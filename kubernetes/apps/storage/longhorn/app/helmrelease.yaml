@@ -128,6 +128,9 @@ spec:
         # only `stopped` replicas are superset-postgresql-data's 2 (the retained
         # rollback) plus superseded leftovers from the roll. Grace period is
         # `orphan-resource-auto-deletion-grace-period: 300`.
+        # (Dated note, kept as the evidence for this setting. Those 2 stopped
+        # replicas went away 2026-09-11 when superset-postgresql-data was
+        # reclaimed — 06c954d2, plan superset-pg-decommission.)
         # NOTE this block is still inert (see header) — the live settings CR was
         # patched directly and this value mirrors it, so un-nesting stays a no-op.
         orphanResourceAutoDeletion: "replica-data;instance"

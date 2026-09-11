@@ -134,7 +134,8 @@ kubectl port-forward -n storage svc/longhorn-frontend 8080:80 &
 ### Default: `longhorn-static` — volumes MUST have speaking names
 
 **Use `longhorn-static` unless a name is technically impossible.** This is the
-house standard and the cluster majority (50 static / 33 dynamic, 48 named PVs).
+house standard and the cluster majority (60 static / 33 dynamic, 58 named PVs,
+verified live 2026-09-11).
 
 Why the PV name matters more than it looks: the Longhorn UI, the backup list,
 and every restore/DR procedure are keyed on the **PV** name, not the PVC. A

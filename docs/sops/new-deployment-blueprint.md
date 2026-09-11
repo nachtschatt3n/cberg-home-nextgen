@@ -182,7 +182,7 @@ spec:
 **Longhorn volume naming rule:**
 
 - **Default: use `longhorn-static` with a speaking name.** Longhorn's UI, backup list and every restore procedure key on the **PV** name, so a `pvc-<uuid>` PV cannot be identified without a `claimRef` lookup — exactly the indirection you do not want mid-incident.
-- **The Longhorn Volume, the PV, the PVC's `volumeName`, the PV's `volumeHandle`, and the PVC name must all be the SAME speaking identifier.** Convention: `{app}-{purpose}` (e.g. `pgadmin-data`, `superset-postgresql-data`).
+- **The Longhorn Volume, the PV, the PVC's `volumeName`, the PV's `volumeHandle`, and the PVC name must all be the SAME speaking identifier.** Convention: `{app}-{purpose}` (e.g. `pgadmin-data`, `superset-pg18-data`).
 - **Use `longhorn` (dynamic, UUID PV) only when a name is impossible** — StatefulSet `volumeClaimTemplates` generate one PVC per replica at scale time, so PVs cannot be pre-created. Also acceptable for genuinely ephemeral scratch/cache data.
 - **The manual Volume-CR apply is not a reason to fall back to dynamic.** A `Pending` PVC means you have not applied `longhorn-volume.yaml` yet (see the Flux `targetNamespace` note below) — apply it, do not switch class.
 

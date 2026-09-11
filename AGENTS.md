@@ -750,7 +750,8 @@ Quick agent rules (anything more, read the SOP):
   The Longhorn `Volume`, the `PV`, the PVC's `volumeName`, the PV's
   `volumeHandle` and the PVC name must **all be the same identifier**
   (`{app}-{purpose}`, e.g. `pgadmin-data`, `home-assistant-config`).
-  This is already the house majority: 50 static / 33 dynamic, 48 named PVs.
+  This is already the house majority: 60 static / 33 dynamic, 58 named PVs
+  (verified live 2026-09-11).
 - **Use `longhorn` (dynamic, UUID PV) ONLY when a name is impossible:**
   StatefulSet `volumeClaimTemplates` (one PVC per replica, generated at
   scale time — you cannot pre-create PVs for replicas that do not exist

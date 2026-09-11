@@ -11,7 +11,7 @@ target: "v1.14.0"                     # released 2026-09-03
 update_type: minor                    # single-minor traversal (Talos allows no skip)
 risk: high                            # rolling reboot of every control-plane node in a
                                       # 3-node hyper-converged cluster: etcd quorum,
-                                      # 95 Longhorn volumes at replica=2, and the ONLY
+                                      # 93 Longhorn volumes at replica=2, and the ONLY
                                       # HTTP data plane (Envoy Gateway) all ride on it
 est_duration_min: 140                 # IN-WINDOW only. Phase A prep (~30 min) is
                                       # Flux-inert and MUST run before the window —
@@ -21,7 +21,7 @@ touches:
   namespaces:
     - kube-system                     # etcd, kube-apiserver, controller-manager,
                                       # scheduler, kube-proxy, coredns, cilium, authentik
-    - storage                         # longhorn-manager, instance-manager, CSI, 95 volumes
+    - storage                         # longhorn-manager, instance-manager, CSI, 93 volumes
     - network                         # envoy-gateway, envoy-internal, envoy-external,
                                       # k8s-gateway, external-dns, adguard-home, cloudflared
     - monitoring                      # prometheus, alertmanager, grafana, edot-collector
@@ -37,7 +37,7 @@ touches:
     - node/k8s-nuc14-02                           # 192.168.55.12 — holds the VIP .10
     - node/k8s-nuc14-03                           # 192.168.55.13 — current etcd leader
     - "etcd (3 members, 3.6.14 -> 3.7.x)"
-    - "194 longhorn replicas / 95 volumes (numberOfReplicas: 2)"
+    - "190 longhorn replicas / 93 volumes (numberOfReplicas: 2)"
   shared:
     - etcd                            # quorum 3; exactly ONE member may be down
     - cni/cilium                      # v1.20.1 DaemonSet restarts per node
@@ -208,7 +208,7 @@ created). The distinction matters — several of the loudest changes are opt-in 
    **DO NOT add a `SecurityProfileConfig` document in this window.** The same notes
    warn: *"With workload isolation enabled, the deprecated in-tree Kubernetes iSCSI
    volume plugin does not work (the kubelet cannot reach the host `iscsid` across the
-   sandbox)."* This cluster's storage is 95 Longhorn volumes over iSCSI. Longhorn uses
+   sandbox)."* This cluster's storage is 93 Longhorn volumes over iSCSI. Longhorn uses
    its own CSI driver (which the note says is the supported path), but flipping a
    node-isolation boundary underneath the iSCSI stack in the same window as a version
    roll would make any storage failure undiagnosable. Separate plan, separate window,
@@ -310,14 +310,12 @@ print('total',len(d),'not-healthy',len(bad))
 for b in bad: print(' ',b)
 print('replica counts:',collections.Counter(v['spec'].get('numberOfReplicas') for v in d))"
 ```
-**PASS:** every volume `healthy` **except** the two known exceptions, both
-`detached`/`robustness: unknown` because nothing mounts them — **not** because they
-are broken:
-
-| Volume | Deliberately orphaned by | Disposition |
-|---|---|---|
-| `superset-postgresql-data` | bitnamilegacy retirement, 2026-09-05 (`90539942`) | retained rollback artifact, PV `Retain` |
-| `superset-pg-data` | postgres 17.11 workload retirement, 2026-09-09 (`9d10199c`) | retained rollback artifact, PV `Retain` |
+**PASS:** every volume `healthy`. **There are no known exceptions as of
+2026-09-11** — the two retained Superset rollback volumes that used to sit here
+(`superset-postgresql-data`, `superset-pg-data`) were reclaimed by plan
+`superset-pg-decommission` (`06c954d2`), so the live reading is 93/93 `healthy`
+with zero detached. **Any** non-healthy or detached volume is now a no-go; do not
+carry an exception forward without re-deriving it from live state.
 
 Longhorn only computes `robustness` while a volume is attached, so `unknown` on a
 deliberately-detached volume is the expected reading, not a fault. Confirm each has
@@ -330,7 +328,7 @@ Any *other* non-healthy volume is a no-go.
 > false-fails, and a gate that cries wolf gets waved through on the one occasion it
 > is real.
 
-**PASS also:** `replica counts: Counter({2: 95})`. **This is the number that sizes the
+**PASS also:** `replica counts: Counter({2: 93})`. **This is the number that sizes the
 gate.** At `numberOfReplicas: 2` across 3 nodes, taking one node down leaves a large
 share of volumes running on a single replica — degraded but serving. There is no
 spare-replica cushion. Do not proceed on a cluster that is already degraded.
@@ -352,8 +350,8 @@ for s in stale: print(' ',s)"
 ```
 **PASS:** the most recent `daily-backup-all-volumes-*` Job is `Complete` within 24h
 (the CronJob runs `0 3 * * *`, so a 09:00 window sees a ~6h-old backup), and the stale
-list contains **only** `superset-postgresql-data` (nothing mounts it, so nothing
-snapshots it). Any other stale volume is a no-go.
+list is **empty** — since the 2026-09-11 Superset volume reclaim (`06c954d2`)
+every volume is attached and snapshotted. Any stale volume is a no-go.
 
 **2.7 — Flux fully green.** A reconcile landing mid-roll is a confounder.
 
@@ -636,9 +634,8 @@ kubectl get volumes -n storage -o json | python3 -c "
 import sys,json,collections
 d=json.load(sys.stdin)['items']
 bad=[(v['metadata']['name'],v['status'].get('robustness'),v['status'].get('state'))
-     for v in d if v['status'].get('robustness') not in ('healthy',)
-     and v['metadata']['name']!='superset-postgresql-data']
-print('NOT-HEALTHY (excl. known-detached superset-postgresql-data):',len(bad))
+     for v in d if v['status'].get('robustness') not in ('healthy',)]
+print('NOT-HEALTHY:',len(bad))
 for b in bad: print('  ',b)
 print('robustness:',collections.Counter(v['status'].get('robustness') for v in d))"
 
@@ -651,7 +648,7 @@ print('total replicas',len(rs))"
 ```
 
 **PASS — all three conditions, together:**
-1. `NOT-HEALTHY … : 0` — every volume except `superset-postgresql-data` is `healthy`.
+1. `NOT-HEALTHY … : 0` — every volume is `healthy`.
    Not `degraded`, not `rebuilding`. `degraded` means one replica; that is exactly the
    state we must not enter the next reboot in.
 2. The just-rebooted node appears again in the replica table with a **`running`** count

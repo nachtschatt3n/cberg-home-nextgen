@@ -70,7 +70,15 @@ status: executed                      # EXECUTED 2026-09-11 in commits 06c954d2
                                       # and directed the plan to proceed anyway.
                                       # See "§2a Soak override" below. Recorded as
                                       # a decision, not a missed precondition.
-window: operator-directed:2026-09-11  # not a scheduled window; run on request
+window: null                          # executed out-of-window on operator
+                                      # direction 2026-09-11; holds no slot. Do
+                                      # NOT retire this file yet despite the
+                                      # executed-plan convention — §1.6 lists
+                                      # cross-references that still resolve here,
+                                      # and this file is the only record
+                                      # distinguishing this work from the
+                                      # 2026-09-05 stage 4 of the same plan_id.
+                                      # Correct those refs first, then retire.
 security_ref: null                    # the credential exposure this plan touches
                                       # is already public in docs/applications.md
                                       # and carries no undisclosed detail
@@ -646,3 +654,38 @@ The stale comment at `kubernetes/apps/storage/longhorn/app/helmrelease.yaml:128`
 names `superset-postgresql-data`'s stopped replicas in a dated verification note;
 left alone deliberately — it is a timestamped historical record, not an
 instruction, and rewriting someone's past measurement would be wrong.
+
+### 9.1 Do NOT retire this file yet (convention tension, recorded deliberately)
+
+`runbooks/maintenance/plans/README.md` says to delete a plan file once
+`status: executed`. **That is the wrong move here, for now.** §1.6 lists
+cross-references that resolve to THIS file while meaning the 2026-09-05 stage-4
+work of the same `plan_id`, and this file is the only record that disambiguates
+the two. Deleting it dangles those references and destroys the disambiguation.
+
+Correct sequence: (1) `window: null` — done, which clears the
+`RETIRED PLAN STILL WINDOWED` warning from `runbooks/maintenance-plan.py`;
+(2) correct the cross-references in §1.6; (3) then retire the file.
+
+### 9.2 Follow-on doc drift this execution created, fixed in the same change set
+
+The deletes invalidated go/no-go gates in an **unexecuted** plan, which is the
+highest-consequence drift found and was not in §4.6's list:
+
+- `runbooks/maintenance/plans/talos-1.14.0.md` (scheduled 2026-09-27) keyed its
+  Longhorn pre-flight on the two deleted volumes as *known exceptions*, including
+  a live gate expression excluding `superset-postgresql-data` by name. Left
+  alone, the node roll would have carried a hardcoded exception for objects that
+  no longer exist — masking a genuinely unhealthy volume. The exception table,
+  the stale-volume gate, the gate code and the volume/replica counts
+  (95→93 volumes, 194→190 replicas, `Counter({2: 95})`→`Counter({2: 93})`) were
+  all corrected against live state. The "95 min" duration figures in that file
+  are minutes, not volume counts, and were deliberately left alone.
+- `kubernetes/apps/storage/longhorn/app/helmrelease.yaml` cited
+  `superset-postgresql-data`'s stopped replicas as live evidence for
+  `orphanResourceAutoDeletion`. Kept as a dated record with an appended
+  correction rather than rewritten — it is evidence for a past decision.
+- `docs/sops/new-deployment-blueprint.md` used `superset-postgresql-data` as a
+  volume-naming exemplar; now `superset-pg18-data`.
+- `AGENTS.md` / `docs/sops/longhorn.md` static-vs-dynamic PV counts were stale by
+  ~10 before this change and moved by 2 because of it; re-measured live.
