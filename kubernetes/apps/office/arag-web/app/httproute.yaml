@@ -152,10 +152,20 @@ spec:
       - accept
       - user-agent               # the outpost's request log, where 400s show up
     # DELIBERATELY NOT FORWARDED: x-forwarded-for / x-forwarded-proto. Envoy
-    # appends to XFF rather than sanitising it, and ClientTrafficPolicy
-    # envoy-internal-client trusts all of 192.168.0.0/16, so forwarding it lets
-    # a LAN client choose the IP authentik's lockout scoring records. The
-    # redirect URI is built correctly without x-forwarded-proto.
+    # appends to XFF rather than sanitising it, so the header handed to the
+    # outpost still carries client-supplied hops even though Envoy's OWN
+    # client-IP selection now ignores them: 097269ba narrowed
+    # ClientTrafficPolicy/envoy-internal-client to trustedCIDRs 10.69.0.0/16
+    # (pod CIDR) only, dropping the 192.168.0.0/16 entry that previously let a
+    # LAN client dictate its own address. That narrowing reduces the blast
+    # radius but does not make forwarding correct — authentik would still read
+    # the attacker-controlled hops out of the header for IP-keyed lockout
+    # scoring. The redirect URI is built correctly without x-forwarded-proto.
+    # Neither header is needed; neither is forwarded.
+    # NOTE for whoever copies this block: several sibling files (incl. the
+    # homepage reference) still assert the pre-097269ba "trusts all of
+    # 192.168.0.0/16" wording. That claim is stale — verify against
+    # kubernetes/apps/network/envoy-gateway/app/policies.yaml, not a comment.
     http:
       backendRefs:
         - group: ""
