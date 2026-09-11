@@ -1,8 +1,8 @@
 # SOP: Immich Photo Library
 
 > Description: Deploy and operate Immich — the self-hosted family photo/video library — as a read-only **external-library viewer** over the iCloud backup on the UniFi NAS, with Intel-iGPU ML face detection, Authentik OIDC SSO, and full Prometheus + Elasticsearch observability.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.09.11`
+> Last Updated: `2026-09-11`
 > Owner: `cberg-agent / media`
 
 ---
@@ -27,7 +27,7 @@ deletes the originals (`:ro` CIFS mount).
 | Namespace | `media` (privileged PSA — ML needs `/dev/dri`) |
 | Source of truth | `kubernetes/apps/media/immich/` (GitOps) |
 | Components | `immich-server`, `immich-machine-learning`, `immich-postgres` (VectorChord), `immich-redis` |
-| Version | `v3.1.0` (server + ML pinned identical) |
+| Version | `v3.2.0` (server + ML pinned identical) |
 | DB image | `ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0` (`DB_VECTOR_EXTENSION=vectorchord`) |
 | Originals | RO CIFS `cifs-immich-icloud-backup` → `/libraries` (`//NAS/backups` subdir `icloud-backup`) |
 | Generated data | Longhorn: `immich-upload` (/data), `immich-ml-cache` (/cache), `immich-pg-data` |
@@ -92,7 +92,9 @@ library Scan). Rules:
 
 ### Change ML accel (iGPU ⇄ CPU)
 Swap the ML image tag in `machine-learning-helmrelease.yaml`:
-`v3.1.0-openvino` (iGPU) ⇄ `v3.1.0` (CPU). Commit; Flux rolls it. No data impact.
+`v<ver>-openvino` (iGPU) ⇄ `v<ver>` (CPU) — keep `<ver>` IDENTICAL to the
+`immich-server` pin (currently `v3.2.0`); only the `-openvino` suffix changes.
+Commit; Flux rolls it. No data impact.
 
 ---
 
@@ -181,7 +183,7 @@ alerts** cluster-wide (Watchdog excluded); edot ES-rejection rate still 0.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| ML `CrashLoopBackOff` after image pull | OpenVINO per-release regression / iGPU init | Swap ML tag to the plain `v3.1.0` (CPU) tag; re-open a GH issue upstream |
+| ML `CrashLoopBackOff` after image pull | OpenVINO per-release regression / iGPU init | Swap ML tag to the plain (suffix-less) CPU tag at the SAME version; re-open a GH issue upstream |
 | ML logs "No GPU"/falls back to CPU | `/dev/dri` not mounted or i915 not allocated | Confirm `intel-device-plugin-gpu` Ready, `/dev/dri/renderD128` present, pod privileged |
 | SSO fails: `invalid_request` "The request is otherwise malformed" | provider `grant_types` empty (blueprint-only provider, Authentik ≥2026.5) | Blueprint must set `grant_types: [authorization_code, refresh_token]`; the redirect_uri is a red herring. See `docs/sops/authentik.md` OIDC gotchas |
 | Server `redirect_uri mismatch` on SSO | callback URL missing from blueprint | Add the exact URL as a `strict` redirect_uri; re-encrypt configmap; wait for Reloader |
