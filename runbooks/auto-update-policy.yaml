@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.10.1"
+version: "2026.09.11.1"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -82,6 +82,23 @@ deny:
       k8s_gateway starts informers for the Gateway API route family and fails CLOSED for
       EVERY name if a version it expects is not served. Latent — it only fires when a
       k8s-gateway pod restarts. Never unattended."
+  - match: "*k8s-gateway*"
+    reason: >-
+      Internal DNS for the entire cluster, pinned at chart 3.7.2. Upstream has
+      relocated THREE times (ori-edge -> GitHub org -> Codeberg/kapsi.fi) and the
+      last move was unannounced with the old GitHub Pages host DELETED rather than
+      redirected, which took cluster-apps down on 2026-09-11 until the source was
+      repointed (8c2a2d84). The pin is the trust anchor for a chart index now served
+      from a personal namespace on hobbyist hosting, where provenance verification
+      is not even expressible: Flux spec.verify is OCI-only and this is an HTTP
+      HelmRepository. The relocated 3.7.2 tarball is also NOT byte-identical to the
+      one we ran (9195 -> 9616 bytes, different digest); it was proven equivalent
+      only by extracting both and diffing `helm template` output against the live
+      values. No future version gets that for free. The real unattended risk is a
+      TEMPLATE change rolling the DNS pods -- not an app-version jump, since the
+      HelmRelease pins image.tag 1.8.0 explicitly. Any bump needs a fresh rendered
+      output diff against the pinned chart plus the restart gate in
+      docs/sops/k8s-gateway-dns.md. Never unattended.
   - match: "*envoy-gateway*"
     reason: "Catch-all for Envoy Gateway artifacts (image/chart aliases) — same hold as gateway-helm."
   # Added 2026-09-08 after an ATTENDED image pin (v0.21.0 -> v0.22.0 under chart
