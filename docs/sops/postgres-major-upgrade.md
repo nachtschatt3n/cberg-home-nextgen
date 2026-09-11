@@ -156,9 +156,16 @@ nothing goes wrong.
   a major upgrade has no manifest rollback, so the previous instance IS the
   recovery path until the soak ends.
   **Workload retired 2026-09-09 (`9d10199c`)** after the soak: the Deployment and
-  Service were deleted while the volume `superset-pg-data` was retained, so the
-  recovery path is now a **restore-from-volume**, not a repoint at a running
-  Service. Re-create the Deployment from git history against the retained PVC.
+  Service were deleted while the volume `superset-pg-data` was retained.
+  **Volume reclaimed 2026-09-11** by plan `superset-pg-decommission`, so there is
+  no retained PVC left to bind and the recovery path is now a
+  **restore-from-backup**: restore the frozen Longhorn backup into a new volume,
+  then re-create the Deployment from git history against it. Use the
+  **2026-09-09** backup — the older dailies predate the 5.0.0→6.1.0 alembic
+  migration and carry the wrong schema. The restore MUST reset every local
+  db-provider Admin account before Superset serves traffic (those backups predate
+  the 2026-09-08 credential rotation). Full procedure: §6 of
+  `runbooks/maintenance/plans/superset-pg-decommission.md`.
 - **`PGDATA` pinned inside the mount**, `/var/lib/postgresql/data/pgdata`, per
   §5 — the whole reason this SOP exists. `POSTGRES_INITDB_ARGS` was dropped
   because PG18 enables data checksums by default, and that was **asserted with

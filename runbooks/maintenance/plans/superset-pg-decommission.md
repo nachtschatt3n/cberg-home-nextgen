@@ -62,12 +62,15 @@ backup_gate: >-
   rebuilding volume cluster-wide before the real deletes begin.
   If (a)-(c) cannot ALL be demonstrated in the window, abort the plan and leave
   every object in place — there is no partial-credit version of this step.
-status: awaiting-soak                 # do NOT schedule before the soak in §2 is
-                                      # satisfied. `window: null` is the honest
-                                      # pairing: an awaiting-go plan with a null
-                                      # window silently never runs, and this work
-                                      # genuinely must not hold a slot yet.
-window: null
+status: executed                      # EXECUTED 2026-09-11 in commits 06c954d2
+                                      # (manifests) + the docs commit that follows
+                                      # it. The §2 soak gate was NOT satisfied —
+                                      # it was OVERRIDDEN BY THE OPERATOR, who was
+                                      # shown the gate and its reasoning in full
+                                      # and directed the plan to proceed anyway.
+                                      # See "§2a Soak override" below. Recorded as
+                                      # a decision, not a missed precondition.
+window: operator-directed:2026-09-11  # not a scheduled window; run on request
 security_ref: null                    # the credential exposure this plan touches
                                       # is already public in docs/applications.md
                                       # and carries no undisclosed detail
@@ -269,6 +272,42 @@ deliberate soak".
 - At least one SQL Lab query and one dashboard render succeed on the day of the
   window (this is what item 2 above buys).
 - No open Superset finding in `sweep_findings` rated warning or above.
+
+## 2a. SOAK OVERRIDE — executed 2026-09-11, gate NOT satisfied
+
+**The §2 soak gate above was not met. It was overridden by the operator.**
+
+- §2 set the earliest eligible date at **2026-09-30** (21 clean days from
+  2026-09-09). The plan executed on **2026-09-11**, 19 days early.
+- The operator was shown the gate **in detail before deciding** — including the
+  two reasons that motivated it: two majors 27 minutes apart on 2026-09-08
+  (Superset 5.0.0→6.1.0 at 08:09, postgres 17→18 at 08:36), and SQL Lab having
+  worked only since 2026-09-09 — and directed that it proceed regardless.
+- This is therefore a **deliberate override, not an oversight**. It is recorded
+  here, and in the commit messages, so the audit trail shows which of the two it
+  was. Nothing else in the plan was waived: §3 pre-checks, the full `backup_gate`
+  including the live restore proof, the ordering, the verification and the
+  rollback path were all executed as written.
+
+**What made the override survivable, and it is not an argument that the soak did
+not matter:** the frozen backup sets were retained, and the `backup_gate` was
+executed in full rather than asserted. The newest `superset-pg-data` backup
+(2026-09-09 03:04) was restored into a scratch Longhorn volume, booted under
+`postgres:17.11-alpine`, and measured: `ab_user` = 2 and
+`alembic_version` = `4b2a8c9d3e1f`, **identical to the live `superset-pg18`
+value**. That turns §1.3's commit-ordering *inference* about the 6.1.0 schema
+boundary into a *measurement*, which is the single most load-bearing fact behind
+running this early.
+
+**The soak's own exit condition was also checked on the day and passed**: SQL Lab
+executed real queries successfully (HTTP 200, `status=success`, rows returned)
+both before and after the deletes — the subsystem §2 item 2 existed to protect.
+What the override genuinely gives up is the *duration* argument: the periodic
+surfaces in §2 item 3 (scheduled reports/alerts, the twice-daily pellet ETL) have
+had days rather than weeks to exercise the migrated schema. If a latent
+6.1.0/pg18 schema fault surfaces later, the recovery is §6, and it is a
+restore-from-backup — slower and more involved than the repoint that a completed
+soak would have preserved.
 
 ## 3. Pre-checks (run in the window, before anything is touched)
 
@@ -540,3 +579,70 @@ so the set does not silently become permanent a second time.
   `superset-pg18-data` sits in the same namespace and folder, one character away
   from a volume being deleted. Any operator or agent executing §4.5 must type
   both names in full and confirm the survivor with the follow-up `get`.
+
+## 9. Execution record — 2026-09-11
+
+Executed by cberg-agent on operator direction (see §2a for the soak override).
+
+**backup_gate, all four limbs, executed not asserted:**
+
+| Limb | Result |
+|---|---|
+| (a) newest Completed backup ≥ 2026-09-09 | PASS — `backup-5876963a2bce454c`, Completed, `2026-09-09T03:04:08Z` |
+| (b) size non-zero and within 20% of the 09-08 daily | PASS — 922,746,880 B vs 905,969,664 B (+1.9%) |
+| (c) live restore proof | PASS — restored to scratch volume, booted `postgres:17.11-alpine`, `ab_user`=2, `alembic_version`=`4b2a8c9d3e1f` **equal to live pg18** |
+| (d) scratch removed, Longhorn clean | PASS — volume count back to 95, no degraded/faulted/rebuilding |
+
+Limb (c) was run via `runbooks/backup-restore-proof.py --keep`. Its built-in
+smoke connects as the `postgres` role and so reported a false FAILED on a cluster
+initdb'd under `superset`; the restore itself had succeeded and the gate queries
+were then run directly with `-U superset`. The script's docstring now warns about
+this (same change set).
+
+**Pre-flight (§3.4), per PV — both identical:** no `subdir` key (Longhorn block
+device, so the shared-root STOP branch is structurally inapplicable), PV
+`persistentVolumeReclaimPolicy: Retain` on the live object, StorageClass
+`longhorn-static` (class default `reclaimPolicy: Delete` — the PV overrides it,
+which is why (2) must be read off the live object every time), volume `detached`
+with empty `currentNodeID`, PVC `Used By: <none>`, workload pods in `Succeeded`.
+
+**Order executed:** backup gate → pre-checks → behaviour baseline → commit
+`06c954d2` + push → Flux pruned both PVCs and both PVs (within ~15 s, no
+hand-delete, no orphaned `Released` PV) → manual `kubectl delete volume` of
+`superset-pg-data` then `superset-postgresql-data`, by full name, one at a time,
+with a survivor check after each.
+
+**Capacity released: 80.0 GiB of scheduled Longhorn capacity** (nuc14-01 718→698,
+nuc14-02 730→690, nuc14-03 603→583 GiB) — 4 replicas × 20 GiB, matching the
+plan's ~80 GiB estimate exactly. Volume count 95 → 93. No orphaned replicas.
+
+**Verification:**
+
+- CONTENTS ASSERTION 1 — live `superset-pg18` table counts diffed before/after:
+  21 of 23 tables byte-identical, including `ab_user`=2, `dashboards`=1,
+  `slices`=10, `dashboard_slices`=9, `tables`=10, `table_columns`=92,
+  `alembic_version`=`4b2a8c9d3e1f`. The only two that moved were `logs`
+  (2407→2498) and `query` (17→20), both append-only activity tables that grew
+  because the verification itself exercised the app.
+- CONTENTS ASSERTION 2 — SQL Lab returned HTTP 200 `status=success` with real
+  rows both before and after (`prices` = 4773 rows, newest observation
+  2026-09-11 06:00 UTC, plus a GROUP BY aggregate). Dashboard 1 loads with its 9
+  charts; 4 of 10 charts resolve data via the saved-query-context API path with
+  rowcounts 58/1/134/134, **identical before and after**. The other 6 return
+  "Chart has no query context saved" on that API path — identical before and
+  after, therefore pre-existing and not caused by this change. The UI loads and
+  redirects to Authentik SSO as expected.
+- CONTENTS ASSERTION 3 — **all 14 backup rows still present and Completed after
+  the deletes**, byte-identical to the pre-delete inventory. `rollback_class:
+  backup-restore` is intact rather than a lie.
+- `superset-pg18-data` attached + healthy throughout; all Superset pods Running
+  with 0 restarts.
+
+**Not verified / carried forward:** the 6 charts without a saved query_context
+were not rendered with data by any path (the API needs a fully-built query
+context per viz type; a real browser render would need an interactive Authentik
+login). Their state is unchanged by this plan but is not a positive assertion.
+The stale comment at `kubernetes/apps/storage/longhorn/app/helmrelease.yaml:128`
+names `superset-postgresql-data`'s stopped replicas in a dated verification note;
+left alone deliberately — it is a timestamped historical record, not an
+instruction, and rewriting someone's past measurement would be wrong.

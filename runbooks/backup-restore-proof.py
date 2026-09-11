@@ -24,8 +24,14 @@ runs in `finally`. Blast radius of any failure: the scratch copies only.
 
 Usage:
   runbooks/backup-restore-proof.py                        # defaults: postgresql-data-5g
-  runbooks/backup-restore-proof.py --volume superset-postgresql-data \\
-      --image pgvector/pgvector:0.8.6-pg16 --keep   # keep scratch for inspection
+  runbooks/backup-restore-proof.py --volume superset-pg18-data \\
+      --image postgres:18.6-alpine --keep           # keep scratch for inspection
+
+NOTE the smoke step connects as the `postgres` role over the local socket. A
+volume whose cluster was initdb'd under a different superuser (Superset's, for
+instance, uses `superset`) will restore and start correctly but fail the smoke
+with `role "postgres" does not exist` — that is a probe limitation, NOT a bad
+backup. Use --keep and query it yourself with the right -U before concluding.
 
 Exit: 0 restore PROVEN · 1 FAILED · 2 preconditions (leftovers / no backup).
 """
