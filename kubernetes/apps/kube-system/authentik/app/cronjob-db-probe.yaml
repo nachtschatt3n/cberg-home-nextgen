@@ -1,0 +1,154 @@
+---
+# Authentik database probe -> Prometheus Pushgateway.
+#
+# WHY THIS EXISTS
+# ---------------
+# Authentik's audit trail lives in exactly one place: the Postgres table
+# `authentik_events_event`. There is no stdout line, no webhook, no Wazuh
+# decoder. Nothing in the cluster asserted that the table was still being
+# WRITTEN, so a frozen audit log and a quiet audit log were indistinguishable.
+# On 2026-09-11 that ambiguity produced a 23-day false alarm (see the
+# "two databases" note in docs/sops/authentik.md): the legacy rollback DB
+# `authentik-postgresql-0` answers the SAME user/database/password as the live
+# DB, but its copy of the table is frozen at the 2026-08-20 cutover. Querying
+# the wrong pod reads as "no logins recorded for 23 days".
+#
+# This probe resolves both problems at once by publishing, from a manifest that
+# NAMES its source host, a timestamp that any alert or audit can check.
+#
+# DESIGN NOTES (do not "simplify" these away)
+# -------------------------------------------
+#  * It exports a TIMESTAMP (`..._newest_event_timestamp_seconds`), not an age.
+#    Pushgateway is in-memory and has no TTL: it serves the last pushed value
+#    forever. A pre-computed age would FREEZE at its last value the moment this
+#    CronJob died, silently disarming the staleness alert. A timestamp keeps
+#    ageing in PromQL (`time() - max(...)`) whether or not the probe still runs.
+#  * On any psql failure it pushes NOTHING and exits non-zero. Pushgateway then
+#    keeps the previous snapshot, so the staleness rule keeps ageing correctly,
+#    `authentik_db_probe_last_success_timestamp_seconds` goes stale
+#    (AuthentikAuditFreshnessProbeStale), and kube_job_failed fires too.
+#    Pushing a partial group would DELETE the other gauges — pushgateway
+#    replaces a grouping wholesale — and blind the staleness rule instead.
+#  * alpine has no bash and no curl: POSIX sh + busybox `wget --post-data`
+#    (verified present, BusyBox v1.37.0, in this exact image digest).
+#  * No `${...}` braces anywhere in the script. Cluster-wide Flux postBuild
+#    substitution strips brace-form variables out of manifests; bare `$VAR` is
+#    what the sibling channels-cleanup CronJob uses and what survives.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: authentik-db-probe
+  namespace: kube-system
+spec:
+  # Hourly. The audit-staleness threshold is 10 days, so hourly resolution is
+  # ample; the offset keeps it off the :00 CronJob pile-up.
+  schedule: "17 * * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: authentik-db-probe
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: probe
+              # Same digest-pinned alpine postgres as cronjob-channels-cleanup.yaml
+              # (verified against the registry 2026-08-18). Keep the two in step.
+              image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+
+                  # One round-trip, four values, space-separated.
+                  #   1 unix ts of the NEWEST audit event (0 if table empty)
+                  #   2 audit row count
+                  #   3 open connections on this database
+                  #   4 server max_connections
+                  # Values 3+4 replace the AuthentikPostgresConnectionsHigh
+                  # alert's old `pg_stat_activity_count` expression, which has
+                  # been inert since the cutover: no postgres exporter exists in
+                  # this cluster, so that series has zero samples.
+                  SQL="select coalesce(extract(epoch from max(created))::bigint, 0),
+                              count(*),
+                              (select count(*) from pg_stat_activity
+                                where datname = current_database()),
+                              current_setting('max_connections')::int
+                       from authentik_events_event;"
+
+                  if ! ROW=$(PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USER" \
+                               -d "$DB_NAME" -v ON_ERROR_STOP=1 -At -F' ' -c "$SQL"); then
+                    echo "FATAL: query against $DB_HOST failed; pushing nothing so the"
+                    echo "       staleness rules keep ageing instead of going blind."
+                    exit 1
+                  fi
+
+                  # shellcheck disable=SC2086
+                  set -- $ROW
+                  if [ "$#" -ne 4 ]; then
+                    echo "FATAL: expected 4 values from $DB_HOST, got $# ($ROW)"
+                    exit 1
+                  fi
+                  NEWEST_TS=$1
+                  ROW_COUNT=$2
+                  CONNS_USED=$3
+                  CONNS_MAX=$4
+
+                  NOW=$(date -u +%s)
+                  echo "host=$DB_HOST newest_event_ts=$NEWEST_TS rows=$ROW_COUNT"
+                  echo "connections=$CONNS_USED/$CONNS_MAX now=$NOW"
+                  echo "age_seconds=$((NOW - NEWEST_TS))"
+
+                  PAYLOAD=$(printf '%s\n' \
+                    "# HELP authentik_audit_newest_event_timestamp_seconds Unix timestamp of the newest row in authentik_events_event on the LIVE database." \
+                    "# TYPE authentik_audit_newest_event_timestamp_seconds gauge" \
+                    "authentik_audit_newest_event_timestamp_seconds $NEWEST_TS" \
+                    "# HELP authentik_audit_event_rows Total rows in authentik_events_event." \
+                    "# TYPE authentik_audit_event_rows gauge" \
+                    "authentik_audit_event_rows $ROW_COUNT" \
+                    "# HELP authentik_db_connections_used Open connections on the authentik database." \
+                    "# TYPE authentik_db_connections_used gauge" \
+                    "authentik_db_connections_used $CONNS_USED" \
+                    "# HELP authentik_db_connections_max Configured max_connections on the authentik database." \
+                    "# TYPE authentik_db_connections_max gauge" \
+                    "authentik_db_connections_max $CONNS_MAX" \
+                    "# HELP authentik_db_probe_last_success_timestamp_seconds Unix timestamp of the last successful probe run." \
+                    "# TYPE authentik_db_probe_last_success_timestamp_seconds gauge" \
+                    "authentik_db_probe_last_success_timestamp_seconds $NOW")
+
+                  # Short service name, not the svc.cluster.local FQDN: this is a
+                  # public repo. One dot + ndots:5 resolves via the search path.
+                  wget -q -O - -T 15 --post-data "$PAYLOAD" \
+                    "http://prometheus-pushgateway.monitoring:9091/metrics/job/authentik-db-probe"
+                  echo "pushed to pushgateway job=authentik-db-probe"
+              env:
+                # The LIVE database. NOT authentik-postgresql (the frozen
+                # pre-cutover rollback StatefulSet) — pointing this at the
+                # rollback would re-manufacture the exact false alarm the probe
+                # exists to prevent.
+                - name: DB_HOST
+                  value: "authentik-pg"
+                - name: DB_USER
+                  value: "authentik"
+                - name: DB_NAME
+                  value: "authentik"
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: authentik-secret
+                      key: SECRET_AUTHENTIK_DB_PASSWORD
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi

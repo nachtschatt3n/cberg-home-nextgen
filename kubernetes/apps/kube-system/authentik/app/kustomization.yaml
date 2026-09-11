@@ -8,6 +8,10 @@ resources:
   - ./metrics-service.yaml
   - ./prometheusrule.yaml
   - ./cronjob-channels-cleanup.yaml
+  # Audit-log freshness + DB connection gauges -> Pushgateway. The ONLY thing
+  # asserting that authentik_events_event is still being written; see the
+  # "two databases" note in docs/sops/authentik.md for why that matters.
+  - ./cronjob-db-probe.yaml
   # ReferenceGrants letting other namespaces reach the forward-auth outposts.
   # Must be here (target ns), not next to each app — see the file header.
   - ./referencegrants.yaml

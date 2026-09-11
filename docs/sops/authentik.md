@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.09.11`
-> Last Updated: `2026-09-11`
+> Version: `2026.09.12`
+> Last Updated: `2026-09-12`
 > Owner: `Platform`
 
 ---
@@ -29,6 +29,59 @@ Authentik provides unified SSO and forward-auth proxy for all cluster services.
 | Auth flow | Forward auth proxy via per-app outposts |
 | Core database | Standalone `authentik-pg` Deployment — Docker Official `postgres:18.6-bookworm`, `longhorn-static` volume `authentik-pg-data` (20Gi) |
 | Rollback DB | Bundled bitnamilegacy PostgreSQL 17.11 StatefulSet `authentik-postgresql`, still running until plan `authentik-pg17-decommission` |
+
+### Two databases answer to `-U authentik -d authentik` — read the right one
+
+**This has already produced one false alarm, ranked as the household's
+highest-priority security item for a day.** On 2026-09-11 Authentik's audit log
+was reported dead since 2026-08-19 — 23 days with no record of any login,
+failure, or admin action, on the SSO server that fronts private
+health-insurance data. Measured: `authentik_events_event` held 11,375 rows with
+a hard stop at 2026-08-19 22:26 UTC.
+
+That reading was taken from the **wrong database**. Both of these are Running in
+`kube-system`, both accept the *same* user, the *same* database name and the
+*same* password out of `authentik-secret`, and their pod names differ by one
+word:
+
+| Pod | Role | `max(created)` in `authentik_events_event` |
+|-----|------|--------------------------------------------|
+| `deployment/authentik-pg` (postgres 18.6) | **LIVE** — what `AUTHENTIK_POSTGRESQL__HOST` points at | current |
+| `statefulset/authentik-postgresql` → `authentik-postgresql-0` (17.11) | frozen pre-cutover rollback, kept by plan `authentik-pg17-decommission` | **permanently 2026-08-19 22:26 UTC** |
+
+The rollback DB stopped receiving writes at the 2026-08-20 05:10 cutover
+(`05843b7f`). Its copy of the audit table is a snapshot, and it will read as
+"dead for N days" forever, with N growing by one every day. Nothing about the
+query, the credentials, or the output signals that you hit the wrong instance.
+
+Always name the host explicitly, and always `deploy/authentik-pg`:
+
+```bash
+# CORRECT — the live database
+kubectl -n kube-system exec deploy/authentik-pg -- \
+  psql -U authentik -d authentik -c \
+  'select count(*), min(created), max(created) from authentik_events_event;'
+
+# WRONG — succeeds, looks authoritative, returns a frozen snapshot
+kubectl -n kube-system exec authentik-postgresql-0 -- psql -U authentik -d authentik ...
+```
+
+**Do not rely on this note alone** — it is the third place the live host is
+documented, and the false alarm happened anyway. The structural guard is
+`CronJob/authentik-db-probe` (`app/cronjob-db-probe.yaml`), which publishes
+`authentik_audit_newest_event_timestamp_seconds` from the live DB hourly via
+Pushgateway, with `AuthentikAuditLogStale` /
+`AuthentikAuditFreshnessProbeMissing` in
+`kubernetes/apps/monitoring/kube-prometheus-stack/app/authentik-alerts.yaml`.
+Check the metric before believing any claim about audit-log freshness: it names
+its source in the manifest, a human query does not.
+
+**Related gap, deliberately NOT closed here:** there is no IP-based lockout
+policy at all (`authentik_policies_reputation_reputationpolicy` has 0 rows and
+0 bindings, and the reputation table is empty). Reputation scoring derives from
+these same events, so the two interact — a genuinely frozen event log would also
+starve any lockout policy that existed. Closing the lockout gap is its own
+change.
 
 ### Database: `max_connections` parity is mandatory
 

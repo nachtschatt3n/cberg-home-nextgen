@@ -208,7 +208,17 @@ spec:
         runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
         summary: Authentik PostgreSQL database is down
       expr: |
-        up{job="authentik-postgresql"} == 0
+        # Rebuilt 2026-09-12. The old expression was `up{job="authentik-postgresql"} == 0`,
+        # which has had ZERO series since before the 2026-08-20 pg18 cutover:
+        # there is no postgres exporter anywhere in this cluster, and
+        # `authentik-postgresql` is now the frozen rollback StatefulSet anyway.
+        # A `== 0` comparison against an absent series matches nothing, so this
+        # critical alert sat at state=inactive and read as healthy for the whole
+        # period — a textbook inert rule. kube-state-metrics is always present,
+        # and `authentik-pg` is the LIVE database, so this form both exists and
+        # points at the right object. Verified non-inert: the series resolves to
+        # 1 today, so the rule is armed rather than matching nothing.
+        kube_deployment_status_replicas_available{namespace="kube-system", deployment="authentik-pg"} == 0
       for: 2m
       labels:
         category: authentication
@@ -222,7 +232,16 @@ spec:
         runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
         summary: Authentik PostgreSQL connection usage is high
       expr: |
-        pg_stat_activity_count{datname="authentik"} / pg_settings_max_connections > 0.8
+        # Rebuilt 2026-09-12. `pg_stat_activity_count` / `pg_settings_max_connections`
+        # are postgres-exporter series and this cluster has no postgres exporter
+        # — both had zero samples, so this rule was inert, exactly like
+        # AuthentikPostgresDown above. The gauges below come from the
+        # authentik-db-probe CronJob (kube-system), which already has a psql
+        # session open to the live DB each hour, so collecting them is free.
+        # `max_connections` is read from the server rather than hardcoded to 500,
+        # so a parity regression on the DB manifest cannot silently rescale the
+        # denominator (see "max_connections parity" in docs/sops/authentik.md).
+        max(authentik_db_connections_used) / max(authentik_db_connections_max) > 0.8
       for: 5m
       labels:
         category: authentication
@@ -246,4 +265,163 @@ spec:
       labels:
         category: authentication
         component: authentik-blueprint
+        severity: warning
+
+  # ---------------------------------------------------------------------------
+  # Audit-log freshness. Added 2026-09-12.
+  #
+  # Authentik's audit trail exists in exactly ONE place: the Postgres table
+  # authentik_events_event. Nothing asserted it was still being written, so a
+  # frozen audit log and a quiet household were the same observation. That
+  # ambiguity is what let a 23-day "the audit log is dead" report stand
+  # unchallenged on 2026-09-11 (it was a misread of the frozen pre-cutover
+  # rollback DB -- see docs/sops/authentik.md "Two databases answer to
+  # -U authentik -d authentik"). These rules make the distinction measurable.
+  #
+  # Gauges come from CronJob/authentik-db-probe (kube-system, hourly) via
+  # prometheus-pushgateway. The probe exports a TIMESTAMP, never a
+  # pre-computed age: pushgateway has no TTL and serves its last value
+  # forever, so an age gauge would freeze the instant the probe died and
+  # silently disarm AuthentikAuditLogStale.
+  # ---------------------------------------------------------------------------
+  - interval: 30s
+    name: authentik.audit.freshness
+    rules:
+    - alert: AuthentikAuditLogStale
+      annotations:
+        summary: Authentik has written no audit event for over 10 days
+        description: |
+          The newest row in authentik_events_event is {{ $value | humanizeDuration }}
+          old. Authentik writes events (login, login_failed, authorize_application,
+          model_*) through its task queue, so the web path can stay perfectly
+          healthy while event persistence is frozen -- a Ready=True server proves
+          nothing here. There is no other copy of this data: no stdout line, no
+          webhook, no Wazuh decoder. While this fires, every security review that
+          reads the Authentik audit log reads clean regardless of what happened,
+          and reputation/IP-lockout scoring (which derives from these events) has
+          nothing to score.
+
+          Triage: check the worker task queue first
+          (AuthentikTaskWorkersZero / AuthentikTaskQueueBacklog below), then
+          `kubectl logs -n kube-system -l app.kubernetes.io/component=worker`.
+          Confirm against the LIVE database only:
+            kubectl -n kube-system exec deploy/authentik-pg -- \
+              psql -U authentik -d authentik -c \
+              'select max(created) from authentik_events_event;'
+          Do NOT query authentik-postgresql-0 -- it accepts the same credentials
+          and its copy is frozen at the 2026-08-20 cutover.
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+      # THRESHOLD IS MEASURED, NOT GUESSED. Over the 90 days to 2026-09-12 the
+      # live table yielded 772 inter-event gaps: p50 0.3s, p95 14h47m,
+      # p99 1d19h22m, and a genuine quiet-period MAXIMUM of 6d22h51m (the run
+      # ending 2026-08-04, with 5d21h and 4d14h as the next two). 10 days sits
+      # ~44% above the observed maximum, so a legitimately quiet fortnight does
+      # not page, while the 23-day blind spot that prompted this rule would have
+      # been caught on day 10. Do not tighten below ~8d without re-measuring:
+      # this household genuinely goes a week without an SSO event.
+      #
+      # A tighter "frozen despite traffic" variant was prototyped and REJECTED:
+      # gating on increase(authentik_flows_plan_time_count[6h]) does not
+      # correlate with event writes in the measured data (6h buckets with
+      # flows=36/events=0 and flows=0/events=7 both occur) and the counter
+      # resets on every server roll. It would have been a noisy rule pretending
+      # to be a precise one.
+      expr: |
+        time() - max(authentik_audit_newest_event_timestamp_seconds) > 60 * 60 * 24 * 10
+      for: 1h
+      labels:
+        category: authentication
+        component: authentik-audit
+        severity: critical
+    - alert: AuthentikAuditFreshnessProbeMissing
+      annotations:
+        summary: Authentik audit-freshness gauge is not present in Prometheus
+        description: |
+          authentik_audit_newest_event_timestamp_seconds has no series at all.
+          AuthentikAuditLogStale is BLIND while this fires and must not be read
+          as evidence the audit log is healthy. Most likely the
+          authentik-db-probe CronJob was removed or has never run successfully,
+          or prometheus-pushgateway lost its in-memory state and no probe cycle
+          has re-pushed yet (it re-pushes hourly, so that self-heals inside the
+          3h `for`).
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+      # INERTNESS GUARD -- this is the rule that stops the rule above from
+      # becoming another silent zero. An expr matching no series sits at
+      # state=inactive and is indistinguishable from healthy.
+      #
+      # DO NOT "improve" this by gating it on the scrape target being up as
+      #   absent(<metric>) and up{job="prometheus-pushgateway"} == 1
+      # That form is PERMANENTLY INERT: absent() on a selector with no equality
+      # matchers emits a sample with an EMPTY label set, so `and` against a
+      # vector carrying job/instance labels matches nothing and returns zero
+      # samples even when the metric genuinely is missing. If a gate is ever
+      # genuinely wanted it MUST be `and on() up{...} == 1`. Same trap,
+      # same wording, as AragPushMetricMissing in macos-apps-alerts.yaml.
+      expr: absent(authentik_audit_newest_event_timestamp_seconds)
+      for: 3h
+      labels:
+        category: authentication
+        component: authentik-audit
+        severity: warning
+    - alert: AuthentikAuditFreshnessProbeStale
+      annotations:
+        summary: Authentik DB probe has not completed a successful run recently
+        description: |
+          authentik-db-probe last succeeded {{ $value | humanizeDuration }} ago
+          (it runs hourly; threshold 6h = 6 missed cycles). The probe pushes
+          nothing on failure by design, so the audit-freshness gauges are now
+          stale snapshots: AuthentikAuditLogStale still ages correctly because
+          it reads a timestamp, but AuthentikPostgresConnectionsHigh is frozen.
+          Check the latest Job under CronJob/authentik-db-probe in kube-system --
+          a psql failure against authentik-pg is the expected cause and is
+          itself worth investigating.
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+      expr: |
+        time() - max(authentik_db_probe_last_success_timestamp_seconds) > 60 * 60 * 6
+      for: 30m
+      labels:
+        category: authentication
+        component: authentik-audit
+        severity: warning
+    - alert: AuthentikTaskWorkersZero
+      annotations:
+        summary: Authentik reports zero task workers
+        description: |
+          authentik_tasks_workers is 0. Authentik persists audit events through
+          this task queue, so with no workers the request path keeps serving
+          logins while the audit trail silently stops -- the exact failure mode
+          AuthentikAuditLogStale needs 10 days to notice. This catches it in
+          minutes. Note the distinction from AuthentikWorkerDown, which counts
+          PODS: a Running worker pod with a dead worker pool satisfies that
+          alert and trips this one.
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+      # Measured 2026-09-12: steady at 3 across all three server pods, so the
+      # series exists and the rule is armed rather than matching nothing.
+      expr: |
+        min(authentik_tasks_workers) == 0
+      for: 10m
+      labels:
+        category: authentication
+        component: authentik-audit
+        severity: critical
+    - alert: AuthentikTaskQueueBacklog
+      annotations:
+        summary: Authentik task queue is backing up
+        description: |
+          {{ $value | printf "%.0f" }} tasks are queued on a single Authentik
+          server's view of the queue. Audit-event writes ride this queue, so a
+          sustained backlog precedes a frozen audit log. Check worker logs and
+          database latency.
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+      # All three server pods report the same global queue state, so summing
+      # across pods would triple-count; take max of the per-pod sums instead.
+      # Measured threshold: max_over_time of that expression across the 7 days
+      # to 2026-09-12 was 28, and it is 0 at rest. 100 is ~3.5x the observed
+      # peak -- high enough not to page on a blueprint-reconcile burst.
+      expr: |
+        max(sum by (pod) (authentik_tasks_queued)) > 100
+      for: 15m
+      labels:
+        category: authentication
+        component: authentik-audit
         severity: warning
