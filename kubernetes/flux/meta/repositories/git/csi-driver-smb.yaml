@@ -1,0 +1,98 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/gitrepository-source-v1.json
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: csi-driver-smb
+  namespace: flux-system
+# Replaces the HelmRepository this chart used to be sourced from, which pointed
+# at raw.githubusercontent.com/kubernetes-csi/csi-driver-smb/master/charts --
+# a MUTABLE GIT BRANCH. This driver backs every cifs-* StorageClass in the
+# cluster (19 of them, two of which address the whole shared media export), so
+# "the chart index silently changed or 404'd" is not an acceptable failure
+# mode: losing reconcilability here means no CIFS volume can be provisioned and
+# a broken driver cannot be repaired through git. That exact shape blocked
+# cluster-apps cluster-wide on 2026-09-11 when a different chart's index was
+# deleted from under us.
+#
+# WHY A GitRepository AND NOT AN OCIRepository.
+# OCIRepository + chartRef is the house direction (see
+# kubernetes/apps/network/internal/k8s-gateway/ocirepository.yaml). It is not
+# available for this chart: kubernetes-csi publishes NO OCI chart artifact for
+# csi-driver-smb. Verified 2026-09-11 -- four candidate GHCR paths under
+# kubernetes-csi/ and kubernetes-sigs/ all deny (no such package), and
+# registry.k8s.io/sig-storage/charts/csi-driver-smb returns the SAME
+# empty-repository body as a deliberately bogus path (the 307 is just the
+# registry.k8s.io redirector, not a hit). Upstream ships this chart from the
+# git repo below and from a GitHub Pages mirror, nothing else.
+#
+# WHY NOT SIMPLY PIN THE HTTP INDEX TO A TAG -- the trap worth recording.
+# It does not work, while LOOKING like it does. The index.yaml in this repo
+# hardcodes an ABSOLUTE tarball URL back to the branch:
+#   .../csi-driver-smb/master/charts/v1.20.3/csi-driver-smb-1.20.3.tgz
+# so aiming a HelmRepository at .../v1.20.3/charts would pin the INDEX and keep
+# fetching the CHART from master. The GitHub Pages mirror is no better: an
+# equally mutable index, and it serves a REPACKAGED 1.20.3 -- identical file
+# contents but different tar metadata and a different digest (b9873707...),
+# i.e. not the bytes this cluster is running.
+#
+# THE COMMIT BELOW IS THE TRUST ANCHOR.
+# ref.commit is content-addressed, so it is strictly stronger than a tag
+# (movable) and stronger than a registry tag->digest pin (GHCR does not enforce
+# tag immutability, which is the one way the k8s-gateway OCI move was briefly
+# WEAKER than the HelmRepository it replaced until its digest was pinned).
+# There is no tag-mutation window here at all.
+#
+# ref.branch is present only to scope the clone: Flux documents commit as
+# combinable with branch, "in which the commit must exist", and this commit is
+# NOT reachable from the default branch (master has diverged -- the release was
+# cut on release-1.20). Relying on commit-only would depend on undocumented
+# default-branch resolution behaviour. The branch does not weaken the pin: the
+# commit decides the content, and upstream retains release branches back to
+# release-1.4. If the branch ever disappears this source goes not-Ready, which
+# is a loud, git-revertable failure -- not a silent content swap.
+#
+# 59dce96e is the commit tagged v1.20.3. The chart directory at that commit is
+# BYTE-IDENTICAL in content to the tarball this cluster already runs
+# (sha256:6dee977f... / 6273 bytes, which is exactly the HelmChart artifact
+# behind Helm release v5): `diff -r` of the extracted tarball against
+# charts/v1.20.3/csi-driver-smb reports no differences, `helm template` from
+# both sources is identical line for line, and the render matches the live
+# release manifest on all 12 objects (only Flux's own injected
+# helm.toolkit.fluxcd.io/* labels differ). This is a SOURCE change, not a
+# content change.
+#
+# reconcileStrategy is left at its default (ChartVersion) on the HelmRelease's
+# HelmChart. For a git source that means a new chart artifact is built only
+# when Chart.yaml's version changes -- preserving the no-silent-re-pull
+# property the old HelmRepository had.
+#
+# To move versions: change ref.commit, ref.branch and the HelmRelease's chart
+# path together, and re-derive the commit from the upstream tag rather than
+# trusting this note.
+spec:
+  interval: 1h
+  url: https://github.com/kubernetes-csi/csi-driver-smb
+  ref:
+    branch: release-1.20
+    commit: 59dce96e11522a46354d6970393b00b1c2a57351
+  # The checkout is ~118 MB because this repo vendors its Go dependencies, and
+  # we need one 12-file chart directory out of it, so the artifact is filtered
+  # down to just that directory (same pattern style as k8s-self-ai-ops.yaml).
+  #
+  # `ignore` ON PURPOSE, NOT `sparseCheckout`. Both would shrink the artifact,
+  # but they fail differently and that matters here: cluster-meta runs with
+  # `wait: true` and cluster-apps dependsOn it, so a source that cannot become
+  # Ready blocks reconciliation CLUSTER-WIDE. `sparseCheckout` happens during
+  # checkout, so a bad path or a go-git edge case fails the GitRepository
+  # itself; `ignore` is applied after checkout when the artifact is built, so
+  # the worst case is an artifact missing the chart -- which stops only this
+  # HelmChart and leaves cluster-meta Ready. Patterns verified against git's
+  # own matcher: exactly the 12 chart files plus the tarball survive.
+  ignore: |
+    # exclude all
+    /*
+    # include only the pinned chart directory
+    !/charts
+    /charts/*
+    !/charts/v1.20.3

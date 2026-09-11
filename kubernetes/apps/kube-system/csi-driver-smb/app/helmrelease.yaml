@@ -9,10 +9,19 @@ spec:
   interval: 30m
   chart:
     spec:
-      chart: csi-driver-smb
-      version: 1.20.3
+      # Sourced from kubernetes/flux/meta/repositories/git/csi-driver-smb.yaml
+      # (GitRepository pinned to the commit tagged v1.20.3), NOT from an HTTP
+      # chart index on a mutable branch -- see that file for why, and for the
+      # proof that the chart directory below is byte-identical to the tarball
+      # this release was already built from.
+      #
+      # For a git source `chart` is a PATH to the chart directory, and `version`
+      # does not apply -- the version is whatever Chart.yaml says at the pinned
+      # commit (1.20.3). Moving versions means changing this path AND the
+      # GitRepository's ref.commit together.
+      chart: charts/v1.20.3/csi-driver-smb
       sourceRef:
-        kind: HelmRepository
+        kind: GitRepository
         name: csi-driver-smb
         namespace: flux-system
   install:
