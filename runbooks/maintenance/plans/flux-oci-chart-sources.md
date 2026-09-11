@@ -7,7 +7,7 @@ pr: null                              # No Renovate PR exists or can exist: this
                                       # understands; it has no opinion about which KIND of
                                       # source holds the chart.
 kind: infra
-current: "30 HTTP HelmRepository chart sources + 10 type:oci HelmRepository + 1 OCIRepository + 2 GitRepository — recounted 2026-09-11 after 4dfc3e32 (pajikos deleted) and 001ab0ad (csi-driver-smb moved to a commit-pinned GitRepository). The 6 unreferenced HelmRepositories of Stage 1 are still live; a 7th orphan (GitRepository k8s-self-ai-ops) was measured the same day (F-c73cd510)"
+current: "30 HTTP HelmRepository chart sources + 10 type:oci HelmRepository + 1 OCIRepository + 2 GitRepository — recounted 2026-09-11 after 4dfc3e32 (pajikos deleted) and 001ab0ad (csi-driver-smb moved to a commit-pinned GitRepository). Stage 1 is 5-of-6 executed (7c048735): five orphans deleted, leaving external-secrets deliberately HELD by the operator; a further orphan (GitRepository k8s-self-ai-ops) was measured the same day (F-c73cd510)"
 target: "every referenced chart with an immutable OCI source migrated to OCIRepository pinned by tag AND digest; unreferenced sources deleted; the rest explicitly parked with a named reason — delivered in 11 stages, each independently abandonable"
 update_type: refactor
 risk: high                            # NOT from any single stage. Two drivers, both
@@ -111,7 +111,7 @@ HelmRepository could not go Ready, and because `cluster-meta` carries
 
 That is the finding worth generalising: one third-party URL, owned by one person,
 with no consumer outside a single app, is wired into a gate that every app in the
-cluster passes through. We have **36 more of them**.
+cluster passes through. We have **30 more of them**.
 
 The near-miss was worse than the outage. `source-controller` stores artifacts on
 an **`emptyDir`** (verified: volumes `data` and `tmp`, both `emptyDir: {}`, **no
@@ -131,17 +131,23 @@ detail stays on those records.
 
 | | count | note |
 |---|---|---|
-| `HelmRepository` total, in repo | 46 | was 48 this morning; `k8s-gateway` migrated (`43a3b3e4`), `pajikos` deleted (`4dfc3e32`) |
+| `HelmRepository` total, in repo | 40 | was 48 this morning; `k8s-gateway` migrated (`43a3b3e4`), `pajikos` deleted (`4dfc3e32`), five Stage-1 orphans deleted (`7c048735`) |
 | of which `type: oci` | 10 | legacy OCI shape, healthy — out of scope except as the comparison in §1.4 |
-| of which HTTP | **36** | this plan's scope |
-| HTTP, referenced by a HelmRelease | **30** (32 releases) | stages 2-8 |
-| HTTP, referenced by **nothing** | **6** | stage 1 — pure subtraction |
+| of which HTTP | **30** | this plan's scope |
+| HTTP, referenced by a HelmRelease | **29** | stages 2-8 — `csi-driver-smb` left this population at `001ab0ad` |
+| HTTP, referenced by **nothing** | **1** | stage 1 — five deleted (`7c048735`); `external-secrets` HELD, not a worklist item |
 | `OCIRepository` | 1 | `network/k8s-gateway`, tag **and** digest pinned |
 | cached `HelmChart` artifacts in the emptyDir | **122** | the blast radius of one source-controller restart |
 
-The 6 unreferenced: `backube`, `democratic-csi`, `external-secrets`, `guerzon`,
-`piraeus`, `rook-ceph`. Verified by grepping every `name:` in `kubernetes/`
-outside `kubernetes/flux/meta/repositories/` — zero hits each. Four match the
+Five of the six — `backube`, `democratic-csi`, `guerzon`, `piraeus`,
+`rook-ceph` — were deleted in `7c048735` (2026-09-11). **One remains and is NOT
+a worklist item: `external-secrets`, deliberately retained by the operator**
+because it is the one that was never wired up at all, and no evidence it was
+intended is not evidence it was not. Verified by grepping every `name:` in
+`kubernetes/` outside `kubernetes/flux/meta/repositories/` — zero hits each.
+When re-running that grep, scope it to `kubernetes/` or exclude
+`.claude/worktrees/`: a stale worktree still holds the five deleted files, so a
+repo-root grep reports them as present. Four match the
 "dormant 8-19 months" profile by last git touch: `external-secrets`
 (2025-02-19), `backube` / `piraeus` / `rook-ceph` (2025-02-25); `democratic-csi`
 and `guerzon` were last touched 2026-02-22 in a bulk edit and are equally
@@ -372,7 +378,7 @@ source inventory this table is derived from is in §7.
 | # | Stage | components | min | risk | rolls? | buys |
 |---|---|---|---|---|---|---|
 | 0 | **Teach the version/update pipeline about `chartRef`** — **3 of 4 items DONE `97c3e913`; item 3's G3 fail-open still OPEN, and Stage 0 has not yet survived a sweep, so the §4.1 gate on stages 2-7 HOLDS** | tooling only | 30 → ~10 left | low | no | stops the migration from blinding `coverage.py` and fail-open-ing G3 |
-| 1 | **Delete the 6 unreferenced HelmRepositories** | backube, democratic-csi, external-secrets, guerzon, piraeus, rook-ceph | 15 | low | no | removes 6 third-party URLs from the `cluster-meta` gate — the best risk-per-minute in this plan |
+| 1 | ~~Delete the 6 unreferenced HelmRepositories~~ **5 of 6 DONE 2026-09-11 (`7c048735`)** — `backube`, `democratic-csi`, `guerzon`, `piraeus`, `rook-ceph` deleted (45 → 40 live). **`external-secrets` is deliberately HELD by the operator — do NOT delete it, and do not re-run this row against it.** | — | 0 | — | no | executed: five third-party URLs out of the `cluster-meta` gate. **Do not execute this row.** |
 | 2 | ~~`csi-driver-smb` → charts-mirror OCI~~ **DONE 2026-09-11 via a DIFFERENT route — see §3.4** | csi-driver-smb | 0 | — | **no roll occurred** | executed as a GitRepository pinned to commit `59dce96e` (the v1.20.3 cut), NOT charts-mirror. **Do not execute this row.** |
 | 3 | **No-roll, upstream-native OCI** | intel (3 releases), node-feature-discovery, gabe565/paperless-ngx, falcosecurity/falco | 15 ea | low | **no** | 6 releases off HTTP with zero workload impact — build confidence here |
 | 4 | **No-roll, charts-mirror** | descheduler, external-dns, headlamp, metrics-server | 15 ea | low-med | **no** | external-dns is DNS-adjacent; still no pod roll |
@@ -995,10 +1001,13 @@ is worth a note because it looks migratable and is not:
 (it resolves as an OCI image index, whereas every real Helm chart probed returned
 config mediaType `application/vnd.cncf.helm.config.v1+json`).
 
-### Unreferenced (6 repos) — stage 1, delete
+### Unreferenced (1 repo) — HELD, do not delete
 
-`backube` (its `volsync` chart *is* in charts-mirror, if it is ever wanted again) ·
-`democratic-csi` · `external-secrets` · `guerzon` · `piraeus` · `rook-ceph`.
+`external-secrets` — HELD by the operator, do not delete.
+
+Already deleted in `7c048735`: `backube` (its `volsync` chart *is* in
+charts-mirror, if it is ever wanted again) · `democratic-csi` · `guerzon` ·
+`piraeus` · `rook-ceph`.
 
 ### Stated as unverified
 
