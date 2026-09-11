@@ -1,19 +1,43 @@
 ---
-# Envoy migration — arag-web onto envoy-internal.
+# arag-web on envoy-internal. The UI is behind Authentik forward-auth; the API is
+# NOT, and that split is the whole design of this file.
+# Pattern + the gotchas: docs/sops/gateway-api-httproute.md
 #
-# Annotation notes: NO auth by operator decision AR-118 — see below
-#   Body-size limits have no route-level equivalent; Envoy streams uncapped
-#   unless a requestBuffer is set and none is, so this loosens rather than
-#   breaks. A cap would have to be Gateway-scoped and hit every other app.#
-# NO SecurityPolicy, and that is a DECISION not an omission (AR-118, 2026-09-07).
-# This app answers unauthenticated. Its Authentik provider is mode=forward_single,
-# which enforces nothing on its own and needs the ingress to call it via
-# auth-url/auth-signin — wiring that was never done, long before this migration
-# (traced to 4926bfa5). The operator accepted that on the basis that exposure is
-# INTERNAL ONLY. Adding ext-auth here would change the auth structure during a
-# routing migration, which is explicitly not what was asked for.
-# RE-REVIEW if this host ever gains external exposure; the acceptance rests on
-# it being LAN-only, not on the data being unimportant.
+# AUTH HISTORY: this host answered ANONYMOUSLY (HTTP 200, no redirect) from well
+# before the Envoy migration until 2026-09-11. Its Authentik provider is
+# mode=forward_single, which enforces nothing by itself — it needs the proxy in
+# front to actually call the outpost, and that wiring was never done (traced to
+# 4926bfa5). The gap was accepted on a LAN-only basis as AR-118 during the
+# routing migration, explicitly as "do not change auth structure mid-migration".
+# The operator reversed that on 2026-09-11 and asked for the gate.
+#
+# WHY THE HOSTNAME IS SPLIT INTO TWO ROUTES — DO NOT MERGE THEM.
+# This one hostname serves two surfaces with two DIFFERENT auth models:
+#   * the Rails web UI (root + `scope :web`) — humans, browser, session cookie
+#   * `namespace :api / :v1`                 — the Mac-mini scraper, unattended
+# The scraper pushes with urllib.request + `Authorization: Bearer <token>`
+# (scraper/scraper/cli.py -> POST /api/v1/sync and /api/v1/sync/complete), every
+# 6h, launch-at-login, NO cookie jar and NO OIDC. It cannot complete an
+# interactive login, and its error path is `if e.code < 500: raise` — so a single
+# 302-to-Authentik kills the push with no retry. /api is ALREADY authenticated in
+# the app itself: Api::V1::BaseController#authenticate! secure_compares against
+# ENV["ARAG_SYNC_TOKEN"] (set in office/arag-web-secret). Putting forward-auth on
+# /api would stack a browser-only gate on a working token gate and break the
+# ingest pipeline. arag-web's own config/routes.rb records the intended boundary
+# on the web scope: "all Authentik-protected at ingress level".
+#
+# A SecurityPolicy targets a whole HTTPRoute, not one rule inside it, which is
+# why /api must be a SEPARATE HTTPRoute rather than a second rule here.
+#
+# This route keeps the name `arag-web` deliberately — it is NOT renamed to
+# `arag-web-ui`. Gateway API breaks conflicting matches by oldest
+# creationTimestamp, so a renamed route would lose to the incumbent `/` route
+# until Flux pruned it, leaving the host ungated for that window (and
+# indefinitely if the prune stalled). Editing in place makes that window zero.
+#
+# Body-size limits still have no route-level equivalent; Envoy streams uncapped
+# unless a requestBuffer is set and none is. A cap would have to be
+# Gateway-scoped and would hit every other app, so it stays out of scope here.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -36,3 +60,114 @@ spec:
           kind: Service
           name: arag-web
           port: 80
+---
+# API route — MORE specific than `/`, so Gateway API's match precedence sends
+# /api/** here rather than to the gated route above. Carries NO SecurityPolicy
+# ON PURPOSE: see the header block. Everything under it is token-gated inside
+# Rails; the only deliberately unauthenticated path is GET /api/v1/health.
+# VERIFY AFTER ANY CHANGE HERE: a request to /api/v1/... must reach Rails (401
+# from Rails on a bad token is a PASS — it proves the request arrived); a 302 to
+# Authentik is a FAIL and means the pipeline is broken.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: arag-web-api
+  namespace: office
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "arag.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /api }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: arag-web
+          port: 80
+---
+# Callback route — separate and MORE specific than `/`; Gateway API resolves by
+# longest match, so folding it in would loop the login callback into the app.
+# It carries NO SecurityPolicy: gating the callback would make the login flow
+# unable to ever complete.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: arag-web-authentik-outpost
+  namespace: office
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "arag.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /outpost.goauthentik.io }
+      backendRefs:
+        # Real Service cross-namespace, NOT an ExternalName shim — Envoy
+        # resolves backends via EndpointSlices and ExternalName has none.
+        # Authorised by ReferenceGrant kube-system/arag-web-outpost-access,
+        # which already covers BOTH the HTTPRoute and the SecurityPolicy
+        # subject — the outpost, its Service and that grant all pre-existed.
+        - group: ""
+          kind: Service
+          name: ak-outpost-arag-web-forward-auth
+          namespace: kube-system
+          port: 9000
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: arag-web-forward-auth
+  namespace: office
+spec:
+  targetRefs:                    # UI route ONLY — never the API or callback route
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: arag-web
+  extAuth:
+    failOpen: false              # outpost down => deny, never publish
+    # MANDATORY. Unset, Envoy forwards the ext-auth server ONLY Host, Method,
+    # Path, Content-Length and Authorization — no Cookie — so the outpost cannot
+    # see the session and every check is anonymous. Each asset request then opens
+    # its own flow; the parallel flows clobber each other's state cookie and the
+    # top-level callback returns `oauth state does not match the session` =>
+    # HTTP 400 in the browser. nginx's auth_request passed Cookie implicitly,
+    # which is why this only surfaced after the Envoy migration, and why it took
+    # the ten already-converted apps down for four days (2026-09-07 -> 09-11).
+    # Verify with the session-stability A/B, NOT a 302: a broken policy 302s
+    # forever. Present the issued cookie a second time — fixed reuses it,
+    # broken mints a new one. See docs/sops/gateway-api-httproute.md.
+    headersToExtAuth:
+      - cookie                   # the session — the one that actually fixes it
+      - accept
+      - user-agent               # the outpost's request log, where 400s show up
+    # DELIBERATELY NOT FORWARDED: x-forwarded-for / x-forwarded-proto. Envoy
+    # appends to XFF rather than sanitising it, and ClientTrafficPolicy
+    # envoy-internal-client trusts all of 192.168.0.0/16, so forwarding it lets
+    # a LAN client choose the IP authentik's lockout scoring records. The
+    # redirect URI is built correctly without x-forwarded-proto.
+    http:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-arag-web-forward-auth
+          namespace: kube-system
+          port: 9000
+      path: /outpost.goauthentik.io/auth/envoy   # /auth/nginx 500s here
+      headersToBackend:
+        - Set-Cookie
+        - X-authentik-username
+        - X-authentik-groups
+        - X-authentik-email
+        - X-authentik-name
+        - X-authentik-uid
