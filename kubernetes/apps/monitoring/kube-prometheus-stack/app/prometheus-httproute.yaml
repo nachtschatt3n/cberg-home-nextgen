@@ -67,6 +67,24 @@ spec:
       name: prometheus
   extAuth:
     failOpen: false               # outpost down => deny, never publish
+    # MANDATORY. Unset, Envoy forwards the ext-auth server ONLY Host, Method,
+    # Path, Content-Length and Authorization — no Cookie — so the outpost cannot
+    # see the session and every check is anonymous. Each asset request then opens
+    # its own flow; the parallel flows clobber each other's state cookie and the
+    # top-level callback returns `oauth state does not match the session` =>
+    # HTTP 400 in the browser. nginx's auth_request passed Cookie implicitly,
+    # which is why this only surfaced after the Envoy migration.
+    # Verify with the session-stability A/B, NOT a 302: a broken policy 302s
+    # forever. Present the issued cookie a second time — fixed reuses it,
+    # broken mints a new one. See docs/sops/gateway-api-httproute.md.
+    headersToExtAuth:
+      - cookie                   # the session — the one that actually fixes it
+      - accept
+      - user-agent               # the outpost's request log, where 400s show up
+    # DELIBERATELY NOT FORWARDED: x-forwarded-for / x-forwarded-proto. Envoy
+    # appends to XFF rather than sanitising it, so forwarding it lets a client
+    # choose the IP authentik's lockout scoring records. The redirect URI is
+    # built correctly without x-forwarded-proto.
     http:
       backendRefs:
         - group: ""
