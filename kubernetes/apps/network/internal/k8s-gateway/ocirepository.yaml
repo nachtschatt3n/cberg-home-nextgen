@@ -10,9 +10,15 @@ metadata:
 # GitHub Pages index was DELETED outright, which blocked `cluster-apps`
 # cluster-wide until the source was repointed. An HTTP chart index is a single
 # mutable URL owned by one person; the OCI registry below is the chart's own
-# canonical distribution point and, unlike the index, source-controller keeps
-# its own stored artifact -- so recovery no longer depends on a tarball cache
-# that only gets written at source-controller pod boot.
+# canonical distribution point.
+#
+# CORRECTION to an earlier version of this comment: OCI does NOT make the cached
+# artifact survive a source-controller restart. Its artifact lives in the SAME
+# emptyDir as a HelmRepository's, so a restart discards it either way. What
+# actually changed is that the artifact is RE-FETCHABLE afterwards -- the old
+# HTTP index was a 404, so a cache loss was unrecoverable and would have left
+# internal DNS unreconcilable. That is the property worth having; do not
+# over-claim persistence it does not provide.
 #
 # The 3.7.2 layer here is the ORIGINAL tarball, not a repackage:
 # sha256:a9bd8636...526 / 9195 bytes, byte-identical to the HelmChart artifact
