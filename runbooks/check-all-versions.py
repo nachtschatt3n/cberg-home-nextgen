@@ -497,6 +497,13 @@ class VersionChecker:
         self.kubernetes_dir = self.repo_root / "kubernetes"
         self.helmreleases: List[Dict] = []
         self.helm_repositories: Dict[str, Dict] = {}
+        # `spec.chartRef` targets: (kind, name) -> resolved chart identity.
+        # Populated by load_chart_sources(); see parse_helmrelease().
+        self.chart_sources: Dict[tuple, Dict] = {}
+        # HelmReleases whose chart source could NOT be resolved to a
+        # (chart, version) pair. A silent zero is never a pass: this list is
+        # printed, reported, and vetoes auto-close for the affected leaf.
+        self.unresolved_chart_sources: List[Dict] = []
         self.results: List[Dict] = []
         self.github_cache: Dict[str, Any] = {}  # Cache for GitHub API responses
         self.github_token = github_token or os.environ.get('GITHUB_TOKEN')
@@ -635,6 +642,8 @@ class VersionChecker:
                     'chart_name': '',
                     'chart_version': '',
                     'repository_name': '',
+                    'chart_repo_url': '',
+                    'chart_repo_type': '',
                     'images': images,
                 })
         return out
@@ -662,29 +671,253 @@ class VersionChecker:
                                      f"{type(e).__name__}: {e}")
                 print(f"{Colors.YELLOW}Warning: Could not load {repo_file}: {e}{Colors.RESET}")
     
+    # ------------------------------------------------------------------
+    # HelmRelease chart sources — BOTH shapes
+    #
+    # A HelmRelease names its chart in exactly one of two mutually exclusive
+    # ways:
+    #
+    #   spec.chart.spec.{chart,version,sourceRef}   inline; version is in git
+    #   spec.chartRef.{kind,name,namespace}         points at a source CR
+    #
+    # Under `chartRef` the version does NOT live in the HelmRelease — it lives
+    # on the referenced object: an `OCIRepository` carries `spec.ref.tag`
+    # (and optionally `spec.ref.digest`), a `HelmChart` carries its own
+    # `spec.version`. This parser read ONLY the first shape until 2026-09-11,
+    # when k8s-gateway moved from an HTTP HelmRepository to an OCIRepository +
+    # chartRef and immediately parsed to chart_name='' / chart_version=''.
+    # The chart-check branch in check_all() reads an empty chart name as
+    # "this row has no chart", so INTERNAL DNS silently dropped out of the
+    # frozen/stale-upstream freshness detector — a detector that exists
+    # BECAUSE this very chart's index froze and then vanished. Renovate still
+    # covered the component, so this was loss of OUR measurement rather than of
+    # all coverage; but Renovate happily reports "up to date" against a frozen
+    # registry, which is precisely the state only the freshness detector sees.
+    #
+    # A migration of the remaining HTTP HelmRepository sources to
+    # OCIRepository is planned, so every shape this parser does not understand
+    # shrinks the denominator one component at a time. Therefore an
+    # unresolvable chart source is COUNTED and ANNOUNCED
+    # (self.unresolved_chart_sources + degraded.record + a report section),
+    # never returned as empty strings: a silent zero is never a pass.
+    _CHART_SOURCE_KINDS = ('OCIRepository', 'HelmChart')
+
+    def load_chart_sources(self):
+        """Index the source CRs that `spec.chartRef` can point at.
+
+        Keyed by (kind, name) — the namespace is deliberately NOT part of the
+        key. `chartRef.namespace` is almost never set in this repo (the source
+        CR sits in the app's own kustomization and inherits the owning
+        Kustomization's targetNamespace, the same reason
+        `_resolve_namespace()` exists), so keying on it would miss every
+        same-directory reference. Names are unique per kind here; a duplicate
+        is recorded rather than silently overwritten.
+        """
+        kind_re = re.compile(r'(?m)^kind:\s*(' +
+                             '|'.join(self._CHART_SOURCE_KINDS) + r')\s*$')
+        for file_path in sorted(self.kubernetes_dir.rglob("*.yaml")):
+            try:
+                text = file_path.read_text(errors='ignore')
+            except OSError as e:
+                self.degraded.record(f"chart source {file_path.name}",
+                                     'chart source manifest',
+                                     f"{type(e).__name__}: {e}")
+                continue
+            # Same cheap pre-filter as find_raw_manifest_workloads(): this
+            # repo carries non-Kubernetes YAML dialects under kubernetes/
+            # (Authentik blueprints use a `!KeyOf` tag PyYAML's safe loader
+            # cannot construct), and parsing one would arm a SECTION-WIDE
+            # auto-close veto over a file that can never match anyway.
+            if not kind_re.search(text):
+                continue
+            try:
+                docs = list(yaml.safe_load_all(text))
+            except yaml.YAMLError as e:
+                self.degraded.record(f"chart source {file_path.name}",
+                                     'chart source manifest',
+                                     f"{type(e).__name__}: {e}")
+                continue
+            for doc in docs:
+                if not isinstance(doc, dict):
+                    continue
+                kind = doc.get('kind')
+                if kind not in self._CHART_SOURCE_KINDS:
+                    continue
+                name = ((doc.get('metadata') or {}).get('name') or '').strip()
+                if not name:
+                    continue
+                entry = self._parse_chart_source(kind, doc)
+                entry['file_path'] = str(file_path.relative_to(self.repo_root))
+                key = (kind, name)
+                prev = self.chart_sources.get(key)
+                if prev and prev.get('url') != entry.get('url'):
+                    self.degraded.record(
+                        f"chart source {kind}/{name}", 'chart source manifest',
+                        f"duplicate definition: {prev.get('file_path')} vs "
+                        f"{entry['file_path']}")
+                self.chart_sources[key] = entry
+
+    @staticmethod
+    def _parse_chart_source(kind: str, doc: Dict) -> Dict:
+        """Resolve one source CR to {chart, version, url, type, digest}.
+
+        OCIRepository: the chart NAME is the last path segment of the OCI URL
+        (`oci://ghcr.io/k8s-gateway/charts/k8s-gateway` -> `k8s-gateway`) and
+        `url` is kept as the PARENT path, because that is the shape
+        get_oci_chart_version() wants (it appends `/<chart>`).
+
+        Version precedence is `ref.tag`, then `ref.semver`. The DIGEST is an
+        immutability pin, not a version: k8s-gateway carries tag `3.7.2` AND
+        `digest: sha256:3783b0b4…` together, and reporting the digest as the
+        version would make every comparison downstream meaningless. Equally,
+        the presence of a digest must never be read as "no version found" —
+        the tag is still the human-meaningful version. A digest-ONLY ref has
+        no version at all and resolves to '' so the caller counts it as
+        unresolved out loud.
+        """
+        spec = doc.get('spec') or {}
+        if kind == 'HelmChart':
+            return {
+                'kind': kind,
+                'chart': str(spec.get('chart') or '').strip(),
+                'version': str(spec.get('version') or '').strip(),
+                'url': '',
+                'type': 'default',
+                'digest': '',
+                # A HelmChart delegates to its own sourceRef (a
+                # HelmRepository), so the repo name is resolvable by the
+                # existing HelmRepository index.
+                'source_name': str(((spec.get('sourceRef') or {})
+                                    .get('name')) or '').strip(),
+            }
+        # OCIRepository
+        url = str(spec.get('url') or '').strip().rstrip('/')
+        ref = spec.get('ref') or {}
+        chart = url.rpartition('/')[2] if url else ''
+        parent = url.rpartition('/')[0] if url else ''
+        version = str(ref.get('tag') or ref.get('semver') or '').strip()
+        return {
+            'kind': kind,
+            'chart': chart,
+            'version': version,
+            'url': parent,
+            'type': 'oci',
+            'digest': str(ref.get('digest') or '').strip(),
+            'source_name': '',
+        }
+
+    def _resolve_chart_ref(self, chart_ref: Dict) -> Dict:
+        """Follow a `spec.chartRef` to a chart identity, or explain why not.
+
+        Returns {chart, version, repo_name, repo_url, repo_type, reason}.
+        `reason` is '' on success and a human sentence on failure — the caller
+        must surface it rather than fall through to empty strings.
+        """
+        out = {'chart': '', 'version': '', 'repo_name': '', 'repo_url': '',
+               'repo_type': '', 'reason': ''}
+        kind = str(chart_ref.get('kind') or '').strip()
+        name = str(chart_ref.get('name') or '').strip()
+        if not kind or not name:
+            out['reason'] = 'chartRef is missing kind and/or name'
+            return out
+        if kind not in self._CHART_SOURCE_KINDS:
+            out['reason'] = (f"chartRef kind {kind!r} is not one of "
+                             f"{', '.join(self._CHART_SOURCE_KINDS)} — this "
+                             f"parser has no resolver for it")
+            return out
+        src = self.chart_sources.get((kind, name))
+        if not src:
+            out['reason'] = (f"chartRef -> {kind}/{name} but no such manifest "
+                             f"was found under kubernetes/")
+            return out
+        out['chart'] = src.get('chart', '')
+        out['version'] = src.get('version', '')
+        out['repo_url'] = src.get('url', '')
+        out['repo_type'] = src.get('type', '')
+        # The source CR's own name is the repository identity for reporting.
+        # A HelmChart defers to its sourceRef, which IS a HelmRepository and
+        # therefore already in self.helm_repositories.
+        out['repo_name'] = src.get('source_name') or name
+        if not out['chart']:
+            out['reason'] = (f"{kind}/{name} yields no chart name "
+                             f"(url={src.get('url') or '?'})")
+        elif not out['version']:
+            out['reason'] = (
+                f"{kind}/{name} pins no version: no ref.tag / ref.semver"
+                + (" (digest-only ref — a digest is an immutability pin, not "
+                   "a version)" if src.get('digest') else ""))
+        return out
+
     def parse_helmrelease(self, file_path: Path) -> Optional[Dict]:
-        """Parse a HelmRelease YAML file."""
+        """Parse a HelmRelease YAML file (both chart-source shapes).
+
+        See the `_CHART_SOURCE_KINDS` comment block above for why `chartRef`
+        is handled here and why an unresolvable source is loud.
+        """
         try:
             with open(file_path, 'r') as f:
                 doc = yaml.safe_load(f)
-                
+
             if not doc or doc.get('kind') != 'HelmRelease':
                 return None
-            
+
             metadata = doc.get('metadata', {})
             spec = doc.get('spec', {})
-            chart_spec = spec.get('chart', {}).get('spec', {})
+            chart_spec = (spec.get('chart') or {}).get('spec') or {}
+            chart_ref = spec.get('chartRef') or {}
             values = spec.get('values', {})
-            
-            # Extract chart info
-            chart_name = chart_spec.get('chart', '')
-            chart_version = chart_spec.get('version', '')
-            source_ref = chart_spec.get('sourceRef', {})
-            repo_name = source_ref.get('name', '')
-            
+            hr_name = metadata.get('name', '') or file_path.stem
+
+            repo_url = ''
+            repo_type = ''
+            unresolved_reason = ''
+            if chart_spec:
+                # Classic, inline shape — the version is in git.
+                chart_name = str(chart_spec.get('chart') or '')
+                chart_version = str(chart_spec.get('version') or '')
+                source_ref = chart_spec.get('sourceRef') or {}
+                repo_name = str(source_ref.get('name') or '')
+                source_kind = str(source_ref.get('kind') or '')
+                if source_kind == 'GitRepository' and not chart_version:
+                    # THIRD shape, also in-tree since 2026-09-11: a git chart
+                    # source. `chart` is a PATH to the chart directory and
+                    # `version` does not apply — the version is whatever
+                    # Chart.yaml says at the GitRepository's pinned commit,
+                    # which is not in this repo at all. Named precisely rather
+                    # than lumped in with a malformed manifest, and NOT guessed
+                    # from the path (`charts/v1.20.3/...` is a convention, not
+                    # a contract): inventing a version is worse than admitting
+                    # we have none.
+                    unresolved_reason = (
+                        f"chart comes from GitRepository/{repo_name or '?'} at "
+                        f"path {chart_name!r} — no version in git (it lives in "
+                        f"Chart.yaml at the pinned commit), so no upstream "
+                        f"comparison ran")
+                elif not chart_name or not chart_version:
+                    unresolved_reason = (
+                        f"spec.chart.spec is present but incomplete "
+                        f"(chart={chart_name or 'MISSING'}, "
+                        f"version={chart_version or 'MISSING'})")
+            elif chart_ref:
+                res = self._resolve_chart_ref(chart_ref)
+                chart_name = res['chart']
+                chart_version = res['version']
+                repo_name = res['repo_name']
+                repo_url = res['repo_url']
+                repo_type = res['repo_type']
+                unresolved_reason = res['reason']
+            else:
+                chart_name = chart_version = repo_name = ''
+                unresolved_reason = ('HelmRelease declares neither '
+                                     'spec.chart.spec nor spec.chartRef')
+
+            if unresolved_reason:
+                self._record_unresolved_chart_source(
+                    hr_name, file_path, unresolved_reason)
+
             # Extract images from values
             images = self.extract_images(values)
-            
+
             return {
                 'name': metadata.get('name', ''),
                 'namespace': self._resolve_namespace(file_path, metadata),
@@ -692,6 +925,11 @@ class VersionChecker:
                 'chart_name': chart_name,
                 'chart_version': chart_version,
                 'repository_name': repo_name,
+                # Only set for chartRef-sourced charts, where the URL is NOT
+                # discoverable from self.helm_repositories. Empty string keeps
+                # the classic path on its existing lookup.
+                'chart_repo_url': repo_url,
+                'chart_repo_type': repo_type,
                 'images': images
             }
         except Exception as e:
@@ -703,7 +941,46 @@ class VersionChecker:
                                  f"{type(e).__name__}: {e}")
             print(f"{Colors.RED}Error parsing {file_path}: {e}{Colors.RESET}")
             return None
-    
+
+    def _record_unresolved_chart_source(self, hr_name, file_path, reason: str):
+        """Announce a HelmRelease whose chart source this parser cannot read.
+
+        THE POINT OF THIS METHOD is that the chartRef regression went unnoticed
+        for a day: the parser returned `chart_name=''`, the chart-check branch
+        read that as "no chart to check", and the component left the
+        denominator with nothing printed and nothing recorded. Three signals
+        now fire instead:
+
+          1. a stderr warning at parse time (visible in the sweep log),
+          2. a row in self.unresolved_chart_sources, printed as a count after
+             the parse loop and rendered as its own report section,
+          3. degraded.record(), which vetoes auto-close for that component so
+             its open version findings are not resolved by the silence.
+
+        The veto is attributed per-component (`component=chart:<name>`), which
+        DegradationLog widens to a section-wide veto past its
+        MAX_SCOPED_COMPONENTS / MAX_UNCOVERED_FRACTION bounds. That is the
+        behaviour we want for the planned HelmRepository -> OCIRepository
+        migration: one unknown shape narrows, a mass migration that outruns
+        this parser vetoes the whole section.
+        """
+        rel = str(file_path)
+        try:
+            rel = str(Path(file_path).relative_to(self.repo_root))
+        except (ValueError, TypeError):
+            pass
+        self.unresolved_chart_sources.append(
+            {'name': hr_name, 'file_path': rel, 'reason': reason})
+        print(f"{Colors.RED}⚠ UNRESOLVED chart source: {hr_name} "
+              f"({rel}) — {reason}{Colors.RESET}", file=sys.stderr)
+        kwargs = {}
+        if hr_name:
+            try:
+                kwargs['component'] = component_key('chart', hr_name)
+            except ValueError:
+                pass
+        self.degraded.record(f"helmrelease {hr_name or rel}",
+                             'HelmRelease chart source', reason, **kwargs)
 
     @staticmethod
     def _resolve_namespace(file_path, metadata) -> str:
@@ -858,16 +1135,26 @@ class VersionChecker:
         self._index_cache[repo_url] = entries
         return entries
 
-    def check_chart_freshness(self, repo_name: str, chart_name: str) -> dict:
-        """Freshness verdict for one (repo, chart) pair actually deployed."""
+    def check_chart_freshness(self, repo_name: str, chart_name: str,
+                              repo_url: str = '', repo_type: str = '') -> dict:
+        """Freshness verdict for one (repo, chart) pair actually deployed.
+
+        `repo_url`/`repo_type` are passed explicitly for charts sourced via
+        `spec.chartRef`: an OCIRepository is not a HelmRepository and so is
+        absent from self.helm_repositories. Without them a chartRef chart
+        returns the default `unverifiable` with `repo_url=None`, which the
+        report then drops from BOTH the stale and the unverifiable tables —
+        i.e. it would still silently vanish, just one layer further down.
+        """
         import datetime
         out = {'state': 'unverifiable', 'newest': None, 'created': None,
                'months': None, 'pin_in_index': None, 'repo_url': None}
         repo = self.helm_repositories.get(repo_name)
-        if not repo:
+        if not repo and not repo_url:
             return out
-        out['repo_url'] = repo.get('url', '')
-        if repo.get('type') == 'oci' or out['repo_url'].startswith('oci://'):
+        out['repo_url'] = repo_url or (repo or {}).get('url', '')
+        rtype = repo_type or (repo or {}).get('type')
+        if rtype == 'oci' or out['repo_url'].startswith('oci://'):
             return out  # honest: cannot date OCI entries from the tag list
         charts = self._chart_index_entries(out['repo_url'])
         if not charts:
@@ -899,19 +1186,31 @@ class VersionChecker:
                         else 'fresh')
         return out
 
-    def get_latest_chart_version(self, repo_name: str, chart_name: str) -> Optional[str]:
-        """Get latest chart version from Helm repository."""
-        if repo_name not in self.helm_repositories:
-            # NOT recorded as degradation: most charts here are sourced from
-            # OCIRepository CRs, which load_helmrepositories never collects, so
-            # this is the steady state for them rather than an outage. A repo
-            # CR that genuinely failed to PARSE is recorded there instead.
+    def get_latest_chart_version(self, repo_name: str, chart_name: str,
+                                 repo_url: str = '',
+                                 repo_type: str = '') -> Optional[str]:
+        """Get latest chart version from a Helm repository or OCI registry.
+
+        `repo_url`/`repo_type` come from the HelmRelease row when the chart is
+        sourced via `spec.chartRef` -> OCIRepository, which is NOT in
+        self.helm_repositories. `oci://<parent>/<chart>` is exactly the ref
+        get_oci_chart_version() builds, so the OCI branch needs no new code.
+        """
+        if not repo_url and repo_name not in self.helm_repositories:
+            # NOT recorded as degradation: a chart whose source CR is neither a
+            # known HelmRepository nor a resolved chartRef URL has no resolver
+            # here by design, which is a steady state rather than an outage —
+            # and the UNRESOLVED bucket in parse_helmrelease() already names it
+            # loudly. A repo CR that genuinely failed to PARSE is recorded
+            # there instead.
             return None
 
-        repo = self.helm_repositories[repo_name]
-        repo_url = repo['url']
-        repo_type = repo.get('type', 'default')
-        
+        repo = self.helm_repositories.get(repo_name) or {}
+        repo_url = repo_url or repo.get('url', '')
+        repo_type = repo_type or repo.get('type', 'default')
+        if not repo_url:
+            return None
+
         try:
             if repo_type == 'oci':
                 # OCI registry (e.g., ghcr.io)
@@ -2826,6 +3125,13 @@ class VersionChecker:
         self.load_helmrepositories()
         print(f"Loaded {len(self.helm_repositories)} Helm repositories")
 
+        # Load the source CRs that `spec.chartRef` points at (OCIRepository /
+        # HelmChart). MUST run before parse_helmrelease(), which resolves
+        # chartRef versions out of this index.
+        self.load_chart_sources()
+        print(f"Loaded {len(self.chart_sources)} chartRef source(s) "
+              f"(OCIRepository/HelmChart)")
+
         # Fetch open Renovate PRs
         print("Fetching open Renovate PRs...")
         self.renovate_prs = self.get_renovate_prs()
@@ -2843,7 +3149,22 @@ class VersionChecker:
             if hr:
                 self.helmreleases.append(hr)
 
-        print(f"Parsed {len(self.helmreleases)} HelmReleases\n")
+        # Resolved = a chart identity we can actually compare upstream. The
+        # count is printed next to the total on purpose: "Parsed 124" was true
+        # on the day k8s-gateway silently resolved to nothing, because parsing
+        # the FILE and resolving its CHART are different successes.
+        n_resolved = sum(1 for h in self.helmreleases
+                         if h['chart_name'] and h['chart_version'])
+        print(f"Parsed {len(self.helmreleases)} HelmReleases "
+              f"({n_resolved} chart sources resolved)")
+        if self.unresolved_chart_sources:
+            print(f"{Colors.RED}⚠ {len(self.unresolved_chart_sources)} "
+                  f"HelmRelease(s) with an UNRESOLVED chart source — these are "
+                  f"NOT version-checked:{Colors.RESET}")
+            for u in self.unresolved_chart_sources:
+                print(f"    {Colors.RED}• {u['name']} ({u['file_path']}): "
+                      f"{u['reason']}{Colors.RESET}")
+        print()
 
         # Raw-manifest Deployments/StatefulSets/DaemonSets carry real images
         # but no HelmRelease -- the whole Wazuh SIEM among them. Same shape as
@@ -2879,21 +3200,30 @@ class VersionChecker:
             }
             
             # Check chart version
+            # `chart_repo_url`/`chart_repo_type` are set only for charts
+            # sourced via spec.chartRef -> OCIRepository (absent from
+            # self.helm_repositories); '' keeps classic charts on the
+            # HelmRepository lookup.
+            hr_repo_url = hr.get('chart_repo_url') or ''
+            hr_repo_type = hr.get('chart_repo_type') or ''
             if hr['chart_name'] and hr['repository_name']:
                 result['chart']['freshness'] = self.check_chart_freshness(
-                    hr['repository_name'], hr['chart_name'])
-                latest_chart = self.get_latest_chart_version(hr['repository_name'], hr['chart_name'])
+                    hr['repository_name'], hr['chart_name'],
+                    hr_repo_url, hr_repo_type)
+                latest_chart = self.get_latest_chart_version(
+                    hr['repository_name'], hr['chart_name'],
+                    hr_repo_url, hr_repo_type)
                 # Fallback for bjw-s charts (app-template, etc.) which live in an
                 # OCI HelmRepository not loaded into self.helm_repositories.
                 if (not latest_chart) and hr['repository_name'] == 'bjw-s':
                     latest_chart = resolve_bjw_s_chart_latest(hr['chart_name'])
                 result['chart']['latest_version'] = latest_chart
-                
+
                 # Get repository URL for chart repo detection
-                repo_url = ''
-                if hr['repository_name'] in self.helm_repositories:
+                repo_url = hr_repo_url
+                if not repo_url and hr['repository_name'] in self.helm_repositories:
                     repo_url = self.helm_repositories[hr['repository_name']].get('url', '')
-                
+
                 if (latest_chart and not self.tags_are_equal(latest_chart, hr['chart_version'])
                         and not self.is_reportable_update(hr['chart_version'], latest_chart)):
                     # Resolver returned an OLDER chart than the running one —
@@ -3456,6 +3786,25 @@ class VersionChecker:
                     lines.append(f"| `{name}` | `{chart}` | `{fr['newest']}` | {fr['created']} "
                                  f"| **{fr['months']}** | `{cur}` |")
             lines.append("")
+        # Unresolved chart sources — a HelmRelease whose chart identity this
+        # script could not determine is NOT "clean", it is UNMEASURED. It has
+        # to appear in the report for the same reason the freshness table
+        # exists: the failure mode is silence, not a wrong number.
+        if self.unresolved_chart_sources:
+            lines.append("### ⚠️ Unresolved chart sources (NOT version-checked)")
+            lines.append("")
+            lines.append("> These HelmReleases parsed fine as YAML but their CHART could not be")
+            lines.append("> resolved to a (chart, version) pair, so no upstream comparison and no")
+            lines.append("> freshness verdict ran for them. This is a parser gap, not a clean bill")
+            lines.append("> of health — `spec.chart.spec` and `spec.chartRef` are both valid and a")
+            lines.append("> third shape (or a missing source CR) lands here rather than vanishing.")
+            lines.append("")
+            lines.append("| App | File | Why unresolved |")
+            lines.append("|-----|------|----------------|")
+            for u in sorted(self.unresolved_chart_sources,
+                            key=lambda r: (r['name'], r['file_path'])):
+                lines.append(f"| `{u['name']}` | `{u['file_path']}` | {u['reason']} |")
+            lines.append("")
         if unver_rows:
             lines.append("### Upstream freshness unverifiable (OCI — no dates in index)")
             lines.append("")
@@ -3689,6 +4038,30 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
         return (0, 0)
 
     crit, warn = 0, 0
+
+    # Coverage gaps FIRST: a HelmRelease whose chart source could not be
+    # resolved was never version-checked at all, and the rest of this function
+    # can only report on what WAS measured. Emitted at `monitor` on purpose —
+    # it belongs on the board (the operator has to either extend the parser or
+    # accept the gap) but it is a coverage gap, not an incident, so it must not
+    # drive the section verdict yellow on every cycle. Correctness is already
+    # protected separately by the per-component auto-close veto that
+    # _record_unresolved_chart_source() arms.
+    for u in getattr(checker, 'unresolved_chart_sources', []):
+        writer.emit(
+            severity='monitor',
+            title=f"{u['name']}: chart source UNRESOLVED — not version-checked",
+            action=("teach runbooks/check-all-versions.py this chart-source "
+                    "shape, or accept the gap explicitly: " + u['reason']),
+            evidence_path=evidence_path,
+            subsection="helmrelease_chart",
+            metadata={
+                "kind": "chart",
+                "component": component_key('chart', u['name']),
+                "file_path": u['file_path'],
+                "reason": u['reason'],
+            },
+        )
 
     # HelmRelease findings
     for r in getattr(checker, 'results', []):

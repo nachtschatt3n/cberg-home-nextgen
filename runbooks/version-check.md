@@ -232,10 +232,31 @@ To verify a new app is tracked:
 
 ### 2. Extracting Chart Information
 
-From each HelmRelease, it extracts:
+A HelmRelease names its chart in exactly one of two mutually exclusive shapes,
+and the script handles both:
+
+**Inline (`spec.chart.spec`) — the version is in git:**
 - Chart name: `spec.chart.spec.chart`
 - Chart version: `spec.chart.spec.version`
 - Repository: `spec.chart.spec.sourceRef.name`
+
+**Reference (`spec.chartRef`) — the version is on the referenced source CR:**
+- `chartRef.kind` / `chartRef.name` point at an `OCIRepository` or a `HelmChart`
+- `OCIRepository`: chart name is the last path segment of `spec.url`, version is
+  `spec.ref.tag` (or `spec.ref.semver`). **`spec.ref.digest` is an immutability
+  pin, not a version** — a digest-pinned source carries both and the tag is the
+  version (k8s-gateway: `tag: 3.7.2` + `digest: sha256:…`).
+- `HelmChart`: `spec.chart` / `spec.version`, repository via its `spec.sourceRef`
+
+**A chart source the script cannot resolve is NOT silently skipped.** It lands in
+an `UNRESOLVED chart source` bucket: a stderr warning, a count printed after the
+parse loop, an `⚠️ Unresolved chart sources` table in the report, and a
+`degraded.record()` that vetoes stale-finding auto-close for that component.
+A silent zero is never a pass — the `chartRef` shape went unmeasured for a day
+precisely because the old parser returned empty strings instead of complaining.
+Currently expected in that bucket: `csi-driver-smb`, whose chart comes from a
+commit-pinned `GitRepository` where `chart` is a PATH and the version lives in
+`Chart.yaml` at the pinned commit (not in this repo at all).
 
 ### 3. Extracting Image Information
 
@@ -462,7 +483,10 @@ When updates are available:
 1. **Review the update**: Check changelogs and release notes
 2. **Test in staging**: If available, test updates in non-production
 3. **Update HelmRelease**: 
-   - Update `spec.chart.spec.version` for chart updates
+   - Update `spec.chart.spec.version` for chart updates — or, for a
+     `spec.chartRef` source, the referenced `OCIRepository`'s `spec.ref.tag`
+     **and** its `spec.ref.digest` together (the digest must be re-derived from
+     the registry, never carried over)
    - Update image tags in `spec.values` for image updates
 4. **Commit and push**: Let Flux reconcile the changes
 5. **Monitor**: Watch for reconciliation and pod restarts

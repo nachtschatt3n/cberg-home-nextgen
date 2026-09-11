@@ -761,6 +761,65 @@ def _helm_repo_urls() -> dict:
     return _HELM_REPO_URL_CACHE
 
 
+_CHART_REF_CACHE: dict = {}
+
+
+def _chart_ref_sources() -> dict:
+    """(kind, name) -> (chart_name, version, repo_url) for chartRef targets.
+
+    A HelmRelease names its chart EITHER inline under `spec.chart.spec` OR by
+    pointing `spec.chartRef` at a source CR -- and in the second shape the
+    version is NOT in the HelmRelease, it is on the referenced object
+    (`OCIRepository.spec.ref.tag`, `HelmChart.spec.version`). This file knew
+    only the first shape, so when k8s-gateway migrated to an OCIRepository on
+    2026-09-11 `_chart_source_for()` stopped finding it at all. The symptom was
+    invisible here because the age gate holds fail-safe on a None -- a correct
+    HOLD reached for the wrong reason ("chart not found" rather than "OCI has
+    no publish dates"), which is exactly the kind of right-answer-by-accident
+    that stops being right when the surrounding logic changes.
+
+    The digest on an OCIRepository ref is an immutability pin, never the
+    version: k8s-gateway carries `tag: 3.7.2` AND a `digest:` together, and the
+    tag is the human-meaningful version.
+    """
+    if _CHART_REF_CACHE:
+        return _CHART_REF_CACHE
+    for f in sorted((REPO_ROOT / "kubernetes").rglob("*.yaml")):
+        try:
+            text = f.read_text(errors="ignore")
+        except OSError:
+            continue
+        # Cheap pre-filter: kubernetes/ also holds non-Kubernetes YAML dialects
+        # (Authentik blueprints use a `!KeyOf` tag safe_load cannot construct).
+        if "OCIRepository" not in text and "HelmChart" not in text:
+            continue
+        try:
+            docs = list(yaml.safe_load_all(text))
+        except Exception:
+            continue
+        for d in docs:
+            if not isinstance(d, dict):
+                continue
+            kind = d.get("kind")
+            name = ((d.get("metadata") or {}).get("name") or "").strip()
+            spec = d.get("spec") or {}
+            if kind == "OCIRepository" and name:
+                url = str(spec.get("url") or "").strip().rstrip("/")
+                ref = spec.get("ref") or {}
+                chart = url.rpartition("/")[2]
+                parent = url.rpartition("/")[0]
+                ver = str(ref.get("tag") or ref.get("semver") or "").strip()
+                _CHART_REF_CACHE[(kind, name)] = (chart, ver, parent)
+            elif kind == "HelmChart" and name:
+                ref = (spec.get("sourceRef") or {}).get("name")
+                _CHART_REF_CACHE[(kind, name)] = (
+                    str(spec.get("chart") or "").strip(),
+                    str(spec.get("version") or "").strip(),
+                    _helm_repo_urls().get(ref),
+                )
+    return _CHART_REF_CACHE
+
+
 def _chart_source_for(item):
     """(chart_name, repo_url) for a chart item, or (None, None).
 
@@ -769,6 +828,8 @@ def _chart_source_for(item):
     component label -- report-side names (`otel-operator`, `open-webui`) do not
     map onto directory or release names, which is the same trap _namespace_text
     documents.
+
+    Handles BOTH chart-source shapes -- see _chart_ref_sources().
     """
     ns, cur = (item.get("namespace") or "").strip(), item.get("current")
     if not ns or not cur:
@@ -784,13 +845,24 @@ def _chart_source_for(item):
         for doc in docs:
             if not isinstance(doc, dict) or doc.get("kind") != "HelmRelease":
                 continue
-            cs = (((doc.get("spec") or {}).get("chart") or {}).get("spec") or {})
-            if str(cs.get("version") or "").strip() != str(cur).strip():
+            spec = doc.get("spec") or {}
+            cs = ((spec.get("chart") or {}).get("spec") or {})
+            if cs:
+                if str(cs.get("version") or "").strip() != str(cur).strip():
+                    continue
+                chart = cs.get("chart")
+                ref = (cs.get("sourceRef") or {}).get("name")
+                if chart and ref:
+                    return chart, _helm_repo_urls().get(ref)
                 continue
-            chart = cs.get("chart")
-            ref = (cs.get("sourceRef") or {}).get("name")
-            if chart and ref:
-                return chart, _helm_repo_urls().get(ref)
+            cref = spec.get("chartRef") or {}
+            key = (str(cref.get("kind") or "").strip(),
+                   str(cref.get("name") or "").strip())
+            if not all(key):
+                continue
+            chart, ver, url = _chart_ref_sources().get(key, (None, None, None))
+            if ver and str(ver).strip() == str(cur).strip() and chart:
+                return chart, url
     return None, None
 
 

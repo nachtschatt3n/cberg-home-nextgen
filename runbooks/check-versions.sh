@@ -35,12 +35,33 @@ check_github_release() {
 }
 
 # Function to check Helm chart in cluster
+#
+# A HelmRelease carries its chart version EITHER inline at
+# .spec.chart.spec.version OR, when it uses .spec.chartRef, on the referenced
+# source object (OCIRepository.spec.ref.tag / HelmChart.spec.version). The
+# jsonpath below returns an EMPTY STRING for the second shape and exits 0, so
+# the `|| echo N/A` never fires and the release printed a blank version that
+# looked like a formatting quirk (k8s-gateway, 2026-09-11). Resolve the ref,
+# and if that also fails print UNRESOLVED rather than nothing.
 check_helm_chart() {
     local namespace=$1
     local release=$2
+    local current ref_kind ref_name
 
-    current=$(kubectl get helmrelease -n "${namespace}" "${release}" -o jsonpath='{.spec.chart.spec.version}' 2>/dev/null || echo "N/A")
-    echo "${release}|${current}"
+    current=$(kubectl get helmrelease -n "${namespace}" "${release}" -o jsonpath='{.spec.chart.spec.version}' 2>/dev/null)
+    if [ -z "${current}" ]; then
+        ref_kind=$(kubectl get helmrelease -n "${namespace}" "${release}" -o jsonpath='{.spec.chartRef.kind}' 2>/dev/null)
+        ref_name=$(kubectl get helmrelease -n "${namespace}" "${release}" -o jsonpath='{.spec.chartRef.name}' 2>/dev/null)
+        if [ -n "${ref_kind}" ] && [ -n "${ref_name}" ]; then
+            case "${ref_kind}" in
+                # .spec.ref.tag, NOT .spec.ref.digest: the digest is an
+                # immutability pin, the tag is the version.
+                OCIRepository) current=$(kubectl get ocirepository -n "${namespace}" "${ref_name}" -o jsonpath='{.spec.ref.tag}' 2>/dev/null) ;;
+                HelmChart)     current=$(kubectl get helmchart     -n "${namespace}" "${ref_name}" -o jsonpath='{.spec.version}' 2>/dev/null) ;;
+            esac
+        fi
+    fi
+    echo "${release}|${current:-UNRESOLVED}"
 }
 
 echo -e "${COLOR_BLUE}Checking GitHub Releases...${COLOR_RESET}"
@@ -66,7 +87,15 @@ echo -e "${COLOR_BLUE}Current Cluster Versions...${COLOR_RESET}"
 echo ""
 
 # Get current versions from cluster
-kubectl get helmreleases -A -o json | jq -r '.items[] | "\(.metadata.namespace)|\(.metadata.name)|\(.spec.chart.spec.version)"' | column -t -s'|'
+# Same dual-shape rule as check_helm_chart(): fall back to the chartRef target
+# and label an unresolvable chart source instead of printing `null`.
+kubectl get helmreleases -A -o json \
+  | jq -r '.items[] as $hr
+      | ($hr.spec.chart.spec.version
+         // ($hr.spec.chartRef | if . then "chartRef:\(.kind)/\(.name) (see that object for the version)" else null end)
+         // "UNRESOLVED") as $v
+      | "\($hr.metadata.namespace)|\($hr.metadata.name)|\($v)"' \
+  | column -t -s'|'
 
 echo ""
 echo -e "${COLOR_GREEN}Version check complete!${COLOR_RESET}"

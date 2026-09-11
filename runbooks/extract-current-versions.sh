@@ -44,6 +44,21 @@ find "${REPO_ROOT}/kubernetes/apps" -name "helmrelease.yaml" 2>/dev/null | sort 
     CHART_NAME=$(grep -A 5 "chart:" "$hr_file" 2>/dev/null | grep -E "^\s+chart:" | head -1 | sed 's/.*chart: *//' | tr -d '"' | tr -d "'" || echo "unknown")
     CHART_VERSION=$(grep -A 5 "chart:" "$hr_file" 2>/dev/null | grep -E "^\s+version:" | head -1 | sed 's/.*version: *//' | tr -d '"' | tr -d "'" || echo "unknown")
     REPO_NAME=$(grep -A 10 "sourceRef:" "$hr_file" 2>/dev/null | grep -E "^\s+name:" | head -1 | sed 's/.*name: *//' | tr -d '"' | tr -d "'" || echo "unknown")
+
+    # A HelmRelease using `spec.chartRef` keeps NO chart/version inline -- both
+    # live on the referenced OCIRepository / HelmChart, which this grep-based
+    # extractor cannot follow (use runbooks/check-all-versions.py, which does).
+    # Say so explicitly: the greps above otherwise yield EMPTY fields, which
+    # render as a blank table cell indistinguishable from a formatting glitch.
+    # That silence is how the chartRef blind spot survived a whole day in the
+    # Python tooling on 2026-09-11.
+    if [ -z "${CHART_VERSION}" ] && grep -qE "^\s+chartRef:" "$hr_file" 2>/dev/null; then
+        CHART_REF_KIND=$(grep -A 3 -E "^\s+chartRef:" "$hr_file" | grep -E "^\s+kind:" | head -1 | sed 's/.*kind: *//' | tr -d '"' | tr -d "'")
+        CHART_REF_NAME=$(grep -A 3 -E "^\s+chartRef:" "$hr_file" | grep -E "^\s+name:" | head -1 | sed 's/.*name: *//' | tr -d '"' | tr -d "'")
+        CHART_NAME="${CHART_REF_NAME:-unknown}"
+        CHART_VERSION="UNRESOLVED (chartRef -> ${CHART_REF_KIND:-?}/${CHART_REF_NAME:-?})"
+        REPO_NAME="${CHART_REF_KIND:-chartRef}"
+    fi
     
     # Extract image info (basic extraction - first image found)
     IMAGE_REPO=$(grep -E "^\s+repository:" "$hr_file" 2>/dev/null | head -1 | sed 's/.*repository: *//' | tr -d '"' | tr -d "'" || echo "")
