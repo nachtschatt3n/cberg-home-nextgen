@@ -595,8 +595,14 @@ a `mode: proxy` app's route at the app Service instead and you publish it
 Every other provider here is `forward_single`, where the outpost enforces
 nothing on its own: the protected route must actively invoke it (see Step 3's
 `SecurityPolicy`). A `forward_single` outpost with nothing calling it is dead
-weight — which is exactly the case for `arag-web` (AR-118), where the wiring
-was never completed, so removing its Ingress changed no behaviour at all.
+weight — which was the case for `arag-web` (AR-118) until 2026-09-11: the
+wiring was never completed, so removing its Ingress changed no behaviour at
+all. `d1440d50` completed it, and the shape is worth copying when an app has
+machine clients: the `SecurityPolicy` targets only the UI route, while a
+separate `PathPrefix /api` route is left ungated because its caller
+authenticates with a Bearer token and cannot complete an interactive login.
+A `SecurityPolicy` targets a whole `HTTPRoute`, not one rule inside it, which
+is why that exemption has to be its own route.
 
 ### Auditing
 
