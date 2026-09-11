@@ -906,9 +906,9 @@ Rollback cautions specific to this migration:
 - `kubernetes/apps/network/envoy-gateway/app/` — Gateways, policies, GatewayClass, HelmRelease
 - `kubernetes/apps/kube-system/authentik/app/referencegrants.yaml` — all ReferenceGrants
 - `kubernetes/apps/default/homepage/app/httproute.yaml` — canonical forward-auth
-  example: the only one currently carrying `headersToExtAuth`. Do NOT copy
-  `kubernetes/apps/monitoring/headlamp/app/httproute.yaml`, the previous pointer
-  here — it is still missing that field and is therefore the broken shape.
+  example. Every forward-auth policy now carries `headersToExtAuth` (homepage in
+  `ef41fa1f`, the remaining nine in `c4c50755`), so any of them is a safe shape
+  to copy — but copy this one, it is the annotated reference.
 - `kubernetes/apps/office/nextcloud/app/httproute.yaml` — canonical multi-path/websocket/timeout example
 - `kubernetes/apps/monitoring/kibana/app/httproute.yaml` — `BackendTLSPolicy` example
 - `kubernetes/apps/security/wazuh/app/httproute.yaml` — EG `Backend` + `insecureSkipVerify` example
@@ -928,6 +928,18 @@ Rollback cautions specific to this migration:
 
 ## Version History
 
+- `2026.09.11b`: Closed the defect across the remaining nine forward-auth
+  policies (`c4c50755`) — nocodb, phpmyadmin, esphome, frigate,
+  solarfocus-scraper, alertmanager, headlamp, prometheus, longhorn-ui. All nine
+  read SESSION-CHURN before and SESSION-STABLE after; delivered over xDS with no
+  pod roll. Also narrowed `ClientTrafficPolicy/envoy-internal-client` XFF trust
+  to the pod CIDR (`097269ba`): trusting the LAN range let a client select its
+  own recorded address, measured as Envoy logging a sentinel
+  `downstream_remote_address` instead of the real peer. Note for future
+  verification: `upstream_cluster` in the access log is set on route SELECTION,
+  so it is populated even for an ext-auth denial — a true backend-reached test
+  must require a non-null `upstream_host` (and `response_flags` other than
+  `UAEX`).
 - `2026.09.11`: §4.3 — `extAuth.headersToExtAuth` MUST list `cookie`, because an
   HTTP ext-auth service otherwise receives only Host/Method/Path/Content-Length/
   Authorization and the outpost can never see the session. Added the
