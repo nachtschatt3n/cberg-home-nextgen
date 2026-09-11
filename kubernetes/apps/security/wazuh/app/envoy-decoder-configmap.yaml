@@ -47,8 +47,11 @@
 # `clientIPDetection.customHeader: CF-Connecting-IP` (not xForwardedFor). Envoy
 # substitutes the detected client IP into `downstream_remote_address`, so THAT
 # is the real client IP (public IPs confirmed present there). The internal
-# Gateway trusts XFF from RFC1918/pod CIDRs and lands the result in the same
-# field. One field covers both gateways.
+# Gateway trusts XFF from the POD CIDR ONLY (`10.69.0.0/16`) since `097269ba`
+# narrowed it — the RFC1918 LAN range was dropped because trusting it let any
+# LAN client dictate its own recorded address. It lands the result in the same
+# field. One field covers both gateways, and on the internal gateway that field
+# is now forgery-resistant.
 #
 # ---------------------------------------------------------------------------
 # Matching strategy — inherited hard-won constraints, do not "simplify"
