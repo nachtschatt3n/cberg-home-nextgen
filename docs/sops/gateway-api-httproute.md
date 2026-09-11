@@ -453,7 +453,7 @@ in `kubernetes/apps/network/envoy-gateway/app/policies.yaml`:
 | Gateway | Mechanism | Trusts |
 |---------|-----------|--------|
 | `envoy-internal` | `xForwardedFor.trustedCIDRs` | `10.69.0.0/16` (pod CIDR) **only** |
-| `envoy-external` | `customHeader: CF-Connecting-IP`, `failClosed: false` | the cloudflared tunnel |
+| `envoy-external` | `xForwardedFor.trustedCIDRs` | `10.69.0.0/16` (pod CIDR) **only** |
 
 **How Envoy picks the address.** It APPENDS the connection peer to `X-Forwarded-For`
 (it never sanitises the header), then walks the list right-to-left, skipping
@@ -468,18 +468,71 @@ consequences:
   `X-Forwarded-For:` had that value selected — measured with a TEST-NET-3
   sentinel, Envoy logged `downstream_remote_address: 203.0.113.77:0` instead of
   the real peer. Narrowed to the pod CIDR, the same forged request records the
-  real LAN address. **This gateway has no legitimate upstream proxy to trust:**
-  over 100h of access logs every XFF value on `envoy-internal` was a single
-  address identical to its connection peer.
+  real LAN address.
 
-**Still true after the narrowing:** the forged entry REMAINS in the XFF header
-passed to backends. Envoy fixes *its own* selection, not the header. A backend
-doing naive leftmost-XFF parsing still reads the attacker's value — which is why
-`x-forwarded-for` must not be added to `headersToExtAuth` (§4.3).
+**The two gateways reached the same trust set from opposite directions, and the
+reason differs per gateway — do not "simplify" one to match the other.**
 
-**Scope warning:** recorded client IPs on `envoy-internal` changed cluster-wide on
-2026-09-11 — both access logs and the XFF backends receive now carry the real LAN
-address. Anything correlating on historical client IPs crosses that boundary.
+- `envoy-internal` has **no** legitimate upstream proxy to trust: over 100h of
+  access logs every XFF value on it was a single address identical to its
+  connection peer. `097269ba` was a *narrowing* of an already-gated set.
+- `envoy-external` **does** have one — the in-cluster cloudflared tunnel — which
+  is exactly why the pod CIDR is trusted there rather than nothing. Until
+  `2df8ec7f` it used `customHeader: CF-Connecting-IP`, which has **no notion of
+  peer trust at all** (the extension's only fields are `name` and `failClosed`),
+  so that was the *first* gate on a previously ungated path. Measured with a
+  TEST-NET-3 sentinel: a LAN-direct request to the external VIP carrying
+  `CF-Connecting-IP: 203.0.113.201` was logged as
+  `downstream_remote_address: 203.0.113.201:0`; after the switch the same
+  request records the real peer and a real port.
+
+**Cloudflare's ranges are deliberately NOT the trust set on `envoy-external`.**
+External traffic arrives through the in-cluster cloudflared tunnel, so the TCP
+peer of a legitimate external request is a cloudflared **pod** address, never a
+Cloudflare edge address — confirmed in the access log, where a request through
+the real Cloudflare edge reads
+`xff: <client>,10.69.2.217` with `10.69.2.217` the cloudflared pod. Public DNS
+returns Cloudflare proxy addresses and external-dns publishes CNAMEs to the
+tunnel hostname, so no Cloudflare address has a path to the VIP. Listing their
+ranges would match no peer while *looking* like a Cloudflare check. **If this is
+ever changed to a direct port-forward onto the VIP, CF's `ips-v4`/`ips-v6` must
+be added here.**
+
+**Still true after the narrowing, on BOTH gateways:** the forged entry REMAINS in
+the XFF header passed to backends, and on `envoy-external` a forged
+`CF-Connecting-IP` reaches backends verbatim too. Envoy fixes *its own*
+selection, not the header. A backend doing naive leftmost-XFF parsing still
+reads the attacker's value — which is why `x-forwarded-for` must not be added to
+`headersToExtAuth` (§4.3).
+
+**What the surviving header does and does not buy an attacker** (measured
+2026-09-11, so do not re-reason it from first principles):
+
+- **From the internet: not forgeable.** Cloudflare **appends** to a
+  client-supplied XFF rather than replacing it, so a client-sent entry does
+  survive the edge — `xff: 198.51.100.77,<true-visitor>,10.69.2.217` for a probe
+  that sent `X-Forwarded-For: 198.51.100.77`. But the true visitor address is
+  appended to its *right* and is public, and Authentik selects the **rightmost
+  non-private** entry, so it recorded the true visitor address, identical to the
+  control. A client-supplied `CF-Connecting-IP` never even arrives: Cloudflare
+  **403s** that request at the edge.
+- **From the LAN, direct to the external VIP: still forgeable for backends.**
+  With no Cloudflare hop to append a public address, a forged public XFF entry is
+  the rightmost non-private one and wins. A sentinel sending
+  `X-Forwarded-For: 203.0.113.202` was recorded by Authentik as
+  `203.0.113.202` even though Envoy correctly recorded the real LAN peer. This
+  matters because ~1149 LAN-direct requests/hr already reach this gateway via
+  split-horizon DNS.
+- The open remediation for that LAN limb is Authentik-side, not gateway-side:
+  `AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS` is unset, so the permissive upstream
+  default applies. Setting it to the pod CIDR makes Authentik skip the Envoy hop
+  and select the real peer.
+
+**Scope warning:** recorded client IPs changed cluster-wide on **both** gateways
+on 2026-09-11 — `envoy-internal` in `097269ba` and `envoy-external` in
+`2df8ec7f` (CF-derived → XFF-derived; verified equal across three real external
+clients, but LAN-direct attribution semantics differ). Anything correlating on
+historical client IPs crosses **both** boundaries.
 
 ---
 
@@ -990,6 +1043,20 @@ Rollback cautions specific to this migration:
 
 ## Version History
 
+- `2026.09.11` (third pass): §4.6 — rewrote the client-IP section for BOTH
+  gateways. `2df8ec7f` switched `envoy-external` from
+  `customHeader: CF-Connecting-IP` (which has no peer trust at all) to
+  `xForwardedFor.trustedCIDRs: [10.69.0.0/16]`, so the table row, the
+  internal-only narrative and the scope warning were all stale. Recorded why
+  Cloudflare's published ranges are deliberately NOT the trust set (the peer of
+  legitimate external traffic is a cloudflared pod, never a CF edge address) and
+  the port-forward trigger that would change that. Added the measured blast
+  radius of the surviving forged header: not forgeable from the internet
+  (Cloudflare appends the true visitor to the right of a client-supplied XFF and
+  403s a client-supplied `CF-Connecting-IP`; Authentik picks the rightmost
+  non-private entry), still forgeable from a LAN-direct connection to the
+  external VIP, whose open remediation is Authentik's unset
+  `AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS`.
 - `2026.09.11` (second pass): Closed the defect across the remaining nine forward-auth
   policies (`c4c50755`) — nocodb, phpmyadmin, esphome, frigate,
   solarfocus-scraper, alertmanager, headlamp, prometheus, longhorn-ui. All nine
