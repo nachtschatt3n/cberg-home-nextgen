@@ -997,8 +997,21 @@ class VersionChecker:
     # they can be candidates at all, and (b) never propose a CROSS-variant tag
     # as an "update" (2026-08-03: redis 8.10.0-alpine → 8.10.0 was a false
     # positive — that's the debian build, not a newer release).
+    # HARDWARE-ACCELERATION flavours belong here too, and their absence was a
+    # live near-miss. A variant anchor is not only a distro: immich publishes
+    # `v3.2.0-openvino` (OpenVINO), `-cuda`, `-rocm`, `-armnn`, `-rknn` as
+    # SIBLING builds of one release, and the BARE `v3.2.0` is the CPU build.
+    # With these unlisted, _tag_variant('v3.1.0-openvino') returned '' — the
+    # cross-variant guard below then read the pin as plain, EXCLUDED variant
+    # tags, and would have proposed the bare CPU tag as an "update". That is a
+    # silent capability loss: the image pulls, the pod starts, inference just
+    # stops being accelerated, and no error is ever raised. Caught 2026-09-11
+    # while bumping immich v3.1.0 -> v3.2.0 (F-aa7da9d6); immich is not on the
+    # auto-update deny-list, so the unattended nightly lane could have written
+    # the CPU tag on the NEXT release with nobody watching.
     _VARIANT_NAMES = (r'alpine\d*|bookworm|bullseye|buster|slim|debian|ubuntu|'
-                      r'focal|jammy|noble')
+                      r'focal|jammy|noble|'
+                      r'openvino|cuda\d*|rocm|armnn|rknn')
     # Some vendors publish a COMPOUND variant: a distro codename plus a build
     # flavour (`v0.143.0-noble-full`, `-noble-nvidia`, `-noble-lite`). The
     # anchor stays a known distro name, so this cannot swallow a pre-release or
