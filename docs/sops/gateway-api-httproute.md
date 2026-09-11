@@ -1,8 +1,8 @@
 # SOP: Gateway API / HTTPRoute Routing (Envoy Gateway)
 
 > Description: How HTTP ingress works in this cluster now that ingress-nginx is gone — writing, reviewing and debugging HTTPRoutes on the two Envoy Gateways, including forward-auth, backend TLS, timeouts and the verification gate that catches the failures which are invisible at apply time.
-> Version: `2026.09.07`
-> Last Updated: `2026-09-07`
+> Version: `2026.09.11`
+> Last Updated: `2026-09-11`
 > Owner: `homelab operator (cberg-home-nextgen)`
 
 ---
@@ -268,6 +268,55 @@ Per forward-auth app you need **four** objects:
    `failOpen: false` and
    `path: /outpost.goauthentik.io/auth/envoy` (**never** `/auth/nginx` or
    `/auth/traefik` — those return 500 without their own dialect headers).
+
+**`extAuth.headersToExtAuth` MUST list `cookie`, or the app answers HTTP 400.**
+This is not optional and it is not a tuning knob. For an **HTTP** ext-auth
+service Envoy forwards only `Host`, `Method`, `Path`, `Content-Length` and
+`Authorization` when the list is absent (the CRD documents this on the field
+itself) — so the outpost never receives `authentik_proxy_*` and **cannot ever
+conclude the client is logged in**. Each check then denies with a fresh 302 plus
+a fresh session/state cookie; the page's parallel asset requests each open their
+own flow and overwrite that cookie, so the top-level callback arrives bearing a
+state the surviving session does not recognise. The outpost logs `oauth state
+does not match the session` and returns **400**, which is what the browser
+shows. On homepage this measured as **75 successful callbacks and 0 requests
+ever allowed to the backend**. ingress-nginx's `auth_request` passed `Cookie`
+implicitly, which is exactly why no forward-auth app could surface this before
+the Envoy migration. The shape:
+
+```yaml
+  extAuth:
+    failOpen: false
+    headersToExtAuth:
+      - cookie                 # the session — without it nothing works
+      - accept                 # outpost 401s assets instead of redirecting them
+      - user-agent             # authentik login events, not the Envoy pod
+      - x-forwarded-for
+      - x-forwarded-proto
+    http:
+      ...
+```
+
+**Verification must be a real login, not a 302.** An unauthenticated `curl`
+against a forward-auth app returns `302 ext_authz_denied` in both the working
+and the broken configuration, so the redirect proves nothing. The gate is: a
+request that reaches the app backend. Check it on the data, not the status:
+
+```bash
+# expect a non-zero count of allowed requests; 0 means forward-auth is broken
+kubectl logs -n network -l app.kubernetes.io/name=envoy --tail=200000 \
+  | python3 -c 'import sys,json
+n=0
+for l in sys.stdin:
+    l=l.strip()
+    if not l.startswith("{"): continue
+    try: d=json.loads(l)
+    except: continue
+    if d.get(":authority","").startswith("<app>.") \
+       and d.get("upstream_cluster","").startswith("httproute/<ns>/<app>/") \
+       and d.get("response_code_details")=="via_upstream": n+=1
+print("allowed-to-backend:", n)'
+```
 
 **ReferenceGrants: two traps at once.**
 

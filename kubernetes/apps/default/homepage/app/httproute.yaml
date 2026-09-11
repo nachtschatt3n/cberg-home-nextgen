@@ -72,6 +72,24 @@ spec:
       name: homepage
   extAuth:
     failOpen: false              # outpost down => deny, never publish
+    # MANDATORY. Without this list Envoy sends the ext-auth service ONLY Host,
+    # Method, Path, Content-Length and Authorization (CRD doc on this very
+    # field) — so the outpost never sees `authentik_proxy_*` and CANNOT know the
+    # client is logged in. Every check then denies with a fresh 302 + a fresh
+    # session/state cookie; the page's parallel asset requests each start their
+    # own flow and clobber that cookie, so the top-level callback comes back
+    # with a state the surviving session does not know. The outpost answers
+    # `oauth state does not match the session` => **HTTP 400 in the browser**.
+    # Measured before this fix: 75 successful callbacks, 0 requests ever
+    # allowed through to the app. nginx's auth_request passed the Cookie header
+    # implicitly, which is why this only appeared after the Envoy migration.
+    headersToExtAuth:
+      - cookie                   # the session — the one that actually fixes it
+      - accept                   # lets the outpost 401 assets instead of
+                                 # redirecting them (kills the clobber storm)
+      - user-agent               # authentik login events, not the Envoy pod
+      - x-forwarded-for          # real client IP in those events
+      - x-forwarded-proto
     http:
       backendRefs:
         - group: ""
