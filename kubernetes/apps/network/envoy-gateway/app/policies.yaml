@@ -10,12 +10,30 @@ spec:
       name: envoy-internal
   clientIPDetection:
     xForwardedFor:
-      # Parity with ingress-nginx `use-forwarded-headers: true` on the
-      # internal class: trust XFF only from the pod network and the RFC1918
-      # LAN VLANs, so an external client cannot spoof its own client IP.
+      # Trust XFF ONLY from the pod network. This gateway has no legitimate
+      # upstream proxy on the LAN: measured over 100h of access logs, every
+      # XFF value on envoy-internal was a single address identical to the
+      # connection peer — i.e. nothing out there sets XFF for us.
+      #
+      # 192.168.0.0/16 used to be trusted here for "parity with ingress-nginx
+      # use-forwarded-headers", and that made the client IP FORGEABLE: Envoy
+      # appends the peer to XFF rather than sanitising it, then walks the list
+      # right-to-left skipping trusted entries and selects the first untrusted
+      # one. With the LAN trusted, a client on 192.168.x.x sending its own
+      # `X-Forwarded-For: <anything>` had that value selected — a sentinel
+      # request carrying 203.0.113.77 was recorded by Envoy itself as
+      # `downstream_remote_address: 203.0.113.77:0` and reached the backend as
+      # `ip: 203.0.113.77`, instead of the real LAN address.
+      #
+      # With only the pod CIDR trusted, that same forged header is ignored: the
+      # rightmost entry is the untrusted LAN peer, so the REAL address is
+      # selected. A genuine in-cluster proxy still works — its own pod IP is
+      # trusted and skipped, so the client IP it forwards is honoured.
+      #
+      # NOTE this changes recorded client IPs cluster-wide on this gateway
+      # (access logs, and the XFF backends receive).
       trustedCIDRs:
-        - 10.69.0.0/16
-        - 192.168.0.0/16
+        - 10.69.0.0/16           # pod CIDR, per bootstrap/talos/talconfig.yaml
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: ClientTrafficPolicy
