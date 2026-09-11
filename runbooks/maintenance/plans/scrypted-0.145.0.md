@@ -140,7 +140,50 @@ Read from the `v0.145.0` release body (which spans the whole gap — it contains
 the `install v0.143.0` post-release commits) plus a direct diff of the image
 recipe at both tags. Four things in this span can actually change behaviour:
 
-1. **GStreamer is REMOVED from the `-full` image.** Primary evidence, a diff of
+1. **GStreamer is removed in the SOURCE, but NOT in the image we deployed.**
+   **CORRECTED 2026-09-11, post-execution** — this claim was wrong as written
+   below, and wrong in the direction that matters for the NEXT bump.
+
+   The removal commits are real, but they edit `install/docker/Dockerfile.full`
+   and `template/Dockerfile.full.header`, which build the BASE image
+   `ghcr.io/koush/scrypted-common:noble-full` — and that base was not re-cut for
+   this release. Measured on the two manifests:
+
+   - the first **27 of 35** amd64 layer digests are byte-identical between
+     `v0.143.0-noble-full` and `v0.145.0-noble-full`; the first divergence is at
+     index 27;
+   - both image configs carry `SCRYPTED_BASE_VERSION=20250101`;
+   - both histories still contain the
+     `apt-get -y install gstreamer1.0-tools gstreamer1.0-plugins-base …` layer.
+
+   **So the risk is DEFERRED, not consumed.** GStreamer removal, the AMD-OpenCL
+   drop, and the Intel compute-runtime/IGC rebase all arrive whenever koush
+   rebuilds `scrypted-common:noble-full` — which can land on a PATCH-level tag
+   that the auto-updater would classify as safe. That is the one unconsumed item
+   from this span and the thing to carry into the next scrypted plan: a scrypted
+   image bump is not characterised by its version delta alone, because the base
+   layer is pinned by `SCRYPTED_BASE_VERSION` and moves independently of it.
+   Check the layer prefix, not just the tag.
+
+   Two smaller corrections from the same re-derivation:
+
+   - **Node.js 22.21.0 does not apply to the container.** Commit `b4b17d4`
+     touches exactly one file, `install/local/install-scrypted-dependencies-win.ps1`
+     — the Windows installer. Both images build with `NODE_VERSION=22` off the
+     identical base, so the Node runtime is unchanged across this bump.
+   - **The `extraVolumes` / `extraVolumeMounts` `/dev/dri` hostPath block in
+     the HelmRelease is INERT.** app-template 5.1.0 does not honour top-level
+     `extraVolumes`; the live Deployment has no hostPath volume and no
+     `/dev/dri` mount. iGPU access comes entirely from the
+     `gpu.intel.com/i915` device plugin, which injects the device nodes itself
+     (`card0` + `renderD128` are present in the pod). The block is therefore
+     dead config that OVERSTATES this privileged container's host access to
+     anyone auditing the manifest. Not introduced by this bump and not fixed by
+     it — tracked separately.
+
+   The original, superseded text follows, kept so the correction is legible:
+
+   **GStreamer is REMOVED from the `-full` image.** Primary evidence, a diff of
    `install/docker/Dockerfile.full` between the two tags — the following block
    is deleted at v0.145.0:
    ```
