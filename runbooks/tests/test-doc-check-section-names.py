@@ -72,6 +72,35 @@ wr = src[src.index("def write_report"):src.index("def ", src.index("def write_re
 check("write_report has no direct SECTION_NAMES[...] indexing",
       "SECTION_NAMES[" not in wr)
 
+# 4. _SECTION_SLUGS is the fingerprint half of the SAME omission guard #1
+#    covers. Sections 9 and 10 were added to SECTION_NAMES (fixed 2026-08-28)
+#    but NOT to _SECTION_SLUGS, so _emit_findings() fell through to its
+#    fallback and filed storage-safety findings under subsection "s8" —
+#    fingerprint(section, subsection, title), so a blocking storage-safety
+#    critical was indistinguishable from a Runbook Coverage row. Silent,
+#    because both sections happened to be green. Guard the twin list too.
+check(
+    "_SECTION_SLUGS aligns 1:1 with SECTION_NAMES",
+    len(doc_check._SECTION_SLUGS) == len(doc_check.SECTION_NAMES),
+    f"{len(doc_check._SECTION_SLUGS)} slugs vs {len(doc_check.SECTION_NAMES)} names — "
+    "an unlabelled section silently mis-fingerprints its findings",
+)
+# Slug numbering must match its 1-based position, or the label points at the
+# wrong section even when the lengths happen to line up.
+misnumbered = [
+    (i, slug) for i, slug in enumerate(doc_check._SECTION_SLUGS, 1)
+    if not slug.startswith(f"s{i}_")
+]
+check("each slug's number matches its 1-based position", not misnumbered,
+      f"misnumbered: {misnumbered}")
+# The fallback must be 1-based too — `f"s{idx}"` over a 0-based enumerate()
+# is what filed section 9 as "s8".
+check(
+    "_emit_findings fallback subsection is 1-based",
+    'f"s{idx + 1}"' in src and 'f"s{idx}"' not in src,
+    "fallback still numbers one low against the 1-based slugs",
+)
+
 if failures:
     print(f"\n{len(failures)} FAILURE(S): {failures}")
     sys.exit(1)

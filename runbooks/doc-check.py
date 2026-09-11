@@ -2065,6 +2065,8 @@ _SECTION_SLUGS = [
     "s6_readme_claude_currency",
     "s7_coding_guidelines",
     "s8_runbook_coverage",
+    "s9_storage_safety",
+    "s10_control_ledger",
 ]
 
 
@@ -2077,7 +2079,7 @@ def _emit_findings(writer: FindingsWriter, results: list) -> None:
     if not writer.enabled:
         return
     for idx, (_status, findings, _body) in enumerate(results):
-        subsection = _SECTION_SLUGS[idx] if idx < len(_SECTION_SLUGS) else f"s{idx}"
+        subsection = _SECTION_SLUGS[idx] if idx < len(_SECTION_SLUGS) else f"s{idx + 1}"
         section_title = SECTION_NAMES[idx] if idx < len(SECTION_NAMES) else subsection
         for sev_emoji, msg in findings._items:
             writer.emit(
