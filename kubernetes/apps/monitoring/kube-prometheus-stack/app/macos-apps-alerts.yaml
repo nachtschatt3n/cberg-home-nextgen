@@ -206,3 +206,67 @@ spec:
           annotations:
             summary: "ARAG scrape Android emulator is down"
             description: "The Android emulator backing the arag-scrape pipeline on {{ $labels.instance }} has been reported down for more than 30 minutes. Scrapes cannot run without it."
+
+        # The PUSH leg of the ARAG pipeline had NO alert coverage until
+        # 2026-09-11, and a 3.6-day (15-cycle) push outage starting
+        # 2026-09-08T01:09Z went unpaged because all three existing signals are
+        # structurally blind to it:
+        #   * AragScrapeStale reads arag_scrape_last_success_timestamp_seconds,
+        #     which is re-seeded from the newest status='ok' sync_runs row. That
+        #     row is written by the `sync` (normalise) step BEFORE push runs, so
+        #     it tracks the SCRAPE, not the push — measured 5.5h stale while the
+        #     push had not landed in 90h.
+        #   * AragScrapeFailing is increase(arag_scrape_errors_total[6h]) > 3.5,
+        #     and a deterministic once-per-cycle push failure is +1 — measured
+        #     live at 1.0028, permanently under the threshold.
+        #   * arag_scrape_last_exit_code was 1 throughout and no rule read it.
+        # arag_scrape_last_push_success_timestamp_seconds advances ONLY when the
+        # `push` step itself exits 0. It is persisted to disk and monotonic.
+        - alert: AragPushStale
+          # 46800s = 13h, matching AragScrapeStale, i.e. ~2 missed cycles.
+          # Measured from the last 29 real cycle gaps in sync_runs: mean 6.00h,
+          # max 6.53h, p95 6.33h — so 13h clears the worst observed gap with
+          # margin.
+          # NO `> 0` guard, deliberately: the gauge is persisted to disk and
+          # monotonic, so it never resets on restart (unlike the in-memory
+          # bank_refresh_* timestamps above, which DO need the guard). A gauge
+          # sitting at 0 means "push has never succeeded", which is a real
+          # outage and must fire. Do not add the guard and do not raise the
+          # threshold to silence a never-succeeded push.
+          expr: time() - arag_scrape_last_push_success_timestamp_seconds > 46800
+          for: 10m
+          labels:
+            severity: warning
+            category: macos
+            component: arag-scrape
+          annotations:
+            summary: "ARAG push to the web app has not succeeded recently"
+            description: >-
+              The ARAG pipeline on {{ $labels.instance }} has not successfully
+              PUSHED to the web app for {{ $value | humanizeDuration }}
+              (threshold 13h ≈ 2 missed 6h cycles). This tracks the PUSH leg
+              specifically: AragScrapeStale tracks the SCRAPE and stays green
+              while the push is dead, because the sync_runs row it reads is
+              written by the normalise step before push runs. Scraped data is
+              therefore landing in arag.sqlite but never reaching the web app.
+
+        # Inertness guard. A rule whose expr matches no series sits at
+        # state=inactive and is indistinguishable from healthy, so a build of
+        # the menubar app predating the push gauge would silently disarm
+        # AragPushStale. The exporter emits the gauge at 0 rather than omitting
+        # it precisely so that absent() means "old build", never "never pushed".
+        - alert: AragPushMetricMissing
+          expr: absent(arag_scrape_last_push_success_timestamp_seconds)
+          for: 30m
+          labels:
+            severity: warning
+            category: macos
+            component: arag-scrape
+          annotations:
+            summary: "ARAG push-success metric is not being exported"
+            description: >-
+              The arag-scrape metrics endpoint is reachable but is not exporting
+              arag_scrape_last_push_success_timestamp_seconds, so the menubar
+              app is running a build older than that metric. AragPushStale is
+              blind while this fires and must not be trusted as evidence the
+              push leg is healthy. Rebuild and relaunch the menubar app.
