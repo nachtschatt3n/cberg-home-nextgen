@@ -129,6 +129,37 @@ S4_POLICY_MARKERS = (
     "pin it",
 )
 
+# Within s3_git_history there are two finding SHAPES, and only ONE of them is
+# evidence that secret material exists.
+#
+#   VALUE match — "Credential-like pattern in history: `<line>`". A credential-
+#     like VALUE was found in history. This stays VULN, unconditionally.
+#     DO NOT add a placeholder-word override here. On 2026-09-08 a real Superset
+#     admin password survived 4.7 months and 28 commits precisely because the
+#     placeholder suppression was satisfied by the credential's OWN VALUE, and
+#     that failure mode is ANTI-CORRELATED WITH RISK: the weakest, most
+#     guessable passwords are exactly the ones spelled `changeme` /
+#     `placeholder` / `test`. A historical line that has been VERIFIED inert is
+#     retired through an ACCEPTED RISK after per-string verification
+#     (AR-119..AR-123 did this by provenance + a cross-check against the live
+#     cluster-Secret literal corpus) — never by teaching this model to trust
+#     what a value says about itself.
+#
+#   NAME match — "Secret-named file committed outside sops: `<path>`". Only the
+#     file's NAME looked secret-ish. A name is not evidence that secret
+#     MATERIAL is present; the VALUE detectors answer that question
+#     (s1_sops_coverage, the VALUE branch above, and pre-commit Layer 1's
+#     cluster-literal scan + Layer 3's password guard). Scoring a name as a
+#     CONFIRMED external exposure is a category error, and because git history
+#     cannot be un-committed without a rewrite it parks the row at HIGH forever.
+#     The live instance is `.githooks/lib/password-guard.awk` — the 171-line awk
+#     source of the Layer-3 guard itself. Hygiene → POLICY → LOW: still
+#     reported, no longer ranked above real work.
+#
+# One explicit marker match on the section's own verbatim prefix, deliberately
+# NOT general prose parsing — same idiom as S4_POLICY_MARKERS above.
+S3_NAME_ONLY_MARKER = "secret-named file committed outside sops"
+
 # Sections whose exposure surface is the PUBLIC GIT REPO itself, not a cluster
 # component. A credential pattern in public history is world-readable.
 _PUBLIC_REPO_SECTIONS = {"s2_sensitive_exposure", "s3_git_history"}
@@ -609,6 +640,16 @@ def compute_nature(finding: Finding) -> tuple[str, str]:
         for marker in S4_POLICY_MARKERS:
             if marker in low:
                 return POLICY, f"s4 hygiene marker '{marker}' → policy"
+    # NAME-only git-history match → hygiene. The VALUE branch is untouched and
+    # stays VULN; see S3_NAME_ONLY_MARKER for why no value-based override exists.
+    # startswith, NOT `in`: the marker is the section's verbatim title PREFIX.
+    # Matching it anywhere in the title would let a VALUE row that merely quotes
+    # the phrase demote itself — the same "the text judged itself" shape as the
+    # 2026-09-08 miss. Caught by the adversarial case in
+    # runbooks/tests/test-risk-model-git-history-nature.py before it shipped.
+    if slug == "s3_git_history" and finding.message.strip().lower().startswith(
+            S3_NAME_ONLY_MARKER):
+        return POLICY, "s3 name-only match (no credential value) → policy"
     note = f"{slug} → {base}"
     if slug not in NATURE_BY_SECTION:
         note = f"unknown section {slug!r} → {base} (default)"
