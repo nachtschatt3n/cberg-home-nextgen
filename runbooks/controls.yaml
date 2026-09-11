@@ -120,3 +120,18 @@ controls:
       assertion: "last_watchdog_age_s"
       in: runbooks/alert-watcher.md
       note: "Watchdog dead-man's switch on the bridge health endpoint"
+
+
+  - id: authentik-audit-freshness
+    kind: k8s-cronjob
+    what: "hourly probe of the LIVE authentik DB (deployment/authentik-pg) publishing
+      the audit log's newest-event timestamp — the only thing asserting that
+      authentik_events_event is still being WRITTEN"
+    cadence: 1h
+    watched_by:
+      assertion: AuthentikAuditFreshnessProbeMissing
+      in: kubernetes/apps/monitoring/kube-prometheus-stack/app/authentik-alerts.yaml
+      note: "watcher-of-the-watcher: the probe publishes a TIMESTAMP, not an age,
+        because pushgateway has no TTL and a frozen age gauge would silently
+        disarm AuthentikAuditLogStale. absent() covers the probe dying outright;
+        AuthentikAuditFreshnessProbeStale covers it failing its query."

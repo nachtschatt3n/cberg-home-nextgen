@@ -356,17 +356,28 @@ See AR-020 in the `accepted_risks` table (`sweep.<DOMAIN>/policies/accepted-risk
 **Detection:** Every forward-auth-protected app returns 502/auth-loop;
 Wazuh dashboard SAML SSO fails.
 
+> **Name the right database.** Two Postgres instances run in `kube-system` and
+> both accept the same user, database name and password. The LIVE one is
+> `deployment/authentik-pg` on the `longhorn-static` volume `authentik-pg-data`.
+> `statefulset/authentik-postgresql` is the frozen pre-cutover rollback (retired
+> 2026-08-20, kept by plan `authentik-pg17-decommission`) — restarting it during
+> an outage SUCCEEDS, looks authoritative and changes nothing, and restoring its
+> volume would recover the pre-cutover dataset into the wrong place. This section
+> named the rollback until 2026-09-12. See `docs/sops/authentik.md`
+> §"Two databases answer to `-U authentik -d authentik`".
+
 **Recovery — Postgres PV intact:**
 
 ```bash
-kubectl rollout restart sts -n kube-system authentik-postgresql
+kubectl rollout restart deploy -n kube-system authentik-pg
 # wait for Ready, then:
 kubectl rollout restart deploy -n kube-system authentik-server
+kubectl rollout restart deploy -n kube-system authentik-worker
 ```
 
 **Recovery — Postgres PV lost (corruption, ransomware):**
 
-1. Restore the `authentik-postgresql` PV from Longhorn backup (§4.5).
+1. Restore the `authentik-pg-data` PV from Longhorn backup (§4.5).
 2. If unrecoverable, accept the SSO outage and rebuild:
    - Fresh Authentik install (Flux already deploys it).
    - Apply blueprints from `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`.

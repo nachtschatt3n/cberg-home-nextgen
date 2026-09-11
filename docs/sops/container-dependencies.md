@@ -222,7 +222,7 @@ Apps that crashlooped after the 2026-04-30 upgrade — apply first:
 - `office/nextcloud` (nextcloud-mariadb, nextcloud-redis)
 - `office/penpot` (penpot-postgresql, penpot-redis)
 - `databases/superset` (superset-postgresql, superset-redis)
-- `kube-system/authentik` (authentik-postgresql, authentik-redis)
+- `kube-system/authentik` (authentik-pg — NOT `authentik-postgresql`, the retired pre-cutover rollback; redis was dropped in 2025.10)
 - `ai/paperclip` (paperclip-postgresql)
 - `ai/openclaw` (openclaw-postgresql)
 - `office/sure` (sure-pg, sure-redis)

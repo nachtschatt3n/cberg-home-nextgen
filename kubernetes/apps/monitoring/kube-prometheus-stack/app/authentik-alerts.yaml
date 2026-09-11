@@ -298,8 +298,7 @@ spec:
           nothing here. There is no other copy of this data: no stdout line, no
           webhook, no Wazuh decoder. While this fires, every security review that
           reads the Authentik audit log reads clean regardless of what happened,
-          and reputation/IP-lockout scoring (which derives from these events) has
-          nothing to score.
+          and every other control that derives from these events is starved too.
 
           Triage: check the worker task queue first
           (AuthentikTaskWorkersZero / AuthentikTaskQueueBacklog below), then

@@ -35,9 +35,9 @@ Authentik provides unified SSO and forward-auth proxy for all cluster services.
 **This has already produced one false alarm, ranked as the household's
 highest-priority security item for a day.** On 2026-09-11 Authentik's audit log
 was reported dead since 2026-08-19 — 23 days with no record of any login,
-failure, or admin action, on the SSO server that fronts private
-health-insurance data. Measured: `authentik_events_event` held 11,375 rows with
-a hard stop at 2026-08-19 22:26 UTC.
+failure, or admin action on the cluster's SSO server. Measured:
+`authentik_events_event` held 11,375 rows with a hard stop at
+2026-08-19 22:26 UTC.
 
 That reading was taken from the **wrong database**. Both of these are Running in
 `kube-system`, both accept the *same* user, the *same* database name and the
@@ -76,12 +76,11 @@ Pushgateway, with `AuthentikAuditLogStale` /
 Check the metric before believing any claim about audit-log freshness: it names
 its source in the manifest, a human query does not.
 
-**Related gap, deliberately NOT closed here:** there is no IP-based lockout
-policy at all (`authentik_policies_reputation_reputationpolicy` has 0 rows and
-0 bindings, and the reputation table is empty). Reputation scoring derives from
-these same events, so the two interact — a genuinely frozen event log would also
-starve any lockout policy that existed. Closing the lockout gap is its own
-change.
+**Related gap, deliberately NOT closed here.** A separate control that depends
+on this same event path is tracked as `security_ref:` **F-8197a63f** — the audit
+trail is a prerequisite for it, not an alternative, which is why the two are
+sequenced. Detail is withheld from this public repo on purpose; read the finding
+record, and see `docs/sops/vulnerability-disclosure.md` for the boundary.
 
 ### Database: `max_connections` parity is mandatory
 

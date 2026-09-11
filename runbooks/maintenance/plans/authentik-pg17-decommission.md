@@ -15,6 +15,8 @@ touches:
     - helmrelease/authentik
     - statefulset/authentik-postgresql
     - "pvc/data-authentik-postgresql-0 (Longhorn, keep Retain)"
+    - "cronjob/authentik-db-probe (audit-trail control — NOT modified, but it lives
+       in the same kustomization.yaml this plan edits, so a window agent must see it)"
   shared: []
 depends_on: []
 conflicts_with: []
@@ -92,6 +94,34 @@ one-command rollback into a restore-from-backup. Require all of:
 - authentik still serves logins (both paths again).
 - No pod references `authentik-postgresql`:
   `kubectl get pods -n kube-system -o yaml | grep -c authentik-postgresql` → 0.
+- **The audit-trail control survived.** This plan edits the same
+  `kustomization.yaml` that registers `cronjob/authentik-db-probe`, so a
+  fat-fingered resource list can silently delete the only thing asserting the
+  audit log is being written — and a dead probe looks exactly like a quiet one.
+  Assert positively, not by absence:
+  - `kubectl get cronjob -n kube-system authentik-db-probe` still present, and
+    its next scheduled Job Succeeds.
+  - `authentik_audit_newest_event_timestamp_seconds` still advancing after
+    reconcile, and neither `AuthentikAuditFreshnessProbeMissing` nor
+    `AuthentikAuditFreshnessProbeStale` firing.
+  - This is also the positive proof the plan removed only the ROLLBACK: the probe
+    targets `deploy/authentik-pg`, which this plan must not touch. If the metric
+    keeps advancing, the live DB was not disturbed.
+
+## Also owned by this plan (do not skip — it prevents a stale warning)
+
+Once the StatefulSet is gone the two-database ambiguity ceases to exist, so the
+documentation written for it becomes actively misleading — a reader will go
+hunting for a pod that no longer exists. In the SAME change:
+
+- Rewrite `docs/sops/authentik.md` §"Two databases answer to
+  `-U authentik -d authentik`" into past tense (or fold it into cutover history).
+- Drop the `Rollback DB` row from that SOP's settings table.
+- Re-check `docs/sops/disaster-recovery.md` §4.9 and
+  `docs/sops/container-dependencies.md` — both were corrected to name
+  `authentik-pg` on 2026-09-12 and must not drift back.
+- `docs/sops/longhorn.md` cites `data-authentik-postgresql-0` as a UUID-PV
+  example; pick a surviving example.
 
 ## Rollback
 

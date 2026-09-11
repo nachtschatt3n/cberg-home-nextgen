@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.09.07`
-> Last Updated: `2026-09-07`
+> Version: `2026.09.12`
+> Last Updated: `2026-09-12`
 > Owner: `Platform`
 
 ---
@@ -56,6 +56,64 @@ Scraped via `ScrapeConfig` CRDs (not `additionalScrapeConfigs`):
 
 Alert rules: `macos-apps-alerts.yaml` (FindMyTraccarSyncDown, BankRefreshDown,
 AragScrapeDown/Stale/Failing/EmulatorDown, etc.)
+
+### Push-based Metrics (Pushgateway)
+
+Batch jobs that are not alive long enough to be scraped PUSH instead, to
+`prometheus-pushgateway.monitoring:9091` (ClusterIP only, no HTTPRoute). It is a
+permanent always-up scrape target, which is why it replaced the racy per-pod
+Service+ServiceMonitor on short-lived CronJobs.
+
+| Pusher | Job label | Cadence | Metrics | Alert rules |
+|--------|-----------|---------|---------|-------------|
+| `home-automation/pallet-price-monitor` | `pellet-price-monitor` | twice daily (08:00/20:00) | `pellet_*` | `pallet-price-monitor-alerts.yaml` |
+| `kube-system/authentik-db-probe` | `authentik-db-probe` | hourly at :17 | `authentik_audit_*`, `authentik_db_connections_*`, `authentik_db_probe_last_success_timestamp_seconds` | `authentik-alerts.yaml` (`authentik.audit.freshness`) |
+
+Three rules, each of which has already cost real time:
+
+1. **Push a TIMESTAMP, never a pre-computed age.** Pushgateway is in-memory and
+   has **no TTL** — it serves the last value pushed, forever. An age gauge
+   therefore FREEZES at its last value the moment the pusher dies, silently
+   disarming the very alert that reads it. A timestamp keeps ageing in PromQL
+   (`time() - max(<metric>)`) whether or not the pusher still runs. The house
+   examples are `pellet_last_run_timestamp_seconds` and
+   `authentik_db_probe_last_success_timestamp_seconds`.
+
+2. **The POST body MUST end with a newline.** The Prometheus text format requires
+   the final line to be newline-terminated; pushgateway answers an unterminated
+   body with `HTTP 400 Bad Request` and stores **nothing**. This is nasty because
+   shell command substitution *strips* trailing newlines, so the natural-looking
+   construction is always wrong:
+
+   ```sh
+   # WRONG — $(...) strips the trailing newline -> HTTP 400, nothing stored
+   PAYLOAD=$(printf '%s\n' "# TYPE x gauge" "x 1")
+   wget -q -O - --post-data "$PAYLOAD" "$PGW/metrics/job/myjob"
+
+   # RIGHT — the file keeps exactly what printf wrote -> HTTP 200
+   printf '%s\n' "# TYPE x gauge" "x 1" > /tmp/p.prom
+   wget -q -O - --post-file /tmp/p.prom "$PGW/metrics/job/myjob"
+   ```
+
+   The script reads correctly either way and only the wire format objects, so
+   this is invisible at review time. It killed the first scheduled run of
+   `authentik-db-probe` (2026-09-12). Note `busybox wget` (alpine) has no `curl`
+   but does support `--post-file`; it cannot issue `DELETE`.
+
+3. **A push replaces a grouping WHOLESALE.** Pushing a partial metric set to
+   `/metrics/job/<name>` deletes the gauges you left out. So on failure, push
+   **nothing** rather than a partial set — the stale-but-present snapshot keeps
+   timestamp-based staleness rules ageing correctly, whereas a partial push
+   blinds them. Pair every pushed gauge with an `absent()` guard, because
+   "pusher removed" and "pusher never ran" both present as no series.
+
+Verify what is currently stored, and clear a test grouping:
+
+```bash
+kubectl port-forward -n monitoring svc/prometheus-pushgateway 9191:9091 &
+curl -s http://localhost:9191/metrics | grep '^push_time_seconds{'   # one line per grouping
+curl -X DELETE http://localhost:9191/metrics/job/<job-name>          # 202 Accepted
+```
 
 > Note: prometheus-operator sets the `job` label on `ScrapeConfig` targets to
 > `scrapeConfig/<namespace>/<name>` (e.g. `scrapeConfig/monitoring/arag-scrape`),
@@ -721,9 +779,16 @@ kubectl logs -n monitoring -l app.kubernetes.io/name=unpoller --tail=20
 
 ## Job and CronJob Monitoring
 
-Known CronJobs in this cluster:
+Known CronJobs in this cluster (this list has drifted before — `kubectl get
+cronjobs -A` is the source of truth; ~22 manifests exist under
+`kubernetes/apps/`):
 - `storage/backup-of-all-volumes` (Longhorn backups, daily 3:00 AM)
 - `kube-system/descheduler` (rescheduling optimization)
+- `kube-system/authentik-channels-cleanup` (django-channels message prune, every 6h)
+- `kube-system/authentik-db-probe` (audit-log freshness gauges → Pushgateway, hourly :17)
+- `databases/sweep-heartbeat`, `monitoring/obs-recovery`, `ai/openclaw-probe`,
+  `ai/paperclip-backup-cleanup`, `home-automation/frigate-nvr` restart,
+  `office/mealie` shopping-sync, tube-archivist maintenance
 
 ```bash
 # List CronJobs
