@@ -238,11 +238,43 @@ def collect(cur, cycle_id: str | None) -> dict:
     # severity filter: `clean` rows are pass confirmations, `accepted` rows
     # are operator-acknowledged ARs — neither is an action item (the 44
     # "SOP … compliant" doc rows of cycle b2410887 rendered as 44 MEDIUMs).
+    # cycle_id alone UNDER-COUNTS a cycle's findings, and silently. Findings a
+    # specialist hand-authors via `policy-cli.py finding add` — which is what the
+    # P4.1.6 contract REQUIRES for any recommendation implying a state change —
+    # are pinned by _policy_cli_cycle() to a sentinel 'policy-cli' cycle row on
+    # purpose ("a real sweep cycle would be a lie about provenance"). Both
+    # designs are defensible; their intersection was the bug. Keying the action
+    # list on cycle_id therefore dropped EVERY agent-written row: measured on
+    # cycle 0e37c7d3 (2026-09-11), 17 of 17 findings authored by that cycle's
+    # own six specialists rendered nowhere, while the board still looked
+    # complete — worse than the 2026-08-16 block, which at least announced
+    # itself by producing no board at all.
+    #
+    # So scope by AUTHORSHIP WINDOW as well as cycle_id: a row first seen
+    # between this cycle's start and its end (now, if still running) was
+    # authored by this cycle whichever row it hangs off. Provenance is left
+    # alone — metadata.authored_by still distinguishes hand-authored from
+    # script-emitted.
     cur.execute(
         """SELECT finding_id, section, title, severity FROM sweep_findings
-           WHERE cycle_id=%s AND status='new' AND section != 'security'
+           WHERE status='new' AND section != 'security'
              AND severity NOT IN ('clean', 'accepted')
-           ORDER BY section, finding_id""", (cycle_id,))
+             AND (
+                   cycle_id = %(cid)s
+                OR first_seen >= (SELECT started_at FROM sweep_cycles WHERE cycle_id = %(cid)s)
+             )
+             AND first_seen < COALESCE(
+                   -- Bound by the NEXT cycle's start, not this cycle's
+                   -- finished_at: the reconcile stamps finished_at mid-run, so a
+                   -- row authored after it (a late hand-authored finding, a
+                   -- follow-up fix) still belongs to THIS cycle. Using
+                   -- finished_at dropped such rows with no signal — it happened
+                   -- to pass on 0e37c7d3 by a 55-second margin.
+                   (SELECT MIN(started_at) FROM sweep_cycles
+                     WHERE started_at > (SELECT started_at FROM sweep_cycles
+                                          WHERE cycle_id = %(cid)s)),
+                   'infinity'::timestamptz)
+           ORDER BY section, finding_id""", {"cid": cycle_id})
     out["new_other"] = [{"id": f, "section": sec, "title": t, "severity": sev}
                         for f, sec, t, sev in cur.fetchall()]
     cur.execute(
