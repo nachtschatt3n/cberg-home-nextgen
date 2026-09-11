@@ -29,7 +29,6 @@ resources:
   - ./longhorn.yaml
   - ./rm3l.yaml
   - ./dirsigler.yaml
-  - ./pajikos.yaml
   - ./penpot.yaml
   - ./prometheus-community.yaml
   - ./unpoller.yaml
