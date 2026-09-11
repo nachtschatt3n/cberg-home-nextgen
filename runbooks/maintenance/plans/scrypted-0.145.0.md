@@ -37,13 +37,29 @@ capability_change: false          # see §2.4 — this is the one fact a reviewe
 rollback_class: git-revert        # see §2.3 — established from the live filesystem,
                                   # not assumed.
 finding_refs: [F-b885ec1b]
-status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
+status: executed # EXECUTED 2026-09-11, out-of-band, on an explicit operator
+                 # go. The bump landed exactly as planned:
+                 # koush/scrypted:v0.143.0-noble-full -> v0.145.0-noble-full.
+                 # Run unattended rather than in the window because the NVR is
+                 # EMPTY -- re-verified immediately before the bump: the only
+                 # installed plugin is the built-in `@scrypted/core` (all 35
+                 # PluginDevice rows in scrypted.db carry
+                 # pluginId=@scrypted/core), no camera/HomeKit/Reolink/Unifi
+                 # plugin exists, and the CIFS /media share holds 0 bytes. So
+                 # the §1.3 GStreamer removal reaches nothing, and the "lost
+                 # recording window" cost in §2 is zero.
+                 # VETTED 2026-09-06. Premise checked against the LIVE
                  # cluster, not against the plan's own prose:
                  # live koush/scrypted:v0.143.0-noble-full, matching
                  # `current`. NOTE the workload is deployment/scrypted in
                  # home-automation -- the directory is named scrypted-nvr but
                  # the HelmRelease and the release are both named `scrypted`.
-window: "sat-attended:2026-09-12"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
+window: null     # RELEASED 2026-09-11. Was "sat-attended:2026-09-12"
+                 # (auto-assigned 2026-09-06). That slot was OVER-CAPACITY
+                 # (risk-load 7 > 6) and OVER-TIME (100m in a 90m window);
+                 # executing this out-of-band returns 25m and 2 risk-load to
+                 # it. A terminal-status plan must drop its `window:` or
+                 # retired_still_windowed() warns -- see maintenance-plan.py.
 premises:
   - id: image-is-still-0.143.0
     why: >-

@@ -30,7 +30,14 @@ spec:
           app:
             image:
               repository: koush/scrypted
-              tag: v0.143.0-noble-full
+              # v0.145.0 is the newest STABLE cut: it is the newest tag with a
+              # GitHub Release carrying prerelease=false (verified 2026-09-11).
+              # koush publishes even-minor tags (v0.144.x, v0.146.x) to the registry
+              # with NO Release entry -- that is upstream's dev channel, and it is
+              # not acceptable on a privileged, iGPU-holding NVR (AR-081). The gate
+              # is "does a prerelease=false Release exist for THIS exact tag", never
+              # "is the minor odd".
+              tag: v0.145.0-noble-full
             env:
               # WITHOUT THIS, SCRYPTED PERSISTS NOTHING. Scrypted's default
               # SCRYPTED_VOLUME is /server/volume, which is on the container's

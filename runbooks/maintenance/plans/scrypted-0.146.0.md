@@ -3,7 +3,11 @@ plan_id: scrypted-0.146.0
 component: scrypted
 pr: null                          # no Renovate PR number given/found (gh pr search: none open)
 kind: image
-current: "v0.143.0-noble-full"
+current: "v0.145.0-noble-full"  # UPDATED 2026-09-11: the stable bump in
+                                # scrypted-0.146.0's sibling plan (scrypted-0.145.0)
+                                # executed, so live is no longer v0.143.0. Kept
+                                # truthful so nobody reads a stale baseline out of
+                                # a retired file.
 target: "v0.146.0-noble-full"
 update_type: n/a                  # this plan documents a HOLD decision, not an upgrade to execute
 risk: medium                      # reflects what executing the bump WOULD be, not "doing nothing"
@@ -33,13 +37,62 @@ autonomy_override: human-gated  # ADDED 2026-09-06. This plan's own verdict is
                                 # Same shape as the paperclip PGDATA trap caught
                                 # earlier today: body says no, metadata says go,
                                 # machinery reads the metadata.
-status: draft
+status: superseded  # SUPERSEDED 2026-09-11. Two independent reasons, either
+                    # sufficient: (1) the target `v0.146.0-noble-full` is itself
+                    # now a superseded dev build -- the even-minor channel head
+                    # moved to v0.146.1-noble-full (pushed 2026-09-09); (2) this
+                    # plan's own §1 instructs "Retire this plan file at that
+                    # point rather than editing it to a new target".
+                    # THE HOLD ITSELF STANDS AND IS UNCHANGED. Re-verified
+                    # 2026-09-11 against primary sources: the newest koush/scrypted
+                    # GitHub Release is still v0.145.0 (prerelease=false,
+                    # 2026-09-02), and `GET /releases/tags/v0.146.1` returns 404 --
+                    # i.e. v0.146.1 has no Release entry at all and is still the
+                    # dev channel AR-081 refuses on a privileged NVR.
+                    # The hold no longer needs a plan file to carry it: it lives in
+                    # the `*scrypted*` deny rule in runbooks/auto-update-policy.yaml,
+                    # which is git-tracked and code-reviewed (CLAUDE.md: "To hold a
+                    # component back, add a deny rule to the policy YAML"). That
+                    # rule's reason text was refreshed in the same commit.
+                    # NEXT ACTION when upstream cuts the next prerelease=false
+                    # Release (expected v0.147.0): dispatch a planner against THAT
+                    # tag. Do not revive this file.
 window: null
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/storage-safety.md
 generated: "2026-09-05"
 ---
+
+## 0. RESOLUTION — 2026-09-11 (read this before anything below)
+
+This plan is **superseded and must not be executed**. Everything below is kept
+for its reasoning, not as instructions.
+
+What changed since it was written:
+
+- **The stable bump happened.** `scrypted-0.145.0.md` executed on 2026-09-11:
+  live is now `koush/scrypted:v0.145.0-noble-full`. That is precisely the
+  "adjacent, cheaper option" §1 flagged — taken as its own separate change, as
+  §1 asked, not folded into this plan.
+- **This plan's target went stale on its own channel.** `v0.146.0-noble-full`
+  was the even-minor head when this was written; `v0.146.1-noble-full` was
+  pushed 2026-09-09 and displaced it.
+- **The hold verdict is UNCHANGED and still correct.** Re-checked 2026-09-11:
+
+  ```
+  GET /repos/koush/scrypted/releases/latest        -> v0.145.0  prerelease=false
+  GET /repos/koush/scrypted/releases/tags/v0.146.1 -> 404 (no Release entry)
+  ```
+
+  So v0.146.1 is still dev-channel, and §1's release condition is still unmet.
+  Do not ship it.
+- **The hold is now carried by policy, not by this file.** The `*scrypted*`
+  deny rule in `runbooks/auto-update-policy.yaml` keeps the even-minor channel
+  out of the nightly Step-0 auto-apply. A plan file was never the right home
+  for a standing channel hold — it consumed the plan queue every sweep and
+  needed `autonomy_override: human-gated` bolted on to stop its own metadata
+  scheduling a do-not-execute plan into a window.
 
 ## 1. Summary & why held — VERDICT: DO NOT UPGRADE YET, hold confirmed correct
 
