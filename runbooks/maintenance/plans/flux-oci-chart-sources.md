@@ -347,7 +347,7 @@ source inventory this table is derived from is in §7.
 |---|---|---|---|---|---|---|
 | 0 | **Teach the version/update pipeline about `chartRef`** | tooling only | 30 | low | no | stops the migration from blinding `coverage.py` and fail-open-ing G3 |
 | 1 | **Delete the 6 unreferenced HelmRepositories** | backube, democratic-csi, external-secrets, guerzon, piraeus, rook-ceph | 15 | low | no | removes 6 third-party URLs from the `cluster-meta` gate — the best risk-per-minute in this plan |
-| 2 | **`csi-driver-smb` → charts-mirror OCI** | csi-driver-smb | 30 | **high** | **yes** (DS ×3 + controller) | kills a mutable-git-branch source behind all 19 CIFS classes |
+| 2 | ~~`csi-driver-smb` → charts-mirror OCI~~ **DONE 2026-09-11 via a DIFFERENT route — see §3.4** | csi-driver-smb | 0 | — | **no roll occurred** | executed as a GitRepository pinned to commit `59dce96e` (the v1.20.3 cut), NOT charts-mirror. **Do not execute this row.** |
 | 3 | **No-roll, upstream-native OCI** | intel (3 releases), node-feature-discovery, gabe565/paperless-ngx, falcosecurity/falco | 15 ea | low | **no** | 6 releases off HTTP with zero workload impact — build confidence here |
 | 4 | **No-roll, charts-mirror** | descheduler, external-dns, headlamp, metrics-server | 15 ea | low-med | **no** | external-dns is DNS-adjacent; still no pod roll |
 | 5 | **Rolling, upstream-native OCI, app tier** | authentik, grafana, nextcloud, open-webui, opentelemetry, mintplex-labs | 25 ea | medium | yes | the apps where a restart is tolerable but not free |
@@ -549,7 +549,45 @@ Repo-only; no cluster change. Three edits plus a ground-truth test:
 
 **Do not start Stage 2 until Stage 0 has survived one sweep** — proof in §4.1.
 
-### 3.4 Stage 2 — `csi-driver-smb` first, and what makes it safe
+### 3.4 Stage 2 — `csi-driver-smb` ✅ EXECUTED 2026-09-11, by a different route
+
+> **STOP. DO NOT EXECUTE THE BODY OF THIS STAGE.** It was completed on
+> 2026-09-11 in `001ab0ad` + `9a8eb6e5`, but **not** via charts-mirror OCI as
+> planned below. Running the text as written would REPLACE an upstream commit
+> pin with a third-party mirror pin — a regression, not progress.
+>
+> What shipped instead, and why it is stronger:
+> * **`GitRepository` pinned to `ref.commit: 59dce96e11522a46354d6970393b00b1c2a57351`**
+>   (the commit tagged v1.20.3), with `ref.branch: release-1.20` — required
+>   because the release is not reachable from `master`, which has diverged.
+>   A git commit SHA **is** the content address, so this needs no separate
+>   digest pin the way an OCI tag does.
+> * **Trust root stays on kubernetes-csi.** charts-mirror is a re-publisher;
+>   using it would have moved the root off upstream and required proving the
+>   mirror's bytes equal upstream's. That remains a legitimate operator choice,
+>   just not the one taken.
+> * **A trap this stage's original plan would have walked into:** the repo's
+>   `index.yaml` hardcodes an **absolute** tarball URL back to the branch
+>   (`…/csi-driver-smb/master/charts/v1.20.3/…`). Pinning the *index* to a
+>   version path would still have fetched the *chart* from `master` — a fix
+>   that looks real and is not. The GitHub Pages mirror is equally mutable and
+>   additionally serves a repackaged 1.20.3.
+> * **Verified no-op:** Helm release stayed at **v5** (no v6 secret), all three
+>   workload generations 5/5, 0 restarts, 19/19 CIFS StorageClasses, 114/114
+>   PVCs Bound, and six real CIFS mounts read including both catastrophic-tier
+>   shares. `helm template` identical 619/619 lines, 12/12 objects matching live.
+> * **`spec.timeout: 5m` was required** (`9a8eb6e5`): this swapped a few-KB index
+>   fetch for a ~118 MB clone **inside the `wait: true` gate** that blocks
+>   `cluster-apps`, against a 60s default. Any future GitRepository source in
+>   this gate needs the same consideration.
+> * **REGRESSION TO CLOSE — version tracking is gone.** Renovate's flux manager
+>   reads a GitRepository only via `ref.tag`, and the HelmRelease no longer has
+>   a `version:` field, so neither Renovate nor `check-all-versions.py` can
+>   compare against upstream; the chart's image tags are frozen at the pinned
+>   commit too. Needs a Renovate `customManagers` decision. Do not "fix" it with
+>   a comment-only bump PR that auto-update could merge as safe.
+
+#### Original Stage 2 plan (superseded, retained for its reasoning)
 
 It is first because its source is the worst (a **mutable git branch** via
 `raw.githubusercontent.com/kubernetes-csi/csi-driver-smb/master/charts` — the same
