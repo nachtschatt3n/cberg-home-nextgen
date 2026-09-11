@@ -6,14 +6,11 @@ metadata:
   name: k8s-gateway
 spec:
   interval: 30m
-  chart:
-    spec:
-      chart: k8s-gateway
-      version: 3.7.2
-      sourceRef:
-        kind: HelmRepository
-        name: k8s-gateway
-        namespace: flux-system
+  # Chart comes from ./ocirepository.yaml (pinned tag 3.7.2), not from an HTTP
+  # HelmRepository index -- see that file for why the HTTP source was dropped.
+  chartRef:
+    kind: OCIRepository
+    name: k8s-gateway
   install:
     remediation:
       retries: 3

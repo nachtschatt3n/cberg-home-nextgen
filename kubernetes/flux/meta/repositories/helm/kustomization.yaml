@@ -19,7 +19,6 @@ resources:
   - ./influxdata.yaml
   - ./jellyfin.yaml
   - ./jetstack.yaml
-  - ./k8s-gateway.yaml
   - ./metrics-server.yaml
   - ./nextcloud.yaml
   - ./node-feature-discovery.yaml
