@@ -291,6 +291,12 @@ print('Long-lived SA tokens:', sa_tokens or 'none')
 # Forward auth is now an Envoy Gateway SecurityPolicy plus the outpost route:
 kubectl get securitypolicy -n monitoring headlamp-forward-auth \
   -o jsonpath='{.spec.extAuth.http.backendRefs[*].name}{"\n"}'
+# ...and that the gate can actually PASS someone. Without `cookie` here the
+# outpost never sees the session and headlamp answers HTTP 400 to every browser
+# while the check above still looks perfect (docs/sops/gateway-api-httproute.md
+# section 4.3). As of 2026-09-11 headlamp is in exactly that state.
+kubectl get securitypolicy -n monitoring headlamp-forward-auth \
+  -o jsonpath='{.spec.extAuth.headersToExtAuth}{"\n"}'
 kubectl get httproute -n monitoring headlamp-authentik-outpost \
   -o jsonpath='{.spec.rules[*].matches[*].path.value}{"\n"}'
 ```
@@ -299,6 +305,7 @@ Expected:
 - No matches in repo for `service-account-token` under headlamp
 - `Long-lived SA tokens: none`
 - The `SecurityPolicy` exists and its extAuth backend is the `ak-outpost-*` Service, and the outpost route matches `/outpost.goauthentik.io`. Empty output from either command means the forward-auth gate is GONE, not that it is fine
+- `headersToExtAuth` contains `cookie`. Empty means the gate denies EVERYONE (fail-closed, so not an exposure — but headlamp's web UI is unusable)
 
 ---
 

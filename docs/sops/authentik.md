@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.09.09`
-> Last Updated: `2026-09-09`
+> Version: `2026.09.11`
+> Last Updated: `2026-09-11`
 > Owner: `Platform`
 
 ---
@@ -793,6 +793,17 @@ spec:
       name: my-app
   extAuth:
     failOpen: false              # outpost down => deny, never publish
+    # MANDATORY. For an HTTP ext-auth service Envoy forwards ONLY Host, Method,
+    # Path, Content-Length and Authorization unless this list says otherwise — so
+    # without `cookie` the outpost never sees `authentik_proxy_*`, can never tell
+    # the client is logged in, and the app answers HTTP 400 to every browser.
+    # Do NOT add x-forwarded-for/-proto: Envoy appends to XFF instead of
+    # sanitising it, so forwarding it lets a LAN client dictate the client IP
+    # authentik records. Full reasoning: docs/sops/gateway-api-httproute.md §4.3.
+    headersToExtAuth:
+      - cookie
+      - accept
+      - user-agent
     http:
       backendRefs:
         - group: ""
@@ -1053,7 +1064,7 @@ Before deploying a new Authentik integration, verify:
 4. Routing
    - App `HTTPRoute` parented to `envoy-internal`/`envoy-external` in ns `network`, `sectionName: https`
    - Separate, more-specific `HTTPRoute` for `/outpost.goauthentik.io` backed by the outpost Service
-   - `SecurityPolicy` with `extAuth` targeting the APP route only, `path: /outpost.goauthentik.io/auth/envoy`, `failOpen: false`
+   - `SecurityPolicy` with `extAuth` targeting the APP route only, `path: /outpost.goauthentik.io/auth/envoy`, `failOpen: false`, and `headersToExtAuth` containing `cookie` (without it every request 400s)
    - `ReferenceGrant` in `kube-system` for the app namespace
    - `kubectl get ingress -A` returns nothing
 5. Verification

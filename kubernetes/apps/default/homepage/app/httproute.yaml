@@ -91,9 +91,18 @@ spec:
                                  # so this does NOT suppress the clobber storm.
                                  # The storm stops because `cookie` above makes
                                  # the first callback stick.
-      - user-agent               # authentik login events, not the Envoy pod
-      - x-forwarded-for          # real client IP in those events
-      - x-forwarded-proto
+      - user-agent               # the outpost's own request log — this is what
+                                 # the 400 was diagnosed from
+    # DELIBERATELY NOT FORWARDED: x-forwarded-for / x-forwarded-proto. They were
+    # in the first cut of this fix for "real client IP in authentik events", and
+    # the security review then MEASURED the cost: Envoy appends to XFF rather
+    # than sanitising it, and ClientTrafficPolicy/envoy-internal-client trusts
+    # all of 192.168.0.0/16, so a LAN client sending its own XFF has that value
+    # selected as the client IP — a sentinel `203.0.113.77` showed up as the
+    # outpost's `remote=`. No bypass (the request was still denied), but it makes
+    # the recorded IP forgeable, which is what IP-keyed lockout scoring reads.
+    # The redirect URI is built correctly without x-forwarded-proto — verified
+    # against the live outpost. Neither header is needed; neither is forwarded.
     http:
       backendRefs:
         - group: ""

@@ -265,9 +265,13 @@ Per forward-auth app you need **four** objects:
 3. A **ReferenceGrant** — see below.
 4. A **SecurityPolicy** targeting **ONLY the app route** (targeting the
    callback route makes it require the auth it exists to establish), with
-   `failOpen: false` and
+   `failOpen: false`,
    `path: /outpost.goauthentik.io/auth/envoy` (**never** `/auth/nginx` or
-   `/auth/traefik` — those return 500 without their own dialect headers).
+   `/auth/traefik` — those return 500 without their own dialect headers),
+   **and `extAuth.headersToExtAuth` listing `cookie`** — a required FIELD on
+   this object, not a fifth object. Omit it and the app answers HTTP 400; see
+   immediately below. A reader who follows items 1–4 without it ships a broken
+   app, which is exactly what happened to homepage.
 
 **`extAuth.headersToExtAuth` MUST list `cookie`, or the app answers HTTP 400.**
 This is not optional and it is not a tuning knob. For an **HTTP** ext-auth
@@ -291,9 +295,13 @@ the Envoy migration. The shape:
       - cookie                 # the session — without it nothing works
       - accept                 # completeness only — measured: this outpost 302s
                                # assets whatever Accept says. `cookie` is the fix.
-      - user-agent             # authentik login events, not the Envoy pod
-      - x-forwarded-for
-      - x-forwarded-proto
+      - user-agent             # the outpost's own request log
+    # Do NOT add x-forwarded-for / x-forwarded-proto. Envoy APPENDS to XFF rather
+    # than sanitising it and the internal gateway trusts all of 192.168.0.0/16,
+    # so forwarding XFF lets any LAN client dictate the client IP authentik
+    # records and scores lockouts on (measured with a TEST-NET-3 sentinel). It is
+    # not a bypass, and it is not needed: the redirect URI is built correctly
+    # without x-forwarded-proto.
     http:
       ...
 ```
@@ -472,6 +480,8 @@ spec:
       name: headlamp            # ONLY the app route, never the callback
   extAuth:
     failOpen: false             # an outpost outage must DENY
+    headersToExtAuth: [cookie, accept, user-agent]   # MANDATORY — without
+                                                    # `cookie`, every request 400s
     http:
       backendRefs:
         - { group: "", kind: Service, name: ak-outpost-headlamp-forward-auth, namespace: kube-system, port: 9000 }
@@ -622,6 +632,13 @@ for a in json.load(sys.stdin)['status']['ancestors']:
 
 Expected:
 - `Accepted True`.
+- **AND** the header list is present — `Accepted True` was true for the whole
+  four days homepage answered 400, so it is not sufficient on its own:
+
+```bash
+kubectl get securitypolicy -n <ns> <name> \
+  -o jsonpath='{.spec.extAuth.headersToExtAuth}'    # MUST contain `cookie`
+```
 
 If failed:
 - `Accepted False` with a ref error → the ReferenceGrant is missing its
@@ -734,6 +751,12 @@ Expected:
   missing `gateway.envoyproxy.io/SecurityPolicy` grant entry, which leaves the
   app **unprotected**. Treat as a security incident, not a routing bug.
 
+> **A `302` here proves only that the policy ATTACHED.** It does not prove auth
+> works. A policy missing `headersToExtAuth: [cookie, …]` returns this identical
+> `302` forever and never lets one request reach the backend — homepage passed
+> this exact test while it was answering 400 to every browser. For "does login
+> actually complete", use the allowed-to-backend log check in §4.3.
+
 If unclear:
 - Confirm the outpost is running: `kubectl get deploy -n kube-system | grep
   ak-outpost-<app>`.
@@ -776,10 +799,32 @@ Expected:
 ## 10) Security Check
 
 ```bash
-# 1. Every forward-auth app still denies anonymously (302, never 200)
-for h in headlamp nocodb phpmyadmin arag-web uptime-kuma; do
+# 1. Every forward-auth app still denies anonymously (302, never 200).
+#    These ten are the actual extAuth subjects, by HOSTNAME — the old list named
+#    `arag-web` and `uptime-kuma`, neither of which is a hostname (they are
+#    `arag` and `kuma`) and neither of which has a SecurityPolicy, so the loop
+#    scored two non-existent hosts and missed seven real ones.
+#    `kuma` is protected differently — its route sends `/` straight to the
+#    outpost (proxy mode), no SecurityPolicy needed. `arag` answers 200
+#    anonymously by accepted risk AR-118, not by accident. Neither belongs here.
+for h in homepage headlamp nocodb phpmyadmin esphome frigate solarfocus \
+         alertmanager prometheus longhorn; do
   printf '%s ' "$h"
   curl -s -o /dev/null -w '%{http_code}\n' https://$h.${SECRET_DOMAIN}/
+done
+
+# 1b. …and that each one can actually COMPLETE a login. A 302 above is returned
+#     both when forward-auth works and when it is broken, so this is the real
+#     gate: the outpost must RE-USE a presented session cookie rather than mint
+#     a fresh one per request. Churn => `headersToExtAuth` is missing `cookie`
+#     and the app answers 400 to real browsers.
+for h in homepage headlamp nocodb phpmyadmin esphome frigate solarfocus \
+         alertmanager prometheus longhorn; do
+  c=$(curl -s -D - -o /dev/null https://$h.${SECRET_DOMAIN}/ \
+        | awk 'tolower($1)=="set-cookie:"{print $2; exit}')
+  c2=$(curl -s -D - -o /dev/null -H "Cookie: ${c%%;*}" https://$h.${SECRET_DOMAIN}/ \
+        | awk 'tolower($1)=="set-cookie:"{print $2; exit}')
+  [ "${c%%;*}" = "${c2%%;*}" ] && echo "$h SESSION-STABLE" || echo "$h SESSION-CHURN"
 done
 
 # 2. No SecurityPolicy is fail-open
@@ -860,7 +905,10 @@ Rollback cautions specific to this migration:
 
 - `kubernetes/apps/network/envoy-gateway/app/` — Gateways, policies, GatewayClass, HelmRelease
 - `kubernetes/apps/kube-system/authentik/app/referencegrants.yaml` — all ReferenceGrants
-- `kubernetes/apps/monitoring/headlamp/app/httproute.yaml` — canonical forward-auth example
+- `kubernetes/apps/default/homepage/app/httproute.yaml` — canonical forward-auth
+  example: the only one currently carrying `headersToExtAuth`. Do NOT copy
+  `kubernetes/apps/monitoring/headlamp/app/httproute.yaml`, the previous pointer
+  here — it is still missing that field and is therefore the broken shape.
 - `kubernetes/apps/office/nextcloud/app/httproute.yaml` — canonical multi-path/websocket/timeout example
 - `kubernetes/apps/monitoring/kibana/app/httproute.yaml` — `BackendTLSPolicy` example
 - `kubernetes/apps/security/wazuh/app/httproute.yaml` — EG `Backend` + `insecureSkipVerify` example
@@ -880,6 +928,15 @@ Rollback cautions specific to this migration:
 
 ## Version History
 
+- `2026.09.11`: §4.3 — `extAuth.headersToExtAuth` MUST list `cookie`, because an
+  HTTP ext-auth service otherwise receives only Host/Method/Path/Content-Length/
+  Authorization and the outpost can never see the session. Added the
+  allowed-to-backend and session-stability verifications and relabelled the
+  anonymous-302 tests (§6 Test 4, §8 Example 3, §10 item 1), which returned their
+  expected `302` throughout the four days homepage answered 400 to every browser.
+  Corrected §10's host list (`arag-web`/`uptime-kuma` are not hostnames and have
+  no SecurityPolicy) and repointed the canonical example off headlamp. Driver:
+  `ef41fa1f` — homepage measured 75 callbacks, 0 requests reaching the backend.
 - `2026.09.07`: Created on completion of the Envoy Gateway migration (104
   HTTPRoutes; ingress-nginx deleted). Supersedes and replaces
   `docs/troubleshooting/envoy-phase2-conversion-pattern.md`, which was deleted

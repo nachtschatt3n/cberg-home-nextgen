@@ -178,7 +178,7 @@ forward-auth pattern only; OIDC and SAML integrations follow `docs/sops/authenti
 - [ ] Create application entry using `!KeyOf` to reference provider
 - [ ] Create outpost entry with `service_connection` UUID and `kubernetes_namespace: kube-system`
 - [ ] Add `gethomepage.dev/*` annotations **and** the `gethomepage.dev/enabled: "true"` label to the app's **HTTPRoute** (Homepage runs `kubernetes.gateway: true`; annotations on an Ingress register nothing, silently)
-- [ ] Add a second HTTPRoute for the `/outpost.goauthentik.io/*` paths pointing at the `ak-outpost-*` Service, plus a `SecurityPolicy` for the forward-auth extAuth — not an Ingress: ingress-nginx was deleted 2026-09-07 (`ad1ea7c2`), so an Ingress is inert
+- [ ] Add a second HTTPRoute for the `/outpost.goauthentik.io/*` paths pointing at the `ak-outpost-*` Service, plus a `SecurityPolicy` for the forward-auth extAuth — not an Ingress: ingress-nginx was deleted 2026-09-07 (`ad1ea7c2`), so an Ingress is inert. That `SecurityPolicy` **must** set `extAuth.headersToExtAuth: [cookie, …]` — omit it and Envoy never forwards the session cookie to the outpost, so the app answers HTTP 400 to every browser while every status field reads healthy (`docs/sops/gateway-api-httproute.md` §4.3)
 - [ ] Deploy and verify: `kubectl exec -n kube-system deployment/authentik-server -- python3 manage.py show_blueprints`
 
 ### Blueprint Pattern
