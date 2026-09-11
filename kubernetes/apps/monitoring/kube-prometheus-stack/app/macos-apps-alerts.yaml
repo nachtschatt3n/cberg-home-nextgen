@@ -242,8 +242,12 @@ spec:
           annotations:
             summary: "ARAG push to the web app has not succeeded recently"
             description: >-
-              The ARAG pipeline on {{ $labels.instance }} has not successfully
-              PUSHED to the web app for {{ $value | humanizeDuration }}
+              The ARAG pipeline on {{ $labels.instance }}
+              {{ if gt $value 315360000.0 }}has NEVER successfully PUSHED to the
+              web app since the push gauge was introduced — the gauge is still
+              0, so this reads as decades; that is the outage signal itself, not
+              a broken rule{{ else }}has not successfully PUSHED to the web app
+              for {{ $value | humanizeDuration }}{{ end }}
               (threshold 13h ≈ 2 missed 6h cycles). This tracks the PUSH leg
               specifically: AragScrapeStale tracks the SCRAPE and stays green
               while the push is dead, because the sync_runs row it reads is
@@ -256,6 +260,18 @@ spec:
         # AragPushStale. The exporter emits the gauge at 0 rather than omitting
         # it precisely so that absent() means "old build", never "never pushed".
         - alert: AragPushMetricMissing
+          # DO NOT "fix" this by gating it on the target being up as
+          #   absent(<metric>) and up{job="scrapeConfig/monitoring/arag-scrape"} == 1
+          # That form is PERMANENTLY INERT and was measured as such on
+          # 2026-09-11: absent() on a selector with no equality matchers emits a
+          # sample with an EMPTY label set, so `and` against a vector carrying
+          # job/instance labels finds no matching series and returns 0 samples
+          # even when the metric genuinely is missing. Verified by substituting a
+          # deliberately wrong metric name: bare absent() -> 1 sample, the gated
+          # form -> 0 samples. If a gate is ever genuinely wanted it MUST be
+          # `and on() up{...} == 1` (verified -> 1 sample). Gating it without
+          # on() would silently recreate the exact blind spot this rule exists
+          # to close.
           expr: absent(arag_scrape_last_push_success_timestamp_seconds)
           for: 30m
           labels:
@@ -265,8 +281,9 @@ spec:
           annotations:
             summary: "ARAG push-success metric is not being exported"
             description: >-
-              The arag-scrape metrics endpoint is reachable but is not exporting
-              arag_scrape_last_push_success_timestamp_seconds, so the menubar
-              app is running a build older than that metric. AragPushStale is
-              blind while this fires and must not be trusted as evidence the
-              push leg is healthy. Rebuild and relaunch the menubar app.
+              arag_scrape_last_push_success_timestamp_seconds is not present in
+              Prometheus. Most likely the menubar app is running a build older
+              than that metric — rebuild and relaunch it. If AragScrapeDown is
+              also firing, the target is simply unreachable and that alert is
+              the accurate one. Either way AragPushStale is blind while this
+              fires and must not be trusted as evidence the push leg is healthy.
