@@ -32,9 +32,44 @@ rollback_class: backup-restore    # the change is a DELETE of one row; there is 
                                   # revert. See section 6 -- the re-INSERT is a one-liner and the
                                   # exact row contents are recorded there, so the practical
                                   # rollback is cheap.
-status: draft                     # REWRITTEN 2026-09-12 from grafana-orphan-dashboard-uid, which
-                                  # was BLOCKED on a false premise and, critically, named the
-                                  # WRONG row. See section 5.
+status: blocked   # 2026-09-12: the approved change EXECUTED cleanly via M2 with a live
+                  # operator GO -- and its HYPOTHESIS WAS DISPROVEN. Row 1836 was deleted
+                  # (exactly 1 row; verified gone and NOT recreated). The errors did NOT
+                  # stop: 23 in the first ~10 min on the new pod, i.e. the unchanged ~2/min
+                  # 30s-reconcile cadence.
+                  #
+                  # THE DUPLICATE PROVISIONING ROW WAS NOT THE CAUSE. What the execution
+                  # measured, which the analysis could not see read-only:
+                  #   - row 1864's stored check_sum (36fbe0878d52dceec9f655f969476e68)
+                  #     EXACTLY equals the current file's md5. So the file->204 mapping is
+                  #     healthy and is NOT what errors.
+                  #   - but row 1864's `updated` is still 2026-07-17T01:24:44Z while the
+                  #     file's mtime is now 2026-09-12 19:08 (the sidecar rewrites it on
+                  #     every Grafana restart). Grafana gates the skip on mtime AND
+                  #     checksum, so a changed mtime forces a re-save attempt every cycle.
+                  #   - that re-save then fails against the collision that is STILL
+                  #     present: THREE dashboards titled "Prometheus / Overview" all in
+                  #     folder_id 0 (148, 201, 204). Only one file and one ConfigMap carry
+                  #     uid 9fa0d141 (checked), so competing sources are ruled out.
+                  #   - dashboard 204 is still version 2 / updated 2026-07-17: no
+                  #     provisioning save has landed since then. It remains FROZEN.
+                  #
+                  # SO THE REAL REMEDY IS THE PART THAT WAS DEFERRED AS "COSMETIC": the
+                  # duplicates 148 and 201 must go (or be renamed/moved out of folder 0).
+                  # Removing row 1836 was necessary-but-insufficient -- it is a PREREQUISITE
+                  # for deleting 201, which the API refuses while a dashboard is provisioned.
+                  # Re-plan around that, and re-test: the title collision is the hypothesis
+                  # to attack next, not the provisioning rows.
+                  #
+                  # State left behind (all verified): row 1836 gone, 66 provisioning rows
+                  # (was 67), 81 dashboards (unchanged), 148/201/204 ALL still present,
+                  # integrity_check ok, Grafana 3/3 restarts=0, HelmRelease resumed
+                  # SUSPENDED=False READY=True, PVC intact. Rollback for row 1836 is the
+                  # one-line re-INSERT in section 6 -- deliberately NOT applied, because the
+                  # row is agreed-stale garbage and re-inserting it would restore a known
+                  # defect for no benefit; the operator can call for it in one word.
+                  # Backup: /tmp/grafana-m2-backup/grafana.db.bak
+                  # sha256 2d054580f6da6033e617440f92b0cff1c9cae9405c1b1119f96ff76d3b47bfe9
 window: null
 sops_refs:
   - docs/sops/grafana-image-changes.md
