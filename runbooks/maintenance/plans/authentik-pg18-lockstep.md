@@ -65,13 +65,29 @@ finding_refs: [F-8ab2ee07]  # plan-lane finding: "authentik postgres 17.11 findi
                             # "exclude the bundled block from version attribution" arm of its own
                             # prescribed remediation (the other arm, "finish the decommission", is
                             # authentik-pg17-decommission.md, not this plan).
-status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
-                 # cluster, not against the plan's own prose:
-                 # live authentik-server is
-                 # ghcr.io/goauthentik/server:2026.8.0 and authentik-
-                 # postgresql is postgres:17.11-bookworm -- both halves of
-                 # `current` hold.
-window: "sun-attended:2026-09-13"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
+status: executed # EXECUTED -- and NOT by this plan's own window run.
+                 # The chart half landed out-of-band as e681fd3a
+                 # ("chore(authentik): chart 2026.8.0 -> 2026.8.1",
+                 # 2026-09-08 07:38), with the initContainer pins following in
+                 # f74c5bee. The declined postgres half stayed declined: the
+                 # bundled StatefulSet is still postgres:17.11-bookworm.
+                 #
+                 # Re-statused 2026-09-12 because BOTH premises below are now
+                 # false and the plan was still scheduled to run. `run` for
+                 # premise server-is-still-2026.8.0 expects exactly
+                 # ghcr.io/goauthentik/server:2026.8.0; live is :2026.8.2 (the
+                 # cluster moved on again that morning, bfdaa95a). A plan left
+                 # `vetted` with a dead premise either aborts mid-window or,
+                 # worse, gets "fixed" by someone editing the premise to match
+                 # -- so it is retired here rather than re-pointed.
+                 #
+                 # Scope note: this plan only ever owned the
+                 # stale-attribution arm of its finding_ref. The decommission
+                 # arm belongs to authentik-pg17-decommission (awaiting-soak).
+                 # See the finding record for current state; do not infer it
+                 # from this file. security_ref: F-8ab2ee07
+window: null     # was "sun-attended:2026-09-13" (AUTO-ASSIGNED 2026-09-06 by
+                 # window-scheduler); unscheduled on completion
 premises:
   - id: server-is-still-2026.8.0
     why: "`current:` claims chart 2026.8.0 with server image :2026.8.0."

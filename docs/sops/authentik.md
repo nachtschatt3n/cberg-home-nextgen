@@ -1022,32 +1022,70 @@ mise exec -- kubectl run ak-preflight --rm -i --restart=Never -n kube-system \
 A server upgrade leaves every managed proxy outpost pinned at the **old** image.
 They must be pushed:
 
-```bash
-POD=$(mise exec -- kubectl get pods -n kube-system \
-  -l app.kubernetes.io/component=server --field-selector=status.phase=Running \
-  -o jsonpath='{.items[0].metadata.name}')
+> **DO NOT RUN THE `KubernetesController(...).up()` LOOP ON 2026.8.2.**
+> It is destructive. Verified on 2026-09-12 against `homepage-forward-auth`:
+> `up()` **deleted** `svc/ak-outpost-homepage-forward-auth`, then failed to
+> recreate it — it renders the Service with an empty port list and the API
+> rejects it (`422 Service "..." is invalid: spec.ports: Required value`) — and
+> it stripped `ports` from the Deployment. The **image bump still lands**, so
+> the run looks partially successful while the app's
+> `/outpost.goauthentik.io/*` sign-in path is left pointing at a Service that no
+> longer exists. Only the single tested outpost broke; **the `for o in
+> Outpost.objects.all()` loop as previously written here would have deleted all
+> 12 forward-auth Services in one pass and taken cluster-wide SSO down.**
+> The old procedure is kept below, commented, purely so this failure is
+> recognisable — do not uncomment it without re-testing on ONE outpost first.
+>
+> ```bash
+> # DESTRUCTIVE ON 2026.8.2 — see above.
+> # for o in Outpost.objects.all():
+> #     KubernetesController(o, o.service_connection).up()
+> ```
 
-mise exec -- kubectl exec -n kube-system $POD -c server -- ak shell -c "
-from authentik.outposts.models import Outpost
-from authentik.outposts.controllers.kubernetes import KubernetesController
-for o in Outpost.objects.all():
-    if not o.service_connection: continue
-    try: KubernetesController(o, o.service_connection).up()
-    except Exception as e: print('partial', o.name, e)
-"
+**Use this instead — bump the image directly, one outpost at a time:**
+
+```bash
+# Do ONE first and verify it before touching the rest.
+mise exec -- kubectl set image -n kube-system \
+  deploy/ak-outpost-<app>-forward-auth \
+  proxy=ghcr.io/goauthentik/proxy:<NEW_TAG>
+
+mise exec -- kubectl rollout status -n kube-system deploy/ak-outpost-<app>-forward-auth
+mise exec -- kubectl get svc,endpoints -n kube-system ak-outpost-<app>-forward-auth
 ```
 
-**NEVER `kubectl delete` an outpost Deployment** to force this — that is the
+This touches **only** the Deployment's image and never invokes the controller's
+Service rendering, so the failure above cannot occur. It does not fight the
+controller either: the controller derives the outpost image from the server
+version, so once the server is on `<NEW_TAG>` a later reconcile converges on the
+same tag rather than reverting it.
+
+These Deployments and Services are created by authentik's outpost controller and
+exist in **no git repo**, so `kubectl` is the correct path here — this is not a
+GitOps bypass. Rollback is the same command with the previous tag.
+
+**NEVER `kubectl delete` an outpost Deployment** to force a bump — that is the
 documented way to break it.
 
-Two things to expect, both benign:
+Still true, and still benign:
 
 - A bulk `o.save()` alone may enqueue controller tasks that finish `exc: null`
-  and change nothing. The explicit `up()` above is what actually reconciles.
-- Each `up()` raises `ControllerException (403)` — authentik's controller runs
-  as `kube-system:default`, which lacks `get secrets`, so the reconcile updates
-  the Deployment and then aborts at the Secret comparison. The **image bump
-  still lands**. (Granting that RBAC is an open improvement.)
+  and change nothing.
+- The controller runs as `kube-system:default`, which lacks `get secrets`, so a
+  reconcile aborts at the Secret comparison with `ControllerException (403)`.
+  (Granting that RBAC is an open improvement.)
+
+**Open question, deliberately unresolved.** The *background* `outpost_controller`
+task logged no error at all through the 2026.8.2 upgrade (`exc: null`, zero
+error/warning lines in either worker pod) — the 422 came from the **manual**
+`ak shell` path. Whether the controller reproduces the portless-Service bug on
+its own next reconcile is **untested**. Until someone establishes that, treat any
+outpost save or config change as capable of deleting that outpost's Service, and
+check `kubectl get svc -n kube-system | grep ak-outpost` afterwards.
+
+If a Service does get deleted, recreate it by copying an intact sibling's spec —
+`selector` must match the Deployment's `spec.selector.matchLabels` exactly, and
+ports are `9000` (http) and `9443` (https), both `targetPort` numeric.
 
 ### 3. Verify — and verify the right things
 
