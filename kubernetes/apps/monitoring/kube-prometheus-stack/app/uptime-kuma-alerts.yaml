@@ -17,8 +17,24 @@ spec:
         # endpoint going DOWN routes through the normal notification path (telegram
         # + the Claude push watcher). Kuma monitor_status: 1=up, 0=down, 2=pending,
         # 3=maintenance. Scraped every 30s via the kuma /metrics ServiceMonitor.
+        #
+        # `monitor_type != "group"` (2026-09-12): a Kuma GROUP is a pure rollup
+        # of its children and carries NO independent signal — it reports down
+        # because a child is down, and that child already alerts on its own. The
+        # hierarchy here is three deep (Wyze Cam Entry -> Cameras ->
+        # HomeAutomation), so one unplugged camera paged THREE times, one minute
+        # apart, each page sounding broader than the last. The widest of them
+        # read "Uptime Kuma monitor down: HomeAutomation", which states that the
+        # whole home-automation stack is down when 26/26 pods were Running and
+        # Home Assistant was answering in 4ms. An alert that overstates its own
+        # blast radius trains people to ignore the pager.
+        # Measured at the time of the change: 6 group / 58 ping / 3 json-query /
+        # 1 snmp monitors; the filter turned 3 firing alerts into 1, and the one
+        # that fired named the actual dead device.
+        # NOTE this loses no coverage: every leaf monitor alerts individually, so
+        # a group whose children are ALL down still produces one alert per child.
         - alert: KumaMonitorDown
-          expr: monitor_status == 0
+          expr: monitor_status{monitor_type!="group"} == 0
           for: 2m
           labels:
             severity: warning
