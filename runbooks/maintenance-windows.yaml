@@ -47,9 +47,12 @@ windows:
     duration_min: 90
     capacity_risk: 6
     allow_reboot: false
-    mode: unattended          # autonomy classes key on this (P2.1b, enforced):
-                              # Step 0 safe updates + plans deriving AUTO-* in
-                              # runbooks/autonomy-policy.yaml; rest HUMAN-GATED
+    mode: unattended          # NOTE (2026-09-12): autonomy classes NO LONGER key
+                              # on `mode:` — AUTO-* plans run in ANY window, and
+                              # HUMAN-GATED runs in none without an operator GO.
+                              # `mode:` now only records whether a human is
+                              # expected to be around, which still drives the
+                              # attended-window operator ping.
   - id: sat-attended
     day: saturday
     start: "09:00"

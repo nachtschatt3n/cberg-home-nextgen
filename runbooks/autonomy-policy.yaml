@@ -19,7 +19,14 @@
 # MODEL — a plan's execution class is DERIVED from declared, reviewable FACTS
 # (maintenance-plan.py computes it; plans cannot claim a class directly):
 #
-#   AUTO-NIGHT         may run unattended in a `mode: unattended` window.
+#   AUTO-NIGHT         may run WITHOUT a human, in ANY window regardless of
+#                      its `mode:` (widened 2026-09-12, operator call: the old
+#                      "`mode: unattended` only" wording meant a cron-fired
+#                      ATTENDED window could execute nothing on its own, so
+#                      pre-approved reversible work waited for a human on the
+#                      mornings least likely to have one. `mode:` says whether
+#                      a human is expected around; it does not say whether
+#                      pre-approved work may run).
 #   AUTO-BACKUP-GATED  as above, but only after its named backup gate PASSES
 #                      at runtime (a restore-PROOF, not a freshness timestamp —
 #                      "Schrödinger's backup": verified ≠ restorable).
@@ -52,7 +59,7 @@
 # HUMAN-GATED. KILL SWITCH: empty the `classes:` map (or delete this file)
 # => every plan derives HUMAN-GATED.
 # Changes here are code-reviewed; bump `version`.
-version: "2026.08.26"
+version: "2026.09.12"
 
 first_runs_supervised: 2
 

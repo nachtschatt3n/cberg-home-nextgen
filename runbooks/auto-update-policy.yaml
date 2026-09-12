@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.11.1"
+version: "2026.09.12.1"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -61,7 +61,16 @@ age_waive:
 # block the component entirely. e.g. max: patch  → allow patch, hold minor+.
 deny:
   - match: "*app-template*"
-    reason: "app-template 3.7.3→5.0.0 is a breaking chart migration wrapping ~40 HelmReleases — must be done deliberately, once."
+    reason: "app-template 3.7.3→5.0.0 is a breaking chart migration wrapping ~40
+      HelmReleases — must be done deliberately, once.
+      NARROWED to `max: patch` 2026-09-12 (operator call): the hazard named here is the
+      MAJOR migration, which G1 already blocks on its own (only patch/minor ever reach
+      this rule), so blocking patches added nothing the type gate was not already doing
+      while hiding routine fixes across ~40 HelmReleases. Patches auto-merge. The blast
+      radius is the widest of any component here, so the post-apply health gate carries
+      more weight for this rule than for any other — if a patch ever regresses broadly,
+      restore the FULL block rather than reasoning about which of the 40 broke."
+    max: patch
   - match: "*affine*"
     reason: "affine chart/image bumps carry breaking env→config.json changes even on patch tags (0.27.3) — hold for manual review."
   - match: "*cilium*"
@@ -172,7 +181,14 @@ deny:
   # so that reason was simply false, and a false reason is what makes an
   # operator override a hold that turns out to be real (0.176.0 drops a table).
   - match: "*nextcloud-mcp*"
-    reason: "third-party MCP bridge; upstream ships BREAKING-tagged releases on minor hops (0.176.0 removed the webhook registration API and dropped its table; 0.177.0 tightened create_share). Read the release notes per hop — never an unattended bump."
+    reason: "third-party MCP bridge; upstream ships BREAKING-tagged releases on MINOR hops
+      (0.176.0 removed the webhook registration API and dropped its table; 0.177.0
+      tightened create_share). Every minor hop needs its release notes read by a human.
+      NARROWED to `max: patch` 2026-09-12 (operator call): both breakages this rule cites
+      are minor hops, and the rule's own text says 'on minor hops' — so blocking patches
+      was never justified by its stated reason. Patch bumps on a settled minor line
+      auto-merge; minor+ stays PLAN lane."
+    max: patch
   # Same reasoning as *nextcloud-mcp* above, same required position: without
   # this rule nextcloud-redis falls through to "*nextcloud*" and is held with
   # the Nextcloud SERVER's chart-lockstep/occ/maintenance-mode reason, which is
@@ -242,7 +258,21 @@ deny:
   # REMOVE THIS RULE only together with a plan that states which appVersion the
   # target chart ships and what the rollback class becomes.
   - match: "*grafana*"
-    reason: "chart minors can move appVersion (13.0.1 ships app 13.2.0; 13.1.0+ ships 13.2.1), which crosses forward-only sqlite migrations and downgrades the rollback from git-revert to restore-from-backup. Grafana bumps go through the PLAN lane so the appVersion delta is stated explicitly, per docs/sops/grafana-image-changes.md 'roll the variant, never the version'."
+    reason: "chart minors can move appVersion (13.0.1 ships app 13.2.0; 13.1.0+ ships
+      13.2.1), which crosses forward-only sqlite migrations and downgrades the rollback
+      from git-revert to restore-from-backup. Minor+ goes through the PLAN lane so the
+      appVersion delta is stated explicitly, per docs/sops/grafana-image-changes.md
+      'roll the variant, never the version'.
+      NARROWED to `max: patch` 2026-09-12 (operator call). Every word of the hazard above
+      is about chart MINORS, yet the rule carried no `max:` and so blocked PATCHES too —
+      over-blocking by its own stated reasoning. That is the precise failure mode this
+      file warns about two rules up: a hold whose reason does not survive scrutiny gets
+      overridden by a human, and the real risk rides along unnoticed. Measured 2026-09-12:
+      chart 13.2.3 ships appVersion 13.2.1, IDENTICAL to the running app, and the chart
+      templates the image as .Chart.AppVersion with no pin — so a chart PATCH does not move
+      the binary and crosses no sqlite migration. Patch bumps therefore keep
+      rollback_class git-revert and are safe to auto-merge."
+    max: patch
   - match: "*unpoller*"
     reason: "image v5.2.4 is pinned AHEAD of chart 2.4.0 (appVersion v3.5.0) as of 2026-09-06 (shipped by the now-retired plan unpoller-v5.1.0, commit b3cae4c1). This is the coredns shape: the pinned image.tag permanently outranks appVersion, so a future chart bump would score as a safe minor and land unattended while templating for v3 — and chart templates change semantics between releases (2.4.0 itself added a Service that would have collided with our hand-written one). Chart bumps must go through the PLAN lane until a chart ships appVersion >= the pinned tag AND its values diff is re-vetted against our Service/PodMonitor overrides."
   - match: "*openclaw*"
