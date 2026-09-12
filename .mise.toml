@@ -25,7 +25,7 @@ uv = "latest"
 "aqua:kubernetes-sigs/kustomize" = "5.6.0"
 "aqua:kubernetes/kubectl" = "1.36.0"
 "aqua:mikefarah/yq" = "4.50.1"
-"aqua:siderolabs/talos" = "1.13.10"  # CLI pin — track the CLUSTER (talosVersion in
+"aqua:siderolabs/talos" = "1.14.0"  # CLI pin — track the CLUSTER (talosVersion in
                                      # kubernetes/bootstrap/talos/talconfig.yaml), not Renovate.
                                      # Renovate PR #212 proposes 1.14.0, a minor AHEAD of a v1.13.10
                                      # cluster: the siderolabs/* deny glob matches the dep NAME, so it
