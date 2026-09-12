@@ -30,7 +30,43 @@ rollback_class: backup-restore   # DECLARED 2026-09-06. The change is a DELETE
                           # dashboard's content is byte-equivalent to the
                           # chart ConfigMap that will immediately re-provision
                           # it, so the ConfigMap IS the backup.
-status: awaiting-go   # 2026-09-08 nightly window: condition RE-VERIFIED live (60 x
+status: blocked   # BLOCKED 2026-09-12 sat-attended, with a live operator GO in hand.
+                  # NOT executed: the plan's OWN Pre-check #1 STOP condition fired.
+                  # It says "If `provisionedExternalId` is non-empty, STOP -- the
+                  # situation changed and this plan's premise no longer holds."
+                  # Measured at execution time: external_id =
+                  # /var/lib/grafana/dashboards/sidecar/default/prometheus.json
+                  # (NON-empty), provider sidecarProvider. The "orphaned record with
+                  # an EMPTY provisionedExternalId" that this whole plan is built on
+                  # no longer describes the cluster.
+                  #
+                  # The symptom DOES persist (20 errors / 10 min, the 30s reconcile
+                  # cadence), but the ROOT CAUSE is different from the one modelled
+                  # here. Measured from a verified copy of grafana.db:
+                  #   - THREE dashboards titled "Prometheus / Overview":
+                  #       id 148 uid 05081011-...  id 201 uid a3b1fd60-...
+                  #       id 204 uid 9fa0d141-...  (all folder_id 0, org 1)
+                  #   - TWO provisioning rows point at the SAME file
+                  #     .../sidecar/default/prometheus.json:
+                  #       row 1836 -> dashboard_id 201   row 1864 -> dashboard_id 204
+                  # So the sidecar provisions prometheus.json (which carries uid
+                  # 9fa0d141), its provisioning record for that file resolves to
+                  # dashboard 201 (a DIFFERENT uid), and writing it collides with
+                  # dashboard 204, which already holds 9fa0d141. That is a duplicate-
+                  # provisioning-record collision across three same-titled dashboards,
+                  # NOT an unreachable orphan.
+                  #
+                  # Consequence: the planned DELETE of row 1864 alone would leave row
+                  # 1836 still pointing at the same file and dashboard 204 still
+                  # holding the uid. It is not established that it fixes anything, and
+                  # deleting a provisioning row that now has a VALID external_id is a
+                  # materially different act from clearing an orphan. Needs re-planning
+                  # against the duplicate-collision model, including which of the three
+                  # dashboards is canonical.
+                  #
+                  # Backup gate PASSED before the stop (both limbs) -- see the window
+                  # report. Nothing was deleted; the cluster is unchanged.
+                  # PRIOR: 2026-09-08 nightly window: condition RE-VERIFIED live (60 x
                       # "same uid already exists" in 30m on grafana-598f7c549c-rgkxh,
                       # matching the plan's ~2880/day). NOT run: derived class is
                       # HUMAN-GATED (rollback_class: backup-restore names no
