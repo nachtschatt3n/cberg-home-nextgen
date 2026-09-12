@@ -27,7 +27,14 @@ capability_change: false              # base-image bump only; mcpo's own image
                                        # its config.json are untouched
 rollback_class: git-revert
 finding_refs: []
-status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
+status: awaiting-go   # 2026-09-12 sat-attended (cron-triggered, operator away):
+                 # premise re-checked mechanically -> PASS. go/no-go ingested to
+                 # OpenClaw home-operation. NOT run: the slot is mode: attended,
+                 # which confers no AUTO-NIGHT autonomy, and
+                 # `decisions --pending-exec` returned empty (no confirmed
+                 # approval). Deferred to the next attended window with an
+                 # operator GO.
+                 # Prior: VETTED 2026-09-06. Premise checked against the LIVE
                  # cluster, not against the plan's own prose:
                  # `python --version` in the running ai/mcpo pod reports
                  # 3.11.2, matching the `3.11-slim` premise. The image tag is

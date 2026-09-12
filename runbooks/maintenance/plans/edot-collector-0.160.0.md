@@ -34,7 +34,14 @@ capability_change: false          # no user-visible behaviour change; internal
 rollback_class: git-revert        # image tag only; config unchanged; bbolt queue
                                   # schema unchanged between 0.158/0.159/0.160
 finding_refs: []
-status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
+status: awaiting-go   # 2026-09-12 sat-attended (cron-triggered, operator away):
+                 # premise re-checked mechanically -> PASS. go/no-go ingested to
+                 # OpenClaw home-operation. NOT run: the slot is mode: attended,
+                 # which confers no AUTO-NIGHT autonomy, and
+                 # `decisions --pending-exec` returned empty (no confirmed
+                 # approval). Deferred to the next attended window with an
+                 # operator GO.
+                 # Prior: VETTED 2026-09-06. Premise checked against the LIVE
                  # cluster, not against the plan's own prose:
                  # live image is otel/opentelemetry-collector-
                  # contrib:0.158.0, matching `current`.
