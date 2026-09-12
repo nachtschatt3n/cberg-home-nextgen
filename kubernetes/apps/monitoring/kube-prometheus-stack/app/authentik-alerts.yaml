@@ -102,9 +102,65 @@ spec:
       # (no panic or concurrent-write line in any replica; that fix shipped in
       # 2026.5 and we run 2026.8.0).
       #
-      # Not blinded: a sustained disconnect still pages, 8 min later. Separately
-      # worth knowing -- a DEAD outpost stops exporting the series altogether, so
-      # `== 0` never catches that at all; absence needs its own rule.
+      # Not blinded: a sustained disconnect still pages. Separately worth knowing
+      # -- a DEAD outpost stops exporting the series altogether, so `== 0` never
+      # catches that at all; absence needs its own rule. That rule now exists:
+      # AuthentikOutpostMetricsAbsent, directly below.
+      #
+      # RE-MEASURED 2026-09-12, and the 2026-08-20 measurement above NO LONGER
+      # HOLDS. That round found the churn confined to the EMBEDDED outpost, with
+      # dips of 30-270s and "the 13 k8s forward-auth outposts never flapped
+      # once". Both halves have since changed:
+      #   * the k8s forward-auth outposts DO flap now -- over 6h, homepage logged
+      #     7 reconnect/7 connect cycles and longhorn 8/8. They are equally
+      #     affected; longhorn only looked healthy because no alert had caught it.
+      #   * each dip is now ~300s, not 30-270s, because the outpost's reconnect
+      #     backoff has saturated at its 300s cap ("reconnecting websocket in
+      #     300s...", attempt 91 on homepage). The dip length is now set by the
+      #     backoff cap, not by how long the fault lasts.
+      # Two consecutive drops therefore clear 10m easily, which is why this paged
+      # at 05:16Z on 2026-09-12 for zero impact -- both alerts self-resolved.
+      # 20m sits above two full backoff cycles and still pages on a sustained
+      # disconnect.
+      #
+      # IMPACT BOUND, measured not assumed: a ws drop is NOT an auth outage. The
+      # outpost keeps serving over HTTP throughout -- homepage completed its
+      # interval refresh mid-drop at 05:11:15Z ("loaded application
+      # host=homepage.<DOMAIN>"). Only the config PUSH channel is down, so the
+      # description's "may be inaccessible" overstates this failure mode.
+      #
+      # ROOT CAUSE STILL NOT IDENTIFIED -- this raises the threshold above the
+      # re-measured noise floor, it does not explain the churn. Newly ruled out
+      # 2026-09-12: the backchannel hypothesis (docs/sops/authentik.md, Rust
+      # outposts needing the in-cluster service). All outposts already resolve
+      # AUTHENTIK_HOST to the in-cluster authentik-server Service rather than
+      # the public path, byte-identical on flapping and quiet outposts alike, so
+      # config is not the differentiator. Tracked as F-bd54183f.
+      for: 20m
+      labels:
+        category: authentication
+        component: authentik-outpost
+        severity: critical
+    # The absence guard the AuthentikOutpostDisconnected comment calls for.
+    # `authentik_outpost_connection == 0` can only fire on a series that still
+    # EXISTS; if authentik-server stops exporting outpost metrics entirely the
+    # disconnect rule goes quiet and looks healthy. absent() is deliberately
+    # chosen over a per-outpost count-drop check: a count-drop rule also fires
+    # every time an outpost is intentionally removed (as kubernetes-dashboard
+    # was) or rolls during a chart bump, and no measured baseline exists yet to
+    # set that threshold honestly. Per-outpost vanish detection is left as
+    # follow-up on F-bd54183f rather than shipped unmeasured.
+    - alert: AuthentikOutpostMetricsAbsent
+      annotations:
+        description: authentik_outpost_connection has not been exported at all for
+          10 minutes. Outpost connection state is now UNMONITORED -- AuthentikOutpostDisconnected
+          cannot fire while the series is missing, so treat this as loss of signal,
+          not as proof that outposts are healthy. Check authentik-server pods and
+          the authentik-server-metrics ServiceMonitor.
+        runbook_url: https://docs.goauthentik.io/docs/outposts/
+        summary: Authentik outpost metrics are absent - outpost health is unmonitored
+      expr: |
+        absent(authentik_outpost_connection)
       for: 10m
       labels:
         category: authentication
