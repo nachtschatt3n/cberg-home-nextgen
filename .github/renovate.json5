@@ -85,6 +85,26 @@
       }
     },
     {
+      // n8n publishes its beta/next/rc channel on the NEXT MINOR line with no
+      // prerelease marker in the tag, so plain semver tracking proposes betas
+      // as ordinary minor bumps. Measured 2026-09-12: `stable` and `latest`
+      // both resolved to 2.38.7, while `next`, `beta` and `rc` all resolved to
+      // the SAME digest as 2.39.4 — i.e. PR #213 (2.38.4 -> 2.39.4) was the
+      // beta wearing a bare version number, and nothing in the tag could tell
+      // us that. Renovate reads registry semver and cannot see dist-tags, so
+      // it would keep re-proposing the beta every time 2.39.x advanced.
+      //
+      // `followTag: "stable"` pins tracking to the channel pointer instead of
+      // the highest semver, so Renovate proposes only what upstream has
+      // actually promoted. This is the DURABLE fix; auto-update-policy.yaml's
+      // `max: patch` on *n8n* stays as defence in depth, because followTag
+      // trusts upstream to keep the pointer honest and the policy rule does
+      // not.
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["n8nio/n8n"],
+      "followTag": "stable"
+    },
+    {
       "matchDatasources": ["docker"],
       "matchUpdateTypes": ["major"],
       "commitMessagePrefix": "feat(container)!: ",
