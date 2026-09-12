@@ -304,6 +304,53 @@ kubectl exec -n monitoring <grafana-pod> -c dbread -- \
 PID namespace, so PID 1 is *Grafana's* process — doing so restarted Grafana on
 2026-09-12. Let the `sleep` expire, or exit the shell.
 
+### THE ABOVE READS THE DB. IT CANNOT WRITE TO IT. (proven 2026-09-12)
+
+An execution attempt with a live operator GO stopped here. The ephemeral-container
+route can `tar` the file out, but **sqlite cannot open any database on the
+Longhorn PVC through `/proc/1/root`** — so the DELETE cannot be performed this
+way. Measured, in this order, so the conclusion is not a guess:
+
+```
+ls / head / open(path,'r+b')       on grafana.db      -> OK (readable AND writable)
+touch  <pvcdir>/.writetest                            -> WRITABLE
+sqlite3.connect('<pvcdir>/grafana.db')                -> "unable to open database file"
+sqlite3.connect('<pvcdir>/grafana.db')  via chdir     -> "unable to open database file"
+sqlite3.connect('/proc/1/root/tmp/_probe.db')         -> OK      <- /proc is NOT the blocker
+sqlite3.connect('<pvcdir>/_probe.db')   (brand new)   -> "unable to open database file"
+```
+
+The last two lines are the decisive pair: sqlite works fine under `/proc` on the
+emptyDir `/tmp`, and fails on the PVC directory even for a **brand-new** file. So
+it is neither the `/proc` prefix nor the existing `grafana.db` — it is that
+sqlite must open the containing directory (for the journal + fsync) and that
+fails across the mount boundary into another container's Longhorn mount. Plain
+`open()` never touches the directory, which is why raw reads mislead here.
+
+**Corrected execution methods — the operator must pick one, they differ in blast
+radius and the original GO did not cover either:**
+
+- **M1 — helper Pod mounting `grafana-config` directly, pinned to Grafana's
+  node.** Gives sqlite a real path, so locking works and the single-row DELETE is
+  safe alongside a running Grafana (sqlite is built for exactly this). Cost: the
+  PVC is RWO Longhorn, so the helper MUST be pinned (`nodeName`) to the node
+  Grafana is on. If it lands elsewhere the volume goes `Multi-Attach` and Grafana
+  goes down — see `docs/sops/longhorn-rwo-multi-attach.md`. No downtime when
+  pinned correctly.
+- **M2 — scale Grafana to 0, mount the PVC in a helper Pod, edit, scale back.**
+  Zero concurrency risk and zero Multi-Attach risk (the volume is detached
+  first), at the cost of ~2 minutes of Grafana downtime. Note the Deployment is
+  Flux-managed, so the scale-down races the next reconcile; suspend the
+  HelmRelease or complete inside the reconcile interval.
+
+M2 is the safer of the two and the recommended default; M1 avoids downtime but
+puts a live RWO attach at stake to save two minutes on a repair whose urgency is
+low.
+
+**Do NOT attempt copy-out / edit / copy-back.** Grafana writes to this database
+continuously (the file's mtime moved twice during a single investigation), so
+restoring an edited copy would silently discard every write made in between.
+
 ## 6. Steps, and the rollback held ready
 
 Record the exact row contents **before** removing anything — this IS the
