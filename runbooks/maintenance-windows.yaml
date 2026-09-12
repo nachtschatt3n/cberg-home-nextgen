@@ -34,7 +34,7 @@
 # scheduled plans' window: fields, the OpenClaw crons' payloads, and the live
 # GO/issue records — a rename without that migration orphans a live GO.
 # Edit freely (git-tracked); bump `version`.
-version: "2026.09.06.1"
+version: "2026.09.12.1"
 timezone: Europe/Berlin
 
 windows:
@@ -60,7 +60,28 @@ windows:
   - id: sun-attended
     day: sunday
     start: "09:00"
-    duration_min: 150         # RAISED 2026-09-06 from 90. A full 3-node Talos
+    duration_min: 200         # RAISED 2026-09-12 from 150. The 150 was sized on an
+                              # ESTIMATE of 115 min for the roll, leaving a 35-min
+                              # margin. The talos-1.14.0 plan, once actually written,
+                              # estimates 140 min IN-WINDOW -- so the margin the 150
+                              # was built to provide had already been spent before the
+                              # window arrived, leaving 10 min. Ten minutes is not a
+                              # rollback budget for a node-reboot plan: rolling back a
+                              # Talos node is another reboot cycle (~45 min for node
+                              # 01), not a git revert.
+                              # 200 = 140 (plan) + 45 (single-node rollback, the
+                              # realistic worst case -- you roll back the node that
+                              # failed, not all three) + 15 (the plan's final alert
+                              # gate requires firing:0 SUSTAINED for >=15 min, which
+                              # sits at the very end and is the first thing shortchanged
+                              # when the clock is against you).
+                              # This is a slot-wide CEILING, not a commitment: windows
+                              # consume what their plans need, and most Sundays need far
+                              # less. Sizing it honestly is the same principle that drove
+                              # the 90->150 change -- a window we intend to run must not
+                              # trip the reconciler's OVER-TIME check, because that
+                              # trains people to ignore the check.
+                              # PRIOR REASONING (2026-09-06, raised 90->150): A full 3-node Talos
                               # roll is 70 min (nodes 02+03) + 45 min (node 01)
                               # = 115 min, and 90 was already the binding
                               # constraint that forced the roll to be split

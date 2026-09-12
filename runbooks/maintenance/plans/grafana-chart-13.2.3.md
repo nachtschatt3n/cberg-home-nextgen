@@ -1,12 +1,12 @@
 ---
-plan_id: grafana-chart-13.2.2
+plan_id: grafana-chart-13.2.3
 component: grafana
 pr: null                          # no Renovate PR supplied with this held update;
                                   # verify no open PR exists before hand-editing
                                   # (grep open PRs titled "grafana" first)
 kind: chart
 current: "13.2.1"
-target: "13.2.2"
+target: "13.2.3"
 update_type: patch
 risk: low
 est_duration_min: 15
@@ -75,12 +75,22 @@ premises:
     expect_exact: "True"
   - id: target-chart-appversion-unchanged
     why: >-
-      This IS the plan's central claim: chart 13.2.2 must still ship
+      This IS the plan's central claim: chart 13.2.3 must still ship
       appVersion 13.2.1 (identical to what runs today), or the low-risk /
       git-revert verdict below is void and this plan must be re-triaged as
       appVersion-unsafe per docs/sops/grafana-image-changes.md.
-    run: helm show chart grafana-community/grafana --version 13.2.2 | grep '^appVersion:'
+    run: helm show chart grafana-community/grafana --version 13.2.3 | grep '^appVersion:'
     expect_exact: "appVersion: 13.2.1"
+  - id: repo-cache-has-target
+    why: >-
+      The appVersion premise below shells out to `helm show chart ... --version
+      13.2.3`, which FAILS on a stale local index cache -- and at exit-code
+      level that is indistinguishable from the appVersion having moved. Prove
+      the cache can see the target first, so a cache miss cannot masquerade as
+      a real premise failure. Refresh with `helm repo update grafana-community`
+      if this fails.
+    run: helm show chart grafana-community/grafana --version 13.2.3 | grep '^version:'
+    expect_exact: "version: 13.2.3"
   - id: current-chart-appversion-matches
     why: >-
       Confirms the CURRENT chart (13.2.1) also ships appVersion 13.2.1, so
@@ -91,7 +101,7 @@ premises:
 generated: "2026-09-11"
 ---
 
-# grafana: chart 13.2.1 -> 13.2.2 (patch)
+# grafana: chart 13.2.1 -> 13.2.3 (patch)
 
 ## 1) Summary & why held
 
@@ -118,18 +128,19 @@ HelmRelease's `sourceRef` actually points at; `grafana.github.io` is a
 different, frozen index at chart 10.5.15 and answers the wrong question if
 queried instead), two independent ways:
 
-1. Direct fetch + parse of the repo's `index.yaml` (2026-09-11):
+1. Direct fetch + parse of the repo's `index.yaml` (RE-MEASURED 2026-09-12):
    ```
+   13.2.3   appVersion 13.2.1                                  <- new target
    13.2.2   appVersion 13.2.1   created 2026-09-06T20:56:35Z
    13.2.1   appVersion 13.2.1   created 2026-09-04T15:14:29Z   <- live today
    13.2.0   appVersion 13.2.1   created 2026-09-04T02:02:08Z
    13.1.0   appVersion 13.2.1   created 2026-09-03T07:15:11Z
    13.0.1   appVersion 13.2.0   created 2026-08-28T21:18:19Z
    ```
-2. `helm show chart grafana-community/grafana --version {13.2.1,13.2.2}` —
+2. `helm show chart grafana-community/grafana --version {13.2.1,13.2.3}` —
    both report `appVersion: 13.2.1` (also cross-checked via
    `helm search repo grafana-community/grafana --versions`, which further
-   confirms **13.2.2 is the newest chart published as of this check** — no
+   confirms **13.2.3 is the newest chart published as of this check** — no
    later version has shipped that this plan would be silently stale against).
 
 **Conclusion: appVersion is UNCHANGED (13.2.1 -> 13.2.1).** No Grafana app
@@ -145,7 +156,7 @@ here rather than assumed, and re-checked at execution time via the
 **appVersion-unchanged also means the container image is byte-identical.**
 The chart's own `values.yaml` sets `image.tag: "{{ .Chart.AppVersion
 }}-distroless"` with no digest pin either side — since `AppVersion` is
-`13.2.1` for both chart 13.2.1 and 13.2.2, the rendered image reference is
+`13.2.1` for both chart 13.2.1 and 13.2.3, the rendered image reference is
 `grafana/grafana:13.2.1-distroless` **on both sides of this bump**. This is
 not a version bump for the running binary at all; it is a chart-packaging
 patch only. Live-confirmed running image today:
@@ -153,12 +164,12 @@ patch only. Live-confirmed running image today:
 monitoring -o jsonpath=...`).
 
 **Render-diff against OUR real values** (`helm template` of chart 13.2.1 vs
-13.2.2, both fed the actual `spec.values` block from
+13.2.3, both fed the actual `spec.values` block from
 `kubernetes/apps/monitoring/grafana/app/helmrelease.yaml` — not chart
 defaults): the two renders differ in exactly two ways, both routine and
 neither structural:
 
-- `helm.sh/chart: grafana-13.2.1` -> `grafana-13.2.2` on every labeled object
+- `helm.sh/chart: grafana-13.2.1` -> `grafana-13.2.3` on every labeled object
   (expected on any chart bump; carries no behavioural meaning).
 - `checksum/dashboards-json-config` on the Deployment pod template changes —
   this is a direct, mechanical consequence of the label above: the checksum
@@ -172,12 +183,61 @@ neither structural:
   sides — a second, independent confirmation of the appVersion finding above,
   now from the rendered manifest rather than the chart's own metadata.
 
-The one template-level change in the chart source between 13.2.1 and 13.2.2 is
+The one template-level change in the chart source between 13.2.1 and 13.2.3 is
 in `templates/servicemonitor.yaml`: it adds an optional
 `.Values.serviceMonitor.labels.release` override (falls back to
 `.Release.Name` if unset). We do not set `serviceMonitor.labels`, so the
 rendered `ServiceMonitor` is identical either way (`release: "grafana"` on
 both renders) — confirmed, not assumed.
+
+**NEW IN 13.2.3 — a values default that DOES reach our rendered config.**
+Re-measured 2026-09-12 by diffing the unpacked chart source 13.2.1 vs 13.2.3,
+the source delta is exactly two files: `templates/servicemonitor.yaml` (the
+override above, inert for us) and `values.yaml`, which adds under `grafana.ini`:
+
+```yaml
+grafana.ini:
+  plugins:
+    preinstall_auto_update: "false"
+```
+
+This one is **not** inert. Our HelmRelease sets only `grafana.ini.server` and
+`grafana.ini.analytics` (checked, not assumed), so it does not override
+`plugins`, and Helm deep-merges the chart default in. The live `grafana`
+ConfigMap has **no `[plugins]` section today** — after this bump it will gain
+`preinstall_auto_update = false`.
+
+Effect: preinstalled plugins stop auto-updating on Grafana startup. That is a
+*desirable* change for a GitOps cluster (it makes plugin versions deterministic
+rather than drifting on every pod restart), and it is the direction upstream is
+moving. But it must be stated rather than waved through, because it means the
+honest description of this hop is **not** "a chart patch that changes nothing":
+the rendered `grafana.ini` changes, and that rolls the pod on its own merits —
+independently of the `checksum/dashboards-json-config` churn described above.
+
+It does **not** affect the rollback class: the setting is chart-values-derived,
+so `git revert` restores the previous ConfigMap exactly. And it crosses no
+sqlite migration — appVersion is still 13.2.1.
+
+The §4 plugin-count check is the one that would catch an unwanted consequence
+here, so do not skip it as boilerplate on a "patch".
+
+**Local helm repo cache gotcha — affects the premises below.** The
+`target-chart-appversion-unchanged` premise shells out to `helm show chart
+grafana-community/grafana --version 13.2.3`. That command **fails on a stale
+local index cache**, and it failed exactly that way during this replan: the
+`grafana-community` alias had no 13.2.3 in its cached index until refreshed,
+while a *different alias pointing at the same URL* already did. A premise
+failing for cache reasons is indistinguishable, at exit-code level, from the
+appVersion having genuinely moved — and this plan's whole safety argument
+routes through that premise. **Run `helm repo update grafana-community` before
+the premise check.** (Confirmed same-source: the in-cluster HelmRepository
+`grafana` in `flux-system` resolves to
+`https://grafana-community.github.io/helm-charts`, which is the URL behind the
+`grafana-community` alias — so the local measurement is apples-to-apples with
+what Flux will actually pull. Note there is ALSO a local alias literally named
+`grafana` pointing at `grafana.github.io/helm-charts`, a different repo; using
+it here would answer the wrong question.)
 
 **`Deployment.spec.selector.matchLabels` is unchanged** between the two
 renders (`app.kubernetes.io/name: grafana`, `app.kubernetes.io/instance:
@@ -198,7 +258,7 @@ chart bumps in general (the next hop must be re-measured the same way).
 
 ## 2) Pre-checks
 
-Run all `premises:` above first (`plan-premises.py grafana-chart-13.2.2`).
+Run all `premises:` above first (`plan-premises.py grafana-chart-13.2.3`).
 Then:
 
 ```bash
@@ -242,21 +302,21 @@ short (1h) silence on `alertname=~"Grafana.*|KubePodNotReady.*"` scoped to
        spec:
          chart: grafana
          version: 13.2.1     # ->
-         version: 13.2.2
+         version: 13.2.3
    ```
 2. Add a dated comment line to the existing history block (do not delete the
    prior history — it is load-bearing evidence for the next planner):
    ```
-   # 2026-09-1x: chart 13.2.2 — routine patch. appVersion UNCHANGED at 13.2.1
-   # (measured against both chart 13.2.1 and 13.2.2 via
+   # 2026-09-1x: chart 13.2.3 — routine patch. appVersion UNCHANGED at 13.2.1
+   # (measured against both chart 13.2.1 and 13.2.3 via
    # grafana-community.github.io/helm-charts index + `helm show chart`), so
    # this hop crosses no sqlite migration; git-revert remains a real
-   # rollback. Plan: grafana-chart-13.2.2. Finding: F-cce839da.
+   # rollback. Plan: grafana-chart-13.2.3. Finding: F-cce839da.
    ```
 3. Commit and push:
    ```bash
    git commit --only kubernetes/apps/monitoring/grafana/app/helmrelease.yaml \
-     -m "chore(monitoring): grafana chart 13.2.1 -> 13.2.2 (plan grafana-chart-13.2.2, appVersion unchanged at 13.2.1)"
+     -m "chore(monitoring): grafana chart 13.2.1 -> 13.2.3 (plan grafana-chart-13.2.3, appVersion unchanged at 13.2.1)"
    git push
    ```
 4. Let Flux reconcile (interval 30m on this HelmRelease's Kustomization) or,
@@ -278,7 +338,7 @@ Floor checks (shape — necessary but not sufficient on their own):
 ```bash
 kubectl get helmrelease grafana -n monitoring \
   -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.history[0].chartVersion}{"\n"}'
-# expect: True 13.2.2
+# expect: True 13.2.3
 flux get kustomization grafana -n flux-system
 kubectl get pods -n monitoring -l app.kubernetes.io/name=grafana
 kubectl get deploy grafana -n monitoring \
@@ -342,7 +402,7 @@ kill %1
 curl -s http://localhost:9090/api/v1/alerts | grep -o '"alertname":"[^"]*"' | grep -vE 'Watchdog|InfoInhibitor' | sort -u
 ```
 
-**PASS criteria:** HelmRelease Ready at chart 13.2.2; running image tag still
+**PASS criteria:** HelmRelease Ready at chart 13.2.3; running image tag still
 `13.2.1-distroless`; migration log shows `performed=0`; bundled/datasource
 plugin count and list not lower than the §2 baseline; all six datasource
 health checks OK; Alertmanager proxy returns config; `/api/ds/query` returns
@@ -425,7 +485,7 @@ plan — there is no schema migration to be behind on either direction.
 
 - **Re-run the appVersion premises at execution time, not just at planning
   time.** This plan's low-risk verdict is conditioned entirely on the
-  measurement in §1 still holding — if chart 13.2.2 gets repackaged (rare but
+  measurement in §1 still holding — if chart 13.2.3 gets repackaged (rare but
   not impossible for a `helm-charts` repo) or a later plan changed the
   HelmRelease's `image.tag`, the whole argument for `git-revert` collapses and
   this plan should be blocked pending re-triage, not executed on stale
