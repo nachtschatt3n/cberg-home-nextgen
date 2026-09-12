@@ -254,10 +254,27 @@ def deny_rule_for(policy, name, utype):
     """The deny rule that BLOCKS (name, utype), else None.
 
     Same traversal `denied()` uses — deliberately, because the two must never
-    disagree about which rule is in force. Note the traversal does NOT stop at
-    the first rule whose glob matches: it stops at the first rule that actually
-    blocks, so a narrow `max:` rule can still fall through to a later catch-all
-    (e.g. `*nextcloud-mcp*` max:patch → `*nextcloud*` full block for a PATCH).
+    disagree about which rule is in force.
+
+    THE FIRST RULE WHOSE GLOB MATCHES DECIDES, and its verdict is final
+    (changed 2026-09-12). Ordering IS how this file expresses specificity: the
+    policy YAML places `*nextcloud-mcp*` above `*nextcloud*` and says in a
+    comment "first match wins", precisely so the MCP bridge is judged by its
+    own reason. The traversal used to continue past a rule that matched but
+    did not block, which meant a narrow `max: patch` rule fell through to a
+    later catch-all — so `nextcloud-mcp` PATCH was blocked, and blocked while
+    reporting the Nextcloud SERVER's occ-migration reason, which is false for a
+    standalone bridge with no chart coupling and no occ. That is the exact
+    failure the policy file warns about two rules above the pair: a hold
+    carrying a false reason gets overridden by a human, and the real risk rides
+    along unnoticed. It also silently made the operator's 2026-09-12 narrowing
+    inert.
+
+    Consequence to keep in mind when EDITING the policy: a narrow rule now
+    shadows every later rule for the components it matches, so a catch-all can
+    no longer backstop it. Put the specific rule first and make its reason
+    true on its own.
+
     `auto-update.py::policy_block` has the identical shape; keep them in step.
 
     Split out so the `max:` fallback lane below can read the rule ITSELF (its
@@ -269,6 +286,9 @@ def deny_rule_for(policy, name, utype):
             mx = rule.get("max")
             if mx is None or RANK.get(utype, 99) > RANK.get(mx, -1):
                 return rule
+            # Matched, and `max:` permits this update type: that is a decisive
+            # ALLOW. Do NOT keep scanning — see the docstring.
+            return None
     return None
 
 

@@ -182,17 +182,49 @@ class NoRegressionTest(_Stubbed):
         it = item("n8n", "2.38.4", "2.38.5", "patch", repo="n8nio/n8n")
         self.assertEqual(cov.max_rule_fallbacks([it], N8N_POLICY, {}), [])
 
-    def test_deny_semantics_unchanged_by_the_refactor(self):
-        """`denied()` was re-expressed via `deny_rule_for()`. It must still scan
-        PAST a non-blocking `max:` rule to a later catch-all — auto-update.py's
-        `policy_block()` has that same shape and the two must not diverge."""
+    def test_first_matching_rule_decides_and_is_final(self):
+        """THE regression guard for 2026-09-12. The traversal must STOP at the
+        first rule whose glob matches: a narrow `max:` rule shadows every later
+        catch-all for the components it matches.
+
+        History: it used to scan PAST a matching-but-not-blocking rule, so
+        `nextcloud-mcp` PATCH was blocked by the `*nextcloud*` catch-all — and
+        blocked while REPORTING THE SERVER'S occ-migration reason, which is
+        false for a standalone bridge with no chart coupling and no occ. That
+        made the operator's narrowing silently inert and attached a false
+        reason to a real hold, which is how holds get overridden."""
         pol = {"deny": [
             {"match": "*nextcloud-mcp*", "reason": "mcp minors", "max": "patch"},
             {"match": "*nextcloud*", "reason": "occ migrations"},
         ]}
+        # the narrow rule still blocks what IT blocks
         self.assertIn("mcp minors", cov.denied(pol, "nextcloud-mcp", "minor"))
-        self.assertIn("occ migrations", cov.denied(pol, "nextcloud-mcp", "patch"))
+        # ...and its ALLOW is decisive: no fallthrough to the catch-all
+        self.assertIsNone(cov.denied(pol, "nextcloud-mcp", "patch"))
+        # the catch-all is untouched for everything it legitimately covers
+        self.assertIn("occ migrations", cov.denied(pol, "nextcloud", "patch"))
         self.assertIsNone(cov.denied(pol, "unrelated-app", "patch"))
+
+    def test_policy_block_parity_with_denied(self):
+        """auto-update.py::policy_block and coverage.py::denied must never
+        disagree about which rule is in force — they gate the same merges from
+        two different lanes. Parity is asserted on the exact shape that
+        diverged, not on a toy case."""
+        import importlib.util as _u
+        _sp = _u.spec_from_file_location(
+            "au_parity", os.path.join(_HERE, "..", "auto-update.py"))
+        au = _u.module_from_spec(_sp); _sp.loader.exec_module(au)
+        pol = {"deny": [
+            {"match": "*nextcloud-mcp*", "reason": "mcp minors", "max": "patch"},
+            {"match": "*nextcloud*", "reason": "occ migrations"},
+        ]}
+        for name, utype in [("nextcloud-mcp", "patch"), ("nextcloud-mcp", "minor"),
+                            ("nextcloud", "patch"), ("unrelated-app", "patch")]:
+            with self.subTest(name=name, utype=utype):
+                self.assertEqual(
+                    cov.denied(pol, name, utype) is None,
+                    au.policy_block(pol, name, utype) is None,
+                    f"denied() and policy_block() disagree on {name}/{utype}")
 
 
 # ── 4. the fallback is a SOURCE, not a bypass ───────────────────────────────

@@ -164,6 +164,10 @@ def policy_block(policy, dep, update_type):
         # rule allows up to `mx`; block only if this update exceeds it
         if RANK.get(update_type, 99) > RANK.get(mx, -1):
             return f"{rule.get('reason','')} (allows ≤{mx}, this is {update_type})"
+        # Matched and permitted => decisive ALLOW; stop scanning. The first
+        # matching rule decides (2026-09-12). Kept in lockstep with
+        # coverage.py::deny_rule_for, whose docstring carries the reasoning.
+        return None
     return None
 
 
