@@ -25,6 +25,13 @@ Lanes (operator policy, 2026-08-02):
   HELD    — explicitly held/accepted (e.g. openclaw node 22). No action.
   CRACK   — actionable but in NONE of the above. MUST never happen → CRITICAL.
 
+A FOURTH source of candidates was added 2026-09-12: `max_rule_fallbacks()`. A
+deny rule carrying `max: patch` permits patches, but Renovate only ever proposes
+the NEWEST version — the blocked one — and the Renovate-PR shortcut then counted
+that PR as coverage, so the permitted update was invisible to both halves of
+Step 0. It now emits the stable-channel head as an ordinary direct-bump
+candidate, holding fail-safe when the channel cannot be positively confirmed.
+
 CRACK==0 is only a safety property if the UNIVERSE is complete. Until
 2026-08-18 it was not: the detector read the overview table alone, which lists
 ONE image per app, so every init/sidecar/base image and every non-HelmRelease
@@ -243,15 +250,34 @@ def load_policy():
         return {"deny": []}
 
 
-def denied(policy, name, utype):
-    """Return a reason if the deny-list blocks (name, utype), else None."""
+def deny_rule_for(policy, name, utype):
+    """The deny rule that BLOCKS (name, utype), else None.
+
+    Same traversal `denied()` uses — deliberately, because the two must never
+    disagree about which rule is in force. Note the traversal does NOT stop at
+    the first rule whose glob matches: it stops at the first rule that actually
+    blocks, so a narrow `max:` rule can still fall through to a later catch-all
+    (e.g. `*nextcloud-mcp*` max:patch → `*nextcloud*` full block for a PATCH).
+    `auto-update.py::policy_block` has the identical shape; keep them in step.
+
+    Split out so the `max:` fallback lane below can read the rule ITSELF (its
+    `max`, its `reason`) rather than only the string `denied()` returns.
+    """
     for rule in policy.get("deny", []) or []:
         pat = rule.get("match", "")
         if pat and _match_anywhere(name, pat):
             mx = rule.get("max")
             if mx is None or RANK.get(utype, 99) > RANK.get(mx, -1):
-                return rule.get("reason", f"deny rule {pat!r}")
+                return rule
     return None
+
+
+def denied(policy, name, utype):
+    """Return a reason if the deny-list blocks (name, utype), else None."""
+    rule = deny_rule_for(policy, name, utype)
+    if rule is None:
+        return None
+    return rule.get("reason", f"deny rule {rule.get('match')!r}")
 
 
 _ROW = re.compile(r"^\|\s*`?([^`|]+?)`?\s*\|\s*`?([^`|]*)`?\s*\|\s*([^|]*)\|\s*([^|]*)\|\s*([^|]*)\|\s*([^|]*)\|\s*$")
@@ -984,6 +1010,346 @@ def direct_bump_age_gate(item, policy):
     return None
 
 
+# ── The `max:` fallback — an ALLOWED update masked by a BLOCKED one ─────────
+# WHY THIS EXISTS (2026-09-12, operator lever #3). A deny rule carrying `max:`
+# says "patches are fine, minor+ is not". Nothing in the pipeline could act on
+# the first half:
+#
+#   * auto-update.py only ever sees OPEN Renovate PRs, and Renovate proposes the
+#     NEWEST version — which for a `max:`-held component is by definition the
+#     blocked one. G2 holds it. Correct, and the end of that road.
+#   * coverage.py's direct-bump lane is the no-PR path, and the component HAS a
+#     PR, so the Renovate-PR shortcut in assign_lane() claimed it as covered.
+#
+# Measured case: n8n publishes beta/next on the next MINOR line with no
+# prerelease marker, so it is held at `max: patch`. Renovate's PR proposed
+# 2.38.4 -> 2.39.4 (the beta, correctly blocked) while 2.38.4 -> 2.38.7 — a
+# plain patch on the STABLE line, explicitly permitted by that same rule — was
+# invisible to both halves of Step 0 and could never land.
+#
+# This lane adds a SOURCE of candidates, never a bypass: every candidate it
+# emits is re-run through assign_lane() and must clear G1 (type), G2 (the rule's
+# own `max:`), G3 (breaking signal), G5 (release-age cooldown) exactly like any
+# other direct bump. G4 (CI) is not applicable — a direct bump has no PR, which
+# is the pre-existing property of this whole lane.
+#
+# THE HARD PART IS THE CHANNEL, and it is where this fails SAFE. The only
+# reason a component carries `max:` at all is that registry semver cannot
+# distinguish its stable line from its beta line; so "newest semver the rule
+# allows" is precisely the wrong oracle — it would re-create the hazard the rule
+# exists to prevent, one minor lower. A candidate is therefore eligible ONLY
+# when upstream's own STABLE channel pointer is read and positively confirms it.
+# An unresolvable channel is a HOLD, never a pass.
+#
+# The lookup is a read-only, timeout-bounded registry read kept inside this
+# module on purpose: `plan-premises.py`'s allowlist refuses network verbs and
+# must NOT be widened to accommodate this.
+_UA = "cberg-coverage"
+_CHANNEL_TAGS = ("stable", "latest")
+_VERSION_LABELS = ("org.opencontainers.image.version", "org.label-schema.version")
+_PLAIN_VERSION = re.compile(r"^v?\d+(?:\.\d+){1,3}$")
+_CHANNEL_TIMEOUT = 12
+_MANIFEST_ACCEPT = ",".join([
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+])
+_STABLE_HEAD_CACHE: dict = {}
+
+
+def _registry_coords(image_ref: str):
+    """(registry_host, auth_host, auth_service, repo_path) for an image ref."""
+    ref = str(image_ref).strip()
+    if ref.startswith("docker.io/"):
+        ref = ref[len("docker.io/"):]
+    host = ref.split("/")[0]
+    if "." not in host and ":" not in host:
+        path = ref if "/" in ref else "library/" + ref
+        return "registry-1.docker.io", "auth.docker.io", "registry.docker.io", path
+    return host, host, host, "/".join(ref.split("/")[1:])
+
+
+def _http_json(url: str, headers: dict, timeout: int):
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": _UA, **headers})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read()), dict(resp.headers)
+
+
+def _registry_token(auth_host: str, service: str, path: str, timeout: int):
+    d, _ = _http_json(
+        f"https://{auth_host}/token?service={service}&scope=repository:{path}:pull",
+        {}, timeout)
+    return d.get("token") or d.get("access_token")
+
+
+def _manifest_and_digest(reg: str, path: str, ref: str, bearer: str, timeout: int):
+    import urllib.parse
+    return _http_json(
+        f"https://{reg}/v2/{path}/manifests/{urllib.parse.quote(str(ref))}",
+        {"Authorization": f"Bearer {bearer}", "Accept": _MANIFEST_ACCEPT}, timeout)
+
+
+def _tag_labels_and_digest(reg: str, path: str, tag: str, bearer: str, timeout: int):
+    """(config labels dict, content digest of the tag) — ({}, None) on miss."""
+    man, hdrs = _manifest_and_digest(reg, path, tag, bearer, timeout)
+    digest = hdrs.get("Docker-Content-Digest") or hdrs.get("docker-content-digest")
+    if "manifests" in man:
+        # attestation/SBOM children carry no image config; skip them (same
+        # filter as _oci_created).
+        real = [m for m in man["manifests"]
+                if (m.get("platform") or {}).get("architecture") not in (None, "unknown")]
+        if not real:
+            return {}, digest
+        man, _ = _manifest_and_digest(reg, path, real[0]["digest"], bearer, timeout)
+    cfg = (man.get("config") or {}).get("digest")
+    if not cfg:
+        return {}, digest
+    blob, _ = _http_json(f"https://{reg}/v2/{path}/blobs/{cfg}",
+                         {"Authorization": f"Bearer {bearer}", "Accept": "*/*"}, timeout)
+    return ((blob.get("config") or {}).get("Labels") or {}), digest
+
+
+def _dockerhub_version_for_digest(repo: str, digest: str, timeout: int):
+    """Newest plain-semver Docker Hub tag sharing `digest`, or None.
+
+    Secondary oracle, used only when the image carries no version label. It
+    reads ONE page of tags ordered by recency: a channel pointer that was just
+    moved has its version twin on that page, and if it does not, we return None
+    and the caller HOLDS — which is the right direction to be wrong in.
+    """
+    d, _ = _http_json(
+        f"https://hub.docker.com/v2/repositories/{repo}/tags/"
+        f"?page_size=100&ordering=last_updated", {}, timeout)
+    best = None
+    for row in d.get("results") or []:
+        name = str(row.get("name") or "")
+        if row.get("digest") != digest or not _PLAIN_VERSION.match(name):
+            continue
+        if _PRERELEASE_TAG.search(name):
+            continue
+        t = _ver_tuple(name)
+        if t and (best is None or t > _ver_tuple(best)):
+            best = name
+    return best
+
+
+def stable_channel_version(image_ref: str, timeout: int = _CHANNEL_TIMEOUT):
+    """(version, evidence) for the tag upstream's STABLE channel points at.
+
+    Returns (None, why) when it cannot be established — which the caller MUST
+    treat as a hold. Two positive oracles, in order:
+
+      1. the `stable` (then `latest`) tag's OCI config label
+         `org.opencontainers.image.version`, CROSS-CHECKED by resolving that
+         version as a tag and requiring the same content digest. A label alone
+         is upstream prose; label + digest identity is proof the channel
+         pointer and the version tag are the same image.
+      2. Docker Hub only: reverse-lookup of the channel digest across one page
+         of recent tags.
+
+    Never infers from version ordering. That inference is the exact failure the
+    `max:` rules exist to prevent.
+    """
+    key = str(image_ref)
+    if key in _STABLE_HEAD_CACHE:
+        return _STABLE_HEAD_CACHE[key]
+    result = (None, "channel lookup not attempted")
+    try:
+        reg, auth_host, service, path = _registry_coords(image_ref)
+        bearer = _registry_token(auth_host, service, path, timeout)
+        if not bearer:
+            result = (None, f"no pull token for {image_ref}")
+        else:
+            misses = []
+            for ch in _CHANNEL_TAGS:
+                try:
+                    labels, ch_digest = _tag_labels_and_digest(reg, path, ch, bearer, timeout)
+                except Exception as e:
+                    misses.append(f"`{ch}` unreadable ({type(e).__name__})")
+                    continue
+                ver = None
+                for lbl in _VERSION_LABELS:
+                    v = str(labels.get(lbl) or "").strip()
+                    if _PLAIN_VERSION.match(v) and not _PRERELEASE_TAG.search(v):
+                        ver, lbl_used = v, lbl
+                        break
+                if ver:
+                    try:
+                        _, vd = _manifest_and_digest(reg, path, ver, bearer, timeout)
+                        v_digest = (vd.get("Docker-Content-Digest")
+                                    or vd.get("docker-content-digest"))
+                    except Exception:
+                        v_digest = None
+                    if ch_digest and v_digest and ch_digest != v_digest:
+                        misses.append(
+                            f"`{ch}` label says {ver} but tag {ver} is a DIFFERENT image")
+                        continue
+                    result = (ver, f"`{ch}` tag label {lbl_used}={ver}"
+                                   + (", digest-confirmed" if ch_digest and v_digest else ""))
+                    break
+                if ch_digest and reg == "registry-1.docker.io":
+                    hub = _dockerhub_version_for_digest(path, ch_digest, timeout)
+                    if hub:
+                        result = (hub, f"Docker Hub `{ch}` digest == tag {hub}")
+                        break
+                misses.append(f"`{ch}` carries no version label")
+            else:
+                result = (None, "; ".join(misses) or "no stable/latest channel tag")
+    except Exception as e:
+        result = (None, f"channel lookup failed ({type(e).__name__})")
+    _STABLE_HEAD_CACHE[key] = result
+    return result
+
+
+_G3_CACHE: dict = {}
+
+
+def breaking_change_signal(image_repo: str, tag: str):
+    """(is_breaking, note) — G3 for a candidate that has no Renovate PR.
+
+    Reuses auto-update.py's engine so the two lanes agree on what "breaking"
+    means. Best-effort by design and it says so: a POSITIVE signal holds, an
+    unfetchable release note is reported as `unverified` and does NOT hold.
+    That asymmetry is deliberate. G3-unknown is the pre-existing baseline of
+    every direct bump in this lane, so demanding certainty here would be a NEW
+    gate (and, under an unauthenticated GitHub rate limit, a permanently closed
+    one) rather than honouring an existing one. The CHANNEL gate above is the
+    opposite — it holds on unknown — because the channel IS the hazard the
+    `max:` rule was written for.
+    """
+    key = f"{image_repo}:{tag}"
+    if key in _G3_CACHE:
+        return _G3_CACHE[key]
+    out = (False, "unverified (release notes unavailable)")
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "cberg_auto_update", SCRIPT_DIR / "auto-update.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore
+        notes, resolved = mod.breaking_signal(mod._load_version_checker(), image_repo, tag)
+        if notes:
+            out = (True, "breaking-change signal in release notes: "
+                         + "; ".join(str(n)[:100] for n in notes[:2]))
+        elif resolved:
+            out = (False, "clean (release notes checked)")
+    except Exception:
+        pass
+    _G3_CACHE[key] = out
+    return out
+
+
+def _fallback_item(item, target, utype, rule, evidence, pr=None, g3=None):
+    """A synthetic actionable item for the allowed-but-masked update."""
+    return {**{k: v for k, v in item.items() if k not in ("cell", "source")},
+            "target": target,
+            "type": utype,
+            "cell": f"{item['current']} → {target}",
+            "source": "max-rule-allowed",
+            "max_rule_fallback": True,
+            "origin_target": item["target"],
+            "deny_match": rule.get("match"),
+            "deny_max": rule.get("max"),
+            "blocked_pr": pr,
+            "channel_evidence": evidence,
+            "g3": g3}
+
+
+def max_rule_fallbacks(actionable, policy, prs=None):
+    """[(record, item_or_None)] — the ALLOWED update hiding behind a BLOCKED one.
+
+    One record per item whose target is blocked by a `max:` rule, with
+    `status` one of:
+      candidate   — a stable-channel version the rule allows; `item` is a real
+                    actionable entry appended to the universe
+      hold        — the channel could not be confirmed, or the stable head is
+                    itself blocked; reported, never applied
+      up-to-date  — the stable channel head is already deployed; nothing to do
+    """
+    prs = prs or {}
+    out = []
+    seen = {(i["component"].lower(), i["kind"], _dedupe_tag(i["current"]),
+             _dedupe_tag(i["target"])) for i in actionable}
+    for item in actionable:
+        comp = item["component"].lower()
+        if item.get("max_rule_fallback") or comp in HELD:
+            continue
+        is_app_template = item["kind"] == "chart" and str(item["target"]).startswith("5.")
+        key = "app-template" if is_app_template else comp
+        rule = deny_rule_for(policy, key, item["type"])
+        mx = (rule or {}).get("max")
+        if not rule or mx not in RANK:
+            continue                      # no rule, or a FULL block: nothing is allowed
+        if RANK.get(item["type"], 99) <= RANK.get(mx, -1):
+            continue                      # not actually blocked by the `max:`
+        rec = {"component": item["component"], "kind": item["kind"],
+               "current": item["current"], "blocked_target": item["target"],
+               "blocked_type": item["type"], "deny_match": rule.get("match"),
+               "deny_max": mx, "blocked_pr": prs.get(comp) or prs.get(key)}
+        if is_self_built(item, comp):
+            continue                      # REBUILD lane — a tag bump can't move it
+        if item["kind"] != "image":
+            out.append({**rec, "status": "hold", "candidate": None,
+                        "reason": "no stable-channel oracle exists for a CHART "
+                                  "(registries publish channel pointers, chart "
+                                  "repos do not) — holding (fail-safe)"})
+            continue
+        repos = [r for r in ([item.get("image_repo")] if item.get("image_repo")
+                             else item.get("image_repos") or []) if r]
+        if len(repos) != 1:
+            out.append({**rec, "status": "hold", "candidate": None,
+                        "reason": f"image repository {'unresolved' if not repos else 'ambiguous'} "
+                                  f"({len(repos)} candidates) — the channel cannot be read "
+                                  f"from a repo we cannot name; holding (fail-safe)"})
+            continue
+        repo = repos[0]
+        ver, why = stable_channel_version(repo)
+        if not ver:
+            out.append({**rec, "status": "hold", "candidate": None,
+                        "reason": f"stable channel of {repo} NOT confirmable — {why}. "
+                                  f"Refusing to fall back to 'newest semver wins': that "
+                                  f"inference is the hazard `max: {mx}` exists to prevent"})
+            continue
+        if not _is_strictly_newer(item["current"], ver):
+            out.append({**rec, "status": "up-to-date", "candidate": None,
+                        "reason": f"stable channel head is {ver} ({why}); "
+                                  f"{item['current']} is already at or ahead of it"})
+            continue
+        utype = _semver_type(item["current"], ver)
+        blocked = denied(policy, key, utype)
+        if blocked:
+            out.append({**rec, "status": "hold", "candidate": ver,
+                        "reason": f"stable channel head {ver} ({why}) is a {utype} bump, "
+                                  f"which the policy still blocks — {str(blocked)[:120]}"})
+            continue
+        k = (comp, item["kind"], _dedupe_tag(item["current"]), _dedupe_tag(ver))
+        if k in seen:
+            # Already enumerated in its own right, so it is NOT masked and must
+            # not be appended twice (a double-counted lane is the same class of
+            # bug as a missed one). Still reported — silently swallowing it
+            # would make the two cases indistinguishable in the output.
+            out.append({**rec, "status": "already-enumerated", "candidate": ver,
+                        "reason": f"stable channel head {ver} ({why}) is already in "
+                                  f"the actionable universe on its own — no masking"})
+            continue
+        seen.add(k)
+        is_breaking, g3 = breaking_change_signal(repo, ver)
+        if is_breaking:
+            out.append({**rec, "status": "hold", "candidate": ver,
+                        "reason": f"G3 — {g3}"})
+            continue
+        new = _fallback_item(item, ver, utype, rule, why,
+                             pr=rec["blocked_pr"], g3=g3)
+        out.append({**rec, "status": "candidate", "candidate": ver, "item": new,
+                    "channel_evidence": why, "g3": g3,
+                    "reason": f"{utype} to {ver} on the stable channel ({why}) — "
+                              f"permitted by `max: {mx}`, masked by the blocked "
+                              f"{item['type']} to {item['target']}"})
+    return out
+
+
 def assign_lane(item, policy, prs, plans, ar_holds=None):
     """(lane, reason, drift) for one actionable update."""
     comp = item["component"].lower()
@@ -1017,7 +1383,12 @@ def assign_lane(item, policy, prs, plans, ar_holds=None):
         return "PLAN", ("0.x release-line move (0.%d -> 0.%d) — at major 0 the minor "
                         "IS the breaking axis; needs an assessed window plan"
                         % (zc[1], zt[1])), None
-    if prs.get(comp) or prs.get(key):
+    # The Renovate-PR shortcut is SKIPPED for a `max:`-fallback candidate. That
+    # PR exists, but it proposes the BLOCKED target — claiming this candidate as
+    # "covered by PR #N" is exactly the masking max_rule_fallbacks() was written
+    # to undo, and it would also route the item away from the direct-bump half
+    # of Step 0 (the window agent skips AUTO items whose reason names a PR).
+    if not item.get("max_rule_fallback") and (prs.get(comp) or prs.get(key)):
         return "AUTO", f"Renovate PR #{prs.get(comp) or prs.get(key)}", None
     dn = denied(policy, key, utype)
     if dn or utype == "major" or utype == "unknown":
@@ -1156,14 +1527,22 @@ def _apply_lockstep(lanes, needs_plan):
     holders = {}
     for lane in ("PLAN", "HELD"):
         for e in lanes[lane]:
-            holders.setdefault(str(e.get("component", "")).lower(), (lane, e))
+            holders.setdefault(str(e.get("component", "")).lower(), []).append((lane, e))
     moved = []
     for e in list(lanes["AUTO"]):
         comp = str(e.get("component", "")).lower()
-        held = holders.get(comp)
-        if not held:
+        cands = list(holders.get(comp) or ())
+        if e.get("max_rule_fallback"):
+            # A `max:`-fallback candidate's own ORIGIN (the same image on the
+            # blocked higher target) is not a "sibling half" — it is the very
+            # item this candidate exists to unmask, and it is ALWAYS in PLAN.
+            # Letting it lockstep would make the new lane permanently inert.
+            cands = [(l, h) for l, h in cands
+                     if not (h.get("kind") == e.get("kind")
+                             and _dedupe_tag(h.get("target")) == _dedupe_tag(e.get("origin_target")))]
+        if not cands:
             continue
-        hlane, he = held
+        hlane, he = cands[0]
         e["lane"] = "PLAN"
         e["lockstep_with"] = f"{he['kind']} {he['current']}→{he['target']} [{hlane}]"
         e["reason"] = (f"lockstep — the {comp} {he['kind']} is {hlane} "
@@ -1219,6 +1598,14 @@ def reconcile():
     for i in actionable:
         if i["kind"] == "image" and not i.get("image_repo"):
             i["image_repos"] = sorted(repo_index.get(i["component"].lower(), ()))
+    prs = parse_renovate_prs()
+    # An update the deny rule ALLOWS can be masked by one it blocks — surface it
+    # as an ordinary candidate (see max_rule_fallbacks). Emitted BEFORE the
+    # already_applied filter and the lane loop so it is subject to both.
+    fallbacks = max_rule_fallbacks(actionable, policy, prs)
+    for rec in fallbacks:
+        if rec.get("item") is not None:
+            actionable.append(rec["item"])
     # Drop what the maintenance window already applied (see already_applied).
     # Reported, never silently swallowed: a suppressed item that was NOT really
     # applied would be an invisible crack, so the operator sees the list.
@@ -1227,7 +1614,6 @@ def reconcile():
         _drop = {id(i) for i in applied}
         actionable = [i for i in actionable if id(i) not in _drop]
 
-    prs = parse_renovate_prs()
     plans = load_plans()
     ar_holds = ar_prerelease_holds()
 
@@ -1253,8 +1639,27 @@ def reconcile():
 
     lockstep = _apply_lockstep(lanes, needs_plan)
 
+    # Stamp each fallback's FINAL lane back onto its record, so the operator can
+    # see a candidate that was generated correctly and then legitimately parked
+    # (a live plan already targets it, or G5's cooldown has not elapsed). A
+    # candidate reported without its lane would read as "will apply".
+    placed = {}
+    for lane, entries in lanes.items():
+        for e in entries:
+            if e.get("max_rule_fallback"):
+                placed[(str(e["component"]).lower(), e["kind"],
+                        _dedupe_tag(e["current"]), _dedupe_tag(e["target"]))] = (lane, e["reason"])
+    for rec in fallbacks:
+        if rec.get("status") != "candidate":
+            continue
+        k = (str(rec["component"]).lower(), rec["kind"],
+             _dedupe_tag(rec["current"]), _dedupe_tag(rec["candidate"]))
+        rec["lane"], rec["lane_reason"] = placed.get(k, ("DROPPED", "already applied in git"))
+        rec.pop("item", None)
+
     return {
         "counts": {k: len(v) for k, v in lanes.items()},
+        "max_rule_fallback": fallbacks,     # allowed update masked by a blocked one
         "already_applied": applied,         # in the snapshot, already in git
         "snapshot_age_hours": snapshot_age_hours(),
         "lockstep": lockstep,               # AUTO items pulled back to PLAN
@@ -1285,6 +1690,20 @@ def human(r):
                  f"already in git; dropped from the lanes below:")
         for e in r["already_applied"]:
             L.append(f"  • {e['component']} [{e['kind']} {e['current']}→{e['target']}]")
+    fb = r.get("max_rule_fallback") or []
+    if fb:
+        L.append(f"\n`max:` RULE FALLBACK ({len(fb)}) — the deny rule blocks the newest "
+                 f"version but ALLOWS a lower one; Renovate only ever proposes the newest:")
+        for e in fb:
+            tag = {"candidate": "✅ candidate", "hold": "⛔ hold",
+                   "up-to-date": "· up-to-date",
+                   "already-enumerated": "· already enumerated"}.get(
+                       e.get("status"), e.get("status"))
+            lane = f" → {e['lane']} ({str(e.get('lane_reason'))[:50]})" if e.get("lane") else ""
+            L.append(f"  • {e['component']} [{e['kind']}] blocked {e['current']}→"
+                     f"{e['blocked_target']} ({e['blocked_type']}, max: {e['deny_max']}) "
+                     f"— {tag}{lane}")
+            L.append(f"      {str(e.get('reason'))[:160]}")
     if r["needs_plan"]:
         L.append(f"\nNEEDS A PLAN ({len(r['needs_plan'])}) — dispatch an upgrade-planner for each:")
         for e in r["needs_plan"]:

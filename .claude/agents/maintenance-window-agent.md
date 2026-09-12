@@ -51,6 +51,18 @@ PR exists (CI-gated), direct-bump when it doesn't — so **no safe update ever
 stalls waiting on Renovate.** REBUILD-lane items (self-built) and PLAN-lane items
 are NOT touched here — they go through their source-repo rebuild / vetted plans.
 
+**A `max:`-rule fallback in AUTO has an open PR you must NOT touch.** Since
+2026-09-12 `coverage.py` also surfaces the update a `max:` deny rule ALLOWS when
+Renovate's PR proposes a target it BLOCKS (n8n: PR #213 wants the 2.39.x beta,
+held; `2.38.7` is the permitted stable patch). Those items carry
+`max_rule_fallback: true` and `blocked_pr`, and they appear under
+`max_rule_fallback` in the `--json` output with their evidence. Direct-bump them
+like any other no-PR AUTO item — and **leave the blocked PR exactly as it is**:
+do not merge, close, retarget or comment on it. Renovate will re-point it itself
+once upstream promotes. An entry there with `status: hold` is NOT actionable:
+the stable channel could not be confirmed, and guessing is the hazard the rule
+exists to prevent.
+
 `coverage.py` reads `runbooks/version-check-current.md`, a SNAPSHOT the sweep
 writes every 48h — not live upstream state. Two consequences you must hold:
 

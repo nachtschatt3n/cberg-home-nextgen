@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.09.12`
+> Last Updated: `2026-09-12`
 
 ## 1) Description
 
@@ -216,6 +216,38 @@ lane, which is stricter — it also excludes pre-release channels, 0.x
 release-line moves and lockstep-coupled items. See
 `docs/sops/maintenance-windows.md` §Coverage guarantee → AUTO disqualifiers.
 
+#### A `max:` rule's ALLOWED half needs its own candidate source
+
+A `max:` rule permits the lower update_type, but until 2026-09-12 nothing could
+ever act on that permission. Renovate proposes only the NEWEST version, which
+for a `max:`-held component is by definition the blocked one — so G2 held the
+PR (correctly, and that is the end of that road), while the direct-bump half
+skipped the component because the Renovate-PR shortcut in `assign_lane()`
+counted a PR's mere existence as coverage. Measured: n8n's PR #213 proposed
+`2.38.4 → 2.39.4` (the beta line, held by `max: patch`) while `2.38.4 → 2.38.7`
+— a plain patch on the stable line that the same rule explicitly permits — was
+invisible to both halves.
+
+`coverage.py::max_rule_fallbacks()` closes that. For every item a `max:` rule
+blocks it asks upstream's own **stable channel pointer** what the stable head
+is, and emits it as an ordinary direct-bump candidate. Reported under
+`max_rule_fallback` in `--json` with one of four statuses (`candidate`, `hold`,
+`up-to-date`, `already-enumerated`) and, for a candidate, the lane it actually
+landed in.
+
+Two properties to hold on to:
+
+- **It is a candidate SOURCE, not a bypass.** Every emitted candidate is
+  re-run through `assign_lane()` and must clear G1, G2 (the rule's own `max:`,
+  re-evaluated for the lower type), G3 and G5 like any other direct bump. G4 is
+  not applicable — a direct bump has no PR.
+- **An unconfirmable channel HOLDS.** "Newest semver the rule allows" is exactly
+  the inference these rules exist to prevent, so the candidate must be
+  positively confirmed by an `org.opencontainers.image.version` label on the
+  `stable`/`latest` tag (digest-cross-checked), or by a Docker Hub digest match.
+  Charts have no such pointer and always hold. The blocked PR is left strictly
+  alone — never closed, retargeted or commented on from code.
+
 ### Test 2: policy + parse gates (offline unit check)
 
 Run the synthetic matrix. **It must assert every deny rule that exists, not a
@@ -373,6 +405,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.12 | 2026-09-12 | **A `max:` rule's ALLOWED half had no candidate source.** Renovate only ever proposes the newest version — the blocked one — so G2 held the PR while the direct-bump lane skipped the component for *having* a PR. n8n `2.38.4 → 2.38.7` (a patch on the stable line, explicitly permitted by its own `max: patch`) was invisible to both halves. Added `coverage.py::max_rule_fallbacks()`: reads upstream's stable-channel pointer, emits the allowed head as an ordinary direct-bump candidate, holds fail-safe when the channel cannot be confirmed. Regression suite: `runbooks/tests/test-max-rule-fallback.py`. |
 | 2026.09.08 | 2026-09-08 | **Completed the Test 2 synthetic matrix and added Test 2b to keep it complete.** The matrix enumerated 8 of the then-20 deny globs; `*external-dns*` was added the same day (`e97476d3`, policy `2026.09.08.1`) and 11 others (`cilium`, `gateway-helm`, `gateway-crds-helm`, `envoy-gateway`, `mcpo`, `nocodb`, `nextcloud-mcp`, `nextcloud-redis`, `grafana`, `coredns`, `@openclaw/`) had never been listed — so the SOP's own test asserted a policy the repo no longer had. Test 1 now derives the list from the policy YAML instead of restating it, and Test 2b fails on any missing-or-stale glob in both directions. |
 | 2026.09.05 | 2026-09-05 | Documented the G5 **direct-bump blind spot**: the security waiver reads a marker from the Renovate PR title, so the no-PR direct-bump lane can never trigger it and `age_waive` (retroactive, permanent, per-component) is the only lever. Three occurrences in two days — `3118a96f`, `e813bba0`. |
 | 2026.08.18 | 2026-08-18 | Cross-referenced `docs/sops/immutable-job-image-bumps.md` — an auto-applied image bump landing on a Job wedges the whole Kustomization. |
