@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Internal Ingress & DNS",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [1080, 600],
+    "column_fit": "spread",
+    "views": [
+      { "id": "dns", "label": "Name resolution", "focus": ["client", "adguard", "kgw"], "note": "Split-horizon DNS: AdGuard forwards the home zone to k8s-gateway, which answers from live HTTPRoutes." },
+      { "id": "auth", "label": "TLS + forward-auth", "focus": ["client", "envoy", "outpost"], "note": "envoy-internal terminates TLS and consults the Authentik outpost per request (fail-closed)." },
+      { "id": "proxy", "label": "Proxy to app", "focus": ["envoy", "app", "client"], "note": "Matched HTTPRoute rule forwards to the app Service; the response returns through the gateway." }
+    ]
+  },
+  "participants": [
+    { "id": "client", "type": "external", "label": "LAN Client", "sublabel": "VLAN 1 / 20 / 30" },
+    { "id": "adguard", "type": "security", "label": "AdGuard Home", "sublabel": "DNS · 192.168.55.5" },
+    { "id": "kgw", "type": "backend", "label": "k8s-gateway", "sublabel": "192.168.55.101" },
+    { "id": "envoy", "type": "cloud", "label": "envoy-internal", "sublabel": "192.168.55.103 :443" },
+    { "id": "outpost", "type": "security", "label": "Authentik outpost", "sublabel": "ak-outpost :9000" },
+    { "id": "app", "type": "backend", "label": "App Pod", "sublabel": "HTTPRoute backend" }
+  ],
+  "segments": [
+    { "from": 150, "to": 252, "label": "Name resolution" },
+    { "from": 262, "to": 364, "label": "TLS + forward-auth" },
+    { "from": 374, "to": 490, "label": "Proxy to app" }
+  ],
+  "messages": [
+    { "id": "dns-query", "from": "client", "to": "adguard", "y": 160, "label": "app.<domain> A?", "variant": "default" },
+    { "id": "zone-fwd", "from": "adguard", "to": "kgw", "y": 186, "label": "zone forward [/<domain>/]", "variant": "emphasis" },
+    { "id": "answer", "from": "kgw", "to": "adguard", "y": 214, "label": "A 192.168.55.103 (from HTTPRoute)", "variant": "return" },
+    { "id": "dns-reply", "from": "adguard", "to": "client", "y": 242, "label": "192.168.55.103", "variant": "return" },
+    { "id": "https", "from": "client", "to": "envoy", "y": 272, "label": "HTTPS · SNI app.<domain>", "variant": "emphasis" },
+    { "id": "extauth", "from": "envoy", "to": "outpost", "y": 300, "label": "extAuth (cookie forwarded)", "variant": "security" },
+    { "id": "allow", "from": "outpost", "to": "envoy", "y": 328, "label": "allow + x-authentik-* headers", "variant": "return" },
+    { "id": "redirect", "from": "outpost", "to": "envoy", "y": 356, "label": "or 302 → /outpost.goauthentik.io", "variant": "dashed" },
+    { "id": "route", "from": "envoy", "to": "app", "y": 386, "label": "matched rule → Service", "variant": "emphasis" },
+    { "id": "resp", "from": "app", "to": "envoy", "y": 414, "label": "response", "variant": "return" },
+    { "id": "done", "from": "envoy", "to": "client", "y": 442, "label": "200 (wildcard cert)", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "adguard", "from": 155, "to": 248, "type": "security" },
+    { "participant": "kgw", "from": 181, "to": 220, "type": "backend" },
+    { "participant": "envoy", "from": 267, "to": 448, "type": "cloud" },
+    { "participant": "outpost", "from": 295, "to": 362, "type": "security" },
+    { "participant": "app", "from": 381, "to": 420, "type": "backend" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Split-horizon DNS", "items": ["AdGuard forwards only the home zone to k8s-gateway", "k8s-gateway answers from live HTTPRoutes: internal .103, external .104, LB-VIP overrides (mqtt → .15)"] },
+    { "dot": "rose", "title": "Fail-closed auth", "items": ["SecurityPolicy extAuth with failOpen: false — outpost down means deny", "The cookie header must reach the outpost or every check is anonymous"] },
+    { "dot": "emerald", "title": "One wildcard cert", "items": ["TLS terminates at the gateway with the cert-manager wildcard", "Callback + API routes live on separate HTTPRoutes without extAuth"] }
+  ]
+}

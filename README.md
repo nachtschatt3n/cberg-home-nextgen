@@ -481,7 +481,7 @@ quarterly.
 
 ## 📦 Applications
 
-~120 apps across 18 namespaces. Full inventory with per-app purpose, exposure
+~121 apps across 18 namespaces. Full inventory with per-app purpose, exposure
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 
@@ -502,9 +502,9 @@ teslamate · traccar · trmnl-ha · zero-export-controller · zigbee2mqtt
 influxdb · mariadb · memgraph · nocodb · pgadmin · phpmyadmin · postgresql ·
 redis · redisinsight · superset · sweep-history
 
-### 📊 Monitoring & Observability (`monitoring` — 13)
-eck-operator · edot-collector · elasticsearch · grafana · headlamp · kibana ·
-kube-prometheus-stack · otel-operator · prometheus-blackbox-exporter ·
+### 📊 Monitoring & Observability (`monitoring` — 14)
+docs-site · eck-operator · edot-collector · elasticsearch · grafana · headlamp ·
+kibana · kube-prometheus-stack · otel-operator · prometheus-blackbox-exporter ·
 prometheus-pushgateway · sweep-dashboard · unpoller · uptime-kuma
 
 ### 📄 Office & Productivity (`office` — 11)

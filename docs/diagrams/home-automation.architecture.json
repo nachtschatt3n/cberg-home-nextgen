@@ -1,0 +1,263 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Home Automation Stack",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "zigbee",
+        "label": "Zigbee path",
+        "focus": [
+          "devices",
+          "coord",
+          "z2m",
+          "mqtt"
+        ],
+        "note": "Devices mesh through the PoE coordinator; Zigbee2MQTT bridges TCP-serial to MQTT."
+      },
+      {
+        "id": "ha-core",
+        "label": "Home Assistant",
+        "focus": [
+          "mqtt",
+          "ha",
+          "matter"
+        ],
+        "note": "HA runs on hostNetwork and consumes MQTT plus the Matter/Thread fabric."
+      },
+      {
+        "id": "consumers",
+        "label": "Other consumers",
+        "focus": [
+          "frigate",
+          "nodered",
+          "mqtt"
+        ],
+        "note": "Frigate publishes detections; Node-RED and n8n drive automation flows."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "devices",
+      "type": "external",
+      "label": "Zigbee Devices",
+      "sublabel": "~21 end devices",
+      "pos": [
+        40,
+        160
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "coord",
+      "type": "external",
+      "label": "SLZB-06P10",
+      "sublabel": "192.168.32.20 · PoE",
+      "tag": "coordinator",
+      "pos": [
+        290,
+        160
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "z2m",
+      "type": "backend",
+      "label": "Zigbee2MQTT",
+      "sublabel": "TCP serial :6638",
+      "pos": [
+        570,
+        160
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "mqtt",
+      "type": "messagebus",
+      "label": "Mosquitto",
+      "sublabel": "ClusterIP + LB .15",
+      "tag": "mqtt.<domain>",
+      "pos": [
+        840,
+        160
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "ha",
+      "type": "backend",
+      "label": "Home Assistant",
+      "sublabel": "hostNetwork · VIP .24",
+      "pos": [
+        1110,
+        160
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "frigate",
+      "type": "backend",
+      "label": "Frigate NVR",
+      "sublabel": "cameras on IoT VLAN",
+      "pos": [
+        570,
+        400
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "nodered",
+      "type": "backend",
+      "label": "Node-RED / n8n",
+      "sublabel": "automation flows",
+      "pos": [
+        840,
+        400
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "matter",
+      "type": "backend",
+      "label": "Matter + OTBR",
+      "sublabel": "Thread border router",
+      "pos": [
+        1110,
+        400
+      ],
+      "size": [
+        180,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "IoT VLAN 30 · 192.168.32.0/23",
+      "wraps": [
+        "coord"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "home-automation namespace · VLAN 55",
+      "wraps": [
+        "z2m",
+        "mqtt",
+        "ha",
+        "frigate",
+        "nodered",
+        "matter"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "mesh",
+      "from": "devices",
+      "to": "coord",
+      "label": "Zigbee mesh",
+      "variant": "emphasis"
+    },
+    {
+      "id": "serial",
+      "from": "coord",
+      "to": "z2m",
+      "label": "TCP serial :6638",
+      "variant": "emphasis"
+    },
+    {
+      "id": "publish",
+      "from": "z2m",
+      "to": "mqtt",
+      "label": "MQTT :1883",
+      "variant": "emphasis"
+    },
+    {
+      "id": "subscribe",
+      "from": "mqtt",
+      "to": "ha",
+      "label": "LB .15 :1883",
+      "variant": "emphasis"
+    },
+    {
+      "id": "detections",
+      "from": "frigate",
+      "to": "mqtt",
+      "label": "detections",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelDy": 24
+    },
+    {
+      "id": "flows",
+      "from": "nodered",
+      "to": "mqtt",
+      "label": "flows",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelDy": -18
+    },
+    {
+      "id": "fabric",
+      "from": "matter",
+      "to": "ha",
+      "label": "Matter fabric",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelDy": -18
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Zigbee topology",
+      "items": [
+        "SLZB-06P10 coordinator + SLZB-06 router + 3 Hue mains routers",
+        "CC2652-class router interview failures recover via DB injection — never reflash"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Broker split",
+      "items": [
+        "In-cluster consumers use mosquitto-internal (ClusterIP)",
+        "hostNetwork HA, Frigate and LAN clients use the .15 LoadBalancer"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Beyond Zigbee",
+      "items": [
+        "Matter-server + OpenThread border router carry the Thread fabric",
+        "AI/voice via ha-ai-harness against the LAN Ollama host"
+      ]
+    }
+  ]
+}

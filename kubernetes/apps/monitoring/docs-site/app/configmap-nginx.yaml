@@ -1,0 +1,21 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master/configmap.json
+# Additive http-context snippet (subPath-mounted into conf.d, same pattern as
+# ibgastro's healthz config):
+# - absolute_redirect/port_in_redirect off: MkDocs uses directory URLs, and
+#   nginx's directory 301s must not leak `:8080`/`http://` behind the TLS
+#   gateway.
+# - gzip: the interactive diagram pages under /docs/diagrams/ are ~800KB of
+#   inline SVG/JS each and compress well.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: docs-site-nginx
+  namespace: monitoring
+data:
+  tuning.conf: |
+    absolute_redirect off;
+    port_in_redirect off;
+    gzip on;
+    gzip_types text/html text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;

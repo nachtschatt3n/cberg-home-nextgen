@@ -1,0 +1,229 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Operation Sweep",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "trigger-path",
+        "label": "Trigger path",
+        "focus": [
+          "cron",
+          "mint",
+          "scripts"
+        ],
+        "note": "The in-cluster cron only triggers; the sweep runs on the Mac mini where the SOPS key and tooling live."
+      },
+      {
+        "id": "shared-cycle",
+        "label": "One shared cycle",
+        "focus": [
+          "mint",
+          "scripts",
+          "dbrow",
+          "reconcile"
+        ],
+        "note": "All specialists write findings into a single sweep_cycles row keyed by SWEEP_CYCLE_ID."
+      },
+      {
+        "id": "outputs",
+        "label": "Operator outputs",
+        "focus": [
+          "reconcile",
+          "board",
+          "ingest"
+        ],
+        "note": "The board is rendered deterministically; open issues reach the operator's phone via OpenClaw."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "openclaw",
+      "label": "OpenClaw (cluster cron · phone)"
+    },
+    {
+      "id": "session",
+      "label": "Mac mini · daily-operation session"
+    },
+    {
+      "id": "work",
+      "label": "Specialists → sweep_history Postgres"
+    }
+  ],
+  "phases": [
+    {
+      "id": "start",
+      "label": "Trigger",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "collect",
+      "label": "Collect + persist",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "publish",
+      "label": "Reconcile + publish",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "cron",
+    "mint",
+    "scripts",
+    "dbrow",
+    "reconcile",
+    "board"
+  ],
+  "nodes": [
+    {
+      "id": "cron",
+      "lane": "openclaw",
+      "col": 0,
+      "type": "messagebus",
+      "label": "Cron 8163c139",
+      "sublabel": "48h · 04:00 Berlin",
+      "width": 150
+    },
+    {
+      "id": "mint",
+      "lane": "session",
+      "col": 1,
+      "type": "backend",
+      "label": "Mint cycle",
+      "sublabel": "SWEEP_CYCLE_ID",
+      "width": 150
+    },
+    {
+      "id": "scripts",
+      "lane": "work",
+      "col": 2,
+      "type": "backend",
+      "label": "Six sections",
+      "sublabel": "5 scripts · doc runs last",
+      "tag": "media out-of-band",
+      "width": 180
+    },
+    {
+      "id": "dbrow",
+      "lane": "work",
+      "col": 3,
+      "type": "database",
+      "label": "One cycle row",
+      "sublabel": "findings + SLO snapshots",
+      "width": 150
+    },
+    {
+      "id": "reconcile",
+      "lane": "session",
+      "col": 4,
+      "type": "backend",
+      "label": "Reconcile",
+      "sublabel": "AR suppression · auto-close",
+      "width": 160
+    },
+    {
+      "id": "board",
+      "lane": "session",
+      "col": 5,
+      "type": "backend",
+      "label": "Render board",
+      "sublabel": "render-board.py · 6 sections",
+      "width": 160
+    },
+    {
+      "id": "ingest",
+      "lane": "openclaw",
+      "col": 5,
+      "type": "external",
+      "label": "OpenClaw ingest",
+      "sublabel": "issues → phone",
+      "width": 160
+    }
+  ],
+  "edges": [
+    {
+      "from": "cron",
+      "to": "mint",
+      "label": "iterm2-harness",
+      "variant": "emphasis"
+    },
+    {
+      "from": "mint",
+      "to": "scripts",
+      "label": "shared cycle id",
+      "variant": "emphasis"
+    },
+    {
+      "from": "scripts",
+      "to": "dbrow",
+      "label": "FindingsWriter",
+      "variant": "emphasis"
+    },
+    {
+      "from": "dbrow",
+      "to": "reconcile",
+      "label": "incomplete sections veto"
+    },
+    {
+      "from": "reconcile",
+      "to": "board",
+      "variant": "emphasis"
+    },
+    {
+      "from": "reconcile",
+      "to": "ingest",
+      "label": "open issues + go/no-gos",
+      "variant": "dashed"
+    }
+  ],
+  "semanticChecks": {
+    "allowedRoots": [
+      "cron"
+    ],
+    "allowedTerminals": [
+      "board",
+      "ingest"
+    ],
+    "requiredPaths": [
+      {
+        "from": "cron",
+        "to": "board"
+      }
+    ]
+  },
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Runs on the Mac, not the cloud",
+      "items": [
+        "Cluster nodes, SOPS age key, kubectl/talosctl and UniFi are LAN/local-only",
+        "The in-cluster cron is just the trigger over iterm2-harness"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "One shared cycle",
+      "items": [
+        "Specialists run in parallel but write to a single sweep_cycles row",
+        "doc-check runs last so it sees fresh *-current.md output"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Deterministic board",
+      "items": [
+        "render-board.py owns the layout — never hand-written",
+        "CRITICALs never collapse; AR-accepted and plan-covered findings do"
+      ]
+    }
+  ]
+}

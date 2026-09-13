@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Flux Reconcile Flow",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [1080, 600],
+    "column_fit": "spread",
+    "views": [
+      { "id": "webhook", "label": "Push + webhook", "focus": ["dev", "gh", "rcvr", "src"], "note": "A push to main hits the notification Receiver, which pokes the GitRepository immediately." },
+      { "id": "decrypt", "label": "Decrypt + apply", "focus": ["src", "kust", "api"], "note": "kustomize-controller decrypts SOPS with the age key and substitutes cluster settings before applying." },
+      { "id": "helm", "label": "Helm releases", "focus": ["kust", "helm", "api"], "note": "helm-controller upgrades releases with rollback remediation on failure." }
+    ]
+  },
+  "participants": [
+    { "id": "dev", "type": "external", "label": "Operator", "sublabel": "git push" },
+    { "id": "gh", "type": "cloud", "label": "GitHub", "sublabel": "main branch" },
+    { "id": "rcvr", "type": "backend", "label": "Receiver", "sublabel": "github-receiver" },
+    { "id": "src", "type": "backend", "label": "source-ctrl", "sublabel": "GitRepository" },
+    { "id": "kust", "type": "security", "label": "kustomize-ctrl", "sublabel": "SOPS + substitute" },
+    { "id": "helm", "type": "backend", "label": "helm-ctrl", "sublabel": "HelmReleases" },
+    { "id": "api", "type": "database", "label": "K8s API", "sublabel": "apply / prune" }
+  ],
+  "segments": [
+    { "from": 150, "to": 224, "label": "Push + webhook" },
+    { "from": 234, "to": 336, "label": "Fetch source" },
+    { "from": 346, "to": 480, "label": "Reconcile + apply" }
+  ],
+  "messages": [
+    { "id": "push", "from": "dev", "to": "gh", "y": 160, "label": "git push (main)", "variant": "emphasis" },
+    { "id": "webhook", "from": "gh", "to": "rcvr", "y": 188, "label": "webhook POST", "variant": "emphasis" },
+    { "id": "poke", "from": "rcvr", "to": "src", "y": 216, "label": "reconcile GitRepository", "variant": "default" },
+    { "id": "fetch", "from": "src", "to": "gh", "y": 246, "label": "fetch kubernetes/flux/cluster", "variant": "default" },
+    { "id": "revision", "from": "gh", "to": "src", "y": 274, "label": "main@sha", "variant": "return" },
+    { "id": "artifact", "from": "src", "to": "kust", "y": 302, "label": "new artifact (revision)", "variant": "emphasis" },
+    { "id": "apply", "from": "kust", "to": "api", "y": 356, "label": "SOPS decrypt · substitute · apply", "variant": "security" },
+    { "id": "hrspecs", "from": "kust", "to": "helm", "y": 384, "label": "HelmRelease specs", "variant": "default" },
+    { "id": "upgrade", "from": "helm", "to": "api", "y": 412, "label": "install / upgrade (auto-rollback)", "variant": "emphasis" },
+    { "id": "ready", "from": "api", "to": "kust", "y": 440, "label": "Kustomizations Ready", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "gh", "from": 155, "to": 280, "type": "cloud" },
+    { "participant": "rcvr", "from": 183, "to": 222, "type": "backend" },
+    { "participant": "src", "from": 211, "to": 308, "type": "backend" },
+    { "participant": "kust", "from": 297, "to": 446, "type": "security" },
+    { "participant": "helm", "from": 379, "to": 418, "type": "backend" },
+    { "participant": "api", "from": 351, "to": 444, "type": "database" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "One tree, one key", "items": ["cluster-meta → cluster-apps → per-app Kustomizations via dependsOn", "Every Kustomization decrypts with the sops-age secret; substitution is patched onto all children"] },
+    { "dot": "emerald", "title": "Webhook, not polling", "items": ["The Receiver makes pushes reconcile in seconds", "Interval-based reconcile (30m) remains the safety net"] },
+    { "dot": "rose", "title": "Guardrails", "items": ["flux-guardrails ValidatingAdmissionPolicy pins which namespaces may cross-reference the write-credentialed GitRepository", "Fail-closed: unknown namespaces are denied"] }
+  ]
+}

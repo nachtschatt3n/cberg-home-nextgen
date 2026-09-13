@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "cberg Home Network Topology",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "backbone",
+        "label": "Wired backbone",
+        "focus": [
+          "internet",
+          "gateway",
+          "sw48",
+          "sw24",
+          "k8s"
+        ],
+        "note": "Dual-WAN fiber uplink into the 10 GbE SFP+ switching backbone down to the cluster."
+      },
+      {
+        "id": "wifi",
+        "label": "Wireless edge",
+        "focus": [
+          "sw48",
+          "aps",
+          "clients"
+        ],
+        "note": "PoE-fed access points serving four SSIDs across the client VLANs."
+      },
+      {
+        "id": "storage",
+        "label": "Cluster storage",
+        "focus": [
+          "sw24",
+          "k8s",
+          "nas"
+        ],
+        "note": "NAS sits on VLAN 55 itself, so node-to-NAS storage traffic is L2-switched."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "internet",
+      "type": "external",
+      "label": "Internet",
+      "sublabel": "Deutsche Glasfaser fiber",
+      "tag": "dual WAN",
+      "pos": [
+        40,
+        160
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "security",
+      "label": "DMP-CBERG",
+      "sublabel": "UniFi gateway · 192.168.30.1",
+      "pos": [
+        270,
+        160
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "sw48",
+      "type": "backend",
+      "label": "Basement-SW-48 PoE",
+      "sublabel": "48-port · 192.168.30.118",
+      "pos": [
+        520,
+        160
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "sw24",
+      "type": "backend",
+      "label": "Basement-SW-24 PoE",
+      "sublabel": "24-port · 192.168.30.220",
+      "pos": [
+        780,
+        160
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "k8s",
+      "type": "cloud",
+      "label": "Kubernetes Cluster",
+      "sublabel": "3× NUC14 · Talos",
+      "tag": "192.168.55.11-13",
+      "pos": [
+        1050,
+        160
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "nas",
+      "type": "database",
+      "label": "UNAS-CBERG",
+      "sublabel": "NAS · 192.168.55.240",
+      "tag": "10 GbE SFP+",
+      "pos": [
+        1050,
+        400
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "aps",
+      "type": "frontend",
+      "label": "WiFi Access Points",
+      "sublabel": "U7 Pro · 2× U6 · AC LR",
+      "tag": "4 APs",
+      "pos": [
+        520,
+        400
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "clients",
+      "type": "external",
+      "label": "Wireless Clients",
+      "sublabel": "VLANs 20 / 30 / 40",
+      "pos": [
+        40,
+        400
+      ],
+      "size": [
+        140,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Trusted VLAN 1 · 192.168.30.0/24",
+      "wraps": [
+        "gateway",
+        "sw48",
+        "sw24",
+        "aps"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "k8s-network VLAN 55 · 192.168.55.0/24",
+      "wraps": [
+        "k8s",
+        "nas"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "wan-uplink",
+      "from": "internet",
+      "to": "gateway",
+      "label": "fiber WAN1 + WAN2",
+      "variant": "emphasis"
+    },
+    {
+      "id": "gw-to-sw48",
+      "from": "gateway",
+      "to": "sw48",
+      "label": "10 GbE SFP+",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sw48-to-sw24",
+      "from": "sw48",
+      "to": "sw24",
+      "label": "10 GbE SFP+",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sw24-to-k8s",
+      "from": "sw24",
+      "to": "k8s",
+      "label": "GbE × 3 nodes",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sw48-to-aps",
+      "from": "sw48",
+      "to": "aps",
+      "label": "GbE PoE",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "aps-to-clients",
+      "from": "aps",
+      "to": "clients",
+      "label": "WPA2/WPA3 · 4 SSIDs",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "k8s-to-nas",
+      "from": "k8s",
+      "to": "nas",
+      "label": "CIFS/SMB · L2-switched",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Uplink & backbone",
+      "items": [
+        "Deutsche Glasfaser fiber with dual WAN (Telekom + Glasfaser)",
+        "10 GbE SFP+ backbone: gateway → 48-port → 24-port switch"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Kubernetes · VLAN 55",
+      "items": [
+        "3× NUC14 Talos nodes uplinked to the 24-port PoE switch",
+        "NAS moved onto VLAN 55 — storage is L2-switched, no gateway hop"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Segmentation",
+      "items": [
+        "VLANs 1 / 20 / 30 / 40 / 55; guest VLAN 40 fully isolated",
+        "IoT VLAN 30 routed selectively for Home Assistant integrations"
+      ]
+    }
+  ]
+}

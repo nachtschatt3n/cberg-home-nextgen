@@ -1,0 +1,57 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: docs-site-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: docs-site.pods.health
+    rules:
+    - alert: DocsSitePodNotReady
+      annotations:
+        description: docs-site pod {{ $labels.pod }} has been not ready for more
+          than 5 minutes. Usually the nightly rebuild cannot clone GitHub — the
+          previous pod may still be serving stale content (RollingUpdate surge).
+          Check the build init container logs.
+        summary: docs-site pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="monitoring", pod=~"docs-site-.*", condition="true"}
+        ) == 0
+      for: 5m
+      labels:
+        category: monitoring
+        component: docs-site
+        severity: critical
+    - alert: DocsSitePodCrashLooping
+      annotations:
+        description: docs-site pod {{ $labels.pod }} has restarted {{ $value | printf
+          "%.0f" }} times in the last 15 minutes. Check nginx and build init
+          container logs.
+        summary: docs-site pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="monitoring", pod=~"docs-site-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: monitoring
+        component: docs-site
+        severity: critical
+    - alert: DocsSitePodRestarted
+      annotations:
+        description: docs-site pod {{ $labels.pod }} has restarted at least once
+          in the last 15 minutes. A single restart after the 05:30 refresh
+          CronJob is expected; monitor for repeats.
+        summary: docs-site pod {{ $labels.pod }} restarted
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace="monitoring", pod=~"docs-site-.*"}[15m]) > 0
+      for: 1m
+      labels:
+        category: monitoring
+        component: docs-site
+        severity: warning

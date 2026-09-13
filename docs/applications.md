@@ -19,7 +19,7 @@
 | ai | 9 |
 | home-automation | 20 |
 | databases | 11 |
-| monitoring | 13 |
+| monitoring | 14 |
 | office | 11 |
 | media | 5 |
 | download | 2 |
@@ -34,7 +34,7 @@
 | my-software-development | 3 |
 | my-software-production | 4 |
 | my-software-showcase | 15 |
-| **Total** | **120** |
+| **Total** | **121** |
 
 ---
 
@@ -119,6 +119,7 @@
 | prometheus-pushgateway | Push endpoint for metrics from short-lived jobs (CronJobs/scripts) that cannot be scraped. | None | Monitoring |
 | prometheus-blackbox-exporter | Synthetic DNS + HTTPS probes (chart 11.17.2 / blackbox v0.28.0, prometheus-community OCI). 4 `Probe` CRs: 2 answer-validating DNS probes against k8s-gateway 192.168.55.101, 2 HTTPS probes (one representative host per ingress class). Emits `probe_success` — the SLI behind the `internal-dns-resolution` and `internal-ingress-availability` SLOs. Alerts in `kube-prometheus-stack/app/blackbox-exporter-alerts.yaml`. | None | — |
 | sweep-dashboard | Web UI over the sweep_history DB — browse operator policy (`/policies/`) and sweep findings. JSON API at `/api/policies/{accepted-risks,slos,noise,security}`. | Internal | Monitoring |
+| docs-site | Static MkDocs Material build of this repo's docs/SOPs/runbooks + interactive diagrams (`docs/diagrams/`). Init container clones the public repo and builds (mkdocs-material 9.7.7); nginx-unprivileged 1.31.5-alpine serves; refreshed nightly 05:30 via rollout-restart CronJob. | Internal | Monitoring |
 
 ---
 

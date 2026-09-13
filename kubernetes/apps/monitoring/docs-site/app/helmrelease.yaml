@@ -1,0 +1,209 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+#
+# docs-site — static MkDocs Material build of this repo's docs/ + runbooks/*.md
+# plus the interactive diagrams under docs/diagrams/, served by unprivileged
+# nginx. The init container clones the PUBLIC repo (no credentials) and builds
+# into a shared emptyDir; content therefore refreshes on every pod restart
+# (nightly via refresh-cronjob.yaml). Gitignored docs/runbooks *-current.md
+# reports never exist in a fresh clone, and mkdocs.yml excludes them
+# defense-in-depth.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app docs-site
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 5.1.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      docs-site:
+        replicas: 1
+        # Deliberate deviation from the house single-replica Recreate default:
+        # emptyDir-only (no RWO PVC, Gotcha #12 does not apply), and a failed
+        # nightly rebuild (e.g. GitHub unreachable) must leave the OLD pod
+        # serving — surge 1 / unavailable 0 keeps it up while the new pod
+        # sticks in Init, and DocsSitePodNotReady pages after 5m.
+        strategy: RollingUpdate
+        rollingUpdate:
+          surge: 1
+          unavailable: 0
+        annotations:
+          reloader.stakater.com/auto: "true"
+        initContainers:
+          build:
+            image:
+              # renovate: image=squidfunk/mkdocs-material
+              repository: squidfunk/mkdocs-material
+              tag: 9.7.7
+              pullPolicy: IfNotPresent
+            command: ["/bin/sh", "-c"]
+            args:
+              - |
+                set -eu
+                git clone --depth 1 https://github.com/nachtschatt3n/cberg-home-nextgen.git /work/repo
+                sh /work/repo/docs-site/build.sh /work/repo /site
+            env:
+              # git wants a writable HOME for config discovery under uid 1000
+              - name: HOME
+                value: /work
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 200m
+                memory: 256Mi
+              limits:
+                memory: 1Gi
+        containers:
+          app:
+            image:
+              # renovate: image=nginxinc/nginx-unprivileged
+              repository: nginxinc/nginx-unprivileged
+              tag: 1.31.5-alpine
+              pullPolicy: IfNotPresent
+            probes:
+              # Static index.html on :8080 — cheap by construction (blueprint
+              # Gotcha #13: probes must never boot a framework).
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  initialDelaySeconds: 5
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  initialDelaySeconds: 5
+                  periodSeconds: 15
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  initialDelaySeconds: 2
+                  periodSeconds: 5
+                  timeoutSeconds: 5
+                  failureThreshold: 12
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 128Mi
+
+    defaultPodOptions:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+
+    service:
+      app:
+        controller: docs-site
+        ports:
+          http:
+            port: 8080
+
+    route:
+      app:
+        kind: HTTPRoute
+        hostnames:
+          - "docs.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only — the http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        labels:
+          gethomepage.dev/enabled: "true"
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Docs"
+          gethomepage.dev/description: "Cluster handbook — SOPs, runbooks, diagrams"
+          gethomepage.dev/group: "Monitoring"
+          gethomepage.dev/icon: "mdi-book-open-page-variant"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=docs-site"
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: app
+                port: http
+
+    persistence:
+      work:
+        type: emptyDir
+        advancedMounts:
+          docs-site:
+            build:
+              - path: /work
+      site:
+        type: emptyDir
+        advancedMounts:
+          docs-site:
+            build:
+              - path: /site
+            app:
+              - path: /usr/share/nginx/html
+                readOnly: true
+      tmp:
+        type: emptyDir
+        advancedMounts:
+          docs-site:
+            app:
+              # nginx-unprivileged writes its pid + temp dirs under /tmp,
+              # required with readOnlyRootFilesystem
+              - path: /tmp
+      nginx-tuning:
+        type: configMap
+        name: docs-site-nginx
+        advancedMounts:
+          docs-site:
+            app:
+              - path: /etc/nginx/conf.d/tuning.conf
+                subPath: tuning.conf
+                readOnly: true

@@ -18,6 +18,7 @@ resources:
   - ./prometheus-pushgateway/ks.yaml
   - ./sweep-dashboard/ks.yaml
   - ./prometheus-blackbox-exporter/ks.yaml
+  - ./docs-site/ks.yaml
 patches:
   # PSA override: privileged required for prometheus-node-exporter
   # DaemonSet (hostNetwork + hostPath /proc /sys).

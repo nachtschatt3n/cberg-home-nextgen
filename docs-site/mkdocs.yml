@@ -1,0 +1,63 @@
+# Homelab handbook — rendered by the docs-site app (kubernetes/apps/monitoring/docs-site).
+# The docs_dir staging tree is assembled by build.sh (gitignored); it mirrors the
+# repo root so every repo-relative cross-link between docs/ and runbooks/ resolves.
+# Zero extra plugins: only the built-in search — nothing is pip-installed at runtime.
+site_name: cberg-home-nextgen · Homelab Handbook
+docs_dir: content
+site_dir: site
+use_directory_urls: true
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.details
+
+# Defense-in-depth: a fresh clone never contains the gitignored *-current.md
+# reports (they carry live exposure detail), but exclude them anyway in case
+# the build ever runs against a working tree.
+exclude_docs: |
+  *-current.md
+
+# Keep the SOP template buildable (inbound links from sli-catalog.md and
+# policy-cli.md must not 404) but out of the navigation.
+not_in_nav: |
+  docs/sops/SOP-TEMPLATE.md
+
+# Docs intentionally link to .py/.sh runbook scripts and gitignored reports;
+# never build with --strict.
+validation:
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn

@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Longhorn Backup & Restore",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1080,
+      520
+    ],
+    "views": [
+      {
+        "id": "nightly",
+        "label": "Nightly backup",
+        "focus": [
+          "vols",
+          "cron",
+          "snap",
+          "backupcr",
+          "nas"
+        ],
+        "note": "The 03:00 CronJob snapshots every volume and ships incremental backups to the NAS."
+      },
+      {
+        "id": "truth",
+        "label": "Ground truth",
+        "focus": [
+          "backupcr",
+          "nas"
+        ],
+        "note": "Completed Backup CRs are the source of truth — lastBackupAt can lag a full cycle."
+      },
+      {
+        "id": "restore",
+        "label": "Restore path",
+        "focus": [
+          "nas",
+          "restorevol",
+          "pv"
+        ],
+        "note": "Restore creates a new volume, then a speaking-name PV and a PVC bound by volumeName."
+      }
+    ]
+  },
+  "stages": [
+    {
+      "label": "Volumes"
+    },
+    {
+      "label": "Snapshot"
+    },
+    {
+      "label": "Backup"
+    },
+    {
+      "label": "Target"
+    },
+    {
+      "label": "Restore"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "vols",
+      "type": "database",
+      "label": "Longhorn Volumes",
+      "sublabel": "replicated PVs",
+      "stage": 0,
+      "row": 0
+    },
+    {
+      "id": "cron",
+      "type": "messagebus",
+      "label": "backup-of-all",
+      "sublabel": "CronJob 03:00",
+      "stage": 0,
+      "row": 2
+    },
+    {
+      "id": "snap",
+      "type": "backend",
+      "label": "Snapshots",
+      "sublabel": "per volume",
+      "stage": 1,
+      "row": 0
+    },
+    {
+      "id": "backupcr",
+      "type": "backend",
+      "label": "Backup CRs",
+      "sublabel": "ground truth",
+      "stage": 2,
+      "row": 0,
+      "tag": "Completed"
+    },
+    {
+      "id": "nas",
+      "type": "cloud",
+      "label": "NAS Target",
+      "sublabel": "192.168.55.240",
+      "stage": 3,
+      "row": 0,
+      "tag": "retain 7"
+    },
+    {
+      "id": "restorevol",
+      "type": "backend",
+      "label": "Restore Volume",
+      "sublabel": "Longhorn UI",
+      "stage": 4,
+      "row": 0
+    },
+    {
+      "id": "pv",
+      "type": "database",
+      "label": "PV + PVC Swap",
+      "sublabel": "longhorn-static",
+      "stage": 4,
+      "row": 2,
+      "tag": "speaking name"
+    }
+  ],
+  "flows": [
+    {
+      "id": "trigger",
+      "from": "cron",
+      "to": "snap",
+      "label": "trigger",
+      "classification": "nightly",
+      "variant": "dashed"
+    },
+    {
+      "id": "snapshot",
+      "from": "vols",
+      "to": "snap",
+      "label": "snapshot",
+      "classification": "crash-consistent",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        263,
+        200
+      ]
+    },
+    {
+      "id": "backup",
+      "from": "snap",
+      "to": "backupcr",
+      "label": "incremental backup",
+      "classification": "per volume",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ship",
+      "from": "backupcr",
+      "to": "nas",
+      "label": "ship to NAS",
+      "classification": "CIFS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "restore",
+      "from": "nas",
+      "to": "restorevol",
+      "label": "restore",
+      "classification": "new volume",
+      "variant": "dashed"
+    },
+    {
+      "id": "bind",
+      "from": "restorevol",
+      "to": "pv",
+      "label": "bind by volumeName",
+      "classification": "scale down/up",
+      "variant": "dashed",
+      "labelDy": 24
+    }
+  ],
+  "cards": [
+    {
+      "dot": "violet",
+      "title": "lastBackupAt can lie",
+      "items": [
+        "volume.status.lastBackupAt can lag one full cycle under nightly load",
+        "Judge staleness by the newest Completed Backup CR, never the timestamp alone"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Retention",
+      "items": [
+        "Recurring retain count 7, old-backup cleanup every 24h",
+        "Credentials live in backup-credentials.sops.yaml"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Restore contract",
+      "items": [
+        "Restored volume gets a speaking-name PV (longhorn-static) and a PVC bound by volumeName",
+        "Scale the workload down, swap the PVC, scale back up"
+      ]
+    }
+  ]
+}

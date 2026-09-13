@@ -1,0 +1,60 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Media Intake Workflow",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "analysis", "label": "Analysis", "focus": ["scan", "classify", "probe", "planmove"], "note": "Everything up to the move plan is read-only analysis with ffprobe evidence." },
+      { "id": "approval", "label": "Approval gate", "focus": ["planmove", "approve", "move"], "note": "No file moves until the operator approves the rendered plan." },
+      { "id": "landing", "label": "Landing + rescan", "focus": ["move", "verifyclean", "rescan"], "note": "Atomic moves, sidecars, verified cleanup, then targeted library rescans." }
+    ]
+  },
+  "lanes": [
+    { "id": "mm", "label": "media-manager agent" },
+    { "id": "jobs", "label": "library-tools Jobs (cluster)" },
+    { "id": "libs", "label": "Plex / Jellyfin" },
+    { "id": "operator", "label": "Operator", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "analyse", "label": "Analyse", "fromCol": 0, "toCol": 2 },
+    { "id": "gate", "label": "Approve", "fromCol": 3, "toCol": 3, "variant": "security" },
+    { "id": "land", "label": "Land + rescan", "fromCol": 4, "toCol": 5, "variant": "emphasis" }
+  ],
+  "mainPath": ["scan", "classify", "probe", "planmove"],
+  "nodes": [
+    { "id": "scan", "lane": "mm", "col": 0, "type": "backend", "label": "List intake", "sublabel": "downloads/jdownloader", "width": 148 },
+    { "id": "classify", "lane": "mm", "col": 1, "type": "backend", "label": "Classify", "sublabel": "TV SxxEyy / movie", "width": 132 },
+    { "id": "probe", "lane": "mm", "col": 2, "type": "backend", "label": "ffprobe diff", "sublabel": "bitrate · fps · duration", "width": 148 },
+    { "id": "planmove", "lane": "mm", "col": 3, "type": "backend", "label": "Move plan", "sublabel": "targets + conflicts", "width": 136 },
+    { "id": "dupes", "lane": "jobs", "col": 2, "type": "security", "label": "Quarantine", "sublabel": "_duplicates/ + ignore files", "width": 168 },
+    { "id": "approve", "lane": "operator", "col": 3, "type": "external", "label": "Go / No-Go", "sublabel": "rendered plan", "width": 120 },
+    { "id": "move", "lane": "jobs", "col": 4, "type": "backend", "label": "Job: mv + NFO", "sublabel": "atomic · artwork fetch", "width": 152 },
+    { "id": "verifyclean", "lane": "jobs", "col": 5, "type": "backend", "label": "Verify + cleanup", "sublabel": "size>0 · rm verified dir", "width": 152 },
+    { "id": "rescan", "lane": "libs", "col": 5, "type": "cloud", "label": "Targeted rescan", "sublabel": "affected sections only", "width": 152 }
+  ],
+  "edges": [
+    { "from": "scan", "to": "classify", "variant": "emphasis" },
+    { "from": "classify", "to": "probe", "variant": "emphasis" },
+    { "from": "probe", "to": "planmove", "label": "winner per title", "variant": "emphasis" },
+    { "from": "probe", "to": "dupes", "label": "inferior copy", "variant": "dashed" },
+    { "from": "planmove", "to": "approve", "label": "surface plan", "variant": "security" },
+    { "from": "approve", "to": "move", "label": "approved", "variant": "emphasis" },
+    { "from": "move", "to": "verifyclean", "variant": "emphasis" },
+    { "from": "verifyclean", "to": "rescan", "label": "via cluster-ops-agent" }
+  ],
+  "semanticChecks": {
+    "allowedRoots": ["scan"],
+    "allowedTerminals": ["rescan", "dupes"],
+    "requiredEdges": [
+      { "from": "planmove", "to": "approve" },
+      { "from": "approve", "to": "move" }
+    ]
+  },
+  "cards": [
+    { "dot": "cyan", "title": "Evidence before moves", "items": ["ffprobe compares bitrate, native fps and duration before any replace", "Same-mount mv keeps every move atomic"] },
+    { "dot": "amber", "title": "Operator gate", "items": ["The move plan with conflicts is surfaced for go/no-go", "Cleanup removes only the specific verified subdir — no globs"] },
+    { "dot": "violet", "title": "Library hygiene", "items": ["Nested Kodi layout with NFO + poster/fanart sidecars", "Tube Archivist bridges to Jellyfin only, via two sidecar CronJobs"] }
+  ]
+}

@@ -1,0 +1,323 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "cberg Kubernetes Cluster",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "gitops",
+        "label": "GitOps loop",
+        "focus": [
+          "github",
+          "flux",
+          "apps"
+        ],
+        "note": "Every change lands via git push; Flux reconciles the cluster from the repo."
+      },
+      {
+        "id": "traffic",
+        "label": "Traffic entry",
+        "focus": [
+          "cloudflare",
+          "envoy-ext",
+          "lan",
+          "envoy-int",
+          "authentik",
+          "apps"
+        ],
+        "note": "Two Envoy gateways: LAN-only internal, tunnel-fed external, with Authentik SSO."
+      },
+      {
+        "id": "storage",
+        "label": "Storage",
+        "focus": [
+          "apps",
+          "longhorn",
+          "nas"
+        ],
+        "note": "Longhorn replicated volumes in-cluster; NAS for bulk data and nightly backups."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "github",
+      "type": "external",
+      "label": "GitHub",
+      "sublabel": "cberg-home-nextgen",
+      "tag": "public repo",
+      "pos": [
+        40,
+        80
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "cloudflare",
+      "type": "cloud",
+      "label": "Cloudflare",
+      "sublabel": "proxied DNS · Tunnel",
+      "pos": [
+        40,
+        250
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "lan",
+      "type": "external",
+      "label": "LAN Clients",
+      "sublabel": "VLANs 1 / 20 / 30",
+      "pos": [
+        40,
+        420
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "flux",
+      "type": "backend",
+      "label": "Flux",
+      "sublabel": "flux-operator · SOPS/age",
+      "pos": [
+        320,
+        80
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "envoy-ext",
+      "type": "security",
+      "label": "envoy-external",
+      "sublabel": "Gateway · 192.168.55.104",
+      "pos": [
+        320,
+        250
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "envoy-int",
+      "type": "backend",
+      "label": "envoy-internal",
+      "sublabel": "Gateway · 192.168.55.103",
+      "pos": [
+        320,
+        420
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "authentik",
+      "type": "security",
+      "label": "Authentik",
+      "sublabel": "SSO · outposts",
+      "pos": [
+        640,
+        80
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "apps",
+      "type": "backend",
+      "label": "Workloads",
+      "sublabel": "17 namespaces · HTTPRoutes",
+      "tag": "ai · media · home",
+      "pos": [
+        640,
+        250
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "longhorn",
+      "type": "database",
+      "label": "Longhorn",
+      "sublabel": "replicated block storage",
+      "pos": [
+        640,
+        420
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "monitoring",
+      "type": "backend",
+      "label": "Monitoring",
+      "sublabel": "Prom · Grafana · ELK",
+      "pos": [
+        880,
+        80
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "nas",
+      "type": "database",
+      "label": "UNAS-CBERG",
+      "sublabel": "NAS · 192.168.55.240",
+      "tag": "VLAN 55",
+      "pos": [
+        1110,
+        420
+      ],
+      "size": [
+        170,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Talos cluster · 3× NUC14 · VLAN 55 · Cilium",
+      "wraps": [
+        "flux",
+        "envoy-ext",
+        "envoy-int",
+        "authentik",
+        "apps",
+        "longhorn",
+        "monitoring"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "push-webhook",
+      "from": "github",
+      "to": "flux",
+      "label": "push → webhook",
+      "variant": "emphasis"
+    },
+    {
+      "id": "flux-reconcile",
+      "from": "flux",
+      "to": "apps",
+      "label": "reconciles manifests"
+    },
+    {
+      "id": "tunnel-in",
+      "from": "cloudflare",
+      "to": "envoy-ext",
+      "label": "Cloudflare Tunnel",
+      "variant": "emphasis"
+    },
+    {
+      "id": "lan-in",
+      "from": "lan",
+      "to": "envoy-int",
+      "label": "HTTPS · LAN DNS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ext-routes",
+      "from": "envoy-ext",
+      "to": "apps",
+      "label": "HTTPRoutes",
+      "labelDy": 30,
+      "labelDx": -40
+    },
+    {
+      "id": "int-routes",
+      "from": "envoy-int",
+      "to": "apps",
+      "label": "HTTPRoutes"
+    },
+    {
+      "id": "sso",
+      "from": "authentik",
+      "to": "apps",
+      "label": "SSO · OIDC / proxy",
+      "variant": "security",
+      "labelDy": 24
+    },
+    {
+      "id": "observe",
+      "from": "monitoring",
+      "to": "apps",
+      "label": "scrapes · log shipping",
+      "variant": "dashed"
+    },
+    {
+      "id": "pvc",
+      "from": "apps",
+      "to": "longhorn",
+      "label": "PVCs (RWO)",
+      "labelDy": 24
+    },
+    {
+      "id": "cifs",
+      "from": "apps",
+      "to": "nas",
+      "label": "CIFS/SMB mounts"
+    },
+    {
+      "id": "backup",
+      "from": "longhorn",
+      "to": "nas",
+      "label": "nightly backups",
+      "variant": "dashed",
+      "labelDy": 24
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "GitOps",
+      "items": [
+        "All changes via git push — Flux webhook reconcile, no direct cluster edits",
+        "Secrets SOPS-encrypted with age; decrypted in-cluster by Flux"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Traffic",
+      "items": [
+        "Gateway API only (zero Ingress objects): internal .103 for LAN, external .104 fed by Cloudflare Tunnel",
+        "Cilium LB-IPAM announces the gateway IPs on VLAN 55"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Storage",
+      "items": [
+        "Longhorn replicated volumes with speaking PV names",
+        "Bulk media/docs on the NAS via CIFS CSI; nightly Longhorn backups at 03:00"
+      ]
+    }
+  ]
+}

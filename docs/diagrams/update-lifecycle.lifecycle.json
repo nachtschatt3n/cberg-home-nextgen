@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Update Decision Lifecycle",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "safe-rail",
+        "label": "Safe rail",
+        "focus": [
+          "detected",
+          "gates",
+          "queued",
+          "applied",
+          "verified"
+        ],
+        "note": "A patch/minor update that clears all six gates lands automatically in the next window."
+      },
+      {
+        "id": "held-path",
+        "label": "Held path",
+        "focus": [
+          "gates",
+          "held",
+          "applied"
+        ],
+        "note": "Anything a gate holds gets a written plan and window approval before it may apply."
+      },
+      {
+        "id": "revert-loop",
+        "label": "Revert loop",
+        "focus": [
+          "applied",
+          "reverted",
+          "held"
+        ],
+        "note": "A failed health gate reverts the batch and sends the update back to planning."
+      }
+    ],
+    "viewBox": [
+      980,
+      566
+    ]
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "Update rail"
+    },
+    {
+      "id": "waiting",
+      "label": "Held / planning + auto-revert"
+    }
+  ],
+  "states": [
+    {
+      "id": "detected",
+      "type": "start",
+      "label": "Detected",
+      "sublabel": "Renovate PR / scan",
+      "lane": "main",
+      "col": 0,
+      "step": "01"
+    },
+    {
+      "id": "gates",
+      "type": "decision",
+      "label": "Gates G0–G5",
+      "sublabel": "deny by default",
+      "lane": "main",
+      "col": 1,
+      "step": "02",
+      "tag": "6 gates"
+    },
+    {
+      "id": "queued",
+      "type": "waiting",
+      "label": "Safe · queued",
+      "sublabel": "lands next window",
+      "lane": "main",
+      "col": 2,
+      "step": "03"
+    },
+    {
+      "id": "applied",
+      "type": "active",
+      "label": "Applied",
+      "sublabel": "Step 0 merge / direct-bump",
+      "lane": "main",
+      "col": 3,
+      "step": "04",
+      "width": 150
+    },
+    {
+      "id": "verified",
+      "type": "success",
+      "label": "Verified",
+      "sublabel": "Ready · no CrashLoop",
+      "lane": "main",
+      "col": 4,
+      "step": "05",
+      "tag": "terminal"
+    },
+    {
+      "id": "held",
+      "type": "waiting",
+      "label": "Held → Planned",
+      "sublabel": "plan · vet · sequence",
+      "lane": "waiting",
+      "col": 0
+    },
+    {
+      "id": "reverted",
+      "type": "failure",
+      "label": "Auto-reverted",
+      "sublabel": "git revert · exit 2",
+      "lane": "waiting",
+      "col": 2,
+      "tag": "recoverable"
+    }
+  ],
+  "transitions": [
+    {
+      "from": "gates",
+      "to": "held",
+      "label": "major / denied / breaking / red CI",
+      "variant": "security",
+      "route": "auto"
+    },
+    {
+      "from": "held",
+      "to": "applied",
+      "label": "approved / AUTO-NIGHT",
+      "variant": "emphasis",
+      "route": "auto"
+    },
+    {
+      "from": "applied",
+      "to": "reverted",
+      "label": "health gate fails",
+      "variant": "security",
+      "route": "auto"
+    },
+    {
+      "from": "reverted",
+      "to": "held",
+      "label": "re-planned for attended window",
+      "variant": "dashed",
+      "route": "auto",
+      "labelAt": [
+        526,
+        350
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Six gates, deny by default",
+      "items": [
+        "Parse · patch/minor · deny-list · breaking · CI · 48h age",
+        "Missing or unparseable policy denies everything"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Two safe lanes",
+      "items": [
+        "Renovate-PR merges and direct manifest bumps share the gates",
+        "Direct-bump lane is stricter: no pre-release channels, no 0.x line moves"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Revert is loud",
+      "items": [
+        "Exit 2 = applied-then-reverted, emits a critical finding",
+        "The reverted update returns to planning — it never silently retries"
+      ]
+    }
+  ]
+}

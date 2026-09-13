@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Paperless Document Ingestion",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1080,
+      520
+    ],
+    "views": [
+      {
+        "id": "scan-path",
+        "label": "Scanner path",
+        "focus": [
+          "scanner",
+          "inbox",
+          "validator",
+          "consumer"
+        ],
+        "note": "Scans land on the SMB inbox and are validated before paperless ever sees them."
+      },
+      {
+        "id": "mail-path",
+        "label": "Email path",
+        "focus": [
+          "email",
+          "consumer"
+        ],
+        "note": "A GMX mail rule pulls PDF attachments straight into the consume pipeline."
+      },
+      {
+        "id": "ai-store",
+        "label": "AI + storage",
+        "focus": [
+          "consumer",
+          "ai",
+          "db",
+          "media"
+        ],
+        "note": "Native AI suggests metadata; documents land in MariaDB + the CIFS media share."
+      }
+    ]
+  },
+  "stages": [
+    {
+      "label": "Capture"
+    },
+    {
+      "label": "Inbox"
+    },
+    {
+      "label": "Validate"
+    },
+    {
+      "label": "Consume"
+    },
+    {
+      "label": "Store"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "scanner",
+      "type": "external",
+      "label": "Epson ES-580W",
+      "sublabel": "192.168.32.201",
+      "stage": 0,
+      "row": 0,
+      "tag": "IoT VLAN · duplex"
+    },
+    {
+      "id": "email",
+      "type": "external",
+      "label": "GMX Mailbox",
+      "sublabel": "IMAP 993 · *.pdf",
+      "stage": 0,
+      "row": 2
+    },
+    {
+      "id": "inbox",
+      "type": "cloud",
+      "label": "SMB Inbox",
+      "sublabel": "NAS share · inbox",
+      "stage": 1,
+      "row": 0,
+      "tag": "CIFS · Retain"
+    },
+    {
+      "id": "validator",
+      "type": "security",
+      "label": "Inbox Validator",
+      "sublabel": "pikepdf pre-flight",
+      "stage": 2,
+      "row": 0
+    },
+    {
+      "id": "consumer",
+      "type": "backend",
+      "label": "paperless-ngx",
+      "sublabel": "OCR force deu+eng",
+      "stage": 3,
+      "row": 1,
+      "tag": "6Gi limit"
+    },
+    {
+      "id": "ai",
+      "type": "backend",
+      "label": "Native AI",
+      "sublabel": "gemma4 + RAG",
+      "stage": 3,
+      "row": 2,
+      "tag": "ollama :11434"
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "MariaDB",
+      "sublabel": "paperless-db",
+      "stage": 4,
+      "row": 0
+    },
+    {
+      "id": "media",
+      "type": "database",
+      "label": "CIFS Media",
+      "sublabel": "archive on NAS",
+      "stage": 4,
+      "row": 2
+    }
+  ],
+  "flows": [
+    {
+      "id": "scan-smb",
+      "from": "scanner",
+      "to": "inbox",
+      "label": "scan-to-SMB",
+      "classification": "originals",
+      "variant": "emphasis"
+    },
+    {
+      "id": "validated",
+      "from": "inbox",
+      "to": "validator",
+      "label": "stable PDFs",
+      "classification": "pre-flight",
+      "variant": "emphasis"
+    },
+    {
+      "id": "atomic-move",
+      "from": "validator",
+      "to": "consumer",
+      "label": "atomic move → consume",
+      "classification": "poll 10s",
+      "variant": "emphasis"
+    },
+    {
+      "id": "mail-pdfs",
+      "from": "email",
+      "to": "consumer",
+      "label": "PDF attachments",
+      "classification": "MailRule",
+      "variant": "dashed"
+    },
+    {
+      "id": "suggest",
+      "from": "consumer",
+      "to": "ai",
+      "label": "suggest + index",
+      "classification": "nightly 02:10",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "metadata",
+      "from": "consumer",
+      "to": "db",
+      "label": "metadata + index",
+      "classification": "utf8mb4",
+      "variant": "emphasis"
+    },
+    {
+      "id": "archive",
+      "from": "consumer",
+      "to": "media",
+      "label": "archived PDF",
+      "classification": "year/correspondent",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Validated before consumed",
+      "items": [
+        "The validator only moves file-stable, pikepdf-parseable PDFs with pages",
+        "Barcode splitting (PATCHT) happens in the consumer"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "OCR settings that matter",
+      "items": [
+        "OCR_MODE=force with deu+eng and rotate threshold 7",
+        "Memory limit stays at 6Gi — it OOMs at 3Gi"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "AI is DB-stored config",
+      "items": [
+        "LLM suggestions + RAG run against the LAN ollama host",
+        "ApplicationConfiguration lives in the DB, not GitOps"
+      ]
+    }
+  ]
+}

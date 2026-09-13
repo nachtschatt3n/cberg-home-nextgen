@@ -1,0 +1,322 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Maintenance-Window Pipeline",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "safe-lane",
+        "label": "Safe updates (Step 0)",
+        "focus": [
+          "wopen",
+          "step0",
+          "verify"
+        ],
+        "note": "Every window starts by applying the safe update batch — even unattended nightly runs."
+      },
+      {
+        "id": "held-lane",
+        "label": "Held updates",
+        "focus": [
+          "dryrun",
+          "dispatch",
+          "plan",
+          "vet",
+          "sequence"
+        ],
+        "note": "Non-safe updates get an executable plan and interference vetting before any window runs them."
+      },
+      {
+        "id": "gates",
+        "label": "Autonomy & rollback",
+        "focus": [
+          "sequence",
+          "gonogo",
+          "execute",
+          "verify",
+          "revert",
+          "defer"
+        ],
+        "note": "Autonomy classes decide who approves; regressions auto-revert via git."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "sweep",
+      "label": "Daily Sweep (read-only)"
+    },
+    {
+      "id": "planner",
+      "label": "Upgrade Planner Agents"
+    },
+    {
+      "id": "window",
+      "label": "Maintenance-Window Agent"
+    },
+    {
+      "id": "exceptions",
+      "label": "Operator / Exceptions",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "trigger",
+      "label": "Trigger + Step 0",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "planvet",
+      "label": "Plan + vet",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "run",
+      "label": "Execute + verify",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "wopen",
+    "step0",
+    "vet",
+    "sequence",
+    "execute",
+    "verify"
+  ],
+  "nodes": [
+    {
+      "id": "wopen",
+      "lane": "window",
+      "col": 0,
+      "type": "messagebus",
+      "label": "Window opens",
+      "sublabel": "nightly 03:30 · Sat/Sun 09:00",
+      "width": 148
+    },
+    {
+      "id": "dryrun",
+      "lane": "sweep",
+      "col": 0,
+      "type": "backend",
+      "label": "Sweep dry-run",
+      "sublabel": "auto-update.py report",
+      "width": 116
+    },
+    {
+      "id": "dispatch",
+      "lane": "sweep",
+      "col": 1,
+      "type": "backend",
+      "label": "Dispatch planners",
+      "sublabel": "one per held update",
+      "width": 128
+    },
+    {
+      "id": "plan",
+      "lane": "planner",
+      "col": 2,
+      "type": "backend",
+      "label": "Write plan",
+      "sublabel": "pre-checks · rollback · risk",
+      "width": 160
+    },
+    {
+      "id": "step0",
+      "lane": "window",
+      "col": 1,
+      "type": "backend",
+      "label": "Step 0: safe batch",
+      "sublabel": "auto-update --apply",
+      "tag": "every window",
+      "width": 132
+    },
+    {
+      "id": "vet",
+      "lane": "window",
+      "col": 2,
+      "type": "backend",
+      "label": "Vet plan set",
+      "sublabel": "interference · stacking",
+      "width": 128
+    },
+    {
+      "id": "sequence",
+      "lane": "window",
+      "col": 3,
+      "type": "backend",
+      "label": "Sequence",
+      "sublabel": "serialize risk classes",
+      "width": 124
+    },
+    {
+      "id": "execute",
+      "lane": "window",
+      "col": 4,
+      "type": "cloud",
+      "label": "Execute",
+      "sublabel": "via cberg-agent · GitOps",
+      "width": 136
+    },
+    {
+      "id": "verify",
+      "lane": "window",
+      "col": 5,
+      "type": "database",
+      "label": "Health gate",
+      "sublabel": "per-plan verification",
+      "width": 120
+    },
+    {
+      "id": "gonogo",
+      "lane": "exceptions",
+      "col": 3,
+      "type": "external",
+      "label": "Go / No-Go",
+      "sublabel": "HUMAN-GATED plans",
+      "width": 104
+    },
+    {
+      "id": "defer",
+      "lane": "exceptions",
+      "col": 4,
+      "type": "security",
+      "label": "Defer",
+      "sublabel": "unanswered → next window",
+      "width": 136
+    },
+    {
+      "id": "revert",
+      "lane": "exceptions",
+      "col": 5,
+      "type": "security",
+      "label": "Auto-revert",
+      "sublabel": "git revert + reconcile",
+      "width": 128
+    }
+  ],
+  "edges": [
+    {
+      "from": "wopen",
+      "to": "step0",
+      "label": "opens",
+      "variant": "emphasis"
+    },
+    {
+      "from": "dryrun",
+      "to": "dispatch",
+      "label": "held updates"
+    },
+    {
+      "from": "dispatch",
+      "to": "plan",
+      "label": "one planner each"
+    },
+    {
+      "from": "plan",
+      "to": "vet",
+      "label": "plans due"
+    },
+    {
+      "from": "step0",
+      "to": "vet",
+      "label": "safe batch landed",
+      "variant": "emphasis"
+    },
+    {
+      "from": "vet",
+      "to": "sequence",
+      "variant": "emphasis"
+    },
+    {
+      "from": "sequence",
+      "to": "execute",
+      "label": "AUTO-NIGHT",
+      "variant": "emphasis"
+    },
+    {
+      "from": "sequence",
+      "to": "gonogo",
+      "label": "HUMAN-GATED",
+      "variant": "security"
+    },
+    {
+      "from": "gonogo",
+      "to": "execute",
+      "label": "approved"
+    },
+    {
+      "from": "gonogo",
+      "to": "defer",
+      "label": "no answer",
+      "variant": "dashed"
+    },
+    {
+      "from": "execute",
+      "to": "verify",
+      "variant": "emphasis"
+    },
+    {
+      "from": "verify",
+      "to": "revert",
+      "label": "regression",
+      "variant": "security",
+      "role": "error"
+    }
+  ],
+  "semanticChecks": {
+    "allowedRoots": [
+      "wopen",
+      "dryrun"
+    ],
+    "allowedTerminals": [
+      "verify",
+      "defer",
+      "revert"
+    ],
+    "requiredEdges": [
+      {
+        "from": "wopen",
+        "to": "step0"
+      },
+      {
+        "from": "verify",
+        "to": "revert"
+      }
+    ]
+  },
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Step 0 is unconditional",
+      "items": [
+        "Safe patch/minor updates apply at the START of every window — including unattended nightly runs",
+        "The sweep only dry-runs and reports; it never applies"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Autonomy classes",
+      "items": [
+        "AUTO-NIGHT runs unattended after clean supervised runs; backup-gated plans need a named gate PASS",
+        "HUMAN-GATED or ambiguity → operator go/no-go; silence defers, never auto-runs"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Rollback contract",
+      "items": [
+        "Every plan ships its own verification + rollback",
+        "A failed health gate git-reverts the batch and Flux reconciles back"
+      ]
+    }
+  ]
+}

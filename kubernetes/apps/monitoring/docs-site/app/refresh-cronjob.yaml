@@ -1,0 +1,94 @@
+---
+# docs-site-refresh — nightly rollout restart so the site tracks main.
+#
+# The docs-site pod builds its content from a git clone at INIT time; nothing
+# re-pulls while the pod runs. A daily restart re-clones and rebuilds. 05:30
+# Europe/Berlin sits clear of the 02:30 frigate restart, the 03:00 Longhorn
+# backup, the 03:30 nightly maintenance window and the 04:00 sweep.
+#
+# Shape copied from frigate-restart (home-automation), including its two
+# hard-won lessons: rancher/kubectl has NO SHELL (args only — a /bin/sh form
+# can never start), and the RollingUpdate strategy on the deployment means a
+# failed rebuild leaves the old pod serving rather than taking the site down.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: docs-site-refresh
+  namespace: monitoring
+---
+# Deliberately minimal: patch on ONE named deployment.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: docs-site-refresh
+  namespace: monitoring
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [docs-site]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: docs-site-refresh
+  namespace: monitoring
+subjects:
+  - kind: ServiceAccount
+    name: docs-site-refresh
+    namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: docs-site-refresh
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: docs-site-refresh
+  namespace: monitoring
+spec:
+  schedule: "30 5 * * *"          # DAILY 05:30 Europe/Berlin
+  timeZone: Europe/Berlin
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # A missed refresh is skipped, not deferred — stale-by-one-day docs are fine
+  # and the operator can `kubectl rollout restart` anytime.
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: docs-site-refresh
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+          containers:
+            - name: restart
+              # v1.36.x tracks the cluster (apiserver + kubelets v1.36.0).
+              # Bump alongside Talos/k8s upgrades — the tag is inline here, so
+              # nothing bumps it for you (same caveat as frigate-restart).
+              image: docker.io/rancher/kubectl:v1.36.2
+              # NO SHELL in rancher/kubectl — the entrypoint IS kubectl, pass
+              # args only (proven the hard way on frigate-restart 2026-08-26).
+              args:
+                - -n
+                - monitoring
+                - rollout
+                - restart
+                - deployment/docs-site
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi

@@ -1,0 +1,267 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "External Ingress Path",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "request",
+        "label": "Request path",
+        "focus": [
+          "client",
+          "cf-edge",
+          "cloudflared",
+          "envoy-ext",
+          "apps"
+        ],
+        "note": "Internet request through the outbound-only tunnel to the external gateway and app pods."
+      },
+      {
+        "id": "dns-certs",
+        "label": "DNS & certificates",
+        "focus": [
+          "external-dns",
+          "cert-manager",
+          "cf-edge",
+          "envoy-ext"
+        ],
+        "note": "external-dns publishes proxied CNAMEs; cert-manager issues the wildcard via DNS-01."
+      },
+      {
+        "id": "auth",
+        "label": "Authentication",
+        "focus": [
+          "authentik",
+          "apps"
+        ],
+        "note": "Authentik gates sensitive external apps via OIDC and proxy outposts."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "Internet Client",
+      "sublabel": "https://app.<domain>",
+      "pos": [
+        40,
+        120
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "cf-edge",
+      "type": "cloud",
+      "label": "Cloudflare Edge",
+      "sublabel": "proxied CNAME · TLS",
+      "tag": "WAF",
+      "pos": [
+        40,
+        320
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "cloudflared",
+      "type": "backend",
+      "label": "cloudflared",
+      "sublabel": "network/external",
+      "tag": "outbound-only",
+      "pos": [
+        340,
+        320
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "envoy-ext",
+      "type": "security",
+      "label": "envoy-external",
+      "sublabel": "192.168.55.104 · TLS terminate",
+      "tag": "wildcard cert",
+      "pos": [
+        660,
+        320
+      ],
+      "size": [
+        190,
+        64
+      ]
+    },
+    {
+      "id": "apps",
+      "type": "backend",
+      "label": "Application Pods",
+      "sublabel": "per-app HTTPRoutes",
+      "pos": [
+        990,
+        320
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "external-dns",
+      "type": "backend",
+      "label": "external-dns",
+      "sublabel": "crd + gateway-httproute",
+      "pos": [
+        340,
+        520
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "cert-manager",
+      "type": "security",
+      "label": "cert-manager",
+      "sublabel": "Let's Encrypt · DNS-01",
+      "pos": [
+        660,
+        520
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "authentik",
+      "type": "security",
+      "label": "Authentik",
+      "sublabel": "SSO · proxy outposts",
+      "pos": [
+        990,
+        520
+      ],
+      "size": [
+        170,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Kubernetes cluster · VLAN 55",
+      "wraps": [
+        "cloudflared",
+        "envoy-ext",
+        "apps",
+        "external-dns",
+        "cert-manager",
+        "authentik"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "client-edge",
+      "from": "client",
+      "to": "cf-edge",
+      "label": "HTTPS",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "tunnel",
+      "from": "cf-edge",
+      "to": "cloudflared",
+      "label": "Tunnel (outbound QUIC)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "origin",
+      "from": "cloudflared",
+      "to": "envoy-ext",
+      "label": "HTTPS :443 · SNI <domain>",
+      "variant": "emphasis"
+    },
+    {
+      "id": "routes",
+      "from": "envoy-ext",
+      "to": "apps",
+      "label": "sectionName: https",
+      "variant": "emphasis"
+    },
+    {
+      "id": "dns-publish",
+      "from": "external-dns",
+      "to": "cf-edge",
+      "label": "CNAME → external.<domain>",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "bottom"
+    },
+    {
+      "id": "wildcard-cert",
+      "from": "cert-manager",
+      "to": "envoy-ext",
+      "label": "wildcard TLS secret",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelAt": [
+        850,
+        452
+      ]
+    },
+    {
+      "id": "gate",
+      "from": "authentik",
+      "to": "apps",
+      "label": "OIDC / forward-auth",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelAt": [
+        990,
+        452
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "No open WAN ports",
+      "items": [
+        "cloudflared dials out to Cloudflare — nothing is port-forwarded on the gateway",
+        "Wildcard tunnel rule sends *.<domain> to envoy-external :443"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "TLS & redirects",
+      "items": [
+        "TLS re-terminated at envoy-external with the wildcard cert (SNI pinned to <domain>)",
+        "The http listener is owned by the cluster-wide https-redirect route — every host 301s"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Control plane",
+      "items": [
+        "external-dns (gateway-httproute source) reads the target from the parent Gateway, not the route",
+        "cert-manager solves ACME DNS-01 through Cloudflare for the wildcard"
+      ]
+    }
+  ]
+}
