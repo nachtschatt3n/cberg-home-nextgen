@@ -1,12 +1,14 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.09.11`
-> Last Updated: `2026-09-11`
+> Version: `2026.09.13`
+> Last Updated: `2026-09-13`
 
 ## 1) Description
 
-The auto-updater (`docs/sops/auto-update.md`) merges SAFE patch/minor updates on
-the scheduled sweep. Everything it HOLDS — majors, breaking-despite-patch,
+The auto-updater (`docs/sops/auto-update.md`) merges SAFE patch/minor updates at
+**Step 0 of EVERY maintenance window** — not on the sweep. The sweep is
+READ-ONLY: it dry-runs `auto-update.py` (rule 4c) to report what will land next
+window, and applies nothing. Everything the auto-updater HOLDS — majors, breaking-despite-patch,
 deny-listed components, node-reboot items — is a **non-safe** update that must be
 executed deliberately. This SOP is the pipeline that gets those done without
 tangling several risky changes together:
@@ -112,9 +114,14 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   2026-07-25 `auto_execute`+`risk: low` pair):** a plan's execution class is
   DERIVED from declared facts (`capability_change`, `rollback_class`,
   `needs_reboot`, shared-storage touch) against `runbooks/autonomy-policy.yaml`
-  — plans cannot claim a class. **AUTO-NIGHT** runs unattended in
-  `mode: unattended` windows (no unresolved interference; category needs
-  `first_runs_supervised` clean supervised runs first). **AUTO-BACKUP-GATED**
+  — plans cannot claim a class. **AUTO-NIGHT** may execute WITHOUT asking in
+  **ANY** window regardless of its `mode:` (widened 2026-09-12, `d147b1ce` —
+  the old "`mode: unattended` only" wording contradicted the attended-window
+  no-ack rule below, and being stricter it won, so a cron-fired ATTENDED window
+  could execute nothing on its own). Still required: no unresolved
+  interference, and the plan's category needs `first_runs_supervised` clean
+  supervised runs first. `mode:` records whether a human is expected around; it
+  does not decide whether pre-approved work may run. **AUTO-BACKUP-GATED**
   additionally requires its named restore-proof `backup_gate` to PASS in the
   window. **HUMAN-GATED** — and every ambiguity, missing fact, or unreadable
   policy — is operator go/no-go, never silently skipped or auto-decided.
@@ -420,6 +427,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.13 | 2026-09-13 | **Two stale assertions corrected, both of a kind that has already cost a window.** (a) §1 said the auto-updater "merges SAFE patch/minor updates on the scheduled sweep" — the retired "sweep-applies" model; the sweep is READ-ONLY and safe updates land at Step 0 of every window, as §2 of this same SOP already said. (b) §Execution posture still said AUTO-NIGHT "runs unattended in `mode: unattended` windows" — the exact wording `d147b1ce` removed from `maintenance-window-agent.md`, `autonomy-policy.yaml` and `maintenance-windows.yaml` on 2026-09-12 because, being the stricter of two contradictory rules, it meant a cron-fired ATTENDED window could execute NOTHING. This SOP was the fourth site and was missed. |
 | 2026.09.11 | 2026-09-11 | `CHANNEL_RULES` is now **membership, not a predicate**. The `"stable": "odd-minor"` rule for scrypted was DISPROVED (~17 even-minor releases carry `prerelease=false`) and, worse, failed OPEN: a Release-less ODD-minor dev tag scored stable and would have been applied UNATTENDED at Step 0 onto a privileged NVR, with the `auto-update-policy.yaml` deny rule as the only thing holding the door. Stable-ness depends on whether upstream published a non-prerelease Release for that EXACT tag — which no version string can answer — so membership alone is the hold. Membership stays offline-decidable, which the window agent requires. |
 | 2026.09.05 | 2026-09-05 | Documented the **RISK-CLASS STACKING** detector (`656ffef8`): >1 irreversible plan (`rollback_class` one-way/backup-restore) in one slot has no rollback path for the window; quiet on a single irreversible plan and on git-revert rollbacks. Blast radius is set by reversibility, not namespace. |
 | 2026.07.25 | 2026-07-25 | Initial SOP. 3 windows/week; per-held-update planner agent; window agent vets interference + side effects, sequences, operator go/no-go; sweep reconciles + reports the schedule. |

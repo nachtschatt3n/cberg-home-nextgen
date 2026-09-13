@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.09.12`
-> Last Updated: `2026-09-12`
+> Version: `2026.09.13`
+> Last Updated: `2026-09-13`
 
 ## 1) Description
 
@@ -248,29 +248,42 @@ Two properties to hold on to:
   Charts have no such pointer and always hold. The blocked PR is left strictly
   alone — never closed, retargeted or commented on from code.
 
+**The durable fix for a channel problem is Renovate-side, not policy-side.**
+Where upstream publishes a real dist-tag, pin Renovate to the channel pointer
+instead of the highest semver — `followTag: "stable"` in `.github/renovate.json5`
+(added for `n8nio/n8n` 2026-09-12, `12de99ef`). Renovate then proposes only what
+upstream has actually promoted, so the beta stops being re-proposed every time
+the pre-release line advances. It does NOT replace the `max:` deny rule:
+`followTag` trusts upstream to keep the pointer honest, the policy rule does not,
+so the two stay layered as defence in depth. Components without a usable
+dist-tag stay on `CHANNEL_RULES` membership (see
+`docs/sops/maintenance-windows.md` §Coverage guarantee).
+
 ### Test 2: policy + parse gates (offline unit check)
 
 Run the synthetic matrix. **It must assert every deny rule that exists, not a
 memorable subset** — a rule absent from the matrix is a rule the test cannot
-catch the removal of. As of `2026.09.08.1` that is all 21 globs:
+catch the removal of. As of `2026.09.12.1` that is all 23 globs:
 
 | Deny glob | Assert |
 |---|---|
-| `*app-template*` | held at every update_type |
+| `*app-template*` | `max: patch` (narrowed 2026-09-12) — patch ALLOWED, minor held; major never reaches the rule (G1) |
 | `*affine*` | held at every update_type |
 | `*cilium*` | held at every update_type |
 | `*gateway-helm*` | held at every update_type |
 | `*gateway-crds-helm*` | held at every update_type |
+| `*k8s-gateway*` | held at every update_type |
 | `*envoy-gateway*` | held at every update_type |
 | `*external-dns*` | held at every update_type — **including `minor`**, which is the case that matters: chart 1.22.x will ship appVersion 0.22.0 and would otherwise score a safe MINOR into the unattended nightly lane |
 | `*mariadb*` | `max: patch` — patch ALLOWED, minor and major held |
 | `*mcpo*` | held at every update_type |
-| `*nocodb*` | held at every update_type (calver month hops parse as `minor`) |
-| `*nextcloud-mcp*` | held **with its own reason**, matched BEFORE `*nextcloud*` |
+| `*n8n*` | `max: patch` (added 2026-09-10) — patch ALLOWED (stable line), minor held: n8n ships its beta/next channel on the next MINOR line with no prerelease marker in the tag |
+| `*nocodb*` | `max: patch` — patch ALLOWED, minor held, which is the case that matters: a calver month hop parses as `minor` and runs one-way knex migrations |
+| `*nextcloud-mcp*` | `max: patch` (narrowed 2026-09-12) — patch ALLOWED, minor held **with its own reason**, matched BEFORE `*nextcloud*` |
 | `*nextcloud-redis*` | held **with its own reason**, matched BEFORE `*nextcloud*` |
 | `*nextcloud*` | held at every update_type |
 | `*scrypted*` | held at every update_type |
-| `*grafana*` | held at every update_type (chart minor can move appVersion) |
+| `*grafana*` | `max: patch` (narrowed 2026-09-12) — patch ALLOWED, minor held (a chart MINOR can move appVersion across forward-only sqlite migrations; a chart PATCH does not) |
 | `*unpoller*` | held at every update_type |
 | `*openclaw*` | held at every update_type |
 | `*@openclaw/*` | held at every update_type |
@@ -405,6 +418,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.13 | 2026-09-13 | **Test 2's matrix had drifted again — the failure mode the 2026.09.08 entry below claims to have closed.** Its own Test 2b check reported `MISSING: *k8s-gateway*, *n8n*`, and four Assert cells were stale: `*app-template*`, `*grafana*`, `*nextcloud-mcp*` were narrowed to `max: patch` on 2026-09-12 (`d147b1ce`) and `*nocodb*` earlier, yet all four still read "held at every update_type". Test 2b only checks glob MEMBERSHIP, so it cannot see a wrong Assert — the `max:` semantics still decay silently. Matrix resynced to policy `2026.09.12.1` (23 globs). Also documented the Renovate-side `followTag` channel lever. |
 | 2026.09.12 | 2026-09-12 | **A `max:` rule's ALLOWED half had no candidate source.** Renovate only ever proposes the newest version — the blocked one — so G2 held the PR while the direct-bump lane skipped the component for *having* a PR. n8n `2.38.4 → 2.38.7` (a patch on the stable line, explicitly permitted by its own `max: patch`) was invisible to both halves. Added `coverage.py::max_rule_fallbacks()`: reads upstream's stable-channel pointer, emits the allowed head as an ordinary direct-bump candidate, holds fail-safe when the channel cannot be confirmed. Regression suite: `runbooks/tests/test-max-rule-fallback.py`. |
 | 2026.09.08 | 2026-09-08 | **Completed the Test 2 synthetic matrix and added Test 2b to keep it complete.** The matrix enumerated 8 of the then-20 deny globs; `*external-dns*` was added the same day (`e97476d3`, policy `2026.09.08.1`) and 11 others (`cilium`, `gateway-helm`, `gateway-crds-helm`, `envoy-gateway`, `mcpo`, `nocodb`, `nextcloud-mcp`, `nextcloud-redis`, `grafana`, `coredns`, `@openclaw/`) had never been listed — so the SOP's own test asserted a policy the repo no longer had. Test 1 now derives the list from the policy YAML instead of restating it, and Test 2b fails on any missing-or-stale glob in both directions. |
 | 2026.09.05 | 2026-09-05 | Documented the G5 **direct-bump blind spot**: the security waiver reads a marker from the Renovate PR title, so the no-PR direct-bump lane can never trigger it and `age_waive` (retroactive, permanent, per-component) is the only lever. Three occurrences in two days — `3118a96f`, `e813bba0`. |

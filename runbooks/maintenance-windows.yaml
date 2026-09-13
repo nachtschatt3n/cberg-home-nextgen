@@ -34,7 +34,7 @@
 # scheduled plans' window: fields, the OpenClaw crons' payloads, and the live
 # GO/issue records — a rename without that migration orphans a live GO.
 # Edit freely (git-tracked); bump `version`.
-version: "2026.09.12.1"
+version: "2026.09.13"
 timezone: Europe/Berlin
 
 windows:
@@ -103,17 +103,21 @@ windows:
     mode: attended
 
 execution:
-  # Limited autonomy (enabled 2026-07-25): a plan may run WITHOUT asking only if
-  # ALL hold — `auto_execute: true` in its frontmatter, `risk: low`, and no
-  # unresolved interference. Everything else (any medium/high plan, any
-  # interference/side-effect conflict, any blocked/rollback) ALWAYS notifies the
-  # operator and waits for go/no-go. So the trivial runs itself; anything that
-  # needs a decision reaches your phone.
+  # Autonomy is CLASS-BASED (P2.1b, 2026-08-26). A plan's execution class is
+  # DERIVED by maintenance-plan.py from declared facts against
+  # runbooks/autonomy-policy.yaml — plans cannot claim a class. AUTO-NIGHT and
+  # AUTO-BACKUP-GATED may run WITHOUT asking, provided there is no unresolved
+  # interference (and, for AUTO-BACKUP-GATED, the named backup gate PASSES in
+  # the window). Everything else — HUMAN-GATED, any interference/side-effect
+  # conflict, any blocked/rollback — ALWAYS notifies the operator and waits for
+  # go/no-go. So the pre-approved runs itself; anything needing a decision
+  # reaches your phone.
   default_mode: operator-go-no-go
-  # unattended_allowed / max_unattended_risk RETIRED 2026-08-26 (P2.1b): the
-  # blunt boolean+risk-ceiling pair is superseded by derived execution classes
-  # (runbooks/autonomy-policy.yaml). Autonomy is decided by reversibility +
-  # capability-change + blast radius, per window `mode:` — not by risk.
+  # RETIRED knobs, do not reintroduce: `auto_execute` + `risk: low` (the
+  # 2026-07-25 pair), `unattended_allowed`, `max_unattended_risk`. Autonomy is
+  # decided by reversibility + capability-change + blast radius — NOT by `risk:`
+  # (which stays the capacity weight) and NOT by the window's `mode:` (widened
+  # 2026-09-12: AUTO-* plans run in ANY window; see the `mode:` note above).
 
   # Operator MUST be told on every event below, and a go/no-go is never silently
   # skipped or auto-decided. Since 2026-07-25 OpenClaw's `home-operation` skill
