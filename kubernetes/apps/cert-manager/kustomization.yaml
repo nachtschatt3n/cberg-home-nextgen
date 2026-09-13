@@ -7,3 +7,23 @@ components:
   - ../../flux/components/common
 resources:
   - ./cert-manager/ks.yaml
+patches:
+  # PSA hardening (F-60eb143c): all three cert-manager pods (controller,
+  # cainjector, webhook) already satisfy `restricted` — runAsNonRoot +
+  # seccompProfile RuntimeDefault at pod level, allowPrivilegeEscalation:false
+  # + capabilities.drop:[ALL] per container — so `baseline` understated the
+  # posture actually in force. Verified with a server-side dry-run of the label
+  # change, which emitted no violation warnings for the running pods.
+  # Target = not-used (namespace transformer runs after patches).
+  - target:
+      kind: Namespace
+      name: not-used
+    patch: |-
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: not-used
+        labels:
+          pod-security.kubernetes.io/enforce: restricted
+          pod-security.kubernetes.io/audit: restricted
+          pod-security.kubernetes.io/warn: restricted
