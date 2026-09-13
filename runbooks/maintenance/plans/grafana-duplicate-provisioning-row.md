@@ -32,7 +32,63 @@ rollback_class: backup-restore    # the change is a DELETE of one row; there is 
                                   # revert. See section 6 -- the re-INSERT is a one-liner and the
                                   # exact row contents are recorded there, so the practical
                                   # rollback is cheap.
-status: blocked   # 2026-09-12: the approved change EXECUTED cleanly via M2 with a live
+status: blocked   # ROOT CAUSE FOUND 2026-09-13 — AND IT IS A LAYER BELOW EVERYTHING
+                  # THIS PLAN (AND ITS TWO PREDECESSORS) REASONED ABOUT. Read this first.
+                  #
+                  # GRAFANA 13.2 RUNS UNIFIED STORAGE. Dashboards live in the `resource`
+                  # table as `dashboard.grafana.app/dashboards` (73 entries). The legacy
+                  # `dashboard` (81 rows) and `dashboard_provisioning` tables are
+                  # VESTIGIAL MIRRORS — the running provisioner does not read them.
+                  # Proof: deleting dashboard 148 through the API returned 200 and the
+                  # row REMAINED in the legacy `dashboard` table; 148 was absent from
+                  # unified storage entirely (a legacy-only leftover).
+                  #
+                  # THEREFORE BOTH PREVIOUS FIXES TARGETED A DEAD LAYER:
+                  #   - deleting legacy provisioning row 1836 (2026-09-12) — inert
+                  #   - deleting legacy dashboard 148 (2026-09-13)        — inert
+                  # Each executed correctly and changed nothing observable. Error rate
+                  # measured 10 per 5 min before AND after both (the unchanged ~2/min
+                  # 30s cadence), and dashboard 204 stayed frozen at version 2 /
+                  # 2026-07-17 throughout.
+                  #
+                  # THE ACTUAL DUPLICATE is in unified storage: TWO dashboard resources
+                  # both claim the same provisioning source.
+                  #   a3b1fd60-...  managedBy=classic-file-provisioning
+                  #                 managerId=sidecarProvider
+                  #                 sourcePath=prometheus.json
+                  #                 sourceChecksum=6dd9be8660a292935ccb97321444c762
+                  #                 sourceTimestamp=1769180998  (2026-01-23)  <- STALE
+                  #   9fa0d141-...  same managedBy/managerId/sourcePath
+                  #                 sourceChecksum=36fbe0878d52dceec9f655f969476e68
+                  #                 sourceTimestamp=1784251484  (2026-07-17)  <- CURRENT
+                  # Note sourceChecksum 6dd9be86 is EXACTLY the check_sum that legacy row
+                  # 1836 carried — the legacy row was a mirror of this annotation, which
+                  # is why deleting it looked plausible and did nothing.
+                  #
+                  # THE REMEDY is to remove the stale a3b1fd60 RESOURCE from unified
+                  # storage. BLOCKED: Grafana refuses it on BOTH HTTP surfaces —
+                  #   DELETE /api/dashboards/uid/a3b1fd60...                  -> 400
+                  #   DELETE /apis/dashboard.grafana.app/v0alpha1/.../a3b1fd60 -> 400
+                  #   both: "provisioned dashboard cannot be deleted"
+                  # Every remaining option exceeds the HTTP-API-only constraint this run
+                  # was given, so execution STOPPED here rather than improvising:
+                  #   (i)  PATCH the grafana.app/managedBy annotation off, then delete —
+                  #        HTTP-only, but mutates provisioning metadata and is unvalidated;
+                  #   (ii) remove the provisioning SOURCE so Grafana garbage-collects the
+                  #        resource, then restore it — touches a kube-prometheus-stack
+                  #        chart-owned ConfigMap;
+                  #   (iii) write to the unified-storage `resource` table directly —
+                  #        rejected, this is the layer everything else depends on.
+                  # Next plan must be written against UNIFIED STORAGE, and must state
+                  # which of (i)/(ii) the operator has approved BEFORE execution.
+                  #
+                  # State: dashboard 148 deleted (legacy-only leftover, byte-identical
+                  # duplicate, zero references, never human-saved — re-confirmed live
+                  # before deleting; rollback export held). a3b1fd60 and 9fa0d141 both
+                  # still present. Grafana 3/3 restarts=0, HelmRelease SUSPENDED=False
+                  # READY=True, PVC intact. 204 STILL FROZEN — the problem is NOT fixed.
+                  #
+                  # PRIOR (2026-09-12): the approved change EXECUTED cleanly via M2 with a live
                   # operator GO -- and its HYPOTHESIS WAS DISPROVEN. Row 1836 was deleted
                   # (exactly 1 row; verified gone and NOT recreated). The errors did NOT
                   # stop: 23 in the first ~10 min on the new pod, i.e. the unchanged ~2/min
