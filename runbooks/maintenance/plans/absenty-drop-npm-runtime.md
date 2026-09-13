@@ -24,14 +24,33 @@ rollback_class: git-revert    # DECLARED 2026-09-06. The production runtime is
                           # Removing it changes the image's SHAPE, not what the
                           # software can do, so capability_change is false.
                           # Undo is: revert the Dockerfile commit and rebuild.
-status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
+status: awaiting-go   # DEFERRED 2026-09-13 from sun-attended:2026-09-13. The
+                 # window fired from the per-window cron with no operator
+                 # present, so the run was UNATTENDED. Class is AUTO-NIGHT and
+                 # the premise PASSED (plan-premises.py exit 0, deployed image
+                 # still production-20260818185444), but the category
+                 # `image/AUTO-NIGHT` has 1 of the 2 clean supervised runs
+                 # `first_runs_supervised` requires (autonomy-record.py
+                 # eligible --plan-id absenty-drop-npm-runtime, verified:true).
+                 # `supervised` is RECORDED, never inferred from a slot named
+                 # "attended", so this run could not have counted as #2.
+                 # The ask is a human present for its second supervised run —
+                 # not a re-assessment of the plan, which is unchanged.
+                 # VETTED 2026-09-06. Premise checked against the LIVE
                  # cluster, not against the plan's own prose:
                  # npm 12.0.2 and node confirmed present at /usr/local/bin in
                  # the RUNNING my-software-production container, not merely
                  # in the Dockerfile. Dockerfile line 39 installs npm in
                  # `base` and line 84 is `FROM base AS production`, so the
                  # inheritance the plan describes is real.
-window: "sun-attended:2026-09-13"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
+window: "sun-attended:2026-09-20"   # MOVED 2026-09-13 (was sun-attended:2026-09-13, AUTO-ASSIGNED
+                 # 2026-09-06 by window-scheduler). NOT sat-attended:2026-09-19: that slot is
+                 # duration_min 90 and already holds media-audit-durable-output (45 min), so
+                 # adding this plan's 60 min would be 105/90 — an OVER-TIME window, and a
+                 # reconciler check that fires on a window we intend to run is a check people
+                 # learn to ignore. sun-attended:2026-09-20 is attended, 200 min and empty
+                 # (talos-1.14.0 sits in sun-attended:2026-09-27, not 09-20), so the supervised
+                 # run this plan needs actually has room for its dev-lane soak.
 premises:
   - id: artifact-under-test-is-unchanged
     why: >-
