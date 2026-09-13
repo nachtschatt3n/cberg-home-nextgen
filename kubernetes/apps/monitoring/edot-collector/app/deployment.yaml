@@ -23,7 +23,7 @@ spec:
   template:
     metadata:
       annotations:
-        cberg.dev/rollout-revision: "2026-08-16.1"
+        cberg.dev/rollout-revision: "2026-09-13.1"
       labels:
         app: edot-collector
     spec:
@@ -37,7 +37,7 @@ spec:
         fsGroup: 10001
       containers:
         - name: edot-collector
-          image: otel/opentelemetry-collector-contrib:0.158.0
+          image: otel/opentelemetry-collector-contrib:0.160.0
           args:
             - --config=/config/otel.yml
           ports:
