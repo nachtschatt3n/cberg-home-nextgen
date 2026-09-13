@@ -48,8 +48,23 @@ capability_change: false              # see §2.4 — the one fact a reviewer sh
 rollback_class: git-revert            # stateless bridge: no PVC, no DB. `values.image.tag`
                                       # is the entire diff.
 finding_refs: [F-9af9baf7, F-80459b23]
-status: draft
-window: null                          # RECOMMENDATION (not assignment): sun-attended:2026-09-13.
+status: superseded                     # SUPERSEDED 2026-09-13 (F-a1984c9f). Upstream head moved to
+                                      # 0.187.1 — a DIFFERENT 0.x minor line — so coverage.py can
+                                      # never match target 0.185.3 again and nextcloud-mcp re-entered
+                                      # `needs_plan` every cycle while this file sat here looking
+                                      # like coverage. Deployed is still 0.184.5.
+                                      #
+                                      # Retired rather than re-targeted, deliberately: at major 0
+                                      # each MINOR is the breaking axis (0.176.0 dropped a table,
+                                      # 0.177.0 tightened create_share), so hopping 0.185.x ->
+                                      # 0.186.0 -> 0.187.x is three breaking surfaces, not a version
+                                      # bump. That needs a fresh upgrade-planner-agent reading all
+                                      # three release-note sets — not a sed of this file's target.
+                                      #
+                                      # NEXT: let the sweep dispatch a planner for
+                                      # nextcloud-mcp-0.187.1. Superseding this file is what ALLOWS
+                                      # that to happen cleanly.
+window: null                          # never schedule this file; it is superseded (see status)
                                       # sat-attended:2026-09-12 is already over-committed
                                       # (risk-load 7>6, ~100min in a 90min window per the
                                       # dispatch brief) — do not add to it. sun-attended:2026-09-13

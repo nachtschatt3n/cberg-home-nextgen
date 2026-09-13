@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.12.1"
+version: "2026.09.13.1"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -294,6 +294,21 @@ deny:
       connect-attempt default), so this component should never bump unattended regardless of
       the pin. REMOVE THIS RULE when a chart ships appVersion >= the pinned tag AND the
       image.tag override is dropped from helm-values.yaml — both, not either."
+  # SPLIT 2026-09-13 (F-1128fcdf). First matching rule decides
+  # (auto-update.py::policy_block), so this MORE SPECIFIC rule must stay ABOVE
+  # the node-image glob below — `_match_anywhere` makes `siderolabs/*` swallow
+  # the CLI dep otherwise, which is exactly how the wrong reason got attached.
+  #
+  # PR #212 touches ONLY .mise.toml — the local talosctl CLI pin. It reboots
+  # nothing, needs no window and needs no plan, so the node-image reason was
+  # FALSE for it, and a false hold reason is worse than no rule: it trains the
+  # reader to discount a reason that is load-bearing on the OTHER rule.
+  - match: "aqua:siderolabs/talos"
+    reason: "talosctl CLI pin — tracks the CLUSTER version (talosVersion in
+      kubernetes/bootstrap/talos/talconfig.yaml, currently v1.13.10), so it must
+      never move AHEAD of the nodes. It FOLLOWS a node upgrade; it does not
+      authorise one. Merge only after the cluster is actually on the new
+      version. This is a local binary — no reboot window, no maintenance plan."
   - match: "siderolabs/*"
     reason: "Talos node image — needs a rolling node-reboot maintenance window, not a git merge."
   - match: "*talos*"
