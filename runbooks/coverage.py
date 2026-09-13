@@ -936,6 +936,55 @@ def _chart_source_for(item):
     return None, None
 
 
+def _oci_chart_created(url: str, chart: str, version: str, timeout: int = 20):
+    """Publish timestamp for an OCI-hosted Helm chart, or None.
+
+    F-88bf8743: `oci://` chart sources used to be treated as UNKNOWABLE age, and
+    since unknown age is hold-fail-safe that made the hold PERMANENT rather than
+    a wait — kube-prometheus-stack could never elapse its cooldown no matter how
+    old the release got. It is knowable: `helm push` stamps the standard OCI
+    annotation `org.opencontainers.image.created` on the chart manifest, which is
+    the chart analogue of the image path _oci_created() already uses.
+
+    Measured on ghcr.io/prometheus-community/charts/kube-prometheus-stack:
+      90.0.0 -> 2026-09-06T22:41:00Z    90.2.0 -> 2026-09-12T23:55:57Z
+
+    Returns None on ANY failure (unsupported registry, auth, missing annotation),
+    which preserves the pre-existing fail-safe hold. This widens what we can
+    verify; it never widens what we let through.
+    """
+    import urllib.request, urllib.parse, datetime
+    try:
+        rest = str(url)[len("oci://"):].strip("/")
+        host, _, ns = rest.partition("/")
+        path = f"{ns}/{chart}" if ns else str(chart)
+        # docker.io splits its registry and token hosts; everything else is same-host.
+        reg = "registry-1.docker.io" if host in ("docker.io", "index.docker.io") else host
+        auth = "auth.docker.io" if reg == "registry-1.docker.io" else host
+        svc = "registry.docker.io" if reg == "registry-1.docker.io" else host
+        tok = json.loads(urllib.request.urlopen(urllib.request.Request(
+            f"https://{auth}/token?scope=repository:{path}:pull&service={svc}",
+            headers={"User-Agent": "cberg-coverage"}), timeout=timeout).read())
+        bearer = tok.get("token") or tok.get("access_token")
+        if not bearer:
+            return None
+        man = json.loads(urllib.request.urlopen(urllib.request.Request(
+            f"https://{reg}/v2/{path}/manifests/{urllib.parse.quote(str(version))}",
+            headers={"Authorization": f"Bearer {bearer}",
+                     "Accept": ",".join([
+                         "application/vnd.oci.image.manifest.v1+json",
+                         "application/vnd.oci.image.index.v1+json",
+                         "application/vnd.docker.distribution.manifest.v2+json"])}),
+            timeout=timeout).read())
+        created = (man.get("annotations") or {}).get("org.opencontainers.image.created")
+        if not created:
+            return None
+        dt = datetime.datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+        return (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds() / 3600.0
+    except Exception:
+        return None
+
+
 def chart_publish_age_hours(item):
     """Hours since this chart item's TARGET version was published, or None.
 
@@ -948,7 +997,13 @@ def chart_publish_age_hours(item):
         return _CHART_AGE_CACHE[key]
     age = None
     chart, url = _chart_source_for(item)
-    # oci:// indexes carry no per-version created date -- unverifiable, not old.
+    # oci:// has no index.yaml, but the chart MANIFEST carries
+    # org.opencontainers.image.created (F-88bf8743) -- resolve it there instead
+    # of declaring the age unknowable and holding forever.
+    if chart and url and str(url).startswith("oci://"):
+        age = _oci_chart_created(url, chart, item["target"])
+        _CHART_AGE_CACHE[key] = age
+        return age
     if chart and url and not str(url).startswith("oci://"):
         import urllib.request
         try:
