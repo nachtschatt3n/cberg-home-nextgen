@@ -6188,6 +6188,105 @@ log_section "Issues Summary by Severity"
 } | tee -a "$OUTPUT_FILE" "$ISSUES_FILE"
 
 #######################################
+# Shared API credentials — liveness
+#######################################
+#
+# A shared API token can stop working without anything crashing: the
+# consumers keep running, keep their pods Ready, and just get 401 on every
+# call. On 2026-09-14 the single consolidated Paperless token had been
+# deleted from `authtoken_token`, which silently broke FOUR consumers
+# (openclaw/Jerry's invoice scan, arag-web's statement archival, mcpo, and
+# cluster-secrets). Nothing alerted. It surfaced only when a human tried to
+# look up a document and got "401 invalid token".
+#
+# Consolidating onto one token is what makes this worth a dedicated check:
+# it turns one silent credential death into a simultaneous multi-service
+# outage. So probe the credential itself, not the pods that hold it —
+# liveness of the holder proves nothing about the secret inside it.
+
+log_section "Shared API Credentials"
+
+check_api_credential() {
+    # $1 label · $2 namespace · $3 pod selector · $4 container
+    # $5 token env-var · $6 url env-var · $7 probe path
+    local label="$1" ns="$2" sel="$3" ctr="$4" tokenv="$5" urlenv="$6" path="$7"
+    local pod code
+
+    # Probe from INSIDE the consumer, reading the token straight out of its
+    # own environment. That tests the credential the service actually uses,
+    # rather than a Secret it may not have picked up yet — a pod that has not
+    # been rolled since a rotation is precisely the case worth catching.
+    # It also avoids a throwaway probe pod, whose cold image pull raced the
+    # timeout and reported a perfectly good token as "inconclusive".
+    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
+        | awk '$3=="Running"{print $1; exit}')
+
+    if [ -z "$pod" ]; then
+        echo "  $label: no Running pod for '$sel' in $ns — skipped"
+        return 0
+    fi
+
+    # Emit a tagged status so parsing cannot pick up stray digits from
+    # kubectl noise (an untagged `tr -dc '0-9'` once yielded "401401").
+    code=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- python3 -c "
+import os, urllib.request, urllib.error
+tok = os.environ.get('$tokenv', ''); url = os.environ.get('$urlenv', '')
+if not tok or not url:
+    print('STATUS:noenv'); raise SystemExit
+req = urllib.request.Request(url.rstrip('/') + '$path',
+                             headers={'Authorization': 'Token ' + tok,
+                                      'Accept': 'application/json'})
+try:
+    urllib.request.urlopen(req, timeout=20)
+    print('STATUS:200')
+except urllib.error.HTTPError as e:
+    print('STATUS:%d' % e.code)
+except Exception:
+    print('STATUS:unreachable')
+" 2>/dev/null | sed -n 's/^STATUS:\(.*\)$/\1/p' | tail -1)
+
+    case "$code" in
+        noenv)
+            echo "  $label: token/url env not set in $pod — skipped"
+            return 0
+            ;;
+        unreachable)
+            echo "  $label: ⚠️  API unreachable from $pod — inconclusive"
+            add_minor_issue "$label credential probe inconclusive — could not reach the API to verify the token"
+            return 0
+            ;;
+    esac
+
+    case "$code" in
+        200)
+            echo "  $label: ✅ 200 — credential valid"
+            CHECKS_PASSED=$((CHECKS_PASSED + 1))
+            ;;
+        401|403)
+            echo "  $label: ❌ $code — CREDENTIAL REJECTED"
+            log_critical "$label API credential rejected ($code) — every consumer of this token is failing silently"
+            add_critical_issue "$label API token invalid ($code): $ns/$secret.$key is rejected. All consumers are broken until it is re-minted."
+            ;;
+        "")
+            echo "  $label: ⚠️  probe produced no status — inconclusive"
+            add_minor_issue "$label credential probe inconclusive — no status returned"
+            ;;
+        *)
+            echo "  $label: ⚠️  HTTP $code — service reachable, auth state unclear"
+            add_minor_issue "$label credential probe returned HTTP $code (expected 200)"
+            ;;
+    esac
+}
+
+{
+    echo "=== Shared API Credential Liveness ==="
+    check_api_credential "Paperless" "ai" \
+        "app.kubernetes.io/instance=openclaw" "app" \
+        "PAPERLESS_TOKEN" "PAPERLESS_URL" "/api/documents/?page_size=1"
+    echo ""
+} | tee -a "$OUTPUT_FILE"
+
+#######################################
 # Generate Final Summary
 #######################################
 
