@@ -20,9 +20,18 @@ spec:
           previous pod may still be serving stale content (RollingUpdate surge).
           Check the build init container logs.
         summary: docs-site pod {{ $labels.pod }} is not ready
+      # Watch only the long-running docs-site Deployment pods. The daily 05:30
+      # docs-site-refresh CronJob (kubernetes/apps/monitoring/docs-site/app/
+      # refresh-cronjob.yaml) spawns Job pods named docs-site-refresh-<id>-<hash>
+      # which also match pod=~"docs-site-.*"; a Completed Job pod is never
+      # service-"ready" (kube_pod_status_ready{condition="true"}==0 until history
+      # GC), so it tripped this critical alert at 05:35 CEST on 2026-09-14.
+      # Excluded by name on all three rules (pod!~"docs-site-refresh-.*") so a
+      # failing refresh Job's retries are not attributed to the site either —
+      # same pattern as paperclip-alerts.yaml (pod!~"paperclip-backup.*").
       expr: |
         sum by (namespace, pod) (
-          kube_pod_status_ready{namespace="monitoring", pod=~"docs-site-.*", condition="true"}
+          kube_pod_status_ready{namespace="monitoring", pod=~"docs-site-.*", pod!~"docs-site-refresh-.*", condition="true"}
         ) == 0
       for: 5m
       labels:
@@ -36,7 +45,7 @@ spec:
           container logs.
         summary: docs-site pod {{ $labels.pod }} is crash looping
       expr: |
-        rate(kube_pod_container_status_restarts_total{namespace="monitoring", pod=~"docs-site-.*"}[15m]) * 900 > 2
+        rate(kube_pod_container_status_restarts_total{namespace="monitoring", pod=~"docs-site-.*", pod!~"docs-site-refresh-.*"}[15m]) * 900 > 2
       for: 5m
       labels:
         category: monitoring
@@ -49,7 +58,7 @@ spec:
           CronJob is expected; monitor for repeats.
         summary: docs-site pod {{ $labels.pod }} restarted
       expr: |
-        increase(kube_pod_container_status_restarts_total{namespace="monitoring", pod=~"docs-site-.*"}[15m]) > 0
+        increase(kube_pod_container_status_restarts_total{namespace="monitoring", pod=~"docs-site-.*", pod!~"docs-site-refresh-.*"}[15m]) > 0
       for: 1m
       labels:
         category: monitoring
