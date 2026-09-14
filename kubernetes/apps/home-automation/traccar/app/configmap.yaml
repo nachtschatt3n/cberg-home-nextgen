@@ -24,6 +24,12 @@ data:
       <entry key='osmand.enable'>true</entry>
       <entry key='osmand.port'>5055</entry>
 
+      <!-- Drop positions whose fixTime equals the device's last stored position.
+           The Find My sync re-sends the last known fix until Apple issues a new
+           one; the client now dedups too, this is the server-side backstop. -->
+      <entry key='filter.enable'>true</entry>
+      <entry key='filter.duplicate'>true</entry>
+
       <!-- Disable open registration after first admin account is created -->
       <entry key='server.registration'>false</entry>
 
