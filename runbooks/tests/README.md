@@ -56,6 +56,9 @@ test — see `runbooks/refingerprint-findings.py`.
 | `test-cred-suppressor-scoping.py` | Both credential detectors' suppressor SCOPING: shape rules judged against the VALUE only, scaffolding words against the CONTEXT only (the line minus its values), never the whole file. Carries the witness that survived 4.7 months, with the pre-fix logic transcribed so the witness is proven to be a real regression witness. Also asserts the awk guard trips on zero tracked files. | `_hist_cred_hit_suppressed` in `security-check.py`; `.githooks/lib/password-guard.awk`; the s3 grep chain |
 | `test-disclosure-residual-claims.py` | The residual-claim tier of the commit-message disclosure hook — phrasing that describes what still awaits an upstream release, distinct from the count and advisory-ID tiers | `.githooks/lib/disclosure_patterns.py` or the residual-claim wording set |
 | `test-outpost-ingress-suppression.py` | The Authentik outpost audit. Load-bearing assertion: it reads the LIVE outpost list, never a repo grep — a repo grep enumerates the outposts we *declared*, which is how the managed `authentik Embedded Outpost` sat on `[]` invisibly through every previous audit. Also pins: `managed` outposts are never exempt, non-Kubernetes service connections are out of scope (no Ingress to publish), and neither a failed probe nor an empty list may read as clean | `s12_authentik_outposts` in `security-check.py` |
+| `test-window-run-running-row.py` | window-run-record.py running/finalize target selection, stuck detection, CLI compatibility | touching window-run-record.py or maintenance-plan.py liveness |
+| `test-scheduler-premises-gate.py` | window-scheduler.py fail-closed premises gate (premises_verdict, injected checker) | touching window-scheduler.py or plan-premises.py output |
+| `test-window-crons-retry.py` | window-crons.py retry cron expression derivation and --check parity | touching window-crons.py or maintenance-windows.yaml |
 
 ## `runbooks/lib/`
 

@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.09.13`
-> Last Updated: `2026-09-13`
+> Version: `2026.09.14`
+> Last Updated: `2026-09-14`
 
 ## 1) Description
 
@@ -238,6 +238,8 @@ Authentik/Homepage/Longhorn objects.
   (tue-early `335e4a3e` and thu-early `a9325ac9` removed 2026-08-26 with the
   reshape. Re-render any command with `runbooks/window-crons.py --render`;
   verify parity any time with `--check`.)
+  A window declaring `retry_after_min` also gets a retry cron from `--render`,
+  asserted by `--check` (2026-09-14).
 
   **Durability caveat:** these crons live only in OpenClaw's PVC sqlite (the
   gateway cron store), **not** in git — same as the sweep cron. They survive pod
@@ -428,6 +430,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 | Version | Date | Change |
 |---|---|---|
 | 2026.09.13 | 2026-09-13 | **Two stale assertions corrected, both of a kind that has already cost a window.** (a) §1 said the auto-updater "merges SAFE patch/minor updates on the scheduled sweep" — the retired "sweep-applies" model; the sweep is READ-ONLY and safe updates land at Step 0 of every window, as §2 of this same SOP already said. (b) §Execution posture still said AUTO-NIGHT "runs unattended in `mode: unattended` windows" — the exact wording `d147b1ce` removed from `maintenance-window-agent.md`, `autonomy-policy.yaml` and `maintenance-windows.yaml` on 2026-09-12 because, being the stricter of two contradictory rules, it meant a cron-fired ATTENDED window could execute NOTHING. This SOP was the fourth site and was missed. |
+| 2026.09.14 | 2026-09-14 | **Lost-occurrence retry + in-flight rows.** A window may declare `retry_after_min` (nightly: 135 → 05:45); `window-crons.py --render` then also emits a `Maintenance Window — <id> retry` cron and `--check` asserts it. The retry verb (`maintenance-window retry --window <id>`, in the OpenClaw skill) no-ops when ANY `window_runs` row exists for (slot, today) — including the new `--outcome running` row the window agent now writes at Step 0 start and closes with `--finalize` — and fails closed on an unreadable ledger. `maintenance-plan.py` reports a never-finalized running row under `window_liveness.stuck`. Also: scheduler refuses plans with absent/failing premises; nightly window dispatches planners for `needs_plan` items; two aborts on one plan in a window → blocked; every executed plan is recorded via `autonomy-record.py` before the finalize (ledger backfilled with 24 audited executions; chart/image AUTO-NIGHT graduated). Operator-approved mechanics; no gate/threshold/deny rule changed. |
 | 2026.09.11 | 2026-09-11 | `CHANNEL_RULES` is now **membership, not a predicate**. The `"stable": "odd-minor"` rule for scrypted was DISPROVED (~17 even-minor releases carry `prerelease=false`) and, worse, failed OPEN: a Release-less ODD-minor dev tag scored stable and would have been applied UNATTENDED at Step 0 onto a privileged NVR, with the `auto-update-policy.yaml` deny rule as the only thing holding the door. Stable-ness depends on whether upstream published a non-prerelease Release for that EXACT tag — which no version string can answer — so membership alone is the hold. Membership stays offline-decidable, which the window agent requires. |
 | 2026.09.05 | 2026-09-05 | Documented the **RISK-CLASS STACKING** detector (`656ffef8`): >1 irreversible plan (`rollback_class` one-way/backup-restore) in one slot has no rollback path for the window; quiet on a single irreversible plan and on git-revert rollbacks. Blast radius is set by reversibility, not namespace. |
 | 2026.07.25 | 2026-07-25 | Initial SOP. 3 windows/week; per-held-update planner agent; window agent vets interference + side effects, sequences, operator go/no-go; sweep reconciles + reports the schedule. |

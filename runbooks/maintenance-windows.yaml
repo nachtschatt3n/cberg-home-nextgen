@@ -34,7 +34,7 @@
 # scheduled plans' window: fields, the OpenClaw crons' payloads, and the live
 # GO/issue records — a rename without that migration orphans a live GO.
 # Edit freely (git-tracked); bump `version`.
-version: "2026.09.13"
+version: "2026.09.14"
 timezone: Europe/Berlin
 
 windows:
@@ -53,6 +53,23 @@ windows:
                               # `mode:` now only records whether a human is
                               # expected to be around, which still drives the
                               # attended-window operator ping.
+    retry_after_min: 135      # 03:30 + 135 = 05:45 Europe/Berlin — ONE retry of a
+                              # LOST occurrence, the same morning. WHY (2026-09-14):
+                              # the driving OpenClaw cron reports `ok` on DELIVERY
+                              # of the prompt to the ai-server-ops console, not on
+                              # completion, so a run the console never picked up
+                              # looks identical to one that ran — five nightly
+                              # dates had no window_runs row and nothing noticed
+                              # until the next sweep. 135 = the 90-min window plus
+                              # 45 min for a slow-but-alive run to reach its
+                              # close-out row, and still before the 07:00 briefing.
+                              # The retry cron (`window-crons.py --render` prints
+                              # it; --check asserts it exists) calls
+                              # `maintenance-window retry --window nightly`, which
+                              # is a NO-OP if ANY window_runs row exists for
+                              # (nightly, today) — including outcome=running, the
+                              # row the window agent now writes at Step 0 start —
+                              # so a live or finished run is never re-fired.
   - id: sat-attended
     day: saturday
     start: "09:00"
