@@ -3,8 +3,8 @@
 > Standard Operating Procedures for cluster backup management.
 > Covers Longhorn volume backups and external backup integrations.
 > Description: Running, validating, and restoring Longhorn/iCloud backup workflows.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.09.14`
+> Last Updated: `2026-09-14`
 > Owner: `Platform`
 
 ---
@@ -22,6 +22,14 @@ before and after cluster changes.
 |--------------|------|---------|--------|
 | Longhorn volume backup | All PV data | Daily 3:00 AM | UNAS-CBERG NAS |
 | iCloud backup | iCloud Drive + Photos, one instance per Apple ID (2) | Continuous | UNAS-CBERG NAS (`backups/icloud-backup/<name>`) |
+
+Off-site copy (toward 3-2-1): the NAS backup is additionally uploaded off-site to cloud
+storage — operator-attested 2026-09-14. Nothing in-cluster observes that upload,
+so treat it as owner-managed: monitoring/alerting on failure, retention, which
+shares it covers, and a restore test from the cloud copy are NOT yet
+established. Re-confirm at the quarterly DR audit
+(`docs/sops/disaster-recovery.md`, "Critical prerequisites" table), where the SOPS age key's off-site custody
+is recorded as well.
 
 Related cluster CronJob (non-backup): `kube-system/descheduler`.
 When checking `kubectl get cronjobs -A`, do not treat it as a backup workload.
@@ -170,7 +178,9 @@ Configure in Longhorn UI → Settings → Backup Retention:
 | Recurring backup retain count | 7 (7 daily backups) |
 | Delete old backup job interval | 24h |
 
-Or configure per-volume in the volume settings.
+Or configure per-volume in the volume settings. The 7-daily figure covers the
+on-site Longhorn store only; the off-site cloud copy's retention is
+owner-managed and not recorded here.
 
 ---
 

@@ -3,8 +3,8 @@
 > Description: Recovery procedures for cluster, node, storage, and external-
 > dependency failures. Complements `docs/sops/backup.md` (preventive workflow)
 > with the *when-something-broke* response runbook.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.09.14`
+> Last Updated: `2026-09-14`
 > Owner: `Platform`
 
 ---
@@ -71,11 +71,11 @@ Most recovery procedures depend on these being current. Audit them quarterly.
 
 | Item | Where | Failure mode if missing |
 |---|---|---|
-| SOPS age key (`age.key`, public id `age1nw624...`) | Offline + offsite (e.g., 1Password / Bitwarden / hardware backup) | Cannot decrypt any `*.sops.yaml`; every cluster secret must rotate (§4.4) |
+| SOPS age key (`age.key`, public id `age1nw624...`) | Offline + offsite — an off-site copy is held in the operator's external, hosted password manager — not the in-cluster vaultwarden (operator-attested 2026-09-14; not cluster-verifiable, re-confirm at the quarterly audit and after any key rotation) | Cannot decrypt any `*.sops.yaml`; every cluster secret must rotate (§4.4) |
 | Talos `talosconfig` (auth to Talos API) | `kubernetes/bootstrap/talos/clusterconfig/` (git) | Cannot `talosctl` against nodes — but git has it |
 | Cluster kubeconfig | Generated from talosconfig; not committed | Regenerate via `talosctl kubeconfig` |
 | Longhorn CIFS backup target connectivity | `UNAS-CBERG/backups/longhorn` | No backups created or restored |
-| NAS offsite backup | Owner-managed (external) | NAS loss = catastrophic for media; cluster data still on Longhorn replicas |
+| NAS offsite backup | Owner-managed (external) — the NAS backup is additionally uploaded off-site to cloud storage (operator-attested 2026-09-14; not cluster-verifiable: upload monitoring, retention, which shares it covers, and a restore test are not yet established) | NAS loss = catastrophic for media until the cloud copy is restore-proven; cluster data still on Longhorn replicas |
 | UniFi controller backup file (`.unf`) | UniFi controller UI → Settings → System → Backup; auto-saved to NAS | Network rules rebuild from `CLAUDE.md` topology spec |
 | Cloudflare account 2FA recovery codes | Offsite | Account takeover risk; see AR-020 |
 | GitHub account 2FA + SSH key backups | Offsite | Cannot push fixes mid-incident |
@@ -221,7 +221,7 @@ decrypted. Every cluster secret must be regenerated.
 
 **Recovery:**
 
-1. Restore the key from offsite (1Password / Bitwarden / hardware backup).
+1. Restore the key from the off-site copy (the operator's password manager holds one — attested 2026-09-14; or a hardware backup if kept).
 2. If truly lost: rotate every secret end-to-end.
    - Generate a new age keypair: `age-keygen -o age.key`.
    - Update `.sops.yaml` with the new public key.
@@ -239,6 +239,11 @@ decrypted. Every cluster secret must be regenerated.
 **Prevention is the only real defense.** Back up `age.key` to at least two
 locations, one offsite. The public key (`age1nw624...`) lives in `.sops.yaml`
 and is fine to commit.
+
+Status 2026-09-14: the offsite requirement is met — an off-site copy is held in
+the operator's password manager (operator-attested, not cluster-verifiable).
+Re-verify that the stored copy still decrypts a current `*.sops.yaml` at each
+quarterly audit and after any key rotation.
 
 ### 4.5 Longhorn volume corruption
 
@@ -299,7 +304,7 @@ kubectl annotate volume <name> -n storage \
 **Recovery — option B: total NAS replacement**
 1. Provision new NAS (same hostname/IP `UNAS-CBERG` @ `192.168.55.240` on
    k8s-network VLAN 55 if possible — saves manifest changes).
-2. Restore shares from offsite backup of the NAS itself (owner-managed).
+2. Restore shares from offsite backup of the NAS itself (owner-managed; a cloud copy exists per the 2026-09-14 attestation — its share coverage and restore path are not yet drill-tested).
 3. Point CIFS PVs back at the new NAS. If hostname/IP changed, search/replace
    the StorageClass + PV manifests under `kubernetes/apps/kube-system/csi-driver-smb/`.
 
