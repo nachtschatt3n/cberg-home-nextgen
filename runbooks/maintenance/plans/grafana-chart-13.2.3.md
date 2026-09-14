@@ -43,7 +43,17 @@ rollback_class: git-revert          # appVersion identical both sides -> no
                                     # sqlite migration crossed -> a plain git
                                     # revert is a real, complete rollback
 finding_refs: [F-cce839da]
-status: draft
+status: superseded              # SUPERSEDED 2026-09-14 (operator-approved throughput fix).
+                                  # The `*grafana*` deny rule was narrowed to `max: patch` on
+                                  # 2026-09-12, so 13.2.1 -> 13.2.4 (chart PATCH, appVersion
+                                  # 13.2.1 unchanged both sides) is policy-permitted in the safe
+                                  # direct-bump lane. This draft only SHADOWED that: coverage.py
+                                  # matches a plan file before it consults the deny rules, so the
+                                  # item sat in PLAN with `window: null`. Retired so Step 0 of the
+                                  # next nightly applies it under the normal G3/G5 gates, health
+                                  # gate and auto-revert. The appVersion premise below is what
+                                  # G3 re-checks; if a later 13.2.x moved appVersion the rule's
+                                  # own reasoning re-holds it (chart minors stay PLAN-lane).
 window: null                        # recommend sat-attended:2026-09-19 (NOT
                                     # 2026-09-12 — that slot is already at
                                     # risk-load 7>6 / 100m in a 90m window;
