@@ -242,7 +242,24 @@ spec:
       #
       # ROLLBACK: pure manifest revert to
       # sha-7b22a02aede4195149d70ca931e85d21235675b8 — no schema to unwind.
-      tag: "sha-dcf50c9d5f4469120ee5ed808f96a1a5e1e83ab5"
+      #
+      # --- 2026-09-14 bump: sha-dcf50c9d -> sha-9439ba5e -------------------
+      # Stops auto-categorization resubmitting transactions the model already
+      # declined. AutoMerchantDetector records an attempt marker for every
+      # transaction a batch examined without changing; AutoCategorizer never
+      # got the same guard, so a declined transaction stayed enrichable and
+      # was re-sent on every post-sync rule run. Measured over the 7 days
+      # before this bump: 2,055 transaction-slots sent to the local LLM
+      # produced 21 actual enrichments (2.1M tokens, ~99% waste) — and is the
+      # likely contributor to the intermittent 500s from the Ollama host.
+      # Now records model_omitted / model_declined / category_unmatched and
+      # filters the scope through without_recent_enrichment_attempt.
+      #
+      # ROLLBACK: pure manifest revert to
+      # sha-dcf50c9d5f4469120ee5ed808f96a1a5e1e83ab5 — no schema to unwind.
+      # (Attempt markers left behind are ordinary DataEnrichment rows; the old
+      # code simply ignores them.)
+      tag: "sha-9439ba5e8c97f9803489111abc3394e712d8f862"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
