@@ -80,6 +80,26 @@ spec:
     envFromSecret: grafana-admin-secret
     env:
       GF_EXPLORE_ENABLED: true
+      # 2026-09-14: REQUIRED on distroless too, not only on -slim. The block
+      # above reasoned that distroless ships plugins-bundled complete, so the
+      # preinstall guard was skipped. It is not enough: Grafana's
+      # plugin.backgroundinstaller (preinstall_auto_update=true by default)
+      # compares the 18 default preinstall plugins against the grafana.com
+      # catalog at EVERY start, and when the catalog is newer than the bundle
+      # it KILLS the running bundled backend and then fails to write the
+      # replacement into /usr/share/grafana/data/plugins-bundled because the
+      # root filesystem is read-only. Measured 2026-09-12T19:08Z (pod restart
+      # during the grafana-duplicate-provisioning-row execution): postgres,
+      # influxdb, loki, jaeger and mssql died ("unlinkat ... read-only file
+      # system"), /api/plugins?type=datasource fell to 13, every TesLaMate and
+      # Pellets panel returned "Plugin not registered" for 2.5 days, and the
+      # prometheus backend (57 dashboards) was one catalog release away from
+      # the same fate. Disabling preinstall keeps the bundled backends as the
+      # image shipped them (SOP docs/sops/grafana-image-changes.md §3 blueprint,
+      # which this file had deviated from). Gate after any restart:
+      # /api/plugins?type=datasource == 18 and every provisioned datasource
+      # /health == 200 (alertmanager excepted, it has no backend health).
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
     extraSecretMounts:
       - name: elasticsearch-credentials
         secretName: elasticsearch-es-elastic-user
