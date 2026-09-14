@@ -154,8 +154,9 @@ spec:
     # docker.io/bitnami/mariadb publishes no semver tags (digest-only).
     # Security driver tracked as F-cb42f390. Paperless now uses the official
     # mariadb image deployed by db-deployment.yaml in this folder.
-    # Server charset is PINNED to utf8mb3/utf8mb3_general_ci there to match the
-    # retired server — utf8mb4 is a separate migration.
+    # Server charset is PINNED to utf8mb4/utf8mb4_general_ci there (converted
+    # 2026-08-30 in 9cb10b76 after a 4-byte emoji in a mail subject broke every
+    # mail cycle on utf8mb3) — the invariant checked in docs/sops/paperless.md §6a.
     # The retired volume paperless-mariadb was the rollback path; deleted
     # 2026-08-30 after verifying the logical dump landed intact (see
     # db-deployment.yaml in this folder for the evidence).
