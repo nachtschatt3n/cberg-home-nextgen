@@ -37,8 +37,18 @@ WHAT IT REFUSES TO SCHEDULE, AND WHY EACH REFUSAL IS LOAD-BEARING
                         today are the two that were caught mid-execution as
                         data-loss traps. Backup-gating protects against a bad
                         outcome; it does not protect against a plan whose
-                        premises stopped being true. Admit this class only after
-                        premise validation exists.
+                        premises stopped being true. The premises gate below
+                        now exists; admitting this class is a separate operator
+                        decision (edit SCHEDULABLE_CLASSES), not a side effect.
+  premises              a plan is written at time T and executed at T+days;
+                        nothing else re-checks that what it assumed is still
+                        true. Before a plan is placed, its frontmatter premises
+                        are run via `plan-premises.py <id> --require-premises
+                        --json` (read-only by construction). REFUSED when the
+                        check exits non-zero, any premise fails, the plan
+                        declares NO premises (unverified is not passing), or
+                        the check itself errors / times out — fail CLOSED, so
+                        "the check could not see" never reads as consent.
   unmet depends_on      `superset-pg-18.6` hard-depends on `superset-6.1.0`,
                         which has not executed.
   conflicts_with        never two conflicting plans in one slot.
@@ -62,6 +72,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -121,11 +132,67 @@ def slot_load(slot, plans):
             sum(int(p.get("est_duration_min") or 0) for p in here))
 
 
-def assign(plans, cfg, classes, graduated, today, horizon_days=21):
+# Upper bound for one plan's premises run. plan-premises.py caps each premise
+# at 60s; a plan declares a handful at most. Past this the checker is treated
+# as FAILED, never skipped.
+PREMISES_TIMEOUT_S = 300
+
+
+def premises_verdict(returncode, stdout, plan_id) -> tuple[bool, str]:
+    """(ok, reason) from a `plan-premises.py <id> --require-premises --json` run.
+
+    Pure, so the fail-closed branches are testable without a subprocess. Every
+    branch that is not "exit 0 AND a report for THIS plan AND premises declared
+    AND all passed" refuses. Notably an unknown plan id makes plan-premises.py
+    print `{"plans": [], "ok": true}` with exit 0 — a missing report must not
+    be read as a passing one.
+    """
+    try:
+        doc = json.loads(stdout or "")
+    except ValueError:
+        return False, ("premises check produced no parseable JSON "
+                       f"(rc={returncode}) — fail closed")
+    reports = doc.get("plans") if isinstance(doc, dict) else None
+    report = next((r for r in (reports or [])
+                   if isinstance(r, dict) and r.get("plan_id") == plan_id), None)
+    if report is None:
+        return False, f"premises check returned no report for {plan_id!r} — fail closed"
+    if int(report.get("declared") or 0) == 0:
+        return False, "premises undeclared — an unverified plan is not a passing one"
+    failing = [r for r in (report.get("results") or []) if not r.get("passed")]
+    if failing:
+        return False, "premises FAILED: " + "; ".join(
+            f"{r.get('id') or '<unnamed>'} ({r.get('detail') or 'no detail'})"
+            for r in failing)
+    if returncode != 0 or not report.get("passed") or not doc.get("ok"):
+        return False, (f"premises check exited {returncode} without a passing "
+                       "report — fail closed")
+    return True, f"{report['declared']} premise(s) hold"
+
+
+def check_premises_subprocess(plan_id, timeout=PREMISES_TIMEOUT_S) -> tuple[bool, str]:
+    """Default premises checker: shells out to plan-premises.py. Fails closed."""
+    cmd = [sys.executable, str(SCRIPT_DIR / "plan-premises.py"), str(plan_id),
+           "--require-premises", "--json"]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False, f"premises check timed out after {timeout}s — fail closed"
+    except Exception as e:  # noqa: BLE001
+        return False, f"premises check could not run ({type(e).__name__}: {e}) — fail closed"
+    return premises_verdict(p.returncode, p.stdout, plan_id)
+
+
+def assign(plans, cfg, classes, graduated, today, horizon_days=21,
+           premises_check=check_premises_subprocess):
     """Pure planner. Returns (assignments, skipped).
 
     `graduated` maps category -> bool. `classes` maps plan_id -> execution class.
-    No DB, no filesystem, no clock — so every refusal below is directly testable.
+    `premises_check(plan_id) -> (ok, reason)` is the one impure step — it
+    defaults to the plan-premises.py subprocess and is injectable so tests can
+    exercise every refusal without shelling out. A checker that raises is
+    treated as a failing check: the gate fails CLOSED.
+    No DB, no clock — so every refusal below is directly testable.
     """
     executed = {p.get("plan_id") for p in plans
                 if str(p.get("status")) == "executed"}
@@ -158,6 +225,17 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21):
         unmet = [d for d in (plan.get("depends_on") or []) if d not in executed]
         if unmet:
             skip(plan, f"unmet depends_on: {', '.join(unmet)}")
+            continue
+
+        # Premises gate — last of the preflight checks because it is the only
+        # one that costs a subprocess; only plans that survived the cheap
+        # refusals above pay for it. Anything but a clean pass refuses.
+        try:
+            ok, why = premises_check(pid)
+        except Exception as e:  # noqa: BLE001
+            ok, why = False, f"premises check raised {type(e).__name__}: {e} — fail closed"
+        if not ok:
+            skip(plan, f"premises not verified — {why}")
             continue
 
         want_attended = not graduated.get(

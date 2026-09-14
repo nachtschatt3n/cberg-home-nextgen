@@ -61,7 +61,10 @@ def plan(pid, **kw):
 
 def run(plans, classes=None, graduated=None):
     classes = classes or {p["plan_id"]: "AUTO-NIGHT" for p in plans}
-    return ws.assign(plans, CFG, classes, graduated or {}, MONDAY)
+    # Premises hold for every fixture here; the gate itself is covered in
+    # test-scheduler-premises-gate.py. Injected so nothing shells out.
+    return ws.assign(plans, CFG, classes, graduated or {}, MONDAY,
+                     premises_check=lambda pid: (True, "fixture"))
 
 
 def reason_for(skipped, pid):
