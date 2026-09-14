@@ -25,7 +25,7 @@ import re
 import pathlib
 import subprocess
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
@@ -170,7 +170,7 @@ def reconcile(cfg, today):
     held, held_error = get_held()
     plans = load_plans(cfg)
     validation_errors = validate_plans(cfg, plans)
-    liveness_missing, liveness_verified = window_liveness(cfg, today)
+    liveness = window_liveness_report(cfg, today)
     parity_errors, parity_verified = cron_parity(cfg)
     autonomy = load_autonomy_policy()
     exec_classes = []
@@ -378,8 +378,9 @@ def reconcile(cfg, today):
         "needs_plan": needs_plan,
         "ambiguous_matches": ambiguous,
         "validation_errors": validation_errors,
-        "window_liveness": {"missing": liveness_missing,
-                            "verified": liveness_verified},
+        "window_liveness": {"missing": liveness["missing"],
+                            "stuck": liveness["stuck"],
+                            "verified": liveness["verified"]},
         "cron_parity": {"errors": parity_errors, "verified": parity_verified},
         "execution_classes": exec_classes,   # ENFORCED since P2.1b (a39d8766)
         "stale": stale,
@@ -428,9 +429,17 @@ def human(r, cfg):
     if not wl.get("verified", True):
         L.append("\n⚠️  window liveness NOT VERIFIED (no DB access) — absence of findings here is not evidence the windows ran")
     elif wl.get("missing"):
+        stuck = set(wl.get("stuck") or [])
         L.append(f"\n❌ WINDOWS DECLARED BUT NEVER RAN ({len(wl['missing'])}) — the schedule is fictional for these slots:")
         for m in wl["missing"]:
-            L.append(f"  ! {m} — no window_runs row; check the OpenClaw cron and the window agent")
+            if m in stuck:
+                L.append(f"  ! {m} — opened (running) but never finalized; the run died mid-window")
+            else:
+                L.append(f"  ! {m} — no window_runs row; check the OpenClaw cron and the window agent")
+    if wl.get("verified", True) and wl.get("stuck"):
+        L.append(f"\n❌ WINDOW RUNS STUCK OPEN ({len(wl['stuck'])}) — started, never finalized past duration+{WINDOW_STUCK_GRACE_MIN}m grace:")
+        for s in wl["stuck"]:
+            L.append(f"  ! {s} — window-run-record.py --finalize with the real outcome (aborted if unknown)")
     if r.get("validation_errors"):
         L.append(f"\n❌ PLAN FRONTMATTER ERRORS ({len(r['validation_errors'])}) — fix before these plans can be trusted:")
         for e in r["validation_errors"]:
@@ -689,24 +698,106 @@ def missing_window_runs(expected, run_rows):
     return [f"{s}:{d}" for s, d in expected if (s, d) not in have]
 
 
-def window_liveness(cfg, today):
-    """(missing, verified). verified=False when the DB is unreachable —
-    an unreadable ledger must render as NOT CHECKED, never as all-clear."""
+# A window whose row was opened (`--outcome running`, 2026-09-14 two-phase
+# recording) but never finalized. The window agent's close-out is the only
+# thing that writes finished_at, so a row still open this long after the
+# window's own duration means the run died mid-flight — not "still going".
+# Grace absorbs a slow close-out (health-gate retries, an operator reading
+# the report) without hiding a dead run for a day.
+WINDOW_STUCK_GRACE_MIN = 60
+_WINDOW_RUNNING = "running"
+
+
+def _is_open_run(row) -> bool:
+    """A window_runs row that has started and not finished.
+    row: (slot, run_date, started_at, finished_at, outcome, ...)."""
+    return row[4] == _WINDOW_RUNNING and row[3] is None
+
+
+def completed_run_rows(run_rows):
+    """Pure: the (slot, date) pairs that satisfy the liveness assertion.
+
+    An OPEN row is excluded on purpose — "the window started" is not "the
+    window ran". Counting it would turn a crash after the open into a
+    verified occurrence, the exact blind spot the two-phase recording exists
+    to close. Terminal rows count whatever their finished_at (pre-2026-09-14
+    rows all have one; a future terminal row without one is still terminal).
+    """
+    return [(str(r[0]), str(r[1])) for r in run_rows if not _is_open_run(r)]
+
+
+def _as_utc(ts):
+    if isinstance(ts, str):
+        ts = datetime.fromisoformat(ts)
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
+def stuck_window_runs(windows, run_rows, now, grace_min=WINDOW_STUCK_GRACE_MIN):
+    """Pure, DB-free: 'slot:date' for every OPEN row older than its window's
+    duration_min + grace. A window id the YAML no longer declares gets no
+    duration (grace only) — a stale open row for a retired slot is still a
+    row nobody will ever close.
+
+    windows:  the `windows:` list from maintenance-windows.yaml (id, duration_min)
+    run_rows: (slot, run_date, started_at, finished_at, outcome, ...)
+    now:      tz-aware datetime; naive timestamps are read as UTC
+    """
+    durations = {str(w.get("id")): int(w.get("duration_min") or 0)
+                 for w in windows or []}
+    now = _as_utc(now)
+    out = []
+    for r in run_rows:
+        if not _is_open_run(r):
+            continue
+        slot, run_date, started_at = str(r[0]), str(r[1]), r[2]
+        if started_at is None:
+            continue
+        deadline = _as_utc(started_at) + timedelta(
+            minutes=durations.get(slot, 0) + grace_min)
+        if now > deadline:
+            out.append(f"{slot}:{run_date}")
+    return sorted(out)
+
+
+def window_liveness_report(cfg, today, now=None):
+    """{"missing": [...], "stuck": [...], "verified": bool}.
+
+    verified=False when the DB is unreachable — an unreadable ledger must
+    render as NOT CHECKED, never as all-clear. `missing` and `verified` keep
+    the shape every consumer has read since P1.3; `stuck` is additive.
+    """
+    unverified = {"missing": [], "stuck": [], "verified": False}
     expected = expected_slots(cfg, today)
-    if not expected:
-        return [], True
     dsn = __import__("os").environ.get("SWEEP_PG_DSN")
     if not dsn:
-        return [], False
+        return unverified
+    # Stuck detection must see TODAY's rows too (a nightly opened at 03:30 and
+    # dead by 06:00 is today's problem), so the read floor is the earlier of
+    # the liveness lookback and the expected-slot floor.
+    floor = min([d for _, d in expected]
+                + [(today - timedelta(days=7)).isoformat()])
     try:
         import psycopg
         with psycopg.connect(dsn, connect_timeout=10) as c, c.cursor() as cur:
-            cur.execute("SELECT slot, run_date::text FROM window_runs "
-                        "WHERE run_date >= %s", (min(d for _, d in expected),))
+            cur.execute("SELECT slot, run_date::text, started_at, finished_at,"
+                        " outcome FROM window_runs WHERE run_date >= %s",
+                        (floor,))
             rows = cur.fetchall()
     except Exception:
-        return [], False
-    return missing_window_runs(expected, rows), True
+        return unverified
+    now = now or datetime.now(timezone.utc)
+    return {"missing": missing_window_runs(expected, completed_run_rows(rows)),
+            "stuck": stuck_window_runs(cfg.get("windows", []), rows, now),
+            "verified": True}
+
+
+def window_liveness(cfg, today):
+    """(missing, verified) — the original two-value contract, kept for the
+    callers and tests that unpack it; `window_liveness_report` adds `stuck`."""
+    r = window_liveness_report(cfg, today)
+    return r["missing"], r["verified"]
 
 
 # ---------------------------------------------------------------------------
