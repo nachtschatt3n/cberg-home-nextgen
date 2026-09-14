@@ -1,8 +1,8 @@
 # SOP: Grafana Image Changes — the datasource pre-flight gate
 
 > Description: How to change the Grafana container image (tag, variant, or chart-driven bump) without silently breaking datasources, and why "the pod started and the UI loads" is not evidence that it worked.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.09.14`
+> Last Updated: `2026-09-14`
 > Owner: `homelab-sre`
 
 ---
@@ -69,9 +69,14 @@ spec:
     image:
       tag: "<candidate>"        # omit entirely to follow the chart default
     env:
-      # Required for ANY image that ships plugins-bundled empty, or the
-      # container re-downloads them from grafana.com at startup and the
-      # shipped image stops matching the running container.
+      # Required for EVERY image variant, not only ones that ship
+      # plugins-bundled empty: on a stripped image the container re-downloads
+      # the backends at startup (image stops matching the container); on a
+      # complete image with readOnlyRootFilesystem (distroless, the chart
+      # default) the background installer KILLS a bundled backend whose
+      # catalog version is newer and then cannot write the replacement, so
+      # the datasource dies until the next restart with this var set
+      # (measured 2026-09-12: postgres/influxdb/loki/jaeger/mssql, 2.5 days).
       GF_PLUGINS_PREINSTALL_DISABLED: "true"
 ```
 
@@ -181,11 +186,23 @@ logged `reason="plugin prometheus not found"`. Six of seven provisioned
 datasources would have been dead. Do not retry on 13.x without first confirming
 upstream has restored compiled-in core datasources.
 
-**`GF_PLUGINS_PREINSTALL_DISABLED` is load-bearing, not optional.** Upstream also
-grew `defaultPreinstallPlugins` from 6 to 18. Without the env var a stripped
-image re-downloads the same binaries at startup, so the shipped image and the
-running container diverge — the image is no longer a description of what runs.
-It also adds a grafana.com egress dependency at pod start.
+**`GF_PLUGINS_PREINSTALL_DISABLED` is load-bearing, not optional — on every
+variant.** Upstream also grew `defaultPreinstallPlugins` from 6 to 18. Without
+the env var a stripped image re-downloads the same binaries at startup, so the
+shipped image and the running container diverge — the image is no longer a
+description of what runs. It also adds a grafana.com egress dependency at pod
+start. And on a COMPLETE image with `readOnlyRootFilesystem: true` (distroless,
+the chart default) it is worse than divergence: `preinstall_auto_update` is on
+by default, so at every start the background installer compares the bundled
+backends with the grafana.com catalog, and for each one the catalog has since
+republished it first kills the running bundled process and then fails the
+re-install with `unlinkat .../plugins-bundled/<id>: read-only file system`.
+The datasource is then simply gone (`/api/datasources/uid/<uid>/health` → 404
+`plugin.notRegistered`) until a restart with the var set. Measured 2026-09-12
+19:08Z: postgres, influxdb, loki, jaeger, mssql died this way; every TesLaMate
+and Pellets dashboard was empty for 2.5 days while TesLaMate itself was
+healthy, and prometheus was one catalog release away from the same fate. A
+pod restart is therefore never neutral on this image without the var.
 
 **"It works, I can see datasources in the UI."** Check whether they are PVC
 leftovers (§8 command C). This is the specific trap that makes a naive check
