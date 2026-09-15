@@ -79,6 +79,59 @@ Rules:
   false-positive, say so in the Summary and set `risk: low` — but still write the
   plan; the human/window agent decides, not you.
 
+## Authoring rules learned the hard way (review of ten drafts, 2026-09-15)
+
+A `plan-reviewer-agent` reads every draft before it can be vetted, and six of
+ten drafts failed that review on defects of exactly these shapes. Write to
+pass the review, not to finish the file:
+
+1. **Every object a command names must exist — check it live before you
+   write it.** `kubectl get <kind>/<name> -n <ns>` for every CronJob,
+   Deployment, Service, Secret, ConfigMap, PVC, HTTPRoute in your Steps,
+   Verification and Rollback. Do NOT copy object names from SOPs or other
+   plans — a stale name in `docs/sops/backup.md` (`backup-of-all-volumes`,
+   real object `daily-backup-all-volumes`) propagated into a rollback step
+   that would have failed at the worst moment.
+2. **Every verification gate must be able to FAIL.** For each PASS criterion
+   state what the failure it guards against prints, and cite the code path
+   or a live measurement. Exit codes lie (`frigate --validate-config` exits 0
+   after a ValidationError when the safe-mode load succeeds); metrics that
+   are not scraped read empty on both sides; greps must be case-insensitive
+   against mixed-case upstream output. See
+   `docs/sops/verification-contents-not-shape.md`.
+3. **Dry-test every `sed`/`yq`/`python -c` on a scratch copy of the target
+   file on macOS** (BSD sed: `\s` is not a BRE class; use `[[:space:]]*` or
+   `yq`), and paste the resulting diff line into the plan.
+4. **`conflicts_with` must carry everything your prose says to serialize
+   with**, and any same-night `kube-prometheus-stack` bump when your
+   verification reads Prometheus (the window's instrument is shared infra).
+   Name shared surfaces in `touches.shared` (`igpu-i915`, `monitoring`, the
+   public edge, Authentik, the CIFS share). Read every other open plan's
+   frontmatter before you decide the field is empty.
+5. **`finding_refs` must name the sweep finding for this component/target**
+   — query `runbooks/policy-cli.py finding list --component <c>` (with
+   `SWEEP_PG_DSN` up) before writing; the plan-or-page pass joins on it, and
+   an empty list makes the finding read as unplanned.
+6. **A rollback is a procedure, not a `git revert` line**, once anything
+   forward-only happens (schema migrations, appstore/plugin pulls, a PV whose
+   immutable `volumeHandle` cannot be repointed). Name the dump/snapshot you
+   take first and the exact restore path.
+7. **Frontmatter must parse as YAML** — quote any value containing `: `
+   (an unquoted colon-space inside a `premises.run:` value made a plan
+   invisible to every tool for an evening). Run
+   `.venv/bin/python3 runbooks/maintenance-plan.py --validate` and confirm
+   your plan_id appears in `--open`.
+8. **A remedy you cite must come from upstream code or the upstream PR,
+   never from a deny-rule reason or a SOP alone** — those are written by the
+   last agent, and one of them (`--default-targets` for external-dns 1.22.0)
+   prescribed the exact flag that would reproduce the outage it described.
+   When you find a rule or SOP wrong, say so in the report as a repo
+   correction; do not silently plan around it.
+9. **Shared worktree commits:** after `git commit --only <file>` run
+   `git log -1 --format=%s` and confirm the subject is YOURS before pushing —
+   two sessions committing in the same second can swap message files; amend
+   before push if it is not.
+
 ## Boundaries
 - Cluster access is **read-only** (get/describe/logs, registry/release-notes
   fetch). The only file you write is the plan.

@@ -471,6 +471,14 @@ For every item in `needs_plan` from the Step 0 `coverage.py --json` output:
    list; when you cannot tell, skip — a duplicate planner writes a duplicate
    draft that someone has to retire.
 
+A draft a planner writes tonight is NOT vetted by being written: the sweep's
+rule 4d0b dispatches a `plan-reviewer-agent` per new draft and only a
+`ready-for-go` review sets `status: vetted` (2026-09-15: six of ten drafts
+needed fixes a reviewer found and the planner could not). You do not review
+here — the window is the wrong place to reason — but if a draft you dispatched
+last night is still `draft` two sweeps later, that is a sweep gap to report,
+not a plan to run.
+
 For each item that clears all three, dispatch **ONE `upgrade-planner-agent`
 in the background** (Agent tool, `run_in_background`, one per component,
 carrying the component, `current`→`target`, the coverage `reason` and the PR

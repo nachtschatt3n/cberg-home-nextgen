@@ -36,6 +36,7 @@ import sys
 from packaging import version
 
 # Make `runbooks/lib/...` importable when invoked from any CWD.
+SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(Path(__file__).parent))
 from lib.findings_writer import (  # noqa: E402
     FindingsWriter, DegradationLog, cycle_id_from_env, trigger_from_env, git_head,
@@ -4107,6 +4108,91 @@ def _component_universe(checker: 'VersionChecker') -> int:
     return len(seen)
 
 
+# ---------------------------------------------------------------------------
+# Deny-aware ACTION text for patch/minor bumps (2026-09-15; F-7ef7af04
+# external-dns, F-9af9baf7 nextcloud-mcp, F-24463e2b frigate, F-60ebcdb5
+# otel-operator).
+#
+# Every minor used to be emitted with action="batch with other minor bumps".
+# That is an instruction to APPLY, and it is wrong whenever the lane engine
+# (runbooks/coverage.py::assign_lane) routes the very same hop to PLAN: a deny
+# rule in runbooks/auto-update-policy.yaml (a full block, or `max: patch` on a
+# minor hop), or the 0.x release-line rule (at major 0 the minor IS the
+# breaking axis). The operator reads the Action field — four live findings told
+# them to batch bumps that policy forbids.
+#
+# The decision REUSES coverage.py's own matching (load_policy / deny_rule_for /
+# _ver_tuple) instead of re-implementing it, so action text and lane can never
+# disagree. coverage.py is loaded the way security-check.py loads it (importlib
+# on SCRIPT_DIR/coverage.py, cached in a module global); any failure degrades
+# to the old policy-blind text — a version check must never crash on its
+# policy file.
+_COV_MOD = None
+
+
+def _coverage_module():
+    """runbooks/coverage.py as a module, loaded once per process."""
+    global _COV_MOD
+    if _COV_MOD is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "cberg_coverage", SCRIPT_DIR / "coverage.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _COV_MOD = mod
+    return _COV_MOD
+
+
+def load_update_policy():
+    """The auto-update policy exactly as the lane engine reads it, or None when
+    coverage.py cannot be loaded (bump_action() then falls back)."""
+    try:
+        return _coverage_module().load_policy()
+    except Exception:
+        return None
+
+
+def bump_action(component, kind, current, target, utype, policy):
+    """Action text for a patch/minor bump, in lane-engine priority order:
+
+    1. `held by auto-update-policy (<glob>) — PLAN lane` — a deny rule blocks
+       this (component, utype) per coverage.py's `deny_rule_for` (the first
+       matching glob decides; `max:` admits update types up to it).
+    2. `0.x release-line move (0.a -> 0.b) — PLAN lane` — both versions at
+       major 0 and the minor differs (coverage.py's 0.x rule; never fires for
+       a patch, whose minor is unchanged).
+    3. `batch with other <utype> bumps` — the pre-existing text.
+
+    `component` is the HelmRelease/Deployment name: that — lowercased, and
+    collapsed to `app-template` for a 5.x CHART target — is the key
+    assign_lane() feeds the deny list, so it is the key used here. The image
+    repository is deliberately NOT matched: the lane engine does not match it,
+    and matching more here than there would let the action promise a hold the
+    window never applies.
+
+    `policy=None` (coverage.py unavailable) yields (3) unconditionally. A parse
+    failure of the YAML inside coverage.py already yields an empty deny list
+    there — the lane engine's own behaviour on the same file. Pure: no I/O.
+    """
+    fallback = f"batch with other {utype} bumps"
+    if policy is None:
+        return fallback
+    try:
+        cov = _coverage_module()
+        key = str(component or "").lower()
+        if kind == "chart" and str(target or "").startswith("5."):
+            key = "app-template"  # assign_lane()'s collapse — keep in step
+        rule = cov.deny_rule_for(policy, key, utype)
+        if rule:
+            return f"held by auto-update-policy ({rule.get('match')}) — PLAN lane"
+        zt, zc = cov._ver_tuple(target), cov._ver_tuple(current)
+        if zt and zc and zc[0] == 0 and zt[0] == 0 and zt[1] != zc[1]:
+            return f"0.x release-line move (0.{zc[1]} -> 0.{zt[1]}) — PLAN lane"
+    except Exception:
+        pass
+    return fallback
+
+
 def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_path: str) -> tuple[int, int]:
     """Walk checker.results + external_infra_results and emit notable findings.
 
@@ -4162,7 +4248,9 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
             },
         )
 
-    # HelmRelease findings
+    # HelmRelease findings. Policy loaded ONCE for the run; None = coverage.py
+    # unavailable, and bump_action() then emits the old policy-blind text.
+    policy = load_update_policy()
     for r in getattr(checker, 'results', []):
         name = r.get('name', '<unknown>')
         ns   = r.get('namespace', '')
@@ -4193,7 +4281,7 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
             writer.emit(
                 severity='monitor',
                 title=f"{name}: chart {cur} → {latest} (minor)",
-                action="batch with other minor bumps",
+                action=bump_action(name, 'chart', cur, latest, 'minor', policy),
                 evidence_path=evidence_path,
                 subsection="helmrelease_chart",
                 metadata={"namespace": ns, "kind": "chart", "type": "minor"},
@@ -4202,7 +4290,7 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
             writer.emit(
                 severity='monitor',
                 title=f"{name}: chart {cur} → {latest} (patch)",
-                action="batch with other patch bumps",
+                action=bump_action(name, 'chart', cur, latest, 'patch', policy),
                 evidence_path=evidence_path,
                 subsection="helmrelease_chart",
                 metadata={"namespace": ns, "kind": "chart", "type": "patch"},
@@ -4236,7 +4324,8 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
                 writer.emit(
                     severity='monitor',
                     title=f"{name}: image {img.get('repository')} {img.get('current_tag')} → {img.get('latest_tag')} (minor)",
-                    action="batch with other minor bumps",
+                    action=bump_action(name, 'image', img.get('current_tag'),
+                                       img.get('latest_tag'), 'minor', policy),
                     evidence_path=evidence_path,
                     subsection="helmrelease_image",
                     metadata={
@@ -4249,7 +4338,8 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
                 writer.emit(
                     severity='monitor',
                     title=f"{name}: image {img.get('repository')} {img.get('current_tag')} → {img.get('latest_tag')} (patch)",
-                    action="batch with other patch bumps",
+                    action=bump_action(name, 'image', img.get('current_tag'),
+                                       img.get('latest_tag'), 'patch', policy),
                     evidence_path=evidence_path,
                     subsection="helmrelease_image",
                     metadata={

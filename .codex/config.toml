@@ -25,6 +25,10 @@ config_file = "agents/maintenance-window-agent.toml"
 description = "Owns the Plex + Jellyfin + Tube Archivist library curation loop. Organises new arrivals from JDownloader, enforces the nested per-item-folder layout from docs/sops/media-library-standards.md, dedupes with ffprobe quality comparison, backfills NFO and poster/fanart artwork, bridges Tube Archivist channels into Plex, performs the one-time flat→nested migration, and triggers library rescans via cluster-ops-agent. Use for \"organise new downloads\", \"migrate library to nested layout\", \"audit the media library\", \"fix metadata for X\", \"add Tube Archivist channel to Plex\"."
 config_file = "agents/media-manager.toml"
 
+[agents.plan_reviewer_agent]
+description = "Independently reviews ONE maintenance-plan draft (read-only) before it can be vetted — re-runs its premises live, verifies its central technical claim against primary sources (chart/image metadata, upstream source, the live cluster), checks that every command names an object that exists and every verification gate can actually fail, and checks conflicts_with/depends_on against the rest of the plan set. Returns a structured verdict (ready-for-go / needs-fix / reject) with blocking issues and concrete repo corrections. Dispatched per draft by the daily-operation sweep (rule 4d0b) and on demand (\"review the plans\"). Never edits the plan, never commits, never touches the cluster."
+config_file = "agents/plan-reviewer-agent.toml"
+
 [agents.security_agent]
 description = "Performs repository and cluster security audits with strict redaction and SOPS-first handling."
 config_file = "agents/security-agent.toml"

@@ -124,6 +124,20 @@ def main() -> int:
     check("declared conflicts never share a slot",
           len(a) == 2 and slots["c1"] != slots["c2"], str(slots))
 
+    # 2026-09-15: conflicts_with is written by hand and was ONE-SIDED in 21 of
+    # 21 declarations across the live plan set (a planner cannot edit the other
+    # plan's file). The relation means "must not share a window", which is
+    # symmetric — so a plan that nobody else has named must still refuse a
+    # slot holding a plan that HAS named it, whichever is placed first.
+    a, _ = run([plan("names-other", conflicts_with=["quiet"]), plan("quiet")])
+    slots = {x["plan_id"]: x["slot"] for x in a}
+    check("one-sided conflict (A names B) keeps them apart",
+          len(a) == 2 and slots["names-other"] != slots["quiet"], str(slots))
+    a, _ = run([plan("quiet2"), plan("names-quiet2", conflicts_with=["quiet2"])])
+    slots = {x["plan_id"]: x["slot"] for x in a}
+    check("one-sided conflict, unnamed plan placed FIRST, still kept apart",
+          len(a) == 2 and slots["quiet2"] != slots["names-quiet2"], str(slots))
+
     # No window can hold it: the largest slot is sun-attended at 150 minutes,
     # and the Step 0 reserve takes 20 of those. (A 90-minute plan is NOT the
     # right fixture here — it fits sun-attended fine, which is why the first

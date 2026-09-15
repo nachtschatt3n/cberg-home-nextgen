@@ -250,9 +250,19 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21,
                 continue
             if dur and not s.get("allow_reboot") and plan.get("needs_reboot"):
                 continue
-            # never share a slot with a declared conflict
-            here = {p.get("plan_id") for p in live if p.get("window") == s["slot"]}
-            if conflicts & here:
+            # never share a slot with a declared conflict — in EITHER direction.
+            # `conflicts_with` is written by hand and measured 2026-09-15 to be
+            # one-sided in 21 of 21 declarations across the plan set (A lists
+            # B, B does not list A): planners write their own file and cannot
+            # edit the other plan's. Honouring only the candidate's own list
+            # meant a plan that nobody else had named could be placed next to
+            # a plan that HAD named it. The relation is symmetric by meaning
+            # ("must not share a window"), so it is symmetric here.
+            here_plans = [p for p in live if p.get("window") == s["slot"]]
+            here = {p.get("plan_id") for p in here_plans}
+            names_me = {p.get("plan_id") for p in here_plans
+                        if pid in set(p.get("conflicts_with") or [])}
+            if (conflicts & here) or names_me:
                 continue
             rload, rmins = slot_load(s["slot"], live)
             if rload + RISK_WEIGHT.get(risk_of(plan), 2) > int(s.get("capacity_risk", 4)):

@@ -218,6 +218,22 @@ needs their decision, and what got auto-fixed.
       the PLAN lane cover the whole universe. (Manual/dry-run sweep: report the
       gap instead of dispatching, but never leave `needs_plan` unactioned across
       cycles.)
+    - **4d0b — REVIEW every draft before it can be vetted (added 2026-09-15).**
+      A planner's draft is a claim, not a plan. For every plan file with
+      `status: draft` that was written or retargeted since the previous
+      sweep (`git log --since=<prev cycle start> --diff-filter=AMR --name-only
+      -- runbooks/maintenance/plans/`), dispatch ONE `plan-reviewer-agent`
+      (parallel, read-only, `run_in_background`; deadline ~20 min). Apply
+      its `repo_corrections` and blocking fixes yourself (or re-dispatch the
+      planner with the blocking list), then set `status: vetted` ONLY on a
+      `ready-for-go` verdict — never on the planner's own word. Measured
+      2026-09-15: ten drafts, six `needs-fix`, every defect one the planner
+      could not see from inside its own reasoning (a gate that passes on
+      failure, a rollback naming a nonexistent CronJob, a BSD-sed no-op,
+      empty `conflicts_with` beside prose saying "serialize"). The
+      window-scheduler refuses `draft`, so an unreviewed plan never runs —
+      but an unreviewed plan also never gets scheduled, which is the other
+      failure. Note the reviewed ids and verdicts on the board.
     - **If `covered` is false (any CRACK) → emit a CRITICAL `coverage` finding
       AND page via OpenClaw home-operation.** An actionable update with no lane
       is the exact failure this guarantee exists to prevent — it must be loud.

@@ -3053,18 +3053,77 @@ def s5_authentik_logins(es: ElasticPortForward) -> tuple[str, Findings, str]:
         auth_total = auth_data["hits"]["total"]["value"]
         auth_buckets = auth_data.get("aggregations", {}).get("by_namespace", {}).get("buckets", [])
         if auth_total > 0:
+            # RECENCY qualifier (F-ddd38e77, 2026-09-15). The 7d window is the
+            # right net for a low-and-slow pattern, but it also kept a one-day
+            # burst on the board as a WARNING for a full week after its cause was
+            # fixed: arag-web retried Paperless with a deleted token for 7 h on
+            # 09-14 (5,633 lines), the token was re-minted the same morning, and
+            # the count stayed >500 until the day aged out. Ask the same query
+            # over the last 24 h and warn only when the namespace is STILL
+            # failing at the 7d threshold's own daily rate (500/7 ≈ 71/day) —
+            # a steady attacker at 72+/day still warns, a burst that ended
+            # reads as "subsided" with both numbers shown. Not a filter on
+            # what is counted, only on whether an ended burst keeps paging.
+            recent = auth_recent_counts(es, auth_body)
             lines.append(f"\n**Cross-app auth failures (7d):** {auth_total}\n")
             for b in auth_buckets:
-                lines.append(f"- {b['key']}: {b['doc_count']}\n")
-                if b["doc_count"] > 500:
-                    f.add(WARNING, f"High auth failure count in `{b['key']}`: {b['doc_count']} (7d)")
-                    cprint(C.YELLOW, f"  🟡 High auth failures in {b['key']}: {b['doc_count']}")
-            if not any(b["doc_count"] > 500 for b in auth_buckets):
+                c24 = recent.get(b["key"]) if recent is not None else None
+                lines.append(f"- {b['key']}: {b['doc_count']}"
+                             + (f" (last 24h: {c24})" if c24 is not None else "") + "\n")
+                if b["doc_count"] > AUTH_FAIL_7D_THRESHOLD:
+                    verdict = auth_burst_verdict(b["doc_count"], c24)
+                    if verdict == "warn":
+                        f.add(WARNING, f"High auth failure count in `{b['key']}`: {b['doc_count']} (7d)"
+                                       + (f", {c24} in the last 24h" if c24 is not None else ""))
+                        cprint(C.YELLOW, f"  🟡 High auth failures in {b['key']}: {b['doc_count']}"
+                                         + (f" (24h: {c24})" if c24 is not None else ""))
+                    else:
+                        cprint(C.GREEN, f"  🟢 Auth-failure burst in {b['key']} has subsided: "
+                                        f"{b['doc_count']} in 7d but only {c24} in the last 24h "
+                                        f"(below {AUTH_FAIL_7D_THRESHOLD / 7:.0f}/day)")
+            if not any(b["doc_count"] > AUTH_FAIL_7D_THRESHOLD for b in auth_buckets):
                 cprint(C.GREEN, f"  🟢 Cross-app auth failures within normal range ({auth_total} total)")
         else:
             cprint(C.GREEN, "  🟢 No cross-app auth failures detected")
 
     return f.worst(), f, "\n".join(lines)
+
+
+AUTH_FAIL_7D_THRESHOLD = 500   # per namespace, 7d — the s5 cross-app warning bar
+
+
+def auth_recent_counts(es, auth_body: dict) -> dict | None:
+    """{namespace: count} for the SAME cross-app query over the last 24 h.
+
+    None when the query cannot run (ES error) — the caller then keeps the
+    plain 7d verdict, so a failed recency read can never silence a warning.
+    """
+    import copy
+    body = copy.deepcopy(auth_body)
+    try:
+        body["query"]["bool"]["filter"] = [{"range": {"@timestamp": {"gte": "now-24h"}}}]
+        data = es.query(body)
+        if not data:
+            return None
+        buckets = data.get("aggregations", {}).get("by_namespace", {}).get("buckets", [])
+        return {b["key"]: int(b["doc_count"]) for b in buckets}
+    except Exception:
+        return None
+
+
+def auth_burst_verdict(count_7d: int, count_24h) -> str:
+    """'warn' or 'subsided' for a namespace over the 7d threshold.
+
+    Unknown 24h count (None) -> 'warn' (fail toward surfacing). Otherwise warn
+    only while the last-24h rate is at least the 7d bar's own daily rate, so
+    a namespace that is still failing at >= 500/7 per day warns and a burst
+    that has stopped does not keep paging for a week.
+    """
+    if count_7d <= AUTH_FAIL_7D_THRESHOLD:
+        return "ok"
+    if count_24h is None:
+        return "warn"
+    return "warn" if count_24h > AUTH_FAIL_7D_THRESHOLD / 7 else "subsided"
 
 
 def _body_text(hit: dict) -> str:
