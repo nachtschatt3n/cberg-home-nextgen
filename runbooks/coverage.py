@@ -1068,20 +1068,31 @@ def direct_bump_age_gate(item, policy):
     # the age of a tag that repo has never had. Prefer a repo whose name echoes
     # the component, then try each until one actually resolves THIS target tag:
     # a wrong repo simply does not carry `v3.25.1`, so it self-eliminates.
+    #
+    # And when SEVERAL repos carry the target tag, the YOUNGEST decides — never
+    # the first that resolves (F-9b77a91a, 2026-09-15): memgraph indexes both
+    # memgraph/lab and memgraph/memgraph-mage, both carried 3.13.1, lab's was
+    # 3.5 days old and mage's 13 h. The alphabetical "echoes the component"
+    # sort tried lab first, it resolved, and the loop stopped — so the mage
+    # bump was rated AUTO inside the cooldown and only a manual ground-truth
+    # check in the window held it. Whichever carrier is youngest is the one
+    # whose artifact the window would actually pull, so it bounds the risk.
     ordered = sorted(repos, key=lambda r: (dep.split("-")[0] not in (r or "").lower(), r))
-    age = tried = None
+    ages = {}
     for r in ordered:
-        tried = r
-        age = image_publish_age_hours(r, item["target"])
-        if age is not None:
-            break
-    if age is None:
+        a = image_publish_age_hours(r, item["target"])
+        if a is not None:
+            ages[r] = a
+    if not ages:
         return (f"release age UNKNOWN for {item['target']} across {len(ordered)} "
-                f"candidate repo(s) (last tried {tried}) — cannot prove the "
+                f"candidate repo(s) (last tried {ordered[-1]}) — cannot prove the "
                 f"{min_age:g}h cooldown elapsed; holding (fail-safe)")
+    youngest_repo, age = min(ages.items(), key=lambda kv: kv[1])
     if age < min_age:
+        carrier = (f" [{youngest_repo}, youngest of {len(ages)} repos carrying the tag]"
+                   if len(ages) > 1 else "")
         return (f"published {age:.0f}h ago (< {min_age:g}h cooldown) — eligible in "
-                f"{min_age - age:.0f}h")
+                f"{min_age - age:.0f}h{carrier}")
     return None
 
 
@@ -1425,6 +1436,48 @@ def max_rule_fallbacks(actionable, policy, prs=None):
     return out
 
 
+def _direct_bump_breaking_gate(item):
+    """(is_breaking, note) — G3 for a NO-PR candidate on the direct-bump path.
+
+    WHY THIS EXISTS (F-ec4c1644, 2026-09-15). `breaking_change_signal()` was
+    called from exactly one place, `max_rule_fallbacks()`, so only the
+    allowed-behind-a-max-rule candidates were ever scanned for a breaking
+    signal. The ordinary "safe patch/minor" exit in `assign_lane()` went
+    straight to AUTO after G5 — and G5 is WAIVED for `age_waive` components —
+    so mealie v3.25.1 -> v3.26.0, whose release notes open with a BREAKING
+    CHANGE (server-initiated HTTP refuses private-network targets unless
+    HTTP_ALLOW_LIST is set), was rated AUTO for an unattended window. It was
+    caught by a human reading the notes in the window; this is that reading,
+    made mechanical, with the SAME asymmetry the helper documents: a positive
+    signal holds, unfetchable notes do NOT (G3-unknown is the pre-existing
+    baseline of every direct bump, and an unauthenticated GitHub rate limit
+    must not close the lane). auto-update.py applies G3 to PRs already, so
+    the Renovate-PR shortcut above this gate is deliberately not double-gated.
+    Off the network when the item names no repository.
+    """
+    try:
+        if item.get("kind") == "image":
+            dep = (item.get("component") or "").lower()
+            repos = [r for r in ([item.get("image_repo")] if item.get("image_repo")
+                                 else item.get("image_repos") or []) if r]
+            if not repos:
+                return False, "unverified (no image repository to read notes for)"
+            ordered = sorted(repos, key=lambda r: (dep.split("-")[0] not in (r or "").lower(), r))
+            last = (False, "unverified (release notes unavailable)")
+            for r in ordered:
+                is_b, note = breaking_change_signal(r, item["target"])
+                if is_b:
+                    return True, f"{note} [{r}]"
+                if "checked" in note:
+                    last = (False, note)
+            return last
+        if item.get("kind") == "chart":
+            return breaking_change_signal(item.get("component") or "", item["target"])
+        return False, "unverified (not an image or chart)"
+    except Exception as e:  # never let a gate failure read as a pass CLAIM
+        return False, f"unverified ({type(e).__name__})"
+
+
 def assign_lane(item, policy, prs, plans, ar_holds=None):
     """(lane, reason, drift) for one actionable update."""
     comp = item["component"].lower()
@@ -1475,7 +1528,14 @@ def assign_lane(item, policy, prs, plans, ar_holds=None):
         cooldown = direct_bump_age_gate(item, policy)
         if cooldown:
             return "HELD", f"G5 release-age cooldown — {cooldown}", None
-        return "AUTO", "safe patch/minor — window applies (hybrid: PR or direct-bump)", None
+        # G3 on the direct-bump path too (F-ec4c1644): a positive breaking-change
+        # signal in the target's release notes is a PLAN item, whatever the
+        # semver label says. Unfetchable notes do not hold (see the helper).
+        is_breaking, g3 = _direct_bump_breaking_gate(item)
+        if is_breaking:
+            return "PLAN", f"G3 breaking-change signal — {g3}", None
+        g3_note = "" if "checked" in g3 else f"; G3 {g3}"
+        return "AUTO", f"safe patch/minor — window applies (hybrid: PR or direct-bump){g3_note}", None
     return "CRACK", "actionable but unclassifiable — MUST be triaged", None
 
 

@@ -1178,6 +1178,21 @@ def _hist_cred_hit_suppressed(line: str) -> bool:
                for v in values)
 
 
+# A `$UPPER_SNAKE` (or `${UPPER_SNAKE}`) right-hand side after a credential key
+# is a shell-variable REFERENCE, whatever separator precedes it — `key=$VAR`,
+# `key: $VAR`, or the HTTP-header form `-H "X-Emby-Token: $VAR"`. It is
+# syntactically never a literal. Deliberately case-strict on the identifier
+# (the grep runs WITHOUT -i): a literal that merely starts with `$` keeps
+# lowercase letters or digits in odd places and stays visible, so the
+# suppressor cannot blind the detector to a real value. The key half spells
+# out its own case variants for the same reason. Tested in
+# runbooks/tests/test-s3-header-shell-var-rhs.py.
+S3_SHELL_VAR_RHS_ERE = (
+    r'([Tt]oken|TOKEN|[Pp]assword|PASSWORD|[Ss]ecret|SECRET|[Aa]pi.?[Kk]ey|API.?KEY)'
+    r'\s*[:=]\s*"?\$\{?[A-Z_][A-Z0-9_]{2,}\b'
+)
+
+
 def s3_git_history() -> tuple[str, Findings, str]:
     section_header(3, "Git History Secret Scan")
     f = Findings()
@@ -1230,6 +1245,12 @@ def s3_git_history() -> tuple[str, Findings, str]:
         # -i: `X-Plex-Token=$TOKEN` must match the token= branch too (2026-08-17
         # false positives); the $[A-Z_]+ var-name part stays effectively case-strict.
         "| grep -viE 'PGPASSWORD=\\$|password=\"?\\$[A-Z_]+|token=\"?\\$[A-Z_]+|api.?key=\"?\\$[A-Z_]+' "
+        # The same shell-variable reference with a COLON separator and a space
+        # — the HTTP-header shape `-H "X-Emby-Token: $JELLYFIN_API_KEY"` that
+        # the line above cannot see (it anchors on `=`). Three recurring HIGH
+        # rows from the jellyfin plan (F-6bf496a1 / F-d6b2bd92 / F-3d1d7147,
+        # 2026-09-15). Case-STRICT on purpose: see S3_SHELL_VAR_RHS_ERE.
+        f"| grep -vE '{S3_SHELL_VAR_RHS_ERE}' "
         "| grep -vE '^[+-]?\\s*#|description:' "
         "| grep -v '\"replace-me\"\\|\"my-strong-password\"\\|\"my-api-key\"\\|\"your-api-key-here\"\\|\"my-aws-secret-key\"\\|openssl rand' "
         # Template/doc placeholders like <github-personal-access-token>, <web-ui-password>:

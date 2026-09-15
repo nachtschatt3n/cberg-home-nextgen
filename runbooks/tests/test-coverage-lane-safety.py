@@ -155,6 +155,91 @@ class ZeroVerLineTest(unittest.TestCase):
         self.assertEqual(lane, "AUTO")
 
 
+class DirectBumpBreakingGateTest(unittest.TestCase):
+    """G3 on the DIRECT-BUMP path (F-ec4c1644, 2026-09-15).
+
+    `breaking_change_signal()` used to be called only from
+    `max_rule_fallbacks()`, so the ordinary "safe patch/minor" exit never read
+    the target's release notes. mealie v3.25.1 -> v3.26.0 — `age_waive`d, so no
+    G5 either — opens with a BREAKING CHANGE and was rated AUTO for an
+    unattended window. The signal function is patched here so the tests stay
+    off the network; the helper's own routing is what is under test.
+    """
+
+    def setUp(self):
+        self._real = cov.breaking_change_signal
+
+    def tearDown(self):
+        cov.breaking_change_signal = self._real
+
+    def _mealie(self):
+        return item("mealie", current="v3.25.1", target="v3.26.0",
+                    image_repo="ghcr.io/mealie-recipes/mealie")
+
+    def test_breaking_signal_routes_a_safe_minor_to_plan(self):
+        cov.breaking_change_signal = lambda repo, tag: (
+            True, "breaking-change signal in release notes: HTTP_ALLOW_LIST")
+        lane, reason, _ = cov.assign_lane(self._mealie(), POLICY, {}, [])
+        self.assertEqual(lane, "PLAN", reason)
+        self.assertIn("G3", reason)
+        self.assertIn("mealie-recipes/mealie", reason)   # names the repo it read
+
+    def test_clean_notes_still_flow_to_auto(self):
+        cov.breaking_change_signal = lambda repo, tag: (False, "clean (release notes checked)")
+        lane, reason, _ = cov.assign_lane(self._mealie(), POLICY, {}, [])
+        self.assertEqual(lane, "AUTO", reason)
+        self.assertNotIn("G3", reason)
+
+    def test_unverified_notes_do_not_hold_but_are_said(self):
+        """The documented asymmetry: G3-unknown is the pre-existing baseline of
+        every direct bump; a rate-limited GitHub must not close the lane. But
+        the AUTO reason must SAY the notes were not read."""
+        cov.breaking_change_signal = lambda repo, tag: (False, "unverified (release notes unavailable)")
+        lane, reason, _ = cov.assign_lane(self._mealie(), POLICY, {}, [])
+        self.assertEqual(lane, "AUTO", reason)
+        self.assertIn("G3 unverified", reason)
+
+    def test_renovate_pr_shortcut_is_not_double_gated(self):
+        """auto-update.py applies G3 to PRs; the PR exit sits above this gate."""
+        cov.breaking_change_signal = lambda repo, tag: (True, "breaking")
+        lane, reason, _ = cov.assign_lane(self._mealie(), POLICY, {"mealie": "999"}, [])
+        self.assertEqual(lane, "AUTO")
+        self.assertIn("Renovate PR #999", reason)
+
+    def test_gate_failure_is_unverified_not_a_hold_and_not_a_clean_claim(self):
+        def boom(repo, tag):
+            raise RuntimeError("network")
+        cov.breaking_change_signal = boom
+        lane, reason, _ = cov.assign_lane(self._mealie(), POLICY, {}, [])
+        self.assertEqual(lane, "AUTO", reason)
+        self.assertIn("G3 unverified", reason)
+
+    def test_multi_repo_any_breaking_carrier_holds(self):
+        """A component indexing several repos: the first repo that RESOLVES
+        notes and says breaking wins, a repo with no notes does not mask it."""
+        calls = []
+        def sig(repo, tag):
+            calls.append(repo)
+            if repo == "memgraph/memgraph-mage":
+                return True, "breaking-change signal in release notes: x"
+            return False, "unverified (release notes unavailable)"
+        cov.breaking_change_signal = sig
+        it = item("memgraph", current="3.13.0", target="3.13.1", type_="patch",
+                  image_repos=["docker.io/library/busybox", "memgraph/lab",
+                               "memgraph/memgraph-mage"])
+        lane, reason, _ = cov.assign_lane(it, POLICY, {}, [])
+        self.assertEqual(lane, "PLAN", reason)
+        self.assertIn("memgraph-mage", reason)
+
+    def test_no_repository_stays_off_the_network(self):
+        def boom(repo, tag):
+            raise AssertionError("must not be called without a repository")
+        cov.breaking_change_signal = boom
+        lane, reason, _ = cov.assign_lane(
+            item("someapp", current="1.4.0", target="1.6.2"), POLICY, {}, [])
+        self.assertEqual(lane, "AUTO", reason)
+
+
 class LockstepTest(unittest.TestCase):
     def test_chart_follows_its_plan_held_image(self):
         lanes = {"AUTO": [], "PLAN": [], "REBUILD": [], "HELD": [], "CRACK": []}

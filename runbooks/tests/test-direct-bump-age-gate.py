@@ -88,6 +88,29 @@ def main() -> int:
     check("multi-repo: wrong repo self-eliminates, right one passes",
           cov.direct_bump_age_gate(multi, POLICY), False)
 
+    # multi-repo row where TWO repos carry the tag: the YOUNGEST decides.
+    # F-9b77a91a (2026-09-15): memgraph/lab 3.13.1 was 86h old and
+    # memgraph/memgraph-mage 3.13.1 was 13h; the first-that-resolves loop
+    # measured lab (alphabetically first) and passed the mage bump inside the
+    # cooldown. A bump is only as old as the youngest artifact it pulls.
+    with_ages({"docker.io/library/busybox:3.13.1": None,
+               "memgraph/lab:3.13.1": 86, "memgraph/memgraph-mage:3.13.1": 13})
+    twin = {**item(repo=None, tag="3.13.1", comp="memgraph"),
+            "image_repos": ["docker.io/library/busybox", "memgraph/lab",
+                            "memgraph/memgraph-mage"]}
+    got = cov.direct_bump_age_gate(twin, POLICY)
+    check("multi-repo: youngest carrier decides -> hold", got, True)
+    ok = bool(got) and "memgraph-mage" in got and "youngest of 2" in got
+    print(f"  {'PASS' if ok else 'FAIL'}  hold reason names the youngest carrier ({got})")
+    if not ok:
+        FAILURES.append("youngest carrier named")
+
+    # THE LOAD-BEARING HALF: when every carrier is old the bump still passes —
+    # a blanket hold on multi-repo rows would satisfy the assertion above too.
+    with_ages({"memgraph/lab:3.13.1": 86, "memgraph/memgraph-mage:3.13.1": 60})
+    check("multi-repo: every carrier old -> pass",
+          cov.direct_bump_age_gate(twin, POLICY), False)
+
     # operator age_waive glob waives (same semantics as auto-update.py)
     with_ages({"ghcr.io/x/y:1.2.3": 1})
     check("age_waive glob waives",
