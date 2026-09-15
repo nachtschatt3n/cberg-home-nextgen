@@ -65,7 +65,7 @@ rollback_class: backup-restore        # a git revert is NOT a rollback once `occ
                                       # backup_gate named => human-gated, which the deny rule
                                       # demands anyway ("operator-supervised only").
 finding_refs: [F-f3e9ddb0, F-4a9d6631, F-ab9e243a]
-status: awaiting-go   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
+status: awaiting-go   # OPERATOR GO 2026-09-15 (direct, attended update in its window; recorded in home-operation, exec_state=pending). REVIEWED 2026-09-15, corrections c36388bc
 window: "sun-attended:2026-09-20"   # assigned 2026-09-15 from the review synthesis (capacity-checked); go/no-go via home-operation
                                       # sun-attended). Never `nightly`: the executor must
                                       # watch the entrypoint log during §3.4 and be able to

@@ -59,7 +59,7 @@ finding_refs:
                                       #  auto-update.md correction). Kept as the ownership link
                                       #  for the HELD ITEM this plan disposes of; there is
                                       #  nothing left to close. See §6.
-status: awaiting-go   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
+status: awaiting-go   # OPERATOR GO 2026-09-15 (direct, attended update in its window; recorded in home-operation, exec_state=pending). REVIEWED 2026-09-15, corrections c36388bc
 window: "sat-attended:2026-09-26"   # assigned 2026-09-15 from the review synthesis (capacity-checked); go/no-go via home-operation
                                       # against 90). capability_change:true => human-gated, so
                                       # sat-attended / sun-attended, not nightly unattended.

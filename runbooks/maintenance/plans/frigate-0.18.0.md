@@ -91,7 +91,7 @@ backup_gate: "Online sqlite backup of /config/frigate.db taken INSIDE the runnin
   contents comparison."
 finding_refs: [F-24463e2b, F-b0dcee3c]   # NOT F-08b3aaae — that is a camera-hardware
                                           # decision, out of scope here (§6)
-status: awaiting-go   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
+status: awaiting-go   # OPERATOR GO 2026-09-15 (direct, attended update in its window; recorded in home-operation, exec_state=pending). REVIEWED 2026-09-15, corrections c36388bc
 window: "sun-attended:2026-10-04"   # assigned 2026-09-15 from the review synthesis (capacity-checked); go/no-go via home-operation
                                       # agent assigns
 premises:

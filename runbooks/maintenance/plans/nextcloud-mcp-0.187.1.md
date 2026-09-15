@@ -64,7 +64,7 @@ rollback_class: git-revert            # stateless bridge: no PVC, no volumes, no
                                       # EPHEMERAL SQLite in /tmp recreated on every pod start
                                       # (premises 4+5 prove it). `values.image.tag` is the diff.
 finding_refs: [F-9af9baf7, F-80459b23]
-status: awaiting-go   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
+status: awaiting-go   # OPERATOR GO 2026-09-15 (direct, attended update in its window; recorded in home-operation, exec_state=pending). REVIEWED 2026-09-15, corrections c36388bc
 window: "sat-attended:2026-10-03"   # assigned 2026-09-15 from the review synthesis (capacity-checked); go/no-go via home-operation
                                       # reason ("every minor hop needs its release notes read by a
                                       # human") is explicit; never the nightly/unattended window.

@@ -43,7 +43,7 @@ autonomy_override: human-gated        # RESTRICTS only. Public DNS for every ext
                                       # moved unattended, whatever the policy derives.
 rollback_class: git-revert            # external-dns holds no state; the record set is re-asserted from
                                       # cluster state within ~60 s of the revert (measured 2026-09-08)
-status: awaiting-go   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
+status: awaiting-go   # OPERATOR GO 2026-09-15 (direct, attended update in its window; recorded in home-operation, exec_state=pending). REVIEWED 2026-09-15, corrections c36388bc
 window: "sun-attended:2026-09-20"   # assigned 2026-09-15 from the review synthesis (capacity-checked); go/no-go via home-operation
 premises:
   - id: git-chart-pin-still-1.21.1
