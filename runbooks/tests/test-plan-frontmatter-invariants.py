@@ -63,6 +63,39 @@ def main() -> int:
     # control: a correct plan produces zero errors, or every case below is noise
     check("control: valid plan is clean", v(GOOD), None)
 
+    # F-6a398b8b (2026-09-15): a plan file whose frontmatter does not PARSE
+    # used to be skipped silently — "all plan frontmatter invariants hold" was
+    # printed over it, --open did not list it, and the premises gate said
+    # "no matching plans". A broken plan must read as BROKEN, never as absent.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        broken = Path(td) / "broken-plan.md"
+        # an unquoted `: ` inside a mapping value is exactly the live shape
+        broken.write_text("---\nplan_id: broken-plan\nstatus: draft\n"
+                          "premises:\n  - id: x\n    run: kubectl get x -o jsonpath='{.a}: {.b}'\n"
+                          "---\n# body\n")
+        good = Path(td) / "fine-plan.md"
+        good.write_text("---\nplan_id: fine-plan\nstatus: draft\nwindow: null\n---\n# body\n")
+        tcfg = dict(CFG, planning={"plans_dir": td})
+        loaded = mp.load_plans(tcfg)
+        check("unparseable frontmatter -> NOT silently skipped: load error recorded",
+              [e for e in mp.PLAN_LOAD_ERRORS if "broken-plan.md" in e and "unparseable" in e],
+              "broken-plan.md")
+        check("the parseable sibling still loads",
+              [] if [p for p in loaded if p.get("plan_id") == "fine-plan"] else ["fine-plan missing"],
+              None)
+        check("validate_plans reports the unreadable file as an ERROR",
+              mp.validate_plans(tcfg), "UNREADABLE plan file")
+        check("...naming the file", mp.validate_plans(tcfg), "broken-plan.md")
+        # a file with no frontmatter at all is not a plan either — say so
+        (Path(td) / "notes.md").write_text("# just notes\n")
+        mp.load_plans(tcfg)
+        check("no-frontmatter file is reported, not ignored",
+              mp.validate_plans(tcfg), "no frontmatter")
+    # the real plans dir must be clean, or the loader is now blocking the queue
+    mp.load_plans(mp.load_windows())
+    check("real plans dir: every file parses", list(mp.PLAN_LOAD_ERRORS), None)
+
     # the live envoy/multus shape
     check("scheduled + window:null -> error",
           v(dict(GOOD, window=None)), "window is null")

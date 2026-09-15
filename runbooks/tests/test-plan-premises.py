@@ -44,6 +44,19 @@ def ro(cmd):
 def main() -> int:
     print("plan premises:")
 
+    # ---- F-6a398b8b: unreadable is not absent ---------------------------------
+    errs = ["runbooks/maintenance/plans/mealie-v3.26.0.md: frontmatter unparseable — ScannerError: mapping values",
+            "runbooks/maintenance/plans/notes.md: no frontmatter (file does not start with '---')"]
+    got = pp.unreadable_requested(["mealie-v3.26.0", "talos-1.14.0"], errs)
+    check("a named plan whose file failed to parse is reported as UNREADABLE",
+          got == [("mealie-v3.26.0", errs[0])], f"got {got}")
+    check("a named plan with no load error is NOT reported (it is absent or fine)",
+          pp.unreadable_requested(["talos-1.14.0"], errs) == [])
+    check("matching is on the file stem, not a substring of the path",
+          pp.unreadable_requested(["v3.26.0"], errs) == [])
+    check("no load errors -> nothing unreadable",
+          pp.unreadable_requested(["anything"], []) == [])
+
     # ---- the read-only boundary ---------------------------------------------
     check("a plain kubectl get is allowed",
           ro("kubectl get deploy -n monitoring edot-collector -o jsonpath='{.spec}'"))

@@ -1436,6 +1436,25 @@ def max_rule_fallbacks(actionable, policy, prs=None):
     return out
 
 
+def up_to_date_components(fallbacks) -> set:
+    """Components whose `max:`-rule fallback says the STABLE head is deployed.
+
+    F-52e5637f (2026-09-15): n8n 2.38.7 -> 2.39.5 sat in needs_plan every
+    cycle — a planner target for a beta-channel bump that policy will never
+    admit — while the same run's max_rule_fallback record said `up-to-date`
+    (npm dist-tag stable == the deployed tag). Two outputs of one script
+    contradicted each other and the planner dispatch believed the wrong one.
+    """
+    return {str(r.get("component", "")).lower()
+            for r in (fallbacks or []) if r.get("status") == "up-to-date"}
+
+
+def needs_plan_exempt(item, channel_current: set) -> bool:
+    """True when a PLAN-lane item must NOT become a planner target because the
+    stable-channel head is already what runs (see up_to_date_components)."""
+    return str(item.get("component", "")).lower() in (channel_current or set())
+
+
 def _direct_bump_breaking_gate(item):
     """(is_breaking, note) — G3 for a NO-PR candidate on the direct-bump path.
 
@@ -1756,6 +1775,7 @@ def reconcile():
     needs_plan = []  # PLAN-lane items with NO plan file yet → sweep must dispatch a planner
     plan_drift = []  # live plans whose target has fallen behind upstream
     seen_app_template = False
+    channel_current = up_to_date_components(fallbacks)
     for it in actionable:
         lane, reason, drift = assign_lane(it, policy, prs, plans, ar_holds)
         # dedupe the ~40 app-template rows into one PLAN item
@@ -1768,9 +1788,17 @@ def reconcile():
         if drift:
             entry["drift"] = drift
             plan_drift.append(entry)
-        lanes[lane].append(entry)
         if lane == "PLAN" and not reason.startswith("plan exists"):
-            needs_plan.append(entry)
+            if needs_plan_exempt(it, channel_current):
+                # The blocked target IS the pre-release line the `max:` rule
+                # exists to hold, and the stable head is already deployed —
+                # there is nothing to plan (F-52e5637f). Stays in PLAN so the
+                # lane counts are honest; just never a planner target.
+                entry["reason"] += (" — stable channel head already deployed (see "
+                                    "max_rule_fallback); no plan needed")
+            else:
+                needs_plan.append(entry)
+        lanes[lane].append(entry)
 
     lockstep = _apply_lockstep(lanes, needs_plan)
 

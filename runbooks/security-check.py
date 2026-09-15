@@ -2217,9 +2217,52 @@ def _newer_upstream_tag_exists(image_ref: str):
         base, sep, variant = tag.partition("-")
         if sep and variant.lower() in _IMAGE_VARIANT_SUFFIXES and vc.tags_are_equal(latest, base):
             return False
+        # CHANNEL awareness (F-5271b4e2, 2026-09-15). A semver-newer tag is not a
+        # bump we can make when it lives on a pre-release channel the policy
+        # holds: n8n publishes its beta on the next MINOR line with a bare
+        # semver tag (2.39.x while npm dist-tag `stable` == `latest` == 2.38.7,
+        # the deployed tag), so this returned True and the CVE finding said
+        # "bump the image" to a version the `*n8n*` `max: patch` rule will
+        # never admit — an AR-029 case mislabelled as actionable. Only asked for
+        # components whose deny rule carries a `max:` (the channel-sensitive
+        # ones); proof comes from coverage.py's stable_channel_version, which
+        # cross-checks the channel tag's version label against a digest and
+        # never infers from version ordering.
+        if _stable_channel_pins_current(repo, tag, vc):
+            return False
         return True
     except Exception:
         return None
+
+
+_COV_MOD = None
+
+
+def _stable_channel_pins_current(repo: str, tag: str, vc) -> bool:
+    """True when upstream's STABLE-channel pointer resolves to the tag we run.
+
+    Restricted to images a `max:` deny rule matches (auto-update-policy.yaml);
+    for everything else the answer is False and the caller's semver logic
+    stands. Any failure is False — this can only ever turn "bump available"
+    into "already newest", so it must never do that on a guess.
+    """
+    global _COV_MOD
+    try:
+        if _COV_MOD is None:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "cberg_coverage", SCRIPT_DIR / "coverage.py")
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _COV_MOD = mod
+        cov = _COV_MOD
+        rule = cov.deny_rule_for(cov.load_policy(), repo, "minor")
+        if not rule or rule.get("max") not in cov.RANK:
+            return False
+        ver, _why = cov.stable_channel_version(repo)
+        return bool(ver) and bool(vc.tags_are_equal(str(ver), tag))
+    except Exception:
+        return False
 
 
 # Components whose Helm CHART version is published in LOCKSTEP with the app

@@ -49,22 +49,47 @@ def plans_dir(cfg):
     return REPO_ROOT / cfg.get("planning", {}).get("plans_dir", "runbooks/maintenance/plans")
 
 
+# Files in the plans directory that load_plans() could NOT turn into a plan,
+# as "<relative path>: <why>". Reset on every load. F-6a398b8b (2026-09-15):
+# the loader used to `continue` past an unparseable frontmatter, so a plan
+# with one unquoted `: ` inside a `premises.run:` value vanished from
+# --validate ("all invariants hold"), --open and the premises gate ("no
+# matching plans") at once — a BROKEN plan read as NO plan, which is the
+# plan-or-page gap wearing a different hat. A scheduled plan that becomes
+# unparseable would silently drop out of every window. Callers surface this
+# list: validate_plans() turns it into errors, reconcile() carries it in
+# validation_errors, plan-premises.py refuses to treat a named-but-unreadable
+# plan as absent.
+PLAN_LOAD_ERRORS: list[str] = []
+
+
 def load_plans(cfg):
-    """Parse frontmatter of every plan file. Returns list of dicts (+ _path)."""
+    """Parse frontmatter of every plan file. Returns list of dicts (+ _path).
+
+    Populates PLAN_LOAD_ERRORS with every file it had to skip and why.
+    """
     out = []
+    PLAN_LOAD_ERRORS.clear()
     d = plans_dir(cfg)
     for p in sorted(d.glob("*.md")):
         if p.name.lower() == "readme.md":
             continue
+        rel = str(p.relative_to(REPO_ROOT)) if str(p).startswith(str(REPO_ROOT)) else str(p)
         text = p.read_text()
         if not text.startswith("---"):
+            PLAN_LOAD_ERRORS.append(f"{rel}: no frontmatter (file does not start with '---')")
             continue
         try:
             fm = text.split("---", 2)[1]
             meta = yaml.safe_load(fm) or {}
-        except Exception:
+        except Exception as e:
+            first = (str(e).splitlines() or [""])[0][:160]
+            PLAN_LOAD_ERRORS.append(f"{rel}: frontmatter unparseable — {type(e).__name__}: {first}")
             continue
-        meta["_path"] = str(p.relative_to(REPO_ROOT))
+        if not isinstance(meta, dict):
+            PLAN_LOAD_ERRORS.append(f"{rel}: frontmatter is not a mapping ({type(meta).__name__})")
+            continue
+        meta["_path"] = rel
         out.append(meta)
     return out
 
@@ -568,7 +593,11 @@ def validate_plans(cfg, plans=None) -> list[str]:
     plans = plans if plans is not None else load_plans(cfg)
     win = {w["id"]: w for w in cfg.get("windows", [])}
     ids = {p.get("plan_id") for p in plans}
-    errs = []
+    # A file the loader could not parse is a validation ERROR, not an absence
+    # (F-6a398b8b). It comes first: every other invariant below is about plans
+    # that exist, and "all invariants hold" must never be printed over a file
+    # nobody could read.
+    errs = [f"UNREADABLE plan file — {e}" for e in PLAN_LOAD_ERRORS]
     for pl in plans:
         pid = pl.get("plan_id") or pl.get("_path")
         st = str(pl.get("status") or "").strip()

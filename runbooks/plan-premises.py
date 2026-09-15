@@ -93,6 +93,23 @@ def _load(name, filename):
     return mod
 
 
+def unreadable_requested(plan_ids, load_errors) -> list[tuple[str, str]]:
+    """[(plan_id, error)] for requested ids whose FILE exists but did not parse.
+
+    `load_errors` is maintenance-plan.py's PLAN_LOAD_ERRORS ("<path>: <why>").
+    Matched on the file stem (`.../<plan_id>.md`), which is how every plan file
+    in this repo is named; a broken file that ALSO has a mismatched name is
+    still reported by --validate, just not attributed to this id.
+    """
+    out = []
+    for pid in plan_ids:
+        for err in load_errors:
+            path = err.split(":", 1)[0].strip()
+            if path.endswith(f"/{pid}.md") or path == f"{pid}.md":
+                out.append((pid, err))
+    return out
+
+
 def command_is_readonly(cmd: str) -> tuple[bool, str]:
     """(ok, reason). Every pipeline stage must independently be a read verb.
 
@@ -200,10 +217,32 @@ def main() -> int:
     mp = _load("mp", "maintenance-plan.py")
     cfg = mp.load_windows()
     plans = mp.load_plans(cfg)
+    load_errors = list(getattr(mp, "PLAN_LOAD_ERRORS", []))
 
     if args.plan_id:
         want = set(args.plan_id)
         plans = [p for p in plans if p.get("plan_id") in want]
+        # A plan named on the command line that the loader could not READ must
+        # fail loudly, never fold into "no matching plans" (F-6a398b8b): the
+        # window agent gates execution on this exit code, and a broken plan
+        # that reads as absent is the plan-or-page gap in another shape. With
+        # --require-premises a named plan with NO file at all fails too — a
+        # typo in a plan id is not a pass.
+        unreadable = unreadable_requested(sorted(want), load_errors)
+        found = {p.get("plan_id") for p in plans}
+        absent = sorted(pid for pid in want if pid not in found
+                        and pid not in {u[0] for u in unreadable})
+        if unreadable or (absent and args.require_premises):
+            if args.json:
+                print(json.dumps({"plans": [], "ok": False,
+                                  "unreadable": [{"plan_id": p, "error": e} for p, e in unreadable],
+                                  "absent": absent}, indent=2))
+                return 1
+            for pid, err in unreadable:
+                print(f"  UNREADABLE  {pid}  ({err})")
+            for pid in absent:
+                print(f"  ABSENT      {pid}  (no plan file — with --require-premises this is a failure, not a pass)")
+            return 1
     elif args.window:
         plans = [p for p in plans if p.get("window") == args.window]
     elif not args.all:
