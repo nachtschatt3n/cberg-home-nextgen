@@ -1,8 +1,8 @@
 # SOP: Grafana Image Changes — the datasource pre-flight gate
 
 > Description: How to change the Grafana container image (tag, variant, or chart-driven bump) without silently breaking datasources, and why "the pod started and the UI loads" is not evidence that it worked.
-> Version: `2026.09.14`
-> Last Updated: `2026-09-14`
+> Version: `2026.09.15`
+> Last Updated: `2026-09-15`
 > Owner: `homelab-sre`
 
 ---
@@ -37,7 +37,7 @@ this SOP exists as a gate rather than a checklist item.
 | Image | chart default — **no `image.tag` override**, deliberately |
 | Config store | sqlite on the `grafana-config` Longhorn PVC (`longhorn-static`) |
 | Provisioned datasources | 7 — Alertmanager, Prometheus, Elasticsearch, InfluxDB, Unpoller InfluxDB, TeslaMate, Pellets |
-| Current variant | **`-distroless`** — the chart default since 13.0.0 (chart 13.0.1 shipped 2026-09-06). **NO SHELL, NO `wget`, NO `ls`**: every `kubectl exec ... -- sh` in this SOP was rewritten to an API/port-forward form on 2026-09-06 because they could not run at all. Do not reintroduce an exec form. |
+| Current variant | **`-distroless`** — the chart default since 13.0.0 (live 2026-09-15: chart `13.2.4`, image `grafana:13.2.1-distroless`; chart 13.0.1 shipped 2026-09-06). **NO SHELL, NO `wget`, NO `ls`**: every `kubectl exec ... -- sh` in this SOP was rewritten to an API/port-forward form on 2026-09-06 because they could not run at all. Do not reintroduce an exec form. |
 | Rejected variant | `-slim` on 13.x — see §7 |
 | Evidence record | `security_ref: F-de4d92cd` |
 
@@ -344,4 +344,7 @@ Longhorn backup (03:00 daily).
 
 | Version | Date | Change |
 |---------|------|--------|
+| `2026.09.15` | 2026-09-15 | Doc-check currency fix: "Current variant" row now names the live chart/image (13.2.4 / 13.2.1-distroless) and the Version History rows for `2026.09.06` and `2026.09.14` that the header versions implied were backfilled. |
+| `2026.09.14` | 2026-09-14 | `GF_PLUGINS_PREINSTALL_DISABLED` is required on distroless too, not only `-slim`: on a complete read-only-rootfs image the background auto-update kills a newer bundled backend and cannot write the replacement (measured 2026-09-12, five backends). Reworded the blueprint comment and §7 (`9363455a`). |
+| `2026.09.06` | 2026-09-06 | Chart default became `-distroless` (13.0.x): no shell, no `wget`, no `ls`. Every `kubectl exec ... -- sh` form rewritten to an API/port-forward form; "Current variant" row updated. |
 | `2026.08.18` | 2026-08-18 | Initial SOP. Written from the `13.2.0-slim` roll+revert: the datasource gate, the PVC-leftover trap that makes a naive check pass a fatal image, the preinstall env var, and variant-not-version rollback. |
