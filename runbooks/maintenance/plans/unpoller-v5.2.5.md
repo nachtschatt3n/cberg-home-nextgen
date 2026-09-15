@@ -28,10 +28,19 @@ touches:
                                       # shared, so nothing is perturbed. Listed as [] on
                                       # purpose; §6 explains the write-path continuity check.
 depends_on: []
-conflicts_with: []                    # see §6 — serialize with grafana-chart-13.2.3 if it lands
-                                      # in the same window (same namespace, and §4.6 reads
-                                      # Grafana); do not co-run with anything that restarts
-                                      # kube-prometheus-stack. Neither is a hard conflict.
+conflicts_with:
+  - kube-prometheus-stack-91.4.0      # HARD: §4.3-4.4 read THIS Prometheus over a ≥5-min
+                                      # settle, and kps-91.4.0 restarts it (2-5 min blind
+                                      # spot) — a replaying Prometheus reads "no data" and
+                                      # would trigger a needless unpoller revert. Both plans
+                                      # are AUTO-NIGHT with window null, and only this FIELD
+                                      # is honoured by window-scheduler.py (the
+                                      # shared:[monitoring] overlap is a post-placement
+                                      # warning) — 2026-09-15 review. otel-operator-0.21.0
+                                      # (same namespace) is NOT a conflict: serialize per
+                                      # §6, either order. grafana-chart-13.2.3, once named
+                                      # here, is `superseded` since 2026-09-14 — not a
+                                      # constraint.
 security_ref: null                    # version-currency driver only; no vulnerability content
 capability_change: false              # scraper internals + a bug fix; no new opt-in enabled,
                                       # no user-visible behaviour change
@@ -170,8 +179,9 @@ narrow the rule is an operator decision; the facts that bear on it:
   (`unpoller.github.io/helm-chart`), whose newest entry is still
   `2.4.0 → appVersion v3.5.0`. The newer charts live ONLY on OCI
   (`oci://ghcr.io/unpoller/helm-chart/unpoller`, 2.5.0–2.8.0) — see
-  `flux-oci-chart-sources.md` §3.5, which deliberately parks unpoller until a
-  chart plan exists. Measured 2026-09-15: OCI chart 2.8.0 ships
+  `runbooks/maintenance/plans/flux-oci-chart-sources.md` §3.5 (a PLAN, not an
+  SOP — it is not under `docs/sops/`), which deliberately parks unpoller until
+  a chart plan exists. Measured 2026-09-15: OCI chart 2.8.0 ships
   `appVersion: v5.2.3` (below our pin), and 2.5.0 declares `v5.3.0`, a tag
   that has no upstream release (newest is v5.2.5). The rule's own removal
   condition ("a chart ships appVersion ≥ the pinned tag AND its values diff is
@@ -240,7 +250,7 @@ claim a class.
    q 'up{job="unpoller"}'                                   # [1]
    q 'count(unpoller_site_adopted)'                         # [3]
    q 'count(unpoller_device_uptime_seconds)'                # [10]
-   q 'count({__name__=~"unpoller_.*"})'                     # [7953]
+   q 'count({__name__=~"unpoller_.*"})'                     # [7953 at 02:xx, 7954 by 06:xx the same day — RE-RECORD, never copy]
    q 'unpoller_prometheus_cache_age_seconds'                # [< 150 — cache poller alive at our 2m]
    q 'unpoller_prometheus_refresh_failures_total'           # [0]
    kubectl -n monitoring get pod -l app.kubernetes.io/name=unpoller -o jsonpath='{.items[0].status.containerStatuses[0].imageID}{"\n"}'   # record — §4.1 must differ
@@ -273,7 +283,8 @@ claim a class.
    ```
    Then add ONE line to the comment block directly above the tag, after the
    existing "2026-09-06: image-only major …" paragraph, so the next reader
-   sees the lineage without git archaeology:
+   sees the lineage without git archaeology (replace `XX` with the execution
+   day — the stub is a placeholder, not a value):
    ```
          # 2026-09-XX: v5.2.4 -> v5.2.5 image patch (plan unpoller-v5.2.5): scrape-cache
          # interval contract (explicit 0 now disables; ours is "2m", unaffected) + locate-mode
@@ -320,8 +331,13 @@ looks identical to a healthy one. Wait **≥ 5 min** after the new pod is Ready
      -o jsonpath='{.items[0].spec.containers[0].image}{"  "}{.items[0].status.containerStatuses[0].imageID}{"\n"}'
    ```
 2. **Pod Ready, 0 restarts after 5 min, and the startup log proves the config
-   contract survived the type change.** v5.2.5 logs one of two lines at start
-   (`pkg/promunifi/collector.go` `Run()`):
+   contract survived the type change.** `pkg/promunifi/collector.go` `Run()`
+   logs one of two lines at start. The `… cache enabled, refresh interval: %v`
+   line already existed in v5.2.4 (v5.2.5 only changed its argument to
+   `refreshInterval()`); the `… cache disabled; /metrics fetches live` line is
+   NEW in v5.2.5. **Read it promptly on the FRESH pod** — it is a startup line,
+   and on the 8-day-old v5.2.4 pod it had already rotated out of
+   `--tail=3000` at review time (2026-09-15), so a late read proves nothing:
    ```bash
    kubectl -n monitoring logs -l app.kubernetes.io/name=unpoller --tail=200 | grep -E 'scrape cache'
    # MUST show:  Prometheus scrape cache enabled, refresh interval: 2m0s
@@ -387,13 +403,23 @@ Clear the update marker either way.
   restarts nothing shared; `shared: []` is deliberate. §4.5 checks the write
   path anyway because it is cheap and because the previous unpoller plan
   taught that "the schema did not change" is a claim, not a check.
-- **Same-namespace plans:** `grafana-chart-13.2.3` (monitoring, low) can share a
-  window but must be **serialized**, either order — §4.6 reads Grafana and
-  Grafana's own verification reads its datasources; interleaving makes a
-  failure unattributable. Do NOT co-schedule with anything that restarts
-  kube-prometheus-stack/prometheus: §4.3–4.4 need a stable scrape pipeline to
-  mean anything. `flux-oci-chart-sources` §3.5 explicitly parks unpoller and
-  this plan does not move `HelmRepository/unpoller`; no ordering relation.
+- **Same-namespace plans (live as of 2026-09-15):**
+  - `kube-prometheus-stack-91.4.0` — **hard conflict, in `conflicts_with`.** It
+    restarts Prometheus and Alertmanager; §4.3-4.4 need a stable scrape pipeline
+    over a ≥5-min settle to mean anything, and a Prometheus replaying its WAL
+    answers "no data", which reads as a regression and would trigger a needless
+    §5 revert. Never the same window. If the operator overrides that, run
+    unpoller **fully before** kps (complete §4 including the settle) or **fully
+    after** kps's own verification has passed — never interleaved.
+  - `otel-operator-0.21.0` — same namespace, so the scheduler will flag
+    INTERFERENCE if co-slotted, but it is not on unpoller's scrape path
+    (ServiceMonitor → Prometheus; the daemon collector does not scrape
+    unpoller). Sharing a window is acceptable; **serialize**, either order.
+  - `grafana-chart-13.2.3` — named in earlier drafts of this plan; `superseded`
+    since 2026-09-14 and no longer a constraint.
+  - `runbooks/maintenance/plans/flux-oci-chart-sources.md` §3.5 explicitly
+    parks unpoller and this plan does not move `HelmRepository/unpoller`; no
+    ordering relation.
 - **Rollout mechanics:** chart-default `RollingUpdate`, 1 replica, no PVC —
   for a few seconds two pollers hit the UDM-Pro concurrently. At a 2m poll
   cadence that is a single extra API round, well under the 429 threshold that

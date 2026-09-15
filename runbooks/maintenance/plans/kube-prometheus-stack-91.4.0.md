@@ -39,14 +39,38 @@ touches:
                                       # and the window health gates ride on this stack.
                                       # Prometheus is blind for ~2-5 min during its
                                       # restart; Alertmanager for ~1 min.
-depends_on: []
-conflicts_with: []                    # none hard; see §6 for the ordering rules
-                                      # (run AFTER Step 0's health gate, and no other
-                                      # plan's verification during the restart).
+depends_on:
+  - prometheus-crd-ownership          # otel-operator must STOP writing the four shared
+                                      # monitoring.coreos.com CRDs before this plan stamps
+                                      # all ten to 0.94.0; otherwise the next nightly
+                                      # otel patch bump re-stamps four back to 0.92.0 and
+                                      # §4.3 holds only until then (CRD planner,
+                                      # 2026-09-15). window-scheduler.py will not place
+                                      # this plan until that one is `executed`.
+conflicts_with:                       # HARD slot exclusions — window-scheduler.py keys on
+                                      # this field only; the shared:[monitoring] overlap
+                                      # is a post-placement warning (2026-09-15 review).
+  - otel-operator-0.21.0              # both CreateReplace the same four CRDs (last writer
+                                      # wins, 0.94.0 vs 0.92.0), and landing THIS plan
+                                      # first flips their helm.toolkit.fluxcd.io/name
+                                      # label to kube-prometheus-stack — §6 states the
+                                      # effect on that plan. Its own §6 forbids sharing a
+                                      # window with a kps chart bump.
+  - unpoller-v5.2.5                   # its §4 verification queries THIS Prometheus over a
+                                      # ≥5-min settle; the 2-5 min restart blind spot reads
+                                      # as "no data" → a needless unpoller revert.
+  - prometheus-crd-ownership          # (also the dependency above) two CreateReplace
+                                      # writers of the same ten CRDs in one window is the
+                                      # race that plan exists to end; it runs in an EARLIER
+                                      # window, never this one.
 security_ref: null                    # no security driver
 capability_change: false              # operator 0.94.0 adds CRD fields (retentionPercentage,
-                                      # clusterPeerName) we do not set; alerts, rules,
-                                      # dashboards, receivers all render identically.
+                                      # clusterPeerName) we do not set; alerts, rules and
+                                      # receivers render identically. 10 of the 28
+                                      # grafana_dashboard ConfigMaps this chart ships
+                                      # (forceDeployDashboards: true) get an upstream mixin
+                                      # content refresh — dashboard JSON, not a capability
+                                      # (§1, §4.7).
 rollback_class: git-revert            # Flux CreateReplace re-applies the 90.0.0 CRD files
                                       # on the revert (operator-version 0.93.1); helm
                                       # maxHistory: 2 keeps revision 39 reachable. §5.
@@ -137,11 +161,17 @@ from it.
 Held because it is a chart **major**. Upstream bumps the major exactly when the
 CRDs change, and this one does:
 
-> **From 90.x to 91.x** — "This upgrade involves Prometheus-Operator v0.94.0, which
-> implements stricter RBAC by removing wildcard verbs from the operator's
-> ClusterRole." followed by the ten `kubectl apply --server-side -f
+> **From 90.x to 91.x**
+> This version upgrades Prometheus-Operator to v0.94.0
+> The operator's ClusterRole no longer grants wildcard verbs, following the tightened RBAC shipped upstream in v0.94.0.
+> Since 68.4.0 it is also possible to use `crds.upgradeJob.enabled` for upgrading the CRDs.
+> For traditional upgrades, please run these commands to update the CRDs before applying the upgrade.
+>
+> (verbatim from `charts/kube-prometheus-stack/UPGRADE.md` at tag
+> `kube-prometheus-stack-91.4.0`, followed by the ten `kubectl apply --server-side -f
 > …/prometheus-operator/v0.94.0/example/prometheus-operator-crd/monitoring.coreos.com_*.yaml`
-> commands. (`charts/kube-prometheus-stack/UPGRADE.md` at tag `kube-prometheus-stack-91.4.0`)
+> commands — which Flux `CreateReplace` performs for us, premise
+> `crds-applied-by-flux-createreplace`)
 
 **What actually changes, measured against the two chart tags (not the summary):**
 
@@ -152,9 +182,9 @@ CRDs change, and this one does:
 | alertmanager image | v0.34.0 | v0.34.0 | **unchanged** |
 | kube-state-metrics subchart | 8.4.2 (image v2.20.0) | 8.5.0 (image v2.20.0) | chart-only; image identical |
 | node-exporter subchart | 4.56.3 (image v1.12.1) | 4.57.0 (image v1.12.1) | chart-only; image identical |
-| grafana subchart | 13.2.2 | 13.2.4 | **inert** — `grafana.enabled: false` (premise) |
+| grafana subchart | 13.2.2 | 13.2.4 | subchart **workloads inert** (`grafana.enabled: false`, premise) — **but** `grafana.forceDeployDashboards: true` (`helmvalues.yaml`) makes the kps chart itself render **28** `grafana_dashboard=1` ConfigMaps (live count 2026-09-15) that the separate Grafana's `grafana-sc-dashboard` sidecar loads, and **10 of them change content** in 91.4.0 (upstream kube-prometheus mixin refresh, commit `f3f97b1` in the template header). Dashboard JSON only — harmless; §4.7 checks the sidecar picked them up and the count did not move |
 | CRDs (`operator.prometheus.io/version`) | 0.93.1 | **0.94.0** | all 10 replaced by Flux `CreateReplace` |
-| values.yaml (non-comment diff) | — | only ADDED keys: `clusterPeerName`, `datasourcesEnabled`, `retentionPercentage`, `tsdb.chunkEncoding`, `staleSeriesCompactionThreshold`, `rules`, `schedulerName`; one type change `admissionWebhooks.matchConditions: {}` → `[]` | **no removed or renamed values**; we set none of the changed keys |
+| values.yaml (non-comment diff) | — | only ADDED keys: `clusterPeerName`, `datasourcesEnabled`, `retentionPercentage`, `tsdb.chunkEncoding`, `staleSeriesCompactionThreshold`, `prometheusSpec.rules` (a new template branch — the top-level `rules:`/`defaultRules` keys already existed at 90.0.0), `schedulerName`; one type change `admissionWebhooks.matchConditions: {}` → `[]` | **no removed or renamed values**; we set none of the changed keys |
 
 Per-release content of the 91.x line (GitHub releases, 2026-09-13/14): 91.0.0 = the
 operator bump (PR 7269); 91.1.0 = `retentionPercentage` + `clusterPeerName` values;
@@ -209,18 +239,31 @@ older copy of four of these CRDs, and each of its near-weekly patch bumps stamps
 back to 0.92.0 — which is why they read 0.92.0 today six days after kps 90.0.0 wrote
 0.93.1. Consequences for this plan:
 
-1. After this upgrade all ten will read **0.94.0** (§4.3 asserts it) — until the next
-   otel-operator bump reverts four of them to 0.92.0 again. The 0.94.0 operator runs
-   fine against those older schemas (we use no 0.93+/0.94+ fields on those four kinds);
-   what is lost is validation of new fields, not function.
-2. **The durable fix is NOT in this plan.** `crds.installPrometheus: false` on the
-   otel-operator HelmRelease is the obvious switch, but it must be investigated on its
-   own: if that chart renders the Prometheus CRDs as *templated* release resources
-   rather than from a `crds/` directory, flipping the switch would make Helm
-   **delete** the four CRDs and cascade-delete every ServiceMonitor, PodMonitor,
-   Probe and ScrapeConfig in the cluster. That is a separate plan with its own
-   premise (`helm.sh/resource-policy: keep` or `crds/`-dir provenance proven first).
-   The window agent should file it as a follow-up finding (section `plan`).
+1. After this upgrade all ten will read **0.94.0** (§4.3 asserts it). The 0.94.0
+   operator runs fine against the older 0.92.0 schemas too (we use no 0.93+/0.94+
+   fields on those four kinds); what the contention costs is validation of new
+   fields, not function.
+2. **The durable fix is its own plan, and this plan depends on it:
+   `prometheus-crd-ownership` (`depends_on`, sweep record F-a85e8943).** It sets
+   `crds.installPrometheus: false` on the otel-operator HelmRelease. The
+   cascade-delete question that made this a "must investigate first" item has been
+   answered in that plan with three-sourced proof: the four CRDs come from a
+   `crds/` directory in the condition-gated `prometheus-crds` subchart, they are
+   not Helm release resources (`helm get manifest` has zero CRDs; no release
+   annotation on the objects), and helm-controller prunes `condition: false`
+   subcharts before collecting `crds/` and never deletes on `CreateReplace`. So the
+   flip removes a *writer* and deletes nothing. **Ordering:** that plan runs in an
+   earlier window (its human-gated first execution), then this one — after which
+   all ten CRDs are written by kube-prometheus-stack alone and §4.3 holds
+   permanently instead of until the next otel patch bump. It does NOT rewrite the
+   four CRDs itself, so §2.5's expected pre-state is unchanged by it.
+3. **Effect on `otel-operator-0.21.0`.** This upgrade re-stamps all ten CRDs and
+   the `helm.toolkit.fluxcd.io/name` label follows the last applier (observed: the
+   four flipped to `otel-operator` on the 2026-09-14 otel Step-0 bump). Landing this
+   plan first therefore changes the four's label to `kube-prometheus-stack`; the otel
+   plan measures that in its §2.6 instead of gating on it (its former premise
+   `this-hr-owns-the-prometheus-crds` was removed for exactly this reason). The
+   preferred order is still otel-operator-0.21.0 **before** this plan (§6).
 
 ## 2) Pre-checks
 
@@ -239,17 +282,22 @@ python3 runbooks/plan-premises.py kube-prometheus-stack-91.4.0 --require-premise
 ```
 **PASS:** exit 0, 8/8 premises pass.
 
-**2.2 — Flux fully green, nothing mid-upgrade in `monitoring`.** A concurrent
-otel-operator upgrade would race the CRD write.
+**2.2 — Flux fully green, nothing mid-upgrade in `monitoring`, and the dependency
+has landed.** A concurrent otel-operator upgrade would race the CRD write; and
+`prometheus-crd-ownership` (`depends_on`) must already be `executed` — the
+scheduler enforces that at placement, this re-checks the cluster-side fact.
 
 ```bash
 mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
 mise exec -- flux get helmreleases   -A | awk 'NR==1 || $5 != "True"'
 kubectl get helmrelease -n monitoring otel-operator kube-prometheus-stack \
   -o custom-columns='NAME:.metadata.name,CHART:.status.history[0].chartVersion,READY:.status.conditions[?(@.type=="Ready").status]'
+kubectl get helmrelease -n monitoring otel-operator -o jsonpath='installPrometheus=[{.spec.values.crds.installPrometheus}]{"\n"}'
 ```
 **PASS:** both `flux get` commands print only the header; both HRs `READY=True`,
-kps at `90.0.0`.
+kps at `90.0.0`; `installPrometheus=[false]` (the otel HR no longer writes the
+four shared CRDs). `installPrometheus=[]` = the dependency has not landed:
+**no-go**, regardless of what the scheduler believed.
 
 **2.3 — Target chart exists at the OCI source, with a negative control.**
 
@@ -268,8 +316,8 @@ done
 **2.4 — Observability baseline. Write these numbers down; §4 diffs against them.**
 
 ```bash
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9099:9090 >/dev/null 2>&1 &
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 &
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9099:9090 >/dev/null 2>&1 & PF1=$!
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF2=$!
 sleep 4
 curl -s localhost:9099/api/v1/targets | python3 -c "
 import sys,json
@@ -292,7 +340,7 @@ curl -s 'localhost:9093/api/v2/alerts?filter=alertname%3DWatchdog' | python3 -c 
 import sys,json;a=json.load(sys.stdin);print('watchdog_in_AM',len(a),[x['status']['state'] for x in a])"
 curl -s localhost:9093/api/v2/silences | python3 -c "
 import sys,json;print('active_silences',len([x for x in json.load(sys.stdin) if x['status']['state']=='active']))"
-kill %1 %2 2>/dev/null
+kill $PF1 $PF2 2>/dev/null
 ```
 **Baseline measured 2026-09-15 01:58Z:** `targets 98 up 98` · `down: []` ·
 `groups 117 rules 474` · `firing: 1 ['LonghornVolumeAllocationHigh']` ·
@@ -312,8 +360,11 @@ for c in json.load(sys.stdin)['items']:
         print(f\"{n:45s} opver={c['metadata'].get('annotations',{}).get('operator.prometheus.io/version')} hr={c['metadata'].get('labels',{}).get('helm.toolkit.fluxcd.io/name')}\")"
 ```
 **Expected (2026-09-15):** 6 × `0.93.1 hr=kube-prometheus-stack`, 4 × `0.92.0
-hr=otel-operator` (the contention in §1). Ten CRDs total. Any other picture: stop and
-re-derive §1 before proceeding.
+hr=otel-operator` (the contention in §1). Ten CRDs total. This picture is
+**unchanged** by `prometheus-crd-ownership` (it removes the writer without
+rewriting the objects) and by `otel-operator-0.21.0` having run before it (a
+byte-identical 0.92.0 re-apply; only the generation moves). Any other picture:
+stop and re-derive §1 before proceeding.
 
 **2.6 — Storage: the TSDB volume is healthy and backed up.**
 
@@ -332,7 +383,7 @@ operator's outgoing-pod teardown (see `docs/sops/monitoring.md` "Chart-bump roll
 noise") produce `KubePod*`/`KubeStatefulSet*`/`TargetDown` transients. 1-hour TTL.
 
 ```bash
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 &
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF=$!
 sleep 3
 NOW=$(python3 -c "from datetime import *;print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")
 END=$(python3 -c "from datetime import *;print((datetime.now(timezone.utc)+timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")
@@ -341,7 +392,7 @@ curl -s -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/jso
               {"name":"alertname","value":"KubePod.*|KubeStatefulSet.*|KubeDeployment.*|TargetDown|PrometheusOperator.*","isRegex":true,"isEqual":true}],
   "startsAt":"'$NOW'","endsAt":"'$END'","createdBy":"maintenance-window",
   "comment":"kube-prometheus-stack chart 90.0.0->91.4.0 rollout. auto-expires 1h"}'
-kill %1 2>/dev/null
+kill $PF 2>/dev/null
 runbooks/update-marker.sh add kube-prometheus-stack monitoring 1 "chart 90.0.0->91.4.0"
 ```
 
@@ -454,15 +505,18 @@ print('total',len(rows),'at 0.94.0:',sum(1 for c in rows if c['metadata'].get('a
 **PASS:** `total 10 at 0.94.0: 10`; served versions identical to §2.5 (`v1` for
 alertmanagers/podmonitors/probes/prometheuses/prometheusrules/servicemonitors/
 thanosrulers, `v1alpha1` for alertmanagerconfigs/prometheusagents/scrapeconfigs).
-**If exactly the four otel-owned CRDs read 0.92.0:** an otel-operator upgrade ran
-after ours (check `helm history otel-operator -n monitoring`); this is the §1
-contention, not a failed apply — record it, do not retry the kps upgrade.
+**If exactly the four formerly otel-owned CRDs read 0.92.0:** an otel-operator
+upgrade ran after ours (check `helm history otel-operator -n monitoring`) **while
+still collecting the Prometheus CRDs** — with `prometheus-crd-ownership` executed
+(`depends_on`, §2.2) that cannot happen, so it means that fix was reverted or did
+not take. Record it as a finding against `prometheus-crd-ownership`; it is the §1
+contention, not a failed kps apply — do not retry the kps upgrade.
 
 **4.4 — Alert pipeline end to end (the load-bearing section).**
 
 ```bash
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9099:9090 >/dev/null 2>&1 &
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 &
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9099:9090 >/dev/null 2>&1 & PF1=$!
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF2=$!
 sleep 4
 # (a) scrape target count unchanged, all up
 curl -s localhost:9099/api/v1/targets | python3 -c "
@@ -489,7 +543,7 @@ print('watchdog_in_AM',len(a),[(x['status']['state'],x['updatedAt']) for x in a]
 curl -s localhost:9093/api/v2/status | python3 -c "
 import sys,json;d=json.load(sys.stdin)
 print('AM',d['versionInfo']['version'],'telegram receiver in config:', 'telegram' in d['config']['original'])"
-kill %1 %2 2>/dev/null
+kill $PF1 $PF2 2>/dev/null
 ```
 **PASS:** (a) `targets 98 up 98`, `down: []` — same count as §2.4 (a ±1 drift is
 acceptable ONLY if explained by a pod that legitimately came or went during the
@@ -519,7 +573,7 @@ CONTENTS ASSERTION 3: alerts still TRAVERSE Prometheus -> Alertmanager — measu
 ```
 
 ```bash
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9099:9090 >/dev/null 2>&1 &
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9099:9090 >/dev/null 2>&1 & PF=$!
 sleep 4
 START=$(kubectl get pod -n monitoring prometheus-kube-prometheus-stack-0 -o jsonpath='{.status.startTime}')
 echo "prometheus pod started: $START"
@@ -533,7 +587,7 @@ curl -s -G localhost:9099/api/v1/query --data-urlencode 'query=prometheus_tsdb_h
   | python3 -c "import sys,json;print('head_series',json.load(sys.stdin)['data']['result'][0]['value'][1])"
 curl -s -G localhost:9099/api/v1/query --data-urlencode 'query=sum(increase(alertmanager_alerts_received_total[5m]))' \
   | python3 -c "import sys,json;r=json.load(sys.stdin)['data']['result'];print('AM alerts received 5m:',r[0]['value'][1] if r else 'NO DATA')"
-kill %1 2>/dev/null
+kill $PF 2>/dev/null
 ```
 **PASS:** `up==1 now` == the §4.4(a) up count (98); every node shows ≥ 3 samples in
 the last 2 m (≥ 5 min after the pod start — wait if not); `tsdb_floor` **identical**
@@ -554,16 +608,29 @@ kubectl get prometheus,alertmanager -n monitoring -o jsonpath='{range .items[*]}
 pass); no error lines from the NEW pod other than the documented teardown noise;
 both CRs `Available=True Reconciled=True`.
 
-**4.7 — Grafana still reads this Prometheus** (the separate HelmRelease's
-datasource points at `kube-prometheus-stack-prometheus.monitoring.svc:9090`).
+**4.7 — Grafana still reads this Prometheus, and picked up the refreshed dashboards**
+(the separate HelmRelease's datasource points at
+`kube-prometheus-stack-prometheus.monitoring.svc:9090`; its `grafana-sc-dashboard`
+sidecar loads the 28 `grafana_dashboard=1` ConfigMaps this chart ships, 10 of which
+change content in 91.4.0 — §1).
 
 ```bash
-kubectl port-forward -n monitoring svc/grafana 3000:80 >/dev/null 2>&1 & sleep 3
+kubectl port-forward -n monitoring svc/grafana 3000:80 >/dev/null 2>&1 & PF=$!
+sleep 3
 curl -s -o /dev/null -w '%{http_code}\n' localhost:3000/api/health
-kill %1 2>/dev/null
+kill $PF 2>/dev/null
+kubectl get cm -n monitoring -l grafana_dashboard=1 -o json | python3 -c "
+import sys,json; i=json.load(sys.stdin)['items']
+print('kps dashboard ConfigMaps:', sum(1 for x in i if x['metadata'].get('annotations',{}).get('meta.helm.sh/release-name')=='kube-prometheus-stack'), 'of', len(i), 'total')"
+kubectl logs -n monitoring deploy/grafana -c grafana-sc-dashboard --since=30m | grep -ciE 'writing|placing|updated' || true
 ```
-**PASS:** `200`. (Grafana is only a consumer here; a datasource query via the UI is
-the operator's optional extra.)
+**PASS:** `200`; `kps dashboard ConfigMaps: 28 of 33 total` (same as 2026-09-15 — a
+lower kps count means the chart stopped rendering a dashboard, a higher one is a
+new upstream dashboard to look at, neither is a rollback trigger on its own); the
+sidecar log shows ≥ 1 write/placing line since the upgrade (it re-reads the changed
+ConfigMaps — `0` means the sidecar did not see them; check the sidecar's
+`--since` window covers the HR upgrade time before reading it as a fault). A
+datasource query via the UI is the operator's optional extra.
 
 ## 5) Rollback
 
@@ -598,7 +665,11 @@ helm history kube-prometheus-stack -n monitoring          # revision 39 = 90.0.0
 helm rollback kube-prometheus-stack 39 -n monitoring --wait=false
 mise exec -- flux reconcile helmrelease -n monitoring kube-prometheus-stack --force
 ```
-`helm rollback` restores release resources but **does NOT touch CRDs** — after it,
+The `flux reconcile helmrelease --force` here is a **deliberate exception** to the
+SOP's "source git only" allowance (§3.4): it exists only to un-wedge a
+`pending-upgrade` release that the git revert alone cannot, and it is the
+break-glass path, not a step. `helm rollback` restores release resources but
+**does NOT touch CRDs** — after it,
 either leave the CRDs at 0.94.0 (harmless under a 0.93.1 operator: superset schema)
 or let the git revert's Flux upgrade re-stamp them to 0.93.1. Do not
 `kubectl apply --server-side` the 0.93.1 CRD files by hand while a helm-controller
@@ -619,13 +690,19 @@ Alertmanager too, and the same "Watchdog reached AM after the restart" and
 
 ## 6) Interference notes
 
-- **This stack IS the window's instrument.** The maintenance-window health gate,
-  Step 0's auto-revert decision, the sweep alert-watcher and all SLO burn-rate
-  reads come from this Prometheus. **Order rule:** run this plan only AFTER Step 0
-  (safe-update batch) has been applied AND its health gate has PASSED on the old
-  stack, and run **no other plan's verification** during §3.4 — a verification that
-  queries Prometheus while it replays its WAL reads "no data" as failure. Prefer
-  scheduling this plan LAST in its window, or alone.
+- **This stack IS the window's instrument — this plan MUST run LAST in its
+  window, or alone. A constraint, not a preference.** The maintenance-window
+  health gate, Step 0's auto-revert decision, the window agent's Step 4 "never
+  start the next plan on a degraded cluster" check, the sweep alert-watcher and all
+  SLO burn-rate reads come from this Prometheus, which is blind for 2-5 min during
+  §3.4. **Order rule:** run this plan only AFTER Step 0 (safe-update batch) has
+  been applied AND its health gate has PASSED on the old stack, and run **no other
+  plan** — not its steps, not its verification — after §3.2 in the same window: a
+  verification that queries Prometheus while it replays its WAL reads "no data" as
+  failure, and a Step-4 gate that reads it mid-restart would refuse to continue or
+  misread the restart as a regression. The derived class is AUTO-NIGHT, so this
+  can run unattended: the sequencer has to honour "last or alone" without a human
+  in the loop.
 - **Blind spot:** ~2-5 min with no scraping/evaluation while
   `prometheus-kube-prometheus-stack-0` restarts, ~1 min with no routing while
   `alertmanager-kube-prometheus-stack-0` restarts. Alerts that would have fired in
@@ -637,25 +714,47 @@ Alertmanager too, and the same "Watchdog reached AM after the restart" and
   changing those objects in the same window — a `PrometheusRule` applied during the
   CRD swap can land on the old or new schema unpredictably (identical for our
   fields, but the apply can transiently 404 during the Update).
-- **otel-operator (`opentelemetry-kube-stack`) shares four of these CRDs** and is
-  a near-weekly Step 0 patch-bump candidate. If Step 0 in the same window bumps it,
-  that is fine as long as it finishes BEFORE this plan (Step 0 ordering already
-  ensures that); if a later window bumps it, four CRDs revert to 0.92.0 — expected,
-  documented in §1, and a separate follow-up plan (do not fix it here: the fix has a
-  cascade-delete failure mode that must be ruled out first).
+- **otel-operator (`opentelemetry-kube-stack`) shares four of these CRDs.** With
+  `prometheus-crd-ownership` executed first (`depends_on`), its near-weekly Step 0
+  patch bumps no longer write them, so a Step 0 otel bump in the same window is
+  harmless as long as it finishes BEFORE this plan (Step 0 ordering already ensures
+  that), and later otel bumps cannot revert the four to 0.92.0 any more. If §2.2
+  shows `installPrometheus=[]`, the dependency has not landed — no-go.
+- **`otel-operator-0.21.0` — hard conflict (`conflicts_with`), and this plan should
+  run AFTER it.** Both HRs `CreateReplace` the same four CRDs, so never the same
+  window. Ordering effect if THIS plan lands first: all ten CRDs read 0.94.0 and the
+  four's `helm.toolkit.fluxcd.io/name` label flips from `otel-operator` to
+  `kube-prometheus-stack` (the label follows the last applier). The otel plan no
+  longer gates on that label (its former premise `this-hr-owns-the-prometheus-crds`
+  was removed and replaced by an in-window measurement, §1 point 3), so it stays
+  schedulable either way — but if it then runs *without* the ownership fix it
+  downgrades the four to 0.92.0 (the accepted contention F-a85e8943). Preferred
+  sequence: otel-operator-0.21.0 (nightly) → prometheus-crd-ownership (attended) →
+  this plan (a later nightly, alone).
+- **`unpoller-v5.2.5` — hard conflict (`conflicts_with`).** Its §4 verification
+  port-forwards and queries this Prometheus over a ≥5-min settle; the restart blind
+  spot would read as an unpoller regression and trigger a needless revert. Never the
+  same window.
 - **Grafana.** Separate HelmRelease (`grafana`, chart 13.2.4). Its datasource and
   its `ServiceMonitor` are consumers of this stack; it does not restart. The bundled
   grafana subchart is disabled and stays disabled (two premises).
 - **Storage.** `prometheus-tsdb` is an RWO `longhorn-static` volume on a
   StatefulSet — immune to the Deployment multi-attach lottery
-  (`docs/sops/longhorn-rwo-multi-attach.md`). The Longhorn `backup-of-all-volumes`
-  CronJob runs 03:00; the `nightly` window starts 03:30, so a backup may still be
+  (`docs/sops/longhorn-rwo-multi-attach.md`). The Longhorn `daily-backup-all-volumes`
+  CronJob (ns `storage`; `backup-of-all-volumes` does not exist — verified
+  2026-09-15) runs 03:00; the `nightly` window starts 03:30, so a backup may still be
   finishing snapshots on this volume while the pod restarts — harmless (snapshot
   then attach), but do not run this plan concurrently with a Longhorn engine/manager
   plan.
-- **Why not `conflicts_with`:** nothing in the queue currently touches
-  `monitoring` (`grafana-chart-13.2.3` is superseded). The ordering rule above is
-  the constraint, and it is a sequencing rule rather than a slot exclusion.
+- **Why `conflicts_with` and `depends_on` are set (2026-09-15 review):** three
+  live plans touch `monitoring` — `otel-operator-0.21.0` and `unpoller-v5.2.5` are
+  both AUTO-NIGHT with `window: null`, exactly like this one, so the scheduler
+  could pack all three into one unattended nightly; `window-scheduler.py` keys slot
+  exclusion on `conflicts_with` only, and the `shared: [monitoring]` intersection is
+  a shallow post-placement warning. The prose "serialize" rules that earlier drafts
+  relied on are not read by the scheduler. `prometheus-crd-ownership` is both a
+  dependency (ordering) and a conflict (never the same window). `grafana-chart-13.2.3`
+  is superseded and not a constraint.
 - **Future patch/minor bumps of this chart are Step 0 material** — the chart is
   not on the deny-list; only the major crosses into PLAN. After this lands, 91.x
   patches will auto-apply nightly under the normal gates.

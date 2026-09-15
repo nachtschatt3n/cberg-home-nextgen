@@ -34,10 +34,22 @@ touches:
                                                 # calendar skills, office/nextcloud-mcp,
                                                 # Homepage widget) see a 2-5 min 503 — §6.
 depends_on: []
-conflicts_with: [bitnamilegacy-exit-nextcloud-db]   # same helmrelease.yaml, both restart
+conflicts_with:
+  - bitnamilegacy-exit-nextcloud-db             # same helmrelease.yaml, both restart
                                                 # deployment/nextcloud. That plan is `blocked`
                                                 # with window: null, so no live collision
                                                 # today — the guard is for when it revives.
+                                                # RECIPROCITY (2026-09-15 review): the ref was
+                                                # added on THAT plan too — maintenance-plan.py
+                                                # --validate checks only that refs resolve,
+                                                # not that both sides declare them.
+  - nextcloud-mcp-0.187.1                       # ADDED 2026-09-15 (review), reciprocal of that
+                                                # plan's declaration: its §4.4 talks to THIS
+                                                # server and the §2.5 silence here is
+                                                # namespace-wide. Never the same slot; different
+                                                # slots of one weekend in either order are fine
+                                                # (its server premise tolerates 34.0.x and it
+                                                # re-takes its baselines the same day). §6.
 security_ref: F-ab9e243a              # security driver for the image bump. What it is and
                                       # why this tag answers it live on the record only —
                                       # never counts, IDs or vocabulary here (public repo).
@@ -310,6 +322,12 @@ python3 runbooks/plan-premises.py nextcloud-34.0.4 --require-premises
 curl -s https://hub.docker.com/v2/repositories/library/nextcloud/tags/34.0.4 \
   | grep -oE '"name":"34\.0\.4"|"architecture":"amd64"' | sort -u | tr '\n' ' '; echo
 #   expect: "architecture":"amd64" "name":"34.0.4"   (application-update SOP Step 0 — never bump to an unpublished tag)
+curl -s https://nextcloud.github.io/helm/index.yaml | python3 -c "
+import sys,yaml; e=yaml.safe_load(sys.stdin)['entries']['nextcloud'][0]; print(e['version'], e['appVersion'])"
+#   expect: 9.2.6 34.0.3 (2026-09-15). If a chart carrying appVersion 34.0.4 has appeared, premise
+#   chart-is-still-9.2.6 still PASSES but the §1.2 verdict "no chart to move to" is STALE: decide the
+#   lockstep question (fold the chart bump in, or stay image-only under 9.2.6) BEFORE editing anything —
+#   a separate, deliberate decision, never a silent absorb.
 OCC="kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c"
 $OCC 'php occ status --output=json'
 #   expect: "installed":true, "version":"34.0.3.x", "maintenance":false, "needsDbUpgrade":false — anything else: STOP,
@@ -577,7 +595,9 @@ SID=$(python3 -c "import json;print(json.load(open('$B/silence.json'))['silenceI
 Then retire this plan file in the commit that records the window (README:
 plans are transient) and close the three findings:
 `runbooks/policy-cli.py finding close F-f3e9ddb0 --commit <sha>` (and
-F-4a9d6631, F-ab9e243a — the security one closes on the re-scan, but say so).
+F-4a9d6631; F-ab9e243a — status `new` at review time — closes on the
+post-window security-check re-scan: CONFIRM on that run's output that it
+actually resolved rather than assuming, and say so in the window report).
 Keep `~/db-dumps/nextcloud-34.0.4/` until the next nightly Longhorn backup
 covers the post-upgrade state, then `rm -P` the dump.
 
@@ -645,20 +665,29 @@ silently break, not a proxy for it):
    self-test's *"push server is receiving redis messages"* + *"can connect to
    the Nextcloud server"* + *"same version"* lines all green: a real write
    through redis to the rebuilt notify-push container, not a `PONG`.
-4. **CONTENTS ASSERTION: the exporter still scrapes the upgraded instance** —
-   measured over a window that starts after the rollout, compared to the
-   version label before the change:
+4. **CONTENTS ASSERTION: the metrics exporter still serves the UPGRADED
+   instance** — measured by probing `svc/nextcloud-metrics` DIRECTLY (Service
+   port 9100 → targetPort `metrics`/9205; `:9205` on the Service returns
+   nothing), compared to the pre-change values (2026-09-15: `nextcloud_up 1`,
+   `nextcloud_system_info{version="34.0.3.2"}`, `nextcloud_users_total 3`):
    ```bash
-   kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 >/dev/null 2>&1 &
-   Q='http://localhost:9090/api/v1/query'
-   curl -s $Q --data-urlencode 'query=count by (__name__)({__name__=~"nextcloud_.*"})' | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['result']),'nextcloud_* series')"   # > 0
-   curl -s $Q --data-urlencode 'query=min_over_time(nextcloud_up[10m])' | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['result'])"   # value "1"
-   curl -s $Q --data-urlencode 'query=nextcloud_system_info' | python3 -c "import sys,json;[print(r['metric'].get('version')) for r in json.load(sys.stdin)['data']['result']]"   # 34.0.4.x
-   curl -s $Q --data-urlencode 'query=nextcloud_users_total' | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['result'][0]['value'][1])"   # > 0, equals the oc_users count above
+   kubectl exec -n office deploy/nextcloud -c nextcloud -- curl -s http://nextcloud-metrics:9100/metrics \
+     | grep -E '^nextcloud_(up|system_info|users_total)' | tee $B/exporter-post.txt
+   # expect: nextcloud_up 1
+   #         nextcloud_system_info{...version="34.0.4.x"...} 1
+   #         nextcloud_users_total == the oc_users count in $B/rows-post.txt (3 on 2026-09-15)
+   # a missing line, nextcloud_up 0, or a version still reading 34.0.3.x = FAIL
    ```
-   (Series names are the upstream exporter's documented ones; the first query
-   lists what actually exists — adapt the label if the exporter renames it,
-   do not skip the assertion.)
+   Why the exporter and not Prometheus (review 2026-09-15): Prometheus holds
+   ZERO `nextcloud_*` series and has no scrape target for this exporter —
+   `svc/nextcloud-metrics` carries only `prometheus.io/scrape` annotations,
+   which kube-prometheus-stack ignores, and there is no ServiceMonitor /
+   PodMonitor in `office`. A PromQL assertion therefore fails on the day
+   regardless of the upgrade outcome. Enabling the chart's
+   `metrics.serviceMonitor` (label `release: kube-prometheus-stack`) is a
+   SEPARATE monitoring correction with its own finding — not part of this
+   plan's commit. Do not skip the assertion; do not "fix" it by adding the
+   ServiceMonitor in the same diff as the version bump.
 5. **Attended:** operator opens Files, Mail, Calendar on a phone and the
    whiteboard once (the CODE app was rebuilt in 3.2 — open one office document).
 
@@ -775,13 +804,24 @@ reverting: every updated app declares NC 32-35 compatibility and runs fine on
   `helmrelease.yaml`, same Deployment restart, and that plan replatforms the
   very DB this plan dumps from. It is `blocked`/unwindowed today; if it is
   revived, run this plan first (a smaller, reversible change on the known
-  server) and let that one start from 34.0.4.
-- **Same-namespace neighbours** (mealie-v3.26.0, a future nextcloud-mcp plan,
-  paperless-*): no shared resource, but do not run them *in parallel* in the
-  same slot — the §2.5 silence is namespace-wide and would mask their rollout
-  noise too. Sequential is fine.
-- **Step 0 of the same window** may auto-bump `nextcloud-mcp` (patch lane).
-  Independent; no ordering constraint either way.
+  server) and let that one start from 34.0.4. The reciprocal ref now lives on
+  that plan too (2026-09-15) — the validator does not enforce reciprocity.
+- **`conflicts_with: nextcloud-mcp-0.187.1`** (draft, `office`, 30 min, Flux
+  `dependsOn: nextcloud`) — reciprocal of that plan's declaration
+  (2026-09-15). Its verification calls this server, so a 2-5 min 503 during
+  §3.4 would fail its checks, and the namespace-wide §2.5 silence would hide
+  its rollout alerts. Never the same slot. Different slots of one weekend are
+  fine in either order — its `nextcloud-server-unchanged` premise tolerates
+  `34.0.x` and it re-takes its baselines the same day. It is a MINOR hop held
+  by the `*nextcloud-mcp*` `max: patch` deny rule (PLAN lane, HUMAN-GATED):
+  it will NOT ride Step 0 of any window.
+- **Other same-namespace neighbours** (mealie-v3.26.0, paperless-*): no
+  shared resource, but do not run them *in parallel* in the same slot — the
+  §2.5 silence is namespace-wide and would mask their rollout noise too.
+  Sequential is fine.
+- **Step 0 of the same window** touches nothing in this plan's blast radius:
+  the `*nextcloud*` deny rule keeps nextcloud, notify-push and nextcloud-redis
+  out of the safe lane, and nextcloud-mcp minor hops are PLAN-lane (above).
 - **Longhorn housekeeping.** The two §2.4 snapshots are removed by the 02:30
   `global-snapshot-cleanup` the next night; that is intended (the dump and the
   nightly backup are the durable floor). Do not "fix" it by adding retain rules.

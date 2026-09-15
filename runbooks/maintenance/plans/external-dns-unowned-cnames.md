@@ -18,7 +18,15 @@ touches:
     - deployment/external-dns
   shared: [gateway/envoy]             # the records are the public names of the
                                       # envoy-external Gateway's routes
-depends_on: []
+depends_on: [external-dns-1.22.0]     # ADDED 2026-09-15 (review of that plan): the
+                                      # chart bump to v0.22.0 must land FIRST and soak
+                                      # >= 7 days of `All records are already up to
+                                      # date` before adoption — while the 8 are unowned
+                                      # they are immune to a sync delete, so a bump
+                                      # regression costs 17 records, never hass or
+                                      # flux-webhook; after adoption it would cost 24.
+                                      # Was prose in external-dns-1.22.0 §6; the field
+                                      # makes maintenance-plan.py enforce it.
 conflicts_with: []                    # deliberately EMPTY as a FIELD. The real
                                       # constraint — must not share a window with
                                       # wazuh-2xx-edge-coverage — is stated in §10
@@ -96,19 +104,30 @@ live Deployment args, and 30 h of controller logs.
 
 ### 1.1 The structural reason it will never self-heal
 
-This is the part that matters, and it is not a one-off: **external-dns v0.21's txt
-registry writes an ownership TXT only on a `Create`.** In `ApplyChanges`, the
-`Create` list is passed through unfiltered while `UpdateNew`, `UpdateOld` and
-`Delete` are filtered by owner id. An unowned record (owner label `""` ≠
-`default`) is therefore dropped from Update and from Delete.
+This is the part that matters, and it is not a one-off. **Corrected 2026-09-15
+against `registry/txt/registry.go` at tag `v0.22.0`** (the version this plan
+now runs on, via `depends_on`; the earlier text cited a `registry/txt.go` that
+exists at neither tag, and claimed TXTs are written "only on `Create`"):
+`ApplyChanges` (lines 358-403) generates ownership TXTs on **Create** (filtered
+by `existingTXTs.isAbsent`), **Delete**, **UpdateOld** and **UpdateNew** — so
+the registry *would* write a TXT on an update or delete of a record it
+considers its own. The reason that never happens for our 8 is one step
+earlier: `FilterEndpointsByOwnerID` drops an unowned record (owner label `""`
+≠ `default`) from the `UpdateNew`, `UpdateOld` and `Delete` lists before they
+reach the registry, and the `Create` list only carries records that do not
+exist yet.
 
 And because the 8 CNAMEs already match the desired state *exactly* — same
 proxied CNAME to `external.${SECRET_DOMAIN}` — the plan emits **no change at
 all**. The log has said `All records are already up to date` every 60 seconds for
-30 hours straight. No change means no `Create`, which means no TXT, forever.
+30 hours straight. No change means no `Create`; an unowned record never enters
+Update or Delete; which means no TXT, forever.
 
-**There is no adopt-on-read path in v0.21.** This is a stable, self-perpetuating
-state, not a transient one that a restart or a longer wait would clear.
+**There is no adopt-on-read path in v0.21 or v0.22.** This is a stable,
+self-perpetuating state, not a transient one that a restart or a longer wait
+would clear. Re-confirm the four `ApplyChanges` branches against that file on
+execution day — the whole of Path A (§6.1) depends on the owner filter running
+first.
 
 ### 1.2 The metric that hid it
 
@@ -274,8 +293,10 @@ already broken".
 
 ### 6.1 Path A — write the ownership TXTs out-of-band (zero CNAME churn)
 
-`Create` is the only TXT-writing path, and no `Create` will ever be emitted while
-the CNAME already matches desired state. So write the TXT directly. On the next
+For an unowned record, `Create` is the only TXT-writing path the controller can
+reach (Update/Delete are owner-filtered before the registry sees them, §1.1),
+and no `Create` will ever be emitted while the CNAME already matches desired
+state. So write the TXT directly. On the next
 `Records()` the label attaches, desired still equals current, and the controller
 stays on `All records are already up to date`. **The CNAME is never read for
 change, never deleted, never recreated** — the delete-then-create mechanism from

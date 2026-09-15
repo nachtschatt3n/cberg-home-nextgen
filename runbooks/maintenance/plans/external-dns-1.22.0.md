@@ -201,6 +201,15 @@ to v1 (source not enabled), `a-` TXT prefix for AWS ALIAS (AWS only), Cloudflare
 SRV structured data (no SRV records), API-token whitespace trim (benign),
 provider removals (akamai/plural/transip), Pi-hole v5 drop.
 
+Checked and **relevant but covered** (added 2026-09-15, review): **#6550 —
+`cloudflare-go` v5 → v7**, the provider client library the entire zone is
+written through. It is not "irrelevant"; it is exactly what §4 CONTENTS
+ASSERTION 1 guards — the byte-identical zone diff including record `id` and
+`modified_on` catches any behavioural change in the provider library (a
+rewrite, a re-create, a changed proxied flag) that a `verified_records == 25`
+proxy would pass through. The executor should know that library change is part
+of what the snapshot diff is there for.
+
 ### 1.5 The fix this plan uses — Path A, dual annotation, ordering-proof
 
 Put the GA-prefixed twin **`external-dns.kubernetes.io/target`** on Gateway
@@ -336,6 +345,14 @@ add (same indentation, inside the same `annotations:` map of Gateway `envoy-exte
 
 Do not touch `envoy-internal`. Do not touch `spec:`.
 
+Optional, operator decision (review 2026-09-15): commit 1 is inert on v0.21.0
+by §1.5's proof and may be landed BEFORE the window, with checks (a)-(c) below
+run at that time — it removes the 200 s wait from the attended slot. If it is
+landed early, also update `docs/sops/gateway-api-httproute.md` Rule 3 and
+`docs/sops/new-deployment-blueprint.md` Known Gotcha #11 to say the Gateway
+carries BOTH keys and new work uses the GA key (§3.4 item 3), so the alpha key
+is not read as the only one in the meantime.
+
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 mise exec -- task kubeconform
@@ -444,8 +461,13 @@ CONTENTS ASSERTION 1 — the public record set is BYTE-IDENTICAL, including ids.
 
 CONTENTS ASSERTION 2 — the NEW binary is the one that is quiescent.
   measured by:
-    kubectl -n network get pod -l app.kubernetes.io/name=external-dns -o jsonpath='{.items[0].spec.containers[0].image} {.items[0].metadata.labels.app\.kubernetes\.io/version}{"\n"}'
-      -> registry.k8s.io/external-dns/external-dns:v0.22.0 0.22.0
+    kubectl -n network get pod -l app.kubernetes.io/name=external-dns -o jsonpath='{.items[0].spec.containers[0].image}{"\n"}'
+      -> registry.k8s.io/external-dns/external-dns:v0.22.0
+    kubectl -n network get deploy external-dns -o jsonpath='{.metadata.labels.app\.kubernetes\.io/version}{"\n"}'
+      -> 0.22.0   (the chart stamps app.kubernetes.io/version on the DEPLOYMENT metadata only;
+                   the pod template carries name+instance labels — verified in the 1.22.0 and
+                   1.21.1 renders, and live on 1.21.1 — so reading it off the pod always
+                   prints empty and would have you debugging nothing mid-window)
     kubectl -n network get helmrelease external-dns -o jsonpath='{.status.history[0].chartVersion} {.status.history[0].appVersion}{"\n"}'
       -> 1.22.0 0.22.0
     kubectl -n network logs deploy/external-dns --tail=200 | grep -c 'All records are already up to date'   -> >= 3
@@ -517,13 +539,19 @@ reconcile and they confuse the diff you are relying on.
   and never `hass` or `flux-webhook`; after adoption it would cost 24 including
   both. Bump on the smaller blast radius, adopt afterwards. (2) That plan's
   premise §5.0.2 asserts the live args (policy=sync, txt, owner `default`,
-  prefix `k8s.`) — unchanged by this bump (§1.4), so it stays satisfiable — but
-  its §1.1 claim ("ownership TXT is written only on `Create`") was derived from
-  v0.21 code. Before it executes on v0.22.0, re-read `registry/txt.go` at tag
-  `v0.22.0` and confirm; a one-line check, but its whole Path A depends on it.
-  Recommend that plan add `depends_on: [external-dns-1.22.0]` — an edit to that
-  file, outside this plan's write scope. Give v0.22.0 **>= 7 days** of
-  `All records are already up to date` before adoption.
+  prefix `k8s.`) — unchanged by this bump (§1.4), so it stays satisfiable — and
+  its §1.1 claim was derived from v0.21 code and has been CORRECTED (review
+  2026-09-15): the file is `registry/txt/registry.go` (there is no
+  `registry/txt.go` at either tag — `gh` 404s), and at v0.22.0 `ApplyChanges`
+  (lines 358-403) generates ownership TXTs on Create (filtered by
+  `existingTXTs.isAbsent`), Delete, UpdateOld AND UpdateNew — not "only on
+  Create". Unowned records are excluded EARLIER by the owner-label filter, so
+  that plan's Path A conclusion (an unowned, already-correct record never
+  enters Update/Delete, hence no adopt-on-read) still holds; re-confirm against
+  that file on its day. That plan now carries `depends_on: [external-dns-1.22.0]`
+  (added 2026-09-15), so this ordering is machine-enforced rather than prose.
+  Give v0.22.0 **>= 7 days** of `All records are already up to date` before
+  adoption.
 - **`wazuh-2xx-edge-coverage` — conflicts.** Both verify through the public edge
   path; a probe failure in a shared window cannot be attributed to either.
 - **Windows.** Human-gated and `risk: high`: never `nightly`. By capacity and

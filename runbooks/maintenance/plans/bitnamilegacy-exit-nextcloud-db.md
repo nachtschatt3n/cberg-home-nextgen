@@ -33,7 +33,16 @@ depends_on: [bitnamilegacy-exit-nextcloud-redis, bitnamilegacy-exit-paperless-db
                                                 # RESOLVED 2026-08-19:
                                                 # bitnamilegacy-exit-nextcloud-redis EXECUTED
                                                 # (d6070b82) — dependency satisfied
-conflicts_with: [bitnamilegacy-exit-paperless-db, bitnamilegacy-exit-nextcloud-redis, paperless-db-12.3.3]  # paperless-db-12.3.3 added 2026-09-05: both claim
+conflicts_with: [bitnamilegacy-exit-paperless-db, bitnamilegacy-exit-nextcloud-redis, paperless-db-12.3.3, nextcloud-34.0.4]
+                                                # nextcloud-34.0.4 added 2026-09-15 (review): reciprocal of
+                                                # that draft's declaration — same helmrelease.yaml, same
+                                                # deployment/nextcloud restart, and it dumps the very DB
+                                                # this plan replatforms. maintenance-plan.py --validate
+                                                # checks only that refs resolve, not reciprocity, so the
+                                                # guard was one-directional. If both are ever live, run
+                                                # nextcloud-34.0.4 first and start this plan from 34.0.4;
+                                                # drop the ref when that plan executes and is deleted.
+                                                # paperless-db-12.3.3 added 2026-09-05: both claim
                                                 # sat-attended:2026-09-12, both risk:high, and
                                                 # 80 + 60 = 140 min does not fit the 90-min slot.  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.
                                                 # nextcloud-redis EXECUTED 2026-08-19; the only

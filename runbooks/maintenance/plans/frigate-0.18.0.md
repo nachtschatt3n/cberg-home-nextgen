@@ -14,8 +14,9 @@ current: "0.17.2"                     # verified live 2026-09-15: manifest tag A
 target: "0.18.0"                      # GA 2026-09-12T13:17Z (not pre-release; latest).
                                       # GHCR index digest sha256:9678a83a76e4730ac7d9
                                       # ea7428370e32ae656d6b312aaad30d6c69f3fef14d35.
-                                      # No 0.18.x/0.19.x tag newer than 0.18.0 on GHCR
-                                      # as of 2026-09-15.
+                                      # No non-prerelease GitHub Release newer than
+                                      # v0.18.0 as of 2026-09-15 (`gh api releases`,
+                                      # §2i — the GHCR tags/list is pagination-blind).
 update_type: minor                    # semver-minor, but a 0.x line hop: upstream ships
                                       # a config migrator + 3 sqlite migrations with it.
 risk: medium
@@ -34,7 +35,14 @@ touches:
                                       # no PVC/PV operation of any kind in this plan.
     - cronjob/frigate-restart          # UNCHANGED and KEPT — the leak-mitigation exit
                                       # condition is NOT met by this bump (§6)
-  shared: []                          # nothing shared is restarted or reconfigured.
+  shared: [igpu-i915]                 # ADDED 2026-09-15 (review): the SAME token
+                                      # scrypted-0.147.0 and jellyfin-12.1 use — `shared`
+                                      # is an INTERSECTION key. Frigate holds
+                                      # gpu.intel.com/i915:1 on k8s-nuc14-02, the physical
+                                      # render node (/dev/dri/renderD128) it shares with
+                                      # scrypted (live holders on nuc14-02: frigate +
+                                      # scrypted). Nothing else shared is restarted or
+                                      # reconfigured.
                                       # Soft dependencies (not perturbed, but they
                                       # observe the restart): mosquitto (frigate/
                                       # available flips), home-assistant (frigate
@@ -49,9 +57,15 @@ conflicts_with:
                                       # "no other plan may share its window"
   - multus-macvlan-foundation         # mutates Talos machine config on the node that
                                       # pins frigate (nuc14-02)
-security_ref: F-b0dcee3c              # fixable image-level findings on 0.17.2 with a
-                                      # newer upstream tag — this bump IS the remedy
-                                      # (we bump, we never rebuild). Detail on the record.
+  - scrypted-0.147.0                  # ADDED 2026-09-15 (review): same node k8s-nuc14-02,
+                                      # same /dev/dri/renderD128, both privileged GPU
+                                      # churn — a driver wedge with both in flight cannot
+                                      # be bisected. Mirrors scrypted-0.147.0's own
+                                      # declaration so the guard holds whichever file the
+                                      # window agent reads first.
+security_ref: F-b0dcee3c              # security driver for the image bump; what it is
+                                      # and why this tag answers it live on the record
+                                      # only (we bump, we never rebuild).
 capability_change: true               # 0.18 adds user-visible surface that our config
                                       # ENABLES by construction: the migrated genai
                                       # provider gets the new `chat` role (a tool-calling
@@ -254,7 +268,7 @@ embeddings upstream), not a side effect of this bump.
 **Security driver (cited, not described):**
 
 > **Security driver — detail withheld from this public repo.**
-> Tracked as **F-b0dcee3c** (`security` / severity `critical`).
+> Tracked as **F-b0dcee3c**.
 > Full detail (CVE IDs, counts, exposure, exploitability) lives on the
 > finding record — it is deliberately not reproduced here.
 >
@@ -264,9 +278,10 @@ embeddings upstream), not a side effect of this bump.
 > See `docs/sops/vulnerability-disclosure.md` before adding any
 > vulnerability detail to a committed file.
 
-Note the board's *contextual* tier for that finding is `medium` (internal,
-not-in-KEV); the raw `severity` column is not what pages. Version-currency
-finding: F-24463e2b.
+When reporting on that finding, quote the board's *contextual* tier (read it
+from the board at execution time — it was not re-verified by the 2026-09-15
+review), never the raw `severity` column; the raw column is not what pages.
+Version-currency finding: F-24463e2b.
 
 ## 2) Pre-checks
 
@@ -338,9 +353,12 @@ TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:blakeblackshear/frigate:
 curl -sI -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.oci.image.index.v1+json" \
   https://ghcr.io/v2/blakeblackshear/frigate/manifests/0.18.0 | grep -i -E 'HTTP/|docker-content-digest'
 # expect 200 + sha256:9678a83a76e4730ac7d9ea7428370e32ae656d6b312aaad30d6c69f3fef14d35
-curl -s -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/blakeblackshear/frigate/tags/list?n=2000" \
-  | python3 -c "import sys,json; t=json.load(sys.stdin)['tags']; print(sorted(x for x in t if x.startswith(('0.18','0.19'))))"
-# expect: [] or only 0.18.0 — a newer 0.18.x means re-plan the target, not silently take it
+gh api repos/blakeblackshear/frigate/releases --jq '.[0:5][] | "\(.tag_name) pre=\(.prerelease) draft=\(.draft) \(.published_at)"'
+# expect: the newest line with pre=false draft=false is v0.18.0. A newer non-prerelease
+#   (0.18.1, 0.19.0, ...) means re-plan the target, not silently take it.
+# Do NOT use `ghcr.io/v2/.../tags/list` for this check: it is pagination-blind — on
+#   2026-09-15 it returned [] for 0.18.* although 0.18.0 resolves above, so it could not
+#   see a newer 0.18.x either.
 
 # j) HA side: integration version + no in-flight flux work
 kubectl -n home-automation exec deploy/home-assistant -c app -- python3 -c \
@@ -424,10 +442,22 @@ flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
    EOF
    kubectl -n home-automation wait pod/frigate-config-validate --for=jsonpath='{.status.phase}'=Succeeded --timeout=10m \
      || kubectl -n home-automation logs frigate-config-validate | tail -40
-   kubectl -n home-automation logs frigate-config-validate | grep -E 'valid|Config validation error|safe mode'
-   # GATE: "*** Your config file is valid." and exit phase Succeeded. Any "Config validation
-   # error" = fix the candidate and re-run; do NOT push. (A failure that is clearly not about
-   # the config — e.g. a model download — is read, not treated as a config verdict.)
+   kubectl -n home-automation logs frigate-config-validate | grep -iE 'valid|safe mode'
+   PHASE=$(kubectl -n home-automation get pod frigate-config-validate -o jsonpath='{.status.phase}')
+   BAD=$(kubectl -n home-automation logs frigate-config-validate | grep -ciE 'not valid|validation error|safe mode')
+   echo "phase=$PHASE bad_lines=$BAD"
+   # GATE — BOTH must hold, not either: phase == Succeeded (exit 0) AND bad_lines == 0.
+   # The "*** Your config file is valid." banner and exit 0 are NOT a verdict on their own.
+   # At v0.18.0 `frigate/__main__.py` handles `--validate-config` AFTER its
+   # `except ValidationError` block: on a failed validation it prints the errors ("Your
+   # config file is not valid!" / "Config Validation Errors"), re-loads the config with
+   # safe_load=True — which DROPS `genai` entirely — prints "Starting Frigate in safe
+   # mode.", and then still falls through to the "valid" banner and sys.exit(0). So a
+   # broken genai block, the exact mistake this step exists to catch, yields phase
+   # Succeeded + the banner. Any "not valid" / "Validation Error" / "safe mode" line is a
+   # FAIL regardless of the trailing banner and exit code: fix the candidate and re-run;
+   # do NOT push. (A failure that is clearly not about the config — e.g. a model download —
+   # is read, not treated as a config verdict.)
    kubectl -n home-automation delete pod frigate-config-validate configmap frigate-config-candidate
    ```
    Then encrypt in place (repo path, never from /tmp):
@@ -485,10 +515,14 @@ flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
    (`frigate-memory-leak.md` §6).
    ```bash
    kubectl get pods -n home-automation -l app.kubernetes.io/name=frigate -w   # Ctrl-C when the 0.18.0 pod is Running
-   kubectl -n home-automation logs deploy/frigate -f | grep -E 'migrat|Config validation|safe mode|peewee|Starting|frigate.genai|ERROR' 
-   # expect: "Config file is read-only, unable to migrate config file." (still true, harmless
-   #   — the file already IS 0.18-0), then peewee_migrate applying 033/034/035, no
-   #   "Config validation error", no "safe mode".
+   kubectl -n home-automation logs deploy/frigate -f | grep -iE 'migrat|not valid|validation error|safe mode|peewee|Starting|frigate.genai|ERROR'
+   # expect ON THE FINAL 0.18.0 POD: "Config file is read-only, unable to migrate config
+   #   file." (still true, harmless — the file already IS 0.18-0), then peewee_migrate
+   #   applying 033/034/035, and ZERO "not valid" / "Validation Error" / "safe mode" lines.
+   #   A "safe mode" line from the FIRST pod of the pair (0.17.2 booting on the already-
+   #   migrated ConfigMap — the reloader-first race, §6) is expected and is NOT the §4
+   #   failure signature; `kubectl logs deploy/frigate` follows the current pod, so once the
+   #   0.18.0 pod is up you are reading the right log.
    ```
    The HR may report a transient timeout if pull+boot exceeds Helm's 5m wait; with
    `retries: 0` nothing is rolled back and the next interval marks it Ready.
@@ -538,7 +572,7 @@ print('version', c.get('version'))
 for cam in ('entry','heater','kitchen'): print(cam, 'objects.genai.enabled', c['cameras'][cam]['objects']['genai']['enabled'])"
 # expect provider openai, model gemma4:26b-mlx, roles [descriptions, chat], version 0.18-0,
 #   entry/heater/kitchen genai enabled True (kids/living_room False, as before)
-kubectl -n home-automation logs deploy/frigate | grep -c -E 'Config validation error|safe mode'   # 0
+kubectl -n home-automation logs deploy/frigate | grep -ciE 'not valid|validation error|safe mode'   # 0 (the FINAL 0.18.0 pod's log; upstream prints "not valid!" / "Config Validation Errors" / "Starting Frigate in safe mode.")
 
 # CONTENTS ASSERTION 2 (data migration class): row counts on frigate.db >= the §2g baseline,
 # measured with the same count(*), and the three 0.18 migrations recorded.
@@ -615,7 +649,8 @@ commit:
 git fetch origin main && git merge --ff-only origin/main
 git revert <bump-commit-sha> --no-edit && git push origin main
 kubectl get pods -n home-automation -l app.kubernetes.io/name=frigate -w     # expect two Recreates again
-# then re-run §2b's stats capture: all cameras streaming on 0.17.2-3d4dd3a, no "Config validation error"
+# then re-run §2b's stats capture: all cameras streaming on 0.17.2-3d4dd3a, and
+# `grep -ciE 'not valid|validation error|safe mode'` == 0 on the final 0.17.2 pod's log
 ```
 
 Known cosmetic residue of tier A: tracked objects created while 0.18 ran have
@@ -674,29 +709,42 @@ authorised.
 
 ## 6) Interference notes
 
-- **Expect two Recreate restarts, not one.** The Deployment carries
+- **Expect two Recreate restarts, not one — and the FIRST is most likely a
+  transient 0.17.2 SAFE-MODE boot.** The Deployment carries
   `reloader.stakater.com/auto: "true"` and the ConfigMap changes in the same
-  commit as the pod template. Reloader and helm-controller each trigger a
-  rollout; whichever loses the race causes a second restart on the already-new
-  image. `strategy: Recreate` + RWO PVC means the old pod is gone before the
-  new one is scheduled — each restart is a ~60-90 s camera gap, plus image pull
-  time on the first one if §3.3's pre-pull was skipped. Total expected camera
-  outage: 3-6 min. Judge health only at t+8 min after the last pod creation.
+  commit as the pod template. The race is not a coin flip: kustomize-controller
+  applies the ConfigMap and the HelmRelease together, reloader patches the
+  Deployment within seconds, and helm-controller upgrades later — so the first
+  Recreate is usually **0.17.2 booting on the already-migrated ConfigMap**.
+  0.17.2 rejects the 0.18 `genai` shape (`extra="forbid"`), so that pod starts
+  in safe mode (mqtt disabled, `frigate/available` offline, HA entities
+  `unavailable`) until Helm swaps the image and the second Recreate boots
+  0.18.0 on the same ConfigMap. Harmless: safe mode writes nothing back to the
+  DB and runs no migration. But a `Starting Frigate in safe mode.` /
+  `not valid` line from that FIRST pod is **not** the §4 failure signature —
+  §4 reads only the final 0.18.0 pod's log, which must carry zero such lines.
+  `strategy: Recreate` + RWO PVC means the old pod is gone before the new one
+  is scheduled — each restart is a ~60-90 s camera gap, plus image pull time on
+  the first one if §3.3's pre-pull was skipped. Total expected camera outage:
+  3-6 min. Judge health only at t+8 min after the last pod creation.
 - **A wrong config fails SILENTLY-GREEN.** 0.18's `__main__` starts safe mode
   on a validation error: pod Ready, UI up, `/api/version` answers, Helm
   succeeds — and zero cameras run. Only §4 assertion 1 catches it. The window
   agent must not close on Flux Ready.
-- **Timing vs the 02:30 leak-mitigation restart.** The nightly window starts
-  03:30, so at window start the pod is ~60 min old; this plan restarts it
-  again. Harmless — `ContainerRestartMitigationStale` measures age < 30h.
+- **Timing vs the 02:30 leak-mitigation restart.** This plan is HUMAN-GATED
+  and recommends a Sunday 09:00 slot, so the 02:30 restart ran ~6.5 h earlier
+  and this plan restarts the pod again. Harmless —
+  `ContainerRestartMitigationStale` measures age < 30h.
   The CronJob is KEPT (embeddings remain local, §1). If, after 7 days on 0.18,
   the working-set slope is flat, retire the mitigation in its own plan per the
   exit condition in `docs/sops/frigate-memory-leak.md` — never as a side
   effect here.
 - **Timing vs the 03:00 Longhorn backup.** §2h requires the `frigate-config`
-  backup to have COMPLETED before the push; the `backup-of-all-volumes` job
-  walks ~93 volumes and may still be running at 03:30. Wait for
-  `lastBackupAt >= today 03:00` rather than assuming.
+  backup to have COMPLETED before the push; the `daily-backup-all-volumes`
+  CronJob (ns `storage`, owned by the Longhorn RecurringJob of the same name;
+  `backup-of-all-volumes` does not exist) walks ~93 volumes — long finished by
+  a 09:00 Sunday slot, but verify `lastBackupAt >= today 03:00` rather than
+  assuming.
 - **Execution class.** `capability_change: true` + `rollback_class:
   backup-restore` derive an attended class under `runbooks/autonomy-policy.yaml`
   — this must NOT run in the unattended `nightly` window. **Recommended slot
@@ -709,7 +757,17 @@ authorised.
 - **Intel NPU is exclusive.** nuc14-02 advertises `npu.intel.com/accel: 1`,
   fully claimed by frigate. Between pod delete and re-create nothing else
   requests it today; if a future workload does, frigate goes `Pending` on
-  the NPU, not on the image. `gpu.intel.com/i915` is 2/5 used on that node.
+  the NPU, not on the image. `gpu.intel.com/i915` is 2/5 used on that node
+  (frigate + scrypted).
+- **scrypted is the other i915 consumer on k8s-nuc14-02** (added 2026-09-15,
+  review): `deployment/scrypted` — privileged, `SYS_ADMIN` — holds
+  `gpu.intel.com/i915:1` on the same node and re-probes the same
+  `/dev/dri/renderD128` on every restart. `conflicts_with: [scrypted-0.147.0]`
+  and `shared: [igpu-i915]` mirror that plan's own declaration; never co-slot
+  the two (a driver wedge with both in flight cannot be attributed).
+  `jellyfin-12.1` declares the same `igpu-i915` token but runs on nuc14-03 —
+  a scheduler INTERFERENCE warning, not a hardware conflict; still prefer
+  separate slots so the window's warnings stay clean.
 - **Home Assistant is a consumer, not a participant.** Integration 5.15.6
   reconnects on MQTT availability; `binary_sensor.*_person_occupancy` and
   `switch.*_detect|snapshots` go `unavailable` during each restart and

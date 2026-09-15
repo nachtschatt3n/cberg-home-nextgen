@@ -41,11 +41,22 @@ touches:
     - mutatingwebhookconfiguration/otel-operator-opentelemetry-operator-mutation    # caBundle
     - validatingwebhookconfiguration/otel-operator-opentelemetry-operator-validation
     - crd/{instrumentations,opampbridges,opentelemetrycollectors,targetallocators}.opentelemetry.io   # byte-identical
-    - crd/{servicemonitors,podmonitors,probes,scrapeconfigs}.monitoring.coreos.com   # byte-identical,
-                                                           # BUT OWNED BY THIS HR (Flux labels
-                                                           # helm.toolkit.fluxcd.io/name=otel-operator)
-                                                           # — see §6, this is the one shared
-                                                           # surface a bad CRD replace would hit
+    - crd/{servicemonitors,podmonitors,probes,scrapeconfigs}.monitoring.coreos.com   # ORDERING-DEPENDENT
+                                                           # (§2.6, §4.6, §6). 0.20.9 and 0.21.0
+                                                           # ship byte-identical 0.92.0 copies, and
+                                                           # this HR re-applies them via CreateReplace
+                                                           # ONLY while `crds.installPrometheus` is
+                                                           # unset — i.e. until plan
+                                                           # prometheus-crd-ownership lands; after it
+                                                           # this HR does not write them at all.
+                                                           # Live 2026-09-15: 0.92.0, generation 30,
+                                                           # origin otel-operator → a no-op re-apply.
+                                                           # If kube-prometheus-stack-91.4.0 landed
+                                                           # first (without that fix) the re-apply is
+                                                           # a 0.94.0→0.92.0 DOWNGRADE: the accepted
+                                                           # contention F-a85e8943 (AR-072),
+                                                           # functionally harmless — recorded by
+                                                           # §2.6/§4.6, never discovered.
   shared:
     - monitoring                       # the cluster's log/metric collection pipeline:
                                        # 3 daemon-collector pods roll one node at a time
@@ -55,7 +66,20 @@ touches:
                                        # in those minutes sees a hole. Prometheus scrapes
                                        # and edot-collector are NOT perturbed.
 depends_on: []
-conflicts_with: []                     # no hard conflict; SEQUENCING rules in §6 instead
+conflicts_with:                        # HARD slot exclusions — window-scheduler.py honours
+                                       # only this field; the shared:[monitoring] overlap is
+                                       # a post-placement warning (2026-09-15 review).
+  - kube-prometheus-stack-91.4.0       # both CreateReplace the same four monitoring.coreos.com
+                                       # CRDs (last writer wins, 0.92.0 vs 0.94.0). §6 already
+                                       # said "never the same window"; both plans are
+                                       # AUTO-NIGHT with window null, so only the field keeps
+                                       # them out of one nightly. Preferred order: THIS plan
+                                       # first (§6).
+  - prometheus-crd-ownership           # edits the SAME HelmRelease spec (a values key); its §4
+                                       # asserts "CRD generation unchanged across ONE helm
+                                       # upgrade" — two otel-operator upgrades in one window
+                                       # confound that. Either order across windows is fine
+                                       # (§6).
 security_ref: null                     # no security driver. This bump does NOT move the
                                        # operator or collector image (both stay 0.154.0),
                                        # so it does not touch the AR-072-accepted image
@@ -66,12 +90,16 @@ capability_change: false               # appVersion identical; the only new capa
                                        # (presets.profiling) is opt-in, default false,
                                        # NOT enabled here; rendered objects identical
 rollback_class: git-revert             # no data, no migration, CRDs identical both ways
-finding_refs: []                       # no sweep finding exists for 0.21.0 yet (checked
-                                       # 2026-09-15: F-e918a007 is the EXECUTED 0.20.9
-                                       # patch). When the next sweep files
-                                       # "otel-operator: chart 0.20.9 → 0.21.0", ADD ITS
-                                       # ID HERE or the plan-or-page pass reads the
-                                       # finding as unplanned.
+finding_refs:
+  - F-60ebcdb5                         # "otel-operator: chart 0.20.9 → 0.21.0 (minor)" —
+                                       # section version, severity monitor, filed by the
+                                       # 2026-09-15 02:15Z sweep (F-e918a007 is the EXECUTED
+                                       # 0.20.9 patch). Its Action text, "batch with other
+                                       # minor bumps", is the generic version-section text
+                                       # and is WRONG for this item: a 0.x line move that
+                                       # coverage.py holds — PLAN lane, never Step 0. This
+                                       # ref joins the finding to the plan and supersedes
+                                       # that action.
 status: draft
 window: null                           # window agent assigns. Fits nightly (90 min,
                                        # no reboot, git-revert, no capability change).
@@ -134,14 +162,12 @@ premises:
       too and §6's "edot is untouched" claim is false.
     run: kubectl get deploy -n monitoring -l app.kubernetes.io/managed-by=opentelemetry-operator -o name | wc -l
     expect_exact: "0"
-  - id: this-hr-owns-the-prometheus-crds
-    why: >-
-      `touches` declares the monitoring.coreos.com ServiceMonitor/PodMonitor/
-      Probe/ScrapeConfig CRDs because THIS HR installed them (Flux label). If
-      ownership moved to kube-prometheus-stack, §6's CRD-race rule is moot
-      and the interference surface must be re-derived.
-    run: kubectl get crd servicemonitors.monitoring.coreos.com -o jsonpath='{.metadata.labels.helm\.toolkit\.fluxcd\.io/name}'
-    expect_exact: "otel-operator"
+  # NOTE (2026-09-15 review): the former premise `this-hr-owns-the-prometheus-crds`
+  # (servicemonitors CRD label == otel-operator) was REMOVED on purpose. It fails
+  # BY DESIGN once kube-prometheus-stack-91.4.0 lands (that plan re-stamps all ten
+  # CRDs and the label follows the last applier), which would silently drop this
+  # plan out of every later sequence. The ordering fact is now MEASURED in-window
+  # by §2.6 and asserted by §4.6 instead of gating placement.
 generated: "2026-09-15"
 ---
 
@@ -245,10 +271,30 @@ Moves — all observed on the 0.20.9 bump on 2026-09-14 and expected identically
 
 Does not move: the operator Deployment (subchart unchanged → identical pod
 template → no rollout; its pod is 7d21h old today, 20h for the collector pods),
-the CRDs (`crds: CreateReplace` re-applies byte-identical documents), RBAC,
-`edot-collector`, Prometheus scrape targets (only `edot-collector` has a
-ServiceMonitor; the daemon collector is not scraped by Prometheus at all — its
-own telemetry goes to ES via edot).
+the four `opentelemetry.io` CRDs (`crds: CreateReplace` re-applies byte-identical
+documents), RBAC, `edot-collector`, Prometheus scrape targets (only
+`edot-collector` has a ServiceMonitor; the daemon collector is not scraped by
+Prometheus at all — its own telemetry goes to ES via edot).
+
+**The four `monitoring.coreos.com` CRDs — an ordering caveat, not a change.**
+0.20.9 and 0.21.0 ship byte-identical copies of `servicemonitors`, `podmonitors`,
+`probes`, `scrapeconfigs` (prometheus-operator **0.92.0**, from the
+`charts/prometheus-crds/crds/` subchart directory). Today (2026-09-15) the live
+objects ARE that copy — `operator.prometheus.io/version 0.92.0`, generation 30,
+origin label `otel-operator` — so this bump's CreateReplace is a no-op re-apply.
+Two sibling plans change that picture, and this plan does not assume either
+has or has not run; §2.6 measures it and §4.6 asserts the matching post-state:
+
+- **`prometheus-crd-ownership` landed first** (`crds.installPrometheus: false`
+  on this HR): helm-controller no longer collects that subchart's `crds/`, so
+  this bump does **not** write the four at all. Generation and version stay
+  whatever they were.
+- **`kube-prometheus-stack-91.4.0` landed first, without that fix:** the four
+  read 0.94.0 and this bump **downgrades** them to 0.92.0. That is the accepted
+  contention **F-a85e8943** (AR-072): functionally harmless because no CR of
+  those kinds uses a 0.93+/0.94+ field, but it must be *recorded* by §4.6, not
+  discovered by the next sweep. `conflicts_with` keeps both plans out of the
+  same window; the preferred order is this plan **before** kps (§6).
 
 Context for the window agent: upstream `opentelemetry-operator` chart is already at
 0.122.1 / appVersion 0.158.0 while kube-stack still pins 0.119.0 / 0.154.0. **This
@@ -269,7 +315,7 @@ export KUBECONFIG="$PWD/kubeconfig"
 ```bash
 .venv/bin/python3 runbooks/plan-premises.py otel-operator-0.21.0 --require-premises
 ```
-**PASS:** all 9 premises pass.
+**PASS:** all 8 premises pass.
 
 **2.2 — Flux green, release history sane.**
 
@@ -287,7 +333,7 @@ kubectl get pods -n monitoring -l app.kubernetes.io/instance=monitoring.otel-ope
 kubectl get pods -n monitoring -l app.kubernetes.io/name=opentelemetry-operator -o wide   # NOTE the pod NAME
 kubectl get pods -n monitoring -l app=edot-collector -o wide
 
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9299:9090 >/dev/null 2>&1 &
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9299:9090 >/dev/null 2>&1 & PF=$!
 sleep 4
 for q in 'sum(rate(otelcol_receiver_accepted_log_records_total{receiver="otlp"}[5m]))' \
          'sum(rate(otelcol_receiver_accepted_metric_points_total{receiver="otlp"}[5m]))'; do
@@ -298,7 +344,7 @@ curl -s localhost:9299/api/v1/alerts | python3 -c "
 import sys,json
 a=[x for x in json.load(sys.stdin)['data']['alerts'] if x['state']=='firing' and x['labels'].get('alertname') not in ('Watchdog','InfoInhibitor')]
 print('firing:',len(a),[x['labels'].get('alertname') for x in a])"
-kill %1 2>/dev/null
+kill $PF 2>/dev/null
 ```
 **PASS:** 3 collector pods `Running`, 0 restarts; operator 1/1; edot 1/1. Inflow
 into edot from the daemon collectors is the shape signal that the daemon is
@@ -310,7 +356,7 @@ firing is a no-go.
 
 ```bash
 ES_PW=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
-kubectl port-forward -n monitoring svc/elasticsearch-es-http 9261:9200 >/dev/null 2>&1 &
+kubectl port-forward -n monitoring svc/elasticsearch-es-http 9261:9200 >/dev/null 2>&1 & PF=$!
 sleep 4
 # pod logs per node, last 15 min
 curl -k -s -u "elastic:$ES_PW" -X POST "https://localhost:9261/logs-generic-default/_search" -H 'Content-Type: application/json' -d '{"size":0,"query":{"bool":{"filter":[{"range":{"@timestamp":{"gte":"now-15m"}}},{"exists":{"field":"resource.attributes.k8s.pod.name"}}]}},"aggs":{"node":{"terms":{"field":"resource.attributes.k8s.node.name","size":5}}}}' \
@@ -321,7 +367,7 @@ curl -k -s -u "elastic:$ES_PW" -X POST "https://localhost:9261/metrics-generic.o
 # hostmetrics floor + k8s events (leader-elected receiver), last 15 / 60 min
 curl -k -s -u "elastic:$ES_PW" -X POST "https://localhost:9261/metrics-generic.otel-default/_count" -H 'Content-Type: application/json' -d '{"query":{"bool":{"filter":[{"range":{"@timestamp":{"gte":"now-15m"}}},{"exists":{"field":"metrics.system.cpu.utilization"}}]}}}' | python3 -c "import sys,json; print('system.cpu.utilization docs 15m:', json.load(sys.stdin)['count'])"
 curl -k -s -u "elastic:$ES_PW" -X POST "https://localhost:9261/logs-generic-default/_count" -H 'Content-Type: application/json' -d '{"query":{"bool":{"filter":[{"range":{"@timestamp":{"gte":"now-60m"}}},{"term":{"attributes.k8s.resource.name":"events"}}]}}}' | python3 -c "import sys,json; print('k8s event docs 60m:', json.load(sys.stdin)['count'])"
-kill %1 2>/dev/null; unset ES_PW
+kill $PF 2>/dev/null; unset ES_PW
 ```
 **PASS / baseline measured 2026-09-15 03:55:** pod-log docs/node 15m
 `03=27 608, 02=9 316, 01=7 751` (all three nodes present, thousands each);
@@ -349,6 +395,27 @@ re-planned as an image-moving bump.
 > `temp-2248` entry in `~/Library/Preferences/helm/repositories.yaml`). That is why
 > the premises are kubectl-only and this check uses the raw index. Downloading the
 > release tarball directly (§3.2) works.
+
+**2.6 — Prometheus-CRD pre-state (RECORD it; §4.6 asserts the matching post-state).**
+The four `monitoring.coreos.com` CRDs this chart bundles are written by two
+HelmReleases (F-a85e8943, §1). Which sibling plans have landed decides what this
+bump does to them, so measure instead of assuming:
+
+```bash
+kubectl get helmrelease -n monitoring otel-operator -o jsonpath='installPrometheus=[{.spec.values.crds.installPrometheus}]{"\n"}'
+kubectl get crd servicemonitors.monitoring.coreos.com podmonitors.monitoring.coreos.com probes.monitoring.coreos.com scrapeconfigs.monitoring.coreos.com \
+  -o 'custom-columns=NAME:.metadata.name,GEN:.metadata.generation,OPVER:.metadata.annotations.operator\.prometheus\.io/version,ORIGIN:.metadata.labels.helm\.toolkit\.fluxcd\.io/name'
+```
+**Baseline 2026-09-15:** `installPrometheus=[]` (unset → chart default `true`);
+all four `GEN 30`, `OPVER 0.92.0`, `ORIGIN otel-operator`. Write the four rows
+down. Interpretation — every row is a PASS, but it fixes what §4.6 must see:
+
+| `installPrometheus` | four CRDs read | meaning | §4.6 expects after this bump |
+|---|---|---|---|
+| `[]` | 0.92.0 / otel-operator | today's picture; neither sibling has run | 0.92.0, GEN +1, origin otel-operator (byte-identical re-apply) |
+| `[false]` | anything | `prometheus-crd-ownership` landed; this HR no longer writes them | GEN, OPVER, ORIGIN **unchanged** |
+| `[]` | 0.94.0 / kube-prometheus-stack | `kube-prometheus-stack-91.4.0` landed first without the ownership fix | 0.92.0, GEN +1, origin otel-operator — the documented DOWNGRADE (F-a85e8943); proceed, and say so in the window record |
+| mixed values across the four | — | a third writer; **STOP** and re-derive §1 | — |
 
 ## 3) Steps
 
@@ -429,7 +496,10 @@ done | uniq
 # the collector roll
 kubectl rollout status ds/otel-operator-daemon-collector -n monitoring --timeout=5m
 ```
-**PASS:** ends at `True 0.21.0 24`; rollout status `successfully rolled out`.
+**PASS:** ends at `True 0.21.0 <v+1>` — `24` if v23 is still the newest revision at
+window time; the number is informational (any other reconcile of this HR first
+shifts it), the assertion is `True` + chart `0.21.0`; rollout status
+`successfully rolled out`.
 
 **3.6 — Wait 10 minutes** before §4's ES assertions (they need a window that starts
 after the LAST collector pod became Ready). Use the time for §4.1-4.3.
@@ -444,10 +514,15 @@ after the LAST collector pod became Ready). Use the time for §4.1-4.3.
 kubectl get hr -n monitoring otel-operator -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.history[0].chartVersion} {.status.history[0].version} {.status.history[0].status}{"\n"}'
 kubectl get opentelemetrycollector -n monitoring otel-operator-daemon -o jsonpath='{.metadata.labels.helm\.sh/chart} {.status.version} {.status.scale.statusReplicas}{"\n"}'
 kubectl get ds -n monitoring otel-operator-daemon-collector -o jsonpath='{.status.numberReady}/{.status.desiredNumberScheduled} {.spec.template.spec.containers[0].image} {.spec.template.metadata.labels.helm\.sh/chart}{"\n"}'
-kubectl get pods -n monitoring -l app.kubernetes.io/instance=monitoring.otel-operator-daemon -o custom-columns=NAME:.metadata.name,NODE:.spec.nodeName,RESTARTS:.status.containerStatuses[0].restartCount,AGE:.metadata.creationTimestamp
-kubectl get pods -n monitoring -l app.kubernetes.io/name=opentelemetry-operator -o custom-columns=NAME:.metadata.name,AGE:.metadata.creationTimestamp,IMAGE:.spec.containers[0].image
+kubectl get pods -n monitoring -l app.kubernetes.io/instance=monitoring.otel-operator-daemon -o 'custom-columns=NAME:.metadata.name,NODE:.spec.nodeName,RESTARTS:.status.containerStatuses[0].restartCount,AGE:.metadata.creationTimestamp'
+kubectl get pods -n monitoring -l app.kubernetes.io/name=opentelemetry-operator -o 'custom-columns=NAME:.metadata.name,AGE:.metadata.creationTimestamp,IMAGE:.spec.containers[0].image'
 ```
-**PASS:** `True 0.21.0 24 deployed`; CR label `opentelemetry-kube-stack-0.21.0`,
+(The `custom-columns=` arguments are single-quoted on purpose: under zsh an
+unquoted `[0]` is a glob and aborts with `no matches found`, and a verification
+step that cannot run reads as a failed window.)
+
+**PASS:** `True 0.21.0 <v+1> deployed` (revision informational, §3.5); CR label
+`opentelemetry-kube-stack-0.21.0`,
 `status.version 0.154.0`, `3/3`; DaemonSet `3/3`, image
 `otel/opentelemetry-collector-k8s:0.154.0`, template label `…-0.21.0`; three NEW
 collector pods (creation time inside the window, one per node, `RESTARTS 0`);
@@ -517,7 +592,7 @@ change — a window overlapping the pre-change period would credit the old pods.
 
 ```bash
 ES_PW=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
-kubectl port-forward -n monitoring svc/elasticsearch-es-http 9261:9200 >/dev/null 2>&1 &
+kubectl port-forward -n monitoring svc/elasticsearch-es-http 9261:9200 >/dev/null 2>&1 & PF=$!
 sleep 4
 for spec in 'logs-generic-default|resource.attributes.k8s.pod.name|pod-log docs/node' 'metrics-generic.otel-default|metrics.k8s.pod.cpu.usage|k8s.pod.cpu.usage docs/node'; do
   IFS='|' read -r ds field label <<< "$spec"
@@ -526,13 +601,13 @@ for spec in 'logs-generic-default|resource.attributes.k8s.pod.name|pod-log docs/
 done
 curl -k -s -u "elastic:$ES_PW" -X POST "https://localhost:9261/metrics-generic.otel-default/_count" -H 'Content-Type: application/json' -d '{"query":{"bool":{"filter":[{"range":{"@timestamp":{"gte":"now-10m"}}},{"exists":{"field":"metrics.system.cpu.utilization"}}]}}}' | python3 -c "import sys,json; print('system.cpu.utilization docs 10m:', json.load(sys.stdin)['count'])"
 curl -k -s -u "elastic:$ES_PW" -X POST "https://localhost:9261/logs-generic-default/_count" -H 'Content-Type: application/json' -d '{"query":{"bool":{"filter":[{"range":{"@timestamp":{"gte":"now-10m"}}},{"term":{"attributes.k8s.resource.name":"events"}}]}}}' | python3 -c "import sys,json; print('k8s event docs 10m:', json.load(sys.stdin)['count'])"
-kill %1 2>/dev/null; unset ES_PW
+kill $PF 2>/dev/null; unset ES_PW
 ```
 
 ### 4.5 — Prometheus side: inflow back, nothing refused, alerts at baseline
 
 ```bash
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9299:9090 >/dev/null 2>&1 &
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9299:9090 >/dev/null 2>&1 & PF=$!
 sleep 4
 for q in 'sum(rate(otelcol_receiver_accepted_log_records_total{receiver="otlp"}[5m]))' \
          'sum(rate(otelcol_receiver_accepted_metric_points_total{receiver="otlp"}[5m]))' \
@@ -545,7 +620,7 @@ curl -s localhost:9299/api/v1/alerts | python3 -c "
 import sys,json
 a=[x for x in json.load(sys.stdin)['data']['alerts'] if x['state']=='firing' and x['labels'].get('alertname') not in ('Watchdog','InfoInhibitor')]
 print('firing:',len(a),[x['labels'].get('alertname') for x in a])"
-kill %1 2>/dev/null
+kill $PF 2>/dev/null
 ```
 **PASS:** OTLP inflow into edot ≥ **half** the §2.3 baseline (logs ≥ 20/s, metric
 points ≥ 1 800/s — the daemon sends in batches, so a short window is noisy;
@@ -555,10 +630,28 @@ equals the §2.3 baseline (no `Otel*`, `Edot*`, `KubeDaemonSet*` alert).
 **A ceiling without a floor is a shape check:** "no alerts firing" alone would be
 green with all three collectors silently idle. Assertions 1-3 are the floor.
 
+### 4.6 — Prometheus-CRD post-state matches the §2.6 row
+
+```bash
+kubectl get crd servicemonitors.monitoring.coreos.com podmonitors.monitoring.coreos.com probes.monitoring.coreos.com scrapeconfigs.monitoring.coreos.com \
+  -o 'custom-columns=NAME:.metadata.name,GEN:.metadata.generation,OPVER:.metadata.annotations.operator\.prometheus\.io/version,ORIGIN:.metadata.labels.helm\.toolkit\.fluxcd\.io/name'
+for k in servicemonitors podmonitors probes scrapeconfigs; do printf '%-16s %s\n' $k "$(kubectl get $k.monitoring.coreos.com -A --no-headers | wc -l | tr -d ' ')"; done
+```
+**PASS:** all four rows EXIST and read exactly what the §2.6 table's last column
+predicts for the pre-state you recorded (today: `0.92.0`, `GEN 31`, origin
+`otel-operator`); the per-kind CR counts equal the pre-window counts (a CRD
+delete would cascade them to 0 — 49/3/4/3 on 2026-09-15). **If the row was the
+0.94.0 one:** the four now read 0.92.0 — record "downgraded per F-a85e8943" in
+the window record; it is not a rollback trigger. **FAIL:** any CRD missing, or a
+write on the four when `installPrometheus=[false]` was recorded (the ownership
+fix did not take — that is `prometheus-crd-ownership`'s §5, not this plan's).
+
 ## 5) Rollback
 
 `rollback_class: git-revert` — no data, no schema, no migration; both chart
-versions render the same CRDs, so a downgrade replaces byte-identical documents.
+versions render the same CRDs, so a downgrade replaces byte-identical documents
+(for the four Prometheus CRDs: the same §2.6/§4.6 ordering rule applies to the
+revert's re-apply as to the forward one).
 
 **5.1 — Flux does the first tier itself.** `upgrade.remediation: {strategy:
 rollback, retries: 3}` — if the helm upgrade to 0.21.0 fails (e.g. a CRD apply
@@ -574,7 +667,8 @@ git show --stat HEAD            # exactly kubernetes/apps/monitoring/otel-operat
 git push origin main
 kubectl rollout status ds/otel-operator-daemon-collector -n monitoring --timeout=5m
 ```
-Expect helm revision **v25** at chart 0.20.9. The revert is itself a label change
+Expect helm revision **v+2** at chart 0.20.9 (v25 if nothing else reconciled the
+HR; informational). The revert is itself a label change
 plus a cert regeneration, so **the DaemonSet rolls again** (a second ~10-30 s
 log gap per node) and the webhook cert is minted again — re-run §4.2 and §4.3,
 then §4.4 after 10 min.
@@ -582,14 +676,18 @@ then §4.4 after 10 min.
 **Confirm the cluster is back** by cluster state, never by `git log`:
 
 ```bash
-kubectl get hr -n monitoring otel-operator -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.history[0].chartVersion} {.status.history[0].version}{"\n"}'   # True 0.20.9 25
+kubectl get hr -n monitoring otel-operator -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.history[0].chartVersion} {.status.history[0].version}{"\n"}'   # True 0.20.9 <v+2>
 kubectl get ds -n monitoring otel-operator-daemon-collector -o jsonpath='{.status.numberReady}/{.status.desiredNumberScheduled} {.spec.template.metadata.labels.helm\.sh/chart}{"\n"}'   # 3/3 …-0.20.9
 ```
 plus §4.4's three contents assertions. Then `runbooks/update-marker.sh clear otel-operator`.
 
 **5.3 — What rollback does NOT need:** no `kubectl delete` of anything, no PVC
 work (the collector has none), no CRD surgery. If a CRD ever looks wrong, the
-cause is not this bump — both versions ship identical CRDs.
+cause is not this bump — both versions ship identical CRDs. The one CRD state
+change this bump CAN cause is the four Prometheus CRDs flipping 0.94.0 → 0.92.0
+when `kube-prometheus-stack-91.4.0` ran first (§2.6 row 3): that is the
+documented contention F-a85e8943, not a fault, and it is not undone by this
+revert (the revert re-applies the same 0.92.0 copies).
 
 ## 6) Interference notes
 
@@ -607,13 +705,27 @@ cause is not this bump — both versions ship identical CRDs.
   makes any gap in §4.4 unattributable. If Step 0's safe-update lane bumps
   `edot-collector` (image) in this window, run this plan only after edot's own
   verification has passed.
-- **Do not run in the same window as a `kube-prometheus-stack` chart bump.** The
-  cluster's `monitoring.coreos.com` CRDs are split between two HelmReleases:
-  `servicemonitors`, `podmonitors`, `probes`, `scrapeconfigs` are owned by **this**
-  HR (premise `this-hr-owns-the-prometheus-crds`), `prometheusrules` etc. by
-  kube-prometheus-stack. Both use `crds: CreateReplace`. This bump's copies are
-  byte-identical so the replace is a no-op — but two HRs replacing overlapping
-  CRD sets in the same minutes is a race worth not having. Serialize.
+- **`kube-prometheus-stack-91.4.0` — hard conflict (`conflicts_with`), and an
+  ORDER.** The cluster's `monitoring.coreos.com` CRDs are split between two
+  HelmReleases (sweep record **F-a85e8943**, AR-072 — cited, not re-described):
+  `servicemonitors`, `podmonitors`, `probes`, `scrapeconfigs` were last written
+  by **this** HR (0.92.0), the other six by kube-prometheus-stack (0.93.1). Both
+  use `crds: CreateReplace`; the last writer wins and the origin label follows
+  it. Two consequences: (1) never the same window — two HRs replacing overlapping
+  CRD sets in the same minutes is a race worth not having; (2) **run this plan
+  BEFORE kps-91.4.0** (e.g. an earlier nightly). In that order this bump is a
+  no-op re-apply (0.92.0 → 0.92.0) and kps's later "`total 10 at 0.94.0`"
+  assertion holds as written. In the other order this bump downgrades four CRDs
+  0.94.0 → 0.92.0 — harmless (§1) but it must be recorded (§2.6/§4.6), and the
+  former premise `this-hr-owns-the-prometheus-crds` would have FAILED by design,
+  which is why it was replaced by the §2.6 measurement.
+- **`prometheus-crd-ownership` — hard conflict (`conflicts_with`), any order
+  across windows.** It sets `crds.installPrometheus: false` on this same
+  HelmRelease so this HR stops writing the four CRDs (proven `crds/`-directory
+  provenance — no delete risk). Not the same window because two otel-operator
+  helm upgrades confound its "generation unchanged across one upgrade" proof.
+  If it lands first, this bump touches only the four `opentelemetry.io` CRDs
+  (§2.6 row 2). If this plan lands first, nothing changes for it.
 - **`talos-1.14.0` (node roll) must not share the window** — it evicts every pod
   including these; every assertion above would be measuring a cluster in motion.
 - **No reboot, no capability change, git-revert, ~30 min:** fits `nightly`

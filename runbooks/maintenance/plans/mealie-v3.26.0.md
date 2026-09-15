@@ -52,11 +52,13 @@ security_ref: null                    # no security driver on OUR side; upstream
                                       # hardening is the reason for the hold, not a finding
 finding_refs:
   - F-ec4c1644                        # "coverage.py direct-bump lane has NO G3 breaking-change
-                                      #  gate … mealie v3.25.1 -> v3.26.0 rated AUTO". This
-                                      #  plan answers the MEALIE half (the held item). The
-                                      #  finding's Action — the coverage.py G3 fix + test +
-                                      #  auto-update.md correction — is CODE work outside any
-                                      #  window; executing this plan does not close it. See §6.
+                                      #  gate … mealie v3.25.1 -> v3.26.0 rated AUTO". Status
+                                      #  RESOLVED 2026-09-15 (cd163006: the direct-bump breaking
+                                      #  gate in coverage.py + DirectBumpBreakingGateTest in
+                                      #  runbooks/tests/test-coverage-lane-safety.py + the
+                                      #  auto-update.md correction). Kept as the ownership link
+                                      #  for the HELD ITEM this plan disposes of; there is
+                                      #  nothing left to close. See §6.
 status: draft
 window: null                          # window agent assigns. Any non-reboot window fits (25 min
                                       # against 90). capability_change:true => human-gated, so
@@ -283,7 +285,7 @@ kubectl -n office exec deploy/mealie-pg -- psql -U mealie -d mealie -At \
   -c "select 'recipe_actions='||count(*) from recipe_actions" \
   -c "select 'notifiers='||count(*) from group_events_notifiers" \
   -c "select 'recipes='||count(*) from recipes" \
-  -c "select 'recipes_with_image='||count(*) from recipes where image is not null" \
+  -c "select 'recipes_with_image='||count(*) from recipes where image is not null and image <> 'no image'" \
   -c "select 'users='||count(*) from users" \
   -c "select 'users_oidc='||count(*) from users where auth_method='OIDC'" \
   -c "select 'notes='||count(*) from notes" \
@@ -292,6 +294,12 @@ kubectl -n office exec deploy/mealie-pg -- psql -U mealie -d mealie -At \
 **PASS / baseline 2026-09-15:** `alembic_head=69e942bab3aa` · `webhook_urls=0` ·
 `recipe_actions=0` · `notifiers=0` · `recipes=173` · `recipes_with_image=173` · `users=2` ·
 `users_oidc=1` · `notes=2` · `tables=66`.
+**Why `recipes_with_image` excludes `'no image'`** (review 2026-09-15): that string is
+Mealie's `NO_IMAGE` sentinel, and migration `4b91d3a7c0e2` treats a row carrying it as
+having NO image key — it is RESTORED if `original.webp` exists and CLEARED if not. A
+sentinel row counted as "with image" would mispredict the §4.3 backfill line and fail a
+correct upgrade. (The 173 baseline was measured with `is not null`; re-measure with the
+corrected query on the day — if the number differs, that difference is the sentinel rows.)
 **If `webhook_urls` or `recipe_actions` is no longer 0: STOP.** Someone configured an
 outbound target since this plan was written; read the row, resolve its host from the pod,
 and if it is private the plan needs an `HTTP_ALLOW_LIST` entry for *that host only* —
@@ -317,7 +325,9 @@ kubectl -n office exec deploy/mealie -c main -- sh -c \
 plan-write time) and `/app/data` is on `/dev/longhorn/mealie-data`. If they differ, the
 migration WILL clear (or restore) the difference — that is upstream's intended repair, but
 write the numbers down so §4.3's prediction is `restored = webp − with_image` /
-`cleared = with_image − webp`, not 0/0.
+`cleared = with_image − webp`, not 0/0 — where `with_image` is the §2.2 count that already
+excludes the `'no image'` sentinel (a sentinel row with a file on disk lands in `restored`,
+one without lands in `cleared`).
 
 **2.5 — The OIDC discovery path works BEFORE the change** (so a §4.4 failure is
 attributable). From inside the pod, through the same DNS the app uses:
@@ -347,9 +357,13 @@ kill %1 2>/dev/null
 ## 3) Steps
 
 **3.1 — Active-update marker** (`docs/sops/application-update.md` Step 1). No Alertmanager
-silence: the `Mealie*` rules are `for: 5m` (NotReady / CrashLooping) and the Recreate +
-Alembic run is expected in well under that; the marker makes any stray alert read as
-EXPECTED by the triage agent.
+silence: `MealieNotReady` / `MealieCrashLooping` are `for: 5m` and the Recreate + Alembic
+run is expected in well under that. `MealiePodRestarted` is `for: 1m` on
+`increase(kube_pod_container_status_restarts_total[15m]) > 0`
+(`kubernetes/apps/monitoring/kube-prometheus-stack/app/mealie-alerts.yaml`) — a clean
+Recreate is a FRESH pod (restart count 0), so it stays silent on the happy path, but it WILL
+fire within ~1 min during a §5 crash-loop rollback; the marker makes that (and any stray
+alert) read as EXPECTED by the triage agent.
 
 ```bash
 runbooks/update-marker.sh add mealie office 2 "image v3.25.1->v3.26.0"
@@ -369,7 +383,7 @@ pg_restore -l "$DUMP" | grep -c 'TABLE DATA'
 kubectl -n office exec deploy/mealie-pg -- psql -U mealie -d mealie -At \
   -c "select 'alembic_head='||version_num from alembic_version" \
   -c "select 'recipes='||count(*) from recipes" \
-  -c "select 'recipes_with_image='||count(*) from recipes where image is not null" \
+  -c "select 'recipes_with_image='||count(*) from recipes where image is not null and image <> 'no image'" \
   -c "select 'users='||count(*) from users" \
   -c "select 'notes='||count(*) from notes" \
   -c "select 'tables='||count(*) from information_schema.tables where table_schema='public'" \
@@ -425,10 +439,10 @@ Four additive Alembic revisions run at startup (head 69e942bab3aa ->
 3527efeeec34); pre-upgrade pg_dump taken per the plan's backup gate.
 
 Plan: runbooks/maintenance/plans/mealie-v3.26.0.md
-Finding: F-ec4c1644
+Finding: F-ec4c1644 (resolved cd163006; this commit is the held item it surfaced)
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_012bXdxrZGGHNy5e4RnF6seD
+<ATTRIBUTION LINES OF THE EXECUTING SESSION — replace this line; do NOT copy the
+planner's Co-Authored-By / Claude-Session lines into the executing commit>
 EOF
 git commit --only kubernetes/apps/office/mealie/app/helmrelease.yaml -F /tmp/mealie-msg.txt
 git show --stat HEAD          # MUST list exactly helmrelease.yaml
@@ -491,7 +505,7 @@ means a migration half-applied — treat as FAIL and go to §5.
 ```bash
 kubectl -n office logs deploy/mealie -c main | grep -E 'Recipe image backfill|Skipping the clearing half'
 kubectl -n office exec deploy/mealie-pg -- psql -U mealie -d mealie -At \
-  -c "select 'recipes_with_image='||count(*) from recipes where image is not null"
+  -c "select 'recipes_with_image='||count(*) from recipes where image is not null and image <> 'no image'"
 ```
 **PASS:** the log line reads `Recipe image backfill checked <recipes> recipes:
 <webp − with_image> image references restored, <with_image − webp> cleared` — with the
@@ -521,7 +535,11 @@ kubectl -n office logs deploy/mealie -c main --since=15m | grep -cE '\[safehttp\
 ```
 **PASS:** the `/api/auth/oauth/callback?code=…` request is logged with a **3xx** (the
 authlib redirect into the app), not 401/500; the blocked/error grep prints **0**; the
-§2.5 probe still shows `192.168.55.104` + `issuer ok: True`.
+§2.5 probe still shows `192.168.55.104` + `issuer ok: True`. If uvicorn's access log
+does not emit 3xx lines at the configured log level (the callback grep comes back empty
+rather than showing a 401/500), fall back to the PRIMARY pass signal: step 1's browser
+login landed signed-in on the home page AND the blocked/error grep prints 0 — that pair
+is sufficient; an empty access-log grep alone is not a failure.
 **If the callback returns 401/500 or a `[safehttp] blocked … auth.…` line appears:** §1.2
 was wrong for this build — go to §5, and only then consider `HTTP_ALLOW_LIST` with
 exactly the auth hostname (hostnames match exactly; never a CIDR) as a re-planned change.
@@ -587,9 +605,10 @@ kubectl -n office exec deploy/mealie-pg -- psql -U mealie -d mealie -At \
   -c "select 'recipes='||count(*) from recipes" -c "select 'tables='||count(*) from information_schema.tables where table_schema='public'"
 ```
 **Expected:** `alembic_head=69e942bab3aa`, `recipes` and `tables` equal to
-`$DUMP.counts.txt`. (`--clean` drops the three new tables because they are not in the
-dump's DROP list only if they existed at dump time — they did not — so after Option B
-also run `drop table if exists recipe_note_ref_link, recipes_ingredients_substitutions,
+`$DUMP.counts.txt`. (`--clean --if-exists` only drops objects that are IN the dump; the
+three new tables and two new columns are not in it — they did not exist at dump time —
+so they SURVIVE the restore. After Option B therefore also run
+`drop table if exists recipe_note_ref_link, recipes_ingredients_substitutions,
 ingredient_foods_substitutions; alter table users drop column if exists
 external_avatar_hash; alter table notes drop column if exists reference_id;` to leave the
 schema byte-for-byte pre-upgrade. Harmless if already gone.)
@@ -620,8 +639,9 @@ kubectl -n office rollout status deploy/mealie --timeout=10m
 - **Expected noise, not regressions:** one `mealie-shopping-sync` Job (`*/5`) may fail
   during the 1-2 minute Recreate hole — the next one passes (§4.6). The memory note
   *"mealie sync 500s are HA, not Mealie"* concerns the HA side and is unrelated to this
-  change. `Mealie*` alerts are `for: 5m` and should not fire; the §3.1 marker covers a
-  stray one.
+  change. `MealieNotReady` / `MealieCrashLooping` are `for: 5m` and should not fire;
+  `MealiePodRestarted` (`for: 1m`, restart-count increase) fires only if §5 is exercised
+  — the §3.1 marker covers either.
 - **The `HTTP_ALLOW_LIST` temptation.** If anything at all looks wrong after the bump, the
   release notes will suggest setting it. Do not — unless §4.4 has *proved* the login path
   is blocked, which §1.2 shows it cannot be in this build. The correct reaction to any
@@ -631,13 +651,15 @@ kubectl -n office rollout status deploy/mealie --timeout=10m
   crash loop, not v3.25.1.
 - **Re-attempt after a rollback** needs the §5.2 Option-A caveat handled (stamp forward or
   drop the additive schema) — put it in the re-plan, do not improvise in-window.
-- **F-ec4c1644 is only half-answered here.** This plan disposes of the *mealie* item the
-  finding surfaced. The finding's Action — add a `breaking_change_signal()` call before
-  the AUTO exit in `runbooks/coverage.py::assign_lane` for non-PR items, a notes-fixture
-  test with a `## Breaking changes` heading, and correcting `docs/sops/auto-update.md`'s
-  claim that direct bumps clear G3 — is code work for a normal session, not a window
-  action. Executing this plan must not be recorded as closing the finding; close it on the
-  commit that lands that fix.
+- **F-ec4c1644 is RESOLVED (cd163006, 2026-09-15) — this plan covers only the bump.** The
+  finding's Action — a direct-bump breaking-change gate before the AUTO exit in
+  `runbooks/coverage.py`, `DirectBumpBreakingGateTest` in
+  `runbooks/tests/test-coverage-lane-safety.py`, and the `docs/sops/auto-update.md`
+  correction — has already landed. The finding stays in `finding_refs` only as the
+  ownership link for the *mealie* item it surfaced; there is no pending code work behind
+  it and nothing to close on execution. (Consequence for the lane: coverage.py now routes
+  this item to PLAN both via "plan exists" and via the new gate, so the nightly Step 0 will
+  not apply v3.26.0 unattended — no deny rule is needed.)
 
 ### Duration against the slot
 

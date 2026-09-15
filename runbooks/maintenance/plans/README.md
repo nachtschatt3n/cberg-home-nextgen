@@ -122,7 +122,18 @@ touches:                          # interference surface — be precise
                                   # must declare gateway/envoy to be scheduled
                                   # against the right interference surface.
 depends_on: []                    # other plan_ids that must run first
-conflicts_with: []               # plan_ids that must NOT share a window
+conflicts_with: []               # plan_ids that must NOT share a window.
+                                  # ONLY THIS FIELD IS HONOURED by the scheduler
+                                  # (window-scheduler.py); a prose "run these
+                                  # serially" rule in §6 schedules nothing, and a
+                                  # `shared:` intersection is a warning, not a
+                                  # veto. So: a plan whose §4 verification reads
+                                  # Prometheus MUST list any same-night
+                                  # kube-prometheus-stack bump here (and that
+                                  # bump must list the plan) — the window's
+                                  # instrument counts as shared infra. Declare
+                                  # conflicts on BOTH sides: --validate checks
+                                  # that refs resolve, not reciprocity.
 security_ref: null                # F-xxxxxxxx if this plan has a security driver.
 capability_change: false          # P2.1: does this change what the software can
                                   # do / user-visible behaviour? true => never
@@ -222,6 +233,23 @@ CONTENTS ASSERTION: <the property> — measured by <command>, compared to <basel
 - **A ceiling without a floor is a shape check.** Any assertion of the form
   "X should go down" needs the matching "and X must still be > 0", or the
   total disappearance of X reads as complete success.
+
+## Shell hygiene in §3/§4 — the executor runs zsh on the Mac mini
+
+A verification that cannot *run* reads as a failed window, and two shell
+traps have already produced that (`feedback_commit_only_untracked_and_zsh_splitting`):
+
+- **Quote every `-o jsonpath=` / `-o custom-columns=` argument that contains
+  `[`, `?` or `*`.** Unquoted `{.items[0]...}` or `RESTARTS:.status.containerStatuses[0].restartCount`
+  aborts under zsh with `no matches found` before kubectl runs. Single-quote
+  the whole argument; if it must interpolate a shell variable, double-quote
+  it and escape nothing else.
+- **Capture port-forward PIDs with `$!` and kill by PID, never `kill %1`.**
+  Job control is not available in a non-interactive shell, so `kill %1` fails
+  and the forward leaks (or, worse, a later `kill %1` hits a different job).
+  Pattern: `kubectl port-forward ... >/dev/null 2>&1 & PF=$!; sleep 2; ...; kill $PF 2>/dev/null`.
+  A forward also dies with the pod it targets — re-establish it after any
+  Recreate before the next assertion.
 
 ## Public repo — vulnerability detail does NOT go in a plan
 

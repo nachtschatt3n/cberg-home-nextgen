@@ -48,14 +48,16 @@ touches:
     - configmap/library-tools-scripts   # NEW 2026-09-15: four Jellyfin API calls use the
                                         # legacy `X-Emby-Token` header, which 12.x's
                                         # DisableLegacyAuthorization migration switches off
-                                        # (§1.4). Fixed in §3 step 0 as a separate,
-                                        # backward-compatible commit BEFORE the bump.
+                                        # (§1.4). The header switch is being landed NOW by
+                                        # cberg-agent as its own backward-compatible commit,
+                                        # outside this plan; §3 step 0 references it and
+                                        # gate G3 verifies it reconciled (0 call sites).
     - cronjob/media-metadata-coverage   # hourly consumer of the above (feeds media-dashboard)
     - cronjob/media-per-item-refresh    # 6-hourly consumer of the above
     - cronjob/media-rescan              # manual-only consumer of the above
     - deployment/media-dashboard        # reads coverage output; shows "no Jellyfin data" on 401
-  shared: [igpu-i915]                   # REUSE the exact token introduced in
-                                        # scrypted-0.145.0.md. Pod requests+limits
+  shared: [igpu-i915]                   # REUSE the exact token scrypted-0.147.0.md and
+                                        # frigate-0.18.0.md carry. Pod requests+limits
                                         # `gpu.intel.com/i915: 1`, scheduled on k8s-nuc14-03
                                         # (live 2026-09-15), which also serves
                                         # immich-machine-learning and makemkv (3/5 slots; plex
@@ -68,8 +70,11 @@ conflicts_with: [media-audit-durable-output]   # NEW 2026-09-15: that plan (vett
                                       # configmap/library-tools-scripts. Two plans rewriting
                                       # the same ConfigMap in one window is exactly the
                                       # interference the window agent exists to catch; keep
-                                      # them apart and land this plan's step 0 AFTER 09-19's
-                                      # edit is on main (§6). No other open plan touches
+                                      # them apart. (Review 2026-09-15: the step-0 hunks —
+                                      # the X-Emby-Token lines in rescan.py /
+                                      # metadata_coverage.py / per_item_refresh.py — do NOT
+                                      # overlap 09-19's audit.py edit, so step 0 lands now,
+                                      # not after 09-19; §6.) No other open plan touches
                                       # helmrelease/jellyfin or either jellyfin PVC
                                       # (`maintenance-plan.py --open`, 2026-09-15).
 security_ref: F-3a72570a              # Security finding on the CURRENT image — detail on
@@ -97,9 +102,10 @@ backup_gate: "on-demand Longhorn backup of the jellyfin-config volume (holds jel
   plugins/, users/, everything that matters), triggered in-window immediately before the tag
   edit is pushed and verified by a NEW Completed Backup CR for jellyfin-config whose
   creationTimestamp is AFTER the trigger command ran — the nightly 03:00 backup (newest
-  Completed at plan-refresh time: backup-22db01b0fb404cf2, 2026-09-14T03:00:31Z) does not
-  satisfy this gate on its own because it predates the plugin-removal step (§3 step 1).
-  See §3 step 4 and §5."
+  Completed at review time: backup-d8aa67bc8b614641, 2026-09-15T03:04:21Z; re-record at
+  window time) does not satisfy this gate on its own because it predates the
+  plugin-removal step (§3 step 1). Triggered via cronjob/daily-backup-all-volumes (ns
+  storage) — NOT `backup-of-all-volumes`, which does not exist. See §3 step 4 and §5."
 finding_refs: [F-fc5e2913, F-3a72570a]
 status: draft
 window: null                          # See §6 for the recommended slot (sun-attended:2026-09-20).
@@ -335,13 +341,30 @@ server), Jellyfin Mobile iOS/iPadOS 1.7.0, Jellyfin iOS 1.7.0, Jellyfin tvOS
 1.0.1, Infuse-Direct 8.1.5, **Home Assistant** (3 devices, the
 `jellyfin` integration), **Music Assistant** (2.5.8 and 2.10.3, the
 Jellyfin provider). Official Jellyfin clients and Infuse use the modern
-header. HA and Music Assistant go through Python client libraries whose
-header choice this plan could not verify from the server side — **both are
-explicit post-upgrade checks (§4.6)**, and if either breaks, the remedy is on
-their side (client update) or an **operator decision** to re-enable
-`EnableLegacyAuthorization` in `system.xml`/Dashboard — the key still exists
-in 12.x; the migration only flips it once — which weakens the hardening 12.0
-shipped and is therefore not a step in this plan.
+header. HA and Music Assistant go through Python client libraries; the
+2026-09-15 review read both from source (verified, not inferred):
+
+- **Home Assistant 2026.9.2** (live image) pins `jellyfin-apiclient-python==1.16.0`.
+  At that tag the client's own requests carry `Authorization: MediaBrowser …`
+  (`http.py` l.271), so the integration's **state entities and media_player
+  survive** the migration. But its `_build_url` (`http.py` l.91-92) still
+  appends the legacy `api_key=` query parameter to the stream/thumbnail URLs
+  that HA's media_source hands to players. **Expected casualty: playing or
+  browsing Jellyfin items from HA's media browser 401s after the upgrade**
+  until HA ships a newer apiclient (upstream master already uses `ApiKey`;
+  v1.17.0/v1.18.0 exist, HA has not bumped). Remedy = HA update, **not**
+  re-enabling legacy auth. Explicit check in §4.6.
+- **Music Assistant 2.10.3** (live pod) uses `aiojellyfin 0.14.1`, whose own
+  requests send `Authorization: MediaBrowser` (`session.py` l.75); its
+  `_build_url` adds legacy `api_key`, but MA's Jellyfin provider
+  `_normalize_jellyfin_media_url` rewrites it to `apiKey`, which matches the
+  unguarded `ApiKey` branch case-insensitively. **Expected green** in §4.6.
+
+If either check fails anyway, the remedy is on their side (client update) or
+an **operator decision** to re-enable `EnableLegacyAuthorization` in
+`system.xml`/Dashboard — the key still exists in 12.x; the migration only
+flips it once — which weakens the hardening 12.0 shipped and is therefore not
+a step in this plan.
 
 ## 2. Pre-checks
 
@@ -353,11 +376,15 @@ shipped and is therefore not a step in this plan.
   library/user/auth DB), `library.db.old` (28M, a prior-migration leftover,
   harmless), `plugins/`, `trickplay/`, `subtitles/`, `SQLiteBackups/`, and
   `config/{system,network,encoding,…}.xml`. **This is the volume that
-  matters.** Backed by the nightly `backup-of-all-volumes` CronJob
-  (`docs/sops/backup.md`); newest Completed Backup CR at refresh time:
-  `backup-22db01b0fb404cf2` 2026-09-14T03:00:31Z. That backup predates the
-  plugin removal this plan performs, so it is **not** sufficient — the
-  `backup_gate` requires a fresh in-window backup (§3 step 4).
+  matters.** Backed by the nightly `cronjob/daily-backup-all-volumes` (ns
+  `storage`, `0 3 * * *`, owned by the Longhorn RecurringJob
+  `daily-backup-all-volumes` — `kubectl get recurringjobs.longhorn.io -n
+  storage daily-backup-all-volumes`; the name `backup-of-all-volumes` that
+  several docs still use does NOT exist in the cluster). Newest Completed
+  Backup CR at review time: `backup-d8aa67bc8b614641` 2026-09-15T03:04:21Z
+  (re-record at window time). That backup predates the plugin removal this
+  plan performs, so it is **not** sufficient — the `backup_gate` requires a
+  fresh in-window backup (§3 step 4).
 - `jellyfin-media` -> **`cifs-jellyfin-media`**, `//192.168.55.240/media`,
   `subdir: /`, StorageClass **and** PV `reclaimPolicy: Retain` (both
   re-read live). This is the **Tier-1 / catastrophic** class in
@@ -491,32 +518,33 @@ GitOps + one in-window manual admin action (plugin removal). Follow
 `docs/sops/application-update.md` §"Attended" tier (silence -> disable
 rollback -> bump -> watch -> verify -> restore rollback).
 
-0. **PRE-WINDOW, separate commit — move library-tools off the legacy auth
-   header.** Backward-compatible (measured working on 10.11.11), so land it
-   any time before the window — but **after** `media-audit-durable-output`
-   (sat-attended:2026-09-19) has merged its own edit to the same ConfigMap,
-   or rebase onto it (§6). Edit
-   `kubernetes/apps/media/library-tools/app/scripts-configmap.yaml` at the
-   four call sites (`rescan.py` `/Library/Refresh`; `metadata_coverage.py`
-   `jellyfin_items`; `per_item_refresh.py` `jellyfin_missing` and
-   `jellyfin_refresh`), replacing the legacy header with the modern one:
-   ```python
-   # was:  headers={"X-Emby-Token": key}          (and jf_key in rescan.py)
-   headers={"Authorization": f'MediaBrowser Token="{key}"'}
-   ```
+0. **ALREADY IN FLIGHT — the library-tools header switch is being landed
+   separately by cberg-agent (2026-09-15), as its own `git commit --only`
+   outside this plan. Do NOT redo it here.** It is backward-compatible
+   (measured working on 10.11.11: the `Authorization: MediaBrowser` header is
+   unguarded in `AuthorizationContext.cs`), and its hunks — the four
+   `X-Emby-Token` call sites in `rescan.py` (`/Library/Refresh`),
+   `metadata_coverage.py` (`jellyfin_items`), `per_item_refresh.py`
+   (`jellyfin_missing`, `jellyfin_refresh`) — do not overlap the `audit.py`
+   key that `media-audit-durable-output` (sat-attended:2026-09-19) edits, so
+   there is no reason to hold it until after 09-19. What this plan owns is the
+   **verification** that it reconciled, which is gate G3 in §2.5 plus the
+   contents check below (run once the ConfigMap shows 0 call sites):
    ```bash
    cd /Users/mu/code/cberg-home-nextgen
-   grep -n 'X-Emby-Token' kubernetes/apps/media/library-tools/app/scripts-configmap.yaml   # 4 hits before, 0 after
-   git diff kubernetes/apps/media/library-tools/app/scripts-configmap.yaml
-   git commit --only kubernetes/apps/media/library-tools/app/scripts-configmap.yaml \
-     -m "fix(library-tools): use the standard Authorization header for Jellyfin — X-Emby-Token is legacy auth, switched off by the 12.x migration"
-   git show --stat HEAD && git push
-   # CONTENTS check for step 0 (after Flux reconciles the ConfigMap): the next
-   # hourly coverage run must still return Jellyfin data on 10.11.11 —
-   kubectl create job -n media --from=cronjob/media-metadata-coverage coverage-step0-$(date +%H%M)
-   kubectl logs -n media job/coverage-step0-$(date +%H%M) | grep -i jellyfin | head
+   git log --oneline -3 -- kubernetes/apps/media/library-tools/app/scripts-configmap.yaml   # the header-switch commit
+   grep -c 'X-Emby-Token' kubernetes/apps/media/library-tools/app/scripts-configmap.yaml     # 0
+   # CONTENTS check for step 0 (after Flux reconciles the ConfigMap): a coverage run
+   # must still return Jellyfin data on 10.11.11 with the modern header —
+   J=coverage-step0-$(date +%H%M)
+   kubectl create job -n media --from=cronjob/media-metadata-coverage "$J"
+   kubectl wait -n media job/"$J" --for=condition=complete --timeout=10m
+   kubectl logs -n media job/"$J" | grep -i jellyfin | head
    #   must show non-zero Jellyfin item/coverage figures, not an auth error.
    ```
+   If G3 still prints 4 at window start, the separate commit has not landed
+   or not reconciled — chase THAT commit (do not write a second one from this
+   plan), then re-run G3.
 
 1. **Remove the TubeArchivistMetadata plugin from the running instance**
    (Dashboard -> Plugins -> uninstall), or via the pod filesystem if the UI
@@ -556,8 +584,10 @@ rollback -> bump -> watch -> verify -> restore rollback).
    GATE_START=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo "GATE_START=$GATE_START"
    # docs/sops/backup.md "Manual Backup (Ad-hoc)" — the CronJob backs up ALL
    # volumes (broader than needed, acceptable); or Longhorn UI -> Volume ->
-   # jellyfin-config -> Create Backup for just this one.
-   kubectl create job --from=cronjob/backup-of-all-volumes pre-jellyfin-12-$(date +%Y%m%d-%H%M) -n storage
+   # jellyfin-config -> Create Backup for just this one. The CronJob is
+   # `daily-backup-all-volumes` (Longhorn RecurringJob-owned) — NOT
+   # `backup-of-all-volumes`, which returns NotFound.
+   kubectl create job --from=cronjob/daily-backup-all-volumes pre-jellyfin-12-$(date +%Y%m%d-%H%M) -n storage
    kubectl get backups -n storage -l backup-volume=jellyfin-config \
      --sort-by=.metadata.creationTimestamp \
      -o custom-columns=NAME:.metadata.name,STATE:.status.state,CREATED:.metadata.creationTimestamp | tail -3
@@ -589,10 +619,36 @@ rollback -> bump -> watch -> verify -> restore rollback).
    (`Recreate`). Budget for the image pull plus the first-boot migration
    (12.0 notes: *"Migration routines clean up existing data on first boot"*)
    — let it run to completion; do not hand-kill the pod mid-migration
-   (`docs/sops/application-update.md` §7 if it wedges). The liveness probe
-   allows 60s + 10x30s before a restart; if the migration log is still
-   progressing at that point, temporarily raising `failureThreshold` is the
-   correct intervention, not deleting the pod.
+   (`docs/sops/application-update.md` §7 if it wedges).
+
+   **How 12.1 actually behaves during the migration (read from v12.1
+   `Program.cs` / `SetupServer.cs`, corrected 2026-09-15):** every migration
+   (CoreInitialisation l.211, AppInitialisation l.217, cleanup, DB optimize)
+   runs BEFORE `_jellyfinHost.StartAsync()` (l.227), but a `SetupServer`
+   already listens on 8096 during that time: it maps `/health` (returns
+   Degraded → HTTP **200**) and `/System/Info/Public` (→ **503**). Three
+   consequences:
+   - liveness (`/health`) stays green throughout, so the pod is **not** killed
+     at "60s + 10x30s" by a long migration — do not plan around that;
+   - readiness (tcpSocket 8096) and the chart-3.2.0 default `startupProbe`
+     (tcpSocket, 30x10s, present on the live Deployment) both pass on the
+     SetupServer, so **pod Ready, `helm --wait` and HR Ready=True all arrive
+     WHILE the migration is still running** — "Ready" proves nothing here,
+     which is the concrete reason §4 is contents-based;
+   - do NOT "protect" the migration by raising a probe threshold via the
+     HelmRelease: under `Recreate` a pod-template change replaces the pod and
+     kills the very migration it was meant to protect.
+
+   What to do instead: watch the pod log for `Running migration X of Y` /
+   `Startup complete`, treat `/System/Info/Public` → 503 as "still migrating",
+   and end this step only on a 503→200 transition whose body reports
+   `Version` 12.1.x (§4.1). Then **re-establish the port-forward** — the one
+   from §2.5 died with the old pod:
+   ```bash
+   kubectl port-forward -n media svc/jellyfin 8097:8096 >/dev/null 2>&1 &
+   sleep 3
+   curl -s -o /dev/null -w 'public-info http=%{http_code}\n' http://localhost:8097/System/Info/Public   # 503 = migrating, 200 = up
+   ```
 
 7. **Mandatory post-upgrade full library scan** (upstream requirement, §1.3
    item 7) — Dashboard -> Scheduled Tasks -> "Scan Media Library", or:
@@ -653,10 +709,17 @@ floor" failure in `docs/sops/verification-contents-not-shape.md`.
 > (unauthenticated, green even if every login broke).
 
 ```bash
+# Credentials: NO SOPS secret in this repo holds a Jellyfin admin password (only the
+# library-tools API key in media/library-tools secret.sops.yaml and media-manager-tokens
+# exist — checked 2026-09-15). The operator supplies the Jellyfin admin username/password
+# at the prompt (read -s), never writes them into a file, and this check is therefore
+# ATTENDED. Do not skip it because the placeholders are blank.
+read -r -p 'Jellyfin admin user: ' JF_USER; read -r -s -p 'Jellyfin admin pw (not stored): ' JF_PW; echo
 curl -s -o /dev/null -w 'http=%{http_code}\n' -X POST "http://localhost:8097/Users/AuthenticateByName" \
   -H 'Content-Type: application/json' \
   -H 'Authorization: MediaBrowser Client="plan-verify", Device="cli", DeviceId="plan-verify", Version="1.0"' \
-  -d '{"Username":"<admin-user>","Pw":"<password>"}'
+  -d "{\"Username\":\"$JF_USER\",\"Pw\":\"$JF_PW\"}"
+unset JF_PW
 #   MUST be 200 with an AccessToken in the body, not 401.
 # And the API key path the CronJobs use:
 curl -s -o /dev/null -w 'apikey-modern http=%{http_code}\n' -H "Authorization: MediaBrowser Token=\"$JF_KEY\"" http://localhost:8097/System/Info
@@ -700,9 +763,19 @@ kubectl logs -n media job/coverage-post12-$(date +%H%M) | grep -iE 'jellyfin|401
 #   non-zero Jellyfin figures, no 401.
 # media-dashboard renders a Jellyfin section (not "no Jellyfin data"):
 curl -s http://<media-dashboard via port-forward>/ | grep -c 'no Jellyfin data'    # expect 0
-# Home Assistant `jellyfin` integration: entities not `unavailable` (ha-agent / hactl),
-# Music Assistant Jellyfin provider: library browse returns items.
-#   Either failing => §1.4 remedy path (client-side fix or an operator
+
+# Home Assistant `jellyfin` integration (HA 2026.9.2, jellyfin-apiclient-python 1.16.0 — §1.4):
+#   EXPECTED GREEN: entities / media_player not `unavailable` (ha-agent / hactl) — the
+#     integration's own requests use the modern Authorization header.
+#   EXPECTED CASUALTY: browsing/playing a Jellyfin item from HA's media browser
+#     (Media -> Jellyfin) 401s, because the client appends legacy `api_key=` to the
+#     stream/thumbnail URLs it hands to players. Record it as EXPECTED, not as a failed
+#     migration; remedy = an HA release that bumps the apiclient past 1.16.0 (upstream
+#     already uses `ApiKey`). Do NOT re-enable legacy auth for this.
+# Music Assistant (2.10.3, aiojellyfin 0.14.1 — §1.4): EXPECTED GREEN — library browse
+#   returns items AND a track/movie starts playing (MA rewrites api_key -> apiKey, the
+#   unguarded branch). A 401 here is unexpected and needs a real look.
+#   Any other failure => §1.4 remedy path (client-side fix or an operator
 #   decision), NOT a rollback trigger on its own.
 ```
 
@@ -751,20 +824,58 @@ git show --stat HEAD
 git push
 #    Do NOT revert the step-0 library-tools commit — the modern header works on 10.11.11.
 
-# 2) Suspend the HelmRelease so Flux doesn't fight the restore mid-flight:
+# 2) Suspend BOTH Flux objects so nothing re-applies the old PV/PVC or restarts the
+#    Deployment mid-restore (pv/pvc are applied by the `jellyfin` Kustomization in ns
+#    media, prune: true — the HelmRelease alone is not enough), then free the volume:
+flux suspend kustomization -n media jellyfin
 flux suspend helmrelease -n media jellyfin
 kubectl scale deploy -n media jellyfin --replicas=0     # release the RWX volume before restore
+kubectl wait -n media --for=delete pod -l app.kubernetes.io/name=jellyfin --timeout=5m
 
-# 3) Restore jellyfin-config from the backup_gate's Backup CR (name recorded
-#    in §3 step 4): Longhorn UI (port-forward svc/longhorn-frontend 8080:80)
-#    -> Backup -> jellyfin-config -> that backup -> Restore -> new volume
-#    (e.g. `jellyfin-config-restored`), then repoint per docs/sops/backup.md
-#    "Bind Restored Volume to Application" — the PV's volumeHandle must name
-#    the restored Longhorn volume and the PVC's claimRef must match before
-#    resuming. NO action on pvc/jellyfin-media at any point.
-
+# 3) Restore jellyfin-config from the backup_gate's Backup CR (name recorded in §3
+#    step 4). READ FIRST: `spec.csi.volumeHandle` on a PersistentVolume is IMMUTABLE,
+#    and pv/jellyfin-config + pvc/jellyfin-config are git-tracked
+#    (kubernetes/apps/media/jellyfin/app/config-pv.yaml, config-pvc.yaml) and
+#    Flux-reapplied — so "repoint the existing PV" is NOT possible. This is the ONE
+#    ordered recipe (docs/sops/backup.md "Bind Restored Volume to Application", as
+#    corrected for git-tracked static PVs):
+#
+#    (a) Longhorn UI (port-forward svc/longhorn-frontend 8080:80) -> Backup ->
+#        jellyfin-config -> <the gate's backup> -> Restore -> NEW volume name
+#        R=jellyfin-config-r$(date +%Y%m%d). numberOfReplicas: git's config-pv.yaml
+#        declares "3" while the live Longhorn volume runs 2 — choose deliberately and
+#        write the SAME value into the PV in (b). Wait until the restored volume shows
+#        detached + healthy in `kubectl get volumes.longhorn.io -n storage $R`.
+#    (b) In git, on main, --only these two files, do NOT push yet:
+#          config-pv.yaml : metadata.name -> $R ; csi.volumeHandle -> $R ;
+#                           keep accessModes [ReadWriteMany], 25Gi, longhorn-static,
+#                           persistentVolumeReclaimPolicy Retain, fsType ext4,
+#                           staleReplicaTimeout "30"
+#          config-pvc.yaml: spec.volumeName -> $R ; the PVC NAME STAYS `jellyfin-config`
+#                           (the HelmRelease's `existingClaim`)
+#    (c) Delete the OLD PVC and its PV. Storage-safety pre-flight first — this is
+#        driver.longhorn.io with reclaim Retain, NOT a CIFS class, so it is allowed, but
+#        it must be shown, and pvc/jellyfin-media is never named in this step:
+PV=$(kubectl -n media get pvc jellyfin-config -o jsonpath='{.spec.volumeName}')
+kubectl get pv "$PV" -o jsonpath='{.spec.csi.driver} {.spec.persistentVolumeReclaimPolicy} {.spec.csi.volumeHandle}{"\n"}'
+#        MUST print: driver.longhorn.io Retain jellyfin-config  — anything else: STOP.
+kubectl -n media delete pvc jellyfin-config
+kubectl delete pv "$PV"          # Retain: the old Longhorn volume `jellyfin-config` (the
+                                 # failed-migration state) stays for forensics; delete it in
+                                 # Longhorn only after the restored one has proven itself
+#    (d) git push (the two-file commit from (b)); resume the Kustomization so Flux
+#        creates pv/$R and the re-pointed pvc/jellyfin-config, then resume the HR:
+flux resume kustomization -n media jellyfin
+kubectl -n media get pvc jellyfin-config -o jsonpath='{.status.phase} {.spec.volumeName}{"\n"}'   # Bound jellyfin-config-r<date>
 flux resume helmrelease -n media jellyfin
 flux reconcile helmrelease -n media jellyfin --force
+#
+#    ALTERNATIVE (same-name restore, no git change): delete the Longhorn Volume CR
+#    `jellyfin-config` and restore the backup under the SAME name so the existing static
+#    PV re-binds. ONLY if the executor has first confirmed, on a scratch volume, that
+#    Longhorn does not cascade-delete the externally-created PV/PVC — not verified at
+#    plan time, so the git-tracked path above is the default.
+#    Either way: NO action on pvc/jellyfin-media at any point.
 ```
 
 Confirm the cluster is actually back — by digest and by re-running the
@@ -791,25 +902,31 @@ runbooks/update-marker.sh clear jellyfin
 
 - **`conflicts_with: [media-audit-durable-output]`** — that plan (vetted,
   `sat-attended:2026-09-19`) rewrites `configmap/library-tools-scripts`; so
-  does this plan's step 0. Never in the same window, and step 0 must be
-  committed on top of 09-19's merged edit (or rebased onto it) — a step 0
-  landed before 09-19 would hand that plan a merge conflict at execution
-  time. Practical sequencing: land step 0 on the afternoon of 09-19 or the
-  morning of 09-20 before the window, then run G3.
-- **`touches.shared: [igpu-i915]`** — the token from `scrypted-0.145.0.md`,
-  reused deliberately (set-intersection match). `frigate-0.18.0` (draft,
-  medium, 50min, also recommends `sun-attended:2026-09-20`) declares
-  `shared: []` but is a privileged GPU-touching image bump on
-  **k8s-nuc14-02**; this plan's pod is on **k8s-nuc14-03**. Different
-  physical iGPU — not a hard conflict — but per the scrypted precedent, avoid
-  stacking two privileged GPU-touching bumps back-to-back; if both land on
-  09-20, run this one **last** so its background scan does not overlap
-  frigate's verification.
-- **No PVC action of any kind is taken or should be taken.**
+  does the step-0 header switch. Never in the same window. The step-0 commit
+  itself is being landed now by cberg-agent (outside this plan): its hunks
+  (the X-Emby-Token lines) do not overlap 09-19's `audit.py` edit on a single
+  `main`, so it neither waits for 09-19 nor hands that plan a merge conflict.
+  What must be true before THIS window is G3 = 0 call sites and a coverage
+  Job returning real Jellyfin figures (§3 step 0).
+- **`touches.shared: [igpu-i915]`** — the token from `scrypted-0.147.0.md`
+  (originally `scrypted-0.145.0.md`, since retired), reused deliberately
+  (set-intersection match). `frigate-0.18.0` (draft, medium, 50min, also
+  recommends `sun-attended:2026-09-20`) now declares the same token too and
+  is a privileged GPU-touching image bump on **k8s-nuc14-02**; this plan's
+  pod is on **k8s-nuc14-03**. Different physical iGPU — not a hard conflict,
+  but the scheduler will raise an `igpu-i915` INTERFERENCE warning if they
+  share a slot — so avoid stacking two privileged GPU-touching bumps
+  back-to-back; if both land on 09-20 anyway, run this one **last** so its
+  background scan does not overlap frigate's verification. Same for
+  `scrypted-0.147.0` (nuc14-02): separate slots.
+- **No PVC action on the happy path — and exactly ONE on rollback.**
   `cifs-jellyfin-media` is Tier-1/catastrophic per
   `docs/sops/storage-safety.md`; it is named in `touches` so nobody touches
   it (§2.1). The rollback in §5 restores `jellyfin-config` to a NEW Longhorn
-  volume and repoints — it never deletes a PVC.
+  volume, commits a new PV name + PVC `volumeName` to git, and deletes the
+  OLD `pvc/jellyfin-config` + its PV (Longhorn, reclaim Retain — the old
+  volume survives) after the storage-safety pre-flight shown in §5 step 3(c).
+  It never touches the CIFS PVC.
 - **`backup_gate` must PASS before the commit in §3 step 5.** This plan
   derives HUMAN-GATED regardless (`capability_change: true` forecloses both
   `auto-night` and `auto-backup-gated` in `runbooks/autonomy-policy.yaml`),

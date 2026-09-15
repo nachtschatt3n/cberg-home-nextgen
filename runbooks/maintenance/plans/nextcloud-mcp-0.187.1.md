@@ -19,21 +19,34 @@ touches:
   resources:
     - helmrelease/nextcloud-mcp
     - deployment/nextcloud-mcp
-    - httproute/nextcloud-mcp
-  shared: []                          # no shared datastore, gateway, CNI or DNS perturbed. The
-                                      # HTTPRoute on envoy-internal is re-rendered by the same
-                                      # HelmRelease but its spec does not change (image tag is the
-                                      # whole diff), so gateway/envoy is NOT declared. Cross-
-                                      # namespace CONSUMER coupling (ai/openclaw, Claude Desktop
-                                      # on the Mac) is real blast radius but not shared-infra —
-                                      # see §6.
+                                      # httproute/nextcloud-mcp deliberately NOT listed (review
+                                      # 2026-09-15): it is re-rendered by the same HelmRelease
+                                      # but its spec does not change — image tag is the whole
+                                      # diff — so it is not perturbed.
+  shared: []                          # no shared datastore, gateway, CNI or DNS perturbed, so
+                                      # gateway/envoy is NOT declared. Cross-namespace CONSUMER
+                                      # coupling (ai/openclaw, Claude Desktop on the Mac) is real
+                                      # blast radius but not shared-infra — see §6.
 depends_on: []                        # Flux `dependsOn: nextcloud` is an ordering constraint
                                       # (namespace/reconcile-first), not a version coupling —
                                       # no release note in range states a minimum Nextcloud
-                                      # server version (§1.2). No open plan touches nextcloud.
-conflicts_with: []                    # bitnamilegacy-exit-nextcloud-db (office, blocked,
-                                      # window null) cannot claim a slot today; re-add if it is
-                                      # revived into the same window — see §6.
+                                      # server version (§1.2). nextcloud-34.0.4 (draft) DOES
+                                      # touch the server — see conflicts_with, not depends_on:
+                                      # either order works, they must not share a slot.
+conflicts_with:
+  - nextcloud-34.0.4                  # ADDED 2026-09-15 (review): that draft restarts
+                                      # deployment/nextcloud and moves it 34.0.3 -> 34.0.4;
+                                      # §4.4 here talks to that server, so a restart mid-
+                                      # verification makes a calendar-list failure
+                                      # unattributable, and the namespace-wide silence that
+                                      # plan sets would mask this rollout's noise. Different
+                                      # slots (e.g. sat/sun of one weekend); the
+                                      # nextcloud-server premise below is drift-tolerant
+                                      # (34.0.x) so either order is fine — re-take the §2.4
+                                      # baselines the SAME DAY as execution, after any server
+                                      # move. bitnamilegacy-exit-nextcloud-db (office, blocked,
+                                      # window null) cannot claim a slot today; add it if it is
+                                      # revived — see §6.
 security_ref: F-80459b23              # security-driven bump: a newer upstream tag exists and
                                       # taking it is the only remediation this household performs
                                       # for a third-party image. Detail stays on the record.
@@ -41,9 +54,11 @@ capability_change: true               # HONEST FACT, reviewed with the plan (§1
                                       # agent-visible tool behaviours change for our consumers —
                                       # 0.187.0 turns `nc_calendar_find_availability` from a
                                       # registered-but-unimplemented tool into a working one, and
-                                      # 0.186.0 can register `shopping_list_*` tools (inert here:
-                                      # the Nextcloud app is not installed, §2.3). Routes to an
-                                      # attended window — which the deny rule mandates anyway.
+                                      # 0.186.0 WILL register `shopping_list_*` tools (upstream
+                                      # deliberately does not gate them on app presence; the
+                                      # Nextcloud app is not installed here, so calls 404 —
+                                      # additive, §1.2). Routes to an attended window — which
+                                      # the deny rule mandates anyway.
 rollback_class: git-revert            # stateless bridge: no PVC, no volumes, no DATABASE_URL /
                                       # TOKEN_STORAGE_DB — its alembic migrations run against an
                                       # EPHEMERAL SQLite in /tmp recreated on every pod start
@@ -69,9 +84,13 @@ premises:
       No release note in range states a minimum Nextcloud server version, but
       "nothing moved underneath this" must be observed, not assumed from a
       stale read — the calendar DAV encoding change in 0.185.5 talks to this
-      server directly.
+      server directly. Drift-tolerant on the PATCH digit (review 2026-09-15):
+      nextcloud-34.0.4 is a live draft, and a hard pin on 34.0.3 would fail
+      this plan closed as a phantom the moment that plan executes first. A
+      server MAJOR/MINOR move still fails it — that is the re-vet trigger.
+      Whatever patch is live, re-take the §2.4 baselines the same day.
     run: kubectl get deploy -n office nextcloud -o jsonpath='{.spec.template.spec.containers[?(@.name=="nextcloud")].image}'
-    expect_exact: docker.io/nextcloud:34.0.3
+    expect_matches: 'docker\.io/nextcloud:34\.0\.[0-9]+$'
   - id: deployment-mode-still-single-user-basic
     why: >-
       The ONE BREAKING-tagged change in this hop (0.185.0, mcp>=2.1 SDK floor:
@@ -166,8 +185,8 @@ Quoted from the GitHub release bodies (`gh release view vX.Y.Z -R cbcoutinho/nex
 | 0.185.3 | 2026-09-09 | fix (deck) | attachment type on id-addressed routes; card attachments linked, Files-share ones no longer hidden | No `deck_*` tools are registered on our server (Deck app not installed on Nextcloud, §2.3) — inert. |
 | 0.185.4 | 2026-09-11 | fix (processors) | *"batch OCR is worker-only — stop the inline escalation loop"* | Optional document processors are not configured (pod log: "No optional document processors configured") — inert. |
 | **0.185.5** | 2026-09-11 | fix (calendar) | *"encode DAV URLs by one rule, not two"*; *"percent-encode DAV URLs built from decoded path segments"*; DAV encoders moved to a shared module | **Applies.** Calendar is installed (Nextcloud `calendar 6.5.3`) and is on the tool surface both consumers use. A behaviour fix on the CalDAV request path — verified directly in §4.4. |
-| 0.186.0 | 2026-09-11 | feat (additive) | *"add Nextcloud Shopping List app support"* (+ fixes to its `add_items`, typed item schema) | New `shopping_list_*` tools. The Shopping List app is **not installed** on our Nextcloud (§2.3), and this server registers tool families per detected app (no `deck_*`/`notes_*`/`tables_*` in the live list either), so most likely they do not even appear. If they do, calls fail with a Nextcloud 404 — additive, not breaking. |
-| **0.187.0** | 2026-09-12 | feat (calendar) | *"implement nc_calendar_find_availability"*; fixes: *"reject an unknown availability timezone"*, *"refuse availability when a calendar cannot be read"* | **Applies — behaviour, not surface.** The tool name is ALREADY in the live 0.184.5 tool list with a full description; 0.187.0 makes it work. This is the `capability_change: true` fact. |
+| 0.186.0 | 2026-09-11 | feat (additive) | *"add Nextcloud Shopping List app support"* (+ fixes to its `add_items`, typed item schema) | New `shopping_list_*` tools **WILL register** even though the Shopping List app is **not installed** on our Nextcloud (§2.3): at v0.187.1 `server/__init__.py`'s `APP_CAPABILITY_KEY` deliberately EXCLUDES shopping_list (upstream comment: *"gating it would hide working tools on every instance that has it"*; only notes/tables/deck/cookbook/talk are app-gated). Calls fail with a Nextcloud 404 — additive, not breaking; §4.3 expects them to appear. |
+| **0.187.0** | 2026-09-12 | feat (calendar) | *"implement nc_calendar_find_availability"*; fixes: *"reject an unknown availability timezone"*, *"refuse availability when a calendar cannot be read"* | **Applies — behaviour, not surface.** The tool name is ALREADY in the live 0.184.5 tool list with a full description; 0.187.0 makes it work (v0.184.5 `client/calendar.py:2918`: *"This is a simplified stub that returns empty list"*, with a `find_availability is not fully implemented` warning log). This is the `capability_change: true` fact. |
 | 0.187.1 | 2026-09-12 | fix (ingest) | empty download counted on the truncation panel; empty document payloads refused instead of dead-lettered; OCR log placeholder | Document-ingest pipeline — not configured here — inert. |
 
 **No tag in range renames or removes an MCP tool, drops a table, changes the
@@ -292,11 +311,23 @@ accepted-risk model for third-party images, not a plan failure.
    # C) files root (the plain WebDAV path)
    /tmp/ncmcp/call.sh tools/call '{"name":"nc_webdav_list_directory","arguments":{"path":""}}' > /tmp/ncmcp/files.before
    python3 -c 'import json; d=json.load(open("/tmp/ncmcp/files.before")); assert not d["result"].get("isError"), d; print(len(json.dumps(d)))'
+   # D) the NEGOTIATED protocol version from `initialize` — the direct evidence for the
+   #    §1.4 unpinned-client risk (free to capture; compare in §4.3)
+   kubectl port-forward -n office svc/nextcloud-mcp 18000:8000 >/dev/null 2>&1 & PF=$!; sleep 2
+   curl -s -X POST http://localhost:18000/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"plan-probe","version":"0"}}}' \
+     | python3 -c 'import sys,json
+   raw=sys.stdin.read(); data=[l[5:].strip() for l in raw.splitlines() if l.startswith("data:")]
+   r=json.loads(data[-1] if data else raw)["result"]; print(r["protocolVersion"], r["serverInfo"].get("version"))' | tee /tmp/ncmcp/protocol.before
+   kill $PF 2>/dev/null
    ```
    Baseline measured 2026-09-15 on 0.184.5: **96 tools** across the families
-   `collectives_*`, `nc_calendar_*` (17, incl. `nc_calendar_find_availability`),
-   `nc_contacts_*`, `nc_mail_*`, `nc_news_*`, `nc_share_*`, `nc_webdav_*`,
-   `talk_*`. No `deck_*`, `notes_*`, `tables_*`, `shopping_list_*`.
+   `collectives_*` (20), `nc_calendar_*` (17, incl. `nc_calendar_find_availability`),
+   `nc_contacts_*` (8), `nc_mail_*` (13), `nc_news_*` (8), `nc_share_*` (6),
+   `nc_webdav_*` (13), `talk_*` (11). No `deck_*`, `notes_*`, `tables_*`,
+   `shopping_list_*`. **Re-take A-D on the day of execution**, after any
+   Nextcloud server move (nextcloud-34.0.4), so the §4 diff is against the
+   true pre-state.
 5. **No firing alerts for office/ai** (ignore Watchdog/InfoInhibitor):
    ```bash
    kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 &
@@ -320,15 +351,17 @@ accepted-risk model for third-party images, not a plan failure.
 1. Confirm §2 steps 0–6 are green. Do not proceed on a failed premise.
 2. Edit the image tag — one line, the whole diff:
    ```bash
-   sed -i '' 's/^\(\s*tag: \)0\.184\.5$/\10.187.1/' kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml
-   git diff --stat kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml   # expect: 1 file, 1 insertion, 1 deletion
-   git diff kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml | grep -E '^[-+]\s+tag:'
+   # BSD sed (macOS) does NOT honour `\s` in a BRE — `\(\s*tag: \)` silently matches nothing
+   # and the edit no-ops (dry-tested 2026-09-15). Use the POSIX class:
+   sed -i '' 's/^\([[:space:]]*tag: \)0\.184\.5$/\10.187.1/' kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml
+   git diff --stat kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml   # expect: 1 file, 1 insertion, 1 deletion — a 0-file diff means the sed did not match: STOP
+   git diff kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml | grep -E '^[-+][[:space:]]+tag:'
    # expect exactly:  -              tag: 0.184.5  /  +              tag: 0.187.1
    ```
 3. Commit + push — shared worktree, so `--only` with the explicit path:
    ```bash
    cat > /tmp/ncmcp/msg.txt <<'EOF'
-   fix(nextcloud-mcp): bump ghcr.io/cbcoutinho/nextcloud-mcp-server 0.184.5 -> 0.187.1
+   feat(nextcloud-mcp): image 0.184.5 -> 0.187.1
 
    Crosses three 0.x minor lines (0.185, 0.186, 0.187); at major 0 the minor
    digit is the breaking axis, so every tag's release body was read
@@ -387,8 +420,17 @@ accepted-risk model for third-party images, not a plan failure.
      | python3 -c 'import sys,json; d=json.load(sys.stdin); [print(t["name"]) for t in d["result"]["tools"]]' \
      | sort > /tmp/ncmcp/tools.after
    comm -23 /tmp/ncmcp/tools.before /tmp/ncmcp/tools.after     # tools that DISAPPEARED — expect EMPTY
-   comm -13 /tmp/ncmcp/tools.before /tmp/ncmcp/tools.after     # new tools — informational (shopping_list_* may appear)
-   wc -l /tmp/ncmcp/tools.after                                # expect >= 96
+   comm -13 /tmp/ncmcp/tools.before /tmp/ncmcp/tools.after     # new tools — EXPECT shopping_list_* here (§1.2: upstream does not gate them on app presence)
+   wc -l /tmp/ncmcp/tools.after                                # expect > 96 (96 + the shopping_list_* family)
+   # negotiated protocol version after the bump — compare to /tmp/ncmcp/protocol.before (§2.4 D);
+   # a changed value is the §1.4 risk made visible and goes on F-9af9baf7, whatever §4.5 shows
+   kubectl port-forward -n office svc/nextcloud-mcp 18000:8000 >/dev/null 2>&1 & PF=$!; sleep 2
+   curl -s -X POST http://localhost:18000/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"plan-probe","version":"0"}}}' \
+     | python3 -c 'import sys,json
+   raw=sys.stdin.read(); data=[l[5:].strip() for l in raw.splitlines() if l.startswith("data:")]
+   r=json.loads(data[-1] if data else raw)["result"]; print(r["protocolVersion"], r["serverInfo"].get("version"))' | tee /tmp/ncmcp/protocol.after
+   kill $PF 2>/dev/null; diff /tmp/ncmcp/protocol.before /tmp/ncmcp/protocol.after || echo 'protocol/server version changed — record on F-9af9baf7'
    ```
    Also confirm the session log line still names our auth mode after the
    first real session (`initialize` above creates one):
@@ -467,13 +509,24 @@ not holding the server forever.
 - **`capability_change: true` → attended lane.** Derived class is attended
   regardless (deny-rule reason); the flag documents WHY: an existing tool
   (`nc_calendar_find_availability`) starts doing real work for the agent, and
-  new `shopping_list_*` tools may register. Neither is a reason to hold — both
-  are additive — but the operator should know the agent's reach grew.
+  new `shopping_list_*` tools WILL register (visible to the agent; calls 404
+  until the app is installed). Neither is a reason to hold — both are
+  additive — but the operator should know the agent's reach grew.
+- **`nextcloud-34.0.4`** (`office`, draft, attended weekend only) — in
+  `conflicts_with` since 2026-09-15: it restarts `deployment/nextcloud` and
+  moves it 34.0.3 → 34.0.4, and its §2.5 silence is namespace-wide. Never
+  the same slot: a Nextcloud restart mid-§4.4 makes a calendar-list failure
+  unattributable, and the silence would mask this rollout's noise. Different
+  slots of one weekend are fine in either order — it is a MINOR hop held by
+  the `*nextcloud-mcp*` `max: patch` deny rule (PLAN lane, HUMAN-GATED), so
+  it never rides Step 0 either. **Re-take the §2.4 baselines (A-D) the same
+  day as execution, after any server move**, so the §4 diff is against the
+  true pre-state; the `nextcloud-server-unchanged` premise tolerates the
+  patch digit for exactly this reason.
 - **`bitnamilegacy-exit-nextcloud-db`** (`office`, `blocked`, unwindowed)
   restarts `deployment/nextcloud` when revived. If both are ever live in one
   window, add it to `conflicts_with` and run this (lighter, stateless) bump
-  FIRST, then verify §4.4 again after the DB work — a Nextcloud restart
-  mid-verification would make a calendar-list failure unattributable.
+  FIRST, then verify §4.4 again after the DB work — same reasoning.
 - **Flux `dependsOn: nextcloud`** is ordering-only (namespace/reconcile-first);
   confirmed not a version coupling by reading every release body in range.
 - **Window fit (2026-09-15 queue):** `sat-attended:2026-09-19` carries
@@ -488,13 +541,11 @@ not holding the server forever.
 
 - **Client MCP library versions** for `mcporter` (OpenClaw) and `mcp-proxy`
   (Claude Desktop) — both installed unpinned at launch. §4.3–4.5 are written
-  to catch the effect empirically because it cannot be proven ahead of time.
-- **Whether `shopping_list_*` tools register when the Nextcloud app is
-  absent.** Inferred from the live pattern (no `deck_*`/`notes_*`/`tables_*`
-  for uninstalled apps), not proven; either outcome is additive and the
-  superset assertion holds in both.
-- **That `nc_calendar_find_availability` was a non-functional stub on
-  0.184.5** — inferred from the 0.187.0 release verb "implement" plus the
-  tool already being registered; not exercised on the live server (it would
-  run a real availability scan against household calendars for no
-  operational reason).
+  to catch the effect empirically because it cannot be proven ahead of time;
+  the negotiated `protocolVersion` captured in §2.4 D / §4.3 is the one
+  server-side number that makes a client-side break attributable.
+
+(Two earlier items here — whether `shopping_list_*` registers with the app
+absent, and whether `nc_calendar_find_availability` was a stub on 0.184.5 —
+were settled from upstream source in the 2026-09-15 review and moved into
+§1.2: it registers regardless; it was a stub at `client/calendar.py:2918`.)

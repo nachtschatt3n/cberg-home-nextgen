@@ -368,7 +368,12 @@ runbooks/plan-premises.py scrypted-0.147.0 --require-premises` FIRST — it
 mechanises the cluster-side facts (image, volume, plugin set, strategy, GPU
 dependency, sweep snapshot). It CANNOT mechanise G1 (network verbs are outside
 its allowlist by design) or the `/media` count in G3 (needs `kubectl exec`), so
-those two are hand-run below and are not optional.
+those two are hand-run below and are not optional. In particular the
+`sweep-snapshot-still-targets-v0.147.0` premise reads
+`runbooks/version-check-current.md`, which is git-UNTRACKED and refreshed only
+every 48 h by the sweep: a `v0.148.x` tag pushed after the last sweep and
+before the window is invisible to it, so **a passing premise set does not
+excuse skipping G1**.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
@@ -408,6 +413,10 @@ kubectl exec -n home-automation $POD -- sh -c \
 #   => the NVR has been configured since 2026-09-15. STOP. Re-derive: capability_change
 #   becomes true, §5 needs camera-enumeration + recording-continuity assertions, and
 #   the §2.3 snapshot becomes a real backup rather than insurance.
+#   `strings` is present in the noble-full image today (these baselines were measured
+#   with it on 2026-09-15). If a future base re-cut removes it, that is "run the check
+#   differently" (`grep -a -oE` straight on the files, or `kubectl cp` the store out and
+#   inspect locally) — NOT a store failure and NOT a reason to skip G3.
 
 # --- Clean pre-state (informational)
 flux get helmrelease -n home-automation scrypted
@@ -592,12 +601,18 @@ deliberately fixed in `612034be`.
 ### 5.5 Service reachability — both paths
 
 ```bash
-kubectl -n home-automation port-forward svc/scrypted 11080:11080 &
+kubectl -n home-automation port-forward svc/scrypted 11080:11080 >/dev/null 2>&1 & PF=$!; sleep 2
 curl -s -o /dev/null -w 'http=%{http_code} bytes=%{size_download}\n' http://localhost:11080/
 #   2xx/3xx with a non-trivial body, not 0 bytes.
-curl -sk -o /dev/null -w 'http=%{http_code} bytes=%{size_download}\n' "https://scrypted.${SECRET_DOMAIN}/"
+kill $PF 2>/dev/null
+# Resolve the public host from the LIVE HTTPRoute — never from an unexported ${SECRET_DOMAIN},
+# which silently tests `https://scrypted./` and records a false failure (review 2026-09-15):
+HOST=$(kubectl get httproute -n home-automation scrypted -o jsonpath='{.spec.hostnames[0]}')
+[ -n "$HOST" ] || { echo "no hostname on httproute/scrypted — STOP, do not skip this check"; false; }
+curl -sk -o /dev/null -w 'http=%{http_code} bytes=%{size_download}\n' "https://$HOST/"
 #   Through the HTTPRoute on envoy-internal — proves the route still binds after the
-#   Recreate (the Service is untouched, but assert it rather than assume it).
+#   Recreate (the Service is untouched, but assert it rather than assume it). Do not run
+#   this while an envoy/external-dns plan is mid-rollout in the same slot.
 ```
 
 ### 5.6 Honest note on cameras and recordings
@@ -628,12 +643,21 @@ runbooks/policy-cli.py risk show AR-081
 AR-081's needle (`koush/scrypted`) is version-agnostic, so suppression
 continues automatically across the bump — which is exactly why the re-measure
 has to be deliberate. Refresh AR-081's `last_reviewed_at` and justification
-via `runbooks/policy-cli.py risk` (keep the numbers in the DB). Close
-`F-b7f7f5c5` with `--commit <bump-sha>` if the sweep's version check does not
-resolve it on its own next cycle. Then **delete this plan file in the same
-commit that lands the upgrade** (README: plans are transient) — and retire
-`scrypted-0.145.0.md`, which is `status: executed` and should already have
-been removed.
+via `runbooks/policy-cli.py risk` (keep the numbers in the DB). **In the same
+edit** (review 2026-09-15): move AR-081's `security_ref` from `F-b885ec1b` —
+the v0.143.0 image finding, RESOLVED 2026-09-13 — to the live image finding
+**F-09a38bc2** that this plan cites, and replace the justification's
+"v0.145.0 IS the newest upstream stable" sentence (false since v0.147.0) with
+the post-bump truth; the AR's own NEXT RE-REVIEW trigger has fired and its
+evidence currently points at a resolved record. Close `F-b7f7f5c5` with
+`--commit <bump-sha>` if the sweep's version check does not resolve it on its
+own next cycle. Then **delete this plan file in the same commit that lands the
+upgrade** (README: plans are transient). `scrypted-0.145.0.md` (executed) and
+`scrypted-0.146.0.md` (superseded) were deleted in the 2026-09-15 review
+commit; the `*scrypted*` deny-rule `reason:` in
+`runbooks/auto-update-policy.yaml` still names "v0.145.0, live" and the
+0.146.0 file — refresh that text and bump the policy `version` IN THE LANDING
+COMMIT, keeping the rule itself (§7).
 
 ## 6. Rollback
 
@@ -713,17 +737,21 @@ Then clear the silence and marker as in §5.7.
   `runbooks/auto-update-policy.yaml`** in this work. It keeps the even-minor
   dev channel (`v0.146.x` today, `v0.148.x` next) out of the nightly Step-0
   auto-apply and stays correct after this bump. Its reason text names
-  "v0.145.0, live" and will read stale afterwards — refreshing that wording is
-  a separate docs commit, safe to leave.
+  "v0.145.0, live" (and the since-deleted 0.146.0 plan file) and reads stale
+  the moment v0.147.0 is live — refresh that wording and bump the policy
+  `version` IN THE LANDING COMMIT (§5.7), so the rule's evidence and the
+  cluster do not drift; the rule itself stays.
 - **Renovate has no PR for this and will keep pointing at the newest tag**,
   which becomes the dev channel again the moment `v0.148.0-noble-full` is
   pushed. Apply the Release gate (G1, with premise
   `sweep-snapshot-still-targets-v0.147.0` as the mechanical tripwire), never
   the odd/even heuristic.
-- **`scrypted-0.146.0.md` is `superseded`, `scrypted-0.145.0.md` is
-  `executed`** — both still on disk. This plan supersedes neither's reasoning
-  and revives nothing; 0.146's hold verdict stands and is carried by the
-  policy rule. Retire the 0.145 file with this bump's landing commit (§5.7).
+- **`scrypted-0.146.0.md` (superseded) and `scrypted-0.145.0.md` (executed)
+  were DELETED in the 2026-09-15 review commit** — README: plans are
+  transient, and the policy comment had already claimed 0.146.0 was retired on
+  2026-09-11 while the file sat on disk. This plan supersedes neither's
+  reasoning and revives nothing; 0.146's hold verdict stands and is carried by
+  the `*scrypted*` policy rule (git history has both files).
 - **Out of scope, flagged, not to be fixed here:** the HelmRelease's
   `extraVolumes`/`extraVolumeMounts` `/dev/dri` block is inert under
   app-template 5.1.0 and overstates host access to an auditor (§2.1). Real
