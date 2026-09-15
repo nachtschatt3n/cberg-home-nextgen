@@ -9,7 +9,13 @@ spec:
   chart:
     spec:
       chart: external-dns
-      version: 1.21.1
+      # 1.22.0 ships appVersion 0.22.0. v0.22.0 (#6424) reads ONLY the GA
+      # annotation prefix external-dns.kubernetes.io/ — Gateway envoy-external
+      # must carry external-dns.kubernetes.io/target BEFORE this line moves, or
+      # every owned record is deleted and its recreate rejected (2026-09-08,
+      # aa79cf7a). --default-targets does NOT reach the gateway-httproute source
+      # (v0.22.0 flag help) and is not the fix. Plan: external-dns-1.22.0.
+      version: 1.22.0
       sourceRef:
         kind: HelmRepository
         name: external-dns
