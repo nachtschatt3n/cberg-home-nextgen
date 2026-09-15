@@ -1,8 +1,8 @@
 # SOP: Gateway API / HTTPRoute Routing (Envoy Gateway)
 
 > Description: How HTTP ingress works in this cluster now that ingress-nginx is gone — writing, reviewing and debugging HTTPRoutes on the two Envoy Gateways, including forward-auth, backend TLS, timeouts and the verification gate that catches the failures which are invisible at apply time.
-> Version: `2026.09.11`
-> Last Updated: `2026-09-11`
+> Version: `2026.09.15`
+> Last Updated: `2026-09-15`
 > Owner: `homelab operator (cberg-home-nextgen)`
 
 ---
@@ -136,12 +136,19 @@ app route to `http` fights it.
 
 **3. external-dns target belongs on the GATEWAY, never on the route.**
 external-dns runs `--source=gateway-httproute`; for that source it derives each
-record's target from the **parent Gateway's** annotation and an
-`external-dns.alpha.kubernetes.io/target` on the HTTPRoute is **silently
-ignored**. `envoy-external` carries
-`external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"` so every
-attached route publishes a CNAME to the tunnel hostname — exactly what the
-Ingresses did. Getting this wrong on 2026-09-07 published an **A record to the
+record's target from the **parent Gateway's** annotation, and a target
+annotation on the HTTPRoute (either prefix) is **silently ignored**.
+`envoy-external` carries **both** target keys with the same value
+`"external.${SECRET_DOMAIN}"` — `external-dns.kubernetes.io/target` (GA, read by
+external-dns v0.22.0+) and `external-dns.alpha.kubernetes.io/target` (alpha, read
+by v0.21.x, kept as the rollback path) — so every attached route publishes a
+CNAME to the tunnel hostname — exactly what the Ingresses did. **New work uses
+the GA key.** v0.22.0 switched the default annotation prefix to GA with **no
+fallback** (upstream #6424): a Gateway carrying only the alpha key makes v0.22
+publish the Gateway's LAN address, and `policy: sync` deletes the CNAMEs first
+(2026-09-08, 94 s). Never remove either key without proving the other is read by
+the version that is RUNNING (`docs/sops/external-dns.md` §3). Getting the
+placement wrong on 2026-09-07 published an **A record to the
 RFC1918 gateway IP**; Cloudflare refuses a private target for a proxied record,
 the old CNAME had already been withdrawn with the Ingress, and the hostname
 went dark publicly until the commit was reverted (`c41f0ff4` →
@@ -840,8 +847,9 @@ kubectl logs -n network deploy/external-dns --tail=50 | grep -i "$HOST"
 ```
 
 Expected:
-- The **Gateway** carries `external-dns.alpha.kubernetes.io/target:
-  external.${SECRET_DOMAIN}` and the **route carries no target annotation**.
+- The **Gateway** carries both `external-dns.kubernetes.io/target` (GA, read by
+  v0.22.0+) and `external-dns.alpha.kubernetes.io/target` (alpha), each
+  `external.${SECRET_DOMAIN}`, and the **route carries no target annotation**.
   external-dns logs showing an attempted A record to `192.168.55.104`, or a
   Cloudflare rejection of a private target for a proxied record, confirms
   rule 3.
@@ -1049,6 +1057,13 @@ Rollback cautions specific to this migration:
 
 ## Version History
 
+- `2026.09.15`: Rule 3 and the §8 external-dns diagnose expectation — Gateway
+  `envoy-external` now carries BOTH external-dns target keys: the GA
+  `external-dns.kubernetes.io/target` (added `fbcd93c2`, read by v0.22.0+) and the
+  alpha key (kept as the v0.21 rollback path). New work uses the GA key.
+  external-dns moved to chart 1.22.0 / v0.22.0 (`0a316a51`), whose default
+  annotation prefix is GA with no fallback (upstream #6424) — the actual
+  mechanism of the 2026-09-08 outage. Plan external-dns-1.22.0.
 - `2026.09.11` (third pass): §4.6 — rewrote the client-IP section for BOTH
   gateways. `2df8ec7f` switched `envoy-external` from
   `customHeader: CF-Connecting-IP` (which has no peer trust at all) to

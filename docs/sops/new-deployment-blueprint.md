@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/gateway-api-httproute.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/log-volume-runaway.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.09.07`
-> Last Updated: `2026-09-07`
+> Version: `2026.09.15`
+> Last Updated: `2026-09-15`
 > Owner: `Platform`
 
 ---
@@ -156,13 +156,16 @@ spec:
 
 Three things NOT to carry over from the Ingress era:
 
-- **No `external-dns.alpha.kubernetes.io/target` on the route.** external-dns
+- **No external-dns target annotation on the route** — neither the GA
+  `external-dns.kubernetes.io/target` nor the alpha
+  `external-dns.alpha.kubernetes.io/target`. external-dns
   runs `--source=gateway-httproute`, which derives the record target from the
   **parent Gateway**, not from the route. The annotation on an HTTPRoute is
   read from the Gateway and silently ignored on the route. It is already set
   once on `envoy-external`
-  (`kubernetes/apps/network/envoy-gateway/app/gateways.yaml`), so every route
-  attached there publishes the proxied CNAME automatically. See Known Gotcha #11.
+  (`kubernetes/apps/network/envoy-gateway/app/gateways.yaml`) under both keys,
+  so every route attached there publishes the proxied CNAME automatically.
+  New work uses the GA key. See Known Gotcha #11.
 - **No `cert-manager.io/cluster-issuer` and no per-host TLS Secret.** Gateway
   API terminates TLS at the **listener**, and both `https` listeners already
   present the wildcard `*.${SECRET_DOMAIN}` certificate.
@@ -320,7 +323,7 @@ Using `state: present` with `identifiers.name` makes the blueprint idempotent �
    - **Never create an `Ingress`.** There is no ingress controller and no IngressClass in this cluster since 2026-09-07 — an `Ingress` is inert and the app stays unreachable. See the HTTPRoute blueprint above and `docs/sops/gateway-api-httproute.md`.
    - `parentRefs` → `envoy-internal` (ns `network`) for LAN-only; `envoy-external` (ns `network`) for internet-facing. This replaces `className: internal` / `className: external`.
    - Always `sectionName: https`. The `http` listener is owned cluster-wide by the `https-redirect` HTTPRoute, which 301s every host.
-   - **Do NOT put `external-dns.alpha.kubernetes.io/target` on the route** — external-dns reads it from the parent Gateway and ignores it on the route. It is already set on `envoy-external`. See Known Gotcha #11.
+   - **Do NOT put an external-dns target annotation on the route** (GA `external-dns.kubernetes.io/target` or alpha `external-dns.alpha.kubernetes.io/target`) — external-dns reads it from the parent Gateway and ignores it on the route. Both keys are already set on `envoy-external`; new work uses the GA key. See Known Gotcha #11.
    - Homepage discovers HTTPRoutes (`kubernetes.gateway: true`), so the `gethomepage.dev/*` annotations **and** the `gethomepage.dev/enabled` label go on the HTTPRoute, not on any Ingress.
 7. If the app has user login, declare the Authentik provider in the blueprint ConfigMap (`kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`):
    - Forward-auth proxy providers for apps without their own auth.
@@ -772,7 +775,7 @@ WEBHOOK_URL: https://n8n.${SECRET_DOMAIN}/
 
 The `envoy-internal` / `envoy-external` gateways already set `X-Forwarded-Proto`, `X-Forwarded-Host`, `X-Forwarded-For` — no gateway-side config needed, exactly as the retired nginx controllers behaved. Only the app-side ProxyFix is required.
 
-### 11. External exposure — `external-dns.alpha.kubernetes.io/target` belongs on the GATEWAY, never on the HTTPRoute
+### 11. External exposure — the external-dns target annotation (GA and alpha keys) belongs on the GATEWAY, never on the HTTPRoute
 
 The underlying hazard is unchanged: external-dns must create a proxied CNAME to
 the Cloudflare tunnel, not an A record pointing at an internal LoadBalancer IP.
@@ -794,14 +797,26 @@ already been withdrawn along with the Ingress the hostname went dark publicly
 until the commit was reverted.
 
 **Fix:** the annotation is set **once**, on the `envoy-external` Gateway in
-`kubernetes/apps/network/envoy-gateway/app/gateways.yaml`:
+`kubernetes/apps/network/envoy-gateway/app/gateways.yaml` — under **both**
+prefixes, with the same value:
 
 ```yaml
 # Gateway envoy-external, namespace network — set ONCE, cluster-wide
 metadata:
   annotations:
-    external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+    external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"  # read by v0.21.x (rollback path)
+    external-dns.kubernetes.io/target: "external.${SECRET_DOMAIN}"        # read by v0.22.0+ (GA, NO fallback)
 ```
+
+**New work uses the GA key `external-dns.kubernetes.io/target`.** external-dns
+v0.22.0 (upstream #6424) switched its default annotation prefix to GA with no
+fallback to the alpha prefix. A Gateway carrying only the alpha key makes v0.22
+fall back to the Gateway's LAN status address, and under `policy: sync` that
+deletes every owned CNAME before Cloudflare refuses the private recreate
+(2026-09-08, 94 s public outage). The GA twin landed in `fbcd93c2`, before the
+chart moved to 1.22.0 (`0a316a51`). Never remove either key without proving the
+other is read by the external-dns version that is RUNNING — see
+`docs/sops/external-dns.md` §3.
 
 Every HTTPRoute attached to `envoy-external` then publishes a proxied CNAME to
 `external.${SECRET_DOMAIN}` (the cloudflared tunnel entry point) automatically —
@@ -1197,4 +1212,5 @@ Rollback success criteria:
 | `2026.09.04` | `2026-09-04` | Add Known Gotcha #14: a ConfigMap can be a SEED, not the live config — the live process is the truth, not the manifest. Three failure modes (seed-only ConfigMap copied to a PVC, ConfigMap-backed env with no checksum annotation, config file read once at start), why Reloader fixes two of them and must NOT be used for the third, and the exec-based verification pattern. Learned during the gemma4 GGUF→MLX migration, where a repo grep returned zero hits while a live consumer still requested the old model |
 | `2026.09.05` | `2026-09-05` | Extend Known Gotcha #14 with (a2) PVC-persisted config that an init script only ever ADDS to (stale additive keys are not inert — a retired model ref still registered in OpenClaw evicted an 18 GB warm set), and (a3) query an app's store through its DRIVER, never by grepping its file (SQLite WAL hides new writes, free pages retain deleted ones — a file grep was wrong in both directions at once). Cross-links the host/consumer context-coupling invariant in `docs/integration.md` |
 | `2026.09.07` | `2026-09-07` | **Envoy Gateway migration complete — ingress-nginx DELETED (`ad1ea7c2`).** Zero Ingress objects, zero IngressClasses, zero nginx controllers; an `Ingress` created here is now inert. Replace the Ingress/Homepage blueprint with the HTTPRoute pattern (parentRef `envoy-internal` `.103` / `envoy-external` `.104` in ns `network`, always `sectionName: https` because the `http` listener is owned by the cluster-wide `https-redirect` route, no `className`, no per-host cert). Homepage metadata (annotations + label) now goes on the HTTPRoute (`kubernetes.gateway: true`). Rewrite Gotcha #11: the `external-dns` target annotation belongs on the **Gateway** and is silently ignored on a route. Reframe Gotcha #10 for the Envoy `https` listener |
+| `2026.09.15` | `2026-09-15` | Gotcha #11, the HTTPRoute blueprint notes and Operational Instructions step 6: Gateway `envoy-external` carries BOTH external-dns target keys (GA `external-dns.kubernetes.io/target` added `fbcd93c2`; alpha kept as the v0.21 rollback path) and new work uses the GA key. external-dns v0.22.0 (chart 1.22.0, `0a316a51`) reads only the GA prefix with no fallback (upstream #6424) — the actual mechanism of the 2026-09-08 outage. Plan external-dns-1.22.0 |
 | `2026.08.23` | `2026-08-23` | F-750d8a3c — realign with 2026-08 practice: Gotcha #1 reframed (`bitnamilegacy/*` is an unblock, not a target; new deployments stand the datastore up standalone per `bundled-datastore-exit.md`); new Gotcha #1b requiring version- or digest-pinned tags for every image (a floating tag never emits a Renovate PR, so the image ages invisibly — 19 of them, cleared in batches A–D); troubleshooting row for a from-scratch install exceeding Helm's 5m default timeout (uzeit-de `152cb651`) |

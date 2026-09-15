@@ -18,15 +18,19 @@ touches:
     - deployment/external-dns
   shared: [gateway/envoy]             # the records are the public names of the
                                       # envoy-external Gateway's routes
-depends_on: [external-dns-1.22.0]     # ADDED 2026-09-15 (review of that plan): the
-                                      # chart bump to v0.22.0 must land FIRST and soak
-                                      # >= 7 days of `All records are already up to
-                                      # date` before adoption — while the 8 are unowned
-                                      # they are immune to a sync delete, so a bump
-                                      # regression costs 17 records, never hass or
-                                      # flux-webhook; after adoption it would cost 24.
-                                      # Was prose in external-dns-1.22.0 §6; the field
-                                      # makes maintenance-plan.py enforce it.
+depends_on: []                        # 2026-09-15: was [external-dns-1.22.0]. That plan
+                                      # EXECUTED and was retired in the same change
+                                      # (chart 1.22.0 / v0.22.0 landed 0a316a51, pod up
+                                      # 2026-09-15T17:03Z, zone byte-identical), so the
+                                      # ref would be a DEAD-REF error. The ORDERING half
+                                      # is satisfied. The SOAK half is no longer
+                                      # machine-enforced and STILL BINDS: >= 7 days of
+                                      # `All records are already up to date` on v0.22.0
+                                      # before adoption — not before 2026-09-22T17:03Z.
+                                      # While the 8 are unowned they are immune to a
+                                      # sync delete, so a bump regression costs 17
+                                      # records, never hass or flux-webhook; after
+                                      # adoption it would cost 24.
 conflicts_with: []                    # deliberately EMPTY as a FIELD. The real
                                       # constraint — must not share a window with
                                       # wazuh-2xx-edge-coverage — is stated in §10
