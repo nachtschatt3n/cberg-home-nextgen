@@ -59,8 +59,8 @@ finding_refs:
                                       #  auto-update.md correction). Kept as the ownership link
                                       #  for the HELD ITEM this plan disposes of; there is
                                       #  nothing left to close. See §6.
-status: draft
-window: null                          # window agent assigns. Any non-reboot window fits (25 min
+status: awaiting-go   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
+window: "sat-attended:2026-09-26"   # assigned 2026-09-15 from the review synthesis (capacity-checked); go/no-go via home-operation
                                       # against 90). capability_change:true => human-gated, so
                                       # sat-attended / sun-attended, not nightly unattended.
 premises:

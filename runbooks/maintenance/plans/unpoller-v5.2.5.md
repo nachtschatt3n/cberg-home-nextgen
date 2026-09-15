@@ -48,8 +48,8 @@ rollback_class: git-revert
 finding_refs: [F-23119c27]            # the sweep's version finding for exactly this bump
                                       # (section version, severity monitor, producer script —
                                       # it auto-closes when the version check next sees v5.2.5)
-status: draft
-window: null
+status: vetted   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
+window: "nightly:2026-09-16"   # AUTO-ASSIGNED 2026-09-15 by window-scheduler (AUTO-NIGHT; category graduated — eligible for unattended execution)
 premises:
   - id: live-image-still-v5.2.4
     why: >-

@@ -100,8 +100,8 @@ finding_refs:
                                        # coverage.py holds — PLAN lane, never Step 0. This
                                        # ref joins the finding to the plan and supersedes
                                        # that action.
-status: draft
-window: null                           # window agent assigns. Fits nightly (90 min,
+status: vetted   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
+window: "nightly:2026-09-17"   # 2026-09-15: moved off 09-16: reconciler INTERFERENCE with unpoller-v5.2.5 (shared monitoring); unpoller runs 09-16, otel the night after, kps waits for prometheus-crd-ownership
                                        # no reboot, git-revert, no capability change).
 sops_refs:
   - docs/sops/application-update.md

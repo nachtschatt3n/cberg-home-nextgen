@@ -76,7 +76,7 @@ rollback_class: git-revert            # Flux CreateReplace re-applies the 90.0.0
                                       # maxHistory: 2 keeps revision 39 reachable. §5.
 finding_refs:
   - F-f1e564f2                        # "kube-prometheus-stack: chart 90.0.0 → 91.2.1 (major)"
-status: draft
+status: vetted   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
 window: null
 premises:
   - id: hr-still-on-90.0.0

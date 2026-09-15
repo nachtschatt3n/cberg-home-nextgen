@@ -107,8 +107,8 @@ backup_gate: "on-demand Longhorn backup of the jellyfin-config volume (holds jel
   plugin-removal step (§3 step 1). Triggered via cronjob/daily-backup-all-volumes (ns
   storage) — NOT `backup-of-all-volumes`, which does not exist. See §3 step 4 and §5."
 finding_refs: [F-fc5e2913, F-3a72570a]
-status: draft
-window: null                          # See §6 for the recommended slot (sun-attended:2026-09-20).
+status: awaiting-go   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
+window: "sun-attended:2026-10-11"   # 2026-09-15: moved off 10-04: reconciler RISK-CLASS STACKING — two backup-restore plans (frigate, jellyfin) in one slot leaves no rollback capacity; jellyfin has the heavier prerequisite list
 premises:
   - id: image-is-still-10.11.11
     why: >-

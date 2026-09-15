@@ -69,7 +69,7 @@ autonomy_override: human-gated        # 2026-09-15: first execution of a CRD-own
 finding_refs:
   - F-a85e8943                        # "Prometheus CRD ownership contention: otel-operator …
                                       # re-writes 4 of the 10 monitoring.coreos.com CRDs"
-status: draft
+status: vetted   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
 window: null
 premises:
   - id: otel-hr-ready

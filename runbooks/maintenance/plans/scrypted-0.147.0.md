@@ -56,8 +56,8 @@ autonomy_override: human-gated    # RESTRICTS the derivation (which would read A
                                   # never unattended." AR-081 is the reason. The operator
                                   # also chose to execute the 0.145 bump personally.
                                   # Honour the rule: attended window, explicit GO.
-status: draft
-window: null
+status: awaiting-go   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
+window: "sat-attended:2026-09-19"   # assigned 2026-09-15 from the review synthesis (capacity-checked); go/no-go via home-operation
 # PREMISES — mechanical, READ-ONLY, run by runbooks/plan-premises.py before
 # execution. Its allowlist is cluster/git read verbs only (kubectl get/logs/…,
 # flux get, git log/…, bare grep/sort/tr/cat); NO network verbs (gh, curl) and
