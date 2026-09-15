@@ -31,6 +31,9 @@ spec:
       automountServiceAccountToken: true
     controllers:
       mcpo:
+        pod:
+          annotations:
+            secret.reloader.stakater.com/reload: mcpo-api-key
         serviceAccount:
           name: mcpo
         initContainers:
