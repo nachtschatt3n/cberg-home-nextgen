@@ -21,8 +21,7 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 0
-      remediateLastFailure: false   # TEMP for plan frigate-0.18.0 — restore retries: 1 after §4
+      retries: 1
   uninstall:
     keepHistory: false
 
