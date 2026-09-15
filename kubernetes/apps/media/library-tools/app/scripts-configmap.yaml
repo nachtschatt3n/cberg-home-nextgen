@@ -695,7 +695,7 @@ data:
             log_event("plex-rescan-skipped", reason="missing-token-or-sections", severity="warn")
 
         if jf_key:
-            code = post(f"{jf_url}/Library/Refresh", headers={"X-Emby-Token": jf_key})
+            code = post(f"{jf_url}/Library/Refresh", headers={"Authorization": f'MediaBrowser Token="{jf_key}"'})
             log_event("jellyfin-rescan", status=code)
         else:
             log_event("jellyfin-rescan-skipped", reason="missing-key", severity="warn")
@@ -1269,7 +1269,7 @@ data:
                f"&IncludeItemTypes=Movie,Series"
                f"&Fields=Overview,ImageTags,BackdropImageTags"
                f"&Limit=10000")
-        data = http_get_json(url, headers={"X-Emby-Token": key})
+        data = http_get_json(url, headers={"Authorization": f'MediaBrowser Token="{key}"'})
         if not data:
             return None
         items = data.get("Items", []) or []
@@ -1483,7 +1483,7 @@ data:
                f"&IncludeItemTypes=Movie,Series"
                f"&Fields=Overview,ImageTags,BackdropImageTags"
                f"&Limit=10000")
-        data = get_json(url, headers={"X-Emby-Token": key})
+        data = get_json(url, headers={"Authorization": f'MediaBrowser Token="{key}"'})
         if not data:
             return
         for item in (data.get("Items") or []):
@@ -1504,7 +1504,7 @@ data:
         url = (f"{jf_url}/Items/{iid}/Refresh"
                f"?MetadataRefreshMode=FullRefresh"
                f"&ImageRefreshMode=FullRefresh")
-        status, _ = _http(url, "POST", headers={"X-Emby-Token": key})
+        status, _ = _http(url, "POST", headers={"Authorization": f'MediaBrowser Token="{key}"'})
         return status
 
     # ---- main --------------------------------------------------------------
