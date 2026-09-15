@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.15.1"
+version: "2026.09.15.2"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -240,26 +240,29 @@ deny:
   # minors, so a bot trusting parity would eventually deny a real stable cut
   # and, worse, would accept a dev build the day upstream changes cadence.
   #
-  # Measured 2026-09-11 (re-measure, do not trust this list):
-  #   newest Release            v0.145.0  prerelease=false  2026-09-02  <- LIVE
-  #   registry tag v0.146.0     exists, Release lookup 404            dev channel
-  #   registry tag v0.146.1     exists, Release lookup 404            dev channel
-  # So the newest REGISTRY tag is two ahead of the newest SHIPPABLE one, which
-  # is exactly the shape that makes an unattended "newest tag wins" bump wrong
-  # here — on a PRIVILEGED NVR (privileged: true, SYS_ADMIN, i915 passthrough).
-  # AR-081 rules that channel unacceptable for this workload.
+  # Measured 2026-09-15 (re-measure, do not trust this list):
+  #   newest Release            v0.147.0  prerelease=false  2026-09-13  <- LIVE (bumped 2026-09-15)
+  #   previous Release          v0.145.0  prerelease=false  2026-09-02
+  #   registry tags v0.146.x    exist, no Release entry               dev channel
+  # Newest registry tag and newest shippable tag coincide today only because no
+  # v0.148.x dev tag has been pushed yet. The moment one is, the newest REGISTRY
+  # tag is ahead of the newest SHIPPABLE one again, which is exactly the shape
+  # that makes an unattended "newest tag wins" bump wrong here — on a
+  # PRIVILEGED NVR (privileged: true, SYS_ADMIN, i915 passthrough). AR-081 rules
+  # that channel unacceptable for this workload.
   #
-  # This rule is now the ONLY home of the hold: the standing hold formerly also
-  # lived in runbooks/maintenance/plans/scrypted-0.146.0.md, which was retired
-  # 2026-09-11. A plan file is the wrong place for a channel hold — it re-enters
-  # the plan queue every sweep and needs autonomy_override bolted on to stop its
-  # own metadata scheduling a do-not-execute plan into a window.
+  # This rule is the ONLY home of the hold. Plan files are transient: the
+  # superseded scrypted-0.146.0 plan that once also carried it was deleted on
+  # 2026-09-15 (git history has it). A plan file is the wrong place for a
+  # channel hold — it re-enters the plan queue every sweep and needs
+  # autonomy_override bolted on to stop its own metadata scheduling a
+  # do-not-execute plan into a window.
   #
   # Belt-and-braces: coverage.py's channel gate already keeps it out of the AUTO
   # lane's direct-bump path; this rule closes the OTHER door, an open Renovate PR
   # auto-merging at Step 0.
   - match: "*scrypted*"
-    reason: "Upstream pushes registry tags with no GitHub Release behind them — that is the dev channel, and on 2026-09-11 the registry head (v0.146.1) was two tags ahead of the newest prerelease=false Release (v0.145.0, live). Dev builds are not acceptable on a privileged NVR — AR-081. Gate on a prerelease=false Release for the exact tag, never on minor parity. A stable bump is made deliberately, never unattended."
+    reason: "Upstream pushes registry tags with no GitHub Release behind them — that is the dev channel (v0.146.x had none). A tag is shippable only with a prerelease=false Release for that exact tag: v0.147.0 (Release 2026-09-13) replaced v0.145.0 as live on 2026-09-15. Dev builds are not acceptable on a privileged NVR — AR-081. Gate on a prerelease=false Release for the exact tag, never on minor parity. A stable bump is made deliberately, never unattended."
   # Chart and image are ONE deployable unit here. RETARGETED 2026-08-19: the old
   # note said "remove this rule when unpoller-v3 has executed" — it has (live is
   # chart 2.4.0 + image v3.5.0, matching that plan's target). Removing it now
