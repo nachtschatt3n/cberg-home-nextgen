@@ -54,6 +54,13 @@ metadata:
     # Set here, every route attached to this Gateway publishes a CNAME to the
     # tunnel hostname - exactly what the Ingresses did.
     external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+    # GA-prefixed twin of the alpha key above. external-dns v0.22.0 (#6424) reads
+    # external-dns.kubernetes.io/* ONLY — there is no fallback to the alpha
+    # prefix. Both keys carry the same value so v0.21 (alpha) and v0.22 (GA)
+    # agree on the target at every instant; the alpha key is the rollback path
+    # and stays until v0.21 is no longer where a revert lands. Never remove one
+    # key without proving the other is read by the version that is RUNNING.
+    external-dns.kubernetes.io/target: "external.${SECRET_DOMAIN}"
 spec:
   gatewayClassName: envoy
   infrastructure:
