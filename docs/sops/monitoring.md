@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.09.12`
-> Last Updated: `2026-09-12`
+> Version: `2026.09.15`
+> Last Updated: `2026-09-15`
 > Owner: `Platform`
 
 ---
@@ -251,6 +251,50 @@ kube_persistentvolumeclaim_status_phase
 longhorn_volume_actual_size_bytes
 longhorn_volume_state
 ```
+
+### CRD ownership: `monitoring.coreos.com` has TWO writers (proven 2026-09-15)
+
+The ten `monitoring.coreos.com` CRDs are not written by kube-prometheus-stack
+alone. Four of them — `podmonitors`, `probes`, `scrapeconfigs`,
+`servicemonitors` — are ALSO written by the **otel-operator** HelmRelease
+(`kubernetes/apps/monitoring/otel-operator/app/helmrelease.yaml`): the
+`opentelemetry-kube-stack` umbrella carries a `prometheus-crds` subchart
+(Chart.yaml condition `crds.install,crds.installPrometheus`, values default
+`true`) that ships exactly those four from a **`crds/` directory** — it has no
+`templates/`, so they are applied by helm-controller's CRD path and are **not
+release resources** (no `meta.helm.sh/release-name`, no
+`app.kubernetes.io/managed-by: Helm` on the live objects). Both HelmReleases run
+Flux `install.crds`/`upgrade.crds: CreateReplace`, so the last chart to upgrade
+wins: after every otel-operator bump the four re-read
+`operator.prometheus.io/version: 0.92.0` (the copy vendored in that subchart) and
+`helm.toolkit.fluxcd.io/name: otel-operator`, while the other six carry the
+kube-prometheus-stack operator version (`0.93.1` as of 2026-09-15). This is the
+state the sweep keeps re-discovering as "four CRDs read 0.92.0 under a newer
+operator" — it is **provenance, not corruption**, and no ScrapeConfig here uses
+a field newer than 0.92.0.
+
+Proof from the live objects (empty `release-name`/`managed-by` on all ten = the
+`crds/` path; `hr=` shows the last writer):
+
+```bash
+for c in podmonitors probes scrapeconfigs servicemonitors prometheuses alertmanagers; do
+  echo -n "$c: "
+  kubectl get crd "$c.monitoring.coreos.com" \
+    -o jsonpath='opver={.metadata.annotations.operator\.prometheus\.io/version} hr={.metadata.labels.helm\.toolkit\.fluxcd\.io/name} release-name=[{.metadata.annotations.meta\.helm\.sh/release-name}] managed-by=[{.metadata.labels.app\.kubernetes\.io/managed-by}]{"\n"}'
+done
+```
+
+The durable fix is `crds.installPrometheus: false` in the otel-operator
+HelmRelease values — plan `runbooks/maintenance/plans/prometheus-crd-ownership.md`
+(sweep record `F-a85e8943`; its `[AR-072]` title prefix is needle noise, that
+AR's substring is the bare `opentelemetry`). helm-controller then stops
+collecting the subchart's `crds/` on install and upgrade, and
+kube-prometheus-stack becomes the single writer of all ten from its next upgrade.
+**There is no cascade-delete risk in that change**: Helm never deletes
+`crds/`-directory CRDs, and Flux `CreateReplace` only creates or replaces — the
+four CRDs, and every ServiceMonitor/PodMonitor/Probe/ScrapeConfig under them,
+are untouched. Do not re-litigate that fear at the next otel bump; verify with
+the loop above instead.
 
 ---
 
@@ -782,7 +826,8 @@ kubectl logs -n monitoring -l app.kubernetes.io/name=unpoller --tail=20
 Known CronJobs in this cluster (this list has drifted before — `kubectl get
 cronjobs -A` is the source of truth; ~22 manifests exist under
 `kubernetes/apps/`):
-- `storage/backup-of-all-volumes` (Longhorn backups, daily 3:00 AM)
+- `storage/daily-backup-all-volumes` (Longhorn backups, daily 3:00 AM; owned by the
+  Longhorn RecurringJob of the same name, `kubernetes/apps/storage/longhorn/app/recurring-backup-job.yaml`)
 - `kube-system/descheduler` (rescheduling optimization)
 - `kube-system/authentik-channels-cleanup` (django-channels message prune, every 6h)
 - `kube-system/authentik-db-probe` (audit-log freshness gauges → Pushgateway, hourly :17)
@@ -1088,3 +1133,17 @@ git push
 
 Rollback validation:
 - Re-run `Verification Tests` and `Health Check`.
+
+---
+
+## Version History
+
+- `2026.09.15`: CronJob name corrected — `storage/daily-backup-all-volumes`
+  (owned by the Longhorn RecurringJob of the same name; `backup-of-all-volumes`
+  returns `NotFound`). Added "CRD ownership: `monitoring.coreos.com` has TWO
+  writers" under Prometheus: otel-operator's `prometheus-crds` subchart
+  (`crds/`-dir provenance, not release resources) re-stamps four CRDs to
+  operator-version 0.92.0 on every bump; durable fix `crds.installPrometheus:
+  false` on the otel HR, no cascade-delete risk (plan
+  `prometheus-crd-ownership`, F-a85e8943).
+- earlier: `git log -- docs/sops/monitoring.md`.

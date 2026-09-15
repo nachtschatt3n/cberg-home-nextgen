@@ -815,7 +815,8 @@ kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' |
 flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
 flux get helmreleases -A   | awk 'NR==1 || $5 != "True"'
 
-# Longhorn backup state (from CronJob `storage/backup-of-all-volumes` @ 03:00)
+# Longhorn backup state (from CronJob `storage/daily-backup-all-volumes` @ 03:00,
+# owned by the Longhorn RecurringJob of the same name)
 # NOTE: lastBackupAt can lag one cycle — for a stale-looking volume, cross-check
 # its newest Completed Backup CR (docs/sops/backup.md → "lastBackupAt Can Lag")
 kubectl get volumes -n storage -o custom-columns=NAME:.metadata.name,LAST_BACKUP:.status.lastBackupAt --no-headers

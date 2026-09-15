@@ -446,9 +446,10 @@ land on per-class StorageClasses defined **per app** (each app's own
 ### Backup
 
 Daily Longhorn snapshot + backup at 03:00 local via the
-`storage/backup-of-all-volumes` CronJob — pushes to the CIFS backup target on
+`storage/daily-backup-all-volumes` CronJob (owned by the Longhorn RecurringJob of
+the same name) — pushes to the CIFS backup target on
 the NAS. Retention is enforced by Longhorn's recurring-job policy. Verify last
-run via `kubectl get cronjob -n storage backup-of-all-volumes`. Full
+run via `kubectl get cronjob -n storage daily-backup-all-volumes`. Full
 operational workflow: [`docs/sops/backup.md`](docs/sops/backup.md).
 
 ---

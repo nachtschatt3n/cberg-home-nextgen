@@ -147,7 +147,7 @@ manages all subsequent deployments including upgrades to these components.
 | Storage class (static) | `longhorn-static` |
 | Default replicas | 2 |
 | Backup target | UNAS-CBERG NAS |
-| Backup schedule | Daily CronJob at 3:00 AM (`storage/backup-of-all-volumes`) |
+| Backup schedule | Daily CronJob at 3:00 AM (`storage/daily-backup-all-volumes`, owned by the Longhorn RecurringJob of the same name) |
 | Data engine | v1 |
 
 **Usage guidelines:**

@@ -3,8 +3,8 @@
 > Standard Operating Procedures for cluster backup management.
 > Covers Longhorn volume backups and external backup integrations.
 > Description: Running, validating, and restoring Longhorn/iCloud backup workflows.
-> Version: `2026.09.14`
-> Last Updated: `2026-09-14`
+> Version: `2026.09.15`
+> Last Updated: `2026-09-15`
 > Owner: `Platform`
 
 ---
@@ -43,7 +43,11 @@ Backup schedule/config changes should be done via GitOps manifests in this repos
 N/A for dedicated blueprint resources.
 
 Source-of-truth manifests:
-- Longhorn backup cronjob/resources in `kubernetes/apps/storage/longhorn/`
+- Longhorn backup RecurringJob `daily-backup-all-volumes` in
+  `kubernetes/apps/storage/longhorn/app/recurring-backup-job.yaml`. Longhorn
+  materialises it as CronJob `storage/daily-backup-all-volumes` (ownerReference →
+  the RecurringJob); the CronJob itself is not a git object — change the
+  schedule/retention on the RecurringJob, never on the CronJob.
 - iCloud integration in `kubernetes/apps/backup/icloud-docker-{mu,andrea}/`
 
 ---
@@ -62,7 +66,7 @@ Source-of-truth manifests:
 ### Example 1: Trigger Manual Backup
 
 ```bash
-kubectl create job --from=cronjob/backup-of-all-volumes \
+kubectl create job --from=cronjob/daily-backup-all-volumes \
   manual-backup-$(date +%Y%m%d-%H%M) -n storage
 ```
 
@@ -84,12 +88,15 @@ kubectl get volumes -n storage \
 ### Test 1: CronJob and Recent Job Success
 
 ```bash
-kubectl get cronjob backup-of-all-volumes -n storage
+kubectl get cronjob daily-backup-all-volumes -n storage
+kubectl get recurringjobs.longhorn.io -n storage daily-backup-all-volumes   # its owner
 kubectl get jobs -n storage --sort-by='.status.startTime' | tail -5
 ```
 
 Expected:
-- CronJob exists and recent jobs show completion.
+- CronJob `daily-backup-all-volumes` exists (there is NO `backup-of-all-volumes` —
+  that name was never the object and returns `NotFound`), its owner RecurringJob
+  exists, and recent jobs show completion.
 
 If failed:
 - Inspect job events and pod logs.
@@ -116,18 +123,23 @@ If failed:
 
 ### Automated Backup CronJob
 
-A CronJob runs daily at 3:00 AM to back up all Longhorn volumes.
+A CronJob runs daily at 3:00 AM to back up all Longhorn volumes. It is
+`storage/daily-backup-all-volumes`, created and owned by the Longhorn
+RecurringJob of the same name (`kubectl get recurringjobs.longhorn.io -n storage`;
+source `kubernetes/apps/storage/longhorn/app/recurring-backup-job.yaml`, group
+`default`, `retain: 7`, `concurrency: 2`).
 
 ```bash
-# CronJob details
-kubectl get cronjob backup-of-all-volumes -n storage -o yaml
+# CronJob details (owned by the RecurringJob — edit the RecurringJob in git, not this)
+kubectl get cronjob daily-backup-all-volumes -n storage -o yaml
+kubectl get recurringjobs.longhorn.io -n storage daily-backup-all-volumes -o yaml
 
 # View recent jobs
 kubectl get jobs -n storage --sort-by='.status.startTime' | tail -10
 
 # View latest job logs
 LATEST_JOB=$(kubectl get jobs -n storage --sort-by='.status.startTime' \
-  | grep backup-of-all-volumes | tail -1 | awk '{print $1}')
+  | grep daily-backup-all-volumes | tail -1 | awk '{print $1}')
 kubectl logs -n storage job/${LATEST_JOB} --tail=100
 
 # Check if backup is currently running
@@ -138,7 +150,7 @@ kubectl get pods -n storage | grep backup
 
 ```bash
 # Trigger backup now (creates a one-off job)
-kubectl create job --from=cronjob/backup-of-all-volumes \
+kubectl create job --from=cronjob/daily-backup-all-volumes \
   manual-backup-$(date +%Y%m%d-%H%M) -n storage
 
 # Watch the job
@@ -196,7 +208,13 @@ owner-managed and not recorded here.
 
 ### Bind Restored Volume to Application
 
-After restore, create PV and PVC pointing to the restored volume:
+Two cases, decided by whether the app's PV/PVC are git-tracked. Two facts drive
+both: `PersistentVolume.spec.csi.volumeHandle` is **immutable** (an existing PV
+can never be re-pointed at the restored Longhorn volume), and a bound PVC's
+`spec.volumeName` is immutable too (rebinding means delete + recreate the PVC).
+
+**Case A — ad-hoc PV + PVC (not in git).** Create a PV and PVC pointing to the
+restored volume:
 
 ```yaml
 # PersistentVolume
@@ -235,7 +253,42 @@ spec:
   volumeName: restored-my-app-data
 ```
 
-Scale down the original deployment, delete old PVC, apply new PVC, scale back up.
+Scale down the original deployment, delete the old PVC (storage-safety pre-flight
+first — `docs/sops/storage-safety.md`), apply the new PV + PVC, scale back up.
+
+**Case B — `longhorn-static` app with a git-tracked `pv.yaml` + PVC (the house
+default: 60 static volumes as of 2026-09-11, `docs/sops/longhorn.md`).** Flux
+re-applies the app's `pv.yaml` and PVC on every reconcile, so a hand-edited or
+hand-created PV/PVC is reverted; the rebinding must land in git. Restore to a
+NEW Longhorn volume name (e.g. `restored-<app>-data`), then:
+
+1. Scale the consumer to 0 and confirm the old volume detached:
+   `kubectl -n <ns> scale deploy/<app> --replicas=0` →
+   `kubectl -n storage get volume <old-volume>` shows `detached`.
+2. In git, in the app folder: add a **new** PV to `pv.yaml` whose
+   `metadata.name` == `spec.csi.volumeHandle` == the restored Longhorn volume
+   name (the speaking-name rule), reclaim `Retain`, class `longhorn-static`;
+   set the PVC's `spec.volumeName` to that new PV. Keep the PVC **name**
+   unchanged so the HelmRelease's `existingClaim`/`claimName` needs no edit.
+   Commit + push (`git commit --only <app>/pv.yaml <app>/pvc.yaml`).
+3. Let Flux create the new PV (`kubectl get pv <new>` → `Available`); the PVC
+   update will be rejected by the API (immutable `volumeName`) — expected.
+4. Delete the old PVC — **storage-safety pre-flight first**
+   (`docs/sops/storage-safety.md`). Longhorn PVs here are `Retain`, so the old
+   PV and Longhorn volume survive as the rollback path. Flux recreates the PVC
+   from git, now bound to the new PV.
+5. Scale the consumer back up, verify the data, and only then remove the old PV
+   / Longhorn volume (and its `longhorn-volume.yaml`) in a later commit.
+
+**Same-name alternative (restore under the ORIGINAL volume name).** Longhorn
+can only restore a backup under a name that is free, so the original Longhorn
+Volume (and its PV/PVC) must be deleted first — that deletes the on-cluster
+replicas and every snapshot with them, leaving the backup-store copy as the
+**only** copy for the whole gap, with nothing to fall back on if the restore
+fails. Its sole advantage is that no manifest changes. Prefer Case B; use
+same-name only when a new name is impossible, never without a fresh Completed
+Backup CR for that volume verified first (Troubleshooting: "lastBackupAt Can
+Lag"), and never on a CIFS-backed PVC (see Storage Safety).
 
 ---
 
@@ -281,7 +334,7 @@ Before any significant cluster upgrade (Longhorn, Kubernetes, Talos):
 
 ```bash
 # 1. Trigger manual backup of all volumes
-kubectl create job --from=cronjob/backup-of-all-volumes \
+kubectl create job --from=cronjob/daily-backup-all-volumes \
   pre-upgrade-backup-$(date +%Y%m%d) -n storage
 
 # 2. Wait for backup to complete
@@ -307,8 +360,8 @@ kubectl get volumes -n storage \
 Include in the health check runbook (`runbooks/health-check.md`):
 
 ```bash
-# 1. Is the CronJob enabled and scheduled?
-kubectl get cronjob backup-of-all-volumes -n storage
+# 1. Is the CronJob enabled and scheduled? (owned by RecurringJob daily-backup-all-volumes)
+kubectl get cronjob daily-backup-all-volumes -n storage
 
 # 2. Was the last job successful?
 kubectl get jobs -n storage --sort-by='.status.startTime' | tail -5
@@ -449,3 +502,19 @@ git push
 
 Rollback validation:
 - Re-run `Verification Tests` and `Health Check`.
+
+---
+
+## Version History
+
+- `2026.09.15`: CronJob name corrected everywhere — the object is
+  `storage/daily-backup-all-volumes` (owned by the Longhorn RecurringJob of the
+  same name); `backup-of-all-volumes` never existed and returned `NotFound` from
+  Example 1, Test 1, the manual/pre-upgrade recipes and the Health Check.
+  "Bind Restored Volume to Application" now covers the git-tracked
+  `longhorn-static` case (immutable `volumeHandle`/`volumeName`, Flux re-apply,
+  new PV name in `pv.yaml`, PVC name unchanged, storage-safety pre-flight) and
+  the same-name restore's cascade-delete caveat.
+- `2026.09.14`: off-site cloud copy + age-key custody attested (see
+  `disaster-recovery.md`).
+- earlier: `git log -- docs/sops/backup.md`.

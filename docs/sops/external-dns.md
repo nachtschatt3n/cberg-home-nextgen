@@ -1,8 +1,8 @@
 # SOP: external-dns — public DNS publication (Cloudflare, `policy: sync`)
 
 > Description: How public DNS records for this cluster are created, changed and destroyed by external-dns, why `policy: sync` makes a failed *create* a total outage rather than a no-op, and the version/annotation traps that have taken public DNS down twice in two days.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.09.15`
+> Last Updated: `2026-09-15`
 > Owner: `homelab-sre`
 
 ---
@@ -27,7 +27,7 @@ alerts mean when they fire.
 - **Prerequisites**: mise toolchain, cluster `kubectl`, and — for anything that
   changes the record set — an **attended** window. external-dns is on the
   auto-update deny-list (`runbooks/auto-update-policy.yaml`, policy
-  `2026.09.08.1`) at every update type, in both the PR-merge and direct-bump
+  `2026.09.15.1`) at every update type, in both the PR-merge and direct-bump
   lanes.
 - **Out of scope**: internal DNS. LAN names are served by k8s-gateway
   (`docs/sops/k8s-gateway-dns.md`) and AdGuard, neither of which external-dns
@@ -61,12 +61,12 @@ capture the record set before and after (§4).
 |---------|-------|
 | Namespace | `network` |
 | Source of truth | `kubernetes/apps/network/external/external-dns/helmrelease.yaml` |
-| Chart / image | `external-dns` 1.21.1 / `registry.k8s.io/external-dns/external-dns:v0.21.0` |
+| Chart / image | `external-dns` 1.21.1 / `registry.k8s.io/external-dns/external-dns:v0.21.0` — reads the **alpha** annotation prefix. Chart 1.22.x ships v0.22.0, which reads the **GA** prefix `external-dns.kubernetes.io/` only, no fallback (§3) |
 | Provider | `cloudflare`, `--cloudflare-proxied` |
 | Policy | **`sync`** — deletes records, and delete-then-creates on change |
 | Sources | `crd` (`DNSEndpoint`) + `gateway-httproute` |
 | Gateway allowlist | `--gateway-name=envoy-external`, `--gateway-namespace=network` (default-deny, one Gateway) |
-| Record target | `external-dns.alpha.kubernetes.io/target` on the **Gateway** `envoy-external` |
+| Record target | `external-dns.alpha.kubernetes.io/target` on the **Gateway** `envoy-external` (read by v0.21). Its GA twin `external-dns.kubernetes.io/target` must be live on the same Gateway before any move to v0.22.x (§3) |
 | Registry | TXT, `txtPrefix: k8s.`, `txtOwnerId: default` |
 | Domain filter | `${SECRET_DOMAIN}` |
 | Steady-state record count | 25 verified CNAMEs (healthy 24h floor: 24) |
@@ -114,32 +114,65 @@ metadata:
   name: envoy-external
   namespace: network
   annotations:
+    # read by v0.21.x (alpha prefix) — KEEP it: it is the rollback path while a
+    # revert lands on v0.21
     external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+    # read by v0.22.x+ (GA prefix, NO fallback to the alpha key) — must be live
+    # on the object BEFORE the chart/image moves; lands via plan
+    # runbooks/maintenance/plans/external-dns-1.22.0.md §3.1
+    external-dns.kubernetes.io/target: "external.${SECRET_DOMAIN}"
 ```
 
-Every HTTPRoute attached to that Gateway then publishes a proxied CNAME to the
-tunnel hostname. Routes attached to `envoy-internal` publish nothing public,
-which is the intended default-deny.
+Both keys carry the same value, so whichever version is running computes the
+same target and `sync` has nothing to delete. Every HTTPRoute attached to that
+Gateway then publishes a proxied CNAME to the tunnel hostname. Routes attached
+to `envoy-internal` publish nothing public, which is the intended default-deny.
 
-### Version trap: v0.22.x needs `--default-targets` in the SAME change
+### Version trap: v0.22.x reads the GA annotation prefix, with NO fallback
 
-**v0.22.x stops honouring the target annotation on the parent Gateway.** It
-publishes the Gateway's own address instead — here the private LAN address
-`192.168.55.104` — which Cloudflare refuses as the content of a *proxied*
-record. Every create is rejected, and under `policy: sync` the originals are
-already deleted.
+**What changed.** v0.22.0 switched the default annotation prefix from
+`external-dns.alpha.kubernetes.io/` to `external-dns.kubernetes.io/` — upstream
+PR #6424, listed under breaking changes as *"Default annotation prefix is now
+`external-dns.kubernetes.io/` with no fallback"*. The gateway-httproute source
+still takes each route's target from the **parent Gateway's** annotations (the
+Gateway-not-HTTPRoute rule above stands), but it now looks for
+`external-dns.kubernetes.io/target`. A Gateway carrying only the alpha key
+matches nothing, and the source falls back to the Gateway's **status address** —
+here the private LAN address `192.168.55.104` — which Cloudflare refuses as the
+content of a *proxied* record (`9003`). Under `policy: sync` the originals are
+already deleted by then. That is the whole 2026-09-08 outage: the annotation was
+not "no longer honoured", it was looked up under a key our Gateway did not have.
+
+**The fix — Path A (used by plan `external-dns-1.22.0`): dual annotation, in
+its own commit FIRST.** Put the GA twin `external-dns.kubernetes.io/target` on
+Gateway `envoy-external` with the same value (block above), keep the alpha key,
+verify it is live on the object, *then* bump the chart. v0.21 reads the alpha key
+and ignores the GA one; v0.22 reads the GA key and ignores the alpha one. Both
+versions agree on the target at every instant, so no record is ever recomputed
+to a different value and `sync` has nothing to delete. No flags, no deprecated
+options, and the alpha key stays the rollback path while a revert lands on v0.21.
+
+**Path B (fallback only, if the Gateway commit cannot land):**
+`--annotation-prefix=external-dns.alpha.kubernetes.io/` in `extraArgs`, in the
+SAME change as the bump. It works on both versions (the value is validated at
+startup: non-empty, must end in `/`), but it pins every manifest and SOP to a
+prefix upstream has left, and a mistyped value that still ends in `/` is
+accepted and silently matches nothing.
+
+**What is NOT a fix.** `--default-targets` applies **only to the crd source**
+(DNSEndpoint resources with empty targets — the v0.22.0 flag help says so, and
+`multisource.go` applies it only when a source produced *no* targets). The
+gateway-httproute source always produces a target (the status address when the
+annotation is missing), so a bump carrying `--default-targets` reproduces the
+outage. `--force-default-targets` (deprecated) is worse: it overrides *every*
+source, including the tunnel's own `DNSEndpoint`, pointing
+`external.${SECRET_DOMAIN}` at itself. Earlier revisions of this SOP and of the
+deny rule prescribed `--default-targets`; that was wrong (corrected 2026-09-15
+after verification against the v0.22.0 source — plan §1.2–1.5).
 
 A bare version bump is therefore **known-broken regardless of its semver
-label**. Moving to v0.22.x requires a manifest change landed in the same commit:
-
-```yaml
-    extraArgs:
-      # REQUIRED from v0.22.0: the Gateway annotation is no longer read.
-      - --default-targets=external.${SECRET_DOMAIN}
-```
-
-This is why `*external-dns*` is denied in `runbooks/auto-update-policy.yaml` at
-every update type. The hazard is not the image pin itself — that one was
+label**. This is why `*external-dns*` is denied in `runbooks/auto-update-policy.yaml`
+at every update type. The hazard is not the image pin itself — that one was
 attended and reverted in 94 s (`aa79cf7a`) — it is that chart 1.22.x will ship
 appVersion 0.22.0 and would classify as a **safe MINOR**, landing at Step 0 of
 an unattended nightly 03:30 window with nobody watching. `security_ref:
@@ -165,9 +198,10 @@ curl -s 'http://localhost:9090/api/v1/query?query=external_dns_controller_verifi
   | python3 -m json.tool > /tmp/edns-records-before.json
 ```
 
-**2. Make the change.** For a version move, land the manifest change and the
-version change in **one commit** (see §3). For a routing change, confirm the
-target annotation lives on the Gateway, not the route.
+**2. Make the change.** For a move to v0.22.x, land the GA annotation on the
+Gateway in its **own commit first** and verify it on the live object; bump the
+chart only after that (§3, Path A). For a routing change, confirm the target
+annotation lives on the Gateway, not the route.
 
 **3. Commit and push** (shared worktree — explicit paths):
 
@@ -213,23 +247,38 @@ mise exec -- kubectl -n network logs -l app.kubernetes.io/name=external-dns --ta
   | grep -iE 'error|level=error' || echo "no errors in last 50 lines"
 ```
 
-### Example B: version bump to v0.22.x (attended, one commit)
+### Example B: version bump to v0.22.x (attended, TWO commits, Gateway first)
 
 ```bash
-# helmrelease.yaml — BOTH edits in the same change set:
-#   chart version   1.21.1 -> 1.22.x
-#   extraArgs       + --default-targets=external.${SECRET_DOMAIN}
+# Commit 1 — gateways.yaml: add the GA twin next to the alpha key (same value);
+#            no chart change in this commit
+mise exec -- kubeconform -summary -fail-on error kubernetes/apps/network/envoy-gateway
+git commit --only kubernetes/apps/network/envoy-gateway/app/gateways.yaml -F msg1.txt
+git show --stat HEAD && git push
+# verify it is LIVE before going further — expect both keys, same value
+mise exec -- kubectl -n network get gateway envoy-external \
+  -o jsonpath='alpha={.metadata.annotations.external-dns\.alpha\.kubernetes\.io/target} ga={.metadata.annotations.external-dns\.kubernetes\.io/target}{"\n"}'
+
+# Commit 2 — helmrelease.yaml: chart version 1.21.1 -> 1.22.x and NOTHING else
+#            (no --default-targets, no --annotation-prefix)
 mise exec -- kubeconform -summary -fail-on error kubernetes/apps/network/external/external-dns
-git commit --only kubernetes/apps/network/external/external-dns/helmrelease.yaml -F msg.txt
+git commit --only kubernetes/apps/network/external/external-dns/helmrelease.yaml -F msg2.txt
 git show --stat HEAD && git push
 # then STAY and watch — §6 Test 1 and Test 2, and keep `git revert` ready
 ```
 
+The executable form with pre-checks, assertions and rollback is
+`runbooks/maintenance/plans/external-dns-1.22.0.md`. Path B (§3) is the one-file
+alternative: `--annotation-prefix=external-dns.alpha.kubernetes.io/` in the same
+commit as the bump — use it only if the Gateway commit cannot land.
+
 ### Example C: what NOT to do
 
 ```bash
-# ❌ bumping the image/chart alone — known-broken from v0.22.0, and `sync`
+# ❌ bumping the image/chart to v0.22.x while the Gateway carries only the alpha
+#    key — the GA key matches nothing, the LAN address is published, and `sync`
 #    has already deleted the old records by the time the create is rejected
+# ❌ adding --default-targets as the "fix" — crd-source only; the outage repeats
 # ❌ putting external-dns.alpha.kubernetes.io/target on an HTTPRoute — inert
 # ❌ creating a record by hand in the Cloudflare UI — deleted at next reconcile
 # ❌ removing an entry from `sources:` while objects of that kind still exist
@@ -315,7 +364,7 @@ If failed:
 | Symptom | Likely Cause | First Fix |
 |---------|--------------|-----------|
 | Public hostname `NXDOMAIN`, LAN resolution fine | Record deleted by `sync` and the recreate was rejected | §8 Diagnose 1; `git revert` the last external-dns/Gateway change |
-| Log shows `9003` / `Target is not allowed for a proxied record` | Publishing a private A target instead of the tunnel CNAME | Target annotation missing on the Gateway, or on v0.22.x without `--default-targets` (§3) |
+| Log shows `9003` / `Target is not allowed for a proxied record` | Publishing a private A target instead of the tunnel CNAME | Target annotation missing on the Gateway, or v0.22.x running against a Gateway that carries only the alpha key (§3) |
 | Annotation is on the HTTPRoute and nothing happens | `gateway-httproute` source reads the **parent Gateway** only; route annotation is inert | Move it to `envoy-external` in `gateways.yaml` |
 | A new hostname is never published | Its route's `parentRefs` is not `envoy-external`/`network` | The gateway allowlist fails **closed** by design — fix `parentRefs` |
 | Records for one app vanish after a manifest change | Its source was removed from `sources:`, or its Gateway was renamed | Restore the source/name; under `sync` an unlisted source is a delete instruction |
@@ -345,9 +394,13 @@ curl -s 'http://localhost:9090/api/v1/query?query=external_dns_controller_verifi
 mise exec -- kubectl -n network logs -l app.kubernetes.io/name=external-dns --tail=200 \
   | grep -iE '9003|not allowed|error'
 
-# 3. what target does external-dns think it should publish?
+# 3. what target does external-dns think it should publish? — check BOTH keys:
+#    v0.21 reads the alpha one, v0.22+ reads the GA one, neither falls back
 mise exec -- kubectl -n network get gateway envoy-external \
-  -o jsonpath='{.metadata.annotations.external-dns\.alpha\.kubernetes\.io/target}'; echo
+  -o jsonpath='alpha={.metadata.annotations.external-dns\.alpha\.kubernetes\.io/target} ga={.metadata.annotations.external-dns\.kubernetes\.io/target}{"\n"}'
+mise exec -- kubectl -n network get deploy external-dns \
+  -o jsonpath='{.spec.template.spec.containers[0].args}' | tr ',' '\n' \
+  | grep -E 'annotation-prefix|default-targets' || echo "no prefix/default-targets flags (expected)"
 
 # 4. what version is actually running?
 mise exec -- kubectl -n network get deploy external-dns \
@@ -357,7 +410,8 @@ mise exec -- kubectl -n network get deploy external-dns \
 Expected:
 - A collapsed cname count **plus** `9003` rejections **plus** a private-IP target
   in the log confirms the annotation/version trap: either the Gateway annotation
-  is gone, or the image is v0.22.x without `--default-targets`.
+  is gone, or the image is v0.22.x and the Gateway carries only the alpha key
+  (no `external-dns.kubernetes.io/target` and no `--annotation-prefix` override).
 
 If unclear:
 - Compare `/tmp/edns-before.log` from §4 step 1 against the current log. The
@@ -483,7 +537,8 @@ record set harder to reason about while you are diagnosing.
 
 If a revert does *not* restore the records, the cause is upstream of
 external-dns — check the Gateway still exists and still carries the target
-annotation, then the tunnel (`docs/sops/cloudflare.md`).
+annotation under the key the *running* version reads (alpha for v0.21, GA for
+v0.22+), then the tunnel (`docs/sops/cloudflare.md`).
 
 ---
 
@@ -493,6 +548,8 @@ annotation, then the tunnel (`docs/sops/cloudflare.md`).
 - `kubernetes/apps/network/envoy-gateway/app/gateways.yaml`
 - `kubernetes/apps/monitoring/kube-prometheus-stack/app/external-dns-alerts.yaml`
 - `runbooks/auto-update-policy.yaml` — the `*external-dns*` deny rule
+- `runbooks/maintenance/plans/external-dns-1.22.0.md` — the executable 1.22.x
+  plan: upstream evidence for the GA-prefix switch, Path A/B, assertions, rollback
 - [`gateway-api-httproute.md`](gateway-api-httproute.md) — HTTPRoute pattern
 - [`cloudflare.md`](cloudflare.md) — the tunnel the CNAMEs point at
 - [`k8s-gateway-dns.md`](k8s-gateway-dns.md) — internal DNS (separate system)
@@ -512,3 +569,12 @@ annotation, then the tunnel (`docs/sops/cloudflare.md`).
   semantics, the Gateway-not-HTTPRoute annotation rule, the v0.22.x
   `--default-targets` requirement, the Cloudflare `9003` signature, and the six
   alert rules added in `b88109a2`.
+- `2026.09.15`: **Corrected the v0.22.x mechanism and remedy.** The 2026.09.08
+  text said v0.22.x "stops honouring" the Gateway annotation and prescribed
+  `--default-targets`; verified against the v0.22.0 source (plan
+  `external-dns-1.22.0` §1.2–1.5): the real change is the GA annotation-prefix
+  switch with no fallback (upstream #6424), and `--default-targets` is
+  crd-source-only — following it would reproduce the outage. §2, §3, §4 step 2,
+  §5 Examples B/C, §7, §8 Diagnose 1 and §11 now describe the dual-annotation
+  fix (Path A) with `--annotation-prefix=external-dns.alpha.kubernetes.io/` as
+  the fallback (Path B). Policy reference → `2026.09.15.1`.

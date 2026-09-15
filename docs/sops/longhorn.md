@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.09.06`
-> Last Updated: `2026-09-06`
+> Version: `2026.09.15`
+> Last Updated: `2026-09-15`
 > Owner: `Platform`
 
 ---
@@ -102,7 +102,7 @@ If failed:
 ### Test 2: Backup State
 
 ```bash
-kubectl get cronjob backup-of-all-volumes -n storage
+kubectl get cronjob daily-backup-all-volumes -n storage   # owned by Longhorn RecurringJob daily-backup-all-volumes
 kubectl get volumes -n storage -o custom-columns=NAME:.metadata.name,LAST_BACKUP:.status.lastBackupAt
 ```
 
@@ -816,8 +816,8 @@ kubectl get volumes -n storage | grep -v healthy
 kubectl get volumes -n storage -o jsonpath='{.items[*].status.robustness}' | tr ' ' '\n' | sort | uniq -c
 
 # Take manual backups of critical volumes
-# Run backup-of-all-volumes job manually if needed
-kubectl create job --from=cronjob/backup-of-all-volumes manual-backup-$(date +%Y%m%d) -n storage
+# Run the daily-backup-all-volumes job manually if needed
+kubectl create job --from=cronjob/daily-backup-all-volumes manual-backup-$(date +%Y%m%d) -n storage
 ```
 
 ### Longhorn Version Upgrade via Flux

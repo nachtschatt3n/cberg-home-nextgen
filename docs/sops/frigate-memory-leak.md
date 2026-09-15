@@ -1,8 +1,8 @@
 # SOP: Frigate Memory Leak — Restart Mitigation
 
 > Description: Why `home-automation/frigate` is restarted on a schedule, how the mitigation is monitored, and the condition under which all of it gets deleted.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.09.15`
+> Last Updated: `2026-09-15`
 > Owner: `cluster-ops`
 
 ---
@@ -238,8 +238,10 @@ Reverting any of these is a git revert plus Flux reconcile; the rollout is
 **EXIT CONDITION — delete this SOP and the CronJob when it is met.** The root
 cause is frigate's `embeddings_manager` holding memory in-process. Frigate 0.18
 moves embeddings out via Remote Embeddings, which removes the leak's source
-rather than bounding it. 0.18 is **beta only** as of 2026-08-26; 0.17.2 is the
-newest stable. When 0.18 reaches GA and is running here with embeddings remote,
+rather than bounding it. **0.18.0 reached GA on 2026-09-12** (upstream release,
+not a prerelease); 0.17.2 is what runs here until plan
+`runbooks/maintenance/plans/frigate-0.18.0.md` lands. The GA date alone does
+NOT retire this mitigation. When 0.18 is running here with embeddings remote,
 delete the CronJob, its RBAC, `ContainerRestartMitigationStale`,
 `ContainerMemoryBudgetExceeded`, and this file. Restore `limits.memory` to 8Gi
 only after observing a full week of flat memory.
@@ -251,3 +253,4 @@ only after observing a full week of flat memory.
 | Version | Date | Change |
 |---|---|---|
 | `2026.08.26` | 2026-08-26 | Created on execution of the leak-mitigation plan: weekly→daily restart, 10Gi headroom, `MALLOC_ARENA_MAX=1`, two mitigation-aware alerts. |
+| `2026.09.15` | 2026-09-15 | Exit condition: 0.18.0 is GA (2026-09-12), no longer "beta only"; the condition itself (running here with embeddings remote) is unchanged — the mitigation is not retired by the bump. |

@@ -1,5 +1,5 @@
 ---
-# frigate-restart — weekly controlled restart to bound a real memory leak.
+# frigate-restart — daily controlled restart to bound a real memory leak.
 #
 # WHY THIS EXISTS (2026-08-24)
 # frigate leaks roughly 0.32 GiB/day of genuine process memory. Measured across a
@@ -22,10 +22,11 @@
 # a search feature the operator deliberately enabled. It buys days; this bounds
 # the problem indefinitely.
 #
-# WHY WEEKLY
-# ~14 days from a cold start (~3.5 GiB) to the 8 GiB ceiling at the observed
-# rate, so weekly leaves roughly half the budget unused even if the leak
-# accelerates. Sunday 02:30 is the quietest hour for an NVR and sits clear of the
+# WHY DAILY (schedule `30 2 * * *`, Europe/Berlin)
+# Originally weekly (Sunday 02:30) on a "~14 days from a ~3.5 GiB cold start"
+# estimate; corrected to DAILY on 2026-08-26 when the measured rate proved that
+# estimate wrong by ~9x — see the WHY DAILY block on the CronJob spec below for
+# the numbers. 02:30 is the quietest hour for an NVR and sits clear of the
 # 03:00 Longhorn backup and the 04:00 sweep.
 #
 # THIS IS A WORKAROUND, NOT A FIX. frigate 0.17.2 is the newest stable release
