@@ -37,8 +37,8 @@ conflicts_with:
                                   # can actually hurt (§2.1).
   - talos-1.14.0                  # reboots every node; that plan's own rule is "no other
                                   # plan may share its window".
-security_ref: F-09a38bc2          # fixable image-level findings on the CURRENT tag with a
-                                  # newer upstream tag available. Detail on the record only.
+security_ref: F-09a38bc2          # the image-level finding on the CURRENT tag. What it
+                                  # says, and what this bump does to it, live on the record.
 capability_change: false          # §2.4 — the one fact a reviewer should attack; premise
                                   # `only-core-plugin-is-loaded` + gate G3 falsify it at
                                   # runtime instead of trusting this file.
@@ -47,8 +47,8 @@ rollback_class: git-revert        # §2.3 — established from the upstream serv
                                   # /data (it did not when 0.145 was planned), so this is
                                   # the evidence-backed form, not the "nothing survives" form.
 finding_refs: [F-b7f7f5c5, F-09a38bc2]   # F-b7f7f5c5 = the version finding for exactly
-                                  # this bump (PLAN lane); F-09a38bc2 = the fixable-CVE
-                                  # finding this bump is the remedy for.
+                                  # this bump (PLAN lane); F-09a38bc2 = the image-level
+                                  # security finding this plan answers (cited, not described).
 autonomy_override: human-gated    # RESTRICTS the derivation (which would read AUTO-NIGHT
                                   # from capability_change:false + git-revert). The
                                   # `*scrypted*` deny rule in runbooks/auto-update-policy.yaml
