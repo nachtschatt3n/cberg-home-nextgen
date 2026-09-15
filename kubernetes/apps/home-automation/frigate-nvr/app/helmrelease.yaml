@@ -21,7 +21,8 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 1
+      retries: 0
+      remediateLastFailure: false   # TEMP for plan frigate-0.18.0 — restore retries: 1 after §4
   uninstall:
     keepHistory: false
 
@@ -45,7 +46,7 @@ spec:
   values:
     image:
       repository: ghcr.io/blakeblackshear/frigate
-      tag: 0.17.2
+      tag: 0.18.0
     env:
       TZ: "Europe/Berlin"
       LIBVA_DRIVER_NAME: "iHD"

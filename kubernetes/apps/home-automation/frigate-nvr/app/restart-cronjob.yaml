@@ -29,10 +29,14 @@
 # the numbers. 02:30 is the quietest hour for an NVR and sits clear of the
 # 03:00 Longhorn backup and the 04:00 sweep.
 #
-# THIS IS A WORKAROUND, NOT A FIX. frigate 0.17.2 is the newest stable release
-# (0.18 is beta only), so there is nothing to upgrade to yet. Revisit when 0.18
-# ships: if the leak is fixed upstream, delete this CronJob rather than carrying
-# it forever.
+# THIS IS A WORKAROUND, NOT A FIX. 0.18.0 went GA on 2026-09-12 and is deployed
+# by plan frigate-0.18.0, but that bump does NOT retire this CronJob: the exit
+# condition in docs/sops/frigate-memory-leak.md is "0.18 running here with
+# embeddings remote", and the migrated genai provider only takes the
+# descriptions + chat roles. Embeddings (frigate.embeddings, the leak's source)
+# are still the in-process JinaV1 model. Measure a week of 0.18 memory; if the
+# slope is gone, delete this CronJob in its own plan rather than carrying it
+# forever.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
