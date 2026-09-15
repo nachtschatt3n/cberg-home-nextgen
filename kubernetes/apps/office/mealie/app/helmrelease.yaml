@@ -63,7 +63,16 @@ spec:
           main:
             image:
               repository: ghcr.io/mealie-recipes/mealie
-              tag: v3.25.1
+              tag: v3.26.0
+            # v3.26.0+ refuses server-initiated HTTP to private addresses (recipe
+            # import/image download, webhooks, recipe actions) unless the target is
+            # on HTTP_ALLOW_LIST. Deliberately NOT set here: the OIDC login path
+            # (authlib, routes/auth/auth.py) is NOT routed through that guard, so
+            # auth.${SECRET_DOMAIN} resolving to the envoy-external LAN IP is fine;
+            # the only guarded OIDC call (avatar fetch) self-allow-lists the
+            # provider host; and we run 0 webhooks / 0 recipe actions. Adding the
+            # auth host or the VLAN here would only re-open the SSRF surface for
+            # user-supplied URLs. See runbooks/maintenance/plans/mealie-v3.26.0 §1.2.
             env:
               TZ: ${TIMEZONE}
               # BASE_URL is load-bearing for OIDC: it builds the redirect_uri
