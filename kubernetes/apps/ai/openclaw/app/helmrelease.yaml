@@ -1771,6 +1771,12 @@ spec:
               # npm-registry probe. Re-ratified 2026-06-11.
               - name: OPENCLAW_NO_AUTO_UPDATE
                 value: "1"
+              # Mac ops console pane label for the operation /
+              # maintenance-window skills; must match runbooks/window-crons.py
+              # (the crons pass it explicitly; say-so paths from chat did not
+              # have it — 2026-09-15).
+              - name: OPERATION_SESSION
+                value: "ai-server-ops"
               # Playwright browsers were installed into the PVC during init —
               # point @playwright/mcp at the same location at runtime.
               - name: PLAYWRIGHT_BROWSERS_PATH
