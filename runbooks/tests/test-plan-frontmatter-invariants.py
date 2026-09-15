@@ -137,6 +137,51 @@ def main() -> int:
     check("retired 'approved' status -> error",
           v(dict(GOOD, status="approved")), "unknown status")
 
+    # ---- on-demand NOW slot (2026-09-15) ---------------------------------
+    # `now:<date>` refs name the top-level on_demand slot, which has no
+    # weekday and no cron. They must validate — or every stamped plan reads as
+    # broken — but only against that slot's own rules.
+    od_cfg = dict(CFG, on_demand={"id": "now", "mode": "attended",
+                                  "allow_reboot": False, "serial": True,
+                                  "duration_min": 480})
+
+    def vo(*plans):
+        return mp.validate_plans(od_cfg, list(plans))
+
+    now_plan = dict(GOOD, window="now:2026-09-15")        # a Tuesday
+    check("on-demand: now:<date> accepted when on_demand is declared",
+          vo(now_plan), None)
+    check("on-demand: weekday is NOT checked (a Wednesday is fine too)",
+          vo(dict(now_plan, window="now:2026-09-16")), None)
+    check("on-demand: awaiting-go with now: is clean",
+          vo(dict(now_plan, status="awaiting-go")), None)
+    check("on-demand: est_duration_min above the ceiling -> error",
+          vo(dict(now_plan, est_duration_min=481)), "on-demand now ceiling")
+    check("on-demand: exactly at the ceiling is clean",
+          vo(dict(now_plan, est_duration_min=480)), None)
+    check("on-demand: needs_reboot + now: -> error",
+          vo(dict(now_plan, needs_reboot=True)), "needs_reboot plan may not carry an on-demand window")
+    check("on-demand: needs_reboot in a SCHEDULED window is not this error",
+          [e for e in vo(dict(GOOD, needs_reboot=True)) if "on-demand" in e], None)
+    check("on-demand: now: with NO on_demand block declared -> not declared",
+          v(now_plan), "not declared")
+    check("on-demand: an invalid date still fails",
+          vo(dict(now_plan, window="now:2026-13-40")), "invalid date")
+    check("on-demand: id colliding with a scheduled window -> error",
+          mp.validate_plans(dict(CFG, on_demand={"id": "sat-early", "duration_min": 480}),
+                            [GOOD]), "collides")
+    # the discriminator: the on-demand branch must not swallow scheduled refs
+    check("on-demand: a scheduled weekday mismatch is still caught with on_demand present",
+          vo(dict(GOOD, window="sat-early:2026-08-30")), "runs on")
+    real = mp.load_windows()
+    od_real = mp.on_demand_slot(real)
+    check("real YAML declares on_demand 'now', outside windows:",
+          [] if (od_real and od_real["id"] == "now"
+                 and "now" not in {w["id"] for w in real["windows"]}) else [f"{od_real}"],
+          None)
+    check("real YAML on_demand forbids reboots",
+          [] if od_real and od_real.get("allow_reboot") is False else [f"{od_real}"], None)
+
     # status-vocabulary parity (P4.0.4): the plans README must document exactly
     # VALID_STATUSES, and the window agent's Step 1 load-set must be a subset.
     # Same needle contract as controls.yaml: prose that drifts silently

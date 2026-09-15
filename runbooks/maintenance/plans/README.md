@@ -68,6 +68,29 @@ anyway: `coverage.py` returns `PLAN` for `dn or utype == "major"`, so a deny
 rule changes only the REASON TEXT, never removes the item from `needs_plan`.
 A rule here would over-block a real update and still not stop the re-planning.
 
+## On-demand NOW refs — `window: "now:<YYYY-MM-DD>"`
+
+Besides a scheduled-window ref (`sun-attended:2026-09-20`), `window:` may carry
+`now:<YYYY-MM-DD>`: the plan was picked for an operator-triggered, attended
+on-demand NOW run on that date (`on_demand:` slot `now` in
+`runbooks/maintenance-windows.yaml`; flow in `docs/sops/maintenance-windows.md`
+§4 "Run approved plans NOW").
+
+- **Only `runbooks/run-now.py stamp <ids>` writes it**, inside a NOW run, after
+  `run-now.py preflight` passed. It rewrites the frontmatter `window:` line and
+  nothing else (it re-parses and compares every other key before writing). Do
+  not hand-write a `now:` ref to get a plan "run soon" — the preflight, not the
+  stamp, is the gate, and a hand stamp only makes the plan look claimed.
+- `validate_plans` accepts it without a weekday check; `est_duration_min` must
+  fit the 480-minute on-demand ceiling, and a `needs_reboot` plan may not carry
+  one.
+- A plan stamped `now:<today>` that is not `executed` is treated as **already in
+  today's NOW run**: `run-now.py preflight` refuses it unless the operator
+  continues the SAME run (`--operator-go "<who/how>" --resume`).
+- Not executed by the next day → the sweep's reconciler warns `STALE ON-DEMAND
+  stamp`; re-run it (`home-operation run --issue <key>`) or set `window:` back to
+  a scheduled slot or `null`.
+
 ## What counts as an "open plan" — three tiers
 
 `python3 runbooks/maintenance-plan.py --open` is the canonical answer. A flat
@@ -160,7 +183,12 @@ status: draft                     # draft | vetted | scheduled | awaiting-go |
                                   #   maintenance-plan.py, parity-tested)
                                   # awaiting-go = window agent asked for go/no-go;
                                   # the sweep re-reminds you every cycle until answered
-window: null                      # e.g. "sun-window:2026-07-27" once scheduled
+window: null                      # e.g. "sun-attended:2026-09-20" once scheduled
+                                  # (<window id from maintenance-windows.yaml>:<YYYY-MM-DD>)
+                                  # or "now:<YYYY-MM-DD>" = stamped for an operator-
+                                  # triggered on-demand NOW run on that date. ONLY
+                                  # `runbooks/run-now.py stamp` writes a now: ref —
+                                  # never hand-write one (see "On-demand NOW refs" below)
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 # (original rationale: opt-in unattended (only honored if risk:low + policy allows))

@@ -86,6 +86,32 @@ def main() -> int:
              "payload": {"argv": ["sh", "-lc", "briefing"]}}
     check("non-window crons ignored", wc.check(WINDOWS, TZ, GOOD + [noise]), None)
 
+    # ---- on-demand NOW slot (2026-09-15) ---------------------------------
+    # on_demand is a top-level block, never a `windows:` entry: parity must
+    # not demand a cron for it (an on-demand slot has no schedule).
+    real_windows, _tz = wc.load_windows()
+    check("real YAML: parity's window list never contains the on-demand slot",
+          [] if real_windows and "now" not in {str(w["id"]) for w in real_windows}
+          else [f"windows={[w.get('id') for w in real_windows]}"], None)
+    check("real YAML: no cron is required for 'now' (parity over drivers only is clean)",
+          [e for e in wc.check(real_windows, TZ,
+                               [cron(str(w["id"]), wc.expected_cron_expr(w)) for w in real_windows]
+                               + [cron(str(w["id"]), wc.expected_retry_cron_expr(w), "retry")
+                                  for w in real_windows if w.get("retry_after_min")])
+           if "now" in e], None)
+    # ...and a cron that DID drive 'now' is exactly the thing to flag: it would
+    # turn an operator-triggered slot into a schedule nobody reviews
+    check("a cron driving --window now is an ORPHAN",
+          wc.check(WINDOWS, TZ, GOOD + [cron("now", "0 12 * * *")]),
+          "ORPHAN cron drives window 'now'")
+    # the on-demand verb is not a driver or a retry
+    run_now = {"name": "x", "enabled": True, "schedule": {"expr": "0 12 * * *", "tz": TZ},
+               "payload": {"argv": ["sh", "-lc",
+                                    "/home/node/.openclaw/bin/maintenance-window run-now --plan foo"]}}
+    check("a `maintenance-window run-now` payload is neither driver nor retry",
+          [] if wc.window_of_cron(run_now) is None and wc.retry_window_of_cron(run_now) is None
+          else ["run-now misread"], None)
+
     print()
     if FAILURES:
         print(f"FAILED: {len(FAILURES)} -> {', '.join(FAILURES)}")

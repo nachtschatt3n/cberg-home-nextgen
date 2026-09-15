@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.09.14`
-> Last Updated: `2026-09-14`
+> Version: `2026.09.15`
+> Last Updated: `2026-09-15`
 
 ## 1) Description
 
@@ -24,6 +24,7 @@ maintenance-window-agent  ── vets plans for INTERFERENCE + SIDE EFFECTS,
       │                       sequences them, operator go/no-go, executes
       ▼
 3 scheduled windows — nightly unattended + sat/sun attended (runbooks/maintenance-windows.yaml)
+  + the on-demand `now` slot — an attended NOW run of named, approved plans (§4)
 ```
 
 Three roles, deliberately separated: the **sweep** plans + schedules + reports
@@ -58,6 +59,21 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   `needs_reboot: false` plan to a weekday or Sat. Each window has a
   `capacity_risk` (risk-weight budget, low1/med2/high3) and an `allow_reboot`
   flag. Times/capacities are editable (git-tracked; bump `version`).
+- **On-demand NOW slot (2026-09-15):** a top-level `on_demand:` block in the same
+  YAML (id `now`, attended, `allow_reboot: false`, serial, `duration_min: 480`)
+  lets the operator run vetted, approved plans immediately instead of waiting
+  for their window ("run the X upgrade now"). It is deliberately **not** an entry
+  in `windows:`: everything that reads `windows:` asserts a SCHEDULE — cron
+  parity (`window-crons.py --check` would demand a cron), per-occurrence
+  liveness (`expected_slots` would report it missed every day) and the
+  scheduler (`window-scheduler.py` would place work into it). An on-demand slot
+  has no schedule, so it can be used but never missed. What does read it:
+  `validate_plans` accepts `now:<YYYY-MM-DD>` window refs (no weekday check;
+  `est_duration_min` must fit the 480m ceiling; a `needs_reboot` plan may NOT
+  carry one), `stuck_window_runs` uses the ceiling for an open `now` row, the
+  reconciler's per-slot OVER-TIME / REBOOT / INTERFERENCE / STACKING checks
+  (no risk-load budget — the run is operator-chosen and serial), and
+  `runbooks/run-now.py`. Full flow in §4 "Run approved plans NOW".
 - **Plans:** `runbooks/maintenance/plans/<component>-<target>.md` — frontmatter
   (component, PR, current→target, risk, duration, `needs_reboot`, precise
   `touches`, `depends_on`, `conflicts_with`, status, window) + six body sections
@@ -241,6 +257,67 @@ Authentik/Homepage/Longhorn objects.
   A window declaring `retry_after_min` also gets a retry cron from `--render`,
   asserted by `--check` (2026-09-14).
 
+- **Run approved plans NOW (on demand, attended — 2026-09-15).** The operator
+  says "run the grafana upgrade now" to OpenClaw, or types it into the Mac ops
+  console. End to end:
+
+  ```
+  operator: "run X (and Y) now"
+      │  OpenClaw chat                       │  or directly in the ops console
+      ▼                                      │
+  home-operation run --issue X[,Y]           │
+      │  each --issue must be the EXACT key of ONE open go_no_go issue, else
+      │  exit 3 (suggestions only) / 5 and NOTHING is recorded; records approve
+      │  by "operator (say-so run-now)" (or re-scopes an existing GO) with
+      │  window now:<today Europe/Berlin> → exec_state=pending (tick voids it
+      │  2 days later if the run never happens). --no-push writes nothing.
+      │  Dispatch rc != 0 / exception → the say-so is UNDONE (see §5 exit 8/10)
+      ▼                                      │
+  maintenance-window run-now --plan X --plan Y
+      │  REFUSES (non-zero, nothing sent): exit 10 ANY open `now` window_runs row
+      │  (any run_date), exit 7 that ledger unreadable, exit 8 console mid-turn; never
+      │  /clears; sends [OPERATOR NOW-RUN — MAINTENANCE_WINDOW_TRIGGER=now, plans=X,Y]
+      ▼                                      ▼
+  ops console → maintenance-window-agent, "On-demand NOW runs" section
+      │  1. window-run-record.py --slot now --outcome running --trigger ad-hoc
+      │  2. Step 0 safe updates (every run, this one too)
+      │  3. run-now.py preflight X Y --json   (replaces window-occupancy checks)
+      │  4. run-now.py stamp <runnable>        (window: now:<date>, via GitOps)
+      │  5. execute the sequence SERIALLY, full per-plan contract
+      │  6. autonomy-record --slot now --supervised; resolve --by executed
+      ▼
+  window-run-record.py --finalize --slot now --trigger ad-hoc
+  ```
+
+  `runbooks/run-now.py preflight` refuses, per plan and fail-closed: an
+  unreadable or missing plan file; any status but `vetted`/`scheduled`/
+  `awaiting-go` (draft, blocked, awaiting-soak, executed, superseded, reference
+  — with the reason); `needs_reboot` (node rolls stay in `sun-attended`);
+  over the ceiling; `depends_on` neither executed nor in the run; no operator
+  approval — a pending `approve` scoped to `now:<today|yesterday>` in
+  `home-operation --json decisions --pending-exec`, or `--operator-go
+  "<who/how>"` given by the operator at the console (recorded as the consent
+  source); failing premises. A home-operation exec that fails is NO approval. A
+  GO recorded for a scheduled window does not authorize a NOW run (approvals are
+  scoped to their window — `run --issue` re-scopes it on the operator's say-so).
+  It orders the rest deterministically: shared infra first, then risk
+  high→low, stable by plan id, `depends_on` honoured; a declared
+  `conflicts_with` pair (either direction) may share a NOW run ONLY because it
+  is serial, and the later step is marked `settle_before` so the executor
+  settles and re-verifies cluster health between them. Every sequence entry
+  carries `depends_on_in_run`, and the executor does not start a step whose
+  in-run dependency did not execute green (it revokes that approval with
+  `resolve --by cleared`). A plan already stamped `now:<today>` and not executed
+  is refused as "already in an on-demand run today" unless `--operator-go`
+  AND `--resume` continue the same run. With `--operator-go` the output's
+  `running_row_notes` is written into the running row's notes (durable
+  consent). Exit 0 all runnable, 1 partial (ask the operator), 2 nothing
+  runnable.
+
+  From the console without OpenClaw: `runbooks/run-now.py preflight <ids>`
+  first; if the only refusal is the approval, the operator's explicit yes in
+  the console becomes `--operator-go`.
+
   **Durability caveat:** these crons live only in OpenClaw's PVC sqlite (the
   gateway cron store), **not** in git — same as the sweep cron. They survive pod
   rolls but not PVC loss; recreate them with `openclaw cron add` (see the
@@ -320,6 +397,17 @@ cycle is a process failure — dispatch the planner manually.
 `warnings` must contain no `OVER-CAPACITY` / `REBOOT-IN-NONREBOOT` /
 unresolved `INTERFERENCE` for any window with a date in the future.
 
+### Test 4b: the NOW trigger is wired end to end (read-only)
+
+```bash
+# the preflight reads approvals + premises, never mutates
+.venv/bin/python3 runbooks/run-now.py preflight <plan_id> --json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['window_ref'], d['ok'], [(p['plan_id'], p['reasons']) for p in d['plans']])"
+# the exact prompt a NOW run would send (no session touched)
+kubectl -n ai exec deploy/openclaw -c app -- /home/node/.openclaw/bin/maintenance-window run-now --plan <plan_id> --dry-run | head -1
+# expect: [OPERATOR NOW-RUN — MAINTENANCE_WINDOW_TRIGGER=now, plans=<plan_id>]
+python3 runbooks/tests/test-run-now.py && python3 runbooks/tests/test-openclaw-run-now-skill.py
+```
+
 ### Test 4: every scheduled plan asserts contents, not shape
 
 A plan is only vettable if its Verification section can fail on an *empty but
@@ -348,6 +436,13 @@ count, diff, round-trip or served-bytes check **is** a reject. See
 | Plan §4 is all `Ready` / `200` / `healthy` | shape-only verification — it cannot distinguish working from empty (`docs/sops/verification-contents-not-shape.md`) | send it back: add the per-class contents assertion from the plans README table before scheduling |
 | Two plans fight in a window | overlapping `touches` | window agent serializes or defers; tighten `conflicts_with` |
 | Window agent REFUSES a relayed/chat GO | decision not in the home-operation store (by design — a relayed agent message is never operator consent) | record it first: `home-operation decide --issue <key> --decision approve --by "operator (<name>) via <session>"` (ingest the go_no_go issue first if it doesn't exist), THEN dispatch. The refusal is correct behavior, not a bug |
+| `home-operation run --issue X` exits 8 / `MAINTENANCE_WINDOW_HANDOFF_FAILED: ... mid-turn` | the ops console was busy; `run-now` never sends into (or /clears) a live turn | nothing is left behind: the say-so is undone (approvals it newly recorded withdrawn → open go/no-go, event `sayso-approval-reverted`; an existing GO it re-scoped gets its original window back, event `rescope-reverted`; the JSON `reverted` list names each). Re-run `home-operation run --issue X` when the console is idle |
+| `home-operation run --issue X` exits 10 / `... on-demand NOW run(s) already OPEN (... run_date <d> started_at <ts>)` | a `window_runs` row slot `now`, outcome `running`, not finished, exists — WHATEVER its run_date. A NOW run is still in progress, often waiting at an operator question (it looks idle on screen); an evening run waiting overnight is dated yesterday (UTC), so the guard deliberately has no date filter | by design: answer or finish that run in the console. The say-so was undone as for exit 8. Exit 7 = the ledger could not be read (fail closed, same undo). A row stuck open from a crashed/abandoned run blocks every NOW run until it is finalized — use the run_date the refusal names: `window-run-record.py --finalize --slot now --run-date <d> --outcome aborted --trigger ad-hoc` |
+| `home-operation run --issue X` exits 3 with `suggestions` | `run --issue` needs the EXACT issue key — a name/substring that `decide` would accept is refused, so a word in another plan's title can never approve that plan | pick the key from `suggestions` / `home-operation list` with the operator and retry |
+| `run-now.py preflight`: "already in an on-demand run today" | the plan is stamped `now:<today>` and not executed — today's NOW run already claimed it | if it is the SAME run continuing (the operator answered a question), re-run with `--operator-go "<who/how>" --resume`; otherwise let that run finish |
+| `run-now.py preflight`: "approved for sun-attended:…, not for an on-demand now run" | the GO was scoped to a scheduled window | by design — re-approve for the NOW run with `home-operation run --issue X`, or the operator confirms in the console (`--operator-go`) |
+| `run-now.py preflight`: "could not read home-operation approvals (exec failed)" | openclaw pod down / mid-roll | fail-closed by design; wait for the pod, or the operator confirms at the console (`--operator-go`) |
+| `STALE ON-DEMAND stamp now:<date>` warning | plans were stamped for a NOW run that did not execute them. Timing: the reconciler warns from day+1 (date < today); `home-operation tick` voids the GO only at ≥ 2 days; `run-now.py` still accepts a `now:` GO dated today or yesterday — so on day+1 the warning shows while the GO may still be live | on day+1: re-run it (`home-operation run --issue <key>`, which re-scopes the GO to today) or revoke it (`resolve --by cleared`) and clear `window:`. From day+2 `tick` has voided the GO: re-approve before re-running, or clear `window:` |
 | Background window agent stalls "waiting to settle" | agent ended its turn on a passive wait — background agents get NO timer wakeups | agent must poll in-turn (bounded retries) or explicitly hand the wait back to its coordinator with what-to-check; coordinator: verify the settle yourself and resume it with the result |
 
 ### Plan-authoring lessons (2026-08-18, bitnamilegacy-exit-phase1 incident)
@@ -419,6 +514,8 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 - Schedule: `runbooks/maintenance-windows.yaml`
 - Plans + schema: `runbooks/maintenance/plans/` (README.md)
 - Reconciler: `runbooks/maintenance-plan.py`
+- On-demand NOW runs: `runbooks/run-now.py` (preflight + stamp), OpenClaw skills
+  `home-operation run --issue` / `maintenance-window run-now`
 - Agents: `.claude/agents/{upgrade-planner-agent,maintenance-window-agent}.md`
 - Sweep hook: `.claude/agents/daily-operation.md` rule 4d
 - Upstream of the pipeline: `docs/sops/auto-update.md`
@@ -431,6 +528,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 |---|---|---|
 | 2026.09.13 | 2026-09-13 | **Two stale assertions corrected, both of a kind that has already cost a window.** (a) §1 said the auto-updater "merges SAFE patch/minor updates on the scheduled sweep" — the retired "sweep-applies" model; the sweep is READ-ONLY and safe updates land at Step 0 of every window, as §2 of this same SOP already said. (b) §Execution posture still said AUTO-NIGHT "runs unattended in `mode: unattended` windows" — the exact wording `d147b1ce` removed from `maintenance-window-agent.md`, `autonomy-policy.yaml` and `maintenance-windows.yaml` on 2026-09-12 because, being the stricter of two contradictory rules, it meant a cron-fired ATTENDED window could execute NOTHING. This SOP was the fourth site and was missed. |
 | 2026.09.14 | 2026-09-14 | **Lost-occurrence retry + in-flight rows.** A window may declare `retry_after_min` (nightly: 135 → 05:45); `window-crons.py --render` then also emits a `Maintenance Window — <id> retry` cron and `--check` asserts it. The retry verb (`maintenance-window retry --window <id>`, in the OpenClaw skill) no-ops when ANY `window_runs` row exists for (slot, today) — including the new `--outcome running` row the window agent now writes at Step 0 start and closes with `--finalize` — and fails closed on an unreadable ledger. `maintenance-plan.py` reports a never-finalized running row under `window_liveness.stuck`. Also: scheduler refuses plans with absent/failing premises; nightly window dispatches planners for `needs_plan` items; two aborts on one plan in a window → blocked; every executed plan is recorded via `autonomy-record.py` before the finalize (ledger backfilled with 24 audited executions; chart/image AUTO-NIGHT graduated). Operator-approved mechanics; no gate/threshold/deny rule changed. |
+| 2026.09.15 | 2026-09-15 | **Active NOW trigger (operator request).** The say-so path existed but was dead: `home-operation run --issue` resolved the issue to its SCHEDULED window id and fired a normal window run (which found nothing due today and went idle), and both skills still named the retired `tue-early`/`thu-early`/`sun-window` ids. Now: top-level `on_demand:` slot `now` in `maintenance-windows.yaml` (attended, no reboot, serial, 480m ceiling; outside `windows:` so cron parity, liveness and the scheduler are untouched); `validate_plans` accepts `now:<date>` refs; stuck detection uses the ceiling for `now` rows; new `runbooks/run-now.py` (fail-closed preflight + deterministic serial order with conflict-pair settle flags + frontmatter-only stamp); `home-operation run --issue` records/re-scopes the approval to `now:<today>` and calls the new `maintenance-window run-now` verb, which refuses a mid-turn console and never /clears; hardened after adversarial review: `run --issue` needs an EXACT key (a substring once approved the wrong plan), `run-now` refuses while ANY open `now` window_runs row exists, whatever its run_date — an evening run waiting overnight is dated yesterday; a stale row must be finalized first (exit 10, the refusal names the row's run_date + started_at; unreadable ledger exit 7), a failed dispatch undoes the say-so (new approvals withdrawn, re-scoped GOs get their window back), `--no-push` writes nothing, preflight refuses plans already stamped `now:<today>` without `--operator-go --resume`, `sequence` carries `depends_on_in_run` and a step whose dependency was not green is not started, `--operator-go` consent is written into the running row, `run/retry --window now` are refused; window agent gained an "On-demand NOW runs" section (row first, Step 0 still first, only the named plans, `--supervised`, finalize `--slot now`). Retired window ids are refused with their replacement. |
 | 2026.09.11 | 2026-09-11 | `CHANNEL_RULES` is now **membership, not a predicate**. The `"stable": "odd-minor"` rule for scrypted was DISPROVED (~17 even-minor releases carry `prerelease=false`) and, worse, failed OPEN: a Release-less ODD-minor dev tag scored stable and would have been applied UNATTENDED at Step 0 onto a privileged NVR, with the `auto-update-policy.yaml` deny rule as the only thing holding the door. Stable-ness depends on whether upstream published a non-prerelease Release for that EXACT tag — which no version string can answer — so membership alone is the hold. Membership stays offline-decidable, which the window agent requires. |
 | 2026.09.05 | 2026-09-05 | Documented the **RISK-CLASS STACKING** detector (`656ffef8`): >1 irreversible plan (`rollback_class` one-way/backup-restore) in one slot has no rollback path for the window; quiet on a single irreversible plan and on git-revert rollbacks. Blast radius is set by reversibility, not namespace. |
 | 2026.07.25 | 2026-07-25 | Initial SOP. 3 windows/week; per-held-update planner agent; window agent vets interference + side effects, sequences, operator go/no-go; sweep reconciles + reports the schedule. |

@@ -34,7 +34,7 @@
 # scheduled plans' window: fields, the OpenClaw crons' payloads, and the live
 # GO/issue records — a rename without that migration orphans a live GO.
 # Edit freely (git-tracked); bump `version`.
-version: "2026.09.14"
+version: "2026.09.15"
 timezone: Europe/Berlin
 
 windows:
@@ -118,6 +118,42 @@ windows:
     capacity_risk: 6          # unchanged: risk-load 4 (both plans rated medium)
     allow_reboot: true        # rolling node reboots (Talos) go here, operator-present
     mode: attended
+
+# ON-DEMAND "NOW" SLOT (2026-09-15, operator request "run the plan with an
+# active NOW trigger"). An operator can say "run X now" — to OpenClaw
+# (`home-operation run --issue X`) or in the Mac ops console — and have vetted,
+# approved plans executed immediately in an ATTENDED run instead of waiting for
+# the next scheduled window. Plans stamped for such a run carry
+# `window: "now:<YYYY-MM-DD>"`; the run is recorded in window_runs as slot `now`.
+#
+# WHY THIS IS NOT AN ENTRY IN `windows:`. Everything that reads `windows:` is
+# asserting a SCHEDULE, and an on-demand slot has none:
+#   * `window-crons.py --check` requires exactly one driving cron per window —
+#     an on-demand slot must have NO cron (a cron would make it scheduled);
+#   * `maintenance-plan.py` liveness expects a window_runs row per dated
+#     occurrence — an on-demand slot has no occurrences, so it can never be
+#     "missed", only used;
+#   * `window-scheduler.py` places auto-capable plans into upcoming slots — it
+#     must never place work into a run nobody asked for.
+# Keeping it top-level leaves all three untouched by construction instead of
+# special-casing an id in each of them.
+#
+# What IS read from here: `id` (the plan window-ref prefix and the window_runs
+# slot), `duration_min` (a CEILING — per-plan fit in validate_plans and the
+# stuck-row threshold for an open `now` row; it is not a time budget the
+# operator commits to), `allow_reboot: false` (a needs_reboot plan may NOT be
+# stamped now: — node rolls stay in the reboot-capable Sunday window with its
+# sized rollback budget), and `serial: true` (plans run strictly one at a time,
+# which is the only reason a declared conflicts_with pair may share one
+# on-demand run; runbooks/run-now.py flags such pairs so the executor
+# re-verifies cluster health and settles between them).
+# Step 0 (safe updates) still runs FIRST in an on-demand run, as in every run.
+on_demand:
+  id: now
+  mode: attended              # the operator asked for it and is present
+  allow_reboot: false
+  serial: true
+  duration_min: 480           # 8h ceiling: stuck detection + per-plan fit only
 
 execution:
   # Autonomy is CLASS-BASED (P2.1b, 2026-08-26). A plan's execution class is

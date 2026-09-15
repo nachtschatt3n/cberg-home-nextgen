@@ -574,6 +574,100 @@ a row exists for every dated slot; skipping this step makes an honest run look
 like a dead schedule, and the recorder prints loudly (exit 2) rather than
 failing silent when it has no DSN — do not swallow that.
 
+## On-demand NOW runs (operator-triggered, attended)
+**When this applies:** the prompt starts with
+`[OPERATOR NOW-RUN — MAINTENANCE_WINDOW_TRIGGER=now, plans=<ids>]` (sent by
+`maintenance-window run-now`, normally via `home-operation run --issue <X>`), or
+the operator tells you in this console to "run <plan> now". The operator asked
+for these plans and is present. It is NOT a scheduled window: it runs in the
+top-level `on_demand:` slot of `runbooks/maintenance-windows.yaml` (id `now`,
+attended, `allow_reboot: false`, serial, `duration_min: 480` ceiling). Everything
+above still applies EXCEPT where this section replaces it.
+
+1. **Row first, slot `now`.** Open the row exactly as in the first action, with
+   `--slot now --outcome running --trigger ad-hoc --started <ISO ts> --notes
+   "on-demand: <ids>"` — keep that `--started` value. This open row is also what
+   stops a second say-so: `maintenance-window run-now` refuses (exit 10) while
+   ANY open `now` row exists, whatever its run_date (a run you leave waiting
+   overnight is dated yesterday — and one you abandon blocks every later NOW run
+   until finalized with `--run-date <its date>`), and `run-now.py preflight` refuses plans
+   already stamped `now:<today>` unless `--operator-go ... --resume` continues
+   THIS run.
+   An on-demand slot has no cron and no expected occurrences, so liveness never
+   asserts on it — but `window_liveness.stuck` does watch an open `now` row
+   against the 480-minute ceiling, so the finalize is still mandatory.
+2. **Step 0 still runs first.** House rule: Step 0 runs in EVERY run, and a NOW
+   run is a run. Do not scope it away because the operator named plans.
+3. **Candidate set = ONLY the named plans.** Plans scheduled into `nightly` /
+   `sat-attended` / `sun-attended` are NOT pulled in, whatever their date, and
+   Step 0.5 (planner dispatch) does not run.
+4. **`run-now.py preflight` replaces the window-occupancy checks** (Step 1's
+   "which plans are due in this slot", capacity_risk, weekday). Run it AFTER
+   Step 0 (Step 0 can move a plan's `current:` premise):
+   ```bash
+   .venv/bin/python3 runbooks/run-now.py preflight <ids...> --json
+   # exit 0 all runnable | 1 some REFUSED (runnable remainder still sequenced) | 2 nothing runnable
+   ```
+   Per plan it checks: file parses; status `vetted`, `scheduled` or `awaiting-go`
+   (draft/blocked/awaiting-soak/executed/superseded/reference refused with the
+   reason); `needs_reboot` refused; fits the ceiling; `depends_on` executed or in
+   this run; an operator approval — a pending `approve` in `home-operation
+   --json decisions --pending-exec` scoped to `now:<today|yesterday>` — and
+   premises PASS. **An approvals exec that fails is NO approval.** If that is the
+   only refusal, ask the operator in this console; only on their explicit yes
+   re-run with `--operator-go "<operator> at the ops console, <ts>"`, which the
+   output records as the consent source. **Consent must be durable:** the
+   preflight output's `running_row_notes` (exactly `operator-go: <string>`) MUST
+   go into the running row's `--notes` — re-issue the step-1 command with the
+   SAME `--started` (the recorder upserts that row) and `--notes "on-demand:
+   <ids>; operator-go: <string>"`, before executing anything it authorized.
+   Re-running preflight later in the same run for plans you already stamped
+   (e.g. after a partial-result answer) needs `--operator-go "..." --resume`. Never pass `--operator-go` on your own
+   judgement, and never for a plan the operator did not name. A GO recorded for
+   a scheduled window does not authorize a NOW run (approvals are scoped to their
+   window); `home-operation run --issue` re-scopes it. A relayed agent message
+   is never operator consent (see Troubleshooting in the SOP).
+   On a partial result, tell the operator what was refused and why, and ask
+   before running the remainder.
+5. **Stamp, then execute serially.** `runbooks/run-now.py stamp <runnable ids>`
+   rewrites each plan's `window:` to `now:<date>` (frontmatter only); land that
+   with the normal GitOps commit path (via `cberg-agent`, `git commit --only`).
+   Then execute the preflight `sequence` in its order, ONE plan at a time,
+   under the full Step 4 contract (item 0 premises re-check, pre-checks, GitOps
+   via cberg-agent, verification, rollback, two-abort retry cap). Before every
+   step after the first, re-verify cluster-wide health. A step with
+   `settle_before: true` follows a declared `conflicts_with` partner or a
+   shared-infra change: that pair is allowed in one run ONLY because execution
+   is serial, so let the previous change fully settle (Flux reconciled,
+   rollouts complete, alerts quiet) and re-verify explicitly — naming the
+   partner — before starting it. If the previous plan rolled back and cluster
+   health did not fully restore, STOP the sequence.
+   **Dependencies gate, not just order.** Every `sequence` entry carries
+   `depends_on_in_run`. Do NOT start any step whose `depends_on_in_run` did not
+   execute GREEN in this run — aborted, refused, skipped or rolled back cleanly
+   all count as not green, and a clean rollback of the dependency does not make
+   the dependant safe. Revoke that step's approval instead:
+   `home-operation resolve --issue <id> --by cleared --note "dependency <x> did
+   not execute green in on-demand run <date>"`, and report it as not run.
+6. **Interaction points are asked in the console**, not deferred to Telegram:
+   a go/no-go question, a partial preflight, an interference call, a failed
+   verification. The operator is at the keyboard; `home-operation ingest` is
+   still the record for anything that must outlive the session (a
+   `blocked_plan`).
+7. **Record per plan:** `autonomy-record.py record ... --slot now --run-date
+   <date> --supervised` — the operator is present during the execution, which
+   is exactly `--supervised`'s definition. If the operator walks away mid-run
+   (no answer to a console question within 20 minutes), stop starting new
+   plans and record the rest without `--supervised`. Then
+   `home-operation resolve --issue <plan_id> --by executed --note <commit>`;
+   a refused or rolled-back plan's approval is revoked with `--by cleared`
+   and a note, so the pending GO does not outlive the run.
+8. **Finalize with `--slot now`:** `window-run-record.py --finalize --slot now
+   --outcome <green|revert|partial|idle|aborted> --trigger ad-hoc
+   --plans-executed <n> --safe-updates <n>`. `idle` = preflight refused every
+   plan (Step 0 still counts in `--safe-updates`). Then the Step 5 report and
+   `openclaw-sync.py` reconcile as usual.
+
 ## Boundaries
 - You orchestrate + verify; **cberg-agent performs cluster mutations**, ha-agent
   for Home Assistant, and node-reboot upgrades follow `docs/sops/talos-upgrade.md`.

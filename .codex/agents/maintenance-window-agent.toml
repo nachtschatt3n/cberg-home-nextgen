@@ -140,6 +140,48 @@ This row is the only thing distinguishing "ran and found nothing" from "never
 ran" — the sweep asserts one exists per dated slot. The recorder exits 2 loudly
 without a DSN; do not swallow that.
 
+## On-demand NOW runs (operator-triggered, attended)
+Applies when the prompt starts with
+`[OPERATOR NOW-RUN — MAINTENANCE_WINDOW_TRIGGER=now, plans=<ids>]` (sent by
+`maintenance-window run-now`, normally via `home-operation run --issue <X>`), or
+the operator says in the console "run <plan> now". Not a scheduled window: it
+runs in the top-level `on_demand:` slot of `runbooks/maintenance-windows.yaml`
+(id `now`, attended, allow_reboot false, serial, 480-minute ceiling). Full
+contract: `.claude/agents/maintenance-window-agent.md` (same-named section).
+
+1. Row first: `window-run-record.py --slot now --outcome running --trigger ad-hoc
+   --started <ISO ts> --notes "on-demand: <ids>"` (keep --started). An open `now`
+   row, whatever its run_date, makes `maintenance-window run-now` refuse a
+   second say-so (exit 10) — an abandoned one blocks every later NOW run until
+   finalized with `--run-date <its date>`;
+   preflight refuses plans already stamped `now:<today>` unless
+   `--operator-go "..." --resume` continues THIS run.
+2. Step 0 (safe updates) still runs FIRST — it runs in every run.
+3. Candidate set = ONLY the named plans; scheduled windows' plans are not pulled
+   in; no planner dispatch.
+4. `.venv/bin/python3 runbooks/run-now.py preflight <ids...> --json` (after
+   Step 0) replaces the window-occupancy checks: status vetted|scheduled|
+   awaiting-go, no needs_reboot, fits the ceiling, depends_on satisfied, an
+   operator approval scoped to `now:<date>` in `home-operation --json decisions
+   --pending-exec` (an exec failure is NO approval; `--operator-go` only on the
+   operator's explicit yes in the console), premises PASS. Partial → ask.
+   Durable consent: with `--operator-go`, put the output's exact
+   `running_row_notes` (`operator-go: <string>`) into the running row's --notes by
+   re-issuing the step-1 command with the SAME --started, before executing.
+5. `runbooks/run-now.py stamp <ids>` (frontmatter window → now:<date>, landed via
+   GitOps), then execute the `sequence` strictly serially under the normal
+   per-plan contract; re-verify cluster health before each step after the first,
+   and settle + re-verify explicitly before any `settle_before: true` step (a
+   declared conflict partner or shared infra ran just before).
+   Do NOT start any step whose `depends_on_in_run` did not execute GREEN in this
+   run (aborted/refused/rolled back cleanly = not green); revoke its approval:
+   `home-operation resolve --issue <id> --by cleared --note "dependency <x> did
+   not execute green in on-demand run <date>"`.
+6. Operator interaction points are asked in the console.
+7. Per plan: `autonomy-record.py record ... --slot now --supervised` (operator
+   present), `home-operation resolve --issue <id> --by executed --note <commit>`.
+8. Finalize: `window-run-record.py --finalize --slot now --trigger ad-hoc ...`.
+
 ## Boundaries
 - You orchestrate + verify; **cberg-agent performs cluster mutations**, ha-agent
   for Home Assistant, and node-reboot upgrades follow `docs/sops/talos-upgrade.md`.

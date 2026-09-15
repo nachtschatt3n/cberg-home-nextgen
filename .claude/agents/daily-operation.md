@@ -274,6 +274,12 @@ needs their decision, and what got auto-fixed.
       interference, MISSED windows), and how many held updates are still
       unplanned or stale. A MISSED window or an OVER-CAPACITY/INTERFERENCE
       warning is a ⚠️ action row.
+    - **`now:<date>` entries in `scheduled` are on-demand NOW runs**, not
+      windows: plans `run-now.py stamp` claimed for an operator-triggered run
+      (no cron, never "missed"). One still unexecuted the day after its date is
+      reported as `STALE ON-DEMAND stamp now:<date>` — a ⚠️ row: the NOW run did
+      not execute it; re-run it (`home-operation run --issue <key>`) or clear its
+      `window:`. Do not report it as a MISSED window.
     - **Sync pending decisions to OpenClaw (it owns the reminders).** OpenClaw's
       `home-operation` skill holds the open-issue + reminder + decision lifecycle
       (`docs/sops/maintenance-windows.md`). Route the reconciler's output to it —

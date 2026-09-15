@@ -45,6 +45,22 @@ def load_windows():
     return yaml.safe_load(WINDOWS_YAML.read_text())
 
 
+def on_demand_slot(cfg) -> dict | None:
+    """The top-level `on_demand:` slot (the operator-triggered NOW run), or None.
+
+    Deliberately NOT part of `windows:` (see the YAML comment): cron parity,
+    per-occurrence liveness and the scheduler all read `windows:` and must
+    never see a slot that has no schedule. Consumers that DO need it — plan
+    window-ref validation, stuck-row detection, the reconciler's per-slot
+    checks, run-now.py — ask for it here. A block without an `id` is treated
+    as absent (fail closed: a `now:` ref then fails validation as undeclared).
+    """
+    od = (cfg or {}).get("on_demand")
+    if not isinstance(od, dict) or not str(od.get("id") or "").strip():
+        return None
+    return {**od, "id": str(od["id"]).strip()}
+
+
 def plans_dir(cfg):
     return REPO_ROOT / cfg.get("planning", {}).get("plans_dir", "runbooks/maintenance/plans")
 
@@ -259,6 +275,14 @@ def reconcile(cfg, today):
     # run for two-thirds of the queue is the same silent-skip class as the ES
     # field bugs. Resolve the window def by id so the checks cover all plans.
     win_by_id = {w["id"]: w for w in cfg["windows"]}
+    # The on-demand slot joins the per-slot checks (OVER-TIME against its
+    # ceiling, REBOOT-IN-NONREBOOT, INTERFERENCE, RISK-CLASS STACKING) but NOT
+    # the risk-load budget: an on-demand run is operator-chosen, attended and
+    # strictly serial, so a capacity_risk it never declared must not invent an
+    # OVER-CAPACITY warning. It is NOT added to `occ`/next_windows.
+    _od = on_demand_slot(cfg)
+    if _od and _od["id"] not in win_by_id:
+        win_by_id[_od["id"]] = {**_od, "_on_demand": True}
     # A plan in a TERMINAL state (executed / superseded) is not schedulable
     # work — but it stays in this map if its file still carries a `window:`,
     # and then it inflates that slot's risk-load and time budget and lists as
@@ -297,14 +321,22 @@ def reconcile(cfg, today):
             wdate = date.fromisoformat(slot.split(":", 1)[1])
             unrun = unrun_plans(ps)
             if wdate < today and unrun:
-                warnings.append(f"MISSED window {slot}: {len(unrun)} plan(s) "
-                                f"not executed")
+                if _od and slot.split(":", 1)[0] == _od["id"]:
+                    # stamped for an on-demand run that did not execute them —
+                    # the stamp is stale and home-operation tick will expire
+                    # the GO; re-stamp or clear the window.
+                    warnings.append(f"STALE ON-DEMAND stamp {slot}: {len(unrun)} "
+                                    f"plan(s) stamped for a NOW run not executed — "
+                                    f"re-run or clear their window")
+                else:
+                    warnings.append(f"MISSED window {slot}: {len(unrun)} plan(s) "
+                                    f"not executed")
         except Exception:
             wdate = None
         if not w:
             continue
         load = sum(RISK_WEIGHT.get(p.get("risk", "medium"), 2) for p in ps)
-        if load > w.get("capacity_risk", 4):
+        if not w.get("_on_demand") and load > w.get("capacity_risk", 4):
             warnings.append(f"OVER-CAPACITY {slot}: risk-load {load} > {w['capacity_risk']}")
         # TIME capacity — distinct from risk-load, and previously unchecked.
         # risk-load is a coarse "how much can go wrong" budget; it says nothing
@@ -592,12 +624,18 @@ def validate_plans(cfg, plans=None) -> list[str]:
     import datetime as _dt
     plans = plans if plans is not None else load_plans(cfg)
     win = {w["id"]: w for w in cfg.get("windows", [])}
+    od = on_demand_slot(cfg)
     ids = {p.get("plan_id") for p in plans}
     # A file the loader could not parse is a validation ERROR, not an absence
     # (F-6a398b8b). It comes first: every other invariant below is about plans
     # that exist, and "all invariants hold" must never be printed over a file
     # nobody could read.
     errs = [f"UNREADABLE plan file — {e}" for e in PLAN_LOAD_ERRORS]
+    # The on-demand id sharing a scheduled window's id would make every ref to
+    # that id ambiguous (weekday-checked or not? cron-driven or not?).
+    if od and od["id"] in win:
+        errs.append(f"maintenance-windows.yaml: on_demand id {od['id']!r} collides "
+                    f"with a scheduled window id — on-demand refs would be ambiguous")
     for pl in plans:
         pid = pl.get("plan_id") or pl.get("_path")
         st = str(pl.get("status") or "").strip()
@@ -614,6 +652,26 @@ def validate_plans(cfg, plans=None) -> list[str]:
                 m = _WINDOW_REF.match(str(w))
                 if not m:
                     errs.append(f"{pid}: window {w!r} is not <window-id>:<YYYY-MM-DD>")
+                elif od and m.group(1) == od["id"] and m.group(1) not in win:
+                    # ON-DEMAND ref (`now:<date>`): no weekday — the slot has no
+                    # schedule — but the plan must still fit the on-demand
+                    # ceiling, and a reboot-bearing plan may not be stamped for
+                    # it (node rolls keep the reboot-capable Sunday window and
+                    # its sized rollback budget).
+                    try:
+                        _dt.date.fromisoformat(m.group(2))
+                    except ValueError:
+                        errs.append(f"{pid}: window {w} carries an invalid date")
+                    dur = pl.get("est_duration_min")
+                    ceiling = int(od.get("duration_min") or 0)
+                    if isinstance(dur, (int, float)) and ceiling and dur > ceiling:
+                        errs.append(f"{pid}: est_duration_min {dur} can never fit "
+                                    f"the on-demand {od['id']} ceiling ({ceiling}m)")
+                    if pl.get("needs_reboot") and not od.get("allow_reboot"):
+                        errs.append(f"{pid}: needs_reboot plan may not carry an "
+                                    f"on-demand window ({w}) — on_demand.allow_reboot "
+                                    f"is false; reboot plans run in a reboot-capable "
+                                    f"scheduled window")
                 elif m.group(1) not in win:
                     errs.append(f"{pid}: window id {m.group(1)!r} not declared in "
                                 f"maintenance-windows.yaml — plans scheduled into "
@@ -676,7 +734,11 @@ WINDOW_LIVENESS_EPOCH = date(2026, 8, 27)
 
 def expected_slots(cfg, today, lookback_days=7):
     """Every (slot, date) the YAML says should have run: fully-past days only
-    (today's window may legitimately not have fired yet), since the epoch."""
+    (today's window may legitimately not have fired yet), since the epoch.
+
+    Reads `windows:` ONLY. The `on_demand:` slot is never expected: it has no
+    schedule, so an on-demand run can be used or not, never "missed" — a `now`
+    window_runs row is simply an extra completed row nothing asserts on."""
     days = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
             "friday": 4, "saturday": 5, "sunday": 6}
     out = []
@@ -763,18 +825,26 @@ def _as_utc(ts):
     return ts
 
 
-def stuck_window_runs(windows, run_rows, now, grace_min=WINDOW_STUCK_GRACE_MIN):
+def stuck_window_runs(windows, run_rows, now, grace_min=WINDOW_STUCK_GRACE_MIN,
+                      on_demand=None):
     """Pure, DB-free: 'slot:date' for every OPEN row older than its window's
     duration_min + grace. A window id the YAML no longer declares gets no
     duration (grace only) — a stale open row for a retired slot is still a
     row nobody will ever close.
 
-    windows:  the `windows:` list from maintenance-windows.yaml (id, duration_min)
-    run_rows: (slot, run_date, started_at, finished_at, outcome, ...)
-    now:      tz-aware datetime; naive timestamps are read as UTC
+    windows:   the `windows:` list from maintenance-windows.yaml (id, duration_min)
+    run_rows:  (slot, run_date, started_at, finished_at, outcome, ...)
+    now:       tz-aware datetime; naive timestamps are read as UTC
+    on_demand: the top-level `on_demand:` block (optional). An open row for
+               its slot (`now`) uses ITS duration_min ceiling — without it an
+               attended on-demand run would read as stuck after grace alone
+               (60 min), which is shorter than most single plans.
     """
     durations = {str(w.get("id")): int(w.get("duration_min") or 0)
                  for w in windows or []}
+    if isinstance(on_demand, dict) and on_demand.get("id") \
+            and str(on_demand["id"]) not in durations:
+        durations[str(on_demand["id"])] = int(on_demand.get("duration_min") or 0)
     now = _as_utc(now)
     out = []
     for r in run_rows:
@@ -818,7 +888,8 @@ def window_liveness_report(cfg, today, now=None):
         return unverified
     now = now or datetime.now(timezone.utc)
     return {"missing": missing_window_runs(expected, completed_run_rows(rows)),
-            "stuck": stuck_window_runs(cfg.get("windows", []), rows, now),
+            "stuck": stuck_window_runs(cfg.get("windows", []), rows, now,
+                                       on_demand=on_demand_slot(cfg)),
             "verified": True}
 
 
@@ -934,7 +1005,8 @@ def open_queue(cfg) -> str:
         else:
             ref.append(pl)
     out = ["== open plans ==", ""]
-    out.append(f"EXECUTABLE ({len(ex)}) — scheduled into a window")
+    out.append(f"EXECUTABLE ({len(ex)}) — scheduled into a window "
+               f"(or stamped now:<date> for an on-demand NOW run)")
     for pl in sorted(ex, key=lambda x: (str(x.get("window")), x.get("plan_id") or "")):
         out.append(f"  {str(pl.get('window')):<22} {pl.get('plan_id'):<36} "
                    f"{str(pl.get('status')):<10} {str(pl.get('risk')):<7} "

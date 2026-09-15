@@ -65,6 +65,44 @@ def main() -> int:
     check("pre-epoch history excluded",
           all(d >= "2026-08-27" for _, d in exp_epoch), str(exp_epoch))
 
+    # ---- on-demand NOW slot (2026-09-15) ---------------------------------
+    od = {"id": "now", "duration_min": 480, "allow_reboot": False}
+    od_cfg = dict(CFG, on_demand=od)
+    exp_od = mp.expected_slots(od_cfg, today, lookback_days=14)
+    check("on-demand slot is NEVER an expected occurrence",
+          all(s != "now" for s, _ in exp_od) and exp_od == mp.expected_slots(CFG, today, 14),
+          str(exp_od))
+    real_exp = mp.expected_slots(mp.load_windows(), today, lookback_days=14)
+    check("real YAML: no 'now' occurrence is ever expected",
+          real_exp and all(s != "now" for s, _ in real_exp), str(real_exp[:3]))
+    # a completed now row is an extra row — it satisfies nothing and breaks nothing
+    missing = mp.missing_window_runs(exp, [("tue-early", "2026-09-08"),
+                                           ("sat-early", "2026-09-05"),
+                                           ("now", "2026-09-07")])
+    check("a completed 'now' row neither satisfies nor adds a missing slot",
+          missing == [], str(missing))
+
+    from datetime import datetime, timedelta, timezone
+    t_now = datetime(2026, 9, 9, 18, 0, tzinfo=timezone.utc)
+
+    def open_row(slot, hours_ago):
+        return (slot, "2026-09-09", t_now - timedelta(hours=hours_ago), None, "running")
+
+    rows3 = [open_row("now", 3)]
+    check("stuck: a 3h-old open 'now' row is NOT stuck under the 480m ceiling",
+          mp.stuck_window_runs(CFG["windows"], rows3, t_now, on_demand=od) == [])
+    # the control that shows the ceiling is load-bearing: without it grace
+    # alone (60m) would already call an attended multi-plan run dead
+    check("stuck: ...but WITHOUT the on_demand block it would read as stuck (why it is wired)",
+          mp.stuck_window_runs(CFG["windows"], rows3, t_now) == ["now:2026-09-09"])
+    check("stuck: a 9.5h-old open 'now' row IS stuck (480 + 60 grace = 9h)",
+          mp.stuck_window_runs(CFG["windows"], [open_row("now", 9.5)], t_now,
+                               on_demand=od) == ["now:2026-09-09"])
+    check("stuck: on_demand does not change a scheduled window's threshold",
+          mp.stuck_window_runs([{"id": "nightly", "duration_min": 90}],
+                               [open_row("nightly", 3)], t_now,
+                               on_demand=od) == ["nightly:2026-09-09"])
+
     # no-DSN => verified=False, missing empty — degraded, never all-clear
     import os
     os.environ.pop("SWEEP_PG_DSN", None)

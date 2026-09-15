@@ -162,6 +162,32 @@ def main() -> int:
     check("a reboot-bearing plan only lands in an allow_reboot slot",
           len(a) == 1 and a[0]["slot"].startswith("sun-attended:"), str(a))
 
+    # ---- on-demand NOW slot (2026-09-15) -----------------------------------
+    # The on_demand block is top-level, not a `windows:` entry, precisely so
+    # the scheduler cannot place work into a run nobody asked for.
+    od_cfg = dict(CFG, on_demand={"id": "now", "mode": "attended", "allow_reboot": False,
+                                  "serial": True, "duration_min": 480})
+    slots = ws.upcoming_slots(od_cfg, MONDAY, 21)
+    check("upcoming_slots never yields the on-demand slot",
+          slots and all(not s["slot"].startswith("now:") for s in slots),
+          str([s["slot"] for s in slots if s["slot"].startswith("now:")]))
+    # a plan too long for any scheduled slot but inside the 480m ceiling is the
+    # shape that would tempt a scheduler to fall back to 'now'
+    a, s = ws.assign([plan("big", est_duration_min=300)], od_cfg, {"big": "AUTO-NIGHT"},
+                     {}, MONDAY, premises_check=lambda pid: (True, "fixture"))
+    check("a plan that fits only the on-demand ceiling is refused, never placed into now",
+          not a and "room" in reason_for(s, "big"), f"{a} / {s}")
+    a, _ = ws.assign([plan("p1"), plan("p2", est_duration_min=10)], od_cfg,
+                     {"p1": "AUTO-NIGHT", "p2": "AUTO-NIGHT"}, {}, MONDAY,
+                     premises_check=lambda pid: (True, "fixture"))
+    check("with on_demand present, assignments still land only in scheduled windows",
+          len(a) == 2 and all(not x["slot"].startswith("now:") for x in a), str(a))
+    a, s = ws.assign([plan("stamped", window="now:2026-09-07")], od_cfg,
+                     {"stamped": "AUTO-NIGHT"}, {}, MONDAY,
+                     premises_check=lambda pid: (True, "fixture"))
+    check("a plan already stamped now: is not re-placed by the scheduler",
+          not a and not s, f"{a} / {s}")
+
     # ---- commissioning ------------------------------------------------------
     # A scheduler that assigns nothing would pass every refusal test above.
     a_all, _ = run([plan("x1"), plan("x2", est_duration_min=10)])
