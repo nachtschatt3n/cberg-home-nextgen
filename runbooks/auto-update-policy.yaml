@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.13.1"
+version: "2026.09.15"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -130,6 +130,24 @@ deny:
       landed in the SAME change — a bare version bump is known-broken, whatever its semver
       label says. PLAN lane only, attended, with the record set captured before and after.
       security_ref: F-14528040"
+  # Added 2026-09-15 (F-71dc3610, operator call). Frigate is a 0.x project, so
+  # its MINOR is the breaking axis: 0.18.0 parses as a "minor" that G1 admits,
+  # yet ships a config migrator (flat `genai:` -> `genai.default` + roles,
+  # `clean_copy` removed, snapshot format -> WebP), three sqlite migrations and
+  # a kernel floor. coverage.py's 0.x rule already routes the direct-bump half
+  # to PLAN; this rule closes the OTHER door — an open Renovate PR labelled
+  # `minor` auto-merging at Step 0 with only G3 (best-effort release-notes
+  # scan) between it and a privileged NVR pod that starts in SAFE MODE (Ready,
+  # UI up, zero cameras) when its ConfigMap-mounted, read-only config is not
+  # migrated. `max: patch` keeps 0.17.x patches flowing; every minor goes
+  # through a plan (runbooks/maintenance/plans/frigate-0.18.0.md is the first).
+  - match: "*frigate*"
+    reason: "0.x project: a MINOR is a release-line move with config migration + sqlite
+      migrations (0.18.0: genai provider mapping, clean_copy removed, WebP snapshots,
+      kernel >= 6.5). Read-only ConfigMap config cannot be auto-migrated, so an
+      unattended bump starts Frigate in safe mode with zero cameras while every probe
+      stays green. Patch bumps stay on the line and auto-merge; minor+ is PLAN lane."
+    max: patch
   - match: "*mariadb*"
     reason: "A DB-engine bump is never unattended-safe. The bitnami entrypoint can SKIP
       mariadb-upgrade on a server-major roll while reporting Ready and the right

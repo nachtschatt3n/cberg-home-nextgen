@@ -263,7 +263,7 @@ dist-tag stay on `CHANNEL_RULES` membership (see
 
 Run the synthetic matrix. **It must assert every deny rule that exists, not a
 memorable subset** — a rule absent from the matrix is a rule the test cannot
-catch the removal of. As of `2026.09.12.1` that is all 23 globs:
+catch the removal of. As of `2026.09.15` that is all 25 globs:
 
 | Deny glob | Assert |
 |---|---|
@@ -275,6 +275,7 @@ catch the removal of. As of `2026.09.12.1` that is all 23 globs:
 | `*k8s-gateway*` | held at every update_type |
 | `*envoy-gateway*` | held at every update_type |
 | `*external-dns*` | held at every update_type — **including `minor`**, which is the case that matters: chart 1.22.x will ship appVersion 0.22.0 and would otherwise score a safe MINOR into the unattended nightly lane |
+| `*frigate*` | `max: patch` (added 2026-09-15, F-71dc3610) — patch ALLOWED, minor held: a 0.x MINOR is a release-line move with config + sqlite migrations, and the read-only ConfigMap config cannot be auto-migrated (safe-mode-with-zero-cameras failure is invisible to probes) |
 | `*mariadb*` | `max: patch` — patch ALLOWED, minor and major held |
 | `*mcpo*` | held at every update_type |
 | `*n8n*` | `max: patch` (added 2026-09-10) — patch ALLOWED (stable line), minor held: n8n ships its beta/next channel on the next MINOR line with no prerelease marker in the tag |
@@ -288,6 +289,7 @@ catch the removal of. As of `2026.09.12.1` that is all 23 globs:
 | `*openclaw*` | held at every update_type |
 | `*@openclaw/*` | held at every update_type |
 | `*coredns*` | held at every update_type |
+| `aqua:siderolabs/talos` | held at every update_type — the talosctl CLI pin in `.mise.toml` FOLLOWS a node upgrade and must never move ahead of the cluster; listed ABOVE `siderolabs/*` because first match wins and `_match_anywhere` would otherwise attach the node-image reason to a local binary (split 2026-09-13, F-1128fcdf; matrix row added 2026-09-15 — Test 2b had been failing on it) |
 | `siderolabs/*` | held at every update_type |
 | `*talos*` | held at every update_type |
 
@@ -419,6 +421,7 @@ git revert --no-edit <merge-sha> && git push origin main
 | Version | Date | Change |
 |---|---|---|
 | 2026.09.13 | 2026-09-13 | **Test 2's matrix had drifted again — the failure mode the 2026.09.08 entry below claims to have closed.** Its own Test 2b check reported `MISSING: *k8s-gateway*, *n8n*`, and four Assert cells were stale: `*app-template*`, `*grafana*`, `*nextcloud-mcp*` were narrowed to `max: patch` on 2026-09-12 (`d147b1ce`) and `*nocodb*` earlier, yet all four still read "held at every update_type". Test 2b only checks glob MEMBERSHIP, so it cannot see a wrong Assert — the `max:` semantics still decay silently. Matrix resynced to policy `2026.09.12.1` (23 globs). Also documented the Renovate-side `followTag` channel lever. |
+| 2026.09.15 | 2026-09-15 | **`*frigate*` deny rule added (`max: patch`, policy `2026.09.15`, F-71dc3610, operator call).** Frigate is 0.x, so a "minor" is a release-line move with a config migrator and sqlite migrations; the read-only ConfigMap config cannot be auto-migrated, so an unattended bump starts the NVR in safe mode with zero cameras while every probe stays green. coverage.py's 0.x rule already held the direct-bump half; this closes the Renovate-PR half. Test 2 matrix row added. |
 | 2026.09.15 | 2026-09-15 | **Two gate bypasses in the direct-bump lane, found in the nightly window by ground-truthing AUTO items.** (1) G3 was NOT applied on the regular patch/minor path: `breaking_change_signal()` had one call site, inside `max_rule_fallbacks()`, so the sentence in §4 ("must clear G1, G2, G3 and G5 like any other direct bump") described the fallback path only — mealie `v3.25.1 → v3.26.0`, `age_waive`d so G5 did not hold it either, was rated AUTO with a BREAKING CHANGE in its release notes (F-ec4c1644). `assign_lane()` now runs `_direct_bump_breaking_gate()` before its AUTO exit: a positive signal routes to PLAN; unfetchable notes still do not hold (the documented asymmetry) but the AUTO reason now says `G3 unverified`. (2) G5 measured the wrong image for a multi-image component: `direct_bump_age_gate()` stopped at the first repo that resolved the target tag, alphabetically `memgraph/lab` (3.5 d old), and rated `memgraph-mage 3.13.1` (13 h old) AUTO inside the cooldown (F-9b77a91a). It now takes the YOUNGEST age across every repo carrying the tag and names that repo in the hold reason. Regression suites: `test-coverage-lane-safety.py` (DirectBumpBreakingGateTest), `test-direct-bump-age-gate.py` (multi-repo youngest carrier). |
 | 2026.09.12 | 2026-09-12 | **A `max:` rule's ALLOWED half had no candidate source.** Renovate only ever proposes the newest version — the blocked one — so G2 held the PR while the direct-bump lane skipped the component for *having* a PR. n8n `2.38.4 → 2.38.7` (a patch on the stable line, explicitly permitted by its own `max: patch`) was invisible to both halves. Added `coverage.py::max_rule_fallbacks()`: reads upstream's stable-channel pointer, emits the allowed head as an ordinary direct-bump candidate, holds fail-safe when the channel cannot be confirmed. Regression suite: `runbooks/tests/test-max-rule-fallback.py`. |
 | 2026.09.08 | 2026-09-08 | **Completed the Test 2 synthetic matrix and added Test 2b to keep it complete.** The matrix enumerated 8 of the then-20 deny globs; `*external-dns*` was added the same day (`e97476d3`, policy `2026.09.08.1`) and 11 others (`cilium`, `gateway-helm`, `gateway-crds-helm`, `envoy-gateway`, `mcpo`, `nocodb`, `nextcloud-mcp`, `nextcloud-redis`, `grafana`, `coredns`, `@openclaw/`) had never been listed — so the SOP's own test asserted a policy the repo no longer had. Test 1 now derives the list from the policy YAML instead of restating it, and Test 2b fails on any missing-or-stale glob in both directions. |
