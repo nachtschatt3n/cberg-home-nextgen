@@ -78,27 +78,49 @@ else:
     if r.returncode != 0 or "wazuh" not in r.stdout:
         print("  SKIP  wazuh not found running in-cluster -- live scan not exercised")
     else:
-        images = [i for i in r.stdout.split() if "wazuh/wazuh-" in i]
-        target = sorted(set(images))[0] if images else None
-        check("a running wazuh image was found to scan", target is not None, True)
-        if target:
+        images = sorted({i for i in r.stdout.split() if "wazuh/wazuh-" in i})
+        check("a running wazuh image was found to scan", bool(images), True)
+        # 2026-09-15: this used to scan ONLY sorted(images)[0]. On 4.14.5 that
+        # happened to be a vulnerable image; after the 4.14.7 roll the first
+        # image alphabetically is wazuh-agent, whose rebuilt base carries no
+        # CRITICAL/HIGH findings -- so the check failed on a CLEAN image and
+        # blocked every audit-tooling commit via the pre-commit hook. The claim
+        # under test is about the STACK ("never noise-free, only unmeasured"),
+        # so scan the running images in a stable order and stop at the first
+        # one with data. The scan order puts the manager first: it is the image
+        # the original finding was measured on and the most likely to carry data.
+        order = sorted(images, key=lambda i: ("wazuh-manager" not in i, i))
+        scanned, with_data, failed = [], None, []
+        for target in order:
             scan = subprocess.run(
                 ["trivy", "image", "--scanners", "vuln",
                  "--severity", "CRITICAL,HIGH", "--format", "json", target],
                 capture_output=True, text=True, timeout=180,
             )
-            check(f"trivy can scan {target} (public image, no auth needed)",
-                  scan.returncode, 0)
-            if scan.returncode == 0:
-                d = json.loads(scan.stdout)
-                total = sum(len(r.get("Vulnerabilities") or [])
-                           for r in d.get("Results") or [])
-                # Deliberately asserting only presence of scan DATA, never a
-                # count or severity claim in committed text -- see
-                # docs/sops/vulnerability-disclosure.md.
-                check(f"live cluster: trivy returned real vulnerability data for "
-                      f"{target} (proving this was never noise-free, only unmeasured)",
-                      total > 0, True)
+            if scan.returncode != 0:
+                failed.append(target)
+                continue
+            # strict=False: Trivy embeds raw control characters in upstream CVE
+            # descriptions, and strict json.loads raises on them. The old code
+            # never hit this only because it never scanned a vulnerable image.
+            d = json.loads(scan.stdout, strict=False)
+            scanned.append(target)
+            if any(r.get("Vulnerabilities") for r in d.get("Results") or []):
+                with_data = target
+                break
+        check("trivy can scan the running wazuh images (public, no auth needed)",
+              failed, [])
+        # A silent zero is never a pass: if EVERY running image returns no
+        # data, either upstream cleaned the whole stack (re-measure, then revise
+        # this test's claim deliberately) or the scan is broken -- fail either
+        # way, loudly, rather than let "no data" read as "clean".
+        # Deliberately asserting only presence of scan DATA, never a count or
+        # severity claim in committed text -- see
+        # docs/sops/vulnerability-disclosure.md.
+        check(f"live cluster: at least one running wazuh image returned vulnerability "
+              f"data (proving the stack was never noise-free, only unmeasured; "
+              f"scanned {len(scanned)} of {len(order)})",
+              with_data is not None, True)
 
 print(f"\n  {PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
