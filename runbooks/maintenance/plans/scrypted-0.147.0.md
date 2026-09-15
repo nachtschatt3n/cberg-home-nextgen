@@ -31,10 +31,10 @@ depends_on: []                    # Flux `dependsOn: intel-device-plugin-gpu` (n
                                   # kube-system) is a Kustomization dependency, not a
                                   # plan — covered by premise + gate G2, see §7.
 conflicts_with:
-  - frigate-0.18.0                # same node (nuc14-02), same /dev/dri/renderD128, both
-                                  # privileged GPU churn — co-scheduling makes a driver
-                                  # wedge un-bisectable. Frigate is the thing this plan
-                                  # can actually hurt (§2.1).
+  # frigate-0.18.0 REMOVED 2026-09-15: that plan executed (27d8fc00) and was
+  # retired, so the entry named no plan and was flagged DEAD-REF (unenforced).
+  # Frigate itself is still the live NVR on this render node and still the thing
+  # this plan can actually hurt (§2.1); only the co-scheduling guard is gone.
   - talos-1.14.0                  # reboots every node; that plan's own rule is "no other
                                   # plan may share its window".
 security_ref: F-09a38bc2          # the image-level finding on the CURRENT tag. What it
@@ -262,8 +262,8 @@ From the live `deployment/scrypted` and pod `scrypted-5fcd45cc79-ssc9b`:
   k8s-nuc14-02 with **Frigate, a live NVR with real cameras**. A driver-level
   wedge there is the one way this plan hurts something that matters. Nothing
   suggests it is likely (the GPU userspace layer is byte-identical to what
-  runs today, §1.2); it is why `touches.shared` is not `[]` and why
-  `frigate-0.18.0` is in `conflicts_with`.
+  runs today, §1.2); it is why `touches.shared` is not `[]` (and why
+  `frigate-0.18.0` was in `conflicts_with` until that plan executed on 2026-09-15).
 
 - **`/dev/dri` hostPath block in the HelmRelease is still inert** under
   app-template 5.1.0 — the rendered pod has exactly two volumes (`data`,
@@ -712,7 +712,7 @@ Then clear the silence and marker as in §5.7.
 - **`touches.shared: [igpu-i915]`** — same token as `scrypted-0.145.0`; keep
   the spelling. Practical rule: do not co-schedule with anything that restarts
   `intel-device-plugin-gpu`, and not with a GPU-heavy plan on **k8s-nuc14-02**
-  — today that is exactly `frigate-0.18.0`, hence `conflicts_with`. Frigate's
+  — that was `frigate-0.18.0` (executed 2026-09-15, guard removed). Frigate's
   own plan says i915 is 2/5 on that node and pins there; both plans are
   privileged GPU churn on one render node, and a wedge with both in flight
   cannot be attributed. It is **not** in `autonomy-policy.yaml`'s
