@@ -38,9 +38,9 @@ conflicts_with: [bitnamilegacy-exit-nextcloud-db]   # same helmrelease.yaml, bot
                                                 # deployment/nextcloud. That plan is `blocked`
                                                 # with window: null, so no live collision
                                                 # today — the guard is for when it revives.
-security_ref: F-ab9e243a              # security driver: the image's fixable-CVE finding,
-                                      # "newer upstream tag available". Detail stays on the
-                                      # record — never counts or IDs here (public repo).
+security_ref: F-ab9e243a              # security driver for the image bump. What it is and
+                                      # why this tag answers it live on the record only —
+                                      # never counts, IDs or vocabulary here (public repo).
 capability_change: true               # the SERVER patch changes no capability, but `occ
                                       # upgrade` drags every pending appstore update along
                                       # (Updater.php:244) — Mail 5.10 -> 5.11 is a minor
