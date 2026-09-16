@@ -56,9 +56,11 @@ conflicts_with:                       # HARD slot exclusions — window-schedule
                                       # label to kube-prometheus-stack — §6 states the
                                       # effect on that plan. Its own §6 forbids sharing a
                                       # window with a kps chart bump.
-  - unpoller-v5.2.5                   # its §4 verification queries THIS Prometheus over a
-                                      # ≥5-min settle; the 2-5 min restart blind spot reads
-                                      # as "no data" → a needless unpoller revert.
+                                      # 2026-09-16: unpoller-v5.2.5 ref REMOVED — that plan
+                                      # executed (b0ffb944) and was retired (f3869634) in the
+                                      # nightly window. The guard only ever protected its §4
+                                      # settle, where a Prometheus restart blind spot would
+                                      # have read as "no data" and triggered a needless revert.
   - prometheus-crd-ownership          # (also the dependency above) two CreateReplace
                                       # writers of the same ten CRDs in one window is the
                                       # race that plan exists to end; it runs in an EARLIER
@@ -731,10 +733,12 @@ Alertmanager too, and the same "Watchdog reached AM after the restart" and
   downgrades the four to 0.92.0 (the accepted contention F-a85e8943). Preferred
   sequence: otel-operator-0.21.0 (nightly) → prometheus-crd-ownership (attended) →
   this plan (a later nightly, alone).
-- **`unpoller-v5.2.5` — hard conflict (`conflicts_with`).** Its §4 verification
-  port-forwards and queries this Prometheus over a ≥5-min settle; the restart blind
-  spot would read as an unpoller regression and trigger a needless revert. Never the
-  same window.
+- **`unpoller-v5.2.5` — conflict RESOLVED 2026-09-16, ref dropped.** That plan
+  executed (`b0ffb944`) and was retired (`f3869634`) in the nightly window, so it is
+  no longer in `conflicts_with`. It mattered while it existed: its §4 verification
+  port-forwarded and queried this Prometheus over a ≥5-min settle, where the restart
+  blind spot would have read as an unpoller regression and triggered a needless
+  revert. Any future unpoller plan must re-add the exclusion for the same reason.
 - **Grafana.** Separate HelmRelease (`grafana`, chart 13.2.4). Its datasource and
   its `ServiceMonitor` are consumers of this stack; it does not restart. The bundled
   grafana subchart is disabled and stays disabled (two premises).
@@ -747,8 +751,9 @@ Alertmanager too, and the same "Watchdog reached AM after the restart" and
   then attach), but do not run this plan concurrently with a Longhorn engine/manager
   plan.
 - **Why `conflicts_with` and `depends_on` are set (2026-09-15 review):** three
-  live plans touch `monitoring` — `otel-operator-0.21.0` and `unpoller-v5.2.5` are
-  both AUTO-NIGHT with `window: null`, exactly like this one, so the scheduler
+  live plans touched `monitoring` — `otel-operator-0.21.0` and `unpoller-v5.2.5`
+  (the latter executed and retired 2026-09-16, leaving two) were both AUTO-NIGHT
+  with `window: null`, exactly like this one, so the scheduler
   could pack all three into one unattended nightly; `window-scheduler.py` keys slot
   exclusion on `conflicts_with` only, and the `shared: [monitoring]` intersection is
   a shallow post-placement warning. The prose "serialize" rules that earlier drafts

@@ -82,7 +82,8 @@ conflicts_with:                       # SOLO SLOT. This is not a courtesy list: 
                                       # The window's instrument is shared infra (README §4).
   - prometheus-crd-ownership          # same instrument, same night risk
   - otel-operator-0.21.0              # monitoring collector; currently nightly:2026-09-17
-  - unpoller-v5.2.5                   # monitoring; currently nightly:2026-09-16
+                                      # 2026-09-16: unpoller-v5.2.5 ref REMOVED — executed
+                                      # (b0ffb944) and retired (f3869634) that same night.
   - media-audit-durable-output        # sat-attended:2026-09-19
   - wazuh-2xx-edge-coverage           # sat-attended:2026-09-26 — touches the external
                                       # request path this plan can blackhole
