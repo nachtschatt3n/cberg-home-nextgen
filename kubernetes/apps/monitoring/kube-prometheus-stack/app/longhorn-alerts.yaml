@@ -10,65 +10,341 @@ metadata:
     release: kube-prometheus-stack
 spec:
   groups:
-    # These three rules measure ALLOCATION, not usage.
+    # ── Replaced 2026-09-16, finding F-d6efb5fa ─────────────────────────────
+    # LonghornVolumeAllocation{High,VeryHigh,Saturated} lived here and measured
+    # ALLOCATION: longhorn_volume_actual_size_bytes over provisioned capacity.
+    # actual_size INCLUDES snapshots, so the nightly backup snapshot counted
+    # against the volume a second time. Measured on the Elasticsearch volume
+    # 2026-09-16: ONE healthy daily-backup snapshot of 58.63 GiB against 85 GiB
+    # provisioned is 69% of capacity on its own, purely because a snapshot
+    # mirrors the live filesystem. At 03:05Z the allocation signal steps
+    # (68.98% -> 70.34% in 15 min) while the filesystem does not move at all
+    # (65.836% -> 65.998%) — the snapshot is the entire difference.
+    # Measured over the 7d retention window: 5 firing episodes, 1720 minutes,
+    # every one on that single PVC, every one self-resolving. No operator
+    # action was possible in any of them.
     #
-    # longhorn_volume_actual_size_bytes counts blocks EVER WRITTEN to the volume,
-    # not blocks currently holding data — deleting files frees the filesystem but
-    # does not return blocks to Longhorn until a filesystem trim runs. On
-    # 2026-08-22 tube-archivist-cache-2g paged CRITICAL at 93.7% while `df` inside
-    # the pod showed 6% used with 23G free and the app had run four days without a
-    # write error. A trim took it to 2.7%.
+    # The rules conflated two conditions. They are now separated:
+    #   1. "this volume is running out of space" -> kubelet_volume_stats, which
+    #      reads the MOUNTED FILESYSTEM. Longhorn snapshots are invisible to
+    #      statfs by construction, so a nightly backup cannot move it at all.
+    #      That is the structural fix; the threshold is not merely raised.
+    #   2. "the snapshot chain is not being pruned" -> snapshot COUNT, below.
     #
-    # Worse, actual_size only ever GROWS between trims, so once a churning volume
-    # crosses 90% the CRITICAL could never clear on its own — a permanently firing
-    # page for a volume in no distress. Critical is the only tier that pages and
-    # should normally be zero, so a false permanent critical there is corrosive.
+    # Deliberately NOT snapshot BYTES over capacity, as the finding suggested.
+    # Replaying 7d, the one real un-pruned chain peaked at ~3% of capacity and
+    # no long chain exceeded ~34%, because chains hang on SMALL low-churn
+    # volumes where the bytes are negligible. A bytes rule at any threshold
+    # >= 70% matches nothing and would sit state=inactive looking healthy
+    # forever; at 60% it fires only on the Elasticsearch volume, i.e. the alert
+    # being replaced wearing a new name. Count separates the populations.
     #
-    # Renamed to say what they measure, and demoted to warning: saturated
-    # allocation is a "run a trim, reclaim node disk" signal, not an outage. A
-    # volume whose FILESYSTEM is genuinely filling is a different condition,
-    # already covered by kube-prometheus-stack's built-in
-    # KubePersistentVolumeFillingUp (it reads kubelet_volume_stats, which is
-    # populated for Longhorn PVCs like any other). Node-level disk exhaustion is
-    # covered by the Longhorn node disk-capacity checks in health-check.sh.
-    - name: longhorn.volume.allocation
+    # Every threshold below is set from measured data, and every expression was
+    # run against live Prometheus with a control proving it CAN return rows —
+    # a rule that matches nothing is indistinguishable from a healthy one.
+    - name: longhorn.volume.filesystem
       interval: 30s
       rules:
-        - alert: LonghornVolumeAllocationHigh
-          expr: (longhorn_volume_actual_size_bytes / longhorn_volume_capacity_bytes) * 100 >= 80
-          for: 5m
+        # The DAILY MINIMUM, not the instantaneous reading. This is the single
+        # most important choice in the rule and it is forced by measurement:
+        # the Elasticsearch filesystem is itself a daily sawtooth, trough at
+        # ~00:00Z and peak at ~18:20-18:50Z, with full-day amplitudes measured
+        # at 5.22 / 7.42 / 6.13 / 5.83 / 6.60 / 6.31 pp (mean 6.25, max 7.42).
+        # An instantaneous threshold with for: 1h does NOT debounce that: the
+        # peak plateau is hours wide, so the rule would fire at midday and
+        # resolve overnight. Measured slopes are 1.995 pp/day on the daily peak
+        # and 1.776 pp/day on the daily trough, so the peak crosses 80% about
+        # 3.5 days before the trough does — 3-4 consecutive days of fire and
+        # self-resolve on this same PVC. That is precisely the nightly
+        # fire/resolve pattern this whole change exists to remove, so shipping
+        # the instantaneous form would have reproduced the bug one week later.
+        # min_over_time over a rolling 24h window spans a full cycle and is
+        # immune to any intraday excursion by construction.
+        #
+        # The asymmetry is deliberate and correct: the MINIMUM is slow to rise
+        # (a volume must be genuinely above the line for a whole day before it
+        # fires) but instant to fall, so expanding the PVC or freeing data
+        # clears the alert immediately rather than 24h later.
+        #
+        # A second, verified benefit: kubelet reports a volume only while a pod
+        # has it MOUNTED, so an instantaneous rule stops matching the moment
+        # the consuming pod dies — and because the Telegram receiver sets
+        # sendResolved, the operator would be told "RESOLVED" at the exact
+        # moment a full disk killed the pod. Measured on a real series that
+        # ended mid-window: min_over_time still returns a row at +23.9h after
+        # the last sample and stops at +25h. So this form keeps firing for the
+        # window instead of lying. The companion rule below covers the case
+        # where it was not yet firing when the pod died.
+        #
+        # 80%, from the measured distribution of the 24h-minimum across all 93
+        # Longhorn PVCs: 7d max is 64.07% (Elasticsearch, and growing),
+        # next 57.54% (adguard-home-config), then 52.36%, 52.24%, 47.12%.
+        # Replaying 6 days, the number of PVCs reaching 70/75/80/85/90% on this
+        # form is ZERO at every level — silent today by measurement, not hope.
+        # 80% sits 15.93pp above the highest reading observed, which is more
+        # than twice the largest measured daily amplitude (7.42pp), so no
+        # volume can oscillate into it.
+        #
+        # HONEST CONSEQUENCE, stated because it is a dated prediction and not a
+        # hypothetical: the Elasticsearch volume's growth is real and its cause
+        # (F-dc898b50, metrics cardinality) is NOT remediated, so at the
+        # measured trough slope of 1.776 pp/day this rule fires on that PVC in
+        # ~9 days (24h-min 64.07% now, 80% around 2026-09-25) and will NOT
+        # self-clear until the PVC is expanded or retention is fixed. That is a
+        # TRUE positive and must not be suppressed. What changes is its
+        # character: from a nightly false page with 17 days of runway, to one
+        # sustained true page with ~9 days of runway still in hand.
+        #
+        # Scoped to Longhorn on purpose. All 21 CIFS PVCs report the WHOLE
+        # shared NAS export to kubelet (measured: 23 series, one single
+        # distinct value, 27.84%), so an unscoped rule would page 21 times for
+        # one condition and duplicate NasMediaShareFillingUp — the exact bug
+        # nas-share-alerts.yaml exists to fix. Verified both ways: longhorn.*
+        # returns 93 series, cifs.* returns 23.
+        #
+        # max by (namespace, persistentvolumeclaim) is load-bearing: the RWX
+        # PVC office/nextcloud-config emits one series per mounting node (2)
+        # and would otherwise double-alert, and the PVC names absenty-data and
+        # absenty-storage each exist in two namespaces, so grouping by name
+        # alone would merge unrelated volumes.
+        - alert: LonghornVolumeFilesystemUsageHigh
+          expr: |
+            min_over_time((
+              max by (namespace, persistentvolumeclaim) (
+                kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes * 100
+                and on (namespace, persistentvolumeclaim)
+                kube_persistentvolumeclaim_info{storageclass=~"longhorn.*"}
+              )
+            )[24h:10m]) >= 80
+          # 30m only has to outlast a scrape flap: the 24h minimum moves in
+          # daily steps, so the debouncing is already in the expression.
+          for: 30m
           labels:
             severity: warning
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} has allocated most of its provisioned size"
-            description: "Longhorn has allocated {{ $value | printf \"%.1f\" }}% of the provisioned size for PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} (volume: {{ $labels.volume }}, node {{ $labels.node }}). This counts blocks EVER WRITTEN, not current contents, so it can be high while the filesystem is nearly empty — check `df` inside the consuming pod before acting. Reclaim with a Longhorn filesystem trim, which returns the blocks to the node disk. Real filesystem fill is alerted separately by KubePersistentVolumeFillingUp."
+            summary: "Longhorn PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }} has been over 80% full for a full day"
+            description: >-
+              The FILESYSTEM on Longhorn PVC {{ $labels.persistentvolumeclaim }}
+              in {{ $labels.namespace }} has not dropped below {{ $value | printf "%.1f" }}%
+              at any point in the last 24 hours. This reads the mounted
+              filesystem, not Longhorn allocation, so it is real consumption —
+              a filesystem trim will not reclaim it and snapshots do not
+              inflate it. Because it is a 24h minimum, a daily peak cannot
+              trigger it and freeing space clears it immediately. Find the
+              growth before expanding — `kubectl -n {{ $labels.namespace }} exec <pod> -- du -xh --max-depth=2 <mount>`
+              — then either expand the PVC through GitOps or enforce app-side
+              retention if the app never deletes its own data. Apps that write
+              continuously (Elasticsearch, Prometheus, time-series DBs) need
+              retention, not just a bigger volume.
+            runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
+
+        # The blind-spot detector, per volume rather than as a fleet ratio.
+        #
+        # kubelet emits volume stats only while a pod has the volume MOUNTED,
+        # so a Longhorn PVC can silently drop out of the rule above while
+        # everything still looks healthy. absent() cannot catch that: 23 CIFS
+        # series keep the kubelet metric family alive even if all 93 Longhorn
+        # volumes vanish from it. A fleet-percentage guard cannot catch it
+        # either — measured, the three nodes carry 46 / 34 / 14 of the Longhorn
+        # PVCs, so losing k8s-nuc14-01 entirely still leaves 86% coverage and
+        # any floor below that is silent while 14 volumes go unwatched. Worse,
+        # count() over an empty vector returns NO SAMPLE rather than 0, so a
+        # ratio guard goes quiet at exactly 0 survivors — the one state it
+        # exists for. Verified live: the ratio form fires with 1 survivor and
+        # returns nothing with 0. Per-PVC has none of these failure modes: it
+        # names the volume and it fires on 1 missing as loudly as on 93.
+        #
+        # Joined against kube_pod_spec_volumes_persistentvolumeclaims_info so a
+        # deliberately idle PVC with no consumer stays silent — the same false
+        # positive LonghornVolumeDetached above had to grow this exact join to
+        # avoid. Measured now: 93 Longhorn PVCs, all 93 pod-referenced, 0
+        # missing stats; the only unreferenced PVC in the cluster is CIFS and
+        # therefore out of scope.
+        #
+        # for: 30m from measurement, not guesswork: replaying 7d this
+        # expression matched on only 4 occasions, every one a single 10-minute
+        # sample (a pod being rescheduled). 30m suppresses all four.
+        - alert: LonghornVolumeFilesystemStatsMissing
+          expr: |
+            (
+              kube_persistentvolumeclaim_info{storageclass=~"longhorn.*"}
+              unless on (namespace, persistentvolumeclaim)
+              kubelet_volume_stats_capacity_bytes
+            )
+            and on (namespace, persistentvolumeclaim)
+            kube_pod_spec_volumes_persistentvolumeclaims_info
+          for: 30m
+          labels:
+            severity: warning
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "No filesystem stats for Longhorn PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }} — fill alerting is BLIND for it"
+            description: >-
+              A pod references Longhorn PVC {{ $labels.persistentvolumeclaim }}
+              in {{ $labels.namespace }} but kubelet is publishing no volume
+              stats for it, so LonghornVolumeFilesystemUsageHigh and the
+              built-in KubePersistentVolumeFillingUp cannot evaluate it. Treat
+              this volume's fill level as UNMONITORED, not healthy. kubelet
+              reports a volume only while it is MOUNTED, so the usual causes
+              are a pod stuck Pending or CrashLooping (including one killed BY
+              a full disk), a failed attach, or a Multi-Attach deadlock on an
+              RWO volume. Check the consuming pod first, then the kubelet
+              scrape target on its node.
             runbook_url: "https://longhorn.io/docs/latest/monitoring/metrics/"
 
-        - alert: LonghornVolumeAllocationVeryHigh
-          expr: (longhorn_volume_actual_size_bytes / longhorn_volume_capacity_bytes) * 100 >= 90
-          for: 2m
+        # Total-loss guards. Both alerts above go silently blind if either
+        # input disappears wholesale: a missing metric returns no rows, and no
+        # rows reads exactly like "nothing is full". Each was verified to
+        # return 0 rows live and 1 row against a deliberately non-matching
+        # selector, so they are armed rather than decorative.
+        - alert: LonghornVolumeFilesystemMetricsAbsent
+          expr: absent(kubelet_volume_stats_capacity_bytes)
+          # 15m = 30 missed kubelet scrapes at the measured 30s interval.
+          for: 15m
           labels:
             severity: warning
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} allocation is very high"
-            description: "Longhorn has allocated {{ $value | printf \"%.1f\" }}% of the provisioned size for PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} (volume: {{ $labels.volume }}, node {{ $labels.node }}). This counts blocks EVER WRITTEN, not current contents, so it can be high while the filesystem is nearly empty — check `df` inside the consuming pod before acting. Reclaim with a Longhorn filesystem trim, which returns the blocks to the node disk. Real filesystem fill is alerted separately by KubePersistentVolumeFillingUp."
+            summary: "kubelet volume stats have disappeared — Longhorn fill alerting is blind"
+            description: >-
+              No kubelet_volume_stats_capacity_bytes series exist anywhere
+              (116-117 measured over 7 days). Every filesystem fill alert,
+              including the built-in KubePersistentVolumeFillingUp, is
+              unevaluable — treat storage fill as UNMONITORED, not healthy.
+              Check the kubelet ServiceMonitor and that the kubelet scrape
+              targets are up. Note this guard only catches TOTAL loss;
+              LonghornVolumeFilesystemStatsMissing is what catches Longhorn
+              volumes dropping out individually.
             runbook_url: "https://longhorn.io/docs/latest/monitoring/metrics/"
 
-        - alert: LonghornVolumeAllocationSaturated
-          expr: (longhorn_volume_actual_size_bytes / longhorn_volume_capacity_bytes) * 100 >= 99
-          for: 30s
+        - alert: LonghornVolumeStorageClassMetricsAbsent
+          expr: absent(kube_persistentvolumeclaim_info{storageclass=~"longhorn.*"})
+          for: 15m
           labels:
             severity: warning
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} allocation is saturated"
-            description: "Longhorn has allocated {{ $value | printf \"%.1f\" }}% of the provisioned size for PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} (volume: {{ $labels.volume }}, node {{ $labels.node }}). This counts blocks EVER WRITTEN, not current contents, so it can be high while the filesystem is nearly empty — check `df` inside the consuming pod before acting. Reclaim with a Longhorn filesystem trim, which returns the blocks to the node disk. Real filesystem fill is alerted separately by KubePersistentVolumeFillingUp."
+            summary: "kube-state-metrics PVC info is gone — Longhorn fill alerting is blind"
+            description: >-
+              kubelet volume stats carry no storageclass label, so the Longhorn
+              fill alerts scope themselves by joining
+              kube_persistentvolumeclaim_info (93-95 Longhorn PVCs measured
+              over 7 days). With that series gone the join returns empty and
+              BOTH LonghornVolumeFilesystemUsageHigh and
+              LonghornVolumeFilesystemStatsMissing silently match nothing while
+              looking healthy. Check kube-state-metrics is up and scraped.
             runbook_url: "https://longhorn.io/docs/latest/monitoring/metrics/"
+
+    - name: longhorn.volume.snapshots
+      interval: 1m
+      rules:
+        # The second, distinct meaning: the snapshot chain is not being pruned.
+        #
+        # Steady state is exactly ONE snapshot per volume, because
+        # auto-cleanup-recurring-job-backup-snapshot removes the previous one
+        # about 2 minutes after the 03:00 backup takes the next.
+        #
+        # The window, not the threshold, is what makes this quiet. Replaying
+        # 7d: 17 contiguous count>=2 episodes, of which 9 are under 20 minutes
+        # (the nightly overlap) and 3 more run 22.83h — a snapshot created at
+        # ~03:10Z and cleared at the NEXT day's ~02:00Z cleanup, still one cron
+        # cycle, still benign. Exactly ONE episode exceeded a day:
+        # superset-postgresql-data at 43.67h, whose cleanup was blocked because
+        # the volume was detached and
+        # allow-recurring-job-while-volume-detached=false (F-ec968c4d,
+        # F-78624e01).
+        #
+        # 30h, not 26h. 26h also isolates that one real chain today, but its
+        # margin over the benign population is only 3.17h, and those benign
+        # volumes are not comfortable — five of them sit ~23h into the window
+        # EVERY night by design. The documented mechanism that produced the one
+        # real chain (a detached volume skips its recurring job) is exactly
+        # what a maintenance-window reboot does, which would push a benign
+        # volume to its next cleanup ~24h later and page. 30h buys 7.17h of
+        # margin for 4h of detection delay on a 43.67h episode. Measured catch
+        # counts with the presence gate applied: W=22h catches 4 (3 of them
+        # benign), W=26h/30h/32h/36h each catch exactly 1, the real one.
+        #
+        # min_over_time, not for: — a `for:` long enough to outlast a daily
+        # cycle exceeds rules.alert.for-outage-tolerance (measured 1h) and is
+        # reset by any Prometheus restart. min_over_time reads the TSDB, which
+        # survives restarts, and means "never once dropped below 2 in 30h".
+        #
+        # The count_over_time clause is NOT decoration — it is what makes the
+        # rule correct at the edges. The window actually contains 180 samples
+        # (measured: exactly 180 for all 93 volumes), and 168 requires 93% of
+        # them, tolerating 2h of gaps. Without it, a volume observed for less
+        # than the full window satisfies min_over_time trivially on a
+        # part-filled window: measured, dropping the gate re-introduces 3 false
+        # positives (data-authentik-postgresql-0, n8n-config, superset-pg18-data)
+        # at the retention boundary. Verified by sweeping the gate: 0 and 60
+        # give 4 series, 120 and above give exactly 1.
+        #
+        # The + on(volume) group_left(...) 0 * capacity term is a LABEL JOIN,
+        # not arithmetic: longhorn_snapshot_actual_size_bytes carries NO pvc or
+        # pvc_namespace label, so without this the page would name an opaque
+        # volume id. Multiplying by zero keeps $value as the snapshot COUNT;
+        # joining with * or / instead would silently render capacity bytes.
+        # Verified live: the >= 1 control returns 93 rows carrying real pvc
+        # names with value 1, the right-hand side has no duplicate series, and
+        # no snapshot-bearing volume lacks a capacity series.
+        - alert: LonghornVolumeSnapshotChainNotPruned
+          expr: |
+            (
+              min_over_time((count by (volume) (longhorn_snapshot_actual_size_bytes))[30h:10m])
+              and on (volume)
+              (count_over_time((count by (volume) (longhorn_snapshot_actual_size_bytes))[30h:10m]) >= 168)
+            )
+            + on (volume) group_left (pvc, pvc_namespace)
+            (0 * max by (volume, pvc, pvc_namespace) (longhorn_volume_capacity_bytes))
+            >= 2
+          for: 30m
+          labels:
+            severity: warning
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn volume {{ $labels.volume }} has kept {{ $value | printf \"%.0f\" }} snapshots for over 30 hours"
+            description: >-
+              Volume {{ $labels.volume }} (PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }})
+              has held at least 2 snapshots continuously for more than 30
+              hours, so it has survived two daily cleanup runs and pruning is
+              not happening. Steady state here is exactly 1. The usual cause is
+              a DETACHED volume: recurring jobs skip it while
+              allow-recurring-job-while-volume-detached is false, so its chain
+              grows until the volume is attached again — a detached volume does
+              keep reporting these metrics, so this rule does see that case.
+              Check `kubectl -n storage get snapshots.longhorn.io | grep {{ $labels.volume }}`
+              and the attach state with `kubectl -n storage get volume {{ $labels.volume }}`.
+              Unpruned chains consume node disk, not volume capacity, so the
+              backstop if this is ignored is LonghornDiskUsageHigh.
+            runbook_url: "https://longhorn.io/docs/latest/snapshots-and-backups/"
+
+        - alert: LonghornSnapshotMetricsAbsent
+          expr: absent(longhorn_snapshot_actual_size_bytes)
+          # 30m comfortably outlasts the nightly rebuild: all snapshots are
+          # replaced between 03:00 and 03:10Z and the fleet-wide series count
+          # never dropped below 93 in 7 days (max 102), so absence here is a
+          # scrape failure or a metric rename, never normal operation.
+          for: 30m
+          labels:
+            severity: warning
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn snapshot metrics have disappeared — pruning is unmonitored"
+            description: >-
+              No longhorn_snapshot_actual_size_bytes series exist (93-102
+              measured over 7 days). LonghornVolumeSnapshotChainNotPruned
+              cannot fire in this state — treat snapshot pruning as
+              UNMONITORED, not healthy. Check the longhorn-backend scrape
+              targets (3 longhorn-manager pods).
+            runbook_url: "https://longhorn.io/docs/latest/snapshots-and-backups/"
 
     - name: longhorn.volume.health
       interval: 30s
