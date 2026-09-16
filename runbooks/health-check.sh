@@ -6204,6 +6204,88 @@ log_section "Issues Summary by Severity"
 # outage. So probe the credential itself, not the pods that hold it —
 # liveness of the holder proves nothing about the secret inside it.
 
+#######################################
+# OpenClaw heartbeat integrity
+#######################################
+#
+# The heartbeat fails in a way that looks like success. `last_heartbeat_result`
+# is written by the PREVIOUS good run and survives a failed one, so the file can
+# read HEARTBEAT_OK while nothing has run for hours. Measured 2026-09-15: ~6h of
+# silent misses, and on 2026-09-04/06 only 1 of ~48 daily ticks left any trace
+# at all. Every one of those still burned a full agent turn.
+#
+# So check the two things that cannot be faked:
+#   1. the header TIMESTAMP is fresh   -> the run started
+#   2. an action line exists for today -> the run finished and wrote
+# A run that starts and dies mid-way updates neither, or only the first. Both
+# are required; `HEARTBEAT_OK` is deliberately NOT trusted as evidence.
+
+log_section "OpenClaw Heartbeat Integrity"
+
+check_heartbeat_integrity() {
+    local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
+    local state="/home/node/self-improving/heartbeat-state.md"
+    local pod out started result today age_h
+
+    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
+        | awk '$3=="Running"{print $1; exit}')
+    if [ -z "$pod" ]; then
+        echo "  no Running openclaw pod — skipped"
+        return 0
+    fi
+
+    out=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c "
+        grep '^last_heartbeat_started_at:' $state 2>/dev/null | awk '{print \$2}'
+        grep '^last_heartbeat_result:'     $state 2>/dev/null | awk '{print \$2}'
+        date -u +%Y-%m-%d
+        grep -c \"^- \$(date -u +%Y-%m-%d)\" $state 2>/dev/null || echo 0
+    " 2>/dev/null)
+
+    started=$(echo "$out" | sed -n 1p)
+    result=$(echo "$out"  | sed -n 2p)
+    today=$(echo "$out"   | sed -n 3p)
+    local todays_lines
+    todays_lines=$(echo "$out" | sed -n 4p)
+
+    if [ -z "$started" ]; then
+        echo "  heartbeat state unreadable — skipped"
+        add_minor_issue "OpenClaw heartbeat state file unreadable; liveness unverified"
+        return 0
+    fi
+
+    age_h=$(python3 -c "
+import datetime,sys
+try:
+    t=datetime.datetime.strptime('$started','%Y-%m-%dT%H:%M:%SZ')
+    print(round((datetime.datetime.utcnow()-t).total_seconds()/3600,1))
+except Exception:
+    print(-1)
+" 2>/dev/null)
+
+    echo "  last run: $started (${age_h}h ago) · result=$result · action lines today: ${todays_lines:-0}"
+
+    # Cadence is 1h; two missed ticks is the alert threshold.
+    if [ "$age_h" = "-1" ]; then
+        add_minor_issue "OpenClaw heartbeat timestamp unparseable: $started"
+    elif python3 -c "import sys; sys.exit(0 if float('$age_h')>3 else 1)" 2>/dev/null; then
+        log_critical "OpenClaw heartbeat has not run for ${age_h}h (result still reads '$result')"
+        add_critical_issue "OpenClaw heartbeat stalled ${age_h}h — Juno is not checking in. Note '$result' is stale output, not proof of a run."
+    elif [ "${todays_lines:-0}" -eq 0 ]; then
+        # Started but never wrote: the exact ENOENT-abort signature.
+        log_warning "OpenClaw heartbeat ran ${age_h}h ago but wrote no action line today"
+        add_major_issue "OpenClaw heartbeat is starting but not completing its writes (header fresh, no action line today) — check for a failing read/edit inside the run"
+    else
+        echo "  ✅ heartbeat healthy (started AND wrote)"
+        CHECKS_PASSED=$((CHECKS_PASSED + 1))
+    fi
+}
+
+{
+    echo "=== OpenClaw Heartbeat Integrity ==="
+    check_heartbeat_integrity
+    echo ""
+} | tee -a "$OUTPUT_FILE"
+
 log_section "Shared API Credentials"
 
 check_api_credential() {
