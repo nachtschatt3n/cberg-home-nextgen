@@ -6220,6 +6220,77 @@ log_section "Issues Summary by Severity"
 # A run that starts and dies mid-way updates neither, or only the first. Both
 # are required; `HEARTBEAT_OK` is deliberately NOT trusted as evidence.
 
+#######################################
+# Morning briefing delivery
+#######################################
+#
+# Operator rule (2026-09-16): a briefing that cannot be produced completely
+# must FAIL and say so immediately -- not ship degraded. A half briefing is
+# worse than a missing one, because it looks complete. So the preflight stays
+# strict and this check makes the failure loud.
+#
+# What went wrong on 2026-09-15 was NOT the strictness. The run failed
+# correctly ("voice preflight FAILED: voice text is missing expected sections:
+# sure") and then told nobody: the cron recorded lastRunStatus "ok" because the
+# agent turn completed, and the agent was reading .tmp/.../run-<date>.log, which
+# holds none of that -- every real diagnostic goes to
+# state/morning-briefing/briefing.log.
+#
+# Proof of delivery is exactly one line: "voice sent from ...". File existence
+# is not proof -- prepare_voice_file() writes voice-<date>.txt BEFORE validating,
+# so a failed run still leaves a full-looking file behind.
+
+log_section "Morning Briefing Delivery"
+
+check_briefing_delivered() {
+    local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
+    local logf="/home/node/clawd/state/morning-briefing/briefing.log"
+    local pod today sent failed
+
+    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
+        | awk '$3=="Running"{print $1; exit}')
+    if [ -z "$pod" ]; then
+        echo "  no Running openclaw pod — skipped"
+        return 0
+    fi
+    today=$(date -u +%Y-%m-%d)
+
+    # `grep -c` exits 1 on zero matches, so a naive `|| echo 0` emits "0\n0"
+    # and a `tr -dc '0-9'` then yields "00". Harmless here, but that is exactly
+    # the fragile-numeric-parse that produced the impossible HTTP code "401401"
+    # earlier the same day. Count lines instead, and clamp to a single integer.
+    sent=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c \
+        "grep \"^${today}.*voice sent from\" $logf 2>/dev/null | wc -l" 2>/dev/null | tr -dc '0-9')
+    sent=${sent:-0}
+    failed=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c \
+        "grep \"^${today}.*voice preflight FAILED\" $logf 2>/dev/null | tail -1" 2>/dev/null)
+
+    if [ "${sent:-0}" -ge 1 ]; then
+        echo "  ✅ briefing delivered today (${sent}x 'voice sent')"
+        CHECKS_PASSED=$((CHECKS_PASSED + 1))
+    elif [ -n "$failed" ]; then
+        echo "  ❌ briefing FAILED preflight: $failed"
+        log_critical "Morning briefing did not send — $failed"
+        add_critical_issue "Morning briefing failed preflight and was NOT delivered: ${failed#* } — fix the named section, do not ship a partial briefing"
+    else
+        # Before the 07:00 local run there is legitimately nothing to find.
+        local hour; hour=$(date -u +%H)
+        if [ "$hour" -ge 6 ]; then
+            echo "  ❌ no 'voice sent' and no preflight failure logged today"
+            log_critical "Morning briefing produced no delivery record today"
+            add_critical_issue "Morning briefing left no 'voice sent' line in briefing.log today — it did not run, or died before send"
+        else
+            echo "  (before the daily run — nothing expected yet)"
+        fi
+    fi
+}
+
+{
+    echo "=== Morning Briefing Delivery ==="
+    check_briefing_delivered
+    echo ""
+} | tee -a "$OUTPUT_FILE"
+
 log_section "OpenClaw Heartbeat Integrity"
 
 check_heartbeat_integrity() {
