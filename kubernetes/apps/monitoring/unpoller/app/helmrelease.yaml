@@ -44,7 +44,10 @@ spec:
       # uap_radios.channel -> channel_num, duplicate wan_ip/source/version
       # fields dropped); in-repo dashboards are all Prometheus-datasource, so
       # only operator-built InfluxDB panels could need repointing.
-      tag: v5.2.4
+      # 2026-09-16: v5.2.4 -> v5.2.5 image patch (plan unpoller-v5.2.5): scrape-cache
+      # interval contract (explicit 0 now disables; ours is "2m", unaffected) + locate-mode
+      # devices exported. No metric rename, no InfluxDB schema change. Chart still 2.4.0.
+      tag: v5.2.5
 
     replicaCount: 1
 
