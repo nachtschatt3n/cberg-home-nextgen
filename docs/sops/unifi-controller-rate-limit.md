@@ -1,15 +1,27 @@
 # SOP: UniFi Controller Login Rate Limit (unpoller)
 
 > Description: Operate, diagnose, and recover the unpoller → UniFi controller integration when the controller's login endpoint rate-limit (HTTP 429) interrupts metric collection. Covers the relationship between unpoller polling cadence, the controller's `/api/auth/login` throttle, and the SSH workflow on the gateway.
-> Version: `2026.07.12`
-> Last Updated: `2026-07-12`
+> Version: `2026.09.16`
+> Last Updated: `2026-09-16`
 > Owner: `homelab-ops`
 
 ---
 
 ## 1) Description
 
-unpoller (chart `unpoller@2.1.0`, image `ghcr.io/unpoller/unpoller:v2.39.0`) scrapes the UniFi controller and emits metrics to Prometheus and InfluxDB. Two independent exporters share the same controller credentials. Each exporter performs its own login on every polling cycle, so the effective login-attempt rate is `2 × (1 / interval)`.
+unpoller (chart `unpoller@2.4.0`, image `ghcr.io/unpoller/unpoller:v5.2.5`) scrapes the UniFi controller and emits metrics to Prometheus and InfluxDB. Two independent exporters share the same controller credentials. Each exporter performs its own login on every polling cycle, so the effective login-attempt rate is `2 × (1 / interval)`.
+
+> **Do not enable the chart's Service or PodMonitor.** Chart `2.1.0` shipped no
+> Service template, which is why `service.yaml` is hand-written and the chart's
+> `service.enabled` value was inert. Chart `2.4.0` **added** one, and it renders
+> as `unpoller` in `monitoring` — the same object this app's Kustomization owns —
+> naming its port `tcp`, while `servicemonitor.yaml` scrapes `port: http`. If the
+> chart's Service won, the ServiceMonitor would select a Service with no `http`
+> port and **every `unpoller_*` series would stop while the HelmRelease stayed
+> green**. `service.enabled: false` and `podMonitor.enabled: false` are therefore
+> both load-bearing, not tidiness — the second also prevents a duplicate 30s
+> scrape that doubles controller API load and re-triggers the 429 storm this SOP
+> exists to prevent. The rationale is kept in comments in `helmrelease.yaml`.
 
 The UniFi gateway (UDM/UDM-Pro/Dream Machine line) enforces a per-IP rate limit on `POST /api/auth/login` inside the `unifi-core` binary. The threshold is not user-configurable through any settings file or env var — it is part of the binary. When the threshold is crossed the controller returns HTTP `429 Too Many Requests`, which sends unpoller into a self-perpetuating retry+re-auth storm that prolongs the outage.
 
