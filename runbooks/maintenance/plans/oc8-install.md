@@ -404,8 +404,11 @@ Deployment**, never the HelmRelease's Ready status.
 ### 3.4 Routing decision — `envoy-internal`, LAN-only
 
 **Justified from what the product does, not from convenience.** oc8 orchestrates agents that
-hold credentials to other systems, and the vendor ships an unauthenticated admin bypass on by
-default. Nothing in its documented operation requires inbound reachability from the internet —
+hold credentials to other systems, and the **Helm chart** enables an unauthenticated admin
+bypass (`oc8.env: dev`) that the vendor's own default leaves **off** — see §(d), which corrects
+an earlier draft of this plan that inverted the attribution. The operational risk is unchanged;
+it is ours to introduce, not the vendor's to blame. Nothing in its documented operation requires
+inbound reachability from the internet —
 it has no documented required inbound webhooks; model providers are *outbound* calls. So:
 `envoy-internal` (LAN-only, 192.168.55.103). If external access were ever wanted it would go
 behind Authentik forward-auth first, as a separate, argued change — and `OC8_ENV=prod` would be
