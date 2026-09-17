@@ -6374,8 +6374,7 @@ log_section "OpenClaw Heartbeat Integrity"
 
 check_heartbeat_integrity() {
     local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
-    local state="/home/node/self-improving/heartbeat-state.md"
-    local pod out started result today age_h
+    local pod out sess_age state_ts today_lines
 
     pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
         | awk '$3=="Running"{print $1; exit}')
@@ -6384,48 +6383,74 @@ check_heartbeat_integrity() {
         return 0
     fi
 
-    out=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c "
-        grep '^last_heartbeat_started_at:' $state 2>/dev/null | awk '{print \$2}'
-        grep '^last_heartbeat_result:'     $state 2>/dev/null | awk '{print \$2}'
-        date -u +%Y-%m-%d
-        grep -c \"^- \$(date -u +%Y-%m-%d)\" $state 2>/dev/null || echo 0
-    " 2>/dev/null)
+    # TWO independent signals, because they fail independently.
+    #
+    # 1. SESSION mtime = did the heartbeat FIRE. Written by the runtime on every
+    #    tick no matter what the model does, so it is ground truth for liveness.
+    # 2. STATE header  = did the heartbeat RECORD its bookkeeping. This depends
+    #    on the model actually doing the work, and it frequently does not: on
+    #    2026-09-17 at 14:33 the tick ran for 23.6k tokens, answered
+    #    HEARTBEAT_OK, and wrote nothing at all.
+    #
+    # Judging liveness from the state file alone (the old behaviour) reports a
+    # perfectly healthy heartbeat as dead, which is what the standalone watcher
+    # alert did for hours. Judging it from the session alone would miss the
+    # bookkeeping rotting. Report them separately.
+    out=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c '
+        newest=0
+        for f in /home/node/.openclaw/agents/*/sessions/*.jsonl; do
+          case "$f" in *trajectory*) continue;; esac
+          [ -f "$f" ] || continue
+          mt=$(stat -c %Y "$f" 2>/dev/null) || continue
+          [ $(( $(date +%s) - mt )) -gt 43200 ] && continue
+          grep -q "\[OpenClaw heartbeat poll\]" "$f" 2>/dev/null || continue
+          [ "$mt" -gt "$newest" ] && newest=$mt
+        done
+        if [ "$newest" = "0" ]; then echo "SESSAGE -1"; else
+          echo "SESSAGE $(( ($(date +%s)-newest)/60 ))"; fi
+        echo "STATETS $(grep "^last_heartbeat_started_at:" /home/node/self-improving/heartbeat-state.md 2>/dev/null | awk "{print \$2}")"
+        echo "TODAY $(grep -c "^- $(date -u +%Y-%m-%d)" /home/node/self-improving/heartbeat-state.md 2>/dev/null)"
+        echo "YDAY $(grep -c "^- $(date -u -d yesterday +%Y-%m-%d)" /home/node/self-improving/heartbeat-state.md 2>/dev/null)"
+    ' 2>/dev/null)
 
-    started=$(echo "$out" | sed -n 1p)
-    result=$(echo "$out"  | sed -n 2p)
-    today=$(echo "$out"   | sed -n 3p)
-    local todays_lines
-    todays_lines=$(echo "$out" | sed -n 4p)
+    sess_age=$(echo "$out" | awk '/^SESSAGE/{print $2}')
+    state_ts=$(echo "$out" | awk '/^STATETS/{print $2}')
+    today_lines=$(echo "$out" | awk '/^TODAY/{print $2}')
+    sess_age=${sess_age:--1}
 
-    if [ -z "$started" ]; then
-        echo "  heartbeat state unreadable — skipped"
-        add_minor_issue "OpenClaw heartbeat state file unreadable; liveness unverified"
+    echo "  last tick: ${sess_age}min ago (session) · state header: ${state_ts:-none} · action lines today: ${today_lines:-0}"
+
+    # Cadence is 1h; alert after two missed ticks.
+    if [ "$sess_age" = "-1" ]; then
+        log_warning "No heartbeat session found in the last 12h — cannot confirm the heartbeat is running"
+        add_major_issue "OpenClaw heartbeat: no session activity in 12h — it appears not to be firing at all"
+        return 0
+    fi
+    if [ "$sess_age" -gt 150 ]; then
+        log_critical "OpenClaw heartbeat has not fired for ${sess_age} minutes"
+        add_critical_issue "OpenClaw heartbeat stalled — no tick for ${sess_age}min against a 60min cadence. Juno is not checking in."
         return 0
     fi
 
-    age_h=$(python3 -c "
-import datetime,sys
-try:
-    t=datetime.datetime.strptime('$started','%Y-%m-%dT%H:%M:%SZ')
-    print(round((datetime.datetime.utcnow()-t).total_seconds()/3600,1))
-except Exception:
-    print(-1)
-" 2>/dev/null)
+    # Firing. Now: is it RECORDING? Use a daily floor, not a staleness window.
+    #
+    # Measured recording rate: ~100% on Terra (48/48 entries on 09-13, 47 on
+    # 09-14) but only ~27% on the local model (4 entries against ~15 ticks on
+    # 09-17) -- gemma4 often answers HEARTBEAT_OK without doing the bookkeeping
+    # at all. With a 27% rate, "4 consecutive skips" occurs ~28% of the time, so
+    # any staleness threshold short enough to be meaningful would fire almost
+    # daily. A floor over 24h is stable against that variance and still catches
+    # the case that actually matters: the bookkeeping having stopped entirely.
+    local ylines
+    ylines=$(echo "$out" | awk '/^YDAY/{print $2}')
+    today_lines=${today_lines:-0}; ylines=${ylines:-0}
+    local recent=$(( today_lines + ylines ))
 
-    echo "  last run: $started (${age_h}h ago) · result=$result · action lines today: ${todays_lines:-0}"
-
-    # Cadence is 1h; two missed ticks is the alert threshold.
-    if [ "$age_h" = "-1" ]; then
-        add_minor_issue "OpenClaw heartbeat timestamp unparseable: $started"
-    elif python3 -c "import sys; sys.exit(0 if float('$age_h')>3 else 1)" 2>/dev/null; then
-        log_critical "OpenClaw heartbeat has not run for ${age_h}h (result still reads '$result')"
-        add_critical_issue "OpenClaw heartbeat stalled ${age_h}h — Juno is not checking in. Note '$result' is stale output, not proof of a run."
-    elif [ "${todays_lines:-0}" -eq 0 ]; then
-        # Started but never wrote: the exact ENOENT-abort signature.
-        log_warning "OpenClaw heartbeat ran ${age_h}h ago but wrote no action line today"
-        add_major_issue "OpenClaw heartbeat is starting but not completing its writes (header fresh, no action line today) — check for a failing read/edit inside the run"
+    if [ "$recent" -eq 0 ]; then
+        log_warning "Heartbeat is firing (${sess_age}min ago) but recorded nothing in 48h"
+        add_major_issue "OpenClaw heartbeat fires but has recorded no entry in 48h — the model is answering HEARTBEAT_OK without calling hb-record, so the self-improving log has stopped"
     else
-        echo "  ✅ heartbeat healthy (started AND wrote)"
+        echo "  ✅ heartbeat firing and recording (${recent} entries in the last 2 days)"
         CHECKS_PASSED=$((CHECKS_PASSED + 1))
     fi
 }
