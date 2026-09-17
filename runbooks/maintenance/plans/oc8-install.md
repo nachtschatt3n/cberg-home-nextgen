@@ -9,7 +9,11 @@ current: "not installed"
 target: "oc8 Community Edition, chart 0.1.0 / appVersion 0.1.0 (deploy/helm/oc8 in the
   upstream git tree; upstream main @ 8daf228e, 2026-09-14). NO tag, NO release, NO published
   chart, NO published image — see §1.2."
-update_type: new-install
+update_type: install                  # house value — plans/README.md line 130 enumerates
+                                      # `... | decommission | install | refactor | pilot | n/a`.
+                                      # Corrected from `new-install` (doc-agent, 2026-09-17),
+                                      # which was used by this file alone; the validator does
+                                      # not enforce the enum, so it would have passed silently.
 status: blocked                       # DELIBERATE, and the whole point of this file. The brief
                                       # allowed `draft`; the facts do not. Four independent
                                       # blockers in §1.2, any ONE of which is sufficient. The
@@ -86,10 +90,18 @@ premises:
     expect_matches: "^(containerd://[0-9.]+ ?){3}$"
   - id: not-already-installed
     why: >-
-      Guards against this file being executed twice or against a hand-rolled install having
-      appeared out-of-band. `grep -c` prints "0" and exits 1 on no-match; plan-premises.py only
-      fails early when rc!=0 AND stdout is empty, so a clean "0" passes. Verified live 2026-09-17.
-    run: kubectl get ns -o name | grep -c oc8
+      Guards against this file being executed twice or against a hand-rolled install appearing
+      out-of-band. CORRECTED 2026-09-17 (doc-agent): the first version of this premise ran
+      `kubectl get ns -o name | grep -c oc8`, which was INERT — §3.1 installs into the
+      PRE-EXISTING `ai` namespace and never creates an `oc8` namespace, so it returned "0"
+      whether or not an install existed, i.e. it could not fail for the reason it claimed to
+      exist. That is the inert-guard failure mode this repo treats as a defect, not a nit.
+      Now asserts the object the plan would actually create. NEGATIVE CONTROL RUN 2026-09-17:
+      the same pipeline against `openclaw` (a HelmRelease that DOES exist in `ai`) printed "1",
+      proving it detects a match rather than passing on an empty result. Mechanics: `grep -c`
+      prints "0" and exits 1 on no-match, and plan-premises.py fails early only when rc!=0 AND
+      stdout is empty (plan-premises.py:179), so a clean "0" passes.
+    run: kubectl get helmrelease -n ai -o name | grep -c oc8
     expect_exact: "0"
   - id: routing-target-exists
     why: >-
@@ -293,6 +305,7 @@ kubernetes/apps/ai/oc8/app/pv.yaml                   # oc8-postgres + oc8-sessio
 kubernetes/apps/ai/oc8/app/pvc.yaml                  # oc8-postgres (see 3.3)
 kubernetes/apps/ai/oc8/app/httproute.yaml            # envoy-internal + Homepage metadata
 kubernetes/apps/monitoring/kube-prometheus-stack/app/oc8-alerts.yaml
+kubernetes/apps/monitoring/kube-prometheus-stack/app/kustomization.yaml   # MODIFIED, not new
 ```
 
 The alerts file is mandatory and follows the house shape (53 siblings): PodNotReady (5m,
@@ -301,6 +314,13 @@ critical), PodCrashLooping (5m, critical), PodRestarted (1m, warning), with labe
 `app.kubernetes.io/part-of: kube-prometheus-stack` — without the `release` label the rule is
 silently never loaded. oc8's `migrate` runs as an **initContainer**, not a Job, so the
 Succeeded-phase exclusion is not needed here.
+
+**The alerts file must ALSO be appended to that directory's `kustomization.yaml`.** That
+`resources:` list is **enumerated, not globbed** — verified 2026-09-17: 53 alert files on disk,
+all 53 listed explicitly, zero wildcards. A new `oc8-alerts.yaml` that is not added to the list
+is never applied by Flux at all, which fails exactly the way the missing `release` label does:
+silently, with a green Kustomization and no alerting. Verification step 9 (`/api/v1/rules`) is
+what catches both.
 
 ### 3.3 Storage decision — `longhorn-static`, speaking names
 
