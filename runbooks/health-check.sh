@@ -6240,6 +6240,85 @@ log_section "Issues Summary by Severity"
 # is not proof -- prepare_voice_file() writes voice-<date>.txt BEFORE validating,
 # so a failed run still leaves a full-looking file behind.
 
+#######################################
+# OpenClaw heartbeat CONFIG drift
+#######################################
+#
+# agents.defaults.heartbeat lives ONLY on the PVC (openclaw.json). That is an
+# accepted operator decision, not a defect -- but it means the settings carry no
+# review trail and can revert silently. They matter a lot: before 2026-09-16 this
+# block was just {"model": "openai/gpt-5.6-terra"}, the heartbeat inherited the
+# main DM session's whole context, and it burned ~290k tokens per tick -- about
+# 14M/day, which was 99.9% of all GPT spend, to answer "HEARTBEAT_OK".
+#
+# So watch the values instead of the file. A revert here is expensive and
+# otherwise invisible until a quota runs out.
+#
+# Expected (set 2026-09-16, operator chose to stay on the local model):
+#   model           ollama/*        -> no GPT spend
+#   isolatedSession true            -> fresh session per tick (~290k -> ~24k)
+#   lightContext    true            -> skip workspace bootstrap files
+#   every           1h              -> documented default for OAuth auth
+#   skipWhenBusy    true            -> defer rather than stack turns
+
+log_section "OpenClaw Heartbeat Config"
+
+check_heartbeat_config() {
+    local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
+    local pod out
+
+    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
+        | awk '$3=="Running"{print $1; exit}')
+    if [ -z "$pod" ]; then
+        echo "  no Running openclaw pod — skipped"
+        return 0
+    fi
+
+    out=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- python3 -c "
+import json
+try:
+    hb = json.load(open('/home/node/.openclaw/openclaw.json'))['agents']['defaults'].get('heartbeat') or {}
+except Exception as e:
+    print('READ_ERROR ' + str(e)[:80]); raise SystemExit
+drift = []
+model = str(hb.get('model') or '')
+if not model.startswith('ollama/'):
+    drift.append('model=' + (model or 'unset') + ' (expected ollama/*; GPT spend returns)')
+for key in ('isolatedSession', 'lightContext', 'skipWhenBusy'):
+    if hb.get(key) is not True:
+        drift.append(key + '=' + repr(hb.get(key)) + ' (expected True)')
+if str(hb.get('every') or '') != '1h':
+    drift.append('every=' + str(hb.get('every')) + ' expected-1h')
+print('DRIFT ' + ' | '.join(drift) if drift else 'OK ' + model)
+" 2>/dev/null)
+
+    case "$out" in
+        OK*)
+            echo "  ✅ heartbeat config intact (${out#OK })"
+            CHECKS_PASSED=$((CHECKS_PASSED + 1))
+            ;;
+        DRIFT*)
+            echo "  ❌ ${out}"
+            log_critical "OpenClaw heartbeat config drifted: ${out#DRIFT }"
+            add_critical_issue "OpenClaw heartbeat config reverted (PVC-only, no git trail): ${out#DRIFT } — the pre-2026-09-16 settings cost ~14M tokens/day"
+            ;;
+        READ_ERROR*)
+            echo "  ⚠️  ${out}"
+            add_minor_issue "Could not read OpenClaw heartbeat config: ${out#READ_ERROR }"
+            ;;
+        *)
+            echo "  ⚠️  unexpected probe output: ${out:-<empty>}"
+            add_minor_issue "OpenClaw heartbeat config probe returned no verdict"
+            ;;
+    esac
+}
+
+{
+    echo "=== OpenClaw Heartbeat Config ==="
+    check_heartbeat_config
+    echo ""
+} | tee -a "$OUTPUT_FILE"
+
 log_section "Morning Briefing Delivery"
 
 check_briefing_delivered() {
