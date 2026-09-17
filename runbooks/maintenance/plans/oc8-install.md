@@ -22,10 +22,12 @@ status: blocked                       # DELIBERATE, and the whole point of this 
                                       # not be scheduled into a window in this state.
 window: null                          # required: `blocked` must not claim a slot
 risk: high                            # Rated on what it WOULD be, not on the fact that it is
-                                      # blocked: a new internet-era agent platform holding
-                                      # credentials to other systems, whose vendor ships
-                                      # `dev-login` (unauthenticated admin) ON BY DEFAULT and
-                                      # whose own docs call the reference stack "not production".
+                                      # blocked. CORRECTED 2026-09-17 (plan-reviewer): the
+                                      # original justification here cited a vendor default that
+                                      # does not exist (§1.2d). The honest driver is §1.2c —
+                                      # under the CHART's own defaults, agent-authored code
+                                      # executes IN-PROCESS in the same process that holds
+                                      # OC8_SECRET_KEK and the DB credentials.
 est_duration_min: 240                 # CLUSTER-SIDE ONLY, and only if every blocker in §1.2 is
                                       # already cleared. It excludes the prerequisite that
                                       # actually dominates: forking, building and publishing two
@@ -173,20 +175,51 @@ from a git checkout, and the README says publishing happens *"When `charts.oc8.i
 There are **no git tags and no GitHub releases**; `Chart.yaml` says `version: 0.1.0`,
 `appVersion: "0.1.0"`. Flux *can* source a chart from a `GitRepository`, so this is not fatal
 on its own — but the pin would be a commit SHA on a third-party repo with no release
-discipline, and this repo has 111 HelmRepository-sourced charts against exactly **one**
-GitRepository-sourced chart (flux-operator, our own infrastructure). It would be a novel
-supply-chain shape adopted for an unproven dependency.
+discipline. **CORRECTED 2026-09-17 (plan-reviewer):** an earlier draft claimed this repo's one
+GitRepository-sourced chart was flux-operator, "our own infrastructure", and put the count at
+111. Parsing every HelmRelease's `chart.spec.sourceRef` gives **123 HelmRepository and 1
+GitRepository**, and that one is **`csi-driver-smb`** — a *third-party* chart pinned out of a
+git tree. So the precedent **weakens** this objection rather than supporting it: we already do
+exactly this shape once. It remains a real but lesser concern — a SHA pin on an upstream with
+no release discipline — not the novel-supply-chain argument originally written here.
 
-**(c) The product's core function cannot work on Talos — and the chart does not even offer
-the safe version of it.** In compose, privilege is separated: `runtime-provisioner` is
-*"the sole owner of docker.sock in the whole Community stack"*, and backend/worker reach it
-over HTTP with a bearer token (`OC8_SANDBOX_DRIVER=provisioner`). **The Helm chart has no
-`runtime-provisioner` template** (full template list verified) and never sets
-`OC8_SANDBOX_DRIVER` or `OC8_SANDBOX_PROVISIONER_*`. The backend therefore falls back to its
-config default `sandbox_driver: str = "docker"` (`backend/src/oc8/config.py:186`), i.e.
-`docker.from_env()` → `unix:///var/run/docker.sock`. The chart's only offered path is
-`backend.containerSocket.enabled: true`, a hostPath `type: Socket` mount that its own README
-calls *"**root-equivalent** on the node. Only for dedicated test clusters."*
+**(c) The container-isolation tier is unavailable here, so agent-authored code would run
+in-process beside the KEK.** **SUBSTANTIALLY CORRECTED 2026-09-17 (plan-reviewer).** An earlier
+draft concluded "oc8 here would be a chat UI whose agents cannot execute". **That was false**,
+and the correction is recorded rather than quietly edited because it inverted the plan's
+headline finding.
+
+In compose, privilege is separated: `runtime-provisioner` is *"the sole owner of docker.sock in
+the whole Community stack"*, and backend/worker reach it over HTTP with a bearer token
+(`OC8_SANDBOX_DRIVER=provisioner`). **The Helm chart has no `runtime-provisioner` template**
+(all 15 templates checked) and never sets `OC8_SANDBOX_DRIVER` / `OC8_SANDBOX_PROVISIONER_*` —
+in fact it exposes **no `extraEnv` or `envFrom` anywhere**, setting only `OC8_AGENT_ISOLATION`
+and `OC8_SANDBOX_USER`, so that variable cannot be set through values at all.
+
+But the sandbox driver is **never reached** under chart defaults. `values.yaml:56` sets
+`agentIsolation: false`, deliberately inverting the code default
+(`config.py:66 agent_isolation: bool = True`). With `runtime_ref` unset and no plugin,
+`runtime/registry.py` `resolve_runtime` ends:
+
+```python
+        if get_settings().agent_isolation:
+            from oc8.runtime.isolated import DockerIsolatedRuntime
+
+            return DockerIsolatedRuntime()
+        return Oc8AgentRuntime()          # <-- chart default lands HERE
+```
+
+`Oc8AgentRuntime` is the built-in **in-process** runtime (`BUILTIN_IN_PROCESS_RUNTIME_REF =
+"builtin:in-process"`), which never calls `get_sandbox_driver()`. It also carries *more*
+capabilities than the isolated tier (`CHECKPOINTS + SKILLS` vs `SKILLS`).
+
+**So agents would execute.** What Talos cannot provide is the *per-agent container* tier
+(`builtin:isolated` → `DockerIsolatedRuntime`), which needs the Docker Engine API. The chart's
+only route to it is `backend.containerSocket.enabled: true`, a hostPath `type: Socket` mount
+that its own README calls *"**root-equivalent** on the node. Only for dedicated test clusters."*
+The objection is therefore **worse, not milder**: on this cluster oc8 would run agent-authored
+code *in-process*, inside the process holding `OC8_SECRET_KEK` and the database credentials,
+with the isolation tier unreachable.
 
 On these nodes that mount cannot even succeed:
 
@@ -197,22 +230,36 @@ drwxr-xr-x  0 0  60  Sep  6 09:38  podman
 drwx--x--x  0 0 220  Sep  6 09:37  containerd
 ```
 
-`/run/docker.sock` exists only because a Wazuh DaemonSet hostPath mount made kubelet create an
-empty directory there; `talosctl services` lists `containerd` and `cri` and no docker or podman
-daemon. A `type: Socket` hostPath fails kubelet's type check against a directory, and pointing
-oc8 at the real containerd socket would not help — docker-py speaks the Docker Engine API, not
-CRI. **Net: oc8 here would be a chat UI whose agents cannot execute.** The one thing the
-product exists to do is precisely the thing this cluster cannot provide. We would also not
-grant a root-equivalent node socket to a service that runs agent-authored code, even if Talos
-offered one.
+`/run/docker.sock` exists only as an **empty directory**: kubelet auto-created it for a hostPath
+mount declared with no `type:`. **CORRECTED 2026-09-17 (plan-reviewer): the mounter is `falco`,
+not Wazuh** — 3 falco pods in `security` mount `/var/run/docker.sock`, `/run/podman/podman.sock`
+and three containerd/crio paths, all with `type: ""` (hence the shared timestamp), and
+`docker.sock` appears nowhere in `kubernetes/`. `talosctl services` lists `containerd` and `cri`
+and no docker or podman daemon.
 
-**(d) The vendor says it is not production software.** `docs/DEPLOY.md` has a *"Deliberate
-limits"* section stating the stack *"targets local and server testing only, not production"*:
-dev-login is *"an unauthenticated admin bypass, and it is on by default"* (`oc8.env: dev` is the
-chart default; `POST /api/v1/auth/dev-login` mints org_admin tokens to anyone who reaches the
-proxy), no forced TLS, no secrets manager, no HA, no backups. `SCOPE_AND_LIMITATIONS` adds the
-agent sandbox lacks *"full multi-tenant isolation"*. The repo is 24 days old (created
-2026-08-24), 18 stars, under active development.
+A `type: Socket` hostPath therefore fails kubelet's type check against a directory, and pointing
+oc8 at the real containerd socket would not help — docker-py speaks the Docker Engine API, not
+CRI. We would also not grant a root-equivalent node socket to a service that runs
+agent-authored code, even if Talos offered one. **Net: the isolated tier is unreachable here —
+not that nothing runs.**
+
+**(d) The vendor says it is not production software — and the CHART is less safe than the
+vendor's own default.** **CORRECTED 2026-09-17 (plan-reviewer):** an earlier draft asserted the
+vendor ships dev-login "ON BY DEFAULT" and quoted DEPLOY.md as *"…and it is on by default"*.
+**That quotation does not exist and inverts the source.** `docs/DEPLOY.md:210` at the pinned
+commit says verbatim: *"**dev-login is an unauthenticated admin bypass, and it is off by
+default.**"*, and `.env.example:33` ships `OC8_ENV=prod`, so `POST /api/v1/auth/dev-login` 404s.
+
+The true finding is the divergence: the **Helm chart** sets `oc8.env: dev` (`values.yaml:46`,
+and its README config table reads "`dev` (default)") together with `seedOnStart: true` — i.e.
+the chart re-enables the unauthenticated admin bypass that upstream's compose path leaves off,
+and seeds a demo tenant. Same operational risk as originally stated, opposite attribution, and
+the chart-vs-compose gap is the sharper point.
+
+The rest stands: DEPLOY.md's *"Deliberate limits"* says the stack *"targets local and server
+testing only, not production"* — no forced TLS, no secrets manager, no HA, no backups; and
+`SCOPE_AND_LIMITATIONS` notes the agent sandbox lacks *"full multi-tenant isolation"*. The repo
+is 24 days old (created 2026-08-24), 18 stars, under active development.
 
 ### 1.3 Secondary findings (would matter even if (a)–(d) cleared)
 
@@ -234,6 +281,14 @@ agent sandbox lacks *"full multi-tenant isolation"*. The repo is 24 days old (cr
   against the **rendered** Deployment.
 - **Postgres 15 vs the house.** The house is on PostgreSQL 17/18 per app; oc8 pins
   `pgvector/pgvector:pg15` with no documented major-upgrade path.
+- **Tool packs would be absent.** The chart mounts no capas tree by default
+  (`backend.capas.hostPath: ""`, `existingClaim: ""`) and DEPLOY.md states capas are not baked
+  into the image. §3.2 carries no capas volume, so agents would start with no tool packs until
+  a PVC is populated by a job we would have to write.
+- **The image count is a floor, not a ceiling.** Two images only while `agentIsolation: false`.
+  `config.py:62-65` also references `oc8-agent-claude-code`, `oc8-agent-codex` and
+  `oc8-agent-opencode` (Dockerfiles under `capas/*/`) — up to **five** self-built images if the
+  isolated tier were ever wanted.
 - **Redundancy.** `ai` already runs openclaw, **paperclip** ("AI agent orchestration —
   multi-agent company management"), ai-sre, hermes-agent, anythingllm, librechat and
   open-webui. oc8 would be the fifth agent platform, overlapping paperclip and openclaw most.
@@ -454,10 +509,14 @@ with an unwritable volume. Shape-only checks would pass in both cases.
    SPA root returns HTML. Port-forward proves the pod; only this proves the route.
 6. **Auth is closed**: `POST /api/v1/auth/dev-login` must **fail** under `OC8_ENV=prod`. This is
    a gate that can fail, and the single most important one — if it succeeds, revert immediately.
-7. **The product's actual function**: create an agent, assign a model, run one task, and confirm
-   it completes. **This is the gate that fails today** — with no sandbox driver, execution
-   cannot start. A deployment that passes 1–6 and fails 7 is a failed deployment, not a partial
-   success.
+7. **The product's actual function, AND which runtime tier served it**: create an agent, assign
+   a model, run one task, confirm it completes — then assert *how* it ran. **CORRECTED
+   2026-09-17 (plan-reviewer):** an earlier draft predicted this gate would fail ("execution
+   cannot start"), which is wrong per §1.2c and would have been the mirror of a false green — a
+   gate documented to fail that quietly passes. Under chart defaults it **passes, in-process**.
+   So the gate is not "did it run" but "did it run where we think": query `GET /runtimes` and
+   confirm which runtime is `is_default`, and treat `builtin:in-process` as the **risk
+   condition** in §1.2c, not as success. A pass here with in-process execution is the finding.
 8. **Homepage**: the entry appears in the AI group with a resolving icon.
 9. **Alerts loaded**: the `oc8` group appears in Prometheus `/api/v1/rules` — a PrometheusRule
    missing the `release` label loads silently as nothing.
@@ -499,8 +558,22 @@ If it ever unblocks, the collisions to declare are: any plan touching the `ai` n
 anything touching the Longhorn control plane in the same slot (this allocates two new
 2-replica volumes). It shares no manifest with any currently open plan.
 
-**Recommendation: do not adopt oc8 on this cluster.** The blockers are not sequencing problems
-that a window can absorb — (a) and (c) are structural. Worth re-evaluating **only** when
-upstream publishes signed images and a versioned chart *and* ships a Kubernetes-native agent
-sandbox that does not require a node-level Docker socket. Until then the honest alternative is
-that paperclip and openclaw already occupy this niche here.
+**Recommendation: do not adopt oc8 on this cluster.** **RE-ARGUED 2026-09-17** after the
+plan-reviewer corrected §1.2c and §1.2d. The earlier claim that "(a) and (c) are structural" is
+**withdrawn**: with two self-built images and the chart's own `agentIsolation: false`, oc8 would
+run and agents would execute. (a) is a cost-and-ownership objection, not an impossibility, and
+(b) has precedent in `csi-driver-smb`.
+
+The case that survives every correction, and on which the block stands:
+
+1. A 24-day-old upstream with zero tags, zero releases and **zero CI**, which we would fork and
+   own forever under CLAUDE.md's "our own images" rule — no AR-029 escape for any future CVE.
+2. A chart that ships hard-coded `oc8:oc8` database credentials, no resource requests, no
+   rollout strategy, an RWO volume fanned out to three pods, `env: dev`, `seedOnStart: true`,
+   and no S3 backend for a feature the backend expects.
+3. An execution model that on this cluster degrades to running **agent-authored code in-process
+   beside `OC8_SECRET_KEK`**, with the container-isolation tier unreachable.
+
+Worth re-evaluating when upstream publishes signed images and a versioned chart *and* ships an
+agent-isolation tier that does not require a node-level Docker socket. Until then the honest
+alternative is that paperclip and openclaw already occupy this niche here.
