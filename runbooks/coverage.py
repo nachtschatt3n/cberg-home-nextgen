@@ -611,7 +611,61 @@ def load_plans():
     return plans
 
 
-def _plan_delivers(plan, item):
+def _drift_note(item, ptgt, pv, heads):
+    """The re-target hint for a drifted plan — CHANNEL-RESOLVED where possible.
+
+    F-51fb8256: this used to be `f"plan targets {ptgt}, but {item['target']} is
+    now published"` — and `item["target"]` is the newest tag in the version-check
+    snapshot. For an upstream whose beta rides a BARE semver tag, the newest tag
+    IS the pre-release: the snapshot said n8n 2.40.1 (beta) in the very run where
+    this module's own stable_channel_version() had resolved the stable head to
+    2.39.6, digest-confirmed. The hint therefore named a beta build as the
+    re-target for a six-migration SQLite upgrade.
+
+    THE HINT IS ADDITIVE AND ALWAYS SURVIVES. The raw published tag is still
+    named — it is a true fact about the snapshot — and the resolved head is
+    appended with its evidence when, and only when, a channel was POSITIVELY
+    resolved. There is deliberately NO branch that returns None:
+
+      * suppressing the row when the plan is already at the head was tried in
+        review and is a silent zero on the ONE channel that reports plan
+        staleness — measured on the live nocodb plan (target 2026.09.0 == the
+        resolved head), whose row vanished entirely the moment the snapshot
+        moved to the next calver month;
+      * it also breaks match_plan(): a drift of None makes _plan_delivers
+        return (True, None), so the early exit hands the item to a plan that
+        does not deliver it, ahead of one that does.
+
+    Returning the raw tag with no channel opinion is what the bug did; returning
+    nothing is worse. So the row always renders, and only its CONFIDENCE moves.
+    """
+    raw = str(item["target"])
+    base = f"plan targets {ptgt}, but {raw} is now published"
+    rec = (heads or {}).get((str(item.get("component", "")).lower(),
+                             str(item.get("kind", "")).lower()))
+    head, why = (rec or (None, ""))
+    hv = _ver_tuple(head) if head else None
+    if not hv:
+        # No oracle for this (component, kind). TRUE for every CHART by
+        # construction — max_rule_fallbacks() refuses charts — so this is the
+        # COMMON case, and blinding it to fix the rare one would be the trade
+        # backwards.
+        return (f"{base} — CHANNEL UNRESOLVED: confirm {raw} is on the stable "
+                f"channel before re-targeting")
+    ev = f" ({why})" if why else ""
+    line = ("" if _release_line(hv) == _release_line(pv)
+            else f", and on a DIFFERENT release line from this plan — re-scope, "
+                 f"do not merely re-target")
+    if _ver_tuple(raw) == hv:
+        return f"{base}; {raw} IS the stable-channel head{ev}{line}"
+    if hv <= pv:
+        return (f"{base}; the plan is already at or ahead of the stable-channel "
+                f"head {head}{ev}, so {raw} is NOT a confirmed re-target{line}")
+    return (f"{base}; the STABLE-channel head is {head}{ev} — re-target to "
+            f"{head}, not {raw}{line}")
+
+
+def _plan_delivers(plan, item, heads=None):
     """(covers, drift) — does this LIVE plan actually deliver `item`'s bump?
 
     Matching on the component name alone made any plan mentioning an app cover
@@ -640,11 +694,11 @@ def _plan_delivers(plan, item):
     if uv and _CONCRETE_VER.match(ptgt):
         pv = _ver_tuple(ptgt)
         if pv and _release_line(pv) == _release_line(uv):
-            return True, f"plan targets {ptgt}, but {item['target']} is now published"
+            return True, _drift_note(item, ptgt, pv, heads)
     return False, None
 
 
-def match_plan(item, keys, plans):
+def match_plan(item, keys, plans, heads=None):
     """(plan, drift) for the best live plan covering `item`, else (None, None).
     A drift-free match always wins over a drifted one."""
     drifted = None
@@ -653,7 +707,7 @@ def match_plan(item, keys, plans):
             continue
         if plan["status"] in DEAD_PLAN_STATUSES:
             continue
-        covers, drift = _plan_delivers(plan, item)
+        covers, drift = _plan_delivers(plan, item, heads)
         if covers and not drift:
             return plan, None
         if covers and drifted is None:
@@ -1400,6 +1454,13 @@ def max_rule_fallbacks(actionable, policy, prs=None):
             continue
         if not _is_strictly_newer(item["current"], ver):
             out.append({**rec, "status": "up-to-date", "candidate": None,
+                        # The head must survive as DATA, not only inside the
+                        # prose reason. Without this, channel_resolved_heads()
+                        # has nothing to read on an up-to-date record and the
+                        # obvious fallback — `current`, the DEPLOYED tag — would
+                        # publish a running pre-release as "the stable head",
+                        # stapled to evidence naming a different version.
+                        "channel_head": ver, "channel_evidence": why,
                         "reason": f"stable channel head is {ver} ({why}); "
                                   f"{item['current']} is already at or ahead of it"})
             continue
@@ -1407,6 +1468,7 @@ def max_rule_fallbacks(actionable, policy, prs=None):
         blocked = denied(policy, key, utype)
         if blocked:
             out.append({**rec, "status": "hold", "candidate": ver,
+                        "channel_evidence": why,
                         "reason": f"stable channel head {ver} ({why}) is a {utype} bump, "
                                   f"which the policy still blocks — {str(blocked)[:120]}"})
             continue
@@ -1417,6 +1479,7 @@ def max_rule_fallbacks(actionable, policy, prs=None):
             # bug as a missed one). Still reported — silently swallowing it
             # would make the two cases indistinguishable in the output.
             out.append({**rec, "status": "already-enumerated", "candidate": ver,
+                        "channel_evidence": why,
                         "reason": f"stable channel head {ver} ({why}) is already in "
                                   f"the actionable universe on its own — no masking"})
             continue
@@ -1424,6 +1487,7 @@ def max_rule_fallbacks(actionable, policy, prs=None):
         is_breaking, g3 = breaking_change_signal(repo, ver)
         if is_breaking:
             out.append({**rec, "status": "hold", "candidate": ver,
+                        "channel_evidence": why,
                         "reason": f"G3 — {g3}"})
             continue
         new = _fallback_item(item, ver, utype, rule, why,
@@ -1447,6 +1511,53 @@ def up_to_date_components(fallbacks) -> set:
     """
     return {str(r.get("component", "")).lower()
             for r in (fallbacks or []) if r.get("status") == "up-to-date"}
+
+
+def channel_resolved_heads(fallbacks) -> dict:
+    """{(component, kind): (stable_head, evidence)} — channels POSITIVELY resolved.
+
+    Same records as up_to_date_components() (F-52e5637f), widened from the one
+    status that answers the planner question to every record that actually
+    RESOLVED a head.
+
+    THE HEAD COMES FROM THE ORACLE, NEVER FROM WHAT WE RUN. Only `candidate`
+    (the resolved head on a hold/already-enumerated/candidate record) and
+    `channel_head` (the same value on an up-to-date record) are read. Falling
+    back to `current` was tried in review and is how a DEPLOYED pre-release
+    becomes "the STABLE-channel head": measured, a record with
+    current=2.40.1 whose own evidence string names 2.39.6 published 2.40.1 as
+    the head, wearing the digest-confirmed evidence for a different version.
+    A record that resolved nothing is deliberately ABSENT, so a caller can tell
+    "resolved" from "unknown" instead of reading a missing key as a head of None.
+
+    Keyed on (component, KIND) on purpose: max_rule_fallbacks() reads the
+    channel off an IMAGE registry and refuses charts outright, so an image head
+    must never be offered as the head of the same component's CHART bump.
+
+    A key claimed twice with DIFFERENT heads is dropped to unknown rather than
+    last-write-wins: one row's head silently applied to another row's drift
+    note is the same class of error as the beta this function exists to stop.
+    Missing EVIDENCE never drops a head — an unattributed head is still a
+    resolved one.
+    """
+    out, ambiguous = {}, set()
+    for r in (fallbacks or []):
+        comp = str(r.get("component", "")).lower()
+        kind = str(r.get("kind", "")).lower()
+        if not comp:
+            continue
+        head = r.get("candidate") or r.get("channel_head")
+        if not head:
+            continue
+        key = (comp, kind)
+        if key in ambiguous:
+            continue
+        if key in out and out[key][0] != str(head):
+            del out[key]
+            ambiguous.add(key)
+            continue
+        out[key] = (str(head), str(r.get("channel_evidence") or "")[:140])
+    return out
 
 
 def needs_plan_exempt(item, channel_current: set) -> bool:
@@ -1497,7 +1608,7 @@ def _direct_bump_breaking_gate(item):
         return False, f"unverified ({type(e).__name__})"
 
 
-def assign_lane(item, policy, prs, plans, ar_holds=None):
+def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
     """(lane, reason, drift) for one actionable update."""
     comp = item["component"].lower()
     utype = item["type"]
@@ -1509,7 +1620,7 @@ def assign_lane(item, policy, prs, plans, ar_holds=None):
         return "HELD", HELD.get(comp) or HELD.get(key, "held"), None
     if is_self_built(item, comp):
         return "REBUILD", "self-built image — rebuild in its source repo (not a cluster tag bump)", None
-    plan, drift = match_plan(item, {comp, key}, plans)
+    plan, drift = match_plan(item, {comp, key}, plans, heads)
     if plan:
         return "PLAN", f"plan exists: {plan['plan_id']} ({plan['status']})", (
             f"{plan['file']}: {drift}" if drift else None)
@@ -1776,8 +1887,10 @@ def reconcile():
     plan_drift = []  # live plans whose target has fallen behind upstream
     seen_app_template = False
     channel_current = up_to_date_components(fallbacks)
+    channel_heads = channel_resolved_heads(fallbacks)
     for it in actionable:
-        lane, reason, drift = assign_lane(it, policy, prs, plans, ar_holds)
+        lane, reason, drift = assign_lane(it, policy, prs, plans, ar_holds,
+                                          channel_heads)
         # dedupe the ~40 app-template rows into one PLAN item
         if it["kind"] == "chart" and it["target"].startswith("5."):
             if seen_app_template:
@@ -1787,6 +1900,13 @@ def reconcile():
         entry = {**it, "lane": lane, "reason": reason}
         if drift:
             entry["drift"] = drift
+            # Also as DATA, for readers that consume the record rather than the
+            # sentence: `target` is the snapshot's newest tag by definition, so
+            # without this a structured reader still sees only the beta.
+            _h = channel_heads.get((str(it.get("component", "")).lower(),
+                                    str(it.get("kind", "")).lower()))
+            if _h:
+                entry["channel_head"] = _h[0]
             plan_drift.append(entry)
         if lane == "PLAN" and not reason.startswith("plan exists"):
             if needs_plan_exempt(it, channel_current):

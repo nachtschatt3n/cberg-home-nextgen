@@ -20,7 +20,9 @@ Usage examples:
   policy-cli risk edit AR-047 --description 'openclaw: image node'
   policy-cli risk match --description 'node:22.'   # PREVIEW what a needle would suppress
                                         # — run this BEFORE `risk add`
-  policy-cli risk lint                  # descriptions that will drift out of matching
+  policy-cli risk lint                  # descriptions that drifted, went inert, or EXPIRED
+  policy-cli risk edit AR-042 --expires 2026-12-01   # last day in force
+  policy-cli risk edit AR-042 --expires none         # clear it (open-ended)
   policy-cli risk review AR-001         # bumps last_reviewed_at to now
   policy-cli risk disable AR-001        # soft-disable (enabled=false)
   policy-cli risk delete AR-001         # hard delete
@@ -81,6 +83,11 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from lib.ar_expiry import (  # noqa: E402
+    EXPIRY_KEY, EXPIRY_SELECT, is_expired, parse_expiry, prose_deadline,
+)
 
 
 def _activate_mise() -> None:
@@ -224,7 +231,8 @@ def cmd_risk_list(args, dsn):
             where += " AND severity = %s"
             params.append(args.severity)
         cur.execute(
-            f"SELECT ar_id, severity, status, enabled, description, last_reviewed_at "
+            f"SELECT ar_id, severity, status, enabled, description, last_reviewed_at, "
+            f"       {EXPIRY_SELECT} AS expires_at "
             f"FROM accepted_risks {where} ORDER BY ar_id", params
         )
         _print_table(cur.fetchall(), [
@@ -233,7 +241,8 @@ def cmd_risk_list(args, dsn):
             ("status", "Status", 10),
             ("enabled", "On", 3),
             ("last_reviewed_at", "Reviewed", 10),
-            ("description", "Description", 60),
+            ("expires_at", "Expires", 10),
+            ("description", "Description", 50),
         ])
 
 
@@ -341,6 +350,36 @@ def cmd_risk_match(args, dsn):
 
 
 def cmd_risk_add(args, dsn):
+    # Forward-only ratchet: every NEW acceptance states a deadline or says
+    # explicitly that it has none. The 105 pre-existing ARs are untouched —
+    # back-filling by parsing justification prose was measured and rejected as
+    # policy (see lib/ar_expiry.prose_deadline, which REPORTS them instead).
+    if args.expires is None and not args.no_expiry:
+        print("REFUSING: state how long this acceptance is good for.",
+              file=sys.stderr)
+        print("  --expires YYYY-MM-DD   last day in force; the sweep stops "
+              "suppressing after it and the finding re-surfaces.", file=sys.stderr)
+        print("  --no-expiry            open-ended: accepted until a CONDITION "
+              "changes (upstream ships a fix), not until a date. Name the "
+              "condition in --justification.", file=sys.stderr)
+        return 2
+    try:
+        expiry = parse_expiry(args.expires) if args.expires is not None else None
+    except ValueError as exc:
+        print(f"REFUSING: {exc}", file=sys.stderr)
+        return 2
+    # An already-past deadline is inert the instant it is written — the same
+    # failure the needle gate below refuses, wearing a date. Refuse it here
+    # rather than print "added AR-xxx — suppresses N open finding(s)" for an
+    # acceptance that suppresses nothing.
+    if expiry is not None and is_expired(expiry.isoformat()):
+        print(f"REFUSING: --expires {expiry} is already past, so this AR would "
+              f"suppress nothing from the moment it is written.", file=sys.stderr)
+        print("  Pick a future date, or --no-expiry for a condition-based "
+              "acceptance. Use --allow-expired only to record a decision that "
+              "has already lapsed.", file=sys.stderr)
+        if not args.allow_expired:
+            return 2
     warn = _drift_warnings(args.description)
     if warn and not args.allow_drift:
         print("REFUSING: proposed description is not drift-stable:", file=sys.stderr)
@@ -375,9 +414,11 @@ def cmd_risk_add(args, dsn):
                   file=sys.stderr)
             return 2
         cur.execute(
-            "INSERT INTO accepted_risks (ar_id, severity, description, justification) "
-            "VALUES (%s, %s, %s, %s) ON CONFLICT (ar_id) DO NOTHING",
-            (args.ar_id, args.severity, args.description, args.justification),
+            "INSERT INTO accepted_risks "
+            "(ar_id, severity, description, justification, metadata) "
+            "VALUES (%s, %s, %s, %s, %s::jsonb) ON CONFLICT (ar_id) DO NOTHING",
+            (args.ar_id, args.severity, args.description, args.justification,
+             json.dumps({EXPIRY_KEY: expiry.isoformat()} if expiry else {})),
         )
         if cur.rowcount == 0:
             print(f"AR {args.ar_id} already exists — use `risk delete` first or rename")
@@ -418,9 +459,27 @@ def cmd_risk_edit(args, dsn):
         if val is not None:
             sets.append(f"{col} = %s")
             params.append(val)
+    expiry = _UNSET = object()
+    if getattr(args, "expires", None) is not None:
+        try:
+            expiry = parse_expiry(args.expires)
+        except ValueError as exc:
+            print(f"REFUSING: {exc}", file=sys.stderr)
+            return 2
+        if expiry is None:
+            sets.append("metadata = COALESCE(metadata, '{}'::jsonb) - %s")
+            params.append(EXPIRY_KEY)
+        else:
+            # `|| %s::jsonb` with ONE json-encoded parameter, the idiom
+            # `risk add` already uses. NOT jsonb_build_object(%s, %s): psycopg
+            # sends str with an unknown OID, so Postgres cannot resolve
+            # jsonb_build_object("any","any") and the UPDATE fails with
+            # IndeterminateDatatype — measured by EXPLAIN against the live DB.
+            sets.append("metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb")
+            params.append(json.dumps({EXPIRY_KEY: expiry.isoformat()}))
     if not sets:
         print("nothing to change — pass at least one of "
-              "--description/--severity/--justification", file=sys.stderr)
+              "--description/--severity/--justification/--expires", file=sys.stderr)
         return 1
     if args.description is not None:
         warn = _drift_warnings(args.description)
@@ -443,6 +502,10 @@ def cmd_risk_edit(args, dsn):
             f"UPDATE accepted_risks SET {', '.join(sets)} WHERE ar_id = %s", params)
         conn.commit()
     print(f"edited {args.ar_id}")
+    if expiry is not _UNSET and expiry is not None and is_expired(expiry.isoformat()):
+        print(f"  NOTE: {args.ar_id} is now EXPIRED ({expiry}) — it suppresses "
+              f"nothing from this moment, and the findings it masked re-surface "
+              f"at their own severity on the next sweep.")
     if args.description is not None:
         print(f"  description: {before!r}")
         print(f"           -> {args.description!r}")
@@ -476,7 +539,8 @@ def _near_miss(cur, desc: str):
     return None
 
 
-def lint_flag(open_matches: int, warn, miss, total_matches: int) -> str:
+def lint_flag(open_matches: int, warn, miss, total_matches: int,
+              expired: bool = False) -> str:
     """Classify one AR for `risk lint`. Pure, so the precedence is testable.
 
     Precedence matters and is not arbitrary:
@@ -493,6 +557,12 @@ def lint_flag(open_matches: int, warn, miss, total_matches: int) -> str:
     separates INERT from merely DORMANT: an AR whose finding is currently
     resolved is doing its job and waiting, and must not be flagged.
     """
+    if expired:
+        # Outranks everything, INERT included. The others describe a needle that
+        # may not do what the register claims; EXPIRED means the operator's own
+        # deadline passed, so the entry is no longer a decision anyone has
+        # made — renew-or-retire, now, whatever the needle does.
+        return "EXPIRED"
     if open_matches == 0 and not miss and total_matches == 0:
         return "INERT"
     if miss:
@@ -528,11 +598,18 @@ def cmd_risk_lint(args, dsn):
     """
     with _connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT ar_id, description FROM accepted_risks "
-            "WHERE enabled = true AND status = 'accepted' ORDER BY ar_id")
-        ars = [(r["ar_id"], r["description"]) for r in cur.fetchall()]
+            f"SELECT ar_id, description, justification, {EXPIRY_SELECT} AS expires_at "
+            f"FROM accepted_risks "
+            f"WHERE enabled = true AND status = 'accepted' ORDER BY ar_id")
+        ars = [(r["ar_id"], r["description"], r["justification"], r["expires_at"])
+               for r in cur.fetchall()]
         rows = []
-        for ar_id, desc in ars:
+        for ar_id, desc, just, expires in ars:
+            expired = is_expired(expires)
+            # The gate binds ONLY on a recorded date, so an AR whose deadline
+            # lives in prose lapses unseen — which is exactly how AR-042 ran 14
+            # days over. This is the control that keeps that class visible.
+            unrecorded = prose_deadline(just) if not expires else None
             warn = _drift_warnings(desc or "")
             cur.execute(
                 "SELECT count(*) AS n FROM sweep_findings "
@@ -550,15 +627,30 @@ def cmd_risk_lint(args, dsn):
                     "WHERE position(%s in lower(title)) > 0",
                     ((desc or "").strip().lower(),))
                 inert = cur.fetchone()["n"] == 0
-            if warn or miss or inert or args.all:
-                rows.append((ar_id, desc, matches, warn, miss, inert))
+            if warn or miss or inert or expired or unrecorded or args.all:
+                rows.append((ar_id, desc, matches, warn, miss, inert,
+                             expired, expires, unrecorded))
     if not rows:
         print("all enabled AR descriptions are drift-stable and matching")
         return 0
     print(f"{'AR':<8} {'open-match':>10}  description")
-    for ar_id, desc, matches, warn, miss, inert in rows:
-        flag = lint_flag(matches, warn, miss, 0 if inert else 1)
+    for ar_id, desc, matches, warn, miss, inert, expired, expires, unrecorded in rows:
+        flag = lint_flag(matches, warn, miss, 0 if inert else 1, expired=expired)
         print(f"{ar_id:<8} {matches:>10}  {desc!r}  [{flag}]")
+        if expired:
+            print(f"{'':<21}! stated expiry {expires!r} has passed — it no "
+                  f"longer suppresses anything (the sweep skips it).")
+            print(f"{'':<23}Renew: `risk edit {ar_id} --expires <date>`; "
+                  f"retire: `risk disable {ar_id}`; or `--expires none` if "
+                  f"the deadline was never real.")
+        if unrecorded:
+            _phrase, _date = unrecorded
+            print(f"{'':<21}! justification states a deadline ({_phrase} "
+                  f"{_date}) that NOTHING ENFORCES — no metadata.expires_at is "
+                  f"recorded, so this AR suppresses indefinitely.")
+            print(f"{'':<23}Record it: `risk edit {ar_id} --expires {_date}` "
+                  f"(or a renewed date), or `--no-expiry` semantics: reword the "
+                  f"justification as a CONDITION, not a date.")
         for w in warn:
             print(f"{'':<21}! {w}")
         if miss:
@@ -1262,6 +1354,12 @@ def build_parser() -> argparse.ArgumentParser:
     ra.add_argument("--description", required=True)
     ra.add_argument("--severity", default="informational")
     ra.add_argument("--justification")
+    ra.add_argument("--expires", metavar="YYYY-MM-DD",
+                    help="last day this acceptance is in force")
+    ra.add_argument("--no-expiry", action="store_true",
+                    help="open-ended (condition-based) acceptance")
+    ra.add_argument("--allow-expired", action="store_true",
+                    help="record an acceptance whose deadline has already passed")
     ra.add_argument("--allow-drift", action="store_true",
                     help="accept a description that pins a patch version / count")
     ra.add_argument("--allow-nomatch", action="store_true",
@@ -1279,6 +1377,8 @@ def build_parser() -> argparse.ArgumentParser:
     re_.add_argument("--description")
     re_.add_argument("--severity")
     re_.add_argument("--justification")
+    re_.add_argument("--expires", metavar="YYYY-MM-DD",
+                     help="set the last day in force; 'none' clears it")
     re_.add_argument("--allow-drift", action="store_true",
                      help="accept a description that pins a patch version / count")
     re_.set_defaults(handler=cmd_risk_edit)

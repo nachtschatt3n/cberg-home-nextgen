@@ -242,20 +242,46 @@ def _apply_ar_suppression(dsn: str) -> int:
     covers audit-integrity rows that carry no `ar_id`, (2) covers rows
     that carry an `ar_id` but were emitted with an ordinary nature.
 
+    A THIRD CLASS NEVER SUPPRESSES AT ALL: an acceptance past its stated
+    deadline (`metadata.expires_at`, see lib/ar_expiry.py). AR-042 carried
+    "accept until 2026-09-03" in justification PROSE, which no code could read,
+    so it masked a genuinely flat cell for 14 days past the operator's own
+    deadline (F-da238139). An AR with no recorded expiry is unaffected and
+    suppresses indefinitely, by design.
+
+    The expiry column is SELECTED and compared in PYTHON, never in SQL — a
+    `::date` cast raises on a date-shaped-but-impossible value, and that
+    exception lands in the `except` below, which returns 0 and applies NO
+    suppression for the whole cycle. See lib/ar_expiry.py for the measurement.
+
     Returns count of rows re-tagged this pass.
     """
     try:
         import psycopg
     except ImportError:
         return 0
+    if str(SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPT_DIR))
     try:
+        from lib.ar_expiry import EXPIRY_SELECT, is_expired, lapse_note
         with psycopg.connect(dsn) as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT ar_id, description FROM accepted_risks "
+                    "SELECT ar_id, description, " + EXPIRY_SELECT +
+                    " FROM accepted_risks "
                     "WHERE status='accepted' AND enabled=true"
                 )
-                ars = cur.fetchall()
+                rows = cur.fetchall()
+                # Say what lapsed BEFORE acting: otherwise the finding simply
+                # reappears with no statement of why, reading as a new problem
+                # rather than a decision coming back up for review.
+                ars = []
+                for _ar_id, _desc, _exp in rows:
+                    _note = lapse_note(_ar_id, _exp)
+                    if _note is not None:
+                        print(_note)
+                        continue
+                    ars.append((_ar_id, _desc))
                 tagged = 0
                 exempt = 0
                 for ar_id, desc in ars:

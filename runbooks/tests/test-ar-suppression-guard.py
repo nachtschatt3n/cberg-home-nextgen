@@ -75,7 +75,7 @@ class FakeConn:
     """Records every statement; evaluates the UPDATE predicate in Python."""
 
     def __init__(self, ars, rows):
-        self.ars = ars          # [(ar_id, description), ...]
+        self.ars = ars          # [(ar_id, description, expires_at), ...]
         self.rows = rows        # [dict(finding_id, title, severity, meta), ...]
         self.log: list = []
         self.tagged: list[tuple[str, str]] = []   # (ar_id, finding_id)
@@ -212,7 +212,11 @@ def _rows():
 
 
 def _run(ars, rows):
-    conn = FakeConn(ars, rows)
+    # The suppressor also SELECTs metadata->>'expires_at' now (lib/ar_expiry),
+    # so the fake's AR rows are three wide. None = no deadline recorded, which
+    # is the state of all 105 live ARs and the only one these guards concern.
+    conn = FakeConn([(a[0], a[1], a[2] if len(a) > 2 else None) for a in ars],
+                    rows)
     mod = _load_sweep_run(conn)
     tagged = mod._apply_ar_suppression("postgresql://fake")
     return mod, conn, tagged

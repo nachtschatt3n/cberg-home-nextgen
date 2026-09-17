@@ -108,6 +108,9 @@ from lib.findings_writer import (  # noqa: E402
 )
 from lib import risk_model as rm  # noqa: E402  — contextual tier scorer (Phase 2)
 from lib import notify as _notify  # noqa: E402  — tier-based routing (Phase 2)
+from lib.ar_expiry import (  # noqa: E402  — operator deadline on an acceptance
+    EXPIRY_SELECT, is_expired,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -150,12 +153,20 @@ def _load_accepted_risks_from_db(dsn: str) -> dict[str, str]:
         return {}
     try:
         with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+            # Same deadline gate the sweep's suppressor applies. This is the
+            # SECOND suppression layer (it re-tags at emit time), so leaving it
+            # ungated would keep an expired AR masking security findings after
+            # the sweep had already let it go. Filtered in Python, not SQL: a
+            # `::date` cast on a malformed value raises, and the `except` below
+            # would then set _POLICY_LOAD_FAILED and ABORT the entire audit.
             cur.execute(
-                "SELECT ar_id, description FROM accepted_risks "
+                "SELECT ar_id, description, " + EXPIRY_SELECT +
+                " FROM accepted_risks "
                 "WHERE enabled = true AND status = 'accepted' "
                 "ORDER BY ar_id"
             )
-            return {row[0]: row[1] for row in cur.fetchall()}
+            return {row[0]: row[1] for row in cur.fetchall()
+                    if not is_expired(row[2])}
     except Exception as e:
         _POLICY_LOAD_FAILED = str(e)
         cprint(C.YELLOW, f"  ⚠ could not load accepted_risks from DB: {e}")
@@ -1124,6 +1135,52 @@ _PLACEHOLDER_CONTEXT = re.compile(
 )
 
 
+# A VALUE lifted out of a shell or Python string keeps the QUOTING DEBRIS of the
+# string it came from. `-H "Authorization: MediaBrowser Token=\"$JF_KEY\""` hands
+# the extractor `\"$JF_KEY\""`: the value alternatives in _HIST_CRED_KV only
+# recognise a BALANCED run in REAL quotes, so both a BACKSLASH-escaped quote and
+# an UNBALANCED real one fall through to `\S+`, which swallows the punctuation.
+# (Measured 2026-09-17: `password: "$HUNTER2SEVENXYZ` -- one bare, unmatched real
+# quote, no backslash anywhere -- reaches this rule too. The trigger surface is
+# "debris at the ends", not "backslashes".) Every reference rule in _NON_LITERAL_VALUE is
+# ANCHORED (`^\$VAR$`), so the debris alone defeats it and a shell variable is
+# reported as a leaked credential -- five contextual-HIGH rows on 2026-09-17,
+# after the same class was patched for the UNESCAPED spelling on 2026-09-15
+# (F-6bf496a1 / F-d6b2bd92 / F-3d1d7147). Patching the outer grep layer is what
+# produced that sediment; this is value-scoped, where the question belongs.
+#
+# Strip the debris from the ENDS ONLY, then require the remainder to match a
+# reference form in FULL. Literal text riding along INSIDE the value therefore
+# keeps the hit visible -- UNLESS the concatenation is itself $UPPER_SNAKE-shaped
+# (`\"$JF_KEYHUNTER2SEVEN\"` goes quiet; measured, and pinned as an accepted
+# miss). Ends-only + full-match is the property that stops this from becoming a
+# blindfold, and BOTH halves are pinned, each with a mutation that kills it, in
+# runbooks/tests/test-s3-escaped-value-reference.py.
+_VALUE_DEBRIS = re.compile(r"""^(?:\\*["'`])+|(?:\\*["'`]|\\[nrt]|[,;])+$""")
+# CASE-STRICT on the shell identifier, exactly like S3_SHELL_VAR_RHS_ERE and for
+# the same reason: a literal that merely starts with `$` keeps lowercase letters
+# or digits in odd places and must STAY visible. Deliberately NARROWER than
+# _NON_LITERAL_VALUE's own `$VAR` branch -- this rule exists to parse debris, not
+# to widen what counts as a reference.
+_WRAPPED_REFERENCE = re.compile(
+    r"^(?:\$[A-Z_][A-Z0-9_]{2,}|\$\{[A-Z_][A-Z0-9_]{2,}\})$"  # \"$JF_KEY\" / \"${JF_KEY}\"
+    r"|^\{[A-Za-z_][A-Za-z0-9_.]*(?:\([^()]*\))?\}$"  # {token} / {m.group(1)}
+)
+
+
+def _wrapped_value_is_reference(value: str) -> bool:
+    """True if `value` is a reference once its quoting debris is stripped.
+
+    Returns False when there was NO debris: an undressed value is already judged
+    by _NON_LITERAL_VALUE, and this rule must never silently widen that.
+    """
+    stripped, prev = value, None
+    while prev != stripped:
+        prev = stripped
+        stripped = _VALUE_DEBRIS.sub("", stripped)
+    return stripped != value and bool(_WRAPPED_REFERENCE.match(stripped))
+
+
 def _hist_cred_hit_suppressed(line: str) -> bool:
     """True if this git-history hit is a reference/scaffolding line, not a leak."""
     # CONTEXT is the KEY of each assignment plus any trailing comment -- NOT the
@@ -1174,7 +1231,8 @@ def _hist_cred_hit_suppressed(line: str) -> bool:
         return True                                  # the KEY/comment says scaffolding
     if _REFERENCE_CONTEXT.search(context):
         return True                                  # the line names a secret
-    return all(_NON_LITERAL_VALUE.search(v) or v.lower() in _TEMPLATE_LITERALS
+    return all(_NON_LITERAL_VALUE.search(v) or _wrapped_value_is_reference(v)
+               or v.lower() in _TEMPLATE_LITERALS
                for v in values)
 
 
@@ -1228,6 +1286,7 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "      ':(exclude)runbooks/tests/test-s3-env-var-name-rhs.py' "
         "      ':(exclude)runbooks/tests/test-tag-oracle-veto-discriminator.py' "
         "      ':(exclude)runbooks/tests/test-cred-suppressor-scoping.py' "
+        "      ':(exclude)runbooks/tests/test-s3-escaped-value-reference.py' "
         "      ':(exclude)runbooks/doc-check-current.md' "
         "      ':(exclude)runbooks/health-check.sh' "
         "      ':(exclude)docs/sops/*.md' "
@@ -1355,6 +1414,30 @@ def s3_git_history() -> tuple[str, Findings, str]:
         for h in cred_hits[:5]:
             f.add(WARNING, f"Credential-like pattern in history: `{redact(h[:100])}`")
             cprint(C.YELLOW, f"  🟡 History: {redact(h[:100])}")
+        # A SILENT TRUNCATION IS NOT A CLEAN RESULT. This loop has always shown
+        # 5 and printed no total, so a real leak at position 6 was invisible and
+        # permanent -- and the effect of any suppressor change here could not be
+        # read off the board at all (measured 2026-09-17: 59 surviving hits, 5
+        # shown).
+        #
+        # CONSOLE ONLY -- deliberately NOT f.add(). Measured through the real
+        # scorer on 2026-09-17: a finding titled "Git-history credential scan:
+        # <n> surviving hits" in this section scores contextual HIGH, because
+        # the title does not start with risk_model.S3_NAME_ONLY_MARKER (so
+        # compute_nature falls through to NATURE_BY_SECTION['s3_git_history'] =
+        # VULN) and s3_git_history is in _PUBLIC_REPO_SECTIONS (so exposure is
+        # external-unauth). Its condition is `> 5` against ~59 survivors, so it
+        # could only clear by rewriting git history: a permanent, unactionable
+        # HIGH row -- the exact board pollution this change exists to reduce,
+        # and the same shape the domain-literal check below documents having
+        # already fixed once. If a tracked ROW is ever wanted, classify it
+        # first (an S3 hygiene marker beside S3_NAME_ONLY_MARKER in
+        # runbooks/lib/risk_model.py, plus a cell in
+        # runbooks/tests/test-risk-model-git-history-nature.py) -- do not just
+        # add f.add() back.
+        if len(cred_hits) > 5:
+            cprint(C.YELLOW, f"  🟡 History: {len(cred_hits)} surviving hits, "
+                             f"only 5 shown above (console only -- see comment)")
     else:
         cprint(C.GREEN, "  🟢 No plaintext credential patterns in history")
 
