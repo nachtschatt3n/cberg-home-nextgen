@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app oc8
+  namespace: &namespace ai
+spec:
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  # The database, roles and vector extension must exist before the backend's
+  # `alembic upgrade head` init container runs, or it fails and back-off
+  # delays the whole release.
+  dependsOn:
+    - name: oc8-db
+      namespace: databases
+  interval: 30m
+  path: ./kubernetes/apps/ai/oc8/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  targetNamespace: *namespace
+  timeout: 5m
+  wait: false

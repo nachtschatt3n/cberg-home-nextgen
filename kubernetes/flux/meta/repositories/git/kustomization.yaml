@@ -6,3 +6,4 @@ resources:
   - ./csi-driver-smb.yaml
   - ./k8s-self-ai-ops.yaml
   - ./github-k8s-self-ai-ops-secret.sops.yaml
+  - ./oc8.yaml

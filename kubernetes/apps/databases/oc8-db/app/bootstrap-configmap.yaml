@@ -1,0 +1,77 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oc8-db-bootstrap
+  namespace: databases
+data:
+  # NOTE on $${VAR} double-dollar escapes: Flux postBuild.substituteFrom is
+  # applied to every Kustomization in this cluster (kubernetes/flux/cluster/ks.yaml).
+  # It substitutes ${VAR}-style references before apply, which would strip these
+  # bash variables to empty strings. `$${VAR}` survives as a literal `${VAR}`.
+  # Same lesson as sweep-history-init v2a.
+  bootstrap.sh: |
+    #!/usr/bin/env bash
+    # Idempotent bootstrap of the oc8 database on the SHARED postgresql instance.
+    #
+    # Why a Job and not the postgresql init ConfigMap: that ConfigMap is mounted
+    # at /docker-entrypoint-initdb.d, which Postgres runs ONLY on initdb of an
+    # empty data directory. This instance was initialised long ago, so anything
+    # added there would silently never execute.
+    #
+    # Safe to re-run on every Flux reconcile.
+    set -euo pipefail
+
+    : "$${PGHOST:?PGHOST required}"
+    : "$${PGUSER:?PGUSER required}"
+    : "$${PGPASSWORD:?PGPASSWORD required}"
+    : "$${OC8_MIGRATE_PASSWORD:?OC8_MIGRATE_PASSWORD required}"
+    : "$${OC8_APP_PASSWORD:?OC8_APP_PASSWORD required}"
+
+    export PGCONNECT_TIMEOUT=10
+
+    psql_admin() { PGDATABASE=postgres psql -v ON_ERROR_STOP=1 "$@"; }
+    psql_oc8()   { PGDATABASE=oc8      psql -v ON_ERROR_STOP=1 "$@"; }
+
+    # Passwords are SOPS-managed and alphanumeric by convention. Refuse to run
+    # if a rotation introduced a single quote -- inline interpolation is the
+    # only form the SOPS+Flux path carries reliably, so this assert is the guard.
+    case "$${OC8_MIGRATE_PASSWORD}" in *"'"*) echo "FATAL: migrate password contains single quote" >&2; exit 1;; esac
+    case "$${OC8_APP_PASSWORD}"     in *"'"*) echo "FATAL: app password contains single quote" >&2; exit 1;; esac
+
+    echo "==> Ensure roles exist"
+    # NOBYPASSRLS is deliberate and load-bearing: oc8 enforces tenant isolation
+    # with row-level security, so a role that bypasses RLS would silently defeat
+    # it. Upstream's own chart init sets the same.
+    for role_pw in "oc8_migrate:$${OC8_MIGRATE_PASSWORD}" "oc8_app:$${OC8_APP_PASSWORD}"; do
+      role="$${role_pw%%:*}"; pw="$${role_pw#*:}"
+      psql_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname='$${role}'" | grep -q 1 \
+        || psql_admin -c "CREATE ROLE $${role} LOGIN NOBYPASSRLS"
+      # Set every run so a SOPS rotation actually lands.
+      psql_admin -c "ALTER ROLE $${role} WITH LOGIN NOBYPASSRLS PASSWORD '$${pw}'"
+    done
+
+    echo "==> Ensure database oc8 exists (owner oc8_migrate)"
+    # CREATE DATABASE takes no IF NOT EXISTS and cannot run in a transaction.
+    psql_admin -tAc "SELECT 1 FROM pg_database WHERE datname='oc8'" | grep -q 1 \
+      || psql_admin -c "CREATE DATABASE oc8 OWNER oc8_migrate"
+
+    echo "==> Extensions + schema ownership inside oc8"
+    # pgvector is already present in this image (pgvector/pgvector:0.8.6-pg16),
+    # so this is an enable, not an install.
+    psql_oc8 -c "CREATE EXTENSION IF NOT EXISTS vector"
+    psql_oc8 -c "ALTER SCHEMA public OWNER TO oc8_migrate"
+    psql_oc8 -c "GRANT USAGE ON SCHEMA public TO oc8_app"
+    psql_oc8 -c "GRANT CONNECT ON DATABASE oc8 TO oc8_app"
+
+    echo "==> Default privileges so migrate-created tables are usable by the app role"
+    psql_oc8 -c "ALTER DEFAULT PRIVILEGES FOR ROLE oc8_migrate IN SCHEMA public
+                   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO oc8_app"
+    psql_oc8 -c "ALTER DEFAULT PRIVILEGES FOR ROLE oc8_migrate IN SCHEMA public
+                   GRANT USAGE, SELECT ON SEQUENCES TO oc8_app"
+
+    # Existing objects too, for a re-run after migrations have already created tables.
+    psql_oc8 -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO oc8_app"
+    psql_oc8 -c "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO oc8_app"
+
+    echo "==> Done. vector: $(psql_oc8 -tAc "SELECT extversion FROM pg_extension WHERE extname='vector'")"

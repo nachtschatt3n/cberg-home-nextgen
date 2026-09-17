@@ -1,0 +1,56 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/gitrepository-source-v1.json
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: oc8
+  namespace: flux-system
+# Chart source for the oc8 agent platform.
+#
+# WHY A GitRepository AND NOT A HelmRepository/OCIRepository.
+# Upstream oc8-ai/oc8 publishes NO chart artifact and NO container image at
+# all: verified 2026-09-17 via the GitHub API -- 0 tags, 0 Actions workflows,
+# and no container packages under that owner. Its own install documentation
+# describes only `docker compose up -d --build`, i.e. building from source on
+# the host. The chart exists solely as a directory inside the git tree, so a
+# git source is the only shape available.
+#
+# WHY OUR FORK AND NOT UPSTREAM DIRECTLY.
+# The images this cluster runs are built by nachtschatt3n/oc8's own CI
+# (.github/workflows/container.yml) because upstream has none. That fork also
+# carries one deliberate divergence in Dockerfile.backend -- a repo-root build
+# context so the runtime-resolved capas/ and i18n/ trees can be baked in, which
+# upstream's ./backend context cannot reach. Sourcing the chart from the same
+# pinned ref keeps chart and image describing the same commit.
+#
+# PINNED TO A TAG WE CONTROL, NOT A BRANCH.
+# Upstream main moved twice on the day this landed. ref.tag points at a tag in
+# our fork so the chart cannot change under a reconcile.
+#
+# reconcileStrategy: Revision is set on the HelmRelease's chart spec, NOT left
+# at the default. The default (ChartVersion) rebuilds the chart artifact only
+# when Chart.yaml's version changes -- and this chart is pinned at 0.1.0
+# upstream and will not move, so a new pin tag here would otherwise be fetched
+# and then silently ignored.
+#
+# KNOWN COST: no automated version tracking. Renovate's flux manager reads a
+# GitRepository only via ref.tag, and our tag namespace is local, so it cannot
+# compare against anything upstream. Upgrades are MANUAL -- do not read silence
+# as "up to date". Same trade recorded on csi-driver-smb.yaml.
+spec:
+  interval: 1h
+  url: https://github.com/nachtschatt3n/oc8
+  ref:
+    tag: oc8home-2026.09.17
+  # The repo carries a full frontend + backend + docs tree; we need one chart
+  # directory. `ignore` (applied when the artifact is built) rather than
+  # sparseCheckout (applied during checkout): a bad pattern here degrades to an
+  # artifact missing the chart, which stops only this HelmChart, instead of
+  # failing the GitRepository itself inside the cluster-meta health gate.
+  ignore: |
+    # exclude all
+    /*
+    # include only the chart
+    !/deploy
+    /deploy/*
+    !/deploy/helm

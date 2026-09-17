@@ -1,0 +1,51 @@
+---
+# envoy-INTERNAL (LAN-only), deliberately not envoy-external.
+#
+# oc8 runs agents IN-PROCESS inside the backend container: Talos has no Docker
+# socket, so the chart's per-agent container isolation (agentIsolation) cannot
+# be enabled, and agent code therefore executes in the same process that holds
+# the secret KEK. It also has no Authentik integration here. Until both change
+# this is not a service to put on the internet-facing gateway.
+#
+# Routed to the chart's Caddy, not split here: Caddy already owns the
+# /api, /health, /llm and /mcp -> backend:8099 split with everything else going
+# to frontend:3000. Re-expressing that as HTTPRoute rules would duplicate it in
+# a second place that can silently disagree.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: oc8
+  namespace: ai
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/description: "Self-hosted AI agent platform"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "robot.png"
+    gethomepage.dev/name: "oc8"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/instance=oc8"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "oc8.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: oc8-caddy
+          port: 80
+      timeouts:
+        # Agent runs are long: agent_max_steps defaults to 200 tool-using
+        # steps, and the local model is serialised (NUM_PARALLEL=1) so a queued
+        # request waits behind whatever else is using the GPU. The gateway-wide
+        # 60s default would cut runs off mid-flight.
+        request: 3600s
+        backendRequest: 3600s

@@ -1,0 +1,463 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: oc8
+spec:
+  interval: 30m
+  chart:
+    spec:
+      # Chart lives inside the git tree -- upstream publishes no chart artifact
+      # and no image. See kubernetes/flux/meta/repositories/git/oc8.yaml.
+      chart: deploy/helm/oc8
+      # NOT the default (ChartVersion). Chart.yaml is pinned at 0.1.0 upstream
+      # and will not move, so under ChartVersion a new pin tag would be fetched
+      # and then silently ignored.
+      reconcileStrategy: Revision
+      sourceRef:
+        kind: GitRepository
+        name: oc8
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    timeout: 15m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 15m
+    cleanupOnFail: false
+    remediation:
+      retries: 1
+  uninstall:
+    keepHistory: false
+
+  # jwtSecret / secretKek / postgresPassword. The chart GENERATES its own
+  # oc8-secrets Secret from .Values.secrets.*, so inline values would put them
+  # in plaintext in this PUBLIC repository.
+  valuesFrom:
+    - kind: Secret
+      name: oc8-values
+      valuesKey: values.yaml
+
+  postRenderers:
+    - kustomize:
+        patches:
+          # ---------------------------------------------------------------
+          # Sessions PVC: RWX + static binding.
+          # The template hardcodes ReadWriteOnce and exposes no accessMode
+          # value, but BOTH oc8-backend and oc8-worker mount this volume (one
+          # shared backendVolumeMounts helper). Two Deployments on an RWO
+          # Longhorn volume deadlock on Multi-Attach -- see
+          # docs/sops/longhorn-rwo-multi-attach.md. volumeName binds the
+          # hand-applied static PV so the Longhorn volume carries a speaking
+          # name rather than a pvc-<uuid>.
+          # ---------------------------------------------------------------
+          - target:
+              kind: PersistentVolumeClaim
+              name: oc8-sessions
+            patch: |
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: oc8-sessions
+              spec:
+                accessModes:
+                  - ReadWriteMany
+                storageClassName: longhorn-static
+                volumeName: oc8-sessions
+
+          # ---------------------------------------------------------------
+          # oc8-backend: real DSNs, shared Postgres, model wiring, Recreate.
+          # ---------------------------------------------------------------
+          - target:
+              kind: Deployment
+              name: oc8-backend
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: oc8-backend
+                annotations:
+                  reloader.stakater.com/auto: "true"
+              spec:
+                # RWO->RWX makes concurrent attach legal, but a rolling
+                # replacement of an agent workload would still run two
+                # processes over one session tree mid-flight.
+                strategy:
+                  type: Recreate
+                  rollingUpdate: null
+                template:
+                  spec:
+                    initContainers:
+                      # The chart points this at <release>-postgres, which does
+                      # not exist when postgres.enabled=false -- every pod would
+                      # sit in a permanent init loop.
+                      - name: wait-for-postgres
+                        command:
+                          - sh
+                          - -c
+                          - |
+                            until pg_isready -h postgresql.databases -p 5432; do
+                              echo "waiting for postgres..."
+                              sleep 2
+                            done
+                      - name: migrate
+                        env:
+                          - name: OC8_DATABASE_URL
+                            # null deletes the chart's hardcoded literal; without it
+                            # strategic merge leaves value AND valueFrom on one entry,
+                            # which the API server rejects.
+                            value: null
+                            valueFrom:
+                              secretKeyRef: { name: oc8-db-dsn, key: OC8_DATABASE_URL }
+                          - name: OC8_MIGRATION_URL
+                            # null deletes the chart's hardcoded literal; without it
+                            # strategic merge leaves value AND valueFrom on one entry,
+                            # which the API server rejects.
+                            value: null
+                            valueFrom:
+                              secretKeyRef: { name: oc8-db-dsn, key: OC8_MIGRATION_URL }
+                    containers:
+                      - name: backend
+                        env:
+                          - name: OC8_DATABASE_URL
+                            # null deletes the chart's hardcoded literal; without it
+                            # strategic merge leaves value AND valueFrom on one entry,
+                            # which the API server rejects.
+                            value: null
+                            valueFrom:
+                              secretKeyRef: { name: oc8-db-dsn, key: OC8_DATABASE_URL }
+                          - name: OC8_MIGRATION_URL
+                            # null deletes the chart's hardcoded literal; without it
+                            # strategic merge leaves value AND valueFrom on one entry,
+                            # which the API server rejects.
+                            value: null
+                            valueFrom:
+                              secretKeyRef: { name: oc8-db-dsn, key: OC8_MIGRATION_URL }
+                          # The chart emits no model settings at all; the app
+                          # would otherwise default to mistral:latest, which is
+                          # not deployed on the Ollama host.
+                          - name: OC8_DEFAULT_MODEL_PROVIDER
+                            value: "ollama"
+                          - name: OC8_DEFAULT_MODEL
+                            value: "gemma4:26b-mlx"
+                          - name: OC8_DEFAULT_EMBEDDING_MODEL
+                            value: "nomic-embed-text"
+                          # Core i18n catalogs are baked at /app/i18n by our
+                          # image; the setting resolves relative to WORKDIR.
+                          - name: OC8_CORE_I18N_PATH
+                            value: "/app/i18n"
+                          # Without these, every password-reset and email
+                          # confirmation link is built against localhost and
+                          # fails silently for the recipient.
+                          - name: OC8_FRONTEND_BASE_URL
+                            value: "https://oc8.${SECRET_DOMAIN}"
+                          - name: OC8_OAUTH_REDIRECT_BASE_URL
+                            value: "https://oc8.${SECRET_DOMAIN}"
+                          - name: OC8_CORS_ORIGINS
+                            value: "https://oc8.${SECRET_DOMAIN}"
+
+          # ---------------------------------------------------------------
+          # oc8-worker: same DB + model wiring; also shares the sessions volume.
+          # ---------------------------------------------------------------
+          - target:
+              kind: Deployment
+              name: oc8-worker
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: oc8-worker
+                annotations:
+                  reloader.stakater.com/auto: "true"
+              spec:
+                strategy:
+                  type: Recreate
+                  rollingUpdate: null
+                template:
+                  spec:
+                    initContainers:
+                      - name: wait-for-postgres
+                        command:
+                          - sh
+                          - -c
+                          - |
+                            until pg_isready -h postgresql.databases -p 5432; do
+                              echo "waiting for postgres..."
+                              sleep 2
+                            done
+                    containers:
+                      - name: worker
+                        env:
+                          - name: OC8_DATABASE_URL
+                            # null deletes the chart's hardcoded literal; without it
+                            # strategic merge leaves value AND valueFrom on one entry,
+                            # which the API server rejects.
+                            value: null
+                            valueFrom:
+                              secretKeyRef: { name: oc8-db-dsn, key: OC8_DATABASE_URL }
+                          - name: OC8_MIGRATION_URL
+                            # null deletes the chart's hardcoded literal; without it
+                            # strategic merge leaves value AND valueFrom on one entry,
+                            # which the API server rejects.
+                            value: null
+                            valueFrom:
+                              secretKeyRef: { name: oc8-db-dsn, key: OC8_MIGRATION_URL }
+                          - name: OC8_DEFAULT_MODEL_PROVIDER
+                            value: "ollama"
+                          - name: OC8_DEFAULT_MODEL
+                            value: "gemma4:26b-mlx"
+                          - name: OC8_DEFAULT_EMBEDDING_MODEL
+                            value: "nomic-embed-text"
+                          - name: OC8_CORE_I18N_PATH
+                            value: "/app/i18n"
+
+          # ---------------------------------------------------------------
+          # oc8-scheduler
+          # ---------------------------------------------------------------
+          - target:
+              kind: Deployment
+              name: oc8-scheduler
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: oc8-scheduler
+              spec:
+                template:
+                  spec:
+                    initContainers:
+                      - name: wait-for-postgres
+                        command:
+                          - sh
+                          - -c
+                          - |
+                            until pg_isready -h postgresql.databases -p 5432; do
+                              echo "waiting for postgres..."
+                              sleep 2
+                            done
+                    containers:
+                      - name: scheduler
+                        env:
+                          - name: OC8_DATABASE_URL
+                            # null deletes the chart's hardcoded literal; without it
+                            # strategic merge leaves value AND valueFrom on one entry,
+                            # which the API server rejects.
+                            value: null
+                            valueFrom:
+                              secretKeyRef: { name: oc8-db-dsn, key: OC8_DATABASE_URL }
+                          - name: OC8_MIGRATION_URL
+                            # null deletes the chart's hardcoded literal; without it
+                            # strategic merge leaves value AND valueFrom on one entry,
+                            # which the API server rejects.
+                            value: null
+                            valueFrom:
+                              secretKeyRef: { name: oc8-db-dsn, key: OC8_MIGRATION_URL }
+                          - name: OC8_DEFAULT_MODEL_PROVIDER
+                            value: "ollama"
+                          - name: OC8_DEFAULT_MODEL
+                            value: "gemma4:26b-mlx"
+
+          # ---------------------------------------------------------------
+          # oc8-ingestion-worker (knowledge ingestion: needs the embedding model)
+          # ---------------------------------------------------------------
+          - target:
+              kind: Deployment
+              name: oc8-ingestion-worker
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: oc8-ingestion-worker
+              spec:
+                template:
+                  spec:
+                    initContainers:
+                      - name: wait-for-postgres
+                        command:
+                          - sh
+                          - -c
+                          - |
+                            until pg_isready -h postgresql.databases -p 5432; do
+                              echo "waiting for postgres..."
+                              sleep 2
+                            done
+                    containers:
+                      - name: ingestion-worker
+                        env:
+                          - name: OC8_DATABASE_URL
+                            # null deletes the chart's hardcoded literal; without it
+                            # strategic merge leaves value AND valueFrom on one entry,
+                            # which the API server rejects.
+                            value: null
+                            valueFrom:
+                              secretKeyRef: { name: oc8-db-dsn, key: OC8_DATABASE_URL }
+                          - name: OC8_MIGRATION_URL
+                            # null deletes the chart's hardcoded literal; without it
+                            # strategic merge leaves value AND valueFrom on one entry,
+                            # which the API server rejects.
+                            value: null
+                            valueFrom:
+                              secretKeyRef: { name: oc8-db-dsn, key: OC8_MIGRATION_URL }
+                          - name: OC8_DEFAULT_MODEL_PROVIDER
+                            value: "ollama"
+                          - name: OC8_DEFAULT_EMBEDDING_MODEL
+                            value: "nomic-embed-text"
+
+  values:
+    images:
+      backend:
+        repository: ghcr.io/nachtschatt3n/oc8-backend
+        # Built by our fork's CI; upstream publishes nothing. Digest-pinned
+        # because GHCR does not enforce tag immutability.
+        tag: sha-19b92d1@sha256:861e8b59e9b867e2b31ec4f7d34e6ccebdee9babbfcc037a55f86deaa9f4005a
+        pullPolicy: IfNotPresent
+      frontend:
+        repository: ghcr.io/nachtschatt3n/oc8-frontend
+        tag: sha-19b92d1@sha256:f7fb77510f4a5b7d691d7bf0f5608edc1d146ef5faf414fef5dae12d07bd0c1a
+        pullPolicy: IfNotPresent
+      redis:
+        repository: redis
+        tag: 7-alpine
+        pullPolicy: IfNotPresent
+      caddy:
+        repository: caddy
+        tag: "2"
+        pullPolicy: IfNotPresent
+
+    oc8:
+      # prod, NOT the chart default of dev -- dev enables UNAUTHENTICATED
+      # dev-login. The README is explicit that dev must never be network-exposed.
+      env: prod
+      # No demo tenant. The chart default seeds one on first migrate.
+      seedOnStart: false
+      capasPath: /app/capas
+      pythonPath: /app/capas/cli_harness
+      # Per-agent container isolation needs a Docker socket. Talos runs
+      # containerd and exposes none, so this CANNOT be enabled here: agents
+      # execute IN-PROCESS in the backend, alongside the secret KEK. That is
+      # why this app is on the LAN-only gateway.
+      agentIsolation: false
+      sandboxUser: ""
+      # The tool-call translating proxy, NOT raw Ollama. oc8 emits OpenAI-style
+      # tool calls with `arguments` as a JSON object; Ollama's OpenAI endpoint
+      # requires a JSON-encoded string and 400s otherwise. See
+      # kubernetes/apps/ai/openclaw/app/ollama-toolfix.yaml.
+      ollamaBaseUrl: "http://ollama-toolfix.ai.svc.cluster.local:80"
+      otelSdkDisabled: true
+      evidence:
+        # Off: this sweep DELETES run evidence files.
+        sweepEnabled: false
+        archiveAfterMinutes: 60
+        retentionDays: 0
+
+    # Reuse the shared pgvector instance (databases/postgresql,
+    # pgvector/pgvector:0.8.6-pg16). The chart's own StatefulSet pins pg15.
+    # Database, roles and the vector extension are created by
+    # kubernetes/apps/databases/oc8-db.
+    postgres:
+      enabled: false
+
+    # The chart hardcodes redis://<release>-redis:6379/0 with no override
+    # value, so its own small Redis is kept rather than post-rendering a
+    # second DSN for no benefit.
+    redis:
+      enabled: true
+      maxMemory: 256mb
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          memory: 320Mi
+
+    backend:
+      # Keep at 1: the chart runs `alembic upgrade head` in an init container
+      # on EVERY backend pod, so >1 replica races migrations.
+      replicas: 1
+      resources:
+        requests:
+          cpu: 200m
+          memory: 768Mi
+        limits:
+          memory: 3Gi
+      containerSocket:
+        # Root-equivalent on the node. Never on a shared cluster.
+        enabled: false
+      capas:
+        # Neither: capas is baked into our image at /app/capas. The chart's
+        # hostPath option has no meaning on Talos and a PVC would need its own
+        # populate Job for 6 MB of static files.
+        hostPath: ""
+        existingClaim: ""
+      sessions:
+        enabled: true
+        size: 10Gi
+        storageClassName: longhorn-static
+        mountPath: /var/lib/oc8/sessions
+
+    worker:
+      # 1, not the chart's 2. Ollama runs NUM_PARALLEL=1, so a second worker
+      # only queues behind the first on the same GPU while doubling the
+      # memory footprint.
+      replicas: 1
+      resources:
+        requests:
+          cpu: 200m
+          memory: 768Mi
+        limits:
+          memory: 3Gi
+
+    ingestionWorker:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          memory: 2Gi
+
+    scheduler:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 50m
+          memory: 256Mi
+        limits:
+          memory: 768Mi
+
+    frontend:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 50m
+          memory: 192Mi
+        limits:
+          memory: 768Mi
+
+    caddy:
+      enabled: true
+      service:
+        # ClusterIP, not the chart's LoadBalancer: the HTTPRoute fronts this.
+        # A LoadBalancer would burn a Cilium LB-IPAM address for nothing.
+        type: ClusterIP
+        port: 80
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          memory: 256Mi
+
+    # Inert in this cluster: ingress-nginx was deleted 2026-09-07 and there is
+    # no IngressClass. Routing is the HTTPRoute in this directory.
+    ingress:
+      enabled: false
+
+    # Ollama is the existing shared host at 192.168.30.111, reached via the
+    # toolfix proxy above -- not a bundled in-cluster StatefulSet.
+    ollama:
+      enabled: false
+
+    serviceAccount:
+      create: true

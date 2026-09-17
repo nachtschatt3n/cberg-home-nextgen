@@ -14,3 +14,4 @@ resources:
   - ./next-ai-draw-io/ks.yaml
   - ./paperclip/ks.yaml
   - ./hermes-agent/ks.yaml
+  - ./oc8/ks.yaml

@@ -1,0 +1,24 @@
+---
+# APPLY THIS BY HAND: `kubectl apply -f longhorn-volume.yaml`.
+# Flux cannot own it -- the app Kustomization's targetNamespace (ai) silently
+# overrides `namespace: storage` and creates a broken duplicate Longhorn
+# ignores. Kept here as version-controlled source. See docs/sops/longhorn.md.
+#
+# RWX, not RWO: both oc8-backend and oc8-worker mount this volume (the chart
+# shares one backendVolumeMounts helper between them). Two Deployments on an
+# RWO Longhorn volume deadlock on Multi-Attach -- see
+# docs/sops/longhorn-rwo-multi-attach.md. Longhorn RWX is already proven in
+# this cluster by jellyfin-config and nextcloud-config.
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: oc8-sessions
+  namespace: storage
+spec:
+  size: "10737418240"  # 10Gi in bytes
+  numberOfReplicas: 2
+  dataEngine: v1
+  accessMode: rwx
+  frontend: blockdev
+  migratable: false
+  encrypted: false
