@@ -16,6 +16,7 @@ resources:
   - ./redisinsight/ks.yaml
   - ./memgraph/ks.yaml
   - ./superset/ks.yaml
+  - ./oc8-db/ks.yaml
 patches:
   # PSA override: privileged required for postgres init-sysctl etc.
   # Target name must be `not-used` because the namespace transformer
@@ -32,4 +33,3 @@ patches:
           pod-security.kubernetes.io/enforce: privileged
           pod-security.kubernetes.io/audit: privileged
           pod-security.kubernetes.io/warn: privileged
-  - ./oc8-db/ks.yaml
