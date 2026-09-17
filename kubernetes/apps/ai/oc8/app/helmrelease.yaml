@@ -310,11 +310,11 @@ spec:
         repository: ghcr.io/nachtschatt3n/oc8-backend
         # Built by our fork's CI; upstream publishes nothing. Digest-pinned
         # because GHCR does not enforce tag immutability.
-        tag: sha-3c8ecc9@sha256:7a6db7232ce413367ea8c3f9a7e663e3d1c2bf9700c24a581251a98a394597dd
+        tag: sha-821d7cf@sha256:50550e7489ea01b202fce01dfcda6119e275df3bde9f5a019a4d81e4818c31ce
         pullPolicy: IfNotPresent
       frontend:
         repository: ghcr.io/nachtschatt3n/oc8-frontend
-        tag: sha-3c8ecc9@sha256:f766ed012058546a16dc7e8e17a1e6f1840cc1d66e63e83baa7f81931257939b
+        tag: sha-821d7cf@sha256:e82e3c488ea48309ca726d84c40147458234ccc1adc7a4ab423367f8e80fae27
         pullPolicy: IfNotPresent
       redis:
         repository: redis
