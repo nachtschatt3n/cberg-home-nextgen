@@ -49,10 +49,19 @@ conflicts_with:
                                       # CreateReplace writers in one window is the race
                                       # this plan exists to end. Ordering: THIS plan first,
                                       # kps-91.4.0 in a LATER window (§6).
-  - otel-operator-0.21.0              # edits the SAME HelmRelease file/spec; two helm
-                                      # upgrades of otel-operator in one window confound
-                                      # §4's "generation unchanged across an upgrade"
-                                      # assertion. THIS plan first (§6).
+                                      # 2026-09-17: otel-operator-0.21.0 ref REMOVED — that
+                                      # plan executed (9a35168f) and was retired (37f7c7a6)
+                                      # in the nightly window. It edited the SAME HelmRelease
+                                      # spec, so two otel-operator upgrades in one window
+                                      # would have confounded §4's "generation unchanged
+                                      # across an upgrade" assertion. SEE F-7235625a: that
+                                      # assertion is now known to be VACUOUS in the ordinary
+                                      # case — generation, resourceVersion AND the
+                                      # helm-controller write timestamp all stayed unchanged
+                                      # through tonight's upgrade WHILE this HelmRelease was
+                                      # still the configured writer. §4 needs a positive
+                                      # proof, not an absence. Any future otel-operator plan
+                                      # must re-add this exclusion.
 security_ref: null
 capability_change: false              # no user-visible behaviour changes: same chart,
                                       # same images, same collectors, same CRD contents;

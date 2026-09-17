@@ -50,12 +50,19 @@ depends_on:
 conflicts_with:                       # HARD slot exclusions — window-scheduler.py keys on
                                       # this field only; the shared:[monitoring] overlap
                                       # is a post-placement warning (2026-09-15 review).
-  - otel-operator-0.21.0              # both CreateReplace the same four CRDs (last writer
-                                      # wins, 0.94.0 vs 0.92.0), and landing THIS plan
-                                      # first flips their helm.toolkit.fluxcd.io/name
-                                      # label to kube-prometheus-stack — §6 states the
-                                      # effect on that plan. Its own §6 forbids sharing a
-                                      # window with a kps chart bump.
+                                      # 2026-09-17: otel-operator-0.21.0 ref REMOVED — that
+                                      # plan executed (9a35168f) and was retired (37f7c7a6)
+                                      # in the nightly window. It mattered because both
+                                      # CreateReplace the same four monitoring.coreos.com
+                                      # CRDs (last writer wins, 0.94.0 vs 0.92.0) and landing
+                                      # THIS plan first flips their
+                                      # helm.toolkit.fluxcd.io/name label to
+                                      # kube-prometheus-stack. MEASURED 2026-09-17 after that
+                                      # plan ran: the four still read GEN 30, OPVER 0.92.0,
+                                      # origin otel-operator, and helm-controller's last write
+                                      # to them is still 2026-09-14 — a byte-identical
+                                      # CreateReplace leaves no trace. Any future
+                                      # otel-operator plan must re-add this exclusion.
                                       # 2026-09-16: unpoller-v5.2.5 ref REMOVED — that plan
                                       # executed (b0ffb944) and was retired (f3869634) in the
                                       # nightly window. The guard only ever protected its §4

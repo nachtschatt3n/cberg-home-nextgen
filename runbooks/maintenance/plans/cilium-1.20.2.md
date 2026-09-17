@@ -81,9 +81,13 @@ conflicts_with:                       # SOLO SLOT. This is not a courtesy list: 
   - kube-prometheus-stack-91.4.0      # MANDATORY: §4's CONTENTS ASSERTION reads Prometheus.
                                       # The window's instrument is shared infra (README §4).
   - prometheus-crd-ownership          # same instrument, same night risk
-  - otel-operator-0.21.0              # monitoring collector; currently nightly:2026-09-17
                                       # 2026-09-16: unpoller-v5.2.5 ref REMOVED — executed
                                       # (b0ffb944) and retired (f3869634) that same night.
+                                      # 2026-09-17: otel-operator-0.21.0 ref REMOVED for the
+                                      # same reason — executed (9a35168f) and retired
+                                      # (37f7c7a6) in the nightly window. It was a monitoring
+                                      # collector conflict; any FUTURE otel-operator plan must
+                                      # re-add the exclusion.
   - media-audit-durable-output        # sat-attended:2026-09-19
   - wazuh-2xx-edge-coverage           # sat-attended:2026-09-26 — touches the external
                                       # request path this plan can blackhole
