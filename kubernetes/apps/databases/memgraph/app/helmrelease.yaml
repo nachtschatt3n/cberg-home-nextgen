@@ -48,7 +48,7 @@ spec:
           app:
             image:
               repository: memgraph/memgraph-mage
-              tag: "3.13.0"
+              tag: "3.13.1"
               pullPolicy: IfNotPresent
             args:
               - --bolt-address=0.0.0.0
