@@ -22,16 +22,29 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 1
-  postRenderers:
-    - kustomize:
-        patches:
-          - target:
-              kind: Ingress
-              name: adguard-home-http
-            patch: |
-              - op: add
-                path: /metadata/labels/gethomepage.dev~1enabled
-                value: "true"
+  # postRenderers REMOVED 2026-09-18 — dead code, removed alongside the rm3l
+  # source change that forces this release's first upgrade since v20.
+  #
+  # It bolted gethomepage.dev/enabled onto a rendered `kind: Ingress name:
+  # adguard-home-http`, which cannot exist here: `ingresses.http.enabled` is
+  # false since the Envoy migration (2026-09-07), there are zero Ingress objects
+  # cluster-wide, and `helm get manifest` shows the live release holds only a
+  # ServiceAccount, five Services and the Deployment.
+  #
+  # IT WAS NOT ABOUT TO BREAK ANYTHING, and the tempting story that it was is
+  # wrong — worth recording, because the opposite is written on phpmyadmin and
+  # mqttx-web ("a patch that matches nothing fails the ENTIRE post-render").
+  # MEASURED 2026-09-18 on kustomize v5.6.0: a patch whose target matches no
+  # resource is SKIPPED and the build exits 0. The live evidence agreed all
+  # along — release v20 rendered successfully on 2026-09-07 with the ingress
+  # already disabled and this patch already unmatched. Treat those older notes
+  # as circumstance-specific (older kustomize, or strategic-merge rather than
+  # JSON6902), not as a general rule, and re-measure before relying on either.
+  #
+  # The label is NOT lost: it lives on the HTTPRoute in ./httproute.yaml, verified
+  # live (gethomepage.dev/enabled=true, name="AdGuard Home"). The disabled
+  # `ingresses.http` values below stay put — they are the documented rollback
+  # target, not the thing that was broken.
   values:
     # Default values for adguard-home.
     # This is a YAML-formatted file.

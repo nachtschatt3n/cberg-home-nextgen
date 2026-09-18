@@ -5,7 +5,48 @@ kind: HelmRepository
 metadata:
   name: rm3l
   namespace: flux-system
+# URL MOVED OFF helm-charts.rm3l.org (2026-09-18) — that host no longer serves
+# TLS at all: DNS resolves, TCP 443 accepts, then the handshake returns zero
+# bytes with "no peer certificate available".
+#
+# THIS DOES NOT CLEAR ON ITS OWN. rm3l.org is ACTIVE at its registrar until
+# 2027-09-15, but BOTH the apex and helm-charts.rm3l.org now resolve to
+# 2.59.170.20 / 104.219.250.37 (hosted-by-worldstream.net) — which is NOT
+# GitHub Pages (185.199.108-111.153), even though the repo's Pages config still
+# declares `cname: helm-charts.rm3l.org` with https_enforced and status "built".
+# The custom domain was repointed away from Pages and TLS was never configured
+# on the new host. It is a migration, not an outage.
+#
+# COST OF LEAVING IT BROKEN: this object sits in cluster-meta's inventory,
+# cluster-meta runs `wait: true`, and cluster-apps dependsOn cluster-meta — so a
+# single unreachable third-party index stalls GitOps reconciliation
+# CLUSTER-WIDE. That is precisely what happened from 22:43Z on 2026-09-17
+# (finding F-e2e1605a) and it blocked the 2026-09-18 nightly window's Step 0.
+#
+# WHY THIS URL. Upstream CI publishes the chart index to the repo's `gh-pages`
+# branch, which raw.githubusercontent serves normally (HTTP 200,
+# cache-control max-age=300 against this 60m interval). Critically, the index's
+# tarball URLs are GitHub RELEASE assets
+# (github.com/rm3l/helm-charts/releases/download/adguard-home-0.24.1/…), NOT
+# back-references to the dead host — so index and chart are both independent of
+# rm3l.org. This is the INVERSE of the csi-driver-smb trap, where the index
+# hardcoded tarball URLs back to a mutable branch, so verify it stays that way
+# on any future chart bump. Confirmed 2026-09-18 by fetching the 0.24.1 tarball
+# (HTTP 200, 25067 bytes) and checking its sha256 equals the index digest
+# 9536dc52…35e29 — byte-identical to the chart this cluster already runs. A
+# SOURCE change, not a content change.
+#
+# WHY NOT rm3l.github.io: Pages has https_enforced with the custom domain set,
+# so rm3l.github.io/helm-charts/index.yaml 301-redirects to the broken host.
+# WHY NOT OCI: upstream issue rm3l/helm-charts#139 asking for an OCI chart is
+# still OPEN — no OCI artifact exists.
+# FALLBACK IF THIS URL EVER FAILS: GitRepository pinned to tag
+# adguard-home-0.24.1 (commit 78c8a791738c22bb3a048a12988b22276e882765), chart
+# path charts/adguard-home — same shape as csi-driver-smb.yaml. Not used here
+# because it forfeits Renovate tracking, which this URL keeps.
+#
+# REVERT to the custom domain once upstream restores TLS on it.
 spec:
   interval: 60m
-  url: https://helm-charts.rm3l.org
+  url: https://raw.githubusercontent.com/rm3l/helm-charts/gh-pages
 
