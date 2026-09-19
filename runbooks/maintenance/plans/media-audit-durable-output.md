@@ -21,8 +21,8 @@ depends_on: []
 conflicts_with: []
 capability_change: false
 rollback_class: git-revert
-status: vetted
-window: "sat-attended:2026-09-19"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
+status: awaiting-go   # DEFERRED 2026-09-19 sat-attended: AUTO-NIGHT but category config/AUTO-NIGHT is 0/2 clean supervised runs, so the first run must be supervised. go/no-go ingested, scoped sat-attended:2026-09-26.
+window: "sat-attended:2026-09-26"   # RESCOPED 2026-09-19 from sat-attended:2026-09-19 — that window was a cron-fired unattended run with no operator ack; an approval stamped to a closed window is a stranded GO.
 premises:
   - id: audit-still-has-no-writable-mount
     why: >-
