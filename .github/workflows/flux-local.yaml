@@ -114,6 +114,115 @@ jobs:
           diff <(printf '%s\n' "${expected}") <(printf '%s\n' "${actual}") | sed 's/^/  /' || true
           exit 1
 
+  flate:
+    name: Flate Render Gate
+    runs-on: ubuntu-latest
+    # A hung render must not hide the regression this job exists to catch.
+    # flate has been measured wedging CPU-bound and never exiting (twice on a
+    # dev Mac: >20 min at 140-215% CPU on a tree it renders in 5s when run
+    # serially), so cap it rather than burn the runner's 6h default.
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # flux-local is ARCHIVED at v8.4.0 and its README points here; flate is
+      # the Go successor. The installed version comes from THIS ref
+      # (@v0.6.5 -> 0.6.5) -- keep it in lockstep with the
+      # `github:home-operations/flate` pin in .mise.toml.
+      #
+      # `base: ""` IS LOAD-BEARING. The action defaults `base` to the default
+      # branch and exports it as FLATE_BASE, which silently puts every later
+      # flate call into CHANGED-ONLY mode. Measured with FLATE_BASE=main on a
+      # clean tree: "0 passed / 182 skipped", exit 0 -- a gate that renders
+      # nothing at all.
+      - name: Setup flate
+        uses: home-operations/flate/action@v0.6.5
+        with:
+          base: ""
+
+      - name: Run flate test
+        env:
+          # Belt and braces with `base: ""`: a step-level env beats anything the
+          # action wrote to GITHUB_ENV.
+          FLATE_BASE: ""
+          # THE ONE RESOURCE NO OFFLINE TOOL CAN RENDER. ai/oc8's chart
+          # hard-requires secrets.jwtSecret, delivered in-cluster from a SOPS
+          # Secret via valuesFrom, so helm template dies before rendering --
+          # under flux-local, flate, or any successor.
+          #
+          # kube-system/csi-driver-smb is deliberately NOT listed. flux-local
+          # could not clone its external GitRepository and had to excuse it;
+          # flate clones it and renders it for real. That is the blind spot
+          # this job closes -- measured: repointing its chart path at a
+          # directory absent from the pinned commit flips 333 passed ->
+          # 332 passed / 2 failed and fails this gate, where flux-local
+          # produced a byte-identical green.
+          #
+          # Allowlist, not a mute: the step fails if anything ELSE fails, AND
+          # if oc8 ever starts passing (delete the entry then).
+          EXPECTED_FAILURES: |
+            HelmRelease ai/oc8
+        run: |
+          # Same shape as the flux-local step above, for the same reason:
+          # GitHub runs a step with no `shell:` key as `bash -e {0}`, and flate
+          # exits 1 BY DESIGN here (the allowlisted oc8 failure), so errexit
+          # would kill the step at the pipeline below before the allowlist is
+          # ever evaluated. Every path below exits explicitly.
+          set -uo pipefail
+          set +e
+
+          flate test all \
+            --path kubernetes/flux/cluster \
+            --allow-missing-secrets \
+            --no-progress \
+            --kube-version 1.36.0 2>&1 | tee flate-test.log
+          status=${PIPESTATUS[0]}
+
+          # `flate test <typo>` and bare `flate test` both exit 0 while running
+          # nothing (measured), so the exit code alone cannot tell "everything
+          # passed" from "the command never ran". The summary line is the only
+          # honest proof that tests executed. Matched without the unicode
+          # glyphs so the guard cannot go false-negative on a runner locale.
+          if ! grep -qE '[0-9]+ passed' flate-test.log; then
+            echo "::error::flate produced no result summary (exit ${status}); it failed before running any tests"
+            exit 1
+          fi
+
+          expected=$(printf '%s\n' "${EXPECTED_FAILURES}" \
+            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | sort -u)
+          # `sed 's/^[^A-Za-z]*//'` drops the leading spaces and the [x] glyph;
+          # `tr -s ' '` collapses flate's column padding, so entries compare as
+          # the plain "Kind namespace/name" written above.
+          actual=$(grep -oE '^[[:space:]]*✗[[:space:]]+(HelmRelease|Kustomization|GitRepository|OCIRepository|HelmChart|Bucket)[[:space:]]+[^[:space:]]+' flate-test.log \
+            | sed 's/^[^A-Za-z]*//' | tr -s ' ' | sort -u)
+
+          # SILENT-GREEN GUARD. The verdict below rests entirely on a regex whose
+          # kind alternation cannot list every kind flate prints (HelmRepository
+          # alone appears 40x here), and flate's exit status is captured but never
+          # compared. A failure of an unlisted kind would therefore leave `actual`
+          # empty and the gate GREEN. Cross-check the parsed set against flate's
+          # own failed-count instead: measured to agree in every fixture (1/1,
+          # 2/2, 2/2, 2/2, 1/1). A mismatch means the regex missed something.
+          want=$(grep -oE '[0-9]+ failed' flate-test.log | tail -1 | grep -oE '[0-9]+'); want=${want:-0}
+          got=$(printf '%s' "${actual}" | grep -c . )
+          if [ "${want}" != "${got}" ]; then
+            echo "::error::flate reported ${want} failure(s) but this gate parsed ${got} -- a failing kind is not in the regex; fix the parser, do not ignore this"
+            sed -n '/failed/p' flate-test.log | tail -5 | sed 's/^/  /'
+            exit 1
+          fi
+
+          if [ "${actual}" = "${expected}" ]; then
+            echo "flate: failure set matches the known-unrenderable allowlist:"
+            printf '%s\n' "${expected}" | sed 's/^/  /'
+            exit 0
+          fi
+
+          echo "::error::flate failure set changed -- fix the release, or update EXPECTED_FAILURES if it is genuinely unrenderable"
+          echo "  '<' = allowlisted but now PASSING (delete the entry), '>' = newly FAILING"
+          diff <(printf '%s\n' "${expected}") <(printf '%s\n' "${actual}") | sed 's/^/  /' || true
+          exit 1
+
   diff:
     name: Flux Local Diff
     runs-on: ubuntu-latest
@@ -180,7 +289,7 @@ jobs:
             ```
 
   flux-local-success:
-    needs: ["test", "diff"]
+    needs: ["test", "flate", "diff"]
     if: ${{ always() }}
     name: Flux Local successful
     runs-on: ubuntu-latest
