@@ -48,7 +48,7 @@ spec:
             # renovate: image=ghcr.io/immich-app/immich-machine-learning
             image:
               repository: ghcr.io/immich-app/immich-machine-learning
-              tag: v3.2.0-openvino
+              tag: v3.2.2-openvino
               pullPolicy: IfNotPresent
             env:
               - name: TZ
