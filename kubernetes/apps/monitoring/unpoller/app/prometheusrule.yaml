@@ -234,10 +234,9 @@ spec:
         # `ap_name!=""` drops the 1-2 UNASSOCIATED clients that report a permanent 0 with
         # the ap_name label absent.
         #
-        # NOT COVERED — do not read this alert as "a device cannot connect". No metric in
-        # this stack reports a failed association or auth: unpoller only lists clients
-        # that DID connect, and mac_filter_rejects is flat 0 across all series. That gap
-        # needs controller/syslog association events and is tracked on F-3f7e921e.
+        # SCOPE: this alert measures degradation of clients that DID associate. Do not
+        # read it as covering "a device cannot connect" — that limitation is tracked
+        # privately, security_ref: F-e6c1f6c2 (see docs/sops/vulnerability-disclosure.md).
         - alert: UnifiClientsDegradedOnAP
           expr: >-
             count by (ap_name) (
