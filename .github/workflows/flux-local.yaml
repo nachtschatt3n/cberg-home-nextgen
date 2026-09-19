@@ -72,7 +72,15 @@ jobs:
             kubernetes/flux/cluster::csi-driver-smb::kube-system/csi-driver-smb
             kubernetes/flux/cluster::oc8::ai/oc8
         run: |
+          # GitHub runs a step with no `shell:` key as `bash -e {0}` -- errexit is
+          # already ON. flux-local exits 1 BY DESIGN here (the two allowlisted
+          # failures), so errexit would kill this step at the pipeline below,
+          # before the allowlist is ever evaluated -- leaving CI red and the
+          # fix looking applied. Disable it deliberately; every failure path
+          # below exits explicitly. Verified: without this, the allowlist
+          # comparison never runs.
           set -uo pipefail
+          set +e
 
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/github/workspace" \
