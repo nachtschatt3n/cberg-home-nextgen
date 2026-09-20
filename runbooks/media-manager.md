@@ -25,7 +25,7 @@ Invoke `media-manager` (Claude sub-agent, `subagent_type: media-manager`) for:
 - "audit the media library"
 - "check metadata for <item>"
 - "fix metadata / cover art for <movie or show>"
-- "add a new Tube Archivist channel to Plex"
+- "add a new Tube Archivist channel" (Jellyfin-only — see the media-manager agent, rule 9)
 - "rebuild artwork for one show"
 - Anything that requires walking, classifying, renaming, sidecaring, or rescanning the Plex/Jellyfin libraries
 
