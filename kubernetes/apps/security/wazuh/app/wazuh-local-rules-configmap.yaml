@@ -71,4 +71,32 @@ data:
         <url>richdocumentscode|/apps/notifications/api|/apps/whiteboard/</url>
         <description>Suppress 31151 — benign repeated Nextcloud Office 400s from same internal user (icon probing)</description>
       </rule>
+
+      <!-- Rule 592 ("Log file size reduced") is level 8 in groups ossec+attacks
+           because a shrinking log is a classic ANTI-FORENSICS indicator. Ours is
+           self-inflicted: the falco-log-rotate DaemonSet truncates Falco's own
+           sink in place, which is exactly what 592 detects.
+
+           MEASURED 2026-09-20 against the live indexer, not inferred:
+             - 18 hits in 7d, every one level=8, groups ['ossec','attacks']
+             - full_log is byte-identical each time:
+                 ossec: File size reduced (inode remained): '/var/run/falco/falco.log'.
+             - 592 is the SOLE driver of the `attacks` group at level>=7 (18/18),
+               so this one path accounts for that entire bucket.
+
+           Scoped by <match> on the literal path rather than by a field element.
+           Two reasons: 592 carries no url/srcip data to key on (location is just
+           `logcollector`), and the 100600 history recorded above shows field
+           elements are decoder-dependent here while <match> tests the raw log text.
+
+           THIS DOES NOT BLIND THE ANTI-FORENSICS SIGNAL. It suppresses exactly one
+           literal filename. A size reduction on ANY other file — including any
+           other log under /var/run — still fires 592 at level 8 untouched. If the
+           falco sink path ever changes, this rule silently stops matching and the
+           events come back loud, which is the correct failure direction. -->
+      <rule id="100630" level="0">
+        <if_sid>592</if_sid>
+        <match>/var/run/falco/falco.log</match>
+        <description>Suppress 592 — falco-log-rotate DaemonSet truncating Falco's own /var/run/falco/falco.log (documented rotation, not anti-forensics)</description>
+      </rule>
     </group>

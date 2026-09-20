@@ -38,7 +38,7 @@ spec:
         checksum/wazuh-config: "929a00b847ee"
         checksum/unifi-decoder: "742b4950c2ee"
         checksum/envoy-decoder: "6f62f6342128"
-        checksum/wazuh-local-rules: "083f77322744"
+        checksum/wazuh-local-rules: "3889de918173"
     spec:
       securityContext:
         fsGroup: 999
