@@ -1667,12 +1667,39 @@ wait $PF_PID 2>/dev/null || true
 
 > **k8s-gateway / CoreDNS false positives:** DNS responses include the RCODE string `NOERROR`, which matches wildcard `*ERROR*` and is logged for a *successful* answer, not a failure. Always exclude the `k8s-gateway` container **and** add a `must_not` clause on `*NOERROR*` for error queries (see query #6 above; technique landed in `runbooks/health-check.sh` commit `3af29366`).
 
-**ILM Retention** (managed by `elasticsearch-otel-ilm-bootstrap` Job + `otel-ilm-configmap`):
-| Data stream | Policy | Retention |
-|---|---|---|
-| `logs-generic-default` | `logs@lifecycle` | 14 days |
-| `metrics-generic.otel-default` | `metrics@lifecycle` | 7 days |
-| `traces-generic-default` | `traces@lifecycle` | 7 days |
+**Retention — governed by Data Stream Lifecycle (DSL), NOT ILM.** The
+`elasticsearch-otel-ilm-bootstrap` Job
+(`kubernetes/apps/monitoring/elasticsearch/app/otel-ilm-job.yaml`) pins
+`index.lifecycle.prefer_ilm: false` and then PUTs a DSL `data_retention` per
+stream. Measured live 2026-09-20:
+
+| Data stream | Exists? | Effective retention | Determined by | ILM policy attached |
+|---|---|---|---|---|
+| `logs-generic-default` | yes | **14 days** | DSL `data_stream_configuration` | built-in `logs` — inert, and has **no delete phase** |
+| `metrics-generic.otel-default` | yes | **14 days** | DSL `data_stream_configuration` | built-in `metrics` — inert (delete @ 14d) |
+| `traces-generic-default` | **no — never created** | n/a | n/a | n/a |
+
+> **The `*-lifecycle.json` files in `otel-ilm-configmap` do NOT control retention.**
+> The Job does PUT them as `logs@lifecycle` / `metrics@lifecycle` /
+> `traces@lifecycle`, but measured live their `in_use_by` is **empty**
+> (`traces@lifecycle` is referenced only by the unused `traces-otel@template`).
+> Both live streams are attached to Elastic's *built-in* `logs` / `metrics`
+> policies instead — and `prefer_ilm: false` means no ILM policy governs anyway.
+> **To change retention, edit `data_retention` in `set_dsl()` in
+> `otel-ilm-job.yaml`.** Editing the configmap JSON changes nothing, silently.
+>
+> `prefer_ilm: false` is load-bearing for logs: the built-in `logs` policy has no
+> delete phase, so if it ever flipped to `true` the logs stream would grow
+> unbounded — the exact failure the Job's own comment records (48-day-old backing
+> indices, 62 GB).
+>
+> Verify the effective state rather than inferring it from the Job:
+> ```bash
+> # authoritative: which mechanism decides retention, and what it resolved to
+> GET _data_stream/logs-generic-default,metrics-generic.otel-default
+> #   -> .lifecycle.effective_retention + .lifecycle.retention_determined_by
+> #   -> .next_generation_managed_by  ("Data stream lifecycle" = DSL, not ILM)
+> ```
 
 Expected storage at current ingest rate. **Re-measured 2026-08-18** — the previous
 figure here (~360 MiB/day logs, 50 GiB volume) understated logs by more than 2x and
