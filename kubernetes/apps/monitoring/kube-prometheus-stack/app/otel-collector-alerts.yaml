@@ -221,3 +221,121 @@ spec:
               be dropped. Check GET _cluster/health, the elasticsearch-obs-recovery
               CronJob (kubectl get jobs -n monitoring | grep obs-recovery), and
               GET _data_stream/{{ $labels.exporter }} write-index shard state.
+
+        # ====================================================================
+        # ABSENCE GUARDS  (added 2026-09-20)
+        #
+        # Every rule in this group is NO-DATA-BLIND. `rate(...) == 0` and
+        # `queue_size >= queue_capacity` both return an EMPTY vector once their
+        # series stop being scraped, and a rule matching no series sits at
+        # state=inactive -- indistinguishable from healthy.
+        #
+        # EdotCollectorDown does NOT cover this. It keys on
+        # kube_deployment_status_replicas_available, so a collector that stays
+        # pod-Ready while its Elasticsearch exporters disappear from /metrics
+        # (a config roll that drops an exporter, a deleted ServiceMonitor, a
+        # port or relabel change) leaves this entire group silently un-armed
+        # while every dashboard stays green.
+        #
+        # FORM: bare `absent(<selector with EQUALITY matchers>)`. Verified live
+        # 2026-09-20 against this very metric, with BOTH controls:
+        #   absent(otelcol_exporter_sent_metric_points_total{exporter="elasticsearch/DOES-NOT-EXIST"})
+        #     -> 1 sample, labels {exporter="elasticsearch/DOES-NOT-EXIST"}
+        #        (fires when the series is gone, AND carries the label)
+        #   absent(otelcol_exporter_sent_metric_points_total{exporter="elasticsearch/metrics"})
+        #     -> 0 samples  (silent while the series exists)
+        #
+        # DO NOT "improve" these by gating on the scrape target being up as
+        #   absent(<metric>) and up{job="edot-collector"} == 1
+        # That form is PERMANENTLY INERT: absent() emits its sample with an
+        # EMPTY label set, so `and` against a vector carrying job/instance
+        # labels matches nothing even when the metric genuinely is missing.
+        # Re-confirmed live on 2026-09-20: that form returned 0 samples against
+        # a selector that has no series at all. If a gate is ever genuinely
+        # wanted it MUST be written `and on() up{...} == 1`. Same trap, same
+        # wording, as ICloudBackupFreshnessMetricMissing and
+        # AuthentikAuditFreshnessProbeMissing.
+        #
+        # ONE GUARD PER EXPORTER, not a single bare absent() over the regex:
+        # a regex matcher propagates no labels, and a combined guard only fires
+        # once ALL exporters vanish -- so losing just one would silently
+        # un-monitor that exporter while the rule set still looked armed.
+        #
+        # `for: 15m` matches the rules being guarded and rides out the ~1m
+        # series gap of an ordinary collector pod roll.
+        # ====================================================================
+        - alert: EsMetricsExporterSeriesMissing
+          expr: |
+            absent(otelcol_exporter_sent_metric_points_total{exporter="elasticsearch/metrics"})
+            or
+            absent(otelcol_exporter_queue_size{exporter="elasticsearch/metrics"})
+            or
+            absent(otelcol_exporter_queue_capacity{exporter="elasticsearch/metrics"})
+          for: 15m
+          labels:
+            severity: critical
+            category: logging
+            component: otel-collector
+          annotations:
+            summary: "ES metrics-exporter telemetry has disappeared — EsMetricsIngestionStalled is un-armed"
+            description: >-
+              The series EsMetricsIngestionStalled and EsExportQueueStuckFull rely on
+              are absent for exporter elasticsearch/metrics, so BOTH of those critical
+              rules are now evaluating against an empty vector and will stay inactive
+              no matter what ES does. This is a monitoring outage, not necessarily an
+              ingestion outage. Check that the edot-collector pod is scraped
+              (Prometheus target job="edot-collector") and that the elasticsearch/metrics
+              exporter is still present in the collector config
+              (kubectl get cm -n monitoring edot-collector -o yaml).
+
+        - alert: EsLogExporterSeriesMissing
+          expr: |
+            absent(otelcol_exporter_sent_log_records_total{exporter="elasticsearch/logs"})
+            or
+            absent(otelcol_exporter_queue_size{exporter="elasticsearch/logs"})
+            or
+            absent(otelcol_exporter_queue_capacity{exporter="elasticsearch/logs"})
+          for: 15m
+          labels:
+            severity: critical
+            category: logging
+            component: otel-collector
+          annotations:
+            summary: "ES log-exporter telemetry has disappeared — EsLogIngestionStalled is un-armed"
+            description: >-
+              The series EsLogIngestionStalled and EsExportQueueStuckFull rely on are
+              absent for exporter elasticsearch/logs, so BOTH of those critical rules
+              are now evaluating against an empty vector and will stay inactive no
+              matter what ES does. This is a monitoring outage, not necessarily an
+              ingestion outage. Check that the edot-collector pod is scraped
+              (Prometheus target job="edot-collector") and that the elasticsearch/logs
+              exporter is still present in the collector config
+              (kubectl get cm -n monitoring edot-collector -o yaml).
+
+        # Lower severity than its two siblings because no traces data stream
+        # exists (measured 2026-09-20: GET _data_stream/traces-* returns 0), so
+        # the traces limb of EsExportQueueStuckFull guards a path nothing writes
+        # to yet. It is still worth a guard: the exporter IS configured today
+        # (edot-collector configmap, traces_index: traces-generic-default) and
+        # silent removal should be noticed.
+        # IF THE TRACES EXPORTER IS EVER REMOVED DELIBERATELY: delete this rule
+        # AND drop the traces limb from EsExportQueueStuckFull's selector in the
+        # same commit, rather than silencing this alert.
+        - alert: EsTracesExporterSeriesMissing
+          expr: |
+            absent(otelcol_exporter_queue_size{exporter="elasticsearch/traces"})
+            or
+            absent(otelcol_exporter_queue_capacity{exporter="elasticsearch/traces"})
+          for: 15m
+          labels:
+            severity: warning
+            category: logging
+            component: otel-collector
+          annotations:
+            summary: "ES traces-exporter telemetry has disappeared — the traces limb of EsExportQueueStuckFull is un-armed"
+            description: >-
+              Queue series for exporter elasticsearch/traces are absent, so
+              EsExportQueueStuckFull no longer covers the traces exporter. If the
+              exporter was removed on purpose, delete this rule and the traces limb of
+              EsExportQueueStuckFull's selector together. Otherwise check the
+              edot-collector config and its Prometheus scrape target.
