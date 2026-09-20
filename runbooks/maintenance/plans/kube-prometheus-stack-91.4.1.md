@@ -53,6 +53,17 @@ touches:
                                       # and the window health gates ride on this stack.
                                       # Prometheus is blind for ~2-5 min during its
                                       # restart; Alertmanager for ~1 min.
+autonomy_override: human-gated   # ADDED 2026-09-20 on independent review. NOT because the category is
+                                  # unproven (chart/AUTO-NIGHT is graduated) but because this plan's HARDEST
+                                  # constraint is enforced by NOTHING: §6 says it MUST run LAST in its window
+                                  # or alone, and window-scheduler.py has no ordering or exclusivity primitive
+                                  # at all — conflicts_with only keeps NAMED plans out, so any unnamed plan may
+                                  # share the slot and nothing makes this one go last (F-48a45acf). This
+                                  # component IS the window's instrument: its 2-5 min blind spot is also the
+                                  # blind spot of Step 0's auto-revert decision and the Step 4 'never start on
+                                  # a degraded cluster' gate. A chart major that blinds the mechanism meant to
+                                  # catch its own failure is the one case where the absent human is load-bearing.
+                                  # Remove this ONLY when the scheduler can guarantee sole occupancy.
 depends_on:
   # RESOLVED 2026-09-20: prometheus-crd-ownership EXECUTED (1a551276, helm rev 25) and retired (9d87171b) — this dependency is SATISFIED. kube-prometheus-stack is now the single writer of all ten monitoring.coreos.com CRDs.
                                       # monitoring.coreos.com CRDs before this plan stamps
@@ -379,8 +390,10 @@ python3 runbooks/plan-premises.py kube-prometheus-stack-91.4.1 --require-premise
 
 **2.2 — Flux fully green, nothing mid-upgrade in `monitoring`, and the dependency
 has landed.** A concurrent otel-operator upgrade would race the CRD write; and
-`prometheus-crd-ownership` (`depends_on`) must already be `executed` — the
-scheduler enforces that at placement, this re-checks the cluster-side fact.
+`prometheus-crd-ownership` has already EXECUTED (2026-09-20, commit 1a551276)
+and its plan file is retired, so the `depends_on` ref is gone from frontmatter.
+**Nothing enforces this at placement any more — this check IS the enforcement.**
+Do not skip it on the assumption the scheduler gated it; it cannot.
 
 ```bash
 mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
@@ -664,7 +677,7 @@ thanosrulers, `v1alpha1` for alertmanagerconfigs/prometheusagents/scrapeconfigs)
 upgrade ran after ours (check `helm history otel-operator -n monitoring`) **while
 still collecting the Prometheus CRDs** — with `prometheus-crd-ownership` executed
 (`depends_on`, §2.2) that cannot happen, so it means that fix was reverted or did
-not take. Record it as a finding against `prometheus-crd-ownership`; it is the §1
+not take. Record it as a NEW finding (that plan is retired — do not file against it); it is the §1
 contention, not a failed kps apply — do not retry the kps upgrade.
 
 **4.4 — Alert pipeline end to end (the load-bearing section).**
