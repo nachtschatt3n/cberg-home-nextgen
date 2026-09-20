@@ -35,7 +35,19 @@ spec:
         # pushing codes to every device on the account while still reporting
         # requires_2fa: True. See docs/sops/icloud-docker-reauth.md
         # (export INSTANCE=andrea).
-        replicas: 1
+        # STOPPED 2026-09-20 pending interactive Apple 2FA re-auth. The iCloud
+        # session expired; the container then retried login every 600s, and Apple
+        # rate-limits verification-code sends PER APPLE ID - a left-running loop
+        # exhausts the quota and Apple silently stops pushing to EVERY device while
+        # still reporting requires_2fa true (docs/sops/icloud-docker-reauth.md).
+        # This is committed rather than a `kubectl scale`, because an in-cluster
+        # scale only survives by accident here: helm drift detection is disabled
+        # cluster-wide (0 HelmReleases declare it), so nothing corrects the drift
+        # until the next HelmRelease change - at which point replicas would quietly
+        # return to 1 and the quota burn would resume unnoticed.
+        # TO RESUME after a successful re-auth: set this back to 1 (andrea) or
+        # delete the line (mu, which had no explicit replicas), commit, push.
+        replicas: 0
         containers:
           app:
             image:
