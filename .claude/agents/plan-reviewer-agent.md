@@ -80,7 +80,7 @@ the reason it was dispatched. Everything else you establish yourself.
    should still name what it knows.
 10. **Check bookkeeping that the pipeline keys on**: `finding_refs` must name
     the open sweep finding for this component/target if one exists
-    (`.venv/bin/python3 runbooks/policy-cli.py finding list --component <c>`
+    (`.venv/bin/python3 runbooks/policy-cli.py finding list --grep <c>`
     with `SWEEP_PG_DSN` up); `security_ref` present when a security finding
     drives it, and NO CVE detail in the file; frontmatter parses (quote values
     containing `: `); `status: draft`, `window: null`.

@@ -109,7 +109,7 @@ pass the review, not to finish the file:
    public edge, Authentik, the CIFS share). Read every other open plan's
    frontmatter before you decide the field is empty.
 5. **`finding_refs` must name the sweep finding for this component/target**
-   — query `runbooks/policy-cli.py finding list --component <c>` (with
+   — query `runbooks/policy-cli.py finding list --grep <c>` (with
    `SWEEP_PG_DSN` up) before writing; the plan-or-page pass joins on it, and
    an empty list makes the finding read as unplanned.
 6. **A rollback is a procedure, not a `git revert` line**, once anything
