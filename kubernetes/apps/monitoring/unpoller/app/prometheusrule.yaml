@@ -42,6 +42,27 @@ spec:
               the metric names changed upstream (unpoller v5 renames metrics).
               Do NOT treat the other UniFi alerts as meaningful until this clears.
 
+        # GUARD for the CLIENT metric family. UnifiMetricsAbsent above only watches
+        # unpoller_device_uptime_seconds, so if the pending unpoller v5 major renames or
+        # drops unpoller_client_satisfaction_ratio — exactly the class of change that left
+        # every UniFi alert inert for months when unifipoller_* became unpoller_* — then
+        # UnifiClientsDegradedOnAP would sit at health=ok / state=inactive forever,
+        # indistinguishable from correct quiet operation.
+        - alert: UnifiClientMetricsAbsent
+          expr: absent(unpoller_client_satisfaction_ratio)
+          for: 15m
+          labels:
+            severity: critical
+            category: network
+            component: unifi
+          annotations:
+            summary: "UniFi client metrics are absent — client-impact alerting is blind"
+            description: >-
+              `unpoller_client_satisfaction_ratio` has no series for 15m.
+              UnifiClientsDegradedOnAP depends on it exclusively and is silently inert while
+              this is true. Either unpoller is down, no client is associated, or the metric
+              was renamed upstream.
+
         # All 10 devices report a real uptime; `== 0` occurred in 0 of the 7d
         # 5m buckets, so this is a clean signal rather than a noisy one.
         - alert: UnifiDeviceOffline
@@ -176,18 +197,61 @@ spec:
             summary: "UnPoller cannot reach UniFi controller"
             description: "UnPoller has failed to scrape metrics from the UniFi controller for 15 minutes. Check controller availability and credentials. Note: UnPoller polls the controller inline per scrape, so transient UDM-Pro latency spikes can briefly mark the target down without the controller being truly unreachable."
 
-        # RENAMED from UnifiHighWirelessInterference. There is no interference
-        # metric in the unpoller schema; channel UTILIZATION is the closest
-        # operational equivalent, and the alert is named for what it measures
-        # rather than inheriting a name it cannot support. Current max is 0.53,
-        # so 0.70 ships without firing.
-        - alert: UnifiHighChannelUtilization
-          expr: unpoller_device_radio_channel_utilization_total_ratio > 0.70
-          for: 15m
+        # RETUNED 2026-09-19 (operator request) — REPLACES UnifiHighChannelUtilization,
+        # which paged 21 times in 7 days (18 on Hallway-AP-U6 Pro 2.4GHz, 3 on
+        # Upstairs-AP-UAP AC LR) with ZERO client impact. Renamed because it no longer
+        # measures a radio at all.
+        #
+        # The old block justified itself with "Current max is 0.53, so 0.70 ships
+        # without firing." That was stale: the measured 7d distribution on Hallway
+        # 2.4GHz is p50 0.62 / p90 0.81 / max 0.97, so 0.70 sat between that radio's
+        # MEDIAN and its p90. Sizing a threshold off a point-in-time max is what
+        # shipped a rule that pages for a perfectly healthy radio.
+        #
+        # WHY UTILIZATION IS GONE FROM THE EXPRESSION ENTIRELY. A composite
+        # (util > 0.90 AND client harm) was built and REJECTED on measurement: replayed
+        # over the full 7d retention it would have stayed SILENT through the one genuine
+        # harm episode in the window (2026-09-16 14:55-15:41Z, up to 15 clients below
+        # 0.70 satisfaction on Hallway) because utilization repeatedly dipped a hundredth
+        # below the gate while eleven clients were still degraded, resetting the `for:`
+        # clock. Requiring 15 consecutive minutes of BOTH conditions was unreachable —
+        # 0 episodes in 7 days. Client harm is the thing worth waking someone for;
+        # utilization is context and now lives only in the annotation.
+        #
+        # THRESHOLDS ARE MEASURED, replayed at 60s resolution over 7d retention:
+        #   K>=3 degraded clients, for:10m -> 1 page (the real 2026-09-16 episode)
+        #   K>=3, for:15m -> 1 page, but the qualifying run is EXACTLY 15.0m, i.e. ZERO
+        #                    margin; a one-minute-shorter real event is missed. Rejected.
+        #   K>=3, for:5m  -> 6 pages (too chatty)
+        #   K>=2, for:5m  -> 14 pages
+        #   K>=4          -> 0 pages (inert)
+        # for:10m keeps 5 minutes of margin on the real episode, while the next-longest
+        # run in the week is 9m — a clear minute below the clock.
+        #
+        # `max by (ap_name, mac)` dedups clients across unpoller pods: during a two-pod
+        # rollout a bare count double-counts and halves the effective K>=3 gate. Verified
+        # identical to the undeduped form today (338 samples / 136 runs).
+        # `ap_name!=""` drops the 1-2 UNASSOCIATED clients that report a permanent 0 with
+        # the ap_name label absent.
+        #
+        # SCOPE: this alert measures degradation of clients that DID associate. Do not
+        # read it as covering "a device cannot connect" — that limitation is tracked
+        # privately, security_ref: F-e6c1f6c2 (see docs/sops/vulnerability-disclosure.md).
+        - alert: UnifiClientsDegradedOnAP
+          expr: >-
+            count by (ap_name) (
+              max by (ap_name, mac) (unpoller_client_satisfaction_ratio{ap_name!=""}) < 0.70
+            ) >= 3
+          for: 10m
           labels:
             severity: warning
             category: network
             component: unifi
           annotations:
-            summary: "High channel utilization on {{ $labels.name }}"
-            description: "Access point {{ $labels.name }} radio {{ $labels.radio_name }} ({{ $labels.band }}) is at {{ $value | humanizePercentage }} total channel utilization."
+            summary: "Multiple clients degraded on {{ $labels.ap_name }}"
+            description: >-
+              {{ $value }} clients associated to {{ $labels.ap_name }} have been below 0.70
+              satisfaction for 10m. This fires on measured client experience, not on channel
+              utilization — a busy radio with healthy clients is normal here and no longer
+              alerts. Check per-band client distribution with `unifictl local device list`,
+              move 5GHz-capable clients off 2.4GHz, or narrow the 2.4GHz channel width.
