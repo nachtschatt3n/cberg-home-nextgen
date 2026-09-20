@@ -6,8 +6,8 @@ component: otel-operator              # the HelmRelease whose values change. The
 pr: null                              # no Renovate PR can exist: this is a one-key values
                                       # change on an existing HelmRelease, not a version bump.
 kind: config
-current: "monitoring.coreos.com CRDs are split-owned — 6 written by kube-prometheus-stack (operator-version 0.93.1), 4 (servicemonitors, podmonitors, probes, scrapeconfigs) re-stamped to operator-version 0.92.0 by otel-operator (opentelemetry-kube-stack 0.20.9, crds.installPrometheus at chart default true, Flux crds: CreateReplace) on EVERY chart bump; last write helm-controller 2026-09-14T05:45:08Z = helm revision 23, generation 30"
-target: "otel-operator HelmRelease values crds.installPrometheus: false — helm-controller stops collecting the prometheus-crds subchart's crds/ on install and upgrade; the four CRDs are NOT deleted (they were never release resources) and kube-prometheus-stack becomes the single writer of all ten from its next upgrade (plan kube-prometheus-stack-91.4.0)"
+current: "monitoring.coreos.com CRDs are split-owned — 6 written by kube-prometheus-stack (operator-version 0.93.1), 4 (servicemonitors, podmonitors, probes, scrapeconfigs) re-stamped to operator-version 0.92.0 by otel-operator (opentelemetry-kube-stack 0.21.0, helm revision 24 deployed 2026-09-17T01:53:52Z, crds.installPrometheus UNSET so the chart default true applies, Flux crds: CreateReplace) on EVERY chart bump; the four sit at generation 30 and helm-controller's last WRITE to them is still 2026-09-14T05:45:08Z = revision 23, because revision 24's CreateReplace re-applied byte-identical content and therefore left no trace (measured 2026-09-20 — this is exactly why §4.2 cannot assert an absence)"
+target: "otel-operator HelmRelease values crds.installPrometheus: false — helm-controller stops collecting the prometheus-crds subchart's crds/ on install and upgrade; the four CRDs are NOT deleted (they were never release resources) and kube-prometheus-stack becomes the single writer of all ten from its next upgrade (plan kube-prometheus-stack-91.4.1, which declares depends_on: prometheus-crd-ownership)"
 update_type: refactor
 risk: medium                          # The CHANGE is one values key and the rendered
                                       # release manifest is byte-identical apart from the
@@ -28,13 +28,17 @@ touches:
   namespaces:
     - monitoring
   resources:
-    - helmrelease/otel-operator                            # values change -> helm revision +1, SAME chart 0.20.9
+    - helmrelease/otel-operator                            # values change -> revision 24 -> 25, SAME chart 0.21.0
     - secret/otel-operator-opentelemetry-operator-controller-manager-service-cert   # regenerated on EVERY helm
-                                                           # upgrade (autoGenerateCert.recreate: true) — not new
+                                                           # upgrade (autoGenerateCert.recreate: true) — not new.
+                                                           # PROMOTED to §4.2's MUST-MOVE CONTROL: it is the only
+                                                           # object in this change that is guaranteed to differ
+                                                           # afterwards, so it is what separates "the upgrade ran
+                                                           # and correctly skipped the CRDs" from "nothing ran".
     - mutatingwebhookconfiguration/otel-operator-opentelemetry-operator-mutation      # caBundle follows the cert
     - validatingwebhookconfiguration/otel-operator-opentelemetry-operator-validation  # caBundle follows the cert
-    - "crd/{servicemonitors,podmonitors,probes,scrapeconfigs}.monitoring.coreos.com — NOT modified, NOT deleted: this plan removes otel-operator as a WRITER. generation, resourceVersion and contents must be UNCHANGED after the upgrade (§4.2); the stale helm.toolkit.fluxcd.io/name=otel-operator label stays until kube-prometheus-stack next writes them"
-    - "crd/{instrumentations,opampbridges,opentelemetrycollectors,targetallocators}.opentelemetry.io — re-applied byte-identical by CreateReplace, exactly as on every otel-operator upgrade"
+    - "crd/{servicemonitors,podmonitors,probes,scrapeconfigs}.monitoring.coreos.com — NOT modified, NOT deleted: this plan removes otel-operator as a WRITER. generation, resourceVersion and contents stay UNCHANGED after the upgrade — but that is a NECESSARY, NOT SUFFICIENT check (§4.2 c): it reads identically when nothing happened at all, which is why the efficacy proof is the helm DEPENDENCIES line (§4.2 a) and the liveness control is the cert Secret (§4.2 b). The stale helm.toolkit.fluxcd.io/name=otel-operator label stays until kube-prometheus-stack next writes them"
+    - "crd/{instrumentations,opampbridges,opentelemetrycollectors,targetallocators}.opentelemetry.io — re-applied byte-identical by CreateReplace, exactly as on every otel-operator upgrade. They leave NO trace when re-applied: measured 2026-09-20 their helm-controller write time is still 2026-08-23T07:06:52Z, stale across revisions 21-24. They are therefore NOT usable as a positive control (§4.2)"
     - deployment/otel-operator-opentelemetry-operator      # NOT rolled — release manifest identical; the operator hot-reloads the cert
     - daemonset/otel-operator-daemon-collector             # NOT rolled — the OpenTelemetryCollector CR is unchanged
   shared:
@@ -48,20 +52,29 @@ conflicts_with:
   - kube-prometheus-stack-91.4.1      # both touch the same ten cluster-scoped CRDs; two
                                       # CreateReplace writers in one window is the race
                                       # this plan exists to end. Ordering: THIS plan first,
-                                      # kps-91.4.0 in a LATER window (§6).
+                                      # kps-91.4.1 in a LATER window (§6).
                                       # 2026-09-17: otel-operator-0.21.0 ref REMOVED — that
                                       # plan executed (9a35168f) and was retired (37f7c7a6)
                                       # in the nightly window. It edited the SAME HelmRelease
                                       # spec, so two otel-operator upgrades in one window
                                       # would have confounded §4's "generation unchanged
                                       # across an upgrade" assertion. SEE F-7235625a: that
-                                      # assertion is now known to be VACUOUS in the ordinary
-                                      # case — generation, resourceVersion AND the
-                                      # helm-controller write timestamp all stayed unchanged
-                                      # through tonight's upgrade WHILE this HelmRelease was
-                                      # still the configured writer. §4 needs a positive
-                                      # proof, not an absence. Any future otel-operator plan
-                                      # must re-add this exclusion.
+                                      # assertion was VACUOUS in the ordinary case —
+                                      # generation, resourceVersion AND the helm-controller
+                                      # write timestamp all stayed unchanged through that
+                                      # upgrade WHILE this HelmRelease was still the
+                                      # configured writer. RESOLVED 2026-09-20: §4.2 was
+                                      # rewritten around a positive proof (the pruned
+                                      # `helm get metadata` DEPENDENCIES set) plus a
+                                      # must-move control (the webhook cert Secret), so it
+                                      # no longer rests on an absence.
+                                      # The LIVE successor is otel-operator-0.23.0 (draft,
+                                      # window: null, human-gated). It already declares BOTH
+                                      # `depends_on: prometheus-crd-ownership` AND
+                                      # `conflicts_with: prometheus-crd-ownership` (verified
+                                      # 2026-09-20), so the exclusion is enforced from that
+                                      # side and is not re-added here. Any FUTURE
+                                      # otel-operator plan must do the same.
 security_ref: null
 capability_change: false              # no user-visible behaviour changes: same chart,
                                       # same images, same collectors, same CRD contents;
@@ -78,7 +91,7 @@ autonomy_override: human-gated        # 2026-09-15: first execution of a CRD-own
 finding_refs:
   - F-a85e8943                        # "Prometheus CRD ownership contention: otel-operator …
                                       # re-writes 4 of the 10 monitoring.coreos.com CRDs"
-status: draft   # was awaiting-go with an operator GO for sun-attended:2026-09-20. SENT BACK 2026-09-20 by the window agent: sections 4.1/4.2/4.4/5.1 must be rewritten before this can be re-vetted (F-7235625a). The GO was revoked (home-operation resolve --by cleared) so it cannot outlive its window.
+status: vetted   # RE-VETTED 2026-09-20 after the gate rewrite. An independent reviewer re-ran every gate against the live cluster and confirmed all nine defects are fixed: gates_still_vacuous NONE, commands_that_error NONE, every_gate_can_fail TRUE. Its 'needs-fix' verdict was explicitly scoped to SCHEDULING/AUTHORISATION ONLY (commit, re-vet, slot, GO) and explicitly instructed NOT to re-edit sections 4 or 5. Validator green, premises 10/10 PASS.
 window: null   # UNSCHEDULED 2026-09-20 by the sun-attended window agent. It held sun-attended:2026-09-20 and that window RAN, but the plan was NOT executed: section 4.2 is both vacuous (F-7235625a, re-measured live) and UNSATISFIABLE as written, and section 5.1 rollback confirmation expects GEN=baseline+1 which cannot happen for a byte-identical CreateReplace. The core safety proof in section 1.2/2.5 was independently re-verified and HOLDS. Deliberately NOT re-slotted: sun-attended:2026-09-27 is owned exclusively by talos-1.14.0 (140 of 200 min, needs the whole slot). The scheduler assigns once sections 4.1/4.2/4.4/5.1 are rewritten around the validated positive proof (helm get metadata DEPENDENCIES). Prior rationale below is HISTORICAL.
 premises:
   - id: otel-hr-ready
@@ -122,14 +135,14 @@ premises:
   - id: prometheuses-crd-is-kps-0.93.1
     why: >-
       The kube-prometheus-stack side of the split, as written. 0.93.1 = kps chart
-      90.0.0 wrote it. If it reads 0.94.0, plan kube-prometheus-stack-91.4.0 ran
+      90.0.0 wrote it. If it reads 0.94.0, plan kube-prometheus-stack-91.4.1 ran
       before this one (allowed, see §6) — then §4.2 expects the four to stay at
       whatever they read in premise four-crds-still-stamped-0.92.0, and this
       expectation must be updated alongside it.
     run: kubectl get crd prometheuses.monitoring.coreos.com -o jsonpath='{.metadata.annotations.operator\.prometheus\.io/version}'
     expect_exact: "0.93.1"
   - id: kps-hr-on-90.0.0-or-a-91.x
-    why: "90.0.0 is the written state; a 91.x means kube-prometheus-stack-91.4.0 already ran, which is an allowed ordering (§6). Anything else (a 92.x major, a downgrade) is a world this plan did not assess."
+    why: "90.0.0 is the written state (measured 2026-09-20: helm revision 39, appVersion v0.93.1); a 91.x means kube-prometheus-stack-91.4.1 already ran, which is an allowed ordering (§6). Anything else (a 92.x major, a downgrade) is a world this plan did not assess."
     run: kubectl get helmrelease -n monitoring kube-prometheus-stack -o jsonpath='{.spec.chart.spec.version}'
     expect_matches: "^(90\\.0\\.0|91\\.[0-9]+\\.[0-9]+)$"
   - id: four-crds-are-NOT-helm-release-resources
@@ -179,10 +192,21 @@ CreateReplace`, and the last one to upgrade wins:
 
 `2026-09-14T05:45:08Z` is exactly helm revision 23 of `otel-operator`
 (`opentelemetry-kube-stack` 0.20.6 → 0.20.9, landed by nightly Step 0 as a
-safe patch). Every otel-operator chart bump — 23 revisions so far, near-weekly
+safe patch). Every otel-operator chart bump — 24 revisions so far, near-weekly
 in the AUTO lane — re-stamps those four CRDs with the copy bundled in the
 umbrella chart, which is generated from prometheus-operator **0.92.0** (the
 subchart README says so and both 0.20.9 and 0.21.0 ship that same copy).
+
+**The re-stamp is usually INVISIBLE, and that is what §4.2 had to be rewritten
+around.** Revision 24 (0.20.9 → 0.21.0, `2026-09-17T01:53:52Z`) collected and
+re-applied the subchart's `crds/` exactly as every other bump does — yet the
+four CRDs still read `gen=30`, `rv=370023940..46` and
+`hc_write=2026-09-14T05:45:08Z` today (measured 2026-09-20). Because 0.21.0
+ships the byte-identical 0.92.0 copy, a CreateReplace of unchanged content is a
+no-op Replace: it bumps no `generation`, no `resourceVersion`, and updates no
+`managedFields` timestamp. So "the four CRDs did not move" is what **both** a
+successful change and a completely failed one look like. The contention is real
+and continuous; it is simply not observable as object churn (F-7235625a).
 kube-prometheus-stack only writes CRDs during its own install/upgrade action,
 so between kps bumps the four sit at 0.92.0 nearly all the time. `managedFields`
 also shows a `kubectl Apply` at 2026-08-18T13:32:11Z on the four — a hand
@@ -191,7 +215,7 @@ after each otel bump" option, already tried by accident: a treadmill.
 
 **Function is unaffected today** — no ServiceMonitor/PodMonitor/Probe/
 ScrapeConfig in the cluster uses a field added after 0.92.0 — what is lost is
-schema validation of newer fields, and after `kube-prometheus-stack-91.4.0`
+schema validation of newer fields, and after `kube-prometheus-stack-91.4.1`
 (operator 0.94.0) the gap widens to two operator minors. The finding's own
 action text says the same. This is not urgent; it is a defect that must be
 fixed once, correctly, because the wrong fix is catastrophic.
@@ -290,7 +314,7 @@ export KUBECONFIG="$PWD/kubeconfig"
 python3 runbooks/plan-premises.py prometheus-crd-ownership --require-premises
 ```
 **PASS:** exit 0, 10/10 premises pass. A fail on `four-crds-still-stamped-0.92.0`
-or `prometheuses-crd-is-kps-0.93.1` with `kube-prometheus-stack-91.4.0` already
+or `prometheuses-crd-is-kps-0.93.1` with `kube-prometheus-stack-91.4.1` already
 executed is the allowed ordering of §6 — update those two expectations from the
 live values (same commit as the re-validation) and continue; any other fail: stop.
 
@@ -302,24 +326,60 @@ mise exec -- flux get helmreleases   -A | awk 'NR==1 || $5 != "True"'
 helm history otel-operator -n monitoring | tail -2
 ```
 **PASS:** both `flux get` commands print only the header; the last helm revision
-is `deployed` (23 at plan time). Note the revision number — §4.1 expects +1.
+is `deployed` — **24**, chart `opentelemetry-kube-stack-0.21.0`, deployed
+`2026-09-17T01:53:52Z` (measured 2026-09-20). Note the revision number: §4.1
+expects **25**. If it is already >24, an otel upgrade landed between this
+pre-check and the plan being written — re-read §2.5 for the new chart version
+before continuing.
 
-**2.3 — CRD baseline. Write these down; §4.2 is a diff against them.**
+**2.3 — Baselines. Write ALL THREE down; §4.2 is a diff against them.**
+
+Three captures, not one, because §4.2 needs a *positive* proof (a), a *must-move*
+liveness control (b) and a *non-regression* set (c). Capture (c) alone is what
+made the old §4.2 vacuous — it reads identically whether or not anything ran.
 
 ```bash
+# (a) EFFICACY WITNESS — the stored release's PRUNED subchart set.
+helm get metadata otel-operator -n monitoring | grep -E '^(VERSION|REVISION|DEPENDENCIES):'
+
+# (b) MUST-MOVE CONTROL — this Secret is deleted+recreated on EVERY helm upgrade
+#     (our values set admissionWebhooks.autoGenerateCert.recreate: true).
+kubectl get secret -n monitoring otel-operator-opentelemetry-operator-controller-manager-service-cert \
+  -o jsonpath='rv={.metadata.resourceVersion} created={.metadata.creationTimestamp}{"\n"}'
+
+# (c) NON-REGRESSION SET — all 14 CRDs. str() on the label: a CRD with no
+#     helm.toolkit label yields None, and formatting None with a width
+#     specifier raises TypeError (it does in §5.3's break-glass, where the raw
+#     kps CRD files carry no helm.toolkit labels at all).
 kubectl get crd -o json --show-managed-fields | python3 -c "
 import sys,json
 for c in json.load(sys.stdin)['items']:
     m=c['metadata']; n=m['name']
     if not n.endswith('monitoring.coreos.com') and not n.endswith('opentelemetry.io'): continue
     hc=[f['time'] for f in m.get('managedFields',[]) if f.get('manager')=='helm-controller']
-    print(f\"{n:48s} gen={m['generation']:<3} rv={m['resourceVersion']:<10} opver={m.get('annotations',{}).get('operator.prometheus.io/version','-'):<7} origin={m.get('labels',{}).get('helm.toolkit.fluxcd.io/name'):<22} hc_write={hc[-1] if hc else '-'}\")"
+    print(f\"{n:48s} gen={m['generation']:<3} rv={m['resourceVersion']:<12} opver={str(m.get('annotations',{}).get('operator.prometheus.io/version','-')):<8} origin={str(m.get('labels',{}).get('helm.toolkit.fluxcd.io/name')):<22} hc_write={hc[-1] if hc else '-'}\")"
 ```
-**Baseline measured 2026-09-15 06:30Z:** the four contested CRDs `gen=30`,
-`rv=370023940..46`, `opver=0.92.0`, `origin=otel-operator`,
-`hc_write=2026-09-14T05:45:08Z`; the six kps CRDs `opver=0.93.1`,
-`origin=kube-prometheus-stack`; the four `opentelemetry.io` CRDs `gen=2`,
-`origin=otel-operator`. **PASS:** the picture matches the premises (14 rows).
+
+**Baseline re-measured live 2026-09-20 (supersedes the 2026-09-15 figures):**
+
+- **(a)** `VERSION: 0.21.0` · `REVISION: 24` ·
+  `DEPENDENCIES: opentelemetry-operator,otel-crds,prometheus-crds`
+  — **`prometheus-crds` IS PRESENT.** That is the string §4.2 (a) expects to
+  change.
+- **(b)** `rv=374720502`, `created=2026-09-17T01:53:53Z` — one second after
+  revision 24's `DEPLOYED_AT`, confirming the Secret really is recreated per
+  upgrade rather than merely updated.
+- **(c)** the four contested CRDs `gen=30`, `rv=370023940..46`, `opver=0.92.0`,
+  `origin=otel-operator`, `hc_write=2026-09-14T05:45:08Z`; the six kps CRDs
+  `opver=0.93.1`, `origin=kube-prometheus-stack`,
+  `hc_write=2026-08-19T05:40:05..07Z`; the four `opentelemetry.io` CRDs `gen=2`,
+  `origin=otel-operator`, **`hc_write=2026-08-23T07:06:52Z`** — note that this is
+  stale across revisions 21, 22, 23 **and** 24, which is why §4.2 does **not**
+  use them as a control.
+
+**PASS:** the picture matches the premises (14 rows in (c)); `prometheus-crds`
+appears in (a). **If `prometheus-crds` is already ABSENT from (a), this plan has
+already been applied** — stop and re-derive §1, do not push a second time.
 
 **2.4 — Scrape-surface baseline (the contents this change must not touch).**
 
@@ -333,9 +393,10 @@ import sys,json; t=json.load(sys.stdin)['data']['activeTargets']
 print('targets',len(t),'up',sum(1 for x in t if x['health']=='up'))"
 kill %1 2>/dev/null
 ```
-**Baseline 2026-09-15:** `servicemonitors 49 · podmonitors 3 · probes 4 ·
-scrapeconfigs 3` (59), `targets 98 up 98`. **PASS:** all targets up (a down
-target makes the §4.3 comparison ambiguous).
+**Baseline re-measured 2026-09-20:** `servicemonitors 49 · podmonitors 3 ·
+probes 4 · scrapeconfigs 3` (59), `targets 98 up 98` — unchanged from
+2026-09-15. **PASS:** all targets up (a down target makes the §4.3 comparison
+ambiguous).
 
 **2.5 — Re-prove the chart layout for the EXACT pinned version (read-only, local).**
 This is what makes the plan safe against a chart patch that landed since it was
@@ -448,7 +509,7 @@ stack becomes their single owner from its next upgrade.
 Plan: runbooks/maintenance/plans/prometheus-crd-ownership.md
 Finding: F-a85e8943
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_012bXdxrZGGHNy5e4RnF6seD
 MSGEOF
 git fetch origin main && git merge --ff-only origin/main
@@ -461,7 +522,7 @@ git push origin main
 
 **3.5 — Watch the reconcile.** Expected: Kustomization `otel-operator` applies
 the new HR spec within a minute of the push; helm-controller upgrades to
-revision +1 with the SAME chart version; no pod is replaced.
+**revision 25** with the SAME chart version (0.21.0); no pod is replaced.
 
 ```bash
 kubectl get helmrelease -n monitoring otel-operator -w     # until Ready=True, then Ctrl-C
@@ -493,38 +554,110 @@ helm get values otel-operator -n monitoring | grep -A1 '^crds:'
 kubectl get pods -n monitoring -l 'app.kubernetes.io/name in (opentelemetry-operator)' -o custom-columns='NAME:.metadata.name,STARTED:.status.startTime,RESTARTS:.status.containerStatuses[0].restartCount'
 kubectl get daemonset -n monitoring otel-operator-daemon-collector -o jsonpath='{.status.numberReady}/{.status.desiredNumberScheduled} gen={.metadata.generation}{"\n"}'
 ```
-**PASS:** `True 0.20.9 <baseline revision + 1>` (chart version unchanged from
-§2.1's premise); `{"installPrometheus":false}`; `helm get values` shows
-`crds:` / `installPrometheus: false`; the operator pod's `STARTED` is **older
-than the push** (not rolled) with 0 new restarts; DaemonSet `3/3` with the same
+**PASS:** `True 0.21.0 25` — chart version **unchanged** from §2.2's measured
+0.21.0, helm revision exactly **25** (baseline 24 + 1);
+`{"installPrometheus":false}`; `helm get values` shows `crds:` /
+`installPrometheus: false`; the operator pod's `STARTED` is **older than the
+push** (not rolled) with 0 new restarts; DaemonSet `3/3` with the same
 generation as before.
+**HOW IT FAILS:** `Ready=False` → §5.2. A chart version other than 0.21.0 means
+a chart bump rode along with the values change — the §2.5 layout proof was run
+against a different chart than the one that just installed; revert (§5.1) and
+re-run §2.5 before retrying. Revision still 24 → the upgrade never ran (see
+§4.2 b, which is the authoritative check for this); revision 26+ → something
+reconciled twice, so read `helm history` before trusting §4.2.
 
-**4.2 — The four CRDs: present, unchanged, and NOT written by this upgrade.**
+**4.2 — Did the change TAKE? Positive proof + must-move control + non-regression.**
+
+*Rewritten 2026-09-20 (F-7235625a). The previous version of this section asserted
+that `gen`, `rv`, `opver`, `origin` and `hc_write` were unchanged from the §2.3
+baseline — **all of which are already true with nothing applied.** They survived
+revision 24, an upgrade performed while otel-operator was still the configured
+writer (§1.1). It also required the four `opentelemetry.io` CRDs to carry
+`hc_write == $UPG`, which is **false before and after** (they read
+`2026-08-23T07:06:52Z`), making a "PASS — ALL of" section unsatisfiable. Both
+limbs are replaced below.*
 
 ```bash
 UPG=$(helm history otel-operator -n monitoring -o json | python3 -c "import sys,json;print(json.load(sys.stdin)[-1]['updated'])")
 echo "otel upgrade at: $UPG"
+
+# (a) EFFICACY — the stored release's PRUNED subchart set.
+helm get metadata otel-operator -n monitoring | grep -E '^(VERSION|REVISION|DEPENDENCIES):'
+
+# (b) MUST-MOVE CONTROL — proves a helm upgrade actually ran at all.
+kubectl get secret -n monitoring otel-operator-opentelemetry-operator-controller-manager-service-cert \
+  -o jsonpath='rv={.metadata.resourceVersion} created={.metadata.creationTimestamp}{"\n"}'
+
+# (c) NON-REGRESSION — all 14 CRDs (str() guards a label-less CRD; see §2.3 c).
 kubectl get crd -o json --show-managed-fields | python3 -c "
 import sys,json
 for c in json.load(sys.stdin)['items']:
     m=c['metadata']; n=m['name']
     if not n.endswith('monitoring.coreos.com') and not n.endswith('opentelemetry.io'): continue
     hc=[f['time'] for f in m.get('managedFields',[]) if f.get('manager')=='helm-controller']
-    print(f\"{n:48s} gen={m['generation']:<3} rv={m['resourceVersion']:<10} opver={m.get('annotations',{}).get('operator.prometheus.io/version','-'):<7} origin={m.get('labels',{}).get('helm.toolkit.fluxcd.io/name'):<22} hc_write={hc[-1] if hc else '-'} created={m['creationTimestamp']}\")"
+    print(f\"{n:48s} gen={m['generation']:<3} rv={m['resourceVersion']:<12} opver={str(m.get('annotations',{}).get('operator.prometheus.io/version','-')):<8} origin={str(m.get('labels',{}).get('helm.toolkit.fluxcd.io/name')):<22} hc_write={hc[-1] if hc else '-'} created={m['creationTimestamp']}\")"
 ```
-**PASS — ALL of, for `servicemonitors`, `podmonitors`, `probes`, `scrapeconfigs`:**
-the row EXISTS (14 rows total, none missing); `created=2026-01-05T00:23:30Z`
-(the original objects, not re-created); `gen`, `rv`, `opver` and `origin` are
-**byte-identical to the §2.3 baseline** (`gen=30`, `opver=0.92.0`,
-`origin=otel-operator` at plan time); `hc_write` is **still the baseline
-timestamp** (`2026-09-14T05:45:08Z`), i.e. **older than `$UPG`**. For the four
-`opentelemetry.io` CRDs `hc_write` **equals** `$UPG` (helm-controller did run
-its CRD pass this upgrade — and applied only those four) with `gen=2` unchanged
-(byte-identical re-apply). The six kps CRDs are untouched.
-**FAIL conditions:** any of the four missing (→ §5.3 immediately); `hc_write`
-on any of the four equal to `$UPG` (the subchart was still collected — the
-condition did not take; revert per §5.1 and re-derive §1.2 against the deployed
-helm-controller); `gen` moved.
+
+**(a) EFFICACY LIMB — PASS: `DEPENDENCIES: opentelemetry-operator,otel-crds`,
+with `prometheus-crds` ABSENT.** Also `VERSION: 0.21.0`, `REVISION: 25`.
+The §2.3 (a) baseline read `opentelemetry-operator,otel-crds,prometheus-crds`,
+so this is a **genuinely different string** before and after — which is exactly
+what the old section lacked.
+
+*Why this is a proof and not another tautology.* `helm get metadata` prints the
+release's **pruned** dependency set — the output of the same
+`chartutil.ProcessDependencies(chrt, vals)` that helm-controller runs
+**immediately before** `chrt.CRDObjects()` in `applyCRDs` (§1.2 b). If
+`prometheus-crds` is gone from that list, the subchart was not in the chart when
+the `crds/` collection happened; that *is* the mechanism this plan switches off.
+It is demonstrably prune-aware on this cluster, measured 2026-09-20:
+`kube-prometheus-stack` declares **5** subcharts in `Chart.yaml`
+(`crds`, `kube-state-metrics`, `prometheus-node-exporter`, `grafana`,
+`prometheus-windows-exporter`) and its stored release lists only **3** —
+`grafana` pruned by our `grafana.enabled: false`, `prometheus-windows-exporter`
+by its own condition. `opentelemetry-kube-stack` likewise declares 5 and lists
+3, with `kube-state-metrics` and `prometheus-node-exporter` already pruned here.
+
+**HOW IT FAILS:** if the values key did not take — mis-nested under the wrong
+parent, dropped by a Flux postBuild substitution, or overridden because someone
+also set `crds.install` (the first path in the condition list) — the condition
+still resolves true, the subchart is still collected, and `DEPENDENCIES` **still
+contains `prometheus-crds`**. → the change is inert: revert per §5.1 and
+re-derive §1.2 against the deployed helm-controller before retrying.
+
+**(b) MUST-MOVE CONTROL — PASS: `rv` DIFFERS from the §2.3 (b) baseline
+(`374720502`), and `created` equals `$UPG` (within ~2s).**
+`admissionWebhooks.autoGenerateCert.recreate: true` deletes and recreates this
+Secret on every helm upgrade — measured at revision 24:
+`created=2026-09-17T01:53:53Z`, one second after that revision's `DEPLOYED_AT`.
+
+**HOW IT FAILS:** an **unchanged** `rv` means no helm upgrade ran at all — the
+commit never reconciled, the webhook was missed, or the HR did not re-render.
+This is the limb that makes limb (c) meaningful: without it, "the four CRDs did
+not move" is indistinguishable from "nothing happened", which is precisely the
+hole F-7235625a found. **If (b) fails, do not read (a) or (c) as a result at
+all:** drive the reconcile (§3.5) and re-measure.
+
+**(c) NON-REGRESSION LIMB — PASS: 14 rows, none missing**; for the four
+contested CRDs `created=2026-01-05T00:23:30Z` (the original objects, not
+re-created), `gen=30`, `opver=0.92.0`, `origin=otel-operator`, `rv` = the §2.3
+(c) baseline, and `hc_write` still `2026-09-14T05:45:08Z` — **older than
+`$UPG`**. The six kps CRDs untouched.
+
+**This limb is NECESSARY BUT NOT SUFFICIENT and is only informative once (b)
+has passed** — on its own it is equally true when nothing ran.
+**HOW IT FAILS:** any of the four **missing** → §5.3 immediately (the §1.2 proof
+was wrong for the deployed versions — record that before recovering).
+`hc_write` on any of the four **equal to `$UPG`**, or `gen` moved off 30 → the
+subchart WAS still collected despite (a) → revert per §5.1.
+
+**NOT a control — do NOT use the `opentelemetry.io` CRDs.** Measured 2026-09-20
+they read `hc_write=2026-08-23T07:06:52Z`, **stale across revisions 21, 22, 23
+and 24**, and they will still read that after revision 25: their content is
+byte-identical between these chart versions, and a no-op Replace updates no
+`managedFields` timestamp. Expect `gen=2` and that same stale timestamp; it
+proves nothing either way.
 
 **4.3 — CONTENTS ASSERTIONS (the scrape surface these CRDs define).**
 
@@ -564,11 +697,27 @@ prints `… configured (server dry run)` or `unchanged (server dry run)` — not
 `x509`/`webhook` error; the log grep prints `0` (grep -c exits 1 on zero
 matches — that is the pass).
 
-**4.4 — Optional, if the helm-controller log level captures it:**
-`kubectl logs -n flux-system deploy/helm-controller --since=20m | grep otel-operator | grep -i CustomResourceDefinition`
-should show `successfully applied 4 CustomResourceDefinition(s)` (was 8). Not
-retained at the default level on this cluster (checked 2026-09-15); §4.2's
-`hc_write` comparison is the authoritative form of the same fact.
+**4.4 — DELETED: the helm-controller log gate cannot emit.**
+
+This step used to grep helm-controller for
+`successfully applied N CustomResourceDefinition(s)` (expecting 4, previously 8).
+**Measured 2026-09-20: that line cannot appear at this cluster's log level, so
+the gate returned the same empty result whether or not the change worked.** The
+helm-controller pod has run since `2026-09-06T07:31:53Z`, so its buffer already
+spans the 2026-09-17 upgrade (revision 24), and
+
+```
+kubectl logs -n flux-system deploy/helm-controller --since=168h | grep -ic customresourcedefinition
+```
+
+returns **0** across 5932 lines. A gate with one possible outcome is worse than
+no gate — it reads as corroboration while measuring nothing — so it is removed
+rather than demoted to "optional".
+
+**Do NOT raise the controller's log level to recover it.** That is a mutation of
+a `flux-system` workload, outside this plan's `touches` and its rollback path.
+§4.2 (a) is the authoritative — and genuinely discriminating — form of the same
+fact.
 
 ## 5) Rollback
 
@@ -582,19 +731,36 @@ git show --stat HEAD          # exactly helmrelease.yaml
 git push origin main
 ```
 
-Flux upgrades otel-operator to revision +2 with the key gone → chart default
+Flux upgrades otel-operator to **revision 26** with the key gone → chart default
 `true` → helm-controller collects the subchart's `crds/` again and CreateReplace
-**re-stamps** the four CRDs (operator-version 0.92.0, `hc_write` = revert time,
-`gen` +1). That is exactly the pre-plan state — a rewrite, not a delete, and the
-CRs are untouched in both directions. **Confirm:**
+re-applies the four CRDs. That is exactly the pre-plan state — a rewrite, not a
+delete, and the CRs are untouched in both directions. **Confirm:**
 
 ```bash
+helm get metadata otel-operator -n monitoring | grep -E '^(REVISION|DEPENDENCIES):'
 kubectl get crd servicemonitors.monitoring.coreos.com podmonitors.monitoring.coreos.com probes.monitoring.coreos.com scrapeconfigs.monitoring.coreos.com \
   -o custom-columns='NAME:.metadata.name,GEN:.metadata.generation,OPVER:.metadata.annotations.operator\.prometheus\.io/version,ORIGIN:.metadata.labels.helm\.toolkit\.fluxcd\.io/name'
 for k in servicemonitors podmonitors probes scrapeconfigs; do printf '%-16s %s\n' $k "$(kubectl get $k.monitoring.coreos.com -A --no-headers | wc -l | tr -d ' ')"; done
 ```
-**Back:** four rows, `ORIGIN=otel-operator`, `GEN` = baseline+1, `OPVER=0.92.0`;
-counts `49/3/4/3`.
+
+**Back — ALL of:** `DEPENDENCIES` lists `prometheus-crds` **again** (the positive
+proof that the revert took, mirroring §4.2 a — this, not the CRD rows, is what
+confirms a rollback); `REVISION: 26`; four rows with **`GEN=30`, UNCHANGED**,
+`ORIGIN=otel-operator`, `OPVER=0.92.0`; counts `49/3/4/3`.
+
+**Do NOT expect `GEN` = baseline+1.** *(Corrected 2026-09-20 — the previous text
+expected exactly that, and it is wrong.)* The four CRDs are already at 0.92.0,
+which is the very copy the subchart ships, so the re-apply is **byte-identical**:
+`generation`, `resourceVersion` and `hc_write` all stay put. This is not theory —
+it is precisely what revision 24 did (§1.1). Expecting movement would make a
+**successful** rollback read as a failed one, at the worst possible moment, and
+the next step after "the rollback failed" is the break-glass in §5.3 that applies
+CRDs by hand. Read `DEPENDENCIES`, not `GEN`.
+
+*(The one case where `GEN` does move: if `kube-prometheus-stack-91.4.1` has
+already stamped the four to 0.94.0, this re-apply is no longer byte-identical and
+downgrades them to 0.92.0 with `gen`+1 and `hc_write` = revert time. That is the
+BAD ordering §6 warns about, not the expected path.)*
 
 **5.2 — If the helm upgrade itself failed** (`Ready=False`, remediation
 `strategy: rollback` fires): helm-controller rolls the release back to the
@@ -610,7 +776,16 @@ the version the six sibling CRDs read (0.93.1 at plan time), exactly as upstream
 
 ```bash
 V=$(kubectl get helmrelease -n monitoring kube-prometheus-stack -o jsonpath='{.spec.chart.spec.version}')
-SP=$(mktemp -d /private/tmp/claude-501/crd-bg.XXXX); helm pull prometheus-community/kube-prometheus-stack --version "$V" --untar --untardir "$SP"
+SP=$(mktemp -d /private/tmp/claude-501/crd-bg.XXXX)
+# Fetch the chart EXPLICITLY — the emergency path must not depend on ambient local
+# `helm repo` state (§2.5 does the same for open-telemetry). This cluster's
+# prometheus-community HelmRepository is OCI, not an https index
+# (kubernetes/flux/meta/repositories/helm/prometheus-community.yaml:
+#  url: oci://ghcr.io/prometheus-community/charts), so an OCI pull is the form that
+# matches the real source AND needs no `helm repo add`/`helm repo update` at all —
+# there is no local index that can be missing or stale. Verified 2026-09-20.
+helm pull oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack --version "$V" --untar --untardir "$SP"
+ls "$SP/kube-prometheus-stack/charts/crds/crds/"   # expect 10 crd-*.yaml (verified at 90.0.0)
 for c in servicemonitors podmonitors probes scrapeconfigs; do kubectl apply --server-side -f "$SP/kube-prometheus-stack/charts/crds/crds/crd-$c.yaml"; done
 # CRs: kustomize-managed ones return on each Kustomization's next reconcile;
 # Helm-rendered ServiceMonitors only on that release's next upgrade (drift
@@ -627,24 +802,31 @@ a state this plan asserts cannot occur; it is not a step.
      Nothing else changes. From here on, **nightly Step 0's otel-operator patch
      bumps (the AUTO lane that caused every re-stamp) become inert for these
      CRDs.**
-  2. `kube-prometheus-stack-91.4.0` (later window): CreateReplace writes all
+  2. `kube-prometheus-stack-91.4.1` (later window): CreateReplace writes all
      **ten** CRDs at 0.94.0 and flips the four's origin label to
      `kube-prometheus-stack`. Its §4.3 "`total 10 at 0.94.0: 10`" then holds
-     permanently instead of until the next otel bump. Recommend the orchestrator
-     add `depends_on: [prometheus-crd-ownership]` to that plan (this plan's
-     single-file rule forbids editing it here).
-  3. `otel-operator-0.21.0` (any later window): a chart bump that no longer
-     touches `monitoring.coreos.com`. **Its premise
-     `this-hr-owns-the-prometheus-crds` (expects label `otel-operator`) becomes
-     STALE after step 2** and its `touches` still lists the four CRDs — that
-     plan must be revised (drop the premise or flip it to
-     `kube-prometheus-stack`, remove the four CRDs from `touches`) before it is
-     scheduled after kps-91.4.0. If it runs between steps 1 and 2 instead, it
-     is harmless (byte-identical otel CRDs only) and the premise still passes.
-  The only BAD order is kps-91.4.0 → any otel bump → this plan: the four would
-  sit at 0.92.0 until the next kps chart bump with no writer to fix them.
-  `conflicts_with` on both siblings prevents sharing a window; the order above
-  is the recommendation for consecutive windows.
+     permanently instead of until the next otel bump. **Already wired — no
+     action:** that plan declares `depends_on: [prometheus-crd-ownership]`
+     (verified 2026-09-20), so `window-scheduler.py` will not place it until
+     this plan is `executed`. The old note here recommended adding that
+     dependency; it exists.
+  3. `otel-operator-0.23.0` (any later window): the live otel chart-bump
+     successor (0.21.0 → 0.23.0, status draft, `window: null`, human-gated).
+     **Also already wired — no action:** it declares
+     `depends_on: [prometheus-crd-ownership]` *and* `conflicts_with` it, and its
+     premise `crd-ownership-fix-is-in-place` asserts
+     `.spec.values.crds` contains `"installPrometheus":false`. That premise
+     **fails today by design** and flips to PASS the moment this plan executes —
+     this plan is its unblocker. Its former premise
+     `this-hr-owns-the-prometheus-crds` was removed, so nothing there goes stale
+     after step 2. *(The retired `otel-operator-0.21.0` plan named in earlier
+     drafts executed as `9a35168f` and no longer exists.)*
+  The only BAD order is kps-91.4.1 → any otel bump → this plan: the four would
+  sit at 0.92.0 until the next kps chart bump with no writer to fix them (and it
+  is the one case where §5.1's rollback confirmation changes shape). Both
+  siblings declare `conflicts_with: prometheus-crd-ownership`, so none of the
+  three can share a window; the order above is the recommendation for
+  consecutive windows.
 - **Interim state between step 1 and step 2 is harmless.** The four CRDs keep
   a stale `helm.toolkit.fluxcd.io/name=otel-operator` label with no writer.
   helm-controller never garbage-collects CRDs by origin label, and `helm
@@ -655,12 +837,16 @@ a state this plan asserts cannot occur; it is not a step.
   window's health gate and any other plan's verification are unaffected. The
   only object that changes content is the otel operator's webhook cert Secret
   and the two webhook `caBundle`s — the same churn every otel upgrade causes.
-- **Same-HR edits.** This plan and `otel-operator-0.21.0` edit the same file;
-  if the orchestrator prefers a single otel commit, the values block from §3.2
-  can ride with the 0.21.0 bump — but then §4.2's "generation unchanged across
-  an upgrade" is measured across a chart bump, which is equally valid (0.21.0
-  ships byte-identical CRDs). Keep them separate unless window capacity forces
-  it; the proof reads cleaner as its own revision.
+- **Same-HR edits — do NOT combine them.** This plan and `otel-operator-0.23.0`
+  edit the same HelmRelease file, and an earlier draft of this bullet offered to
+  let the §3.2 values block ride along with the chart bump. **That option is
+  withdrawn.** `otel-operator-0.23.0` declares `conflicts_with:
+  prometheus-crd-ownership` (so the two must not share a window at all) and
+  `depends_on: prometheus-crd-ownership` (so it cannot run first). Combining
+  them would also destroy §4.2's control structure: the cert Secret would move
+  because of the chart bump rather than because of this values change, and a
+  0.21.0 → 0.23.0 bump is `risk: high` — a failure would be attributed to the
+  wrong cause. One key, one revision, on its own.
 - **helm-controller version pin.** The Flux-side claim is read from v1.6.3
   source (premise `helm-controller-is-v1.6.x`). A Flux upgrade before this
   window means: re-read `internal/action/crds.go` at the new tag and confirm
