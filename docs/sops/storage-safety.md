@@ -7,8 +7,8 @@
 
 | Field | Value |
 |---|---|
-| **Version** | 2026.04.26 |
-| **Last Updated** | 2026-04-26 |
+| **Version** | 2026.09.20 |
+| **Last Updated** | 2026-09-20 |
 | **Owner** | cluster-ops |
 | **Applies to** | All `kubectl delete pvc/pv` actions, all StorageClass changes, any teardown of stateful workloads |
 
