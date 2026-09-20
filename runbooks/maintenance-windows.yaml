@@ -37,6 +37,16 @@
 version: "2026.09.15"
 timezone: Europe/Berlin
 
+# SCHEDULABLE BUDGET = duration_min - 20.
+# `runbooks/window-scheduler.py` reserves STEP0_RESERVE_MIN = 20 for the Step 0
+# safe-update batch that runs FIRST in every window, then places plans against
+# `duration_min - 20` (window-scheduler.py:92 and :270). So the usable figures are:
+#   nightly      90 -> 70
+#   sat-attended 90 -> 70
+#   sun-attended 200 -> 180
+# Stated here because the reserve lives only in the scheduler: FOUR separate
+# artifacts have now done slot arithmetic against the raw `duration_min` and
+# concluded a plan fits when the scheduler would refuse it (2026-09-20).
 windows:
   - id: nightly
     day: daily

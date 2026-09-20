@@ -74,7 +74,18 @@ deny:
   - match: "*affine*"
     reason: "affine chart/image bumps carry breaking env→config.json changes even on patch tags (0.27.3) — hold for manual review."
   - match: "*cilium*"
-    reason: "CNI datapath — 1.20.0 carries Gateway-API/mutual-auth caveats that can affect streaming protocols (Music Assistant / Home Assistant). Plan + verify MA/HA streaming before upgrading; never an unattended bump."
+    reason: "CNI datapath — never an unattended bump. The hold is about CONSEQUENCE,
+      not a specific release: a bad cilium roll takes the cluster network with it, and
+      every Flux controller that would revert it sits inside the failure domain.
+      CORRECTED 2026-09-20 (F-19e12a92): the previous reason cited Gateway-API and
+      mutual-auth caveats in 1.20.0. Measured live, those cannot apply here —
+      `enable-gateway-api` is absent from cm/cilium-config, `mesh-auth-enabled` is
+      false, and the only GatewayClass belongs to Envoy Gateway (a separate product).
+      The cluster is also already past 1.20.0. The stale clause had mis-briefed a
+      planner dispatch, so it is removed rather than carried. Requires an attended
+      slot, a plan that exercises a FRESH CNI ADD (existing pods keep networking from
+      in-kernel BPF state, so every ordinary gate can pass while new-pod networking is
+      broken), and an operator GO."
   - match: "*gateway-helm*"
     reason: "DEPLOYED and parallel-running since 69daf59c; bumped to 1.9.0 on 2026-08-16
       (phase 0.5) at zero Envoy traffic, which put the cluster back ON the support matrix
