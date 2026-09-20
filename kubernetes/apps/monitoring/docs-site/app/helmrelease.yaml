@@ -77,7 +77,7 @@ spec:
             image:
               # renovate: image=nginxinc/nginx-unprivileged
               repository: nginxinc/nginx-unprivileged
-              tag: 1.31.5-alpine
+              tag: 1.31.6-alpine
               pullPolicy: IfNotPresent
             probes:
               # Static index.html on :8080 — cheap by construction (blueprint

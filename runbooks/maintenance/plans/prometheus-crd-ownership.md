@@ -78,8 +78,8 @@ autonomy_override: human-gated        # 2026-09-15: first execution of a CRD-own
 finding_refs:
   - F-a85e8943                        # "Prometheus CRD ownership contention: otel-operator …
                                       # re-writes 4 of the 10 monitoring.coreos.com CRDs"
-status: vetted   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
-window: null
+status: awaiting-go   # DEFERRED 2026-09-19 sat-attended: HUMAN-GATED via autonomy_override, and this run was cron-fired/unattended. go/no-go ingested, scoped sat-attended:2026-09-26.
+window: "sat-attended:2026-09-26"   # PROPOSED 2026-09-19: plan states "Fits sat-attended; no reboot". Premises re-ran PASS (10/10) at proposal time.
 premises:
   - id: otel-hr-ready
     why: "Do not stack a values change on an already-failing release; a failed upgrade with remediation strategy rollback would mask the §4 result."
