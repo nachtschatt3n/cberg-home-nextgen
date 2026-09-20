@@ -87,11 +87,15 @@ premises:
       PRODUCTION unattended) and it breaks the rollback lever (a hand-pin of the
       tag is rewritten back by the Setters strategy). If this ever regresses to
       not-Ready, §9's whole sequencing changes again and must be re-derived.
-      `suspend` is deliberately allowed to be either: §9.1 may set it true IN
-      GIT as the manual gate, and this premise must not fail when that gate is
-      correctly in place.
+      `suspend` is deliberately allowed to be ANY of unset, `true` or `false`:
+      §9.1 may set it true IN GIT as the manual gate, and this premise must not
+      fail when that gate is correctly in place. `false` is accepted too
+      (widened 2026-09-20) because lifting the gate by writing `suspend: false`
+      is as valid as deleting the line, and the earlier `(true)?` form failed
+      CLOSED on a correctly-ungated automation. What this premise actually
+      asserts is `ready=True`; the suspend value is informational.
     run: kubectl get imageupdateautomation -n my-software-production absenty-image-updates -o jsonpath='ready={.status.conditions[?(@.type=="Ready")].status} suspend=[{.spec.suspend}]'
-    expect_matches: '^ready=True suspend=\[(true)?\]$'
+    expect_matches: '^ready=True suspend=\[(true|false)?\]$'
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 # (original rationale: changes the shape of the production runtime image)
@@ -709,6 +713,19 @@ green if the stage split had broken the build stages outright. This is the limb
 that separates *confined* from *destroyed*.
 
 ```bash
+# SELF-CONTAINED ON PURPOSE. Every Bash call is a FRESH SHELL, so the export and
+# the count_node_pkgs function defined in §7.1's block are NOT in scope here.
+# Repeat them; do not assume §7.1 ran in this same shell (it did not).
+export TRIVY_USERNAME=nachtschatt3n TRIVY_PASSWORD="$(gh auth token)"
+count_node_pkgs() {
+  mise exec -- trivy image --quiet --scanners vuln --list-all-pkgs --format json \
+    --severity CRITICAL "$1" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+n = sum(len(r.get('Packages') or []) for r in d.get('Results', []) if r.get('Type') == 'node-pkg')
+print('$1', 'node-pkg:', n, 'created:', d['Metadata']['ImageConfig']['created'])"
+}
+
 count_node_pkgs ghcr.io/nachtschatt3n/absenty:development-<NEW_TS>   # EXPECT: large (control: 931 today)
 kubectl -n my-software-development exec deploy/absenty -c app -- sh -c \
   'command -v node && command -v npm'                                # EXPECT: both paths print
