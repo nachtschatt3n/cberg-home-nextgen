@@ -530,6 +530,69 @@ Key dashboards to check during health checks:
 
 ---
 
+## Alert Authoring Rules
+
+Four rules, each of which exists because an alert can be **loaded, healthy, and
+completely useless** — and look identical on every dashboard to one that works.
+A rule matching no series sits at `state=inactive`, which is the same thing a
+quiet, working rule looks like. All figures below were measured 2026-09-20.
+
+**1. `release: kube-prometheus-stack` or it never loads.** A PrometheusRule
+without that label is silently ignored — no error, no event, nothing. Verify
+through the rules API, never from the HelmRelease's Ready status:
+
+```bash
+curl -s http://localhost:9090/api/v1/rules | python3 -c "
+import sys,json; g=json.load(sys.stdin)['data']['groups']
+print(len(g),'groups', sum(len(x.get('rules',[])) for x in g),'rules')"
+```
+
+Measured: 57 PrometheusRule objects in the repo, **0** missing the label; 119
+groups / 412 alerting rules loaded, **0** with `health != ok`.
+
+**2. Pair every group with an `absent()` guard.** The guard is what distinguishes
+"quiet because healthy" from "quiet because the series vanished". Without it, a
+collector that stays pod-Ready while its exporters disappear takes the whole
+group silently off-duty.
+
+**3. When AND-ing an `absent()` guard with a labelled vector, it MUST be
+`and on()`.** This is the trap that motivated this section. `absent()` emits a
+sample with an **empty label set**, and PromQL `and` matches on labels, so:
+
+```promql
+absent(my_metric) and up{job="exporter"} == 1      # PERMANENTLY INERT — 0 samples, always
+absent(my_metric) and on() up{job="exporter"} == 1 # correct: on() collapses to the empty label set
+```
+
+The inert form loads cleanly, reports `health=ok`, and sits `inactive` forever.
+It is proposed in good faith — "the guard should only fire when the exporter is
+known up" — and it silently blinds the detector it was meant to strengthen.
+
+**4. Prove non-inertness with a positive AND a negative control.** Never accept
+"it returns nothing" as evidence; that is what both a working guard and a dead one
+do. Evaluate the expression twice:
+
+```promql
+absent(metric{label="DOES-NOT-EXIST"})   # positive control -> MUST return 1 sample (and propagate label=)
+absent(metric{label="<the real one>"})   # negative control -> MUST return 0 samples
+```
+
+If the positive control returns nothing, the guard can never fire. Set thresholds
+from measured data for the same reason — a threshold no series can reach is inert
+in exactly the same way.
+
+**Audit (2026-09-20): no live rule carries the broken form.** Across 57
+PrometheusRule files and 268 rules: 25 bare `absent()` guards (the correct
+default), 0 using `and on()`, **0 AND-ed without `on()`**. So rule 3 is
+preventive, not remedial — it was caught in review before shipping.
+
+> **Audit it by PARSING, not grepping.** Six alert files contain the string
+> `and on()` only inside comments warning about this trap, and four quote the
+> broken form as an example. A grep reports those as hits; loading the YAML and
+> inspecting each rule's `expr` reports the truth, which is zero of each.
+
+---
+
 ## Alertmanager
 
 ### AlertmanagerConfig Namespace Routing (Critical Design Constraint)
@@ -1143,6 +1206,12 @@ Rollback validation:
 
 ## Version History
 
+- `2026.09.20`: Added "Alert Authoring Rules" — the four ways an alert can be
+  loaded, healthy and useless (missing `release` label; no `absent()` guard;
+  `absent()` AND-ed with a labelled vector without `on()`, which is permanently
+  inert; and accepting an empty result as proof). Includes the repo-wide audit
+  (57 rule files / 268 rules: 25 bare guards, 0 broken) and why it must be run by
+  parsing the YAML rather than grepping (F-91a99762).
 - `2026.09.15`: CronJob name corrected — `storage/daily-backup-all-volumes`
   (owned by the Longhorn RecurringJob of the same name; `backup-of-all-volumes`
   returns `NotFound`). Added "CRD ownership: `monitoring.coreos.com` has TWO
