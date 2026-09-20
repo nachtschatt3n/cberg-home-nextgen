@@ -272,7 +272,11 @@ kubectl logs -n cert-manager deployment/cert-manager --tail=50
 - No inbound firewall ports open on WAN
 - All traffic encrypted through Cloudflare Tunnel (QUIC + TLS)
 - Cloudflare DDoS protection and WAF at edge
-- External ingress-nginx only reachable via tunnel
+- The internet-facing `envoy-external` Gateway (192.168.55.104) is only reachable
+  via the tunnel. There is no ingress-nginx and no `Ingress` object anywhere in
+  the cluster — it was deleted 2026-09-07 (`ad1ea7c2`), so every externally
+  routed app is an `HTTPRoute` parented to `envoy-external`. `envoy-internal`
+  (192.168.55.103) is LAN-only and is not published through the tunnel at all.
 
 External services additionally protected by:
 - Authentik forward auth (for services that require login)

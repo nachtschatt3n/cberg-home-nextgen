@@ -58,7 +58,7 @@ window: null                          # UNSCHEDULED 2026-08-16. 90m of work agai
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 sops_refs:
-  - docs/troubleshooting/ingress-migration-plan.md   # hostNetwork research recorded in §scope
+  - docs/sops/gateway-api-httproute.md   # the hostNetwork research from the retired ingress-migration-plan survives here
 generated: "2026-08-07"
 ---
 
