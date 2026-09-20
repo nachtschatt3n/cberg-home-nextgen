@@ -2102,6 +2102,21 @@ _SECTION_SLUGS = [
     "s10_control_ledger",
 ]
 
+# Mirrors the guard security-check.py already carries, for the same reason and
+# with the same deliberate harshness. These two lists are zipped: SECTION_NAMES
+# supplies the human label, _SECTION_SLUGS the stable key a finding is filed
+# under. If they ever drift in length, zip() silently truncates to the shorter
+# one, so the tail sections are mislabelled or dropped entirely -- and that is
+# discovered only AFTER a full scan has run, discarding every result.
+#
+# Fail at import instead, so the drift costs a second rather than a whole audit.
+# Do NOT soften this into a bounds-check fallback: a silently mislabelled
+# section is drift that never gets fixed, because nothing ever reports it.
+assert len(SECTION_NAMES) == len(_SECTION_SLUGS), (
+    f"section list drift: {len(SECTION_NAMES)} SECTION_NAMES vs "
+    f"{len(_SECTION_SLUGS)} _SECTION_SLUGS — both must list every section"
+)
+
 
 def _emit_findings(writer: FindingsWriter, results: list) -> None:
     """Persist each (section, Findings, body) tuple to sweep-history.

@@ -133,7 +133,6 @@ Internet → Cloudflare DNS
 
 **VLANs with mDNS bridging enabled:**
 - Trusted (1)
-- Servers (10)
 - Trusted-Devices (20)
 - IoT (30)
 - k8s-network (55)

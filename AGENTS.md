@@ -451,7 +451,6 @@ Minimum mandatory rules:
 
 **VLAN Scope (mDNS bridging enabled):**
 - Trusted (1)
-- Servers (10)
 - Trusted-Devices (20)
 - IoT (30)
 - k8s-network (55)
@@ -472,7 +471,6 @@ Minimum mandatory rules:
 - Kubernetes services still routed cross-VLAN to:
   - IoT VLAN (30) - for home automation integrations
   - Trusted VLAN (1) - for network management
-  - Servers VLAN (10) - remaining legacy devices until retired
 - Gateway routing and firewall rules control cross-VLAN access
 
 ### Network Security Posture
@@ -486,7 +484,7 @@ Minimum mandatory rules:
 - Server infrastructure (VLAN 10) on separate segment
 
 **IPv6:**
-- Dual-stack enabled on most networks (Trusted, Servers, IoT, Trusted-Devices, k8s-network)
+- Dual-stack enabled on most networks (Trusted, IoT, Trusted-Devices, k8s-network)
 - Guest and USA-Peer networks IPv4-only
 
 ### Network Debugging Commands

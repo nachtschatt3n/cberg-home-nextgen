@@ -34,7 +34,7 @@ spec:
       - name: TZ
         value: "Europe/Berlin"
     ingress:
-      enabled: false  # Using separate ingress.yaml for Authentik integration
+      enabled: false  # Using separate httproute.yaml for Authentik integration
     persistence:
       enabled: true
     volume:

@@ -37,7 +37,7 @@ data:
     alertmanager:
       enabled: true
       ingress:
-        enabled: false  # Using separate alertmanager-ingress.yaml for Authentik integration
+        enabled: false  # Using separate alertmanager-httproute.yaml for Authentik integration
       alertmanagerConfigSelector:
         matchLabels:
           alertmanager-config: telegram
@@ -155,7 +155,7 @@ data:
       enabled: false # Disabled due to eBPF
     prometheus:
       ingress:
-        enabled: false  # Using separate prometheus-ingress.yaml for Authentik integration
+        enabled: false  # Using separate prometheus-httproute.yaml for Authentik integration
       prometheusSpec:
         ruleSelectorNilUsesHelmValues: false
         ruleSelector:
