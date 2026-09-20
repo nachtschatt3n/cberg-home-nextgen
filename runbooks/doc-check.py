@@ -1201,6 +1201,45 @@ def s4_security_docs() -> tuple[str, Findings, str]:
     return f.worst(), f, "\n".join(lines)
 
 
+def homepage_layout_groups(hr_content: str) -> list[str]:
+    """Group names the Homepage dashboard declares, from `settingsString.layout`.
+
+    Sourced from `layout:`, NOT from `config.services`. The services list moved
+    into a SOPS-encrypted Secret (`secret.sops.yaml`, merged via the
+    HelmRelease's spec.valuesFrom) because in a public repo it paired private
+    LAN addresses with each device's role and model — security_ref F-93102d77.
+    A parser still pointed at `services:` would have found nothing and DEGRADED
+    this check on every cycle afterwards, which is the quiet failure mode this
+    repo keeps re-learning (docs/sops/audit-script-correctness.md).
+
+    `layout` is also the better source: it declares every group the dashboard
+    renders — including the ones filled only by HTTPRoute discovery — so the
+    documented-group check covers 10 groups here where `services:` covered 4.
+
+    Returns [] when no layout block parses; the caller must treat that as
+    degraded, never as "nothing to check".
+    """
+    m = re.search(r'^( *)layout:\n', hr_content, re.MULTILINE)
+    if not m:
+        return []
+    base = len(m.group(1))
+    groups: list[str] = []
+    for line in hr_content[m.end():].split("\n"):
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= base:          # dedent — the layout block ended
+            break
+        if indent != base + 2 or line.lstrip().startswith("#"):
+            continue                # a group's properties, or a comment
+        key = re.match(r'\s*"?([^":{\n]+?)"?:\s*$', line)
+        # Bound only against runaway matches — the low bound must stay at 1 so
+        # a real two-letter group ("AI") is checked rather than silently skipped.
+        if key and 1 <= len(key.group(1).strip()) <= 40:
+            groups.append(key.group(1).strip())
+    return groups
+
+
 def s5_integration_docs() -> tuple[str, Findings, str]:
     section_header(5, 10, "Integration Documentation")
     f = Findings()
@@ -1224,21 +1263,15 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
     hr_path = REPO_ROOT / "kubernetes" / "apps" / "default" / "homepage" / "app" / "helmrelease.yaml"
     hr_content = read_file(hr_path, scope="s5_integration_docs")
 
-    # Extract group names ONLY from the services: section (not bookmarks or widgets)
-    # Find the services: block — everything between "services:" and the next same-level key
-    services_m = re.search(r'      services:\n((?:        .*\n|.*\n)*?)(?=      \w|\Z)', hr_content)
-    if services_m:
-        services_section = services_m.group(1)
-        # Groups are 8-space indented list items at the top of each group block
-        hr_groups_raw = re.findall(r'^\s{8}-\s+"?([^":{\n]+)"?:', services_section, re.MULTILINE)
-        hr_groups = [g.strip() for g in hr_groups_raw
-                     if g.strip() and len(g.strip()) > 2 and len(g.strip()) < 40]
-    else:
-        # No services: block parsed — the Homepage-group check below is skipped
-        # entirely, with no print and no finding.
-        DEGRADED.record("s5_integration_docs", "homepage helmrelease services: block",
-                        "regex found no services: section — Homepage groups not compared")
-        hr_groups = []
+    # Group names come from `settingsString.layout` — see homepage_layout_groups()
+    # for why not from `config.services` (it is SOPS-encrypted since F-93102d77).
+    hr_groups = homepage_layout_groups(hr_content)
+    if not hr_groups:
+        # No layout block parsed — the Homepage-group check below would be
+        # skipped entirely, with no print and no finding. Record it so a run
+        # that cannot see is never auto-closed as a run that found nothing.
+        DEGRADED.record("s5_integration_docs", "homepage helmrelease settingsString.layout",
+                        "parser found no layout: block — Homepage groups not compared")
 
     if hr_groups:
         for group in hr_groups:

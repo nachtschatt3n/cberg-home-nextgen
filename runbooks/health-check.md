@@ -21,27 +21,55 @@ If this runbook uncovers a reusable fix and no SOP exists yet:
 
 ## Automated Health Check Script
 
-**Quick Start**: An automated health check script covers all operational checks in this runbook:
+**Quick Start**: An automated health check covers all operational checks in this
+runbook. It is **two** files, and which one you run decides whether the run is
+recorded:
 
 ```bash
-# Run the automated health check
+# Report only — writes the three files below and NOTHING to the DB
 ./runbooks/health-check.sh
 
-# Script generates three output files:
+# Report AND findings — this is what a sweep runs
+python3 runbooks/health-check.py
+
+# Either way, three output files are generated:
 # - Full report: /tmp/health-check-YYYYMMDD-HHMMSS.txt
 # - Summary: /tmp/health-check-summary-YYYYMMDD-HHMMSS.txt
 # - Issues only: /tmp/health-check-issues-YYYYMMDD-HHMMSS.txt
 ```
 
-The script also writes findings to sweep-history Postgres when
-`--postgres-dsn`/`SWEEP_PG_DSN` is set. **A complete run auto-closes this
+`health-check.sh` performs every check and owns all three report files plus the
+`runbooks/health-check-current.md` snapshot — but it is **not** the findings
+producer and never writes to Postgres. `runbooks/health-check.py` is: it runs
+the bash script end-to-end, parses the issues file above, and is the sole
+emitter of `section=health` rows. It is also the entrypoint
+`runbooks/sweep-run.py` invokes (`STEP_SCRIPTS["health"]`); the orchestrator
+never calls the `.sh` directly.
+
+**So run the `.sh` when you want a report, and the `.py` when the run must be
+recorded.** The difference is invisible at the terminal, which is the trap:
+`./runbooks/health-check.sh` with `SWEEP_PG_DSN` exported prints a complete
+report and writes zero findings, which looks exactly like a silent write
+failure. The `.sh` does read `SWEEP_PG_DSN`, but only to dump the noise
+allowlist out of Postgres — never to emit. It also has no `--postgres-dsn`
+flag: its only option is `--prev`, and any other argument is taken as the
+output-file path.
+
+The wrapper writes findings to sweep-history Postgres when
+`--postgres-dsn`/`SWEEP_PG_DSN` is set (`sweep-run.py` port-forwards
+postgresql and exports `SWEEP_PG_DSN` into each step's env, so an orchestrated
+run needs neither flag). **A complete run auto-closes this
 section's open findings that it did not re-emit.** Auto-close is section-scoped
 and fires only on an ORCHESTRATED run (`SWEEP_CYCLE_ID` present in the env —
 i.e. launched by `runbooks/sweep-run.py` or the daily-operation fan-out); an
 ad-hoc standalone run does NOT auto-close unless you opt in with
 `SWEEP_AUTOCLOSE=1`. Set `SWEEP_AUTOCLOSE=0` to always disable it, or
 `SWEEP_AUTOCLOSE_DRYRUN=1` to see what would close without writing.
-Full contract — statuses, the incomplete-run veto, and why a PASS
+Because it is ABSENCE that closes a finding, the wrapper vetoes auto-close
+whenever its coverage is untrustworthy — no issues file this run, a stale one
+(mtime predates the run start), or a bash exit code outside `{0,1}` — and
+returns 3 on an uncaught crash so `sweep-run.py` cannot score the step as a
+clean pass. Full contract — statuses, the incomplete-run veto, and why a PASS
 confirmation must never be written as a finding: `docs/sops/sweep-findings-lifecycle.md`.
 
 **What the script checks (automatically):**
@@ -2127,8 +2155,20 @@ For **critical** applications (e.g., databases, core infrastructure, primary UI)
 3.  **Update `runbooks/health-check.md`**:
     -   Add a new section with the objective and commands to execute manually.
 
+**Why the issue lists are load-bearing:** `health-check.py` builds findings by
+parsing the issues file ONLY — the `🔴/🟡/🔵 ... ISSUES (N):` blocks composed
+from `CRITICAL_ISSUES_LIST` / `MAJOR_ISSUES_LIST` / `MINOR_ISSUES_LIST`. The
+`log_critical` / `log_warning` helpers print to the report and bump counters;
+they do **not** append to those lists. So a dedicated check that only calls
+`log_critical` shows a red line in the report and produces NO finding — it can
+never open one, and can never hold one open against auto-close either. Pair
+the log call with `add_critical_issue` / `add_major_issue` /
+`add_minor_issue`, and never append from a `$(...)` subshell: the append is
+discarded when the subshell exits, which is exactly what `_record_unmeasured`
++ `report_unmeasured()` exist to work around.
+
 ### 3. Verification
-Run `./runbooks/health-check.sh` and verify the new app's status appears in both the generic sections and (if added) its dedicated section.
+Run `./runbooks/health-check.sh` and verify the new app's status appears in both the generic sections and (if added) its dedicated section. To confirm it also becomes a **finding**, run `python3 runbooks/health-check.py` and check that the issues file it parses (`/tmp/health-check-issues-*.txt`) carries your message as a `- <message>` bullet under one of the `ISSUES (N):` headers.
 
 ---
 

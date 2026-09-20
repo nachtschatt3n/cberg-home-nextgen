@@ -1,8 +1,8 @@
 # SOP: Flux dependsOn Revision Gate — why a push makes unrelated Kustomizations go not-Ready
 
 > Description: Explains Flux's revision-gated `dependsOn`, why a burst of commits makes large numbers of unrelated Kustomizations report not-Ready, and how to tell that churn apart from a genuine failure.
-> Version: `2026.08.19`
-> Last Updated: `2026-08-19`
+> Version: `2026.09.20`
+> Last Updated: `2026-09-20`
 > Owner: `Platform`
 
 ---
@@ -20,6 +20,18 @@ nothing to do with what you changed — and, critically, whose error messages
 name a **dependency** rather than your commit. The mechanism is invisible from
 the message text, which is why it gets misdiagnosed as an outage in whatever
 component the message happens to name.
+
+> **This document covers the BENIGN cause, which is not the only reason a
+> `dependsOn` stall appears.** If `Kustomization/flux-system/cluster-meta` is
+> `Ready=False` with reason **`HealthCheckFailed`** naming a *source* object,
+> that is a genuine cluster-wide delivery stall — an unreachable third-party
+> chart source sitting inside its `wait: true` gate. It does **not** resolve
+> itself and a revert cannot land. Go to
+> `docs/sops/helm-chart-source-outage.md`.
+>
+> The tell is the reason field, not the fan-out size: `HealthCheckFailed` on
+> `cluster-meta` (real, act now) versus a message naming a dependency
+> *revision* (churn, wait).
 
 ## 2) Overview
 
@@ -159,6 +171,11 @@ mise exec -- flux get kustomizations -A | awk '$5!="True"' | grep -v "dependency
   indefinitely.
 - **The fan-out never ends** — confirm nobody (including a concurrent agent) is
   still pushing. See "Committing in a SHARED worktree" in `AGENTS.md`.
+- **`cluster-meta` itself is not-Ready with `HealthCheckFailed`** — not this
+  document, and not benign. A source in its `wait: true` inventory cannot
+  fetch, so `cluster-apps` goes `DependencyNotReady` and no app commit can
+  apply *or* revert until the source is fixed:
+  `docs/sops/helm-chart-source-outage.md`.
 
 ## 8) Diagnose Examples
 
@@ -198,14 +215,29 @@ Nothing to roll back: the gate is normal Flux behaviour and resolves itself.
 Rolling back a commit to "fix" it makes it worse — the revert is another
 revision, which re-arms the gate again across the same subtree.
 
+**That holds only for the revision churn this SOP describes.** If the stall is
+instead a failing source inside `cluster-meta`'s `wait: true` gate, "it
+resolves itself" is false: it never clears on its own, and the revert cannot
+land anyway because `cluster-apps` is gated in both directions. Check the
+`Ready` reason on `cluster-meta` **before** deciding to wait it out —
+`HealthCheckFailed` means act, per `docs/sops/helm-chart-source-outage.md`.
+
 ## 12) References
 
 - `docs/sops/longhorn.md` — "Chart Upgrade Storm", the case that surfaced this
 - `AGENTS.md` — "Committing in a SHARED worktree"
 - `docs/sops/flux-upgrade.md`
+- `docs/sops/helm-chart-source-outage.md` — the look-alike that is NOT benign:
+  a third-party chart source failing inside `cluster-meta`'s `wait: true` gate
 
 ## Version History
 
+- `2026.09.20`: Added the disambiguation against a genuine gate stall. §11's
+  "nothing to roll back, it resolves itself" was correct for revision churn but
+  actively misleading for the 2026-09-17 chart-source outage — and this is the
+  document an operator reaches for first when `dependsOn` messages appear, so
+  the carve-out belongs here (`F-e166e134`). The revision-gate analysis itself
+  is unchanged.
 - `2026.08.19` (b): Corrected within the hour, by its own diagnostic. The
   original triage rule ("a population dominated by `is not ready` means
   investigate the dependency") gave a false positive on a demonstrably healthy

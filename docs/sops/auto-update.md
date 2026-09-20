@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.09.15`
-> Last Updated: `2026-09-15`
+> Version: `2026.09.20`
+> Last Updated: `2026-09-20`
 
 ## 1) Description
 
@@ -77,6 +77,12 @@ that SOP has the `vN`-rename fix and the detection command.
      `detect_breaking_changes`. Best-effort: if notes can't be fetched, this
      gate is skipped and the merge relies on G2 + G4 (logged explicitly).
   4. **G4 ci** — PR `mergeable == MERGEABLE` and every CI check green. The
+     repo's `flux-local` workflow renders every HelmRelease with Helm on each
+     PR, so green = the manifest actually renders. Pending checks → hold this
+     cycle (passes next cycle); failing checks → hold. The gate is
+     **all-or-nothing across the whole rollup**, so a red workflow that has
+     nothing to do with the bump still holds the PR — see §7 for the lane-wide
+     failure that hides behind a legitimate-looking per-PR hold.
 - **G5 age**: the PR's newest Renovate commit must be ≥ `minimum_release_age_hours` old (48h, policy-set 2026-08-26) — supply-chain cooldown for the nightly unattended lane. CVE/security bumps waive it (age 0); unknown age HOLDS; measured from the newest commit so a retargeted PR cannot inherit its old target's age.
 
   > **The security waiver cannot fire in the direct-bump lane.** It reads a
@@ -99,9 +105,6 @@ that SOP has the `vN`-rename fix and the detection command.
   > .venv/bin/python3 runbooks/auto-update.py --json | python3 -c \
   >   "import sys,json; d=json.load(sys.stdin); print([(c['dep'],c['gate']) for c in d['held'] if c['gate']=='G5'])"
   > ```
-     repo's `flux-local` workflow renders every HelmRelease with Helm on each
-     PR, so green = the manifest actually renders. Pending checks → hold this
-     cycle (passes next cycle); failing checks → hold.
 - **Apply guard:** merges + git ops happen ONLY when `--apply` is passed AND
   `SWEEP_TRIGGER=cron` (or `AUTO_UPDATE_APPLY=1` for an explicit operator run).
   Otherwise dry-run.
@@ -352,6 +355,7 @@ If failed:
 | Everything held with "deny-all fail-safe" | policy YAML missing/unparseable | fix `auto-update-policy.yaml`; it's the intended fail-safe |
 | Safe PR never merges | CI pending/failing, or not mergeable (conflict) | `gh pr checks <n>`; rebase/fix the PR; it retries next cycle |
 | `--apply` merged nothing on cron | no PR passed all four gates | expected; check the held reasons in `--json` |
+| `--apply` merges nothing for DAYS and EVERY PR is held `gate=ci` | Not the PRs — a **workflow-wide** `flux-local` failure. G4 needs the entire check rollup green, so one red workflow holds every Renovate PR at once and the whole PR lane is frozen; the direct-bump half (`coverage.py`) keeps shipping, so safe updates still appear to flow. Each individual hold reads as a legitimate "CI failing", which is why it ran 8 days unnoticed (F-00235e5c). | Diagnose the WORKFLOW, not the PR: `gh run list --workflow flux-local.yaml -L 10`. If the newest green run predates the holds, the fault is in `.github/workflows/flux-local.yaml` (or its pinned image) — rebasing, reopening or re-running the PRs changes nothing. |
 | Merge happened but no reconcile | `flux`/`kubectl` not on PATH in the sweep env | run under `sweep-run.py`/mise so tooling resolves |
 | Batch reverted repeatedly | a bump genuinely breaks the app | add it to the deny-list until fixed upstream |
 | A version-only patch bump held with `gate=parse` | Title matches neither the spanned nor the bare shape (grouped PR, hand-authored `bump image to sha-…`, major rendered `to v2`) | Expected — it is genuinely unattributable. Do NOT widen the regex to make one PR pass; route it through a maintenance-window plan. |
@@ -420,6 +424,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.20 | 2026-09-20 | **The G4 item was split across the G5 bullet, so both gates read wrong (F-1025b8c2).** G4 ended mid-sentence on the word "The", and its continuation — the `flux-local` dependency and the pending-vs-failing outcomes — sat orphaned *after* G5's entire 20-line blockquote, where it read as a paragraph about the age cooldown. Re-split so each gate describes itself. Added the Troubleshooting row for the failure that mis-split helped hide: G4 is all-or-nothing across the check rollup, so a **workflow-wide** `flux-local` failure holds EVERY Renovate PR on `gate=ci` and freezes the whole PR lane while the direct-bump half keeps shipping. The SOP documented "failing checks → hold" only as a per-PR outcome and never as a lane-wide outage, so 8 days of legitimate-looking holds went unread (operational cause: F-00235e5c). |
 | 2026.09.13 | 2026-09-13 | **Test 2's matrix had drifted again — the failure mode the 2026.09.08 entry below claims to have closed.** Its own Test 2b check reported `MISSING: *k8s-gateway*, *n8n*`, and four Assert cells were stale: `*app-template*`, `*grafana*`, `*nextcloud-mcp*` were narrowed to `max: patch` on 2026-09-12 (`d147b1ce`) and `*nocodb*` earlier, yet all four still read "held at every update_type". Test 2b only checks glob MEMBERSHIP, so it cannot see a wrong Assert — the `max:` semantics still decay silently. Matrix resynced to policy `2026.09.12.1` (23 globs). Also documented the Renovate-side `followTag` channel lever. |
 | 2026.09.15 | 2026-09-15 | **`*frigate*` deny rule added (`max: patch`, policy `2026.09.15`, F-71dc3610, operator call).** Frigate is 0.x, so a "minor" is a release-line move with a config migrator and sqlite migrations; the read-only ConfigMap config cannot be auto-migrated, so an unattended bump starts the NVR in safe mode with zero cameras while every probe stays green. coverage.py's 0.x rule already held the direct-bump half; this closes the Renovate-PR half. Test 2 matrix row added. |
 | 2026.09.15 | 2026-09-15 | **Two gate bypasses in the direct-bump lane, found in the nightly window by ground-truthing AUTO items.** (1) G3 was NOT applied on the regular patch/minor path: `breaking_change_signal()` had one call site, inside `max_rule_fallbacks()`, so the sentence in §4 ("must clear G1, G2, G3 and G5 like any other direct bump") described the fallback path only — mealie `v3.25.1 → v3.26.0`, `age_waive`d so G5 did not hold it either, was rated AUTO with a BREAKING CHANGE in its release notes (F-ec4c1644). `assign_lane()` now runs `_direct_bump_breaking_gate()` before its AUTO exit: a positive signal routes to PLAN; unfetchable notes still do not hold (the documented asymmetry) but the AUTO reason now says `G3 unverified`. (2) G5 measured the wrong image for a multi-image component: `direct_bump_age_gate()` stopped at the first repo that resolved the target tag, alphabetically `memgraph/lab` (3.5 d old), and rated `memgraph-mage 3.13.1` (13 h old) AUTO inside the cooldown (F-9b77a91a). It now takes the YOUNGEST age across every repo carrying the tag and names that repo in the hold reason. Regression suites: `test-coverage-lane-safety.py` (DirectBumpBreakingGateTest), `test-direct-bump-age-gate.py` (multi-repo youngest carrier). |

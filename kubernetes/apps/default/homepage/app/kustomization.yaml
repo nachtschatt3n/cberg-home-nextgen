@@ -5,3 +5,6 @@ kind: Kustomization
 resources:
   - ./helmrelease.yaml
   - ./httproute.yaml
+  # Holds `config.services` (the manual device inventory) for the HelmRelease's
+  # spec.valuesFrom. Encrypted because this repo is public — see the file header.
+  - ./secret.sops.yaml

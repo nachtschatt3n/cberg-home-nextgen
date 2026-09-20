@@ -13,8 +13,19 @@ touches:
   namespaces: [media, databases]
   resources:
     - cronjob/media-library-audit
-    - configmap/library-tools-scripts
-    - deployment/library-tools-dashboard
+    - configmap/library-tools-scripts   # holds audit.py — step 1's edit target
+    - configmap/media-dashboard         # CORRECTED 2026-09-20 (F-5e5c14e6): this plan named
+                                        # `deployment/library-tools-dashboard`, which exists
+                                        # NOWHERE. `library-tools` is the app DIRECTORY and the
+                                        # Flux Kustomization; every object it renders is
+                                        # `media-*`. Step 2 edits dashboard-configmap.yaml, and
+                                        # THIS is the object that file renders — the edit
+                                        # target the old entry left undeclared.
+    - deployment/media-dashboard        # consumer: mounts cm/media-dashboard at volume `app`
+                                        # (verified live 2026-09-20). Named so the interference
+                                        # check and Step 4 verification can both see the
+                                        # dashboard half; the old name resolved to nothing, so
+                                        # it could neither collide nor be verified.
     - "postgres: sweep_history"
   shared: []
 depends_on: []
@@ -31,6 +42,27 @@ premises:
       the design below is solved differently and should be re-planned.
     run: kubectl get cronjob -n media media-library-audit -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].volumeMounts}'
     expect_contains: '"readOnly":true'
+  - id: dashboard-object-is-media-dashboard
+    why: >-
+      ADDED 2026-09-20 (F-5e5c14e6). The premises above cover only the audit
+      half, so the gate passed while the dashboard half was named after an
+      object that does not exist — unverifiable by construction. Step 2 edits
+      dashboard-configmap.yaml, so it is executable only if that file still
+      renders cm/media-dashboard AND deployment/media-dashboard still serves
+      it. One command asserts both: it names the Deployment (so a rename fails
+      the gate instead of resolving to nothing) and reads back the ConfigMap it
+      actually mounts (so the file->object link is proven, not assumed).
+    run: kubectl get deploy -n media media-dashboard -o jsonpath='{.spec.template.spec.volumes[?(@.name=="app")].configMap.name}'
+    expect_exact: media-dashboard
+  - id: dashboard-still-reads-audit-from-pod-logs
+    why: >-
+      Step 2 exists to REPLACE a pod-log read. If latest_audit_summary() is
+      gone or someone already repointed it, this plan is stale and the "the
+      dashboard is equally blind" claim in Why no longer describes the cluster.
+      Asserted against the LIVE ConfigMap rather than the repo file, so drift
+      or a hand-edit fails the gate instead of passing on git's say-so.
+    run: kubectl get cm -n media media-dashboard -o jsonpath='{.data.dashboard\.py}' | grep -c 'def latest_audit_summary'
+    expect_exact: "1"
 ---
 
 # Give the daily media audit a durable output channel
@@ -76,7 +108,10 @@ Two steps, in this order, because the first is useful even if the second slips:
      namespace obtains it — do NOT hand-copy a decoded secret),
    - a small table or a reuse of the existing findings/snapshot shape,
    - `latest_audit_summary()` in dashboard-configmap.yaml repointed at the DB,
-     keeping the pod-log path as a fallback for the current run.
+     keeping the pod-log path as a fallback for the current run. That file
+     renders `cm/media-dashboard`, served by `deployment/media-dashboard` —
+     the dashboard is NOT called `library-tools-dashboard`; that is the app
+     directory (F-5e5c14e6).
 
 ## Verification
 
@@ -86,7 +121,10 @@ kubectl logs -n media job/<latest audit job> | grep -c '^AUDIT_RESULT_JSON '   #
 
 # 2. THE point of the plan: delete the pod, then read the result anyway
 kubectl delete pod -n media -l job-name=<latest audit job>
-# dashboard must still show the same numbers
+
+# dashboard must still show the same numbers, with no audit pod left to read:
+kubectl port-forward -n media svc/media-dashboard 8088:80 &
+curl -s localhost:8088 | grep -A5 'Summary'
 ```
 
 Check 2 is the whole plan. A green check 1 with a blind check 2 is the state

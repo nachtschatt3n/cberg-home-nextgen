@@ -21,6 +21,14 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 3
+  # Part of the Helm values lives in a SOPS-encrypted Secret -- see the
+  # breadcrumb at `config.services` below for why. Flux merges valuesFrom
+  # FIRST and spec.values on top, deep-merging maps, so the Secret supplies
+  # config.services and the block below supplies the rest of config.*.
+  valuesFrom:
+    - kind: Secret
+      name: homepage-values
+      valuesKey: values.yaml
   values:
     image:
       repository: ghcr.io/gethomepage/homepage
@@ -74,95 +82,14 @@ spec:
                 - abbr: GH
                   href: https://github.com/
 
-      services:
-        - "Network Services":
-            - Unifi:
-                href: https://unifi.${SECRET_DOMAIN}
-                icon: unifi-controller.png
-                description: Unifi Controller
-            - Brother:
-                icon: brother.png
-                href: http://192.168.33.153
-                description: Brother HL 2360DW
-                ping: 192.168.33.153
-        - Infrastructure:
-            - openDTU:
-                href: http://192.168.33.220
-                icon: sun-panel.png
-                description: Solar Inverter Gateway
-                ping: 192.168.33.220
-            - Awtrix:
-                href: http://192.168.33.135
-                icon: awtrix.png
-                description: LED Matrix Display
-                ping: 192.168.33.135
-            - PiKVM:
-                href: http://192.168.30.154
-                icon: pikvm.png
-                description: KVM over IP
-                ping: 192.168.30.154
-            - "Zigbee Router Tubroom":
-                href: http://192.168.32.21
-                icon: zigbee2mqtt-light.png
-                description: SLZB-06 Zigbee Router (Tubroom)
-                ping: 192.168.32.21
-            - "Zigbee Coordinator Office":
-                href: http://192.168.32.20
-                icon: zigbee2mqtt.png
-                description: SLZB-06P10 Zigbee Coordinator (Office)
-                ping: 192.168.32.20
-            - "Unifi NAS Pro":
-                href: http://192.168.55.240
-                icon: unifi-drive.png
-                description: Network Attached Storage
-                ping: 192.168.55.240
-            - "Epson Scanner ES-580W":
-                icon: epson-iprint.png
-                href: http://192.168.32.201
-                description: Epson ES-580W
-                ping: 192.168.32.201
-            - "Flic Hub LR":
-                href: https://hubsdk.flic.io
-                icon: mdi-gesture-tap-button
-                description: Flic smart-button hub (LR)
-            - "Tibber Pulse":
-                href: http://192.168.32.229
-                icon: tibber.png
-                description: Tibber Pulse smart-meter bridge
-                ping: 192.168.32.229
-            - "Tesla Wall Connector":
-                href: http://192.168.32.146
-                icon: tesla.png
-                description: TeslaWallConnector_A5CCE5 (EV charger)
-                ping: 192.168.32.146
-        - "Home Automation":
-            - Balkonkraftwerk:
-                href: https://hass.${SECRET_DOMAIN}/dashboard-balkonkraftwerk
-                icon: sun-panel.png
-                description: Balcony PV zero-export dashboard
-                ping: hass.${SECRET_DOMAIN}
-        - Monitoring:
-            - Alertmanager:
-                href: https://alertmanager.${SECRET_DOMAIN}
-                icon: alertmanager.png
-                description: Alertmanager is a tool that routes alerts to a set of receivers
-                namespace: monitoring
-                app: kube-prometheus-stack-alertmanager
-                podSelector: alertmanager=kube-prometheus-stack
-            - Grafana:
-                href: https://grafana.${SECRET_DOMAIN}
-                icon: grafana.png
-                description: Metrics visualization and analytics platform
-                namespace: monitoring
-                app: grafana
-                podSelector: app.kubernetes.io/instance=grafana
-            - Prometheus:
-                href: https://prometheus.${SECRET_DOMAIN}
-                icon: prometheus.png
-                description: Prometheus is an open-source monitoring system with a time series database
-                namespace: monitoring
-                app: kube-prometheus-stack-prometheus
-                podSelector: prometheus=kube-prometheus-stack
+      # services: -- MOVED OUT OF THIS PUBLIC FILE (security_ref: F-93102d77).
+      # The manual device entries pair private LAN addresses with each device's
+      # role and model; the list is a map of the house network, so it lives in
+      # the SOPS-encrypted `homepage-values` Secret merged via spec.valuesFrom
+      # below. Kubernetes-discovered tiles are unaffected -- they come from
+      # HTTPRoute annotations, not from here.
+      # Edit: sops kubernetes/apps/default/homepage/app/secret.sops.yaml
+      # Any group used there must also exist in `settingsString.layout` below.
       widgets:
         - datetime:
             text_size: lg
@@ -301,6 +228,18 @@ spec:
       - name: HOMEPAGE_ALLOWED_HOSTS
         # This value must be set
         # ref: https://gethomepage.dev/installation/#homepage_allowed_hosts
+        #
+        # Still "*" DELIBERATELY, and it is the weaker half of F-93102d77 --
+        # host-header validation is off. What carries the risk instead: the only
+        # route is homepage.${SECRET_DOMAIN} on envoy-internal (LAN-only; there is
+        # no envoy-external route), gated by SecurityPolicy/homepage-forward-auth
+        # with failOpen: false, so an unauthenticated request never reaches the app.
+        # Narrowing is `value: "homepage.${SECRET_DOMAIN}"` and the probes would
+        # survive it (they are tcpSocket, no Host header). The catch: Homepage
+        # answers 400 to every Host outside the list, so anything reaching the
+        # Service under another name -- a monitor on homepage.default.svc, a second
+        # hostname -- starts failing, and that cannot be proven safe without first
+        # making the change. Left as an operator call, not a drive-by.
         value: "*"
       - name: TZ
         value: Europe/Berlin

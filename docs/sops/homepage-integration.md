@@ -4,8 +4,8 @@
 > Reference: `docs/integration.md` for Homepage overview and group list.
 > Routing model (how routes are written at all): `docs/sops/gateway-api-httproute.md`.
 > Description: Registering and validating service discovery entries in Homepage via `HTTPRoute` metadata.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.09.20`
+> Last Updated: `2026-09-20`
 > Owner: `Platform`
 
 ---
@@ -39,7 +39,9 @@ explicitly in its HelmRelease. Every app with a web UI that should appear in the
 dashboard needs **both** the annotations and the label.
 
 **Deployment:** `kubernetes/apps/default/homepage/`
-**Group source of truth:** `kubernetes/apps/default/homepage/app/helmrelease.yaml`
+**Group source of truth:** `settingsString.layout` in `kubernetes/apps/default/homepage/app/helmrelease.yaml`
+**Manual (non-Kubernetes) device entries:** `kubernetes/apps/default/homepage/app/secret.sops.yaml` —
+SOPS-encrypted, merged via `spec.valuesFrom`. See *Manual Service Configuration* below.
 
 Two config blocks in that HelmRelease make discovery work. Neither is optional:
 
@@ -421,28 +423,63 @@ gethomepage.dev/href: "https://custom-url.${SECRET_DOMAIN}"
 
 ## Manual Service Configuration
 
-For services not on Kubernetes (e.g., router UI, NAS, PiKVM), configure them directly in the
-Homepage helmrelease values:
+Services not on Kubernetes (router UI, NAS, printer, PiKVM, Zigbee coordinators…)
+have no `HTTPRoute` to annotate, so they are listed by hand as `config.services`
+Helm values.
+
+**Those values are SOPS-encrypted and are NOT in `helmrelease.yaml`.** They live in
+`kubernetes/apps/default/homepage/app/secret.sops.yaml` and reach the release through
+the HelmRelease's `spec.valuesFrom`:
 
 ```yaml
-# In kubernetes/apps/default/homepage/app/helmrelease.yaml
+# kubernetes/apps/default/homepage/app/helmrelease.yaml
+valuesFrom:
+  - kind: Secret
+    name: homepage-values
+    valuesKey: values.yaml
+```
+
+**Why encrypted (security_ref: F-93102d77).** This repository is public. Each manual
+entry pairs a private LAN address with the device's role and model, and at least one
+carried a per-device identifier. Any single line is harmless; the *list* is a
+reconnaissance map of the house network. Nothing in the file is a credential — SOPS is
+protecting a topology here, which is why it holds values rather than a password.
+
+Edit it in place (the `.sops.yaml` suffix and the `kubernetes/` path are what match the
+`.sops.yaml` creation rule — see `docs/sops/sops-encryption.md`):
+
+```bash
+sops kubernetes/apps/default/homepage/app/secret.sops.yaml
+```
+
+```yaml
+# decrypted shape — `config:` is the Helm values root, not a nested key
 config:
   services:
     - Infrastructure:
         - My Device:
-            href: http://192.168.30.x
+            href: http://10.0.0.x
             icon: my-device.png
             description: My device description
-            ping: 192.168.30.x
+            ping: 10.0.0.x
 ```
 
-The helmrelease already includes entries for:
-- UniFi Controller
-- openDTU (Solar inverter)
-- Awtrix (LED display)
-- PiKVM
-- Zigbee Router
-- Brother Printer
+Three things to keep true when you edit it:
+
+1. **Group names must also exist in `settingsString.layout`** in `helmrelease.yaml`, and
+   in the table in `docs/integration.md` — `doc-check.py` compares the layout block
+   against that doc (`homepage_layout_groups()`).
+2. **Hostnames are literal, not `${SECRET_DOMAIN}`.** No other `*.sops.yaml` here relies
+   on Flux postBuild substitution reaching decrypted Secret content, and the payload is
+   encrypted either way. The cost: a domain rotation must edit this file too.
+3. **Flux merges `valuesFrom` first, then `spec.values` on top** (deep-merges maps,
+   replaces lists). So the Secret owns `config.services` *entirely* — re-adding a
+   `services:` key to `helmrelease.yaml` would override the whole encrypted list, not
+   merge with it.
+
+Entries currently maintained there: UniFi Controller, NAS, printer, scanner, PiKVM,
+solar-inverter gateway, LED matrix, smart-meter bridge, EV charger, and the two Zigbee
+coordinator/router nodes.
 
 ---
 
@@ -509,10 +546,19 @@ Expected:
 ```bash
 # Ensure no sensitive values are stored in homepage annotations
 kubectl get httproute -A -o yaml | rg -i "password|token|apikey|secret" | head -20
+
+# The manual device inventory must stay encrypted — this repo is public.
+# Both commands must print nothing (security_ref: F-93102d77). The second
+# filters comment lines: httproute.yaml legitimately discusses the
+# 192.168.0.0/16 trusted-client CIDR in prose, which is not an inventory entry.
+rg -n '^      services:' kubernetes/apps/default/homepage/app/helmrelease.yaml
+rg -n '192\.168\.' kubernetes/apps/default/homepage/app/*.yaml | rg -v ':\s*#'
 ```
 
 Expected:
 - No sensitive credentials embedded in route annotations/labels.
+- No plaintext `config.services` block and no private addresses in the app directory;
+  the inventory is reachable only through `sops -d .../secret.sops.yaml`.
 
 Note that a `gethomepage.dev/*` annotation is world-readable to anyone with route
 read access and is rendered into the dashboard — never put a widget API key there

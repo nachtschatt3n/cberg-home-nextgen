@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/gateway-api-httproute.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/log-volume-runaway.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.09.15`
-> Last Updated: `2026-09-15`
+> Version: `2026.09.20`
+> Last Updated: `2026-09-20`
 > Owner: `Platform`
 
 ---
@@ -309,6 +309,7 @@ Using `state: present` with `identifiers.name` makes the blueprint idempotent �
 1. Choose target namespace and app path based on `docs/applications.md`.
 2. Create `kubernetes/apps/{namespace}/{app}/` with `ks.yaml` and `app/` manifests.
 3. Define app deployment (`helmrelease.yaml`) and wire it into `kustomization.yaml`.
+   - **Insert every registration INSIDE the named `resources:` block — never append it to the end of the file.** Half of these files end in a `patches:` block, where a bare `- ./{app}/ks.yaml` string breaks the build for the entire cluster. See Known Gotcha #15.
 4. Create secrets as `*.sops.yaml` and encrypt in repository path before commit.
 5. Configure storage class:
    - `longhorn` for normal app/stateful workloads (UUID PV names acceptable).
@@ -342,7 +343,7 @@ Using `state: present` with `identifiers.name` makes the blueprint idempotent �
    - Add `kubernetes/apps/monitoring/kube-prometheus-stack/app/{app}-alerts.yaml`.
    - Include rules for: pod not ready (critical, 5m), crash looping (critical, 5m), pod restarted (warning, 1m).
    - Required labels: `release: kube-prometheus-stack`, `app.kubernetes.io/name: kube-prometheus-stack`, `app.kubernetes.io/part-of: kube-prometheus-stack`.
-   - Register in `kubernetes/apps/monitoring/kube-prometheus-stack/app/kustomization.yaml`.
+   - Register in `kubernetes/apps/monitoring/kube-prometheus-stack/app/kustomization.yaml` — inside its `resources:` block, not appended at the end of the file (Known Gotcha #15).
    - See `kubernetes/apps/monitoring/kube-prometheus-stack/app/anythingllm-alerts.yaml` as reference.
 10. Verify Elasticsearch log ingestion (mandatory):
    - edot-collector ships all pod logs automatically — no config change needed.
@@ -355,6 +356,13 @@ Using `state: present` with `identifiers.name` makes the blueprint idempotent �
 # by older docs no longer exists in this Taskfile).
 task kubeconform
 kubeconform -summary -exit-on-error -ignore-missing-schemas kubernetes/apps/{namespace}/{app}
+
+# Registration render gate — RUN THIS AFTER EVERY kustomization.yaml EDIT.
+# kubeconform cannot see these files (`task kubeconform` ignores them by
+# filename pattern), so a mis-placed registration passes everything above and
+# fails only in Flux, cluster-wide. See Known Gotcha #15.
+kustomize build kubernetes/apps/{namespace}            # namespace registration
+kustomize build kubernetes/apps/{namespace}/{app}/app  # app-level registration
 ```
 
 > **kubeconform SKIPS every CRD kind — it can validate nothing and still exit 0.**
@@ -539,7 +547,7 @@ Expected:
 - Label `release: kube-prometheus-stack` is present (required for Prometheus discovery).
 
 Failure hint:
-- Create `kubernetes/apps/monitoring/kube-prometheus-stack/app/{app}-alerts.yaml` and register in its `kustomization.yaml`.
+- Create `kubernetes/apps/monitoring/kube-prometheus-stack/app/{app}-alerts.yaml` and register in its `kustomization.yaml` (inside the `resources:` block — Known Gotcha #15).
 
 ### Test 8: Elasticsearch Log Ingestion Verified
 
@@ -1049,6 +1057,88 @@ never had the value in the first place.
 
 ---
 
+### 15. Registering an app — a blind append lands in whatever list is LAST, and that is often `patches:`
+
+**The rule: insert the entry INSIDE the named `resources:` block, then assert
+which key it landed under. Never append a registration to the end of the file.**
+
+This SOP says "register in `kustomization.yaml`" in several places (steps 3 and
+9, Test 7's failure hint). None of those files is guaranteed to *end* with its
+`resources:` list. On 2026-09-17 (`e6b48baa`) a registration appended to the end
+of `kubernetes/apps/databases/kustomization.yaml` continued the **`patches:`**
+block instead — that file ends with the PSA privileged override. At the same
+two-space indent the new entry became a bare string in a list where kustomize
+requires an object:
+
+```
+Error: invalid Kustomization: json: cannot unmarshal string into Go struct
+field Kustomization.patches of type types.Patch
+```
+
+**The blast radius is the whole cluster, not the new app.** `kubernetes/apps`
+has no `kustomization.yaml` of its own, so Flux generates one spanning every
+namespace directory: a single unparsable namespace file puts `cluster-apps` in
+`BuildFailed` and **halts reconciliation for every app in the cluster**. Nothing
+is destroyed and running workloads keep running — Flux simply stops applying —
+so it stays silent until someone runs `flux get kustomizations -A`.
+
+**This is a coin flip, not an unlucky edge case.** Measured 2026-09-20: **9 of
+the 18** namespace `kustomization.yaml` files end in a `patches:` block (the PSA
+override) rather than in `resources:` — `cert-manager`, `databases`, `download`,
+`home-automation`, `kube-system`, `media`, `monitoring`, `security`, `storage`.
+At app level, 10 of 122 end in `patches:`, `configurations:` or
+`configMapGenerator:`. `kubernetes/apps/ai/kustomization.yaml` survived the
+identical blind append only because its `resources:` list happens to be last.
+
+**Why the green checks were green — this is the reusable part.** The edit was
+validated with `yaml.safe_load()` plus a count of `resources` entries, and it
+printed `OK 11 resources`. Both facts were true and neither was the question:
+the file *was* well-formed YAML, and `resources` *did* have 11 entries — the new
+one just was not among them. Schema validation is no help either: `task
+kubeconform` carries `-ignore-filename-pattern
+'(^|/)(kustomization|kustomizeconfig|helm-values|authentik-blueprint)\.yaml$'`,
+so it never opens these files, and pointed at one directly it reports
+`Valid: 0 … Skipped: 1` and exits 0. **A registration check must name the key
+the entry is in.**
+
+**The two gates that do catch it** — run both before committing a registration:
+
+```bash
+# 1. RENDER — the authoritative gate. Exits 1 with the unmarshal error above.
+kustomize build kubernetes/apps/{namespace}
+kustomize build kubernetes/apps/{namespace}/{app}/app
+
+# Repo-wide (140 kustomization directories, ~1s — cheap enough to run always)
+for d in kubernetes/apps/*/ kubernetes/apps/*/*/app/; do
+  [ -f "$d/kustomization.yaml" ] || continue
+  kustomize build "$d" >/dev/null || echo "BUILD FAILED: $d"
+done
+```
+
+```python
+# 2. KEY ASSERTION — answers "is MY entry under resources:", which a render does not.
+import yaml
+d = yaml.safe_load(open("kubernetes/apps/{namespace}/kustomization.yaml"))
+hits = [(k, i, v) for k, val in d.items() if isinstance(val, list)
+        for i, v in enumerate(val) if "{app}" in str(v)]
+assert len(hits) == 1 and hits[0][0] == "resources", hits
+```
+
+**Why both.** Verified 2026-09-20 against every trailing-list key that actually
+occurs in this repo — `patches`, `configMapGenerator`, `configurations` — the
+stray string fails `kustomize build` with exit 1, so the render catches *this*
+trap every time and is the gate that should have run first. What a render cannot
+catch is the complement: a build that is green because your entry never landed
+anywhere at all (edited the wrong file, the wrong namespace directory, or lost
+in a conflict resolution). A green render on a file that does not contain your
+registration is indistinguishable from a green render on one that does; only the
+key assertion separates them. Same shape as Gotcha #14 and
+[`docs/sops/verification-contents-not-shape.md`](verification-contents-not-shape.md):
+a check that cannot distinguish *registered* from *absent* is not a
+registration check.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely Cause | Action |
@@ -1074,6 +1164,7 @@ never had the value in the first place.
 | OAuth provider rejects `redirect_uri` with scheme mismatch (`http://` vs `https://`) | WSGI app sees request as `http://` internally; doesn't trust the gateway's `X-Forwarded-Proto` | Enable framework's ProxyFix (Flask: `ENABLE_PROXY_FIX=True` + `PROXY_FIX_CONFIG`, Django: `SECURE_PROXY_SSL_HEADER`) — see Known Gotcha #10 |
 | HelmRelease times out on FIRST install, pods look fine | A from-scratch schema/app install exceeds Helm's 5m default timeout — the work is still running when Flux gives up, and the retry restarts it from the beginning | Set `spec.timeout: 15m` (and `spec.install.timeout`) on the HelmRelease. Seen on uzeit-de's from-scratch TYPO3 install (`152cb651`, 2026-08-18) and on a Superset `Recreate` transition (`8b0075ed`). Check pod logs for forward progress before assuming a real failure |
 | Pod OOMKilled despite `resources:` in HelmRelease | `resources:` placed at wrong nesting level in app-template (no-op) | Move `resources:` inside `controllers.<name>.containers.<name>` — see Known Gotcha #9 |
+| `cluster-apps` is `BuildFailed` and NO app in the cluster reconciles (running workloads unaffected) | A registration was appended to the END of a `kustomization.yaml` that ends in `patches:`, so the entry is a bare string where kustomize wants an object | `kustomize build kubernetes/apps/{namespace}` to surface the unmarshal error, then move the entry inside the `resources:` block and assert which key it is in — see Known Gotcha #15 |
 
 ---
 
@@ -1214,3 +1305,4 @@ Rollback success criteria:
 | `2026.09.07` | `2026-09-07` | **Envoy Gateway migration complete — ingress-nginx DELETED (`ad1ea7c2`).** Zero Ingress objects, zero IngressClasses, zero nginx controllers; an `Ingress` created here is now inert. Replace the Ingress/Homepage blueprint with the HTTPRoute pattern (parentRef `envoy-internal` `.103` / `envoy-external` `.104` in ns `network`, always `sectionName: https` because the `http` listener is owned by the cluster-wide `https-redirect` route, no `className`, no per-host cert). Homepage metadata (annotations + label) now goes on the HTTPRoute (`kubernetes.gateway: true`). Rewrite Gotcha #11: the `external-dns` target annotation belongs on the **Gateway** and is silently ignored on a route. Reframe Gotcha #10 for the Envoy `https` listener |
 | `2026.09.15` | `2026-09-15` | Gotcha #11, the HTTPRoute blueprint notes and Operational Instructions step 6: Gateway `envoy-external` carries BOTH external-dns target keys (GA `external-dns.kubernetes.io/target` added `fbcd93c2`; alpha kept as the v0.21 rollback path) and new work uses the GA key. external-dns v0.22.0 (chart 1.22.0, `0a316a51`) reads only the GA prefix with no fallback (upstream #6424) — the actual mechanism of the 2026-09-08 outage. Plan external-dns-1.22.0 |
 | `2026.08.23` | `2026-08-23` | F-750d8a3c — realign with 2026-08 practice: Gotcha #1 reframed (`bitnamilegacy/*` is an unblock, not a target; new deployments stand the datastore up standalone per `bundled-datastore-exit.md`); new Gotcha #1b requiring version- or digest-pinned tags for every image (a floating tag never emits a Renovate PR, so the image ages invisibly — 19 of them, cleared in batches A–D); troubleshooting row for a from-scratch install exceeding Helm's 5m default timeout (uzeit-de `152cb651`) |
+| `2026.09.20` | `2026-09-20` | F-a52c4e76 — add Known Gotcha #15: a registration appended to the END of a `kustomization.yaml` joins whatever list is last, which for 9 of the 18 namespace files is `patches:`, not `resources:` — a bare string where kustomize wants an object. `cluster-apps` went `BuildFailed` and every app in the cluster stopped reconciling (2026-09-17, `e6b48baa`). Records why the checks were green (valid YAML plus a `resources` count are both true and neither is the question; `task kubeconform` ignores `kustomization.yaml` by filename pattern and exits 0 on the broken file) and the two gates that catch it: `kustomize build` on the directory, plus a key assertion naming the list the entry landed in. Render gate added to Operational Instructions step 11, registration rule to steps 3/9 and Test 7, troubleshooting row added |
