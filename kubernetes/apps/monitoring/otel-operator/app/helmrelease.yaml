@@ -27,6 +27,19 @@ spec:
   values:
     clusterName: cberg-home
 
+    # Prometheus-operator CRD ownership (plan prometheus-crd-ownership, F-a85e8943).
+    # The umbrella chart bundles an OLDER copy of servicemonitors/podmonitors/probes/
+    # scrapeconfigs under charts/prometheus-crds/crds/ (a crds/ directory behind the
+    # Chart.yaml condition `crds.install,crds.installPrometheus`), and Flux
+    # CreateReplace re-stamped them on every chart bump, undoing kube-prometheus-stack's
+    # newer set. crds/-directory objects are never Helm release resources, so `false`
+    # only stops the WRITES - it deletes nothing (helm-controller crds.go:
+    # ProcessDependencies runs before CRDObjects; CreateReplace never deletes).
+    # kube-prometheus-stack is the single owner of all ten monitoring.coreos.com CRDs.
+    # Do NOT set `crds.install` here: it precedes installPrometheus in the condition.
+    crds:
+      installPrometheus: false
+
     opentelemetry-operator:
       enabled: true
       admissionWebhooks:
