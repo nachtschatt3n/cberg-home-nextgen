@@ -82,9 +82,28 @@ jobs:
           set -uo pipefail
           set +e
 
+          # HOME IS LOAD-BEARING -- without it EVERY HelmRelease test fails.
+          # `uses: docker://` got HOME=/github/home (and a writable mount for it)
+          # from the container-action runtime for free; this hand-rolled
+          # `docker run` restored the workspace mount and workdir but not HOME,
+          # so helm fell back to `/.cache` in a non-writable root filesystem:
+          #   level=ERROR msg="failed to create cache directory"
+          #   Error: mkdir /.cache: permission denied
+          # Measured on run 35481803329 (2026-09-20): every HelmRelease FAILED
+          # with that error while every kustomization PASSED -- kustomize needs
+          # no cache, helm does. The failure set was ~all HRs, not the two
+          # allowlisted ones, so the gate went red and froze the auto-update G4
+          # lane. This is NOT a flux-local v8.4.0 defect; v7.11.0 would fail the
+          # same way invoked like this. Set the helm dirs explicitly as well as
+          # HOME so the fix cannot regress on an image that ignores HOME.
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/github/workspace" \
             -w /github/workspace \
+            -e HOME=/tmp \
+            -e XDG_CACHE_HOME=/tmp/.cache \
+            -e HELM_CACHE_HOME=/tmp/.cache/helm \
+            -e HELM_CONFIG_HOME=/tmp/.config/helm \
+            -e HELM_DATA_HOME=/tmp/.local/share/helm \
             ghcr.io/allenporter/flux-local:v8.4.0 \
             test --enable-helm --all-namespaces \
             --path /github/workspace/kubernetes/flux/cluster -v 2>&1 \
