@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.09.15`
-> Last Updated: `2026-09-15`
+> Version: `2026.09.20`
+> Last Updated: `2026-09-20`
 > Owner: `Platform`
 
 ---
@@ -68,6 +68,7 @@ Service+ServiceMonitor on short-lived CronJobs.
 |--------|-----------|---------|---------|-------------|
 | `home-automation/pallet-price-monitor` | `pellet-price-monitor` | twice daily (08:00/20:00) | `pellet_*` | `pallet-price-monitor-alerts.yaml` |
 | `kube-system/authentik-db-probe` | `authentik-db-probe` | hourly at :17 | `authentik_audit_*`, `authentik_db_connections_*`, `authentik_db_probe_last_success_timestamp_seconds` | `authentik-alerts.yaml` (`authentik.audit.freshness`) |
+| `backup/icloud-backup-freshness` | `icloud-backup-freshness` | hourly at :23 | `icloud_backup_newest_file_timestamp_seconds{account}`, `icloud_backup_probe_last_success_timestamp_seconds` | `icloud-backup-alerts.yaml` (`icloud-backup.freshness`) |
 
 Three rules, each of which has already cost real time:
 
@@ -831,6 +832,7 @@ cronjobs -A` is the source of truth; ~22 manifests exist under
 - `kube-system/descheduler` (rescheduling optimization)
 - `kube-system/authentik-channels-cleanup` (django-channels message prune, every 6h)
 - `kube-system/authentik-db-probe` (audit-log freshness gauges → Pushgateway, hourly :17)
+- `backup/icloud-backup-freshness` (iCloud photo-backup file-recency gauges → Pushgateway, hourly :23)
 - `databases/sweep-heartbeat`, `monitoring/obs-recovery`, `ai/openclaw-probe`,
   `ai/paperclip-backup-cleanup`, `home-automation/frigate-nvr` restart,
   `office/mealie` shopping-sync, tube-archivist maintenance

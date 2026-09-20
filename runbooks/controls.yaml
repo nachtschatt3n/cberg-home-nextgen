@@ -135,3 +135,26 @@ controls:
         because pushgateway has no TTL and a frozen age gauge would silently
         disarm AuthentikAuditLogStale. absent() covers the probe dying outright;
         AuthentikAuditFreshnessProbeStale covers it failing its query."
+
+  - id: icloud-backup-freshness
+    kind: k8s-cronjob
+    what: "hourly EXTERNAL walk of the read-only iCloud backup share publishing the
+      newest photo file's mtime per Apple ID — the only signal that survives a
+      sync process that wedges ALIVE (Running 1/1, 0 restarts, no probes), which
+      is how the 2026-09-06 outage stayed invisible for 14 days"
+    cadence: 1h
+    watched_by:
+      assertion: ICloudBackupFreshnessMetricMissing
+      in: kubernetes/apps/monitoring/kube-prometheus-stack/app/icloud-backup-alerts.yaml
+      note: "watcher-of-the-watcher: the absence guards are PER-ACCOUNT because a
+        bare absent() only fires when both Apple IDs vanish, and they fail
+        independently — three days apart in F-21d7e2ec.
+        ICloudBackupFreshnessProbeStale covers the probe dying while its gauges
+        linger (pushgateway has no TTL, so it serves the last push forever).
+        COMMISSIONED 2026-09-20 against the live open incident, not a synthetic
+        test: job icloud-backup-freshness-29831903 Complete (lastSchedule
+        14:23Z) pushed both accounts (mu 2026-09-03 20:12Z, andrea 2026-09-06
+        13:54Z), the absence guards went pending -> inactive as those samples
+        landed, and at 14:54:12Z four alerts reached Alertmanager —
+        ICloudBackupPhotosStale (warning) and ICloudBackupPhotosStaleCritical
+        (critical) for each account."

@@ -1,8 +1,8 @@
 # SOP: iCloud Docker Re-authentication (2FA session recovery)
 
 > Description: Recover the Apple session of any `icloud-docker-*` instance (mandarons/icloud-drive) when it expires, including the modern-2FA flow that the bundled `icloud` CLI gets wrong, and the quota-exhaustion mitigation (stop the retry loop before re-auth).
-> Version: `2026.08.08`
-> Last Updated: `2026-08-08`
+> Version: `2026.09.20`
+> Last Updated: `2026-09-20`
 > Owner: `operator`
 
 ---
@@ -392,19 +392,76 @@ If unclear:
 
 ## 9) Health Check
 
+### Primary trigger — the backup-freshness alert
+
+**Run this SOP when `ICloudBackupPhotosStale` (warning, >24h) or
+`ICloudBackupPhotosStaleCritical` (critical, >72h) fires.** The alert's
+`account` label names the Apple ID: set `INSTANCE` to it and fix only that
+instance — the two are independent.
+
+Those rules live in
+`kubernetes/apps/monitoring/kube-prometheus-stack/app/icloud-backup-alerts.yaml`
+and read an hourly EXTERNAL probe of the backup share
+(`kubernetes/apps/backup/icloud-backup-freshness/`, pushing to Pushgateway).
+They watch the OUTPUT — the mtime of the newest file actually landing under
+`<account>/photos` on the NAS — which is the only signal that still works when
+the sync process is stuck.
+
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
 kubectl -n backup get deploy icloud-docker-$INSTANCE -o jsonpath='replicas={.spec.replicas}{"\n"}'
+
+# Age of the newest backed-up photo, per account — exactly what the alert reads.
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 >/dev/null &
+curl -s http://localhost:9090/api/v1/query --data-urlencode \
+  'query=time() - max by (account) (icloud_backup_newest_file_timestamp_seconds)' \
+  | python3 -c 'import sys, json
+for r in json.load(sys.stdin)["data"]["result"]:
+    print(r["metric"]["account"], round(float(r["value"][1]) / 3600, 1), "h")'
+```
+
+Expected:
+- `replicas=1`.
+- Each account's age is comfortably under `24` h. Over 24 h is the warning
+  tier; over 72 h the backup is dead and this SOP is the recovery path.
+- No freshness-probe alert is firing. Four rules guard the watcher itself:
+  `ICloudBackupFreshnessMetricMissing` and
+  `ICloudBackupFreshnessMetricMissingAndrea` (gauge absent — per-account,
+  because a bare `absent()` only fires when BOTH Apple IDs vanish),
+  `ICloudBackupFreshnessProbeStale` (no successful probe run in 6h) and
+  `ICloudBackupFreshnessProbeJobFailed`. If any of those is firing, the ages
+  above are a stale snapshot from the last good scan — fix the probe first,
+  then re-read them.
+
+### Secondary — recent auth/session log errors (corroborating only)
+
+```bash
+export PATH="$HOME/.local/share/mise/shims:$PATH"
 POD=$(kubectl -n backup get pod -l app.kubernetes.io/name=icloud-docker-$INSTANCE -o name | head -1)
 kubectl -n backup logs $POD --tail=50 | grep -ciE "421|2fa is required"
 ```
 
-Expected:
-- `replicas=1`, count `0` of `421`/`2FA is required` in recent logs.
+> **A zero here is NOT evidence of health.** This count tells you *which*
+> failure you have, never *whether* you have one. A wedged process writes no
+> log lines at all, so the count reads `0` while nothing whatsoever is being
+> backed up — which is precisely what it did for the entire 14-day 2026-09-06
+> outage (F-21d7e2ec), with both pods `Running 1/1` at 0 restarts. An operator
+> following a "0 errors = healthy" reading would have closed the check and
+> walked away, as happened for 14 days. Only the freshness alert above can
+> assert health.
 
-The daily sweep flags this via the `health` finding
-`icloud-docker-$INSTANCE recent log errors: N` — a non-zero count after a session
-expiry is the trigger to run this SOP.
+Read it as:
+- **Non-zero** → the Apple session expired and 2FA is required (case 2): this
+  SOP's main path, from Step 1.
+- **Zero, while a freshness alert is firing** → the sync process wedged
+  silently (case 1). Restarting the deployment is what unblocks that case, and
+  a full interactive re-auth may not be needed at all — but confirm recovery
+  against the freshness metric above, not against the log count.
+
+The daily sweep's `health` findings `icloud-docker-$INSTANCE auth/session errors
+(re-auth needed): N` and `icloud-docker-$INSTANCE recent log errors: N` come from
+this same log scrape and inherit the same blind spot: corroborating detail, not
+the trigger.
 
 ---
 
@@ -449,6 +506,10 @@ flux resume helmrelease icloud-docker-$INSTANCE -n backup
 - `runbooks/icloud-cookie-rotation.md` (older quick-rotation note; superseded by
   this SOP for 2FA accounts)
 - `kubernetes/apps/backup/icloud-docker-{mu,andrea}/app/` (manifests + SOPS secret)
+- `kubernetes/apps/monitoring/kube-prometheus-stack/app/icloud-backup-alerts.yaml`
+  (the freshness alerts that trigger this SOP — §9)
+- `kubernetes/apps/backup/icloud-backup-freshness/` (the external probe feeding them)
+- `runbooks/controls.yaml` (control ledger row `icloud-backup-freshness`)
 - `kubernetes/apps/backup/TODO.md` (what else of an Apple account is backed up)
 - `docs/sops/policy-cli.md` (AR lifecycle — park/disable accepted risks)
 - `docs/sops/cifs-mount-options.md` (CIFS ownership/`uid=1000` context)
@@ -474,3 +535,16 @@ flux resume helmrelease icloud-docker-$INSTANCE -n backup
   pushed code. Pinned the ephemeral re-auth pod to the same image digest as the
   HelmRelease — it previously said `:latest`, which ships icloudpy 0.8.0 and
   would abort on the script's own version guard.
+
+- `2026.09.20`: **Replaced the Health Check trigger, which could not fire.** §9
+  named the sweep finding `icloud-docker-$INSTANCE recent log errors: N` as the
+  signal to run this SOP, measured with a `grep -ciE "421|2fa is required"` over
+  recent logs. That count read ZERO for all 14 days of the 2026-09-06 outage
+  (F-21d7e2ec), because a wedged process emits no log lines — so the documented
+  trigger was unfireable and an operator following it would have concluded
+  "0 errors = healthy". The primary trigger is now the external freshness alert
+  (`ICloudBackupPhotosStale` / `ICloudBackupPhotosStaleCritical`, commissioned
+  2026-09-20), with the log grep demoted to a corroborating check that
+  distinguishes a session expiry from a silent wedge, carrying an explicit
+  warning that a zero count proves nothing. Added the alert rules, the probe and
+  the control-ledger row to §12 so the reference points both ways.

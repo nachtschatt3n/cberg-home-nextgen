@@ -29,12 +29,12 @@
 | network | 5 |
 | default | 2 |
 | flux-system | 2 |
-| backup | 2 |
+| backup | 3 |
 | security | 2 |
 | my-software-development | 3 |
 | my-software-production | 4 |
 | my-software-showcase | 15 |
-| **Total** | **121** |
+| **Total** | **122** |
 
 ---
 
@@ -256,6 +256,7 @@
 
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
+| icloud-backup-freshness | Hourly CronJob (`23 * * * *`) that walks the iCloud backup share read-only and pushes the newest photo file's mtime per Apple ID to Pushgateway (`icloud_backup_newest_file_timestamp_seconds{account}`), alerting via `ICloudBackupPhotosStale` / `...StaleCritical`. Added 2026-09-20 after both `icloud-docker` instances wedged **alive** and the outage went unnoticed for 14 days (F-21d7e2ec) — it watches the OUTPUT on the NAS, because every in-band signal (pod Running 1/1, 0 restarts, no probes, no ServiceMonitor) read healthy throughout. Second, read-only consumer of the `cifs-immich-icloud-backup` StorageClass, whose `subdir` is the `icloud-backup` parent, so one mount sees both accounts. | None | — |
 | icloud-docker-andrea | Apple iCloud Drive + Photos sync for the second household Apple ID. Same `main` build digest pin as `icloud-docker-mu` — **bump both together** or the un-bumped one silently loses the iOS 26.4+ 2FA push. Data on `cifs-icloud-docker-andrea` (`icloud-backup/andrea`), session PVC on dynamic `longhorn`. | None | — |
 | icloud-docker-mu | Apple iCloud Drive sync. Image pinned to a `main` build digest (not a release tag) to get icloudpy 0.9.0's iOS 26.4+ 2FA push trigger — deliberate exception, see `docs/sops/icloud-docker-reauth.md`. | None | — |
 

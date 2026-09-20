@@ -3,8 +3,8 @@
 > Standard Operating Procedures for cluster backup management.
 > Covers Longhorn volume backups and external backup integrations.
 > Description: Running, validating, and restoring Longhorn/iCloud backup workflows.
-> Version: `2026.09.15`
-> Last Updated: `2026-09-15`
+> Version: `2026.09.20`
+> Last Updated: `2026-09-20`
 > Owner: `Platform`
 
 ---
@@ -320,6 +320,19 @@ Sessions expire every ~30-60 days and need an interactive re-auth:
 `docs/sops/icloud-docker-reauth.md` (export `INSTANCE` first). The daily sweep
 surfaces this as `icloud-docker-<instance> auth/session errors (re-auth
 needed): N` — the leading token tells you which Apple ID.
+
+**Freshness monitoring (the load-bearing signal).** `kubernetes/apps/backup/icloud-backup-freshness/`
+— an hourly CronJob pushing to Pushgateway — walks the backup share from OUTSIDE
+the sync processes and publishes the newest photo file's mtime per account,
+alerting via `ICloudBackupPhotosStale` (24h) and `ICloudBackupPhotosStaleCritical`
+(72h). It exists because no in-band signal can see a wedged sync: on 2026-09-06
+both pods sat `Running 1/1` with 0 restarts for 14 days while backing up nothing
+(F-21d7e2ec), and the log-scrape finding above read zero the whole time, because
+a hung process writes no logs. The probe mounts the read-only
+`cifs-immich-icloud-backup` StorageClass — a **second consumer** of that class
+alongside Immich's external library, also read-only — whose `subdir` is the
+`icloud-backup` parent of both per-account directories, so one mount covers both
+Apple IDs. Alert-to-recovery path: `docs/sops/icloud-docker-reauth.md` §9.
 
 **Coverage beyond Drive + Photos** — contacts, calendars, mail, Health,
 Messages — is tracked in `kubernetes/apps/backup/TODO.md`. Note `icloud-docker`

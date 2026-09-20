@@ -1,8 +1,8 @@
 # SOP: Storage Safety — Destructive Operations on Persistent Storage
 
 > Description: Pre-flight, guardrails, and recovery procedure for destructive PVC/PV operations on shared-filesystem (CIFS/SMB/NFS) and Longhorn storage classes.
-> Version: `2026.08.26`
-> Last Updated: `2026-08-26`
+> Version: `2026.09.20`
+> Last Updated: `2026-09-20`
 > Owner: `cluster-ops`
 
 | Field | Value |
@@ -148,8 +148,12 @@ constrained:**
 | `cifs-opencode-andreamosteller` | `//192.168.55.240/opencode` | `/andrea-opencode` | Retain |
 | `cifs-penpot-assets` | `//192.168.55.240/penpot` | `assets` | Retain |
 
-`cifs-immich-icloud-backup` is mounted `ro`, so Immich indexes the iCloud
-originals but cannot write or delete them — iCloud stays source of truth.
+`cifs-immich-icloud-backup` is mounted `ro` by BOTH of its consumers, so
+neither can write or delete the iCloud originals — iCloud stays source of
+truth. The consumers are Immich's read-only external library and, since
+2026-09-20, the backup-freshness probe's claim `backup/icloud-backup-freshness`,
+which only stats file mtimes. Its `subdir` is the `icloud-backup` parent of
+both per-account directories, which is why one mount sees both Apple IDs.
 `cifs-immich-cache` (Tier 2, added 2026-08-25) holds Immich's *derived* data
 after `/data` moved off Longhorn; it is regenerable, unlike everything else here.
 
