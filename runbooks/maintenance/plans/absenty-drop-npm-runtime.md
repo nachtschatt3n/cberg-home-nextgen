@@ -24,7 +24,7 @@ rollback_class: git-revert    # DECLARED 2026-09-06. The production runtime is
                           # Removing it changes the image's SHAPE, not what the
                           # software can do, so capability_change is false.
                           # Undo is: revert the Dockerfile commit and rebuild.
-status: awaiting-go   # DEFERRED 2026-09-13 from sun-attended:2026-09-13. The
+status: draft   # was awaiting-go with an operator GO for sun-attended:2026-09-20. SENT BACK 2026-09-20 by the window agent: verification cannot run or cannot fail on the executor host (F-31b5a28c). Engineering and autonomy gate are fine; the verification and section 9 need correcting. GO revoked so it cannot outlive its window.
                  # window fired from the per-window cron with no operator
                  # present, so the run was UNATTENDED. Class is AUTO-NIGHT and
                  # the premise PASSED (plan-premises.py exit 0, deployed image
@@ -43,7 +43,7 @@ status: awaiting-go   # DEFERRED 2026-09-13 from sun-attended:2026-09-13. The
                  # in the Dockerfile. Dockerfile line 39 installs npm in
                  # `base` and line 84 is `FROM base AS production`, so the
                  # inheritance the plan describes is real.
-window: "sun-attended:2026-09-20"   # MOVED 2026-09-13 (was sun-attended:2026-09-13, AUTO-ASSIGNED
+window: null   # UNSCHEDULED 2026-09-20 by the sun-attended window agent. It held sun-attended:2026-09-20 and that window RAN, but the plan was NOT executed: no container runtime exists on the executor host (kills section 4 and the headline section 7d bit-identical assertion) and the only runnable check cannot fail (svc/absenty has no port 80 - only 3000 - and / returns a zero-byte 302, so the asset greps and their loop pass on an empty body). Section 9's claim that the ImageUpdateAutomation is Ready=False is stale and INVERTED: both are Ready=True and unsuspended, so production auto-rolls in ~30 min. Engineering and autonomy gate are fine (eligible, 2/2 clean supervised). Deliberately NOT re-slotted into sun-attended:2026-09-27, which talos-1.14.0 owns exclusively. Prior rationale below is HISTORICAL.
                  # 2026-09-06 by window-scheduler). NOT sat-attended:2026-09-19: that slot is
                  # duration_min 90 and already holds media-audit-durable-output (45 min), so
                  # adding this plan's 60 min would be 105/90 — an OVER-TIME window, and a

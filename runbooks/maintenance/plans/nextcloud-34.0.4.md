@@ -65,8 +65,8 @@ rollback_class: backup-restore        # a git revert is NOT a rollback once `occ
                                       # backup_gate named => human-gated, which the deny rule
                                       # demands anyway ("operator-supervised only").
 finding_refs: [F-f3e9ddb0, F-4a9d6631, F-ab9e243a]
-status: awaiting-go   # OPERATOR GO 2026-09-15 (direct, attended update in its window; recorded in home-operation, exec_state=pending). REVIEWED 2026-09-15, corrections c36388bc
-window: "sun-attended:2026-09-20"   # assigned 2026-09-15 from the review synthesis (capacity-checked); go/no-go via home-operation
+status: draft   # was awaiting-go with an operator GO for sun-attended:2026-09-20. SENT BACK 2026-09-20 by the window agent: the plan's own section 2.0b mandatory halt tripped (F-0cd73f3f). Needs B1 (image-only vs image+chart 9.2.7/9.3.0) and B2 (whiteboard 2.0.0) decided, then re-vetting. GO revoked so it cannot outlive its window.
+window: null   # UNSCHEDULED 2026-09-20 by the sun-attended window agent. It held sun-attended:2026-09-20 and that window RAN, but the plan was NOT executed: the plan's OWN section 2.0b mandatory halt tripped - chart 9.2.7 and 9.3.0 now carry appVersion 34.0.4 (published 2026-09-19), so section 1.2's "no chart carries 34.0.4" is stale and the deny rule's lockstep clause has a target. Separately occ app:update --all would now install whiteboard 2.0.0, a major owned by plan nextcloud-whiteboard-2.0.0. Premises still read 12/12 PASS because they inspect OUR pin, not the upstream index. Re-slot only after B1 (image-only vs image+chart) and B2 (whiteboard) are decided. Prior rationale below is HISTORICAL.
                                       # sun-attended). Never `nightly`: the executor must
                                       # watch the entrypoint log during §3.4 and be able to
                                       # run the §5.1 recovery inside the same slot.
