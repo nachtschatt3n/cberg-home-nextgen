@@ -79,7 +79,7 @@ finding_refs:
   - F-a85e8943                        # "Prometheus CRD ownership contention: otel-operator …
                                       # re-writes 4 of the 10 monitoring.coreos.com CRDs"
 status: awaiting-go   # DEFERRED 2026-09-19 sat-attended: HUMAN-GATED via autonomy_override, and this run was cron-fired/unattended. go/no-go ingested, scoped sat-attended:2026-09-26.
-window: "sat-attended:2026-09-26"   # PROPOSED 2026-09-19: plan states "Fits sat-attended; no reboot". Premises re-ran PASS (10/10) at proposal time.
+window: "sun-attended:2026-09-20"   # RE-SCOPED 2026-09-20 from sat-attended:2026-09-26 on an EXPLICIT operator GO given in the Claude Code session for TODAY's attended window (operator present). Capacity re-checked: 135/200 min, risk 5/6. Interference re-checked: namespaces monitoring vs office vs my-software-* are disjoint and no co-scheduled plan is in its conflicts_with (kube-prometheus-stack-91.4.1 stays window:null). Runs FIRST in the window because it declares shared:[monitoring].
 premises:
   - id: otel-hr-ready
     why: "Do not stack a values change on an already-failing release; a failed upgrade with remediation strategy rollback would mask the §4 result."
