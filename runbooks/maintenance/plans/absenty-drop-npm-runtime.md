@@ -27,7 +27,7 @@ rollback_class: git-revert    # DECLARED 2026-09-06. The production runtime is
                           # Removing it changes the image's SHAPE, not what the
                           # software can do, so capability_change is false.
                           # Undo is: revert the Dockerfile commit and rebuild.
-status: draft   # was awaiting-go with an operator GO for sun-attended:2026-09-20. SENT BACK 2026-09-20 by the window agent: verification cannot run or cannot fail on the executor host (F-31b5a28c). Engineering and autonomy gate are fine; the verification and section 9 need correcting. GO revoked so it cannot outlive its window.
+status: blocked   # BLOCKED 2026-09-20 BY DESIGN, not by a defect. The operator chose to drain the dependabot queue (section 12 Q3) rather than freeze it, so six dependency PRs were merged into `production` and CI published production-20260920181830. The premise no-newer-production-tag-has-been-published now FAILS (got production-20260920181830, want production-20260818185444) and plan-premises.py correctly refuses execution. That is the premise doing its job: section 7.5's before/after asset comparison is only meaningful when the ONLY source delta is the Dockerfile stage split, and it no longer is. UNBLOCK = re-baseline (see 11.1), NOT relaxing the premise.
                  # window fired from the per-window cron with no operator
                  # present, so the run was UNATTENDED. Class is AUTO-NIGHT and
                  # the premise PASSED (plan-premises.py exit 0, deployed image
@@ -1005,6 +1005,34 @@ gh pr list --base production --state open --json number,author \
 #  CONTROL — the query reaches GitHub and discriminates by base branch:
 gh pr list --base development --state open --json number --jq 'length'       # 2026-09-20: 0
 ```
+
+**SUPERSEDED 2026-09-20 BY OPERATOR DECISION (§12 Q3).** The freeze below was
+NOT adopted. The operator chose to drain the queue instead: "the dependabot PRs
+should also be executed if they're not breaking anything". Six non-breaking PRs
+were merged into `production` on 2026-09-20 (#42, #54, #63, #64, #65, #66, #68 —
+patch/minor only, each re-classified AT MERGE TIME), CI published
+`production-20260920181830`, and the ImagePolicy selected it.
+
+**Consequences, all of which are working as designed:**
+- The `no-newer-production-tag-has-been-published` premise FAILS and blocks
+  execution. Correct — do not relax it.
+- §4.5's recorded digests and §7.5's bit-identical assertion are INVALIDATED.
+  They describe `production-20260818185444`; the comparison baseline must be
+  re-taken against the post-drain image before this plan can run.
+- §9.1's auto-roll hazard was pre-empted: both `image-automation.yaml` files
+  carry `suspend: true` (commit 6194c9f1), so the six merges did NOT roll
+  production. The live Deployment is still on `production-20260818185444`.
+  That suspend is §12 Q2 answered in the affirmative and must be reverted only
+  after this plan passes §7.
+
+**TO UNBLOCK:** (1) finish or deliberately stop the drain; (2) re-take §4.5's
+digests and §2.x baselines against the then-current production image; (3) update
+this premise's `expect_exact` to that tag IN THE SAME CHANGE as (2) — never
+alone, or the premise passes while the comparison is still stale; (4) revert the
+automation suspend after §7 passes.
+
+The original freeze rationale is retained below because it explains WHY the
+comparison is fragile, which is still true:
 
 **Merge none of them** from the moment the dev-lane soak starts until §7 has
 passed on production. Any merge into `production` publishes a new
