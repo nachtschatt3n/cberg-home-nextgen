@@ -35,17 +35,29 @@ touches:
                                                  # IN PLACE (RWO longhorn-static)
     - deployment/paperless-db                    # schema only: migration 0026 applied
                                                  # (two AlterFields); image NOT touched
-  shared: []                           # Deliberate and checked. The app is exposed on the
-                                       # PUBLIC edge (HTTPRoute paperless-ngx -> Gateway
-                                       # envoy-external/https) but this plan does not touch
-                                       # the route, the Gateway or any listener — it is a
-                                       # consumer of that edge, not a perturber of it. It
-                                       # rebuilds ONE longhorn-static volume's contents, not
-                                       # the Longhorn control plane (same rationale the
-                                       # paperless-db plans use). Verification reads the
-                                       # paperless API and the pod directly and does NOT
-                                       # read Prometheus, so the monitoring stack is not an
-                                       # instrument of this plan — see §6.
+  shared:
+    - monitoring                       # CORRECTED 2026-09-20 (was `[]`). §2.5 WRITES a
+                                       # silence into Alertmanager
+                                       # (svc/kube-prometheus-stack-alertmanager, live
+                                       # v0.34.0, GET /api/v2/silences -> 200 verified
+                                       # read-only 2026-09-20), so this plan PERTURBS shared
+                                       # monitoring state even though §4 never READS
+                                       # Prometheus. Declared as a shared surface (a
+                                       # post-placement warning), NOT as a conflicts_with:
+                                       # the silence is a courtesy to the pager, not an
+                                       # instrument of any gate here, so a same-slot
+                                       # kube-prometheus-stack-91.4.1 cannot blind this
+                                       # plan's verification — it can only drop the silence
+                                       # during its ~1 min Alertmanager restart. Sequencing
+                                       # note in §6.
+                                       # NOT declared, deliberately: the PUBLIC edge
+                                       # (HTTPRoute paperless-ngx -> Gateway
+                                       # envoy-external/https) — this plan does not touch the
+                                       # route, the Gateway or any listener; it is a consumer
+                                       # of that edge, not a perturber of it. Nor
+                                       # storage/longhorn: it rebuilds ONE longhorn-static
+                                       # volume's CONTENTS, not the Longhorn control plane
+                                       # (same rationale the paperless-db plans use).
 depends_on: []
 conflicts_with: [paperless-db-13.0.2]  # HARD. That plan scales deployment/paperless-ngx to
                                        # 0, suspends this HelmRelease and this Kustomization,
@@ -58,16 +70,41 @@ conflicts_with: [paperless-db-13.0.2]  # HARD. That plan scales deployment/paper
                                        # written. --validate checks refs resolve, not
                                        # reciprocity — reported as a repo correction, not
                                        # edited here.
-                                       # Deliberately NOT listed: kube-prometheus-stack-91.4.0
-                                       # (this plan's §4 never reads Prometheus) and
-                                       # nextcloud-34.0.4 (namespace `office` overlap only —
-                                       # no shared resource, no shared datastore).
-security_ref: F-15987249               # AR-029-accepted on 3.1.3 under the "already on the
-                                       # newest upstream tag" branch. 3.2.0 makes that premise
-                                       # FALSE — a newer tag now exists, so the accepted-risk
-                                       # rationale lapses and the bump is the household's only
-                                       # sanctioned remedy for a third-party image (we bump,
-                                       # we never rebuild). Detail stays on the finding record.
+                                       # Deliberately NOT listed: kube-prometheus-stack-91.4.1
+                                       # (plan_id corrected 2026-09-20 — that plan retargeted
+                                       # 91.4.0 -> 91.4.1 on 2026-09-20; it is status `draft`,
+                                       # window null). This plan's §4 never reads Prometheus,
+                                       # so that stack cannot blind any gate here. It IS named
+                                       # in touches.shared as `monitoring` because §2.5 writes
+                                       # an Alertmanager silence — a post-placement warning,
+                                       # not a slot veto. See §6 for the sequencing rule.
+                                       # Also NOT listed: nextcloud-34.0.4 (namespace `office`
+                                       # overlap only — no shared resource, no shared
+                                       # datastore; and it sits in sun-attended, a different
+                                       # slot from the sat-attended this plan is sized for).
+security_ref: F-15987249               # see also F-56e8bbdd (SAME image, no-upstream-fix
+                                       # class) — ADDED 2026-09-20; both re-queried live and
+                                       # both are open, section `security`, severity
+                                       # `accepted`, status `unchanged`, last_seen
+                                       # 2026-09-19, both titled against
+                                       # `ghcr.io/paperless-ngx/paperless-ngx:3.1.3`.
+                                       # F-15987249 is AR-029-accepted under the "already on
+                                       # the newest upstream tag" branch. 3.2.0 makes that
+                                       # premise FALSE — a newer tag now exists, so the
+                                       # accepted-risk rationale lapses and the bump is the
+                                       # household's only sanctioned remedy for a third-party
+                                       # image (we bump, we never rebuild). F-56e8bbdd lapses
+                                       # on the same bump for the same reason: its acceptance
+                                       # is pinned to the 3.1.3 tag string, so moving the tag
+                                       # re-scores it on 3.2.0's own CVE set.
+                                       # Both stay OUT of finding_refs on purpose: that field
+                                       # is the plan-or-page OWNERSHIP join for lane=PLAN
+                                       # findings, and these two are section `security` /
+                                       # severity `accepted` — claiming them there would
+                                       # assert this plan answers a PLAN-lane row that does
+                                       # not exist. Precedent for the scalar + "see also"
+                                       # form: bitnamilegacy-exit-nextcloud-{db,redis}.
+                                       # Detail stays on the finding records — never here.
 capability_change: true                # HONEST true, and it decides the execution class.
                                        # 3.2.0 changes ingest-time behaviour, not just the UI:
                                        # "Improve matching for correspondents, storage path and
@@ -99,8 +136,13 @@ finding_refs: []                       # DELIBERATELY EMPTY, queried not assumed
                                        # cycle.
 status: draft
 window: null                           # the scheduler assigns. Shape: attended (see
-                                       # capability_change), no reboot, fits a 90-min
-                                       # sat-attended slot with rollback budget to spare.
+                                       # capability_change), no reboot. Sized against
+                                       # sat-attended, which is the 90-min slot
+                                       # (`maintenance-windows.yaml`, re-read 2026-09-20):
+                                       # 50 min of work leaves a 40-min rollback budget.
+                                       # NOT sun-attended — that slot is 200 min but already
+                                       # holds absenty-drop-npm-runtime + nextcloud-34.0.4,
+                                       # both `awaiting-go` on sun-attended:2026-09-20.
 premises:
   - id: app-pin-is-3.1.3
     why: "`current:` claims 3.1.3 for the app. If the cluster already moved, this plan is stale and every baseline in section 2 is wrong."
@@ -222,11 +264,39 @@ the actual v3.1.3…v3.2.0 diff (145 commits, 300 files):
    (identical in 3.1.3 and 3.2.0), and `document_index.py` wraps the rebuild in
    `transaction.atomic()`. **The pod is NOT Ready until the rebuild finishes.**
 
-   This is the risk. A rebuild that produces an *empty* index leaves every
-   structural signal green — pod Ready, HTTP 200, HelmRelease Ready — while
-   search silently returns nothing. That is exactly the shape-vs-contents
-   failure class (`docs/sops/verification-contents-not-shape.md`), so §4 asserts
-   hit *counts* against measured baselines, not index existence.
+   This is the risk, and it has a **deadline** attached. Measured live
+   2026-09-20 on the running pod, the s6 chain is
+   `init-search-index` (oneshot) → `init-complete` → `svc-webserver`
+   (`ls /etc/s6-overlay/s6-rc.d/svc-webserver/dependencies.d` →
+   `init-complete`; `init-complete/dependencies.d` contains
+   `init-search-index`). **Port 8000 therefore does not listen until the
+   rebuild finishes** — and the chart's `startupProbe` is a `tcpSocket` on
+   exactly port 8000. See §3.2: the kubelet, not Flux, is the first thing that
+   kills a long rebuild, and the stock budget is 150 s.
+
+   The second trap is that the index sentinel is written **before** any
+   document is indexed. From `src/documents/search/_backend.py` at v3.2.0,
+   `TantivyBackend.rebuild()` runs, in this order:
+   `wipe_index(self._path)` → `tantivy.Index(build_schema(), path=...)` →
+   `_write_sentinels(self._path)` → *then* the `writer.add_document(doc)` loop
+   → `writer.commit()`. `_write_sentinels` stamps
+   `{"schema_version": 2, "language": ..., "schema_fingerprint": ...}`
+   (`_schema.py`). The `transaction.atomic()` in `document_index.py` is a
+   **database** transaction — it does not roll back index files. So a rebuild
+   killed midway (probe kill, OOM, node event) leaves a v2 sentinel over an
+   empty-or-partial index; on the next boot `needs_rebuild()` compares
+   `schema_version`, `language` and `schema_fingerprint`, finds all three
+   current, returns **False**, and the pod comes up **Ready on a broken
+   index**.
+
+   A rebuild that produces an *empty* index therefore leaves every structural
+   signal green — pod Ready, HTTP 200, HelmRelease Ready, **and the sentinel
+   reading v2** — while search silently returns nothing. That is exactly the
+   shape-vs-contents failure class
+   (`docs/sops/verification-contents-not-shape.md`), so §4 asserts
+   **index-side** document membership and hit *counts* against measured
+   baselines — never the sentinel alone, and never a database count, which
+   never touches the index.
 
 2. **One Django migration runs**: `0026_alter_document_archive_checksum_and_more`
    (live DB is at `0025_workflowaction_apply_ai_suggestions`). It is two
@@ -303,36 +373,56 @@ These are the numbers that make §4 able to fail. Measured 2026-09-20 on 3.1.3;
 **re-measure in-window**, do not reuse these values if days have passed.
 
 ```bash
-PPOD=$(kubectl get pod -n office -l app.kubernetes.io/name=paperless-ngx \
-  --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
-
-# (a) version + index sentinel + document count + REAL search hit counts
-kubectl exec -n office "$PPOD" -c paperless-ngx -- \
+# (a) version + index sentinel + INDEX-SIDE membership + REAL search hit counts.
+#     Exec via deploy/ so no captured pod name can go stale (§4/§5 do the same).
+kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- \
   python3 /usr/src/paperless/src/manage.py shell -c "
 from paperless.version import __version__
 from documents.models import Document
 from documents.search import get_backend, SearchMode
 print('VERSION', '.'.join(map(str, __version__)))
 print('SETTINGS', open('/usr/src/paperless/data/index/.index_settings.json').read().strip())
-print('DOCS', Document.objects.count())
 b = get_backend()
+db  = set(Document.objects.values_list('pk', flat=True))
+idx = set(b.search_ids('*', None, search_mode=SearchMode.QUERY))
+print('DOCS', len(db))
+print('INDEXED', len(idx))
+print('MISSING_FROM_INDEX', len(db - idx))
+print('EXTRA_IN_INDEX', len(idx - db))
 for term in ['rechnung','versicherung','vertrag','januar']:
     print('HITS', term, len(b.search_ids(term, None, search_mode=SearchMode.TEXT)))
 "
 ```
 
-Measured baseline on 3.1.3 (2026-09-20):
+Measured baseline on 3.1.3 (2026-09-20, re-measured after the review):
 
 ```
 VERSION  3.1.3
 SETTINGS {"schema_version": 1, "language": "de"}
 DOCS     973
+INDEXED  976
+MISSING_FROM_INDEX 0
+EXTRA_IN_INDEX     3
 HITS rechnung 566 · versicherung 405 · vertrag 179 · januar 45
 ```
 
+> **Why `INDEXED` is 976 and not 973, and why CA1 must NOT assert equality.**
+> Measured, not assumed: `search_ids('*', …, QUERY)` returned 976 ids, all
+> distinct (`len(set(ids)) == 976`, no duplicates), containing **every one of
+> the 973 database pks** plus **3 ids that no longer exist in the database** —
+> stale entries for deleted documents that the live v1 index never dropped.
+> An `INDEXED == 973` gate would therefore FAIL on today's healthy index.
+> The load-bearing limb is `MISSING_FROM_INDEX == 0`; `EXTRA_IN_INDEX` is
+> reported for information only. Note `search_ids` is uncapped by default
+> (v3.2.0 `_backend.py`: `limit=None` → `effective_limit = searcher.num_docs`),
+> so this counts the whole index, not a result page.
+> **After the 3.2.0 rebuild expect `EXTRA_IN_INDEX` to drop to 0** — the
+> rebuild sources every document from the database, so the 3 stale ids cannot
+> survive it. That is a *prediction*, not a gate: do not fail the upgrade on it.
+
 ```bash
 # (b) served UI bundle identity (the ng-select leg's baseline)
-kubectl exec -n office "$PPOD" -c paperless-ngx -- python3 -c "
+kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- python3 -c "
 import hashlib
 for p in ('/usr/src/paperless/static/frontend/en-US/main.js',
           '/usr/src/paperless/static/frontend/en-US/styles.css'):
@@ -342,7 +432,7 @@ for p in ('/usr/src/paperless/static/frontend/en-US/main.js',
 # baseline 2026-09-20: main.js 2933613 c853f88fc4f28392 · styles.css 275917 2f620075dee0af2f
 
 # (c) native-AI config row (DB-stored, NOT GitOps - a restore can silently reset it)
-kubectl exec -n office "$PPOD" -c paperless-ngx -- \
+kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- \
   python3 /usr/src/paperless/src/manage.py shell -c "
 from paperless.config import AIConfig
 c = AIConfig()
@@ -362,16 +452,40 @@ kubectl exec -n office deploy/scan-inbox-validator -- \
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF=$!
 sleep 2
 NOW=$(python3 -c "from datetime import *;print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")
-END=$(python3 -c "from datetime import *;print((datetime.now(timezone.utc)+timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")
-curl -s -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/json' -d '{
+END=$(python3 -c "from datetime import *;print((datetime.now(timezone.utc)+timedelta(hours=3)).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")
+# CAPTURE the result — a silence POST that fails must not be silent (see gate below)
+SIL_CODE=$(curl -s -o /tmp/silence-resp.json -w '%{http_code}' \
+  -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/json' -d '{
   "matchers":[{"name":"namespace","value":"office","isRegex":false,"isEqual":true},
               {"name":"alertname","value":"Kube(Pod|Deployment).*","isRegex":true,"isEqual":true}],
   "startsAt":"'$NOW'","endsAt":"'$END'","createdBy":"maintenance-window-agent",
-  "comment":"paperless-ngx 3.1.3->3.2.0 - index rebuild keeps the pod not-Ready for minutes. auto-expires 2h"}'
+  "comment":"paperless-ngx 3.1.3->3.2.0 - index rebuild keeps the pod not-Ready for minutes. auto-expires 3h"}')
+echo "SILENCE_HTTP $SIL_CODE"; cat /tmp/silence-resp.json; echo
+SIL_ID=$(python3 -c "import json;print(json.load(open('/tmp/silence-resp.json')).get('silenceID',''))" 2>/dev/null)
+echo "SILENCE_ID ${SIL_ID:-NONE}"
+# Read it BACK — the POST echoing an id is not proof the silence is active
+curl -s "localhost:9093/api/v2/silence/$SIL_ID" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin); print('SILENCE_STATE', d['status']['state'], 'ENDS', d['endsAt'])
+except Exception as e: print('SILENCE_READBACK_FAILED', e)
+"
 kill $PF 2>/dev/null
 
 runbooks/update-marker.sh add paperless-ngx office 2 "3.1.3->3.2.0 + full search index rebuild"
 ```
+
+**GATE — the silence must exist before the roll.** PASS requires
+`SILENCE_HTTP 200`, a non-empty `SILENCE_ID`, and `SILENCE_STATE active`.
+*What failure prints:* `SILENCE_HTTP 000` (port-forward never came up —
+`curl` writes no body, so `SILENCE_ID NONE`), `SILENCE_HTTP 400` with a
+`"failed to parse"` body (a malformed `startsAt`/matcher), or
+`SILENCE_READBACK_FAILED`. Any of those means the rebuild's multi-minute
+not-Ready window **will page the operator** — fix it or accept the pages
+deliberately; do not proceed assuming silence. `endsAt` is 3 h (was 2 h): the
+startup budget in §3.2 is now up to 10 min and the silence must outlive a
+rollback too. Verified read-only 2026-09-20: Alertmanager v0.34.0,
+`GET /api/v2/silences` → 200.
 
 ## 3) Steps
 
@@ -391,20 +505,129 @@ curl -sI -H "Authorization: Bearer $TOKEN" \
 # docker-content-digest: sha256:22dc423ff48ac1629977dbf0c9625ba9f60d3bd1291a2ff173c65351984a14c2
 ```
 
-**3.2 — Disable Flux upgrade remediation for this run.** This is not optional
-here. The HelmRelease carries `upgrade.remediation.retries: 1` **and**
-`maxHistory: 1`. The new pod stays not-Ready for the whole index rebuild; if
-that outruns the Helm timeout, Flux rolls the release back *mid-rebuild* — the
-exact "Recreate + Flux rollback thrash" trap in `docs/sops/application-update.md`
-§2. Edit `helmrelease.yaml` lines 21-24 to:
+**3.2 — Give the rebuild room to finish: raise the startup budget, raise the
+Helm timeout, and disable Flux remediation.** All three, in the same commit as
+the tag bump. Disabling Flux remediation alone is **not** enough — it defends
+against the wrong thing, in the wrong order.
 
-```yaml
-  upgrade:
-    cleanupOnFail: true
-    remediation:
-      retries: 0
-      remediateLastFailure: false   # RESTORE to retries:1 in step 3.9
+Measured live 2026-09-20, and reproduced by `helm template` against the real
+HelmRelease values, the three deadlines that can kill a rebuild are:
+
+| Deadline | Budget | Source |
+|---|---|---|
+| **kubelet `startupProbe`** | **150 s** | `failureThreshold: 30` × `periodSeconds: 5`, `initialDelaySeconds: 0`, `tcpSocket: 8000` — live on `deploy/paperless-ngx` |
+| Helm operation timeout | 300 s | `spec.timeout` is unset → helm-controller default `5m0s` (confirmed in the HelmRelease CRD v2 schema) |
+| Flux upgrade remediation | on failure | `upgrade.remediation.retries: 1` + `maxHistory: 1` |
+
+**The kubelet fires FIRST, at 150 s, and §3.8's old advice to "expect the pod to
+sit not-Ready" would have trained the operator to watch it happen.** Because
+`svc-webserver` waits on `init-complete` which waits on `init-search-index`
+(§1.2), port 8000 does not listen during the rebuild — so every startup probe
+fails, and at 30 consecutive failures the kubelet **kills the container and
+restarts it**, mid-rebuild, leaving the v2 sentinel over a partial index (§1.2).
+The current no-op startup consumes **28 s** of that budget already (live pod:
+container `startedAt` 22:00:49 → `Ready` 22:01:17; the 41 s pod-level figure
+includes the two initContainers, which run *before* the probe budget starts),
+leaving only ~122 s for a full rebuild of 973 documents / 5.0 MB of extracted
+text / 35 MB of on-disk index.
+
+**The rebuild's real duration is UNMEASURED** — it cannot be measured without
+performing the upgrade, and this plan does not guess at it. Instead the budget
+is raised well past any plausible value and the actual number is recorded in
+§3.8. Raising only the probe would just move the failure to the 300 s Helm
+timeout, so `spec.timeout` moves too.
+
+Apply all three edits (anchored, dry-tested on a scratch copy 2026-09-20 — the
+`install:` block is deliberately left alone):
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+python3 - <<'PY'
+import pathlib
+p = pathlib.Path("kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml")
+s = p.read_text()
+edits = [
+ ("spec:\n  interval: 30m\n",
+  "spec:\n  interval: 30m\n  timeout: 20m                    # RESTORE (remove) in step 3.9\n"),
+ ("  upgrade:\n    cleanupOnFail: true\n    remediation:\n      retries: 1\n",
+  "  upgrade:\n    cleanupOnFail: true\n    remediation:\n"
+  "      retries: 0                    # RESTORE to 1 in step 3.9\n"
+  "      remediateLastFailure: false   # RESTORE (remove) in step 3.9\n"),
+ ("    image:\n      repository: ghcr.io/paperless-ngx/paperless-ngx\n",
+  "    probes:\n      startup:\n        spec:\n"
+  "          failureThreshold: 120     # RESTORE to 30 in step 3.9\n"
+  "    image:\n      repository: ghcr.io/paperless-ngx/paperless-ngx\n"),
+]
+for old, new in edits:
+    assert s.count(old) == 1, f"anchor not unique/found: {old[:40]!r}"
+    s = s.replace(old, new)
+p.write_text(s)
+print("STRUCTURAL EDIT OK")
+PY
 ```
+
+Resulting diff (verified on a scratch copy — this is the exact output):
+
+```diff
+@@ -6,6 +6,7 @@
+   namespace: office
+ spec:
+   interval: 30m
++  timeout: 20m                    # RESTORE (remove) in step 3.9
+   chart:
+     spec:
+       chart: paperless-ngx
+@@ -21,13 +22,18 @@
+   upgrade:
+     cleanupOnFail: true
+     remediation:
+-      retries: 1
++      retries: 0                    # RESTORE to 1 in step 3.9
++      remediateLastFailure: false   # RESTORE (remove) in step 3.9
+   uninstall:
+     keepHistory: false
+   values:
+     global:
+       security:
+         allowInsecureImages: true
++    probes:
++      startup:
++        spec:
++          failureThreshold: 120     # RESTORE to 30 in step 3.9
+     image:
+       repository: ghcr.io/paperless-ngx/paperless-ngx
+       tag: "3.1.3"
+```
+
+`failureThreshold: 120` × `periodSeconds: 5` = **600 s (10 min)** of startup
+budget; `timeout: 20m` keeps Helm from failing the release underneath it.
+
+**Proof the probe override actually reaches the container** (this is a
+gabe565 chart that inherits the `bjw-s` common library 1.5.1 — the key is
+*not* obvious, and setting the wrong one fails silently as "no change"). Dry-run
+2026-09-20: `helm template` the real values before and after the edit and diff
+the rendered `Deployment` — the ONLY two differences are the image tag and the
+startup threshold, with `livenessProbe`/`readinessProbe` untouched:
+
+```diff
+-        image: ghcr.io/paperless-ngx/paperless-ngx:3.1.3
++        image: ghcr.io/paperless-ngx/paperless-ngx:3.2.0
+         startupProbe:
+-          failureThreshold: 30
++          failureThreshold: 120
+           initialDelaySeconds: 0
+           periodSeconds: 5
+           tcpSocket:
+             port: 8000
+```
+
+**Accepted trade-off, stated deliberately:** for this one roll a genuinely
+wedged container takes up to 10 min to be restarted instead of 150 s. That is
+the point — a wedged-looking container *is* the expected state here. Liveness
+and readiness are unchanged (`failureThreshold: 3` × `periodSeconds: 10`), so
+once the app is serving, normal failure detection is back to ~30 s. Step 3.9
+restores the 150 s budget; leaving 120 in place would silently weaken startup
+detection for this app forever.
 
 **3.3 — Bump the app pin.** BSD sed, dry-tested on a scratch copy 2026-09-20:
 
@@ -413,14 +636,20 @@ sed -i '' 's|^      tag: "3.1.3"$|      tag: "3.2.0"|' \
   kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml
 ```
 
-Resulting diff line (verified):
+Resulting diff line (verified on a scratch copy **with the §3.2 edit already
+applied**, which is the order the window agent runs them in):
 
 ```
-33c33
+39c39
 <       tag: "3.1.3"
 ---
 >       tag: "3.2.0"
 ```
+
+> The tag sits at line **39**, not 33, once §3.2 has inserted the four-line
+> `probes:` block above it. The `sed` is anchored on the line's *content*
+> (`^      tag: "3.1.3"$`), so it matches either way — but do not be surprised
+> by the line number, and do not "fix" it back to 33.
 
 **3.4 — Bump the validator pin** (the step that is silently skipped if you only
 read the HelmRelease). Dry-tested on a scratch copy:
@@ -444,12 +673,21 @@ Resulting diff line (verified):
 ```bash
 grep -n '3\.2\.0' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml \
                   kubernetes/apps/office/paperless-ngx/app/validator-deployment.yaml
-# expect EXACTLY two lines: helmrelease.yaml:33 and validator-deployment.yaml:34
+# expect EXACTLY two lines: helmrelease.yaml:39 and validator-deployment.yaml:34
 grep -rn '3\.1\.3' kubernetes/apps/office/paperless-ngx/
 # expect NO hits
-git diff --stat
-# expect exactly 2 files changed
+git diff --stat -- kubernetes/apps/office/paperless-ngx/
+# expect exactly 2 files changed: helmrelease.yaml, validator-deployment.yaml
+git diff -- kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml
+# expect the §3.2 diff (timeout / retries / probes) PLUS the one tag line
 ```
+
+> **The `git diff --stat` MUST be path-scoped.** Measured 2026-09-20: this is a
+> shared worktree and it currently carries an unstaged `runbooks/health-check.sh`
+> (+80 lines) owned by another session, so a bare `git diff --stat` reports
+> **2 files changed** for the wrong reason and would keep reporting a plausible
+> count no matter what a concurrent session does. Scope it, or the gate passes
+> on someone else's work.
 
 **3.6 — Validate the manifests:**
 
@@ -474,8 +712,14 @@ pikepdf runtime.
 rebuilt from the database at container start (s6 init-search-index runs
 document_index reindex --if-needed). Django migration 0026 also applies.
 
-Flux upgrade remediation is temporarily disabled so the rollback cannot fire
-mid-rebuild; restored in a follow-up commit.
+The webserver does not listen until that rebuild finishes, so three limits are
+raised for this roll and RESTORED in a follow-up commit:
+  - values.probes.startup.spec.failureThreshold 30 -> 120 (150s -> 600s), or the
+    kubelet restarts the container mid-rebuild and leaves a v2 index sentinel
+    over a partial index;
+  - spec.timeout 20m (default 5m), so Helm does not fail underneath it;
+  - upgrade.remediation retries 0 + remediateLastFailure false, so a Flux
+    rollback cannot fire mid-rebuild.
 
 Plan: runbooks/maintenance/plans/paperless-ngx-3.2.0.md
 EOF
@@ -490,25 +734,99 @@ git show --stat HEAD          # MUST be exactly the two files above
 git push
 ```
 
-**3.8 — Watch the reconcile and the rebuild.** Expect the pod to sit not-Ready
-while the index rebuilds; that is the plan working, not failing:
+**3.8 — Watch the reconcile and the rebuild, against a clock.** A not-Ready pod
+is expected here — but it is expected **for a bounded time**, and "expect
+not-Ready" is not a licence to ignore it. Start a timer:
 
 ```bash
 flux reconcile kustomization paperless-ngx -n office --with-source
+START=$(date +%s)
 kubectl get pods -n office -l app.kubernetes.io/name=paperless-ngx -w   # Ctrl-C when 1/1
+echo "READY_AFTER $(( $(date +%s) - START ))s"
 
-# the rebuild's own log line:
-PPOD=$(kubectl get pod -n office -l app.kubernetes.io/name=paperless-ngx \
-  --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
-kubectl logs -n office "$PPOD" -c paperless-ngx | grep -iE 'init-index|schema version mismatch|fingerprint mismatch|up to date|reindex'
+# the rebuild's own log lines (deploy/ target - no captured pod name to go stale)
+kubectl logs -n office deploy/paperless-ngx -c paperless-ngx \
+  | grep -iE 'init-index|schema version mismatch|fingerprint mismatch|up to date|reindex'
 ```
 
-Record how long the pod took to reach Ready — it sizes every future paperless
-bump.
+**Expected:** `[init-index] Checking search index...` followed by
+`Search index schema version mismatch - rebuilding.` (the exact string
+`needs_rebuild()` logs when `schema_version` differs), then Ready.
 
-**3.9 — After §4 passes, restore remediation** (`retries: 1`,
-`remediateLastFailure` removed) and commit with `--only` + the same
-subject check.
+**Two things that are NOT the plan working — act, do not wait:**
+
+- **`RESTARTS` incrementing while not-Ready.** That is the startupProbe killing
+  the rebuild. With §3.2 applied it should be impossible inside 10 min; if you
+  see it, §3.2 did not take effect — check the live probe with
+  `kubectl get deploy -n office paperless-ngx -o jsonpath='{.spec.template.spec.containers[0].startupProbe.failureThreshold}'`
+  (must print `120`, not `30`). **A restart here means the index is now
+  sentinel-v2 over a partial rebuild** (§1.2), so §4's CA1 is the gate that
+  matters and a pass on a restarted pod still needs CA1 green.
+- **Ready never arrives within ~10 min.** The budget is exhausted. Do not
+  "give it another minute" — go to §5.
+
+```bash
+# if it is still not Ready, this tells you WHICH deadline you are against
+kubectl get pods -n office -l app.kubernetes.io/name=paperless-ngx \
+  -o custom-columns='READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount'
+kubectl get hr -n office paperless-ngx -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+```
+
+**Record `READY_AFTER` in the close-out and in `docs/sops/paperless.md`.** It is
+the number this plan could not measure in advance, it sizes every future
+paperless bump, and it is what lets the next planner set a real budget instead
+of a generous one.
+
+**3.9 — After §4 passes, restore ALL THREE §3.2 changes.** Leaving any of them
+in place silently weakens this app forever: the startup budget stays at 10 min,
+Helm waits 20 min on every future operation, and Flux's rollback safety net
+stays off. Anchored and dry-tested on a scratch copy 2026-09-20:
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+python3 - <<'PY'
+import pathlib
+p = pathlib.Path("kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml")
+s = p.read_text()
+edits = [
+ ("  timeout: 20m                    # RESTORE (remove) in step 3.9\n", ""),
+ ("      retries: 0                    # RESTORE to 1 in step 3.9\n"
+  "      remediateLastFailure: false   # RESTORE (remove) in step 3.9\n",
+  "      retries: 1\n"),
+ ("    probes:\n      startup:\n        spec:\n"
+  "          failureThreshold: 120     # RESTORE to 30 in step 3.9\n", ""),
+]
+for old, new in edits:
+    assert s.count(old) == 1, f"restore anchor not unique/found: {old[:40]!r}"
+    s = s.replace(old, new)
+p.write_text(s)
+print("RESTORE OK")
+PY
+
+# PROOF the restore is complete: the ONLY surviving difference from the
+# pre-upgrade file must be the image tag. Verified on a scratch copy — this
+# exact one-hunk diff is the expected output.
+git diff -- kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml
+```
+
+```diff
+-      tag: "3.1.3"
++      tag: "3.2.0"
+```
+
+**GATE:** that diff shows **one hunk, the tag line, and nothing else**. Any
+surviving `timeout:`, `retries: 0`, `remediateLastFailure:` or `probes:` line
+means the restore did not complete. Confirm against the live cluster after
+Flux reconciles, not just against the file:
+
+```bash
+kubectl get deploy -n office paperless-ngx \
+  -o jsonpath='{.spec.template.spec.containers[0].startupProbe.failureThreshold}{"\n"}'   # must be 30
+kubectl get hr -n office paperless-ngx \
+  -o jsonpath='{.spec.timeout} {.spec.upgrade.remediation.retries}{"\n"}'                 # must be "  1" (timeout empty, retries 1)
+```
+
+Commit with `--only` + the same `git log -1 --format=%s` subject check as §3.7.
 
 ## 4) Verification
 
@@ -528,32 +846,74 @@ kubectl get pods -n office -l app.kubernetes.io/name=paperless-ngx \
 > Verify the running pod's image, not `kubectl rollout status` — that reports
 > success against the OLD generation mid-HelmRelease-upgrade.
 
-### CONTENTS ASSERTION 1 — the index actually migrated AND is not empty
+### CONTENTS ASSERTION 1 — every document is actually IN the rebuilt index
 
-**The property:** the rebuilt index holds the whole library, on schema v2.
-**Measured by:** the sentinel file + a live document count, in one call.
-**Compared to:** §2.4(a).
+**The property:** the rebuilt v2 index contains the whole library — not that a
+rebuild was *attempted*, and not that the database still has 973 rows.
+**Measured by:** set difference between the database's primary keys and the ids
+the **index itself** returns.
+**Compared to:** §2.4(a) (`DOCS 973`, `MISSING_FROM_INDEX 0`).
 
 ```bash
-PPOD=$(kubectl get pod -n office -l app.kubernetes.io/name=paperless-ngx \
-  --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n office "$PPOD" -c paperless-ngx -- \
+kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- \
   python3 /usr/src/paperless/src/manage.py shell -c "
 from paperless.version import __version__
 from documents.models import Document
+from documents.search import get_backend, SearchMode
 print('VERSION', '.'.join(map(str, __version__)))
 print('SETTINGS', open('/usr/src/paperless/data/index/.index_settings.json').read().strip())
-print('DOCS', Document.objects.count())
+db  = set(Document.objects.values_list('pk', flat=True))
+idx = set(get_backend().search_ids('*', None, search_mode=SearchMode.QUERY))
+print('DOCS', len(db))
+print('INDEXED', len(idx))
+print('MISSING_FROM_INDEX', len(db - idx))
+print('EXTRA_IN_INDEX', len(idx - db))
 "
 ```
 
-PASS: `VERSION 3.2.0`; `SETTINGS` shows `"schema_version": 2` **and** a
-`"schema_fingerprint"` key; `DOCS` is 973 (or 974 after the §4 CA3 test doc).
+PASS, all four limbs:
 
-What failure prints: a rebuild that never ran leaves `"schema_version": 1` with
-no fingerprint — and because 3.2.0's `needs_rebuild()` returns True on that, the
-pod would be looping the rebuild rather than serving. A rebuild that ran against
-an empty/wrong database prints `DOCS 0` while the pod is perfectly Ready.
+1. `VERSION 3.2.0`
+2. `SETTINGS` shows `"schema_version": 2` **and** a `"schema_fingerprint"` key
+3. **`MISSING_FROM_INDEX 0`** ← the load-bearing limb
+4. `INDEXED` ≥ `DOCS` (973, or 974 after the CA3 test document)
+
+`EXTRA_IN_INDEX` is informational: it was **3** on 3.1.3 (stale ids for deleted
+documents) and should fall to **0** after a rebuild, which sources every
+document from the database. Do not fail the upgrade on it.
+
+**What failure prints — and why the obvious gates do not catch it.** This
+assertion exists because of a specific race, confirmed in the v3.2.0 source
+(`_backend.py`, `TantivyBackend.rebuild()`): the index is wiped, the new v2
+index is created, **`_write_sentinels()` stamps `schema_version: 2` + the
+fingerprint, and only THEN does the `writer.add_document()` loop start.** The
+`transaction.atomic()` in `document_index.py` is a database transaction and does
+not roll back index files.
+
+So a rebuild killed midway — by the startupProbe (§3.2), an OOM, or a node
+event — leaves this state:
+
+| Signal | Reads | Catches the failure? |
+|---|---|---|
+| pod Ready / HTTP 200 | green | **no** — `needs_rebuild()` sees a current sentinel and returns False, so the next boot serves immediately |
+| `SETTINGS schema_version: 2` + fingerprint | green | **no** — written before the first document |
+| `DOCS 973` | green | **no** — `Document.objects.count()` is a DATABASE count that never touches the index |
+| **`MISSING_FROM_INDEX`** | **973 (or a partial count)** | **yes** |
+
+A killed rebuild therefore prints `VERSION 3.2.0`, a v2 `SETTINGS` line and
+`DOCS 973` — three green limbs — alongside `INDEXED 0` and
+`MISSING_FROM_INDEX 973`. **An earlier draft of this plan asserted only those
+three green limbs and would have passed the exact failure the plan exists to
+catch.**
+
+If `search_ids('*', …)` raises instead of returning, that is a FAIL, not a pass —
+do not swallow the exception. (Verified on the live 3.1.3 index: the query
+returns the whole index, uncapped — v3.2.0 `_backend.py` uses
+`effective_limit = searcher.num_docs` when `limit` is None.)
+
+> **Do NOT assert on `data/index/meta.json` segment sums.** Measured live:
+> `sum(max_doc)` = 976 against 973 real documents — segment bookkeeping counts
+> superseded segments. An equality check there fails on a healthy index.
 
 > **Do NOT assert on `data/index/meta.json` segment sums.** Measured live:
 > `sum(max_doc)` = 976 against 973 real documents — segment bookkeeping counts
@@ -567,7 +927,7 @@ content, not merely the same count.
 **Compared to:** the §2.4(a) baseline (2026-09-20: 566 / 405 / 179 / 45).
 
 ```bash
-kubectl exec -n office "$PPOD" -c paperless-ngx -- \
+kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- \
   python3 /usr/src/paperless/src/manage.py shell -c "
 from documents.search import get_backend, SearchMode
 b = get_backend()
@@ -596,7 +956,7 @@ schema, not just the DB insert):
 
 ```bash
 kubectl logs -n office deploy/scan-inbox-validator --since=10m | grep -i 'moved -> consume'
-kubectl exec -n office "$PPOD" -c paperless-ngx -- \
+kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- \
   python3 /usr/src/paperless/src/manage.py shell -c "
 from documents.models import Document
 from documents.search import get_backend, SearchMode
@@ -624,7 +984,7 @@ CIFS consume path):** re-OCR one already-clean document and assert it comes back
 searchable, plus assert the validator loop still turns (CA4):
 
 ```bash
-kubectl exec -n office "$PPOD" -c paperless-ngx -- \
+kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- \
   python3 /usr/src/paperless/src/manage.py shell -c "
 from documents.bulk_edit import reprocess
 from documents.models import Document
@@ -663,7 +1023,7 @@ different bundle, not as a failed build.
 **Compared to:** §2.4(b) (`main.js` 2933613 bytes / `c853f88fc4f28392`).
 
 ```bash
-kubectl exec -n office "$PPOD" -c paperless-ngx -- python3 -c "
+kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- python3 -c "
 import hashlib
 for p in ('/usr/src/paperless/static/frontend/en-US/main.js',
           '/usr/src/paperless/static/frontend/en-US/styles.css'):
@@ -692,7 +1052,7 @@ OPOD=$(kubectl get pod -n ai -l app.kubernetes.io/name=openclaw -o jsonpath='{.i
 kubectl exec -n ai "$OPOD" -- paperless search ARAG | head -5
 # 200 + results. A 401 is a TOKEN failure - never read it as "documents are missing".
 
-kubectl logs -n office "$PPOD" -c paperless-ngx --since=30m \
+kubectl logs -n office deploy/paperless-ngx -c paperless-ngx --since=30m \
   | grep -iE "1366|operationalerror|mailbox.login|login failed"
 # expect NO hits (grep is case-insensitive on purpose - upstream mixes case)
 ```
@@ -700,7 +1060,7 @@ kubectl logs -n office "$PPOD" -c paperless-ngx --since=30m \
 ### 4.7 — The RAG index must NOT have silently escalated to a full re-embed
 
 ```bash
-kubectl exec -n office "$PPOD" -c paperless-ngx -- \
+kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- \
   python3 /usr/src/paperless/src/manage.py shell -c "
 from paperless.config import AIConfig
 from paperless_ai.embedding import get_configured_model_name
@@ -744,7 +1104,7 @@ Django does not error on an applied migration it does not know. Reverse it only
 if a later step demands a byte-exact schema:
 
 ```bash
-kubectl exec -n office "$PPOD" -c paperless-ngx -- \
+kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- \
   python3 /usr/src/paperless/src/manage.py migrate documents 0025
 ```
 
@@ -756,15 +1116,23 @@ Both operations are `AlterField`, which is reversible — this is why
 ```bash
 kubectl get deploy -n office paperless-ngx scan-inbox-validator \
   -o custom-columns='NAME:.metadata.name,IMAGE:.spec.template.spec.containers[*].image'   # both :3.1.3
-kubectl exec -n office "$PPOD" -c paperless-ngx -- \
+# the revert also restores the §3.2 changes (same commit): probe budget back to
+# 30, spec.timeout gone, upgrade remediation back to retries:1
+kubectl get deploy -n office paperless-ngx \
+  -o jsonpath='{.spec.template.spec.containers[0].startupProbe.failureThreshold}{"\n"}'   # 30
+kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- \
   python3 /usr/src/paperless/src/manage.py shell -c "
 from paperless.version import __version__
+from documents.models import Document
 from documents.search import get_backend, SearchMode
 print('VERSION', '.'.join(map(str, __version__)))
 print('SETTINGS', open('/usr/src/paperless/data/index/.index_settings.json').read().strip())
+db  = set(Document.objects.values_list('pk', flat=True))
+idx = set(get_backend().search_ids('*', None, search_mode=SearchMode.QUERY))
+print('MISSING_FROM_INDEX', len(db - idx))
 print('HITS', len(get_backend().search_ids('rechnung', None, search_mode=SearchMode.TEXT)))
 "
-# expect VERSION 3.1.3, schema_version 1, HITS back at ~566 (NOT 0)
+# expect VERSION 3.1.3, schema_version 1, MISSING_FROM_INDEX 0, HITS back at ~566 (NOT 0)
 ```
 
 **Only if the index volume itself is damaged** (not for a failed upgrade): the
@@ -773,10 +1141,26 @@ index is fully derived from the database and can always be rebuilt with
 backup (`docs/sops/backup.md` §"Restore from Backup") only if the volume is
 lost — never as the first response to a bad upgrade.
 
-Finally: clear the marker and drop the silence.
+Finally: clear the marker and drop the silence (it auto-expires after 3 h, but
+leave nothing muted once the roll is settled either way).
 
 ```bash
 runbooks/update-marker.sh clear paperless-ngx
+
+# expire the §2.5 silence early, using the id captured there
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF=$!
+sleep 2
+curl -s -o /dev/null -w 'SILENCE_DELETE %{http_code}\n' -X DELETE "localhost:9093/api/v2/silence/$SIL_ID"
+curl -s "localhost:9093/api/v2/silence/$SIL_ID" \
+  | python3 -c "import sys,json;print('SILENCE_STATE', json.load(sys.stdin)['status']['state'])"
+kill $PF 2>/dev/null
+# expect SILENCE_DELETE 200 then SILENCE_STATE expired. If $SIL_ID is empty
+# (fresh shell), list and match on the comment instead:
+#   curl -s localhost:9093/api/v2/silences | python3 -c "
+#   import sys,json
+#   for s in json.load(sys.stdin):
+#       if 'paperless-ngx 3.1.3->3.2.0' in s.get('comment',''):
+#           print(s['id'], s['status']['state'])"
 ```
 
 ## 6) Interference notes
@@ -794,26 +1178,62 @@ runbooks/update-marker.sh clear paperless-ngx
   `paperless-ngx-3.2.0` (it predates this file). `--validate` checks that refs
   resolve, not that they are mutual — whoever next edits that plan should add
   the back-reference.
-- **The window's instrument is not shared here.** §4 deliberately reads the
-  paperless API, the pod and the served static assets — **never Prometheus** —
-  so a same-night `kube-prometheus-stack-91.4.0` does not blind this plan's
-  verification, and no conflict is declared on that basis.
+- **The window's INSTRUMENT is not shared — but a shared surface IS touched.**
+  §4 deliberately reads the paperless API, the pod and the served static assets
+  — **never Prometheus** — so a same-slot `kube-prometheus-stack-91.4.1` cannot
+  blind any gate in this plan, and no `conflicts_with` is declared on that
+  basis. That is *not* the same as "monitoring is untouched": **§2.5 WRITES a
+  silence into Alertmanager**, so `touches.shared` now names `monitoring`
+  (corrected 2026-09-20 — it previously read `[]` and asserted the stack was not
+  involved at all). `kube-prometheus-stack-91.4.1` declares
+  `shared: [monitoring]`, touches `statefulset/alertmanager-kube-prometheus-stack`
+  and documents a ~1 min Alertmanager blind spot during its restart. Consequence
+  if they share a slot: **take the §2.5 silence AFTER that plan's Alertmanager
+  restart has settled**, or the silence is created against an instance that is
+  about to restart and the rebuild's not-Ready window pages the operator anyway.
+  The §2.5 read-back gate (`SILENCE_STATE active`) is what catches that — it is
+  the reason the silence is now verified rather than fire-and-forget.
+  That plan does **not** list this one in `conflicts_with`; asymmetric
+  declarations have been honoured symmetrically since 2026-09-15, so this stays
+  a scheduling *warning* by design, not a veto.
 - **`nextcloud-34.0.4` shares namespace `office` only.** No shared resource, no
-  shared datastore, no shared volume. Namespace overlap alone is a warning, not
-  a veto; they can share a slot if the clock allows (45 + 50 against a 90-min
-  attended window is tight — sequence, do not parallelize).
-- **Expect a not-Ready pod for minutes, and do not treat it as failure.** The
-  index rebuild runs as a blocking s6 oneshot before the app serves. This is why
-  step 3.2 disables Flux remediation: with `retries: 1` + `maxHistory: 1`, a
-  rebuild that outruns the Helm timeout gets rolled back mid-flight and
-  `helm rollback` cannot reach the previous revision. **Step 3.9 must restore
-  `retries: 1` — a plan that leaves remediation off silently removes Flux's
-  safety net from this app forever.**
-- **The rebuild's duration is the one number this plan could not measure**
-  (it cannot run without doing the upgrade). 973 documents / ~35 MB of index on
-  a healthy Longhorn volume should be minutes, and `est_duration_min: 50`
-  budgets for it, but **record the actual Ready time in §3.8** — it sizes every
-  future paperless bump and belongs in the SOP afterwards.
+  shared datastore, no shared volume (its `touches` are its own HelmRelease,
+  Deployments, cron, PVC, MariaDB StatefulSet and Redis; `shared: []`).
+  Namespace overlap alone is a warning, not a veto.
+  **Window arithmetic, corrected 2026-09-20** — the earlier "45 + 50 against a
+  90-min window is tight" compared two plans that are not in the same slot:
+  `nextcloud-34.0.4` is scheduled `sun-attended:2026-09-20`, and **sun-attended
+  is 200 min, not 90** (raised from 150 on 2026-09-12). That slot is also
+  already carrying `absenty-drop-npm-runtime` (60 min) alongside it, both
+  `awaiting-go`. **The slot this plan is sized against is `sat-attended`, which
+  is the 90-min one** — 50 min of work there leaves a 40-min rollback budget.
+  So the two plans are not competing for the same 90 minutes at all; if a
+  scheduler ever does put them in one slot, sequence rather than parallelize.
+- **A not-Ready pod is expected — but it is BOUNDED, and the kubelet is the
+  first thing that would have killed it.** The index rebuild runs as a blocking
+  s6 oneshot (`init-search-index` → `init-complete` → `svc-webserver`, verified
+  live), so port 8000 does not listen while it runs — and the chart's
+  `startupProbe` is a `tcpSocket` on exactly that port with a **150 s** budget
+  (`failureThreshold: 30` × `periodSeconds: 5`). The no-op startup already eats
+  28 s of it. **An earlier draft of this plan defended only against Flux and
+  told the operator to expect a not-Ready pod — which would have trained them to
+  watch the kubelet restart the container mid-rebuild.** §3.2 therefore raises
+  three limits together (probe → 600 s, `spec.timeout` → 20 m, remediation off);
+  raising only one just moves the failure to the next deadline. **§3.9 must
+  restore all three** — left in place they permanently weaken startup detection,
+  slow every future Helm operation, and remove Flux's rollback safety net from
+  this app.
+- **The rebuild's duration is the one number this plan could not measure, and
+  it is not guessed at.** It cannot be measured without performing the upgrade.
+  The corpus is measured — 973 documents, 5,197,578 characters of extracted text
+  (~5.0 MB), 35 MB of on-disk index, `du -sm` live 2026-09-20 — but *how long
+  tantivy takes to re-index that* is **unverified**. Rather than assert a
+  number, §3.2 raises the budget far past any plausible value (600 s) and §3.8
+  **records the actual `READY_AFTER`**. Feed that number into
+  `docs/sops/paperless.md` afterwards: the next paperless bump should set a
+  real budget, not another generous one. `est_duration_min: 50` covers the roll
+  + verification + a 10-min worst-case rebuild inside the 90-min sat-attended
+  slot.
 - **`Recreate` on both Deployments is load-bearing**, not incidental:
   `paperless-data` is RWO on `longhorn-static` with `replicas: 1`. Under
   `RollingUpdate` the surge pod deadlocks on Multi-Attach. The premise

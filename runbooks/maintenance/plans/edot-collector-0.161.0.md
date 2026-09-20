@@ -19,14 +19,26 @@ risk: medium                      # NOT from likelihood — the changelog is cle
                                   # (§1.2). From blast radius + failure MODE:
                                   # single-replica sole ingestion path for every
                                   # namespace, and it fails SILENTLY. See §1.4.
-est_duration_min: 40              # 8 pre-checks (incl. the validate pod + four
-                                  # baselines) + 3 edit/commit/push + 4 reconcile
-                                  # and Recreate roll + 15 SETTLE (the rate gates
-                                  # in §4 need a 15m window that STARTS after the
-                                  # new pod is Ready — this is not padding, it is
-                                  # the measurement) + 10 verification.
-                                  # Prior comparable plan (0.158->0.160) was 25m
-                                  # and did not budget the settle honestly.
+est_duration_min: 70              # RAISED from 40 on 2026-09-20 review. 8 pre-checks
+                                  # (incl. the validate pod + baselines) + 3
+                                  # edit/commit/push + 4 reconcile and Recreate roll
+                                  # + 45 SETTLE + 10 verification.
+                                  # THE SETTLE IS 45m, NOT 15m, AND THAT IS THE
+                                  # MEASUREMENT, NOT PADDING. §4.4's per-node kmsg
+                                  # gate must read a window that lies ENTIRELY after
+                                  # the roll (a straddling window passes on pre-roll
+                                  # lines from a node that has since gone silent),
+                                  # and [45m] is the SHORTEST window with a real
+                                  # floor. Measured 2026-09-20 over 7d, per node:
+                                  #   [15m] min 0/0/0     zero 6.5%/10.7%/13.1%
+                                  #   [30m] min 0/0/0     zero 0.9%/0.9%/1.5%
+                                  #   [45m] min 3.0/3.0/3.0   zero 0%/0%/0%
+                                  #   [1h]  min 6.0/6.0/6.1   zero 0%/0%/0%
+                                  # FITS `nightly` (90m) BUT ONLY ALONE: the
+                                  # scheduler's budget is duration_min - 
+                                  # STEP0_RESERVE_MIN = 90 - 20 = 70, so this plan
+                                  # consumes the whole nightly budget exactly and
+                                  # cannot share the slot with any other plan (§6).
 needs_reboot: false
 touches:
   namespaces: [monitoring]
@@ -93,15 +105,41 @@ conflicts_with:                   # HARD slot exclusions. window-scheduler.py
                                   # (single replica) mid-verification and puts the
                                   # whole cluster in motion; no assertion in §4
                                   # means anything during it.
-security_ref: null                # No security driver for this image. AR-072 was
-                                  # NARROWED on 2026-09-15 to the description
-                                  # `opentelemetry-operator` and scopes the
-                                  # collector-k8s image (the DAEMON, finding
-                                  # F-ba45c963) — not
-                                  # otel/opentelemetry-collector-contrib, which
-                                  # this plan moves. The config-validation gate in
-                                  # §2.3 therefore stands on the documented 2026-08
-                                  # incident (§1.5), NOT on a rule's reason text.
+  - otel-operator-0.23.0          # ADDED 2026-09-20. That plan's daemon collectors
+                                  # export OTLP into edot-collector.monitoring.svc
+                                  # :4317, and its own §4 proves itself through
+                                  # documents landing in ES *via this collector*. If
+                                  # both roll in one window neither plan's ES gate
+                                  # can attribute a gap to its own change. It
+                                  # ALREADY names `edot-collector-0.161.0` in its
+                                  # conflicts_with (verified 2026-09-20), and
+                                  # window-scheduler.py honours a declaration in
+                                  # EITHER direction (`names_me`, line 264), so the
+                                  # pair is already unschedulable together — this
+                                  # entry makes the guard readable from this side
+                                  # rather than creating it. The §6 claim that the
+                                  # edot-vs-otel-operator collision was "spent"
+                                  # when 0.21.0 executed is corrected below: the
+                                  # mechanism is durable and 0.23.0 is its heir.
+security_ref: F-2a0b50e5          # A security finding DOES exist on the exact image
+                                  # this plan moves, and this plan is its remedy:
+                                  # the finding's own remediation is "newer upstream
+                                  # tag available, bump the image", which is
+                                  # precisely 0.160.0 -> 0.161.0. Contextual tier is
+                                  # MEDIUM (internal, not-in-KEV) — NOT a raw
+                                  # scanner CRITICAL; quote the board's tier, per
+                                  # CLAUDE.md. Bare F-id only: no CVE ids, no counts,
+                                  # no exposure detail in this public repo
+                                  # (docs/sops/vulnerability-disclosure.md).
+                                  # CORRECTION of the pre-review text, which claimed
+                                  # "no security driver for this image". The AR that
+                                  # tags this row is AR-124 (needle
+                                  # `opentelemetry-collector`), not AR-072 (needle
+                                  # `opentelemetry-operator`); AR-072 scopes the
+                                  # DAEMON image (F-ba45c963) and was never the
+                                  # relevant rule here. The config-validation gate
+                                  # in §2.3 still stands on the documented 2026-08
+                                  # incident (§1.5), not on any rule's reason text.
 capability_change: false          # image tag only; no config change, no new
                                   # receiver/exporter/processor, no user-visible
                                   # behaviour. Deliberately kept true by NOT
@@ -112,15 +150,32 @@ rollback_class: git-revert        # primary path is genuinely a one-commit rever
                                   # written by the newer binary — is handled as an
                                   # explicit contingency PROCEDURE in §5.2, not
                                   # waved away.
-finding_refs: []                  # DELIBERATELY EMPTY, and argued — not an
-                                  # oversight. Two separate checks, both run
-                                  # 2026-09-17 with SWEEP_PG_DSN up:
-                                  # (1) There is NO sweep finding for this
-                                  #     component/target to name. `finding list
-                                  #     --section version --limit 60` returns 24
-                                  #     rows with no edot-collector row, and
-                                  #     `finding list --grep 0.161` returns none.
-                                  # (2) F-dc898b50 (the ES-storage/Envoy-cardinality
+finding_refs: [F-cb9182ca]        # CORRECTED 2026-09-20. The pre-review file left
+                                  # this EMPTY on two claims that are both FALSE,
+                                  # now deleted: re-run live with SWEEP_PG_DSN up,
+                                  # `finding list --grep 0.161` DOES return
+                                  # F-cb9182ca, and it IS in `--section version`.
+                                  # F-cb9182ca is this plan's own finding: section
+                                  # `version`, action "0.x release-line move
+                                  # (0.160 -> 0.161) — PLAN lane", first_seen
+                                  # 2026-09-17, last_seen 2026-09-19, resolved_at
+                                  # None. finding-triage.py's plan-or-page pass
+                                  # joins PLAN-lane findings to plans on exactly
+                                  # this field, so without it this plan's own target
+                                  # reads as unplanned and pages the operator after
+                                  # plan_sla_days.
+                                  # NOTE on why it was easy to miss: the row is
+                                  # currently marked `accepted` under AR-124, whose
+                                  # needle is the bare substring
+                                  # `opentelemetry-collector` and over-matches this
+                                  # VERSION row. AR-124's own justification scopes
+                                  # it to CVE rows and says the bump is window-work.
+                                  # That over-match is itself filed as F-e430800e
+                                  # (section `plan`), whose metadata.plans already
+                                  # names THIS plan. Narrowing AR-124 is a policy-DB
+                                  # edit, not a git change — see §6.
+                                  # STILL DELIBERATELY NOT CLAIMED:
+                                  # F-dc898b50 (the ES-storage/Envoy-cardinality
                                   #     finding whose fix lives in THIS directory)
                                   #     is deliberately NOT claimed here, because
                                   #     this plan does not fix it (§1.6). Claiming
@@ -132,10 +187,14 @@ finding_refs: []                  # DELIBERATELY EMPTY, and argued — not an
                                   #     gets its own plan or DECIDE routing.
 status: draft
 window: null                      # the scheduler assigns. Shape: no reboot, no
-                                  # capability change, git-revert, 40m — fits
-                                  # `nightly` (90m). But NOT nightly:2026-09-17,
-                                  # which otel-operator-0.21.0 already holds and
-                                  # which conflicts_with excludes.
+                                  # capability change, git-revert, 70m. Derived
+                                  # execution class is AUTO-NIGHT (read from
+                                  # `maintenance-plan.py --json`, not re-derived),
+                                  # i.e. UNATTENDED — which is why every gate in §4
+                                  # that carries revert authority had to be proven
+                                  # incapable of false-failing (§4.4, §4.5).
+                                  # Fits `nightly` (90m) ONLY ALONE: budget is
+                                  # 90 - STEP0_RESERVE_MIN(20) = 70m exactly.
 premises:
   # Re-checked at EXECUTION time, not trusted from when this was written.
   # Both commands were RUN on 2026-09-17 while writing this plan; premise 2 was
@@ -277,6 +336,15 @@ traces, plus the Talos kmsg sink on `192.168.55.18`. Its characteristic failure 
 simply stops being counted. That is why §4 is built on contents assertions with a
 floor, and why "pod Ready" is explicitly not the gate.
 
+**And the standing alerts cannot catch it either — which is what makes §4
+load-bearing rather than belt-and-braces.** `F-7c88001b` (open, section `plan`)
+records that `EsLogIngestionStalled` and `EsMetricsIngestionStalled` in
+`kubernetes/apps/monitoring/kube-prometheus-stack/app/otel-collector-alerts.yaml`
+are written as `rate(...) == 0`, which returns NO DATA — and therefore does not
+fire — when the series disappears entirely, i.e. in exactly the disappearance
+mode §1.3 describes. Do not treat "no alerts fired" as evidence this bump was
+clean; §4.1's floor and §4.2's two-sided outcome gate are the detection.
+
 ### 1.5 The config-validation gate is mandatory (§2.3)
 
 This deployment has already shipped a config the collector ACCEPTED and
@@ -347,12 +415,23 @@ Run in order. Any failure stops the plan — do not proceed to §3.
 # 2.1 — premises (both re-run mechanically at execution time)
 .venv/bin/python3 runbooks/plan-premises.py edot-collector-0.161.0
 
-# 2.2 — target tag is published and multi-arch (measured while planning:
-# pushed 2026-09-16T03:01:45Z, amd64 present)
+# 2.2 — target tag is published and multi-arch, AND capture the digest that §4's
+# floor will compare against. Measured 2026-09-20: pushed 2026-09-16T03:01:45Z,
+# amd64 present, manifest-list digest
+#   sha256:fd328de2552466ad78385e1b1289c3f2402b1c45f265b252aab1955b42845ac1
 curl -s "https://hub.docker.com/v2/repositories/otel/opentelemetry-collector-contrib/tags/0.161.0" \
-  | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['name'],d['tag_last_pushed'],[i['architecture'] for i in d['images']])"
-# PASS: prints 0.161.0 with linux/amd64 present.
+  | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['name'],d['tag_last_pushed'],d['digest'],[i['architecture'] for i in d['images']])"
+# PASS: prints 0.161.0, a tag_last_pushed, a sha256: digest, with amd64 present.
 # FAILS AS: a 404 body -> KeyError/'httpStatus' -> the tag does not exist.
+#
+# RECORD THE MANIFEST-LIST DIGEST — the top-level `digest`, NOT the per-arch one.
+# This matters and is measured, not assumed: the live pod's imageID today reads
+#   docker.io/otel/opentelemetry-collector-contrib@sha256:799dc6cf12c9...72ad6
+# which is Docker Hub's MANIFEST-LIST digest for 0.160.0. The amd64 digest for
+# 0.160.0 is sha256:5b66b0dc6921... and appears NOWHERE in imageID. Comparing
+# §4's floor against the per-arch digest would therefore false-FAIL on a
+# perfectly good roll.
+TARGET_DIGEST=sha256:fd328de2552466ad78385e1b1289c3f2402b1c45f265b252aab1955b42845ac1
 
 # 2.3 — HARD GATE: validate the LIVE config against the NEW binary.
 # A config the new binary rejects crashloops the entire cluster-wide ingest path.
@@ -367,18 +446,25 @@ echo "validate exit=$?"
 # this plan is BLOCKED — the bump needs a config change first, which is a
 # different plan.
 
-# 2.4 — BASELINES for §4. Record all five numbers; §4 compares against them.
-# Measured 2026-09-17 while planning, for reference (yours will differ):
-#   sent log records 15m      ~39,900
-#   sent metric points 15m    ~3,151,700
-#   docs.processed success 6h ~26,850,000   non-success: EMPTY (= 0, healthy)
-#   cumulativetodelta dropped 1h ~2,624     <- ALREADY NON-ZERO (F-f8801413)
-#   ES logs-generic-default 15m ~38,100 docs; metrics 15m ~1,070,600 docs
+# 2.4 — BASELINES for §4.
+# EVERY BASELINE IS TAKEN OVER THE EXACT WINDOW ITS GATE USES. The pre-review
+# file baselined docs.processed over [6h] but gated it at [15m], and baselined
+# kmsg per-HOUR but gated it at [15m] — a baseline in different units than its
+# gate is not a baseline, it is a number that looks like one.
+# Measured 2026-09-20 for reference (yours will differ):
+#   sent log records [15m]        37,161   (24h range 35,927 - 57,673)
+#   sent metric points [15m]   3,218,414   (24h range 3,217,392 - 3,246,244)
+#   docs.processed success [15m] 1,140,668   non-success: EMPTY (= 0, healthy)
+#   cumulativetodelta dropped [1h]    2.0   <- bursty, see §4.5; NOT a band
+#   kmsg per node [45m]  (see §4.4 — 7d min 3.0/3.0/3.0)
 P=/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query
 kubectl get --raw "${P}?query=sum(increase(otelcol_exporter_sent_log_records_total[15m]))"
 kubectl get --raw "${P}?query=sum(increase(otelcol_exporter_sent_metric_points_total[15m]))"
 kubectl get --raw "${P}?query=sum(increase(otelcol_cumulativetodelta_datapoints_dropped_total[1h]))"
-kubectl get --raw "${P}?query=sum%20by%20(outcome)%20(increase(%7B__name__%3D%22otelcol.elasticsearch.docs.processed_total%22%7D%5B6h%5D))"
+kubectl get --raw "${P}?query=sum%20by%20(outcome)%20(increase(%7B__name__%3D%22otelcol.elasticsearch.docs.processed_total%22%7D%5B15m%5D))"
+# kmsg baseline over the SAME [45m] window §4.4 gates on (pre-roll reference only;
+# §4.4's authoritative read is post-roll):
+kubectl get --raw "${P}?query=sum%20by%20(net_peer_ip)%20(increase(talos_kernel_kmsg_lines_total%5B45m%5D))"
 
 # 2.5 — pre-state is clean (nothing already broken that we would be blamed for)
 kubectl get pods -n monitoring -l app=edot-collector -o wide
@@ -412,30 +498,40 @@ runbooks/update-marker.sh add edot-collector monitoring 4 "0.160.0->0.161.0 bump
 `sed` below was DRY-TESTED on a scratch copy on macOS (BSD sed) while planning;
 the resulting diff is pasted verbatim underneath (authoring rule 3):
 
+The rollout-revision stamp is derived from the EXECUTION date, not hard-coded —
+the pre-review file pinned it to `2026-09-17.1`, which is already stale and would
+stamp a false date on whatever night this actually runs.
+
 ```bash
+REV="$(date -u +%Y-%m-%d).1"
 sed -i '' \
   -e 's|image: otel/opentelemetry-collector-contrib:0.160.0|image: otel/opentelemetry-collector-contrib:0.161.0|' \
-  -e 's|cberg.dev/rollout-revision: "2026-09-13.1"|cberg.dev/rollout-revision: "2026-09-17.1"|' \
+  -e 's|cberg.dev/rollout-revision: ".*"|cberg.dev/rollout-revision: "'"$REV"'"|' \
   kubernetes/apps/monitoring/edot-collector/app/deployment.yaml
 git diff --stat kubernetes/apps/monitoring/edot-collector/app/deployment.yaml
 ```
 
-Expected diff (measured, not predicted):
+DRY-TESTED 2026-09-20 on a scratch copy of the real file on macOS (BSD sed);
+`sed` exited 0 and `diff` returned exactly these two hunks, pasted verbatim
+(authoring rule 3). Note the revision pattern is `".*"`, not a `\s`-class or a
+literal old date: BSD sed has no `\s`, and a literal old date makes the command
+a silent no-op the moment another plan stamps the line first.
 
 ```
 26c26
 <         cberg.dev/rollout-revision: "2026-09-13.1"
 ---
->         cberg.dev/rollout-revision: "2026-09-17.1"
+>         cberg.dev/rollout-revision: "2026-09-20.1"
 40c40
 <           image: otel/opentelemetry-collector-contrib:0.160.0
 ---
 >           image: otel/opentelemetry-collector-contrib:0.161.0
 ```
 
-If the rollout-revision line does not match (another plan touched it first), set
-it by hand — it is traceability only, not functional. If the **image** line does
-not match, STOP: premise 1 has been invalidated since §2.1.
+**Both hunks must be present.** If only hunk 26 appears, the image line did not
+match — STOP: premise 1 has been invalidated since §2.1. If only hunk 40
+appears, the revision line moved; set it by hand (traceability only, not
+functional).
 
 **3. Commit and push** (shared worktree — `--only`, never `git add -A`):
 
@@ -453,8 +549,27 @@ fully terminate and detach before the new one starts, or the replacement blocks
 forever on `Multi-Attach` (`docs/sops/longhorn-rwo-multi-attach.md`). Do **not**
 hand-delete pods mid-roll.
 
+**THE NAMESPACE IS `monitoring`, NOT `flux-system`.** Measured 2026-09-20:
+`kubectl get kustomization -n flux-system edot-collector` returns NotFound, while
+`kubectl get kustomization -A` shows it in `monitoring` (and the Deployment
+carries `kustomize.toolkit.fluxcd.io/namespace: monitoring`). The pre-review file
+said `-n flux-system`, which does not merely error — it fails as a FALSE GREEN:
+the reconcile errors, and the very next `kubectl rollout status` then reports
+"successfully rolled out" instantly against the OLD, unchanged generation (this
+repo's documented rollout-status-green-lights-the-old-generation trap), after
+which every §4 gate measures a still-healthy 0.160.0 and passes. Under the
+derived AUTO-NIGHT class that records an unattended SUCCESS on a bump that never
+shipped. §2.5 already used `-n monitoring`, so this was an internal
+inconsistency, not a belief.
+
 ```bash
-flux reconcile kustomization edot-collector -n flux-system --with-source
+GEN_BEFORE=$(kubectl get deployment edot-collector -n monitoring -o jsonpath='{.metadata.generation}')
+flux reconcile kustomization edot-collector -n monitoring --with-source
+# PROVE the new spec actually landed BEFORE trusting rollout status:
+kubectl get deployment edot-collector -n monitoring \
+  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+GEN_AFTER=$(kubectl get deployment edot-collector -n monitoring -o jsonpath='{.metadata.generation}')
+echo "generation $GEN_BEFORE -> $GEN_AFTER"
 kubectl rollout status deployment/edot-collector -n monitoring --timeout=180s
 kubectl get pods -n monitoring -l app=edot-collector -o wide
 # record the new pod's start time — §4.3 needs it as the range floor
@@ -462,8 +577,17 @@ kubectl get pods -n monitoring -l app=edot-collector \
   -o jsonpath='{.items[0].status.startTime}'; echo
 ```
 
-**5. Wait 15 minutes** before §4. The rate gates need a window that STARTS after
-the new pod is Ready; running them early reads the gap as a regression.
+**HARD GATE before proceeding:** the printed image must read `:0.161.0` AND
+`GEN_AFTER` must be greater than `GEN_BEFORE`. If the image still reads
+`:0.161.0` but the generation did NOT advance, the spec was already at the target
+and nothing rolled. If the image still reads `:0.160.0`, the reconcile did not
+apply — do NOT continue into §4, whose gates would all pass on the old binary.
+
+**5. Wait 45 minutes** before §4. This is the measurement, not padding: §4.4's
+per-node kmsg gate must read a window lying ENTIRELY after the roll, and [45m] is
+the shortest window with a measured non-zero floor on every node (frontmatter
+`est_duration_min`). §4.1–4.3 could be read at T+15m, but §4.4 is the gate that
+decides, so the settle is sized on it.
 
 ## 4) Verification
 
@@ -471,12 +595,30 @@ the new pod is Ready; running them early reads the gap as a regression.
 
 ```bash
 kubectl get deployment edot-collector -n monitoring -o jsonpath='{.status.readyReplicas}'; echo
-kubectl get pods -n monitoring -l app=edot-collector -o jsonpath='{.items[0].status.containerStatuses[0].imageID}'; echo
+# MECHANICAL digest comparison — not "must name 0.161.0's digest" by eye
+TARGET_DIGEST=sha256:fd328de2552466ad78385e1b1289c3f2402b1c45f265b252aab1955b42845ac1
+LIVE_ID=$(kubectl get pods -n monitoring -l app=edot-collector \
+  -o jsonpath='{.items[0].status.containerStatuses[0].imageID}')
+echo "live: $LIVE_ID"
+case "$LIVE_ID" in
+  *"$TARGET_DIGEST") echo "DIGEST_OK" ;;
+  *) echo "DIGEST_MISMATCH" ;;
+esac
 kubectl logs -n monitoring deploy/edot-collector --tail=40 | grep -iE "error|invalid configuration|panic" || echo "no startup errors"
 ```
 
-`imageID` (not the tag string) must name 0.161.0's digest. The grep is
-case-insensitive deliberately — upstream logs mixed case.
+**PASS:** `readyReplicas` is 1, the digest check prints `DIGEST_OK`, and the grep
+prints `no startup errors`.
+
+The digest comparison is literal because the pre-review instruction — "`imageID`
+must name 0.161.0's digest" — was not mechanically checkable: no digest was ever
+captured, so the step could only ever be eyeballed, and an eyeball on a 64-char
+hex string is not a gate. `$TARGET_DIGEST` is the MANIFEST-LIST digest recorded
+in §2.2; measured 2026-09-20, `imageID` carries the manifest-list digest
+(`...@sha256:799dc6cf...` for the running 0.160.0, which equals Docker Hub's
+`digest` field for that tag), NOT the per-arch amd64 digest. Comparing against
+the amd64 digest would print `DIGEST_MISMATCH` on a perfectly good roll.
+The grep is case-insensitive deliberately — upstream logs mixed case.
 
 ### CONTENTS ASSERTION 4.1 — telemetry still FLOWS
 
@@ -490,12 +632,24 @@ kubectl get --raw "${P}?query=sum(increase(otelcol_exporter_sent_log_records_tot
 kubectl get --raw "${P}?query=sum(increase(otelcol_exporter_sent_metric_points_total[15m]))"
 ```
 
-**PASS:** both non-empty and within roughly ±40% of the §2.4 baselines.
+**PASS:**
+- **log records — a FLOOR, not a band: `>= 20000`.** The pre-review ±40%
+  two-sided band false-fails on a healthy cluster. Measured 2026-09-20, the
+  24h range of `sum(increase(...[15m]))` is **35,927 – 57,673** — a 1.6x natural
+  spread, so a baseline taken near the low end and a post-roll read near the high
+  end is +60% and trips the band with nothing wrong. Under AUTO-NIGHT that
+  auto-reverts a good bump. The plan's own stated intent ("a trickle is a
+  failure") is a floor, and 20,000 sits ~44% below the measured 24h minimum:
+  reachable only by a real collapse, never by diurnal variation.
+- **metric points — a band IS legitimate here: within ±20% of the §2.4
+  baseline.** Measured 2026-09-20, the same 24h range is **3,217,392 –
+  3,246,244**, a spread of under 1%. This series is genuinely flat, so a band
+  costs nothing and catches a partial pipeline loss that a floor would miss.
+
 **FAILS AS:** an empty `result` array (the metric stopped being exported — the
 `without_type_suffix` rename mode from §1.3 looks exactly like this), or a value
-near zero (the collector is Ready but shipping nothing). A trickle is a failure,
-not a pass — this is the floor half of the rule, and total silence must never
-score as success.
+near zero (the collector is Ready but shipping nothing). Total silence must never
+score as success: an empty result is a FAIL, not a skip.
 
 ### CONTENTS ASSERTION 4.2 — Elasticsearch is not silently REJECTING
 
@@ -509,8 +663,9 @@ restarts, compared to the §2.4 baseline.
 > That series **does not exist**: because the configmap pins
 > `without_type_suffix`/`without_units`/`without_scope_info` to `false`, the
 > exporter's own metrics keep dots and are exposed as
-> `otelcol.elasticsearch.docs.processed_total`. Measured 2026-09-17: the
-> underscored form returns EMPTY, the dotted form returns 26.8M success/6h. The
+> `otelcol.elasticsearch.docs.processed_total`. RE-MEASURED 2026-09-20 over the
+> same [15m] window this gate uses: the underscored form returns EMPTY, the
+> dotted form returns `outcome="success"` = 1,140,668. The
 > underscored gate therefore read EMPTY before and after — it could never fail,
 > and it shipped in an executed plan. `docs/sops/monitoring.md` §365 has the
 > correct escaped form; use it.
@@ -568,18 +723,50 @@ Baseline for scale (2026-09-17, 15m): logs ~38,100, metrics ~1,070,600.
 CONTENTS ASSERTION: *every node is still shipping kernel logs* — measured
 per-node, because this path has failed silently before.
 
+**Read this at T+45m, over `[45m]`, so the window lies ENTIRELY after the roll.**
+
 ```bash
 P=/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query
-kubectl get --raw "${P}?query=sum%20by%20(net_peer_ip)%20(increase(talos_kernel_kmsg_lines_total%5B15m%5D))"
+kubectl get --raw "${P}?query=sum%20by%20(net_peer_ip)%20(increase(talos_kernel_kmsg_lines_total%5B45m%5D))"
 ```
 
-**PASS:** three elements, one per node (`192.168.55.11/.12/.13`), each > 0.
-Measured 2026-09-17 over 1h: 19.2 / 15.1 / 22.2.
-**FAILS AS:** two elements instead of three — a node's UDP sender did not resume
-after the pod restart. This is not hypothetical: nuc14-03 stopped shipping kmsg on
-2026-08-04 and nobody noticed for **4 days**, which is why the
+**PASS:** three elements, one per node (`192.168.55.11/.12/.13`), each `>= 1`.
+**FAILS AS:** two elements instead of three, or any element at 0 — a node's UDP
+sender did not resume after the pod restart. Not hypothetical: nuc14-03 stopped
+shipping kmsg on 2026-08-04 and nobody noticed for **4 days**, which is why the
 `talos_kernel_kmsg_lines` counter exists at all. A cluster-wide aggregate would
 hide exactly this, so the gate is deliberately per-node.
+
+**Why `[45m]` and not `[15m]` — the pre-review gate FALSE-FAILED on a healthy
+cluster.** It read `increase(...[15m])` and demanded all three nodes > 0. This is
+a tiny, reset-heavy counter: the `count/hwerrors` connector feeds the
+`prometheus/hwerrors` exporter on `0.0.0.0:8889` with `metric_expiration: 24h`
+(configmap lines 310-318), at only a few lines per node per 15 minutes. Measured
+2026-09-20 over 7 days, per node (`.11/.12/.13`):
+
+| window | min increase | fraction of windows reading ZERO |
+|---|---|---|
+| `[15m]` | 0 / 0 / 0 | **6.5% / 10.7% / 13.1%** |
+| `[30m]` | 0 / 0 / 0 | 0.9% / 0.9% / 1.5% |
+| `[45m]` | **3.0 / 3.0 / 3.0** | **0% / 0% / 0%** |
+| `[1h]` | 6.0 / 6.0 / 6.1 | 0% / 0% / 0% |
+
+At `[15m]` the chance that at least one of the three nodes reads zero with
+nothing wrong is `1 - (0.935 x 0.893 x 0.869)` = **~27%**: roughly one run in
+four would auto-revert a healthy bump, unattended. `[45m]` is the shortest window
+with a measured zero-fraction of 0 on all three nodes over 7 days, and its floor
+of 3 lines gives the `>= 1` threshold 3x headroom.
+
+**The window must not straddle the roll.** Widening to `[1h]` but reading it at
+T+15m would be worse than the original: the range would include 45 minutes of
+PRE-roll lines, so a node that went permanently silent at the restart still
+reports a healthy non-zero — a gate that passes on exactly the failure it exists
+to catch. That is why the settle in §3.5 is 45 minutes and this read happens
+after it, not why the plan is slow.
+
+**The pre-review baseline did not support the gate either:** it cited "19.2 /
+15.1 / 22.2" measured over **1h** as the reference for a **15m** gate — a number
+in the wrong units, roughly 4x the value the gate would actually see.
 
 ### CONTENTS ASSERTION 4.5 — no NEW metric-drop class
 
@@ -591,12 +778,33 @@ P=/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/p
 kubectl get --raw "${P}?query=sum(increase(otelcol_cumulativetodelta_datapoints_dropped_total[1h]))"
 ```
 
-**PASS:** within roughly ±25% of the §2.4 baseline (~2,624/h on 2026-09-17).
-**FAILS AS:** a materially higher value — a new histogram family started being
-rejected under 0.161.0. **Do not assert zero here**: this counter is already
-non-zero because of the open findings `F-f8801413` / `F-b780647b` (§1.6), and a
-`== 0` gate would fail every time for a pre-existing reason and train the operator
-to ignore it.
+**THIS LIMB IS INFORMATIONAL AND CARRIES NO REVERT AUTHORITY.** Record the
+pre-roll and post-roll values in the window log; a difference is a note for the
+operator, not a rollback trigger.
+
+**WARN (operator note only):** post-roll `[1h]` value **> 6,000**.
+**PASS:** anything at or below that, including 0.
+
+**The ±25% band from the pre-review file was unusable in BOTH directions, and its
+baseline was off by roughly 1300x.** It cited "~2,624/h"; re-measured 2026-09-20,
+the `[1h]` value is **2.0**. The counter is bursty across three orders of
+magnitude — over 24h, `increase(...[1h])` ranges **0 to 601** and
+`increase(...[6h])` ranges **2.0 to 6,014** (raw counter 27,092). A ±25% band on
+a window whose healthy range spans 0..601 fails a good bump whenever a burst
+lands post-roll and passes a real regression whenever one does not: a coin flip
+with revert authority, under AUTO-NIGHT, on a healthy cluster. The 6,000 WARN
+ceiling is 10x the measured 24h maximum of any single `[1h]` window, so it trips
+only on a genuinely new drop class, not on burstiness.
+
+**Do not assert zero here**: this counter is already non-zero because of the open
+findings `F-f8801413` / `F-b780647b` (§1.6) — the `cumulativetodelta/es-histograms`
+include list is `match_type: strict` (configmap line 105), so each new Envoy
+histogram family silently drops until hand-added. A `== 0` gate would fail every
+time for a pre-existing reason.
+
+**The real ES-rejection signal is §4.2(b), which does carry revert authority.**
+That gate reads the exporter's own per-document outcome counter and is two-sided;
+this one is a coarse secondary indicator and is scored as such.
 
 ### 4.6 Alerts quiet
 
@@ -625,11 +833,28 @@ Image-tag-only change, config untouched:
 git fetch origin main && git merge --ff-only origin/main
 git revert --no-edit <bump-commit-sha>
 git push origin main
-flux reconcile kustomization edot-collector -n flux-system --with-source
+# NAMESPACE IS `monitoring` — see §3.4. With `-n flux-system` this reconcile
+# errors, the rollout status below then returns "successfully rolled out"
+# against the unchanged generation, and THE ROLLBACK REPORTS SUCCESS WITHOUT
+# HAVING REVERTED ANYTHING — at the worst possible moment.
+flux reconcile kustomization edot-collector -n monitoring --with-source
 kubectl rollout status deployment/edot-collector -n monitoring --timeout=180s
 kubectl get pods -n monitoring -l app=edot-collector \
   -o jsonpath='{.items[0].spec.containers[0].image}'; echo
+# PROVE the revert actually took, mechanically:
+ROLLBACK_DIGEST=sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
+LIVE_ID=$(kubectl get pods -n monitoring -l app=edot-collector \
+  -o jsonpath='{.items[0].status.containerStatuses[0].imageID}')
+case "$LIVE_ID" in
+  *"$ROLLBACK_DIGEST") echo "ROLLBACK_DIGEST_OK" ;;
+  *) echo "ROLLBACK_DIGEST_MISMATCH: $LIVE_ID" ;;
+esac
 ```
+
+`$ROLLBACK_DIGEST` is 0.160.0's manifest-list digest, measured live 2026-09-20
+from the currently-running pod's `imageID` (it equals Docker Hub's `digest` for
+tag 0.160.0). The image-tag print alone is not proof — the tag string can be
+correct while the pod still runs the old layer mid-roll.
 
 Then **re-run §4.1 through §4.4** to confirm ingestion actually resumed on
 0.160.0. A revert that restores the manifest but not the telemetry is not a
@@ -671,32 +896,51 @@ runbooks/update-marker.sh clear edot-collector
 
 ## 6) Interference notes
 
-- **`conflicts_with` is three entries and every one names a mechanism** — see the
-  frontmatter. The two the window agent must not relax: `prometheus-crd-ownership`
+- **`conflicts_with` is FOUR entries and every one names a mechanism** — see the
+  frontmatter. The ones the window agent must not relax: `prometheus-crd-ownership`
   (an otel-operator helm upgrade, which rolls the daemon collectors that export
-  into this collector) and `kube-prometheus-stack-91.4.0` (a Prometheus restart
-  blinds every gate in §4 and would read as this plan regressing).
-- **`otel-operator-0.21.0` is deliberately absent, and this is the interesting
-  one.** That plan carried the canonical statement of the edot-vs-daemon
-  interference, and it **executed in `nightly:2026-09-17`**, its file retired in
-  commit `37f7c7a6`. So the collision it described is spent for that bump. Its
-  reasoning is preserved verbatim in the frontmatter comment and in the bullet
-  below, because the *mechanism* recurs on every future otel-operator upgrade —
-  the next such plan must carry this conflict from the start.
-- **RECIPROCAL EDIT OWED — the window agent must not assume symmetry.**
-  `maintenance-plan.py --validate` checks that conflict refs *resolve*, not that
-  they are *reciprocal*, so a one-sided guard passes validation while protecting
-  only one direction. Neither `prometheus-crd-ownership` nor
-  `kube-prometheus-stack-91.4.0` lists `edot-collector-0.161.0` in its
-  `conflicts_with`, because this plan did not exist when they were written.
-  **Add it to both before any of the three is scheduled.**
-- **Pre-existing repo defect, surfaced by this plan's validation (not caused by
-  it):** `cilium-1.20.2`, `kube-prometheus-stack-91.4.0` and
-  `prometheus-crd-ownership` all still name the now-retired
-  `otel-operator-0.21.0` in `conflicts_with`, so
-  `maintenance-plan.py --validate` currently reports three dead refs. The
-  close-out commit retired the plan file without sweeping the refs that pointed
-  at it. Those three need the same dated-comment resolution applied here.
+  into this collector), `kube-prometheus-stack-91.4.1` (a Prometheus restart
+  blinds every gate in §4 and would read as this plan regressing), and
+  `otel-operator-0.23.0` (below).
+- **CAPACITY: this plan fills the nightly budget exactly and cannot share it.**
+  `est_duration_min: 70`; `window-scheduler.py` computes the slot budget as
+  `duration_min - STEP0_RESERVE_MIN` = `90 - 20` = **70m** for `nightly`, and
+  places a plan only while `rmins + dur <= budget`. So it fits an unattended
+  nightly slot **only as the sole plan in it**. Any other plan already holding
+  that night pushes this one out — which is correct, not a defect: Step 0's
+  safe-update apply runs first in EVERY window regardless.
+- **`otel-operator-0.23.0` is now DECLARED (frontmatter), and the earlier "the
+  collision is spent" argument is WITHDRAWN.** `otel-operator-0.21.0` did execute
+  in `nightly:2026-09-17` with its file retired in `37f7c7a6`, but the mechanism
+  it described is durable and `otel-operator-0.23.0` (draft, window null, risk
+  high, human-gated) is its heir. That plan already lists
+  `edot-collector-0.161.0` in its own `conflicts_with` (verified 2026-09-20).
+- **Reciprocity is HONOURED BY THE SCHEDULER — verified in code, 2026-09-20.**
+  The pre-review text warned that a one-sided guard protects only one direction.
+  That is no longer true: `window-scheduler.py` (lines 254-266) builds
+  `names_me = {p for p in here_plans if pid in p.conflicts_with}` and skips the
+  slot on `(conflicts & here) or names_me`, with the comment that the relation
+  "is symmetric by meaning ... so it is symmetric here". Measured rationale in
+  that comment: 21 of 21 declarations across the plan set were one-sided.
+  So the missing reciprocal entries in `prometheus-crd-ownership` and
+  `kube-prometheus-stack-91.4.1` are a **readability** gap, not a scheduling
+  hole — worth adding, not blocking. `--validate` still checks only that refs
+  *resolve*.
+- **The earlier "three dead refs" claim was FALSE and is removed.** Re-checked
+  2026-09-20: `maintenance-plan.py --validate` exits 0 with "all plan frontmatter
+  invariants hold", and `grep -rn '^  - otel-operator-0.21.0' plans/*.md` returns
+  nothing. Every surviving mention of that retired plan sits inside a comment or
+  prose, not a list entry — `cilium-1.20.2`, `kube-prometheus-stack-91.4.1` and
+  `prometheus-crd-ownership` each already removed the ref with a dated comment.
+  No repo sweep is owed; the pre-review bullet sent the window agent after work
+  that does not exist.
+- **POLICY-DB item, NOT a git change:** AR-124's needle is the bare substring
+  `opentelemetry-collector`, which over-matches this plan's own VERSION row
+  (`F-cb9182ca`) and marks it `accepted`, even though AR-124's justification
+  scopes it to CVE rows and calls the bump window-work. `F-e430800e` already
+  prescribes narrowing it and names this plan. Until that lands, this plan's
+  target reads as an accepted risk rather than queued work. Fix with
+  `runbooks/policy-cli.py risk`, not by editing any file here.
 - **Ordering against ANY otel-operator plan (the durable rule).** An
   otel-operator helm upgrade rolls `daemonset/otel-operator-daemon-collector`,
   and those daemon pods export into this collector at

@@ -43,8 +43,13 @@ touches:
                                                # no shared DB, and no monitoring instrument: there is
                                                # NO ServiceMonitor in ns office and the backend logs
                                                # "Metrics disabled" (measured 2026-09-17), so this
-                                               # plan's §4 never reads Prometheus and a same-night
-                                               # kube-prometheus-stack bump cannot invalidate it.
+                                               # plan's §4 never READS Prometheus and a same-night
+                                               # kube-prometheus-stack bump cannot invalidate a gate.
+                                               # §2.5/§4.7 do WRITE a transient, self-expiring (2h)
+                                               # silence to shared Alertmanager — that is an API
+                                               # object with a TTL, not a mutation of shared infra,
+                                               # so it does not earn a `shared:` entry. The one
+                                               # co-scheduling consequence is spelled out in §6.
                                                # The app IS on the public edge; §6 states the one
                                                # condition under which gateway/envoy must be added.
 depends_on: [nextcloud-34.0.4]         # ORDERING IS THE WHOLE POINT OF THIS PLAN — see §1.4.
@@ -70,9 +75,17 @@ conflicts_with:
                                        # cannot edit that file); window-scheduler.py honours
                                        # conflicts_with symmetrically via its `names_me` branch, so
                                        # the guard holds regardless.
-security_ref: F-7b0ce7e2               # the CVE driver for the image leg. Detail lives on the finding
-                                       # record ONLY — never counts, IDs or vocabulary here (public
-                                       # repo, docs/sops/vulnerability-disclosure.md).
+security_ref: F-6c461103               # the OPEN security driver for the image leg: section security,
+                                       # severity critical, first_seen 2026-09-17, last_seen
+                                       # 2026-09-19, status unchanged — re-measured against
+                                       # sweep_findings on 2026-09-20. Its RESOLVED predecessor
+                                       # F-7b0ce7e2 is named in §1.6 prose only, never here:
+                                       # render-board.py:84 hides a planned finding on an EXACT
+                                       # security_ref match, so pointing this field at a resolved row
+                                       # leaves the live one on the board as un-planned noise.
+                                       # Detail lives on the finding record ONLY — never counts, IDs
+                                       # or vocabulary here (public repo,
+                                       # docs/sops/vulnerability-disclosure.md).
 capability_change: true                # HONEST, and it is the backend leg that earns this, not just
                                        # the app: v2.0.0 adds a room-authorization gate that can REFUSE
                                        # a socket join v1.5.9 accepted (§1.2), and enforces creator
@@ -88,10 +101,18 @@ rollback_class: git-revert             # TRUE FOR THE LEG THIS PLAN OWNS, and on
                                        # Nextcloud APP has already moved to 2.0.0, reverting this
                                        # image does NOT restore the pre-change world, and the app leg
                                        # is NOT a git revert.
-finding_refs: [F-7b0ce7e2]             # ownership claim: this plan is what answers that finding. It
-                                       # currently reads `accepted` under AR-029 ("already on the
-                                       # newest upstream tag"); that acceptance became STALE on
-                                       # 2026-09-16 when v2.0.0 published — see §1.6.
+finding_refs: [F-53ba35b1, F-6c461103] # ownership claim: this plan answers BOTH open rows for this
+                                       # component. Re-measured 2026-09-20 — both status=unchanged,
+                                       # both last_seen 2026-09-19:
+                                       #   F-53ba35b1 — version / critical, "image v1.5.9 -> v2.0.0
+                                       #     (major)". This is the finding the plan exists to answer.
+                                       #   F-6c461103 — security / critical, the newer-upstream-tag
+                                       #     driver (= security_ref above).
+                                       # finding-triage.py:230 joins findings to plans on THIS field.
+                                       # The previous value named only the RESOLVED F-7b0ce7e2, which
+                                       # left both live rows reading as unplanned and pageable once
+                                       # plan_sla_days elapsed. F-7b0ce7e2 stays in §1.6 prose as the
+                                       # resolved AR-029 predecessor — not in a field a tool keys on.
 premises:
   # Runner grammar (runbooks/plan-premises.py): kubectl/flux/git/helm/talosctl READ verbs plus the
   # ALLOWED_BARE text filters. `kubectl exec` is NOT allowed, by design. The whiteboard APP version
@@ -215,6 +236,14 @@ were extracted and diffed directly. The backend **did** change:
   In v1.5.9 this check **does not exist** — the old code returned early with no
   value and joined anyway. This is the single behaviour that can break the feature
   for us, and §4.6 is built on it.
+
+  **The caller changed too — there are two changed call sites, not one.**
+  `SocketService.joinRoomHandler` now *awaits* that boolean and gates the
+  recording-stop cancellation on it:
+  `const joined = await this.roomLifecycleController.joinRoom(socket, roomID)`
+  (`SocketService.js:547`), then `if (joined) … cancelPendingRecordingStop(…)`
+  (`:549`). Harmless, and consistent with the story above — noted so the executor
+  reading the diff is not surprised by the second site.
 - **`ServerService.start()` is now `async` and awaits `socketService.ready`** (the
   socket engine is initialized before the listener accepts) — upstream "Wait for
   WebSocket initialization" (#1275).
@@ -322,14 +351,32 @@ Both end in the same place. The correct end state is **both on 2.0.0**, which is
 
 ### 1.6 Security driver
 
-`security_ref: F-7b0ce7e2` / `finding_refs: [F-7b0ce7e2]`. That record currently reads
-`accepted` under **AR-029** — the "already on the newest upstream tag, needs an
-upstream rebuild we don't do" branch. **That acceptance went stale on 2026-09-16.**
-`security-check.py` gates the acceptance on `_newer_upstream_tag_exists(img)`
-returning `False`; a newer tag now exists, so the next sweep will return `True` and
-the finding leaves AR-029 as actionable. No rebuild is being proposed here — this is
-exactly the sanctioned remedy for a third-party image: **bump to a newer upstream
-tag.** Detail stays on the record (public repo).
+`security_ref: F-6c461103` / `finding_refs: [F-53ba35b1, F-6c461103]`.
+
+**The AR-029 acceptance is already gone. This is history, not a forecast** — an
+earlier draft of this section predicted the transition in the future tense ("the next
+sweep will…") when it had in fact already happened, which would have had the executor
+waiting on a state change that was two days old. Re-measured against `sweep_findings`
+on **2026-09-20**:
+
+| Finding | Section / severity | Status | Last seen |
+|---|---|---|---|
+| `F-7b0ce7e2` | security / `accepted` (AR-029) | **resolved** 2026-09-17 02:18 | 2026-09-15 |
+| `F-6c461103` | security / **critical** | **open** (`unchanged`) | 2026-09-19 |
+| `F-53ba35b1` | version / **critical** | **open** (`unchanged`) | 2026-09-19 |
+
+`F-7b0ce7e2` was the AR-029 row — the "already on the newest upstream tag, needs an
+upstream rebuild we don't do" branch. `security-check.py` gates that acceptance on
+`_newer_upstream_tag_exists(img)` returning `False`. v2.0.0 published **2026-09-16**,
+so on the **2026-09-17** sweep the predicate flipped, the AR-029 row resolved, and
+`F-6c461103` was raised in its place — critical, and open every sweep since. (That
+row's `resolved_commit` `faabd41d` is an auto-close artifact of an unrelated plans
+commit, not a deliberate resolution; the successor row is the real state.)
+
+So there is **no pending transition for the executor to wait on** — the finding is
+open and critical right now, and this plan is its remedy. No rebuild is being proposed
+here: this is exactly the sanctioned remedy for a third-party image, **bump to a newer
+upstream tag**. Detail stays on the record (public repo).
 
 ## 2) Pre-checks
 
@@ -425,25 +472,66 @@ kubectl logs -n office deploy/nextcloud-whiteboard --tail=20 | grep -iE 'whitebo
 #           "Server initialized with lru storage strategy"
 ```
 
-**2.5 Scope the alert silence to this Deployment, not the namespace.** A
-namespace-wide silence over `office` would also blind Nextcloud, paperless, mealie
-and penpot for the duration — and is the reason `nextcloud-34.0.4` has to declare a
-conflict with `nextcloud-mcp-0.187.1`. This plan does not need that blast radius.
+**2.5 Scope the alert silence to this Deployment, not the namespace — and post TWO,
+because one matcher set cannot cover both alert families.** A namespace-wide silence
+over `office` would also blind Nextcloud, paperless, mealie and penpot for the
+duration — and is the reason `nextcloud-34.0.4` has to declare a conflict with
+`nextcloud-mcp-0.187.1`. This plan does not need that blast radius. But a single
+`deployment=` matcher is too *narrow*, and the reason is measurable: **the pod-level
+alerts carry no `deployment` label at all.**
+
+Measured on the live Prometheus, 2026-09-20:
+
+| Alert | Source series | Has `deployment`? | Covered by |
+|---|---|---|---|
+| `KubeDeploymentReplicasMismatch` / `…GenerationMismatch` | `kube_deployment_spec_replicas` | **yes** — sample carries `deployment="nextcloud-whiteboard"`, `namespace="office"` | silence **A** |
+| `KubePodNotReady` | `kube_pod_status_phase`, aggregated `by (namespace, pod, job, cluster)` | **no** — `pod` only | silence **B** |
+| `KubePodCrashLooping` / `KubeContainerWaiting` | `kube_pod_container_status_waiting_reason` | **no** — inferred, see note | silence **B** |
+
+> **Honesty note on the third row.** `kube_pod_container_status_waiting_reason` had
+> **zero series** at measurement time (nothing in the cluster was waiting), so its
+> label set was *not read directly*. It is inferred from its sibling in the same
+> kube-state-metrics pod-level family, `kube_pod_container_status_waiting` (368 series
+> live), whose labels are `container, endpoint, instance, job, kubernetes_node,
+> namespace, pod, service, uid` — **no `deployment`**. Treat that row as inferred
+> rather than measured.
+
+Silence A alone leaves a crash-looping whiteboard pod paging. That fails in the **safe
+direction** (extra pages, never blindness), so if only one can be posted, post A.
 
 ```bash
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF=$!
 sleep 2
 NOW=$(python3 -c "from datetime import *;print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")
 END=$(python3 -c "from datetime import *;print((datetime.now(timezone.utc)+timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")
+
+# A — the deployment-labelled alerts (KubeDeployment*Mismatch)
 curl -s -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/json' -d '{
   "matchers":[{"name":"namespace","value":"office","isRegex":false,"isEqual":true},
               {"name":"deployment","value":"nextcloud-whiteboard","isRegex":false,"isEqual":true}],
   "startsAt":"'$NOW'","endsAt":"'$END'","createdBy":"maintenance-window-agent",
-  "comment":"nextcloud-whiteboard v1.5.9->v2.0.0 — rollout noise. auto-expires 2h"}'
+  "comment":"nextcloud-whiteboard v1.5.9->v2.0.0 rollout noise (A: deployment). auto-expires 2h"}' \
+  > /tmp/wb-silence-a.json; echo
+
+# B — the pod-labelled alerts (KubePodNotReady / CrashLooping / ContainerWaiting)
+curl -s -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/json' -d '{
+  "matchers":[{"name":"namespace","value":"office","isRegex":false,"isEqual":true},
+              {"name":"pod","value":"nextcloud-whiteboard-.*","isRegex":true,"isEqual":true}],
+  "startsAt":"'$NOW'","endsAt":"'$END'","createdBy":"maintenance-window-agent",
+  "comment":"nextcloud-whiteboard v1.5.9->v2.0.0 rollout noise (B: pod). auto-expires 2h"}' \
+  > /tmp/wb-silence-b.json; echo
+
 kill $PF 2>/dev/null
+
+# RECORD BOTH IDS — §4.7 must delete TWO, not one:
+python3 -c "import json;print('silence A', json.load(open('/tmp/wb-silence-a.json'))['silenceID'])"
+python3 -c "import json;print('silence B', json.load(open('/tmp/wb-silence-b.json'))['silenceID'])"
 
 runbooks/update-marker.sh add nextcloud-whiteboard office 2 "v1.5.9->v2.0.0 upgrade"
 ```
+
+Both `python3` lines must print an id. If either raises `KeyError: 'silenceID'`, the
+POST was rejected (read the JSON body) — **do not proceed believing you are silenced.**
 
 ## 3) Steps
 
@@ -547,8 +635,13 @@ which a green `kubectl rollout status` will happily report after a no-op.
 
 **4.3 The backend reports its own version.**
 
+> **§4.3 and §4.4 must run BEFORE §4.6.** Both read the startup banner, which is only
+> ~8 lines. Once §4.6 generates join traffic the banner scrolls out of a short tail and
+> these gates read **empty — which is indistinguishable from a failure**. `--tail=200`
+> buys margin; the ordering is the actual guarantee.
+
 ```bash
-kubectl logs -n office deploy/nextcloud-whiteboard --tail=40 | grep -iE 'whiteboard@'
+kubectl logs -n office deploy/nextcloud-whiteboard --tail=200 | grep -iE 'whiteboard@'
 ```
 
 PASS = a line containing `whiteboard@2.0.0`. **What this catches:** measured at
@@ -557,24 +650,48 @@ banner is emitted from the image's own `package.json` (`version` 2.0.0 upstream)
 it is independent of the tag we asked for and of the Deployment spec. A stale layer
 or a re-pointed tag still prints 1.5.9 here. Grep is `-i` per house rule.
 
-**4.4 The backend came up with OUR configuration, not defaults.**
+**4.4 The backend finished starting.**
 
 ```bash
-kubectl logs -n office deploy/nextcloud-whiteboard --tail=40 \
-  | grep -iE 'storage strategy|started successfully|FATAL|JWT_SECRET_KEY'
+kubectl logs -n office deploy/nextcloud-whiteboard --tail=200 \
+  | grep -iE 'storage strategy|started successfully|Failed to start server'
 ```
 
 PASS = **both** `Server initialized with lru storage strategy` **and**
-`Server started successfully on port 3002`, and **no** line matching `FATAL` /
-`JWT_SECRET_KEY`. **What each catches:**
-- the `lru` line proves v2.0.0 still honours `STORAGE_STRATEGY` (if it had dropped the
-  strategy, `StorageService.create` would land elsewhere and this line would name a
-  different adapter — the string is generated from the strategy actually selected, not
-  from the env var we set);
-- the absence of `FATAL` matters because `ConfigUtility.js:61-64` **throws on a
-  missing `JWT_SECRET_KEY`** — that is the loud failure mode of a broken secret
-  mount, and asserting its absence is what makes §4.6's silent failure the only
-  remaining one.
+`Server started successfully on port 3002`, and **no** `Failed to start server` line.
+
+**What each limb is actually worth — stated precisely, because two earlier drafts
+overclaimed here and one of them was a gate that passes on failure:**
+
+- `Server started successfully on port 3002` is the **load-bearing positive**. `main.js`
+  prints it only after `await serverManager.start()` resolves, and in v2.0.0 `start()`
+  begins with `await this.socketService.ready` (`ServerService.js:83`, paired with
+  `this.ready = this.init()` in `SocketService.js`). So this line is the direct gate on
+  the one startup-path behaviour v2.0.0 changed. If `init()` rejects, `main()`'s catch
+  prints `Failed to start server:` and calls `process.exit(1)` — the pod crash-loops
+  and the tail shows the reason.
+- `Server initialized with lru storage strategy` is a **liveness/echo marker only, and
+  it CANNOT FAIL on a wrong or missing `STORAGE_STRATEGY`.** Do not read it as a
+  configuration gate. Two measured reasons: (i) the string is a pure echo —
+  ``console.log(`Server initialized with ${Config.STORAGE_STRATEGY} storage strategy`)``
+  (`ServerService.js:65`) over
+  `STORAGE_STRATEGY: process.env.STORAGE_STRATEGY || DEFAULT_STORAGE_STRATEGY`
+  (`ConfigUtility.js:43`), so it reports what we *asked for*, never what took effect;
+  and (ii) `DEFAULT_STORAGE_STRATEGY` is itself `'lru'` (`ConstantsUtility.js:12`,
+  identical in both tags), so a **dropped** env var prints the byte-identical line.
+  The assurance that our side is right comes from the premise
+  `storage-strategy-is-still-lru`, which reads the Deployment spec — not from this log.
+- **Do NOT add `Invalid storage strategy type` to this alternation.** It is unreachable
+  from configuration: `ServerService`'s constructor calls `StorageService.create` with
+  *hardcoded literals* — `'redis'`/`'in-mem'` (`ServerService.js:37-38`) and
+  `'redis'`/`'lru'` (`:41-42`) — selected by `Config.STORAGE_STRATEGY === 'redis'`. An
+  unrecognised value simply takes the non-redis branch; the
+  `default: throw new Error('Invalid storage strategy type')` at `StorageService.js:57`
+  is never reached from the env var.
+- **There is deliberately NO `FATAL` / `JWT_SECRET_KEY` limb here.** An earlier draft
+  had one and it was a gate that passes on failure — nothing on the startup path ever
+  touches that secret. The check has moved to §4.6, where the failure can actually have
+  occurred, and the reasoning is written out there.
 
 **4.5 The service answers through the public edge, with real contents.**
 
@@ -621,18 +738,81 @@ PASS requires **all three**:
   exact output of the new gate refusing the app's JWT, and the fingerprint of an
   app/backend mismatch. **If this is non-empty, go to §5 — the pod is healthy and the
   feature is broken, which is the whole reason this section exists.**
+- **No authentication failures** — this is the limb that REPLACES the deleted §4.4
+  `FATAL` check, and it belongs here, after real sockets have been authenticated:
+
+  ```bash
+  kubectl logs -n office deploy/nextcloud-whiteboard --since=10m \
+    | grep -iE 'FATAL|Token verification failed|Token expired|\[AUTH\] Authentication failed|Cannot attest scene creator'
+  ```
+
+  PASS = **empty**.
+
+  **Why it is here and not in §4.4, and exactly what it does and does not catch.**
+  `JWT_SECRET_KEY` is a **lazy getter** (`ConfigUtility.js:61-69`) whose only consumers
+  are per-connection or per-broadcast: `SocketService.js:436` (`handleAuthError`) and
+  `:455` (`verifyToken`), `SharedTokenUtility.js:14`, and — new in v2.0.0 —
+  `ViewportService.js:57`. The startup path (`main.js` → `new ServerService()` →
+  `await start()`) never reads it, so a secret problem is **silent at startup**: the pod
+  goes Ready and prints both §4.4 positives. Split by failure mode:
+  - **Key missing from the Secret** — cannot produce a running pod at all, so there are
+    no logs to grep. `env JWT_SECRET_KEY` comes from a `secretKeyRef` with no
+    `optional: true` (measured on the live Deployment 2026-09-20), so kubelet fails the
+    container with `CreateContainerConfigError` and §3.4's `rollout status` / §4.1 catch
+    it. That is precisely why a startup log grep was the wrong instrument.
+  - **Key present but WRONG** — the getter never throws, so **`FATAL` never appears.**
+    Auth fails per socket instead: `verifyToken` logs `Token verification failed` or
+    `Token expired` (`SocketService.js:459-460`) and the middleware catch logs
+    `[AUTH] Authentication failed for socket <id>: <msg>` (`SocketService.js:424`).
+    Those strings — not `FATAL` — are what actually fires on the realistic
+    broken-secret case, which is why they are in the alternation. `FATAL` is retained
+    only for the unset-var path, whose throw message
+    (`[FATAL] JWT_SECRET_KEY environment variable is required but not set…`) surfaces
+    through that same `[AUTH]` catch.
+
+  `Token expired` can in principle fire on a genuinely stale browser tab rather than a
+  broken secret. Within the ~10 minutes after a fresh rollout with freshly opened
+  sessions it should not appear, and a hit is worth investigating rather than waving
+  through: this limb is deliberately **fail-closed**.
+
+  Dry-tested on this Mac against a fixture log containing all five strings: BSD
+  `grep -iE` matched every one, and returned **0** against a clean startup log
+  (`\[AUTH\]` and `\[SECURITY\]` are escaped brackets — valid ERE; no `\s` anywhere).
 
 Also check the browser devtools console for CSP violations on the wss:// origin —
 v2.0.0 tightened the collaboration CSP (#1263) and validates the backend host
 (`ConfigService::isValidCspHost`). Our `collabBackendUrl` host is a plain DNS name and
 passes that validator, but a console error here would explain a failing round-trip.
 
-**4.7 Clear the silence and the marker** once §4.1–§4.6 are green.
+**4.7 Clear BOTH silences and the marker** once §4.1–§4.6 are green.
 
 ```bash
 runbooks/update-marker.sh clear nextcloud-whiteboard
-# delete the §2.5 silence by its id (GET /api/v2/silences to find it)
+
+# TWO silences were posted in §2.5 (A: deployment-scoped, B: pod-scoped).
+# Delete BOTH — expiring only one leaves the other masking real alerts for up to 2h.
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF=$!
+sleep 2
+for F in /tmp/wb-silence-a.json /tmp/wb-silence-b.json; do
+  SID=$(python3 -c "import json;print(json.load(open('$F'))['silenceID'])")
+  curl -s -X DELETE "localhost:9093/api/v2/silence/$SID" -o /dev/null -w "$F -> HTTP %{http_code}\n"
+done
+
+# Confirm nothing of ours is left active — this is the gate, not the DELETE status:
+curl -s localhost:9093/api/v2/silences | python3 -c "
+import sys, json
+act = [s for s in json.load(sys.stdin)
+       if s['status']['state'] == 'active'
+       and 'nextcloud-whiteboard' in json.dumps(s['matchers'])]
+print('active whiteboard silences remaining:', len(act))
+for s in act: print('  STILL ACTIVE:', s['id'], s['matchers'])"
+kill $PF 2>/dev/null
 ```
+
+PASS = both DELETEs return **HTTP 200** *and* the final line prints
+`active whiteboard silences remaining: 0`. The count is the real gate: a 404 means the
+id file was lost, in which case fall back to `GET /api/v2/silences` and match on the
+`createdBy` / `comment` text from §2.5 rather than leaving a silence to age out.
 
 ## 5) Rollback
 
@@ -747,10 +927,21 @@ plan's frontmatter was read (`maintenance-plan.py --open`, 2026-09-17: 9 executa
   TXT record**, not the address record for `whiteboard.<domain>`. Deleting it does not
   change external reachability, so §4.5 is unaffected. Recorded here so the next reader
   does not have to re-derive it.
-- Any `kube-prometheus-stack` bump — **not declared, and this is a measurement not an
-  assumption.** §4 never reads Prometheus: there is no `ServiceMonitor` in ns `office`
-  and this backend logs `Metrics disabled`. Every gate is a log, a digest, a curl or a
-  browser.
+- Any `kube-prometheus-stack` bump — **not declared as a conflict, and this is a
+  measurement not an assumption.** §4 never *reads* Prometheus: there is no
+  `ServiceMonitor` in ns `office` and this backend logs `Metrics disabled`. Every gate
+  is a log, a digest, a curl or a browser. **But §2.5 and §4.7 do WRITE to and DELETE
+  from shared Alertmanager** (`svc/kube-prometheus-stack-alertmanager`, port 9093 —
+  verified live 2026-09-20), so the dependency is real even though no gate reads it. If
+  such a bump is ever co-scheduled into this slot the Alertmanager pod rolls, and
+  either the §2.5 silences are lost (alerts un-masked mid-rollout — noisy, not
+  dangerous) or the §4.7 DELETE 404s against a restarted instance, leaving §4.7's
+  "remaining: 0" gate to catch it. **Not a conflict today:**
+  `kube-prometheus-stack-91.4.1` is `status: draft`, `window: null` (measured
+  2026-09-20 — note this is 91.4.**1**, not the 91.4.0 an earlier review cited, and it
+  is `draft`, not `vetted`). This is also not a reason to add `monitoring` to
+  `touches.shared`: the silence is a transient, self-expiring API object, not a
+  mutation of shared infra.
 
 **The one condition that would change `touches.shared`.** This plan declares
 `shared: []` because it mutates nothing shared — the HTTPRoute and the

@@ -29,7 +29,7 @@ risk: low                             # Across the FULL v5.2.5 -> v5.2.7 hop: 6 
                                       # inherited.
 est_duration_min: 15                  # commit+push ~2, reconcile+rollout ~3, settle >=5 for
                                       # the contents assertions (60s scrape, 2m cache refresh,
-                                      # and the 5m lookback that retires stale twins — §4.4)
+                                      # and the 5m lookback that retires stale twins — §4.5)
 needs_reboot: false
 touches:
   namespaces: [monitoring]
@@ -58,11 +58,16 @@ conflicts_with:                       # HARD slot exclusions. window-scheduler.p
                                       # RIGHT NOW: cilium-1.20.2 and prometheus-crd-ownership
                                       # name no unpoller plan (each dropped its
                                       # `unpoller-v5.2.5` ref when that plan retired and no
-                                      # successor was added), and the ONE inbound ref that does
-                                      # exist — kube-prometheus-stack-91.4.1 -> `unpoller-v5.2.6`,
-                                      # added 2026-09-20 for reciprocity — points at THIS PLAN'S
-                                      # FORMER ID and therefore dangles after the rename. It is
-                                      # reported in §6, not edited here (another plan's file).
+                                      # successor was added). The ONE inbound ref that exists —
+                                      # kube-prometheus-stack-91.4.1 -> `unpoller-v5.2.7` — was
+                                      # REPOINTED by its own owner and now RESOLVES: re-measured
+                                      # 2026-09-20 06:2xZ, `grep -rn 'unpoller-v5\.2\.[0-9]'`
+                                      # over plans/ shows that entry naming v5.2.7 (its file,
+                                      # line 100) and `maintenance-plan.py --validate` exits 0
+                                      # with "all plan frontmatter invariants hold". The earlier
+                                      # `unpoller-v5.2.6` dangle is GONE — do not re-report it.
+                                      # Consequence for close-out: that ref is now LIVE, so
+                                      # deleting this file orphans it (§3.5).
                                       # Re-checked against `maintenance-plan.py --open` and
                                       # every sibling plan's frontmatter on 2026-09-20.
   - kube-prometheus-stack-91.4.1      # MANDATORY. §4.5, §4.6 and §4.8 read THIS Prometheus over
@@ -96,7 +101,8 @@ conflicts_with:                       # HARD slot exclusions. window-scheduler.p
   - cilium-1.20.2                     # A CNI roll restarts pod networking cluster-wide; every
                                       # assertion in §4 (scrape, cache refresh, InfluxDB write
                                       # path) rides that network. cilium-1.20.2 declares a SOLO
-                                      # SLOT (11 exclusions, re-read 2026-09-20) and explicitly
+                                      # SLOT (12 exclusions — COUNTED 2026-09-20 from its own
+                                      # conflicts_with block, not estimated) and explicitly
                                       # dropped its unpoller-v5.2.5 ref on 2026-09-16; this is
                                       # the successor it would re-add.
 security_ref: null                    # version-currency driver only; no vulnerability content.
@@ -270,10 +276,17 @@ Consequences, each of which the v5.2.5 review established and neither delta can
 have moved:
 
 - **No metric rename.** The in-repo `prometheusrule.yaml` keeps matching.
-  Re-measured 2026-09-20: **14 `unpoller_*` selector occurrences across 10 alert
-  rules, 7 distinct series names**, two of them `absent()` guards
-  (`absent(unpoller_device_uptime_seconds)` and
-  `absent(unpoller_client_satisfaction_ratio)`). All five in-repo dashboards are
+  Re-measured 2026-09-20 (reproduce with
+  `grep -c '^[[:space:]]*- alert:' …/prometheusrule.yaml` and
+  `grep -o 'unpoller_[a-z_]*' …/prometheusrule.yaml | sort -u`): **10 alert
+  rules over 7 distinct `unpoller_*` series names**, two of them `absent()`
+  guards (`absent(unpoller_device_uptime_seconds)` line 30 and
+  `absent(unpoller_client_satisfaction_ratio)` line 52). *(An earlier draft of
+  this bullet also quoted "14 selector occurrences"; that figure was not
+  reproducible — the same file counts 19 raw token hits, 18 matching lines, or
+  13 on non-comment lines depending on how you count, and several hits are
+  prose inside comments. The number was load-bearing for nothing, so it is
+  dropped rather than restated.)* All five in-repo dashboards are
   Prometheus-datasource — re-measured 2026-09-20: **118 `"type": "prometheus"`,
   zero `"influxdb"`** across `app/dashboards/*.yaml` (identical to the
   2026-09-17 reading).
@@ -430,7 +443,7 @@ or `enable` is unset.
    as the premise `no-otel-env-on-workload`.
 
 **Verdict:** for us the v5.2.6→v5.2.7 delta changes bytes in the binary and
-nothing in behaviour. §4.2b asserts the plugin is still silent on the new pod, so
+nothing in behaviour. §4.4 asserts the plugin is still silent on the new pod, so
 the claim is checked at runtime rather than trusted. **If an `[otel]` block is
 ever added to the config, this section must be re-run before executing** — the
 premise fails loudly in that case rather than letting the plan proceed on a
@@ -621,6 +634,19 @@ a class.
    measured 2026-09-20 over the last 6 h, `min_over_time` **7883** /
    `max_over_time` **8008** (±0.8% around ~7945). That is what makes a ±2% band
    against a SAME-SESSION baseline both meaningful and passable.
+
+   > **THE PRINTED FIGURES ARE MAGNITUDE-ONLY. NEVER USE THEM AS THE BAND.**
+   > They are already stale, and demonstrably so *within the same day they were
+   > written*: re-measured 2026-09-20 06:2xZ — hours after the 05:38Z authoring
+   > run above — the instant count read **7883** (not 7984) and the 6 h window
+   > read `min_over_time` **7883** / `max_over_time` **8019** (not 7883/8008),
+   > i.e. a ±0.9% spread around ~7951. Nothing is wrong: this is the household
+   > drift the bullet above describes, and it is exactly why §2.6 mandates a
+   > same-session baseline and §4.5 compares only against THAT. If you find
+   > yourself computing ±2% of 7984, you are using the wrong number — take your
+   > own baseline first. The only figure in §4.5 that is NOT session-relative is
+   > the `≥ 6000` absolute floor, which exists precisely because it cannot be
+   > argued away by drift.
 7. **InfluxDB write-path baseline** (cheap, and §4.6 compares against it). The
    token comes from the decrypted secret — assign it, never echo it:
    ```bash
@@ -635,9 +661,18 @@ for line in sys.stdin:
    sleep 3
    curl -s 'http://localhost:8086/api/v2/query?org=influxdata' \
      -H "Authorization: Token $TOK" -H 'Content-Type: application/vnd.flux' -H 'Accept: application/csv' \
-     -d 'from(bucket:"default") |> range(start:-30m) |> filter(fn:(r)=>r._measurement=="uap_radios") |> keep(columns:["_time"]) |> sort(columns:["_time"],desc:true) |> limit(n:1)'
+     -d 'from(bucket:"default") |> range(start:-2h) |> filter(fn:(r)=>r._measurement=="uap_radios") |> keep(columns:["_time"]) |> sort(columns:["_time"],desc:true) |> limit(n:1)'
    kill $PF 2>/dev/null
    ```
+   **The range is `-2h`, deliberately — do not narrow it back to `-30m`.** §4.7
+   re-runs this identical query as a gate, and with a 30 min window a write path
+   that has been dead for longer than 30 min returns **no rows at all** instead
+   of the frozen timestamp the gate is written to detect. Dry-run 2026-09-20 on
+   the live instance: a query that matches nothing returns a bare `\r` and
+   nothing else — no error, no non-zero exit — which reads like a tooling
+   hiccup, not a failure. `-2h` keeps a stalled write path legible as an OLD
+   timestamp. Both invocations must use the SAME range or the comparison in
+   §4.7 is not like-for-like.
    **Measured 2026-09-20 05:40Z: newest `uap_radios` `_time` =
    `2026-09-20T05:40:53Z`** — i.e. the write path was current to the second at
    baseline time. (org `influxdata`, bucket `default`, measurement `uap_radios`
@@ -718,12 +753,21 @@ for line in sys.stdin:
    **Before deleting this file, scrub inbound refs — this has broken the repo-wide
    validator on two consecutive nights (F-6acb231c).** Retiring
    `unpoller-v5.2.5` left 2 dangling `conflicts_with` refs; retiring
-   `otel-operator-0.21.0` left 3. **As of 2026-09-20 there is already one
-   inbound ref, and it dangles**: `kube-prometheus-stack-91.4.1` names
-   `unpoller-v5.2.6` — this plan's pre-rename id (§6). Expect it to have been
-   repointed to `unpoller-v5.2.7` by then; if it has, retiring this file will
-   orphan it exactly as before. Re-check rather than trust any of this, and
-   remove or repoint every hit in the SAME commit:
+   `otel-operator-0.21.0` left 3. **As of 2026-09-20 there is exactly one
+   inbound ref and it RESOLVES**: `kube-prometheus-stack-91.4.1` line 100 names
+   `unpoller-v5.2.7` (its owner repointed it from the `unpoller-v5.2.6` id in
+   their own commit — measured, see §6). That is precisely why deleting this
+   file will orphan it: a live ref becomes a dead ref the moment this plan is
+   retired. Remove or repoint it in the SAME commit.
+
+   **Know your baseline before you start:** `maintenance-plan.py --validate`
+   exits **0** right now — measured 2026-09-20 06:2xZ, output *"all plan
+   frontmatter invariants hold"*, across all 41 plan files. There are **no**
+   pre-existing dead refs to excuse a red result. So if the validator goes red
+   after your close-out commit, **your close-out caused it** — fix it before
+   pushing rather than dismissing it as someone else's breakage. Re-measure
+   rather than trusting this paragraph; it is a snapshot, and other sessions
+   retire plans in this same worktree.
    ```bash
    grep -rn 'unpoller-v5\.2\.7' runbooks/maintenance/plans/ | grep -v 'plans/unpoller-v5.2.7.md'
    .venv/bin/python3 runbooks/maintenance-plan.py --validate   # run BEFORE pushing the close-out
@@ -743,27 +787,76 @@ for line in sys.stdin:
 looks identical to a healthy one, and that is the documented failure mode of
 this exact component (the chart-Service trap, §1 premises). Wait **≥ 5 min**
 after the new pod is Ready, then work through the list. **The 5-minute wait is
-now doubly load-bearing — see the box under §4.4; evaluating early produces a
+now doubly load-bearing — see the box under §4.5; evaluating early produces a
 ~2x series count and can trigger a needless revert.**
+
+### 4.0 Pin the pod FIRST — §4.1–§4.4 read `$POD`, never a label selector
+
+**Do not skip this, and do not put `-l app.kubernetes.io/name=unpoller` back
+into the four commands below.** The rollout is a `RollingUpdate` on 1 replica
+(verified live 2026-09-20: `.spec.strategy.type=RollingUpdate`, exactly 1 pod),
+so while the roll is in flight the OUTGOING v5.2.5 pod still matches that
+selector — and a Terminating pod keeps `status.phase: Running`, so
+`--field-selector status.phase=Running` does **not** exclude it either. Two
+consequences, both confirmed against the live pod on 2026-09-20:
+
+- `kubectl logs -l …` **concatenates every matching pod**, so §4.2/§4.3 would
+  read the OLD pod's log. This is the **pass-on-failure** case: the v5.2.5 pod
+  prints `UniFi Poller v5.2.5 Starting Up!`, `Prometheus scrape cache enabled,
+  refresh interval: 2m0s` and `=> URL: https://<controller> (verify SSL: false,
+  timeout: 1m0s)` **verbatim** — measured on it today — so a new pod that never
+  printed those lines could still be reported PASS.
+- `{.items[0]…}` in §4.1 selects by list order, not by age, so it can equally
+  read the OLD pod and produce a false FAIL on a healthy rollout.
+
+Resolve the pod ONCE and refuse to continue unless exactly one matches:
+
+```bash
+kubectl -n monitoring get pods -l app.kubernetes.io/name=unpoller \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"  phase="}{.status.phase}{"  deleting="}{.metadata.deletionTimestamp}{"\n"}{end}'
+N=$(kubectl -n monitoring get pods -l app.kubernetes.io/name=unpoller --no-headers | wc -l | tr -d ' ')
+echo "matching pods: $N"
+# HARD GATE — N must be exactly 1 and that pod must print an EMPTY deleting= field.
+#   N=2 → the old pod is still Terminating: WAIT. Evaluate nothing below.
+#   N=1 but deleting= non-empty → that IS the dying pod: WAIT.
+#   N=0 → no pod at all: that is a FAIL of the rollout, not a flaky query.
+POD=$(kubectl -n monitoring get pods -l app.kubernetes.io/name=unpoller -o jsonpath='{.items[0].metadata.name}')
+echo "POD=$POD"
+```
+
+**Why this is safe even though it cannot tell the old pod from the new one:** it
+deliberately does not try. If the single surviving pod is the OLD one (the
+rollout never happened), **§4.1 catches it** — the `imageID` will be unchanged.
+Deciding identity is §4.1's job; §4.0's only job is to remove the ambiguity that
+let the gates read two pods at once. Dry-run 2026-09-20 on the live cluster:
+`N=1`, `POD=unpoller-9d8c6bdd7-r9kgx`, `deleting=` empty, and all four pinned
+commands below returned their expected output.
 
 1. **New bytes are running.** Tag is `ghcr.io/unpoller/unpoller:v5.2.7` AND the
    pod's `imageID` DIFFERS from the §2.6 baseline (it should carry the v5.2.7
    index digest `sha256:99f452d3…` from §2.3, or its amd64 child
    `sha256:8aebeff1…` — all three nodes are amd64):
    ```bash
-   kubectl -n monitoring get pod -l app.kubernetes.io/name=unpoller \
-     -o jsonpath='{.items[0].spec.containers[0].image}{"  "}{.items[0].status.containerStatuses[0].imageID}{"\n"}'
+   kubectl -n monitoring get pod "$POD" \
+     -o jsonpath='{.spec.containers[0].image}{"  "}{.status.containerStatuses[0].imageID}{"\n"}'
    ```
+   Dry-run 2026-09-20 on the live (pre-bump) pod returned
+   `ghcr.io/unpoller/unpoller:v5.2.5  ghcr.io/unpoller/unpoller@sha256:123a42e6…`
+   — i.e. the gate is wired correctly and currently reports the PRE-bump state,
+   which is what it must do before the bump lands.
    **FAIL signature:** an unchanged `imageID` (still `sha256:123a42e6…`) means
    `IfNotPresent` served a cached layer set under a moved tag, and everything
    below would be measuring v5.2.5.
 2. **The rebuilt binary identifies itself as v5.2.7, on the FRESH pod.** This is
    the assertion that separates "the tag moved" from "the new binary runs".
    ```bash
-   kubectl -n monitoring logs -l app.kubernetes.io/name=unpoller --tail=-1 | head -40 | grep -iE 'starting up'
+   kubectl -n monitoring logs "$POD" --tail=-1 | head -40 | grep -iE 'starting up'
    # MUST show:  [INFO] UniFi Poller v5.2.7 Starting Up! PID: 1
    # FAIL if it shows v5.2.5 — the rollout did not replace the process.
    ```
+   **`"$POD"`, not `-l` (§4.0):** with a selector this line reads the old pod's
+   banner too and cannot distinguish "v5.2.7 started" from "v5.2.5 is still
+   here and v5.2.7 never printed anything".
    **Use `--tail=-1 | head -40`, NOT `--tail=200`.** The startup banner is
    printed once, at the head of the log, and this exporter emits ~1 line/minute
    forever after, so a 200-line tail only reaches back ~3 h. Measured 2026-09-20
@@ -776,13 +869,17 @@ now doubly load-bearing — see the box under §4.4; evaluating early produces a
    live v5.2.5 pod printed these exact lines at 2026-09-16T01:48:5xZ (verified
    2026-09-20), and `pkg/promunifi/` is untouched by both deltas (§1.2), so the
    text must be identical apart from the version:
+   **These two are the gates §4.0 exists for** — the outgoing v5.2.5 pod prints
+   both lines verbatim, so run them against `"$POD"` only. With `-l` they PASS
+   on a new pod that printed nothing.
    ```bash
-   kubectl -n monitoring logs -l app.kubernetes.io/name=unpoller --tail=-1 | head -40 | grep -iE 'scrape cache'
+   kubectl -n monitoring logs "$POD" --tail=-1 | head -40 | grep -iE 'scrape cache'
    # MUST show:  Prometheus scrape cache enabled, refresh interval: 2m0s
    # FAIL if:    Prometheus scrape cache disabled; /metrics fetches live   (our "2m" parsed as 0)
    # FAIL if:    ... refresh interval: 1m0s                                 (parsed as nil → default)
+   # FAIL if:    nothing at all — a silent start is not a pass.
 
-   kubectl -n monitoring logs -l app.kubernetes.io/name=unpoller --tail=-1 | head -40 | grep -iE 'verify ssl'
+   kubectl -n monitoring logs "$POD" --tail=-1 | head -40 | grep -iE 'verify ssl'
    # MUST show:  => URL: https://<controller> (verify SSL: false, timeout: 1m0s)
    # FAIL if the controller block is absent or followed by x509/certificate errors
    #      — that is the CA-bundle regression the base bump could theoretically cause.
@@ -795,9 +892,14 @@ now doubly load-bearing — see the box under §4.4; evaluating early produces a
    a claim. Upstream logs a specific line via `u.Logf` **only** when the plugin
    starts:
    ```bash
-   kubectl -n monitoring logs -l app.kubernetes.io/name=unpoller --tail=-1 | grep -icE 'OpenTelemetry \(OTel\) output plugin enabled'
+   kubectl -n monitoring logs "$POD" --tail=-1 | grep -icE 'OpenTelemetry \(OTel\) output plugin enabled'
    # MUST print 0.
    ```
+   **Pinned to `"$POD"` for the opposite reason to §4.2/§4.3:** with `-l` a
+   concatenated OLD pod log would dilute nothing here (0 + 0 = 0), but it would
+   also let a NEW pod that *did* enable the plugin hide behind a quiet old one
+   if the counts were ever read per-pod. Dry-run 2026-09-20 on the live pod:
+   prints `0`.
    **FAIL signature:** any non-zero count means an `[otel]` block or env reached
    the pod, the changed `recordGauge` path is live, and §1.4's entire argument is
    void — stop and re-assess rather than continuing down this list.
@@ -850,8 +952,23 @@ now doubly load-bearing — see the box under §4.4; evaluating early produces a
    rate, not the absolute counter**, which stands at 1 cumulative as of
    2026-09-20 with zero increase over 24 h (§2.6).
 7. **CONTENTS ASSERTION (the InfluxDB write path still advances):** re-run the
-   §2.7 Flux query — the newest `uap_radios` `_time` must be **NEWER** than the
-   §2.7 baseline timestamp taken in this session. Tag/field names are unchanged
+   §2.7 Flux query **with the same `range(start:-2h)`** — the newest
+   `uap_radios` `_time` must be **NEWER** than the §2.7 baseline timestamp taken
+   in this session.
+
+   > **AN EMPTY RESULT IS A FAIL, NOT A TOOLING PROBLEM.** Measured 2026-09-20
+   > against the live instance: a Flux query matching nothing returns a bare
+   > `\r` — no rows, no error message, exit status 0. So "the command printed
+   > almost nothing" is indistinguishable at a glance from "I mistyped the
+   > measurement", and the tempting reading (*"the query is broken, skip it"*)
+   > is exactly wrong: with `-2h` a write path that is merely stalled still
+   > returns its OLD timestamp, so **empty means the measurement has not been
+   > written for two hours** — a harder failure than a frozen one, not a softer
+   > one. If you get an empty result, treat §4.7 as FAILED and go to §5. (This
+   > is also why §2.7 must not be narrowed back to `-30m`, where a >30 min
+   > outage produces the same silent empty output.)
+
+   Tag/field names are unchanged
    by both deltas (§1.2), so nothing needs repointing; a frozen timestamp would
    mean the write path broke, which §1 says cannot happen from these deltas —
    **which is exactly why it is checked.** This is the second independent output
@@ -943,20 +1060,24 @@ application-update.md §11. Clear the update marker either way.
     it needlessly.
   - `cilium-1.20.2` (draft, window null) — **in `conflicts_with`**; a CNI roll
     restarts the network every §4 assertion rides on. It declares a solo slot
-    (11 exclusions as of 2026-09-20), so in practice it excludes everything.
-  - **Inbound refs: exactly one exists, and it currently DANGLES — the window
-    agent must resolve it before scheduling either plan.**
-    `kube-prometheus-stack-91.4.1` added `- unpoller-v5.2.6  # ADDED 2026-09-20
-    (RECIPROCITY)` to its `conflicts_with` today, pointing at **this plan's
-    former id**. The two retargets happened in parallel in the same worktree, so
-    that ref went stale the moment this file became `unpoller-v5.2.7`, and
-    `maintenance-plan.py --validate` now reports it as *"names no existing
-    plan — this guard is not enforced"*. **This plan does not edit another
-    plan's file**, so it is reported, not fixed: the owner of that plan (or the
-    window agent) should repoint it to `unpoller-v5.2.7` in their own commit.
-    This is precisely the F-6acb231c failure class, arriving through a *rename*
-    rather than a retirement — worth noting, because that finding's proposed
-    pre-delete check would not have caught it.
+    (**12** exclusions — counted 2026-09-20 from its own `conflicts_with`
+    block), so in practice it excludes everything.
+  - **Inbound refs: exactly one exists, and it now RESOLVES — no action
+    outstanding.** `kube-prometheus-stack-91.4.1` added
+    `- unpoller-v5.2.6  # ADDED 2026-09-20 (RECIPROCITY)` to its
+    `conflicts_with` earlier today, pointing at this plan's pre-rename id; **its
+    owner has since repointed it to `unpoller-v5.2.7`.** Re-measured 2026-09-20
+    06:2xZ: `grep -rn 'unpoller-v5\.2\.[0-9]' runbooks/maintenance/plans/` shows
+    that entry at line 100 of its file reading `unpoller-v5.2.7`, and
+    `maintenance-plan.py --validate` exits **0** with *"all plan frontmatter
+    invariants hold"* — the dangle reported in the earlier draft of this bullet
+    is GONE, and the repo-wide validator is clean. **Do not re-report it as
+    broken**, and note the consequence in the other direction: because the ref
+    is live, retiring this file WILL orphan it (§3.5 handles that). The
+    exclusion is now declared on BOTH sides, which is belt-and-braces rather
+    than required — `window-scheduler.py` honours `conflicts_with`
+    symmetrically (`conflicts & here` OR `names_me`), so either side alone
+    suffices.
     `cilium-1.20.2` and `prometheus-crd-ownership` name no unpoller plan at all;
     each dropped its `unpoller-v5.2.5` ref when that plan retired on 2026-09-16
     and no successor ref was added. That is tolerable **only** because
