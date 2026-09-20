@@ -178,7 +178,7 @@ sops_refs:
   - docs/sops/verification-contents-not-shape.md
   - docs/sops/gateway-api-httproute.md
   - docs/sops/maintenance-windows.md
-status: draft
+status: superseded   # SUPERSEDED 2026-09-20 by nextcloud-34.0.4 (commit 1a914093). Operator took whiteboard 2.0.0, and that plan now moves BOTH legs in ONE commit - the Nextcloud app via occ app:update and the backend pin in whiteboard-proxy.yaml - which is the only ordering that avoids shipping the app/backend skew. Its verification absorbed this plan's section 4 as gates 5a-5e. finding_refs F-53ba35b1 and F-6c461103 were INHERITED by nextcloud-34.0.4 (verified before retiring this), so neither is orphaned. Kept as reference: sections 1.2/1.3/1.5 carry the measured v2.0.0 backend source analysis and the skew judgement.
 window: null
 generated: "2026-09-17"
 ---
