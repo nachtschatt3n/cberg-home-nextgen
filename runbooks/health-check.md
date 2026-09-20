@@ -402,12 +402,24 @@ Disk capacity thresholds: **Critical** = <15% free, **Major** = 15-25% free. New
 | Per-volume trim jobs (influxdb, home-assistant, adguard-home, openclaw) also run at 02:00 | | | Redundant but harmless. NOTE: a per-volume job only runs against a volume that carries the label `recurring-job.longhorn.io/<job-name>: enabled`. The `volume:` key under a job's `spec.labels` is NOT a selector — it is stamped onto the snapshots/backups the job creates. Several of these jobs are enrolled on no volume and are inert no-ops. |
 | 03:00 | `daily-backup-all-volumes` | All volumes (default group) | Remote backup to NAS, retain=7 |
 
-**`LonghornVolumeUsageWarning` alert** fires when `longhorn_volume_actual_size_bytes / capacity ≥ 80%`.
-`actual_size_bytes` counts **all allocated blocks** (filesystem-used + stale/freed blocks + snapshot data).
-Root causes in order of likelihood:
-1. **Stale blocks** — application deleted data but blocks not returned (ES merges, log rotation, Nextcloud cleanup). Fix: run `trimFilesystem` via Longhorn API or UI.
-2. **Snapshot size** — daily backup snapshot captures all blocks at backup time; shrinks naturally the next day after trim + backup cycle.
-3. **Genuine growth** — data approaching capacity; expand the volume.
+**`LonghornVolumeFilesystemUsageHigh`** is the live fill alert. It fires on
+`kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes ≥ 80%`,
+wrapped in `min_over_time(...)` over a day with `for: 30m` — hence its summary
+"over 80% full for a full day". There is **no** `LonghornVolumeUsage{Warning,Critical,Emergency}`
+alert; that name and its `actualSize / capacity` basis are retired.
+
+**The basis changed, so the remedy changed.** The signal is now the MOUNTED
+FILESYSTEM as the kubelet sees it, which is **snapshot-blind and stale-block-blind**.
+Trimming cannot move it: `fstrim` returns freed blocks to Longhorn's allocation,
+and allocation is no longer what is measured. Root causes, in order:
+1. **Genuine growth** — the filesystem really is full; fix the app's retention or expand the volume.
+2. **Retention not deleting** — the app writes continuously and never deletes (ES/OTel datastreams are the recurring case). `df -h` in the pod confirms it.
+3. **Snapshot chain** — handled by its own alert, `LonghornVolumeSnapshotChainNotPruned`, because this filesystem metric cannot see snapshots at all.
+
+Blindness is alerted separately rather than assumed away: `LonghornVolumeFilesystemStatsMissing`
+(per-PVC), `LonghornVolumeFilesystemMetricsAbsent` and `LonghornVolumeStorageClassMetricsAbsent`
+(whole-signal `absent()` guards). Node-level capacity stays on
+`LonghornDiskUsageHigh`/`Critical` (`longhorn_disk_usage_bytes`, 85/95%).
 
 **Manual trim** (if alert fires before next scheduled trim):
 ```bash

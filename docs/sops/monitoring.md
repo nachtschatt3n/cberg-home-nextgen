@@ -248,8 +248,11 @@ kube_pod_status_phase
 kube_deployment_status_replicas_unavailable
 kube_persistentvolumeclaim_status_phase
 
-# Longhorn
-longhorn_volume_actual_size_bytes
+# Longhorn — FILL alerting keys on the kubelet metrics, not the Longhorn ones
+kubelet_volume_stats_used_bytes       # what LonghornVolumeFilesystemUsageHigh measures
+kubelet_volume_stats_capacity_bytes
+longhorn_volume_actual_size_bytes     # ALLOCATION (incl. stale + snapshot blocks) — NOT the fill signal
+longhorn_snapshot_actual_size_bytes   # drives LonghornVolumeSnapshotChainNotPruned
 longhorn_volume_state
 ```
 

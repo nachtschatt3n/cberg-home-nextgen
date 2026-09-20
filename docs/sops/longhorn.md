@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.09.15`
-> Last Updated: `2026-09-15`
+> Version: `2026.09.20`
+> Last Updated: `2026-09-20`
 > Owner: `Platform`
 
 ---
@@ -472,11 +472,14 @@ kubectl get setting.longhorn.io -n storage auto-cleanup-recurring-job-backup-sna
 ```
 
 > **`filesystem-trim` only reclaims space the *application* has freed.**
-> A `LonghornVolumeUsage{Warning,Critical,Emergency}` alert (thresholds
-> 80/90/99% of `actualSize / capacity`) on a high-churn volume usually
-> means the app isn't deleting its own data — trim then has nothing to
-> release and the volume legitimately fills with live data. Diagnose
-> with `df -h` inside the pod vs Longhorn's `actualSize`:
+> The live fill alert is **`LonghornVolumeFilesystemUsageHigh`** (80% of
+> `kubelet_volume_stats_used_bytes / ..._capacity_bytes`). There is no
+> `LonghornVolumeUsage{Warning,Critical,Emergency}` alert and no 80/90/99
+> `actualSize / capacity` ladder — that naming is retired. Because the alert now
+> measures the **mounted filesystem**, trim cannot move it at all: `fstrim`
+> returns blocks to Longhorn's *allocation*, which is no longer what is alerted
+> on. The `df` vs `actualSize` split below is still the right diagnosis, but
+> `actualSize` is now a diagnostic, not the alerting signal:
 >
 > - **`df` high AND actualSize high** → real data; fix the app's
 >   retention (don't just trim). 2026-05-29 incident: the ES OTel
@@ -884,6 +887,29 @@ kubectl get volumes -n storage -o custom-columns=NAME:.metadata.name,ROBUSTNESS:
 ```
 
 ---
+
+
+### Alert response — the eight Longhorn alerts
+
+Added by `a2f663e3`; live and loaded (verify with `/api/v1/rules`, never from the
+manifest). Grouped by what they actually measure, because the fill alert and the
+capacity alert key on **different metric families**.
+
+| Alert | Fires on | First response |
+|---|---|---|
+| `LonghornVolumeFilesystemUsageHigh` | `kubelet_volume_stats_used_bytes / ..._capacity_bytes` ≥ 80%, `min_over_time` over a day, `for: 30m` | `df -h` in the pod. This is the **mounted filesystem**, so trim will not move it — fix app retention or expand |
+| `LonghornVolumeSnapshotChainNotPruned` | ≥168 snapshots held for 30h+ (`longhorn_snapshot_actual_size_bytes`) | Check the volume's RecurringJob enrolment; the fill alert is snapshot-blind, which is why this exists separately |
+| `LonghornDiskUsageHigh` / `…Critical` | `longhorn_disk_usage_bytes / …_capacity_bytes` ≥ 85 / 95% | **Node-level**, not per-volume. Rebalance replicas or add disk |
+| `LonghornVolumeFilesystemStatsMissing` | a Longhorn PVC has no kubelet stats | Per-PVC blindness — fill alerting is off for *that* volume |
+| `LonghornVolumeFilesystemMetricsAbsent` | `absent(kubelet_volume_stats_capacity_bytes)` | Whole-signal blindness — fill alerting is off **cluster-wide** |
+| `LonghornVolumeStorageClassMetricsAbsent` | `absent(kube_persistentvolumeclaim_info{storageclass=~"longhorn.*"})` | kube-state-metrics is gone; the fill alert cannot select volumes |
+| `LonghornSnapshotMetricsAbsent` | `absent(longhorn_snapshot_actual_size_bytes)` | Snapshot pruning is unmonitored |
+
+Four of the eight are **blindness detectors**, not fault detectors. That is
+deliberate: a fill alert that silently matches no series sits at `inactive` and is
+indistinguishable from healthy, so each signal is paired with an `absent()` guard.
+Treat a `*MetricsAbsent` alert as *"the control is off"*, which is more urgent than
+a volume being 80% full.
 
 ## Health Check
 
