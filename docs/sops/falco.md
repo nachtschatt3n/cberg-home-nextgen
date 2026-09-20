@@ -1,8 +1,8 @@
 # SOP: Falco Runtime-Security Rule Exception Tuning
 
 > Description: How to add a scoped, benign-workload exception to a built-in Falco rule when a legitimate container trips a runtime-security alert (typically a Critical "Drop and execute new binary in container" → Wazuh level-12), without blinding the rule globally.
-> Version: `2026.07.14`
-> Last Updated: `2026-07-14`
+> Version: `2026.09.20`
+> Last Updated: `2026-09-20`
 > Owner: `security / cluster-ops`
 
 ---
@@ -268,6 +268,44 @@ flux -n security get hr falco
 ```
 
 ---
+
+### The log sink is CAPPED — never read its size as a falco memory leak
+
+`/var/run/falco/falco.log` (the event sink named in §2) has **no rotation of its
+own**, and on Talos `/var/run` is **tmpfs**. So every event falco has ever written
+stays resident in RAM, charged to falco's own cgroup. It reached **501 MiB** on the
+busiest node and pushed the container to **97.9% of its 768Mi limit**.
+
+**It reads exactly like a memory leak and is not one.** falco's RSS was flat at
+~200 MiB throughout; truncating the file dropped the container from 753 MiB to
+299 MiB and left RSS untouched. Growth tracks per-node event volume, which is why
+nodes diverge widely (+27 vs +109 MiB/day). This has been misdiagnosed twice — the
+earlier 512Mi → 768Mi limit raise was attributed to "page-cache reclaim thrash"
+and was this same file. **Raising the limit cannot fix an unbounded file; it only
+sets the date of the next incident.** Before touching falco's memory limit, check
+the size of this file first.
+
+It is now capped at **64 MiB** by the `falco-log-rotate` DaemonSet
+(`kubernetes/apps/security/falco/app/log-rotate-daemonset.yaml`), which truncates
+in place (`: > file`) rather than rotating. Truncation is deliberate: the file is a
+hand-off buffer, not an archive — the wazuh-agent tails it in real time and was
+only ~37 KB behind a 501 MiB file when measured, so anything older has already been
+ingested into Wazuh's indexer. Truncating in place keeps the **inode**, so the
+agent's tail follows it without reopening. It is a DaemonSet rather than a falco
+chart change so that its blast radius stays off falco and off security ingestion:
+if it fails, both are unaffected and the container-memory alerts still catch the
+regrowth.
+
+**The truncation trips a SIEM rule, and that is expected.** Wazuh rule 592 ("Log
+file size reduced", level 8, groups `ossec`+`attacks`, `mitre T1565.001`) fires on
+every truncation — a shrinking log is a genuine anti-forensics indicator. Measured
+2026-09-20: 18 hits in 7 days, and rule 592 was the *sole* driver of the `attacks`
+group at level ≥7. It is suppressed for this one path only, by local rule
+`100630` in `wazuh-local-rules-configmap.yaml`, scoped with `<match>` on the
+literal filename. A size reduction on **any other file still fires 592 at level
+8** — verified with `wazuh-logtest` against `/var/log/secure` as a negative
+control. If the sink path ever changes, that rule stops matching and the events
+return loud, which is the correct failure direction.
 
 ## 8) Diagnose Examples
 

@@ -1,8 +1,8 @@
 # SOP: Immich Photo Library
 
 > Description: Deploy and operate Immich — the self-hosted family photo/video library — as a read-only **external-library viewer** over the iCloud backup on the UniFi NAS, with Intel-iGPU ML face detection, Authentik OIDC SSO, and full Prometheus + Elasticsearch observability.
-> Version: `2026.09.11`
-> Last Updated: `2026-09-11`
+> Version: `2026.09.20`
+> Last Updated: `2026-09-20`
 > Owner: `cberg-agent / media`
 
 ---
@@ -27,10 +27,10 @@ deletes the originals (`:ro` CIFS mount).
 | Namespace | `media` (privileged PSA — ML needs `/dev/dri`) |
 | Source of truth | `kubernetes/apps/media/immich/` (GitOps) |
 | Components | `immich-server`, `immich-machine-learning`, `immich-postgres` (VectorChord), `immich-redis` |
-| Version | `v3.2.0` (server + ML pinned identical) |
+| Version | `v3.2.2` (server + ML pinned identical) |
 | DB image | `ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0` (`DB_VECTOR_EXTENSION=vectorchord`) |
 | Originals | RO CIFS `cifs-immich-icloud-backup` → `/libraries` (`//NAS/backups` subdir `icloud-backup`) |
-| Generated data | Longhorn: `immich-upload` (/data), `immich-ml-cache` (/cache), `immich-pg-data` |
+| Generated data | **CIFS `cifs-immich-cache` → `immich-data` (/data)** — 500Gi, moved off Longhorn 2026-08-25 (`5707b01a`). Longhorn only for `immich-ml-cache` (/cache) and `immich-pg-data`. There is **no `immich-upload` PVC** |
 | ML accel | Intel **iGPU** (OpenVINO, `gpu.intel.com/i915`) — **not** the NPU. CPU fallback = plain image tag |
 | Route | HTTPRoute `immich.${SECRET_DOMAIN}` -> Gateway `envoy-external` (public via Cloudflare tunnel); no Ingress object exists |
 | Auth | Authentik **OIDC** (`immich-oauth2-blueprint.yaml`), Auto Register on |
@@ -125,8 +125,9 @@ A failing test blocks sign-off; each notes its rollback trigger (see §11).
 containers `wait-for-*` Completed; server log shows migrations applied +
 "listening on 2283"; running image digests match the pinned tags (server == ML).
 
-**T2 — Storage & Longhorn**: `immich-pg-data`/`immich-upload`/`immich-ml-cache`
-PVCs Bound on `longhorn`; external-lib mount is **read-only** —
+**T2 — Storage**: `immich-pg-data`/`immich-ml-cache` Bound on `longhorn`, and
+`immich-data` Bound on `cifs-immich-cache` (NOT Longhorn — assert the class, not
+just Bound). external-lib mount is **read-only** —
 `kubectl exec -n media deploy/immich-server -- touch /libraries/x` → **read-only
 file system**; `kubectl get sc cifs-immich-icloud-backup -o jsonpath='{.reclaimPolicy}'`
 = `Retain`; storage-safety Test 1 & 2 print `OK`; the class is in the
@@ -143,7 +144,8 @@ batch. **Fallback test**: swap to the CPU tag → same job completes (slower).
 
 **T5 — External library & data integrity (no NAS writes)**: after a scan, `mu`'s
 assets from `.../icloud-backup/mu/photos/YYYY/MM` appear; Immich asset count ≈ NAS
-file count for a spot-checked month; thumbnails render (on Longhorn, not the NAS);
+file count for a spot-checked month; thumbnails render (served from the CIFS
+`immich-data` volume since 2026-08-25 — the ORIGINALS are still never written);
 UI "delete" is disabled for external assets; **no new/modified files on the NAS**
 attributable to Immich (icloud-docker stays the only writer).
 
@@ -188,7 +190,7 @@ alerts** cluster-wide (Watchdog excluded); edot ES-rejection rate still 0.
 | SSO fails: `invalid_request` "The request is otherwise malformed" | provider `grant_types` empty (blueprint-only provider, Authentik ≥2026.5) | Blueprint must set `grant_types: [authorization_code, refresh_token]`; the redirect_uri is a red herring. See `docs/sops/authentik.md` OIDC gotchas |
 | Server `redirect_uri mismatch` on SSO | callback URL missing from blueprint | Add the exact URL as a `strict` redirect_uri; re-encrypt configmap; wait for Reloader |
 | SSO works but no user created | Auto Register disabled | Enable it in Immich Admin → OAuth |
-| External assets show but thumbnails fail | `immich-upload` PVC full or perms | Check `ImmichUploadPVCFillingUp`; verify fsGroup 1000 on `/data` |
+| External assets show but thumbnails fail | `immich-data` PVC full or perms | **No dedicated PVC alert exists** — `immich-alerts.yaml` carries only the six readiness/restart alerts, so check capacity directly (`kubectl -n media exec deploy/immich-server -- df -h /data`) and verify fsGroup 1000 on `/data` |
 | `\dx` missing `vchord`/`vectors` | wrong PG image or `DB_VECTOR_EXTENSION` | Must be the immich `postgres:14-vectorchord…` image + `vectorchord` |
 | Immich indexed but library empty | wrong import path or scan not run | Import path must be `/libraries/<user>/photos`; kick a scan |
 | Immich writes appear on the NAS | mount not read-only | SC must carry `ro`; PVC/PV `Retain`; STOP and re-check per storage-safety |
@@ -244,6 +246,6 @@ kubectl exec -n kube-system deploy/authentik-server -- ak show_blueprints | grep
 - **ML only broken** → switch the ML image to the CPU (non-`-openvino`) tag; no
   data impact.
 - **Full teardown** → revert all commits, then manually delete the orphaned
-  Longhorn `immich-pg-data`/`immich-upload`/`immich-ml-cache` PVCs (per the
+  Longhorn `immich-pg-data`/`immich-ml-cache` and the CIFS `immich-data` PVCs (per the
   storage-safety delete pre-flight). The NAS `icloud-backup` tree and icloud-docker
   are never touched.
