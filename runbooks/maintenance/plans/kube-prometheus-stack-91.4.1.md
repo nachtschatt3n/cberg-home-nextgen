@@ -1,16 +1,30 @@
 ---
-plan_id: kube-prometheus-stack-91.4.0
+plan_id: kube-prometheus-stack-91.4.1
 component: kube-prometheus-stack
 pr: null                              # no Renovate PR — coverage.py direct-bump lane
                                       # routed it to PLAN ("major — needs an assessed
                                       # window plan"). Sweep finding F-f1e564f2 was
-                                      # filed at 91.2.1; the target has since moved to
-                                      # 91.4.0 (2026-09-14). If a later 91.x exists at
-                                      # window time, re-read its release notes and
-                                      # bump `target:` — the 90.0.0 premise still holds.
+                                      # filed at 91.2.1; the target moved to 91.4.0
+                                      # (2026-09-14) and then to 91.4.1 (2026-09-16).
+                                      # RETARGETED 91.4.0 -> 91.4.1 on 2026-09-20 (target:
+                                      # below carries the measurement). 91.4.1 is the newest
+                                      # 91.x on the prometheus-community index as of
+                                      # 2026-09-20. If a later 91.x exists at window time,
+                                      # re-read its release notes and bump `target:` — the
+                                      # 90.0.0 premise still holds.
 kind: chart
 current: "90.0.0"                     # live: helm revision 39, operator v0.93.1
-target: "91.4.0"                      # released 2026-09-14, operator v0.94.0
+target: "91.4.1"                      # released 2026-09-16, operator v0.94.0 — the SAME
+                                      # appVersion as 91.4.0. MEASURED 2026-09-20 against
+                                      # the prometheus-community index AND both chart
+                                      # tarballs: 91.4.0 -> 91.4.1 differs in 3 of 313 chart
+                                      # files (Chart.yaml, Chart.lock, charts/grafana/
+                                      # Chart.yaml) — the grafana SUBCHART dependency only
+                                      # (13.2.4 -> 13.2.5). values.yaml and all ten CRD
+                                      # files are BYTE-IDENTICAL. So every risk statement
+                                      # below (operator v0.93.1 -> v0.94.0, ten CRDs
+                                      # replaced, Prometheus + Alertmanager restart once)
+                                      # is unchanged by this retarget.
 update_type: major
 risk: medium                          # shared monitoring infra: Prometheus AND
                                       # Alertmanager pods restart once (config-reloader
@@ -72,6 +86,23 @@ conflicts_with:                       # HARD slot exclusions — window-schedule
                                       # writers of the same ten CRDs in one window is the
                                       # race that plan exists to end; it runs in an EARLIER
                                       # window, never this one.
+  - otel-operator-0.23.0              # ADDED 2026-09-20 (RECIPROCITY). That plan already
+                                      # lists THIS plan in its conflicts_with; the README
+                                      # requires the exclusion on BOTH sides because
+                                      # --validate checks that refs resolve, not that they
+                                      # are mutual. Same mechanism as the retired -0.21.0
+                                      # ref above: both HRs CreateReplace the same four
+                                      # monitoring.coreos.com CRDs, last writer wins.
+  - edot-collector-0.161.0            # ADDED 2026-09-20 (RECIPROCITY). That plan lists THIS
+                                      # plan in its conflicts_with: its §4 reads THIS
+                                      # Prometheus, and the 2-5 min restart blind spot of
+                                      # §3.4 would read there as a collector regression.
+  - unpoller-v5.2.7                   # ADDED 2026-09-20 (RECIPROCITY). Successor to the
+                                      # retired unpoller-v5.2.5 ref below, same reason: its
+                                      # §4.3-4.5 query THIS Prometheus over a >=5-min settle.
+  - cilium-1.20.2                     # ADDED 2026-09-20 (RECIPROCITY). That plan lists THIS
+                                      # plan in its conflicts_with: its §4 CONTENTS ASSERTION
+                                      # reads THIS Prometheus.
 security_ref: null                    # no security driver
 capability_change: false              # operator 0.94.0 adds CRD fields (retentionPercentage,
                                       # clusterPeerName) we do not set; alerts, rules and
@@ -85,7 +116,10 @@ rollback_class: git-revert            # Flux CreateReplace re-applies the 90.0.0
                                       # maxHistory: 2 keeps revision 39 reachable. §5.
 finding_refs:
   - F-f1e564f2                        # "kube-prometheus-stack: chart 90.0.0 → 91.2.1 (major)"
-status: vetted   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
+status: draft    # was `vetted` (REVIEWED 2026-09-15, plan-reviewer fan-out, corrections
+                 # applied in c36388bc). RESET TO draft 2026-09-20 because the TARGET moved
+                 # (91.4.0 -> 91.4.1): a vetted stamp may not outlive the version it was
+                 # granted for. Must be re-reviewed before it can be scheduled.
 window: null
 premises:
   - id: hr-still-on-90.0.0
@@ -113,9 +147,12 @@ premises:
   - id: bundled-grafana-stays-disabled
     why: >-
       Grafana is a SEPARATE HelmRelease (grafana-community 13.2.4, 69cf5388).
-      91.4.0 adds GrafanaDatasource provisioning under the bundled grafana
-      subchart; that must stay inert. If someone flipped `grafana.enabled`,
-      this bump would ALSO roll out a second Grafana on the same hostname.
+      91.4.0 added GrafanaDatasource provisioning under the bundled grafana
+      subchart, and 91.4.1 bumps that subchart again (13.2.4 -> 13.2.5, subchart
+      appVersion 13.2.1 -> 13.2.2) — the ONLY content change in the retarget,
+      measured 2026-09-20. Both must stay inert. If someone flipped
+      `grafana.enabled`, this bump would ALSO roll out a second Grafana on the
+      same hostname.
     run: kubectl get configmap -n monitoring kube-prometheus-stack-values -o jsonpath='{.data.values\.yaml}' | grep -A1 '^grafana:' | tail -1 | tr -d ' '
     expect_exact: "enabled:false"
   - id: no-bundled-grafana-deployment-exists
@@ -127,8 +164,10 @@ premises:
     expect_exact: "0"
   - id: prometheus-engine-unchanged-by-this-bump
     why: >-
-      91.4.0 ships prometheus v3.14.0-distroless — the SAME image that is live —
+      91.4.1 ships prometheus v3.14.0-distroless — the SAME image that is live —
       so this plan claims no Prometheus engine change (no TSDB format risk).
+      Re-measured 2026-09-20: 91.4.1's values.yaml is byte-identical to 91.4.0's,
+      so every image tag this plan cites is unchanged by the retarget.
       If the live Prometheus image differs, that claim is stale and the WAL /
       TSDB compatibility question must be re-asked.
     run: kubectl get prometheus -n monitoring kube-prometheus-stack -o jsonpath='{.spec.image}'
@@ -146,7 +185,10 @@ premises:
       Three AlertmanagerConfig objects (monitoring/telegram, monitoring/
       claude-watch-webhook, storage/telegram) and three ScrapeConfigs are
       v1alpha1. Operator 0.94.0's CRDs still serve ONLY v1alpha1 for both
-      (verified against the 91.4.0 chart files), so no API migration is
+      (RE-VERIFIED 2026-09-20 against the 91.4.1 chart files, which are
+      byte-identical to 91.4.0's: served=v1alpha1 for alertmanagerconfigs,
+      prometheusagents and scrapeconfigs; v1 for the other seven; all ten
+      annotated operator.prometheus.io/version=0.94.0), so no API migration is
       needed. If a served version other than v1alpha1 appears, re-check.
     run: kubectl get crd alertmanagerconfigs.monitoring.coreos.com -o jsonpath='{.spec.versions[*].name}'
     expect_exact: v1alpha1
@@ -156,12 +198,12 @@ sops_refs:
 generated: "2026-09-15"
 ---
 
-# kube-prometheus-stack chart 90.0.0 → 91.4.0 (prometheus-operator v0.93.1 → v0.94.0)
+# kube-prometheus-stack chart 90.0.0 → 91.4.1 (prometheus-operator v0.93.1 → v0.94.0)
 
 ## 1) Summary & why held
 
 Bump the `kube-prometheus-stack` HelmRelease in `monitoring` from chart **90.0.0**
-to **91.4.0**. This is the cluster's Prometheus / Alertmanager / prometheus-operator
+to **91.4.1**. This is the cluster's Prometheus / Alertmanager / prometheus-operator
 stack — every PrometheusRule (86), ServiceMonitor (49), PodMonitor (3), Probe (4),
 ScrapeConfig (3) and AlertmanagerConfig (3) in the cluster is interpreted by it, and
 the maintenance-window health gate, the sweep's alert-watcher and all five SLOs read
@@ -177,21 +219,23 @@ CRDs change, and this one does:
 > For traditional upgrades, please run these commands to update the CRDs before applying the upgrade.
 >
 > (verbatim from `charts/kube-prometheus-stack/UPGRADE.md` at tag
-> `kube-prometheus-stack-91.4.0`, followed by the ten `kubectl apply --server-side -f
+> `kube-prometheus-stack-91.4.1` — re-fetched and diffed 2026-09-20: UPGRADE.md is
+> byte-identical at tags 91.4.0 and 91.4.1, so this quote is the 91.4.1 text — followed
+> by the ten `kubectl apply --server-side -f
 > …/prometheus-operator/v0.94.0/example/prometheus-operator-crd/monitoring.coreos.com_*.yaml`
 > commands — which Flux `CreateReplace` performs for us, premise
 > `crds-applied-by-flux-createreplace`)
 
 **What actually changes, measured against the two chart tags (not the summary):**
 
-| | 90.0.0 (live) | 91.4.0 | Effect here |
+| | 90.0.0 (live) | 91.4.1 | Effect here |
 |---|---|---|---|
 | prometheus-operator (appVersion) | v0.93.1 | **v0.94.0** | operator Deployment rolls; config-reloader sidecar in BOTH StatefulSets moves → **Prometheus and Alertmanager pods restart once** |
 | prometheus image | v3.14.0-distroless | v3.14.0-distroless | **unchanged** — no TSDB/WAL format risk |
 | alertmanager image | v0.34.0 | v0.34.0 | **unchanged** |
 | kube-state-metrics subchart | 8.4.2 (image v2.20.0) | 8.5.0 (image v2.20.0) | chart-only; image identical |
 | node-exporter subchart | 4.56.3 (image v1.12.1) | 4.57.0 (image v1.12.1) | chart-only; image identical |
-| grafana subchart | 13.2.2 | 13.2.4 | subchart **workloads inert** (`grafana.enabled: false`, premise) — **but** `grafana.forceDeployDashboards: true` (`helmvalues.yaml`) makes the kps chart itself render **28** `grafana_dashboard=1` ConfigMaps (live count 2026-09-15) that the separate Grafana's `grafana-sc-dashboard` sidecar loads, and **10 of them change content** in 91.4.0 (upstream kube-prometheus mixin refresh, commit `f3f97b1` in the template header). Dashboard JSON only — harmless; §4.7 checks the sidecar picked them up and the count did not move |
+| grafana subchart | 13.2.2 | **13.2.5** | subchart **workloads inert** (`grafana.enabled: false`, premise) — **but** `grafana.forceDeployDashboards: true` (`helmvalues.yaml`) makes the kps chart itself render **28** `grafana_dashboard=1` ConfigMaps (live count 2026-09-15) that the separate Grafana's `grafana-sc-dashboard` sidecar loads, and **10 of them change content** relative to 90.0.0 (upstream kube-prometheus mixin refresh, commit `f3f97b1` in the template header — measured at 91.4.0 on 2026-09-15 and UNCHANGED by the 91.4.1 retarget, whose only delta is the grafana subchart pin: the kps chart's own dashboard templates are byte-identical between 91.4.0 and 91.4.1, measured 2026-09-20). Dashboard JSON only — harmless; §4.7 checks the sidecar picked them up and the count did not move. NOTE the two 13.2.x lines are DIFFERENT objects: this row is the bundled SUBCHART (inert); the separate `grafana` HelmRelease is chart 13.2.4 and is NOT touched (§4.2) |
 | CRDs (`operator.prometheus.io/version`) | 0.93.1 | **0.94.0** | all 10 replaced by Flux `CreateReplace` |
 | values.yaml (non-comment diff) | — | only ADDED keys: `clusterPeerName`, `datasourcesEnabled`, `retentionPercentage`, `tsdb.chunkEncoding`, `staleSeriesCompactionThreshold`, `prometheusSpec.rules` (a new template branch — the top-level `rules:`/`defaultRules` keys already existed at 90.0.0), `schedulerName`; one type change `admissionWebhooks.matchConditions: {}` → `[]` | **no removed or renamed values**; we set none of the changed keys |
 
@@ -199,7 +243,10 @@ Per-release content of the 91.x line (GitHub releases, 2026-09-13/14): 91.0.0 = 
 operator bump (PR 7269); 91.1.0 = `retentionPercentage` + `clusterPeerName` values;
 91.2.0 = `rules`/`tsdb`/thanosRuler spec gaps; 91.2.1 = webhook `matchConditions`
 rendered as a list; 91.2.2/91.2.3 = docs + CRD-upgrade-job labels; 91.3.0 = ksm
-subchart; 91.4.0 = optional `GrafanaDatasource` provisioning (default off).
+subchart; 91.4.0 = optional `GrafanaDatasource` provisioning (default off); **91.4.1 =
+grafana subchart dependency 13.2.4 -> 13.2.5 and a CI change only** (measured 2026-09-20
+by diffing both chart tarballs: 3 of 313 files differ — `Chart.yaml`, `Chart.lock`,
+`charts/grafana/Chart.yaml`; `values.yaml` and all ten CRD files byte-identical).
 
 Prometheus-operator **v0.94.0** (2026-09-09) changes that could bite, checked against
 our objects:
@@ -287,7 +334,7 @@ export KUBECONFIG="$PWD/kubeconfig"
 **2.1 — Premises hold (the scheduler ran them at placement; re-run now).**
 
 ```bash
-python3 runbooks/plan-premises.py kube-prometheus-stack-91.4.0 --require-premises
+python3 runbooks/plan-premises.py kube-prometheus-stack-91.4.1 --require-premises
 ```
 **PASS:** exit 0, 8/8 premises pass.
 
@@ -313,14 +360,16 @@ four shared CRDs). `installPrometheus=[]` = the dependency has not landed:
 ```bash
 TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:prometheus-community/charts/kube-prometheus-stack:pull&service=ghcr.io" \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
-for TAG in 91.4.0 99.99.99; do
+for TAG in 91.4.1 99.99.99; do
   printf "%-10s HTTP %s\n" "$TAG" "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
     -H "Accept: application/vnd.oci.image.manifest.v1+json" \
     "https://ghcr.io/v2/prometheus-community/charts/kube-prometheus-stack/manifests/$TAG")"
 done
 ```
-**PASS — EXACTLY:** `91.4.0 -> 200` and `99.99.99 -> 404`. *(Measured 2026-09-15:
-200 / 404.)* Both 200 = intercepting proxy, result invalid.
+**PASS — EXACTLY:** `91.4.1 -> 200` and `99.99.99 -> 404`. *(RE-MEASURED 2026-09-20
+for the new target: `91.4.1 -> 200`, `91.4.0 -> 200`, `99.99.99 -> 404`. The older
+2026-09-15 datapoint was `91.4.0 -> 200 / 99.99.99 -> 404`.)* Both 200 = intercepting
+proxy, result invalid.
 
 **2.4 — Observability baseline. Write these numbers down; §4 diffs against them.**
 
@@ -351,10 +400,20 @@ curl -s localhost:9093/api/v2/silences | python3 -c "
 import sys,json;print('active_silences',len([x for x in json.load(sys.stdin) if x['status']['state']=='active']))"
 kill $PF1 $PF2 2>/dev/null
 ```
-**Baseline measured 2026-09-15 01:58Z:** `targets 98 up 98` · `down: []` ·
-`groups 117 rules 474` · `firing: 1 ['LonghornVolumeAllocationHigh']` ·
-`head_series 353092` · `tsdb_floor 2026-09-08 00:00Z` · `watchdog_in_AM 1 ['active']` ·
-`active_silences 0`.
+**Historical datapoint — measured 2026-09-15 01:58Z (kept, NOT rewritten):**
+`targets 98 up 98` · `down: []` · `groups 117 rules 474` ·
+`firing: 1 ['LonghornVolumeAllocationHigh']` · `head_series 353092` ·
+`tsdb_floor 2026-09-08 00:00Z` · `watchdog_in_AM 1 ['active']` · `active_silences 0`.
+
+**Re-measured 2026-09-20 (retarget pass, same commands):** `targets 98 up 98` ·
+`down: []` · `groups 118 rules 478` · `firing: 0 []` · `head_series 351993` ·
+`tsdb_floor 2026-09-13 00:00Z` · `watchdog_in_AM 1 ['active']`.
+
+**These numbers are a SANITY RANGE, not the gate.** The gate is the baseline you take
+in THIS window, immediately before §3.2 — §4.4/§4.5 diff against *that*, never against
+a printed number. Note why: `tsdb_floor` MOVES every day (7d retention — it read
+2026-09-08 on 09-15 and 2026-09-13 on 09-20), and `groups`/`rules`/`head_series` drift
+as apps come and go. A gate hardcoded to a plan-time figure would false-fail.
 **PASS:** targets all up, `watchdog_in_AM` = 1 active. Any target down is a no-go
 (the post-upgrade count comparison would be ambiguous).
 
@@ -400,9 +459,9 @@ curl -s -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/jso
   "matchers":[{"name":"namespace","value":"monitoring","isRegex":false,"isEqual":true},
               {"name":"alertname","value":"KubePod.*|KubeStatefulSet.*|KubeDeployment.*|TargetDown|PrometheusOperator.*","isRegex":true,"isEqual":true}],
   "startsAt":"'$NOW'","endsAt":"'$END'","createdBy":"maintenance-window",
-  "comment":"kube-prometheus-stack chart 90.0.0->91.4.0 rollout. auto-expires 1h"}'
+  "comment":"kube-prometheus-stack chart 90.0.0->91.4.1 rollout. auto-expires 1h"}'
 kill $PF 2>/dev/null
-runbooks/update-marker.sh add kube-prometheus-stack monitoring 1 "chart 90.0.0->91.4.0"
+runbooks/update-marker.sh add kube-prometheus-stack monitoring 1 "chart 90.0.0->91.4.1"
 ```
 
 Do **not** silence `Watchdog`, `Prometheus*` or `Alertmanager*` alerts — those are the
@@ -412,27 +471,37 @@ the desired behaviour here: there is no init migration to protect).
 **3.2 — The bump. One line, one file.**
 
 ```bash
-sed -i '' 's/^      version: 90\.0\.0$/      version: 91.4.0/' \
+sed -i '' 's/^      version: 90\.0\.0$/      version: 91.4.1/' \
   kubernetes/apps/monitoring/kube-prometheus-stack/app/helmrelease.yaml
 git --no-pager diff kubernetes/apps/monitoring/kube-prometheus-stack/app/helmrelease.yaml
 ```
-**Expected diff:** exactly `-      version: 90.0.0` / `+      version: 91.4.0`. No
-values change: `helmvalues.yaml` needs nothing for 91.x (no removed/renamed keys, §1).
+**Expected diff** (DRY-TESTED 2026-09-20 on a scratch copy of the real file with this
+exact BSD-sed command; it produced precisely this and nothing else):
+
+```diff
+12c12
+<       version: 90.0.0
+---
+>       version: 91.4.1
+```
+
+No values change: `helmvalues.yaml` needs nothing for 91.x (no removed/renamed keys, §1).
 
 **3.3 — Commit and push (`--only`, shared worktree).**
 
 ```bash
 cat > /tmp/kps-msg.txt <<'EOF'
-chore(monitoring)!: kube-prometheus-stack chart 90.0.0 -> 91.4.0 (operator v0.94.0)
+chore(monitoring)!: kube-prometheus-stack chart 90.0.0 -> 91.4.1 (operator v0.94.0)
 
 Chart major: prometheus-operator v0.93.1 -> v0.94.0 with the matching CRD set
 (applied by Flux CreateReplace) and the tightened operator ClusterRole.
 Prometheus (v3.14.0) and Alertmanager (v0.34.0) images are unchanged; both
 pods restart once for the config-reloader sidecar. kube-state-metrics and
 node-exporter subcharts move without image changes. Bundled grafana stays
-disabled; grafana is its own HelmRelease. Values untouched.
+disabled (its subchart pin moves 13.2.4 -> 13.2.5 and renders nothing); grafana
+is its own HelmRelease. Values untouched.
 
-Plan: runbooks/maintenance/plans/kube-prometheus-stack-91.4.0.md
+Plan: runbooks/maintenance/plans/kube-prometheus-stack-91.4.1.md
 Finding: F-f1e564f2
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
@@ -453,7 +522,7 @@ terminate and come back (Prometheus replays WAL; with ~350k head series budget
 1-3 min before `2/2 Ready`).
 
 ```bash
-kubectl get helmrelease -n monitoring kube-prometheus-stack -w      # until Ready=True with 91.4.0
+kubectl get helmrelease -n monitoring kube-prometheus-stack -w      # until Ready=True with 91.4.1
 kubectl get pods -n monitoring -l 'app.kubernetes.io/name in (prometheus,alertmanager)' -w
 ```
 
@@ -489,7 +558,7 @@ kubectl get sts -n monitoring prometheus-kube-prometheus-stack alertmanager-kube
 kubectl get pods -n monitoring -l 'app.kubernetes.io/name in (prometheus,alertmanager,kube-prometheus-stack-prometheus-operator)'
 helm history kube-prometheus-stack -n monitoring | tail -2
 ```
-**PASS:** `True 91.4.0 v0.94.0`; operator image `…prometheus-operator:v0.94.0`;
+**PASS:** `True 91.4.1 v0.94.0`; operator image `…prometheus-operator:v0.94.0`;
 each StatefulSet lists `prometheus-config-reloader:v0.94.0` next to the UNCHANGED
 `prometheus:v3.14.0-distroless` / `alertmanager:v0.34.0`; all pods `Running`, `2/2`,
 0 restarts after settle; helm shows revision 40 `deployed` and 39 `superseded`.
@@ -598,10 +667,13 @@ curl -s -G localhost:9099/api/v1/query --data-urlencode 'query=sum(increase(aler
   | python3 -c "import sys,json;r=json.load(sys.stdin)['data']['result'];print('AM alerts received 5m:',r[0]['value'][1] if r else 'NO DATA')"
 kill $PF 2>/dev/null
 ```
-**PASS:** `up==1 now` == the §4.4(a) up count (98); every node shows ≥ 3 samples in
-the last 2 m (≥ 5 min after the pod start — wait if not); `tsdb_floor` **identical**
-to §2.4 (a floor equal to the pod start time means an EMPTY volume was mounted —
-STOP, §5, and check the PVC binding); `head_series` within ~±10 % of 353092 (a
+**PASS:** `up==1 now` == the §4.4(a) up count (98 at both measurements); every node
+shows ≥ 3 samples in the last 2 m (≥ 5 min after the pod start — wait if not);
+`tsdb_floor` **identical to the value YOU recorded in §2.4 in this window** (not to any
+figure printed in this plan — retention rolls the floor daily; a floor equal to the pod
+start time means an EMPTY volume was mounted — STOP, §5, and check the PVC binding);
+`head_series` within ~±10 % of the §2.4 figure you just recorded (~352k on 2026-09-20,
+353092 on 2026-09-15) (a
 small rise from the new status-condition metrics is expected; a collapse to a few
 thousand means targets are not being scraped); `AM alerts received 5m` > 0 and not
 `NO DATA`.
@@ -621,7 +693,7 @@ both CRs `Available=True Reconciled=True`.
 (the separate HelmRelease's datasource points at
 `kube-prometheus-stack-prometheus.monitoring.svc:9090`; its `grafana-sc-dashboard`
 sidecar loads the 28 `grafana_dashboard=1` ConfigMaps this chart ships, 10 of which
-change content in 91.4.0 — §1).
+change content vs 90.0.0 — §1; unchanged by the 91.4.1 retarget).
 
 ```bash
 kubectl port-forward -n monitoring svc/grafana 3000:80 >/dev/null 2>&1 & PF=$!

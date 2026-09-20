@@ -80,7 +80,7 @@ conflicts_with:                   # HARD slot exclusions. window-scheduler.py
                                   # CreateReplaces the servicemonitors CRD that
                                   # servicemonitor/edot-collector depends on, i.e.
                                   # it perturbs the instrument §4 reads.
-  - kube-prometheus-stack-91.4.0  # Authoring rule 4, and the mechanism is
+  - kube-prometheus-stack-91.4.1  # Authoring rule 4, and the mechanism is
                                   # explicit in that plan's own file: a chart bump
                                   # RESTARTS Prometheus. Every gate in §2.4 and §4
                                   # of this plan is a Prometheus range query, so a

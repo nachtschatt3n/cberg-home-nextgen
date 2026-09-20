@@ -101,7 +101,7 @@ conflicts_with:                        # HARD slot exclusions — window-schedul
                                        # helm upgrades in one window confound BOTH plans' CRD
                                        # assertions (and it must run in an EARLIER window
                                        # anyway — it is the depends_on above).
-  - kube-prometheus-stack-91.4.0       # (a) both write the ten monitoring.coreos.com CRDs via
+  - kube-prometheus-stack-91.4.1       # (a) both write the ten monitoring.coreos.com CRDs via
                                        # CreateReplace; (b) §4.6 of THIS plan reads Prometheus,
                                        # and that plan restarts Prometheus + Alertmanager — the
                                        # window's instrument is shared infra (authoring rule 4).

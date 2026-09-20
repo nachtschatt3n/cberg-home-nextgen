@@ -45,7 +45,7 @@ touches:
                                       # collectors are NOT perturbed; no scrape gap.
 depends_on: []
 conflicts_with:
-  - kube-prometheus-stack-91.4.0      # both touch the same ten cluster-scoped CRDs; two
+  - kube-prometheus-stack-91.4.1      # both touch the same ten cluster-scoped CRDs; two
                                       # CreateReplace writers in one window is the race
                                       # this plan exists to end. Ordering: THIS plan first,
                                       # kps-91.4.0 in a LATER window (§6).

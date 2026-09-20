@@ -78,7 +78,7 @@ conflicts_with:                       # SOLO SLOT. This is not a courtesy list: 
   - multus-macvlan-foundation         # CNI-adjacent (Talos machine-config VLAN work)
   - flux-oci-chart-sources            # already declares conflicts_with: [talos-1.14.0] for
                                       # the same reason; a CNI roll restarts what it verifies
-  - kube-prometheus-stack-91.4.0      # MANDATORY: §4's CONTENTS ASSERTION reads Prometheus.
+  - kube-prometheus-stack-91.4.1      # MANDATORY: §4's CONTENTS ASSERTION reads Prometheus.
                                       # The window's instrument is shared infra (README §4).
   - prometheus-crd-ownership          # same instrument, same night risk
                                       # 2026-09-16: unpoller-v5.2.5 ref REMOVED — executed
