@@ -64,7 +64,7 @@ rollback_class: git-revert            # stateless bridge: no PVC, no volumes, no
                                       # EPHEMERAL SQLite in /tmp recreated on every pod start
                                       # (premises 4+5 prove it). `values.image.tag` is the diff.
 finding_refs: [F-9af9baf7, F-80459b23]
-status: awaiting-go   # OPERATOR GO 2026-09-15 (direct, attended update in its window; recorded in home-operation, exec_state=pending). REVIEWED 2026-09-15, corrections c36388bc
+status: awaiting-go   # *** THE RECORDED GO IS STALE - RE-SEEK BEFORE EXECUTING (flagged 2026-09-20, F-bb713800). *** The operator approved 0.187.1 on 2026-09-15. Upstream head is now v0.195.0 (published 2026-09-19) - EIGHT 0.x release-lines beyond the reviewed target, and at major 0 the MINOR is the breaking axis, so each of those is a potential break. Live is still 0.184.5. An approval is scoped to what was reviewed: this GO does not cover 0.195.0, and shipping 0.187.1 now would knowingly install a superseded build. Before sat-attended:2026-10-03, re-resolve the target with an upgrade-planner-agent and RE-SEEK the GO.
 window: "sat-attended:2026-10-03"   # assigned 2026-09-15 from the review synthesis (capacity-checked); go/no-go via home-operation
                                       # reason ("every minor hop needs its release notes read by a
                                       # human") is explicit; never the nightly/unattended window.

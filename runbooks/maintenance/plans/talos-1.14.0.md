@@ -78,7 +78,7 @@ finding_refs:
   - F-fc435c71                        # "node roll has no plan file and no reboot-capable
                                       #  window with capacity" — THIS FILE answers it
   - F-9a58f400                        # the PR #212 mis-attribution this plan corrects
-status: awaiting-go                    # needs an operator go/no-go before it runs
+status: awaiting-go   # *** THE RECORDED GO IS STALE - RE-SEEK BEFORE EXECUTING (flagged 2026-09-20). *** The operator approved v1.14.0 on 2026-09-12. Upstream has since published v1.14.1, and maintenance-plan.py --verify still lists this as the repo's only STALE plan. An approval is scoped to what was REVIEWED, so the 2026-09-12 GO does not authorise v1.14.1, and executing v1.14.0 now would deliberately install a superseded release on every control-plane node. This runs in sun-attended:2026-09-27 (reboot-capable, talos owns the WHOLE slot), so decide before then: re-target to v1.14.1 and re-seek the GO, or confirm v1.14.0 deliberately. Same class as F-bb713800 / F-0a32b505.
 window: "sun-attended:2026-09-27"     # NOT self-assigned: this is the first-feasible
                                       # slot F-fc435c71 already computed, and
                                       # maintenance-plan.py --validate rejects
