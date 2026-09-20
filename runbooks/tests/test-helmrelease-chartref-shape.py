@@ -52,6 +52,7 @@ Run: python3 runbooks/tests/test-helmrelease-chartref-shape.py
 """
 import importlib.util
 import os
+import re
 import pathlib
 import sys
 import tempfile
@@ -455,10 +456,28 @@ check("coverage: chartRef chart source resolves",
       cov._chart_source_for({"namespace": "network", "current": str(kg_tag),
                              "component": "k8s-gateway", "target": "9.9.9"}),
       ("k8s-gateway", "oci://ghcr.io/k8s-gateway/charts"))
+# DERIVED, NOT HARDCODED (2026-09-20). This expectation used to pin
+# "https://helm-charts.rm3l.org" verbatim. That host stopped serving on
+# 2026-09-18 and the repo followed the same day (59c24761, gh-pages), but this
+# frozen copy did not -- so an UPSTREAM outage became a repo-wide commit
+# blocker, failing this control for every session in the worktree over a URL
+# that was correctly updated everywhere else. A test that hardcodes a third
+# party's address asserts that third party's stability, which is not the
+# property under test. Read it from the same manifest Flux reads.
+_rm3l_yaml = (ROOT / "kubernetes" / "flux" / "meta" / "repositories" / "helm"
+              / "rm3l.yaml").read_text()
+_m = re.search(r'^\s*url:\s*(\S+)\s*$', _rm3l_yaml, re.M)
+ad_url = _m.group(1) if _m else ""
+# The control still discriminates. It proves the CLASSIC (non-chartRef) shape
+# resolves at all -- the chart name is still pinned, and an empty URL (what a
+# broken resolver returns) fails outright, which is the regression this control
+# was written to catch. Only the third party's spelling is now derived.
+check("control: the adguard chart-source URL is declared in the repo",
+      bool(ad_url), True)
 check("coverage: classic chart source still resolves (control)",
       cov._chart_source_for({"namespace": "network", "current": str(ad_ver),
                              "component": "adguard-home", "target": "9.9.9"}),
-      ("adguard-home", "https://helm-charts.rm3l.org"))
+      ("adguard-home", ad_url))
 # A semver RANGE is not a version: it must not satisfy the `current` match.
 # Exercised against a TEMP tree with REPO_ROOT repointed — asserting it against
 # the real repo would pass vacuously, because no OCIRepository here uses semver
