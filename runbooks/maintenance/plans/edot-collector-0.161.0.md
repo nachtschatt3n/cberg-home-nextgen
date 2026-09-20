@@ -84,7 +84,7 @@ conflicts_with:                   # HARD slot exclusions. window-scheduler.py
                                   # enforced"). The mechanism it guarded is not
                                   # lost: `prometheus-crd-ownership` below is the
                                   # same otel-operator helm upgrade and still open.
-  - prometheus-crd-ownership      # It is an otel-operator HELM UPGRADE, so it
+  # RESOLVED 2026-09-20: prometheus-crd-ownership EXECUTED (1a551276) and retired (9d87171b) — there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention (F-6acb231c).
                                   # rolls daemonset/otel-operator-daemon-collector
                                   # by the same label-propagation mechanism as
                                   # otel-operator-0.21.0 — same OTLP-producer

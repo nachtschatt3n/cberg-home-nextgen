@@ -85,7 +85,7 @@ touches:
                                        # Prometheus is this plan's INSTRUMENT (§4.6) and
                                        # edot-collector is the downstream OTLP sink (§4.4).
 depends_on:
-  - prometheus-crd-ownership           # MECHANICAL, not stylistic. That plan's premise
+  # RESOLVED 2026-09-20: prometheus-crd-ownership EXECUTED (1a551276, helm rev 25) and retired (9d87171b) — this dependency is SATISFIED. kube-prometheus-stack is now the single writer of all ten monitoring.coreos.com CRDs.
                                        # `otel-chart-version-whose-layout-was-verified`
                                        # expects `^0\.(20\.9|21\.0)$`. Landing THIS bump first
                                        # makes that premise FAIL, which makes an already
@@ -98,7 +98,7 @@ depends_on:
 conflicts_with:                        # HARD slot exclusions — window-scheduler.py keys on
                                        # this field ONLY; a shared:[monitoring] overlap is a
                                        # post-placement warning, and §6 prose schedules nothing.
-  - prometheus-crd-ownership           # edits the SAME HelmRelease spec. Two otel-operator
+  # RESOLVED 2026-09-20: prometheus-crd-ownership EXECUTED (1a551276) and retired (9d87171b) — there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention (F-6acb231c).
                                        # helm upgrades in one window confound BOTH plans' CRD
                                        # assertions (and it must run in an EARLIER window
                                        # anyway — it is the depends_on above).

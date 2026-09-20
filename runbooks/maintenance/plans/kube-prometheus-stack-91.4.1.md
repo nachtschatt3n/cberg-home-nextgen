@@ -54,7 +54,7 @@ touches:
                                       # Prometheus is blind for ~2-5 min during its
                                       # restart; Alertmanager for ~1 min.
 depends_on:
-  - prometheus-crd-ownership          # otel-operator must STOP writing the four shared
+  # RESOLVED 2026-09-20: prometheus-crd-ownership EXECUTED (1a551276, helm rev 25) and retired (9d87171b) — this dependency is SATISFIED. kube-prometheus-stack is now the single writer of all ten monitoring.coreos.com CRDs.
                                       # monitoring.coreos.com CRDs before this plan stamps
                                       # all ten to 0.94.0; otherwise the next nightly
                                       # otel patch bump re-stamps four back to 0.92.0 and
@@ -82,7 +82,7 @@ conflicts_with:                       # HARD slot exclusions — window-schedule
                                       # nightly window. The guard only ever protected its §4
                                       # settle, where a Prometheus restart blind spot would
                                       # have read as "no data" and triggered a needless revert.
-  - prometheus-crd-ownership          # (also the dependency above) two CreateReplace
+  # RESOLVED 2026-09-20: prometheus-crd-ownership EXECUTED (1a551276) and retired (9d87171b) — there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention (F-6acb231c).
                                       # writers of the same ten CRDs in one window is the
                                       # race that plan exists to end; it runs in an EARLIER
                                       # window, never this one.

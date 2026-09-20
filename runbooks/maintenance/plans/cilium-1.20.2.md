@@ -80,7 +80,7 @@ conflicts_with:                       # SOLO SLOT. This is not a courtesy list: 
                                       # the same reason; a CNI roll restarts what it verifies
   - kube-prometheus-stack-91.4.1      # MANDATORY: §4's CONTENTS ASSERTION reads Prometheus.
                                       # The window's instrument is shared infra (README §4).
-  - prometheus-crd-ownership          # same instrument, same night risk
+  # RESOLVED 2026-09-20: prometheus-crd-ownership EXECUTED (1a551276) and retired (9d87171b) — there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention (F-6acb231c).
                                       # 2026-09-16: unpoller-v5.2.5 ref REMOVED — executed
                                       # (b0ffb944) and retired (f3869634) that same night.
                                       # 2026-09-17: otel-operator-0.21.0 ref REMOVED for the

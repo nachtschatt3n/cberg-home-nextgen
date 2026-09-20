@@ -85,7 +85,7 @@ conflicts_with:                       # HARD slot exclusions. window-scheduler.p
                                       # only the id moved. Status re-read 2026-09-20 AFTER its
                                       # retarget: draft, window null (it was `vetted` before) —
                                       # so the two CAN still be co-slotted without this line.
-  - prometheus-crd-ownership          # Same instrument, and it CreateReplace-adjacent touches
+  # RESOLVED 2026-09-20: prometheus-crd-ownership EXECUTED (1a551276) and retired (9d87171b) — there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention (F-6acb231c).
                                       # servicemonitors.monitoring.coreos.com — the CRD that
                                       # defines the object carrying this plan's only scrape
                                       # path. Its §4.2 asserts generation/resourceVersion are
