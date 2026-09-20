@@ -1,0 +1,189 @@
+---
+# iCloud photo-backup file-recency probe -> Prometheus Pushgateway.
+#
+# WHY THIS EXISTS
+# ---------------
+# On 2026-09-06 BOTH icloud-docker deployments wedged and nobody noticed for
+# 14 days (finding F-21d7e2ec). Every in-band signal read healthy:
+#   * the pods stayed Running 1/1 with 0 restarts — the process was alive,
+#     just blocked, so pod-level alerts had nothing to fire on;
+#   * there are no liveness/readiness probes on icloud-docker (they are
+#     explicitly disabled in both HelmReleases) and no ServiceMonitor;
+#   * the app's OWN Telegram 2FA notification is configured and works, but it
+#     never fired, because the process hung BEFORE reaching the auth branch.
+#
+# The conclusion recorded on F-21d7e2ec is that an EXTERNAL file-recency check
+# is the load-bearing layer: it is the only signal that still works when the
+# application itself is stuck. This probe is that layer. It asserts the one
+# thing that actually matters — that new photo files are landing on the NAS —
+# from outside the process that is supposed to put them there.
+#
+# DESIGN NOTES (do not "simplify" these away)
+# -------------------------------------------
+#  * It exports a TIMESTAMP (`icloud_backup_newest_file_timestamp_seconds`),
+#    not an age. Pushgateway is in-memory and has no TTL: it serves the last
+#    pushed value forever. A pre-computed age would FREEZE at its last value
+#    the moment this CronJob died, silently disarming the staleness alert —
+#    i.e. it would reproduce the exact class of blindness this probe exists to
+#    fix. A timestamp keeps ageing in PromQL (`time() - max by (account) (...)`)
+#    whether or not the probe still runs.
+#  * On ANY failure it pushes NOTHING and exits non-zero. Pushgateway replaces
+#    a grouping WHOLESALE, so a partial push would DELETE the other account's
+#    gauge and blind that half of the alert. The body is therefore assembled in
+#    full, for every account, before a single byte is sent.
+#  * It also publishes `icloud_backup_probe_last_success_timestamp_seconds`, so
+#    a dead probe is itself detectable (ICloudBackupFreshnessProbeStale) rather
+#    than being mistaken for "the backup is fine".
+#  * alpine has no bash and no curl: POSIX sh + busybox `wget --post-file`.
+#    Verified on this cluster's busybox (v1.37.0): `--post-file`, `stat -c %Y`,
+#    `find -exec CMD +` and `date -u +%s` are all present.
+#    --post-file, NOT --post-data: command substitution strips trailing
+#    newlines and the Prometheus text format requires the final line to be
+#    newline-terminated; pushgateway answers an unterminated body with
+#    "HTTP 400 Bad Request" and stores nothing. That is how the sibling
+#    authentik-db-probe failed its first run (2026-09-12). Same lesson, applied
+#    up front — see kube-system/authentik/app/cronjob-db-probe.yaml.
+#  * No brace-form shell variables anywhere in the script — bare `$VAR` only.
+#    Cluster-wide Flux postBuild substitution strips brace-form variables out
+#    of manifests, so the brace spelling would be silently blanked. (This
+#    comment deliberately does not spell the brace form out either, so that a
+#    repo-wide grep for it stays a clean signal.)
+#  * activeDeadlineSeconds is load-bearing, not boilerplate. concurrencyPolicy
+#    is Forbid, so a probe that itself hung on a wedged CIFS mount would block
+#    every later run forever — the probe would fail the same way the thing it
+#    watches failed. The deadline makes it fail LOUDLY (Job failed ->
+#    ICloudBackupFreshnessProbeJobFailed) instead.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: icloud-backup-freshness
+  namespace: backup
+spec:
+  # Hourly. The alert thresholds are 24h/72h, so hourly resolution is ample;
+  # the offset keeps it off the :00 CronJob pile-up. Measured walk cost is
+  # ~30s for both trees (54157 files / 239 dirs for mu, 23526 / 141 for
+  # andrea), which is why an hourly full walk is affordable.
+  schedule: "23 * * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      activeDeadlineSeconds: 1200
+      template:
+        metadata:
+          labels:
+            app: icloud-backup-freshness
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            # Matches the CIFS mount's uid/gid=1000 so the read-only tree is
+            # readable without relying on the mount's `noperm`.
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: probe
+              image: docker.io/library/alpine:3.24.1
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+
+                  MOUNT=/icloud-backup
+                  OUT=/tmp/icloud-backup-freshness.prom
+
+                  # Assemble the WHOLE body first. Nothing is pushed until
+                  # every account has resolved, because pushgateway replaces a
+                  # grouping wholesale and a partial push would delete the
+                  # other account's gauge.
+                  : > $OUT
+                  printf '%s\n' \
+                    "# HELP icloud_backup_newest_file_timestamp_seconds Unix mtime of the newest file under <account>/photos on the iCloud backup share." \
+                    "# TYPE icloud_backup_newest_file_timestamp_seconds gauge" \
+                    >> $OUT
+
+                  for ACCOUNT in mu andrea; do
+                    DIR=$MOUNT/$ACCOUNT/photos
+
+                    if [ ! -d "$DIR" ]; then
+                      echo "FATAL: $DIR is not a directory. The share layout"
+                      echo "       changed or the CIFS mount is broken."
+                      echo "       Pushing nothing so the staleness rules keep"
+                      echo "       ageing instead of going blind."
+                      exit 1
+                    fi
+
+                    # Batched stat via -exec + (one stat process per ~argmax
+                    # files), not -exec ... \; which would fork per file.
+                    # The full walk is deliberate: a photo can be backfilled
+                    # into an older year directory, so checking only the newest
+                    # year would miss it.
+                    NEWEST=$(find "$DIR" -type f -exec stat -c %Y {} + 2>/dev/null \
+                               | sort -rn | head -1)
+
+                    case $NEWEST in
+                      '' | *[!0-9]*)
+                        echo "FATAL: could not determine a numeric newest mtime"
+                        echo "       under $DIR (got: '$NEWEST'). An empty tree"
+                        echo "       or an unreadable mount both land here."
+                        echo "       Pushing nothing."
+                        exit 1
+                        ;;
+                    esac
+
+                    NOW_LOG=$(date -u +%s)
+                    echo "account=$ACCOUNT dir=$DIR newest_mtime=$NEWEST age_seconds=$((NOW_LOG - NEWEST))"
+
+                    printf '%s\n' \
+                      "icloud_backup_newest_file_timestamp_seconds{account=\"$ACCOUNT\"} $NEWEST" \
+                      >> $OUT
+                  done
+
+                  NOW=$(date -u +%s)
+                  printf '%s\n' \
+                    "# HELP icloud_backup_probe_last_success_timestamp_seconds Unix timestamp of the last fully successful probe run." \
+                    "# TYPE icloud_backup_probe_last_success_timestamp_seconds gauge" \
+                    "icloud_backup_probe_last_success_timestamp_seconds $NOW" \
+                    >> $OUT
+
+                  # Short service name, not the svc.cluster.local FQDN: this is
+                  # a public repo. One dot + ndots:5 resolves via the search path.
+                  wget -q -O - -T 60 --post-file $OUT \
+                    "http://prometheus-pushgateway.monitoring:9091/metrics/job/icloud-backup-freshness"
+                  echo "pushed to pushgateway job=icloud-backup-freshness at $NOW"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: icloud-backup
+                  mountPath: /icloud-backup
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 500m
+                  memory: 128Mi
+          volumes:
+            - name: icloud-backup
+              persistentVolumeClaim:
+                claimName: icloud-backup-freshness
+                readOnly: true
+            # readOnlyRootFilesystem: true, so the metrics body needs a
+            # writable scratch mount.
+            - name: tmp
+              emptyDir: {}

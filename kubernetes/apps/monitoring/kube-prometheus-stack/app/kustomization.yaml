@@ -17,6 +17,7 @@ resources:
   - ./anythingllm-alerts.yaml
   - ./docs-site-alerts.yaml
   - ./absenty-alerts.yaml
+  - ./icloud-backup-alerts.yaml
   - ./immich-alerts.yaml
   - ./openclaw-alerts.yaml
   - ./librechat-alerts.yaml

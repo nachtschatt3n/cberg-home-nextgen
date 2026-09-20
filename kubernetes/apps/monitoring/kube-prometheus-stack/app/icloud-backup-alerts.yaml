@@ -1,0 +1,248 @@
+---
+# iCloud photo-backup freshness. Added 2026-09-20 for finding F-21d7e2ec.
+#
+# WHY THESE RULES EXIST
+# ---------------------
+# On 2026-09-06 both icloud-docker deployments wedged and the failure went
+# unnoticed for 14 days. Nothing in the cluster referenced icloud at all: no
+# liveness/readiness probes (disabled in both HelmReleases), no ServiceMonitor,
+# no alert rule. The pods stayed Running 1/1 with 0 restarts because the
+# process was alive and merely blocked, so every pod-level signal read healthy.
+#
+# These rules watch the OUTPUT instead of the process — the mtime of the newest
+# file actually landing under <account>/photos on the NAS. That is the only
+# signal that still works when the application itself is stuck.
+#
+# Gauges come from CronJob/icloud-backup-freshness (namespace backup, hourly)
+# via prometheus-pushgateway. The probe exports a TIMESTAMP, never a
+# pre-computed age: pushgateway has no TTL and serves its last value forever,
+# so an age gauge would freeze the instant the probe died and silently disarm
+# ICloudBackupPhotosStale — the same class of blindness being fixed here.
+#
+# `max by (account)` and NOT a bare `max()`: a bare max would collapse both
+# accounts into one series, so a single wedged account would be completely
+# hidden behind the other one still syncing. The two Apple IDs fail
+# independently (separate deployments, separate sessions, separate 2FA quota),
+# and in the 2026-09-06 incident they wedged three days apart.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: icloud-backup-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - interval: 1m
+      name: icloud-backup.freshness
+      rules:
+        # THRESHOLD PROVENANCE — read this before tightening or loosening.
+        # These are NOT derived from a measured inter-arrival distribution the
+        # way the authentik audit thresholds were; no such history exists,
+        # because nothing has ever recorded this signal. They come from two
+        # honest inputs: the operator's stated cadence (photos genuinely arrive
+        # most days) and the measured outage (at 2026-09-20 the newest file was
+        # 2026-09-03 for mu and 2026-09-06 for andrea — 16 and 13 days).
+        #
+        # 24h is therefore the WARNING tier and is expected to be the noisy
+        # one: a quiet weekend away from the phone will trip it. 72h is the
+        # load-bearing CRITICAL tier and sits far below the 13-day real
+        # outage while staying well above any plausible quiet spell.
+        # If the 24h warning proves noisy in practice, MEASURE the gap
+        # distribution from this metric's own history and raise it from data —
+        # do not silence it and do not tighten the critical to compensate.
+        - alert: ICloudBackupPhotosStale
+          annotations:
+            summary: iCloud photo backup for account {{ $labels.account }} is stale ({{ $value | humanizeDuration }})
+            description: |
+              No new file has landed under {{ $labels.account }}/photos on the
+              backup share for {{ $value | humanizeDuration }}. The icloud-docker
+              pod being Running proves nothing here: in the 2026-09-06 incident
+              (F-21d7e2ec) both pods sat Running 1/1 with 0 restarts for 14 days
+              while syncing nothing.
+
+              The two causes seen in practice:
+                1. The sync process WEDGES SILENTLY. It stays alive but blocked,
+                   and because icloud-docker has no liveness/readiness probes
+                   nothing restarts it. This is the case that produced the
+                   14-day outage.
+                2. The iCloud SESSION EXPIRES and Apple requires 2FA. The Apple
+                   session expires every ~30-60 days, and re-auth cannot be
+                   automated — it needs the operator to approve the push on a
+                   trusted device and enter the code.
+
+              DO NOT wait for the app's own Telegram 2FA notification to tell
+              you which one it is. That notification is rate-limited to once
+              per 24h, and in the 2026-09-06 incident it never fired at all
+              because the process hung BEFORE reaching the auth branch. It is a
+              convenience, not a control.
+
+              Recovery is an interactive operator-driven login (the same shape
+              as an `occ`-style console login — it cannot run unattended):
+              follow docs/sops/icloud-docker-reauth.md, and note its
+              retry-storm warning — STOP the sync loop (scale to 0 + suspend
+              Flux for that instance) BEFORE re-authing, or Apple's per-Apple-ID
+              2FA quota is exhausted and it silently stops pushing codes to
+              every device. Instances are independent; fix only the one that is
+              stale. Background and history: finding F-21d7e2ec.
+          expr: |
+            time() - max by (account) (icloud_backup_newest_file_timestamp_seconds) > 60 * 60 * 24
+          for: 30m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+        - alert: ICloudBackupPhotosStaleCritical
+          annotations:
+            summary: iCloud photo backup for account {{ $labels.account }} has been dead for over 72h ({{ $value | humanizeDuration }})
+            description: |
+              No new file has landed under {{ $labels.account }}/photos for
+              {{ $value | humanizeDuration }}. At this point this is an outage,
+              not a quiet spell — photos normally arrive most days, and the only
+              precedent for a gap this long is the 14-day silent wedge of
+              2026-09-06 (F-21d7e2ec).
+
+              Causes, in the order they have actually occurred:
+                1. The sync process wedged silently — alive, blocked, no
+                   restarts, no probe to catch it.
+                2. The iCloud session expired and 2FA is required.
+
+              The app's own Telegram 2FA alert is rate-limited to once per 24h
+              and did not fire at all in the 2026-09-06 incident (the hang came
+              before the auth branch), so its silence is NOT evidence that the
+              session is healthy.
+
+              Recovery is an interactive, operator-driven login that cannot be
+              automated: docs/sops/icloud-docker-reauth.md. Stop the retry loop
+              first (scale the instance to 0 and suspend its Flux Kustomization)
+              or Apple's 2FA quota is burned and no device receives a code.
+          expr: |
+            time() - max by (account) (icloud_backup_newest_file_timestamp_seconds) > 60 * 60 * 72
+          for: 30m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: critical
+        # INERTNESS GUARDS. An expr matching no series sits at state=inactive
+        # and is indistinguishable from healthy, so the staleness rules above
+        # need an absence companion — exactly as nas-share-alerts.yaml pairs
+        # NasMediaShareFillingUp with NasMediaShareMetricsMissing.
+        #
+        # Deliberately ONE GUARD PER ACCOUNT rather than a single bare
+        # absent(icloud_backup_newest_file_timestamp_seconds): the bare form
+        # only fires when BOTH series vanish, so losing just one account's
+        # gauge would silently un-monitor that account while the rule set still
+        # looked armed. The account set is fixed and known (two Apple IDs, one
+        # deployment each), so per-account absence is precise and cheap.
+        # absent() propagates the equality matcher into its output labels, so
+        # these fire with account="mu" / account="andrea" attached.
+        #
+        # DO NOT "improve" these by gating them on the scrape target being up as
+        #   absent(<metric>) and up{job="prometheus-pushgateway"} == 1
+        # That form is PERMANENTLY INERT: absent() emits a sample with an EMPTY
+        # label set, so `and` against a vector carrying job/instance labels
+        # matches nothing even when the metric genuinely is missing. If a gate
+        # is ever genuinely wanted it MUST be `and on() up{...} == 1`. Same
+        # trap, same wording, as AuthentikAuditFreshnessProbeMissing.
+        - alert: ICloudBackupFreshnessMetricMissing
+          annotations:
+            summary: iCloud backup freshness gauge for account mu is not present in Prometheus
+            description: |
+              icloud_backup_newest_file_timestamp_seconds{account="mu"} has no
+              series at all. ICloudBackupPhotosStale and
+              ICloudBackupPhotosStaleCritical are BLIND for this account while
+              this fires and must not be read as evidence the backup is healthy.
+              Most likely the icloud-backup-freshness CronJob in namespace
+              backup was removed or has never run successfully, or
+              prometheus-pushgateway lost its in-memory state and no probe cycle
+              has re-pushed yet (it re-pushes hourly, so that self-heals inside
+              the 3h `for`).
+          expr: absent(icloud_backup_newest_file_timestamp_seconds{account="mu"})
+          for: 3h
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+        - alert: ICloudBackupFreshnessMetricMissingAndrea
+          annotations:
+            summary: iCloud backup freshness gauge for account andrea is not present in Prometheus
+            description: |
+              icloud_backup_newest_file_timestamp_seconds{account="andrea"} has
+              no series at all. ICloudBackupPhotosStale and
+              ICloudBackupPhotosStaleCritical are BLIND for this account while
+              this fires and must not be read as evidence the backup is healthy.
+              See ICloudBackupFreshnessMetricMissing for triage — same probe,
+              same causes.
+          expr: absent(icloud_backup_newest_file_timestamp_seconds{account="andrea"})
+          for: 3h
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+        - alert: ICloudBackupFreshnessProbeStale
+          annotations:
+            summary: iCloud backup freshness probe has not completed a successful run recently
+            description: |
+              icloud-backup-freshness last succeeded {{ $value | humanizeDuration }}
+              ago (it runs hourly; threshold 6h = 6 missed cycles). The probe
+              pushes nothing on failure by design, so the freshness gauges are
+              now stale snapshots. The staleness alerts still age CORRECTLY
+              because they read a timestamp rather than a pre-computed age — but
+              they are reporting the last known good scan, not the current state
+              of the share. Check the latest Job under CronJob/icloud-backup-freshness
+              in namespace backup; a broken or hung CIFS mount is the expected
+              cause and is itself worth investigating.
+          expr: |
+            time() - max(icloud_backup_probe_last_success_timestamp_seconds) > 60 * 60 * 6
+          for: 30m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+        # METRIC CHOICE IS DELIBERATE — verified against live kube-state-metrics
+        # on 2026-09-20, because this is exactly where an inert rule hides.
+        #
+        # `kube_job_failed` is a CONDITION metric: KSM emits it only while a Job
+        # actually carries a Failed condition. Measured now: kube_job_complete
+        # has 162 series (54 Jobs x condition=true/false/unknown) while
+        # kube_job_failed has ZERO, because no Job is currently failed. That
+        # zero is CORRECT, not a typo — do not "fix" it by swapping the name.
+        #
+        # The consequence is honest and worth stating: this rule CANNOT be
+        # proven armed by querying it at rest, the way the repo's doctrine
+        # otherwise demands. That is accepted here because it is not the
+        # load-bearing detector — ICloudBackupFreshnessProbeStale below reads an
+        # always-present timestamp gauge and catches every probe failure mode
+        # including this one, a few hours later. This rule only sharpens the
+        # signal from "the gauge stopped refreshing" to "here is the failed Job".
+        #
+        # `kube_job_status_failed` was considered and REJECTED even though it is
+        # always present (54 series) and would therefore be verifiable: it
+        # counts failed PODS, not failed Jobs, and stays > 0 for the retained
+        # life of the Job object. With backoffLimit: 2 a single transient pod
+        # failure that the Job then RECOVERED from would latch this alert on for
+        # a full day. An always-armed rule that cries wolf is not an upgrade
+        # over a quiet rule that is right.
+        #
+        # condition="true" is explicit so the expression cannot accidentally sum
+        # the condition=false/unknown series into a false positive.
+        - alert: ICloudBackupFreshnessProbeJobFailed
+          annotations:
+            summary: iCloud backup freshness probe Job failed
+            description: |
+              The most recent icloud-backup-freshness Job failed
+              ({{ $labels.job_name }}). The probe deliberately exits non-zero
+              and pushes nothing rather than pushing a partial result, so a
+              failure here means the freshness signal is going stale — check
+              `kubectl -n backup logs job/{{ $labels.job_name }}`. A Job killed
+              by activeDeadlineSeconds means the probe itself hung on the CIFS
+              mount, which is a storage problem, not an iCloud problem.
+          expr: |
+            sum(kube_job_failed{namespace="backup", job_name=~"icloud-backup-freshness-.*", condition="true"}) > 0
+          for: 5m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning

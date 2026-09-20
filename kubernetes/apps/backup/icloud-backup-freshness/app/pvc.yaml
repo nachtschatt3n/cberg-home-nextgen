@@ -1,0 +1,42 @@
+---
+# Read-only probe mount of the iCloud backup share.
+#
+# Deliberately a SEPARATE PVC on the EXISTING cifs-immich-icloud-backup
+# StorageClass rather than a reuse of media/immich-library: that claim is
+# RWO and bound to Immich in another namespace, and borrowing it would couple
+# this alert's liveness to Immich's lifecycle.
+#
+# The SC's `subdir` is `icloud-backup` — the PARENT of both accounts — and the
+# CSI driver uses it LITERALLY. Verified against the live bound PV of the
+# sibling claim media/immich-library: its volumeHandle is
+# `<nas>/backups#icloud-backup#<pv-name>#`, i.e. the subdir appears verbatim
+# and the PV name is the volume-id segment, NOT an extra path component.
+# One mount therefore sees both `mu/photos` and `andrea/photos`.
+#
+# The SC mounts `ro` (dir_mode=0555, file_mode=0444, uid/gid 1000), so this
+# probe physically cannot write to or delete the iCloud originals.
+#
+# STORAGE SAFETY (docs/sops/storage-safety.md): the SC is reclaimPolicy Retain
+# with a NON-ROOT subdir. Per that SOP's decision tree — per-app subdir +
+# Retain — creating and later deleting this claim is safe and leaves the data
+# intact. Nothing here introduces a `subdir: /` + `reclaim: Delete` pairing.
+#
+# The size request is nominal: SMB PVCs are not quota-enforced by the NAS, so
+# this is a claim, not a reservation. The probe only reads metadata.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: icloud-backup-freshness
+  namespace: backup
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+    volume.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+  labels:
+    csi-driver-smb: "cifs-share"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: cifs-immich-icloud-backup
