@@ -1527,8 +1527,28 @@ def s3_git_history() -> tuple[str, Findings, str]:
             cprint(C.GREEN, f"  🟢 Domain not added to non-sops git history {_since}")
 
     # Secret-named files ever committed outside .sops.yaml
+    # This rule matches the FILENAME only -- it never reads content -- so a file
+    # named after the thing it detects trips it on its own name. Two such files
+    # exist and both are ours: the Layer-3 pre-commit credential guard, and the
+    # SOP documenting it. Their `password: ...` lines are the guard's own
+    # documented test vectors (`placeholder-XYZZY`, `CORRECT_HORSE_BATTERY`) in
+    # comments and prose -- regex and examples, never a value.
+    #
+    # Excluded BY NAME rather than by a directory glob, for exactly the reason
+    # the cred_hits scan above names its fixtures individually: a glob would
+    # make a genuine plaintext credential committed anywhere under that path
+    # permanently invisible purely by LOCATION. Two literal paths cannot grow
+    # into a blind spot; `.githooks/*` could.
+    #
+    # Deliberately a code-level scope fix and NOT an accepted-risk entry: an AR
+    # would suppress the symptom on a detector that is simply asking the wrong
+    # question about these two files. Pinned both ways -- guard file excluded,
+    # real secret-named files still reported -- in
+    # runbooks/tests/test-s3-secret-named-file-scope.py.
     secret_files = run_lines(
         "git log --all --diff-filter=A --name-only --pretty=format: "
+        "-- . ':(exclude).githooks/lib/password-guard.awk' "
+        "      ':(exclude)docs/sops/pre-commit-secret-scan.md' "
         "| grep -i 'secret\\|password\\|credential\\|private.key' "
         "| grep -v '\\.sops\\.yaml$' | sort -u"
     )
