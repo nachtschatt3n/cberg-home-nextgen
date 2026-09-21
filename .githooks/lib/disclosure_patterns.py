@@ -60,7 +60,15 @@ import re
 # `...s?(?![-\w])`, never `...(?![-\w])s?`. With the lookahead first,
 # "criticals"/"highs" can never match (the trailing "s" is a word char and
 # trips the lookahead), which silently defeats every counted-phrasing rule.
-SEV = r"(?:critical|high|medium|low)s?(?![-\w])"
+SEV = r"\b(?:critical|high|medium|low)s?(?![-\w])"
+# The LEADING \b is load-bearing, and its absence was the same defect
+# PERSISTS carried until 2026-08-19: the guard above bounds only the RIGHT
+# edge, so the alternation matched inside ordinary words. Measured against
+# scan() itself, adding it removes exactly three false positives —
+# "be|low| is deleted. It remains", "al|low|list ... remains", "sha|llow|
+# copy remains" — and changes nothing else: every real severity claim still
+# returns the same hits. This tier BLOCKS a commit, so those three were
+# rejecting exactly the prose a maintenance window produces.
 # "vulns" is included because the abbreviation is at least as common as the
 # full word in practice, and omitting it left an accidental bypass.
 # "will_not_fix" lives here rather than as a standalone reject: bare, it is

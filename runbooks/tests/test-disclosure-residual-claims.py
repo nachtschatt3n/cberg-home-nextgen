@@ -272,6 +272,38 @@ class PersistsWordBoundaries(unittest.TestCase):
     def test_pending_still_matches_as_its_own_word(self):
         self.assertTrue(re.search(dp.PERSISTS, "pending operator approval", re.I))
 
+    def test_severity_word_does_not_match_inside_a_longer_word(self):
+        """SEV had the same missing \\b that PERSISTS did (found 2026-09-21).
+
+        SEV bounded only its right edge with (?![-\\w]), so `low` matched inside
+        "below", "allowlist" and "shallow" when a residual verb followed within
+        four tokens. Found when the hook flagged a plan commit reading "Nothing
+        below is deleted. It remains the reasoning this decision overrode" --
+        prose about preserving a recommendation block, on a plan whose
+        security_ref is null.
+
+        NOTE ON THE ASSERTION SHAPE: scan() returns (match, MATCHED TEXT), not a
+        rule label -- e.g. ('...', 'low is deleted. It remains'). An earlier
+        version of this test filtered on "residual" in the second element and so
+        could never be true for any input, passing and failing for the wrong
+        reason. Assert on scan() directly, as the suspend-vocabulary test below
+        already does.
+        """
+        for t in ("Nothing below is deleted. It remains the reasoning this decision overrode",
+                  "the allowlist below remains unchanged",
+                  "a shallow copy remains in place",
+                  "the row below is deleted; the note remains for context"):
+            self.assertFalse(dp.scan(norm(t)),
+                             "%r must not block a commit" % t)
+
+    def test_severity_words_still_match_as_their_own_word(self):
+        """The other direction: the boundary must not blunt the rule it guards."""
+        for t in ("3 CRITICAL are deleted. It remains exposed until upstream ships",
+                  "one critical remains on that image",
+                  "two high findings are still open"):
+            self.assertTrue(dp.scan(norm(t)),
+                            "%r must still block a commit" % t)
+
     def test_suspend_vocabulary_survives_next_to_a_finding_anchor(self):
         t = norm("fix(plan): suspend both the HelmRelease and the Kustomization "
                  "so the finding's quiesce actually holds")
