@@ -78,19 +78,16 @@ finding_refs:
   - F-fc435c71                        # "node roll has no plan file and no reboot-capable
                                       #  window with capacity" — THIS FILE answers it
   - F-9a58f400                        # the PR #212 mis-attribution this plan corrects
-status: awaiting-go   # *** THE RECORDED GO IS STALE - RE-SEEK BEFORE EXECUTING (flagged 2026-09-20). *** The operator approved v1.14.0 on 2026-09-12. Upstream has since published v1.14.1, and maintenance-plan.py --verify still lists this as the repo's only STALE plan. An approval is scoped to what was REVIEWED, so the 2026-09-12 GO does not authorise v1.14.1, and executing v1.14.0 now would deliberately install a superseded release on every control-plane node. This runs in sun-attended:2026-09-27 (reboot-capable, talos owns the WHOLE slot), so decide before then: re-target to v1.14.1 and re-seek the GO, or confirm v1.14.0 deliberately. Same class as F-bb713800 / F-0a32b505.
-window: "sun-attended:2026-09-27"     # NOT self-assigned: this is the first-feasible
-                                      # slot F-fc435c71 already computed, and
-                                      # maintenance-plan.py --validate rejects
-                                      # status:awaiting-go with a null window (a
-                                      # slotless awaiting-go plan silently never runs).
-                                      # sun-attended is the ONLY allow_reboot window.
-                                      # 2026-09-13 is already committed (95 min booked,
-                                      # see conflicts_with) and 2026-09-20 is contested
-                                      # (see §"open items" #2). THE SCHEDULER/OPERATOR
-                                      # MAY MOVE THIS — pull it earlier by clearing a
-                                      # sun-attended slot of every other plan (§6);
-                                      # this plan needs the slot exclusively.
+status: superseded    # SUPERSEDED 2026-09-21 by runbooks/maintenance/plans/talos-1.14.1.md, which re-targets this work to v1.14.1 (published 2026-09-15) and re-measures every premise live. The operator approved v1.14.0 on 2026-09-12; an approval is scoped to what was REVIEWED, so that GO does NOT carry over to v1.14.1 and must be re-sought against the new file. Executing THIS file would deliberately install a superseded release on every control-plane node. Kept on disk (not deleted) because six other plans name `talos-1.14.0` in conflicts_with and --validate checks that cross-references resolve; those should be repointed to talos-1.14.1. Driven by F-0a32b505.
+window: null                          # CLEARED 2026-09-21 together with the supersede.
+                                      # The slot sun-attended:2026-09-27 now belongs to
+                                      # talos-1.14.1. If BOTH files held it the scheduler
+                                      # would see 145 + 140 = 285 min against a 180-min
+                                      # schedulable budget (200 less the 20-min Step 0
+                                      # reserve), and neither plan would place.
+                                      # A superseded plan may hold a null window —
+                                      # validate_plans only requires a slot for
+                                      # status scheduled/awaiting-go.
 sops_refs:
   - docs/sops/talos-upgrade.md
   - docs/sops/application-update.md
