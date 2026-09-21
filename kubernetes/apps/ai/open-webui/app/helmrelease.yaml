@@ -162,7 +162,10 @@ spec:
         # was `*host`, an anchor defined inside the now-removed ingress block.
         value: "open-webui.${SECRET_DOMAIN}"
       - name: GLOBAL_LOG_LEVEL
-        value: "DEBUG"
+        # INFO, not DEBUG: at DEBUG this one app produced ~38% of ALL cluster
+        # logs (~4.9 GiB of 13.4 GiB), almost entirely aiosqlite statement
+        # tracing with no operational value (F-d03bf70c).
+        value: "INFO"
       # --- Text-to-Speech: self-hosted mini OpenAI-compatible TTS server ---
       # These AUDIO_TTS_* settings are Open WebUI "PersistentConfig" (ConfigVar)
       # values: env seeds the DB on FIRST boot only. With PersistentConfig left

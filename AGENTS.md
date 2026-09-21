@@ -583,7 +583,14 @@ unifictl local log device-alert
 unifictl local event list
 ```
 
-> UniFi is **not** ingested into Wazuh (no `unifi` decoder), so UniFi threat
+> UniFi decoders and rules ARE deployed to Wazuh
+> (`kubernetes/apps/security/wazuh/app/unifi-decoder-configmap.yaml`, from
+> mattsimpson/unifi-wazuh since `180bd2a3`, 2026-05-08). This line used to
+> claim no `unifi` decoder existed, which is false and has misdirected
+> triage. What is NOT established is that events actually ARRIVE: AP remote
+> syslog forwarding is unconfirmed and no hostapd-class alerts have been
+> observed, so treat Wazuh UniFi coverage as present-but-unverified and keep
+> UniFi threat
 > monitoring is done natively via unifictl in the sweep's security-check
 > (`stat alarm` IPS/IDS · `stat rogueap` evil-twin · `log admin-activity`
 > audit). Requires unifictl ≥ 5.5.0 (`.mise.toml` pin); the legacy

@@ -44,6 +44,28 @@ sweep_pg_dsn_up() {
         >"/tmp/sweep-pg-pf-${port}.log" 2>&1 &
     export SWEEP_PG_PF_PID=$!
 
+    # Tear the port-forward down even when the caller does not reach
+    # `sweep_pg_dsn_down` — an early `exit 1`, a failed gate, Ctrl-C, or a
+    # section that simply forgets. Measured 2026-09-21: 22 orphaned
+    # `kubectl port-forward` processes were live on the operator Mac, 18 of
+    # them postgres, the oldest 1d13h, each holding an ephemeral local port
+    # and a cluster connection (F-b881a5b5).
+    #
+    # CHAINED, never replaced. `trap ... EXIT` installs into the CALLER's
+    # shell, and callers already install their own: health-check.sh sets
+    # `trap _all_cleanup EXIT`. An unconditional trap here would silently
+    # clobber it and turn a port-forward leak into a cleanup regression
+    # somewhere else.
+    local _prev_exit_trap
+    _prev_exit_trap=$(trap -p EXIT | sed -n "s/^trap -- '\(.*\)' EXIT\$/\1/p")
+    if [ -n "$_prev_exit_trap" ]; then
+        trap "${_prev_exit_trap}; sweep_pg_dsn_down" EXIT
+    else
+        trap sweep_pg_dsn_down EXIT
+    fi
+    trap 'sweep_pg_dsn_down; exit 130' INT
+    trap 'sweep_pg_dsn_down; exit 143' TERM
+
     for i in $(seq 1 30); do
         if python3 -c "import socket;socket.create_connection(('127.0.0.1',${port}),0.3).close()" 2>/dev/null; then
             break
