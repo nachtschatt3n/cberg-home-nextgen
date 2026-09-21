@@ -119,8 +119,14 @@ backup_gate: "pg_dump of the nocodb metadata database (DB name resolved from the
   ~/backups/nocodb/pre-counts.txt for the §4 contents comparison."
 finding_refs: [F-ca5c5597]
 status: draft
-window: null                          # see §6 for the recommended slot and why it is
-                                      # not assigned here
+window: "sat-attended:2026-10-17"     # PROPOSED 2026-09-21, NOT approved. HUMAN-GATED: still
+                                      # needs an operator GO before it runs. §6's own capacity
+                                      # table reaches this same slot — the Saturday budget is
+                                      # 70 min after the 20-min Step-0 reserve and this plan
+                                      # is 45, with every earlier slot either full or already
+                                      # holding a backup-restore plan (see conflicts_with).
+                                      # n8n-2.39.8, also backup-restore, takes
+                                      # sun-attended:2026-10-18 rather than sharing this slot.
 premises:
   - id: live-image-is-still-2026.08.2
     why: >-

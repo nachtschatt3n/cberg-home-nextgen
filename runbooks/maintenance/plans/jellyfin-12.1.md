@@ -65,7 +65,8 @@ touches:
                                         # 09-11 write-up). `shared` is an INTERSECTION key —
                                         # reuse this spelling in every GPU-touching plan.
 depends_on: []
-conflicts_with: [media-audit-durable-output]   # NEW 2026-09-15: that plan (vetted,
+conflicts_with:
+  - media-audit-durable-output        # NEW 2026-09-15: that plan (vetted,
                                       # sat-attended:2026-09-19) ALSO edits
                                       # configmap/library-tools-scripts. Two plans rewriting
                                       # the same ConfigMap in one window is exactly the
@@ -77,6 +78,18 @@ conflicts_with: [media-audit-durable-output]   # NEW 2026-09-15: that plan (vett
                                       # not after 09-19; §6.) No other open plan touches
                                       # helmrelease/jellyfin or either jellyfin PVC
                                       # (`maintenance-plan.py --open`, 2026-09-15).
+  - media-naming-p3                   # ROLLBACK-CLASS STACKING — ADDED 2026-09-21. Those three
+  - n8n-2.39.8                        # and this plan are all `rollback_class: backup-restore`.
+  - nextcloud-34.0.4                  # Two backup-restore rollbacks in one slot leave no
+                                      # rollback capacity for either — which is precisely why
+                                      # THIS plan was moved off sun-attended:2026-10-04 on
+                                      # 2026-09-15 (see the `window:` note below). That move
+                                      # was recorded only as prose on the window line, so
+                                      # nothing enforced the rule it established and the next
+                                      # reader could not find it; declared here, it is
+                                      # enforced. Once per pair: window-scheduler.py:253-260
+                                      # reads conflicts_with in EITHER direction, so the three
+                                      # counterpart files need no reciprocal entry.
 security_ref: F-3a72570a              # Security finding on the CURRENT image — detail on
                                       # the record only, never here. A tag bump is the only
                                       # remediation this household performs for a

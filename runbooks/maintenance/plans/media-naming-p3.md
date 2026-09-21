@@ -21,7 +21,17 @@ depends_on: [media-episode-backfill]  # was 'media-episode-backfill-bulk', a sta
                                       # never existed as a plan file — so this guard enforced
                                       # nothing (flagged by every sweep since). Repointed to the
                                       # programme plan that actually exists (P0.4, 2026-08-26).
-conflicts_with: []
+conflicts_with:                       # FILLED 2026-09-21; was [].
+  - n8n-2.39.8                        # ROLLBACK-CLASS STACKING: all three are
+  - nextcloud-34.0.4                  # `rollback_class: backup-restore`, as is this
+  - nocodb-2026.09.0                  # plan. Two backup-restore rollbacks in one
+                                      # slot leave no rollback capacity for either.
+                                      # Declared once per pair — window-scheduler.py
+                                      # :253-260 reads conflicts_with in EITHER
+                                      # direction. At 240 min this plan fits no
+                                      # current slot (sun budget is 180 after the
+                                      # Step-0 reserve), so the guard is for when it
+                                      # is re-scoped, not for today.
 capability_change: false
 rollback_class: backup-restore    # DECLARED 2026-09-06. NOT git-revert: a rename
                           # mutates the file, and this plan already records a

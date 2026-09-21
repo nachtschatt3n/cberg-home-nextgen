@@ -31,13 +31,36 @@ depends_on: []                        # 2026-09-15: was [external-dns-1.22.0]. T
                                       # sync delete, so a bump regression costs 17
                                       # records, never hass or flux-webhook; after
                                       # adoption it would cost 24.
-conflicts_with: []                    # deliberately EMPTY as a FIELD. The real
-                                      # constraint — must not share a window with
-                                      # wazuh-2xx-edge-coverage — is stated in §10
-                                      # rather than encoded here, because that
-                                      # plan is `draft` and a guard is only worth
-                                      # what the referenced plan's liveness is
-                                      # worth. Re-evaluate when either is vetted.
+conflicts_with:                       # FILLED 2026-09-21; was deliberately [].
+  - jellyfin-12.1                     # ROLLBACK-CLASS STACKING for all five. Each of
+  - media-naming-p3                   # them is `rollback_class: backup-restore`, as
+  - n8n-2.39.8                        # is this plan, and two backup-restore
+  - nextcloud-34.0.4                  # rollbacks in one slot leave no rollback
+  - nocodb-2026.09.0                  # capacity for either — the stacking the
+                                      # reconciler already rejected for
+                                      # jellyfin+frigate (see jellyfin-12.1's
+                                      # `window:` note).
+                                      # WHY THE FIELD AND NOT JUST THE EXISTING
+                                      # CHECK: maintenance-plan.py DOES warn on this
+                                      # (IRREVERSIBLE_ROLLBACK is ("one-way",
+                                      # "backup-restore")), but it is detective and
+                                      # advisory — warnings.append, and only once
+                                      # both plans are already slotted. conflicts_with
+                                      # is preventive: it is what stops
+                                      # window-scheduler.py placing the pair in one
+                                      # slot at all.
+                                      # DECLARED ONCE PER PAIR. window-scheduler.py
+                                      # :253-260 honours this field in EITHER
+                                      # direction ("symmetric by meaning"), so the
+                                      # five counterpart files need no reciprocal
+                                      # entry and nextcloud-34.0.4 — vetted, with a
+                                      # recorded operator GO — was left untouched.
+                                      # UNCHANGED REASONING: the wazuh-2xx-edge-
+                                      # coverage constraint stays in §10 rather than
+                                      # here. That plan is `draft`, and a guard is
+                                      # only worth what the referenced plan's
+                                      # liveness is worth. Re-evaluate when it is
+                                      # vetted.
 capability_change: false              # DNS answers do not change; only who is
                                       # recorded as owning them
 autonomy_override: human-gated        # RESTRICTS only. Writes against the public
