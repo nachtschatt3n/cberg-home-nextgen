@@ -294,7 +294,7 @@ status: vetted                        # VETTED 2026-09-21. Second independent pl
                                       # §3.4 maxUnavailable 2->1 DECLINED by the operator
                                       # 2026-09-21: run at 2. The premise accepts ^[12]$, so
                                       # leaving it at 2 passes unchanged.
-window: null                          # the scheduler assigns. §6 states the constraint:
+window: "now:2026-09-21"   # ON-DEMAND NOW run 2026-09-21 (run-now.py stamp; was None)
                                       # an ATTENDED slot, alone.
 sops_refs:
   - docs/sops/application-update.md
