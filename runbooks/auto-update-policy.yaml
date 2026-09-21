@@ -354,6 +354,23 @@ deny:
     reason: "Talos node image — needs a rolling node-reboot maintenance window, not a git merge."
   - match: "*talos*"
     reason: "Talos/Kubernetes node-level component — reboot window required."
+  - match: "*valkey*"
+    reason: "INTERIM HOLD added 2026-09-21. The only upstream tag newer than the
+      pinned 9.1.2 is a PRE-RELEASE: `9.2` is a floating 2-component tag that is
+      digest-identical to `9.2.0-rc1` (both sha256:b0eef48f..., pushed 1.7s apart),
+      and NO GA 9.2.x exists — every published 9.2* artifact is either the floating
+      tag or an explicit rc1 variant. Verified against the registry twice, on
+      2026-09-19 and again on 2026-09-21; the full GA list for this image ends at
+      9.1.2. Step 0 direct-bumped 9.1.2 -> 9.2 unattended on 2026-09-21 (335ff526),
+      putting a release candidate into production on a floating tag; reverted the
+      same morning (397af0ff). Without this hold the lane recomputes the identical
+      candidate and the next unattended nightly re-applies it.
+      THIS IS A STOPGAP, NOT THE FIX, and it is scoped to expire: the lane hardening
+      is tracked on the finding below (reject a candidate whose digest matches a
+      sibling -rc/-beta/-alpha tag; require a 3-component GA target when the current
+      pin is 3-component). REMOVE THIS RULE once a GA 9.2.x ships or that gate lands
+      — leaving it in place would silently freeze valkey on a real future release.
+      security_ref: F-aff597aa, F-f2f1f1a9 (detail on the records, never here)."
 
 # ── Hard blocks by Renovate manager ─────────────────────────────────────────
 # github-actions patch/minor are already auto-merged by Renovate itself
