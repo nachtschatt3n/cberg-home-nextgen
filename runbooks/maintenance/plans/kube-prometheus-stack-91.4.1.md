@@ -122,9 +122,7 @@ conflicts_with:                       # HARD slot exclusions — window-schedule
                                       # --validate exits 0, and unpoller-v5.2.7 carries
                                       # `kube-prometheus-stack-91.4.1` in its own
                                       # conflicts_with, so the slot exclusion is mutual.
-  - cilium-1.20.2                     # ADDED 2026-09-20 (RECIPROCITY). That plan lists THIS
-                                      # plan in its conflicts_with: its §4 CONTENTS ASSERTION
-                                      # reads THIS Prometheus.
+  # RESOLVED 2026-09-21: cilium-1.20.2 EXECUTED (80395710, chart 1.20.1 -> 1.20.2) and retired (c0797253) -- there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention: --validate treats an unresolvable ref as an ERROR, because a guard pointing at nothing enforces nothing.
 security_ref: null                    # no security driver
 capability_change: false              # operator 0.94.0 adds CRD fields (retentionPercentage,
                                       # clusterPeerName) we do not set; alerts, rules and

@@ -117,12 +117,7 @@ conflicts_with:                        # HARD slot exclusions — window-schedul
                                        # so the pair is declared from both sides and needs no
                                        # further correction. The note previously here, saying
                                        # the ref was still owed, was stale.
-  - cilium-1.20.2                      # §1.4's whole NetworkPolicy risk assessment is a
-                                       # statement about the CNI's CIDR/remote-node policy
-                                       # semantics; upgrading the enforcement substrate in the
-                                       # same window as the change that might depend on it is
-                                       # exactly backwards. A cilium roll also perturbs every
-                                       # pod's networking, confounding §4.4.
+  # RESOLVED 2026-09-21: cilium-1.20.2 EXECUTED (80395710, chart 1.20.1 -> 1.20.2) and retired (c0797253) -- there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention: --validate treats an unresolvable ref as an ERROR, because a guard pointing at nothing enforces nothing.
   - talos-1.14.0                       # a node roll restarts every collector pod and moves
                                        # workloads between nodes, which blows up the per-node
                                        # ES assertion in §4.4 and the 98-target baseline in §4.6.

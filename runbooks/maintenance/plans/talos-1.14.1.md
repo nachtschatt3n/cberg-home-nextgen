@@ -56,7 +56,7 @@ touches:
     - monitoring                      # scrape gaps + node-level alerts during each reboot
 depends_on: []
 conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended SLOT.
-  - cilium-1.20.2                     # names talos-1.14.0 back; CNI under a node roll
+  # RESOLVED 2026-09-21: cilium-1.20.2 EXECUTED (80395710, chart 1.20.1 -> 1.20.2) and retired (c0797253) -- there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention: --validate treats an unresolvable ref as an ERROR, because a guard pointing at nothing enforces nothing.
   - flux-oci-chart-sources            # names talos-1.14.0 back
   - helm-drift-detection              # names talos-1.14.0 back
   - n8n-2.39.8                        # names talos-1.14.0 back

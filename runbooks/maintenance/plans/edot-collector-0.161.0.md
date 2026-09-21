@@ -136,21 +136,7 @@ conflicts_with:                   # HARD slot exclusions. window-scheduler.py
                                   # edot-vs-otel-operator collision was "spent"
                                   # when 0.21.0 executed is corrected below: the
                                   # mechanism is durable and 0.23.0 is its heir.
-  - cilium-1.20.2                 # ADDED 2026-09-21, from an independent review of
-                                  # that plan. It was §6 PROSE ONLY here (~line 933),
-                                  # and prose schedules nothing — the header of this
-                                  # very field says so. Checked BOTH directions
-                                  # before adding rather than trusting the review:
-                                  # cilium-1.20.2.md contains zero occurrences of
-                                  # "edot", so neither side declared the pair and
-                                  # window-scheduler.py would have placed them in one
-                                  # slot. Mechanism: that plan rolls the CNI
-                                  # DaemonSet, restarting pod networking
-                                  # cluster-wide, while this single-replica collector
-                                  # is mid-verification — and every §4 gate here is
-                                  # an OTLP-into-Elasticsearch assertion carried over
-                                  # exactly that network, so a gap is unattributable
-                                  # between the two changes.
+  # RESOLVED 2026-09-21: cilium-1.20.2 EXECUTED (80395710, chart 1.20.1 -> 1.20.2) and retired (c0797253) -- there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention: --validate treats an unresolvable ref as an ERROR, because a guard pointing at nothing enforces nothing.
 security_ref: F-2a0b50e5          # A security finding DOES exist on the exact image
                                   # this plan moves, and this plan is its remedy:
                                   # the finding's own remediation is "newer upstream

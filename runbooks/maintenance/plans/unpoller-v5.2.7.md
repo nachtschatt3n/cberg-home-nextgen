@@ -98,13 +98,7 @@ conflicts_with:                       # HARD slot exclusions. window-scheduler.p
                                       # awaiting-go, window "sat-attended:2026-09-26". So this
                                       # exclusion now actively removes a real date from this
                                       # plan's candidate slots (§6).
-  - cilium-1.20.2                     # A CNI roll restarts pod networking cluster-wide; every
-                                      # assertion in §4 (scrape, cache refresh, InfluxDB write
-                                      # path) rides that network. cilium-1.20.2 declares a SOLO
-                                      # SLOT (12 exclusions — COUNTED 2026-09-20 from its own
-                                      # conflicts_with block, not estimated) and explicitly
-                                      # dropped its unpoller-v5.2.5 ref on 2026-09-16; this is
-                                      # the successor it would re-add.
+  # RESOLVED 2026-09-21: cilium-1.20.2 EXECUTED (80395710, chart 1.20.1 -> 1.20.2) and retired (c0797253) -- there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention: --validate treats an unresolvable ref as an ERROR, because a guard pointing at nothing enforces nothing.
 security_ref: null                    # version-currency driver only; no vulnerability content.
                                       # The TLS-posture reference in §1.3 is an ALREADY-ACCEPTED
                                       # risk (F-cafe8865 / AR-114), cited as a premise of the
