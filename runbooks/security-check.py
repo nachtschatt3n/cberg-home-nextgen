@@ -2333,6 +2333,17 @@ def _newer_upstream_tag_exists(image_ref: str):
         # never infers from version ordering.
         if _stable_channel_pins_current(repo, tag, vc):
             return False
+        # PRE-RELEASE awareness (F-dc0e1a09, 2026-09-21). The two branches above
+        # already answer "there is nothing to move to" for rolling and
+        # floating-line tags; a pre-release head is the third case and had none.
+        # Live instance (security_ref: F-dc0e1a09): the newest tag above the
+        # pinned `valkey/valkey:9.1.2` is the 9.2 line, where `9.2` is
+        # digest-identical to `9.2.0-rc1` and no GA 9.2.x is published. The
+        # row therefore read "newer upstream tag available, bump the image"
+        # and pointed the reader at a release candidate, which is how one
+        # reached production unattended on 2026-09-21 (reverted in 397af0ff).
+        if _latest_is_prerelease(repo, latest):
+            return False
         return True
     except Exception:
         return None
@@ -2364,6 +2375,60 @@ def _stable_channel_pins_current(repo: str, tag: str, vc) -> bool:
             return False
         ver, _why = cov.stable_channel_version(repo)
         return bool(ver) and bool(vc.tags_are_equal(str(ver), tag))
+    except Exception:
+        return False
+
+
+def _cov():
+    """coverage.py as a module, loaded once — shared registry/channel helpers.
+
+    Same `_COV_MOD` global `_stable_channel_pins_current` populates, so the two
+    callers can never end up with two copies of that module.
+    """
+    global _COV_MOD
+    if _COV_MOD is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "cberg_coverage", SCRIPT_DIR / "coverage.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _COV_MOD = mod
+    return _COV_MOD
+
+
+def _latest_is_prerelease(repo: str, latest: str) -> bool:
+    """True when the NEWEST upstream tag is a pre-release, so no GA bump exists.
+
+    The third "there is nothing to move to" branch, beside `is_rolling_tag()`
+    and `_is_floating_line_tag()`. Without it a fixable CVE is rated
+    actionable-by-bump while the only bump available is a release candidate, and
+    the prescribed remediation points AT that candidate. We consume
+    upstream images and never rebuild, so with no GA newer tag there is no
+    action available and the row belongs in the AR-029 already-newest branch.
+
+    TWO SHAPES, because the tag STRING is not sufficient on its own:
+      * an explicit marker in the name — `2.40.0-beta`, `1.14.0-rc1`;
+      * a GA-LOOKING name that is byte-identical to a pre-release sibling.
+        Measured 2026-09-21: `valkey/valkey:9.2` and `:9.2.0-rc1` share one
+        digest (pushed 1.7s apart) and no GA 9.2.x is published at all, while
+        `_PRERELEASE_TAG.search("9.2")` is False. Only the digest comparison
+        sees that case, which is the whole reason this asks two questions.
+
+    Asks about `latest`, the RESOLVED newest tag — never about the tag we run.
+
+    FAILS TOWARD SURFACING. Any error returns False, exactly as
+    `_stable_channel_pins_current` does and for the same reason: this can only
+    ever turn "bump available" into "already newest", so it must never do that
+    on a guess. A registry hiccup leaves the CVE visible.
+    """
+    if not latest:
+        return False
+    try:
+        cov = _cov()
+        if cov._PRERELEASE_TAG.search(str(latest)):
+            return True
+        twin, _ev = cov._prerelease_digest_twin(repo, str(latest))
+        return bool(twin)
     except Exception:
         return False
 
