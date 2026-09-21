@@ -62,16 +62,33 @@ finding_refs: []                      # DELIBERATELY EMPTY, and checked rather t
                                       # sweep has not filed it yet. An empty list is therefore
                                       # correct — no PLAN-lane finding is left reading as
                                       # unplanned. Add the id here if/when the sweep files one.
-status: blocked                       # DELIBERATE, and a deviation from the "status: draft"
-                                      # default — see the RECOMMENDATION block below. The
-                                      # investigation's conclusion is DO NOT EXECUTE, and
-                                      # F-61d8147e — a plan-state hygiene record, nothing to
-                                      # do with security — documents that a plan stopped by a
-                                      # prose header while its machine-readable status stays
-                                      # `draft` is exactly the defect to avoid ("matching
-                                      # paperless-db-12.3.3 which was blocked the same day for
-                                      # the same class of reason"). Writing `draft` here would
-                                      # reproduce that defect in the same component.
+status: draft                         # UNBLOCKED 2026-09-21 by an explicit operator override of
+                                      # the RECOMMENDATION block (annotated in place below, not
+                                      # deleted). §2's ABORT list keys on exactly that override
+                                      # existing, so it is recorded HERE and in the block, not
+                                      # only in conversation.
+                                      # WHY `draft` IS NOW CORRECT, AND WAS NOT BEFORE:
+                                      # F-61d8147e records that a plan stopped by a prose header
+                                      # while its machine-readable status says `draft` is a
+                                      # plan-state hygiene defect — the two must not disagree.
+                                      # While the recommendation stood, `blocked` was the only
+                                      # honest value. The recommendation is now overridden, so
+                                      # the prose and the status agree again and `draft` is the
+                                      # accurate state: written, not yet reviewed.
+                                      # NOT `vetted`: no plan-reviewer has passed this since the
+                                      # override, and the scheduler ignores `draft`, so nothing
+                                      # can claim a slot before that review.
+                                      # WHAT THE OPERATOR ACCEPTED, recorded so the trade is not
+                                      # re-litigated from memory: MariaDB 13.0 is a ROLLING
+                                      # release whose community support ends 2026-12-31, against
+                                      # 2029-06-12 for the 12.3 LTS line; upstream ships no patch
+                                      # releases on an innovation line, so staying patched means
+                                      # a further one-way datadir migration each quarter; and
+                                      # MARIADB_AUTO_UPGRADE=1 is live, so the conversion is
+                                      # irreversible from the first second the new image starts,
+                                      # with no look-first step and no abort point, on a database
+                                      # with no second copy. The operator was shown all of this
+                                      # and chose to proceed.
 window: null                          # the scheduler assigns; nothing should claim a slot
                                       # while the recommendation stands
 premises:
@@ -143,7 +160,28 @@ sops_refs:
 generated: "2026-09-16"
 ---
 
-> ## ⛔ RECOMMENDATION: DO NOT EXECUTE — this is an operator DECISION, not a routine bump
+> ## ✅ OVERRIDDEN BY THE OPERATOR, 2026-09-21 — the recommendation below stands as the record of what was traded away
+>
+> **The operator was shown this block's full argument — the LTS→rolling move, the
+> 2026-12-31 support end against 2029-06-12, the absence of patch releases on an
+> innovation line, the quarterly one-way migrations that follow, the
+> irreversibility from first container start, and the finding of no upside — and
+> chose to proceed.** §2's ABORT condition "the operator has not explicitly
+> overridden the RECOMMENDATION block" is therefore satisfied, and `status:` moved
+> from `blocked` to `draft`.
+>
+> Nothing below is deleted. It remains the reasoning this decision overrode, so a
+> future reader sees the cost that was accepted rather than an unexplained bump.
+> Re-verified 2026-09-21 before unblocking: premises PASS (5), live image
+> `mariadb:12.3.3`, `MARIADB_AUTO_UPGRADE=1` armed, newest Completed backup for
+> `paperless-db-data` 2026-09-21T03:05:10Z (620756992 bytes) — inside §2's 26h
+> freshness bound.
+>
+> STILL REQUIRED before this runs: a plan-reviewer pass (`draft` → `vetted`), a
+> window that does not stack it with another `backup-restore` plan, and an
+> operator GO recorded for that specific window.
+>
+> ## ⛔ RECOMMENDATION (ORIGINAL, OVERRIDDEN): DO NOT EXECUTE — this is an operator DECISION, not a routine bump
 >
 > **This plan is written, complete and executable, and it recommends against
 > running itself.** The window agent must not schedule it; the decision belongs
