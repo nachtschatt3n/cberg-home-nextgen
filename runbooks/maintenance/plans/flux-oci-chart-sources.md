@@ -46,7 +46,8 @@ touches:
     - "fluxinstance/flux spec.kustomize.patches (Stage 10 — emptyDir sizeLimit)"
   shared: [flux-sources, cni-adjacent, cert-manager, storage/longhorn, dns-internal, monitoring]
 depends_on: []
-conflicts_with: [talos-1.14.0]         # A node roll drains nodes and restarts
+conflicts_with:
+  - talos-1.14.0                       # A node roll drains nodes and restarts
                                        # source-controller, whose artifact cache is an
                                        # unbounded emptyDir holding all 122 HelmCharts.
                                        # Stacking a source-layer refactor on the one event
@@ -55,6 +56,16 @@ conflicts_with: [talos-1.14.0]         # A node roll drains nodes and restarts
                                        # cluster. Also: this plan rolls the CNI DaemonSet
                                        # and longhorn-manager; a Talos roll rebuilds ~50
                                        # Longhorn replicas per node.
+  - talos-1.14.1                       # ADDED 2026-09-21 — this is the LIVE talos plan.
+                                       # talos-1.14.0 above was SUPERSEDED the same day
+                                       # (commit 9c19acc3); its window was cleared and
+                                       # talos-1.14.1 inherited sun-attended:2026-09-27.
+                                       # The old ref still RESOLVES, so --validate stayed
+                                       # clean while this guard named a plan that can
+                                       # never run and left the node roll that DOES
+                                       # happen unguarded. Same mechanism as above.
+                                       # Predecessor kept per the n8n-2.39.8 /
+                                       # cilium-1.20.2 convention.
 security_ref: F-0e310ef2
 capability_change: true                # Stage 9 gives Flux chart-provenance ENFORCEMENT it
                                        # does not have today (spec.verify fails CLOSED), and

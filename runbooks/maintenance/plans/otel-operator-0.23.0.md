@@ -110,9 +110,13 @@ conflicts_with:                        # HARD slot exclusions — window-schedul
                                        # edot-collector.monitoring.svc:4317, and §4.4 proves
                                        # this plan through documents landing in ES *via edot*.
                                        # If edot rolls the same night, neither plan's ES gate
-                                       # can attribute a gap to its own change. That plan does
-                                       # not yet name this one — a reciprocity correction to
-                                       # make when this plan is vetted (§6).
+                                       # can attribute a gap to its own change. RECIPROCITY
+                                       # RE-VERIFIED 2026-09-21 by reading that plan's own
+                                       # frontmatter: edot-collector-0.161.0 DOES name this
+                                       # plan in its conflicts_with (added there 2026-09-20),
+                                       # so the pair is declared from both sides and needs no
+                                       # further correction. The note previously here, saying
+                                       # the ref was still owed, was stale.
   - cilium-1.20.2                      # §1.4's whole NetworkPolicy risk assessment is a
                                        # statement about the CNI's CIDR/remote-node policy
                                        # semantics; upgrading the enforcement substrate in the
@@ -122,6 +126,17 @@ conflicts_with:                        # HARD slot exclusions — window-schedul
   - talos-1.14.0                       # a node roll restarts every collector pod and moves
                                        # workloads between nodes, which blows up the per-node
                                        # ES assertion in §4.4 and the 98-target baseline in §4.6.
+  - talos-1.14.1                       # ADDED 2026-09-21 — this is the LIVE talos plan.
+                                       # talos-1.14.0 above was SUPERSEDED the same day
+                                       # (commit 9c19acc3); its window was cleared and
+                                       # this successor inherited sun-attended:2026-09-27.
+                                       # Same mechanism as above: a node roll restarts
+                                       # every collector pod and moves workloads between
+                                       # nodes, blowing up §4.4's per-node ES assertion
+                                       # and §4.6's 98-target baseline. The old ref still
+                                       # resolves, so --validate stayed clean throughout.
+                                       # Predecessor kept per the n8n-2.39.8 /
+                                       # cilium-1.20.2 convention.
   - flux-oci-chart-sources             # ADDED 2026-09-20 (was missing). Verified in that
                                        # plan's own frontmatter: its touches.resources names
                                        # "daemonset/otel-operator-daemon-collector (ROLL)",

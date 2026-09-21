@@ -105,6 +105,21 @@ conflicts_with:                   # HARD slot exclusions. window-scheduler.py
                                   # (single replica) mid-verification and puts the
                                   # whole cluster in motion; no assertion in §4
                                   # means anything during it.
+                                  # KEPT as a resolving ref only — see below.
+  - talos-1.14.1                  # ADDED 2026-09-21, and this is the LIVE talos
+                                  # plan. talos-1.14.0 was SUPERSEDED earlier the
+                                  # same day (commit 9c19acc3) and will never run;
+                                  # its window was cleared and talos-1.14.1 (draft,
+                                  # high, 145 min, needs_reboot) INHERITED
+                                  # sun-attended:2026-09-27. The ref above still
+                                  # RESOLVES, so --validate stayed clean the whole
+                                  # time while the guard pointed at a plan that
+                                  # cannot execute — the node roll that actually
+                                  # happens was unguarded against this plan. Same
+                                  # eviction mechanism as above. Convention follows
+                                  # n8n-2.39.8 and cilium-1.20.2: name the successor,
+                                  # keep the predecessor so a revival cannot slip
+                                  # past and so --validate keeps resolving.
   - otel-operator-0.23.0          # ADDED 2026-09-20. That plan's daemon collectors
                                   # export OTLP into edot-collector.monitoring.svc
                                   # :4317, and its own §4 proves itself through
@@ -121,6 +136,21 @@ conflicts_with:                   # HARD slot exclusions. window-scheduler.py
                                   # edot-vs-otel-operator collision was "spent"
                                   # when 0.21.0 executed is corrected below: the
                                   # mechanism is durable and 0.23.0 is its heir.
+  - cilium-1.20.2                 # ADDED 2026-09-21, from an independent review of
+                                  # that plan. It was §6 PROSE ONLY here (~line 933),
+                                  # and prose schedules nothing — the header of this
+                                  # very field says so. Checked BOTH directions
+                                  # before adding rather than trusting the review:
+                                  # cilium-1.20.2.md contains zero occurrences of
+                                  # "edot", so neither side declared the pair and
+                                  # window-scheduler.py would have placed them in one
+                                  # slot. Mechanism: that plan rolls the CNI
+                                  # DaemonSet, restarting pod networking
+                                  # cluster-wide, while this single-replica collector
+                                  # is mid-verification — and every §4 gate here is
+                                  # an OTLP-into-Elasticsearch assertion carried over
+                                  # exactly that network, so a gap is unattributable
+                                  # between the two changes.
 security_ref: F-2a0b50e5          # A security finding DOES exist on the exact image
                                   # this plan moves, and this plan is its remedy:
                                   # the finding's own remediation is "newer upstream

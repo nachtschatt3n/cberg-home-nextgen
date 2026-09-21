@@ -69,6 +69,14 @@ conflicts_with:
   - talos-1.14.0                      # §6.5: needs the whole sun-attended slot; a node roll
                                       # plus a first correcting reconcile = two candidate
                                       # causes for any cilium/longhorn rollout
+  - talos-1.14.1                      # ADDED 2026-09-21 — this is the LIVE talos plan.
+                                      # talos-1.14.0 above was SUPERSEDED the same day
+                                      # (commit 9c19acc3) and its window was cleared;
+                                      # this successor inherited sun-attended:2026-09-27,
+                                      # which is precisely the "whole sun-attended slot"
+                                      # §6.5 argues about. The old ref still resolves, so
+                                      # --validate never surfaced the drift. Predecessor
+                                      # kept per the n8n-2.39.8 / cilium-1.20.2 convention.
   - grafana-chart-13.2.3              # §6.4: pure attribution — a Helm upgrade in the same
                                       # window as P3 gives every grafana rollout two causes
 security_ref: null
