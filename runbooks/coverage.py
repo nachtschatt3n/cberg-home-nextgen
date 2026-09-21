@@ -2375,15 +2375,101 @@ def _namespace_text(ns: str):
     return txt
 
 
+def _norm_repo(repo) -> str:
+    """Registry-qualified spellings of one image reduced to a comparable key.
+
+    The snapshot writes `docker.io/jellyfin/jellyfin` and `library/postgres`
+    where the manifests write `jellyfin/jellyfin` and `postgres`. Measured
+    2026-09-21: without this, 2 of the 13 single-repo rows fail to reconcile and
+    the scoped branch below silently never engages — a fix that reads as correct
+    and does nothing.
+    """
+    r = str(repo or "").strip().lower()
+    for p in ("docker.io/", "index.docker.io/"):
+        if r.startswith(p):
+            r = r[len(p):]
+    if r.startswith("library/"):
+        r = r[len("library/"):]
+    return r
+
+
+def _namespace_repo_tags(ns: str) -> dict:
+    """{normalised image repo -> {tags pinned in git}} under kubernetes/apps/<ns>/.
+
+    Cached inside `_NS_TEXT_CACHE` under a TUPLE key on purpose. Both test
+    suites clear that dict between fixtures (11 call sites); a second cache of
+    its own would keep serving the PREVIOUS fixture's tree while every
+    `.clear()` still looked correct — a stale read dressed as a passing test.
+    Tuple keys cannot collide with the plain-string keys `_namespace_text` uses.
+    """
+    key = ("repos", ns)
+    if key in _NS_TEXT_CACHE:
+        return _NS_TEXT_CACHE[key]
+    out: dict = {}
+
+    def add(repo, tag):
+        # `1.38.0@sha256:...` is the same deployed version as the bare tag the
+        # report carries, so the digest must not defeat the comparison.
+        t = str(tag).split("@")[0].strip()
+        if repo and t:
+            out.setdefault(_norm_repo(repo), set()).add(t)
+
+    def walk(node):
+        if isinstance(node, dict):
+            if isinstance(node.get("repository"), str) and node.get("tag") is not None:
+                add(node["repository"], node["tag"])
+            for k, v in node.items():
+                if k == "image" and isinstance(v, str) and ":" in v:
+                    repo, _, tag = v.rpartition(":")
+                    if repo and "/" not in tag:   # not a registry:port hostname
+                        add(repo, tag)
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    d = REPO_ROOT / "kubernetes" / "apps" / ns
+    if d.is_dir():
+        for f in sorted(d.rglob("*.yaml")):
+            try:
+                docs = list(yaml.safe_load_all(f.read_text(errors="ignore")))
+            except Exception:
+                continue      # Authentik blueprints carry tags safe_load rejects
+            for doc in docs:
+                walk(doc)
+    _NS_TEXT_CACHE[key] = out
+    return out
+
+
 def already_applied(item) -> bool:
     """True only when the bump is PROVABLY in git already.
 
     Deliberately conservative in one direction. A false "already applied"
     silently drops a real update — the exact CRACK this file exists to prevent —
-    so the test demands BOTH that the target version is present in the namespace
-    AND that the current one is gone. If the old version still appears anywhere
-    in that namespace we keep the item and re-propose an applied bump, which
-    costs a redundant no-op and nothing else.
+    so the test demands BOTH that the target version is present AND that the
+    current one is gone. Anything unprovable keeps the item, which costs a
+    redundant no-op and nothing else.
+
+    SCOPED TO THE ITEM'S OWN IMAGE when exactly one repository resolves
+    (F-a52c69d7, the second disjunct). The namespace-wide text answers "does
+    this version string appear anywhere under kubernetes/apps/<ns>/", and a
+    SECOND IMAGE legitimately still pinning the old version answers that
+    wrongly: memgraph moved `memgraph/lab` 3.13.1 -> 3.13.2 while
+    `memgraph/memgraph-mage` deliberately stayed at 3.13.1 ("lab controller
+    only, mage unchanged"), so the landed bump never self-cleared and the AUTO
+    lane kept re-proposing it — an unattended bump that risked dragging mage
+    along. 12 of 18 namespaces carry that shape (>1 repo, >1 distinct tag), so
+    it re-arms whenever a snapshot goes stale mid-window, which is the exact
+    condition this function exists for.
+
+    The scoped branch is a REFINEMENT, not a loosening: it asks whether THIS
+    image is pinned at the target and not at the current, which is the real
+    question. It engages only when exactly one repo resolves AND that repo is
+    actually found in git; multi-image rows (nextcloud pins three) and
+    unresolvable repos fall through to the namespace-wide test rather than
+    assume. Measured across all 22 live rows on 2026-09-21: zero behaviour
+    change today — the memgraph instance had already self-resolved, so this is
+    preventive, not corrective.
     """
     cur, tgt = item.get("current"), item.get("target")
     ns = (item.get("namespace") or "").strip()
@@ -2391,6 +2477,11 @@ def already_applied(item) -> bool:
         return False
     if _is_truncated(cur) or _is_truncated(tgt):
         return False          # a clipped tag cannot be matched literally
+    repos = _item_repos(item)
+    if item.get("kind") == "image" and len(repos) == 1:
+        tags = _namespace_repo_tags(ns).get(_norm_repo(repos[0]))
+        if tags:
+            return (str(tgt) in tags) and (str(cur) not in tags)
     txt = _namespace_text(ns)
     if txt is None:
         return False          # external infra / unresolvable ns → never assume
