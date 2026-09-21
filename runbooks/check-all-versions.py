@@ -552,7 +552,14 @@ class VersionChecker:
             found.update(apps_dir.rglob(pattern))
         return sorted(found)
 
-    _RAW_WORKLOAD_KINDS = ("Deployment", "StatefulSet", "DaemonSet")
+    # CronJob and Job were absent until 2026-09-21 (F-b6a4bf95): 22 container
+    # images across ~20 CronJobs and 2 Jobs were never enumerated at all — not
+    # "checked and clean", simply never looked at — so a stale or vulnerable tag
+    # there was invisible to BOTH the version and the security detector. Same
+    # denominator-class bug as the raw-manifest gap this method already closes,
+    # one workload kind further out.
+    _RAW_WORKLOAD_KINDS = ("Deployment", "StatefulSet", "DaemonSet",
+                           "CronJob", "Job")
 
     def find_raw_manifest_workloads(self) -> List[Dict]:
         """Raw-manifest Deployments/StatefulSets/DaemonSets with no HelmRelease.
@@ -617,8 +624,17 @@ class VersionChecker:
                 if not isinstance(doc, dict) or doc.get('kind') not in self._RAW_WORKLOAD_KINDS:
                     continue
                 metadata = doc.get('metadata', {}) or {}
-                pod_spec = (((doc.get('spec') or {}).get('template') or {})
-                            .get('spec') or {})
+                # CronJob nests its pod template ONE LEVEL DEEPER than every
+                # other kind here (spec.jobTemplate.spec.template); Job and the
+                # three original kinds share spec.template. Reading the shallow
+                # path on a CronJob yields an empty pod_spec and therefore NO
+                # images — a silent under-count that looks identical to "this
+                # workload has nothing to track", which is the exact failure
+                # F-b6a4bf95 records.
+                _spec = doc.get('spec') or {}
+                if doc.get('kind') == 'CronJob':
+                    _spec = (_spec.get('jobTemplate') or {}).get('spec') or {}
+                pod_spec = ((_spec.get('template') or {}).get('spec') or {})
                 containers = (list(pod_spec.get('containers') or [])
                               + list(pod_spec.get('initContainers') or []))
                 images = []

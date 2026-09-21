@@ -1528,9 +1528,11 @@ def s3_git_history() -> tuple[str, Findings, str]:
 
     # Secret-named files ever committed outside .sops.yaml
     # This rule matches the FILENAME only -- it never reads content -- so a file
-    # named after the thing it detects trips it on its own name. Two such files
-    # exist and both are ours: the Layer-3 pre-commit credential guard, and the
-    # SOP documenting it. Their `password: ...` lines are the guard's own
+    # named after the thing it detects trips it on its own name. Three such
+    # files exist and all are ours: the Layer-3 pre-commit credential guard, the
+    # SOP documenting it, and — since 2026-09-20 — the regression test that pins
+    # THIS rule's scope, whose own name necessarily contains the word it matches
+    # (F-afd39842). Their `password: ...` lines are the guard's own
     # documented test vectors (`placeholder-XYZZY`, `CORRECT_HORSE_BATTERY`) in
     # comments and prose -- regex and examples, never a value.
     #
@@ -1549,6 +1551,7 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "git log --all --diff-filter=A --name-only --pretty=format: "
         "-- . ':(exclude).githooks/lib/password-guard.awk' "
         "      ':(exclude)docs/sops/pre-commit-secret-scan.md' "
+        "      ':(exclude)runbooks/tests/test-s3-secret-named-file-scope.py' "
         "| grep -i 'secret\\|password\\|credential\\|private.key' "
         "| grep -v '\\.sops\\.yaml$' | sort -u"
     )

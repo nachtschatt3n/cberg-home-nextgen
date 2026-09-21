@@ -16,6 +16,12 @@ kubernetes/bootstrap/talos/clusterconfig/**
 *.agekey
 *.pub
 *.key
+# The SOPS age PRIVATE key for every cluster secret lives at the repo root
+# (SOPS_AGE_KEY_FILE in .envrc / .mise.toml). `*.key` above already covers it,
+# but only incidentally: this repo is PUBLIC, and a future narrowing of that
+# generic rule would silently make the key committable. Named explicitly so the
+# protection survives any edit to the pattern above (F-c1ca08f0).
+age.key
 # Private
 .private
 .bin

@@ -5,7 +5,7 @@
 Recurring health/security/version/doc/media sweeps **must execute on this Mac mini** (in the `daily-operation` Claude session), **never** in an Anthropic cloud sandbox. Reasons:
 
 1. **Private cluster network**: All Kubernetes nodes are on VLAN 55 (192.168.55.0/24), unreachable from the internet. `kubectl`, `talosctl`, and Longhorn/Flux APIs are LAN-only.
-2. **Local SOPS age key**: The age key (`~/.config/sops/age/keys.txt`) used to decrypt all cluster secrets is stored on this machine only. Cloud agents cannot decrypt `.sops.yaml` files.
+2. **Local SOPS age key**: The age key used to decrypt all cluster secrets is stored on this machine only, at the repo root as `age.key` — pointed at by `SOPS_AGE_KEY_FILE` in `.envrc` and `.mise.toml`. (This line previously named `~/.config/sops/age/keys.txt`, which does not exist on this machine; the second real copy is `~/Library/Application Support/sops/age/keys.txt`. Both are mode 600 — see F-c1ca08f0.) Cloud agents cannot decrypt `.sops.yaml` files.
 3. **Local tool binaries**: `kubectl`, `talosctl`, `talhelper`, `unifictl`, `mise`, `flux` are installed locally via mise. Not available in Anthropic cloud sandboxes.
 4. **UniFi controller**: Reachable only at 192.168.30.1 (Trusted VLAN). No internet exposure.
 5. **Home Assistant / Zigbee2MQTT**: Internal services on private VLANs only.

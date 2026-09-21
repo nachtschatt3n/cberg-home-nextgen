@@ -24,6 +24,13 @@ SECURITY_CHECK = ROOT / "runbooks" / "security-check.py"
 EXCLUDED = (
     ".githooks/lib/password-guard.awk",
     "docs/sops/pre-commit-secret-scan.md",
+    # This file. The rule matches FILENAMES, so the regression test that pins
+    # its scope trips it on its own name (F-afd39842, raised 2026-09-21 — the
+    # test was added 2026-09-20 and immediately became an instance of the very
+    # false positive it documents). Excluded by literal path like the other
+    # two: a `runbooks/tests/*` glob would hide a genuine secret-named file
+    # committed anywhere under that directory.
+    "runbooks/tests/test-s3-secret-named-file-scope.py",
 )
 
 passed = failed = 0
@@ -85,7 +92,7 @@ for path in EXCLUDED:
 # This is the anti-blinding assertion. If someone widens the exclusion to a
 # glob such as `.githooks/*` or `docs/sops/*`, this fails.
 check(
-    "the exclusion removed EXACTLY the two named paths and nothing else",
+    "the exclusion removed EXACTLY the named paths and nothing else",
     without - with_,
     set(EXCLUDED),
 )

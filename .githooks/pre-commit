@@ -281,6 +281,12 @@ check_file() {
     echo "$content" | grep -qE 'AKIA[0-9A-Z]{16}'                                  && violations="${violations}  - AWS access key\n"
     echo "$content" | grep -qE '(bearer|token)["\s:=]+[A-Za-z0-9_\-]{20,}'         && violations="${violations}  - Authentication token\n"
     echo "$content" | grep -qE 'BEGIN (RSA|DSA|EC|OPENSSH|PGP) PRIVATE KEY'        && violations="${violations}  - Private key\n"
+    # SOPS age PRIVATE key. The key that decrypts every cluster secret sits at
+    # the repo root as age.key, ignored only by a generic *.key rule, and this
+    # layer had no pattern for it — so `git add -f age.key` would have sailed
+    # through into a PUBLIC repo (F-c1ca08f0). Bech32 alphabet: no 1/B/I/O
+    # after the mandatory leading 1.
+    echo "$content" | grep -qE 'AGE-SECRET-KEY-1[023456789ACDEFGHJKLMNPQRSTUVWXYZ]{58}' && violations="${violations}  - SOPS age private key\n"
     echo "$content" | grep -qE '(postgresql|mysql|mongodb)://[^:]+:[^@]+@'         && violations="${violations}  - DB connection string with creds\n"
     echo "$content" | grep -qE 'gh[pousr]_[A-Za-z0-9]{36,}'                        && violations="${violations}  - GitHub token\n"
     echo "$content" | grep -qE 'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}' && violations="${violations}  - JWT token\n"
