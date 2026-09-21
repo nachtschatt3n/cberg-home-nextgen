@@ -366,22 +366,29 @@ deny:
       calls policy_block(policy, parsed[dep], update_type) with the Renovate depName.
       valkey/valkey matches this glob, so a Renovate PR for this image is blocked.
 
-      WHERE IT DOES NOT: coverage.py's direct-bump lane. Its deny traversal is reached
-      as denied(policy, key, utype) from assign_lane (coverage.py:2198) and
-      max_rule_fallbacks (1960, 2008), and key is the COMPONENT name - both
-      coverage.py:2157 and 1959 build it as app-template when the item is an
-      app-template chart, else the component. The component here is penpot-cache, so
-      an image-repository glob is never consulted on that path. Measured on the live
-      module: denied(policy, penpot-cache, minor) returns nothing, while
-      denied(policy, valkey/valkey, minor) returns this reason.
+      WHERE IT ALSO APPLIES NOW (F-7bad8aeb): coverage.py's direct-bump lane. That
+      lane reaches the deny traversal via denied_for_item(policy, item, key, utype)
+      from assign_lane and max_rule_fallbacks, which tries the COMPONENT key first
+      and then each image repository the item names. It previously passed the
+      component alone - penpot-cache - so an image-repository glob was never
+      consulted there, and this rule blocked the PR path while sitting inert in the
+      lane an unattended nightly actually applies. Both lanes honour it now.
 
-      WHAT COVERS THE DIRECT-BUMP LANE: the floating-series-pointer check added in
-      edeaabc8 - a target naming fewer version components than the pin on the same
-      major line cannot be shown to be GA - which routes 9.1.2 -> 9.2 to PLAN.
+      ALSO COVERING THAT LANE: the floating-series-pointer check added in edeaabc8 -
+      a target naming fewer version components than the pin on the same major line
+      cannot be shown to be GA - which routes 9.1.2 -> 9.2 to PLAN. That check and
+      this rule are independent guards on the same hop.
 
-      REMOVAL CONDITION: a GA 9.2.x appears on Docker Hub, or the digest-sibling check
-      described on F-aff597aa lands. Left beyond that it would freeze valkey on a
-      genuine future release. security_ref: F-aff597aa, F-f2f1f1a9
+      REMOVAL CONDITION, NARROWED 2026-09-21: a GA 9.2.x appears on Docker Hub. The
+      digest-sibling work has since landed - security-check.py grew a prerelease
+      branch, and coverage.py the arity check - but auto-update.py's PR gate has NO
+      prerelease admission gate at all: its only prerelease awareness is the GitHub
+      release flag read in github_releases(), used solely to SKIP prereleases while
+      enumerating intermediate releases for G3. A Renovate PR for a GA-looking
+      digest-twin tag would therefore not be stopped by anything else, so this rule
+      is still the guard on that path and the earlier "or the digest-sibling check
+      lands" clause is withdrawn. Left beyond a real GA it would freeze valkey on a
+      genuine future release. security_ref: F-aff597aa, F-f2f1f1a9, F-7bad8aeb
 # ── Hard blocks by Renovate manager ─────────────────────────────────────────
 # github-actions patch/minor are already auto-merged by Renovate itself
 # (packageRules in .github/renovate.json5); don't double-handle them here.

@@ -454,6 +454,48 @@ def denied(policy, name, utype):
     return rule.get("reason", f"deny rule {rule.get('match')!r}")
 
 
+def deny_rule_for_item(policy, item, key, utype):
+    """The deny rule blocking this ITEM — matched on component OR image repo.
+
+    `deny_rule_for()` answers about one NAME, and WHICH name it is handed
+    decides whether a rule fires at all. The two lanes hand it different ones:
+    auto-update.py's PR gate passes the Renovate depName
+    (`policy_block(policy, parsed['dep'], …)`, e.g. `valkey/valkey`), while this
+    file passed only the component (`penpot-cache`). So an operator following
+    the documented procedure — CLAUDE.md's "to hold a component back, add a
+    deny rule to the policy YAML" — got a rule that blocked the PR path and was
+    silently inert HERE, in the lane an unattended nightly actually applies
+    (F-7bad8aeb). Nothing reported the mismatch.
+
+    Component key first, so every existing match and its reason are unchanged;
+    only then the image repositories the item names.
+
+    DIRECTION IS SAFE BY CONSTRUCTION. This can only find a rule where none was
+    found before, so it can only move work OUT of the unattended lane, never
+    into it — the same property `_apply_lockstep` relies on. Measured across the
+    whole live item set before the change: exactly TWO items gain a hold —
+    penpot-cache via `valkey/valkey`, and paperless-db via `mariadb` against the
+    "a DB-engine bump is never unattended-safe" rule — and both were already in
+    PLAN, so no lane outcome regressed.
+    """
+    rule = deny_rule_for(policy, key, utype)
+    if rule:
+        return rule
+    for repo in _item_repos(item):
+        rule = deny_rule_for(policy, str(repo).lower(), utype)
+        if rule:
+            return rule
+    return None
+
+
+def denied_for_item(policy, item, key, utype):
+    """Reason the deny-list blocks this item by component OR image repo, else None."""
+    rule = deny_rule_for_item(policy, item, key, utype)
+    if rule is None:
+        return None
+    return rule.get("reason", f"deny rule {rule.get('match')!r}")
+
+
 _ROW = re.compile(r"^\|\s*`?([^`|]+?)`?\s*\|\s*`?([^`|]*)`?\s*\|\s*([^|]*)\|\s*([^|]*)\|\s*([^|]*)\|\s*([^|]*)\|\s*$")
 _ARROW = re.compile(r"(\S+)\s*(?:→|->)\s*(\S+)")
 
@@ -1957,7 +1999,7 @@ def max_rule_fallbacks(actionable, policy, prs=None):
             continue
         is_app_template = item["kind"] == "chart" and str(item["target"]).startswith("5.")
         key = "app-template" if is_app_template else comp
-        rule = deny_rule_for(policy, key, item["type"])
+        rule = deny_rule_for_item(policy, item, key, item["type"])
         mx = (rule or {}).get("max")
         if not rule or mx not in RANK:
             continue                      # no rule, or a FULL block: nothing is allowed
@@ -2005,7 +2047,7 @@ def max_rule_fallbacks(actionable, policy, prs=None):
                                   f"{item['current']} is already at or ahead of it"})
             continue
         utype = _semver_type(item["current"], ver)
-        blocked = denied(policy, key, utype)
+        blocked = denied_for_item(policy, item, key, utype)
         if blocked:
             out.append({**rec, "status": "hold", "candidate": ver,
                         "channel_evidence": why,
@@ -2195,7 +2237,7 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
     pr_num, pr_note = renovate_pr_for(prs, item, {comp, key})
     if not item.get("max_rule_fallback") and pr_num:
         return "AUTO", f"Renovate PR #{pr_num}", None
-    dn = denied(policy, key, utype)
+    dn = denied_for_item(policy, item, key, utype)
     if dn or utype == "major" or utype == "unknown":
         return "PLAN", _with_channel_measurement(
             dn or f"{utype} — needs an assessed window plan", item, heads), None
