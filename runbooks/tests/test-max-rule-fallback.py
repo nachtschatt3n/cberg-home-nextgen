@@ -32,6 +32,13 @@ _spec = importlib.util.spec_from_file_location(
 cov = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cov)
 
+# HERMETICITY — see the same note in test-coverage-lane-safety.py. assign_lane()
+# now also walks the release RANGE (F-51728488) and looks for a pre-release
+# DIGEST TWIN (F-aff597aa); both seams are stubbed to "nothing found" so this
+# suite stays offline. Their behaviour is pinned by their own test files.
+cov._release_tags_between = lambda *a, **k: ([], "stubbed: no releases skipped")
+cov._prerelease_digest_twin = lambda *a, **k: (None, "")
+
 
 # ── fixtures ────────────────────────────────────────────────────────────────
 N8N_POLICY = {

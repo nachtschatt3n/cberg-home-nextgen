@@ -63,6 +63,59 @@ VERSION_MD = SCRIPT_DIR / "version-check-current.md"
 POLICY = SCRIPT_DIR / "auto-update-policy.yaml"
 PLANS_DIR = SCRIPT_DIR / "maintenance" / "plans"
 
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from lib.plan_matching import normalize_name  # noqa: E402
+
+# ── Component identity: EXTERNAL DISPLAY NAME -> PLAN COMPONENT KEY ─────────
+# F-21865cc4 / F-3bc51210. The External Infrastructure section of the version
+# report names the node OS `Talos Linux`; every talos PLAN carries
+# `component: talos`. assign_lane() lowercased to `talos linux`, load_plans()
+# keyed `{talos}`, the sets never intersected, and so an approved, windowed
+# plan (talos-1.14.1, sun-attended) was reported NEEDS A PLAN on every sweep —
+# one redundant upgrade-planner dispatch per cycle, for three cycles running.
+#
+# Normalisation ALONE does not fix it, which is what F-3bc51210's Action
+# claimed and why that Action was corrected on the record: normalize_name(
+# "Talos Linux") is `talos-linux`, which still does not equal `talos`. Routing
+# through lib.plan_matching.match_held_to_plan() only ever matched this pair
+# via its SECOND tier (version_pair_match), a fallback that stops matching the
+# moment the plan's target drifts — silently, and drift is the recurring
+# condition here. An EXPLICIT alias is the fix: it is a stated identity, not an
+# inference, and it survives any target drift.
+#
+# Keep this table SHORT and one-directional (display name -> plan key). It is
+# not a place to paper over a component that should simply be renamed.
+COMPONENT_ALIASES = {
+    "talos linux": "talos",
+    "talos-linux": "talos",
+}
+
+
+def _name_keys(name) -> set:
+    """Every spelling a component may be matched by: raw-lowercase, normalized,
+    and any explicit alias of either.
+
+    BOTH SIDES get normalized. Measured 2026-09-21: normalisation is the
+    identity for 39 of 40 plan components and 22 of 23 item components — only
+    the helm-drift plan's `flux/helm-controller` and the external
+    `Talos Linux` move — so normalizing one side only would have silently
+    stopped matching the helm-drift plan while fixing talos.
+    """
+    raw = str(name or "").lower().strip()
+    out = {raw, normalize_name(raw)}
+    for k in list(out):
+        alias = COMPONENT_ALIASES.get(k)
+        if alias:
+            out.add(alias)
+    return {k for k in out if k}
+
+
+def _item_repos(item) -> list:
+    """The image repositories an item names (single or multi-image row)."""
+    return [r for r in ([item.get("image_repo")] if item.get("image_repo")
+                        else item.get("image_repos") or []) if r]
+
 # Components intentionally held/accepted — actionable but we don't act (with why).
 # Keep in sync with the operator's real holds; these are NOT cracks.
 HELD = {
@@ -196,6 +249,115 @@ def channel_hold(comp: str, item: dict, ar_holds: dict | None = None) -> str | N
 
 
 _AR_HOLDS_CACHE = None
+_AR_ROWS_CACHE = None
+
+
+def accepted_risk_rows() -> list:
+    """[(ar_id, description, justification)] for ENABLED, accepted risks.
+
+    Best-effort: needs SWEEP_PG_DSN + psycopg, and returns [] without them.
+    Every consumer must therefore degrade SAFELY on an empty list — the window
+    agent runs coverage.py with no DSN, so anything gated on this must fail in
+    the direction of MORE scrutiny, never less.
+    """
+    global _AR_ROWS_CACHE
+    if _AR_ROWS_CACHE is not None:
+        return _AR_ROWS_CACHE
+    _AR_ROWS_CACHE = []
+    dsn = os.environ.get("SWEEP_PG_DSN")
+    if not dsn:
+        return _AR_ROWS_CACHE
+    try:
+        import psycopg
+        with psycopg.connect(dsn, connect_timeout=5) as conn, conn.cursor() as cur:
+            cur.execute("SELECT ar_id, description, justification FROM accepted_risks "
+                        "WHERE enabled = true AND status = 'accepted'")
+            _AR_ROWS_CACHE = list(cur.fetchall())
+    except Exception:
+        _AR_ROWS_CACHE = []
+    return _AR_ROWS_CACHE
+
+
+def _item_finding_titles(item) -> list:
+    """The finding titles this item would be emitted under.
+
+    Mirrors findings_writer's `<name>: <kind> <repo> <cur> → <tgt>` shape,
+    because an AR `description` is a SUBSTRING NEEDLE matched against finding
+    titles (sweep-run.py::_apply_ar_suppression) — so the only honest way to
+    ask "does an AR already dispose of this item" is to build the same string
+    the needle was written against. One per candidate repo, plus a repo-less
+    form for rows that carry tags only.
+    """
+    comp = str(item.get("component") or "")
+    kind = str(item.get("kind") or "")
+    cur, tgt = item.get("current"), item.get("target")
+    out = [f"{comp}: {kind} {cur} → {tgt}"]
+    for repo in _item_repos(item):
+        out.append(f"{comp}: {kind} {repo} {cur} → {tgt}")
+    return out
+
+
+def ar_accepts_item(item, rows=None):
+    """AR-ID of an ENABLED accepted risk that already disposes of this item.
+
+    F-a95ba973: coverage.py received `ar_holds` but used them ONLY for
+    channel_hold, so an ORDINARY acceptance could never reach the lane
+    decision. AR-113 accepts the authentik bundled-postgres 17.11 -> 18.6 pin
+    (the migration was EXECUTED; the 17.11 StatefulSet is the deliberate
+    rollback copy, scheduled for retirement by its own plan) and DID suppress
+    the matching version finding in the same run — while needs_plan still
+    asked for an upgrade-planner to plan an upgrade of a database the operator
+    has decided to delete.
+
+    This NEVER changes a lane, only planner dispatch: the item stays in PLAN so
+    the lane counts remain honest. An unreachable policy DB yields no rows and
+    the item simply keeps its planner — the degradation costs a redundant
+    dispatch, never a missed one.
+    """
+    rows = accepted_risk_rows() if rows is None else rows
+    titles = [t.lower() for t in _item_finding_titles(item)]
+    for ar_id, desc, _just in rows or []:
+        needle = str(desc or "").strip().lower()
+        # Short needles are matched against every finding title in the DB and
+        # are linted there; here they would be indiscriminate, so require a
+        # substantive one.
+        if len(needle) < 8:
+            continue
+        if any(needle in t for t in titles):
+            return ar_id
+    return None
+
+
+_DECLINE_RE = re.compile(r"\bDECLINED?\b")
+
+
+def plan_declines(item, plans):
+    """plan_id of a plan whose frontmatter DECLINES this exact bump, else None.
+
+    The other half of F-a95ba973. `authentik-pg18-lockstep` states in its
+    `target` field: "bundled/rollback postgresql image bump to 18.6-bookworm
+    DECLINED — stays pinned 17.11-bookworm". That is a recorded DECISION, and
+    unlike pending work a decision does not expire when the plan executes —
+    which is why DEAD_PLAN_STATUSES is deliberately NOT applied here. Without
+    this, the decision is invisible and rule 4d re-dispatches a planner to
+    re-derive it every cycle.
+
+    Narrow on purpose: the decline marker AND the item's exact target version
+    must both appear in the plan's own current/target fields.
+    """
+    keys = _name_keys(str(item.get("component") or ""))
+    uv = _ver_tuple(item.get("target"))
+    if not uv:
+        return None
+    for plan in plans or []:
+        if not ((plan.get("keys") or set()) | (plan.get("also_keys") or set())) & keys:
+            continue
+        blob = f"{plan.get('target') or ''} {plan.get('current') or ''}"
+        if not _DECLINE_RE.search(blob):
+            continue
+        if any(_ver_tuple(t) == uv for t in _VER_TOKEN.findall(blob)):
+            return plan["plan_id"]
+    return None
 
 
 def ar_prerelease_holds() -> dict:
@@ -208,16 +370,8 @@ def ar_prerelease_holds() -> dict:
     if _AR_HOLDS_CACHE is not None:
         return _AR_HOLDS_CACHE
     _AR_HOLDS_CACHE = {}
-    dsn = os.environ.get("SWEEP_PG_DSN")
-    if not dsn:
-        return _AR_HOLDS_CACHE
-    try:
-        import psycopg
-        with psycopg.connect(dsn, connect_timeout=5) as conn, conn.cursor() as cur:
-            cur.execute("SELECT ar_id, description, justification FROM accepted_risks "
-                        "WHERE enabled = true AND status = 'accepted'")
-            rows = cur.fetchall()
-    except Exception:
+    rows = accepted_risk_rows()
+    if not rows:
         return _AR_HOLDS_CACHE
     for ar_id, desc, just in rows:
         blob = (just or "").lower()
@@ -533,16 +687,127 @@ def parse_external_infra():
     return items
 
 
+_PR_LINE = re.compile(r"\[#(\d+)\].*?update\s+(.+?)\s*\(")
+# `aqua:cloudflare/cloudflared` — a Renovate MANAGER prefix, not a registry
+# host. The negative lookahead keeps `https://` and friends out of it.
+_MANAGER_PREFIX = re.compile(r"^([a-z][a-z0-9_-]*):(?!//)(.+)$", re.IGNORECASE)
+# Managers that can never describe a container image running in this cluster.
+_NON_IMAGE_MANAGERS = {"aqua", "npm", "pypi", "gomod", "cargo", "nuget",
+                       "github-release", "github-releases", "helm"}
+
+
+def _pr_record(number, dep):
+    m = _MANAGER_PREFIX.match(dep)
+    manager, path = (m.group(1).lower(), m.group(2)) if m else (None, dep)
+    return {"number": str(number), "dep": dep, "manager": manager,
+            "path": path.strip().strip("/")}
+
+
 def parse_renovate_prs():
-    """Component names that already have an open Renovate PR (AUTO artifact)."""
-    prs = {}
+    """{lookup key: [pr record, …]} for every open Renovate PR.
+
+    A DICT OF LISTS, keyed on several spellings, because the old map stored ONE
+    PR per dep BASENAME and collapsed collisions last-wins (F-ebd51739). Two
+    open PRs reduced to the key `cloudflared`: #214
+    `docker.io/cloudflare/cloudflared` (the internet-facing tunnel CONTAINER)
+    and #215 `aqua:cloudflare/cloudflared` (the local CLI pin in `.mise.toml`).
+    The snapshot lists them in ascending order, so #215 overwrote #214 and the
+    operator-facing lane table named the wrong artifact for a change to an
+    internet-facing tunnel. Worse, had #215 merged first the component key
+    would have read as COVERED while helmrelease.yaml stayed on the old tag —
+    a false negative in the crack detector, whose zero is only a safety
+    property if this mapping is sound.
+
+    Attribution is `renovate_pr_for()`, and it matches on the ARTIFACT.
+    """
+    prs: dict = {}
     txt = VERSION_MD.read_text() if VERSION_MD.exists() else ""
     for line in txt.splitlines():
-        m = re.search(r"\[#(\d+)\].*?update\s+(.+?)\s*\(", line)
-        if m:
-            dep = m.group(2).strip().split("/")[-1]
-            prs[dep.lower()] = m.group(1)
+        m = _PR_LINE.search(line)
+        if not m:
+            continue
+        rec = _pr_record(m.group(1), m.group(2).strip())
+        base = rec["path"].split("/")[-1].lower()
+        for k in {rec["dep"].lower(), rec["path"].lower(), base,
+                  normalize_name(base)}:
+            if k:
+                prs.setdefault(k, []).append(rec)
     return prs
+
+
+def _as_pr_records(value) -> list:
+    """Normalise a `prs` entry to records. A bare number is a LEGACY entry
+    (hand-built fixtures, and any caller predating the dict-of-lists shape);
+    it carries no dep, so it can only ever be matched by name."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [{"number": str(value), "dep": None, "manager": None,
+             "path": None, "legacy": True}]
+
+
+def renovate_pr_for(prs, item, keys=None):
+    """(pr_number | None, note) — the open Renovate PR covering THIS artifact.
+
+    Name agreement is necessary but NOT sufficient: a PR claims an IMAGE item
+    only when its dep names one of that item's image repositories, and a dep
+    carrying a non-image manager prefix (`aqua:`, `npm:`) never claims an image
+    at all. That is what separates #214 (the container) from #215 (the CLI
+    pin), and it is also why `aqua:siderolabs/talos` can no longer be read as
+    coverage for the Talos NODE image (the F-9a58f400 shape).
+
+    When two PRs survive, the ambiguity is RETURNED, never resolved by picking
+    one: the caller then judges the item on its own merits, which is strictly
+    safer than naming the wrong artifact as its coverage.
+    """
+    if not prs:
+        return None, ""
+    comp = str(item.get("component", "")).lower()
+    lookup = {comp, normalize_name(comp)} | {str(k).lower() for k in (keys or ())}
+    lookup = {k for k in lookup if k}
+    seen, cands, legacy = set(), [], []
+    for k in lookup:
+        for rec in _as_pr_records(prs.get(k)):
+            ident = (rec["number"], rec.get("dep"))
+            if ident in seen:
+                continue
+            seen.add(ident)
+            (legacy if rec.get("legacy") else cands).append(rec)
+    if not cands and legacy:
+        return legacy[0]["number"], ""
+    repos = [str(r).lower() for r in _item_repos(item)]
+    kept = []
+    for rec in cands:
+        path = (rec.get("path") or "").lower()
+        if item.get("kind") == "image":
+            if rec.get("manager") in _NON_IMAGE_MANAGERS:
+                continue
+            if not repos:
+                # An image PR cannot be attributed to an item whose image we
+                # could not resolve. Unattributable is not covered.
+                continue
+            if not any(r == path or r.endswith("/" + path) or path.endswith("/" + r)
+                       for r in repos):
+                continue
+        else:
+            if rec.get("manager") in _NON_IMAGE_MANAGERS - {"helm"}:
+                continue
+            if normalize_name(path.split("/")[-1]) not in {normalize_name(x) for x in lookup}:
+                continue
+        kept.append(rec)
+    nums = sorted({r["number"] for r in kept})
+    if len(nums) == 1:
+        return nums[0], ""
+    if len(nums) > 1:
+        return None, ("Renovate PR attribution AMBIGUOUS — #" + ", #".join(nums)
+                      + " both name this component; judged on its own merits")
+    if cands:
+        others = sorted({r["number"] for r in cands})
+        return None, ("open Renovate PR #" + ", #".join(others)
+                      + " names a DIFFERENT artifact (" +
+                      ", ".join(sorted({r["dep"] for r in cands if r.get("dep")})) + ")")
+    return None, ""
 
 
 # A plan file is only EVIDENCE OF COVERAGE while it is still going to run.
@@ -594,14 +859,29 @@ def load_plans():
         comp = str(fm.get("component") or "").lower().strip()
         if not comp:
             continue
-        keys = {comp}
+        keys = _name_keys(comp)
         # app-template plan covers all its wrappers
         if "app-template" in str(fm.get("plan_id") or ""):
             keys.add("app-template")
+        # `also_covers:` — the OTHER components this plan moves in the same
+        # commit (F-d71bc523). nextcloud-34.0.4 bumps deployment/
+        # nextcloud-notify-push's tag in lockstep and says so in its `touches`
+        # prose, but nothing read prose, so notify-push was reported as
+        # needing its own plan — which would have produced a second plan for a
+        # bump an approved plan already performs, to be kept in step by hand.
+        # An explicit machine-readable list is deliberate: inferring coverage
+        # from prose is how a plan comes to claim work it does not do.
+        also = fm.get("also_covers") or []
+        if isinstance(also, str):
+            also = [also]
+        also_keys: set = set()
+        for a in also:
+            also_keys |= _name_keys(str(a))
         plans.append({
             "plan_id": str(fm.get("plan_id") or p.stem),
             "file": p.name,
             "keys": keys,
+            "also_keys": also_keys,
             # a plan with no status is a live draft, not history
             "status": str(fm.get("status") or "draft").lower().strip(),
             "kind": str(fm.get("kind") or "").lower().strip(),
@@ -665,7 +945,7 @@ def _drift_note(item, ptgt, pv, heads):
             f"{head}, not {raw}{line}")
 
 
-def _plan_delivers(plan, item, heads=None):
+def _plan_delivers(plan, item, heads=None, ignore_kind=False):
     """(covers, drift) — does this LIVE plan actually deliver `item`'s bump?
 
     Matching on the component name alone made any plan mentioning an app cover
@@ -681,9 +961,12 @@ def _plan_delivers(plan, item, heads=None):
     ptgt = plan["target"]
     if not ptgt:
         return False, None
-    # a chart plan never delivers an image bump (or vice versa)
-    if plan["kind"] in ("chart", "image") and item["kind"] in ("chart", "image") \
-            and plan["kind"] != item["kind"]:
+    # a chart plan never delivers an image bump (or vice versa) — UNLESS the
+    # plan names this component in `also_covers`, which is precisely the
+    # statement "my chart commit moves that image too" (nextcloud-34.0.4 is
+    # kind: chart and moves three image tags in the same commit).
+    if not ignore_kind and plan["kind"] in ("chart", "image") \
+            and item["kind"] in ("chart", "image") and plan["kind"] != item["kind"]:
         return False, None
     uv = _ver_tuple(item["target"])
     # the exact target version named anywhere in the plan's target field —
@@ -703,11 +986,21 @@ def match_plan(item, keys, plans, heads=None):
     A drift-free match always wins over a drifted one."""
     drifted = None
     for plan in plans:
-        if not (plan["keys"] & keys):
+        by_name = bool(plan["keys"] & keys)
+        by_also = bool(plan.get("also_keys") and plan["also_keys"] & keys)
+        if not (by_name or by_also):
             continue
         if plan["status"] in DEAD_PLAN_STATUSES:
             continue
-        covers, drift = _plan_delivers(plan, item, heads)
+        # A plan that DECLARES also_covers is, by that declaration, a
+        # chart+image lockstep plan — so the kind guard is waived for the
+        # components it names AND for its own. nextcloud-34.0.4 is `kind:
+        # chart` and moves three image tags in the same commit; without this
+        # its own server image could only ever be covered indirectly, by
+        # happening to share a repository string with a sibling. A plan with no
+        # also_covers keeps the guard exactly as before.
+        covers, drift = _plan_delivers(plan, item, heads,
+                                       ignore_kind=bool(plan.get("also_keys")))
         if covers and not drift:
             return plan, None
         if covers and drifted is None:
@@ -1344,6 +1637,249 @@ def stable_channel_version(image_ref: str, timeout: int = _CHANNEL_TIMEOUT):
 
 
 _G3_CACHE: dict = {}
+_AU_MOD = None
+
+
+def _auto_update_module():
+    """runbooks/auto-update.py as a module, loaded once per process.
+
+    Cached because it used to be exec'd afresh on every G3 cache miss, and
+    because the RANGE walk below needs the same release-list cache the PR lane
+    fills — two lanes disagreeing about which releases exist would be the same
+    class of defect as them disagreeing about what "breaking" means.
+    """
+    global _AU_MOD
+    if _AU_MOD is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "cberg_auto_update", SCRIPT_DIR / "auto-update.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore
+        _AU_MOD = mod
+    return _AU_MOD
+
+
+def _hop_skips_releases(cur, tgt) -> bool:
+    """True when `tgt` is provably NOT the immediate successor of `cur`.
+
+    Adjacent means: same major+minor (and same trailing build fields) with the
+    patch advancing by exactly one. Everything else LEAPFROGS at least one
+    version that upstream may have published — which is the precondition for
+    the G3 range walk. Unparseable => False: a skip must be PROVEN, never
+    assumed, or the gate would hold every tag it cannot read.
+    """
+    a, b = _version_components(cur), _version_components(tgt)
+    if not a or not b:
+        return False
+    a, b = _padded(a, b)
+    if b <= a:
+        return False
+    return not (a[:2] == b[:2] and b[2] == a[2] + 1 and a[3:] == b[3:])
+
+
+def _crosses_minor(cur, tgt) -> bool:
+    """True when the hop leaves the current MINOR line (or the major)."""
+    a, b = _version_components(cur), _version_components(tgt)
+    if not a or not b:
+        return False
+    a, b = _padded(a, b)
+    return a[0] != b[0] or a[1] != b[1]
+
+
+def _release_tags_between(dep, cur, tgt):
+    """(tags_leapfrogged, note) for `dep`, or (None, why) when unknowable."""
+    try:
+        return _auto_update_module().release_tags_between(
+            _load_checker(), dep, cur, tgt)
+    except Exception as e:
+        return None, f"release list unreadable ({type(e).__name__})"
+
+
+_CHECKER = None
+
+
+def _load_checker():
+    global _CHECKER
+    if _CHECKER is None:
+        _CHECKER = _auto_update_module()._load_version_checker()
+    return _CHECKER
+
+
+def _g3_range_gate(item):
+    """(status, note) — G3 over the release RANGE current..target.
+
+    status is one of:
+      n/a        — the hop is adjacent (or unparseable): nothing is skipped
+      clean      — every leapfrogged release was read and none is breaking
+      breaking   — a leapfrogged release announces a breaking change
+      unreadable — releases WERE skipped and could not be read
+
+    WHY (F-51728488). `breaking_signal()` fetches notes for the single TARGET
+    tag, and nothing walked the range, so a breaking change announced in a
+    release we leapfrog was never evaluated — the gate read as a
+    breaking-change check while being a breaking-change check for exactly one
+    version. Live: scan-inbox-validator 3.1.3 -> 3.2.0 was rated PLAN with
+    reason "G3 breaking-change signal — update ng-select to v24, handle
+    breaking changes"; hours later the target moved to 3.2.1 and the SAME
+    component was rated AUTO, because 3.2.0 was no longer the tag whose notes
+    are read. The breaking change did not go away; the reader moved past it.
+
+    `unreadable` HOLDS only when the hop crosses a MINOR boundary. That is the
+    deliberate line: within a patch line the pre-existing G3-unknown asymmetry
+    still applies (an unauthenticated GitHub rate limit must not close the
+    lane), but a minor hop always leapfrogs at least `X.Y.0`, so an unread
+    range there is an unevaluated gate, not a missing nicety.
+    """
+    cur, tgt = item.get("current"), item.get("target")
+    if not _hop_skips_releases(cur, tgt):
+        return "n/a", ""
+    dep, holdable = None, False
+    if item.get("kind") == "image":
+        repos = _item_repos(item)
+        if repos:
+            base = (item.get("component") or "").lower().split("-")[0]
+            dep = sorted(repos, key=lambda r: (base not in (r or "").lower(), r))[0]
+            # Only an item with a RESOLVED artifact can be held for an unread
+            # range. An image whose repository the snapshot does not carry is
+            # already held fail-safe one gate earlier, by G5
+            # (direct_bump_age_gate: "image repository unresolved … holding"),
+            # and charts have no registry artifact to read at all — so turning
+            # "no source" into a hold HERE would both duplicate that gate and
+            # widen this one far past the defect it closes, holding every
+            # chart minor that upstream does not publish to GitHub.
+            holdable = True
+    elif item.get("kind") == "chart":
+        dep = item.get("component")
+    if not dep:
+        return "n/a", ""
+    between, why = _release_tags_between(dep, cur, tgt)
+    if between is None:
+        return (("unreadable", f"{why} for {dep}")
+                if holdable and _crosses_minor(cur, tgt) else ("n/a", why))
+    if not between:
+        # Nothing was leapfrogged: the target-tag read already covered the hop,
+        # and saying so in the AUTO reason would imply a gate that did work.
+        return "n/a", ""
+    for tag in between:
+        is_breaking, note = breaking_change_signal(dep, tag)
+        if is_breaking:
+            return "breaking", (f"release {tag} is SKIPPED by this hop "
+                                f"({cur} → {tgt}) and {note}")
+    return "clean", f"{len(between)} skipped release(s) read and clean"
+
+
+# ── Pre-release targets that carry NO pre-release marker ────────────────────
+# F-aff597aa, and it CAME TRUE: the AUTO lane admitted penpot-cache valkey
+# 9.1.2 -> 9.2 and an unattended Step 0 shipped it. Measured (re-verified
+# 2026-09-21): `9.2` and `9.2.0-rc1` are the SAME digest
+# (sha256:b0eef48f…, pushed 1.7s apart), 9.2.0 and 9.2.1 both 404 — there is no
+# GA 9.2.x at all. So a RELEASE CANDIDATE is running in production, and a
+# pinned 3-component tag was replaced by a FLOATING 2-component one, which a
+# future reconcile can move again with no commit and no review.
+#
+# Two independent detectors, because each covers the other's blind spot:
+#   1. ARITY (offline, decidable in the window agent with no DSN and no
+#      network): the target names FEWER version components than the current
+#      pin, on the SAME major. That is a series pointer replacing a fixed pin,
+#      whatever it resolves to today. Scoped to the same major deliberately —
+#      a cross-major hop is already a PLAN item by type, and widening it would
+#      hold ordinary suffixed tags such as `13.6-bookworm`.
+#   2. DIGEST TWIN (Docker Hub, best-effort, ADDITIVE): the target tag is
+#      byte-identical to a sibling -rc/-beta/-alpha tag. This catches the case
+#      arity cannot — a 3-component GA-looking tag that is really the RC.
+# A per-component deny rule would only paper over this one instance.
+_TWIN_CACHE: dict = {}
+
+
+def _dockerhub_tag_digests(repo: str, timeout: int = 12):
+    """{tag: digest} for one page of a Docker Hub repo's tags, or None."""
+    import urllib.request
+    if repo in _TWIN_CACHE:
+        return _TWIN_CACHE[repo]
+    _TWIN_CACHE[repo] = None
+    ref = str(repo).strip()
+    if ref.startswith("docker.io/"):
+        ref = ref[len("docker.io/"):]
+    host = ref.split("/")[0]
+    if "." in host or ":" in host:
+        return None                      # not Docker Hub — no oracle here
+    path = ref if "/" in ref else "library/" + ref
+    try:
+        req = urllib.request.Request(
+            f"https://hub.docker.com/v2/repositories/{path}/tags/"
+            f"?page_size=100&ordering=last_updated", headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read())
+    except Exception:
+        return None
+    out = {str(row.get("name") or ""): row.get("digest")
+           for row in (data.get("results") or []) if row.get("digest")}
+    _TWIN_CACHE[repo] = out
+    return out
+
+
+def _prerelease_digest_twin(repo: str, tag: str):
+    """(twin_tag, evidence) when `tag` IS a pre-release under another name."""
+    tags = _dockerhub_tag_digests(repo)
+    if not tags:
+        return None, ""
+    digest = tags.get(str(tag))
+    if not digest:
+        return None, ""
+    for name, dg in tags.items():
+        if dg == digest and name != tag and _PRERELEASE_TAG.search(name):
+            return name, (f"{repo}:{tag} and {repo}:{name} are the same image "
+                          f"({str(digest)[:19]}…)")
+    return None, ""
+
+
+def prerelease_target_hold(item):
+    """Reason why the TARGET is a pre-release/floating pin in disguise, else None."""
+    cur, tgt = str(item.get("current") or ""), str(item.get("target") or "")
+    a, b = _version_components(cur), _version_components(tgt)
+    if a and b and len(b) < len(a) and a[0] == b[0]:
+        return (f"target {tgt} names FEWER version components than the pinned "
+                f"{cur} on the same major line — a floating series pointer, not "
+                f"a fixed version: it cannot be shown to be GA (valkey `9.2` was "
+                f"digest-identical to `9.2.0-rc1` with no GA 9.2.x published), "
+                f"and once applied a reconcile can move the artifact again with "
+                f"no commit. Needs an assessed window plan")
+    if item.get("kind") == "image":
+        for repo in _item_repos(item):
+            twin, ev = _prerelease_digest_twin(repo, tgt)
+            if twin:
+                return (f"target {tgt} is byte-identical to the PRE-RELEASE tag "
+                        f"{twin} — {ev}. A release candidate wearing a GA-looking "
+                        f"tag is still a release candidate; never unattended")
+    return None
+
+
+def _with_channel_measurement(reason, item, heads):
+    """Append THIS RUN's channel measurement to a policy-prose hold reason.
+
+    F-5224f230: one run emitted two contradictory verdicts for n8n — the
+    max-rule fallback reported "stable channel head 2.39.5, digest-confirmed"
+    while the PLAN-lane reason (the deny rule's prose) asserted 2.39.x IS the
+    beta/next line. The prose is a STATIC assertion about the component that
+    does not re-measure when upstream promotes a line, and a planner briefed
+    from the wrong half plans a pre-release bump into production. The rule text
+    still governs the lane — only the operator is now told what the same run
+    actually measured, so the two halves can no longer be read as two facts.
+    """
+    rec = (heads or {}).get((str(item.get("component", "")).lower(),
+                             str(item.get("kind", "")).lower()))
+    if not rec:
+        return reason
+    head, why = rec[0], rec[1]
+    hv, tv = _ver_tuple(head), _ver_tuple(item.get("target"))
+    rel = ""
+    if hv and tv:
+        rel = (f"; the target {item.get('target')} is "
+               + ("AT that head" if tv == hv else
+                  "AHEAD of it" if tv > hv else "BEHIND it"))
+    return (f"{reason} [MEASURED THIS RUN: upstream's stable-channel head is "
+            f"{head} ({why}){rel} — the hold reason above is policy prose, not "
+            f"a measurement]")
 
 
 def breaking_change_signal(image_repo: str, tag: str):
@@ -1364,12 +1900,8 @@ def breaking_change_signal(image_repo: str, tag: str):
         return _G3_CACHE[key]
     out = (False, "unverified (release notes unavailable)")
     try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "cberg_auto_update", SCRIPT_DIR / "auto-update.py")
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)  # type: ignore
-        notes, resolved = mod.breaking_signal(mod._load_version_checker(), image_repo, tag)
+        mod = _auto_update_module()
+        notes, resolved = mod.breaking_signal(_load_checker(), image_repo, tag)
         if notes:
             out = (True, "breaking-change signal in release notes: "
                          + "; ".join(str(n)[:100] for n in notes[:2]))
@@ -1407,6 +1939,13 @@ def max_rule_fallbacks(actionable, policy, prs=None):
       hold        — the channel could not be confirmed, or the stable head is
                     itself blocked; reported, never applied
       up-to-date  — the stable channel head is already deployed; nothing to do
+      already-enumerated
+                  — the stable head is in the actionable universe in its own
+                    right, so nothing is masked; reported, never appended
+                    twice (F-7b04b03f: this fourth status was emitted below
+                    and branched on downstream, but only the SOP documented
+                    it — a caller writing an exhaustive switch off this
+                    docstring would have missed it).
     """
     prs = prs or {}
     out = []
@@ -1427,7 +1966,8 @@ def max_rule_fallbacks(actionable, policy, prs=None):
         rec = {"component": item["component"], "kind": item["kind"],
                "current": item["current"], "blocked_target": item["target"],
                "blocked_type": item["type"], "deny_match": rule.get("match"),
-               "deny_max": mx, "blocked_pr": prs.get(comp) or prs.get(key)}
+               "deny_max": mx,
+               "blocked_pr": renovate_pr_for(prs, item, {comp, key})[0]}
         if is_self_built(item, comp):
             continue                      # REBUILD lane — a tag bump can't move it
         if item["kind"] != "image":
@@ -1620,7 +2160,7 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
         return "HELD", HELD.get(comp) or HELD.get(key, "held"), None
     if is_self_built(item, comp):
         return "REBUILD", "self-built image — rebuild in its source repo (not a cluster tag bump)", None
-    plan, drift = match_plan(item, {comp, key}, plans, heads)
+    plan, drift = match_plan(item, _name_keys(comp) | {key}, plans, heads)
     if plan:
         return "PLAN", f"plan exists: {plan['plan_id']} ({plan['status']})", (
             f"{plan['file']}: {drift}" if drift else None)
@@ -1630,6 +2170,12 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
     ch = channel_hold(comp, item, ar_holds)
     if ch:
         return "PLAN", ch, None
+    # Same position, same reason: a target that IS a pre-release under another
+    # name (or a floating series pointer) must not be laundered by a PR
+    # existing for it, and the window applies AUTO unattended (F-aff597aa).
+    pre = prerelease_target_hold(item)
+    if pre:
+        return "PLAN", pre, None
     # 0.x: the MINOR is the breaking axis, so a "minor" label there is a
     # release-LINE move, not a safe in-line bump. This repo already encodes that
     # in `_release_line` (plan matching) and lives it: nextcloud-mcp 0.176.0
@@ -1646,11 +2192,13 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
     # "covered by PR #N" is exactly the masking max_rule_fallbacks() was written
     # to undo, and it would also route the item away from the direct-bump half
     # of Step 0 (the window agent skips AUTO items whose reason names a PR).
-    if not item.get("max_rule_fallback") and (prs.get(comp) or prs.get(key)):
-        return "AUTO", f"Renovate PR #{prs.get(comp) or prs.get(key)}", None
+    pr_num, pr_note = renovate_pr_for(prs, item, {comp, key})
+    if not item.get("max_rule_fallback") and pr_num:
+        return "AUTO", f"Renovate PR #{pr_num}", None
     dn = denied(policy, key, utype)
     if dn or utype == "major" or utype == "unknown":
-        return "PLAN", (dn or f"{utype} — needs an assessed window plan"), None
+        return "PLAN", _with_channel_measurement(
+            dn or f"{utype} — needs an assessed window plan", item, heads), None
     if utype in ("patch", "minor"):
         # G5 cooldown applies to the DIRECT-BUMP lane too (F-0bd870a4). The
         # Renovate-PR exit above is deliberately NOT gated here: auto-update.py
@@ -1664,7 +2212,22 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
         is_breaking, g3 = _direct_bump_breaking_gate(item)
         if is_breaking:
             return "PLAN", f"G3 breaking-change signal — {g3}", None
+        # G3 over the RANGE, not the target alone (F-51728488): a breaking
+        # change announced in a release this hop LEAPFROGS is exactly as
+        # breaking as one in the target, and the target-only read made the
+        # defect invisible whenever upstream published one more patch.
+        rstatus, rnote = _g3_range_gate(item)
+        if rstatus == "breaking":
+            return "PLAN", f"G3 breaking-change signal in a SKIPPED release — {rnote}", None
+        if rstatus == "unreadable":
+            return "PLAN", (f"G3 range UNEVALUATED across a minor boundary — {rnote}. "
+                            f"The hop leapfrogs at least one release whose notes were "
+                            f"not read; needs an assessed window plan"), None
         g3_note = "" if "checked" in g3 else f"; G3 {g3}"
+        if rstatus == "clean" and rnote:
+            g3_note += f"; G3 range: {rnote}"
+        if pr_note:
+            g3_note += f"; {pr_note}"
         return "AUTO", f"safe patch/minor — window applies (hybrid: PR or direct-bump){g3_note}", None
     return "CRACK", "actionable but unclassifiable — MUST be triaged", None
 
@@ -1718,6 +2281,33 @@ def _strip_yaml_comments(text: str) -> str:
     return _YAML_COMMENT.sub("", text)
 
 
+# The SOPS metadata trailer: a top-level `sops:` key followed by its indented
+# block, written at the END of every encrypted file.
+_SOPS_TRAILER = re.compile(r"(?ms)^sops:[ \t]*\n(?:(?:[ \t]+[^\n]*)?\n)*")
+
+
+def _strip_sops_trailer(text: str) -> str:
+    """Drop the `sops:` metadata block before version matching.
+
+    F-a52c69d7. `already_applied()` proves a bump landed with a NAMESPACE-WIDE
+    substring test — target present AND current absent — and the SOPS trailer
+    carries `version: <sops binary version>`, a version-shaped string that has
+    nothing to do with any workload. Measured 2026-09-17: memgraph was bumped
+    3.13.0 -> 3.13.1 in git, but `3.13.0` still appeared in TWO unrelated
+    `secret.sops.yaml` trailers in the same namespace (the local sops binary
+    was 3.13.0), so `cur not in txt` was False, the bump never self-cleared,
+    and counts.AUTO reported 2 where the true actionable AUTO was 1 — a number
+    the maintenance-window agent reads at Step 0.
+
+    The trailer is STABLE (it moves only when the sops binary moves), so any
+    component whose CURRENT version happens to equal the sops version is stuck
+    in AUTO indefinitely. `_strip_yaml_comments` already handles the
+    changelog-comment source of stale version strings; this is the second one.
+    Three files in `kubernetes/apps/databases/` carry `version: 3.13.0` today.
+    """
+    return _SOPS_TRAILER.sub("", text)
+
+
 def _namespace_text(ns: str):
     """Concatenated manifest text under kubernetes/apps/<ns>/, else None.
 
@@ -1734,7 +2324,8 @@ def _namespace_text(ns: str):
         parts = []
         for f in sorted(d.rglob("*.yaml")):
             try:
-                parts.append(_strip_yaml_comments(f.read_text(errors="ignore")))
+                parts.append(_strip_sops_trailer(
+                    _strip_yaml_comments(f.read_text(errors="ignore"))))
             except OSError:
                 pass
         txt = "\n".join(parts)
@@ -1790,13 +2381,36 @@ def _apply_lockstep(lanes, needs_plan):
     moment the plan executes and the hold disappears.
     """
     holders = {}
+    repo_holders = {}
     for lane in ("PLAN", "HELD"):
         for e in lanes[lane]:
             holders.setdefault(str(e.get("component", "")).lower(), []).append((lane, e))
+            # …and by the IMAGE ARTIFACT itself (F-dc4066f9). scan-inbox-validator
+            # runs ghcr.io/paperless-ngx/paperless-ngx — the SAME image as the
+            # main paperless-ngx workload — but it is a bare Deployment, so it
+            # is scored as its own component and landed in AUTO while the other
+            # half of one ingestion pipeline was deliberately PLAN-held, on the
+            # same image. Applying the AUTO half alone splits the version across
+            # the pipeline. The lane rules were right; the component IDENTITY
+            # was wrong, and it recurs for any sidecar/helper Deployment sharing
+            # an image with a workload tracked under a different name.
+            if e.get("kind") == "image":
+                for r in _item_repos(e):
+                    repo_holders.setdefault(
+                        (str(r).lower(), _dedupe_tag(e.get("target"))), []).append((lane, e))
     moved = []
     for e in list(lanes["AUTO"]):
         comp = str(e.get("component", "")).lower()
         cands = list(holders.get(comp) or ())
+        if e.get("kind") == "image":
+            # Keyed on (repo, TARGET tag): the same artifact moving to the same
+            # tag. Requiring the target too keeps this to the genuine shared-
+            # image case instead of coupling every component that happens to
+            # mount a common base image.
+            for r in _item_repos(e):
+                for lane_e in repo_holders.get((str(r).lower(), _dedupe_tag(e.get("target"))), []):
+                    if lane_e[1] is not e and lane_e not in cands:
+                        cands.append(lane_e)
         if e.get("max_rule_fallback"):
             # A `max:`-fallback candidate's own ORIGIN (the same image on the
             # blocked higher target) is not a "sibling half" — it is the very
@@ -1808,11 +2422,21 @@ def _apply_lockstep(lanes, needs_plan):
         if not cands:
             continue
         hlane, he = cands[0]
+        hcomp = str(he.get("component", "")).lower()
+        shared = sorted(set(str(r).lower() for r in _item_repos(e))
+                        & set(str(r).lower() for r in _item_repos(he)))
         e["lane"] = "PLAN"
         e["lockstep_with"] = f"{he['kind']} {he['current']}→{he['target']} [{hlane}]"
-        e["reason"] = (f"lockstep — the {comp} {he['kind']} is {hlane} "
-                       f"({str(he.get('reason', ''))[:60]}); a {e['kind']} bump must move "
-                       f"WITH it in the same window, never unattended ahead of it")
+        if hcomp != comp and shared:
+            e["lockstep_image"] = shared[0]
+            e["reason"] = (f"lockstep — {hcomp} is {hlane} on the SAME image "
+                           f"{shared[0]} at the same target ({str(he.get('reason', ''))[:60]}); "
+                           f"applying this half alone splits one deployable unit "
+                           f"across two versions")
+        else:
+            e["reason"] = (f"lockstep — the {comp} {he['kind']} is {hlane} "
+                           f"({str(he.get('reason', ''))[:60]}); a {e['kind']} bump must move "
+                           f"WITH it in the same window, never unattended ahead of it")
         lanes["AUTO"].remove(e)
         lanes["PLAN"].append(e)
         moved.append(e)
@@ -1821,6 +2445,44 @@ def _apply_lockstep(lanes, needs_plan):
         if any(n.get("component", "").lower() == comp for n in needs_plan) and e not in needs_plan:
             needs_plan.append(e)
     return moved
+
+
+def _prune_needs_plan_shared_image(lanes, needs_plan):
+    """Drop a planner target that ANOTHER component's plan already delivers.
+
+    The other half of F-dc4066f9. Once the shared-image lockstep above pulls
+    the sidecar back to PLAN, the sidecar becomes a PLAN-lane item with no plan
+    of its own — i.e. a needs_plan entry — and rule 4d would dispatch a SECOND
+    upgrade-planner for the very bump the first plan performs, leaving two
+    plans to be kept in step by hand. Same shape as F-d71bc523, reached from
+    the other direction.
+
+    Keyed on (image repository, TARGET tag), so it only ever suppresses a
+    planner for the identical artifact moving to the identical version.
+    """
+    covered = {}
+    for e in lanes["PLAN"]:
+        if e.get("kind") != "image":
+            continue
+        if not str(e.get("reason", "")).startswith("plan exists"):
+            continue
+        for r in _item_repos(e):
+            covered[(str(r).lower(), _dedupe_tag(e.get("target")))] = e
+    dropped = []
+    for e in list(needs_plan):
+        if e.get("kind") != "image":
+            continue
+        for r in _item_repos(e):
+            owner = covered.get((str(r).lower(), _dedupe_tag(e.get("target"))))
+            if owner is None or owner is e:
+                continue
+            e["covered_by_sibling"] = f"{owner.get('component')}: {owner.get('reason')}"
+            e["reason"] += (f" — but {owner.get('component')} already has a plan for the "
+                            f"SAME image {r} at {e.get('target')}; no second planner")
+            needs_plan.remove(e)
+            dropped.append(e)
+            break
+    return dropped
 
 
 def reconcile():
@@ -1881,6 +2543,7 @@ def reconcile():
 
     plans = load_plans()
     ar_holds = ar_prerelease_holds()
+    ar_rows = accepted_risk_rows()
 
     lanes = {"AUTO": [], "PLAN": [], "REBUILD": [], "HELD": [], "CRACK": []}
     needs_plan = []  # PLAN-lane items with NO plan file yet → sweep must dispatch a planner
@@ -1916,11 +2579,25 @@ def reconcile():
                 # lane counts are honest; just never a planner target.
                 entry["reason"] += (" — stable channel head already deployed (see "
                                     "max_rule_fallback); no plan needed")
+            elif ar_accepts_item(it, ar_rows):
+                # An ENABLED accepted risk already disposes of this item
+                # (F-a95ba973). Lane unchanged — only the planner dispatch.
+                _ar = ar_accepts_item(it, ar_rows)
+                entry["accepted_risk"] = _ar
+                entry["reason"] += (f" — accepted risk {_ar} already disposes of this "
+                                    f"item; no plan needed")
+            elif plan_declines(it, plans):
+                _pl = plan_declines(it, plans)
+                entry["declined_by"] = _pl
+                entry["reason"] += (f" — plan {_pl} explicitly DECLINES this bump; that "
+                                    f"is a recorded decision, not pending work; no plan "
+                                    f"needed")
             else:
                 needs_plan.append(entry)
         lanes[lane].append(entry)
 
     lockstep = _apply_lockstep(lanes, needs_plan)
+    _prune_needs_plan_shared_image(lanes, needs_plan)
 
     # Stamp each fallback's FINAL lane back onto its record, so the operator can
     # see a candidate that was generated correctly and then legitimately parked

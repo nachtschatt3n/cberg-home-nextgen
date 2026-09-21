@@ -35,6 +35,16 @@ _spec = importlib.util.spec_from_file_location(
 cov = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cov)
 
+# HERMETICITY. assign_lane() gained two gates that reach upstream: the G3
+# RANGE walk (F-51728488) and the pre-release DIGEST TWIN lookup (F-aff597aa).
+# Every suite in this directory is contractually offline (see tests/README.md),
+# and these tests are about OTHER gates, so both network seams are stubbed to
+# their "nothing found" answer here. Their own behaviour — including the
+# fail-safe HOLD when a skipped range cannot be read — is pinned by
+# test-coverage-g3-release-range.py and test-coverage-prerelease-target.py.
+cov._release_tags_between = lambda *a, **k: ([], "stubbed: no releases skipped")
+cov._prerelease_digest_twin = lambda *a, **k: (None, "")
+
 POLICY = {"deny": []}
 
 

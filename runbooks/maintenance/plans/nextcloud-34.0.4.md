@@ -27,6 +27,18 @@ target: "34.0.4 (chart 9.3.0, whiteboard backend v2.0.0)"
                                       # items (server image, notify-push image, chart, and the
                                       # whiteboard backend) resolve to this plan instead of
                                       # reading as unplanned.
+also_covers:                          # MACHINE-READABLE lockstep coverage (F-d71bc523).
+  - nextcloud-notify-push             # `touches` below already names both of these
+  - nextcloud-whiteboard              # deployments as moving in the SAME commit, but that
+                                      # is prose and coverage.py read none of it — so both
+                                      # were reported as needing their OWN plan, and rule 4d
+                                      # would have dispatched a planner for a bump this plan
+                                      # already performs, leaving two plans to be kept in
+                                      # lockstep by hand. Listed explicitly rather than
+                                      # inferred from the prose: an inferred claim of
+                                      # coverage is how a plan comes to own work it does not
+                                      # actually do. coverage.py matches these kind-agnostically
+                                      # (this plan is `kind: chart` and moves image tags).
 update_type: major                    # HONEST, and it is the whiteboard leg that earns it, not
                                       # the server: server 34.0.3 -> 34.0.4 is a patch and the
                                       # chart hop is a minor, but this plan now also lands

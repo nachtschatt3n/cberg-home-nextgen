@@ -265,28 +265,152 @@ def parse_pr(pr):
 
 
 # ── G3 breaking-change scan (best-effort, reuses version engine) ─────────────
-def breaking_signal(checker, dep, new_tag):
-    """Return (list_of_breaking_notes, resolved_bool). Empty list + resolved=True
-    means 'checked, clean'. resolved=False means notes couldn't be fetched."""
-    owner_repo = None
+def _owner_repo(checker, dep):
+    """(owner, repo) on GitHub for a dep, or None. Image first, then chart."""
     try:
+        owner_repo = None
         if "/" in dep and (dep.count("/") >= 1 and any(c in dep for c in ".:")) or "/" in dep:
             owner_repo = checker.get_repo_info_from_image(dep)
         if not owner_repo:
             owner_repo = checker.get_chart_repo_info(dep.split("/")[-1], "", "")
+        return owner_repo
     except Exception:
-        owner_repo = None
+        return None
+
+
+def _vt(tag):
+    """(a, b, c, ...) numeric tuple for a tag, or None. `v` and any
+    `-suffix`/`+build` are dropped, exactly like the version report does."""
+    t = str(tag or "").lstrip("vV").split("-")[0].split("+")[0].split("@")[0]
+    nums = [int(x) for x in re.findall(r"\d+", t)]
+    return tuple(nums) if nums else None
+
+
+def _cmp_pad(a, b):
+    n = max(len(a), len(b), 3)
+    return a + (0,) * (n - len(a)), b + (0,) * (n - len(b))
+
+
+_RELEASES_CACHE: dict = {}
+
+
+def github_releases(checker, dep, timeout: int = 15):
+    """[(tag, is_prerelease)] newest-first for `dep`'s GitHub repo, or None.
+
+    None means UNKNOWABLE (no repo mapping, no `gh`, API error) — callers must
+    not read it as "no releases".
+    """
+    key = str(dep)
+    if key in _RELEASES_CACHE:
+        return _RELEASES_CACHE[key]
+    _RELEASES_CACHE[key] = None
+    owner_repo = _owner_repo(checker, dep)
+    if not owner_repo:
+        return None
+    owner, repo = owner_repo
+    path = f"repos/{owner}/{repo}/releases?per_page=100"
+    data = None
+    try:  # gh CLI first: authenticated, no anonymous rate limit
+        p = subprocess.run(["gh", "api", "-X", "GET", path],
+                           capture_output=True, text=True, timeout=timeout)
+        if p.returncode == 0:
+            data = json.loads(p.stdout)
+    except Exception:
+        data = None
+    if data is None:
+        try:
+            import urllib.request
+            hdrs = {"User-Agent": "cberg-auto-update",
+                    "Accept": "application/vnd.github+json"}
+            tok = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+            if tok:
+                hdrs["Authorization"] = f"Bearer {tok}"
+            req = urllib.request.Request(f"https://api.github.com/{path}", headers=hdrs)
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data = json.loads(r.read())
+        except Exception:
+            return None
+    if not isinstance(data, list):
+        return None
+    out = [(str(d.get("tag_name") or ""), bool(d.get("prerelease")))
+           for d in data if d.get("tag_name")]
+    _RELEASES_CACHE[key] = out
+    return out
+
+
+def release_tags_between(checker, dep, cur_tag, new_tag, timeout: int = 15):
+    """(tags_strictly_between, note) — the releases a hop LEAPFROGS, or (None, why).
+
+    F-51728488: G3 read the TARGET tag's notes alone, so a breaking change
+    announced in a release we skip over was never evaluated. Live instance:
+    paperless-ngx 3.1.3 -> 3.2.1 skips 3.2.0, whose notes carry "update
+    ng-select to v24, handle breaking changes" — the gate read as a
+    breaking-change check while being a breaking-change check for exactly one
+    version. Pre-releases are excluded: they are not on the upgrade path.
+
+    `None` is UNKNOWABLE and must never be read as "nothing was skipped".
+    """
+    a, b = _vt(cur_tag), _vt(new_tag)
+    if not a or not b:
+        return None, f"unparseable version pair ({cur_tag} -> {new_tag})"
+    a, b = _cmp_pad(a, b)
+    rels = github_releases(checker, dep, timeout)
+    if rels is None:
+        return None, f"release list for {dep} unreadable"
+    n = max(len(a), len(b), 3)
+
+    def pad(t):
+        return tuple(t) + (0,) * (n - len(t)) if len(t) < n else tuple(t)
+
+    lo, hi = pad(a), pad(b)
+    between = []
+    for tag, pre in rels:
+        if pre:
+            continue
+        t = _vt(tag)
+        if not t:
+            continue
+        tp = pad(t)
+        if lo < tp < hi:
+            between.append(tag)
+    ordered = sorted(set(between), key=lambda x: pad(_vt(x) or (0,)))
+    return ordered, (f"{len(ordered)} intermediate release(s) read between "
+                     f"{cur_tag} and {new_tag}")
+
+
+def breaking_signal(checker, dep, new_tag, cur_tag=None):
+    """Return (list_of_breaking_notes, resolved_bool). Empty list + resolved=True
+    means 'checked, clean'. resolved=False means notes couldn't be fetched.
+
+    When `cur_tag` is supplied the scan covers the whole RANGE cur..new, not
+    the target tag alone (F-51728488) — a breaking change announced in a
+    release the hop leapfrogs is exactly as breaking as one in the target.
+    An unreadable release LIST degrades to the single-tag scan and says so via
+    resolved=False, preserving this gate's documented asymmetry.
+    """
+    owner_repo = _owner_repo(checker, dep)
     if not owner_repo:
         return [], False
     owner, repo = owner_repo
-    try:
-        notes = checker.fetch_release_notes(owner, repo, new_tag)
-        if not notes or not notes.get("body"):
-            return [], False
-        detected = checker.detect_breaking_changes(notes["body"], "minor")
-        return detected or [], True
-    except Exception:
-        return [], False
+    tags, resolved_range = [new_tag], True
+    if cur_tag and str(cur_tag) not in ("", "?"):
+        between, _why = release_tags_between(checker, dep, cur_tag, new_tag)
+        if between is None:
+            resolved_range = False
+        else:
+            tags = between + [new_tag]
+    found, any_resolved = [], False
+    for tag in tags:
+        try:
+            notes = checker.fetch_release_notes(owner, repo, tag)
+            if not notes or not notes.get("body"):
+                continue
+            any_resolved = True
+            for d in checker.detect_breaking_changes(notes["body"], "minor") or []:
+                found.append(d if tag == new_tag else f"[skipped release {tag}] {d}")
+        except Exception:
+            continue
+    return found, bool(any_resolved and resolved_range)
 
 
 # ── G5 release-age cooldown ──────────────────────────────────────────────────
@@ -491,7 +615,9 @@ def classify(pr, policy, checker):
     if held:
         return {**r, "verdict": "hold", "gate": held[0], "reason": held[1]}
     # G3 breaking
-    notes, resolved = breaking_signal(checker, parsed["dep"], parsed["new"])
+    notes, resolved = breaking_signal(
+        checker, parsed["dep"], parsed["new"],
+        cur_tag=parsed["cur"] if parsed.get("cur_known") else None)
     if notes:
         return {**r, "verdict": "hold", "gate": "breaking",
                 "reason": "breaking-change signal in release notes: " + "; ".join(n[:120] for n in notes[:2])}
