@@ -33,7 +33,21 @@ depends_on: [bitnamilegacy-exit-nextcloud-redis, bitnamilegacy-exit-paperless-db
                                                 # RESOLVED 2026-08-19:
                                                 # bitnamilegacy-exit-nextcloud-redis EXECUTED
                                                 # (d6070b82) — dependency satisfied
-conflicts_with: [bitnamilegacy-exit-paperless-db, bitnamilegacy-exit-nextcloud-redis, paperless-db-12.3.3, nextcloud-34.0.4]
+conflicts_with: [bitnamilegacy-exit-paperless-db, bitnamilegacy-exit-nextcloud-redis, paperless-db-13.0.2, nextcloud-34.0.4]
+                                                # paperless-db-12.3.3 -> paperless-db-13.0.2, 2026-09-21.
+                                                # The old ref RESOLVED, so --validate never flagged it, but
+                                                # that plan is status `executed` and will never be scheduled
+                                                # again: the guard could not fire. The live collision is with
+                                                # its successor, and it is real on every axis - same namespace
+                                                # `office`, both risk: high, both rollback_class:
+                                                # backup-restore, both one-way MariaDB datadir operations,
+                                                # and 80 + 60 = 140 min against a 70-min schedulable
+                                                # Saturday budget. paperless-db-13.0.2 already names THIS
+                                                # plan in its own conflicts_with, so the pair was one-sided
+                                                # in the direction that mattered least; it is mutual now.
+                                                # Same stale-guard class as the talos-1.14.0 refs repointed
+                                                # earlier today: a ref that resolves is not the same as a
+                                                # guard that can act.
                                                 # nextcloud-34.0.4 added 2026-09-15 (review): reciprocal of
                                                 # that draft's declaration — same helmrelease.yaml, same
                                                 # deployment/nextcloud restart, and it dumps the very DB
