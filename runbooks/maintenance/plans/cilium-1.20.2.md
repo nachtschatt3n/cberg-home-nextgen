@@ -25,10 +25,14 @@ risk: medium                          # Rated on the MEASURED change, not the co
                                       # cilium-1.20.1 (executed 2026-08-19, addfd9aa) was
                                       # also rated medium for the identical change shape.
                                       # A reviewer who disagrees should change this ONE line.
-est_duration_min: 50                  # 12 pre-checks ~10 · edit+commit+push ~5 · reconcile
-                                      # + full DS roll ~8 · verification §4 ~12 · mandatory
-                                      # 15-min settle. (Predecessor plan used 45; +5 for the
-                                      # two gateway probes and the Prometheus contents gate.)
+est_duration_min: 55                  # 13 pre-checks + premise runner ~12 · edit+commit+push
+                                      # ~5 · reconcile + full DS roll ~8 · verification §4
+                                      # ~15 · mandatory 15-min settle. RAISED from 50 on
+                                      # 2026-09-21: §4.8 (fresh-pod CNI ADD canary) and §2m
+                                      # (enforcement baseline) are new work, ~4 min together.
+                                      # Still fits a 70-min schedulable sat-attended budget
+                                      # SOLO — see §6, which does that arithmetic against
+                                      # duration_min - STEP0_RESERVE_MIN, not duration_min.
 needs_reboot: false                   # HONEST: no node reboot, no drain, no Talos change.
                                       # Upstream's upgrade guide requires neither; the roll is
                                       # a DaemonSet RollingUpdate only. Verified: this plan
@@ -73,8 +77,23 @@ conflicts_with:                       # SOLO SLOT. This is not a courtesy list: 
                                       # every one of them verifies over the network this
                                       # plan perturbs. Checked against
                                       # `maintenance-plan.py --open` on 2026-09-16.
-  - talos-1.14.0                      # rolls all 3 nodes; needs the whole Sunday slot.
+  - talos-1.14.1                      # ADDED 2026-09-21. THE LIVE Talos plan (talos-1.14.0 was
+                                      # superseded 2026-09-21 and its window cleared). Holds
+                                      # sun-attended:2026-09-27 at 145 min and names
+                                      # cilium-1.20.2 back. Worst pairing in the queue: both
+                                      # roll the CNI on all three nodes.
+  - talos-1.14.0                      # KEPT although superseded — the file still exists and
+                                      # --validate checks that refs resolve. Rolls all 3 nodes.
                                       # Compounding: agents restarting while a node drains.
+  - otel-operator-0.23.0              # ADDED 2026-09-21 (RECIPROCITY — it was MISSING). That
+                                      # plan already lists cilium-1.20.2, because its whole
+                                      # §1.4 NetworkPolicy risk assessment is read against
+                                      # this CNI. A one-sided exclusion schedules nothing:
+                                      # window-scheduler.py skips a plan if EITHER side names
+                                      # the other, but only for plans it is actively placing.
+  - unpoller-v5.2.7                   # ADDED 2026-09-21 (RECIPROCITY — it was MISSING). That
+                                      # plan lists cilium-1.20.2: a CNI roll restarts pod
+                                      # networking cluster-wide and its §4 reads Prometheus.
   - multus-macvlan-foundation         # CNI-adjacent (Talos machine-config VLAN work)
   - flux-oci-chart-sources            # already declares conflicts_with: [talos-1.14.0] for
                                       # the same reason; a CNI roll restarts what it verifies
@@ -88,17 +107,30 @@ conflicts_with:                       # SOLO SLOT. This is not a courtesy list: 
                                       # (37f7c7a6) in the nightly window. It was a monitoring
                                       # collector conflict; any FUTURE otel-operator plan must
                                       # re-add the exclusion.
-  - media-audit-durable-output        # sat-attended:2026-09-19
+  # Window annotations below RE-READ from each plan's own frontmatter 2026-09-21.
+  # Four were stale; a stale annotation is how a planner talks itself into a slot
+  # that is already full.
+  - media-audit-durable-output        # sat-attended:2026-10-10 (was annotated 09-19 — that
+                                      # window ran without it; rescoped TWICE since, off
+                                      # 09-26 and 10-03 on capacity)
   - wazuh-2xx-edge-coverage           # sat-attended:2026-09-26 — touches the external
-                                      # request path this plan can blackhole
-  - external-dns-unowned-cnames       # sat-attended:2026-10-03 — DNS/edge records
-  - nextcloud-mcp-0.187.1             # sat-attended:2026-10-03
-  - absenty-drop-npm-runtime          # sun-attended:2026-09-20
-  - nextcloud-34.0.4                  # sun-attended:2026-09-20
+                                      # request path this plan can blackhole. 45 min.
+  - external-dns-unowned-cnames       # sat-attended:2026-10-03 — DNS/edge records. 40 min.
+  - nextcloud-mcp-0.187.1             # sat-attended:2026-10-03. 30 min. (Its recorded GO is
+                                      # itself stale — F-bb713800 — but the slot is claimed.)
+  - absenty-drop-npm-runtime          # window: null, status: blocked (was annotated
+                                      # sun-attended:2026-09-20). UNSCHEDULED 2026-09-20 —
+                                      # it claims no slot at all right now.
+  - nextcloud-34.0.4                  # sun-attended:2026-10-04 (was annotated 09-20), status
+                                      # vetted with a RECORDED GO. 75 min.
   - jellyfin-12.1                     # sun-attended:2026-10-11
-security_ref: F-d3d1472f              # quay.io/cilium/cilium image record. Detail stays on
-                                      # the finding; see §1.6. Companion: F-0075055f
+security_ref: F-7620060c              # quay.io/cilium/cilium image record. Detail stays on
+                                      # the finding; see §1.6. Companion: F-9b0a4b0d
                                       # (operator-generic image).
+                                      # REPOINTED 2026-09-21: the previous refs F-d3d1472f
+                                      # and F-0075055f are both RESOLVED/ACCEPTED records —
+                                      # a plan citing a closed finding answers nothing and
+                                      # leaves the LIVE ones reading as unplanned.
 capability_change: false              # FACT, not a claim of safety: no feature flag, no
                                       # value, no user-visible behaviour changes. The
                                       # rendered manifest delta is two image digests (§1.4).
@@ -118,7 +150,122 @@ autonomy_override: human-gated        # DELIBERATE AND LOAD-BEARING. Without thi
                                       # operator-performed streaming check that no cron can
                                       # do. `human-gated` is the one legal value and it only
                                       # RESTRICTS (maintenance-plan.py:704).
-finding_refs: [F-d3d1472f, F-0075055f]
+finding_refs: [F-7620060c, F-9b0a4b0d, F-f0816905]
+                                      # REPOINTED 2026-09-21 to the LIVE open records
+                                      # (`policy-cli.py finding show`, re-read that day):
+                                      #   F-7620060c  security/warning — cilium agent image,
+                                      #               newer upstream tag available
+                                      #   F-9b0a4b0d  security/warning — operator-generic
+                                      #               image, same
+                                      #   F-f0816905  version/monitor — "cilium: chart
+                                      #               1.20.1 → 1.20.2 (patch)", action
+                                      #               "held by auto-update-policy (*cilium*)
+                                      #               — PLAN lane". THIS is the finding the
+                                      #               plan-or-page pass joins on; without it
+                                      #               the PLAN-lane row pages the operator
+                                      #               after plan_sla_days.
+                                      # F-19e12a92 deliberately NOT added — CLOSED 2026-09-20
+                                      # (it was the deny-rule reason correction, b9d64b70).
+premises:                             # MACHINE-CHECKED preconditions, re-run at execution
+                                      # time. ADDED 2026-09-21. Before this, §2 carried
+                                      # twelve `# PREMISE` prose comments and NO `premises:`
+                                      # block, so `plan-premises.py cilium-1.20.2
+                                      # --require-premises` exited non-zero ("declares no
+                                      # premises") and the vetting gate reported UNVERIFIED
+                                      # while checking nothing. Prose is the claim under
+                                      # test, not evidence for it.
+                                      # Every `run:` below was dry-tested against
+                                      # plan-premises.py's own command_is_readonly(), and
+                                      # every expected value was MEASURED live 2026-09-21.
+                                      # THREE §2 gates are deliberately NOT premises — the
+                                      # §2e LB snapshot, the §2h LAN probes and the §2m
+                                      # enforcement baseline use `$( )`, `>` or `&&`, which
+                                      # command_is_readonly refuses ("premises must be a
+                                      # simple pipeline"). They stay executor gates in §2.
+  - id: hr-ready
+    why: "An unready HelmRelease cannot be cleanly upgraded, and §4.1 asserts against this same field."
+    run: kubectl get hr -n kube-system cilium -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+    expect_exact: "True"
+  - id: live-chart-is-1.20.1
+    why: "`current:` claims 1.20.1. If the cluster already moved, this plan is stale and §4.1's baseline is wrong."
+    run: kubectl get hr -n kube-system cilium -o jsonpath='{.status.history[0].chartVersion}'
+    expect_exact: "1.20.1"
+  - id: live-agent-image-is-1.20.1
+    why: "The HR can read 1.20.1 while the DaemonSet runs something else. §4.1 diffs the digest, so the OLD digest must be what is live."
+    run: kubectl get ds -n kube-system cilium -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_contains: "v1.20.1@sha256:ae9ea21f"
+  - id: live-operator-image-is-1.20.1
+    why: "Second of the two digests §1.4 says this plan moves."
+    run: kubectl get deploy -n kube-system cilium-operator -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_contains: "operator-generic:v1.20.1"
+  - id: agents-3-of-3-ready
+    why: "Rolling a CNI that is already down a node is how a 2-of-3 maxUnavailable roll becomes a full outage."
+    run: kubectl get ds -n kube-system cilium -o jsonpath='{.status.desiredNumberScheduled} {.status.numberReady}'
+    expect_exact: "3 3"
+  - id: maxunavailable-is-still-2
+    why: "§1.5's blast-radius claim and the whole §3.4 decision rest on this being 2. If a previous window took §3.4, it is 1 and §1.5 is stale."
+    run: kubectl get ds -n kube-system cilium -o jsonpath='{.spec.updateStrategy.rollingUpdate.maxUnavailable}'
+    expect_exact: "2"
+  - id: chart-1.20.2-is-published
+    why: "Never bump to a version that is not there. Uses `helm show chart` — curl is NOT in the premise runner's allowlist. A stale local repo cache fails this CLOSED; the fix is `helm repo update`, not relaxing the premise."
+    run: helm show chart cilium/cilium --version 1.20.2 | grep '^version'
+    expect_exact: "version: 1.20.2"
+  - id: lb-services-are-14
+    why: "§4.4 diffs the LB table against 14 rows. The retired 1.20.1 plan said 16 and was wrong."
+    run: kubectl get svc -A --no-headers | grep -c LoadBalancer
+    expect_exact: "14"
+  - id: l2announce-leases-are-14
+    why: "A VIP with a Service IP but no lease is dark on the LAN. §4.4's second half counts these."
+    run: kubectl get leases -n kube-system -o name | grep -c cilium-l2announce
+    expect_exact: "14"
+  - id: lbipam-pool-not-conflicted
+    why: "A pool already in conflict re-allocates unpredictably when the operator restarts, and §4.4 would read that as a cilium regression."
+    run: kubectl get ciliumloadbalancerippool pool -o jsonpath='{.status.conditions[?(@.type=="cilium.io/PoolConflict")].status}'
+    expect_exact: "False"
+  - id: k8s-netpol-count-is-6
+    why: "BASELINE for §4.7, not a gate. §4.7 asserts 6 ENFORCING endpoints in the datapath; that number is only meaningful against the 6 policy objects it derives from. If this moved, re-derive §4.7's expected total before trusting it."
+    run: kubectl get netpol -A --no-headers | wc -l
+    expect_exact: "6"
+  - id: no-ciliumnetworkpolicies-exist
+    why: "§1.2 calls the deprecated-L7-rule upgrade note vacuous on the strength of there being zero CNPs. If one appeared, that reasoning no longer holds."
+    run: kubectl get cnp -A --no-headers | wc -l
+    expect_exact: "0"
+  - id: repo-pin-still-1.20.1
+    why: "§3.2's sed anchors on `version: 1.20.1`. If HEAD already says 1.20.2 the edit silently no-ops and the window ships nothing."
+    run: git show HEAD:kubernetes/apps/kube-system/cilium/app/helmrelease.yaml | grep '^      version'
+    expect_exact: "version: 1.20.1"
+  - id: bootstrap-pin-still-1.20.1
+    why: "§3.3's regex anchors on it. Exactly ONE occurrence in the file (measured) — a second would mean the naive-sed trap §3.3 warns about became real."
+    run: git show HEAD:kubernetes/bootstrap/apps/helmfile.yaml | grep -c 'version. 1.20.1'
+    expect_exact: "1"
+  - id: cilium-worktree-clean
+    why: "Shared checkout. An uncommitted edit under the cilium app dir would ride into §3.5's path-scoped commit."
+    run: git status --porcelain kubernetes/apps/kube-system/cilium | wc -l
+    expect_exact: "0"
+  - id: no-kustomization-in-flight
+    why: "Nothing else may be reconciling. NOTE the form: `grep -c False` is WRONG here — False is the SUSPENDED column and matches all 140 rows. Column 5 is READY."
+    run: flux get kustomizations -A | tail -n +2 | awk '$5!="True"' | wc -l
+    expect_exact: "0"
+  - id: no-helmrelease-in-flight
+    why: "Same, for HelmReleases — helm-controller must be idle before it is asked to upgrade the CNI."
+    run: flux get helmreleases -A | tail -n +2 | awk '$5!="True"' | wc -l
+    expect_exact: "0"
+  - id: nodes-on-expected-kubelet
+    why: "Asserts no Talos/node operation is mid-flight. talos-1.14.1 moves this; if it reads anything else, that roll is in progress and this plan must not run."
+    run: kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.kubeletVersion}'
+    expect_exact: "v1.36.0 v1.36.0 v1.36.0"
+  - id: canary-image-cached-on-all-3-nodes
+    why: "§4.8's canary uses busybox:1.38.0 precisely because ds/security/falco-log-rotate already runs it on all three nodes — so a CNI-ADD failure cannot be misread as a slow image pull."
+    run: kubectl get ds -n security falco-log-rotate -o jsonpath='{.status.numberReady}'
+    expect_exact: "3"
+  - id: canary-target-service-exists
+    why: "§4.8 dials svc/echo-server in ns default on 8080. A gate naming an object that does not exist fails at the worst moment."
+    run: kubectl get svc -n default echo-server -o jsonpath='{.spec.ports[0].port}'
+    expect_exact: "8080"
+  - id: canary-namespace-has-no-networkpolicy
+    why: "If ns default gained a default-deny, §4.8's canary would fail for a reason that has nothing to do with this upgrade — a false rollback trigger."
+    run: kubectl get netpol -n default --no-headers | wc -l
+    expect_exact: "0"
 status: draft
 window: null                          # the scheduler assigns. §6 states the constraint:
                                       # an ATTENDED slot, alone.
@@ -152,19 +299,33 @@ have been running for six weeks.** Every 1.20 upgrade-note action item is
 therefore already behind us — and, as §1.2 shows, three of the four never
 applied to this cluster at all.
 
-### 1.2 The deny-rule reason is stale — the hold is still right, the reason is wrong
+### 1.2 The deny rule — reason ALREADY CORRECTED upstream of this plan; the hold stays
 
-`runbooks/auto-update-policy.yaml` holds `*cilium*` with:
+**Status 2026-09-21: the correction this section used to ask for has landed.**
+`runbooks/auto-update-policy.yaml` was fixed on 2026-09-20 (commit `b9d64b70`,
+finding `F-19e12a92`, now closed). The rule text this plan is written against is
+the CURRENT one — do not re-litigate the old Gateway-API/mutual-auth rationale,
+which is gone from the file:
 
-> "CNI datapath — 1.20.0 carries Gateway-API/mutual-auth caveats that can affect
-> streaming protocols (Music Assistant / Home Assistant). Plan + verify MA/HA
-> streaming before upgrading; never an unattended bump."
+> "CNI datapath — never an unattended bump. The hold is about CONSEQUENCE, not a
+> specific release: a bad cilium roll takes the cluster network with it, and
+> every Flux controller that would revert it sits inside the failure domain.
+> […] Requires an attended slot, a plan that exercises a FRESH CNI ADD (existing
+> pods keep networking from in-kernel BPF state, so every ordinary gate can pass
+> while new-pod networking is broken), and an operator GO."
 
-**The "never an unattended bump" half is correct and this plan honours it.** The
-stated *caveats*, however, are structurally inapplicable here — checked against
-the live `cilium-config`, not against the rule text (authoring rule 8: a remedy
-or a risk claim must come from upstream or the cluster, never from a deny-rule
-reason written by the last agent):
+**The hold is correct and stays.** Note what the corrected reason now demands of
+this file, in as many words: *a plan that exercises a FRESH CNI ADD*. That is
+**§4.8**, which did not exist before 2026-09-21 — the plan asserted the in-kernel
+BPF persistence argument in §5.1 and then never tested the one path that
+argument leaves unprotected. The attended-slot and operator-GO requirements are
+met by `autonomy_override: human-gated` and §4.9.
+
+The table below is retained as the measured record of why the OLD reason's
+version-specific caveats never applied here — checked against the live
+`cilium-config`, not against rule text (authoring rule 8: a risk claim must come
+from upstream or the cluster, never from a deny-rule reason written by the last
+agent):
 
 | Claimed caveat | Live state | Verdict |
 |---|---|---|
@@ -173,11 +334,11 @@ reason written by the last agent):
 | Deprecated L7 policy rules (`kafka`/`l7`/`l7proto`) must be removed before 1.20 | **0 CiliumNetworkPolicies exist** cluster-wide (6 plain k8s NetworkPolicies, which this note does not cover). | Vacuous. |
 | `CiliumNodeConfig` v2alpha1 → v2 | 0 objects; CRD serves v2 only. | Vacuous. |
 
-**Repo correction owed** (do not silently plan around it): the deny rule's
-*reason* string should be rewritten to the real one — *"the CNI is the cluster's
-only data plane; every bump restarts it under every pod, so it is never
-unattended"* — and its version-specific clause dropped. That is a policy edit,
-code-reviewed, and out of scope for this plan file.
+**Repo correction: DONE, nothing owed.** This section previously ended with an
+owed correction to the deny rule's *reason* string. It was made on 2026-09-20 in
+`b9d64b70` — the version-specific clause was dropped and replaced with the
+consequence-based rationale quoted above. No further policy edit is required by
+this plan, and the window agent should not open one.
 
 ### 1.3 How cilium is delivered here — Flux, not bootstrap
 
@@ -216,8 +377,8 @@ $ helm template cilium cilium/cilium --version 1.20.{1,2} -n kube-system -f app/
 +  image: "quay.io/cilium/operator-generic:v1.20.2@sha256:64d8798350e8569b8e7622563fed6e44dce2625f311e4651b774816516c744fc"
 ```
 
-Everything else in the 64 changed lines is the `helm.sh/chart: cilium-1.20.x`
-label (46 lines). **`cm/cilium-config` renders byte-identical.** No value we set
+Everything else in the **62** changed lines is the `helm.sh/chart: cilium-1.20.x`
+label (re-measured 2026-09-21; the earlier "64" was wrong). **`cm/cilium-config` renders byte-identical.** No value we set
 gained or lost meaning; no DaemonSet field other than the image moved.
 
 **CRDs:** the chart ships **no `crds/` directory** — Cilium's CRDs are
@@ -278,7 +439,23 @@ answered. Detail stays on the finding records; nothing quantitative here.
 ## 2) Pre-checks
 
 Run from `/Users/mu/code/cberg-home-nextgen`. **Every command below names an
-object verified to exist on 2026-09-16.** Do not proceed if any premise fails.
+object verified to exist on 2026-09-21.** Do not proceed if any premise fails.
+
+**Run the machine-checked premises FIRST** — the 21 `premises:` entries in the
+frontmatter cover (a), (c), (d), (f), (g), (i), (j), (k) below and several
+things the prose never checked. Verified 2026-09-21: `PASS cilium-1.20.2
+(21 premise(s))`, exit 0.
+
+```bash
+.venv/bin/python3 runbooks/plan-premises.py cilium-1.20.2 --require-premises
+#   PASS: every premise PASS, exit 0.
+#   FAIL MODE: any premise FAIL, or exit non-zero — including "declares no
+#   premises", which is what this plan did before 2026-09-21.
+```
+
+The gates below that the premise runner **cannot** express — `$( )`, `>` and
+`&&` are refused as not-a-simple-pipeline — are (b), (e), (h), (l) and (m).
+Run those by hand.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
@@ -290,10 +467,17 @@ for p in $(kubectl get pods -n kube-system -l k8s-app=cilium -o name); do
   echo -n "$p: "; kubectl -n kube-system exec "$p" -c cilium-agent -- cilium-dbg status --brief
 done                                                                          # expect: 3× OK
 
-# b) PREMISE — no module is already degraded (this is the baseline §4 compares to).
-kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status \
-  | grep -E 'Modules Health'
-#   baseline 2026-09-16: "Stopped(0) Degraded(0) OK(307)"
+# b) BASELINE — no module is already degraded (this is what §4.3 compares to).
+for p in $(kubectl get pods -n kube-system -l k8s-app=cilium -o name); do
+  echo -n "$p "
+  kubectl -n kube-system exec "$p" -c cilium-agent -- cilium-dbg status | grep -E 'Modules Health'
+done
+#   Measured 2026-09-21: Degraded(0) on all three; OK(311) / OK(365) / OK(371).
+#   The OK COUNT IS NOT A GATE — it is per-node and tracks how many endpoints and
+#   subsystems that agent happens to own, so it drifts with pod placement. The
+#   earlier "OK(307)" written here was a single-node reading from 2026-09-16 and
+#   is stale. `Degraded(0)` is the gate. Note this also replaces the old
+#   `exec ds/cilium` form, which silently reads ONE arbitrary pod.
 
 # c) PREMISE — the HelmRelease is Ready and actually on 1.20.1.
 kubectl get hr -n kube-system cilium \
@@ -301,7 +485,10 @@ kubectl get hr -n kube-system cilium \
 #   expect: True 1.20.1
 
 # d) PREMISE — chart 1.20.2 is published (never bump to a version that isn't there).
-curl -s https://helm.cilium.io/index.yaml | grep -c 'version: 1.20.2'          # expect: >= 1
+#    `curl` is NOT in plan-premises.py's allowlist, so the premise form uses helm.
+helm show chart cilium/cilium --version 1.20.2 | grep '^version'   # expect: version: 1.20.2
+#    If this errors "chart not found", the LOCAL repo cache is stale — run
+#    `helm repo update cilium` and re-run. Do NOT work around it by editing the pin.
 
 # e) BASELINE — the LB table. §4 diffs against this file; take it AFTER Step 0
 #    of the window (safe-update batch) has settled, immediately before §3.
@@ -349,6 +536,16 @@ git fetch origin main && git status --porcelain && git log --oneline -1 origin/m
 # l) OPERATOR — no active Music Assistant stream / Plex playback. The per-node blip
 #    is seconds, but do not roll the CNI mid-movie. This is a human judgement, and
 #    it is the reason this plan is attended.
+
+# m) BASELINE — POLICY ENFORCEMENT IN THE DATAPATH. This is the number §4.7
+#    compares to; take it AFTER Step 0 settles, immediately before §3.
+#    It reads each agent's own endpoint table (BPF state), NOT the API server.
+for p in $(kubectl get pods -n kube-system -l k8s-app=cilium -o name); do
+  kubectl -n kube-system exec "$p" -c cilium-agent -- cilium-dbg endpoint list
+done | grep -c 'Enabled'
+#   Measured 2026-09-21: 6  (per node: 1 + 2 + 3, matching the 6 k8s NetworkPolicies)
+#   NOTE the case: `grep -c 'Enabled'` does NOT match "Disabled" (D-i-s-a-b-l-e-d
+#   contains no "enabled"), so this counts only endpoints with enforcement ON.
 ```
 
 ---
@@ -545,9 +742,16 @@ done
 for p in $(kubectl get pods -n kube-system -l k8s-app=cilium -o name); do
   kubectl -n kube-system exec "$p" -c cilium-agent -- cilium-dbg status | grep -E 'Modules Health'
 done
-#   PASS: Degraded(0) on all three, OK count >= 300 (baseline 307).
+#   PASS: Degraded(0) AND Stopped(0) on all three.
 #   FAIL MODE: Degraded(n>0) — the brief summary can still read OK while a
 #   subsystem is degraded, which is exactly why both lines are checked.
+#
+#   THE OK COUNT IS NOT A GATE. The old text here said "OK count >= 300
+#   (baseline 307)". Re-measured 2026-09-21 the three agents report OK(311),
+#   OK(365) and OK(371) — the count is per-node and tracks how many endpoints
+#   and subsystems that agent owns, so it moves with ordinary pod placement and
+#   a threshold on it either never fires or fires for the wrong reason. Compare
+#   `Degraded`/`Stopped` against the §2b baseline; read the OK count as colour.
 ```
 
 *Binary note:* both `cilium` and `cilium-dbg` exist in the agent container on
@@ -597,26 +801,120 @@ a hard failure, not as a quiet 200 from somewhere else.
 **4.6 — LAN VIP surface beyond the gateways.**
 
 ```bash
-dig +short +time=2 @192.168.55.5 kubernetes.io > /dev/null && echo 'DNS VIP .5 OK'
+if dig +short +time=2 +tries=1 @192.168.55.5 kubernetes.io | grep -q '[0-9]'; then
+  echo 'DNS VIP .5 OK'
+else
+  echo 'DNS VIP .5 FAIL — AdGuard VIP dark or returning no answer'
+fi
 curl -sk -o /dev/null -w 'HA .24:8123 -> %{http_code}\n' --max-time 8 http://192.168.55.24:8123
 curl -sk -o /dev/null -w 'MA .29:8095 -> %{http_code}\n' --max-time 8 http://192.168.55.29:8095
-#   PASS: DNS line prints, 200, 200 (all measured 2026-09-16 pre-change).
+#   PASS: 'DNS VIP .5 OK', 200, 200 (measured 2026-09-16 pre-change).
+#   FIXED 2026-09-21: the old form was `dig ... > /dev/null && echo OK`, which
+#   PRINTS NOTHING on failure — a silent gate reads as a skipped gate in a
+#   window log, and `dig` exits 0 even when it returns an empty answer set, so
+#   the old `&&` would have printed OK for a VIP that answered nothing at all.
+#   The `grep -q '[0-9]'` asserts an actual A record came back, and the else
+#   branch makes the failure loud. Positive control: the same command aimed at
+#   an address with no resolver on it prints the FAIL line.
 ```
 
-**4.7 — Policy enforcement and east-west traffic survived the restart.**
+**4.7 — Policy enforcement survived the restart (read from the DATAPATH).**
 
 ```bash
-kubectl get netpol -A --no-headers | wc -l        # PASS: 6 (unchanged)
-kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' | tail -20
-#   PASS: no FailedCreatePodSandBox / CNI / NetworkNotReady entries after the roll.
+for p in $(kubectl get pods -n kube-system -l k8s-app=cilium -o name); do
+  kubectl -n kube-system exec "$p" -c cilium-agent -- cilium-dbg endpoint list
+done | grep -c 'Enabled'
+#   PASS: 6 — identical to the §2m baseline.
+#   FAIL MODE: a lower number. Agents that came up without loading policy
+#   regenerate their endpoints with enforcement OFF, and every one of those
+#   prints "Disabled" in this column instead.
 ```
 
-**4.8 — OPERATOR GATE (the deny rule's actual requirement).** Play a stream
+*This replaced a gate that could not fail.* The old §4.7 was
+`kubectl get netpol -A --no-headers | wc -l  # PASS: 6`, which asks the **API
+server** how many NetworkPolicy OBJECTS exist. This plan creates and deletes no
+NetworkPolicy, so that command returns 6 whether cilium is enforcing all six
+policies or none of them — it was a constant dressed as a gate. The form above
+asks each **agent** what its own BPF endpoint table says, which is the property
+the restart could actually destroy.
+
+*Proof this gate can fail — measured 2026-09-21, not inferred:* in the same
+`cilium-dbg endpoint list` output, endpoint 3 (`k8s-gateway`, selected by none
+of the six policies) prints `Disabled` in both enforcement columns. The column
+therefore takes both values in the live cluster, and the count is a real
+measurement of how many endpoints have enforcement on. Per-node it reads 1 / 2
+/ 3; the **sum** is the gate, because a policy-selected pod rescheduling moves
+the count between nodes without changing the total. If §2m's baseline was not 6,
+use that number, not this one.
+
+**4.8 — A FRESH POD GETS NETWORKING (the gate this section was missing).**
+
+**Why this exists, and why nothing else in §4 substitutes for it.** §5.1 states
+the plan's own load-bearing assumption: existing pods keep networking across an
+agent restart because their BPF programs stay loaded in-kernel. That is exactly
+why **every other gate in §4 can go green while `CNI ADD` is broken for new
+pods** — agents Ready, VIPs serving, HA/MA answering, Prometheus scraped, policy
+enforced, all of it runs on endpoints that already exist. A broken CNI ADD is
+invisible until the next unrelated deploy schedules a pod, which is hours or
+days after the window closed and nobody connects it to cilium. Nothing else here
+creates a pod, so nothing else tests the path.
+
+```bash
+kubectl -n default delete pod cni-canary --ignore-not-found
+
+kubectl -n default run cni-canary --restart=Never --image=busybox:1.38.0 \
+  --command -- sh -c \
+  'wget -q -T 5 -O- http://echo-server.default.svc.cluster.local:8080/ >/dev/null && echo CNI_CANARY_OK || echo CNI_CANARY_FAIL'
+
+# GATE 1 — CNI ADD succeeded. A pod cannot reach Succeeded without an IP.
+kubectl -n default wait --for=jsonpath='{.status.phase}'=Succeeded \
+  pod/cni-canary --timeout=120s
+#   PASS: exit 0, "pod/cni-canary condition met".
+#   FAIL MODE: `wait` exits 1 on timeout while the pod sits in
+#   ContainerCreating. Diagnose with the SCOPED event list (not a cluster-wide
+#   tail, which crowds the one line that matters out of 20):
+#     kubectl -n default describe pod cni-canary | tail -20
+#     kubectl -n default get events --field-selector involvedObject.name=cni-canary
+#   The signature is FailedCreatePodSandBox naming plugin type "cilium-cni".
+
+# GATE 2 — the pod got a routable pod-network IP.
+kubectl -n default get pod cni-canary -o jsonpath='{.status.podIP}{"\n"}'
+#   PASS: a 10.69.x.y address (the pod CIDR; live pods measured 2026-09-21 sit
+#   on 10.69.0/1/2.x). FAIL MODE: empty output.
+
+# GATE 3 — east-west: DNS resolved AND the Service was reachable.
+kubectl -n default logs cni-canary
+#   PASS: exactly CNI_CANARY_OK
+#   FAIL MODE: CNI_CANARY_FAIL — coredns did not resolve, or eBPF service
+#   load-balancing did not forward to the backend.
+
+kubectl -n default delete pod cni-canary --ignore-not-found
+```
+
+*Every object named here was verified live 2026-09-21:* `svc/echo-server` exists
+in ns `default` on port 8080; ns `default` has **zero** NetworkPolicies and zero
+CiliumNetworkPolicies, so a default-deny cannot fail the canary for an unrelated
+reason; and `busybox:1.38.0` is already resident on **all three** nodes via
+`ds/security/falco-log-rotate` (3/3 ready), so a CNI-ADD failure can never be
+misread as a slow image pull. All three are also frontmatter premises.
+
+*Proof each gate can fail.* Gate 1: `kubectl wait` exits non-zero on timeout —
+the failure is an exit code, not absent output. Gate 2: the jsonpath prints an
+empty line when `podIP` is unset. Gate 3: the FAIL branch is written into the
+container's own command (`|| echo CNI_CANARY_FAIL`), so the failing output is
+structurally guaranteed rather than inferred, and `CNI_CANARY_OK` does not
+appear as a substring of `CNI_CANARY_FAIL`. Note the deliberate split: the
+command exits 0 either way, so Gate 1 tests **only** pod admission (CNI ADD)
+while Gate 3 tests **only** reachability. Two distinct failure modes, two
+distinct gates; collapsing them into one would let a DNS failure masquerade as a
+CNI failure and trigger the wrong rollback limb.
+
+**4.9 — OPERATOR GATE (the deny rule's actual requirement).** Play a stream
 through Music Assistant and open the Home Assistant dashboard. Both must work.
 This is the check no cron can perform and the reason `autonomy_override:
 human-gated` is set. **Do not close the window without it.**
 
-**4.9 — Settle.** Wait 15 minutes, then confirm no new firing alerts
+**4.10 — Settle.** Wait 15 minutes, then confirm no new firing alerts
 (port-forward Prometheus per CLAUDE.md, filtering `Watchdog|InfoInhibitor`).
 
 ---
@@ -693,9 +991,19 @@ cd /Users/mu/code/cberg-home-nextgen      # REQUIRED: `helm` is a mise shim pinn
 #    within its 30m interval and undoes the rollback.
 flux suspend helmrelease cilium -n kube-system
 
-# 2. Roll the release back directly. Revision 13 == chart cilium-1.20.1.
-helm history cilium -n kube-system          # confirm 13 is cilium-1.20.1 before using it
-helm rollback cilium 13 -n kube-system --wait --timeout 10m
+# 2. Roll the release back directly — DERIVE the revision, never hardcode it.
+#    A hardcoded number is correct only until the next cilium release changes
+#    it, and this limb runs when the datapath is already broken.
+helm history cilium -n kube-system          # eyeball it first
+REV=$(helm history cilium -n kube-system -o json | .venv/bin/python3 -c "
+import sys, json
+h = json.load(sys.stdin)
+r = [x for x in h if x['chart'] == 'cilium-1.20.1']
+print(r[-1]['revision'] if r else 'NONE')
+")
+echo "rollback target revision: $REV"      # measured 2026-09-21: 13
+test "$REV" != NONE || echo 'STOP — no cilium-1.20.1 revision in helm history'
+helm rollback cilium "$REV" -n kube-system --wait --timeout 10m
 
 # 3. Prove the datapath is back (§4.3, §4.4, §4.5).
 kubectl -n kube-system rollout status ds/cilium --timeout=10m
@@ -736,19 +1044,45 @@ VIP, a failed §4 gate) — never for a transient blip observed *during* the rol
   currently-open executable plan deliberately (README §4: prose schedules
   nothing; only that field is honoured). **`window: null` — the scheduler
   assigns, but it must be an ATTENDED slot** (`sat-attended` or `sun-attended`):
-  §4.8 is an operator-performed streaming check, and `autonomy_override:
+  §4.9 is an operator-performed streaming check, and `autonomy_override:
   human-gated` enforces that no derivation can route this to an unattended night.
-- **Reciprocity is owed on the other side.** `--validate` checks that refs
-  resolve, not that they are mutual. The counterpart entries — at minimum
-  `kube-prometheus-stack-91.4.0`, `prometheus-crd-ownership`, `otel-operator-0.21.0`
-  and `talos-1.14.0` naming `cilium-1.20.2` back — must be added by whoever vets
-  this plan. This plan file cannot edit other plans.
-- **Not the Sunday reboot slot.** `needs_reboot: false` is truthful, so this plan
-  must **not** consume `sun-attended:2026-09-27`, which `talos-1.14.0` needs in
-  full (140 min in-window against a 200-min slot). A `sat-attended` slot fits 50
-  min comfortably. If it ever shares a Sunday with the Talos roll, that is the
-  single worst pairing in the queue: both restart the CNI on all three nodes,
-  and the Talos roll already lists `cni/cilium` in its own `touches.shared`.
+- **Reciprocity — VERIFIED 2026-09-21, no longer owed.** `--validate` checks that
+  refs resolve, not that they are mutual, so each counterpart was read directly:
+  `kube-prometheus-stack-91.4.1`, `otel-operator-0.23.0`, `unpoller-v5.2.7` and
+  `talos-1.14.1` **all name `cilium-1.20.2` in their own `conflicts_with`**. The
+  two that were missing on THIS side (`otel-operator-0.23.0`, `unpoller-v5.2.7`)
+  have been added. The older refs named here before — `kube-prometheus-stack-91.4.0`,
+  `prometheus-crd-ownership`, `otel-operator-0.21.0` — are gone: the first two
+  executed and retired, the third was superseded by 0.23.0.
+- **SLOT: a solo attended slot. None of the three standing ones is free for it.**
+  Arithmetic against the SCHEDULABLE budget (`duration_min - STEP0_RESERVE_MIN`,
+  `STEP0_RESERVE_MIN = 20`, window-scheduler.py:92/:270 — now also documented at
+  the top of `maintenance-windows.yaml`, because four artifacts have costed a
+  slot against the raw `duration_min` and got it wrong):
+  - `sat-attended` 90 → **70 usable**. `2026-09-26` holds `wazuh-2xx-edge-coverage`
+    (45 min) — which is in this plan's `conflicts_with`, and 45 + 55 = 100 > 70
+    regardless. `2026-10-03` already holds 70 min (external-dns 40 +
+    nextcloud-mcp 30) — full. `2026-10-10` holds `media-audit-durable-output`
+    (45 min), also a listed conflict.
+  - `sun-attended` 200 → **180 usable**. `2026-09-27` is `talos-1.14.1`'s at
+    145 min, and it must keep the whole slot. **Do not put this plan there.**
+    cilium + Talos is the single worst pairing in the queue: both roll the CNI
+    on all three nodes, and the Talos plan already lists `cni/cilium` in its own
+    `touches.shared`. `needs_reboot: false` here is truthful and must not be
+    used to justify claiming a reboot-capable slot.
+  - `nightly` is unattended — excluded by `autonomy_override: human-gated`.
+
+  **What would have to move.** The cheapest displacement is
+  `wazuh-2xx-edge-coverage` off `sat-attended:2026-09-26`: it is `status: draft`
+  and explicitly "PROPOSED, not approved", it carries `conflicts_with: []`, and
+  it is the only occupant of that slot — moving it frees all 70 usable minutes
+  for a 55-minute solo run. The alternative, and probably the better one, is an
+  operator-triggered **on-demand NOW run** (`on_demand:` slot `now`,
+  480-min ceiling, `allow_reboot: false`, attended by construction): it gives
+  this plan a genuinely solo attended slot without evicting anyone. Per
+  `plans/README.md` only `run-now.py stamp` may write that `window:` value —
+  hence `window: null` here. **Recommendation: NOW run, or 09-26 with wazuh
+  displaced. Not 09-27.**
 - **Blip profile.** Established flows survive (in-kernel BPF persists across an
   agent restart). New-flow setup, policy updates and L2 lease renewals pause for
   seconds per node — and with `maxUnavailable: 2` that is **two nodes at once**

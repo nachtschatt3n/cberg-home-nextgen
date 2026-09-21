@@ -41,7 +41,24 @@ touches:
                                       # surface you MEASURE through, not only the one you
                                       # write to).
 depends_on: []
-conflicts_with: [float-tag-pinning, kube-prometheus-stack-91.4.1]
+conflicts_with: [float-tag-pinning, kube-prometheus-stack-91.4.1,
+                 nextcloud-34.0.4, jellyfin-12.1]
+                                      # ADDED 2026-09-21: nextcloud-34.0.4 and
+                                      # jellyfin-12.1. ROLLBACK-CLASS STACKING, not a
+                                      # resource collision. Both are
+                                      # `rollback_class: backup-restore` +
+                                      # `capability_change: true`, exactly as this plan
+                                      # is. Two backup-restore rollbacks in one window
+                                      # leaves no rollback capacity for either — the
+                                      # stacking the reconciler already rejected for
+                                      # jellyfin+frigate, and which nextcloud-34.0.4's
+                                      # own `window:` note cites as its reason for
+                                      # avoiding sun-attended:2026-10-11. §6 says to
+                                      # serialize with both, so the field must carry
+                                      # both (they hold sun-attended:2026-10-04 and
+                                      # sun-attended:2026-10-11 respectively; declaring
+                                      # them here is what keeps the scheduler off those
+                                      # two slots).
                                       # CORRECTED 2026-09-20. The previous `[]` was justified
                                       # by "no other open plan declares shared:[postgresql]".
                                       # That claim is still TRUE (re-verified today) but it
@@ -60,9 +77,13 @@ conflicts_with: [float-tag-pinning, kube-prometheus-stack-91.4.1]
                                       #    reads Prometheus; a same-night kps bump leaves
                                       #    that instrument mid-restart, so the gate would
                                       #    read a stack that is down, not a cluster that is
-                                      #    clean. (kps is currently gated behind
-                                      #    depends_on: prometheus-crd-ownership, so it cannot
-                                      #    be placed yet — declare it now, before it can.)
+                                      #    clean. CORRECTED 2026-09-21: the earlier note
+                                      #    called this "pre-emptive, kps cannot be placed
+                                      #    yet". That is STALE — kps's own frontmatter
+                                      #    records its prometheus-crd-ownership dependency
+                                      #    RESOLVED/executed on 2026-09-20 (and that plan
+                                      #    file is retired). kps is placeable now, so this
+                                      #    declaration is live, not theoretical.
                                       # NOTE: neither of those two names this plan back.
                                       # window-scheduler.py has honoured asymmetric
                                       # declarations SYMMETRICALLY since 2026-09-15
@@ -260,13 +281,49 @@ pushed = datetime.fromisoformat('2026-09-10T11:30:48.709134+00:00')
 print('age_hours:', round((datetime.now(timezone.utc) - pushed).total_seconds()/3600, 1))
 "   # proceed only if >= 48
 
-# e) Longhorn backups fresh (last nightly 03:00 run succeeded for both volumes)
+# e) Longhorn backups fresh — MECHANICAL GATE (rewritten 2026-09-21).
+#    The previous form printed the two timestamps and asserted in PROSE that "both
+#    LAST_BACKUP values must be from TODAY". Nothing exited non-zero, so a stale or
+#    empty column read exactly like a fresh one — the same shape §2f was rewritten
+#    to remove. This version parses the values and fails.
+#
+#    Why an AGE bound and not a "today" string compare: `lastBackupAt` is stamped in
+#    UTC (measured 03:04:15Z / 03:08:30Z) while the windows are Europe/Berlin, so a
+#    literal date-equality test is wrong by two hours at the nightly slot's 03:30
+#    Berlin start. 24h is the right bound for both window shapes: at an attended
+#    09:00 Berlin start today's ~03:0xZ run is ~4h old, and a run that FAILED leaves
+#    yesterday's stamp at ~28h, which this rejects.
 kubectl get volume -n storage nocodb-data postgresql-data-5g \
-  -o custom-columns=NAME:.metadata.name,LAST_BACKUP:.status.lastBackupAt --no-headers
-  # both objects verified to exist 2026-09-20; that morning's run stamped
-  # nocodb-data 03:04:15Z and postgresql-data-5g 03:08:30Z.
-  # GATE: both LAST_BACKUP values must be from TODAY. An empty column or a stale
-  # date means the disaster fallback in §5 does not exist — do not proceed.
+  -o custom-columns=NAME:.metadata.name,LAST_BACKUP:.status.lastBackupAt --no-headers \
+  | tee /tmp/nocodb-lastbackup.txt
+python3 - /tmp/nocodb-lastbackup.txt <<'PY' || { echo 'FAIL: Longhorn backup freshness gate — the §5 disaster fallback does not exist; do not proceed'; exit 1; }
+import re, sys
+from datetime import datetime, timezone
+rows = [l.split() for l in open(sys.argv[1]).read().strip().splitlines() if l.strip()]
+seen = {r[0]: r[1] for r in rows if len(r) == 2}
+bad = []
+for vol in ("nocodb-data", "postgresql-data-5g"):
+    ts = seen.get(vol)
+    if not ts or not re.match(r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$', ts):
+        bad.append(f"{vol}: no usable lastBackupAt ({ts!r})"); continue
+    age = (datetime.now(timezone.utc) - datetime.fromisoformat(ts.replace('Z', '+00:00'))).total_seconds() / 3600
+    print(f"{vol}: {ts}  age={age:.1f}h")
+    if age > 24:
+        bad.append(f"{vol}: backup is {age:.1f}h old (>24h)")
+if bad:
+    print("FAIL: " + "; ".join(bad)); sys.exit(1)
+print("BACKUP FRESHNESS GATE PASSED")
+PY
+  # DRY-TESTED on this Mac 2026-09-21 against three inputs:
+  #   * the LIVE reading (nocodb-data 2026-09-20T03:04:15Z / postgresql-data-5g
+  #     2026-09-20T03:08:30Z) -> "age=22.5h / 22.4h", PASSED, rc=0.
+  #   * POSITIVE CONTROL A (stale): nocodb-data back-dated to 2026-09-18 ->
+  #     "FAIL: nocodb-data: backup is 70.5h old (>24h)", rc=1.
+  #   * POSITIVE CONTROL B (empty column, which is what a volume with no completed
+  #     backup actually prints): `<none>` -> "FAIL: nocodb-data: no usable
+  #     lastBackupAt ('<none>')", rc=1.
+  # A MISSING row fails too: `seen.get()` returns None and hits the same branch, so
+  # a renamed/absent volume cannot pass by simply not printing.
 
 # f) MANDATORY point-in-time dump of the nocodb metadata DB — the backup_gate.
 #
@@ -488,14 +545,43 @@ kubectl logs -n databases deploy/nocodb --since=20m > /tmp/nocodb-boot.log 2>&1
 # ^ self-tested 2026-09-20 against the 13-day-old pod: --since=20m returned 0 bytes
 #   and this guard correctly REFUSED. It only passes after an actual restart.
 echo "boot log lines: $(wc -l < /tmp/nocodb-boot.log)"
-grep -inE 'error|unhandled|failed|ECONNREFUSED' /tmp/nocodb-boot.log   # PRINT the matches
-ERRS=$(grep -icE 'error|unhandled|failed|ECONNREFUSED' /tmp/nocodb-boot.log)
-echo "error-ish lines: $ERRS"     # baseline on 2026.08.2 measured 2026-09-20: 0
-[ "$ERRS" -eq 0 ] || { echo "FAIL: $ERRS error-ish lines in boot log — read them above"; exit 1; }
+
+# NARROWED 2026-09-21. The blocking pattern was an UNANCHORED substring match,
+# `grep -icE 'error|unhandled|failed|ECONNREFUSED'`, against a release that adds
+# 138 MCP tools (11 -> 149). Any benign new line containing the SUBSTRING "failed"
+# — a tool-registry summary, a capability probe, a retry notice — aborts a
+# successful upgrade. It fails closed, but a gate that stops a good upgrade on new
+# log vocabulary gets disabled by the next operator, which is worse.
+#
+# nocodb logs through pino, whose numeric levels are 30=info, 40=warn, 50=error,
+# 60=fatal. Measured on the live 2026.08.2 pod 2026-09-21: the complete 29-line
+# boot log contains ONLY `"level":30` records — zero at 40/50/60 — so an error is
+# structurally distinguishable from a message that merely says "failed".
+grep -inE '"level":(50|60)|unhandled|econnrefused|cannot find module|migration failed|fatal' \
+  /tmp/nocodb-boot.log        # PRINT whatever the two gates below count
+ERRS=$(grep -cE '"level":(50|60)' /tmp/nocodb-boot.log)
+FATALS=$(grep -icE 'unhandled|econnrefused|cannot find module|migration failed|fatal' /tmp/nocodb-boot.log)
+echo "pino error/fatal records: $ERRS   plain-text fatal markers: $FATALS"
+[ "$ERRS" -eq 0 ]   || { echo "FAIL: $ERRS pino error/fatal records in boot log — read them above"; exit 1; }
+[ "$FATALS" -eq 0 ] || { echo "FAIL: $FATALS fatal markers in boot log — read them above"; exit 1; }
+# ADVISORY ONLY — printed, never gating. This is where a genuinely new-but-benign
+# "…failed…" line lands, so the operator still SEES it without it stopping the run.
+echo "advisory (non-gating) substring hits: $(grep -icE 'error|failed' /tmp/nocodb-boot.log)"
+
 grep -q 'App started successfully' /tmp/nocodb-boot.log \
   || { echo 'FAIL: no "App started successfully" line — boot did not complete'; exit 1; }
-# FAILS ON: no restart happened (empty log), an error line appeared, or the boot
-# never reached its success marker. Case-insensitive throughout (mixed-case output).
+# DRY-TESTED on this Mac 2026-09-21 against a captured copy of the live boot log:
+#   * clean baseline          -> ERRS=0, FATALS=0 (both gates pass)
+#   * POSITIVE CONTROL: append `{"level":50,…,"msg":"knex migration failed"}` and
+#     `Error: something broke` -> ERRS=1, FATALS=1, both gates FAIL. So a real
+#     migration error cannot pass.
+#   * FALSE-STOP CONTROL: append the benign `{"level":30,"msg":"MCP tool registry:
+#     0 tools failed to register"}` -> the OLD gate counted 1 and would have
+#     aborted; the new gate counts ERRS=0 and correctly proceeds.
+# STILL FAILS ON: no restart (empty log, caught by the -s guard above), a pino
+# error/fatal record, a plain-text fatal marker, or a boot that never reached its
+# success marker. Case-insensitive on every text pattern (mixed-case upstream output);
+# the pino test is deliberately case-SENSITIVE because it matches a JSON key.
 
 # --- 4.4 MIGRATION TRUTH: the knex ledger, not stdout ------------------------
 # Migrations are recorded in the DB, which is where the truth lives. Measured
@@ -591,17 +677,106 @@ git revert <bump-commit-sha> && git push
 kubectl scale deploy -n databases nocodb --replicas=0
 kubectl wait --for=delete pod -n databases -l app.kubernetes.io/name=nocodb --timeout=120s
 
-# 2) restore the pre-upgrade dump (drops+recreates objects via --clean --if-exists)
+# --- shared query helper, defined ONCE for steps 2 and 3 -----------------------
+ncq() { kubectl exec -n databases deploy/postgresql -- env NCDB="$NCDB_NAME" sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$NCDB" -tAc "$0"' "$1"; }
+
+# 2) PURGE THE SCHEMA, THEN RESTORE.
+#
+#    *** CORRECTED 2026-09-21 — the previous step 2 made this rollback a
+#    GUARANTEED SELF-ABORT. ***
+#    The dump is taken (§2f) with `pg_dump --clean --if-exists`, and PostgreSQL's
+#    documentation is explicit that --clean emits DROP statements for THE OBJECTS
+#    CONTAINED IN THE DUMP ONLY. A table that 2026.09.0's knex migration created is
+#    by definition NOT in the pre-upgrade dump, so no DROP is emitted for it and it
+#    SURVIVES the restore. Step 3's exact-equality check then compares
+#    R_TABLES (= 146 + the new tables) against the 146 baseline, prints
+#    "RESTORE INCOMPLETE — counts do not match the pre-upgrade baseline; escalate"
+#    and exits 1 — WITH THE APP STILL SCALED TO 0 FROM STEP 1.
+#    So the only rollback this plan has aborted, leaving nocodb down, in precisely
+#    the scenario it exists for: a migration that ADDED tables. (If the migration
+#    added nothing, the old step 2 worked — which is why this never surfaced.)
+#    The fix is to return the schema to the same ground the dump was taken against
+#    before replaying it.
+
+# 2a) record the CURRENT owner + grants of schema `public` BEFORE dropping it, so
+#     2b can put them back exactly and 3b can prove they came back. Measured live
+#     2026-09-21: owner `pg_database_owner`; acl
+#     {pg_database_owner=UC/pg_database_owner,=U/pg_database_owner,nocodb=UC/pg_database_owner}
+#     — PUBLIC holds USAGE, and the app's own role holds USAGE+CREATE.
+#     `CREATE SCHEMA public` restores NEITHER: a new schema is owned by whoever
+#     created it and carries no grants at all. Losing the app role's grant is the
+#     one way a byte-perfect DATA restore still leaves nocodb authenticated but
+#     unable to touch its own schema — and it is not safe to assume the dump repairs
+#     it, since it was taken without `--create` and may carry no schema-level GRANT.
+PRE_OWNER=$(ncq "select pg_get_userbyid(nspowner) from pg_namespace where nspname='public'")
+PRE_ACL=$(ncq "select coalesce(nspacl::text,'') from pg_namespace where nspname='public'")
+[ -n "$PRE_OWNER" ] || { echo 'ABORT: could not read schema public owner — do not purge blind'; exit 1; }
+[ -n "$PRE_ACL" ]   || { echo 'ABORT: could not read schema public ACL — do not purge blind'; exit 1; }
+echo "pre-purge public owner=$PRE_OWNER  acl=$PRE_ACL"
+
+# 2b) build the purge DDL FROM THE MEASURED STATE, not from hardcoded role names.
+#     The app's role happens to be spelled like the database today; hardcoding that
+#     coincidence is exactly how a rollback acquires an object name that does not
+#     exist on the night it is needed.
+PURGE_SQL=$(PRE_ACL="$PRE_ACL" PRE_OWNER="$PRE_OWNER" python3 -c "
+import os
+names = {'U': 'USAGE', 'C': 'CREATE'}
+sql = ['DROP SCHEMA public CASCADE;', 'CREATE SCHEMA public;',
+       'ALTER SCHEMA public OWNER TO \"%s\";' % os.environ['PRE_OWNER']]
+for e in os.environ['PRE_ACL'].strip('{}').split(','):
+    if '=' not in e: continue
+    grantee, rest = e.split('=', 1)
+    privs = ', '.join(names[c] for c in rest.split('/')[0] if c in names)
+    if not privs: continue
+    tgt = 'PUBLIC' if grantee == '' else '\"%s\"' % grantee
+    sql.append('GRANT %s ON SCHEMA public TO %s;' % (privs, tgt))
+print('\n'.join(sql))
+")
+printf 'purge DDL:\n%s\n' "$PURGE_SQL"
+printf '%s' "$PURGE_SQL" | grep -q '^DROP SCHEMA public CASCADE;' \
+  || { echo 'ABORT: purge DDL did not generate — do not continue'; exit 1; }
+# DRY-TESTED on this Mac 2026-09-21 against the LIVE acl above; generated exactly:
+#     DROP SCHEMA public CASCADE;
+#     CREATE SCHEMA public;
+#     ALTER SCHEMA public OWNER TO "pg_database_owner";
+#     GRANT USAGE, CREATE ON SCHEMA public TO "pg_database_owner";
+#     GRANT USAGE ON SCHEMA public TO PUBLIC;
+#     GRANT USAGE, CREATE ON SCHEMA public TO "nocodb";
+# i.e. it reproduces the measured ACL exactly, including PUBLIC's USAGE-only grant
+# (a blanket `GRANT USAGE, CREATE ... TO PUBLIC` would have WIDENED privileges
+# during a rollback). Control: an empty $PRE_ACL emits the DROP/CREATE/ALTER and no
+# GRANT lines — but 2a has already aborted on an empty ACL, so that path is unreachable.
+
+# 2c) apply it. One `psql -c` => one transaction, so this is all-or-nothing.
+#     Verified live 2026-09-21 that this database holds NO extension outside
+#     pg_catalog (only plpgsql, which lives in pg_catalog), so CASCADE drops
+#     nocodb's own objects and nothing else. Server is PostgreSQL 16.15.
+kubectl exec -n databases deploy/postgresql -- env NCDB="$NCDB_NAME" sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$NCDB" -v ON_ERROR_STOP=1 -c "$0"' \
+  "$PURGE_SQL" \
+  || { echo 'ABORT: schema purge failed — nothing was restored; escalate'; exit 1; }
+
+# 2d) POSITIVE CONTROL for the purge. Measured live 2026-09-21: this database holds
+#     146 BASE TABLEs. If the DROP silently did not take effect, this still reads
+#     146 and the gate stops here — BEFORE the restore, while the dump is still the
+#     untouched source of truth.
+PURGED=$(ncq "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'")
+echo "tables after purge: [$PURGED]  (expect 0; pre-purge was $tables per the baseline)"
+[ "$PURGED" = "0" ] || { echo "ABORT: schema not empty after purge (got [$PURGED]) — do NOT restore on top; escalate"; exit 1; }
+# An empty $PURGED (dead psql) fails this string compare too — it never equals "0".
+
+# 2e) replay the dump onto the empty schema. Its own `DROP … IF EXISTS` statements
+#     are now harmless no-ops, and every CREATE lands on clean ground.
 gunzip -c "$DUMP" | kubectl exec -i -n databases deploy/postgresql -- \
   env NCDB="$NCDB_NAME" sh -c \
   'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$NCDB" -v ON_ERROR_STOP=1' \
   || { echo 'RESTORE FAILED — do NOT scale nocodb back up; escalate to the operator'; exit 1; }
 # ON_ERROR_STOP=1 is load-bearing: without it psql reports success after individual
 # statements fail, which would leave a partially restored DB looking restored.
+# `set -o pipefail` (top of this block) is equally load-bearing on this pipe.
 
 # 3) CONFIRM THE RESTORE BY CONTENTS before bringing the app back
-ncq() { kubectl exec -n databases deploy/postgresql -- env NCDB="$NCDB_NAME" sh -c \
-  'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$NCDB" -tAc "$0"' "$1"; }
 . ~/backups/nocodb/pre-counts.txt
 R_TABLES=$(ncq "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'")
 R_KNEX=$(ncq "select count(*) from xc_knex_migrationsv2")
@@ -610,7 +785,31 @@ echo "restored tables=$R_TABLES (pre $tables)  knex=$R_KNEX (pre $knex)  triple=
 [ -n "$R_TABLES" ] && [ "$R_TABLES" = "$tables" ] && [ "$R_KNEX" = "$knex" ] && [ "$R_TRIPLE" = "$triple" ] \
   || { echo 'RESTORE INCOMPLETE — counts do not match the pre-upgrade baseline; escalate'; exit 1; }
 # Exact equality here, not >=: a restore is supposed to reproduce the baseline
-# exactly. An empty value fails the -n guard rather than matching.
+# exactly. An empty value fails the -n guard rather than matching. THIS TEST IS NOW
+# MEANINGFUL: after the 2b-2c purge (proved empty by 2d), the only way to reach 146
+# is to have replayed the dump onto an empty schema. Under the old step 2 it could
+# only be reached when the migration had added nothing — so it failed exactly when
+# it mattered, and passed only when the rollback was not really needed.
+
+# 3b) GRANTS came back. Compares the GRANTEE SET, not the ACL string: the grantor
+#     recorded in an ACL entry depends on which role issued the GRANT, so a literal
+#     string compare would fail on a correct restore. A MISSING grantee is the real
+#     failure — it leaves the app authenticated but unable to touch its own schema.
+POST_ACL=$(ncq "select coalesce(nspacl::text,'') from pg_namespace where nspname='public'")
+echo "post-restore public ACL: $POST_ACL"
+PRE_ACL="$PRE_ACL" POST_ACL="$POST_ACL" python3 -c "
+import os, sys
+def grantees(acl):
+    return {e.split('=')[0] for e in acl.strip('{}').split(',') if '=' in e}
+pre, post = grantees(os.environ['PRE_ACL']), grantees(os.environ['POST_ACL'])
+missing = pre - post
+print('grantees pre:', sorted(pre) or ['(none)'], '-> post:', sorted(post) or ['(none)'])
+if missing:
+    print('FAIL: schema public lost grantee(s):', sorted(missing)); sys.exit(1)
+print('SCHEMA GRANTS RESTORED')
+" || { echo "RESTORE INCOMPLETE — re-grant manually before scaling up: GRANT USAGE, CREATE ON SCHEMA public TO <the missing role>; then re-run this gate"; exit 1; }
+# FAILS ON: any role present before the purge and absent after. An empty PRE_ACL
+# cannot reach here (2a aborts on it), so this gate can never pass vacuously.
 
 # 4) bring nocodb back and confirm it runs the OLD code
 kubectl scale deploy -n databases nocodb --replicas=1
@@ -652,19 +851,34 @@ shared instance, not just nocodb's, and is a last resort coordinated per
   today. The exposure is a human co-scheduling them.
 - **`kube-prometheus-stack-91.4.1` — declared.** §4.5 reads Prometheus; a
   same-night kps bump takes that instrument down for minutes and the gate would
-  measure a restarting stack rather than a clean cluster. kps is currently
-  `status: draft`, `window: null`, and gated behind
-  `depends_on: prometheus-crd-ownership`, so it cannot be placed yet — the
-  declaration is pre-emptive and costs nothing.
+  measure a restarting stack rather than a clean cluster. **CORRECTED 2026-09-21:**
+  the 2026-09-20 draft called this declaration "pre-emptive" because kps was
+  "gated behind `depends_on: prometheus-crd-ownership`, so it cannot be placed
+  yet". That is no longer true — kps's own frontmatter records that dependency as
+  RESOLVED/executed on 2026-09-20, and the `prometheus-crd-ownership` plan file has
+  been retired. kps is `status: draft`, `window: null`, and **placeable**, so this
+  is a live exclusion, not a theoretical one.
 - **Shared `postgresql` instance** (same token `nocodb-calver.md` used). The
   `postgresql` pod itself is not restarted, but the migration runner writes into
   nocodb's database inside it, sharing that instance's CPU/disk with every other
-  tenant DB. Re-verified 2026-09-20: **no other OPEN plan writes to this
-  instance.** `nocodb-calver`, `authentik-pg18-lockstep`, `superset-pg-cutover`
-  and `superset-pg-decommission` are all `status: executed`; the paperless and
-  paperclip DB plans declare `shared: []` against their own dedicated instances.
-  (The 2026-09-11 draft described `authentik-pg18-lockstep` as open — it has since
-  executed. Conclusion unchanged.) Re-check `--open` immediately before scheduling.
+  tenant DB. Measured live 2026-09-21, that instance holds five databases:
+  `nocodb`, `oc8`, `pellets`, `postgres`, `sweep_history`.
+  **CORRECTED 2026-09-21 — the previous claim "no other OPEN plan writes to this
+  instance" was overstated.** `media-audit-durable-output` (`awaiting-go`,
+  `sat-attended:2026-10-10`) declares `namespaces: [media, databases]` and
+  `touches.resources: "postgres: sweep_history"` — and `sweep_history` is a
+  database **inside this same instance**, not a separate server. So a second open
+  plan *does* write to this instance. The operational conclusion is unchanged, but
+  it rests on two narrower facts, both of which must be re-checked rather than
+  assumed: it writes a **different database** (`sweep_history`, not `nocodb`), and
+  it is scheduled for a **different night** (10-10 vs. this plan's recommendation
+  below). Neither this plan's dump/restore nor its §4 contents gates touch
+  `sweep_history`, and vice versa. What remains genuinely exclusive is narrower:
+  **no other open plan writes to the `nocodb` database.** `nocodb-calver`,
+  `authentik-pg18-lockstep`, `superset-pg-cutover` and `superset-pg-decommission`
+  are all `status: executed`; the paperless and paperclip DB plans declare
+  `shared: []` against their own dedicated instances. Re-check `--open`
+  immediately before scheduling.
 - `nocodb-data` PVC is Longhorn RWO but effectively empty (`lost+found` only);
   no storage-class hazard (`longhorn-static`, `Retain`).
 - Expected user-visible downtime ~1-3 min (pod replace + migration boot).
@@ -674,22 +888,47 @@ shared instance, not just nocodb's, and is a last resort coordinated per
 - **Release-age cooldown: CLEARED.** The 2026-09-11 draft said "do not run
   before 2026-09-12T11:31 UTC". Measured 2026-09-20, the tag is 234.9h old.
   This constraint is discharged and no longer constrains the window choice.
-- **Recommended window (not assigned — `window: null`): `sun-attended:2026-10-04`.**
-  Re-derived 2026-09-20 from live frontmatter (the 2026-09-11 draft recommended
-  `sun-attended:2026-09-13`, now a week in the past, on inputs that have all
-  moved). Method: `window-scheduler.py` RISK_WEIGHT low=1/medium=2/high=4,
-  `STEP0_RESERVE_MIN = 20`, so the usable budget is `duration_min - 20`.
-  | slot | committed | load | verdict for this plan (medium=2, 45min) |
+- **Recommended window (not assigned — `window: null`): `sat-attended:2026-10-17`,
+  fallback `sun-attended:2026-10-18`.**
+  **RE-DERIVED 2026-09-21 from live `maintenance-plan.py --json`.** The 2026-09-20
+  table was wrong in two ways and is replaced wholesale: it recommended
+  `sun-attended:2026-10-04` on the evidence "*(empty)* | risk 0/6, 0min/180", but
+  that slot holds **`nextcloud-34.0.4`** (`status: vetted`, medium, 75 min, and it
+  now carries a recorded operator GO); and its `sun-attended:2026-09-20` row was
+  stale. Root cause worth naming so the next author avoids it: in the JSON,
+  `scheduled` is a **dict keyed by window id**, not a list — iterating it yields
+  slot-id STRINGS, so a membership test written against it finds no plans and every
+  slot reads empty.
+  Method: `window-scheduler.py` RISK_WEIGHT low=1/medium=2/high=4, capacity_risk 6
+  per window, and budget = `duration_min - STEP0_RESERVE_MIN(20)`
+  (window-scheduler.py:92 and :270) — so **sat = 70 min, sun = 180 min**, never the
+  raw 90/200. This plan adds risk 2 and 45 min. Nightly slots are excluded
+  outright: §4.6's acceptance gate is a human browser pass, so this needs an
+  **attended** slot.
+  | slot | committed (live) | load | verdict for this plan (medium=2, 45 min) |
   |---|---|---|---|
-  | `sun-attended:2026-09-20` | absenty(low,60) + nextcloud-34.0.4(med,45) + prometheus-crd-ownership(med,30) | risk 5/6, 135min/180 | **risk would hit 7 > 6** — and it is today |
-  | `sat-attended:2026-09-26` | wazuh-2xx-edge-coverage(med,45) | risk 2/6, 45min/70 | **45+45=90 > 70min** |
-  | `sun-attended:2026-09-27` | talos-1.14.0(high,140) | risk 4/6, 140min/180 | talos claims the whole slot (node roll = every verification runs against a cluster in motion) |
-  | `sat-attended:2026-10-03` | external-dns-unowned-cnames(med,40) + nextcloud-mcp-0.187.1(med,30) | risk 4/6, 70min/70 | **budget already exactly full** |
-  | `sat-attended:2026-10-10` | media-audit-durable-output(low,45) | risk 1/6, 45min/70 | **45+45=90 > 70min** |
-  | `sun-attended:2026-10-04` | *(empty)* | risk 0/6, 0min/180 | **FITS: risk 2/6, 45/180min** |
-  `sun-attended:2026-10-04` is also **attended**, which this plan requires —
-  §4.6's acceptance gate is a human browser pass. The window agent makes the
-  final call; this is a recommendation, not an assignment.
+  | `sat-attended:2026-09-26` | wazuh-2xx-edge-coverage (med, 45) | risk 2/6, 45/70 | **45+45=90 > 70 min** |
+  | `sun-attended:2026-09-27` | talos-1.14.1 (high, 145) | risk 4/6, 145/180 | **145+45=190 > 180 min** — and a node roll runs every verification against a cluster in motion |
+  | `sat-attended:2026-10-03` | external-dns-unowned-cnames (med, 40) + nextcloud-mcp-0.187.1 (med, 30) | risk 4/6, 70/70 | **budget exactly full** |
+  | `sun-attended:2026-10-04` | **nextcloud-34.0.4 (med, 75, vetted, operator GO recorded)** | risk 2/6, 75/180 | capacity would fit (120/180, risk 4/6) but **EXCLUDED — rollback-class stacking**, see below |
+  | `sat-attended:2026-10-10` | media-audit-durable-output (low, 45) | risk 1/6, 45/70 | **45+45=90 > 70 min** |
+  | `sun-attended:2026-10-11` | jellyfin-12.1 (high, 60) | risk 4/6, 60/180 | capacity would fit (105/180, risk 6/6 — at the cap) but **EXCLUDED — rollback-class stacking** |
+  | `sat-attended:2026-10-17` | *(empty — verified against the live `scheduled` dict)* | risk 0/6, 0/70 | **FITS: risk 2/6, 45/70 min — RECOMMENDED** |
+  | `sun-attended:2026-10-18` | *(empty)* | risk 0/6, 0/180 | fits (risk 2/6, 45/180) — fallback if 10-17 fills |
+- **Why not `sun-attended:2026-10-04`, even though 105 min are free there.** That
+  slot holds `nextcloud-34.0.4`, which is `rollback_class: backup-restore` +
+  `capability_change: true` — as is this plan. Two backup-restore rollbacks in one
+  window leaves no rollback capacity for either; `nextcloud-34.0.4`'s own `window:`
+  note records this as "the same no-rollback-capacity stacking the reconciler
+  already rejected for jellyfin+frigate", which is why it avoided
+  `sun-attended:2026-10-11`. **Nextcloud has the recorded GO and keeps 10-04**;
+  this plan moves. The same reasoning excludes `sun-attended:2026-10-11`
+  (jellyfin-12.1: high, backup-restore, capability_change). Both are now declared
+  in `conflicts_with`, so the scheduler enforces it rather than relying on this
+  prose.
+- Re-run the derivation immediately before scheduling: three of the occupants above
+  are `awaiting-go`/`draft` and can still move, and `sat-attended:2026-10-17` is
+  only empty until something else claims it.
 - One-way boundary: once §4.6's operator acceptance gate passes and the window
   closes, **the pre-upgrade dump is the only way back** — keep
   `~/backups/nocodb/nocodb-pre-2026.09.0-<date>.sql.gz` **and**
