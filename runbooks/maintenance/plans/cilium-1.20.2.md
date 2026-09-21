@@ -30,6 +30,11 @@ est_duration_min: 55                  # 13 pre-checks + premise runner ~12 · ed
                                       # ~15 · mandatory 15-min settle. RAISED from 50 on
                                       # 2026-09-21: §4.8 (fresh-pod CNI ADD canary) and §2m
                                       # (enforcement baseline) are new work, ~4 min together.
+                                      # UNCHANGED by the 2026-09-21 repair: §4.8 went from one
+                                      # canary to one PER NODE (+~40s, they run back-to-back)
+                                      # and §3.4's optional override was measured to cost a
+                                      # helm upgrade and ZERO node-steps (§3.4), not the +8 min
+                                      # it used to claim. Both fit inside the 55 already booked.
                                       # Still fits a 70-min schedulable sat-attended budget
                                       # SOLO — see §6, which does that arithmetic against
                                       # duration_min - STEP0_RESERVE_MIN, not duration_min.
@@ -202,10 +207,10 @@ premises:                             # MACHINE-CHECKED preconditions, re-run at
     why: "Rolling a CNI that is already down a node is how a 2-of-3 maxUnavailable roll becomes a full outage."
     run: kubectl get ds -n kube-system cilium -o jsonpath='{.status.desiredNumberScheduled} {.status.numberReady}'
     expect_exact: "3 3"
-  - id: maxunavailable-is-still-2
-    why: "§1.5's blast-radius claim and the whole §3.4 decision rest on this being 2. If a previous window took §3.4, it is 1 and §1.5 is stale."
+  - id: maxunavailable-is-1-or-2
+    why: "BOTH values are legal here, which is why this is a regex and not expect_exact. 2 = the chart default, the state §1.5 describes and §3.4 offers to change. 1 = §3.4 already taken (earlier in THIS window, or in an earlier one) — then skip §3.4 and read §1.5's '2 of 3' as history, not as current state. Anything else (0, 3, empty) means something outside this plan edited the DaemonSet, and §1.5's blast-radius arithmetic no longer describes the roll. RELAXED 2026-09-21, and this is the B4 fix: as expect_exact '2' the premise was MUTUALLY EXCLUSIVE with §3.4's own instruction to commit the override first and separately. The window agent re-runs premises at execution time, so an operator who took §3.4 as written made the very next premise run FAIL with \"got '1', want exactly '2'\" — stopping a plan that was proceeding exactly as written. Relaxing is the right limb rather than an ordering constraint, because ordering is prose the runner cannot see, and the premise must stay meaningful in both legal states instead of being evaluated once at a moment chosen to make it true."
     run: kubectl get ds -n kube-system cilium -o jsonpath='{.spec.updateStrategy.rollingUpdate.maxUnavailable}'
-    expect_exact: "2"
+    expect_matches: "^[12]$"
   - id: chart-1.20.2-is-published
     why: "Never bump to a version that is not there. Uses `helm show chart` — curl is NOT in the premise runner's allowlist. A stale local repo cache fails this CLOSED; the fix is `helm repo update`, not relaxing the premise."
     run: helm show chart cilium/cilium --version 1.20.2 | grep '^version'
@@ -423,7 +428,9 @@ holds both down together.
 maxUnavailable 1" and "16 VIPs / 16 leases".** Both were wrong — it is 2, and
 there are **14** LoadBalancer services and **14** `cilium-l2announce` leases
 today. That plan's text would have understated the simultaneous blast radius by
-2×. Corrected here; §3.3 offers the optional fix.
+2×. Corrected here; **§3.4** offers the optional fix — at a cost §3.4 now states
+correctly (one helm upgrade, zero node-steps; the old "+8 min, a full agent roll"
+was measured to be false).
 
 ### 1.6 Security driver
 
@@ -451,6 +458,18 @@ things the prose never checked. Verified 2026-09-21: `PASS cilium-1.20.2
 #   PASS: every premise PASS, exit 0.
 #   FAIL MODE: any premise FAIL, or exit non-zero — including "declares no
 #   premises", which is what this plan did before 2026-09-21.
+#
+#   A FIRST FAIL OF ONE SPECIFIC SHAPE IS A RE-RUN, NOT A STOP. The premises
+#   `no-kustomization-in-flight` / `no-helmrelease-in-flight` assert that NOTHING
+#   is reconciling, and Step 0 (the window's safe-update batch) or a `run-now`
+#   preflight always runs immediately before this plan — so a Flux object is
+#   often still settling when the runner first fires. An independent review run
+#   on 2026-09-21 FAILed on `ai/mcpo` "Reconciliation in progress" and PASSed
+#   60s later with nothing changed. So: on a FAIL naming an in-flight or
+#   reconciling object, wait ~60s and re-run ONCE. Escalate only if it fails
+#   twice, or if the FAIL names anything else — every other premise here asserts
+#   a steady-state fact that time alone will not fix, and a re-run that keeps
+#   failing is a real stop.
 ```
 
 The gates below that the premise runner **cannot** express — `$( )`, `>` and
@@ -472,12 +491,14 @@ for p in $(kubectl get pods -n kube-system -l k8s-app=cilium -o name); do
   echo -n "$p "
   kubectl -n kube-system exec "$p" -c cilium-agent -- cilium-dbg status | grep -E 'Modules Health'
 done
-#   Measured 2026-09-21: Degraded(0) on all three; OK(311) / OK(365) / OK(371).
-#   The OK COUNT IS NOT A GATE — it is per-node and tracks how many endpoints and
-#   subsystems that agent happens to own, so it drifts with pod placement. The
-#   earlier "OK(307)" written here was a single-node reading from 2026-09-16 and
-#   is stale. `Degraded(0)` is the gate. Note this also replaces the old
-#   `exec ds/cilium` form, which silently reads ONE arbitrary pod.
+#   THE GATE IS `Stopped(0) Degraded(0)` ON ALL THREE — measured 2026-09-21.
+#   DO NOT write the OK counts down here. They drift within a single day: the
+#   reading taken when this section was last edited (311/365/371) had become
+#   374/308/365 hours later, with no cilium change in between. That is why §4.3
+#   compares Degraded/Stopped and treats the OK count as colour. Take THIS
+#   window's reading as the baseline §4.3 compares to, rather than trusting any
+#   number committed to this file. Note this form also replaces the old
+#   `exec ds/cilium`, which silently reads ONE arbitrary pod.
 
 # c) PREMISE — the HelmRelease is Ready and actually on 1.20.1.
 kubectl get hr -n kube-system cilium \
@@ -620,17 +641,68 @@ updateStrategy:
 Supported by the chart's own `values.schema.json` (top-level `updateStrategy`
 with `rollingUpdate.maxUnavailable`, verified against chart 1.20.2).
 
-- **Take it** and the roll is slower (~3 node-steps instead of 2) but only one
-  third of the datapath is ever down, and a stuck image pull cannot strand two
-  nodes at once.
+**COST — CORRECTED 2026-09-21, AND THE CORRECTION CHANGES THE DECISION.** This
+section used to claim the override "is itself a full agent roll; budget +8 min",
+and then used that invented cost as the stated reason to skip the mitigation.
+**It is false.** Re-measured here by rendering chart 1.20.1 against the REAL
+`app/helm-values.yaml` twice — once with the four lines above appended to a
+scratch copy:
+
+```
+$ helm template cilium cilium/cilium --version 1.20.1 -n kube-system \
+    -f kubernetes/apps/kube-system/cilium/app/helm-values.yaml   # 1734 lines
+$ helm template cilium cilium/cilium --version 1.20.1 -n kube-system \
+    -f /tmp/values-with-override.yaml    # scratch copy + the 4 lines, 1734 lines
+$ diff render-base.yaml render-with.yaml
+1009c1009
+<       maxUnavailable: 2
+---
+>       maxUnavailable: 1
+```
+
+**That is the entire diff — one line out of 1734.** Line 1009 sits in
+`spec.updateStrategy.rollingUpdate` of `ds/cilium`: the DaemonSet document
+begins at line 994, and `spec.template:` begins at line **1011 in both
+renders**. So `spec.template` is byte-identical, the DaemonSet's pod-template
+hash does not change, and **the kubelet recreates no pod**. The true cost is one
+helm upgrade and **zero node-steps**.
+
+**So the operator decision is not "is this mitigation worth 8 extra minutes of
+rolling?" — the mitigation is very nearly free.** What it actually costs:
+
+- **Take it** and only one third of the datapath is ever down during THIS
+  upgrade, and a stuck image pull cannot strand two nodes at once — which is the
+  whole reason §1.5 exists. The upgrade's own roll becomes 3 node-steps instead
+  of 2, so the roll in §3.6 runs somewhat longer; applying the override itself
+  costs nothing.
 - **Skip it** and the behaviour is exactly what the last two cilium bumps did.
 - It changes *future* cilium rolls too, which is why it gets **its own commit**
   and its own revert line in §5.
 
-If taken, commit it **first and separately**, let Flux settle (the DS spec change
-alone triggers a roll — so this is itself a full agent roll; budget +8 min), and
-only then do §3.5. If that is more change than the window has appetite for,
-skip §3.4 entirely — the upgrade does not depend on it.
+If taken, commit it **first and separately** and let Flux settle. Then verify —
+**both halves**, because the claim under test is that this lands WITHOUT a roll:
+
+```bash
+kubectl get ds -n kube-system cilium \
+  -o jsonpath='{.spec.updateStrategy.rollingUpdate.maxUnavailable}{"\n"}'
+#   PASS: 1.  FAIL MODE: still 2 => the generated values ConfigMap has not
+#   re-rendered or helm-controller has not upgraded yet. Wait for the HR to go
+#   Ready and re-read; do NOT proceed to §3.5 on an unverified override.
+kubectl get pods -n kube-system -l k8s-app=cilium
+#   PASS: three pods, AGES UNCHANGED across the commit. This is the gate that
+#   proves no roll happened — measured 2026-09-21 pre-change, all three were
+#   ~15d old (created 2026-09-06T07:13:52Z / 07:23:33Z / 07:36:50Z).
+#   FAIL MODE: ages reset to seconds => something DID recreate the pods, the
+#   render analysis above does not describe what actually landed, and you should
+#   stop and find out what else moved before starting §3.5.
+```
+
+Taking §3.4 does **not** break the next premise run: the
+`maxunavailable-is-1-or-2` premise accepts `^[12]$` precisely so that this
+section and the machine-checked preconditions are not mutually exclusive (see
+that premise's `why`). Only then do §3.5. §3.4 remains optional — the upgrade
+does not depend on it — but **"it costs a full agent roll" is no longer a reason
+to skip it, because it does not.**
 
 ### 3.5 Commit + push (SHARED worktree — path-scoped, never `git add -A`)
 
@@ -746,12 +818,16 @@ done
 #   FAIL MODE: Degraded(n>0) — the brief summary can still read OK while a
 #   subsystem is degraded, which is exactly why both lines are checked.
 #
-#   THE OK COUNT IS NOT A GATE. The old text here said "OK count >= 300
-#   (baseline 307)". Re-measured 2026-09-21 the three agents report OK(311),
-#   OK(365) and OK(371) — the count is per-node and tracks how many endpoints
-#   and subsystems that agent owns, so it moves with ordinary pod placement and
-#   a threshold on it either never fires or fires for the wrong reason. Compare
-#   `Degraded`/`Stopped` against the §2b baseline; read the OK count as colour.
+#   THE OK COUNT IS NOT A GATE, AND NO BASELINE NUMBER IS QUOTED HERE ANY MORE.
+#   Successive texts quoted "307", then "311/365/371", and both were stale
+#   within days. Proof that a number here is unmaintainable: the 311/365/371
+#   triple was written on 2026-09-21 and a re-measurement THE SAME DAY read
+#   374/308/365 — the multiset itself changed, with no cilium change between
+#   the two readings. The count is per-node and tracks how many endpoints and
+#   subsystems that agent happens to own, so it moves with ordinary pod
+#   placement and a threshold on it either never fires or fires for the wrong
+#   reason. Compare `Degraded`/`Stopped` against the §2b baseline taken in THIS
+#   window; read the OK count as colour, never as a gate.
 ```
 
 *Binary note:* both `cilium` and `cilium-dbg` exist in the agent container on
@@ -860,54 +936,90 @@ days after the window closed and nobody connects it to cilium. Nothing else here
 creates a pod, so nothing else tests the path.
 
 ```bash
-kubectl -n default delete pod cni-canary --ignore-not-found
+# ONE CANARY PER NODE — this is the point of the section, not a refinement.
+# `maxUnavailable: 2` (§1.5) means two agents restart together, so the
+# regression this gate exists to catch is "one agent came back unable to serve
+# CNI ADD on ITS node". An unpinned `kubectl run` lets the scheduler place a
+# single canary anywhere across the three nodes, so it can land on a healthy
+# node and report PASS while another node's CNI ADD is dead — which is exactly
+# the failure the deny rule demands this plan exercise. Pin with nodeName.
+# Verified 2026-09-21 that kubectl v1.36.0 (client and server) accepts this
+# --overrides JSON and puts nodeName into the pod spec. Adds ~40s.
+for N in k8s-nuc14-01 k8s-nuc14-02 k8s-nuc14-03; do
+  kubectl -n default delete pod "cni-canary-$N" --ignore-not-found
+  kubectl -n default run "cni-canary-$N" --restart=Never --image=busybox:1.38.0 \
+    --overrides="{\"spec\":{\"nodeName\":\"$N\"}}" --command -- sh -c \
+    'wget -q -T 5 -O- http://echo-server.default.svc.cluster.local:8080/ >/dev/null && echo CNI_CANARY_OK || echo CNI_CANARY_FAIL'
+done
 
-kubectl -n default run cni-canary --restart=Never --image=busybox:1.38.0 \
-  --command -- sh -c \
-  'wget -q -T 5 -O- http://echo-server.default.svc.cluster.local:8080/ >/dev/null && echo CNI_CANARY_OK || echo CNI_CANARY_FAIL'
+# ALL THREE GATES, AGAINST EACH CANARY. Every gate exits non-zero on failure,
+# and the loop echoes the node first, so the output names the node that failed.
+for N in k8s-nuc14-01 k8s-nuc14-02 k8s-nuc14-03; do
+  POD="cni-canary-$N"
+  echo "===== $N ====="
 
-# GATE 1 — CNI ADD succeeded. A pod cannot reach Succeeded without an IP.
-kubectl -n default wait --for=jsonpath='{.status.phase}'=Succeeded \
-  pod/cni-canary --timeout=120s
-#   PASS: exit 0, "pod/cni-canary condition met".
-#   FAIL MODE: `wait` exits 1 on timeout while the pod sits in
-#   ContainerCreating. Diagnose with the SCOPED event list (not a cluster-wide
-#   tail, which crowds the one line that matters out of 20):
-#     kubectl -n default describe pod cni-canary | tail -20
-#     kubectl -n default get events --field-selector involvedObject.name=cni-canary
-#   The signature is FailedCreatePodSandBox naming plugin type "cilium-cni".
+  # GATE 1 — CNI ADD succeeded ON THIS NODE. A pod cannot reach Succeeded
+  # without an IP.
+  kubectl -n default wait --for=jsonpath='{.status.phase}'=Succeeded \
+    "pod/$POD" --timeout=120s
+  #   PASS: exit 0, "pod/cni-canary-<node> condition met".
+  #   FAIL MODE: `wait` exits 1 on timeout while the pod sits in
+  #   ContainerCreating. Diagnose SCOPED to the node that failed (not a
+  #   cluster-wide tail, which crowds out the one line that matters):
+  #     kubectl -n default describe pod "$POD" | tail -20
+  #     kubectl -n default get events --field-selector involvedObject.name="$POD"
+  #   The signature is FailedCreatePodSandBox naming plugin type "cilium-cni".
 
-# GATE 2 — the pod got a routable pod-network IP.
-kubectl -n default get pod cni-canary -o jsonpath='{.status.podIP}{"\n"}'
-#   PASS: a 10.69.x.y address (the pod CIDR; live pods measured 2026-09-21 sit
-#   on 10.69.0/1/2.x). FAIL MODE: empty output.
+  # GATE 2 — the pod got a routable pod-network IP. ASSERTED, not printed.
+  IP=$(kubectl -n default get pod "$POD" -o jsonpath='{.status.podIP}')
+  case "$IP" in 10.69.*) echo "GATE2 PASS podIP=$IP";; *) echo "GATE2 FAIL podIP='$IP'"; false;; esac
 
-# GATE 3 — east-west: DNS resolved AND the Service was reachable.
-kubectl -n default logs cni-canary
-#   PASS: exactly CNI_CANARY_OK
-#   FAIL MODE: CNI_CANARY_FAIL — coredns did not resolve, or eBPF service
-#   load-balancing did not forward to the backend.
+  # GATE 3 — east-west: DNS resolved AND the Service was reachable. ASSERTED.
+  kubectl -n default logs "$POD" | grep -qx CNI_CANARY_OK \
+    && echo "GATE3 PASS" || { echo "GATE3 FAIL"; kubectl -n default logs "$POD"; false; }
+done
 
-kubectl -n default delete pod cni-canary --ignore-not-found
+# Clean up ALL THREE canaries.
+for N in k8s-nuc14-01 k8s-nuc14-02 k8s-nuc14-03; do
+  kubectl -n default delete pod "cni-canary-$N" --ignore-not-found
+done
 ```
 
-*Every object named here was verified live 2026-09-21:* `svc/echo-server` exists
-in ns `default` on port 8080; ns `default` has **zero** NetworkPolicies and zero
+*Every object named here was verified live 2026-09-21:* the three node names are
+`k8s-nuc14-01/02/03` (`kubectl get nodes`); `svc/echo-server` exists in ns
+`default` on port 8080; ns `default` has **zero** NetworkPolicies and zero
 CiliumNetworkPolicies, so a default-deny cannot fail the canary for an unrelated
 reason; and `busybox:1.38.0` is already resident on **all three** nodes via
 `ds/security/falco-log-rotate` (3/3 ready), so a CNI-ADD failure can never be
-misread as a slow image pull. All three are also frontmatter premises.
+misread as a slow image pull. All of these are also frontmatter premises. No
+`cni-canary-*` pod exists in ns `default` today, so the names are free.
 
-*Proof each gate can fail.* Gate 1: `kubectl wait` exits non-zero on timeout —
-the failure is an exit code, not absent output. Gate 2: the jsonpath prints an
-empty line when `podIP` is unset. Gate 3: the FAIL branch is written into the
-container's own command (`|| echo CNI_CANARY_FAIL`), so the failing output is
-structurally guaranteed rather than inferred, and `CNI_CANARY_OK` does not
-appear as a substring of `CNI_CANARY_FAIL`. Note the deliberate split: the
+*Proof each gate can fail — DRY-TESTED 2026-09-21, not inferred.*
+
+- **Gate 1** exits non-zero on timeout: the failure is an exit code, not absent
+  output.
+- **Gate 2 was rewritten because the old form could not fail.** It used to be
+  `get pod -o jsonpath='{.status.podIP}'`, which on failure prints an empty line
+  and **exits 0** — indistinguishable in a window log from a gate that was
+  skipped, the exact defect §4.6 was repaired for. The `case` form asserts the
+  pod CIDR and returns non-zero otherwise. Dry-tested: `IP=10.69.1.42` prints
+  `GATE2 PASS podIP=10.69.1.42` rc=0; `IP=""` prints `GATE2 FAIL podIP=''` rc=1.
+  The prefix is right — all 306 pod-network IPs in the cluster are `10.69.*`
+  (the remaining 25 are `hostNetwork` pods on `192.168.*`, which a canary is
+  not), so a hostNetwork fallback would also fail this gate rather than pass it.
+- **Gate 3 was rewritten because it had no assertion at all** — a bare
+  `kubectl logs` is an eyeball, and an eyeball in a 03:30 window log is not a
+  gate. `grep -qx` anchors the WHOLE line. Dry-tested: `CNI_CANARY_OK` → rc=0;
+  `CNI_CANARY_FAIL` → rc=1 (and `-x` means a hypothetical `CNI_CANARY_OK_LATER`
+  would not match either); empty log → rc=1, so a pod that produced no output at
+  all fails rather than passing quietly. The failure branch re-prints the log so
+  the window operator sees why.
+
+Note the deliberate split, which the per-node loop preserves: the container's
 command exits 0 either way, so Gate 1 tests **only** pod admission (CNI ADD)
 while Gate 3 tests **only** reachability. Two distinct failure modes, two
-distinct gates; collapsing them into one would let a DNS failure masquerade as a
-CNI failure and trigger the wrong rollback limb.
+distinct gates; collapsing them would let a DNS failure masquerade as a CNI
+failure and trigger the wrong rollback limb.
 
 **4.9 — OPERATOR GATE (the deny rule's actual requirement).** Play a stream
 through Music Assistant and open the Home Assistant dashboard. Both must work.
@@ -1002,7 +1114,12 @@ r = [x for x in h if x['chart'] == 'cilium-1.20.1']
 print(r[-1]['revision'] if r else 'NONE')
 ")
 echo "rollback target revision: $REV"      # measured 2026-09-21: 13
-test "$REV" != NONE || echo 'STOP — no cilium-1.20.1 revision in helm history'
+test "$REV" != NONE || { echo 'STOP — no cilium-1.20.1 revision in helm history'; exit 1; }
+#   The `{ …; exit 1; }` form is load-bearing. As a bare `|| echo` this only
+#   PRINTED the warning and then fell straight through into
+#   `helm rollback cilium "NONE"` — during a datapath outage, with a nonsense
+#   revision. Dry-tested 2026-09-21: REV=NONE prints STOP and returns rc=1
+#   without reaching the rollback; REV=13 proceeds normally.
 helm rollback cilium "$REV" -n kube-system --wait --timeout 10m
 
 # 3. Prove the datapath is back (§4.3, §4.4, §4.5).
@@ -1020,7 +1137,14 @@ rows = sorted((i['metadata']['namespace'] + '/' + i['metadata']['name'],
 ")
 
 # 4. ONLY NOW reconcile git with reality, then hand control back to Flux.
-git revert --no-edit <bump-commit-sha> && git push origin main
+git revert --no-edit <bump-commit-sha>
+git push origin main
+#   `flux resume` is on its OWN line deliberately. Chained as
+#   `git revert … && git push …` followed by the resume, a push failure (rejected
+#   non-fast-forward in this shared checkout, or GitHub unreachable — plausible
+#   while the datapath is broken) short-circuits the chain and leaves the
+#   HelmRelease SUSPENDED, which the paragraph below calls an incident in its own
+#   right. Resume regardless, then fix the push.
 flux resume helmrelease cilium -n kube-system
 ```
 
