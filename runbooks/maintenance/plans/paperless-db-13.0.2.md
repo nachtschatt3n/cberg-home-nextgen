@@ -102,7 +102,21 @@ finding_refs: [F-1c080cce]            # CORRECTED 2026-09-21 (was []). The sweep
                                       # This is a PLAN-lane critical: without the ref here the
                                       # plan-or-page join leaves it reading as unplanned and it
                                       # pages the operator after plan_sla_days.
-status: draft                         # UNBLOCKED 2026-09-21 by an explicit operator override of
+status: vetted                        # VETTED 2026-09-21. An independent plan-reviewer
+                                      # returned ready-for-go on the SECOND pass, after B1-B3
+                                      # were repaired, and then a further pass cleared six
+                                      # non-blocking items — including the one that mattered:
+                                      # $DUMP was set only inside §3.2's script block but used
+                                      # by §5.4's destructive restore, so in a fresh shell hours
+                                      # later it expanded EMPTY. That is a defect in the only
+                                      # rollback for a database with no second copy, and it
+                                      # bites exactly when everything else has already failed.
+                                      # STILL REQUIRED BEFORE IT RUNS: an operator GO recorded
+                                      # against sat-attended:2026-10-24 specifically. The
+                                      # override of the RECOMMENDATION block is a decision to
+                                      # proceed at all; it is NOT a window GO, and this plan is
+                                      # HUMAN-GATED so nothing will run it unattended.
+                                      # PREVIOUSLY: unblocked 2026-09-21 by an explicit operator override of
                                       # the RECOMMENDATION block (annotated in place below, not
                                       # deleted). §2's ABORT list keys on exactly that override
                                       # existing, so it is recorded HERE and in the block, not
@@ -129,7 +143,15 @@ status: draft                         # UNBLOCKED 2026-09-21 by an explicit oper
                                       # with no look-first step and no abort point, on a database
                                       # with no second copy. The operator was shown all of this
                                       # and chose to proceed.
-window: null                          # the scheduler assigns; nothing should claim a slot
+window: "sat-attended:2026-10-24"      # OPERATOR-CHOSEN 2026-09-21. The first slot that can
+                                      # take it: 0 of 70 schedulable minutes used, and it holds
+                                      # none of the six backup-restore plans this one now
+                                      # conflicts with. Every earlier slot fails on one axis or
+                                      # the other — 09-26/09-27/10-03/10-10 on capacity,
+                                      # 10-04/10-11/10-17/10-18 because each already holds a
+                                      # backup-restore plan. At 60 min it fits ALONE, with 10
+                                      # minutes spare; it must not share the slot.
+                                      # SUPERSEDED NOTE: the scheduler assigns; nothing should claim a slot
                                       # while the recommendation stands
 premises:
   # SCOPE NOTE (inherited from paperless-db-12.3.3, re-confirmed against
@@ -362,10 +384,20 @@ quiesce loses nothing — it delays.
 ### 1.5 One security-adjacent interaction (cited by id only, no detail here)
 
 `security-check.py` rates a fixable-CVE finding actionable only when
-`_newer_upstream_tag_exists()`. A newer tag (13.0.2) now exists, which can flip
-the standing accepted finding **F-fbbeecab** on the `mariadb:12.3.3` image from
-`[AR-029] already on the newest upstream tag` to actionable, and that will read
-as pressure to take this bump. It should not:
+`_newer_upstream_tag_exists()`. A newer tag (13.0.2) now exists, and **the flip
+this section predicted has since happened** — so the ids are updated here to
+match the DB rather than sending a reader after a closed row (verified against
+the findings DB 2026-09-21):
+
+- **F-fbbeecab** — the standing `[AR-029] already on the newest upstream tag`
+  acceptance on the `mariadb:12.3.3` image — is now **`resolved`** (resolved
+  2026-09-17). Do not chase it; it is closed.
+- **F-c83c3494** is the row that replaced it and is **open** (first seen
+  2026-09-17, the same cycle F-fbbeecab closed). It is the "newer upstream tag
+  available, bump the image" finding on that image, and it will read as pressure
+  to take this bump.
+
+It should not:
 
 - The household rule is *bump, never rebuild* — but it does not say *bump onto
   an unsupported line*. 13.0 stops receiving patches at 2026-12-31, so bumping
@@ -484,8 +516,21 @@ echo "paperless tables=$NT  non-utf8mb4=$NB"
 # leaves the household document DB with NO pod, mid-window, after the app is
 # already quiesced. Resolve the manifest digest first.
 TOK=$(curl -s --max-time 20 "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/mariadb:pull" \
-      | /usr/bin/python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+      | /usr/bin/python3 -c 'import sys,json
+try:
+    print(json.load(sys.stdin)["token"])
+except Exception:
+    pass' || true)
 [ -n "$TOK" ] || { echo "ABORT: no registry token"; exit 1; }
+# The try/except + `|| true` make the NEXT line the thing that fails, rather than
+# the assignment. Without them, under `set -euo pipefail`, a failed curl or a
+# non-JSON body kills the block at the assignment with a raw Python traceback and
+# the `[ -n "$TOK" ]` check is unreachable — it fails CLOSED either way, so this
+# is a consistency/legibility fix, not a safety fix. Dry-tested 2026-09-21 against
+# four fixtures: valid token -> exit 0; empty body, non-JSON body, and well-formed
+# JSON with no "token" key -> all print "ABORT: no registry token", exit 1. The
+# unfixed form on the same non-JSON fixture exits 1 with a JSONDecodeError
+# traceback and never prints its own message (measured).
 DIG=$(curl -s --max-time 20 -D - -o /dev/null \
         -H "Authorization: Bearer $TOK" \
         -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json' \
@@ -565,6 +610,14 @@ tail -1 "$DUMP" | grep -q -- '-- Dump completed' || { echo "ABORT: dump incomple
 T=$(grep -c 'CREATE TABLE' "$DUMP" || true); echo "CREATE TABLE=$T"
 [ "$T" -ge 74 ] || { echo "ABORT: only $T CREATE TABLE (expect >=74)"; exit 1; }
 
+# TARGETED assertion — the >=74 count alone is LOOSER THAN IT READS. The dump is
+# --all-databases, so it also carries the ~30-40 `mysql`/`sys`/`performance_schema`
+# tables; the threshold could therefore be met with only about HALF of paperless's
+# own 74 tables present. Name a table that must be there, so a partial dump cannot
+# satisfy the count:
+grep -qE '^CREATE TABLE `?documents_document`?[^a-zA-Z0-9_]' "$DUMP" \
+  || { echo "ABORT: dump has no paperless documents_document table — partial dump, NOT a valid rollback"; exit 1; }
+
 S=$(wc -c < "$DUMP" | tr -d ' '); echo "bytes=$S"
 [ "$S" -gt 10000000 ] || { echo "ABORT: $S bytes; the 12.3.3 dump was ~25.8 MB"; exit 1; }
 
@@ -591,16 +644,20 @@ Notes on the form, each of which was measured rather than assumed:
 
 - `/usr/bin/python3` is named explicitly (3.9.6 on this Mac) — a bare `python3`
   resolves to the repo `.venv` in some shells and is absent in others.
-- `|| true` on `grep -c` is deliberate: with 0 matches `grep` exits 1, which
-  under `set -e` kills the script at the *assignment* with a bare `exit 2` and
-  no message (measured). The guard keeps the failure but makes it say why.
-- `wc -c < "$DUMP" | tr -d ' '` — BSD `wc` pads its output with spaces, which
-  breaks `[ "$S" -gt … ]` without the `tr`.
-
-`--default-character-set=utf8mb4` is **not optional**: without it the server
-transcodes 4-byte characters to `?` on the way out and the rollback floor is
-corrupt when written (this destroyed a Nextcloud migration's dump on
-2026-08-19).
+- `|| true` on `grep -c` is deliberate: with 0 matches `grep` exits **1**, which
+  under `set -e` kills the script at the *assignment* with no message of its own.
+  The guard keeps the failure but makes it say why. (Exit **2** is the distinct
+  *missing-file* case. Both re-measured on this Mac 2026-09-21 in `bash` and
+  `zsh`: zero matches → 1, absent file → 2. An earlier revision of this note
+  said a zero-match `grep -c` exits 2; it does not.)
+- `wc -c < "$DUMP" | tr -d ' '` — BSD `wc` pads its output with leading spaces,
+  so the `tr` gives a clean value to echo and to compare. It is **defensive
+  hygiene, not a requirement**: re-measured 2026-09-21, padded `wc` output of the
+  form `[     100]` passes `[ "$S" -gt … ]` unchanged in `bash`, `zsh` and `sh`,
+  plain and under `set -euo pipefail`, because `test -gt` strips leading
+  whitespace when coercing to an integer. Keep the `tr` — it costs nothing and
+  the echoed value is cleaner — but do not repeat the earlier claim that the
+  comparison *breaks* without it. That does not reproduce.
 
 `--default-character-set=utf8mb4` is **not optional**: without it the server
 transcodes 4-byte characters to `?` on the way out and the rollback floor is
@@ -787,13 +844,18 @@ kubectl -n office exec deploy/paperless-db -- sh -c \
   'mariadb-check --protocol=socket --all-databases -uroot -p"$MARIADB_ROOT_PASSWORD"' \
   | grep -ivE '[[:space:]]ok$' || echo "all OK"
 # CATCHES: tables the upgrade left needing repair.
-# PATTERN CORRECTED 2026-09-21, and the old comment was wrong about its own code.
-# The prose said mariadb-check prints "<db>.<table><tabs>OK" while the pattern
-# was ' ok$' — a literal SPACE. Dry-tested on this Mac with a two-line fixture
-# (one TAB-separated "OK", one space-padded "OK"): ' ok$' left the TAB line in
-# the output, i.e. a healthy table would have been reported as a failure, AFTER
-# the point of no return. '[[:space:]]ok$' swallowed both OK lines and kept the
-# genuinely broken ones ("paperless.broken_table" / "error    : Corrupt").
+# ON THE PATTERN '[[:space:]]ok$' — this is DEFENCE IN DEPTH, not a reproduced
+# failure, and the distinction is recorded so nobody "simplifies" it back.
+# An earlier revision of this comment claimed mariadb-check emits a
+# TAB-separated "<db>.<table>\tOK" that a literal-space ' ok$' would miss,
+# false-reddening a healthy table after the point of no return. That claim does
+# NOT hold for this component: client/mysqlcheck.c at tag mariadb-13.0.2 has
+# three output paths in print_result(), all "%-50s %s\n" or "%-9s: %s\n" —
+# SPACE-padded, with no tab path on this branch. So the space form would in fact
+# have worked. '[[:space:]]ok$' is kept anyway because it is a strict SUPERSET of
+# ' ok$' (space, tab or any other blank), costs nothing, and removes a dependency
+# on upstream's column formatting staying byte-stable across a major version —
+# which is precisely the thing this plan is changing.
 # Still case-INSENSITIVE and still anchored, so a naive `grep -v OK` (which also
 # swallows any table name containing "ok") is not reintroduced.
 # NOTE: the executed paperless-db-12.3.3 plan carries the even weaker `grep -v OK`
@@ -925,6 +987,39 @@ paperless cannot serve its library.
    (`rm -rf /var/lib/mysql/*` — this PVC only, triple-check the claim name; the
    PVC and PV themselves are NOT deleted), scale up so the entrypoint
    re-initialises from the `MARIADB_*` env, then:
+
+   **Re-derive `$DUMP` first — do not assume it is still set.** It is assigned
+   only inside §3.2's own script block. §5 will very likely run in a FRESH SHELL
+   hours later, where `$DUMP` expands to empty and the restore below silently
+   reads from the terminal instead of the dump — in the one rollback path of a
+   database with no second copy, at the moment everything else has already gone
+   wrong. This block fails closed instead:
+
+   ```bash
+   set -euo pipefail
+   DUMP=$(ls -t "$HOME"/backups/paperless-db/paperless-db-pre-13.0.2-*.sql 2>/dev/null | head -1 || true)
+   [ -n "$DUMP" ] && [ -s "$DUMP" ] || { echo "ABORT: no pre-upgrade dump found — do NOT wipe the datadir"; exit 1; }
+   echo "restoring from $DUMP ($(wc -c < "$DUMP" | tr -d ' ') bytes)"
+   ```
+   Dry-tested on this Mac 2026-09-21 under `bash`, `zsh` and `sh`, against three
+   fixtures, with `$HOME` overridden to a scratch tree:
+
+   - **no matching file** → prints the `ABORT`, exit 1, in all three shells. The
+     naive `DUMP=$(ls -t … | head -1)` — without `2>/dev/null … || true` — instead
+     dies at the *assignment* under `set -euo pipefail`, so the `[ -n "$DUMP" ]`
+     check never runs and the operator sees only `ls`'s error.
+   - **a zero-byte dump present** → `ABORT` via `-s`, exit 1, all three shells.
+     This is the case the `-n` check alone would wave through.
+   - **two dumps present** → the newest is selected; verified by reading the file's
+     *contents*, not by trusting the name's timestamp.
+
+   Expect harmless stderr noise under `zsh` in the no-match case: zsh fails the
+   glob itself, *before* `ls` runs, so `2>/dev/null` cannot suppress its
+   `no matches found` line. Measured — it does not change the outcome (the
+   substitution is still empty, `|| true` absorbs the status, and the explicit
+   check still prints the `ABORT` and exits 1). The `|| true` is what keeps the
+   failure on the explicit check, which is the one that says why.
+
    ```bash
    kubectl -n office exec -i deploy/paperless-db -- sh -c \
      'mariadb --default-character-set=utf8mb4 -uroot -p"$MARIADB_ROOT_PASSWORD"' < "$DUMP"
