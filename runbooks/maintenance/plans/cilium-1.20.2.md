@@ -271,7 +271,29 @@ premises:                             # MACHINE-CHECKED preconditions, re-run at
     why: "If ns default gained a default-deny, §4.8's canary would fail for a reason that has nothing to do with this upgrade — a false rollback trigger."
     run: kubectl get netpol -n default --no-headers | wc -l
     expect_exact: "0"
-status: draft
+status: vetted                        # VETTED 2026-09-21. Second independent plan-reviewer
+                                      # returned ready-for-go after the B1-B4 repair, having
+                                      # EXERCISED all four rather than read them: kubectl
+                                      # --dry-run confirmed nodeName lands in the spec without
+                                      # clobbering the container; every Gate 2/3 branch was run
+                                      # in both zsh and bash; the chart was re-rendered twice
+                                      # and md5 of line 1011..EOF is IDENTICAL in both, proving
+                                      # spec.template is byte-identical; and the relaxed
+                                      # premise was measured through plan-premises.py evaluate().
+                                      # blocking_issues: none. --validate clean, premises 21/21.
+                                      # KNOWN, CARRIED TO THE EXECUTION BRIEF rather than
+                                      # patched post-review: §4.8's per-node loop returns the
+                                      # LAST iteration's status, so a failure on node 01 with
+                                      # 02/03 passing leaves the loop exit code 0. The failure
+                                      # still PRINTS under its node header. Read §4.8's output,
+                                      # never its exit code. Also: nodeName bypasses the
+                                      # scheduler, so check `describe pod` for OutOfcpu/
+                                      # OutOfmemory before attributing a canary failure to the
+                                      # CNI — that path fails safe (false STOP, never false
+                                      # green).
+                                      # §3.4 maxUnavailable 2->1 DECLINED by the operator
+                                      # 2026-09-21: run at 2. The premise accepts ^[12]$, so
+                                      # leaving it at 2 passes unchanged.
 window: null                          # the scheduler assigns. §6 states the constraint:
                                       # an ATTENDED slot, alone.
 sops_refs:
