@@ -355,33 +355,33 @@ deny:
   - match: "*talos*"
     reason: "Talos/Kubernetes node-level component — reboot window required."
   - match: "*valkey*"
-    reason: "INTERIM HOLD added 2026-09-21, scope corrected same day. The only
-      upstream tag above the pinned 9.1.2 is a PRE-RELEASE: `9.2` is a floating
-      2-component tag digest-identical to `9.2.0-rc1` (both sha256:b0eef48f...,
-      pushed 1.7s apart), and the full GA list for this image ends at 9.1.2 --
-      9.1.3, 9.1.4 and 9.2.0 all return HTTP 404. Verified against the registry
-      on 2026-09-19 and again on 2026-09-21.
-      WHERE THIS RULE APPLIES: the Renovate-PR lane in auto-update.py, whose G2
-      gate calls policy_block(policy, parsed['dep'], update_type) with the
-      Renovate depName -- `valkey/valkey` matches this glob.
-      WHERE IT DOES NOT: coverage.py's direct-bump lane. Its deny traversal is
-      reached as denied(policy, key, utype) from assign_lane (coverage.py:2198)
-      and max_rule_fallbacks (1960, 2008), and `key` is the COMPONENT name
-      (coverage.py:2157 and 1959: key = "app-template" if is_app_template else
-      comp). The component here is `penpot-cache`, so this image-repo glob is
-      never consulted on that path. Measured on the live module:
-      denied(policy, 'penpot-cache', 'minor') returns nothing, while
-      denied(policy, 'valkey/valkey', 'minor') returns this reason. The earlier
-      wording of this rule claimed it guarded that lane; it guards the PR lane.
-      WHAT COVERS THE DIRECT-BUMP LANE: the floating-series-pointer check added
-      in edeaabc8 routes 9.1.2 -> 9.2 to PLAN (a target naming fewer version
-      components than the pin on the same major line cannot be shown to be GA),
-      so an unattended window no longer applies it. Live after that change:
-      AUTO holds one unrelated item.
-      REMOVAL CONDITION, unchanged: a GA 9.2.x appears on Docker Hub, or the
-      digest-sibling check described on F-aff597aa lands. Left in place beyond
-      that it would freeze valkey on a genuine future release.
-      security_ref: F-aff597aa, F-f2f1f1a9 (detail on the records, never here)."
+    reason: >-
+      INTERIM HOLD added 2026-09-21, scope corrected the same day. The only upstream
+      tag above the pinned 9.1.2 is a PRE-RELEASE: 9.2 is a floating 2-component tag
+      digest-identical to 9.2.0-rc1 (both sha256:b0eef48f..., pushed 1.7s apart), and
+      the full GA list for this image ends at 9.1.2 - 9.1.3, 9.1.4 and 9.2.0 all
+      return HTTP 404. Verified against the registry on 2026-09-19 and 2026-09-21.
+
+      WHERE THIS RULE APPLIES: the Renovate-PR lane in auto-update.py, whose G2 gate
+      calls policy_block(policy, parsed[dep], update_type) with the Renovate depName.
+      valkey/valkey matches this glob, so a Renovate PR for this image is blocked.
+
+      WHERE IT DOES NOT: coverage.py's direct-bump lane. Its deny traversal is reached
+      as denied(policy, key, utype) from assign_lane (coverage.py:2198) and
+      max_rule_fallbacks (1960, 2008), and key is the COMPONENT name - both
+      coverage.py:2157 and 1959 build it as app-template when the item is an
+      app-template chart, else the component. The component here is penpot-cache, so
+      an image-repository glob is never consulted on that path. Measured on the live
+      module: denied(policy, penpot-cache, minor) returns nothing, while
+      denied(policy, valkey/valkey, minor) returns this reason.
+
+      WHAT COVERS THE DIRECT-BUMP LANE: the floating-series-pointer check added in
+      edeaabc8 - a target naming fewer version components than the pin on the same
+      major line cannot be shown to be GA - which routes 9.1.2 -> 9.2 to PLAN.
+
+      REMOVAL CONDITION: a GA 9.2.x appears on Docker Hub, or the digest-sibling check
+      described on F-aff597aa lands. Left beyond that it would freeze valkey on a
+      genuine future release. security_ref: F-aff597aa, F-f2f1f1a9
 # ── Hard blocks by Renovate manager ─────────────────────────────────────────
 # github-actions patch/minor are already auto-merged by Renovate itself
 # (packageRules in .github/renovate.json5); don't double-handle them here.
