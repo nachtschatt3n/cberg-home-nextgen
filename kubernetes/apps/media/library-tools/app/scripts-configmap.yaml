@@ -45,24 +45,45 @@ data:
     # which silently breaks year-restricted TMDb queries downstream.
     YEAR_RE     = re.compile(r"\((19[0-9]{2}|20[0-9]{2})\)")
     # SOP canonical episode filename is `<Show Name> - SXXEYY - Episode Title.ext`
-    # (docs/sops/media-library-standards.md "Naming rules"). Compliance requires
-    # ALL THREE of:
+    # (docs/sops/media-library-standards.md "Naming rules"), and the SAME rule
+    # says: "Episode title is preferred; if unknown, `Show Name - S01E01.mkv`
+    # is acceptable." Compliance therefore requires BOTH of:
     #   * a CASE-SENSITIVE SxxExx token (uppercase S/E) — release-scene lowercase
     #     `s01e01` and dotted `Show.S01E01.GROUP` forms fail,
     #   * the prefix before the token equals the show folder name EXACTLY,
-    #   * a non-empty episode title AFTER the token.
-    # The prior lax check ` - SxxEyy\b` (case-insensitive, no prefix/title
-    # constraint) measured a weaker rule and under-counted the non-compliant
-    # surface ~4x (reported 99 vs the true 404 of 807). Use episode_name_ok()
-    # below — the bare regex cannot check the prefix, which needs the show name.
-    EPISODE_NAME_RE = re.compile(r"^(?P<show>.+) - S[0-9]{2}E[0-9]{2} - (?P<title>.+)$")
+    # and the episode title after the token is OPTIONAL: either absent entirely
+    # (the documented title-less fallback) or ` - <non-empty title>`. A dangling
+    # ` - ` with nothing after it is NOT the fallback form and still fails.
+    # The prior lax check ` - SxxEyy\b` (case-insensitive, no prefix constraint)
+    # measured a weaker rule and under-counted the non-compliant surface ~4x
+    # (reported 99 vs the true 404 of 807). Then the fix over-corrected: it also
+    # REQUIRED a title, scoring the SOP's own fallback form as a failure — 87 of
+    # the 191 "non-compliant" episodes measured 2026-09-13 were exactly that
+    # form (F-3e46ac10), so code was stricter than the standard. Title-less
+    # compliant episodes are now counted separately as the title-backfill
+    # surface (episode_title_missing()) instead of as naming failures.
+    # Use episode_name_ok() below — the bare regex cannot check the prefix,
+    # which needs the show name.
+    EPISODE_NAME_RE = re.compile(
+        r"^(?P<show>.+) - S[0-9]{2}E[0-9]{2}(?: - (?P<title>.+))?$")
+
+    def _episode_name_match(stem: str, show_name: str):
+        m = EPISODE_NAME_RE.match(stem)
+        return m if (m and m.group("show") == show_name) else None
 
     def episode_name_ok(stem: str, show_name: str) -> bool:
-        """True iff `stem` matches the SOP canonical episode form for `show_name`:
-        `<show_name> - SXXEYY - <Episode Title>` — case-sensitive SxxExx token,
-        prefix equal to the show folder name, non-empty episode title required."""
-        m = EPISODE_NAME_RE.match(stem)
-        return bool(m) and m.group("show") == show_name
+        """True iff `stem` matches an SOP-compliant episode form for `show_name`:
+        `<show_name> - SXXEYY - <Episode Title>` or the documented title-less
+        fallback `<show_name> - SXXEYY` — case-sensitive SxxExx token, prefix
+        equal to the show folder name."""
+        return _episode_name_match(stem, show_name) is not None
+
+    def episode_title_missing(stem: str, show_name: str) -> bool:
+        """True iff `stem` is compliant ONLY via the title-less fallback form
+        `<show_name> - SXXEYY`. Compliant per the SOP, but a title-backfill
+        candidate — reported as its own metric, never as a naming failure."""
+        m = _episode_name_match(stem, show_name)
+        return bool(m) and not m.group("title")
     YT_ID_RE    = re.compile(r"\[([A-Za-z0-9_-]{11})\]")
 
     # Redaction guard: ban the printing of arbitrary filename text.
@@ -358,6 +379,7 @@ data:
     from common import (
         SECTIONS, MEDIA_ROOT, EP_RE, YEAR_RE, YT_ID_RE, EPISODE_NAME_RE,
         episode_name_ok,
+        episode_title_missing,
         log, log_event, anon_path, image_dims,
     )
 
@@ -480,6 +502,9 @@ data:
         shows = [s for s in sorted(root.iterdir()) if s.is_dir() and not s.name.startswith('_')]
         episodes_total, episodes_in_season = 0, 0
         episodes_with_nfo, episodes_with_thumb, episodes_named_ok = 0, 0, 0
+        # Title-backfill surface: compliant via the SOP's title-less fallback
+        # (`Show - SXXEYY`) — a subset of episodes_named_ok, NOT a failure.
+        episodes_title_missing = 0
         series_compliant = 0
         for show in shows:
             tvshow_nfo = show / "tvshow.nfo"
@@ -507,6 +532,8 @@ data:
                         episodes_with_thumb += 1
                     if episode_name_ok(ep.stem, show.name):
                         episodes_named_ok += 1
+                        if episode_title_missing(ep.stem, show.name):
+                            episodes_title_missing += 1
         return {
             "section":              "tv",
             "shows":                len(shows),
@@ -519,6 +546,10 @@ data:
             "episode_thumb_pct":    round(100 * episodes_with_thumb / max(episodes_total, 1), 1),
             "episodes_named_ok":    episodes_named_ok,
             "episode_naming_pct":   round(100 * episodes_named_ok / max(episodes_total, 1), 1),
+            # Subset of episodes_named_ok: compliant title-less fallback form,
+            # i.e. the title-backfill work queue. No SOP threshold row.
+            "episodes_title_missing":   episodes_title_missing,
+            "episode_title_backfill_pct": round(100 * episodes_title_missing / max(episodes_total, 1), 1),
             "series_compliance_pct": round(100 * series_compliant / max(len(shows), 1), 1),
         }
 
