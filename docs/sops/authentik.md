@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.09.12`
-> Last Updated: `2026-09-12`
+> Version: `2026.09.22`
+> Last Updated: `2026-09-22`
 > Owner: `Platform`
 
 ---
@@ -1312,6 +1312,113 @@ kubectl get svc -n kube-system | grep ak-outpost
 
 Expected:
 - Blueprints load cleanly and expected outpost resources remain healthy.
+
+### Outpost websocket disconnects — the alert contract
+
+The contract for `AuthentikOutpostDisconnected` existed only as comments inside
+`kubernetes/apps/monitoring/kube-prometheus-stack/app/authentik-alerts.yaml`.
+Summarised here so a responder does not have to re-derive it at 05:00:
+
+- **Brief dips are EXPECTED and are not an auth outage.** Outposts drop their
+  websocket to the server and reconnect on their own. Re-measured 2026-09-12:
+  each dip is now **roughly 5 minutes (~300 s)** because the outpost's reconnect
+  backoff has saturated at its 300 s cap — the dip length is set by the backoff
+  cap, not by how long the underlying fault lasts. Both the embedded outpost and
+  the Kubernetes forward-auth outposts flap (homepage logged 7 reconnect/7
+  connect cycles over 6 h; longhorn 8/8). The earlier 2026-08-20 measurement
+  (30–270 s dips, confined to the embedded outpost) **no longer holds** — do not
+  reason from it.
+- **`for: 20m` is the threshold, and it is a measured floor, not a round
+  number.** `2m` sat inside the noise band and paged CRITICAL three times in two
+  hours for zero impact; `10m` was then cleared by two consecutive ~300 s dips
+  and paged again on 2026-09-12. **20 m sits above two full backoff cycles** and
+  still pages on a genuinely sustained disconnect.
+- **Impact bound, measured rather than assumed:** only the config PUSH channel
+  rides the websocket. The outpost keeps serving over HTTP throughout — a
+  homepage config refresh completed mid-drop. The alert description's "may be
+  inaccessible" overstates this particular failure mode.
+- **Root cause is NOT identified.** The threshold was raised above the measured
+  noise floor; nothing explains the churn. Tracked as F-bd54183f. Ruled out with
+  evidence rather than reasoning: the Postgres cutover, the `authentik_host`
+  change, DB resource pressure, channels-table growth, a config rewrite loop,
+  and the backchannel hypothesis — every outpost already resolves
+  `AUTHENTIK_HOST` to the in-cluster Service, byte-identical on flapping and
+  quiet outposts alike, so configuration is not the differentiator.
+- **The embedded outpost is the loudest and currently has NO providers
+  attached**, so a disconnect there affects nothing. Check the provider list
+  before treating an embedded-outpost alert as an access outage.
+
+#### The paired `absent()` guard is mandatory, not optional
+
+`authentik_outpost_connection == 0` can only fire on a series that still
+EXISTS. If authentik-server stops exporting outpost metrics entirely, the
+disconnect rule goes quiet and **reads as healthy**: a rule whose expression
+matches no series sits at `state=inactive` forever, which is indistinguishable
+from "nothing is wrong". A *dead* outpost stops exporting its series altogether,
+so `== 0` never catches that case at all — absence needs its own rule. That is
+`AuthentikOutpostMetricsAbsent` (`absent(authentik_outpost_connection)`,
+`for: 10m`), and the same pairing is required for any future `== 0` or
+threshold rule added to this file.
+
+`absent()` was chosen over a per-outpost count-drop check deliberately: a
+count-drop rule also fires every time an outpost is intentionally removed or
+rolls during a chart bump, and no measured baseline exists to set that threshold
+honestly. Per-outpost vanish detection is follow-up on F-bd54183f, not shipped
+unmeasured.
+
+**Do not "improve" the guard by gating it on the scrape target being up:**
+
+```promql
+# PERMANENTLY INERT — never write this
+absent(authentik_outpost_connection) and up{job="..."} == 1
+```
+
+`absent()` on a selector with no equality matchers emits a sample with an EMPTY
+label set, so `and` against a vector carrying `job`/`instance` labels matches
+nothing and returns zero samples *even when the metric genuinely is missing*. If
+a gate is ever wanted it MUST be `and on() up{...} == 1`. The same trap, in the
+same wording, is recorded on `AragPushMetricMissing` in `macos-apps-alerts.yaml`.
+
+Both rules also depend on the PrometheusRule carrying the
+`release: kube-prometheus-stack` label. Without it the file is never loaded and
+neither rule exists at all — with no error raised anywhere.
+
+#### Verify the contract is armed (not merely written)
+
+```bash
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 \
+  >/dev/null 2>&1 & PF=$!; sleep 3
+
+# 1. the series exists at all — if this is empty, the disconnect rule is BLIND
+curl -s --get http://localhost:9090/api/v1/query \
+  --data-urlencode 'query=count(authentik_outpost_connection)'
+
+# 2. anything actually disconnected right now
+curl -s --get http://localhost:9090/api/v1/query \
+  --data-urlencode 'query=authentik_outpost_connection == 0'
+
+# 3. both rules are LOADED and armed
+curl -s http://localhost:9090/api/v1/rules | python3 -c "
+import sys, json
+for g in json.load(sys.stdin)['data']['groups']:
+    for r in g['rules']:
+        if r.get('name', '').startswith('AuthentikOutpost'):
+            print(f\"{r['name']:<34} state={r['state']:<9} for={r['duration']}s health={r['health']}\")"
+
+kill $PF 2>/dev/null
+```
+
+Expected (measured live 2026-09-22): step 1 returns **15 series** of
+`authentik_outpost_connection` spanning **13 outpost names** (12 forward-auth
+outposts plus `authentik Embedded Outpost`); step 2 returns **nothing**; step 3
+lists `AuthentikOutpostDisconnected` at `for=1200s` and
+`AuthentikOutpostMetricsAbsent` at `for=600s`, both `state=inactive health=ok`.
+
+A rule **missing** from step 3 is not loaded (check the `release` label above);
+a rule present with `health != ok` is loaded but erroring. Note the reading
+order that the whole contract turns on: **`state=inactive` is good news only
+when step 1 returned a non-zero count.** Inactive with zero series is an inert
+rule wearing a healthy badge.
 
 ---
 

@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.09.20`
-> Last Updated: `2026-09-20`
+> Version: `2026.09.22`
+> Last Updated: `2026-09-22`
 
 ## 1) Description
 
@@ -83,7 +83,50 @@ that SOP has the `vN`-rename fix and the detection command.
      **all-or-nothing across the whole rollup**, so a red workflow that has
      nothing to do with the bump still holds the PR — see §7 for the lane-wide
      failure that hides behind a legitimate-looking per-PR hold.
-- **G5 age**: the PR's newest Renovate commit must be ≥ `minimum_release_age_hours` old (48h, policy-set 2026-08-26) — supply-chain cooldown for the nightly unattended lane. CVE/security bumps waive it (age 0); unknown age HOLDS; measured from the newest commit so a retargeted PR cannot inherit its old target's age.
+- **G5 age**: a supply-chain cooldown — nothing may land in the unattended
+  nightly lane until it has been public for `minimum_release_age_hours` (48h,
+  policy-set 2026-08-26). **Unknown age HOLDS, in both lanes.**
+
+  G5 has TWO implementations, because there are two lanes and they measure
+  different objects:
+
+  - **PR lane** (`auto-update.py`): the PR's newest Renovate commit must be ≥
+    the cooldown. Measured from the NEWEST commit, so a retargeted PR cannot
+    inherit its old target's age. CVE/security bumps waive it (age 0).
+  - **Direct-bump lane** (`coverage.py::direct_bump_age_gate`): a direct bump
+    has no PR and therefore no commit to measure, so it ages the **artifact's
+    publish date** instead:
+    - **images** — `image_publish_age_hours()`. `docker.io` reads the Hub tag's
+      `last_updated`; every other registry reads the image config blob's
+      `created` via `_oci_created()`, which walks a multi-arch index and skips
+      the attestation/SBOM children (their platform is `unknown` and they carry
+      no config blob, so picking `manifests[0]` blindly 404s). An app can index
+      several repos, so the gate takes the **youngest** age across every repo
+      that actually carries the target tag, and names that repo in the hold
+      reason.
+    - **charts** — `chart_publish_age_hours()`. An HTTP chart repo publishes a
+      per-version `created` in `index.yaml`. An `oci://` chart has no
+      `index.yaml`, but `helm push` stamps the standard OCI annotation
+      `org.opencontainers.image.created` on the chart manifest, and
+      `_oci_chart_created()` reads it (`5c53e313`, F-88bf8743). `docker.io`'s
+      split registry/token hosts are handled; everything else is same-host.
+
+  **Why the chart half is worth knowing:** before `5c53e313` every `oci://`
+  source short-circuited to `None`, and since unknown age is hold-fail-safe
+  that made the hold **permanent rather than timed** — the component could never
+  elapse the cooldown however old the release got, while the hold reason read
+  like a countdown that was never counting. Resolving the date turns it back
+  into a bounded wait. Verified live 2026-09-22 against
+  `oci://ghcr.io/prometheus-community/charts` / `kube-prometheus-stack`:
+  `90.0.0 → 367.2h`, `90.2.0 → 222.0h`, and a non-existent version → `None`.
+
+  Fail-safe runs one way only: `_oci_chart_created()` returns `None` on ANY
+  failure (unsupported registry, auth, missing annotation), so anything
+  unverifiable still holds. This widens what can be VERIFIED, never what is let
+  through — a future refactor returning `0.0` or `now()` on failure would invert
+  every unreachable registry into an instant cooldown PASS, which is exactly
+  what `runbooks/tests/test-oci-chart-age.py` asserts against in both
+  directions.
 
   > **The security waiver cannot fire in the direct-bump lane.** It reads a
   > security marker out of the **Renovate PR title**, and the no-PR direct-bump
@@ -266,10 +309,12 @@ dist-tag stay on `CHANNEL_RULES` membership (see
 
 Run the synthetic matrix. **It must assert every deny rule that exists, not a
 memorable subset** — a rule absent from the matrix is a rule the test cannot
-catch the removal of. As of `2026.09.15` that is all 25 globs:
+catch the removal of — and a rule whose `max:` is mis-stated is a hold the test
+cannot catch the WIDENING of. As of `2026.09.22` that is all 27 globs:
 
 | Deny glob | Assert |
 |---|---|
+| `*authentik*` | held at every update_type (added 2026-09-22, `0193f2e4`, operator call) — the chart version and the server image are pinned SEPARATELY (`helmrelease.yaml` pins the image inline at two sites), so a chart-only bump moves the templates while the running image stays put, with nothing asserting the two agree; and G3 reported its breaking-change signal "unverified (release notes unavailable)" while the item routed to AUTO anyway — a fail-open on the household SSO front door, which every forward-auth service and the Flux controllers that would revert a bad roll sit behind |
 | `*app-template*` | `max: patch` (narrowed 2026-09-12) — patch ALLOWED, minor held; major never reaches the rule (G1) |
 | `*affine*` | held at every update_type |
 | `*cilium*` | held at every update_type |
@@ -295,6 +340,7 @@ catch the removal of. As of `2026.09.15` that is all 25 globs:
 | `aqua:siderolabs/talos` | held at every update_type — the talosctl CLI pin in `.mise.toml` FOLLOWS a node upgrade and must never move ahead of the cluster; listed ABOVE `siderolabs/*` because first match wins and `_match_anywhere` would otherwise attach the node-image reason to a local binary (split 2026-09-13, F-1128fcdf; matrix row added 2026-09-15 — Test 2b had been failing on it) |
 | `siderolabs/*` | held at every update_type |
 | `*talos*` | held at every update_type |
+| `*valkey*` | held at every update_type (INTERIM, added 2026-09-21) — the only upstream tag above the pin is a PRE-RELEASE: a floating 2-component tag digest-identical to an `-rc1`, with no GA above the pin. Withdraw the rule when a real GA publishes, or it freezes valkey on a genuine future release. It also has to reach the DIRECT-BUMP lane, which resolves a deny rule by the component key first and then by each image repository the item names (`denied_for_item`) — the component key alone did not match this glob |
 
 Rule ORDER is load-bearing for the three `nextcloud` globs: the first match
 wins, so `*nextcloud-mcp*` and `*nextcloud-redis*` must precede `*nextcloud*`.
@@ -307,38 +353,66 @@ held; bare `update busybox to v1.38.0` → parses; `update Flux Operator group t
 v1.2.3` and `update foo to v2` → still refused. Any mismatch means a deny glob
 or the title parser is wrong — fix before the next scheduled run.
 
-### Test 2b: the matrix is COMPLETE (guards this section against drift)
+### Test 2b: the matrix is COMPLETE *and* CORRECT (guards this section against drift)
 
 Test 2 is a hand-written enumeration, so it decays silently every time a deny
-rule is added: the SOP keeps passing while asserting a policy that no longer
-exists. It did — `*external-dns*` was added in `e97476d3` and eleven other
-globs (`cilium`, the four gateway/envoy globs, `mcpo`, `nocodb`, the two
+rule is added or narrowed: the SOP keeps passing while asserting a policy that
+no longer exists. Both halves have failed in the field.
+
+**Membership** drifted when `*external-dns*` was added in `e97476d3` and eleven
+other globs (`cilium`, the four gateway/envoy globs, `mcpo`, `nocodb`, the two
 `nextcloud-*` variants, `grafana`, `coredns`, `@openclaw/`) had never been
-listed at all. Check completeness mechanically, in BOTH directions:
+listed at all.
+
+**The `max:` half is the worse one, because it decays without changing the
+verdict.** Until 2026-09-22 this check compared glob MEMBERSHIP only and never
+read the `max:` key, so a row asserting "held at every update_type" for a rule
+that actually carries `max: patch` passed cleanly — the SOP claimed a component
+was fully blocked while the policy was letting its patches through unattended
+(F-28c62378). Check all three properties mechanically:
 
 ```bash
 .venv/bin/python3 - <<'EOF'
 import re, yaml
-policy = {r['match'] for r in yaml.safe_load(open('runbooks/auto-update-policy.yaml'))['deny']}
+policy = {r['match']: r.get('max')
+          for r in yaml.safe_load(open('runbooks/auto-update-policy.yaml'))['deny']}
 bt = chr(96)                                   # backtick, kept out of the shell
-sop = set(re.findall(r'^\| ' + bt + r'([^' + bt + r']+)' + bt + r' \|',
-                     open('docs/sops/auto-update.md').read(), re.M))
-missing = policy - sop
-stale   = {g for g in sop - policy if '*' in g or '/' in g}
+rows = dict(re.findall(r'^\| ' + bt + r'([^' + bt + r']+)' + bt + r' \| (.*?) \|\s*$',
+                       open('docs/sops/auto-update.md').read(), re.M))
+missing = set(policy) - set(rows)
+stale   = {g for g in set(rows) - set(policy) if '*' in g or '/' in g}
+# The Assert cell must SPELL OUT the rule's own `max:`, not merely exist.
+wrong = []
+for g, cell in rows.items():
+    if g not in policy:
+        continue                               # a non-policy backticked row
+    m = re.search(bt + r'max: (\w+)' + bt, cell)
+    claimed = m.group(1) if m else None
+    if claimed != policy[g]:
+        wrong.append((g, claimed or 'blanket hold', policy[g] or 'blanket hold'))
 print('MISSING from the SOP matrix:', sorted(missing) or 'none')
 print('STALE in the SOP matrix   :', sorted(stale) or 'none')
-raise SystemExit(1 if (missing or stale) else 0)
+print('WRONG max: assertion      :', sorted(wrong) or 'none')
+raise SystemExit(1 if (missing or stale or wrong) else 0)
 EOF
 ```
 
 Expected:
-- both lines print `none`, exit 0.
+- all three lines print `none`, exit 0.
 
 If failed:
 - `MISSING` — a deny rule exists that Test 2 does not assert. Add the row.
 - `STALE` — Test 2 asserts a rule that was deleted from the policy. Either the
   removal was intentional (drop the row, and say why in the Version History) or
   a hold was lost.
+- `WRONG max:` — the row's Assert cell disagrees with the rule's own `max:` key.
+  Each triple is `(glob, what the SOP claims, what the policy says)`. Resync the
+  row, then ask which side was wrong: a row claiming a blanket hold over a
+  `max: patch` rule **over-claims** (that component's patches ARE landing
+  unattended tonight), while a row claiming `max: patch` over a blanket rule
+  under-claims a hold that really exists. The cell must spell the value in
+  backticks exactly as the YAML does — a prose "patches allowed" does not parse
+  and is read as a blanket-hold claim.
 
 ### Test 3: apply guard holds on manual runs
 
@@ -424,6 +498,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.22 | 2026-09-22 | **Two gaps, both found by the SOP asserting something the code stopped doing.** (a) **G5 was documented as a commit-age rule only (F-b5445561)** — the SOP had zero mentions of `oci://` or artifact publish dates, although the engine has had a SECOND G5 implementation since 2026-09-07 and `_oci_chart_created()` since `5c53e313`. The no-PR direct-bump lane has no Renovate commit to measure, so it ages the ARTIFACT: Docker Hub `last_updated`, the OCI image config blob's `created` (youngest across every repo carrying the tag), chart `index.yaml` `created`, and for `oci://` charts the `org.opencontainers.image.created` annotation on the chart manifest. Documented under G5 with the fail-safe direction and why an unresolvable `oci://` age used to make the hold *permanent* rather than timed. Live-verified against `kube-prometheus-stack` 90.0.0 / 90.2.0 / a bogus version. (b) **Test 2b compared glob MEMBERSHIP only, so a wrong `max:` assertion passed (F-28c62378)** — the exact decay the 2026.09.13 entry below flagged as "Test 2b only checks glob MEMBERSHIP, so it cannot see a wrong Assert". It now parses each row's Assert cell and diffs the backticked `max:` against the rule's own key in both directions. Matrix resynced to policy `2026.09.22.1` — 27 globs, with `*authentik*` (`0193f2e4`) and `*valkey*` added. |
 | 2026.09.20 | 2026-09-20 | **The G4 item was split across the G5 bullet, so both gates read wrong (F-1025b8c2).** G4 ended mid-sentence on the word "The", and its continuation — the `flux-local` dependency and the pending-vs-failing outcomes — sat orphaned *after* G5's entire 20-line blockquote, where it read as a paragraph about the age cooldown. Re-split so each gate describes itself. Added the Troubleshooting row for the failure that mis-split helped hide: G4 is all-or-nothing across the check rollup, so a **workflow-wide** `flux-local` failure holds EVERY Renovate PR on `gate=ci` and freezes the whole PR lane while the direct-bump half keeps shipping. The SOP documented "failing checks → hold" only as a per-PR outcome and never as a lane-wide outage, so 8 days of legitimate-looking holds went unread (operational cause: F-00235e5c). |
 | 2026.09.13 | 2026-09-13 | **Test 2's matrix had drifted again — the failure mode the 2026.09.08 entry below claims to have closed.** Its own Test 2b check reported `MISSING: *k8s-gateway*, *n8n*`, and four Assert cells were stale: `*app-template*`, `*grafana*`, `*nextcloud-mcp*` were narrowed to `max: patch` on 2026-09-12 (`d147b1ce`) and `*nocodb*` earlier, yet all four still read "held at every update_type". Test 2b only checks glob MEMBERSHIP, so it cannot see a wrong Assert — the `max:` semantics still decay silently. Matrix resynced to policy `2026.09.12.1` (23 globs). Also documented the Renovate-side `followTag` channel lever. |
 | 2026.09.15 | 2026-09-15 | **`*frigate*` deny rule added (`max: patch`, policy `2026.09.15`, F-71dc3610, operator call).** Frigate is 0.x, so a "minor" is a release-line move with a config migrator and sqlite migrations; the read-only ConfigMap config cannot be auto-migrated, so an unattended bump starts the NVR in safe mode with zero cameras while every probe stays green. coverage.py's 0.x rule already held the direct-bump half; this closes the Renovate-PR half. Test 2 matrix row added. |

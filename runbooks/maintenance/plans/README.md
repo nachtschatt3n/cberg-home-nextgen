@@ -40,6 +40,49 @@ PREDECESSOR's end state, not today: `grafana-chart-12` legitimately says
 "chart 11.6.1" while 10.5.15 is live. Verifying those against the cluster
 manufactures a false stale signal, so plans with unmet `depends_on` are skipped.
 
+## When the held target MOVES — refresh the plan, do not replace it
+
+A plan can also fall out of date from the *other* end: the work is still wanted,
+but the held update retargeted underneath it (upstream published a newer
+version, or Renovate moved the PR). `maintenance-plan.py` compares the plan's
+`target:` against the held `new:` using `target_covers()` — a version-TOKEN
+comparison, so a prose `"talosVersion v1.13.9"` and `v1.13.9` are the same
+target — and files a mismatch under the **STALE plans** headline.
+
+That one headline covers two different situations with opposite fixes. The
+reconciler entry tells you which you have, by the fields it carries:
+
+| The STALE entry carries | What happened | What to do |
+|---|---|---|
+| `plan_target` + `now_target` | **DRIFTED** — the target moved after the plan was written | **Refresh in place**, keep the file (see below) |
+| `age_days` + `reason: unused > stale_after_days` | nothing moved; the plan just sat unused past 14 days | Re-investigate whether the work is still wanted at all — then refresh and re-date `generated:`, or supersede |
+
+**Keep the `plan_id` when you refresh.** It is an identifier, not an assertion,
+and four separate things resolve by it:
+
+- other plans' `depends_on` / `conflicts_with` — `maintenance-plan.py --validate`
+  raises `DEAD-REF` for a ref naming no plan;
+- a `window:` stamp (`run-now.py stamp` writes `now:` refs by plan id);
+- the home-operation go/no-go issue, keyed on the plan id, which owns the
+  reminder cadence until the operator answers;
+- the `finding_refs` ownership claim — the plan-or-page pass joins `lane=PLAN`
+  findings to plans on that field, so a PLAN-lane critical whose owning file
+  vanished pages the operator after `plan_sla_days`.
+
+Writing a new `<component>-<new-target>.md` and deleting the old one breaks all
+four at once. Nothing validates `plan_id` against `target:`, so a refreshed plan
+whose id still names the superseded version is correct as-is — `target:` is the
+authoritative field.
+
+**A drift is a re-review, not a find-and-replace.** The version number is the
+cheapest thing that changed. A retarget can cross a release boundary that
+invalidates the steps, the breaking-change evidence quoted in §1, the
+`est_duration_min`, or `needs_reboot` — so re-read the notes for the NEW target
+before you bump the number, and re-run the §2 pre-checks. If the new target
+turns the change into a different job entirely (a major where a minor was
+planned), that is the one case for superseding: say so in the new file and
+carry the old plan's `finding_refs` and cross-references across by hand.
+
 ## Known phantoms — coverage asks for these, do NOT plan them
 
 `coverage.py` reads the version snapshot, which reads MANIFEST PINS. It cannot
