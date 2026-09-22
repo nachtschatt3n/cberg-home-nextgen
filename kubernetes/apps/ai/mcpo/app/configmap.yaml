@@ -31,7 +31,7 @@ data:
         },
         "kubernetes": {
           "command": "uvx",
-          "args": ["--with", "mcp<2", "mcp-kubernetes-server", "--disable-write", "--disable-delete"],
+          "args": ["--with", "fastmcp>=2.13,<3", "mcp-kubernetes-server", "--disable-write", "--disable-delete"],
           "env": {}
         },
         "github": {
