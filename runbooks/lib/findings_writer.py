@@ -1041,6 +1041,68 @@ class FindingsWriter:
             except Exception:  # noqa: BLE001
                 pass
 
+    def _persist_completed(self, verdict: str | None) -> None:
+        """Record that THIS section ran to completion on the shared cycle row.
+
+        A section that ran clean writes no finding rows, so from the DB alone
+        it is indistinguishable from a section that never ran — and the board
+        renders it as DID NOT REPORT. Measured 2026-09-17 (F-bfb9ec80): two
+        false gaps out of six sections on a night when every section ran; the
+        SLO section had written five snapshots and the doc section had filed
+        its findings under `plan`, as the rules told it to. The reconcile's
+        `ran` note exists for this but is DECLARED by the orchestrator at the
+        end, from what it believes ran; this record is written by the one
+        process that knows for certain — the section's own writer — under the
+        same row lock the veto notes use. `notes.completed[section]` =
+        {verdict, at}. Rendered by runbooks/render-board.py as "ran clean —
+        0 findings (section closed with verdict …)", a different line from
+        both "declared at reconcile" and "DID NOT REPORT".
+        """
+        if self._conn is None:
+            return
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO sweep_cycles (cycle_id, started_at, trigger, "
+                    "git_head) VALUES (%s, now(), %s, %s) "
+                    "ON CONFLICT (cycle_id) DO NOTHING",
+                    (self._cycle_id, self._trigger, self._git_head),
+                )
+                cur.execute(
+                    "SELECT notes FROM sweep_cycles WHERE cycle_id = %s FOR UPDATE",
+                    (self._cycle_id,),
+                )
+                row = cur.fetchone()
+                notes: dict = {}
+                if row and row[0]:
+                    try:
+                        notes = json.loads(row[0])
+                        if not isinstance(notes, dict):
+                            notes = {"legacy_notes": row[0]}
+                    except (ValueError, TypeError):
+                        notes = {"legacy_notes": row[0]}
+                completed = notes.get("completed")
+                if not isinstance(completed, dict):
+                    completed = {}
+                completed[self.section] = {
+                    "verdict": verdict,
+                    "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "emitted": len(self._emitted_fps),
+                }
+                notes["completed"] = completed
+                cur.execute(
+                    "UPDATE sweep_cycles SET notes = %s WHERE cycle_id = %s",
+                    (json.dumps(notes), self._cycle_id),
+                )
+            self._conn.commit()
+        except Exception as e:  # noqa: BLE001 — never lose the cycle close
+            print(f"==> WARNING: could not persist completion record for "
+                  f"{self.section}: {type(e).__name__}: {e}")
+            try:
+                self._conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+
     def _autoclose_stale(self, *, dry_run: bool) -> list[tuple[str, str, str, str, dict]]:
         """Resolve open findings THIS section owns that it did not re-emit.
 
@@ -1226,6 +1288,15 @@ class FindingsWriter:
         if section_complete is None:
             section_complete = verdict is not None
 
+        # A completed run leaves a durable trace even when it emitted nothing —
+        # see _persist_completed, written at the END of this method. Two gates
+        # turn it off, both decided below: SWEEP_AUTOCLOSE_DRYRUN (documented
+        # as writing nothing) and the zero-emit circuit breaker (the writer's
+        # own verdict that the run almost certainly failed — attesting that it
+        # completed would tell the board the opposite).
+        dry = os.environ.get("SWEEP_AUTOCLOSE_DRYRUN", "0") == "1"
+        attest_completion = section_complete and not dry
+
         mode = os.environ.get("SWEEP_AUTOCLOSE", "")
         if mode == "0":
             pass  # kill-switch: leave stale rows for a human
@@ -1246,7 +1317,6 @@ class FindingsWriter:
                   f"not complete (no verdict) — its open findings are left "
                   f"untouched, a failed run is not a resolution")
         else:
-            dry = os.environ.get("SWEEP_AUTOCLOSE_DRYRUN", "0") == "1"
             # Publish the per-component scope BEFORE closing anything. If this
             # fails it converts itself into a section-wide veto, which must be
             # honoured here rather than discovered after the UPDATE.
@@ -1257,6 +1327,8 @@ class FindingsWriter:
                       f"open findings are left untouched, a coverage gap is "
                       f"not a fix")
                 self._persist_incomplete()
+                if attest_completion:
+                    self._persist_completed(verdict)
                 self._finalise_cycle_row(verdict)
                 return
             try:
@@ -1280,6 +1352,9 @@ class FindingsWriter:
                           f"clean. Would have closed:")
                     self._report_autoclose(probe, dry_run=True)
                     rows = []
+                    # The breaker's verdict is "this did not really run"; the
+                    # board must not be told it ran clean (F-bfb9ec80 gate).
+                    attest_completion = False
                 else:
                     rows = self._autoclose_stale(dry_run=dry)
                     if not dry:
@@ -1310,6 +1385,10 @@ class FindingsWriter:
                 except Exception:  # noqa: BLE001
                     pass
 
+        # Last, so the veto notes written above are what the record merges
+        # onto, and so a refusal decided above can withhold it.
+        if attest_completion:
+            self._persist_completed(verdict)
         self._finalise_cycle_row(verdict)
 
     def _finalise_cycle_row(self, verdict: str | None) -> None:

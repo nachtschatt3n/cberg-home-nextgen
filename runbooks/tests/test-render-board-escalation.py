@@ -97,6 +97,8 @@ class FakeCursor:
             return []
         if "SELECT 1 FROM slo_snapshots" in s:
             return []
+        if "SELECT count(*) FROM slo_snapshots" in s:
+            return [(0,)]
         raise AssertionError(f"FakeCursor: unexpected query {s[:90]!r}")
 
     def fetchall(self):

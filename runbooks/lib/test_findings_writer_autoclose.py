@@ -62,6 +62,12 @@ class FakeCursor:
     def execute(self, sql, params=None):
         self._last = " ".join(sql.split())
         self.log.append((self._last, params))
+        # A real row carries each UPDATE forward into the next SELECT … FOR
+        # UPDATE. The completion record (F-bfb9ec80) is written LAST and
+        # merges onto whatever the veto retraction just wrote, so the fake
+        # must chain too or the last payload re-reads the seeded notes.
+        if self._last.startswith("UPDATE sweep_cycles SET notes") and params:
+            self.conn.notes = params[0]
 
     def fetchall(self):
         if self._last.startswith("SELECT") and "FROM sweep_findings" in self._last:
@@ -404,13 +410,22 @@ def test_veto_is_persisted_so_the_orchestrator_can_honour_it():
 
 
 def test_complete_run_persists_no_incomplete_marker():
-    """A healthy section must not poison the shared cycle row."""
+    """A healthy section must not poison the shared cycle row.
+
+    Since F-bfb9ec80 a complete run DOES write the row once — its own
+    `completed[section]` record (see _persist_completed) — so the assertion is
+    on what the writes carry, not on their absence: no `incomplete` marker,
+    and nothing beyond this section's completion record.
+    """
     _clear_env()
     w, conn = _writer(section="security")
     w.close(verdict="green")
-    notes_writes = [sql for sql, _p in conn.log
-                    if "UPDATE sweep_cycles" in sql and "notes" in sql]
-    assert not notes_writes, "a complete run wrote an incomplete marker"
+    payloads = [json.loads(p[0]) for sql, p in conn.log
+                if "UPDATE sweep_cycles" in sql and "notes" in sql]
+    assert all("incomplete" not in n for n in payloads), \
+        "a complete run wrote an incomplete marker"
+    assert all(set(n) <= {"completed"} for n in payloads), \
+        f"a complete run wrote more than its completion record: {payloads}"
 
 
 # --------------------------------------------------------------------------
@@ -482,13 +497,24 @@ def test_full_coverage_clears_its_own_stale_uncovered_note():
 
 
 def test_clean_run_leaves_a_cycle_with_no_notes_untouched():
-    """No stale note means no write at all — not an empty-dict rewrite."""
+    """No stale note of its own means nothing of its own is retracted.
+
+    Originally "no write at all — not an empty-dict rewrite": the bug was a
+    clean section wiping ANOTHER section's veto with `{}`. Since F-bfb9ec80 a
+    complete run writes the row once, for its own `completed[section]`
+    record, so the guard is now stated directly: the other section's note
+    survives byte-for-byte, and the only key added is `completed`.
+    """
     _clear_env()
     w, conn = _writer(section="security")
     conn.notes = json.dumps({"incomplete": {"version": "renovate unreachable"}})
     w.close(verdict="green")
-    assert _notes_payload(conn) is None, (
-        "a section with nothing of its own to retract still rewrote the row")
+    payload = _notes_payload(conn)
+    assert payload is not None, "the completion record was not written"
+    assert payload.get("incomplete") == {"version": "renovate unreachable"}, (
+        "a section with nothing of its own to retract rewrote another section's note")
+    assert set(payload) == {"incomplete", "completed"}, payload
+    assert set(payload["completed"]) == {"security"}, payload
 
 
 def test_refused_autoclose_does_not_clear_the_note():

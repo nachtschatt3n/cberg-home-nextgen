@@ -192,6 +192,49 @@ def planned_findings(cur=None) -> dict:
                   f"renamed findings may show as un-planned", file=sys.stderr)
     return out
 
+def section_evidence(d: dict, s: str) -> str | None:
+    """Which durable artifact says section `s` reported this cycle, or None.
+
+    Checked in evidence order — rows, the writer's own completion record, SLO
+    snapshots, the reconcile's declaration — so the board can say WHY a
+    clean section counts as reported. "No findings" and "no report" are
+    different answers (F-bfb9ec80), and only the last one is a gap.
+    """
+    if d.get("sections", {}).get(s) is not None:
+        return "rows"
+    if s in (d.get("completed") or {}):
+        return "completed"
+    if s == "slo" and (d.get("slo_snapshots_in_cycle") or 0) > 0:
+        return "snapshots"
+    if s in (d.get("ran") or set()):
+        return "declared"
+    return None
+
+
+def section_reported(d: dict, s: str) -> bool:
+    return section_evidence(d, s) is not None
+
+
+def section_line(d: dict, s: str) -> str:
+    ev = section_evidence(d, s)
+    inc = (d.get("incomplete") or {}).get(s)
+    suffix = f" — coverage INCOMPLETE ({inc})" if inc else ""
+    if ev == "rows":
+        info = d["sections"][s]
+        return f"{info['new']} new, {info['open']} open{suffix}"
+    if ev == "completed":
+        c = d["completed"][s] or {}
+        at = str(c.get("at") or "")[:16]
+        return (f"ran clean — 0 findings (section closed with verdict "
+                f"{c.get('verdict') or '?'}{' at ' + at if at else ''}){suffix}")
+    if ev == "snapshots":
+        return (f"ran clean — 0 findings ({d['slo_snapshots_in_cycle']} SLO "
+                f"snapshot(s) written this cycle){suffix}")
+    if ev == "declared":
+        return f"ran clean — 0 new (run declared at reconcile){suffix}"
+    return "**DID NOT REPORT** — gap, not a pass"
+
+
 def collect(cur, cycle_id: str | None) -> dict:
     if not cycle_id:
         cur.execute(
@@ -212,18 +255,32 @@ def collect(cur, cycle_id: str | None) -> dict:
     out = {"cycle_id": str(cycle_id), "started_at": str(started),
            "finished": bool(finished), "db_verdict": verdict}
 
-    # Ran-set persisted by sweep-run reconcile (notes JSON, key "ran"). This is
-    # the only record that distinguishes "ran clean, wrote nothing" from "never
-    # ran" — without it a clean section must render as DID NOT REPORT.
+    # Three per-section run records live on the cycle row's notes JSON, and
+    # "did this section report?" is answered from ALL of them (F-bfb9ec80):
+    #   completed[section] — written by the section's OWN FindingsWriter at
+    #                        close(verdict=…): the section finished, whatever
+    #                        it emitted. The durable artifact for a clean run.
+    #   ran                — declared by the orchestrator at reconcile from
+    #                        what it believes ran; authoritative for auto-close
+    #                        scope, but a belief, and on 2026-09-17 it left out
+    #                        two sections that had in fact run.
+    #   incomplete[section]— the section ran but vetoed auto-close (coverage
+    #                        gap); rendered as a suffix, never as a gap.
+    # Row-count alone cannot answer the question: a clean section writes no
+    # rows, and an agent section files its rows under `plan` by rule.
     cur.execute("SELECT notes FROM sweep_cycles WHERE cycle_id = %s", (cycle_id,))
     row = cur.fetchone()
-    ran: set[str] = set()
+    notes: dict = {}
     if row and row[0]:
         try:
-            ran = set(json.loads(row[0]).get("ran", []))
-        except (ValueError, TypeError, AttributeError):
-            pass
+            parsed = json.loads(row[0])
+            notes = parsed if isinstance(parsed, dict) else {}
+        except (ValueError, TypeError):
+            notes = {}
+    ran: set[str] = set(notes.get("ran") or []) if isinstance(notes.get("ran"), list) else set()
     out["ran"] = ran
+    out["completed"] = notes["completed"] if isinstance(notes.get("completed"), dict) else {}
+    out["incomplete"] = notes["incomplete"] if isinstance(notes.get("incomplete"), dict) else {}
     # Resolved here, not in render(), because this is where the cursor is —
     # the plan refs need a DB lookup to follow renamed finding ids.
     out["planned"] = planned_findings(cur)
@@ -355,18 +412,22 @@ def collect(cur, cycle_id: str | None) -> dict:
         (cycle_id,))
     sect = {s: {"new": n, "open": o} for s, n, o in cur.fetchall()}
     out["sections"] = sect
-    out["gaps"] = [s for s in EXPECTED_SECTIONS if s not in sect]
-    # slo writes snapshots, not findings, when clean — check snapshots in the
-    # cycle's own time window before calling it a gap (the auto-close lesson).
-    if "slo" in out["gaps"]:
-        cur.execute(
-            """SELECT 1 FROM slo_snapshots s, sweep_cycles c
-               WHERE c.cycle_id=%s AND s.taken_at >= c.started_at
-                 AND s.taken_at <= COALESCE(c.finished_at, now()) LIMIT 1""",
-            (cycle_id,))
-        if cur.fetchone():
-            out["gaps"].remove("slo")
-            sect["slo"] = {"new": 0, "open": 0}
+    # slo writes snapshots, not findings, when clean — count the snapshots in
+    # the cycle's own window before calling it a gap (the auto-close lesson).
+    # Same bounds as the action-list query above: from this cycle's start to
+    # the NEXT cycle's start. finished_at is stamped by the reconcile mid-run
+    # and is not a ceiling anything else in this file trusts.
+    cur.execute(
+        """SELECT count(*) FROM slo_snapshots s
+           WHERE s.taken_at >= (SELECT started_at FROM sweep_cycles WHERE cycle_id = %(cid)s)
+             AND s.taken_at < COALESCE(
+                   (SELECT MIN(started_at) FROM sweep_cycles
+                     WHERE started_at > (SELECT started_at FROM sweep_cycles
+                                          WHERE cycle_id = %(cid)s)),
+                   'infinity'::timestamptz)""", {"cid": cycle_id})
+    row = cur.fetchone()
+    out["slo_snapshots_in_cycle"] = int(row[0]) if row and row[0] is not None else 0
+    out["gaps"] = [s for s in EXPECTED_SECTIONS if not section_reported(out, s)]
 
     # 5 — latest snapshot per SLO
     cur.execute(
@@ -505,14 +566,7 @@ def render(d: dict, w: dict) -> str:
     L.append("## 3 · Sections")
     L.append("")
     for s in EXPECTED_SECTIONS:
-        info = d["sections"].get(s)
-        if info is None:
-            if s in d.get("ran", set()):
-                L.append(f"- `{s}`: ran clean — 0 new (run declared at reconcile)")
-            else:
-                L.append(f"- `{s}`: **DID NOT REPORT** — gap, not a pass")
-        else:
-            L.append(f"- `{s}`: {info['new']} new, {info['open']} open")
+        L.append(f"- `{s}`: {section_line(d, s)}")
     L.append("")
     L.append("## 4 · SLO / SLI")
     L.append("")
