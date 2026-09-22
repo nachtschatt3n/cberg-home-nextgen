@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import pathlib
 import subprocess
@@ -236,6 +237,7 @@ def reconcile(cfg, today, decisions=_FETCH_DECISIONS):
     plans = load_plans(cfg)
     validation_errors = validate_plans(cfg, plans)
     liveness = window_liveness_figures(cfg, today)
+    sweep_liveness = sweep_cron_liveness_report()
     parity_errors, parity_verified = cron_parity(cfg)
     autonomy = load_autonomy_policy()
     exec_classes = []
@@ -506,6 +508,9 @@ def reconcile(cfg, today, decisions=_FETCH_DECISIONS):
         # the full liveness report: missing/stuck/verified plus the figures
         # (window_runs_missing_count, lookback) a PrometheusRule will read
         "window_liveness": dict(liveness),
+        # the same assertion over the 48h sweep cron: grid points in the
+        # lookback with no trigger='cron' sweep_cycles row (F-8eea4d9e)
+        "sweep_cron_liveness": dict(sweep_liveness),
         "cron_parity": {"errors": parity_errors, "verified": parity_verified},
         "execution_classes": exec_classes,   # ENFORCED since P2.1b (a39d8766)
         "stale": stale,
@@ -592,6 +597,36 @@ def human(r, cfg):
                  f"{wl.get('lookback_days')}-day lookback from {wl.get('lookback_floor')} — "
                  f"a miss older than that has AGED OUT of this figure; "
                  f"expose it with --liveness-metrics for a PrometheusRule)")
+    # The 48h sweep cron, same shape (F-8eea4d9e / F-0ad5ad13): a cron that
+    # reported ok is DELIVERY; a trigger='cron' cycle row is completion.
+    sl = r.get("sweep_cron_liveness")
+    if isinstance(sl, dict) and sl:
+        if not sl.get("verified", True):
+            L.append("\n⚠️  sweep-cron liveness NOT VERIFIED (no DB access) — absence of findings "
+                     "here is not evidence the 48h sweep cron produced its cycles")
+        else:
+            if sl.get("no_cron_cycle_in_window"):
+                L.append(f"\n❌ NO trigger=cron SWEEP CYCLE in the last "
+                         f"{sl.get('lookback_days')} days (+2 cadences read for an anchor) "
+                         f"— every one of the {sl.get('missing_count')} expected 48h "
+                         f"occurrences is unaccounted for; the cron reports ok on "
+                         f"delivery, so its status cannot tell you this")
+            elif sl.get("missing"):
+                L.append(f"\n❌ SWEEP CRON OCCURRENCES WITHOUT A CYCLE ({sl['missing_count']}) "
+                         f"— the cron typed its prompt and exited ok, no sweep ran "
+                         f"(delivery is not completion):")
+                for m in sl["missing"]:
+                    cov = m.get("covered_by_other_trigger") or []
+                    note = (f" — a non-cron cycle sits inside this occurrence ({', '.join(cov)}): "
+                            f"an operator stand-in, or a cron run that lost its trigger "
+                            f"label (F-74fcc1c3)" if cov else
+                            " — nothing ran in its place; the cluster went unaudited")
+                    L.append(f"  ! expected {m['expected']}{note}")
+            L.append(f"\nsweep_cron_missing_count {sl.get('missing_count')} "
+                     f"(newest cron cycle {sl.get('newest_cron_at')}, "
+                     f"{sl.get('newest_cron_age_hours')}h ago; "
+                     f"{sl.get('lookback_days')}-day lookback from {sl.get('lookback_floor')} — "
+                     f"a miss older than that has AGED OUT; --liveness-metrics exposes it)")
     if r.get("validation_errors"):
         L.append(f"\n❌ PLAN FRONTMATTER ERRORS ({len(r['validation_errors'])}) — fix before these plans can be trusted:")
         for e in r["validation_errors"]:
@@ -1131,6 +1166,183 @@ def window_liveness(cfg, today):
 
 
 # ---------------------------------------------------------------------------
+# Sweep-cron liveness (F-8eea4d9e, F-0ad5ad13, F-74fcc1c3 — one symptom).
+#
+# The 48h operation sweep is DELIVERED by an in-cluster cron that types a
+# prompt into a Mac iTerm pane and reports `ok` when the text was typed and
+# the process exited. Delivery is not completion: a repurposed pane, a pane at
+# context exhaustion, a dropped trigger label — every variant leaves an `ok`
+# cron behind and NO sweep_cycles row. Measured from the ledger on 2026-09-14:
+# five 48h occurrences (08-30, 09-01, 09-03, 09-05, 09-09) produced no cycle
+# while the cron read ok every time; on 2026-09-21 a sixth ran for 30.0 min,
+# recorded success, and wrote nothing.
+#
+# The window ledger has had this assertion since P1.3 (expected_slots ↔
+# window_runs). The sweep ledger had none: sweep-heartbeat reads only
+# MAX(started_at) — so it sees the NEWEST gap and only while it is open — and
+# a manual stand-in cycle masks a cron miss unless the reader filters on
+# trigger. This is the same rolling assertion for sweep_cycles: every 48h
+# grid point in the lookback must have a trigger='cron' cycle near it.
+#
+# What this is NOT: the completion gate the finding asks for. That gate has
+# to live in the cron's own command (`operation sweep --wait` refusing to exit
+# 0 until the row appears — the OpenClaw skill under kubernetes/), because
+# nothing on the Mac runs at cron time when the pane does not act. This
+# detector makes the miss visible on the next sweep that DOES run, dated,
+# instead of three cycles later by inference.
+#
+# The grid is anchored on the OLDEST cron cycle in the read window and stepped
+# by the cadence — never re-anchored on each row, so a prompt that queued
+# behind a busy console and ran hours late does not shift every later
+# expectation. A grid point is SATISFIED by a cron cycle from `grace` before
+# it up to half a cadence after it (a late run is still that occurrence, and
+# is unambiguously the nearest one); it is DUE once `grace` has elapsed.
+# ---------------------------------------------------------------------------
+
+SWEEP_CRON_CADENCE_H = 48
+# sweep-heartbeat pages at 50h on a 48h cadence (2h). A cycle row appears
+# within minutes of the prompt landing, so 4h absorbs a slow console without
+# hiding a lost occurrence for a day.
+SWEEP_CRON_GRACE_H = 4
+SWEEP_CRON_LOOKBACK_DAYS = WINDOW_LIVENESS_LOOKBACK_DAYS
+SWEEP_CRON_TRIGGER = "cron"
+
+
+def _iso_z(ts) -> str:
+    return _as_utc(ts).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def missing_sweep_occurrences(cron_started_ats, now, other_started_ats=(),
+                              lookback_days=SWEEP_CRON_LOOKBACK_DAYS,
+                              cadence_h=SWEEP_CRON_CADENCE_H,
+                              grace_h=SWEEP_CRON_GRACE_H) -> dict:
+    """Pure, DB-free: the cron grid points inside the lookback with no
+    trigger='cron' sweep_cycles row near them.
+
+    cron_started_ats:  started_at of every cycle with trigger='cron' in the
+                       READ window (which must reach back further than the
+                       lookback, so the grid has an anchor — see
+                       sweep_cron_liveness_report).
+    other_started_ats: started_at of every OTHER cycle (manual / alert /
+                       ad-hoc). Never satisfies an occurrence — a manual
+                       stand-in is a person covering for the scheduler, and
+                       the miss is the scheduler's — but each miss lists the
+                       ones inside its occurrence, so a reader can tell "the
+                       cluster went unaudited" from "the trigger lost its
+                       label" (F-74fcc1c3) or "an operator stood in".
+
+    Returns {"missing": [{"expected": iso, "covered_by_other_trigger": [iso]}],
+             "missing_count": int, "anchor": iso|None, "newest_cron_at": iso|None,
+             "newest_cron_age_hours": float|None, "no_cron_cycle_in_window": bool}.
+    With NO cron cycle in the read window there is no anchor to date the
+    misses, so `missing` is empty and `missing_count` is every grid point the
+    lookback holds — the count never reads 0 over an empty ledger.
+    """
+    now = _as_utc(now)
+    cadence = timedelta(hours=cadence_h)
+    grace = timedelta(hours=grace_h)
+    floor = now - timedelta(days=lookback_days)
+    times = sorted(_as_utc(t) for t in cron_started_ats if t is not None)
+    others = sorted(_as_utc(t) for t in other_started_ats if t is not None)
+    if not times:
+        return {"missing": [], "missing_count": int(timedelta(days=lookback_days) // cadence),
+                "anchor": None, "newest_cron_at": None, "newest_cron_age_hours": None,
+                "no_cron_cycle_in_window": True}
+    anchor, newest = times[0], times[-1]
+    missing = []
+    k = 1
+    while True:
+        expected = anchor + k * cadence
+        k += 1
+        if expected + grace >= now:
+            break                              # not due yet
+        if expected < floor:
+            continue                           # before the lookback: not asserted
+        lo, hi = expected - grace, expected + cadence / 2
+        if any(lo <= t < hi for t in times):
+            continue
+        covered = [_iso_z(t) for t in others if lo <= t < expected + cadence]
+        missing.append({"expected": _iso_z(expected),
+                        "covered_by_other_trigger": covered})
+    return {"missing": missing, "missing_count": len(missing),
+            "anchor": _iso_z(anchor), "newest_cron_at": _iso_z(newest),
+            "newest_cron_age_hours": round((now - newest).total_seconds() / 3600, 1),
+            # the TIMESTAMP is what gets exposed (docs/sops/monitoring.md push
+            # rule 1): an age gauge freezes when its pusher dies
+            "newest_cron_epoch": int(newest.timestamp()),
+            "no_cron_cycle_in_window": False}
+
+
+def sweep_cron_liveness_report(now=None, lookback_days=SWEEP_CRON_LOOKBACK_DAYS) -> dict:
+    """missing_sweep_occurrences() over the live sweep_cycles ledger.
+
+    verified=False (and missing_count None, never 0) when SWEEP_PG_DSN is unset
+    or the read fails — an unreadable ledger is NOT CHECKED, same rule as
+    window_liveness_report. The read window reaches two cadences past the
+    lookback so the grid has an anchor cycle older than the first asserted
+    point.
+    """
+    now = _as_utc(now or datetime.now(timezone.utc))
+    base = {"verified": False, "missing": [], "missing_count": None,
+            "anchor": None, "newest_cron_at": None, "newest_cron_age_hours": None,
+            "newest_cron_epoch": None, "no_cron_cycle_in_window": None,
+            "lookback_days": int(lookback_days),
+            "lookback_floor": _iso_z(now - timedelta(days=lookback_days)),
+            "cadence_hours": SWEEP_CRON_CADENCE_H, "grace_hours": SWEEP_CRON_GRACE_H,
+            "ages_out": (f"a missed occurrence older than {int(lookback_days)} days is no "
+                         f"longer counted — rolling window, not a ledger")}
+    dsn = os.environ.get("SWEEP_PG_DSN")
+    if not dsn:
+        return base
+    read_floor = now - timedelta(days=lookback_days) - 2 * timedelta(hours=SWEEP_CRON_CADENCE_H)
+    try:
+        import psycopg
+        with psycopg.connect(dsn, connect_timeout=10) as c, c.cursor() as cur:
+            cur.execute("SELECT started_at, trigger FROM sweep_cycles "
+                        "WHERE started_at >= %s ORDER BY started_at", (read_floor,))
+            rows = cur.fetchall()
+    except Exception:
+        return base
+    cron = [t for t, trig in rows if str(trig or "") == SWEEP_CRON_TRIGGER]
+    other = [t for t, trig in rows if str(trig or "") != SWEEP_CRON_TRIGGER]
+    r = missing_sweep_occurrences(cron, now, other, lookback_days=lookback_days)
+    return {**base, **r, "verified": True}
+
+
+def sweep_cron_metrics_text(report: dict) -> str:
+    """Prometheus text exposition of the sweep-cron figures, printed by
+    --liveness-metrics AFTER liveness_metrics_text() (that block is pinned
+    and unchanged). Same contract: verified/lookback always; the count and
+    the newest-cycle age ONLY when verified, so absent() is the unverified arm."""
+    L = [
+        "# HELP sweep_cron_liveness_verified 1 when the sweep_cycles ledger was read this run, 0 when it could not be. 0 is NOT all-clear.",
+        "# TYPE sweep_cron_liveness_verified gauge",
+        f"sweep_cron_liveness_verified {1 if report.get('verified') else 0}",
+        "# HELP sweep_cron_lookback_days Rolling lookback of the sweep-cron assertion. A missed occurrence older than this AGES OUT of sweep_cron_missing_count silently.",
+        "# TYPE sweep_cron_lookback_days gauge",
+        f"sweep_cron_lookback_days {int(report.get('lookback_days') or SWEEP_CRON_LOOKBACK_DAYS)}",
+    ]
+    if report.get("verified"):
+        lb = int(report.get("lookback_days") or SWEEP_CRON_LOOKBACK_DAYS)
+        L += [
+            "# HELP sweep_cron_missing_count 48h sweep-cron grid points in the lookback with no trigger=cron sweep_cycles row (the cron reported ok, no sweep ran).",
+            "# TYPE sweep_cron_missing_count gauge",
+            f"sweep_cron_missing_count{{lookback_days=\"{lb}\"}} {int(report.get('missing_count') or 0)}",
+        ]
+        epoch = report.get("newest_cron_epoch")
+        if epoch is not None:
+            # A TIMESTAMP, never an age (docs/sops/monitoring.md, push rule 1):
+            # pushgateway has no TTL, so an age gauge would freeze at its last
+            # value when the pusher dies; `time() - this` keeps ageing.
+            L += [
+                "# HELP sweep_cron_newest_cycle_timestamp_seconds Unix time the newest trigger=cron sweep cycle started; age it in PromQL with time() - this.",
+                "# TYPE sweep_cron_newest_cycle_timestamp_seconds gauge",
+                f"sweep_cron_newest_cycle_timestamp_seconds {int(epoch)}",
+            ]
+    return "\n".join(L) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # Execution classes (P2.1a derivation; ENFORCED since P2.1b, a39d8766).
 # Derived from declared plan facts against runbooks/autonomy-policy.yaml.
 # A plan cannot claim a class; it declares capability_change / rollback_class
@@ -1401,6 +1613,7 @@ def main(argv=None):
     today = datetime.now().date()
     if args.liveness_metrics:
         print(liveness_metrics_text(window_liveness_figures(cfg, today)), end="")
+        print(sweep_cron_metrics_text(sweep_cron_liveness_report()), end="")
         return 0
     r = reconcile(cfg, today)
     if args.verify:

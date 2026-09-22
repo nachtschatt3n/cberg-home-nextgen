@@ -274,6 +274,15 @@ needs their decision, and what got auto-fixed.
       interference, MISSED windows), and how many held updates are still
       unplanned or stale. A MISSED window or an OVER-CAPACITY/INTERFERENCE
       warning is a ⚠️ action row.
+    - **Read `sweep_cron_liveness` the same way as `window_liveness`** (both
+      need the DSN from rule 0b in the environment; `verified: false` means NOT
+      CHECKED, never all-clear). It lists every 48h grid point of the sweep
+      cron in the lookback with no `trigger='cron'` `sweep_cycles` row — the
+      cron reports `ok` on DELIVERY of its prompt, so its own status cannot
+      show this (F-8eea4d9e, F-0ad5ad13). Each miss is a ⚠️ row; a miss whose
+      `covered_by_other_trigger` is empty means the cluster went unaudited for
+      that occurrence, one that names a `manual` cycle at cron time is the
+      lost-trigger-label shape (F-74fcc1c3) — say which.
     - **`now:<date>` entries in `scheduled` are on-demand NOW runs**, not
       windows: plans `run-now.py stamp` claimed for an operator-triggered run
       (no cron, never "missed"). One still unexecuted the day after its date is

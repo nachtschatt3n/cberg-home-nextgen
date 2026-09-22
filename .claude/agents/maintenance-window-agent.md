@@ -184,6 +184,14 @@ continue to the plans.
   `ai-server-ops` session and reports itself healthy on DELIVERY, not on
   completion — a window whose agent never ran still leaves an `ok` cron behind.
   Treat `verified: false` as a hard failure of this step, not a footnote.
+  **Inheriting a cleared console** (F-8eea4d9e, third recurrence 2026-09-14):
+  if you find only the tail of a window prompt after a `/clear`, or a
+  "Continue" from the operator, do NOT assume the occurrence ran. Establish it
+  from the ledger — `window_runs` for (slot, today), `git log` since the slot
+  start, and `home-operation list` — and if none of them shows the run, run it
+  now as the stand-in and WRITE THE ROW THE SAME DAY (`--trigger ad-hoc`,
+  `--notes` naming the lost cron occurrence): liveness excludes today, so a
+  row written tomorrow leaves today's date reading as missed.
 - Run `python3 runbooks/maintenance-plan.py --json`. Load every plan whose
   `window` is this slot, plus `status: vetted|scheduled` plans that are
   unassigned but due (no window yet and a plan exists). Drop `executed`,
