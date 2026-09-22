@@ -498,6 +498,58 @@ def _split_image_ref(image: str) -> tuple:
     return ref, "latest"
 
 
+# Image repository -> the GitHub project whose RELEASES carry its notes.
+#
+# F-d6f1b7c7 (2026-09-22). G3 (the breaking-change gate in auto-update.py and
+# coverage.py) resolves release notes from the IMAGE repository string, via
+# get_repo_info_from_image(): `memgraph/memgraph-mage` -> github.com/memgraph/
+# memgraph-mage, which does not exist. The notes live in memgraph/memgraph,
+# whose v3.13.x tags are exactly the image tags. So the gate reported
+# "unverified (release notes unavailable)" on every memgraph bump, forever, and
+# the lane's documented fail-OPEN asymmetry let those bumps through unread.
+# There was no image-repo -> project mapping anywhere for it to consult.
+#
+# This is that mapping. Consulted FIRST by get_release_notes_project(); the
+# registry-path derivation remains the fallback for everything not listed, so
+# the fail-open asymmetry is untouched: an image that is NOT here and does not
+# derive is still "unverified", never "verified safe".
+#
+# SEEDING RULE: an entry is added only after the tag we actually pin resolves
+# to a release body in the named project (runbooks/tests/test-g3-release-
+# notes-map.py pins that check hermetically; the live proof for each row was
+# run on 2026-09-22 against the tag then in git). A guessed entry is worse
+# than none: a wrong project whose tag scheme happens to collide would read
+# ANOTHER project's notes and could rate a breaking hop "clean".
+# NOT listed on purpose (their pinned tag did not resolve): n8n (`n8n@x.y.z`
+# release tags), jellyfin (build-stamped image tags), rolling `latest`/`main`
+# pins, and mirrors whose release naming could not be matched.
+#
+# Keys are lowercase, registry-host-free for Docker Hub (`docker.io/` and
+# `library/` are stripped by the lookup), exact otherwise.
+IMAGE_RELEASE_NOTES_PROJECTS: Dict[str, Tuple[str, str]] = {
+    'memgraph/memgraph-mage': ('memgraph', 'memgraph'),
+    'adguard/adguardhome': ('AdguardTeam', 'AdGuardHome'),
+    'vaultwarden/server': ('dani-garcia', 'vaultwarden'),
+    'teslamate/teslamate': ('teslamate-org', 'teslamate'),
+    'nodered/node-red': ('node-red', 'node-red'),
+    'mintplexlabs/anythingllm': ('Mintplex-Labs', 'anything-llm'),
+    'ghcr.io/immich-app/immich-server': ('immich-app', 'immich'),
+    # Same release train as immich-server; the `-openvino` build-flavour
+    # suffix on its pinned tag is what keeps fetch_release_notes from finding
+    # the release directly (a separate, un-fixed gap in that function).
+    'ghcr.io/immich-app/immich-machine-learning': ('immich-app', 'immich'),
+    'otel/opentelemetry-collector-contrib': ('open-telemetry', 'opentelemetry-collector-releases'),
+    'valkey/valkey': ('valkey-io', 'valkey'),
+    'jlesage/jdownloader-2': ('jlesage', 'docker-jdownloader-2'),
+    'buanet/iobroker': ('buanet', 'ioBroker.docker'),
+    'emqx/mqttx-web': ('emqx', 'MQTTX'),
+    'wazuh/wazuh-manager': ('wazuh', 'wazuh'),
+    'wazuh/wazuh-agent': ('wazuh', 'wazuh'),
+    'actualbudget/actual-server': ('actualbudget', 'actual'),
+    'curlimages/curl': ('curl', 'curl-container'),
+}
+
+
 class VersionChecker:
     def __init__(self, repo_root: str, github_token: Optional[str] = None):
         self.repo_root = Path(repo_root)
@@ -511,6 +563,12 @@ class VersionChecker:
         # (chart, version) pair. A silent zero is never a pass: this list is
         # printed, reported, and vetoes auto-close for the affected leaf.
         self.unresolved_chart_sources: List[Dict] = []
+        # Controller-RENDERED workloads (EnvoyProxy -> the Envoy data-plane
+        # Deployment) whose image is NOT named in git, so the controller's
+        # compiled-in default runs and nothing here can measure it. Same
+        # three-signal treatment as an unresolved chart source: printed,
+        # reported, and a per-component auto-close veto (F-41f0d855).
+        self.unresolved_rendered_images: List[Dict] = []
         self.results: List[Dict] = []
         self.github_cache: Dict[str, Any] = {}  # Cache for GitHub API responses
         self.github_token = github_token or os.environ.get('GITHUB_TOKEN')
@@ -560,6 +618,24 @@ class VersionChecker:
     # one workload kind further out.
     _RAW_WORKLOAD_KINDS = ("Deployment", "StatefulSet", "DaemonSet",
                            "CronJob", "Job")
+
+    # Controller-RENDERED workloads: a CR whose controller stamps out the
+    # Deployment, so no manifest in git carries a pod template. `EnvoyProxy`
+    # is the one we run — Envoy Gateway renders the data-plane Deployment for
+    # every Gateway and takes its image from the path below, falling back to
+    # a constant compiled into the controller when the field is unset. That
+    # default is invisible to git, to Renovate and to this check: the
+    # internet-facing data plane had ZERO references in this file until
+    # 2026-09-22 (F-41f0d855). The value is the image field's path; the second
+    # map names the upstream image the default resolves to, so the
+    # not-measured record is keyed on the component the findings will carry.
+    _RENDERED_IMAGE_KINDS = {
+        'EnvoyProxy': ('spec', 'provider', 'kubernetes', 'envoyDeployment',
+                       'container', 'image'),
+    }
+    _RENDERED_IMAGE_DEFAULT_REPO = {
+        'EnvoyProxy': 'docker.io/envoyproxy/envoy',
+    }
 
     def find_raw_manifest_workloads(self) -> List[Dict]:
         """Raw-manifest Deployments/StatefulSets/DaemonSets with no HelmRelease.
@@ -611,7 +687,8 @@ class VersionChecker:
             # A file with no `kind: Deployment/StatefulSet/DaemonSet` line can
             # never match `self._RAW_WORKLOAD_KINDS` anyway, so skipping it
             # here is a pure narrowing, not a coverage loss.
-            if not re.search(r'(?m)^kind:\s*(' + '|'.join(self._RAW_WORKLOAD_KINDS) + r')\s*$', text):
+            _kinds = tuple(self._RAW_WORKLOAD_KINDS) + tuple(self._RENDERED_IMAGE_KINDS)
+            if not re.search(r'(?m)^kind:\s*(' + '|'.join(_kinds) + r')\s*$', text):
                 continue
             try:
                 docs = list(yaml.safe_load_all(text))
@@ -621,7 +698,16 @@ class VersionChecker:
                                      f"{type(e).__name__}: {e}")
                 continue
             for doc in docs:
-                if not isinstance(doc, dict) or doc.get('kind') not in self._RAW_WORKLOAD_KINDS:
+                if not isinstance(doc, dict):
+                    continue
+                if doc.get('kind') in self._RENDERED_IMAGE_KINDS:
+                    # Never a silent skip: either an entry (git names the
+                    # image) or a not-measured record (it does not).
+                    entry = self._rendered_image_workload(doc, file_path)
+                    if entry:
+                        out.append(entry)
+                    continue
+                if doc.get('kind') not in self._RAW_WORKLOAD_KINDS:
                     continue
                 metadata = doc.get('metadata', {}) or {}
                 # CronJob nests its pod template ONE LEVEL DEEPER than every
@@ -670,6 +756,82 @@ class VersionChecker:
                     'images': images,
                 })
         return out
+
+    def _rendered_image_workload(self, doc: Dict, file_path: Path) -> Optional[Dict]:
+        """A HelmRelease-SHAPED entry for a controller-rendered workload whose
+        image IS named in git, else None after recording the gap.
+
+        Git-only by design, like every in-cluster component in this file: the
+        version universe is what the repository declares plus upstream
+        registries, never the live cluster (Talos is the sole live probe, and
+        it is node firmware, not a workload). Reading the live Deployment here
+        would make the universe depend on cluster reachability and would still
+        leave the image unpinned — the fix for "the image comes from a default,
+        not from git" has always been to name it in git (every sidecar image
+        in this repo is pinned for exactly that reason), and then this walker
+        sees it like any other manifest. Until it is named, the honest answer
+        is NOT MEASURED, and that is what the three signals below say.
+        """
+        kind = str(doc.get('kind'))
+        path = self._RENDERED_IMAGE_KINDS[kind]
+        metadata = doc.get('metadata', {}) or {}
+        name = metadata.get('name') or file_path.stem
+        node: Any = doc
+        for key in path:
+            node = node.get(key) if isinstance(node, dict) else None
+            if node is None:
+                break
+        ref = node if isinstance(node, str) and node.strip() else None
+        dotted = '.'.join(path)
+        if not ref:
+            self._note_unresolved_rendered_image(
+                kind, name, file_path,
+                f"{dotted} is unset, so the controller's compiled-in default "
+                f"image runs — it appears in no manifest, no Renovate PR and "
+                f"no version comparison. Pin it there so git names it.")
+            return None
+        repo, tag = _split_image_ref(ref)
+        if not repo:
+            self._note_unresolved_rendered_image(
+                kind, name, file_path, f"{dotted} = {ref!r} is not an image reference")
+            return None
+        return {
+            'name': name,
+            'namespace': self._resolve_namespace(file_path, metadata),
+            'file_path': str(file_path.relative_to(self.repo_root)),
+            'chart_name': '',
+            'chart_version': '',
+            'repository_name': '',
+            'chart_repo_url': '',
+            'chart_repo_type': '',
+            'images': [{'repository': repo, 'tag': tag, 'path': dotted}],
+        }
+
+    def _note_unresolved_rendered_image(self, kind: str, name: str,
+                                        file_path, reason: str) -> None:
+        """Three signals for a rendered workload we cannot measure — mirrors
+        _note_unresolved_chart_source(): stderr, a report row, and a
+        per-component auto-close veto keyed on the image the default resolves
+        to, so the veto narrows to that leaf instead of the whole section."""
+        rel = str(file_path)
+        try:
+            rel = str(Path(file_path).relative_to(self.repo_root))
+        except (ValueError, TypeError):
+            pass
+        hint = self._RENDERED_IMAGE_DEFAULT_REPO.get(kind, '')
+        self.unresolved_rendered_images.append(
+            {'kind': kind, 'name': name, 'file_path': rel, 'reason': reason,
+             'image_hint': hint})
+        print(f"{Colors.RED}⚠ NOT MEASURED rendered image: {kind}/{name} "
+              f"({rel}) — {reason}{Colors.RESET}", file=sys.stderr)
+        kwargs = {}
+        if hint:
+            try:
+                kwargs['component'] = component_key('image', hint)
+            except ValueError:
+                pass
+        self.degraded.record(f"{kind.lower()} {name}", f"{kind} container image",
+                             reason, **kwargs)
 
     def load_helmrepositories(self):
         """Load all HelmRepository definitions."""
@@ -1295,6 +1457,99 @@ class VersionChecker:
             print(f"{Colors.YELLOW}Warning: Could not check chart version for {chart_name} from {repo_name}: {e}{Colors.RESET}")
             return None
     
+    def get_chart_version_candidates(self, repo_name: str, chart_name: str,
+                                     repo_url: str = '',
+                                     repo_type: str = '') -> Optional[List[str]]:
+        """EVERY published version of a chart, or None when that is UNKNOWABLE.
+
+        OCI charts are tags on an OCI repository, so the same complete-or-None
+        listers the image side uses apply (`_oci_v2_tags`, `_dockerhub_tags`
+        for Docker Hub hosts); classic repos already fetch the whole
+        `index.yaml` for the freshness check, and its per-chart entries are the
+        list. None is "could not list" — a caller must not read it as "no
+        other versions exist".
+        """
+        repo = self.helm_repositories.get(repo_name) or {}
+        repo_url = repo_url or repo.get('url', '')
+        repo_type = repo_type or repo.get('type', 'default')
+        if not repo_url or not chart_name:
+            return None
+        # One listing per (repo, chart) per run: ~40 HelmReleases pin the same
+        # app-template chart, and re-listing it per release would repeat both
+        # the network round-trips and any degradation record.
+        if not hasattr(self, '_chart_candidates_cache'):
+            self._chart_candidates_cache: Dict[tuple, Optional[List[str]]] = {}
+        cache_key = (repo_url, repo_type, chart_name)
+        if cache_key in self._chart_candidates_cache:
+            return self._chart_candidates_cache[cache_key]
+        self._chart_candidates_cache[cache_key] = self._list_chart_versions(
+            repo_url, repo_type, chart_name)
+        return self._chart_candidates_cache[cache_key]
+
+    def _list_chart_versions(self, repo_url: str, repo_type: str,
+                             chart_name: str) -> Optional[List[str]]:
+        """Uncached body of get_chart_version_candidates()."""
+        comp = component_key('chart', chart_name)
+        try:
+            if repo_type == 'oci' or repo_url.startswith('oci://'):
+                base = repo_url.split('://', 1)[-1].rstrip('/')
+                host, _, path = base.partition('/')
+                chart_path = f"{path}/{chart_name}" if path else chart_name
+                if host in self._DOCKERHUB_HOSTS:
+                    return self._dockerhub_tags(chart_path, '', component=comp) or None
+                return self._oci_v2_tags(host, chart_path, component=comp)
+            entries = self._chart_index_entries(repo_url)
+            if entries is None:
+                return None
+            return [str(e.get('version')) for e in (entries.get(chart_name) or [])
+                    if e.get('version')]
+        except Exception as e:
+            self.degraded.record(f"chart {chart_name}", f"chart version listing {repo_url}",
+                                 f"{type(e).__name__}: {e}", component=comp)
+            return None
+
+    def resolve_chart_versions(self, repo_name: str, chart_name: str,
+                               current_version: str, repo_url: str = '',
+                               repo_type: str = '') -> Dict[str, Any]:
+        """{'latest': the actionable next version, 'head': newest overall,
+        'listed': bool, 'candidates': int} — the chart-side twin of
+        `_pick_latest_semver_tag`'s same-major preference (F-a8bfa9de).
+
+        Until 2026-09-22 a chart had ONE answer, the absolute head: `helm show
+        chart` returns the newest tag's Chart.yaml and nothing else. Pinned at
+        kube-prometheus-stack 90.0.0 with 90.1.0 .. 90.2.0 published, the
+        report said `90.0.0 -> 91.4.1` (a MAJOR, PLAN lane, planner dispatch)
+        while the in-line minors that Renovate's separate-major PR offers and
+        the nightly window could apply were masked behind it — the exact
+        defect the image side fixed on 2026-08-15 for redisinsight, in the
+        other direction.
+
+        `latest` is what the image side returns: the newest SAME-MAJOR version
+        strictly newer than the pin when one exists, else the head (so a
+        major-behind state still surfaces as a MAJOR when the current line is
+        exhausted). `head` is ALWAYS carried so the report can show both.
+        When the listing is unknowable, `latest == head` from the old
+        single-answer resolver and `listed` is False — the pre-fix behaviour,
+        never silently worse than it.
+        """
+        head = self.get_latest_chart_version(repo_name, chart_name, repo_url, repo_type)
+        out: Dict[str, Any] = {'latest': head, 'head': head, 'listed': False, 'candidates': 0}
+        cands = self.get_chart_version_candidates(repo_name, chart_name, repo_url, repo_type)
+        if not cands:
+            return out
+        out['listed'] = True
+        out['candidates'] = len(cands)
+        listed_head = self._pick_latest_semver_tag(cands)
+        if listed_head and (not head or self.is_reportable_update(head, listed_head)):
+            head = listed_head        # a complete listing outranks helm's one tag
+        cur = str(current_version or '')
+        nxt = self._pick_latest_semver_tag(cands, cur) if cur else None
+        latest = head
+        if nxt and self.is_reportable_update(cur, nxt):
+            latest = nxt
+        out['latest'], out['head'] = latest, head
+        return out
+
     def get_oci_chart_version(self, repo_url: str, chart_name: str) -> Optional[str]:
         """Get the latest version of an OCI-hosted Helm chart.
 
@@ -1379,9 +1634,18 @@ class VersionChecker:
     # while bumping immich v3.1.0 -> v3.2.0 (F-aa7da9d6); immich is not on the
     # auto-update deny-list, so the unattended nightly lane could have written
     # the CPU tag on the NEXT release with nobody watching.
+    # BUILD-CLASS flavours that some vendors put in FRONT of the version
+    # (`distroless-v1.39.1`, `debug-v1.39.1`, `contrib-debug-v1.39.1` —
+    # envoyproxy/envoy publishes all of these as siblings of the bare
+    # `v1.39.1`). They are canonicalised to the suffix form by _canonical_tag()
+    # and listed here so the suffix machinery treats them as variants: without
+    # this the Envoy data plane's pin was not version-shaped at all, and the
+    # picker proposed the bare `v1.40.0` — a silent distroless -> full-image
+    # base swap — as its "update" (F-41f0d855, measured 2026-09-22).
     _VARIANT_NAMES = (r'alpine\d*|bookworm|bullseye|buster|slim|debian|ubuntu|'
                       r'focal|jammy|noble|'
-                      r'openvino|cuda\d*|rocm|armnn|rknn')
+                      r'openvino|cuda\d*|rocm|armnn|rknn|'
+                      r'distroless|debug|tools|contrib|google_vrp')
     # Some vendors publish a COMPOUND variant: a distro codename plus a build
     # flavour (`v0.143.0-noble-full`, `-noble-nvidia`, `-noble-lite`). The
     # anchor stays a known distro name, so this cannot swallow a pre-release or
@@ -1424,7 +1688,7 @@ class VersionChecker:
         recognised as pre-releases rather than as plain variant builds.
         """
         return bool(cls._PRERELEASE_TAG_RE.search(
-            cls._VARIANT_RE.sub('', cls._strip_digest(tag))))
+            cls._VARIANT_RE.sub('', cls._canonical_tag(tag))))
     # Current-tag shapes that are unverifiable by design (rolling / self-built):
     # git-sha pins and floating tags. We skip these cleanly instead of emitting
     # a meaningless "could not check" / "→ latest ⚪ UNKNOWN".
@@ -1454,10 +1718,33 @@ class VersionChecker:
         """`1.2.3-bookworm@sha256:…` → `1.2.3-bookworm`; other tags unchanged."""
         return cls._DIGEST_SUFFIX_RE.sub('', str(tag or ''))
 
+    # A build-class PREFIX in front of a version-shaped remainder. Anchored on
+    # the closed list of names and on a following `v?<digit>`, so `dev`,
+    # `sha-…` and a plain suffix-variant tag are never rewritten.
+    _PREFIX_VARIANT_RE = re.compile(
+        r'^((?:distroless|debug|tools|contrib|google_vrp)'
+        r'(?:-(?:distroless|debug|tools|contrib|google_vrp))*)-(?=v?\d)',
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _canonical_tag(cls, tag: str) -> str:
+        """Digest stripped AND a prefix flavour moved to the suffix position:
+        `distroless-v1.39.1@sha256:…` → `v1.39.1-distroless`. The ONE
+        normalisation chokepoint every tag-shape helper below goes through, so
+        a vendor's prefix convention is handled once rather than per helper —
+        the same reason the digest strip lives in one place (F-41f0d855)."""
+        t = cls._strip_digest(tag)
+        m = cls._PREFIX_VARIANT_RE.match(t)
+        if m:
+            return f"{t[m.end():]}-{m.group(1).lower()}"
+        return t
+
     @classmethod
     def _tag_variant(cls, tag: str) -> str:
-        """The OS/variant suffix of a tag ('alpine', 'slim', …), '' if none."""
-        m = cls._VARIANT_RE.search(cls._strip_digest(tag))
+        """The OS/variant flavour of a tag ('alpine', 'slim', 'distroless', …),
+        '' if none. Prefix flavours (`distroless-v1.39.1`) count."""
+        m = cls._VARIANT_RE.search(cls._canonical_tag(tag))
         return m.group(1).lower() if m else ''
 
     # Ubuntu's tag stream mixes two release CLASSES. An LTS (even year, `.04`)
@@ -1473,7 +1760,7 @@ class VersionChecker:
     @classmethod
     def _is_ubuntu_lts(cls, tag: str) -> bool:
         """True for Ubuntu LTS tags (`24.04`, `24.04.4`, `22.04-slim`)."""
-        t = cls._VARIANT_RE.sub('', cls._strip_digest(tag)).lstrip('vV')
+        t = cls._VARIANT_RE.sub('', cls._canonical_tag(tag)).lstrip('vV')
         m = re.match(r'^(\d{2})\.(\d{2})(?:\.|$|-)', t)
         return bool(m) and int(m.group(1)) % 2 == 0 and m.group(2) == '04'
 
@@ -1485,7 +1772,7 @@ class VersionChecker:
         plain tag outranks a build-sha-suffixed one (2026-08-03: n8n 2.33.3 →
         2.33.3-12d3f08 was a false positive — same release, sha-pinned build,
         and the equal-key stable sort picked it arbitrarily)."""
-        tag = cls._strip_digest(tag)
+        tag = cls._canonical_tag(tag)
         name = cls._VARIANT_RE.sub('', tag).lstrip('vV').split('-', 1)[0]
         try:
             nums = [int(p) for p in name.split('.')]
@@ -1504,7 +1791,8 @@ class VersionChecker:
 
         `repository` is optional and used only for release-CLASS rules that the
         tag string alone cannot express (Ubuntu LTS vs interim)."""
-        version_tags = [t for t in tags if t and self._SEMVER_TAG_RE.match(t)]
+        version_tags = [t for t in tags
+                        if t and self._SEMVER_TAG_RE.match(self._canonical_tag(t))]
         if not version_tags:
             return None
         # Never recommend a pre-release. Conditional on a stable candidate
@@ -1566,7 +1854,8 @@ class VersionChecker:
             return True
         # Leading hex-sha segment (e.g. '5d88656-unprivileged-v2') with no
         # parseable semver shape → rolling.
-        if re.match(r'^[0-9a-f]{7,}(-|$)', tag) and not self._SEMVER_TAG_RE.match(tag):
+        if (re.match(r'^[0-9a-f]{7,}(-|$)', tag)
+                and not self._SEMVER_TAG_RE.match(self._canonical_tag(tag))):
             return True
         return False
 
@@ -1940,11 +2229,12 @@ class VersionChecker:
         (F-6f75c263). Noise in an audit log is not free: it trains the reader to
         skim exactly the lines that would carry a real downgrade.
         """
-        tag = self._strip_digest(tag)
+        tag = self._canonical_tag(tag)   # digest off, prefix flavour -> suffix
         # Strip v/V prefix
         tag = tag.lstrip('vV')
         # Strip known OS/variant suffixes that don't represent version differences
-        tag = re.sub(r'-(alpine|alpine\d*|bookworm|bullseye|buster|slim|debian|ubuntu|focal|jammy|noble)(\d*)$', '', tag, flags=re.IGNORECASE)
+        tag = re.sub(r'-(alpine|alpine\d*|bookworm|bullseye|buster|slim|debian|ubuntu|focal|jammy|noble'
+                     r'|distroless|debug|tools|contrib|google_vrp)(\d*)$', '', tag, flags=re.IGNORECASE)
         return tag
 
     _NUMERIC_TAG_RE = re.compile(r'^\d+(?:\.\d+)*$')
@@ -2055,8 +2345,10 @@ class VersionChecker:
         if not version_str:
             return None
         
-        # Remove 'v' prefix and any build metadata
-        clean_version = version_str.lstrip('vV').split('+')[0].split('-')[0]
+        # Remove 'v' prefix and any build metadata. Canonicalise first so a
+        # prefix flavour (`distroless-v1.39.1`) parses as (1, 39, 1) instead of
+        # as the unparseable word "distroless" (F-41f0d855).
+        clean_version = self._canonical_tag(str(version_str)).lstrip('vV').split('+')[0].split('-')[0]
         
         try:
             # Try using packaging library. `.release` keeps every component;
@@ -2409,8 +2701,15 @@ class VersionChecker:
         
         # Handle docker.io (Docker Hub)
         if 'docker.io' in image_repo or (not '/' in image_repo.split('://')[-1].split('/')[0] and '.' not in image_repo.split('/')[0]):
-            # Docker Hub format: owner/repo or library/repo
-            parts = image_repo.split('/')
+            # Docker Hub format: owner/repo or library/repo. An explicit
+            # registry host is NOT the owner: `docker.io/cloudflare/cloudflared`
+            # derived ('docker.io', 'cloudflared') until 2026-09-22, so every
+            # `docker.io/<owner>/<repo>` pin in the universe resolved to a
+            # GitHub project that does not exist and G3 could never read a
+            # note for any of them (found by the F-d6f1b7c7 audit).
+            parts = image_repo.split('://')[-1].split('/')
+            if len(parts) >= 2 and parts[0] in self._DOCKERHUB_HOSTS:
+                parts = parts[1:]
             if len(parts) >= 2:
                 owner = parts[0] if parts[0] != 'library' else parts[1]
                 repo = parts[-1]
@@ -2418,6 +2717,31 @@ class VersionChecker:
         
         return None
     
+    def get_release_notes_project(self, image_repo: str) -> Optional[Tuple[str, str]]:
+        """(owner, repo) whose GitHub RELEASES carry the notes for `image_repo`.
+
+        The git-tracked IMAGE_RELEASE_NOTES_PROJECTS map first, then the
+        registry-path derivation (get_repo_info_from_image). This is the
+        resolver G3 must use — auto-update.py's `_owner_repo()` and, through
+        it, coverage.py's `breaking_change_signal()` — and the one this file's
+        own image release-note lookups use. It is deliberately NOT used for the
+        G5 age measure: the map names where the NOTES live, and a project's
+        release date is not the image's publish date (a bundled image such as
+        memgraph-mage is built after the database release it wraps); the age
+        gate keeps reading the registry for images (F-d6f1b7c7).
+        """
+        key = str(image_repo or '').strip().lower().split('@', 1)[0]
+        key = key.split('://')[-1]
+        parts = key.split('/')
+        if len(parts) >= 2 and parts[0] in self._DOCKERHUB_HOSTS:
+            parts = parts[1:]
+        if len(parts) >= 2 and parts[0] == 'library':
+            parts = parts[1:]
+        key = '/'.join(parts)
+        if key in IMAGE_RELEASE_NOTES_PROJECTS:
+            return IMAGE_RELEASE_NOTES_PROJECTS[key]
+        return self.get_repo_info_from_image(image_repo)
+
     def get_chart_repo_info(self, chart_name: str, repo_name: str, repo_url: str = '') -> Optional[Tuple[str, str]]:
         """Get GitHub repository info for a Helm chart.
         
@@ -3263,6 +3587,13 @@ class VersionChecker:
             for u in self.unresolved_chart_sources:
                 print(f"    {Colors.RED}• {u['name']} ({u['file_path']}): "
                       f"{u['reason']}{Colors.RESET}")
+        if self.unresolved_rendered_images:
+            print(f"{Colors.RED}⚠ {len(self.unresolved_rendered_images)} "
+                  f"controller-rendered workload(s) whose image git does not "
+                  f"name — NOT version-checked:{Colors.RESET}")
+            for u in self.unresolved_rendered_images:
+                print(f"    {Colors.RED}• {u['kind']}/{u['name']} ({u['file_path']}): "
+                      f"{u['reason']}{Colors.RESET}")
         print()
 
         # Raw-manifest Deployments/StatefulSets/DaemonSets carry real images
@@ -3309,14 +3640,21 @@ class VersionChecker:
                 result['chart']['freshness'] = self.check_chart_freshness(
                     hr['repository_name'], hr['chart_name'],
                     hr_repo_url, hr_repo_type)
-                latest_chart = self.get_latest_chart_version(
-                    hr['repository_name'], hr['chart_name'],
+                # Same-major successor AND the absolute head (F-a8bfa9de):
+                # `latest_version` is the actionable hop, `head_version` the
+                # newest overall, so an in-line minor is no longer masked by a
+                # newer major and the major-behind state is still visible.
+                resolved = self.resolve_chart_versions(
+                    hr['repository_name'], hr['chart_name'], hr['chart_version'],
                     hr_repo_url, hr_repo_type)
+                latest_chart = resolved['latest']
                 # Fallback for bjw-s charts (app-template, etc.) which live in an
                 # OCI HelmRepository not loaded into self.helm_repositories.
                 if (not latest_chart) and hr['repository_name'] == 'bjw-s':
                     latest_chart = resolve_bjw_s_chart_latest(hr['chart_name'])
                 result['chart']['latest_version'] = latest_chart
+                result['chart']['head_version'] = resolved['head'] or latest_chart
+                result['chart']['versions_listed'] = resolved['listed']
 
                 # Get repository URL for chart repo detection
                 repo_url = hr_repo_url
@@ -3443,7 +3781,7 @@ class VersionChecker:
                         img_result['update_assessment'] = assessment
                         
                         # Try to fetch release notes for breaking changes
-                        repo_info = self.get_repo_info_from_image(img['repository'])
+                        repo_info = self.get_release_notes_project(img['repository'])
                         breaking_changes = assessment.get('breaking_changes', [])
                         
                         if repo_info:
@@ -3761,6 +4099,13 @@ class VersionChecker:
             chart_complexity = "-"
             if chart['latest_version'] and self.is_reportable_update(chart['current_version'], chart['latest_version']):
                 chart_version = f"{chart['current_version']} → {chart['latest_version']}"
+                # The newest overall rides along when it is beyond the
+                # actionable hop, AFTER the arrow pair: coverage.py's row
+                # parser takes the first `a → b` in the cell, so the same-major
+                # step is the target it lanes and the head stays informative.
+                _head = chart.get('head_version')
+                if _head and self.is_reportable_update(chart['latest_version'], _head):
+                    chart_version += f" (head {_head})"
                 chart_update = True
                 if 'update_assessment' in chart:
                     complexity_emoji = {'low': '🟢', 'medium': '🟡', 'high': '🔴'}.get(
@@ -3904,6 +4249,22 @@ class VersionChecker:
                             key=lambda r: (r['name'], r['file_path'])):
                 lines.append(f"| `{u['name']}` | `{u['file_path']}` | {u['reason']} |")
             lines.append("")
+        # Controller-rendered images git does not name — the same failure mode
+        # as above (silence, not a wrong number), one workload kind further out.
+        if self.unresolved_rendered_images:
+            lines.append("### ⚠️ Controller-rendered images not named in git (NOT version-checked)")
+            lines.append("")
+            lines.append("> A controller renders these Deployments from a CR; the image comes from a")
+            lines.append("> default compiled into the controller unless the CR pins it. Nothing in git")
+            lines.append("> names that image, so no upstream comparison ran. Pin the image field named")
+            lines.append("> below so the repository becomes the source of truth for it.")
+            lines.append("")
+            lines.append("| Object | File | Why not measured |")
+            lines.append("|--------|------|------------------|")
+            for u in sorted(self.unresolved_rendered_images,
+                            key=lambda r: (r['kind'], r['name'], r['file_path'])):
+                lines.append(f"| `{u['kind']}/{u['name']}` | `{u['file_path']}` | {u['reason']} |")
+            lines.append("")
         if unver_rows:
             lines.append("### Upstream freshness unverifiable (OCI — no dates in index)")
             lines.append("")
@@ -3945,7 +4306,11 @@ class VersionChecker:
                 if chart['latest_version']:
                     if self.is_reportable_update(chart['current_version'], chart['latest_version']):
                         lines.append(f"- **Latest Version:** `{chart['latest_version']}` ⚠️ **UPDATE AVAILABLE**")
-                        
+                        _head = chart.get('head_version')
+                        if _head and self.is_reportable_update(chart['latest_version'], _head):
+                            lines.append(f"- **Newest Overall:** `{_head}` (beyond the same-major "
+                                         f"step above — a separate, larger hop)")
+
                         # Add update assessment
                         if 'update_assessment' in chart:
                             assessment = chart['update_assessment']
@@ -4039,7 +4404,7 @@ class VersionChecker:
                                             lines.append(f"    - {bc}")
                                     
                                     # Add release notes information if available
-                                    repo_info = self.get_repo_info_from_image(img['repository'])
+                                    repo_info = self.get_release_notes_project(img['repository'])
                                     if repo_info:
                                         owner, repo = repo_info
                                         lines.append(f"  - **Source:** https://github.com/{owner}/{repo}/releases/tag/{img['latest_tag']}")
@@ -4262,6 +4627,30 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
                 "file_path": u['file_path'],
                 "reason": u['reason'],
             },
+        )
+    # A controller-rendered image git does not name is the same class of gap:
+    # it is re-emitted every run the field stays unset and stops the run the
+    # pin lands, so it closes itself the way every other version finding does.
+    for u in getattr(checker, 'unresolved_rendered_images', []):
+        warn += 1
+        _hint = u.get('image_hint') or ''
+        _meta = {"kind": "image", "file_path": u['file_path'], "reason": u['reason'],
+                 "rendered_by": u['kind']}
+        if _hint:
+            _meta["component"] = component_key('image', _hint)
+            _meta["repository"] = _hint
+        writer.emit(
+            severity='warning',
+            title=f"{u['kind']}/{u['name']}: rendered image not named in git — NOT version-checked",
+            action=("no upstream comparison ran for the image this controller "
+                    "renders. Pin the image field in the CR so git names it "
+                    "(then Renovate and this check both see it), or record an "
+                    "accepted risk with a re-review trigger (runbooks/policy-cli.py "
+                    "risk add) — do not leave it silently unmeasured. Reason: "
+                    + u['reason']),
+            evidence_path=evidence_path,
+            subsection="helmrelease_image",
+            metadata=_meta,
         )
 
     # HelmRelease findings. Policy loaded ONCE for the run; None = coverage.py

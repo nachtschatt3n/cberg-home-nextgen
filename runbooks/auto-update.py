@@ -266,11 +266,19 @@ def parse_pr(pr):
 
 # ── G3 breaking-change scan (best-effort, reuses version engine) ─────────────
 def _owner_repo(checker, dep):
-    """(owner, repo) on GitHub for a dep, or None. Image first, then chart."""
+    """(owner, repo) on GitHub for a dep, or None. Image first, then chart.
+
+    Images go through the checker's RELEASE-NOTES resolver, which consults the
+    git-tracked IMAGE_RELEASE_NOTES_PROJECTS map before deriving a project
+    from the registry path (F-d6f1b7c7: `memgraph/memgraph-mage` derives a
+    project that does not exist; its notes live in memgraph/memgraph). This
+    is G3's resolver and the release-range walk's; G5's age measure keeps its
+    own (registry-dated) path on purpose.
+    """
     try:
         owner_repo = None
         if "/" in dep and (dep.count("/") >= 1 and any(c in dep for c in ".:")) or "/" in dep:
-            owner_repo = checker.get_repo_info_from_image(dep)
+            owner_repo = checker.get_release_notes_project(dep)
         if not owner_repo:
             owner_repo = checker.get_chart_repo_info(dep.split("/")[-1], "", "")
         return owner_repo
@@ -417,19 +425,89 @@ def breaking_signal(checker, dep, new_tag, cur_tag=None):
 _SEC_MARKERS = ("cve", "security", "vulnerability", "ghsa")
 
 
+def age_waivers(policy, today=None):
+    """(active_globs, expired, malformed) from the policy's `age_waive` list.
+
+    Two entry shapes, both git-tracked in auto-update-policy.yaml:
+
+      - "*mealie*"                          plain glob — PERMANENT until removed
+                                            (the only shape before 2026-09-22;
+                                            still honoured unchanged)
+      - {match: "*mealie*", until: 2026-12-31, reason: "..."}
+                                            glob with an EXPIRY. `until` is an
+                                            inclusive UTC date; the waiver is
+                                            in force through that day and
+                                            stops waiving the day after.
+
+    F-7eaae066: the plain form was the only one, and the policy's own comment
+    says it waives the cooldown for ALL future bumps of the component. For two
+    externally exposed services that turned a one-day CVE decision into a
+    permanent supply-chain exemption nobody re-decides. A dated waiver lapses
+    on its own; the lapse is the re-review trigger.
+
+    FAIL-CLOSED on the waiver's own defects: an entry whose `until` cannot be
+    read, or whose `match` is missing, is returned in `malformed` and does NOT
+    waive — a relaxation that cannot be read must not relax. An `until` in the
+    past lands in `expired` (as `(glob, until)`), also not waiving. `today` is
+    injectable for tests.
+
+    Both lanes consume THIS function (auto-update.py's PR lane via
+    security_waived(), coverage.py's direct-bump lane via
+    _active_age_waivers()), so they cannot disagree about whether a waiver has
+    lapsed.
+    """
+    import datetime as _dt
+    today = today or _dt.datetime.now(_dt.timezone.utc).date()
+    active, expired, malformed = [], [], []
+    for entry in (policy or {}).get("age_waive") or []:
+        if isinstance(entry, str):
+            if entry.strip():
+                active.append(entry)
+            else:
+                malformed.append("empty glob string")
+            continue
+        if not isinstance(entry, dict):
+            malformed.append(f"unsupported entry shape {type(entry).__name__}: {entry!r}"[:120])
+            continue
+        pat = entry.get("match")
+        if not isinstance(pat, str) or not pat.strip():
+            malformed.append(f"mapping entry without a `match` glob: {entry!r}"[:120])
+            continue
+        until = entry.get("until")
+        if until is None or (isinstance(until, str) and not until.strip()):
+            active.append(pat)            # a mapping with no expiry is the plain form
+            continue
+        try:
+            if isinstance(until, _dt.datetime):
+                until_d = until.date()
+            elif isinstance(until, _dt.date):
+                until_d = until
+            else:
+                until_d = _dt.date.fromisoformat(str(until).strip()[:10])
+        except (ValueError, TypeError):
+            malformed.append(f"age_waive {pat!r}: unreadable `until` {until!r} — not waiving")
+            continue
+        if today > until_d:
+            expired.append((pat, until_d))
+        else:
+            active.append(pat)
+    return active, expired, malformed
+
+
 def security_waived(pr, policy):
     """CVE-driven bumps skip the age cooldown (operator: 0 days for CVE fixes).
     Signals: security markers in the PR title or labels, or an operator
-    `age_waive` glob on the dep."""
+    `age_waive` glob on the dep that is still IN FORCE (see age_waivers():
+    an expired or unreadable waiver does not waive)."""
     hay = (pr.get("title") or "").lower() + " " + " ".join(
         (l.get("name") or "").lower() if isinstance(l, dict) else str(l).lower()
         for l in (pr.get("labels") or []))
     if any(m in hay for m in _SEC_MARKERS):
         return "security-marked PR"
-    import fnmatch as _fn
     dep = (pr.get("_dep") or "").lower()
-    for pat in (policy.get("age_waive") or []):
-        if _fn.fnmatch(dep, str(pat).lower()):
+    active, _expired, _malformed = age_waivers(policy)
+    for pat in active:
+        if fnmatch.fnmatch(dep, str(pat).lower()):
             return f"age_waive glob {pat!r}"
     return None
 
@@ -759,6 +837,14 @@ def main(argv=None):
     prs = list_renovate_prs()
     log(f"== auto-update: {len(prs)} open Renovate PR(s) · policy v{policy.get('version','?')} "
         f"· trigger={trigger} · mode={'APPLY' if apply else 'dry-run'} ==")
+    # A lapsed or unreadable waiver is reported ONCE per run, so the operator
+    # sees the cooldown is back in force and prunes the entry — silently
+    # ignoring it would look identical to the waiver still working.
+    _act, _exp, _mal = age_waivers(policy)
+    for _pat, _until in _exp:
+        log(f"   age_waive {_pat!r} EXPIRED {_until} — cooldown back in force; prune it")
+    for _why in _mal:
+        log(f"!! age_waive entry ignored (fail-closed, does NOT waive): {_why}")
 
     classified = [classify(pr, policy, checker) for pr in prs]
     safe = [c for c in classified if c["verdict"] == "safe"]

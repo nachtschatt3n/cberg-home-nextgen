@@ -1416,6 +1416,22 @@ def chart_publish_age_hours(item):
     return age
 
 
+def _active_age_waivers(policy):
+    """The `age_waive` globs in force RIGHT NOW — expiry-aware (F-7eaae066).
+
+    Delegates to auto-update.py's `age_waivers()` so the PR lane and this
+    direct-bump lane can never disagree about whether a waiver has lapsed
+    (plain string = permanent; `{match, until}` = lapses after `until`).
+    FAIL-CLOSED: if that module cannot be loaded, NO waiver is in force and the
+    cooldown holds — a waiver is a relaxation, and a relaxation that cannot be
+    read must not relax.
+    """
+    try:
+        return list(_auto_update_module().age_waivers(policy or {})[0])
+    except Exception:
+        return []
+
+
 def direct_bump_age_gate(item, policy):
     """None = may auto-apply; else a reason string that HOLDS it."""
     min_age = (policy or {}).get("minimum_release_age_hours") or 0
@@ -1423,7 +1439,7 @@ def direct_bump_age_gate(item, policy):
         return None
     dep = (item.get("component") or "").lower()
     repos = item.get("image_repos") or ([item["image_repo"]] if item.get("image_repo") else [])
-    for pat in ((policy or {}).get("age_waive") or []):
+    for pat in _active_age_waivers(policy):
         if fnmatch.fnmatch(dep, str(pat).lower()) or any(
                 fnmatch.fnmatch((r or "").lower(), str(pat).lower()) for r in repos):
             return None
@@ -1928,7 +1944,13 @@ def breaking_change_signal(image_repo: str, tag: str):
     """(is_breaking, note) — G3 for a candidate that has no Renovate PR.
 
     Reuses auto-update.py's engine so the two lanes agree on what "breaking"
-    means. Best-effort by design and it says so: a POSITIVE signal holds, an
+    means — including WHERE the notes are read from: the engine resolves the
+    image repo through check-all-versions.py's `get_release_notes_project()`,
+    i.e. the git-tracked IMAGE_RELEASE_NOTES_PROJECTS map first, then the
+    registry-path derivation (F-d6f1b7c7: `memgraph/memgraph-mage` derives a
+    GitHub project that does not exist, so this gate could never verify a
+    memgraph bump and the asymmetry below waved every one through).
+    Best-effort by design and it says so: a POSITIVE signal holds, an
     unfetchable release note is reported as `unverified` and does NOT hold.
     That asymmetry is deliberate. G3-unknown is the pre-existing baseline of
     every direct bump in this lane, so demanding certainty here would be a NEW
