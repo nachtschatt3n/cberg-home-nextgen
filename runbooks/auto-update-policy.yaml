@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.22.1"
+version: "2026.09.22.2"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -44,15 +44,15 @@ minimum_release_age_hours: 48
 # future mealie / paperless-ngx bumps, not just the CVE ones. Revisit if either
 # component starts shipping regressions.
 age_waive:
-  - "*mealie*"
-  - "*paperless-ngx*"
+  - {match: "*mealie*", until: 2026-12-31, reason: "CVE-fix waiver, first bound set 2026-09-22 (F-7eaae066); re-decide before it lapses"}
+  - {match: "*paperless-ngx*", until: 2026-12-31, reason: "CVE-fix waiver, first bound set 2026-09-22 (F-7eaae066); re-decide before it lapses"}
   # Added 2026-09-05, same reason as the two above. music-assistant 2.10.1 has
   # an open CRITICAL security finding (F-759a45b5) whose fix IS the 2.10.2 tag,
   # and G5 held that fix for the full 48h because the DIRECT-BUMP lane has no
   # PR title for the security-marker waiver to read. A known-bad current
   # version outranks an unknown-new one -- this file already says so; the
   # waiver just could not see the marker.
-  - "*music-assistant*"
+  - {match: "*music-assistant*", until: 2026-12-31, reason: "CVE-fix waiver, first bound set 2026-09-22 (F-7eaae066); re-decide before it lapses"}
 
 # ── Hard blocks by dependency name ──────────────────────────────────────────
 # `match` is a shell-style glob against the Renovate depName (the token between
@@ -332,7 +332,19 @@ deny:
       rollback_class git-revert and are safe to auto-merge."
     max: patch
   - match: "*unpoller*"
-    reason: "image v5.2.4 is pinned AHEAD of chart 2.4.0 (appVersion v3.5.0) as of 2026-09-06 (shipped by the now-retired plan unpoller-v5.1.0, commit b3cae4c1). This is the coredns shape: the pinned image.tag permanently outranks appVersion, so a future chart bump would score as a safe minor and land unattended while templating for v3 — and chart templates change semantics between releases (2.4.0 itself added a Service that would have collided with our hand-written one). Chart bumps must go through the PLAN lane until a chart ships appVersion >= the pinned tag AND its values diff is re-vetted against our Service/PodMonitor overrides."
+    reason: >-
+      The pinned image tag permanently outranks the chart appVersion (the coredns
+      shape), so a CHART bump would score as a safe minor and land unattended while
+      templating for an older app line - and chart templates change semantics
+      between releases (one added a Service that would have collided with our
+      hand-written one). Chart minors go through the PLAN lane until a chart ships
+      an appVersion at or above the pinned tag AND its values diff is re-vetted
+      against our Service/PodMonitor overrides. Narrowed to max: patch on
+      2026-09-22 (F-84472f89, operator call): that hazard is about chart MINORS,
+      and blocking image PATCHES on it forced three routine patches through the
+      planner for nothing. No version digit here on purpose - the previous reason
+      named one and went stale within two weeks.
+    max: patch
   - match: "*openclaw*"
     reason: "held at 2026.6.11 pending the Memory Core→SQLite migration (2026.7.1 blocked)."
   - match: "*@openclaw/*"
