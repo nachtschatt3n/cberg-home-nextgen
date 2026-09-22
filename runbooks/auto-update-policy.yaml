@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.15.2"
+version: "2026.09.22.1"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -60,6 +60,23 @@ age_waive:
 # `max` (optional): the highest update_type still allowed for a match. Omit to
 # block the component entirely. e.g. max: patch  → allow patch, hold minor+.
 deny:
+  - match: "*authentik*"
+    reason: >-
+      HELD 2026-09-22 by operator decision. The chart bump 2026.8.2 to 2026.8.3
+      was sitting in the UNATTENDED AUTO lane for the 03:30 nightly window while
+      its own breaking-change gate reported "unverified (release notes
+      unavailable)" - G3 could not read the notes and the item routed to AUTO
+      anyway, which is a fail-open on the household SSO front door. Every service
+      behind forward-auth is downstream of a bad authentik roll, and the Flux
+      controllers that would revert it are reachable only through it.
+      SECOND REASON, independent of the first: the chart version and the server
+      image are pinned SEPARATELY. helmrelease.yaml pins
+      ghcr.io/goauthentik/server:2026.8.2 inline at two sites, so a chart-only
+      bump moves the templates while the running image stays put and leaves the
+      two skewed, with nothing asserting they agree.
+      REMOVE THIS RULE once the upgrade is done deliberately: move the chart
+      version and BOTH inline image pins together in one reviewed commit, in an
+      attended window, after confirming the 2026.8.3 image tag is published.
   - match: "*app-template*"
     reason: "app-template 3.7.3→5.0.0 is a breaking chart migration wrapping ~40
       HelmReleases — must be done deliberately, once.
