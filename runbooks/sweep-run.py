@@ -194,6 +194,177 @@ def _stop(pf: subprocess.Popen | None) -> None:
         pass
 
 
+# ---------------------------------------------------------------------------
+# Port-forward SUPERVISION (F-f85cf55c, F-fe1795c5)
+#
+# _start_port_forward() above is a one-shot probe: it waits up to 6s for the
+# local socket to ACCEPT and returns. Nothing re-checked it afterwards, and
+# main() returned 0 regardless. Two things follow from that, both measured:
+#
+#   * a forward that died between sections lost that section's entire DB
+#     write — findings_writer catches every write exception ("never lose the
+#     cycle close"), the step still exits 0/1/2, sweep-run scored it
+#     completed, and the run reported success;
+#   * "accepted TCP at start" is not the property that matters. On
+#     2026-09-22 a forward reported ready and refused the VERY NEXT connection
+#     (F-fe1795c5): kubectl port-forward listens locally and only dials the
+#     pod when a connection arrives, so a bare accept proves nothing about
+#     the path to the pod.
+#
+# So the probe is END-TO-END (a `SELECT 1` through the DSN, an HTTP /-/ready
+# through the URL), it runs BEFORE and AFTER every section (before: the
+# section's writes will have somewhere to land; after: they HAD somewhere to
+# land, i.e. the forward was alive at write time), a dead forward is
+# re-dialled ONCE per phase, and a forward that is dead when a write depended
+# on it makes the run exit non-zero. A lost section is also struck from the
+# auto-close scope: no report is not a resolution.
+# ---------------------------------------------------------------------------
+
+EXIT_FORWARD_DEAD = 3   # deliberately outside the (0,1,2) "ran to completion" set
+
+
+def _pg_probe(dsn: str):
+    """END-TO-END liveness for the postgres forward: a round-trip query."""
+    def probe() -> bool:
+        import psycopg
+        with psycopg.connect(dsn, connect_timeout=5) as c, c.cursor() as cur:
+            cur.execute("SELECT 1")
+            return cur.fetchone() == (1,)
+    return probe
+
+
+def _http_probe(url: str, path: str = "/-/ready"):
+    """END-TO-END liveness for an HTTP forward (prometheus readiness)."""
+    def probe() -> bool:
+        import urllib.request
+        with urllib.request.urlopen(url.rstrip("/") + path, timeout=5) as r:
+            return 200 <= r.status < 300
+    return probe
+
+
+class Forward:
+    """A supervised kubectl port-forward.
+
+    `probe()` MUST be end-to-end (see above). `starter` is injectable so the
+    supervision logic is testable without kubectl. `log` carries a line per
+    supervision event for the run summary.
+    """
+
+    def __init__(self, namespace: str, service: str, local_port: int, remote_port: int,
+                 probe=None, starter=None):
+        self.namespace, self.service = namespace, service
+        self.local_port, self.remote_port = local_port, remote_port
+        self.probe = probe
+        self.starter = starter or _start_port_forward
+        self.proc: subprocess.Popen | None = None
+        self.redials = 0
+        self.log: list[str] = []
+
+    def dial(self) -> None:
+        self.proc = self.starter(self.namespace, self.service,
+                                 self.local_port, self.remote_port)
+
+    def alive(self) -> bool:
+        """Process still running AND the end-to-end probe succeeds. A probe
+        that raises is a dead forward, never an unknown one."""
+        if self.proc is None or self.proc.poll() is not None:
+            return False
+        if self.probe is None:
+            return True   # not yet armed (DSN unknown) — caller arms it before use
+        try:
+            return bool(self.probe())
+        except Exception:  # noqa: BLE001 — any failure to round-trip is "dead"
+            return False
+
+    def ensure(self, phase: str) -> bool:
+        """True when the forward is live for `phase`. When it is not: stop
+        the old process, re-dial ONCE, re-probe. False means the phase must
+        not trust the forward — its writes would be lost."""
+        if self.alive():
+            return True
+        self.log.append(f"{phase}: forward to {self.service}:{self.remote_port} is DEAD "
+                        f"(end-to-end probe failed) — re-dialling once")
+        _stop(self.proc)
+        self.proc = None
+        time.sleep(0.5)
+        try:
+            self.dial()
+        except SystemExit as e:
+            self.log.append(f"{phase}: re-dial FAILED — {e}")
+            return False
+        self.redials += 1
+        ok = self.alive()
+        self.log.append(f"{phase}: re-dial {'succeeded' if ok else 'FAILED (probe still dead)'}")
+        return ok
+
+    def stop(self) -> None:
+        _stop(self.proc)
+        self.proc = None
+
+
+def _run_steps_supervised(steps: list[str], env: dict, pg_fwd: "Forward | None",
+                          prom_fwd: "Forward | None", runner=None) -> dict:
+    """Run the section scripts with the forwards supervised around each.
+
+    Returns {"nonzero": [...], "completed": [...], "lost": [...], "skipped": [...]}:
+      completed — ran to a sane rc AND its forwards were alive at write time
+      lost      — ran, but a forward it depended on was dead AFTERWARDS: its
+                  DB write cannot be trusted; struck from `completed`
+      skipped   — not run at all: a forward it depended on was dead BEFORE it
+                  and could not be re-dialled (running it would only lose the
+                  write, and the step's own exit code would hide that)
+    """
+    runner = runner or subprocess.call
+    nonzero: list[str] = []
+    completed: list[str] = []
+    lost: list[str] = []
+    skipped: list[str] = []
+    for step in steps:
+        needed = [f for f in (pg_fwd, prom_fwd if step == "slo" else None) if f is not None]
+        if not all(f.ensure(f"before {step}") for f in needed):
+            skipped.append(step)
+            print(f"────────── {step} ────────── SKIPPED: a port-forward it writes through "
+                  f"is dead and could not be re-dialled")
+            continue
+        cmd = list(STEP_SCRIPTS[step])
+        print(f"────────── {step} ──────────")
+        rc = runner(cmd, env=env)
+        if rc != 0:
+            nonzero.append(f"{step}({rc})")
+        # rc 0/1/2 = "ran to completion" (1/2 typically mean "found findings");
+        # anything else, assume crash and skip its section in auto-close.
+        sane = rc in (0, 1, 2)
+        # AFTER the step: was the forward alive at the moment the section
+        # wrote? A dead forward here means the write was silently discarded
+        # (findings_writer swallows it) — the section did NOT report. Read
+        # alive() FIRST and only then re-dial for the NEXT section: a
+        # successful re-dial must not retroactively score THIS section's
+        # lost write as landed.
+        was_alive = all(f.alive() for f in needed)
+        if not was_alive:
+            for f in needed:
+                f.ensure(f"after {step}")
+        if sane and was_alive:
+            completed.append(step)
+        elif sane:
+            lost.append(step)
+    return {"nonzero": nonzero, "completed": completed, "lost": lost, "skipped": skipped}
+
+
+def _require_forward(fwd: "Forward | None", phase: str) -> None:
+    """A DB phase that cannot proceed without its forward: abort the run with
+    EXIT_FORWARD_DEAD when ensure() cannot revive it. Nothing written in
+    `phase` would land, and pretending otherwise is the defect."""
+    if fwd is None or fwd.ensure(phase):
+        return
+    for line in fwd.log:
+        print(f"==> {line}", file=sys.stderr)
+    print(f"==> ABORT: the {fwd.service} port-forward is dead at {phase} and one re-dial "
+          f"did not revive it — nothing written here would land (F-f85cf55c); "
+          f"exit {EXIT_FORWARD_DEAD}", file=sys.stderr)
+    raise SystemExit(EXIT_FORWARD_DEAD)
+
+
 # Natures that mark a finding as being ABOUT THE AUDIT ITSELF rather than
 # about the estate: a suppression that stopped matching, a check that could
 # not cover its target, a rule that regressed. These are exempt from AR
@@ -889,8 +1060,8 @@ def main(argv: list[str] | None = None) -> int:
     steps = _resolve_steps(args.steps)
     cycle_id = args.cycle_id or str(uuid.uuid4())
 
-    pg_pf: subprocess.Popen | None = None
-    prom_pf: subprocess.Popen | None = None
+    pg_fwd: Forward | None = None
+    prom_fwd: Forward | None = None
     dsn = args.postgres_dsn
     prom_url = args.prom_url
 
@@ -902,7 +1073,8 @@ def main(argv: list[str] | None = None) -> int:
         if write_enabled and not dsn:
             port = _free_port()
             print(f"==> port-forwarding postgresql ({port}/tcp) ...")
-            pg_pf = _start_port_forward("databases", "postgresql", port, 5432)
+            pg_fwd = Forward("databases", "postgresql", port, 5432)
+            pg_fwd.dial()
             raw = _kubectl_secret_dsn()
             if not raw:
                 raise SystemExit(
@@ -915,6 +1087,12 @@ def main(argv: list[str] | None = None) -> int:
             # the `feedback_precommit_cluster_secret_match` operator memory.
             fqdn = "@postgresql." + "databases.svc.cluster.local:5432"
             dsn = raw.replace(fqdn, f"@127.0.0.1:{port}")
+            # Arm the END-TO-END probe now that the DSN is known, and prove
+            # the path to the pod before anything trusts it: a forward that
+            # accepts TCP and refuses the first real connection (F-fe1795c5)
+            # is caught here, not by the first section's silently lost write.
+            pg_fwd.probe = _pg_probe(dsn)
+            _require_forward(pg_fwd, "startup")
 
         # Reconcile-only: recompute the verdict for the shared cycle from the
         # currently-open findings and exit — no check steps. This is how the
@@ -941,6 +1119,11 @@ def main(argv: list[str] | None = None) -> int:
                     "because none of them can carry a cycle id that does not "
                     "exist yet."
                 )
+            # The reconcile writes the ran-set, the auto-close and the verdict
+            # through the forward; prove it is live first (re-dial once), or
+            # abort non-zero — a reconcile whose writes vanish is a green
+            # board over an unrecorded cycle.
+            _require_forward(pg_fwd, "reconcile")
             # The fan-out finalizes here. Guarantee the shared cycle row exists
             # even if every specialist ran clean (lazy-create means no finding →
             # no row), so the verdict lands somewhere and /api/cycles/latest has
@@ -1028,13 +1211,11 @@ def main(argv: list[str] | None = None) -> int:
         if needs_slo and not prom_url:
             port = _free_port()
             print(f"==> port-forwarding prometheus ({port}/tcp) ...")
-            prom_pf = _start_port_forward(
-                "monitoring",
-                "kube-prometheus-stack-prometheus",
-                port,
-                9090,
-            )
             prom_url = f"http://127.0.0.1:{port}"
+            prom_fwd = Forward("monitoring", "kube-prometheus-stack-prometheus",
+                               port, 9090, probe=_http_probe(prom_url))
+            prom_fwd.dial()
+            _require_forward(prom_fwd, "startup")
 
         env = os.environ.copy()
         # GHCR auth for trivy. Nine first-party ghcr.io/nachtschatt3n/* images are
@@ -1074,18 +1255,20 @@ def main(argv: list[str] | None = None) -> int:
               f"steps={steps} write={'YES' if write_enabled else 'NO'}")
         print()
 
-        nonzero: list[str] = []
-        completed: list[str] = []  # sections whose script ran to a sane rc
-        for step in steps:
-            cmd = list(STEP_SCRIPTS[step])
-            print(f"────────── {step} ──────────")
-            rc = subprocess.call(cmd, env=env)
-            if rc != 0:
-                nonzero.append(f"{step}({rc})")
-            # rc 0/1/2 = "ran to completion" (1/2 typically mean "found findings");
-            # anything else, assume crash and skip its section in auto-close.
-            if rc in (0, 1, 2):
-                completed.append(step)
+        # Sections run under forward supervision (F-f85cf55c): probed
+        # end-to-end before AND after each one; a section whose forward was
+        # dead at write time is `lost`, never `completed` — so it is not
+        # auto-closed against, and the run exits non-zero below.
+        res = _run_steps_supervised(steps, env,
+                                    pg_fwd if (write_enabled and dsn) else None,
+                                    prom_fwd)
+        nonzero: list[str] = res["nonzero"]
+        completed: list[str] = res["completed"]  # ran to a sane rc AND wrote through a live forward
+
+        # The post-step DB phases (AR suppression, auto-close, verdict) all
+        # write through the forward — prove it live first, or abort non-zero.
+        if write_enabled and dsn:
+            _require_forward(pg_fwd, "post-steps (AR suppression / auto-close / verdict)")
 
         # Apply AR suppression: tag any open finding whose title matches
         # an enabled accepted-risk description as severity=accepted. Runs
@@ -1123,16 +1306,31 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"==> cycle verdict reconciled from open findings: {verdict}")
 
         print()
+        for fwd in (pg_fwd, prom_fwd):
+            for line in (fwd.log if fwd else []):
+                print(f"==> forward supervision: {line}")
         if not nonzero:
             print(f"==> sweep-run done (cycle={cycle_id}, all clean)")
         else:
             print(f"==> sweep-run done (cycle={cycle_id}, nonzero={nonzero})")
-        # Match the in-cluster entrypoint contract: nonzero from a script
-        # often just means "found a finding" — don't propagate as failure.
+        # A section whose forward was dead at write time did NOT report,
+        # whatever its exit code said — its rows were silently discarded.
+        # That is a failed run, and the ONE thing this exit code must never
+        # hide (F-f85cf55c). Everything else keeps the in-cluster entrypoint
+        # contract: nonzero from a script often just means "found a finding".
+        if res["lost"] or res["skipped"]:
+            print(f"==> FAILED: DB write lost for section(s) {res['lost'] or '[]'} "
+                  f"(forward dead at write time), skipped {res['skipped'] or '[]'} "
+                  f"(forward dead before the section and not revivable) — these "
+                  f"sections did NOT report this cycle; exit {EXIT_FORWARD_DEAD}",
+                  file=sys.stderr)
+            return EXIT_FORWARD_DEAD
         return 0
     finally:
-        _stop(prom_pf)
-        _stop(pg_pf)
+        if prom_fwd is not None:
+            prom_fwd.stop()
+        if pg_fwd is not None:
+            pg_fwd.stop()
 
 
 if __name__ == "__main__":

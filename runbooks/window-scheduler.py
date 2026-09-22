@@ -52,6 +52,11 @@ WHAT IT REFUSES TO SCHEDULE, AND WHY EACH REFUSAL IS LOAD-BEARING
   unmet depends_on      `superset-pg-18.6` hard-depends on `superset-6.1.0`,
                         which has not executed.
   conflicts_with        never two conflicting plans in one slot.
+  exclusive: true       a plan that must have its slot to itself never shares
+                        one, in EITHER direction: an exclusive candidate is
+                        refused an occupied slot, and any candidate is refused
+                        a slot an exclusive plan already holds. Until
+                        2026-09-22 nothing enforced this (F-48a45acf).
   over capacity         risk-load against `capacity_risk`, and minutes against
                         `duration_min` LESS a reserve for Step 0, which applies
                         safe updates in every window before any plan runs.
@@ -130,6 +135,45 @@ def slot_load(slot, plans):
     here = [p for p in plans if p.get("window") == slot]
     return (sum(RISK_WEIGHT.get(risk_of(p), 2) for p in here),
             sum(int(p.get("est_duration_min") or 0) for p in here))
+
+
+def is_exclusive(plan) -> bool:
+    """`exclusive: true` — the plan must have its dated slot to itself.
+
+    Only a BARE boolean true counts. A string ("yes", "true") is a typo the
+    validator reports; reading it as true here would let a mis-typed field
+    silently reserve whole windows, reading it as false would silently drop
+    the plan's hardest constraint. Neither is acceptable, so the type is
+    strict on both sides (validate_plans() rejects the non-boolean).
+    """
+    return plan.get("exclusive") is True
+
+
+def slot_exclusivity_blocks(plan, here_plans) -> str | None:
+    """The SIXTH slot guard (F-48a45acf). Returns the refusal reason, or None.
+
+    A plan's hardest scheduling constraint — "nothing else may run in my
+    window" — was enforced by NOTHING: `grep -c exclusiv window-scheduler.py`
+    read 0 on 2026-09-22. `conflicts_with` cannot express it (it names
+    specific plans, and the plan written next week is not on the list), and
+    capacity cannot either (a 10-minute low-risk plan fits beside anything).
+
+    Symmetric, like the conflicts guard: the candidate is refused when IT is
+    exclusive and the slot is occupied, AND when any OCCUPANT is exclusive —
+    the occupant's declaration binds every later arrival, not only the ones
+    that happen to declare it themselves.
+    """
+    if not here_plans:
+        return None
+    occupants = sorted(str(p.get("plan_id")) for p in here_plans)
+    if is_exclusive(plan):
+        return (f"declares exclusive: true but the slot already holds "
+                f"{', '.join(occupants)}")
+    excl = sorted(str(p.get("plan_id")) for p in here_plans if is_exclusive(p))
+    if excl:
+        return (f"slot is held exclusively by {', '.join(excl)} "
+                f"(exclusive: true) — nothing else may share it")
+    return None
 
 
 # Upper bound for one plan's premises run. plan-premises.py caps each premise
@@ -244,6 +288,7 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21,
         conflicts = set(plan.get("conflicts_with") or [])
 
         placed = None
+        excl_blocked: list[str] = []   # slots refused on exclusivity, for the reason
         for s in slots:
             attended = str(s.get("mode")) == "attended"
             if want_attended != attended:
@@ -264,6 +309,13 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21,
                         if pid in set(p.get("conflicts_with") or [])}
             if (conflicts & here) or names_me:
                 continue
+            # sixth guard — slot exclusivity, symmetric (F-48a45acf); see
+            # slot_exclusivity_blocks() for why neither of the guards above
+            # can stand in for it.
+            excl_why = slot_exclusivity_blocks(plan, here_plans)
+            if excl_why:
+                excl_blocked.append(f"{s['slot']}: {excl_why}")
+                continue
             rload, rmins = slot_load(s["slot"], live)
             if rload + RISK_WEIGHT.get(risk_of(plan), 2) > int(s.get("capacity_risk", 4)):
                 continue
@@ -274,8 +326,13 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21,
             break
 
         if not placed:
-            skip(plan, f"no {'attended' if want_attended else 'unattended'} slot in horizon "
-                       f"with room for {dur}m at risk {risk_of(plan)}")
+            why = (f"no {'attended' if want_attended else 'unattended'} slot in horizon "
+                   f"with room for {dur}m at risk {risk_of(plan)}")
+            if excl_blocked:
+                why += (f"; {len(excl_blocked)} slot(s) refused on exclusivity — "
+                        + "; ".join(excl_blocked[:3])
+                        + (" …" if len(excl_blocked) > 3 else ""))
+            skip(plan, why)
             continue
 
         by_id[pid]["window"] = placed["slot"]

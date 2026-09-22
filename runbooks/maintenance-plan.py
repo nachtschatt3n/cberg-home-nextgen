@@ -235,7 +235,7 @@ def reconcile(cfg, today, decisions=_FETCH_DECISIONS):
     held, held_error = get_held()
     plans = load_plans(cfg)
     validation_errors = validate_plans(cfg, plans)
-    liveness = window_liveness_report(cfg, today)
+    liveness = window_liveness_figures(cfg, today)
     parity_errors, parity_verified = cron_parity(cfg)
     autonomy = load_autonomy_policy()
     exec_classes = []
@@ -503,9 +503,9 @@ def reconcile(cfg, today, decisions=_FETCH_DECISIONS):
         "age_cooldown": cooling,
         "ambiguous_matches": ambiguous,
         "validation_errors": validation_errors,
-        "window_liveness": {"missing": liveness["missing"],
-                            "stuck": liveness["stuck"],
-                            "verified": liveness["verified"]},
+        # the full liveness report: missing/stuck/verified plus the figures
+        # (window_runs_missing_count, lookback) a PrometheusRule will read
+        "window_liveness": dict(liveness),
         "cron_parity": {"errors": parity_errors, "verified": parity_verified},
         "execution_classes": exec_classes,   # ENFORCED since P2.1b (a39d8766)
         "stale": stale,
@@ -582,6 +582,16 @@ def human(r, cfg):
         L.append(f"\n❌ WINDOW RUNS STUCK OPEN ({len(wl['stuck'])}) — started, never finalized past duration+{WINDOW_STUCK_GRACE_MIN}m grace:")
         for s in wl["stuck"]:
             L.append(f"  ! {s} — window-run-record.py --finalize with the real outcome (aborted if unknown)")
+    # The FIGURE, printed on every verified run — including at 0 — so a reader
+    # (and a future exporter) always sees the number AND the caveat that
+    # makes it honest: it is a rolling lookback, so a gap ages out of it
+    # silently (F-2dabaddb). Not printed when unverified: no ledger, no figure.
+    if wl.get("verified") and wl.get("window_runs_missing_count") is not None:
+        L.append(f"\nwindow_runs_missing_count {wl['window_runs_missing_count']} "
+                 f"(stuck {wl.get('window_runs_stuck_count', 0)}; "
+                 f"{wl.get('lookback_days')}-day lookback from {wl.get('lookback_floor')} — "
+                 f"a miss older than that has AGED OUT of this figure; "
+                 f"expose it with --liveness-metrics for a PrometheusRule)")
     if r.get("validation_errors"):
         L.append(f"\n❌ PLAN FRONTMATTER ERRORS ({len(r['validation_errors'])}) — fix before these plans can be trusted:")
         for e in r["validation_errors"]:
@@ -794,6 +804,14 @@ def validate_plans(cfg, plans=None) -> list[str]:
         ao = pl.get("autonomy_override")
         if ao is not None and ao != "human-gated":
             errs.append(f"{pid}: autonomy_override may only RESTRICT (only legal value: human-gated)")
+        # `exclusive: true` — the plan must have its dated slot to itself
+        # (F-48a45acf; enforced by window-scheduler.py's sixth guard). A
+        # non-boolean would be read as false by the scheduler's strict
+        # `is True` test, silently dropping the plan's hardest constraint —
+        # so the type is an error here, same as capability_change.
+        ex = pl.get("exclusive")
+        if ex is not None and not isinstance(ex, bool):
+            errs.append(f"{pid}: exclusive must be a bare boolean, got {ex!r}")
         # finding_refs bind a plan to the sweep findings it answers — the
         # plan-or-page pass (finding-triage.py) joins on them, so a malformed
         # ref silently un-plans a finding. Format-checked here.
@@ -808,7 +826,39 @@ def validate_plans(cfg, plans=None) -> list[str]:
                     errs.append(f"{pid}: {field} -> {ref!r} names no existing plan "
                                 f"— this guard is not enforced; resolve or delete "
                                 f"the ref with a dated comment")
+    # Cross-plan: an `exclusive: true` plan sharing a dated slot with any other
+    # LIVE plan. The scheduler's guard only governs placements IT makes; a
+    # `window:` written by hand (or by run-now.py stamp) never passes through
+    # it, so the invariant has to be asserted over the files as they are.
+    # Terminal plans still carrying a window are retired_still_windowed()'s
+    # finding, not occupancy — they do not count as sharing.
+    errs.extend(exclusive_slot_violations(plans))
     return errs
+
+
+def exclusive_slot_violations(plans) -> list[str]:
+    """Pure: error strings for every exclusive plan whose dated slot holds
+    another live plan (F-48a45acf). One line per exclusive plan, naming the
+    others, so the fix (move one of them) is legible from the message."""
+    by_slot: dict = {}
+    for pl in plans:
+        w = pl.get("window")
+        st = str(pl.get("status") or "").strip()
+        if w and st not in TERMINAL_PLAN_STATUSES:
+            by_slot.setdefault(str(w), []).append(pl)
+    out = []
+    for slot, group in sorted(by_slot.items()):
+        if len(group) < 2:
+            continue
+        for p in group:
+            if p.get("exclusive") is not True:
+                continue
+            others = sorted(str(q.get("plan_id")) for q in group if q is not p)
+            out.append(f"{p.get('plan_id')}: exclusive: true but shares window {slot} "
+                       f"with {', '.join(others)} — an exclusive plan's slot must hold "
+                       f"nothing else; move one of them (a hand-written window: "
+                       f"bypasses window-scheduler.py's guard)")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -823,8 +873,17 @@ def validate_plans(cfg, plans=None) -> list[str]:
 # asserted — otherwise the check would fire for all of history on day one.
 WINDOW_LIVENESS_EPOCH = date(2026, 8, 27)
 
+# How far back the liveness assertion looks. THIS IS A ROLLING WINDOW, NOT A
+# LEDGER: a missed occurrence older than this ages out of `missing` (and of
+# window_runs_missing_count) silently — nothing carries it forward. The figure
+# therefore answers "did anything go missing THIS week", never "has anything
+# ever gone missing". A consumer that needs the latter has to observe the
+# figure continuously (a PrometheusRule over the exposed gauge), which is why
+# liveness_metrics_text() exposes the lookback alongside the count.
+WINDOW_LIVENESS_LOOKBACK_DAYS = 7
 
-def expected_slots(cfg, today, lookback_days=7):
+
+def expected_slots(cfg, today, lookback_days=WINDOW_LIVENESS_LOOKBACK_DAYS):
     """Every (slot, date) the YAML says should have run: fully-past days only
     (today's window may legitimately not have fired yet), since the epoch.
 
@@ -952,12 +1011,82 @@ def stuck_window_runs(windows, run_rows, now, grace_min=WINDOW_STUCK_GRACE_MIN,
     return sorted(out)
 
 
+def liveness_figures(missing, stuck, verified, today,
+                     lookback_days=WINDOW_LIVENESS_LOOKBACK_DAYS) -> dict:
+    """Pure: the liveness report WITH its machine-readable figures (F-2dabaddb).
+
+    Before this the report carried only the lists, and a nightly that silently
+    never ran was a line in a human report nobody was paged by. The count is
+    the thing a PrometheusRule can read; the lookback rides beside it because
+    the count is a rolling 7-day window and a gap AGES OUT of it silently
+    (see WINDOW_LIVENESS_LOOKBACK_DAYS) — a rule that reads only the count
+    would see it fall back to 0 a week after the miss and call that recovery.
+
+    Unverified → the counts are None, never 0: a ledger that could not be
+    read has no figure, and 0 would be the silent all-clear this exists to
+    prevent. The exposition (liveness_metrics_text) omits them the same way.
+    """
+    floor = (today - timedelta(days=lookback_days)).isoformat()
+    missing, stuck = list(missing), list(stuck)
+    return {
+        "missing": missing,
+        "stuck": stuck,
+        "verified": bool(verified),
+        "window_runs_missing_count": len(missing) if verified else None,
+        "window_runs_stuck_count": len(stuck) if verified else None,
+        "lookback_days": int(lookback_days),
+        "lookback_floor": floor,
+        "ages_out": (f"a missed occurrence older than {lookback_days} days (before "
+                     f"{floor}) is no longer counted — this is a rolling window, "
+                     f"not a ledger; read it continuously, not once"),
+    }
+
+
+def liveness_metrics_text(report: dict) -> str:
+    """Prometheus text exposition of the liveness figures, for the exporter /
+    textfile hook that will feed a PrometheusRule (the rule is a manifest and
+    lives in kubernetes/, not here). Contract:
+
+      window_runs_liveness_verified        1 = the ledger was read; 0 = it was
+                                           NOT — a rule must alert on 0 as
+                                           loudly as on a missing window
+      window_runs_liveness_lookback_days   the rolling window the count covers
+      window_runs_missing_count{...}       ONLY when verified — an unverified
+                                           run exposes NO count, so absent()
+                                           in the rule is the unverified arm
+      window_runs_stuck_count              same rule
+    """
+    L = [
+        "# HELP window_runs_liveness_verified 1 when the window_runs ledger was read this run, 0 when it could not be (no DSN / DB unreachable). 0 is NOT all-clear.",
+        "# TYPE window_runs_liveness_verified gauge",
+        f"window_runs_liveness_verified {1 if report.get('verified') else 0}",
+        "# HELP window_runs_liveness_lookback_days Rolling lookback of the liveness assertion. A missed window older than this AGES OUT of window_runs_missing_count silently.",
+        "# TYPE window_runs_liveness_lookback_days gauge",
+        f"window_runs_liveness_lookback_days {int(report.get('lookback_days') or WINDOW_LIVENESS_LOOKBACK_DAYS)}",
+    ]
+    if report.get("verified"):
+        n = int(report.get("window_runs_missing_count") or 0)
+        s = int(report.get("window_runs_stuck_count") or 0)
+        L += [
+            "# HELP window_runs_missing_count Declared maintenance-window occurrences in the lookback with no completed window_runs row (the window silently never ran, or died mid-run).",
+            "# TYPE window_runs_missing_count gauge",
+            f"window_runs_missing_count{{lookback_days=\"{int(report.get('lookback_days') or WINDOW_LIVENESS_LOOKBACK_DAYS)}\"}} {n}",
+            "# HELP window_runs_stuck_count window_runs rows opened (running) and never finalized past the window's duration plus grace.",
+            "# TYPE window_runs_stuck_count gauge",
+            f"window_runs_stuck_count {s}",
+        ]
+    return "\n".join(L) + "\n"
+
+
 def window_liveness_report(cfg, today, now=None):
     """{"missing": [...], "stuck": [...], "verified": bool}.
 
     verified=False when the DB is unreachable — an unreadable ledger must
     render as NOT CHECKED, never as all-clear. `missing` and `verified` keep
-    the shape every consumer has read since P1.3; `stuck` is additive.
+    the shape every consumer has read since P1.3; `stuck` is additive. The
+    shape is PINNED (test-window-run-running-row asserts the unverified dict
+    by equality), so the machine-readable figures live in the sibling
+    window_liveness_figures(), which wraps this.
     """
     unverified = {"missing": [], "stuck": [], "verified": False}
     expected = expected_slots(cfg, today)
@@ -968,7 +1097,7 @@ def window_liveness_report(cfg, today, now=None):
     # dead by 06:00 is today's problem), so the read floor is the earlier of
     # the liveness lookback and the expected-slot floor.
     floor = min([d for _, d in expected]
-                + [(today - timedelta(days=7)).isoformat()])
+                + [(today - timedelta(days=WINDOW_LIVENESS_LOOKBACK_DAYS)).isoformat()])
     try:
         import psycopg
         with psycopg.connect(dsn, connect_timeout=10) as c, c.cursor() as cur:
@@ -983,6 +1112,15 @@ def window_liveness_report(cfg, today, now=None):
             "stuck": stuck_window_runs(cfg.get("windows", []), rows, now,
                                        on_demand=on_demand_slot(cfg)),
             "verified": True}
+
+
+def window_liveness_figures(cfg, today, now=None) -> dict:
+    """window_liveness_report() PLUS the figures a PrometheusRule reads
+    (F-2dabaddb): window_runs_missing_count, window_runs_stuck_count,
+    lookback_days, lookback_floor, ages_out. This is what reconcile(), human()
+    and --liveness-metrics consume; the three-key report stays as it was."""
+    r = window_liveness_report(cfg, today, now=now)
+    return liveness_figures(r["missing"], r["stuck"], r["verified"], today)
 
 
 def window_liveness(cfg, today):
@@ -1254,9 +1392,16 @@ def main(argv=None):
                     help="check plan frontmatter invariants and exit (rc 1 on errors)")
     ap.add_argument("--open", action="store_true",
                     help="canonical open-plan queue, split executable/programme/reference")
+    ap.add_argument("--liveness-metrics", action="store_true",
+                    help="print the window-liveness figures in Prometheus text exposition "
+                         "(window_runs_missing_count etc.) for an exporter / PrometheusRule; "
+                         "reads only the window_runs ledger, no plan reconcile")
     args = ap.parse_args(argv)
     cfg = load_windows()
     today = datetime.now().date()
+    if args.liveness_metrics:
+        print(liveness_metrics_text(window_liveness_figures(cfg, today)), end="")
+        return 0
     r = reconcile(cfg, today)
     if args.verify:
         sus = already_done_suspects(cfg)

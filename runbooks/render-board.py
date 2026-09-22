@@ -79,6 +79,33 @@ def _desc(title: str, limit: int = 96) -> str:
     return (t[: limit - 1] + "…") if len(t) > limit else t
 
 
+# An UNBUMPABLE-CVE ESCALATION (F-80128ae8). security-check.py's magnitude rule
+# emits a CRITICAL row when no newer upstream tag can fix an image and the
+# count is too large to absorb: the remaining options are a variant/base
+# switch, a replacement, or a compensating control — a HUMAN DECISION, which
+# is the one thing "no action now" must never say. But AR-029's substring
+# then tags the row `[AR-029]`/accepted, and the high-tier collapse below
+# folded it into "N AR-accepted item(s), awaiting an upstream release — resurface at
+# their AR review dates, no action now". Measured 2026-09-22: one row.
+#
+# The emitter does not (yet) stamp `metadata.escalation`, so the row is
+# recognised by BOTH: the marker when present (it wins), and the title shape
+# the magnitude branch has carried since 2026-07-31 ("no bump can fix this …
+# Decide: …"). Keying on the shape is deliberate and stated here: when
+# security-check.py gains the marker, the shape keeps working meanwhile.
+ESCALATION_TITLE_MARKS = ("no bump can fix this", "Decide:")
+
+
+def is_escalation(row: dict) -> bool:
+    """True for a row that is a decision request, whatever its tier or
+    severity — see the block above for the two keys."""
+    meta = row.get("meta") or {}
+    if str(meta.get("escalation", "")).strip().lower() in ("true", "1", "yes"):
+        return True
+    title = str(row.get("title") or "")
+    return all(mark in title for mark in ESCALATION_TITLE_MARKS)
+
+
 def planned_findings(cur=None) -> dict:
     """finding_id -> (plan_id, window) for every ACTIVE maintenance plan that
     carries a `security_ref`. Operator rule (2026-08-17): a finding already
@@ -215,6 +242,28 @@ def collect(cur, cycle_id: str | None) -> dict:
         (cycle_id,))
     out["criticals"] = [{"id": f, "title": t} for f, t in cur.fetchall()]
 
+    # Escalations (F-80128ae8) — tier-independent. The SQL is a cheap SUPERSET
+    # (marker present, or the first title mark); is_escalation() is the
+    # authority, so the split is decided in one place and is testable.
+    cur.execute(
+        """SELECT finding_id, title,
+                  COALESCE(metadata->>'risk_tier','untiered') AS tier,
+                  severity, metadata->>'escalation' AS esc,
+                  COALESCE(metadata->>'subsection','') AS sub
+           FROM sweep_findings
+           WHERE cycle_id=%s AND status!='resolved'
+             AND (COALESCE(metadata->>'escalation','') <> ''
+                  OR title LIKE '%%no bump can fix this%%')
+           ORDER BY finding_id""",
+        (cycle_id,))
+    cand = [{"id": f, "title": t, "tier": tier, "severity": sev, "sub": sub,
+             "meta": {"escalation": esc}}
+            for f, t, tier, sev, esc, sub in cur.fetchall()]
+    out["escalations"] = [r for r in cand if is_escalation(r)]
+    esc_ids = {r["id"] for r in out["escalations"]}
+    # rendered ONCE, as a decision request — never also as a bare critical
+    out["criticals"] = [c for c in out["criticals"] if c["id"] not in esc_ids]
+
     cur.execute(
         """SELECT finding_id, title, metadata->>'exposure' AS exposure,
                   COALESCE(metadata->>'subsection','') AS sub, severity
@@ -224,6 +273,10 @@ def collect(cur, cycle_id: str | None) -> dict:
         (cycle_id,))
     rows = [{"id": f, "title": t, "exposure": e, "sub": sub, "severity": sev}
             for f, t, e, sub, sev in cur.fetchall()]
+    # An escalation is a decision request, not an accepted risk — it must
+    # never fold into the AR count line below, whatever severity the AR
+    # suppression stamped on it.
+    rows = [r for r in rows if r["id"] not in esc_ids]
     # Operator rule (2026-08-17): an ACCEPTED-risk finding is by definition
     # acknowledged — "I don't need to see the accepted AR if there is no
     # upstream fix yet." They collapse to one count line instead of individual
@@ -283,7 +336,15 @@ def collect(cur, cycle_id: str | None) -> dict:
            WHERE cycle_id=%s AND status!='resolved'
              AND metadata->>'risk_tier'='medium'
            GROUP BY 1 ORDER BY 2 DESC""", (cycle_id,))
-    out["medium_groups"] = [(g, n) for g, n in cur.fetchall()]
+    groups = [(g, n) for g, n in cur.fetchall()]
+    # an escalation at medium tier is already rendered as a decision request;
+    # take it out of its subsection's count so it is not also "1 internal
+    # finding — maintenance-window queue"
+    for r in out["escalations"]:
+        if r.get("tier") == "medium":
+            grp = r.get("sub") or "other"
+            groups = [(g, n - 1 if g == grp else n) for g, n in groups]
+    out["medium_groups"] = [(g, n) for g, n in groups if n > 0]
 
     # 4 — per-section counts + explicit gaps
     cur.execute(
@@ -368,8 +429,10 @@ def render(d: dict, w: dict) -> str:
     # line. Stored severity is the authority for non-security sections.
     ops_criticals = [f_ for f_ in d.get("new_other", [])
                      if f_.get("severity") == "critical"]
+    escalations = d.get("escalations") or []
     if not d["criticals"] and not ops_criticals:
-        L.append("*(no CRITICAL items — nothing pages; list starts at HIGH)*")
+        starts = "DECISION" if escalations else "HIGH"
+        L.append(f"*(no CRITICAL items — nothing pages; list starts at {starts})*")
         L.append("")
     for c in d["criticals"]:
         # criticals are NEVER hidden — they page; a plan is annotated, not a veil
@@ -381,6 +444,19 @@ def render(d: dict, w: dict) -> str:
     for f_ in ops_criticals:
         # never collapsed -- same contract as the security criticals above
         item("CRITICAL", f"{f_['section']}/critical", _desc(f_["title"]))
+    # Decision requests (F-80128ae8): an unbumpable-CVE escalation is rendered
+    # as exactly that — one numbered line each, never collapsed, never folded
+    # into the AR-accepted "no action now" count, whatever tier or severity
+    # the suppression left on it. The decision named here is the emitter's:
+    # variant/base switch, replacement, or a compensating control.
+    for e in escalations:
+        note = ""
+        if e["id"] in planned:
+            pid, win = planned[e["id"]]
+            note = f"  *(planned: {pid} @ {win})*"
+        item("DECISION", f"security/escalation/{e.get('tier') or 'untiered'}",
+             _desc(e["title"]) + " — DECISION REQUESTED: variant/base switch, "
+             "replacement, or a compensating control; not an accepted risk" + note)
     high_planned = [h for h in d["high"] if h["id"] in planned]
     for h in [h for h in d["high"] if h["id"] not in planned]:
         # category: real exposure when recorded; else derive from subsection

@@ -137,6 +137,87 @@ def shared_of(plan: dict) -> list:
 
 
 # --------------------------------------------------------------------------
+# upstream drift since review (F-58f0bbab)
+#
+# A plan is reviewed at time T against target X and run at T+days. In between,
+# upstream publishes. coverage.py has measured this for months — its
+# reconcile() returns `plan_drift`, one entry per live plan whose target has
+# fallen behind the snapshot — but nothing on the EXECUTION path read it, so
+# the drift was caught only mid-run, by a human reading the plan body. Live
+# proof on 2026-09-22: nextcloud-mcp-0.187.1 carried a recorded GO for 0.187.1
+# while the snapshot's newest tag was 0.195.0 — eight 0.x release lines past
+# the reviewed target, at a major where the minor is the breaking axis.
+#
+# An approval is scoped to what was reviewed. Drift therefore blocks as a
+# NEEDS-DECISION: re-resolve the target, refresh the plan, re-seek the GO.
+# --operator-go does not override it — the operator's console consent is
+# consent to RUN THE REVIEWED PLAN, and the reviewed plan no longer describes
+# the newest build.
+# --------------------------------------------------------------------------
+
+_DRIFT_PLAN_RE = re.compile(r"plan exists:\s*(\S+)\s*\(")
+
+
+def drift_by_plan(coverage_report) -> dict | None:
+    """{plan_id: [drift entries]} from coverage.py's reconcile() output.
+
+    None when the report could not be produced (`error` key, or not a report
+    at all) — the caller must treat None as "could not measure", never as
+    "no drift". Each entry is attributed to its plan by the `reason` field
+    (`plan exists: <plan_id> (<status>)`), falling back to the file stem the
+    `drift` text is prefixed with."""
+    if not isinstance(coverage_report, dict) or "error" in coverage_report:
+        return None
+    out: dict = {}
+    for e in coverage_report.get("plan_drift") or []:
+        if not isinstance(e, dict):
+            continue
+        pid = None
+        m = _DRIFT_PLAN_RE.search(str(e.get("reason") or ""))
+        if m:
+            pid = m.group(1)
+        else:
+            head = str(e.get("drift") or "").split(":", 1)[0].strip()
+            if head.endswith(".md"):
+                pid = head[:-3]
+        if pid:
+            out.setdefault(pid, []).append(e)
+    return out
+
+
+def drift_refusal(plan: dict, drift_map) -> str | None:
+    """The NEEDS-DECISION refusal for a plan whose target fell behind upstream
+    since review; None when there is no drift for it.
+
+    `drift_map` None (coverage unreadable) refuses too, for every plan: a
+    drift that could not be measured is not an absence of drift."""
+    if drift_map is None:
+        return ("NEEDS-DECISION — upstream drift since review could NOT be measured "
+                "(coverage.py produced no report: is runbooks/version-check-current.md "
+                "present and fresh?) — fail closed; run the version check, then re-preflight")
+    entries = drift_map.get(str(plan.get("plan_id")))
+    if not entries:
+        return None
+    e = entries[0]
+    return (f"NEEDS-DECISION — upstream drift since review: {e.get('drift')}; "
+            f"the reviewed target is {str(plan.get('target') or '?')!r} "
+            f"(live {str(e.get('current') or '?')!r}), newest published "
+            f"{str(e.get('target') or '?')!r}. An approval is scoped to what was reviewed "
+            f"— re-resolve the target (upgrade-planner-agent), refresh the plan and "
+            f"RE-SEEK the GO; --operator-go does not override this")
+
+
+def fetch_plan_drift(loader=None) -> dict | None:
+    """Impure: coverage.py reconcile() -> drift map. Any failure -> None
+    (which drift_refusal reads as NEEDS-DECISION for every plan)."""
+    try:
+        cov = (loader or _load)("coverage", "coverage.py")
+        return drift_by_plan(cov.reconcile())
+    except Exception:  # noqa: BLE001 — unreadable is unreadable, whatever the cause
+        return None
+
+
+# --------------------------------------------------------------------------
 # pure decision functions
 # --------------------------------------------------------------------------
 
@@ -331,10 +412,20 @@ def unreadable_for(plan_id: str, load_errors) -> str | None:
     return None
 
 
+_DRIFT_UNFETCHED = object()
+
+
 def preflight(plan_ids, plans, load_errors, on_demand, decisions, operator_go,
-              today, premises_check, resume=False) -> dict:
-    """The whole verdict. `premises_check(plan_id) -> (ok, reason)` is the only
-    impure step and is injected; one that raises fails closed."""
+              today, premises_check, resume=False, drift_check=None) -> dict:
+    """The whole verdict. Two injected impure steps:
+
+    `premises_check(plan_id) -> (ok, reason)` — one that raises fails closed.
+    `drift_check() -> {plan_id: [drift entries]} | None` — coverage.py's
+    plan_drift, fetched lazily ONCE, only when a plan survives the cheap
+    refusals (it costs a reconcile). None from it, or a raise, fails closed
+    for every plan that reaches the gate. main() always supplies it; a caller
+    that passes nothing gets NO drift gate and the report says so
+    (`drift_verified: false`) rather than pretending one ran."""
     requested = []
     for pid in plan_ids:
         if pid not in requested:
@@ -343,8 +434,9 @@ def preflight(plan_ids, plans, load_errors, on_demand, decisions, operator_go,
     run_ids = set(requested)
     od_id = on_demand["id"]
     results = []
+    drift_map = _DRIFT_UNFETCHED
     for pid in requested:
-        reasons, consent = [], None
+        reasons, consent, needs_decision = [], None, False
         if not PLAN_ID_RE.match(pid):
             reasons.append("not a plan id")
         elif (err := unreadable_for(pid, load_errors)):
@@ -362,6 +454,21 @@ def preflight(plan_ids, plans, load_errors, on_demand, decisions, operator_go,
                 consent = why
             else:
                 reasons.append(why)
+        # Drift gate (F-58f0bbab) — a DECISION, not a cluster state, so it is
+        # settled before premises spend a subprocess on a plan that must be
+        # re-planned anyway. Sits after approval so the reason list reads in
+        # the order the operator can act on it.
+        if not reasons and drift_check is not None:
+            if drift_map is _DRIFT_UNFETCHED:
+                try:
+                    drift_map = drift_check()
+                except Exception:  # noqa: BLE001 — unreadable, whatever the cause
+                    drift_map = None
+            why = drift_refusal(by_id[pid], drift_map)
+            if why:
+                reasons.append(why)
+                needs_decision = True
+                consent = None
         if not reasons:
             try:
                 ok, why = premises_check(pid)
@@ -370,7 +477,7 @@ def preflight(plan_ids, plans, load_errors, on_demand, decisions, operator_go,
             if not ok:
                 reasons.append(f"premises not verified — {why}")
         results.append({"plan_id": pid, "ok": not reasons, "reasons": reasons,
-                        "consent_source": consent})
+                        "consent_source": consent, "needs_decision": needs_decision})
     runnable = [by_id[r["plan_id"]] for r in results if r["ok"]]
     # a dependant is only runnable if its in-run dependency is too
     dropped = True
@@ -412,6 +519,14 @@ def preflight(plan_ids, plans, load_errors, on_demand, decisions, operator_go,
         "running_row_notes": (f"operator-go: {(operator_go or '').strip()}"
                               if (operator_go or "").strip() else None),
         "approvals_readable": decisions is not None,
+        # True only when a drift oracle was supplied AND produced a report;
+        # False means the drift gate did NOT run (no oracle, or it could not
+        # measure) — and in the latter case every gated plan already reads
+        # NEEDS-DECISION above.
+        "drift_verified": (drift_check is not None
+                           and drift_map is not _DRIFT_UNFETCHED
+                           and drift_map is not None),
+        "needs_decision": [r["plan_id"] for r in results if r.get("needs_decision")],
         "plans": results,
         "sequence": seq,
         "conflict_pairs": [list(p) for p in pairs],
@@ -519,9 +634,13 @@ def _human(report: dict) -> str:
         if r["ok"]:
             L.append(f"  OK       {r['plan_id']}  consent: {r['consent_source']}")
         else:
-            L.append(f"  REFUSED  {r['plan_id']}")
+            mark = "NEEDS-DECISION" if r.get("needs_decision") else "REFUSED"
+            L.append(f"  {mark:14} {r['plan_id']}")
             for why in r["reasons"]:
                 L.append(f"             - {why}")
+    if not report.get("drift_verified", False):
+        L.append("  ! upstream drift since review NOT VERIFIED — the drift gate produced "
+                 "no coverage report; every plan that reached it reads NEEDS-DECISION above")
     if report["sequence"]:
         L.append("")
         L.append(f"sequence ({report['total_est_duration_min']}m of {report['ceiling_min']}m ceiling):")
@@ -599,7 +718,7 @@ def main(argv=None) -> int:
     ws = _load("ws", "window-scheduler.py")
     report = preflight(ids, plans, load_errors, od, fetch_pending_decisions(),
                        args.operator_go, today_local(), ws.check_premises_subprocess,
-                       resume=args.resume)
+                       resume=args.resume, drift_check=fetch_plan_drift)
     print(json.dumps(report, indent=2) if args.json else _human(report))
     return exit_code(report)
 

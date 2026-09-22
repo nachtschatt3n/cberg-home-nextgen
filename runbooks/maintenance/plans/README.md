@@ -200,6 +200,21 @@ conflicts_with: []               # plan_ids that must NOT share a window.
                                   # instrument counts as shared infra. Declare
                                   # conflicts on BOTH sides: --validate checks
                                   # that refs resolve, not reciprocity.
+exclusive: false                  # true => this plan must have its dated slot
+                                  # TO ITSELF: nothing else is scheduled into
+                                  # the same window, in EITHER direction (an
+                                  # exclusive plan is refused an occupied slot;
+                                  # any plan is refused a slot an exclusive one
+                                  # holds). Use it for the constraint
+                                  # conflicts_with cannot express — "no other
+                                  # change may be in flight while this runs",
+                                  # including plans not written yet (a node
+                                  # roll, a storage engine move, a CNI bump).
+                                  # Bare boolean only; a string is a --validate
+                                  # error (the scheduler reads only `true`).
+                                  # Enforced by window-scheduler.py (its sixth
+                                  # slot guard) AND by --validate over
+                                  # hand-written windows (F-48a45acf).
 security_ref: null                # F-xxxxxxxx if this plan has a security driver.
 capability_change: false          # P2.1: does this change what the software can
                                   # do / user-visible behaviour? true => never
@@ -252,8 +267,11 @@ generated: "2026-07-25"
    numbered and copy-pasteable. Follow the referenced SOPs.
 4. **Verification** — how to prove success. Flux Ready, pods healthy and an app
    probe are the *floor*, not the section. **Every plan MUST carry at least one
-   assertion about the CONTENTS of the thing it changed** — see the next
-   heading; a plan without one is not vetted.
+   assertion about the CONTENTS of the thing it changed** (`CONTENTS ASSERTION:`)
+   **and MUST name the instrument each gate reads** (`CONTROL: metric …` /
+   `CONTROL: alertname …`) — see the next heading; a plan without both is not
+   vetted, and `plan-premises.py --controls <plan_id>` checks that every named
+   instrument exists.
 5. **Rollback** — the exact revert path if verification fails.
 6. **Interference notes** — anything the window agent must know (shared infra it
    restarts, ordering constraints, why `conflicts_with` is set).
@@ -280,6 +298,40 @@ empty or wrong while structurally healthy**. Write it as an explicit line:
 ```
 CONTENTS ASSERTION: <the property> — measured by <command>, compared to <baseline>.
 ```
+
+**And every §4 MUST also name its CONTROL — the metric or alert the gate
+actually reads — as an explicit line, one per instrument:**
+
+```
+CONTROL: metric <metric_name> — <what the gate reads from it, and the floor/band>
+CONTROL: alertname <AlertName> — <what state of it the gate asserts (not firing / firing)>
+```
+
+Why this is a required line and not a convention: a gate that names a metric or
+an alert that does not exist passes loudest. An empty PromQL result is not an
+error, and an `alertname` matcher that matches nothing is not an error either —
+the edot-collector plan's own negative control proved it: the identical pipeline
+pointed at a nonexistent metric printed `INGEST_LOW`, i.e. the check *could*
+fail only because the author had tested that it could. Until 2026-09-22 nothing
+checked at authoring time that a named instrument was real
+(`grep -c "alertname\|metric" runbooks/plan-premises.py` read 0 — F-ab84875b).
+Now `plan-premises.py --controls <plan_id>` does:
+
+- every `CONTROL: alertname X` line, and every `alertname` matcher inside a
+  premise's `run:`, is checked against the **repo's PrometheusRule manifests**
+  (`kubernetes/**`, git-tracked — the only source that is true at authoring time);
+- every `CONTROL: metric X` line, and every metric name inside a premise's PromQL
+  (`query=` / `{__name__="…"}`), is checked against the **live Prometheus
+  label index** (`--prom-url` / `SLO_PROM_URL`); with no oracle reachable the
+  metric is reported **UNVERIFIED and the check fails** — an instrument that
+  could not be confirmed is not confirmed;
+- a plan with no `CONTROL:` line at all fails the check: a §4 that names no
+  instrument has no gate, whatever its prose says.
+
+Reviewers (`plan-reviewer-agent`) run it on every draft; the scheduler does not
+(premises remain the run-time gate). The CONTROL line is the instrument, the
+CONTENTS ASSERTION is the property — a plan needs both, and they are usually
+the same sentence read from two ends.
 
 ### Per-class exemplars — use the row for your change class
 

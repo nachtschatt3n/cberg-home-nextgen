@@ -76,7 +76,7 @@ controls:
 
   - id: frigate-restart-mitigation
     kind: k8s-cronjob
-    what: "daily 02:30 frigate restart bounding the 0.17.2 leak (exit: 0.18 GA)"
+    what: "daily 02:30 frigate restart bounding the in-process embeddings leak (exit: 0.18 running here WITH embeddings remote — 0.18 GA alone does not retire it)"
     cadence: daily
     watched_by:
       assertion: ContainerRestartMitigationStale

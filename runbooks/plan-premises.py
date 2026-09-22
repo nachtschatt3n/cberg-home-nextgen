@@ -57,10 +57,13 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import shlex
 import subprocess
 import sys
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -202,6 +205,237 @@ def check_plan(plan: dict, timeout: int = 60) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Authoring-time CONTROL check (F-ab84875b)
+#
+# A premise or a §4 gate that reads a metric or an alert PASSES LOUDEST when
+# the instrument does not exist: an empty PromQL result is not an error, and
+# an `alertname` matcher that matches nothing is not an error. The
+# edot-collector plan's own negative control proved it (the identical pipeline
+# pointed at a nonexistent metric printed INGEST_LOW — and only because the
+# author had tested that it could). Until 2026-09-22 nothing here checked that
+# a named instrument was real: `grep -c "alertname\|metric" plan-premises.py`
+# read 0.
+#
+# This is an AUTHORING-TIME check (`--controls`), run by the reviewer on a
+# draft. It is deliberately NOT part of the run-time premises gate: the
+# scheduler's contract on this script's exit code is unchanged.
+#
+# What it reads:
+#   * every `CONTROL: metric <name>` / `CONTROL: alertname <Name>` line in
+#     the plan body (the line plans/README.md §4 now requires);
+#   * every metric name inside a premise's PromQL (`query=` parameter,
+#     `{__name__="…"}` matcher) and every `alertname` matcher, in `run:`;
+#   * every `alertname` matcher anywhere in the body (a silence that names a
+#     non-existent alert is inert).
+# Body PromQL outside CONTROL lines is NOT harvested: bodies quote negative
+# controls and examples, and flagging those would teach authors to stop
+# writing them.
+#
+# Oracles — both injectable, both fail CLOSED:
+#   * alert names: the repo's PrometheusRule manifests under kubernetes/
+#     (git-tracked — the only source that is true at authoring time);
+#   * metric names: the live Prometheus label index. No oracle → every metric
+#     is UNVERIFIED and the check FAILS. "Could not confirm" is not "confirmed".
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = SCRIPT_DIR.parent
+
+CONTROL_LINE_RE = re.compile(
+    r"^\s*(?:[-*>]\s*)*(?:\*\*)?CONTROL:(?:\*\*)?\s*(metric|alertname|alert)\s+"
+    r"`?([A-Za-z_:][A-Za-z0-9_:.]*)`?", re.M | re.I)
+_ALERTNAME_MATCHER_RE = re.compile(r'alertname\s*(?:=~|!~|!=|=)\s*["\']([^"\']+)["\']')
+_ALERTNAME_JSON_RE = re.compile(
+    r'"name"\s*:\s*"alertname"\s*,\s*"value"\s*:\s*"([^"]+)"')
+_QUERY_PARAM_RE = re.compile(r'[?&]query=([^&\s\'"]+)')
+_NAME_LABEL_RE = re.compile(r'__name__\s*(?:=~|=)\s*["\']([^"\']+)["\']')
+_IDENT_RE = re.compile(r'(?<![A-Za-z0-9_:.])([A-Za-z_:][A-Za-z0-9_:.]*)')
+_ALERT_ID_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+# PromQL words that are never a metric name. Aggregators/functions are also
+# excluded structurally (an identifier followed by `(`), so this list only
+# has to carry the keyword-shaped ones.
+PROMQL_WORDS = {
+    "by", "without", "on", "ignoring", "group_left", "group_right", "bool",
+    "offset", "and", "or", "unless", "inf", "nan", "NaN", "Inf", "true", "false",
+    "s", "m", "h", "d", "w", "y", "ms",
+}
+
+
+def promql_metric_names(expr: str) -> set[str]:
+    """The metric names an expression selects. Pure.
+
+    Structural, not a parser: label matchers, string literals, range/offset
+    brackets and `by/without/on/ignoring(...)` groups are blanked first (their
+    contents are labels, not metrics); what remains and is not followed by `(`
+    (a function or aggregator) and not a keyword is a metric selector. A
+    `{__name__="…"}` matcher names its metric explicitly and is taken as-is,
+    which is also how dotted OTel names travel."""
+    expr = urllib.parse.unquote(str(expr or ""))
+    names = {n for n in _NAME_LABEL_RE.findall(expr) if _IDENT_RE.fullmatch(n)}
+    stripped = re.sub(r'\{[^}]*\}', ' ', expr)
+    stripped = re.sub(r'"[^"]*"|\'[^\']*\'', ' ', stripped)
+    stripped = re.sub(r'\[[^\]]*\]', ' ', stripped)
+    stripped = re.sub(r'\b(by|without|on|ignoring|group_left|group_right)\s*\([^)]*\)',
+                      ' ', stripped, flags=re.I)
+    for m in _IDENT_RE.finditer(stripped):
+        tok = m.group(1)
+        if tok in PROMQL_WORDS:
+            continue
+        if stripped[m.end():].lstrip().startswith("("):
+            continue                      # a call: sum(, rate(, increase(
+        names.add(tok)
+    return names
+
+
+def alertnames_in(text: str) -> set[str]:
+    """Every alert name a matcher in `text` names (PromQL `alertname="X"`,
+    `alertname=~"A|B"`, or an Alertmanager silence JSON matcher). Regex
+    alternatives are split; anchors stripped; only identifier-shaped names
+    are kept (a `.*` is not an alert)."""
+    out: set[str] = set()
+    for raw in _ALERTNAME_MATCHER_RE.findall(text or "") + _ALERTNAME_JSON_RE.findall(text or ""):
+        for part in str(raw).split("|"):
+            part = part.strip().strip("^$").strip()
+            if part and _ALERT_ID_RE.match(part):
+                out.add(part)
+    return out
+
+
+def gate_names(plan: dict, body: str) -> dict:
+    """{"metrics": {name: [sources]}, "alertnames": {name: [sources]},
+    "control_lines": int} — every instrument the plan's gates name, with
+    where each was named, so a miss is attributable."""
+    metrics: dict = {}
+    alerts: dict = {}
+
+    def add(store, name, src):
+        store.setdefault(name, [])
+        if src not in store[name]:
+            store[name].append(src)
+
+    control_lines = 0
+    for kind, name in CONTROL_LINE_RE.findall(body or ""):
+        control_lines += 1
+        if kind.lower() == "metric":
+            add(metrics, name, "CONTROL line")
+        else:
+            add(alerts, name, "CONTROL line")
+    for pr in plan.get("premises") or []:
+        run = str((pr or {}).get("run") or "")
+        src = f"premise {(pr or {}).get('id') or '<unnamed>'}"
+        for q in _QUERY_PARAM_RE.findall(run):
+            for n in promql_metric_names(q):
+                add(metrics, n, src)
+        for n in {n for n in _NAME_LABEL_RE.findall(run) if _IDENT_RE.fullmatch(n)}:
+            add(metrics, n, src)
+        for a in alertnames_in(run):
+            add(alerts, a, src)
+    for a in alertnames_in(body or ""):
+        add(alerts, a, "body matcher")
+    return {"metrics": metrics, "alertnames": alerts, "control_lines": control_lines}
+
+
+def repo_alertnames(root: Path = REPO_ROOT) -> set[str]:
+    """Alert names declared by PrometheusRule manifests under <root>/kubernetes.
+    Git-tracked, so this is what is true at authoring time. Empty when none
+    could be read — the caller treats that as UNVERIFIED, not as 'none exist'."""
+    names: set[str] = set()
+    base = Path(root) / "kubernetes"
+    if not base.is_dir():
+        return names
+    for p in base.rglob("*.yaml"):
+        try:
+            text = p.read_text()
+        except OSError:
+            continue
+        if "kind: PrometheusRule" not in text:
+            continue
+        for m in re.finditer(r'^\s*-?\s*alert:\s*["\']?([A-Za-z_][A-Za-z0-9_]*)', text, re.M):
+            names.add(m.group(1))
+    return names
+
+
+def prom_metric_names(url: str, timeout: int = 20):
+    """The live Prometheus `__name__` label index, or None when unreachable /
+    not a success response. Impure; injected into check_controls()."""
+    if not url:
+        return None
+    try:
+        req = urllib.request.Request(f"{url.rstrip('/')}/api/v1/label/__name__/values",
+                                     headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            doc = json.load(r)
+    except Exception:  # noqa: BLE001 — any failure is "no oracle"
+        return None
+    if not isinstance(doc, dict) or doc.get("status") != "success":
+        return None
+    data = doc.get("data")
+    return set(data) if isinstance(data, list) else None
+
+
+def check_controls(plan: dict, body: str, alert_oracle, metric_oracle) -> dict:
+    """Pure verdict over one plan. `alert_oracle`: set of declared alert names
+    (empty = could not read any → UNVERIFIED). `metric_oracle`: set of live
+    metric names, or None (no oracle → UNVERIFIED). UNVERIFIED FAILS."""
+    names = gate_names(plan, body)
+    results = []
+    for a, srcs in sorted(names["alertnames"].items()):
+        if not alert_oracle:
+            passed, detail = False, ("UNVERIFIED — no PrometheusRule manifest could be "
+                                     "read under kubernetes/")
+        elif a in alert_oracle:
+            passed, detail = True, "declared by a PrometheusRule manifest"
+        else:
+            passed, detail = False, ("NOT declared by any PrometheusRule manifest under "
+                                     "kubernetes/ — a matcher on it matches nothing")
+        results.append({"kind": "alertname", "name": a, "sources": srcs,
+                        "passed": passed, "detail": detail})
+    for mname, srcs in sorted(names["metrics"].items()):
+        if metric_oracle is None:
+            passed, detail = False, ("UNVERIFIED — no Prometheus oracle (pass --prom-url "
+                                     "or set SLO_PROM_URL)")
+        elif not metric_oracle:
+            passed, detail = False, "UNVERIFIED — the Prometheus label index came back EMPTY"
+        elif mname in metric_oracle:
+            passed, detail = True, "present in the Prometheus label index"
+        else:
+            passed, detail = False, ("NOT in the Prometheus label index — a query on it "
+                                     "returns an empty result, which is not an error")
+        results.append({"kind": "metric", "name": mname, "sources": srcs,
+                        "passed": passed, "detail": detail})
+    problems = [f"{r['kind']} {r['name']}: {r['detail']}" for r in results if not r["passed"]]
+    if names["control_lines"] == 0:
+        problems.insert(0, "no CONTROL: line in the plan body — §4 names no instrument, "
+                           "so it has no gate (plans/README.md §4)")
+    return {
+        "plan_id": plan.get("plan_id"),
+        "status": plan.get("status"),
+        "control_lines": names["control_lines"],
+        "results": results,
+        "problems": problems,
+        "passed": not problems,
+    }
+
+
+def plan_body(plan: dict) -> str:
+    """The plan file's body (everything after the frontmatter). Empty when
+    the file cannot be read — which check_controls then reports as 'no
+    CONTROL: line', the fail-closed reading."""
+    rel = plan.get("_path")
+    if not rel:
+        return ""
+    path = Path(rel)
+    if not path.is_absolute():
+        path = REPO_ROOT / rel
+    try:
+        text = path.read_text()
+    except OSError:
+        return ""
+    parts = text.split("---", 2)
+    return parts[2] if len(parts) == 3 else text
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -212,12 +446,70 @@ def main() -> int:
                     help="a plan declaring NO premises is a failure, not a pass")
     ap.add_argument("--timeout", type=int, default=60)
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--controls", action="store_true",
+                    help="AUTHORING-TIME check: every metric / alertname a plan's gates "
+                         "name (CONTROL: lines, premises PromQL, alertname matchers) must "
+                         "exist — alerts in the repo's PrometheusRule manifests, metrics in "
+                         "the live Prometheus label index. Unverifiable FAILS. Runs no premise.")
+    ap.add_argument("--prom-url", default=os.environ.get("SLO_PROM_URL"),
+                    help="Prometheus base URL for the metric oracle (default: $SLO_PROM_URL)")
     args = ap.parse_args()
 
     mp = _load("mp", "maintenance-plan.py")
     cfg = mp.load_windows()
     plans = mp.load_plans(cfg)
     load_errors = list(getattr(mp, "PLAN_LOAD_ERRORS", []))
+
+    if args.controls:
+        # Authoring-time instrument check (F-ab84875b). Separate branch on
+        # purpose: it never runs a premise and never touches the run-time exit
+        # contract the scheduler gates on.
+        if args.plan_id:
+            want = set(args.plan_id)
+            unreadable = unreadable_requested(sorted(want), load_errors)
+            selected = [p for p in plans if p.get("plan_id") in want]
+            absent = sorted(pid for pid in want
+                            if pid not in {p.get("plan_id") for p in selected}
+                            and pid not in {u[0] for u in unreadable})
+        elif args.window:
+            unreadable, absent = [], []
+            selected = [p for p in plans if p.get("window") == args.window]
+        else:
+            unreadable, absent = [], []
+            terminal = tuple(getattr(mp, "TERMINAL_PLAN_STATUSES", ("executed", "superseded", "reference")))
+            selected = [p for p in plans if str(p.get("status") or "") not in terminal]
+        alert_oracle = repo_alertnames()
+        metric_oracle = prom_metric_names(args.prom_url) if args.prom_url else None
+        reports = [check_controls(p, plan_body(p), alert_oracle, metric_oracle) for p in selected]
+        failed = bool(unreadable or absent) or any(not r["passed"] for r in reports)
+        if args.json:
+            print(json.dumps({"controls": reports, "ok": not failed,
+                              "unreadable": [{"plan_id": p, "error": e} for p, e in unreadable],
+                              "absent": absent,
+                              "alert_oracle_size": len(alert_oracle),
+                              "metric_oracle": (None if metric_oracle is None
+                                                else len(metric_oracle))}, indent=2))
+            return 1 if failed else 0
+        for pid, err in unreadable:
+            print(f"  UNREADABLE  {pid}  ({err})")
+        for pid in absent:
+            print(f"  ABSENT      {pid}  (no plan file)")
+        if not reports and not failed:
+            print("no matching plans")
+            return 0
+        print(f"  oracles: {len(alert_oracle)} alert name(s) from PrometheusRule manifests; "
+              + ("no Prometheus metric oracle — every metric reads UNVERIFIED"
+                 if metric_oracle is None else f"{len(metric_oracle)} metric name(s) from {args.prom_url}"))
+        for r in reports:
+            print(f"  {'PASS' if r['passed'] else 'FAIL':11} {r['plan_id']}  "
+                  f"({r['control_lines']} CONTROL line(s), {len(r['results'])} instrument(s))")
+            for p in r["problems"]:
+                print(f"                 ✗ {p}")
+        if failed:
+            print("\nAt least one plan names an instrument that could not be confirmed to "
+                  "exist, or names none. A gate on a nonexistent metric or alert passes "
+                  "on an empty result — fix the plan before it is vetted.")
+        return 1 if failed else 0
 
     if args.plan_id:
         want = set(args.plan_id)
