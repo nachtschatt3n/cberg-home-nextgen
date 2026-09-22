@@ -42,6 +42,25 @@ covered by the WARN tier only, because the vocabulary that catches it
 engineering prose to gate on -- measured at 15 of 25 flips over 4841 commits,
 mostly `persist` in its database sense.
 
+THREE MORE CLAIM SHAPES (2026-09-22), each reproduced with scan() returning []
+before it was added, each measured over 5707 commit messages and the tracked
+tree before it was allowed to BLOCK:
+  * MISSING CONTROL -- "no rate limit protects X", "nothing throttles Y",
+    "no lockout on Z" (F-c2e3d6de). Present tense only: the commit that ADDS
+    the control describes the past, and that is a closed gap.
+  * STILL CARRIED -- "the image still carries criticals" (F-c1537a4e).
+    PERSISTS already had the verb, but only in the WARN tier and only next to
+    a finding anchor, and a bare scanner plural was never one.
+  * DETECTION COVERAGE -- "we cannot detect a successful login", "no alert
+    fires on a brute-force burst", "authentication that succeeds is invisible"
+    (F-a1b6c39b). Blocks only next to a SECURITY EVENT; the same shape about
+    our own tooling or an ops alert is WARN-only, and only next to a MONITOR
+    word -- bare, it nagged on 80 of 5707 commits.
+All three carry the `residual claim` label prefix, so the tooling-edit trailer
+and the TOOLING_TALK acquittal cover them like the rest of the residual tier.
+The same measurement took two things OUT of the block tier: a bare severity
+word near an image ref, and a version tag's last digit read as a count.
+
 This hook is a BACKSTOP against careless disclosure, never a substitute for
 the author's judgement. Three structurally distinct false negatives were
 found in it in a single evening (staged-diff blindness; prose-without-tokens
@@ -78,6 +97,25 @@ VULN = (
     r"(?:" + SEV + r"|vulns?\b|vulnerabilit\w*|advisor(?:y|ies)|cves?"
     r"|will[_ -]not[_ -]fix)"
 )
+
+# A REAL vulnerability token: the subset of VULN that cannot be an ordinary
+# adjective. Bare SEV is deliberately absent. The image-adjacency rules used
+# full VULN, so `("example-org/widget:1.2.3", "high", 2)` -- a counted-severity
+# test fixture, i.e. exactly the synthetic shape the policy asks authors to
+# write -- blocked as "vulnerability state tied to a named image"
+# (2026-09-22). A severity word within 80 chars of a tag is not evidence of
+# anything; a vulnerability NOUN is. A counted severity next to an image still
+# blocks, through the counted rule, which is where a count belongs.
+VULN_STRICT = (
+    r"(?:\bvulns?\b|\bvulnerabilit\w*|\badvisor(?:y|ies)\b|\bcves?\b"
+    r"|\bwill[_ -]not[_ -]fix\b)"
+)
+# Scanner-vocabulary plurals ("criticals", "highs"): a severity used as a
+# NOUN, which ordinary prose never does. Safe to pair with a residual verb
+# where the singular adjective is not ("still has highs" vs "still has high
+# latency").
+SEV_PLURAL = r"\b(?:critical|high|medium|low)s(?![-\w])"
+VULN_NOUN = r"(?:" + VULN_STRICT + r"|" + SEV_PLURAL + r")"
 
 # A literal 0 is explicitly NOT a disclosure — the SOP (§2.1) lists
 # "post-rebuild: 0 fixable CRITICAL" as publishable, because it states a
@@ -213,6 +251,175 @@ REOPEN_OR_CLOSED = (
     + VULN + r")"
 )
 
+# "still carries" and its family, as a BLOCKING residual claim. PERSISTS has
+# covered `still (carries|contains|holds|retains)` since 2026-08-19, but only
+# in the WARN tier and only next to FINDING_ANCHOR_WIDE -- so "the image still
+# carries criticals" (no count, no finding id, a bare scanner plural) neither
+# warned nor blocked (F-c1537a4e, 2026-09-22). Bound to VULN_NOUN, never VULN:
+# "still has high latency" is ordinary prose, "still has highs" is not.
+STILL_CARRIES = (
+    r"\bstill\s+(?:carries|carrying|contains?|containing|holds?|holding|"
+    r"retains?|retaining|ships?|shipping|includes?|including|has|have|"
+    r"reports?|shows?|lists?|bundles?)\b"
+)
+STILL_PRESENT = (
+    r"\bstill\s+(?:present|there|in\s+(?:the\s+)?(?:image|build|base\s+layer|tree))\b"
+)
+
+# ── Missing-control vocabulary ─────────────────────────────────────────────
+# "no rate limit protects the login endpoint", "nothing throttles the token
+# endpoint", "no lockout on admin accounts". No vulnerability word, no count,
+# no image -- a plain statement that a CONTROL IS ABSENT on a surface we run,
+# which is exposure detail for an unfixed gap, and it scanned clean through
+# every tier (F-c2e3d6de, 2026-09-22). Present tense only, by construction:
+# "no rate limit protected the endpoint" is how a commit that ADDS the control
+# describes the past, and that is a closed gap SOP 2.1 publishes.
+CONTROL = (
+    r"(?:rate[- ]?limit(?:s|ing|er|ers)?|throttl(?:e|es|ing)|lock-?outs?|"
+    r"brute[- ]?force\s+(?:protection|guard|defen[cs]e|limit\w*)|captcha|"
+    r"mfa|2fa|two[- ]factor|second[- ]factor|"
+    r"auth(?:n|z|entication|orization)?|password\s+polic(?:y|ies)|"
+    r"csrf\s+(?:token|protection|guard)|tls|encryption|"
+    r"network\s?polic(?:y|ies)|firewall(?:\s+rules?)?|waf|"
+    r"input\s+validation|(?:audit|access)\s+log(?:s|ging)?|"
+    r"ip\s+(?:allow-?list|restriction|filter\w*)|"
+    r"geo-?(?:block\w*|fenc\w*)|seccomp|apparmor|rbac|"
+    r"sandbox(?:ing)?|signature\s+(?:check|verification)|"
+    r"session\s+(?:timeout|expiry)|idle\s+timeout)"
+)
+# Bare `password` is NOT a control here, on measurement: "no usable password
+# on the FAB user" and "no password path exists" both describe a LOCKED
+# account -- hardening, the opposite of a gap -- and a regex cannot tell that
+# from "no password on the admin share". Only the policy form is kept.
+# Verbs that place a control OVER something -- present tense only.
+GUARDS = (
+    r"(?:protects?|guards?|covers?|limits?|gates?|throttles?|shields?|fronts?|"
+    r"enforces?|applies|exists?|(?:is\s+|are\s+)?in\s+place|"
+    r"(?:is|are)\s+(?:configured|enabled|enforced|applied|wired|set|defined)|"
+    r"sits?\s+(?:in\s+front|between))"
+)
+# Verbs that ARE a security control by themselves; no target needed.
+CONTROL_VERBS = (
+    r"(?:throttles|rate[- ]?limits|locks\s+out|authenticates|authorizes|encrypts)"
+)
+# Verbs that need a SURFACE to be about exposure: "nothing gates the apply on
+# the check" is a build-script remark, "nothing gates the admin page" is not.
+SURFACE_VERBS = (
+    r"(?:protects?|guards?|shields?|fronts?|gates?|secures?|restricts?)"
+)
+# Things an attacker reaches. Deliberately NOT the Kubernetes nouns (pod,
+# node, deployment, service): "nothing protects the pod from eviction" is a
+# scheduling remark, not a statement of exposure.
+SURFACE = (
+    r"(?:endpoints?|log-?ins?|logons?|sign-?ins?|sign-?ups?|forms?|apis?|"
+    r"ports?|routes?|listeners?|sockets?|interfaces?|consoles?|dashboards?|"
+    r"admin|ui|webhooks?|urls?|paths?|hosts?|ingress(?:es)?|gateways?|"
+    r"httproutes?|buckets?|shares?|databases?|db|credentials?|tokens?|"
+    r"secrets?|passwords?|accounts?|users?|sessions?|cookies?|uploads?|"
+    r"panels?|pages?)"
+)
+# A missing-control claim whose CLOSURE is in the same message: the control is
+# being added, or is no longer absent. Intent ("by design", "deliberately") is
+# NOT here -- an accepted risk is still an open gap, and it belongs in the
+# accepted_risks register, not in git.
+MISSING_CONTROL_CLOSED = (
+    r"\b(?:this\s+(?:commit|change|patch|pr|rule|policy)\s+(?:\w+\s+){0,2}?"
+    r"(?:adds?|introduces?|enables?|wires?|puts?|installs?|configures?|"
+    r"enforces?|closes?|fixes?|restores?)"
+    r"|now\s+(?:adds?|has|enforces?|gets?|protects?|throttles?|limits?)"
+    r"|no\s+longer|until\s+(?:now|this)|before\s+this)\b"
+)
+
+# ── Detection-coverage vocabulary ──────────────────────────────────────────
+# "we cannot detect a successful login from a new address", "no alert fires
+# on a brute-force burst", "authentication that succeeds is invisible". What
+# our monitoring does NOT see is exposure detail of the same kind as an unfixed
+# CVE: it tells a reader where to act unobserved. One reached a public commit
+# body on 2026-09-09 (F-a1b6c39b) and every tier returned [] on it, because
+# nothing in it is a vulnerability word.
+#
+# BLOCK needs a SECURITY EVENT as the thing not detected. Without that anchor
+# the same shapes are how this repo talks about its own tooling ("the hook
+# cannot detect a paraphrase", "no alert fires when the cron is skipped") --
+# those are the WARN tier. Bare `credentials`, `probe`, `escalate`, `anomaly`
+# and `breach` are absent on purpose: "we do not log credentials" is a good
+# thing, `probe` is a liveness probe, `escalate` is what the sweep does to a
+# human, and `breach` is this file's own word for a policy miss.
+#
+# Measured over 5707 commit messages + the tracked tree (2026-09-22), three
+# more anchors were removed as pure noise: `adversar\w*` hit "adversarial
+# review" (how this repo red-teams its own tooling), `authorization` hit the
+# HTTP header of that name in every forward-auth commit, and a bare
+# `unauthorized` hit the registry status trivy reports on a private image.
+SECURITY_EVENT = (
+    r"(?:\b(?:log-?ins?|logons?|sign-?ins?)\b"
+    r"(?!\s+(?:page|form|screen|button|dialog|prompt|flow|url|route|redirect)s?\b)"
+    r"|\bauth(?:n|z|entication)s?\b"
+    r"(?!\s+(?:page|form|screen|flow|url|route|redirect|header)s?\b)"
+    r"|\bbrute[- ]?forc\w*|\bcredential[- ]?(?:stuffing|theft|reuse|leak\w*)"
+    r"|\bintrusions?\b|\blateral\s+movement|\bexfil\w*|\bprivilege[- ]escalat\w*"
+    r"|(?<![\w-])attack\w*|\badversar(?:y|ies)\b|\bmalicious\w*|\bcompromised?\b"
+    r"|\btamper\w*|\bunauthori[sz]ed\s+(?:access|user|client|request|login|"
+    r"use|call|read|write|change|action)s?\b|\bimpossible[- ]travel|\bnew[- ]asn"
+    r"|\bunusual[- ]hour|\btoken\s+(?:theft|reuse|replay)|\bsession\s+hijack\w*"
+    r"|\bwebshells?\b|\breverse\s+shells?\b|\bport[- ]scan\w*)"
+)
+# The thing that would have seen it. Anchors the WARN tier: "no alert fires"
+# is a coverage statement, "the hook cannot detect a paraphrase" is not, and
+# without this anchor the generic shape nagged on 80 of 5707 commits -- this
+# repo says "blind spot" a lot.
+MONITOR = (
+    r"(?:wazuh|siem|alertmanager|prometheus|grafana|elastic\w*|kibana|indexer|"
+    r"decoders?|alert(?:s|ing|ed)?|alarms?|monitor\w*|detection|coverage|falco|"
+    r"audit\s+logs?|on-?call|pager\w*|paged|paging|telemetry|observab\w*|"
+    r"scanner|trivy)"
+)
+# What a detection DOES. `see` only with an object, so "cannot see the login
+# page" (a UI bug) stays out; `log` not followed by in/on/out, so "cannot log
+# in to <app>" stays out.
+DETECT = (
+    r"(?:detects?|detected|detecting|observes?|catch(?:es)?|spots?|flags?|"
+    r"surfaces?|alerts?(?:\s+on)?|pages?(?:\s+on)?|monitors?|"
+    r"logs?(?!\s*(?:in|on|out)\b)|records?|correlates?|audits?|hunts?|"
+    r"notices?|tracks?|sees?(?=\s+(?:a|an|the|any|when|if|whether|that)\b))"
+)
+# Present-tense negation only: "could not detect" and "did not alert" are how
+# the commit that FIXES the gap describes the past.
+NEG_PRESENT = (
+    r"(?:(?:can|do|does|will|would|shall)\s*not|can[’']?t|don[’']t|"
+    r"doesn[’']t|won[’']t|wouldn[’']t|cannot|never|"
+    r"(?:is|are)\s+(?:unable|not\s+able)\s+to|(?:has|have)\s+no\s+way\s+(?:to|of))"
+)
+NO_DETECT = NEG_PRESENT + r"\s+(?:\w+\s+){0,2}?" + DETECT + r"\b"
+# "no alert fires", "no rule matches", "none of the notification rules
+# matches", "no decoder exists".
+NO_ALERT = (
+    r"\b(?:no|zero|not\s+a\s+single|none\s+of(?:\s+the)?)\s+(?:\w+[-\s]+){0,2}?"
+    r"(?:alerts?|alarms?|rules?|decoders?|detections?|monitors?|notifications?|"
+    r"signals?|checks?|correlations?|watchers?|pages?)\s+(?:\w+\s+){0,1}?"
+    r"(?:fires?|firing|exists?|covers?|matches|match|triggers?|watches|catches|"
+    r"flags?|notifies|raises?|pages?|(?:is|are)\s+(?:defined|wired|configured|"
+    r"in\s+place))\b"
+)
+# "is invisible", "stays unmonitored", "invisible to Wazuh", "blind spot".
+UNSEEN = (
+    r"(?:\b(?:is|are|stays?|remains?|goes|go)\s+(?:\w+\s+)?"
+    r"(?:invisible|unmonitored|undetected|unlogged|unobserved|unalerted|"
+    r"unwatched|unnoticed)\b"
+    r"|\b(?:invisible|opaque)\s+to\s+(?:wazuh|the\s+siem|siem|monitoring|"
+    r"alerting|detection|elastic\w*|kibana|the\s+indexer|prometheus|"
+    r"alertmanager)\b"
+    r"|\bblind[- ]spots?\b)"
+)
+COVERAGE_GAP = r"(?:" + NO_DETECT + r"|" + NO_ALERT + r"|" + UNSEEN + r")"
+# The gap is being closed in this very message.
+DETECTION_CLOSED = (
+    r"\b(?:no\s+longer|until\s+(?:now|this)|before\s+this|"
+    r"(?:this|the)\s+(?:commit|change|patch|rule|decoder|alert)\s+(?:\w+\s+){0,2}?"
+    r"(?:adds?|closes?|fixes?|covers?|detects?|catches|wires?|makes?|restores?)|"
+    r"now\s+(?:detects?|alerts?|fires?|catches|pages?|logs?|covers?))\b"
+)
+
 
 PATTERNS = [
     (
@@ -225,7 +432,17 @@ PATTERNS = [
     ),
     (
         # "13 fixable criticals", "clears 4 CVEs", "19 CRITICAL"
-        r"\b" + NONZERO + r"\s+(?:\w+[- ]){0,2}?" + VULN,
+        # The lookbehind keeps a VERSION TAIL out. `\b` already refuses a
+        # preceding digit, but "bump to 1.2.3 for high availability" put the
+        # tag's last digit in front of a bare severity word and the rule read
+        # "3 for high" as a count (2026-09-22). A count never follows a dot.
+        # The same measurement showed the tail was ALL that caught
+        # "3 unfixable v1.15.1 criticals": the real count could not reach the
+        # noun because the word-slack stopped at the dots. It now steps over a
+        # VERSION-shaped token (digits and dots only -- "days." is not one, or
+        # "30 days. With criticals" would cross a sentence boundary), so the
+        # count carries the match instead of the tag.
+        r"(?<![\d.])\b" + NONZERO + r"\s+(?:(?:v?\d+(?:\.\d+)+\w*|\w+)[- ]){0,2}?" + VULN,
         "counted vulnerability phrasing",
     ),
     (
@@ -286,13 +503,15 @@ PATTERNS = [
         "residual-exposure statement",
     ),
     (
-        # "postgres:17.11-bookworm carries 19 CRITICAL" — a vuln term tied to
-        # a concrete artifact on the same line.
-        IMAGE_REF + r".{0,80}?" + VULN,
+        # "postgres:17.11-bookworm carries a known CVE" — a vulnerability NOUN
+        # tied to a concrete artifact on the same line. VULN_STRICT, not VULN:
+        # see the note on VULN_STRICT for the fixture the bare severity word
+        # rejected. "...carries 19 CRITICAL" still blocks, via the counted rule.
+        IMAGE_REF + r".{0,80}?" + VULN_STRICT,
         "vulnerability state tied to a named image",
     ),
     (
-        VULN + r".{0,80}?" + IMAGE_REF,
+        VULN_STRICT + r".{0,80}?" + IMAGE_REF,
         "vulnerability state tied to a named image",
     ),
 
@@ -345,6 +564,76 @@ PATTERNS = [
         "residual claim — upstream has not shipped a fix",
         TOOLING_TALK,
     ),
+    (
+        # "the image still carries criticals", "still ships the CVE",
+        # "still has two vulns" (the quantified rule sees that one too).
+        STILL_CARRIES + r"\s+(?:\w+[-\s]+){0,3}?" + VULN_NOUN,
+        "residual claim — still carried",
+        # "still carries no criticals" states a closed gap; the acquittal must
+        # sit INSIDE the span, or a neighbouring "no" would switch it off.
+        (r"\b(?:no|zero|0|none)\s+(?:\w+[-\s]+){0,2}?" + VULN_NOUN
+         + r"|" + TOOLING_TALK, 0),
+    ),
+    (
+        # "the CVE is still present on the base image", "criticals are still there"
+        VULN_NOUN + r"\W+(?:\w+\W+){0,4}?" + STILL_PRESENT,
+        "residual claim — still carried",
+        TOOLING_TALK,
+    ),
+
+    # ── Missing-control tier ──────────────────────────────────────────────
+    # Absence of a security control on a surface we run. No vulnerability word
+    # anywhere in the claim, so every rule above is structurally blind to it.
+    (
+        # "no rate limit protects <endpoint>", "no lockout is configured",
+        # "there is no throttling in place"
+        r"\b(?:no|zero|not\s+a\s+single)\s+(?:\w+[-\s]+){0,2}?" + CONTROL
+        + r"\s+(?:\w+\s+){0,1}?" + GUARDS + r"\b",
+        "residual claim — missing control",
+        MISSING_CONTROL_CLOSED + r"|" + TOOLING_TALK,
+    ),
+    (
+        # "nothing throttles <endpoint>", "nothing rate-limits the token route"
+        r"\b(?:nothing|nobody|no\s+one)\s+(?:\w+\s+){0,1}?" + CONTROL_VERBS + r"\b",
+        "residual claim — missing control",
+        MISSING_CONTROL_CLOSED + r"|" + TOOLING_TALK,
+    ),
+    (
+        # "nothing protects the login endpoint" -- a generic guard verb needs a
+        # SURFACE to be about exposure rather than about tooling.
+        r"\b(?:nothing|nobody|no\s+one)\s+(?:\w+\s+){0,1}?" + SURFACE_VERBS
+        + r"\s+(?:\w+[-\s]+){0,3}?" + SURFACE + r"\b",
+        "residual claim — missing control",
+        MISSING_CONTROL_CLOSED + r"|" + TOOLING_TALK,
+    ),
+    (
+        # "no lockout on <accounts>", "no rate limit for the API". The
+        # lookbehinds and the trailing lookahead keep DESIGN statements out:
+        # "needs no auth" describes a health probe and "no auth at the gateway
+        # level is needed" describes a layer that authenticates elsewhere.
+        r"(?<!\bneeds\s)(?<!\bneed\s)(?<!\brequires\s)(?<!\brequire\s)"
+        r"(?<!\bwith\s)(?<!\bwants\s)(?<!\bexpects\s)"
+        r"\b(?:no|zero)\s+(?:\w+[-\s]+){0,1}?" + CONTROL
+        + r"\s+(?:on|for|at|around|behind|in\s+front\s+of|between)\s+"
+        r"(?:\w+[-\s]+){0,3}?" + SURFACE + r"\b"
+        r"(?!\s+(?:\w+\s+){0,1}?(?:is|are)\s+(?:needed|required|necessary)\b)",
+        "residual claim — missing control",
+        MISSING_CONTROL_CLOSED + r"|" + TOOLING_TALK,
+    ),
+
+    # ── Detection-coverage tier ───────────────────────────────────────────
+    # What our monitoring does NOT see, anchored on a SECURITY EVENT. The
+    # generic shape ("we cannot detect X") is WARN-only, below.
+    (
+        COVERAGE_GAP + r".{0,80}?" + SECURITY_EVENT,
+        "residual claim — detection coverage",
+        DETECTION_CLOSED + r"|" + TOOLING_TALK,
+    ),
+    (
+        SECURITY_EVENT + r".{0,80}?" + COVERAGE_GAP,
+        "residual claim — detection coverage",
+        DETECTION_CLOSED + r"|" + TOOLING_TALK,
+    ),
 ]
 
 # ── WARN tier ──────────────────────────────────────────────────────────────
@@ -383,6 +672,29 @@ WARN_PATTERNS = [
         VULN + r".{0,80}?" + BARE_VERSIONED_COMPONENT,
         "vulnerability state near a bare-versioned component",
         TOOLING_TALK,
+    ),
+    (
+        # "no alert fires when the cron is skipped", "no decoder exists" -- a
+        # coverage gap with NO security event attached. Self-anchored: the
+        # noun IS the monitor. Real signal when it is about the SIEM, but it
+        # is also how this repo describes its own tooling, so it nags. The
+        # security-anchored form blocks (see PATTERNS).
+        NO_ALERT,
+        "possible detection-coverage statement",
+        DETECTION_CLOSED + r"|" + TOOLING_TALK,
+    ),
+    (
+        # "trivy cannot see private images", "invisible to Wazuh", "a blind
+        # spot in alerting" -- the generic shape, which must sit next to a
+        # MONITOR to count: bare, it fired on 80 of 5707 commits.
+        r"(?:" + NO_DETECT + r"|" + UNSEEN + r").{0,80}?" + MONITOR + r"\b",
+        "possible detection-coverage statement",
+        DETECTION_CLOSED + r"|" + TOOLING_TALK,
+    ),
+    (
+        r"\b" + MONITOR + r"\b.{0,80}?(?:" + NO_DETECT + r"|" + UNSEEN + r")",
+        "possible detection-coverage statement",
+        DETECTION_CLOSED + r"|" + TOOLING_TALK,
     ),
 ]
 

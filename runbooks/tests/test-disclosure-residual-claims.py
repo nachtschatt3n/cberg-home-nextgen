@@ -330,6 +330,292 @@ class PersistsStillCarries(unittest.TestCase):
             self.assertFalse(re.search(dp.PERSISTS, phrase, re.I), phrase)
 
 
+# ── 2026-09-22: three verified gaps (F-c2e3d6de, F-c1537a4e, F-a1b6c39b) ──
+# Every fixture below is ASSEMBLED from these placeholders at runtime. None is
+# a real CVE id, a real domain, a real finding id, or a real per-image count.
+SVC = "exampleapp"
+IMG = "example-org/widget:" + "1.2.3"
+COUNT = str(1 + 2)
+
+
+def scan_without(text, label):
+    """COMMISSIONING STRAW: scan with every rule carrying `label` removed.
+
+    A widening is load-bearing only if its positive fixture scans CLEAN
+    without it -- otherwise the assertion passes on the strength of some other
+    rule and proves nothing about the new one.
+    """
+    return dp._scan(norm(text), [r for r in dp._COMPILED3 if r[1] != label])
+
+
+def scan_warn_without(text, label):
+    return dp._scan(norm(text), [r for r in dp._COMPILED3_WARN if r[1] != label])
+
+
+class MissingControlBlocked(unittest.TestCase):
+    """F-c2e3d6de: a security control asserted ABSENT on a surface we run.
+
+    "no rate limit protects X", "nothing throttles Y", "no lockout on Z" carry
+    no vulnerability word, no count and no image, so every earlier tier
+    returned [] and the commit-msg hook exited 0 -- reproduced 2026-09-22 with
+    dp.scan() against the frozen library before the rule existed.
+    """
+    LABEL = "residual claim — missing control"
+    POSITIVE = [
+        "no rate limit protects the %s login endpoint" % SVC,
+        "nothing throttles the %s token endpoint" % SVC,
+        "no lockout on the %s admin accounts" % SVC,
+        "there is no throttling in place for the %s api" % SVC,
+        "nothing protects the %s admin dashboard" % SVC,
+    ]
+    NEGATIVE = [
+        # Past tense: the commit that ADDS the control describes the past.
+        "no rate limit protected the %s endpoint; this commit adds one" % SVC,
+        # Design statements, not gaps.
+        "the healthz probe needs no auth for the %s endpoint" % SVC,
+        "no auth at the %s gateway level is needed" % SVC,
+        # A locked account is hardening -- measured on a real plan file.
+        "no usable password on the %s service user" % SVC,
+        # Tooling talk: a build gate is not a security control.
+        "nothing gates the apply on the check; the gate now blocks",
+        # Closed in the same message.
+        "no lockout on the %s admin accounts until now; this change enforces one" % SVC,
+    ]
+
+    def test_positive_fixtures_block(self):
+        for t in self.POSITIVE:
+            with self.subTest(t=t):
+                self.assertIn(self.LABEL, [h[2] for h in dp.scan(norm(t))], t)
+
+    def test_negative_fixtures_stay_clean(self):
+        for t in self.NEGATIVE:
+            with self.subTest(t=t):
+                self.assertFalse(dp.scan(norm(t)), "must not block: %r" % t)
+
+    def test_straw_pattern_is_load_bearing(self):
+        for t in self.POSITIVE:
+            with self.subTest(t=t):
+                self.assertFalse(scan_without(t, self.LABEL),
+                                 "another rule already carries %r" % t)
+
+    def test_residual_tier_waiver_covers_it(self):
+        self.assertFalse(dp.scan(norm(self.POSITIVE[0]), waived=True))
+
+
+class StillCarriedBlocked(unittest.TestCase):
+    """F-c1537a4e: "image X still carries criticals" and its family.
+
+    PERSISTS has matched `still carries` since 2026-08-19, but only in the WARN
+    tier and only next to FINDING_ANCHOR_WIDE. A bare scanner plural is not an
+    anchor there, so "the image still carries criticals" neither warned nor
+    blocked (reproduced 2026-09-22).
+    """
+    LABEL = "residual claim — still carried"
+    POSITIVE = [
+        "the %s image still carries criticals" % SVC,
+        "the %s image still ships the CVE from its base layer" % SVC,
+        "the %s runtime still has vulns after the rebuild" % SVC,
+        "the CVE is still present on the base image",
+        "criticals are still there after the rebuild",
+    ]
+    NEGATIVE = [
+        "the %s image still carries no criticals" % SVC,        # closed gap
+        "the %s image still has high latency" % SVC,           # bare adjective
+        "the %s chart still contains the old values" % SVC,    # no vuln noun
+        "the retained rollback datadir still carries the old value",
+    ]
+
+    def test_positive_fixtures_block(self):
+        for t in self.POSITIVE:
+            with self.subTest(t=t):
+                self.assertIn(self.LABEL, [h[2] for h in dp.scan(norm(t))], t)
+
+    def test_negative_fixtures_stay_clean(self):
+        for t in self.NEGATIVE:
+            with self.subTest(t=t):
+                self.assertFalse(dp.scan(norm(t)), "must not block: %r" % t)
+
+    def test_straw_pattern_is_load_bearing(self):
+        for t in self.POSITIVE:
+            with self.subTest(t=t):
+                self.assertFalse(scan_without(t, self.LABEL),
+                                 "another rule already carries %r" % t)
+
+
+class ImageAdjacencyNeedsARealToken(unittest.TestCase):
+    """The image rules paired IMAGE_REF with full VULN, so a bare severity word
+    within 80 chars of a SYNTHETIC tag -- a counted-severity test fixture, the
+    exact shape the policy asks authors to write -- blocked (2026-09-22). The
+    counted rule compounded it: the tag's trailing digit read as a count
+    ("1.2.3 for high").
+    """
+    IMAGE_LABEL = "vulnerability state tied to a named image"
+    COUNTED_LABEL = "counted vulnerability phrasing"
+    NEGATIVE = [
+        '("%s", "high", %s)' % (IMG, COUNT),
+        "%s produced a high error count in the fixture" % IMG,
+        "%s runs at low priority in the test fixture" % IMG,
+        "chore(app): bump to 1.2.3 for high availability",
+        "| `%s` (cache only) | medium | 45 m |" % IMG,
+    ]
+
+    def test_bare_severity_near_an_image_is_not_evidence(self):
+        for t in self.NEGATIVE:
+            with self.subTest(t=t):
+                self.assertFalse(dp.scan(norm(t)), "must not block: %r" % t)
+
+    def test_real_token_near_an_image_still_blocks(self):
+        t = "%s carries a known advisory in its base layer" % IMG
+        self.assertIn(self.IMAGE_LABEL, [h[2] for h in dp.scan(norm(t))])
+        self.assertFalse(scan_without(t, self.IMAGE_LABEL), "straw: rule not load-bearing")
+
+    def test_counted_severity_near_an_image_blocks_via_the_count(self):
+        t = "%s carries %s criticals" % (IMG, COUNT)
+        labels = [h[2] for h in dp.scan(norm(t))]
+        self.assertIn(self.COUNTED_LABEL, labels)
+        self.assertNotIn(self.IMAGE_LABEL, labels, "the count carries it, not the adjacency")
+        self.assertFalse(scan_without(t, self.COUNTED_LABEL), "straw: rule not load-bearing")
+
+    def test_count_reaches_across_a_version_token(self):
+        # Measured: "3 unfixable v1.15.1 criticals" was only ever caught by the
+        # tag digit; the real count could not cross the dotted token.
+        t = "%s unfixable v1.15.1 criticals accepted on %s" % (COUNT, SVC)
+        hits = [h for h in dp.scan(norm(t)) if h[2] == self.COUNTED_LABEL]
+        self.assertTrue(hits, "count must still block")
+        self.assertTrue(hits[0][1].startswith(COUNT + " "),
+                        "the COUNT must carry the match, not the tag digit: %r" % hits[0][1])
+        self.assertFalse(scan_without(t, self.COUNTED_LABEL), "straw: rule not load-bearing")
+
+    def test_version_slack_does_not_cross_a_sentence(self):
+        t = "review again after 30 days. With criticals the plan is kept"
+        self.assertFalse([h for h in dp.scan(norm(t)) if h[2] == self.COUNTED_LABEL],
+                         '"days." is not a version token')
+
+
+class DetectionCoverageBlocked(unittest.TestCase):
+    """F-a1b6c39b: what our monitoring does NOT see, next to a security event.
+
+    Modelled on the 2026-09-09 commit body (left in history as it is):
+    "authentication that succeeds is invisible", "none of the notification
+    rules matches action: login", "cannot correlate ... burst-from-one-IP".
+    dp.scan() returned [] on all of it (reproduced 2026-09-22).
+    """
+    LABEL = "residual claim — detection coverage"
+    WARN_LABEL = "possible detection-coverage statement"
+    POSITIVE = [
+        "we cannot detect a successful login to %s from a new address" % SVC,
+        "no alert fires when a brute-force burst hits %s" % SVC,
+        "authentication that succeeds on %s is invisible to the SIEM" % SVC,
+        "none of the notification rules matches a login on %s" % SVC,
+        "the indexer never correlates by client ip, so an attacker on %s goes unnoticed" % SVC,
+    ]
+    NEGATIVE = [
+        # Tooling talk about the scanner itself.
+        "the hook cannot detect a paraphrase of the residual claim",
+        # An ops gap: WARN-only (asserted below), never a block.
+        "no alert fires when the %s rollover stalls" % SVC,
+        # `login` the page, `log in` the verb.
+        "we cannot see the login page of %s on mobile" % SVC,
+        "we cannot log in to %s after the upgrade" % SVC,
+        # Past tense: the commit that adds the rule describes the past.
+        "we could not detect a failed login on %s before this rule" % SVC,
+        # Measured noise: adversarial review, the Authorization HEADER, a
+        # registry status.
+        "a blind spot in the code; re-attacking adversarially found it",
+        "only Host and Authorization are forwarded, so the outpost cannot see the session",
+        "trivy reports UNAUTHORIZED -> UNKNOWN, a coverage blind spot",
+        # Closed in the same message.
+        "a brute-force burst on %s is no longer invisible: this rule adds the decoder" % SVC,
+    ]
+
+    def test_positive_fixtures_block(self):
+        for t in self.POSITIVE:
+            with self.subTest(t=t):
+                self.assertIn(self.LABEL, [h[2] for h in dp.scan(norm(t))], t)
+
+    def test_negative_fixtures_stay_clean(self):
+        for t in self.NEGATIVE:
+            with self.subTest(t=t):
+                self.assertFalse(dp.scan(norm(t)), "must not block: %r" % t)
+
+    def test_straw_pattern_is_load_bearing(self):
+        for t in self.POSITIVE:
+            with self.subTest(t=t):
+                self.assertFalse(scan_without(t, self.LABEL),
+                                 "another rule already carries %r" % t)
+
+    def test_generic_shape_warns_only_next_to_a_monitor(self):
+        ops = norm("no alert fires when the %s rollover stalls" % SVC)
+        self.assertFalse(dp.scan(ops))
+        self.assertIn(self.WARN_LABEL, [h[2] for h in dp.scan_warn(ops)])
+        self.assertFalse(scan_warn_without(ops, self.WARN_LABEL), "straw: warn rule not load-bearing")
+        scanner = norm("trivy cannot see private images, a scan blind spot")
+        self.assertFalse(dp.scan(scanner))
+        self.assertIn(self.WARN_LABEL, [h[2] for h in dp.scan_warn(scanner)])
+        # No monitor word anywhere: neither tier. This repo says "cannot
+        # detect" about its own tooling constantly.
+        tooling = norm("the hook cannot detect a paraphrase of the residual claim")
+        self.assertFalse(dp.scan(tooling))
+        self.assertFalse(dp.scan_warn(tooling))
+
+    def test_existing_blind_spot_fixture_still_does_not_block(self):
+        # WarnTierNeverGates already asserts this one; it is repeated here
+        # because `blind spot` is now a coverage anchor and this is the fixture
+        # a careless widening would break.
+        self.assertFalse(dp.scan(norm(
+            "fix(elasticsearch): bump 8.19.15 -> 8.19.20 (CVE blind-spot plan)")))
+
+
+class CommitMsgHookEndToEnd(unittest.TestCase):
+    """F-c2e3d6de was an EXIT CODE (commit-msg exited 0), so assert the hook,
+    not only the library. Runs `.githooks/commit-msg` on a temp file the way
+    git does; the hook resolves GITHOOKS_DIR from its own path.
+    """
+    HOOK = os.path.join(_HERE, "..", "..", ".githooks", "commit-msg")
+
+    def _run(self, message):
+        import subprocess
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".msg", delete=False) as fh:
+            fh.write(message)
+            path = fh.name
+        try:
+            return subprocess.run(["bash", self.HOOK, path],
+                                  capture_output=True, text=True)
+        finally:
+            os.unlink(path)
+
+    def test_missing_control_message_is_rejected(self):
+        r = self._run("fix(%s): tighten the login flow\n\n"
+                      "no rate limit protects the %s login endpoint\n" % (SVC, SVC))
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("missing control", r.stderr)
+
+    def test_detection_coverage_message_is_rejected(self):
+        r = self._run("docs(plan): note the edge gap\n\n"
+                      "authentication that succeeds on %s is invisible\n"
+                      "to the SIEM today.\n" % SVC)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("detection coverage", r.stderr)
+
+    def test_still_carried_message_is_rejected(self):
+        r = self._run("chore(%s): rebuild\n\nthe %s image still carries\n"
+                      "criticals after the rebuild.\n" % (SVC, SVC))
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("still carried", r.stderr)
+
+    def test_version_tail_near_a_severity_word_is_accepted(self):
+        r = self._run("chore(app): bump to 1.2.3 for high availability\n\n"
+                      "Patch release, no breaking changes upstream.\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_ops_coverage_gap_is_advisory_only(self):
+        r = self._run("fix(alerts): note the gap\n\n"
+                      "no alert fires when the %s rollover stalls\n" % SVC)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("advisory", r.stderr)
+
+
 class LibraryContract(unittest.TestCase):
     """Both hooks import this module; keep the exported shape stable."""
 

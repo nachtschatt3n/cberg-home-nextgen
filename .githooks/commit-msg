@@ -16,6 +16,11 @@
 #     ("13 fixable criticals", "one critical remains", "clears 4 CVEs")
 #   · explicit unfixed-state statements
 #     ("vulnerable to", "unpatched", "exploitable", "residual critical")
+#   · a security control asserted ABSENT on a surface we run
+#     ("no rate limit protects the login endpoint", "nothing throttles X")
+#   · a detection gap next to a security event
+#     ("we cannot detect a successful login", "no alert fires on brute force")
+#   · "still carries" / "still present" next to a vulnerability noun
 #
 # What is allowed:
 #   · `security_ref: F-xxxxxxxx` — the sanctioned pointer to the finding record
