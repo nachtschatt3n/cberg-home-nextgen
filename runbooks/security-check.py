@@ -27,6 +27,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 # Self-activate mise toolchain so kubectl/talosctl/flux/sops + KUBECONFIG/etc are
@@ -1353,8 +1354,9 @@ _REFERENCE_CONTEXT = re.compile(
     r"secretStore|envFromSecret|process\.env|getenv|os\.environ|__file|__env"
 )
 # Canonical template strings, matched EXACTLY and deliberately few. This is not
-# the substring match that failed: `placeholder` and `replace-me-now` are not
-# members and still fire. Same set the section-2 scanner allowlists.
+# the substring match that failed: a bare `placeholder` is not a member and
+# still fires (the SHAPE rule below needs two words). Same set the section-2
+# scanner allowlists.
 _TEMPLATE_LITERALS = {
     "replace-me", "my-strong-password", "my-api-key",
     "your-api-key-here", "my-aws-secret-key",
@@ -1364,6 +1366,67 @@ _PLACEHOLDER_CONTEXT = re.compile(
     r"(?i)example|placeholder|change[_-]?me|replace[_-]?me|replace[_-]?with|"
     r"your[_-]|my[_-]strong"
 )
+
+# ── Scaffolding PHRASE, judged by SHAPE (F-54cbd530) ─────────────────────────
+#
+# The exact-match set above is deliberately blind to vocabulary, so five
+# self-evident template tokens survived the 2026-09-10 cycle as contextual-HIGH
+# rows: `REPLACE_WITH_SECURE_PASSWORD`, `your_actual_db_password`,
+# `changeme-<app>`, `PLACEHOLDER_ENCRYPTED_…_REPLACE_WITH_ACTUAL_PASSWORD`, and a
+# bare `placeholder` whose comment named the env var that really supplies it.
+#
+# The 2026-09-08 rule stands: a suppressor may never read the VALUE'S
+# VOCABULARY, because the leaked credential was itself spelled like a
+# placeholder. So this is not a word filter. It is a SHAPE test on the whole
+# value: two or more purely-alphabetic words, each all-lower or all-UPPER,
+# joined by `_`/`-`, with no digit anywhere, AND carrying a placeholder anchor
+# at a word boundary. Every property is chosen so the 2026-09-08 witness class
+# keeps firing: `placeholder7Zq` has a digit, `placeholderXyz` is one word
+# with mixed case, `notaplaceholder1` has a digit and no anchor at a word
+# boundary, `correct-horse-battery-staple` has no anchor. What it accepts is
+# the phrase a template author writes for a human to replace.
+#
+# Accepted residual: a real multi-word, digit-free, dictionary-word password
+# that happens to include one of these anchors (`your-secret-here`). That is
+# the weakest possible credential class and the pre-commit password guard
+# still fires on it at commit time; the trade is recorded here rather than
+# widened silently. Pinned in runbooks/tests/test-s3-placeholder-value-shape.py.
+_PLACEHOLDER_ANCHORS = (
+    "placeholder", "changeme", "change_me", "replace_me", "replace_with",
+    "your_", "example",
+)
+_SCAFFOLD_WORD_SPLIT = re.compile(r"[_-]+")
+
+
+def _placeholder_scaffold_value(value: str) -> bool:
+    """True when `value` is spelled ENTIRELY as a multi-word scaffolding phrase."""
+    v = value.strip().rstrip(",;").strip("\"'`").rstrip(",;")
+    if not v or any(ch.isdigit() for ch in v):
+        return False
+    words = [w for w in _SCAFFOLD_WORD_SPLIT.split(v) if w]
+    if len(words) < 2:
+        return False
+    if not all(w.isalpha() and w.isascii() and (w.islower() or w.isupper())
+               for w in words):
+        return False
+    phrase = "_".join(w.lower() for w in words)
+    return any(phrase.startswith(a) or f"_{a}" in phrase for a in _PLACEHOLDER_ANCHORS)
+
+
+# A BARE anchor word as the value — `password: placeholder` — is exactly the
+# 2026-09-08 shape and MUST keep firing on its own. It is suppressed only when
+# the line's own context (key + comment, never the value) names an
+# environment-variable identifier, i.e. the author wrote down where the real
+# value comes from: `password: placeholder  # overridden by ADMIN_PASSWORD env`.
+# The comment already buys silence for scaffolding WORDS (_PLACEHOLDER_CONTEXT);
+# this is narrower — it needs an UPPER_SNAKE identifier, not prose.
+_BARE_PLACEHOLDER_WORDS = frozenset({"placeholder", "changeme", "change_me", "change-me"})
+_ENV_NAME_IN_CONTEXT = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
+
+
+def _bare_placeholder_with_env_reference(value: str, context: str) -> bool:
+    v = value.strip().rstrip(",;").strip("\"'`").rstrip(",;").lower()
+    return v in _BARE_PLACEHOLDER_WORDS and bool(_ENV_NAME_IN_CONTEXT.search(context))
 
 
 # A VALUE lifted out of a shell or Python string keeps the QUOTING DEBRIS of the
@@ -1464,6 +1527,8 @@ def _hist_cred_hit_suppressed(line: str) -> bool:
         return True                                  # the line names a secret
     return all(_NON_LITERAL_VALUE.search(v) or _wrapped_value_is_reference(v)
                or v.lower() in _TEMPLATE_LITERALS
+               or _placeholder_scaffold_value(v)
+               or _bare_placeholder_with_env_reference(v, context)
                for v in values)
 
 
@@ -1480,6 +1545,93 @@ S3_SHELL_VAR_RHS_ERE = (
     r'([Tt]oken|TOKEN|[Pp]assword|PASSWORD|[Ss]ecret|SECRET|[Aa]pi.?[Kk]ey|API.?KEY)'
     r'\s*[:=]\s*"?\$\{?[A-Z_][A-Z0-9_]{2,}\b'
 )
+
+
+# ── Secret-NAMED files: read the CONTENT, not just the name (F-fd37ba9c) ──────
+#
+# The "secret-named file committed outside sops" rule matches FILENAMES and
+# never reads content, so it rates a template of `${SECRET_X}` references and a
+# file holding a raw credential identically. Since 89736fd6 that name-only
+# match tiers LOW (policy/hygiene) — correct for the name, and blind for the
+# file that also holds material. The pre-commit layers cover ADDED lines only;
+# a pre-existing committed file of that shape had no detector at all.
+#
+# This reads every version of each secret-named path ever committed (any
+# branch) and applies the same VALUE-scoped judgement the history scan uses —
+# `_hist_cred_hit_suppressed`, plus the env-var-NAME confirmation — so a
+# reference, a ciphertext, a template token or a documented env-var name stays
+# quiet and only credential-SHAPED material counts. A PEM private-key block
+# always counts: it has no key/value line to judge. The surviving LINES never
+# reach a finding title (the title names the path and a count; the lines are
+# DB-only metadata), because the title is what a public report renders.
+#
+# Result contract: a LIST (possibly empty) means "measured"; None means the git
+# read itself failed and the caller must not print a clean answer for it.
+_HIST_CRED_LINE_RE = re.compile(
+    r"(?i)(?:password|passwd|secret|token|api.?key|private.?key)\s*[:=]\s*\S{8,}"
+)
+_PEM_PRIVATE_KEY_RE = re.compile(r"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----")
+# Diff plumbing that is never file content.
+_DIFF_PLUMBING_PREFIXES = ("diff --git", "index ", "--- ", "+++ ", "@@", "commit ",
+                           "Author:", "Date:", "Merge:", "new file mode",
+                           "deleted file mode", "similarity index", "rename ")
+# Declaration-shaped right-hand sides the grep chain drops and the Python
+# predicate does not: a language keyword default, a type hint, a bare
+# identifier the tree declares as an env var (checked by _confirm_env_var_names).
+_DECLARATION_RHS_RE = re.compile(
+    r"(?i)(?:(?:password|passwd|secret|token|api.?key)[^=:]*[=:]\s*"
+    r"(?:None|null|nil|true|false)\s*[),;}:\]]*$"
+    r"|(?:password|passwd|secret|token|api.?key)[a-z0-9_]*\s*:\s*Optional\[)"
+)
+
+
+def secret_named_file_content_hits(path: str, *, cwd: str | Path | None = None,
+                                   confirm_env_names=None) -> list[str] | None:
+    """Credential-shaped lines ever committed to `path`, value-scoped.
+
+    `confirm_env_names` is the tree-side confirmation for bare env-var NAMES on
+    the right-hand side (defaults to _confirm_env_var_names); injectable so the
+    predicate is testable in a throwaway repository without a tree to grep.
+    """
+    try:
+        raw = subprocess.run(
+            ["git", "log", "--all", "-p", "--no-color", "--", path],
+            capture_output=True, timeout=60, cwd=str(cwd) if cwd else None,
+        ).stdout or b""
+    except Exception as e:  # noqa: BLE001
+        DEGRADED.record(_scope(), "git history (secret-named file content)",
+                        f"{type(e).__name__} reading `{path}` — its content was "
+                        f"not judged, so it stays reported by name only")
+        return None
+    confirm = confirm_env_names or _confirm_env_var_names
+    candidates: list[str] = []
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        if line.startswith(_DIFF_PLUMBING_PREFIXES):
+            continue
+        body = line[1:] if line[:1] in "+-" else line
+        if _PEM_PRIVATE_KEY_RE.search(body):
+            candidates.append(body)
+            continue
+        if not _HIST_CRED_LINE_RE.search(body):
+            continue
+        if _DECLARATION_RHS_RE.search(body) or _hist_cred_hit_suppressed(body):
+            continue
+        candidates.append(body)
+    # Bare env-var NAMES on the right-hand side (`token: GITHUB_TOKEN`) are
+    # references iff the tree really uses that name — the same confirmation the
+    # history scan applies, so the two detectors cannot disagree about a line.
+    per_hit = {c: _env_name_candidates(c) for c in candidates}
+    wanted = {n for v in per_hit.values() if v for n in v}
+    confirmed = confirm(wanted) if wanted else set()
+    seen: set[str] = set()
+    hits: list[str] = []
+    for c in candidates:
+        if per_hit[c] and per_hit[c] <= confirmed:
+            continue
+        if c not in seen:
+            seen.add(c)
+            hits.append(c)
+    return hits
 
 
 def s3_git_history() -> tuple[str, Findings, str]:
@@ -1790,9 +1942,33 @@ def s3_git_history() -> tuple[str, Findings, str]:
     secret_files = [sf for sf in secret_files
                     if not any(sf.startswith(a) or sf == a for a in ACCEPTED_SECRET_FILES)]
     if secret_files:
+        # Two rows, two tiers. A secret-named file whose committed content holds
+        # credential-SHAPED material (value-scoped) is reported as CONTENT — a
+        # title that does NOT carry S3_NAME_ONLY_MARKER, so risk_model scores it
+        # VULN on a public repo. A file that only LOOKS secret by name keeps the
+        # name-only row and its LOW tier, now honestly: its content was read.
+        with_content = 0
+        unjudged = 0
         for sf in secret_files:
+            hits = secret_named_file_content_hits(sf)
+            if hits:
+                with_content += 1
+                f.add(WARNING,
+                      f"Secret-named file holds credential-shaped content in "
+                      f"history: `{sf}` ({len(hits)} line(s))",
+                      meta={"path": sf, "content_lines": len(hits),
+                            "content_sample": [redact(h[:120]) for h in hits[:5]]})
+                cprint(C.YELLOW, f"  🟡 Historical secret file WITH credential-shaped "
+                                 f"content: {sf} ({len(hits)} line(s))")
+                continue
+            if hits is None:
+                unjudged += 1
             f.add(WARNING, f"Secret-named file committed outside sops: `{sf}`")
-            cprint(C.YELLOW, f"  🟡 Historical secret file: {sf}")
+            cprint(C.YELLOW, f"  🟡 Historical secret file (name only, content read "
+                             f"{'NOT judged' if hits is None else 'clean'}): {sf}")
+        cprint(C.CYAN, f"  · secret-named files: {len(secret_files)} by name, "
+                       f"{with_content} with credential-shaped content, "
+                       f"{unjudged} unjudged (git read failed)")
     else:
         cprint(C.GREEN, "  🟢 No plaintext secret filenames in history")
 
@@ -4316,6 +4492,440 @@ def s9_certificates() -> tuple[str, Findings, str]:
     return f.worst(), f, "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Flux source hygiene (F-e805174a)
+#
+# Every Flux-source problem found on 2026-09-11 was found BY HAND, twice: a
+# chart index fetched over cleartext http, seven sources with zero consumers
+# (six stranded by traceable commits), and a HelmRepository hosted under a
+# personal GitHub account. Nothing in this audit asked any of the three
+# questions. The cost of the missing detector was measured the same day: a
+# chart-index 404 blocked cluster-apps cluster-wide for ~90 minutes, because
+# every source sits inside the cluster-meta health gate
+# (docs/sops/flux-chart-source-pinning.md §7).
+#
+# Three questions, each behind a CONTROL so a zero means "checked and clean"
+# and never "the query broke" (docs/sops/audit-script-correctness.md):
+#
+#   scheme      https:// or oci:// (ssh for git); never http://. Control: the
+#               inventory itself must be non-empty for every kind the CRDs
+#               serve — an empty list is NOT MEASURED, not clean.
+#   consumers   at least one HelmRelease / Flux Kustomization / HelmChart /
+#               ImageUpdateAutomation references the source, or the operator
+#               has accepted it as staged — an accepted_risks needle on the
+#               finding title, the house allow-list with a review date. Control:
+#               the root GitRepository flux-system MUST resolve consumers; a
+#               resolver that cannot see the root's ~140 references is broken,
+#               and no "unreferenced" verdict from it is trusted.
+#   ownership   a GitHub-hosted source whose owner is a personal USER account
+#               (asked of the GitHub API, never guessed from the name) is
+#               flagged: with verify=false on every source and `default`-type
+#               HelmRepositories unable to cosign at all, account ownership is
+#               the ENTIRE provenance story, and a renamed or deleted personal
+#               account leaves its namespace claimable. Control: the oracle must
+#               classify two known accounts (`octocat` → User, `fluxcd` →
+#               Organization) before any answer of its is used; otherwise the
+#               ownership half is NOT MEASURED. Our own account — the owner of
+#               the root GitRepository's URL — is exempt: we are that person.
+#
+# A fourth rule comes from the SOP the same finding produced: a GitRepository
+# that tracks a mutable branch with no commit/tag pin swaps content with no
+# git diff (Shape D). The root sync source is exempt by identity — tracking
+# main IS its job.
+#
+# Objects are read LIVE through the same kubectl path this section already
+# uses, so a source applied out-of-band is seen; the repo's manifests are
+# read too, and a live source declared in no manifest is itself a finding.
+# The classifier is pure and is exercised in
+# runbooks/tests/test-flux-source-hygiene.py over the REAL repo manifests.
+# ---------------------------------------------------------------------------
+_FLUX_SOURCE_KINDS = ("HelmRepository", "OCIRepository", "GitRepository", "Bucket")
+_FLUX_SOURCE_RESOURCES = (
+    "helmrepositories.source.toolkit.fluxcd.io",
+    "ocirepositories.source.toolkit.fluxcd.io",
+    "gitrepositories.source.toolkit.fluxcd.io",
+    "buckets.source.toolkit.fluxcd.io",
+)
+_FLUX_CONSUMER_KINDS = ("HelmRelease", "Kustomization", "HelmChart", "ImageUpdateAutomation")
+_FLUX_CONSUMER_RESOURCES = (
+    "helmreleases.helm.toolkit.fluxcd.io",
+    "kustomizations.kustomize.toolkit.fluxcd.io",
+    "helmcharts.source.toolkit.fluxcd.io",
+    "imageupdateautomations.image.toolkit.fluxcd.io",
+)
+_FLUX_ROOT_SOURCE = ("GitRepository", "flux-system", "flux-system")
+_FLUX_OK_SCHEMES = frozenset({"https", "oci", "ssh"})
+_GITHUB_OWNER_CONTROLS = {"octocat": "User", "fluxcd": "Organization"}
+_FLUX_INSTANCE_VALUES = Path("kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml")
+_URL_RE = re.compile(r"^(?P<scheme>[a-z][a-z0-9+.-]*)://(?:[^@/]+@)?(?P<host>[^/:]+)(?::\d+)?(?:/(?P<path>.*))?$", re.I)
+_SCP_URL_RE = re.compile(r"^(?:[^@]+@)?(?P<host>[^:/]+):(?P<path>.*)$")
+
+
+def flux_source_key(obj: dict) -> tuple[str, str, str]:
+    md = obj.get("metadata") or {}
+    return (str(obj.get("kind") or ""), str(md.get("namespace") or ""), str(md.get("name") or ""))
+
+
+def flux_consumer_ref(obj: dict) -> tuple[str, str | None, str] | None:
+    """(kind, namespace-or-None, name) of the source a consumer points at.
+
+    A HelmRelease points through `chart.spec.sourceRef` or `chartRef`; the
+    other kinds through `sourceRef`. The namespace defaults to the consumer's
+    own when the ref omits it; None when neither is known (a repo manifest
+    whose namespace comes from its Flux Kustomization's targetNamespace).
+    """
+    spec = obj.get("spec") or {}
+    kind = obj.get("kind")
+    ref = None
+    if kind == "HelmRelease":
+        ref = ((spec.get("chart") or {}).get("spec") or {}).get("sourceRef") or spec.get("chartRef")
+    elif kind in ("Kustomization", "HelmChart", "ImageUpdateAutomation"):
+        ref = spec.get("sourceRef")
+    if not isinstance(ref, dict) or not ref.get("kind") or not ref.get("name"):
+        return None
+    ns = ref.get("namespace") or (obj.get("metadata") or {}).get("namespace") or None
+    return (str(ref["kind"]), str(ns) if ns else None, str(ref["name"]))
+
+
+def url_scheme(url: str) -> str:
+    u = (url or "").strip()
+    m = _URL_RE.match(u)
+    if m:
+        return m.group("scheme").lower()
+    return "ssh" if _SCP_URL_RE.match(u) and "@" in u else ""
+
+
+def github_owner_of(url: str) -> str | None:
+    """The GitHub account owning `url`'s namespace; None when not GitHub-hosted."""
+    u = (url or "").strip()
+    m = _URL_RE.match(u) or _SCP_URL_RE.match(u)
+    if not m:
+        return None
+    host = m.group("host").lower()
+    segs = [s for s in (m.group("path") or "").split("/") if s]
+    if host in ("github.com", "ghcr.io", "raw.githubusercontent.com"):
+        return segs[0].lower() if segs else None
+    if host.endswith(".github.io"):
+        return host[: -len(".github.io")]
+    return None
+
+
+_github_owner_type_cache: dict[str, str | None] = {}
+
+
+def _github_owner_type(owner: str) -> str | None:
+    """'User' | 'Organization' from the GitHub API, None when it did not answer."""
+    if owner in _github_owner_type_cache:
+        return _github_owner_type_cache[owner]
+    headers = {"User-Agent": "homelab-security-check/1.0",
+               "Accept": "application/vnd.github+json"}
+    tok = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if tok:
+        headers["Authorization"] = f"Bearer {tok}"
+    url = "https://api.github.com/users/" + urllib.parse.quote(owner, safe="")
+    answer: str | None = None
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=15) as r:
+            t = json.load(r).get("type")
+            answer = t if t in ("User", "Organization") else None
+    except Exception:  # noqa: BLE001 — 404, 403 rate limit, network: all "no answer"
+        answer = None
+    _github_owner_type_cache[owner] = answer
+    return answer
+
+
+def flux_source_hygiene(sources: list[dict], consumers: list[dict], *,
+                        owner_type, self_owners: set[str] | None = None) -> dict:
+    """Pure classifier. `owner_type(owner) -> 'User'|'Organization'|None`."""
+    from collections import Counter
+    keys = [flux_source_key(s) for s in sources]
+    by_kind = Counter(k[0] for k in keys)
+    consumer_counts: dict[tuple[str, str, str], int] = {k: 0 for k in keys}
+    unresolved_refs = 0
+    for c in consumers:
+        ref = flux_consumer_ref(c)
+        if ref is None:
+            continue
+        rk, rns, rn = ref
+        hit = False
+        for k in keys:
+            if k[0] == rk and k[2] == rn and (rns is None or rns == k[1]):
+                consumer_counts[k] += 1
+                hit = True
+        if not hit:
+            unresolved_refs += 1
+    root_present = _FLUX_ROOT_SOURCE in consumer_counts
+    root_consumers = consumer_counts.get(_FLUX_ROOT_SOURCE, 0)
+    resolver_ok = root_present and root_consumers > 0
+
+    http, odd_scheme, branch_tracking = [], [], []
+    for s, k in zip(sources, keys):
+        url = str((s.get("spec") or {}).get("url") or "")
+        scheme = url_scheme(url)
+        if scheme == "http":
+            http.append((k, url))
+        elif scheme not in _FLUX_OK_SCHEMES:
+            odd_scheme.append((k, scheme or "(none)", url))
+        if k[0] == "GitRepository" and k != _FLUX_ROOT_SOURCE:
+            ref = (s.get("spec") or {}).get("ref") or {}
+            if isinstance(ref, dict) and ref.get("branch") and not any(
+                    ref.get(x) for x in ("commit", "tag", "semver", "name")):
+                branch_tracking.append((k, str(ref["branch"])))
+
+    # Ownership — controls first; without them nothing below is trusted.
+    controls = {c: owner_type(c) for c in _GITHUB_OWNER_CONTROLS}
+    oracle_ok = all(controls[c] == want for c, want in _GITHUB_OWNER_CONTROLS.items())
+    if self_owners is None:
+        self_owners = set()
+        for s, k in zip(sources, keys):
+            if k == _FLUX_ROOT_SOURCE:
+                o = github_owner_of(str((s.get("spec") or {}).get("url") or ""))
+                if o:
+                    self_owners.add(o)
+    owner: dict = {"oracle_ok": oracle_ok, "controls": controls, "personal": [],
+                   "org": [], "self": [], "not_github": [], "unknown": [],
+                   "self_owners": sorted(self_owners)}
+    for s, k in zip(sources, keys):
+        o = github_owner_of(str((s.get("spec") or {}).get("url") or ""))
+        if o is None:
+            owner["not_github"].append(k)
+        elif o in self_owners:
+            owner["self"].append((k, o))
+        elif not oracle_ok:
+            owner["unknown"].append((k, o))
+        else:
+            t = owner_type(o)
+            if t == "User":
+                owner["personal"].append((k, o))
+            elif t == "Organization":
+                owner["org"].append((k, o))
+            else:
+                owner["unknown"].append((k, o))
+
+    return {
+        "sources": len(sources), "by_kind": dict(by_kind), "consumers": len(consumers),
+        "consumer_counts": consumer_counts, "unresolved_refs": unresolved_refs,
+        "root_present": root_present, "root_consumers": root_consumers,
+        "resolver_ok": resolver_ok,
+        "unreferenced": [k for k, n in consumer_counts.items() if n == 0] if resolver_ok else [],
+        "http": http, "odd_scheme": odd_scheme, "branch_tracking": branch_tracking,
+        "owner": owner,
+    }
+
+
+def _flux_objects_live(resources: tuple[str, ...]) -> list[dict] | None:
+    """Every object of the given API resources, or None when any read failed."""
+    items: list[dict] = []
+    for r in resources:
+        data = kubectl_json(f"get {r} -A")
+        if not isinstance(data, dict):
+            return None          # kubectl_json already recorded the gap
+        items.extend(i for i in data.get("items", []) if isinstance(i, dict))
+    return items
+
+
+def flux_objects_from_repo(root: Path) -> tuple[list[dict], list[dict], dict]:
+    """(sources, consumers, stats) declared under `root`/kubernetes.
+
+    The root sync GitRepository is not a manifest — flux-operator generates it
+    from the FluxInstance `sync:` block — so it is synthesised from that file
+    and tagged `_synthesized_from`. `stats` carries the parse failures: a
+    reader that skips files silently would turn a YAML error into "no such
+    source", which is the false-zero class this whole section exists to
+    avoid.
+    """
+    import yaml
+    sources: list[dict] = []
+    consumers: list[dict] = []
+    stats = {"files": 0, "parse_failures": [], "docs": 0}
+    for p in sorted((root / "kubernetes").rglob("*.yaml")):
+        if p.name.endswith(".sops.yaml"):
+            continue
+        stats["files"] += 1
+        try:
+            docs = list(yaml.safe_load_all(p.read_text(encoding="utf-8", errors="replace")))
+        except Exception as e:  # noqa: BLE001
+            stats["parse_failures"].append(f"{p.relative_to(root)}: {type(e).__name__}")
+            continue
+        for d in docs:
+            if not isinstance(d, dict) or not isinstance(d.get("kind"), str):
+                continue
+            stats["docs"] += 1
+            api = str(d.get("apiVersion") or "")
+            kind = d["kind"]
+            if kind in _FLUX_SOURCE_KINDS and api.startswith("source.toolkit.fluxcd.io"):
+                sources.append(d)
+            elif kind == "Kustomization" and api.startswith("kustomize.toolkit.fluxcd.io"):
+                consumers.append(d)
+            elif kind == "HelmRelease" and api.startswith("helm.toolkit.fluxcd.io"):
+                consumers.append(d)
+            elif kind in ("HelmChart", "ImageUpdateAutomation"):
+                consumers.append(d)
+    fi = root / _FLUX_INSTANCE_VALUES
+    if fi.is_file():
+        try:
+            vals = yaml.safe_load(fi.read_text(encoding="utf-8")) or {}
+            sync = ((vals.get("instance") or {}).get("sync") or {})
+            if sync.get("kind") == "GitRepository" and sync.get("url"):
+                sources.append({
+                    "apiVersion": "source.toolkit.fluxcd.io/v1", "kind": "GitRepository",
+                    "metadata": {"name": _FLUX_ROOT_SOURCE[2], "namespace": _FLUX_ROOT_SOURCE[1]},
+                    "spec": {"url": sync["url"], "ref": {"name": sync.get("ref")}},
+                    "_synthesized_from": str(_FLUX_INSTANCE_VALUES),
+                })
+        except Exception as e:  # noqa: BLE001
+            stats["parse_failures"].append(f"{_FLUX_INSTANCE_VALUES}: {type(e).__name__}")
+    return sources, consumers, stats
+
+
+def _fmt_key(k: tuple[str, str, str]) -> str:
+    return f"{k[0]}/{k[1]}/{k[2]}"
+
+
+def flux_source_declared(live_key: tuple[str, str, str],
+                         repo_keys: set[tuple[str, str, str]]) -> bool:
+    """Is the live source declared by a repo manifest?
+
+    An app-local manifest usually carries NO `metadata.namespace` — the Flux
+    Kustomization's `targetNamespace` injects it at apply time (the
+    k8s-gateway OCIRepository is the live instance) — so a repo key with an
+    empty namespace matches on kind+name alone. A repo key WITH a namespace
+    must match it exactly. Measured before this rule existed: the first live
+    run reported the k8s-gateway source as "live-only", a false positive.
+    """
+    kind, ns, name = live_key
+    return any(rk == kind and rn == name and (rns == "" or rns == ns)
+               for rk, rns, rn in repo_keys)
+
+
+def _s10_flux_source_hygiene(f: Findings, checks: list[str]) -> None:
+    sources = _flux_objects_live(_FLUX_SOURCE_RESOURCES)
+    consumers = _flux_objects_live(_FLUX_CONSUMER_RESOURCES)
+    if sources is None or consumers is None:
+        checks.append(f"{WARNING} Flux source hygiene NOT MEASURED — kubectl inventory failed")
+        cprint(C.YELLOW, "  🟡 Flux source hygiene NOT MEASURED (kubectl inventory failed)")
+        return
+    if not sources or not any(c.get("kind") == "HelmRelease" for c in consumers) \
+            or not any(c.get("kind") == "Kustomization" for c in consumers):
+        DEGRADED.record(_scope(), "Flux source inventory",
+                        f"{len(sources)} sources / {len(consumers)} consumers read — an "
+                        f"empty inventory is a broken query, not a clean cluster")
+        checks.append(f"{WARNING} Flux source hygiene NOT MEASURED — empty inventory")
+        cprint(C.YELLOW, "  🟡 Flux source hygiene NOT MEASURED (empty inventory)")
+        return
+
+    hyg = flux_source_hygiene(sources, consumers, owner_type=_github_owner_type)
+    kinds = ", ".join(f"{n} {k}" for k, n in sorted(hyg["by_kind"].items()))
+    cprint(C.CYAN, f"  · Flux sources: {hyg['sources']} ({kinds}); {hyg['consumers']} consumers; "
+                   f"root `{_fmt_key(_FLUX_ROOT_SOURCE)}` referenced by {hyg['root_consumers']}")
+
+    # scheme
+    for k, url in hyg["http"]:
+        f.add(CRITICAL, f"Flux source `{_fmt_key(k)}` fetches over cleartext http "
+                        f"({url}) — chart bytes can be swapped in transit; move it "
+                        f"to https:// or oci://")
+        cprint(C.RED, f"  🔴 cleartext http source: {_fmt_key(k)}")
+    for k, scheme, url in hyg["odd_scheme"]:
+        f.add(WARNING, f"Flux source `{_fmt_key(k)}` uses scheme `{scheme}` "
+                       f"({url}) — expected https, oci or ssh")
+        cprint(C.YELLOW, f"  🟡 unexpected scheme `{scheme}`: {_fmt_key(k)}")
+    if not hyg["http"] and not hyg["odd_scheme"]:
+        checks.append(f"{OK} Flux sources: all {hyg['sources']} use https/oci/ssh")
+        cprint(C.GREEN, f"  🟢 all {hyg['sources']} Flux sources use https/oci/ssh")
+
+    # consumers (gated on the resolver control)
+    if not hyg["resolver_ok"]:
+        DEGRADED.record(_scope(), "Flux consumer resolver",
+                        f"root {_fmt_key(_FLUX_ROOT_SOURCE)} "
+                        f"{'absent' if not hyg['root_present'] else 'resolved 0 consumers'} — "
+                        f"unreferenced-source verdicts not trusted")
+        checks.append(f"{WARNING} Flux unreferenced-source check NOT MEASURED (resolver control failed)")
+        cprint(C.YELLOW, "  🟡 unreferenced-source check NOT MEASURED — resolver control failed")
+    else:
+        for k in hyg["unreferenced"]:
+            f.add(WARNING, f"Flux source `{_fmt_key(k)}` has no consumer — reconciled "
+                           f"every interval against a remote nobody reads; delete it, "
+                           f"or accept it as staged (accepted-risk needle on this title)")
+            cprint(C.YELLOW, f"  🟡 unreferenced Flux source: {_fmt_key(k)}")
+        if not hyg["unreferenced"]:
+            checks.append(f"{OK} Flux sources: every one of {hyg['sources']} has a consumer "
+                          f"(root referenced by {hyg['root_consumers']})")
+            cprint(C.GREEN, f"  🟢 every Flux source has a consumer")
+        if hyg["unresolved_refs"]:
+            checks.append(f"{WARNING} {hyg['unresolved_refs']} consumer reference(s) point at "
+                          f"no live source (a HelmRelease/Kustomization naming a "
+                          f"missing source)")
+
+    # ownership (gated on the oracle control)
+    own = hyg["owner"]
+    if not own["oracle_ok"]:
+        DEGRADED.record(_scope(), "GitHub owner-type oracle",
+                        f"controls answered {own['controls']} — namespace-ownership "
+                        f"check not measured (rate limit or network)")
+        checks.append(f"{WARNING} Flux source namespace ownership NOT MEASURED "
+                      f"(GitHub oracle controls failed: {own['controls']})")
+        cprint(C.YELLOW, "  🟡 namespace-ownership check NOT MEASURED — oracle controls failed")
+    else:
+        for k, o in own["personal"]:
+            f.add(WARNING, f"Flux source `{_fmt_key(k)}` is hosted under personal GitHub "
+                           f"account `{o}` (type User) — namespace provenance rests on "
+                           f"one account; prefer an organization/project source or "
+                           f"accept it (accepted-risk needle on this title)")
+            cprint(C.YELLOW, f"  🟡 personal-account source: {_fmt_key(k)} (owner {o})")
+        checks.append(f"{OK if not own['personal'] else WARNING} Flux source ownership: "
+                      f"{len(own['org'])} organization, {len(own['personal'])} personal, "
+                      f"{len(own['self'])} self ({', '.join(own['self_owners']) or '-'}), "
+                      f"{len(own['not_github'])} not GitHub-hosted, "
+                      f"{len(own['unknown'])} unanswered")
+        if own["unknown"]:
+            DEGRADED.record(_scope(), "GitHub owner-type oracle",
+                            f"{len(own['unknown'])} owner(s) unanswered after the controls "
+                            f"passed: {', '.join(o for _, o in own['unknown'][:5])}")
+        cprint(C.GREEN if not own["personal"] else C.YELLOW,
+               f"  · ownership: {len(own['org'])} org, {len(own['personal'])} personal, "
+               f"{len(own['self'])} self, {len(own['not_github'])} non-GitHub, "
+               f"{len(own['unknown'])} unanswered")
+
+    # mutable-branch GitRepositories (SOP Shape D)
+    for k, branch in hyg["branch_tracking"]:
+        f.add(WARNING, f"GitRepository `{k[1]}/{k[2]}` tracks mutable branch `{branch}` with "
+                       f"no commit/tag pin — content swaps with no git diff "
+                       f"(docs/sops/flux-chart-source-pinning.md, Shape D)")
+        cprint(C.YELLOW, f"  🟡 branch-tracking GitRepository: {k[1]}/{k[2]} ({branch})")
+
+    # live ⊄ git: an object Flux will never prune
+    try:
+        repo_sources, _repo_consumers, stats = flux_objects_from_repo(REPO_ROOT)
+    except Exception as e:  # noqa: BLE001
+        repo_sources, stats = [], {"parse_failures": [f"walk: {type(e).__name__}"], "files": 0}
+    if not repo_sources or stats["parse_failures"]:
+        DEGRADED.record(_scope(), "Flux source manifests (repo walk)",
+                        f"{len(repo_sources)} sources parsed from {stats.get('files', 0)} "
+                        f"files, {len(stats['parse_failures'])} parse failure(s) — "
+                        f"live-vs-git drift not measured")
+        checks.append(f"{WARNING} Flux live-vs-git drift NOT MEASURED "
+                      f"({len(stats['parse_failures'])} manifest parse failure(s))")
+    else:
+        repo_keys = {flux_source_key(s) for s in repo_sources}
+        live_keys = {flux_source_key(s) for s in sources}
+        live_only = sorted(k for k in live_keys if not flux_source_declared(k, repo_keys))
+        for k in live_only:
+            f.add(WARNING, f"Flux source `{_fmt_key(k)}` exists in the cluster but is "
+                           f"declared in no manifest under kubernetes/ — out-of-band "
+                           f"object; Flux will not prune it")
+            cprint(C.YELLOW, f"  🟡 live source with no manifest: {_fmt_key(k)}")
+        # Declared but not live: namespace-less repo keys match any live
+        # namespace, the same rule in the other direction.
+        pending = sorted(
+            rk for rk in repo_keys
+            if not any(lk[0] == rk[0] and lk[2] == rk[2] and (rk[1] == "" or rk[1] == lk[1])
+                       for lk in live_keys))
+        checks.append(f"{OK} Flux sources live vs git: {len(live_keys)} live, "
+                      f"{len(repo_keys)} declared, {len(live_only)} live-only"
+                      + (f", {len(pending)} declared-but-not-live (reconcile pending?)"
+                         if pending else ""))
+
+
 def s10_flux_posture() -> tuple[str, Findings, str]:
     section_header(11, "Flux Security Posture")
     f = Findings()
@@ -4432,6 +5042,9 @@ def s10_flux_posture() -> tuple[str, Findings, str]:
                 if any("flux" in s.lower() for s in subjects):
                     checks.append(f"{OK} flux-operator has cluster-admin (expected for GitOps)")
                     cprint(C.GREEN, "  🟢 flux-operator has cluster-admin (expected for GitOps)")
+
+    # Flux source hygiene: scheme, consumers, namespace ownership (F-e805174a)
+    _s10_flux_source_hygiene(f, checks)
 
     f.suppress_accepted(_ACCEPTED_RISKS)
     lines.extend(f"- {c}\n" for c in checks)
@@ -4854,6 +5467,22 @@ def flag_wazuh_groups(buckets, concerning, rare, volume_floor=5):
     return out
 
 
+def flag_wazuh_flooding_agents(buckets) -> list[tuple[str, int]]:
+    """Agents with ANY `agent_flooding` alert in the window (F-9952c59e).
+
+    No volume floor, on purpose. The group-level triage above keeps
+    `agent_flooding` behind the `> volume_floor` floor because it is a noisy
+    group cluster-wide; per AGENT the question is different: one queue-full
+    event means that agent dropped events, so every SIEM count from that node
+    in the same window is a floor, not a total. Measured 2026-09-18: 10
+    queue-full + 12 agent_flooding events, ALL on one node, invisible to a
+    phrase query on the keyword field `rule.description` and below the group
+    floor on a quiet day. Pure, so it runs without an indexer.
+    """
+    return [(str(b.get("key")), int(b.get("doc_count", 0)))
+            for b in buckets if int(b.get("doc_count", 0)) > 0]
+
+
 # ---------------------------------------------------------------------------
 # Section 13 — Authentik outpost Ingress suppression (F-0e2c62ad)
 #
@@ -5182,6 +5811,43 @@ def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
         cprint(C.YELLOW, f"  🟡 Notable K8s container alerts elevated ({k8s_notable}/24h level≥7; {k8s_total} total incl. routine)")
     else:
         cprint(C.GREEN, f"  🟢 K8s container alert volume normal ({k8s_notable}/24h notable, {k8s_total} total incl. routine)")
+
+    # --- Slice 3c: per-agent event-queue overflow (F-9952c59e) ---------------
+    # `rule.groups` is a keyword field, so this is an ENUMERATING query (a term
+    # on the group plus a terms aggregation over agents), never a phrase match
+    # on `rule.description` — a phrase query on a keyword field returns 0 by
+    # construction and reads as "does not reproduce". A dropping agent makes
+    # every other slice of this section a floor for that node; say which node.
+    body = {
+        "size": 0,
+        "query": {"bool": {"must": [
+            {"range": {"@timestamp": {"gte": "now-24h"}}},
+            {"term": {"rule.groups": "agent_flooding"}},
+        ]}},
+        "aggs": {"by_agent": {"terms": {"field": "agent.name", "size": 50}}},
+    }
+    data = wz.query(body)
+    if data is None:
+        # _exec_search recorded the gap; do not print a clean zero for it.
+        cprint(C.YELLOW, "  🟡 agent event-queue overflow NOT MEASURED (query failed)")
+        lines.append("\nAgent event-queue overflow (agent_flooding, 24h): NOT MEASURED\n")
+    else:
+        flooding = flag_wazuh_flooding_agents(
+            data.get("aggregations", {}).get("by_agent", {}).get("buckets", []))
+        flood_total = data.get("hits", {}).get("total", {}).get("value", 0)
+        for agent, n in flooding:
+            f.add(WARNING, f"Wazuh agent `{agent}` overflowed its event queue: {n} "
+                           f"agent_flooding alert(s) in 24h — events were dropped, so "
+                           f"every count from that node this cycle is a floor, not a "
+                           f"total; raise client_buffer queue_size on that node")
+            cprint(C.YELLOW, f"  🟡 agent queue overflow: {agent} ({n} in 24h)")
+        if not flooding:
+            cprint(C.GREEN, f"  🟢 No agent event-queue overflow in 24h "
+                            f"({flood_total} agent_flooding events, enumerated by group)")
+        lines.append(f"\nAgent event-queue overflow (agent_flooding, 24h): "
+                     f"**{flood_total}** across {len(flooding)} agent(s)"
+                     + (": " + ", ".join(f"{a} ({n})" for a, n in flooding) if flooding else "")
+                     + "\n")
 
     # --- Slice 4: per-agent heartbeat (catch agent compromise / death) -------
     # An agent that stops reporting may be compromised, OOMKilled, or evicted.
