@@ -2919,7 +2919,7 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     # blunt "HIGH CVEs" substring — masking FIXABLE criticals (2026-07-30 fix).
     if findings_per_image:
         n_actionable = n_latest = n_accepted = 0
-        n_floating = n_stale = n_undet = 0
+        n_floating = n_stale = n_undet = n_rebuild = 0
         for img, r in sorted(findings_per_image.items()):
             tag = img.split("@")[0]  # strip digest if present
             fix_s = ", ".join(r["fix_sample"][:3]) + ("…" if len(r["fix_sample"]) > 3 else "")
@@ -2941,7 +2941,8 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                     # ROUTE, not a risk acceptance. Two independent rules apply
                     # before anything may be absorbed into AR-029.
                     floating = _is_mutable_tag_ref(img)
-                    if r["crit_fix"] >= _UNBUMPABLE_CRIT_ESCALATE:
+                    if (r["crit_fix"] >= _UNBUMPABLE_CRIT_ESCALATE
+                            and not img.startswith(_PRIVATE_REGISTRY_PREFIX)):
                         # MAGNITUDE rule — deliberately independent of whether
                         # the tag floats. No bump can fix this, so the remaining
                         # options are a variant/base switch, a replacement, or a
@@ -2965,6 +2966,37 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                         f.add(WARNING, f"`{tag}`: floating tag — upstream re-publishes it in place, so the CVE posture is unknowable and can change with no manifest edit (a snapshot today: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable); pin an immutable version or @sha256 digest — {fix_s}", meta=_fix_meta)
                         cprint(C.YELLOW, f"  🟡 {tag}: FLOATING tag ({r['crit_fix']}C/{r['high_fix']}H fixable snapshot) — posture unknowable, pin it")
                         n_floating += 1
+                    elif img.startswith(_PRIVATE_REGISTRY_PREFIX):
+                        # OUR OWN image — AR-029 does not apply (F-3355f834).
+                        # That acceptance rests on "needs an upstream rebuild we
+                        # don't do", and for this namespace we ARE upstream: the
+                        # Dockerfile is in a repo we own, a rebuild is exactly
+                        # the remedy, and it is entirely within our control.
+                        # CLAUDE.md states this as a hard rule. Absorbing these
+                        # into AR-029 inverted it — a fixable CVE in an image we
+                        # build was filed as unactionable BECAUSE we build it.
+                        #
+                        # It compounded, too: the version side's REBUILD lane is
+                        # fed only by "a newer tag exists", which is never true
+                        # for an image already at its newest self-built tag, so
+                        # these reached neither the security board nor the
+                        # rebuild queue. 53 accepted rows named this namespace
+                        # when the guard was added.
+                        #
+                        # Deliberately NOT applied to the no-upstream-fix branch
+                        # below: when no patched version exists anywhere, owning
+                        # the Dockerfile does not help, so that acceptance stays
+                        # correct for our images too.
+                        #
+                        # Matches on _PRIVATE_REGISTRY_PREFIX, which is currently
+                        # identical in content to coverage.py's
+                        # SELF_BUILT_REPO_PREFIXES. Keep the two in step: if that
+                        # list ever grows a second prefix and this does not, the
+                        # extra images silently resume being accepted here.
+                        _sev = CRITICAL if r["crit_fix"] > 0 else WARNING
+                        f.add(_sev, f"`{tag}`: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable CVE(s) in an image WE build — no newer upstream tag because we publish it; the remedy is a rebuild in its own app repo, not an acceptance — {fix_s}", meta=_fix_meta)
+                        cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']}C/{r['high_fix']}H fixable, SELF-BUILT — rebuild in its own repo")
+                        n_rebuild += 1
                     else:
                         f.add(ACCEPTED, f"[AR-029] `{tag}`: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable CVE(s) but already on the newest upstream tag — needs an upstream rebuild we don't do (accepted)", meta=_fix_meta)
                         cprint(C.CYAN, f"  ⓘ {tag}: {r['crit_fix']}C/{r['high_fix']}H fixable but already-latest — accepted")
@@ -3020,6 +3052,7 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         cprint(C.CYAN, f"  Trivy: {len(findings_per_image)} of {len(distinct_images)} images with CVEs — "
                        f"{n_actionable} actionable (newer tag → bump), {n_floating} on FLOATING tags (posture unknowable), "
                        f"{n_stale} unbumpable-but-severe (needs a decision), "
+                       f"{n_rebuild} SELF-BUILT (rebuild in our own app repo), "
                        f"{n_latest} fixable-but-already-latest (accepted), "
                        f"{n_undet} with an UNDETERMINED fix-status (Go pseudo-version), "
                        f"{n_accepted} no-upstream-fix (accepted)")
