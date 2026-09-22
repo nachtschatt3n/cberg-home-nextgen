@@ -196,6 +196,22 @@ data:
             # node_network_*/node_arp_entries burst on scrape churn) — carry no
             # value by design; ES can never index them.
             - 'flags == FLAG_NO_RECORDED_VALUE'
+      # Per-upstream-cluster Envoy families (F-dc898b50 / F-75c5f090). Every
+      # envoy_cluster_* series carries envoy_cluster_name -- one per Service or
+      # route backend, 125 distinct values on 2026-09-22 -- so each family is
+      # multiplied by the whole backend inventory on both proxies. Measured
+      # that day over 24h: 20.5M of the 106M metric documents ES ingested
+      # carried envoy_cluster_name (71% of everything the Envoy pods emit),
+      # ~0.65 GB/day at the measured 3.4 GB/day stream rate, with the ES data
+      # volume at 81%. These families stay fully available in Prometheus,
+      # which is what the envoy-gateway alert rules and Grafana read; nothing
+      # in ES consumes them. envoy_http_*, envoy_listener_* and envoy_server_*
+      # (per-listener, bounded) still flow through.
+      filter/drop-envoy-cluster-metrics:
+        error_mode: ignore
+        metrics:
+          metric:
+            - 'IsMatch(name, "^envoy_cluster_")'
       batch:
         send_batch_size: 1000
         send_batch_max_size: 1500
@@ -361,7 +377,7 @@ data:
           exporters: [prometheus/hwerrors]
         metrics:
           receivers: [otlp]
-          processors: [memory_limiter, filter/drop-es-invalid-metrics, cumulativetodelta/es-histograms, batch]
+          processors: [memory_limiter, filter/drop-es-invalid-metrics, filter/drop-envoy-cluster-metrics, cumulativetodelta/es-histograms, batch]
           exporters: [elasticsearch/metrics]
         traces:
           receivers: [otlp]
