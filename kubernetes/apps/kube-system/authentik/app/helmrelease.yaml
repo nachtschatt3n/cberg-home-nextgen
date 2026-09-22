@@ -76,6 +76,16 @@ spec:
         # Sessions will expire on browser close regardless of age setting
         - name: AUTHENTIK_SESSIONS__UNAUTHENTICATED_AGE
           value: "days=365"
+        # F-649e78b6: only the pod CIDR may set proxy headers (X-Forwarded-For).
+        # Envoy Gateway (network/envoy-gateway policies.yaml) is the only hop
+        # in front of authentik and trusts client XFF from that same CIDR. The
+        # upstream default also trusts 10/8, 172.16/12 and 192.168/16, so any
+        # LAN client reaching the Service directly could spoof its client IP.
+        # Attribution only (events, reputation scoring) - not an access change.
+        # Docs: "applies to the Server"; mirrored on the worker so both env
+        # blocks stay identical.
+        - name: AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS
+          value: "10.69.0.0/16"
       initContainers:
         # Wait for the authentik-pg Deployment (postgres 18.6) to be reachable
         # before starting the server. Without this, authentik tries to connect
@@ -203,6 +213,16 @@ spec:
         # Sessions will expire on browser close regardless of age setting
         - name: AUTHENTIK_SESSIONS__UNAUTHENTICATED_AGE
           value: "days=365"
+        # F-649e78b6: only the pod CIDR may set proxy headers (X-Forwarded-For).
+        # Envoy Gateway (network/envoy-gateway policies.yaml) is the only hop
+        # in front of authentik and trusts client XFF from that same CIDR. The
+        # upstream default also trusts 10/8, 172.16/12 and 192.168/16, so any
+        # LAN client reaching the Service directly could spoof its client IP.
+        # Attribution only (events, reputation scoring) - not an access change.
+        # Docs: "applies to the Server"; mirrored on the worker so both env
+        # blocks stay identical.
+        - name: AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS
+          value: "10.69.0.0/16"
       # WORKAROUND for Authentik 2025.10.1 bug - Remove when upgrading to 2025.10.2+
       # Issue: Workers try to connect to port 9000 (server port) instead of checking heartbeat file
       # Upstream: https://github.com/goauthentik/authentik/issues/17923
