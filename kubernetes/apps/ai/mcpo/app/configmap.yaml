@@ -24,14 +24,14 @@ data:
         },
         "alertmanager": {
           "command": "uvx",
-          "args": ["alertmanager-mcp-server"],
+          "args": ["--with", "mcp<2", "alertmanager-mcp-server"],
           "env": {
             "ALERTMANAGER_URL": "http://alertmanager-operated.monitoring.svc.cluster.local:9093"
           }
         },
         "kubernetes": {
           "command": "uvx",
-          "args": ["mcp-kubernetes-server", "--disable-write", "--disable-delete"],
+          "args": ["--with", "mcp<2", "mcp-kubernetes-server", "--disable-write", "--disable-delete"],
           "env": {}
         },
         "github": {

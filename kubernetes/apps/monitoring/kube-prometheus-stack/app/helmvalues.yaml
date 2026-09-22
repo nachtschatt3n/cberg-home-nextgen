@@ -294,7 +294,10 @@ data:
               app.kubernetes.io/name: nextcloud
               app.kubernetes.io/component: metrics
           endpoints:
-            - port: metrics
+            # `port:` names the SERVICE port. office/nextcloud-metrics names its port
+            # `http` (http/9100->metrics), so `metrics` matched nothing: 0 endpoints,
+            # 0 nextcloud_* series (F-44f2be05, measured 2026-09-22).
+            - port: http
               path: /metrics
               interval: 30s
         - name: influxdb

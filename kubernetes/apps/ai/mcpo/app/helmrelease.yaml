@@ -34,6 +34,10 @@ spec:
         pod:
           annotations:
             secret.reloader.stakater.com/reload: mcpo-api-key
+            # The pod mounts ConfigMap mcpo-config, but only the Secret was watched:
+            # a config change reconciled and changed nothing until the next manual
+            # restart. Found while shipping the mcp<2 pin (F-ce80db2a).
+            configmap.reloader.stakater.com/reload: mcpo-config
         serviceAccount:
           name: mcpo
         initContainers:

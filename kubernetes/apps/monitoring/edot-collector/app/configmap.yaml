@@ -102,8 +102,13 @@ data:
       # health-check ES-rejection assertion (added 2026-08-07) catches that.
       cumulativetodelta/es-histograms:
         include:
-          match_type: strict
+          # regexp, not strict: strict is a fixed list, so every NEW Envoy
+          # histogram family arrived cumulative and was rejected by ES
+          # (1606 drop warnings in 2h, F-f8801413). The literal names below
+          # still match as regexes; ^envoy_.* covers the whole family.
+          match_type: regexp
           metrics:
+            - ^envoy_.*
             - otelcol_processor_batch_batch_send_size
             - workqueue_queue_duration_seconds
             - workqueue_work_duration_seconds

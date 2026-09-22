@@ -165,5 +165,13 @@ data:
         try:
             main()
         except urllib.error.HTTPError as exc:
-            print("HTTP %s: %s" % (exc.code, exc.read().decode()[:500]), file=sys.stderr)
+            body = exc.read().decode()[:500]
+            # Home Assistant's aiohttp answers a transient 500 "Server got itself in
+            # trouble" on roughly 0.1% of runs (2 of 2017 in 7d). It is HA, not Mealie,
+            # and the next run succeeds; failing the Job for it only pages. ONLY that
+            # exact shape exits clean -- every other HTTP error stays loud (F-e0f13069).
+            if exc.code == 500 and "Server got itself in trouble" in body:
+                print("HTTP 500 (transient HA aiohttp, tolerated): %s" % body, file=sys.stderr)
+                sys.exit(0)
+            print("HTTP %s: %s" % (exc.code, body), file=sys.stderr)
             sys.exit(1)
