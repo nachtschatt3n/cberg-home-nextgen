@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/gateway-api-httproute.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/log-volume-runaway.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.09.20`
-> Last Updated: `2026-09-20`
+> Version: `2026.09.23`
+> Last Updated: `2026-09-23`
 > Owner: `Platform`
 
 ---
@@ -678,14 +678,18 @@ Celery defaults worker concurrency to CPU count. On nuc14 nodes (18 threads), th
 
 Symptom: `Exit Code: 137 (OOMKilled)` on worker pods after the image loads.
 
-### 6. Authentik blueprints — `copy-blueprints` init must wildcard
+### 6. Authentik blueprints — the ConfigMap is a SUBDIRECTORY of `/blueprints`, never mounted over it
 
-The Authentik HelmRelease in this cluster has a custom `copy-blueprints` init container that copies files from the ConfigMap volume (read-only) into an emptyDir (writable) that the worker mounts. If that init uses a hardcoded list of `cp` commands (as it did originally), adding a new blueprint YAML to the ConfigMap is silently ignored.
+The Authentik HelmRelease mounts the `authentik-blueprints` ConfigMap read-only at
+`/blueprints/cberg` on server and worker (since 2026-09-23, F-6d6decf1). Discovery is
+recursive, so adding a `*.yaml` data key is all a new blueprint needs — no init container,
+no copy step, no HelmRelease edit. Two historical traps, both retired:
 
-Correct init command:
-```bash
-cp /blueprints-source/*.yaml /blueprints/ || true
-```
+- an init container with a hardcoded `cp` list silently ignored new keys (fixed by a wildcard);
+- the wildcard copy went into an emptyDir mounted **over** `/blueprints`, which hid the image's
+  `default/`, `system/` and `migrations/` blueprints and froze every upstream-managed object
+  across upgrades. Do not reintroduce either. Layout and re-apply semantics:
+  `docs/sops/authentik.md` "Blueprint directory layout".
 
 ### 7. PrometheusRule for apps with init-db Jobs
 
@@ -1156,7 +1160,7 @@ registration check.
 | PodNotReady alert fires for Completed Job pods | `kube_pod_status_ready{condition="true"}` is 0 for Succeeded pods | Add `unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1` to the expr |
 | `bitnami/*` image 404 pulling | Bitnami deleted pre-2026 tags from Docker Hub | Override `image.repository` to `bitnamilegacy/*` (same tag lives there) |
 | Longhorn Volume CR created in wrong namespace | Flux `targetNamespace` overrode `namespace: storage` | Keep `longhorn-volume.yaml` out of `app/kustomization.yaml`; apply once manually with `kubectl apply` (see Storage blueprint section) |
-| Authentik blueprint not picked up after ConfigMap change | `copy-blueprints` init hardcoded file list in authentik HelmRelease | Ensure init uses `cp /blueprints-source/*.yaml /blueprints/` wildcard — any new key in the ConfigMap is auto-copied |
+| Authentik blueprint not picked up after ConfigMap change | data key does not end in `.yaml`, starts with a dot, or the pods did not roll | Key must match `*.yaml` (discovery is recursive under `/blueprints/cberg`, dot-prefixed paths are skipped); check Reloader rolled the pods and read the `BlueprintInstance` row (`docs/sops/authentik.md`) |
 | Homepage icon broken (404) | Dashboard-icons repo doesn't ship that app | Use `si-<name>` (Simple Icons) or `mdi-<name>` (Material Design) prefix — verify URL before committing with `curl -sI https://cdn.simpleicons.org/<name>` |
 | Helm chart with bundled Postgres needs custom PG driver | Image lacks `psycopg2` / other connector | Use chart's `bootstrapScript` value — install into the runtime venv path (e.g. Superset: `uv pip install --python /app/.venv/bin/python psycopg2-binary==X`) |
 | Chart `envFromSecret`/`configFromSecret` breaks chart's default config | Chart default secret is replaced (not merged) when these values are set | Use `envFromSecrets` (plural array) to add your secret on top of the chart's default |

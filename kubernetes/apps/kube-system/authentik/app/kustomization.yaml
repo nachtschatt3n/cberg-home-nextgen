@@ -50,8 +50,14 @@ resources:
 # kubernetes/ first, encrypt in place with "sops -e -i", then move it over the
 # target and shred the plaintext -- the flow in AGENTS.md "SOPS Encryption Rules".
 
-# Note: Blueprints are loaded via init containers in helmrelease.yaml:
-# - ConfigMap (authentik-blueprints) is mounted as a volume (blueprints-source)
-# - Init containers copy all blueprints from blueprints-source to /blueprints (emptyDir volume)
-# - Authentik server/worker containers mount /blueprints as read-only
-# Volume mounts are configured via extraVolumes/extraVolumeMounts in helmrelease.yaml
+# Note: how the blueprints reach authentik (helmrelease.yaml, server.volumes /
+# worker.volumes -> blueprints-cberg):
+# - The ConfigMap (authentik-blueprints) is mounted read-only at
+#   /blueprints/cberg on server AND worker — a SUBDIRECTORY of the image's own
+#   /blueprints, so upstream's default/, system/ and migrations/ trees stay
+#   visible and re-apply on every image bump (F-6d6decf1, 2026-09-23).
+# - Discovery is recursive; every *.yaml key becomes a BlueprintInstance with
+#   path cberg/<key>.yaml. No init container, no copy step.
+# - Never mount anything OVER /blueprints again: that is what hid the upstream
+#   trees and froze every upstream-managed object until 2026-09-23.
+# Layout + re-apply semantics: docs/sops/authentik.md "Blueprint directory layout".

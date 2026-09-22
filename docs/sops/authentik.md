@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.09.22`
-> Last Updated: `2026-09-22`
+> Version: `2026.09.23`
+> Last Updated: `2026-09-23`
 > Owner: `Platform`
 
 ---
@@ -119,6 +119,151 @@ App-level blueprint source files (optional — some apps keep a local copy):
 The central ConfigMap is the source of truth. A per-app file is optional documentation.
 All Authentik changes must be declarative and committed to Git (no UI-only configuration).
 
+### Blueprint directory layout and upstream re-apply semantics
+
+**Layout (since F-6d6decf1, 2026-09-23).** `AUTHENTIK_BLUEPRINTS_DIR` is unset,
+so `blueprints_dir` is the image default `/blueprints` (`authentik/lib/default.yml`).
+On `ghcr.io/goauthentik/server:2026.8.2` that directory ships **45** YAML files
+plus `schema.json`. Our ConfigMap `authentik-blueprints` is mounted **read-only
+as a subdirectory** of it, on server and worker (`helmrelease.yaml`,
+`server.volumes` / `worker.volumes` → `blueprints-cberg`):
+
+```
+/blueprints/
+  cberg/        <- OUR ConfigMap (one file per data key)   -> BlueprintInstance.path = cberg/<key>.yaml
+  default/      <- upstream default flows, brand, events, RBAC roles (19)   instantiated
+  system/       <- upstream managed property mappings, bootstrap (11)       instantiated
+  migrations/   <- upstream one-off cleanups (1)                            instantiated
+  example/      <- upstream examples (12)                                   NEVER instantiated
+  testing/      <- upstream conformance fixtures (1)                        NEVER instantiated
+  schema.json
+```
+
+Until 2026-09-23 an init container copied the ConfigMap into an emptyDir that
+was mounted **over** `/blueprints`. That hid every upstream file: `BlueprintInstance`
+held only our rows, every upstream-managed object was frozen at whatever the
+database held, and the server-side bootstrap path
+(`authentik/core/setup/signals.py` reads `system/bootstrap.yaml` from
+`blueprints_dir`) could not find its file. A rolled-back dry run on 2026-09-23
+measured the drift that freeze had accumulated by 2026.8.2: the `default-request`
+flow, the `authentik Agent-Users` group + role, the `scope-dcr` and
+`scope-bound_key` managed scope mappings, the `default-notify-configuration-warning`
+rule, the `default-authentication-flow-authenticator-validate-stage` policy (and
+its binding on the order-30 MFA binding) and the OOBE `base_url` prompt all
+existed upstream and not here.
+
+**Why this layout is safe — verified on the pinned image, not from memory**
+(`authentik/blueprints/v1/tasks.py`, `v1/importer.py`, `models.py`):
+
+- `blueprints_find()` walks `blueprints_dir` **recursively** (`Path.rglob("**/*.yaml")`)
+  and skips any path with a dot-prefixed component. That is exactly why a plain
+  ConfigMap mount works: kubelet's `..data` symlink and `..<timestamp>` directory
+  are ignored and each key is found **once**, as `cberg/<key>.yaml` (measured in
+  a throwaway pod on the image's Python 3.14: 66 files = 21 ours + 45 upstream,
+  no duplicates). Do not name a data key with a leading dot — it would be invisible.
+- `check_blueprint_v1_file()` matches a `BlueprintInstance` by exact `path`. A file
+  whose `metadata.labels` carries `blueprints.goauthentik.io/instantiate: "false"`
+  is skipped **before** any row is created — that is how `example/` and `testing/`
+  are excluded, with nothing to configure on our side. Otherwise a missing row is
+  created (`name` = `metadata.name` if set, else the path) and `apply_blueprint`
+  is dispatched **only when the file's sha512 differs from `last_applied_hash`**.
+  Unchanged files are *not* re-applied on a pod restart; an image bump changes
+  the upstream bytes, so upstream re-applies exactly then — and only upstream,
+  because our bytes did not change.
+- `blueprints_discovery` runs at worker startup and hourly; a watchdog observer
+  on the worker also dispatches it whenever a file is created (a ConfigMap update
+  creates files), and Reloader rolls the pods on ConfigMap change anyway.
+- `clear_failed_blueprints` (startup + hourly) **deletes** any non-OCI row whose
+  file can no longer be read. Deleting a row never touches the objects it created
+  (`managed_models` is a plain array; no FK, no delete signal).
+- Each file is one `apply_blueprint` task and one DB transaction; entries inside
+  a file apply top-to-bottom. **There is no ordering between files** other than
+  an explicit `authentik_blueprints.metaapplyblueprint` entry (upstream uses it
+  with `required: false` to pull a flow in before the brand). Design nothing that
+  depends on "our file runs after theirs".
+- What a re-apply does to an **existing** object: the entry is matched by its
+  `identifiers`; with `state: present` (the default) the serializer is initialised
+  with `instance=<existing>, partial=True`, so **only the fields the entry declares
+  are written**. Undeclared fields and undeclared related objects are left alone —
+  there is no pruning. `state: created` never touches an existing object;
+  `state: absent` deletes the match.
+
+**Interaction with our blueprints** — measured 2026-09-23 by applying all 31
+instantiable upstream files against the live DB inside a transaction that was
+then rolled back (`Importer.validate()` + `apply()` under an outer `atomic()`):
+
+| Object | Upstream side | Our side | Who wins, and why it does not matter |
+|---|---|---|---|
+| `authentik Embedded Outpost` | **No blueprint declares any outpost** (grep of all 45 files: zero `authentik_outposts.*` entries). It is created by code — `outposts/apps.py` `update_or_create(defaults={type, name}, managed=…)`; `config` is not in `defaults`. | `embedded-outpost-blueprint.yaml` sets `kubernetes_disabled_components: [ingress]` | Ours. Nothing upstream can reset `config`; the hijacking Ingress cannot come back through a re-apply. Still re-check after every upgrade (audit below) — code, not files, owns this object. |
+| `default-authentication-flow` (`6b45105d-…`) | `default/flow-default-authentication-flow.yaml`: the flow by `slug` (attrs `designation`, `name`, `title`, `authentication`) and bindings **10/20/30/100** by `(target, stage, order)` | `login-reputation-blueprint.yaml`: a **new** order-**15** deny binding targeting the flow by pk, plus its policy binding | Both. Different identifier tuples; upstream never declares order 15 and never prunes. Dry-run delta on bindings: **none**. Live flow attrs equal upstream's, so the flow row is a no-op. |
+| Default brand `authentik-default` | `state: created` behind `!Condition [NOR, default brand exists]` | none | Skipped entirely here. |
+| Managed scope / property mappings (38 ids under `system/`) | re-asserted, `state: present` | referenced read-only via `!Find` | Upstream — by design. We only read them; the re-apply is how e.g. the `profile` scope's `groups` claim stays current. |
+| Groups, users, providers, applications | `authentik Admins` (`created`), RBAC groups, `akadmin` (`created`) | our own names only | No shared identifier for any model (checked model by model). |
+| Deletions | `flow-oobe.yaml` `state: absent` → the retired `default-oobe-flow-set-authentication` policy and its binding on the **OOBE** flow; `migrations/` → already gone | — | The only deletions a re-apply performs. None of ours. |
+
+**The rule that follows.** To change how an upstream-managed object behaves,
+**add** objects upstream does not declare — a binding, a policy, a stage — as
+the order-15 deny binding does. Never re-declare a field that an upstream entry
+also declares and expect ours to stick: on the next image bump only the upstream
+file's hash changes, so only it re-applies, and it overwrites that field with no
+signal. If a field genuinely must diverge from upstream, it needs its own entry
+in our blueprint *and* a deliberate re-apply of our file after every upgrade —
+prefer not to.
+
+**Changing the layout or the ConfigMap mount path moves every row.** A
+`BlueprintInstance` keys on `path`, so after such a change the old rows point at
+files that no longer exist and `clear_failed_blueprints` deletes them on the
+first worker boot, while discovery creates fresh rows under the new path. Two of
+our files carry `metadata.name` (`authentik-embedded-outpost`,
+`login-reputation-throttle`) and `BlueprintInstance.name` is unique: if discovery
+runs before cleanup on that first boot, the insert for those two raises an
+`IntegrityError`, the discovery task fails and is retried
+(`worker.task_max_retries: 5`, exponential backoff) — it converges once cleanup
+has run, normally within a minute. Deterministic path, **after** the new pods are
+Running:
+
+```bash
+POD=$(kubectl get pod -n kube-system -l app.kubernetes.io/component=worker \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from authentik.blueprints.models import BlueprintInstance
+stale = BlueprintInstance.objects.exclude(path='').exclude(path__contains='/')
+print('stale bare-path rows:', list(stale.values_list('path', flat=True)))
+stale.delete()
+from authentik.blueprints.v1.tasks import blueprints_discovery
+blueprints_discovery.send()
+" 2>/dev/null | grep -v '^{'
+```
+
+**Verification after the rollout (and after every image bump):**
+
+```bash
+# 1. Every row successful; ours under cberg/, upstream under default/ system/ migrations/;
+#    no bare-filename rows; example/ and testing/ absent.
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from authentik.blueprints.models import BlueprintInstance
+from collections import Counter
+qs = BlueprintInstance.objects.order_by('path')
+print(Counter(b.path.split('/')[0] if '/' in b.path else '<BARE>' for b in qs))
+print('not successful:', [(b.path, b.status) for b in qs if b.status != 'successful'])
+for b in qs: print(f'{b.status:<11} {b.last_applied:%Y-%m-%d %H:%M}  {b.path}')
+" 2>/dev/null | grep -v '^{'
+# expected on 2026.8.2: cberg 21, default 19, system 11, migrations 1 -> 52 rows, none <BARE>, none failed
+
+# 2. Embedded outpost (and every other) still suppresses the Ingress; zero Ingress objects
+#    -> run the outpost audit from "The rule covers MANAGED/SYSTEM outposts too" above
+kubectl get ingress -A            # expect: No resources found
+
+# 3. Login flow shape intact: orders [10, 15, 20, 30, 100], order 15 = login-reputation-deny
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from authentik.flows.models import FlowStageBinding
+print([(b.order, b.stage.name) for b in FlowStageBinding.objects.filter(
+    target='6b45105d-e374-4d34-809d-64f69bc95e72').order_by('order')])
+" 2>/dev/null | grep -v '^{'
+
+# 4. A real browser login still works (an unauthenticated curl cannot prove this — see grant_types).
+```
+
 ---
 
 ## Operational Instructions
@@ -169,6 +314,7 @@ Detailed implementation steps are in `Integrating a New Application` below.
 | default-provider-authorization-implicit-consent | `0cdf1b8c-88f9-4b90-a063-a14e18192f74` |
 | default-provider-invalidation-flow | `b8a97e00-f02f-48d9-b854-b26bf837779c` |
 | Local Kubernetes Cluster service connection | `162f6c4f-053d-4a1a-9aa6-d8e590c49d70` |
+| default-authentication-flow (target for bindings we ADD to the login flow, e.g. the order-15 deny binding) | `6b45105d-e374-4d34-809d-64f69bc95e72` |
 
 ---
 
@@ -420,14 +566,21 @@ blueprint entry.
   pod after the blueprint reports `successful`.
 - **Reuse the flow UUIDs** in `## Key UUIDs` above and the shared self-signed
   signing key via `!Find` — do not create per-app flows or keys.
-- Adding the data key is enough — the init container `cp /blueprints-source/*.yaml`
-  wildcard picks it up and Reloader rolls the pods. No `helmrelease.yaml` edit.
+- Adding the data key is enough — the ConfigMap is mounted at `/blueprints/cberg`
+  and discovery is recursive, so any `*.yaml` key is picked up and Reloader rolls
+  the pods. No `helmrelease.yaml` edit (see "Blueprint directory layout").
 
-Verify a new OIDC blueprint loaded without error:
+Verify a new OIDC blueprint loaded without error (there is no `show_blueprints`
+management command on this image — read the `BlueprintInstance` table):
 
 ```bash
-kubectl exec -n kube-system deploy/authentik-server -- \
-  ak show_blueprints | grep -i <app>      # state should be "present"/successful, not "errored"
+POD=$(kubectl get pod -n kube-system -l app.kubernetes.io/component=worker \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from authentik.blueprints.models import BlueprintInstance
+b = BlueprintInstance.objects.get(path='cberg/<app>-oauth2-blueprint.yaml')
+print(b.status, b.last_applied)          # successful, not error
+" 2>/dev/null | grep -v '^{'
 ```
 
 ---
@@ -942,9 +1095,15 @@ git commit --only \
 git show --stat HEAD    # is every file here actually yours?
 git push
 
-# Wait for Flux reconciliation, then verify
-kubectl exec -n kube-system deployment/authentik-server -- \
-  python3 manage.py show_blueprints
+# Wait for Flux reconciliation, then verify the row for your file is `successful`
+# (no `show_blueprints` command exists on this image; read the BlueprintInstance table)
+POD=$(kubectl get pod -n kube-system -l app.kubernetes.io/component=worker \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from authentik.blueprints.models import BlueprintInstance
+for b in BlueprintInstance.objects.order_by('path'):
+    print(f'{b.status:<11} {b.last_applied:%Y-%m-%d %H:%M}  {b.path}')
+" 2>/dev/null | grep -v '^{'
 
 # Check outpost was created
 kubectl get deployment -n kube-system ak-outpost-my-app-forward-auth
@@ -1117,6 +1276,21 @@ outpost also logs a benign `error` ("failed to detect a forward URL from
 nginx") for any request lacking `X-Forwarded-*` headers — including your own
 `curl` probes.
 
+### 4. Upstream blueprints re-apply on the bump — verify the re-apply, not just the pods
+
+Since the ConfigMap moved to `/blueprints/cberg` (2026-09-23) the image's
+`default/`, `system/` and `migrations/` blueprints are discovered and re-applied
+whenever their bytes change — which is every image bump. That is the point (it is
+how upstream ships flow/mapping fixes), and it is also the moment any field we
+were relying on being "left alone" gets reset. After the pods are on the new tag,
+run the four checks under "Verification after the rollout" in "Blueprint directory
+layout": every `BlueprintInstance` row `successful` with `default/` and `system/`
+rows freshly `last_applied`, zero Ingress objects and every outpost still
+`kubernetes_disabled_components: ['ingress']`, login-flow orders `[10, 15, 20, 30, 100]`,
+and a real browser login. Read the upstream release notes for blueprint changes
+under `blueprints/default` before the bump — a renamed stage identifier there is
+what would make one of our `!Find` references start failing.
+
 ## Blueprint Reference: DO's and DON'Ts
 
 ### ✅ DO
@@ -1135,6 +1309,9 @@ nginx") for any request lacking `X-Forwarded-*` headers — including your own
 - Use Flux substitution in ConfigMap data fields (doesn't work)
 - Omit `service_connection` from outposts
 - Bind to the embedded outpost
+- Re-declare a field of an upstream-managed object (default flows, stages, brand,
+  managed mappings) — it is overwritten on the next image bump with no signal.
+  Add objects instead (see "Blueprint directory layout")
 
 ---
 
@@ -1165,7 +1342,7 @@ Before deploying a new Authentik integration, verify:
    - `ReferenceGrant` in `kube-system` for the app namespace
    - `kubectl get ingress -A` returns nothing
 5. Verification
-   - `show_blueprints` includes the new blueprint
+   - the `BlueprintInstance` row `cberg/<app>-…yaml` is `successful` (listing in "Blueprint directory layout")
    - `ak-outpost-{app}-forward-auth` deployment and service exist in `kube-system`
 
 ---
@@ -1200,8 +1377,13 @@ For all apps: blueprint entry is in `kubernetes/apps/kube-system/authentik/app/c
 ### Test 1: Blueprint Loaded
 
 ```bash
-kubectl exec -n kube-system deployment/authentik-server -- \
-  python3 manage.py show_blueprints
+POD=$(kubectl get pod -n kube-system -l app.kubernetes.io/component=worker \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from authentik.blueprints.models import BlueprintInstance
+for b in BlueprintInstance.objects.order_by('path'):
+    print(f'{b.status:<11} {b.last_applied:%Y-%m-%d %H:%M}  {b.path}')
+" 2>/dev/null | grep -v '^{'
 ```
 
 Expected:
@@ -1228,9 +1410,14 @@ If failed:
 ## Troubleshooting
 
 ```bash
-# Check blueprints loaded
-kubectl exec -n kube-system deployment/authentik-server -- \
-  python3 manage.py show_blueprints
+# Check blueprints loaded (BlueprintInstance table; see "Blueprint directory layout")
+POD=$(kubectl get pod -n kube-system -l app.kubernetes.io/component=worker \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from authentik.blueprints.models import BlueprintInstance
+for b in BlueprintInstance.objects.order_by('path'):
+    print(f'{b.status:<11} {b.last_applied:%Y-%m-%d %H:%M}  {b.path}')
+" 2>/dev/null | grep -v '^{'
 
 # Authentik server logs
 kubectl logs -n kube-system -l app.kubernetes.io/name=authentik --tail=100
@@ -1304,8 +1491,13 @@ If unclear:
 ## Health Check
 
 ```bash
-kubectl exec -n kube-system deployment/authentik-server -- \
-  python3 manage.py show_blueprints
+POD=$(kubectl get pod -n kube-system -l app.kubernetes.io/component=worker \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from authentik.blueprints.models import BlueprintInstance
+for b in BlueprintInstance.objects.order_by('path'):
+    print(f'{b.status:<11} {b.last_applied:%Y-%m-%d %H:%M}  {b.path}')
+" 2>/dev/null | grep -v '^{'
 kubectl get deployments -n kube-system -l app.kubernetes.io/managed-by=goauthentik.io
 kubectl get svc -n kube-system | grep ak-outpost
 ```

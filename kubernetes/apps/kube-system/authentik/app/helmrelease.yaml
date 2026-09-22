@@ -37,6 +37,8 @@ spec:
     global:
       deploymentAnnotations:
         secret.reloader.stakater.com/reload: authentik-secret
+        # Reloader rolls server + worker whenever the blueprint ConfigMap
+        # changes; it is referenced as the blueprints-cberg volume below.
         configmap.reloader.stakater.com/reload: authentik-blueprints
       podAnnotations:
         reloader.stakater.com/auto: "true"
@@ -116,35 +118,28 @@ spec:
           volumeMounts:
             - name: patched-settings
               mountPath: /authentik-settings
-        - name: copy-blueprints
-          image: busybox:1.38.0
-          command:
-            - sh
-            - -c
-            - |
-              # Copy every blueprint from the ConfigMap — allows adding new blueprints
-              # without editing this init container. Trailing `|| true` handles empty source.
-              cp /blueprints-source/*.yaml /blueprints/ || true
-              echo "All blueprints copied:"
-              ls /blueprints/
-          volumeMounts:
-            - name: blueprints-source
-              mountPath: /blueprints-source
-              readOnly: true
-            - name: blueprints
-              mountPath: /blueprints
       volumes:
-        - name: blueprints
-          emptyDir: {}
-        - name: blueprints-source
+        # Our blueprints are mounted as a SUBDIRECTORY of the image's own
+        # /blueprints, so upstream's default/, system/ and migrations/ trees
+        # stay visible and re-apply on every image bump (F-6d6decf1). The
+        # previous layout copied the ConfigMap into an emptyDir mounted OVER
+        # /blueprints, which hid those trees and froze every upstream-managed
+        # object at whatever the database held. Discovery is recursive
+        # (blueprints_find: rglob "**/*.yaml", skipping dot-prefixed parts such
+        # as the ConfigMap's ..data symlink), so each key becomes a
+        # BlueprintInstance with path cberg/<key>.yaml. Adding a data key to the
+        # ConfigMap is still all it takes — no init container, no HelmRelease
+        # edit. Layout, re-apply semantics and the post-rollout checks:
+        # docs/sops/authentik.md "Blueprint directory layout".
+        - name: blueprints-cberg
           configMap:
             name: authentik-blueprints
         - name: patched-settings
           emptyDir: {}
       volumeMounts:
-        - name: blueprints
-          mountPath: /blueprints
-          readOnly: false
+        - name: blueprints-cberg
+          mountPath: /blueprints/cberg
+          readOnly: true
         - name: patched-settings
           mountPath: /authentik/root/settings.py
           subPath: settings.py
@@ -259,35 +254,19 @@ spec:
           volumeMounts:
             - name: patched-settings
               mountPath: /authentik-settings
-        - name: copy-blueprints
-          image: busybox:1.38.0
-          command:
-            - sh
-            - -c
-            - |
-              # Copy every blueprint from the ConfigMap — allows adding new blueprints
-              # without editing this init container. Trailing `|| true` handles empty source.
-              cp /blueprints-source/*.yaml /blueprints/ || true
-              echo "All blueprints copied:"
-              ls /blueprints/
-          volumeMounts:
-            - name: blueprints-source
-              mountPath: /blueprints-source
-              readOnly: true
-            - name: blueprints
-              mountPath: /blueprints
       volumes:
-        - name: blueprints
-          emptyDir: {}
-        - name: blueprints-source
+        # Same subdirectory mount as the server (see the comment there): the
+        # worker is where blueprints_discovery, the file watcher and every
+        # apply_blueprint task actually run, so this is the mount that matters.
+        - name: blueprints-cberg
           configMap:
             name: authentik-blueprints
         - name: patched-settings
           emptyDir: {}
       volumeMounts:
-        - name: blueprints
-          mountPath: /blueprints
-          readOnly: false
+        - name: blueprints-cberg
+          mountPath: /blueprints/cberg
+          readOnly: true
         - name: patched-settings
           mountPath: /authentik/root/settings.py
           subPath: settings.py
