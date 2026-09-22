@@ -59,6 +59,30 @@ spec:
                 - gateway.envoyproxy.io/owning-gateway-name
                 - pod-template-hash
         container:
+          # F-41f0d855 (2026-09-22). Envoy Gateway renders the data-plane
+          # Deployment from this CR and, with this field unset, takes the image
+          # from a constant compiled into the controller
+          # (api/v1alpha1/shared_types.go DefaultEnvoyProxyImage at v1.9.1), so
+          # nothing in git named the image of the internet-facing data plane
+          # and runbooks/check-all-versions.py recorded it NOT MEASURED. This
+          # pin is EXACTLY that compiled default -- verified byte-identical to
+          # the `envoy` container's spec image and imageID digest on both
+          # network/envoy-internal and network/envoy-external before writing,
+          # and EG copies the field verbatim (proxy/resource.go
+          # expectedProxyImage) -- so it is a naming change, not an image
+          # change: no rollout.
+          #
+          # COUPLED TO THE CONTROLLER. Every EG release compiles in the Envoy
+          # it was tested with, and this pin now outranks that default: a
+          # gateway-helm bump in helmrelease.yaml MUST move this tag+digest to
+          # the new release's DefaultEnvoyProxyImage in the SAME change, or the
+          # control plane drives a data plane it never tested. Renovate's
+          # built-in kubernetes manager sees this line but docker versioning
+          # cannot parse the `distroless-` PREFIX (measured with Renovate's own
+          # extractor, see the F-41f0d855 report), so until a regex-versioning
+          # packageRule exists this moves by hand, with the chart. Mutually
+          # exclusive with imageRepository -- never set both.
+          image: docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4
           resources:
             requests:
               cpu: 100m

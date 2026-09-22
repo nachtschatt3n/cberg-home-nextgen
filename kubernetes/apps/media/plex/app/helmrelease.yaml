@@ -9,10 +9,19 @@ spec:
   interval: 30m
   chart:
     spec:
-      chart: plex-media-server
-      version: 1.9.0
+      # Sourced from kubernetes/flux/meta/repositories/git/plex.yaml -- a
+      # GitRepository pinned to the commit tagged helm-chart-1.9.0 -- NOT from
+      # the gh-pages index on a mutable branch (F-0e310ef2; see that file for
+      # the decision and the proof that the chart directory renders
+      # identically to the tarball this release already runs).
+      #
+      # For a git source `chart` is a PATH and `version` does not apply: the
+      # version is whatever Chart.yaml says at the pinned commit (1.9.0).
+      # Moving versions means a new ref.commit in the GitRepository; this path
+      # stays (upstream keeps one unversioned chart directory).
+      chart: charts/plex-media-server
       sourceRef:
-        kind: HelmRepository
+        kind: GitRepository
         name: plex
         namespace: flux-system
   install:

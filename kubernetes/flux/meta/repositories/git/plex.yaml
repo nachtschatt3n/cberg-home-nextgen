@@ -1,0 +1,90 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/gitrepository-source-v1.json
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: plex
+  namespace: flux-system
+# F-0e310ef2. Replaces the HelmRepository that sourced plex-media-server from
+# raw.githubusercontent.com/plexinc/pms-docker/gh-pages -- an index.yaml on a
+# MUTABLE GIT BRANCH (Shape C in docs/sops/flux-chart-source-pinning.md; the
+# csi-driver-smb half of the same finding closed 2026-09-11). Unlike the
+# csi-driver-smb trap, this index's tarball URLs already point at GitHub
+# RELEASE assets (releases/download/helm-chart-1.9.0/...tgz), so the CHART
+# bytes were never fetched from the branch -- but the INDEX was, and an index
+# that is force-pushed, renamed or deleted takes this source not-Ready inside
+# the cluster-meta gate (wait: true, cluster-apps dependsOn it): the
+# 2026-09-11 cluster-wide stall. The commit below removes that dependency.
+#
+# SOP decision ladder (4.1), rung 3 -- Shape D, commit-pinned:
+#   rung 1/2 (OCI from the project): none exists. plexinc's release workflow is
+#   helm/chart-releaser-action only (gh-pages index + release assets, no
+#   `helm push`); five GHCR paths under plexinc/ and two Docker Hub paths all
+#   deny (2026-09-22). rung 4 (charts-mirror): no plex-media-server there
+#   either, and a re-publisher is a different trust decision anyway.
+#
+# THE COMMIT IS THE TRUST ANCHOR. 96d39230 is the commit tagged helm-chart-1.9.0
+# (git ls-remote, 2026-09-22); content-addressed, so stronger than the tag
+# (movable) and than any registry tag. ref.branch only scopes the clone -- the
+# commit is on master (master HEAD is one commit past it, touching nothing
+# under charts/), and Flux documents commit+branch as "the commit must exist
+# on the branch". If the branch ever vanished this source goes not-Ready:
+# loud and git-revertable, not a silent swap.
+#
+# SOURCE change, not CONTENT change (SOP 4.2): the release tarball
+# plex-media-server-1.9.0.tgz (sha256 d6b026d8..., 25473 B) is byte-identical
+# to the live HelmChart artifact behind Helm release 16, and `diff -r` of that
+# tarball against charts/plex-media-server at this commit differs ONLY in
+# Chart.yaml serialisation (`helm package` strips comments and sorts keys;
+# the parsed documents are equal). `helm template` with our values renders
+# identically from both (137/137 lines), and the rendered object set matches
+# `helm get manifest` of the live release. Flux repackages the directory into
+# its own tarball, so expect a NEW artifact digest and possibly a new Helm
+# revision with an identical manifest -- and no pod roll.
+#
+# reconcileStrategy stays ChartVersion (default) on the HelmRelease: upstream
+# cuts a helm-chart-X.Y.Z tag on every Chart.yaml version bump, so a new pin
+# always changes the version and always rebuilds.
+#
+# NO spec.verify, on purpose: the pinned commit is signed by GitHub's web-flow
+# key (B5690EEEBB952194 -- a squash-merge through the GitHub UI), which attests
+# routing, not maintainer intent, and verify fails CLOSED inside the
+# cluster-meta gate. Same reasoning as csi-driver-smb.yaml.
+#
+# KNOWN COST: version tracking. The HelmRelease no longer carries `version:`,
+# so Renovate's flux manager loses the helm-datasource row it had; what it
+# emits for THIS file instead is a git-refs DIGEST bump to the default-branch
+# HEAD (no ref.tag => no currentValue; measured with Renovate's own extractor,
+# 2026-09-22) -- the exact silent swap this pin exists to prevent. Step 0 holds
+# digest-type updates (auto-update.py gate G1), so it cannot auto-merge, but it
+# is a WRONG PR that a planner or operator could act on: disable that path in
+# .github/renovate.json5 (same rule shape as csi-driver-smb). Upgrades are
+# MANUAL until a detector exists: do not read silence as "up to date". The
+# chart-version customManager does not match this file (upstream keeps ONE
+# unversioned chart directory, no /charts/vX.Y.Z to read; measured 0 matches).
+#
+# To move versions: `git ls-remote https://github.com/plexinc/pms-docker
+# refs/tags/helm-chart-X.Y.Z`, put that commit here, confirm it is on master,
+# re-run the 4.2 proof. The chart path in the HelmRelease does not change.
+spec:
+  interval: 1h
+  # Measured 2026-09-22: full clone 816 KB in 0.7 s, so the 60 s default is
+  # ~90x margin; 2m covers a cold node or a degraded GitHub without holding the
+  # cluster-meta gate for long (its interval is 30m). Not 5m as on
+  # csi-driver-smb -- that one is a 118 MB clone.
+  timeout: 2m
+  url: https://github.com/plexinc/pms-docker
+  ref:
+    branch: master
+    commit: 96d39230ad375c941505bd1ba024d354e73a6caf
+  # `ignore` rather than sparseCheckout (csi-driver-smb.yaml has the why: a bad
+  # pattern degrades to an artifact missing the chart -- one HelmChart stops --
+  # instead of failing the source inside the gate). Verified against git's own
+  # matcher at this commit: exactly the 17 chart files survive of 44.
+  ignore: |
+    # exclude all
+    /*
+    # include only the chart directory
+    !/charts
+    /charts/*
+    !/charts/plex-media-server

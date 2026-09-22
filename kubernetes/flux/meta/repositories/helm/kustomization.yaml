@@ -19,7 +19,6 @@ resources:
   - ./nextcloud.yaml
   - ./node-feature-discovery.yaml
   - ./open-webui.yaml
-  - ./plex.yaml
   - ./longhorn.yaml
   - ./rm3l.yaml
   - ./dirsigler.yaml
