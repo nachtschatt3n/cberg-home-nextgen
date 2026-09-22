@@ -3,8 +3,8 @@
 > Description: Recovery procedures for cluster, node, storage, and external-
 > dependency failures. Complements `docs/sops/backup.md` (preventive workflow)
 > with the *when-something-broke* response runbook.
-> Version: `2026.09.14`
-> Last Updated: `2026-09-14`
+> Version: `2026.09.22`
+> Last Updated: `2026-09-22`
 > Owner: `Platform`
 
 ---
@@ -407,8 +407,21 @@ Full workflow: `docs/sops/authentik.md`.
 **Recovery — no backup, full rebuild:**
 - Rebuild VLAN/firewall/wifi config from the topology spec in `CLAUDE.md`
   "Network Architecture" section. That file is the source of truth for:
-  - VLAN IDs + subnets (Trusted 1/192.168.30.0, Servers 10/192.168.31.0,
-    Trusted-Devices 20, IoT 30, Guests 40, k8s-network 55, USA-Peer 2)
+  - VLAN IDs + subnets (Trusted 1/192.168.30.0/24, Trusted-Devices 20,
+    IoT 30, Guests 40, **k8s-network 55/192.168.55.0/24**, USA-Peer 2)
+
+  > **Do NOT recreate Servers VLAN 10 / 192.168.31.0/24.** It was retired on
+  > 2026-06-07 and folded into VLAN 55; no device uses that subnet today. This
+  > list previously named it, which mattered because this list is *executed*
+  > while rebuilding the network from nothing. Rebuilding it would reintroduce
+  > the stale 192.168.31.x address family that already cost real time twice —
+  > a kubelet unmount loop on `k8s-nuc14-01` (`docs/sops/talos-upgrade.md` §9)
+  > and a health check pinging a dead NAS address until 2026-08-16. The NAS now
+  > lives at **192.168.55.240 on VLAN 55**, deliberately, so NAS↔node storage is
+  > L2-switched rather than routed through the gateway (the UDM-Pro caps a
+  > routed flow at ~1 Gbit/s — see `docs/sops/cifs-mount-options.md`). On
+  > VLAN 55 reserve **.240–.254 for physical servers**, .11–.13 for the nodes,
+  > and leave the Cilium LB-IPAM pool (.2–.10 / .14–.199 / .211–.239) free.
   - WiFi SSIDs and VLAN bindings
   - mDNS proxy scope
   - DHCP ranges

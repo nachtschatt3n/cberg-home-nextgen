@@ -1,8 +1,8 @@
 # SOP: external-dns — public DNS publication (Cloudflare, `policy: sync`)
 
 > Description: How public DNS records for this cluster are created, changed and destroyed by external-dns, why `policy: sync` makes a failed *create* a total outage rather than a no-op, and the version/annotation traps that have taken public DNS down twice in two days.
-> Version: `2026.09.15`
-> Last Updated: `2026-09-15`
+> Version: `2026.09.22`
+> Last Updated: `2026-09-22`
 > Owner: `homelab-sre`
 
 ---
@@ -61,15 +61,15 @@ capture the record set before and after (§4).
 |---------|-------|
 | Namespace | `network` |
 | Source of truth | `kubernetes/apps/network/external/external-dns/helmrelease.yaml` |
-| Chart / image | `external-dns` 1.21.1 / `registry.k8s.io/external-dns/external-dns:v0.21.0` — reads the **alpha** annotation prefix. Chart 1.22.x ships v0.22.0, which reads the **GA** prefix `external-dns.kubernetes.io/` only, no fallback (§3) |
+| Chart / image | `external-dns` **1.22.0** / `registry.k8s.io/external-dns/external-dns:**v0.22.0**` — bumped 2026-09-15 (`0a316a51`), verified live 2026-09-22. This version reads the **GA** annotation prefix `external-dns.kubernetes.io/` **only**, with no fallback to the alpha key (§3); the live pod confirms `AnnotationPrefix:external-dns.kubernetes.io/`. Upstream latest is v0.23.0 — the next bump is subject to the same attended ritual |
 | Provider | `cloudflare`, `--cloudflare-proxied` |
 | Policy | **`sync`** — deletes records, and delete-then-creates on change |
 | Sources | `crd` (`DNSEndpoint`) + `gateway-httproute` |
 | Gateway allowlist | `--gateway-name=envoy-external`, `--gateway-namespace=network` (default-deny, one Gateway) |
-| Record target | `external-dns.alpha.kubernetes.io/target` on the **Gateway** `envoy-external` (read by v0.21). Its GA twin `external-dns.kubernetes.io/target` must be live on the same Gateway before any move to v0.22.x (§3) |
+| Record target | `external-dns.kubernetes.io/target` (**GA key — this is the one the running v0.22.0 reads**) on the **Gateway** `envoy-external`. Its alpha twin `external-dns.alpha.kubernetes.io/target` is still present on the same Gateway with the same value and is retained deliberately as the rollback path to v0.21.x — do not delete it (§3) |
 | Registry | TXT, `txtPrefix: k8s.`, `txtOwnerId: default` |
 | Domain filter | `${SECRET_DOMAIN}` |
-| Steady-state record count | 25 verified CNAMEs (healthy 24h floor: 24) |
+| Steady-state record count | 25 verified CNAMEs (healthy 24h floor: 24) — re-verified live 2026-09-22 (`external_dns_controller_verified_records{record_type="cname"}` = 25, registry errors over 7 d = 0) |
 | Sync interval / staleness | ~60 s; worst observed excursion 147 s |
 | Metrics | `--metrics-address=0.0.0.0:7979`, ServiceMonitor at 30 s |
 | Alerts | `external-dns.sync.health` + `external-dns.metrics.presence` (§9) |
@@ -117,9 +117,10 @@ metadata:
     # read by v0.21.x (alpha prefix) — KEEP it: it is the rollback path while a
     # revert lands on v0.21
     external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-    # read by v0.22.x+ (GA prefix, NO fallback to the alpha key) — must be live
-    # on the object BEFORE the chart/image moves; lands via plan
-    # runbooks/maintenance/plans/external-dns-1.22.0.md §3.1
+    # read by v0.22.x+ (GA prefix, NO fallback to the alpha key). This is the
+    # key the RUNNING version reads. It landed on the Gateway in its own commit
+    # (fbcd93c2) BEFORE the chart/image moved (0a316a51) — that ordering is the
+    # whole point; see §3.
     external-dns.kubernetes.io/target: "external.${SECRET_DOMAIN}"
 ```
 
@@ -172,11 +173,49 @@ after verification against the v0.22.0 source — plan §1.2–1.5).
 
 A bare version bump is therefore **known-broken regardless of its semver
 label**. This is why `*external-dns*` is denied in `runbooks/auto-update-policy.yaml`
-at every update type. The hazard is not the image pin itself — that one was
-attended and reverted in 94 s (`aa79cf7a`) — it is that chart 1.22.x will ship
-appVersion 0.22.0 and would classify as a **safe MINOR**, landing at Step 0 of
-an unattended nightly 03:30 window with nobody watching. `security_ref:
-F-14528040`.
+at every update type. The hazard was never the image pin itself — that one was
+attended and reverted in 94 s (`aa79cf7a`) — it was that chart 1.22.x ships
+appVersion 0.22.0 and would have classified as a **safe MINOR**, landing at
+Step 0 of an unattended nightly 03:30 window with nobody watching.
+`security_ref: F-14528040`.
+
+**That move has since been made, attended and in the correct order**: the GA
+annotation landed on the Gateway first (`fbcd93c2`), then the chart bumped
+1.21.1 → 1.22.0 / image v0.21.0 → v0.22.0 (`0a316a51`). The deny rule stays —
+upstream is already at v0.23.0, and the next bump earns the same attended
+treatment.
+
+### Pending: `--request-timeout` is deprecated — migrate to `--kube-api-request-timeout`
+
+The HelmRelease still passes `--request-timeout=60s`. **That flag is
+deprecated upstream**, verified three independent ways on 2026-09-22:
+
+1. Upstream source at the exact tag we run
+   (`pkg/apis/externaldns/types.go` @ `v0.22.0`) registers it as
+   `[DEPRECATED: use --kube-api-request-timeout] Request timeout when calling
+   Kubernetes APIs`, and warns when it is set away from its default.
+2. The upstream flags reference carries the same `[DEPRECATED: …]` text.
+3. **Our own pod logs it at startup**, because 60s ≠ the 30s default:
+   `level=warning msg="--request-timeout is deprecated, use
+   --kube-api-request-timeout instead"`.
+
+**It is not broken — it is forwarded.** The live pod reports
+`RequestTimeout:1m0s KubeAPIRequestTimeout:1m0s`, i.e. the deprecated flag
+still populates the new one, so behaviour today is correct and this is not
+urgent. Two cautions:
+
+- **The flag is Kubernetes-API-scoped, not provider-scoped.** It does not bound
+  Cloudflare API calls; do not reach for it to fix a provider-side hang.
+- **Do not bundle the rename with a version bump.** Under `policy: sync` a bump
+  is already an attended, revert-ready change (§4); adding a second variable
+  makes a failed run ambiguous. Swap the flag in its own commit *before* the
+  next bump, then confirm the warning is gone from the startup log.
+
+```bash
+# Confirm the warning is (still) there, and gone after the change
+mise exec -- kubectl logs -n network deploy/external-dns | head -5 | grep -i "request-timeout" \
+  || echo "no deprecation warning — migration done"
+```
 
 ---
 
@@ -247,7 +286,14 @@ mise exec -- kubectl -n network logs -l app.kubernetes.io/name=external-dns --ta
   | grep -iE 'error|level=error' || echo "no errors in last 50 lines"
 ```
 
-### Example B: version bump to v0.22.x (attended, TWO commits, Gateway first)
+### Example B: version bump (attended, TWO commits, Gateway first)
+
+> This is the pattern **as actually executed** on 2026-09-15 for
+> v0.21.0 → v0.22.0: `fbcd93c2` (Gateway GA key) then `0a316a51` (chart +
+> image). Reuse it verbatim for the next bump — upstream is at v0.23.0.
+> The annotation-key half is specific to the v0.22.0 GA-prefix switch; the
+> **two-commit, Gateway-first, verify-live-in-between shape** is the general
+> rule, because `policy: sync` deletes before it creates.
 
 ```bash
 # Commit 1 — gateways.yaml: add the GA twin next to the alpha key (same value);
@@ -259,18 +305,21 @@ git show --stat HEAD && git push
 mise exec -- kubectl -n network get gateway envoy-external \
   -o jsonpath='alpha={.metadata.annotations.external-dns\.alpha\.kubernetes\.io/target} ga={.metadata.annotations.external-dns\.kubernetes\.io/target}{"\n"}'
 
-# Commit 2 — helmrelease.yaml: chart version 1.21.1 -> 1.22.x and NOTHING else
+# Commit 2 — helmrelease.yaml: chart version <current> -> <next> and NOTHING else
 #            (no --default-targets, no --annotation-prefix)
+#            2026-09-15 ran this as 1.21.1 -> 1.22.0 in 0a316a51
 mise exec -- kubeconform -summary -fail-on error kubernetes/apps/network/external/external-dns
 git commit --only kubernetes/apps/network/external/external-dns/helmrelease.yaml -F msg2.txt
 git show --stat HEAD && git push
 # then STAY and watch — §6 Test 1 and Test 2, and keep `git revert` ready
 ```
 
-The executable form with pre-checks, assertions and rollback is
-`runbooks/maintenance/plans/external-dns-1.22.0.md`. Path B (§3) is the one-file
-alternative: `--annotation-prefix=external-dns.alpha.kubernetes.io/` in the same
-commit as the bump — use it only if the Gateway commit cannot land.
+The executable plan that drove this (`external-dns-1.22.0`) was **retired in
+`26a24fae`** once the bump landed; its pre-checks, assertions and rollback
+survive as commits `fbcd93c2` + `0a316a51`, and its reasoning is folded into §3
+above. Path B (§3) remains the one-file alternative:
+`--annotation-prefix=external-dns.alpha.kubernetes.io/` in the same commit as
+the bump — use it only if the Gateway commit cannot land.
 
 ### Example C: what NOT to do
 
@@ -548,8 +597,10 @@ v0.22+), then the tunnel (`docs/sops/cloudflare.md`).
 - `kubernetes/apps/network/envoy-gateway/app/gateways.yaml`
 - `kubernetes/apps/monitoring/kube-prometheus-stack/app/external-dns-alerts.yaml`
 - `runbooks/auto-update-policy.yaml` — the `*external-dns*` deny rule
-- `runbooks/maintenance/plans/external-dns-1.22.0.md` — the executable 1.22.x
-  plan: upstream evidence for the GA-prefix switch, Path A/B, assertions, rollback
+- `fbcd93c2` (Gateway GA key) + `0a316a51` (chart 1.21.1 → 1.22.0 / image
+  v0.21.0 → v0.22.0) — the executed bump. The `external-dns-1.22.0` plan that
+  carried the upstream evidence for the GA-prefix switch, Path A/B, assertions
+  and rollback was retired in `26a24fae`; read those commits instead
 - [`gateway-api-httproute.md`](gateway-api-httproute.md) — HTTPRoute pattern
 - [`cloudflare.md`](cloudflare.md) — the tunnel the CNAMEs point at
 - [`k8s-gateway-dns.md`](k8s-gateway-dns.md) — internal DNS (separate system)
@@ -562,6 +613,21 @@ v0.22+), then the tunnel (`docs/sops/cloudflare.md`).
 
 ## Version History
 
+- `2026.09.22`: post-bump accuracy pass — the SOP still described a pre-1.22.0
+  world. Corrected the §2 Overview rows to the **live** state (chart 1.22.0 /
+  image v0.22.0, verified 2026-09-22; the **GA** key is the one the running
+  version reads, with the alpha twin retained deliberately as the v0.21.x
+  rollback path), re-verified the record count (25 CNAMEs, 0 registry errors
+  over 7 d), and moved §3/§5 Example B from future to past tense now that the
+  bump has been executed. Replaced **three dead links** to the
+  `external-dns-1.22.0` maintenance plan — retired in `26a24fae` — with the
+  commits that carry the same evidence (`fbcd93c2` Gateway GA key, `0a316a51`
+  chart+image). Added the pending
+  **`--request-timeout` → `--kube-api-request-timeout`** migration: the flag is
+  genuinely deprecated (confirmed against upstream `types.go` @ `v0.22.0`, the
+  upstream flags reference, **and** our own pod's startup warning), but it is
+  still forwarded to the new field so nothing is broken — migrate in its own
+  commit, never bundled with a version bump.
 - `2026.09.08`: Initial SOP. Created after external-dns took public DNS down for
   94 s on an attended v0.21.0 → v0.22.0 image pin (reverted in `aa79cf7a`), and
   the follow-up found it had **zero** alert coverage — none of the 382 loaded

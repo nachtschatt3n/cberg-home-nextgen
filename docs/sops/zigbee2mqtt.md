@@ -1,8 +1,8 @@
 # SOP: Zigbee2MQTT operations
 
 > Description: Lifecycle operations for the Zigbee2MQTT (Z2M) deployment and its mesh — opening/closing `permit_join`, removing devices safely, recovering from interview failures on CC2652-class router firmware, backup/restore, and post-incident smoke testing.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.09.22`
+> Last Updated: `2026-09-22`
 > Owner: `cberg-home-ops`
 
 ---
@@ -38,10 +38,73 @@ The rule is about the **pre-flight**, not about the flag. Once the pre-flight pl
 
 ---
 
+## 2b) `/data/state.json` `last_seen` FREEZES — it is NOT a liveness sensor
+
+**Do not judge whether a Zigbee device is alive from `/data/state.json`.** The
+file is rewritten continuously (its mtime is always current), but the
+`last_seen` timestamps *inside* it do not track the device's actual last
+contact. A device can look 24 hours dead in `state.json` while it is publishing
+to MQTT the same second.
+
+**Measured 2026-09-22** (`kubectl exec -n home-automation deploy/zigbee2mqtt -c app
+-- cat /data/state.json`, compared against `/data/database.db`):
+
+| Signal | Result |
+|---|---|
+| Devices in `state.json` | 24 (all 24 have a `last_seen`) |
+| `state.json` `last_seen` older than 12 h | **24 of 24** |
+| `database.db` `lastSeen` younger than 1 h | **17 of 24** |
+| Oldest `state.json` entries | 716 h and 634 h |
+
+The clinching case: the Tuya soil sensor `0xa4c1385405b16ed5` read **23.8 h
+stale** in `state.json`, while `kubectl logs deploy/zigbee2mqtt -c app` showed
+it publishing `last_seen: 2026-09-22T05:57:34Z` — seconds earlier. The mesh was
+healthy throughout.
+
+**This has already cost real time.** Scoring device health from this field
+produces "every device is dead" (24/24) during a perfectly healthy mesh — a
+dead *sensor*, not 24 dead devices. `runbooks/health-check.sh` now refuses to
+score zigbee staleness when its own sensor is frozen and records the check as
+*unmeasured* instead (commit `3dd85971`).
+
+### What IS a liveness signal
+
+1. **`zigbee2mqtt/bridge/devices` over MQTT — the correct source.** This is what
+   to read when you need to know which devices are alive.
+2. **`zigbee2mqtt/bridge/health`** for per-device `messages` /
+   `messages_per_sec` / `leave_count` — see §8 Diagnose Example 1.
+3. **`/data/database.db` `lastSeen`** (epoch **milliseconds**) — advances live,
+   and is the easiest cross-check when you already have a shell:
+
+   ```bash
+   kubectl exec -n home-automation deploy/zigbee2mqtt -c app -- cat /data/database.db \
+     | python3 -c "
+   import sys, json, datetime
+   now = datetime.datetime.now(datetime.timezone.utc)
+   for line in sys.stdin:
+       line = line.strip()
+       if not line: continue
+       d = json.loads(line)
+       ls = d.get('lastSeen')
+       if not ls: continue
+       age = (now - datetime.datetime.fromtimestamp(ls/1000, datetime.timezone.utc)).total_seconds()/3600
+       print(f\"{d.get('ieeeAddr')} {d.get('type'):<11} {age:8.1f} h\")
+   "
+   ```
+4. **A `networkmap`** for routers — but note the §4f caveat: CC2652-class
+   routers run with `availability:false`, so `+/availability` and
+   `bridge/health` will not report them dropping; the networkmap link check and
+   `lastSeen` are the reliable signals there.
+
+> Rule of thumb: `state.json` answers *"what was this device's last reported
+> state?"* — never *"is it still there?"*
+
+---
+
 ## 3) Blueprints
 
 - Source of truth: `kubernetes/apps/home-automation/zigbee2mqtt/app/helmrelease.yaml`
-- Z2M runtime state (not in git, lives in PVC): `/data/database.db`, `/data/state.json`, `/data/coordinator_backup.json`, `/data/configuration.yaml`
+- Z2M runtime state (not in git, lives in PVC): `/data/database.db`, `/data/state.json` (**`last_seen` here is NOT a liveness sensor — see §2b**), `/data/coordinator_backup.json`, `/data/configuration.yaml`
 - Device definitions (upstream): [zigbee-herdsman-converters `src/devices/smlight.ts`](https://github.com/Koenkk/zigbee-herdsman-converters/blob/master/src/devices/smlight.ts) — covers SLZB-06, SLZB-06P7, SLZB-06P10, SLZB-06M, etc.
 
 `/data/database.db` is a line-delimited JSON file. One device per line; each line is a complete JSON object with at least: `id`, `type` (`Coordinator|Router|EndDevice|Unknown`), `ieeeAddr`, `nwkAddr`, `epList`, `endpoints`, `interviewCompleted`, `interviewState`, plus optional `manufId`, `manufName`, `modelId`, `powerSource`, `lastSeen`.
@@ -613,6 +676,7 @@ If the DB is corrupted beyond surgical repair: restore from the daily backup of 
 
 ## Version History
 
+- `2026.09.22`: new §2b — **`/data/state.json` `last_seen` freezes and is not a liveness sensor**, with the 2026-09-22 measurement (24/24 devices stale >12 h in `state.json` while 17/24 were fresher than 1 h in `database.db`, and one sensor reading 23.8 h stale while publishing to MQTT in the same second). Records what IS a liveness signal instead — `bridge/devices` over MQTT (the correct source), `bridge/health` counters, `database.db` `lastSeen`, and the networkmap for routers — plus the `availability:false` caveat for CC2652-class routers. Cross-referenced from the §3 blueprint file list. Closes the knowledge gap behind `3dd85971`, which taught `health-check.sh` to report this check as *unmeasured* rather than emit "24 devices dead" during a healthy mesh.
 - `2026.08.08`: the tub-room SLZB-06 was **recovered, not replaced** — correcting this SOP's biggest factual error. (1) §4f rung 5 added: after the 4-rung ladder failed on 2026-07-14, an SLZB-OS core update (v3.3.3.dev7 → v3.3.5.dev1) plus a plain "Router Reconnect" revived the unit on 2026-08-08 — **always retry the ladder after a firmware change before condemning hardware**; the §4f worked example's "physical replacement required" conclusion is retracted. (2) New §8 Diagnose Example 4: the **zeroed-IEEE rejoin** (`0x000000020000001c` / `ti.router` / `TexasInstruments`) that makes one physical device appear as two Z2M records, how to tie a record to a box via `software_build_id` ↔ `/ha_info` `zb_version`, plus two corrections — `zb_channel: 1` is an SLZB-OS reporting quirk and **not** evidence of NV corruption (the healthy coordinator reports it too), and SMLIGHT-integration HA entities are HTTP-polled and independent of the Z2M record. (3) §8 Diagnose Example 2 rewritten: the old "clean up ghosts with `device/remove` (soft, not force)" was **unachievable** — a ghost can never answer `mgmtLeaveRsp`, so soft always fails; documented the correct soft-then-`force` sequence gated on a zero-link/zero-route `networkmap raw`, why `block`/`clear_cache` stay off, and the 2026-08-08 removal of ghost `0x00124b0031dffd19` (66d stale, 27→26 devices, no cascade). (4) §6 Test 2 repointed off the removed IEEE onto the live record and rewritten to assert routability (type/interview/supported/enabled) against a known-identity set rather than a bare model-string match, with an explicit note that it proves the *record*, not mesh liveness. (5) New §8 Diagnose Example 3: `linkquality` is a **last-hop** measurement, how to read a `networkmap raw` neighbour table (relationship codes 0/1/2/3), the identical-LQI-means-shared-relay fingerprint, and the warning that end devices do not roam (a power-cycle is a one-way parent lottery) — this misreading nearly produced a wrong diagnosis. Also refreshed the §1 scope and §2 Overview to the current 26-record / 4-router mesh and marked the §4d worked-example IEEE as historical.
 - `2026.07.18`: fix the §8 ghost-scan liveness probe. It used `/api2?action=4&cmd=0`, which per SMLIGHT's `pysmlight` is `CMD_ZB_ROUTER_RECON` (a router reconnect), so it re-commissioned the router radio on every call instead of just probing. Switched to the side-effect-free `GET /ha_info`. (Found while wiring the SLZB `/api2` codes into the `zigbeectl` CLI; full endpoint map lives in that repo's `docs/slzb-api.md`.)
 - `2026.07.14`: add §4f (SLZB router present on LAN but dropped from the mesh — remote radio-reboot + rejoin ladder) and matching troubleshooting row. Distinguishes this failure (stale `lastSeen` + networkmap `failed:[lqi,routingTable]` + core reachable/`ethernet:true`) from the §4d interview bug and from a real power/PoE outage. Captures the 2026-07-14 tub-room recovery: a radio-only "Zigbee Restart" did not rejoin the mesh, requiring escalation.

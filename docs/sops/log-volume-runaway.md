@@ -1,8 +1,8 @@
 # SOP: Log-Volume Runaway
 
-> Description: How to attribute a sudden jump in Elasticsearch log ingest to a namespace, pod and single log line; how to tell a mislabelled deprecation stream from a real error stream; how to price it against the 14-day DLM window; and the ordered remediation menu (fix at source → change the probe path → drop at the collector, last resort).
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Description: How to attribute a sudden jump in Elasticsearch ingest to a namespace, pod and single log line; how to tell a mislabelled deprecation stream from a real error stream; how to price it against the 14-day DLM window; and the ordered remediation menu (fix at source → change the probe path → drop at the collector, last resort). Covers **both** runaway shapes: a LOG-volume runaway (§1–§4) and a METRICS-cardinality runaway (§4b), which is the one currently dominating this cluster's Elasticsearch disk.
+> Version: `2026.09.22`
+> Last Updated: `2026-09-22`
 > Owner: `cberg-agent` / platform operator
 
 ---
@@ -19,8 +19,13 @@ This SOP exists because the first real instance took ~15 ad-hoc Elasticsearch
 queries to characterise from scratch. Section 8 is those queries, so the next
 one takes five minutes.
 
-- Scope: the `logs-generic-default` OTel data stream in the `monitoring`
-  namespace; any workload shipping container logs through `edot-collector`.
+- Scope: **both** OTel data streams in the `monitoring` namespace —
+  `logs-generic-default` (§1–§4, any workload shipping container logs through
+  `edot-collector`) and `metrics-generic.otel-default` (**§4b**, any workload
+  or receiver emitting metrics through it). The two have the same *shape* — one
+  producer dominating the bill — but different attribution ladders and
+  different remedies, because a metrics runaway is driven by **cardinality**
+  (distinct time series), not by line count.
 - Prerequisites: `mise exec --` shell in `/Users/mu/code/cberg-home-nextgen`;
   `kubectl` access; the `elasticsearch-es-elastic-user` secret.
 - Out of scope: Elasticsearch cluster health / TSDB rollover stalls
@@ -173,6 +178,226 @@ process answers" trap in §7 for whoever investigates next.
 Run §6. Then check whether the *audit assertion* that surfaced this is itself
 calibrated against the new baseline — a runaway often reveals that a threshold
 was never reachable (see §7, "the assertion could never clear").
+
+---
+
+## 4b) Metrics-cardinality runaway — different stream, different remedy
+
+Everything above attributes **log lines**. It does not work on the metrics
+stream, and reaching for it wastes the first hour. A metrics runaway is driven
+by **cardinality** — the number of distinct time series — not by verbosity, so
+the unit of blame is a *label*, not a log line.
+
+**This is the runaway currently dominating this cluster's Elasticsearch disk.**
+
+### The shape (measured 2026-09-22)
+
+| Signal | Value |
+|---|---|
+| ES data volume | **64.1 GB used of 83.1 GB — 77%** (`_cat/allocation`) |
+| `metrics-generic.otel-default` | **50.68 GiB**, 15 backing indices, **1.48 billion docs** |
+| `logs-generic-default` | **13.34 GiB**, 15 backing indices, 54.4 M docs |
+| Metrics share of all index bytes | **79%** |
+| Top 15 indices by store | **all 15 are `.ds-metrics-generic.otel-default-*`**, ~3.4–4.2 GB each |
+| Largest logs backing index | ~1.02 GB — under a quarter of a single metrics day |
+| Growth | **+1.47 GiB/day** (`deriv(kubelet_volume_stats_used_bytes[7d])*86400`) |
+| Retention (both streams) | DSL `data_retention: 14d`, `effective_retention: 14d` |
+| `index_mode` | metrics = **`time_series` (TSDB)**; logs = `standard` |
+
+> **Do not confuse the two 79%/77% numbers.** *Disk* is at 77%; *79%* is the
+> metrics stream's share of index bytes. They are different denominators and
+> they drift apart — always say which one you mean, and re-measure rather than
+> quoting this table, which is a point-in-time snapshot.
+
+Note the docs-per-byte tell: metrics carry ~29 M docs per GiB against ~4 M for
+logs. Metrics documents are *tiny and innumerable*. That is the fingerprint of
+a cardinality problem, and it is why "find the noisy log line" finds nothing.
+
+### Step M1 — Confirm and size it
+
+Use the §8 Step 0 port-forward and credential, then:
+
+```bash
+PW=$(cat /tmp/.espw)
+# Is the pressure on disk real?
+curl -sk -u "elastic:$PW" "https://localhost:9299/_cat/allocation?v&h=disk.used,disk.avail,disk.total,disk.percent,node"
+
+# Which indices actually hold the bytes? If the top of this list is one
+# data stream repeated once per day, you have a stream-level runaway.
+curl -sk -u "elastic:$PW" \
+  "https://localhost:9299/_cat/indices?v&bytes=b&s=store.size:desc&h=index,docs.count,store.size" | head -20
+```
+
+Roll the per-day backing indices up per stream so the comparison is honest
+(15 indices of 3 GB each is a very different story from one 45 GB index):
+
+```bash
+curl -sk -u "elastic:$PW" "https://localhost:9299/_cat/indices?bytes=b&h=index,docs.count,store.size&format=json" \
+ > /tmp/esidx.json
+python3 -c "
+import json, re, collections
+agg = collections.defaultdict(lambda: [0,0,0])
+for i in json.load(open('/tmp/esidx.json')):
+    m = re.match(r'\.ds-(.+?)-\d{4}\.\d{2}\.\d{2}-\d+\$', i['index'])
+    k = m.group(1) if m else i['index']
+    agg[k][0] += 1
+    agg[k][1] += int(i['docs.count'] or 0)
+    agg[k][2] += int(i['store.size'] or 0)
+for k, v in sorted(agg.items(), key=lambda x: -x[1][2])[:10]:
+    print(f'{v[2]/2**30:8.2f} GiB  idx={v[0]:3d}  docs={v[1]:>14,}  {k}')
+"
+```
+
+### Step M2 — Attribute: receiver → namespace → service
+
+The logs ladder is namespace → pod → line. The metrics ladder starts one level
+higher, at the **receiver**, because the producer is usually a scraper rather
+than the app itself. All three aggregations run in one pass:
+
+```bash
+curl -sk -u "elastic:$PW" "https://localhost:9299/metrics-generic.otel-default/_search?size=0" \
+  -H 'Content-Type: application/json' -d '{
+   "aggs":{
+     "by_scope":{"terms":{"field":"scope.name","size":15}},
+     "by_ns":{"terms":{"field":"resource.attributes.k8s.namespace.name","size":15}},
+     "by_svc":{"terms":{"field":"resource.attributes.service.name","size":15}}
+   }}' | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for a in ('by_scope','by_ns','by_svc'):
+    print('---', a)
+    for b in d['aggregations'][a]['buckets']:
+        print(f\"  {b['doc_count']:>14,}  {b['key']}\")
+"
+```
+
+Measured 2026-09-22 — this is what a localised runaway looks like:
+
+| Dimension | Top buckets (doc count) |
+|---|---|
+| `scope.name` (receiver) | `prometheusreceiver` **486.6 M**, `kubeletstatsreceiver` 370.9 M, `k8sclusterreceiver` 340.4 M, `hostmetrics/disk` 151.7 M, `hostmetrics/cpu` 107.7 M |
+| `k8s.namespace.name` | `monitoring` 476.2 M, **`network` 408.0 M**, `kube-system` 135.6 M |
+| `service.name` | **`envoy` 360.5 M** — the single largest producer — then `node-exporter` 116.8 M |
+
+That reads as: the **Envoy Gateway proxies in namespace `network`, scraped by
+the Prometheus receiver**, are the dominant source. One `service.name` bucket
+holding ~24% of 1.48 billion documents *is* the finding.
+
+### Step M3 — Separate the TWO multipliers (do not skip this)
+
+A metrics step change almost always has two independent causes multiplied
+together, and fixing the wrong one achieves nothing:
+
+1. **Replica count** — more pods emitting the same series set.
+2. **Per-pod emission** — each pod emitting more series than it used to.
+
+Finding `F-4221190f` records the reference case: `envoy-internal` went
+**1 → 3 replicas** *and* **703 k → 6.0 M points/pod/day** in the same window.
+Scaling back the replicas would have cut a third of a problem whose real driver
+was a ~8.5× rise in per-pod emission. **Always divide by the pod count** before
+concluding anything:
+
+```bash
+# points/pod/day — the number that actually moved
+curl -sk -u "elastic:$PW" "https://localhost:9299/metrics-generic.otel-default/_search?size=0" \
+  -H 'Content-Type: application/json' -d '{
+   "query":{"bool":{"filter":[
+     {"term":{"resource.attributes.service.name":"<service>"}},
+     {"range":{"@timestamp":{"gte":"now-1d"}}}]}},
+   "aggs":{"pods":{"terms":{"field":"resource.attributes.k8s.pod.name","size":20}}}}' \
+  | python3 -c "
+import sys, json
+for b in json.load(sys.stdin)['aggregations']['pods']['buckets']:
+    print(f\"  {b['doc_count']:>12,}  {b['key']}\")
+"
+```
+
+Compare the **per-pod** figures across pod generations. Flat per-pod with more
+pods = a scaling event (usually legitimate). Rising per-pod = a cardinality
+regression, which is the real defect.
+
+### Step M4 — Find the unbounded label
+
+This stream is **TSDB** (`index_mode: time_series`), so every distinct
+combination of *dimension* fields is a separate time series. The index settings
+name the dimensions explicitly:
+
+```bash
+curl -sk -u "elastic:$PW" \
+  "https://localhost:9299/.ds-metrics-generic.otel-default-<YYYY.MM.DD>-<NNNNNN>/_settings?filter_path=**.routing_path"
+```
+
+**The trap: a label with no ceiling.** A histogram labelled by user agent,
+request path, response-code-with-detail, or any caller-supplied string has
+*unbounded* cardinality — it grows with traffic diversity forever, and no
+retention setting bounds it. A single such label on a histogram (which is
+already many series per label set, one per bucket) is the classic way a stream
+triples in a week. Check any suspicious metric's label set for a field whose
+distinct-value count is not obviously finite:
+
+```bash
+curl -sk -u "elastic:$PW" "https://localhost:9299/metrics-generic.otel-default/_search?size=0" \
+  -H 'Content-Type: application/json' -d '{
+   "aggs":{"c":{"cardinality":{"field":"<attributes.suspect_label>"}}}}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['aggregations']['c'])"
+```
+
+### Step M5 — Price it
+
+Same arithmetic as §4 Step 5, different inputs: the bill is
+`bytes/day × 14`, because DSL keeps every one of those days. At the measured
+~3.6 GiB/day for this stream, **each day of retention costs ~3.6 GiB**, and the
+stream's steady-state footprint is ~50 GiB.
+
+> **Check `prefer_ilm` before blaming retention.** On 2026-05-29 both OTel
+> streams carried `index.lifecycle.prefer_ilm: true` under the Elastic built-in
+> `logs`/`metrics` ILM policies, which have **no delete phase** — so the DSL
+> `data_retention` was silently ignored and indices accumulated for ~48 days.
+> If the index count exceeds the retention window in days, that is the cause,
+> not cardinality. See `docs/sops/longhorn.md` and
+> `kubernetes/apps/monitoring/elasticsearch/app/otel-ilm-job.yaml`.
+
+### Step M6 — Remediate, IN THIS ORDER
+
+The order matters for the same reason as §4 Step 6: each later option destroys
+more information than the one before it.
+
+1. **Reduce what is emitted, at the source (best).** Drop the unbounded label,
+   or stop emitting the offending histogram. For the Envoy case this means the
+   proxy's telemetry/stats configuration — **verify the exact key against the
+   `EnvoyProxy` CRD in use before changing it**; do not copy a stats-matcher
+   snippet from upstream docs unverified. This is the only option that fixes
+   cardinality rather than hiding it.
+2. **Filter/transform at the collector.** An `edot-collector` processor that
+   drops the metric or strips the high-cardinality attribute
+   (`kubernetes/apps/monitoring/edot-collector/`). Cheaper to land than a
+   source change and fully reversible — but it makes the signal invisible
+   without making the producer correct, so record it with
+   `runbooks/policy-cli.py risk` and state what is now unobservable.
+3. **Cut retention — LAST, and it is not a fix.** Lowering the 14 d DSL window
+   shrinks the disk immediately and proportionally, which makes it seductive
+   during a disk alert. It destroys historical comparison — including the
+   ability to prove whether the cardinality change is still getting worse — and
+   the stream resumes growing at the same rate the next day. Use it only to buy
+   time for option 1, and say so explicitly when you do.
+
+**Never "fix" this by deleting backing indices by hand.** On a TSDB stream the
+backing indices are time-bounded and managed by DSL; deleting them out from
+under the lifecycle leaves gaps that look like ingestion failure to every later
+investigation.
+
+### Detector gap — there is still no alert on this
+
+**Nothing alerts on metrics-stream growth.** The 2026-09-06 step change was
+found *by hand* on 2026-09-13, a week later, and only because someone looked at
+disk. The logs side has `health-check.sh` §34; the metrics side has no
+equivalent assertion and no Prometheus rule. Until one exists, this section is
+reached only by a human noticing ES disk — treat that as a known blind spot
+rather than assuming silence means health. Tracked as `F-4221190f`.
+
+> When adding such a rule, pair it with an `absent()` guard: a rule matching no
+> series sits at `state=inactive` forever and reports nothing, which is
+> indistinguishable from "healthy" on a dashboard.
 
 ---
 
@@ -576,4 +801,5 @@ automatically; `strategy: Recreate` means there is a brief gap either way.
 
 | Version | Date | Change |
 |---------|------|--------|
+| `2026.09.22` | 2026-09-22 | **Scope widened to metrics.** The SOP covered only `logs-generic-default`, so the runaway actually consuming the ES filesystem — a *metrics-cardinality* runaway — had no procedure, and every §8 query hardcoded the logs stream. Added **§4b** with the measured 2026-09-22 state (metrics = 50.68 GiB / 79% of index bytes vs logs 13.34 GiB; top 15 indices all `.ds-metrics-generic.otel-default-*`; disk 77%; +1.47 GiB/day), the receiver → namespace → service attribution ladder (localising it to Envoy Gateway in `network` via the Prometheus receiver), the two-multiplier rule (replica count vs per-pod emission), the unbounded-label/TSDB cardinality trap, the `prefer_ilm` retention caveat, the remediation order (source → collector → retention last) and the standing detector gap. Updated the §1 scope and description accordingly. |
 | `2026.08.18` | 2026-08-18 | Initial SOP, written from the CakePHP probe-storm incident (58% of cluster ingest from one app's health probes). Diagnose Examples are the ~15 queries that characterised it. |

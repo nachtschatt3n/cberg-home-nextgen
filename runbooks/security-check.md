@@ -1058,7 +1058,12 @@ if not admin_events:
 
 **Severity:**
 - 🔴 Critical if IDS/IPS `threat` classification event detected
-- 🔴 Critical if unadopted device found on Trusted (VLAN 1) or Servers (VLAN 10) network
+- 🔴 Critical if unadopted device found on Trusted (VLAN 1) or k8s-network (VLAN 55) network
+  - (This rule previously named "Servers (VLAN 10)". That VLAN — 192.168.31.0/24 —
+    was retired on 2026-06-07 and folded into VLAN 55, so that limb of the
+    assertion was structurally dead and could never fire. VLAN 55 is the network
+    that now carries the cluster nodes *and* the NAS at 192.168.55.240, so an
+    unadopted device there is the finding the old rule was reaching for.)
 - 🟡 Warning if new device on IoT VLAN not recognised
 - 🟡 Warning if repeated firewall denies from same external IP (active scanner)
 - 🟡 Warning if admin login from unexpected IP or time

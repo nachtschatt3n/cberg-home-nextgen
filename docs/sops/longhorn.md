@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.09.20`
-> Last Updated: `2026-09-20`
+> Version: `2026.09.22`
+> Last Updated: `2026-09-22`
 > Owner: `Platform`
 
 ---
@@ -150,6 +150,42 @@ deletion, anything needing specific Longhorn settings.
 **PV naming:** human-readable, and the **same identifier everywhere** — the
 Longhorn `Volume`, the `PV`, the PVC's `volumeName`, the PV's `volumeHandle`
 and the PVC name are all `{app}-{purpose}`.
+
+### Known alias — OpenClaw: PV/PVC `openclaw-data`, Longhorn Volume `clawd-bot-data`
+
+**One volume in this cluster breaks the one-name rule, and a DR lookup keyed on
+the PV name will dead-end on it.** Verified live 2026-09-22:
+
+| Object | Name |
+|---|---|
+| PVC | `ai/openclaw-data` |
+| PV | `openclaw-data` (StorageClass `longhorn-static`, reclaim `Retain`) |
+| PV `volumeHandle` | **`clawd-bot-data`** |
+| Longhorn `Volume` CR | **`clawd-bot-data`** (namespace `storage`) |
+
+So the Kubernetes side says `openclaw-data` and the **Longhorn side says
+`clawd-bot-data`** — and the Longhorn UI, the backup list, and every
+restore procedure key on the Longhorn/PV-handle name. Searching Longhorn for
+`openclaw-data` returns nothing; the backups are filed under `clawd-bot-data`.
+
+```bash
+# The lookup that resolves the alias in either direction
+kubectl get pv openclaw-data -o jsonpath='{.spec.csi.volumeHandle}{"\n"}'        # -> clawd-bot-data
+kubectl get volumes.longhorn.io -n storage clawd-bot-data \
+  -o jsonpath='{.status.kubernetesStatus.namespace}/{.status.kubernetesStatus.pvcName}{"\n"}'  # -> ai/openclaw-data
+```
+
+**If you are restoring OpenClaw at 02:00, look for `clawd-bot-data`.** It is
+backed up normally (attached, in the `default` recurring-job group,
+`lastBackupAt` current) — the defect is purely the name mismatch.
+
+**Do not "fix" this as routine work.** A Longhorn volume cannot be renamed in
+place: closing it means restoring the latest `clawd-bot-data` backup into a new
+volume named `openclaw-data` (or renaming the PV/PVC to `clawd-bot-data`), with
+OpenClaw scaled to 0, in an **attended window**, subject to the RWO
+multi-attach rules. That is an operator decision, tracked as `F-1d47c5d1` —
+not something to attempt opportunistically. Until then, this alias is the
+documented answer.
 
 ### Use `longhorn` (Dynamic, UUID PV) only when a name is impossible
 
@@ -429,6 +465,52 @@ Daily schedule (UTC):
 | 02:00 | `global-filesystem-trim`  | `fstrim` inside every volume — releases freed-but-still-allocated blocks back to Longhorn |
 | 02:30 | `global-snapshot-cleanup` | Deletes user-created snapshots that aren't kept by `retain` rules — picks up orphans the per-backup auto-cleanup misses |
 | 03:00 | `daily-backup-all-volumes`| Backs up all volumes to the CIFS target (`192.168.55.240/backups`), `retain: 7` |
+
+#### A DETACHED volume gets NO recurring backup — `allow-recurring-job-while-volume-detached=false`
+
+**This setting is `false` in this cluster** (verified live 2026-09-22:
+`kubectl get settings.longhorn.io -n storage
+allow-recurring-job-while-volume-detached -o jsonpath='{.value}'` → `false`,
+`status.applied: true`).
+
+**Consequence:** a volume that is **detached** at 03:00 is skipped by
+`daily-backup-all-volumes` entirely. It is not an error and nothing is logged
+against the volume — the job simply does not run for it, and its
+`status.lastBackupAt` **freezes at the last time it happened to be attached**.
+
+Measured 2026-09-22, the two detached volumes in the cluster both show exactly
+this — a `lastBackupAt` two days old while every attached volume backed up that
+morning:
+
+```bash
+# The two-column read that tells you whether a "stale backup" is real
+kubectl get volumes.longhorn.io -n storage \
+  -o custom-columns=NAME:.metadata.name,STATE:.status.state,LAST_BACKUP:.status.lastBackupAt \
+  --no-headers | awk '$2!="attached"'
+```
+
+**This is why a stale `lastBackupAt` on a detached volume is usually
+harmless**, and why `runbooks/health-check.sh` scopes its backup-staleness
+assertion to **attached** volumes. Do not "fix" a frozen `lastBackupAt` by
+flipping this setting: running recurring jobs against detached volumes attaches
+them on Longhorn's schedule, which is a much larger change than it looks.
+
+**The real risk it hides.** A volume *orphaned* by a migration — the app moved
+to a new PVC but the old one was never deleted — stays `Bound`, keeps consuming
+pool space, and **can never be backed up again** while it sits detached. It
+reads as "quiet", not as "unprotected". Note this is a different thing from the
+orphaned *engine/replica instances* reaped below: Longhorn's
+`orphanResourceAutoDeletion` does **not** reap orphaned **volumes**, so nothing
+cleans these up for you.
+
+**Post-migration checklist** — whenever you move an app to a new volume:
+
+1. Confirm the old volume is genuinely unused (no pod mounts its PVC).
+2. Take one final **manual** backup if the data still matters, *while it is
+   still attached* — once detached it cannot be backed up.
+3. Delete the PVC/PV/Volume, or deliberately accept it and record why.
+4. Re-check `kubectl get volumes.longhorn.io -n storage` for anything detached
+   that you did not expect.
 
 **Continuous, not scheduled — orphan reaping.** Longhorn also deletes orphaned
 resources on its own, governed by `orphanResourceAutoDeletion` (grace period

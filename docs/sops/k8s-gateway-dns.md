@@ -1,8 +1,8 @@
 # SOP: k8s-gateway Split-Horizon DNS (and the Gateway API CRD Incompatibility)
 
 > Description: Operating and troubleshooting the internal split-horizon DNS at 192.168.55.101 (CoreDNS k8s_gateway plugin), including the (RESOLVED on app 1.8.0) incompatibility with Gateway API CRDs that caused a full internal-DNS outage on 2026-08-15.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.09.22`
+> Last Updated: `2026-09-22`
 > Owner: `cberg-agent / operator`
 
 ---
@@ -37,7 +37,7 @@ mandatory restart-and-verify gate for future CRD/chart changes.
 | Setting | Value |
 |---------|-------|
 | Namespace | `network` |
-| Source of truth | `kubernetes/apps/network/internal/k8s-gateway/helmrelease.yaml` |
+| Source of truth | `kubernetes/apps/network/internal/k8s-gateway/helmrelease.yaml` **plus `ocirepository.yaml`** — the chart is pulled from an `OCIRepository` referenced by `chartRef`, not from a `HelmRepository`. The HTTP `HelmRepository` was deleted in `43a3b3e4`, so a `sourceRef`-shaped search finds nothing |
 | Chart / app | `k8s-gateway` 3.7.2 / k8s_gateway plugin 1.8.0 (upstream moved orgs: ori-edge → k8s-gateway; image `ghcr.io/k8s-gateway/k8s_gateway`, tag pinned in HR because the chart default lags) |
 | LB IP | 192.168.55.101 (lbipam, UDP 53) |
 | Watched resources | `["Ingress", "Service", "HTTPRoute"]` — all three, since EG-migration phase 1. Verify live, not from git: `kubectl get cm -n network k8s-gateway -o jsonpath='{.data.Corefile}'` must show `resources Ingress Service HTTPRoute`. The `Ingress` informer is now **vestigial** (zero Ingress objects cluster-wide since 2026-09-07) but is kept so the informer set does not change — the §8 restart-and-verify gate applies to ANY edit of this list |
@@ -130,6 +130,60 @@ mise exec -- dig +short @192.168.55.101 <internal-host>.${SECRET_DOMAIN} A   # e
 # Through the household resolver
 mise exec -- dig +short @192.168.55.5 <internal-host>.${SECRET_DOMAIN} A
 ```
+
+### Per-pod drill-down — the backends listen on UDP **1053**, not 53
+
+When the VIP answers inconsistently you need to know *which backend* is wrong.
+Three traps make that harder than it looks, so read all three before probing.
+
+**Trap 1 — `dig @<podIP>` without `-p 1053` ALWAYS says "connection refused".**
+The container listens on **UDP 1053**; only the *Service* maps 53 →
+`dns-udp`/1053. Nothing listens on port 53 inside the pod, so the default
+`dig` port produces a hard refusal on a perfectly healthy pod. **That is a port
+artifact, not an outage** — do not escalate on it. This is easy to misread
+because the §2 "Upstream retry policy" row describes a genuine
+ICMP-port-unreachable as a real failure mode. On 2026-09-11 six ad-hoc probe
+pods produced exactly this false outage signal *during a change to cluster-wide
+DNS*, including against a pod that had been Ready for 80 seconds.
+
+**Trap 2 — `kubectl port-forward` cannot be used here at all.** It is
+TCP-only and refuses the port outright (verified 2026-09-22):
+
+```
+error: UDP protocol is not supported for 1053
+```
+
+So there is no port-forward workaround; a forwarded socket that *appears* to
+refuse the connection is the forward failing, not the DNS server.
+
+**Trap 3 — pod IPs are not reachable from the LAN.** The pod CIDR
+(`10.69.0.0/16`) has no route from the Mac (verified 2026-09-22: `dig` to a pod
+IP times out, and `netstat -rn` shows no route). The per-pod probe therefore
+has to run **inside** the cluster; from a workstation you can only use the VIP.
+
+```bash
+# 1. List the backends (pod name + pod IP)
+mise exec -- kubectl get pods -n network -l app.kubernetes.io/name=k8s-gateway \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.podIP}{"\n"}{end}'
+
+# 2. Ask ONE backend directly — note BOTH the -p 1053 and that this runs in-cluster.
+#    --rm matters: earlier ad-hoc probe pods were left behind in Failed state.
+mise exec -- kubectl run dnsprobe --rm -i --restart=Never -n network \
+  --image=alpine/bind-tools -- \
+  dig +short -p 1053 @<podIP> <internal-host>.${SECRET_DOMAIN} A
+
+# 3. Confirm the port the container actually publishes, rather than assuming
+mise exec -- kubectl get deploy -n network k8s-gateway \
+  -o jsonpath='{.spec.template.spec.containers[0].ports}{"\n"}'   # dns-udp 1053/UDP
+mise exec -- kubectl get svc -n network k8s-gateway \
+  -o jsonpath='{.spec.ports}{"\n"}'                               # 53 -> targetPort dns-udp
+```
+
+**Reading the result.** A backend that answers on `-p 1053` with the right VIP
+is healthy. A backend that returns an **empty answer** on port 1053 for a host
+that has an HTTPRoute is the real failure (the plugin failing closed while
+CoreDNS stays up — see §7 and §8); a **refusal on port 53** is Trap 1 and means
+nothing.
 
 ---
 
