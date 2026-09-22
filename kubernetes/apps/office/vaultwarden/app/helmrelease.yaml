@@ -28,6 +28,13 @@ spec:
     controllerType: deployment
     controllers:
       main:
+        # ADMIN_TOKEN (and the SMTP creds) are env-from-Secret; the kubelet
+        # never re-reads a changed Secret into a running pod's env, so a
+        # secret rotation is inert until the pod rolls. Reloader (kube-system)
+        # watches the referenced Secret and restarts the Deployment for us —
+        # the GitOps-safe equivalent of `kubectl rollout restart`.
+        annotations:
+          reloader.stakater.com/auto: "true"
         containers:
           main:
             image:
