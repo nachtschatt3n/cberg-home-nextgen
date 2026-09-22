@@ -1186,6 +1186,745 @@ _all_cleanup() {
 }
 trap _all_cleanup EXIT
 
+# ---------------------------------------------------------------------------
+# Zigbee availability via retained zigbee2mqtt/+/availability (F-cd07827d)
+#
+# state.json last_seen freezes (saturation control in Section 22), so the
+# staleness detector has had a working measurement path it never used: Z2M's
+# availability feature (enabled in configuration.yaml) publishes a RETAINED
+# zigbee2mqtt/<device>/availability topic per device, and an "offline" there
+# is the bridge's own, current liveness verdict. Measured 2026-09-22: 25
+# retained topics against 24 non-coordinator registry devices -- 6 offline by
+# a valid signal, 1 topic ("Entry Door") with no backing device at all.
+#
+# Excluded by SOP zigbee2mqtt.md §4f: a CC2652-class router (model ti.router)
+# fails Z2M's ZDO availability pings by design, so its topic cannot say it
+# dropped -- that needs a networkmap. It is listed as UNMEASURABLE, never
+# scored either way.
+# ---------------------------------------------------------------------------
+
+# z2m_availability_fetch: every retained zigbee2mqtt/<device>/availability
+# topic as "<topic> <payload>" (mosquitto_sub -v), or nothing when the broker
+# did not answer. Same in-pod anonymous-localhost path as z2m_registry_fetch.
+z2m_availability_fetch() {
+    kubectl exec -n home-automation deployment/mosquitto -c app -- \
+        mosquitto_sub -h 127.0.0.1 -p 1883 -t 'zigbee2mqtt/+/availability' -v -W 8 2>/dev/null
+}
+
+# z2m_classify_availability AVAIL_LINES REGISTRY_JSON
+#   One TSV line per topic (and per registry device without a topic):
+#     cls \t friendly \t ieee \t type \t power_source \t state
+#   cls: OFFLINE | ONLINE | UNPARSED   enabled registry member, by its topic
+#        UNMEASURABLE                  ti.router (SOP §4f), state not trusted
+#        DISABLED | COORDINATOR        listed, never scored
+#        GHOST                         retained topic with NO registry device
+#        MISSING                       registry device with NO retained topic
+#        UNKNOWN                       registry unavailable/unparseable
+z2m_classify_availability() {
+    local avail="$1" regfile
+    regfile=$(mktemp)
+    printf '%s' "${2:-}" > "$regfile"
+    python3 - "$avail" "$regfile" <<'PYEOF'
+import sys, json, re
+avail, regpath = sys.argv[1], sys.argv[2]
+reg = None
+try:
+    raw = open(regpath).read()
+    devs = json.loads(raw) if raw.strip() else None
+    if isinstance(devs, list):
+        reg = {}
+        for d in devs:
+            if isinstance(d, dict) and d.get("friendly_name"):
+                reg[str(d["friendly_name"])] = d
+except Exception:
+    reg = None
+topics = {}
+for line in avail.splitlines():
+    m = re.match(r"^zigbee2mqtt/(.+)/availability\s+(.*)$", line.strip())
+    if not m:
+        continue
+    name, payload = m.group(1), m.group(2).strip()
+    state = payload
+    try:
+        j = json.loads(payload)
+        if isinstance(j, dict):
+            state = str(j.get("state", ""))
+    except Exception:
+        pass
+    topics[name] = state.strip().lower()
+if reg is None:
+    for name, state in sorted(topics.items()):
+        print("\t".join(["UNKNOWN", name, "-", "-", "-", state]))
+    if not topics:
+        print("\t".join(["UNKNOWN", "-", "-", "-", "-", "-"]))
+    sys.exit(0)
+def row(cls, name, d, state):
+    print("\t".join([cls, name, str(d.get("ieee_address") or "-"), str(d.get("type") or "-"),
+                     str(d.get("power_source") or "-"), state]))
+seen = set()
+for name, state in sorted(topics.items()):
+    d = reg.get(name)
+    if d is None:
+        print("\t".join(["GHOST", name, "-", "-", "-", state]))
+        continue
+    seen.add(name)
+    model = str(d.get("model_id") or (d.get("definition") or {}).get("model") or "")
+    if d.get("type") == "Coordinator":
+        row("COORDINATOR", name, d, state)
+    elif d.get("disabled") is True:
+        row("DISABLED", name, d, state)
+    elif model == "ti.router":
+        row("UNMEASURABLE", name, d, state)
+    elif state == "offline":
+        row("OFFLINE", name, d, state)
+    elif state == "online":
+        row("ONLINE", name, d, state)
+    else:
+        row("UNPARSED", name, d, state)
+for name, d in sorted(reg.items()):
+    if name in seen or d.get("type") == "Coordinator" or d.get("disabled") is True:
+        continue
+    row("MISSING", name, d, "-")
+PYEOF
+    rm -f "$regfile"
+}
+
+# z2m_score_availability CLASS_LINES  (output of z2m_classify_availability)
+#   OFFLINE -> warning + ONE minor issue naming each device (the treatment the
+#   registry path gives a LIVE dark device); GHOST -> info naming the topic;
+#   UNMEASURABLE -> printed with the SOP reference; UNKNOWN or no topic at all
+#   -> recorded as a measurement that did not run.
+z2m_score_availability() {
+    local lines="$1" cls name ieee typ power state tag
+    local offline_n=0 online_n=0 ghost_n=0 unmeas_n=0 unknown_n=0 missing_n=0 topic_n=0
+    local offline_names="" ghost_names="" missing_names=""
+    [ -z "$lines" ] && lines=$'UNKNOWN\t-\t-\t-\t-\t-'
+    while IFS=$'\t' read -r cls name ieee typ power state; do
+        [ -n "$cls" ] || continue
+        case "$cls" in
+            OFFLINE)
+                offline_n=$((offline_n + 1)); topic_n=$((topic_n + 1))
+                offline_names="${offline_names}${offline_names:+, }${name} [${ieee}] (${typ}, ${power})"
+                tag=$(_noise_tag "$name $ieee")
+                printf '    %s [%s]: OFFLINE by availability signal (%s, %s)%s\n' "$name" "$ieee" "$typ" "$power" "$tag" ;;
+            ONLINE)
+                online_n=$((online_n + 1)); topic_n=$((topic_n + 1)) ;;
+            GHOST)
+                ghost_n=$((ghost_n + 1)); topic_n=$((topic_n + 1))
+                ghost_names="${ghost_names}${ghost_names:+, }${name}"
+                printf '    %s: retained availability topic (%s) with NO device in bridge/devices -- stale retained ghost topic\n' "$name" "$state" ;;
+            UNMEASURABLE)
+                unmeas_n=$((unmeas_n + 1)); topic_n=$((topic_n + 1))
+                printf '    %s [%s]: topic says %s but a ti.router fails Z2M availability pings by design (SOP zigbee2mqtt.md §4f) -- not measurable here, needs a networkmap\n' "$name" "$ieee" "$state" ;;
+            DISABLED|COORDINATOR|UNPARSED)
+                topic_n=$((topic_n + 1))
+                printf '    %s [%s]: %s (%s)\n' "$name" "$ieee" "$cls" "$state" ;;
+            MISSING)
+                missing_n=$((missing_n + 1))
+                missing_names="${missing_names}${missing_names:+, }${name}" ;;
+            *)
+                unknown_n=$((unknown_n + 1)) ;;
+        esac
+    done <<< "$lines"
+    if [ "$unknown_n" -gt 0 ]; then
+        _record_unmeasured "zigbee-availability" \
+            "bridge/devices not received; $unknown_n retained availability topic(s) could not be matched to devices"
+        log_warning "Zigbee availability: registry not received -- $unknown_n topic(s) unclassified"
+        return 0
+    fi
+    if [ "$topic_n" -eq 0 ]; then
+        _record_unmeasured "zigbee-availability" \
+            "no retained zigbee2mqtt/+/availability topic received from the broker"
+        log_warning "Zigbee availability: no retained availability topics received -- not measured"
+        return 0
+    fi
+    echo "    topics: $topic_n (online $online_n, offline $offline_n, ghost $ghost_n, unmeasurable $unmeas_n); registry devices without a topic: $missing_n"
+    if [ "$offline_n" -gt 0 ]; then
+        log_warning "Zigbee devices OFFLINE by availability signal: $offline_n -- $offline_names"
+        add_minor_issue "Zigbee devices offline (zigbee2mqtt availability): $offline_names"
+    fi
+    if [ "$ghost_n" -gt 0 ]; then
+        log_info "Zigbee retained availability topic(s) with no backing device: $ghost_names -- stale retained ghost topic(s) to clear"
+    fi
+    if [ "$missing_n" -gt 0 ]; then
+        log_info "Zigbee registry devices with no retained availability topic: $missing_names"
+    fi
+    if [ "$offline_n" -eq 0 ] && [ "$ghost_n" -eq 0 ]; then
+        log_success "Zigbee availability: all $online_n measurable devices online"
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Flux image-automation liveness by FRESHNESS (F-8d4645f6 residual)
+#
+# Section 20's push assertion keys on lastPushCommit being NON-NULL, which a
+# PAT expiry never disturbs: the commit of the last good push stays in status
+# forever while every later run silently fails to push, and Ready flaps back
+# to True/"repository up-to-date". So key on time and ancestry instead:
+#   - an unsuspended automation whose lastAutomationRunTime is older than
+#     FLUX_IUA_STALE_MULT x spec.interval is not being run at all  -> MAJOR
+#   - a lastPushCommit that is not an ancestor of origin/main was pushed
+#     somewhere main never received (rejected/rewritten push)      -> MAJOR
+# A suspended automation is listed, not scored: spec.suspend is the operator's
+# own decision (both absenty automations, 6194c9f1) and Ready=True says
+# nothing about it. Ancestry is still checked for a suspended one.
+# ---------------------------------------------------------------------------
+FLUX_IUA_STALE_MULT="${FLUX_IUA_STALE_MULT:-3}"
+
+# flux_iua_collect: one TSV line per ImageUpdateAutomation
+#   ns \t name \t suspended(0/1) \t interval_s \t run_age_s \t push_age_s \t push_commit \t push_branch
+# ("-" when a field is absent, "?" when a stamp is unparseable). Non-zero exit
+# when the listing could not be read or parsed.
+flux_iua_collect() {
+    kubectl get imageupdateautomation -A -o json 2>/dev/null | python3 -c '
+import sys, json, re
+from datetime import datetime, timezone
+try:
+    items = json.load(sys.stdin).get("items", [])
+except Exception:
+    sys.exit(1)
+now = datetime.now(timezone.utc)
+def secs(s):
+    m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", s or "")
+    if not m or not any(m.groups()):
+        return "-"
+    h, mi, se = (int(x or 0) for x in m.groups())
+    return str(h * 3600 + mi * 60 + se)
+def age(ts):
+    if not ts:
+        return "-"
+    try:
+        return str(int((now - datetime.fromisoformat(ts.replace("Z", "+00:00"))).total_seconds()))
+    except Exception:
+        return "?"
+for it in items:
+    m, sp, st = it["metadata"], it.get("spec") or {}, it.get("status") or {}
+    print("\t".join([m["namespace"], m["name"], "1" if sp.get("suspend") is True else "0",
+                     secs(sp.get("interval")), age(st.get("lastAutomationRunTime")), age(st.get("lastPushTime")),
+                     st.get("lastPushCommit") or "-",
+                     ((sp.get("git") or {}).get("push") or {}).get("branch") or "-"]))
+'
+}
+
+# flux_iua_ancestor COMMIT -> yes | no | missing | stale-clone
+#   "no" is only a verdict when the local origin/main IS the remote head;
+#   behind the remote it is merely unfetched, and a commit object the clone
+#   does not hold cannot be judged at all.
+flux_iua_ancestor() {
+    local c="$1" local_main remote_main
+    if ! git -C "$REPO_ROOT" cat-file -e "${c}^{commit}" 2>/dev/null; then
+        echo missing; return 0
+    fi
+    if git -C "$REPO_ROOT" merge-base --is-ancestor "$c" origin/main 2>/dev/null; then
+        echo yes; return 0
+    fi
+    local_main=$(git -C "$REPO_ROOT" rev-parse origin/main 2>/dev/null)
+    remote_main=$(git -C "$REPO_ROOT" ls-remote -q origin refs/heads/main 2>/dev/null | cut -c1-40)
+    if [ -n "$remote_main" ] && [ "$local_main" = "$remote_main" ]; then
+        echo no
+    else
+        echo stale-clone
+    fi
+}
+
+# flux_iua_score LINES  (output of flux_iua_collect)
+flux_iua_score() {
+    local lines="$1" ns name susp interval run_age push_age commit branch anc limit
+    local stale_n=0 orphan_n=0 susp_n=0 ok_n=0 stale_names="" orphan_names=""
+    if [ -z "$lines" ]; then
+        _record_unmeasured "flux-image-automation-freshness" \
+            "CRD present but 0 ImageUpdateAutomation objects listed -- there are automations in git, so this is an empty read, not an empty cluster"
+        log_warning "Image-automation freshness: 0 automations listed -- not measured"
+        return 0
+    fi
+    while IFS=$'\t' read -r ns name susp interval run_age push_age commit branch; do
+        [ -n "$ns" ] || continue
+        if [ "$susp" = "1" ]; then
+            susp_n=$((susp_n + 1))
+            printf '    %s/%s: SUSPENDED (spec.suspend) -- run liveness not asserted; last run %ss ago, last push %ss ago\n' "$ns" "$name" "$run_age" "$push_age"
+        elif [ "$run_age" = "-" ] || [ "$run_age" = "?" ]; then
+            stale_n=$((stale_n + 1))
+            stale_names="${stale_names}${stale_names:+, }${ns}/${name} (no lastAutomationRunTime)"
+            printf '    %s/%s: NEVER RAN (lastAutomationRunTime absent) while unsuspended\n' "$ns" "$name"
+        elif [ "$interval" = "-" ]; then
+            _record_unmeasured "flux-image-automation-freshness" "$ns/$name spec.interval unparseable -- staleness limit undefined"
+            printf '    %s/%s: interval unparseable -- freshness not judged\n' "$ns" "$name"
+        else
+            limit=$((interval * FLUX_IUA_STALE_MULT))
+            if [ "$run_age" -gt "$limit" ] 2>/dev/null; then
+                stale_n=$((stale_n + 1))
+                stale_names="${stale_names}${stale_names:+, }${ns}/${name} (last run ${run_age}s ago, interval ${interval}s)"
+                printf '    %s/%s: STALE -- last run %ss ago exceeds %sx interval (%ss)\n' "$ns" "$name" "$run_age" "$FLUX_IUA_STALE_MULT" "$limit"
+            else
+                ok_n=$((ok_n + 1))
+                printf '    %s/%s: ran %ss ago (interval %ss), last push %ss ago\n' "$ns" "$name" "$run_age" "$interval" "$push_age"
+            fi
+        fi
+        if [ "$commit" != "-" ]; then
+            anc=$(flux_iua_ancestor "$commit")
+            case "$anc" in
+                yes) printf '      lastPushCommit %s is on origin/main\n' "${commit:0:8}" ;;
+                no)
+                    orphan_n=$((orphan_n + 1))
+                    orphan_names="${orphan_names}${orphan_names:+, }${ns}/${name} (${commit:0:8} -> ${branch})"
+                    printf '      lastPushCommit %s is NOT an ancestor of origin/main (push branch %s)\n' "${commit:0:8}" "$branch" ;;
+                missing)
+                    _record_unmeasured "flux-image-automation-push-ancestry" "$ns/$name lastPushCommit ${commit:0:8} is not in the local clone -- fetch and re-run"
+                    printf '      lastPushCommit %s not in the local clone -- ancestry not judged\n' "${commit:0:8}" ;;
+                *)
+                    _record_unmeasured "flux-image-automation-push-ancestry" "$ns/$name lastPushCommit ${commit:0:8} not on the LOCAL origin/main, which is behind the remote -- fetch and re-run"
+                    printf '      lastPushCommit %s not on local origin/main, clone behind remote -- ancestry not judged\n' "${commit:0:8}" ;;
+            esac
+        fi
+    done <<< "$lines"
+    if [ "$stale_n" -gt 0 ]; then
+        log_warning "Flux image automations NOT RUNNING: $stale_n -- $stale_names"
+        add_major_issue "Flux image automation stale: $stale_names -- lastAutomationRunTime older than ${FLUX_IUA_STALE_MULT}x interval, the controller is not running it (a non-null lastPushCommit says nothing here; docs/sops/flux-image-automation-push-auth.md)"
+    fi
+    if [ "$orphan_n" -gt 0 ]; then
+        log_warning "Flux image-automation pushes NOT on origin/main: $orphan_n -- $orphan_names"
+        add_major_issue "Flux image automation pushed off main: $orphan_names -- lastPushCommit is not an ancestor of origin/main (rejected or rewritten push; docs/sops/flux-image-automation-push-auth.md)"
+    fi
+    if [ "$stale_n" -eq 0 ] && [ "$orphan_n" -eq 0 ]; then
+        log_success "Flux image automation freshness: $ok_n live, $susp_n suspended, every recorded push is on origin/main"
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Grafana datasource plugins + provisioned datasource health (F-f3bd72df 1)
+#
+# On the 2026-09-12 restart Grafana's plugin background installer killed the
+# bundled postgres/influxdb/loki/jaeger/mssql backends on the read-only
+# distroless rootfs: 15/72 dashboards read "no data" while the pod was Ready
+# and Section 30 counted it as up. Fixed by GF_PLUGINS_PREINSTALL_DISABLED
+# (631ea3fd) -- and a restart is never neutral without it, so the probe is
+# the guard: bundled datasource plugin count == 18 (measured 2026-09-22) and
+# every provisioned datasource answers /health with 200. Alertmanager is
+# skipped: its /health is 500 plugin.unavailable by design on this build.
+# ---------------------------------------------------------------------------
+GRAFANA_PORT="${GRAFANA_PORT:-3097}"
+GRAFANA_DS_PLUGINS_EXPECTED="${GRAFANA_DS_PLUGINS_EXPECTED:-18}"
+
+# grafana_probe_collect -> TSV lines
+#   PLUGINS \t <n>                      datasource plugins Grafana can see
+#   DS \t <uid> \t <type> \t <code> \t <message>
+#   ERR \t <reason>                     probe could not run
+# Admin credentials come from grafana-admin-secret and reach curl via a
+# mode-600 -K config file, never argv; the port-forward is torn down here.
+grafana_probe_collect() {
+    local user pass cfg body pf i base uid typ code msg n
+    user=$(kubectl get secret -n monitoring grafana-admin-secret -o jsonpath='{.data.admin-user}' 2>/dev/null | base64 -d 2>/dev/null)
+    pass=$(kubectl get secret -n monitoring grafana-admin-secret -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d 2>/dev/null)
+    if [ -z "$user" ] || [ -z "$pass" ]; then
+        printf 'ERR\t%s\n' "grafana-admin-secret admin-user/admin-password unreadable"
+        return 1
+    fi
+    cfg=$(mktemp); chmod 600 "$cfg"
+    pass="${pass//\\/\\\\}"; pass="${pass//\"/\\\"}"
+    printf 'user = "%s:%s"\n' "$user" "$pass" > "$cfg"
+    pass=""
+    body=$(mktemp)
+    lsof -ti:"${GRAFANA_PORT}" 2>/dev/null | xargs kill 2>/dev/null || true
+    kubectl port-forward -n monitoring svc/grafana "${GRAFANA_PORT}:80" >/dev/null 2>&1 &
+    pf=$!
+    base="http://localhost:${GRAFANA_PORT}"
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        curl -s -m 2 "$base/api/health" >/dev/null 2>&1 && break
+        sleep 1
+    done
+    if ! curl -s -m 2 "$base/api/health" >/dev/null 2>&1; then
+        printf 'ERR\t%s\n' "grafana port-forward on ${GRAFANA_PORT} never answered /api/health"
+        kill "$pf" 2>/dev/null; rm -f "$cfg" "$body"; return 1
+    fi
+    n=$(curl -s -m 15 -K "$cfg" "$base/api/plugins?type=datasource" 2>/dev/null | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+print(len(d) if isinstance(d, list) else "")
+' 2>/dev/null)
+    if [ -z "$n" ]; then
+        printf 'ERR\t%s\n' "/api/plugins?type=datasource returned no list (auth or API failure)"
+        kill "$pf" 2>/dev/null; rm -f "$cfg" "$body"; return 1
+    fi
+    printf 'PLUGINS\t%s\n' "$n"
+    curl -s -m 15 -K "$cfg" "$base/api/datasources" 2>/dev/null | python3 -c '
+import sys, json, urllib.parse
+d = json.load(sys.stdin)
+for x in d if isinstance(d, list) else []:
+    print("%s\t%s\t%s" % (x.get("uid", ""), x.get("type", ""), urllib.parse.quote(x.get("uid", ""), safe="")))
+' 2>/dev/null > "$body"
+    while IFS=$'\t' read -r uid typ enc; do
+        [ -n "$uid" ] || continue
+        code=$(curl -s -m 25 -K "$cfg" -o "$body.h" -w '%{http_code}' "$base/api/datasources/uid/$enc/health" 2>/dev/null)
+        msg=$(python3 -c '
+import sys, json
+try:
+    d = json.load(open(sys.argv[1]))
+    print(str(d.get("message") or d.get("status") or "")[:120].replace("\t", " ").replace("\n", " "))
+except Exception:
+    print("")
+' "$body.h" 2>/dev/null)
+        printf 'DS\t%s\t%s\t%s\t%s\n' "$uid" "$typ" "${code:-000}" "$msg"
+    done < "$body"
+    kill "$pf" 2>/dev/null; wait "$pf" 2>/dev/null
+    rm -f "$cfg" "$body" "$body.h"
+    return 0
+}
+
+# grafana_score_datasources LINES  (output of grafana_probe_collect)
+grafana_score_datasources() {
+    local lines="$1" cls a b c d n="" ds_n=0 bad_n=0 skip_n=0 ok_n=0 bad_names=""
+    while IFS=$'\t' read -r cls a b c d; do
+        [ -n "$cls" ] || continue
+        case "$cls" in
+            ERR)
+                _record_unmeasured "grafana-datasource-plugins" "$a"
+                log_warning "Grafana datasource probe did not run: $a"
+                return 0 ;;
+            PLUGINS) n="$a" ;;
+            DS)
+                ds_n=$((ds_n + 1))
+                if [ "$b" = "alertmanager" ]; then
+                    skip_n=$((skip_n + 1))
+                    printf '    %s (%s): HTTP %s -- skipped, alertmanager /health is plugin.unavailable by design\n' "$a" "$b" "$c"
+                elif [ "$c" = "200" ]; then
+                    ok_n=$((ok_n + 1))
+                    printf '    %s (%s): 200 %s\n' "$a" "$b" "$d"
+                else
+                    bad_n=$((bad_n + 1))
+                    bad_names="${bad_names}${bad_names:+, }${a} (${b}) HTTP ${c}${d:+: $d}"
+                    printf '    %s (%s): HTTP %s %s  <-- UNHEALTHY\n' "$a" "$b" "$c" "$d"
+                fi ;;
+        esac
+    done <<< "$lines"
+    if [ -z "$n" ]; then
+        _record_unmeasured "grafana-datasource-plugins" "no PLUGINS count in the probe output"
+        log_warning "Grafana datasource plugin count not measured"
+        return 0
+    fi
+    echo "    datasource plugins visible: $n (expected $GRAFANA_DS_PLUGINS_EXPECTED); provisioned datasources: $ds_n ($ok_n healthy, $bad_n unhealthy, $skip_n skipped)"
+    if [ "$n" -lt "$GRAFANA_DS_PLUGINS_EXPECTED" ] 2>/dev/null; then
+        log_warning "Grafana sees only $n datasource plugins (expected $GRAFANA_DS_PLUGINS_EXPECTED) -- bundled backends missing, dashboards on them read 'no data'"
+        add_major_issue "Grafana datasource plugins: $n of $GRAFANA_DS_PLUGINS_EXPECTED visible -- the bundled backend plugins were lost (plugin preinstall on a read-only rootfs; check GF_PLUGINS_PREINSTALL_DISABLED=true survived, 631ea3fd)"
+    elif [ "$n" -gt "$GRAFANA_DS_PLUGINS_EXPECTED" ] 2>/dev/null; then
+        log_info "Grafana sees $n datasource plugins, more than the expected $GRAFANA_DS_PLUGINS_EXPECTED -- a newer build bundles more; bump GRAFANA_DS_PLUGINS_EXPECTED"
+    fi
+    if [ "$ds_n" -eq 0 ]; then
+        _record_unmeasured "grafana-datasource-health" "/api/datasources listed 0 provisioned datasources -- there are 7 in the HelmRelease, so this is an empty read"
+        log_warning "Grafana datasource health: 0 datasources listed -- not measured"
+        return 0
+    fi
+    if [ "$bad_n" -gt 0 ]; then
+        log_warning "Grafana datasources unhealthy: $bad_n -- $bad_names"
+        add_major_issue "Grafana provisioned datasource(s) failing /health: $bad_names -- every dashboard on them is blank"
+    elif [ "$n" -ge "$GRAFANA_DS_PLUGINS_EXPECTED" ] 2>/dev/null; then
+        log_success "Grafana datasource plugins ($n) and provisioned datasource health ($ok_n/$((ds_n - skip_n)) 200) intact"
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Superset FAB credential -- vault-only SOPS keys (F-9d938fce)
+#
+# MU_ADM_PASSWORD (and ADMIN_PASSWORD since init.createAdmin=false) live in
+# superset-secrets but are consumed by NO workload: Superset's own metadata
+# DB holds the live FAB password hash. Any in-app reset therefore drifts the
+# vault copy silently, and nothing else can notice -- the pod is Ready, the
+# Secret decrypts, and SSO users never touch the db provider. The only
+# assertion that means anything is a real login: POST /api/v1/security/login
+# with provider db, from inside the web pod, password via stdin.
+# SOP: docs/sops/in-app-credential-rotation.md
+# ---------------------------------------------------------------------------
+
+# superset_fab_probe NS SECRET KEY USER -> <http code> | unreachable | nopod | nosecret
+superset_fab_probe() {
+    local ns="$1" secret="$2" key="$3" user="$4" pod pw out
+    pod=$(kubectl get pods -n "$ns" -l app.kubernetes.io/name=superset,app.kubernetes.io/component=web --no-headers 2>/dev/null \
+        | awk '$3=="Running"{print $1; exit}')
+    if [ -z "$pod" ]; then echo nopod; return 0; fi
+    pw=$(kubectl get secret -n "$ns" "$secret" -o "jsonpath={.data.$key}" 2>/dev/null | base64 -d 2>/dev/null)
+    if [ -z "$pw" ]; then echo nosecret; return 0; fi
+    out=$(printf '%s' "$pw" | kubectl exec -i -n "$ns" "$pod" -c superset -- python3 -c '
+import sys, json, urllib.request, urllib.error
+user = sys.argv[1]
+pw = sys.stdin.read()
+body = json.dumps({"username": user, "password": pw, "provider": "db", "refresh": False}).encode()
+req = urllib.request.Request("http://127.0.0.1:8088/api/v1/security/login", data=body,
+                             headers={"Content-Type": "application/json"}, method="POST")
+try:
+    r = urllib.request.urlopen(req, timeout=20); print("STATUS:%d" % r.status)
+except urllib.error.HTTPError as e:
+    print("STATUS:%d" % e.code)
+except Exception:
+    print("STATUS:unreachable")
+' "$user" 2>/dev/null | sed -n 's/^STATUS:\(.*\)$/\1/p' | tail -1)
+    pw=""
+    echo "${out:-unreachable}"
+}
+
+# superset_fab_score USER KEY STATUS
+superset_fab_score() {
+    local user="$1" key="$2" status="$3"
+    case "$status" in
+        200)
+            echo "  $user: ✅ 200 -- SOPS key $key authenticates against Superset FAB"
+            CHECKS_PASSED=$((CHECKS_PASSED + 1)) ;;
+        401)
+            echo "  $user: ❌ 401 -- SOPS key $key is REJECTED by Superset FAB"
+            log_warning "Superset FAB: SOPS-held $key no longer authenticates as $user -- the live password was reset outside SOPS"
+            add_major_issue "Superset vault-only credential drift: superset-secrets.$key is rejected for FAB user $user (401) -- the live FAB password was reset in-app and the SOPS copy is stale; re-sync per docs/sops/in-app-credential-rotation.md" ;;
+        nopod)
+            _record_unmeasured "superset-fab-credential-$key" "no Running superset web pod"
+            echo "  $user: no Running superset web pod -- not measured" ;;
+        nosecret)
+            _record_unmeasured "superset-fab-credential-$key" "superset-secrets.$key unreadable/empty"
+            echo "  $user: superset-secrets.$key unreadable -- not measured" ;;
+        unreachable|"")
+            _record_unmeasured "superset-fab-credential-$key" "login endpoint unreachable from inside the web pod"
+            echo "  $user: /api/v1/security/login unreachable -- not measured" ;;
+        *)
+            echo "  $user: ⚠️  HTTP $status -- reachable, auth state unclear"
+            add_minor_issue "Superset FAB login probe for $user returned HTTP $status (expected 200)" ;;
+    esac
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Log shipping coverage: Running pods with ZERO documents in ES (F-a49c67c3)
+#
+# Four showcase pods ran 1/1 for 13h while every request log went to an
+# emptyDir file and nothing reached Elasticsearch -- and no check noticed,
+# because every ES assertion here counts documents that exist. A silent zero
+# is never a pass, so this section enumerates the absence: each Running pod
+# older than the window is looked up in a per-pod terms aggregation over
+# logs-generic-default, and every pod with no bucket is then cross-checked
+# against what the kubelet holds for it (`kubectl logs --since`):
+#   GAP           kubelet has stdout inside the window (older than the lag
+#                 guard) and ES has nothing   -> the pipeline is dropping the
+#                 pod                          -> MAJOR naming the pods
+#   LAG           newest stdout line is younger than the lag guard (measured
+#                 2026-09-22: a postgres checkpoint line landed in ES ~1 min
+#                 after the aggregation ran)   -> info, not scored
+#   REPLICA-IDLE  no stdout, but a sibling of the same controller logs
+#                 (leader election: schedulers, csi sidecars, envoy) -> info
+#   SILENT        no stdout at all in the window, no logging sibling: idle
+#                 by nature or logging to a file -- unproven either way, so
+#                 REPORTED as one minor issue with the list, never excluded
+#   UNPROBED      kubelet query failed                -> unmeasured
+# Measured 2026-09-22 over 24h: 264 Running pods, 100 without an ES bucket,
+# 99 of those also empty on the kubelet side (SILENT), 0 GAP.
+# ---------------------------------------------------------------------------
+LOGSHIP_WINDOW_H="${LOGSHIP_WINDOW_H:-24}"
+LOGSHIP_LAG_GUARD_S="${LOGSHIP_LAG_GUARD_S:-900}"
+
+# logship_es_pods HOURS -> "POD\t<name>\t<docs>" per pod with a bucket, then
+# "OTHER\t<sum_other_doc_count>". Non-zero exit when ES did not answer.
+logship_es_pods() {
+    local out
+    out=$(es_query "{\"size\":0,\"query\":{\"range\":{\"@timestamp\":{\"gte\":\"now-${1}h\"}}},\"aggs\":{\"by_pod\":{\"terms\":{\"field\":\"resource.attributes.k8s.pod.name\",\"size\":5000}}}}") || return 1
+    [ -n "$out" ] || return 1
+    printf '%s' "$out" | python3 -c '
+import sys, json
+try:
+    a = json.load(sys.stdin)["aggregations"]["by_pod"]
+except Exception:
+    sys.exit(1)
+for b in a.get("buckets", []):
+    print("POD\t%s\t%d" % (b["key"], b["doc_count"]))
+print("OTHER\t%d" % a.get("sum_other_doc_count", 0))
+'
+}
+
+# logship_running_pods MIN_AGE_S -> "ns\tname\towner\tage_s" for every Running
+# pod older than MIN_AGE_S. owner is Kind/controller with the ReplicaSet hash
+# and the static-pod node suffix stripped, so replicas group together.
+logship_running_pods() {
+    kubectl get pods -A -o json 2>/dev/null | python3 -c '
+import sys, json, re
+from datetime import datetime, timezone
+min_age = int(sys.argv[1])
+try:
+    items = json.load(sys.stdin).get("items", [])
+except Exception:
+    sys.exit(1)
+now = datetime.now(timezone.utc)
+for p in items:
+    st = p.get("status") or {}
+    if st.get("phase") != "Running" or not st.get("startTime"):
+        continue
+    try:
+        age = int((now - datetime.fromisoformat(st["startTime"].replace("Z", "+00:00"))).total_seconds())
+    except Exception:
+        continue
+    if age < min_age:
+        continue
+    m = p["metadata"]
+    own = (m.get("ownerReferences") or [{}])[0]
+    kind, oname = own.get("kind", "Pod"), own.get("name", m["name"])
+    if kind == "ReplicaSet":
+        oname = re.sub(r"-[a-z0-9]{5,10}$", "", oname)
+    elif kind == "Node":
+        oname = re.sub(r"-" + re.escape(oname) + r"$", "", m["name"])
+    print("\t".join([m["namespace"], m["name"], "%s/%s" % (kind, oname), str(age)]))
+' "$1"
+}
+
+# logship_candidates RUNNING_LINES ES_LINES -> "CAND\tns\tname\tsibling_logs"
+# for every Running pod without an ES bucket; "OVERFLOW\t<n>" first when the
+# aggregation was truncated (then no absence can be trusted).
+logship_candidates() {
+    local rfile efile
+    rfile=$(mktemp); efile=$(mktemp)
+    printf '%s' "$1" > "$rfile"; printf '%s' "$2" > "$efile"
+    python3 - "$rfile" "$efile" <<'PYEOF'
+import sys
+run, es = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+docs, other = {}, 0
+for l in es.splitlines():
+    f = l.split("\t")
+    if f[0] == "POD" and len(f) >= 3:
+        docs[f[1]] = int(f[2])
+    elif f[0] == "OTHER" and len(f) >= 2:
+        other = int(f[1])
+if other > 0:
+    print("OVERFLOW\t%d" % other)
+pods = [l.split("\t") for l in run.splitlines() if l.strip()]
+pods = [p for p in pods if len(p) >= 4]
+group_logs = {}
+for ns, name, owner, age in pods:
+    group_logs.setdefault((ns, owner), False)
+    if docs.get(name, 0) > 0:
+        group_logs[(ns, owner)] = True
+for ns, name, owner, age in pods:
+    if docs.get(name, 0) > 0:
+        continue
+    print("\t".join(["CAND", ns, name, "1" if group_logs[(ns, owner)] else "0"]))
+PYEOF
+    rm -f "$rfile" "$efile"
+}
+
+# logship_kubelet_newest NS POD HOURS -> epoch of the newest stdout line the
+# kubelet holds for the pod inside the window; empty when there is none.
+# Non-zero exit when the kubelet query itself failed.
+logship_kubelet_newest() {
+    kubectl logs -n "$1" "$2" --all-containers --since="${3}h" --tail=1 --timestamps 2>/dev/null \
+        | python3 -c '
+import sys
+from datetime import datetime, timezone
+best = None
+for l in sys.stdin:
+    ts = l.split(" ", 1)[0].strip()
+    try:
+        t = int(datetime.fromisoformat(ts[:19]).replace(tzinfo=timezone.utc).timestamp())
+    except Exception:
+        continue
+    if best is None or t > best:
+        best = t
+print(best if best is not None else "")
+'
+}
+
+# logship_classify CAND_LINES HOURS LAG_S -> "cls\tns\tname\tdetail"
+logship_classify() {
+    local lines="$1" hours="$2" lag="$3" cls ns name sib newest now age
+    now=$(date +%s)
+    while IFS=$'\t' read -r cls ns name sib; do
+        [ "$cls" = "CAND" ] || continue
+        if ! newest=$(logship_kubelet_newest "$ns" "$name" "$hours"); then
+            printf 'UNPROBED\t%s\t%s\tkubelet log query failed\n' "$ns" "$name"
+        elif [ -n "$newest" ]; then
+            age=$((now - newest))
+            if [ "$age" -gt "$lag" ]; then
+                printf 'GAP\t%s\t%s\tstdout written %ss ago, 0 documents in ES\n' "$ns" "$name" "$age"
+            else
+                printf 'LAG\t%s\t%s\tnewest stdout line only %ss old (inside the %ss ingestion guard)\n' "$ns" "$name" "$age" "$lag"
+            fi
+        elif [ "$sib" = "1" ]; then
+            printf 'REPLICA-IDLE\t%s\t%s\ta sibling replica of the same controller logs\n' "$ns" "$name"
+        else
+            printf 'SILENT\t%s\t%s\tno stdout in %sh\n' "$ns" "$name" "$hours"
+        fi
+    done <<< "$lines"
+}
+
+# logship_score CLASS_LINES RUNNING_N HOURS
+logship_score() {
+    local lines="$1" running_n="$2" hours="$3" cls ns name detail
+    local gap_n=0 lag_n=0 idle_n=0 silent_n=0 unprobed_n=0 gap_names="" silent_ns=""
+    while IFS=$'\t' read -r cls ns name detail; do
+        [ -n "$cls" ] || continue
+        case "$cls" in
+            GAP)
+                gap_n=$((gap_n + 1)); gap_names="${gap_names}${gap_names:+, }${ns}/${name}"
+                printf '    GAP           %s/%s -- %s\n' "$ns" "$name" "$detail" ;;
+            LAG)
+                lag_n=$((lag_n + 1)); printf '    LAG           %s/%s -- %s\n' "$ns" "$name" "$detail" ;;
+            REPLICA-IDLE)
+                idle_n=$((idle_n + 1)); printf '    REPLICA-IDLE  %s/%s -- %s\n' "$ns" "$name" "$detail" ;;
+            SILENT)
+                silent_n=$((silent_n + 1)); silent_ns="${silent_ns}${ns}"$'\n'
+                printf '    SILENT        %s/%s -- %s\n' "$ns" "$name" "$detail" ;;
+            UNPROBED)
+                unprobed_n=$((unprobed_n + 1)); printf '    UNPROBED      %s/%s -- %s\n' "$ns" "$name" "$detail" ;;
+        esac
+    done <<< "$lines"
+    echo "    zero-document pods: gap $gap_n, lag $lag_n, replica-idle $idle_n, silent $silent_n, unprobed $unprobed_n (of $running_n Running pods older than ${hours}h)"
+    if [ "$unprobed_n" -gt 0 ]; then
+        _record_unmeasured "log-shipping-coverage" "$unprobed_n zero-document pod(s) could not be cross-checked against the kubelet"
+    fi
+    if [ "$gap_n" -gt 0 ]; then
+        log_warning "Log pipeline GAP: $gap_n Running pod(s) wrote stdout in ${hours}h that never reached Elasticsearch -- $gap_names"
+        add_major_issue "Log pipeline gap: $gap_n Running pod(s) wrote stdout in the last ${hours}h but have 0 documents in logs-generic-default: $gap_names -- the collector is not shipping them"
+    fi
+    if [ "$silent_n" -gt 0 ]; then
+        local breakdown
+        breakdown=$(printf '%s' "$silent_ns" | sort | uniq -c | awk '{printf "%s%s=%s", (NR>1?", ":""), $2, $1}')
+        log_warning "Running pods with no stdout at all in ${hours}h: $silent_n ($breakdown)"
+        add_minor_issue "Running pods silent on stdout for ${hours}h: $silent_n ($breakdown) -- idle by nature or logging to a file that no collector reads (F-a49c67c3 class); unproven either way, names in the sweep report"
+    fi
+    if [ "$gap_n" -eq 0 ] && [ "$unprobed_n" -eq 0 ]; then
+        log_success "Log shipping: every Running pod (>${hours}h) that wrote stdout has documents in Elasticsearch"
+    fi
+    return 0
+}
+
+# logship_run: orchestration, MAIN shell (its verdicts must reach the arrays)
+logship_run() {
+    local hours="$LOGSHIP_WINDOW_H" running es cands classes running_n es_n
+    if [ "$ES_AVAILABLE" != "true" ]; then
+        _record_unmeasured "log-shipping-coverage" "Elasticsearch enrichment session unavailable"
+        log_warning "Log shipping coverage: Elasticsearch unavailable -- not measured"
+        return 0
+    fi
+    if ! es=$(logship_es_pods "$hours"); then
+        _record_unmeasured "log-shipping-coverage" "per-pod terms aggregation on logs-generic-default failed"
+        log_warning "Log shipping coverage: ES aggregation failed -- not measured"
+        return 0
+    fi
+    if ! running=$(logship_running_pods $((hours * 3600))); then
+        _record_unmeasured "log-shipping-coverage" "pod listing could not be read"
+        log_warning "Log shipping coverage: pod listing failed -- not measured"
+        return 0
+    fi
+    running_n=$(printf '%s\n' "$running" | grep -c .)
+    es_n=$(printf '%s\n' "$es" | grep -c '^POD')
+    if [ "${running_n:-0}" -lt 1 ]; then
+        _record_unmeasured "log-shipping-coverage" "0 Running pods older than ${hours}h -- the denominator is empty, not the cluster"
+        log_warning "Log shipping coverage: no Running pods older than ${hours}h listed -- not measured"
+        return 0
+    fi
+    echo "  Running pods older than ${hours}h: $running_n; pods with >=1 document in the window: $es_n"
+    cands=$(logship_candidates "$running" "$es")
+    if printf '%s\n' "$cands" | grep -q '^OVERFLOW'; then
+        _record_unmeasured "log-shipping-coverage" "per-pod aggregation truncated (sum_other_doc_count > 0) -- an absent bucket proves nothing"
+        log_warning "Log shipping coverage: aggregation truncated -- not measured"
+        return 0
+    fi
+    classes=$(logship_classify "$cands" "$hours" "$LOGSHIP_LAG_GUARD_S")
+    logship_score "$classes" "$running_n" "$hours"
+}
+
 # Verify cluster access
 log_section "Phase 1: Preparation"
 if kubectl cluster-info >> "$OUTPUT_FILE" 2>&1; then
@@ -3016,6 +3755,23 @@ print(len(silent))
     fi
     echo ""
 
+    # --- Image-automation LIVENESS by freshness (F-8d4645f6 residual) ---
+    # The block above keys on lastPushCommit being NON-NULL, which a PAT
+    # expiry never disturbs (see flux_iua_score). Time + ancestry instead.
+    echo "Flux image automation liveness (freshness):"
+    if kubectl get crd imageupdateautomations.image.toolkit.fluxcd.io >/dev/null 2>&1; then
+        if IUA_LINES=$(flux_iua_collect); then
+            flux_iua_score "$IUA_LINES"
+        else
+            _record_unmeasured "flux-image-automation-freshness" "imageupdateautomation listing could not be read/parsed"
+            log_warning "Image-automation freshness: listing unreadable -- not measured"
+        fi
+    else
+        _record_unmeasured "flux-image-automation-freshness" "imageupdateautomations CRD absent -- there are automations in git, so this is a missing CRD, not a cluster without them"
+        log_warning "Image-automation freshness: CRD absent -- not measured"
+    fi
+    echo ""
+
     # -----------------------------------------------------------------------
     # (3) AVAILABILITY COUPLING introduced by 505fefa4.
     #
@@ -3624,6 +4380,22 @@ PYEOF
     if [ "${Z2M_GOT_INFO}" = "True" ] && [ "${Z2M_PERMIT_JOIN}" = "True" ]; then
         log_warning "Z2M permit_join is OPEN at sweep time — pairing window left open?"
         add_minor_issue "Z2M permit_join open during daily sweep"
+    fi
+    echo ""
+
+    # --- Device availability via retained zigbee2mqtt/+/availability (F-cd07827d) ---
+    # state.json last_seen is frozen (saturation control above); the bridge's
+    # own retained availability topics are a valid, current liveness verdict
+    # and were never consulted. Classified against the same registry payload;
+    # see z2m_classify_availability for the ti.router exclusion (SOP §4f).
+    echo "Zigbee device availability (retained zigbee2mqtt/+/availability):"
+    Z2M_AVAIL_RAW=$(z2m_availability_fetch)
+    [ -n "${Z2M_BRIDGE_DEVICES_RAW:-}" ] || Z2M_BRIDGE_DEVICES_RAW=$(z2m_registry_fetch)
+    if [ -z "$Z2M_AVAIL_RAW" ]; then
+        _record_unmeasured "zigbee-availability" "no retained zigbee2mqtt/+/availability topic received from the broker in 8s"
+        log_warning "Zigbee availability: no retained availability topics received -- not measured"
+    else
+        z2m_score_availability "$(z2m_classify_availability "$Z2M_AVAIL_RAW" "${Z2M_BRIDGE_DEVICES_RAW:-}")"
     fi
     echo ""
 
@@ -6699,6 +7471,32 @@ check_heartbeat_integrity() {
     check_heartbeat_integrity
     echo ""
 } >> "$OUTPUT_FILE"
+
+log_section "Grafana Datasource Plugins"
+{
+    echo "=== Grafana Datasource Plugins & Provisioned Datasource Health ==="
+    grafana_score_datasources "$(grafana_probe_collect)"
+    echo ""
+} >> "$OUTPUT_FILE" 2>&1
+
+log_section "Superset FAB Credential (vault-only SOPS keys)"
+{
+    echo "=== Superset FAB local-db login with the SOPS-held password ==="
+    # Both keys are vault-only: no workload consumes them (init.createAdmin
+    # is false), so only a real login can tell the SOPS copy from the live one.
+    for _spec in "mu_adm|MU_ADM_PASSWORD" "admin|ADMIN_PASSWORD"; do
+        superset_fab_score "${_spec%%|*}" "${_spec#*|}" \
+            "$(superset_fab_probe databases superset-secrets "${_spec#*|}" "${_spec%%|*}")"
+    done
+    echo ""
+} >> "$OUTPUT_FILE" 2>&1
+
+log_section "Log Shipping Coverage"
+{
+    echo "=== Running pods with zero log documents in Elasticsearch (${LOGSHIP_WINDOW_H}h) ==="
+    logship_run
+    echo ""
+} >> "$OUTPUT_FILE" 2>&1
 
 #######################################
 # Generate Issues Summary
