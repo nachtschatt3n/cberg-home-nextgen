@@ -372,6 +372,41 @@ def kubectl_json(args: str, timeout: int = 30) -> dict | list | None:
 
 
 # ---------------------------------------------------------------------------
+# external-dns target annotation
+# ---------------------------------------------------------------------------
+
+# external-dns promoted its annotations from the `alpha` prefix to a GA one.
+# v0.22.0 (#6424) reads `external-dns.kubernetes.io/*` ONLY — there is NO
+# fallback to the alpha spelling — while v0.21 reads only the alpha key.
+# `kubernetes/apps/network/envoy-gateway/app/gateways.yaml` therefore carries
+# BOTH keys with the same value so either version agrees on the target at every
+# instant, and the alpha key is the rollback path.
+EXTDNS_TARGET_GA = "external-dns.kubernetes.io/target"
+EXTDNS_TARGET_ALPHA = "external-dns.alpha.kubernetes.io/target"
+
+
+def extdns_target(annotations: dict | None) -> str | None:
+    """The external-dns target this object declares, GA key first.
+
+    Reading the alpha key ALONE (as this check did until 2026-09-22, F-c43f447f)
+    made the whole DNS-traceability assertion an accident of the transition
+    window: it passed only because the live Gateway happens to carry both keys.
+    Either end of the migration broke it, in opposite and both-bad directions —
+    drop the alpha key once v0.22 is in and a correctly-annotated Gateway is
+    reported as MISSING its target (a false warning that trains the operator to
+    ignore this line); drop the GA key and the check stays GREEN while the
+    running external-dns reads nothing, publishes nothing, and every external
+    hostname goes dark exactly as it did on 2026-09-07.
+
+    GA is primary because it is where external-dns is going and what the newer
+    version reads; alpha is the fallback that keeps the check honest until the
+    rollback path is retired.
+    """
+    ann = annotations or {}
+    return ann.get(EXTDNS_TARGET_GA) or ann.get(EXTDNS_TARGET_ALPHA) or None
+
+
+# ---------------------------------------------------------------------------
 # Sensitive-value loading and redaction
 # ---------------------------------------------------------------------------
 
@@ -699,30 +734,66 @@ def s1_sops_coverage() -> tuple[str, Findings, str]:
     # *manifest* (top-level document field) and not a nested reference such as
     # a Gateway `certificateRefs: - kind: Secret` or a HelmRelease
     # `valuesFrom: - kind: Secret` — those name a Secret, they do not contain one.
-    unenc = run_lines(
-        "grep -rlE '^kind: Secret[[:space:]]*$' kubernetes/ --include='*.yaml' "
-        "| grep -v '\\.sops\\.yaml$'"
+    # DENOMINATORS (F-0823fdc3). Every green line below used to report a bare
+    # "none found", which is the one answer a BROKEN scan also gives: a grep
+    # that matched nothing because the tree moved, the pattern rotted or the
+    # binary was missing reads exactly like a clean repo. Each check now states
+    # what it actually looked at, and raises a blindness warning when the
+    # population it scanned is empty — a zero with no denominator is not
+    # evidence of anything.
+    #
+    # The `grep -v '.sops.yaml$'` that used to be in the shell pipeline is done
+    # in Python instead, purely so the ENCRYPTED manifests stay visible as the
+    # denominator rather than being discarded inside the pipe.
+    secret_manifests = run_lines(
+        "grep -rlE '^kind: Secret[[:space:]]*$' kubernetes/ --include='*.yaml'"
     )
+    encrypted = [p for p in secret_manifests if p.endswith(".sops.yaml")]
+    unenc = [p for p in secret_manifests if not p.endswith(".sops.yaml")]
     # Filter known false-positives (SecretKeyRef refs, SA tokens, kustomization refs,
     # _template/ scaffolding directories, and *.example.yaml placeholder files which are
     # by design unencrypted and not deployed by any kustomization).
     fp_patterns = ["helmrelease.yaml", "ks.yaml", "token-secret.yaml", "/_template/", ".example.yaml"]
     real_unenc = [p for p in unenc if not any(fp in p for fp in fp_patterns)]
+    secret_scope = (f"{len(secret_manifests)} `kind: Secret` manifests scanned: "
+                    f"{len(encrypted)} SOPS-encrypted, {len(unenc)} plaintext "
+                    f"({len(unenc) - len(real_unenc)} known false-positive)")
+    lines.append(f"**Secret manifests:** {secret_scope}\n\n")
+    if not secret_manifests:
+        f.add(WARNING, "SOPS coverage scan is BLIND — 0 `kind: Secret` manifests "
+                       "found under kubernetes/, so 'no plaintext Secrets' proves nothing")
+        cprint(C.YELLOW, "  🟡 Secret-manifest scan is BLIND (0 manifests of either kind)")
     if real_unenc:
         for p in real_unenc:
             f.add(CRITICAL, f"Plaintext `kind: Secret` in `{p}`")
             cprint(C.RED, f"  🔴 Unencrypted Secret: {p}")
-    else:
-        cprint(C.GREEN, "  🟢 No unencrypted Secret manifests")
+    elif secret_manifests:
+        cprint(C.GREEN, f"  🟢 No unencrypted Secret manifests ({secret_scope})")
 
-    # SOPS temp files
-    temp = run_lines("find kubernetes/ talos/ -name '.decrypted~*' -type f 2>/dev/null")
+    # SOPS temp files. The denominator is the tree actually walked: `find` over
+    # a root that does not exist is silent (2>/dev/null), so "no temp files"
+    # and "no such directory" were the same output.
+    temp_roots = [d for d in ("kubernetes/", "talos/") if os.path.isdir(d)]
+    temp_scanned = 0
+    if temp_roots:
+        temp_scanned = len(run_lines(
+            f"find {' '.join(temp_roots)} -type f 2>/dev/null"))
+    temp = run_lines(
+        f"find {' '.join(temp_roots)} -name '.decrypted~*' -type f 2>/dev/null"
+    ) if temp_roots else []
+    temp_scope = (f"{temp_scanned} files under {', '.join(temp_roots)}"
+                  if temp_roots else "NO search root exists")
+    lines.append(f"**SOPS temp-file scan:** {temp_scope}\n\n")
+    if not temp_roots or not temp_scanned:
+        f.add(WARNING, "SOPS temp-file scan is BLIND — no files were walked, so "
+                       "'no .decrypted~ files on disk' proves nothing")
+        cprint(C.YELLOW, f"  🟡 SOPS temp-file scan is BLIND ({temp_scope})")
     if temp:
         for t in temp:
             f.add(CRITICAL, f"SOPS temp file on disk: `{t}`")
             cprint(C.RED, f"  🔴 SOPS temp file: {t}")
-    else:
-        cprint(C.GREEN, "  🟢 No SOPS temp files")
+    elif temp_scanned:
+        cprint(C.GREEN, f"  🟢 No SOPS temp files ({temp_scope})")
 
     # Suspicious base64 outside sops files (filter known safe patterns)
     b64_hits = run_lines(
@@ -771,13 +842,21 @@ def s1_sops_coverage() -> tuple[str, Findings, str]:
         and not _jsonpatch_path.search(h)
         and not _repo_path.search(h)
     ]
+    b64_scope = (f"{len(b64_hits)} candidate lines matched, "
+                 f"{len(b64_hits) - len(real_b64)} filtered as known-safe")
+    lines.append(f"**Inline-base64 scan:** {b64_scope}\n\n")
+    if not b64_hits:
+        f.add(WARNING, "Inline-base64 scan is BLIND — the long-string grep "
+                       "matched 0 lines anywhere under kubernetes/, which a "
+                       "working scan of this repo never does")
+        cprint(C.YELLOW, "  🟡 Inline-base64 scan is BLIND (0 candidate lines)")
     if real_b64:
         for hit in real_b64[:10]:
             short = redact(hit[:120])
             f.add(WARNING, f"Possible inline credential: `{short}`")
             cprint(C.YELLOW, f"  🟡 Suspicious base64: {short}")
-    else:
-        cprint(C.GREEN, "  🟢 No suspicious base64 outside sops files")
+    elif b64_hits:
+        cprint(C.GREEN, f"  🟢 No suspicious base64 outside sops files ({b64_scope})")
 
     lines.append(f.markdown())
     return f.worst(), f, "\n".join(lines)
@@ -3834,7 +3913,8 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
     # wildcard. The meaningful drift is at the DNS layer:
     #   - Every external ingress hostname should resolve to a Cloudflare proxy IP
     #     (which means a Cloudflare DNS record exists pointing at the tunnel)
-    #   - external-dns annotation `external-dns.alpha.kubernetes.io/target` must
+    #   - the external-dns target annotation (GA key, alpha fallback — see
+    #     extdns_target()) must
     #     point at `external.${SECRET_DOMAIN}` (or be absent if the wildcard
     #     CNAME absorbs it — but we want explicit annotation for traceability)
     # A hostname registered in K8s but missing a DNS record = unreachable
@@ -3864,7 +3944,7 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
         if routes:
             gw = kubectl_json("get gateway -n network envoy-external")
             gw_ann = ((gw or {}).get("metadata", {}) or {}).get("annotations", {}) or {}
-            if not gw_ann.get("external-dns.alpha.kubernetes.io/target"):
+            if not extdns_target(gw_ann):
                 missing_extdns.append("`network/envoy-external` Gateway (all external routes inherit from it)")
 
         # Ingresses, if any are reintroduced, still carry it per-object.
@@ -3873,7 +3953,7 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
                 if i["spec"].get("ingressClassName") != "external":
                     continue
                 ann = i["metadata"].get("annotations", {}) or {}
-                if not ann.get("external-dns.alpha.kubernetes.io/target"):
+                if not extdns_target(ann):
                     missing_extdns.append(f"`{i['metadata']['namespace']}/{i['metadata']['name']}`")
 
         if misconfigured:

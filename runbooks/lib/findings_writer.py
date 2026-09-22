@@ -424,11 +424,34 @@ def uncovered_from_notes(notes_json) -> dict[str, dict[str, str]]:
     return out
 
 
+def row_producer(meta):
+    """Who owns a finding row, reading BOTH spellings of that fact.
+
+    `producer` is the canonical key, stamped by every FindingsWriter.emit().
+    `authored_by` is the OLDER spelling, and the only one `policy-cli.py
+    finding add` wrote: it inserts straight into sweep_findings rather than
+    going through this module, so its hand-authored rows carried
+    `{"authored_by": "policy-cli"}` and NO `producer` (F-d93b2328). The
+    ownership gate below reads `producer`, so those rows looked untagged —
+    i.e. closeable — and the next orchestrated script run in the same section
+    resolved them on silence. The write side now stamps `producer` too, but a
+    write-side fix cannot reach the rows ALREADY in the table; this does.
+
+    Returns None when neither key is present. That is deliberate and must stay:
+    genuinely untagged legacy rows have to remain closeable (see below).
+    """
+    m = meta or {}
+    return m.get("producer") or m.get("authored_by") or None
+
+
 def foreign_candidates(candidates, run_producer):
     """Rows this run must NOT close, because it does not own them.
 
     A row stamped with a DIFFERENT producer was written by something this run
     does not speak for, so its absence here is not evidence of anything.
+
+    "Stamped" means EITHER `producer` or the legacy `authored_by` — see
+    row_producer(). A policy-cli-authored row carries only the latter.
 
     UNTAGGED (producer IS NULL) rows stay closeable, and that carve-out is
     LOAD-BEARING — narrowing it was tried on 2026-09-06 and reverted within
@@ -451,7 +474,7 @@ def foreign_candidates(candidates, run_producer):
     `candidates` are (id, row) pairs where row[4] is the metadata mapping.
     """
     return [c for c in candidates
-            if (c[1][4] or {}).get("producer") not in (None, run_producer)]
+            if row_producer(c[1][4]) not in (None, run_producer)]
 
 
 class FindingsWriter:
@@ -463,7 +486,10 @@ class FindingsWriter:
 
     Degrades to no-op if dsn is empty or None — emit() returns the
     derived finding_id but performs no DB write. Lets the existing
-    markdown-only workflow keep working.
+    markdown-only workflow keep working. That degradation is allowed ONLY for
+    a stand-alone run: joining an orchestrated cycle (cycle_id / SWEEP_CYCLE_ID)
+    with no DSN raises, because there it means the sweep's database setup
+    failed and the whole run's findings would vanish silently (F-28e8c394).
     """
 
     def __init__(
@@ -476,6 +502,7 @@ class FindingsWriter:
         git_head: str | None = None,
         notes: str | None = None,
         producer: str,
+        allow_no_db: bool = False,
     ):
         if section not in VALID_SECTIONS:
             raise ValueError(
@@ -536,6 +563,41 @@ class FindingsWriter:
                 "covered it (F-9188fdb8, F-616c910d)."
             )
         self._producer = producer
+        # FAIL CLOSED: an ORCHESTRATED run with no database (F-28e8c394).
+        #
+        # `dsn` falsy means "degrade to markdown-only" — emit() mints a finding
+        # id and throws the row away, close() writes nothing. That is the right
+        # behaviour for an operator running one check script by hand. It is the
+        # WRONG behaviour inside a sweep: sweep-run.py sets SWEEP_CYCLE_ID and
+        # SWEEP_PG_DSN together, so a cycle id WITHOUT a DSN means the DSN
+        # setup (port-forward, secret decode) failed. Every specialist then ran
+        # its full audit, printed a confident green board, and persisted
+        # NOTHING — no findings, no cycle row — while auto-close, the board and
+        # the open-findings queue all read the silence as "clean". A whole
+        # sweep's worth of findings evaporating is exactly the silent-loss class
+        # this module exists to prevent, so the run must die at construction,
+        # before the audit work is done, rather than discover it at close().
+        #
+        # Placed AFTER the producer validation on purpose: a missing/blank
+        # `producer=` is a call-signature bug, deterministic and independent of
+        # the environment, and must keep raising its own ValueError/TypeError
+        # even in a shell that happens to export SWEEP_CYCLE_ID.
+        #
+        # `allow_no_db=True` is the explicit opt-out for a caller that KNOWS
+        # there is no database and accepts the loss — offline unit tests that
+        # attach a fake connection afterwards. It must never be passed by a
+        # check script.
+        if self._orchestrated and not self.dsn and not allow_no_db:
+            raise RuntimeError(
+                f"orchestrated run without a database: section={self.section!r} "
+                f"joined cycle {self._cycle_id} but no DSN was supplied "
+                f"(SWEEP_PG_DSN empty/unset). Every finding this run emits "
+                f"would be silently DROPPED while the sweep reported a clean "
+                f"section. Fix the DSN (source runbooks/lib/sweep-pg-dsn.sh, or "
+                f"let runbooks/sweep-run.py set it up), or drop SWEEP_CYCLE_ID "
+                f"to run markdown-only on purpose. Offline tests that attach "
+                f"their own connection pass allow_no_db=True."
+            )
         # The sweep_cycles row is created on the FIRST emit(), never on
         # construction. A writer that is built and then closed WITHOUT emitting
         # anything (a clean section that joins someone else's shared cycle, or a
@@ -1045,7 +1107,7 @@ class FindingsWriter:
                       f"never covered):")
                 for _id, row in foreign[:20]:
                     print(f"      ⏸ kept open {self.section}/{row[0]} [{row[1]}] "
-                          f"— producer {(row[4] or {}).get('producer')!r}: "
+                          f"— producer {row_producer(row[4])!r}: "
                           f"{row[2][:60]}")
                 if len(foreign) > 20:
                     print(f"      … and {len(foreign) - 20} more")

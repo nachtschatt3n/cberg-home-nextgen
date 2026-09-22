@@ -108,8 +108,13 @@ def _writer(section="version", orchestrated=True):
     fan-out always hand a cycle id down, a hand-run script does not.
     """
     cid = "11111111-2222-3333-4444-555555555555" if orchestrated else None
+    # allow_no_db: this IS an orchestrated writer with dsn=None, the shape the
+    # ctor now refuses outright (F-28e8c394) — deliberately so, because in a
+    # real sweep it means the DSN setup failed and every finding would be
+    # dropped. Here the fake connection is attached two lines below, so the
+    # run is not actually DB-less; say so explicitly.
     w = fw.FindingsWriter(dsn=None, section=section, cycle_id=cid,
-                          producer="script")
+                          producer="script", allow_no_db=True)
     conn = FakeConn()
     w._conn = conn
     w._enabled = True
@@ -593,7 +598,10 @@ def test_veto_survives_the_force_and_autoclose_env_overrides():
 
 def test_disabled_writer_never_touches_the_db():
     _clear_env()
-    w = fw.FindingsWriter(dsn=None, section="version", producer="script")  # markdown-only
+    # allow_no_db keeps this markdown-only case independent of whatever
+    # SWEEP_CYCLE_ID the surrounding shell happens to export.
+    w = fw.FindingsWriter(dsn=None, section="version", producer="script",
+                          allow_no_db=True)  # markdown-only
     w.emit("critical", "something")
     w.close(verdict="red")
     assert w._conn is None

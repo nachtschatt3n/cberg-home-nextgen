@@ -93,8 +93,12 @@ class FakeConn:
 
 
 def _writer(rows, section="version"):
+    # allow_no_db: an orchestrated writer with dsn=None is refused by the ctor
+    # (F-28e8c394); the fake connection is attached below, so this run is not
+    # really DB-less and says so explicitly.
     w = fw.FindingsWriter(dsn=None, section=section, producer="script",
-                          cycle_id="11111111-2222-3333-4444-555555555555")
+                          cycle_id="11111111-2222-3333-4444-555555555555",
+                          allow_no_db=True)
     conn = FakeConn(rows)
     w._conn = conn
     w._enabled = True

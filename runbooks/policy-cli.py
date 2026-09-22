@@ -1126,7 +1126,17 @@ def cmd_finding_add(args, dsn):
     after a partial remediation. Idempotent on the title fingerprint."""
     fp, fid = _finding_fingerprint(args.section, args.subsection, args.title)
     detail = _read_detail(args)
-    meta = {"authored_by": "policy-cli", "subsection": args.subsection or "plan_driver"}
+    # `producer` is what the auto-close ownership gate reads
+    # (lib/findings_writer.foreign_candidates). This path INSERTs directly
+    # rather than going through FindingsWriter.emit(), so it used to set
+    # `authored_by` alone — leaving the row indistinguishable from an untagged
+    # legacy row, which the gate deliberately lets a script run close. A
+    # hand-authored driver in a script-owned section was therefore auto-closed
+    # by the next sweep of that section (F-d93b2328). Both keys are written:
+    # `authored_by` stays for render-board.py, which reads it to separate
+    # hand-authored rows from script ones.
+    meta = {"authored_by": "policy-cli", "producer": "policy-cli",
+            "subsection": args.subsection or "plan_driver"}
     if detail:
         meta["security_detail"] = detail
         meta["detail_updated_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat()

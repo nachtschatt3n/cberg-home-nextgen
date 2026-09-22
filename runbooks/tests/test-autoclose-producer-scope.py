@@ -65,12 +65,16 @@ class TestProducerStamp(unittest.TestCase):
                 _fw.FindingsWriter(dsn=None, section="doc", producer=blank)
 
     def test_producer_is_overridable(self):
-        w = _fw.FindingsWriter(dsn=None, section="doc", producer="doc-agent")
+        # allow_no_db keeps these markdown-only cases independent of whatever
+        # SWEEP_CYCLE_ID the surrounding shell exports (F-28e8c394).
+        w = _fw.FindingsWriter(dsn=None, section="doc", producer="doc-agent",
+                               allow_no_db=True)
         self.assertEqual(w._producer, "doc-agent")
 
     def test_disabled_writer_still_accepts_producer(self):
         # emit() short-circuits when disabled; the ctor must not blow up.
-        w = _fw.FindingsWriter(dsn=None, section="doc", producer="doc-agent")
+        w = _fw.FindingsWriter(dsn=None, section="doc", producer="doc-agent",
+                               allow_no_db=True)
         fid = w.emit("warning", "some agent finding")
         self.assertTrue(fid.startswith("F-"))
 

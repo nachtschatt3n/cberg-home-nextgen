@@ -506,7 +506,7 @@ def _auto_close_stale_findings(
         # the pass closed the very rows the scope was holding open.
         if str(SCRIPT_DIR) not in sys.path:
             sys.path.insert(0, str(SCRIPT_DIR))
-        from lib.findings_writer import finding_matches_component
+        from lib.findings_writer import finding_matches_component, row_producer
 
         with psycopg.connect(dsn) as _c, _c.cursor() as _cur:
             _cur.execute("SELECT notes FROM sweep_cycles WHERE cycle_id = %s",
@@ -586,7 +586,15 @@ def _auto_close_stale_findings(
                     # docs/sops/sweep-findings-lifecycle.md §4.8 states the
                     # rule: if you add a gate to the writer, decide explicitly
                     # whether the backstop needs it too.
-                    _producer = (meta or {}).get("producer")
+                    # row_producer() rather than meta["producer"], and IMPORTED
+                    # rather than re-spelled: `policy-cli finding add` stamps
+                    # the legacy `authored_by` key, so a hand-authored row read
+                    # as untagged here and this backstop closed it even after
+                    # the writer gate learned to hold it (F-d93b2328). That is
+                    # the §4.8 divergence this comment block already warns
+                    # about, repeated — so the predicate is now shared code,
+                    # not a fourth copy.
+                    _producer = row_producer(meta)
                     if _producer is not None and _producer != "script":
                         foreign.append((pk, fid, sec, title, _producer))
                         continue
