@@ -1,13 +1,23 @@
 cluster:
   allowSchedulingOnControlPlanes: true
-  # Enable the in-cluster (kubernetes) discovery registry alongside the external
-  # discovery.talos.dev service, so member discovery survives a Sidero/WAN outage
-  # instead of erroring (talhelper disables this registry by default).
+  # Discovery: SERVICE registry only (discovery.talos.dev). The in-cluster
+  # kubernetes registry used to be enabled here "so member discovery survives
+  # a Sidero/WAN outage", but it cannot work on Kubernetes >= 1.32: the
+  # AuthorizeNodeWithSelectors node authorizer limits a kubelet identity to
+  # its OWN Node object, and the registry lists/watches ALL nodes as
+  # system:node:<name>. Upstream deprecated it and disables it by default for
+  # that reason. Measured 2026-09-22 (F-82fb3335): ~1,000 "nodes is forbidden"
+  # errors per hour per node from cluster.KubernetesPullController in
+  # controller-runtime, and `talosctl get members` is served entirely by the
+  # service registry — so the outage-resilience it was meant to buy has been
+  # zero since the K8s bump. Disabling it removes the log flood and nothing
+  # else. (Re-enabling would need the api-server feature gate off, which
+  # drops several other node-authorizer protections — not an option.)
   discovery:
     enabled: true
     registries:
       kubernetes:
-        disabled: false
+        disabled: true
   apiServer:
     extraArgs:
       # https://kubernetes.io/docs/tasks/extend-kubernetes/configure-aggregation-layer/
