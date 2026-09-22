@@ -1,7 +1,7 @@
 # SOP: Application Version Update / Upgrade
 
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.09.22`
+> Last Updated: `2026-09-22`
 
 ## 1) Description
 
@@ -173,6 +173,8 @@ kubectl exec -n <ns> <pod> -c <c> -- <app-version-cmd>
 | `helm rollback` can't reach old version | `maxHistory: 1` pruned it | revert git spec instead (§11) |
 | PVC `Pending`, events say `volume already bound to a different claim` | old PVC deleted (e.g. chart renamed it); PV is `Released` with stale `claimRef` uid | `kubectl patch pv <pv> --type json -p '[{"op":"remove","path":"/spec/claimRef/uid"},{"op":"remove","path":"/spec/claimRef/resourceVersion"}]'` — PV goes `Available`, same-name PVC rebinds. Retain PVs only; NEVER delete the PV |
 | HR retry loop applies a HALF-landed fix (e.g. pre-fix render deletes/recreates PVCs) | Flux retried the failing upgrade before the git fix revision reached the HR spec | suspend the HR across the fix push (`flux suspend hr` → push → verify spec updated → `flux resume hr`), or verify kustomization+HR are on the fix revision before any retry can start |
+| a field you REMOVED from a Flux-managed manifest is still set on the live object (e.g. `serviceAccountName` pointing at a pruned SA → next Job: `serviceaccount not found`) | server-side apply: dropping the line only RELEASES kustomize-controller's ownership; the live value stays unless the applier was its sole owner (§7c) | set the field EXPLICITLY to the intended value (`serviceAccountName: default`) to re-take ownership; verify with `--show-managed-fields` |
+| CrashLoopBackOff right after an image bump; `logs --previous` shows `mkdir`/`chown` permission denied on `$HOME` or `/config` | the new image adopted a root-required entrypoint (adduser + chown + `su-exec`/`gosu` drop to `PUID`) and we run `runAsUser` non-root (§7d) | `command:` the binary directly with `HOME` on an emptyDir (the house fix), or hold the bump; never widen the securityContext to root as a reflex |
 
 ### 7b) Library-chart MAJOR migrations (learned from app-template 3.7.3→5.1.0, 2026-08-18)
 
@@ -206,6 +208,79 @@ is a migration, not an update. Beyond the immutable-selector dance above:
 5. **Batch by blast tier** (canary → stateless → smart-home broker-first →
    stateful → external tunnel LAST, alone) and gate each tier on full green +
    zero PVC-uid churn before the next.
+
+### 7c) Removing a field from a Flux-managed manifest ORPHANS the live value (server-side apply)
+
+Learned on `paperclip` (`c6466091`, 2026-08-18; F-e931fd2d). A commit dropped
+`serviceAccountName` from a CronJob **and** pruned the ServiceAccount it named.
+Kubernetes' server-side apply removes a field you stop declaring only when your
+field manager was its **sole owner**; here the value stayed on the live CronJob
+with no manager owning it, so nothing ever reconciled it away — while the SA
+itself *was* pruned. The next Job failed pod creation with
+`serviceaccount "<name>" not found`. Nothing in `flux get` or the HelmRelease
+status shows this: the manifest is "applied", the object is "in sync", the
+field is simply not yours any more.
+
+**Rule:** to change a value under SSA, **set it explicitly** to what you want
+(`serviceAccountName: default`, `automountServiceAccountToken: false`) so
+kustomize-controller re-takes ownership. Deleting the line is not a change
+request; it is an abdication.
+
+```bash
+# who owns the field now? (verified 2026-09-22: kustomize-controller Apply owns serviceAccountName on the fixed CronJob)
+kubectl -n <ns> get <kind> <name> -o json --show-managed-fields | /usr/bin/python3 -c "
+import sys,json
+for m in json.load(sys.stdin)['metadata']['managedFields']:
+    print(m['manager'], m['operation'], 'OWNS' if '<fieldName>' in json.dumps(m.get('fieldsV1',{})) else '-')"
+# the live value vs what git declares
+kubectl -n <ns> get <kind> <name> -o jsonpath='{.spec.<path>}{"\n"}'
+```
+
+If no manager owns the field and git no longer declares it, the object will
+keep the stale value indefinitely — set it, or remove it with an explicit
+`kubectl patch --type=json -p '[{"op":"remove","path":"/spec/…"}]'` as a
+recorded one-off.
+
+### 7d) Root-required container entrypoints vs our non-root `securityContext`
+
+Learned on `paperless-gpt` (`3d60ab9f` revert, `264b6064` fix, 2026-08-18;
+F-8f61fe7d). From v0.26.0 the image's `entrypoint.sh` became a
+rootless-*style* script — `adduser`, `mkdir`/`chown $HOME`, then `su-exec` down
+to `PUID` — which **requires starting as root**. Under our pod
+`securityContext.runAsUser: 1000` the `mkdir /home/<app>` fails, the container
+crash-loops, and nothing in the release notes or the semver says so. The
+auto-updater applied it as a safe minor and had to be reverted; it was
+re-applied the same day with a bypass.
+
+This is a **class**, not a paperless-gpt quirk: any image that adopts an
+s6-overlay / LinuxServer / `PUID`+`PGID` entrypoint behaves the same. Two
+legitimate shapes exist in this repo:
+
+1. **Exec the binary directly, own `$HOME`** (the `264b6064` fix — preferred
+   when the image already contains a usable non-root layout):
+   ```yaml
+   command: ["/app/<binary>"]           # skip the root-only entrypoint
+   env:
+     HOME: /home/<app>                  # a dedicated emptyDir, writable by uid 1000
+   ```
+   plus an `emptyDir` mounted at that path. Verify against the image source
+   that every path the entrypoint would have prepared is already writable
+   (`/app/{config,db}`, `/tmp` …).
+2. **Let the entrypoint run as root and drop privileges itself** — the
+   `icloud-docker` shape (`PUID`/`PGID: 1000`, entrypoint remaps its `abc`
+   user; `docs/sops/icloud-docker-reauth.md`). This needs the pod to start as
+   root, i.e. a namespace whose Pod Security level allows it
+   (`docs/sops/pod-security-admission.md`). Choose it deliberately, per app,
+   never as a reflex fix for a crash-loop.
+
+**Detection, before the bump when possible:** diff the image's
+`Dockerfile`/`entrypoint.sh` across the two tags for `su-exec`, `gosu`,
+`s6-overlay`, `PUID`, `chown`; after the bump, `kubectl logs --previous` with
+`mkdir`/`chown … Permission denied` on `$HOME` or `/config` within seconds of
+start is the signature. If it hits an unattended safe-lane bump, the
+maintenance window's health gate reverts the batch — then hold the component
+with a deny rule in `runbooks/auto-update-policy.yaml` until a plan carries one
+of the two shapes above.
 
 ## 8) Diagnose Examples
 
@@ -257,3 +332,4 @@ flux reconcile helmrelease -n <ns> <app> --force
 |---|---|---|
 | 2026.07.18 | 2026-07-18 | Initial — codifies the superset/openclaw upgrade lessons (silence, disable-rollback, immutable-selector, pending-upgrade recovery, revert). |
 | 2026.08.18 | 2026-08-18 | Added Step 0b — digest-pin drift: how to detect a pin that has fallen behind a rebuilt release tag, how to re-pin (multi-arch index digest), why a re-pin is not a version bump, and the before/after scan + `imageID` proof it actually moved. |
+| 2026.09.22 | 2026-09-22 | Added §7c (server-side-apply orphaned field, F-e931fd2d / `c6466091`) and §7d (root-required entrypoints vs non-root securityContext, F-8f61fe7d / `3d60ab9f` + `264b6064`) with matching Troubleshooting rows. |

@@ -3,7 +3,7 @@ plan_id: media-episode-backfill
 component: media-library
 pr: null
 kind: data
-current: "episode NFO 2.5% (20/807) · episode naming 49.9% (403/807, corrected 2026-08-16 — was mis-reported 87.7% by a lax audit regex) · 4 movies without fanart (WONTFIX)"
+current: "episode NFO 96.3% (777/807) · episode naming 76.3% (616/807) · episode thumb 2.5% (20/807) · 4 movies without fanart (WONTFIX) — RE-MEASURED 2026-09-19 by the media-library-audit CronJob (runbooks/media-library-current.md, sweep cycle 393034c0, section tv: episodes_with_nfo=777, episodes_named_ok=616, episodes_total=807). The 2026-08-15 figures this line used to carry (NFO 2.5%, naming 49.9%/403) predate stages 2-3 and conflated the NFO count with the THUMB count; NFO already clears this file's >= 80% target — F-b6f768f1"
 target: "episode NFO >= 80% · naming >= 99% · fanart gap CLOSED AS WONTFIX — delivered in 4 stages"
 update_type: n/a
 risk: medium
@@ -105,12 +105,14 @@ skipped on both the Plex (`art`) and Jellyfin (`backdrop`) paths; items missing
 `skipped_art_only` count. Set the env to `"0"` to restore the old behaviour, or revert
 the introducing commit — no file writes, so there is nothing on the share to undo.
 
-## Baseline recorded 2026-08-15 (unchanged by the fix above, which writes no files)
+## Baseline — recorded 2026-08-15, tv row re-measured 2026-09-19 (the fix above writes no files)
 
 - movies: 508 items · `layout_pct` 99.6 · `nfo_pct` 100.0 · `poster_pct` 99.0 ·
   `fanart_pct` 99.2 · `movie_nfo_orphan` 4
-- tv: 20 shows · 807 episodes · `episode_nfo_pct` 2.5 · `episode_naming_pct` 49.9 (corrected) ·
-  `season_layout_pct` 100.0 · `series_compliance_pct` 100.0
+- tv: 20 shows · 807 episodes · `episode_nfo_pct` **96.3** (777) · `episode_naming_pct` **76.3** (616) ·
+  `episode_thumb_pct` 2.5 (20) · `season_layout_pct` 100.0 · `series_compliance_pct` 100.0 —
+  re-measured 2026-09-19 (`runbooks/media-library-current.md`, cycle `393034c0`, `audit-section` tv);
+  the 2026-08-15 row read NFO 2.5 / naming 49.9, which is the thumb figure and the pre-stage-2/3 naming state
 - Plex: `unmatched=0` in all 3 sections, summary/thumb/art 100%
 - Jellyfin: 550 items · overview 100% · primary 100% · backdrop 546/550 (99.3%)
 - share: 25 T free of 33 T (26% used)

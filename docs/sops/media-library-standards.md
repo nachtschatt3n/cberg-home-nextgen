@@ -1,14 +1,14 @@
 # SOP: Media Library Standards (Plex + Jellyfin + Tube Archivist)
 
 > Description: Canonical on-disk layout, naming, sidecar/NFO conventions, and intake workflow for the shared Plex/Jellyfin/Tube Archivist media library.
-> Version: `2026.09.06`
-> Last Updated: `2026-09-06`
+> Version: `2026.09.22`
+> Last Updated: `2026-09-22`
 > Owner: `media-manager`
 
 | Field | Value |
 |---|---|
-| **Version** | 2026.08.15 |
-| **Last Updated** | 2026-08-15 |
+| **Version** | 2026.09.22 |
+| **Last Updated** | 2026-09-22 |
 | **Owner** | media-manager |
 | **Applies to** | All content under `//${NAS_HOSTNAME}/media/data/` consumed by Plex (`media/plex`) and Jellyfin (`media/jellyfin`); JDownloader intake at `//${NAS_HOSTNAME}/media/downloads/jdownloader`; Tube Archivist content at `//${NAS_HOSTNAME}/media/downloads/tube-archivist` (surfaced in Jellyfin only — Plex is intentionally not configured for YouTube). |
 
@@ -110,6 +110,33 @@ data/
 ### TMDb integration (the v3-vs-v4 trap)
 
 `sidecar.py` calls `https://api.themoviedb.org/3/search/...?api_key=<KEY>&query=...`. The `&api_key=` URL parameter requires a **v3 API key** (32-char hex string). TMDb's newer **v4 Read Access Token** is a JWT-style long string and is sent as `Authorization: Bearer <TOKEN>` — it does NOT work as a query param and returns HTTP 401. When populating `media-manager-tokens.sops.yaml`, use the **"API Key (v3 auth)"** field from <https://www.themoviedb.org/settings/api>, not the v4 token.
+
+### Jellyfin API auth (the legacy-header trap, 12.x)
+
+Send the key as **`Authorization: MediaBrowser Token="<key>"`** — nothing else.
+Jellyfin guards four *legacy* forms behind `EnableLegacyAuthorization`: the
+`X-Emby-Token` header, the `X-MediaBrowser-Token` header, the `api_key=` query
+parameter and the `X-Emby-Authorization` header. Jellyfin **12.x** ships the
+`DisableLegacyAuthorization` migration, which flips that flag to `false` in
+`system.xml` on first boot, after which every one of those forms returns
+**HTTP 401** — indistinguishable, from the caller's side, from a wrong key. The
+`Authorization: MediaBrowser Token=…` header (and the `ApiKey=` query
+parameter, capital A/K) are not guarded and keep working.
+
+Measured 2026-09-22 against the live server (`10.11.11`, legacy still enabled):
+modern header → 200, `X-Emby-Token` → 200, `api_key=` → 200, no auth → 401.
+The 200s on the legacy forms are **not** a reason to use them — they end at the
+12.x upgrade (plan `jellyfin-12.1`, gate G3). All four call sites in
+`library-tools`' `scripts-configmap.yaml` (`rescan.py`, `metadata_coverage.py`,
+`per_item_refresh.py`) were switched to the header form in `5b8193c9`. Any new
+Jellyfin client — a CronJob, a dashboard, an agent skill — must use the header
+form from day one; do not re-enable legacy authorization on the server to
+accommodate one.
+
+```bash
+# the shape, key kept in-shell (secret media-manager-tokens, key JELLYFIN_API_KEY)
+curl -s -H "Authorization: MediaBrowser Token=\"$JF_KEY\"" "http://<jellyfin-host>:8096/System/Info"
+```
 
 ### Dedup / quality decisions (German scene ranking)
 
@@ -525,6 +552,7 @@ For the GitOps pieces (library-tools app): `git revert <commit>` on the introduc
 
 ## Version History
 
+- `2026.09.22`: Added the Jellyfin API auth note next to the TMDb trap (F-5d27f37e): 12.x disables the four legacy forms (`X-Emby-Token`, `X-MediaBrowser-Token`, `api_key=`, `X-Emby-Authorization`); use `Authorization: MediaBrowser Token="<key>"`. Live 10.11.11 responses measured; scripts already switched in `5b8193c9`.
 - `2026.08.15`: Removed the stale Tube Archivist→Plex bridge references (scope line, applies-to, troubleshooting row) — TA content is Jellyfin-only and no bridge CronJob exists. Documented that Jellyfin's scan-exclusion mechanism is an empty `.ignore` file inside the folder, not the `.plexignore` at the section root.
 - `2026.07.05`: Documented that `_duplicates/`/`_archive/` prefixes are naming-only and require a `.plexignore` file per section root to actually stop Plex from scanning them (found via daily sweep: a quarantined duplicate was still indexed under `Movies/_duplicates/`). Confirmed Plex's built-in keyword exclusion doesn't cover custom prefixes.
 - `2026.04.27`: Initial standard. Nested layout. Migration workflow from prior flat layout. Tube Archivist→Plex bridge. Audit thresholds.
