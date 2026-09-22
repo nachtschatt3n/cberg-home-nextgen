@@ -98,7 +98,11 @@ check("unmeasured -> NOT MEASURED in the report, no clean zero, no CRITICAL",
 f, text, new = run_block(lambda: ("n/a", None, "HTTP 404"))
 check("n/a -> N/A reported as the disabled feature, nothing DEGRADED",
       "IPS/IDS alarms: N/A" in text and "disabled by operator" in text and new == [], text)
-check("n/a with declaration False -> no drift finding", f.count(sc.WARNING) == 0)
+# F-68a24565: the n/a branch now emits ONE stable title for the accepted blind
+# spot (AR-125 accepts it) and still no drift title when the declaration matches.
+check("n/a with declaration False -> the blind-spot title only, no drift finding",
+      f.count(sc.WARNING) == 1 and "threat management is disabled" in f._items[0][1]
+      and not any("declared ENABLED" in m for s, m, _ in f._items if s == sc.WARNING))
 
 f, text, new = run_block(lambda: ("measured", [{"msg": "alarm A"}, {"key": "alarm B"}], ""))
 check("measured with alarms -> one CRITICAL per alarm", f.count(sc.CRITICAL) == 2,
@@ -115,8 +119,11 @@ saved_decl = sc.UNIFI_IPS_ENABLED
 sc.UNIFI_IPS_ENABLED = True
 try:
     f, text, new = run_block(lambda: ("n/a", None, "HTTP 404"))
-    check("n/a with declaration True -> drift WARNING (declared enabled, controller has no feed)",
-          f.count(sc.WARNING) == 1 and "declared ENABLED" in f._items[0][1])
+    check("n/a with declaration True -> drift WARNING (declared enabled, controller has no feed) "
+          "plus the blind-spot title",
+          f.count(sc.WARNING) == 2
+          and any("declared ENABLED" in m for s, m, _ in f._items if s == sc.WARNING)
+          and any("threat management is disabled" in m for s, m, _ in f._items if s == sc.WARNING))
     f, text, new = run_block(lambda: ("measured", [], ""))
     check("measured with declaration True -> no drift finding", f.count(sc.WARNING) == 0)
 finally:

@@ -364,6 +364,12 @@ def _s11_ips_alarms(f: "Findings", lines: list[str], probe=None) -> None:
                            "(UNIFI_IPS_ENABLED) but the controller serves no alarm feed "
                            "(404) — declaration drift: update it or re-enable threat management")
             cprint(C.YELLOW, "  🟡 IPS/IDS feed absent (404) but declared enabled — declaration drift")
+        # F-68a24565: a disabled feed is an accepted MONITORING BLIND SPOT, not a clean
+        # result. Emit a stable title so the register (AR-125) can accept it explicitly
+        # and the board shows 'accepted' rather than nothing; if threat management is
+        # re-enabled the title stops being emitted and the AR goes inert on its own.
+        f.add(WARNING, "UniFi IPS/IDS threat management is disabled on the controller — "
+                       "alarm feed 404, no IDS/IPS signal (operator decision 2026-08-28)")
         cprint(C.GREEN, "  🟢 IPS/IDS alarm feed absent (404) — threat management disabled "
                         "on the controller (operator decision 2026-08-28, performance); "
                         "N/A, not a gap — probed live, not assumed")
