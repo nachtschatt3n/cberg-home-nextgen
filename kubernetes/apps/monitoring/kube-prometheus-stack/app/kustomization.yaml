@@ -66,3 +66,6 @@ resources:
   - ./stepbystepguide-alerts.yaml
   - ./u-zeit-alerts.yaml
   - ./uzeit-de-alerts.yaml
+  - ./slo-burn-rate-alerts.yaml
+  - ./scrypted-alerts.yaml
+  - ./vaultwarden-alerts.yaml

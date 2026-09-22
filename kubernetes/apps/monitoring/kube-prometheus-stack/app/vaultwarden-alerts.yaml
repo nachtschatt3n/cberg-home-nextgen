@@ -1,0 +1,139 @@
+---
+# Vaultwarden (F-a3659de8): app-level HTTP reachability only.
+#
+# DELIBERATELY NOT the per-app pod triple. The generic KubePodCrashLooping /
+# KubePodNotReady rules already cover vaultwarden's pod (namespace office,
+# Deployment vaultwarden, container `main`), and its kubelet probes hit
+# GET /alive on :80 every 10s, so a dead process IS caught. The gap the
+# finding names is an HTTP hang the kubelet path cannot see: the user path is
+# DNS (k8s-gateway) -> envoy-internal -> HTTPRoute -> pod, and a wedge in any
+# hop after the pod leaves readiness green while every client times out.
+# Vaultwarden exposes no Prometheus metrics of its own, so the only signal that
+# spans that path is a blackbox probe from inside the cluster.
+#
+# WHAT EXISTS TODAY (verified 2026-09-22):
+#   probe_success                                          4 series, all in namespace monitoring:
+#     job="probe/monitoring/dns-k8s-gateway-{primary,secondary}"  probe_class="dns"
+#     job="probe/monitoring/http-ingress-{internal,external}"     probe_class="http"
+#   probe_success{probe_component="vaultwarden"}           0 series — no Probe CR for it
+#   monitor_status{monitor_name=~"(?i).*(vault|warden|bitwarden).*"}  0 series — no Uptime Kuma monitor
+#   Kuma has 58 ping / 6 group / 3 json-query / 1 snmp monitors; none is an
+#   HTTP monitor of vaultwarden, and a ping monitor would not see an HTTP hang.
+#
+# So the series these rules read DOES NOT EXIST YET. The rules are written
+# against the label contract of the existing Probe CRs in
+# kubernetes/apps/monitoring/prometheus-blackbox-exporter/app/probes.yaml,
+# and the Probe CR that produces it is one more block in that file (outside
+# this change's file scope — a PrometheusRule is not a scrape):
+#
+#   apiVersion: monitoring.coreos.com/v1
+#   kind: Probe
+#   metadata:
+#     name: http-vaultwarden
+#     namespace: monitoring
+#     labels:
+#       release: kube-prometheus-stack
+#   spec:
+#     interval: 30s
+#     scrapeTimeout: 15s
+#     module: http_2xx_ingress          # GET, expects 200, TLS required, 10s timeout
+#     prober:
+#       url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+#       scheme: http
+#       path: /probe
+#     targets:
+#       staticConfig:
+#         static:
+#           - https://vaultwarden.${SECRET_DOMAIN}/alive
+#         labels:
+#           probe_class: http
+#           probe_component: vaultwarden
+#
+# /alive is vaultwarden's unauthenticated health endpoint (200 + timestamp);
+# probing it through the public hostname exercises DNS, Envoy, the route and
+# the Rocket HTTP server — the whole path — without touching user data.
+# NOTE: adding that probe also adds one target to the internal-ingress SLI
+# (`probe_success{probe_class="http"}` is the SLO's selector) — intended, it
+# is an internal ingress host, but know that the SLO's denominator grows.
+#
+# Until the Probe CR lands, VaultwardenHttpProbeAbsent fires — deliberately.
+# That is the finding: no alerting on the app's user path. Do not AR it; add
+# the probe.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: vaultwarden-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: vaultwarden.http
+      interval: 30s
+      rules:
+        # 5m = 10 consecutive failed probes at 30s. A hung HTTP server times
+        # out the 10s module and scores 0, the same as a 5xx or a TLS failure.
+        - alert: VaultwardenHttpProbeFailing
+          expr: |
+            probe_success{probe_class="http", probe_component="vaultwarden"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            category: office
+            component: vaultwarden
+          annotations:
+            summary: "Vaultwarden is not answering HTTP via {{ $labels.instance }}"
+            description: >-
+              The blackbox HTTP probe to {{ $labels.instance }} has failed for
+              5+ minutes (timeout, non-200, or TLS). The pod may still be
+              Ready — the kubelet probes /alive on the pod IP, this probe goes
+              through DNS, envoy-internal and the HTTPRoute — so a green pod
+              with this firing points at a hang in the HTTP server or the
+              ingress path. Check: kubectl -n office logs deploy/vaultwarden
+              --tail=100; kubectl -n office get httproute vaultwarden; and
+              whether IngressProbeFailing is firing too (then it is the
+              gateway, not vaultwarden).
+        # A password manager that answers /alive in seconds instead of
+        # milliseconds is the on-ramp to the hang above. probe_duration_seconds
+        # is the whole probe (DNS + TLS + request); 5s leaves the 10s module
+        # timeout in reserve.
+        - alert: VaultwardenHttpProbeSlow
+          expr: |
+            probe_duration_seconds{probe_class="http", probe_component="vaultwarden"} > 5
+          for: 10m
+          labels:
+            severity: warning
+            category: office
+            component: vaultwarden
+          annotations:
+            summary: "Vaultwarden HTTP probe taking {{ $value | printf \"%.1f\" }}s"
+            description: >-
+              The blackbox probe to {{ $labels.instance }} has taken over 5
+              seconds end-to-end for 10 minutes (normal is well under one). The
+              server is answering but wedging — a SQLite lock, a full data
+              volume, or a stuck SMTP send inside a request are the usual
+              causes. Check the pod's logs and the vaultwarden-data PVC.
+        # INERTNESS GUARD. Fires today (no Probe CR — see header) and, once
+        # the probe exists, whenever it is deleted or the blackbox exporter
+        # stops being scraped. Both rules above are inert in this state.
+        - alert: VaultwardenHttpProbeAbsent
+          expr: |
+            absent(probe_success{probe_class="http", probe_component="vaultwarden"})
+          for: 10m
+          labels:
+            severity: warning
+            category: office
+            component: vaultwarden
+          annotations:
+            summary: "No blackbox HTTP probe result for Vaultwarden — its HTTP alerts are blind"
+            description: >-
+              probe_success{probe_component="vaultwarden"} has no series for 10
+              minutes. VaultwardenHttpProbeFailing and VaultwardenHttpProbeSlow
+              are INERT while this fires; the pod-level rules still cover a
+              dead process but nothing covers an HTTP hang. Either the Probe CR
+              http-vaultwarden was never added to
+              kubernetes/apps/monitoring/prometheus-blackbox-exporter/app/probes.yaml
+              (see the header of vaultwarden-alerts.yaml for the block), it was
+              removed, or the blackbox exporter is down (BlackboxProbesAbsent).

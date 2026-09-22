@@ -1,0 +1,295 @@
+---
+# Multi-window, multi-burn-rate alerts for every ENABLED SLO in the sweep DB
+# (`runbooks/policy-cli.py slo list`, F-7f596ea3). Before this file the cluster
+# had 87 PrometheusRules and ZERO burn-rate rules: SLO compliance was computed
+# only by runbooks/slo-check.py once per 48h sweep, so a budget could be burned
+# to nothing between two sweeps with no page.
+#
+# CONTRACT WITH THE DB (read it, do not paraphrase it):
+#   * The five `slo:sli_ratio` expressions below are the `query_json`
+#     numerator/denominator of the DB rows VERBATIM, combined exactly as
+#     runbooks/lib/slo/clients.py:windowed_ratio() combines them:
+#     `(NUM) / (DEN)`. slo-check.py time-averages that ratio with a subquery;
+#     here it is RECORDED once a minute and the windows are plain range
+#     selectors over the recording — same arithmetic, no nested subqueries at
+#     rule-evaluation time (the unifi denominator already carries a [1d:5m]
+#     subquery of its own; nesting that inside a [3d:] subquery is what the
+#     recording rule avoids).
+#   * Burn rate = (1 - compliance) / (1 - target), runbooks/lib/slo/calc.py:
+#     burn_rate(). 1.0 = the budget lasts exactly the SLO window (7d).
+#   * Windows/thresholds are the DB rows' `burn_rate_windows`:
+#       long 1h / short 5m  / 14.4x   (2% of a 7d budget gone in 1h)  -> page
+#       long 6h / short 30m /  6.0x   (5% gone in 6h)                 -> page
+#       long 3d / short 6h  /  1.0x   (whole budget on track to go)   -> ticket
+#     longhorn-volume-health, mosquitto-broker-up and unifi-device-availability
+#     carry that triple explicitly; internal-dns-resolution and
+#     internal-ingress-availability have burn_rate_windows=NULL, for which
+#     runbooks/lib/slo/catalog.py:_DEFAULT_BRWS is the SAME triple, so all five
+#     SLOs use one alert set. If a DB row ever gets a DIFFERENT triple this
+#     file must grow a per-SLO alert; the `slo` label makes that a local edit.
+#   * Targets are the DB rows' `target` (0.999 / 0.995 / 0.99 / 0.995 / 0.99),
+#     recorded as `slo:target` so the three alerts stay generic.
+#
+# WHY THE SLI GOES ABSENT INSTEAD OF NaN (and why that is the guard):
+#   every numerator is present-gated by its author (see the DB descriptions):
+#   with the source metric gone the numerator is EMPTY, so `(NUM)/(DEN)` is
+#   empty and the recorded series has a gap — never 0/0. avg_over_time() skips
+#   the gap, so a scrape blackout is not scored as an outage, and
+#   `absent(slo:sli_ratio{slo=...})` is the honest "this SLO is blind" arm.
+#   One absent() per SLO on purpose: a bare absent(slo:sli_ratio) fires only
+#   when ALL FIVE vanish (the icloud-backup-alerts.yaml lesson).
+#
+# Existence check at authoring (2026-09-22, Prometheus 3.14.0): each of the
+# five `(NUM)/(DEN)` expressions returned exactly 1 series, value 1; each
+# `avg_over_time(((NUM)/(DEN))[1h:1m])` returned 1 series, value 1.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-burn-rate-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  groups:
+    # ------------------------------------------------------------------------
+    # RECORDING group: the SLIs (DB rows verbatim), their targets, and the burn
+    # rates derived from them, evaluated in that order once a minute (rules in
+    # a group run sequentially, so the burn-rate rules see this cycle's SLI).
+    # No alert lives here; the absent() guard for everything this group
+    # produces is SloSliAbsent in slo.burn-rate.alerts below — one per SLO,
+    # on slo:sli_ratio, the series every other rule in this file derives from.
+    # ------------------------------------------------------------------------
+    - name: slo.recording
+      interval: 1m
+      rules:
+        - record: slo:sli_ratio
+          labels:
+            slo: internal-dns-resolution
+          expr: |
+            ((count(probe_success{probe_class="dns"} == 1) or on() (count(probe_success{probe_class="dns"}) * 0)))
+            /
+            ((count(probe_success{probe_class="dns"}) or on() vector(0)))
+        - record: slo:target
+          labels:
+            slo: internal-dns-resolution
+          expr: vector(0.999)
+
+        - record: slo:sli_ratio
+          labels:
+            slo: internal-ingress-availability
+          expr: |
+            ((count(probe_success{probe_class="http"} == 1) or on() (count(probe_success{probe_class="http"}) * 0)))
+            /
+            ((count(probe_success{probe_class="http"}) or on() vector(0)))
+        - record: slo:target
+          labels:
+            slo: internal-ingress-availability
+          expr: vector(0.995)
+
+        - record: slo:sli_ratio
+          labels:
+            slo: longhorn-volume-health
+          expr: |
+            ((count(count by (volume) (longhorn_volume_robustness{state="healthy"} == 1)) or on() vector(0)))
+            /
+            (count(count by (volume) (longhorn_volume_state{state="attached"} == 1)))
+        - record: slo:target
+          labels:
+            slo: longhorn-volume-health
+          expr: vector(0.99)
+
+        - record: slo:sli_ratio
+          labels:
+            slo: mosquitto-broker-up
+          expr: |
+            (max(up{job="mosquitto-metrics"}))
+            /
+            ((count(up{job="mosquitto-metrics"}) * 0 + 1))
+        - record: slo:target
+          labels:
+            slo: mosquitto-broker-up
+          expr: vector(0.995)
+
+        - record: slo:sli_ratio
+          labels:
+            slo: unifi-device-availability
+          expr: |
+            ((count(count by (name) (unpoller_device_uptime_seconds > 0)) or on() (count(count by (name) (unpoller_device_uptime_seconds)) * 0)))
+            /
+            (clamp_min(max_over_time((count(count by (name) (unpoller_device_uptime_seconds)) or vector(0))[1d:5m]),1))
+        - record: slo:target
+          labels:
+            slo: unifi-device-availability
+          expr: vector(0.99)
+
+        # Burn rates over each window the DB names. Generic over the `slo`
+        # label: both operands carry exactly {slo}, so on(slo) is one-to-one.
+        - record: slo:error_budget_burn_rate:5m
+          expr: |
+            (1 - avg_over_time(slo:sli_ratio[5m])) / on(slo) (1 - slo:target)
+        - record: slo:error_budget_burn_rate:30m
+          expr: |
+            (1 - avg_over_time(slo:sli_ratio[30m])) / on(slo) (1 - slo:target)
+        - record: slo:error_budget_burn_rate:1h
+          expr: |
+            (1 - avg_over_time(slo:sli_ratio[1h])) / on(slo) (1 - slo:target)
+        - record: slo:error_budget_burn_rate:6h
+          expr: |
+            (1 - avg_over_time(slo:sli_ratio[6h])) / on(slo) (1 - slo:target)
+        - record: slo:error_budget_burn_rate:3d
+          expr: |
+            (1 - avg_over_time(slo:sli_ratio[3d])) / on(slo) (1 - slo:target)
+
+    # ------------------------------------------------------------------------
+    # The alerts. Long window says "this is real", short window says "it is
+    # still happening" — the pair is what keeps a burn that ended an hour ago
+    # from paging for the rest of the long window.
+    # ------------------------------------------------------------------------
+    - name: slo.burn-rate.alerts
+      interval: 1m
+      rules:
+        - alert: SloErrorBudgetBurnRateFast
+          expr: |
+            slo:error_budget_burn_rate:1h > 14.4
+            and on(slo)
+            slo:error_budget_burn_rate:5m > 14.4
+          for: 2m
+          labels:
+            severity: critical
+            category: slo
+            component: slo-burn-rate
+          annotations:
+            summary: "SLO {{ $labels.slo }} burning error budget at {{ $value | printf \"%.1f\" }}x (1h/5m)"
+            description: >-
+              {{ $labels.slo }} is consuming its 7-day error budget at
+              {{ $value | printf "%.1f" }}x the sustainable rate over the last hour
+              and is still burning over the last 5 minutes. At 14.4x, 2% of the
+              whole budget is gone every hour. Read the SLI: the `slo:sli_ratio`
+              recording with this `slo` label, and the DB row
+              (`runbooks/policy-cli.py slo show {{ $labels.slo }}`) for what it
+              measures and what usually moves it.
+        - alert: SloErrorBudgetBurnRateMedium
+          expr: |
+            slo:error_budget_burn_rate:6h > 6
+            and on(slo)
+            slo:error_budget_burn_rate:30m > 6
+          for: 5m
+          labels:
+            severity: critical
+            category: slo
+            component: slo-burn-rate
+          annotations:
+            summary: "SLO {{ $labels.slo }} burning error budget at {{ $value | printf \"%.1f\" }}x (6h/30m)"
+            description: >-
+              {{ $labels.slo }} has burned its 7-day error budget at
+              {{ $value | printf "%.1f" }}x the sustainable rate over the last six
+              hours and is still burning over the last 30 minutes. At 6x, 5% of
+              the budget goes every six hours — a slower, longer degradation than
+              the 1h/5m alert catches. Same reading path: `slo:sli_ratio{slo="{{ $labels.slo }}"}`
+              and `runbooks/policy-cli.py slo show {{ $labels.slo }}`.
+        - alert: SloErrorBudgetBurnRateSlow
+          expr: |
+            slo:error_budget_burn_rate:3d > 1
+            and on(slo)
+            slo:error_budget_burn_rate:6h > 1
+          for: 15m
+          labels:
+            severity: warning
+            category: slo
+            component: slo-burn-rate
+          annotations:
+            summary: "SLO {{ $labels.slo }} on track to exhaust its error budget ({{ $value | printf \"%.2f\" }}x over 3d)"
+            description: >-
+              {{ $labels.slo }} has burned error budget faster than 1x over the
+              last three days and the last six hours — at this rate the whole
+              7-day budget is gone before the window ends. This is the
+              ticket-severity signal: nothing is on fire right now, but the SLO
+              will be missed unless the slow leak is found.
+              `runbooks/policy-cli.py slo show {{ $labels.slo }}` names the SLI.
+
+        # INERTNESS GUARDS, one per SLO. A recorded SLI that stops being
+        # produced (source exporter gone, Probe CR deleted, rule file unloaded
+        # by a label typo) leaves every burn-rate expression above matching
+        # nothing — state=inactive, indistinguishable from "budget intact".
+        # 15m because the longhorn and unifi denominators go absent DELIBERATELY
+        # during a scrape gap (see their DB descriptions); a single missed
+        # scrape must not page.
+        - alert: SloSliAbsent
+          expr: absent(slo:sli_ratio{slo="internal-dns-resolution"})
+          for: 15m
+          labels:
+            severity: warning
+            category: slo
+            component: slo-burn-rate
+          annotations:
+            summary: "SLO {{ $labels.slo }} has no SLI samples — its burn-rate alerts are blind"
+            description: >-
+              slo:sli_ratio{slo="{{ $labels.slo }}"} has produced no sample for
+              15 minutes. Every SloErrorBudgetBurnRate* alert for this SLO is
+              INERT while this fires and must not be read as a healthy budget.
+              Either the source metric is gone (for this SLO: probe_success with
+              probe_class="dns" — check BlackboxProbesAbsent) or this
+              PrometheusRule is not loaded (verify via /api/v1/rules, not
+              kubectl).
+        - alert: SloSliAbsent
+          expr: absent(slo:sli_ratio{slo="internal-ingress-availability"})
+          for: 15m
+          labels:
+            severity: warning
+            category: slo
+            component: slo-burn-rate
+          annotations:
+            summary: "SLO {{ $labels.slo }} has no SLI samples — its burn-rate alerts are blind"
+            description: >-
+              slo:sli_ratio{slo="{{ $labels.slo }}"} has produced no sample for
+              15 minutes. Every SloErrorBudgetBurnRate* alert for this SLO is
+              INERT while this fires. Source metric: probe_success with
+              probe_class="http" (check BlackboxProbesAbsent).
+        - alert: SloSliAbsent
+          expr: absent(slo:sli_ratio{slo="longhorn-volume-health"})
+          for: 15m
+          labels:
+            severity: warning
+            category: slo
+            component: slo-burn-rate
+          annotations:
+            summary: "SLO {{ $labels.slo }} has no SLI samples — its burn-rate alerts are blind"
+            description: >-
+              slo:sli_ratio{slo="{{ $labels.slo }}"} has produced no sample for
+              15 minutes. Every SloErrorBudgetBurnRate* alert for this SLO is
+              INERT while this fires. Source metrics: longhorn_volume_robustness
+              and longhorn_volume_state from longhorn-manager; the denominator
+              is absent by design when no volume is attached, so a cluster with
+              every volume detached also lands here.
+        - alert: SloSliAbsent
+          expr: absent(slo:sli_ratio{slo="mosquitto-broker-up"})
+          for: 15m
+          labels:
+            severity: warning
+            category: slo
+            component: slo-burn-rate
+          annotations:
+            summary: "SLO {{ $labels.slo }} has no SLI samples — its burn-rate alerts are blind"
+            description: >-
+              slo:sli_ratio{slo="{{ $labels.slo }}"} has produced no sample for
+              15 minutes. Every SloErrorBudgetBurnRate* alert for this SLO is
+              INERT while this fires. Source metric: up{job="mosquitto-metrics"}
+              — the ServiceMonitor for the broker's exporter is gone, not the
+              broker (a broker that is down still has an up=0 series).
+        - alert: SloSliAbsent
+          expr: absent(slo:sli_ratio{slo="unifi-device-availability"})
+          for: 15m
+          labels:
+            severity: warning
+            category: slo
+            component: slo-burn-rate
+          annotations:
+            summary: "SLO {{ $labels.slo }} has no SLI samples — its burn-rate alerts are blind"
+            description: >-
+              slo:sli_ratio{slo="{{ $labels.slo }}"} has produced no sample for
+              15 minutes. Every SloErrorBudgetBurnRate* alert for this SLO is
+              INERT while this fires. Source metric: unpoller_device_uptime_seconds
+              — the unpoller exporter is gone or cannot reach the UniFi
+              controller (the JVM GC-stall pattern, see unpoller alerts).

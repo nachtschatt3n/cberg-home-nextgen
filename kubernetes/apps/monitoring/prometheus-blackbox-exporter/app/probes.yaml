@@ -95,3 +95,31 @@ spec:
       labels:
         probe_class: http
         probe_component: ingress-external
+---
+# vaultwarden has no metrics endpoint and Kuma has no HTTP monitor for it, so
+# a dead process is caught by the generic pod rules but an app-level HANG is
+# not. This probe is the series vaultwarden-alerts.yaml keys on
+# (probe_component="vaultwarden"); without it that file's absent() guard fires
+# by design (F-a3659de8, 2026-09-22).
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: http-vaultwarden
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  interval: 30s
+  scrapeTimeout: 15s
+  module: http_2xx_ingress
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://vaultwarden.${SECRET_DOMAIN}/alive
+      labels:
+        probe_class: http
+        probe_component: vaultwarden

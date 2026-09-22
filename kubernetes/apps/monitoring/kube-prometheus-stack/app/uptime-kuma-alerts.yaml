@@ -46,3 +46,96 @@ spec:
               Uptime Kuma reports {{ $labels.monitor_name }} ({{ $labels.monitor_type }}
               {{ $labels.monitor_url }}) DOWN for 2+ minutes. Check the target service
               and the Kuma dashboard.
+        # INERTNESS GUARD for the rule above (added 2026-09-22 with the latency
+        # group). KumaMonitorDown matches nothing when the Kuma /metrics scrape
+        # is gone — every Kuma-tracked endpoint is unwatched and this file
+        # reads as healthy. 10m rides out a Kuma pod restart.
+        - alert: KumaMonitorMetricsAbsent
+          expr: absent(monitor_status)
+          for: 10m
+          labels:
+            severity: warning
+            category: uptime
+            component: uptime-kuma
+          annotations:
+            summary: "Uptime Kuma monitor metrics are absent from Prometheus"
+            description: >-
+              No monitor_status series for 10 minutes. KumaMonitorDown is INERT
+              while this fires — no Kuma-tracked endpoint can page.
+              Check the uptime-kuma pod in namespace monitoring and its
+              ServiceMonitor (30s scrape of /metrics).
+
+    # ------------------------------------------------------------------------
+    # Ping latency (F-e0cabea1). Kuma's ping monitors had status alerts only:
+    # a device answering every ping at 5 s never went DOWN and never paged.
+    #
+    # WHICH METRIC CARRIES PING LATENCY — resolved 2026-09-22, Kuma 2.5.5:
+    #
+    #   monitor_response_time          68 series (one per monitor), MILLISECONDS.
+    #     Kuma's per-heartbeat gauge: the RTT of the LAST ping. Spiky by
+    #     nature — instant median 4 ms, p90 73 ms across the 58 ping monitors,
+    #     yet 24h max 2867 ms and a 15m-average peak of 2546 ms in 7d. This is
+    #     the ping latency.
+    #
+    #   monitor_response_time_seconds  204 series = 68 monitors x 3, SECONDS,
+    #     distinguished by a `window` label in {1d, 30d, 365d} (same shape as
+    #     monitor_uptime_ratio, also 204). It is Kuma 2.x's ROLLING AVERAGE
+    #     response time over that window — not a unit-converted twin of the
+    #     gauge. A day-long mean of a 4 ms ping with occasional 2 s spikes sits
+    #     at 0.04-0.19 s, which is why it "tops out at 0.2" while the gauge
+    #     shows 16938: they disagree because they measure different things.
+    #     A threshold on it would need a DAY of sustained degradation to move
+    #     and could never catch a live one. Do not alert on it.
+    #
+    # THRESHOLD. The gauge alone would page on every WiFi spike (23 monitors
+    # exceeded 1000 ms instantaneously in one 24h span, 0 went DOWN in 7d), so
+    # the rule reads a 15m average and holds it 15m: roughly 30 minutes of
+    # RTT above one second. Calibrated against the last 7 days at authoring:
+    # instantaneous >1000 ms: 23 monitors/24h; 15m-average >1000 ms at any
+    # point: 9 monitors/7d; 15m-average >1000 ms held for 15m (this rule):
+    # 1 monitor, once. Ping monitors are IoT devices on the 2.4 GHz SSID;
+    # one second sustained is a device or an AP in trouble, not the air.
+    # Scoped to monitor_type="ping": json-query/snmp response times measure a
+    # server round trip, and groups carry no signal of their own.
+    # ------------------------------------------------------------------------
+    - name: uptime-kuma.latency
+      interval: 30s
+      rules:
+        - alert: KumaPingLatencyHigh
+          expr: |
+            avg_over_time(monitor_response_time{monitor_type="ping"}[15m]) > 1000
+          for: 15m
+          labels:
+            severity: warning
+            category: uptime
+            component: uptime-kuma
+          annotations:
+            summary: "Ping latency to {{ $labels.monitor_name }} averaging {{ $value | printf \"%.0f\" }} ms"
+            description: >-
+              Uptime Kuma's ping to {{ $labels.monitor_name }}
+              ({{ $labels.monitor_hostname }}) has averaged over 1000 ms for the
+              last 15 minutes, and stayed there a further 15 — the device is
+              answering (no DOWN) but barely. On this network that is a WiFi
+              client with a bad link, an AP under load, or a device that is
+              wedged but still answering ICMP. Check the client in UniFi
+              (`unifictl local correlate client <MAC>`) and the AP it sits on.
+        # INERTNESS GUARD. Distinct from KumaMonitorMetricsAbsent on purpose: a
+        # Kuma release can drop or rename one metric and keep the other (this
+        # very file exists because 2.x ADDED one), so the latency rule guards
+        # the exact series it reads.
+        - alert: KumaPingLatencyMetricAbsent
+          expr: absent(monitor_response_time{monitor_type="ping"})
+          for: 10m
+          labels:
+            severity: warning
+            category: uptime
+            component: uptime-kuma
+          annotations:
+            summary: "Uptime Kuma ping response-time gauge is absent from Prometheus"
+            description: >-
+              No monitor_response_time{monitor_type="ping"} series for 10
+              minutes. KumaPingLatencyHigh is INERT while this fires. Either
+              Kuma's /metrics scrape is gone (KumaMonitorMetricsAbsent will fire
+              too), every ping monitor was deleted, or a Kuma upgrade renamed
+              the per-heartbeat gauge — re-resolve the metric before re-pointing
+              the rule (see the group header).

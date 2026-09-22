@@ -1,0 +1,105 @@
+---
+# Scrypted NVR (F-dde403f4): the only home-automation workload with no
+# app-specific rule (0 of 119 groups on 2026-09-22). Deployment `scrypted` in
+# namespace home-automation (kubernetes/apps/home-automation/scrypted-nvr/),
+# single replica, container `app`, pod name scrypted-<rs-hash>-<pod-hash>.
+#
+# Existence check at authoring (2026-09-22):
+#   kube_pod_container_status_restarts_total{namespace="home-automation", pod=~"scrypted.*"}  1 series (container="app")
+#   kube_pod_status_ready{namespace="home-automation", pod=~"scrypted.*"}                     3 series (condition true/false/unknown)
+#   kube_pod_info{namespace="home-automation", pod=~"scrypted-[0-9a-f]+-.*"}                  1 series
+#   kube_deployment_spec_replicas{namespace="home-automation", deployment="scrypted"}         1 series, value 1
+#
+# The generic KubePodCrashLooping / KubePodNotReady rules do fire for this
+# pod, but without the component label nothing routes it as "the cameras are
+# down" and the description does not say where to look. The standard per-app
+# triple (house rule, see blackbox-exporter-alerts.yaml) plus an absent()
+# guard, which the generic rules also lack: a Deployment scaled to zero or
+# deleted produces NO pod series, so every pod-scoped rule goes inactive and
+# reads as healthy.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: scrypted-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: scrypted.pods.health
+      interval: 30s
+      rules:
+        # `unless ... Succeeded` excludes Completed Job pods (blueprint Gotcha
+        # #7); scrypted has none today but the shape is the house shape.
+        - alert: ScryptedPodNotReady
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="home-automation", pod=~"scrypted-[0-9a-f]+-.*", condition="true"}
+              unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+            ) == 0
+          for: 5m
+          labels:
+            severity: critical
+            category: home-automation
+            component: scrypted
+          annotations:
+            summary: "Scrypted pod {{ $labels.pod }} is not ready"
+            description: >-
+              Scrypted NVR pod {{ $labels.pod }} has been not ready for more
+              than 5 minutes. Camera streams, recordings and the HomeKit bridge
+              are down. Check:
+              kubectl -n home-automation describe pod {{ $labels.pod }}
+              and the CIFS recordings mount (cifs-scrypted-media) and the Intel
+              GPU device plugin it depends on.
+        - alert: ScryptedPodCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="home-automation", pod=~"scrypted-[0-9a-f]+-.*"}[15m]) * 900 > 2
+          for: 5m
+          labels:
+            severity: critical
+            category: home-automation
+            component: scrypted
+          annotations:
+            summary: "Scrypted pod {{ $labels.pod }} is crash looping"
+            description: >-
+              Scrypted NVR pod {{ $labels.pod }} has restarted
+              {{ $value | printf "%.0f" }} times in the last 15 minutes. Check
+              logs for plugin load failures, a full or unreachable recordings
+              share, or a GPU device that failed to attach:
+              kubectl -n home-automation logs {{ $labels.pod }} --previous --tail=100
+        - alert: ScryptedPodRestarted
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="home-automation", pod=~"scrypted-[0-9a-f]+-.*"}[15m]) > 0
+          for: 1m
+          labels:
+            severity: warning
+            category: home-automation
+            component: scrypted
+          annotations:
+            summary: "Scrypted pod {{ $labels.pod }} restarted"
+            description: >-
+              Scrypted NVR pod {{ $labels.pod }} has restarted at least once in
+              the last 15 minutes. Monitor for repeated restarts; a single
+              restart drops every active camera stream once.
+        # INERTNESS GUARD. Every rule above is pod-scoped; with no scrypted pod
+        # (Deployment deleted, scaled to 0, HelmRelease suspended, or
+        # kube-state-metrics down) they match nothing and sit inactive.
+        # 10m rides out a rollout, where the old pod is gone before the new one
+        # is registered only for seconds, and a kube-state-metrics restart.
+        - alert: ScryptedPodAbsent
+          expr: absent(kube_pod_info{namespace="home-automation", pod=~"scrypted-[0-9a-f]+-.*"})
+          for: 10m
+          labels:
+            severity: warning
+            category: home-automation
+            component: scrypted
+          annotations:
+            summary: "No Scrypted pod exists in namespace home-automation"
+            description: >-
+              kube_pod_info shows no scrypted-* pod in home-automation for 10
+              minutes. ScryptedPodNotReady / CrashLooping / Restarted are all
+              INERT in this state and must not be read as healthy. Check:
+              kubectl -n home-automation get deploy scrypted; flux get hr -n
+              home-automation scrypted; and that kube-state-metrics is up.
