@@ -130,4 +130,10 @@ except Exception as e:
 sweep_pg_dsn_down() {
     [ -n "${SWEEP_PG_PF_PID:-}" ] && kill "${SWEEP_PG_PF_PID}" 2>/dev/null
     unset SWEEP_PG_PF_PID
+    # The DSN points at the forward just killed. Leaving it exported turns
+    # every later caller in this shell -- policy-cli, which would otherwise
+    # dial its own forward -- into "connection refused" on a dead port
+    # (measured 2026-09-22: four finding writes lost in one call). Unset it so
+    # consumers fall back to their own dial or fail closed on "no DSN".
+    unset SWEEP_PG_DSN
 }
