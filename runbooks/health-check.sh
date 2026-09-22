@@ -7330,6 +7330,86 @@ print('DRIFT ' + ' | '.join(drift) if drift else 'OK ' + model)
     echo ""
 } >> "$OUTPUT_FILE"
 
+#######################################
+# Weekly invoice scan (mail -> Paperless)
+#######################################
+#
+# This job archived NOTHING from email between 2026-08-24 and 2026-09-19 and
+# nobody noticed. It failed on 08-31 and twice on 09-07 ("Agent couldn't
+# generate a response"), then sat disabled. Paperless kept filling from the
+# scanner and email-ingest paths, so it looked healthy the whole time.
+#
+# Freshness is judged from the tool's OWN watermark (state.json.last_success),
+# which only a clean --apply run advances: a dry run, or any run with errors,
+# deliberately leaves it alone so the missed window gets rescanned. That makes
+# it an honest record of "when did we last completely scan the mail".
+#
+# Schedule is Monday 09:00 Europe/Berlin, so alert past ~9 days.
+
+log_section "Invoice Scan"
+
+check_invoice_scan() {
+    local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
+    local pod out age last errors
+
+    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
+        | awk '$3=="Running"{print $1; exit}')
+    if [ -z "$pod" ]; then
+        echo "  no Running openclaw pod — skipped"
+        return 0
+    fi
+
+    out=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- python3 -c "
+import json, datetime
+try:
+    st = json.load(open('/home/node/clawd/state/invoice-scan/state.json'))
+except Exception as e:
+    print('NOSTATE ' + str(e)[:60]); raise SystemExit
+ls = st.get('last_success')
+if not ls:
+    print('NEVER'); raise SystemExit
+try:
+    d = datetime.datetime.strptime(ls, '%Y-%m-%dT%H:%M:%SZ')
+    print('AGE %d %s %d' % ((datetime.datetime.utcnow()-d).days, ls[:10], len(st.get('uploaded', {}))))
+except Exception:
+    print('BADSTAMP ' + ls[:40])
+" 2>/dev/null)
+
+    case "$out" in
+        NOSTATE*)
+            echo "  no scan state found — the job may never have run"
+            add_major_issue "Invoice scan has no state file — it has not completed a scan since deployment"
+            ;;
+        NEVER*)
+            echo "  ❌ no successful scan recorded yet"
+            add_major_issue "Invoice scan has never completed a clean apply run — mail invoices are not being archived"
+            ;;
+        AGE*)
+            age=$(echo "$out" | awk '{print $2}')
+            last=$(echo "$out" | awk '{print $3}')
+            local total; total=$(echo "$out" | awk '{print $4}')
+            echo "  last clean scan: $last (${age}d ago) · documents archived to date: ${total}"
+            if [ "${age:-99}" -gt 9 ]; then
+                log_critical "Invoice scan has not completed cleanly for ${age} days"
+                add_critical_issue "Invoice scan stale ${age}d (weekly job, last clean run $last) — email invoices are silently not reaching Paperless, which went unnoticed for 26 days once already"
+            else
+                echo "  ✅ invoice scan current"
+                CHECKS_PASSED=$((CHECKS_PASSED + 1))
+            fi
+            ;;
+        *)
+            echo "  ⚠️  unreadable scan state: ${out:-<empty>}"
+            add_minor_issue "Invoice scan state unreadable — freshness unverified"
+            ;;
+    esac
+}
+
+{
+    echo "=== Invoice Scan ==="
+    check_invoice_scan
+    echo ""
+} | tee -a "$OUTPUT_FILE"
+
 log_section "Morning Briefing Delivery"
 
 check_briefing_delivered() {
