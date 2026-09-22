@@ -4,8 +4,8 @@
 > (`health-check.sh`, `security-check.py`, `doc-check.py`, `slo-check.py`,
 > `sweep-run.py`, `maintenance-plan.py`, the media `audit.py`), so a check that could not measure
 > something never reports it as passing — or as confirmed.
-> Version: `2026.09.20`
-> Last Updated: `2026-09-20`
+> Version: `2026.09.22`
+> Last Updated: `2026-09-22`
 > Owner: `operator + daily-operation agents`
 
 ---
@@ -185,6 +185,8 @@ into silence). Ask of every suppressor: **who wrote the text I am trusting?**
 | `security-check.py` | attack-pattern needles were matched against whole log bodies, including the ingress controller's own diagnostic stdout, so the controller describing a request counted as an attack against it. Anchored to the request surface (`b2a76e7c`) | confirmed (noise scored as a result) |
 | `security-check.py` | the stale-Ingress sub-probe tested `if ing:` — a **failed** kubectl read is falsy exactly like an empty one, so an unreadable cluster scored as "no stale Ingress". The canonical shape this SOP is named for (`476ca7ea`) | pass |
 | `security-check.py` | `SECTION_NAMES` and `_SECTION_SLUGS` are index-aligned and were edited one-sided, so `write_report()` raised IndexError **after the entire scan had completed** and before the findings writer ran: section INCOMPLETE, zero findings persisted. Remedy is an import-time length assert, deliberately **not** a bounds-check fallback — a silently mislabelled section is drift that nothing ever reports. The same guard was mirrored into `doc-check.py` on 2026-09-20 (`759066d9`) | incomplete (a finished scan discarded) |
+| any reader of Zigbee2MQTT `state.json` (liveness, battery age) | `last_seen` in `state.json` FREEZES: measured 2026-09-22, 24/24 devices read stale beyond 12h there while 17/24 were fresh within the hour in `database.db`, and one sensor read 23.8h stale while publishing to MQTT in the same second | a dead sensor reads alive and a live one reads dead, on a file that never says it stopped updating — use `bridge/devices` over MQTT or `database.db` `lastSeen` (docs/sops/zigbee2mqtt.md §2b) |
+| any per-pod DNS drill-down against k8s-gateway | pods listen on UDP **1053**, not 53; `kubectl port-forward` refuses UDP outright (`UDP protocol is not supported`); pod IPs are unreachable from the LAN, so a `dig` from the operator Mac times out with no route | a probe that could never reach the listener reports "DNS is broken" — the probe must run in-cluster (docs/sops/k8s-gateway-dns.md, per-pod recipe) |
 
 ### Enforcement (added 2026-08-22)
 
