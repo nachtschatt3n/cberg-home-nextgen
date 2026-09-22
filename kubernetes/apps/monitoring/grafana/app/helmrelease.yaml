@@ -113,6 +113,46 @@ spec:
         check_for_updates: false
         check_for_plugin_updates: false
         reporting_enabled: false
+      # 2026-09-22 (F-5a894d0e): Authentik SSO was provisioned but INERT. The
+      # blueprint provider + application exist and envFromSecret already injects
+      # GF_AUTH_GENERIC_OAUTH_CLIENT_ID/_SECRET, but nothing ever set
+      # enabled=true, so /login rendered only the local form (measured live:
+      # /login bootdata oauth={} , disableLoginForm=false). Every Grafana login
+      # was a LOCAL login, and the Authentik 365d-session change could never
+      # reach it. Verify after rollout with the bootdata/frontend-settings
+      # oauth block -- NOT `kubectl exec printenv` (distroless, exec returns an
+      # empty result that reads like "unset"). The pod restarts on this ConfigMap
+      # change: re-run the datasource gate (docs/sops/grafana-image-changes.md,
+      # /api/plugins?type=datasource == 18) afterwards.
+      auth:
+        # Grafana expires its own session on its own clock, independent of
+        # Authentik. Chart/Grafana defaults are 7d inactive / 30d absolute;
+        # align with the Authentik login-stage session so an SSO user is not
+        # bounced to a local password prompt in between.
+        login_maximum_inactive_lifetime_duration: 30d
+        login_maximum_lifetime_duration: 365d
+        signout_redirect_url: "https://auth.${SECRET_DOMAIN}/application/o/grafana/end-session/"
+      auth.generic_oauth:
+        enabled: true
+        name: Authentik
+        icon: signin
+        allow_sign_up: true
+        # Local form stays available (auto_login false, disable_login_form
+        # default false) so the admin account remains a break-glass path.
+        auto_login: false
+        # client_id / client_secret come from envFromSecret grafana-admin-secret
+        # (GF_AUTH_GENERIC_OAUTH_CLIENT_ID / _SECRET; env overrides ini). Keep
+        # them in sync with the grafana-oauth2-provider entry in
+        # kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml.
+        scopes: openid profile email
+        auth_url: "https://auth.${SECRET_DOMAIN}/application/o/authorize/"
+        token_url: "https://auth.${SECRET_DOMAIN}/application/o/token/"
+        api_url: "https://auth.${SECRET_DOMAIN}/application/o/userinfo/"
+        use_pkce: true
+        # `groups` is delivered by authentik's managed profile scope mapping,
+        # which the provider already binds. Everyone else lands as Viewer.
+        role_attribute_path: "contains(groups[*], 'authentik Admins') && 'Admin' || 'Viewer'"
+        role_attribute_strict: false
     datasources:
       datasources.yaml:
         apiVersion: 1
@@ -233,14 +273,24 @@ spec:
           gnetId: 15650 # https://grafana.com/grafana/dashboards/15650 - InfluxDB 2.x monitoring
           revision: 1
           datasource: Prometheus
+        # 2026-09-22 (F-f3bd72df item 2): these two use the object-form
+        # datasource ref ("datasource": {"type": ..., "uid": "${DS_PROMETHEUS}"})
+        # that the chart's bare `datasource: <name>` sed (which rewrites only a
+        # one-line `"datasource": ...,`) never touches, so the uid stayed the
+        # literal placeholder -- measured live: AdGuard 31 refs and
+        # mosquitto-exporter 61 refs still `${DS_PROMETHEUS}`, while cloudflared
+        # (list form below) resolves. The list form substitutes the placeholder
+        # itself, exactly like the cloudflared entry.
         adguard-home:
           gnetId: 20799 # https://grafana.com/grafana/dashboards/20799 - AdGuard Home Exporter
           revision: 1
-          datasource: Prometheus
+          datasource:
+            - { name: DS_PROMETHEUS, value: Prometheus }
         mosquitto:
           gnetId: 17721 # https://grafana.com/grafana/dashboards/17721 - Mosquitto Exporter
           revision: 1
-          datasource: Prometheus
+          datasource:
+            - { name: DS_PROMETHEUS, value: Prometheus }
       flux:
         flux-cluster:
           url: https://raw.githubusercontent.com/fluxcd/flux2-monitoring-example/main/monitoring/configs/dashboards/cluster.json
