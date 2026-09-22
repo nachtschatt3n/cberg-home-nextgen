@@ -15,6 +15,13 @@ Gates (all must pass) — see runbooks/auto-update-policy.yaml:
                 detect_breaking_changes, so a "patch-but-breaking" bump
                 (affine 0.27.3 env→config.json) is caught even if a human
                 forgot to deny-list it.
+  G3s struct  : NO migration/schema signal in the DIFF between the current
+                and target tags (F-ea1000ff). G3 reads release-note PROSE, so
+                it holds when upstream writes "breaking" and passes when
+                upstream does not; this companion reads the compare API for
+                files ADDED under a migrations directory and for a bumped
+                SCHEMA_VERSION-style constant. Same asymmetry as G3: a
+                positive signal holds, an unreadable diff is reported.
   G5 age      : the TARGET RELEASE is at least `minimum_release_age_hours`
                 old (policy; operator set 48h). Supply-chain cooldown:
                 poisoned releases are usually yanked within days, so an
@@ -301,6 +308,54 @@ def _cmp_pad(a, b):
 
 _RELEASES_CACHE: dict = {}
 
+# Definitive HTTP 404 from GitHub, as distinct from "unknowable". A missing
+# repository, tag or compare range is a fact the caller can act on (skip the
+# next spelling, stop probing); an auth wall, a rate limit or a network
+# failure is not. Callers that do not care treat it like None.
+_NOT_FOUND = object()
+
+
+def _gh_api_json(path: str, timeout: int = 15):
+    """Parsed JSON for a GitHub REST `path` (`repos/o/r/...`), `_NOT_FOUND`
+    for a definitive HTTP 404, or None when UNKNOWABLE.
+
+    `gh api` first (authenticated, no anonymous rate limit), then a direct
+    request with GITHUB_TOKEN/GH_TOKEN when set. A 404 from `gh` is returned
+    as `_NOT_FOUND` WITHOUT the direct retry: the retry used to run anonymously
+    against the same missing URL, spending the 60/hour bucket on an answer
+    already known. ONE seam for every GitHub read in this file (releases,
+    compare, trees, contents), so a test fakes all of them in one place and
+    no lane can disagree with another about what GitHub said.
+    """
+    data = None
+    try:
+        p = subprocess.run(["gh", "api", "-X", "GET", path],
+                           capture_output=True, text=True, timeout=timeout)
+        if p.returncode == 0:
+            data = json.loads(p.stdout)
+        elif "HTTP 404" in (p.stderr or ""):
+            return _NOT_FOUND
+    except Exception:
+        data = None
+    if data is None:
+        try:
+            import urllib.error
+            import urllib.request
+            hdrs = {"User-Agent": "cberg-auto-update",
+                    "Accept": "application/vnd.github+json"}
+            tok = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+            if tok:
+                hdrs["Authorization"] = f"Bearer {tok}"
+            req = urllib.request.Request(f"https://api.github.com/{path}", headers=hdrs)
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    data = json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return _NOT_FOUND if e.code == 404 else None
+        except Exception:
+            return None
+    return data
+
 
 def github_releases(checker, dep, timeout: int = 15):
     """[(tag, is_prerelease)] newest-first for `dep`'s GitHub repo, or None.
@@ -317,28 +372,8 @@ def github_releases(checker, dep, timeout: int = 15):
         return None
     owner, repo = owner_repo
     path = f"repos/{owner}/{repo}/releases?per_page=100"
-    data = None
-    try:  # gh CLI first: authenticated, no anonymous rate limit
-        p = subprocess.run(["gh", "api", "-X", "GET", path],
-                           capture_output=True, text=True, timeout=timeout)
-        if p.returncode == 0:
-            data = json.loads(p.stdout)
-    except Exception:
-        data = None
-    if data is None:
-        try:
-            import urllib.request
-            hdrs = {"User-Agent": "cberg-auto-update",
-                    "Accept": "application/vnd.github+json"}
-            tok = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-            if tok:
-                hdrs["Authorization"] = f"Bearer {tok}"
-            req = urllib.request.Request(f"https://api.github.com/{path}", headers=hdrs)
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                data = json.loads(r.read())
-        except Exception:
-            return None
-    if not isinstance(data, list):
+    data = _gh_api_json(path, timeout)
+    if data is _NOT_FOUND or not isinstance(data, list):
         return None
     out = [(str(d.get("tag_name") or ""), bool(d.get("prerelease")))
            for d in data if d.get("tag_name")]
@@ -419,6 +454,250 @@ def breaking_signal(checker, dep, new_tag, cur_tag=None):
         except Exception:
             continue
     return found, bool(any_resolved and resolved_range)
+
+
+# ── G3s: the STRUCTURAL companion gate — the DIFF, not the prose ─────────────
+# WHY THIS EXISTS (F-ea1000ff, 2026-09-20). G3 reads release-note PROSE. It
+# therefore holds when upstream happens to write the word "breaking" and
+# passes when upstream does not — the presence of the hazard and the presence
+# of the sentence are two different things. In the measured case the held
+# bump's stated reason was a frontend-dependency note that could not touch the
+# workload's data path, while the SAME diff carried a new database migration
+# and a bumped search-index schema constant: a blocking full-index rebuild at
+# container start plus a migration on the app's database, with nobody
+# watching had the prose been one adjective quieter. The hold was correct by
+# accident. This gate asks the question the prose cannot answer: WHAT CHANGED
+# in the tree between the two tags.
+#
+# Two structural signals, both mechanical and both cheap to state:
+#   * a file ADDED under a migrations directory — django/alembic/rails/prisma/
+#     flyway/liquibase layouts and the plain `migrations/`, at any depth
+#     (prisma nests `migrations/<stamp>/migration.sql`);
+#   * an ADDED line assigning an UPPER-CASE `*_VERSION` / `*_REVISION`
+#     constant whose stem names a schema, index, database, migration or
+#     storage format — the `SCHEMA_VERSION = 2` shape. Comparisons (`==`) and
+#     documentation/test paths are excluded.
+#
+# The compare API caps its file list at 300, and the measured diff was exactly
+# that size — sorted by path, with the migration and the schema file sitting
+# AFTER the 300th entry. So a truncated compare is NOT read as "nothing more":
+# the two git trees are diffed for the path signal (no cap) and the changed
+# files whose NAME suggests a schema or version constant are fetched for the
+# constant signal, bounded by _TREE_FETCH_CAP; anything beyond that bound is
+# reported as an incomplete scan, never as clean.
+#
+# Same asymmetry as G3, stated once: a POSITIVE signal holds. An unreadable
+# diff is returned as `resolved=False` with the reason and does NOT hold on
+# its own — the PR lane already relies on CI + policy for the unverified case
+# and says so in its verdict; the direct-bump lane in coverage.py mirrors this
+# gate with the same hold-or-annotate contract. Lower-case constants
+# (`schema_version = 2`) are a known gap of the constant rule; the path rule
+# does not depend on naming.
+_STRUCTURAL_PATH_RE = re.compile(
+    r"(?:^|/)(?:migrations?|migrate|alembic/versions|db/migrate|prisma/migrations|"
+    r"database/migrations|schema/migrations|flyway|liquibase)/.+$", re.IGNORECASE)
+_STRUCTURAL_CONST_RE = re.compile(
+    r"^\+(?!\+\+).*?\b_?(?:[A-Z0-9]+_)*(?:SCHEMA|INDEX|DB|DATABASE|MIGRATION|STORAGE)"
+    r"_(?:VERSION|REVISION)\b\s*(?::[^=\n]{0,40})?=(?!=)", re.MULTILINE)
+# Paths whose constants are not the running code: docs, tests, examples.
+_STRUCTURAL_EXCLUDE_RE = re.compile(
+    r"(?:^|/)(?:docs?|tests?|__tests__|spec|examples?|fixtures?)/|\.(?:md|rst|txt)$",
+    re.IGNORECASE)
+# Files worth fetching when the compare response is TRUNCATED: changed files
+# whose NAME suggests a schema/version constant lives there.
+_SCHEMA_FILE_RE = re.compile(
+    r"(?:^|/)[^/]*(?:schema|migrat|version|const|settings|config|index)[^/]*"
+    r"\.(?:py|ts|js|mjs|cjs|go|rs|rb|java|kt|cs|php|ex|exs|json|ya?ml|toml)$",
+    re.IGNORECASE)
+_COMPARE_FILE_CAP = 300     # GitHub's documented ceiling for compare `files`
+_TREE_FETCH_CAP = 8         # content fetches per truncated compare, at most
+_STRUCTURAL_CACHE: dict = {}
+
+
+def _numeric_tag(tag):
+    """`v0.143.0-noble-full` -> `0.143.0`; None when the tag has no digits."""
+    t = _vt(tag)
+    return ".".join(str(x) for x in t) if t else None
+
+
+def _tag_pair_candidates(checker, dep, cur_tag, new_tag):
+    """Ordered (base, head) git-ref pairs for the compare call.
+
+    Docker tags and git tags disagree about the `v` prefix and about build
+    suffixes. The release list this file already fetches names the REAL tags,
+    so an exact numeric match there (stable releases first) comes first; the
+    raw pair and the bare/`v` numeric pairs follow for tags-only repositories.
+    """
+    exact = {}
+    rels = github_releases(checker, dep) or []
+    want = {"cur": _vt(cur_tag), "new": _vt(new_tag)}
+    for prefer_stable in (True, False):
+        for tag, pre in rels:
+            if pre == prefer_stable:
+                continue
+            vt = _vt(tag)
+            for k, v in want.items():
+                if v and vt == v and k not in exact:
+                    exact[k] = tag
+    pairs = []
+    if "cur" in exact and "new" in exact:
+        pairs.append((exact["cur"], exact["new"]))
+    raw = (str(cur_tag).split("@")[0], str(new_tag).split("@")[0])
+    c, n = _numeric_tag(cur_tag), _numeric_tag(new_tag)
+    for pair in (raw, (c, n), (f"v{c}", f"v{n}")):
+        if all(pair) and pair not in pairs:
+            pairs.append(pair)
+    return pairs
+
+
+def _compare_changed_files(owner, repo, base, head, timeout: int = 25):
+    """{'files', 'truncated', 'commits'} for base...head, `_NOT_FOUND` when a
+    ref does not exist, None when unknowable."""
+    data = _gh_api_json(f"repos/{owner}/{repo}/compare/{base}...{head}", timeout)
+    if data is _NOT_FOUND or data is None or not isinstance(data, dict):
+        return data if data is _NOT_FOUND else None
+    files = [f for f in (data.get("files") or []) if isinstance(f, dict)]
+    return {"files": files, "truncated": len(files) >= _COMPARE_FILE_CAP,
+            "commits": data.get("total_commits")}
+
+
+def _scan_structural_files(files):
+    """Signals from compare `files` entries (filename/status/patch)."""
+    out = []
+    for f in files:
+        name = str(f.get("filename") or "")
+        status = str(f.get("status") or "")
+        if status in ("added", "renamed", "copied") and _STRUCTURAL_PATH_RE.search(name):
+            out.append(f"new migration file {name}")
+            continue
+        if _STRUCTURAL_EXCLUDE_RE.search(name):
+            continue
+        m = _STRUCTURAL_CONST_RE.search(str(f.get("patch") or ""))
+        if m:
+            out.append(f"{name}: {m.group(0).lstrip('+').strip()[:80]}")
+    return out
+
+
+def _tree_blobs(owner, repo, ref, timeout: int = 40):
+    """{path: blob sha} for a ref's full tree, or None (missing/unknowable/
+    truncated — a truncated tree cannot prove a path absent)."""
+    data = _gh_api_json(f"repos/{owner}/{repo}/git/trees/{ref}?recursive=1", timeout)
+    if data is _NOT_FOUND or not isinstance(data, dict) or data.get("truncated"):
+        return None
+    return {str(e.get("path")): e.get("sha") for e in (data.get("tree") or [])
+            if isinstance(e, dict) and e.get("type") == "blob" and e.get("path")}
+
+
+def _file_lines(owner, repo, path, ref, timeout: int = 20):
+    """Text lines of `path` at `ref`, or None."""
+    import base64
+    import urllib.parse
+    data = _gh_api_json(
+        f"repos/{owner}/{repo}/contents/{urllib.parse.quote(path)}?ref={ref}", timeout)
+    if not isinstance(data, dict) or data.get("encoding") != "base64":
+        return None
+    try:
+        return base64.b64decode(data.get("content") or "").decode("utf-8", "replace").splitlines()
+    except Exception:
+        return None
+
+
+def structural_signal(checker, dep, new_tag, cur_tag=None):
+    """(signals, resolved, note) — migration/schema changes in the DIFF
+    cur_tag..new_tag of `dep`'s source repository.
+
+    `signals` non-empty means HOLD. `resolved` True means the whole scan
+    completed (a clean verdict is meaningful); False means the diff could not
+    be read completely and `note` says why — callers annotate, they do not
+    hold on it (see the block comment above). Cached per (dep, cur, new).
+    """
+    key = (str(dep), str(cur_tag), str(new_tag))
+    if key in _STRUCTURAL_CACHE:
+        return _STRUCTURAL_CACHE[key]
+    try:
+        out = _structural_signal_uncached(checker, dep, new_tag, cur_tag)
+    except Exception as e:  # a gate failure is reported, never read as clean
+        out = ([], False, f"structural scan failed ({type(e).__name__})")
+    _STRUCTURAL_CACHE[key] = out
+    return out
+
+
+def _structural_signal_uncached(checker, dep, new_tag, cur_tag):
+    if not cur_tag or str(cur_tag) in ("", "?"):
+        return [], False, "current version unknown — no base ref for the compare"
+    owner_repo = _owner_repo(checker, dep)
+    if not owner_repo:
+        return [], False, "no source repository resolved for the compare"
+    owner, repo = owner_repo
+    if github_releases(checker, dep) is None:
+        # Tags-only repositories have no releases; a MISSING repository has no
+        # tags either, and probing it four ways would spend four calls on a
+        # fact one call settles.
+        probe = _gh_api_json(f"repos/{owner}/{repo}", 15)
+        if probe is _NOT_FOUND:
+            return [], False, f"source repository {owner}/{repo} not found on GitHub"
+        if probe is None:
+            return [], False, f"GitHub unreachable for {owner}/{repo} (compare not attempted)"
+    cmp = used = None
+    pairs = _tag_pair_candidates(checker, dep, cur_tag, new_tag)
+    for base, head in pairs:
+        r = _compare_changed_files(owner, repo, base, head)
+        if r is _NOT_FOUND:
+            continue
+        if r is None:
+            return [], False, f"compare {base}...{head} unreadable for {owner}/{repo}"
+        cmp, used = r, (base, head)
+        break
+    if cmp is None:
+        return [], False, (f"compare refs unresolved for {owner}/{repo} "
+                           f"(tried {len(pairs)} tag spelling(s))")
+    signals = _scan_structural_files(cmp["files"])
+    span = f"{used[0]}...{used[1]}"
+    if not cmp["truncated"]:
+        return _dedupe(signals), True, (f"diff {span} read: {len(cmp['files'])} file(s), "
+                                        f"{cmp.get('commits')} commit(s)")
+    # TRUNCATED: the 300 files seen are a prefix of the diff, not the diff.
+    base_t, head_t = _tree_blobs(owner, repo, used[0]), _tree_blobs(owner, repo, used[1])
+    if base_t is None or head_t is None:
+        return _dedupe(signals), False, (
+            f"diff {span} truncated at {_COMPARE_FILE_CAP} files and the trees could "
+            f"not be read — structural scan INCOMPLETE")
+    added = [p for p in head_t if p not in base_t]
+    changed = [p for p, sha in head_t.items() if p in base_t and base_t[p] != sha]
+    signals += [f"new migration file {p}" for p in added if _STRUCTURAL_PATH_RE.search(p)]
+    cands = [p for p in added + changed
+             if _SCHEMA_FILE_RE.search(p) and not _STRUCTURAL_EXCLUDE_RE.search(p)]
+    complete = len(cands) <= _TREE_FETCH_CAP
+    fetched = 0
+    for path in cands[:_TREE_FETCH_CAP]:
+        head_lines = _file_lines(owner, repo, path, used[1])
+        if head_lines is None:
+            complete = False
+            continue
+        base_lines = _file_lines(owner, repo, path, used[0]) if path in base_t else []
+        if base_lines is None:
+            complete = False
+            base_lines = []
+        fetched += 1
+        for ln in sorted(set(head_lines) - set(base_lines)):
+            if _STRUCTURAL_CONST_RE.search("+" + ln):
+                signals.append(f"{path}: {ln.strip()[:80]}")
+                break
+    note = (f"diff {span} truncated at {_COMPARE_FILE_CAP} files; trees diffed "
+            f"({len(added)} added, {len(changed)} changed), {fetched}/{len(cands)} "
+            f"schema-named file(s) read")
+    if not complete:
+        note += " — structural scan INCOMPLETE"
+    return _dedupe(signals), complete, note
+
+
+def _dedupe(items):
+    seen, out = set(), []
+    for x in items:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
 
 
 # ── G5 release-age cooldown ──────────────────────────────────────────────────
@@ -700,13 +979,24 @@ def classify(pr, policy, checker):
         return {**r, "verdict": "hold", "gate": "breaking",
                 "reason": "breaking-change signal in release notes: " + "; ".join(n[:120] for n in notes[:2])}
     r["breaking_checked"] = resolved
+    # G3s structural — the DIFF, not the prose (F-ea1000ff)
+    s_sigs, s_resolved, s_note = structural_signal(
+        checker, parsed["dep"], parsed["new"],
+        cur_tag=parsed["cur"] if parsed.get("cur_known") else None)
+    if s_sigs:
+        return {**r, "verdict": "hold", "gate": "structural",
+                "reason": "structural change in the diff (migration/schema): "
+                          + "; ".join(str(x)[:120] for x in s_sigs[:2])}
+    r["structural_checked"] = s_resolved
+    r["structural_note"] = s_note
     # G4 ci
     ok, detail = ci_state(pr["number"])
     if not ok:
         return {**r, "verdict": "hold", "gate": "ci", "reason": detail}
     return {**r, "verdict": "safe", "gate": "-",
             "reason": "patch/minor, not denied, no breaking signal, CI green"
-                      + ("" if resolved else " (release notes unavailable — relied on CI + policy)")}
+                      + ("" if resolved else " (release notes unavailable — relied on CI + policy)")
+                      + ("" if s_resolved else f" (diff not inspected for migrations/schema — {s_note})")}
 
 
 # ── apply: merge, reconcile, health-gate, revert ─────────────────────────────

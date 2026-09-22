@@ -2006,8 +2006,30 @@ class VersionChecker:
                         params = {'scope': chal.get('scope') or f'repository:{image_path}:pull'}
                         if chal.get('service'):
                             params['service'] = chal['service']
+                        # OUR OWN namespace on GHCR (F-4677123a, tractable half).
+                        # The anonymous token exchange succeeds for every
+                        # package but only UNLOCKS the public ones: a private
+                        # package answers 401/403 to the anonymous bearer and
+                        # landed in "Could not determine" — for our own images,
+                        # where a rebuild is the one remedy this household
+                        # performs, so the REBUILD lane could not even
+                        # enumerate them. Measured 2026-09-22: three semver
+                        # -tagged self-built images, anonymous listing 401 on
+                        # all three, one resolved (public), two did not; with
+                        # the `gh` token on the token exchange all three list.
+                        # GHCR accepts any username with a PAT as the password
+                        # (the same `TRIVY_USERNAME`/token pair trivy uses);
+                        # no token resolved => the exchange stays anonymous,
+                        # exactly as before. ghcr.io only: other registries'
+                        # token endpoints do not take a GitHub credential.
+                        tok_kwargs = {}
+                        if host == 'ghcr.io':
+                            gh_tok = self._github_api_token()
+                            if gh_tok:
+                                tok_kwargs['auth'] = (
+                                    os.environ.get('TRIVY_USERNAME') or 'token', gh_tok)
                         tok_resp = _get_retry_429(sess, realm, params=params,
-                                                  timeout=15)
+                                                  timeout=15, **tok_kwargs)
                         if tok_resp.status_code != 200:
                             # 401/403-for-auth is the STEADY state for a private
                             # repo we never authenticate to — not a coverage
@@ -3804,8 +3826,10 @@ class VersionChecker:
                     else:
                         # Not recorded here: the resolver already recorded the
                         # cause when it was transient (429/5xx/timeout). This
-                        # line is also the steady state for every private
-                        # ghcr.io repo we do not authenticate to.
+                        # line is also the steady state for a private
+                        # third-party ghcr.io repo; our own namespace now
+                        # authenticates the token exchange (_oci_v2_tags,
+                        # F-4677123a).
                         print(f"  {Colors.YELLOW}Image {img['repository']}: {img['tag']} (could not check){Colors.RESET}")
                     
                     result['images'].append(img_result)

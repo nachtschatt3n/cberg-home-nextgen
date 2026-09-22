@@ -44,6 +44,7 @@ _spec.loader.exec_module(cov)
 # test-coverage-g3-release-range.py and test-coverage-prerelease-target.py.
 cov._release_tags_between = lambda *a, **k: ([], "stubbed: no releases skipped")
 cov._prerelease_digest_twin = lambda *a, **k: (None, "")
+cov._direct_bump_structural_gate = lambda item: (False, "clean (diff checked: stubbed — the G3 structural companion reaches the compare API; pinned by test-structural-signal.py)")
 
 POLICY = {"deny": []}
 

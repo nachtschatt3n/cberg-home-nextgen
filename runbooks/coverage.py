@@ -278,6 +278,136 @@ def accepted_risk_rows() -> list:
     return _AR_ROWS_CACHE
 
 
+# ── REBUILD lane: the SECURITY side's self-built rows ───────────────────────
+# WHY (F-4677123a). The REBUILD lane was fed by ONE signal: "a newer tag exists
+# for a self-built image" — which is never true for an image already at its
+# newest self-built tag, and not computable at all for the rolling tags most
+# of ours carry. So the lane read 0 while the security side was filing rows
+# on the same images, and openclaw-sync's 14-day rebuild SLA queue was
+# permanently empty. Since 382abfe2 security-check.py routes images under our
+# own namespace to a rebuild verdict instead of AR-029; those rows are the
+# version side's second feed. Keyed on the DB row's SHAPE, not its prose:
+# section `security`, open, NOT accepted (an operator's per-image AR disposes
+# of a row here exactly as ar_accepts_item() does for a version item), a
+# backticked image reference under SELF_BUILT_REPO_PREFIXES at the head of
+# the title, and the scanner's fix-availability word in the title.
+_SEC_REBUILD_CACHE = None
+_SEC_REBUILD_SOURCE = "not queried"
+_SEC_TITLE_REF = re.compile(r"^\s*`([^`\s]+)`\s*:")
+
+
+def _parse_security_rebuild_title(title):
+    """(image_repo, tag) when `title` leads with a backticked reference to an
+    image we build, else None. A digest suffix is dropped; `host:port/...`
+    without a tag yields an empty tag rather than a bogus one."""
+    m = _SEC_TITLE_REF.match(str(title or ""))
+    if not m:
+        return None
+    ref = m.group(1).split("@", 1)[0]
+    repo, sep, tag = ref.rpartition(":")
+    if not sep or "/" in tag:
+        repo, tag = ref, ""
+    if not _is_self_built_repo(repo):
+        return None
+    return repo, tag
+
+
+def security_rebuild_rows() -> list:
+    """[{finding_id, severity, title, image_repo, tag}] — OPEN, NOT-accepted
+    security rows on images we build.
+
+    Best-effort like accepted_risk_rows(): needs SWEEP_PG_DSN + psycopg and
+    returns [] without them — but SAYS SO in `_SEC_REBUILD_SOURCE`, which the
+    report prints next to the lane counts, because this feed being absent is
+    precisely the "REBUILD 0 means not looked at" the finding is about. The
+    window agent runs without a DSN, so there the lane is qualified, never
+    silently empty.
+    """
+    global _SEC_REBUILD_CACHE, _SEC_REBUILD_SOURCE
+    if _SEC_REBUILD_CACHE is not None:
+        return _SEC_REBUILD_CACHE
+    _SEC_REBUILD_CACHE = []
+    dsn = os.environ.get("SWEEP_PG_DSN")
+    if not dsn:
+        _SEC_REBUILD_SOURCE = ("unavailable — no SWEEP_PG_DSN, the security side's "
+                               "self-built rows were NOT consulted")
+        return _SEC_REBUILD_CACHE
+    try:
+        import psycopg
+        with psycopg.connect(dsn, connect_timeout=5) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT finding_id, severity, title FROM sweep_findings "
+                "WHERE section = 'security' AND resolved_at IS NULL "
+                "AND severity IN ('critical', 'warning') AND title LIKE %s",
+                ("%fixable%",))
+            rows = list(cur.fetchall())
+    except Exception as e:
+        _SEC_REBUILD_SOURCE = f"unavailable — sweep_findings query failed ({type(e).__name__})"
+        return _SEC_REBUILD_CACHE
+    out = []
+    for fid, sev, title in rows:
+        parsed = _parse_security_rebuild_title(title)
+        if not parsed or "fixable" not in str(title):
+            continue
+        out.append({"finding_id": fid, "severity": sev, "title": title,
+                    "image_repo": parsed[0], "tag": parsed[1]})
+    _SEC_REBUILD_SOURCE = f"sweep_findings ({len(out)} open self-built row(s))"
+    _SEC_REBUILD_CACHE = out
+    return out
+
+
+def _rebuild_from_security(lanes, repo_index, rows, ns_index=None):
+    """Append one REBUILD entry per self-built IMAGE the security side flagged;
+    returns the entries added.
+
+    An image already in REBUILD on the version signal is not duplicated — the
+    finding id is attached to the existing entry instead. Two rows on one
+    image (the scanner files one per tally) collapse to one entry carrying
+    both ids. The component comes from the snapshot's repo index (the app
+    that mounts the image), falling back to the image basename.
+    """
+    existing = {}
+    for e in lanes["REBUILD"]:
+        for r in _item_repos(e):
+            existing[str(r).lower()] = e
+    by_repo: dict = {}
+    for comp, repos in (repo_index or {}).items():
+        for r in repos:
+            by_repo.setdefault(str(r).lower(), set()).add(comp)
+    added, seen = [], {}
+    for row in rows:
+        repo = str(row.get("image_repo") or "").lower()
+        fid = row.get("finding_id")
+        if not repo or not fid:
+            continue
+        if repo in existing:
+            refs = existing[repo].setdefault("security_refs", [])
+            if fid not in refs:
+                refs.append(fid)
+            continue
+        if repo in seen:
+            if fid not in seen[repo]["security_refs"]:
+                seen[repo]["security_refs"].append(fid)
+            continue
+        comps = sorted(by_repo.get(repo) or ())
+        comp = comps[0] if comps else repo.rsplit("/", 1)[-1]
+        entry = {"component": comp,
+                 "namespace": (ns_index or {}).get(comp),
+                 "kind": "image", "current": row.get("tag") or "?",
+                 "target": "rebuild", "type": "rebuild",
+                 "image_repo": row.get("image_repo"),
+                 "cell": f"{row.get('image_repo')}:{row.get('tag') or '?'}",
+                 "source": "security", "lane": "REBUILD",
+                 "security_ref": fid, "security_refs": [fid],
+                 "reason": (f"security finding {fid} on an image we build — no newer "
+                            f"upstream tag can exist because we publish it; the remedy "
+                            f"is a rebuild in its source repo, then a tag bump")}
+        lanes["REBUILD"].append(entry)
+        added.append(entry)
+        seen[repo] = entry
+    return added
+
+
 def _item_finding_titles(item) -> list:
     """The finding titles this item would be emitted under.
 
@@ -609,17 +739,30 @@ _REPO_LINE = re.compile(r"^- \*\*Repository:\*\* `([^`]+)`")
 _CURTAG_LINE = re.compile(r"^\s+- \*\*Current Tag:\*\* `([^`]+)`")
 _LATESTTAG_LINE = re.compile(r"^\s+- \*\*Latest Tag:\*\* `([^`]+)`(.*)$")
 _UPDTYPE_LINE = re.compile(r"^\s+- \*\*Update Type:\*\*.*\*\*([A-Z]+)\*\*")
+# The oracle's "no answer" rendering. For an image WE build this is the steady
+# state (rolling `sha-…`/date tags, or a private package), and it is exactly
+# the population the REBUILD lane could not see (F-4677123a).
+_NOLATEST_LINE = re.compile(r"^\s+- \*\*Latest Tag:\*\* \*Could not determine\*")
 _EXT_HEAD = re.compile(r"^### (.+?) \(`[^`]+`\)\s*$")
 _EXT_VER = re.compile(r"^- \*\*Version:\*\* `([^`]+)`.*?(?:→|->) `([^`]+)`")
 
 
-def parse_detail_images(repo_index=None):
+def parse_detail_images(repo_index=None, unresolved=None, ns_index=None):
     """Every image update from the PER-APP detail sections.
 
     `repo_index` (optional dict) is filled with {component: {image repos}} for
     EVERY app in the report, update or not — the overview table lists tags
     without their repository, so this is how an overview row learns which image
     it is talking about (needed to decide REBUILD on the image, not the app).
+
+    `unresolved` (optional list) collects every SELF-BUILT image whose latest
+    tag the oracle could not determine, one entry per distinct (repo, tag):
+    {component, namespace, image_repo, current, reason}. An image the oracle
+    cannot resolve never becomes an actionable update, never enters
+    assign_lane(), and so was never counted — REBUILD 0 meant "not looked at"
+    (F-4677123a). `ns_index` (optional dict) is filled with {component:
+    namespace} so a row taken over from the security side can carry its
+    namespace.
 
     The Quick Overview Table carries ONE image per app, so init containers,
     sidecars and base images never reached the crack detector at all — for
@@ -669,6 +812,8 @@ def parse_detail_images(repo_index=None):
             continue
         if pending_app and line.startswith("- **File:**"):
             comp, pending_app, in_images = pending_app, None, False
+            if ns_index is not None:
+                ns_index.setdefault(comp.lower(), ns)
             continue
         if not comp:
             continue
@@ -696,6 +841,13 @@ def parse_detail_images(repo_index=None):
                               "current": cur, "target": tgt,
                               "type": _semver_type(cur, tgt), "cell": f"{repo} {cur} → {tgt}",
                               "source": f"detail:{repo}", "image_repo": repo})
+            continue
+        if (unresolved is not None and in_images and repo and cur
+                and _NOLATEST_LINE.match(line) and _is_self_built_repo(repo)):
+            if not any(u["image_repo"] == repo and u["current"] == cur for u in unresolved):
+                unresolved.append({"component": comp, "namespace": ns, "image_repo": repo,
+                                   "current": cur,
+                                   "reason": "version oracle could not resolve a newer tag"})
     return items
 
 
@@ -1977,6 +2129,41 @@ def breaking_change_signal(image_repo: str, tag: str):
     return out
 
 
+_STRUCT_CACHE: dict = {}
+
+
+def structural_change_signal(dep: str, cur: str, tgt: str):
+    """(is_structural, note) — G3's STRUCTURAL companion for a no-PR candidate.
+
+    Reuses auto-update.py's structural_signal() so both lanes read the same
+    diff the same way (F-ea1000ff): a file ADDED under a migrations directory,
+    or an ADDED line assigning a SCHEMA_VERSION-style constant, between the
+    tag we run and the tag proposed. This is the half that applies UNATTENDED
+    — the direct-bump exit has no PR, no reviewer and no CI render of the
+    change — so the prose-only G3 was thinnest exactly where it mattered.
+    Same asymmetry as G3: a POSITIVE signal holds; an unreadable diff is
+    `unverified (...)` and annotates the AUTO reason instead of holding.
+    """
+    key = f"{dep}:{cur}:{tgt}"
+    if key in _STRUCT_CACHE:
+        return _STRUCT_CACHE[key]
+    out = (False, "unverified (diff not read)")
+    try:
+        sigs, resolved, note = _auto_update_module().structural_signal(
+            _load_checker(), dep, tgt, cur_tag=cur)
+        if sigs:
+            out = (True, "migration/schema change in the diff: "
+                         + "; ".join(str(x)[:100] for x in sigs[:2]))
+        elif resolved:
+            out = (False, f"clean (diff checked: {note})")
+        else:
+            out = (False, f"unverified ({note})")
+    except Exception as e:
+        out = (False, f"unverified ({type(e).__name__})")
+    _STRUCT_CACHE[key] = out
+    return out
+
+
 def _fallback_item(item, target, utype, rule, evidence, pr=None, g3=None):
     """A synthetic actionable item for the allowed-but-masked update."""
     return {**{k: v for k, v in item.items() if k not in ("cell", "source")},
@@ -2213,6 +2400,37 @@ def _direct_bump_breaking_gate(item):
         return False, f"unverified ({type(e).__name__})"
 
 
+def _direct_bump_structural_gate(item):
+    """(is_structural, note) — G3s for a NO-PR candidate on the direct-bump path.
+
+    Mirrors _direct_bump_breaking_gate() image-for-image and chart-for-chart:
+    the same repository ordering, the same "never let a gate failure read as
+    a pass claim" wrapper. Kept as its own module-level seam so a hermetic
+    test can stub it exactly as the breaking gate is stubbed.
+    """
+    try:
+        if item.get("kind") == "image":
+            dep = (item.get("component") or "").lower()
+            repos = _item_repos(item)
+            if not repos:
+                return False, "unverified (no image repository to read the diff for)"
+            ordered = sorted(repos, key=lambda r: (dep.split("-")[0] not in (r or "").lower(), r))
+            last = (False, "unverified (diff not read)")
+            for r in ordered:
+                is_s, note = structural_change_signal(r, item["current"], item["target"])
+                if is_s:
+                    return True, f"{note} [{r}]"
+                if "checked" in note:
+                    last = (False, note)
+            return last
+        if item.get("kind") == "chart":
+            return structural_change_signal(item.get("component") or "",
+                                            item["current"], item["target"])
+        return False, "unverified (not an image or chart)"
+    except Exception as e:
+        return False, f"unverified ({type(e).__name__})"
+
+
 def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
     """(lane, reason, drift) for one actionable update."""
     comp = item["component"].lower()
@@ -2303,7 +2521,22 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
             return "PLAN", (f"G3 range UNEVALUATED across a minor boundary — {rnote}. "
                             f"The hop leapfrogs at least one release whose notes were "
                             f"not read; needs an assessed window plan"), None
+        # G3s STRUCTURAL companion (F-ea1000ff): the DIFF between the two tags,
+        # not the prose. Runs only when the notes resolver WORKED ("checked"):
+        # it rides the same GitHub project resolution, and when G3 could not
+        # read the notes the item is already annotated (gate exception) or in
+        # PLAN (unavailable) above — a second unreadable verdict adds nothing
+        # and would make every offline run reach for the network twice.
+        s_note = ""
+        if "checked" in g3:
+            is_struct, s_note = _direct_bump_structural_gate(item)
+            if is_struct:
+                return "PLAN", (f"G3 structural signal — {s_note}; a migration or "
+                                f"schema change needs an assessed window, never the "
+                                f"unattended lane"), None
         g3_note = "" if "checked" in g3 else f"; G3 {g3}"
+        if s_note and "checked" not in s_note:
+            g3_note += f"; G3-structural {s_note}"
         if rstatus == "clean" and rnote:
             g3_note += f"; G3 range: {rnote}"
         if pr_note:
@@ -2671,7 +2904,9 @@ def reconcile():
     # read 4 when it was really 3. A lane count that overstates itself is the
     # same class of bug as CRACK 0 meaning "never looked at".
     repo_index: dict = {}
-    detail = parse_detail_images(repo_index)
+    ns_index: dict = {}
+    unresolved_self_built: list = []
+    detail = parse_detail_images(repo_index, unresolved_self_built, ns_index)
     by_key: dict = {}
     for i in actionable:
         by_key[(i["component"].lower(), i["kind"], _dedupe_tag(i["current"]),
@@ -2770,6 +3005,12 @@ def reconcile():
     lockstep = _apply_lockstep(lanes, needs_plan)
     _prune_needs_plan_shared_image(lanes, needs_plan)
 
+    # REBUILD's second feed: the security side's rows on images we build
+    # (F-4677123a). Added after lockstep on purpose — REBUILD is never a
+    # holder lane, and these rows have no AUTO sibling to pull back.
+    sec_rows = security_rebuild_rows()
+    from_security = _rebuild_from_security(lanes, repo_index, sec_rows, ns_index)
+
     # Stamp each fallback's FINAL lane back onto its record, so the operator can
     # see a candidate that was generated correctly and then legitimately parked
     # (a live plan already targets it, or G5's cooldown has not elapsed). A
@@ -2795,6 +3036,17 @@ def reconcile():
         "snapshot_age_hours": snapshot_age_hours(),
         "lockstep": lockstep,               # AUTO items pulled back to PLAN
         "lanes": lanes,
+        # REBUILD 0 is never an unqualified zero (F-4677123a): what fed the
+        # lane, and which of OUR images the version oracle could not resolve.
+        "rebuild_universe": {
+            "security_source": _SEC_REBUILD_SOURCE,
+            "security_rows": (len(sec_rows) if _SEC_REBUILD_SOURCE.startswith("sweep_findings")
+                              else None),
+            "from_security": [{"component": e["component"], "image_repo": e["image_repo"],
+                               "current": e["current"], "security_refs": e["security_refs"]}
+                              for e in from_security],
+            "unresolved_self_built": unresolved_self_built,
+        },
         "needs_plan": needs_plan,           # dispatch an upgrade-planner for each
         "plan_drift": plan_drift,           # plan exists but its target is stale
         "cracks": lanes["CRACK"],           # MUST be empty
@@ -2852,7 +3104,18 @@ def human(r):
     if r["lanes"]["REBUILD"]:
         L.append(f"\nREBUILD (self-built, source-repo rebuild) ({len(r['lanes']['REBUILD'])}):")
         for e in r["lanes"]["REBUILD"]:
-            L.append(f"  • {e['component']} [{e['kind']} {e['current']}→{e['target']}]")
+            refs = e.get("security_refs") or ([e["security_ref"]] if e.get("security_ref") else [])
+            tail = f" — security_ref {', '.join(refs)}" if refs else ""
+            L.append(f"  • {e['component']} [{e['kind']} {e['current']}→{e['target']}]{tail}")
+    ru = r.get("rebuild_universe") or {}
+    if ru:
+        unres = ru.get("unresolved_self_built") or []
+        qual = ("" if (c["REBUILD"] or (ru.get("security_rows") is not None and not unres))
+                else " — REBUILD 0 above is NOT 'none pending'")
+        L.append(f"\nREBUILD universe: security-side feed {ru.get('security_source')}; "
+                 f"{len(unres)} self-built image(s) the version oracle could not resolve{qual}")
+        for u in unres:
+            L.append(f"  · {u['component']} [{u['image_repo']}:{u['current']}] — {u['reason']}")
     if r["cracks"]:
         L.append(f"\n🚨 CRACKS ({len(r['cracks'])}) — actionable with NO lane, MUST triage:")
         for e in r["cracks"]:

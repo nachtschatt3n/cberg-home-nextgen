@@ -46,6 +46,7 @@ _spec = importlib.util.spec_from_file_location("cov", REPO / "runbooks/coverage.
 cov = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cov)
 cov._prerelease_digest_twin = lambda *a, **k: (None, "")
+cov._direct_bump_structural_gate = lambda item: (False, "clean (diff checked: stubbed — the G3 structural companion reaches the compare API; pinned by test-structural-signal.py)")
 
 _au_spec = importlib.util.spec_from_file_location("au", REPO / "runbooks/auto-update.py")
 au = importlib.util.module_from_spec(_au_spec)

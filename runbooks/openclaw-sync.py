@@ -19,8 +19,12 @@ Three subjects, all glue over outputs the sweep has already produced:
                    reconciles legacy source "maintenance-window".
   --triage-json    finding-triage.py --json     → DECIDE-lane findings as
                    go_no_go issues, source "triage".
-  --coverage-json  coverage.py --json           → REBUILD-lane components as
-                   14d-SLA task issues, source "rebuild".
+  --coverage-json  coverage.py --json           → REBUILD-lane rows as
+                   14d-SLA task issues, source "rebuild". One row per
+                   self-built IMAGE, including the rows coverage.py takes
+                   over from the security side (security_ref set); the
+                   key carries the image basename when a component mounts
+                   more than one of our images (see rebuild_issue_key).
 
 SOURCE ISOLATION IS LOAD-BEARING. The old prompt contract told 4e to ingest
 DECIDE findings under source "maintenance" — but 4d's reconcile over that
@@ -103,22 +107,61 @@ def decide_issues(triage_json: dict) -> tuple[list[dict], list[str]]:
     return issues, [r["finding_id"] for r in rows]
 
 
+def rebuild_issue_key(row: dict) -> str:
+    """`rebuild:<component>`, plus `/<image basename>` when the row names an
+    image whose basename differs from the component.
+
+    One component can mount SEVERAL self-built images (ha-ai-harness runs
+    harness-home-server AND harness-home-frontend), and coverage.py now emits
+    one REBUILD row per IMAGE (F-4677123a). A component-only key folded those
+    into one issue, so the second image's row would have silently merged into
+    the first's reminder. The plain key is kept for rows without an image so
+    the existing contract (and fixtures) still hold.
+    """
+    comp = str(row.get("component") or "")
+    repo = str(row.get("image_repo") or "")
+    base = repo.rsplit("/", 1)[-1] if repo else ""
+    return f"rebuild:{comp}" + (f"/{base}" if base and base != comp else "")
+
+
 def rebuild_issues(coverage_json: dict) -> tuple[list[dict], list[str]]:
     rows = [r for r in (coverage_json.get("lanes") or {}).get("REBUILD", [])
             if r.get("component")]
-    issues = [{
-        "key": f"rebuild:{r['component']}",
-        "kind": "finding",
-        "source": "rebuild",
-        "severity": "warning",
-        "action": "ack",
-        "title": f"REBUILD: {r['component']} {r.get('current') or '?'} → "
-                 f"{r.get('target') or '?'} — rebuild in its source repo, "
-                 f"then cberg-agent bumps the tag (SLA {REBUILD_SLA_DAYS}d)",
-        "component": r.get("component"),
-        "target": r.get("target"),
-        "url": "docs/sops/self-built-image-rebuild.md",
-    } for r in rows]
+    issues = []
+    for r in rows:
+        ref = r.get("security_ref")
+        repo = str(r.get("image_repo") or "")
+        base = repo.rsplit("/", 1)[-1] if repo else ""
+        if ref:
+            # Driven by the SECURITY side: no newer tag exists to name, so the
+            # title names the finding and the image instead of a `→ ?` target.
+            title = (f"REBUILD: {r['component']}"
+                     f"{f' ({base})' if base and base != r['component'] else ''} "
+                     f"{r.get('current') or '?'} — security finding {ref} on an image "
+                     f"we build; rebuild in its source repo, then cberg-agent bumps "
+                     f"the tag (SLA {REBUILD_SLA_DAYS}d)")
+        else:
+            title = (f"REBUILD: {r['component']} {r.get('current') or '?'} → "
+                     f"{r.get('target') or '?'} — rebuild in its source repo, "
+                     f"then cberg-agent bumps the tag (SLA {REBUILD_SLA_DAYS}d)")
+        issue = {
+            "key": rebuild_issue_key(r),
+            "kind": "finding",
+            "source": "rebuild",
+            "severity": "warning",
+            "action": "ack",
+            "title": title,
+            "component": r.get("component"),
+            "target": r.get("target"),
+            "url": "docs/sops/self-built-image-rebuild.md",
+        }
+        if repo:
+            issue["image_repo"] = repo
+        if ref:
+            issue["security_ref"] = ref
+        if r.get("reason"):
+            issue["detail"] = str(r["reason"])[:300]
+        issues.append(issue)
     return issues, [i["key"] for i in issues]
 
 

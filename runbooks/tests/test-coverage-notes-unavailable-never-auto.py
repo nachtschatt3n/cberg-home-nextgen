@@ -22,6 +22,7 @@ _REPO = Path(__file__).resolve().parents[2]
 os.environ.setdefault("_MISE_ACTIVATED", "1"); sys.path.insert(0, str(_REPO / "runbooks"))
 _s = importlib.util.spec_from_file_location("cov", _REPO / "runbooks" / "coverage.py")
 cov = importlib.util.module_from_spec(_s); _s.loader.exec_module(cov)
+cov._direct_bump_structural_gate = lambda item: (False, "clean (diff checked: stubbed — the G3 structural companion reaches the compare API; pinned by test-structural-signal.py)")
 FAILURES: list[str] = []
 def check(name, ok, detail=""):
     print(f"  {'PASS' if ok else 'FAIL'}  {name}" + ("" if ok else f"  {detail}"))
