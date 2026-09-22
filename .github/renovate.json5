@@ -241,6 +241,80 @@
       // which Renovate's strict semver rejects. Loose versioning lets it track.
       "matchPackageNames": ["docker.io/jellyfin/jellyfin"],
       "versioning": "loose"
+    },
+    {
+      // DETECT-ONLY, NEVER AUTO-MERGE — charts sourced from a Flux GitRepository.
+      //
+      // For csi-driver-smb the version appears in FOUR places that must move
+      // together: the GitRepository's `ref.commit`, its `ref.branch`, the
+      // `!/charts/vX.Y.Z` line in its `ignore` allowlist, and the HelmRelease's
+      // `chart: charts/vX.Y.Z/csi-driver-smb` path. The customManager below can
+      // only rewrite the third. A PR carrying that edit alone points the artifact
+      // filter at a chart directory that does not exist at the pinned commit, so
+      // the HelmChart stops resolving (loud, and git-revertable — the GitRepository
+      // itself stays Ready — but still a broken reconcile). That PR would look
+      // patch/minor and green to the maintenance window's Step 0 safe-update lane
+      // and get merged unattended at 03:30.
+      //
+      // `dependencyDashboardApproval` keeps the finding visible (which is the whole
+      // point — csi-driver-smb had NO version detector at all) while guaranteeing
+      // no PR exists for anything to auto-merge. The operator opens it from the
+      // dashboard and does the coordinated four-place edit by hand, re-deriving the
+      // commit from the upstream tag per kubernetes/flux/meta/repositories/git/csi-driver-smb.yaml.
+      "description": ["Flux GitRepository chart sources — dashboard-approval only"],
+      "matchDatasources": ["github-releases"],
+      "matchPackageNames": ["kubernetes-csi/csi-driver-smb"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      // csi-driver-smb's GitRepository ALSO reaches Renovate through the built-in
+      // flux manager, and that path is actively WRONG — disable it.
+      //
+      // Measured with Renovate's own extractor (`renovate --platform=local
+      // --dry-run=extract`, 2026-09-22): the flux manager emits
+      //   depName=csi-driver-smb  datasource=git-refs
+      //   packageName=https://github.com/kubernetes-csi/csi-driver-smb
+      //   currentDigest=59dce96e…  (and NO currentValue — `ref.branch` is dropped)
+      // With no currentValue, the git-refs datasource resolves the DEFAULT BRANCH
+      // head. Upstream's default branch is `master` @ da360634 (git ls-remote,
+      // 2026-09-22); the pin 59dce96e is the v1.20.3 commit on `release-1.20`, a
+      // diverged branch. So the only update this dep can ever produce is "move the
+      // pin onto master HEAD" — the silent content swap the commit pin exists to
+      // prevent, dressed as a routine digest bump.
+      //
+      // Disabling it removes a structurally wrong signal; the structurally right
+      // one (the chart version, via the customManager below) is added in the same
+      // change, so this is not a loss of coverage.
+      "description": ["csi-driver-smb commit pin — suppress the flux manager's master-HEAD digest bump"],
+      "matchDatasources": ["git-refs"],
+      "matchPackageNames": ["https://github.com/kubernetes-csi/csi-driver-smb"],
+      "enabled": false
+    },
+    {
+      // oc8 — same class of gap, different mechanism, so it needs a different fix.
+      //
+      // The customManager below cannot help it: oc8 carries no version string
+      // anywhere — upstream oc8-ai/oc8 has 0 tags and 0 releases (re-verified via
+      // the GitHub API, 2026-09-22), its chart is pinned at 0.1.0 forever, and the
+      // HelmRelease's chart path is `deploy/helm/oc8` with no version in it.
+      //
+      // What IS trackable is our own fork's pin tag. Measured with Renovate's own
+      // extractor (2026-09-22) the flux manager emits
+      //   depName=oc8  datasource=github-tags  packageName=nachtschatt3n/oc8
+      //   currentValue=oc8home-2026.09.17
+      // and neither semver NOR `loose` can parse that tag — both were measured
+      // returning skipReason "invalid-value" against the live tag on 2026-09-22,
+      // so Renovate compared nothing and the manifest could sit on a stale pin
+      // after our CI cut a newer one. A `regex:` versioning that names the date
+      // parts is what actually parses it. Dashboard-approval because a tag-only
+      // bump moves the chart without moving the separately sha-pinned images in
+      // the HelmRelease, breaking the "chart and image describe the same commit"
+      // invariant that kubernetes/flux/meta/repositories/git/oc8.yaml relies on.
+      "description": ["oc8 fork pin tag — make date-tag drift comparable, dashboard-approval only"],
+      "matchDatasources": ["github-tags"],
+      "matchPackageNames": ["nachtschatt3n/oc8"],
+      "versioning": "regex:^oc8home-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
+      "dependencyDashboardApproval": true
     }
   ],
   "customManagers": [
@@ -265,6 +339,43 @@
         "#\\s*renovate:\\s*image=(?<depName>\\S+)\\s*\\n\\s*repository:\\s*\\S+\\s*\\n\\s*tag:\\s*[\"']?(?<currentValue>[^\"'\\s]+)[\"']?"
       ],
       "datasourceTemplate": "docker"
+    },
+    {
+      // Flux GitRepository chart sources pinned by COMMIT are invisible to every
+      // version detector we have: Renovate's built-in flux manager reads a
+      // GitRepository only via `spec.ref.tag`, and csi-driver-smb pins
+      // `ref.branch` + `ref.commit` with no tag, so it extracted NOTHING (verified
+      // 2026-09-22 — neither customManager above matches that file either; the
+      // first needs a `datasource=`/`depName=` annotation, the second a
+      // `# renovate: image=` one, and the manifest carries neither).
+      // `runbooks/check-all-versions.py` cannot read it for the same reason. The
+      // manifest itself records the gap: "no automated version tracking ... do not
+      // read silence as 'up to date'."
+      //
+      // The chart version IS present, in the `ignore` allowlist that filters the
+      // 118 MB checkout down to the one pinned chart directory
+      // (`!/charts/v1.20.3`). This reads it from there and pairs it with the
+      // owner/repo from `url:`, giving a real github-releases comparison.
+      // Verified against the live manifests: exactly 1 match across the directory
+      // (kubernetes-csi/csi-driver-smb @ 1.20.3), and 0 matches on oc8.yaml,
+      // k8s-self-ai-ops.yaml and kustomization.yaml, which carry no versioned
+      // chart path.
+      //
+      // `extractVersionTemplate` strips upstream's `v` prefix so the datasource's
+      // `v1.20.3` compares against the `1.20.3` captured after the literal `v` in
+      // the path, and the replacement writes back only those digits.
+      //
+      // Paired with a dependencyDashboardApproval packageRule above — this manager
+      // DETECTS, it must never open an auto-mergeable PR, because it can rewrite
+      // only one of the four places the version lives.
+      "customType": "regex",
+      "description": ["Chart version pinned inside a commit-pinned Flux GitRepository"],
+      "fileMatch": ["(^|/)kubernetes/flux/meta/repositories/git/[^/]+\\.ya?ml$"],
+      "matchStrings": [
+        "url:\\s+https://github\\.com/(?<depName>[^/\\s]+/[^/\\s]+?)(?:\\.git)?\\s*\\n[\\s\\S]*?\\n\\s*ignore:[\\s\\S]*?!/charts/v(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
     }
   ]
 }

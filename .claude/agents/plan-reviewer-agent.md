@@ -62,6 +62,24 @@ the reason it was dispatched. Everything else you establish yourself.
    sides read empty, a grep that is case-sensitive against mixed-case
    upstream output), it is a blocking issue. Cite the code path or the live
    measurement that proves it.
+
+   **A gate whose PASS condition is an ABSENCE is blocking unless the plan
+   demonstrates the SAME query returning non-zero in a known-bad case.**
+   "Zero matches", "no errors in the log", "the field is gone", "kubectl
+   returns nothing", "grep finds nothing" — these pass on every successful run
+   *precisely because nothing is wrong*, which makes a working gate
+   indistinguishable from a query that was never capable of matching: wrong
+   container or pod name, wrong label selector, log already rotated, a
+   `--since` window shorter than the restart, a log level that never emits the
+   string. "Can FAIL" and "can PASS for the right reason" are two separate
+   questions and item 6 is not satisfied until both are answered. The
+   acceptable demonstration is a non-zero reading from the identical command:
+   the pre-change baseline, a deliberately broken scratch copy, or an archived
+   failure the query is replayed against — a plan that merely *asserts* the
+   query would have caught the bad case has demonstrated nothing. The case
+   that produced this rule: a webhook-cert verification that grepped the
+   controller log for certificate errors and passed on zero matches. It would
+   have reported PASS against a pod that had never emitted a single line.
 7. **Dry-test every text transformation** (`sed`, `yq`, `python -c`) on a
    scratch COPY of the target file with the platform the window agent runs on
    (macOS BSD sed, GNU coreutils absent). A no-op or a wrong edit is blocking.

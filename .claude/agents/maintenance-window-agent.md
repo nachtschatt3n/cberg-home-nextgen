@@ -493,14 +493,9 @@ scheduled or executed without a human vetting it first. Name the dispatched comp
 Summarize: executed (with resulting versions/SHAs), rolled-back/blocked (with
 the failure), deferred/awaiting-go (with the window they moved to), and the
 remaining held-update backlog. Emit an `auto-update`/`maintenance` finding to the
-sweep DB if anything blocked. Ingest a **window-complete** awareness issue
-(`home-operation ingest --json '{"key":"window-<slot>","kind":"window_warning",
-"source":"maintenance","severity":"info","action":"ack","title":"Window <slot>
-done: <x> applied, <y> awaiting-go, <z> blocked"}'`) so the operator always gets a
-close-out even when nothing needed a decision. OpenClaw surfaces it in the
-briefing.
+sweep DB if anything blocked.
 
-Then run the scripted issue-set reconcile (P4.1.1) so plans this window
+**FIRST**, run the scripted issue-set reconcile (P4.1.1) so plans this window
 executed/resolved drop their reminders immediately instead of waiting for the
 next sweep — save `maintenance-plan.py --json` to a file and:
 
@@ -508,6 +503,26 @@ next sweep — save `maintenance-plan.py --json` to a file and:
 .venv/bin/python3 runbooks/openclaw-sync.py --plan-json <that file>
 # exit 2 = sync degraded — note it in the close-out summary, never ignore it.
 ```
+
+**THEN** ingest the **window-complete** awareness issue
+(`home-operation ingest --json '{"key":"window-<slot>","kind":"window_warning",
+"source":"maintenance","severity":"info","action":"ack","title":"Window <slot>
+done: <x> applied, <y> awaiting-go, <z> blocked"}'`) so the operator always gets a
+close-out even when nothing needed a decision. OpenClaw surfaces it in the
+briefing.
+
+**THAT ORDER IS LOAD-BEARING — do not swap it back.** The reconcile's open set
+is `maintenance-plan.py`'s `open_issue_keys`, which by construction holds PLAN
+IDS ONLY (`runbooks/maintenance-plan.py`: every plan whose `status` is not
+`executed`/`superseded`) — `window-<slot>` is not a plan id and can never appear
+in it. `openclaw-sync.py` then reconciles the WHOLE `maintenance` source against
+that set, so anything open under that source and absent from the set is
+auto-closed. Ingesting the close-out first therefore created the notification
+and had the reconcile close it seconds later, in the same step: the operator got
+no close-out at all, and nothing logged a failure because both commands
+succeeded. Ingest after the reconcile and the issue survives until the operator
+acks it (the next sweep's reconcile will close it, which is the intended
+lifetime).
 
 **Record the track record — one `autonomy-record.py record` per plan executed,
 BEFORE the `window_runs` finalize (2026-09-14):**
