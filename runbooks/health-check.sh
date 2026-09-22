@@ -366,6 +366,421 @@ report_unmeasured() {
     rm -f "$UNMEASURED_LOG" 2>/dev/null || true
 }
 
+# _iso_to_epoch ISO8601 -> epoch seconds (UTC); prints nothing on unparseable
+# input. python3 rather than `date`: this runs on macOS (BSD date has no -d)
+# and the same code must read Kubernetes RFC3339 stamps unchanged.
+_iso_to_epoch() {
+    python3 -c '
+import sys, datetime
+s = sys.argv[1].strip()
+if not s:
+    raise SystemExit(1)
+if s.endswith("Z"):
+    s = s[:-1] + "+00:00"
+d = datetime.datetime.fromisoformat(s)
+if d.tzinfo is None:
+    d = d.replace(tzinfo=datetime.timezone.utc)
+print(int(d.timestamp()))
+' "${1:-}" 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# Flux not-Ready persistence gate (F-accbce1b)
+#
+# One sample of `kustomizations -A` taken while Flux re-reconciles onto a
+# fresh commit catches dependency-ordered Kustomizations inside their normal
+# "dependency X is not ready" window (measured 2026-09-17: ~3.5 min, cleared
+# on its own, 0/137 not-ready on an independent recheck). That was scored as
+# a standing MAJOR "blocked by dependencies", which teaches the reader to skip
+# the row. The scan keeps the probe exactly as wide (every Kustomization) but
+# scores only what PERSISTS:
+#
+#   failure      any reason that is not a dependency wait or an in-progress
+#                reconcile (BuildFailed, ArtifactFailed, HealthCheckFailed, a
+#                decryption error, ...) -> STANDING at once. A hard failure is
+#                never a transient, so it gets no grace.
+#   dependency / healthcheck / progressing
+#                STANDING once the Ready=False condition is older than
+#                FLUX_NOTREADY_GRACE_S (600s: well past the observed window,
+#                well short of the 30-min health-check timeout). Younger:
+#                PENDING -> ONE re-sample after FLUX_NOTREADY_RESAMPLE_S.
+#                Gone by then = RESOLVED (printed, not scored). Still there
+#                and still young = PENDING (printed, not scored; the next
+#                sweep scores it, because lastTransitionTime does not move
+#                while the status stays False).
+#
+# "Ready=False older than the current source revision" was the other rule on
+# offer and was rejected: the recorded transient spanned several commits
+# pushed by concurrent agents minutes apart, so a young condition can predate
+# the newest artifact and would have been scored anyway.
+#
+# Unreadable timestamps score as STANDING and an unreadable listing is
+# recorded as unmeasured: a gate that cannot read the clock must not turn
+# into a silent pass.
+# ---------------------------------------------------------------------------
+FLUX_NOTREADY_GRACE_S="${FLUX_NOTREADY_GRACE_S:-600}"
+FLUX_NOTREADY_RESAMPLE_S="${FLUX_NOTREADY_RESAMPLE_S:-60}"
+
+# flux_notready_list: one TSV line per not-Ready Kustomization:
+#   ns \t name \t reason \t lastTransitionTime \t message (flattened, <=160 chars)
+# Empty output = every Kustomization is Ready. Non-zero exit = could not read.
+flux_notready_list() {
+    kubectl get kustomizations -A -o json 2>/dev/null | python3 -c '
+import sys, json
+try:
+    items = json.load(sys.stdin).get("items", [])
+except Exception:
+    sys.exit(2)
+for it in items:
+    for c in it.get("status", {}).get("conditions", []) or []:
+        if c.get("type") == "Ready" and c.get("status") != "True":
+            msg = " ".join(str(c.get("message", "")).split())[:160]
+            print("\t".join([it["metadata"]["namespace"], it["metadata"]["name"],
+                             str(c.get("reason", "")), str(c.get("lastTransitionTime", "")), msg]))
+            break
+'
+}
+
+# flux_notready_class REASON MESSAGE -> dependency | healthcheck | progressing | failure
+flux_notready_class() {
+    local reason="$1" msg="$2"
+    case "$msg" in
+        *dependency*"not ready"*)       echo dependency;  return 0 ;;
+        *"Reconciliation in progress"*) echo progressing; return 0 ;;
+    esac
+    case "$reason" in
+        DependencyNotReady) echo dependency; return 0 ;;
+        Progressing|ProgressingWithRetry)
+            case "$msg" in
+                *"health check"*|*"Health check"*) echo healthcheck ;;
+                *)                                 echo progressing ;;
+            esac
+            return 0 ;;
+    esac
+    echo failure
+}
+
+# flux_notready_verdict CLASS LAST_TRANSITION NOW GRACE -> STANDING | PENDING
+flux_notready_verdict() {
+    local cls="$1" ts="$2" now="$3" grace="$4" t
+    [ "$cls" = "failure" ] && { echo STANDING; return 0; }
+    t=$(_iso_to_epoch "$ts")
+    if [ -z "$t" ]; then echo STANDING; return 0; fi
+    if [ $((now - t)) -ge "$grace" ]; then echo STANDING; else echo PENDING; fi
+}
+
+# flux_notready_scan: sample, judge, ONE bounded re-sample for the young ones.
+# Prints one line per not-Ready Kustomization from the first sample:
+#   VERDICT \t CLASS \t ns/name \t age_s \t reason \t message
+# VERDICT: STANDING (score it) | PENDING (young, still there) | RESOLVED (gone
+# at re-sample). Exit 2 when the listing itself could not be taken.
+flux_notready_scan() {
+    local grace="${FLUX_NOTREADY_GRACE_S}" delay="${FLUX_NOTREADY_RESAMPLE_S}"
+    local sample1 sample2 now line ns name reason ts msg cls verdict t age
+    local pending=0 resampled=0
+    sample1=$(flux_notready_list) || return 2
+    [ -z "$sample1" ] && return 0
+    now=$(date +%s)
+    while IFS=$'\t' read -r ns name reason ts msg; do
+        [ -n "$ns" ] || continue
+        cls=$(flux_notready_class "$reason" "$msg")
+        verdict=$(flux_notready_verdict "$cls" "$ts" "$now" "$grace")
+        [ "$verdict" = "PENDING" ] && pending=$((pending + 1))
+    done <<< "$sample1"
+    if [ "$pending" -gt 0 ]; then
+        [ "$delay" -gt 0 ] 2>/dev/null && sleep "$delay"
+        if sample2=$(flux_notready_list); then
+            resampled=1
+        else
+            _record_unmeasured "flux-notready-resample" \
+                "$pending young not-ready Kustomization(s) could not be re-sampled; left PENDING (unscored) on the single sample"
+        fi
+        now=$(date +%s)
+    fi
+    while IFS=$'\t' read -r ns name reason ts msg; do
+        [ -n "$ns" ] || continue
+        cls=$(flux_notready_class "$reason" "$msg")
+        verdict=$(flux_notready_verdict "$cls" "$ts" "$now" "$grace")
+        if [ "$verdict" = "PENDING" ] && [ "$resampled" -eq 1 ]; then
+            line=$(printf '%s\n' "$sample2" | awk -F'\t' -v ns="$ns" -v n="$name" '$1==ns && $2==n {print; exit}')
+            if [ -z "$line" ]; then
+                verdict=RESOLVED
+            else
+                reason=$(printf '%s' "$line" | cut -f3)
+                ts=$(printf '%s' "$line" | cut -f4)
+                msg=$(printf '%s' "$line" | cut -f5)
+                cls=$(flux_notready_class "$reason" "$msg")
+                verdict=$(flux_notready_verdict "$cls" "$ts" "$now" "$grace")
+            fi
+        fi
+        t=$(_iso_to_epoch "$ts"); age=""
+        [ -n "$t" ] && age=$((now - t))
+        printf '%s\t%s\t%s/%s\t%s\t%s\t%s\n' "$verdict" "$cls" "$ns" "$name" "${age:-?}" "$reason" "$msg"
+    done <<< "$sample1"
+}
+
+# ---------------------------------------------------------------------------
+# Zigbee staleness, classified against the LIVE registry (F-ae98282d)
+#
+# state.json is bookkeeping: an address stays in it after the device is gone,
+# and last_seen can freeze (see the saturation control in Section 22). The
+# old code explained every stale entry with a fixed "baseline 23 decommissioned
+# devices (2026-04-17)": a magic number that by 2026-09 exceeded the whole
+# population (24 entries) and labelled enabled, interview-complete devices --
+# one of them dark for three weeks on a flat battery -- as removed hardware.
+# Only the registry (zigbee2mqtt/bridge/devices, retained on the broker and
+# already read by Section 22) can tell "dark device" from "orphan entry", so
+# each stale address is looked up there. No baseline constant remains.
+# ---------------------------------------------------------------------------
+
+# z2m_registry_fetch: the retained zigbee2mqtt/bridge/devices payload, or
+# nothing when the broker did not answer in time.
+z2m_registry_fetch() {
+    kubectl exec -n home-automation deployment/mosquitto -c app -- \
+        mosquitto_sub -h 127.0.0.1 -p 1883 -t zigbee2mqtt/bridge/devices -C 1 -W 12 2>/dev/null
+}
+
+# z2m_classify_stale STALE_LINES REGISTRY_JSON
+#   STALE_LINES: "STALE:<ieee>:<days>d" lines, as Sections 22 and 32 produce.
+#   One TSV line per stale address:
+#     LIVE     \t ieee \t days \t friendly   enabled registry member -> a device
+#                                            that has gone dark
+#     DISABLED \t ieee \t days \t friendly   registry member marked disabled ->
+#                                            dark on purpose
+#     ORPHAN   \t ieee \t days \t -          not in the registry -> stale
+#                                            bookkeeping, not a device
+#     UNKNOWN  \t ieee \t days \t -          registry unavailable/unparseable ->
+#                                            cannot be classified
+z2m_classify_stale() {
+    local stale="$1" regfile
+    regfile=$(mktemp)
+    printf '%s' "${2:-}" > "$regfile"
+    python3 - "$stale" "$regfile" <<'PYEOF'
+import sys, json
+stale_lines, regpath = sys.argv[1], sys.argv[2]
+reg = None
+try:
+    raw = open(regpath).read()
+    devs = json.loads(raw) if raw.strip() else None
+    if isinstance(devs, list):
+        reg = {d.get("ieee_address"): d for d in devs if isinstance(d, dict)}
+except Exception:
+    reg = None
+for line in stale_lines.splitlines():
+    if not line.startswith("STALE:"):
+        continue
+    parts = line.split(":", 2)
+    if len(parts) < 3:
+        continue
+    ieee, days = parts[1].strip(), parts[2].strip().rstrip("d")
+    if reg is None:
+        print("\t".join(["UNKNOWN", ieee, days, "-"]))
+        continue
+    d = reg.get(ieee)
+    if d is None:
+        print("\t".join(["ORPHAN", ieee, days, "-"]))
+    elif d.get("disabled") is True:
+        print("\t".join(["DISABLED", ieee, days, str(d.get("friendly_name") or ieee)]))
+    else:
+        print("\t".join(["LIVE", ieee, days, str(d.get("friendly_name") or ieee)]))
+PYEOF
+    rm -f "$regfile"
+}
+
+# z2m_score_stale CLASS_LINES  (output of z2m_classify_stale)
+#   Prints each line with its noise tag, then scores: LIVE -> warning + minor
+#   issue NAMING the devices; ORPHAN -> info; UNKNOWN -> recorded as a
+#   measurement that did not run (an entry that cannot be classified is not a
+#   decommissioned device). Sections 22 and 32 both classify; only the first
+#   complete classification scores (Z2M_STALE_SCORED), so one dark device is
+#   one finding, not two.
+Z2M_STALE_SCORED=0
+z2m_score_stale() {
+    local lines="$1" cls ieee days name tag
+    local live_n=0 orphan_n=0 unknown_n=0 disabled_n=0 live_names=""
+    [ -z "$lines" ] && return 0
+    while IFS=$'\t' read -r cls ieee days name; do
+        [ -n "$cls" ] || continue
+        case "$cls" in
+            LIVE)
+                live_n=$((live_n + 1))
+                live_names="${live_names}${live_names:+, }${name} [${ieee}] ${days}d"
+                tag=$(_noise_tag "$name $ieee")
+                printf '    %s [%s]: dark %sd -- LIVE registry member%s\n' "$name" "$ieee" "$days" "$tag" ;;
+            DISABLED)
+                disabled_n=$((disabled_n + 1))
+                tag=$(_noise_tag "$name $ieee")
+                printf '    %s [%s]: dark %sd -- disabled in registry%s\n' "$name" "$ieee" "$days" "$tag" ;;
+            ORPHAN)
+                orphan_n=$((orphan_n + 1))
+                printf '    %s: dark %sd -- not in registry (orphan state entry)\n' "$ieee" "$days" ;;
+            *)
+                unknown_n=$((unknown_n + 1))
+                printf '    %s: dark %sd -- registry unavailable, not classified\n' "$ieee" "$days" ;;
+        esac
+    done <<< "$lines"
+    if [ "$unknown_n" -gt 0 ]; then
+        _record_unmeasured "zigbee-stale-registry" \
+            "bridge/devices not received; $unknown_n stale state entr(y/ies) could not be classified live-vs-orphan"
+        log_warning "Zigbee staleness: $unknown_n stale entr(y/ies) unclassified -- bridge/devices not received"
+        return 0
+    fi
+    if [ "${Z2M_STALE_SCORED:-0}" -eq 1 ]; then
+        echo "    (already scored by an earlier section)"
+        return 0
+    fi
+    Z2M_STALE_SCORED=1
+    if [ "$live_n" -gt 0 ]; then
+        log_warning "Zigbee devices dark >5 days but live in the registry: $live_n -- $live_names"
+        add_minor_issue "Zigbee live devices dark >5 days: $live_names"
+    fi
+    [ "$orphan_n" -gt 0 ] && log_info "Zigbee orphan state entries (not in registry): $orphan_n"
+    [ "$disabled_n" -gt 0 ] && log_info "Zigbee disabled devices dark >5 days: $disabled_n (expected)"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# hactl doctor scope (F-0a79466d)
+#
+# The loop used to run config_entries + zombie_devices only, so the sweep had
+# no view of entity availability at all: hactl's own `unavailable` check was
+# reporting well over a hundred truly-unavailable entities across dozens of
+# device groups while the sweep printed "2 warning hactl finding(s)". The
+# check name is `unavailable` (see `hactl doctor --help`), not the
+# `unavailable_entities` the finding's action text guessed.
+# ---------------------------------------------------------------------------
+HACTL_DOCTOR_CHECKS="config_entries zombie_devices unavailable"
+
+# hactl_doctor_collect CHECK...: run each scoped check on its own (hactl's
+# --check is single-valued), ride out a transient HA API blip with backoff,
+# and route on the Summary block. Sets hactl_summaries + hactl_bodies.
+hactl_doctor_collect() {
+    local chk chk_out attempt
+    hactl_summaries=""
+    hactl_bodies=""
+    for chk in "$@"; do
+        chk_out=""
+        for attempt in 1 2 3; do
+            chk_out=$(run_hactl doctor --check "$chk" 2>&1)
+            printf '%s\n' "$chk_out" | grep -q '^=== Summary ===' && break
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 5))
+        done
+        if printf '%s\n' "$chk_out" | grep -q '^=== Summary ==='; then
+            hactl_summaries="${hactl_summaries}${chk_out}"$'\n'
+            hactl_bodies="${hactl_bodies}$(printf '%s\n' "$chk_out" | awk '/^=== Summary ===/{exit} /^---/{p=1} p')"$'\n'
+        else
+            echo "hactl doctor --check $chk: no summary after retry (transient HA API?) -- first 10 lines:"
+            printf '%s\n' "$chk_out" | head -10
+        fi
+    done
+}
+
+# hactl_doctor_counts SUMMARIES -> "<critical> <warnings>", summed across every
+# Summary block present.
+hactl_doctor_counts() {
+    printf '%s\n' "$1" \
+        | awk '/^=== Summary ===/{s=1;next} s&&/^[[:space:]]+Critical:/{c+=$2} s&&/^[[:space:]]+Warnings:/{w+=$2;s=0} END{print c+0, w+0}'
+}
+
+# ---------------------------------------------------------------------------
+# Zigbee battery assessment (F-3faa37f8)
+#
+# The issue titles used to carry only a COUNT ("Critical battery levels
+# (<10%): 2 devices"), so an accepted-risk needle could only ever match the
+# count and therefore masked WHICHEVER device was critical, not the one it was
+# accepted for. Every title now names each device (friendly name + IEEE + %)
+# so a needle can be scoped to one device. AR-042 (count-scoped) is disabled.
+#
+# Bands: critical <10%, warning 10-29%, monitor 30-49%, good >=50%. The
+# warning band was unreachable before (its test repeated the critical `<10`).
+# ---------------------------------------------------------------------------
+
+# zigbee_battery_assess BATTERY_LIST   (lines "friendly|battery|ieee")
+zigbee_battery_assess() {
+    local list="$1"
+    local TOTAL_BATTERY CRITICAL_COUNT WARNING_COUNT MONITOR_COUNT GOOD_COUNT
+    local CRITICAL_BATTERIES WARNING_BATTERIES MONITOR_BATTERIES
+    local CRITICAL_NAMES WARNING_NAMES AVG_BATTERY
+    local friendly battery ieee battery_int
+
+    TOTAL_BATTERY=$(printf '%s\n' "$list" | grep -c '|' || true)
+    echo "Total battery-powered devices: $TOTAL_BATTERY"
+    echo ""
+
+    CRITICAL_COUNT=0; WARNING_COUNT=0; MONITOR_COUNT=0; GOOD_COUNT=0
+    CRITICAL_BATTERIES=""; WARNING_BATTERIES=""; MONITOR_BATTERIES=""
+    CRITICAL_NAMES=""; WARNING_NAMES=""
+
+    while IFS='|' read -r friendly battery ieee; do
+        if [ -n "$friendly" ] && [ -n "$battery" ]; then
+            battery_int=$(echo "$battery" | awk '{print int($1)}')
+            if [ "$battery_int" -lt 10 ]; then
+                CRITICAL_BATTERIES="${CRITICAL_BATTERIES}  - ${friendly} [${ieee:-?}] (${battery}%)\n"
+                CRITICAL_NAMES="${CRITICAL_NAMES}${CRITICAL_NAMES:+, }${friendly} [${ieee:-?}] ${battery}%"
+                CRITICAL_COUNT=$((CRITICAL_COUNT + 1))
+            elif [ "$battery_int" -lt 30 ]; then
+                WARNING_BATTERIES="${WARNING_BATTERIES}  - ${friendly} [${ieee:-?}] (${battery}%)\n"
+                WARNING_NAMES="${WARNING_NAMES}${WARNING_NAMES:+, }${friendly} [${ieee:-?}] ${battery}%"
+                WARNING_COUNT=$((WARNING_COUNT + 1))
+            elif [ "$battery_int" -lt 50 ]; then
+                MONITOR_BATTERIES="${MONITOR_BATTERIES}  - ${friendly} [${ieee:-?}] (${battery}%)\n"
+                MONITOR_COUNT=$((MONITOR_COUNT + 1))
+            else
+                GOOD_COUNT=$((GOOD_COUNT + 1))
+            fi
+        fi
+    done <<< "$list"
+
+    # Helper: tag known-flaky zigbee devices from the noise allowlist
+    _print_battery_block() {
+        local block="$1"
+        # echo -e expands the literal \n separators built above
+        echo -e "$block" | while IFS= read -r _bat_line; do
+            [ -z "$_bat_line" ] && continue
+            tag=$(_noise_tag "$_bat_line")
+            printf '%s%s\n' "$_bat_line" "$tag"
+        done
+    }
+
+    echo "🔴 CRITICAL (<10%) - Replace Immediately:"
+    if [ "$CRITICAL_COUNT" -gt 0 ]; then _print_battery_block "$CRITICAL_BATTERIES"; else echo "  None"; fi
+    echo ""
+    echo "🟡 WARNING (10-29%) - Replace Soon:"
+    if [ "$WARNING_COUNT" -gt 0 ]; then _print_battery_block "$WARNING_BATTERIES"; else echo "  None"; fi
+    echo ""
+    echo "🔵 MONITOR (30-49%) - Watch Closely:"
+    if [ "$MONITOR_COUNT" -gt 0 ]; then _print_battery_block "$MONITOR_BATTERIES"; else echo "  None"; fi
+    echo ""
+    echo "✅ GOOD (>=50%):"
+    echo "  $GOOD_COUNT devices"
+    echo ""
+
+    AVG_BATTERY=$(printf '%s\n' "$list" | awk -F'|' 'NF>=2 {sum+=$2; count++} END {if(count>0) print int(sum/count); else print 0}')
+    echo "Average battery level: ${AVG_BATTERY}%"
+    echo ""
+
+    if [ "$CRITICAL_COUNT" -gt 0 ]; then
+        log_warning "CRITICAL: $CRITICAL_COUNT device(s) with batteries <10%: $CRITICAL_NAMES"
+        add_major_issue "Critical battery (<10%): ${CRITICAL_NAMES} -- ${CRITICAL_COUNT} device(s) need immediate replacement"
+    fi
+    if [ "$WARNING_COUNT" -gt 0 ]; then
+        log_warning "WARNING: $WARNING_COUNT device(s) with batteries 10-29%: $WARNING_NAMES"
+        add_minor_issue "Low battery (10-29%): ${WARNING_NAMES} -- ${WARNING_COUNT} device(s) need replacement soon"
+    fi
+    if [ "$CRITICAL_COUNT" -eq 0 ] && [ "$WARNING_COUNT" -eq 0 ]; then
+        log_success "All Zigbee device batteries at or above 30%"
+    fi
+
+    echo "📋 Recommendations:"
+    [ "$CRITICAL_COUNT" -gt 0 ] && echo "  🔴 URGENT: Replace batteries in $CRITICAL_COUNT device(s) immediately: $CRITICAL_NAMES"
+    [ "$WARNING_COUNT" -gt 0 ]  && echo "  🟡 Replace batteries in $WARNING_COUNT device(s) within 1-2 weeks: $WARNING_NAMES"
+    [ "$MONITOR_COUNT" -gt 0 ]  && echo "  🔵 Monitor $MONITOR_COUNT device(s), plan battery replacement"
+    if [ "$CRITICAL_COUNT" -eq 0 ] && [ "$WARNING_COUNT" -eq 0 ] && [ "$MONITOR_COUNT" -eq 0 ]; then
+        echo "  ✅ All devices have healthy battery levels"
+    fi
+    return 0
+}
+
 # Authoritative backup-freshness signal, judged PER VOLUME. For each Longhorn
 # volume the freshest evidence wins: the newest Completed Backup CR carrying
 # its backup-volume label OR volume.status.lastBackupAt — whichever is newer.
@@ -1091,8 +1506,43 @@ log_section "Section 5: Helm Deployments"
     # Evaluate issues
     CRITICAL_FLUX_ISSUES=0
 
-    if [ "$FAILED_HELM" -eq 0 ] && [ "$NOT_RECONCILED" -eq 0 ] && [ "$FAILED_HELMREPOS" -eq 0 ]; then
-        log_success "All Helm releases, repositories, and Kustomizations healthy"
+    # Persistence gate (F-accbce1b): NOT_RECONCILED above stays the raw
+    # point-in-time sample (the "reconciled" line and --prev drift keep their
+    # meaning); what gets SCORED is only what flux_notready_scan finds to
+    # persist. A listing that cannot be re-read falls back to scoring the raw
+    # sample and records the gap, never to "clean".
+    FLUX_NR_SCAN=""
+    FLUX_STANDING_DEP=0; FLUX_STANDING_HC=0; FLUX_STANDING_OTHER=0; FLUX_NR_TRANSIENT=0
+    if [ "$NOT_RECONCILED" -gt 0 ]; then
+        FLUX_NR_SCAN=$(flux_notready_scan)
+        FLUX_NR_RC=$?
+        if [ "$FLUX_NR_RC" -ne 0 ]; then
+            _record_unmeasured "flux-notready-persistence" \
+                "the persistence scan could not list the $NOT_RECONCILED not-ready Kustomization(s) (rc=$FLUX_NR_RC); scored from the single sample"
+            FLUX_STANDING_OTHER="$NOT_RECONCILED"
+        elif [ -n "$FLUX_NR_SCAN" ]; then
+            echo ""
+            echo "Not-ready persistence scan (grace ${FLUX_NOTREADY_GRACE_S}s, re-sample after ${FLUX_NOTREADY_RESAMPLE_S}s):"
+            printf '%s\n' "$FLUX_NR_SCAN" | awk -F'\t' '{printf "  - %-8s %-11s %s (age %ss, %s): %s\n", $1, $2, $3, $4, $5, $6}'
+            FLUX_STANDING_DEP=$(printf '%s\n' "$FLUX_NR_SCAN" | grep -c $'^STANDING\tdependency' || true)
+            FLUX_STANDING_HC=$(printf '%s\n' "$FLUX_NR_SCAN" | grep -c $'^STANDING\thealthcheck' || true)
+            FLUX_STANDING_OTHER=$(printf '%s\n' "$FLUX_NR_SCAN" | grep -cE $'^STANDING\t(progressing|failure)' || true)
+            FLUX_NR_TRANSIENT=$(printf '%s\n' "$FLUX_NR_SCAN" | grep -cE '^(PENDING|RESOLVED)' || true)
+        else
+            # Not ready at the count, all Ready by the scan: the ordering window
+            # closed between the two reads.
+            FLUX_NR_TRANSIENT="$NOT_RECONCILED"
+        fi
+    fi
+    FLUX_STANDING=$((FLUX_STANDING_DEP + FLUX_STANDING_HC + FLUX_STANDING_OTHER))
+    FLUX_STANDING_NAMES=$(printf '%s\n' "$FLUX_NR_SCAN" | awk -F'\t' '$1=="STANDING"{print $3}' | paste -s -d, - | sed 's/,/, /g')
+
+    if [ "$FAILED_HELM" -eq 0 ] && [ "$FLUX_STANDING" -eq 0 ] && [ "$FAILED_HELMREPOS" -eq 0 ]; then
+        if [ "$FLUX_NR_TRANSIENT" -gt 0 ]; then
+            log_success "All Helm releases, repositories, and Kustomizations healthy ($FLUX_NR_TRANSIENT Kustomization(s) briefly not ready during the probe -- reconcile ordering, not scored)"
+        else
+            log_success "All Helm releases, repositories, and Kustomizations healthy"
+        fi
     else
         if [ "$FAILED_HELMREPOS" -gt 0 ]; then
             log_warning "Failed HelmRepositories detected: $FAILED_HELMREPOS (may block kustomizations)"
@@ -1105,21 +1555,20 @@ log_section "Section 5: Helm Deployments"
             add_major_issue "HelmRelease failures: $FAILED_HELM"
         fi
 
-        if [ "$NOT_RECONCILED" -gt 0 ]; then
-            # Check if stuck due to dependencies
-            DEPENDENCY_STUCK=$(flux get kustomizations -A 2>/dev/null | grep -c "dependency.*not ready" || true)
-            HEALTHCHECK_STUCK=$(kubectl get kustomizations -A -o json 2>/dev/null | jq -r '[.items[] | select(.status.conditions[]? | select(.type=="Ready" and .reason=="Progressing" and (.message | contains("health check"))))] | length' || echo "0")
-
-            if [ "$DEPENDENCY_STUCK" -gt 0 ]; then
-                log_warning "Kustomizations blocked by dependencies: $DEPENDENCY_STUCK"
-                add_major_issue "Kustomizations blocked by dependencies: $DEPENDENCY_STUCK (check for failed HelmRepositories)"
-            elif [ "$HEALTHCHECK_STUCK" -gt 0 ]; then
-                log_warning "Kustomizations stuck in health checks: $HEALTHCHECK_STUCK"
-                add_major_issue "Kustomizations stuck in health checks: $HEALTHCHECK_STUCK (may timeout after 30 minutes)"
-            else
-                log_warning "Kustomizations not reconciled: $NOT_RECONCILED"
-                add_minor_issue "Kustomizations not reconciled: $NOT_RECONCILED"
-            fi
+        if [ "$FLUX_STANDING_DEP" -gt 0 ]; then
+            log_warning "Kustomizations blocked by dependencies: $FLUX_STANDING_DEP (not ready for >= ${FLUX_NOTREADY_GRACE_S}s)"
+            add_major_issue "Kustomizations blocked by dependencies: $FLUX_STANDING_DEP -- $FLUX_STANDING_NAMES (not ready for >= ${FLUX_NOTREADY_GRACE_S}s; check for failed HelmRepositories)"
+        fi
+        if [ "$FLUX_STANDING_HC" -gt 0 ]; then
+            log_warning "Kustomizations stuck in health checks: $FLUX_STANDING_HC (not ready for >= ${FLUX_NOTREADY_GRACE_S}s)"
+            add_major_issue "Kustomizations stuck in health checks: $FLUX_STANDING_HC -- $FLUX_STANDING_NAMES (may timeout after 30 minutes)"
+        fi
+        if [ "$FLUX_STANDING_OTHER" -gt 0 ]; then
+            log_warning "Kustomizations not reconciled: $FLUX_STANDING_OTHER"
+            add_minor_issue "Kustomizations not reconciled: $FLUX_STANDING_OTHER -- ${FLUX_STANDING_NAMES:-see report}"
+        fi
+        if [ "$FLUX_NR_TRANSIENT" -gt 0 ]; then
+            log_info "Kustomizations briefly not ready during the probe: $FLUX_NR_TRANSIENT (reconcile ordering, not scored)"
         fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
@@ -2964,6 +3413,7 @@ log_section "Section 22: Home Automation Health"
     echo ""
 
     # --- Zigbee device offline detection via state.json ---
+    Z2M_BRIDGE_DEVICES_RAW=""
     echo "Zigbee device health (from state.json):"
     # NOTE: previously this piped state.json into `python3 - <<heredoc` — but the
     # heredoc TAKES OVER stdin, so the piped JSON never reached json.load(sys.stdin)
@@ -3027,30 +3477,27 @@ PYEOF
     # timestamps that are dead. `/data/state.json`'s last_seen is therefore
     # NOT a liveness signal, however current the file's mtime looks.
     #
-    # That permanent 24-of-24 is also where the `baseline 23` below came from:
+    # That permanent 24-of-24 is also where the retired `baseline 23` came from:
     # a false positive was silenced with a magic number, and the silencing then
     # hid a genuinely dead device (Soil Sensor 2, dark 14.4d, battery 0) inside
     # the noise. Suppressing a symptom blinded the detector -- so refuse to
     # score at all rather than emit a number that cannot mean anything.
     #
-    # The real fix is to read the live MQTT `zigbee2mqtt/bridge/devices` topic
-    # instead; until then this must not report a pass.
+    # The partially-stale branch below now classifies each entry against the
+    # live `zigbee2mqtt/bridge/devices` registry (z2m_classify_stale); the
+    # saturated case still must not report a pass.
     if [ -n "$Z2M_OFFLINE_5D" ] && [ -n "$Z2M_TOTAL" ] && [ "$Z2M_TOTAL" -gt 0 ] \
        && [ "$Z2M_OFFLINE_5D" -eq "$Z2M_TOTAL" ] 2>/dev/null; then
         _record_unmeasured "zigbee-staleness" \
             "every device with a last_seen is stale ($Z2M_OFFLINE_5D/$Z2M_TOTAL) -- state.json last_seen is frozen, so this is a dead SENSOR, not $Z2M_TOTAL dead devices; read zigbee2mqtt/bridge/devices over MQTT instead"
         log_warning "Zigbee staleness detector is UNUSABLE: $Z2M_OFFLINE_5D/$Z2M_TOTAL devices stale — state.json last_seen is frozen, not the mesh"
-    # Baseline: 23 stale entries from decommissioned devices (as of 2026-04-17) — see docs/troubleshooting/ha-upstream-integration-issues.md
-    # These are state.json records of physically removed/replaced devices, not live Zigbee failures.
-    # Trip only if count exceeds baseline by a clear margin OR increases unexpectedly.
-    # NOTE the branch above runs FIRST and swallows the saturated case, so this
-    # baseline now only applies to a partially-stale reading -- the only shape
-    # in which it was ever meaningful.
-    elif Z2M_OFFLINE_BASELINE=23 && [ -n "$Z2M_OFFLINE_5D" ] && [ "$Z2M_OFFLINE_5D" -gt $((Z2M_OFFLINE_BASELINE + 5)) ]; then
-        log_warning "Zigbee devices offline >5 days above baseline: $Z2M_OFFLINE_5D (baseline: $Z2M_OFFLINE_BASELINE)"
-        add_major_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE_5D/${Z2M_TOTAL} (baseline $Z2M_OFFLINE_BASELINE)"
+    # Partially-stale reading: classify each stale address against the LIVE
+    # registry (F-ae98282d; z2m_classify_stale / z2m_score_stale). The payload
+    # is fetched once here and reused by the bridge-state block below.
     elif [ -n "$Z2M_OFFLINE_5D" ] && [ "$Z2M_OFFLINE_5D" -gt 0 ]; then
-        log_info "Zigbee stale state entries: $Z2M_OFFLINE_5D (baseline $Z2M_OFFLINE_BASELINE — decommissioned devices)"
+        Z2M_BRIDGE_DEVICES_RAW=$(z2m_registry_fetch)
+        echo "  Stale entries vs live registry (zigbee2mqtt/bridge/devices):"
+        z2m_score_stale "$(z2m_classify_stale "$(echo "$Z2M_DEVICE_STATS" | grep '^STALE:')" "${Z2M_BRIDGE_DEVICES_RAW:-}")"
     fi
 
     echo "Zigbee2MQTT logs (last 50 lines):"
@@ -3078,8 +3525,9 @@ PYEOF
     # "coordinator missing" critical (real cause of the F-bfb57b26 false
     # positive observed 2026-06-04 after the version 2.11.0 bump).
     echo "Zigbee2MQTT bridge state (via MQTT):"
-    Z2M_BRIDGE_DEVICES_RAW=$(kubectl exec -n home-automation deployment/mosquitto -c app -- \
-        mosquitto_sub -h 127.0.0.1 -p 1883 -t zigbee2mqtt/bridge/devices -C 1 -W 12 2>/dev/null)
+    # Reuse the payload the staleness classification already fetched; read the
+    # retained topic only when that did not happen or came back empty.
+    [ -n "${Z2M_BRIDGE_DEVICES_RAW:-}" ] || Z2M_BRIDGE_DEVICES_RAW=$(z2m_registry_fetch)
     Z2M_BRIDGE_INFO_RAW=$(kubectl exec -n home-automation deployment/mosquitto -c app -- \
         mosquitto_sub -h 127.0.0.1 -p 1883 -t zigbee2mqtt/bridge/info -C 1 -W 10 2>/dev/null)
 
@@ -4338,27 +4786,14 @@ log_section "Home Assistant Health (via hactl doctor)"
         # Summary block — a run that printed a Summary is a real result (parse it for
         # genuine HA findings regardless of exit code); only a persistent
         # no-Summary failure across both checks is surfaced.
-        hactl_summaries=""
-        hactl_bodies=""
-        for chk in config_entries zombie_devices; do
-            chk_out=""
-            # Up to 3 attempts with progressive backoff (5s, 10s ≈ 15s/check) so
-            # a longer transient HA API blip — the cause of the recurring
-            # false-positive no-report finding — is ridden out before flagging.
-            # A genuinely unreachable API still fails all 3 and surfaces it.
-            for attempt in 1 2 3; do
-                chk_out=$(run_hactl doctor --check "$chk" 2>&1)
-                printf '%s\n' "$chk_out" | grep -q '^=== Summary ===' && break
-                [ "$attempt" -lt 3 ] && sleep $((attempt * 5))
-            done
-            if printf '%s\n' "$chk_out" | grep -q '^=== Summary ==='; then
-                hactl_summaries="${hactl_summaries}${chk_out}"$'\n'
-                hactl_bodies="${hactl_bodies}$(printf '%s\n' "$chk_out" | awk '/^=== Summary ===/{exit} /^---/{p=1} p')"$'\n'
-            else
-                echo "hactl doctor --check $chk: no summary after retry (transient HA API?) — first 10 lines:"
-                printf '%s\n' "$chk_out" | head -10
-            fi
-        done
+        # Scoped checks come from HACTL_DOCTOR_CHECKS -- `unavailable` included
+        # since F-0a79466d, because entity availability was otherwise invisible
+        # to the sweep. hactl_doctor_collect runs each check on its own with up
+        # to 3 attempts and progressive backoff (5s, 10s ≈ 15s/check) so a
+        # longer transient HA API blip -- the cause of the recurring
+        # false-positive no-report finding -- is ridden out before flagging;
+        # a genuinely unreachable API still fails all 3 and surfaces it.
+        hactl_doctor_collect $HACTL_DOCTOR_CHECKS
 
         if [ -z "$hactl_summaries" ]; then
             # Both checks failed to produce any report across retries — a
@@ -4372,10 +4807,7 @@ log_section "Home Assistant Health (via hactl doctor)"
             echo ""
 
             # Sum Critical/Warnings across each scoped check's Summary block.
-            crit_count=$(printf '%s\n' "$hactl_summaries" \
-                | awk '/^=== Summary ===/{s=1;next} s&&/^[[:space:]]+Critical:/{c+=$2} s&&/^[[:space:]]+Warnings:/{w+=$2;s=0} END{print c+0}')
-            warn_count=$(printf '%s\n' "$hactl_summaries" \
-                | awk '/^=== Summary ===/{s=1;next} s&&/^[[:space:]]+Critical:/{c+=$2} s&&/^[[:space:]]+Warnings:/{w+=$2;s=0} END{print w+0}')
+            read -r crit_count warn_count <<< "$(hactl_doctor_counts "$hactl_summaries")"
             crit_count=${crit_count:-0}
             warn_count=${warn_count:-0}
             overall=OK
@@ -4457,14 +4889,14 @@ except Exception as e:
         echo "Total Zigbee devices: ${Z2M_TOTAL32:-?}"
         echo ""
 
-        echo "Devices offline >5 days:"
+        echo "Devices offline >5 days (classified against the live registry):"
+        Z2M_STALE32_CLASS=""
         if [ -n "$Z2M_OFFLINE32" ] && [ "$Z2M_OFFLINE32" -gt 0 ] 2>/dev/null; then
-            # Tag flaky-known devices via noise_allowlist.yaml
-            echo "$Z2M_STATS" | grep "^STALE:" | cut -d: -f2- | head -10 \
-                | while IFS= read -r _stale_line; do
-                    tag=$(_noise_tag "$_stale_line")
-                    printf '%s%s\n' "$_stale_line" "$tag"
-                done
+            # Live-registry classification (F-ae98282d): reuse Section 22's
+            # payload when it arrived, else read the retained topic again.
+            [ -n "${Z2M_BRIDGE_DEVICES_RAW:-}" ] || Z2M_BRIDGE_DEVICES_RAW=$(z2m_registry_fetch)
+            Z2M_STALE32_CLASS=$(z2m_classify_stale "$(echo "$Z2M_STATS" | grep '^STALE:')" "${Z2M_BRIDGE_DEVICES_RAW:-}")
+            z2m_score_stale "$Z2M_STALE32_CLASS"
             echo "Total offline >5 days: $Z2M_OFFLINE32"
         else
             echo "None"
@@ -4476,14 +4908,10 @@ except Exception as e:
         echo "Zigbee2MQTT errors (24h): $Z2M_COORD_ERRORS"
 
         Z2M_ISSUES=0
-        # Baseline: 23 stale entries from decommissioned devices — see docs/troubleshooting/ha-upstream-integration-issues.md
-        Z2M_OFFLINE_BASELINE=23
-        if [ -n "$Z2M_OFFLINE32" ] && [ "${Z2M_OFFLINE32:-0}" -gt $((Z2M_OFFLINE_BASELINE + 5)) ] 2>/dev/null; then
-            log_warning "Zigbee devices offline >5 days above baseline: $Z2M_OFFLINE32 (baseline: $Z2M_OFFLINE_BASELINE)"
-            add_minor_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE32/${Z2M_TOTAL32} (baseline $Z2M_OFFLINE_BASELINE)"
+        # A LIVE registry member dark >5d counts against this section's verdict
+        # (scored once, above, by z2m_score_stale); orphan entries do not.
+        if printf '%s\n' "$Z2M_STALE32_CLASS" | grep -q '^LIVE'; then
             Z2M_ISSUES=$((Z2M_ISSUES + 1))
-        elif [ -n "$Z2M_OFFLINE32" ] && [ "${Z2M_OFFLINE32:-0}" -gt 0 ] 2>/dev/null; then
-            log_info "Zigbee stale state entries: $Z2M_OFFLINE32 (baseline $Z2M_OFFLINE_BASELINE — decommissioned devices)"
         fi
         if [ "$Z2M_COORD_ERRORS" -gt 20 ]; then
             log_warning "High Zigbee2MQTT error count: $Z2M_COORD_ERRORS in 24h"
@@ -4507,14 +4935,14 @@ log_section "Section 33: Battery Health Monitoring"
     # Get device friendly names mapping
     CONFIG_DATA=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/configuration.yaml 2>/dev/null | grep -A1 "'0x" | grep -E "^  '0x|friendly_name:" | sed "s/'//g" | paste - - | awk -F: '{gsub(/^[ \t]+/, "", $1); gsub(/^[ \t]+/, "", $3); print $1"|"$3}' 2>/dev/null || echo "")
 
-    # Create combined list with friendly names
+    # Create combined list with friendly names (friendly|battery|ieee)
     BATTERY_LIST=""
     while IFS='|' read -r ieee battery; do
         if [ -n "$ieee" ] && [ -n "$battery" ]; then
             # Look up friendly name
             friendly=$(echo "$CONFIG_DATA" | grep "^$ieee|" | cut -d'|' -f2-)
             [ -z "$friendly" ] && friendly="$ieee"
-            BATTERY_LIST="${BATTERY_LIST}${friendly}|${battery}"$'\n'
+            BATTERY_LIST="${BATTERY_LIST}${friendly}|${battery}|${ieee}"$'\n'
         fi
     done <<< "$BATTERY_DATA"
 
@@ -4523,116 +4951,8 @@ log_section "Section 33: Battery Health Monitoring"
         log_warning "Unable to retrieve Zigbee battery data"
         add_minor_issue "Cannot retrieve Zigbee battery status"
     else
-        # Count total battery devices
-        TOTAL_BATTERY=$(echo "$BATTERY_LIST" | wc -l)
-        echo "Total battery-powered devices: $TOTAL_BATTERY"
-        echo ""
-
-        # Initialize counters
-        CRITICAL_COUNT=0
-        WARNING_COUNT=0
-        MONITOR_COUNT=0
-        GOOD_COUNT=0
-
-        # Categorize by battery level
-        CRITICAL_BATTERIES=""
-        WARNING_BATTERIES=""
-        MONITOR_BATTERIES=""
-
-        while IFS='|' read -r friendly battery; do
-            if [ -n "$friendly" ] && [ -n "$battery" ]; then
-                # Remove any decimal points
-                battery_int=$(echo "$battery" | awk '{print int($1)}')
-
-                if [ "$battery_int" -lt 10 ]; then
-                    CRITICAL_BATTERIES="${CRITICAL_BATTERIES}  - ${friendly} (${battery}%)\n"
-                    CRITICAL_COUNT=$((CRITICAL_COUNT + 1))
-                elif [ "$battery_int" -lt 10 ]; then
-                    WARNING_BATTERIES="${WARNING_BATTERIES}  - ${friendly} (${battery}%)\n"
-                    WARNING_COUNT=$((WARNING_COUNT + 1))
-                elif [ "$battery_int" -lt 50 ]; then
-                    MONITOR_BATTERIES="${MONITOR_BATTERIES}  - ${friendly} (${battery}%)\n"
-                    MONITOR_COUNT=$((MONITOR_COUNT + 1))
-                else
-                    GOOD_COUNT=$((GOOD_COUNT + 1))
-                fi
-            fi
-        done <<< "$BATTERY_LIST"
-
-        # Display categorized results
-        # Helper: tag known-flaky zigbee devices from noise_allowlist.yaml
-        _print_battery_block() {
-            local block="$1"
-            # echo -e expands the literal \n separators we built earlier
-            echo -e "$block" | while IFS= read -r _bat_line; do
-                [ -z "$_bat_line" ] && continue
-                tag=$(_noise_tag "$_bat_line")
-                printf '%s%s\n' "$_bat_line" "$tag"
-            done
-        }
-
-        echo "🔴 CRITICAL (<10%) - Replace Immediately:"
-        if [ "$CRITICAL_COUNT" -gt 0 ]; then
-            _print_battery_block "$CRITICAL_BATTERIES"
-        else
-            echo "  None"
-        fi
-        echo ""
-
-        echo "🟡 WARNING (15-30%) - Replace Soon:"
-        if [ "$WARNING_COUNT" -gt 0 ]; then
-            _print_battery_block "$WARNING_BATTERIES"
-        else
-            echo "  None"
-        fi
-        echo ""
-
-        echo "🔵 MONITOR (10-50%) - Watch Closely:"
-        if [ "$MONITOR_COUNT" -gt 0 ]; then
-            _print_battery_block "$MONITOR_BATTERIES"
-        else
-            echo "  None"
-        fi
-        echo ""
-
-        echo "✅ GOOD (>50%):"
-        echo "  $GOOD_COUNT devices"
-        echo ""
-
-        # Calculate average battery level
-        AVG_BATTERY=$(echo "$BATTERY_LIST" | awk -F'|' '{sum+=$2; count++} END {if(count>0) print int(sum/count); else print 0}')
-        echo "Average battery level: ${AVG_BATTERY}%"
-        echo ""
-
-        # Add issues based on severity
-        if [ "$CRITICAL_COUNT" -gt 0 ]; then
-            log_warning "CRITICAL: $CRITICAL_COUNT devices with batteries <10%"
-            add_major_issue "Critical battery levels (<10%): $CRITICAL_COUNT devices need immediate replacement"
-        fi
-
-        if [ "$WARNING_COUNT" -gt 0 ]; then
-            log_warning "WARNING: $WARNING_COUNT devices with batteries 15-30%"
-            add_minor_issue "Low batteries (15-30%): $WARNING_COUNT devices need replacement soon"
-        fi
-
-        if [ "$CRITICAL_COUNT" -eq 0 ] && [ "$WARNING_COUNT" -eq 0 ]; then
-            log_success "All Zigbee device batteries above 30%"
-        fi
-
-        # Show recommendations
-        echo "📋 Recommendations:"
-        if [ "$CRITICAL_COUNT" -gt 0 ]; then
-            echo "  🔴 URGENT: Replace batteries in $CRITICAL_COUNT devices immediately"
-        fi
-        if [ "$WARNING_COUNT" -gt 0 ]; then
-            echo "  🟡 Replace batteries in $WARNING_COUNT devices within 1-2 weeks"
-        fi
-        if [ "$MONITOR_COUNT" -gt 0 ]; then
-            echo "  🔵 Monitor $MONITOR_COUNT devices, plan battery replacement"
-        fi
-        if [ "$CRITICAL_COUNT" -eq 0 ] && [ "$WARNING_COUNT" -eq 0 ] && [ "$MONITOR_COUNT" -eq 0 ]; then
-            echo "  ✅ All devices have healthy battery levels"
-        fi
+        # Bands + per-device issue titles: zigbee_battery_assess (F-3faa37f8)
+        zigbee_battery_assess "$BATTERY_LIST"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -5697,12 +6017,22 @@ log_section "Section 38: Admission Webhook Health"
     # happens here) -- genuinely dead, but not a noise source.
     #
     # One port-forward per unique target SERVICE (48 webhook entries share
-    # only 8 backing services in this cluster), POST an empty AdmissionReview
+    # only 8 backing services in this cluster), POST a synthetic AdmissionReview
     # body to each registered path, and treat exactly 404 as "route not
     # registered". Any other response (200/400/500/...) means the route
     # EXISTS and merely rejected the synthetic payload -- expected, not a
     # finding. HIGH severity is a webhook whose `rules` match core-group
     # `pods` (fires on every pod, cluster-wide); everything else is LOW.
+    #
+    # The body MUST carry a `request` object (F-a002e49b, 2026-09-22). This
+    # probe used to post `{}`; prometheus-operator's handler dereferences
+    # ar.Request.Resource before anything else (pkg/admission/admission.go),
+    # so every sweep left three recovered nil-pointer panics in its log --
+    # the panic days lined up with the sweep days exactly, and v0.94.0 ships
+    # the same file. A real API-server call always carries `request`, so
+    # PrometheusRule validation was never bypassed; the panics were ours. A
+    # review naming a resource no webhook owns gets a resource-mismatch
+    # response instead, and 404 keeps its meaning.
     WEBHOOK_PROBE=$(python3 -c "
 import json, socket, subprocess, sys, time
 
@@ -5747,6 +6077,17 @@ def free_port():
 probed = 0
 could_not_run = []
 dead = []
+probe_body = json.dumps({
+    'apiVersion': 'admission.k8s.io/v1', 'kind': 'AdmissionReview',
+    'request': {
+        'uid': '00000000-0000-4000-8000-000000000000', 'operation': 'CREATE',
+        'kind': {'group': 'health-check.cberg', 'version': 'v1', 'kind': 'Probe'},
+        'resource': {'group': 'health-check.cberg', 'version': 'v1', 'resource': 'probes'},
+        'userInfo': {'username': 'health-check-webhook-probe'},
+        'object': {'apiVersion': 'health-check.cberg/v1', 'kind': 'Probe',
+                   'metadata': {'name': 'route-probe'}},
+    },
+})
 
 for (ns, svc, port), items in groups.items():
     lport = free_port()
@@ -5775,7 +6116,7 @@ for (ns, svc, port), items in groups.items():
                 ['curl', '-k', '-s', '-m', '3', '-o', '/dev/null',
                  '-w', '%{http_code}', '-X', 'POST',
                  'https://127.0.0.1:' + str(lport) + t['path'],
-                 '-H', 'Content-Type: application/json', '-d', '{}'],
+                 '-H', 'Content-Type: application/json', '-d', probe_body],
                 capture_output=True, text=True,
             )
             if r.stdout.strip() == '404':
@@ -5880,6 +6221,484 @@ log_section "UnPoller Status (Current Investigation)"
         add_minor_issue "UnPoller pod not found"
     fi
 } >> "$OUTPUT_FILE" 2>&1
+
+log_section "Shared API Credentials"
+
+# ---------------------------------------------------------------------------
+# Shared API credential consumers (F-b5ac6c77)
+#
+# One Paperless token is consumed by several pods, each reading it from a
+# Secret that Flux rewrites on rotation. A pod rolled BEFORE Flux rewrote its
+# Secret keeps the old value for as long as it lives (mcpo, 2026-09-14: rolled
+# 2.5 min before the Secret, ran a day on a deleted token, undetected because
+# only openclaw was probed). Every consumer is probed now, and each probe does
+# two things from INSIDE the pod:
+#   1. freshness -- sha256 prefix of the in-pod env value vs the live Secret
+#      (the value itself never leaves the pod); a mismatch is the
+#      stale-credential finding, with the pod's startTime and the Secret's
+#      last write in the title;
+#   2. liveness -- an authenticated request made with the credential the pod
+#      actually holds.
+# Consumers verified 2026-09-22: openclaw, mcpo, arag-web. n8n holds NO
+# Secret-backed credential (its only envFrom is a ConfigMap), so it is listed
+# as not probed rather than probed against an invented Secret.
+#
+# This section sits BEFORE the issue-count freeze and runs in the main shell
+# (`>> "$OUTPUT_FILE"`, not `| tee`): it used to run after the issues file was
+# written, inside a pipeline subshell, so nothing it raised could ever reach
+# a finding.
+# ---------------------------------------------------------------------------
+
+# _secret_sha8 NS NAME KEY -> first 8 hex of sha256(decoded value); empty if unreadable
+_secret_sha8() {
+    kubectl get secret -n "$1" "$2" -o "jsonpath={.data.$3}" 2>/dev/null | python3 -c '
+import sys, base64, hashlib
+raw = sys.stdin.read().strip()
+if raw:
+    print(hashlib.sha256(base64.b64decode(raw)).hexdigest()[:8])
+' 2>/dev/null
+}
+
+# _secret_last_write NS NAME -> newest managedFields time that touched .data
+# (creationTimestamp when there is none); empty if unreadable
+_secret_last_write() {
+    kubectl get secret -n "$1" "$2" --show-managed-fields -o json 2>/dev/null | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+times = [m.get("time", "") for m in d["metadata"].get("managedFields", []) or []
+         if "f:data" in json.dumps(m.get("fieldsV1", {}))]
+times = [t for t in times if t]
+print(max(times) if times else d["metadata"].get("creationTimestamp", ""))
+' 2>/dev/null
+}
+
+# _pod_env_sha8 NS POD CTR ENV -> first 8 hex of sha256 over the in-pod env
+# value (hashed inside the pod; the value never leaves it); empty if unset
+_pod_env_sha8() {
+    kubectl exec -n "$1" "$2" -c "$3" -- sh -c 'v="$'"$4"'"; [ -n "$v" ] || exit 3; printf %s "$v" | sha256sum | cut -c1-8' 2>/dev/null
+}
+
+check_api_credential() {
+    # $1 label · $2 namespace · $3 pod selector · $4 container
+    # $5 token env-var · $6 url env-var OR a literal http(s) URL · $7 probe path
+    # $8 Secret name · $9 Secret key   (what the pod SHOULD be holding)
+    local label="$1" ns="$2" sel="$3" ctr="$4" tokenv="$5" urlspec="$6" path="$7" secret="$8" key="$9"
+    local pod code pod_sha sec_sha sec_written pod_started t_pod t_sec stale=0
+
+    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
+        | awk '$3=="Running"{print $1; exit}')
+
+    if [ -z "$pod" ]; then
+        echo "  $label: no Running pod for '$sel' in $ns -- skipped"
+        return 0
+    fi
+
+    # 1. Freshness: the in-pod value vs the Secret it was projected from.
+    sec_sha=$(_secret_sha8 "$ns" "$secret" "$key")
+    pod_sha=$(_pod_env_sha8 "$ns" "$pod" "$ctr" "$tokenv")
+    sec_written=$(_secret_last_write "$ns" "$secret")
+    pod_started=$(kubectl get pod -n "$ns" "$pod" -o jsonpath='{.status.startTime}' 2>/dev/null)
+    if [ -z "$sec_sha" ]; then
+        echo "  $label: ⚠️  Secret $ns/$secret.$key unreadable -- freshness not compared"
+        add_minor_issue "$label credential freshness not compared -- Secret $ns/$secret.$key unreadable"
+    elif [ -z "$pod_sha" ]; then
+        echo "  $label: ⚠️  \$$tokenv unset or unhashable in $pod -- freshness not compared"
+        add_minor_issue "$label credential freshness not compared -- \$$tokenv unset or unhashable in $ns/$pod"
+    elif [ "$pod_sha" != "$sec_sha" ]; then
+        stale=1
+        echo "  $label: ❌ STALE -- pod holds sha256 $pod_sha, Secret holds $sec_sha (pod started ${pod_started:-?}, Secret last written ${sec_written:-?})"
+        log_warning "$label: $ns/$pod runs with a credential that differs from Secret $secret.$key -- not rolled after the Secret changed"
+        add_major_issue "$label stale credential in $ns/$pod: in-pod sha256 $pod_sha differs from Secret $secret.$key $sec_sha (pod started ${pod_started:-?}, Secret written ${sec_written:-?}) -- roll the pod"
+    else
+        echo "  $label: ✅ pod credential matches Secret $secret.$key ($sec_sha)"
+        t_pod=$(_iso_to_epoch "${pod_started:-}"); t_sec=$(_iso_to_epoch "${sec_written:-}")
+        if [ -n "$t_pod" ] && [ -n "$t_sec" ] && [ "$t_pod" -lt "$t_sec" ]; then
+            echo "  $label: ℹ️  pod started ${pod_started} before the Secret's last write ${sec_written}; value unchanged, no roll needed"
+        fi
+    fi
+
+    # 2. Liveness, from INSIDE the consumer with the credential it actually
+    # uses (a Secret it has not picked up yet is exactly the case above; a
+    # throwaway probe pod's cold image pull once raced the timeout and called
+    # a good token "inconclusive"). Emits a tagged status so parsing cannot
+    # pick up stray digits from kubectl noise (an untagged `tr -dc '0-9'` once
+    # yielded "401401"). curl first (every consumer image ships it), python3
+    # as the fallback; the token reaches curl via -K on stdin, never argv. A
+    # URL ending in /api is trimmed so the probe path is not doubled.
+    code=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c '
+tokenv="$1"; urlspec="$2"; path="$3"
+tok=$(eval "printf %s \"\${$tokenv:-}\"")
+case "$urlspec" in
+    http://*|https://*) url="$urlspec" ;;
+    *) url=$(eval "printf %s \"\${$urlspec:-}\"") ;;
+esac
+if [ -z "$tok" ] || [ -z "$url" ]; then echo STATUS:noenv; exit 0; fi
+url="${url%/}"; url="${url%/api}"
+if command -v curl >/dev/null 2>&1; then
+    code=$(printf "header = \"Authorization: Token %s\"\nheader = \"Accept: application/json\"\n" "$tok" \
+        | curl -s -K - -o /dev/null -w "%{http_code}" --max-time 20 "$url$path" 2>/dev/null)
+    case "$code" in ""|000) echo STATUS:unreachable ;; *) echo "STATUS:$code" ;; esac
+elif command -v python3 >/dev/null 2>&1; then
+    TOK="$tok" URL="$url$path" python3 -c "
+import os, urllib.request, urllib.error
+req = urllib.request.Request(os.environ[\"URL\"], headers={\"Authorization\": \"Token \" + os.environ[\"TOK\"], \"Accept\": \"application/json\"})
+try:
+    urllib.request.urlopen(req, timeout=20); print(\"STATUS:200\")
+except urllib.error.HTTPError as e:
+    print(\"STATUS:%d\" % e.code)
+except Exception:
+    print(\"STATUS:unreachable\")
+"
+else
+    echo STATUS:notool
+fi' sh "$tokenv" "$urlspec" "$path" 2>/dev/null | sed -n 's/^STATUS:\(.*\)$/\1/p' | tail -1)
+
+    case "$code" in
+        noenv)
+            echo "  $label: token/url env not set in $pod -- skipped"
+            return 0
+            ;;
+        notool)
+            echo "  $label: ⚠️  neither curl nor python3 in $pod -- liveness not probed"
+            add_minor_issue "$label credential liveness not probed -- no curl/python3 in $ns/$pod"
+            return 0
+            ;;
+        unreachable)
+            echo "  $label: ⚠️  API unreachable from $pod -- inconclusive"
+            add_minor_issue "$label credential probe inconclusive -- could not reach the API to verify the token"
+            return 0
+            ;;
+    esac
+
+    case "$code" in
+        200)
+            echo "  $label: ✅ 200 -- credential valid"
+            CHECKS_PASSED=$((CHECKS_PASSED + 1))
+            ;;
+        401|403)
+            echo "  $label: ❌ $code -- CREDENTIAL REJECTED"
+            if [ "$stale" -eq 1 ]; then
+                log_critical "$label API credential rejected ($code) in $ns/$pod -- the pod holds a stale value (see freshness above)"
+                add_critical_issue "$label API token rejected ($code) in $ns/$pod: the pod holds a STALE value that differs from $secret.$key -- roll the pod"
+            else
+                log_critical "$label API credential rejected ($code) -- every consumer of this token is failing silently"
+                add_critical_issue "$label API token invalid ($code): $ns/$secret.$key is rejected. All consumers are broken until it is re-minted."
+            fi
+            ;;
+        "")
+            echo "  $label: ⚠️  probe produced no status -- inconclusive"
+            add_minor_issue "$label credential probe inconclusive -- no status returned"
+            ;;
+        *)
+            echo "  $label: ⚠️  HTTP $code -- service reachable, auth state unclear"
+            add_minor_issue "$label credential probe returned HTTP $code (expected 200)"
+            ;;
+    esac
+}
+
+{
+    echo "=== Shared API Credential Liveness ==="
+    check_api_credential "Paperless" "ai" \
+        "app.kubernetes.io/instance=openclaw" "app" \
+        "PAPERLESS_TOKEN" "PAPERLESS_URL" "/api/documents/?page_size=1" \
+        "openclaw-secret" "PAPERLESS_TOKEN"
+    check_api_credential "Paperless (mcpo)" "ai" \
+        "app.kubernetes.io/instance=mcpo" "app" \
+        "PAPERLESS_API_KEY" "http://paperless-ngx.office.svc:8000" "/api/documents/?page_size=1" \
+        "mcpo-api-key" "paperless-api-key"
+    check_api_credential "Paperless (arag-web)" "office" \
+        "app.kubernetes.io/instance=arag-web" "app" \
+        "PAPERLESS_API_KEY" "PAPERLESS_API_URL" "/api/documents/?page_size=1" \
+        "arag-web-secret" "PAPERLESS_API_KEY"
+    # n8n: no Secret-backed API credential in its pod env (verified
+    # 2026-09-22 -- envFrom is the n8n-app-config ConfigMap only; a Paperless
+    # credential, if any, lives in n8n's own credential store). Listed so the
+    # omission is visible, not probed against a Secret that does not exist.
+    echo "  Paperless (n8n): no Secret-backed credential in the pod env -- not probed"
+    echo ""
+} >> "$OUTPUT_FILE" 2>&1
+
+# The three OpenClaw sections below used to sit after the issues register was
+# rendered, each inside a `{ ... } | tee` subshell: their add_*_issue calls
+# filled arrays the subshell discarded, after CRIT_COUNT/MAJOR_COUNT had
+# already been read -- a stalled heartbeat or an undelivered briefing printed
+# and counted for nothing (F-tail-sections, 2026-09-22). They now run here,
+# in the main shell, before report_unmeasured and the count freeze.
+
+
+#######################################
+# Shared API credentials — liveness
+#######################################
+#
+# A shared API token can stop working without anything crashing: the
+# consumers keep running, keep their pods Ready, and just get 401 on every
+# call. On 2026-09-14 the single consolidated Paperless token had been
+# deleted from `authtoken_token`, which silently broke FOUR consumers
+# (openclaw/Jerry's invoice scan, arag-web's statement archival, mcpo, and
+# cluster-secrets). Nothing alerted. It surfaced only when a human tried to
+# look up a document and got "401 invalid token".
+#
+# Consolidating onto one token is what makes this worth a dedicated check:
+# it turns one silent credential death into a simultaneous multi-service
+# outage. So probe the credential itself, not the pods that hold it —
+# liveness of the holder proves nothing about the secret inside it.
+
+#######################################
+# OpenClaw heartbeat integrity
+#######################################
+#
+# The heartbeat fails in a way that looks like success. `last_heartbeat_result`
+# is written by the PREVIOUS good run and survives a failed one, so the file can
+# read HEARTBEAT_OK while nothing has run for hours. Measured 2026-09-15: ~6h of
+# silent misses, and on 2026-09-04/06 only 1 of ~48 daily ticks left any trace
+# at all. Every one of those still burned a full agent turn.
+#
+# So check the two things that cannot be faked:
+#   1. the header TIMESTAMP is fresh   -> the run started
+#   2. an action line exists for today -> the run finished and wrote
+# A run that starts and dies mid-way updates neither, or only the first. Both
+# are required; `HEARTBEAT_OK` is deliberately NOT trusted as evidence.
+
+#######################################
+# Morning briefing delivery
+#######################################
+#
+# Operator rule (2026-09-16): a briefing that cannot be produced completely
+# must FAIL and say so immediately -- not ship degraded. A half briefing is
+# worse than a missing one, because it looks complete. So the preflight stays
+# strict and this check makes the failure loud.
+#
+# What went wrong on 2026-09-15 was NOT the strictness. The run failed
+# correctly ("voice preflight FAILED: voice text is missing expected sections:
+# sure") and then told nobody: the cron recorded lastRunStatus "ok" because the
+# agent turn completed, and the agent was reading .tmp/.../run-<date>.log, which
+# holds none of that -- every real diagnostic goes to
+# state/morning-briefing/briefing.log.
+#
+# Proof of delivery is exactly one line: "voice sent from ...". File existence
+# is not proof -- prepare_voice_file() writes voice-<date>.txt BEFORE validating,
+# so a failed run still leaves a full-looking file behind.
+
+#######################################
+# OpenClaw heartbeat CONFIG drift
+#######################################
+#
+# agents.defaults.heartbeat lives ONLY on the PVC (openclaw.json). That is an
+# accepted operator decision, not a defect -- but it means the settings carry no
+# review trail and can revert silently. They matter a lot: before 2026-09-16 this
+# block was just {"model": "openai/gpt-5.6-terra"}, the heartbeat inherited the
+# main DM session's whole context, and it burned ~290k tokens per tick -- about
+# 14M/day, which was 99.9% of all GPT spend, to answer "HEARTBEAT_OK".
+#
+# So watch the values instead of the file. A revert here is expensive and
+# otherwise invisible until a quota runs out.
+#
+# Expected (set 2026-09-16, operator chose to stay on the local model):
+#   model           ollama/*        -> no GPT spend
+#   isolatedSession true            -> fresh session per tick (~290k -> ~24k)
+#   lightContext    true            -> skip workspace bootstrap files
+#   every           1h              -> documented default for OAuth auth
+#   skipWhenBusy    true            -> defer rather than stack turns
+
+log_section "OpenClaw Heartbeat Config"
+
+check_heartbeat_config() {
+    local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
+    local pod out
+
+    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
+        | awk '$3=="Running"{print $1; exit}')
+    if [ -z "$pod" ]; then
+        echo "  no Running openclaw pod — skipped"
+        return 0
+    fi
+
+    out=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- python3 -c "
+import json
+try:
+    hb = json.load(open('/home/node/.openclaw/openclaw.json'))['agents']['defaults'].get('heartbeat') or {}
+except Exception as e:
+    print('READ_ERROR ' + str(e)[:80]); raise SystemExit
+drift = []
+model = str(hb.get('model') or '')
+if not model.startswith('ollama/'):
+    drift.append('model=' + (model or 'unset') + ' (expected ollama/*; GPT spend returns)')
+for key in ('isolatedSession', 'lightContext', 'skipWhenBusy'):
+    if hb.get(key) is not True:
+        drift.append(key + '=' + repr(hb.get(key)) + ' (expected True)')
+if str(hb.get('every') or '') != '1h':
+    drift.append('every=' + str(hb.get('every')) + ' expected-1h')
+print('DRIFT ' + ' | '.join(drift) if drift else 'OK ' + model)
+" 2>/dev/null)
+
+    case "$out" in
+        OK*)
+            echo "  ✅ heartbeat config intact (${out#OK })"
+            CHECKS_PASSED=$((CHECKS_PASSED + 1))
+            ;;
+        DRIFT*)
+            echo "  ❌ ${out}"
+            log_critical "OpenClaw heartbeat config drifted: ${out#DRIFT }"
+            add_critical_issue "OpenClaw heartbeat config reverted (PVC-only, no git trail): ${out#DRIFT } — the pre-2026-09-16 settings cost ~14M tokens/day"
+            ;;
+        READ_ERROR*)
+            echo "  ⚠️  ${out}"
+            add_minor_issue "Could not read OpenClaw heartbeat config: ${out#READ_ERROR }"
+            ;;
+        *)
+            echo "  ⚠️  unexpected probe output: ${out:-<empty>}"
+            add_minor_issue "OpenClaw heartbeat config probe returned no verdict"
+            ;;
+    esac
+}
+
+{
+    echo "=== OpenClaw Heartbeat Config ==="
+    check_heartbeat_config
+    echo ""
+} >> "$OUTPUT_FILE"
+
+log_section "Morning Briefing Delivery"
+
+check_briefing_delivered() {
+    local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
+    local logf="/home/node/clawd/state/morning-briefing/briefing.log"
+    local pod today sent failed
+
+    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
+        | awk '$3=="Running"{print $1; exit}')
+    if [ -z "$pod" ]; then
+        echo "  no Running openclaw pod — skipped"
+        return 0
+    fi
+    today=$(date -u +%Y-%m-%d)
+
+    # `grep -c` exits 1 on zero matches, so a naive `|| echo 0` emits "0\n0"
+    # and a `tr -dc '0-9'` then yields "00". Harmless here, but that is exactly
+    # the fragile-numeric-parse that produced the impossible HTTP code "401401"
+    # earlier the same day. Count lines instead, and clamp to a single integer.
+    sent=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c \
+        "grep \"^${today}.*voice sent from\" $logf 2>/dev/null | wc -l" 2>/dev/null | tr -dc '0-9')
+    sent=${sent:-0}
+    failed=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c \
+        "grep \"^${today}.*voice preflight FAILED\" $logf 2>/dev/null | tail -1" 2>/dev/null)
+
+    if [ "${sent:-0}" -ge 1 ]; then
+        echo "  ✅ briefing delivered today (${sent}x 'voice sent')"
+        CHECKS_PASSED=$((CHECKS_PASSED + 1))
+    elif [ -n "$failed" ]; then
+        echo "  ❌ briefing FAILED preflight: $failed"
+        log_critical "Morning briefing did not send — $failed"
+        add_critical_issue "Morning briefing failed preflight and was NOT delivered: ${failed#* } — fix the named section, do not ship a partial briefing"
+    else
+        # Before the 07:00 local run there is legitimately nothing to find.
+        local hour; hour=$(date -u +%H)
+        if [ "$hour" -ge 6 ]; then
+            echo "  ❌ no 'voice sent' and no preflight failure logged today"
+            log_critical "Morning briefing produced no delivery record today"
+            add_critical_issue "Morning briefing left no 'voice sent' line in briefing.log today — it did not run, or died before send"
+        else
+            echo "  (before the daily run — nothing expected yet)"
+        fi
+    fi
+}
+
+{
+    echo "=== Morning Briefing Delivery ==="
+    check_briefing_delivered
+    echo ""
+} >> "$OUTPUT_FILE"
+
+log_section "OpenClaw Heartbeat Integrity"
+
+check_heartbeat_integrity() {
+    local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
+    local pod out sess_age state_ts today_lines
+
+    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
+        | awk '$3=="Running"{print $1; exit}')
+    if [ -z "$pod" ]; then
+        echo "  no Running openclaw pod — skipped"
+        return 0
+    fi
+
+    # TWO independent signals, because they fail independently.
+    #
+    # 1. SESSION mtime = did the heartbeat FIRE. Written by the runtime on every
+    #    tick no matter what the model does, so it is ground truth for liveness.
+    # 2. STATE header  = did the heartbeat RECORD its bookkeeping. This depends
+    #    on the model actually doing the work, and it frequently does not: on
+    #    2026-09-17 at 14:33 the tick ran for 23.6k tokens, answered
+    #    HEARTBEAT_OK, and wrote nothing at all.
+    #
+    # Judging liveness from the state file alone (the old behaviour) reports a
+    # perfectly healthy heartbeat as dead, which is what the standalone watcher
+    # alert did for hours. Judging it from the session alone would miss the
+    # bookkeeping rotting. Report them separately.
+    out=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c '
+        newest=0
+        for f in /home/node/.openclaw/agents/*/sessions/*.jsonl; do
+          case "$f" in *trajectory*) continue;; esac
+          [ -f "$f" ] || continue
+          mt=$(stat -c %Y "$f" 2>/dev/null) || continue
+          [ $(( $(date +%s) - mt )) -gt 43200 ] && continue
+          grep -q "\[OpenClaw heartbeat poll\]" "$f" 2>/dev/null || continue
+          [ "$mt" -gt "$newest" ] && newest=$mt
+        done
+        if [ "$newest" = "0" ]; then echo "SESSAGE -1"; else
+          echo "SESSAGE $(( ($(date +%s)-newest)/60 ))"; fi
+        echo "STATETS $(grep "^last_heartbeat_started_at:" /home/node/self-improving/heartbeat-state.md 2>/dev/null | awk "{print \$2}")"
+        echo "TODAY $(grep -c "^- $(date -u +%Y-%m-%d)" /home/node/self-improving/heartbeat-state.md 2>/dev/null)"
+        echo "YDAY $(grep -c "^- $(date -u -d yesterday +%Y-%m-%d)" /home/node/self-improving/heartbeat-state.md 2>/dev/null)"
+    ' 2>/dev/null)
+
+    sess_age=$(echo "$out" | awk '/^SESSAGE/{print $2}')
+    state_ts=$(echo "$out" | awk '/^STATETS/{print $2}')
+    today_lines=$(echo "$out" | awk '/^TODAY/{print $2}')
+    sess_age=${sess_age:--1}
+
+    echo "  last tick: ${sess_age}min ago (session) · state header: ${state_ts:-none} · action lines today: ${today_lines:-0}"
+
+    # Cadence is 1h; alert after two missed ticks.
+    if [ "$sess_age" = "-1" ]; then
+        log_warning "No heartbeat session found in the last 12h — cannot confirm the heartbeat is running"
+        add_major_issue "OpenClaw heartbeat: no session activity in 12h — it appears not to be firing at all"
+        return 0
+    fi
+    if [ "$sess_age" -gt 150 ]; then
+        log_critical "OpenClaw heartbeat has not fired for ${sess_age} minutes"
+        add_critical_issue "OpenClaw heartbeat stalled — no tick for ${sess_age}min against a 60min cadence. Juno is not checking in."
+        return 0
+    fi
+
+    # Firing. Now: is it RECORDING? Use a daily floor, not a staleness window.
+    #
+    # Measured recording rate: ~100% on Terra (48/48 entries on 09-13, 47 on
+    # 09-14) but only ~27% on the local model (4 entries against ~15 ticks on
+    # 09-17) -- gemma4 often answers HEARTBEAT_OK without doing the bookkeeping
+    # at all. With a 27% rate, "4 consecutive skips" occurs ~28% of the time, so
+    # any staleness threshold short enough to be meaningful would fire almost
+    # daily. A floor over 24h is stable against that variance and still catches
+    # the case that actually matters: the bookkeeping having stopped entirely.
+    local ylines
+    ylines=$(echo "$out" | awk '/^YDAY/{print $2}')
+    today_lines=${today_lines:-0}; ylines=${ylines:-0}
+    local recent=$(( today_lines + ylines ))
+
+    if [ "$recent" -eq 0 ]; then
+        log_warning "Heartbeat is firing (${sess_age}min ago) but recorded nothing in 48h"
+        add_major_issue "OpenClaw heartbeat fires but has recorded no entry in 48h — the model is answering HEARTBEAT_OK without calling hb-record, so the self-improving log has stopped"
+    else
+        echo "  ✅ heartbeat firing and recording (${recent} entries in the last 2 days)"
+        CHECKS_PASSED=$((CHECKS_PASSED + 1))
+    fi
+}
+
+{
+    echo "=== OpenClaw Heartbeat Integrity ==="
+    check_heartbeat_integrity
+    echo ""
+} >> "$OUTPUT_FILE"
 
 #######################################
 # Generate Issues Summary
@@ -6186,362 +7005,6 @@ log_section "Issues Summary by Severity"
     fi
 
 } | tee -a "$OUTPUT_FILE" "$ISSUES_FILE"
-
-#######################################
-# Shared API credentials — liveness
-#######################################
-#
-# A shared API token can stop working without anything crashing: the
-# consumers keep running, keep their pods Ready, and just get 401 on every
-# call. On 2026-09-14 the single consolidated Paperless token had been
-# deleted from `authtoken_token`, which silently broke FOUR consumers
-# (openclaw/Jerry's invoice scan, arag-web's statement archival, mcpo, and
-# cluster-secrets). Nothing alerted. It surfaced only when a human tried to
-# look up a document and got "401 invalid token".
-#
-# Consolidating onto one token is what makes this worth a dedicated check:
-# it turns one silent credential death into a simultaneous multi-service
-# outage. So probe the credential itself, not the pods that hold it —
-# liveness of the holder proves nothing about the secret inside it.
-
-#######################################
-# OpenClaw heartbeat integrity
-#######################################
-#
-# The heartbeat fails in a way that looks like success. `last_heartbeat_result`
-# is written by the PREVIOUS good run and survives a failed one, so the file can
-# read HEARTBEAT_OK while nothing has run for hours. Measured 2026-09-15: ~6h of
-# silent misses, and on 2026-09-04/06 only 1 of ~48 daily ticks left any trace
-# at all. Every one of those still burned a full agent turn.
-#
-# So check the two things that cannot be faked:
-#   1. the header TIMESTAMP is fresh   -> the run started
-#   2. an action line exists for today -> the run finished and wrote
-# A run that starts and dies mid-way updates neither, or only the first. Both
-# are required; `HEARTBEAT_OK` is deliberately NOT trusted as evidence.
-
-#######################################
-# Morning briefing delivery
-#######################################
-#
-# Operator rule (2026-09-16): a briefing that cannot be produced completely
-# must FAIL and say so immediately -- not ship degraded. A half briefing is
-# worse than a missing one, because it looks complete. So the preflight stays
-# strict and this check makes the failure loud.
-#
-# What went wrong on 2026-09-15 was NOT the strictness. The run failed
-# correctly ("voice preflight FAILED: voice text is missing expected sections:
-# sure") and then told nobody: the cron recorded lastRunStatus "ok" because the
-# agent turn completed, and the agent was reading .tmp/.../run-<date>.log, which
-# holds none of that -- every real diagnostic goes to
-# state/morning-briefing/briefing.log.
-#
-# Proof of delivery is exactly one line: "voice sent from ...". File existence
-# is not proof -- prepare_voice_file() writes voice-<date>.txt BEFORE validating,
-# so a failed run still leaves a full-looking file behind.
-
-#######################################
-# OpenClaw heartbeat CONFIG drift
-#######################################
-#
-# agents.defaults.heartbeat lives ONLY on the PVC (openclaw.json). That is an
-# accepted operator decision, not a defect -- but it means the settings carry no
-# review trail and can revert silently. They matter a lot: before 2026-09-16 this
-# block was just {"model": "openai/gpt-5.6-terra"}, the heartbeat inherited the
-# main DM session's whole context, and it burned ~290k tokens per tick -- about
-# 14M/day, which was 99.9% of all GPT spend, to answer "HEARTBEAT_OK".
-#
-# So watch the values instead of the file. A revert here is expensive and
-# otherwise invisible until a quota runs out.
-#
-# Expected (set 2026-09-16, operator chose to stay on the local model):
-#   model           ollama/*        -> no GPT spend
-#   isolatedSession true            -> fresh session per tick (~290k -> ~24k)
-#   lightContext    true            -> skip workspace bootstrap files
-#   every           1h              -> documented default for OAuth auth
-#   skipWhenBusy    true            -> defer rather than stack turns
-
-log_section "OpenClaw Heartbeat Config"
-
-check_heartbeat_config() {
-    local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
-    local pod out
-
-    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
-        | awk '$3=="Running"{print $1; exit}')
-    if [ -z "$pod" ]; then
-        echo "  no Running openclaw pod — skipped"
-        return 0
-    fi
-
-    out=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- python3 -c "
-import json
-try:
-    hb = json.load(open('/home/node/.openclaw/openclaw.json'))['agents']['defaults'].get('heartbeat') or {}
-except Exception as e:
-    print('READ_ERROR ' + str(e)[:80]); raise SystemExit
-drift = []
-model = str(hb.get('model') or '')
-if not model.startswith('ollama/'):
-    drift.append('model=' + (model or 'unset') + ' (expected ollama/*; GPT spend returns)')
-for key in ('isolatedSession', 'lightContext', 'skipWhenBusy'):
-    if hb.get(key) is not True:
-        drift.append(key + '=' + repr(hb.get(key)) + ' (expected True)')
-if str(hb.get('every') or '') != '1h':
-    drift.append('every=' + str(hb.get('every')) + ' expected-1h')
-print('DRIFT ' + ' | '.join(drift) if drift else 'OK ' + model)
-" 2>/dev/null)
-
-    case "$out" in
-        OK*)
-            echo "  ✅ heartbeat config intact (${out#OK })"
-            CHECKS_PASSED=$((CHECKS_PASSED + 1))
-            ;;
-        DRIFT*)
-            echo "  ❌ ${out}"
-            log_critical "OpenClaw heartbeat config drifted: ${out#DRIFT }"
-            add_critical_issue "OpenClaw heartbeat config reverted (PVC-only, no git trail): ${out#DRIFT } — the pre-2026-09-16 settings cost ~14M tokens/day"
-            ;;
-        READ_ERROR*)
-            echo "  ⚠️  ${out}"
-            add_minor_issue "Could not read OpenClaw heartbeat config: ${out#READ_ERROR }"
-            ;;
-        *)
-            echo "  ⚠️  unexpected probe output: ${out:-<empty>}"
-            add_minor_issue "OpenClaw heartbeat config probe returned no verdict"
-            ;;
-    esac
-}
-
-{
-    echo "=== OpenClaw Heartbeat Config ==="
-    check_heartbeat_config
-    echo ""
-} | tee -a "$OUTPUT_FILE"
-
-log_section "Morning Briefing Delivery"
-
-check_briefing_delivered() {
-    local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
-    local logf="/home/node/clawd/state/morning-briefing/briefing.log"
-    local pod today sent failed
-
-    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
-        | awk '$3=="Running"{print $1; exit}')
-    if [ -z "$pod" ]; then
-        echo "  no Running openclaw pod — skipped"
-        return 0
-    fi
-    today=$(date -u +%Y-%m-%d)
-
-    # `grep -c` exits 1 on zero matches, so a naive `|| echo 0` emits "0\n0"
-    # and a `tr -dc '0-9'` then yields "00". Harmless here, but that is exactly
-    # the fragile-numeric-parse that produced the impossible HTTP code "401401"
-    # earlier the same day. Count lines instead, and clamp to a single integer.
-    sent=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c \
-        "grep \"^${today}.*voice sent from\" $logf 2>/dev/null | wc -l" 2>/dev/null | tr -dc '0-9')
-    sent=${sent:-0}
-    failed=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c \
-        "grep \"^${today}.*voice preflight FAILED\" $logf 2>/dev/null | tail -1" 2>/dev/null)
-
-    if [ "${sent:-0}" -ge 1 ]; then
-        echo "  ✅ briefing delivered today (${sent}x 'voice sent')"
-        CHECKS_PASSED=$((CHECKS_PASSED + 1))
-    elif [ -n "$failed" ]; then
-        echo "  ❌ briefing FAILED preflight: $failed"
-        log_critical "Morning briefing did not send — $failed"
-        add_critical_issue "Morning briefing failed preflight and was NOT delivered: ${failed#* } — fix the named section, do not ship a partial briefing"
-    else
-        # Before the 07:00 local run there is legitimately nothing to find.
-        local hour; hour=$(date -u +%H)
-        if [ "$hour" -ge 6 ]; then
-            echo "  ❌ no 'voice sent' and no preflight failure logged today"
-            log_critical "Morning briefing produced no delivery record today"
-            add_critical_issue "Morning briefing left no 'voice sent' line in briefing.log today — it did not run, or died before send"
-        else
-            echo "  (before the daily run — nothing expected yet)"
-        fi
-    fi
-}
-
-{
-    echo "=== Morning Briefing Delivery ==="
-    check_briefing_delivered
-    echo ""
-} | tee -a "$OUTPUT_FILE"
-
-log_section "OpenClaw Heartbeat Integrity"
-
-check_heartbeat_integrity() {
-    local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
-    local pod out sess_age state_ts today_lines
-
-    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
-        | awk '$3=="Running"{print $1; exit}')
-    if [ -z "$pod" ]; then
-        echo "  no Running openclaw pod — skipped"
-        return 0
-    fi
-
-    # TWO independent signals, because they fail independently.
-    #
-    # 1. SESSION mtime = did the heartbeat FIRE. Written by the runtime on every
-    #    tick no matter what the model does, so it is ground truth for liveness.
-    # 2. STATE header  = did the heartbeat RECORD its bookkeeping. This depends
-    #    on the model actually doing the work, and it frequently does not: on
-    #    2026-09-17 at 14:33 the tick ran for 23.6k tokens, answered
-    #    HEARTBEAT_OK, and wrote nothing at all.
-    #
-    # Judging liveness from the state file alone (the old behaviour) reports a
-    # perfectly healthy heartbeat as dead, which is what the standalone watcher
-    # alert did for hours. Judging it from the session alone would miss the
-    # bookkeeping rotting. Report them separately.
-    out=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c '
-        newest=0
-        for f in /home/node/.openclaw/agents/*/sessions/*.jsonl; do
-          case "$f" in *trajectory*) continue;; esac
-          [ -f "$f" ] || continue
-          mt=$(stat -c %Y "$f" 2>/dev/null) || continue
-          [ $(( $(date +%s) - mt )) -gt 43200 ] && continue
-          grep -q "\[OpenClaw heartbeat poll\]" "$f" 2>/dev/null || continue
-          [ "$mt" -gt "$newest" ] && newest=$mt
-        done
-        if [ "$newest" = "0" ]; then echo "SESSAGE -1"; else
-          echo "SESSAGE $(( ($(date +%s)-newest)/60 ))"; fi
-        echo "STATETS $(grep "^last_heartbeat_started_at:" /home/node/self-improving/heartbeat-state.md 2>/dev/null | awk "{print \$2}")"
-        echo "TODAY $(grep -c "^- $(date -u +%Y-%m-%d)" /home/node/self-improving/heartbeat-state.md 2>/dev/null)"
-        echo "YDAY $(grep -c "^- $(date -u -d yesterday +%Y-%m-%d)" /home/node/self-improving/heartbeat-state.md 2>/dev/null)"
-    ' 2>/dev/null)
-
-    sess_age=$(echo "$out" | awk '/^SESSAGE/{print $2}')
-    state_ts=$(echo "$out" | awk '/^STATETS/{print $2}')
-    today_lines=$(echo "$out" | awk '/^TODAY/{print $2}')
-    sess_age=${sess_age:--1}
-
-    echo "  last tick: ${sess_age}min ago (session) · state header: ${state_ts:-none} · action lines today: ${today_lines:-0}"
-
-    # Cadence is 1h; alert after two missed ticks.
-    if [ "$sess_age" = "-1" ]; then
-        log_warning "No heartbeat session found in the last 12h — cannot confirm the heartbeat is running"
-        add_major_issue "OpenClaw heartbeat: no session activity in 12h — it appears not to be firing at all"
-        return 0
-    fi
-    if [ "$sess_age" -gt 150 ]; then
-        log_critical "OpenClaw heartbeat has not fired for ${sess_age} minutes"
-        add_critical_issue "OpenClaw heartbeat stalled — no tick for ${sess_age}min against a 60min cadence. Juno is not checking in."
-        return 0
-    fi
-
-    # Firing. Now: is it RECORDING? Use a daily floor, not a staleness window.
-    #
-    # Measured recording rate: ~100% on Terra (48/48 entries on 09-13, 47 on
-    # 09-14) but only ~27% on the local model (4 entries against ~15 ticks on
-    # 09-17) -- gemma4 often answers HEARTBEAT_OK without doing the bookkeeping
-    # at all. With a 27% rate, "4 consecutive skips" occurs ~28% of the time, so
-    # any staleness threshold short enough to be meaningful would fire almost
-    # daily. A floor over 24h is stable against that variance and still catches
-    # the case that actually matters: the bookkeeping having stopped entirely.
-    local ylines
-    ylines=$(echo "$out" | awk '/^YDAY/{print $2}')
-    today_lines=${today_lines:-0}; ylines=${ylines:-0}
-    local recent=$(( today_lines + ylines ))
-
-    if [ "$recent" -eq 0 ]; then
-        log_warning "Heartbeat is firing (${sess_age}min ago) but recorded nothing in 48h"
-        add_major_issue "OpenClaw heartbeat fires but has recorded no entry in 48h — the model is answering HEARTBEAT_OK without calling hb-record, so the self-improving log has stopped"
-    else
-        echo "  ✅ heartbeat firing and recording (${recent} entries in the last 2 days)"
-        CHECKS_PASSED=$((CHECKS_PASSED + 1))
-    fi
-}
-
-{
-    echo "=== OpenClaw Heartbeat Integrity ==="
-    check_heartbeat_integrity
-    echo ""
-} | tee -a "$OUTPUT_FILE"
-
-log_section "Shared API Credentials"
-
-check_api_credential() {
-    # $1 label · $2 namespace · $3 pod selector · $4 container
-    # $5 token env-var · $6 url env-var · $7 probe path
-    local label="$1" ns="$2" sel="$3" ctr="$4" tokenv="$5" urlenv="$6" path="$7"
-    local pod code
-
-    # Probe from INSIDE the consumer, reading the token straight out of its
-    # own environment. That tests the credential the service actually uses,
-    # rather than a Secret it may not have picked up yet — a pod that has not
-    # been rolled since a rotation is precisely the case worth catching.
-    # It also avoids a throwaway probe pod, whose cold image pull raced the
-    # timeout and reported a perfectly good token as "inconclusive".
-    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
-        | awk '$3=="Running"{print $1; exit}')
-
-    if [ -z "$pod" ]; then
-        echo "  $label: no Running pod for '$sel' in $ns — skipped"
-        return 0
-    fi
-
-    # Emit a tagged status so parsing cannot pick up stray digits from
-    # kubectl noise (an untagged `tr -dc '0-9'` once yielded "401401").
-    code=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- python3 -c "
-import os, urllib.request, urllib.error
-tok = os.environ.get('$tokenv', ''); url = os.environ.get('$urlenv', '')
-if not tok or not url:
-    print('STATUS:noenv'); raise SystemExit
-req = urllib.request.Request(url.rstrip('/') + '$path',
-                             headers={'Authorization': 'Token ' + tok,
-                                      'Accept': 'application/json'})
-try:
-    urllib.request.urlopen(req, timeout=20)
-    print('STATUS:200')
-except urllib.error.HTTPError as e:
-    print('STATUS:%d' % e.code)
-except Exception:
-    print('STATUS:unreachable')
-" 2>/dev/null | sed -n 's/^STATUS:\(.*\)$/\1/p' | tail -1)
-
-    case "$code" in
-        noenv)
-            echo "  $label: token/url env not set in $pod — skipped"
-            return 0
-            ;;
-        unreachable)
-            echo "  $label: ⚠️  API unreachable from $pod — inconclusive"
-            add_minor_issue "$label credential probe inconclusive — could not reach the API to verify the token"
-            return 0
-            ;;
-    esac
-
-    case "$code" in
-        200)
-            echo "  $label: ✅ 200 — credential valid"
-            CHECKS_PASSED=$((CHECKS_PASSED + 1))
-            ;;
-        401|403)
-            echo "  $label: ❌ $code — CREDENTIAL REJECTED"
-            log_critical "$label API credential rejected ($code) — every consumer of this token is failing silently"
-            add_critical_issue "$label API token invalid ($code): $ns/$secret.$key is rejected. All consumers are broken until it is re-minted."
-            ;;
-        "")
-            echo "  $label: ⚠️  probe produced no status — inconclusive"
-            add_minor_issue "$label credential probe inconclusive — no status returned"
-            ;;
-        *)
-            echo "  $label: ⚠️  HTTP $code — service reachable, auth state unclear"
-            add_minor_issue "$label credential probe returned HTTP $code (expected 200)"
-            ;;
-    esac
-}
-
-{
-    echo "=== Shared API Credential Liveness ==="
-    check_api_credential "Paperless" "ai" \
-        "app.kubernetes.io/instance=openclaw" "app" \
-        "PAPERLESS_TOKEN" "PAPERLESS_URL" "/api/documents/?page_size=1"
-    echo ""
-} | tee -a "$OUTPUT_FILE"
 
 #######################################
 # Generate Final Summary

@@ -318,6 +318,18 @@ in our values ConfigMap and this bump does not alter them. 91.1.0 does expose th
 new `retentionPercentage` field, which is a possible lever for that finding's
 option (b) — a separate operator decision, not part of this plan.
 
+### Admission-validator panics (F-a002e49b) -- answered, not fixed by this bump
+
+The nil dereference at `pkg/admission/admission.go:234` is `ar.Request` being
+nil. A real API-server call always carries `request`; the only caller that did
+not was `runbooks/health-check.sh` section 38, which posted `{}` to every
+registered webhook path once per sweep (panic days = sweep days, three lines per
+run, one per registered path). The probe now sends a well-formed review, and
+the operator answers with a resource-mismatch response instead. Checked
+2026-09-22: v0.94.0 ships a byte-identical `admission.go`, so this plan changes
+nothing about it -- and nothing needs changing. PrometheusRule validation was
+never bypassed.
+
 ### The CRD-ownership contention this plan must live with (read before executing)
 
 The ten `monitoring.coreos.com` CRDs are written by **two** HelmReleases, both with
