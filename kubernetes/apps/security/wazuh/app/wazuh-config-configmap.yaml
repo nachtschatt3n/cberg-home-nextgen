@@ -93,15 +93,32 @@ data:
         <processes>yes</processes>
       </wodle>
 
+      <!-- FIM watches the TALOS HOST through the read-only hostPath mount of
+           / at /host (wazuh-agents-daemonset.yaml), NOT the agent container's
+           own image filesystem. F-7a099e09 (2026-09-06): the previous stanza
+           named /etc,/usr/bin,... which resolve INSIDE the container, so 30
+           days produced 2 syscheck alerts against 68k total — the hosts were
+           never watched. Talos is immutable (/ is squashfs), so the surfaces
+           an intruder can actually change are the generated node config
+           (/etc/kubernetes, /etc/cri, /etc/cni, /etc/containerd, /etc/pki),
+           the CNI + system-extension binaries (/opt/cni/bin, /usr/local) and
+           the EFI dir; /usr/bin,/bin,/sbin are kept in the 12h scan only, as
+           a baseline hash of the squashfs. /host/var is deliberately out
+           (kubelet pod churn). Do NOT add report_changes: kubeconfig-kubelet
+           and pki/ under /host/etc/kubernetes are secrets and would be diffed
+           into alerts. The ignores are files Talos regenerates at every boot.
+           BUMP checksum/wazuh-config in the DaemonSet after editing this. -->
       <syscheck>
         <disabled>no</disabled>
         <frequency>43200</frequency>
         <scan_on_start>yes</scan_on_start>
-        <directories check_all="yes" realtime="yes">/etc,/usr/bin,/usr/sbin</directories>
-        <directories check_all="yes" realtime="yes">/bin,/sbin,/boot</directories>
-        <ignore>/etc/mtab</ignore>
-        <ignore>/etc/random-seed</ignore>
-        <ignore>/etc/adjtime</ignore>
+        <directories check_all="yes" realtime="yes">/host/etc,/host/opt/cni/bin,/host/usr/local</directories>
+        <directories check_all="yes">/host/boot,/host/usr/bin,/host/usr/sbin,/host/bin,/host/sbin</directories>
+        <ignore>/host/etc/mtab</ignore>
+        <ignore>/host/etc/resolv.conf</ignore>
+        <ignore>/host/etc/hosts</ignore>
+        <ignore>/host/etc/machine-id</ignore>
+        <ignore>/host/etc/localtime</ignore>
         <skip_nfs>yes</skip_nfs>
         <skip_dev>yes</skip_dev>
         <skip_proc>yes</skip_proc>

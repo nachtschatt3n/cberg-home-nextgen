@@ -28,7 +28,7 @@ spec:
         # GitOps-safe equivalent of `kubectl rollout restart daemonset`.
         # Recipe (run after any wazuh-config-configmap edit):
         #   sha256sum kubernetes/apps/security/wazuh/app/wazuh-config-configmap.yaml | awk '{print substr($1,1,12)}'
-        checksum/wazuh-config: "06516efc0899"
+        checksum/wazuh-config: "741eafeb3f6e"
     spec:
       tolerations:
         - operator: Exists
