@@ -46,6 +46,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import atexit
 import base64
 import json
 import os
@@ -223,6 +224,55 @@ def _stop(pf: subprocess.Popen | None) -> None:
 EXIT_FORWARD_DEAD = 3   # deliberately outside the (0,1,2) "ran to completion" set
 
 
+# ---------------------------------------------------------------------------
+# Forward TEARDOWN that does not depend on reaching `finally` (F-b881a5b5)
+#
+# main() stops its forwards in a `finally`, and `_stop()` kills the forward's
+# whole process group (the starter puts each kubectl in its own session), so
+# every path that UNWINDS is clean. Two paths never unwind: SIGTERM and SIGHUP.
+# Python's default disposition for both is "terminate now" — no exception, no
+# `finally`, no atexit — so a sweep killed by the console going away (HUP) or
+# by a supervisor's timeout (TERM) left its port-forwards alive with ppid 1.
+# Measured 2026-09-17: 108 orphaned `kubectl port-forward` processes on the
+# operator Mac, 74 of them to postgresql, the oldest 3 days.
+#
+# So: every dialled Forward is registered; SIGTERM/SIGHUP are turned into a
+# SystemExit (which DOES run `finally` and atexit); and an atexit hook stops
+# whatever is still registered, for any exit path that skipped the `finally`.
+# Handlers are installed only over the DEFAULT disposition — a caller that
+# deliberately ignores HUP (nohup) keeps that choice.
+# ---------------------------------------------------------------------------
+
+_LIVE_FORWARDS: list = []
+
+
+def _stop_all_forwards() -> None:
+    for fwd in list(_LIVE_FORWARDS):
+        try:
+            fwd.stop()
+        except Exception:  # noqa: BLE001 — teardown must reach every forward
+            pass
+
+
+def _install_teardown_signals(signals=(signal.SIGTERM, signal.SIGHUP)) -> list:
+    """Make TERM/HUP unwind the process instead of ending it in place, and arm
+    the atexit backstop. Returns the signals actually re-dispositioned (a
+    signal already ignored or handled is left alone)."""
+    def _raise_exit(signum, _frame):
+        raise SystemExit(128 + int(signum))
+
+    installed = []
+    for sig in signals:
+        try:
+            if signal.getsignal(sig) is signal.SIG_DFL:
+                signal.signal(sig, _raise_exit)
+                installed.append(sig)
+        except (ValueError, OSError):   # not the main thread / unsupported
+            continue
+    atexit.register(_stop_all_forwards)
+    return installed
+
+
 def _pg_probe(dsn: str):
     """END-TO-END liveness for the postgres forward: a round-trip query."""
     def probe() -> bool:
@@ -263,6 +313,8 @@ class Forward:
     def dial(self) -> None:
         self.proc = self.starter(self.namespace, self.service,
                                  self.local_port, self.remote_port)
+        if self not in _LIVE_FORWARDS:
+            _LIVE_FORWARDS.append(self)   # so a TERM/HUP/atexit teardown finds it
 
     def alive(self) -> bool:
         """Process still running AND the end-to-end probe succeeds. A probe
@@ -300,6 +352,125 @@ class Forward:
     def stop(self) -> None:
         _stop(self.proc)
         self.proc = None
+        if self in _LIVE_FORWARDS:
+            _LIVE_FORWARDS.remove(self)
+
+
+# ---------------------------------------------------------------------------
+# Maintenance-window liveness -> Pushgateway (F-2dabaddb)
+#
+# `maintenance-plan.py --liveness-metrics` has exposed window_runs_missing_count
+# and friends in Prometheus text format since the F-2dabaddb figure landed, and
+# a PrometheusRule now reads exactly those names — but nothing carried the text
+# to Prometheus, so the rule's absent() arm would fire forever and its
+# staleness arm (push_time_seconds{job="maintenance-window-liveness"} older
+# than 50h) had nothing to measure. The sweep is the one thing that runs with
+# the DSN on the operator Mac every 48h, so it pushes.
+#
+# House rules (docs/sops/monitoring.md, "Push-based Metrics"), all applied:
+#   1. timestamps, never ages — the payload is produced by maintenance-plan.py
+#      and carries counts, flags and one timestamp; staleness is pushgateway's
+#      own push_time_seconds;
+#   2. the body ends with a newline or pushgateway answers 400 and stores
+#      nothing — refused here before it is sent;
+#   3. a push replaces the grouping WHOLESALE — so on ANY failure (payload not
+#      built, payload lacking the names the rule reads, forward dead) push
+#      NOTHING and say so; the previous snapshot keeps ageing on
+#      push_time_seconds, which is exactly what the staleness arm reads.
+# A failed push never changes the sweep's exit code: the sections' contract is
+# unchanged, and the rule pages on the staleness this failure produces.
+# ---------------------------------------------------------------------------
+
+PUSHGATEWAY_NS, PUSHGATEWAY_SVC, PUSHGATEWAY_PORT = "monitoring", "prometheus-pushgateway", 9091
+LIVENESS_PUSH_JOB = "maintenance-window-liveness"
+# The names the PrometheusRule keys on. A payload without them is not a
+# liveness payload and must not replace the grouping.
+LIVENESS_REQUIRED_METRICS = ("window_runs_liveness_verified",
+                             "window_runs_liveness_lookback_days")
+
+
+def _metric_names(text: str) -> set:
+    return {ln.split("{", 1)[0].split(" ", 1)[0] for ln in text.splitlines()
+            if ln and not ln.startswith("#")}
+
+
+def liveness_metrics_payload(env: dict, runner=subprocess.run) -> tuple:
+    """(payload, error). Runs `maintenance-plan.py --liveness-metrics` with the
+    caller's env (SWEEP_PG_DSN on the write path). payload is None when it is
+    unusable — the caller then pushes NOTHING."""
+    try:
+        p = runner([sys.executable, str(SCRIPT_DIR / "maintenance-plan.py"), "--liveness-metrics"],
+                   env=env, capture_output=True, text=True, timeout=180)
+    except Exception as e:  # noqa: BLE001
+        return None, f"maintenance-plan.py --liveness-metrics did not run: {type(e).__name__}: {e}"
+    if p.returncode != 0:
+        return None, (f"maintenance-plan.py --liveness-metrics rc={p.returncode}: "
+                      f"{(p.stderr or '').strip()[-200:]}")
+    text = p.stdout or ""
+    missing = [m for m in LIVENESS_REQUIRED_METRICS if m not in _metric_names(text)]
+    if missing:
+        return None, f"payload lacks the metric(s) the rule reads: {missing}"
+    if not text.endswith("\n"):
+        text += "\n"
+    return text, ""
+
+
+def push_metrics(base_url: str, job: str, payload: str, opener=None) -> tuple:
+    """POST one text-format payload to <base_url>/metrics/job/<job>. Never raises."""
+    import urllib.error
+    import urllib.request
+    opener = opener or urllib.request.urlopen
+    if not payload.endswith("\n"):
+        return False, "payload is not newline-terminated — pushgateway would answer 400 and store nothing; not sent"
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/metrics/job/{job}", data=payload.encode("utf-8"), method="POST",
+        headers={"Content-Type": "text/plain; version=0.0.4; charset=utf-8"})
+    try:
+        with opener(req, timeout=15) as r:
+            status = int(getattr(r, "status", 200))
+            return 200 <= status < 300, f"HTTP {status}"
+    except urllib.error.HTTPError as e:
+        return False, f"HTTP {e.code}: {(e.read() or b'')[:200]!r}"
+    except Exception as e:  # noqa: BLE001
+        return False, f"{type(e).__name__}: {e}"
+
+
+def push_liveness_metrics(env: dict, gateway_url: str | None = None, starter=None,
+                          runner=subprocess.run) -> tuple:
+    """The whole step; never raises. Builds the payload, reaches the gateway
+    (a supervised port-forward unless a URL is given), pushes under
+    LIVENESS_PUSH_JOB. Any failure => (False, why) and NOTHING pushed."""
+    payload, err = liveness_metrics_payload(env, runner=runner)
+    if payload is None:
+        return False, f"nothing pushed — {err}"
+    fwd = None
+    try:
+        if not gateway_url:
+            port = _free_port()
+            gateway_url = f"http://127.0.0.1:{port}"
+            fwd = Forward(PUSHGATEWAY_NS, PUSHGATEWAY_SVC, port, PUSHGATEWAY_PORT,
+                          probe=_http_probe(gateway_url, "/-/ready"), starter=starter)
+            try:
+                fwd.dial()
+            except SystemExit as e:
+                return False, f"nothing pushed — port-forward to {PUSHGATEWAY_SVC} failed: {e}"
+            if not fwd.ensure("liveness push"):
+                return False, f"nothing pushed — {PUSHGATEWAY_SVC} forward dead after one re-dial"
+        ok, why = push_metrics(gateway_url, LIVENESS_PUSH_JOB, payload)
+        return ok, (f"job {LIVENESS_PUSH_JOB}: {why}" if ok else f"nothing stored — {why}")
+    finally:
+        if fwd is not None:
+            fwd.stop()
+
+
+def _report_liveness_push(env: dict, gateway_url: str | None) -> None:
+    ok, why = push_liveness_metrics(env, gateway_url=gateway_url)
+    if ok:
+        print(f"==> maintenance-window liveness metrics pushed to Pushgateway ({why})")
+    else:
+        print(f"==> maintenance-window liveness metrics NOT pushed ({why}); the previous "
+              f"snapshot keeps ageing on push_time_seconds and MaintenanceWindowLivenessStale "
+              f"pages at 50h — the sweep's exit code is unchanged", file=sys.stderr)
 
 
 def _run_steps_supervised(steps: list[str], env: dict, pg_fwd: "Forward | None",
@@ -1022,6 +1193,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--pushgateway-url",
+        default=os.environ.get("SWEEP_PUSHGATEWAY_URL"),
+        help=(
+            "Pushgateway base URL for the maintenance-window liveness push "
+            "(job maintenance-window-liveness). If unset, port-forwards "
+            "monitoring/prometheus-pushgateway automatically."
+        ),
+    )
+    parser.add_argument(
         "--cycle-id",
         default=os.environ.get("SWEEP_CYCLE_ID"),
         help=(
@@ -1059,6 +1239,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     steps = _resolve_steps(args.steps)
     cycle_id = args.cycle_id or str(uuid.uuid4())
+    # Before the first forward is dialled: TERM/HUP must unwind into the
+    # `finally` below, and atexit must catch whatever does not (F-b881a5b5).
+    _install_teardown_signals()
 
     pg_fwd: Forward | None = None
     prom_fwd: Forward | None = None
@@ -1205,6 +1388,10 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"      … and {len(closed) - 20} more")
             v = _reconcile_verdict(dsn, cycle_id)
             print(f"==> reconciled cycle {cycle_id} verdict -> {v}")
+            # The fan-out's finalizer is the normal cron path, so the liveness
+            # figures are pushed here too (F-2dabaddb); the DSN rides on the
+            # child's env, never on os.environ (F-4b27e81c).
+            _report_liveness_push({**os.environ, "SWEEP_PG_DSN": dsn}, args.pushgateway_url)
             return 0
 
         # Prometheus — only slo-check needs it
@@ -1238,6 +1425,9 @@ def main(argv: list[str] | None = None) -> int:
             if _tok:
                 env["TRIVY_USERNAME"] = env.get("TRIVY_USERNAME") or "nachtschatt3n"
                 env["TRIVY_PASSWORD"] = _tok
+                # security-check's Flux-source owner oracle and the ghcr tag
+                # listing read GITHUB_TOKEN; anonymous GitHub is 60 calls/h.
+                env["GITHUB_TOKEN"] = env.get("GITHUB_TOKEN") or _tok
         env["SWEEP_CYCLE_ID"] = cycle_id
         env["SWEEP_TRIGGER"] = env.get("SWEEP_TRIGGER", "manual")
         if write_enabled and dsn:
@@ -1304,6 +1494,12 @@ def main(argv: list[str] | None = None) -> int:
             if verdict:
                 print()
                 print(f"==> cycle verdict reconciled from open findings: {verdict}")
+            # The liveness push lives on the --reconcile-only branch (the
+            # cron/fan-out finalizer, daily-operation.md rule 4b), NOT here:
+            # this full-sweep path is the ad-hoc operator smoke run, the
+            # figures it would push are identical, and it must not add a
+            # second port-forward to the supervised set this path accounts
+            # for (F-2dabaddb push; F-f85cf55c supervision).
 
         print()
         for fwd in (pg_fwd, prom_fwd):

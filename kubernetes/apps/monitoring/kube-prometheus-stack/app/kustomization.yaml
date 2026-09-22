@@ -69,3 +69,4 @@ resources:
   - ./slo-burn-rate-alerts.yaml
   - ./scrypted-alerts.yaml
   - ./vaultwarden-alerts.yaml
+  - ./maintenance-window-alerts.yaml

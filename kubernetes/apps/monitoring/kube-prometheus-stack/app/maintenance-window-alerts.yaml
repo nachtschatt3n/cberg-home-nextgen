@@ -1,0 +1,187 @@
+---
+# Maintenance-window liveness (F-2dabaddb, the rule half).
+#
+# WHAT THIS READS. runbooks/maintenance-plan.py --liveness-metrics prints, in
+# Prometheus text exposition, the figures its window_liveness_figures() derives
+# from the sweep_history `window_runs` ledger (commit 1f2d56f6). The metric
+# names below are copied from liveness_metrics_text() and are the contract:
+#
+#   window_runs_liveness_verified        1 = the ledger was read this run,
+#                                        0 = it could NOT be (no DSN / DB
+#                                        unreachable). 0 is NOT all-clear.
+#   window_runs_liveness_lookback_days   rolling lookback of the assertion
+#   window_runs_missing_count{lookback_days="N"}
+#                                        declared window occurrences in the
+#                                        lookback with no completed window_runs
+#                                        row — ONLY exposed when verified=1
+#   window_runs_stuck_count              running rows never finalized past the
+#                                        window's duration plus grace — ONLY
+#                                        when verified=1
+#
+# HOW IT REACHES PROMETHEUS — IT DOES NOT, YET (verified 2026-09-22). Nothing
+# in runbooks/, kubernetes/, ~/Library/LaunchAgents or the user crontab invokes
+# `--liveness-metrics`; there is no node_exporter/textfile collector on the
+# Mac mini (its three ScrapeConfigs are app exporters on :9100-:9102, and
+# count(node_textfile_mtime_seconds)=0); and count({__name__=~"window_runs.*"})
+# is 0 in Prometheus. The household's existing path for exactly this shape —
+# a script-produced gauge with no long-running process behind it — is
+# prometheus-pushgateway (job=icloud-backup-freshness, authentik-db-probe,
+# pellet-price-monitor all land there, and push_time_seconds{job=...} exists
+# for each). The rules are therefore written against the emitted names plus
+# ONE contract the pusher must honour when it is built:
+#
+#   PUT http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/maintenance-window-liveness
+#   body = `maintenance-plan.py --liveness-metrics` output, newline-terminated
+#
+# The job name `maintenance-window-liveness` is what the staleness arm below
+# keys on. This file does not create a scrape, a CronJob, or a pusher; until
+# one exists MaintenanceWindowLivenessMetricsAbsent fires — deliberately.
+# That is the finding: a mechanism whose absence is silent. Do not AR it away;
+# land the pusher.
+#
+# WHY A STALENESS ARM. Pushgateway has no TTL: it serves the last push
+# forever, so a pusher that dies after one good push leaves
+# window_runs_missing_count frozen at 0 — the exact silent failure this file
+# exists to catch, now wearing a metric. The exposition carries no timestamp,
+# so staleness is read from Pushgateway's own push_time_seconds for the job.
+# 50h = the 48h sweep cadence plus slack, the same figure the in-cluster
+# sweep-heartbeat uses; tighten it if the pusher runs nightly.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: maintenance-window-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: maintenance-window.liveness
+      interval: 1m
+      rules:
+        # One dated occurrence with no completed window_runs row. The nightly
+        # window is where safe updates actually land (Step 0), so a missed one
+        # is a day of updates that did not happen — and nobody was told.
+        - alert: MaintenanceWindowMissed
+          expr: window_runs_missing_count > 0
+          for: 1h
+          labels:
+            severity: warning
+            category: pipeline
+            component: maintenance-window
+          annotations:
+            summary: "{{ $value | printf \"%.0f\" }} maintenance window occurrence(s) never ran"
+            description: >-
+              maintenance-plan.py found {{ $value | printf "%.0f" }} declared
+              maintenance-window occurrence(s) in the last
+              {{ $labels.lookback_days }} days with no completed window_runs row
+              — the window silently never started, or died mid-run without
+              finalizing. Safe updates for that window did not land. Check the
+              OpenClaw window crons (`runbooks/window-crons.py --check`), the
+              maintenance-window-agent session, and
+              `runbooks/maintenance-plan.py` (WINDOWS DECLARED BUT NEVER RAN).
+              This is a rolling window: a miss older than the lookback AGES OUT
+              of the count on its own — read it now, not later.
+        # Two or more in the lookback is not a fluke, it is the pipeline. Same
+        # severity as SweepPipelineDead, for the same reason.
+        - alert: MaintenanceWindowsRepeatedlyMissed
+          expr: window_runs_missing_count >= 2
+          for: 1h
+          labels:
+            severity: critical
+            category: pipeline
+            component: maintenance-window
+          annotations:
+            summary: "{{ $value | printf \"%.0f\" }} maintenance windows missed — the window pipeline is not running"
+            description: >-
+              {{ $value | printf "%.0f" }} declared maintenance-window
+              occurrences in the last {{ $labels.lookback_days }} days have no
+              completed window_runs row. One miss is a fluke; two is the
+              mechanism — the cluster cron, the Mac session, or the agent
+              driving the windows is dead, and safe updates have stopped
+              landing. Treat exactly like SweepPipelineDead.
+        - alert: MaintenanceWindowRunStuck
+          expr: window_runs_stuck_count > 0
+          for: 30m
+          labels:
+            severity: warning
+            category: pipeline
+            component: maintenance-window
+          annotations:
+            summary: "{{ $value | printf \"%.0f\" }} maintenance window run(s) opened and never finalized"
+            description: >-
+              window_runs has {{ $value | printf "%.0f" }} row(s) still in
+              `running` past the window's declared duration plus grace. The
+              agent that opened the row died, hung, or lost its DB forward
+              before writing the outcome. A stuck row also blocks the slot for
+              the next occurrence. Finalize it with runbooks/window-run-record.py
+              once the actual outcome is known.
+        # The exporter's own honesty bit. verified=0 means the ledger could not
+        # be read: no DSN, DB unreachable. The counts are NOT exposed in that
+        # state (by design — see liveness_metrics_text), so the two rules above
+        # go inactive and would read as all-clear without this.
+        - alert: MaintenanceWindowLivenessUnverified
+          expr: |
+            window_runs_liveness_verified == 0
+            or
+            (absent(window_runs_missing_count) and on() window_runs_liveness_verified == 1)
+          for: 1h
+          labels:
+            severity: warning
+            category: pipeline
+            component: maintenance-window
+          annotations:
+            summary: "Maintenance-window liveness could not be verified — missed windows are invisible"
+            description: >-
+              The last liveness run reported window_runs_liveness_verified=0
+              (the window_runs ledger in sweep_history Postgres could not be
+              read: no SWEEP_PG_DSN or DB unreachable), or reported verified=1
+              without exposing window_runs_missing_count (a contract
+              violation). MaintenanceWindowMissed and MaintenanceWindowRunStuck
+              are BLIND while this fires. Not all-clear.
+        # INERTNESS GUARD. No series at all: the pusher was never built, was
+        # removed, or prometheus-pushgateway restarted (in-memory) and nothing
+        # has re-pushed. Every rule above is inactive in this state. Fires from
+        # the day this file lands until the pusher exists — see the header.
+        # 6h so a Pushgateway restart on a 48h cadence has time to self-heal
+        # only if the pusher runs more often than that; otherwise it pages, as
+        # it should.
+        - alert: MaintenanceWindowLivenessMetricsAbsent
+          expr: absent(window_runs_liveness_verified)
+          for: 6h
+          labels:
+            severity: warning
+            category: pipeline
+            component: maintenance-window
+          annotations:
+            summary: "Maintenance-window liveness metrics are absent from Prometheus"
+            description: >-
+              window_runs_liveness_verified has no series. Nothing is delivering
+              `runbooks/maintenance-plan.py --liveness-metrics` to Prometheus:
+              either the pusher (contract: pushgateway job
+              maintenance-window-liveness) does not exist yet, was removed, or
+              prometheus-pushgateway lost its in-memory state and no run has
+              re-pushed. Every MaintenanceWindow* alert is INERT while this
+              fires; a missed window is invisible. Build or restore the pusher.
+        # STALENESS GUARD (pushgateway has no TTL). Keys on the job-name
+        # contract in the header; inert until a pusher with that job name
+        # exists, which MaintenanceWindowLivenessMetricsAbsent already reports.
+        - alert: MaintenanceWindowLivenessStale
+          expr: |
+            (time() - push_time_seconds{job="maintenance-window-liveness"}) > 50 * 3600
+          for: 1h
+          labels:
+            severity: warning
+            category: pipeline
+            component: maintenance-window
+          annotations:
+            summary: "Maintenance-window liveness figures are {{ $value | humanizeDuration }} old"
+            description: >-
+              The last push of the window-liveness figures to
+              prometheus-pushgateway (job maintenance-window-liveness) was
+              {{ $value | humanizeDuration }} ago, beyond the 50h expected on
+              the 48h sweep cadence. Pushgateway serves the last value forever,
+              so window_runs_missing_count is a FROZEN number right now, not a
+              current one — a window missed since then is invisible. Check the
+              pusher on the Mac mini.
