@@ -207,7 +207,31 @@ def held_key(h):
     return f"pr{h['number']}" if h.get("number") else h.get("dep", "?")
 
 
-def reconcile(cfg, today):
+# A plan in one of these states can never run again: `executed` is done,
+# `superseded` was deliberately replaced by a newer plan, `reference` is
+# deliberately outside the window system. Matching a held update against one is
+# WORSE than finding nothing — it RESOLVES the update against a dead file, so
+# the live plan is never seen and the "needs a plan" question stops being asked.
+# Measured 2026-09-22 (F-9ec14462): held PR #212 (aqua:siderolabs/talos
+# 1.13.10 -> 1.14.1) matched BOTH talos plans on the name key `talos`, and load
+# order handed it talos-1.14.0 (superseded, target v1.14.0) over the live
+# talos-1.14.1 (draft, the actual 1.14.1 plan). The bump was then filed STALE
+# against a plan that will never run, and reported AMBIGUOUS every sweep, while
+# the plan that will actually execute went unmentioned.
+TERMINAL_PLAN_STATUSES = ("executed", "superseded", "reference")
+
+# auto-update.py's G5 cooldown gate (`classify` -> gate "age"). A hold at this
+# gate has already PASSED the type and policy gates: it is safe-lane work whose
+# only impediment is a timer, and the maintenance-window agent merges it at
+# Step 0 once the cooldown elapses. It needs no upgrade plan and no planner
+# agent (F-50f5de70) — the gates are evaluated in order, so `age` is reached
+# only by an update the policy has already cleared.
+AGE_COOLDOWN_GATE = "age"
+
+_FETCH_DECISIONS = object()   # "caller supplied nothing" — reconcile fetches
+
+
+def reconcile(cfg, today, decisions=_FETCH_DECISIONS):
     held, held_error = get_held()
     plans = load_plans(cfg)
     validation_errors = validate_plans(cfg, plans)
@@ -216,7 +240,7 @@ def reconcile(cfg, today):
     autonomy = load_autonomy_policy()
     exec_classes = []
     for p in plans:
-        if p.get("status") in ("executed", "superseded", "reference"):
+        if p.get("status") in TERMINAL_PLAN_STATUSES:
             continue
         cls, why = execution_class(p, autonomy)
         exec_classes.append({"plan_id": p.get("plan_id"), "class": cls,
@@ -228,18 +252,35 @@ def reconcile(cfg, today):
     # IMAGE BASENAME — the talos plan (pr: null, component "Talos Linux" vs dep
     # ghcr.io/siderolabs/installer) missed both, was reported NEEDS A PLAN
     # every sweep, and got a redundant planner dispatched every cycle.
-    needs_plan, stale, ambiguous = [], [], []
+    # The candidate set EXCLUDES terminal plans (see TERMINAL_PLAN_STATUSES):
+    # a dead file must not absorb a live held update. This narrows the MATCH
+    # SET only — the files stay on disk, `retired_still_windowed` and the
+    # orphan/validation passes below still read them — and a held update whose
+    # only plan is terminal now surfaces as NEEDS A PLAN, which is the truth.
+    matchable = [p for p in plans if p.get("status") not in TERMINAL_PLAN_STATUSES]
+    needs_plan, stale, ambiguous, cooling = [], [], [], []
     for h in held:
-        plan, others = match_held_to_plan(h, plans)
+        plan, others = match_held_to_plan(h, matchable)
         if others:
             ambiguous.append({"held": held_key(h),
                               "picked": plan.get("_path"),
                               "also_matched": [o.get("_path") for o in others]})
         if not plan:
-            needs_plan.append({"key": held_key(h), "dep": h.get("dep"),
-                               "pr": h.get("number"), "cur": h.get("cur"),
-                               "new": h.get("new"), "gate": h.get("gate"),
-                               "reason": h.get("reason")})
+            row = {"key": held_key(h), "dep": h.get("dep"),
+                   "pr": h.get("number"), "cur": h.get("cur"),
+                   "new": h.get("new"), "gate": h.get("gate"),
+                   "reason": h.get("reason")}
+            # An age-cooldown hold is WAITING ON A TIMER, not missing a plan
+            # (F-50f5de70). Dispatching a planner for it burns an agent on work
+            # the safe lane performs by itself, and files a plan nobody will
+            # ever run. It is bucketed rather than dropped: the same gate also
+            # holds an update whose age is UNKNOWN on both measures, which
+            # clears only when a human looks — invisible is not the fix for
+            # mis-labelled.
+            if str(h.get("gate") or "").strip().lower() == AGE_COOLDOWN_GATE:
+                cooling.append(row)
+            else:
+                needs_plan.append(row)
             continue
         # stale if the plan's target no longer covers the held bump. Version-
         # TOKEN comparison, not string equality: a prose target like
@@ -413,10 +454,35 @@ def reconcile(cfg, today):
 
     # plans stuck waiting for an operator go/no-go — routed to OpenClaw home-operation
     # (keyed on plan_id), which owns the reminder cadence until answered.
+    #
+    # A plan the operator has ALREADY approved is NOT awaiting a go/no-go: it
+    # keeps `status: awaiting-go` until the window agent executes it, because
+    # the GO is the recorded home-operation decision and NEVER a status value
+    # (see the VALID_STATUSES note). Status alone cannot tell the two apart, so
+    # every sweep re-asked for a decision already given (F-0c639ada). Do NOT be
+    # misled by nextcloud-34.0.4, which is also approved yet correctly absent
+    # here: that is an accident of ITS lifecycle status (`vetted`), not evidence
+    # that status encodes approval — approval has to be asked for, keyed on
+    # plan_id, against the ledger that holds it.
+    #
+    # `decisions` is injectable so this stays testable without a cluster.
+    # None = NOT READABLE, which must never read as "nobody has decided" (see
+    # answered_plan_ids). Asked for only when there is something to cross-check:
+    # this is a kubectl exec, and with no awaiting-go plan it cannot change any
+    # output.
+    if decisions is _FETCH_DECISIONS:
+        decisions = (fetch_recorded_decisions()
+                     if any(p.get("status") == "awaiting-go" for p in plans)
+                     else [])
+    answered = answered_plan_ids(decisions)
+    approved_pending_exec = sorted(
+        str(p.get("plan_id")) for p in plans
+        if p.get("status") == "awaiting-go" and str(p.get("plan_id")) in answered)
     awaiting_go = [{"plan_id": p.get("plan_id"), "plan": p["_path"],
                     "component": p.get("component"), "target": p.get("target"),
                     "window": p.get("window")}
-                   for p in plans if p.get("status") == "awaiting-go"]
+                   for p in plans if p.get("status") == "awaiting-go"
+                   and str(p.get("plan_id")) not in answered]
     # Keys that must stay OPEN in OpenClaw's home-operation store, for the
     # sweep's `reconcile` call. This is EVERY non-terminal plan — not just
     # awaiting-go. Critically it includes SCHEDULED plans whose decision is
@@ -433,6 +499,8 @@ def reconcile(cfg, today):
         # non-None => held_count is NOT a fact; render it as unknown
         "held_error": held_error,
         "needs_plan": needs_plan,
+        # held only by the release-age cooldown: no plan, no planner dispatch
+        "age_cooldown": cooling,
         "ambiguous_matches": ambiguous,
         "validation_errors": validation_errors,
         "window_liveness": {"missing": liveness["missing"],
@@ -443,6 +511,13 @@ def reconcile(cfg, today):
         "stale": stale,
         "orphan_plans": orphan,
         "awaiting_go": awaiting_go,
+        # awaiting-go plans the operator ALREADY approved (decision recorded,
+        # execution pending) — suppressed from awaiting_go, surfaced here so
+        # the suppression is legible instead of silent.
+        "approved_pending_exec": approved_pending_exec,
+        # False => the decision ledger could NOT be read, so awaiting_go is
+        # un-cross-checked and may re-ask an answered question.
+        "decisions_readable": decisions is not None,
         "open_issue_keys": open_issue_keys,
         "next_windows": occ[:6],
         "scheduled": {k: [p.get("plan_id") for p in v] for k, v in scheduled.items()},
@@ -464,12 +539,22 @@ def human(r, cfg):
     if nxt:
         L.append(f"next window: {nxt['slot']} {nxt['start']} {cfg['timezone']} "
                  f"({nxt['duration_min']}m, cap {nxt['capacity_risk']}, reboot={'yes' if nxt.get('allow_reboot') else 'no'})")
+    cooling = r.get("age_cooldown") or []
     if r["needs_plan"]:
         L.append(f"\nNEEDS A PLAN ({len(r['needs_plan'])}) — dispatch an upgrade-planner-agent for each:")
         for n in r["needs_plan"]:
             L.append(f"  • {n['dep']} {n['cur']}→{n['new']} (PR #{n['pr']}, held:{n['gate']}) — {n['reason'][:80]}")
+    elif cooling:
+        L.append("\nevery held update that needs a plan has one ✅")
     else:
         L.append("\nall held updates have a plan ✅")
+    if cooling:
+        L.append(f"\nCOOLING OFF ({len(cooling)}) — held ONLY by the release-age gate; "
+                 f"no plan and no planner needed, the next window merges them once "
+                 f"the timer elapses:")
+        for c in cooling:
+            L.append(f"  • {c['dep']} {c['cur']}→{c['new']} (PR #{c['pr']}) — "
+                     f"{(c['reason'] or '')[:80]}")
     ec = r.get("execution_classes") or []
     if ec:
         L.append("\nexecution classes (ENFORCED — window agent executes AUTO-* only, P2.1b):")
@@ -515,6 +600,13 @@ def human(r, cfg):
         L.append(f"\n🔔 AWAITING YOUR GO/NO-GO ({len(r['awaiting_go'])}) — re-remind the operator:")
         for a in r["awaiting_go"]:
             L.append(f"  • {a['component']} → {a['target']} (window {a.get('window')}) [{a['plan']}]")
+        if not r.get("decisions_readable", True):
+            L.append("  (decision ledger UNREADABLE — this list is NOT cross-checked "
+                     "against recorded approvals; some of these may already be answered)")
+    if r.get("approved_pending_exec"):
+        L.append(f"\nGO ALREADY GIVEN ({len(r['approved_pending_exec'])}) — approved, "
+                 f"waiting for their window; not re-asked: "
+                 f"{', '.join(r['approved_pending_exec'])}")
     if r["scheduled"]:
         L.append("\nscheduled:")
         for slot, ids in r["scheduled"].items():
@@ -920,6 +1012,56 @@ def load_autonomy_policy(path=AUTONOMY_POLICY_PATH):
         return None
 
 
+# The shared-infrastructure FLOOR: keys that are never unattended, whatever the
+# policy file happens to list. A policy class may WIDEN this (its own
+# forbid_shared is unioned in); it may not narrow it. It lives here rather than
+# only in the YAML because a guard is only as good as its vocabulary, and
+# [storage, longhorn] missed the substrates the plans in this repo actually
+# name: cni/cilium, gateway/envoy, etcd, dns. (The YAML stays the place to add
+# more, and emptying `classes:` is still the kill switch — a plan that matches
+# no class never reaches this check.)
+SHARED_INFRA_FLOOR = ("storage", "longhorn", "cni", "gateway", "etcd", "dns")
+
+_SHARED_TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def shared_tokens(values) -> set[str]:
+    """Every matchable token in a plan's `touches.shared` list.
+
+    `touches.shared` is an INTERSECTION KEY, and the house spells it COMPOUND:
+    `storage/longhorn`, `gateway/envoy`, `cni/cilium`, `dns-internal`,
+    `k8s-gateway DNS`. A bare set intersection against ["storage", "longhorn"]
+    therefore matched exactly ONE of the 19 distinct values in the plan corpus
+    (measured 2026-09-22, F-724dc4df): the guard meant to keep shared
+    infrastructure out of unattended windows was inert for every key that
+    qualified itself. wazuh-2xx-edge-coverage (shared: [gateway/envoy]) derived
+    AUTO-NIGHT on mechanics, held back only by a hand-written
+    autonomy_override — i.e. by an author remembering, which is what a guard is
+    for.
+
+    Returns the whole value AND its alphanumeric tokens, so a literal policy
+    entry (`storage`, or even `storage/longhorn`) still matches while
+    `gateway/envoy` now also matches `gateway`. Over-matching is the SAFE
+    direction: a hit means HUMAN-GATED, the default this module fails toward.
+    """
+    out: set[str] = set()
+    for v in values or []:
+        if v is None:                 # else str(None) -> the token "none"
+            continue
+        s = str(v).strip().lower()
+        if not s:
+            continue
+        out.add(s)
+        out.update(t for t in _SHARED_TOKEN_SPLIT.split(s) if t)
+    return out
+
+
+def forbidden_shared(spec) -> set[str]:
+    """A class's forbid_shared, widened by the floor it may not narrow."""
+    return ({str(x).strip().lower() for x in (spec.get("forbid_shared") or [])}
+            | set(SHARED_INFRA_FLOOR))
+
+
 def execution_class(plan: dict, policy: dict | None) -> tuple[str, str]:
     """(class, reason). HUMAN-GATED unless the policy affirmatively says
     otherwise — absence of facts is absence of pre-approval."""
@@ -937,7 +1079,7 @@ def execution_class(plan: dict, policy: dict | None) -> tuple[str, str]:
         return "HUMAN-GATED", "capability-changing — human-gated by policy"
     if facts["capability_change"] is None or facts["rollback_class"] is None:
         return "HUMAN-GATED", "facts not declared (capability_change/rollback_class)"
-    shared = {str(x).lower() for x in ((plan.get("touches") or {}).get("shared") or [])}
+    shared = shared_tokens((plan.get("touches") or {}).get("shared"))
     # `risk:` frequently carries a trailing comment in these files, so take the
     # first token. `.split()` on an empty/absent value yields [], NOT [""] --
     # indexing it raised IndexError for every plan without a risk (caught by
@@ -948,7 +1090,7 @@ def execution_class(plan: dict, policy: dict | None) -> tuple[str, str]:
         req = spec.get("require", {})
         if any(facts.get(k) != v for k, v in req.items()):
             continue
-        if shared & {str(x).lower() for x in spec.get("forbid_shared", [])}:
+        if shared & forbidden_shared(spec):
             continue
         # A declared risk level can VETO an otherwise-matching class, but never
         # grant one. See the `risk: high` note in autonomy-policy.yaml: the
@@ -963,6 +1105,73 @@ def execution_class(plan: dict, policy: dict | None) -> tuple[str, str]:
                                    f"an ungated backup-restore plan is not pre-approved")
         return cname.upper(), f"policy class {cname}"
     return "HUMAN-GATED", "matches no pre-approved class (default)"
+
+
+# ---------------------------------------------------------------------------
+# Recorded operator decisions (F-0c639ada).
+#
+# The GO state is `status: awaiting-go` PLUS a recorded home-operation
+# decision — never a status value (see the VALID_STATUSES note). The two are
+# ORTHOGONAL: nextcloud-34.0.4 carries a recorded operator GO while sitting at
+# `status: vetted`, and an approved plan keeps `awaiting-go` until the window
+# agent executes it. So the reminder list cannot be derived from the plan files
+# alone, and "approval" cannot be read off a status — it has to be asked for.
+# Same command run-now.py uses, so "approved" means ONE thing in this repo.
+# ---------------------------------------------------------------------------
+
+HOME_OP_DECISIONS_CMD = [
+    "kubectl", "-n", "ai", "exec", "deploy/openclaw", "-c", "app", "--",
+    "/home/node/.openclaw/bin/home-operation", "--json",
+    "decisions", "--pending-exec",
+]
+
+
+def parse_decisions(returncode, stdout) -> list | None:
+    """The decision rows, or None when they could NOT be read.
+
+    None is "unknown", never "none recorded": an exec that failed (pod
+    mid-roll, no kubeconfig, running off-cluster) must not read as "nobody has
+    decided", or the go/no-go reminder would vanish exactly when the ledger is
+    unreadable — the unreadable-ledger-is-not-all-clear rule this module
+    already applies to window liveness and cron parity.
+    """
+    if returncode != 0:
+        return None
+    try:
+        doc = json.loads(stdout or "")
+    except ValueError:
+        return None
+    rows = doc.get("decisions") if isinstance(doc, dict) else None
+    if not isinstance(rows, list):
+        return None
+    return [r for r in rows if isinstance(r, dict)]
+
+
+def fetch_recorded_decisions(runner=subprocess.run, timeout=60) -> list | None:
+    """Pending-exec decisions from OpenClaw's home-operation store, or None."""
+    try:
+        p = runner(HOME_OP_DECISIONS_CMD, capture_output=True, text=True,
+                   timeout=timeout)
+    except Exception:
+        return None
+    return parse_decisions(p.returncode, p.stdout)
+
+
+def answered_plan_ids(decisions) -> set[str]:
+    """plan_ids whose go/no-go the operator has ALREADY answered with a GO.
+
+    `approve` + `exec_state: pending` only — run-now.py's own predicate. NOT
+    `deny`: a denied plan still needs its file moved to blocked/superseded, and
+    the reminder is the only thing carrying that; suppressing it would retire
+    the nag and leave the plan sitting at `awaiting-go` forever.
+
+    Unreadable decisions (None) yield an EMPTY set, so every reminder keeps
+    firing — fail toward asking twice, never toward a go/no-go that silently
+    stops being asked.
+    """
+    return {str(d.get("key")) for d in (decisions or [])
+            if d.get("key") and d.get("decision") == "approve"
+            and d.get("exec_state") == "pending"}
 
 
 def cron_parity(cfg):
