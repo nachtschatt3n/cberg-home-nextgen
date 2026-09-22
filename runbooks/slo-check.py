@@ -114,19 +114,61 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def burn_window_labels(slo: SloDef) -> list[str]:
+    """Every window the catalog DECLARES for this SLO — long AND short of each
+    burn-rate pair — de-duplicated, in declaration order.
+
+    Until 2026-09-22 this script queried a hardcoded `1h` and `6h` while
+    `slo_definitions.burn_rate_windows` (1h/5m@14.4, 6h/30m@6.0, 3d/6h@1.0)
+    was parsed by lib/slo/catalog.py and consumed by nothing: the per-SLO
+    thresholds AND the declared 3d slow-burn window were read and never
+    evaluated (F-7f596ea3). The windows evaluated are now the declared ones.
+    """
+    labels: list[str] = []
+    for w in slo.burn_rate_windows:
+        for label in (w.long, w.short):
+            if label and label not in labels:
+                labels.append(label)
+    return labels
+
+
 def _evaluate_prom(slo: SloDef, prom: PromClient) -> dict:
-    """Run all three queries (long window + 1h + 6h) and return raw numbers."""
+    """Run the long-window query plus one per DECLARED burn window."""
     q = slo.prom
     long_r = prom.windowed_ratio(q, slo.window)
-    short_1h = prom.windowed_ratio(q, "1h")
-    short_6h = prom.windowed_ratio(q, "6h")
+    short = {label: prom.windowed_ratio(q, label).ratio for label in burn_window_labels(slo)}
     return {
-        "long_compliance":      long_r.ratio,
-        "raw_numerator":        long_r.numerator,
-        "raw_denominator":      long_r.denominator,
-        "short_compliance_1h":  short_1h.ratio,
-        "short_compliance_6h":  short_6h.ratio,
+        "long_compliance":   long_r.ratio,
+        "raw_numerator":     long_r.numerator,
+        "raw_denominator":   long_r.denominator,
+        "short_compliances": short,
     }
+
+
+def fast_burns(slo: SloDef, snap) -> list[dict]:
+    """Declared burn-rate pairs whose LONG-window burn exceeds the declared
+    threshold, with the short window's state alongside.
+
+    The sweep is a point-in-time reading at 48h cadence, so it flags on the
+    long window alone — that is the budget actually consumed — and reports
+    whether the short window says the burn is still going or has subsided.
+    (A PrometheusRule is what evaluates the two-window AND continuously; that
+    half of F-7f596ea3 is a manifest, not this script.)
+    """
+    out: list[dict] = []
+    rates = snap.burn_rates or {}
+    for w in slo.burn_rate_windows:
+        bl = rates.get(w.long)
+        if bl is None or bl <= w.threshold:
+            continue
+        bs = rates.get(w.short)
+        out.append({
+            "long": w.long, "short": w.short, "threshold": w.threshold,
+            "burn_long": bl, "burn_short": bs,
+            "state": ("unknown" if bs is None else
+                      "still burning" if bs > w.threshold else "subsided"),
+        })
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -182,6 +224,7 @@ def _main_impl(args) -> int:
     print()
 
     snaps = []
+    burning: dict[str, list[dict]] = {}
     for slo in slos:
         if slo.source != "prom":
             print(f"  · {slo.name}: source={slo.source} not implemented yet — skipping")
@@ -203,12 +246,19 @@ def _main_impl(args) -> int:
             **raw,
         )
         snaps.append(snap)
+        burning[slo.name] = fast_burns(slo, snap)
         c = f"{snap.compliance_pct:.3f}%" if snap.compliance_pct is not None else "—"
         b = f"{snap.budget_remaining_pct:+.1f}%" if snap.budget_remaining_pct is not None else "—"
-        br1 = f"{snap.burn_rate_1h:.2f}" if snap.burn_rate_1h is not None else "—"
-        br6 = f"{snap.burn_rate_6h:.2f}" if snap.burn_rate_6h is not None else "—"
+        burns = "  ".join(
+            f"burn{label}={('—' if br is None else f'{br:.2f}'):>5s}"
+            for label, br in snap.burn_rates.items())
         print(f"  · {slo.name:36s}  compliance={c:>10s}  target={snap.target_pct:.2f}%  "
-              f"budget={b:>7s}  burn1h={br1:>5s}  burn6h={br6:>5s}")
+              f"budget={b:>7s}  {burns}")
+        for fb in burning[slo.name]:
+            bs = "—" if fb["burn_short"] is None else f"{fb['burn_short']:.2f}"
+            print(f"    ⚠ FAST BURN [{slo.name}]: {fb['burn_long']:.2f}x over {fb['long']} "
+                  f"(declared threshold {fb['threshold']}x; {fb['short']} window "
+                  f"{bs}x, {fb['state']})", file=sys.stderr)
         for d in defects(snap):
             print(f"    ‼ DEFECT [{slo.name}]: {d}", file=sys.stderr)
 
@@ -231,9 +281,42 @@ def _main_impl(args) -> int:
         # surface as findings instead of being published silently (F-1fb11f2e:
         # a sum-over-replicas numerator read burn -11.67, masking the real ~10).
         defective = [(s, ds) for s in snaps if (ds := defects(s))]
-        if exhausted or defective:
+        # A burn above a DECLARED threshold is a finding in its own right: the
+        # budget may still be positive, yet it is being spent faster than the
+        # catalog says is acceptable (F-7f596ea3). Title carries only the
+        # backticked name and the window, so it fingerprints stably per SLO
+        # and window; the numbers live in action + metadata.
+        fast = [(s, fb) for s in snaps for fb in burning.get(s.slo_name, [])]
+        if exhausted or defective or fast:
             fw = FindingsWriter(dsn=args.postgres_dsn, section="slo", producer="script")
             try:
+                for s, fb in fast:
+                    fid = fw.emit(
+                        "warning",
+                        f"SLO fast burn: `{s.slo_name}` over {fb['long']} exceeds "
+                        f"its declared burn-rate threshold",
+                        action=(
+                            f"Investigate {s.slo_name}: burning {fb['burn_long']:.2f}x "
+                            f"the budget rate over {fb['long']} (declared threshold "
+                            f"{fb['threshold']}x); the {fb['short']} window reads "
+                            f"{'—' if fb['burn_short'] is None else f'{fb['burn_short']:.2f}x'} "
+                            f"({fb['state']}). Compliance {s.compliance_pct:.3f}% vs target "
+                            f"{s.target_pct:.2f}% over {s.window_size}; budget "
+                            f"{s.budget_remaining_pct:+.1f}%."
+                        ),
+                        subsection=s.slo_name,
+                        metadata={
+                            "window_long": fb["long"], "window_short": fb["short"],
+                            "threshold": fb["threshold"],
+                            "burn_long": fb["burn_long"], "burn_short": fb["burn_short"],
+                            "state": fb["state"],
+                            "burn_rates": s.burn_rates,
+                            "compliance_pct": s.compliance_pct,
+                            "budget_remaining_pct": s.budget_remaining_pct,
+                            "window": s.window_size,
+                        },
+                    )
+                    print(f"  ⚠ finding {fid}: fast burn over {fb['long']} for {s.slo_name}")
                 for s in exhausted:
                     fid = fw.emit(
                         "warning",

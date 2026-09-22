@@ -18,7 +18,7 @@ passing the results in.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -27,6 +27,12 @@ class SloSnapshot:
 
     Field names mirror the column names in
     kubernetes/apps/databases/sweep-history/app/schema-configmap.yaml.
+
+    `burn_rates` carries the burn at EVERY window the catalog declares for
+    the SLO (`burn_rate_windows`, long and short), keyed by window label.
+    The two columns `burn_rate_1h` / `burn_rate_6h` are the same numbers
+    looked up by label — the table has no column for the other windows, so
+    they travel in finding metadata (F-7f596ea3).
     """
     slo_name: str
     compliance_pct: float | None
@@ -38,6 +44,7 @@ class SloSnapshot:
     source: str
     raw_numerator: float | None
     raw_denominator: float | None
+    burn_rates: dict[str, float | None] = field(default_factory=dict)
 
 
 def burn_rate(short_window_compliance: float | None, target: float) -> float | None:
@@ -110,8 +117,11 @@ def defects(snap: "SloSnapshot") -> list[str]:
             f"compliance {c:.3f}% exceeds 100% — numerator over-counts the "
             f"denominator (a sum-over-replicas SLI reads >1.0 during rollouts)"
         )
-    for label, br in (("burn_rate_1h", snap.burn_rate_1h),
-                      ("burn_rate_6h", snap.burn_rate_6h)):
+    checked: list[tuple[str, float | None]] = [
+        (f"burn_rate_{w}", br) for w, br in (snap.burn_rates or {}).items()]
+    if not checked:
+        checked = [("burn_rate_1h", snap.burn_rate_1h), ("burn_rate_6h", snap.burn_rate_6h)]
+    for label, br in checked:
         if br is not None and br < -_EPS:
             out.append(
                 f"{label}={br:.2f} is negative — arithmetically impossible; it "
@@ -129,20 +139,35 @@ def compute(
     long_compliance: float | None,
     raw_numerator: float | None,
     raw_denominator: float | None,
-    short_compliance_1h: float | None,
-    short_compliance_6h: float | None,
+    short_compliance_1h: float | None = None,
+    short_compliance_6h: float | None = None,
+    short_compliances: dict[str, float | None] | None = None,
 ) -> SloSnapshot:
-    """Bundle a long-window compliance result and two short-window
-    samples into a snapshot row ready for the DB."""
+    """Bundle a long-window compliance result and the short-window samples
+    into a snapshot row ready for the DB.
+
+    `short_compliances` maps a window LABEL (`"1h"`, `"5m"`, `"3d"`, …) to
+    the compliance measured over that window — one entry per window the
+    catalog declares. The two legacy keyword arguments are accepted for
+    callers that still pass exactly 1h and 6h; they never override a label
+    already present in `short_compliances`.
+    """
+    sc: dict[str, float | None] = dict(short_compliances or {})
+    if short_compliance_1h is not None:
+        sc.setdefault("1h", short_compliance_1h)
+    if short_compliance_6h is not None:
+        sc.setdefault("6h", short_compliance_6h)
+    burns = {label: burn_rate(c, target) for label, c in sc.items()}
     return SloSnapshot(
         slo_name=slo_name,
         compliance_pct=(long_compliance * 100.0) if long_compliance is not None else None,
         target_pct=target * 100.0,
         budget_remaining_pct=budget_remaining(long_compliance, target),
-        burn_rate_1h=burn_rate(short_compliance_1h, target),
-        burn_rate_6h=burn_rate(short_compliance_6h, target),
+        burn_rate_1h=burns.get("1h"),
+        burn_rate_6h=burns.get("6h"),
         window_size=window,
         source=source,
         raw_numerator=raw_numerator,
         raw_denominator=raw_denominator,
+        burn_rates=burns,
     )
