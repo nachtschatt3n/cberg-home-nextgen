@@ -32,8 +32,53 @@ _sweep_pg_pybin() {
     if [ -x "$d/.venv/bin/python3" ]; then echo "$d/.venv/bin/python3"; else echo "python3"; fi
 }
 
+# Install the teardown traps in the CALLER's shell, shell-aware.
+#
+# bash: a trap set inside a function is the shell's trap, so `trap ... EXIT`
+# here runs at shell exit. It is CHAINED onto any existing EXIT trap rather
+# than replacing it (health-check.sh installs its own _all_cleanup).
+#
+# zsh: BOTH `trap ... EXIT` and a TRAPEXIT function, when set inside a
+# function, fire when that FUNCTION returns -- documented zsh semantics -- which
+# turned the 26f318d8 leak fix into "ready, then refused" for every interactive
+# caller (F-fe1795c5, 2026-09-22): sweep_pg_dsn_up printed ready, returned,
+# tore itself down. The first repair reached for TRAPEXIT and the two-shell
+# test caught it firing on return just the same. The zshexit hook array has no
+# function scoping: entries run at shell exit, and appending chains any hook
+# the caller already registered. The zsh-only syntax lives inside eval so bash
+# never parses it.
+_sweep_pg_install_traps() {
+    if [ -n "${ZSH_VERSION:-}" ]; then
+        eval '
+            typeset -ga zshexit_functions
+            if (( ${zshexit_functions[(Ie)sweep_pg_dsn_down]} == 0 )); then
+                zshexit_functions+=(sweep_pg_dsn_down)
+            fi
+        '
+    else
+        local _prev_exit_trap
+        _prev_exit_trap=$(trap -p EXIT | sed -n "s/^trap -- '\(.*\)' EXIT\$/\1/p")
+        if [ -n "$_prev_exit_trap" ] && [ "${_prev_exit_trap#*sweep_pg_dsn_down}" = "$_prev_exit_trap" ]; then
+            trap "${_prev_exit_trap}; sweep_pg_dsn_down" EXIT
+        elif [ -z "$_prev_exit_trap" ]; then
+            trap sweep_pg_dsn_down EXIT
+        fi
+    fi
+    trap 'sweep_pg_dsn_down; exit 130' INT
+    trap 'sweep_pg_dsn_down; exit 143' TERM
+}
+
 sweep_pg_dsn_up() {
     local py port raw fqdn i
+    # A subshell cannot hand its exports to the caller, and under zsh its EXIT
+    # trap runs as it returns -- so `sweep_pg_dsn_up | sed`, `$(sweep_pg_dsn_up)`
+    # or `( ... )` reports ready for a DSN the caller will never see, over a
+    # forward that dies before the first real connection (F-fe1795c5). Refuse
+    # loudly instead of failing one line later with "connection refused".
+    if [ "${BASH_SUBSHELL:-${ZSH_SUBSHELL:-0}}" != "0" ]; then
+        echo "sweep-pg-dsn: ERROR sweep_pg_dsn_up must run in the main shell (source the file, then call it) -- not in a pipe, \$(...) or ( ... )" >&2
+        return 1
+    fi
     py="$(_sweep_pg_pybin)"
 
     # Guaranteed-free local port (bind :0). Belt-and-suspenders: never 5432.
@@ -44,27 +89,7 @@ sweep_pg_dsn_up() {
         >"/tmp/sweep-pg-pf-${port}.log" 2>&1 &
     export SWEEP_PG_PF_PID=$!
 
-    # Tear the port-forward down even when the caller does not reach
-    # `sweep_pg_dsn_down` — an early `exit 1`, a failed gate, Ctrl-C, or a
-    # section that simply forgets. Measured 2026-09-21: 22 orphaned
-    # `kubectl port-forward` processes were live on the operator Mac, 18 of
-    # them postgres, the oldest 1d13h, each holding an ephemeral local port
-    # and a cluster connection (F-b881a5b5).
-    #
-    # CHAINED, never replaced. `trap ... EXIT` installs into the CALLER's
-    # shell, and callers already install their own: health-check.sh sets
-    # `trap _all_cleanup EXIT`. An unconditional trap here would silently
-    # clobber it and turn a port-forward leak into a cleanup regression
-    # somewhere else.
-    local _prev_exit_trap
-    _prev_exit_trap=$(trap -p EXIT | sed -n "s/^trap -- '\(.*\)' EXIT\$/\1/p")
-    if [ -n "$_prev_exit_trap" ]; then
-        trap "${_prev_exit_trap}; sweep_pg_dsn_down" EXIT
-    else
-        trap sweep_pg_dsn_down EXIT
-    fi
-    trap 'sweep_pg_dsn_down; exit 130' INT
-    trap 'sweep_pg_dsn_down; exit 143' TERM
+    _sweep_pg_install_traps || return 1
 
     for i in $(seq 1 30); do
         if python3 -c "import socket;socket.create_connection(('127.0.0.1',${port}),0.3).close()" 2>/dev/null; then
