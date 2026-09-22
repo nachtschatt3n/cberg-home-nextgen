@@ -46,6 +46,11 @@ spec:
     image:
       repository: ghcr.io/blakeblackshear/frigate
       tag: 0.18.0
+    # Every credential in config.yml is a {FRIGATE_*} placeholder resolved from
+    # this Secret at start (frigate substitutes FRIGATE_* env vars into the
+    # config). The rendered ConfigMap carries no secret value (F-31aac218).
+    envFromSecrets:
+      - frigate-rtsp-credentials
     env:
       TZ: "Europe/Berlin"
       LIBVA_DRIVER_NAME: "iHD"
