@@ -5,6 +5,19 @@
 #   Body-size limits have no route-level equivalent; Envoy streams uncapped
 #   unless a requestBuffer is set and none is, so this loosens rather than
 #   breaks. A cap would have to be Gateway-scoped and hit every other app.
+#
+# PROBING THIS ROUTE (2026-09-22, F-7711e772): a plain GET returns 503 from
+# Envoy and that is CORRECT. Backend 9001 is a websockets-only listener;
+# libwebsockets closes a non-upgrade request without writing any response
+# (direct probe: curl exit 52, empty reply), which Envoy reports as
+# `503 UC upstream_reset_before_response_started{connection_termination}`.
+# An upgrade probe must be sent over HTTP/1.1: curl negotiates h2 via ALPN
+# by default, h2 has no `Upgrade:` header, so the request reaches mosquitto
+# as a plain GET and also reads 503. With `--http1.1` plus the
+# Sec-WebSocket-* headers the route answers `101 Switching Protocols`
+# with `sec-websocket-protocol: mqtt` (measured through envoy-internal).
+# Browsers and MQTT-over-WS clients use HTTP/1.1 for the upgrade, so real
+# consumers are unaffected; only the probe was wrong.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

@@ -74,8 +74,11 @@ spec:
     - alert: AuthentikOutpostDisconnected
       annotations:
         description: 'Authentik outpost {{ $labels.outpost_name }} (type: {{ $labels.outpost_type
-          }}) has been disconnected from the server for more than 10 minutes. Applications
-          protected by this outpost may be inaccessible. NOTE: the EMBEDDED outpost
+          }}) has been disconnected from the server for more than 20 minutes. Forward-auth
+          keeps serving over HTTP while the websocket is down (measured); what is lost is
+          the CONFIG PUSH channel, so provider changes will not reach this outpost until it
+          reconnects. A sustained loss can still mean the outpost cannot reach
+          authentik-server at all. NOTE: the EMBEDDED outpost
           currently has NO providers attached, so a disconnect there affects nothing --
           check the provider list before treating it as an access outage.'
         runbook_url: https://docs.goauthentik.io/docs/outposts/
@@ -136,6 +139,33 @@ spec:
       # AUTHENTIK_HOST to the in-cluster authentik-server Service rather than
       # the public path, byte-identical on flapping and quiet outposts alike, so
       # config is not the differentiator. Tracked as F-bd54183f.
+      #
+      # ROOT CAUSE IDENTIFIED 2026-09-22 (F-bd54183f), measured not reasoned:
+      # the dips are gunicorn WORKER RECYCLING on authentik-server. Upstream
+      # lifecycle/gunicorn.conf.py sets
+      #   max_requests = CONFIG.get_int("web.max_requests", 1000)  (jitter 50)
+      # so each of the 2 uvicorn workers per server pod is gracefully replaced
+      # after ~1000 requests -- at the measured ~11 req/min/worker that is one
+      # recycle per worker every ~90 min, ~100/day fleet-wide -- and every
+      # outpost websocket that worker held drops with it. Elasticsearch
+      # (logs-generic-default, container=server) vs Prometheus over 26h:
+      # 97 "Worker exiting" events, 96 of them followed within 90 s by >=1
+      # outpost dip, and 365 of 384 dip-starts (95%) inside such a window; the
+      # 19 remainder sit around the 11:35Z server roll. Dips cluster by
+      # server pod because the clients of one worker drop together. The
+      # 300 s dip LENGTH is the Rust outpost's reconnect backoff, whose
+      # attempt counter never resets after a successful connect (homepage:
+      # attempts 233 -> 242 across ten clean reconnects), so every drop costs
+      # the full cap. Both halves are upstream behaviour; nothing in this
+      # cluster's config causes them.
+      #
+      # Benign, so the alert stays as it is: `for: 20m` sits four backoff
+      # cycles above a single dip, a back-to-back double dip needs the
+      # reconnect to land on a worker at its own recycle instant, and a
+      # sustained disconnect still pages. Reduce the churn itself, if wanted,
+      # with AUTHENTIK_WEB__MAX_REQUESTS on the server Deployment (0 disables
+      # recycling, larger values stretch it) -- an authentik-server change,
+      # deliberately not bundled with this alert edit.
       for: 20m
       labels:
         category: authentication

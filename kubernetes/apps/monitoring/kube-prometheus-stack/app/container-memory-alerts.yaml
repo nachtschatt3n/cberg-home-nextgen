@@ -142,6 +142,38 @@ spec:
           #
           # Cost: a 24h blind spot for this rule after every restart. The two
           # threshold rules above cover that window.
+          #
+          # A STEP IS NOT A SLOPE (2026-09-22, F-1af743b7). A regression line
+          # through a window that contains one jump has a positive slope for as
+          # long as the jump stays inside the window, so predict_linear reports
+          # "growth" for a full day after a one-time allocation that has already
+          # plateaued. ai/openclaw did exactly that: a single ~2.4 GiB step
+          # overnight on 09-06 (then flat for 6h) fired this rule, and the
+          # repeat on 09-20 (607 -> 1055 MiB in one hour, then flat for two
+          # days) shows the same signature on the last-7d data: the growth term
+          # above still read 0.21 / 0.28 / 0.24 of limit at 5h / 11h / 15h after
+          # the step, while the container was not growing at all.
+          #
+          # The two deriv clauses require the growth to be PRESENT IN BOTH of
+          # the last two non-overlapping 6h windows, each at >= a quarter of
+          # the 24h slope. A steady leak has the same slope in every sub-window
+          # (ratio ~1, a 4x margin over the 0.25 floor); a single step lands in
+          # at most one sub-window, so the other reads ~0 and blocks it. Because
+          # the >0.10 growth gate already forces the 24h slope to be
+          # substantial, the ratio also implies an absolute per-window floor of
+          # ~0.025 of limit per 48h -- noise on a plateau does not pass while
+          # the gate is open. Measured on the openclaw step (pod-scoped, 5 Gi
+          # limit): ratio(6h/24h) and ratio(6h offset 6h / 24h) were
+          # 4.44/0.10 while the step was inside the last 6h, then -0.25/1.11,
+          # 0.02/-0.21 and 0.11/-0.11 at +5h, +11h and +15h -- blocked at every
+          # instant. Under 24h of age the 24h slope is inflated by the
+          # post-restart ramp and the ratio blocks that too (frigate at age
+          # 22h: 0.12/0.35), which is the sure-worker false positive above.
+          #
+          # Not yet checked against a live steady leak: none older than 24h
+          # existed in the cluster on 2026-09-22 (frigate is under a daily
+          # restart, which the age guard excludes anyway). The straw for
+          # "does not blind a real leak" is the analytic one above.
           expr: |
             (
               predict_linear(
@@ -171,6 +203,16 @@ spec:
             )
             / on(namespace,pod,container) group_left
             kube_pod_container_resource_limits{resource="memory"} > 0.10
+            and
+            (
+              deriv(container_memory_rss{container!="",container!="POD"}[6h])
+              > 0.25 * deriv(container_memory_rss{container!="",container!="POD"}[24h])
+            )
+            and
+            (
+              deriv(container_memory_rss{container!="",container!="POD"}[6h] offset 6h)
+              > 0.25 * deriv(container_memory_rss{container!="",container!="POD"}[24h])
+            )
           for: 1h
           labels:
             severity: warning
@@ -184,6 +226,39 @@ spec:
               the shape of a leak rather than a load spike. Plan a limit change or a fix in a
               maintenance window — do not wait for it to reach the ceiling, where allocations fail
               silently instead of producing a clean OOMKill.
+
+        # The absence guard for the three rules above. Each of them is a JOIN:
+        # container_memory_* from cAdvisor (kubelet) against
+        # kube_pod_container_resource_limits from kube-state-metrics, and the
+        # leak rule additionally needs container_start_time_seconds. If ANY of
+        # those series vanishes -- kubelet cAdvisor scrape broken, kube-state-
+        # metrics down or its ServiceMonitor gone, a metric renamed by an
+        # upgrade -- every rule above returns an empty result, which is
+        # indistinguishable from "nothing is near its limit". Verified
+        # 2026-09-22: absent() on a non-existent container returns 1, and this
+        # exact expression returns empty while all three series are present
+        # (313 container_start_time_seconds series).
+        - alert: ContainerMemoryMetricsAbsent
+          expr: |
+            absent(container_memory_rss{container!="",container!="POD"})
+            or absent(container_memory_working_set_bytes{container!="",container!="POD"})
+            or absent(kube_pod_container_resource_limits{resource="memory"})
+            or absent(container_start_time_seconds{container!="",container!="POD"})
+          for: 15m
+          labels:
+            severity: warning
+            category: capacity
+            component: container
+          annotations:
+            summary: "Container memory alerting has lost its input series -- ContainerMemory* rules are blind"
+            description: >-
+              One of the series the container memory rules join on (cAdvisor container_memory_rss /
+              container_memory_working_set_bytes / container_start_time_seconds, or kube-state-metrics
+              kube_pod_container_resource_limits) has not been scraped for 15 minutes. While it is
+              missing, ContainerMemoryNearLimit, ContainerMemoryLimitImminent and
+              ContainerMemoryLeakPredicted return no data and cannot fire. Treat this as loss of
+              signal, not as proof that memory is fine. Check the kubelet/cAdvisor and
+              kube-state-metrics scrape targets.
 
         # ---- Restart-mitigated workloads (added 2026-08-26, finding F-5e6cdafc) ----
         #
