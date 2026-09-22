@@ -79,7 +79,7 @@ class _Stubbed(unittest.TestCase):
         self._chan = cov.stable_channel_version
         self._g3 = cov.breaking_change_signal
         self._age = cov.direct_bump_age_gate
-        cov.breaking_change_signal = lambda repo, tag: (False, "clean (stubbed)")
+        cov.breaking_change_signal = lambda repo, tag: (False, "clean (release notes checked, stubbed)")
         cov.direct_bump_age_gate = lambda it, policy: None
 
     def tearDown(self):

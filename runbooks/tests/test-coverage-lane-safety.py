@@ -200,14 +200,17 @@ class DirectBumpBreakingGateTest(unittest.TestCase):
         self.assertEqual(lane, "AUTO", reason)
         self.assertNotIn("G3", reason)
 
-    def test_unverified_notes_do_not_hold_but_are_said(self):
-        """The documented asymmetry: G3-unknown is the pre-existing baseline of
-        every direct bump; a rate-limited GitHub must not close the lane. But
-        the AUTO reason must SAY the notes were not read."""
+    def test_unavailable_notes_hold_and_say_why(self):
+        """REVISED 2026-09-22 (retrospective plan item 2). This test used to
+        assert the opposite: that unavailable notes reach AUTO with a note. The
+        note was never read at 03:30, and the authentik chart sat in AUTO with
+        it until a human wrote a deny rule. Now: the repository resolved and no
+        body came back -> PLAN, with the reason stated. The rate-limit guard
+        lives in the NEXT test: a gate exception still passes through."""
         cov.breaking_change_signal = lambda repo, tag: (False, "unverified (release notes unavailable)")
         lane, reason, _ = cov.assign_lane(self._mealie(), POLICY, {}, [])
-        self.assertEqual(lane, "AUTO", reason)
-        self.assertIn("G3 unverified", reason)
+        self.assertEqual(lane, "PLAN", reason)
+        self.assertIn("could not verify", reason)
 
     def test_renovate_pr_shortcut_is_not_double_gated(self):
         """auto-update.py applies G3 to PRs; the PR exit sits above this gate."""

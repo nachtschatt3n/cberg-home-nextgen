@@ -61,6 +61,10 @@ def no_twin(*a, **k):
 
 
 def main() -> int:
+    # G3 is stubbed as CHECKED so this suite exercises the pre-release gate alone;
+    # since 2026-09-22 an unavailable-notes verdict routes to PLAN on its own,
+    # which would otherwise mask what the straw below needs to demonstrate.
+    cov.breaking_change_signal = lambda repo, tag: (False, "clean (release notes checked, stubbed)")
     print("test-coverage-prerelease-target")
     cov._prerelease_digest_twin = no_twin
 

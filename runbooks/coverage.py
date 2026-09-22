@@ -2182,10 +2182,11 @@ def _direct_bump_breaking_gate(item):
     CHANGE (server-initiated HTTP refuses private-network targets unless
     HTTP_ALLOW_LIST is set), was rated AUTO for an unattended window. It was
     caught by a human reading the notes in the window; this is that reading,
-    made mechanical, with the SAME asymmetry the helper documents: a positive
-    signal holds, unfetchable notes do NOT (G3-unknown is the pre-existing
-    baseline of every direct bump, and an unauthenticated GitHub rate limit
-    must not close the lane). auto-update.py applies G3 to PRs already, so
+    made mechanical. Asymmetry, revised 2026-09-22: a positive signal holds; a
+    gate EXCEPTION (network, rate limit) does NOT — an unauthenticated GitHub
+    rate limit must not close the lane; but "release notes unavailable", where
+    the repository resolved and no body came back, is routed to PLAN by
+    assign_lane() rather than annotated and passed. auto-update.py applies G3 to PRs already, so
     the Renovate-PR shortcut above this gate is deliberately not double-gated.
     Off the network when the item names no repository.
     """
@@ -2276,6 +2277,21 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
         is_breaking, g3 = _direct_bump_breaking_gate(item)
         if is_breaking:
             return "PLAN", f"G3 breaking-change signal — {g3}", None
+        # NOTES UNAVAILABLE IS NOT SAFE (2026-09-22, retrospective plan item 2,
+        # narrowed with the operator). Two shapes of "unverified" used to fall
+        # through here identically. A gate EXCEPTION (network, rate limit) still
+        # does: a GitHub outage at 03:30 must not freeze the whole lane, and the
+        # note says the notes were not read. But when the repository RESOLVED and
+        # no release body came back, nothing transient is being waited out — the
+        # verdict simply cannot be given, and on 2026-09-22 the authentik chart
+        # sat in AUTO with exactly that note, held only by a manual deny rule.
+        # That shape routes to an assessed window. "No image repository" also
+        # passes through: G5 already holds it one gate earlier with a truer reason.
+        # Measured on the live rows when added: zero flips that day.
+        if "release notes unavailable" in str(g3):
+            return "PLAN", (f"G3 could not verify the release notes ({g3}) — an "
+                            f"unverified bump needs an assessed window, never the "
+                            f"unattended lane"), None
         # G3 over the RANGE, not the target alone (F-51728488): a breaking
         # change announced in a release this hop LEAPFROGS is exactly as
         # breaking as one in the target, and the target-only read made the
