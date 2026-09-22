@@ -91,6 +91,16 @@ def main() -> int:
         ret, ext, _ = scope_case("bash", straw, marker)
         check("commissioning: ...and does not under bash, which is why the bash-only "
               "verification missed it", not ret and ext)
+    # down() must also drop the DSN it exported: a later caller in the same shell
+    # (policy-cli dials its own forward only when the variable is absent) would
+    # otherwise connect to the dead port. Four finding writes were lost that way
+    # on 2026-09-22 (fixed in 5e4dcd39).
+    for sh in shells:
+        r = run(sh, f'source "{HELPER}"; export SWEEP_PG_DSN=postgresql://x; SWEEP_PG_PF_PID=""; '
+                    'sweep_pg_dsn_down; [ -z "${SWEEP_PG_DSN:-}" ] && echo UNSET || echo STILL_SET')
+        check(f"{sh}: sweep_pg_dsn_down unsets SWEEP_PG_DSN", "UNSET" in r.stdout,
+              r.stdout[-80:] + r.stderr[-120:])
+
     print(); print("FAILED: " + ", ".join(FAILURES) if FAILURES else "all tests passed"); return 1 if FAILURES else 0
 def test_pytest_entry(): assert main() == 0
 if __name__ == "__main__": raise SystemExit(main())
