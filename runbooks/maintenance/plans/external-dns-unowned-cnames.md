@@ -31,6 +31,43 @@ depends_on: []                        # 2026-09-15: was [external-dns-1.22.0]. T
                                       # sync delete, so a bump regression costs 17
                                       # records, never hass or flux-webhook; after
                                       # adoption it would cost 24.
+premises:                             # F-9404f24b (2026-09-22). depends_on used to carry
+                                      # the 7-day soak as a machine-enforced ordering ref;
+                                      # when external-dns-1.22.0 executed and was retired
+                                      # the ref became a DEAD-REF error and was cleared,
+                                      # leaving the soak as the comment above. These make
+                                      # it a gate again: the window agent runs
+                                      # `plan-premises.py --require-premises` on every
+                                      # sequenced plan, so this plan is REFUSED until both
+                                      # hold. Read live 2026-09-22 10:50Z: NOT-SOAKED
+                                      # (soak-until 2026-09-22T17:03:05Z), as intended.
+  - id: chart-1.22.0-soaked-7d
+    why: >-
+      Adoption must not run until chart 1.22.0 (external-dns v0.22.0) has been
+      the deployed release for at least 7 days. While the 8 CNAMEs are unowned a
+      bump regression can only delete the 17 registry-owned records; after
+      adoption it would delete 24, including flux-webhook and hass. Time-aware
+      on purpose (jq `now` against the HelmRelease's lastDeployed) so the same
+      premise refuses on 2026-09-16 and passes on 2026-09-23 -- a static date
+      would pass the moment the chart landed. 604800 = 7 * 86400. A chart other
+      than 1.22.0 yields NO output (select), which plan-premises.py reads as a
+      failure, never as a pass.
+    run: >-
+      kubectl get helmrelease -n network external-dns -o json
+      | jq '.status.history[0]'
+      | jq 'select(.chartVersion == "1.22.0")'
+      | jq '.lastDeployed[0:19] + "Z"'
+      | jq 'fromdateiso8601'
+      | jq -r 'if . + 604800 <= now then "SOAKED chart=1.22.0 deployed-epoch=\(.) soak-until-epoch=\(. + 604800) now-epoch=\(now)" else "NOT-SOAKED chart=1.22.0 deployed-epoch=\(.) soak-until-epoch=\(. + 604800) now-epoch=\(now)" end'
+    expect_matches: "^SOAKED chart=1\\.22\\.0 "
+  - id: pod-runs-v0.22.0
+    why: >-
+      The soak is on the running binary, not on the chart record: the Deployment
+      must actually run external-dns v0.22.0 (chart 1.22.0's appVersion). A
+      rolled-back or hand-patched image would leave the HelmRelease history
+      saying one thing and the pod doing another.
+    run: kubectl get deploy -n network external-dns -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_contains: "external-dns:v0.22.0"
 conflicts_with:                       # FILLED 2026-09-21; was deliberately [].
   - jellyfin-12.1                     # ROLLBACK-CLASS STACKING for all five. Each of
   - media-naming-p3                   # them is `rollback_class: backup-restore`, as
