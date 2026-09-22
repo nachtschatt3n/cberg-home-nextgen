@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.22.2"
+version: "2026.09.22.3"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -77,16 +77,27 @@ deny:
       REMOVE THIS RULE once the upgrade is done deliberately: move the chart
       version and BOTH inline image pins together in one reviewed commit, in an
       attended window, after confirming the 2026.8.3 image tag is published.
+  # Reason REWRITTEN 2026-09-22 (F-af4e0882). The previous text justified the
+  # hold with the 3.x -> 5.x MAJOR migration only — which G1 blocks on its own,
+  # and which has since EXECUTED (every consumer is on one 5.x chart line) — so
+  # the MINOR hold this rule actually performs had no stated hazard: the exact
+  # false-reason shape the *nextcloud-mcp* comment below warns about. The minor
+  # hazard is written down now, without version digits, so it survives drift.
   - match: "*app-template*"
-    reason: "app-template 3.7.3→5.0.0 is a breaking chart migration wrapping ~40
-      HelmReleases — must be done deliberately, once.
-      NARROWED to `max: patch` 2026-09-12 (operator call): the hazard named here is the
-      MAJOR migration, which G1 already blocks on its own (only patch/minor ever reach
-      this rule), so blocking patches added nothing the type gate was not already doing
-      while hiding routine fixes across ~40 HelmReleases. Patches auto-merge. The blast
-      radius is the widest of any component here, so the post-apply health gate carries
-      more weight for this rule than for any other — if a patch ever regresses broadly,
-      restore the FULL block rather than reasoning about which of the 40 broke."
+    reason: "bjw-s app-template is the chart under EVERY plain-Deployment app in this
+      cluster (79 HelmReleases, all on one chart version, measured live 2026-09-22) —
+      the widest blast radius of any component in this file. A chart MINOR is where
+      upstream adds template features and changes rendered defaults (probes, service,
+      PVC and securityContext templating, values-key moves with deprecation shims),
+      and Flux re-renders every consumer in one reconcile: a regression lands on all
+      79 at once and cannot be localised — the post-apply health gate can say 'many
+      pods NotReady', not which of the 79 values files hit the changed key, and the
+      revert is a 79-release roll in the other direction. So minor+ goes through the
+      PLAN lane with a rendered diff (helm template, old chart vs new, across all
+      consumers) before it moves. The MAJOR migration is G1's job, not this rule's.
+      NARROWED to `max: patch` 2026-09-12 (operator call): patches change no template
+      semantics and auto-merge; if a patch ever regresses broadly, restore the FULL
+      block rather than reasoning about which of the 79 broke."
     max: patch
   - match: "*affine*"
     reason: "affine chart/image bumps carry breaking env→config.json changes even on patch tags (0.27.3) — hold for manual review."
@@ -142,6 +153,19 @@ deny:
       docs/sops/k8s-gateway-dns.md. Never unattended.
   - match: "*envoy-gateway*"
     reason: "Catch-all for Envoy Gateway artifacts (image/chart aliases) — same hold as gateway-helm."
+  # Added 2026-09-22 with the Renovate rule that makes this tag comparable
+  # (F-58dbe939). Before it, no PR could exist for this image (docker versioning
+  # rejected the `distroless-v` prefix); after it, an operator-approved PR is an
+  # ordinary docker minor/patch and NOTHING above matched its name — the
+  # *envoy-gateway* catch-all does not contain "envoyproxy/envoy". This closes
+  # that door; the Renovate side is dependencyDashboardApproval.
+  - match: "*envoyproxy/envoy*"
+    reason: "Envoy DATA-PLANE image, pinned tag+digest in the EnvoyProxy resource
+      (kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml). COUPLED to the
+      controller: every Envoy Gateway release compiles in the Envoy it was tested with,
+      so this pin moves only in the SAME change as the gateway-helm chart bump, to that
+      release's DefaultEnvoyProxyImage — never on its own, never unattended. Same hold
+      as gateway-helm; PLAN lane with the restart gate in docs/sops/k8s-gateway-dns.md."
   # Added 2026-09-08 after an ATTENDED image pin (v0.21.0 -> v0.22.0 under chart
   # 1.21.1) took public DNS down for 94s and was reverted (aa79cf7a). Chart
   # 1.22.x will ship appVersion 0.22.0 and would classify as a safe MINOR — i.e.

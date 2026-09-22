@@ -38,10 +38,6 @@
   "pip_requirements": {
     "fileMatch": ["(^|/)[\\w-]*requirements(-\\w+)?\\.(txt|pip)(?:\\.j2)?$"]
   },
-  "ignoreDeps": [
-    // Private GitHub repo — Renovate App token has no access, managed separately
-    "nachtschatt3n/k8s-self-ai-ops"
-  ],
   "packageRules": [
     {
       "description": ["Auto-merge GitHub Actions for minor and patch"],
@@ -291,6 +287,31 @@
       "enabled": false
     },
     {
+      // plex — the same trap as csi-driver-smb, so the same fix (F-58dbe939).
+      // kubernetes/flux/meta/repositories/git/plex.yaml pins `ref.commit` (the
+      // commit tagged helm-chart-1.9.0) with `ref.branch: master` and NO
+      // `ref.tag`, so the flux manager emits
+      //   depName=plex  datasource=git-refs
+      //   packageName=https://github.com/plexinc/pms-docker
+      //   currentDigest=96d39230…  (and NO currentValue)
+      // (measured with Renovate's own extractor, 2026-09-22). With no
+      // currentValue the git-refs datasource resolves the default-branch HEAD,
+      // so the only update this dep can ever produce is "move the pin onto
+      // master HEAD" — the silent content swap the commit pin exists to prevent.
+      // auto-update.py's G1 holds digest-type updates, so it cannot auto-merge,
+      // but it is a WRONG PR that a planner or operator could act on. Disable it.
+      //
+      // Unlike csi-driver-smb there is NO detector to add in its place: upstream
+      // keeps one unversioned chart directory (no `/charts/vX.Y.Z` for the
+      // customManager below to read; measured 0 matches). Plex chart upgrades
+      // stay MANUAL — follow the "To move versions" recipe in plex.yaml and do
+      // not read silence as "up to date".
+      "description": ["plex commit pin — suppress the flux manager's master-HEAD digest bump"],
+      "matchDatasources": ["git-refs"],
+      "matchPackageNames": ["https://github.com/plexinc/pms-docker"],
+      "enabled": false
+    },
+    {
       // oc8 — same class of gap, different mechanism, so it needs a different fix.
       //
       // The customManager below cannot help it: oc8 carries no version string
@@ -314,6 +335,32 @@
       "matchDatasources": ["github-tags"],
       "matchPackageNames": ["nachtschatt3n/oc8"],
       "versioning": "regex:^oc8home-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
+      "dependencyDashboardApproval": true
+    },
+    {
+      // Envoy DATA-PLANE image (F-58dbe939), pinned in
+      // kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml as
+      // docker.io/envoyproxy/envoy:distroless-v<X.Y.Z>@sha256:… . Renovate's
+      // kubernetes manager does extract that line, but the default docker
+      // versioning rejects the `distroless-v` PREFIX as invalid (measured with
+      // Renovate's own extractor, 2026-09-22), so it raised neither a version
+      // PR nor a digest PR — the pin was invisible, which the comment on that
+      // line already records. This regex parses 1.39.1, orders 1.40.0 above it,
+      // and REJECTS bare v1.40.0, debug-* and distroless-dev, so a base/variant
+      // swap can never arrive dressed as a version bump.
+      //
+      // dependencyDashboardApproval because the pin is COUPLED to the control
+      // plane: every Envoy Gateway release compiles in the Envoy it was tested
+      // with, so this tag+digest must move in the SAME change as the
+      // gateway-helm chart bump in helmrelease.yaml, never on its own. The
+      // dashboard row makes the drift visible; nothing auto-mergeable exists
+      // until an operator opens it. runbooks/auto-update-policy.yaml holds
+      // `*envoyproxy/envoy*` for the same reason, so an approved PR still
+      // cannot land at Step 0 ahead of the coordinated edit.
+      "description": ["Envoy data-plane image pin — make distroless-vX.Y.Z comparable, dashboard-approval only"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["docker.io/envoyproxy/envoy"],
+      "versioning": "regex:^distroless-v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
       "dependencyDashboardApproval": true
     }
   ],

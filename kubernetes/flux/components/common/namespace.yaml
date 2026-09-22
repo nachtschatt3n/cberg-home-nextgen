@@ -11,10 +11,17 @@ metadata:
     # MUST be `name: not-used` because the kustomize namespace transformer
     # runs AFTER patches, so at patch time the resource is still named
     # `not-used` from this component.
-    # Privileged (7): databases, home-automation, kube-system, media,
-    #   monitoring, storage, download (ES IPC_LOCK).
-    # Baseline (8): ai, backup, cert-manager, default, my-software-{dev,prod},
-    #   network, office.
+    # Inventory below is measured from the LIVE `enforce` label (2026-09-22,
+    # F-481fadb8); docs/sops/pod-security-admission.md is the maintained copy —
+    # re-count with `kubectl get ns -L pod-security.kubernetes.io/enforce`.
+    # Privileged (8): databases, download (ES IPC_LOCK), home-automation,
+    #   kube-system, media, monitoring, security, storage.
+    # Baseline (8): ai, backup, default, my-software-{development,production,
+    #   showcase}, network, office.
+    # Restricted (1): cert-manager — the only namespace tightened ABOVE the
+    #   default (apps/cert-manager/kustomization.yaml).
+    # No enforce label (4): cilium-secrets, flux-system, kube-node-lease,
+    #   kube-public — not created through this component.
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/audit: baseline
     pod-security.kubernetes.io/warn: baseline
