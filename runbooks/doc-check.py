@@ -490,7 +490,7 @@ def section_header(n: int, total: int, title: str) -> None:
 
 
 def s1_infrastructure_docs() -> tuple[str, Findings, str]:
-    section_header(1, 10, "Infrastructure Documentation")
+    section_header(1, 11, "Infrastructure Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -613,7 +613,7 @@ def s1_infrastructure_docs() -> tuple[str, Findings, str]:
 
 
 def s2_network_docs() -> tuple[str, Findings, str]:
-    section_header(2, 10, "Network Documentation")
+    section_header(2, 11, "Network Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -762,8 +762,307 @@ def _documented_name_surface(content: str) -> str:
     return "\n".join(surface)
 
 
+# ---------------------------------------------------------------------------
+# Per-namespace count tables (F-63b578f5)
+# ---------------------------------------------------------------------------
+
+def _ns_count_cell(content: str, ns: str, count_col: int) -> int | None:
+    r"""The integer in column `count_col` of the table row whose first cell is `ns`.
+
+    None when there is no such row OR the cell is not a bare integer — both
+    are reported by the caller as a mismatch, never skipped. The previous
+    check used `^\|\s*ns\s*\|\s*(\d+)\s*\|`, which hard-codes the count into
+    column 1: on docs/infrastructure.md's 3-column `| ns | Purpose | N |` table
+    it matched nothing and the table went unvalidated for months while 7 of
+    18 rows were wrong. Telling the parser the column is the whole fix.
+    """
+    for line in content.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if not cells or cells[0] != ns:
+            continue
+        if len(cells) <= count_col:
+            return None
+        return int(cells[count_col]) if cells[count_col].isdigit() else None
+    return None
+
+
+def _namespace_table_mismatches(content: str, countable: dict[str, list],
+                                count_col: int) -> list[str] | None:
+    """Rows of a per-namespace count table that disagree with `countable`.
+
+    Returns None when NOT ONE namespace row could be parsed — an empty
+    population means the table is absent or reshaped, which is a coverage
+    gap to record, not a clean pass. Otherwise a list of human-readable
+    mismatches (empty when every row agrees).
+    """
+    mismatches, parsed = [], 0
+    for ns, apps in sorted(countable.items()):
+        stated = _ns_count_cell(content, ns, count_col)
+        if stated is None:
+            mismatches.append(f"{ns}: no parseable row (actual {len(apps)})")
+            continue
+        parsed += 1
+        if stated != len(apps):
+            mismatches.append(f"{ns}: table says {stated}, actual {len(apps)}")
+    if parsed == 0:
+        return None
+    return mismatches
+
+
+# ---------------------------------------------------------------------------
+# Exposure column vs live HTTPRoute parentRefs (F-ce5a9fd5)
+# ---------------------------------------------------------------------------
+#
+# docs/applications.md states each app's exposure by hand. It was wrong for 13
+# apps at the Envoy migration review (11 documented Internal while actually
+# internet-reachable), hand-corrected, then wrong again for 7 more (4afadaac).
+# Exposure is a PROPERTY of which Gateway a route attaches to, so it is derived
+# here and diffed against the column. The route->app mapping is EXACT and
+# repo-grounded: a live route carries the Flux object that created it
+# (helm.toolkit.fluxcd.io/name / kustomize.toolkit.fluxcd.io/name), and that
+# object's name is declared inside exactly one app directory. No hostname or
+# name-similarity matching — a first attempt at that produced false
+# corrections (redis vs redisinsight, wazuh-agent vs the wazuh dashboard host)
+# to a security-posture table, which is worse than no check.
+
+GATEWAY_EXPOSURE = {"envoy-external": "external", "envoy-internal": "internal"}
+_ROUTE_OWNER_LABELS = (
+    ("labels", "helm.toolkit.fluxcd.io/name"),
+    ("labels", "kustomize.toolkit.fluxcd.io/name"),
+    ("annotations", "meta.helm.sh/release-name"),
+    ("labels", "app.kubernetes.io/instance"),
+)
+_FLUX_NAME_RE = re.compile(r"^\s{2}name:\s*(?:&\w+\s+)?[\"']?([\w.-]+)", re.M)
+
+
+def _declared_flux_names(path: Path) -> set[str]:
+    """metadata.name of every Kustomization/HelmRelease document in `path`."""
+    txt = read_file(path)
+    if not txt:
+        return set()
+    names: set[str] = set()
+    try:
+        import yaml as _yaml
+        for doc in _yaml.safe_load_all(txt):
+            if isinstance(doc, dict) and doc.get("kind") in ("Kustomization", "HelmRelease"):
+                n = (doc.get("metadata") or {}).get("name")
+                if isinstance(n, str):
+                    names.add(n)
+        return names
+    except Exception:  # noqa: BLE001 — Flux ${VAR} substitutions can trip a strict loader
+        return set(_FLUX_NAME_RE.findall(txt))
+
+
+def _route_owner_index() -> dict[tuple[str, str], str]:
+    """(namespace, Flux object name) -> owning app directory, from the repo.
+
+    Covers the app directory name itself, every Kustomization in its ks.yaml
+    and the HelmRelease in app/ — so `frigate` (HelmRelease in frigate-nvr/),
+    `flux-instance` (second Kustomization in flux-operator/ks.yaml) and
+    `scrypted` (HelmRelease in scrypted-nvr/) resolve without an alias table.
+    """
+    apps_dir = REPO_ROOT / "kubernetes" / "apps"
+    index: dict[tuple[str, str], str] = {}
+    if not apps_dir.is_dir():
+        return index
+    for ns_dir in sorted(apps_dir.iterdir()):
+        if not ns_dir.is_dir() or ns_dir.name.startswith("."):
+            continue
+        ns = ns_dir.name
+        # app dirs, plus grouping dirs (network/external|internal/<app>)
+        candidates = []
+        for app_dir in sorted(ns_dir.iterdir()):
+            if not app_dir.is_dir() or app_dir.name.startswith("_"):
+                continue
+            candidates.append(app_dir)
+            for sub in sorted(app_dir.iterdir()):
+                if (sub.is_dir() and not sub.name.startswith("_")
+                        and ((sub / "ks.yaml").exists() or (sub / "app").is_dir())):
+                    candidates.append(sub)
+        for app_dir in candidates:
+            names = {app_dir.name}
+            for rel in ("ks.yaml", "app/helmrelease.yaml", "app/helm-release.yaml",
+                        "helmrelease.yaml", "helm-release.yaml"):
+                if (app_dir / rel).exists():
+                    names |= _declared_flux_names(app_dir / rel)
+            subdirs = {s.name for s in app_dir.iterdir() if s.is_dir()}
+            for n in names:
+                # A grouping dir's ks.yaml declares its CHILDREN by name
+                # (network/internal/ks.yaml -> adguard-home, k8s-gateway): the
+                # owner is the child directory, never the grouping directory.
+                owner = n if (n != app_dir.name and n in subdirs) else app_dir.name
+                index.setdefault((ns, n), owner)
+    return index
+
+
+def _derive_route_exposure(routes: list, owner_index: dict[tuple[str, str], str]
+                           ) -> tuple[dict[tuple[str, str], set[str]], list[str]]:
+    """Exposure set per (namespace, app) from live HTTPRoutes.
+
+    A route counts only if it carries a hostname (the cluster-wide
+    https-redirect has none and exposes nothing) and only through parentRefs
+    on the https listener of a known Gateway (the :80 listener is the
+    redirect's). Returns (derived, unmapped) where `unmapped` lists routes
+    whose owner could not be resolved EXACTLY — those are a coverage gap for
+    their app, reported as such, never guessed.
+    """
+    derived: dict[tuple[str, str], set[str]] = {}
+    unmapped: list[str] = []
+    for r in routes:
+        md, spec = r.get("metadata") or {}, r.get("spec") or {}
+        ns, name = md.get("namespace", ""), md.get("name", "")
+        if not spec.get("hostnames"):
+            continue
+        gws = {GATEWAY_EXPOSURE[p["name"]] for p in (spec.get("parentRefs") or [])
+               if p.get("name") in GATEWAY_EXPOSURE and p.get("sectionName") != "http"}
+        if not gws:
+            continue
+        owner = None
+        for field, key in _ROUTE_OWNER_LABELS:
+            v = (md.get(field) or {}).get(key)
+            if v and (ns, v) in owner_index:
+                owner = owner_index[(ns, v)]
+                break
+        if owner is None:
+            unmapped.append(f"{ns}/{name}")
+            continue
+        derived.setdefault((ns, owner), set()).update(gws)
+    return derived, unmapped
+
+
+_EXPOSURE_SPLIT_RE = re.compile(r"\s+—\s+|\s+-\s+|\s*\(")
+
+
+def _parse_exposure_claim(cell: str) -> set[str] | None:
+    """The exposure a doc cell CLAIMS, as a set — {} for None, None if unparseable.
+
+    Only the leading clause is read (`**External** — ...`, `Internal +
+    External`, `External (webhook)`, `Internal UI; External x`): the prose
+    after the dash freely says things like "no internal route".
+    """
+    head = _EXPOSURE_SPLIT_RE.split(cell, 1)[0].strip("* `").lower()
+    claim = {x for x in ("external", "internal") if x in head}
+    if claim:
+        return claim
+    if head in ("none", "—", "-", "n/a", "") or head.startswith("none"):
+        return set()
+    return None
+
+
+def _doc_exposure_claims(content: str) -> dict[tuple[str, str], set[str] | None]:
+    """(namespace, app) -> claimed exposure for every row under an `Ingress` column."""
+    claims: dict[tuple[str, str], set[str] | None] = {}
+    ns, ing_col = None, None
+    for line in content.splitlines():
+        m = re.match(r"^#{2,3}\s+.*?\(`([a-z0-9-]+)`\)\s*$", line) or \
+            re.match(r"^#{2,3}\s+`([a-z0-9-]+)`\s*$", line)
+        if m:
+            ns, ing_col = m.group(1), None
+            continue
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if cells and cells[0] == "App":
+            ing_col = cells.index("Ingress") if "Ingress" in cells else None
+            continue
+        if ns is None or ing_col is None or not cells or set(cells[0]) <= {"-", ":"}:
+            continue
+        # A bold first cell (`**Total**`) is a summary row, not an app — test
+        # the RAW cell, the strip below would erase the marker.
+        if not cells[0] or cells[0].startswith("**") or len(cells) <= ing_col:
+            continue
+        app = cells[0].strip("` *")
+        if not app:
+            continue
+        claims[(ns, app)] = _parse_exposure_claim(cells[ing_col])
+    return claims
+
+
+def _exposure_mismatches(claims: dict, derived: dict, repo_apps: set[tuple[str, str]]
+                         ) -> tuple[list[str], int, list[str], list[str]]:
+    """Diff doc claims against derived exposure for apps the repo declares.
+
+    Returns (mismatches, compared, skipped_not_repo, unparseable). Rows whose
+    app is not a repo app are skipped — a row-head that is not an exact app
+    name is not something this check may guess about.
+    """
+    def fmt(s: set[str]) -> str:
+        return "+".join(sorted(s)) if s else "none"
+
+    mismatches, skipped, unparseable, compared = [], [], [], 0
+    for (ns, app), claim in sorted(claims.items()):
+        if (ns, app) not in repo_apps:
+            skipped.append(f"{ns}/{app}")
+            continue
+        if claim is None:
+            unparseable.append(f"{ns}/{app}")
+            continue
+        compared += 1
+        actual = derived.get((ns, app), set())
+        if claim != actual:
+            mismatches.append(f"{ns}/{app}: doc says {fmt(claim)}, routes say {fmt(actual)}")
+    return mismatches, compared, skipped, unparseable
+
+
+def _s3_exposure_check(f: Findings, lines: list[str], content: str,
+                       cluster_apps: dict[str, list[str]]) -> None:
+    scope = "s3_application_docs"
+    rc, out, err = run_cmd("kubectl get httproute -A -o json", timeout=60,
+                           scope=scope, dep="kubectl (httproutes)")
+    if rc != 0 or not out:
+        DEGRADED.record(scope, "kubectl get httproute -A",
+                        (err.splitlines() or ["no output"])[-1] + " — exposure column not compared")
+        lines.append("Exposure column vs routes: **NOT MEASURED** (HTTPRoute listing failed)\n")
+        return
+    try:
+        routes = json.loads(out).get("items", [])
+    except json.JSONDecodeError as e:
+        DEGRADED.record(scope, "kubectl httproute JSON", repr(e))
+        lines.append("Exposure column vs routes: **NOT MEASURED** (unparsable listing)\n")
+        return
+    if not routes:
+        DEGRADED.record(scope, "kubectl get httproute -A",
+                        "0 routes returned — empty population, exposure column not compared")
+        lines.append("Exposure column vs routes: **NOT MEASURED** (0 routes returned)\n")
+        return
+    claims = _doc_exposure_claims(content)
+    if not claims:
+        DEGRADED.record(scope, "docs/applications.md Ingress column",
+                        "0 rows parsed — exposure column not compared")
+        lines.append("Exposure column vs routes: **NOT MEASURED** (0 doc rows parsed)\n")
+        return
+    derived, unmapped = _derive_route_exposure(routes, _route_owner_index())
+    repo_apps = {(ns, _bare(a)) for ns, apps in cluster_apps.items() for a in apps}
+    mismatches, compared, skipped, unparseable = _exposure_mismatches(claims, derived, repo_apps)
+    if unmapped:
+        # An unattributed route leaves SOME app's derived set short, so its
+        # comparison may be wrong in either direction: partial coverage.
+        DEGRADED.record(scope, "HTTPRoute -> app ownership",
+                        f"{len(unmapped)} live route(s) resolve to no repo app: "
+                        f"{', '.join(unmapped[:6])}")
+    for m in mismatches:
+        f.add(WARNING, f"docs/applications.md exposure drift — {m} (derived from live "
+                       f"HTTPRoute parentRefs; correct the doc, or the route if the doc "
+                       f"states the intended posture)")
+        cprint(C.YELLOW, f"  {WARNING} exposure drift: {m}")
+    for u in unparseable:
+        f.add(WARNING, f"docs/applications.md exposure cell for `{u}` is not parseable "
+                       f"as Internal/External/None — state it explicitly")
+    lines.append(f"Exposure column vs live routes: **{compared}** rows compared, "
+                 f"**{len(mismatches)}** mismatched, {len(unparseable)} unparseable, "
+                 f"{len(skipped)} rows skipped (not a repo app); {len(routes)} routes "
+                 f"examined, {len(unmapped)} unmapped\n")
+    if mismatches:
+        lines.append("Exposure mismatches:\n" + "\n".join(f"- {m}" for m in mismatches[:20]) + "\n")
+    elif compared:
+        cprint(C.GREEN, f"  {OK} exposure column matches live routes "
+                        f"({compared} rows compared, {len(routes)} routes)")
+
+
 def s3_application_docs() -> tuple[str, Findings, str]:
-    section_header(3, 10, "Application Documentation")
+    section_header(3, 11, "Application Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -958,23 +1257,33 @@ def s3_application_docs() -> tuple[str, Findings, str]:
             f.add(WARNING, f"`{doc_name}` says {stated} {what}, actual is {actual}")
             cprint(C.YELLOW, f"  {WARNING} {doc_name}: states {stated} {what}, actual {actual}")
 
-    # Per-namespace rows in the applications.md Summary table.
-    mismatched_rows = []
-    for ns, apps in sorted(countable.items()):
-        m = re.search(rf"^\|\s*{re.escape(ns)}\s*\|\s*(\d+)\s*\|", content, re.M)
-        if not m:
-            mismatched_rows.append(f"{ns}: no Summary row (actual {len(apps)})")
+    # Per-namespace rows: the applications.md Summary (`| ns | N |`, count in
+    # column 1) AND the docs/infrastructure.md Namespaces table
+    # (`| ns | Purpose | N |`, column 2). F-63b578f5: the second table was
+    # validated by NOTHING — s1 checks versions, nodes and IPs only, and the
+    # 2-column regex that used to live here could never match a 3-column row,
+    # so it never even tried. Both now go through _ns_count_cell with the
+    # column named, and a row that cannot be parsed is a mismatch, not a skip.
+    infra_content = read_file(REPO_ROOT / "docs" / "infrastructure.md", scope="s3_application_docs")
+    for doc_name, doc_content, col, table_label in (
+        ("docs/applications.md", content, 1, "Summary"),
+        ("docs/infrastructure.md", infra_content, 2, "Namespaces"),
+    ):
+        if not doc_content:
+            continue    # read_file recorded the degradation
+        mismatched_rows = _namespace_table_mismatches(doc_content, countable, col)
+        if mismatched_rows is None:
+            DEGRADED.record("s3_application_docs", f"{doc_name} {table_label} table",
+                            "no per-namespace count row parsed — stated counts not compared")
             continue
-        if int(m.group(1)) != len(apps):
-            mismatched_rows.append(f"{ns}: table says {m.group(1)}, actual {len(apps)}")
-    if mismatched_rows:
-        f.add(WARNING, "docs/applications.md Summary table disagrees with the cluster: "
-                       + "; ".join(mismatched_rows[:8]))
-        cprint(C.YELLOW, f"  {WARNING} applications.md Summary: {len(mismatched_rows)} row(s) wrong")
-        for r in mismatched_rows[:8]:
-            cprint(C.YELLOW, f"      - {r}")
-    else:
-        cprint(C.GREEN, f"  {OK} applications.md Summary table matches the cluster")
+        if mismatched_rows:
+            f.add(WARNING, f"{doc_name} {table_label} table disagrees with the cluster: "
+                           + "; ".join(mismatched_rows[:8]))
+            cprint(C.YELLOW, f"  {WARNING} {doc_name} {table_label}: {len(mismatched_rows)} row(s) wrong")
+            for r in mismatched_rows[:8]:
+                cprint(C.YELLOW, f"      - {r}")
+        else:
+            cprint(C.GREEN, f"  {OK} {doc_name} {table_label} table matches the cluster")
 
     # --- The applications.md Total row -------------------------------------
     m_tot = re.search(r"^\|\s*\*\*Total\*\*\s*\|\s*\*\*(\d+)\*\*\s*\|", content, re.M)
@@ -1028,6 +1337,9 @@ def s3_application_docs() -> tuple[str, Findings, str]:
             cprint(C.GREEN, f"  {OK} README.md per-namespace counts match "
                             f"({len(stated_ns)} categories)")
 
+    # --- Exposure column vs live HTTPRoute parentRefs (F-ce5a9fd5) --------
+    _s3_exposure_check(f, lines, content, cluster_apps)
+
     # Check namespace sections exist in the doc
     expected_namespaces = [
         "ai", "home-automation", "databases", "monitoring", "office",
@@ -1043,7 +1355,7 @@ def s3_application_docs() -> tuple[str, Findings, str]:
 
 
 def s4_security_docs() -> tuple[str, Findings, str]:
-    section_header(4, 10, "Security Documentation")
+    section_header(4, 11, "Security Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -1241,7 +1553,7 @@ def homepage_layout_groups(hr_content: str) -> list[str]:
 
 
 def s5_integration_docs() -> tuple[str, Findings, str]:
-    section_header(5, 10, "Integration Documentation")
+    section_header(5, 11, "Integration Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -1375,7 +1687,7 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
 
 
 def s6_readme_claude_currency() -> tuple[str, Findings, str]:
-    section_header(6, 10, "README & CLAUDE.md Currency")
+    section_header(6, 11, "README & CLAUDE.md Currency")
     f = Findings()
     lines: list[str] = []
 
@@ -1507,7 +1819,7 @@ def s6_readme_claude_currency() -> tuple[str, Findings, str]:
 
 
 def s7_coding_guidelines() -> tuple[str, Findings, str]:
-    section_header(7, 10, "Coding Guidelines & Rules")
+    section_header(7, 11, "Coding Guidelines & Rules")
     f = Findings()
     lines: list[str] = []
 
@@ -1664,7 +1976,7 @@ def s7_coding_guidelines() -> tuple[str, Findings, str]:
 
 
 def s8_runbook_coverage() -> tuple[str, Findings, str]:
-    section_header(8, 10, "Runbook Coverage")
+    section_header(8, 11, "Runbook Coverage")
     f = Findings()
     lines: list[str] = []
 
@@ -1837,6 +2149,7 @@ SECTION_NAMES = [
     "Runbook Coverage",
     "Storage Safety Table vs Live StorageClasses",
     "Control Ledger",
+    "Retired-Rule Phrases",
 ]
 
 
@@ -1866,7 +2179,7 @@ def s9_storage_safety_table() -> tuple[str, Findings, str]:
     Both failures are the same shape: a check that quietly stopped checking. A
     doc nobody verifies is not a control, so this verifies it.
     """
-    section_header(9, 10, "Storage Safety Table vs Live StorageClasses")
+    section_header(9, 11, "Storage Safety Table vs Live StorageClasses")
     f = Findings()
     lines: list[str] = []
     scope = "s9_storage_safety_table"
@@ -1970,7 +2283,7 @@ def s10_control_ledger() -> tuple[str, Findings, str]:
     catch — so the ledger itself is verified, in git, with no cluster access
     needed (pure-repo check).
     """
-    section_header(10, 10, "Control Ledger — every control has a live watcher")
+    section_header(10, 11, "Control Ledger — every control has a live watcher")
     f = Findings()
     lines: list[str] = []
     scope = "s10_control_ledger"
@@ -2018,6 +2331,178 @@ def s10_control_ledger() -> tuple[str, Findings, str]:
     else:
         for sev, msg in f._items:
             cprint(C.RED if sev == CRITICAL else C.YELLOW, f"  {sev} {msg}")
+    return f.worst(), f, "".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Retired-rule phrases (F-485655e1)
+# ---------------------------------------------------------------------------
+#
+# A rule stated in several files drifts when a fix updates some copies and not
+# others — and agents follow the STRICTER surviving copy. d147b1ce corrected the
+# "AUTO-NIGHT runs only in mode: unattended windows" claim in three files; the
+# fourth (the SOP the agent definition points at) kept it, and a cron-fired
+# attended window could execute nothing. A grep finds this in seconds; nothing
+# ran the grep. Each entry below is a phrase RETIRED by a named commit; the
+# commit is re-checked against git (`retired_phrase_grounded`) so the list
+# cannot silently assert history that never happened. A hit is a live
+# assertion of the phrase outside a historical context: lines carrying a
+# history marker (retired / superseded / replaces / ...) and rows inside a
+# "History" / "Changelog" section legitimately quote the old wording.
+
+RETIRED_PHRASES: list[dict] = [
+    {
+        "id": "auto-night-mode-unattended-only",
+        "phrase": r"runs\s+unattended\s+in\s+`?mode:\s*unattended`?\s+windows?",
+        "retired_by": "ac2b5a2e",
+        "why": "AUTO-NIGHT may run in ANY window regardless of `mode:` (widened "
+               "2026-09-12, d147b1ce); the strict copy that survived made a "
+               "cron-fired attended window unable to execute anything",
+    },
+    {
+        "id": "auto_execute-knob",
+        "phrase": r"\bauto_execute\b",
+        "retired_by": "a39d8766",
+        "why": "the per-plan auto_execute boolean was replaced by derived execution "
+               "classes (P2.1b, 2026-08-26); plans cannot claim a class",
+    },
+    {
+        "id": "unattended_allowed-knob",
+        "phrase": r"\bunattended_allowed\b",
+        "retired_by": "a39d8766",
+        "why": "window-level unattended_allowed was replaced by derived execution classes (P2.1b)",
+    },
+    {
+        "id": "max_unattended_risk-knob",
+        "phrase": r"\bmax_unattended_risk\b",
+        "retired_by": "a39d8766",
+        "why": "the risk-ceiling knob was replaced by derived execution classes (P2.1b); "
+               "`risk:` itself stays the capacity weight",
+    },
+]
+
+RETIRED_PHRASE_HISTORY_MARKERS = re.compile(
+    r"retired|superseded|no longer|formerly|replaces|replaced|do not reintroduce|"
+    r"was the|used to|the old|deprecated|removed|history", re.I)
+_HISTORY_HEADING_RE = re.compile(r"^#{1,6}\s+.*\b(history|changelog|version history)\b", re.I)
+
+# Corpus: every place a RULE is stated — not plan files, which are per-change
+# artifacts with their own validator and which quote history by design.
+RETIRED_PHRASE_CORPUS = (
+    "CLAUDE.md", "README.md", "docs/**/*.md", ".claude/agents/*.md",
+    "runbooks/*.md", "runbooks/*.yaml", "runbooks/maintenance/plans/README.md",
+)
+# Raw occurrence counts printed as CONTEXT (these words are not findings).
+RETIRED_PHRASE_CONTEXT_WORDS = ("retired", "unattended", "auto_execute")
+
+
+def _retired_phrase_corpus(root: Path) -> list[Path]:
+    files: list[Path] = []
+    for pat in RETIRED_PHRASE_CORPUS:
+        files.extend(p for p in root.glob(pat) if p.is_file())
+    # doc-check itself carries the phrase list; it is not a rule document.
+    return sorted({p for p in files if p.name != "doc-check.py"})
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", s)
+
+
+def scan_retired_phrases(files: list[Path], entries: list[dict],
+                         root: Path | None = None) -> list[dict]:
+    """Live assertions of retired phrases: [{file, line, id, text}, ...].
+
+    A phrase is tested on each line AND on the line joined with its successor,
+    so a wrapped assertion (the exact ac2b5a2e shape: `runs unattended in` /
+    `mode: unattended` windows` across two lines) cannot hide from a
+    single-line grep. A hit is exempt when its line, the line before or after
+    carries a history marker, or it sits under a History/Changelog heading.
+    """
+    hits: list[dict] = []
+    compiled = [(e, re.compile(e["phrase"], re.I)) for e in entries]
+    for path in files:
+        text = read_file(path)
+        if not text:
+            continue
+        lines = text.splitlines()
+        in_history = False
+        for i, line in enumerate(lines):
+            if line.startswith("#"):
+                in_history = bool(_HISTORY_HEADING_RE.match(line))
+            nxt = lines[i + 1] if i + 1 < len(lines) else ""
+            for entry, rx in compiled:
+                here = rx.search(_norm(line))
+                wrapped = (not here and rx.search(_norm(line + " " + nxt))
+                           and not rx.search(_norm(nxt)))
+                if not (here or wrapped):
+                    continue
+                ctx = " ".join(lines[max(0, i - 1):i + 2])
+                if in_history or RETIRED_PHRASE_HISTORY_MARKERS.search(ctx):
+                    continue
+                rel = str(path.relative_to(root)) if root else str(path)
+                hits.append({"file": rel, "line": i + 1, "id": entry["id"],
+                             "text": _norm(line).strip()[:120]})
+    return hits
+
+
+def retired_phrase_grounded(entry: dict, root: Path | None = None) -> bool:
+    """True when `retired_by` REMOVED a match of `phrase` — the entry is real history."""
+    rc, out, _err = run_cmd(f"git -C {root or REPO_ROOT} show --format= {entry['retired_by']}",
+                            timeout=30)
+    if rc != 0 or not out:
+        return False
+    removed = " ".join(l[1:] for l in out.splitlines()
+                       if l.startswith("-") and not l.startswith("---"))
+    return re.search(entry["phrase"], _norm(removed), re.I) is not None
+
+
+def s11_retired_phrases() -> tuple[str, Findings, str]:
+    section_header(11, 11, "Retired-Rule Phrases — no copy left behind")
+    f = Findings()
+    lines: list[str] = []
+    scope = "s11_retired_phrases"
+
+    files = _retired_phrase_corpus(REPO_ROOT)
+    if len(files) < 10:
+        # The corpus globs cover ~100 files; a handful means the layout moved.
+        DEGRADED.record(scope, "retired-phrase corpus",
+                        f"only {len(files)} files matched — corpus globs stale, scan not trusted")
+        lines.append(f"Corpus: **{len(files)}** files (too few — NOT MEASURED)\n")
+        return f.worst(), f, "".join(lines)
+
+    ungrounded = [e["id"] for e in RETIRED_PHRASES if not retired_phrase_grounded(e)]
+    for eid in ungrounded:
+        DEGRADED.record(scope, f"retired-phrase entry `{eid}`",
+                        "its retired_by commit removed no match — entry not grounded in git, hits unverified")
+
+    hits = scan_retired_phrases(files, RETIRED_PHRASES, REPO_ROOT)
+    by_id = {e["id"]: e for e in RETIRED_PHRASES}
+    for h in hits:
+        e = by_id[h["id"]]
+        f.add(WARNING, f"Retired rule phrase `{h['id']}` still asserted in `{h['file']}:{h['line']}` "
+                       f"— retired by `{e['retired_by']}` ({e['why']}); the other copies were "
+                       f"updated, this one was not")
+        cprint(C.YELLOW, f"  {WARNING} {h['file']}:{h['line']} still asserts `{h['id']}`: {h['text']}")
+
+    counts = {w: [0, 0] for w in RETIRED_PHRASE_CONTEXT_WORDS}
+    for path in files:
+        txt = read_file(path).lower()
+        for w in counts:
+            n = txt.count(w)
+            if n:
+                counts[w][0] += n
+                counts[w][1] += 1
+    lines.append(f"Corpus: **{len(files)}** rule-bearing files; **{len(RETIRED_PHRASES)}** retired "
+                 f"phrases ({len(RETIRED_PHRASES) - len(ungrounded)} grounded in git); "
+                 f"**{len(hits)}** live assertion(s)\n")
+    lines.append("Context — raw word counts (occurrences / files): "
+                 + ", ".join(f"`{w}` {c[0]}/{c[1]}" for w, c in counts.items()) + "\n")
+    if hits:
+        lines.append("Live assertions:\n" + "\n".join(
+            f"- `{h['file']}:{h['line']}` `{h['id']}`" for h in hits) + "\n")
+    elif not ungrounded:
+        cprint(C.GREEN, f"  {OK} no retired phrase asserted live in {len(files)} files "
+                        f"({len(RETIRED_PHRASES)} phrases, all grounded)")
     return f.worst(), f, "".join(lines)
 
 
@@ -2100,6 +2585,7 @@ _SECTION_SLUGS = [
     "s8_runbook_coverage",
     "s9_storage_safety",
     "s10_control_ledger",
+    "s11_retired_phrases",
 ]
 
 # Mirrors the guard security-check.py already carries, for the same reason and
@@ -2223,6 +2709,7 @@ def _main_impl(args) -> int:
     results.append(s8_runbook_coverage())
     results.append(s9_storage_safety_table())
     results.append(s10_control_ledger())
+    results.append(s11_retired_phrases())
 
     # Write report
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

@@ -176,19 +176,19 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Namespace | Purpose | App Count |
 |-----------|---------|-----------|
 | ai | AI/ML services | 10 |
-| home-automation | Smart home integrations | 19 |
-| databases | Database backends | 10 |
-| monitoring | Observability stack | 11 |
+| home-automation | Smart home integrations | 20 |
+| databases | Database backends | 11 |
+| monitoring | Observability stack | 14 |
 | office | Productivity and document management | 11 |
 | media | Media servers | 5 |
 | download | Download managers | 2 |
-| kube-system | Core cluster infrastructure | 12 |
-| storage | Persistent storage (Longhorn) | 1 |
+| kube-system | Core cluster infrastructure | 11 |
+| storage | Persistent storage (Longhorn) | 2 |
 | cert-manager | TLS certificate management | 1 |
-| network | Gateway API data plane (Envoy), DNS, networking | 6 |
+| network | Gateway API data plane (Envoy), DNS, networking | 5 |
 | default | Dashboard (Homepage) + utilities | 2 |
 | flux-system | Flux GitOps operator + admission guardrails | 2 |
-| backup | External backup integrations | 1 |
+| backup | External backup integrations | 3 |
 | my-software-development | Custom app development | 3 |
 | my-software-production | Custom app production | 4 |
 | my-software-showcase | Portfolio showcase (containerized legacy client apps) | 15 |

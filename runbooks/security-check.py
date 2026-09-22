@@ -256,17 +256,136 @@ def _scope() -> str:
 # check-all-versions.py's classifier; the two must not drift.
 _TRANSIENT_HTTP = {408, 425, 429, 403}
 
+# Section 6 attack-pattern query budget (F-510bd6d5). The query ORs nine
+# leading-wildcard clauses over `body.text` (a keyword field), which cannot use
+# the index: replayed by hand through the same inside-pod curl path it returned
+# HTTP 200 after 51.3s. ElasticPortForward.query() defaulted to timeout=15 and
+# _exec_search() caps the subprocess at timeout + _EXEC_SEARCH_GRACE_S = 40s,
+# so all three attempts were killed and a HEALTHY indexer (section 7 succeeded
+# against the same index in the same run) was recorded as "Elasticsearch
+# unavailable" — which set the whole security section INCOMPLETE and vetoed
+# auto-close for findings this run had proven fixed. The budget must clear the
+# measured latency with headroom; a timeout is reported as NOT MEASURED, never
+# as "no attacks". Pinned by runbooks/tests/test-s6-attack-query-timeout.py.
+S6_ATTACK_QUERY_TIMEOUT_S = 60
+S6_ATTACK_QUERY_MEASURED_S = 51.3   # the replayed latency the budget must beat
+
 # Operator decision 2026-08-28: UniFi threat management (IDS/IPS) is DISABLED
 # on the controller — it cost too much gateway performance. With the feature
-# off, the alarm feed has nothing to serve (`stat alarm` 404s/empty), so
-# probing it every sweep recorded a DEGRADED coverage gap that kept the whole
-# security section INCOMPLETE and permanently vetoed stale-finding auto-close
-# — for a signal that is deliberately absent. Report N/A instead of probing.
-# Flip to True if IDS/IPS is ever re-enabled (compensating signals that still
-# run while off: evil-twin rogue-AP scan, admin-access audit, Wazuh SIEM
-# slices, firewall posture). Closes the F-e545073a loop — the 404 was the
-# disabled feature, not a moved endpoint.
+# off, the alarm feed has nothing to serve (`stat alarm` 404s), and probing it
+# every sweep used to record a DEGRADED coverage gap that kept the whole
+# security section INCOMPLETE — for a signal that is deliberately absent.
+#
+# This constant is the DECLARED state, and it gates NOTHING (F-64d54ab1). The
+# section probes the alarm feed LIVE every run and classifies the answer
+# (_classify_unifi_alarm_probe): a 404 is N/A — the disabled feature, not a
+# moved endpoint (F-e545073a) — and every other failure is NOT MEASURED. The
+# declaration is only compared against the live answer, so re-enabling IDS/IPS
+# on the controller surfaces as "feed live but declared disabled" (and the
+# alarms are read) instead of a green line printed from a stale constant;
+# disabling it while this says True surfaces as the reverse drift. Update it
+# when the operator decision changes. Compensating signals that run either
+# way: evil-twin rogue-AP scan, admin-access audit, Wazuh SIEM slices,
+# firewall posture. Pinned by runbooks/tests/test-unifi-ips-live-probe.py.
 UNIFI_IPS_ENABLED = False
+
+_UNIFI_404_RE = re.compile(r"\b404\b|resource not found", re.I)
+_UNIFI_ALARM_CMD = "unifictl local stat alarm -o json"
+
+
+def _classify_unifi_alarm_probe(rc: int, out: str, err: str) -> tuple[str, list | None, str]:
+    """Classify one `unifictl local stat alarm -o json` attempt.
+
+    Returns (state, alarms, detail), state one of:
+      "measured"   — the feed answered; `alarms` is the (possibly empty) list
+      "n/a"        — HTTP 404: the controller serves no alarm feed, which is
+                     what threat management being DISABLED looks like — a
+                     deliberate absence, not a coverage gap
+      "unmeasured" — anything else: timeout, auth blip, empty or unparsable
+                     output, a non-404 error. The caller records DEGRADED.
+
+    The 404 test is on the ERROR TEXT, deliberately: unifictl exits 1 for a
+    404 and for a timeout alike, and only the former is N/A. `2>/dev/null`
+    (what the generic _unifi_json helper does) throws exactly that
+    distinction away, which is why this probe does not use it. rc alone can
+    never classify as "n/a", so a probe that fails for any other reason can
+    never read as "IPS is on and clean".
+    """
+    if rc == 0:
+        if not (out or "").strip():
+            return "unmeasured", None, "exit 0 with empty output"
+        try:
+            doc = json.loads(out)
+        except Exception as e:  # noqa: BLE001
+            return "unmeasured", None, f"unparsable JSON: {type(e).__name__}"
+        alarms = doc.get("data", doc) if isinstance(doc, dict) else doc
+        if not isinstance(alarms, list):
+            return "unmeasured", None, f"unexpected JSON shape: {type(alarms).__name__}"
+        return "measured", alarms, ""
+    if _UNIFI_404_RE.search(err or ""):
+        return "n/a", None, "HTTP 404 — the controller serves no alarm feed (threat management disabled)"
+    tail = [l for l in (err or "").strip().splitlines() if l.strip()]
+    return "unmeasured", None, (tail[0] if tail else f"exit {rc} with no error text")[:160]
+
+
+def _probe_unifi_ips_alarms(retries: int = 2, backoff: float = 2.0) -> tuple[str, list | None, str]:
+    """Live probe of the controller's IPS/IDS alarm feed (F-64d54ab1).
+
+    Retries only the transient class (auth blip / empty / timeout); a 404 is
+    an answer and is never retried. Returns what _classify_unifi_alarm_probe
+    returns, with the detail redacted for the report.
+    """
+    state, alarms, detail = _classify_unifi_alarm_probe(*run_cmd(_UNIFI_ALARM_CMD, timeout=15))
+    for _ in range(retries):
+        if state != "unmeasured":
+            break
+        time.sleep(backoff)
+        state, alarms, detail = _classify_unifi_alarm_probe(*run_cmd(_UNIFI_ALARM_CMD, timeout=15))
+    return state, alarms, redact(detail)
+
+
+def _s11_ips_alarms(f: "Findings", lines: list[str], probe=None) -> None:
+    """IPS/IDS alarm sub-check of the UniFi section, driven by the LIVE probe.
+
+    `probe` is injectable for tests; production passes nothing.
+    """
+    state, alarms, detail = (probe or _probe_unifi_ips_alarms)()
+    if state == "unmeasured":
+        DEGRADED.record(_scope(), "UniFi IPS/IDS alarm feed (`stat alarm`)", detail)
+        cprint(C.YELLOW, f"  🟡 IPS/IDS alarm feed NOT MEASURED — probe failed for a "
+                         f"reason other than 404 ({detail})")
+        lines.append(f"IPS/IDS alarms: NOT MEASURED — probe failed ({detail}); not a "
+                     f"404, so this is a coverage gap, not a disabled feature\n")
+        return
+    if state == "n/a":
+        if UNIFI_IPS_ENABLED:
+            f.add(WARNING, "UniFi IPS/IDS is declared ENABLED in security-check.py "
+                           "(UNIFI_IPS_ENABLED) but the controller serves no alarm feed "
+                           "(404) — declaration drift: update it or re-enable threat management")
+            cprint(C.YELLOW, "  🟡 IPS/IDS feed absent (404) but declared enabled — declaration drift")
+        cprint(C.GREEN, "  🟢 IPS/IDS alarm feed absent (404) — threat management disabled "
+                        "on the controller (operator decision 2026-08-28, performance); "
+                        "N/A, not a gap — probed live, not assumed")
+        lines.append("IPS/IDS alarms: N/A — controller serves no alarm feed (404): "
+                     "threat management disabled by operator decision (2026-08-28, "
+                     "performance). Probed live this run, not assumed from a constant.\n")
+        return
+    # measured: the feed is live
+    if not UNIFI_IPS_ENABLED:
+        f.add(WARNING, "UniFi IPS/IDS alarm feed is LIVE but security-check.py declares "
+                       "it disabled (UNIFI_IPS_ENABLED=False, operator decision "
+                       "2026-08-28) — threat management was re-enabled on the controller; "
+                       "confirm the performance trade-off and update the declaration")
+        cprint(C.YELLOW, "  🟡 IPS/IDS feed live but declared disabled — declaration drift")
+    if alarms:
+        for a in alarms[:5]:
+            msg = (str(a.get("msg") or a.get("key") or a) if isinstance(a, dict) else str(a))[:120]
+            f.add(CRITICAL, f"UniFi IPS/IDS alarm: `{msg}`")
+            cprint(C.RED, f"  🔴 IPS/IDS alarm: {msg[:80]}")
+        lines.append(f"IPS/IDS alarms (active): **{len(alarms)}** (feed live)\n")
+    else:
+        cprint(C.GREEN, "  🟢 No active IPS/IDS alarms (feed live, 0 entries)")
+        lines.append("IPS/IDS alarms (active): **0** (feed live)\n")
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -582,12 +701,30 @@ def _indexer_name(index: str) -> str:
     return "Wazuh indexer" if index.startswith("wazuh") else "Elasticsearch"
 
 
+# Grace added on top of the query `timeout` before the curl subprocess is
+# killed. The effective wall-clock cap is therefore `_search_cap_seconds()`,
+# and a query slower than THAT is killed on every attempt — reported below as
+# a latency failure, distinct from an unreachable indexer (F-510bd6d5).
+_EXEC_SEARCH_GRACE_S = 25
+
+
+def _search_cap_seconds(timeout: int) -> int:
+    """Wall-clock cap _exec_search enforces for a query with `timeout`."""
+    return timeout + _EXEC_SEARCH_GRACE_S
+
+
 def _exec_search(ns: str, pod: str, container: str, userpass: str | None,
                  index: str, body: dict, timeout: int) -> dict | None:
     """Run an _search against the indexer from inside its own pod.
 
     JSON body is piped to curl via stdin (`-d @-`) so there's no shell
     quoting of the query. Returns parsed JSON, or None on any failure.
+
+    A failure is recorded as DEGRADED in one of two shapes, because they call
+    for opposite responses: three timeouts mean the QUERY is slower than the
+    client cap (raise the budget or cheapen the query — the indexer may be
+    perfectly healthy); anything else means the indexer did not answer.
+    Conflating them labelled a slow-but-healthy Elasticsearch "unavailable".
     """
     if not userpass or not pod:
         DEGRADED.record(_scope(), _indexer_name(index),
@@ -599,18 +736,33 @@ def _exec_search(ns: str, pod: str, container: str, userpass: str | None,
         "curl", "-sk", "-u", userpass, "-H", "Content-Type: application/json",
         f"https://localhost:9200/{index}/_search", "-d", "@-",
     ]
+    cap = _search_cap_seconds(timeout)
+    last = "no response"
+    timed_out = 0
     for attempt in range(3):
         try:
             p = subprocess.run(cmd, input=data, capture_output=True,
-                               text=True, timeout=timeout + 25)
+                               text=True, timeout=cap)
             if p.returncode == 0 and p.stdout.strip():
                 return json.loads(p.stdout)
-        except Exception:
-            pass
+            last = (f"rc={p.returncode}, "
+                    f"{'empty' if not p.stdout.strip() else 'unparsable'} stdout")
+        except subprocess.TimeoutExpired:
+            timed_out += 1
+            last = f"killed at the {cap}s client cap"
+        except Exception as e:  # noqa: BLE001
+            last = type(e).__name__
         if attempt < 2:
             time.sleep(2)
-    DEGRADED.record(_scope(), _indexer_name(index),
-                    f"_search against {index} failed on all 3 attempts")
+    if timed_out == 3:
+        DEGRADED.record(_scope(), f"{_indexer_name(index)} _search completion",
+                        f"query against {index} exceeded the {cap}s client cap on "
+                        f"all 3 attempts — latency, not availability: the indexer "
+                        f"may be healthy and the query slower than its budget")
+    else:
+        DEGRADED.record(_scope(), _indexer_name(index),
+                        f"_search against {index} failed on all 3 attempts "
+                        f"(last: {last})")
     return None
 
 
@@ -3480,10 +3632,17 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
         "aggs": {"by_pod": {"terms": {"field": "resource.attributes.k8s.pod.name", "size": 10}}},
     }
 
-    data = es.query(body)
+    # Budget raised above the measured latency (F-510bd6d5): with the default
+    # 15s the nine-wildcard query was killed at 40s on every attempt while the
+    # indexer was healthy. _exec_search records the timeout-vs-unreachable
+    # distinction; here a None is NOT MEASURED — never "no attacks".
+    data = es.query(body, timeout=S6_ATTACK_QUERY_TIMEOUT_S)
     if data is None:
-        f.add(WARNING, "Elasticsearch unavailable — skipping attack pattern check")
-        cprint(C.YELLOW, "  🟡 Elasticsearch query failed")
+        f.add(WARNING, "Attack-pattern query did not complete (timed out or indexer "
+                       "unreachable — see the DEGRADED line) — attack patterns NOT "
+                       "MEASURED this run; a zero here would be a blind detector, "
+                       "not a clean ingress")
+        cprint(C.YELLOW, "  🟡 attack-pattern query did not complete — NOT MEASURED")
         return f.worst(), f, f.markdown()
 
     total = data["hits"]["total"]["value"]
@@ -3635,6 +3794,13 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
                        "verify Envoy access logs are still reaching ES")
         cprint(C.YELLOW, "  🟡 0 Envoy 4xx events parsed in 24h — either a very "
                          "quiet window or access-log ingestion has stopped")
+    else:
+        # The query itself did not complete. Previously this fell through every
+        # branch above and printed NOTHING — an unmeasured sub-check that was
+        # indistinguishable from a clean one. _exec_search has recorded the
+        # DEGRADED reason; say it in the report too.
+        cprint(C.YELLOW, "  🟡 per-source-IP 4xx correlation NOT MEASURED — query did not complete")
+        lines.append("\nPer-source-IP 4xx correlation: NOT MEASURED (query did not complete).\n")
 
     return f.worst(), f, "\n".join(lines)
 
@@ -3975,6 +4141,114 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
     return f.worst(), f, "\n".join(lines)
 
 
+CERT_MANAGER_NAME_ANNOTATION = "cert-manager.io/certificate-name"
+
+
+def _orphaned_cert_secrets(secret_items: list, cert_items: list):
+    """Pair cert-manager-annotated TLS Secrets with the Certificates issuing them.
+
+    Returns (orphans, annotated_count, certificate_count), or None when either
+    population is EMPTY. This cluster always has at least the wildcard
+    Certificate and its Secret, so an empty side means the LISTING failed
+    (RBAC, CRD absent, a wrong field selector) — not that there is nothing to
+    check — and the caller must report NOT MEASURED, never "0 orphans".
+
+    An orphan is an annotated Secret with NO Certificate in the SAME namespace
+    whose spec.secretName names it. Namespace-scoped on purpose: the seven
+    2026-09-13 orphans (F-3201fe14) were leftovers of deleted Certificates,
+    and a same-named Certificate in another namespace does not renew them —
+    the wildcard exists as one Certificate per namespace precisely because
+    cert-manager does not cross that boundary.
+    """
+    annotated = [s for s in secret_items
+                 if CERT_MANAGER_NAME_ANNOTATION in
+                 ((s.get("metadata") or {}).get("annotations") or {})]
+    if not annotated or not cert_items:
+        return None
+    issued = {((c.get("metadata") or {}).get("namespace"),
+               (c.get("spec") or {}).get("secretName"))
+              for c in cert_items}
+    orphans = []
+    for s in annotated:
+        md = s.get("metadata") or {}
+        if (md.get("namespace"), md.get("name")) in issued:
+            continue
+        orphans.append({
+            "namespace": md.get("namespace", "?"),
+            "name": md.get("name", "?"),
+            "certificate_name": md["annotations"][CERT_MANAGER_NAME_ANNOTATION],
+            "tls_crt": (s.get("data") or {}).get("tls.crt", ""),
+        })
+    return orphans, len(annotated), len(cert_items)
+
+
+def _cert_not_after(tls_crt_b64: str) -> str:
+    """notAfter of a base64-encoded PEM via openssl, or "?" — never raises."""
+    try:
+        import base64
+        pem = base64.b64decode(tls_crt_b64 or "")
+        r = subprocess.run("openssl x509 -noout -enddate", input=pem, shell=True,
+                           capture_output=True, timeout=10)
+        m = re.search(rb"notAfter=(.*)", r.stdout)
+        return m.group(1).decode().strip() if m else "?"
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
+def _s9_orphaned_cert_secrets(f: "Findings", lines: list[str],
+                              tls_items, cert_items, domain: str = "") -> None:
+    """Orphaned cert-manager TLS Secret detector (F-d4039dd2).
+
+    A Secret still carrying `cert-manager.io/certificate-name` after its
+    Certificate was deleted keeps serving until notAfter and then lapses with
+    nothing to renew it — the F-3201fe14 class, which was found by hand during
+    a maintenance window because nothing here looked. Pairing is done by
+    _orphaned_cert_secrets; this wrapper only reports.
+    """
+    dashed = domain.replace(".", "-") if domain else ""
+
+    def _safe(name: str) -> str:
+        return name.replace(dashed, "[DOMAIN]") if dashed else name
+
+    if tls_items is None or cert_items is None:
+        # kubectl_json already recorded WHICH listing failed as DEGRADED.
+        cprint(C.YELLOW, "  🟡 orphaned cert-manager Secret check NOT MEASURED (a listing failed)")
+        lines.append("Orphaned cert-manager TLS Secrets: NOT MEASURED — Secret or "
+                     "Certificate listing failed\n")
+        return
+    secrets = tls_items.get("items", []) if isinstance(tls_items, dict) else []
+    certs = cert_items.get("items", []) if isinstance(cert_items, dict) else []
+    res = _orphaned_cert_secrets(secrets, certs)
+    if res is None:
+        n_annot = sum(1 for s in secrets if CERT_MANAGER_NAME_ANNOTATION in
+                      ((s.get("metadata") or {}).get("annotations") or {}))
+        DEGRADED.record(_scope(), "cert-manager Secret<->Certificate pairing",
+                        f"empty population: {n_annot} annotated TLS Secrets, "
+                        f"{len(certs)} Certificates — the wildcard alone should give 1/1, "
+                        f"so a listing is broken")
+        cprint(C.YELLOW, f"  🟡 orphaned-Secret check NOT MEASURED — empty population "
+                         f"({n_annot} annotated Secrets, {len(certs)} Certificates)")
+        lines.append(f"Orphaned cert-manager TLS Secrets: NOT MEASURED — empty population "
+                     f"({n_annot} annotated Secrets, {len(certs)} Certificates)\n")
+        return
+    orphans, n_annot, n_cert = res
+    if orphans:
+        for o in orphans:
+            ref = _safe(f"{o['namespace']}/{o['name']}")
+            f.add(WARNING, f"Orphaned cert-manager TLS Secret `{ref}` — annotated with "
+                           f"certificate-name `{_safe(o['certificate_name'])}` but no "
+                           f"Certificate in `{o['namespace']}` issues it; it lapses "
+                           f"unrenewed at notAfter {_cert_not_after(o['tls_crt'])}")
+            cprint(C.YELLOW, f"  🟡 orphaned cert-manager Secret: {ref}")
+        lines.append(f"Orphaned cert-manager TLS Secrets: **{len(orphans)}** "
+                     f"(of {n_annot} annotated; {n_cert} Certificates)\n")
+    else:
+        cprint(C.GREEN, f"  🟢 No orphaned cert-manager TLS Secrets ({n_annot} annotated "
+                        f"<-> {n_cert} Certificates — control: both populations non-empty)")
+        lines.append(f"Orphaned cert-manager TLS Secrets: **0** ({n_annot} annotated "
+                     f"Secrets <-> {n_cert} Certificates)\n")
+
+
 def s9_certificates() -> tuple[str, Findings, str]:
     section_header(10, "Certificate Integrity")
     f = Findings()
@@ -4024,11 +4298,20 @@ def s9_certificates() -> tuple[str, Findings, str]:
         f.add(WARNING, "Could not retrieve wildcard TLS secret")
         cprint(C.YELLOW, "  🟡 Could not retrieve wildcard TLS secret")
 
-    # TLS secrets status
-    tls_secrets = kubectl("get secret -A --field-selector type=kubernetes.io/tls --no-headers 2>/dev/null")
-    tls_count = len([l for l in tls_secrets.splitlines() if l.strip()])
+    # TLS secrets status + orphaned cert-manager Secrets (F-d4039dd2). One
+    # JSON listing serves both; the old --no-headers count stays as the
+    # fallback so a JSON failure does not also lose the count.
+    tls_items = kubectl_json("get secret -A --field-selector type=kubernetes.io/tls")
+    cert_items = kubectl_json("get certificate -A")
+    if isinstance(tls_items, dict):
+        tls_count = len(tls_items.get("items", []))
+    else:
+        tls_secrets = kubectl("get secret -A --field-selector type=kubernetes.io/tls --no-headers 2>/dev/null")
+        tls_count = len([l for l in tls_secrets.splitlines() if l.strip()])
     lines.append(f"TLS secrets in cluster: {tls_count}\n")
     cprint(C.GREEN, f"  🟢 {tls_count} TLS secrets present")
+
+    _s9_orphaned_cert_secrets(f, lines, tls_items, cert_items, domain)
 
     return f.worst(), f, "\n".join(lines)
 
@@ -4516,25 +4799,10 @@ def s11_unifi() -> tuple[str, Findings, str]:
                             f"unparsable JSON: {type(e).__name__}")
             return None
 
-    # IPS/IDS alarms — active threat-management events
-    if not UNIFI_IPS_ENABLED:
-        # Feature disabled by operator (see UNIFI_IPS_ENABLED) — the feed is
-        # deliberately absent, so this is N/A, not a coverage gap.
-        cprint(C.GREEN, "  🟢 IPS/IDS disabled by operator decision (2026-08-28, performance) — alarm feed N/A")
-        lines.append("IPS/IDS alarms: N/A — threat management disabled by operator (performance, 2026-08-28)\n")
-        alarms = None
-    elif (alarms := _unifi_json("stat alarm")) is None:
-        cprint(C.YELLOW, "  🟡 Could not read UniFi IPS/IDS alarms (stat alarm)")
-        lines.append("IPS/IDS alarms: query failed\n")
-    elif alarms:
-        for a in alarms[:5]:
-            msg = str(a.get("msg") or a.get("key") or a)[:120]
-            f.add(CRITICAL, f"UniFi IPS/IDS alarm: `{msg}`")
-            cprint(C.RED, f"  🔴 IPS/IDS alarm: {msg[:80]}")
-        lines.append(f"IPS/IDS alarms (active): **{len(alarms)}**\n")
-    else:
-        cprint(C.GREEN, "  🟢 No active IPS/IDS alarms")
-        lines.append("IPS/IDS alarms (active): **0**\n")
+    # IPS/IDS alarms — probed LIVE and classified (F-64d54ab1); the
+    # UNIFI_IPS_ENABLED constant is only compared against the answer. See
+    # _s11_ips_alarms for the three outcomes (measured / n-a / unmeasured).
+    _s11_ips_alarms(f, lines)
 
     # Evil-twin rogue APs — a rogue broadcasting one of our own SSIDs
     rogues = _unifi_json("stat rogueap")
