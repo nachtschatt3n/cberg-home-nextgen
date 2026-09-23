@@ -33,7 +33,7 @@ conflicts_with: []
 capability_change: false
 rollback_class: git-revert
 status: awaiting-go   # DEFERRED 2026-09-19 sat-attended: AUTO-NIGHT but category config/AUTO-NIGHT is 0/2 clean supervised runs, so the first run must be supervised. go/no-go ingested, scoped sat-attended:2026-09-26.
-window: "sat-attended:2026-10-10"   # RESCOPED TWICE on 2026-09-19: off :2026-09-19 because that run was cron-fired/unattended (an approval on a closed window is a stranded GO), then off :2026-09-26 because media-audit(45m) + prometheus-crd-ownership(30m) + wazuh-2xx-edge-coverage(45m) = 120m overflows a 90m window. This is the lowest-priority of the three (risk low, observability improvement), so per the capacity rule it is the one that moves. :2026-10-03 was rejected too — it already holds 70m.
+window: "now:2026-09-23"   # ON-DEMAND NOW run 2026-09-23 (run-now.py stamp; was 'sat-attended:2026-10-10')
 premises:
   - id: audit-still-has-no-writable-mount
     why: >-

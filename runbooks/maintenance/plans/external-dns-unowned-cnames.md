@@ -146,7 +146,7 @@ status: vetted                        # VETTED 2026-09-23: plan-reviewer-agent v
                                       # same change together with the premise `min` fix.
                                       # Operator GO recorded for an attended on-demand run
                                       # on 2026-09-23 (soak premise passed 2026-09-22T17:03Z).
-window: "sat-attended:2026-10-03"     # see §2 for why deliberately NOT sooner.
+window: "now:2026-09-23"   # ON-DEMAND NOW run 2026-09-23 (run-now.py stamp; was 'sat-attended:2026-10-03')
                                       # Attended; empty slot; separated by a week
                                       # from wazuh-2xx-edge-coverage (09-26) so
                                       # the two external-path plans cannot share
