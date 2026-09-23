@@ -29,6 +29,23 @@ rollback_class: one-way    # DECLARED 2026-09-06. The plan's own risk note says
                           # superset-pg-decommission, which used one-way.
                           # Correctly stays HUMAN-GATED, and is awaiting-soak.
 status: awaiting-soak                 # do NOT run until the soak below is satisfied
+                                      # DEFERRED 2026-09-23 (attended on-demand run, operator
+                                      # asked for it): NOT executable under the window contract
+                                      # — declares NO premises (required since 2026-09-14) and
+                                      # awaiting-soak is refused by run-now.py. Live pre-checks
+                                      # that day, read-only: all 6 authentik server/worker pods
+                                      # AUTHENTIK_POSTGRESQL__HOST=authentik-pg; the 17.11 pod
+                                      # has 0 client backends and its newest user last_login is
+                                      # 2026-08-19 (pre-cutover); cronjob-channels-cleanup targets
+                                      # authentik-pg; PV data-authentik-postgresql-0 Retain,
+                                      # longhorn-static, no subdir key, daily backups Completed
+                                      # through 2026-09-23; authentik-pg-data has its own daily
+                                      # backups (gate 2 met); AR-080 enabled (gate 4 met). The
+                                      # operator's ask also DELETES the PVC in the same step,
+                                      # while step 3 below keeps it one more backup cycle — the
+                                      # planner must reconcile that scope and encode gates 1-4
+                                      # as premises before a reviewer vets it. go_no_go issue
+                                      # ingested (defer,deny) naming `no premises declared`.
 window: null
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
