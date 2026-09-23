@@ -41,6 +41,6 @@ uv = "latest"
 # 2027.1.0, so use the `github:` backend. Renovate does not read .mise.toml in
 # this repo -- bump by hand.
 "github:home-operations/flate" = "0.6.5"
-"cargo:unifictl" = "5.6.0"
+"cargo:unifictl" = "5.7.0"
 "cargo:zigbeectl" = "0.1.2"
 talhelper = "3.1.11"
