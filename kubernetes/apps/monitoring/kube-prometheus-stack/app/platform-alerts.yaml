@@ -104,7 +104,15 @@ spec:
           # Counts DISTINCT sending nodes, not total lines. A per-node absent()
           # cannot work here: the label value only exists while that node sends,
           # so the series does not go to zero, it disappears.
-          expr: count(count by (net_peer_ip) (talos_kernel_kmsg_lines_total)) < 3
+          #
+          # Presence is read over a 24h RANGE, not the instant vector
+          # (F-02e86261, 2026-09-23): after a collector restart a node's series
+          # exists only once it has sent a line, and one node writes ~7 kernel
+          # lines a day against ~600/h on the others, so the instant form fired
+          # for most of a day and flapped exactly when that node logged. A node
+          # still counts while it has ANY sample in the last 24h; a node that
+          # has sent nothing for a full day is the real signal.
+          expr: count(count by (net_peer_ip) (max_over_time(talos_kernel_kmsg_lines_total[24h]))) < 3
           for: 30m
           labels:
             severity: warning
