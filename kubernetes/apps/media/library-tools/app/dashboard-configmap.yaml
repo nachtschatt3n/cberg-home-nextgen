@@ -100,8 +100,73 @@ data:
         return k8s_post(f"/apis/batch/v1/namespaces/{namespace}/jobs", body)
 
     # ---- Latest audit summary ----
+    # Newest PERSISTED run first (sweep_history.media_audit_runs, written by the
+    # audit Job's `persist` container), pod logs only as the fallback. Pod
+    # stdout was the audit's only artifact until 2026-09-23, and a node reboot
+    # garbage-collected it on 2026-09-06 (plan media-audit-durable-output).
+    # pg8000 is pip-installed at container start (dashboard-deployment.yaml);
+    # if that install, the secret or the DB is unavailable this degrades to
+    # exactly the old behaviour, and says so once per request in the pod log.
+    READER_DSN = os.environ.get("READER_DSN", "")
+
+    def pg_connect(dsn):
+        """Open a pg8000 connection from a libpq-style DSN URL (pg8000 takes kwargs)."""
+        import pg8000.native  # installed at container start; ImportError => fallback
+        u = urllib.parse.urlsplit(dsn)
+        return pg8000.native.Connection(
+            urllib.parse.unquote(u.username or ""),
+            host=u.hostname,
+            port=u.port or 5432,
+            database=u.path.lstrip("/"),
+            password=urllib.parse.unquote(u.password or ""),
+            timeout=5,
+        )
+
+    def db_latest_audit():
+        """Newest media_audit_runs row as (ran_at, result dict), or None."""
+        if not READER_DSN:
+            return None
+        try:
+            conn = pg_connect(READER_DSN)
+            try:
+                rows = conn.run("SELECT ran_at, result FROM media_audit_runs "
+                                "ORDER BY ran_at DESC, id DESC LIMIT 1")
+            finally:
+                conn.close()
+        except Exception as e:
+            print(f"audit summary: db path unavailable ({type(e).__name__}); "
+                  "falling back to pod logs", flush=True)
+            return None
+        if not rows:
+            return None
+        ran_at, result = rows[0]
+        if isinstance(result, str):
+            result = json.loads(result)
+        return ran_at, result
+
+    def render_audit_result(ran_at, result):
+        """Render a persisted AUDIT_RESULT_JSON payload in the same shape as the
+        audit's own '## Summary' block, so the page reads the same from either source."""
+        lines = ["## Summary"]
+        for r in result.get("sections") or []:
+            lines.append(f"- {r.get('section')}: " + ", ".join(
+                f"{k}={v}" for k, v in r.items() if k != "section"))
+        lines.append("")
+        lines.append("Worst compliance metric (SOP-tracked thresholds only): "
+                     f"{result.get('worst_pct')}%")
+        lines.append("")
+        lines.append(f"(source: sweep_history.media_audit_runs, run {result.get('ran_at') or ran_at})")
+        return "\n".join(lines)
+
     def latest_audit_summary():
-        """Read the latest audit Job's pod logs and extract the summary block."""
+        """Newest persisted audit result; falls back to the latest audit Job's pod logs."""
+        persisted = db_latest_audit()
+        if persisted:
+            return render_audit_result(*persisted)
+        return latest_audit_from_pod_logs()
+
+    def latest_audit_from_pod_logs():
+        """Fallback: read the latest audit Job's pod logs and extract the summary block."""
         jobs = [j for j in list_jobs("media")
                 if j["metadata"]["name"].startswith("media-library-audit")]
         if not jobs:
@@ -113,7 +178,10 @@ data:
             if not pods.get("items"):
                 return f"job {job_name}: no pod yet"
             pod_name = pods["items"][0]["metadata"]["name"]
-            log_url = f"/api/v1/namespaces/media/pods/{pod_name}/log?tailLines=80"
+            # container= is required: the audit pod also has the `persist`
+            # container since 2026-09-23 and the API refuses an unqualified
+            # log read on a multi-container pod.
+            log_url = f"/api/v1/namespaces/media/pods/{pod_name}/log?container=audit&tailLines=80"
             req = urllib.request.Request(K8S_HOST + log_url, headers=AUTH_HEADERS)
             with urllib.request.urlopen(req, context=SSL_CTX, timeout=10) as r:
                 text = r.read().decode("utf-8", errors="replace")

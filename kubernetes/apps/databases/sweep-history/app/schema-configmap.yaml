@@ -312,3 +312,21 @@ data:
     );
     CREATE INDEX IF NOT EXISTS idx_secacc_category
       ON security_acceptances(category) WHERE enabled = true;
+
+    -- ─── schema v8: media_audit_runs ────────────────────────────────
+    -- One row per media-library-audit CronJob run (namespace media), written
+    -- by that Job's `persist` container as sweep_writer and read by
+    -- media-dashboard as sweep_reader. Added 2026-09-23 (plan
+    -- media-audit-durable-output): the audit's only artifact was pod stdout,
+    -- and a node reboot on 2026-09-06 garbage-collected the completed pod
+    -- before anyone had read it. `result` is the audit's AUDIT_RESULT_JSON
+    -- payload verbatim -- per-section counts and *_pct only, never a title.
+    -- Pure additive CREATE IF NOT EXISTS; nothing here can fail on existing
+    -- data. Both roles get access from the ALL TABLES grants in bootstrap.sh.
+    CREATE TABLE IF NOT EXISTS media_audit_runs (
+      id      BIGSERIAL PRIMARY KEY,
+      ran_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      result  JSONB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_media_audit_runs_ran_at
+      ON media_audit_runs (ran_at DESC);

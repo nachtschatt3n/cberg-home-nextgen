@@ -159,8 +159,8 @@
 | jellyfin | Open-source media server | External | Media |
 | plex | Plex media server | Internal | Media |
 | makemkv | Blu-ray/DVD ripping utility | Internal | Media |
-| library-tools | Audit + organize + sidecar + episode-sidecar + rescan + cleanup + per-item-refresh + plex-fs-classifier CronJobs for the shared media library; ConfigMap-of-Python pattern. All are suspended and invoked on demand. `media-episode-sidecar` (`episode_sidecar.py`, added 2026-08-15) writes per-EPISODE `.nfo` for one show, dry-run by default and never deletes — it is **not** `media-sidecar`, which unlinks every `.nfo` in its target folder first. Owned by the `media-manager` sub-agent; standard in `docs/sops/media-library-standards.md`. | None | — |
-| media-dashboard | Internal status dashboard with live intake queue + recent jobs + trigger buttons (audit, rescan, TA bridge). Part of `library-tools`. | Internal | Media |
+| library-tools | Audit + organize + sidecar + episode-sidecar + rescan + cleanup + per-item-refresh + plex-fs-classifier CronJobs for the shared media library; ConfigMap-of-Python pattern. All are suspended and invoked on demand. `media-episode-sidecar` (`episode_sidecar.py`, added 2026-08-15) writes per-EPISODE `.nfo` for one show, dry-run by default and never deletes — it is **not** `media-sidecar`, which unlinks every `.nfo` in its target folder first. Owned by the `media-manager` sub-agent; standard in `docs/sops/media-library-standards.md`. Since 2026-09-23 `media-library-audit` persists each run's `AUDIT_RESULT_JSON` line into `sweep_history.media_audit_runs` via a `persist` psql container (secret `media-audit-db`, copies of the sweep-history DSNs). | None | — |
+| media-dashboard | Internal status dashboard with live intake queue + recent jobs + trigger buttons (audit, rescan, TA bridge). Part of `library-tools`. Audit summary is read from `sweep_history.media_audit_runs` (pg8000 pip-installed at start, `READER_DSN` from secret `media-audit-db`), with the audit pod's logs as fallback. | Internal | Media |
 
 ---
 

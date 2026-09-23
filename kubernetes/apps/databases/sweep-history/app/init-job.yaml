@@ -66,10 +66,16 @@
 #         AUTO-*. Category is DERIVED as '<kind>/<execution_class>'; keying on
 #         plan_id could never accumulate because plans are retired after they
 #         execute.
+#   v8  — media_audit_runs table (plan media-audit-durable-output): one JSONB
+#         row per media-library-audit run, written from the media namespace as
+#         sweep_writer, read by media-dashboard as sweep_reader. Pure additive
+#         CREATE TABLE IF NOT EXISTS + one index; cannot fail on existing
+#         data. The rename re-runs the idempotent bootstrap, whose ALL-TABLES
+#         grants are what give both roles access to the new table.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v7  # v6->v7: plan_executions table. Rename forces recreate (Job spec immutable).
+  name: sweep-history-init-v8  # v7->v8: media_audit_runs table. Rename forces recreate (Job spec immutable).
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history

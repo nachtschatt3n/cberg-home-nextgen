@@ -372,7 +372,9 @@ data:
     counts to stdout. Does NOT name individual items — only counts and
     anonymous identifiers (`item #1`, `item #2`, ...).
     """
+    import json
     import sys
+    import time
     from pathlib import Path
     from xml.etree import ElementTree as ET
     sys.path.insert(0, "/app")
@@ -668,6 +670,23 @@ data:
                 if k in TRACKED_PCT_KEYS and isinstance(v, (int, float)):
                     worst = min(worst, v)
         log(f"\nWorst compliance metric (SOP-tracked thresholds only): {worst}%")
+        # Final line: compact JSON mirroring metadata_coverage.py's
+        # COVERAGE_RESULT_JSON. `sections` carries the exact per-section dicts
+        # printed in the Summary above (counts and *_pct only -- never a
+        # title), `worst_pct` the headline. The audit CronJob's `persist`
+        # container greps this line out of the tee'd log and INSERTs it into
+        # sweep_history.media_audit_runs; the dashboard renders the newest row
+        # and only falls back to pod logs when the table is unreachable. Pod
+        # stdout alone was GC'd with the pod on 2026-09-06 (plan
+        # media-audit-durable-output). Keep it LAST and on ONE line.
+        now = time.time()
+        result = {
+            "timestamp": int(now),
+            "ran_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+            "sections": results,
+            "worst_pct": worst,
+        }
+        print("AUDIT_RESULT_JSON " + json.dumps(result, separators=(',', ':')), flush=True)
         # Always exit 0 — the audit ran successfully if it walked the share.
         # Low compliance is a number, not a Job failure; alerting on it
         # belongs to a metrics exporter, not a CronJob exit code.

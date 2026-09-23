@@ -1,4 +1,25 @@
 ---
+# Daily on-disk compliance audit of the shared media library (audit.py).
+#
+# Two containers since 2026-09-23 (plan media-audit-durable-output): pod
+# stdout was the audit's ONLY artifact, and on 2026-09-06 a node reboot
+# garbage-collected the completed pod before anyone had read it. Now:
+#
+#   audit    python:slim; mounts the share READ-ONLY; holds no DB credential.
+#            Runs audit.py with stdout tee'd to the shared emptyDir (/out) and
+#            drops /out/done whatever the exit status.
+#   persist  postgres:alpine (psql only; same digest as the sweep-heartbeat
+#            CronJob); holds the sweep_writer DSN; never mounts the share.
+#            Waits for /out/done, greps the final `AUDIT_RESULT_JSON {...}`
+#            line and INSERTs it into sweep_history.media_audit_runs. Exits 1
+#            -- failing the Job loudly -- if the line is missing or the INSERT
+#            fails: a silently unpersisted run is the state this exists to end.
+#
+# Why not a shared PVC or the share itself: see the plan's constraints (the
+# Longhorn RWO Multi-Attach trap; the share is user data under audit). The
+# emptyDir lives and dies with this one pod, which is exactly the scope needed.
+#
+# $$ = Flux postBuild envsubst escaping (cluster-wide substituteFrom).
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -13,6 +34,10 @@ spec:
     spec:
       backoffLimit: 0
       template:
+        metadata:
+          annotations:
+            # `kubectl logs job/...` means the AUDIT's output, not the writer's.
+            kubectl.kubernetes.io/default-container: audit
         spec:
           securityContext:
             runAsUser: 1000
@@ -22,7 +47,14 @@ spec:
           containers:
             - name: audit
               image: python:3.14.7-slim
-              command: ["python", "/app/audit.py"]
+              command: ["bash", "-c"]
+              args:
+                - |
+                  set -o pipefail
+                  python /app/audit.py 2>&1 | tee /out/audit.log
+                  rc=$$?
+                  touch /out/done
+                  exit $$rc
               env:
                 - name: MEDIA_ROOT
                   value: "/data/data"
@@ -32,12 +64,69 @@ spec:
                 - name: media
                   mountPath: /data
                   readOnly: true
+                - name: out
+                  mountPath: /out
               resources:
                 requests:
                   cpu: 100m
                   memory: 256Mi
                 limits:
                   memory: 1Gi
+            - name: persist
+              image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+              env:
+                - name: WRITER_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-audit-db
+                      key: WRITER_DSN
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  # The audit itself takes ~30s (26s on 2026-09-23); 2h is a
+                  # hang guard so an OOM-killed audit cannot leave this pod
+                  # Running forever and Forbid the next day's schedule.
+                  n=0
+                  while [ ! -f /out/done ]; do
+                    n=$$((n + 1))
+                    if [ "$$n" -gt 1440 ]; then
+                      echo "FATAL: audit container did not finish within 2h; nothing persisted" >&2
+                      exit 1
+                    fi
+                    sleep 5
+                  done
+                  line=$$(grep '^AUDIT_RESULT_JSON ' /out/audit.log | tail -n 1 || true)
+                  if [ -z "$$line" ]; then
+                    echo "FATAL: no AUDIT_RESULT_JSON line in the audit output (audit failed?); nothing persisted" >&2
+                    exit 1
+                  fi
+                  json=$${line#AUDIT_RESULT_JSON }
+                  # psql only interpolates :'var' in a script fed via stdin/-f,
+                  # never in -c (init-job v1a history). :'result' quotes the
+                  # value as a SQL literal, so no shell escaping is needed.
+                  psql -X -v ON_ERROR_STOP=1 -v result="$$json" "$$WRITER_DSN" <<'SQL'
+                  INSERT INTO media_audit_runs (result) VALUES (:'result'::jsonb);
+                  SQL
+                  echo "persisted to sweep_history.media_audit_runs:"
+                  echo "$$line"
+              volumeMounts:
+                - name: out
+                  mountPath: /out
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi
+              securityContext:
+                runAsUser: 999    # the image's postgres uid, as sweep-heartbeat runs
+                runAsGroup: 999
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
           volumes:
             - name: scripts
               configMap:
@@ -45,3 +134,6 @@ spec:
             - name: media
               persistentVolumeClaim:
                 claimName: plex-media-smb   # read-only mount; uses Plex's PVC
+            - name: out
+              emptyDir:
+                sizeLimit: 16Mi

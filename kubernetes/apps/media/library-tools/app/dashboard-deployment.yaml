@@ -26,12 +26,31 @@ spec:
       containers:
         - name: dashboard
           image: python:3.14.7-slim
-          command: ["python", "/app/dashboard.py"]
+          # pg8000 (pure-Python Postgres driver) is installed at start into the
+          # /pylib emptyDir so dashboard.py can read the persisted audit runs in
+          # sweep_history.media_audit_runs -- the runtime-pip house pattern
+          # (ai/openclaw, ai/mcpo). A failed install is deliberately NOT fatal:
+          # dashboard.py then falls back to the audit pod's logs, i.e. the
+          # pre-2026-09-23 behaviour (plan media-audit-durable-output).
+          command: ["bash", "-c"]
+          args:
+            - |
+              if ! timeout 90 python -m pip install --quiet --no-cache-dir --target /pylib pg8000==1.31.5; then
+                echo "WARN: pip install pg8000 failed; audit summary falls back to pod logs" >&2
+              fi
+              export PYTHONPATH=/pylib
+              exec python /app/dashboard.py
           env:
             - name: INTAKE_ROOT
               value: "/intake"
             - name: PORT
               value: "8080"
+            - name: READER_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: media-audit-db
+                  key: READER_DSN
+                  optional: true   # read path only; absent => pod-log fallback
           ports:
             - name: http
               containerPort: 8080
@@ -41,13 +60,15 @@ spec:
             - name: intake
               mountPath: /intake
               readOnly: true
+            - name: pylib
+              mountPath: /pylib
           readinessProbe:
             httpGet: { path: /healthz, port: http }
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10   # pip install runs first (a few seconds)
             periodSeconds: 10
           livenessProbe:
             httpGet: { path: /healthz, port: http }
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60   # > the 90s pip timeout minus one period
             periodSeconds: 30
           resources:
             requests:
@@ -62,3 +83,6 @@ spec:
         - name: intake
           persistentVolumeClaim:
             claimName: jdownloader-intake
+        - name: pylib
+          emptyDir:
+            sizeLimit: 64Mi
