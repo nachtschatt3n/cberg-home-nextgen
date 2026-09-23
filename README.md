@@ -704,7 +704,7 @@ Since 2026-07-31 the `daily-operation` sweep is **read-only** — it only
 Changes are applied by the maintenance-window pipeline:
 
 - **Safe updates** (patch/minor, not deny-listed, no breaking-change signal,
-  green flux-local CI) are applied at **Step 0 of EVERY window** by the
+  green `Flate Render Gate` CI) are applied at **Step 0 of EVERY window** by the
   `maintenance-window-agent` — `auto-update.py --apply` plus `coverage.py` for
   safe updates with no PR — then Flux-reconciled, health-gated, and
   **auto-reverted** on regression. A window run is therefore never scoped to

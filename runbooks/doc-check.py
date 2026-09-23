@@ -717,7 +717,9 @@ def s2_network_docs() -> tuple[str, Findings, str]:
             cprint(C.YELLOW, f"  Skipping live SSID check ({detail})")
 
     # Check mDNS section
-    expected_mdns = ["Trusted", "Servers", "Trusted-Devices", "IoT", "k8s-network"]
+    # "Servers" (VLAN 10) was RETIRED 2026-06-07 and folded into VLAN 55; it must
+    # not be expected in the mDNS scope any more (F-7341cabf was that stale expectation).
+    expected_mdns = ["Trusted", "Trusted-Devices", "IoT", "k8s-network"]
     mdns_section = re.search(r'mDNS.*?(?=---|\Z)', content, re.DOTALL | re.IGNORECASE)
     if mdns_section:
         mdns_text = mdns_section.group()
