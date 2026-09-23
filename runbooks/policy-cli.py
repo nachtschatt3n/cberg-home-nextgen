@@ -388,11 +388,25 @@ def cmd_risk_add(args, dsn):
         print("  (see operator memory project_sweep_ar_version_drift; "
               "pass --allow-drift to override)", file=sys.stderr)
         return 2
+    anchor = getattr(args, "register_only", None)
+    if anchor is not None:
+        if anchor.strip().lower() == _CLEAR:
+            print(f"REFUSING: --register-only {_CLEAR} clears a pointer, and a new "
+                  f"AR has none to clear. Name what enforces it "
+                  f"(<file>:<SYMBOL> or {POSTURE_ANCHOR}).", file=sys.stderr)
+            return 2
+        problem = _anchor_problem(anchor)
+        if problem:
+            print(f"REFUSING: --register-only {problem}", file=sys.stderr)
+            return 2
+        anchor = anchor.strip()
     with _connect(dsn) as conn, conn.cursor() as cur:
         live = [h for h in _would_match(cur, args.description) if h[3]]
         # An AR that matches nothing is inert. Refuse by default rather than
-        # report success on a suppression that will never fire.
-        if not live and not args.allow_nomatch:
+        # report success on a suppression that will never fire. A register-only
+        # AR is enforced elsewhere and matches nothing BY DESIGN, so the anchor
+        # satisfies this gate on its own.
+        if not live and not args.allow_nomatch and anchor is None:
             print(f"REFUSING: {args.description!r} would suppress no open "
                   f"finding, so this AR is inert.", file=sys.stderr)
             print("  Preview with `policy-cli.py risk match --description ...`. "
@@ -413,18 +427,26 @@ def cmd_risk_add(args, dsn):
                   "--allow-broad if the breadth really is intended.",
                   file=sys.stderr)
             return 2
+        meta = {EXPIRY_KEY: expiry.isoformat()} if expiry else {}
+        if anchor:
+            meta.update({REGISTER_ONLY_KEY: True, ENFORCED_IN_KEY: anchor})
         cur.execute(
             "INSERT INTO accepted_risks "
             "(ar_id, severity, description, justification, metadata) "
             "VALUES (%s, %s, %s, %s, %s::jsonb) ON CONFLICT (ar_id) DO NOTHING",
             (args.ar_id, args.severity, args.description, args.justification,
-             json.dumps({EXPIRY_KEY: expiry.isoformat()} if expiry else {})),
+             json.dumps(meta)),
         )
         if cur.rowcount == 0:
             print(f"AR {args.ar_id} already exists — use `risk delete` first or rename")
             return 1
         conn.commit()
-        print(f"added {args.ar_id} — suppresses {len(live)} open finding(s)")
+        if anchor:
+            print(f"added {args.ar_id} — register-only, enforced by {anchor} "
+                  f"(suppresses {len(live)} open finding(s); a title match is "
+                  f"not expected)")
+        else:
+            print(f"added {args.ar_id} — suppresses {len(live)} open finding(s)")
 
 
 # An AR's `description` is used as a SUBSTRING needle against open finding
@@ -449,6 +471,94 @@ def _drift_warnings(desc: str) -> list:
     return out
 
 
+# ---- register-only acceptances (F-5c48a0fc) --------------------------------
+#
+# Not every AR is a needle. Some register entries are enforced SOMEWHERE ELSE:
+# a `security_acceptances` row that cites the AR (the ingress allowlist), an
+# exemption set coded into security-check.py (ACCEPTED_PRIVILEGED,
+# ACCEPTED_ROOT_UID), or an operator posture decision no detector exists for.
+# Their description is a heading the operator reads; it is never matched
+# against a finding title, BY DESIGN. `risk lint` used to read every one of
+# them as INERT — 21 of 22 INERT rows on 2026-09-22 — which buried the one row
+# that really was inert among twenty doing exactly what they should, and told
+# the operator to rewrite headings as needles. A register-only AR records
+# WHERE it is enforced (`metadata.enforced_in`) so the lint can say so.
+#
+# A `security_acceptances` citation is DERIVED from that table on every run,
+# never copied onto the AR: the row is the enforcement, and a copy of that
+# fact on the AR would be one more thing to drift (a disabled row anchors
+# nothing, and the derivation sees that; a copied flag would not).
+REGISTER_ONLY_KEY = "register_only"
+ENFORCED_IN_KEY = "enforced_in"
+POSTURE_ANCHOR = "register-only:posture"   # operator decision; no detector exists
+_CLEAR = "none"                            # `--register-only none`, like `--expires none`
+
+
+def _anchor_problem(anchor: str) -> str | None:
+    """Why `anchor` is not an acceptable `enforced_in` pointer, or None if it is.
+
+    Accepted forms:
+      register-only:posture    an operator decision nothing detects
+      <file>:<SYMBOL>          e.g. security-check.py:ACCEPTED_PRIVILEGED — the
+                               file must exist under runbooks/ (or the repo
+                               root) and SYMBOL must occur in it.
+
+    The symbol check is the point. A pointer to a set that was renamed or
+    deleted is the inert AR again, one indirection further away.
+    """
+    anchor = (anchor or "").strip()
+    if not anchor:
+        return "empty anchor"
+    if anchor == POSTURE_ANCHOR:
+        return None
+    path, sep, symbol = anchor.partition(":")
+    symbol = symbol.strip()
+    if not sep or not symbol or " " in path or "/" in symbol:
+        return (f"{anchor!r} — use `{POSTURE_ANCHOR}` or `<file>:<SYMBOL>` "
+                f"(e.g. security-check.py:ACCEPTED_PRIVILEGED)")
+    for base in (SCRIPT_DIR, SCRIPT_DIR.parent):
+        candidate = base / path
+        if candidate.is_file():
+            break
+    else:
+        return f"{path!r} not found under runbooks/ or the repo root"
+    if symbol not in candidate.read_text(encoding="utf-8", errors="replace"):
+        return (f"{symbol!r} does not occur in {path} — a pointer to nothing "
+                f"enforces nothing")
+    return None
+
+
+def register_only_anchors(ar_meta: dict, sec_rows: list) -> dict:
+    """ar_id -> human-readable anchor, for every AR enforced outside the
+    needle. Pure, so the derivation is testable without a database.
+
+    ar_meta:  {ar_id: metadata dict or None}   (accepted_risks.metadata)
+    sec_rows: [{id, category, ar_id}]           (ENABLED security_acceptances)
+
+    A metadata anchor needs BOTH keys: `register_only` without an
+    `enforced_in` pointer is not an anchor, it is a claim with no address, and
+    the AR stays INERT (the lint says why).
+    """
+    parts: dict[str, list[str]] = {}
+    cited: dict[str, dict[str, list]] = {}
+    for r in sec_rows:
+        ar = r.get("ar_id")
+        if not ar:
+            continue
+        cited.setdefault(ar, {}).setdefault(r.get("category") or "?", []).append(r.get("id"))
+    for ar, cats in cited.items():
+        for cat, ids in cats.items():
+            ids = sorted(i for i in ids if i is not None)
+            parts.setdefault(ar, []).append(
+                f"security_acceptances:{cat} (id {','.join(str(i) for i in ids)})")
+    for ar, meta in ar_meta.items():
+        meta = meta or {}
+        pointer = str(meta.get(ENFORCED_IN_KEY) or "").strip()
+        if meta.get(REGISTER_ONLY_KEY) in (True, "true") and pointer:
+            parts.setdefault(ar, []).append(f"{pointer} (metadata.{ENFORCED_IN_KEY})")
+    return {ar: " + ".join(v) for ar, v in parts.items()}
+
+
 def cmd_risk_edit(args, dsn):
     """Update an existing AR in place. This is the sanctioned way to make a
     description drift-stable without delete+re-add (which loses accepted_at).
@@ -459,6 +569,10 @@ def cmd_risk_edit(args, dsn):
         if val is not None:
             sets.append(f"{col} = %s")
             params.append(val)
+    # Every metadata change is folded into ONE `metadata = <expr>` assignment:
+    # Postgres rejects two assignments to the same column in one UPDATE, so
+    # `--expires` and `--register-only` in the same call must compose.
+    meta_expr, meta_params = "COALESCE(metadata, '{}'::jsonb)", []
     expiry = _UNSET = object()
     if getattr(args, "expires", None) is not None:
         try:
@@ -467,19 +581,36 @@ def cmd_risk_edit(args, dsn):
             print(f"REFUSING: {exc}", file=sys.stderr)
             return 2
         if expiry is None:
-            sets.append("metadata = COALESCE(metadata, '{}'::jsonb) - %s")
-            params.append(EXPIRY_KEY)
+            meta_expr += " - %s"
+            meta_params.append(EXPIRY_KEY)
         else:
             # `|| %s::jsonb` with ONE json-encoded parameter, the idiom
             # `risk add` already uses. NOT jsonb_build_object(%s, %s): psycopg
             # sends str with an unknown OID, so Postgres cannot resolve
             # jsonb_build_object("any","any") and the UPDATE fails with
             # IndeterminateDatatype — measured by EXPLAIN against the live DB.
-            sets.append("metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb")
-            params.append(json.dumps({EXPIRY_KEY: expiry.isoformat()}))
+            meta_expr += " || %s::jsonb"
+            meta_params.append(json.dumps({EXPIRY_KEY: expiry.isoformat()}))
+    anchor = getattr(args, "register_only", None)
+    clear_anchor = anchor is not None and anchor.strip().lower() == _CLEAR
+    if clear_anchor:
+        meta_expr += " - %s - %s"
+        meta_params.extend([REGISTER_ONLY_KEY, ENFORCED_IN_KEY])
+    elif anchor is not None:
+        problem = _anchor_problem(anchor)
+        if problem:
+            print(f"REFUSING: --register-only {problem}", file=sys.stderr)
+            return 2
+        anchor = anchor.strip()
+        meta_expr += " || %s::jsonb"
+        meta_params.append(json.dumps({REGISTER_ONLY_KEY: True, ENFORCED_IN_KEY: anchor}))
+    if meta_params:
+        sets.append(f"metadata = {meta_expr}")
+        params.extend(meta_params)
     if not sets:
         print("nothing to change — pass at least one of "
-              "--description/--severity/--justification/--expires", file=sys.stderr)
+              "--description/--severity/--justification/--expires/--register-only",
+              file=sys.stderr)
         return 1
     if args.description is not None:
         warn = _drift_warnings(args.description)
@@ -509,6 +640,12 @@ def cmd_risk_edit(args, dsn):
     if args.description is not None:
         print(f"  description: {before!r}")
         print(f"           -> {args.description!r}")
+    if clear_anchor:
+        print(f"  register-only: cleared — {args.ar_id} lints as a needle again")
+    elif anchor is not None:
+        print(f"  register-only: enforced by {anchor} — `risk lint` reports it "
+              f"REGISTER-ONLY instead of INERT while the description matches "
+              f"no title")
     return 0
 
 
@@ -540,7 +677,7 @@ def _near_miss(cur, desc: str):
 
 
 def lint_flag(open_matches: int, warn, miss, total_matches: int,
-              expired: bool = False) -> str:
+              expired: bool = False, register_only: "str | None" = None) -> str:
     """Classify one AR for `risk lint`. Pure, so the precedence is testable.
 
     Precedence matters and is not arbitrary:
@@ -549,6 +686,13 @@ def lint_flag(open_matches: int, warn, miss, total_matches: int,
                    is not "drifting" and not "at risk" — it never worked, and
                    telling the operator to watch it for future drift would
                    describe the wrong problem entirely.
+      REGISTER-ONLY sits exactly where INERT would: the description has never
+                   matched a title and is not meant to — `register_only` names
+                   what enforces the AR instead (a security_acceptances row, a
+                   coded exemption set, an operator posture decision). ONLY the
+                   never-matched case is reclassified: a register-only AR that
+                   does match a title is a needle whatever its metadata says,
+                   and lints as one (ok / at risk / DRIFTING NOW as usual).
       DRIFTING NOW beats `at risk`: the drift already happened, so a warning
                    that it MIGHT happen is stale news.
       at risk      the description still matches, but embeds something volatile.
@@ -564,7 +708,7 @@ def lint_flag(open_matches: int, warn, miss, total_matches: int,
         # made — renew-or-retire, now, whatever the needle does.
         return "EXPIRED"
     if open_matches == 0 and not miss and total_matches == 0:
-        return "INERT"
+        return "REGISTER-ONLY" if register_only else "INERT"
     if miss:
         return "DRIFTING NOW"
     if warn:
@@ -595,16 +739,40 @@ def cmd_risk_lint(args, dsn):
     An inert AR is not merely useless. The register is what the operator reads
     to answer "what have we accepted", so an inert entry is a claim that
     something is handled when nothing is.
+
+      REGISTER-ONLY — never matched a title either, and is not meant to: the
+                AR is enforced elsewhere and the line names where. Two anchors
+                count (F-5c48a0fc, 2026-09-23): an ENABLED security_acceptances
+                row citing the AR (derived from the table every run), or
+                metadata.register_only=true with an enforced_in pointer that
+                `risk add/edit --register-only <anchor>` records. Everything
+                else keeps INERT semantics; a register-only AR whose
+                description DOES match a title lints as a needle.
+
+    Before that class existed, 21 of the 22 INERT rows were enforced elsewhere
+    — the ingress allowlist, ACCEPTED_PRIVILEGED / ACCEPTED_ROOT_UID in
+    security-check.py, operator posture decisions — and the lint told the
+    operator to rewrite every one of them as a needle. The one genuinely inert
+    row was indistinguishable from the twenty that were doing their job.
     """
     with _connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT ar_id, description, justification, {EXPIRY_SELECT} AS expires_at "
+            f"SELECT ar_id, description, justification, {EXPIRY_SELECT} AS expires_at, "
+            f"       metadata "
             f"FROM accepted_risks "
             f"WHERE enabled = true AND status = 'accepted' ORDER BY ar_id")
-        ars = [(r["ar_id"], r["description"], r["justification"], r["expires_at"])
-               for r in cur.fetchall()]
+        ars = [(r["ar_id"], r["description"], r["justification"], r["expires_at"],
+                r["metadata"]) for r in cur.fetchall()]
+        # What anchors an AR outside the needle. Derived, not trusted: a
+        # DISABLED security_acceptances row enforces nothing, so it anchors
+        # nothing — filter here, where the derivation can see it.
+        cur.execute(
+            "SELECT id, category, ar_id FROM security_acceptances "
+            "WHERE enabled = true AND ar_id IS NOT NULL ORDER BY category, id")
+        anchors = register_only_anchors(
+            {ar_id: meta for ar_id, _d, _j, _e, meta in ars}, cur.fetchall())
         rows = []
-        for ar_id, desc, just, expires in ars:
+        for ar_id, desc, just, expires, meta in ars:
             expired = is_expired(expires)
             # The gate binds ONLY on a recorded date, so an AR whose deadline
             # lives in prose lapses unseen — which is exactly how AR-042 ran 14
@@ -629,13 +797,21 @@ def cmd_risk_lint(args, dsn):
                 inert = cur.fetchone()["n"] == 0
             if warn or miss or inert or expired or unrecorded or args.all:
                 rows.append((ar_id, desc, matches, warn, miss, inert,
-                             expired, expires, unrecorded))
+                             expired, expires, unrecorded, anchors.get(ar_id),
+                             meta))
     if not rows:
         print("all enabled AR descriptions are drift-stable and matching")
         return 0
     print(f"{'AR':<8} {'open-match':>10}  description")
-    for ar_id, desc, matches, warn, miss, inert, expired, expires, unrecorded in rows:
-        flag = lint_flag(matches, warn, miss, 0 if inert else 1, expired=expired)
+    attention = register_only = 0
+    for (ar_id, desc, matches, warn, miss, inert, expired, expires, unrecorded,
+         anchor, meta) in rows:
+        flag = lint_flag(matches, warn, miss, 0 if inert else 1, expired=expired,
+                         register_only=anchor)
+        if flag == "REGISTER-ONLY":
+            register_only += 1
+        if flag not in ("ok", "REGISTER-ONLY") or unrecorded:
+            attention += 1
         print(f"{ar_id:<8} {matches:>10}  {desc!r}  [{flag}]")
         if expired:
             print(f"{'':<21}! stated expiry {expires!r} has passed — it no "
@@ -658,12 +834,25 @@ def cmd_risk_lint(args, dsn):
             print(f"{'':<21}! description matches 0 open findings, but the prefix "
                   f"{prefix!r} matches {fid}:")
             print(f"{'':<23}{title[:100]}")
-        if inert:
+        if inert and anchor:
+            print(f"{'':<21}! register-only — enforced by {anchor}. The "
+                  f"description is a heading, not a needle; it is not expected "
+                  f"to match a finding title.")
+        elif inert:
             print(f"{'':<21}! has NEVER matched any finding (open or resolved) — "
                   f"it suppresses nothing while reading as accepted policy.")
             print(f"{'':<23}Rewrite it as a SUBSTRING of the finding title it "
                   f"should cover (preview with `risk match`), or retire it if "
                   f"the risk is gone.")
+            if (meta or {}).get(REGISTER_ONLY_KEY) and not anchor:
+                print(f"{'':<23}metadata.{REGISTER_ONLY_KEY} is set but there is "
+                      f"no {ENFORCED_IN_KEY} pointer, so nothing anchors it — "
+                      f"`risk edit {ar_id} --register-only <anchor>` records both.")
+    if register_only and not attention and not args.all:
+        # Every listed row is enforced elsewhere: say so, or a clean register
+        # reads as twenty-one problems.
+        print(f"all other enabled AR descriptions are drift-stable and matching "
+              f"({register_only} register-only, enforced elsewhere)")
     return 0
 
 
@@ -1377,6 +1566,10 @@ def build_parser() -> argparse.ArgumentParser:
     ra.add_argument("--allow-broad", action="store_true",
                     help=f"accept a description matching more than "
                          f"{_BREADTH_CEILING} open findings")
+    ra.add_argument("--register-only", metavar="ANCHOR",
+                    help=f"this AR is enforced elsewhere, not by title match: "
+                         f"<file>:<SYMBOL> (security-check.py:ACCEPTED_PRIVILEGED) "
+                         f"or {POSTURE_ANCHOR}; implies --allow-nomatch")
     ra.set_defaults(handler=cmd_risk_add)
     rm = risk.add_parser("match",
                          help="preview which open findings a description would suppress")
@@ -1391,8 +1584,12 @@ def build_parser() -> argparse.ArgumentParser:
                      help="set the last day in force; 'none' clears it")
     re_.add_argument("--allow-drift", action="store_true",
                      help="accept a description that pins a patch version / count")
+    re_.add_argument("--register-only", metavar="ANCHOR",
+                     help=f"record where this AR is enforced (<file>:<SYMBOL> or "
+                          f"{POSTURE_ANCHOR}); '{_CLEAR}' clears it")
     re_.set_defaults(handler=cmd_risk_edit)
-    rlint = risk.add_parser("lint", help="report AR descriptions that are not drift-stable")
+    rlint = risk.add_parser("lint", help="report AR descriptions that are not drift-stable, "
+                                         "inert, expired, or register-only (enforced elsewhere)")
     rlint.add_argument("--all", action="store_true", help="include drift-stable ARs too")
     rlint.set_defaults(handler=cmd_risk_lint)
     rv = risk.add_parser("review"); rv.add_argument("ar_id")

@@ -1,8 +1,8 @@
 # SOP: policy-cli — operator interface for sweep_history policy tables
 
 > Description: How to edit the four operator-curated policy tables that back the daily sweep (accepted_risks, slo_definitions, noise_suppressions, security_acceptances) from the operator's local Claude CLI / mise session.
-> Version: `2026.08.19`
-> Last Updated: `2026-08-19`
+> Version: `2026.09.23`
+> Last Updated: `2026-09-23`
 > Owner: `homelab-operator`
 
 ---
@@ -28,11 +28,31 @@ The four tables and their CLI namespaces:
 | `noise_suppressions` | `policy-cli noise …` | `runbooks/noise_allowlist.yaml` |
 | `security_acceptances` | `policy-cli sec …` | `runbooks/security_check_acceptances.py` |
 
-Every entity supports `list`, `add`, `disable`, `delete`. Risk + SLO also have `show`. Risk also has `review` (bumps `last_reviewed_at`), `edit` (update description/severity/justification/**expiry** **in place** — the only way to change an AR without losing `accepted_at`), `match` (preview which open findings a candidate description would suppress — **run this before every `risk add`**), and `lint` (reports AR descriptions that have drifted out of matching, gone inert, or EXPIRED). SLO also has `update` (patch numerator/denominator/target/window in place).
+Every entity supports `list`, `add`, `disable`, `delete`. Risk + SLO also have `show`. Risk also has `review` (bumps `last_reviewed_at`), `edit` (update description/severity/justification/**expiry** **in place** — the only way to change an AR without losing `accepted_at`), `match` (preview which open findings a candidate description would suppress — **run this before every `risk add`**), and `lint` (reports AR descriptions that have drifted out of matching, gone inert, or EXPIRED — and names the ARs that are REGISTER-ONLY, i.e. enforced elsewhere). SLO also has `update` (patch numerator/denominator/target/window in place).
 
 **Every new AR must state a deadline or declare it has none.** `risk add` REFUSES without either `--expires YYYY-MM-DD` (the last day in force — inclusive) or `--no-expiry` (condition-based: accepted until upstream ships a fix, not until a date; name the condition in `--justification`). It also refuses an `--expires` already in the past, which would be inert from the moment it is written. Set or clear one later with `risk edit AR-0xx --expires 2026-12-01` / `--expires none`. Past its date an AR stops suppressing — in BOTH layers, the sweep's `_apply_ar_suppression` and `security-check.py`'s emit-time re-tag — and the findings it masked re-surface at their own severity, announced in the sweep log. The rule lives once, in `runbooks/lib/ar_expiry.py`. **The gate binds only on a RECORDED `metadata.expires_at`**: a deadline written in justification prose enforces nothing, which is how AR-042 suppressed a flat battery cell for 14 days past its own "accept until" date. `risk lint` now names those (`justification states a deadline that NOTHING ENFORCES`) — it is the control against this gate being blind, not a nicety.
 
 **AR descriptions are substring matchers, so they must be drift-stable.** `risk add` and `risk edit` both REFUSE a description containing a patch-level version (`x.y.z`) or a volatile count (CVE/device tally) unless `--allow-drift` is passed. `risk lint` flags two signals: `at risk` (static — embeds a version/count) and `DRIFTING NOW` (the description matches zero open findings but a shorter prefix of it matches one — proof the tail already drifted). AR-030 and AR-047 both lapsed this way.
+
+**Not every AR is a needle — REGISTER-ONLY.** Some register entries are enforced
+somewhere else and their description is a heading the operator reads, never a
+substring of a generated title: the ingress allowlist (a `security_acceptances` row
+whose `ar_id` cites the AR), an exemption set coded into `security-check.py`
+(`ACCEPTED_PRIVILEGED`, `ACCEPTED_ROOT_UID`), or an operator posture decision no
+detector exists for. Until 2026-09-23 `risk lint` read all of them as INERT — 21 of
+22 INERT rows (F-5c48a0fc) — and told the operator to rewrite headings as needles.
+It now reports them `[REGISTER-ONLY]` with the anchor that enforces them. Two anchors
+count: an **enabled** `security_acceptances` citation (derived from the table every
+run — a disabled row anchors nothing), and `metadata.register_only=true` with an
+`enforced_in` pointer, written by `risk add|edit AR-0xx --register-only <anchor>`.
+The anchor is `<file>:<SYMBOL>` (e.g. `security-check.py:ACCEPTED_PRIVILEGED` — the
+file must exist under `runbooks/` and the symbol must occur in it, or the CLI refuses:
+a pointer to a renamed set is the inert AR one hop further away) or the literal
+`register-only:posture` for a decision nothing detects. `--register-only none` clears
+it. Only the never-matched case is reclassified: a register-only AR whose description
+DOES match a title lints as a needle (`ok` / `at risk` / `DRIFTING NOW`), and an AR
+with neither anchor is still INERT. On `risk add`, `--register-only` satisfies the
+matches-nothing gate on its own.
 
 **A description is a NEEDLE, not prose — and `risk lint` will not catch prose.** The
 description is used as a case-insensitive **substring of a finding title**
@@ -328,3 +348,4 @@ To restore from a `policy-cli export` snapshot: import via direct psql `COPY FRO
 | 2026-05-27 | 2026.05.27 | Initial — Phase 3 of policy-in-DB migration |
 | 2026-08-18 | 2026.08.18 | Documented `risk edit` / `risk lint` / `slo update`; drift-stable AR description rule; made the §6 verification rerun non-destructive (`SWEEP_AUTOCLOSE=0`); documented the two AR-suppression exemption classes (audit-integrity + self-reference) after F-21ceb683, and the not-yet-guarded second matcher in `security-check.py` |
 | 2026-08-19 | 2026.08.19 | Documented `risk match`; the AR-authoring workflow and the prose-description failure mode (`risk lint` is a regression check, not a pre-write validator); `risk add` now refuses inert, over-broad and drift-unstable descriptions; rewrote both `risk add` examples, which the new guards would have rejected |
+| 2026-09-23 | 2026.09.23 | `risk lint` REGISTER-ONLY class (F-5c48a0fc): an AR cited by an enabled `security_acceptances` row, or carrying `metadata.register_only=true` + `enforced_in`, is reported with its anchor instead of as INERT; `risk add|edit --register-only <anchor>` (`none` clears) with a file:SYMBOL existence gate |
