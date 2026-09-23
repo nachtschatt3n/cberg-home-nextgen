@@ -73,6 +73,7 @@ depends_on:
                                       # 2026-09-15). window-scheduler.py will not place
                                       # this plan until that one is `executed`.
 conflicts_with:                       # HARD slot exclusions — window-scheduler.py keys on
+  - nextcloud-mcp-0.187.1
                                       # this field only; the shared:[monitoring] overlap
                                       # is a post-placement warning (2026-09-15 review).
                                       # 2026-09-17: otel-operator-0.21.0 ref REMOVED — that

@@ -81,7 +81,7 @@ rollback_class: git-revert            # stateless bridge: no PVC, no volumes, no
                                       # `values.image.tag` is the diff.
 finding_refs: [F-9af9baf7, F-80459b23, F-bb713800]   # F-bb713800 ADDED 2026-09-22: the drift
                                       # finding this refresh answers (plan-or-page joins on this field).
-status: draft   # *** FRESH OPERATOR GO REQUIRED FOR 0.195.0 — nothing recorded covers this target (§1.8). *** Re-set from awaiting-go to draft 2026-09-22 on retarget 0.187.1 -> 0.195.0 (F-bb713800): eleven 0.x release lines re-read, two new BREAKING-tagged changes assessed, gates rewritten. The 2026-09-15 GO was scoped to 0.187.1 and is already VOID in the home-operation store (read 2026-09-22 - the go_no_go issue keyed on this plan_id is OPEN with decision null, opened 2026-09-20T18:55Z, but its target field still says 0.187.1). Path: plan-reviewer -> vetted -> re-ingest the go/no-go issue with target 0.195.0 -> operator GO -> awaiting-go. Never infer authorization from the old approval or from the open issue's stale target.
+status: awaiting-go   # reviewed 2026-09-23 (needs-fix -> the three gate fixes applied); fresh GO for 0.195.0 recorded via home-operation
 window: "sat-attended:2026-10-03"   # KEPT on retarget (risk/duration/reboot class unchanged: medium, 35 min, no
                                       # reboot, git-revert). Slot re-checked 2026-09-22: also holds
                                       # external-dns-unowned-cnames (draft, 40 min, medium) — no shared resource
@@ -449,7 +449,7 @@ with `target:` at 0.195.0 that gate clears — it does not replace the GO.
    curl -s -o /dev/null -X POST http://localhost:18000/mcp -H "$H" -H "$A" -H "mcp-session-id: $SID" \
         -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
    curl -s -X POST http://localhost:18000/mcp -H "$H" -H "$A" -H "mcp-session-id: $SID" \
-        -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"$1\",\"params\":${2:-{\}}}" \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"$1\",\"params\":${2:-"{}"}}" \
      | python3 -c 'import sys,json
    raw=sys.stdin.read(); data=[l[5:].strip() for l in raw.splitlines() if l.startswith("data:")]
    print(json.dumps(json.loads(data[-1] if data else raw)))'
@@ -593,15 +593,17 @@ can confirm it exists (all four PRESENT in the live label index 2026-09-22):
    kubectl get pod -n office -l app.kubernetes.io/name=nextcloud-mcp -o jsonpath='{range .items[*]}{.metadata.name} restarts={.status.containerStatuses[0].restartCount} {.status.containerStatuses[0].imageID}{"\n"}{end}'
    # expect: ONE pod, restarts=0, imageID ending sha256:33c37e0063ff6cded7c9406d94a1868eca7b41ab4901b2f01d23eaa76beefd28
    #         (the OLD digest f6d88397… here means the roll did not happen or was remediated back)
-   kubectl logs -n office deploy/nextcloud-mcp --tail=300 | grep -cE '^(ERROR|CRITICAL) \[|Traceback'; echo '^ expect 0 (log format is "<LEVEL> [ts] module - msg"; a 3.14/2.x import failure prints a Traceback here)'
-   kubectl logs -n office deploy/nextcloud-mcp --tail=300 | grep -c 'Configuring MCP server for single_user_basic mode'; echo '^ expect 1 — the mode the server actually booted in (app.py:1824 at 0.195.0)'
+   kubectl logs -n office deploy/nextcloud-mcp --tail=300 | grep -cE '(^|[[:space:]])(ERROR|CRITICAL)[[:space:]]|Traceback'; echo '^ expect 0 (log format is "<LEVEL> [ts] module - msg"; a 3.14/2.x import failure prints a Traceback here)'
+   # (reviewer 2026-09-23: the 'Configuring MCP server for ... mode' line is logged at app.py:1824 BEFORE the
+   #  first log handler exists (installed inside NextcloudMCPServer at 1825) and never reaches the log --
+   #  demonstrated on the live pod. The mode is proven by premise 3 and by the §4.3 'Starting MCP session' line.)
    ```
 3. **CONTENTS ASSERTION (lifespan semantics landed, §1.7): the BasicAuth
    session lifespan ran exactly once, at container start, and does not run
    again per probe session** — measured by counting the line before and after
    §4.4's sessions:
    ```bash
-   kubectl logs -n office deploy/nextcloud-mcp --tail=300 | grep -c 'Starting MCP session in single-user BasicAuth mode'
+   kubectl logs -n office deploy/nextcloud-mcp | grep -c 'Starting MCP session in single-user BasicAuth mode'   # no --tail: later probes add lines
    # expect: 1 immediately after start (on 0.184.5 this line only appeared once a client session opened)
    # …after §4.4 has opened two sessions, re-run: still 1. A count that climbs means the 1.x per-session
    # lifespan is still running, i.e. the pod is NOT on the mcp 2.x build — cross-check §4.2's imageID.
@@ -651,12 +653,15 @@ can confirm it exists (all four PRESENT in the live label index 2026-09-22):
    raw=sys.stdin.read(); data=[l[5:].strip() for l in raw.splitlines() if l.startswith("data:")]
    r=json.loads(data[-1] if data else raw)["result"]; print(r["protocolVersion"], r["serverInfo"].get("version"))' | tee /tmp/ncmcp/protocol.after
    kill $PF 2>/dev/null
-   # expect: 2025-06-18 2.1.1
+   # expect: '2025-06-18 ' -- protocolVersion 2025-06-18 and serverInfo.version EMPTY
    #   - protocolVersion 2025-06-18: the offer is in mcp 2.1.1's HANDSHAKE_PROTOCOL_VERSIONS (§1.4), so the
    #     server must echo it. Any OTHER value (e.g. 2025-11-25 or 2026-07-28) means the server counter-offered
    #     and the §1.4 client risk is real for 2025-06-18-era clients — record it on F-9af9baf7 and weigh §4.10.
-   #   - serverInfo.version 2.1.1: this field IS the mcp SDK version (1.29.0 today), and 2.1.1 is what
-   #     v0.195.0's uv.lock pins — a build-identity assertion no tag string can fake.
+   #   - serverInfo.version EMPTY: mcp 2.x reports the version the app passes and substitutes nothing
+   #     (the app constructs NextcloudMCPServer("Nextcloud MCP", lifespan=...) with no version); 1.x printed
+   #     its own 1.29.0. So the empty string IS the 2.x signature, and a non-empty '1.29.0' after the roll
+   #     means the old build is still serving (the §5 rollback check stays valid). Build identity rests on
+   #     the §4.2 imageID digest, not on this field (reviewer 2026-09-23).
    ```
 5. **CONTENTS ASSERTION (behaviour): the two Nextcloud-facing paths this hop
    touched still return real data** — `nc_calendar_list_calendars` crosses the
@@ -677,11 +682,24 @@ can confirm it exists (all four PRESENT in the live label index 2026-09-22):
    cb, ca = names("/tmp/ncmcp/calendars.before"), names("/tmp/ncmcp/calendars.after")
    fb, fa = names("/tmp/ncmcp/files.before"),     names("/tmp/ncmcp/files.after")
    assert len(ca) > 0 and len(fa) > 0, "empty result after bump"
-   # calendar identifiers must all survive the DAV-encoding change
-   ids = lambda s: set(re.findall(r'"(?:name|display_name|id|uri)"\s*:\s*"([^"]+)"', s))
-   missing = ids(cb) - ids(ca)
+   # calendar identity must survive the DAV-encoding change. 0.195.0 unquote()s the `name` field
+   # (client/calendar.py:730) and two live calendars carry percent-encoded names, so a raw-text
+   # diff of `name` reads 2 missing on a HEALTHY rollout (reviewer 2026-09-23). Compare the parsed
+   # display_name sets, with name unquoted on both sides as a second witness.
+   from urllib.parse import unquote
+   def cal_ids(txt):
+       try:
+           items = json.loads(txt)
+           if isinstance(items, dict): items = items.get("calendars") or items.get("items") or [items]
+       except Exception:
+           items = [json.loads(m) for m in re.findall(r'\{[^{}]*"display_name"[^{}]*\}', txt)]
+       return ({c.get("display_name") for c in items if isinstance(c, dict)} - {None},
+               {unquote(c.get("name", "")) for c in items if isinstance(c, dict)} - {""})
+   (db, nb), (da, na) = cal_ids(cb), cal_ids(ca)
+   assert db and da, "could not parse a calendar list on one side -- fix the parser before judging"
+   missing = (db - da) | (nb - na)
    assert not missing, f"calendars missing after bump: {missing}"
-   print("calendar ids before/after:", len(ids(cb)), len(ids(ca)), "| files listing bytes before/after:", len(fb), len(fa))
+   print("calendars before/after:", len(db), len(da), "| files listing bytes before/after:", len(fb), len(fa))
    EOF
    ```
 6. **CONTENTS ASSERTION (the 0.192.0 BREAKING, made visible):
