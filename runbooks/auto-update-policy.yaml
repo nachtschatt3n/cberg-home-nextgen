@@ -6,7 +6,9 @@
 #   G2 policy   : depName is NOT blocked by a `deny` rule below
 #   G3 breaking : no breaking-change signal in the target release notes
 #                 (reuses check-all-versions' detect_breaking_changes)
-#   G4 ci       : PR mergeable + flux-local CI checks all green
+#   G4 ci       : PR mergeable + every CI check green (no check is named;
+#                 the render check is the Flate Render Gate — the flux-local
+#                 test job was retired 2026-09-23, F-6b1dd22b)
 # and APPLY is only performed on the cron-triggered sweep (SWEEP_TRIGGER=cron),
 # never a manual read-only `operation sweep`.
 #
@@ -16,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.22.3"
+version: "2026.09.23.1"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Regression tests: the three things that keep a flate wedge from becoming a
-silent-green or a stuck runner stay in the CI workflow (F-b44621fb).
+"""Regression tests: the things that keep a flate wedge from becoming a
+silent-green or a stuck runner stay in the CI workflow (F-b44621fb), and the
+Flate Render Gate stays the SINGLE render gate (F-6b1dd22b).
 
 flate 0.6.5 was measured wedging CPU-bound and never exiting (139% CPU, 10 min,
 no output, on a tree it renders in 5.3 s) right after a HelmRepository URL was
@@ -10,9 +11,16 @@ drifts out of a workflow file one refactor later. Asserted here:
 
   1. the `flate` job carries `timeout-minutes` <= 10 — the ONLY thing bounding
      a wedge; without it a hang burns the runner's 6 h default;
-  2. the flux-local `test` job is still there and still runs `flux-local test`
-     — two gates that fail differently are the insurance while the wedge is
-     unexplained;
+  2. the flux-local `test` job is GONE and stays gone (retired 2026-09-23,
+     operator decision on F-6b1dd22b): flux-local is archived at v8.4.0, its
+     hand-rolled `docker run` invocation froze the auto-update G4 lane for
+     nine days once (F-00235e5c), and its allowlist had drifted again
+     (media/plex moved to a GitRepository chart flux-local cannot clone while
+     flate rendered it). Exactly ONE job runs a renderer's test command and it
+     is `flate`; the `flux-local-success` aggregate is gone (nothing consumed
+     it — no branch protection, and G4 reads the whole rollup); the flux-local
+     DIFF jobs are kept (they post PR diffs flate does not replace); every
+     `needs` names a job that exists;
   3. the "Run flate test" step's own no-summary guard: a wedge killed by the
      timeout (or a binary that ran nothing) produces no `N passed` line and
      the step must fail, never pass — proven by EXECUTING the step's real
@@ -24,7 +32,10 @@ drifts out of a workflow file one refactor later. Asserted here:
   6. COMMISSIONING STRAWS: (a) the step script with its no-summary guard
      removed passes the empty-output case — proving the guard, not the fake,
      is what fails it; (b) a copy of the workflow without `timeout-minutes`
-     fails assertion 1.
+     fails assertion 1; (c) a copy with a flux-local test job re-added fails
+     the single-gate assertion; (d) a copy whose flate step no longer invokes
+     `flate test` fails it too — the detector sees the invocation, not merely
+     the absence of the other tool.
 
 The workflow is read with PyYAML (the reader GitHub's own schema tooling
 uses); nothing here re-parses it with grep.
@@ -33,6 +44,7 @@ Run: python3 runbooks/tests/test-flate-gate-mitigations.py
 """
 from __future__ import annotations
 
+import copy
 import os
 import re
 import stat
@@ -81,6 +93,34 @@ def timeout_ok(jobs: dict) -> tuple[bool, str]:
         return False, f"timeout-minutes is not a number: {t!r}"
 
 
+def _code(text: str) -> str:
+    """Drop comment/blank lines so a comment that MENTIONS a tool is not an invocation."""
+    return "\n".join(l for l in str(text).splitlines() if l.strip() and not l.strip().startswith("#"))
+
+
+def _step_text(step: dict) -> str:
+    w = step.get("with") if isinstance(step.get("with"), dict) else {}
+    return _code("\n".join(str(x) for x in (step.get("run"), step.get("uses"), w.get("args")) if x))
+
+
+def renderers(jobs: dict) -> dict[str, set[str]]:
+    """Pure: job id -> the render tools whose TEST command that job invokes.
+    Reads run scripts, `uses:` images and `with.args`, comments stripped."""
+    found: dict[str, set[str]] = {}
+    for jid, job in jobs.items():
+        if not isinstance(job, dict):
+            continue
+        text = "\n".join(_step_text(s) for s in job.get("steps", []) if isinstance(s, dict))
+        tools = set()
+        if re.search(r"\bflate\s+test\b", text):
+            tools.add("flate")
+        if "flux-local" in text and re.search(r"(^|\s)test(\s|$)", text):
+            tools.add("flux-local")
+        if tools:
+            found[jid] = tools
+    return found
+
+
 wf = yaml.safe_load(WORKFLOW.read_text())
 jobs = wf["jobs"]
 
@@ -88,17 +128,27 @@ jobs = wf["jobs"]
 ok, why = timeout_ok(jobs)
 check("flate job: timeout-minutes present and <= 10 (the only bound on a wedge)", ok, why)
 
-# 2 — flux-local retained
-test_job = jobs.get("test") or {}
-runs = [str(s.get("run") or "") for s in test_job.get("steps", [])]
-# source text, not tool output: the error-text-aborting count() does not apply
-# (the step script legitimately prints ::error:: lines), so the population is
-# asserted non-empty explicitly instead.
-check("flux-local `test` job still has run steps", bool(runs), str(test_job.get("name")))
-check("flux-local `test` job still runs `flux-local test`",
-      sum(1 for r in runs if "flux-local" in r and " test" in r) >= 1, str(test_job.get("name")))
-check("flux-local-success gate still depends on the flux-local job (two gates, not one)",
-      "test" in (jobs.get("flux-local-success") or {}).get("needs", []), str(jobs.get("flux-local-success", {}).get("needs")))
+# 2 — flux-local test RETIRED; flate is the single render gate (F-6b1dd22b)
+seen = renderers(jobs)
+check("exactly one job runs a renderer's test command, and it is `flate` (single render gate)",
+      seen == {"flate": {"flate"}}, str(seen))
+check("no job runs `flux-local test` (retired 2026-09-23 — EOL tool, hand-maintained invocation)",
+      "flux-local" not in set().union(*seen.values()) if seen else False, str(seen))
+check("no `flux-local-success` aggregate job (nothing consumed it; G4 reads the whole rollup)",
+      "flux-local-success" not in jobs and not any(
+          str(j.get("name", "")).strip().lower() == "flux local successful"
+          for j in jobs.values() if isinstance(j, dict)), str(list(jobs)))
+check("the render gate's check name is exactly `Flate Render Gate` (what `gh pr checks` and G4 print)",
+      jobs.get("flate", {}).get("name") == "Flate Render Gate", str(jobs.get("flate", {}).get("name")))
+diff_text = "\n".join(_step_text(s) for s in (jobs.get("diff") or {}).get("steps", []) if isinstance(s, dict))
+check("the flux-local `diff` jobs are kept (they post PR diffs flate's test does not replace)",
+      "diff" in jobs and "allenporter/flux-local" in diff_text
+      and re.search(r"(^|\s)diff\s", diff_text) is not None, diff_text[:120])
+dangling = [(jid, n) for jid, j in jobs.items() if isinstance(j, dict)
+            for n in ([j.get("needs")] if isinstance(j.get("needs"), str) else (j.get("needs") or []))
+            if n not in jobs]
+check("every `needs` names a job that exists (a dangling needs is a workflow GitHub refuses to run)",
+      not dangling, str(dangling))
 
 # 3/4 — execute the real step script with a fake flate
 flate_steps = [s for s in jobs["flate"]["steps"] if s.get("name") == "Run flate test"]
@@ -172,6 +222,30 @@ no_timeout = {k: ({kk: vv for kk, vv in v.items() if kk != "timeout-minutes"} if
               for k, v in jobs.items()}
 ok2, why2 = timeout_ok(no_timeout)
 check("STRAW (b): a workflow copy without timeout-minutes fails the timeout assertion", not ok2, why2)
+# (c) the retired job comes back, in the exact shape it had (comment lines
+# mentioning the tool must NOT trip the detector — only the invocation does).
+readded = copy.deepcopy(jobs)
+readded["test"] = {"name": "Flux Local Test", "runs-on": "ubuntu-latest", "steps": [
+    {"name": "Run flux-local test", "run":
+        "# flux-local is archived; this comment alone must not count\n"
+        "docker run --rm ghcr.io/allenporter/flux-local:v8.4.0 \\\n"
+        "  test --enable-helm --all-namespaces --path kubernetes/flux/cluster\n"}]}
+seen_c = renderers(readded)
+check("STRAW (c): a workflow copy with a flux-local test job re-added FAILS the single-gate assertion",
+      seen_c != {"flate": {"flate"}} and "flux-local" in seen_c.get("test", set()), str(seen_c))
+commented = copy.deepcopy(jobs)
+commented["flate"]["steps"] = [
+    {**s, "run": "# a comment saying flate test and flux-local test\n" + str(s.get("run"))}
+    if s.get("name") == "Run flate test" else s for s in commented["flate"]["steps"]]
+check("STRAW (c) control: a comment that merely MENTIONS both tools does not change the reading",
+      renderers(commented) == {"flate": {"flate"}}, str(renderers(commented)))
+# (d) the flate step stops invoking flate: the gate is hollow and the detector says so.
+hollow = copy.deepcopy(jobs)
+hollow["flate"]["steps"] = [
+    {**s, "run": "echo 'nothing rendered'\n"} if s.get("name") == "Run flate test" else s
+    for s in hollow["flate"]["steps"]]
+check("STRAW (d): a workflow copy whose flate step no longer runs `flate test` FAILS the single-gate assertion",
+      renderers(hollow) == {}, str(renderers(hollow)))
 
 print(f"\n{len(FAILURES)} failure(s)" if FAILURES else "\nall checks passed")
 sys.exit(1 if FAILURES else 0)

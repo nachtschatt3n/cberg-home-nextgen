@@ -1,5 +1,16 @@
 ---
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+#
+# The name says "Flux Local" because the DIFF jobs below still run flux-local;
+# the RENDER GATE is flate (job `flate`, check name "Flate Render Gate"), the
+# single render gate since 2026-09-23. The flux-local `test` job and the
+# `flux-local-success` aggregate were retired then (F-6b1dd22b): flux-local is
+# archived upstream at v8.4.0 (final), its hand-rolled `docker run` invocation
+# had already failed once in a way that froze the auto-update G4 lane for nine
+# days (F-00235e5c), and its allowlist had drifted a second time (media/plex
+# moved to a GitRepository chart source, which flux-local cannot clone, while
+# flate rendered it). Do not re-add a flux-local test job: regression test
+# runbooks/tests/test-flate-gate-mitigations.py fails on one.
 name: "Flux Local"
 
 on:
@@ -14,125 +25,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Flux Local Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # WHY `docker run` AND NOT `uses: docker://` LIKE THE DIFF JOB BELOW.
-      # This step has to READ flux-local's output: two HelmReleases in this repo
-      # cannot be rendered by flux-local at all (see EXPECTED_FAILURES), so the
-      # job must pass when the failure set is EXACTLY those two and fail on any
-      # other outcome. A `uses:` step exposes no output, so the allowlist could
-      # not be enforced there. Everything else about the invocation -- image,
-      # mount point, working directory, arguments -- is identical to what
-      # `uses: docker://` did.
-      #
-      # v8.4.0 (was v7.11.0) IS THE FIX for the third failure this job used to
-      # have: network/k8s-gateway is an OCIRepository pinned by tag AND digest,
-      # and flux-local <8.3.0 passed the DIGEST to `helm template --version`,
-      # which accepts semver only ("Error: improper constraint: sha256:...").
-      # Upstream fixed exactly that in allenporter/flux-local#1103 (released in
-      # 8.3.0), so k8s-gateway now renders for real rather than being excused.
-      #
-      # v8.4.0 is flux-local's FINAL release: upstream archived the project and
-      # points at flate/konflate (https://github.com/home-operations/flate), so
-      # this pin is terminal and Renovate will never propose a bump. Keep it in
-      # lockstep with the diff job's pin below.
-      - name: Run flux-local test
-        env:
-          # HelmReleases flux-local STRUCTURALLY CANNOT RENDER -- not manifest
-          # defects. Both reconcile normally in-cluster; this is a CI-tooling
-          # limit, which is why no health check sees it.
-          #
-          # Both take their chart from an EXTERNAL GitRepository BY PATH
-          # (kubernetes/flux/meta/repositories/git/{csi-driver-smb,oc8}.yaml).
-          # flux-local never clones a GitRepository it does not own, so it hands
-          # the bare chart path to helm as a repo NAME:
-          #   helm template csi-driver-smb charts/v1.20.3/csi-driver-smb ...
-          #     Error: repo charts not found
-          #   helm template oc8 deploy/helm/oc8 ...
-          #     Error: repo deploy not found
-          # Its own --skip-invalid-helm-release-paths flag does NOT help: it is
-          # honored only in the build/diff visitor, never in `test`, whose
-          # HelmReleaseTest.async_runtest calls helm.template directly. Verified
-          # on 7.11.0 and 8.4.0, with the flag passed explicitly. Upstream is
-          # archived, so that will not be fixed.
-          #
-          # ai/oc8 is additionally unrenderable by ANY offline tool: its chart
-          # hard-requires values (secrets.jwtSecret) that exist only in a SOPS
-          # secret, so it fails on "secrets.jwtSecret is required" even in a
-          # tool that clones the chart.
-          #
-          # This list is an allowlist, not a mute: the step fails if anything
-          # ELSE fails, AND if one of these starts passing (delete it then).
-          EXPECTED_FAILURES: |
-            kubernetes/flux/cluster::csi-driver-smb::kube-system/csi-driver-smb
-            kubernetes/flux/cluster::oc8::ai/oc8
-        run: |
-          # GitHub runs a step with no `shell:` key as `bash -e {0}` -- errexit is
-          # already ON. flux-local exits 1 BY DESIGN here (the two allowlisted
-          # failures), so errexit would kill this step at the pipeline below,
-          # before the allowlist is ever evaluated -- leaving CI red and the
-          # fix looking applied. Disable it deliberately; every failure path
-          # below exits explicitly. Verified: without this, the allowlist
-          # comparison never runs.
-          set -uo pipefail
-          set +e
-
-          # HOME IS LOAD-BEARING -- without it EVERY HelmRelease test fails.
-          # `uses: docker://` got HOME=/github/home (and a writable mount for it)
-          # from the container-action runtime for free; this hand-rolled
-          # `docker run` restored the workspace mount and workdir but not HOME,
-          # so helm fell back to `/.cache` in a non-writable root filesystem:
-          #   level=ERROR msg="failed to create cache directory"
-          #   Error: mkdir /.cache: permission denied
-          # Measured on run 35481803329 (2026-09-20): every HelmRelease FAILED
-          # with that error while every kustomization PASSED -- kustomize needs
-          # no cache, helm does. The failure set was ~all HRs, not the two
-          # allowlisted ones, so the gate went red and froze the auto-update G4
-          # lane. This is NOT a flux-local v8.4.0 defect; v7.11.0 would fail the
-          # same way invoked like this. Set the helm dirs explicitly as well as
-          # HOME so the fix cannot regress on an image that ignores HOME.
-          docker run --rm \
-            -v "${GITHUB_WORKSPACE}:/github/workspace" \
-            -w /github/workspace \
-            -e HOME=/tmp \
-            -e XDG_CACHE_HOME=/tmp/.cache \
-            -e HELM_CACHE_HOME=/tmp/.cache/helm \
-            -e HELM_CONFIG_HOME=/tmp/.config/helm \
-            -e HELM_DATA_HOME=/tmp/.local/share/helm \
-            ghcr.io/allenporter/flux-local:v8.4.0 \
-            test --enable-helm --all-namespaces \
-            --path /github/workspace/kubernetes/flux/cluster -v 2>&1 \
-            | tee flux-local-test.log
-          status=${PIPESTATUS[0]}
-
-          # A crash BEFORE any test ran must never be read as "only the known
-          # failures failed" -- it would produce an empty failure set.
-          if ! grep -qE '^=+ .*(passed|failed|error)' flux-local-test.log; then
-            echo "::error::flux-local produced no pytest summary (exit ${status}); it failed before running tests"
-            exit 1
-          fi
-
-          expected=$(printf '%s\n' "${EXPECTED_FAILURES}" \
-            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | sort -u)
-          actual=$(grep -oE '^FAILED [^[:space:]]+' flux-local-test.log \
-            | cut -d' ' -f2 | sort -u)
-
-          if [ "${actual}" = "${expected}" ]; then
-            echo "flux-local: failure set matches the known-unrenderable allowlist:"
-            printf '%s\n' "${expected}" | sed 's/^/  /'
-            exit 0
-          fi
-
-          echo "::error::flux-local failure set changed -- fix the release, or update EXPECTED_FAILURES if it is genuinely unrenderable"
-          echo "  '<' = expected but now passing, '>' = newly failing"
-          diff <(printf '%s\n' "${expected}") <(printf '%s\n' "${actual}") | sed 's/^/  /' || true
-          exit 1
-
   flate:
     name: Flate Render Gate
     runs-on: ubuntu-latest
@@ -170,24 +62,27 @@ jobs:
           # Secret via valuesFrom, so helm template dies before rendering --
           # under flux-local, flate, or any successor.
           #
-          # kube-system/csi-driver-smb is deliberately NOT listed. flux-local
-          # could not clone its external GitRepository and had to excuse it;
-          # flate clones it and renders it for real. That is the blind spot
-          # this job closes -- measured: repointing its chart path at a
-          # directory absent from the pinned commit flips 333 passed ->
-          # 332 passed / 2 failed and fails this gate, where flux-local
-          # produced a byte-identical green.
+          # HelmReleases whose chart comes from an external GitRepository BY
+          # PATH (kube-system/csi-driver-smb, media/plex -- see
+          # kubernetes/flux/meta/repositories/git/) are deliberately NOT
+          # listed. flux-local never cloned a GitRepository it did not own and
+          # had to excuse them; flate clones them and renders them for real.
+          # That is the blind spot this job closes -- measured: repointing
+          # csi-driver-smb's chart path at a directory absent from the pinned
+          # commit flips 333 passed -> 332 passed / 2 failed and fails this
+          # gate, where flux-local produced a byte-identical green.
           #
           # Allowlist, not a mute: the step fails if anything ELSE fails, AND
           # if oc8 ever starts passing (delete the entry then).
           EXPECTED_FAILURES: |
             HelmRelease ai/oc8
         run: |
-          # Same shape as the flux-local step above, for the same reason:
-          # GitHub runs a step with no `shell:` key as `bash -e {0}`, and flate
-          # exits 1 BY DESIGN here (the allowlisted oc8 failure), so errexit
-          # would kill the step at the pipeline below before the allowlist is
-          # ever evaluated. Every path below exits explicitly.
+          # GitHub runs a step with no `shell:` key as `bash -e {0}` -- errexit
+          # is already ON. flate exits 1 BY DESIGN here (the allowlisted oc8
+          # failure), so errexit would kill the step at the pipeline below
+          # before the allowlist is ever evaluated -- leaving CI red and the
+          # fix looking applied. Disable it deliberately; every path below
+          # exits explicitly.
           set -uo pipefail
           set +e
 
@@ -242,6 +137,11 @@ jobs:
           diff <(printf '%s\n' "${expected}") <(printf '%s\n' "${actual}") | sed 's/^/  /' || true
           exit 1
 
+  # NOT a render gate. These post the rendered HelmRelease/Kustomization diff
+  # as a PR comment, which flate's `test` job does not replace -- that is the
+  # only reason flux-local is still here. A diff that cannot be produced (the
+  # GitRepository-sourced charts flux-local cannot clone) is simply absent
+  # from the comment; the Flate Render Gate above is what decides pass/fail.
   diff:
     name: Flux Local Diff
     runs-on: ubuntu-latest
@@ -265,7 +165,9 @@ jobs:
           ref: "${{ github.event.repository.default_branch }}"
           path: default
 
-      # Keep this pin in lockstep with the test job's `docker run` image above.
+      # v8.4.0 is flux-local's FINAL release: upstream archived the project and
+      # points at flate/konflate (https://github.com/home-operations/flate), so
+      # this pin is terminal and Renovate will never propose a bump.
       - name: Run flux-local diff
         uses: docker://ghcr.io/allenporter/flux-local:v8.4.0
         with:
@@ -306,13 +208,3 @@ jobs:
             ```diff
             ${{ steps.diff.outputs.diff }}
             ```
-
-  flux-local-success:
-    needs: ["test", "flate", "diff"]
-    if: ${{ always() }}
-    name: Flux Local successful
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check flux-local status
-        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
-        run: exit 1

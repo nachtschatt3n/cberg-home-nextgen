@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.09.22`
-> Last Updated: `2026-09-22`
+> Version: `2026.09.23`
+> Last Updated: `2026-09-23`
 
 ## 1) Description
 
@@ -77,12 +77,19 @@ that SOP has the `vN`-rename fix and the detection command.
      `detect_breaking_changes`. Best-effort: if notes can't be fetched, this
      gate is skipped and the merge relies on G2 + G4 (logged explicitly).
   4. **G4 ci** — PR `mergeable == MERGEABLE` and every CI check green. The
-     repo's `flux-local` workflow renders every HelmRelease with Helm on each
-     PR, so green = the manifest actually renders. Pending checks → hold this
-     cycle (passes next cycle); failing checks → hold. The gate is
-     **all-or-nothing across the whole rollup**, so a red workflow that has
-     nothing to do with the bump still holds the PR — see §7 for the lane-wide
-     failure that hides behind a legitimate-looking per-PR hold.
+     render check is the **`Flate Render Gate`** job of
+     `.github/workflows/flux-local.yaml` (flate renders every HelmRelease and
+     Kustomization on each PR), so green = the manifest actually renders. The
+     EOL `flux-local test` job was retired 2026-09-23 (F-6b1dd22b); the file
+     keeps its name because the flux-local *diff* jobs still live there, and
+     they are not a gate. Pending checks → hold this cycle (passes next
+     cycle); failing checks → hold. The gate is **all-or-nothing across the
+     whole rollup** and **names no check** — nothing is required by name and
+     nothing is ignored by name — so a red workflow that has nothing to do
+     with the bump still holds the PR (see §7 for the lane-wide failure that
+     hides behind a legitimate-looking per-PR hold), and a check run that a
+     since-removed job left on the PR's head SHA still holds it until a fresh
+     run (reopen or rebase); the hold reason names that case explicitly.
 - **G5 age**: a supply-chain cooldown — nothing may land in the unattended
   nightly lane until it has been public for `minimum_release_age_hours` (48h,
   policy-set 2026-08-26). **Unknown age HOLDS, in both lanes.**
@@ -429,7 +436,8 @@ If failed:
 | Everything held with "deny-all fail-safe" | policy YAML missing/unparseable | fix `auto-update-policy.yaml`; it's the intended fail-safe |
 | Safe PR never merges | CI pending/failing, or not mergeable (conflict) | `gh pr checks <n>`; rebase/fix the PR; it retries next cycle |
 | `--apply` merged nothing on cron | no PR passed all four gates | expected; check the held reasons in `--json` |
-| `--apply` merges nothing for DAYS and EVERY PR is held `gate=ci` | Not the PRs — a **workflow-wide** `flux-local` failure. G4 needs the entire check rollup green, so one red workflow holds every Renovate PR at once and the whole PR lane is frozen; the direct-bump half (`coverage.py`) keeps shipping, so safe updates still appear to flow. Each individual hold reads as a legitimate "CI failing", which is why it ran 8 days unnoticed (F-00235e5c). | Diagnose the WORKFLOW, not the PR: `gh run list --workflow flux-local.yaml -L 10`. If the newest green run predates the holds, the fault is in `.github/workflows/flux-local.yaml` (or its pinned image) — rebasing, reopening or re-running the PRs changes nothing. |
+| `--apply` merges nothing for DAYS and EVERY PR is held `gate=ci` | Not the PRs — a **workflow-wide** render-gate failure (`Flate Render Gate`; historically `flux-local`). G4 needs the entire check rollup green, so one red workflow holds every Renovate PR at once and the whole PR lane is frozen; the direct-bump half (`coverage.py`) keeps shipping, so safe updates still appear to flow. Each individual hold reads as a legitimate "CI failing", which is why it ran 8 days unnoticed (F-00235e5c). | Diagnose the WORKFLOW, not the PR: `gh run list --workflow flux-local.yaml -L 10`. If the newest green run predates the holds, the fault is in `.github/workflows/flux-local.yaml` (or its pinned image) — rebasing, reopening or re-running the PRs changes nothing. |
+| A PR is held `gate=ci` on a check that is not a job in its workflow any more (the reason ends "stale check run on this head SHA") | The job was removed from `.github/workflows/*.yaml` (e.g. `Flux Local Test`, retired 2026-09-23) but GitHub keeps the check run it had already attached to the PR's head SHA, and nothing re-runs PR workflows when `main` changes. PR #219 carried `Flux Local Test=FAILURE` beside a green `Flate Render Gate` on the same SHA. | `gh pr close <n> && gh pr reopen <n>` (or tick Renovate's rebase box): the fresh `pull_request` run uses the current workflow and the stale check leaves the rollup; G4 clears next cycle. Do NOT teach G4 to ignore the name — that is a silent-green. |
 | Merge happened but no reconcile | `flux`/`kubectl` not on PATH in the sweep env | run under `sweep-run.py`/mise so tooling resolves |
 | Batch reverted repeatedly | a bump genuinely breaks the app | add it to the deny-list until fixed upstream |
 | A version-only patch bump held with `gate=parse` | Title matches neither the spanned nor the bare shape (grouped PR, hand-authored `bump image to sha-…`, major rendered `to v2`) | Expected — it is genuinely unattributable. Do NOT widen the regex to make one PR pass; route it through a maintenance-window plan. |
@@ -491,13 +499,14 @@ git revert --no-edit <merge-sha> && git push origin main
 - Policy (git-tracked deny-list): `runbooks/auto-update-policy.yaml`
 - Orchestrator hook: `.claude/agents/daily-operation.md` rule 4c
 - Version audit engine reused for G3: `runbooks/check-all-versions.py`
-- CI gate: `.github/workflows/flux-local.yaml`
+- CI render gate: `.github/workflows/flux-local.yaml` — job `flate`, check name `Flate Render Gate` (flux-local test retired 2026-09-23, F-6b1dd22b); shape pinned by `runbooks/tests/test-flate-gate-mitigations.py`, G4's stale-check diagnosis by `runbooks/tests/test-g4-stale-check-diagnosis.py`
 - Renovate config: `.github/renovate.json5`
 
 ## Version History
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.23 | 2026-09-23 | **flux-local test retired; the Flate Render Gate is the single render gate (F-6b1dd22b, operator decision).** The `Flux Local Test` and `Flux Local successful` jobs are gone from `.github/workflows/flux-local.yaml`; the flux-local *diff* jobs stay (they post PR diffs flate does not replace), so the file keeps its name. G4 needed no re-pointing — it never named a check; it holds on any non-green rollup entry — but a check run left on a PR's head SHA by a removed job outlives the job (PR #219: `Flux Local Test=FAILURE` beside a green `Flate Render Gate` on the same SHA), so `ci_state()` now appends "stale check run on this head SHA; reopen or rebase" to that hold reason. Verdict unchanged (hold). New Troubleshooting row. |
 | 2026.09.22 | 2026-09-22 | **Two gaps, both found by the SOP asserting something the code stopped doing.** (a) **G5 was documented as a commit-age rule only (F-b5445561)** — the SOP had zero mentions of `oci://` or artifact publish dates, although the engine has had a SECOND G5 implementation since 2026-09-07 and `_oci_chart_created()` since `5c53e313`. The no-PR direct-bump lane has no Renovate commit to measure, so it ages the ARTIFACT: Docker Hub `last_updated`, the OCI image config blob's `created` (youngest across every repo carrying the tag), chart `index.yaml` `created`, and for `oci://` charts the `org.opencontainers.image.created` annotation on the chart manifest. Documented under G5 with the fail-safe direction and why an unresolvable `oci://` age used to make the hold *permanent* rather than timed. Live-verified against `kube-prometheus-stack` 90.0.0 / 90.2.0 / a bogus version. (b) **Test 2b compared glob MEMBERSHIP only, so a wrong `max:` assertion passed (F-28c62378)** — the exact decay the 2026.09.13 entry below flagged as "Test 2b only checks glob MEMBERSHIP, so it cannot see a wrong Assert". It now parses each row's Assert cell and diffs the backticked `max:` against the rule's own key in both directions. Matrix resynced to policy `2026.09.22.1` — 27 globs, with `*authentik*` (`0193f2e4`) and `*valkey*` added. |
 | 2026.09.20 | 2026-09-20 | **The G4 item was split across the G5 bullet, so both gates read wrong (F-1025b8c2).** G4 ended mid-sentence on the word "The", and its continuation — the `flux-local` dependency and the pending-vs-failing outcomes — sat orphaned *after* G5's entire 20-line blockquote, where it read as a paragraph about the age cooldown. Re-split so each gate describes itself. Added the Troubleshooting row for the failure that mis-split helped hide: G4 is all-or-nothing across the check rollup, so a **workflow-wide** `flux-local` failure holds EVERY Renovate PR on `gate=ci` and freezes the whole PR lane while the direct-bump half keeps shipping. The SOP documented "failing checks → hold" only as a per-PR outcome and never as a lane-wide outage, so 8 days of legitimate-looking holds went unread (operational cause: F-00235e5c). |
 | 2026.09.13 | 2026-09-13 | **Test 2's matrix had drifted again — the failure mode the 2026.09.08 entry below claims to have closed.** Its own Test 2b check reported `MISSING: *k8s-gateway*, *n8n*`, and four Assert cells were stale: `*app-template*`, `*grafana*`, `*nextcloud-mcp*` were narrowed to `max: patch` on 2026-09-12 (`d147b1ce`) and `*nocodb*` earlier, yet all four still read "held at every update_type". Test 2b only checks glob MEMBERSHIP, so it cannot see a wrong Assert — the `max:` semantics still decay silently. Matrix resynced to policy `2026.09.12.1` (23 globs). Also documented the Renovate-side `followTag` channel lever. |

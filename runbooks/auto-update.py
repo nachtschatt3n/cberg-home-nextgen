@@ -42,9 +42,16 @@ Gates (all must pass) — see runbooks/auto-update-policy.yaml:
                 (the stricter measure — fail-closed) and say so in the log.
                 Unknown age on both measures HOLDS — a cooldown that cannot
                 be proven has not elapsed.
-  G4 ci       : PR mergeable + all required CI checks green. The repo's
-                flux-local workflow renders every HelmRelease with Helm on
-                each PR, so a green check means the manifest actually renders.
+  G4 ci       : PR mergeable + EVERY check in the PR's rollup green. No
+                check is required BY NAME and none is ignored by name. The
+                render check is the "Flate Render Gate" job of
+                .github/workflows/flux-local.yaml (flate renders every
+                HelmRelease/Kustomization on each PR; the EOL flux-local test
+                job was retired 2026-09-23, F-6b1dd22b), so a green rollup
+                means the manifest actually renders. A check run already on
+                a PR's head SHA outlives the job that produced it, so a
+                retired-and-red check keeps holding that PR until a fresh run
+                (reopen/rebase) — the hold reason names that case.
 
 APPLY GUARD — merges + git ops run ONLY when BOTH hold:
   * --apply is passed, AND
@@ -914,7 +921,53 @@ def age_gate(pr, parsed, policy, checker=None):
 
 
 # ── CI / mergeability (G4) ───────────────────────────────────────────────────
-def ci_state(number):
+# G4 names NO required check: it holds on ANY non-green entry in the rollup
+# (fail-closed — a check nobody anticipated can only hold, never pass). The one
+# way a check that "no longer runs" can still hold a PR is a check run already
+# attached to the PR's head SHA by a job that has since been removed from its
+# workflow file: GitHub keeps it until a fresh run replaces the rollup, and
+# nothing re-runs PR workflows when main changes. That is exactly what the
+# flux-local retirement left behind (F-6b1dd22b): PR #219 carried
+# `Flux Local Test=FAILURE` beside a green `Flate Render Gate` on the SAME SHA.
+# The verdict stays hold (no green CI = hold) — teaching G4 to ignore a name
+# would be a silent-green — but the reason names the cause and the remedy, so
+# the hold cannot pass for a legitimate per-PR CI failure for days (F-00235e5c).
+WORKFLOW_DIR = Path(__file__).resolve().parents[1] / ".github/workflows"
+
+
+def workflow_check_names(workflow_dir=WORKFLOW_DIR):
+    """{workflow display name: {job display names}} read from the repo's own
+    workflow files. A rollup entry whose (workflowName, name) pair is not in
+    here was produced by a job that no longer exists in that workflow."""
+    out = {}
+    for f in sorted(Path(workflow_dir).glob("*.y*ml")):
+        try:
+            wf = yaml.safe_load(f.read_text()) or {}
+        except Exception:
+            continue
+        jobs = wf.get("jobs") if isinstance(wf, dict) else None
+        if not isinstance(jobs, dict):
+            continue
+        out[str(wf.get("name") or f.stem)] = {
+            str(j.get("name") or jid) for jid, j in jobs.items() if isinstance(j, dict)}
+    return out
+
+
+def stale_check_note(check, defined):
+    """Pure. '' when the check's job still exists in its workflow file, or when
+    the check did not come from one of our workflows (nothing to judge); else a
+    diagnosis to append to the hold reason. Matrix legs report as 'Name (leg)'."""
+    wf = check.get("workflowName")
+    if not wf or wf not in defined:
+        return ""
+    name = str(check.get("name") or "")
+    if any(name == n or name.startswith(n + " (") for n in defined[wf]):
+        return ""
+    return (f" [no job named that in the '{wf}' workflow any more — a stale check run "
+            f"on this head SHA; reopen or rebase the PR for a fresh run]")
+
+
+def ci_state(number, defined=None):
     """Return (ok, detail). ok=True only when mergeable + every check succeeded."""
     rc, out, err = run([
         "gh", "pr", "view", str(number),
@@ -926,20 +979,23 @@ def ci_state(number):
     if d.get("mergeable") != "MERGEABLE":
         return False, f"not mergeable (mergeable={d.get('mergeable')}, state={d.get('mergeStateStatus')})"
     rollup = d.get("statusCheckRollup") or []
+    if defined is None:
+        defined = workflow_check_names()
     bad, pending = [], []
     for c in rollup:
         # CheckRun uses status/conclusion; StatusContext uses state
         concl = (c.get("conclusion") or c.get("state") or "").upper()
         status = (c.get("status") or "").upper()
         name = c.get("name") or c.get("context") or "check"
+        note = stale_check_note(c, defined)
         if status and status != "COMPLETED" and not concl:
-            pending.append(name)
+            pending.append(name + note)
         elif concl in {"SUCCESS", "NEUTRAL", "SKIPPED"}:
             continue
         elif concl in {"", "PENDING", "EXPECTED", "IN_PROGRESS", "QUEUED"}:
-            pending.append(name)
+            pending.append(name + note)
         else:
-            bad.append(f"{name}={concl}")
+            bad.append(f"{name}={concl}" + note)
     if bad:
         return False, "CI failing: " + ", ".join(bad)
     if pending:

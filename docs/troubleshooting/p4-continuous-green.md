@@ -130,8 +130,8 @@ cve_snapshot}`) — no schema migration.
 
 ## P4.4 — Hardening the auto path
 
-1. **kubeconform in CI** — add to `.github/workflows/flux-local.yaml` over
-   rendered output, in the required check; auto-merge "CI green" then means
+1. **kubeconform in CI** — add to the `Flate Render Gate` job in
+   `.github/workflows/flux-local.yaml` over flate's rendered output; auto-merge "CI green" then means
    rendering AND schema. Commission with a deliberately invalid field.
 2. **Snapshot-freshness gate (G6)** in `auto-update.py` —
    `version-check-current.md` older than 36h → AUTO demoted to HELD for that

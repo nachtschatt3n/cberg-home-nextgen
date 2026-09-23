@@ -35,7 +35,8 @@ uv = "latest"
 "aqua:aquasecurity/trivy" = "0.70.0"
 "aqua:yannh/kubeconform" = "0.8.0"
 # flate -- the Flux renderer/validator that flux-local's archived README points
-# at. Drives the render gate in .github/workflows/flux-local.yaml; keep this pin
+# at. Drives the SINGLE render gate (job `flate`, "Flate Render Gate") in
+# .github/workflows/flux-local.yaml since 2026-09-23 (F-6b1dd22b); keep this pin
 # and the action ref there in lockstep. No `aqua:` pin is possible (aqua-registry
 # carries no home-operations/*), and `ubi:` is deprecated for removal in mise
 # 2027.1.0, so use the `github:` backend. Renovate does not read .mise.toml in

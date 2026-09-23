@@ -447,8 +447,8 @@ Shape-A (`app-template`) caveats:
   offline `helm template` renders `v1alpha2`, which this cluster's CRD does not
   serve. Always pass
   `--api-versions gateway.networking.k8s.io/v1/HTTPRoute`, or you are
-  validating a shape the API would reject. This affects CI too (`flux-local
-  test` runs without cluster capabilities).
+  validating a shape the API would reject. This affects CI too (the
+  `Flate Render Gate` renders offline, without live cluster capabilities).
 
 ---
 

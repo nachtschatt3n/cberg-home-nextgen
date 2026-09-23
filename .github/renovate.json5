@@ -15,7 +15,7 @@
   // Run every night before 6am local (operator call 2026-09-14). Mon/Thu/weekend
   // left the nightly maintenance window (03:30) to land most safe updates via
   // the no-CI direct-bump lane; a nightly scan means a safe update usually has
-  // an open, flux-local-CI-checked PR by 03:30 and Step 0 merges that instead.
+  // an open, render-gate-checked PR (flate) by 03:30 and Step 0 merges that instead.
   // Latency is unchanged (the G5 release-age gate measures upstream age); this
   // only shifts volume into the stricter lane. Automerge stays github-actions-only.
   "schedule": ["before 6am every day"],
