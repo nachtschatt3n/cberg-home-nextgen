@@ -4932,6 +4932,32 @@ def _s10_flux_source_hygiene(f: Findings, checks: list[str]) -> None:
                          if pending else ""))
 
 
+def _cluster_admin_bindings(crbs):
+    """Classify every cluster-admin ClusterRoleBinding: (name, subjects, subject
+    names, verdict) with verdict in {"bootstrap", "flux", "tenant", "other"}. Pure, so the
+    loop above can be pinned without a cluster (F-eb998107)."""
+    out = []
+    for b in crbs.get("items", []) or []:
+        if (b.get("roleRef") or {}).get("name") != "cluster-admin":
+            continue
+        bname = (b.get("metadata") or {}).get("name", "?")
+        subs = b.get("subjects", []) or []
+        names = [s.get("name", "?") for s in subs]
+        if any(s.get("kind") == "Group" and s.get("name") == "system:masters" for s in subs):
+            verdict = "bootstrap"
+        elif any((s.get("namespace") or "") == "flux-system" for s in subs):
+            verdict = "flux"
+        elif any(s.get("name") == "flux-reconciler" for s in subs):
+            # the per-namespace tenant identities the impersonation plan
+            # creates (flux-reconciler-cluster-admin-<ns>): expected, but
+            # listed one by one so an untiered extra binding stays visible
+            verdict = "tenant"
+        else:
+            verdict = "other"
+        out.append((bname, subs, names, verdict))
+    return out
+
+
 def s10_flux_posture() -> tuple[str, Findings, str]:
     section_header(11, "Flux Security Posture")
     f = Findings()
@@ -5039,15 +5065,29 @@ def s10_flux_posture() -> tuple[str, Findings, str]:
             else:
                 checks.append(f"{OK} `{ns}/{name}`: no inline credentials")
 
-    # flux-operator cluster-admin — expected for GitOps; informational only (not WARNING)
+    # cluster-admin ClusterRoleBindings. The Flux bindings are expected for
+    # GitOps (informational) and Kubernetes' own bootstrap system:masters Group
+    # binding is skipped; EVERY OTHER cluster-admin binding is a WARNING naming
+    # subject and binding, so the register accepts it by title instead of the
+    # binding being invisible (F-eb998107: this loop had no else branch, so
+    # headlamp-admin and longhorn-support-bundle never produced a line while
+    # AR-008/AR-022 accepted titles nothing emitted).
     crbs = kubectl_json("get clusterrolebindings 2>/dev/null")
     if crbs:
-        for b in crbs.get("items", []):
-            if b["roleRef"]["name"] == "cluster-admin":
-                subjects = [s.get("name", "?") for s in b.get("subjects", [])]
-                if any("flux" in s.lower() for s in subjects):
-                    checks.append(f"{OK} flux-operator has cluster-admin (expected for GitOps)")
-                    cprint(C.GREEN, "  🟢 flux-operator has cluster-admin (expected for GitOps)")
+        for b in _cluster_admin_bindings(crbs):
+            bname, subs, names, verdict = b
+            if verdict == "bootstrap":
+                checks.append(f"{OK} `{bname}`: Kubernetes' own system:masters binding")
+            elif verdict == "flux":
+                checks.append(f"{OK} `{bname}` has cluster-admin ({', '.join(names)}; expected for GitOps)")
+                cprint(C.GREEN, f"  🟢 {bname} has cluster-admin (expected for GitOps)")
+            elif verdict == "tenant":
+                checks.append(f"{OK} `{bname}`: tenant reconciler identity ({', '.join(names)}; per-namespace, expected)")
+            else:
+                subj = ", ".join(names) or "?"
+                f.add(WARNING, f"{subj} cluster-admin ClusterRoleBinding `{bname}` — a non-Flux "
+                               f"subject holds cluster-admin; accept it on the register or narrow it")
+                cprint(C.YELLOW, f"  🟡 {bname}: cluster-admin for {subj}")
 
     # Flux source hygiene: scheme, consumers, namespace ownership (F-e805174a)
     _s10_flux_source_hygiene(f, checks)
