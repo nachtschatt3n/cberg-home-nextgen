@@ -1,8 +1,8 @@
 # SOP: Control Liveness — every control proves it can fire
 
 > Description: The convention every automation in this repo must follow — a one-time commissioning proof plus a standing staleness assertion — and the ledger that enforces it.
-> Version: `2026.08.26`
-> Last Updated: `2026-08-26`
+> Version: `2026.09.23`
+> Last Updated: `2026-09-23`
 > Owner: `cluster-ops`
 
 ---
@@ -168,6 +168,7 @@ here. **Next due: 2026-11-26.**
 | Date | What was restored | Outcome |
 |---|---|---|
 | 2026-08-26 | `postgresql-data-5g` backup of same morning (03:01), via `runbooks/backup-restore-proof.py` | **PROVEN** — postgres booted, 6 databases, smoke count on a live table returned rows; scratch fully torn down |
+| 2026-09-23 | `superset-pg-data` frozen keeper `backup-5876963a2bce454c` (2026-09-09 03:04 — the SINGLE surviving pre-pg18 Superset metadata backup, F-059aca4a), via `runbooks/backup-restore-proof.py --volume superset-pg-data --namespace databases --superuser superset --smoke-table superset.ab_user --keep`, booted under the digest-pinned `postgres:17.11-alpine` the retired deployment ran | **PROVEN** — postgres 17.11 booted, 4 databases, `ab_user`=2, `alembic_version`=`4b2a8c9d3e1f` identical to live `superset-pg18`; dashboards/slices/tables 1/10/10 identical. Scratch `restoreproof-09231430` (pod, PVC, PV, Longhorn volume) deleted by exact name, no `restore-proof=true` leftovers, `superset-pg18-data` attached/healthy throughout, keeper still Completed and still the BackupVolume `lastBackupName` |
 
 ---
 
@@ -176,3 +177,4 @@ here. **Next due: 2026-11-26.**
 | Version | Date | Change |
 |---|---|---|
 | `2026.08.26` | 2026-08-26 | Created (P3.2): convention + ledger + doc-check s10 enforcement. |
+| `2026.09.23` | 2026-09-23 | Restore Drill Log: superset pre-pg18 keeper backup proven (F-059aca4a). |
