@@ -1,8 +1,8 @@
 # SOP: external-dns — public DNS publication (Cloudflare, `policy: sync`)
 
 > Description: How public DNS records for this cluster are created, changed and destroyed by external-dns, why `policy: sync` makes a failed *create* a total outage rather than a no-op, and the version/annotation traps that have taken public DNS down twice in two days.
-> Version: `2026.09.22`
-> Last Updated: `2026-09-22`
+> Version: `2026.09.23`
+> Last Updated: `2026-09-23`
 > Owner: `homelab-sre`
 
 ---
@@ -329,7 +329,17 @@ the bump — use it only if the Gateway commit cannot land.
 #    has already deleted the old records by the time the create is rejected
 # ❌ adding --default-targets as the "fix" — crd-source only; the outage repeats
 # ❌ putting external-dns.alpha.kubernetes.io/target on an HTTPRoute — inert
-# ❌ creating a record by hand in the Cloudflare UI — deleted at next reconcile
+# ❌ creating a DATA record (A/CNAME) by hand in the Cloudflare UI — deleted at
+#    next reconcile. NARROW CARVE-OUT (2026-09-23, plan external-dns-unowned-
+#    cnames): a correctly-formed REGISTRY TXT `k8s.cname-<host>` with content
+#    "heritage=external-dns,external-dns/owner=default,external-dns/resource=
+#    httproute/<ns>/<route>" written out-of-band for a hostname that HAS a live
+#    envoy-external HTTPRoute is NOT reaped — it becomes the ownership marker
+#    (registry/txt/registry.go Records() consumes it into the label map) and
+#    adopts the existing CNAME with zero churn. Writing one for a hostname with
+#    NO live source makes the very next sync DELETE that CNAME (the echo-server
+#    trap). Verify adoption on external_dns_registry_endpoints_total staying at
+#    its baseline, never on the log line alone.
 # ❌ removing an entry from `sources:` while objects of that kind still exist
 ```
 
@@ -613,6 +623,12 @@ v0.22+), then the tunnel (`docs/sops/cloudflare.md`).
 
 ## Version History
 
+- `2026.09.23`: §5 Example C carve-out — a well-formed out-of-band REGISTRY TXT
+  (`k8s.cname-<host>`) for a hostname with a live envoy-external HTTPRoute is
+  adopted, not reaped; only DATA records are reaped. Recorded because the
+  2026-09-23 adoption of the 7 unowned public CNAMEs (plan
+  external-dns-unowned-cnames, Path A) is exactly that operation, and the
+  unamended text would have told the executor it was forbidden.
 - `2026.09.22`: post-bump accuracy pass — the SOP still described a pre-1.22.0
   world. Corrected the §2 Overview rows to the **live** state (chart 1.22.0 /
   image v0.22.0, verified 2026-09-22; the **GA** key is the one the running
