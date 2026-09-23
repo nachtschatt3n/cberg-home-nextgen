@@ -121,7 +121,7 @@ backup_gate: "on-demand Longhorn backup of the jellyfin-config volume (holds jel
   storage) — NOT `backup-of-all-volumes`, which does not exist. See §3 step 4 and §5."
 finding_refs: [F-fc5e2913, F-3a72570a]
 status: awaiting-go   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
-window: "sun-attended:2026-10-11"   # 2026-09-15: moved off 10-04: reconciler RISK-CLASS STACKING — two backup-restore plans (frigate, jellyfin) in one slot leaves no rollback capacity; jellyfin has the heavier prerequisite list
+window: "sat-attended:2026-10-10"   # 2026-09-23: moved off 10-11 (flux-reconciler-impersonation is exclusive there; media-audit-durable-output left 10-10 by executing early). Earlier, 2026-09-15: moved off 10-04: reconciler RISK-CLASS STACKING — two backup-restore plans (frigate, jellyfin) in one slot leaves no rollback capacity; jellyfin has the heavier prerequisite list
 premises:
   - id: image-is-still-10.11.11
     why: >-

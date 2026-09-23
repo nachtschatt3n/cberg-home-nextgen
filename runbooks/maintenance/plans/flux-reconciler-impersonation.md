@@ -182,8 +182,8 @@ premises:                             # read 2026-09-22 ~15:00Z; 10/10 PASS at a
       | jq 'map(select(.status == "False"))'
       | jq 'length'
     expect_exact: "0"
-status: draft
-window: null                          # the window agent assigns; see section 6 for
+status: awaiting-go   # reviewed 2026-09-23 (needs-fix -> both blocking gate fixes applied below)
+window: "sun-attended:2026-10-11"   # scheduled 2026-09-23 per the review: earliest reboot-free attended slot; needs a fresh GO on the day
                                       # the slot shape (attended, exclusive, no reboot).
 sops_refs:
   - docs/sops/application-update.md
@@ -631,7 +631,7 @@ mise exec -- yq '.resources' kubernetes/apps/flux-system/kustomization.yaml
 mise exec -- kubectl kustomize $D/app | grep -c '^kind:'
 # EXPECT: 56  (2 ClusterRole + 18 ServiceAccount + 18 RoleBinding + 17 ClusterRoleBinding + 1 Kustomization)
 mise exec -- kubectl kustomize $D/app | grep -c 'namespace: flux-system$'
-# EXPECT: 4  (flux-system's SA, its RoleBinding, and the two subjects that name it) — NOT 53.
+# EXPECT: 5  (flux-system's SA, its RoleBinding, and the two subjects that name it) — NOT 53.
 mise exec -- task kubeconform
 
 printf 'feat(flux): per-namespace flux-reconciler identities + tiered RBAC (stage A of F-7b847e3e)\n\nInert until --default-service-account renders (stage C). Adds ServiceAccount\nflux-reconciler + RoleBinding in the 18 namespaces that host a Kustomization or\nHelmRelease, cluster-admin CRBs for the 9 platform namespaces whose content\nowns ClusterRoles/CRDs/webhooks, PV/StorageClass CRBs for the 8 storage-owning\napp namespaces, and a window-scoped impersonation probe in kube-public.\n\nPlan: runbooks/maintenance/plans/flux-reconciler-impersonation.md\n' > /tmp/msg-a.txt
@@ -949,7 +949,7 @@ mise exec -- kubectl get helmrelease -n download -o custom-columns='NAME:.metada
 fluxlog kustomize-controller 15m | grep -E 'distinct|forbidden|FORBIDDEN'
 fluxlog helm-controller 15m      | grep -E 'distinct|forbidden|FORBIDDEN'
 # PASS: forbidden/unauthorized lines: 0 on both. Any FORBIDDEN line = stop, revert B1 (section 5.3).
-mise exec -- kubectl logs -n flux-system deploy/kustomize-controller --since=15m | grep -c '"namespace":"download".*server-side apply completed'
+mise exec -- kubectl logs -n flux-system deploy/kustomize-controller --since=15m | grep -c 'server-side apply completed.*"namespace":"download"'
 # PASS: >= 2 (one per Kustomization). 0 means the generation bump did not reconcile — do not proceed.
 
 # B1-NEG — scope is REAL (same SA, different namespace / cluster scope):
@@ -967,7 +967,7 @@ mise exec -- kubectl get kustomization -n flux-system cluster-meta cluster-apps 
 # PASS: both SA=flux-reconciler, GEN==OBS, READY=True. FAIL: cluster-apps READY=False "... is forbidden: User "system:serviceaccount:flux-system:flux-reconciler" ..." — the cluster-admin CRB for flux-system is wrong; section 5.3, NOT Stage C.
 
 # B2-2 — it actually re-applied its 200+ objects (Namespaces, per-ns secrets, child Kustomizations)
-mise exec -- kubectl logs -n flux-system deploy/kustomize-controller --since=10m | grep -c '"Kustomization":{"name":"cluster-apps","namespace":"flux-system"}.*server-side apply completed'
+mise exec -- kubectl logs -n flux-system deploy/kustomize-controller --since=10m | grep -c 'server-side apply completed.*"Kustomization":{"name":"cluster-apps","namespace":"flux-system"}'
 # PASS: >= 1
 fluxlog kustomize-controller 10m | grep -E 'forbidden|FORBIDDEN'      # PASS: forbidden/unauthorized lines: 0
 
@@ -1178,7 +1178,7 @@ which git cannot reach the cluster.
    cluster-scoped objects), regenerate, commit BEFORE the app", and
    `runbooks/health-check.sh` should assert `namespaces hosting ks/hr ⊆
    namespaces with serviceaccount/flux-reconciler` every sweep. Neither edit
-   is a window action; both are owed the same day.
+   is a window action; both are owed the BEFORE the window (reviewer 2026-09-23: any namespace outside the tenant generator stops reconciling at Stage C).
 2. **Demote `default` and `ai` from Tier A** by moving homepage's and
    ai-sre/mcpo's ClusterRole/ClusterRoleBinding under a flux-system-owned
    Kustomization (as `flux-reconciler-rbac` already is). Both are
