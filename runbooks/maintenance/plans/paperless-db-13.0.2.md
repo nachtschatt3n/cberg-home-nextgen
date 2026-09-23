@@ -30,8 +30,10 @@ touches:
                                                 # the Longhorn control plane.
 depends_on: []
 conflicts_with: [bitnamilegacy-exit-nextcloud-db, paperless-ngx-3.2.0,
-                 external-dns-unowned-cnames, jellyfin-12.1, media-naming-p3,
+                 jellyfin-12.1, media-naming-p3,
                  n8n-2.39.8, nextcloud-34.0.4, nocodb-2026.09.0]
+                 # 2026-09-23: external-dns-unowned-cnames removed from this list — it EXECUTED
+                 # (57280084) and was retired; a ref to a missing plan is an unenforced guard.
                                       # ROLLBACK-CLASS STACKING, added 2026-09-21 as a
                                       # consequence of unblocking this plan. Until today it
                                       # was `blocked`, so it was not in the live

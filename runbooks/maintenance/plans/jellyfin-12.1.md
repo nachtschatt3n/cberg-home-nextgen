@@ -66,7 +66,8 @@ touches:
                                         # reuse this spelling in every GPU-touching plan.
 depends_on: []
 conflicts_with:
-  - media-audit-durable-output        # NEW 2026-09-15: that plan (vetted,
+  # - media-audit-durable-output      # REMOVED 2026-09-23: that plan EXECUTED (960f3d4e) and was retired,
+                                      # so the shared edit target no longer collides. Original note kept below:
                                       # sat-attended:2026-09-19) ALSO edits
                                       # configmap/library-tools-scripts. Two plans rewriting
                                       # the same ConfigMap in one window is exactly the
