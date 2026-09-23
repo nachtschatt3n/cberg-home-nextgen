@@ -51,13 +51,20 @@ premises:                             # F-9404f24b (2026-09-22). depends_on used
       premise refuses on 2026-09-16 and passes on 2026-09-23 -- a static date
       would pass the moment the chart landed. 604800 = 7 * 86400. A chart other
       than 1.22.0 yields NO output (select), which plan-premises.py reads as a
-      failure, never as a pass.
+      failure, never as a pass. CORRECTED 2026-09-23 (review): reads the
+      EARLIEST 1.22.0 lastDeployed across the whole history, not history[0],
+      so the §6.2 registry pin (a new Helm revision of the same chart) cannot
+      reset the soak; `select(. != null)` guards `min` of an empty array,
+      because jq's `null + 604800` is a number and would have printed SOAKED
+      for a chart that was never deployed.
     run: >-
       kubectl get helmrelease -n network external-dns -o json
-      | jq '.status.history[0]'
-      | jq 'select(.chartVersion == "1.22.0")'
-      | jq '.lastDeployed[0:19] + "Z"'
-      | jq 'fromdateiso8601'
+      | jq '.status.history'
+      | jq 'map(select(.chartVersion == "1.22.0"))'
+      | jq 'map(.lastDeployed[0:19] + "Z")'
+      | jq 'map(fromdateiso8601)'
+      | jq 'min'
+      | jq 'select(. != null)'
       | jq -r 'if . + 604800 <= now then "SOAKED chart=1.22.0 deployed-epoch=\(.) soak-until-epoch=\(. + 604800) now-epoch=\(now)" else "NOT-SOAKED chart=1.22.0 deployed-epoch=\(.) soak-until-epoch=\(. + 604800) now-epoch=\(now)" end'
     expect_matches: "^SOAKED chart=1\\.22\\.0 "
   - id: pod-runs-v0.22.0
@@ -118,7 +125,12 @@ backup_gate: >-
   the failure this catches;
   (b) assert the export contains all 8 target CNAMEs BY NAME with non-empty
   content — an export that parsed but lost the very records at risk is not a
-  backup;
+  backup — AND (added 2026-09-23 review) that each of the 7 adoption targets is
+  `proxied: true` with `content` identical to an owned record's content (the
+  `jellyfin` CNAME): plan.go:303-304 emits an in-place Update the moment an
+  adopted record differs from desired in target or proxied flag, so a mismatch
+  means adoption would CHANGE the CNAME and "delete the TXT" would no longer be
+  a byte-identical rollback. Any mismatch → do not adopt that host, re-diagnose;
   (c) prove the export is USABLE, not merely present: pick one record from it and
   reconstruct the exact API call that would recreate it (`--dry-run` / print
   only, do not send). If the export cannot be turned back into a create call, it
@@ -127,8 +139,13 @@ backup_gate: >-
   `All records are already up to date` for the last 3 consecutive reconciles —
   i.e. the controller is quiescent before we perturb its registry.
   If any of (a)-(d) fails, write nothing.
-status: draft                         # PROPOSED, not approved. The window below
-                                      # is a capacity claim, not a granted go.
+status: vetted                        # VETTED 2026-09-23: plan-reviewer-agent verdict
+                                      # needs-fix -> ready-for-go on two file-only gate
+                                      # corrections (Assertion 1 discriminator, backup_gate
+                                      # (b) proxied/content assertion), both applied in the
+                                      # same change together with the premise `min` fix.
+                                      # Operator GO recorded for an attended on-demand run
+                                      # on 2026-09-23 (soak premise passed 2026-09-22T17:03Z).
 window: "sat-attended:2026-10-03"     # see §2 for why deliberately NOT sooner.
                                       # Attended; empty slot; separated by a week
                                       # from wazuh-2xx-edge-coverage (09-26) so
@@ -408,7 +425,10 @@ credibility permanently.
 `kubernetes/apps/network/external/external-dns/helmrelease.yaml`. Under
 `--policy=sync`, a chart-side change of that default would orphan the entire
 registry silently — the same class of failure this plan exists to fix, at 25×
-the scale. Pin it explicitly.
+the scale. Pin it explicitly. Run this ONLY after all seven adoptions have
+verified, and never split the adoptions across it: it creates a new Helm
+revision, and the soak premise deliberately reads the EARLIEST 1.22.0
+lastDeployed so that this pin cannot reset the soak (2026-09-23 review).
 
 ```bash
 mise exec -- task kubeconform
@@ -483,6 +503,19 @@ CONTENTS ASSERTION 1 — ownership is REAL, not merely present.
   controller log still reads `All records are already up to date` on the next
   two reconciles with external_dns_registry_errors_total unchanged at 0.
   "The TXT exists" alone is the shape check that ErrInvalidHeritage passes.
+  DISCRIMINATOR (added 2026-09-23 review): the log line and errors_total above
+  ALSO pass on the silent ErrInvalidHeritage case, so on their own they cannot
+  fail on the failure this assertion exists to catch. The one scraped
+  observable that separates adoption from non-adoption is
+  external_dns_registry_endpoints_total (controller.go:83 = len(regRecords);
+  registry.go:226-230 appends a NON-parsing TXT to the endpoint list instead of
+  consuming it into the label map). Record it before the first write —
+  baseline measured 2026-09-23: 27 (26 CNAME + 1 A, all 31 TXTs consumed).
+  After each adoption wait >= 2 reconciles (>= 2 min) and assert it is EXACTLY
+  the baseline; 28 means the TXT came back as an unowned plain endpoint →
+  delete that TXT, fix the string, retry. Per-host and API-free:
+  `dig +short @1.1.1.1 TXT k8s.cname-<host>.$D` prints the heritage string
+  once written and nothing before.
 
 CONTENTS ASSERTION 2 — the hostname still resolves and routes PUBLICLY.
   Edge-pinned, per host, before and after:
@@ -499,9 +532,12 @@ CONTENTS ASSERTION 2 — the hostname still resolves and routes PUBLICLY.
 
 CONTENTS ASSERTION 3 — flux-webhook still delivers, not merely answers.
   After adopting flux-webhook, push a trivial commit and confirm Flux reconciles
-  on the webhook rather than on the interval: check the receiver's
-  lastHandledReconcileAt / the Receiver resource's status advances within
-  seconds. An HTTP code proves the name resolves; it does not prove GitOps
+  on the webhook rather than on the interval:
+  `kubectl -n flux-system get gitrepository flux-system -o jsonpath='{.status.lastHandledReconcileAt}'`
+  must advance within seconds of the push (corrected 2026-09-23: the Receiver's
+  own status carries only conditions/observedGeneration/webhookPath — the
+  field that moves on a webhook is on the GitRepository). An HTTP code proves
+  the name resolves; it does not prove GitOps
   reconciliation-on-push survived, which is the entire reason this hostname
   matters.
 
