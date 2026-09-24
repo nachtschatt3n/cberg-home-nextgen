@@ -834,10 +834,22 @@ class VersionChecker:
                              reason, **kwargs)
 
     def load_helmrepositories(self):
-        """Load all HelmRepository definitions."""
-        repos_dir = self.kubernetes_dir / "flux" / "meta" / "repositories" / "helm"
-        
-        for repo_file in repos_dir.glob("*.yaml"):
+        """Load all HelmRepository definitions.
+
+        BOTH `repositories/helm/` and `repositories/oci/` hold HelmRepository
+        CRs (the `oci/` ones are `spec.type: oci`). Until 2026-09-24 only
+        `helm/` was globbed, so every chart sourced from an OCI HelmRepository
+        (bitnami, controlplaneio, coredns, librechat, n8n, spegel, stakater)
+        fell into get_latest_chart_version()'s silent `repo_name not in
+        self.helm_repositories` branch: printed "could not check latest",
+        recorded no degradation, emitted no finding — a fail-open that hid a
+        bitnami mariadb chart MAJOR among others.
+        """
+        repos_root = self.kubernetes_dir / "flux" / "meta" / "repositories"
+        repo_files = sorted(
+            f for sub in ("helm", "oci") for f in (repos_root / sub).glob("*.yaml"))
+
+        for repo_file in repo_files:
             try:
                 with open(repo_file, 'r') as f:
                     doc = yaml.safe_load(f)
