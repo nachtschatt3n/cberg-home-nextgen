@@ -28,29 +28,49 @@ rollback_class: one-way    # DECLARED 2026-09-06. The plan's own risk note says
                           # recovery is a restore, not a commit. Same shape as
                           # superset-pg-decommission, which used one-way.
                           # Correctly stays HUMAN-GATED, and is awaiting-soak.
-status: awaiting-soak                 # do NOT run until the soak below is satisfied
-                                      # DEFERRED 2026-09-23 (attended on-demand run, operator
-                                      # asked for it): NOT executable under the window contract
-                                      # — declares NO premises (required since 2026-09-14) and
-                                      # awaiting-soak is refused by run-now.py. Live pre-checks
-                                      # that day, read-only: all 6 authentik server/worker pods
-                                      # AUTHENTIK_POSTGRESQL__HOST=authentik-pg; the 17.11 pod
-                                      # has 0 client backends and its newest user last_login is
-                                      # 2026-08-19 (pre-cutover); cronjob-channels-cleanup targets
-                                      # authentik-pg; PV data-authentik-postgresql-0 Retain,
-                                      # longhorn-static, no subdir key, daily backups Completed
-                                      # through 2026-09-23; authentik-pg-data has its own daily
-                                      # backups (gate 2 met); AR-080 enabled (gate 4 met). The
-                                      # operator's ask also DELETES the PVC in the same step,
-                                      # while step 3 below keeps it one more backup cycle — the
-                                      # planner must reconcile that scope and encode gates 1-4
-                                      # as premises before a reviewer vets it. go_no_go issue
-                                      # ingested (defer,deny) naming `no premises declared`.
-window: null
+status: awaiting-go   # 2026-09-24: gates 1, 2 encoded as premises (gate 3 is the post-step login check, gate 4 AR-080 is enabled);
+                      # operator asked for the StatefulSet AND the PVC to go (2026-09-23). Soak long satisfied.
+window: "sat-attended:2026-09-26"   # slotted 2026-09-24 so awaiting-go is valid; operator asked for it now, so a NOW run may take it first
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 # (original rationale: destroys the rollback path)
 security_ref: null
+premises:
+  # Gates 1-4 of the plan body, machine-checked (added 2026-09-24; pipe-free jq
+  # stages because plan-premises splits on | and refuses > <). Run ONCE,
+  # before step 1: after step 1 the StatefulSet is gone and premise 3's PVC
+  # read fails by design.
+  - id: soak-7d-on-authentik-pg
+    why: "Gate 1: authentik-pg has served for >= 7 days (cutover 2026-08-20)."
+    run: kubectl get deploy -n kube-system authentik-pg -o jsonpath='{.metadata.creationTimestamp}' | jq -R 'now - fromdate' | jq '. / 86400' | jq floor
+    expect_matches: '^([7-9]|[1-9][0-9]+)$'
+  - id: every-authentik-pod-uses-authentik-pg
+    why: >-
+      No server or worker pod still points at the bundled DB. Prints the unique
+      set of AUTHENTIK_POSTGRESQL__HOST values; any second value (or none) fails.
+    run: kubectl get pods -n kube-system -l app.kubernetes.io/name=authentik -o json | jq -c '.items[].spec.containers[].env[]?' | grep AUTHENTIK_POSTGRESQL__HOST | sort -u
+    expect_exact: '{"name":"AUTHENTIK_POSTGRESQL__HOST","value":"authentik-pg"}'
+  - id: no-other-pod-references-the-old-db
+    why: >-
+      Nothing else in the cluster (probes, cronjobs, apps) carries the old
+      service name in its env. Counts pods other than the StatefulSet's own.
+    run: kubectl get pods -A -o json | jq -c '.items[]' | grep -v '"name":"authentik-postgresql-0"' | grep -c authentik-postgresql
+    expect_exact: "0"
+  - id: old-volume-retain-and-backed-up-within-26h
+    why: >-
+      Gate for deleting the PVC in the same run: the old volume is Retain on
+      longhorn-static AND has a Completed Longhorn backup newer than 26h (the
+      daily 03:00 job plus slack). Without it the PVC stays one more cycle.
+    run: kubectl get backups.longhorn.io -n storage -o json | jq -c '.items[].status' | grep '"volumeName":"data-authentik-postgresql-0"' | grep '"state":"Completed"' | jq -r .backupCreatedAt | sort | tail -1 | jq -R 'now - fromdate' | jq '. / 3600' | jq floor
+    expect_matches: '^([0-9]|1[0-9]|2[0-5])$'
+  - id: old-pv-is-retain
+    why: "Deleting the PVC must leave the PV and the Longhorn volume intact."
+    run: kubectl get pv data-authentik-postgresql-0 -o jsonpath='{.spec.persistentVolumeReclaimPolicy} {.spec.storageClassName}'
+    expect_exact: Retain longhorn-static
+  - id: new-volume-backed-up-within-26h
+    why: "Gate 2: authentik-pg-data has its own Completed backup newer than 26h."
+    run: kubectl get backups.longhorn.io -n storage -o json | jq -c '.items[].status' | grep '"volumeName":"authentik-pg-data"' | grep '"state":"Completed"' | jq -r .backupCreatedAt | sort | tail -1 | jq -R 'now - fromdate' | jq '. / 3600' | jq floor
+    expect_matches: '^([0-9]|1[0-9]|2[0-5])$'
 sops_refs:
   - docs/sops/longhorn.md
   - docs/sops/backup.md
@@ -97,9 +117,14 @@ one-command rollback into a restore-from-backup. Require all of:
    pin block + its comment. Leave `AUTHENTIK_POSTGRESQL__HOST: authentik-pg`.
 2. Push, let Flux reconcile, confirm authentik stays healthy (it is not touching
    the old DB, so this should be a no-op for the app).
-3. The PVC `data-authentik-postgresql-0` is Longhorn with `Retain` — deleting the
-   StatefulSet does not delete the data. Keep the PV for one more backup cycle,
-   then remove it deliberately.
+3. Delete the PVC `data-authentik-postgresql-0` in this run (operator ask,
+   2026-09-23) — gated by premise `old-volume-retain-and-backed-up-within-26h`:
+   the PV is `Retain`, so the PV and the Longhorn volume survive the PVC delete,
+   and a Completed backup newer than 26h exists. Run the storage-safety
+   pre-flight one-liner from CLAUDE.md first (Longhorn, no subdir). Delete the
+   PV and the Longhorn volume only after the next daily backup of NOTHING else
+   is needed: leave them, and NEVER delete the backup — it is the recovery
+   floor once `~/db-dumps` is purged in step 5.
 4. Disable AR-080 (`postgres:17.`) once no 17.11 image runs anywhere.
    AR-112 (`postgres:18.`) stays — it carries the same gosu argument forward.
 5. `rm -P ~/db-dumps/authentik-pg17-*.dump` — it holds password hashes, MFA
@@ -143,4 +168,5 @@ hunting for a pod that no longer exists. In the SAME change:
 ## Rollback
 
 Set `postgresql.enabled: true` again. The PV is `Retain`, so the data survives;
-the StatefulSet re-binds it. This is why step 3 keeps the PV.
+after the PVC delete, re-create the PVC bound to the Released PV (clear its
+`claimRef` first) or restore the kept Longhorn backup into a new volume.
