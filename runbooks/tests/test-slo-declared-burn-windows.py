@@ -149,8 +149,10 @@ check("defects() covers every declared window (a negative 3d burn is a defect)",
 print("\n-- the script emits the finding --")
 src = (ROOT / "runbooks" / "slo-check.py").read_text()
 write_block = src[src.find("    if write:"):src.find("    elif args.no_write:")]
-check("the write block gates on fast burns and emits a stable-titled finding",
-      "fast_burns(slo, snap)" in src and "if exhausted or defective or fast:" in write_block
+# The writer now opens on every write run (F-4f717f3f), so the check is that
+# fast burns are EMITTED, not that they gate the writer.
+check("the write block emits a stable-titled finding for every fast burn",
+      "fast_burns(slo, snap)" in src and "for s, fb in fast:" in write_block
       and "SLO fast burn: `{s.slo_name}` over {fb['long']}" in write_block)
 check("no hardcoded burn window survives in the evaluator",
       'windowed_ratio(q, "1h")' not in src and 'windowed_ratio(q, "6h")' not in src)

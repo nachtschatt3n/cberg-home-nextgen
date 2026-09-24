@@ -287,83 +287,88 @@ def _main_impl(args) -> int:
         # backticked name and the window, so it fingerprints stably per SLO
         # and window; the numbers live in action + metadata.
         fast = [(s, fb) for s in snaps for fb in burning.get(s.slo_name, [])]
-        if exhausted or defective or fast:
-            fw = FindingsWriter(dsn=args.postgres_dsn, section="slo", producer="script")
-            try:
-                for s, fb in fast:
-                    fid = fw.emit(
-                        "warning",
-                        f"SLO fast burn: `{s.slo_name}` over {fb['long']} exceeds "
-                        f"its declared burn-rate threshold",
-                        action=(
-                            f"Investigate {s.slo_name}: burning {fb['burn_long']:.2f}x "
-                            f"the budget rate over {fb['long']} (declared threshold "
-                            f"{fb['threshold']}x); the {fb['short']} window reads "
-                            f"{'—' if fb['burn_short'] is None else f'{fb['burn_short']:.2f}x'} "
-                            f"({fb['state']}). Compliance {s.compliance_pct:.3f}% vs target "
-                            f"{s.target_pct:.2f}% over {s.window_size}; budget "
-                            f"{s.budget_remaining_pct:+.1f}%."
-                        ),
-                        subsection=s.slo_name,
-                        metadata={
-                            "window_long": fb["long"], "window_short": fb["short"],
-                            "threshold": fb["threshold"],
-                            "burn_long": fb["burn_long"], "burn_short": fb["burn_short"],
-                            "state": fb["state"],
-                            "burn_rates": s.burn_rates,
-                            "compliance_pct": s.compliance_pct,
-                            "budget_remaining_pct": s.budget_remaining_pct,
-                            "window": s.window_size,
-                        },
-                    )
-                    print(f"  ⚠ finding {fid}: fast burn over {fb['long']} for {s.slo_name}")
-                for s in exhausted:
-                    fid = fw.emit(
-                        "warning",
-                        f"SLO error budget exhausted: {s.slo_name}",
-                        action=(
-                            f"Investigate {s.slo_name}: compliance "
-                            f"{s.compliance_pct:.3f}% vs target {s.target_pct:.2f}% "
-                            f"over {s.window_size}; budget {s.budget_remaining_pct:+.1f}%."
-                        ),
-                        subsection=s.slo_name,
-                        metadata={
-                            "compliance_pct": s.compliance_pct,
-                            "target_pct": s.target_pct,
-                            "budget_remaining_pct": s.budget_remaining_pct,
-                            "burn_rate_1h": s.burn_rate_1h,
-                            "burn_rate_6h": s.burn_rate_6h,
-                            "window": s.window_size,
-                        },
-                    )
-                    print(f"  ⚠ finding {fid}: budget exhausted for {s.slo_name}")
-                for s, ds in defective:
-                    fid = fw.emit(
-                        "warning",
-                        # Backticked name → stable fingerprint across cycles.
-                        f"SLO definition defect: `{s.slo_name}` produced an "
-                        f"impossible value",
-                        action=(
-                            f"Fix the SLO query for {s.slo_name}: "
-                            + "; ".join(ds)
-                            + ". Bound the numerator (e.g. max(...) not "
-                            "sum(...) across replicas) so compliance stays in "
-                            "[0,1]. Edit via runbooks/policy-cli.py slo update."
-                        ),
-                        subsection=s.slo_name,
-                        metadata={
-                            "defects": ds,
-                            "compliance_pct": s.compliance_pct,
-                            "burn_rate_1h": s.burn_rate_1h,
-                            "burn_rate_6h": s.burn_rate_6h,
-                            "raw_numerator": s.raw_numerator,
-                            "raw_denominator": s.raw_denominator,
-                            "window": s.window_size,
-                        },
-                    )
-                    print(f"  ‼ finding {fid}: definition defect for {s.slo_name}")
-            finally:
-                fw.close()
+        # Open the writer on EVERY write run, not only when there is something
+        # to emit (F-4f717f3f): close() is what records notes.completed.slo, so
+        # a clean run that never opened it left the board rendering the SLO
+        # section as DID NOT REPORT despite the snapshots written above. A
+        # clean close also auto-resolves last cycle's SLO findings, which is
+        # the correct reading of "section ran, nothing to report".
+        fw = FindingsWriter(dsn=args.postgres_dsn, section="slo", producer="script")
+        try:
+            for s, fb in fast:
+                fid = fw.emit(
+                    "warning",
+                    f"SLO fast burn: `{s.slo_name}` over {fb['long']} exceeds "
+                    f"its declared burn-rate threshold",
+                    action=(
+                        f"Investigate {s.slo_name}: burning {fb['burn_long']:.2f}x "
+                        f"the budget rate over {fb['long']} (declared threshold "
+                        f"{fb['threshold']}x); the {fb['short']} window reads "
+                        f"{'—' if fb['burn_short'] is None else f'{fb['burn_short']:.2f}x'} "
+                        f"({fb['state']}). Compliance {s.compliance_pct:.3f}% vs target "
+                        f"{s.target_pct:.2f}% over {s.window_size}; budget "
+                        f"{s.budget_remaining_pct:+.1f}%."
+                    ),
+                    subsection=s.slo_name,
+                    metadata={
+                        "window_long": fb["long"], "window_short": fb["short"],
+                        "threshold": fb["threshold"],
+                        "burn_long": fb["burn_long"], "burn_short": fb["burn_short"],
+                        "state": fb["state"],
+                        "burn_rates": s.burn_rates,
+                        "compliance_pct": s.compliance_pct,
+                        "budget_remaining_pct": s.budget_remaining_pct,
+                        "window": s.window_size,
+                    },
+                )
+                print(f"  ⚠ finding {fid}: fast burn over {fb['long']} for {s.slo_name}")
+            for s in exhausted:
+                fid = fw.emit(
+                    "warning",
+                    f"SLO error budget exhausted: {s.slo_name}",
+                    action=(
+                        f"Investigate {s.slo_name}: compliance "
+                        f"{s.compliance_pct:.3f}% vs target {s.target_pct:.2f}% "
+                        f"over {s.window_size}; budget {s.budget_remaining_pct:+.1f}%."
+                    ),
+                    subsection=s.slo_name,
+                    metadata={
+                        "compliance_pct": s.compliance_pct,
+                        "target_pct": s.target_pct,
+                        "budget_remaining_pct": s.budget_remaining_pct,
+                        "burn_rate_1h": s.burn_rate_1h,
+                        "burn_rate_6h": s.burn_rate_6h,
+                        "window": s.window_size,
+                    },
+                )
+                print(f"  ⚠ finding {fid}: budget exhausted for {s.slo_name}")
+            for s, ds in defective:
+                fid = fw.emit(
+                    "warning",
+                    # Backticked name → stable fingerprint across cycles.
+                    f"SLO definition defect: `{s.slo_name}` produced an "
+                    f"impossible value",
+                    action=(
+                        f"Fix the SLO query for {s.slo_name}: "
+                        + "; ".join(ds)
+                        + ". Bound the numerator (e.g. max(...) not "
+                        "sum(...) across replicas) so compliance stays in "
+                        "[0,1]. Edit via runbooks/policy-cli.py slo update."
+                    ),
+                    subsection=s.slo_name,
+                    metadata={
+                        "defects": ds,
+                        "compliance_pct": s.compliance_pct,
+                        "burn_rate_1h": s.burn_rate_1h,
+                        "burn_rate_6h": s.burn_rate_6h,
+                        "raw_numerator": s.raw_numerator,
+                        "raw_denominator": s.raw_denominator,
+                        "window": s.window_size,
+                    },
+                )
+                print(f"  ‼ finding {fid}: definition defect for {s.slo_name}")
+        finally:
+            fw.close()
     elif args.no_write:
         print(f"\n--no-write set, {len(snaps)} snapshot(s) computed but NOT persisted.")
     else:
