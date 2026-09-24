@@ -29,6 +29,9 @@ rollback_class: one-way    # DECLARED 2026-09-06. The plan's own risk note says
                           # superset-pg-decommission, which used one-way.
                           # Correctly stays HUMAN-GATED, and is awaiting-soak.
 status: awaiting-go   # 2026-09-24 NOW run: steps 1, 2, 4 EXECUTED (5f162456, AR-080 disabled). RESIDUAL: step 3 (PVC delete)
+# 2026-09-24 17:50Z: step 3 DONE in the coordinating session (operator approved the PVC delete there on
+# 2026-09-23): PVC deleted after the storage pre-flight; PV Released + Retain, Longhorn volume detached
+# and kept, 8 backups kept. Remaining: a forward-auth sign-in in the authentik event log, then step 5.
                       # and step 5 (dump purge) need the operator in-session — see "Residual" below.
 window: "sat-attended:2026-09-26"   # residual steps 3+5 only; operator hands (was now:2026-09-24 for steps 1-4)
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
