@@ -77,6 +77,26 @@ def main() -> int:
         check(f"bare/malformed value {bad!r} is not treated as an email needle",
               not shaped)
 
+    # NAME needle: the opposite failure. A one-letter local user.name made the
+    # needle a single character, which matched every tracked file (~1.4k
+    # CRITICALs per run) and made redact() rewrite that letter everywhere.
+    name = sc._dominant_author_name()
+    check("a usable NAME needle is derived from history",
+          len(name) >= sc._MIN_NEEDLE_LEN, "no usable name -> scan inert")
+    check("the NAME needle is not a bot author",
+          not name.lower().endswith("[bot]"))
+    check("the NAME needle is NOT hardcoded in the scanner source",
+          name not in src)
+    saved = dict(sc._sensitive)
+    sc._sensitive.clear()
+    sc._sensitive.update({"NAME": "t"})
+    check("redact() ignores a sub-minimum needle",
+          sc.redact("test text") == "test text")
+    sc._sensitive.clear()
+    sc._sensitive.update(saved)
+    check("s2 refuses to scan with a sub-minimum needle (UNMEASURED)",
+          "needle shorter" in src)
+
     print()
     if FAILURES:
         print(f"FAILED ({len(FAILURES)}): {', '.join(FAILURES)}")

@@ -561,6 +561,16 @@ def load_sensitive() -> bool:
         return False
 
     _sensitive["DOMAIN"] = domain_raw
+    # A needle shorter than _MIN_NEEDLE_LEN is not an identity, it is a
+    # letter. This checkout's local `git config user.name` became a single
+    # character, and `grep -Fl` on one letter matched EVERY tracked file --
+    # one CRITICAL "[NAME] literal" per file, ~1.4k per run -- while redact()
+    # rewrote every occurrence of that letter in the report. Fall back to the
+    # dominant human author name from history (same reasoning as the EMAIL
+    # fallback below: already public, never written to a tracked file). If that
+    # is also unusable the needle stays "" and s2 reports UNMEASURED.
+    if len(git_name.strip()) < _MIN_NEEDLE_LEN:
+        git_name = _dominant_author_name()
     _sensitive["NAME"]   = git_name
     # Only treat a value as a scannable EMAIL literal if it is actually
     # email-shaped. `git config user.email` here is a bare username (no "@"),
@@ -585,6 +595,31 @@ def load_sensitive() -> bool:
     else:
         _sensitive["EMAIL"] = _dominant_author_email()
     return True
+
+
+_MIN_NEEDLE_LEN = 4
+
+
+def _dominant_author_name() -> str:
+    """Most frequent human author name in history with len >= _MIN_NEEDLE_LEN.
+
+    Bot authors (`[bot]` suffix) are excluded. Returns "" if none qualifies;
+    s2 then reports the name scan as UNMEASURED rather than clean.
+    """
+    import collections
+    try:
+        out = subprocess.run(["git", "log", "--format=%aN"],
+                             capture_output=True, text=True, timeout=30)
+        if out.returncode != 0:
+            return ""
+        names = [n.strip() for n in out.stdout.splitlines()]
+        usable = [n for n in names
+                  if len(n) >= _MIN_NEEDLE_LEN and not n.lower().endswith("[bot]")]
+        if not usable:
+            return ""
+        return collections.Counter(usable).most_common(1)[0][0]
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _dominant_author_email() -> str:
@@ -613,7 +648,8 @@ def _dominant_author_email() -> str:
 def redact(text: str) -> str:
     """Replace all sensitive literals with bracketed placeholders."""
     for key, val in _sensitive.items():
-        if val:
+        # A sub-minimum value would rewrite every occurrence of a letter.
+        if val and len(val) >= _MIN_NEEDLE_LEN:
             text = text.replace(val, f"[{key}]")
     return text
 
@@ -1038,6 +1074,12 @@ def s2_sensitive_exposure() -> tuple[str, Findings, str]:
             f.add(WARNING, f"[{label.upper()}] scan did NOT run — no needle "
                            f"available, so this is unmeasured, not clean")
             cprint(C.YELLOW, f"  🟡 {label} scan skipped — no needle (UNMEASURED)")
+            continue
+        if len(val) < _MIN_NEEDLE_LEN:
+            # A one/two-letter needle matches every file: not a scan.
+            f.add(WARNING, f"[{label.upper()}] scan did NOT run — needle shorter "
+                           f"than {_MIN_NEEDLE_LEN} chars, so this is unmeasured, not clean")
+            cprint(C.YELLOW, f"  🟡 {label} scan skipped — needle too short (UNMEASURED)")
             continue
         hits = run_lines(
             f"git ls-files | grep -v '\\.sops\\.yaml$' "
