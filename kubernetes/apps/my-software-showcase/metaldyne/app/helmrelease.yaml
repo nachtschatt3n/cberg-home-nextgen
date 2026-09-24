@@ -32,6 +32,13 @@ spec:
         strategy: Recreate
         containers:
           app:
+            # /app/tmp is an emptyDir, so it survives a CONTAINER restart: a Rails
+            # server killed by its liveness probe left tmp/pids/server.pid behind and
+            # every restart after that exited "A server is already running"
+            # (2026-09-24 switch reboot, 8 apps in CrashLoopBackOff). Clear it first;
+            # the rest is the image's own command, read from PID 1.
+            command: ["/bin/sh", "-c"]
+            args: ["rm -f /app/tmp/pids/server.pid; exec /usr/local/bin/ruby bin/rails server -b 0.0.0.0 -p 3000"]
             image:
               repository: ghcr.io/nachtschatt3n/metaldyne-mini-erp
               tag: production-20260923142917
