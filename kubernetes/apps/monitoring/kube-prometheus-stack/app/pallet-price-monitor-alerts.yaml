@@ -110,6 +110,15 @@ spec:
           unless on (source)
           max by (source) (max_over_time(pellet_source_last_write_timestamp_seconds{source=~"hessen_forst|fva_bw_kaefer|nrw_borkenkaefer"}[36h])),
         "cadence", "weekly", "", ""), "window", "36h (fetched on >=2 runs)", "", "")
+        or
+        # F-45267d28 (image sha-27bd472): a fetch error is now a source FAILURE and no
+        # longer moves last_success, so the branch above cannot see a broken page.
+        # A weekly source that FAILED in the last 36h and wrote nothing is stale too.
+        label_replace(label_replace(
+          max by (source) (max_over_time(pellet_source_last_failure_timestamp_seconds{source=~"hessen_forst|fva_bw_kaefer|nrw_borkenkaefer"}[36h]))
+          unless on (source)
+          max by (source) (max_over_time(pellet_source_last_write_timestamp_seconds{source=~"hessen_forst|fva_bw_kaefer|nrw_borkenkaefer"}[36h])),
+        "cadence", "weekly", "", ""), "window", "36h (fetch failed)", "", "")
       for: 30m
       labels:
         category: home-automation
