@@ -40,20 +40,76 @@ spec:
         category: home-automation
         component: pallet-price-monitor
         severity: critical
+    # Keyed on the WRITE series (source yielded >=1 observation this run), not
+    # the fetch series: a rotted parser fetches fine and writes nothing.
+    #
+    # Series semantics that shape this rule: the app pushes with PUT and a
+    # job-only grouping key, so every run REPLACES the Pushgateway group. A
+    # source that wrote nothing this run has NO write series at all, and the
+    # value is always ~the run time. `time() - ts > N` can therefore never fire
+    # for a dead source; absence over a window is the signal. Prometheus keeps
+    # the history, so a Pushgateway wipe shorter than the window is harmless
+    # and a longer one fires every source (correct: we are blind).
+    # absent_over_time only yields a labelled result for an equality matcher,
+    # hence one term per source; a newly enabled source must be added here.
+    #
+    # Windows are from measured write gaps (90d, pellets DB) and must stay
+    # below Prometheus retention (7d). Three shapes:
+    #   every_run  absent 30h   healthy max gap 24h -> 2 consecutive missed runs
+    #   daily      absent 5d    healthy max gap 96h (agrarheute), 29h (holzpellets_net).
+    #              Armed only once the write series has 5d of history
+    #              (`offset 5d` guard), else it fires on sources that simply
+    #              have not been due since the metric was introduced.
+    #   weekly     fetched, wrote nothing: a successful fetch >=20h old in the
+    #              last 36h (so >=2 runs) and no write in the same 36h. Their
+    #              healthy gaps (up to 13d) exceed retention, but the forest
+    #              scrapers yield exactly one observation per successful HTTP
+    #              fetch and swallow HTTP errors, so fetch-without-write there
+    #              means the upstream page is broken, not a cadence gap.
+    # NOT covered: monthly indices (destatis_epi_*, eurostat_hs_440131) and
+    # energienutzer_de: they legitimately fetch-and-write-nothing for weeks
+    # between releases. Also NOT covered: a source that keeps re-yielding the
+    # same stale rows (idempotent upsert) sets the write series every run;
+    # holzkurier and dwd_hdd are in that state. That needs an app-side change
+    # (count rows actually inserted, or export newest-observation age).
     - alert: PalletCriticalSourceStale
       annotations:
         description: |
-          Critical pellet-price-monitor source `{{ $labels.source }}` has not
-          successfully reported in over 30 hours. This is the alert class that
-          would have caught the DWD HDD regression where the parser silently
-          emitted 0 weather rows for several runs.
-        summary: Pellet-price-monitor source {{ $labels.source }} is stale
+          Pellet-price-monitor source `{{ $labels.source }}` ({{ $labels.cadence }})
+          has written no observation in the last {{ $labels.window }}, well
+          beyond its expected cadence. Check the scraper logs for
+          `source_no_observations id={{ $labels.source }}` (fetched, wrote
+          nothing: parser or upstream page broken) or `source_failed` (fetch
+          raised). If every source fires at once, the Pushgateway series are
+          gone: check the prometheus-pushgateway pod and the latest Job.
+        summary: Pellet-price-monitor source {{ $labels.source }} has stopped writing
       expr: |
-        time() - max by (source) (
-          pellet_source_last_success_timestamp_seconds{
-            source=~"dwd_hdd|heizpellets24|heizpellets24_offers|esyoil|heizoel24|eurostat_hs_440131"
-          }
-        ) > 60 * 60 * 30
+        label_replace(label_replace(
+            absent_over_time(pellet_source_last_write_timestamp_seconds{source="heizpellets24"}[30h])
+          or absent_over_time(pellet_source_last_write_timestamp_seconds{source="heizpellets24_offers"}[30h])
+          or absent_over_time(pellet_source_last_write_timestamp_seconds{source="esyoil"}[30h])
+          or absent_over_time(pellet_source_last_write_timestamp_seconds{source="baywa_pellets"}[30h])
+          or absent_over_time(pellet_source_last_write_timestamp_seconds{source="heizoel24"}[30h])
+          or absent_over_time(pellet_source_last_write_timestamp_seconds{source="forecast_kaessler"}[30h]),
+        "cadence", "every_run", "", ""), "window", "30h", "", "")
+        or
+        (
+          label_replace(label_replace(
+              absent_over_time(pellet_source_last_write_timestamp_seconds{source="holzpellets_net"}[5d])
+            or absent_over_time(pellet_source_last_write_timestamp_seconds{source="agrarheute"}[5d])
+            or absent_over_time(pellet_source_last_write_timestamp_seconds{source="dwd_hdd"}[5d])
+            or absent_over_time(pellet_source_last_write_timestamp_seconds{source="holzkurier"}[5d]),
+          "cadence", "daily", "", ""), "window", "5d", "", "")
+          and on () group(present_over_time(pellet_source_last_write_timestamp_seconds[1h] offset 5d))
+        )
+        or
+        label_replace(label_replace(
+          (
+            time() - min by (source) (min_over_time(pellet_source_last_success_timestamp_seconds{source=~"hessen_forst|fva_bw_kaefer|nrw_borkenkaefer"}[36h]))
+          ) > 20 * 3600
+          unless on (source)
+          max by (source) (max_over_time(pellet_source_last_write_timestamp_seconds{source=~"hessen_forst|fva_bw_kaefer|nrw_borkenkaefer"}[36h])),
+        "cadence", "weekly", "", ""), "window", "36h (fetched on >=2 runs)", "", "")
       for: 30m
       labels:
         category: home-automation
