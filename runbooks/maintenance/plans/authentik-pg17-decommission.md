@@ -28,9 +28,9 @@ rollback_class: one-way    # DECLARED 2026-09-06. The plan's own risk note says
                           # recovery is a restore, not a commit. Same shape as
                           # superset-pg-decommission, which used one-way.
                           # Correctly stays HUMAN-GATED, and is awaiting-soak.
-status: awaiting-go   # 2026-09-24: gates 1, 2 encoded as premises (gate 3 is the post-step login check, gate 4 AR-080 is enabled);
-                      # operator asked for the StatefulSet AND the PVC to go (2026-09-23). Soak long satisfied.
-window: "now:2026-09-24"   # ON-DEMAND NOW run 2026-09-24 (run-now.py stamp; was 'sat-attended:2026-09-26')
+status: awaiting-go   # 2026-09-24 NOW run: steps 1, 2, 4 EXECUTED (5f162456, AR-080 disabled). RESIDUAL: step 3 (PVC delete)
+                      # and step 5 (dump purge) need the operator in-session — see "Residual" below.
+window: "sat-attended:2026-09-26"   # residual steps 3+5 only; operator hands (was now:2026-09-24 for steps 1-4)
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 # (original rationale: destroys the rollback path)
@@ -78,6 +78,29 @@ generated: "2026-08-20"
 ---
 
 # Retire the bundled 17.11 authentik DB
+
+## Residual (2026-09-24) — READ FIRST
+
+The on-demand NOW run of 2026-09-24 executed steps 1, 2 and 4:
+`5f162456` set `postgresql.enabled: false` (StatefulSet, services, configmaps
+gone; authentik-server/worker pod templates byte-identical, no restart), the
+docs this plan owns were rewritten in the same commit, and AR-080 was disabled
+(no `postgres:17.` image runs). Verification passed for the OIDC path and the
+audit-trail probe (see the window_runs row for now:2026-09-24).
+
+Two steps are left, and both need the operator IN-SESSION, not a relayed GO:
+
+- **Step 3**: `kubectl -n kube-system delete pvc data-authentik-postgresql-0`.
+  cberg-agent refused it on a relayed approval (destructive direct mutation).
+  Storage pre-flight passed at 16:55 UTC: Longhorn, no subdir, PV `Retain`,
+  unmounted, 8 Completed backups. Harmless to leave meanwhile: the PVC is Bound
+  to nothing that runs.
+- **Step 5**: `rm -P ~/db-dumps/authentik-pg17-*.dump`. This is a permanent
+  deletion, so agents leave it to the operator.
+
+Premises 1-6 still hold after the run. Steps 1, 2 and 4 are idempotent no-ops
+if re-run.
+
 
 Follow-up to `authentik-postgres-18` (cutover executed 2026-08-20, ~6m43s SSO
 outage). The bundled StatefulSet was deliberately left running: it is the
