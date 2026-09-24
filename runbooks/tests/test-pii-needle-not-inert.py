@@ -97,6 +97,9 @@ def main() -> int:
     check("s2 refuses to scan with a sub-minimum needle (UNMEASURED)",
           "needle shorter" in src)
 
+    check("a reserved-domain (test fixture) email is not used as the EMAIL needle",
+          "_reserved" in src and '".invalid"' in src)
+
     print()
     if FAILURES:
         print(f"FAILED ({len(FAILURES)}): {', '.join(FAILURES)}")

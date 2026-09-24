@@ -590,7 +590,12 @@ def load_sensitive() -> bool:
     # being pasted into a file, and — critically — it is ALREADY in the public
     # history it is derived from, so nothing new is committed by using it. The
     # needle is computed at runtime and never written to a tracked file.
-    if "@" in git_email and "." in git_email.rsplit("@", 1)[-1]:
+    # A reserved (RFC 2606/6761) domain is a test identity, not operator PII --
+    # a test fixture once leaked its `@example.invalid` identity into this
+    # checkout's .git/config and the scan then flagged the fixture itself.
+    _reserved = git_email.lower().endswith((".invalid", ".test", ".example", "@example.com",
+                                           "@example.org", "@example.net", ".localhost"))
+    if "@" in git_email and "." in git_email.rsplit("@", 1)[-1] and not _reserved:
         _sensitive["EMAIL"] = git_email
     else:
         _sensitive["EMAIL"] = _dominant_author_email()
