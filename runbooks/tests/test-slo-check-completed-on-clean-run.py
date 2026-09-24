@@ -43,6 +43,8 @@ def main():
     check("exactly one section='slo' writer on the normal path", len(guards) >= 1, str(guards))
     main_path = [g for g in guards if "exhausted" in g or "defective" in g or "fast" in g]
     check("the writer is NOT gated on having findings to emit", not main_path, str(guards))
+    check("close() passes a verdict (a bare close() records no completion)",
+          'fw.close(verdict=' in SRC and "\n            fw.close()\n" not in SRC)
     straw = SRC.replace(
         '        fw = FindingsWriter(dsn=args.postgres_dsn, section="slo", producer="script")',
         '        if exhausted or defective or fast:\n            fw = FindingsWriter(dsn=args.postgres_dsn, section="slo", producer="script")', 1)

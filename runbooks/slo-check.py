@@ -368,7 +368,10 @@ def _main_impl(args) -> int:
                 )
                 print(f"  ‼ finding {fid}: definition defect for {s.slo_name}")
         finally:
-            fw.close()
+            # A verdict is what marks the section complete (section_complete defaults
+            # to verdict is not None): a bare close() records nothing and auto-closes
+            # nothing (F-7be10f2c). yellow when anything was emitted, else green.
+            fw.close(verdict="yellow" if (exhausted or defective or fast) else "green")
     elif args.no_write:
         print(f"\n--no-write set, {len(snaps)} snapshot(s) computed but NOT persisted.")
     else:
