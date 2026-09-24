@@ -30,7 +30,7 @@ rollback_class: one-way    # DECLARED 2026-09-06. The plan's own risk note says
                           # Correctly stays HUMAN-GATED, and is awaiting-soak.
 status: awaiting-go   # 2026-09-24: gates 1, 2 encoded as premises (gate 3 is the post-step login check, gate 4 AR-080 is enabled);
                       # operator asked for the StatefulSet AND the PVC to go (2026-09-23). Soak long satisfied.
-window: "sat-attended:2026-09-26"   # slotted 2026-09-24 so awaiting-go is valid; operator asked for it now, so a NOW run may take it first
+window: "now:2026-09-24"   # ON-DEMAND NOW run 2026-09-24 (run-now.py stamp; was 'sat-attended:2026-09-26')
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 # (original rationale: destroys the rollback path)
