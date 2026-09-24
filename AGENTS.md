@@ -23,7 +23,7 @@ EVERY window** — `AUTO_UPDATE_APPLY=1 auto-update.py --apply` (safe open Renov
 PRs) plus `runbooks/coverage.py` (direct-bump for safe updates with no PR) —
 applying only the *safe* subset (patch/minor, not on the
 `runbooks/auto-update-policy.yaml` deny-list, no breaking-change signal in
-release notes, green flux-local CI), then Flux-reconciles, health-gates, and
+release notes, green `Flate Render Gate` CI), then Flux-reconciles, health-gates, and
 **auto-reverts** the batch on regression. **Therefore NEVER scope a
 maintenance-window run to "just the assigned plans" — Step 0 (safe-update apply)
 runs FIRST, every window, even on unattended cron runs.** Full contract:
