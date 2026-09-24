@@ -259,7 +259,17 @@ spec:
       # sha-dcf50c9d5f4469120ee5ed808f96a1a5e1e83ab5 — no schema to unwind.
       # (Attempt markers left behind are ordinary DataEnrichment rows; the old
       # code simply ignores them.)
-      tag: "sha-9439ba5e8c97f9803489111abc3394e712d8f862"
+      #
+      # --- 2026-09-24 bump: sha-9439ba5e -> sha-40b0038f -------------------
+      # Contract#next_due never falls behind the stored next_due_date. The
+      # recompute only sees charges linked to the contract's merchant, so a
+      # charge that landed unmerchanted made a quarterly Grundsteuer contract
+      # read ~40 days overdue while the identifier had already advanced the
+      # column. Now takes the later of the two.
+      #
+      # ROLLBACK: pure manifest revert to
+      # sha-9439ba5e8c97f9803489111abc3394e712d8f862 — no schema to unwind.
+      tag: "sha-40b0038febc9566d3301a332f77d0da7958c644e"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
