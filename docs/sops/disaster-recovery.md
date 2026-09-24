@@ -3,8 +3,8 @@
 > Description: Recovery procedures for cluster, node, storage, and external-
 > dependency failures. Complements `docs/sops/backup.md` (preventive workflow)
 > with the *when-something-broke* response runbook.
-> Version: `2026.09.22`
-> Last Updated: `2026-09-22`
+> Version: `2026.09.24`
+> Last Updated: `2026-09-24`
 > Owner: `Platform`
 
 ---
@@ -361,15 +361,14 @@ See AR-020 in the `accepted_risks` table (`sweep.<DOMAIN>/policies/accepted-risk
 **Detection:** Every forward-auth-protected app returns 502/auth-loop;
 Wazuh dashboard SAML SSO fails.
 
-> **Name the right database.** Two Postgres instances run in `kube-system` and
-> both accept the same user, database name and password. The LIVE one is
+> **Name the right database.** The only authentik database is
 > `deployment/authentik-pg` on the `longhorn-static` volume `authentik-pg-data`.
-> `statefulset/authentik-postgresql` is the frozen pre-cutover rollback (retired
-> 2026-08-20, kept by plan `authentik-pg17-decommission`) — restarting it during
-> an outage SUCCEEDS, looks authoritative and changes nothing, and restoring its
-> volume would recover the pre-cutover dataset into the wrong place. This section
-> named the rollback until 2026-09-12. See `docs/sops/authentik.md`
-> §"Two databases answer to `-U authentik -d authentik`".
+> The pre-cutover rollback `statefulset/authentik-postgresql` was retired on
+> 2026-09-24 (plan `authentik-pg17-decommission`). Its PV/Longhorn volume
+> `data-authentik-postgresql-0` and backups are KEPT but hold a frozen
+> 2026-08-19 snapshot. Restoring them recovers the pre-cutover dataset, not
+> current data. This section named the rollback until 2026-09-12. See
+> `docs/sops/authentik.md` §"Two databases answered to `-U authentik -d authentik`".
 
 **Recovery — Postgres PV intact:**
 

@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.09.23`
-> Last Updated: `2026-09-23`
+> Version: `2026.09.24`
+> Last Updated: `2026-09-24`
 > Owner: `Platform`
 
 ---
@@ -28,42 +28,30 @@ Authentik provides unified SSO and forward-auth proxy for all cluster services.
 | Config approach | Blueprints only — never use UI |
 | Auth flow | Forward auth proxy via per-app outposts |
 | Core database | Standalone `authentik-pg` Deployment — Docker Official `postgres:18.6-bookworm`, `longhorn-static` volume `authentik-pg-data` (20Gi) |
-| Rollback DB | Bundled bitnamilegacy PostgreSQL 17.11 StatefulSet `authentik-postgresql`, still running until plan `authentik-pg17-decommission` |
 
-### Two databases answer to `-U authentik -d authentik` — read the right one
+### Two databases answered to `-U authentik -d authentik` (history, retired 2026-09-24)
 
-**This has already produced one false alarm, ranked as the household's
-highest-priority security item for a day.** On 2026-09-11 Authentik's audit log
-was reported dead since 2026-08-19 — 23 days with no record of any login,
-failure, or admin action on the cluster's SSO server. Measured:
-`authentik_events_event` held 11,375 rows with a hard stop at
-2026-08-19 22:26 UTC.
+**Only one authentik database exists now: `deployment/authentik-pg`.** From the
+2026-08-20 cutover (`05843b7f`) until 2026-09-24 the bundled 17.11 StatefulSet
+`authentik-postgresql` kept running beside it as the rollback, accepting the
+*same* user, database name and password. That produced one false alarm: on
+2026-09-11 the audit log was reported dead since 2026-08-19, because
+`authentik_events_event` was read on the frozen rollback (hard stop 2026-08-19
+22:26 UTC) instead of the live DB.
 
-That reading was taken from the **wrong database**. Both of these are Running in
-`kube-system`, both accept the *same* user, the *same* database name and the
-*same* password out of `authentik-secret`, and their pod names differ by one
-word:
+Plan `authentik-pg17-decommission` retired it on 2026-09-24
+(`postgresql.enabled: false`, PVC `data-authentik-postgresql-0` deleted). The
+PV and Longhorn volume `data-authentik-postgresql-0` are `Retain` and its
+Longhorn backups are kept as the pre-cutover recovery floor. They hold a
+frozen 2026-08-19 snapshot, not current data. **Never restore that volume to
+recover authentik.** The current data lives on `authentik-pg-data`.
 
-| Pod | Role | `max(created)` in `authentik_events_event` |
-|-----|------|--------------------------------------------|
-| `deployment/authentik-pg` (postgres 18.6) | **LIVE** — what `AUTHENTIK_POSTGRESQL__HOST` points at | current |
-| `statefulset/authentik-postgresql` → `authentik-postgresql-0` (17.11) | frozen pre-cutover rollback, kept by plan `authentik-pg17-decommission` | **permanently 2026-08-19 22:26 UTC** |
-
-The rollback DB stopped receiving writes at the 2026-08-20 05:10 cutover
-(`05843b7f`). Its copy of the audit table is a snapshot, and it will read as
-"dead for N days" forever, with N growing by one every day. Nothing about the
-query, the credentials, or the output signals that you hit the wrong instance.
-
-Always name the host explicitly, and always `deploy/authentik-pg`:
+Still name the host explicitly in every query:
 
 ```bash
-# CORRECT — the live database
 kubectl -n kube-system exec deploy/authentik-pg -- \
   psql -U authentik -d authentik -c \
   'select count(*), min(created), max(created) from authentik_events_event;'
-
-# WRONG — succeeds, looks authoritative, returns a frozen snapshot
-kubectl -n kube-system exec authentik-postgresql-0 -- psql -U authentik -d authentik ...
 ```
 
 **Do not rely on this note alone** — it is the third place the live host is

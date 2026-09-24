@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.09.22`
-> Last Updated: `2026-09-22`
+> Version: `2026.09.24`
+> Last Updated: `2026-09-24`
 > Owner: `Platform`
 
 ---
@@ -214,7 +214,7 @@ prompt to apply the Volume, **not** a reason to switch to dynamic provisioning.
 For new PVCs, use descriptive names: `{app}-{purpose}`.
 
 - ✅ `home-assistant-config` (`longhorn-static` → clean PV name) — the default
-- ✅ `data-authentik-postgresql-0` (StatefulSet template → UUID PV is expected)
+- ✅ `elasticsearch-data-elasticsearch-es-default-0` (StatefulSet `volumeClaimTemplates` → UUID PV is expected)
 - ❌ Reaching for `longhorn` just to avoid the manual Volume-CR apply
 - ❌ Manually creating UUID-like PV names for static volumes
 

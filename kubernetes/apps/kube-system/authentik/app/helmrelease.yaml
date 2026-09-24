@@ -283,44 +283,8 @@ spec:
       enabled: false
  
     postgresql:
-      # Use built-in PostgreSQL for compatibility
-      enabled: true
-      # SUPERSEDED 2026-08-20 by deployment/authentik-pg (postgres 18.6),
-      # plan authentik-postgres-18. This bundled 17.11 StatefulSet is
-      # deliberately LEFT RUNNING and unmodified: it is the rollback and it
-      # still holds the pre-cutover data. Decommissioning it is a follow-up
-      # plan after the soak — do NOT set enabled: false here.
-      # Pin the postgres image explicitly (chart 2026.8.0 defaults to
-      # 17.11-bookworm). SAME major only: 18.x is a data-dir migration.
-      # Keep the MAJOR/MINOR (17.11) in sync with
-      # cronjob-channels-cleanup.yaml so the client psql matches the server;
-      # the BASE deliberately differs — the cleanup job runs alpine (psql
-      # only, no state), while this server stays on the Debian base because
-      # swapping the base under a live data directory is a separate change
-      # with its own validation.
-      image:
-        registry: docker.io
-        repository: library/postgres
-        tag: "17.11-bookworm"
-      auth:
-        username: authentik
-        database: authentik
-        existingSecret: authentik-secret
-        secretKeys:
-          adminPasswordKey: SECRET_AUTHENTIK_DB_PASSWORD
-          userPasswordKey: SECRET_AUTHENTIK_DB_PASSWORD
-      primary:
-        persistence:
-          enabled: true
-          name: data-authentik-postgresql-0
-          size: 10Gi  # Manually expanded to 20Gi via kubectl patch
-        resources:
-          requests:
-            cpu: 100m
-            memory: 256Mi
-          limits:
-            cpu: 1000m
-            memory: 1Gi
+      # Bundled 17.11 DB retired 2026-09-24 (plan authentik-pg17-decommission); live DB is deployment/authentik-pg
+      enabled: false
 
     geoip:
       enabled: false
