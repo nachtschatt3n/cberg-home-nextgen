@@ -11,15 +11,27 @@ spec:
     - name: authentik.postgresql
       interval: 5m
       rules:
+        # Guard (2026-09-24): both rules below were inert for their whole life --
+        # they read longhorn_volume_size_bytes, which does not exist (the metric is
+        # longhorn_volume_capacity_bytes), and after the 08-20 cutover they also
+        # watched the frozen old volume instead of authentik-pg-data. This fires
+        # if the live volume's series ever disappears again.
+        - alert: AuthentikPostgreSQLVolumeMetricsAbsent
+          expr: absent(longhorn_volume_capacity_bytes{volume="authentik-pg-data"}) or absent(longhorn_volume_actual_size_bytes{volume="authentik-pg-data"})
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn size metrics for authentik-pg-data are absent; the authentik DB disk rules cannot fire"
         - alert: AuthentikPostgreSQLRapidGrowth
           expr: |
             (
-              longhorn_volume_actual_size_bytes{volume="data-authentik-postgresql-0"}
+              longhorn_volume_actual_size_bytes{volume="authentik-pg-data"}
               /
-              longhorn_volume_size_bytes{volume="data-authentik-postgresql-0"}
+              longhorn_volume_capacity_bytes{volume="authentik-pg-data"}
             ) > 0.5
             and
-            increase(longhorn_volume_actual_size_bytes{volume="data-authentik-postgresql-0"}[6h]) > 1073741824
+            increase(longhorn_volume_actual_size_bytes{volume="authentik-pg-data"}[6h]) > 1073741824
           for: 10m
           labels:
             severity: warning
@@ -30,14 +42,14 @@ spec:
             description: |
               Authentik PostgreSQL volume is {{ printf "%.0f" $value }}% full and has grown by >1GB in the last 6 hours.
               This may indicate the django_channels_postgres_message table is accumulating expired messages.
-              Check table size: kubectl exec -n kube-system authentik-postgresql-0 -- sh -c 'PGPASSWORD=$(cat /opt/bitnami/postgresql/secrets/SECRET_AUTHENTIK_DB_PASSWORD) psql -U authentik -d authentik -c "SELECT pg_size_pretty(pg_total_relation_size('"'"'django_channels_postgres_message'"'"'));"'
+              Check table size: kubectl exec -n kube-system deploy/authentik-pg -- sh -c 'psql -U authentik -d authentik -c "SELECT pg_size_pretty(pg_total_relation_size('"'"'django_channels_postgres_message'"'"'));"'
 
         - alert: AuthentikPostgreSQLHighUsageAfterCleanup
           expr: |
             (
-              longhorn_volume_actual_size_bytes{volume="data-authentik-postgresql-0"}
+              longhorn_volume_actual_size_bytes{volume="authentik-pg-data"}
               /
-              longhorn_volume_size_bytes{volume="data-authentik-postgresql-0"}
+              longhorn_volume_capacity_bytes{volume="authentik-pg-data"}
             ) > 0.4
           for: 24h
           labels:
