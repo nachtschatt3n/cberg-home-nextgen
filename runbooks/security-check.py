@@ -2721,7 +2721,7 @@ def collect_trivy_results(scan_targets: list[str], cached: dict | None, scan_fn,
     return results, failed, scanned_ok, topup
 
 
-def _newer_upstream_tag_exists(image_ref: str):
+def _newer_upstream_tag_lookup(image_ref: str):
     """Is there a newer upstream image TAG than the one we run?
 
     Returns True  → a newer tag exists → a fixable CVE is actionable by a bump.
@@ -2806,10 +2806,118 @@ def _newer_upstream_tag_exists(image_ref: str):
         # and pointed the reader at a release candidate, which is how one
         # reached production unattended on 2026-09-21 (reverted in 397af0ff).
         if _latest_is_prerelease(repo, latest):
-            return False
+            # A pre-release HEAD says nothing about the GA tags BELOW it
+            # (F-910a4a4b, 2026-09-25). This used to `return False` here, i.e.
+            # "no bump exists", and the row was absorbed into AR-029. Live:
+            # n8nio/n8n:2.38.7 resolved latest -> 2.41.3, digest-identical to
+            # `beta`, so the branch fired — while `stable` pointed at a GA
+            # 2.40.7 two minors above the deployed tag. The valkey case this
+            # branch was written for (9.1.2 -> 9.2 == 9.2.0-rc1, no GA 9.2.x)
+            # is the special case where NO GA tag sits between; that has to be
+            # MEASURED, not inferred from the head being a pre-release.
+            return _ga_tag_above(repo, tag, vc)
         return True
     except Exception:
         return None
+
+
+def _degradation_marks(vc):
+    """Snapshot of the version checker's coverage-gap log, or None."""
+    d = getattr(vc, "degraded", None)
+    if d is None:
+        return None
+    try:
+        return (tuple(d.reasons), tuple(sorted(d.uncovered)))
+    except Exception:
+        return None
+
+
+def _newer_upstream_tag_exists(image_ref: str):
+    """Tri-state newer-tag verdict that can NEVER fail open into "accepted".
+
+    Wraps `_newer_upstream_tag_lookup`. A False from it is the one answer that
+    routes a fixable CVE into the AR-029 accepted class, so a False is only
+    believed when the registry lookups that produced it completed cleanly. If
+    the version checker recorded ANY coverage gap during this lookup (a 429,
+    a 5xx, a truncated Docker Hub window — `_dockerhub_tags` returns a PARTIAL
+    push-ordered list on a later-page failure, whose highest tag can equal the
+    one we run), the False is demoted to None: undetermined, surfaced, never
+    accepted (F-910a4a4b). True and None pass through untouched — they already
+    surface.
+    """
+    before = _degradation_marks(_VER_CHECKER)
+    verdict = _newer_upstream_tag_lookup(image_ref)
+    if verdict is False:
+        after = _degradation_marks(_VER_CHECKER)
+        if before is None and after is not None:
+            # Checker was created by this call: any gap at all is this image's.
+            if after[0] or after[1]:
+                return None
+        elif before is not None and after != before:
+            return None
+    return verdict
+
+
+def _ga_tag_above(repo: str, tag: str, vc):
+    """Does a GA (non-pre-release) tag newer than `tag` exist? True/False/None.
+
+    Asked only once the newest upstream tag has been shown to be a
+    pre-release. Two oracles, in order:
+
+      1. upstream's STABLE channel (coverage.stable_channel_version: the
+         `stable`/`latest` tag's version label, digest-confirmed). Plain-version
+         tags only — a channel pointer names the plain line, not a variant.
+         Newer than ours -> True; equal to ours -> False (proved newest GA).
+      2. Docker Hub's recent-tags page: any plain-version tag (same variant
+         suffix as ours) above ours that carries no pre-release marker and is
+         not digest-identical to a pre-release tag -> True. A page that was
+         read and holds none -> False, the valkey shape.
+
+    Anything else is None — UNDETERMINED, which the caller surfaces. It must
+    never fall back to False: False is "accept under AR-029", and an accept
+    has to be earned by a measurement, not by an oracle being unavailable.
+    """
+    cov = _cov()
+    cur = cov._ver_tuple(tag)
+    if not cur:
+        return None
+    base, sep, suffix = str(tag).partition("-")
+    plain = not sep and bool(cov._PLAIN_VERSION.match(str(tag)))
+
+    if plain:
+        try:
+            ver, _why = cov.stable_channel_version(repo)
+        except Exception:
+            ver = None
+        sv = cov._ver_tuple(ver) if ver else None
+        if sv:
+            if sv > cur:
+                return True
+            if vc.tags_are_equal(str(ver), tag):
+                return False
+            # stable BELOW the tag we run (we are on a pre-release line
+            # ourselves, or the label is stale) — no conclusion; fall through.
+
+    try:
+        digests = cov._dockerhub_tag_digests(repo)
+    except Exception:
+        digests = None
+    if not digests:
+        return None
+    pre_digests = {dg for name, dg in digests.items()
+                   if cov._PRERELEASE_TAG.search(name)}
+    for name, dg in digests.items():
+        nb, nsep, nsuf = name.partition("-")
+        if (nsep, nsuf.lower()) != (sep, suffix.lower()):
+            continue
+        if not cov._PLAIN_VERSION.match(nb) or cov._PRERELEASE_TAG.search(name):
+            continue
+        if dg in pre_digests:
+            continue
+        nv = cov._ver_tuple(nb)
+        if nv and nv > cur:
+            return True
+    return False
 
 
 _COV_MOD = None
@@ -2868,6 +2976,9 @@ def _latest_is_prerelease(repo: str, latest: str) -> bool:
     the prescribed remediation points AT that candidate. We consume
     upstream images and never rebuild, so with no GA newer tag there is no
     action available and the row belongs in the AR-029 already-newest branch.
+    A True here does NOT by itself establish "no GA newer tag" — a GA release
+    can sit between our tag and the pre-release head (n8n, F-910a4a4b); the
+    caller settles that with `_ga_tag_above()`.
 
     TWO SHAPES, because the tag STRING is not sufficient on its own:
       * an explicit marker in the name — `2.40.0-beta`, `1.14.0-rc1`;
