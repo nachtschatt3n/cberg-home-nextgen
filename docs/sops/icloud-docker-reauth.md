@@ -1,8 +1,8 @@
 # SOP: iCloud Docker Re-authentication (2FA session recovery)
 
 > Description: Recover the Apple session of any `icloud-docker-*` instance (mandarons/icloud-drive) when it expires, including the modern-2FA flow that the bundled `icloud` CLI gets wrong, and the quota-exhaustion mitigation (stop the retry loop before re-auth).
-> Version: `2026.09.20`
-> Last Updated: `2026-09-20`
+> Version: `2026.09.25`
+> Last Updated: `2026-09-25`
 > Owner: `operator`
 
 ---
@@ -276,6 +276,42 @@ kubectl -n backup exec -it icloud-reauth-$INSTANCE -c app -- python3 /tmp/reauth
 Approve the iPhone push, type the 6-digit code, Enter. Expect
 `Final: requires_2fa = False | is_trusted_session = True`.
 
+### Step 4b — Prove data access BEFORE resuming (pending iCloud terms)
+
+`requires_2fa = False` proves the **sign-in** works, not that iCloud will serve
+**data**. On 2026-09-25 a clean re-auth was followed by an app that failed every
+start with `Authentication required for Account. (421)` on `setup/ws/1/validate`
+and then `409 Client Error ... signin/init`. The cause was
+`termsUpdateNeeded: true` in the `accountLogin` response: until updated iCloud
+terms are accepted, Apple withholds `X-APPLE-WEBAUTH-TOKEN` and
+`X-APPLE-DS-WEB-SESSION-TOKEN`. So every session check returns 421, CloudKit answers
+`AUTHENTICATION_FAILED: no auth method found`, and the fallback sign-in fails with 409.
+The 421/409 look like an auth bug but are symptoms. **Do not patch icloudpy for
+them** — that was tried and was unnecessary.
+
+Still in the re-auth pod, before tearing it down (no password sign-in, no 2FA):
+
+```bash
+kubectl -n backup exec -i icloud-reauth-$INSTANCE -c app -- python3 - <<'PY'
+import os, json
+import icloudpy.base as b
+class Probe(b.ICloudPyService):
+    def authenticate(self, force_refresh=False, service=None): pass  # no network
+api = Probe(os.environ["SECRET_ICLOUD_USERNAME"], os.environ["SECRET_ICLOUD_PASSWORD"],
+            cookie_directory="/config/session_data")
+api._authenticate_with_token()          # accountLogin with the stored token
+d = api.data
+print("termsUpdateNeeded:", d.get("termsUpdateNeeded"), "| isRepairNeeded:", d.get("isRepairNeeded"),
+      "| webAccess:", d.get("dsInfo", {}).get("isWebAccessAllowed"),
+      "| WEBAUTH-TOKEN cookie:", any(c.name == "X-APPLE-WEBAUTH-TOKEN" for c in api.session.cookies))
+PY
+```
+
+Pass = `termsUpdateNeeded: False` **and** `WEBAUTH-TOKEN cookie: True`. If terms
+are pending, the Apple ID owner signs in at **icloud.com** in a browser and
+accepts them, then re-run the probe. No new 2FA code is needed: the session is
+already trusted. Only then go to Step 5.
+
 ### Step 5 — Tear down + restore service (mind the RWO ordering)
 
 The session PVC is RWO — **delete the re-auth pod BEFORE scaling the app up**,
@@ -355,6 +391,7 @@ If failed:
 | `PermissionError: ... /config/session_data/...session` | re-auth pod ran as `abc` uid 911; CIFS owns files as 1000 | Run the pod as `runAsUser: 1000` (manifest in §3), not root + su-exec |
 | App pod stuck `ContainerCreating`, volume in use | `icloud-reauth-$INSTANCE` still holds the RWO PVC | Delete `icloud-reauth-$INSTANCE` before scaling the app up |
 | `Authentication required for Account. (421)` loop | session expired | Full SOP from step 1 |
+| 421 on `validate` then `409 ... signin/init` **right after a successful re-auth**; CloudKit `no auth method found` | `termsUpdateNeeded: true`: Apple won't issue `X-APPLE-WEBAUTH-TOKEN` until updated iCloud terms are accepted | Step 4b probe; owner accepts the terms at icloud.com; do NOT patch icloudpy |
 
 ---
 
@@ -548,3 +585,13 @@ flux resume helmrelease icloud-docker-$INSTANCE -n backup
   distinguishes a session expiry from a silent wedge, carrying an explicit
   warning that a zero count proves nothing. Added the alert rules, the probe and
   the control-ledger row to §12 so the reference points both ways.
+
+- `2026.09.25`: **Added Step 4b: prove data access before resuming.** A clean
+  mu re-auth (`requires_2fa=False`, trusted) was followed by an app that died
+  on every start with 421 on `validate` and 409 on `signin/init`. The
+  `accountLogin` response carried `termsUpdateNeeded: true`, and Apple withholds
+  `X-APPLE-WEBAUTH-TOKEN` / `DS-WEB-SESSION-TOKEN` until the updated iCloud terms
+  are accepted. Accepting them at icloud.com fixed it with the stock image; an
+  icloudpy runtime patch drafted for the 409 turned out to be unnecessary.
+  Added the token-only probe (no password sign-in, no 2FA) and a Troubleshooting
+  row.
