@@ -9,27 +9,35 @@ pr: null                              # no open Renovate PR. Re-verified 2026-09
                                       # `*unpoller*` deny rule — see §1.5
 kind: image
 current: "v5.2.5"                     # STILL v5.2.5 — live on deployment/unpoller, re-verified
-                                      # 2026-09-20 05:37Z. The v5.2.6 bump was planned but never
-                                      # shipped, so this plan's hop WIDENS to v5.2.5 -> v5.2.7
-                                      # and carries BOTH upstream deltas (§1.2). imageID on the
-                                      # running pod is sha256:123a42e6… = the v5.2.5 index digest.
-target: "v5.2.7"                      # released 2026-09-18T11:16:58Z, isPrerelease=false,
-                                      # isDraft=false, newest v5 release (§2.4). ghcr manifest
-                                      # HEAD 200, index digest sha256:99f452d3… (measured 2026-09-20)
+                                      # 2026-09-25 (imageID sha256:123a42e6… = the v5.2.5 index
+                                      # digest, 0 restarts, started 2026-09-16T01:48:49Z). Neither
+                                      # v5.2.6 nor v5.2.7 ever shipped, so the hop is now
+                                      # v5.2.5 -> v5.2.8 and carries THREE upstream deltas (§1.2).
+target: "v5.2.8"                      # RETARGETED 2026-09-25 from v5.2.7. Released
+                                      # 2026-09-24T01:10:53Z, isPrerelease=false, isDraft=false,
+                                      # newest release of any line (stable channel: unpoller
+                                      # publishes no pre-release tags in the v5 line — the six
+                                      # newest releases are all pre=False). ghcr manifest HEAD 200,
+                                      # index digest sha256:ca82e584… (measured 2026-09-25)
 update_type: patch
-risk: low                             # Across the FULL v5.2.5 -> v5.2.7 hop: 6 commits, 4 files.
-                                      # Two are a dependabot go.mod/go.sum group, one is a
-                                      # distroless base bump (MEASURED, §1.3), and one is a
-                                      # single Go function in pkg/otelunifi — a package that is
-                                      # UNREACHABLE in this deployment because no [otel] config
-                                      # block exists (§1.4, and asserted as a premise). No metric
-                                      # rename, no InfluxDB schema change, no config-contract
-                                      # change. This is the same risk tier the v5.2.6 draft
-                                      # carried, re-derived against the wider hop rather than
-                                      # inherited.
-est_duration_min: 15                  # commit+push ~2, reconcile+rollout ~3, settle >=5 for
+risk: low                             # Across the FULL v5.2.5 -> v5.2.8 hop: 10 commits, 6 files.
+                                      # A dependabot go.mod/go.sum group, a distroless base bump
+                                      # (MEASURED, §1.3), one Go function in pkg/otelunifi that is
+                                      # UNREACHABLE here (no [otel] block, §1.4), a README edit,
+                                      # and — NEW in v5.2.8 — an ADDITIVE InfluxDB tag `band` on
+                                      # uap_vaps + uap_radios (§1.4b). The tag is additive, the
+                                      # Prometheus side (pkg/promunifi) is untouched, and no
+                                      # in-repo dashboard reads InfluxDB, so the risk class does
+                                      # NOT change; the tag gets its own positive gate (§4.7b).
+                                      # Consequence to accept: the two measurements' InfluxDB
+                                      # series keys split at the rollout (old untagged series
+                                      # stop, band-tagged ones start). No metric rename, no
+                                      # config-contract change.
+est_duration_min: 17                  # commit+push ~2, reconcile+rollout ~3, settle >=5 for
                                       # the contents assertions (60s scrape, 2m cache refresh,
-                                      # and the 5m lookback that retires stale twins — §4.5)
+                                      # and the 5m lookback that retires stale twins — §4.5),
+                                      # +2 for the v5.2.8 band-tag gate (§4.7b), which must wait
+                                      # for at least one 2m InfluxDB write interval
 needs_reboot: false
 touches:
   namespaces: [monitoring]
@@ -109,18 +117,15 @@ capability_change: false              # dependency refresh + base-image rebuild 
                                       # delta is ONE image tag.
 rollback_class: git-revert
 finding_refs: [F-0e3c2de5, F-23119c27]
-                                      # F-0e3c2de5 (section plan) OWNS this retarget: "unpoller
-                                      # v5.2.6 published 2026-09-16 00:40Z, 3 h before the
-                                      # nightly window: the vetted plan targets v5.2.5, so the
-                                      # window executed v5.2.5 as reviewed and left v5.2.6 for
-                                      # the next cycle". This plan is that next cycle — carried
-                                      # one release further, because v5.2.7 landed before the
-                                      # cycle ran. Its TEXT is now stale in two ways (§1.6);
-                                      # this plan does not edit the finding.
-                                      # F-23119c27 (section version) now names THIS EXACT HOP:
-                                      # re-read 2026-09-20 its title is "unpoller: image
-                                      # ghcr.io/unpoller/unpoller v5.2.5 → v5.2.7 (patch)",
-                                      # status unchanged, last seen 2026-09-19. The v5.2.6 draft
+                                      # F-0e3c2de5 (section plan) asked for this follow-up cycle.
+                                      # Re-read 2026-09-25 it is status RESOLVED (closed
+                                      # 2026-09-20 by policy-cli, close_reason: "the plan
+                                      # exists"), so it needs NO close-out action any more; kept
+                                      # here as lineage only.
+                                      # F-23119c27 (section version) names THIS EXACT HOP:
+                                      # re-read 2026-09-25 its title is "unpoller: image
+                                      # ghcr.io/unpoller/unpoller v5.2.5 → v5.2.8 (patch)",
+                                      # status unchanged, last seen 2026-09-25. The v5.2.6 draft
                                       # said this row was "the v5.2.4 → v5.2.5 finding, already
                                       # satisfied, auto-closes next sweep" — it did NOT close;
                                       # it re-targeted itself to the live pin vs newest upstream
@@ -195,8 +200,8 @@ premises:
     expect_exact: Running
   - id: no-otel-env-on-workload
     why: >-
-      NEW FOR THIS TARGET, and it guards the whole risk argument. v5.2.7's only
-      code change is one function in pkg/otelunifi (§1.4). Upstream gates that
+      Guards the §1.4 risk argument. The v5.2.7 delta's only code change is
+      one function in pkg/otelunifi (§1.4). Upstream gates that
       package behind Enabled(), which is false when no [otel] block is
       configured — so the changed code is unreachable here. unpoller's config
       library also accepts env overrides, so "no [otel] in the file" is only
@@ -210,12 +215,24 @@ sops_refs:
   - docs/sops/monitoring.md
   - docs/sops/auto-update.md
   - docs/sops/verification-contents-not-shape.md
-generated: "2026-09-20"
+generated: "2026-09-25"
 ---
 
-# unpoller: image v5.2.5 → v5.2.7 (image-only patch, chart stays 2.4.0)
+# unpoller: image v5.2.5 → v5.2.8 (image-only patch, chart stays 2.4.0)
 
-> **Retargeted 2026-09-20** from the `unpoller-v5.2.6` draft (generated
+> **Retargeted again 2026-09-25: v5.2.7 → v5.2.8.** v5.2.8 shipped 2026-09-24
+> while this draft sat in the queue. `plan_id` stays `unpoller-v5.2.7` by
+> convention (plans/README.md "Keep the plan_id when you refresh" — the
+> kube-prometheus-stack plan's `conflicts_with` resolves by it); `target:` is the
+> authoritative field. The v5.2.7→v5.2.8 delta is **README + one additive
+> InfluxDB tag** (§1.4b). §1.2's "none of the review-sensitive paths changed"
+> is therefore NO LONGER TRUE for `pkg/influxunifi/` — the delta was reviewed in
+> full here rather than waved through as a find-and-replace; it does not move
+> the risk class. Measurements re-taken 2026-09-25 are labelled with that date;
+> 2026-09-20 figures that the v5.2.8 delta cannot have moved are kept with their
+> own date.
+>
+> **Earlier retarget 2026-09-20** from the `unpoller-v5.2.6` draft (generated
 > 2026-09-17, never executed). v5.2.7 shipped 2026-09-18 while that draft sat in
 > the queue, so the hop widens to **v5.2.5 → v5.2.7** and now carries TWO
 > upstream deltas. Every live measurement in this file was **re-taken on
@@ -226,48 +243,59 @@ generated: "2026-09-20"
 
 ### 1.1 What changes
 
-**One line**: `image.tag: v5.2.5 → v5.2.7` in
+**One line**: `image.tag: v5.2.5 → v5.2.8` in
 `kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml`.
 
 **Which leg moves — state it explicitly (F-a2cd7a11).** unpoller's chart and
 image move in two independent lanes, so a chart bump can land days apart from an
 image bump and split the pair. **This plan moves the IMAGE leg ONLY.** The chart
 stays `2.4.0`, the `HelmRepository` stays on HTTP, and no chart value changes.
-Live today and after this plan: chart `2.4.0` + image `v5.2.7`. The chart leg is
+Live today: chart `2.4.0` + image `v5.2.5`; after this plan: chart `2.4.0` + image `v5.2.8`. The chart leg is
 deliberately parked — `flux-oci-chart-sources` §3.5 blocks unpoller's OCI
 migration precisely because it would force a chart upgrade in the same commit.
 No `upConfig` (secret) edit. No policy edit.
 
 **The current version did NOT move while this plan was re-targeted.**
 `deployment/unpoller` still runs `ghcr.io/unpoller/unpoller:v5.2.5`, re-verified
-2026-09-20 05:37Z, with `imageID sha256:123a42e6…` — the exact v5.2.5 index
+2026-09-20 05:37Z and again 2026-09-25, with `imageID sha256:123a42e6…` — the exact v5.2.5 index
 digest — 0 restarts, and a start time of 2026-09-16T01:48:49Z. So `current:`
 stays `v5.2.5`; this is a **wider hop, not a later one**.
 
-### 1.2 Upstream evidence — TWO deltas, both measured
+### 1.2 Upstream evidence — THREE deltas, all measured
 
 `gh api repos/unpoller/unpoller/compare/v5.2.5...v5.2.7`, measured **2026-09-20**:
-`status: ahead`, **6 commits, 4 files**.
+`status: ahead`, **6 commits, 4 files**. Plus `compare/v5.2.7...v5.2.8`, measured
+**2026-09-25**: `status: ahead`, **4 commits, 2 files** (rows marked v5.2.7→v5.2.8
+below) — `47ba6ca` *Updated README.md* / merge PR #1093, and `2152c02` *Update
+uap.go* / merge PR #1094 (*"add band label to per-VAP and per-radio metrics …
+to influxdb too, just like the Prometheus change"*). The v5.2.8 release body
+lists exactly those four commits and nothing else; no breaking-change or
+migration note.
 
-| File | Delta (v5.2.5…v5.2.7) | Which hop | Effect on us |
+| File | Delta | Which hop | Effect on us |
 |---|---|---|---|
 | `Dockerfile` | `+1/-1` | v5.2.5→v5.2.6 | distroless base `static-debian11` → `static-debian13`. Assessed in §1.3. |
 | `go.mod` | `+6/-6` | v5.2.5→v5.2.6 | dependabot "all" group, 4 updates; no functional surface. |
 | `go.sum` | `+12/-12` | v5.2.5→v5.2.6 | checksums for the above. |
-| `pkg/otelunifi/report.go` | `+3/-14` | v5.2.6→v5.2.7 | **the only Go source change in the whole hop.** Assessed in §1.4. |
+| `pkg/otelunifi/report.go` | `+3/-14` | v5.2.6→v5.2.7 | Go source change #1. Assessed in §1.4 (unreachable here). |
+| `README.md` | `+2/-2` | v5.2.7→v5.2.8 | dashboard-count prose. None. |
+| `pkg/influxunifi/uap.go` | `+19/-0` | v5.2.7→v5.2.8 | Go source change #2: **additive InfluxDB tag `band`** on `uap_vaps` and `uap_radios`. Assessed in §1.4b. |
 
 **The second hop in isolation** (`compare/v5.2.6...v5.2.7`, measured 2026-09-20):
 `status: ahead`, **2 commits, 1 file** — exactly the two the orchestrator
 reported: `160b46d` *"fix(otelunifi): callback memory leak"* and `4123a13`, the
 merge of PR #1092. Nothing else moved.
 
-**NONE of the review-sensitive paths changed**, re-verified against the file list
-of the combined compare: `pkg/influxunifi/` (InfluxDB tag/field schema),
-`pkg/promunifi/` (Prometheus metric names, the scrape-cache config contract) and
-`examples/up.conf.example` (the config contract).
+**ONE review-sensitive path changed in v5.2.8 — `pkg/influxunifi/`** (InfluxDB
+tag/field schema), additively (§1.4b). The other two remain untouched across the
+whole v5.2.5…v5.2.8 hop, re-verified 2026-09-25 against both compares' file
+lists: `pkg/promunifi/` (Prometheus metric names, the scrape-cache config
+contract) and `examples/up.conf.example` (the config contract). `Dockerfile` is
+also absent from the v5.2.7…v5.2.8 file list; the v5.2.8 Dockerfile read
+directly still says `FROM gcr.io/distroless/static-debian13`.
 
-Consequences, each of which the v5.2.5 review established and neither delta can
-have moved:
+Consequences (the v5.2.5 review established them; re-checked against all three
+deltas):
 
 - **No metric rename.** The in-repo `prometheusrule.yaml` keeps matching.
   Re-measured 2026-09-20 (reproduce with
@@ -284,20 +312,23 @@ have moved:
   Prometheus-datasource — re-measured 2026-09-20: **118 `"type": "prometheus"`,
   zero `"influxdb"`** across `app/dashboards/*.yaml` (identical to the
   2026-09-17 reading).
-- **No InfluxDB schema change.** Re-measured 2026-09-20, bucket `default` holds
+- **InfluxDB schema: ADDITIVE change only (v5.2.8, §1.4b).** No measurement
+  is renamed, removed or added, and no field changes; two measurements gain one
+  tag. Re-measured 2026-09-20, bucket `default` holds
   **20 measurements** (`uap`, `uap_radios`, `uap_vaps`, `usw`, `usw_ports`,
   `usg`, `usg_networks`, `usg_wan_ports`, `clients`, `clientdpi`, `wan`,
   `wan_status`, `speedtest`, `subsystems`, `firewall_policy`, `topology_edge`,
   `topology_summary`, `vpn_mesh`, `vpn_mesh_connection`, `vpn_mesh_status`).
-  Their tag/field names are untouched by both deltas, so the Grafana
+  Every existing tag/field name survives all three deltas, so the Grafana
   `unpoller-influxdb` datasource and any operator-built InfluxDB panels need no
-  repointing. *(Older datapoint, kept: the 2026-09-17 authoring note recorded
+  repointing — but see §1.4b for the one visible side effect (series split on
+  `uap_vaps`/`uap_radios`). *(Older datapoint, kept: the 2026-09-17 authoring note recorded
   **21** measurements. The current re-measured figure is 20. Nothing in this
   plan depends on the exact count — it is cited only as "the schema did not
   move" — and §4.6 asserts the write path by timestamp, not by cardinality.)*
 - **No config-contract change.** The one key whose type changed in v5.2.5
   (`[prometheus] interval`, where an explicit `0` now disables the scrape cache)
-  is untouched by both deltas, and our config sets `"2m"` explicitly — asserted
+  is untouched by all three deltas, and our config sets `"2m"` explicitly — asserted
   in §2.5 and re-verified 2026-09-20 (2 occurrences of `interval = "2m"`, zero
   of `interval = 0`).
 
@@ -305,13 +336,14 @@ have moved:
 
 The base move is **still in scope**: it belongs to v5.2.5→v5.2.6, and since the
 live image never left v5.2.5, executing this plan crosses it. `Dockerfile` is
-**unchanged** between v5.2.6 and v5.2.7 (the compare above lists one file, and it
-is not the Dockerfile), re-confirmed 2026-09-20 by reading the file at both tags
-directly:
+**unchanged** from v5.2.6 through v5.2.8 (neither later compare lists it),
+re-confirmed by reading the file at the tags directly (v5.2.5/v5.2.7 on
+2026-09-20, v5.2.8 on 2026-09-25):
 
 ```
 v5.2.5:  FROM gcr.io/distroless/static-debian11
 v5.2.7:  FROM gcr.io/distroless/static-debian13
+v5.2.8:  FROM gcr.io/distroless/static-debian13
 ```
 
 So the jump is **two Debian majors**, upstream's stated reason being that Debian
@@ -343,26 +375,26 @@ opens TLS. **Both TLS-relevant paths are therefore insensitive to the CA-bundle
 contents by construction**, which is what makes this base major low-risk HERE and
 would NOT make it low-risk on a component that verifies.
 
-**Measurement 3 — RE-TAKEN 2026-09-20 against the NEW target.** The old draft
-compared v5.2.5 against v5.2.6; this table compares the amd64 image configs
-pulled from ghcr for **v5.2.5 and v5.2.7**:
+**Measurement 3 — RE-TAKEN 2026-09-25 against the NEW target.** amd64 image
+configs pulled from ghcr (v5.2.5/v5.2.7 columns from 2026-09-20, v5.2.8 column
+2026-09-25):
 
-| | v5.2.5 | v5.2.7 |
-|---|---|---|
-| `User` | `'0'` | `'0'` |
-| `Entrypoint` | `/usr/bin/unpoller` | `/usr/bin/unpoller` |
-| `SSL_CERT_FILE` | `/etc/ssl/certs/ca-certificates.crt` | `/etc/ssl/certs/ca-certificates.crt` |
-| `Cmd` / `ExposedPorts` | none / none | none / none |
-| layers | 13 | 15 |
-| created | 2026-09-12T22:55:31Z | 2026-09-18T11:16:17Z |
-| amd64 child digest | `sha256:b48f300f…` | `sha256:8aebeff1…` |
+| | v5.2.5 | v5.2.7 (superseded) | **v5.2.8 (target)** |
+|---|---|---|---|
+| `User` | `'0'` | `'0'` | `'0'` |
+| `Entrypoint` | `/usr/bin/unpoller` | `/usr/bin/unpoller` | `/usr/bin/unpoller` |
+| `SSL_CERT_FILE` | `/etc/ssl/certs/ca-certificates.crt` | same | same |
+| `Cmd` / `ExposedPorts` | none / none | none / none | none / none |
+| layers | 13 | 15 | 15 |
+| created | 2026-09-12T22:55:31Z | 2026-09-18T11:16:17Z | 2026-09-24T01:10:13Z |
+| amd64 child digest | `sha256:b48f300f…` | `sha256:8aebeff1…` | `sha256:a5316d72…` |
 
 The `User` row is the one that could have bitten: our HelmRelease deliberately
 does NOT set `runAsNonRoot`/`runAsUser` (the comment in `helmrelease.yaml`
 explains why — the declared USER could not be read at hardening time), and it
 DOES set `readOnlyRootFilesystem: true`. A base that changed the declared uid
 could have produced `CreateContainerConfigError` or a container unable to read
-its own config. It did not change. *(Older datapoint, kept: the same table taken
+its own config. It did not change, at v5.2.7 or at v5.2.8. *(Older datapoint, kept: the same table taken
 2026-09-17 against v5.2.6 read 15 layers, created 2026-09-16T00:40:12Z, same
 User/Entrypoint/SSL_CERT_FILE. v5.2.7 matches it on every row but `created` —
 consistent with a rebuild of the same base.)*
@@ -443,6 +475,63 @@ ever added to the config, this section must be re-run before executing** — the
 premise fails loudly in that case rather than letting the plan proceed on a
 stale argument.
 
+### 1.4b The v5.2.8 InfluxDB `band` tag — the one element the v5.2.7 draft never saw
+
+`pkg/influxunifi/uap.go` (`+19/-0`, PR #1094) adds a helper and one map entry in
+each of two tag maps:
+
+```go
++func radioBand(radio string) string {
++	switch radio {
++	case "ng": return "2.4"
++	case "na": return "5"
++	case "6e": return "6"
++	default:   return ""
++	}
++}
+ ...  processVAPTable tags:  "radio": s.Radio,  +"band": radioBand(s.Radio),
+ ...  processRadTable tags:  "radio": p.Radio,  +"band": radioBand(p.Radio),
+```
+
+Both maps are the **tag** maps (`map[string]string`, followed by a separate
+`fields := map[string]any{…}`), so this adds a tag, not a field. Upstream's PR
+text: it ports to InfluxDB the band label the Prometheus exporter gained earlier.
+It is NOT a Prometheus change — `pkg/promunifi/` is untouched.
+
+**Measured against our live InfluxDB, 2026-09-25 (read-only Flux, `-2h`):**
+
+| | `uap_radios` | `uap_vaps` |
+|---|---|---|
+| tag keys today | `channel device_name radio site_name source` | `ap_mac bssid device_name essid id is_guest name radio radio_name site_id site_name source state usage` |
+| `band` tag present | **no** | **no** |
+| `radio` values | `6e na ng` | `6e na ng` |
+| rows with `exists r.band` | **0** (empty result) | — |
+
+**What that means for us:**
+
+1. **Every post-bump row gets a non-empty band.** All three live radio values
+   hit a `case`, so the `default: ""` branch is unreachable today and no
+   empty-valued tag is emitted.
+2. **Series split, not breakage.** In InfluxDB the tag set IS the series key, so
+   at the rollout every existing `uap_radios`/`uap_vaps` series stops receiving
+   points and a band-tagged twin starts. Queries that filter on
+   `_measurement`/`_field` and aggregate (`group()`, `mean()` across series)
+   are unaffected; a panel that plots **one line per series** without
+   regrouping will show the line change identity at the rollout time. That is
+   the visible side effect, and it is one-time.
+3. **Who reads it:** zero in-repo dashboards use InfluxDB (re-measured
+   2026-09-25: `grep -c '"type": "influxdb"'` returns 0 for all five files under
+   `unpoller/app/dashboards/`); the `unpoller-influxdb` datasource is declared in
+   `grafana/app/helmrelease.yaml` for operator-built panels only. No alert rule
+   reads InfluxDB.
+4. **Cardinality:** bounded by the existing radio/VAP series count (one twin
+   each, the old ones age out under the bucket's retention). Not a capacity
+   concern at this household's ~10 devices.
+
+This is also the one change in the whole hop that produces a **positive,
+unfakeable runtime signal**: a v5.2.5 binary cannot write a `band` tag. §4.7b
+uses it as a second, independent proof that the new binary is the one writing.
+
 ### 1.5 Why it was held — and the honest verdict
 
 The `*unpoller*` deny rule in `runbooks/auto-update-policy.yaml` carries **no
@@ -476,7 +565,7 @@ consecutive patch to need a window. Nothing here edits the policy; that is the
 operator's separate, code-reviewed decision.
 
 **If the rule is narrowed before this plan runs**, Step 0's direct-bump lane will
-ship v5.2.7 on its own, premises `live-image-still-v5.2.5` / `git-pin-still-v5.2.5`
+ship v5.2.8 on its own, premises `live-image-still-v5.2.5` / `git-pin-still-v5.2.5`
 will FAIL, and the right action is to run §4 against the already-landed bump and
 retire this file — not to execute it.
 
@@ -484,11 +573,13 @@ retire this file — not to execute it.
 
 Recorded here because the next reader will otherwise trust them:
 
-1. **F-0e3c2de5** (this plan's owning finding) says *"the vetted plan targets
+1. **F-0e3c2de5** (this plan's originating finding) says *"the vetted plan targets
    v5.2.5"* and frames the work as *"treat v5.2.5 → v5.2.6 as a normal
    follow-up"*. Both were true on 2026-09-16 and neither is true now: the plan
-   targets **v5.2.7**, and v5.2.6 has been superseded upstream without ever being
-   deployed. Its `security_detail` also carries a correction appended 2026-09-17
+   targets **v5.2.8**, and v5.2.6/v5.2.7 were superseded upstream without ever
+   being deployed. **Update 2026-09-25:** the finding is now `resolved` (closed
+   2026-09-20 by policy-cli on the grounds that this plan exists), so its stale
+   text is moot and it needs no close-out action. Its `security_detail` also carries a correction appended 2026-09-17
    fixing its own base-image claim from `debian12 → debian13` to
    `debian11 → debian13` (which this plan re-verified independently, §1.3).
 2. **F-23119c27** was described by the v5.2.6 draft as the v5.2.4→v5.2.5 version
@@ -496,8 +587,9 @@ Recorded here because the next reader will otherwise trust them:
    It did not close. It is a script-produced row keyed on *live pin vs newest
    upstream*, so it re-targeted itself: as of 2026-09-19 its title reads
    **"unpoller: image ghcr.io/unpoller/unpoller v5.2.5 → v5.2.7 (patch)"**,
-   status `unchanged`. It is now the version-lane row for exactly this hop, which
-   is why `finding_refs` lists it.
+   status `unchanged`. Re-read 2026-09-25 it has moved again with upstream and
+   now reads **"… v5.2.5 → v5.2.8 (patch)"** — the version-lane row for exactly
+   this hop, which is why `finding_refs` lists it.
 
 Per the planner contract neither finding is edited by this plan.
 
@@ -527,32 +619,31 @@ a class.
    Record the digests — §4.1 compares against them:
    ```bash
    TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:unpoller/unpoller:pull&service=ghcr.io" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
-   for t in v5.2.5 v5.2.7; do echo "== $t"; curl -sI -H "Authorization: Bearer $TOKEN" \
+   for t in v5.2.5 v5.2.8; do echo "== $t"; curl -sI -H "Authorization: Bearer $TOKEN" \
      -H "Accept: application/vnd.oci.image.index.v1+json" \
      "https://ghcr.io/v2/unpoller/unpoller/manifests/$t" | grep -iE '^HTTP|docker-content-digest'; done
    ```
-   **Measured 2026-09-20 (re-taken for the new target, not carried over):**
+   **Measured 2026-09-25 (re-taken for the new target, not carried over):**
    | tag | HTTP | index digest | amd64 child |
    |---|---|---|---|
    | `v5.2.5` (rollback) | 200 | `sha256:123a42e6…` | `sha256:b48f300f…` |
-   | `v5.2.7` (target) | 200 | `sha256:99f452d3…` | `sha256:8aebeff1…` |
+   | `v5.2.8` (target) | 200 | `sha256:ca82e584…` | `sha256:a5316d72…` |
 
    The v5.2.5 index digest matches the `imageID` on the LIVE pod — so the
    rollback target in §5 is the exact artifact that has been serving since
    2026-09-16T01:48:49Z.
-   *(Older datapoint, kept for lineage: on 2026-09-17 the then-target v5.2.6
-   resolved 200 at index digest `sha256:b6912acc…`. v5.2.6 is **not** this
-   plan's target and that digest is not used by any step below.)*
+   *(Older datapoints, kept for lineage: the then-target v5.2.6 resolved 200 at
+   index `sha256:b6912acc…` on 2026-09-17, and v5.2.7 at `sha256:99f452d3…` on
+   2026-09-20. Neither is this plan's target and no step below uses them.)*
 4. **Re-resolve the target** — a plan is a snapshot and unpoller ships fast
-   (v5.2.0 → v5.2.7 in 18 days; this plan exists *because* the previous draft was
-   overtaken twice). Measured 2026-09-20, the newest v5 release is **v5.2.7**
-   (`isPrerelease=false`, `isDraft=false`, published 2026-09-18T11:16:58Z) with
-   nothing above it. Re-run at execution:
+   (v5.2.0 → v5.2.8 in 24 days; this plan has now been overtaken three times).
+   Measured 2026-09-25, the newest release is **v5.2.8** (`isPrerelease=false`,
+   `isDraft=false`, published 2026-09-24T01:10:53Z) with nothing above it. Re-run at execution:
    ```bash
    curl -s "https://api.github.com/repos/unpoller/unpoller/releases?per_page=10" \
      | python3 -c "import sys,json;[print(r['tag_name'],r['published_at'][:10],'pre=%s'%r['prerelease'],'draft=%s'%r['draft']) for r in json.load(sys.stdin) if r['tag_name'].startswith('v5.')]"
    # for any newer NON-prerelease, non-draft tag N:
-   curl -s "https://api.github.com/repos/unpoller/unpoller/compare/v5.2.7...N" \
+   curl -s "https://api.github.com/repos/unpoller/unpoller/compare/v5.2.8...N" \
      | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['status'],d['total_commits']);[print(f['status'],f['filename']) for f in d['files']]"
    ```
    **Do not take a tag marked `pre=True` or `draft=True`.**
@@ -560,7 +651,9 @@ a class.
    carries over. Real commits → re-run the §1.2 review for the delta before
    bumping, paying attention to `pkg/influxunifi/` (schema), `pkg/promunifi/`
    (metric names, config keys) and `examples/up.conf.example` (config contract).
-   **Anything touching those beyond a one-liner is a new plan, not a retarget.**
+   **Anything touching those beyond a one-liner needs a full re-review, not a
+   find-and-replace** — as v5.2.8's `pkg/influxunifi/` tag addition got in §1.4b
+   (additive tag: retarget with a new gate; a rename/removal: new risk class).
    A `Dockerfile` base change alone is a retarget, but re-run §1.3's three
    measurements against the new base before taking it; a change confined to
    `pkg/otelunifi/` is a retarget **only while §1.4's two measurements still
@@ -579,7 +672,8 @@ a class.
    grep -oE '^[[:space:]]*\[[a-z_.]+\]' "$S" | tr -d ' ' | sort -u  # expect exactly [influxdb] [prometheus] [unifi]
    rm -f "$S"
    ```
-   All six re-measured 2026-09-20 and matching the expectations above.
+   All six re-measured 2026-09-20 and again 2026-09-25 (2 / 0 / 1 / 1 / 0 /
+   `[influxdb] [prometheus] [unifi]`), matching the expectations above.
    **Note the anchors:** these patterns are deliberately `[[:space:]]`-tolerant
    and NOT anchored at column 0 — the TOML lives indented inside the Secret's
    `stringData`, and a `^\[` anchor returns a false **zero** here rather than an
@@ -667,10 +761,23 @@ for line in sys.stdin:
    hiccup, not a failure. `-2h` keeps a stalled write path legible as an OLD
    timestamp. Both invocations must use the SAME range or the comparison in
    §4.7 is not like-for-like.
-   **Measured 2026-09-20 05:40Z: newest `uap_radios` `_time` =
-   `2026-09-20T05:40:53Z`** — i.e. the write path was current to the second at
-   baseline time. (org `influxdata`, bucket `default`, measurement `uap_radios`
-   — all three re-verified to exist today, alongside 19 sibling measurements.)
+   **Measured 2026-09-25 19:2xZ: newest `uap_radios` `_time` =
+   `2026-09-25T19:24:53Z`** — i.e. the write path was current at baseline time
+   (2026-09-20 05:40Z read `2026-09-20T05:40:53Z`). (org `influxdata`, bucket `default`, measurement `uap_radios`
+   — all three re-verified to exist 2026-09-25.)
+
+   **Also record the `band`-tag baseline for §4.7b** — same port-forward and
+   `$TOK`, run BEFORE the bump; it must return NO rows (a bare `\r\n`,
+   measured 2026-09-25) because v5.2.5 cannot write the tag:
+   ```bash
+   curl -s 'http://localhost:8086/api/v2/query?org=influxdata' \
+     -H "Authorization: Token $TOK" -H 'Content-Type: application/vnd.flux' -H 'Accept: application/csv' \
+     -d 'from(bucket:"default") |> range(start:-2h) |> filter(fn:(r)=>r._measurement=="uap_radios" and exists r.band) |> group() |> count()'
+   ```
+   If this already returns a count, something other than v5.2.5 is writing
+   `uap_radios` (a second poller, or the bump already landed) — stop and find
+   out which before continuing; §4.7b would otherwise pass without proving
+   anything.
    *(Older datapoint, kept: the 2026-09-17 authoring baseline was
    `2026-09-17T02:00:53Z`.)*
 8. **No in-flight reconcile on `monitoring`, and no other plan mid-execution in
@@ -687,34 +794,35 @@ for line in sys.stdin:
    RollingUpdate of a stateless 1-replica Deployment, so the scrape gap is at
    most one 60s interval while `UnifiMetricsAbsent` needs 15m to fire):
    ```bash
-   runbooks/update-marker.sh add unpoller monitoring 1 "v5.2.5->v5.2.7 image patch (plan unpoller-v5.2.7)"
+   runbooks/update-marker.sh add unpoller monitoring 1 "v5.2.5->v5.2.8 image patch (plan unpoller-v5.2.7)"
    ```
 2. **Bump the tag** — one line in
    `kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml`. **Dry-tested
-   2026-09-20 on a scratch copy of the CURRENT file on macOS (BSD sed)**; the
+   2026-09-25 on a scratch copy of the CURRENT file on macOS (BSD sed)**; the
    resulting diff is exactly:
    ```
    50c50
    <       tag: v5.2.5
    ---
-   >       tag: v5.2.7
+   >       tag: v5.2.8
    ```
    ```bash
-   sed -i '' 's/^      tag: v5\.2\.5$/      tag: v5.2.7/' kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml
-   grep -n 'tag: v5\.2\.' kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml   # exactly one line, v5.2.7
-   grep -c 'tag: v5.2.7' kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml    # exactly 1
+   sed -i '' 's/^      tag: v5\.2\.5$/      tag: v5.2.8/' kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml
+   grep -n 'tag: v5\.2\.' kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml   # exactly one line, v5.2.8
+   grep -c 'tag: v5.2.8' kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml    # exactly 1
    ```
    Then add the lines below to the comment block directly above the tag, after
    the existing "2026-09-16: v5.2.4 -> v5.2.5 …" paragraph, so the next reader
    sees the lineage without git archaeology (replace `XX` with the execution day
    — the stub is a placeholder, not a value):
    ```
-         # 2026-09-XX: v5.2.5 -> v5.2.7 image patch (plan unpoller-v5.2.7), skipping v5.2.6
-         # which was planned but never shipped. Two deltas: dependabot go.mod/go.sum group +
-         # distroless base static-debian11 -> static-debian13 (bullseye EOL) from v5.2.6, and
-         # an otelunifi callback-leak fix from v5.2.7 that is inert here (no [otel] block, no
-         # env, so the plugin never starts). No metric rename, no InfluxDB schema change, no
-         # config-contract change. Chart still 2.4.0.
+         # 2026-09-XX: v5.2.5 -> v5.2.8 image patch (plan unpoller-v5.2.7), skipping v5.2.6/7
+         # which were planned but never shipped. Three deltas: dependabot go.mod/go.sum group +
+         # distroless base static-debian11 -> static-debian13 (bullseye EOL) from v5.2.6; an
+         # otelunifi callback-leak fix from v5.2.7 that is inert here (no [otel] block, no env);
+         # and from v5.2.8 an ADDITIVE InfluxDB tag `band` on uap_vaps/uap_radios (series keys
+         # split once at rollout). No Prometheus metric change, no config-contract change.
+         # Chart still 2.4.0.
    ```
    Do NOT touch `runbooks/auto-update-policy.yaml` in this plan — the rule
    narrowing is the operator's separate, code-reviewed decision (§1.5, F-84472f89).
@@ -724,7 +832,7 @@ for line in sys.stdin:
    ```bash
    git fetch origin main && git merge --ff-only origin/main
    git commit --only kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml \
-     -m "chore(unpoller): image v5.2.5 -> v5.2.7 on chart 2.4.0 (plan unpoller-v5.2.7)"
+     -m "chore(unpoller): image v5.2.5 -> v5.2.8 on chart 2.4.0 (plan unpoller-v5.2.7)"
    git show --stat HEAD                 # exactly ONE file — reject anything else
    git log -1 --format=%s               # MUST be your subject; if not, git commit --amend
    git push origin main
@@ -767,13 +875,10 @@ for line in sys.stdin:
    .venv/bin/python3 runbooks/maintenance-plan.py --validate   # run BEFORE pushing the close-out
    ```
 
-   **Findings:** `F-0e3c2de5` is `authored_by: policy-cli`, **not** a script
-   producer — it will NOT auto-close. Close it by hand in the same turn, citing
-   the bump commit. `F-23119c27` is `producer: script` and closes itself on the
-   next sweep once the pin moves — do not close it by hand.
-   ```bash
-   runbooks/policy-cli.py finding close F-0e3c2de5 --commit <sha>
-   ```
+   **Findings:** `F-0e3c2de5` is ALREADY `resolved` (closed 2026-09-20,
+   re-read 2026-09-25) — do not re-close it. `F-23119c27` is `producer: script`
+   and closes itself on the next sweep once the pin moves — do not close it by
+   hand. No manual finding action remains.
 
 ## 4) Verification
 
@@ -826,10 +931,10 @@ let the gates read two pods at once. Dry-run 2026-09-20 on the live cluster:
 `N=1`, `POD=unpoller-9d8c6bdd7-r9kgx`, `deleting=` empty, and all four pinned
 commands below returned their expected output.
 
-1. **New bytes are running.** Tag is `ghcr.io/unpoller/unpoller:v5.2.7` AND the
-   pod's `imageID` DIFFERS from the §2.6 baseline (it should carry the v5.2.7
-   index digest `sha256:99f452d3…` from §2.3, or its amd64 child
-   `sha256:8aebeff1…` — all three nodes are amd64):
+1. **New bytes are running.** Tag is `ghcr.io/unpoller/unpoller:v5.2.8` AND the
+   pod's `imageID` DIFFERS from the §2.6 baseline (it should carry the v5.2.8
+   index digest `sha256:ca82e584…` from §2.3, or its amd64 child
+   `sha256:a5316d72…` — all three nodes are amd64):
    ```bash
    kubectl -n monitoring get pod "$POD" \
      -o jsonpath='{.spec.containers[0].image}{"  "}{.status.containerStatuses[0].imageID}{"\n"}'
@@ -841,16 +946,16 @@ commands below returned their expected output.
    **FAIL signature:** an unchanged `imageID` (still `sha256:123a42e6…`) means
    `IfNotPresent` served a cached layer set under a moved tag, and everything
    below would be measuring v5.2.5.
-2. **The rebuilt binary identifies itself as v5.2.7, on the FRESH pod.** This is
+2. **The rebuilt binary identifies itself as v5.2.8, on the FRESH pod.** This is
    the assertion that separates "the tag moved" from "the new binary runs".
    ```bash
    kubectl -n monitoring logs "$POD" --tail=-1 | head -40 | grep -iE 'starting up'
-   # MUST show:  [INFO] UniFi Poller v5.2.7 Starting Up! PID: 1
+   # MUST show:  [INFO] UniFi Poller v5.2.8 Starting Up! PID: 1
    # FAIL if it shows v5.2.5 — the rollout did not replace the process.
    ```
    **`"$POD"`, not `-l` (§4.0):** with a selector this line reads the old pod's
-   banner too and cannot distinguish "v5.2.7 started" from "v5.2.5 is still
-   here and v5.2.7 never printed anything".
+   banner too and cannot distinguish "v5.2.8 started" from "v5.2.5 is still
+   here and v5.2.8 never printed anything".
    **Use `--tail=-1 | head -40`, NOT `--tail=200`.** The startup banner is
    printed once, at the head of the log, and this exporter emits ~1 line/minute
    forever after, so a 200-line tail only reaches back ~3 h. Measured 2026-09-20
@@ -861,7 +966,7 @@ commands below returned their expected output.
    Greps here are `-i` because the upstream lines are mixed-case.
 3. **The config contract survived the rebuild** — same head-of-log window. The
    live v5.2.5 pod printed these exact lines at 2026-09-16T01:48:5xZ (verified
-   2026-09-20), and `pkg/promunifi/` is untouched by both deltas (§1.2), so the
+   2026-09-20), and `pkg/promunifi/` is untouched by all three deltas (§1.2), so the
    text must be identical apart from the version:
    **These two are the gates §4.0 exists for** — the outgoing v5.2.5 pod prints
    both lines verbatim, so run them against `"$POD"` only. With `-l` they PASS
@@ -881,7 +986,7 @@ commands below returned their expected output.
    Both also confirm the InfluxDB output is still enabled: the line
    `Poller->InfluxDB started, version: 2, interval: 2m0s, …, bucket: default,
    org: influxdata` appears in the same block on the live pod.
-4. **NEW — the OTel plugin is still OFF on the new binary (§1.4).** This is the
+4. **The OTel plugin is still OFF on the new binary (§1.4).** This is the
    assertion that makes the v5.2.7 delta's irrelevance a *measurement* instead of
    a claim. Upstream logs a specific line via `u.Logf` **only** when the plugin
    starts:
@@ -962,12 +1067,39 @@ commands below returned their expected output.
    > is also why §2.7 must not be narrowed back to `-30m`, where a >30 min
    > outage produces the same silent empty output.)
 
-   Tag/field names are unchanged
-   by both deltas (§1.2), so nothing needs repointing; a frozen timestamp would
+   Existing tag/field names are unchanged
+   by all three deltas (§1.2; v5.2.8 only ADDS `band`), so nothing needs repointing; a frozen timestamp would
    mean the write path broke, which §1 says cannot happen from these deltas —
    **which is exactly why it is checked.** This is the second independent output
    of the same process, so it distinguishes "Prometheus scrape broke" from "the
    poller stopped polling".
+7b. **CONTENTS ASSERTION (v5.2.8 — the NEW binary is the one writing InfluxDB).**
+   Wait until at least one full 2m InfluxDB interval has elapsed after the new
+   pod's `Poller->InfluxDB started` line, then re-run the §2.7 `band` query:
+   ```bash
+   curl -s 'http://localhost:8086/api/v2/query?org=influxdata' \
+     -H "Authorization: Token $TOK" -H 'Content-Type: application/vnd.flux' -H 'Accept: application/csv' \
+     -d 'from(bucket:"default") |> range(start:-10m) |> filter(fn:(r)=>r._measurement=="uap_radios" and exists r.band) |> group(columns:["band"]) |> count() |> keep(columns:["band","_value"])'
+   ```
+   **PASS:** rows for `band` values `2.4`, `5` and `6` (the three live radio
+   types, §1.4b), each with `_value` > 0.
+   **FAIL signatures, and what each means:**
+   - a bare `\r\n` (empty — the §2.7 baseline shape) → nothing with a `band`
+     tag was written in 10 min: either the old binary is still the writer (§4.1
+     should have caught it) or the InfluxDB write path is dead (§4.7). FAIL.
+   - rows but a missing band value (e.g. no `6`) → a radio type is now mapped
+     to `""`; the 6 GHz radio's series lost its band. Not a revert trigger on
+     its own (additive tag, Prometheus unaffected) — record it and continue.
+   Why it can fail and cannot be faked: the §2.7 baseline proved zero
+   band-tagged rows exist before the bump, and no v5.2.5 code path writes the
+   tag, so a PASS here can only come from the v5.2.8 binary. Read the rows,
+   not the exit status — curl exits 0 on the empty result too.
+   **Dry-run 2026-09-25 on the live (v5.2.5) cluster:** this exact query
+   returned the bare `\r\n` (the FAIL shape — correct pre-bump), and the same
+   query with `radio` in place of `band` as a positive control returned
+   `6e 95 / na 380 / ng 380` — so the query shape does return one row per tag
+   value when the tag exists, and the empty result is the tag's absence, not
+   a malformed query.
 8. `UnifiMetricsAbsent` (`absent(unpoller_device_uptime_seconds)`, `for: 15m`),
    `UnifiClientMetricsAbsent` (`absent(unpoller_client_satisfaction_ratio)`) and
    `UnifiControllerUnreachable` are NOT firing 15 min after Ready; the in-repo
@@ -992,12 +1124,17 @@ return to a state observed healthy for four days, not to a theoretical one.
 not a rollback target and must not be used as one.
 
 Then let Flux roll the Deployment back and confirm §4.1 shows `v5.2.5`, §4.2
-shows `UniFi Poller v5.2.5 Starting Up!`, and §4.5–4.7 pass again.
+shows `UniFi Poller v5.2.5 Starting Up!`, and §4.5–4.7 pass again. §4.7b
+inverts on rollback: re-run it with `range(start:-5m)` a few minutes after the
+v5.2.5 pod is up and expect the EMPTY result again (v5.2.5 stops writing the tag).
 
 **Nothing is forward-only**, so `rollback_class: git-revert` is honest rather
 than optimistic: unpoller is a stateless scraper with no PVC, no schema and no
-migration; the InfluxDB measurements are identical on both sides of this patch,
-so there is no mixed-key window to clean up and no dump to take first. If Helm is
+migration. The one thing a revert does not undo is the band-tagged InfluxDB
+series written while v5.2.8 ran: after the revert, those series simply stop and
+untagged ones resume (the same one-time split as §1.4b, in reverse). They are
+ordinary data points that age out under the bucket's retention; nothing reads
+them, nothing needs cleaning, and no dump is needed first. If Helm is
 ever wedged `pending-upgrade` (not expected for a tag-only change):
 `helm rollback unpoller <last-deployed-rev> -n monitoring --wait=false` then
 `flux reconcile helmrelease unpoller -n monitoring --force`, per
@@ -1008,11 +1145,15 @@ application-update.md §11. Clear the update marker either way.
 - **Blast radius if wrong:** UniFi observability only. `unpoller_*` series stop,
   the ten `unifi.*` alert rules go blind (the two `absent()` guards fire after
   15m, which is the intended loud failure), and the 20 InfluxDB UniFi
-  measurements freeze. **No workload, gateway, storage or auth path depends on
+  measurements freeze. **Expected, not a failure:** `uap_vaps`/`uap_radios`
+  series identities split once at the rollout (v5.2.8 `band` tag, §1.4b) — an
+  operator-built InfluxDB panel drawing one line per series will show lines
+  change identity at that timestamp. **No workload, gateway, storage or auth path depends on
   unpoller, and nothing depends on it for recovery** — it is a leaf exporter.
 - **Shared infra: none perturbed**, hence `shared: []` (justified in the
   frontmatter). unpoller continues writing to the shared influxdb2 (`databases`
-  ns, bucket `default`) with an unchanged schema and restarts nothing shared.
+  ns, bucket `default`) with an additively-changed schema (one new tag on two
+  measurements) and restarts nothing shared.
   §4.7 checks that write path anyway because it is cheap, and because the v5.1.0
   plan taught that "the schema did not change" is a claim, not a check.
 - **The off-cluster surface it DOES touch: the UniFi controller API.** The
@@ -1032,7 +1173,10 @@ application-update.md §11. Clear the update marker either way.
   one (measured there as a 5x spread on one radio). Compare same-session instant
   values, which is what §4 already does.
 - **Same-namespace / same-instrument plans (re-checked against
-  `maintenance-plan.py --open`, 2026-09-20):**
+  `maintenance-plan.py --open`, 2026-09-20; frontmatter re-read 2026-09-25 —
+  `prometheus-crd-ownership` and `cilium-1.20.2` have since EXECUTED and retired,
+  so their two bullets below are historical and neither is in `conflicts_with`
+  any more):**
   - `kube-prometheus-stack-91.4.1` (**draft, window null**) — **hard conflict,
     in `conflicts_with`**, and its own §6 asks any successor unpoller plan to
     re-add it. Never the same window. If an operator overrides that, run unpoller
@@ -1043,7 +1187,7 @@ application-update.md §11. Clear the update marker either way.
     re-targeted. 91.4.1 is chart-only (same operator appVersion `v0.94.0`), so
     the conflict *reason* is untouched — it still restarts Prometheus and
     Alertmanager, which is the whole basis for the exclusion.
-  - `prometheus-crd-ownership` — **in `conflicts_with`**; it touches the CRD
+  - `prometheus-crd-ownership` — *(RETIRED — executed 1a551276; kept as history)* it touches the CRD
     behind this plan's only scrape path. **CHANGED since the v5.2.6 draft:** it
     is now `status: awaiting-go`, `window: "sat-attended:2026-09-26"` (it was
     vetted/window-null on 2026-09-17), so this exclusion now removes a real date
@@ -1052,7 +1196,7 @@ application-update.md §11. Clear the update marker either way.
     asserts the CRDs are unchanged); the exclusion exists so that if it is ever
     non-zero, the damage does not get misattributed to this image bump and revert
     it needlessly.
-  - `cilium-1.20.2` (draft, window null) — **in `conflicts_with`**; a CNI roll
+  - `cilium-1.20.2` — *(RETIRED — executed 80395710; kept as history)* a CNI roll
     restarts the network every §4 assertion rides on. It declares a solo slot
     (**12** exclusions — counted 2026-09-20 from its own `conflicts_with`
     block), so in practice it excludes everything.
