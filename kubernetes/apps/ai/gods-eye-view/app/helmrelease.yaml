@@ -1,0 +1,162 @@
+---
+# God's Eye View — live public data (aircraft, ships, satellites, quakes, fires,
+# weather, CCTV …) on a photorealistic CesiumJS globe.
+# Upstream: bilawalsidhu/gods-eye-view. Upstream ships NO image; ours is built by
+# nachtschatt3n/gods-eye-view (branch `cberg`, .github/workflows/container.yml)
+# from the latest upstream RELEASE tag, weekly — REBUILD lane
+# (docs/sops/self-built-image-rebuild.md).
+#
+# Runs the Vite DEV server by design: in v0.1.x most /api/* providers only
+# register configureServer, so `vite preview` would drop them. Upstream's
+# SECURITY.md calls that server unhardened — hence the Authentik forward-auth
+# gate in ./httproute.yaml. Never expose it without that SecurityPolicy.
+#
+# Keys come ONLY from the SOPS Secret: GOOGLE_MAPS_API_KEY / CESIUM_ION_TOKEN are
+# injected into the client bundle, so they must never be baked into the image.
+# The in-app "Provider Settings" panel writes /app/.env, which the read-only root
+# filesystem blocks on purpose — change keys in secret.sops.yaml instead.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: gods-eye-view
+  namespace: ai
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 5.1.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      gods-eye-view:
+        # Single replica: in-memory rate limiters, TomTom daily tile budget and
+        # the AISStream websocket are all process-local.
+        replicas: 1
+        strategy: Recreate
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/gods-eye-view
+              tag: 0.1.1-b20260925@sha256:7a7fd86e01656ddca6d8ca3f66c2d8eefa5326ac23a297a921c1148374c2b852
+              pullPolicy: IfNotPresent
+            env:
+              - name: TZ
+                value: "Europe/Berlin"
+              - name: HOST
+                value: "0.0.0.0"
+              - name: PORT
+                value: "4173"
+              - name: OPENSKY_AUTH_MODE
+                value: "auto"
+              # Per-IP throttle on the metered Google proxies (off upstream by
+              # default; the README asks for it whenever HOST is not localhost).
+              - name: GEV_RATELIMIT_GOOGLE_PER_MIN
+                value: "30"
+              - name: TOMTOM_DAILY_TILE_BUDGET
+                value: "6000"
+            envFrom:
+              - secretRef:
+                  name: gods-eye-view
+            # Gotcha #13: readiness on a static public/ asset (served verbatim by
+            # Vite, no transform, no log line); startup + liveness on `/`, which
+            # runs the HTML transform and so proves the dev server is really up.
+            # Startup is the deploy gate — the first dep-optimise pass is slow.
+            probes:
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 4173
+                  periodSeconds: 5
+                  timeoutSeconds: 5
+                  failureThreshold: 60
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 4173
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /logo.svg
+                    port: 4173
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                cpu: 2000m
+                memory: 2Gi
+    defaultPodOptions:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
+        seccompProfile:
+          type: RuntimeDefault
+
+    service:
+      app:
+        controller: gods-eye-view
+        ports:
+          http:
+            port: 80
+            targetPort: 4173
+
+    # All state is recreatable cache (CelesTrak/LL2/FIRMS/terrain/overpass …),
+    # so emptyDir — no Longhorn volume.
+    persistence:
+      gev-cache:
+        type: emptyDir
+        globalMounts:
+          - path: /app/.gev-cache
+      gev-logs:
+        type: emptyDir
+        globalMounts:
+          - path: /app/.gev-logs
+      vite-cache:
+        type: emptyDir
+        globalMounts:
+          - path: /app/node_modules/.vite
+      # Vite bundles vite.config.js into a temp file here on every start.
+      vite-temp:
+        type: emptyDir
+        globalMounts:
+          - path: /app/node_modules/.vite-temp
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp

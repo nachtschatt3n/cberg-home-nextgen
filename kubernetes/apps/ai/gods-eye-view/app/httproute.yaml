@@ -1,0 +1,107 @@
+# gods-eye-view on envoy-EXTERNAL, entirely behind Authentik forward-auth.
+# Pattern + gotchas: docs/sops/gateway-api-httproute.md §4.3; shape copied from
+# kubernetes/apps/office/arag-web/app/httproute.yaml minus its ungated /api
+# split — nothing here is meant for an unattended client, so EVERY path except
+# the outpost callback is gated. Upstream's SECURITY.md: the Vite server is not
+# a hardened production service, and it proxies metered Google/TomTom keys.
+# The external-dns target lives on the envoy-external Gateway, not here
+# (new-deployment-blueprint Gotcha #11).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gods-eye-view
+  namespace: ai
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "God's Eye View"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "google-earth.png"
+    gethomepage.dev/description: "Live aircraft, ships, satellites & sensors on a 3D globe"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/name=gods-eye-view"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "godseye.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: gods-eye-view
+          port: 80
+      # Websocket-capable app (Vite HMR socket, live AIS/aircraft streams):
+      # the gateway-wide 60s would sever them (gateway SOP §4.2).
+      timeouts:
+        request: 3600s
+        backendRequest: 3600s
+---
+# Callback route — separate and MORE specific than `/` (longest match wins), and
+# NEVER gated, or the login flow can never complete.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gods-eye-view-authentik-outpost
+  namespace: ai
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "godseye.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /outpost.goauthentik.io }
+      backendRefs:
+        # Authorised by ReferenceGrant kube-system/gods-eye-view-outpost-access
+        # (kubernetes/apps/kube-system/authentik/app/referencegrants.yaml).
+        - group: ""
+          kind: Service
+          name: ak-outpost-gods-eye-view-forward-auth
+          namespace: kube-system
+          port: 9000
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: gods-eye-view-forward-auth
+  namespace: ai
+spec:
+  targetRefs:                    # app route ONLY — never the callback route
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gods-eye-view
+  extAuth:
+    failOpen: false              # outpost down => deny, never publish
+    # cookie is MANDATORY (without it every check is anonymous and browsers get
+    # `oauth state does not match` 400s); x-forwarded-* deliberately NOT
+    # forwarded — see the full rationale in office/arag-web/app/httproute.yaml.
+    headersToExtAuth:
+      - cookie
+      - accept
+      - user-agent
+    http:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-gods-eye-view-forward-auth
+          namespace: kube-system
+          port: 9000
+      path: /outpost.goauthentik.io/auth/envoy
+      headersToBackend:
+        - Set-Cookie
+        - X-authentik-username
+        - X-authentik-groups
+        - X-authentik-email
+        - X-authentik-name
+        - X-authentik-uid

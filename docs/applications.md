@@ -16,7 +16,7 @@
 
 | Namespace | App Count |
 |-----------|-----------|
-| ai | 10 |
+| ai | 11 |
 | home-automation | 20 |
 | databases | 11 |
 | monitoring | 14 |
@@ -34,7 +34,7 @@
 | my-software-development | 3 |
 | my-software-production | 4 |
 | my-software-showcase | 15 |
-| **Total** | **123** |
+| **Total** | **124** |
 
 ---
 
@@ -52,6 +52,7 @@
 | paperclip | AI agent orchestration — multi-agent company management | Internal | AI |
 | hermes-agent | Self-improving AI agent with Telegram gateway and skill learning | Internal | AI |
 | oc8 | Self-hosted AI agent platform — seven Deployments (`oc8-backend`, `oc8-frontend`, `oc8-caddy` edge, `oc8-redis`, `oc8-worker`, `oc8-ingestion-worker`, `oc8-scheduler`). **We fork and build this one ourselves**: upstream ships no image, no chart and no CI, so the images are `ghcr.io/nachtschatt3n/oc8-backend` / `-frontend` (digest-pinned, tagged by source sha) and the chart is `deploy/helm/oc8` out of our fork. Because the chart hardcodes the DSN, host and an RWO PVC, those are corrected via `postRenderers` rather than values. Its Flux Kustomization **`dependsOn` `databases/oc8-db`** — a one-shot bootstrap `Job` (`oc8-db-init-v1`, which uses `pgvector/pgvector:0.8.6-pg16` purely as a *client* image) that creates the role, database and `vector` extension inside the shared `databases/postgresql`. That Kustomization sets `wait: true`, because the backend's `alembic upgrade head` init container fails and back-offs the whole release if the schema is not already there. Per the Summary convention above, `oc8-db` is documented here in its parent's row rather than as an entry of its own, and is not counted separately. The worker crash-loops unless `OC8_SANDBOX_DRIVER` is set (upstream issue #8), so never drop that env when bumping. | Internal | AI |
+| gods-eye-view | Live public data (aircraft, ships, satellites, quakes, fires, weather, CCTV) on a photorealistic CesiumJS 3D globe. **We build the image ourselves**: upstream (`bilawalsidhu/gods-eye-view`) ships none, so `nachtschatt3n/gods-eye-view` (default branch `cberg`) builds the latest upstream *release* weekly into `ghcr.io/nachtschatt3n/gods-eye-view:<ver>-b<YYYYMMDD>` (digest-pinned here). Runs the Vite **dev** server (v0.1.x only serves its `/api/*` providers there), which upstream calls unhardened — so the whole host sits behind Authentik forward-auth (`SecurityPolicy`, outpost `gods-eye-view-forward-auth`). Provider keys live in `secret.sops.yaml` (empty = keyless fallback); the in-app Provider Settings panel cannot write (read-only rootfs) by design. Cache is emptyDir. No OpenAI voice (endpoint hard-coded upstream). | External (Authentik forward-auth) | AI |
 
 **External Ollama:** Mac Mini M4 Pro at `192.168.30.111` (not deployed in cluster)
 

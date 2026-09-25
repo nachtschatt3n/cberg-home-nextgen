@@ -58,6 +58,7 @@ Known first-party images and their source repos (extend as they are added):
 | `ghcr.io/nachtschatt3n/sure` | `nachtschatt3n/sure` |
 | `ghcr.io/nachtschatt3n/arag-web` | `nachtschatt3n/arag-web` |
 | `ghcr.io/nachtschatt3n/sweep-dashboard` | `nachtschatt3n/sweep-dashboard` |
+| `ghcr.io/nachtschatt3n/gods-eye-view` | `nachtschatt3n/gods-eye-view` (branch `cberg`; packages the latest upstream `bilawalsidhu/gods-eye-view` release — weekly `container.yml` rebuild, or dispatch with `upstream_tag`) |
 
 ---
 

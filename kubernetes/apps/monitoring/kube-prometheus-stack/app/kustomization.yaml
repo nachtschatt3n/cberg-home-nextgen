@@ -15,6 +15,7 @@ resources:
   - ./authentik-alerts.yaml
   - ./otel-collector-alerts.yaml
   - ./anythingllm-alerts.yaml
+  - ./gods-eye-view-alerts.yaml
   - ./docs-site-alerts.yaml
   - ./absenty-alerts.yaml
   - ./icloud-backup-alerts.yaml

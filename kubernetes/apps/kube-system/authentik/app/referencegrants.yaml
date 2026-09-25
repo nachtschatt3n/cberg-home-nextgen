@@ -256,3 +256,21 @@ spec:
     - group: ""
       kind: Service
       name: ak-outpost-uptime-kuma-forward-auth
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: gods-eye-view-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: ai
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: ai
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-gods-eye-view-forward-auth
