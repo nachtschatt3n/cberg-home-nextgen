@@ -18,7 +18,8 @@ metadata:
   name: media-plex-fs-classifier
   namespace: media
 spec:
-  schedule: "0 4 * * *"   # daily at 04:00 (just before audit at 04:15)
+  schedule: "35 1 * * *"   # daily 01:35 Berlin, just before the audit at 01:45 Berlin (F-a3d4801f)
+  timeZone: Europe/Berlin
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3   # keep a few for trend
   failedJobsHistoryLimit: 2

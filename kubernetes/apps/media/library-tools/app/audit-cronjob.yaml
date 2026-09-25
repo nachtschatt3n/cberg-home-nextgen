@@ -26,7 +26,16 @@ metadata:
   name: media-library-audit
   namespace: media
 spec:
-  schedule: "15 4 * * *"   # daily at 04:15 local
+  # 01:45 Europe/Berlin, pinned via timeZone so it tracks the Berlin-anchored
+  # operations sweep (04:00 Berlin, every 48h) across DST. Was "15 4 * * *" in
+  # controller-UTC = 06:15 CEST, AFTER the sweep, so every cron sweep read a
+  # ~22h-old walk (F-a3d4801f). Slot rationale: the run takes ~35s; 01:45 is
+  # outside the 02:00-02:59 Berlin hour that DST skips/repeats, clear of the
+  # nightly maintenance window (03:30 Berlin) and of every Longhorn recurring
+  # job (trim 02:00Z, snapshot-cleanup 02:30Z, backup 03:00Z = 04:00-05:00
+  # Berlin), and off the :00/:30 marks of the hourly CIFS sync jobs.
+  schedule: "45 1 * * *"
+  timeZone: Europe/Berlin
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3

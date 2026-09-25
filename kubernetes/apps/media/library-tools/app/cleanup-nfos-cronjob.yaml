@@ -14,7 +14,7 @@ metadata:
   name: media-cleanup-nfos
   namespace: media
 spec:
-  schedule: "30 4 * * 0"   # weekly, Sundays at 04:30 (after audit at 04:15)
+  schedule: "30 4 * * 0"   # weekly, Sundays 04:30 UTC (after the audit at 01:45 Berlin)
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
