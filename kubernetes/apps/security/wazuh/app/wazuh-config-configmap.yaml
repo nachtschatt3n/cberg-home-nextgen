@@ -62,10 +62,19 @@ data:
         </enrollment>
       </client>
 
+      <!-- client_buffer raised 2026-09-25 (F-92f53633): at 5000/500 all 3
+           agents hit "agent event queue flooded" (rules 202/203/204,
+           7-21x/node/24h) — Falco + host-log bursts outran 500 EPS and
+           filled the 5000-slot queue in ~10s, and msg_count - msg_sent
+           showed ~100k dropped events on one node. 50000 slots (max 100000)
+           absorbs minute-scale bursts; ~1KB/event avg ≈ 50MB worst-case,
+           well inside the 512Mi limit (live RSS ~40-50Mi). 1000 EPS doubles
+           drain rate while staying modest for the single-node manager
+           (3 agents x 1000 = 3000 EPS peak). -->
       <client_buffer>
         <disabled>no</disabled>
-        <queue_size>5000</queue_size>
-        <events_per_second>500</events_per_second>
+        <queue_size>50000</queue_size>
+        <events_per_second>1000</events_per_second>
       </client_buffer>
 
       <rootcheck>
