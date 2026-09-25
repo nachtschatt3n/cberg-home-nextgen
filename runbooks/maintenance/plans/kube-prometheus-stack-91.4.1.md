@@ -98,6 +98,9 @@ autonomy_override: human-gated   # ADDED 2026-09-20 on independent review. NOT b
                                   # a degraded cluster' gate. A chart major that blinds the mechanism meant to
                                   # catch its own failure is the one case where the absent human is load-bearing.
                                   # Remove this ONLY when the scheduler can guarantee sole occupancy.
+exclusive: true   # §6 "LAST in its window, or alone" — enforced by window-scheduler.py since 1f2d56f6
+                  # (added 2026-09-25 review). NOT read by run-now.py preflight: in an on-demand
+                  # NOW run the attending operator/agent enforces sole occupancy (run it alone).
 depends_on:
   # RESOLVED 2026-09-20: prometheus-crd-ownership EXECUTED (1a551276, helm rev 25) and retired (9d87171b) — this dependency is SATISFIED. kube-prometheus-stack is now the single writer of all ten monitoring.coreos.com CRDs.
                                       # monitoring.coreos.com CRDs before this plan stamps
@@ -197,7 +200,10 @@ finding_refs:
                                       # overall", and no open finding names the 91.x major.
                                       # Ref kept (it is this plan's origin); see §2.1a for
                                       # what a Step-0 landing of 90.2.0 does to this plan.
-status: draft    # was `vetted` (REVIEWED 2026-09-15, plan-reviewer fan-out, corrections
+status: vetted   # RE-VETTED 2026-09-25 against 91.5.2: plan-reviewer verdict needs-fix (5 blocking,
+                 # all text), corrections applied in this commit, then re-checked mechanically:
+                 # plan-premises --require-premises PASS (9), --controls --prom-url PASS (5 instruments),
+                 # maintenance-plan.py --validate PASS. History: was `vetted` (REVIEWED 2026-09-15, plan-reviewer fan-out, corrections
                  # applied in c36388bc). RESET TO draft 2026-09-20 because the TARGET moved
                  # (91.4.0 -> 91.4.1): a vetted stamp may not outlive the version it was
                  # granted for. Must be re-reviewed before it can be scheduled.
@@ -597,14 +603,7 @@ for c in json.load(sys.stdin)['items']:
     if n.endswith('monitoring.coreos.com'):
         print(f\"{n:45s} opver={c['metadata'].get('annotations',{}).get('operator.prometheus.io/version')} hr={c['metadata'].get('labels',{}).get('helm.toolkit.fluxcd.io/name')}\")"
 ```
-**Expected (2026-09-15):** 6 × `0.93.1 hr=kube-prometheus-stack`, 4 × `0.92.0
-hr=otel-operator` (the contention in §1). Ten CRDs total. This picture is
-**unchanged** by `prometheus-crd-ownership` (it removes the writer without
-rewriting the objects) and by any otel-operator bump having run before it (a
-byte-identical 0.92.0 re-apply; only the generation moves — observed when the
-now-retired `otel-operator-0.21.0` ran on 2026-09-17: the four still read GEN 30,
-OPVER 0.92.0). RE-CONFIRMED live 2026-09-20 by the independent reviewer: 6 ×
-`0.93.1 hr=kube-prometheus-stack`, 4 × `0.92.0 hr=otel-operator`. Any other
+**Expected (RE-MEASURED 2026-09-25):** 10 × `0.93.1 hr=kube-prometheus-stack` — prometheus-crd-ownership removed the otel writer and kps revision 40 (2026-09-22) re-stamped the four formerly otel-owned CRDs (now generation 31). Ten CRDs total. *(The 2026-09-15/20 picture — 6 × kps 0.93.1 + 4 × otel 0.92.0 — is history; the §1 contention block describes the pre-2026-09-22 state.)* Any other
 picture: stop and re-derive §1 before proceeding.
 
 **2.6 — Storage: the TSDB volume is healthy and backed up.**
@@ -630,7 +629,7 @@ NOW=$(python3 -c "from datetime import *;print(datetime.now(timezone.utc).strfti
 END=$(python3 -c "from datetime import *;print((datetime.now(timezone.utc)+timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")
 curl -s -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/json' -d '{
   "matchers":[{"name":"namespace","value":"monitoring","isRegex":false,"isEqual":true},
-              {"name":"alertname","value":"KubePod.*|KubeStatefulSet.*|KubeDeployment.*|TargetDown|PrometheusOperator.*","isRegex":true,"isEqual":true}],
+              {"name":"alertname","value":"KubePod.*|KubeStatefulSet.*|KubeDeployment.*","isRegex":true,"isEqual":true}],
   "startsAt":"'$NOW'","endsAt":"'$END'","createdBy":"maintenance-window",
   "comment":"kube-prometheus-stack chart 90.0.0->91.5.2 rollout. auto-expires 1h"}'
 kill $PF 2>/dev/null
@@ -821,7 +820,7 @@ import sys,json;d=json.load(sys.stdin)
 print('AM',d['versionInfo']['version'],'telegram receiver in config:', 'telegram' in d['config']['original'])"
 kill $PF1 $PF2 2>/dev/null
 ```
-**PASS:** (a) `targets 98 up 98`, `down: []` — same count as the baseline YOU took
+**PASS:** (a) `targets N up N` with N = the count YOU took in §2.4 this window (100 on 2026-09-25), `down: []` — same count as the baseline YOU took
 in §2.4 this window (a ±1 drift is acceptable ONLY if explained by a pod that
 legitimately came or went during the window; a lower count with `down:` entries is a
 fail). (b) an equal-or-higher group/rule count than your §2.4 baseline — a LOWER
@@ -839,7 +838,7 @@ firing` equals the §2.4 set you recorded, plus at most the transients the §3.1
 silence covers. *(Re-measured 2026-09-20: `firing: 0 []` — the cluster is currently
 quiet. The older `['LonghornVolumeAllocationHigh']` figure was 2026-09-15 and has
 since cleared; do NOT treat its absence as a regression, and do NOT treat its
-presence as one either — compare to YOUR baseline.)* (d) `AM 0.34.0`, `telegram
+presence as one either — compare to YOUR baseline.)* (d) `AM 0.34.1` (still `0.34.0` = the operator did not roll the Alertmanager image — FAIL), `telegram
 receiver in config: True`.
 
 **4.5 — CONTENTS ASSERTIONS (chart bump on the thing that IS the scraper).**
@@ -857,6 +856,16 @@ CONTENTS ASSERTION 3: alerts still TRAVERSE Prometheus -> Alertmanager — measu
   by increase(alertmanager_alerts_received_total[5m]) > 0 on the new Alertmanager
   pod; compared to zero.
 ```
+
+CONTROL: metric up — count(up == 1) after the restart must equal the §2.4 in-window target count (100 up of 100 on 2026-09-25)
+CONTROL: metric prometheus_tsdb_lowest_timestamp_seconds — must equal the §2.4 in-window floor; a value at the new pod's start time = empty volume mounted
+CONTROL: metric alertmanager_alerts_received_total — sum(increase(...[5m])) > 0 on the new pod (24.4 measured live 2026-09-25)
+CONTROL: metric prometheus_tsdb_head_series — within ±10 % of the §2.4 in-window baseline
+CONTROL: metric node_load1 — >= 3 samples per node over the last 2m (4 per node measured live 2026-09-25)
+
+*(2026-09-25 review: `TargetDown` and `PrometheusOperator.*` REMOVED from the §3.1
+silence — the operator alerts are exactly what a broken 0.94.x RBAC would raise, and
+`TargetDown` (`for: 600s`) cannot fire inside a 2-5 min blind spot anyway.)*
 
 ```bash
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9099:9090 >/dev/null 2>&1 & PF=$!
@@ -1040,9 +1049,9 @@ Alertmanager too, and the same "Watchdog reached AM after the restart" and
   plan** — not its steps, not its verification — after §3.2 in the same window: a
   verification that queries Prometheus while it replays its WAL reads "no data" as
   failure, and a Step-4 gate that reads it mid-restart would refuse to continue or
-  misread the restart as a regression. The derived class is AUTO-NIGHT, so this
-  can run unattended: the sequencer has to honour "last or alone" without a human
-  in the loop.
+  misread the restart as a regression. The derived class is HUMAN-GATED
+  (autonomy_override); `exclusive: true` keeps every other plan out of the slot, and
+  the attending operator enforces "after Step 0's health gate, nothing after §3.2".
 - **Blind spot:** ~2-5 min with no scraping/evaluation while
   `prometheus-kube-prometheus-stack-0` restarts, ~1 min with no routing while
   `alertmanager-kube-prometheus-stack-0` restarts. Alerts that would have fired in
