@@ -10,11 +10,18 @@ kind: image
 current: "3.1.3"                       # live-verified 2026-09-20: BOTH Deployments run
                                        # ghcr.io/paperless-ngx/paperless-ngx:3.1.3, and the
                                        # serving process reports paperless.version 3.1.3
-target: "3.2.0"                        # released 2026-09-19; ghcr tag exists
-                                       # (index digest sha256:22dc423ff48ac1629977dbf0c9625ba9f60d3bd1291a2ff173c65351984a14c2)
+target: "3.2.1"                        # RETARGETED 2026-09-25 from 3.2.0 (plan_id kept per
+                                       # README "Keep the plan_id when you refresh").
+                                       # v3.2.1 released 2026-09-20, GitHub release NOT
+                                       # prerelease and marked Latest; ghcr index digest
+                                       # sha256:5fa76604a81df6945086e0837b14b56543d137e8ce4f311cc5d9ebe907e74e79
+                                       # == the digest ghcr `latest` resolves to (read
+                                       # 2026-09-25) -> stable channel. 3.2.0 remains
+                                       # the release that carries the schema change below.
 update_type: minor
 risk: medium                           # NOT from the flagged ng-select line (frontend-only).
-                                       # From the search-index rebuild: 3.2.0 bumps the
+                                       # From the search-index rebuild: 3.2.0 (crossed by
+                                       # this 3.1.3 -> 3.2.1 path; 3.2.1 keeps it) bumps the
                                        # tantivy SCHEMA_VERSION 1 -> 2, which forces a full
                                        # rebuild of the 973-document full-text index at
                                        # container start, plus one Django migration. A
@@ -25,11 +32,15 @@ needs_reboot: false
 touches:
   namespaces: [office]
   resources:
-    - helmrelease/paperless-ngx                  # values.image.tag 3.1.3 -> 3.2.0
+    - helmrelease/paperless-ngx                  # values.image.tag 3.1.3 -> 3.2.1
     - deployment/paperless-ngx                   # Recreate roll onto the new image
-    - deployment/scan-inbox-validator            # SAME image, SECOND pin — must move in the
-                                                 # same commit or the validator silently
-                                                 # keeps running the retired 3.1.3 image
+                                                 # scan-inbox-validator REMOVED from touches
+                                                 # 2026-09-25: its pin (the SAME image) was
+                                                 # already moved 3.1.3 -> 3.2.1 by 9557fa89
+                                                 # (2026-09-21, operator instruction, own
+                                                 # commit). Live-verified 2026-09-25: it runs
+                                                 # :3.2.1. This plan no longer edits it; it
+                                                 # only re-reads it (premises + CA4).
     - kustomization/paperless-ngx                # namespace `office` (NOT flux-system)
     - pvc/paperless-data                         # tantivy index under data/index REBUILT
                                                  # IN PLACE (RWO longhorn-static)
@@ -82,31 +93,22 @@ conflicts_with: [paperless-db-13.0.2]  # HARD. That plan scales deployment/paper
                                        # overlap only — no shared resource, no shared
                                        # datastore; and it sits in sun-attended, a different
                                        # slot from the sat-attended this plan is sized for).
-security_ref: F-15987249               # see also F-56e8bbdd (SAME image, no-upstream-fix
-                                       # class) — ADDED 2026-09-20; both re-queried live and
-                                       # both are open, section `security`, severity
-                                       # `accepted`, status `unchanged`, last_seen
-                                       # 2026-09-19, both titled against
-                                       # `ghcr.io/paperless-ngx/paperless-ngx:3.1.3`.
-                                       # F-15987249 is AR-029-accepted under the "already on
-                                       # the newest upstream tag" branch. 3.2.0 makes that
-                                       # premise FALSE — a newer tag now exists, so the
-                                       # accepted-risk rationale lapses and the bump is the
-                                       # household's only sanctioned remedy for a third-party
-                                       # image (we bump, we never rebuild). F-56e8bbdd lapses
-                                       # on the same bump for the same reason: its acceptance
-                                       # is pinned to the 3.1.3 tag string, so moving the tag
-                                       # re-scores it on 3.2.0's own CVE set.
-                                       # Both stay OUT of finding_refs on purpose: that field
-                                       # is the plan-or-page OWNERSHIP join for lane=PLAN
-                                       # findings, and these two are section `security` /
-                                       # severity `accepted` — claiming them there would
-                                       # assert this plan answers a PLAN-lane row that does
-                                       # not exist. Precedent for the scalar + "see also"
-                                       # form: bitnamilegacy-exit-nextcloud-{db,redis}.
+security_ref: F-9c2b83cf               # RE-QUERIED 2026-09-25 (F-15987249 is now RESOLVED).
+                                       # F-9c2b83cf: open, section `security`, against the
+                                       # running `:3.1.3` app image, "newer upstream tag
+                                       # available", triage lane COVERED (image-or-version-
+                                       # bump) — i.e. it is waiting on exactly this bump.
+                                       # See also F-56e8bbdd (open, AR-029-accepted, pinned
+                                       # to the 3.1.3 tag string — lapses when the tag moves)
+                                       # and F-e6b70b55 (open, AR-029-accepted residual set
+                                       # of the `:3.2.1` TARGET image, already running in
+                                       # scan-inbox-validator). We bump, we never rebuild.
+                                       # Security refs stay OUT of finding_refs: they are
+                                       # citations, not PLAN-lane ownership claims.
                                        # Detail stays on the finding records — never here.
 capability_change: true                # HONEST true, and it decides the execution class.
-                                       # 3.2.0 changes ingest-time behaviour, not just the UI:
+                                       # The 3.1.3 -> 3.2.1 path changes ingest-time
+                                       # behaviour, not just the UI. From 3.2.0:
                                        # "Improve matching for correspondents, storage path and
                                        # labels by removing bias + adding minimum match
                                        # threshold" (#12164) alters auto-classification of
@@ -114,26 +116,22 @@ capability_change: true                # HONEST true, and it decides the executi
                                        # content in apply AI suggestions WF" (#13985) changes
                                        # when the AI workflow action fires. Both are
                                        # user-visible on the household's live ingestion path.
+                                       # From 3.2.1: mail-fetch overlap guard moves from a
+                                       # PaperlessTask-row check to a Redis cache lock with a
+                                       # 30-min TTL (#14189), and ocrmypdf 17.12 (ligature
+                                       # text-layer fix, #14190) changes OCR text output under
+                                       # OCR_MODE=force.
 rollback_class: git-revert             # A real git revert, verified against the code paths:
                                        # the index self-heals on downgrade (§5) and both
                                        # migration operations are reversible AlterFields.
                                        # NOT backup-restore: nothing forward-only happens.
-finding_refs: []                       # DELIBERATELY EMPTY, queried not assumed. With
-                                       # SWEEP_PG_DSN up on 2026-09-20:
-                                       #   finding list --section version --all  (80 rows)
-                                       #   finding list --grep 'paperless-ngx' --all
-                                       #   finding list --grep '3.2.0' --all
-                                       # No finding exists for paperless-ngx 3.1.3 -> 3.2.0;
-                                       # the only 3.2.0 rows are immich's, and every
-                                       # paperless-ngx version row (3.0.5, 3.1.0, 3.1.3) is
-                                       # RESOLVED. This update reached the queue from
-                                       # coverage.py's needs_plan list, not from a finding, so
-                                       # there is no PLAN-lane row to join and nothing to page
-                                       # on. Same precedent and reasoning as
-                                       # paperless-db-13.0.2. A `finding add` was deliberately
-                                       # NOT made: `version` is a script-owned section, and an
-                                       # agent-authored row there is auto-closed on the next
-                                       # cycle.
+finding_refs: [F-6b6c515a]             # RE-QUERIED 2026-09-25 with SWEEP_PG_DSN up
+                                       # (finding list --grep paperless-ngx --all). The
+                                       # 2026-09-20 query found none; the version sweep has
+                                       # since opened F-6b6c515a, "paperless-ngx: image
+                                       # ghcr.io/paperless-ngx/paperless-ngx 3.1.3 -> 3.2.1
+                                       # (minor)" — the exact component + target this plan
+                                       # answers. Claimed so the finding reads as planned.
 status: draft
 window: null                           # the scheduler assigns. Shape: attended (see
                                        # capability_change), no reboot. Sized against
@@ -148,17 +146,17 @@ premises:
     why: "`current:` claims 3.1.3 for the app. If the cluster already moved, this plan is stale and every baseline in section 2 is wrong."
     run: "kubectl get deploy -n office paperless-ngx -o jsonpath='{.spec.template.spec.containers[0].image}'"
     expect_exact: "ghcr.io/paperless-ngx/paperless-ngx:3.1.3"
-  - id: validator-pin-is-3.1.3
-    why: "The SECOND pin of the same image. This is the premise the whole plan exists to protect - if these two ever diverge, the scanner pipeline is running two paperless versions against one consume share."
+  - id: validator-pin-is-3.2.1
+    why: "The SECOND pin of the same image was moved ahead of this plan to the TARGET (9557fa89, operator decision 2026-09-21). This plan closes the split by moving the app to match. If the validator is anywhere else, the parity premise this plan converges on is wrong - stop and re-plan."
     run: "kubectl get deploy -n office scan-inbox-validator -o jsonpath='{.spec.template.spec.containers[0].image}'"
-    expect_exact: "ghcr.io/paperless-ngx/paperless-ngx:3.1.3"
+    expect_exact: "ghcr.io/paperless-ngx/paperless-ngx:3.2.1"
   - id: repo-helmrelease-pin-is-3.1.3
     why: "The manifest the edit in section 3 targets. If HEAD no longer carries exactly one 3.1.3 tag line, the sed in step 3.3 would silently no-op or hit the wrong line."
     run: "git show HEAD:kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml | grep -c 'tag: \"3.1.3\"'"
     expect_exact: "1"
-  - id: repo-validator-pin-is-3.1.3
-    why: "Same guard for the second file. Exactly one occurrence is what makes the sed in step 3.4 safe."
-    run: "git show HEAD:kubernetes/apps/office/paperless-ngx/app/validator-deployment.yaml | grep -c 'paperless-ngx:3.1.3'"
+  - id: repo-validator-pin-is-3.2.1
+    why: "Same guard in git. Exactly one 3.2.1 occurrence means step 3.4 (verify-only) needs no edit and step 3.5's two-line parity grep is valid."
+    run: "git show HEAD:kubernetes/apps/office/paperless-ngx/app/validator-deployment.yaml | grep -c 'paperless-ngx:3.2.1'"
     expect_exact: "1"
   - id: helmrelease-ready-on-chart-0.24.1
     why: "A not-Ready or drifted HelmRelease means something else is mid-flight; this plan must not stack a bump on top of it. The chart is NOT being changed - only values.image.tag."
@@ -199,15 +197,30 @@ sops_refs:
   - docs/sops/backup.md
   - docs/sops/longhorn.md
 generated: "2026-09-20"
+retargeted: "2026-09-25"                 # 3.2.0 -> 3.2.1; validator pin already at 3.2.1
 ---
 
-# paperless-ngx 3.1.3 -> 3.2.0 (app + scan-inbox-validator, one commit)
+# paperless-ngx 3.1.3 -> 3.2.1 (app pin; closes the split with scan-inbox-validator, already on 3.2.1)
 
 ## 1) Summary & why held
 
 ### 1.1 What moves
 
-ONE image, pinned TWICE in the same app folder, moved together:
+> **Retargeted 2026-09-25: 3.2.0 -> 3.2.1.** 3.2.1 (released 2026-09-20) is a
+> four-fix patch on top of 3.2.0 — see §1.4. Everything in §1.2 about 3.2.0
+> still applies, because 3.1.3 -> 3.2.1 crosses 3.2.0: `SCHEMA_VERSION` is still
+> `2` at v3.2.1 (`_schema.py:28`), `_backend.py` and `document_index.py` are
+> unchanged between v3.2.0 and v3.2.1, and **no Django migration was added**
+> (no file under any `migrations/` in the v3.2.0...v3.2.1 compare, 8 commits).
+>
+> **The validator pin has ALREADY moved.** `9557fa89` (2026-09-21, operator
+> instruction, "a DECISION, not drift") bumped `scan-inbox-validator` to
+> `:3.2.1` while deliberately leaving the app at 3.1.3. Live 2026-09-25: the
+> validator runs `:3.2.1` with `PIKEPDF 10.2.0 PY 3.14.7` and a heartbeat 13 s
+> old. So this plan now moves **ONE pin** — the app — and ends the intentional
+> split. The table below is the pre-2026-09-21 layout, kept for context.
+
+ONE image, pinned TWICE in the same app folder (validator row: now `:3.2.1`):
 
 | Pin | File | Line |
 |---|---|---|
@@ -218,8 +231,8 @@ ONE image, pinned TWICE in the same app folder, moved together:
 image for its `python3` + `pikepdf` runtime and overrides the entrypoint
 (`command: ["python3", "/scripts/validator.py"]`). Both pins move in one commit
 or the scanner pipeline runs two paperless versions against one consume share.
-The SOP states this as a rule (`docs/sops/paperless.md` §2). There is no second
-plan for the validator, by design.
+The SOP states this as a rule (`docs/sops/paperless.md` §2). That rule has been
+knowingly suspended since 2026-09-21 (`9557fa89`); this plan restores it.
 
 ### 1.2 Why it was held — and why the stated reason is not the real one
 
@@ -331,6 +344,43 @@ from the gate's reason string.
 - **Security**: see `security_ref` in the frontmatter. Detail stays on the
   finding record — not in this file.
 
+### 1.4 What 3.2.1 adds on top of 3.2.0 (release notes + the v3.2.0...v3.2.1 diff)
+
+Stable channel: GitHub release `v3.2.1` is **not** a prerelease and is marked
+**Latest**; the ghcr `latest` tag resolves to the same index digest as `3.2.1`
+(`sha256:5fa76604…`, read 2026-09-25). No breaking-change or migration note.
+The four fixes, and what each means here:
+
+- **#14180 — rebuild the search index when tantivy files are missing.**
+  `open_or_rebuild_index()` now catches the `ValueError` from
+  `tantivy.Index.open()` (e.g. a missing `meta.json`) and wipes + rebuilds.
+  **This does NOT close the §1.2 partial-rebuild trap**: a rebuild killed
+  after `_write_sentinels()` leaves a *valid* (openable) v2 index with too few
+  documents — `Index.open()` succeeds, nothing is caught, the pod serves Ready
+  on a partial index. CA1's `MISSING_FROM_INDEX` stays the load-bearing gate.
+  What it *does* change: a torn index now self-heals by a full rebuild at the
+  next open instead of hard-failing every read/write — so an unexpected
+  *second* not-Ready rebuild after a restart is plausible and is not by itself
+  a failure (§3.8).
+- **#14189 — mail-fetch overlap guard is now a cache lock.** The
+  `PaperlessTask`-row check is replaced by `cache.add("paperless_mail_fetch_lock",
+  …, timeout=30*60)` on the Django cache, which paperless points at its Redis
+  (`_parse_caches()` → `_CHANNELS_REDIS_URL`). If the worker is killed
+  mid-fetch (e.g. by this roll), the lock self-expires within **30 min**; until
+  then scheduled fetches log `Mail account processing is already running;
+  skipping this run.` That is expected right after the roll and is **not** the
+  §4.6 failure signal.
+- **#14190 — ocrmypdf pinned to `>=17.12,<17.13`** (ligature text-layer fix).
+  Under `OCR_MODE=force` this changes the OCR text of newly ingested pages; CA3
+  exercises it.
+- **#14182 — flower `--conf` only when `flowerconfig.py` exists.** Flower is
+  not enabled in this deployment; no effect.
+- `src/paperless_ai/` is untouched by 3.2.1 as well (not in the compare file
+  list), so §4.7's `MISMATCH False` expectation stands.
+
+**Risk class unchanged: `medium`.** 3.2.1 adds no migration, no schema change
+and no breaking note; the risk is still the 3.2.0 index rebuild.
+
 ## 2) Pre-checks
 
 Run in order. Any FAIL aborts before the first edit.
@@ -416,7 +466,7 @@ HITS rechnung 566 · versicherung 405 · vertrag 179 · januar 45
 > reported for information only. Note `search_ids` is uncapped by default
 > (v3.2.0 `_backend.py`: `limit=None` → `effective_limit = searcher.num_docs`),
 > so this counts the whole index, not a result page.
-> **After the 3.2.0 rebuild expect `EXTRA_IN_INDEX` to drop to 0** — the
+> **After the 3.2.1 rebuild expect `EXTRA_IN_INDEX` to drop to 0** — the
 > rebuild sources every document from the database, so the 3 stale ids cannot
 > survive it. That is a *prediction*, not a gate: do not fail the upgrade on it.
 
@@ -459,7 +509,7 @@ SIL_CODE=$(curl -s -o /tmp/silence-resp.json -w '%{http_code}' \
   "matchers":[{"name":"namespace","value":"office","isRegex":false,"isEqual":true},
               {"name":"alertname","value":"Kube(Pod|Deployment).*","isRegex":true,"isEqual":true}],
   "startsAt":"'$NOW'","endsAt":"'$END'","createdBy":"maintenance-window-agent",
-  "comment":"paperless-ngx 3.1.3->3.2.0 - index rebuild keeps the pod not-Ready for minutes. auto-expires 3h"}')
+  "comment":"paperless-ngx 3.1.3->3.2.1 - index rebuild keeps the pod not-Ready for minutes. auto-expires 3h"}')
 echo "SILENCE_HTTP $SIL_CODE"; cat /tmp/silence-resp.json; echo
 SIL_ID=$(python3 -c "import json;print(json.load(open('/tmp/silence-resp.json')).get('silenceID',''))" 2>/dev/null)
 echo "SILENCE_ID ${SIL_ID:-NONE}"
@@ -472,7 +522,7 @@ except Exception as e: print('SILENCE_READBACK_FAILED', e)
 "
 kill $PF 2>/dev/null
 
-runbooks/update-marker.sh add paperless-ngx office 2 "3.1.3->3.2.0 + full search index rebuild"
+runbooks/update-marker.sh add paperless-ngx office 2 "3.1.3->3.2.1 + full search index rebuild"
 ```
 
 **GATE — the silence must exist before the roll.** PASS requires
@@ -500,9 +550,9 @@ TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:paperless-ngx/paperless-
   | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
 curl -sI -H "Authorization: Bearer $TOKEN" \
   -H "Accept: application/vnd.oci.image.index.v1+json" \
-  "https://ghcr.io/v2/paperless-ngx/paperless-ngx/manifests/3.2.0" | grep -iE '^HTTP|docker-content-digest'
-# expect HTTP/2 200 and
-# docker-content-digest: sha256:22dc423ff48ac1629977dbf0c9625ba9f60d3bd1291a2ff173c65351984a14c2
+  "https://ghcr.io/v2/paperless-ngx/paperless-ngx/manifests/3.2.1" | grep -iE '^HTTP|docker-content-digest'
+# expect HTTP/2 200 and (verified 2026-09-25)
+# docker-content-digest: sha256:5fa76604a81df6945086e0837b14b56543d137e8ce4f311cc5d9ebe907e74e79
 ```
 
 **3.2 — Give the rebuild room to finish: raise the startup budget, raise the
@@ -611,7 +661,7 @@ startup threshold, with `livenessProbe`/`readinessProbe` untouched:
 
 ```diff
 -        image: ghcr.io/paperless-ngx/paperless-ngx:3.1.3
-+        image: ghcr.io/paperless-ngx/paperless-ngx:3.2.0
++        image: ghcr.io/paperless-ngx/paperless-ngx:3.2.1   # (dry-run was against 3.2.0; the tag string is the only render input that changed)
          startupProbe:
 -          failureThreshold: 30
 +          failureThreshold: 120
@@ -629,10 +679,10 @@ once the app is serving, normal failure detection is back to ~30 s. Step 3.9
 restores the 150 s budget; leaving 120 in place would silently weaken startup
 detection for this app forever.
 
-**3.3 — Bump the app pin.** BSD sed, dry-tested on a scratch copy 2026-09-20:
+**3.3 — Bump the app pin.** BSD sed, re-dry-tested on a scratch copy 2026-09-25:
 
 ```bash
-sed -i '' 's|^      tag: "3.1.3"$|      tag: "3.2.0"|' \
+sed -i '' 's|^      tag: "3.1.3"$|      tag: "3.2.1"|' \
   kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml
 ```
 
@@ -643,7 +693,7 @@ applied**, which is the order the window agent runs them in):
 39c39
 <       tag: "3.1.3"
 ---
->       tag: "3.2.0"
+>       tag: "3.2.1"
 ```
 
 > The tag sits at line **39**, not 33, once §3.2 has inserted the four-line
@@ -651,33 +701,27 @@ applied**, which is the order the window agent runs them in):
 > (`^      tag: "3.1.3"$`), so it matches either way — but do not be surprised
 > by the line number, and do not "fix" it back to 33.
 
-**3.4 — Bump the validator pin** (the step that is silently skipped if you only
-read the HelmRelease). Dry-tested on a scratch copy:
+**3.4 — Validator pin: VERIFY ONLY, no edit** (changed 2026-09-25). It already
+reads `:3.2.1` (`9557fa89`). Do **not** run a sed against it; confirm instead:
 
 ```bash
-sed -i '' 's|ghcr.io/paperless-ngx/paperless-ngx:3.1.3|ghcr.io/paperless-ngx/paperless-ngx:3.2.0|' \
-  kubernetes/apps/office/paperless-ngx/app/validator-deployment.yaml
+grep -n 'paperless-ngx:' kubernetes/apps/office/paperless-ngx/app/validator-deployment.yaml
+# expect exactly: 34:          image: ghcr.io/paperless-ngx/paperless-ngx:3.2.1
 ```
 
-Resulting diff line (verified):
-
-```
-34c34
-<           image: ghcr.io/paperless-ngx/paperless-ngx:3.1.3
----
->           image: ghcr.io/paperless-ngx/paperless-ngx:3.2.0
-```
+If it reads anything else, someone moved it since 2026-09-25 — stop; the
+parity target of this plan is no longer 3.2.1.
 
 **3.5 — Prove BOTH pins moved and nothing else did:**
 
 ```bash
-grep -n '3\.2\.0' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml \
+grep -n '3\.2\.1' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml \
                   kubernetes/apps/office/paperless-ngx/app/validator-deployment.yaml
 # expect EXACTLY two lines: helmrelease.yaml:39 and validator-deployment.yaml:34
 grep -rn '3\.1\.3' kubernetes/apps/office/paperless-ngx/
 # expect NO hits
 git diff --stat -- kubernetes/apps/office/paperless-ngx/
-# expect exactly 2 files changed: helmrelease.yaml, validator-deployment.yaml
+# expect exactly 1 file changed: helmrelease.yaml (validator was moved in 9557fa89)
 git diff -- kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml
 # expect the §3.2 diff (timeout / retries / probes) PLUS the one tag line
 ```
@@ -701,14 +745,13 @@ before pushing.** Two sessions committing in the same second can swap message
 files:
 
 ```bash
-cat > /tmp/paperless-320-msg.txt <<'EOF'
-feat(container): update ghcr.io/paperless-ngx/paperless-ngx ( 3.1.3 -> 3.2.0 )
+cat > /tmp/paperless-321-msg.txt <<'EOF'
+feat(container): update ghcr.io/paperless-ngx/paperless-ngx ( 3.1.3 -> 3.2.1 )
 
-Moves BOTH pins of the image in lockstep: the HelmRelease values tag and the
-scan-inbox-validator Deployment, which reuses the same image for its python3 +
-pikepdf runtime.
+Moves the HelmRelease values tag to 3.2.1, matching scan-inbox-validator, which
+has run the same image at 3.2.1 since 9557fa89. Ends the intentional split.
 
-3.2.0 bumps the tantivy search SCHEMA_VERSION 1 -> 2, so the full-text index is
+The path crosses 3.2.0, which bumps the tantivy search SCHEMA_VERSION 1 -> 2, so the full-text index is
 rebuilt from the database at container start (s6 init-search-index runs
 document_index reindex --if-needed). Django migration 0026 also applies.
 
@@ -726,11 +769,10 @@ EOF
 
 git commit --only \
   kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml \
-  kubernetes/apps/office/paperless-ngx/app/validator-deployment.yaml \
-  -F /tmp/paperless-320-msg.txt
+  -F /tmp/paperless-321-msg.txt
 
 git log -1 --format=%s        # MUST be the paperless subject above; amend if not
-git show --stat HEAD          # MUST be exactly the two files above
+git show --stat HEAD          # MUST be exactly the one file above
 git push
 ```
 
@@ -752,6 +794,10 @@ kubectl logs -n office deploy/paperless-ngx -c paperless-ngx \
 **Expected:** `[init-index] Checking search index...` followed by
 `Search index schema version mismatch - rebuilding.` (the exact string
 `needs_rebuild()` logs when `schema_version` differs), then Ready.
+New in 3.2.1 (#14180): a line `Search index is corrupted or incomplete -
+rebuilding from scratch.` means `Index.open()` raised and a *further* full
+rebuild ran. Not a failure by itself — but it means the index was torn, so CA1
+must be green on the final pod before you proceed.
 
 **Two things that are NOT the plan working — act, do not wait:**
 
@@ -811,7 +857,7 @@ git diff -- kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml
 
 ```diff
 -      tag: "3.1.3"
-+      tag: "3.2.0"
++      tag: "3.2.1"
 ```
 
 **GATE:** that diff shows **one hunk, the tag line, and nothing else**. Any
@@ -838,7 +884,7 @@ kubectl get hr -n office paperless-ngx \
 # expect: True 0.24.1   (chart unchanged - only the image moved)
 kubectl get deploy -n office paperless-ngx scan-inbox-validator \
   -o custom-columns='NAME:.metadata.name,IMAGE:.spec.template.spec.containers[*].image'
-# BOTH must read ...:3.2.0  - this is SOP paperless.md section 6.6, image parity
+# BOTH must read ...:3.2.1  - this is SOP paperless.md section 6.6, image parity
 kubectl get pods -n office -l app.kubernetes.io/name=paperless-ngx \
   -o custom-columns='READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount'
 ```
@@ -873,7 +919,7 @@ print('EXTRA_IN_INDEX', len(idx - db))
 
 PASS, all four limbs:
 
-1. `VERSION 3.2.0`
+1. `VERSION 3.2.1`
 2. `SETTINGS` shows `"schema_version": 2` **and** a `"schema_fingerprint"` key
 3. **`MISSING_FROM_INDEX 0`** ← the load-bearing limb
 4. `INDEXED` ≥ `DOCS` (973, or 974 after the CA3 test document)
@@ -884,7 +930,8 @@ document from the database. Do not fail the upgrade on it.
 
 **What failure prints — and why the obvious gates do not catch it.** This
 assertion exists because of a specific race, confirmed in the v3.2.0 source
-(`_backend.py`, `TantivyBackend.rebuild()`): the index is wiped, the new v2
+(`_backend.py`, `TantivyBackend.rebuild()`; the file is unchanged at v3.2.1, and
+3.2.1's #14180 only catches an *unopenable* index, not a partial one): the index is wiped, the new v2
 index is created, **`_write_sentinels()` stamps `schema_version: 2` + the
 fingerprint, and only THEN does the `writer.add_document()` loop start.** The
 `transaction.atomic()` in `document_index.py` is a database transaction and does
@@ -900,7 +947,7 @@ event — leaves this state:
 | `DOCS 973` | green | **no** — `Document.objects.count()` is a DATABASE count that never touches the index |
 | **`MISSING_FROM_INDEX`** | **973 (or a partial count)** | **yes** |
 
-A killed rebuild therefore prints `VERSION 3.2.0`, a v2 `SETTINGS` line and
+A killed rebuild therefore prints `VERSION 3.2.1`, a v2 `SETTINGS` line and
 `DOCS 973` — three green limbs — alongside `INDEXED 0` and
 `MISSING_FROM_INDEX 973`. **An earlier draft of this plan asserted only those
 three green limbs and would have passed the exact failure the plan exists to
@@ -994,15 +1041,15 @@ print('REPROCESS', d.pk); reprocess([d.pk])
 # wait ~60s, then re-run the SEARCHABLE check above for that pk
 ```
 
-### CONTENTS ASSERTION 4 — the validator runs the new image and still works
+### CONTENTS ASSERTION 4 — the validator is still on 3.2.1 and still works
 
-**The property:** the second pin moved *and* the new image can still run the
-validator loop (it needs `python3` + `pikepdf`; the 3.2.0 Dockerfile dropped the
-NLTK data, so prove what it kept rather than assuming).
+**The property:** the second pin (already `:3.2.1` since `9557fa89`) was not
+disturbed by this roll and its loop still turns. Baseline 2026-09-25 on 3.2.1:
+`PIKEPDF 10.2.0 PY 3.14.7`, heartbeat age 13 s.
 
 ```bash
 kubectl get deploy -n office scan-inbox-validator \
-  -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'   # must be :3.2.0
+  -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'   # must be :3.2.1
 kubectl exec -n office deploy/scan-inbox-validator -- \
   python3 -c "import pikepdf, sys; print('PIKEPDF', pikepdf.__version__, 'PY', sys.version.split()[0])"
 # heartbeat must ADVANCE - run twice, ~20s apart
@@ -1010,7 +1057,7 @@ kubectl exec -n office deploy/scan-inbox-validator -- \
   python3 -c "import os; print(os.path.getmtime('/tmp/validator.heartbeat'))"
 ```
 
-PASS: image is `:3.2.0`, `PIKEPDF` prints a version, and the second heartbeat is
+PASS: image is `:3.2.1`, `PIKEPDF` prints a version, and the second heartbeat is
 larger than the first. What failure prints: `ModuleNotFoundError: pikepdf`, or a
 frozen mtime — a validator that is Running but whose loop is dead (the liveness
 probe would take ~3 min to notice).
@@ -1057,6 +1104,12 @@ kubectl logs -n office deploy/paperless-ngx -c paperless-ngx --since=30m \
 # expect NO hits (grep is case-insensitive on purpose - upstream mixes case)
 ```
 
+> 3.2.1 (#14189): `Mail account processing is already running; skipping this
+> run.` in the worker log for up to 30 min after the roll is the cache lock left
+> by a fetch the roll killed, expiring on its TTL — **not** a failure. It becomes
+> one only if it is still logged > 35 min after the new pod went Ready (the lock
+> is renewed only by a *running* fetch).
+
 ### 4.7 — The RAG index must NOT have silently escalated to a full re-embed
 
 ```bash
@@ -1073,7 +1126,7 @@ with read_store() as s:
 ```
 
 PASS: `MISMATCH False` (nightly `llm_index` stays incremental) and the AI row
-still matches §2.4(c). `src/paperless_ai/` is untouched by 3.2.0, so a `True`
+still matches §2.4(c). `src/paperless_ai/` is untouched by 3.2.0 and 3.2.1, so a `True`
 here means something else changed the row — investigate before closing.
 
 ## 5) Rollback
@@ -1083,7 +1136,9 @@ revision is not retained. Roll back **forward through git**.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-git revert --no-edit <sha-of-step-3.7>     # restores BOTH pins to 3.1.3 together
+git revert --no-edit <sha-of-step-3.7>     # restores the APP pin to 3.1.3; the validator
+                                           # stays :3.2.1 (9557fa89, operator decision,
+                                           # separately revertible — do NOT revert it here)
 git log -1 --format=%s && git show --stat HEAD
 git push
 flux reconcile kustomization paperless-ngx -n office --with-source
@@ -1115,7 +1170,7 @@ Both operations are `AlterField`, which is reversible — this is why
 
 ```bash
 kubectl get deploy -n office paperless-ngx scan-inbox-validator \
-  -o custom-columns='NAME:.metadata.name,IMAGE:.spec.template.spec.containers[*].image'   # both :3.1.3
+  -o custom-columns='NAME:.metadata.name,IMAGE:.spec.template.spec.containers[*].image'   # paperless-ngx :3.1.3, scan-inbox-validator :3.2.1 (the pre-plan split)
 # the revert also restores the §3.2 changes (same commit): probe budget back to
 # 30, spec.timeout gone, upgrade remediation back to retries:1
 kubectl get deploy -n office paperless-ngx \
@@ -1159,25 +1214,26 @@ kill $PF 2>/dev/null
 #   curl -s localhost:9093/api/v2/silences | python3 -c "
 #   import sys,json
 #   for s in json.load(sys.stdin):
-#       if 'paperless-ngx 3.1.3->3.2.0' in s.get('comment',''):
+#       if 'paperless-ngx 3.1.3->3.2.1' in s.get('comment',''):
 #           print(s['id'], s['status']['state'])"
 ```
 
 ## 6) Interference notes
 
-- **This plan moves TWO pins of one image.** Any vetting that checks only
-  `helmrelease.yaml` will believe the work is done while
-  `scan-inbox-validator` still runs 3.1.3. §4's image-parity check is the gate.
+- **This plan now moves ONE pin; the other already moved.** Since
+  `9557fa89` the validator runs `:3.2.1` and the app `:3.1.3` — an
+  operator-sanctioned split. This plan ends it. Rollback re-opens the split
+  (app back to 3.1.3, validator stays 3.2.1), which is the pre-plan state, not
+  a new divergence. §4's image-parity check is the gate.
 - **`conflicts_with: [paperless-db-13.0.2]` is a hard exclusion.** That plan
   scales `deployment/paperless-ngx` to 0, suspends this HelmRelease *and* this
   Kustomization, and does a one-way MariaDB datadir conversion on the same
   library. This plan runs a Django migration and needs a live writable DB for
   every assertion in §4. Never the same window, in either order. That plan is
-  currently `blocked`, so the collision is latent, not live.
-  **Reciprocity gap to report:** `paperless-db-13.0.2` does not list
-  `paperless-ngx-3.2.0` (it predates this file). `--validate` checks that refs
-  resolve, not that they are mutual — whoever next edits that plan should add
-  the back-reference.
+  now `vetted` and slotted `sat-attended:2026-10-24` (re-read 2026-09-25), and
+  since 2026-09-21 it lists `paperless-ngx-3.2.0` back — the pair is mutual.
+  The plan_id was kept on the 3.2.1 retarget precisely so that ref still
+  resolves.
 - **The window's INSTRUMENT is not shared — but a shared surface IS touched.**
   §4 deliberately reads the paperless API, the pod and the served static assets
   — **never Prometheus** — so a same-slot `kube-prometheus-stack-91.4.1` cannot
