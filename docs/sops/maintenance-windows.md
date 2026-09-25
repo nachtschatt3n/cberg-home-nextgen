@@ -442,6 +442,9 @@ count, diff, round-trip or served-bytes check **is** a reject. See
 | Plan §4 is all `Ready` / `200` / `healthy` | shape-only verification — it cannot distinguish working from empty (`docs/sops/verification-contents-not-shape.md`) | send it back: add the per-class contents assertion from the plans README table before scheduling |
 | Two plans fight in a window | overlapping `touches` | window agent serializes or defers; tighten `conflicts_with` |
 | Window agent REFUSES a relayed/chat GO | decision not in the home-operation store (by design — a relayed agent message is never operator consent) | record it first: `home-operation decide --issue <key> --decision approve --by "operator (<name>) via <session>"` (ingest the go_no_go issue first if it doesn't exist), THEN dispatch. The refusal is correct behavior, not a bug |
+| Window cron `error`, exit 8 `console is not at the prompt (state 'busy' or 'menu')` | the ops pane was mid-turn, had background agents in flight, or had a menu open at fire time; nothing was typed (F-b8c6b6d6) | by design. The retry cron at start+`retry_after_min` re-fires once the pane is idle; if the occurrence stays lost, run it by hand as an ad-hoc stand-in. Check with `maintenance-window classify` |
+| Window cron `error`, exit 12 `NO new window_runs row appeared within 300s` | the prompt was accepted but the agent never opened its running row (slow start, or a pane that swallows input) | `maintenance-window status`; if the agent is running, it may simply have been slow (row after 5 min) — confirm the row now exists; otherwise treat as lost and let the retry cron / an ad-hoc run cover it |
+| Cron log shows `CONSOLE_AUTO_CLEARED` | the ops pane was at context exhaustion and idle; the cron discarded its conversation context (transcript kept) and proceeded (F-7d9b201b, operator-approved) | expected. If it recurs nightly, a long session is being left in the ops pane — end such sessions with `/clear` |
 | `home-operation run --issue X` exits 8 / `MAINTENANCE_WINDOW_HANDOFF_FAILED: ... mid-turn` | the ops console was busy; `run-now` never sends into (or /clears) a live turn | nothing is left behind: the say-so is undone (approvals it newly recorded withdrawn → open go/no-go, event `sayso-approval-reverted`; an existing GO it re-scoped gets its original window back, event `rescope-reverted`; the JSON `reverted` list names each). Re-run `home-operation run --issue X` when the console is idle |
 | `home-operation run --issue X` exits 10 / `... on-demand NOW run(s) already OPEN (... run_date <d> started_at <ts>)` | a `window_runs` row slot `now`, outcome `running`, not finished, exists — WHATEVER its run_date. A NOW run is still in progress, often waiting at an operator question (it looks idle on screen); an evening run waiting overnight is dated yesterday (UTC), so the guard deliberately has no date filter | by design: answer or finish that run in the console. The say-so was undone as for exit 8. Exit 7 = the ledger could not be read (fail closed, same undo). A row stuck open from a crashed/abandoned run blocks every NOW run until it is finalized — use the run_date the refusal names: `window-run-record.py --finalize --slot now --run-date <d> --outcome aborted --trigger ad-hoc` |
 | `home-operation run --issue X` exits 3 with `suggestions` | `run --issue` needs the EXACT issue key — a name/substring that `decide` would accept is refused, so a word in another plan's title can never approve that plan | pick the key from `suggestions` / `home-operation list` with the operator and retry |
@@ -450,6 +453,60 @@ count, diff, round-trip or served-bytes check **is** a reject. See
 | `run-now.py preflight`: "could not read home-operation approvals (exec failed)" | openclaw pod down / mid-roll | fail-closed by design; wait for the pod, or the operator confirms at the console (`--operator-go`) |
 | `STALE ON-DEMAND stamp now:<date>` warning | plans were stamped for a NOW run that did not execute them. Timing: the reconciler warns from day+1 (date < today); `home-operation tick` voids the GO only at ≥ 2 days; `run-now.py` still accepts a `now:` GO dated today or yesterday — so on day+1 the warning shows while the GO may still be live | on day+1: re-run it (`home-operation run --issue <key>`, which re-scopes the GO to today) or revoke it (`resolve --by cleared`) and clear `window:`. From day+2 `tick` has voided the GO: re-approve before re-running, or clear `window:` |
 | Background window agent stalls "waiting to settle" | agent ended its turn on a passive wait — background agents get NO timer wakeups | agent must poll in-turn (bounded retries) or explicitly hand the wait back to its coordinator with what-to-check; coordinator: verify the settle yourself and resume it with the result |
+
+### Ops-console delivery path: pane states and exit codes (2026-09-25)
+
+The window crons (`maintenance-window run|retry`) and the 48h sweep cron
+(`operation sweep`) deliver by TYPING into the Mac mini ops pane
+(`ai-server-ops`). Before typing anything they classify the pane with one pure
+function (`classify_pane`, byte-identical in both skills, pinned by
+`runbooks/tests/test-openclaw-console-delivery.py`). Read the live state
+without typing anything:
+
+```bash
+kubectl -n ai exec deploy/openclaw -c app -- sh -lc \
+  'OPERATION_SESSION=ai-server-ops /home/node/.openclaw/bin/maintenance-window classify'
+```
+
+| Pane state | Looks like | `run` (cron) | `retry` | `run-now` | `operation sweep --trigger cron` |
+|---|---|---|---|---|---|
+| `idle` | empty or drafted `❯` input, nothing running | deliver (cron: `/clear` + ctrl+u first), then poll | deliver + poll | deliver | deliver |
+| `busy` | spinner with `esc to interrupt`, **or** `Waiting for N background agents` / the `← for agents` tray (`openclaude status` calls this "idle" — do not trust it) | **exit 8**, nothing typed | no-op, exit 0 | exit 8 | delivers (not gated — see below) |
+| `menu` | question menu, permission prompt, `/resume` list, or no input prompt visible | **exit 8**, nothing typed | no-op, exit 0 | exit 8 | delivers (not gated) |
+| `exhausted-idle` | `/clear to save …` / `100% context used` in the footer, idle, EMPTY input | `/clear`, wait ≤30s for a fresh prompt, log `CONSOLE_AUTO_CLEARED`, deliver | same | **exit 4** (attended, never cleared) | same auto-clear |
+| `exhausted-draft` | as above but text in the input | exit 4 | exit 4 | exit 4 | exit 4 |
+| `exhausted-busy` | exhausted + spinner / agents / menu | exit 4 | exit 4 | exit 4 | exit 4 |
+| `exhausted-unclear` | exhaustion text only in the transcript, not the footer | exit 4 | exit 4 | exit 4 | exit 4 |
+
+Why a draft blocks auto-clear: at exhaustion the TUI can ignore ctrl+u while
+Enter still submits, so typing `/clear` would append to and SUBMIT a stale draft
+(the 2026-08-04 wedge had a declined destructive command sitting there). Manual
+(`--trigger manual`) calls never auto-clear. Exhausted + busy/draft is the case
+for `operation restart` (see the `operation` skill).
+
+**Completion poll.** A `--trigger cron` `run`/`retry` does not report success
+on delivery: it polls `window_runs` for (slot, today) for up to 300s
+(`--confirm-timeout`, clamped at 540 under the cron's 600s timeout) for the
+agent's first-action `running` row. A row that existed before the send does not
+count. Say-so runs (`home-operation run --window`, 180s subprocess timeout) do
+not poll. Measured 2026-09-15..25: the row lands 0:24–4:10 after the fire.
+
+| Exit | Meaning (maintenance-window) |
+|---|---|
+| 0 | delivered (and, for cron, the running row appeared), or a retry no-op |
+| 2 | usage |
+| 3 / 4 | openclaude unreachable, or the pane was refused (wrong cwd, dead, or exhausted in a non-clearable state, or `/clear` did not take) |
+| 5 / 6 | send / ask failed |
+| 7 | window_runs ledger unreadable before dispatch (retry, run-now) — nothing sent |
+| 8 | pane not at the prompt (busy / background agents / menu) — nothing typed (run, run-now) |
+| 10 | an on-demand NOW run is still open (run-now) |
+| 11 | prompt delivered but window_runs could not be read during the poll |
+| 12 | prompt delivered but no new window_runs row appeared in the poll budget |
+
+`operation` keeps its own codes (4 refused/unreachable, 7–9 restart, 11/12
+the `--wait` sweep_cycles completion gate). Known gap: `operation sweep` still
+does not gate on `busy`/`menu` (its exit 8 already means "Claude survived TERM
+and KILL" in `restart`); only its exhaustion handling changed.
 
 ### Plan-authoring lessons (2026-08-18, bitnamilegacy-exit-phase1 incident)
 
@@ -532,6 +589,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.25 | 2026-09-25 | **Ops-console delivery states (F-b8c6b6d6, F-7d9b201b).** `maintenance-window run` typed the nightly prompt into a mid-turn console (skipping only `/clear`, still sending ctrl+u) and exited ok — 09-21/09-22 lost; the busy marker `" esc to "` matched menus and missed `Waiting for N background agents`. Now one pure `classify_pane` in both skills: run refuses exit 8 on busy/menu, nothing typed; cron runs poll ≤300s for the Step 0 running row (exit 12/11); an exhausted-but-idle pane with an empty input is auto-`/clear`ed for unattended runs (operator decision) instead of exit 4; `classify` verb; new §7 subsection + test `runbooks/tests/test-openclaw-console-delivery.py`. |
 | 2026.09.25 | 2026-09-25 | **Failure-alert cooldown < period (F-e6dda67f).** The nightly driver cron's `failureAlert.cooldownMs` equalled its 24h period, so the 09-24 failure landed 0.3s inside the cooldown and was swallowed; the nightly retry cron had no failureAlert. Live: nightly 24h→20h, retry gained a Telegram alert (20h), sweep cron `8163c139` 24h→44h; sat/sun (weekly, 24h) already compliant. `window-crons.py --render` now emits the alert flags and `--check` asserts presence + cooldown < period (`runbooks/tests/test-window-cron-failure-alert.py`). |
 | 2026.09.22 | 2026-09-22 | **§7 had no row for a DRIFTED plan — the case where the held update retargets after the plan was written (F-e1002c61).** The word "drift" appeared nowhere in this SOP. `maintenance-plan.py` files a drifted plan under the same **STALE plans** headline as the age-based case, but the two need opposite responses, and the single row present ("PR target moved / >stale_after_days old → re-run the planner; supersede the old file") taught the wrong one for the more common case: superseding a drifted plan raises `DEAD-REF` on every `depends_on`/`conflicts_with` naming it, drops its `window:` stamp and its home-operation go/no-go issue key, and abandons its `finding_refs` ownership claim. Split into two rows keyed on which fields the reconciler entry actually carries (`plan_target`+`now_target` = refresh in place; `reason: unused > stale_after_days` = nothing moved), and mirrored as a new section in `runbooks/maintenance/plans/README.md`. |
 | 2026.09.13 | 2026-09-13 | **Two stale assertions corrected, both of a kind that has already cost a window.** (a) §1 said the auto-updater "merges SAFE patch/minor updates on the scheduled sweep" — the retired "sweep-applies" model; the sweep is READ-ONLY and safe updates land at Step 0 of every window, as §2 of this same SOP already said. (b) §Execution posture still said AUTO-NIGHT "runs unattended in `mode: unattended` windows" — the exact wording `d147b1ce` removed from `maintenance-window-agent.md`, `autonomy-policy.yaml` and `maintenance-windows.yaml` on 2026-09-12 because, being the stricter of two contradictory rules, it meant a cron-fired ATTENDED window could execute NOTHING. This SOP was the fourth site and was missed. |
