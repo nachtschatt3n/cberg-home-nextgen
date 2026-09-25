@@ -88,7 +88,7 @@ spec:
             secretName: wazuh-certs
       containers:
         - name: wazuh-manager
-          image: wazuh/wazuh-manager:4.14.7
+          image: wazuh/wazuh-manager:4.14.8
           resources:
             requests:
               cpu: 500m
