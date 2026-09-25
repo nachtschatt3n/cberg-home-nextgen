@@ -200,7 +200,11 @@ finding_refs:
                                       # overall", and no open finding names the 91.x major.
                                       # Ref kept (it is this plan's origin); see §2.1a for
                                       # what a Step-0 landing of 90.2.0 does to this plan.
-status: vetted   # RE-VETTED 2026-09-25 against 91.5.2: plan-reviewer verdict needs-fix (5 blocking,
+status: vetted   # 2026-09-25 on-demand NOW run: preflight refused ONLY for "no operator approval
+                      # pending" — the GO reached the window agent as a relayed agent message, which is not
+                      # operator consent. go_no_go issue ingested (window now:2026-09-25); approve via
+                      # `home-operation run --issue kube-prometheus-stack-91.4.1` or Telegram, then re-run.
+                      # RE-VETTED 2026-09-25 against 91.5.2: plan-reviewer verdict needs-fix (5 blocking,
                  # all text), corrections applied in this commit, then re-checked mechanically:
                  # plan-premises --require-premises PASS (9), --controls --prom-url PASS (5 instruments),
                  # maintenance-plan.py --validate PASS. History: was `vetted` (REVIEWED 2026-09-15, plan-reviewer fan-out, corrections
