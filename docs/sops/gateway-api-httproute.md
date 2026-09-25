@@ -1,8 +1,8 @@
 # SOP: Gateway API / HTTPRoute Routing (Envoy Gateway)
 
 > Description: How HTTP ingress works in this cluster now that ingress-nginx is gone — writing, reviewing and debugging HTTPRoutes on the two Envoy Gateways, including forward-auth, backend TLS, timeouts and the verification gate that catches the failures which are invisible at apply time.
-> Version: `2026.09.15`
-> Last Updated: `2026-09-15`
+> Version: `2026.09.25`
+> Last Updated: `2026-09-25`
 > Owner: `homelab operator (cberg-home-nextgen)`
 
 ---
@@ -41,9 +41,9 @@ are not style preferences.
 | Setting | Value |
 |---------|-------|
 | GatewayClass | `envoy` |
-| Internal Gateway | `envoy-internal` in `network` — LB **192.168.55.103**, 68 hostnames / 79 routes |
-| External Gateway | `envoy-external` in `network` — LB **192.168.55.104**, 24 hostnames / 25 routes |
-| Total HTTPRoutes | 103 |
+| Internal Gateway | `envoy-internal` in `network` — LB **192.168.55.103**, 70 hostnames / 83 routes |
+| External Gateway | `envoy-external` in `network` — LB **192.168.55.104**, 25 hostnames / 28 routes |
+| Total HTTPRoutes | 109 |
 | Listeners (both) | `http` (80, redirect-only) and `https` (443, Terminate, wildcard cert `${SECRET_DOMAIN/./-}-production-tls`) |
 | Source of truth | `kubernetes/apps/network/envoy-gateway/app/` (`gateways.yaml`, `policies.yaml`, `gatewayclass.yaml`, `helmrelease.yaml`) |
 | Per-app routes | `kubernetes/apps/<ns>/<app>/app/httproute.yaml`, or the bjw-s `route:` values key in the HelmRelease |
@@ -1107,3 +1107,6 @@ Rollback cautions specific to this migration:
   HTTPRoutes; ingress-nginx deleted). Supersedes and replaces
   `docs/troubleshooting/envoy-phase2-conversion-pattern.md`, which was deleted
   per the troubleshooting-doc lifecycle rule.
+- `2026.09.25`: Add `godseye` (ai/gods-eye-view, envoy-external) to the §10
+  forward-auth host loops (twelve extAuth subjects); re-measure the gateway
+  inventory (internal 70/83, external 25/28, 109 routes total).

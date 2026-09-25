@@ -482,12 +482,12 @@ quarterly.
 
 ## 📦 Applications
 
-~123 apps across 18 namespaces. Full inventory with per-app purpose, exposure
+~124 apps across 18 namespaces. Full inventory with per-app purpose, exposure
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 
-### 🤖 AI (`ai` — 10)
-ai-sre · anythingllm · hermes-agent · librechat · mcpo ·
+### 🤖 AI (`ai` — 11)
+ai-sre · anythingllm · gods-eye-view · hermes-agent · librechat · mcpo ·
 next-ai-draw-io · oc8 · open-webui · openclaw · paperclip
 
 > **External Ollama** on Mac Mini M4 Pro (`192.168.30.111:11434`, gemma 4 +

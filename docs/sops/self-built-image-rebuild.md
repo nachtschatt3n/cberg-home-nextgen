@@ -3,8 +3,8 @@
 > Description: How to clear CVEs on container images we build ourselves, where there is
 > no upstream version to bump to and remediation is a **rebuild in the source repo**
 > followed by a GitOps tag bump — not a version bump.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.09.25`
+> Last Updated: `2026-09-25`
 > Owner: `homelab-operator`
 
 ---
@@ -417,3 +417,5 @@ reconcile — never patch the Deployment directly (GitOps rule).
 
 - `2026.08.15`: Initial SOP, extracted from the ha-ai-harness rebuild (`fb821821`) and
   the absenty rebuild plan, which were the only written record of the five traps.
+- `2026.09.25`: Add `ghcr.io/nachtschatt3n/gods-eye-view` (fork packaging of an
+  upstream release, weekly `container.yml` rebuild) to the first-party table.
