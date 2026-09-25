@@ -142,6 +142,7 @@ The naive query (folder name + year) hits ~60%. The full ladder gets to 95%+:
 - **Audit Job exits 0 if it walked the share** (regardless of compliance numbers). Compliance is a metric, not a job-failure signal. Alerting on low compliance belongs in Prometheus rules over a metric, not on `kube_job_failed`.
 - **`tmdb-no-match` is a soft outcome, not a Job failure.** `sidecar.py` logs the warn and returns cleanly (exit 0) when TMDb can't match. The audit script surfaces the missing sidecar; the Job firing `KubeJobFailed` for every TMDb miss is pager noise. Same convention applies to any new "fetch from external API" Jobs.
 - **`_duplicates/` counts as 1 false-positive item** in the audit (folder doesn't match canonical naming). Filter folders starting with `_` in audit walks.
+- **The current `_duplicates/` set is KEPT by operator decision (2026-09-25, F-9e163a17).** Do not re-raise it as a keep/delete decision each sweep. Emit a finding ONLY if the quarantine grows beyond that set (18 movie files + 16 episodes, ~14.9G) or Plex/Jellyfin start indexing it.
 - **Folders with malformed `.nfo` XML** show up as missing-nfo even though file exists. Worth a separate counter.
 
 ### Operational tactics
