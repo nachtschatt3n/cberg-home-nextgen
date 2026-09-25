@@ -12,10 +12,13 @@ pr: null                              # no Renovate PR (`gh pr list --state all 
                                       # via coverage.py's PLAN lane, not by a live PR
 kind: image
 current: "0.184.5"
-target: "0.195.0"                     # RETARGETED 2026-09-22 (was 0.187.1; F-bb713800). Verified head:
-                                      # GHCR manifest 200 with digest identical to `latest`, 0.195.1 and
-                                      # 0.196.0 404, full tag pagination (1181 tags) has nothing newer,
-                                      # GitHub release v0.195.0 is marked Latest (2026-09-19T14:12Z). §1.1
+target: "0.195.4"                     # RETARGETED 2026-09-25 (was 0.195.0; PATCH-only, same 0.195 line).
+                                      # Verified head: GHCR 0.195.4 index digest sha256:24417dcb… is
+                                      # IDENTICAL to `latest`; 0.195.5 and 0.196.0 404; GitHub release
+                                      # v0.195.4 is Latest, not a pre-release (2026-09-25T12:56Z). The
+                                      # sweep brief said "0.195.1"; 0.195.2/.3/.4 shipped after it, so
+                                      # 0.195.1 would have been stale on commit. History: 0.187.1 ->
+                                      # 0.195.0 (2026-09-22) -> 0.195.4 (2026-09-25). §1.1
 update_type: minor                    # semver label only — at major version 0 the MINOR digit
                                       # is the breaking axis; this hop crosses ELEVEN minor lines
                                       # (0.185 .. 0.195), twenty tags, TWO of them BREAKING-tagged
@@ -81,7 +84,9 @@ rollback_class: git-revert            # stateless bridge: no PVC, no volumes, no
                                       # `values.image.tag` is the diff.
 finding_refs: [F-9af9baf7, F-80459b23, F-bb713800]   # F-bb713800 ADDED 2026-09-22: the drift
                                       # finding this refresh answers (plan-or-page joins on this field).
-status: awaiting-go   # reviewed 2026-09-23 (needs-fix -> the three gate fixes applied); fresh GO for 0.195.0 recorded via home-operation
+status: awaiting-go   # RESET 2026-09-25: the operator GO recorded for 0.195.0 does NOT extend to 0.195.4 (an
+                      # approval is scoped to what was reviewed, §1.8). A FRESH GO for 0.195.4 is required
+                      # before the 2026-10-03 run. Reviewed 2026-09-23 at 0.195.0 (needs-fix -> fixed).
 window: "sat-attended:2026-10-03"   # KEPT on retarget (risk/duration/reboot class unchanged: medium, 35 min, no
                                       # reboot, git-revert). Slot re-checked 2026-09-22: also holds
                                       # external-dns-unowned-cnames (draft, 40 min, medium) — no shared resource
@@ -133,7 +138,7 @@ premises:
       forward-migrated schema and this plan's rollback is no longer free.
       The same four-key fact also proves no COLLABORA_URL / DOCLING_API_URL /
       QDRANT_URL, i.e. every optional processor and vector-sync feature added
-      in 0.191.0–0.195.0 stays off (§1.2).
+      in 0.191.0–0.195.4 stays off (§1.2, §1.2a).
     run: kubectl get secret -n office nextcloud-mcp-config -o go-template='{{range $k,$v := .data}}{{$k}},{{end}}'
     expect_exact: MCP_DEPLOYMENT_MODE,NEXTCLOUD_HOST,NEXTCLOUD_PASSWORD,NEXTCLOUD_USERNAME,
   - id: no-volumes-on-the-pod
@@ -154,14 +159,14 @@ sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
   - docs/sops/verification-contents-not-shape.md
-generated: "2026-09-22"
+generated: "2026-09-25"
 ---
 
 ## 1. Summary & why held
 
 `kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml:34` pins
 `ghcr.io/cbcoutinho/nextcloud-mcp-server` at `0.184.5`. Upstream head is
-`0.195.0` (sweep finding `F-9af9baf7`, re-verified §1.1). `coverage.py` routes
+`0.195.4` (sweep finding `F-9af9baf7`, re-verified §1.1). `coverage.py` routes
 it to the PLAN lane: *"0.x release-line move — at major 0 the minor IS the
 breaking axis"*, and the `*nextcloud-mcp*` deny rule (`max: patch`) exists
 because upstream has shipped BREAKING-tagged releases on minor hops before
@@ -174,6 +179,14 @@ superseded 2026-09-13 (`00c62d4c`); this file was written 2026-09-15 for
 when upstream had moved six more lines. Refreshed **in place** 2026-09-22 per
 the README ("refresh, do not replace") — same `plan_id`, new `target:`.
 Everything below was re-derived for 0.195.0; nothing was sed-ed forward.
+
+**Third refresh, 2026-09-25: 0.195.0 → 0.195.4 (PATCH-only, same line).**
+The four patch tags were read individually (§1.2a) and the
+`v0.195.0...v0.195.4` source diff checked: fixes only, no tool added,
+renamed or removed, no env var, no schema, `mcp` stays 2.1.1, base image moves
+only by digest within `python:3.14-slim-trixie` (+ `uv` 0.12.14 → 0.12.18
+build tool). Risk, duration, reboot and rollback class are UNCHANGED. The
+operator GO recorded for 0.195.0 is **void for 0.195.4** — see §1.8.
 
 **Verdict after reading all twenty release-note sets (§1.2) and the source
 diff (§1.6): the hop carries THREE upstream-tagged BREAKING CHANGES.
@@ -199,20 +212,26 @@ pull-scope token):
 |---|---|
 | `0.184.5` (live) | 200, digest `sha256:f6d8839722587f2cd37ec5218a18479f9e313be9904ad4f6bbb36f98bc827065` — identical to the running pod's `imageID` |
 | `0.187.1` (old target) | 200, digest `sha256:57d9c93f…` — superseded, NOT the head |
-| **`0.195.0` (target)** | **200, digest `sha256:33c37e0063ff6cded7c9406d94a1868eca7b41ab4901b2f01d23eaa76beefd28`** |
-| `latest` | 200, digest **identical** to `0.195.0` → 0.195.0 is upstream's channel head (this settles coverage's "CHANNEL UNRESOLVED" note) |
-| `0.195.1`, `0.196.0` | 404 — nothing newer exists |
+| `0.195.0` (previous target, GO'd 2026-09-23) | 200, digest `sha256:33c37e0063ff6cded7c9406d94a1868eca7b41ab4901b2f01d23eaa76beefd28` — superseded |
+| `0.195.1` / `0.195.2` / `0.195.3` | 200 — `fc14e4c7…` / `ad742445…` / `a19516ff…` (intermediate patches, read in §1.2a) |
+| **`0.195.4` (target)** | **200, digest `sha256:24417dcb804fc65bcb8712226bf70be71018aefd2ec7b27e9392a4d4e1ed707c`** (re-read 2026-09-25) |
+| `latest` | 200, digest **identical** to `0.195.4` → 0.195.4 is upstream's channel head (settles coverage's "CHANNEL UNRESOLVED" note) |
+| `0.195.5`, `0.196.0` | 404 — nothing newer exists (2026-09-25) |
 | `stable` | 404 — there is no `stable` tag on this repo; `latest` is the only channel pointer |
 
 Full tag pagination (2 pages, 1181 tags — the single-page `tags/list` call
 stops at 0.159.0 and must not be used to judge the head) lists exactly
 `0.188.0 0.188.1 0.189.0 0.190.0 0.190.1 0.191.0 0.192.0 0.193.0 0.193.1
-0.194.0 0.195.0` above 0.187.1. GitHub releases agree: `v0.195.0` published
-2026-09-19T14:12:38Z, marked Latest, not a pre-release — past the 48h
-`minimum_release_age_hours` gate by any window. Tags carry no `v` prefix on
-GHCR (`0.195.0`), only on GitHub releases (`v0.195.0`).
+0.194.0 0.195.0` above 0.187.1 (2026-09-22); `0.195.1`–`0.195.4` were added
+2026-09-23..25. GitHub releases agree: `v0.195.4` published
+2026-09-25T12:56:04Z, marked Latest, not a pre-release; none of
+v0.195.1–v0.195.4 is a pre-release — the channel is stable (upstream publishes
+no rc/beta tags on this line). 0.195.4 clears the 48h
+`minimum_release_age_hours` gate on 2026-09-27, before the 2026-10-03 slot.
+Tags carry no `v` prefix on GHCR (`0.195.4`), only on GitHub releases
+(`v0.195.4`).
 
-### 1.2 What actually changed, 0.184.5 → 0.195.0, read per tag
+### 1.2 What actually changed, 0.184.5 → 0.195.4, read per tag
 
 Quoted from the GitHub release bodies (`gh release view vX.Y.Z -R cbcoutinho/nextcloud-mcp-server`).
 Rows 0.185.0–0.187.1 were reviewed 2026-09-15 and are carried here condensed;
@@ -245,7 +264,20 @@ required Nextcloud server version, or changes any env var this deployment
 sets.** The 0.176.0 failure shape (removed API + dropped table) does not
 recur. Confirmed against source, not only the notes: the live 96-name tool
 list is a strict subset of the names registered by `server/*.py` at
-`v0.195.0` (§1.6).
+`v0.195.0` (§1.6), and 0.195.1–0.195.4 register no new tool (§1.2a).
+
+### 1.2a The 0.195.x patch tail, 0.195.0 → 0.195.4 (read 2026-09-25)
+
+| tag | published | class | what it says | applies to us? |
+|---|---|---|---|---|
+| 0.195.1 | 2026-09-23 | fix/refactor | *"webdav: scope a range read's failed-parse fallback to the slice"*; *"webdav: reap the read-path parse worker, add page-range reads"* | **Additive on a live tool.** `nc_webdav_read_file` gains two OPTIONAL args `page_start`/`page_end` (PDF only; rejected with `parse_document="raw"`) and `ReadFileResponse` gains three optional fields `page_count`/`page_start`/`page_end` (`server/webdav.py`, `models/webdav.py` diff). No field removed, default behaviour unchanged when the args are omitted. The parse worker is now reaped after a read — if anything, LOWERS §4.8 working set. Dockerfile: base `python:3.14-slim-trixie` digest bump + `uv` 0.12.14 → 0.12.18; no entrypoint change. |
+| 0.195.2 | 2026-09-24 | fix | *"observability: classify tool errors from the wire-shaped result"* | Metrics labelling only. Inert. |
+| 0.195.3 | 2026-09-24 | fix (contacts) | *"contacts: drop only unparseable vCard properties, not the whole contact"* | **Applies, benign.** A contact with a property pythonvCard4 rejects (reduced-form `BDAY:--MMDD`, vCard-3 `GEO:`) now keeps its name/phone/email instead of an empty projection; emits a `WARNING Dropped unparseable vCard properties` log line. §4.7 can only get MORE populated; the §4.2 grep counts ERROR/CRITICAL/Traceback, so the WARNING does not trip it. |
+| 0.195.4 | 2026-09-25 | fix (documents) | *"documents: skip the RLIMIT_AS cap when the OS refuses it"* | Hardening of the document-parse isolation worker; no config. Inert unless `setrlimit` fails in the pod, in which case 0.195.0 would have failed the parse. |
+
+`uv.lock` across 0.195.0..0.195.4 changes only the project version and the
+`ty` dev dependency: **`mcp` stays 2.1.1**, so §1.4, §4.4's protocol gate and
+the 117-name tool surface are unchanged. No tag in the tail is BREAKING-tagged.
 
 ### 1.3 Storage: does the server own a table or a PVC?
 
@@ -365,6 +397,16 @@ take effect rather than a new session — irrelevant to this bump, worth knowing
 
 ### 1.8 Approval state — a FRESH GO is required, and the open issue is mis-targeted
 
+> **2026-09-25 retarget 0.195.0 → 0.195.4: the GO recorded for 0.195.0
+> (2026-09-23) does NOT carry over.** Status is `awaiting-go` and means it:
+> the operator must be re-asked with a card naming **0.195.4** before the
+> `sat-attended:2026-10-03` run. The diff is patch-only (§1.2a) and the risk
+> class is unchanged, which is why this is a same-day edit rather than a
+> re-review — but "patch-only" is a claim the operator is entitled to see
+> before it runs. The home-operation go/no-go card must be re-targeted to
+> 0.195.4 by the coordinator/window agent (this planner does not write it).
+> The text below is the 2026-09-22 history.
+
 Read from the home-operation store 2026-09-22 (`kubectl -n ai exec
 deploy/openclaw -c app -- /home/node/.openclaw/bin/home-operation --json
 decisions --pending-exec` and `... --json list`):
@@ -390,7 +432,7 @@ with `target:` at 0.195.0 that gate clears — it does not replace the GO.
 ## 2. Pre-checks
 
 0. **Re-verify the target is still upstream's head** (manual — the premise
-   checker has no network tool). If `0.195.1`/`0.196.0` now return 200,
+   checker has no network tool). If `0.195.5`/`0.196.0` now return 200,
    **STOP**: read that tag's release body before retargeting — at major 0 a
    new minor is a new breaking surface, never a sed. A new PATCH on 0.195 is
    the one case where retargeting is a same-day edit (same line; still re-read
@@ -398,13 +440,14 @@ with `target:` at 0.195.0 that gate clears — it does not replace the GO.
    ```bash
    TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:cbcoutinho/nextcloud-mcp-server:pull&service=ghcr.io" \
      | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
-   for t in 0.195.0 latest 0.195.1 0.196.0; do
+   for t in 0.195.4 latest 0.195.5 0.196.0; do
      printf '%-8s ' "$t"
      curl -sI -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.oci.image.index.v1+json" \
        "https://ghcr.io/v2/cbcoutinho/nextcloud-mcp-server/manifests/$t" \
        | tr -d '\r' | awk 'NR==1{printf "%s ",$2} tolower($1)=="docker-content-digest:"{print $2}'; echo
    done
-   # expect: 0.195.0 200 sha256:33c37e00…; latest 200 <SAME digest>; 0.195.1 404; 0.196.0 404
+   # expect: 0.195.4 200 sha256:24417dcb…; latest 200 <SAME digest>; 0.195.5 404; 0.196.0 404
+   #   (a DIFFERENT digest on `latest` means a newer tag shipped: STOP and read it, per the rule above)
    ```
 1. **Premises pass** (all six, fail-closed):
    ```bash
@@ -504,7 +547,7 @@ with `target:` at 0.195.0 that gate clears — it does not replace the GO.
    replica, ~30s roll, tcp probes; the chart-bundled pod-not-ready alert needs
    15m to fire:
    ```bash
-   runbooks/update-marker.sh add nextcloud-mcp office 2 "0.184.5->0.195.0 image bump"
+   runbooks/update-marker.sh add nextcloud-mcp office 2 "0.184.5->0.195.4 image bump"
    ```
 
 ## 3. Steps
@@ -513,24 +556,24 @@ with `target:` at 0.195.0 that gate clears — it does not replace the GO.
 2. Edit the image tag — one line, the whole diff:
    ```bash
    # BSD sed (macOS) does NOT honour `\s` in a BRE — `\(\s*tag: \)` silently matches nothing
-   # and the edit no-ops. Use the POSIX class. Dry-tested 2026-09-22 on a scratch copy:
-   #   34c34  <               tag: 0.184.5  /  >               tag: 0.195.0   (one hunk, rc=1)
-   sed -i '' 's/^\([[:space:]]*tag: \)0\.184\.5$/\10.195.0/' kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml
+   # and the edit no-ops. Use the POSIX class. Dry-tested 2026-09-25 on a scratch copy:
+   #   34c34  <               tag: 0.184.5  /  >               tag: 0.195.4   (one hunk, rc=1)
+   sed -i '' 's/^\([[:space:]]*tag: \)0\.184\.5$/\10.195.4/' kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml
    git diff --stat kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml   # expect: 1 file, 1 insertion, 1 deletion — a 0-file diff means the sed did not match: STOP
    git diff kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml | grep -E '^[-+][[:space:]]+tag:'
-   # expect exactly:  -              tag: 0.184.5  /  +              tag: 0.195.0
+   # expect exactly:  -              tag: 0.184.5  /  +              tag: 0.195.4
    ```
 3. Commit + push — shared worktree, so `--only` with the explicit path, and
    confirm the subject is yours before pushing (two sessions committing in the
    same second can swap message files):
    ```bash
    cat > /tmp/ncmcp/msg.txt <<'EOF'
-   feat(nextcloud-mcp): image 0.184.5 -> 0.195.0
+   feat(nextcloud-mcp): image 0.184.5 -> 0.195.4
 
-   Crosses eleven 0.x minor lines (0.185 .. 0.195, twenty tags); at major 0
+   Crosses eleven 0.x minor lines (0.185 .. 0.195, twenty-four tags); at major 0
    the minor digit is the breaking axis, so every tag's release body and the
-   v0.184.5...v0.195.0 source diff were read
-   (runbooks/maintenance/plans/nextcloud-mcp-0.187.1.md §1.2, §1.6). Three
+   v0.184.5...v0.195.0 + v0.195.0...v0.195.4 source diffs were read
+   (runbooks/maintenance/plans/nextcloud-mcp-0.187.1.md §1.2, §1.2a, §1.6). Three
    BREAKING-tagged changes: 0.185.0 (mcp>=2.1 SDK floor, elicitation ->
    message_only) and 0.194.0 (parsing_metadata key rename) are inert for
    MCP_DEPLOYMENT_MODE=single_user_basic with no processors configured;
@@ -538,7 +581,9 @@ with `target:` at 0.195.0 that gate clears — it does not replace the GO.
    apply_to_series=true) is a safer default on a live tool and adds a
    parameter only. Adds 21 tools (nc_webdav_* trash/versions/tags,
    nc_shopping_list_*), contacts paging/photo opt-in (0.188.1), the 0.185.5
-   CalDAV URL-encoding fix, a working nc_calendar_find_availability. Base
+   CalDAV URL-encoding fix, a working nc_calendar_find_availability,
+   nc_webdav_read_file page ranges (0.195.1, optional args), per-property
+   vCard parse fallback (0.195.3). Base
    image python 3.12 -> 3.14. No tool renamed/removed, no schema owned
    (ephemeral /tmp SQLite, no PVC).
 
@@ -548,7 +593,7 @@ with `target:` at 0.195.0 that gate clears — it does not replace the GO.
    git fetch origin main && git merge --ff-only origin/main
    git commit --only kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml -F /tmp/ncmcp/msg.txt
    git show --stat HEAD      # exactly ONE file: the helmrelease. Anything else rode in from the shared index — fix before pushing.
-   git log -1 --format=%s    # expect: feat(nextcloud-mcp): image 0.184.5 -> 0.195.0 — if not, `git commit --amend -F /tmp/ncmcp/msg.txt` before pushing
+   git log -1 --format=%s    # expect: feat(nextcloud-mcp): image 0.184.5 -> 0.195.4 — if not, `git commit --amend -F /tmp/ncmcp/msg.txt` before pushing
    git push origin main
    ```
 4. Let Flux reconcile (`interval: 30m`). Forcing is permitted by the SOP when
@@ -589,10 +634,11 @@ can confirm it exists (all four PRESENT in the live label index 2026-09-22):
    match a pod stuck pulling:
    ```bash
    kubectl get deploy -n office nextcloud-mcp -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
-   # expect: ghcr.io/cbcoutinho/nextcloud-mcp-server:0.195.0
+   # expect: ghcr.io/cbcoutinho/nextcloud-mcp-server:0.195.4
    kubectl get pod -n office -l app.kubernetes.io/name=nextcloud-mcp -o jsonpath='{range .items[*]}{.metadata.name} restarts={.status.containerStatuses[0].restartCount} {.status.containerStatuses[0].imageID}{"\n"}{end}'
-   # expect: ONE pod, restarts=0, imageID ending sha256:33c37e0063ff6cded7c9406d94a1868eca7b41ab4901b2f01d23eaa76beefd28
-   #         (the OLD digest f6d88397… here means the roll did not happen or was remediated back)
+   # expect: ONE pod, restarts=0, imageID ending sha256:24417dcb804fc65bcb8712226bf70be71018aefd2ec7b27e9392a4d4e1ed707c
+   #         (the OLD digest f6d88397… here means the roll did not happen or was remediated back;
+   #          33c37e00… means the 0.195.0 bytes — the superseded target — are running: wrong tag committed)
    kubectl logs -n office deploy/nextcloud-mcp --tail=300 | grep -cE '(^|[[:space:]])(ERROR|CRITICAL)[[:space:]]|Traceback'; echo '^ expect 0 (log format is "<LEVEL> [ts] module - msg"; a 3.14/2.x import failure prints a Traceback here)'
    # (reviewer 2026-09-23: the 'Configuring MCP server for ... mode' line is logged at app.py:1824 BEFORE the
    #  first log handler exists (installed inside NextcloudMCPServer at 1825) and never reaches the log --
@@ -682,7 +728,7 @@ can confirm it exists (all four PRESENT in the live label index 2026-09-22):
    cb, ca = names("/tmp/ncmcp/calendars.before"), names("/tmp/ncmcp/calendars.after")
    fb, fa = names("/tmp/ncmcp/files.before"),     names("/tmp/ncmcp/files.after")
    assert len(ca) > 0 and len(fa) > 0, "empty result after bump"
-   # calendar identity must survive the DAV-encoding change. 0.195.0 unquote()s the `name` field
+   # calendar identity must survive the DAV-encoding change. 0.195.x unquote()s the `name` field
    # (client/calendar.py:730) and two live calendars carry percent-encoded names, so a raw-text
    # diff of `name` reads 2 missing on a HEALTHY rollout (reviewer 2026-09-23). Compare the parsed
    # display_name sets, with name unquoted on both sides as a second witness.
@@ -805,7 +851,7 @@ image-tag revert:
 
 ```bash
 git revert --no-edit <bump-commit-sha>
-git log -1 --format=%s     # expect: Revert "feat(nextcloud-mcp): image 0.184.5 -> 0.195.0"
+git log -1 --format=%s     # expect: Revert "feat(nextcloud-mcp): image 0.184.5 -> 0.195.4"
 git push origin main
 flux reconcile kustomization nextcloud-mcp -n office --with-source && flux reconcile hr -n office nextcloud-mcp
 kubectl rollout status deploy/nextcloud-mcp -n office --timeout=180s
