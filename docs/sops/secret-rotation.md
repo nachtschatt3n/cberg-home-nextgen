@@ -1,8 +1,8 @@
 # SOP: Secret Rotation — rotate the value, then roll EVERY consumer
 
 > Description: How to rotate a Kubernetes Secret that one or more running workloads consume, so that no consumer keeps serving the old value behind a green HelmRelease. Covers consumer enumeration, Stakater Reloader, Flux `postBuild` substitution, and in-pod verification.
-> Version: `2026.09.22`
-> Last Updated: `2026-09-22`
+> Version: `2026.09.25`
+> Last Updated: `2026-09-25`
 > Owner: `Platform`
 
 ---
@@ -123,6 +123,36 @@ Paperless API token lives in **four** places (`2165b484`):
 that last one by Flux substitution — `mcpo-api-key.PAPERLESS_API_KEY`. A grep
 for the Secret *name* finds none of that; grep for the **key name** and the
 `${VAR}` form as well.
+
+**A literal `$` in a Secret value must be written `$$`.** Every app
+Kustomization is patched with `postBuild.substituteFrom` (`cluster-settings`,
+`cluster-secrets`; see `kubernetes/flux/cluster/ks.yaml`). kustomize-controller
+runs that substitution on the **decrypted** Secret, so any `$` in the value can
+be rewritten before the Secret reaches the cluster. The values this bites are
+password hashes: an argon2 PHC string (`$argon2id$v=19$m=…,t=…,p=…$<salt>$<hash>`)
+or a bcrypt hash (`$2b$12$…`). Measured in `79d2d504` (vaultwarden
+`ADMIN_TOKEN`) with `flux build` on a throwaway object, and live on
+2026-09-25 in the running pod:
+
+| Written in the SOPS file | Arrives in the pod as |
+|---|---|
+| `$$argon2id$$v=19$$…` | `$argon2id$v=19$…` (correct; the live vaultwarden value begins `$argon2id$v=19`) |
+| `${NAME}` | the value of `NAME` from the cluster vars. If `NAME` is undefined, the whole Kustomization **fails** in strict mode (kustomize-controller ≥ v1.9, see `docs/sops/flux-upgrade.md`), which blocks every object in it |
+| bare `$name` | left alone in the `79d2d504` test. Do not rely on this: the form is correct only by accident of which character follows the `$` |
+
+Rules:
+
+- Escape **every** `$` in the value as `$$`, not only the ones that look like
+  `${`. That is the only form whose result does not depend on what follows
+  the `$`, and it is what vaultwarden's Secret uses.
+- A hash is invalid even when a single `$` is wrong, and the app usually does
+  not say so. It either rejects the correct password or treats the value as
+  plain text. Verify the prefix in the pod (§6 Test 4), not in git.
+- Where a whole object must not be substituted, the per-object opt-out
+  annotation `kustomize.toolkit.fluxcd.io/substitute: disabled` is already used
+  in this repo (mosquitto, unpoller dashboards). Escaping is preferred for a
+  single Secret value, because the opt-out also disables every intended
+  `${VAR}` in that object.
 
 ---
 
@@ -283,6 +313,21 @@ Expected:
 If failed:
 - the pod started before the Secret landed (Test 2) or reads a different Secret/key than you rotated (re-run §4 step 1)
 
+### Test 4: a value containing `$` survived Flux substitution
+
+```bash
+# print only the non-secret prefix of a hash (algorithm + version)
+kubectl -n <ns> exec deploy/<name> -- sh -c 'printf %s "$<ENV>" | cut -c1-14'
+```
+
+Expected:
+- `$argon2id$v=19` (argon2) or `$2b$12$` (bcrypt), with single `$` signs
+
+If failed:
+- empty or truncated: an unescaped `${…}` was substituted. `$$` in the pod means
+  the value bypassed Flux substitution, so remove the doubling. Fix the SOPS
+  value (§3 "A literal `$`")
+
 ---
 
 ## 7) Troubleshooting
@@ -293,6 +338,7 @@ If failed:
 | Reloader log shows no line for the Secret | the workload carries no annotation for it (`auto` covers only Secrets the workload references; a *named* annotation is needed for Secrets consumed indirectly) | add `secret.reloader.stakater.com/reload: <name>` on the pod template |
 | Secret in the cluster still holds the OLD value 20 minutes after the push | it is rendered from `cluster-secrets` by substitution and the consuming Kustomization has not re-reconciled | `flux reconcile kustomization <app> -n <ns> --with-source` |
 | Every consumer of a credential broke at once | the credential was retired at the source before the new one was in every Secret (`2165b484` shape) | re-mint, then follow §4 in order |
+| After storing a password hash (argon2/bcrypt), the app rejects the correct password or logs that the value is plain text; or the app Kustomization goes `post build failed … variable not set (strict mode)` | literal `$` in the Secret value was not written as `$$`, so Flux postBuild substitution rewrote it (`79d2d504`) | write every `$` as `$$` in the SOPS value; verify with §6 Test 4 |
 | A CronJob keeps failing after the rotation | a Job started before the Secret changed is still running, or the CronJob reads a different key | wait for / delete the in-flight Job; re-run §4 step 1 |
 
 ```bash
@@ -388,6 +434,7 @@ kubectl -n <ns> rollout restart deploy/<consumer>           # per un-annotated c
 
 - `bc4a2fbf` — the mcpo reload fix and the RCA of F-c04cc353's driver
 - `2165b484` — the four-consumer Paperless token re-mint
+- `79d2d504` — vaultwarden `ADMIN_TOKEN` stored as an argon2id hash with every `$` written `$$`
 - `kubernetes/apps/kube-system/reloader/app/helmrelease.yaml`
 - `kubernetes/flux/components/common/cluster-secrets.sops.yaml` (substitution source)
 - `docs/sops/sops-encryption.md`, `docs/sops/pre-commit-secret-scan.md`
@@ -397,4 +444,5 @@ kubectl -n <ns> rollout restart deploy/<consumer>           # per un-annotated c
 
 ## Version History
 
+- `2026.09.25`: Added the `$` → `$$` rule for Secret values (F-95d6d080). This is the lesson from `79d2d504`: Flux postBuild substitution runs on the decrypted Secret and rewrites `$` sequences, so argon2/bcrypt hashes must store every `$` as `$$`. Added §3 block, §6 Test 4 (in-pod prefix check), and a §7 row. `$$` → `$` was verified live in the vaultwarden pod.
 - `2026.09.22`: Initial SOP (F-c04cc353). Grounded in the bc4a2fbf incident, the live Reloader (v1.4.21) log, and a 2026-09-22 scan of shared Secrets under kubernetes/apps.
