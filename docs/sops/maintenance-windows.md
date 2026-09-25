@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.09.22`
-> Last Updated: `2026-09-22`
+> Version: `2026.09.25`
+> Last Updated: `2026-09-25`
 
 ## 1) Description
 
@@ -256,6 +256,11 @@ Authentik/Homepage/Longhorn objects.
   verify parity any time with `--check`.)
   A window declaring `retry_after_min` also gets a retry cron from `--render`,
   asserted by `--check` (2026-09-14).
+  Every driver and retry cron carries a Telegram `failureAlert` whose cooldown
+  is **strictly shorter than its period** (daily 20h, weekly 24h; the 48h sweep
+  cron `8163c139` uses 44h). A cooldown equal to the period swallowed the
+  2026-09-24 nightly failure (F-e6dda67f). `--render` emits the flags (chat id
+  from `$FAILURE_ALERT_TO`, never committed); `--check` asserts them.
 
 - **Run approved plans NOW (on demand, attended — 2026-09-15).** The operator
   says "run the grafana upgrade now" to OpenClaw, or types it into the Mac ops
@@ -527,6 +532,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.25 | 2026-09-25 | **Failure-alert cooldown < period (F-e6dda67f).** The nightly driver cron's `failureAlert.cooldownMs` equalled its 24h period, so the 09-24 failure landed 0.3s inside the cooldown and was swallowed; the nightly retry cron had no failureAlert. Live: nightly 24h→20h, retry gained a Telegram alert (20h), sweep cron `8163c139` 24h→44h; sat/sun (weekly, 24h) already compliant. `window-crons.py --render` now emits the alert flags and `--check` asserts presence + cooldown < period (`runbooks/tests/test-window-cron-failure-alert.py`). |
 | 2026.09.22 | 2026-09-22 | **§7 had no row for a DRIFTED plan — the case where the held update retargets after the plan was written (F-e1002c61).** The word "drift" appeared nowhere in this SOP. `maintenance-plan.py` files a drifted plan under the same **STALE plans** headline as the age-based case, but the two need opposite responses, and the single row present ("PR target moved / >stale_after_days old → re-run the planner; supersede the old file") taught the wrong one for the more common case: superseding a drifted plan raises `DEAD-REF` on every `depends_on`/`conflicts_with` naming it, drops its `window:` stamp and its home-operation go/no-go issue key, and abandons its `finding_refs` ownership claim. Split into two rows keyed on which fields the reconciler entry actually carries (`plan_target`+`now_target` = refresh in place; `reason: unused > stale_after_days` = nothing moved), and mirrored as a new section in `runbooks/maintenance/plans/README.md`. |
 | 2026.09.13 | 2026-09-13 | **Two stale assertions corrected, both of a kind that has already cost a window.** (a) §1 said the auto-updater "merges SAFE patch/minor updates on the scheduled sweep" — the retired "sweep-applies" model; the sweep is READ-ONLY and safe updates land at Step 0 of every window, as §2 of this same SOP already said. (b) §Execution posture still said AUTO-NIGHT "runs unattended in `mode: unattended` windows" — the exact wording `d147b1ce` removed from `maintenance-window-agent.md`, `autonomy-policy.yaml` and `maintenance-windows.yaml` on 2026-09-12 because, being the stricter of two contradictory rules, it meant a cron-fired ATTENDED window could execute NOTHING. This SOP was the fourth site and was missed. |
 | 2026.09.14 | 2026-09-14 | **Lost-occurrence retry + in-flight rows.** A window may declare `retry_after_min` (nightly: 135 → 05:45); `window-crons.py --render` then also emits a `Maintenance Window — <id> retry` cron and `--check` asserts it. The retry verb (`maintenance-window retry --window <id>`, in the OpenClaw skill) no-ops when ANY `window_runs` row exists for (slot, today) — including the new `--outcome running` row the window agent now writes at Step 0 start and closes with `--finalize` — and fails closed on an unreadable ledger. `maintenance-plan.py` reports a never-finalized running row under `window_liveness.stuck`. Also: scheduler refuses plans with absent/failing premises; nightly window dispatches planners for `needs_plan` items; two aborts on one plan in a window → blocked; every executed plan is recorded via `autonomy-record.py` before the finalize (ledger backfilled with 24 audited executions; chart/image AUTO-NIGHT graduated). Operator-approved mechanics; no gate/threshold/deny rule changed. |

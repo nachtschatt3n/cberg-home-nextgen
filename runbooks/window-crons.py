@@ -30,6 +30,16 @@ the prompt, not on completion, and five nightly dates were lost that way.
 derived expression, and flags a retry cron for a window that declares no
 retry (or no longer exists) as an orphan. A retry cron is never counted as a
 driver — a window with only a retry cron is still undriven.
+
+Failure alerts (2026-09-25, F-e6dda67f). Every driver and retry cron must
+carry a failureAlert whose cooldown is STRICTLY SHORTER than the cron's
+period. The nightly driver had cooldownMs = 86,400,000 (exactly 24h) on a 24h
+schedule, so the 09-24 failure landed 0.3s inside the previous alert's
+cooldown and was swallowed; the retry cron had no failureAlert at all.
+--render emits the alert flags (daily: 20h, weekly: 24h); --check asserts
+presence, after>=1, a destination, and cooldown < period. The Telegram
+destination is never committed (public repo) — --render reads it from
+$FAILURE_ALERT_TO at paste time.
 """
 
 from __future__ import annotations
@@ -72,6 +82,53 @@ def expected_retry_cron_expr(win: dict) -> str | None:
     if day == "daily":
         return f"{rmm} {rhh} * * *"
     return f"{rmm} {rhh} * * {(_DOW[day] + days) % 7}"
+
+
+_DAY_MS = 24 * 3600 * 1000
+
+
+def window_period_ms(win: dict) -> int:
+    """How often the window's crons fire: daily or weekly."""
+    return _DAY_MS if str(win.get("day", "")).lower() == "daily" else 7 * _DAY_MS
+
+
+def expected_alert_cooldown(win: dict) -> str:
+    """Rendered failure-alert cooldown. Must stay < window_period_ms: an
+    alert cooldown equal to the period swallows the next failure (F-e6dda67f)."""
+    return "20h" if str(win.get("day", "")).lower() == "daily" else "24h"
+
+
+def _alert_flags(win: dict) -> str:
+    return ("  --failure-alert --failure-alert-after 1 --failure-alert-channel telegram "
+            "--failure-alert-to \"${FAILURE_ALERT_TO:?set to the ops Telegram chat id}\" \\\n"
+            f"  --failure-alert-mode announce --failure-alert-cooldown {expected_alert_cooldown(win)} \\\n")
+
+
+def check_failure_alerts(windows: list, crons: list) -> list[str]:
+    """Pure logic (testable): every driver/retry cron of a declared window has
+    a failureAlert with after>=1, a destination, and cooldown < period."""
+    errs = []
+    by_id = {str(w["id"]): w for w in windows}
+    for c in crons:
+        for kind, wid in (("cron", window_of_cron(c)), ("retry cron", retry_window_of_cron(c))):
+            if not wid or wid not in by_id:
+                continue
+            fa = c.get("failureAlert")
+            if not fa:
+                errs.append(f"window {wid!r}: {kind} has NO failureAlert — "
+                            f"a failed run pages nobody")
+                continue
+            period = window_period_ms(by_id[wid])
+            cd = fa.get("cooldownMs")
+            if not isinstance(cd, (int, float)) or cd >= period:
+                errs.append(f"window {wid!r}: {kind} failureAlert cooldownMs {cd!r} "
+                            f">= period {period} — the next failure lands inside "
+                            f"the cooldown and is swallowed (F-e6dda67f)")
+            if not fa.get("to"):
+                errs.append(f"window {wid!r}: {kind} failureAlert has no destination")
+            if int(fa.get("after") or 0) < 1:
+                errs.append(f"window {wid!r}: {kind} failureAlert after={fa.get('after')!r} (< 1)")
+    return errs
 
 
 def load_windows(path: Path = WINDOWS_YAML) -> tuple[list, str]:
@@ -215,6 +272,7 @@ def render(windows: list, tz: str) -> str:
             "  --command-cwd /home/node/clawd "
             "--command-env MAINTENANCE_WINDOW_TRIGGER=cron "
             f"--command-env OPERATION_SESSION={ops_session} \\\n"
+            + _alert_flags(w) +
             "  --no-output-timeout-seconds 600 --timeout-seconds 600 --no-deliver\n")
         retry_expr = expected_retry_cron_expr(w)
         if retry_expr:
@@ -233,6 +291,7 @@ def render(windows: list, tz: str) -> str:
                 "  --command-cwd /home/node/clawd "
                 "--command-env MAINTENANCE_WINDOW_TRIGGER=cron "
                 f"--command-env OPERATION_SESSION={ops_session} \\\n"
+                + _alert_flags(w) +
                 "  --no-output-timeout-seconds 600 --timeout-seconds 600 --no-deliver\n")
     return "\n".join(out)
 
@@ -253,7 +312,7 @@ def main() -> int:
                "note": "cron list unreadable — parity NOT verified (this is not a pass)"}
         print(json.dumps(msg) if a.json else f"⚠️  {msg['note']}")
         return 2
-    errs = check(windows, tz, crons)
+    errs = check(windows, tz, crons) + check_failure_alerts(windows, crons)
     if a.json:
         print(json.dumps({"verified": True, "errors": errs}))
     else:
