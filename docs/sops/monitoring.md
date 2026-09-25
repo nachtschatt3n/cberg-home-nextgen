@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.09.20`
-> Last Updated: `2026-09-20`
+> Version: `2026.09.25`
+> Last Updated: `2026-09-25`
 > Owner: `Platform`
 
 ---
@@ -301,6 +301,41 @@ are untouched. Do not re-litigate that fear at the next otel bump; verify with
 the loop above instead.
 
 ---
+
+## Collector OOM and memory_limiter (otel-operator DaemonSet)
+
+The ES side above is only half the pipeline. The per-node **otel-operator
+daemon collectors** (`otel-operator-daemon-collector-*`, 512Mi limit) can be
+OOMKilled on their own: on 2026-09-24 two of three were killed at the limit
+(F-4c13797f) while the central edot-collector, which already had a limiter,
+survived. An OOMKill drops whatever the pod had buffered for that node.
+
+Rule: **every collector pipeline starts with `memory_limiter`**. The daemon
+config in `kubernetes/apps/monitoring/otel-operator/app/helmrelease.yaml` uses
+`check_interval: 1s`, `limit_percentage: 80`, `spike_limit_percentage: 20`
+(percent of the cgroup limit, so it follows any future limit change). Above the
+soft limit the receivers refuse data and the pod stays alive.
+
+Chart trap (opentelemetry-kube-stack): the `kubernetesAttributes` preset
+PREPENDS `k8s_attributes` to any processor list that lacks it, and a
+user-supplied list REPLACES the chart defaults (`resource_detection/env`,
+`resource/hostname`). So write the full list, `memory_limiter` first, and
+check the rendered `OpenTelemetryCollector` with `helm template` before you
+commit.
+
+Checks:
+
+```bash
+# Restarts / last termination reason per daemon pod
+kubectl -n monitoring get pods -l app.kubernetes.io/component=opentelemetry-collector \
+  -o custom-columns=POD:.metadata.name,NODE:.spec.nodeName,RESTARTS:.status.containerStatuses[0].restartCount,LAST:.status.containerStatuses[0].lastState.terminated.reason
+# Limiter is loaded (live config); refusals show up in the pod log as "memory usage is above soft limit"
+kubectl -n monitoring get otelcol otel-operator-daemon -o yaml | grep -A4 memory_limiter
+kubectl -n monitoring logs ds/otel-operator-daemon-collector --since=1h | grep -i "memory_limiter\|soft limit"
+```
+
+If the limiter keeps refusing data, raise the container limit. Do not remove
+the limiter, and do not raise `limit_percentage` above 80.
 
 ## ES Rejected Documents (edot-collector silent telemetry loss)
 

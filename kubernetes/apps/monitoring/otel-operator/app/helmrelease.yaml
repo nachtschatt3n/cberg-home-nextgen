@@ -88,11 +88,28 @@ spec:
               endpoint: edot-collector.monitoring.svc:4317
               tls:
                 insecure: true
+          # memory_limiter (F-4c13797f): 2 of 3 daemon pods were OOMKilled at the
+          # 512Mi limit on 2026-09-24 with no limiter in the pipeline. Percentages
+          # are of the container cgroup limit: hard ~410Mi, soft ~307Mi; above soft
+          # the receivers are refused data (backpressure) instead of the pod dying.
+          processors:
+            memory_limiter:
+              check_interval: 1s
+              limit_percentage: 80
+              spike_limit_percentage: 20
+          # Processor lists are spelled out IN FULL on purpose. The chart's
+          # kubernetesAttributes preset PREPENDS k8s_attributes to any list that
+          # lacks it (so memory_limiter would not be first), and a user-supplied
+          # list REPLACES the chart defaults (resource_detection/env,
+          # resource/hostname would silently vanish). Verify with helm template.
           service:
             pipelines:
               logs:
+                processors: [memory_limiter, k8s_attributes, resource_detection/env, resource/hostname, batch]
                 exporters: [otlp]
               metrics:
+                processors: [memory_limiter, k8s_attributes, resource_detection/env, resource/hostname, batch]
                 exporters: [otlp]
               traces:
+                processors: [memory_limiter, k8s_attributes, resource_detection/env, resource/hostname, batch]
                 exporters: [otlp]
