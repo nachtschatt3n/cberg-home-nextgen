@@ -269,7 +269,17 @@ spec:
       #
       # ROLLBACK: pure manifest revert to
       # sha-9439ba5e8c97f9803489111abc3394e712d8f862 — no schema to unwind.
-      tag: "sha-40b0038febc9566d3301a332f77d0da7958c644e"
+      #
+      # --- 2026-09-25 bump: sha-40b0038f -> sha-1a9ff4a7 -------------------
+      # Image-hygiene rebuild (no app change). Base ruby:3.4.9-slim had been
+      # frozen upstream since June, so every rebuild shipped stale Debian
+      # packages. Now Ruby 3.4.11 base + `apt-get upgrade` at build + a
+      # date-keyed cache-buster so rebuilds refresh OS packages.
+      # security_ref: F-063c7324
+      #
+      # ROLLBACK: pure manifest revert to
+      # sha-40b0038febc9566d3301a332f77d0da7958c644e — no schema to unwind.
+      tag: "sha-1a9ff4a775edc959d7513b09ff2dcaeda8ca0e3b"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
