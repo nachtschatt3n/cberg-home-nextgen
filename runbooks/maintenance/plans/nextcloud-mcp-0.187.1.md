@@ -87,6 +87,8 @@ finding_refs: [F-9af9baf7, F-80459b23, F-bb713800]   # F-bb713800 ADDED 2026-09-
 status: awaiting-go   # RESET 2026-09-25: the operator GO recorded for 0.195.0 does NOT extend to 0.195.4 (an
                       # approval is scoped to what was reviewed, §1.8). A FRESH GO for 0.195.4 is required
                       # before the 2026-10-03 run. Reviewed 2026-09-23 at 0.195.0 (needs-fix -> fixed).
+                      # FRESH GO for 0.195.4 given by the operator 2026-09-25 (home-operation decide
+                      # approve, exec_state=pending). Status stays awaiting-go per the pre-window convention.
 window: "sat-attended:2026-10-03"   # KEPT on retarget (risk/duration/reboot class unchanged: medium, 35 min, no
                                       # reboot, git-revert). Slot re-checked 2026-09-22: also holds
                                       # external-dns-unowned-cnames (draft, 40 min, medium) — no shared resource
