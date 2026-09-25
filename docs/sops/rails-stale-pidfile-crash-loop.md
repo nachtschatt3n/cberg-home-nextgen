@@ -81,8 +81,8 @@ the volume type backing `/app/tmp`, and `/proc/1/cmdline`.
 | `my-software-showcase/see-edv-ibspm` | emptyDir `/app/tmp` | sh wrapper → `ruby script/rails server -b 0.0.0.0 -p 3000` | FIXED `437bbeb8` |
 | `my-software-showcase/u-zeit` | emptyDir `/app/tmp` | sh wrapper → `ruby bin/rails server -b 0.0.0.0 -p 3000` | FIXED `437bbeb8` |
 | `my-software-showcase/zuhause-betreut` | emptyDir `/app/tmp` | sh wrapper → `ruby bin/rails server -b 0.0.0.0 -p 3000` | FIXED `437bbeb8` |
-| `my-software-showcase/mangold-smarthomeadvisor` | emptyDir `/app/tmp` | image default, PID 1 = `ruby bin/rails server -b 0.0.0.0 -p 3000`, no wrapper | **EXPOSED, not fixed**. Same liveness probe as the 8 above. Needs the §3 wrapper |
-| `my-software-showcase/stepbystepguide` | emptyDir `/app/tmp` | image default, PID 1 = `ruby bin/rails server -b 0.0.0.0 -p 3000`, no wrapper | **EXPOSED, not fixed**. Same liveness probe as the 8 above. Needs the §3 wrapper |
+| `my-software-showcase/mangold-smarthomeadvisor` | emptyDir `/app/tmp` | sh wrapper → `ruby bin/rails server -b 0.0.0.0 -p 3000` | FIXED `010715d2` |
+| `my-software-showcase/stepbystepguide` | emptyDir `/app/tmp` | sh wrapper → `ruby bin/rails server -b 0.0.0.0 -p 3000` | FIXED `010715d2` |
 | `office/sure` (`sure-web`) | container layer (the only volume is `/rails/storage`) | image default, PID 1 = `puma` | not exposed: no pidfile under `/rails/tmp/pids` |
 | `office/arag-web` | container layer | image default, `thrust ./bin/rails server` | not exposed: no pidfile under `/rails/tmp/pids` |
 
@@ -365,6 +365,11 @@ that is to correct the `args` string, not to revert.
 
 ## Version History
 
+- `2026.09.25` (amendment): `mangold-smarthomeadvisor` and `stepbystepguide`
+  got the §3 wrapper in `010715d2`. Live check after rollout: 0 restarts, PID 1
+  is the exec'd `ruby bin/rails server`, the pidfile at
+  `/app/tmp/pids/server.pid` holds `1`, and the app answers on :3000. No known
+  exposed app remains in the table.
 - `2026.09.25`: Scope corrected (F-4fa1f9da). The 2026-09-24 incident
   (`437bbeb8`) disproved both exclusions in the earlier version. An `emptyDir`
   survives a container restart after a liveness kill. Apps started through the
