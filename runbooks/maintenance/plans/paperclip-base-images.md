@@ -4,8 +4,8 @@ component: paperclip
 pr: null                              # digest-pinned base images; no Renovate PR (float-tag policy)
 kind: image
 current: "mise-install initContainer: debian trixie-slim@sha256:26f98ccd… (built 2026-03-16, ~Debian 13.4-era) | tools container: ubuntu 24.04@sha256:d78ab76…"
-target: "mise-install initContainer: debian 13.6-slim | tools container: ubuntu 26.04 — RECOMMENDED: DO NOT EXECUTE, see §1b"
-update_type: major                    # driven by the ubuntu leg; the debian leg is an intra-major (13.4→13.6) refresh, see §1a
+target: "mise-install initContainer: debian 13.7-slim | tools container: ubuntu 26.04 — RECOMMENDED: DO NOT EXECUTE, see §1b"
+update_type: major                    # driven by the ubuntu leg; the debian leg is an intra-major (13.4→13.7) refresh, see §1a
 risk: medium                          # debian leg: medium (persisted toolchain, ABI risk). ubuntu leg: not executed by default (see below)
 est_duration_min: 40
 needs_reboot: false
@@ -40,6 +40,7 @@ sops_refs:
   - docs/sops/application-update.md
   - docs/sops/vulnerability-disclosure.md
 generated: "2026-09-05"
+retargeted: "2026-09-25"                # debian leg 13.6-slim -> 13.7-slim (13.7 released 2026-09-12); DO-NOT-EXECUTE on the ubuntu leg re-confirmed
 ---
 
 # paperclip: two base-image bumps — debian (mise-install) + ubuntu (tools sidecar)
@@ -51,7 +52,7 @@ unrelated containers of the `paperclip` controller. They were bundled into one
 sweep item because they're both digest-pinned base-image bumps on the same
 component, but **they are different questions with different answers.**
 
-### 1a) `mise-install` initContainer: `debian:trixie-slim` → `13.6-slim`
+### 1a) `mise-install` initContainer: `debian:trixie-slim` → `13.7-slim`
 
 **This is NOT a codename→number no-op rename, despite trixie being Debian 13
 both before and after.** Verified against the registry, not assumed from the
@@ -62,18 +63,29 @@ tag string:
   decodes to an image built `2026-03-16T00:00:00Z` (OCI `created` annotation,
   debuerreotype build). That build date lands two days after **Debian 13.4**
   released (2026-03-14) — i.e. the container running today is effectively a
-  13.4-era `trixie-slim` snapshot, not 13.6.
-- The **`13.6-slim`** tag today resolves to digest `sha256:d7e12182…`, which is
-  **byte-identical** to the current floating `trixie-slim` tag (same digest,
-  both `last_updated: 2026-08-25`). Debian 13.6 released 2026-07-11; no 13.7
-  exists yet (`13.7-slim` → 404 on Docker Hub as of this check).
-- **Conclusion: this is a real intra-major refresh, ~13.4 → 13.6**, carrying
-  roughly two Debian point releases (13.5, 13.6) of security-only package
+  13.4-era `trixie-slim` snapshot, not 13.7.
+- **Re-targeted 2026-09-25 (13.6 → 13.7).** Debian 13.7 released 2026-09-12
+  (debian.org/News/2026/20260912). Docker Hub, checked 2026-09-25: the
+  **`13.7-slim`** tag resolves to index digest `sha256:a99cfc51…`
+  (`last_updated: 2026-09-19`), **byte-identical** to the floating
+  `trixie-slim` tag — i.e. 13.7 IS the current stable trixie build, not a
+  pre-release. `13.8-slim` → 404. The old target `13.6-slim` (`sha256:d7e12182…`,
+  2026-08-25) is now superseded and must not be used.
+- **13.7 notes relevant to this container:** a **glibc update** (packages
+  rebuilt against it), a new upstream OpenSSL release, kernel ABI bump to
+  6.12.107 (irrelevant here — containers use the node's Talos kernel). No
+  gcc/binutils/apt changes and no package removals called out. The glibc
+  update is the one that matters: it is exactly the component the persisted
+  sysroot toolchain (below) is built from, so the §4 compile-and-run gate is
+  load-bearing, not ceremonial. It does not change the risk class (still an
+  intra-major point-release refresh, `risk: medium`).
+- **Conclusion: this is a real intra-major refresh, ~13.4 → 13.7**, carrying
+  three Debian point releases (13.5, 13.6, 13.7) of stable-update package
   patches — glibc, gcc, openssl, binutils, coreutils, apt — NOT a distro
   major bump (still Debian 13) and NOT a no-op digest-only republish. The
   auto-updater's "unknown" classification is a **codename-vs-number string
   comparison blind spot** (it cannot semantically diff `trixie-slim` against
-  `13.6-slim`), not evidence of anything more dramatic than the above.
+  `13.7-slim`), not evidence of anything more dramatic than the above.
 
 **Why this needs care despite being "just" a point-release bump**: this
 initContainer builds a **persistent glibc/gcc sysroot toolchain**
@@ -104,7 +116,9 @@ on record:
 > exists," which the finding record explicitly calls a currency signal, not a
 > risk signal. Re-evaluation triggers recorded on the finding: (a) ubuntu
 > 26.04's base image measures better, or (b) 24.04 approaches its 2029 EOL.
-> Neither has occurred.
+> Neither has occurred. **Re-confirmed 2026-09-25:** F-ae420ae8 is still
+> `accepted` / last seen 2026-09-25 under AR-101 — the DO-NOT-EXECUTE on this
+> leg stands unchanged by the debian re-target.
 >
 > - Dashboard: `https://sweep.<DOMAIN>/findings/F-ae420ae8` (and `F-afa93406`)
 > - CLI: `runbooks/policy-cli.py finding show F-ae420ae8`
@@ -183,10 +197,10 @@ per the disclosure rule) back to AR-101 so its next review has fresh data.
    ```yaml
    image:
      repository: debian
-     tag: 13.6-slim@sha256:<digest of 13.6-slim AT EXECUTION TIME>  # re-resolve; don't reuse the digest quoted in §1a — it will have moved by the window date
+     tag: 13.7-slim@sha256:<digest of 13.7-slim AT EXECUTION TIME>  # re-resolve; don't reuse the digest quoted in §1a — it will have moved by the window date
    ```
    Re-resolve the digest at execution time (`curl -s
-   "https://hub.docker.com/v2/repositories/library/debian/tags/13.6-slim" | python3 -c
+   "https://hub.docker.com/v2/repositories/library/debian/tags/13.7-slim" | python3 -c
    "import sys,json;print(json.load(sys.stdin)['digest'])"`) and pin the
    multi-arch index digest, not a per-platform manifest digest. Update the
    trailing comment to record the new pin date, replacing the stale
@@ -214,7 +228,7 @@ per the disclosure rule) back to AR-101 so its next review has fresh data.
 3. Commit and push:
    ```bash
    git add kubernetes/apps/ai/paperclip/app/helmrelease.yaml
-   git commit --only kubernetes/apps/ai/paperclip/app/helmrelease.yaml -m "chore(paperclip): debian mise-install trixie-slim -> 13.6-slim (13.4-era -> 13.6, same major)"
+   git commit --only kubernetes/apps/ai/paperclip/app/helmrelease.yaml -m "chore(paperclip): debian mise-install trixie-slim -> 13.7-slim (13.4-era -> 13.7, same major)"
    git push
    ```
 
@@ -236,6 +250,16 @@ AR-101 revisited) — not a silent extension of this plan's approved scope.
 
 Floor: `flux get helmrelease -n ai paperclip` → `Ready=True`; `paperclip` pod
 `1/1`, 0 unexpected restarts; `mise-install` initContainer `Completed`.
+
+**Image-identity gate (debian leg)** — prove the initContainer actually ran the
+13.7 digest you pinned, not a cached old one. Fails (prints the OLD
+`sha256:26f98ccd…` or an empty line) if the rollout did not pick up the pin:
+
+```bash
+mise exec -- kubectl get pods -n ai -l app.kubernetes.io/name=paperclip \
+  -o jsonpath='{range .items[*]}{.status.initContainerStatuses[?(@.name=="mise-install")].imageID}{"\n"}{end}'
+# PASS: contains the digest pinned in Step 1 (resolved from 13.7-slim at execution time)
+```
 
 **CONTENTS ASSERTION (debian leg): the toolroot was actually rebuilt against
 the new image, and native gem compilation still works end-to-end** — a green
@@ -305,6 +329,10 @@ Ubuntu leg: not executed, nothing to roll back.
   don't. §1b's gate must be re-run and show a materially different result
   first, and even then the accepted-risk AR-101 needs an explicit operator
   update, not an automatic supersede by this plan landing.
+- **Same-component chart bump pending:** finding F-44278983 (paperclip chart
+  5.1.0 → 5.2.1, `monitor`, 2026-09-25) is not planned here. If it lands in the
+  same window it restarts the same pod — run it separately so a toolchain
+  failure is attributable to this plan's base-image change.
 - `maxHistory: 1` and default `upgrade.remediation.retries: 1` are `paperclip`'s
   standing HelmRelease settings — a bad rollout auto-retries once then reports
   failed; there is no multi-revision `helm rollback` available, so recovery is
