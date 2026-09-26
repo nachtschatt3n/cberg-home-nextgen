@@ -13,7 +13,11 @@
 #   window_runs_missing_count{lookback_days="N"}
 #                                        declared window occurrences in the
 #                                        lookback with no completed window_runs
-#                                        row — ONLY exposed when verified=1
+#                                        row — ONLY exposed when verified=1.
+#                                        A nightly is also satisfied by a
+#                                        completed, non-aborted same-Berlin-day
+#                                        `now`/ad-hoc run (maintenance-windows
+#                                        SOP §1, 2026-09-26)
 #   window_runs_stuck_count              running rows never finalized past the
 #                                        window's duration plus grace — ONLY
 #                                        when verified=1
@@ -76,6 +80,8 @@ spec:
               maintenance-plan.py found {{ $value | printf "%.0f" }} declared
               maintenance-window occurrence(s) in the last
               {{ $labels.lookback_days }} days with no completed window_runs row
+              (a nightly also counts as run when a completed, non-aborted
+              on-demand now/ad-hoc run happened the same Europe/Berlin day)
               — the window silently never started, or died mid-run without
               finalizing. Safe updates for that window did not land. Check the
               OpenClaw window crons (`runbooks/window-crons.py --check`), the

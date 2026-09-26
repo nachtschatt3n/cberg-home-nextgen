@@ -80,6 +80,11 @@ windows:
                               # (nightly, today) — including outcome=running, the
                               # row the window agent now writes at Step 0 start —
                               # so a live or finished run is never re-fired.
+                              # If NO row exists and the console is busy /
+                              # in a menu (exit 8) or exhausted and not
+                              # auto-clearable (exit 4), retry fails LOUDLY,
+                              # nothing typed, so the retry cron's failureAlert
+                              # pages the same morning (2026-09-26).
   - id: sat-attended
     day: saturday
     start: "09:00"
