@@ -58,7 +58,7 @@ security_ref: null
 capability_change: false              # same script, same schedule, same env; interpreter only
 rollback_class: git-revert            # stateless CronJob; nothing forward-only happens
 finding_refs: [F-c9568174]
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer ready-for-go (0 blocking); fixed W path, full-SHA premise, 4.4 can-fail demo, context-guard wording applied
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -71,8 +71,8 @@ premises:
     expect_exact: "docker.io/library/python:3.12-alpine"
   - id: script-unchanged-since-authoring
     why: "The §1.3 TLS measurement and the §2.3 mock harness were proven against the script at a21e3f8f. A newer script invalidates that evidence — re-run §2.3 and re-review before proceeding."
-    run: git log -1 --format=%h -- kubernetes/apps/monitoring/elasticsearch/app/obs-recovery-configmap.yaml
-    expect_exact: "a21e3f8f"
+    run: git log -1 --format=%H -- kubernetes/apps/monitoring/elasticsearch/app/obs-recovery-configmap.yaml
+    expect_exact: "a21e3f8f048fd59d29c2fec6c12e82c4c403a443"
   - id: flux-ks-elasticsearch-ready
     why: "The Flux Kustomization that applies the bump must be Ready, or §3.3 cannot tell a stalled reconcile from a bad image."
     run: kubectl get kustomization -n monitoring elasticsearch -o 'jsonpath={.status.conditions[?(@.type=="Ready")].status}'
@@ -185,7 +185,7 @@ are driven against a local mock ES/Alertmanager. Uses the Homebrew 3.14 interpre
 target) with no `LANG`/`LC_*` (C locale, like the image), and the repo venv for YAML parsing.
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-W=$(mktemp -d)
+W=/private/tmp/claude-501/obs-recovery-3.14.7; mkdir -p "$W"   # FIXED path: agent Bash calls share no shell vars; later blocks re-declare W
 kubectl -n monitoring get secret elasticsearch-es-http-certs-public -o 'jsonpath={.data.tls\.crt}' | base64 -d > "$W/es-ca.crt"
 cat > "$W/obs_recovery_mock.py" <<'EOF'
 #!/usr/bin/env python3
@@ -276,6 +276,7 @@ never page). Keeps the in-cluster hostname for SNI/hostname verification by pinn
 port-forward in `getaddrinfo`, so this exercises the strict-X509 path for real.
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
+W=/private/tmp/claude-501/obs-recovery-3.14.7
 cat > "$W/live_dryrun.py" <<'EOF'
 """Run the REAL obs_recovery.py with DRY_RUN=true against live ES through a port-forward
 on 127.0.0.1:19200, keeping the in-cluster hostname for TLS verification (SNI + hostname
@@ -311,9 +312,10 @@ Traceback (the third grep reads ≥1). The password is only ever in the process 
 2.5 **Baseline: TSDB write-window count from the last 3.12 run** (the §4.3 contents
 comparison):
 ```bash
+W=/private/tmp/claude-501/obs-recovery-3.14.7
 J0=$(kubectl get jobs -n monitoring --sort-by=.metadata.creationTimestamp --no-headers -o custom-columns=N:.metadata.name | grep -E '^elasticsearch-obs-recovery-[0-9]+$' | tail -1)
 kubectl -n monitoring logs job/$J0 | tee "$W/baseline.log"
-N_TSDB=$(grep -cE ': write window (healthy|EXPIRED)' "$W/baseline.log"); echo "N_TSDB=$N_TSDB"
+N_TSDB=$(grep -cE ': write window (healthy|EXPIRED)' "$W/baseline.log"); echo "N_TSDB=$N_TSDB"; echo "$N_TSDB" > "$W/n_tsdb"
 ```
 PASS: `N_TSDB ≥ 1` (authoring: 1 — `metrics-generic.otel-default`) and it equals the §2.4
 count. `N_TSDB=0` means the baseline itself is broken: STOP, investigate before bumping.
@@ -342,7 +344,7 @@ git commit --only kubernetes/apps/monitoring/elasticsearch/app/obs-recovery-cron
 git log -1 --format=%s     # must be the subject above
 git show --stat HEAD       # must list ONLY obs-recovery-cronjob.yaml
 git push
-T0=$(date -u +%s); echo "T0=$T0"
+T0=$(date -u +%s); echo "T0=$T0"; echo "$T0" > /private/tmp/claude-501/obs-recovery-3.14.7/t0
 ```
 
 3.3 Wait for Flux (webhook) and confirm the applied spec:
@@ -377,6 +379,7 @@ means a later success replaces J1 — read 4.1–4.3 promptly after each run.
 
 4.2 **The script completed, not just the pod** (exit codes lie; read the log):
 ```bash
+W=/private/tmp/claude-501/obs-recovery-3.14.7
 kubectl -n monitoring logs job/$J1 | tee "$W/after.log"
 grep -cE 'cluster status=(green|yellow|red) unassigned=[0-9]+ dry_run=False$' "$W/after.log"  # PASS: 1
 grep -cE ' done$' "$W/after.log"                                                             # PASS: 1
@@ -391,6 +394,7 @@ CERTIFICATE_VERIFY_FAILED` and no `status=` line (Job Failed); ES auth/URL regre
 measured by the count of `write window (healthy|EXPIRED)` lines in the new-image Job log,
 compared to `N_TSDB` from the last 3.12 run (§2.5):
 ```bash
+W=/private/tmp/claude-501/obs-recovery-3.14.7; N_TSDB=$(cat "$W/n_tsdb")
 N_AFTER=$(grep -cE ': write window (healthy|EXPIRED)' "$W/after.log"); echo "N_AFTER=$N_AFTER N_TSDB=$N_TSDB"
 [ "$N_AFTER" -ge 1 ] && [ "$N_AFTER" -eq "$N_TSDB" ] && echo CONTENTS_PASS || echo CONTENTS_FAIL
 ```
@@ -406,7 +410,7 @@ OTel TSDB stream appeared between runs, cross-check with
 ```bash
 kubectl get jobs -n monitoring --no-headers -o 'custom-columns=N:.metadata.name,F:.status.failed' | grep -E '^elasticsearch-obs-recovery-[0-9]+ ' | awk '$2!="<none>"'
 ```
-PASS: prints nothing (no Job with a `failed` count) after the second post-T0 run.
+PASS: prints nothing (no Job with a `failed` count) after the second post-T0 run. Can-fail demonstration (review 2026-09-26): `max_over_time(kube_job_status_failed{namespace="monitoring",job_name=~"elasticsearch-obs-recovery-.*"}[30d]) > 0` returned Job `elasticsearch-obs-recovery-29838030` (2026-09-24 20:30Z, reason BackoffLimitExceeded, on 3.12) — this Job family does fail and the count is populated. Because a transient 3.12 failure happened ~36h before authoring (cause unknown), a printed row means: read that Job's log BEFORE blaming the image.
 
 4.5 **Prometheus sees successful runs and ingestion is not stalled:**
 ```bash
@@ -421,7 +425,7 @@ kill $PF 2>/dev/null
 ```
 PASS: first value `> T0` (`EMPTY` or `< T0` = FAIL — at authoring it read 1790301005, i.e. the
 last 3.12 success, which is `< T0` and therefore demonstrably fails before a new-image run);
-second `0`; third `0`.
+second `0`; third `0`. (The third read is a CONTEXT GUARD, not an image verdict: the three rules are loaded in group `otel-collector.es-ingestion` with `for: 15m` and their input series exist (review 2026-09-26: 1/1/3), but none fired in 30d, so no non-zero replay exists. The image verdict rests on 4.1–4.3 and the first read here.)
 
 CONTROL: metric kube_cronjob_status_last_successful_time — must advance past T0 after the first new-image run.
 CONTROL: metric kube_job_status_failed — sum over elasticsearch-obs-recovery-* Jobs must be 0.
@@ -457,14 +461,15 @@ on either image, tell the operator explicitly that ES RED currently has **no pag
 - **conflicts_with:** `kube-prometheus-stack-91.4.1` (§4.5 reads Prometheus; RED notify targets
   its Alertmanager), `edot-collector-0.161.0` (§4.5 gates on the ES ingestion-stall alerts),
   `talos-1.14.1` (node reboots bounce the single-node ES into the states this job acts on),
-  `flux-reconciler-impersonation` (Flux apply path for §3.3). Declared one-sided here; the
+  `flux-reconciler-impersonation` (Flux apply path for §3.3). 2026-09-26 NOW run: KPS (87432c93, chart 91.5.2) restarted Prometheus/Alertmanager/kube-state-metrics ~05:00Z — start this plan only after the KPS plan's verification has closed (run-now `settle_before`). Declared one-sided here; the
   scheduler honours it symmetrically.
 - **Same image elsewhere:** `kube-system/crash-ghost-reaper` also runs
   `python:3.12-alpine` (finding F-cdcbe7ea, no plan yet). Deliberately not bundled: different
   namespace, different failure surface, and a combined revert would couple two unrelated
   safety jobs. That plan can reuse §2.2 (image probe) verbatim.
 - **Float-tag pinning:** this plan pins by digest; `float-tag-pinning` covers the broader
-  float-tag inventory and should drop this CronJob from its list once executed.
+  float-tag inventory, which does not list `python:3.12-alpine` (only `python:3.11-slim` /
+  `python:3.12-slim`), so there is nothing to drop there.
 - **Concurrency:** the CronJob is `Forbid`; no manual Job is created, so no overlap risk.
 - **Repo correction (for the report):** coverage G3 marks CPython minor bumps "unverified"
   although `docs.python.org/3/whatsnew/<X.Y>.html` is a stable, fetchable source — every

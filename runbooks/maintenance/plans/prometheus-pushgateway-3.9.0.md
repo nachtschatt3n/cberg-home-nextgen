@@ -31,7 +31,7 @@ touches:
                                       # every alert that reads those series (§1.3).
 depends_on: []
 conflicts_with:
-  - kube-prometheus-stack-91.4.1      # §4 gate reads Prometheus; that bump restarts it.
+  - kube-prometheus-stack-91.4.1      # §4 gate reads Prometheus; that bump restarts it. Its §4 also diffs the firing set vs its baseline, which this restart perturbs: run strictly AFTER its §4 is recorded.
   - icloud-backup-freshness-3.24.2    # its §2/§4 baseline reads the icloud group FROM THIS
                                       # pushgateway; a same-night restart wipes that baseline
                                       # and its gate would fail for a reason not its own.
@@ -47,7 +47,7 @@ security_ref: null                    # image is unchanged by this bump; the ima
 capability_change: false
 rollback_class: git-revert
 finding_refs: [F-684a70f6]            # version finding "prometheus-pushgateway: chart 3.8.0 -> 3.9.0"
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer ready-for-go (0 blocking); timing exception, file-carried T0/POD_IP/OLD_IP, alert counts corrected
 window: null
 premises:
   - id: hr-still-on-3.8.0
@@ -118,7 +118,7 @@ each one and what happens meanwhile:
 | Group (job) | Pusher / cadence | Rules that go blank while it is missing | Effect of the gap |
 |---|---|---|---|
 | `authentik-db-probe` | CronJob kube-system, hourly `:17` | AuthentikAuditLogStale / AuthentikAuditFreshnessProbeStale / AuthentikPostgresConnectionsHigh go inert; `AuthentikAuditFreshnessProbeMissing` (absent, `for: 3h`) | Re-pushed within ≤60 min, normally ≤17 min with §3.0 timing. No false page. |
-| `icloud-backup-freshness` | CronJob backup, hourly `:23` | `ICloudBackupPhotosStale{,Critical}` (**currently FIRING**, 2 accounts each) RESOLVE. `ICloudBackupFreshnessMetricMissing*` (absent, `for: 3h`) | Alertmanager sends a **false "resolved"** for 4 firing alerts. They re-fire ≥30 min (`for: 30m`) after the next push. Expected noise, so tell the operator. |
+| `icloud-backup-freshness` | CronJob backup, hourly `:23` | `ICloudBackupPhotosStale{,Critical}` (**FIRING**: 3 series on 2026-09-26) RESOLVE. `ICloudBackupFreshnessMetricMissing*` (absent, `for: 3h`) | Alertmanager sends a **false "resolved"** for each firing series. They re-fire ≥30 min (`for: 30m`) after the next push. Expected noise, so tell the operator. |
 | `maintenance-window-liveness` | **Mac sweep only, ~48h** | `MaintenanceWindowMissed` + `MaintenanceWindowsRepeatedlyMissed` (**currently FIRING**) RESOLVE. `MaintenanceWindowLivenessMetricsAbsent` (absent, `for: 6h`) **pages** if nothing re-pushes | **Would stay blank until the next sweep.** §3.4 re-pushes it by hand. That is the one non-optional step. |
 | `pellet-price-monitor` | CronJob home-automation, 08:00 + 20:00 local | `PalletPriceMonitorRunStale` goes inert. `PalletCriticalSourceStale` uses `absent_over_time(...[30h])`, and TSDB history still covers the gap | Masked (not falsely paged) until the next run, ≤12h. Grafana panels show a gap. Accept it, because the run cannot be reproduced without triggering the Job. |
 
@@ -134,6 +134,7 @@ cd /Users/mu/code/cberg-home-nextgen
 
 flux get helmreleases -n monitoring prometheus-pushgateway                    # Ready True, 3.8.0
 kubectl get pod -n monitoring -l app.kubernetes.io/name=prometheus-pushgateway -o wide   # 1/1 Running
+kubectl get pod -n monitoring -l app.kubernetes.io/name=prometheus-pushgateway -o jsonpath='{.items[0].status.podIP}' > /tmp/pgw-OLD_IP; cat /tmp/pgw-OLD_IP
 
 # 2.1 Baseline the pushgateway groups (what a restart will wipe):
 kubectl port-forward -n monitoring svc/prometheus-pushgateway 19091:9091 >/dev/null 2>&1 & PF=$!; sleep 3
@@ -156,10 +157,15 @@ sweep_pg_dsn_down
 
 **3.0 Timing.** Do the commit (3.2) between **hh:00 and hh:08**. The two hourly
 probes (`:17`, `:23`) then re-populate the gateway within ~20 min instead of
-~75, which shortens both the false-resolved window and §4's wait. Record T0:
+~75, which shortens both the false-resolved window and §4's wait.
+**Exception around 08:00/20:00 local:** the pellet CronJob pushes then, so a
+restart at hh:00-hh:08 of those hours blanks it for 12h. Commit at
+07:40-07:52 (or 19:40-19:52) instead, so the new pod is serving before the
+pellet push. §4 must PASS before any other same-day window whose plans read
+pushed series starts (e.g. sat-attended 09:00). Record T0:
 
 ```bash
-T0=$(date +%s); echo "T0=$T0"
+T0=$(date +%s); echo "$T0" > /tmp/pgw-T0; echo "T0=$T0"   # fresh shell per call: re-read with $(cat /tmp/pgw-T0)
 ```
 
 **3.1 Edit.** Dry-tested with BSD sed on a scratch copy 2026-09-25. It matched exactly one line:
@@ -188,8 +194,8 @@ git push
 kubectl get helmrelease -n monitoring prometheus-pushgateway -o jsonpath='{.status.history[0].chartVersion}{"\n"}'   # 3.9.0
 kubectl get deploy -n monitoring prometheus-pushgateway -o jsonpath='{.spec.template.metadata.labels.helm\.sh/chart}{"\n"}'  # prometheus-pushgateway-3.9.0
 kubectl rollout status -n monitoring deploy/prometheus-pushgateway --timeout=180s
-POD_IP=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=prometheus-pushgateway -o jsonpath='{.items[0].status.podIP}'); echo "POD_IP=$POD_IP"
-# POD_IP must DIFFER from the pre-check IP (proves the new pod, not the old generation)
+POD_IP=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=prometheus-pushgateway -o jsonpath='{.items[0].status.podIP}'); echo "$POD_IP" > /tmp/pgw-POD_IP; echo "POD_IP=$POD_IP"
+[ "$(cat /tmp/pgw-POD_IP)" != "$(cat /tmp/pgw-OLD_IP)" ] && echo NEW-POD || echo "SAME IP: STOP"   # proves the new pod, not the old generation
 ```
 
 **3.4 Re-push maintenance-window liveness (required).** This is the same
@@ -275,7 +281,7 @@ sys.exit(1 if fails else 0)
 EOF
 RC=$?; kill $PF 2>/dev/null; exit $RC
 SH
-bash /tmp/pgw-gate.sh "$T0" "$POD_IP"; echo "gate rc=$?"      # PASS + rc=0
+bash /tmp/pgw-gate.sh "$(cat /tmp/pgw-T0)" "$(cat /tmp/pgw-POD_IP)"; echo "gate rc=$?"      # PASS + rc=0
 ```
 
 **How each gate can fail.** Measured 2026-09-25 against the live pre-state with
@@ -307,7 +313,7 @@ push-cadence failures, not chart regressions. Anything else goes to §5.
 problem is the pellet CronJob, not this chart (the gate above already proves
 the gateway accepts pushes).
 
-**Tell the operator:** 4× `ICloudBackupPhotosStale*` and
+**Tell the operator:** the firing `ICloudBackupPhotosStale*` series and
 `MaintenanceWindowMissed`/`MaintenanceWindowsRepeatedlyMissed` sent a false
 "resolved" at the restart. They were firing before, nothing is fixed, and they
 re-fire after their `for:` (30m / 1h).

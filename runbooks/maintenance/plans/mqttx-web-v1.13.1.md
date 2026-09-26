@@ -37,7 +37,7 @@ conflicts_with:
   - talos-1.14.1                      # node roll reboots every node: pod would be rescheduled
                                       # mid-verification and Prometheus/KSM go blind.
 exclusive: false
-security_ref: F-2b88c402              # security driver; detail stays on the finding record.
+security_ref: F-2b88c402              # disposition after the bump is decided on the finding record (re-measured 2026-09-26, detail there); closing it is not a step of this plan.
 capability_change: true               # HONEST, not convenient: upstream v1.13.1 lists
                                       # user-visible Web features (collapsible connections pane,
                                       # MQTT 5.0 subscription user properties). Additive only, no
@@ -45,7 +45,7 @@ capability_change: true               # HONEST, not convenient: upstream v1.13.1
 rollback_class: git-revert            # stateless: no server-side data is written or migrated (§1.2)
 finding_refs: [F-2b88c402, F-e0347d36]
                                       # F-2b88c402 (security, new, last seen 2026-09-24) names the
-                                      # running v1.13.0 tag and says a newer upstream tag exists.
+                                      # running v1.13.0 tag and says a newer upstream tag exists; see the record for the 2026-09-26 re-measurement.
                                       # F-e0347d36 (version, "mqttx-web: image emqx/mqttx-web
                                       # v1.13.0 → v1.13.1 (patch)") — producer=script, auto-closes
                                       # once the pin moves.
@@ -98,15 +98,14 @@ generated: "2026-09-25"
 ## 1. Summary & why held
 
 ### 1.1 What changes
-One line in `kubernetes/apps/home-automation/mqttx-web/app/helmrelease.yaml`:
+Two lines in `kubernetes/apps/home-automation/mqttx-web/app/helmrelease.yaml`:
 `tag: v1.13.0` → `tag: v1.13.1`. Chart (app-template 5.1.0), Service, HTTPRoute
 and Homepage annotations are untouched. The image is the MQTTX **web** client:
 a static Vue bundle served by `http-server -p 80` on `node:18-alpine`.
 
 Image config compared for both tags from the Docker Hub registry (amd64, 2026-09-25):
 `Entrypoint [docker-entrypoint.sh]`, `Cmd [http-server -p 80]`, `WorkingDir /app`,
-`ExposedPorts 80/tcp`, `User` unset, `NODE_VERSION=18.20.8` — **identical**. Only
-the `COPY dist ./` layer (the built bundle) differs. So the runtime contract the
+`ExposedPorts 80/tcp`, `User` unset, `NODE_VERSION=18.20.8` — **identical**. The four base layers (alpine + node) are byte-identical; the `npm i -g http-server` layer and the `COPY dist ./` layer (the built bundle) were rebuilt. So the runtime contract the
 chart relies on (port 80, root user inside `drop: ALL`) does not move.
 
 ### 1.2 Why held — and why it does not apply to this image
@@ -141,8 +140,7 @@ Web-relevant items: *"Support MQTT 5.0 user properties for subscriptions"*,
 *"Enhance data export with message-based progress tracking"*,
 *"Add collapsible connections list pane"* (Web), plus fixes in the
 "Desktop,Web" section including security fixes. No breaking change, no config
-change, no removed option. The security driver for taking this bump is on
-`F-2b88c402` and is not restated here.
+change, no removed option. This is a routine patch bump plus the OOM fix in §3.1b; the security disposition lives on `F-2b88c402`, not in this plan.
 
 ### 1.4 Repo correction (not fixed by this plan)
 The pin comment in `helmrelease.yaml` —
@@ -164,7 +162,7 @@ curl -s 'https://hub.docker.com/v2/repositories/emqx/mqttx-web/tags/v1.13.1' \
 # anything else (or None) = STOP, re-review.
 
 # 2.2 flux healthy for this app
-flux get kustomization -n flux-system mqttx-web
+flux get kustomization -n home-automation mqttx-web
 flux get helmrelease -n home-automation mqttx-web      # both Ready=True
 
 # 2.3 baseline for §4 (records the OLD markers; must print FAIL 4.2 on the OLD build —
@@ -184,21 +182,27 @@ F=kubernetes/apps/home-automation/mqttx-web/app/helmrelease.yaml
 
 # 3.1 bump the tag and drop the stale comment (BSD sed; dry-tested on a scratch copy 2026-09-25)
 sed -i '' -E 's|^([[:space:]]*tag:) v1\.13\.0([[:space:]]+#.*)?$|\1 v1.13.1|' "$F"
+# 3.1b the pod is OOMKilled at 128Mi serving its own 38 MB app.js (2026-09-25T01:55Z,
+#      2026-09-26T05:01Z after two back-to-back §4.2 runs) — raise the limit
+sed -i '' -E 's|^([[:space:]]*memory:) 128Mi$|\1 256Mi|' "$F"
 git diff -- "$F"
-# EXPECT exactly one hunk:
+# EXPECT one hunk, exactly two changed lines:
 # -              tag: v1.13.0  # v1.13.3 is a GitHub release only; not published to Docker Hub (latest image tag is v1.13.0)
 # +              tag: v1.13.1
+# -                memory: 128Mi
+# +                memory: 256Mi
 grep -c 'tag: v1.13.1$' "$F"          # EXPECT 1
+grep -c 'memory: 256Mi$' "$F"         # EXPECT 1
 
 # 3.2 commit ONLY this path (shared worktree), verify, push
-git commit --only "$F" -m "chore(mqttx-web): v1.13.0 -> v1.13.1 (plan mqttx-web-v1.13.1)"
+git commit --only "$F" -m "chore(mqttx-web): v1.13.0 -> v1.13.1, memory limit 128Mi -> 256Mi (plan mqttx-web-v1.13.1)"
 git log -1 --format=%s                # must be THIS subject; amend before push if not
 git show --stat HEAD                  # must list only the helmrelease
 git push
 ```
 
 Flux webhook reconciles; no manual `flux reconcile` needed (HR interval 30m —
-if the webhook does not land within 5 min, `flux reconcile kustomization mqttx-web -n flux-system --with-source`
+if the webhook does not land within 5 min, `flux reconcile kustomization mqttx-web -n home-automation --with-source`
 per `docs/sops/application-update.md`).
 
 ## 4. Verification
@@ -208,8 +212,9 @@ per `docs/sops/application-update.md`).
 kubectl -n home-automation get helmrelease mqttx-web -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'   # True
 kubectl -n home-automation get deploy mqttx-web -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'              # emqx/mqttx-web:v1.13.1
 kubectl -n home-automation get pods -l app.kubernetes.io/name=mqttx-web \
-  -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.status.containerStatuses[0].imageID}{"\n"}{end}'
-# PASS: exactly one pod, Running, imageID contains e777a2221a4e (the reviewed v1.13.1 index digest).
+  -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.status.containerStatuses[0].imageID} restarts={.status.containerStatuses[0].restartCount} last={.status.containerStatuses[0].lastState.terminated.reason}{"\n"}{end}'
+kubectl -n home-automation get deploy mqttx-web -o jsonpath='{.spec.template.spec.containers[0].resources.limits.memory}{"\n"}'   # 256Mi
+# PASS: exactly one pod, Running, imageID contains e777a2221a4e, restarts=0, last= empty; limit 256Mi.
 # FAIL shape it guards: rollout-status green on the OLD generation — imageID would still read 64525ad9…
 ```
 
@@ -270,6 +275,9 @@ PASS: Accepted=True, 200, marker count ≥1. Baseline 2026-09-25 (old build): 20
 and a `1.13.0` count of 8 on this path, i.e. the grep measures real content, and
 it returns 0 for `1.13.1` today (would FAIL).
 
+### 4.3b No OOM under the verification load
+Re-run the §4.1 pod line after §4.3. PASS: `restarts=0` and `last=` empty. It can fail: on 2026-09-26 the same line read `restarts=2 last=OOMKilled` against v1.13.0 at 128Mi. If this FAILS at 256Mi: STOP and surface to the operator. Do NOT revert, because a revert restores 128Mi.
+
 ### 4.4 Prometheus controls (after ≥5 min settle)
 ```bash
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19090:9090 >/dev/null 2>&1 & PF=$!; sleep 3
@@ -281,7 +289,7 @@ done
 kill $PF 2>/dev/null
 ```
 CONTROL: metric kube_deployment_status_replicas_available — exactly ONE series with value `1`. An empty result is FAIL, not pass: the negative control (`deployment="mqttx-web-nonexistent"`) returned `0 []` on 2026-09-25; baseline for the real deployment `1 ['1']`.
-CONTROL: metric kube_pod_container_status_restarts_total — exactly one result, value `0` (the new pod has not restarted). Baseline `1 ['0']`.
+CONTROL: metric kube_pod_container_status_restarts_total — exactly one result, value `0` (the new pod has not restarted). Baseline `1 ['0']` (2026-09-25). Non-zero demonstrated: the old pod read restartCount 2 (OOMKilled) on 2026-09-26.
 
 ## 5. Rollback
 
