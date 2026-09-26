@@ -902,6 +902,10 @@ can confirm it exists (all four PRESENT in the live label index 2026-09-22):
       kubectl exec -n ai deploy/openclaw -c app -- sh -c '
         M=/home/node/.openclaw/lib/node_modules/mcporter/dist/cli.js
         node "$M" --version >&2
+        case "$NEXTCLOUD_MCP_URL" in
+          http://nextcloud-mcp.*:8000/mcp) ;;
+          *) echo "4.10 STOP: NEXTCLOUD_MCP_URL=$NEXTCLOUD_MCP_URL is not the streamable-HTTP endpoint .../mcp" >&2; exit 3;;
+        esac
         cfg=$(mktemp /tmp/mcporter-ncmcp.XXXXXX)
         printf "{\"imports\":[],\"mcpServers\":{\"nextcloud\":{\"baseUrl\":\"%s\",\"headers\":{\"Authorization\":\"\${NEXTCLOUD_MCP_AUTH_HEADER}\"}}}}" "$NEXTCLOUD_MCP_URL" > "$cfg"
         node "$M" call --config "$cfg" --output json --timeout 30000 nextcloud.nc_webdav_list_directory path=""
@@ -923,6 +927,15 @@ can confirm it exists (all four PRESENT in the live label index 2026-09-22):
       # record the mcporter version printed on stderr (install_npm mcporter is UNPINNED; npm head is
       # 0.14.x, the plan measured 0.9.0 on 2026-09-22) so a failure is attributable.
       ```
+      **Endpoint corrected 2026-09-26 (post-block):** the 2nd-attempt 4.10 failure
+      was `POST /` -> 404 because `NEXTCLOUD_MCP_URL` in `openclaw-secret` had been
+      the bare service root (`...:8000`, no path) since it was introduced on
+      2026-05-16; the server's streamable-HTTP endpoint is `...:8000/mcp` (`POST /` 404,
+      `POST /mcp` 200, `/mcp/` 307, measured in-pod on 0.184.5). The secret now
+      carries `/mcp` (see the fix commit), and the `case` guard above STOPs the gate
+      with exit 3 on anything else, so a regressed URL can no longer read as a
+      server regression. Plan status is unchanged (still blocked): it still needs a
+      re-review and a fresh operator GO.
       PROVEN 2026-09-26 (reviewer, mcporter 0.9.0 AND 0.14.1 locally, identical `sh -c`
       body): the config parses, the Authorization header is interpolated onto
       the POST to `/mcp`; the checker PASSes on a result carrying the 26 root
