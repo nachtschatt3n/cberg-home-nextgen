@@ -7428,11 +7428,14 @@ log_section "OpenClaw CLI Contracts"
 # chat tool warning or a wrong family-facing result (family-calendar writes
 # into the deleting Google mirror, `--include` vs `--have`, stale synced
 # staging rows hiding a week's groceries, ...). The suite fakes every network
-# call, so running it touches no service. Source: clawd repo
-# scripts/tests/test_cli_contracts.py.
+# call, so running it touches no service. Runs EVERY test_*.py in the clawd
+# repo's scripts/tests/ — test_cli_contracts.py (household CLIs) and
+# test_briefing_numbers.py (the morning briefing must speak the numbers Sure
+# and the pellet monitor hold; 2026-09-26 it said 224,847 for 42,874).
 check_openclaw_cli_contracts() {
     local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
     local suite="/home/node/clawd/scripts/tests/test_cli_contracts.py"
+    local tests_dir="/home/node/clawd/scripts/tests"
     local pod out rc summary
 
     pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
@@ -7448,7 +7451,8 @@ check_openclaw_cli_contracts() {
         return 0
     fi
 
-    out=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- python3 "$suite" 2>&1)
+    out=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c \
+        "cd $tests_dir && python3 -m unittest discover -s . -p 'test_*.py'" 2>&1)
     rc=$?
     summary=$(printf '%s\n' "$out" | grep -E '^(Ran [0-9]+ tests|OK|FAILED)' | tr '\n' ' ')
     if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q '^OK'; then
@@ -7457,7 +7461,7 @@ check_openclaw_cli_contracts() {
     else
         echo "  ❌ ${summary:-suite did not run (exit $rc)}"
         printf '%s\n' "$out" | grep -E '^(FAIL|ERROR):' | sed 's/^/     /'
-        add_major_issue "OpenClaw CLI contract regression: ${summary:-suite exit $rc} — a household CLI fix was lost; run the suite in the openclaw pod for detail"
+        add_major_issue "OpenClaw CLI/briefing contract regression: ${summary:-suite exit $rc} — a household CLI or briefing-number fix was lost; run the suites in the openclaw pod for detail"
     fi
 }
 
