@@ -17,7 +17,7 @@ risk: low                             # stdlib-only scripts; byte-identical outp
                                       # be SILENT — which is what §4 is built around.
 est_duration_min: 65                  # commit+reconcile ~5; then the gates must wait for the
                                       # NEXT scheduled run of each CronJob (nfo :00, image :30),
-                                      # worst case ~60 min. No manual job creation (GitOps only).
+                                      # worst case ~60 min; ~15 min with the optional §3.3 on-demand Jobs.
 needs_reboot: false
 touches:
   namespaces: [download]
@@ -41,7 +41,7 @@ capability_change: false             # same scripts, same inputs, same outputs (
 rollback_class: git-revert            # nothing forward-only: the jobs rewrite derived sidecar
                                       # files every hour from ES/TA, so a revert self-heals them
 finding_refs: [F-043dfda0, F-897440a7]
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> fixed (A: 4.4 ERR/HTTP=0 informational; B: 4.5 succeeded-series counterpart); C-F applied; text-only fixes, no re-review needed
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -217,18 +217,33 @@ git commit --only $A/metadata-sync-cronjob.yaml $A/image-sync-cronjob.yaml \
   -m "chore(tube-archivist): sync jobs python 3.11-slim -> 3.14.7-slim (plan tube-archivist-sync-python-3.14.7)"
 git log -1 --format=%s        # must be the subject above
 git show --stat HEAD          # exactly the two cronjob files
-git push
-T=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo "bump pushed at $T"   # used by §4
+git push      # if rejected (shared main moved): git pull --rebase && git push
 
 # 3.3 Wait for Flux (webhook) — no manual reconcile
 kubectl get cronjob -n download tube-archivist-nfo-sync tube-archivist-image-sync \
   -o custom-columns='NAME:.metadata.name,IMG:.spec.jobTemplate.spec.template.spec.containers[0].image'
 # both show python:3.14.7-slim before continuing
+T=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo "bump live at $T"   # used by §4; taken AFTER both CronJobs show 3.14.7, so no 3.11 run can land after $T
 ```
 
-Then **wait for the next scheduled run of each** (nfo at :00, image at :30).
-Do not `kubectl create job --from=cronjob/...` — that is a direct cluster
-mutation, and the scheduled run is what we actually need to prove.
+Then either **wait for the next scheduled run of each** (nfo at :00, image at
+:30), or — attended runs only, to cut the wait — trigger one run of each from
+the RECONCILED CronJob (precedent: docs/sops/media-library-standards.md,
+docs/sops/secret-rotation.md). Only after the check above shows
+`python:3.14.7-slim` on both (a Job created earlier copies the OLD template),
+and not within 2 min of :00/:30:
+
+    kubectl create job -n download --from=cronjob/tube-archivist-nfo-sync tube-archivist-nfo-sync-manual-$(date +%s)
+    # after it Completes (~10 s):
+    kubectl create job -n download --from=cronjob/tube-archivist-image-sync tube-archivist-image-sync-manual-$(date +%s)
+
+The Job copies the CronJob's live jobTemplate verbatim (image, env, secret,
+PVC, securityContext) and is ownerRef'd to the CronJob (history limits GC it;
+Flux does not prune it; not drift). The `-manual-` names keep the 4.1 pod grep
+and the 4.5 `tube-archivist-(nfo|image)-sync.*` regex matching. It proves the
+same thing as a scheduled run; only the controller's schedule, which this
+change does not touch, is not exercised. If 4.5 lastSuccessfulTime does not
+advance for a manual Job, rely on the 4.5 succeeded-series check.
 
 ## 4. Verification
 
@@ -253,13 +268,13 @@ library-tools pods is `83ff1d24…`, while Docker Hub's index now reads
 **4.2 nfo-sync did real work (CONTENTS).**
 
 ```bash
-kubectl logs -n download "$NFO_POD" | grep -iE 'retrieved|found|processed|error|traceback'
+kubectl logs -n download "$NFO_POD" | grep -iE 'retrieved|found|processed|error|failed|traceback'
 ```
 
 CONTENTS ASSERTION: nfo-sync read ES and wrote episode metadata — measured by
 the job log, compared to the §2.2 baseline. PASS: `Retrieved N` with N ≥ the
 baseline (1642 at authoring) and N > 0, `Processed N videos across M channels`
-with M ≥ 23, and **no** `Error fetching from ES` / `Traceback` line
+with M ≥ 23, and **no** `Error fetching from ES` / `Failed to write` / `Traceback` line
 (case-insensitive grep). FAIL prints `Error fetching from ES: …` +
 `Retrieved 0 videos` while the Job is still Complete (§1.4 negative control,
 code path `get_all_videos` except-branch → `main` early return).
@@ -269,6 +284,7 @@ code path `get_all_videos` except-branch → `main` early return).
 ```bash
 kubectl exec -n download deploy/tube-archivist -- sh -c "find /youtube -name '*.nfo' -newermt '$T' | wc -l"
 kubectl exec -n download deploy/tube-archivist -- sh -c 'find /youtube -name "*.nfo" -exec sha256sum {} + | sort -k2' > $B/post.sha
+wc -l < $B/post.sha          # must be >= wc -l < $B/pre.sha; empty/short = FAIL (exec/mount problem), not a clean diff
 diff $B/pre.sha $B/post.sha | grep -c '^[<>]'
 ```
 
@@ -291,12 +307,16 @@ kubectl logs -n download "$IMG_POD" | grep -icE '^  (ERR|HTTP) '
 kubectl logs -n download "$IMG_POD" | grep -i 'done\.'
 ```
 
-CONTENTS ASSERTION: every channel folder still has its three artwork files and
-the TA cache was reachable — measured by the `Done.` line, compared to the
-baseline 72. PASS: `copied + skipped(existing)` ≥ 72 (3 × number of `UC*`
-dirs; 24 at authoring) and ERR/HTTP line count **0**. FAIL prints `  ERR <url>:`
-lines and a non-zero `source-missing/404` with the Job still Complete (§1.4,
-code path `fetch` except-branch).
+CONTENTS ASSERTION: every channel folder still has its three artwork files —
+measured by the `Done.` line, compared to the baseline 72. PASS: the `Done.`
+line is present, `copied + skipped(existing)` ≥ 72 (3 × number of `UC*`
+dirs; 24 at authoring) and `source-missing/404=0`. FAIL: no `Done.` line
+(`YOUTUBE_ROOT /youtube not mounted` + rc=1, or a Traceback), or a sum < 72.
+NOT verified in-window: the TA-cache fetch path (`urlopen`). `fetch()` runs
+only for a MISSING artwork file (`os.path.exists(dst)` short-circuits first)
+and all 72 exist, so the ERR/HTTP count is 0 by construction on every run —
+it is informational, not a gate. The `urlopen` path under 3.14 rests on the
+§1.3 local differential (404/500 channels exercised there).
 
 **4.5 Prometheus controls (floor, not the gate).**
 
@@ -304,11 +324,12 @@ code path `fetch` except-branch).
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19090:9090 >/dev/null 2>&1 & PF=$!; sleep 3
 curl -s --data-urlencode 'query=kube_cronjob_status_last_successful_time{namespace="download",cronjob=~"tube-archivist-(nfo|image)-sync"}' http://localhost:19090/api/v1/query
 curl -s --data-urlencode 'query=kube_job_status_failed{namespace="download",job_name=~"tube-archivist-(nfo|image)-sync.*"} > 0' http://localhost:19090/api/v1/query
+curl -s --data-urlencode 'query=kube_job_status_succeeded{namespace="download",job_name=~"tube-archivist-(nfo|image)-sync.*"} == 1' http://localhost:19090/api/v1/query
 kill $PF 2>/dev/null
 ```
 
 CONTROL: metric kube_cronjob_status_last_successful_time — both series present (2 results; measured live 2026-09-25) and each value > epoch of `$T`. An absent series is a FAIL, not a pass.
-CONTROL: metric kube_job_status_failed — the `> 0` query returns an empty result for jobs created after `$T`. Only meaningful together with a non-empty `kube_job_status_succeeded` for the same jobs (4 series measured live), because an empty result is also what a missing series looks like.
+CONTROL: metric kube_job_status_failed — the `> 0` query returns an empty result for jobs created after `$T`, AND the `kube_job_status_succeeded == 1` query returns a series for EACH post-`$T` job (job name = the 4.1 pod's `job-name` label). The succeeded query is the half that can fail: if it lacks the post-`$T` job names, the empty failed-result is a missing series, not a pass — FAIL.
 
 These catch the loud failure (interpreter/image won't start, `ImagePullBackOff`,
 crash). The silent failure is caught only by 4.2–4.4.
