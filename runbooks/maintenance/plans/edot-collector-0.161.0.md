@@ -201,7 +201,7 @@ finding_refs: [F-cb9182ca]        # CORRECTED 2026-09-20. The pre-review file le
                                   #     nothing in this plan remediates it. It
                                   #     SHOULD keep reading as unplanned until it
                                   #     gets its own plan or DECIDE routing.
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> 15 edits applied (log floor 10k, kmsg gate via ES per-node count, state in fixed files, silence delete URL fixed); order: after elasticsearch-obs-recovery §4 + 10 min
 window: null                      # the scheduler assigns. Shape: no reboot, no
                                   # capability change, git-revert, 70m. Derived
                                   # execution class is AUTO-NIGHT (read from
@@ -345,6 +345,11 @@ Neither the core nor the contrib 0.161.0 changelog touches that surface, and
 
 ### 1.4 Why `risk: medium` despite a clean changelog
 
+**UPDATE 2026-09-26 (review):** F-7c88001b is RESOLVED (aff58ede, 2026-09-20):
+`Es{Metrics,Log,Traces}ExporterSeriesMissing` (absent(), for 15m) now page on the
+disappearance mode. They are deliberately NOT in §3.1's silence; §4.6 must show
+them not firing. §4 remains the primary detection.
+
 Blast radius and failure *mode*, not likelihood. This single-replica Deployment is
 the only OTLP path into Elasticsearch for every namespace's logs, metrics and
 traces, plus the Talos kmsg sink on `192.168.55.18`. Its characteristic failure is
@@ -374,6 +379,13 @@ validates the live config against the **new binary** before anything rolls, and
 §4.2 asserts on ES's per-document outcome afterwards.
 
 ### 1.6 F-dc898b50 — this plan deliberately does NOT carry the filter
+
+**UPDATE 2026-09-26 (review): F-dc898b50 is RESOLVED (2026-09-22) by f470b8c8**, which
+added `filter/drop-envoy-cluster-metrics` in its own commit; the live pod (started
+2026-09-22T22:52Z) already runs it, and §2.3 validates it against 0.161.0. The
+metric-point rate fell from ~3.2M to ~2.0M per 15m (24h range 1,969,997 - 1,999,117
+on 2026-09-26); §2.4 re-baselines live, so §4.1's band is unaffected. The text
+below is historical.
 
 `F-dc898b50` is open and unremediated: Elasticsearch storage is growing
 **+1.47 GiB/day** because a high-cardinality Envoy histogram family (labelled by
@@ -455,6 +467,12 @@ kubectl run edot-validate-0161 --rm -i --restart=Never \
   --image=otel/opentelemetry-collector-contrib:0.161.0 \
   --overrides='{"spec":{"containers":[{"name":"edot-validate-0161","image":"otel/opentelemetry-collector-contrib:0.161.0","command":["/otelcol-contrib","validate","--config=/config/otel.yml"],"env":[{"name":"ES_PASSWORD","value":"dummy-validate-only"}],"volumeMounts":[{"name":"cfg","mountPath":"/config"}]}],"volumes":[{"name":"cfg","configMap":{"name":"edot-collector-config"}}]}}'
 echo "validate exit=$?"
+# NEGATIVE CONTROL (same Bash call): a missing config MUST print a non-zero exit,
+# proving the exit code above is the collector's and not kubectl's.
+kubectl run edot-validate-0161-neg --rm -i --restart=Never \
+  --image=otel/opentelemetry-collector-contrib:0.161.0 \
+  --overrides='{"spec":{"containers":[{"name":"edot-validate-0161-neg","image":"otel/opentelemetry-collector-contrib:0.161.0","command":["/otelcol-contrib","validate","--config=/nonexistent/otel.yml"]}]}}'
+echo "negative-control exit=$?   # MUST be non-zero; if 0, the gate above cannot fail"
 # PASS: exit 0 AND no output containing (case-insensitively) "error" / "invalid
 # configuration" / "cannot unmarshal". Read the OUTPUT, not only the code.
 # FAILS AS: a line naming the rejected key, e.g. an unknown `without_type_suffix`
@@ -505,7 +523,8 @@ curl -s -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/jso
   "matchers":[{"name":"namespace","value":"monitoring","isRegex":false,"isEqual":true},
               {"name":"alertname","value":"EdotCollectorDown|OtelDaemonCollectorDown|OtelCollectorExportFailed|OtelCollectorRecordsRefused|OtelCollectorQueueFull|EdotCollectorESAuthError|EsMetricsIngestionStalled|EsLogIngestionStalled|EsExportQueueStuckFull","isRegex":true,"isEqual":true}],
   "startsAt":"'"$NOW"'","endsAt":"'"$END"'","createdBy":"maintenance-window-agent",
-  "comment":"edot-collector 0.160.0->0.161.0 — expected rollout noise. auto-expires 4h"}'
+  "comment":"edot-collector 0.160.0->0.161.0 — expected rollout noise. auto-expires 4h"}' \
+  | tee /private/tmp/claude-501/edot-0161-silence.json; echo   # prints {"silenceID":"..."}; empty = NOT silenced
 kill $PF 2>/dev/null
 runbooks/update-marker.sh add edot-collector monitoring 4 "0.160.0->0.161.0 bump"
 ```
@@ -553,8 +572,10 @@ functional).
 
 ```bash
 git fetch origin main && git merge --ff-only origin/main
-git commit --only kubernetes/apps/monitoring/edot-collector/app/deployment.yaml \
-  -m "chore(monitoring): edot-collector 0.160.0 -> 0.161.0 (plan edot-collector-0.161.0)"
+MSG=/private/tmp/claude-501/msg-edot-collector-0.161.0-$(date +%s).txt
+printf '%s\n' "chore(monitoring): edot-collector 0.160.0 -> 0.161.0 (plan edot-collector-0.161.0)" > "$MSG"
+git commit --only kubernetes/apps/monitoring/edot-collector/app/deployment.yaml -F "$MSG"
+git show --stat HEAD   # exactly one file: deployment.yaml
 git log -1 --format=%s     # MUST be your subject; amend before pushing if not
 git push origin main
 ```
@@ -590,7 +611,8 @@ kubectl rollout status deployment/edot-collector -n monitoring --timeout=180s
 kubectl get pods -n monitoring -l app=edot-collector -o wide
 # record the new pod's start time — §4.3 needs it as the range floor
 kubectl get pods -n monitoring -l app=edot-collector \
-  -o jsonpath='{.items[0].status.startTime}'; echo
+  -o jsonpath='{.items[0].status.startTime}' > /private/tmp/claude-501/edot-0161-rollout-ts
+cat /private/tmp/claude-501/edot-0161-rollout-ts; echo   # MUST be non-empty and AFTER the push time
 ```
 
 **HARD GATE before proceeding:** the printed image must read `:0.161.0` AND
@@ -599,7 +621,9 @@ kubectl get pods -n monitoring -l app=edot-collector \
 and nothing rolled. If the image still reads `:0.160.0`, the reconcile did not
 apply — do NOT continue into §4, whose gates would all pass on the old binary.
 
-**5. Wait 45 minutes** before §4. This is the measurement, not padding: §4.4's
+**5. Wait 15 minutes** before §4 (2026-09-26 review: §4.4 is now an ES read over
+[ROLLOUT_TS, now]; the 45-minute sizing below belonged to the retired counter gate
+and is historical). Original text: This is the measurement, not padding: §4.4's
 per-node kmsg gate must read a window lying ENTIRELY after the roll, and [45m] is
 the shortest window with a measured non-zero floor on every node (frontmatter
 `est_duration_min`). §4.1–4.3 could be read at T+15m, but §4.4 is the gate that
@@ -620,7 +644,8 @@ case "$LIVE_ID" in
   *"$TARGET_DIGEST") echo "DIGEST_OK" ;;
   *) echo "DIGEST_MISMATCH" ;;
 esac
-kubectl logs -n monitoring deploy/edot-collector --tail=40 | grep -iE "error|invalid configuration|panic" || echo "no startup errors"
+kubectl logs -n monitoring deploy/edot-collector | head -80 | grep -iE "error|invalid configuration|panic" || echo "no startup errors"
+# can-fail shown 2026-09-26: the same grep on the 0.160.0 pod's tail matched 5 lines.
 ```
 
 **PASS:** `readyReplicas` is 1, the digest check prints `DIGEST_OK`, and the grep
@@ -649,13 +674,16 @@ kubectl get --raw "${P}?query=sum(increase(otelcol_exporter_sent_metric_points_t
 ```
 
 **PASS:**
-- **log records — a FLOOR, not a band: `>= 20000`.** The pre-review ±40%
+- **log records — a FLOOR, not a band: `>= 10000`.** The pre-review ±40%
   two-sided band false-fails on a healthy cluster. Measured 2026-09-20, the
   24h range of `sum(increase(...[15m]))` is **35,927 – 57,673** — a 1.6x natural
   spread, so a baseline taken near the low end and a post-roll read near the high
   end is +60% and trips the band with nothing wrong. Under AUTO-NIGHT that
   auto-reverts a good bump. The plan's own stated intent ("a trickle is a
-  failure") is a floor, and 20,000 sits ~44% below the measured 24h minimum:
+  failure") is a floor. RE-MEASURED 2026-09-26 (review): the 7d minimum of
+  `sum(increase(...[15m]))` is **20,530** (24h range 21,673 - 89,933), so the
+  earlier 20,000 floor had ~3% headroom and would false-fail a healthy roll in a
+  quiet quarter-hour. The floor is **10,000**, about half the 7d minimum:
   reachable only by a real collapse, never by diurnal variation.
 - **metric points — a band IS legitimate here: within ±20% of the §2.4
   baseline.** Measured 2026-09-20, the same 24h range is **3,217,392 –
@@ -696,6 +724,11 @@ kubectl get --raw "${P}?query=sum%20by%20(outcome)%20(increase(%7B__name__%3D%22
 
 **PASS:** (a) returns an `outcome="success"` element with a non-zero value, AND
 (b) returns an empty result (or zeros).
+(b) CAN fail - demonstrated 2026-09-26: `max_over_time` of query (b) over 30d returns
+`outcome="timeout"` 46,357 (ES-side burst 2026-09-24 ~20:28Z, open finding F-c5333426;
+zero in every other hour of 7d). Attribution: `failed_client` is the binary/config
+signal (revert); a non-zero `timeout`/`internal_server_error` is ES-side - check
+`_cluster/health` and elasticsearch-obs-recovery's last Job before reverting.
 **FAILS AS:** (b) returning `failed_client` — that is precisely the
 `managedFields`-class signature from §1.5, i.e. the transform stopped matching
 under the new binary while the pod looked perfectly healthy. Per
@@ -715,7 +748,8 @@ inside is rejected, so "sent" is not "stored".
 ES_PW=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
 kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 >/dev/null 2>&1 & PF=$!
 sleep 4
-ROLLOUT_TS="<the startTime captured in §3.4>"
+ROLLOUT_TS=$(cat /private/tmp/claude-501/edot-0161-rollout-ts)   # written in §3.4
+test -n "$ROLLOUT_TS" || echo "NO_ROLLOUT_TS -> FAIL"
 for DS in logs-generic-default metrics-generic.otel-default; do
   echo -n "$DS "
   curl -k -s -u "elastic:$ES_PW" -H 'Content-Type: application/json' \
@@ -739,14 +773,42 @@ Baseline for scale (2026-09-17, 15m): logs ~38,100, metrics ~1,070,600.
 CONTENTS ASSERTION: *every node is still shipping kernel logs* — measured
 per-node, because this path has failed silently before.
 
-**Read this at T+45m, over `[45m]`, so the window lies ENTIRELY after the roll.**
+**SUPERSEDED 2026-09-26 (review): the Prometheus-counter gate is RETIRED.** Re-measured
+live: since 2026-09-23 ~00:00Z (Talos discovery-registry noise removed, 40d7dc78)
+per-node kmsg volume fell ~15x. `sum by (net_peer_ip)(increase(talos_kernel_kmsg_lines_total[45m]))`
+read **0 / 0 / 27** (.11/.12/.13) on the untouched, healthy 0.160.0 pod at 05:17Z; its
+zero-fraction over the last 2d is **62% / 85% / 56%**, and `.12` had no current series
+at all. The counter also undercounts ES by about two orders of magnitude (ES holds
+~7,500 talos-kernel docs per 12h from .11). Read at T+45m it would fail a good roll
+most of the time. The table and prose further down describe the retired gate and are
+historical. The gate is now an ES read over the post-roll window, at T+15m:
 
 ```bash
-P=/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query
-kubectl get --raw "${P}?query=sum%20by%20(net_peer_ip)%20(increase(talos_kernel_kmsg_lines_total%5B45m%5D))"
+ES_PW=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
+ROLLOUT_TS=$(cat /private/tmp/claude-501/edot-0161-rollout-ts)
+test -n "$ROLLOUT_TS" || echo "NO_ROLLOUT_TS -> FAIL"
+kubectl port-forward -n monitoring svc/elasticsearch-es-http 19211:9200 >/dev/null 2>&1 & PF=$!
+sleep 4
+curl -k -s -u "elastic:$ES_PW" -H 'Content-Type: application/json' \
+  "https://localhost:19211/logs-generic-default/_search" \
+  -d '{"size":0,"query":{"bool":{"filter":[{"term":{"attributes.log_source":"talos-kernel"}},{"range":{"@timestamp":{"gte":"'"$ROLLOUT_TS"'"}}}]}},"aggs":{"ip":{"terms":{"field":"attributes.net.peer.ip","size":5}}}}' \
+  | python3 -c "import sys,json;d=json.load(sys.stdin);b={x['key']:x['doc_count'] for x in d['aggregations']['ip']['buckets']};print(b);print('KMSG_OK' if b.get('192.168.55.11',0)>=20 else 'KMSG_FAIL')"
+kill $PF 2>/dev/null
 ```
 
-**PASS:** three elements, one per node (`192.168.55.11/.12/.13`), each `>= 1`.
+**PASS (revert authority):** `KMSG_OK` - node `.11` (steady ~9-10 lines/min; 7,500-8,000
+per 12h, 2026-09-23..26) has >= 20 talos-kernel docs in ES after the roll, proving
+LB 192.168.55.18 -> udplog receiver -> ES works on the new binary.
+Both sides DEMONSTRATED 2026-09-26 with this exact command: gte 05:00Z printed
+`{'192.168.55.11': 235, '192.168.55.13': 154, '192.168.55.12': 31}` / `KMSG_OK`; gte a
+future timestamp printed `{}` / `KMSG_FAIL`. A KeyError on `aggregations` is a FAIL.
+**.12 / .13 - INFORMATIONAL, no revert authority:** they are genuinely quiet (0-700
+docs per 12h since 09-23; .12 had 1 doc in one 12h bucket), so no in-window read can
+prove their sender resumed. Record their counts. Follow-up owed by the next sweep:
+talos-kernel docs per node in ES over the 24h after ROLLOUT_TS must be >= 1 each,
+else file a finding (UDP-sender wedge, docs/troubleshooting/node-reboot-observability.md).
+
+**RETIRED PASS (historical):** three elements, one per node (`192.168.55.11/.12/.13`), each `>= 1`.
 **FAILS AS:** two elements instead of three, or any element at 0 — a node's UDP
 sender did not resume after the pod restart. Not hypothetical: nuc14-03 stopped
 shipping kmsg on 2026-08-04 and nobody noticed for **4 days**, which is why the
@@ -907,10 +969,24 @@ plan that loses data.
 
 ```bash
 runbooks/update-marker.sh clear edot-collector
-# delete the §3.1 silence by id: curl -s -X DELETE localhost:9093/api/v2/silences/<id>
+# delete the §3.1 silence (id persisted in §3.1), one Bash call:
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF=$!
+sleep 3
+SID=$(python3 -c "import json;print(json.load(open('/private/tmp/claude-501/edot-0161-silence.json'))['silenceID'])")
+curl -s -o /dev/null -w 'delete silence %{http_code}\n' -X DELETE "localhost:9093/api/v2/silence/$SID"
+kill $PF 2>/dev/null
 ```
 
 ## 6) Interference notes
+
+- **2026-09-26 NOW run ordering (review).** kube-prometheus-stack-91.4.1 EXECUTED
+  (598bbce7; Prometheus restarted ~04:57Z; TSDB retained) - spent. Run
+  `elasticsearch-obs-recovery-3.14.7` FIRST and start this plan only after its §4
+  (two post-push */10 runs + §4.5) is recorded: its job acts on ES/ingestion state and
+  its §4.5 reads the ES stall ALERTS this roll can perturb (it declares this plan in
+  conflicts_with). Settle >= 10 min after it closes (one clean */10 run). No mechanism
+  links this plan to prometheus-pushgateway-3.9.0 (monitoring), paperclip (ai) or
+  crash-ghost-reaper (kube-system); parallel is acceptable.
 
 - **`conflicts_with` is FOUR entries and every one names a mechanism** — see the
   frontmatter. The ones the window agent must not relax: `prometheus-crd-ownership`

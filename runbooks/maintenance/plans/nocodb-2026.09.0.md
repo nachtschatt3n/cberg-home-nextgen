@@ -91,7 +91,12 @@ conflicts_with: [float-tag-pinning, kube-prometheus-stack-91.4.1,
                                       # set), so declaring on this side is sufficient for the
                                       # scheduler — but see the report's
                                       # needs_orchestrator_action for the reciprocal edits.
-security_ref: null                    # CORRECTED 2026-09-20 from `F-ca5c5597`. The plans
+security_ref: F-17c8bf18              # CORRECTED 2026-09-26 (plan-reviewer): an OPEN security
+                                      # finding (section security, first_seen 2026-09-11) on the
+                                      # running 2026.08.2 image names a newer upstream tag as its
+                                      # remedy — this bump. Detail stays in sweep_findings only.
+                                      # Earlier note, still true of F-ca5c5597 itself:
+                                      # CORRECTED 2026-09-20 from `F-ca5c5597`. The plans
                                       # README defines security_ref as "F-xxxxxxxx if this
                                       # plan has a security driver". Pulled the record: this
                                       # finding is section `version`, severity `monitor`,
@@ -117,8 +122,8 @@ backup_gate: "pg_dump of the nocodb metadata database (DB name resolved from the
   to the live BASE TABLE count, presence of the five named nocodb metadata tables, and the
   pg_dump completion marker. A pre-upgrade row-count baseline is written to
   ~/backups/nocodb/pre-counts.txt for the §4 contents comparison."
-finding_refs: [F-ca5c5597]
-status: draft
+finding_refs: [F-ca5c5597, F-17c8bf18]
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> 15 edits applied (namespace-scoped alert gate, no sleeps, Flux-suspend rollback, security_ref F-17c8bf18); order: before nextcloud-34.0.4 + 15 min soak
 window: "sat-attended:2026-10-17"     # PROPOSED 2026-09-21, NOT approved. HUMAN-GATED: still
                                       # needs an operator GO before it runs. §6's own capacity
                                       # table reaches this same slot — the Saturday budget is
@@ -250,14 +255,20 @@ vendor-documented downgrade. It is not `high` because this release's own notes
 show no destructive schema change and the blast radius, if the upgrade
 misbehaves, is contained to nocodb's own database and its own pod.
 
-**No security driver.** `finding_refs: [F-ca5c5597]` is a version-currency
-finding (section `version`, severity `monitor`). `security_ref` is `null` —
-see the frontmatter note; the earlier draft set it to the same id, which
-mis-declared this as a security-driven plan.
+**Security driver: `security_ref: F-17c8bf18`** (CORRECTED 2026-09-26). F-ca5c5597
+is the version-currency finding (section `version`, severity `monitor`) and is
+not itself a security driver — but a separate, open security finding on the
+running 2026.08.2 image names a newer upstream tag as its remedy, so this bump
+has one. Detail lives in sweep_findings only, never in this file. After §4
+passes, re-check that finding against 2026.09.0 before closing it.
 
 ## 2) Pre-checks
 
 ```bash
+# RUN §2 (a)-(i) AS ONE Bash CALL with timeout 600000 ms: the pg_dump plus three
+# gunzip passes take ~1.5 min (over the 120 s default), and a timeout mid-(f) leaves
+# no BACKUP GATE PASSED line. (g) re-resolves its own inputs, so a split after (f)
+# still works — but never split INSIDE (f).
 cd /Users/mu/code/cberg-home-nextgen
 
 # a) nocodb + shared PG healthy, HR Ready on app-template 5.1.0, live tag matches `current:`
@@ -343,7 +354,7 @@ PY
 #    shape (docs/sops/verification-contents-not-shape.md).
 set -o pipefail            # REQUIRED — without it pg_dump's exit status is discarded
 
-NCDB_NAME=$(sops -d kubernetes/apps/databases/nocodb/app/secret.sops.yaml \
+NCDB_NAME=$(sops -d /Users/mu/code/cberg-home-nextgen/kubernetes/apps/databases/nocodb/app/secret.sops.yaml \
   | python3 -c "import sys,yaml,urllib.parse as u; s=yaml.safe_load(sys.stdin)['stringData']['NC_DB']; print(u.parse_qs(u.urlsplit(s).query)['d'][0])")
 [ -n "$NCDB_NAME" ] || { echo 'FAIL: DB name did not resolve from the secret'; exit 1; }
 echo "resolved DB name: $NCDB_NAME"        # measured 2026-09-20: nocodb
@@ -398,7 +409,11 @@ echo "BACKUP GATE PASSED: $OUT  ($SZ B, $DUMP_COPIES tables)"
 
 # g) pre-upgrade data fingerprint, WRITTEN TO A FILE (not "noted"). §4 reads this
 #    back, so the comparison survives the window boundary and is diffable.
-#    NOTE: this block continues the shell from (f) — $NCDB_NAME is still set here.
+#    Self-contained (CORRECTED 2026-09-26): re-resolves $NCDB_NAME instead of relying
+#    on (f)'s shell, because agent Bash calls share no variables.
+NCDB_NAME=$(sops -d /Users/mu/code/cberg-home-nextgen/kubernetes/apps/databases/nocodb/app/secret.sops.yaml \
+  | python3 -c "import sys,yaml,urllib.parse as u; s=yaml.safe_load(sys.stdin)['stringData']['NC_DB']; print(u.parse_qs(u.urlsplit(s).query)['d'][0])")
+[ -n "$NCDB_NAME" ] || { echo 'FAIL: DB name did not resolve'; exit 1; }
 ncq() { kubectl exec -n databases deploy/postgresql -- env NCDB="$NCDB_NAME" sh -c \
   'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$NCDB" -tAc "$0"' "$1"; }
 
@@ -425,7 +440,13 @@ grep -qE '^tables=[0-9]+$' ~/backups/nocodb/pre-counts.txt \
 
 # h) no in-flight flux reconcile on databases apps
 flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
-  # expect: header row only (verified clean 2026-09-20)
+  # expect: header row only (verified clean 2026-09-20). ADVISORY today: parallel
+  # plans in other namespaces may be mid-reconcile; only a databases/* row matters.
+
+# i) PRE-CHANGE alert baseline for the §4.5 gate: run the §4.5 block NOW, before
+#    the tag edit. It must print `ALERT GATE PASSED (scope=databases)`. If it FAILs,
+#    a databases/nocodb alert predates this change — STOP and investigate before a
+#    one-way migration, rather than discovering it after.
 ```
 
 ## 3) Steps
@@ -492,31 +513,59 @@ flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
 
 ## 4) Verification
 
-Every gate below states what makes it FAIL. Run the whole block; do not accept a
-gate that printed nothing.
+Every gate below states what makes it FAIL. Each numbered sub-block (4.1-4.5) is
+SELF-CONTAINED — absolute paths, no variables or port-forwards carried between
+them — so run each as its own Bash call. Do not accept a gate that printed nothing.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 set -o pipefail
 
 # --- 4.1 HR Ready, pod on the NEW image, stable ------------------------------
-kubectl get hr -n databases nocodb -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'
-sleep 300   # settle before reading restartCount — a crash-loop needs time to show
-kubectl get pods -n databases -l app.kubernetes.io/name=nocodb \
-  -o jsonpath='{.items[0].spec.containers[0].image} {.items[0].status.containerStatuses[0].restartCount}{"\n"}'
-# PASS: `nocodb/nocodb:2026.09.0 0`.
-# FAILS ON: the image field still reading 2026.08.2 (rollout raced / HR did not
-# upgrade), or a non-zero restart count (crash-loop). Both are read from the LIVE
-# pod, not from `rollout status`, which green-lights the old generation.
+# REWRITTEN 2026-09-26: the old `sleep 300` is blocked as a foreground sleep in the
+# agent harness and exceeds the 120 s Bash default timeout. This reads the container's
+# running-for age instead and refuses until it is >= 300 s — re-run it, never sleep.
+set -o pipefail
+HR_READY=$(kubectl get hr -n databases nocodb -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+echo "HR Ready=[$HR_READY]"
+[ "$HR_READY" = "True" ] || { echo 'FAIL: HelmRelease nocodb not Ready'; exit 1; }
+kubectl get pods -n databases -l app.kubernetes.io/name=nocodb -o json > /tmp/nocodb-pod.json \
+  || { echo 'FAIL: could not read nocodb pod'; exit 1; }
+python3 - /tmp/nocodb-pod.json <<'PY' || { echo 'FAIL: §4.1 pod gate (read the line above)'; exit 1; }
+import json, sys
+from datetime import datetime, timezone
+items = json.load(open(sys.argv[1]))['items']
+if len(items) != 1:
+    print(f'expected exactly 1 nocodb pod, got {len(items)}'); sys.exit(1)
+p = items[0]; img = p['spec']['containers'][0]['image']; cs = p['status']['containerStatuses'][0]
+st = (cs.get('state') or {}).get('running', {}).get('startedAt')
+if not st:
+    print(f'container not running: {cs.get("state")}'); sys.exit(1)
+age = (datetime.now(timezone.utc) - datetime.fromisoformat(st.replace('Z', '+00:00'))).total_seconds()
+print(f'image={img} restartCount={cs["restartCount"]} running_for={age:.0f}s')
+if img != 'nocodb/nocodb:2026.09.0':
+    print(f'wrong image {img} (rollout raced / HR did not upgrade)'); sys.exit(1)
+if cs['restartCount'] != 0:
+    print('restartCount != 0 (crash-loop)'); sys.exit(1)
+if age < 300:
+    print(f'NOT YET SETTLED: re-run this block in {int(300 - age) + 5}s'); sys.exit(1)
+print('4.1 PASSED')
+PY
+# PASS: `4.1 PASSED`. FAILS ON: HR not Ready, image still 2026.08.2, restartCount > 0,
+# container not running, or < 300 s since start (re-run). DRY-TESTED 2026-09-26 against
+# the live 2026.08.2 pod: printed `wrong image nocodb/nocodb:2026.08.2`, rc=1.
 
 # --- 4.2 VERSION CONTENTS GATE (new) -----------------------------------------
 # nocodb serves its own version at /api/v1/version. Measured on the 2026.08.2 pod
 # 2026-09-20: {"currentVersion":"2026.08.2","releaseVersion":"2026.09.0"}.
 # This asserts the RUNNING CODE's self-reported version, which a status code cannot.
-kubectl port-forward -n databases svc/nocodb 18080:8080 >/dev/null 2>&1 & PF=$!
+set -o pipefail
+# Port 19392, not 18080: other plans run in parallel sessions on this Mac today, and a
+# port another forward already holds makes this one fail silently (>/dev/null).
+kubectl port-forward -n databases svc/nocodb 19392:8080 >/dev/null 2>&1 & PF=$!
 trap 'kill $PF 2>/dev/null' EXIT       # cleanup — the previous draft leaked its port-forward
-sleep 5
-VER=$(curl -s --max-time 10 http://localhost:18080/api/v1/version \
+curl -s -o /dev/null --retry 15 --retry-connrefused --retry-delay 1 --max-time 30 http://localhost:19392/api/v1/health
+VER=$(curl -s --max-time 10 http://localhost:19392/api/v1/version \
       | python3 -c "import sys,json; print(json.load(sys.stdin).get('currentVersion',''))" 2>/dev/null)
 echo "currentVersion=[$VER]"
 [ "$VER" = "2026.09.0" ] || { echo "FAIL: app reports [$VER], expected 2026.09.0"; kill $PF; exit 1; }
@@ -525,7 +574,7 @@ echo "currentVersion=[$VER]"
 # It CANNOT pass on a dead app: an empty VER never equals 2026.09.0.
 
 # health endpoint, with a BODY assertion rather than a status code
-curl -s --max-time 10 http://localhost:18080/api/v1/health \
+curl -s --max-time 10 http://localhost:19392/api/v1/health \
   | grep -q '"message":"OK"' || { echo 'FAIL: /api/v1/health did not return message OK'; kill $PF; exit 1; }
 kill $PF 2>/dev/null; trap - EXIT
 # NOTE: the previous draft used `curl -sk https://nocodb.${SECRET_DOMAIN}/`.
@@ -597,7 +646,7 @@ grep -q 'App started successfully' /tmp/nocodb-boot.log \
 # interpolated an unset $NCDB_NAME, which degraded to `psql -U postgres -d -tAc ...`
 # ( -d swallowed -tAc ) and errored with `database "-tAc" does not exist`, exit 2.
 # The contents assertion therefore never ran at all.
-NCDB_NAME=$(sops -d kubernetes/apps/databases/nocodb/app/secret.sops.yaml \
+NCDB_NAME=$(sops -d /Users/mu/code/cberg-home-nextgen/kubernetes/apps/databases/nocodb/app/secret.sops.yaml \
   | python3 -c "import sys,yaml,urllib.parse as u; s=yaml.safe_load(sys.stdin)['stringData']['NC_DB']; print(u.parse_qs(u.urlsplit(s).query)['d'][0])")
 [ -n "$NCDB_NAME" ] || { echo 'FAIL: DB name did not resolve'; exit 1; }
 ncq() { kubectl exec -n databases deploy/postgresql -- env NCDB="$NCDB_NAME" sh -c \
@@ -634,19 +683,43 @@ echo "CONTENTS GATE PASSED"
 # --- 4.5 no new firing alerts ------------------------------------------------
 # Reads kube-prometheus-stack's Prometheus — which is why this plan declares
 # shared:[monitoring] and conflicts_with kube-prometheus-stack-91.4.1.
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 >/dev/null 2>&1 & PF=$!
+# REWRITTEN 2026-09-26. The old PASS was "0 non-Watchdog alerts firing cluster-wide".
+# Measured 2026-09-26 pre-change: 5 firing (4 names, all in other namespaces:
+# maintenance-window liveness + iCloud backup staleness), so that gate FAILED on a
+# healthy nocodb — and other plans run in parallel today. The gate now BLOCKS only on
+# alerts scoped to this change (namespace databases, or any label mentioning nocodb)
+# and prints the rest as advisory. Unique port (19391) for the same parallel reason.
+set -o pipefail
+SCOPE_NS="${SCOPE_NS:-databases}"
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19391:9090 >/dev/null 2>&1 & PF=$!
 trap 'kill $PF 2>/dev/null' EXIT
-sleep 5
-RAW=$(curl -s --max-time 10 http://localhost:9090/api/v1/alerts)
-printf '%s' "$RAW" | python3 -c "import sys,json; assert json.load(sys.stdin)['status']=='success'" \
-  || { echo 'FAIL: Prometheus API did not return status=success — the instrument is down, this gate did NOT measure'; kill $PF; exit 1; }
-FIRING=$(printf '%s' "$RAW" | python3 -c "import sys,json; a=json.load(sys.stdin)['data']['alerts']; xs=[x['labels']['alertname'] for x in a if x['state']=='firing' and x['labels']['alertname'] not in ('Watchdog','InfoInhibitor')]; print(len(xs)); [print(' firing:',n) for n in sorted(set(xs))]")
-echo "$FIRING"
+curl -s -o /dev/null --retry 15 --retry-connrefused --retry-delay 1 --max-time 30 http://localhost:19391/-/ready
+curl -s --max-time 10 http://localhost:19391/api/v1/alerts > /tmp/nocodb-alerts.json
 kill $PF 2>/dev/null; trap - EXIT
-# Measured 2026-09-20 pre-change: status=success, 0 non-Watchdog alerts FIRING.
-# PASS: first line is 0. FAILS ON: a firing alert, OR Prometheus itself being
-# unreachable/mid-restart — the old form (`curl | grep -o '"alertname"'`) printed
-# nothing in BOTH cases, so a down Prometheus read exactly like a clean cluster.
+SCOPE_NS="$SCOPE_NS" python3 - /tmp/nocodb-alerts.json <<'PY' || { echo 'FAIL: §4.5 alert gate'; exit 1; }
+import json, os, sys
+d = json.load(open(sys.argv[1]))
+assert d.get('status') == 'success', 'Prometheus API not status=success — instrument down, gate did NOT measure'
+ns = os.environ['SCOPE_NS']
+fire = [a for a in d['data']['alerts'] if a['state'] == 'firing'
+        and a['labels'].get('alertname') not in ('Watchdog', 'InfoInhibitor')]
+def mine(a):
+    l = a['labels']
+    return l.get('namespace') == ns or any('nocodb' in str(v) for v in l.values())
+scoped = sorted({a['labels']['alertname'] for a in fire if mine(a)})
+other = sorted({a['labels']['alertname'] for a in fire if not mine(a)})
+print(f"total firing (excl Watchdog/InfoInhibitor): {len(fire)}")
+print(f"advisory (other namespaces, non-gating): {other}")
+print(f"SCOPED ({ns} / nocodb) firing: {len(scoped)} {scoped}")
+sys.exit(1 if scoped else 0)
+PY
+echo "ALERT GATE PASSED (scope=$SCOPE_NS)"
+# FAILS ON: any firing alert in namespace databases or labelled nocodb; Prometheus
+# unreachable/non-success (empty file -> json error -> rc!=0).
+# POSITIVE CONTROL, DRY-RUN 2026-09-26 with the IDENTICAL block and SCOPE_NS=monitoring:
+# `SCOPED (monitoring / nocodb) firing: 2 [...]`, `FAIL: §4.5 alert gate`, rc=1 — so the
+# scoped filter does return non-zero on real firing alerts. With scope=databases it
+# printed 0 scoped / 4 advisory names and PASSED.
 
 # --- 4.6 OPERATOR ACCEPTANCE (the real gate; why this stays attended) --------
 # Log in via browser, open EACH existing base, confirm tables/views/records render
@@ -671,15 +744,22 @@ set -o pipefail
 #    (The previous draft interpolated it unset here too, so the restore degraded
 #    to `psql -U postgres -d` with no argument and errored instead of restoring.
 #    Fail-closed, but a non-functional rollback is still not a rollback.)
-NCDB_NAME=$(sops -d kubernetes/apps/databases/nocodb/app/secret.sops.yaml \
+NCDB_NAME=$(sops -d /Users/mu/code/cberg-home-nextgen/kubernetes/apps/databases/nocodb/app/secret.sops.yaml \
   | python3 -c "import sys,yaml,urllib.parse as u; s=yaml.safe_load(sys.stdin)['stringData']['NC_DB']; print(u.parse_qs(u.urlsplit(s).query)['d'][0])")
 [ -n "$NCDB_NAME" ] || { echo 'ABORT: DB name did not resolve — do NOT run a blind restore'; exit 1; }
 DUMP=~/backups/nocodb/nocodb-pre-2026.09.0-$(date +%F).sql.gz    # adjust date if the window crossed midnight
 [ -f "$DUMP" ] && gzip -t "$DUMP" || { echo "ABORT: dump $DUMP missing or invalid"; exit 1; }
 
-# 1) revert the bump commit(s), then FENCE the pod before it can serve old code
-#    against a new schema.
-git revert <bump-commit-sha> && git push
+# 1) FENCE FIRST, revert LATER (CORRECTED 2026-09-26). Suspend the HelmRelease so no
+#    helm upgrade can run during the purge/restore, then scale to 0. The old order
+#    (git revert + push, THEN scale 0) raced Flux: the reverted HR's helm upgrade
+#    renders replicas: 1 and Helm's three-way merge resets a manual scale-to-0, so
+#    2026.08.2 could boot mid-purge and run knex into the emptied schema. And
+#    `git revert` refuses to run while the SHARED index is dirty. Git moves in step 4.
+#    Run steps 0-3b as ONE Bash call (timeout 600000): 3b reads $PRE_ACL from 2a.
+flux suspend helmrelease nocodb -n databases
+[ "$(kubectl get hr -n databases nocodb -o jsonpath='{.spec.suspend}')" = "true" ] \
+  || { echo 'ABORT: HelmRelease not suspended — do not purge'; exit 1; }
 kubectl scale deploy -n databases nocodb --replicas=0
 kubectl wait --for=delete pod -n databases -l app.kubernetes.io/name=nocodb --timeout=120s
 
@@ -817,23 +897,44 @@ print('SCHEMA GRANTS RESTORED')
 # FAILS ON: any role present before the purge and absent after. An empty PRE_ACL
 # cannot reach here (2a aborts on it), so this gate can never pass vacuously.
 
-# 4) bring nocodb back and confirm it runs the OLD code
-kubectl scale deploy -n databases nocodb --replicas=1
+# 4) SEPARATE Bash call. ONLY NOW move git back, confirm the old tag reached the LIVE
+#    HR spec, THEN resume: the helm upgrade that `flux resume` runs brings the pod
+#    back at replicas: 1 on 2026.08.2. NEVER `kubectl scale --replicas=1` by hand —
+#    while the HR spec still says 2026.09.0 that boots the NEW code against the
+#    restored DB and re-runs its migrations.
+#    The file is restored from the bump's PARENT (covers §3.6's retries-restore commit
+#    too) and committed with --only, because the worktree index is shared.
+cd /Users/mu/code/cberg-home-nextgen
+set -o pipefail
+BUMP_SHA=<bump-commit-sha>          # the §3.4 commit; fill in before running
+git show "$BUMP_SHA^:kubernetes/apps/databases/nocodb/app/helmrelease.yaml" \
+  > kubernetes/apps/databases/nocodb/app/helmrelease.yaml || { echo 'ABORT: could not restore file'; exit 1; }
+grep -q 'tag: 2026.08.2' kubernetes/apps/databases/nocodb/app/helmrelease.yaml || { echo 'ABORT: restored file is not 2026.08.2'; exit 1; }
+MSG=/tmp/msg-nocodb-rollback-$(date +%s).txt
+printf 'revert(nocodb): back to 2026.08.2 after failed 2026.09.0 (plan nocodb-2026.09.0 §5)\n' > "$MSG"
+git commit --only kubernetes/apps/databases/nocodb/app/helmrelease.yaml -F "$MSG"
+git log -1 --format=%s && git show --stat HEAD      # must be ONLY the nocodb helmrelease
+git push
+flux reconcile kustomization nocodb -n databases --with-source
+TAG=$(kubectl get hr -n databases nocodb -o jsonpath='{.spec.values.controllers.nocodb.containers.app.image.tag}')
+echo "live HR spec tag=[$TAG]"
+[ "$TAG" = "2026.08.2" ] || { echo 'ABORT: HR spec not reverted yet — do NOT resume; re-run the reconcile'; exit 1; }
+flux resume helmrelease nocodb -n databases
 kubectl rollout status deploy/nocodb -n databases --timeout=5m
 kubectl get pods -n databases -l app.kubernetes.io/name=nocodb \
   -o jsonpath='{.items[0].spec.containers[0].image}{"\n"}'     # expect nocodb/nocodb:2026.08.2
-kubectl port-forward -n databases svc/nocodb 18080:8080 >/dev/null 2>&1 & PF=$!
+kubectl port-forward -n databases svc/nocodb 19392:8080 >/dev/null 2>&1 & PF=$!
 trap 'kill $PF 2>/dev/null' EXIT
-sleep 5
-curl -s --max-time 10 http://localhost:18080/api/v1/version \
+curl -s -o /dev/null --retry 15 --retry-connrefused --retry-delay 1 --max-time 30 http://localhost:19392/api/v1/health
+curl -s --max-time 10 http://localhost:19392/api/v1/version \
   | python3 -c "import sys,json; v=json.load(sys.stdin)['currentVersion']; print('currentVersion:',v); sys.exit(0 if v=='2026.08.2' else 1)" \
   || { echo 'FAIL: app is not reporting 2026.08.2 after rollback'; kill $PF; exit 1; }
 kill $PF 2>/dev/null; trap - EXIT
 # OPERATOR: open a base, confirm pre-upgrade data is back and an edit saves.
 ```
 
-(The scale commands are the one sanctioned direct-cluster action, fencing the
-restore; Flux's desired state is restored by the git revert itself. The
+(The HR suspend/resume and the scale-to-0 are the sanctioned direct-cluster actions,
+fencing the restore; Flux's desired state is restored by the step-4 file restore. The
 `postgresql-data-5g` Longhorn backup from that morning's 03:0x run — verified
 present at §2e, stamped 03:08:30Z on 2026-09-20 — is the disaster fallback if
 the dump itself is bad. But restoring THAT rolls back every database in the
