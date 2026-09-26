@@ -84,12 +84,19 @@ rollback_class: git-revert            # stateless bridge: no PVC, no volumes, no
                                       # `values.image.tag` is the diff.
 finding_refs: [F-9af9baf7, F-80459b23, F-bb713800]   # F-bb713800 ADDED 2026-09-22: the drift
                                       # finding this refresh answers (plan-or-page joins on this field).
-status: awaiting-go   # RESET 2026-09-25: the operator GO recorded for 0.195.0 does NOT extend to 0.195.4 (an
-                      # approval is scoped to what was reviewed, §1.8). A FRESH GO for 0.195.4 is required
-                      # before the 2026-10-03 run. Reviewed 2026-09-23 at 0.195.0 (needs-fix -> fixed).
-                      # FRESH GO for 0.195.4 given by the operator 2026-09-25 (home-operation decide
-                      # approve, exec_state=pending). Status stays awaiting-go per the pre-window convention.
-window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was 'sat-attended:2026-10-03')
+status: blocked
+blocked_reason: >-
+  2026-09-26 NOW run, TWO aborts (retry cap): attempt 1 (3007ffb1, rollback 90413987)
+  false-STOPped at gate 4.5 (calendar `name` encoding; gate fixed a1e5c69e). Attempt 2
+  (7e5a6d59, rollback 50648945) passed 4.1-4.7 including the fixed 4.5, then FAILED 4.10:
+  the OpenClaw-side mcporter call gets HTTP 404 because the pod's NEXTCLOUD_MCP_URL has no
+  /mcp path (POST /), and the identical call 404s against 0.184.5 too - a gate/consumer
+  config defect, not a 0.195.4 regression, but two aborts block the plan. OpenClaw's own
+  rendered mcp-servers.json uses the same URL without /mcp, so its nextcloud tool may be
+  broken today independent of this plan (check separately). Service back on 0.184.5 digest
+  f6d88397 since 06:08:29Z (96 tools, protocol 2025-06-18 1.29.0). Needs: 4.10 fixed
+  (correct endpoint), a re-review, and a fresh operator GO naming this plan.
+window: null   # cleared 2026-09-26 on block (was now:2026-09-26) so the scheduler cannot re-place it untouched
                                       # reboot, git-revert). Slot re-checked 2026-09-22: also holds
                                       # external-dns-unowned-cnames (draft, 40 min, medium) — no shared resource
                                       # (§6); 40+35 = 75 of 90 min, risk 2+2 = 4 of 6. Attended by the deny-rule
