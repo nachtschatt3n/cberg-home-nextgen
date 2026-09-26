@@ -145,6 +145,14 @@ spec:
               # Mealie-scoped and is the escape hatch upstream documents for
               # exactly this case.
               OIDC_REQUIRES_EMAIL_VERIFICATION: "false"
+              # Persistent login (2026-09-26). OIDC_REMEMBER_ME defaults to
+              # false, and then routes/auth/auth.py sets the mealie session
+              # cookie WITHOUT max-age: a browser-session cookie, so closing
+              # the browser or the iOS PWA logged the user out. With it true
+              # the cookie gets Max-Age = TOKEN_TIME (hours; default 48,
+              # Mealie caps it at 400 days). 8760h = 365 days.
+              OIDC_REMEMBER_ME: "true"
+              TOKEN_TIME: "8760"
               OIDC_CLIENT_ID:
                 valueFrom:
                   secretKeyRef:
