@@ -26,7 +26,9 @@ touches:
                                       # re-rendered by this change.
 depends_on: []
 conflicts_with:
-  - paperclip-base-images             # same HelmRelease file, same pod: its debian leg restarts
+  - paperclip-base-images             # RUN THIS PLAN FIRST (label-only, no roll); base-images is draft +
+                                      # human-gated and re-renders on 5.2.1 afterwards.
+                                      # same HelmRelease file, same pod: its debian leg restarts
                                       # deployment/paperclip; keep the two apart so a regression is
                                       # attributable (that plan's §6 already asks for this in prose)
   - kube-prometheus-stack-91.4.1      # §4 reads Prometheus (ALERTS + kube-state-metrics) — the
@@ -36,7 +38,44 @@ security_ref: null
 capability_change: false              # template library bump; no behaviour change for paperclip
 rollback_class: git-revert
 finding_refs: [F-44278983]
-status: draft
+premises:
+  - id: live-chart-still-5.1.0
+    why: >-
+      `current:` claims app-template 5.1.0. If the HR spec already moved, the
+      plan is done or stale and its rendered-diff baseline is wrong.
+    run: kubectl get helmrelease paperclip -n ai -o jsonpath='{.spec.chart.spec.version}'
+    expect_exact: "5.1.0"
+  - id: release-deployed-on-5.1.0
+    why: >-
+      Do not stack the bump on a failing or half-applied release; the rollback
+      target (git revert -> 5.1.0) must be the revision actually deployed.
+    run: kubectl get helmrelease paperclip -n ai -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.history[0].chartVersion} {.status.history[0].status}'
+    expect_exact: "True 5.1.0 deployed"
+  - id: target-chart-5.2.1-published
+    why: >-
+      The target must still resolve from the same OCI source the HelmRepository
+      uses (oci://ghcr.io/bjw-s-labs/helm); a yanked tag fails the helm upgrade.
+    run: helm show chart oci://ghcr.io/bjw-s-labs/helm/app-template --version 5.2.1 | grep -E '^version:'
+    expect_exact: "version: 5.2.1"
+  - id: workload-healthy-on-old-chart
+    why: >-
+      The no-roll claim and CONTENTS ASSERTION 1 compare against a healthy 1/1
+      Recreate Deployment labelled app-template-5.1.0.
+    run: kubectl get deploy paperclip -n ai -o jsonpath='{.status.availableReplicas}/{.spec.replicas} {.spec.strategy.type} {.metadata.labels.helm\.sh/chart}'
+    expect_exact: "1/1 Recreate app-template-5.1.0"
+  - id: pod-running-all-containers-ready
+    why: "The §4 same-pod assertion needs one Running pod with both containers Ready."
+    run: kubectl get pods -n ai -l app.kubernetes.io/name=paperclip -o jsonpath='{range .items[*]}{.status.phase} {.status.containerStatuses[*].ready}{"\n"}{end}'
+    expect_exact: "Running true true"
+  - id: helmrelease-file-unchanged-since-review
+    why: >-
+      The rendered diff (label-only, reviewed 2026-09-26) was measured against
+      this exact values file. Any later commit to it (e.g. paperclip-base-images
+      landing first) voids the review; re-run §2d and re-review. Run from the
+      repo root (plan-premises.py is).
+    run: git log -1 --format=%H -- kubernetes/apps/ai/paperclip/app/helmrelease.yaml
+    expect_exact: "d50270b8fe57943ba4059843be155e39850072e7"
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> corrections 1-9 applied verbatim (6 premises, render gate, file-carried baseline, positive readiness reading); reviewer: ready-for-go once applied
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -127,11 +166,15 @@ kubectl get helmrelease -n ai paperclip \
 # expect: True 5.1.0
 
 # b) record the pod identity the §4 no-roll assertion compares against
-kubectl get pods -n ai -l app.kubernetes.io/name=paperclip \
-  -o custom-columns='NAME:.metadata.name,UID:.metadata.uid,HASH:.metadata.labels.pod-template-hash,RESTARTS:.status.containerStatuses[*].restartCount'
-kubectl get deploy -n ai paperclip -o jsonpath='{.metadata.generation}{"\n"}'
-# 2026-09-25 baseline: paperclip-58bccc9b55-tn9sb  uid 3ebccc18-…  hash 58bccc9b55  restarts 0,0  generation 8
-# -> WRITE DOWN today's values; they are the baseline, not these.
+#    Written to a FIXED file: agent Bash calls share no shell variables, so §4 reads it back by path.
+B=/private/tmp/claude-501/paperclip-chart-5.2.1; mkdir -p "$B"
+{ kubectl get pods -n ai -l app.kubernetes.io/name=paperclip --no-headers \
+    -o custom-columns='NAME:.metadata.name,UID:.metadata.uid,HASH:.metadata.labels.pod-template-hash,RESTARTS:.status.containerStatuses[*].restartCount'
+  kubectl get deploy -n ai paperclip -o jsonpath='{.metadata.generation}{"\n"}'; } > "$B/pod-before.txt"
+cat "$B/pod-before.txt"
+test "$(wc -l < "$B/pod-before.txt" | tr -d ' ')" = 2 && echo BASELINE_OK || echo BASELINE_BAD
+# PASS: BASELINE_OK. BASELINE_BAD (0 lines = kubectl failed, 3+ = more than one pod) -> STOP.
+# Reviewer reading 2026-09-26: paperclip-58bccc9b55-tn9sb 3ebccc18-0f88-4daf-abf6-fba1b09595b5 58bccc9b55 0,0 / 8
 
 # c) app content baseline — /api/health (NOT /health: that path is the SPA and returns 200 + HTML for anything)
 kubectl port-forward -n ai svc/paperclip 38100:3100 >/dev/null 2>&1 & PF=$!; sleep 3
@@ -141,14 +184,20 @@ kill $PF 2>/dev/null
 
 # d) RENDERED-DIFF GATE — re-run at execution time; this is the policy rule's required evidence.
 #    Values contain the real domain: keep them in a scratch dir and delete afterwards; never commit.
-T=$(mktemp -d)
+T=/private/tmp/claude-501/paperclip-chart-5.2.1/render; rm -rf "$T"; mkdir -p "$T"
 kubectl get helmrelease -n ai paperclip -o jsonpath='{.spec.values}' > "$T/v.json"
 for v in 5.1.0 5.2.1; do
-  helm template paperclip oci://ghcr.io/bjw-s-labs/helm/app-template --version $v -n ai -f "$T/v.json" > "$T/r-$v.yaml" || echo "RENDER_FAIL $v"
+  helm template paperclip oci://ghcr.io/bjw-s-labs/helm/app-template --version $v -n ai -f "$T/v.json" > "$T/r-$v.yaml" 2>"$T/err-$v.txt" || echo "RENDER_FAIL $v"
 done
-diff "$T/r-5.1.0.yaml" "$T/r-5.2.1.yaml" | grep -E '^[<>]' \
-  | grep -vE 'helm\.sh/chart: app-template-5\.(1\.0|2\.1)$' | wc -l | tr -d ' '
-# PASS: 0. Any other number = the render changed something beyond the chart label -> STOP,
+K1=$(grep -c '^kind:' "$T/r-5.1.0.yaml"); K2=$(grep -c '^kind:' "$T/r-5.2.1.yaml")
+C=$(grep -c 'helm.sh/chart: app-template-5.2.1' "$T/r-5.2.1.yaml")
+N=$(diff "$T/r-5.1.0.yaml" "$T/r-5.2.1.yaml" | grep -E '^[<>]' | grep -vE 'helm\.sh/chart: app-template-5\.(1\.0|2\.1)$' | wc -l | tr -d ' ')
+echo "kinds=$K1/$K2 chartlabels=$C otherdiff=$N"
+[ "$K1" = 5 ] && [ "$K2" = 5 ] && [ "$C" = 5 ] && [ "$N" = 0 ] && echo RENDER_GATE_PASS || echo RENDER_GATE_FAIL
+# PASS: RENDER_GATE_PASS (kinds=5/5 chartlabels=5 otherdiff=0). RENDER_GATE_FAIL = a render or the
+#   values fetch failed, or the render changed something beyond the chart label -> STOP,
+#   (the old count-only gate printed 0 = PASS for BOTH an empty values file and two failed renders;
+#   reviewer-measured 2026-09-26: those now read kinds=1/1 and kinds=0/0 -> RENDER_GATE_FAIL)
 #   inspect `diff` by hand and re-plan (risk is no longer low).
 # Can it fail? Yes — dry-tested 2026-09-25 on macOS: real diff -> 0; negative control
 #   (sed port 3100->3101 in the 5.2.1 render) -> 8. A RENDER_FAIL line also fails the gate.
@@ -205,11 +254,15 @@ can be the OLD revision's condition.
 **CONTENTS ASSERTION 2 (nothing else changed; the no-roll premise holds):**
 the pod is the same pod. Measured by
 ```bash
-kubectl get pods -n ai -l app.kubernetes.io/name=paperclip \
-  -o custom-columns='NAME:.metadata.name,UID:.metadata.uid,HASH:.metadata.labels.pod-template-hash,RESTARTS:.status.containerStatuses[*].restartCount'
-kubectl get deploy -n ai paperclip -o jsonpath='{.metadata.generation}{"\n"}'
+B=/private/tmp/claude-501/paperclip-chart-5.2.1
+{ kubectl get pods -n ai -l app.kubernetes.io/name=paperclip --no-headers \
+    -o custom-columns='NAME:.metadata.name,UID:.metadata.uid,HASH:.metadata.labels.pod-template-hash,RESTARTS:.status.containerStatuses[*].restartCount'
+  kubectl get deploy -n ai paperclip -o jsonpath='{.metadata.generation}{"\n"}'; } > "$B/pod-after.txt"
+cat "$B/pod-after.txt"
+diff "$B/pod-before.txt" "$B/pod-after.txt" && echo SAME_POD || echo POD_CHANGED
 ```
-Compare against the §2b baseline. PASS means the same UID, same
+PASS prints `SAME_POD` (a missing/empty §2b file also prints POD_CHANGED: fail
+closed; reviewer-tested 2026-09-26, a 0,0 -> 0,1 restart edit reads POD_CHANGED). PASS means the same UID, same
 pod-template-hash, same restart counts and same generation. It fails with a new
 pod name/UID/hash, or generation +1, if the chart changed the pod spec. That
 contradicts the §2d render. It is not necessarily an outage, but it means the
@@ -234,6 +287,9 @@ curl -s http://127.0.0.1:39090/api/v1/query \
   --data-urlencode 'query=kube_deployment_status_replicas_available{namespace="ai",deployment="paperclip"}' \
   | python3 -c "import sys,json;r=json.load(sys.stdin)['data']['result'];print(r[0]['value'][1] if r else 'EMPTY')"
 curl -s http://127.0.0.1:39090/api/v1/query \
+  --data-urlencode 'query=sum(kube_pod_status_ready{namespace="ai",pod=~"paperclip-[^p].*",pod!~"paperclip-backup.*",condition="true"})' \
+  | python3 -c "import sys,json;r=json.load(sys.stdin)['data']['result'];print(r[0]['value'][1] if r else 'EMPTY')"
+curl -s http://127.0.0.1:39090/api/v1/query \
   --data-urlencode 'query=ALERTS{alertname=~"PaperclipPodNotReady|PaperclipPodCrashLooping|PaperclipPodRestarted",alertstate="firing"}' \
   | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['result']))"
 kill $PF 2>/dev/null
@@ -243,13 +299,23 @@ It fails as `0` (pod not available) or `EMPTY`. EMPTY means the scrape or
 forward is broken, so the ALERTS reading below is not trustworthy either. That
 is why this non-empty reading is paired with it. Measured 2026-09-25: `1`.
 
-CONTROL: alertname PaperclipPodNotReady — must be not firing. The ALERTS count
-above reads `0`. Rules were confirmed loaded via `/api/v1/rules` on 2026-09-25.
+CONTROL: metric kube_pod_status_ready — the PaperclipPodNotReady rule's own
+selector, read positively (second query). PASS reads `1`. It fails as `0` (pod
+not Ready) or `EMPTY` (selector matches no pod, e.g. a new pod-template-hash
+beginning with `p`, which the rule's `paperclip-[^p].*` excludes). Measured
+2026-09-26 after the kps 91.5.2 restart: `1`; a deliberately wrong pod regex
+reads `EMPTY`.
 
-CONTROL: alertname PaperclipPodCrashLooping — must be not firing (same query).
+CONTROL: alertname PaperclipPodNotReady — INFORMATIONAL, not a PASS criterion.
+The ALERTS count reads `0`, but `count_over_time(ALERTS{alertname=~"PaperclipPod.*"}[30d])`
+is empty (never fired within retention), so a zero here cannot be told apart
+from a query that cannot match. The PASS criteria are the two positive readings
+above plus the restart-count equality in CONTENTS ASSERTION 2.
 
-CONTROL: alertname PaperclipPodRestarted — must be not firing (same query). It
-guards against an unexpected container restart triggered by the upgrade.
+CONTROL: alertname PaperclipPodCrashLooping — informational (same query, same reason).
+
+CONTROL: alertname PaperclipPodRestarted — informational (same query, same reason).
+The unexpected-restart guard is the RESTARTS column in CONTENTS ASSERTION 2's `SAME_POD` diff.
 
 ## 5) Rollback
 

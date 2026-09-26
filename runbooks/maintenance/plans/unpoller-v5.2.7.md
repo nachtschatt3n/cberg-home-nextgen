@@ -132,7 +132,7 @@ finding_refs: [F-0e3c2de5, F-23119c27]
                                       # (§1.6). It is producer=script, so it DOES auto-close once
                                       # the pin moves; it is listed because it is the version-lane
                                       # row this plan answers, not because it needs manual closing.
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> E1-E17 applied verbatim (file-carried POD/log/token/baselines, ports 19090/18086, absence gates informational); reviewer: mechanical, no re-review needed
 window: null
 premises:
   - id: live-image-still-v5.2.5
@@ -687,10 +687,13 @@ a class.
    (**2026-09-20 05:38Z**) and are recorded only to show the expected magnitude
    and to justify the §4.4 band:
    ```bash
-   kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 >/dev/null 2>&1 & PF=$!
+   # Port 19090 (a concurrent verifier may hold 9090). Output is teed to a fixed file:
+   # §4.5 runs in a different Bash call and shares no variables.
+   D=/private/tmp/claude-501/unpoller-v5.2.7; mkdir -p "$D"; : > "$D/baseline-prom.txt"
+   kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19090:9090 >/dev/null 2>&1 & PF=$!
    sleep 3
-   q(){ echo -n "$1 => "; curl -s --data-urlencode "query=$1" http://localhost:9090/api/v1/query \
-        | python3 -c "import sys,json;print([r['value'][1] for r in json.load(sys.stdin)['data']['result']])"; }
+   q(){ r=$(curl -s --data-urlencode "query=$1" http://localhost:19090/api/v1/query \
+        | python3 -c "import sys,json;print([r['value'][1] for r in json.load(sys.stdin)['data']['result']])"); echo "$1 => $r" | tee -a "$D/baseline-prom.txt"; }
    q 'up{job="unpoller"}'                                   # [1]
    q 'count(unpoller_site_adopted)'                         # [3]
    q 'count(unpoller_device_uptime_seconds)'                # [10]
@@ -738,18 +741,21 @@ a class.
 7. **InfluxDB write-path baseline** (cheap, and §4.6 compares against it). The
    token comes from the decrypted secret — assign it, never echo it:
    ```bash
-   TOK=$(sops -d kubernetes/apps/monitoring/unpoller/app/secret.sops.yaml \
+   D=/private/tmp/claude-501/unpoller-v5.2.7; mkdir -p "$D"
+   (umask 077; sops -d kubernetes/apps/monitoring/unpoller/app/secret.sops.yaml \
      | python3 -c "
 import sys
 for line in sys.stdin:
     s=line.strip()
     if s.startswith('auth_token'):
-        print(s.split('=',1)[1].strip().strip('\"')); break")
-   kubectl port-forward -n databases svc/influxdb-influxdb2 8086:80 >/dev/null 2>&1 & PF=$!
+        print(s.split('=',1)[1].strip().strip('\"')); break" > "$D/influx.tok")
+   test -s "$D/influx.tok" || echo "NO TOKEN - STOP"
+   kubectl port-forward -n databases svc/influxdb-influxdb2 18086:80 >/dev/null 2>&1 & PF=$!
    sleep 3
-   curl -s 'http://localhost:8086/api/v2/query?org=influxdata' \
-     -H "Authorization: Token $TOK" -H 'Content-Type: application/vnd.flux' -H 'Accept: application/csv' \
-     -d 'from(bucket:"default") |> range(start:-2h) |> filter(fn:(r)=>r._measurement=="uap_radios") |> keep(columns:["_time"]) |> sort(columns:["_time"],desc:true) |> limit(n:1)'
+   curl -s 'http://localhost:18086/api/v2/query?org=influxdata' \
+     -H "Authorization: Token $(cat "$D/influx.tok")" -H 'Content-Type: application/vnd.flux' -H 'Accept: application/csv' \
+     -d 'from(bucket:"default") |> range(start:-2h) |> filter(fn:(r)=>r._measurement=="uap_radios") |> keep(columns:["_time"]) |> sort(columns:["_time"],desc:true) |> limit(n:1)' \
+     | tee "$D/baseline-influx.csv"
    kill $PF 2>/dev/null
    ```
    **The range is `-2h`, deliberately — do not narrow it back to `-30m`.** §4.7
@@ -766,13 +772,17 @@ for line in sys.stdin:
    (2026-09-20 05:40Z read `2026-09-20T05:40:53Z`). (org `influxdata`, bucket `default`, measurement `uap_radios`
    — all three re-verified to exist 2026-09-25.)
 
-   **Also record the `band`-tag baseline for §4.7b** — same port-forward and
-   `$TOK`, run BEFORE the bump; it must return NO rows (a bare `\r\n`,
+   **Also record the `band`-tag baseline for §4.7b** — self-contained block (own
+   port-forward, token file from the block above), run BEFORE the bump; it must return NO rows (a bare `\r\n`,
    measured 2026-09-25) because v5.2.5 cannot write the tag:
    ```bash
-   curl -s 'http://localhost:8086/api/v2/query?org=influxdata' \
-     -H "Authorization: Token $TOK" -H 'Content-Type: application/vnd.flux' -H 'Accept: application/csv' \
+   D=/private/tmp/claude-501/unpoller-v5.2.7
+   kubectl port-forward -n databases svc/influxdb-influxdb2 18086:80 >/dev/null 2>&1 & PF=$!
+   sleep 3
+   curl -s 'http://localhost:18086/api/v2/query?org=influxdata' \
+     -H "Authorization: Token $(cat "$D/influx.tok")" -H 'Content-Type: application/vnd.flux' -H 'Accept: application/csv' \
      -d 'from(bucket:"default") |> range(start:-2h) |> filter(fn:(r)=>r._measurement=="uap_radios" and exists r.band) |> group() |> count()'
+   kill $PF 2>/dev/null
    ```
    If this already returns a count, something other than v5.2.5 is writing
    `uap_radios` (a second poller, or the bump already landed) — stop and find
@@ -816,7 +826,7 @@ for line in sys.stdin:
    sees the lineage without git archaeology (replace `XX` with the execution day
    — the stub is a placeholder, not a value):
    ```
-         # 2026-09-XX: v5.2.5 -> v5.2.8 image patch (plan unpoller-v5.2.7), skipping v5.2.6/7
+         # 2026-09-26: v5.2.5 -> v5.2.8 image patch (plan unpoller-v5.2.7), skipping v5.2.6/7
          # which were planned but never shipped. Three deltas: dependabot go.mod/go.sum group +
          # distroless base static-debian11 -> static-debian13 (bullseye EOL) from v5.2.6; an
          # otelunifi callback-leak fix from v5.2.7 that is inert here (no [otel] block, no env);
@@ -840,14 +850,14 @@ for line in sys.stdin:
 4. **Let Flux reconcile on the webhook** — no manual `flux reconcile` by
    default. Watch the rollout:
    ```bash
-   kubectl -n monitoring get pods -l app.kubernetes.io/name=unpoller -w
+   kubectl -n monitoring rollout status deploy/unpoller --timeout=10m   # bounded; -w never returns in an agent Bash call. Green is NOT proof - §4.1 checks the digest
    ```
    Only if nothing has rolled after 10 min: check
    `flux get kustomization unpoller -n monitoring` shows the pushed revision; if
    the source is stale,
    `flux reconcile kustomization unpoller -n monitoring --with-source`.
 5. **Close-out** after §4 passes: clear the marker
-   (`runbooks/update-marker.sh clear unpoller`), delete this plan file in the
+   (`runbooks/update-marker.sh clear unpoller`), delete the scratch state incl. the InfluxDB token file (`rm -rf /private/tmp/claude-501/unpoller-v5.2.7`, also after a §5 rollback), delete this plan file in the
    close-out commit (`plans/README.md`: executed plans are deleted, git has the
    history), and record the execution via `autonomy-record.py` as the window
    agent's contract requires.
@@ -920,7 +930,15 @@ echo "matching pods: $N"
 #   N=1 but deleting= non-empty → that IS the dying pod: WAIT.
 #   N=0 → no pod at all: that is a FAIL of the rollout, not a flaky query.
 POD=$(kubectl -n monitoring get pods -l app.kubernetes.io/name=unpoller -o jsonpath='{.items[0].metadata.name}')
-echo "POD=$POD"
+# Agent Bash calls share NO shell variables: persist the pin + the pod's FULL log to a
+# fixed path ONCE. §4.1-§4.4 read these files, never $POD.
+D=/private/tmp/claude-501/unpoller-v5.2.7; mkdir -p "$D"; rm -f "$D/pod" "$D/pod.log"
+if [ "$N" = 1 ] && [ -n "$POD" ] && [ -z "$(kubectl -n monitoring get pod "$POD" -o jsonpath='{.metadata.deletionTimestamp}')" ]; then
+  echo "$POD" > "$D/pod" && kubectl -n monitoring logs "$POD" --tail=-1 > "$D/pod.log" \
+    && echo "PINNED POD=$POD  log_lines=$(wc -l < "$D/pod.log" | tr -d ' ')"
+else
+  echo "GATE 4.0 NOT MET (N=$N, POD='$POD') - wait and re-run; evaluate nothing below"
+fi
 ```
 
 **Why this is safe even though it cannot tell the old pod from the new one:** it
@@ -936,8 +954,10 @@ commands below returned their expected output.
    index digest `sha256:ca82e584…` from §2.3, or its amd64 child
    `sha256:a5316d72…` — all three nodes are amd64):
    ```bash
+   POD=$(cat /private/tmp/claude-501/unpoller-v5.2.7/pod) && test -n "$POD" && \
    kubectl -n monitoring get pod "$POD" \
      -o jsonpath='{.spec.containers[0].image}{"  "}{.status.containerStatuses[0].imageID}{"\n"}'
+   # NO output at all = §4.0 was not met (no pinned pod) = FAIL; re-run §4.0
    ```
    Dry-run 2026-09-20 on the live (pre-bump) pod returned
    `ghcr.io/unpoller/unpoller:v5.2.5  ghcr.io/unpoller/unpoller@sha256:123a42e6…`
@@ -949,7 +969,7 @@ commands below returned their expected output.
 2. **The rebuilt binary identifies itself as v5.2.8, on the FRESH pod.** This is
    the assertion that separates "the tag moved" from "the new binary runs".
    ```bash
-   kubectl -n monitoring logs "$POD" --tail=-1 | head -40 | grep -iE 'starting up'
+   head -40 /private/tmp/claude-501/unpoller-v5.2.7/pod.log | grep -iE 'starting up'
    # MUST show:  [INFO] UniFi Poller v5.2.8 Starting Up! PID: 1
    # FAIL if it shows v5.2.5 — the rollout did not replace the process.
    ```
@@ -972,13 +992,13 @@ commands below returned their expected output.
    both lines verbatim, so run them against `"$POD"` only. With `-l` they PASS
    on a new pod that printed nothing.
    ```bash
-   kubectl -n monitoring logs "$POD" --tail=-1 | head -40 | grep -iE 'scrape cache'
+   head -40 /private/tmp/claude-501/unpoller-v5.2.7/pod.log | grep -iE 'scrape cache'
    # MUST show:  Prometheus scrape cache enabled, refresh interval: 2m0s
    # FAIL if:    Prometheus scrape cache disabled; /metrics fetches live   (our "2m" parsed as 0)
    # FAIL if:    ... refresh interval: 1m0s                                 (parsed as nil → default)
    # FAIL if:    nothing at all — a silent start is not a pass.
 
-   kubectl -n monitoring logs "$POD" --tail=-1 | head -40 | grep -iE 'verify ssl'
+   head -40 /private/tmp/claude-501/unpoller-v5.2.7/pod.log | grep -iE 'verify ssl'
    # MUST show:  => URL: https://<controller> (verify SSL: false, timeout: 1m0s)
    # FAIL if the controller block is absent or followed by x509/certificate errors
    #      — that is the CA-bundle regression the base bump could theoretically cause.
@@ -991,8 +1011,15 @@ commands below returned their expected output.
    a claim. Upstream logs a specific line via `u.Logf` **only** when the plugin
    starts:
    ```bash
-   kubectl -n monitoring logs "$POD" --tail=-1 | grep -icE 'OpenTelemetry \(OTel\) output plugin enabled'
-   # MUST print 0.
+   L=/private/tmp/claude-501/unpoller-v5.2.7/pod.log
+   test -s "$L" && grep -icE 'starting up' "$L" && grep -icE 'OpenTelemetry \(OTel\) output plugin enabled' "$L"
+   # Prints TWO numbers: banner count (MUST be 1 - proves this is the pinned pod's log,
+   # not a missing/empty file) then the OTel count (expected 0).
+   # INFORMATIONAL, NOT A PASS GATE: an absence check that cannot be shown to match in
+   # a known-bad case without enabling [otel]. The string is verified in upstream
+   # source (pkg/otelunifi/otelunifi.go:133 at v5.2.8, u.Logf). The gating proof of
+   # §1.4 is §2.5 + premise no-otel-env-on-workload. A non-zero SECOND number is
+   # still a STOP (re-assess §1.4).
    ```
    **Pinned to `"$POD"` for the opposite reason to §4.2/§4.3:** with `-l` a
    concatenated OLD pod log would dilute nothing here (0 + 0 = 0), but it would
@@ -1019,6 +1046,25 @@ commands below returned their expected output.
    - `count(count_over_time(unpoller_site_adopted[5m]))` > 0 at that point
      (measured 3 at baseline), so the assertion is reading post-change samples
      rather than stale ones.
+   ```bash
+   D=/private/tmp/claude-501/unpoller-v5.2.7; cat "$D/baseline-prom.txt"   # SAME-SESSION §2.6 baseline; missing = take §2.6 first
+   kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19090:9090 >/dev/null 2>&1 & PF=$!
+   sleep 3
+   q(){ echo -n "$1 => "; curl -s --data-urlencode "query=$1" http://localhost:19090/api/v1/query \
+        | python3 -c "import sys,json;print([r['value'][1] for r in json.load(sys.stdin)['data']['result']])"; }
+   q 'up{job="unpoller"}'
+   q 'count(unpoller_site_adopted)'
+   q 'count(unpoller_device_uptime_seconds)'
+   q 'count({__name__=~"unpoller_.*"})'
+   q 'count(count_over_time(unpoller_site_adopted[5m]))'
+   q 'unpoller_prometheus_cache_age_seconds'
+   q 'increase(unpoller_prometheus_refresh_failures_total[10m])'
+   kill $PF 2>/dev/null
+   ```
+   An empty list `[]` on ANY line is a FAIL, never a zero. `increase(...[10m])`
+   passes only as exactly `['0']` (measured 2026-09-26: an absent series returns
+   `[]`; the counter itself reads `['3']`, so the query is live and can go
+   non-zero). §4.6's second sample = re-run this same block 3 min later.
 
    > **DO NOT evaluate this gate before the 5-minute mark — you will see roughly
    > DOUBLE and revert a healthy bump.** Per **F-26b89cde** (measured 2026-09-19):
@@ -1054,6 +1100,18 @@ commands below returned their expected output.
    §2.7 Flux query **with the same `range(start:-2h)`** — the newest
    `uap_radios` `_time` must be **NEWER** than the §2.7 baseline timestamp taken
    in this session.
+   ```bash
+   D=/private/tmp/claude-501/unpoller-v5.2.7
+   kubectl port-forward -n databases svc/influxdb-influxdb2 18086:80 >/dev/null 2>&1 & PF=$!
+   sleep 3
+   curl -s 'http://localhost:18086/api/v2/query?org=influxdata' \
+     -H "Authorization: Token $(cat "$D/influx.tok")" -H 'Content-Type: application/vnd.flux' -H 'Accept: application/csv' \
+     -d 'from(bucket:"default") |> range(start:-2h) |> filter(fn:(r)=>r._measurement=="uap_radios") |> keep(columns:["_time"]) |> sort(columns:["_time"],desc:true) |> limit(n:1)' \
+     > "$D/post-influx.csv"
+   kill $PF 2>/dev/null
+   echo "baseline: $(grep -o '20[0-9-]*T[0-9:.]*Z' "$D/baseline-influx.csv")"
+   echo "post:     $(grep -o '20[0-9-]*T[0-9:.]*Z' "$D/post-influx.csv")"   # MUST be later; empty = FAIL
+   ```
 
    > **AN EMPTY RESULT IS A FAIL, NOT A TOOLING PROBLEM.** Measured 2026-09-20
    > against the live instance: a Flux query matching nothing returns a bare
@@ -1077,9 +1135,13 @@ commands below returned their expected output.
    Wait until at least one full 2m InfluxDB interval has elapsed after the new
    pod's `Poller->InfluxDB started` line, then re-run the §2.7 `band` query:
    ```bash
-   curl -s 'http://localhost:8086/api/v2/query?org=influxdata' \
-     -H "Authorization: Token $TOK" -H 'Content-Type: application/vnd.flux' -H 'Accept: application/csv' \
+   D=/private/tmp/claude-501/unpoller-v5.2.7
+   kubectl port-forward -n databases svc/influxdb-influxdb2 18086:80 >/dev/null 2>&1 & PF=$!
+   sleep 3
+   curl -s 'http://localhost:18086/api/v2/query?org=influxdata' \
+     -H "Authorization: Token $(cat "$D/influx.tok")" -H 'Content-Type: application/vnd.flux' -H 'Accept: application/csv' \
      -d 'from(bucket:"default") |> range(start:-10m) |> filter(fn:(r)=>r._measurement=="uap_radios" and exists r.band) |> group(columns:["band"]) |> count() |> keep(columns:["band","_value"])'
+   kill $PF 2>/dev/null
    ```
    **PASS:** rows for `band` values `2.4`, `5` and `6` (the three live radio
    types, §1.4b), each with `_value` > 0.
@@ -1100,7 +1162,7 @@ commands below returned their expected output.
    `6e 95 / na 380 / ng 380` — so the query shape does return one row per tag
    value when the tag exists, and the empty result is the tag's absence, not
    a malformed query.
-8. `UnifiMetricsAbsent` (`absent(unpoller_device_uptime_seconds)`, `for: 15m`),
+8. **INFORMATIONAL (absence check; the positive gates are §4.5-§4.7b. Rules measured loaded 2026-09-26 via /api/v1/rules: all 10 `Unifi*` health=ok, state=inactive).** `UnifiMetricsAbsent` (`absent(unpoller_device_uptime_seconds)`, `for: 15m`),
    `UnifiClientMetricsAbsent` (`absent(unpoller_client_satisfaction_ratio)`) and
    `UnifiControllerUnreachable` are NOT firing 15 min after Ready; the in-repo
    Grafana UniFi dashboards render data past the rollout time, not a flat line
@@ -1177,7 +1239,7 @@ application-update.md §11. Clear the update marker either way.
   `prometheus-crd-ownership` and `cilium-1.20.2` have since EXECUTED and retired,
   so their two bullets below are historical and neither is in `conflicts_with`
   any more):**
-  - `kube-prometheus-stack-91.4.1` (**draft, window null**) — **hard conflict,
+  - `kube-prometheus-stack-91.4.1` (**vetted, window now:2026-09-26, EXECUTED 87432c93 — chart 90.0.0 -> 91.5.2, operator v0.94.1, so NOT chart-only any more; its inbound ref to this plan is at its line 149**) — **hard conflict,
     in `conflicts_with`**, and its own §6 asks any successor unpoller plan to
     re-add it. Never the same window. If an operator overrides that, run unpoller
     **fully before** kps (complete §4 including the ≥5-min settle) or **fully
