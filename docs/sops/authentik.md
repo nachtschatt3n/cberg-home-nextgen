@@ -490,8 +490,10 @@ What a user sees:
 - **Has no device (andrea)**: username, then password, then "configure an
   authenticator" with two choices, `WebAuthn device` (passkey) and
   `TOTP Device`. The picker order is the DB order of
-  `Stage.objects.filter(pk__in=...)` (no `ORDER BY`), observed as passkey
-  first; it is not guaranteed. The labels are the upstream `friendly_name`
+  `Stage.objects.filter(pk__in=...)` (no `ORDER BY`), so the blueprint's
+  list order is NOT honoured: read back after the phase-2 apply it is
+  `TOTP Device`, then `WebAuthn device` (before the apply the same query
+  returned passkey first). Not controllable via blueprint; both are offered. The labels are the upstream `friendly_name`
   values, which upstream declares; do not rename them here, or an image bump
   resets them. After enrolling she is logged in, with a 365-day session.
   Enrol TOTP as well as a passkey before using a device that cannot do
