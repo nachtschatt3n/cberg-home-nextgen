@@ -15,10 +15,21 @@
 # path for the bundled chart redis; deleted 2026-08-30 once the cutover was
 # 11 days stable. It held only cache contents, so there was nothing to lose.
 #
-# Auth + source-restricted NetworkPolicy since plan nextcloud-redis-hardening
-# (2026-09-26, see git log for this file): requirepass from SOPS key
-# nextcloud-config/redis-password, enforced by a wrapper that refuses to start
-# unauthenticated; consumers = main pod, cron pods, notify-push (via config.php).
+# Deliberately NO --requirepass: parity with the retired instance's
+# `auth.enabled: false` posture, so this cutover stays a pure registry move.
+#
+# CORRECTION (2026-08-19, post-execution review): an earlier version of this
+# comment claimed auth was deferred because "redis.config.php carries no
+# password, so both sides must change at once". That is wrong and should not
+# be relied on. The password path already exists upstream on both sides —
+# redis.config.php reads REDIS_HOST_PASSWORD/_FILE, the image entrypoint
+# builds session.save_path with auth from it, and the chart's externalRedis
+# block emits it. Enabling auth is therefore a normal scoped change (SOPS
+# secret + secretKeyRef + `sh -c` wrapper, since redis-server does not expand
+# env in argv + externalRedis.password + flip redis.auth.enabled so
+# _helpers.tpl renders the AUTH form + the hardcoded worker sidecar env +
+# the config.php refresh, see notify-push.yaml). Deferring it here was a
+# SCOPING decision, not a technical blocker.
 #
 # Named `nextcloud-redis`, NOT `nextcloud-redis-master`: reusing the old
 # name would race Helm's own Service of that name during the cutover
@@ -52,26 +63,11 @@ spec:
         image: redis:8.10.1-alpine
         imagePullPolicy: IfNotPresent
         command:
-        - /bin/sh
-        - -c
-        - |
-          # Refuse to start unauthenticated: an empty --requirepass means "no
-          # password" to Redis, and a missing env var must be a crash, not a
-          # silently open server.
-          [ -n "$REDIS_PASSWORD" ] || { echo "REDIS_PASSWORD is empty — refusing to start"; exit 1; }
-          exec redis-server --save "" --appendonly no --requirepass "$REDIS_PASSWORD"
-        env:
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: nextcloud-config
-              key: redis-password
-        # redis-cli reads REDISCLI_AUTH — keeps the password off the probe argv.
-        - name: REDISCLI_AUTH
-          valueFrom:
-            secretKeyRef:
-              name: nextcloud-config
-              key: redis-password
+        - redis-server
+        - --save
+        - ""
+        - --appendonly
+        - "no"
         ports:
         - containerPort: 6379
           name: redis
@@ -117,12 +113,24 @@ spec:
   selector:
     app: nextcloud-redis
 ---
-# Replacement for the subchart-owned `networkpolicy/nextcloud-redis`.
-# Source-restricted since plan nextcloud-redis-hardening (2026-09-26): only
-# the three real consumers (CLIENT LIST-verified) may reach 6379 — main pod
-# + cron pods (instance=nextcloud, component in [app, cronjob]) and
-# notify-push. A mis-scoped selector surfaces as file-lock timeouts rather
-# than a clean connection error. Egress is unrestricted.
+# Replacement for the subchart-owned `networkpolicy/nextcloud-redis`, which
+# disappears together with the subchart when `redis.enabled: false`.
+#
+# READ THE SEMANTICS BEFORE TRUSTING THIS. It is mirrored 1:1 from the retired
+# subchart policy (and matches the shape of the surviving
+# networkpolicy/nextcloud-mariadb), but "mirrors the old policy" and
+# "restricts access" are different claims and only the first one holds: an
+# ingress rule carrying `ports` and no `from` peer allows ALL sources on that
+# port. What this actually constrains is ports OTHER than 6379 — and redis
+# listens on nothing else. Egress is unrestricted.
+#
+# To make it restrict sources, add a `from:` with podSelectors for the real
+# consumers, which are (verified from CLIENT LIST + pod labels, all in
+# office): the main pod and the cron Jobs, both labelled
+# app.kubernetes.io/instance=nextcloud, and app=nextcloud-notify-push.
+# nextcloud-metrics, -mcp and -whiteboard do not connect. Do it in a window,
+# not casually: a mis-scoped selector surfaces as file-lock timeouts rather
+# than a clean connection error.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -138,15 +146,7 @@ spec:
   - Ingress
   - Egress
   ingress:
-  - from:
-    - podSelector:
-        matchExpressions:
-        - {key: app.kubernetes.io/instance, operator: In, values: [nextcloud]}
-        - {key: app.kubernetes.io/component, operator: In, values: [app, cronjob]}
-    - podSelector:
-        matchLabels:
-          app: nextcloud-notify-push
-    ports:
+  - ports:
     - port: 6379
       protocol: TCP
   egress:
