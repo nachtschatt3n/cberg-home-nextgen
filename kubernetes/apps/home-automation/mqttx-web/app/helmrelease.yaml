@@ -30,13 +30,13 @@ spec:
           app:
             image:
               repository: emqx/mqttx-web
-              tag: v1.13.0  # v1.13.3 is a GitHub release only; not published to Docker Hub (latest image tag is v1.13.0)
+              tag: v1.13.1
             resources:
               requests:
                 cpu: 10m
                 memory: 64Mi
               limits:
-                memory: 128Mi
+                memory: 256Mi
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: false # Nginx might need to write logs or temp files
