@@ -1178,6 +1178,224 @@ prom_cleanup() {
     fi
     lsof -ti:${PROM_PORT} 2>/dev/null | xargs kill 2>/dev/null || true
 }
+# prom_query_at PROMQL TS — instant query at a fixed evaluation time (unix s).
+# prom_query_range PROMQL START END STEP — range query. Both print the raw
+# Prometheus JSON, or "" on transport failure (callers treat "" as UNMEASURED).
+# Added 2026-09-26 (F-ee2f51a2) so the link-drop / etcd-leader checks can be
+# replayed against a past window instead of only "now".
+prom_query_at() {
+    [ "$PROM_AVAILABLE" != "true" ] && { echo ""; return 1; }
+    curl -s -m 15 -G "http://localhost:${PROM_PORT}/api/v1/query" \
+        --data-urlencode "query=$1" --data-urlencode "time=$2" 2>/dev/null || { echo ""; return 1; }
+}
+
+prom_query_range() {
+    [ "$PROM_AVAILABLE" != "true" ] && { echo ""; return 1; }
+    curl -s -m 20 -G "http://localhost:${PROM_PORT}/api/v1/query_range" \
+        --data-urlencode "query=$1" --data-urlencode "start=$2" \
+        --data-urlencode "end=$3" --data-urlencode "step=$4" 2>/dev/null || { echo ""; return 1; }
+}
+
+# ── Node link-drop + etcd leader-change assessment (F-ee2f51a2, 2026-09-26) ──
+#
+# 2026-09-24 ~20:25Z a switch reboot dropped the NIC carrier on all three nodes
+# inside one 10-minute window. etcd lost quorum for seconds, and one
+# kube-apiserver logged ~351k `watch chan error: etcdserver: no leader` lines in
+# that window. The next report said "kube-system 360k errors (93%)" and nothing
+# else: the cause was measurable (node-exporter's carrier counter and etcd's own
+# leader-change counter both moved) but no check read either.
+#
+# The NIC is selected by NAME (en*/eth*/bond*) so the dozens of lxc*/cilium_*
+# veths, which flap on every pod start, never count. A carrier change in the
+# same 10-minute bucket as the node's own boot is a reboot, not a link drop.
+#
+# Thresholds:
+#   link drop, one node .......... MINOR (a single cable/port/NIC flap)
+#   link drop, >=2 nodes in the
+#     same 10-min window ......... MAJOR (switch/uplink-level; partitions etcd)
+#   etcd leader changes / 24h .... 0-2 INFO, >=3 MINOR, >=6 MAJOR. Background
+#     measured 2026-09-26: 6 in 7 days (~0.9/day), so 3/day is ~3.5x and 6/day
+#     is a week's worth in one day. A change that coincides with a multi-node
+#     link drop is reported (MINOR at least) and attributed to it rather than
+#     paged twice for one cause.
+#
+# netstab_collect EVAL_TS DIR  writes the six Prometheus JSON inputs to DIR.
+# netstab_assess DIR           pure: prints LEVEL<TAB>CHECK<TAB>message lines,
+#                              LEVEL in OK|INFO|MINOR|MAJOR|UNMEASURED.
+NETSTAB_NIC_RE='(en|eth|bond).*'
+
+netstab_collect() {
+    local ts="$1" dir="$2" start
+    start=$(( ts - 86400 + 600 ))
+    prom_query_range "max by (instance) (increase(node_network_carrier_changes_total{device=~\"${NETSTAB_NIC_RE}\"}[10m]))" "$start" "$ts" 600 > "$dir/carrier.json"
+    prom_query_at 'node_boot_time_seconds' "$ts" > "$dir/boot.json"
+    prom_query_at 'node_uname_info' "$ts" > "$dir/uname.json"
+    prom_query_at 'max(increase(etcd_server_leader_changes_seen_total[24h]))' "$ts" > "$dir/etcd24h.json"
+    prom_query_at 'max(increase(etcd_server_leader_changes_seen_total[7d]))' "$ts" > "$dir/etcd7d.json"
+    prom_query_range 'max(increase(etcd_server_leader_changes_seen_total[10m]))' "$start" "$ts" 600 > "$dir/etcdrange.json"
+    echo "$ts" > "$dir/eval_ts"
+}
+
+netstab_assess() {
+    NETSTAB_DIR="$1" python3 - <<'PY'
+import json, os, datetime
+d = os.environ["NETSTAB_DIR"]
+def load(name):
+    try:
+        with open(os.path.join(d, name)) as f:
+            j = json.load(f)
+        return j["data"]["result"] if j.get("status") == "success" else None
+    except Exception:
+        return None
+def hm(t):
+    return datetime.datetime.fromtimestamp(float(t), datetime.timezone.utc).strftime("%Y-%m-%d %H:%MZ")
+def out(level, check, msg):
+    print("%s\t%s\t%s" % (level, check, msg.replace("\t", " ").replace("\n", " ")))
+
+carrier, boot, uname = load("carrier.json"), load("boot.json"), load("uname.json")
+names = {r["metric"].get("instance"): r["metric"].get("nodename") for r in (uname or [])}
+boots = {r["metric"].get("instance"): float(r["value"][1]) for r in (boot or [])}
+node = lambda inst: names.get(inst) or (inst or "?").split(":")[0]
+
+co_windows = []
+if not carrier:
+    out("UNMEASURED", "link-drop", "node_network_carrier_changes_total returned no series for the node NICs -- link stability NOT measured")
+else:
+    per_node, reboot, buckets = {}, {}, {}
+    for r in carrier:
+        inst = r["metric"].get("instance")
+        for t, v in r["values"]:
+            t, v = float(t), float(v)
+            if v < 0.5:
+                continue
+            bt = boots.get(inst)
+            if bt is not None and t - 1200 < bt <= t:
+                reboot[node(inst)] = reboot.get(node(inst), 0) + 1
+                continue
+            n = int(round(v))
+            per_node.setdefault(node(inst), []).append((t, n))
+            buckets.setdefault(t, {})[node(inst)] = n
+    co_windows = sorted(t for t, ns in buckets.items() if len(ns) >= 2)
+    for n in sorted(reboot):
+        out("INFO", "link-drop", "%s: carrier change(s) explained by its own reboot -- not counted" % n)
+    if co_windows:
+        parts = []
+        for t in co_windows[:3]:
+            ns = buckets[t]
+            parts.append("%s-%s: %s" % (hm(t - 600), hm(t)[-6:], ", ".join("%s x%d" % (k, ns[k]) for k in sorted(ns))))
+        out("MAJOR", "link-drop", "Network link drop on %d nodes in the same 10-min window (`node-nic-carrier`): %s -- switch/uplink-level event; expect etcd leader loss and apiserver 'etcdserver: no leader' floods in that window" % (max(len(buckets[t]) for t in co_windows), "; ".join(parts)))
+    elif per_node:
+        for n in sorted(per_node):
+            ev = per_node[n]
+            out("MINOR", "link-drop", "Node NIC link flapped on `%s` (`node-nic-carrier`): %d carrier change(s) in 24h (last %s)" % (n, sum(c for _, c in ev), hm(max(t for t, _ in ev))))
+    else:
+        out("OK", "link-drop", "No node NIC carrier changes in 24h on %d node(s)" % len(carrier))
+
+e24, e7, er = load("etcd24h.json"), load("etcd7d.json"), load("etcdrange.json")
+if not e24:
+    out("UNMEASURED", "etcd-leader", "etcd_server_leader_changes_seen_total returned no series -- etcd leader stability NOT measured")
+else:
+    n24 = int(round(float(e24[0]["value"][1])))
+    n7 = int(round(float(e7[0]["value"][1]))) if e7 else None
+    changes = [float(t) for r in (er or []) for t, v in r["values"] if float(v) >= 0.5]
+    coinc = sorted(t for t in changes if any(abs(t - w) <= 600 for w in co_windows))
+    ctx = "%d in 24h%s (background ~6 per 7 days)" % (n24, "" if n7 is None else ", %d in 7d" % n7)
+    when = ", ".join(hm(t) for t in sorted(changes)[-5:])
+    attr = (" -- coincides with the multi-node link drop at %s (see the link-drop finding): partition-driven" % ", ".join(hm(t) for t in coinc[:3])) if coinc else ""
+    if n24 >= 6:
+        out("MAJOR", "etcd-leader", "etcd leader changes (`etcd-leader-changes`): %s, at %s%s" % (ctx, when, attr))
+    elif coinc or n24 >= 3:
+        out("MINOR", "etcd-leader", "etcd leader changes (`etcd-leader-changes`): %s, at %s%s" % (ctx, when, attr))
+    elif n24 > 0:
+        out("INFO", "etcd-leader", "etcd leader changes: %s, at %s -- within background" % (ctx, when))
+    else:
+        out("OK", "etcd-leader", "etcd leader changes: %s" % ctx)
+PY
+}
+
+# ── Per-namespace error-count ATTRIBUTION (F-ee2f51a2, 2026-09-26) ──────────
+#
+# A namespace error-count finding used to be only a number and a share
+# ("kube-system 360k errors (93%)"). The count stays exactly as it was -- the
+# wildcard total is the control and is never narrowed here. This only ADDS,
+# per flagged namespace: the top normalised message(s) from a random sample of
+# that namespace's matching docs, and the busiest 10-minute window. On
+# 2026-09-24 that reads "watch chan error: etcdserver: no leader" and
+# 20:20-20:30Z, which points straight at the partition.
+#
+# ns_error_attribution NS GTE LT PORT PASSWORD [NS_TOTAL]  (GTE/LT: ES date math or ISO)
+#   prints one line: the attribution, or "attribution unavailable (...)".
+# ns_attr_render HIST_FILE SAMPLE_FILE NS_TOTAL  pure renderer, tested.
+ns_attr_render() {
+    ATTR_HIST="$1" ATTR_SAMPLE="$2" ATTR_TOTAL="$3" python3 - <<'PY'
+import json, os, re, datetime
+def load(p):
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except Exception:
+        return None
+def norm(s):
+    s = (s or "").strip()
+    s = s.splitlines()[0] if s else ""
+    s = re.sub(r"^[IWEF]\d{4} \d\d:\d\d:\d\d\.\d+\s+\d+\s+", "", s)
+    s = re.sub(r"\d{4}-\d\d-\d\d[T ][\d:.,]+(Z|[+-]\d\d:?\d\d)?", "<ts>", s)
+    s = re.sub(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", "<uuid>", s, flags=re.I)
+    s = re.sub(r"\b\d{1,3}(\.\d{1,3}){3}(:\d+)?\b", "<ip>", s)
+    s = re.sub(r"\b[0-9a-f]{12,}\b", "<hex>", s, flags=re.I)
+    s = re.sub(r"\d+", "#", s)
+    s = re.sub(r"\s+", " ", s).replace("`", "'").strip()
+    return (s[:117] + "...") if len(s) > 120 else s
+total = int(os.environ.get("ATTR_TOTAL") or 0)
+hist, sample = load(os.environ["ATTR_HIST"]), load(os.environ["ATTR_SAMPLE"])
+parts = []
+try:
+    hits = [h["_source"]["body"]["text"] for h in sample["hits"]["hits"]]
+except Exception:
+    hits = None
+if hits:
+    counts = {}
+    for h in hits:
+        k = norm(h if isinstance(h, str) else json.dumps(h))
+        counts[k] = counts.get(k, 0) + 1
+    top = sorted(counts.items(), key=lambda kv: -kv[1])[:2]
+    parts.append("top: " + "; ".join('"%s" ~%d%%' % (k, round(100.0 * c / len(hits))) for k, c in top)
+                 + " of a %d-doc sample" % len(hits))
+try:
+    b = max(hist["aggregations"]["per10m"]["buckets"], key=lambda x: x["doc_count"])
+    t0 = b["key"] / 1000.0
+    f = lambda t, fmt: datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime(fmt)
+    share = (" (%d%% of the namespace)" % round(100.0 * b["doc_count"] / total)) if total else ""
+    parts.append("busiest 10m: %s-%sZ %d%s" % (f(t0, "%Y-%m-%d %H:%M"), f(t0 + 600, "%H:%M"), b["doc_count"], share))
+except Exception:
+    pass
+print(" | ".join(parts) if parts else "attribution unavailable (ES sample/histogram empty or unparseable)")
+PY
+}
+
+ns_error_attribution() {
+    local ns="$1" gte="$2" lt="$3" port="$4" pw="$5" tmp filter
+    tmp=$(mktemp -d) || { echo "attribution unavailable (mktemp failed)"; return 0; }
+    # SAME match as the §34 count query (should/min_should/must_not) -- the
+    # attribution must describe the documents that were counted.
+    filter="\"should\": [{\"wildcard\": {\"body.text\": {\"value\": \"*error*\", \"case_insensitive\": true}}},
+                         {\"wildcard\": {\"body.text\": {\"value\": \"*fatal*\", \"case_insensitive\": true}}}],
+            \"minimum_should_match\": 1,
+            \"must_not\": [{\"wildcard\": {\"body.text\": {\"value\": \"*noerror*\", \"case_insensitive\": true}}}],
+            \"filter\": [{\"range\": {\"@timestamp\": {\"gte\": \"$gte\", \"lt\": \"$lt\"}}},
+                       {\"term\": {\"resource.attributes.k8s.namespace.name\": \"$ns\"}}]"
+    curl -k -s -m 20 -u "elastic:$pw" -X POST "https://localhost:${port}/logs-generic-default/_search" \
+        -H 'Content-Type: application/json' -d "{\"size\": 0, \"query\": {\"bool\": {$filter}},
+        \"aggs\": {\"per10m\": {\"date_histogram\": {\"field\": \"@timestamp\", \"fixed_interval\": \"10m\", \"min_doc_count\": 1}}}}" \
+        > "$tmp/hist.json" 2>/dev/null
+    curl -k -s -m 20 -u "elastic:$pw" -X POST "https://localhost:${port}/logs-generic-default/_search" \
+        -H 'Content-Type: application/json' -d "{\"size\": 200, \"_source\": [\"body.text\"],
+        \"query\": {\"function_score\": {\"query\": {\"bool\": {$filter}},
+        \"random_score\": {\"seed\": 20260926, \"field\": \"_seq_no\"}, \"boost_mode\": \"replace\"}}}" \
+        > "$tmp/sample.json" 2>/dev/null
+    ns_attr_render "$tmp/hist.json" "$tmp/sample.json" "${6:-0}"
+    rm -rf "$tmp"
+}
 
 # Combined cleanup — replaces the es_cleanup trap
 _all_cleanup() {
@@ -2752,6 +2970,15 @@ log_section "Section 11: Container Logs Analysis"
     # -- 0.9%. `--since=24h` is the real bound; the tail cap only made the
     # number meaningless. Do not reintroduce a cap without ALSO reporting it
     # as `>=N (capped)` so a saturated value cannot be compared to a threshold.
+    # ROTATED FILES ARE INVISIBLE HERE (F-ee2f51a2, 2026-09-26). `kubectl logs
+    # --since=24h` reads only the kubelet's CURRENT container log file; once
+    # the file rotates (10 MiB by default) the older lines are gone from this
+    # API, and a restarted container's previous instance is not read at all
+    # (no --previous). So these four counters are a LOWER bound that is
+    # weakest exactly when a component floods: on 2026-09-24 one apiserver
+    # wrote ~351k lines in ten minutes, far past one rotation. For volume use
+    # the ES per-namespace count in Section 34 (it keeps every shipped line),
+    # and Section 11a for the network/etcd cause behind a flood.
     require_selector_matches kube-system "k8s-app=cilium" "cilium-errors"
     CILIUM_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=cilium --tail=-1 --since=24h 2>&1 | grep -E 'level=(error|fatal|critical)|\[(ERROR|FATAL|CRITICAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l" "cilium-errors")
     echo "Cilium errors (24h): $CILIUM_ERRORS"
@@ -2821,6 +3048,35 @@ except: print('')
             echo "  $ES_INFRA_SUMMARY"
             log_info "$ES_INFRA_SUMMARY"
         fi
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
+log_section "Section 11a: Node Link Stability & etcd Leadership"
+{
+    # F-ee2f51a2 (2026-09-26). Functions + thresholds: netstab_collect /
+    # netstab_assess near the Prometheus helpers. HC_NETSTAB_EVAL_TS replays
+    # a past window (unix seconds, the END of the 24h window); default now.
+    echo "Checking node NIC carrier changes and etcd leader changes (24h)..."
+    if [ "$PROM_AVAILABLE" != "true" ]; then
+        log_warning "Prometheus unavailable - node link-drop and etcd leader checks did NOT run"
+        _record_unmeasured "netstab" "Prometheus port-forward unavailable"
+    else
+        NETSTAB_TMP=$(mktemp -d)
+        netstab_collect "${HC_NETSTAB_EVAL_TS:-$(date +%s)}" "$NETSTAB_TMP"
+        NETSTAB_OUT=$(netstab_assess "$NETSTAB_TMP")
+        rm -rf "$NETSTAB_TMP"
+        [ -z "$NETSTAB_OUT" ] && NETSTAB_OUT=$(printf 'UNMEASURED\tnetstab\tassessor produced no output')
+        # here-string, not a pipe: add_*_issue must run in this shell.
+        while IFS=$'\t' read -r NS_LVL NS_CHECK NS_MSG; do
+            [ -z "$NS_LVL" ] && continue
+            case "$NS_LVL" in
+                MAJOR)      log_warning "$NS_MSG"; add_major_issue "$NS_MSG" ;;
+                MINOR)      log_warning "$NS_MSG"; add_minor_issue "$NS_MSG" ;;
+                INFO)       log_info "$NS_MSG" ;;
+                OK)         log_success "$NS_MSG" ;;
+                UNMEASURED) log_warning "$NS_MSG"; _record_unmeasured "netstab-$NS_CHECK" "$NS_MSG" ;;
+            esac
+        done <<< "$NETSTAB_OUT"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -6441,23 +6697,41 @@ except Exception:
                 else
                     NS_SHARE=0
                 fi
+                # Identity: the namespace + `error-log-volume` are BACKTICKED so the
+                # findings fingerprint anchors on them (findings_writer
+                # _stable_anchor) and not on the prose -- the attribution below
+                # varies run to run and would otherwise fork a new row daily.
+                # Attribution (F-ee2f51a2): only for namespaces that will be
+                # flagged (>= the 40,000 floor below). Appended to the finding;
+                # it never changes the count, the share or the tier. Uses the
+                # shared ES session -- this section's own 9200 forward is
+                # already closed by the time the verdict runs.
+                NS_ATTR=""
+                if [ "$NS_HITS" -ge 40000 ]; then
+                    if [ "$ES_AVAILABLE" = "true" ]; then
+                        NS_ATTR=" -- $(ns_error_attribution "$NS_NAME" now-24h now "$ES_PORT" "$ES_PASSWORD_SHARED" "$NS_HITS")"
+                    else
+                        NS_ATTR=" -- attribution unavailable (shared ES session not connected)"
+                    fi
+                    echo "  $NS_NAME attribution:${NS_ATTR# --}"
+                fi
 
                 if [ "$NS_HITS" -ge 500000 ]; then
                     NS_FLAGGED=1
                     log_critical "Log-volume runaway in namespace $NS_NAME: $NS_HITS error-substring matches in 24h (${NS_SHARE}% of cluster)"
-                    add_critical_issue "Log-volume runaway in namespace $NS_NAME: $NS_HITS error-substring matches in 24h (${NS_SHARE}% of the cluster total) - see docs/sops/log-volume-runaway.md"
+                    add_critical_issue "Log-volume runaway in namespace \`$NS_NAME\` (\`error-log-volume\`): $NS_HITS error-substring matches in 24h (${NS_SHARE}% of the cluster total) - see docs/sops/log-volume-runaway.md${NS_ATTR}"
                 elif [ "$NS_HITS" -ge 100000 ]; then
                     NS_FLAGGED=1
                     log_warning "High error-log volume in namespace $NS_NAME: $NS_HITS in 24h (${NS_SHARE}% of cluster)"
-                    add_major_issue "High error-log volume in namespace $NS_NAME: $NS_HITS in 24h (${NS_SHARE}% of the cluster total)"
+                    add_major_issue "High error-log volume in namespace \`$NS_NAME\` (\`error-log-volume\`): $NS_HITS in 24h (${NS_SHARE}% of the cluster total)${NS_ATTR}"
                 elif [ "$NS_HITS" -ge 40000 ] && [ "$NS_SHARE" -ge 40 ]; then
                     NS_FLAGGED=1
                     log_warning "Error-log volume concentrated in namespace $NS_NAME: $NS_HITS in 24h (${NS_SHARE}% of cluster)"
-                    add_major_issue "Error-log volume concentrated in namespace $NS_NAME: $NS_HITS in 24h (${NS_SHARE}% of the cluster total)"
+                    add_major_issue "Error-log volume concentrated in namespace \`$NS_NAME\` (\`error-log-volume\`): $NS_HITS in 24h (${NS_SHARE}% of the cluster total)${NS_ATTR}"
                 elif [ "$NS_HITS" -ge 40000 ]; then
                     NS_FLAGGED=1
                     log_warning "Elevated error-log volume in namespace $NS_NAME: $NS_HITS in 24h"
-                    add_minor_issue "Elevated error-log volume in namespace $NS_NAME: $NS_HITS in 24h"
+                    add_minor_issue "Elevated error-log volume in namespace \`$NS_NAME\` (\`error-log-volume\`): $NS_HITS in 24h${NS_ATTR}"
                 fi
             done <<< "$NS_ERROR_ROWS"
 

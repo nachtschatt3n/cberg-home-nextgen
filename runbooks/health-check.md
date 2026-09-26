@@ -481,6 +481,24 @@ kubectl logs -n cert-manager deployment/cert-manager --tail=50 --since=24h 2>&1 
 **AI Analysis**: Count error occurrences, identify problematic components.
 **Pattern Improvements**: Uses structured log patterns (level=error, [ERROR]) to avoid false positives from status fields like "Err: 0" or "error_count: 0".
 
+**Blind spot (F-ee2f51a2)**: `kubectl logs --since=24h` reads only the current container log file. Rotated files and a restarted container's previous instance are not read, so these counts are a lower bound, and they are weakest during a flood. For volume, use the Section 34 ES per-namespace count.
+
+---
+
+## 11a. Node Link Stability & etcd Leadership (added 2026-09-26, F-ee2f51a2)
+
+**Objective**: Name the network or etcd cause behind an error flood instead of only counting it. On 2026-09-24 a switch reboot dropped all three node NICs in one 10-minute window. etcd lost its leader, and one apiserver logged about 351k `etcdserver: no leader` lines.
+
+**Automated** (`netstab_collect` / `netstab_assess`, Prometheus):
+- `increase(node_network_carrier_changes_total{device=~"(en|eth|bond).*"}[10m])` per node over 24h. A change in the node's own boot bucket counts as a reboot, not a drop. One node dropping is **MINOR**. Two or more nodes dropping in the same 10-minute window is **MAJOR** (switch or uplink level).
+- `max(increase(etcd_server_leader_changes_seen_total[24h]))`: 0–2 is INFO (measured background is about 6 per 7 days), ≥3 is **MINOR**, ≥6 is **MAJOR**. A leader change in the same window as a multi-node link drop is at least MINOR and is attributed to that drop.
+- If a series is missing, the check reports UNMEASURED, never OK.
+- To replay a past window, set `HC_NETSTAB_EVAL_TS=<unix end of the 24h window>`.
+
+**Section 34 attribution**: every flagged namespace error-volume finding gets the top normalised messages from a random 200-document sample, plus the busiest 10-minute window. The wildcard count stays unchanged as the control.
+
+Test: `runbooks/tests/test-health-check-netstab-attribution.py` (set `HC_LIVE_PROM_PORT` to also replay against live Prometheus).
+
 ---
 
 ## 12. Talos System Health
