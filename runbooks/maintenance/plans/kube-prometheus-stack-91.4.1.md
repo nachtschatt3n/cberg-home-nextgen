@@ -146,20 +146,7 @@ conflicts_with:                       # HARD slot exclusions — window-schedule
                                       # plan in its conflicts_with: its §4 reads THIS
                                       # Prometheus, and the 2-5 min restart blind spot of
                                       # §3.4 would read there as a collector regression.
-  - unpoller-v5.2.7                   # ADDED 2026-09-20 (RECIPROCITY). Successor to the
-                                      # retired unpoller-v5.2.5 ref below, same reason: its
-                                      # §4.3-4.5 query THIS Prometheus over a >=5-min settle.
-                                      # DEAD-REF CLOSED 2026-09-20: this entry briefly read
-                                      # `unpoller-v5.2.6` — an id that ceased to exist when
-                                      # that plan was retargeted — and `maintenance-plan.py
-                                      # --validate` failed the WHOLE plan set on it
-                                      # (validate_plans() treats an unresolvable depends_on/
-                                      # conflicts_with ref as an ERROR, not a warning:
-                                      # "names no existing plan — this guard is not
-                                      # enforced"). RE-VERIFIED 2026-09-20 after the fix:
-                                      # --validate exits 0, and unpoller-v5.2.7 carries
-                                      # `kube-prometheus-stack-91.4.1` in its own
-                                      # conflicts_with, so the slot exclusion is mutual.
+  # RESOLVED 2026-09-26: unpoller-v5.2.7 EXECUTED (94dfefa5, image v5.2.5 -> v5.2.8) and retired in the same close-out commit -- there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention (F-6acb231c).
   # RESOLVED 2026-09-21: cilium-1.20.2 EXECUTED (80395710, chart 1.20.1 -> 1.20.2) and retired (c0797253) -- there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention: --validate treats an unresolvable ref as an ERROR, because a guard pointing at nothing enforces nothing.
 security_ref: null                    # no security driver
 capability_change: false              # 91.5.2 retarget (2026-09-25): no dashboard JSON
