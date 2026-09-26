@@ -396,7 +396,10 @@ echo "live BASE TABLEs=$LIVE_TABLES   COPY blocks in dump=$DUMP_COPIES"   # expe
 # (Verified 2026-09-20 that each matches exactly once, and that the plausible
 # typo `nc_col_v2` matches zero times — the real table is `nc_columns_v2`.)
 for t in nc_bases_v2 nc_models_v2 nc_views_v2 nc_columns_v2 xc_knex_migrationsv2; do
-  gunzip -c "$OUT" | grep -q "^COPY public\.$t " || { echo "FAIL: $t missing from dump"; exit 1; }
+  # NOT grep -q: it exits at the first match, gunzip takes SIGPIPE, and under pipefail a
+  # PRESENT table reads as missing (false FAIL, 2026-09-26 run). grep >/dev/null reads the
+  # whole stream. Tested 2026-09-26 on the real dump: 5/5 present, a bogus table -> FAIL.
+  gunzip -c "$OUT" | grep "^COPY public\.$t " >/dev/null || { echo "FAIL: $t missing from dump"; exit 1; }
 done
 
 # GATE 5 — the dump ran to completion rather than being truncated mid-stream.
