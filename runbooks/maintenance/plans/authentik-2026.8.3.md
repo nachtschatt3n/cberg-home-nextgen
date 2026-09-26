@@ -5,14 +5,14 @@ pr: null                              # no open Renovate PR (gh pr list --search
                                       # 2026-09-25); held by coverage.py needs_plan + the
                                       # operator deny rule "*authentik*" in auto-update-policy.yaml
 kind: chart
-current: "chart 2026.8.2; server+worker run ghcr.io/goauthentik/server:2026.8.2 (chart appVersion) with both patch-session-settings initContainers pinned :2026.8.2; 12 managed proxy outposts on ghcr.io/goauthentik/proxy:2026.8.2"
-target: "chart 2026.8.3 + both initContainer pins ghcr.io/goauthentik/server:2026.8.3 in ONE commit; 12 managed proxy outposts pushed to ghcr.io/goauthentik/proxy:2026.8.3"
+current: "chart 2026.8.2; server+worker run ghcr.io/goauthentik/server:2026.8.2 (chart appVersion) with both patch-session-settings initContainers pinned :2026.8.2; 13 managed proxy outposts on ghcr.io/goauthentik/proxy:2026.8.2"
+target: "chart 2026.8.3 + both initContainer pins ghcr.io/goauthentik/server:2026.8.3 in ONE commit; 13 managed proxy outposts pushed to ghcr.io/goauthentik/proxy:2026.8.3"
 update_type: patch
 risk: medium                          # same-line patch, chart templates+values byte-identical
                                       # (measured: helm pull 2026.8.2 vs 2026.8.3, only Chart.yaml/
                                       # lock/README differ), but full-cluster SSO blast radius, a
                                       # forward-only (empty) Django merge migration, and a manual
-                                      # 12-outpost image push
+                                      # 13-outpost image push
 est_duration_min: 40
 needs_reboot: false
 touches:
@@ -26,6 +26,7 @@ touches:
     - deployment/ak-outpost-arag-web-forward-auth
     - deployment/ak-outpost-esphome-forward-auth
     - deployment/ak-outpost-frigate-forward-auth
+    - deployment/ak-outpost-gods-eye-view-forward-auth   # created 2026-09-25 by fda69f17
     - deployment/ak-outpost-headlamp-forward-auth
     - deployment/ak-outpost-homepage-forward-auth
     - deployment/ak-outpost-longhorn-forward-auth
@@ -37,9 +38,9 @@ touches:
     - "upstream system blueprints re-applied on the image change (system/providers-oauth2.yaml profile-scope mapping, system/object-attributes-user.yaml)"
   shared:
     - identity-provider   # authentik = SSO (OIDC) + forward-auth for the whole estate
-    - authentik           # every OIDC app and all 12 forward-auth-protected apps log in through it
+    - authentik           # every OIDC app and all 13 forward-auth-protected apps log in through it
     - gateway/envoy       # authentik-server is published via HTTPRoute on envoy-external (public
-                          # edge); the 12 outposts back the SecurityPolicy ext-auth of their apps
+                          # edge); the 13 outposts back the SecurityPolicy ext-auth of their apps
     - monitoring          # §4 reads Prometheus alerts/series; authentik gauges change label shape
 depends_on: []
 conflicts_with:
@@ -66,7 +67,7 @@ rollback_class: git-revert            # the only schema change is an EMPTY merge
 finding_refs: [F-2fb59c74, F-51a63a20, F-adb82e20]   # version-monitor chart patch; server + proxy
                                       # image records (bump-never-rebuild). Confirm closure on the
                                       # next scan; do not assume 2026.8.3 clears every item.
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> E1-E12 applied (13 outposts incl. gods-eye-view re-derived from the live Outpost list, self-contained push blocks with a failing endpoints check, G3/G6 thresholds re-baselined, 6-min settle before outpost gates); order: after authentik-pg17-decommission residual
 window: null                          # PROPOSED: sun-attended:2026-10-04 (see §6) — the window agent assigns
 premises:
   - id: server-still-on-2026.8.2
@@ -81,10 +82,10 @@ premises:
     why: "The HelmRelease has not already been moved by another session."
     run: kubectl get helmrelease -n kube-system authentik -o jsonpath='{.spec.chart.spec.version}'
     expect_exact: "2026.8.2"
-  - id: twelve-outposts-on-2026.8.2
-    why: "The outpost push in §3 step 6 targets exactly 12 Deployments on the old proxy tag."
+  - id: thirteen-outposts-on-2026.8.2
+    why: "The outpost push in §3 step 6 targets exactly 13 Deployments on the old proxy tag (the 12 of 2026-09-12 plus gods-eye-view, created 2026-09-25 by fda69f17). Re-derived 2026-09-26 from the LIVE authentik Outpost list: 14 outposts = 13 managed forward-auth + the embedded one, all kubernetes_disabled_components [ingress]."
     run: kubectl get deploy -n kube-system -o jsonpath='{range .items[*]}{.spec.template.spec.containers[0].image}{"\n"}{end}' | grep -c 'goauthentik/proxy:2026.8.2'
-    expect_exact: "12"
+    expect_exact: "13"
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/authentik.md
@@ -93,7 +94,7 @@ sops_refs:
 generated: "2026-09-25"
 ---
 
-# authentik 2026.8.2 -> 2026.8.3 (chart + both init pins in lockstep, then the 12 outposts)
+# authentik 2026.8.2 -> 2026.8.3 (chart + both init pins in lockstep, then the 13 outposts)
 
 ## 1. Summary & why held
 
@@ -159,15 +160,16 @@ this way).
   timestamp and README badges. Templates and `values.yaml` are byte-identical.
 
 **Managed outposts DO need a bump — the server upgrade does not do it.** This is
-confirmed live: all 12 `ak-outpost-*-forward-auth` Deployments run
-`ghcr.io/goauthentik/proxy:2026.8.2` and were moved there by hand on 2026-09-12.
+confirmed live: all 13 `ak-outpost-*-forward-auth` Deployments run
+`ghcr.io/goauthentik/proxy:2026.8.2`. Twelve were moved there by hand on 2026-09-12;
+`gods-eye-view-forward-auth` was created on that tag by the controller on 2026-09-25 (`fda69f17`).
 `docs/sops/authentik.md` §2 "Managed outposts do NOT follow the server" forbids
 the `KubernetesController(...).up()` loop (on 2026.8.2 it deleted
 `svc/ak-outpost-homepage-forward-auth` — that Deployment is generation 1,
 created 2026-09-12, which is the scar). The SOP-sanctioned path is `kubectl set
 image`, one outpost at a time. These Deployments and Services exist in no git
 repo (controller-created), so this is the documented non-GitOps exception, not a
-bypass. The 13th outpost (`authentik Embedded Outpost`) runs inside
+bypass. The 14th outpost (`authentik Embedded Outpost`) runs inside
 authentik-server and follows the server image.
 
 Security records `F-51a63a20` (server) and `F-adb82e20` (proxy) cite
@@ -179,7 +181,7 @@ this plan is their remedy. Detail stays on the records.
 Run from the repo root on the Mac mini (zsh). Every jsonpath is single-quoted.
 
 1. **Premises** — `.venv/bin/python3 runbooks/plan-premises.py authentik-2026.8.3`.
-   All four must pass. The outpost count must be exactly 12. A different number
+   All four must pass. The outpost count must be exactly 13. A different number
    means an outpost was added or reaped, so re-derive the step 6 list before
    continuing.
 2. **Healthy baseline, all pods Ready on 2026.8.2:**
@@ -187,7 +189,7 @@ Run from the repo root on the Mac mini (zsh). Every jsonpath is single-quoted.
    kubectl get pods -n kube-system -l app.kubernetes.io/instance=authentik \
      -o custom-columns='NAME:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount'
    flux get hr -n kube-system authentik        # READY True, 2026.8.2
-   kubectl get svc -n kube-system -o name | grep -c ak-outpost   # baseline: 25 (12 outpost + 12 -metrics + embedded)
+   kubectl get svc -n kube-system -o name | grep -c ak-outpost   # baseline: 27 (13 outpost + 13 -metrics + embedded)
    ```
 3. **Backup gate — the live DB's Longhorn backup newer than 26h.** The empty
    merge migration makes a revert safe (§5). The backup is the floor if
@@ -224,10 +226,10 @@ Run from the repo root on the Mac mini (zsh). Every jsonpath is single-quoted.
    print('BP', dict(Counter(b.path.split('/')[0] if '/' in b.path else '<BARE>' for b in qs)), 'notok', [(b.path,b.status) for b in qs if b.status!='successful'])
    from authentik.providers.oauth2.models import OAuth2Provider as P
    print('GT empty', [p.name for p in P.objects.all() if not p.grant_types], 'of', P.objects.count())
-   " 2>/dev/null | grep -E '^(BP|GT)'
+   " 2>/dev/null | grep -E '^(BP|GT)' | tee /private/tmp/authentik-2026.8.3-baseline.txt
    ```
-   Measured 2026-09-25: `BP {'cberg': 21, 'default': 19, 'system': 11, 'migrations': 1} notok []`,
-   `GT empty [] of 19`.
+   Measured 2026-09-26 05:07Z (after 8a9b6545): `BP {'cberg': 22, 'system': 11, 'default': 19, 'migrations': 1} notok []`,
+   `GT empty [] of 20`. A non-empty `notok` here means STOP: fix it first (SOP "stuck in `error`").
 6. **Pre-flight the new image's `settings.py`** (SOP §1). This catches a moved
    path or a renamed setting that would make the init `sed` silently no-op:
    ```bash
@@ -240,7 +242,8 @@ Run from the repo root on the Mac mini (zsh). Every jsonpath is single-quoted.
    unchanged between the two tags (GitHub compare file list), so this is
    expected to pass. A `0` means the sed would no-op, so STOP.
 7. **Not co-running:** `authentik-pg17-decommission` is `executed` or has no
-   step running today. `wazuh-2xx-edge-coverage` is not in flight.
+   step running today. `wazuh-2xx-edge-coverage` is not in flight. `kube-prometheus-stack-91.4.1`
+   (exclusive) has finished its verification.
    `git log -3 --format='%h %s' -- kubernetes/apps/kube-system/authentik/` shows
    no uncommitted/unreconciled authentik change.
 
@@ -296,25 +299,35 @@ Run from the repo root on the Mac mini (zsh). Every jsonpath is single-quoted.
    means go to §5 immediately.
 5. **Run the §4 server gates (G1-G5) BEFORE touching any outpost.** A broken
    server with outposts on the new tag doubles the rollback.
-6. **Push the 12 outposts, ONE first.** Follow SOP §2 and never use the
+6. **Push the 13 outposts, ONE first.** Follow SOP §2 and never use the
    `KubernetesController.up()` loop:
+   Each fenced block is ONE self-contained Bash call. The window agent's calls share
+   no shell state, so the second block re-defines `push`. `push` exits non-zero
+   unless the Service's endpoints are exactly 9000 and 9443 (tested in bash and zsh
+   on 2026-09-26: a missing Service prints `EP x: []` with rc=1).
    ```bash
    push() {
      kubectl set image -n kube-system "deploy/ak-outpost-$1-forward-auth" proxy=ghcr.io/goauthentik/proxy:2026.8.3 &&
      kubectl rollout status -n kube-system "deploy/ak-outpost-$1-forward-auth" --timeout=3m &&
-     kubectl get endpoints -n kube-system "ak-outpost-$1-forward-auth" -o jsonpath='{.subsets[0].ports[*].port}{"\n"}'
+     P=$(kubectl get endpoints -n kube-system "ak-outpost-$1-forward-auth" -o jsonpath='{.subsets[0].ports[*].port}' 2>/dev/null | tr ' ' '\n' | sort | tr '\n' ' ') &&
+     echo "EP $1: [$P]" && [ "$P" = "9000 9443 " ]
    }
-   push homepage     # canary; the endpoints line must print 9000 and 9443 (either order)
+   push homepage || echo "STOP at homepage"     # canary
    ```
-   Log in to Homepage through forward-auth in a real browser. Only if that
-   succeeds, continue with the rest one at a time, checking each endpoints
-   line:
+   Log in to Homepage through forward-auth in a real browser (log out first). Only if that
+   succeeds, continue with the remaining 12, one at a time:
    ```bash
-   for a in alertmanager arag-web esphome frigate headlamp longhorn nocodb phpmyadmin prometheus solarfocus-scraper uptime-kuma; do
+   push() {
+     kubectl set image -n kube-system "deploy/ak-outpost-$1-forward-auth" proxy=ghcr.io/goauthentik/proxy:2026.8.3 &&
+     kubectl rollout status -n kube-system "deploy/ak-outpost-$1-forward-auth" --timeout=3m &&
+     P=$(kubectl get endpoints -n kube-system "ak-outpost-$1-forward-auth" -o jsonpath='{.subsets[0].ports[*].port}' 2>/dev/null | tr ' ' '\n' | sort | tr '\n' ' ') &&
+     echo "EP $1: [$P]" && [ "$P" = "9000 9443 " ]
+   }
+   for a in alertmanager arag-web esphome frigate gods-eye-view headlamp longhorn nocodb phpmyadmin prometheus solarfocus-scraper uptime-kuma; do
      echo "== $a"; push "$a" || { echo "STOP at $a"; break; }
    done
    ```
-   (bash/zsh-safe: the list is literal words, not a scalar variable.) Any
+   (bash/zsh-safe: the list is literal words, not a scalar variable. 12 words + the homepage canary = 13.) Any
    `STOP` or an empty endpoints line: see §5 "outpost".
 7. **Close out** (application-update.md Step 5). Delete the silence and run
    `runbooks/update-marker.sh clear authentik`.
@@ -342,7 +355,12 @@ Each gate lists what its failure prints.
   the worker never finished migrating even though the pod is Ready.
 - **G3 — blueprints re-applied successfully (CONTENTS).** Re-run pre-check 5.
   PASS: `notok []`, and the `system` count is ≥ 11 and `default` ≥ 19, `cberg`
-  == 21, no `<BARE>`. `GT empty [] of 19` stays unchanged. FAIL looks like
+  == 22, no `<BARE>`. `GT empty [] of 20` stays unchanged, i.e. the same as the `GT` line in
+  /private/tmp/authentik-2026.8.3-baseline.txt (cat it). If a row is stuck at `error`
+  while its objects work, first read its task log per docs/sops/authentik.md "A blueprint
+  change can leave its row stuck in `error`". "deadlock detected" (3 new workers apply the
+  two changed system blueprints in parallel) means ONE targeted re-apply after all pods
+  are Ready, then re-run. Anything else is a real failure: go to §5. FAIL looks like
   `notok [('system/object-attributes-user.yaml','error')]`, or any OIDC
   provider name in `GT empty [...]`. The latter is the silent failure where
   every login to that app fails while authentik looks healthy
@@ -384,23 +402,28 @@ Each gate lists what its failure prints.
   session and proved nothing. Log out first.
 - **G6 — outposts on 2026.8.3, connected, Services intact (CONTENTS).**
   ```bash
-  kubectl get deploy -n kube-system -o jsonpath='{range .items[*]}{.spec.template.spec.containers[0].image}{"\n"}{end}' | grep -c 'goauthentik/proxy:2026.8.3'   # 12
-  kubectl get svc -n kube-system -o name | grep -c ak-outpost                                                                        # 25 (baseline)
+  kubectl get deploy -n kube-system -o jsonpath='{range .items[*]}{.spec.template.spec.containers[0].image}{"\n"}{end}' | grep -c 'goauthentik/proxy:2026.8.3'   # 13
+  kubectl get svc -n kube-system -o name | grep -c ak-outpost                                                                        # 27 (baseline)
   POD=$(kubectl get pods -n kube-system -l app.kubernetes.io/component=server -o jsonpath='{.items[0].metadata.name}')   # re-derive: the roll replaced every pod
   kubectl exec -n kube-system "$POD" -c server -- ak shell -c "
   from authentik.outposts.models import Outpost, OutpostState
   for o in Outpost.objects.all(): print('OP', o.name, sorted({s.version for s in OutpostState.for_outpost(o)}))
   " 2>/dev/null | grep '^OP' | grep -v "\['2026.8.3'\]"
   ```
-  PASS: `12`, `25`, and the last command prints nothing. The server itself
+  Run this no earlier than 6 min after the last push (outposts re-dial the server
+  websocket on a backoff of up to 300 s after the server roll). If it fails, wait 5 min
+  and re-run ONCE before treating it as a failure. Measured 2026-09-26 05:07Z, 5 min
+  after a server roll: 12 outposts read `[None]`; by 05:09Z every outpost read one version.
+  PASS: `13`, `27`, and the last command prints nothing. The server itself
   reports every outpost (including embedded) on exactly `['2026.8.3']` over
-  its websocket. FAIL: `11` or fewer means a push was skipped. `24` means the
+  its websocket. FAIL: `12` or fewer means a push was skipped. `26` means the
   portless-Service bug deleted one (SOP §2). An `OP x ['2026.8.2']` or `[]`
   line means that outpost is not connected on the new build.
   CONTROL: metric authentik_outpost_connection — `count(authentik_outpost_connection{version="2026.8.3"} == 1)`
-  must be ≥ 12 once the 12 outposts' own exporters are scraped (baseline:
-  15 series = 12 outpost jobs + 3 embedded server-side). Fewer than 12 means an
-  outpost is not connected or not scraped.
+  must be ≥ 13 once the 13 outposts' own exporters are scraped (baseline
+  2026-09-26: 16 series = 13 outpost jobs + 3 embedded server-side). Fewer than 13 means an
+  outpost is not connected or not scraped. Same ≥ 6 min wait as above. Demonstrated
+  FAIL reading: 4 of 16 at 05:07Z, 5 min after the 8a9b6545 server roll; 16 at 05:08:53Z.
   CONTROL: alertname AuthentikOutpostDisconnected — not firing 20 min after
   step 6 (its `for:` window).
   CONTROL: alertname AuthentikOutpostMetricsAbsent — not firing. This guards
@@ -432,7 +455,7 @@ holds secrets. Purge it once done.
 **Outposts (any step 6 failure):** the same command with the old tag, for each
 outpost already pushed:
 `kubectl set image -n kube-system deploy/ak-outpost-<app>-forward-auth proxy=ghcr.io/goauthentik/proxy:2026.8.2`.
-Never `kubectl delete` an outpost Deployment. If a Service vanished (`24` in
+Never `kubectl delete` an outpost Deployment. If a Service vanished (`26` in
 G6), recreate it by copying an intact sibling's spec. `selector` must equal
 the Deployment's `spec.selector.matchLabels`, with ports 9000 (http) / 9443 (https), numeric
 `targetPort` (SOP §2). If the server is reverted, outposts on 2026.8.3 still
@@ -467,7 +490,7 @@ and record the failure on `F-2fb59c74`.
   live.
 - **talos-1.14.1 (sun-attended:2026-09-27):** a node roll evicts every authentik
   pod. Declared.
-- **kube-prometheus-stack-91.4.1 (unwindowed):** G4/G6 read Prometheus. Declared.
+- **kube-prometheus-stack-91.4.1 (now:2026-09-26, exclusive):** G4/G6 read Prometheus. Run only after its verification has finished. Declared.
 - **flux-reconciler-impersonation (sun-attended:2026-10-11, exclusive):** declared.
 - **Proposed window: `sun-attended:2026-10-04`.** It is the earliest attended slot with room
   that does not collide. sat 09-26 holds both authentik plans above, sun 09-27
@@ -477,7 +500,7 @@ and record the failure on `F-2fb59c74`.
   180 min and risk-load 4 of 6. Fallback: `sun-attended:2026-10-18` alongside
   n8n (45 min, no authentik touch).
 - **Full-cluster SSO blast radius.** A crashlooping server or worker drops login
-  for every OIDC app and all 12 forward-auth apps at once. Run it with the
+  for every OIDC app and all 13 forward-auth apps at once. Run it with the
   operator present, and not alongside any other identity-adjacent or
   gateway/envoy change.
 - **Metrics label shape changes** (#25882: `pid` dropped from authentik gauges).

@@ -18,7 +18,7 @@ touches:
   shared: []                                       # no ingress/cert-manager/cilium/coredns/shared-DB perturbed;
                                                     # paperclip-postgresql is a SEPARATE Deployment (see conflicts_with)
 depends_on: []
-conflicts_with: ["paperclip-chart-5.2.1"]          # same HelmRelease file + same pod (reciprocal of that plan's entry).
+conflicts_with: []   # 2026-09-26: paperclip-chart-5.2.1 EXECUTED and retired first (same HelmRelease + pod); ref resolved
                                                     # paperclip-postgresql-18.6 was the old placeholder: it EXECUTED
                                                     # 2026-09-07 (status: executed), so that conflict is moot and removed.
 autonomy_override: human-gated  # ADDED 2026-09-06. The target field itself
