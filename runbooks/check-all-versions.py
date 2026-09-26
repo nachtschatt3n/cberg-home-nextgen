@@ -549,6 +549,39 @@ IMAGE_RELEASE_NOTES_PROJECTS: Dict[str, Tuple[str, str]] = {
     'curlimages/curl': ('curl', 'curl-container'),
 }
 
+# Images whose release notes are NOT GitHub releases, keyed as above. Value is
+# the name of the fetcher used by VersionChecker.fetch_distro_release_notes().
+#
+# 2026-09-26 (planner findings on icloud-backup-freshness alpine 3.24.1 ->
+# 3.24.2 and crash-ghost-reaper python 3.12 -> 3.14). Neither project publishes
+# GitHub releases, so G3 reported "release notes unavailable" on EVERY bump and
+# coverage.py routed each one to an assessed window as unverified. Both have a
+# stable, fetchable first-party source:
+#   alpine -- one news post per release batch, usually naming SEVERAL branches
+#             at once (`Alpine-3.21.8-3.22.6-3.23.6-3.24.2-released.html`), so a
+#             lookup by one version must parse the multi-version slug;
+#   python -- the "What's New In Python X.Y" page per minor, whose
+#             "Notable changes in X.Y.N" sections cover the patch releases.
+DISTRO_RELEASE_NOTES: Dict[str, str] = {
+    'alpine': 'alpine',
+    'python': 'python',
+}
+
+
+def _image_map_key(image_repo: str) -> str:
+    """Registry-host-free, `library/`-free, lowercase key for the image maps."""
+    key = str(image_repo or '').strip().lower().split('@', 1)[0]
+    key = key.split('://')[-1]
+    parts = key.split('/')
+    if len(parts) >= 2 and parts[0] in ('docker.io', 'index.docker.io', 'registry-1.docker.io'):
+        parts = parts[1:]
+    if len(parts) >= 2 and parts[0] == 'library':
+        parts = parts[1:]
+    # a `repo:tag` reference: drop the tag, never a registry port
+    if ':' in parts[-1]:
+        parts[-1] = parts[-1].split(':', 1)[0]
+    return '/'.join(parts)
+
 
 class VersionChecker:
     def __init__(self, repo_root: str, github_token: Optional[str] = None):
@@ -2775,6 +2808,164 @@ class VersionChecker:
         if key in IMAGE_RELEASE_NOTES_PROJECTS:
             return IMAGE_RELEASE_NOTES_PROJECTS[key]
         return self.get_repo_info_from_image(image_repo)
+
+    # ── non-GitHub release notes (alpine, python) ─────────────────────────
+    ALPINE_POSTS_URL = 'https://alpinelinux.org/posts/'
+    PYTHON_WHATSNEW_URL = 'https://docs.python.org/3/whatsnew/{minor}.html'
+    _DISTRO_POST_CAP = 12
+
+    @staticmethod
+    def distro_notes_source(image_repo: str) -> Optional[str]:
+        """'alpine' / 'python' when `image_repo` takes its notes from a
+        non-GitHub first-party source (DISTRO_RELEASE_NOTES), else None."""
+        return DISTRO_RELEASE_NOTES.get(_image_map_key(image_repo))
+
+    def _http_get_text(self, url: str, timeout: int = 20) -> Optional[str]:
+        """Body of `url` as text, or None. One seam, so tests fake the web."""
+        cache_key = f"http:{url}"
+        if cache_key in self.github_cache:
+            return self.github_cache[cache_key]
+        try:
+            resp = requests.get(url, timeout=timeout,
+                                headers={'User-Agent': 'cberg-version-check'})
+            # Decode as UTF-8 ourselves: docs.python.org sends no charset, so
+            # requests falls back to ISO-8859-1 and mangles the heading `¶`
+            # into `Â`, which then breaks the section-number match.
+            text = (resp.content.decode('utf-8', 'replace')
+                    if resp.status_code == 200 else None)
+        except Exception:
+            text = None
+        self.github_cache[cache_key] = text
+        return text
+
+    @staticmethod
+    def _html_to_notes_text(html: str) -> str:
+        """Readable text with headings rendered as markdown `## `, so the
+        section patterns in detect_breaking_changes() see the page structure
+        (e.g. an Alpine `<h2>Upgrade notes</h2>`). The level is kept (`<h3>` ->
+        `### `) so a section can be cut at its own level."""
+        import html as _html
+        s = re.sub(r'(?is)<(script|style|nav|header|footer)\b.*?</\1>', '', html)
+        s = re.sub(r'(?is)<h([1-6])[^>]*>(.*?)</h\1>',
+                   lambda m: ('\n' + '#' * int(m.group(1)) + ' '
+                              + re.sub(r'<[^>]+>', '', m.group(2)).strip() + '\n'), s)
+        s = re.sub(r'(?i)<br\s*/?>|</p>|</li>|</div>', '\n', s)
+        s = re.sub(r'<[^>]+>', '', s)
+        s = _html.unescape(s).replace('¶', '')
+        s = re.sub(r'[ \t]+', ' ', s)
+        return re.sub(r'\n\s*\n+', '\n\n', s).strip()
+
+    @staticmethod
+    def _ver_nums(tag) -> Optional[Tuple[int, ...]]:
+        """`v3.14.7-alpine3.24` -> (3, 14, 7); None when no leading version."""
+        core = str(tag or '').strip().lstrip('vV').split('-')[0].split('+')[0].split('@')[0]
+        if not re.match(r'^\d+(\.\d+)*$', core):
+            return None
+        return tuple(int(x) for x in core.split('.'))
+
+    def fetch_distro_release_notes(self, image_repo: str, cur_tag, new_tag) -> Optional[Dict[str, Any]]:
+        """Release notes covering the hop cur_tag -> new_tag for an image in
+        DISTRO_RELEASE_NOTES, as {'body', 'source', 'prerelease',
+        'published_at'} -- or None when UNKNOWABLE (fetch failed, target
+        release not found, unparseable tag). `cur_tag` may be None: the read
+        then covers the target release alone. Never guesses: None is not
+        "clean", it is "not read".
+        """
+        kind = self.distro_notes_source(image_repo)
+        hi = self._ver_nums(new_tag)
+        lo = self._ver_nums(cur_tag) if cur_tag not in (None, '', '?') else None
+        if not kind or not hi:
+            return None
+        if kind == 'alpine':
+            return self._alpine_notes(lo, hi)
+        if kind == 'python':
+            return self._python_notes(lo, hi)
+        return None
+
+    def _alpine_notes(self, lo, hi) -> Optional[Dict[str, Any]]:
+        # A floating `3.24` is a series pointer, not a release: no post names it.
+        if len(hi) < 3:
+            return None
+        index = self._http_get_text(self.ALPINE_POSTS_URL)
+        if not index:
+            return None
+        pad = lambda t: tuple(t) + (0,) * (3 - len(t)) if len(t) < 3 else tuple(t[:3])
+        hi3 = pad(hi)
+        lo3 = pad(lo) if lo else None
+        wanted, seen = [], set()
+        # Post slugs name one or SEVERAL releases:
+        #   Alpine-3.24.1-released.html
+        #   Alpine-3.21.8-3.22.6-3.23.6-3.24.2-released.html
+        for slug in re.findall(r'(Alpine-[0-9][0-9.\-]*-released\.html)', index):
+            if slug in seen:
+                continue
+            seen.add(slug)
+            versions = [pad(tuple(int(x) for x in v.split('.')))
+                        for v in re.findall(r'\d+\.\d+\.\d+', slug)]
+            if lo3 is None:
+                hit = hi3 in versions
+            else:
+                hit = any(lo3 < v <= hi3 for v in versions)
+            if hit:
+                wanted.append((slug, hi3 in versions))
+        if not any(is_target for _, is_target in wanted):
+            return None                      # the target release has no post (yet)
+        if len(wanted) > self._DISTRO_POST_CAP:
+            return None                      # too wide a hop to read honestly
+        parts, sources = [], []
+        for slug, _ in wanted:
+            url = self.ALPINE_POSTS_URL + slug
+            html = self._http_get_text(url)
+            if not html:
+                return None                  # one unread post = range not read
+            text = self._html_to_notes_text(html)
+            # Drop the site chrome ahead of the post title.
+            m = re.search(r'(?m)^#+ Alpine (Linux )?[0-9].*$', text)
+            parts.append(text[m.start():] if m else text)
+            sources.append(url)
+        return {'body': '\n\n'.join(parts), 'source': ' '.join(sources),
+                'prerelease': False, 'published_at': ''}
+
+    def _python_notes(self, lo, hi) -> Optional[Dict[str, Any]]:
+        if len(hi) < 2 or hi[0] != 3:
+            return None
+        patch_hop = bool(lo and len(lo) >= 2 and tuple(lo[:2]) == tuple(hi[:2]))
+        if patch_hop:
+            minors = [hi[1]]
+        elif lo and len(lo) >= 2 and lo[0] == 3 and lo[1] < hi[1]:
+            # Every minor the hop ENTERS: 3.12 -> 3.14 reads 3.13 and 3.14.
+            minors = list(range(lo[1] + 1, hi[1] + 1))
+        else:
+            minors = [hi[1]]
+        parts, sources = [], []
+        for m in minors:
+            url = self.PYTHON_WHATSNEW_URL.format(minor=f"3.{m}")
+            html = self._http_get_text(url)
+            if not html:
+                return None
+            text = self._html_to_notes_text(html)
+            sources.append(url)
+            if not patch_hop:
+                # A minor the hop enters: the whole What's New page is its notes.
+                parts.append(text)
+                continue
+            # Same-minor PATCH hop: the page's "Notable changes in 3.Y.N"
+            # sections are upstream's notes for the patch releases.
+            lo_p = lo[2] if len(lo) > 2 else 0
+            hi_p = hi[2] if len(hi) > 2 else None
+            if hi_p is None:
+                return None                  # floating `3.14` target: not a release
+            picked = []
+            for sec in re.split(r'(?m)^(?=## )', text):
+                mm = re.match(r'## Notable changes in 3\.%d\.(\d+)\b' % m, sec)
+                if mm and lo_p < int(mm.group(1)) <= hi_p:
+                    picked.append(sec.strip())
+            parts.append('\n\n'.join(picked) if picked else
+                         f"No 'Notable changes in 3.{m}.N' section for 3.{m}.{lo_p + 1}"
+                         f"..3.{m}.{hi_p} on {url} -- upstream documents no notable "
+                         f"change for these bugfix releases.")
+        return {'body': '\n\n'.join(parts), 'source': ' '.join(sources),
+                'prerelease': False, 'published_at': ''}
 
     def get_chart_repo_info(self, chart_name: str, repo_name: str, repo_url: str = '') -> Optional[Tuple[str, str]]:
         """Get GitHub repository info for a Helm chart.

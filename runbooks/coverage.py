@@ -1982,6 +1982,15 @@ def _g3_range_gate(item):
         dep = item.get("component")
     if not dep:
         return "n/a", ""
+    # A non-GitHub notes source (alpine posts, python What's New) was already
+    # read over the WHOLE range by the G3 target read (breaking_change_signal
+    # passes `current`), and these projects publish no GitHub releases, so the
+    # release-list walk could only ever answer "unreadable".
+    try:
+        if _auto_update_module().distro_range_read(_load_checker(), dep):
+            return "n/a", ""
+    except Exception:
+        pass
     between, why = _release_tags_between(dep, cur, tgt)
     if between is None:
         return (("unreadable", f"{why} for {dep}")
@@ -2112,7 +2121,7 @@ def _with_channel_measurement(reason, item, heads):
             f"a measurement]")
 
 
-def breaking_change_signal(image_repo: str, tag: str):
+def breaking_change_signal(image_repo: str, tag: str, cur: str = None):
     """(is_breaking, note) — G3 for a candidate that has no Renovate PR.
 
     Reuses auto-update.py's engine so the two lanes agree on what "breaking"
@@ -2132,12 +2141,20 @@ def breaking_change_signal(image_repo: str, tag: str):
     `max:` rule was written for.
     """
     key = f"{image_repo}:{tag}"
+    # `cur` matters ONLY for a non-GitHub (DISTRO_RELEASE_NOTES) image, whose
+    # fetcher reads the whole cur..tag range in one go; for everything else
+    # the range is walked by _g3_range_gate() and the target read is keyed
+    # on the tag alone, exactly as before.
+    mod = _auto_update_module()
+    distro = mod.distro_range_read(_load_checker(), image_repo) if cur else False
+    if distro:
+        key = f"{image_repo}:{cur}:{tag}"
     if key in _G3_CACHE:
         return _G3_CACHE[key]
     out = (False, "unverified (release notes unavailable)")
     try:
-        mod = _auto_update_module()
-        notes, resolved = mod.breaking_signal(_load_checker(), image_repo, tag)
+        notes, resolved = mod.breaking_signal(_load_checker(), image_repo, tag,
+                                              cur_tag=cur if distro else None)
         if notes:
             out = (True, "breaking-change signal in release notes: "
                          + "; ".join(str(n)[:100] for n in notes[:2]))
@@ -2407,7 +2424,12 @@ def _direct_bump_breaking_gate(item):
             ordered = sorted(repos, key=lambda r: (dep.split("-")[0] not in (r or "").lower(), r))
             last = (False, "unverified (release notes unavailable)")
             for r in ordered:
-                is_b, note = breaking_change_signal(r, item["target"])
+                # `cur` only for a non-GitHub notes source (its fetcher reads
+                # the whole range); the two-argument call is kept otherwise.
+                if _is_distro_repo(r):
+                    is_b, note = breaking_change_signal(r, item["target"], item.get("current"))
+                else:
+                    is_b, note = breaking_change_signal(r, item["target"])
                 if is_b:
                     return True, f"{note} [{r}]"
                 if "checked" in note:
@@ -2418,6 +2440,15 @@ def _direct_bump_breaking_gate(item):
         return False, "unverified (not an image or chart)"
     except Exception as e:  # never let a gate failure read as a pass CLAIM
         return False, f"unverified ({type(e).__name__})"
+
+
+def _is_distro_repo(repo) -> bool:
+    """True when `repo` reads its notes from a non-GitHub source (alpine,
+    python — check-all-versions.py DISTRO_RELEASE_NOTES). Never raises."""
+    try:
+        return bool(_auto_update_module().distro_range_read(_load_checker(), repo))
+    except Exception:
+        return False
 
 
 def _direct_bump_structural_gate(item):

@@ -437,7 +437,15 @@ def breaking_signal(checker, dep, new_tag, cur_tag=None):
     release the hop leapfrogs is exactly as breaking as one in the target.
     An unreadable release LIST degrades to the single-tag scan and says so via
     resolved=False, preserving this gate's documented asymmetry.
+
+    Images whose notes are NOT GitHub releases (alpine, python — see
+    check-all-versions.py DISTRO_RELEASE_NOTES) are read from their
+    first-party source instead, over the same cur..new range. Without this
+    every such bump was "release notes unavailable" by construction.
     """
+    distro = _distro_source(checker, dep)
+    if distro:
+        return _distro_breaking_signal(checker, dep, new_tag, cur_tag)
     owner_repo = _owner_repo(checker, dep)
     if not owner_repo:
         return [], False
@@ -461,6 +469,38 @@ def breaking_signal(checker, dep, new_tag, cur_tag=None):
         except Exception:
             continue
     return found, bool(any_resolved and resolved_range)
+
+
+def _distro_source(checker, dep):
+    """'alpine'/'python' when `dep` reads its notes from a non-GitHub source."""
+    try:
+        fn = getattr(checker, "distro_notes_source", None)
+        return fn(dep) if fn else None
+    except Exception:
+        return None
+
+
+def _distro_breaking_signal(checker, dep, new_tag, cur_tag=None):
+    """G3 for a DISTRO_RELEASE_NOTES image. The fetcher reads the whole range
+    cur..new itself (every Alpine post naming a release in the range; every
+    Python "What's New" page the hop enters, or the target minor's "Notable
+    changes in X.Y.N" sections for a patch hop), so there is no separate
+    release-list walk. Unfetchable => ([], False), the same "not read" G3
+    reports for a GitHub project it cannot reach."""
+    try:
+        notes = checker.fetch_distro_release_notes(dep, cur_tag, new_tag)
+    except Exception:
+        return [], False
+    if not notes or not notes.get("body"):
+        return [], False
+    return list(checker.detect_breaking_changes(notes["body"], "minor") or []), True
+
+
+def distro_range_read(checker, dep):
+    """True when G3 for `dep` already covers the whole cur..new RANGE, so the
+    GitHub release-list range walk has nothing to add (and could only report
+    "unreadable" — these projects publish no GitHub releases)."""
+    return bool(_distro_source(checker, dep))
 
 
 # ── G3s: the STRUCTURAL companion gate — the DIFF, not the prose ─────────────
