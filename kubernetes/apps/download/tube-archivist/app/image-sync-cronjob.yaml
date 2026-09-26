@@ -19,7 +19,7 @@ spec:
             fsGroup: 1000
           containers:
             - name: sync-images
-              image: python:3.11-slim
+              image: python:3.14.7-slim
               command: ["python", "/app/sync_images.py"]
               env:
                 - name: TA_URL
