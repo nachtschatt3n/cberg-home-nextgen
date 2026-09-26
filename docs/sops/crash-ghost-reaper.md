@@ -25,7 +25,7 @@ Related: [[project_power_outage_es_corruption]], `docs/sops/storage-safety.md`.
 
 - **What runs:** `kubernetes/apps/kube-system/crash-ghost-reaper/`
   - `app/configmap.yaml` — the Python detection/reaping script (`reap.py`)
-  - `app/cronjob.yaml` — `*/15 * * * *`, python:3.12-alpine, non-root, RO rootfs
+  - `app/cronjob.yaml` — `*/15 * * * *`, python:3.14.7-alpine, non-root, RO rootfs
   - `app/rbac.yaml` — SA + ClusterRole (`pods: get,list,delete`) + binding
   - `ks.yaml` — Flux Kustomization
 - **How it talks to the API:** in-cluster ServiceAccount token + CA (urllib),
