@@ -76,7 +76,7 @@ rollback_class: git-revert              # but TWO-PHASE — see §5 (operator we
                                         # plugin image older than its own version)
 finding_refs: [F-b6b925de, F-e99826d8, F-4aebf29c, F-cc5b464c, F-bb3a90aa, F-97cb1e88]
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> B1-B6 + N1-N3 applied verbatim (fixed state dir, file-carried rollback sha, pod-level phase-A gate, exact webhook set, autonomy_override human-gated, optional 4.8 CRD removal gated in code)
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 premises:
   - id: operator-chart-0360
     why: "`current:` claims chart 0.36.0 on the operator HR; if it moved, this plan is stale."

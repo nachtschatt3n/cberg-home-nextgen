@@ -202,7 +202,7 @@ finding_refs: [F-cb9182ca]        # CORRECTED 2026-09-20. The pre-review file le
                                   #     SHOULD keep reading as unplanned until it
                                   #     gets its own plan or DECIDE routing.
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> 15 edits applied (log floor 10k, kmsg gate via ES per-node count, state in fixed files, silence delete URL fixed); order: after elasticsearch-obs-recovery §4 + 10 min
-window: null                      # the scheduler assigns. Shape: no reboot, no
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
                                   # capability change, git-revert, 70m. Derived
                                   # execution class is AUTO-NIGHT (read from
                                   # `maintenance-plan.py --json`, not re-derived),

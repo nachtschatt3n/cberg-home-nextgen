@@ -31,7 +31,7 @@ autonomy_override: human-gated        # RESTRICTS only. The verification needs a
                                       # address; it cannot run unattended.
 rollback_class: git-revert            # nothing is changed, so nothing to roll back
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> rewritten check-only (Phase 1 already shipped in 2df8ec7f + f2d6c667); depends_on authentik-2026.8.3 + 20-min soak
-window: null                          # the orchestrator stamps the slot
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 security_ref: null                    # the client-IP defect this plan was written
                                       # for is FIXED (F-649e78b6 resolved,
                                       # f2d6c667); F-aae0f363 (the ingress-nginx

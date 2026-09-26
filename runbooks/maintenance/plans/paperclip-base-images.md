@@ -27,7 +27,7 @@ autonomy_override: human-gated  # ADDED 2026-09-06. The target field itself
                                 # the moment anyone vetted it. The refusal now
                                 # lives in the field the derivation reads.
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> 24 edits applied verbatim (debian-only scope, ubuntu leg excluded, 6 premises, gates that can fail, real rollback); order: after paperclip-chart-5.2.1
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is derived from
 # capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 security_ref: F-ae420ae8              # live accepted-risk finding for the ubuntu leg (AR-101); F-afa93406 is its

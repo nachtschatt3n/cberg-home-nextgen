@@ -124,7 +124,7 @@ backup_gate: "pg_dump of the nocodb metadata database (DB name resolved from the
   ~/backups/nocodb/pre-counts.txt for the §4 contents comparison."
 finding_refs: [F-ca5c5597, F-17c8bf18]
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> 15 edits applied (namespace-scoped alert gate, no sleeps, Flux-suspend rollback, security_ref F-17c8bf18); order: before nextcloud-34.0.4 + 15 min soak
-window: "sat-attended:2026-10-17"     # PROPOSED 2026-09-21, NOT approved. HUMAN-GATED: still
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was 'sat-attended:2026-10-17')
                                       # needs an operator GO before it runs. §6's own capacity
                                       # table reaches this same slot — the Saturday budget is
                                       # 70 min after the 20-min Step-0 reserve and this plan

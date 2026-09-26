@@ -69,7 +69,7 @@ finding_refs: [F-8ee4be16, F-01f4a388]
                                       # F-01f4a388 = metacollector image finding (answered by the
                                       # 0.1.3 -> 0.1.4 pin bump in step 3.2)
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> A-H applied (detect.sh script file, wazuh >=3 hits all 100402, k8smeta RPC noise filtered in 4.1, shared-index-safe revert, 9m rollout waits); order: last in the serial set, after kps sign-off
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 premises:
   - id: chart-still-9.1.0
     why: >-

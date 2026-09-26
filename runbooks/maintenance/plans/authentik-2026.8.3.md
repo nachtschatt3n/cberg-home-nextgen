@@ -68,7 +68,7 @@ finding_refs: [F-2fb59c74, F-51a63a20, F-adb82e20]   # version-monitor chart pat
                                       # image records (bump-never-rebuild). Confirm closure on the
                                       # next scan; do not assume 2026.8.3 clears every item.
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> E1-E12 applied (13 outposts incl. gods-eye-view re-derived from the live Outpost list, self-contained push blocks with a failing endpoints check, G3/G6 thresholds re-baselined, 6-min settle before outpost gates); order: after authentik-pg17-decommission residual
-window: null                          # PROPOSED: sun-attended:2026-10-04 (see §6) — the window agent assigns
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 premises:
   - id: server-still-on-2026.8.2
     why: "`current:` claims the server Deployment runs :2026.8.2."

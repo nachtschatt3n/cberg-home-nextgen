@@ -38,7 +38,7 @@ status: awaiting-go   # steps 1-4 DONE: 1, 2, 4 in the now:2026-09-24 run (5f162
                       # step 3 (PVC delete) by the operator in the coordinating session, PV Released
                       # at 2026-09-24T17:41:36Z (recorded in e6e31d44). RESIDUAL: R1 forward-auth
                       # proof, then R2 = step 5 (dump purge, operator hands) — see "Residual" below.
-window: "now:2026-09-26"   # residual R1+R2 only (was sat-attended:2026-09-26; steps 1-4 ran now:2026-09-24)
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was 'now:2026-09-26')
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 # (original rationale: destroys the rollback path)
