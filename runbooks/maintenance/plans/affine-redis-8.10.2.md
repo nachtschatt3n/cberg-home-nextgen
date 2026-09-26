@@ -22,13 +22,13 @@ conflicts_with:
   - helm-drift-detection            # its §4.1 asserts Helm revision numbers are IDENTICAL across
                                     # all releases before/after; an affine-redis upgrade (rev 14 -> 15)
                                     # in the same window would fail that gate and mis-attribute.
-                                    # Reciprocal entry is NOT yet in helm-drift-detection (reported).
+                                    # Reciprocal entry added to helm-drift-detection 2026-09-26 (review).
 exclusive: false
 security_ref: null
 capability_change: false
 rollback_class: git-revert          # redis is non-persistent; nothing forward-only happens
 finding_refs: [F-d40c9c12]          # version finding "affine-redis: image redis 8.10.1-alpine → 8.10.2-alpine (patch)"
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> 5 edits applied (cooldown exits 1 on TOO_NEW, V6 log grep informational, V7 asserts /info body); NOT before 2026-09-26T21:05Z -> 03:30 nightly (AUTO-NIGHT)
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -156,10 +156,13 @@ try:
 except Exception:
     print("FETCH_FAILED"); sys.exit(1)
 age = (d.datetime.now(d.timezone.utc) - d.datetime.fromisoformat(t.replace("Z","+00:00"))).total_seconds()/3600
-print(("AGE_OK" if age >= 48 else "TOO_NEW"), round(age,1), "h", t)'
-#    Published 2026-09-24T21:05Z => earliest AGE_OK is 2026-09-26T21:05Z.
-#    sat-attended 2026-09-26 09:00 is TOO EARLY; sun-attended 2026-09-27 or
-#    any later slot is fine.
+ok = age >= 48
+print(("AGE_OK" if ok else "TOO_NEW"), round(age,1), "h", t); sys.exit(0 if ok else 1)'
+#    Docker Hub last_updated 2026-09-24T21:05Z. That is a RE-PUSH (upstream
+#    released 8.10.2 on 2026-09-17); coverage.py's G5 keys on last_updated
+#    too, so this mirrors the fleet gate. Earliest AGE_OK 2026-09-26T21:05Z;
+#    nightly 2026-09-27 03:30 (01:30Z, ~52 h) or any later slot is fine.
+#    A further re-push of the tag resets the clock: TOO_NEW then is a STOP.
 
 # c) target tag still resolvable AND no newer 8.10.x has superseded it
 #    (8.10.2 -> 200; 8.10.3 -> 404 expected; a 200 there means refresh the plan)
@@ -286,16 +289,23 @@ kubectl get pod -n office -l app.kubernetes.io/instance=affine \
   -o 'custom-columns=NAME:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount,START:.status.startTime'
 #      PASS: same NAME/START/RESTARTS as pre-check (e). A new pod or a
 #      restart increment means ioredis did not recover in-process -> investigate.
-#      Then, at least 3 min after the new redis pod went Ready:
+#      Then, at least 3 min after the new redis pod went Ready. INFORMATIONAL,
+#      NOT a PASS criterion (review 2026-09-26): its PASS is an absence (0) and
+#      no non-zero reading of this exact command is demonstrated. The
+#      2026-09-24 burst is outside kubelet log retention (~11 h at this pod's
+#      VERBOSE rate; `--since=40h` matched 0 lines on 2026-09-26). The
+#      "client reconnected" property is gated by V4 and V5, which both FAIL
+#      on a dead client.
 kubectl logs -n office deploy/affine -c main --since=2m | grep -ciE 'ETIMEDOUT|ECONNREFUSED'
-#      PASS: 0. A burst DURING the swap is expected; any non-zero count in a
-#      2-minute window that starts >= 3 min after Ready means the client is
-#      still failing (the 2026-09-24 burst printed ~110 such lines in 3 min,
-#      so this grep does fire on the real failure shape — case-insensitive).
+#      Record the count. Also record the same grep with --since=6m right after
+#      V4 (it spans the swap): a non-zero reading there is the positive
+#      control this query lacks; cite it in the run record if it fires.
 
 # V7 — end-to-end app answer via the service (no public hostname needed).
 kubectl port-forward -n office svc/affine 13010:3010 >/dev/null 2>&1 & PF=$!; sleep 3
-curl -s -o /dev/null -w '/info %{http_code}\n' http://127.0.0.1:13010/info    # PASS: 200
+curl -s http://127.0.0.1:13010/info | grep -c '"message":"AFFiNE 0.27.4 Server"'   # PASS: 1
+#      (a status code alone cannot fail: the SPA fallback answers 200 on ANY
+#      path, measured 2026-09-26; the JSON body is served only by the API.)
 kill $PF 2>/dev/null
 #      Attended: also open AFFiNE in a browser and load one existing doc;
 #      content must render (not an empty shell) and an edit must persist
@@ -353,6 +363,14 @@ If Helm is wedged `pending-upgrade`, follow `docs/sops/application-update.md`
 - **Not Prometheus-verified** — §4 reads redis and AFFiNE directly, so no
   conflict with `kube-prometheus-stack-91.4.1` is needed.
 - **Timing:** not before 2026-09-26T21:05Z (G5 cooldown, pre-check b). No
-  reboot, low risk weight, ~15 min: any attended slot from sun-attended
-  2026-09-27 onward. It could also ride the unattended nightly if the operator
-  narrows the deny rule instead — that removes the need for this plan entirely.
+  reboot, low risk weight, ~15 min. The plan derives **AUTO-NIGHT**
+  (`maintenance-plan.py --json` execution_classes, 2026-09-26), so once
+  vetted it may run in any window after the cooldown; the first is nightly
+  2026-09-27 03:30. It does NOT become a Step-0 AUTO item after the
+  cooldown: the `*affine*` deny rule has no `max:`, so coverage.py's
+  `deny_rule_for('affine-redis', 'patch')` still blocks it (verified
+  2026-09-26). Narrowing that glob is the only way to retire this plan in
+  favour of Step 0.
+- **Same HelmRelease, second held item:** F-e4bffed7 (affine-redis chart
+  5.1.0 -> 5.2.1, held by the same glob) has no plan yet. Any plan for it
+  touches `helmrelease/affine-redis` and must be serialized with this one.

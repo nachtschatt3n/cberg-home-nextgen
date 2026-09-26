@@ -5,14 +5,11 @@ pr: null                              # no Renovate PR — coverage.py direct-bu
                                       # F-f3e9ddb0 (server) + F-4a9d6631 (notify-push),
                                       # both routed to the PLAN lane by the `*nextcloud*`
                                       # deny rule in runbooks/auto-update-policy.yaml.
-                                      # The CHART leg (9.2.6 -> 9.3.0) has NO finding id of
-                                      # its own: version-check-current.md line 197 carries
-                                      # chart and image in ONE row, and only the image half
-                                      # was raised as a finding. Measured 2026-09-20 with
-                                      # `policy-cli.py finding list --grep chart`: no
-                                      # nextcloud chart row exists. So nothing but this
-                                      # plan tracks the chart move — do not assume a
-                                      # finding will re-raise it if this plan is dropped.
+                                      # The CHART leg (9.2.6 -> 9.3.0) is F-38fecaa8
+                                      # (version/monitor, first_seen 2026-09-21, PLAN lane).
+                                      # It did not exist when this plan was rewritten on
+                                      # 2026-09-20; re-measured open on 2026-09-26 and now
+                                      # carried in finding_refs.
 kind: chart                           # CHANGED 2026-09-20: this is now a chart+image lockstep
                                       # move (house precedent: authentik-pg18-lockstep also
                                       # files a chart+image lockstep as `kind: chart`). The
@@ -108,6 +105,17 @@ conflicts_with:
                                                 # slots of one weekend in either order are fine
                                                 # (its server premise tolerates 34.0.x and it
                                                 # re-takes its baselines the same day). §6.
+  - nocodb-2026.09.0                            # ADDED 2026-09-26 (reciprocity; that plan lists
+                                                # this one). ROLLBACK-CLASS STACKING, not a shared
+                                                # resource: both are backup-restore. Same slot only
+                                                # SERIALLY, nocodb first, and only once nocodb's
+                                                # rollback is closed (its §4 green + 15 min soak) —
+                                                # never two backup-restore rollbacks open at once.
+  - nextcloud-redis-hardening                   # ADDED 2026-09-26 (reciprocity). Same helmrelease.yaml,
+                                                # same Deployment restart. It runs AFTER this plan and
+                                                # must not start until §3.6 (retries restored to 3) is
+                                                # pushed and §4 is green — else §5.3(d) can no longer
+                                                # restore helmrelease.yaml from <bump-sha>^ cleanly.
                                                 # NOT listed: nextcloud-whiteboard-2.0.0. It is
                                                 # SUPERSEDED by this plan (§1.6), not a conflict,
                                                 # and the operator is retiring the file. A ref to
@@ -136,7 +144,9 @@ rollback_class: backup-restore        # a git revert is NOT a rollback once `occ
                                       # demands anyway ("operator-supervised only").
                                       # The whiteboard BACKEND leg alone is a true one-line
                                       # git-revert (§5.4) — the weakest class wins the field.
-finding_refs: [F-f3e9ddb0, F-4a9d6631, F-ab9e243a, F-53ba35b1, F-6c461103]
+finding_refs: [F-f3e9ddb0, F-4a9d6631, F-ab9e243a, F-53ba35b1, F-6c461103, F-38fecaa8]
+                                      # F-38fecaa8 (version/monitor, nextcloud chart 9.2.6 ->
+                                      # 9.3.0) ADDED 2026-09-26 re-review: raised 2026-09-21.
                                       # F-53ba35b1 (version/critical, whiteboard v1.5.9 ->
                                       # v2.0.0) and F-6c461103 (security/critical, whiteboard)
                                       # ADDED 2026-09-20: this plan now delivers that bump, so
@@ -144,7 +154,7 @@ finding_refs: [F-f3e9ddb0, F-4a9d6631, F-ab9e243a, F-53ba35b1, F-6c461103]
                                       # joins on. Both were re-measured open/unchanged
                                       # (last_seen 2026-09-19) before being claimed.
 status: vetted   # RE-VETTED 2026-09-20 after the B1/B2 rewrite. Independent reviewer ran every gate read-only against the live cluster: verdict ready-for-go, every_gate_can_fail=true, mail_gate_is_real=true, whiteboard_both_legs_covered=true, gates_still_vacuous=NONE, blocking_issues=NONE, 18 premises PASS. NOT YET SCHEDULED: HUMAN-GATED (capability_change), needs an attended slot and a fresh operator GO.
-window: "sun-attended:2026-10-04"   # SLOTTED 2026-09-20 after the B1/B2 rewrite was reviewed ready-for-go. Capacity: 75 of 200 min, risk 2 of 6, slot otherwise EMPTY. Deliberately NOT sun-attended:2026-10-11 - that holds jellyfin-12.1, and jellyfin (high, backup-restore, capability_change) plus this plan (major, backup-restore, capability_change) is two backup-restore rollbacks in one window, the same no-rollback-capacity stacking the reconciler already rejected for jellyfin+frigate. Not 09-26/10-03/10-10 either: 45/20/45 min free, 75 does not fit. Not 09-27: talos-1.14.0 needs that whole slot. HUMAN-GATED - still requires an operator GO before it runs.
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was 'sun-attended:2026-10-04')
                                       # sun-attended). Never `nightly`: the executor must
                                       # watch the entrypoint log during §3.4 and be able to
                                       # run the §5.1 recovery inside the same slot.
@@ -448,6 +458,18 @@ previous revision listed.** Pod runs PHP **8.5.9**.
 disabled", and named mail 5.11.5 and contacts 8.8.1 — all three figures were
 stale by five days.) 68 apps enabled, 9 disabled overall.
 
+> **RE-MEASURED 2026-09-26 (appstore API, `platform/34.0.3/apps.json`, newest
+> stable per app) — the table above is stale in four places and the pending set
+> is now 14:** `mail` → **5.12.2** (5.12.1 on 09-23, 5.12.2 on 09-24; still one
+> app, still two minor lines from 5.10.12), `calendar` → **6.6.1** (now a
+> MINOR, 09-20), `richdocumentscode` → **26.4.402** (09-24), and one NEW pending
+> update **`google_synchronization` 4.2.0 → 4.3.1** (enabled; 4.3.0/4.3.1 on
+> 09-20/09-21; its 4.2.0 declared platform `<35`, 4.3.1 declares `<36`). All
+> four declare platform `<36` and PHP `<8.6` (pod runs 8.5.9). No new MAJOR;
+> under the operator's always-take-app-updates policy this drift is in scope,
+> but every number below that counts or names it was updated. The executor's
+> §2.0b(e) reading is still the authority on the day.
+
 Now the timer. The chart's startupProbe is `initialDelaySeconds: 60`,
 `periodSeconds: 30`, `failureThreshold: 10`: **the kubelet kills the container
 360 s after start if `status.php` has not answered.** Measured on the last
@@ -604,6 +626,15 @@ A Recreate rollout re-runs both, so it should survive — §4 asserts it did.
 Run from the repo root on the Mac mini. Everything here is read-only except the
 dump/snapshot artefacts.
 
+**Agent runtime (2026-09-26 re-review).** Each code block runs as ONE Bash tool
+call; no shell variable, function, `cd` or port-forward survives to the next.
+Cross-step values live in FILES under the `-exec` directory (`bump-sha.txt`,
+`retries-sha.txt`, `silence.json`). There is no foreground `sleep` above 10 s
+and no `-w`/`-f` follow anywhere: every wait is a `kubectl ... --timeout=`. Any
+command whose `--timeout` exceeds 110 s (or the §3.2 `app:update --all`) MUST be
+issued with the Bash tool `timeout` set to 600000 ms, else the tool kills it at
+120 s and the gate reads as a failure it is not.
+
 **Baseline directory — `/Users/mu/db-dumps/nextcloud-34.0.4-exec/`, written
 with TRUNCATING redirects only.** Every path in this plan is absolute and
 literal on purpose: each tool call is a fresh shell, so a `B=…` set in §2 is
@@ -693,7 +724,8 @@ print('counts: enabled', len(en), 'disabled', len(d['disabled']))
 # (e) the pending set is the 13 this plan planned for
 kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ app:update --showonly" \
   | tee /Users/mu/db-dumps/nextcloud-34.0.4-exec/app-updates-pending-pre.txt | wc -l
-#   EXPECT: 13, and the names/versions in §1.3's table.
+#   EXPECT: 14 (re-measured from the appstore 2026-09-26): §1.3's table with mail 5.12.2,
+#   calendar 6.6.1, richdocumentscode 26.4.402, PLUS google_synchronization 4.3.1.
 #   HOW IT FAILS: a DIFFERENT count or a version above the table => upstream drifted again
 #   (this is F-58f0bbab's whole subject). A LOWER count is as suspicious as a higher one.
 #   Read the file before continuing; a new MAJOR in that list is an operator decision, not
@@ -730,7 +762,15 @@ done
 **2.1 Cluster / Flux / storage green, nothing in flight**
 
 ```bash
-flux get kustomizations -A | awk 'NR==1 || $5 != "True"'        # expect header ONLY
+# SCOPED 2026-09-26: a cluster-wide header-only gate cannot pass during a multi-plan day
+# (measured: 3-7 rows of transient "dependency ... revision is not up to date" while other
+# plans' commits reconcile). Gate on THIS plan's chain only: office/nextcloud and its sole
+# dependsOn, storage/longhorn. Re-run until both read True (transient churn clears in minutes).
+for K in office/nextcloud storage/longhorn; do
+  printf '%s ' "$K"; kubectl get kustomization -n "${K%%/*}" "${K##*/}" \
+    -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{" "}{.status.lastAppliedRevision}{"\n"}'
+done                                                            # expect: True <sha> on both
+flux get kustomizations -A | awk 'NR==1 || $5 != "True"'        # INFORMATIONAL only today
 flux get helmreleases -n office | grep nextcloud                # READY True, chart 9.2.6
 kubectl -n office get pods -l app.kubernetes.io/name=nextcloud  # all Running, 0 recent restarts
 kubectl -n office get pods | grep -E 'nextcloud-(notify-push|redis|mariadb|whiteboard)'
@@ -739,11 +779,14 @@ kubectl get volumes -n storage nextcloud-mariadb nextcloud-config \
 kubectl -n office get jobs --sort-by=.metadata.creationTimestamp | grep nextcloud-cron | tail -3
 ```
 
-EXPECT: header-only from the first line; volumes attached/healthy with
+EXPECT: `True` for office/nextcloud and storage/longhorn (the cluster-wide list is
+informational); volumes attached/healthy with
 `lastBackupAt` from last night (measured 2026-09-20: mariadb 03:04:10Z, config
 03:08:50Z — both `Completed`); newest cron Jobs `Complete 1/1`.
-HOW IT FAILS: any non-True Kustomization printed by the `awk` means something
-else is already broken and this window should fix that first. A
+HOW IT FAILS: office/nextcloud or storage/longhorn not `True` after the churn
+settles means this plan's own reconcile path is broken — fix that first. A
+cluster-wide row that stays False with a NON-dependency message is worth a look,
+but is not this plan's gate. A
 `lastBackupAt` older than ~36 h means the durable rollback floor under §5.3 is
 not where the premises claim (the premise checks STATE; only the executor can
 read the AGE).
@@ -955,13 +998,14 @@ kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -
 
 # CONTROL: the log must contain one success line per updated app — an EMPTY log is a failure,
 # not "nothing to do" (§2.0b(e) already proved 13 updates were pending).
-grep -cE 'updated|Updated' /Users/mu/db-dumps/nextcloud-34.0.4-exec/app-update-all.log       # expect ~13
+grep -cE 'updated|Updated' /Users/mu/db-dumps/nextcloud-34.0.4-exec/app-update-all.log       # expect ~14 (= §2.0b(e) count)
 grep -inE 'error|failed|could not|exception' /Users/mu/db-dumps/nextcloud-34.0.4-exec/app-update-all.log   # expect NO output
 ```
 
-EXPECT: one "updated" line per pending app — **13 of them, including
-`whiteboard` (→ 2.0.0) and `mail` (→ 5.12.0)**. `richdocumentscode` (the CODE
-AppImage, 26.4.104 → 26.4.303) is the slow one: minutes, not seconds.
+EXPECT: one "updated" line per pending app — **14 of them (the §2.0b(e) count),
+including `whiteboard` (→ 2.0.0) and `mail` (→ 5.12.2)**. `richdocumentscode`
+(the CODE AppImage, 26.4.104 → 26.4.402) is the slow one: minutes, not seconds —
+run this `kubectl exec` with the Bash tool timeout at 600000 ms (§2 note).
 
 HOW IT FAILS: the second `grep` printing any line. Note `grep -c` exits 1 when
 it counts zero — for the error grep, **no output and exit 1 is the PASS**.
@@ -988,7 +1032,7 @@ PY
 
 EXPECT: pending list now **empty** (0 lines); `occ status` still
 `34.0.3.2`, `maintenance: false`, `needsDbUpgrade: false`; the assertions print
-`mail 5.10.12 -> 5.12.0` and `whiteboard 1.5.9 -> 2.0.0`.
+`mail 5.10.12 -> 5.12.2` (or whatever §2.0b(e) recorded) and `whiteboard 1.5.9 -> 2.0.0`.
 
 HOW IT FAILS: a non-empty pending list means the drain did not finish and the
 entrypoint's `occ upgrade` will try to download inside the 360 s probe budget —
@@ -1083,7 +1127,7 @@ Commit (shared worktree: `--only`, never `git add -A`):
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-cat > /tmp/nc-msg.txt <<'EOF'
+cat > /Users/mu/db-dumps/nextcloud-34.0.4-exec/msg-nextcloud-34.0.4-bump.txt <<'EOF'
 feat(nextcloud): 34.0.3 -> 34.0.4 with chart 9.2.6 -> 9.3.0 (lockstep) + whiteboard backend v2.0.0
 
 Executes runbooks/maintenance/plans/nextcloud-34.0.4.md.
@@ -1119,7 +1163,7 @@ EOF
 git commit --only kubernetes/apps/office/nextcloud/app/helmrelease.yaml \
                   kubernetes/apps/office/nextcloud/app/notify-push.yaml \
                   kubernetes/apps/office/nextcloud/app/whiteboard-proxy.yaml \
-                  -F /tmp/nc-msg.txt
+                  -F /Users/mu/db-dumps/nextcloud-34.0.4-exec/msg-nextcloud-34.0.4-bump.txt
 git show --stat HEAD          # HOW IT FAILS: any file here that is not one of the three => a
                               # concurrent session's hunk rode along. Do NOT push; see CLAUDE.md
                               # "Committing in a SHARED worktree".
@@ -1127,6 +1171,25 @@ git log -1 --format=%s        # MUST be the subject above — .git/COMMIT_EDITMS
                               # sessions committing in the same second can swap messages. Amend now,
                               # never after the push.
 git push origin main
+```
+
+Record the bump sha in a FILE — §5.3(d) and §3.6 read it hours later from a
+fresh shell. Path-scoped to notify-push.yaml (only this commit touches it), so a
+concurrent session's commit landing on HEAD cannot be recorded by mistake:
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+/Users/mu/code/cberg-home-nextgen/.venv/bin/python3 - <<'PY'
+import subprocess
+out = subprocess.run(['git', '-C', '/Users/mu/code/cberg-home-nextgen', 'log', '-1', '--format=%H%x09%s', '--',
+                      'kubernetes/apps/office/nextcloud/app/notify-push.yaml'],
+                     capture_output=True, text=True, check=True).stdout.strip()
+sha, subj = out.split('\t', 1)
+assert subj.startswith('feat(nextcloud): 34.0.3 -> 34.0.4'), ('NEWEST notify-push commit is not the bump', subj)
+open('/Users/mu/db-dumps/nextcloud-34.0.4-exec/bump-sha.txt', 'w').write(sha + '\n')
+print('bump-sha', sha)
+PY
+git branch -r --contains "$(cat /Users/mu/db-dumps/nextcloud-34.0.4-exec/bump-sha.txt)" | grep -c 'origin/main'   # expect 1 (pushed)
 ```
 
 **3.4 Watch the rollout — this is the attended part.** Flux reconciles the
@@ -1137,16 +1200,20 @@ container starts you have **360 s** before the startup probe kills it.
 ```bash
 flux get kustomization -n office nextcloud                     # revision = your commit
 flux get helmrelease -n office nextcloud                       # Upgrading -> Ready, chart 9.3.0
-kubectl -n office get pods -l app.kubernetes.io/name=nextcloud -w   # old pod Terminating, new pod Init -> Running
+kubectl -n office get pods -l app.kubernetes.io/name=nextcloud -o wide   # SNAPSHOT (no -w: a watch never
+                                                                         # returns and hangs the agent's call)
 ```
 
-In a second terminal, the moment the new pod exists (the pod name is resolved
-and used in the **same** command — nothing is carried across steps):
+Then poll the entrypoint log with a BOUNDED read, re-issued every ~30-60 s until
+`Update successful` / Apache start (no `logs -f`, no second terminal — an agent
+has neither). The pod is resolved inside the same command; the container's start
+time is printed with it so the 300 s mark below can be read off directly:
 
 ```bash
-kubectl -n office logs -f \
-  "$(kubectl -n office get pod -l app.kubernetes.io/name=nextcloud,app.kubernetes.io/component=app -o jsonpath='{.items[0].metadata.name}')" \
-  -c nextcloud --timestamps
+POD=$(kubectl -n office get pod -l app.kubernetes.io/name=nextcloud,app.kubernetes.io/component=app \
+  -o jsonpath='{.items[0].metadata.name}')
+echo "pod=$POD started=$(kubectl -n office get pod "$POD" -o jsonpath='{.status.containerStatuses[?(@.name=="nextcloud")].state.running.startedAt}') now=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+kubectl -n office logs "$POD" -c nextcloud --timestamps --tail=40
 ```
 
 Expected log shape and timing (measured rsync ≈ 86 s; `occ upgrade` with the
@@ -1171,7 +1238,10 @@ get ready for §5.2 — do not delete the pod, do not scale anything; let the
 kubelet act and then repair.
 
 ```bash
-kubectl -n office rollout status deploy/nextcloud --timeout=15m
+# Bash tool timeout 600000 ms for each line (§2 note). If the 9m one times out, re-issue it
+# once while the log poll above still shows progress — do NOT use a 15m timeout: the tool
+# caps a call at 10 min and would kill it mid-wait.
+kubectl -n office rollout status deploy/nextcloud --timeout=9m
 kubectl -n office rollout status deploy/nextcloud-notify-push --timeout=5m    # rolls on the tag change
 kubectl -n office rollout status deploy/nextcloud-whiteboard --timeout=5m     # rolls on the v2.0.0 change
 kubectl -n office get pods | grep -E '^nextcloud-(notify-push|whiteboard|cron)'
@@ -1200,6 +1270,16 @@ grep -A2 'remediation:' kubernetes/apps/office/nextcloud/app/helmrelease.yaml | 
 git commit --only kubernetes/apps/office/nextcloud/app/helmrelease.yaml \
   -m "chore(nextcloud): restore upgrade.remediation.retries 3 after the 34.0.4 rollout (plan nextcloud-34.0.4 §3.6)"
 git show --stat HEAD && git log -1 --format=%s && git push origin main
+/Users/mu/code/cberg-home-nextgen/.venv/bin/python3 - <<'PY'
+import subprocess
+out = subprocess.run(['git', '-C', '/Users/mu/code/cberg-home-nextgen', 'log', '-1', '--format=%H%x09%s', '--',
+                      'kubernetes/apps/office/nextcloud/app/helmrelease.yaml'],
+                     capture_output=True, text=True, check=True).stdout.strip()
+sha, subj = out.split('\t', 1)
+assert subj.startswith('chore(nextcloud): restore upgrade.remediation.retries 3'), ('not the restore commit', subj)
+open('/Users/mu/db-dumps/nextcloud-34.0.4-exec/retries-sha.txt', 'w').write(sha + '\n')
+print('retries-sha', sha)
+PY
 
 runbooks/update-marker.sh clear nextcloud
 
@@ -1223,9 +1303,10 @@ Then retire this plan file in the commit that records the window (README: plans
 are transient) and close the findings:
 
 ```bash
-runbooks/policy-cli.py finding close F-f3e9ddb0 --commit <sha>
-runbooks/policy-cli.py finding close F-4a9d6631 --commit <sha>
-runbooks/policy-cli.py finding close F-53ba35b1 --commit <sha>
+# <sha> is read from the file written in §3.3 — never typed from memory
+for F in F-f3e9ddb0 F-4a9d6631 F-53ba35b1 F-38fecaa8; do
+  runbooks/policy-cli.py finding close "$F" --commit "$(cat /Users/mu/db-dumps/nextcloud-34.0.4-exec/bump-sha.txt)"
+done
 ```
 
 `F-ab9e243a` and `F-6c461103` are security rows that close on the post-window
@@ -1288,8 +1369,9 @@ for a in ('mail', 'whiteboard', 'notify_push', 'openclaw_mail', 'richdocumentsco
 PY
 ```
 
-EXPECT: `mail 5.10.12 -> 5.12.0`, `whiteboard 1.5.9 -> 2.0.0`,
-`notify_push 1.4.0 -> 1.4.1`, `richdocumentscode 26.4.104 -> 26.4.303`, and
+EXPECT (versions as recorded in app-updates-pending-pre.txt): `mail 5.10.12 -> 5.12.2`,
+`whiteboard 1.5.9 -> 2.0.0`, `notify_push 1.4.0 -> 1.4.1`,
+`richdocumentscode 26.4.104 -> 26.4.402`, and
 **`openclaw_mail 0.1.0 -> 0.1.0`** — the custom app is re-materialized by the
 `install-openclaw-mail` initContainer on every boot and re-enabled by the
 worker sidecar (§1.7), so a Recreate rollout must leave it enabled and
@@ -1562,7 +1644,7 @@ supported"* and the pod crash-loops. Rollback therefore restores the data first.
 flux suspend kustomization -n office nextcloud && flux suspend helmrelease -n office nextcloud
 kubectl -n office scale deploy/nextcloud deploy/nextcloud-notify-push --replicas=0
 kubectl -n office patch cronjob nextcloud-cron -p '{"spec":{"suspend":true}}'
-kubectl -n office wait --for=delete pod -l app.kubernetes.io/name=nextcloud,app.kubernetes.io/component=app --timeout=5m
+kubectl -n office wait --for=delete pod -l app.kubernetes.io/name=nextcloud,app.kubernetes.io/component=app --timeout=5m   # Bash timeout 600000 ms
 
 # (b) database: back to the §2.3 dump. LITERAL PATH — there is no $D in this plan.
 kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c \
@@ -1585,10 +1667,45 @@ its size BEFORE running the DROP.** This is exactly why the path is literal.
 #     volume and rebind the PV per docs/sops/disaster-recovery.md + longhorn.md.
 #     (Either way the volume must have NO consumers — that is what (a) guarantees.)
 
-# (d) git: revert the bump commit(s), so the 34.0.3 / chart 9.2.6 spec meets 34.0.3 data
+# (d) git: put the three files back to their state BEFORE the bump, so the 34.0.3 / chart
+#     9.2.6 spec meets 34.0.3 data. NOT `git revert`: it REFUSES whenever any other session
+#     has anything staged in this shared index (reproduced 2026-09-26). Restoring the files
+#     from <bump-sha>^ and committing with --only ignores the shared index entirely, and it
+#     also undoes the §3.6 retries commit and any §5.4 whiteboard revert (all three are
+#     subsumed by "the files as they were before the bump").
 cd /Users/mu/code/cberg-home-nextgen
-git revert --no-edit <bump-sha> [<retries-restore-sha>]
-git show --stat HEAD && git log -1 --format=%s && git push origin main
+git fetch origin main && git merge --ff-only origin/main
+# GUARD — only this plan's own commits may have touched the three files since <bump-sha>^.
+# EXPECT: the bump, optionally the §3.6 retries restore and a §5.4 revert — NOTHING else.
+# HOW IT FAILS: any other subject (e.g. nextcloud-redis-hardening) => restoring whole files
+# would silently discard that commit. STOP and hand-merge with the operator.
+git log --format='%h %s' "$(cat /Users/mu/db-dumps/nextcloud-34.0.4-exec/bump-sha.txt)^..HEAD" -- \
+  kubernetes/apps/office/nextcloud/app/helmrelease.yaml \
+  kubernetes/apps/office/nextcloud/app/notify-push.yaml \
+  kubernetes/apps/office/nextcloud/app/whiteboard-proxy.yaml
+for P in kubernetes/apps/office/nextcloud/app/helmrelease.yaml \
+         kubernetes/apps/office/nextcloud/app/notify-push.yaml \
+         kubernetes/apps/office/nextcloud/app/whiteboard-proxy.yaml; do
+  git show "$(cat /Users/mu/db-dumps/nextcloud-34.0.4-exec/bump-sha.txt)^:$P" > "$P.rollback-tmp" \
+    && mv "$P.rollback-tmp" "$P" || echo "RESTORE FAILED: $P"      # temp+mv: a failed show never truncates the file
+done
+# POSITIVE gates, each exactly 1 (the pre-bump pins are back):
+grep -c '^      version: 9\.2\.6$'              kubernetes/apps/office/nextcloud/app/helmrelease.yaml
+grep -c '^      tag: 34\.0\.3$'                 kubernetes/apps/office/nextcloud/app/helmrelease.yaml
+grep -c '^          image: nextcloud:34\.0\.3$' kubernetes/apps/office/nextcloud/app/helmrelease.yaml
+grep -c '^          image: nextcloud:34\.0\.3$' kubernetes/apps/office/nextcloud/app/notify-push.yaml
+grep -c 'whiteboard:v1\.5\.9'                   kubernetes/apps/office/nextcloud/app/whiteboard-proxy.yaml
+grep -A2 'remediation:' kubernetes/apps/office/nextcloud/app/helmrelease.yaml | grep -c 'retries: 3'   # expect 2
+git diff --stat -- kubernetes/apps/office/nextcloud/app/                  # expect ONLY these 3 files
+printf '%s\n\n%s\n' \
+  "revert(nextcloud): back to 34.0.3 / chart 9.2.6 / whiteboard v1.5.9 (plan nextcloud-34.0.4 §5.3)" \
+  "Restores the three files from $(cat /Users/mu/db-dumps/nextcloud-34.0.4-exec/bump-sha.txt)^ after the DB dump + nextcloud-config snapshot were restored." \
+  > /Users/mu/db-dumps/nextcloud-34.0.4-exec/msg-nextcloud-34.0.4-rollback.txt
+git commit --only kubernetes/apps/office/nextcloud/app/helmrelease.yaml \
+                  kubernetes/apps/office/nextcloud/app/notify-push.yaml \
+                  kubernetes/apps/office/nextcloud/app/whiteboard-proxy.yaml \
+                  -F /Users/mu/db-dumps/nextcloud-34.0.4-exec/msg-nextcloud-34.0.4-rollback.txt
+git show --stat HEAD && git log -1 --format=%s && git push origin main   # stat: exactly the 3 files
 kubectl -n office patch cronjob nextcloud-cron -p '{"spec":{"suspend":false}}'
 flux resume helmrelease -n office nextcloud && flux resume kustomization -n office nextcloud
 # Flux re-applies replicas: 1; then §4 floor + occ status (34.0.3.2, maintenance false, chart 9.2.6)
@@ -1620,7 +1737,7 @@ grep -c 'whiteboard:v1\.5\.9' kubernetes/apps/office/nextcloud/app/whiteboard-pr
 git commit --only kubernetes/apps/office/nextcloud/app/whiteboard-proxy.yaml \
   -m "revert(nextcloud-whiteboard): backend v2.0.0 -> v1.5.9 (plan nextcloud-34.0.4 §5.4)"
 git show --stat HEAD && git log -1 --format=%s && git push origin main
-kubectl rollout status -n office deploy/nextcloud-whiteboard --timeout=180s
+kubectl rollout status -n office deploy/nextcloud-whiteboard --timeout=180s   # Bash timeout 600000 ms
 kubectl get pod -n office -l app=nextcloud-whiteboard \
   -o jsonpath='{.items[0].status.containerStatuses[0].imageID}{"\n"}'
 #   EXPECT: ...@sha256:b60b7633f90d106ac6922f9bc27e1a1ca2442488b740fefdae4c812f34e9cebc
@@ -1694,6 +1811,14 @@ appstore still serves the v1.5.9 release for platform 34.
   premise `live-whiteboard-backend-is-still-v1.5.9` would FAIL, which is the
   correct outcome) and its §2.3 branch logic assumes it owns the backend leg.
   The operator is retiring the file.
+- **Same-day serial run (2026-09-26, `now` slot).** Order: nextcloud-mcp-0.187.1
+  (+15 min soak) → nocodb-2026.09.0 (+15 min soak; its backup-restore rollback
+  CLOSED before §2 here starts) → **this plan** → nextcloud-redis-hardening. The
+  §2.5 silence is office-wide: create it only after nextcloud-mcp's verification is
+  finished, and delete it (§3.6) before nextcloud-redis-hardening starts. That plan
+  edits the same helmrelease.yaml — it must not start until §3.6 is pushed and §4 is
+  green, and once it has committed, §5.3(d)'s guard will STOP a whole-file restore
+  (by design): past that point a full rollback of this plan is a hand-merge.
 - **Other same-namespace neighbours** (mealie, paperless-*): no shared resource,
   but do not run them *in parallel* in the same slot — the §2.5 silence is
   namespace-wide and would mask their rollout noise too. Sequential is fine.
