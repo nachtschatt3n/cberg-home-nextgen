@@ -62,12 +62,12 @@ rollback_class: git-revert            # ONE commit, three files, reverts cleanly
 backup_gate: "config.php copied IN-POD to config.php.pre-redis-auth-<ts> BEFORE the quiesce (§3.1, asserted by a byte-count compare), and a Completed Longhorn backup of volume nextcloud-config < 26h (premise config-volume-backed-up + §2 gate 3). No datastore dump: this Redis holds nothing durable."
 finding_refs: [F-069b1775]            # filed 2026-08-19 (policy-cli finding show,
                                       # 2026-09-22). Its `action` is exactly this plan.
-status: draft                         # WRITTEN 2026-09-22, NOT reviewed. Every command
+status: vetted   # 2026-09-26 plan-reviewer needs-fix (14) -> applied; re-review needs-fix (set -euo pipefail in 3.6/3.7 + 5 minor) -> applied; ready-for-go; LAST of the nextcloud plans
                                       # below names an object verified to exist on
                                       # 2026-09-22; every gate was designed to have a
                                       # concrete failing input (stated inline). A
                                       # plan-reviewer pass is still required before `vetted`.
-window: null                          # the scheduler assigns after vetting. Attended: every
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
                                       # logged-in user is logged out (PHP sessions live in
                                       # this Redis, no persistence) — announce it.
 premises:
@@ -290,7 +290,11 @@ kubectl -n office wait --for=jsonpath='{.status.phase}'=Succeeded pod -l app.kub
   --field-selector=status.phase=Running --timeout=300s 2>/dev/null || true   # only RUNNING cron pods; Completed ones persist
 
 # PROVE the quiesce at the server, not at the pod list:
-N=$(kubectl -n office exec deploy/nextcloud-redis -- redis-cli CLIENT LIST | grep -vc 'addr=127.0.0.1' || true)
+CL=$(kubectl -n office exec deploy/nextcloud-redis -- redis-cli CLIENT LIST)
+echo "$CL" | grep -q 'addr=127.0.0.1' \
+  || { echo "ABORT: CLIENT LIST read failed (redis-cli's own 127.0.0.1 connection absent) — the quiesce is unproven"; exit 1; }
+N=$(echo "$CL" | grep -vc 'addr=127.0.0.1' || true)
+# REVIEW 2026-09-26 (re-review): the old one-liner read N=0 when the exec itself failed.
 echo "non-local redis clients=$N"
 [ "$N" -eq 0 ] || { echo "ABORT: $N client(s) still connected — quiesce did not hold"; exit 1; }
 ```
@@ -304,10 +308,12 @@ sops -d "$F" | grep -qE '^ +redis-password *:' && { echo "ABORT: key already exi
 .venv/bin/python3 -c 'import secrets,string,json;print(json.dumps("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(40))),end="")' \
   | sops set --value-stdin "$F" '["stringData"]["redis-password"]' || { echo "ABORT: sops set failed"; exit 1; }
 sops -d "$F" | .venv/bin/python3 -c 'import sys,yaml; d=yaml.safe_load(sys.stdin)["stringData"]; v=d.get("redis-password",""); assert len(v)==40 and v.isalnum(), "ABORT: redis-password missing/malformed"; print("redis-password OK (40 alnum), %d keys" % len(d))'
-# Dry-tested 2026-09-26 on a scratch copy with sops 3.13.0: 11 -> 12 keys, other
-# ciphertexts unchanged. NOTE: `sops set` re-emits the file with 4-space indent —
-# a cosmetic whole-file diff, expected; the old `grep '^  redis-password:'` check
-# read 0 on a correct file for that reason.
+# Dry-tested 2026-09-26 (re-review) on a scratch copy with sops 3.13.0 FROM THE REPO CWD:
+# 11 -> 12 keys, the other 11 ciphertexts byte-identical, 40 alnum, and the existence
+# check above then ABORTs (rc=1). From the repo cwd `.sops.yaml` (indent: 2) applies, so
+# the real diff is SMALL (~9 lines: the new key + sops lastmodified/mac/recipient order).
+# A whole-file 4-space re-indent means `.sops.yaml` was NOT picked up (wrong cwd) — stop
+# and re-run from the repo root. The `^ +` regex matches 2- and 4-space output alike.
 ```
 
 **3.3 `redis-deployment.yaml` — wrapper, env, and the `from:` block:**
@@ -412,6 +418,7 @@ git push origin main
 **3.6 Land the server side first (HR still suspended), prove it:**
 
 ```bash
+set -euo pipefail   # REVIEW 2026-09-26 (re-review): a failed reconcile/rollout must stop here
 flux resume    kustomization nextcloud -n office
 flux reconcile kustomization nextcloud -n office --with-source
 kubectl -n office rollout status deploy/nextcloud-redis --timeout=180s
@@ -425,6 +432,9 @@ kubectl -n office rollout status deploy/nextcloud-redis --timeout=180s
 **3.7 Bring the app back, persist the password for notify_push, resume the rest:**
 
 ```bash
+set -euo pipefail   # REVIEW 2026-09-26 (re-review): the config.php persistence ABORT below
+                    # must STOP the block — without this it printed ABORT and went on to
+                    # restart notify-push, un-suspend cron and remove the update marker.
 flux resume    helmrelease nextcloud -n office
 flux reconcile helmrelease nextcloud -n office
 # The values change fires a Helm upgrade, which re-asserts the chart's replicas;
@@ -484,6 +494,7 @@ URL=$(kubectl -n office get deploy nextcloud -o jsonpath='{.spec.template.spec.c
 P=$(kubectl -n office exec deploy/nextcloud -c nextcloud -- sh -c 'printf %s "$REDIS_HOST_PASSWORD" | sha256sum | cut -c1-8')
 S=$(kubectl -n office get secret nextcloud-config -o jsonpath='{.data.redis-password}' | base64 -d | shasum -a 256 | cut -c1-8)
 echo "pod=$P secret=$S"
+[ "$S" != e3b0c442 ] || { echo "ABORT: Secret key redis-password is empty/missing (sha256 of '')"; exit 1; }
 [ -n "$P" ] && [ "$P" = "$S" ] || { echo "ABORT: pod value ($P) != Secret ($S) — pod started before the Secret landed (docs/sops/secret-rotation.md)"; exit 1; }
 # CATCHES: the exact bc4a2fbf failure — a pod rolled before the Secret rewrite.
 ```
@@ -557,7 +568,10 @@ the HelmRelease; gate 3-7 red after §3.7 → full sequence below. Sessions are
 dropped a second time; say so.
 
 1. Quiesce again (§3.1 minus the backup).
-2. `git revert <the §3.5 commit> && git push` — restores the unauthenticated
+2. `git revert --no-edit --no-commit <the §3.5 commit>` then
+   `git commit --only kubernetes/apps/office/nextcloud/app/{secrets.sops.yaml,redis-deployment.yaml,helmrelease.yaml} -F <msgfile>`,
+   `git show --stat HEAD` (exactly those three), `git push origin main` — shared worktree:
+   a plain `git revert` refuses on a dirty index. Restores the unauthenticated
    command, the `from:`-less policy, and the password-less HelmRelease values
    in one revision.
 3. `flux resume kustomization nextcloud -n office && flux reconcile kustomization nextcloud -n office --with-source`;
@@ -577,8 +591,8 @@ dropped a second time; say so.
    config.php — scaling is a no-op), `occ notify_push:self-test` clean by the §4
    gate 5 form; un-suspend the CronJob; remove the marker.
 
-The Secret key `redis-password` may stay in SOPS after a revert; it is inert
-without consumers. Do not delete anything on the PVC.
+The revert also removes the Secret key `redis-password` (it is in the §3.5 commit);
+nothing consumes it after the revert, and a re-run of §3.2 generates a fresh one. Do not delete anything on the PVC.
 
 ## 6. Interference notes
 
@@ -586,6 +600,15 @@ without consumers. Do not delete anything on the PVC.
   HelmRelease file, same Deployment roll, same quiesce. Whichever lands first,
   the other must re-read `helmrelease.yaml` before editing; the sidecar env
   block and `externalRedis` are edited by THIS plan only.
+- **`nextcloud-34.0.4`'s rollback is a Longhorn snapshot revert of `nextcloud-config`
+  taken BEFORE this plan.** If that restore is ever run after this plan lands, config.php
+  loses `redis.password` while the server keeps requirepass: notify_push NOAUTH-loops
+  behind a green HelmRelease. After any such restore, re-run §3.7's persistence exec +
+  notify-push `rollout restart` + §4 gate 5 (or revert this plan first). Hence: run this
+  plan only after 34.0.4 is fully green, never in the same attempt as its rollback.
+- **Open version finding `F-3fcdca7b`** (this image, patch, safe lane) edits the same
+  `redis-deployment.yaml`; Step 0 may land it in the same run. §3.5's ff-merge absorbs it;
+  it is a separate Recreate roll, not a finding_ref of this plan.
 - **Attended only.** Every logged-in user is logged out; the `occ` write is a
   human-verified step; and gate 7 creates two throwaway pods in `office`.
 - **No storage operation.** `pvc/nextcloud-config` is written through `occ`

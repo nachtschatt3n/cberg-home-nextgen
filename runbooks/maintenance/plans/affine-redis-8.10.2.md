@@ -28,8 +28,8 @@ security_ref: null
 capability_change: false
 rollback_class: git-revert          # redis is non-persistent; nothing forward-only happens
 finding_refs: [F-d40c9c12]          # version finding "affine-redis: image redis 8.10.1-alpine → 8.10.2-alpine (patch)"
-status: vetted   # 2026-09-26 plan-reviewer needs-fix -> 5 edits applied (cooldown exits 1 on TOO_NEW, V6 log grep informational, V7 asserts /info body); NOT before 2026-09-26T21:05Z -> 03:30 nightly (AUTO-NIGHT)
-window: null
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> 5 edits applied (cooldown exits 1 on TOO_NEW, V6 log grep informational, V7 asserts /info body); operator waived the 48h cooldown 2026-09-26 for the NOW run (recorded in pre-check b)
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/verification-contents-not-shape.md
@@ -163,6 +163,11 @@ print(("AGE_OK" if ok else "TOO_NEW"), round(age,1), "h", t); sys.exit(0 if ok e
 #    too, so this mirrors the fleet gate. Earliest AGE_OK 2026-09-26T21:05Z;
 #    nightly 2026-09-27 03:30 (01:30Z, ~52 h) or any later slot is fine.
 #    A further re-push of the tag resets the clock: TOO_NEW then is a STOP.
+#    OPERATOR OVERRIDE 2026-09-26 (~07:40 CEST, attended NOW run now:2026-09-26):
+#    the operator explicitly waived the 48 h cooldown ("do them now", relayed by
+#    the coordinating ops session). For THAT run only, a TOO_NEW reading of
+#    8.10.2-alpine with last_updated 2026-09-24T21:05Z is recorded and NOT a stop.
+#    FETCH_FAILED, or any other last_updated (a further re-push), is still a STOP.
 
 # c) target tag still resolvable AND no newer 8.10.x has superseded it
 #    (8.10.2 -> 200; 8.10.3 -> 404 expected; a 200 there means refresh the plan)
@@ -192,7 +197,7 @@ kubectl logs -n office deploy/affine -c main --since=10m | grep -ciE 'ETIMEDOUT|
 python3 runbooks/maintenance-plan.py --open | grep -iE 'affine|helm-drift' || true
 ```
 
-Proceed only if (a) all premises PASS, (b) prints AGE_OK, (c) shows 200/404,
+Proceed only if (a) all premises PASS, (b) prints AGE_OK (or, in the 2026-09-26 NOW run only, TOO_NEW with last_updated 2026-09-24T21:05Z under the recorded operator override), (c) shows 200/404,
 and (f) prints 0.
 
 ## 3) Steps (GitOps)
