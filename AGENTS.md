@@ -131,6 +131,13 @@ history** (another session may have built on it). Record the provenance in a
 follow-up commit naming the stray file and its real owner — see `3f9923c9` for
 the shape.
 
+**Never run a session, `claude rc`, sops, kubectl or git as root in this
+worktree.** On 2026-09-25/26 a `claude rc` started from a `sudo -s` iTerm shell
+spawned every remote session as root; its writes left root-owned files, dirs
+and `.git/objects` that broke pre-commit (PermissionError) and rebase for all
+other sessions. `.githooks/lib/ownership-guard.sh` (pre-commit + pre-rebase)
+now refuses root and prints the fix: `sudo chown -R mu:staff <repo>`.
+
 Other rules that still apply: work directly on `main` (no feature branches in
 this repo), stage specific hunks rather than whole files, and never
 `git add -A`.
