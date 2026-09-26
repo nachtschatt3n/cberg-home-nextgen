@@ -1,0 +1,8 @@
+#!/bin/bash
+# pre-rebase hook -- repo-tracked, active via `core.hooksPath .githooks`.
+# Refuses a rebase run as root, or one that would trip over root-owned
+# (unreadable / unwritable) paths left behind by a root session. See
+# .githooks/lib/ownership-guard.sh for the incident and the rules.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/ownership-guard.sh"
+ownership_guard "pre-rebase" strict || exit 1
+exit 0

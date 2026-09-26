@@ -34,6 +34,12 @@ NC='\033[0m'
 HOOKS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 PW_GUARD="$HOOKS_LIB/password-guard.awk"
 
+# Layer 0: refuse root, and flag root-owned paths left by a root session
+# (2026-09-26: a `claude rc` under `sudo -s` did this). See the lib header.
+# shellcheck source=lib/ownership-guard.sh
+. "$HOOKS_LIB/ownership-guard.sh"
+ownership_guard "pre-commit" || exit 1
+
 # ACMR: renamed files (status R, rename+modify above git's similarity
 # threshold) must be scanned too — with ACM only they skipped ALL layers.
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
