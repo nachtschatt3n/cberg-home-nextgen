@@ -80,7 +80,7 @@ conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended S
   # - icloud-backup-freshness-3.24.2 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
   - n8n-chart-2.1.1
   # - prometheus-pushgateway-3.9.0 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
-  - wazuh-2xx-edge-coverage
+  # - wazuh-2xx-edge-coverage (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
   # DROPPED 2026-09-26: kube-prometheus-stack-91.4.1 (status executed). The rule still
   # stands: any FUTURE same-night kube-prometheus-stack plan must be added here, because
   # §4 reads Prometheus. cilium-1.20.2 / authentik-pg17-decommission / authentik-pg17-volume-retire
