@@ -132,8 +132,8 @@ finding_refs: [F-6b6c515a]             # RE-QUERIED 2026-09-25 with SWEEP_PG_DSN
                                        # ghcr.io/paperless-ngx/paperless-ngx 3.1.3 -> 3.2.1
                                        # (minor)" — the exact component + target this plan
                                        # answers. Claimed so the finding reads as planned.
-status: draft
-window: null                           # the scheduler assigns. Shape: attended (see
+status: vetted   # 2026-09-26 plan-reviewer needs-fix (20) -> applied; re-review needs-fix (2: poll ignores pre-roll pods, §5 guard exits) -> applied; ready-for-go
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
                                        # capability_change), no reboot. Sized against
                                        # sat-attended, which is the 90-min slot
                                        # (`maintenance-windows.yaml`, re-read 2026-09-20):
@@ -516,6 +516,7 @@ kubectl exec -n office deploy/scan-inbox-validator -- \
 # /private/tmp/claude-501/paperless-ngx-3.2.0/silence-id. Local port 19093 (not 9093) so a parallel plan's
 # Alertmanager port-forward cannot collide with this one.
 mkdir -p /private/tmp/claude-501/paperless-ngx-3.2.0
+rm -f /private/tmp/claude-501/paperless-ngx-3.2.0/roll-start /private/tmp/claude-501/paperless-ngx-3.2.0/ready-after /private/tmp/claude-501/paperless-ngx-3.2.0/expect-tag   # stale state (NOT commit-3.7.sha: 3.9 needs it) from any earlier attempt
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 19093:9093 >/dev/null 2>&1 & PF=$!
 sleep 2
 NOW=$(python3 -c "from datetime import *;print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")
@@ -803,17 +804,25 @@ not-Ready" is not a licence to ignore it. Start a timer:
 
 ```bash
 mkdir -p /private/tmp/claude-501/paperless-ngx-3.2.0
+[ -s /private/tmp/claude-501/paperless-ngx-3.2.0/roll-start ] || date +%s > /private/tmp/claude-501/paperless-ngx-3.2.0/roll-start   # READY_AFTER clock only
 flux reconcile kustomization paperless-ngx -n office --with-source
-[ -s /private/tmp/claude-501/paperless-ngx-3.2.0/roll-start ] || date +%s > /private/tmp/claude-501/paperless-ngx-3.2.0/roll-start
-printf '3.2.1\n' > /private/tmp/claude-501/paperless-ngx-3.2.0/expect-tag
 # Bounded, non-interactive poll (NO `-w`, no Ctrl-C; fits one Bash call).
 # All state is in files, so if it prints STILL_NOT_READY just run THIS block
 # again: it resumes against the same roll-start. Past 660 s total -> section 5.
+# The poll waits for a pod whose SPEC matches the COMMITTED helmrelease (app tag
+# + startup failureThreshold, 30 when no probes block). A pod with any other spec
+# is the pre-roll pod and is ignored - without this the 3.9 re-roll (same tag,
+# threshold 120 -> 30) printed READY_AFTER on the OLD, still-Ready pod at once.
 python3 - <<'PY'
-import json, subprocess, time
+import json, re, subprocess, time
 st = "/private/tmp/claude-501/paperless-ngx-3.2.0"
+hr = open("/Users/mu/code/cberg-home-nextgen/kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml").read()
+tags = re.findall(r'(?m)^      tag: "([^"]+)"$', hr)
+fts = re.findall(r'(?m)^          failureThreshold: ([0-9]+)', hr)
+assert len(tags) == 1 and len(fts) <= 1, "helmrelease tag/probe lines not as expected: %r %r" % (tags, fts)
+want, want_ft = tags[0], (int(fts[0]) if fts else 30)
+print("WANT tag=%s startup.failureThreshold=%d (from the committed helmrelease)" % (want, want_ft))
 start = int(open(st + "/roll-start").read())
-want = open(st + "/expect-tag").read().strip()
 deadline = time.time() + 540
 while time.time() < deadline:
     raw = subprocess.run(["kubectl", "get", "pods", "-n", "office", "-l",
@@ -821,6 +830,12 @@ while time.time() < deadline:
                          capture_output=True, text=True).stdout or '{"items":[]}'
     for p in json.loads(raw)["items"]:
         if p["metadata"].get("deletionTimestamp"):
+            continue
+        c0 = p["spec"]["containers"][0]
+        sp_ft = (c0.get("startupProbe") or {}).get("failureThreshold")
+        if not (c0.get("image", "").endswith(":" + want) and sp_ft == want_ft):
+            print(time.strftime("%H:%M:%S"), p["metadata"]["name"], "PRE_ROLL_POD",
+                  c0.get("image", "").rsplit(":", 1)[-1], "ft=%s - ignored" % sp_ft, flush=True)
             continue
         cs = (p["status"].get("containerStatuses") or [{}])[0]
         img = cs.get("image", "")
@@ -1170,7 +1185,7 @@ import re
 t = open("/private/tmp/claude-501/paperless-ngx-3.2.0/app-30m.log").read()
 ran = len(re.findall(r"process_mail_accounts\[[^\]]+\] succeeded in [0-9.]+s: '(?:No new documents were added|Added [0-9]+ document)", t))
 skipped = len(re.findall(r"Mail account processing is already running", t))
-bad = [m.group(0) for m in re.finditer(r"(?im)^.*(?:1366|operationalerror|mailbox.login|login failed|error while processing mail account).*$", t)]
+bad = [m.group(0) for m in re.finditer(r"(?im)^.*(?:\(1366,|operationalerror|mailbox.login|login failed|error while processing mail account).*$", t)]
 print("LOG_LINES", t.count("\n"), "MAIL_CYCLES_RAN", ran, "SKIPPED", skipped, "ERRORS", len(bad))
 for line in bad[:5]:
     print("  ", line[:200])
@@ -1187,6 +1202,10 @@ PY
 # 'Error while processing mail account ...' - hence that pattern.
 # MAIL_CYCLES_RAN 0 with SKIPPED > 0 = the #14189 cache lock: re-run this block
 # once the new pod has been Ready > 35 min. MAIL_CYCLES_RAN 0 with SKIPPED 0 = FAIL.
+# ERRORS limb replayed by review 2026-09-26: the live 30-min log + one appended line
+# in the v3.2.1 format '[..] [ERROR] [paperless.mail.tasks] Error while processing
+# mail account X' reads ERRORS 1 (live log alone: ERRORS 0). The earlier bare
+# '1366' alternative also matched celery's 'succeeded in 0.21366s' - now '(1366,'.
 ```
 
 > 3.2.1 (#14189): `Mail account processing is already running; skipping this
@@ -1230,23 +1249,32 @@ cd /Users/mu/code/cberg-home-nextgen
 # (The validator stays :3.2.1 - 9557fa89, operator decision; do NOT touch it.)
 # If migration 0026 must be reversed, do it BEFORE this edit, while 3.2.1 code is
 # live (3.1.3 has no 0026 file to reverse to) - see below.
-grep -q 'failureThreshold: 120' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml \
-  || echo "3.9 ALREADY RESTORED - re-run the section 3.2 python edit FIRST, then continue"
+if ! grep -q 'failureThreshold: 120' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml; then
+  echo "3.9 ALREADY RESTORED - STOP. Run the section 3.2 python edit (re-adds timeout/retries/probe), then re-run THIS block"
+  exit 1
+fi
 sed -i '' 's|^      tag: "3.2.1"$|      tag: "3.1.3"|' \
   kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml
-grep -c 'tag: "3.1.3"' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml          # must print 1
-grep -c 'failureThreshold: 120' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml  # must print 1
+[ "$(grep -c '^      tag: "3.1.3"$' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml)" = 1 ] \
+  && [ "$(grep -c 'failureThreshold: 120' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml)" = 1 ] \
+  || { echo "ROLLBACK EDIT INCOMPLETE - not committing"; exit 1; }
 mkdir -p /private/tmp/claude-501/paperless-ngx-3.2.0
 MSG=/private/tmp/claude-501/paperless-ngx-3.2.0/msg-paperless-ngx-3.2.0-rollback-$(date +%s).txt
 printf 'revert(paperless-ngx): app image 3.2.1 -> 3.1.3 (rollback, startup budget kept raised)\n\nPlan: runbooks/maintenance/plans/paperless-ngx-3.2.0.md\n' > "$MSG"
 git commit --only kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml -F "$MSG"
 git log -1 --format=%s && git show --stat HEAD
 git push
-rm -f /private/tmp/claude-501/paperless-ngx-3.2.0/roll-start && printf '3.1.3\n' > /private/tmp/claude-501/paperless-ngx-3.2.0/expect-tag
+rm -f /private/tmp/claude-501/paperless-ngx-3.2.0/roll-start
 flux reconcile kustomization paperless-ngx -n office --with-source
-# then run the section 3.8 poll block WITHOUT its `printf '3.2.1\n'` line (it
-# must read expect-tag 3.1.3), and after the checks below pass run section 3.9
-# (restore) - its gate then shows NO diff at all against the pre-3.7 file.
+# then run the section 3.8 poll block AS-IS: it reads the wanted tag (3.1.3) and
+# startup threshold (120) from the committed helmrelease, so it ignores the 3.2.1
+# pod. After the checks below pass run section 3.9 (restore) - its gate then
+# shows NO diff at all against the pre-3.7 file.
+# TIMING: if 3.8 ended STILL_NOT_READY, the forward Helm upgrade is still inside
+# its 20m wait and helm-controller v1.6.3 runs with CancelHealthCheckOnNewRevision
+# OFF, so this commit is NOT acted on until that wait expires (up to ~20 min after
+# the forward upgrade started), then the 3.1.3 v1 rebuild (<= 10 min) follows.
+# STILL_NOT_READY on the rollback poll is expected until then; keep re-running it.
 ```
 
 **The search index self-heals on the way back — verified in the 3.1.3 source.**
