@@ -62,12 +62,19 @@ rollback_class: git-revert            # ONE commit, three files, reverts cleanly
 backup_gate: "config.php copied IN-POD to config.php.pre-redis-auth-<ts> BEFORE the quiesce (§3.1, asserted by a byte-count compare), and a Completed Longhorn backup of volume nextcloud-config < 26h (premise config-volume-backed-up + §2 gate 3). No datastore dump: this Redis holds nothing durable."
 finding_refs: [F-069b1775]            # filed 2026-08-19 (policy-cli finding show,
                                       # 2026-09-22). Its `action` is exactly this plan.
-status: vetted   # 2026-09-26 plan-reviewer needs-fix (14) -> applied; re-review needs-fix (set -euo pipefail in 3.6/3.7 + 5 minor) -> applied; ready-for-go; LAST of the nextcloud plans
+status: draft   # 2026-09-26 NOW run: REVERTED at 3.7 (landing da77a7de, revert b65617d1, no partial state).
+                      # 3.7 is deterministic-broken: `occ config:system:set redis password` is a no-op
+                      # (exit 0, no write) because the chart's redis.config.php overlay already puts
+                      # REDIS_HOST_PASSWORD into the MERGED config, so config.php on disk (what notify_push
+                      # parses) never gets it. Needs a re-plan of 3.7 (untested idea: the zz_touch pattern
+                      # from notify-push.yaml - set+delete a throwaway key to force a full rewrite, then
+                      # roll notify-push; also update-marker.sh `remove` -> `clear`) and a fresh review +
+                      # GO. Deliberately not re-planned inside the window.
                                       # below names an object verified to exist on
                                       # 2026-09-22; every gate was designed to have a
                                       # concrete failing input (stated inline). A
                                       # plan-reviewer pass is still required before `vetted`.
-window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
+window: null   # cleared 2026-09-26 after the reverted NOW-run attempt (was now:2026-09-26)
                                       # logged-in user is logged out (PHP sessions live in
                                       # this Redis, no persistence) — announce it.
 premises:
