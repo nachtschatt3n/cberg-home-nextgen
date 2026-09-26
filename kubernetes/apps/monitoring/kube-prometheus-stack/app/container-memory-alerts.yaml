@@ -21,6 +21,19 @@
 # the resource is a LABEL, which is why searching metric names for "memory.*limit"
 # does not turn it up. Every rule below was checked to return series before being
 # trusted.
+#
+# EVERY JOIN AGAINST THE LIMIT IS `max by (namespace,pod,container)` FIRST
+# (2026-09-26). During the kube-prometheus-stack upgrade that morning the old
+# and new kube-state-metrics pods overlapped, so every container had TWO
+# kube_pod_container_resource_limits series (differing only in instance /
+# kubernetes_node). A bare `/ on(namespace,pod,container) group_left` needs the
+# right-hand side unique per match group, so the whole group failed with
+# "found duplicate series for the match group ... on the right hand-side" for
+# ~3 min (16 evaluation failures, 05:00-05:03Z) -- every rule here was blind
+# during exactly the kind of change that most often moves memory. Replayed at
+# 04:59:30Z: the bare join errors, the max-by join returns 228 series. Both
+# copies carry the same limit, so max() changes no value; it only collapses the
+# duplicate. The absent() guard below deliberately keeps the bare selector.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -42,7 +55,7 @@ spec:
             (
               container_memory_working_set_bytes{container!="",container!="POD"}
               / on(namespace,pod,container) group_left
-              kube_pod_container_resource_limits{resource="memory"}
+              max by (namespace,pod,container) (kube_pod_container_resource_limits{resource="memory"})
             ) > 0.90
           for: 15m
           labels:
@@ -63,7 +76,7 @@ spec:
             (
               container_memory_working_set_bytes{container!="",container!="POD"}
               / on(namespace,pod,container) group_left
-              kube_pod_container_resource_limits{resource="memory"}
+              max by (namespace,pod,container) (kube_pod_container_resource_limits{resource="memory"})
             ) > 0.97
           for: 5m
           labels:
@@ -181,13 +194,13 @@ spec:
                 48 * 3600
               )
               / on(namespace,pod,container) group_left
-              kube_pod_container_resource_limits{resource="memory"}
+              max by (namespace,pod,container) (kube_pod_container_resource_limits{resource="memory"})
             ) > 0.90
             and
             (
               container_memory_rss{container!="",container!="POD"}
               / on(namespace,pod,container) group_left
-              kube_pod_container_resource_limits{resource="memory"}
+              max by (namespace,pod,container) (kube_pod_container_resource_limits{resource="memory"})
             ) > 0.50
             and
             (
@@ -202,7 +215,7 @@ spec:
               - container_memory_rss{container!="",container!="POD"}
             )
             / on(namespace,pod,container) group_left
-            kube_pod_container_resource_limits{resource="memory"} > 0.10
+            max by (namespace,pod,container) (kube_pod_container_resource_limits{resource="memory"}) > 0.10
             and
             (
               deriv(container_memory_rss{container!="",container!="POD"}[6h])
@@ -343,7 +356,7 @@ spec:
             (
               container_memory_working_set_bytes{namespace="home-automation",container="frigate"}
               / on(namespace,pod,container) group_left
-              kube_pod_container_resource_limits{resource="memory"}
+              max by (namespace,pod,container) (kube_pod_container_resource_limits{resource="memory"})
             ) > 0.75
           for: 30m
           labels:
