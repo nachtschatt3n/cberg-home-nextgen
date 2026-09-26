@@ -49,7 +49,7 @@ finding_refs: [F-2b88c402, F-e0347d36]
                                       # F-e0347d36 (version, "mqttx-web: image emqx/mqttx-web
                                       # v1.13.0 → v1.13.1 (patch)") — producer=script, auto-closes
                                       # once the pin moves.
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> fixed (256Mi, OOM gate, ks namespace); re-review needs-fix (2.3 must not load the old pod) -> fixed; ready-for-go
 window: null
 premises:
   - id: live-image-still-v1.13.0
@@ -165,11 +165,12 @@ curl -s 'https://hub.docker.com/v2/repositories/emqx/mqttx-web/tags/v1.13.1' \
 flux get kustomization -n home-automation mqttx-web
 flux get helmrelease -n home-automation mqttx-web      # both Ready=True
 
-# 2.3 baseline for §4 (records the OLD markers; must print FAIL 4.2 on the OLD build —
-#     that is the negative control proving the gate can fail)
-#     SCRATCH=$(mktemp -d); write the §4.2 script to "$SCRATCH/mqttx-verify.sh" (see §4.2), then:
-WANT=1.13.1 OLD=1.13.0 zsh "$SCRATCH/mqttx-verify.sh"
-# EXPECT before the change: "version_markers want=0 old=8 feature_markers=0" and "FAIL 4.2"
+# 2.3 prepare §4.2 — do NOT run it against the OLD pod: at 128Mi two back-to-back
+#     app.js downloads OOMKilled it (2026-09-26T05:01:52Z), and a mid-transfer kill
+#     would print FAIL 4.2 for the wrong reason. The negative control is already on
+#     record: 2026-09-25 against v1.13.0 printed
+#     "version_markers want=0 old=8 feature_markers=0" and "FAIL 4.2" (§4.2 baseline).
+SCRATCH=$(mktemp -d); echo "$SCRATCH"   # write the §4.2 script to "$SCRATCH/mqttx-verify.sh"; carry the path by hand (shell state does not persist)
 ```
 
 No backup is needed: nothing server-side is stateful (§1.2).
@@ -276,7 +277,7 @@ and a `1.13.0` count of 8 on this path, i.e. the grep measures real content, and
 it returns 0 for `1.13.1` today (would FAIL).
 
 ### 4.3b No OOM under the verification load
-Re-run the §4.1 pod line after §4.3. PASS: `restarts=0` and `last=` empty. It can fail: on 2026-09-26 the same line read `restarts=2 last=OOMKilled` against v1.13.0 at 128Mi. If this FAILS at 256Mi: STOP and surface to the operator. Do NOT revert, because a revert restores 128Mi.
+Re-run the §4.1 pod line after §4.3. PASS: `restarts=0` and `last=` empty. It can fail: on 2026-09-26 the same line read `restarts=2 last=OOMKilled` against v1.13.0 at 128Mi. If this FAILS at 256Mi: STOP and surface to the operator. Do NOT revert, because a revert restores 128Mi; the forward fix is raising the limit to 512Mi.
 
 ### 4.4 Prometheus controls (after ≥5 min settle)
 ```bash
