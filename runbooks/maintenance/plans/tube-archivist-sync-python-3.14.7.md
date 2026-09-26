@@ -42,7 +42,7 @@ rollback_class: git-revert            # nothing forward-only: the jobs rewrite d
                                       # files every hour from ES/TA, so a revert self-heals them
 finding_refs: [F-043dfda0, F-897440a7]
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> fixed (A: 4.4 ERR/HTTP=0 informational; B: 4.5 succeeded-series counterpart); C-F applied; text-only fixes, no re-review needed
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/media-library-standards.md

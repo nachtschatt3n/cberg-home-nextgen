@@ -133,7 +133,7 @@ finding_refs: [F-0e3c2de5, F-23119c27]
                                       # the pin moves; it is listed because it is the version-lane
                                       # row this plan answers, not because it needs manual closing.
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> E1-E17 applied verbatim (file-carried POD/log/token/baselines, ports 19090/18086, absence gates informational); reviewer: mechanical, no re-review needed
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 premises:
   - id: live-image-still-v5.2.5
     why: >-

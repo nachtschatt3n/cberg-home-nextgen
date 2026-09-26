@@ -59,7 +59,7 @@ capability_change: false              # same script, same schedule, same env; in
 rollback_class: git-revert            # stateless CronJob; nothing forward-only happens
 finding_refs: [F-c9568174]
 status: vetted   # 2026-09-26 plan-reviewer ready-for-go (0 blocking); fixed W path, full-SHA premise, 4.4 can-fail demo, context-guard wording applied
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/verification-contents-not-shape.md

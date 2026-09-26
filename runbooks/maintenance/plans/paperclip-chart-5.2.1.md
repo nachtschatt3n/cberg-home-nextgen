@@ -76,7 +76,7 @@ premises:
     run: git log -1 --format=%H -- kubernetes/apps/ai/paperclip/app/helmrelease.yaml
     expect_exact: "d50270b8fe57943ba4059843be155e39850072e7"
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> corrections 1-9 applied verbatim (6 premises, render gate, file-carried baseline, positive readiness reading); reviewer: ready-for-go once applied
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
 generated: "2026-09-25"

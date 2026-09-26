@@ -48,7 +48,7 @@ capability_change: false
 rollback_class: git-revert
 finding_refs: [F-684a70f6]            # version finding "prometheus-pushgateway: chart 3.8.0 -> 3.9.0"
 status: vetted   # 2026-09-26 plan-reviewer ready-for-go (0 blocking); timing exception, file-carried T0/POD_IP/OLD_IP, alert counts corrected
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 premises:
   - id: hr-still-on-3.8.0
     why: "Baseline and rollback target. If the HR already moved, this plan is stale."

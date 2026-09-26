@@ -44,7 +44,7 @@ capability_change: false              # same script, same busybox; no behaviour 
 rollback_class: git-revert            # stateless CronJob; nothing forward-only happens
 finding_refs: [F-16ac7b93]
 status: vetted   # 2026-09-26 plan-reviewer ready-for-go (0 blocking); 4 non-blocking corrections applied (pushgateway conflict, informational gates, one-line diff)
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/storage-safety.md       # read-only CIFS mount; no PVC delete in this plan

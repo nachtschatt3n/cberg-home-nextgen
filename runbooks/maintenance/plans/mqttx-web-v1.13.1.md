@@ -50,7 +50,7 @@ finding_refs: [F-2b88c402, F-e0347d36]
                                       # v1.13.0 → v1.13.1 (patch)") — producer=script, auto-closes
                                       # once the pin moves.
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> fixed (256Mi, OOM gate, ks namespace); re-review needs-fix (2.3 must not load the old pod) -> fixed; ready-for-go
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 premises:
   - id: live-image-still-v1.13.0
     why: >-

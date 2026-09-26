@@ -51,7 +51,7 @@ finding_refs: [F-cdcbe7ea]            # version finding "crash-ghost-reaper: ima
                                       # F-c9568174 (elasticsearch-obs-recovery, same image bump) is NOT
                                       # answered by this plan — different script, different surface.
 status: vetted   # 2026-09-26 plan-reviewer ready-for-go (0 blocking); Gate B made enforcing, SOP edit made concrete
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/crash-ghost-reaper.md
