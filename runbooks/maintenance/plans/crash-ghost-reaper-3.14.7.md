@@ -50,7 +50,7 @@ finding_refs: [F-cdcbe7ea]            # version finding "crash-ghost-reaper: ima
                                       # 3.12-alpine → 3.14.7-alpine (minor)". The sibling finding
                                       # F-c9568174 (elasticsearch-obs-recovery, same image bump) is NOT
                                       # answered by this plan — different script, different surface.
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer ready-for-go (0 blocking); Gate B made enforcing, SOP edit made concrete
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -190,7 +190,7 @@ If P3 lists a pod, stop: let the old reaper handle it (next */15 run), then rest
    ```
 
 2. Also bump the SOP's overview line so the doc stays true (optional but same commit):
-   `docs/sops/crash-ghost-reaper.md` §2, `python:3.12-alpine` → `python:3.14.7-alpine`.
+   `docs/sops/crash-ghost-reaper.md` §2, `python:3.12-alpine` → `python:3.14.7-alpine`: SOP line 28, plain text edit `python:3.12-alpine, non-root` → `python:3.14.7-alpine, non-root`; confirm `git diff docs/sops/crash-ghost-reaper.md` = 1+/1-.
 
 3. Commit and push (shared worktree, so use `--only`):
    ```bash
@@ -259,16 +259,16 @@ CONTROL: metric kube_job_status_failed — `{namespace="kube-system",job_name=~"
 
 ```bash
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19090:9090 >/dev/null 2>&1 & PF=$!; sleep 3
-for q in 'kube_cronjob_status_last_successful_time{cronjob="crash-ghost-reaper"}' \
-         'kube_job_status_failed{namespace="kube-system",job_name=~"crash-ghost-reaper.*"}'; do
-  curl -s --data-urlencode "query=$q" http://localhost:19090/api/v1/query \
-   | python3 -c "import sys,json;r=json.load(sys.stdin)['data']['result'];print(len(r),[(x['metric'].get('job_name',x['metric'].get('cronjob')),x['value'][1]) for x in r]); sys.exit(0 if r else 1)" \
-   || echo "EMPTY RESULT = FAIL (instrument missing, not a pass)"
-done
+PUSH_TS=$(git log -1 --format=%ct <sha-of-step-3>)
+WIN=$(( ($(date +%s) - PUSH_TS) / 60 + 1 ))
+curl -s --data-urlencode 'query=kube_cronjob_status_last_successful_time{cronjob="crash-ghost-reaper"}' http://localhost:19090/api/v1/query \
+ | PUSH_TS=$PUSH_TS python3 -c "import sys,json,os;r=json.load(sys.stdin)['data']['result'];v=float(r[0]['value'][1]) if r else 0;ok=v>int(os.environ['PUSH_TS']);print('last_successful',int(v),'push',os.environ['PUSH_TS'],'PASS' if ok else 'FAIL');sys.exit(0 if ok else 1)"
+curl -s --data-urlencode "query=max by (job_name)(max_over_time(kube_job_status_failed{namespace=\"kube-system\",job_name=~\"crash-ghost-reaper.*|ghost-reaper-adhoc.*\"}[${WIN}m]))" http://localhost:19090/api/v1/query \
+ | python3 -c "import sys,json;r=json.load(sys.stdin)['data']['result'];bad=[(x['metric']['job_name'],x['value'][1]) for x in r if float(x['value'][1])>0];print(len(r),'series; failed:',bad,'FAIL' if (not r or bad) else 'PASS');sys.exit(1 if (not r or bad) else 0)"
 kill $PF 2>/dev/null
 ```
-Both series were measured present on 2026-09-25, so an empty result means the
-scrape is broken. It does not mean a pass.
+Both series were measured present on 2026-09-25/26; an empty result FAILs (instrument missing). Known-bad replay 2026-09-26: the failed-job query over [30d] returned crash-ghost-reaper-29838030 = 1 (2026-09-24 20:30Z) and exited 1; the timestamp check against PUSH_TS=now exited 1.
+A single failed run after the bump: read its log before calling it a 3.14 regression (a 3.12 run failed 2026-09-24 20:30Z alongside elasticsearch-obs-recovery, cause unknown).
 
 **Gate C (logic parity, already measured):** §1.3 ran detection parity on
 3.14.6 against the live pod list with positive controls. Nothing in the
