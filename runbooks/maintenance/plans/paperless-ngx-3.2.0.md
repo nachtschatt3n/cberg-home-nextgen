@@ -311,7 +311,16 @@ the actual v3.1.3…v3.2.0 diff (145 commits, 300 files):
    baselines — never the sentinel alone, and never a database count, which
    never touches the index.
 
-2. **One Django migration runs**: `0026_alter_document_archive_checksum_and_more`
+2. **Two Django migrations run** (corrected by review 2026-09-26: the GitHub
+   compare API returns at most 300 files, so the v3.1.3...v3.2.0 file list the
+   planner read was truncated; a full-tree diff shows a second migration).
+   `paperless/0016_alter_applicationconfiguration_ai_enabled` makes
+   `ApplicationConfiguration.ai_enabled` nullable and a RunPython rewrites
+   `ai_enabled=False` rows to NULL (reverse: no-op). 3.1.3 resolves
+   `app_config.ai_enabled or settings.AI_ENABLED`, no `PAPERLESS_AI_ENABLED` env
+   is set, and §2.4(c) reads `AI True`, so the stored row is True and the data
+   step changes nothing here; §4.7 re-asserts it. The documents one:
+   `0026_alter_document_archive_checksum_and_more`
    (live DB is at `0025_workflowaction_apply_ai_suggestions`). It is two
    `AlterField`s: `Document.archive_checksum` gains `db_index=True` (973 rows —
    trivial), and `SavedViewFilterRule.rule_type` gains choice `50 "has
@@ -331,9 +340,12 @@ from the gate's reason string.
 
 ### 1.3 What is NOT affected (checked, not assumed)
 
-- **RAG / LLM vector store**: zero files under `src/paperless_ai/` changed
-  between v3.1.3 and v3.2.0, so no `REEMBED_REQUIRED` schema migration is
-  triggered. The nightly `llm_index` task stays incremental. §4.7 re-asserts
+- **RAG / LLM vector store**: five non-test files under `src/paperless_ai/` DO
+  change between v3.1.3 and v3.2.1 (ai_classifier, client, exceptions, indexing,
+  taxonomy; the earlier "zero" came from the 300-file-capped compare). The only
+  `indexing.py` change removes an unused helper, `vector_store.py` is unchanged
+  and no `paperless_ai` migration exists, so no `REEMBED_REQUIRED` schema
+  migration is triggered. The nightly `llm_index` task stays incremental. §4.7 re-asserts
   this rather than trusting it.
 - **The validator's own runtime**: it overrides `command:`, so it bypasses
   s6-overlay entirely — it never runs migrations and never reindexes. It needs
@@ -499,22 +511,28 @@ kubectl exec -n office deploy/scan-inbox-validator -- \
 ### 2.5 Silence alerts + drop the active-update marker
 
 ```bash
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF=$!
+# ONE Bash block. State goes to FIXED FILES under /private/tmp/claude-501/paperless-ngx-3.2.0 because agent
+# Bash calls share no shell variables: section 5 reads the silence id back from
+# /private/tmp/claude-501/paperless-ngx-3.2.0/silence-id. Local port 19093 (not 9093) so a parallel plan's
+# Alertmanager port-forward cannot collide with this one.
+mkdir -p /private/tmp/claude-501/paperless-ngx-3.2.0
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 19093:9093 >/dev/null 2>&1 & PF=$!
 sleep 2
 NOW=$(python3 -c "from datetime import *;print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")
 END=$(python3 -c "from datetime import *;print((datetime.now(timezone.utc)+timedelta(hours=3)).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")
 # CAPTURE the result — a silence POST that fails must not be silent (see gate below)
-SIL_CODE=$(curl -s -o /tmp/silence-resp.json -w '%{http_code}' \
-  -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/json' -d '{
+SIL_CODE=$(curl -s -o /private/tmp/claude-501/paperless-ngx-3.2.0/silence-resp.json -w '%{http_code}' \
+  -X POST localhost:19093/api/v2/silences -H 'Content-Type: application/json' -d '{
   "matchers":[{"name":"namespace","value":"office","isRegex":false,"isEqual":true},
               {"name":"alertname","value":"Kube(Pod|Deployment).*","isRegex":true,"isEqual":true}],
   "startsAt":"'$NOW'","endsAt":"'$END'","createdBy":"maintenance-window-agent",
   "comment":"paperless-ngx 3.1.3->3.2.1 - index rebuild keeps the pod not-Ready for minutes. auto-expires 3h"}')
-echo "SILENCE_HTTP $SIL_CODE"; cat /tmp/silence-resp.json; echo
-SIL_ID=$(python3 -c "import json;print(json.load(open('/tmp/silence-resp.json')).get('silenceID',''))" 2>/dev/null)
+echo "SILENCE_HTTP $SIL_CODE"; cat /private/tmp/claude-501/paperless-ngx-3.2.0/silence-resp.json; echo
+SIL_ID=$(python3 -c "import json;print(json.load(open('/private/tmp/claude-501/paperless-ngx-3.2.0/silence-resp.json')).get('silenceID',''))" 2>/dev/null)
 echo "SILENCE_ID ${SIL_ID:-NONE}"
+printf '%s\n' "$SIL_ID" > /private/tmp/claude-501/paperless-ngx-3.2.0/silence-id    # section 5 reads THIS file, never $SIL_ID
 # Read it BACK — the POST echoing an id is not proof the silence is active
-curl -s "localhost:9093/api/v2/silence/$SIL_ID" | python3 -c "
+curl -s "localhost:19093/api/v2/silence/$SIL_ID" | python3 -c "
 import sys,json
 try:
     d=json.load(sys.stdin); print('SILENCE_STATE', d['status']['state'], 'ENDS', d['endsAt'])
@@ -745,7 +763,9 @@ before pushing.** Two sessions committing in the same second can swap message
 files:
 
 ```bash
-cat > /tmp/paperless-321-msg.txt <<'EOF'
+mkdir -p /private/tmp/claude-501/paperless-ngx-3.2.0
+MSG=/private/tmp/claude-501/paperless-ngx-3.2.0/msg-paperless-ngx-3.2.0-$(date +%s).txt   # unique name, same block as its use
+cat > "$MSG" <<'EOF'
 feat(container): update ghcr.io/paperless-ngx/paperless-ngx ( 3.1.3 -> 3.2.1 )
 
 Moves the HelmRelease values tag to 3.2.1, matching scan-inbox-validator, which
@@ -769,10 +789,11 @@ EOF
 
 git commit --only \
   kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml \
-  -F /tmp/paperless-321-msg.txt
+  -F "$MSG"
 
 git log -1 --format=%s        # MUST be the paperless subject above; amend if not
 git show --stat HEAD          # MUST be exactly the one file above
+git rev-parse HEAD > /private/tmp/claude-501/paperless-ngx-3.2.0/commit-3.7.sha   # read by the 3.9 gate (file, not a shell var)
 git push
 ```
 
@@ -781,10 +802,42 @@ is expected here — but it is expected **for a bounded time**, and "expect
 not-Ready" is not a licence to ignore it. Start a timer:
 
 ```bash
+mkdir -p /private/tmp/claude-501/paperless-ngx-3.2.0
 flux reconcile kustomization paperless-ngx -n office --with-source
-START=$(date +%s)
-kubectl get pods -n office -l app.kubernetes.io/name=paperless-ngx -w   # Ctrl-C when 1/1
-echo "READY_AFTER $(( $(date +%s) - START ))s"
+[ -s /private/tmp/claude-501/paperless-ngx-3.2.0/roll-start ] || date +%s > /private/tmp/claude-501/paperless-ngx-3.2.0/roll-start
+printf '3.2.1\n' > /private/tmp/claude-501/paperless-ngx-3.2.0/expect-tag
+# Bounded, non-interactive poll (NO `-w`, no Ctrl-C; fits one Bash call).
+# All state is in files, so if it prints STILL_NOT_READY just run THIS block
+# again: it resumes against the same roll-start. Past 660 s total -> section 5.
+python3 - <<'PY'
+import json, subprocess, time
+st = "/private/tmp/claude-501/paperless-ngx-3.2.0"
+start = int(open(st + "/roll-start").read())
+want = open(st + "/expect-tag").read().strip()
+deadline = time.time() + 540
+while time.time() < deadline:
+    raw = subprocess.run(["kubectl", "get", "pods", "-n", "office", "-l",
+                          "app.kubernetes.io/name=paperless-ngx", "-o", "json"],
+                         capture_output=True, text=True).stdout or '{"items":[]}'
+    for p in json.loads(raw)["items"]:
+        if p["metadata"].get("deletionTimestamp"):
+            continue
+        cs = (p["status"].get("containerStatuses") or [{}])[0]
+        img = cs.get("image", "")
+        rs = cs.get("restartCount", 0)
+        print(time.strftime("%H:%M:%S"), p["metadata"]["name"], img.rsplit(":", 1)[-1],
+              "ready=%s restarts=%s" % (cs.get("ready"), rs), flush=True)
+        if rs:
+            print("RESTARTED_DURING_REBUILD - see the RESTARTS bullet below; CA1 is now the gate")
+        if cs.get("ready") and img.endswith(":" + want):
+            ra = int(time.time()) - start
+            open(st + "/ready-after", "w").write(str(ra))
+            print("READY_AFTER %ds" % ra)
+            raise SystemExit(0)
+    time.sleep(15)
+print("STILL_NOT_READY %ds since roll start" % (int(time.time()) - start))
+raise SystemExit(1)
+PY
 
 # the rebuild's own log lines (deploy/ target - no captured pod name to go stale)
 kubectl logs -n office deploy/paperless-ngx -c paperless-ngx \
@@ -850,9 +903,11 @@ print("RESTORE OK")
 PY
 
 # PROOF the restore is complete: the ONLY surviving difference from the
-# pre-upgrade file must be the image tag. Verified on a scratch copy — this
-# exact one-hunk diff is the expected output.
-git diff -- kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml
+# pre-upgrade file must be the image tag. Diff against the PARENT of the 3.7
+# commit (the pre-upgrade file). A bare `git diff` compares against HEAD, which
+# already carries the 3.7 commit, so it would print the REMOVAL of the
+# timeout/retries/probes lines on a correct restore - a false STOP.
+git diff "$(cat /private/tmp/claude-501/paperless-ngx-3.2.0/commit-3.7.sha)^" -- kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml
 ```
 
 ```diff
@@ -872,7 +927,21 @@ kubectl get hr -n office paperless-ngx \
   -o jsonpath='{.spec.timeout} {.spec.upgrade.remediation.retries}{"\n"}'                 # must be "  1" (timeout empty, retries 1)
 ```
 
-Commit with `--only` + the same `git log -1 --format=%s` subject check as §3.7.
+Commit with `--only` + the same `git log -1 --format=%s` subject check as §3.7,
+using a unique message file in the same block, e.g.
+`MSG=/private/tmp/claude-501/paperless-ngx-3.2.0/msg-paperless-ngx-3.2.0-restore-$(date +%s).txt`, subject
+`fix(paperless-ngx): restore startup probe, helm timeout and upgrade remediation after 3.2.1 roll`.
+
+**This restore changes the pod template (`startupProbe.failureThreshold`), so it
+triggers a SECOND Recreate roll** — a brief outage on an already-current v2 index
+(expect the ~30 s no-op startup, `Search index is up to date.`). Run the §3.8 poll
+again (it resumes from the files; reset with
+`rm /private/tmp/claude-501/paperless-ngx-3.2.0/roll-start`) and re-run CA1 once on that pod.
+
+**3.10 — Close-out (success path too).** After §4 passes and §3.9 has landed, run
+the final "clear the marker and drop the silence" block at the end of §5. It is
+not rollback-only: left in place, the namespace-wide `office` silence masks pod
+alerts of any other `office` plan for up to 3 h.
 
 ## 4) Verification
 
@@ -957,10 +1026,6 @@ If `search_ids('*', …)` raises instead of returning, that is a FAIL, not a pas
 do not swallow the exception. (Verified on the live 3.1.3 index: the query
 returns the whole index, uncapped — v3.2.0 `_backend.py` uses
 `effective_limit = searcher.num_docs` when `limit` is None.)
-
-> **Do NOT assert on `data/index/meta.json` segment sums.** Measured live:
-> `sum(max_doc)` = 976 against 973 real documents — segment bookkeeping counts
-> superseded segments. An equality check there fails on a healthy index.
 
 > **Do NOT assert on `data/index/meta.json` segment sums.** Measured live:
 > `sum(max_doc)` = 976 against 973 real documents — segment bookkeeping counts
@@ -1052,13 +1117,12 @@ kubectl get deploy -n office scan-inbox-validator \
   -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'   # must be :3.2.1
 kubectl exec -n office deploy/scan-inbox-validator -- \
   python3 -c "import pikepdf, sys; print('PIKEPDF', pikepdf.__version__, 'PY', sys.version.split()[0])"
-# heartbeat must ADVANCE - run twice, ~20s apart
+# heartbeat must ADVANCE - both reads inside ONE call (validator poll = 15 s)
 kubectl exec -n office deploy/scan-inbox-validator -- \
-  python3 -c "import os; print(os.path.getmtime('/tmp/validator.heartbeat'))"
+  python3 -c "import os,time; a=os.path.getmtime('/tmp/validator.heartbeat'); time.sleep(25); b=os.path.getmtime('/tmp/validator.heartbeat'); print('HEARTBEAT', a, b, 'ADVANCED' if b > a else 'FROZEN')"
 ```
 
-PASS: image is `:3.2.1`, `PIKEPDF` prints a version, and the second heartbeat is
-larger than the first. What failure prints: `ModuleNotFoundError: pikepdf`, or a
+PASS: image is `:3.2.1`, `PIKEPDF` prints a version, and `HEARTBEAT ... ADVANCED`. What failure prints: `ModuleNotFoundError: pikepdf`, or a
 frozen mtime — a validator that is Running but whose loop is dead (the liveness
 probe would take ~3 min to notice).
 
@@ -1099,9 +1163,30 @@ OPOD=$(kubectl get pod -n ai -l app.kubernetes.io/name=openclaw -o jsonpath='{.i
 kubectl exec -n ai "$OPOD" -- paperless search ARAG | head -5
 # 200 + results. A 401 is a TOKEN failure - never read it as "documents are missing".
 
-kubectl logs -n office deploy/paperless-ngx -c paperless-ngx --since=30m \
-  | grep -iE "1366|operationalerror|mailbox.login|login failed"
-# expect NO hits (grep is case-insensitive on purpose - upstream mixes case)
+mkdir -p /private/tmp/claude-501/paperless-ngx-3.2.0
+kubectl logs -n office deploy/paperless-ngx -c paperless-ngx --since=30m > /private/tmp/claude-501/paperless-ngx-3.2.0/app-30m.log
+python3 - <<'PY'
+import re
+t = open("/private/tmp/claude-501/paperless-ngx-3.2.0/app-30m.log").read()
+ran = len(re.findall(r"process_mail_accounts\[[^\]]+\] succeeded in [0-9.]+s: '(?:No new documents were added|Added [0-9]+ document)", t))
+skipped = len(re.findall(r"Mail account processing is already running", t))
+bad = [m.group(0) for m in re.finditer(r"(?im)^.*(?:1366|operationalerror|mailbox.login|login failed|error while processing mail account).*$", t)]
+print("LOG_LINES", t.count("\n"), "MAIL_CYCLES_RAN", ran, "SKIPPED", skipped, "ERRORS", len(bad))
+for line in bad[:5]:
+    print("  ", line[:200])
+PY
+# PASS: MAIL_CYCLES_RAN >= 1 AND ERRORS 0.
+# MAIL_CYCLES_RAN is the positive control on the IDENTICAL stream: it proves the
+# window covers at least one real post-roll mail cycle on the right container
+# (measured by review 2026-09-26 on 3.1.3: 9 process_mail_accounts lines in the
+# last 30 min, 'succeeded ... No new documents were added'). ERRORS 0 alone
+# would also read 0 on a container that never ran a mail cycle.
+# paperless_mail logs propagate to the root console handler (settings LOGGING,
+# v3.2.1), so these strings DO reach `kubectl logs`. 3.2.1 catches MailError per
+# account and still returns 'No new documents were added.', logging
+# 'Error while processing mail account ...' - hence that pattern.
+# MAIL_CYCLES_RAN 0 with SKIPPED > 0 = the #14189 cache lock: re-run this block
+# once the new pod has been Ready > 35 min. MAIL_CYCLES_RAN 0 with SKIPPED 0 = FAIL.
 ```
 
 > 3.2.1 (#14189): `Mail account processing is already running; skipping this
@@ -1126,7 +1211,7 @@ with read_store() as s:
 ```
 
 PASS: `MISMATCH False` (nightly `llm_index` stays incremental) and the AI row
-still matches §2.4(c). `src/paperless_ai/` is untouched by 3.2.0 and 3.2.1, so a `True`
+still matches §2.4(c). 3.2.x adds no re-embed trigger to `src/paperless_ai/` (see §1.3), so a `True`
 here means something else changed the row — investigate before closing.
 
 ## 5) Rollback
@@ -1136,12 +1221,32 @@ revision is not retained. Roll back **forward through git**.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-git revert --no-edit <sha-of-step-3.7>     # restores the APP pin to 3.1.3; the validator
-                                           # stays :3.2.1 (9557fa89, operator decision,
-                                           # separately revertible — do NOT revert it here)
+# Do NOT `git revert` the 3.7 commit: that also drops failureThreshold back to 30,
+# and 3.1.3 must REBUILD the index v2 -> v1 at startup with the SAME
+# sentinel-before-documents ordering (v3.1.3 _backend.py rebuild(): wipe_index ->
+# _write_sentinels -> add_document loop) and WITHOUT 3.2.1's #14180 recovery.
+# A 150 s budget would let the kubelet kill that rebuild and leave 3.1.3 Ready on
+# a partial v1 index. After 3.9 a revert also conflicts. Edit the TAG only.
+# (The validator stays :3.2.1 - 9557fa89, operator decision; do NOT touch it.)
+# If migration 0026 must be reversed, do it BEFORE this edit, while 3.2.1 code is
+# live (3.1.3 has no 0026 file to reverse to) - see below.
+grep -q 'failureThreshold: 120' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml \
+  || echo "3.9 ALREADY RESTORED - re-run the section 3.2 python edit FIRST, then continue"
+sed -i '' 's|^      tag: "3.2.1"$|      tag: "3.1.3"|' \
+  kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml
+grep -c 'tag: "3.1.3"' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml          # must print 1
+grep -c 'failureThreshold: 120' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml  # must print 1
+mkdir -p /private/tmp/claude-501/paperless-ngx-3.2.0
+MSG=/private/tmp/claude-501/paperless-ngx-3.2.0/msg-paperless-ngx-3.2.0-rollback-$(date +%s).txt
+printf 'revert(paperless-ngx): app image 3.2.1 -> 3.1.3 (rollback, startup budget kept raised)\n\nPlan: runbooks/maintenance/plans/paperless-ngx-3.2.0.md\n' > "$MSG"
+git commit --only kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml -F "$MSG"
 git log -1 --format=%s && git show --stat HEAD
 git push
+rm -f /private/tmp/claude-501/paperless-ngx-3.2.0/roll-start && printf '3.1.3\n' > /private/tmp/claude-501/paperless-ngx-3.2.0/expect-tag
 flux reconcile kustomization paperless-ngx -n office --with-source
+# then run the section 3.8 poll block WITHOUT its `printf '3.2.1\n'` line (it
+# must read expect-tag 3.1.3), and after the checks below pass run section 3.9
+# (restore) - its gate then shows NO diff at all against the pre-3.7 file.
 ```
 
 **The search index self-heals on the way back — verified in the 3.1.3 source.**
@@ -1156,7 +1261,10 @@ the forward path. Nothing about the index is one-way.
 code is unaware of it, and both effects are inert there (an extra index on
 `documents_document.archive_checksum`, plus one unused `rule_type` choice).
 Django does not error on an applied migration it does not know. Reverse it only
-if a later step demands a byte-exact schema:
+if a later step demands a byte-exact schema, and only BEFORE the tag edit above
+(while 3.2.1 code, which carries the migration files, is still running).
+`paperless 0016` can be left applied too (its reverse is AlterField + a no-op
+RunPython):
 
 ```bash
 kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- \
@@ -1171,10 +1279,9 @@ Both operations are `AlterField`, which is reversible — this is why
 ```bash
 kubectl get deploy -n office paperless-ngx scan-inbox-validator \
   -o custom-columns='NAME:.metadata.name,IMAGE:.spec.template.spec.containers[*].image'   # paperless-ngx :3.1.3, scan-inbox-validator :3.2.1 (the pre-plan split)
-# the revert also restores the §3.2 changes (same commit): probe budget back to
-# 30, spec.timeout gone, upgrade remediation back to retries:1
+# the rollback KEEPS the §3.2 raises until section 3.9 runs after these checks
 kubectl get deploy -n office paperless-ngx \
-  -o jsonpath='{.spec.template.spec.containers[0].startupProbe.failureThreshold}{"\n"}'   # 30
+  -o jsonpath='{.spec.template.spec.containers[0].startupProbe.failureThreshold}{"\n"}'   # 120 (30 after 3.9)
 kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- \
   python3 /usr/src/paperless/src/manage.py shell -c "
 from paperless.version import __version__
@@ -1202,16 +1309,19 @@ leave nothing muted once the roll is settled either way).
 ```bash
 runbooks/update-marker.sh clear paperless-ngx
 
-# expire the §2.5 silence early, using the id captured there
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF=$!
+# expire the §2.5 silence early, using the id §2.5 wrote to a FILE (agent Bash
+# calls share no shell variables - $SIL_ID from §2.5 does not exist here)
+SIL_ID=$(cat /private/tmp/claude-501/paperless-ngx-3.2.0/silence-id 2>/dev/null)
+echo "SILENCE_ID ${SIL_ID:-NONE}"   # NONE -> use the list-and-match fallback below
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 19093:9093 >/dev/null 2>&1 & PF=$!
 sleep 2
-curl -s -o /dev/null -w 'SILENCE_DELETE %{http_code}\n' -X DELETE "localhost:9093/api/v2/silence/$SIL_ID"
-curl -s "localhost:9093/api/v2/silence/$SIL_ID" \
+curl -s -o /dev/null -w 'SILENCE_DELETE %{http_code}\n' -X DELETE "localhost:19093/api/v2/silence/$SIL_ID"
+curl -s "localhost:19093/api/v2/silence/$SIL_ID" \
   | python3 -c "import sys,json;print('SILENCE_STATE', json.load(sys.stdin)['status']['state'])"
 kill $PF 2>/dev/null
-# expect SILENCE_DELETE 200 then SILENCE_STATE expired. If $SIL_ID is empty
-# (fresh shell), list and match on the comment instead:
-#   curl -s localhost:9093/api/v2/silences | python3 -c "
+# expect SILENCE_DELETE 200 then SILENCE_STATE expired. If the file is empty,
+# list and match on the comment instead (port 19093):
+#   curl -s localhost:19093/api/v2/silences | python3 -c "
 #   import sys,json
 #   for s in json.load(sys.stdin):
 #       if 'paperless-ngx 3.1.3->3.2.1' in s.get('comment',''):
