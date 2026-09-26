@@ -7416,6 +7416,53 @@ except Exception:
     echo ""
 } | tee -a "$OUTPUT_FILE"
 
+log_section "OpenClaw CLI Contracts"
+
+# Offline regression suite for Juno's household CLIs (mealplan, cal, mail,
+# ha). The scripts live on the PVC and get hand-patched, so nothing else
+# notices when a fix is lost: each test pins a behaviour that once produced a
+# chat tool warning or a wrong family-facing result (family-calendar writes
+# into the deleting Google mirror, `--include` vs `--have`, stale synced
+# staging rows hiding a week's groceries, ...). The suite fakes every network
+# call, so running it touches no service. Source: clawd repo
+# scripts/tests/test_cli_contracts.py.
+check_openclaw_cli_contracts() {
+    local ns="ai" sel="app.kubernetes.io/instance=openclaw" ctr="app"
+    local suite="/home/node/clawd/scripts/tests/test_cli_contracts.py"
+    local pod out rc summary
+
+    pod=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null \
+        | awk '$3=="Running"{print $1; exit}')
+    if [ -z "$pod" ]; then
+        echo "  no Running openclaw pod — skipped"
+        return 0
+    fi
+
+    if ! kubectl exec -n "$ns" "$pod" -c "$ctr" -- test -f "$suite" 2>/dev/null; then
+        echo "  ❌ contract suite missing at $suite"
+        add_major_issue "OpenClaw CLI contract suite is missing from the PVC — mealplan/cal/mail/ha regressions are no longer detected"
+        return 0
+    fi
+
+    out=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- python3 "$suite" 2>&1)
+    rc=$?
+    summary=$(printf '%s\n' "$out" | grep -E '^(Ran [0-9]+ tests|OK|FAILED)' | tr '\n' ' ')
+    if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q '^OK'; then
+        echo "  ✅ ${summary}"
+        CHECKS_PASSED=$((CHECKS_PASSED + 1))
+    else
+        echo "  ❌ ${summary:-suite did not run (exit $rc)}"
+        printf '%s\n' "$out" | grep -E '^(FAIL|ERROR):' | sed 's/^/     /'
+        add_major_issue "OpenClaw CLI contract regression: ${summary:-suite exit $rc} — a household CLI fix was lost; run the suite in the openclaw pod for detail"
+    fi
+}
+
+{
+    echo "=== OpenClaw CLI Contracts ==="
+    check_openclaw_cli_contracts
+    echo ""
+} | tee -a "$OUTPUT_FILE"
+
 log_section "Morning Briefing Delivery"
 
 check_briefing_delivered() {
