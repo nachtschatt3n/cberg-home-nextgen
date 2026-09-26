@@ -47,8 +47,8 @@ finding_refs: [F-aa4d1184, F-eed33ead]  # the two OPEN floating-tag findings in 
 capability_change: false
 rollback_class: git-revert            # Batch M changes addressability only, not bytes.
 autonomy_override: human-gated        # A PROGRAMME: which batch runs when is an operator call.
-status: vetted   # 2026-09-26 plan-reviewer needs-fix -> full replacement (Batch M makemkv only, 5 premises, byte-neutral digest pin); ready-for-go
-window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
+status: draft    # Batch M EXECUTED 2026-09-26 (ab5a41b3). Programme stays open: Batch O not yet planned; component/current/target/touches/premises below still describe Batch M and must be rotated when Batch O is planned
+window: null     # reset after Batch M ran in now:2026-09-26
 generated: "2026-09-26"               # Batch M re-planned 2026-09-26 by plan-reviewer from a LIVE
                                       # inventory; the 2026-09-06 inventory (19 images) is obsolete.
 sops_refs:
@@ -104,7 +104,7 @@ line tag). Result — 10 refs, 4 images:
 
 | Batch | Namespace / workload | Image | Open finding | Status |
 |---|---|---|---|---|
-| **M (now)** | media/makemkv | `jlesage/makemkv:latest` | none (no fixable-CVE warning) | **executable today — §3** |
+| M (done) | media/makemkv | `jlesage/makemkv:latest` -> `v26.01.1@sha256:12ce7fc0…` | none (no fixable-CVE warning) | **DONE 2026-09-26 in now:2026-09-26, pin commit ab5a41b3; G1/G2/G3 green, imageID unchanged** |
 | O (later) | ai/oc8-caddy | `caddy:2` | F-eed33ead | later window |
 | O (later) | ai/oc8-redis | `redis:7-alpine` | none | later window |
 | O (later) | ai/oc8-{backend,worker,scheduler,ingestion-worker} init `wait-for-postgres` | `pgvector/pgvector:pg15` | F-aa4d1184 | later; the image is hard-coded in the FORK chart `deploy/helm/oc8` (GitRepository source), so the fix is a fork commit, not an edit in this repo |
