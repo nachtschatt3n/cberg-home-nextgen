@@ -21,8 +21,7 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 0
-      remediateLastFailure: false   # TEMP for this bump — restore after §3.6
+      retries: 3
   uninstall:
     keepHistory: false
 
