@@ -549,6 +549,31 @@ IMAGE_RELEASE_NOTES_PROJECTS: Dict[str, Tuple[str, str]] = {
     'curlimages/curl': ('curl', 'curl-container'),
 }
 
+# Image repository -> the sub-directory of its source repository that is the
+# image's Docker BUILD CONTEXT.
+#
+# 2026-09-26 (planner finding on mqttx-web v1.13.0 -> v1.13.1). G3s, the
+# structural migration/schema scan in auto-update.py, diffs the WHOLE source
+# repository between the two tags. For a monorepo that ships several products
+# from one tree that is the wrong unit: MQTTX builds the Electron desktop app
+# from `src/`, the CLI from `cli/` and the `emqx/mqttx-web` image from `web/`
+# (`.github/workflows/deploy_web.yaml`: `docker/build-push-action` with
+# `context: ./web`). A TypeORM migration ADDED under the DESKTOP tree
+# (`src/database/migration/...`) held the web image, which carries no database
+# at all. A file outside the build context cannot be in the image, so it
+# cannot be a migration the image runs.
+#
+# SEEDING RULE, same discipline as the map above: an entry is added only after
+# the upstream build workflow has been read and names this context for this
+# image. A wrong entry would HIDE a real migration, so when in doubt leave the
+# image out -- an unlisted image keeps the whole-repository scan (the
+# conservative direction). Values are repository-relative directory prefixes
+# ending in `/`. Keys use the same normalisation as IMAGE_RELEASE_NOTES_PROJECTS.
+IMAGE_BUILD_CONTEXTS: Dict[str, str] = {
+    # verified 2026-09-26: deploy_web.yaml `context: ./web`, images: emqx/mqttx-web
+    'emqx/mqttx-web': 'web/',
+}
+
 # Images whose release notes are NOT GitHub releases, keyed as above. Value is
 # the name of the fetcher used by VersionChecker.fetch_distro_release_notes().
 #
@@ -2819,6 +2844,12 @@ class VersionChecker:
         """'alpine' / 'python' when `image_repo` takes its notes from a
         non-GitHub first-party source (DISTRO_RELEASE_NOTES), else None."""
         return DISTRO_RELEASE_NOTES.get(_image_map_key(image_repo))
+
+    @staticmethod
+    def get_image_build_context(image_repo: str) -> Optional[str]:
+        """Repository-relative build-context prefix (`web/`) for a monorepo
+        image, or None = the whole repository (IMAGE_BUILD_CONTEXTS)."""
+        return IMAGE_BUILD_CONTEXTS.get(_image_map_key(image_repo))
 
     def _http_get_text(self, url: str, timeout: int = 20) -> Optional[str]:
         """Body of `url` as text, or None. One seam, so tests fake the web."""

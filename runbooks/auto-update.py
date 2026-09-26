@@ -503,6 +503,23 @@ def distro_range_read(checker, dep):
     return bool(_distro_source(checker, dep))
 
 
+def _build_context(checker, dep):
+    """Repository-relative build-context prefix for `dep`, or None."""
+    try:
+        fn = getattr(checker, "get_image_build_context", None)
+        ctx = fn(dep) if fn else None
+    except Exception:
+        ctx = None
+    if not ctx:
+        return None
+    ctx = str(ctx).strip().lstrip("./").strip("/")
+    return (ctx + "/") if ctx else None
+
+
+def _in_context(path, ctx):
+    return ctx is None or str(path or "").startswith(ctx)
+
+
 # ── G3s: the STRUCTURAL companion gate — the DIFF, not the prose ─────────────
 # WHY THIS EXISTS (F-ea1000ff, 2026-09-20). G3 reads release-note PROSE. It
 # therefore holds when upstream happens to write the word "breaking" and
@@ -698,10 +715,19 @@ def _structural_signal_uncached(checker, dep, new_tag, cur_tag):
     if cmp is None:
         return [], False, (f"compare refs unresolved for {owner}/{repo} "
                            f"(tried {len(pairs)} tag spelling(s))")
-    signals = _scan_structural_files(cmp["files"])
+    # BUILD-CONTEXT SCOPE (2026-09-26). A monorepo ships several products from
+    # one tree; only files inside the image's own build context can be in the
+    # image. mqttx-web was held for a TypeORM migration under the Electron
+    # DESKTOP tree (`src/`) while the image builds from `web/` and carries no
+    # database. Unlisted images keep the whole-repository scan.
+    ctx = _build_context(checker, dep)
+    scope = f" (scoped to build context {ctx})" if ctx else ""
+    in_ctx = [f for f in cmp["files"] if _in_context(f.get("filename"), ctx)]
+    signals = _scan_structural_files(in_ctx)
     span = f"{used[0]}...{used[1]}"
     if not cmp["truncated"]:
-        return _dedupe(signals), True, (f"diff {span} read: {len(cmp['files'])} file(s), "
+        return _dedupe(signals), True, (f"diff {span} read{scope}: {len(in_ctx)} of "
+                                        f"{len(cmp['files'])} file(s), "
                                         f"{cmp.get('commits')} commit(s)")
     # TRUNCATED: the 300 files seen are a prefix of the diff, not the diff.
     base_t, head_t = _tree_blobs(owner, repo, used[0]), _tree_blobs(owner, repo, used[1])
@@ -709,8 +735,9 @@ def _structural_signal_uncached(checker, dep, new_tag, cur_tag):
         return _dedupe(signals), False, (
             f"diff {span} truncated at {_COMPARE_FILE_CAP} files and the trees could "
             f"not be read — structural scan INCOMPLETE")
-    added = [p for p in head_t if p not in base_t]
-    changed = [p for p, sha in head_t.items() if p in base_t and base_t[p] != sha]
+    added = [p for p in head_t if p not in base_t and _in_context(p, ctx)]
+    changed = [p for p, sha in head_t.items()
+               if p in base_t and base_t[p] != sha and _in_context(p, ctx)]
     signals += [f"new migration file {p}" for p in added if _STRUCTURAL_PATH_RE.search(p)]
     cands = [p for p in added + changed
              if _SCHEMA_FILE_RE.search(p) and not _STRUCTURAL_EXCLUDE_RE.search(p)]
@@ -730,7 +757,7 @@ def _structural_signal_uncached(checker, dep, new_tag, cur_tag):
             if _STRUCTURAL_CONST_RE.search("+" + ln):
                 signals.append(f"{path}: {ln.strip()[:80]}")
                 break
-    note = (f"diff {span} truncated at {_COMPARE_FILE_CAP} files; trees diffed "
+    note = (f"diff {span}{scope} truncated at {_COMPARE_FILE_CAP} files; trees diffed "
             f"({len(added)} added, {len(changed)} changed), {fetched}/{len(cands)} "
             f"schema-named file(s) read")
     if not complete:
