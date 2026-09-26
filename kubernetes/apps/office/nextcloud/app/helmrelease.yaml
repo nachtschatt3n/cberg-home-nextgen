@@ -22,8 +22,7 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 0                 # TEMPORARY (plan nextcloud-34.0.4 §3.3) — restore 3 in §3.6
-      remediateLastFailure: false
+      retries: 3
   uninstall:
     keepHistory: false
   # Values link: https://github.com/nextcloud/helm/blob/master/charts/nextcloud/values.yaml
