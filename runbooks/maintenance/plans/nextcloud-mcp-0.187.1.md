@@ -89,7 +89,7 @@ status: awaiting-go   # RESET 2026-09-25: the operator GO recorded for 0.195.0 d
                       # before the 2026-10-03 run. Reviewed 2026-09-23 at 0.195.0 (needs-fix -> fixed).
                       # FRESH GO for 0.195.4 given by the operator 2026-09-25 (home-operation decide
                       # approve, exec_state=pending). Status stays awaiting-go per the pre-window convention.
-window: "sat-attended:2026-10-03"   # KEPT on retarget (risk/duration/reboot class unchanged: medium, 35 min, no
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was 'sat-attended:2026-10-03')
                                       # reboot, git-revert). Slot re-checked 2026-09-22: also holds
                                       # external-dns-unowned-cnames (draft, 40 min, medium) — no shared resource
                                       # (§6); 40+35 = 75 of 90 min, risk 2+2 = 4 of 6. Attended by the deny-rule
