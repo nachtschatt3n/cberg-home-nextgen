@@ -35,9 +35,7 @@ conflicts_with:
                                       # but the declaration stands until nocodb's file drops it, so
                                       # it is named here too. In an on-demand run it only forces
                                       # serial order + settle_before (run-now.py conflict_pairs).
-  - intel-device-plugin-0.37.0        # its DaemonSet roll re-registers gpu.intel.com/i915; a makemkv
-                                      # pod recreated DURING that roll cannot be allocated i915 and
-                                      # sits Pending. Never interleave; either order is fine.
+  # - intel-device-plugin-0.37.0   # RESOLVED 2026-09-26: executed + retired in the now:2026-09-26 run; ref removed
 exclusive: false
 security_ref: null                    # CORRECTED 2026-09-26: was F-c58dd98e, which is an unrelated
                                       # (absenty, resolved) finding. No security finding exists for

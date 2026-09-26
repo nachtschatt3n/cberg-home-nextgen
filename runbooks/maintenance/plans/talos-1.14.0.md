@@ -50,8 +50,7 @@ depends_on: []
 conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended SLOT.
   - absenty-drop-npm-runtime          # currently sun-attended:2026-09-13, 60 min
   - authentik-pg18-lockstep           # currently sun-attended:2026-09-13, 35 min
-  - authentik-pg17-decommission       # must not destroy the auth DB rollback in a
-                                      # window that also reboots every node
+  # - authentik-pg17-decommission   # RESOLVED 2026-09-26: executed + retired in the now:2026-09-26 run; ref removed
   # RESOLVED 2026-09-09: superset-pg-cutover dropped. Its §5 rollback repointed
   # DB_HOST at superset-postgresql (retired 2026-09-05, 90539942), and the
   # alternate leg superset-pg was retired 2026-09-09 (9d10199c). Neither leg

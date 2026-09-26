@@ -23,7 +23,7 @@ conflicts_with:
   - authentik-2026.8.3                # reciprocal of its own conflicts_with entry;
                                       # a roll mid-verification makes the login
                                       # land on a terminating pod
-  - authentik-pg17-decommission       # same component, same DB; must not co-run
+  # - authentik-pg17-decommission   # RESOLVED 2026-09-26: executed + retired in the now:2026-09-26 run; ref removed
   - talos-1.14.1                      # a node roll evicts authentik-server mid-verification
 capability_change: false              # records nothing new, changes nothing
 autonomy_override: human-gated        # RESTRICTS only. The verification needs a

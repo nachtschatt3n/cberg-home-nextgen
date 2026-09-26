@@ -67,8 +67,7 @@ conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended S
                                       # same-night bump of the instrument invalidates the
                                       # measurement (plans README, conflicts_with rule).
   - multus-macvlan-foundation         # also mutates Talos machine config
-  - authentik-pg17-decommission       # must not destroy the auth DB rollback in a window
-                                      # that also reboots every node
+  # - authentik-pg17-decommission   # RESOLVED 2026-09-26: executed + retired in the now:2026-09-26 run; ref removed
   - nextcloud-34.0.4                  # sun-attended:2026-10-04 — declared in case THIS
   - jellyfin-12.1                     # sun-attended:2026-10-11 — plan slips to their date.
                                       # Today the minutes check already excludes them

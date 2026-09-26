@@ -44,10 +44,7 @@ touches:
     - monitoring          # §4 reads Prometheus alerts/series; authentik gauges change label shape
 depends_on: []
 conflicts_with:
-  - authentik-pg17-decommission       # SAME component, SAME helmrelease.yaml, sat-attended:2026-09-26,
-                                      # awaiting-go; its residual verification (a forward-auth sign-in
-                                      # in the authentik event log) must not be read across an authentik
-                                      # roll — see §6. Do not co-schedule.
+  # - authentik-pg17-decommission   # RESOLVED 2026-09-26: executed + retired in the now:2026-09-26 run; ref removed
   - wazuh-2xx-edge-coverage           # sat-attended:2026-09-26; edits helmrelease/authentik and restarts
                                       # authentik-server, and its §3.1 client_ip baseline is changed by
                                       # this release (X-Forwarded-For-with-ports fix) — see §6
