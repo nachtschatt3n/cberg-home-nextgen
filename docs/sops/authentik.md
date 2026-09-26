@@ -381,14 +381,12 @@ a foreign sender, so `FROM` must be that GMX address. If the GMX password is
 rotated in paperless, rotate `SECRET_AUTHENTIK_EMAIL_PASSWORD` too.
 
 ```bash
-# test mail (worker pod; the recipient is read from the user object, not typed)
+# test mail = `ak test_email <to>` (authentik/stages/email/management/commands/
+# test_email.py); here the recipient is read from the user object, not typed
 kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from django.core.management import call_command
 from authentik.core.models import User
-from authentik.stages.email.tasks import send_mails
-from authentik.stages.email.utils import TemplateEmailMessage
-u=User.objects.get(username='mu_adm')
-m=TemplateEmailMessage(subject='authentik test', to=[(u.name,u.email)], template_name='email/setup.html', template_context={})
-send_mails.send(None, m)" 2>/dev/null | tail -1
+call_command('test_email', User.objects.get(username='mu_adm').email)" 2>/dev/null | tail -1
 # proof: an Event action=email_sent (or a task error with the SMTP reply)
 ```
 
