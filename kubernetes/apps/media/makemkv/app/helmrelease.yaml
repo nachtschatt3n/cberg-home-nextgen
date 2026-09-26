@@ -32,7 +32,7 @@ spec:
   values:
     image:
       repository: jlesage/makemkv
-      tag: latest
+      tag: v26.01.1@sha256:12ce7fc0e398c240bc06b27459241ddae524e066c476525b9b36a16c3e478518
       pullPolicy: IfNotPresent
 
     service:
@@ -155,7 +155,7 @@ spec:
           main:
             image:
               repository: jlesage/makemkv
-              tag: latest
+              tag: v26.01.1@sha256:12ce7fc0e398c240bc06b27459241ddae524e066c476525b9b36a16c3e478518
               pullPolicy: IfNotPresent
             env:
               - name: MAKEMKV_KEY
