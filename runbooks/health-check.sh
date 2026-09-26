@@ -6787,6 +6787,12 @@ log_section "Section 38: Admission Webhook Health"
     # ~2,700 times/day. The other 12 are CRD-scoped (fire only when someone
     # creates e.g. an `FpgaDevicePlugin` object, which essentially never
     # happens here) -- genuinely dead, but not a noise source.
+    # UPDATE 2026-09-26 (chart 0.37.0): upstream removed the DLB and FPGA
+    # plugins, and devices are now enabled via `manager.devices`, which also
+    # suppresses the pod-scoped sgx mutator. The mutating config now carries
+    # 6 CRD-scoped entries (dsa/gpu/iaa/npu/qat/sgx) and NO pod-scoped
+    # mutator; the unused-type 404 routes drop from 12 to 8 (dsa/iaa/qat/sgx,
+    # validating + mutating). The history above describes 0.36.0.
     #
     # One port-forward per unique target SERVICE (48 webhook entries share
     # only 8 backing services in this cluster), POST a synthetic AdmissionReview
