@@ -5,7 +5,7 @@ pr: null                              # No Renovate PR exists or can exist: this
                                       # CONFIG change (a field on every HelmRelease),
                                       # not a version bump. Renovate has no opinion.
 kind: config
-current: "124 HelmReleases, spec.driftDetection unset on all 124 (mode defaults to `disabled`: helm-controller v1.6.3 never compares the Helm storage manifest with the cluster). Two stored manifests (ai/anythingllm, media/jellyfin) are REJECTED by a server-side dry-run apply and would fail their reconcile the moment detection is switched on. Measured 2026-09-14."
+current: "126 HelmReleases in 138 child Kustomizations, spec.driftDetection unset on all 126 (mode defaults to `disabled`: helm-controller v1.6.3 never compares the Helm storage manifest with the cluster). Two stored manifests (ai/anythingllm, media/jellyfin) are REJECTED by a server-side dry-run apply and would fail their reconcile the moment detection is switched on. Measured 2026-09-14, re-measured unchanged 2026-09-26 (plan review)."
 target: "spec.driftDetection.mode: enabled on every HelmRelease, with ignore rules derived from a measured >=7-day warn-mode inventory — delivered in FOUR windowed steps (P0 fix the two SSA-rejected charts -> P1 warn -> P2 ignores + retire the two known day-1 diffs -> P3 enabled), each its own window, each one commit, each independently revertible"
 update_type: refactor
 risk: medium                          # Two sources. (1) Phase 1 is NOT read-only for a
@@ -82,6 +82,13 @@ conflicts_with:
   - affine-redis-8.10.2               # §4.1 revision-identity diff: that plan upgrades
                                       # office/affine-redis (rev 14 -> 15). Reciprocal of
                                       # its own declaration; added 2026-09-26 (plan review).
+  - flux-reconciler-impersonation     # Reciprocal of its own declaration (it swaps the identity
+                                      # helm-controller applies under; drift correction under
+                                      # impersonation is untested). Added 2026-09-26 (review).
+                                      # intel-device-plugin-0.37.0 and falco-9.2.0 also name this
+                                      # plan but are NOT listed: both run/ran in the 2026-09-26
+                                      # main NOW run and are retired on execution, and a ref to a
+                                      # deleted plan is a --validate DEAD-REF.
 security_ref: null
 capability_change: false              # no user-visible behaviour changes; Flux reconciles the
                                       # same manifests, it merely starts to notice edits
@@ -94,9 +101,11 @@ autonomy_override: human-gated        # RESTRICTS only. P0 and P1 are nightly-sa
                                       # file cannot be one AUTO-NIGHT unit, so the scheduler
                                       # must not treat it as one.
 finding_refs: []
-status: draft
-window: null                          # assigned PER PHASE by the window agent; after each
-                                      # phase set status back to `vetted` for the next one
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> 19 edits applied; ready-for-go for P0+P1 ONLY, as a SEPARATE on-demand run after the main now:2026-09-26 run is finalized; P1 then sets awaiting-soak (7-day warn inventory)
+window: null                          # assigned PER PHASE by the window agent; after P0-only
+                                      # set status back to `vetted`; after P1 and after P2 set
+                                      # `awaiting-soak` (run-now.py refuses it, so no NOW run
+                                      # can collapse a soak; flip to `vetted` when it ends)
                                       # AND refresh `generated:` to the edit date in that
                                       # same commit — maintenance-plan.py flags a plan as
                                       # `unused > stale_after_days` (14) from `generated`,
@@ -171,7 +180,7 @@ premises:
       One Alert with eventSeverity info or a HelmRelease source changes that.
     run: kubectl get alerts.notification.toolkit.fluxcd.io -A --no-headers | wc -l
     expect_exact: "0"
-generated: "2026-09-14"
+generated: "2026-09-26"
 ---
 
 # Helm drift detection: fix the SSA-rejected charts -> warn -> ignore rules -> enabled, cluster-wide
@@ -423,9 +432,8 @@ python3 runbooks/plan-premises.py helm-drift-detection          # all 8 must PAS
 flux get kustomizations -A | awk 'NR==1 || $5 != "True"'         # header only
 flux get helmreleases -A   | awk 'NR==1 || $5 != "True"'         # header only
 git status --porcelain kubernetes/flux/cluster/ks.yaml            # empty: nobody else mid-edit
-# Baseline for the "no Helm upgrade" assertion (§4.1): revision per release
-helm list -A -o json | python3 -c "import sys,json;print('\n'.join(sorted(f\"{r['namespace']}/{r['name']} rev={r['revision']}\" for r in json.load(sys.stdin))))" > /tmp/helm-rev-before.txt
-wc -l /tmp/helm-rev-before.txt                                     # 124 (or the premise range)
+# Baseline for the "no Helm upgrade" assertion (§4.1) is `rev-gate.py snapshot` (§3.0.0),
+# taken IMMEDIATELY before the P1 commit — never here: Step 0 and P0 itself bump revisions.
 ```
 
 ### 2.1 PRE-PHASE-1 GATE — every stored manifest must pass a server-side dry-run (MANDATORY)
@@ -440,7 +448,8 @@ kube-prometheus-stack on their cross-namespace objects — that is a
 is the §3.1.4 export and the §1.2 "expected day-1 inventory" in one run.
 
 ```bash
-cat > /tmp/hr-ssa-gate.py <<'PY'
+mkdir -p /private/tmp/claude-501/helm-drift-detection
+cat > /private/tmp/claude-501/helm-drift-detection/hr-ssa-gate.py <<'PY'
 #!/usr/bin/env python3
 """helm-controller drift detection, emulated read-only: per-document server-side
 DRY-RUN apply of every stored release manifest as field manager helm-controller with
@@ -498,10 +507,14 @@ with cf.ThreadPoolExecutor(max_workers=8) as ex:
     for rows in ex.map(lambda r: one(*r),rels):
         for r in rows: print(r)
 PY
-python3 /tmp/hr-ssa-gate.py > /tmp/hr-ssa-gate.tsv       # ~3 min, ~600 objects, read-only
-grep -c '^FAIL' /tmp/hr-ssa-gate.tsv                       # MUST be 0 — else STOP, P0 is not done
-grep '^FAIL\|^MISSING' /tmp/hr-ssa-gate.tsv
-grep '^DIFF' /tmp/hr-ssa-gate.tsv                          # = the expected day-1 inventory
+python3 /private/tmp/claude-501/helm-drift-detection/hr-ssa-gate.py > /private/tmp/claude-501/helm-drift-detection/hr-ssa-gate.tsv       # ~3 min, ~600 objects, read-only
+# THE GATE is the fail-closed wrapper (§3.0.0 step 2), not `grep -c '^FAIL'`: the bare
+# grep reads 0 — a false PASS — when the script crashes or helm list hides a pending
+# release (both reproduced 2026-09-26). The wrapper re-runs the script and checks exit
+# code, release coverage == HelmRelease count, and 0 FAIL rows:
+python3 /private/tmp/claude-501/helm-drift-detection/ssa-gate-check.py; echo "rc=$?"                # MUST print SSA-GATE PASS, rc=0 — else STOP
+grep '^FAIL\|^MISSING' /private/tmp/claude-501/helm-drift-detection/hr-ssa-gate.tsv
+grep '^DIFF' /private/tmp/claude-501/helm-drift-detection/hr-ssa-gate.tsv                          # = the expected day-1 inventory
 ```
 
 **Measured 2026-09-14 (before P0):**
@@ -548,7 +561,7 @@ kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{
 #         (An opted-out HR prints an empty reason and therefore FAILS this gate — correct direction.)
 
 # 1b. Same thing measured from the API instead of the condition (§2.1 script, ~3 min):
-python3 /tmp/hr-ssa-gate.py > /tmp/hr-ssa-gate-p3.tsv; grep -c '^FAIL\|^DIFF' /tmp/hr-ssa-gate-p3.tsv   # 0
+python3 /private/tmp/claude-501/helm-drift-detection/hr-ssa-gate.py > /private/tmp/claude-501/helm-drift-detection/hr-ssa-gate-p3.tsv; grep -c '^FAIL\|^DIFF' /private/tmp/claude-501/helm-drift-detection/hr-ssa-gate-p3.tsv   # 0
 
 # 2. No standing manual override on a Helm-managed workload (a replicas=0 parked by hand is
 #    exactly what Phase 3 un-parks):
@@ -597,6 +610,255 @@ downtime each. **The opt-out label** (`drift-detection.flux.home.arpa/disabled:
 a fix cannot land before P1's window — it leaves two real chart bugs unfixed
 and those two releases unwatched, so it must be recorded in the inventory
 finding with a follow-up date.
+
+### 3.0.0 TODAY — on-demand NOW run 2026-09-26: P0 + P1 as ONE dedicated, FINAL run
+
+Reviewed 2026-09-26 (plan-reviewer, read-only). Re-measured live that morning:
+126 HelmReleases, 138 child Kustomizations; the §2.1 gate (through the
+fail-closed wrapper below) = `SSA-GATE FAIL: FAIL=2 DIFF=2` — the same two
+rejected Deployments (ai/anythingllm, media/jellyfin) and the same two day-1
+diffs (GpuDevicePlugin `monitoringMode`, which SURVIVED intel-device-plugin
+0.37.0 / rev 6 executed the same morning; Prometheus `paused`). So P1 cannot
+run before P0, and P2/P3 cannot run before the >= 7-day soak.
+
+**Why a dedicated FINAL run, not a step of the main run.** `run-now.py`
+orders plans with a non-empty `touches.shared` FIRST (this plan carries the
+P2-only intel-gpu-plugin entry), so inside the main run P1 would land before
+the other HelmRelease-changing plans. P1 must be the LAST HelmRelease change
+of the day: (a) the §2.1 gate must cover every stored manifest as it will be
+after today's upgrades — once `warn` is on, a later upgrade to an SSA-invalid
+manifest goes `Ready=False` inside ANOTHER plan's verification; (b) the
+revision gate below must attribute every Helm upgrade. `run-now.py` cannot
+express "last", hence a second run. P0 rides in it (no reason to split: the
+jellyfin hunk is disjoint from `jellyfin-12.1`'s image/remediation hunks, that
+plan's rollback is `git revert <its bump commit>`, and the two removed keys
+were already pruned from the live pod templates — see §3.0.3).
+
+Every block below is self-contained (no shell variable, function or
+port-forward survives between blocks); state lives in fixed files under
+`/private/tmp/claude-501/helm-drift-detection/`.
+
+1. **Preconditions.** The main NOW run is FINALIZED (`run-now.py` exits 10 while
+   any `now` row is open). This plan is `status: vetted`. Then
+   `.venv/bin/python3 runbooks/run-now.py preflight helm-drift-detection --operator-go "<who/how>"`
+   -> exit 0. Step 0 of this run lands first as always; the settle check in
+   `rev-gate.py` absorbs it. §2.0 as written, minus its baseline lines.
+2. **Tooling** — run the §2.1 heredoc block (it now writes
+   `/private/tmp/claude-501/helm-drift-detection/hr-ssa-gate.py`), then:
+
+```bash
+mkdir -p /private/tmp/claude-501/helm-drift-detection
+cat > /private/tmp/claude-501/helm-drift-detection/ssa-gate-check.py <<'SSACHECK'
+#!/usr/bin/env python3
+"""Wraps hr-ssa-gate.py (same dir) so the gate FAILS CLOSED: a crash, a partial
+run (helm list hiding a pending release) or a FAIL row is a FAIL; only a complete
+run over every HelmRelease with zero FAIL rows prints SSA-GATE PASS."""
+import json, os, subprocess, sys
+D = os.path.dirname(os.path.abspath(__file__))
+p = subprocess.run([sys.executable, f"{D}/hr-ssa-gate.py"], capture_output=True, text=True)
+open(f"{D}/hr-ssa-gate.tsv", "w").write(p.stdout)
+hr = len(json.loads(subprocess.run(["kubectl", "get", "helmrelease", "-A", "-o", "json"],
+                                   capture_output=True, text=True, check=True).stdout)["items"])
+rel = [l for l in p.stderr.splitlines() if l.startswith("releases: ")]
+rows = p.stdout.splitlines()
+fails = [r for r in rows if r.startswith("FAIL")]
+for r in rows:
+    print(r[:300])
+problems = []
+if p.returncode: problems.append(f"gate script exited {p.returncode}: {p.stderr.strip()[-300:]}")
+if rel != [f"releases: {hr}"]: problems.append(f"covered {rel} but {hr} HelmReleases exist")
+if fails: problems.append(f"{len(fails)} FAIL row(s)")
+print(f"SSA-GATE {'FAIL' if problems else 'PASS'}: HelmReleases={hr} {rel} FAIL={len(fails)} "
+      f"DIFF={sum(r.startswith('DIFF') for r in rows)} MISSING={sum(r.startswith('MISSING') for r in rows)}")
+for x in problems: print("  -", x)
+sys.exit(1 if problems else 0)
+SSACHECK
+cat > /private/tmp/claude-501/helm-drift-detection/rev-gate.py <<'REVGATE'
+#!/usr/bin/env python3
+"""Helm-revision identity gate for helm-drift-detection P1, scoped so other plans'
+commits cannot false-FAIL it and a real upgrade cannot false-PASS it.
+  rev-gate.py snapshot NAME            -> <dir>/rev-NAME.json   (refuses unless SETTLED)
+  rev-gate.py compare NAME [--require-warn] [--no-explain]
+Exit 0 PASS, 1 FAIL, 2 NOT-SETTLED (re-run later; never read 2 as a pass)."""
+import json, os, subprocess, sys
+D = os.path.dirname(os.path.abspath(__file__))
+REPO = "/Users/mu/code/cberg-home-nextgen"
+def sh(*c): return subprocess.run(c, capture_output=True, text=True, check=True, cwd=REPO).stdout
+def cond(o, t):
+    return next((c for c in o.get("status", {}).get("conditions", []) if c["type"] == t), None)
+def settled(require_warn):
+    subprocess.run(["git", "fetch", "-q", "origin", "main"], cwd=REPO, check=True)
+    head = sh("git", "rev-parse", "origin/main").strip()
+    # floor = newest commit that touches anything Flux applies; plan-only commits
+    # by other sessions move HEAD but cannot change a HelmRelease, so they are ignored
+    floor = sh("git", "log", "-1", "--format=%H", "origin/main", "--", "kubernetes/").strip()
+    why = []
+    for k in json.loads(sh("kubectl", "get", "kustomization", "-A", "-o", "json"))["items"]:
+        n = k["metadata"]["namespace"] + "/" + k["metadata"]["name"]
+        if k["spec"].get("suspend"): continue
+        applied = (k["status"].get("lastAppliedRevision") or "").rsplit(":", 1)[-1]
+        if not applied or subprocess.run(["git", "merge-base", "--is-ancestor", floor, applied], cwd=REPO).returncode != 0:
+            why.append(f"ks {n} applied {applied[:8] or '-'} does not contain {floor[:8]}")
+        if k["status"].get("observedGeneration") != k["metadata"]["generation"]: why.append(f"ks {n} generation lag")
+    hrs = json.loads(sh("kubectl", "get", "helmrelease", "-A", "-o", "json"))["items"]
+    for h in hrs:
+        n = h["metadata"]["namespace"] + "/" + h["metadata"]["name"]
+        r = cond(h, "Ready")
+        if h["status"].get("observedGeneration") != h["metadata"]["generation"]: why.append(f"hr {n} generation lag")
+        if not r or r["status"] != "True": why.append(f"hr {n} Ready={r and r['status']}")
+        if require_warn:
+            if (h["spec"].get("driftDetection") or {}).get("mode") != "warn": why.append(f"hr {n} mode!=warn")
+            if not cond(h, "Drifted"): why.append(f"hr {n} has no Drifted condition (detection never ran)")
+    return head, hrs, why
+def revs():
+    return {f"{r['namespace']}/{r['name']}": int(r["revision"]) for r in json.loads(sh("helm", "list", "-A", "-a", "-o", "json"))}
+def main(argv, settled=settled):
+  mode, name = argv[1], argv[2]
+  flags = set(argv[3:]); path = f"{D}/rev-{name}.json"
+  head, hrs, why = settled("--require-warn" in flags)
+  if why:
+      print("NOT-SETTLED:", len(why), "reason(s)"); print("\n".join(why[:25])); sys.exit(2)
+  cur = revs()
+  if len(cur) != len(hrs):
+      print(f"FAIL: helm list has {len(cur)} releases, {len(hrs)} HelmReleases"); sys.exit(1)
+  if mode == "snapshot":
+      json.dump({"head": head, "revs": cur}, open(path, "w"), indent=1)
+      print(f"SNAPSHOT {name}: {len(cur)} releases at {head[:8]} -> {path}"); sys.exit(0)
+  base = json.load(open(path))
+  ks = {(k["metadata"]["namespace"], k["metadata"]["name"]): k["spec"]["path"].lstrip("./")
+        for k in json.loads(sh("kubectl", "get", "kustomization", "-A", "-o", "json"))["items"]}
+  bad, explained = [], []
+  for key in sorted(set(base["revs"]) | set(cur)):
+      a, b = base["revs"].get(key), cur.get(key)
+      if a == b: continue
+      h = next((x for x in hrs if f"{x['metadata']['namespace']}/{x['metadata']['name']}" == key), None)
+      lab = (h or {}).get("metadata", {}).get("labels", {})
+      kpath = ks.get((lab.get("kustomize.toolkit.fluxcd.io/namespace"), lab.get("kustomize.toolkit.fluxcd.io/name")))
+      commits = sh("git", "log", "--format=%h %s", f"{base['head']}..{head}", "--", kpath).strip() if kpath and "--no-explain" not in flags else ""
+      (explained if commits else bad).append(f"{key} rev {a}->{b}" + (f"  explained by: {commits.splitlines()[0]}" if commits else ("  (--no-explain)" if "--no-explain" in flags else f"  (path {kpath}: no commit since {base['head'][:8]})")))
+  for e in explained: print("EXPLAINED", e)
+  for e in bad: print("UNEXPLAINED", e)
+  print(f"REV-GATE {'FAIL' if bad else 'PASS'}: {len(cur)} releases, {len(explained)} explained change(s), {len(bad)} unexplained")
+  sys.exit(1 if bad else 0)
+if __name__ == "__main__":
+  main(sys.argv)
+REVGATE
+cat > /private/tmp/claude-501/helm-drift-detection/p0-edit.py <<'P0EDIT'
+import sys
+R = "/Users/mu/code/cberg-home-nextgen/"
+def edit(path, old, new):
+    t = open(R + path).read()
+    n = t.count(old)
+    if n != 1: sys.exit(f"STOP: {path}: anchor matched {n}x (need exactly 1) -- file changed since review")
+    open(R + path, "w").write(t.replace(old, new))
+    print("edited", path)
+edit("kubernetes/apps/ai/anythingllm/app/helmrelease.yaml",
+     "    replicaCount: 1\n\n    strategy:\n      type: Recreate\n\n    image:\n",
+     "    replicaCount: 1\n\n    image:\n")
+edit("kubernetes/apps/ai/anythingllm/app/helmrelease.yaml",
+     "                      - name: storage\n                        mountPath: /storage\n",
+     "                      - name: storage\n                        mountPath: /storage\n"
+     "          # The chart renders `.Values.strategy` under the POD spec (templates/\n"
+     "          # deployment.yaml:35-38) and defaults it to Recreate in its own values.yaml,\n"
+     "          # so the field is present even with no value of ours. A pod spec has no\n"
+     "          # `strategy`: a server-side apply rejects the whole Deployment with\n"
+     "          # `.spec.template.spec.strategy: field not declared in schema` -- invisible\n"
+     "          # to Helm's 3-way merge, fatal to Flux drift detection (plan\n"
+     "          # helm-drift-detection section 3.0.1). Strategic-merge null deletes the key\n"
+     "          # whether or not the chart renders it; the Deployment-level strategy is\n"
+     "          # still forced to Recreate by the patch above (RWO Longhorn PVC).\n"
+     "          - target:\n              kind: Deployment\n              name: anythingllm\n"
+     "            patch: |\n              apiVersion: apps/v1\n              kind: Deployment\n"
+     "              metadata:\n                name: anythingllm\n              spec:\n"
+     "                template:\n                  spec:\n                    strategy: null\n")
+edit("kubernetes/apps/media/jellyfin/app/helmrelease.yaml",
+     "    podSecurityContext:\n      privileged: true\n      capabilities:\n        add:\n          - SYS_ADMIN\n"
+     "      allowPrivilegeEscalation: true\n      runAsUser: 0\n",
+     "    podSecurityContext:\n      runAsUser: 0\n")
+P0EDIT
+ls -l /private/tmp/claude-501/helm-drift-detection/
+```
+
+3. **Known-bad demonstration + baseline A (before P0).**
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+python3 /private/tmp/claude-501/helm-drift-detection/ssa-gate-check.py; echo "rc=$?"
+# MUST print SSA-GATE FAIL with exactly two FAIL rows (ai/anythingllm, media/jellyfin) and rc=1:
+# this is the identical command that must print PASS in step 6, so the gate is shown able to FAIL.
+# (If it already prints PASS, someone fixed both: skip P0, go to step 6.)
+python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py snapshot A; echo "rc=$?"
+# rc=0 "SNAPSHOT A". rc=2 = NOT-SETTLED (reasons printed): re-run until 0 (Monitor tool;
+# no sleep loops). NEVER proceed on rc=2.
+```
+
+4. **P0 — edit, prove, commit** (one call; anchors asserted exactly once, a
+   file changed since this review STOPs instead of mis-editing):
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+git status --porcelain kubernetes/apps/ai/anythingllm/app/helmrelease.yaml kubernetes/apps/media/jellyfin/app/helmrelease.yaml  # empty
+python3 /private/tmp/claude-501/helm-drift-detection/p0-edit.py
+git diff --stat -- kubernetes/apps/ai/anythingllm/app/helmrelease.yaml kubernetes/apps/media/jellyfin/app/helmrelease.yaml   # 2 files, +12/-2 and -5
+```
+
+   Then run the §3.0.1 step 3 and §3.0.2 step 2 proof blocks unchanged (both
+   expect `serverside-applied (server dry run)`; the review re-ran them on
+   2026-09-26 and ALSO ran the negative control — the unedited anythingllm
+   render is rejected with `field not declared in schema`). Commit, in ONE call:
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+M=/private/tmp/claude-501/helm-drift-detection/msg-helm-drift-detection-p0-$(date +%s).txt
+printf '%s\n' "fix(anythingllm,jellyfin): make stored manifests pass server-side apply" "" \
+  "anythingllm: the chart renders .Values.strategy under the pod spec (and defaults it)," \
+  "so drop our copy and delete the pod-level key in the postRenderer; the Deployment" \
+  "strategy stays Recreate (RWO PVC). jellyfin: privileged/capabilities/" \
+  "allowPrivilegeEscalation are container-only keys, removed from podSecurityContext" \
+  "(the container securityContext already carries them). Both were rejected by a" \
+  "server-side dry-run apply, the comparison Flux drift detection performs." \
+  "Phase 0 of runbooks/maintenance/plans/helm-drift-detection.md." > "$M"
+git commit --only kubernetes/apps/ai/anythingllm/app/helmrelease.yaml kubernetes/apps/media/jellyfin/app/helmrelease.yaml -F "$M"
+git show --stat HEAD          # exactly these 2 files
+git log -1 --format=%s        # the subject above, not someone else's
+git push
+```
+
+5. **P0 verification.**
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py compare A --no-explain; echo "rc=$?"
+# rc=2: not settled yet, re-run. Then REQUIRED: rc=1 listing ai/anythingllm AND media/jellyfin
+# UNEXPLAINED (proves both Helm upgrades happened AND that the revision gate can FAIL).
+# Any OTHER release listed: run `rev-gate.py compare A` (with explanation) and read it before going on.
+```
+
+   Then §4.0.
+6. **P1 gate** — `python3 /private/tmp/claude-501/helm-drift-detection/ssa-gate-check.py; echo "rc=$?"` MUST print
+   `SSA-GATE PASS` (rc 0: script exit 0, releases == HelmRelease count, 0 FAIL
+   rows). The two DIFF rows are expected. Anything else: STOP (the opt-out label
+   of §3.0 is a stop-gap only on the operator's say-so).
+7. **Baseline B** — `python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py snapshot B` -> rc 0 (re-run on 2).
+8. **P1** — §3.1.1 edit, §3.1.2 render proof; commit `kubernetes/flux/cluster/ks.yaml`
+   ALONE (not this plan file — the close-out in step 10 carries the plan, so a
+   P1 revert stays one file), with a message file exactly as in step 4
+   (`msg-helm-drift-detection-p1-$(date +%s).txt`), `git show --stat HEAD`
+   (1 file), `git log -1 --format=%s`, push, then the §3.1.2 nudge.
+9. **P1 verification** — `python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py compare B --require-warn; echo "rc=$?"`.
+   rc 2 while propagating (re-run). rc 0 = every HelmRelease has
+   `mode: warn`, `observedGeneration == generation`, `Ready=True`, a `Drifted`
+   condition (detection RAN), and no unexplained revision change (the pre-P1
+   state fails `--require-warn` on every release, measured 2026-09-26, so this
+   cannot pass on a stale read). rc 1 = STOP -> §5 P1 revert. Then §4.1
+   assertions 1 and 3.
+10. **Close-out commit (this plan file only):** `status: awaiting-soak` (NOT
+    `vetted`: `run-now.py` refuses awaiting-soak, so no NOW run can collapse the
+    soak), `window: null`, `generated: "2026-09-26"`, the §3.1.3 day-1 finding id
+    in `finding_refs`. P2 not before 2026-10-03 and only after the inventory spans
+    a weekend window (§2.2).
+
+Rollback today: P1 revert first, then P0 revert — two separate `git revert`s (§5).
 
 #### 3.0.1 `kubernetes/apps/ai/anythingllm/app/helmrelease.yaml`
 
@@ -713,7 +975,10 @@ which is the comparison Flux drift detection performs. Prereq for
 runbooks/maintenance/plans/helm-drift-detection.md phase 1."
 git show --stat HEAD                                   # exactly 2 files
 git push
-# Rollout: values changed -> Helm upgrade -> Recreate. Watch both, ~2 min each:
+# Rollout: values changed -> Helm upgrade. Measured 2026-09-26: both removed keys were already
+# pruned from the LIVE pod templates (the API server dropped them), so the rendered pod
+# template does not change and NO restart is expected. rollout status passes either way and
+# is NOT the gate — the stored-manifest dry-run (§4.0) and the revision bump (§3.0.0 step 5) are:
 kubectl rollout status deploy/anythingllm -n ai --timeout=5m
 kubectl rollout status deploy/jellyfin -n media --timeout=5m
 ```
@@ -765,12 +1030,13 @@ Verification and rollback for P0: §4.0 and §5.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-# 0. §2.1 gate: grep -c '^FAIL' /tmp/hr-ssa-gate.tsv == 0, run TODAY (not the 2026-09-14 figure).
+# 0. §2.1 gate: /private/tmp/claude-501/helm-drift-detection/ssa-gate-check.py prints SSA-GATE PASS, run TODAY (§3.0.0 step 6).
 # 1. Re-prove the render against TODAY's tree (the §1.4 proof is dated):
 cp kubernetes/flux/cluster/ks.yaml /tmp/ks-before.yaml
 #    ...apply the §3.1.1 edit...
 flux build kustomization cluster-apps --path ./kubernetes/apps --kustomization-file kubernetes/flux/cluster/ks.yaml \
-  | grep -c 'mode: warn'                     # == number of child Kustomizations (134 on 2026-09-14)
+  | grep -c 'mode: warn'                     # == child Kustomizations: kubectl get ks -A --no-headers | wc -l, minus 3
+                                             # (flux-system, cluster-meta, cluster-apps) — 138 on 2026-09-26
 # 2. In THIS plan file: status: vetted -> scheduled/executing per the window agent, and
 #    generated: "<today>" (stale-check clock). Commit both files, nothing else:
 git commit --only kubernetes/flux/cluster/ks.yaml runbooks/maintenance/plans/helm-drift-detection.md \
@@ -785,10 +1051,12 @@ git show --stat HEAD                          # exactly 2 files
 git push
 # 3. Optional, to fit the window: compress the 10-minute source interval
 flux reconcile kustomization flux-system --with-source
-# 4. Watch propagation (parent -> 134 children -> 124 HRs), typically < 5 min after the source pull:
-watch -n 20 'kubectl get helmrelease -A -o jsonpath="{range .items[*]}{.spec.driftDetection.mode}{\"\n\"}{end}" | sort | uniq -c'
-# 5. THEN §4.1 assertion 0 (Ready=True count) — a Ready=False that appears here is a
-#    manifest §2.1 should have caught; opt that child out (label) and re-run §2.1.
+# 4. Propagation (parent -> 138 children -> 126 HRs), typically < 5 min after the source pull.
+#    NOT `watch` (interactive; never returns in an agent shell). Re-run this one-shot check
+#    (Monitor tool) until rc != 2 — it is also §4.1 assertions 0 and 2:
+python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py compare B --require-warn; echo "rc=$?"
+# 5. rc=1 naming a Ready=False release is a manifest §2.1 should have caught; opt that
+#    child out (label) and re-run §2.1 — or revert P1 (§5).
 ```
 
 #### 3.1.3 Inventory collection (runs for the whole soak, not just in the window)
@@ -814,7 +1082,8 @@ kubectl get events -A --field-selector reason=DriftDetected -o custom-columns=TS
 ```
 
 Store each snapshot on the ops DB so it outlives this file: on day 1 create
-`runbooks/policy-cli.py finding add --title 'helm drift inventory (warn-mode soak)' --component flux/helm-controller --plan helm-drift-detection --section plan --detail-file /tmp/drift-day1.md`,
+`source runbooks/lib/sweep-pg-dsn.sh && sweep_pg_dsn_up && .venv/bin/python3 runbooks/policy-cli.py finding add --title 'helm drift inventory (warn-mode soak)' --severity monitor --component flux/helm-controller --plan helm-drift-detection --section plan --detail-file /private/tmp/claude-501/helm-drift-detection/drift-day1.md; sweep_pg_dsn_down`
+(ONE Bash call: the DSN does not survive into the next call, and a missing DSN fails closed with a well-formed denial),
 then append with `finding detail <id> --detail-file` each day; the finding
 id goes into `finding_refs:` of this plan on the day-1 edit. The 7-day export
 is the input to §3.2.
@@ -830,7 +1099,7 @@ kubectl top pod -n flux-system -l app=helm-controller     # pre-P1 2026-09-14: 8
 
 The condition message names the objects and the kind of change but not the
 field. The §2.1 script already produces the full-cluster answer
-(`grep '^DIFF' /tmp/hr-ssa-gate.tsv`). For one named object, the same
+(`grep '^DIFF' /private/tmp/claude-501/helm-drift-detection/hr-ssa-gate.tsv`). For one named object, the same
 comparison by hand — server-side dry-run of the stored document, diffed
 against the live object with `managedFields` and `status` stripped:
 
@@ -906,8 +1175,9 @@ kubectl get prometheus kube-prometheus-stack -n monitoring -o jsonpath='{.spec.p
 kubectl get sts prometheus-kube-prometheus-stack -n monitoring -o jsonpath='{.metadata.generation}'; echo   # UNCHANGED
 
 # (3) Watch both HRs clear within one interval (or `flux reconcile helmrelease <hr> -n <ns>` to hurry):
-kubectl get helmrelease intel-device-plugin-gpu -n kube-system kube-prometheus-stack -n monitoring \
-  -o jsonpath='{range .items[*]}{.metadata.name} {.status.conditions[?(@.type=="Drifted")].reason}{"\n"}{end}'   # both NoDriftDetected
+# (two commands: with two -n flags kubectl uses the LAST one, and the first name is NotFound)
+kubectl get helmrelease intel-device-plugin-gpu -n kube-system -o jsonpath='{.status.conditions[?(@.type=="Drifted")].reason}{"\n"}'   # NoDriftDetected
+kubectl get helmrelease kube-prometheus-stack -n monitoring -o jsonpath='{.status.conditions[?(@.type=="Drifted")].reason}{"\n"}'      # NoDriftDetected
 ```
 
 This is a direct cluster write, sanctioned here because it is byte-for-byte
@@ -1058,14 +1328,21 @@ are the ones that would fail with the thing configured-but-inert.
 ### 4.0 Phase 0
 
 ```bash
-# Shape: both rolled and Ready
-kubectl get helmrelease anythingllm -n ai jellyfin -n media -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,READY:.status.conditions[?\(@.type==\"Ready\"\)].status
+# Shape: both upgraded and Ready (two commands — with two -n flags kubectl uses the LAST one
+# and reports anythingllm NotFound). The three deploy lines below are NOT gates: the live
+# pod templates already lacked both keys before P0 (measured 2026-09-26), so they print the
+# same before and after.
+kubectl get helmrelease anythingllm -n ai -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} rev={.status.history[0].version}{"\n"}'
+kubectl get helmrelease jellyfin -n media -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} rev={.status.history[0].version}{"\n"}' 
 kubectl get deploy anythingllm -n ai -o jsonpath='{.spec.strategy.type} {.spec.template.spec.strategy}'; echo   # "Recreate " (pod-level field ABSENT)
 kubectl get deploy jellyfin -n media -o jsonpath='{.spec.template.spec.securityContext}'; echo                   # fsGroup/runAsGroup/runAsUser only
 kubectl get deploy jellyfin -n media -o jsonpath='{.spec.template.spec.containers[0].securityContext.privileged}'; echo   # true (container unchanged)
 
-# CONTENTS ASSERTION: the STORED manifests (what drift detection reads) now pass a
-# server-side dry-run — the §2.1 gate, scoped to the two releases:
+# CONTENTS ASSERTION (THE P0 GATE): the STORED manifests (what drift detection reads) pass a
+# server-side dry-run — `python3 /private/tmp/claude-501/helm-drift-detection/ssa-gate-check.py` prints SSA-GATE PASS (§3.0.0 step 6;
+# its FAIL on the identical command before P0 is the known-bad demonstration, step 3).
+# The scoped loop below is a diagnostic only: an empty `helm get manifest` prints nothing and
+# would read as "no FAIL".
 for r in ai:anythingllm media:jellyfin; do helm get manifest ${r##*:} -n ${r%%:*} | python3 -c "
 import sys,yaml,subprocess
 ns=sys.argv[1]
@@ -1075,7 +1352,7 @@ for d in yaml.safe_load_all(sys.stdin):
     print('FAIL' if p.returncode else 'ok', d['kind'], d['metadata']['name'], p.stderr.strip()[:120])" ${r%%:*}; done   # no FAIL
 # App probes: anythingllm and jellyfin answer on their HTTPRoutes (HTTP 200/302 via the internal gateway);
 # jellyfin: a hardware-transcode still works (container securityContext unchanged) — operator spot check.
-# Then the full §2.1 run: grep -c '^FAIL' == 0 across all 124.
+# Then the full §2.1 run through the wrapper: SSA-GATE PASS across all 126.
 ```
 
 ### 4.1 Phase 1
@@ -1101,10 +1378,14 @@ kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.status.conditions[?(@
 # CONTENTS ASSERTION 2: no Helm upgrade was triggered by the spec change — every
 # release revision is identical to the §2.0 baseline (a rolled-out cluster with
 # "warn" is the wrong outcome even if everything is Ready).
-helm list -A -o json | python3 -c "import sys,json;print('\n'.join(sorted(f\"{r['namespace']}/{r['name']} rev={r['revision']}\" for r in json.load(sys.stdin))))" > /tmp/helm-rev-after.txt
-diff /tmp/helm-rev-before.txt /tmp/helm-rev-after.txt && echo REVISIONS-UNCHANGED
-# (Step 0 safe-updates in the same window legitimately bump revisions — run this
-#  BEFORE Step 0 or exclude the components Step 0 touched.)
+python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py compare B --require-warn; echo "rc=$?"     # rc=0 REV-GATE PASS
+# Scoped, not global: baseline B is taken after P0 and after the cluster settled, and a
+# revision change is tolerated ONLY when a commit since B touched that release's own
+# Kustomization path (printed as EXPLAINED — e.g. a concurrent session's bump). A change with
+# no such commit is UNEXPLAINED and FAILS. Demonstrated 2026-09-26 against a doctored
+# baseline: 2 UNEXPLAINED -> rc=1, and the live intel-device-plugin / mqttx-web bumps of the
+# main run -> EXPLAINED by their commits. Also asserts assertion 0 (Ready=True on all) with
+# observedGeneration == generation, so a stale Ready cannot pass it.
 
 # CONTENTS ASSERTION 3 (positive control, warn does not correct): scale a stateless,
 # PVC-less, helm-managed Deployment UP by one and wait one reconcile.
@@ -1120,7 +1401,7 @@ kubectl scale deploy/docs-site -n monitoring --replicas=1
 
 ```bash
 # §3.2.0 landed: both known diffs are gone from the API-side inventory
-python3 /tmp/hr-ssa-gate.py > /tmp/hr-ssa-gate-p2.tsv; grep '^FAIL\|^DIFF' /tmp/hr-ssa-gate-p2.tsv   # empty
+python3 /private/tmp/claude-501/helm-drift-detection/hr-ssa-gate.py > /private/tmp/claude-501/helm-drift-detection/hr-ssa-gate-p2.tsv; grep '^FAIL\|^DIFF' /private/tmp/claude-501/helm-drift-detection/hr-ssa-gate-p2.tsv   # empty
 kubectl get ds intel-gpu-plugin-intel-gpu-plugin -n kube-system -o jsonpath='{.status.numberReady}/{.status.desiredNumberScheduled}'; echo   # 3/3
 
 # Shape: the rules rendered on a real HR
