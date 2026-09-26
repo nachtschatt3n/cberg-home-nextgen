@@ -47,6 +47,8 @@ touches:
                                       # into the privileged falco container (§1.3)
 depends_on: []
 conflicts_with:
+  - flux-oci-chart-sources            # moves falco's chart source to OCI
+  - helm-drift-detection              # adds a spec field to hr/falco
   - talos-1.14.1                      # A node roll changes the KERNEL that modern_ebpf attaches
                                       # to and restarts every falco pod three times. Running both
                                       # in one window makes a detection gap unattributable
@@ -66,7 +68,7 @@ finding_refs: [F-8ee4be16, F-01f4a388]
                                       # F-8ee4be16 = version finding "falco: chart 9.1.0 -> 9.2.0";
                                       # F-01f4a388 = metacollector image finding (answered by the
                                       # 0.1.3 -> 0.1.4 pin bump in step 3.2)
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> A-H applied (detect.sh script file, wazuh >=3 hits all 100402, k8smeta RPC noise filtered in 4.1, shared-index-safe revert, 9m rollout waits); order: last in the serial set, after kps sign-off
 window: null
 premises:
   - id: chart-still-9.1.0
@@ -284,30 +286,35 @@ for line in sys.stdin:
     f = d.get("output_fields") or {}
     if (f.get("container") or {}).get("name") != want_ctr: continue
     hits += 1; ids.add(e["rule"]["id"])
-print(f"wazuh: hits={hits} rule_ids={sorted(ids)} -> " + ("PASS" if hits > 0 else "FAIL"))
+print(f"wazuh: hits={hits} rule_ids={sorted(ids)} -> " + ("PASS" if hits >= 3 and ids == {"100402"} else "FAIL"))
 EOF
 ```
 
-Then trigger + read (the function is reused in §4.3):
+Then save the trigger + read as a SCRIPT FILE (reused verbatim in §4.3 and §5;
+not a shell function — the window agent's Bash calls share no shell state):
 
 ```bash
-falco_detect() {
-  T0=$(date -u +%Y-%m-%dT%H:%M:%S); echo "T0=$T0 (record in the window log: synthetic falco trigger)"
-  for node in k8s-nuc14-01 k8s-nuc14-02 k8s-nuc14-03; do
-    R=$(kubectl -n security get pods -l app.kubernetes.io/name=falco-log-rotate --field-selector spec.nodeName=$node -o jsonpath='{.items[0].metadata.name}')
-    kubectl -n security exec "$R" -c rotate -- cat /etc/shadow >/dev/null
-  done
-  sleep 20
-  for node in k8s-nuc14-01 k8s-nuc14-02 k8s-nuc14-03; do
-    F=$(kubectl -n security get pods -l app.kubernetes.io/name=falco --field-selector spec.nodeName=$node -o jsonpath='{.items[0].metadata.name}')
-    kubectl -n security exec "$F" -c falco -- grep -F '"rule":"Read sensitive file untrusted"' /var/run/falco/falco.log \
-      | T0=$T0 NODE=$node python3 /tmp/falco-9.2.0/check.py
-  done
-  sleep 30
-  kubectl -n security exec wazuh-manager-master-0 -- grep -F 'falco.log' /var/ossec/logs/alerts/alerts.json \
-    | T0=$T0 python3 /tmp/falco-9.2.0/wz.py
-}
-falco_detect
+cat > /tmp/falco-9.2.0/detect.sh <<'EOF'
+#!/bin/bash
+set -u
+T0=$(date -u +%Y-%m-%dT%H:%M:%S)
+echo "T0=$T0 (record in the window log: synthetic falco trigger)"
+echo "$T0" >> /tmp/falco-9.2.0/t0.log
+for node in k8s-nuc14-01 k8s-nuc14-02 k8s-nuc14-03; do
+  R=$(kubectl -n security get pods -l app.kubernetes.io/name=falco-log-rotate --field-selector spec.nodeName=$node -o jsonpath='{.items[0].metadata.name}')
+  kubectl -n security exec "$R" -c rotate -- cat /etc/shadow >/dev/null
+done
+sleep 20
+for node in k8s-nuc14-01 k8s-nuc14-02 k8s-nuc14-03; do
+  F=$(kubectl -n security get pods -l app.kubernetes.io/name=falco --field-selector spec.nodeName=$node -o jsonpath='{.items[0].metadata.name}')
+  kubectl -n security exec "$F" -c falco -- grep -F '"rule":"Read sensitive file untrusted"' /var/run/falco/falco.log \
+    | T0=$T0 NODE=$node python3 /tmp/falco-9.2.0/check.py
+done
+sleep 30
+kubectl -n security exec wazuh-manager-master-0 -- grep -F 'falco.log' /var/ossec/logs/alerts/alerts.json \
+  | T0=$T0 python3 /tmp/falco-9.2.0/wz.py
+EOF
+bash /tmp/falco-9.2.0/detect.sh
 ```
 
 PASS = three `k8s-nuc14-0N: hits>=1 enriched==hits -> PASS` lines and
@@ -387,7 +394,7 @@ release with `timeout: 15m`; the DaemonSet rolls one node at a time
 let Flux's remediation loop run):
 
 ```bash
-kubectl -n security rollout status ds/falco --timeout=12m
+kubectl -n security rollout status ds/falco --timeout=9m   # agent Bash caps a call at 10 min; if it times out while pods still progress, run it once more
 kubectl -n security get pods -l app.kubernetes.io/name=falco -o wide
 ```
 
@@ -401,15 +408,18 @@ failure mode from `docs/sops/falco.md`):
 
 ```bash
 for p in $(kubectl -n security get pods -l app.kubernetes.io/name=falco -o name); do
-  echo "== $p"; kubectl -n security logs "$p" -c falco --tail=300 | grep -ciE '\[error\]|schema validation|could not load|LOAD_ERR'
+  echo "== $p"; kubectl -n security logs "$p" -c falco --tail=300 | grep -iE '\[error\]|schema validation|could not load|LOAD_ERR' | grep -vcF '[k8smeta] error during the RPC call'
 done
 ```
 
 PASS = `0` on all three pods. Case-insensitive on purpose (upstream mixes
-`[error]` / `Error` / `LOAD_ERR_*`). Baseline on 9.1.0 is NOT zero over the full
-log (k8smeta RPC errors from the 2026-09-07 metacollector restart), which is why
-this reads only the new pods' `--tail=300`: a fresh pod has no history, so a
-non-zero here is from the new engine. A rule the engine rejects prints an error
+`[error]` / `Error` / `LOAD_ERR_*`). k8smeta `error during the RPC call` lines are excluded on purpose: every falco
+pod logs them when the metacollector pod is replaced (4/7/4 lines on the live
+9.1.0 pods, 2026-09-26), and this upgrade replaces the metacollector while the
+DaemonSet is still rolling, so an unfiltered count FAILs a healthy roll.
+Filtered, the live 9.1.0 pods read `0 0 0`; the identical chain reads `1` on a
+replayed `LOAD_ERR_COMPILE_CONDITION` line, so a rules-load failure still FAILs.
+Persistent k8smeta loss is caught by §4.3's `enriched == hits`, not here. A rule the engine rejects prints an error
 and the container restarts — caught here and in 4.2.
 
 4.2 Shape floor — HR on the new revision, DS fully rolled, no restarts:
@@ -428,11 +438,11 @@ PASS = HR Ready with `falco@9.2.0`; `3/3 updated=3`;
 
 4.3 **CONTENTS ASSERTION: every node's falco actually DETECTS a syscall event,
 enriches it with container + Kubernetes metadata, writes it to the host sink,
-and Wazuh ingests it** — measured by `falco_detect` (§2.3) run after the roll,
+and Wazuh ingests it** — measured by `/tmp/falco-9.2.0/detect.sh` (§2.3) run after the roll,
 compared to the §2.3 baseline on 9.1.0.
 
 ```bash
-falco_detect
+bash /tmp/falco-9.2.0/detect.sh
 ```
 
 PASS = identical shape to the §2.3 baseline: three per-node `PASS` lines with
@@ -484,20 +494,25 @@ git instead:
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-git revert --no-edit <sha-of-3.3-commit>
+git log -1 --format=%H --grep='^feat(falco): chart 9\.1\.0 -> 9\.2\.0' -- kubernetes/apps/security/falco/app/helmrelease.yaml > /tmp/falco-9.2.0/commit.sha
+cat /tmp/falco-9.2.0/commit.sha        # exactly one SHA; empty = STOP
+git revert --no-commit "$(cat /tmp/falco-9.2.0/commit.sha)"   # plain `git revert` refuses while the shared index holds foreign staged files
+git commit --only kubernetes/apps/security/falco/app/helmrelease.yaml \
+  -m 'Revert "feat(falco): chart 9.1.0 -> 9.2.0 (falco 0.45.0), metacollector pin 0.1.3 -> 0.1.4"' \
+  -m "Plan: runbooks/maintenance/plans/falco-9.2.0.md §5"
 git log -1 --format=%s                 # "Revert \"feat(falco): chart 9.1.0 -> 9.2.0 ...\""
 git show --stat HEAD                   # only helmrelease.yaml
-git push
+git push                               # rejected? git pull --rebase, then push
 ```
 
 Confirm the cluster is back:
 
 ```bash
 flux -n security get hr falco          # Ready, falco@9.1.0
-kubectl -n security rollout status ds/falco --timeout=12m
+kubectl -n security rollout status ds/falco --timeout=9m   # agent Bash caps a call at 10 min; if it times out while pods still progress, run it once more
 kubectl -n security get ds falco -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'   # falco:0.44.1
 kubectl -n security get deploy falco-k8s-metacollector -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'   # k8s-metacollector:0.1.3
-falco_detect                           # must PASS on all three nodes + wazuh, as in §2.3
+bash /tmp/falco-9.2.0/detect.sh        # must PASS on all three nodes + wazuh, as in §2.3
 ```
 
 If Flux's own remediation already rolled back to rev v28 before the revert
@@ -523,6 +538,11 @@ downgrade mounts succeed.
   failure.
 - **kube-prometheus-stack-91.4.1** (conflicts_with): §4 CONTROL lines read
   kube-state-metrics through that Prometheus.
+- **Wazuh 4.14.7 -> 4.14.8 (cb4fe2ff) and agent client_buffer change (44584b1b)
+  landed 2026-09-25 evening, AFTER the §2.3 reader demonstration.** Live
+  alerts.json on 2026-09-26 still shows nested `data.output_fields.container.name`
+  and Warning -> 100402, but §2.3's pre-change run is the re-demonstration and is
+  mandatory: a Wazuh-leg FAIL there stops the plan before any edit.
 - **wazuh-agent / wazuh-manager** are not touched, but §4.3 reads the manager's
   `alerts.json`. Any same-window change to the Wazuh ruleset (the
   `unifi-decoder` ConfigMap holds rules 100400-100415) would confound the Wazuh
@@ -530,7 +550,7 @@ downgrade mounts succeed.
   touches `network`/`kube-system` only).
 - **falco-log-rotate** truncates `falco.log` at 64 MiB. A truncation between
   trigger and read would drop the synthetic line; if a single node reads
-  `hits=0` while the others PASS, re-run `falco_detect` once before declaring
+  `hits=0` while the others PASS, re-run `bash /tmp/falco-9.2.0/detect.sh` once before declaring
   failure (check `wc -c /var/run/falco/falco.log` for a reset).
 - **Helm comments** in `helmrelease.yaml` still say "verified by helm template
   against falco 9.1.0 ... with pin -> 0.1.3" and "Falco 0.44.0's built-in

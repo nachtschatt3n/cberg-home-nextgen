@@ -62,6 +62,10 @@ conflicts_with:
                                         # asserts "0.36.0 (all 3)"; same three HRs
   - kube-prometheus-stack-91.4.1        # §4 reads kube-state-metrics through this Prometheus
 exclusive: false
+autonomy_override: human-gated          # RESTRICTS only. Derived class was AUTO-NIGHT (igpu-i915/
+                                        # npu-accel are not in the shared-infra floor), but the
+                                        # frigate NVR dependency and the §4.5 probe pod need an
+                                        # operator-present slot (§6).
 security_ref: F-cc5b464c                # image-currency security rows exist for all three
                                         # images (F-cc5b464c gpu, F-bb3a90aa npu, F-97cb1e88
                                         # operator). Detail stays on the finding records.
@@ -71,7 +75,7 @@ capability_change: false                # same devices (gpu, npu), same sharedDe
 rollback_class: git-revert              # but TWO-PHASE — see §5 (operator webhook rejects a
                                         # plugin image older than its own version)
 finding_refs: [F-b6b925de, F-e99826d8, F-4aebf29c, F-cc5b464c, F-bb3a90aa, F-97cb1e88]
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> B1-B6 + N1-N3 applied verbatim (fixed state dir, file-carried rollback sha, pod-level phase-A gate, exact webhook set, autonomy_override human-gated, optional 4.8 CRD removal gated in code)
 window: null
 premises:
   - id: operator-chart-0360
@@ -208,7 +212,7 @@ patch stays.
   files `deviceplugin.intel.com_{dlb,fpga}deviceplugins` and
   `fpga.intel.com_{acceleratorfunctions,fpgaregions}`. **Helm never deletes CRDs
   from `crds/`**, so those 4 CRDs stay in the cluster, unused and inert (none
-  has any object). Removing them is out of scope.
+  has any object). Removing them is the OPTIONAL, operator-approved step 4.8.
 - GPU chart: only `spec.image` changes on the CR. The new B-series
   NodeFeatureRules are behind `nodeFeatureRule`, which is `false` here, so they
   do not render.
@@ -221,7 +225,11 @@ patch stays.
   than that to `name:0.37.0`, then `r.Update()`s the CR. **So the moment
   operator 0.37.0 runs, it rolls both plugin DaemonSets to 0.37.0 on its own**,
   whatever the gpu/npu HRs say. The gpu/npu HR bumps then just make git match
-  the live state. They produce no second roll.
+  the live state. They produce no second roll IF the operator lands first. dependsOn is
+  satisfied by the still-Ready 0.36.0 operator HR, so a gpu/npu Kustomization can
+  apply first: operator 0.36.0 then rolls the DS to image 0.37.0 and operator
+  0.37.0 rolls it once more for its new memory limits (up to two ~1 min/node
+  admission gaps per DaemonSet; running consumers unaffected).
 - `pkg/apis/deviceplugin/v1/webhook_common.go` `validatePluginImage()`: the
   validating webhook **rejects any plugin image older than ImageMinVersion**
   (*"version … is too low. Should be at least …"*).
@@ -265,6 +273,7 @@ Run from repo root on the Mac mini (zsh).
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
+mkdir -p /private/tmp/claude-501/intel-037    # fixed scratch dir: agent Bash calls share no shell variables
 # 2.1 premises (all must PASS)
 .venv/bin/python3 runbooks/plan-premises.py intel-device-plugin-0.37.0
 
@@ -277,8 +286,8 @@ kubectl get pods -A -o json | jq -r '.items[] | select(.status.phase!="Running" 
 #   expect: empty output
 
 # 2.4 record the consumer baseline for §4.6
-kubectl get pods -A -o json | jq -r '.items[] | select([.spec.containers[].resources.limits // {} | keys[]] | any(test("intel.com"))) | .metadata.namespace+"/"+.metadata.name+" "+.status.phase+" "+(.status.containerStatuses[0].restartCount|tostring)' | sort > "$TMPDIR/intel-consumers-before.txt"
-wc -l < "$TMPDIR/intel-consumers-before.txt"    # expect 7 (1.4); a different number -> re-derive 1.4 first
+kubectl get pods -A -o json | jq -r '.items[] | select([.spec.containers[].resources.limits // {} | keys[]] | any(test("intel.com"))) | .metadata.namespace+"/"+.metadata.name+" "+.status.phase+" "+(.status.containerStatuses[0].restartCount|tostring)' | sort > "/private/tmp/claude-501/intel-037/intel-consumers-before.txt"
+wc -l < "/private/tmp/claude-501/intel-037/intel-consumers-before.txt"    # expect 7 (1.4); a different number -> re-derive 1.4 first
 
 # 2.5 NEGATIVE CONTROL for §4.5, run BEFORE the change: an UNPRIVILEGED pod with
 #     NO device request must NOT see /dev/dri. This proves the probe in 4.5 can fail
@@ -286,8 +295,8 @@ wc -l < "$TMPDIR/intel-consumers-before.txt"    # expect 7 (1.4); a different nu
 kubectl run intel-dev-negctl --rm -i --restart=Never -n kube-system \
   --image=busybox:1.37.0 --pod-running-timeout=120s \
   --overrides='{"apiVersion":"v1","spec":{"nodeName":"k8s-nuc14-01","containers":[{"name":"intel-dev-negctl","image":"busybox:1.37.0","command":["sh","-c","ls /dev/dri/ /dev/accel/ 2>&1; true"]}]}}' \
-  2>&1 | tee "$TMPDIR/intel-negctl.txt"
-grep -c -i 'no such file' "$TMPDIR/intel-negctl.txt"      # expect 2 (both paths absent)
+  2>&1 | tee "/private/tmp/claude-501/intel-037/intel-negctl.txt"
+grep -c -i 'no such file' "/private/tmp/claude-501/intel-037/intel-negctl.txt"      # expect 2 (both paths absent)
 kubectl delete pod -n kube-system intel-dev-negctl --ignore-not-found
 ```
 
@@ -304,7 +313,7 @@ It produced the diff in 3.2 and all three files parse as YAML.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-cat > "$TMPDIR/intel-037-edit.py" <<'EOF'
+cat > "/private/tmp/claude-501/intel-037/intel-037-edit.py" <<'EOF'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1]) / "kubernetes/apps/kube-system/intel-device-plugin"
 def sub1(text, old, new, path):
@@ -342,7 +351,7 @@ t = sub1(t,
 p.write_text(t)
 print("ok")
 EOF
-python3 "$TMPDIR/intel-037-edit.py" .          # must print: ok
+python3 "/private/tmp/claude-501/intel-037/intel-037-edit.py" .          # must print: ok
 git diff --stat -- kubernetes/apps/kube-system/intel-device-plugin
 #   expect exactly: app/helmrelease.yaml | ~50 +++---, gpu/helmrelease.yaml | 2 +-, vpu/helmrelease.yaml | 2 +-
 ```
@@ -390,7 +399,8 @@ The curl fallback is the path that worked.)
 3.4 Commit ONLY these three files and push:
 
 ```bash
-cat > "$TMPDIR/intel-037-msg.txt" <<'EOF'
+M=/private/tmp/claude-501/intel-037/msg-intel-device-plugin-0.37.0-$(date +%s).txt
+cat > "$M" <<'EOF'
 feat(intel-device-plugin): 0.36.0 -> 0.37.0 (operator, gpu, npu lockstep)
 
 0.37.0 removed the FPGA plugin, so the index-based JSON-patch that stripped
@@ -406,9 +416,11 @@ git commit --only \
   kubernetes/apps/kube-system/intel-device-plugin/app/helmrelease.yaml \
   kubernetes/apps/kube-system/intel-device-plugin/gpu/helmrelease.yaml \
   kubernetes/apps/kube-system/intel-device-plugin/vpu/helmrelease.yaml \
-  -F "$TMPDIR/intel-037-msg.txt"
+  -F "$M"
 git log -1 --format=%s        # must be the subject above (EDITMSG race guard)
 git show --stat HEAD          # exactly the 3 files
+git log -1 --format=%H -- kubernetes/apps/kube-system/intel-device-plugin/app/helmrelease.yaml > /private/tmp/claude-501/intel-037/bad-sha.txt
+cat /private/tmp/claude-501/intel-037/bad-sha.txt   # the 3.4 commit sha; §5 reads it from this file
 git push
 ```
 
@@ -486,8 +498,15 @@ pod-scoped mutator is present, and the gpu/npu CR webhooks are present:
 ```bash
 kubectl get mutatingwebhookconfigurations inteldeviceplugins-mutating-webhook-configuration -o jsonpath='{.webhooks[*].name}' | tr ' ' '\n'
 # expect exactly: mdsadeviceplugin.kb.io mgpudeviceplugin.kb.io miaadeviceplugin.kb.io mnpudeviceplugin.kb.io mqatdeviceplugin.kb.io msgxdeviceplugin.kb.io
-kubectl get mutatingwebhookconfigurations inteldeviceplugins-mutating-webhook-configuration -o jsonpath='{.webhooks[*].name}' | tr ' ' '\n' | grep -c -i 'mutator.webhooks'
-# expect 0.  1 = sgx.mutator came back (manager.devices not applied) -> FAIL
+kubectl get mutatingwebhookconfigurations inteldeviceplugins-mutating-webhook-configuration -o jsonpath='{.webhooks[*].name}' | python3 -c "
+import sys
+got=sorted(sys.stdin.read().split())
+want=sorted('mdsadeviceplugin.kb.io mgpudeviceplugin.kb.io miaadeviceplugin.kb.io mnpudeviceplugin.kb.io mqatdeviceplugin.kb.io msgxdeviceplugin.kb.io'.split())
+print('WEBHOOKS_OK' if got==want else 'WEBHOOKS_FAIL got=%s' % got)"
+# expect WEBHOOKS_OK. Set EQUALITY, not an absence count: it fails on sgx.mutator returning,
+# on a leftover mdlb/mfpga entry, AND on a wrong object name (empty set). Demonstrated failure:
+# the identical command read WEBHOOKS_FAIL (8 names incl. mdlb/mfpga) against the live 0.36.0
+# config on 2026-09-26, and WEBHOOKS_OK against the offline 0.37.0 render with the new values.
 kubectl get deploy -n kube-system inteldeviceplugins-controller-manager -o jsonpath='{.spec.template.spec.containers[0].args}'
 # expect --devices=gpu and --devices=npu, each exactly ONCE
 kubectl get endpointslices -n kube-system -l kubernetes.io/service-name=inteldeviceplugins-controller-manager-metrics-service -o jsonpath='{.items[*].ports[*].port}'
@@ -505,10 +524,10 @@ paths.
 kubectl run intel-dev-probe --rm -i --restart=Never -n kube-system \
   --image=busybox:1.37.0 --pod-running-timeout=120s \
   --overrides='{"apiVersion":"v1","spec":{"nodeName":"k8s-nuc14-01","containers":[{"name":"intel-dev-probe","image":"busybox:1.37.0","command":["sh","-c","ls /dev/dri/ /dev/accel/ 2>&1; true"],"resources":{"limits":{"gpu.intel.com/i915":"1","npu.intel.com/accel":"1"}}}]}}' \
-  2>&1 | tee "$TMPDIR/intel-probe.txt"
-grep -c -E '^renderD[0-9]+$' "$TMPDIR/intel-probe.txt"   # expect 1
-grep -c -E '^accel[0-9]+$'   "$TMPDIR/intel-probe.txt"   # expect 1
-grep -c -i 'no such file'    "$TMPDIR/intel-probe.txt"   # expect 0
+  2>&1 | tee "/private/tmp/claude-501/intel-037/intel-probe.txt"
+grep -c -E '^renderD[0-9]+$' "/private/tmp/claude-501/intel-037/intel-probe.txt"   # expect 1
+grep -c -E '^accel[0-9]+$'   "/private/tmp/claude-501/intel-037/intel-probe.txt"   # expect 1
+grep -c -i 'no such file'    "/private/tmp/claude-501/intel-037/intel-probe.txt"   # expect 0
 kubectl delete pod -n kube-system intel-dev-probe --ignore-not-found
 ```
 
@@ -526,8 +545,8 @@ fullest one. Premise first: that node must have at most 4 i915 claims.
 4.6 Consumers unharmed:
 
 ```bash
-kubectl get pods -A -o json | jq -r '.items[] | select([.spec.containers[].resources.limits // {} | keys[]] | any(test("intel.com"))) | .metadata.namespace+"/"+.metadata.name+" "+.status.phase+" "+(.status.containerStatuses[0].restartCount|tostring)' | sort > "$TMPDIR/intel-consumers-after.txt"
-diff "$TMPDIR/intel-consumers-before.txt" "$TMPDIR/intel-consumers-after.txt" && echo CONSUMERS_UNCHANGED
+kubectl get pods -A -o json | jq -r '.items[] | select([.spec.containers[].resources.limits // {} | keys[]] | any(test("intel.com"))) | .metadata.namespace+"/"+.metadata.name+" "+.status.phase+" "+(.status.containerStatuses[0].restartCount|tostring)' | sort > "/private/tmp/claude-501/intel-037/intel-consumers-after.txt"
+diff "/private/tmp/claude-501/intel-037/intel-consumers-before.txt" "/private/tmp/claude-501/intel-037/intel-consumers-after.txt" && echo CONSUMERS_UNCHANGED
 ```
 
 Expect `CONSUMERS_UNCHANGED`: the same 7 pods, same names, Running, restart
@@ -539,7 +558,9 @@ Frigate spot-check, because it is the only NPU consumer and the NVR:
 
 ```bash
 kubectl logs -n home-automation deploy/frigate -c frigate --since=15m | grep -i -E 'openvino|npu|detector.*(error|fail)|no such device' | tail -20
-# expect: no new detector errors since the roll
+# INFORMATIONAL ONLY, not a gate: an empty result is also what a never-matching grep prints
+# (and frigate is not restarted by this plan). The gating consumer checks are 4.6 (frigate
+# restartCount unchanged) and 4.5 (a fresh NPU allocation on a node).
 ```
 
 CONTROL: metric kube_pod_container_resource_limits — the consumer set, read through kube-state-metrics (8 series measured live 2026-09-25: 7 i915 + 1 npu). This is a cross-check for 4.6 if the jq read is disputed.
@@ -548,7 +569,42 @@ CONTROL: metric kube_pod_container_resource_limits — the consumer set, read th
 (`F-b6b925de`, `F-e99826d8`, `F-4aebf29c`) with the commit sha if they do not
 auto-close on the next sweep. Leave the three security rows to the next
 security-check re-scan: the re-scan decides them, not this plan. Delete this
-plan file in the close-out commit.
+plan file in the close-out commit. Expect F-695ff83e (webhook routes unreachable,
+currently 12) to re-read 8 on the next sweep: the dlb+fpga validating/mutating
+entries are gone, dsa/iaa/qat/sgx remain. That is this change, not a regression.
+
+4.8 **OPTIONAL (operator-approved on the day): delete the 4 CRDs 0.37.0 no
+longer ships.** Helm never deletes `crds/` objects and no Kustomization owns
+them (live 2026-09-26: label `helm.toolkit.fluxcd.io/name=intel-device-plugin-operator`
+only, no ownerReferences, no finalizers, 0 objects each), so there is no GitOps
+path and this is an explicit plan step. Run ONLY after 4.1-4.6 passed.
+
+```bash
+kubectl get helmrelease -n kube-system intel-device-plugin-operator -o jsonpath='{.status.lastAttemptedRevision} {.status.conditions[?(@.type=="Ready")].status}{"\n"}'   # must read: 0.37.0 True, else STOP
+kubectl get crd -o name | grep -c -E 'dlbdeviceplugins|fpgadeviceplugins|fpga\.intel\.com'   # BEFORE: expect 4
+# ONE Bash call: the delete is GATED IN CODE on the check (4 x DELETE-OK on the retired CRDs
+# AND a STOP on the in-use positive control gpudeviceplugins). Anything else -> no delete.
+OK=0; CTRL=0
+for c in dlbdeviceplugins.deviceplugin.intel.com fpgadeviceplugins.deviceplugin.intel.com acceleratorfunctions.fpga.intel.com fpgaregions.fpga.intel.com gpudeviceplugins.deviceplugin.intel.com; do
+  out=$(kubectl get "$c" -A -o name 2>/dev/null); rc=$?
+  lbl=$(kubectl get crd "$c" -o jsonpath='{.metadata.labels.helm\.toolkit\.fluxcd\.io/name}' 2>/dev/null)
+  if [ $rc -ne 0 ] || [ -n "$out" ] || [ "$lbl" != intel-device-plugin-operator ]; then
+    echo "STOP $c rc=$rc objs=[$out] owner=[$lbl]"; [ "$c" = gpudeviceplugins.deviceplugin.intel.com ] && CTRL=1
+  else
+    echo "DELETE-OK $c"; [ "$c" != gpudeviceplugins.deviceplugin.intel.com ] && OK=$((OK+1))
+  fi
+done
+echo "retired_ok=$OK control_stop=$CTRL"
+if [ "$OK" = 4 ] && [ "$CTRL" = 1 ]; then
+  kubectl delete crd dlbdeviceplugins.deviceplugin.intel.com fpgadeviceplugins.deviceplugin.intel.com acceleratorfunctions.fpga.intel.com fpgaregions.fpga.intel.com
+else
+  echo "CRD DELETE SKIPPED (check not clean) - report, do not force"
+fi
+kubectl get crd -o name | grep -c -E 'dlbdeviceplugins|fpgadeviceplugins|fpga\.intel\.com'   # AFTER: expect 0 (read 4 above)
+kubectl get crd -o name | grep -c -E '(gpu|npu)deviceplugins\.deviceplugin\.intel\.com'       # expect 2 (in-use CRDs untouched)
+```
+
+Rollback of 4.8: §5 phase A re-creates all four from the 0.36.0 chart's `crds/`.
 
 ## 5. Rollback (two-phase — ORDER IS MANDATORY)
 
@@ -562,14 +618,19 @@ low`), and the HR sits in failed remediation. Revert in two commits:
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-BAD=<sha of the 3.4 commit>
+BAD=$(cat /private/tmp/claude-501/intel-037/bad-sha.txt); echo "BAD=$BAD"   # must print the 3.4 sha; empty -> STOP, find it with: git log --oneline -3 -- kubernetes/apps/kube-system/intel-device-plugin/app/helmrelease.yaml
 git checkout "$BAD"~1 -- kubernetes/apps/kube-system/intel-device-plugin/app/helmrelease.yaml
 git commit --only kubernetes/apps/kube-system/intel-device-plugin/app/helmrelease.yaml \
   -m "revert(intel-device-plugin): operator back to 0.36.0 (phase A of plan rollback)"
 git log -1 --format=%s; git show --stat HEAD; git push
-# wait until BOTH hold:
+# wait until ALL THREE hold (the third is the one that matters: phase B is denied
+# while ANY 0.37.0 operator pod still serves the webhook Service):
 kubectl get helmrelease -n kube-system intel-device-plugin-operator -o jsonpath='{.status.lastAttemptedRevision} {.status.conditions[?(@.type=="Ready")].status}{"\n"}'   # 0.36.0 True
 kubectl get deploy -n kube-system inteldeviceplugins-controller-manager -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'                                     # ...:0.36.0
+kubectl rollout status -n kube-system deploy/inteldeviceplugins-controller-manager --timeout=180s
+kubectl get pods -n kube-system -o json | jq -r '.items[] | select(.metadata.name|startswith("inteldeviceplugins-controller-manager-")) | .status.containerStatuses[0].image' | sort | uniq -c
+# must print exactly ONE line ending ':0.36.0' (e.g. "1 docker.io/intel/intel-deviceplugin-operator:0.36.0").
+# Any line ending ':0.37.0' = the old webhook server is still up -> wait and re-run; do NOT start phase B.
 ```
 
 Operator 0.36.0 leaves plugin images at 0.37.0 alone. `UpgradeImages` only
@@ -580,6 +641,7 @@ operator. That combination is valid. If the fault was the operator itself
 **Phase B: plugins** (only if the plugin images are the fault):
 
 ```bash
+BAD=$(cat /private/tmp/claude-501/intel-037/bad-sha.txt); echo "BAD=$BAD"   # same sha as phase A; empty -> STOP
 git checkout "$BAD"~1 -- kubernetes/apps/kube-system/intel-device-plugin/gpu/helmrelease.yaml kubernetes/apps/kube-system/intel-device-plugin/vpu/helmrelease.yaml
 git commit --only kubernetes/apps/kube-system/intel-device-plugin/gpu/helmrelease.yaml kubernetes/apps/kube-system/intel-device-plugin/vpu/helmrelease.yaml \
   -m "revert(intel-device-plugin): gpu/npu plugins back to 0.36.0 (phase B of plan rollback)"
@@ -597,7 +659,9 @@ rolls the DaemonSets.
 applies again to the 0.36.0 render. Then re-run §4.5 with 0.36.0 expected.
 
 Nothing in this plan is forward-only. There is no data or PVC, and CRDs are
-CreateReplace in both directions, with the 4 retired CRDs never deleted.
+CreateReplace in both directions; if 4.8 deleted the 4 retired CRDs, phase A
+re-creates them from the 0.36.0 chart's `crds/` (CreateReplace creates missing
+CRDs). They hold no objects, so nothing is lost.
 Rolling back restores the 0.36.0 CRD schemas.
 
 **If an HR is stuck after a failed forward attempt** (§1.1 failure mode, e.g.
@@ -638,8 +702,8 @@ this case, because the operator never moved), or fix forward with §3.
   device-plugin CRs only. No pod admission depends on it.
 - **Stale CRDs** (`dlbdeviceplugins`, `fpgadeviceplugins`,
   `acceleratorfunctions.fpga.intel.com`, `fpgaregions.fpga.intel.com`) remain
-  after the upgrade, inert. Deleting them is a separate, trivial follow-up, not
-  part of this plan.
+  after the upgrade, inert, unless the optional step 4.8 (zero-CR pre-check with a
+  positive control) removes them.
 - **Repo correction (not done by this plan):** `runbooks/health-check.sh`
   ~L6780 describes the webhook set as "dlb/dsa/fpga/iaa/qat/sgx … 14" entries.
   After 0.37.0 it is dsa/gpu/iaa/npu/qat/sgx, 6 mutating. It is comment-only

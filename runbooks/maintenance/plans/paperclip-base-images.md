@@ -4,9 +4,9 @@ component: paperclip
 pr: null                              # digest-pinned base images; no Renovate PR (float-tag policy)
 kind: image
 current: "mise-install initContainer: debian trixie-slim@sha256:26f98ccd… (built 2026-03-16, ~Debian 13.4-era) | tools container: ubuntu 24.04@sha256:d78ab76…"
-target: "mise-install initContainer: debian 13.7-slim | tools container: ubuntu 26.04 — RECOMMENDED: DO NOT EXECUTE, see §1b"
-update_type: major                    # driven by the ubuntu leg; the debian leg is an intra-major (13.4→13.7) refresh, see §1a
-risk: medium                          # debian leg: medium (persisted toolchain, ABI risk). ubuntu leg: not executed by default (see below)
+target: "mise-install initContainer ONLY: debian 13.7-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a. tools container (ubuntu): OUT OF SCOPE, stays on 24.04 under AR-101, see §1b"
+update_type: minor                    # debian-only scope (2026-09-26 operator re-scope): intra-major 13.4-era -> 13.7 refresh, see §1a. The ubuntu 26.04 leg (the only major) is excluded.
+risk: medium                          # persisted toolchain rebuild, ABI risk
 est_duration_min: 40
 needs_reboot: false
 touches:
@@ -14,20 +14,19 @@ touches:
   resources:
     - helmrelease/paperclip
     - pvc/paperclip-data                          # /paperclip — persists mise-install's built toolroot
-    - initcontainer/mise-install (debian leg)
-    - container/tools (ubuntu leg — sidecar, not on request path)
+    - initcontainer/mise-install (debian leg — the ONLY leg in scope)
   shared: []                                       # no ingress/cert-manager/cilium/coredns/shared-DB perturbed;
                                                     # paperclip-postgresql is a SEPARATE Deployment (see conflicts_with)
 depends_on: []
-conflicts_with: ["paperclip-postgresql-18.6"]      # placeholder name for the parallel postgres 17->18 plan being
-                                                    # written independently — confirm the ACTUAL plan_id at vetting
-                                                    # time (see §6 Interference notes for why ordering matters)
+conflicts_with: ["paperclip-chart-5.2.1"]          # same HelmRelease file + same pod (reciprocal of that plan's entry).
+                                                    # paperclip-postgresql-18.6 was the old placeholder: it EXECUTED
+                                                    # 2026-09-07 (status: executed), so that conflict is moot and removed.
 autonomy_override: human-gated  # ADDED 2026-09-06. The target field itself
                                 # reads "RECOMMENDED: DO NOT EXECUTE, see 1b",
                                 # yet this derived AUTO-NIGHT -- auto-schedulable
                                 # the moment anyone vetted it. The refusal now
                                 # lives in the field the derivation reads.
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> 24 edits applied verbatim (debian-only scope, ubuntu leg excluded, 6 premises, gates that can fail, real rollback); order: after paperclip-chart-5.2.1
 window: null
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is derived from
 # capability_change/rollback_class per runbooks/autonomy-policy.yaml.
@@ -35,7 +34,49 @@ security_ref: F-ae420ae8              # live accepted-risk finding for the ubunt
                                        # resolved predecessor recording the original hold decision. Detail DB-only.
 capability_change: false              # no user-visible behaviour change on either leg
 rollback_class: git-revert
-finding_refs: []                      # not a P2.2 sweep-dispatched finding; direct held-update input
+finding_refs: []                      # no open version finding for the debian leg (checked 2026-09-26, `finding list --grep paperclip`).
+                                      # The accepted debian:trixie-slim image rows (AR-029) are re-evaluated by the next security sweep after the re-pin.
+premises:
+  - id: init-pin-is-still-the-trixie-digest
+    why: >-
+      The debian leg replaces exactly this pin. If the rendered Deployment's
+      mise-install image is already something else, someone has been here
+      before and Step 1's edit and the rollback target are wrong.
+    run: kubectl get deploy -n ai paperclip -o jsonpath='{.spec.template.spec.initContainers[?(@.name=="mise-install")].image}'
+    expect_exact: "debian:trixie-slim@sha256:26f98ccd92fd0a44d6928ce8ff8f4921b4d2f535bfa07555ee5d18f61429cf0c"
+  - id: running-pod-ran-the-trixie-digest
+    why: >-
+      Baseline for the §4 image-identity gate: the live init imageID is the
+      OLD index digest, so reading the NEW digest afterwards is a real
+      transition, not a reading that was always true.
+    run: kubectl get pods -n ai -l app.kubernetes.io/name=paperclip -o jsonpath='{.items[*].status.initContainerStatuses[?(@.name=="mise-install")].imageID}'
+    expect_exact: "docker.io/library/debian@sha256:26f98ccd92fd0a44d6928ce8ff8f4921b4d2f535bfa07555ee5d18f61429cf0c"
+  - id: toolchain-cache-present-and-skipped
+    why: >-
+      Step 2 exists because the init script skips the sysroot build while
+      /paperclip/.local/bin/gcc exists. This is also the known-bad baseline
+      for the §4 rebuild gate: the grep that must find "Sysroot ready" after
+      the change finds only the skip line today.
+    run: kubectl logs -n ai deploy/paperclip -c mise-install --tail=200 | grep -c 'Build toolchain already present, skipping'
+    expect_exact: "1"
+  - id: ubuntu-tools-leg-untouched
+    why: >-
+      The ubuntu leg is OUT OF SCOPE (AR-101). The tools container must be on
+      the 24.04 pin before (and after) this plan; if it is not, stop.
+    run: kubectl get deploy -n ai paperclip -o jsonpath='{.spec.template.spec.containers[?(@.name=="tools")].image}'
+    expect_exact: "ubuntu:24.04@sha256:d78ab76437b1afc5f01e223d6bf0172763f404bb166441328845adbef44518cb"
+  - id: paperclip-healthy
+    why: >-
+      Do not start a toolchain rebuild on a pod that is already unhealthy; a
+      failure afterwards would be unattributable. Two containers: app + tools.
+    run: kubectl get pods -n ai -l app.kubernetes.io/name=paperclip -o jsonpath='{.items[*].status.containerStatuses[*].ready}'
+    expect_exact: "true true"
+  - id: helmrelease-ready
+    why: >-
+      No in-flight or failed upgrade to stack this change on (maxHistory 1,
+      no helm rollback available).
+    run: kubectl get helmrelease -n ai paperclip -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+    expect_exact: "True"
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/vulnerability-disclosure.md
@@ -43,7 +84,12 @@ generated: "2026-09-05"
 retargeted: "2026-09-25"                # debian leg 13.6-slim -> 13.7-slim (13.7 released 2026-09-12); DO-NOT-EXECUTE on the ubuntu leg re-confirmed
 ---
 
-# paperclip: two base-image bumps — debian (mise-install) + ubuntu (tools sidecar)
+# paperclip: debian base-image bump for mise-install (ubuntu tools leg EXCLUDED)
+
+> **SCOPE (operator, 2026-09-26): execute the DEBIAN `mise-install` leg ONLY.**
+> The ubuntu `tools` leg is NOT part of this plan's executable scope: no step,
+> gate or rollback below edits the `tools` image. An executor that finds itself
+> editing `repository: ubuntu` / `24.04@sha256:d78ab764...` is off-plan: STOP.
 
 ## 1) Summary & why held
 
@@ -100,7 +146,7 @@ started (§4).
 the init script's idempotency is keyed on **files already present on the PVC**,
 not on the image version, so a naive tag bump silently does nothing.
 
-### 1b) `tools` container: `ubuntu:24.04` → `26.04` — RECOMMENDED: DO NOT EXECUTE
+### 1b) `tools` container: `ubuntu:24.04` → `26.04` — EXCLUDED FROM THIS PLAN (DO NOT EXECUTE, AR-101)
 
 This leg is **not an open question**. It is a live operator decision already
 on record:
@@ -146,16 +192,14 @@ action for the window: SKIP this leg, leave the pin as-is.**
 
 ## 2) Pre-checks
 
-Run for both legs before touching anything:
+Run before touching anything (debian leg only; the ubuntu leg is excluded):
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 mise exec -- flux get helmrelease -n ai paperclip           # Ready=True, no in-flight reconcile
 mise exec -- kubectl get pods -n ai -l app.kubernetes.io/name=paperclip
 mise exec -- kubectl get pvc -n ai paperclip-data            # Bound, note current usage: `kubectl exec` df -h /paperclip
-mise exec -- kubectl get deploy -n ai paperclip-postgresql   # confirm it's on the version this plan's `current:` assumes
-                                                              # (paperclip-postgresql-18.6 plan may have already landed —
-                                                              # if so, re-check §6 ordering before proceeding)
+.venv/bin/python3 runbooks/plan-premises.py paperclip-base-images --require-premises   # every premise PASS, else STOP
 ```
 
 **Debian leg only** — confirm the PVC actually holds a stale toolroot before
@@ -167,8 +211,9 @@ mise exec -- kubectl exec -n ai deploy/paperclip -c app -- \
   sh -c 'ls -la /paperclip/.local/bin/gcc /paperclip/toolroot 2>&1 | head -5'
 ```
 
-**Ubuntu leg gate** (run regardless of whether you intend to act on it — this
-is the re-evaluation trigger check, not a plan step):
+**Ubuntu leg gate — NOT RUN in this plan's execution (reference only).** The
+re-evaluation belongs to AR-101's own review, not to this window. Do not run
+the block below as part of executing this plan:
 
 ```bash
 # Requires trivy locally. Compare current 24.04 pin vs current 26.04 digest,
@@ -194,23 +239,36 @@ per the disclosure rule) back to AR-101 so its next review has fresh data.
 
 1. Edit `kubernetes/apps/ai/paperclip/app/helmrelease.yaml`, `mise-install`
    initContainer image:
-   ```yaml
-   image:
-     repository: debian
-     tag: 13.7-slim@sha256:<digest of 13.7-slim AT EXECUTION TIME>  # re-resolve; don't reuse the digest quoted in §1a — it will have moved by the window date
+   First confirm the tag still resolves to the reviewed index digest (a
+   different value = upstream re-pushed 13.7-slim: STOP and re-review, do not
+   pin an unreviewed digest):
+   ```bash
+   curl -s "https://hub.docker.com/v2/repositories/library/debian/tags/13.7-slim" | python3 -c "import sys,json;d=json.load(sys.stdin)['digest'];print(d);print('DIGEST_MATCH' if d=='sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a' else 'DIGEST_MOVED_STOP')"
    ```
-   Re-resolve the digest at execution time (`curl -s
-   "https://hub.docker.com/v2/repositories/library/debian/tags/13.7-slim" | python3 -c
-   "import sys,json;print(json.load(sys.stdin)['digest'])"`) and pin the
-   multi-arch index digest, not a per-platform manifest digest. Update the
-   trailing comment to record the new pin date, replacing the stale
-   "2026-08-18" note.
+   Then apply the edit (BSD-safe, asserts exactly one match, touches ONLY the
+   mise-install line; the ubuntu `tools` pin is not in the replaced text).
+   The block is deliberately NOT indented: copy it as-is (a heredoc terminator
+   and Python both break on leading spaces):
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen && python3 - <<'EOF'
+p="kubernetes/apps/ai/paperclip/app/helmrelease.yaml"; s=open(p).read()
+old="tag: trixie-slim@sha256:26f98ccd92fd0a44d6928ce8ff8f4921b4d2f535bfa07555ee5d18f61429cf0c  # digest-pinned to the RUNNING image 2026-08-18 (float-tag policy); re-pin deliberately"
+new="tag: 13.7-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a  # digest-pinned 2026-09-26 to the Debian 13.7-slim index digest (float-tag policy); re-pin deliberately"
+n=s.count(old); assert n==1, f"old text found {n}x - STOP"
+open(p,"w").write(s.replace(old,new)); print("EDITED")
+EOF
+git -C /Users/mu/code/cberg-home-nextgen diff --numstat kubernetes/apps/ai/paperclip/app/helmrelease.yaml   # PASS: "1  1  kubernetes/apps/ai/paperclip/app/helmrelease.yaml"
+```
 
 2. **Clear the persisted toolchain cache so the bump actually takes effect.**
    This is the step the idempotent init script cannot do for itself — it only
    rebuilds when these files are *absent*:
+   Run it in the `tools` container (`runAsUser: 0`, same `/paperclip` mount):
+   the `app` container runs as uid 1000 (`node`) and the toolroot was written
+   by the root init container. Do this IMMEDIATELY before Step 3's push:
    ```bash
-   mise exec -- kubectl exec -n ai deploy/paperclip -c app -- \
+   mise exec -- kubectl exec -n ai deploy/paperclip -c tools -- \
      rm -rf /paperclip/toolroot /paperclip/toolchain.log \
             /paperclip/.local/bin/gcc /paperclip/.local/bin/cc \
             /paperclip/.local/bin/g++ /paperclip/.local/bin/c++ \
@@ -218,6 +276,9 @@ per the disclosure rule) back to AR-101 so its next review has fresh data.
             /paperclip/.local/bin/ld.bfd /paperclip/.local/bin/as \
             /paperclip/.local/bin/ar /paperclip/.local/bin/nm \
             /paperclip/.local/bin/strip /paperclip/.local/bin/objdump
+   mise exec -- kubectl exec -n ai deploy/paperclip -c tools -- \
+     sh -c 'test ! -e /paperclip/.local/bin/gcc && echo GCC_WRAPPER_CLEARED'
+   # PASS: prints GCC_WRAPPER_CLEARED (the ONLY file the init script's rebuild gate keys on). Anything else: STOP.
    ```
    Leave `mise`, `zsh`, `oh-my-zsh`, `gh`, `unifictl` in place — their own
    `NEED_APT` gate is unrelated to the base-image ABI question this plan is
@@ -227,29 +288,38 @@ per the disclosure rule) back to AR-101 so its next review has fresh data.
 
 3. Commit and push:
    ```bash
-   git add kubernetes/apps/ai/paperclip/app/helmrelease.yaml
+   cd /Users/mu/code/cberg-home-nextgen
    git commit --only kubernetes/apps/ai/paperclip/app/helmrelease.yaml -m "chore(paperclip): debian mise-install trixie-slim -> 13.7-slim (13.4-era -> 13.7, same major)"
+   git show --stat HEAD          # exactly one file: kubernetes/apps/ai/paperclip/app/helmrelease.yaml
+   git log -1 --format=%s        # must be the subject above
    git push
    ```
 
-4. Reconcile and force a pod restart so the initContainer re-runs against the
-   cleared cache:
+4. Reconcile. The init image change alters the pod template, so the helm
+   upgrade itself replaces the pod (`strategy: Recreate`). Do NOT
+   `kubectl rollout restart`: a second roll after the rebuild makes the final
+   pod's init log read "skipping" and fails the §4 rebuild gate falsely.
    ```bash
    mise exec -- flux reconcile kustomization paperclip -n ai --with-source
-   mise exec -- kubectl rollout restart deployment/paperclip -n ai
-   mise exec -- kubectl get pods -n ai -l app.kubernetes.io/name=paperclip -w
+   mise exec -- flux reconcile helmrelease paperclip -n ai
+   mise exec -- kubectl rollout status deployment/paperclip -n ai --timeout=15m
    ```
+   The toolroot rebuild runs inside the helm wait (HR `timeout` default 5m).
+   If the HR reports an upgrade timeout while the pod is still `Init` running
+   `mise-install`, do not intervene: let the init finish, then judge by §4.
 
-### Ubuntu leg (`tools`) — do not execute by default
+### Ubuntu leg (`tools`) — EXCLUDED, no steps
 
-No steps. If the §2 gate result changes the operator's call, that is a new
+No steps. Do not edit the `tools` image in this plan. If the §2 gate result changes the operator's call, that is a new
 plan (or an explicit re-scope of this one with `security_ref` updated and
 AR-101 revisited) — not a silent extension of this plan's approved scope.
 
 ## 4) Verification
 
 Floor: `flux get helmrelease -n ai paperclip` → `Ready=True`; `paperclip` pod
-`1/1`, 0 unexpected restarts; `mise-install` initContainer `Completed`.
+`2/2` (app + tools), 0 unexpected restarts; `mise-install` initContainer `Completed`;
+premise `ubuntu-tools-leg-untouched` still PASS (`.venv/bin/python3 runbooks/plan-premises.py paperclip-base-images`
+— the three trixie/skip premises are EXPECTED to fail after the change; that is the transition).
 
 **Image-identity gate (debian leg)** — prove the initContainer actually ran the
 13.7 digest you pinned, not a cached old one. Fails (prints the OLD
@@ -258,7 +328,8 @@ Floor: `flux get helmrelease -n ai paperclip` → `Ready=True`; `paperclip` pod
 ```bash
 mise exec -- kubectl get pods -n ai -l app.kubernetes.io/name=paperclip \
   -o jsonpath='{range .items[*]}{.status.initContainerStatuses[?(@.name=="mise-install")].imageID}{"\n"}{end}'
-# PASS: contains the digest pinned in Step 1 (resolved from 13.7-slim at execution time)
+# PASS: prints exactly docker.io/library/debian@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+# FAIL: prints ...26f98ccd... (the pre-change reading, measured 2026-09-26) or nothing
 ```
 
 **CONTENTS ASSERTION (debian leg): the toolroot was actually rebuilt against
@@ -267,20 +338,22 @@ pod proves the OS pulled, not that the toolchain functions:
 
 ```bash
 # a) prove the rebuild happened against the NEW image, not stale cache
-mise exec -- kubectl logs -n ai deploy/paperclip -c mise-install --tail=200 | grep -E 'Building sysroot|gcc wrapper ->|ld wrapper ->|Sysroot ready'
-# expect the full build sequence, NOT "Build toolchain already present, skipping"
+mise exec -- kubectl logs -n ai deploy/paperclip -c mise-install --tail=300 | grep -cE 'Building sysroot|gcc wrapper ->|ld wrapper ->|Sysroot ready'
+# PASS: 4. FAIL: 0 is the pre-change reading (measured 2026-09-26: the log holds only
+# "Build toolchain already present, skipping"); <4 = partial build ("ERROR: gcc wrapper ..." path).
 
 mise exec -- kubectl exec -n ai deploy/paperclip -c app -- \
-  sh -c 'cat /paperclip/toolchain.log 2>/dev/null | tail -20; /paperclip/.local/bin/gcc --version'
-# gcc version banner must be present, and toolchain.log must be freshly timestamped (this run, not weeks old)
+  sh -c 'stat -c %y /paperclip/toolchain.log; grep -cE -e "^--- (crtbeginS\.o|stdio\.h|libgcc_s\.so\.1): YES ---$" /paperclip/toolchain.log; grep -c -e "^ld-linux: OK$" /paperclip/toolchain.log; /paperclip/.local/bin/gcc --version | head -1'
+# PASS: timestamp dated today; then 3; then 1; then a gcc banner. A missing piece prints "NO" in the log
+# and the count drops below 3 (regex dry-tested 2026-09-26 against a log with one NO: prints 2).
 
 # b) compile something real through the sysroot wrapper — the actual failure mode
 # to catch is "gcc exists but native extension linking is broken against this glibc"
 mise exec -- kubectl exec -n ai deploy/paperclip -c app -- \
-  sh -c 'export PATH=/paperclip/.local/bin:$PATH; printf "int main(){return 0;}" > /tmp/t.c && gcc -o /tmp/t /tmp/t.c && /tmp/t && echo COMPILE_AND_RUN_OK'
-# then exercise the real path if paperclip's runtime supports it, e.g. a gem install
-# that needs native compilation (mkmf/extconf.rb) — check paperclip logs after the
-# app has had a chance to install/update its own dependencies post-restart:
+  sh -c 'printf "int main(){return 0;}" > /tmp/t.c && /paperclip/.local/bin/gcc -o /tmp/t /tmp/t.c && /tmp/t && echo COMPILE_AND_RUN_OK'
+# PASS: COMPILE_AND_RUN_OK. Calls the sysroot wrapper by absolute path, so a missing wrapper
+# cannot fall through to some other gcc on PATH.
+# INFORMATIONAL ONLY (not a PASS criterion — an absence reading, never shown to match a bad case):
 mise exec -- kubectl logs -n ai deploy/paperclip -c app --tail=100 | grep -iE 'gyp|extconf|native extension|error' || echo "no native-build errors in recent app log"
 ```
 
@@ -290,28 +363,33 @@ the rebuilt toolchain silently produces broken binaries.
 
 ## 5) Rollback
 
-Debian leg:
+Debian leg. **The stale-cache trap cuts both ways:** if the 13.7 build
+completed, `/paperclip/.local/bin/gcc` exists and a bare revert would SKIP the
+rebuild, leaving the 13.7-built toolroot in place under the old pin. So clear
+the wrapper again first (if the pod is not Running, the build did not finish,
+the wrapper is absent, and this step is skipped):
 ```bash
-git revert <the debian-bump commit>
-git push
+cd /Users/mu/code/cberg-home-nextgen
+mise exec -- kubectl exec -n ai deploy/paperclip -c tools -- \
+  sh -c 'rm -rf /paperclip/toolroot /paperclip/.local/bin/gcc; test ! -e /paperclip/.local/bin/gcc && echo GCC_WRAPPER_CLEARED'
+git revert --no-edit "$(git log -1 --format=%H --grep='debian mise-install trixie-slim -> 13.7-slim' -- kubernetes/apps/ai/paperclip/app/helmrelease.yaml)"
+git show --stat HEAD && git push
 mise exec -- flux reconcile kustomization paperclip -n ai --with-source
+mise exec -- flux reconcile helmrelease paperclip -n ai
+mise exec -- kubectl rollout status deployment/paperclip -n ai --timeout=15m
 ```
-The reverted manifest re-pins the old digest, but **the stale-cache trap cuts
-both ways**: if you cleared the toolroot in Step 2 and the revert lands, the
-NEXT pod start will rebuild the toolroot fresh from the OLD (13.4-era) debian
-image — this is expected and fine, just don't assume "revert = instant
-restore," budget the same ~2-3 min rebuild time. Confirm via the same §4
-commands (rebuild log shows the OLD digest's package versions, `gcc --version`
-succeeds).
+Confirm with the §4 commands: imageID back to `...26f98ccd...`, rebuild count 4,
+COMPILE_AND_RUN_OK.
 
-Ubuntu leg: not executed, nothing to roll back.
+Ubuntu leg: excluded from this plan, nothing to roll back.
 
 ## 6) Interference notes
 
 - **No shared infra perturbed.** No ingress, cert-manager, CNI, CoreDNS, or
   shared-DB touched by either leg. Safe to co-schedule with unrelated plans
   from a shared-infra standpoint.
-- **Do not co-schedule with the parallel `paperclip-postgresql` (17→18) plan
+- **`paperclip-postgresql-18.6` EXECUTED 2026-09-07 — the note below is historical.**
+  **Do not co-schedule with the parallel `paperclip-postgresql` (17→18) plan
   in the same window without sequencing.** Both plans restart pods in the `ai`
   namespace that the `paperclip` controller's `wait-for-postgres` initContainer
   depends on (`nc -z paperclip-postgresql 5432`), and `backup-cleanup.yaml`'s
@@ -329,10 +407,16 @@ Ubuntu leg: not executed, nothing to roll back.
   don't. §1b's gate must be re-run and show a materially different result
   first, and even then the accepted-risk AR-101 needs an explicit operator
   update, not an automatic supersede by this plan landing.
-- **Same-component chart bump pending:** finding F-44278983 (paperclip chart
-  5.1.0 → 5.2.1, `monitor`, 2026-09-25) is not planned here. If it lands in the
-  same window it restarts the same pod — run it separately so a toolchain
-  failure is attributable to this plan's base-image change.
+- **`paperclip-chart-5.2.1`** (F-44278983) edits the same HelmRelease; now in
+  `conflicts_with` both ways. Serial in one on-demand run is fine (run-now
+  marks the later one `settle_before`). ORDER DECIDED 2026-09-26 (coordinator):
+  the chart plan runs FIRST (label-only, no roll; its premise
+  `helmrelease-file-unchanged-since-review` pins the HR file and would fail if
+  this plan landed first). This plan starts only after the chart plan's §4
+  SAME_POD gate has passed and its close-out is pushed; this plan's premises
+  read the init/tools pins and the running pod, which the chart plan does not
+  change. Never let this plan's pod roll land between the chart plan's §2b
+  baseline and its §4 verification.
 - `maxHistory: 1` and default `upgrade.remediation.retries: 1` are `paperclip`'s
   standing HelmRelease settings — a bad rollout auto-retries once then reports
   failed; there is no multi-revision `helm rollback` available, so recovery is
