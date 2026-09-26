@@ -15,17 +15,22 @@ risk: high                            # rolling reboot of every control-plane no
                                       # 3-node hyper-converged cluster: etcd quorum,
                                       # 93 Longhorn volumes at replica=2, and the ONLY
                                       # HTTP data plane (Envoy Gateway) all ride on it
-est_duration_min: 160                 # RE-PRICED 2026-09-26 (was 145): the canary may now be
-                                      # the HEAVIEST node (39 engines on 02, re-measured 2026-09-26),
-                                      # plus the pre-roll etcd snapshot, the UniFi and per-node
-                                      # DaemonSet/device-plugin gates. IN-WINDOW only; Phase A
-                                      # prep (~35 min) is Flux-inert and runs BEFORE the window.
-                                      # Breakdown in §7.
+est_duration_min: 187                 # RE-PRICED 2026-09-26 PM (was 160) for the etcd-stability
+                                      # additions (F-84a27c15, F-58141d46): push freeze + freeze-sha
+                                      # gate, §2.3 Prometheus etcd gates, §3.8.0 defrag of 3
+                                      # members, and a >=10-min settle + etcd gate between nodes
+                                      # (§3.10b). FLAGGED: 187 > the 180 schedulable, and
+                                      # Step 0 (20) + 187 = 207 > the 200-min slot. §7 has the
+                                      # arithmetic and the operator's options. IN-WINDOW only;
+                                      # Phase A prep (~35 min) is Flux-inert and runs BEFORE it.
 needs_reboot: true                    # three sequential node reboots
 exclusive: true                       # the node roll must have sun-attended:2026-09-27 TO
                                       # ITSELF — including plans not yet written (§6).
 touches:
   namespaces:
+    - flux-system                     # freeze sha recorded + gated before every node (§2.0b); source NOT suspended
+    - my-software-production          # ImageUpdateAutomation suspended/resumed (it pushes to main)
+    - my-software-development         # ImageUpdateAutomation suspended/resumed (it pushes to main)
     - kube-system                     # etcd, kube-apiserver, controller-manager,
                                       # scheduler, coredns, cilium, authentik
     - storage                         # longhorn-manager, instance-manager, CSI, 93 volumes
@@ -46,6 +51,11 @@ touches:
     - node/k8s-nuc14-03                           # 192.168.55.13
     - "etcd (3 members, 3.6.14 -> 3.7.1; pre-roll snapshot taken at §3.8a)"
     - "all Longhorn replicas (186 on 2026-09-26, after the pg17 volume retire) / 93 volumes (numberOfReplicas: 2)"
+    - "etcd defrag of all 3 members, followers first, leader last (§3.8.0)"
+    # NOT gitrepository/flux-system: deliberately NOT suspended (source-controller storage is
+    # emptyDir; a suspended source loses its artifact when a drain moves that pod — §2.0b)
+    - imageupdateautomation/my-software-production/absenty-image-updates   # suspended: it pushes to main
+    - imageupdateautomation/my-software-development/absenty-image-updates  # suspended: it pushes to main
   shared:
     - etcd                            # quorum 3; exactly ONE member may be down
     - cni/cilium                      # DaemonSet restarts per node
@@ -62,6 +72,9 @@ touches:
                                       # npu.intel.com/accel on every rolled node
     - cifs-share                      # every CIFS mount (smb.csi) is torn down and remounted
                                       # with its pods on each node
+    - flux-source                     # PUSH FREEZE on main for every session: origin/main must
+                                      # equal the §2.0b freeze sha before every node (§3.9)
+    - git-main                        # the freeze itself: no session may push to main in-window
 depends_on: []
 conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended SLOT (also exclusive: true).
   - flux-oci-chart-sources            # names talos-1.14.1 back
@@ -100,6 +113,11 @@ rollback_class: one-way               # HONEST RATING — see §5. Per-node `tal
 security_ref: null                    # no security driver
 finding_refs:
   - F-912f4778                        # "Talos Linux (cluster nodes): v1.13.10 → v1.14.1"
+  - F-84a27c15                        # etcd-disk-latency gate + git-push freeze (§2.0b, §2.3, §3.10b)
+  - F-58141d46                        # etcd defrag before the one-way 3.6 -> 3.7 roll (§3.8.0)
+  - F-7b842e62                        # Longhorn rebuild concurrency: DECIDED here, left at 8 (§3.11)
+  # NOT claimed: F-baf94b64 (flux-system spec.ignore — landed b4ed1d63 2026-09-26 14:35Z, not this plan's)
+  # and F-3602cfa9 (the 09-24 20:28Z stall, owned by health-check-agent; named in §7 risk).
   # DROPPED 2026-09-26: F-0a32b505 (resolved 2026-09-21) and F-9a58f400 (resolved
   # 2026-09-22). An ownership claim on a resolved finding is noise.
 premises:
@@ -167,6 +185,28 @@ premises:
       Local installability is still gated by `mise ls-remote talhelper` at §3.5.
     run: kubectl --kubeconfig=/dev/null --server=https://proxy.golang.org --token=none get --raw /github.com/budimanjojo/talhelper/v3/@v/v3.1.17.info
     expect_contains: '"Version":"v3.1.17"'
+  - id: etcd-latency-histograms-scraped
+    why: >-
+      §2.3 and §3.10b gate on the worst 5m-p99 of etcd WAL fsync and backend commit. An
+      unscraped histogram reads EMPTY on both sides and a "< 50 ms" check would pass on no
+      data. Expects exactly 3 fsync + 3 commit series (6); a lost etcd target prints 4 or 5.
+    run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count(etcd_disk_wal_fsync_duration_seconds_count)%20%2B%20count(etcd_disk_backend_commit_duration_seconds_count)'
+    expect_matches: '"value":\[[0-9.]+,"6"\]'
+  - id: kustomize-controller-write-metric-scraped
+    why: >-
+      The < 5 MB/s kustomize-controller gate reads cAdvisor container_fs_writes_bytes_total
+      for container=manager. There is ALSO a pod-level series with no container label; the
+      filter must select exactly one series or the rate double-counts. 0 series (label change,
+      cAdvisor off) or 2 fails here.
+    run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count(container_fs_writes_bytes_total%7Bnamespace%3D%22flux-system%22%2Ccontainer%3D%22manager%22%2Cpod%3D~%22kustomize-controller-.*%22%7D)'
+    expect_matches: '"value":\[[0-9.]+,"1"\]'
+  - id: longhorn-rebuild-limit-8
+    why: >-
+      §3.11 prices and justifies the roll at concurrent-replica-rebuild-per-node-limit 8 (the
+      decision on F-7b842e62). If someone lowers it before the window, §3.11's rebuild time
+      and the §7 price are wrong — re-price rather than run.
+    run: kubectl get settings.longhorn.io -n storage concurrent-replica-rebuild-per-node-limit -o jsonpath='{.value}'
+    expect_exact: "8"
 status: awaiting-go                   # plan-reviewer re-review 2026-09-26: ready-for-go.
                                       # NO GO RECORDED. The 2026-09-12 GO covered v1.14.0 ONLY
                                       # and does NOT carry over — the operator must give a
@@ -630,13 +670,182 @@ for ns, ds in (("security", "falco"), ("security", "falco-log-rotate"), ("securi
 for f in fail: print("  FAIL:", f)
 print("VERDICT", "FAIL" if fail else "PASS")
 PY
-ls -l "$SCR"/*.py | wc -l                   # MUST print 5
+cat > "$SCR/etcdgate.py" <<'PY'
+import json, subprocess, sys, time, argparse, urllib.parse
+# Prometheus-side etcd/disk gate. Every threshold is a flag so a negative control can run it.
+ap = argparse.ArgumentParser()
+ap.add_argument("--lookback", default="1h")        # fsync/commit worst-5m-p99 window
+ap.add_argument("--leader-window", default="2h")   # leader-change window
+ap.add_argument("--allow-file", default="")        # explained leader changes: "<epoch> <reason>" per line
+ap.add_argument("--fsync-ms", type=float, default=50)
+ap.add_argument("--commit-ms", type=float, default=50)
+ap.add_argument("--kc-mbps", type=float, default=5)
+ap.add_argument("--kc-window", default="10m")
+ap.add_argument("--members", type=int, default=3)   # 0 = skip the count checks (ONLY the §3.11 node-down tripwire)
+a = ap.parse_args()
+Q = "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query="
+def q(expr):
+    d = json.loads(subprocess.check_output(["kubectl", "get", "--raw", Q + urllib.parse.quote(expr)]))
+    if d.get("status") != "success": sys.exit(f"FAIL: query error {d}")
+    return {x["metric"].get("instance", "*").split(":")[0]: float(x["value"][1]) for x in d["data"]["result"]}
+def secs(w):
+    return int(w[:-1]) * {"m": 60, "h": 3600, "d": 86400}[w[-1]]
+fail = []
+for name, metric, lim in (("wal_fsync", "etcd_disk_wal_fsync_duration_seconds_bucket", a.fsync_ms),
+                          ("backend_commit", "etcd_disk_backend_commit_duration_seconds_bucket", a.commit_ms)):
+    r = q(f"max_over_time(histogram_quantile(0.99, sum by (instance,le) (rate({metric}[5m])))[{a.lookback}:1m])")
+    print(f"{name} worst 5m-p99 over {a.lookback}: " + " ".join(f"{k}={v*1000:.1f}ms" for k, v in sorted(r.items())))
+    if a.members and len(r) != a.members: fail.append(f"{name}: expected {a.members} members, got {sorted(r)} (scrape gap -> wait, retry)")
+    if not r: continue
+    worst = max(r.values()) * 1000
+    if worst >= lim: fail.append(f"{name} worst p99 {worst:.1f}ms >= {lim}ms")
+now = time.time(); lw = secs(a.leader_window)
+start = q('process_start_time_seconds{job="kube-etcd"}')
+chg = q(f"etcd_server_leader_changes_seen_total - etcd_server_leader_changes_seen_total offset {a.leader_window}")
+counted = {ip: v for ip, v in chg.items() if start.get(ip, now) < now - lw}
+print(f"leader changes over {a.leader_window} (members up the whole window): {counted}; skipped (restarted inside it): {sorted(set(start) - set(counted))}")
+allowed = 0
+if a.allow_file:
+    try:
+        allowed = sum(1 for l in open(a.allow_file) if l.strip() and float(l.split()[0]) >= now - lw)
+    except FileNotFoundError:
+        pass
+if a.members and len(start) != a.members: fail.append(f"expected {a.members} etcd process_start series, got {sorted(start)}")
+if not counted: fail.append("no member was up for the whole leader window -> cannot measure, FAIL closed")
+elif max(counted.values()) > allowed:
+    fail.append(f"{max(counted.values()):.0f} leader change(s) in {a.leader_window}, explained/allowed {allowed}")
+kc = q(f'sum(rate(container_fs_writes_bytes_total{{namespace="flux-system",container="manager",pod=~"kustomize-controller-.*"}}[{a.kc_window}]))')
+if not kc: fail.append("kustomize-controller write metric returned NO series -> not scraped, FAIL closed")
+else:
+    mb = list(kc.values())[0] / 1e6
+    print(f"kustomize-controller writes over {a.kc_window}: {mb:.2f} MB/s")
+    if mb >= a.kc_mbps: fail.append(f"kustomize-controller {mb:.2f} MB/s >= {a.kc_mbps} MB/s (commit burst / cold start in progress)")
+for f in fail: print("  FAIL:", f)
+print("VERDICT", "FAIL" if fail else "PASS")
+sys.exit(1 if fail else 0)
+PY
+cat > "$SCR/etcdstat.py" <<'PY'
+import subprocess, sys
+# converged                -> 3 members, 1 leader, no learner, no errors, RAFT INDEX spread <= 50
+# defragged <ip> [<ip>..]  -> additionally: IN USE >= 80% of DB SIZE on each named member
+U = {"B": 1e-6, "kB": 1e-3, "KB": 1e-3, "MB": 1, "GB": 1e3}
+out = subprocess.check_output(["talosctl", "-n", "192.168.55.11,192.168.55.12,192.168.55.13", "etcd", "status"], text=True)
+rows = [l.split() for l in out.splitlines()[1:] if l.strip()]
+m, fail = {}, []
+for t in rows:
+    ip = t[0]
+    m[ip] = dict(member=t[1], db=float(t[2]) * U[t[3]], use=float(t[4]) * U[t[5]], leader=t[7],
+                 raft=int(t[8]), applied=int(t[10]), learner=t[11], proto=t[12], err=" ".join(t[14:]))
+    print(f"{ip} db={m[ip]['db']:.0f}MB in_use={m[ip]['use']:.0f}MB ({100*m[ip]['use']/m[ip]['db']:.0f}%) raft={m[ip]['raft']} applied={m[ip]['applied']} learner={m[ip]['learner']} proto={m[ip]['proto']} err=[{m[ip]['err']}]")
+if len(m) != 3: fail.append(f"expected 3 members, got {len(m)}")
+if len({v['leader'] for v in m.values()}) != 1: fail.append("members disagree on the leader")
+if any(v["learner"] != "false" for v in m.values()): fail.append("a LEARNER is present")
+if any(v["err"] for v in m.values()): fail.append("ERRORS column not empty")
+spread = max(v["raft"] for v in m.values()) - min(v["raft"] for v in m.values()) if m else -1
+lag = max(v["raft"] - v["applied"] for v in m.values()) if m else -1
+print(f"raft index spread {spread}, max raft-applied lag {lag}")
+if spread > 50 or lag > 50: fail.append(f"not converged: spread {spread} / apply lag {lag} (> 50)")
+if len(sys.argv) > 1 and sys.argv[1] == "defragged":
+    for ip in sys.argv[2:]:
+        r = m.get(ip)
+        if not r or r["use"] / r["db"] < 0.8: fail.append(f"{ip} not defragged: in-use {r and round(100*r['use']/r['db'])}% of DB SIZE (< 80%)")
+for f in fail: print("  FAIL:", f)
+print("VERDICT", "FAIL" if fail else "PASS")
+sys.exit(1 if fail else 0)
+PY
+ls -l "$SCR"/*.py | wc -l                   # MUST print 7
 ```
+
+`etcdgate.py` (Prometheus: worst 5m-p99 WAL fsync + backend commit, leader changes on members
+that were up the whole window, kustomize-controller write rate) and `etcdstat.py` (parses
+`talosctl etcd status`: 3 members, one leader, no learner/errors, RAFT INDEX spread and apply
+lag <= 50, and with `defragged <ip>...` IN USE >= 80% of DB SIZE) were added 2026-09-26 PM.
+Both EXIT NON-ZERO on FAIL. **Their controls, run live 2026-09-26 ~14:35Z:** default
+thresholds → `VERDICT FAIL` on *kustomize-controller 11.19 MB/s >= 5* (a commit burst was in
+progress — the gate caught a real one); `--fsync-ms 1 --commit-ms 1` → FAIL on both latency
+lines (live worst p99 28.5 / 30.0 ms, i.e. the default 50 ms gate would have PASSED them);
+`--leader-window 7d` → FAIL *8 leader change(s) in 7d* (the counter is live, not an empty
+read); `--kc-window 6h --kc-mbps 0.0001` → FAIL at 4.12 MB/s; `etcdstat.py converged` → PASS
+(spread 0); `etcdstat.py defragged 192.168.55.12` → FAIL *in-use 27% of DB SIZE* (today's
+pre-defrag state). The leader count uses `x - x offset <window>` (exact; no `increase()`
+extrapolation) and SKIPS any member whose etcd `process_start_time_seconds` falls inside the
+window: a rebooted member's counter restarts and would otherwise read as a change. Every
+member sees an election, so the survivors still catch it; with no member up for the whole
+window the helper fails closed. Explained leader changes (a rolled node that WAS leader, a
+leader-member defrag that caused one) are appended to `$SCR/leader-allow.log` as
+`<epoch> <reason>` and only those inside the window are allowed.
 
 *Controls run 2026-09-26:* `lh_gate.py gate` against a baseline naming one volume and 190
 replicas → `NO-GO` on both lines; `bk.py` with an empty exempt set → `NO-GO` naming the
 detached `icloud-docker-andrea` session volume (147h); `nodegate.py check` against a
 baseline with one leader change fewer → `FAIL … leader loss`.
+
+**2.0b — PUSH FREEZE begins (F-84a27c15). Run it AFTER this window's Step 0 has landed and
+BEFORE 2.1.** Why: the 2026-09-26 etcd investigation traced the spontaneous leader elections
+to NVMe flush contention on the disk etcd shares, triggered by commit bursts — every new
+revision makes kustomize-controller download and unpack the whole repo once per Kustomization
+(~141x; F-baf94b64) — and worsened by Longhorn rebuilds. A node roll takes one of three
+members away; the two survivors must BOTH stay responsive for the whole downtime. So: **no
+push to `main` by any session from here until §5.4**, except this plan's own §3.7 commit (which
+Phase A normally pushed before the window; if it did not, push it now, BEFORE recording the
+freeze sha).
+
+*Operator, before running anything below — stop the other writers yourself; an agent cannot:*
+- tell every other Claude Code session on this Mac (and any on other machines) **"push freeze
+  on cberg-home-nextgen main until the talos-1.14.1 window ends — do not commit or push"**, and
+  do not start new sessions that commit;
+- the daily-operation sweep is read-only and the 04:00 run is done — but do not trigger an
+  ad-hoc `operation sweep`, and hold any OpenClaw cron that commits to this repo;
+- **do not merge PRs** (GitHub UI, `gh pr merge`) — including PR #212, which is §3.12 and runs
+  after §5.4's resume;
+- Renovate runs `before 6am` and branch-automerges GitHub Actions bumps into `main`; a 09:00
+  window is past its schedule, but a **manual** Renovate run is a push too — none in-window.
+- The two in-cluster pushers are handled mechanically below.
+
+```bash
+# (1) F-baf94b64 state — RECORD it, not a gate. LANDED 2026-09-26 14:35Z (b4ed1d63): spec.ignore
+#     '/*' + '!/kubernetes' is live, artifact 7,135,607 B -> 1,922,733 B. Expect ignore=[...] set.
+mise exec -- kubectl -n flux-system get gitrepository flux-system \
+  -o jsonpath='ignore=[{.spec.ignore}] size={.status.artifact.size} rev={.status.artifact.revision}{"\n"}' \
+  | tee "$SCR/source-pre.txt"
+# (2) the source has fetched origin/main HEAD (Step 0 and §3.7 are IN the artifact); record the FREEZE SHA
+git fetch -q origin && git rev-parse origin/main | tee "$SCR/freeze-sha.txt"
+# PASS: rev= reads `refs/heads/main@sha1:<sha>` with <sha> == freeze-sha.txt. If not, wait for the
+#       1-min source interval — the Step 0 reconciles land before the freeze, not after.
+# (3) suspend the two ImageUpdateAutomations: they push to main (spec.git.push.branch main, every 30m)
+mise exec -- flux suspend image update absenty-image-updates -n my-software-production
+mise exec -- flux suspend image update absenty-image-updates -n my-software-development
+mise exec -- kubectl get imageupdateautomation -A -o custom-columns='NS:.metadata.namespace,SUSPEND:.spec.suspend' --no-headers
+```
+**PASS:** (2) the revisions match and `freeze-sha.txt` holds one 40-hex sha; (3) prints
+`true` twice (before the suspend the same read prints `<none>` — that is its negative control).
+
+**The flux-system GitRepository is deliberately NOT suspended** (plan-reviewer, 2026-09-26):
+source-controller keeps its artifacts on an `emptyDir` and runs on one node; every node is
+drained, so the pod moves. source-controller v1.9.3 returns early for a suspended object
+before `reconcileStorage` (the step that rebuilds a missing artifact), so a suspended source
+would leave all 141 Kustomizations `Ready=False` ("artifact not found") until the resume —
+an outage of GitOps and a false FAIL of §4.4. The freeze is enforced instead by the **freeze-sha
+gate**, run before EVERY node's §3.9 and before §3.8.0:
+
+```bash
+git fetch -q origin && [ "$(git rev-parse origin/main)" = "$(cat "$SCR/freeze-sha.txt")" ] \
+  && echo FREEZE-HELD || { echo "FREEZE BROKEN:"; git log --oneline "$(cat "$SCR/freeze-sha.txt")"..origin/main; }
+```
+**PASS:** `FREEZE-HELD`. **Negative control:** `git log --oneline -1 origin/main~1` is a different
+sha, so comparing against it prints `FREEZE BROKEN` — the comparison can fail. **On FREEZE
+BROKEN: do not start the next node.** Read the commits; the source reconciles them within a
+minute. Tell the operator which session pushed. Continue only after the operator has judged
+them harmless AND §2.3b's `etcdgate.py` (kustomize-controller < 5 MB/s over 10 min) passes
+again — the push itself is the trigger this freeze exists to keep away from a node reboot.
+
+**The window agent's own bookkeeping commits (plan status, GO/exec records) are pushes too:
+hold them until after §5.4**, or the freeze-sha gate reads `FREEZE BROKEN`.
+
+`spec.ignore` (F-baf94b64) cut each extraction ~3.7x at the root, so the kustomize-controller
+gate is easier to meet than on the morning of 2026-09-26 (10–29 MB/s during that commit burst;
+0–1 MB/s in quiet hours). kustomize-controller still re-extracts the current artifact on each
+Kustomization interval; that background rate is what §2.3b measures.
 
 **2.1 — Today's NOW run is finished and no other plan is mid-flight.** This window is
 exclusive (`exclusive: true`).
@@ -678,6 +887,45 @@ at 06:03Z — **no reboot in between**. Spontaneous elections measured: 6 in 7d,
 in the busy hour of the NOW run. That base rate is why §3.10's leader-loss rule has a
 triage branch.)* ≥ 6 in 24h with no reboots = etcd is already unstable: NO-GO, investigate
 first.
+
+**2.3b — etcd disk gates (F-84a27c15), measured by Prometheus, each able to fail.** Run AFTER
+2.0b's freeze; the kustomize-controller gate needs 10 quiet minutes after the last push.
+
+```bash
+mise exec -- python3 "$SCR/etcdgate.py" --lookback 1h --leader-window 2h --allow-file "$SCR/leader-allow.log" \
+  | tee "$SCR/etcdgate-2.3.txt"
+mise exec -- python3 "$SCR/etcdstat.py" converged
+```
+**PASS — both print `VERDICT PASS`, which asserts:**
+1. **worst 5m-window p99 WAL fsync over the last 1h < 50 ms on every member, AND worst
+   5m-window p99 backend commit < 50 ms** (`etcd_disk_wal_fsync_duration_seconds_bucket`,
+   `etcd_disk_backend_commit_duration_seconds_bucket`; exactly 3 series each or FAIL). Guards
+   against rolling into a disk that is already stalling etcd. *2026-09-26 14:35Z: 28.5 / 30.0
+   ms worst.* (F-84a27c15's action text proposed 25 ms for fsync; this plan uses 50 ms for
+   both as instructed by the operator — today's 28.5 ms would fail a 25 ms gate on an idle
+   afternoon.)
+2. **0 leader changes in the last 2h** (`allow-file` is empty at this point, so nothing is
+   excused). *2026-09-26 14:35Z: 0/0/0.*
+3. **kustomize-controller write rate < 5 MB/s over the last 10 min** (cAdvisor
+   `container_fs_writes_bytes_total{container="manager"}`; no series = FAIL). *2026-09-26
+   14:35Z: 11.19 MB/s → FAIL — a live commit burst; this gate would have held the roll.*
+4. `etcdstat.py converged`: 3 members, one LEADER, no LEARNER, empty ERRORS, RAFT INDEX spread
+   and apply lag ≤ 50.
+
+**Negative controls (run once, each MUST print `VERDICT FAIL`):**
+```bash
+mise exec -- python3 "$SCR/etcdgate.py" --fsync-ms 1 --commit-ms 1 --kc-mbps 1000   # FAIL on both latency lines
+mise exec -- python3 "$SCR/etcdgate.py" --leader-window 7d --kc-mbps 1000          # FAIL: N>0 changes in 7d (8 on 09-26)
+```
+If the first prints PASS the latency queries are reading nothing; if the second prints PASS the
+leader counter is dead. Either = the gate is blind: NO-GO.
+
+**On FAIL of the real gate:** a latency or kc FAIL right after Step 0 is expected to clear —
+re-run every 5 min. **Budget rule: if 2.3b has not passed by T+60 (10:00 Berlin), do not start
+the roll today** — resume per §5.4 and reschedule; the 1h lookback means a spike at 09:20 holds
+the gate until 10:20. A leader-change FAIL is NOT waited out: an election inside 2h with the
+source frozen means something other than commits is moving the disk — NO-GO, investigate
+(F-3602cfa9 is exactly such an unexplained event).
 
 **2.4 — Roll order: derive it by RULE, now and again before every node.**
 
@@ -1088,10 +1336,67 @@ the VIP and who led etcd immediately before it rolled** — §3.10 needs the lea
 own IPs and is unaffected. Do not interpret that blip as a failure; re-run `kubectl get nodes`
 until it answers, then continue watching the drain.
 
-For each node, in the order the rule gives, run **3.9 → 3.10 → 3.11** to completion before
-starting the next.
+For each node, in the order the rule gives, run **3.9 → 3.10 → 3.10a → 3.11 → 3.10b** to
+completion before starting the next. §3.10b (≥10-min settle + etcd gates) is the LAST thing
+before the next node's §3.9; after the third node it is replaced by §4.
 
-**3.8a — Pre-roll etcd snapshot (ONCE, immediately before the first node).**
+**3.8.0 — etcd defrag (F-58141d46), gated, ONE member at a time, followers first, leader
+last. Runs once, after §2.3b PASS and BEFORE the §3.8a snapshot.** *2026-09-26: DB SIZE
+867–912 MB, IN USE ~227–250 MB (25–29%) on every member* — ~75% free pages. Defrag rewrites
+the bbolt file with only live pages; it changes no keys, so there is nothing to roll back, and
+a smaller file makes the §3.8a snapshot and every member's post-upgrade startup cheaper. It
+is also the heaviest single write burst etcd does to itself — which is why it runs only
+while the disk gate is green and never on two members at once.
+
+```bash
+mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status   # LEADER column -> which IP is leader
+LEADER_IP=<ip whose MEMBER equals the LEADER column>
+FOLLOWERS=(<ip> <ip>)            # the other two, in 02 -> 01 -> 03 tie-break order. An ARRAY:
+                                 # zsh does not word-split a "a b" scalar, so a string here
+                                 # would make the loop run ONCE with both IPs in one argument.
+DONE=()                          # defragged so far; `etcdstat.py defragged` with no IPs = converged checks only
+for ip in "${FOLLOWERS[@]}" "$LEADER_IP"; do
+  echo "=== $ip"
+  mise exec -- python3 "$SCR/etcdgate.py" --lookback 10m --leader-window 2h --allow-file "$SCR/leader-allow.log" \
+    && mise exec -- python3 "$SCR/etcdstat.py" defragged "${DONE[@]}" \
+    || { echo "GATE FAIL before defragging $ip -- STOP, do not defrag it"; break; }
+  /usr/bin/time -p mise exec -- talosctl -n "$ip" etcd defrag \
+    || { echo "DEFRAG FAILED on $ip -- STOP"; break; }
+  DONE+=("$ip")
+  sleep 60        # let the member catch up before the next gate reads it
+done
+echo "defragged: ${DONE[*]}  (MUST list all three)"
+mise exec -- python3 "$SCR/etcdstat.py" defragged "${DONE[@]}"
+mise exec -- python3 "$SCR/etcdgate.py" --lookback 10m --leader-window 2h --allow-file "$SCR/leader-allow.log"
+```
+**PASS, between members and at the end:** each iteration's `etcdgate.py` (worst p99 fsync and
+commit over the last **10 min** < 50 ms, no unexplained leader change in 2h, kc < 5 MB/s) and
+`etcdstat.py` print `VERDICT PASS` BEFORE the next member is touched; after each defrag that
+member shows **IN USE ≈ DB SIZE** (`defragged <ip>`: ≥ 80%, expect DB SIZE ~230–300 MB) with
+all three members healthy and converged; `real` from `time` is seconds, not minutes. The
+final `etcdstat.py defragged <all three>` (which also runs every converged check) must PASS. **Negative control:** the
+same `defragged` check run on 2026-09-26 against the un-defragged `.12` printed FAIL (27%), so
+a defrag that silently did nothing cannot pass it.
+- **Gate FAIL mid-loop (e.g. right after a follower's defrag):** a defrag's own p99 spike stays
+  in the 10-min lookback for ~15 min. Re-run the two gate commands every 3 min, at most 6 tries;
+  when they pass, continue with ONLY the IPs not yet in `DONE` (set `FOLLOWERS` / `LEADER_IP`
+  to those; keep `DONE`) — never re-run the whole list. Still failing after 6 tries = stop
+  defragging; the §3.8a snapshot and the roll may still proceed if §2.3b's gates pass on a
+  re-run (a partly-defragged cluster is correct, just larger).
+- **Leader last, and it may cause ONE election.** Note the LEADER column before the leader's
+  defrag and read `etcdstat.py`'s status table after it: a different LEADER plus a +1 in
+  `etcdgate.py`'s leader line, appearing only after that defrag, is the election it caused. Defragmenting the leader blocks its
+  backend; if that outlasts the election timeout the followers elect a new leader. If the
+  final `etcdgate.py` shows exactly one new leader change and it followed the leader's defrag,
+  record it — `echo "$(date -u +%s) defrag-of-leader $LEADER_IP" >> "$SCR/leader-allow.log"` —
+  and continue; that election is explained. A change during a FOLLOWER's defrag, or more than
+  one, is unexplained: **STOP, do not take the snapshot, do not roll** (§5.4 cleanup).
+- **A member that does not come back healthy** (ERRORS non-empty, not converged after 5 min):
+  `mise exec -- talosctl -n <that-ip> service etcd restart` on that member ONLY, re-check;
+  still bad = NO-GO for the roll (two healthy members is not a starting point for taking a
+  third away).
+
+**3.8a — Pre-roll etcd snapshot (ONCE, immediately before the first node, AFTER §3.8.0).**
 Per `docs/sops/talos-upgrade.md` Step 0.4 (added 2026-09-26 — the SOP had no etcd snapshot
 procedure). Longhorn backups do not cover control-plane state.
 
@@ -1102,15 +1407,22 @@ chmod 600 "$SCR/etcd-pre-v1.14.1.db"
 stat -f '%Lp %z %N' "$SCR/etcd-pre-v1.14.1.db"
 stat -f '%Lp %N' "$SCR"
 ```
-**PASS:** file mode `600`, dir mode `700`, and a size in the same order as §2.3's `DB SIZE`
-(*845–886 MB on 2026-09-26*; a 0-byte or few-KB file is a FAIL — do not start the roll). It is
+**PASS:** file mode `600`, dir mode `700`, and a size in the same order as the POST-DEFRAG
+`DB SIZE` from §3.8.0's last `etcdstat.py` line (*expect ~230–300 MB; the pre-defrag 845–912 MB
+of 2026-09-26 would mean the defrag did not happen*; a 0-byte or few-KB file is a FAIL — do not
+start the roll). It is
 **local only**: never copy it into the repo or a synced folder; it holds every Secret. Delete
 it (`rm -P`) after §4.4 has passed and the cluster has soaked 24h. Restore path: §5.2.
 
 **3.9 — Upgrade one node.**
 
 ```bash
+# freeze-sha gate (§2.0b) — MUST print FREEZE-HELD
+git fetch -q origin && [ "$(git rev-parse origin/main)" = "$(cat "$SCR/freeze-sha.txt")" ] && echo FREEZE-HELD
 python3 "$SCR/nodegate.py" snap "$SCR/node-pre-<node-name>.json"     # counters just before
+date -u +%s > "$SCR/node<N>-start.txt"                               # N = 1, 2, 3 in roll order; §4.4 #9 reads node3
+# ONLY if this node is the etcd leader right now (§3.8 LEADER column): pre-record its expected election
+# echo "$(date -u +%s) rolled-leader <node-name>" >> "$SCR/leader-allow.log"
 mise exec -- task talos:upgrade-node IP=<node-ip>
 ```
 
@@ -1191,6 +1503,11 @@ ASSERTION 2 holds at the end.*
   = 1 on both survivors (a re-election, not a leaderless period). Otherwise stop part-rolled
   (§5.2).
 
+**If the node that just rolled WAS the etcd leader at §3.8**, its reboot election must already
+be in `$SCR/leader-allow.log` — written at §3.9, BEFORE the upgrade, so the §3.11 node-down
+tripwire does not stop on it either. Only that one line per leader-node roll; never add a line
+to make a gate pass.
+
 **3.10a — Forward-auth gate (F-89376ab7). Forward-auth must stay available across every node
 reboot; check it after EACH node, before 3.11.**
 
@@ -1262,9 +1579,99 @@ reboot overruns 10 minutes, Longhorn builds **full** replicas on the survivors a
 can take far longer over 92 attached volumes (93 minus the one detached). `concurrent-replica-rebuild-per-node-limit` is
 **8** and `replica-rebuild-concurrent-sync-limit` is `{"v1":"1"}`, deliberately paced.
 
+**Rebuild concurrency: LEFT AT 8 for this roll — the decision on F-7b842e62, with reasons.**
+The operator asked to lower `concurrentReplicaRebuildPerNodeLimit` 8 → 2 at
+`kubernetes/apps/storage/longhorn/app/helmrelease.yaml` ~line 88, or justify leaving it.
+
+1. **That edit would be a silent no-op.** Line 88 sits inside the `values.longhorn:` block,
+   which the file itself documents as INERT: this HelmRelease installs the `longhorn` chart
+   directly, the chart has no `longhorn` subchart, and Helm discards everything under that key
+   (the live `longhorn-default-setting` ConfigMap carries only `priority-class` and
+   `disable-revision-counter`, measured 2026-09-26). Committing it, reconciling, and seeing
+   HelmRelease `Ready=True` would prove nothing; `settings.longhorn.io
+   concurrent-replica-rebuild-per-node-limit` would still read `8`. **Repo correction:**
+   F-7b842e62's action text names exactly this path.
+2. **A working GitOps path exists, and it was verified, not assumed.** A TOP-LEVEL
+   `values.defaultSettings.concurrentReplicaRebuildPerNodeLimit: 2` (sibling of `persistence`)
+   renders exactly one extra line into the ConfigMap (`helm template` of chart 1.12.1, diff
+   = `concurrent-replica-rebuild-per-node-limit: "2"`, no pod-template checksum change), and
+   longhorn-manager v1.12.1 applies ConfigMap edits to the Setting CRs
+   (`controller/kubernetes_configmap_controller.go` → `ds.UpdateCustomizedSettings` →
+   `syncSettingCRsWithCustomizedDefaultSettings`). Its restore trap: **`git revert` does not
+   restore it** — removing the key leaves the CR at 2 — so the cleanup must set `8`
+   explicitly. That costs two pushes (one before the freeze, one after) plus reconcile waits.
+3. **Lowering does not fit the window.** Rebuilds after a normal reboot (node back inside the
+   600 s `replica-replenishment-wait-interval`, which §3.9 expects) are incremental rebuilds
+   ONTO the returning node. At 2 instead of 8 concurrent per node the heaviest node's ~60
+   replicas rebuild in ~4× as many waves; the 25-min budget rule below would then trip on the
+   canary and stop the roll, or have to be lengthened with the between-node pause, adding
+   an estimated 40–60 min to a plan that is already over the slot (§7). There is no
+   Prometheus history of a rebuild to price it better (retention starts 2026-09-19; no
+   degraded-volume episode since).
+4. **The harm is now MEASURED per node instead of guessed.** The destination of a normal
+   rebuild is the rebooted node, whose etcd member is a catching-up FOLLOWER at that moment;
+   the quorum pair is the two survivors, which serve reads. §3.10b refuses the next node until
+   worst p99 fsync and commit are < 50 ms for 10 min on every member after the rebuild ended,
+   with no unexplained election. If rebuild pressure were hurting etcd, that gate fails and
+   the roll stops — which is the outcome lowering the limit was meant to prevent.
+
+**The case where 8 is genuinely dangerous — and the tripwire for it:** a node that stays down
+PAST 600 s. Longhorn then builds FULL replicas on the two survivors — heavy writes on exactly
+the two disks carrying quorum, while one member is away. **If a node is not back `Ready`
+within 10 min of its reboot starting, the operator runs
+`mise exec -- python3 "$SCR/etcdgate.py" --members 0 --lookback 5m --allow-file "$SCR/leader-allow.log"`
+every 2 min until it returns and reads the TWO SURVIVORS' values on the printed lines (`--members 0`
+skips the 3-member count checks, which would otherwise FAIL by construction while a member is
+away and hide the numbers; the down member may still show a stale value for up to ~10 min —
+ignore that IP). Any survivor leader change or survivor p99 ≥ 50 ms in that period = do not
+start the next node today**, whatever §3.11 later says. If the operator would rather pay the time to shrink
+this case, the lever is a top-level `defaultSettings` override as in point 2 (or raising
+`replicaReplenishmentWaitInterval` so full rebuilds never start during a reboot) — its own
+small GitOps plan, landed and verified before a later window, not a mid-freeze edit.
+
 **Budget rule: if the gate has not passed 25 minutes after the node returned `Ready`, stop
 rolling.** Do not skip the gate, do not shorten it, do not start the next node. Leave the
 cluster part-rolled (a supported transient), finish §4.4 on the current mix, and reschedule.
+
+**3.10b — Inter-node settle and etcd gate (F-84a27c15). Between node 1→2 and 2→3 only.**
+Starts when §3.11 prints `VERDICT PASS` (the rebuild is finished). **Wait at least 10 minutes**,
+then:
+
+```bash
+date -u +%s > "$SCR/settle-start-<node-name>.txt"          # at §3.11 PASS
+# ... >= 10 min later; use the wait for §4.1's cmdline check, the canary go/no-go and §3.8's re-check
+mise exec -- python3 "$SCR/etcdgate.py" --lookback 10m --leader-window 2h --allow-file "$SCR/leader-allow.log"
+mise exec -- python3 "$SCR/etcdstat.py" converged
+echo "settled $(( ($(date -u +%s) - $(cat "$SCR/settle-start-<node-name>.txt")) / 60 )) min"   # MUST be >= 10
+```
+**PASS — all of:** ≥ 10 min since §3.11 PASS; `etcdgate.py` `VERDICT PASS` — worst 5m-p99 WAL
+fsync AND backend commit < 50 ms over **the settle window (10 min)**, no leader change in the
+last 2h beyond the lines in `leader-allow.log`, kustomize-controller < 5 MB/s over 10 min; and
+`etcdstat.py` `VERDICT PASS` — 3 members, one leader, **RAFT INDEX converged** (spread and
+apply lag ≤ 50, i.e. the rebooted member has caught up, not merely rejoined).
+
+**Why the latency lookback here is the settle window, not 1h (deviation, stated):** §2.3b looks
+back 1h because nothing should have disturbed the disk. Here the previous hour by construction
+contains this plan's own reboot, drain, reattach and rebuild — a 1h lookback would hold every
+node for an hour after its rebuild and cannot fit any window. What the next reboot needs is a
+disk that is quiet NOW, after the rebuild; 10 min of < 50 ms p99 is that measurement. The 2h
+leader-change rule is kept at full length, with the rolled member excluded (its counter
+restarted) and its own explained election allowed via the log.
+
+**Why the kc gate matters here specifically:** `kustomize-controller` runs on **k8s-nuc14-03**
+(2026-09-26). When 03 drains, the replacement pod on a survivor starts cold and reconciles all
+141 Kustomizations, extracting the artifact for each — a write burst on a node that is one of
+the two etcd members carrying quorum at that moment. The freeze does not prevent that; the
+gate makes the next node wait until it is over.
+
+**On FAIL:** re-run every 5 min. Not PASS within **20 min** of the settle start → stop rolling
+(§5.2 "stop, don't unwind"), finish §4.4 on the mix, §5.4 cleanup, reschedule. An unexplained
+leader change is not waited out — apply §3.10's STOP rule.
+
+**Negative controls:** as §2.3b. Additionally, on the FIRST pass only, confirm the rolled member
+was skipped: the `leader changes ...` line must list the rolled node's IP under `skipped
+(restarted inside it)`. If it does not, `process_start_time_seconds` is not tracking the
+reboot and the leader count is unreliable: STOP.
 
 **3.12 — Merge PR #212 (the talosctl CLI pin) — LAST, and only after all three nodes
 report v1.14.1.**
@@ -1295,6 +1702,9 @@ mise install
 mise exec -- talosctl version --short         # Client: v1.14.1, and it still reaches the nodes
 grep -n -E '^(talhelper|"aqua:siderolabs/talos")' .mise.toml   # talhelper 3.1.17 AND talos 1.14.1
 ```
+
+**ORDER: §3.12 is a push to main, so it runs only AFTER §4.4 PASS and §5.4's resume has ended
+the freeze.**
 
 **If fewer than 3 nodes reached v1.14.1, do NOT merge #212.** Leave it open; a v1.13.10
 client drives a mixed cluster correctly (n±1, older client is the normal direction).
@@ -1488,7 +1898,15 @@ python3 "$SCR/lh_gate.py" gate "$SCR/lh-baseline.json"
 # 7. all three CONTENTS ASSERTIONS from §4.3
 # 8. alerts vs the §2.8 baseline SET — after a settle period, NOT immediately
 python3 "$SCR/alerts.py" compare "$SCR/alerts-baseline.json"
+# 9. etcd after the roll: disk quiet, no unexplained election. The leader window runs from the THIRD
+#    node's §3.9 start ($SCR/node3-start.txt): nodes 1-2 were up for all of it and are counted; node 3
+#    restarted inside it and is skipped. A fixed 2h would skip ALL THREE after an on-time roll and fail closed.
+LW="$(( ($(date -u +%s) - $(cat "$SCR/node3-start.txt")) / 60 ))m"; echo "leader window $LW"
+mise exec -- python3 "$SCR/etcdgate.py" --lookback 10m --leader-window "$LW" --allow-file "$SCR/leader-allow.log"
+mise exec -- python3 "$SCR/etcdstat.py" converged
 ```
+**PASS on 9:** both `VERDICT PASS`. Run inside the 15-min alert settle; it is the last check
+before §5.4 lifts the freeze.
 
 **PASS on 4:** the field-selector query prints no pods **and** `notready.py` prints
 `VERDICT PASS` (no workload not-ready that was ready at §2.8). The phase query alone is a
@@ -1633,6 +2051,30 @@ independent here — a green `git log` proves nothing.
 **Do not** revert `.mise.toml`'s `aqua:siderolabs/talos` below the cluster version if any
 node is on v1.14.1: an n-1 client is fine, an n-2 client is not.
 
+### 5.4 — END OF WINDOW CLEANUP: lift the push freeze. Runs on EVERY exit path.
+
+Success, stop-part-rolled (§5.2), canary rollback (§5.1), a §2.3b / §3.8.0 NO-GO — whichever
+way the window ends, the automations must be resumed and the other sessions released before the
+operator leaves. A forgotten suspended ImageUpdateAutomation silently stops image bumps for its
+app while reading `Ready=True`.
+
+```bash
+git fetch -q origin && git log --oneline "$(cat "$SCR/freeze-sha.txt")"..origin/main   # pushes during the freeze? MUST be empty
+mise exec -- flux resume image update absenty-image-updates -n my-software-production
+mise exec -- flux resume image update absenty-image-updates -n my-software-development
+mise exec -- kubectl get imageupdateautomation -A -o custom-columns='NS:.metadata.namespace,SUSPEND:.spec.suspend,READY:.status.conditions[0].status' --no-headers
+mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
+```
+**PASS:** the `git log` is empty (a non-empty list means the freeze was broken — name the
+commits and the session to the operator); both automations `SUSPEND false`, Ready `True`; the
+Kustomization query prints only the header. Then tell the other sessions the freeze is over.
+Only after this may §3.12 (PR #212) run.
+
+**Nothing to restore for Longhorn:** the rebuild limit was deliberately left at 8 (§3.11), so
+there is no cleanup commit. If a future revision of this plan lowers it, the restore is an
+explicit `8` in a TOP-LEVEL `defaultSettings`, verified on
+`settings.longhorn.io concurrent-replica-rebuild-per-node-limit` — never a `git revert`.
+
 ## 6) Interference notes
 
 **This plan requires the ENTIRE `sun-attended` window, with no other plan in it.** That is
@@ -1674,6 +2116,15 @@ pairing it with something, the only defensible shape is a short, fully-reversibl
 storage-untouching plan running **after** §4.4 has completely passed — never before, never
 interleaved between nodes.
 
+**The push freeze (§2.0b → §5.4) is itself an interference control, and it has a scope
+beyond this repo's plans:** no session, cron, bot or human pushes to `main` in that span, the
+two `absenty-image-updates` automations are suspended, and no PR is
+merged (PR #212 waits for §5.4). The source itself is NOT suspended (emptyDir artifact
+storage, §2.0b); the freeze-sha gate before every node is the enforcement. A plan stamped for the same day in ANOTHER window cannot run
+while this one holds the freeze. The etcd investigation of 2026-09-26 is the reason: commit
+bursts are the proven trigger of the spontaneous elections this plan must not suffer while a
+member is down (F-84a27c15, F-baf94b64).
+
 **Things that must not run concurrently, beyond other plans:**
 - **The nightly window's Step 0 safe-update apply.** `sun-attended` is a different window,
   but it fires at 03:30 the same day; verify via §2.7 that its reconciles have fully landed.
@@ -1709,6 +2160,8 @@ interleaved between nodes.
 | `coredns` | Talos-bundled version moves | cluster DNS, briefly |
 | `cert-manager` | webhook pods reschedule | any Certificate reconcile landing mid-roll |
 | `monitoring` | scrape gaps + node alerts during each reboot | expected; §4.4 waits 15 min before judging |
+| `flux-source` / `git-main` | push freeze on main, freeze-sha gate before every node, 2 ImageUpdateAutomations suspended (§2.0b–§5.4); flux-system source stays live | every session and bot that commits; any GitOps change lands only after §5.4 |
+| `etcd` defrag | each member's backend blocked for seconds, one at a time (§3.8.0) | API latency blip; a leader defrag may cause one explained election |
 
 ## 7) Risk and duration against the slot
 
@@ -1717,6 +2170,29 @@ opt-in and this plan declines them, and v1.14.1 specifically fixes two faults on
 this roll drives — but because the blast radius is the whole cluster and there is no clean
 rollback past the first node. `needs_reboot: true` and `capability_change: true` both hold,
 so this is operator-present, reboot-capable, `sun-attended` only.
+
+### The etcd-stability risk this revision addresses — and the one it does not
+
+**Addressed (2026-09-26 investigation):** spontaneous leader elections (8 in the 7 days to
+2026-09-26 14:35Z; 0 in the 2h before) were traced to flush contention on the NVMe etcd shares
+with everything else, triggered by commit bursts through kustomize-controller's per-
+Kustomization artifact extraction and made worse by Longhorn rebuilds. During a roll one member
+is down and the other two must both stay responsive, so an election that is harmless on a
+healthy cluster becomes a quorum risk. Controls in this plan: the push freeze + freeze-sha gate
+(§2.0b), Prometheus disk/election gates before start (§2.3b) and between nodes (§3.10b), the
+defrag (§3.8.0) and the > 600 s node-down tripwire (§3.11). F-baf94b64 (`spec.ignore`, which
+cuts the extraction volume at the root) LANDED at 14:35Z (b4ed1d63; artifact 7.1 → 1.9 MB).
+
+**NOT addressed — F-3602cfa9, unexplained:** on **2026-09-24 ~20:28Z** all three etcd members
+failed their health check together and peer round-trip time reached the 3.3 s bucket, with NO
+disk-latency and NO kustomize-controller IO signal. That is a different mechanism from the
+disk-driven flaps (the network, the switch — Basement-SW-24-PoE carries all three nodes — or
+CPU pressure are the open candidates; health-check-agent owns the investigation). None of this
+plan's disk gates would have predicted it. What does apply: §2.11 (no switch firmware), §3.10's
+carrier-change STOP rule, and the leader-change gates, which would STOP the roll if it recurs
+between nodes. **If it recurs while a node is down**, the cluster can lose quorum for its
+duration; the §3.8a snapshot (§5.2) is the backstop. The operator should weigh this at the GO:
+the roll proceeds with one known-unexplained, cluster-wide stall in the last 72 hours.
 
 ### The slot arithmetic, corrected
 
@@ -1732,42 +2208,53 @@ has always done, and it changes this plan's fit:
 
 So `sun-attended` is **200 wall-clock / 180 schedulable**, not 200 for plans.
 
-### Re-priced duration: 160 min in-window (was 145)
+### Re-priced duration: 187 min in-window (was 160) — FLAGGED: over the slot
 
-| Phase | Min | Basis (re-measured 2026-09-26) |
+| Phase | Min | Basis |
 |---|---:|---|
-| **A — prep (BEFORE the window)** | **~35** | *Not counted.* Flux does not reconcile `kubernetes/bootstrap/talos/`; §3.1–§3.7 are inert until `talosctl upgrade`. +5 vs 09-20 for the §3.6 scratch snapshot + live-image check. |
-| §2 pre-checks | 20 | 12 checks + writing the 5 helpers + UniFi (§2.11) + per-node baseline (§2.12); +5 vs 09-20 |
-| §3.8a etcd snapshot | 3 | ~0.9 GB streamed over the LAN |
-| **Canary** — upgrade + drain + reboot + §3.10 + §3.11 + §4.1 + canary go/no-go | **45** | **priced for the HEAVIEST node**: the §2.4 rule can pick node 02 (39 engines, 66 replicas on 2026-09-26). The 09-20 plan priced a 17-engine canary at 35; drain and rebuild scale with engines, +10 |
-| 2nd node — upgrade + gates | 37 | 19–39 engines; possibly a VIP failover |
-| 3rd node — upgrade + gates | 35 | possibly a VIP failover and/or leader re-election |
-| §4.2 + §4.3 + §4.4 + §4.5 (incl. the 15-min alert settle) | 20 | overlaps the settle wait |
-| **In-window total** | **160** | |
+| **A — prep (BEFORE the window)** | **~35** | *Not counted.* Flux does not reconcile `kubernetes/bootstrap/talos/`; §3.1–§3.7 are inert until `talosctl upgrade`. |
+| §2.0b push freeze + automation suspend + freeze sha | 2 | 2 suspends + read-back; the per-node freeze-sha check is seconds |
+| §2 pre-checks incl. §2.3b etcd gates | 23 | was 20; +3 for two gate helpers + controls. Assumes 2.3b passes first time — its own budget rule caps waiting at T+60 |
+| §3.8.0 etcd defrag, 3 members, gated | 7 | ~3 × (gate ~40 s + defrag seconds + 60 s catch-up) + final checks |
+| §3.8a etcd snapshot | 3 | now ~0.25 GB after the defrag (was ~0.9 GB) |
+| **Canary** — upgrade + drain + reboot + §3.10 + §3.10a + §3.11 + §4.1 + go/no-go | **45** | priced for the HEAVIEST node (unchanged) |
+| §3.10b settle after canary | 7 | 10-min floor; ~3 min of it overlaps §4.1's cmdline check, the go/no-go and §3.8's re-check |
+| 2nd node | 37 | unchanged |
+| §3.10b settle after 2nd node | 7 | as above |
+| 3rd node | 35 | unchanged |
+| §4.2–§4.5 incl. 15-min alert settle and the §4.4 #9 etcd gate | 20 | the etcd gate runs inside the settle |
+| §5.4 resume + read-back | 1 | during the settle |
+| **In-window total** | **187** | +27 vs 160 |
 
-Where the +15 went: +10 because the canary can no longer be assumed light (the rule picks by
-VIP/leadership, and leadership moves — it moved twice in ten minutes on 2026-09-26), +5 for
-the snapshot / UniFi / per-node gates the reviewer required. The old "+5 because node 03
-holds both VIP and leader" is gone: that pairing no longer holds and the order is a rule now.
-
-### Does it still fit, with a real rollback budget? Yes on the scheduler's rule; the rollback budget is 20, and that is acceptable only because of WHEN it is needed.
+Longhorn rebuild concurrency stays at 8 (§3.11), so no rebuild time was added; lowering it
+would add an estimated 40–60 min on top and push the plan past the 200-min slot outright.
 
 ```
 slot wall clock                      200
   − Step 0 reserve (mandatory)        20
-  − this plan                        160
+  − this plan                        187
   ────────────────────────────────────────
-  = residual                          20    ← the late-rollback budget
+  = residual                         −7    ← NO rollback budget; overruns the slot by 7 min
 ```
 
-- **Scheduler:** 160 ≤ 180 schedulable. Fits, with `exclusive: true` so nothing else can.
-- **The canary rollback (~45–50 min) is fully covered:** the canary finishes around
-  **T+68** (20 pre-checks + 3 snapshot + 45); ~110 minutes of slot remain at that point.
-- **Past the canary the answer is stop-part-rolled (§5.2), which costs nothing.** The only
-  case the 20-min residual does not cover: the LAST node fails at the very end AND the
-  operator chooses to roll that one node back rather than stop. That overruns by ~25–30 min,
-  attended, operator present. **Flag it at the go/no-go rather than discovering it at 12:20.**
-- If the canary alone takes > 60 min, re-plan: stop after the canary, run §4.4 on the mix,
+- **Scheduler: 187 > 180 schedulable. FLAG.** `maintenance-plan.py --validate` still passes
+  (it rejects only a plan longer than the raw 200-min slot), so nothing mechanical stops this
+  window from being run over-committed. The operator must choose at the GO:
+  1. **extend `sun-attended` on 2026-09-27** to ≥ 250 min (`runbooks/maintenance-windows.yaml`
+     — a git-tracked edit, operator's call) so the plan fits WITH a ~45-min canary-rollback
+     residual; or
+  2. **run the defrag on its own earlier** (attended, same gates, e.g. Saturday evening with
+     the freeze held from then) — saves 7 min in-window, 0 residual; **but** the nightly
+     03:30 window's Step 0 on 09-27 pushes to main, which collides with a freeze held
+     overnight — the freeze would have to start after that Step 0, i.e. the defrag gets
+     its own freeze Saturday evening and a new freeze sha Sunday; or
+  3. **accept a stop-after-2 outcome**: plan for canary + 2nd node, take the 3rd if §3.10b
+     passes before T+170, otherwise stop part-rolled (§5.2, a supported transient) and finish
+     next Sunday.
+- **The canary rollback is still covered in time:** the canary ends around **T+80** (2 + 23 +
+  7 + 3 + 45), leaving ~100 min of slot. Past the canary the answer is stop-part-rolled (§5.2),
+  which costs nothing — so option 3 is safe, merely slow.
+- If the canary alone takes > 60 min, re-plan: stop after the canary, run §4.4 on the mix, §5.4,
   take the other two next Sunday. Do **not** trim the estimate to make three nodes fit.
 
 ## Open items — could not be determined read-only
