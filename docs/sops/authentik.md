@@ -481,13 +481,13 @@ authentication flow (no provider sets its own `authentication_flow`, no LDAP
 provider), so this covers every app.
 
 Enrolment state at rollout: operator's admin user = passkey, TOTP, 10 static
-codes, email. **`andrea` = no device, pending enrolment at her next login.**
+codes, email. Remaining human account: `security_ref: F-e2535a1a`.
 
 What a user sees:
 - **Has a device**: unchanged. Username, then password, then the second
   factor picker (passkey, TOTP, static code, email code). Or the passkey from
   the username field autofill, with no password and no second prompt.
-- **Has no device (andrea)**: username, then password, then "configure an
+- **Has no device**: username, then password, then "configure an
   authenticator" with two choices, `WebAuthn device` (passkey) and
   `TOTP Device`. The picker order is the DB order of
   `Stage.objects.filter(pk__in=...)` (no `ORDER BY`), so the blueprint's
