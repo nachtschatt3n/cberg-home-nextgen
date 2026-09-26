@@ -22,17 +22,20 @@ touches:
     - "docs/applications.md, docs/sops/authentik.md, docs/sops/disaster-recovery.md (the 'kept' wording, §3.5)"
     - "NOT touched, by design: backupvolumes.longhorn.io/data-authentik-postgresql-0-6dd5bdc0 and its 9 backups.longhorn.io; volumes.longhorn.io/authentik-pg-data (the LIVE auth DB); deploy/authentik-pg"
   shared: [storage/longhorn]      # restore proof reads the CIFS backup target and builds a scratch volume
-depends_on: []                    # 2026-09-26: was [authentik-pg17-decommission] (its premises
-                                  # read this PV/volume). That plan EXECUTED and was retired in
-                                  # 2b82a7f4 (07:35 CEST) while this draft was written, so the
-                                  # ordering is satisfied and the ref would be a DEAD-REF.
+depends_on:
+  - authentik-2026.8.3             # 2026-09-26 review: same component, operator ordering
+                                  # condition (run only after 8.3 finished + soaked; §2.2b
+                                  # gates the soak). If 8.3 is RETIRED before this runs, drop
+                                  # this ref (dead-ref convention); §2.2b still enforces it.
+                                  # (Was [authentik-pg17-decommission]: executed + retired in
+                                  # 2b82a7f4, ordering satisfied.)
 conflicts_with:
   - talos-1.14.1                  # node roll: its Longhorn gates enumerate the not-healthy /
                                   # detached volume set and total count (94); this plan changes
                                   # both, and a restore proof mid-roll competes for replicas.
-                                  # talos-1.14.1 already lists authentik-pg17-decommission for
-                                  # the same reason; the reciprocal entry for THIS plan is owed
-                                  # there (not edited here — see §6).
+                                  # Reciprocal entry added to talos-1.14.1 by the 2026-09-26
+                                  # review (its authentik-pg17-decommission entry was removed
+                                  # as resolved in a885b5b6).
 exclusive: false
 security_ref: null
 capability_change: false
@@ -58,7 +61,7 @@ finding_refs: []                  # checked 2026-09-26: `finding list --grep` au
                                   # data-authentik / postgresql-0 / detached / 17.11 — no finding
                                   # for this volume. F-8ab2ee07 (the 17.11 pin phantom) is owned
                                   # by authentik-pg17-decommission and is NOT claimed here.
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> E1-E9 applied (depends_on authentik-2026.8.3 + 30-min soak gate, restore probe run in background with log/rc file); operator GO now:2026-09-26
 window: null
 premises:
   # All read-only, pipe-free jq stages (plan-premises refuses ; && > etc.).
@@ -228,6 +231,23 @@ git log -1 --format='%h %s' -- runbooks/maintenance/plans/authentik-pg17-decommi
 test ! -e runbooks/maintenance/plans/authentik-pg17-decommission.md && echo "predecessor retired"
 # EXPECT: 2b82a7f4 ... retire plan  AND  "predecessor retired". Otherwise -> STOP.
 
+# 2.2b authentik-2026.8.3 has FINISHED and SOAKED (depends_on; operator condition).
+grep -m1 '^status:' runbooks/maintenance/plans/authentik-2026.8.3.md \
+  || git log -1 --format='%h %s' -- runbooks/maintenance/plans/authentik-2026.8.3.md
+# EXPECT: "status: executed" (or, file gone, a "retire plan" commit). vetted/approved -> STOP.
+kubectl -n kube-system get pods -l app.kubernetes.io/name=authentik -o json | python3 -c "
+import sys,json,datetime as dt
+now=dt.datetime.now(dt.timezone.utc); n=0
+for p in json.load(sys.stdin)['items']:
+    cs=p['status'].get('containerStatuses',[]); n+=1
+    st=dt.datetime.fromisoformat(p['status']['startTime'].replace('Z','+00:00'))
+    print(p['metadata']['name'], all(c['ready'] for c in cs), sum(c['restartCount'] for c in cs),
+          int((now-st).total_seconds()//60), 'min', cs[0]['image'] if cs else '')
+print('pods', n)"
+# EXPECT: pods >= 6 (3 server + 3 worker), every line True, 0 restarts, >= 30 min, image
+# ghcr.io/goauthentik/server:2026.8.3. pods 0 -> selector broken, STOP (not a pass).
+# Measured 2026-09-26 05:59Z: 6 pods, age 5-6 min -> this gate FAILED then, as it must.
+
 # 2.3 Not inside Longhorn's nightly jobs: do NOT start between 02:00 and 03:30 UTC
 #     (trim 02:00, snapshot-cleanup 02:30, backups 03:00 all hit the backup
 #     target the restore proof reads from).
@@ -316,13 +336,23 @@ kubectl get backups.longhorn.io -n storage authentik-pg17-decommission-preflight
 # (c) restore proof: restores the NEWEST Completed backup into a scratch
 #     1-replica volume, boots postgres 17.11 on it, counts rows, tears down.
 #     The source volume is never touched.
-.venv/bin/python3 runbooks/backup-restore-proof.py \
+# RUN THIS BLOCK WITH THE BASH TOOL'S run_in_background: true. It can take up to
+# 20 min (--timeout-restore 900 + --timeout-start 300); a foreground agent call is
+# killed at 120 s (600 s max), and a kill SKIPS the probe's `finally` teardown,
+# stranding scratch objects and leaving no rc. No pipe: $? must be the probe's.
+cd /Users/mu/code/cberg-home-nextgen && .venv/bin/python3 runbooks/backup-restore-proof.py \
   --volume data-authentik-postgresql-0 \
   --image postgres:17.11-bookworm \
   --pgdata /var/lib/postgresql/data/data \
   --superuser authentik \
-  --smoke-table authentik.authentik_core_user
-echo "rc=$?"
+  --smoke-table authentik.authentik_core_user \
+  > /tmp/authentik-pg17-restoreproof.log 2>&1
+echo "rc=$?" >> /tmp/authentik-pg17-restoreproof.log
+# Poll (short calls) until an rc= line exists:
+#   grep -E '^(proving:|RESTORE |rc=)' /tmp/authentik-pg17-restoreproof.log
+# If the run died WITHOUT an rc= line, its scratch name is restoreproof-<MMDDHHMM of the
+# UTC start minute>: delete pod + pvc (ns databases), then pv, then
+# volumes.longhorn.io (ns storage) BY THAT EXACT NAME, never by selector -> STOP.
 ```
 
 **PASS requires all three:** `rc=0`, a `proving:` line naming
@@ -333,11 +363,23 @@ showing `authentik.authentik_core_user=<N> rows` with **N > 0**.
   chart kept PGDATA at `<root>/data`, hence `--pgdata /var/lib/postgresql/data/data`.
   If `postgres` never becomes ready and the pod log says it cannot find
   `PG_VERSION`/`postgresql.conf`, the path is wrong. That is a plan defect, not
-  a bad backup: STOP and do not delete. Re-run with `--keep` and
-  `kubectl exec` into the scratch pod to `ls` the mount.
+  a bad backup: STOP and do not delete. The probe already prints the pod log
+  tail; the pod is `restartPolicy: Never`, so a crashed one cannot be
+  `kubectl exec`'d -- inspect with `--keep` plus `kubectl -n databases logs
+  restoreproof-<run>`. Reviewer evidence (2026-09-26): the data dir was
+  initdb'd 2025-10-05 (`59089381`, chart 2025.8.4) by the OFFICIAL image
+  entrypoint (rendered: `docker.io/library/postgres:17.6-bookworm`,
+  `PGDATA=/bitnami/postgresql/data`, `POSTGRES_USER=authentik`), so
+  `postgresql.conf`/`pg_hba.conf` exist in PGDATA (initdb writes them; the
+  chart's `-c config_file=/bitnami/postgresql/conf/...` args only overrode
+  them), local auth is initdb's default `trust`, and the superuser is
+  `authentik` -- there is no `postgres` role.
 - `rc=2` with `INCONCLUSIVE` means postgres booted, which proves the restore,
-  but the role guess missed. Re-run once with `--superuser postgres`. The gate
-  needs the row count, so INCONCLUSIVE alone is **not** a pass.
+  but no role answered. `postgres` is already tried automatically and does
+  not exist on this cluster, so do NOT re-run with `--superuser postgres`:
+  INCONCLUSIVE here means the restored `pg_hba.conf` is not local-trust --
+  STOP and decide with the operator. The gate needs the row count, so
+  INCONCLUSIVE alone is **not** a pass.
 - `rc=2` with `PRECONDITION: leftover restore-proof volume(s)` means another
   proof run's leftovers exist. Do not delete them blind; find their owner first.
 - **Not yet executed against this volume.** The flags above are derived from
@@ -350,6 +392,7 @@ showing `authentik.authentik_core_user=<N> rows` with **N > 0**.
 # (d) scratch objects gone
 kubectl get volumes.longhorn.io -n storage -l restore-proof=true    # EXPECT: No resources found
 kubectl get pv -l restore-proof=true                                # EXPECT: No resources found
+kubectl get pvc,pod -n databases -l restore-proof=true             # EXPECT: No resources found
 ```
 
 Any failure in (a)–(d) → **STOP. Leave every object in place.** The alert in
@@ -596,7 +639,10 @@ first (dailies 09-24 → 09-18, then `backup-b6619f46ad37492d`).
   listed. A future kps plan landing the same night must be added to
   `conflicts_with` on both sides.
 - `flux-reconciler-impersonation` is `exclusive: true` and already keeps its
-  slot to itself. `authentik-2026.8.3` does not interfere: it rolls
+  slot to itself. `authentik-2026.8.3` is ordered BEFORE this plan
+  (`depends_on` + §2.2b soak gate, operator condition 2026-09-26): same
+  component, and §2.6/V2 read the live DB as the fat-finger control, which
+  a mid-rollout 8.3 would confound. Technically it rolls
   authentik-server/worker/outposts on `authentik-pg`, while this plan touches
   only the dead volume.
 - **Backup-target load.** The §3.1 restore proof pulls about 2.8 GB from the NAS

@@ -68,6 +68,11 @@ conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended S
                                       # measurement (plans README, conflicts_with rule).
   - multus-macvlan-foundation         # also mutates Talos machine config
   # - authentik-pg17-decommission   # RESOLVED 2026-09-26: executed + retired in the now:2026-09-26 run; ref removed
+  - authentik-pg17-volume-retire      # reciprocal (2026-09-26 review): deletes detached volume
+                                      # data-authentik-postgresql-0 + 2 stopped replicas, so the
+                                      # §4 Longhorn gate (total 94 / not-healthy set) must be
+                                      # re-read after it runs (live 2026-09-26: total 94, not-healthy
+                                      # = data-authentik-postgresql-0 + pvc-f6ec0213, 188 replicas).
   - nextcloud-34.0.4                  # sun-attended:2026-10-04 — declared in case THIS
   - jellyfin-12.1                     # sun-attended:2026-10-11 — plan slips to their date.
                                       # Today the minutes check already excludes them
