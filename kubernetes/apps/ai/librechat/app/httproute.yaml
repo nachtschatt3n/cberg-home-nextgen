@@ -24,6 +24,9 @@ metadata:
     gethomepage.dev/group: "AI"
     gethomepage.dev/icon: "librechat.png"
     gethomepage.dev/name: "LibreChat"
+    # Chart names the pod librechat-librechat, so Homepage's default
+    # app.kubernetes.io/name=librechat lookup finds nothing (NOT FOUND).
+    gethomepage.dev/pod-selector: "app.kubernetes.io/name=librechat-librechat,app.kubernetes.io/instance=librechat"
 spec:
   parentRefs:
     - group: gateway.networking.k8s.io
