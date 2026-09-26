@@ -23,7 +23,7 @@ depends_on: [media-episode-backfill]  # was 'media-episode-backfill-bulk', a sta
                                       # programme plan that actually exists (P0.4, 2026-08-26).
 conflicts_with:                       # FILLED 2026-09-21; was [].
   - n8n-2.39.8                        # ROLLBACK-CLASS STACKING: all three are
-  - nextcloud-34.0.4                  # `rollback_class: backup-restore`, as is this
+  # - nextcloud-34.0.4 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # `rollback_class: backup-restore`, as is this
   # - nocodb-2026.09.0 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # plan. Two backup-restore rollbacks in one
                                       # slot leave no rollback capacity for either.
                                       # Declared once per pair — window-scheduler.py

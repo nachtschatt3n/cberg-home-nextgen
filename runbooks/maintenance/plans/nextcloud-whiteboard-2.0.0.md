@@ -52,7 +52,7 @@ touches:
                                                # co-scheduling consequence is spelled out in §6.
                                                # The app IS on the public edge; §6 states the one
                                                # condition under which gateway/envoy must be added.
-depends_on: [nextcloud-34.0.4]         # ORDERING IS THE WHOLE POINT OF THIS PLAN — see §1.4.
+depends_on: []   # 2026-09-26: nextcloud-34.0.4 executed + retired, ref removed         # ORDERING IS THE WHOLE POINT OF THIS PLAN — see §1.4.
                                        # The Nextcloud APP half of whiteboard 2.0.0 is delivered by
                                        # THAT plan, not this one: its §3.2 runs `occ app:update --all`
                                        # and the live server already offers whiteboard 2.0.0

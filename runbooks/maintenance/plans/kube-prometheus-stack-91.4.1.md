@@ -142,7 +142,7 @@ conflicts_with:                       # HARD slot exclusions — window-schedule
                                       # are mutual. Same mechanism as the retired -0.21.0
                                       # ref above: both HRs CreateReplace the same four
                                       # monitoring.coreos.com CRDs, last writer wins.
-  - edot-collector-0.161.0            # ADDED 2026-09-20 (RECIPROCITY). That plan lists THIS
+  # - edot-collector-0.161.0 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # ADDED 2026-09-20 (RECIPROCITY). That plan lists THIS
                                       # plan in its conflicts_with: its §4 reads THIS
                                       # Prometheus, and the 2-5 min restart blind spot of
                                       # §3.4 would read there as a collector regression.

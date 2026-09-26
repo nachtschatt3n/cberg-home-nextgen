@@ -81,7 +81,7 @@ conflicts_with:
                                       # (`maintenance-plan.py --open`, 2026-09-15).
   - media-naming-p3                   # ROLLBACK-CLASS STACKING — ADDED 2026-09-21. Those three
   - n8n-2.39.8                        # and this plan are all `rollback_class: backup-restore`.
-  - nextcloud-34.0.4                  # Two backup-restore rollbacks in one slot leave no
+  # - nextcloud-34.0.4 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # Two backup-restore rollbacks in one slot leave no
                                       # rollback capacity for either — which is precisely why
                                       # THIS plan was moved off sun-attended:2026-10-04 on
                                       # 2026-09-15 (see the `window:` note below). That move

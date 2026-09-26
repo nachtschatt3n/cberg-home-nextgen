@@ -106,7 +106,7 @@ conflicts_with:                        # HARD slot exclusions — window-schedul
                                        # CreateReplace; (b) §4.6 of THIS plan reads Prometheus,
                                        # and that plan restarts Prometheus + Alertmanager — the
                                        # window's instrument is shared infra (authoring rule 4).
-  - edot-collector-0.161.0             # the daemon collectors export OTLP to
+  # - edot-collector-0.161.0 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # the daemon collectors export OTLP to
                                        # edot-collector.monitoring.svc:4317, and §4.4 proves
                                        # this plan through documents landing in ES *via edot*.
                                        # If edot rolls the same night, neither plan's ES gate

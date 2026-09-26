@@ -36,7 +36,7 @@ touches:
   shared: []                                    # office-local. NOT `storage`: no volume operation.
 depends_on: []
 conflicts_with:
-  - nextcloud-34.0.4                    # vetted, sun-attended:2026-10-04. Same helmrelease.yaml,
+  # - nextcloud-34.0.4 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # vetted, sun-attended:2026-10-04. Same helmrelease.yaml,
                                         # same deployment/nextcloud roll, same quiesce shape.
                                         # Two plans editing one HelmRelease in one slot is the
                                         # interference the window agent exists to catch.

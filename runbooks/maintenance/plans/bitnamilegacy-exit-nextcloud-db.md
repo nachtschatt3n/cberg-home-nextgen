@@ -33,7 +33,7 @@ depends_on: [bitnamilegacy-exit-nextcloud-redis, bitnamilegacy-exit-paperless-db
                                                 # RESOLVED 2026-08-19:
                                                 # bitnamilegacy-exit-nextcloud-redis EXECUTED
                                                 # (d6070b82) — dependency satisfied
-conflicts_with: [bitnamilegacy-exit-paperless-db, bitnamilegacy-exit-nextcloud-redis, paperless-db-13.0.2, nextcloud-34.0.4]
+conflicts_with: [bitnamilegacy-exit-paperless-db, bitnamilegacy-exit-nextcloud-redis, paperless-db-13.0.2]   # 2026-09-26: nextcloud-34.0.4 executed + retired, ref removed
                                                 # paperless-db-12.3.3 -> paperless-db-13.0.2, 2026-09-21.
                                                 # The old ref RESOLVED, so --validate never flagged it, but
                                                 # that plan is status `executed` and will never be scheduled

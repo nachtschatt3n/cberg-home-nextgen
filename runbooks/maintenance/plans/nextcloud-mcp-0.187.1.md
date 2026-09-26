@@ -48,7 +48,7 @@ depends_on: []                        # Flux `dependsOn: nextcloud` is an orderi
                                       # server — see conflicts_with, not depends_on: either
                                       # order works, they must not share a slot.
 conflicts_with:
-  - nextcloud-34.0.4                  # vetted, sun-attended:2026-10-04 (the day AFTER this
+  # - nextcloud-34.0.4 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # vetted, sun-attended:2026-10-04 (the day AFTER this
                                       # plan's slot — satisfied). It restarts deployment/nextcloud
                                       # and moves it 34.0.3 -> 34.0.4; §4.5 here talks to that
                                       # server, so a restart mid-verification makes a calendar-

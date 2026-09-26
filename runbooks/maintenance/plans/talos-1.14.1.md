@@ -67,15 +67,15 @@ conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended S
   - flux-oci-chart-sources            # names talos-1.14.1 back
   - helm-drift-detection              # names talos-1.14.1 back
   - n8n-2.39.8                        # names talos-1.14.1 back
-  - edot-collector-0.161.0            # names talos-1.14.1 back; its pod is evicted 3x
+  # - edot-collector-0.161.0 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # names talos-1.14.1 back; its pod is evicted 3x
   - otel-operator-0.23.0              # names talos-1.14.1 back
   - multus-macvlan-foundation         # also mutates Talos machine config
-  - nextcloud-34.0.4                  # declared in case either plan slips onto the other's date
+  # - nextcloud-34.0.4 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # declared in case either plan slips onto the other's date
   - jellyfin-12.1                     # sat-attended:2026-10-10; same reason
   # ADDED 2026-09-26 for reciprocity — each of these already names talos-1.14.1:
   # - authentik-2026.8.3 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
   # - elasticsearch-obs-recovery-3.14.7 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
-  - falco-9.2.0                       # falco's eBPF probe meets the new kernel in this plan
+  # - falco-9.2.0 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # falco's eBPF probe meets the new kernel in this plan
   - flux-reconciler-impersonation
   # - icloud-backup-freshness-3.24.2 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
   - n8n-chart-2.1.1
