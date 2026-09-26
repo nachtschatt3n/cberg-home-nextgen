@@ -49,11 +49,49 @@ NOTIFY = item("nextcloud-notify-push", "34.0.4", "34.0.3")
 WHITEBOARD = item("nextcloud-whiteboard", "v2.0.0", "v1.5.9")
 
 
+def _plans_with_retired(plan_id: str) -> list:
+    """Live plans plus `plan_id` as it stood in the commit before it was
+    deleted. GIT_* is scrubbed: under the pre-commit hook it would point git
+    at the hook's temporary index."""
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    rel = f"runbooks/maintenance/plans/{plan_id}.md"
+    rev = subprocess.run(["git", "-C", str(REPO), "log", "-1", "--format=%H",
+                          "--diff-filter=D", "--", rel],
+                         capture_output=True, text=True, env=env).stdout.strip()
+    if not rev:
+        return cov.load_plans()
+    body = subprocess.run(["git", "-C", str(REPO), "show", f"{rev}^:{rel}"],
+                          capture_output=True, text=True, env=env).stdout
+    if not body.strip():
+        return cov.load_plans()
+    tmp = Path(tempfile.mkdtemp(prefix="plans-also-covers-"))
+    for f in cov.PLANS_DIR.glob("*.md"):
+        shutil.copy(f, tmp / f.name)
+    (tmp / f"{plan_id}.md").write_text(body)
+    saved = cov.PLANS_DIR
+    try:
+        cov.PLANS_DIR = tmp
+        return cov.load_plans()
+    finally:
+        cov.PLANS_DIR = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     print("test-coverage-plan-also-covers")
 
     # ── the REAL plan file, not a fixture ──────────────────────────────
+    # The plan was EXECUTED and retired (e43a1381, 2026-09-26), which deleted
+    # the file this test reads and failed the whole pre-commit suite. The file
+    # is still the real evidence, so read it from the last revision that had
+    # it, alongside the live plan set — never a hand-written fixture.
     plans = cov.load_plans()
+    if not any(p["plan_id"] == "nextcloud-34.0.4" for p in plans):
+        plans = _plans_with_retired("nextcloud-34.0.4")
     nc = [p for p in plans if p["plan_id"] == "nextcloud-34.0.4"]
     check("the live nextcloud-34.0.4 plan loads", len(nc) == 1)
     if not nc:
