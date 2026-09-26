@@ -5206,30 +5206,31 @@ log_section "Section 24a: Network Infrastructure Services"
         fi
 
         # Last morning-briefing voice outcome — catches voice breakage even when
-        # codex auth is healthy (the briefing log records 'voice sent' on success).
+        # codex auth is healthy. Proof is say's own 'voice delivered message_id=N'
+        # line (written after Telegram answered), not the caller's 'queued'.
         BRIEF_LOG=$(kubectl exec -n ai "$OC_POD" -c app -- bash -lc \
             'tail -40 ~/clawd/state/morning-briefing/briefing.log 2>/dev/null; tail -40 ~/clawd/.tmp/morning-briefing/*.log 2>/dev/null' 2>/dev/null)
         if [ -n "$BRIEF_LOG" ]; then
-            LAST_VOICE_SENT=$(printf '%s' "$BRIEF_LOG" | grep -E "voice sent" | tail -1)
+            LAST_VOICE_SENT=$(printf '%s' "$BRIEF_LOG" | grep -E "voice delivered message_id=" | tail -1)
             if [ -n "$LAST_VOICE_SENT" ]; then
                 VTS_RAW=$(printf '%s' "$LAST_VOICE_SENT" | awk '{print $1}')
                 VTS=$(date -d "$VTS_RAW" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "${VTS_RAW%%+*}" +%s 2>/dev/null || echo "")
                 if [ -n "$VTS" ]; then
                     VAGE_H=$(( ($(date +%s) - VTS) / 3600 ))
-                    echo "  last briefing voice sent ${VAGE_H}h ago"
+                    echo "  last briefing voice delivered ${VAGE_H}h ago"
                     if [ "$VAGE_H" -gt 26 ]; then
-                        log_warning "openclaw morning briefing: last voice sent ${VAGE_H}h ago (>26h)"
+                        log_warning "openclaw morning briefing: last voice delivered ${VAGE_H}h ago (>26h)"
                         add_major_issue "openclaw morning-briefing voice last delivered ${VAGE_H}h ago — daily briefing may be failing."
                     else
                         log_success "openclaw morning briefing: voice delivered ${VAGE_H}h ago"
                     fi
                 else
-                    log_success "openclaw morning briefing: voice sent (timestamp unparsed)"
+                    log_success "openclaw morning briefing: voice delivered (timestamp unparsed)"
                 fi
             else
-                echo "  no 'voice sent' line in recent briefing log"
-                log_warning "openclaw morning briefing: no recent 'voice sent' confirmation"
-                add_major_issue "openclaw morning-briefing voice not confirmed sent — check ~/clawd/state/morning-briefing/briefing.log"
+                echo "  no 'voice delivered' line in recent briefing log"
+                log_warning "openclaw morning briefing: no recent 'voice delivered' confirmation"
+                add_major_issue "openclaw morning-briefing voice not confirmed delivered — check ~/clawd/state/morning-briefing/briefing.log"
             fi
         fi
 
@@ -7253,9 +7254,12 @@ fi' sh "$tokenv" "$urlspec" "$path" 2>/dev/null | sed -n 's/^STATUS:\(.*\)$/\1/p
 # holds none of that -- every real diagnostic goes to
 # state/morning-briefing/briefing.log.
 #
-# Proof of delivery is exactly one line: "voice sent from ...". File existence
-# is not proof -- prepare_voice_file() writes voice-<date>.txt BEFORE validating,
-# so a failed run still leaves a full-looking file behind.
+# Proof of delivery is exactly one line: "voice delivered message_id=N", which
+# `say --result-log` appends only after Telegram accepted the voice note. The
+# older "voice sent from ..." line meant QUEUED: on 2026-09-26 a pod restart
+# killed the detached synthesis 32 s in, nothing was delivered, and this check
+# still went green. File existence is not proof either -- prepare_voice_file()
+# writes voice-<date>.txt BEFORE validating.
 
 #######################################
 # OpenClaw heartbeat CONFIG drift
@@ -7483,25 +7487,31 @@ check_briefing_delivered() {
     # the fragile-numeric-parse that produced the impossible HTTP code "401401"
     # earlier the same day. Count lines instead, and clamp to a single integer.
     sent=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c \
-        "grep \"^${today}.*voice sent from\" $logf 2>/dev/null | wc -l" 2>/dev/null | tr -dc '0-9')
+        "grep \"^${today}.*voice delivered message_id=\" $logf 2>/dev/null | wc -l" 2>/dev/null | tr -dc '0-9')
     sent=${sent:-0}
     failed=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c \
-        "grep \"^${today}.*voice preflight FAILED\" $logf 2>/dev/null | tail -1" 2>/dev/null)
+        "grep -E \"^${today}.*(voice preflight FAILED|voice FAILED)\" $logf 2>/dev/null | tail -1" 2>/dev/null)
+    queued=$(kubectl exec -n "$ns" "$pod" -c "$ctr" -- sh -c \
+        "grep \"^${today}.*voice queued\" $logf 2>/dev/null | tail -1" 2>/dev/null)
 
     if [ "${sent:-0}" -ge 1 ]; then
-        echo "  ✅ briefing delivered today (${sent}x 'voice sent')"
+        echo "  ✅ briefing delivered today (${sent}x 'voice delivered')"
         CHECKS_PASSED=$((CHECKS_PASSED + 1))
     elif [ -n "$failed" ]; then
-        echo "  ❌ briefing FAILED preflight: $failed"
+        echo "  ❌ briefing FAILED: $failed"
         log_critical "Morning briefing did not send — $failed"
-        add_critical_issue "Morning briefing failed preflight and was NOT delivered: ${failed#* } — fix the named section, do not ship a partial briefing"
+        add_critical_issue "Morning briefing was NOT delivered: ${failed#* } — fix the cause, do not ship a partial briefing"
+    elif [ -n "$queued" ]; then
+        echo "  ❌ briefing queued but never delivered: $queued"
+        log_critical "Morning briefing voice was queued but never delivered"
+        add_critical_issue "Morning briefing voice was queued (${queued%% *}) but say never recorded delivery — the detached synthesis died (pod restart? TTS host down?)"
     else
         # Before the 07:00 local run there is legitimately nothing to find.
         local hour; hour=$(date -u +%H)
         if [ "$hour" -ge 6 ]; then
-            echo "  ❌ no 'voice sent' and no preflight failure logged today"
+            echo "  ❌ no 'voice delivered' and no failure logged today"
             log_critical "Morning briefing produced no delivery record today"
-            add_critical_issue "Morning briefing left no 'voice sent' line in briefing.log today — it did not run, or died before send"
+            add_critical_issue "Morning briefing left no 'voice delivered' line in briefing.log today — it did not run, or died before send"
         else
             echo "  (before the daily run — nothing expected yet)"
         fi
