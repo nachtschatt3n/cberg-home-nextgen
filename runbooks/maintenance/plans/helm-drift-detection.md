@@ -102,7 +102,7 @@ autonomy_override: human-gated        # RESTRICTS only. P0 and P1 are nightly-sa
                                       # must not treat it as one.
 finding_refs: []
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> 19 edits applied; ready-for-go for P0+P1 ONLY, as a SEPARATE on-demand run after the main now:2026-09-26 run is finalized; P1 then sets awaiting-soak (7-day warn inventory)
-window: null                          # assigned PER PHASE by the window agent; after P0-only
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
                                       # set status back to `vetted`; after P1 and after P2 set
                                       # `awaiting-soak` (run-now.py refuses it, so no NOW run
                                       # can collapse a soak; flip to `vetted` when it ends)
