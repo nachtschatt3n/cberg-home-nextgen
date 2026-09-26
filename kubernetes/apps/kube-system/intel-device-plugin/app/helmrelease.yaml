@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: intel-device-plugins-operator
-      version: 0.36.0
+      version: 0.37.0
       sourceRef:
         kind: HelmRepository
         name: intel
@@ -37,38 +37,14 @@ spec:
   # The chart exposes no value for this, hence a post-render patch.
   # Re-check on every chart bump: if upstream names the port, drop this.
   #
-  # SECOND UPSTREAM CHART BUG: the mutating-webhook config template renders
-  # the pod-mutator entries for ALL device types unconditionally — there is
-  # no `manager.devices` (or any other) value that gates it (verified against
-  # this chart version: `--set manager.devices.gpu=true` still renders all
-  # 8). Only gpu + npu are enabled here (controllerExtraArgs below), so
-  # `fpga.mutator.webhooks.intel.com` and `sgx.mutator.webhooks.intel.com` —
-  # the two entries whose rules match core-group `pods` with no CRD scoping,
-  # so they run on EVERY pod CREATE cluster-wide — point at controller routes
-  # that are never registered and 404 on every call (found via
-  # health-check.sh Section 38's response probe, 2026-08-24). `failurePolicy:
-  # Ignore` means the 404 blocks nothing, so this was pure waste (an extra
-  # network round-trip per pod create, cluster-wide) rather than a
-  # functional bug, but it's a needless one now that it is detected.
-  #
-  # Removed by index with an explicit name TEST first, so a future chart
-  # bump that reorders the webhooks array fails this patch LOUDLY (Flux
-  # Kustomization goes NotReady) instead of silently deleting the wrong
-  # entry. Only these two are removed — the six OTHER unused-device-type
-  # webhooks (dlb/dsa/fpga/iaa/qat/sgx device-plugin CRD validators +
-  # mutators) are CRD-scoped, essentially never fire (nothing here ever
-  # creates an FpgaDevicePlugin-shaped object), and are already correctly
-  # reported as low-severity by Section 38 — not worth the same index-patch
-  # fragility for near-zero benefit. gpu/npu's own webhooks
-  # (m/vgpudeviceplugin.kb.io, m/vnpudeviceplugin.kb.io) are untouched by
-  # this patch and continue to work exactly as before — this cannot affect
-  # GPU/NPU-accelerated workloads (Ollama, immich ML, etc.), because removing
-  # an Ignore-policy webhook that already 404s on every call changes nothing
-  # about what gets admitted.
-  # Re-check on every chart bump: `kubectl get mutatingwebhookconfigurations
-  # inteldeviceplugins-mutating-webhook-configuration -o json | jq -r
-  # '.webhooks[].name'` and confirm fpga.mutator/sgx.mutator are still at
-  # indices 8/9 before trusting a green Flux reconcile blindly.
+  # (0.37.0) The former second post-render patch -- removing the
+  # fpga/sgx pod-mutator webhooks by index -- is gone: upstream 0.37.0
+  # deleted the FPGA plugin entirely and gates the sgx pod mutator on
+  # `manager.devices`, so enabling devices via `manager.devices` below
+  # renders neither entry. Re-check on every chart bump that
+  # `kubectl get mutatingwebhookconfigurations
+  # inteldeviceplugins-mutating-webhook-configuration` lists no
+  # `*.mutator.webhooks.intel.com` entry.
   postRenderers:
     - kustomize:
         patches:
@@ -80,23 +56,12 @@ spec:
               - op: replace
                 path: /spec/ports/0/targetPort
                 value: 8443
-          - target:
-              group: admissionregistration.k8s.io
-              version: v1
-              kind: MutatingWebhookConfiguration
-              name: inteldeviceplugins-mutating-webhook-configuration
-            patch: |
-              - op: test
-                path: /webhooks/8/name
-                value: fpga.mutator.webhooks.intel.com
-              - op: test
-                path: /webhooks/9/name
-                value: sgx.mutator.webhooks.intel.com
-              - op: remove
-                path: /webhooks/9
-              - op: remove
-                path: /webhooks/8
   values:
-    controllerExtraArgs: |
-      - --devices=gpu
-      - --devices=npu
+    # Renders exactly `--devices=gpu --devices=npu` (same args as the old
+    # controllerExtraArgs) AND, since chart 0.37.0, suppresses the sgx pod
+    # mutator webhook. Do not also set controllerExtraArgs -- the flags
+    # would be passed twice.
+    manager:
+      devices:
+        gpu: true
+        npu: true
