@@ -969,10 +969,65 @@ def retired_still_windowed(plans):
             if p.get("window") and p.get("status") in MISSED_EXEMPT_STATUSES]
 
 
-def missing_window_runs(expected, run_rows):
-    """Pure logic, DB-free: expected (slot,date) pairs minus recorded ones."""
+def missing_window_runs(expected, run_rows, covered=()):
+    """Pure logic, DB-free: expected (slot,date) pairs minus recorded ones.
+
+    covered: extra (slot,date) pairs that count as run although no row for
+    that slot exists — see nightly_covered_by_on_demand()."""
     have = {(str(s), str(d)) for s, d in run_rows}
+    have |= {(str(s), str(d)) for s, d in covered}
     return [f"{s}:{d}" for s, d in expected if (s, d) not in have]
+
+
+# Operator decision 2026-09-26: a same-day on-demand run covers that day's
+# NIGHTLY. The nightly's job is Step 0 (safe updates land every night), and a
+# NOW / ad-hoc run runs Step 0 first by contract (maintenance-window-agent
+# "On-demand NOW runs" item 2), so on a day the console spent in an attended
+# run the nightly's work DID happen — the old check paged "missed" for it.
+# Scope, deliberately narrow:
+#   * only the `nightly` slot is covered — sat-attended / sun-attended carry
+#     attended plan capacity (and Sunday the reboot allowance) an on-demand run
+#     does not substitute for;
+#   * the covering row is slot `now` (the on_demand id) OR trigger `ad-hoc`,
+#     in a slot other than nightly itself (a nightly row is already direct);
+#   * it must be TERMINAL and not `aborted`: an OPEN row is "started", not
+#     "ran" (same reason completed_run_rows excludes it), and an aborted run
+#     cannot be shown to have finished Step 0. window_runs has no Step 0 flag,
+#     so "completed and not aborted" is the ledger's proof that Step 0 ran —
+#     the agent opens the row, then runs Step 0 before anything else;
+#   * the date is the Europe/Berlin calendar date of started_at (the operator's
+#     day). run_date is stamped from the UTC clock, so a NOW run opened at
+#     00:30 Berlin carries yesterday's run_date but covers today's nightly.
+NIGHTLY_SLOT = "nightly"
+COVERING_TRIGGER = "ad-hoc"
+NON_COVERING_OUTCOMES = ("aborted",)
+
+
+def _berlin_date(ts):
+    from zoneinfo import ZoneInfo
+    return _as_utc(ts).astimezone(ZoneInfo("Europe/Berlin")).date().isoformat()
+
+
+def nightly_covered_by_on_demand(run_rows, on_demand_id="now",
+                                 nightly_slot=NIGHTLY_SLOT):
+    """Pure, DB-free: {(nightly_slot, berlin_date)} for every completed,
+    non-aborted `now`/ad-hoc row. row: (slot, run_date, started_at,
+    finished_at, outcome[, trigger]) — a row without a trigger column is
+    judged by its slot alone. A row whose started_at is missing falls back to
+    its run_date."""
+    out = set()
+    for r in run_rows:
+        slot = str(r[0])
+        if slot == nightly_slot or _is_open_run(r):
+            continue
+        if r[4] == _WINDOW_RUNNING or r[4] in NON_COVERING_OUTCOMES:
+            continue
+        trigger = str(r[5]) if len(r) > 5 and r[5] is not None else ""
+        if not (slot == str(on_demand_id) or trigger == COVERING_TRIGGER):
+            continue
+        day = _berlin_date(r[2]) if r[2] is not None else str(r[1])
+        out.add((nightly_slot, day))
+    return sorted(out)
 
 
 # A window whose row was opened (`--outcome running`, 2026-09-14 two-phase
@@ -1137,13 +1192,18 @@ def window_liveness_report(cfg, today, now=None):
         import psycopg
         with psycopg.connect(dsn, connect_timeout=10) as c, c.cursor() as cur:
             cur.execute("SELECT slot, run_date::text, started_at, finished_at,"
-                        " outcome FROM window_runs WHERE run_date >= %s",
-                        (floor,))
+                        " outcome, trigger FROM window_runs WHERE run_date >= %s",
+                        # one day earlier: a NOW row opened after 22:00 UTC
+                        # carries the previous run_date but covers the next
+                        # Berlin day's nightly (nightly_covered_by_on_demand)
+                        ((date.fromisoformat(floor) - timedelta(days=1)).isoformat(),))
             rows = cur.fetchall()
     except Exception:
         return unverified
     now = now or datetime.now(timezone.utc)
-    return {"missing": missing_window_runs(expected, completed_run_rows(rows)),
+    od = on_demand_slot(cfg)
+    covered = nightly_covered_by_on_demand(rows, on_demand_id=(od or {}).get("id", "now"))
+    return {"missing": missing_window_runs(expected, completed_run_rows(rows), covered),
             "stuck": stuck_window_runs(cfg.get("windows", []), rows, now,
                                        on_demand=on_demand_slot(cfg)),
             "verified": True}

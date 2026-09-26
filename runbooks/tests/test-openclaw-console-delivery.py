@@ -22,7 +22,11 @@ pins that classifier against captured pane shapes and pins the delivery rules:
       row appears -> 0 "completion verified"; never -> 12 within the budget;
       ledger unreadable -> 11; a row that existed BEFORE the send does not count
     * say-so (home-operation, 180s subprocess timeout) -> no poll
-    * retry into a busy pane stays a no-op (exit 0, nothing typed)
+    * retry of a LOST occurrence into a busy / background-agents / menu pane ->
+      exit 8, nothing typed, message names the lost (slot, date) (2026-09-26,
+      so the retry cron's failureAlert pages); exhausted + not clearable -> exit 4
+      with the same LOST wording; a row already present -> exit 0 no-op whatever
+      the pane state (nothing lost, nothing to page)
   exhausted-pane recovery (F-7d9b201b, operator decision 2026-09-25: automate)
     * exhausted-idle + unattended -> /clear, wait for a fresh prompt, log
       CONSOLE_AUTO_CLEARED, then deliver (exactly ONE /clear, no second clean)
@@ -269,12 +273,42 @@ def test_maintenance_window(mw):
                 check(f"mw run cron into {name}: NOTHING typed (no ctrl+u, /clear, prompt)",
                       not con.typed(), str(con.typed()))
 
-            # retry into a busy pane: unchanged no-op
+            # retry of a LOST occurrence into a pane that is not at the prompt:
+            # exit 8 (was a silent no-op until 2026-09-26), nothing typed
+            for name in ("busy-spinner", "busy-bg-agents", "menu-question",
+                         "menu-permission", "menu-resume-list"):
+                con.set(S[name])
+                ledger.update(counts=[0], rc=0)
+                code, out = run_main(mw.main, ["retry", "--window", "nightly", "--trigger", "cron"])
+                check(f"mw retry LOST occurrence into {name}: exit 8, nothing typed",
+                      code == 8 and not con.typed(), f"{code} {con.typed()} {out[-300:]}")
+                check(f"mw ...{name}: loud FAIL_TOKEN naming the lost (slot, date)",
+                      mw.FAIL_TOKEN in out and "LOST" in out
+                      and f"(nightly, {mw._today_utc()})" in out, out[-400:])
+
+            # exhausted and NOT auto-clearable, occurrence lost: exit 4, LOST wording
+            for name in ("exhausted-busy", "exhausted-draft", "exhausted-unclear"):
+                con.set(S[name], after_clear=S["idle"])
+                ledger.update(counts=[0], rc=0)
+                code, out = run_main(mw.main, ["retry", "--window", "nightly", "--trigger", "cron"])
+                check(f"mw retry LOST occurrence, {name}: exit 4, nothing typed, says LOST",
+                      code == 4 and not con.typed() and "is LOST" in out,
+                      f"{code} {con.typed()} {out[-300:]}")
+
+            # nothing lost (a row exists): exit 0 no-op, whatever the pane state
+            for name in ("busy-bg-agents", "menu-question", "exhausted-busy", "idle"):
+                con.set(S[name])
+                ledger.update(counts=[1], rc=0)
+                code, out = run_main(mw.main, ["retry", "--window", "nightly", "--trigger", "cron"])
+                check(f"mw retry, row exists, {name}: exit 0 no-op, nothing typed",
+                      code == 0 and not con.typed() and "no-op" in out, f"{code} {out[-200:]}")
+
             con.set(S["busy-bg-agents"])
             ledger.update(counts=[0], rc=0)
-            code, out = run_main(mw.main, ["retry", "--window", "nightly", "--trigger", "cron"])
-            check("mw retry into background-agents pane: no-op exit 0, nothing typed",
-                  code == 0 and not con.typed() and "no-op" in out, f"{code} {con.typed()}")
+            code, out = run_main(mw.main, ["retry", "--window", "nightly", "--trigger", "cron",
+                                           "--dry-run"])
+            check("mw retry dry-run (lost): states the exit-8 refusal, types nothing",
+                  code == 0 and "REFUSE exit 8 (retry" in out and not con.typed(), out[:500])
 
             # -- idle + cron: deliver, then bounded poll for the running row --
             con.set(S["idle"])
