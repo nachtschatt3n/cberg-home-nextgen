@@ -396,8 +396,9 @@ call_command('test_email', User.objects.get(username='mu_adm').email)" 2>/dev/nu
 
 | Object | Setting | Why |
 |---|---|---|
-| Flow `cberg-recovery` (designation `recovery`) | identification (10) → `login-reputation-deny` (15, same IP-reputation policy as login) → email link (20, `token_expiry: minutes=30`) → new-password prompt (30, `cberg-recovery-password-policy`: ≥12 chars, zxcvbn ≥3, HIBP) → user write (40, `never_create`) → login (100, 365 d) | self-service reset; unblocks accounts that never had a password |
+| Flow `cberg-recovery` (designation `recovery`) | identification (10) → `login-reputation-deny` (15, same IP-reputation policy as login) → email link (20, `token_expiry: minutes=30`) → **second factor (25, `cberg-recovery-mfa-validation`)** → new-password prompt (30, `cberg-recovery-password-policy`: ≥12 chars, zxcvbn ≥3, HIBP) → user write (40, `never_create`) → login (100, 365 d) | self-service reset; unblocks accounts that never had a password |
 | Recovery identification | `pretend_user_exists: true`, `show_matched_user: false` | no user enumeration: an unknown identifier gets the same "check your email" page and **no** mail (`stages/email/stage.py` skips a pending user without pk in a recovery flow) |
+| `cberg-recovery-mfa-validation` (recovery order 25, added 2026-09-26, security finding W2) | `device_classes: [webauthn, totp, static]` (**no `email`**), `not_configured_action: skip`, `webauthn_user_verification: required` | without it, mailbox access alone resets the password of an MFA-enrolled account. `email` is excluded because an email code lands in the same inbox as the recovery link, so it is not an independent factor. `skip` keeps recovery working for a user with no device. Consequence: a user whose ONLY device is email-OTP gets no second-factor check on recovery. Enrol a passkey/TOTP/static codes. |
 | Recovery email stage | `recovery_max_attempts: 3`, `recovery_cache_timeout: minutes=30`, `activate_user_on_success: false` | per-user throttle; a reset link never re-enables a disabled account |
 | `default-authentication-identification` | `recovery_flow: cberg-recovery`, `webauthn_stage: default-authentication-mfa-validation` | `recovery_flow` on **this stage** is what renders "Forgot password?" (the brand field alone does not); `webauthn_stage` = passkey autofill on the login page |
 | Brand `authentik-default` | `flow_recovery: cberg-recovery` | admin "Send recovery link" / `ak` recovery emails |
@@ -405,7 +406,8 @@ call_command('test_email', User.objects.get(username='mu_adm').email)" 2>/dev/nu
 | `default-authenticator-webauthn-setup` | `user_verification: required`, `resident_key_requirement: preferred` | discoverable passkeys (autofill), biometrics required |
 | `default-authenticator-static-setup` | `token_count: 10` | 10 recovery codes |
 | `default-authenticator-totp-setup` | unchanged (upstream: 6 digits) | — |
-| Flow/stage `cberg-authenticator-email-setup` | email-OTP, `token_expiry: minutes=15` | fallback factor |
+| Flow/stage `cberg-authenticator-email-setup` | email-OTP, `token_expiry: minutes=15` | fallback factor (login only, it does not count on recovery) |
+| User `akadmin` | `is_active: false` (added 2026-09-26) | unused bootstrap superuser: pk 14, re-created by upstream `system/bootstrap.yaml` after the original admin was renamed to the operator's account; never logged in, no usable password, owns no tokens, no outpost/service account/blueprint authenticates as it. Upstream's entry is `state: created`, so an image bump never re-activates it. The operator's own superuser is the only active admin; break-glass is issued for that user, so it is unaffected. |
 
 Every authenticator stage with a `configure_flow` is listed at
 `https://auth.<domain>/if/user/` → **MFA Devices → Enroll**.
@@ -439,6 +441,15 @@ mode-600 file.
 4. An existing browser session, a Grafana OIDC login and a forward-auth app
    still pass.
 5. Login flow orders unchanged: `[10, 15, 20, 30, 100]`.
+6. Recovery flow orders `[10, 15, 20, 25, 30, 40, 100]`, order 25 =
+   `cberg-recovery-mfa-validation` with classes `[webauthn, totp, static]`:
+   ```bash
+   kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+   from authentik.flows.models import FlowStageBinding
+   print([(b.order, b.stage.name) for b in FlowStageBinding.objects.filter(
+       target__slug='cberg-recovery').order_by('order')])" 2>/dev/null | grep -v '^{'
+   ```
+7. `akadmin` is `is_active=False`; the operator's admin user is active + superuser.
 
 **Phase 2 — enforcement (not yet done; operator go/no-go):**
 1. **Preconditions, checked per human user** (`mu_adm`, `andrea`): at least
@@ -453,16 +464,21 @@ mode-600 file.
 3. Keep `last_auth_threshold` in mind: with 365-day sessions the MFA prompt
    appears roughly once a year per device — the fridge-type devices use
    password + TOTP typed from the phone.
-4. Recovery flow: add the MFA validation stage between email link and new
-   password (order 25) so an emailed link alone cannot take over an account
-   whose mailbox is compromised; keep `not_configured_action: skip` there or
-   a user with no device could never recover.
+4. ~~Recovery flow: add the MFA validation stage at order 25~~ **done in
+   phase 1** (2026-09-26, before the first enrolment). Keep
+   `not_configured_action: skip` there even in phase 2, or a user with no
+   device could never recover. Note that a second factor on recovery means a
+   user who loses *every* device can no longer self-recover: that is what the
+   break-glass key (admin) and an admin-issued recovery link are for.
 5. Roll out with an existing admin session open in a second browser and the
    break-glass file at hand; rollback is `git revert` (or break-glass → admin
    UI) — the recovery key bypasses flows, so a broken flow cannot lock out
    the admin.
 
-Rollback (phase 1): `git revert` the commit. The brand/identification-stage
+Rollback (phase 1): `git revert` the commit. Reverting the order-25 stage or
+the `akadmin` entry does NOT undo them live (blueprints do not prune): to take
+the stage out, set its binding entry to `state: absent`; to re-activate
+`akadmin`, flip it to `is_active: true`. The brand/identification-stage
 fields keep their new values after a revert (blueprints do not prune); clear
 them with a follow-up blueprint entry (`flow_recovery: null`, `recovery_flow:
 null`, `webauthn_stage: null`) if the flow itself must go.
