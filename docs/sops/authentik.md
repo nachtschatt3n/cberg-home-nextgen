@@ -364,11 +364,12 @@ browser and PWA restarts. Three settings make that true, all in blueprints:
   keep their old browser-session cookie until the next login.
 - Rollback: revert the commit, or set `session_duration: seconds=0`.
 
-### Email, recovery and MFA (phase 1, 2026-09-26)
+### Email, recovery and MFA (phase 1 + phase 2, 2026-09-26)
 
 Operator project: MFA for the two human accounts (operator + Andrea; no kids,
-no guests). **Phase 1 = everything available, nothing enforced.** Phase 2
-(below) makes MFA required everywhere, internal apps included.
+no guests). **Phase 1 = everything available, nothing enforced.** **Phase 2
+(done 2026-09-26, below) makes MFA required everywhere**, internal apps
+included, no network/IP exemption.
 
 **Email transport.** authentik sends through the operator's existing GMX
 account — the IMAP account paperless-ngx fetches from (it lives in the
@@ -402,7 +403,7 @@ call_command('test_email', User.objects.get(username='mu_adm').email)" 2>/dev/nu
 | Recovery email stage | `recovery_max_attempts: 3`, `recovery_cache_timeout: minutes=30`, `activate_user_on_success: false` | per-user throttle; a reset link never re-enables a disabled account |
 | `default-authentication-identification` | `recovery_flow: cberg-recovery`, `webauthn_stage: default-authentication-mfa-validation` | `recovery_flow` on **this stage** is what renders "Forgot password?" (the brand field alone does not); `webauthn_stage` = passkey autofill on the login page |
 | Brand `authentik-default` | `flow_recovery: cberg-recovery` | admin "Send recovery link" / `ak` recovery emails |
-| `default-authentication-mfa-validation` (order 30) | `device_classes: [webauthn, totp, static, email]`, `not_configured_action: skip`, `webauthn_user_verification: required` | second factor offered to anyone who has one; **nobody forced** |
+| `default-authentication-mfa-validation` (order 30) | `device_classes: [webauthn, totp, static, email]`, **`not_configured_action: configure`** (phase 2; was `skip`), `configuration_stages: [default-authenticator-webauthn-setup, default-authenticator-totp-setup]`, `webauthn_user_verification: required` | every password login needs a second factor; a user with **no** device is walked through passkey-or-TOTP enrolment at that login, never denied. Upstream declares none of these fields, so they survive image bumps. |
 | `default-authenticator-webauthn-setup` | `user_verification: required`, `resident_key_requirement: preferred` | discoverable passkeys (autofill), biometrics required |
 | `default-authenticator-static-setup` | `token_count: 10` | 10 recovery codes |
 | `default-authenticator-totp-setup` | unchanged (upstream: 6 digits) | — |
@@ -426,12 +427,27 @@ in "A blueprint change can leave its row stuck", filtered to
 `path='cberg/mfa-recovery-blueprint.yaml'`). Everything else in this file is a
 field upstream does not declare, so it survives a bump.
 
-**Break-glass.** `ak create_recovery_key <years> <user>` prints a one-time
-login URL for that user. Generated 2026-09-26 for the operator's admin user,
-valid 1 year, stored off-cluster by the operator (never in git/logs). It
-bypasses the login flow entirely, so it still works after phase 2 locks the
-flow down. Regenerate yearly (or after use) with stdout redirected to a
-mode-600 file.
+**Break-glass.** `ak create_recovery_key <MINUTES> <user>` prints a one-time
+login URL for that user. **The first argument is minutes, not years**
+(`authentik/recovery/management/commands/create_recovery_key.py`: `duration`,
+default 60, `timedelta(minutes=duration)`). The key generated on 2026-09-26
+as `create_recovery_key 1 <user>` was therefore valid for ONE MINUTE and was
+already gone from the DB when phase 2 was rolled out (no `intent=recovery`
+token exists), so the stored file holds a dead link. For a 1-year key use
+`525600`. It bypasses the login flow entirely (`authentik/recovery/views.py`
+`UseTokenView`: looks up the token, calls Django `login()` directly, deletes
+the token, redirects to `/if/user/`; no flow, no stage, no policy), so it
+still works after phase 2. The on-demand form (a short-lived key generated via
+`kubectl exec` at the moment of need) is always available to whoever holds the
+kubeconfig, which is the real break-glass; a pre-generated key only saves the
+`kubectl` step. Regenerate with stdout redirected to a mode-600 file, and
+check it exists without printing the key:
+
+```bash
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from authentik.core.models import Token
+print([(t.user.username, t.expires) for t in Token.objects.filter(intent='recovery')])" 2>/dev/null | tail -1
+```
 
 **Verification (phase 1):**
 1. Login page shows "Forgot password?" (link to `/if/flow/cberg-recovery/`).
@@ -451,33 +467,73 @@ mode-600 file.
    ```
 7. `akadmin` is `is_active=False`; the operator's admin user is active + superuser.
 
-**Phase 2 — enforcement (not yet done; operator go/no-go):**
-1. **Preconditions, checked per human user** (`mu_adm`, `andrea`): at least
-   two independent devices — a passkey **and** TOTP or static codes — so that
-   losing one phone is not a lock-out; the break-glass key file exists and is
-   in the password manager; recovery email for each user works.
-2. Set `configuration_stages` on `default-authentication-mfa-validation` to
-   [webauthn, totp] setup stages, then `not_configured_action: configure`:
-   a user with no device is walked through enrolment at next login instead of
-   being refused. (`deny` is the stricter alternative once both users are
-   enrolled; it gives no enrolment path at all.)
-3. Keep `last_auth_threshold` in mind: with 365-day sessions the MFA prompt
-   appears roughly once a year per device — the fridge-type devices use
-   password + TOTP typed from the phone.
-4. ~~Recovery flow: add the MFA validation stage at order 25~~ **done in
-   phase 1** (2026-09-26, before the first enrolment). Keep
-   `not_configured_action: skip` there even in phase 2, or a user with no
-   device could never recover. Note that a second factor on recovery means a
+**Phase 2 — enforcement (DONE 2026-09-26, operator-approved "MFA required everywhere"):**
+
+State after rollout: `default-authentication-mfa-validation` has
+`not_configured_action: configure` and `configuration_stages` = WebAuthn
+setup + TOTP setup. `device_classes` unchanged
+(`webauthn, totp, static, email`). No policy/IP exemption exists on the order-30
+binding; its only policy is upstream's
+`default-authentication-flow-authenticator-validate-stage`, which skips the
+stage solely for a passwordless passkey login (`auth_webauthn_pwl`, already
+two factors via user verification). Every provider uses the brand's default
+authentication flow (no provider sets its own `authentication_flow`, no LDAP
+provider), so this covers every app.
+
+Enrolment state at rollout: operator's admin user = passkey, TOTP, 10 static
+codes, email. **`andrea` = no device, pending enrolment at her next login.**
+
+What a user sees:
+- **Has a device**: unchanged. Username, then password, then the second
+  factor picker (passkey, TOTP, static code, email code). Or the passkey from
+  the username field autofill, with no password and no second prompt.
+- **Has no device (andrea)**: username, then password, then "configure an
+  authenticator" with two choices, `WebAuthn device` (passkey) and
+  `TOTP Device`. The picker order is the DB order of
+  `Stage.objects.filter(pk__in=...)` (no `ORDER BY`), observed as passkey
+  first; it is not guaranteed. The labels are the upstream `friendly_name`
+  values, which upstream declares; do not rename them here, or an image bump
+  resets them. After enrolling she is logged in, with a 365-day session.
+  Enrol TOTP as well as a passkey before using a device that cannot do
+  WebAuthn, such as the fridge browser. Email is not offered in the enrolment picker.
+  She can add it later under `/if/user/` → MFA Devices.
+- **Existing sessions** are not re-evaluated. Enforcement bites at the next
+  flow execution only, so a 365-day session keeps working until it expires,
+  is logged out, or an app forces re-auth (OIDC `prompt=login`/`max_age`).
+- **Limited-input devices (fridge etc.)**: password + TOTP code typed from
+  the phone, about once a year (session 365 days, `last_auth_threshold:
+  seconds=0`, so each new login asks). Deliberately no IP/network exemption.
+
+Constraints that still hold:
+1. Recovery flow order 25 keeps `not_configured_action: skip`, or a user
+   with no device could never recover. A second factor on recovery means a
    user who loses *every* device can no longer self-recover. An admin-issued
    recovery link does NOT help: it is built from the brand's recovery flow,
    i.e. `cberg-recovery`, so order 25 still asks for the lost device. The
    way back in is either an admin deleting that user's registered devices
-   (the stage then skips) followed by a normal recovery, or
-   `ak create_recovery_key` for that user (bypasses flows entirely).
-5. Roll out with an existing admin session open in a second browser and the
-   break-glass file at hand; rollback is `git revert` (or break-glass → admin
-   UI) — the recovery key bypasses flows, so a broken flow cannot lock out
-   the admin.
+   (the stage then skips, and at the next login `configure` enrols afresh) followed
+   by a normal recovery, or `ak create_recovery_key <minutes> <user>`
+   (bypasses flows entirely).
+2. `deny` is the stricter alternative once both users are enrolled; it gives
+   no enrolment path at all. Not needed: `configure` already denies a login
+   that does not finish enrolment.
+3. **Follow-up (not done): exclude `email` for superusers.** An email code
+   is weaker than the other classes, because mailbox compromise alone passes it. For
+   superusers it could be excluded with a second validate stage (classes
+   `[webauthn, totp, static]`) bound at order 31, plus superuser/non-superuser
+   expression policies on both bindings. That needs
+   `policy_engine_mode: all` on upstream's order-30 binding. With the default
+   `any`, our policy ORs with upstream's passwordless-skip policy and the
+   stage runs for everyone. Changing a field on an upstream-owned
+   binding is exactly the pattern the "Blueprint directory layout" rule warns
+   against, so it was left out of phase 2. Simpler alternative when wanted:
+   the operator deletes his own email device (UI), which removes the factor
+   without any flow change.
+
+Rollback (phase 2): `git revert` the phase-2 commit. The blueprint re-applies
+`not_configured_action: skip`; `configuration_stages` stays set but is inert
+under `skip`. If the flow itself is broken: break-glass key → admin UI →
+Flows & Stages → set the stage back to skip.
 
 Rollback (phase 1): `git revert` the commit. Reverting the order-25 stage or
 the `akadmin` entry does NOT undo them live (blueprints do not prune): to take
