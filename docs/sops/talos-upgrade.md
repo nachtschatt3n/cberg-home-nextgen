@@ -1,8 +1,8 @@
 # SOP: Talos Linux Upgrade with Performance Tuning
 
 > Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. **Current cluster state: Talos v1.13.8 + Kubernetes v1.36.0 (kernel 6.18.42-talos, Clang/ThinLTO) — rolled 2026-08-16.**
-> Version: `2026.08.16`
-> Last Updated: `2026-08-16`
+> Version: `2026.09.26`
+> Last Updated: `2026-09-26`
 > Owner: `homelab-ops`
 
 > **Cluster state (2026-08-16):** All three nodes (`k8s-nuc14-01/02/03`) are running Talos `v1.13.8` + Kubernetes `v1.36.0`. Performance sweep (BBR, conntrack, kubelet reservations, RPS mask, hugepages), intelgpu/udev patches, and Longhorn v2 OS prerequisites are all wired in. See §13 for the full two-stage traversal record and lessons learned.
@@ -95,6 +95,30 @@ mise exec -- kubectl get jobs -n storage | grep daily-backup-all-volumes | tail 
 # 0.3 Record current Talos versions
 mise exec -- talosctl version --nodes 192.168.55.11,192.168.55.12,192.168.55.13 --short
 ```
+
+### Step 0.4 — Pre-roll etcd snapshot (MANDATORY before the first node)
+
+Longhorn backups protect volume data; they do **not** protect the cluster's control-plane
+state. Until 2026-09-26 this SOP had no etcd snapshot step at all, so the only disaster-
+recovery path for a broken etcd was "rebuild from git + Longhorn backups". Take one
+immediately before the first node is touched, from the current etcd **leader**:
+
+```bash
+# scratch dir: local only, mode 700, never inside the repo, never synced
+SCR=$(mktemp -d /tmp/talos-roll.XXXXXX); chmod 700 "$SCR"
+LEADER_IP=<ip of the member whose MEMBER id equals its LEADER column>   # from: talosctl etcd status
+mise exec -- talosctl -n "$LEADER_IP" etcd snapshot "$SCR/etcd-pre-roll.db"
+chmod 600 "$SCR/etcd-pre-roll.db"
+stat -f '%Lp %z %N' "$SCR/etcd-pre-roll.db"     # macOS/BSD stat
+```
+
+**PASS:** mode `600` and a size in the same order as the `DB SIZE` column of
+`talosctl etcd status` (hundreds of MB here). A 0-byte or tiny file is a FAIL — do not start
+the roll. The snapshot contains every Secret in the cluster: keep it in `$SCR` only (not the
+repo, not iCloud/Nextcloud-synced paths), and delete it (`rm -P`) once the roll has verified
+green and soaked 24h.
+
+**Restore path** (disaster recovery only — see §11.4): `talosctl bootstrap --recover-from`.
 
 **Expected**: `Firing alerts: 0`, daily backup `Complete` within last 24h, all nodes on v1.11.0.
 
@@ -972,6 +996,32 @@ mise exec -- task talos:upgrade-node IP=192.168.55.12
 mise exec -- task talos:upgrade-node IP=192.168.55.13
 mise exec -- task talos:upgrade-k8s  # roll back K8s too
 ```
+
+### 11.4 etcd disaster recovery from the Step 0.4 snapshot
+
+Use ONLY when etcd has lost quorum permanently (not for a single broken node — that is
+§11.1). Upstream procedure: Talos docs, "Disaster Recovery" (etcd). Operator-present only.
+
+```bash
+# 1. on every control-plane node, confirm etcd is not running / not healthy
+mise exec -- talosctl -n <ip> service etcd
+# 2. wipe the broken etcd state on each control-plane node. EPHEMERAL holds /var/lib/etcd
+#    AND — on this cluster — /var/lib/longhorn (Longhorn disk path, on the ~1 TB EPHEMERAL
+#    partition nvme0n1p6; measured 2026-09-26 via `talosctl get volumestatus` + the
+#    Longhorn node's spec.disks). THIS WIPE DESTROYS EVERY LONGHORN REPLICA ON THAT NODE.
+#    Doing it on all three nodes means restoring every volume from the off-site Longhorn
+#    backups afterwards (docs/sops/backup.md, docs/sops/disaster-recovery.md).
+#    Operator decision only; never inside a normal window.
+mise exec -- talosctl -n <ip> reset --graceful=false --reboot --system-labels-to-wipe=EPHEMERAL
+# 3. wait until `talosctl -n <ip> service etcd` reports state Preparing on all nodes, then
+#    bootstrap ONE node from the snapshot (a real snapshot: no --recover-skip-hash-check)
+mise exec -- talosctl -n <one-ip> bootstrap --recover-from=$SCR/etcd-pre-roll.db
+# 4. the other members rejoin on their own; verify
+mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status
+```
+
+A snapshot from before the roll rewinds the cluster to that moment: any object created
+during the window is lost and Flux re-applies git on top. That is the intended trade.
 
 ### 11.3 Disable OTBR again if mroute broken
 

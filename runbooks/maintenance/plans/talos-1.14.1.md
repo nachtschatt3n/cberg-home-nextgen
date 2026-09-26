@@ -5,9 +5,9 @@ pr: null                              # THE NODE IMAGE HAS NO RENOVATE PR — se
                                       # "Attribution". PR #212 is the talosctl CLI
                                       # pin in .mise.toml (retargeted upstream to
                                       # 1.14.1 on 2026-09-19) and is a SEPARATE
-                                      # artifact, merged as the LAST step (§3.7).
+                                      # artifact, merged as the LAST step (§3.12).
 kind: infra
-current: "v1.13.10"                   # live on all 3 nodes, re-verified 2026-09-20
+current: "v1.13.10"                   # live on all 3 nodes, re-verified 2026-09-26 (premise)
 target: "v1.14.1"                     # released 2026-09-15; supersedes v1.14.0 (2026-09-03)
 update_type: minor                    # one minor hop, but it SKIPS OVER v1.14.0 — §1 reviews
                                       # both release notes because we never run 1.14.0
@@ -15,14 +15,15 @@ risk: high                            # rolling reboot of every control-plane no
                                       # 3-node hyper-converged cluster: etcd quorum,
                                       # 94 Longhorn volumes at replica=2, and the ONLY
                                       # HTTP data plane (Envoy Gateway) all ride on it
-est_duration_min: 145                 # RE-MEASURED 2026-09-20 — was 140 for v1.14.0.
-                                      # IN-WINDOW only; Phase A prep (~30 min) is
-                                      # Flux-inert and MUST run before the window.
-                                      # +5 because node 03 now holds BOTH the VIP and
-                                      # etcd leadership, so the final node carries a VIP
-                                      # failover AND a leader re-election that the
-                                      # v1.14.0 plan split across two nodes. See §7.
+est_duration_min: 160                 # RE-PRICED 2026-09-26 (was 145): the canary may now be
+                                      # the HEAVIEST node (38 engines on 02 measured today),
+                                      # plus the pre-roll etcd snapshot, the UniFi and per-node
+                                      # DaemonSet/device-plugin gates. IN-WINDOW only; Phase A
+                                      # prep (~35 min) is Flux-inert and runs BEFORE the window.
+                                      # Breakdown in §7.
 needs_reboot: true                    # three sequential node reboots
+exclusive: true                       # the node roll must have sun-attended:2026-09-27 TO
+                                      # ITSELF — including plans not yet written (§6).
 touches:
   namespaces:
     - kube-system                     # etcd, kube-apiserver, controller-manager,
@@ -30,58 +31,60 @@ touches:
     - storage                         # longhorn-manager, instance-manager, CSI, 94 volumes
     - network                         # envoy-gateway, envoy-internal, envoy-external,
                                       # k8s-gateway, external-dns, adguard-home, cloudflared
-    - monitoring                      # prometheus, alertmanager, grafana, edot-collector
+    - monitoring                      # prometheus, alertmanager, grafana, edot/otel collectors
+    - security                        # falco (modern_ebpf vs the new 6.18.51 kernel), wazuh-agent
     - "ALL (cluster-wide)"            # every pod on the cluster is evicted and
                                       # rescheduled once; this is not a scoped change
   resources:
     - kubernetes/bootstrap/talos/talconfig.yaml   # talosVersion — THE node image bump
-    - kubernetes/bootstrap/talos/clusterconfig/   # talhelper-generated, SOPS-encrypted
-    - .mise.toml                                  # talhelper pin (§3.5) + talosctl CLI pin (§3.7)
+    - .mise.toml                                  # talhelper pin (§3.5) + talosctl CLI pin (§3.12, via PR #212)
     - runbooks/auto-update-policy.yaml            # stale reason text (§3.3)
-    - node/k8s-nuc14-01                           # 192.168.55.11 — CANARY (lightest)
-    - node/k8s-nuc14-02                           # 192.168.55.12 — heaviest Longhorn load
-    - node/k8s-nuc14-03                           # 192.168.55.13 — holds VIP .10 AND etcd leader
-    - "etcd (3 members, 3.6.14 -> 3.7.1)"
-    - "192 longhorn replicas / 94 volumes (numberOfReplicas: 2)"
+    # NOT kubernetes/bootstrap/talos/clusterconfig/: those files are gitignored
+    # plaintext (clusterconfig/.gitignore), regenerated locally by §3.6 and never committed.
+    - node/k8s-nuc14-01                           # 192.168.55.11 — held the VIP on 2026-09-26
+    - node/k8s-nuc14-02                           # 192.168.55.12 — heaviest (38 engines); etcd leader on 2026-09-26
+    - node/k8s-nuc14-03                           # 192.168.55.13
+    - "etcd (3 members, 3.6.14 -> 3.7.1; pre-roll snapshot taken at §3.8a)"
+    - "all Longhorn replicas (188 on 2026-09-26) / 94 volumes (numberOfReplicas: 2)"
   shared:
     - etcd                            # quorum 3; exactly ONE member may be down
     - cni/cilium                      # DaemonSet restarts per node
     - coredns                         # Talos-bundled version moves with the release
     - storage/longhorn                # instance-manager restart + replica rebuild per node
-    - gateway/envoy                   # Envoy Gateway IS the only HTTP(S) data plane.
-                                      # NOT "ingress": ingress-nginx was deleted 2026-09-07
-                                      # (ad1ea7c2) and the plans README names this exact
-                                      # miswording. The v1.14.0 plan said `ingress`.
+    - gateway/envoy                   # Envoy Gateway IS the only HTTP(S) data plane (public edge
+                                      # envoy-external included). NOT "ingress": ingress-nginx
+                                      # was deleted 2026-09-07 (ad1ea7c2).
+    - authentik                       # server/worker/outposts reschedule 3x — every SSO login path
     - cert-manager                    # webhook pods reschedule
-    - monitoring                      # scrape gaps + node-level alerts during each reboot
+    - monitoring                      # scrape gaps + node-level alerts during each reboot;
+                                      # §4 reads Prometheus, so it is also this plan's instrument
+    - igpu-i915                       # intel device plugins re-register gpu.intel.com/i915 +
+                                      # npu.intel.com/accel on every rolled node
+    - cifs-share                      # every CIFS mount (smb.csi) is torn down and remounted
+                                      # with its pods on each node
 depends_on: []
-conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended SLOT.
-  # RESOLVED 2026-09-21: cilium-1.20.2 EXECUTED (80395710, chart 1.20.1 -> 1.20.2) and retired (c0797253) -- there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention: --validate treats an unresolvable ref as an ERROR, because a guard pointing at nothing enforces nothing.
-  - flux-oci-chart-sources            # names talos-1.14.0 back
-  - helm-drift-detection              # names talos-1.14.0 back
-  - n8n-2.39.8                        # names talos-1.14.0 back
-  - edot-collector-0.161.0            # names talos-1.14.0 back; its pod is evicted 3x
-  - otel-operator-0.23.0              # names talos-1.14.0 back
-  - kube-prometheus-stack-91.4.1      # ADDED — the v1.14.0 plan OMITTED it. §4 reads
-                                      # Prometheus for its alert/target/rule gates, so a
-                                      # same-night bump of the instrument invalidates the
-                                      # measurement (plans README, conflicts_with rule).
+conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended SLOT (also exclusive: true).
+  - flux-oci-chart-sources            # names talos-1.14.1 back
+  - helm-drift-detection              # names talos-1.14.1 back
+  - n8n-2.39.8                        # names talos-1.14.1 back
+  - edot-collector-0.161.0            # names talos-1.14.1 back; its pod is evicted 3x
+  - otel-operator-0.23.0              # names talos-1.14.1 back
   - multus-macvlan-foundation         # also mutates Talos machine config
-  # - authentik-pg17-decommission   # RESOLVED 2026-09-26: executed + retired in the now:2026-09-26 run; ref removed
-  - authentik-pg17-volume-retire      # reciprocal (2026-09-26 review): deletes detached volume
-                                      # data-authentik-postgresql-0 + 2 stopped replicas, so the
-                                      # §4 Longhorn gate (total 94 / not-healthy set) must be
-                                      # re-read after it runs (live 2026-09-26: total 94, not-healthy
-                                      # = data-authentik-postgresql-0 + pvc-f6ec0213, 188 replicas).
-  - nextcloud-34.0.4                  # sun-attended:2026-10-04 — declared in case THIS
-  - jellyfin-12.1                     # sun-attended:2026-10-11 — plan slips to their date.
-                                      # Today the minutes check already excludes them
-                                      # (145+75 and 145+60 both exceed the 180 budget);
-                                      # these entries survive a downward duration revision.
-  # DROPPED vs the v1.14.0 plan: absenty-drop-npm-runtime (now `blocked`, window null, and
-  # 145+90 > 180 so the scheduler refuses it on minutes) and authentik-pg18-lockstep (now
-  # `executed`). Both entries existed only for the spent 2026-09-13 slot.
-  # General rule, not a list: NO other plan may share this window (§6).
+  - nextcloud-34.0.4                  # declared in case either plan slips onto the other's date
+  - jellyfin-12.1                     # sat-attended:2026-10-10; same reason
+  # ADDED 2026-09-26 for reciprocity — each of these already names talos-1.14.1:
+  - authentik-pg17-volume-retire      # deletes a detached Longhorn volume that §2.5 exempts
+  - authentik-2026.8.3
+  - elasticsearch-obs-recovery-3.14.7
+  - falco-9.2.0                       # falco's eBPF probe meets the new kernel in this plan
+  - flux-reconciler-impersonation
+  - icloud-backup-freshness-3.24.2
+  - n8n-chart-2.1.1
+  - prometheus-pushgateway-3.9.0
+  - wazuh-2xx-edge-coverage
+  # DROPPED 2026-09-26: kube-prometheus-stack-91.4.1 (status executed). The rule still
+  # stands: any FUTURE same-night kube-prometheus-stack plan must be added here, because
+  # §4 reads Prometheus. cilium-1.20.2 / authentik-pg17-decommission: retired earlier.
 capability_change: true               # v1.14 changes node-level behaviour on upgrade:
                                       # containerd NRI now ENABLED by default,
                                       # net.ipv4.conf.*.send_redirects=0 by default,
@@ -92,24 +95,81 @@ capability_change: true               # v1.14 changes node-level behaviour on up
 rollback_class: one-way               # HONEST RATING — see §5. Per-node `talosctl rollback`
                                       # is real and is the CANARY's abort path, but it is one
                                       # boot-partition deep and does not unwind etcd 3.6->3.7.
-                                      # Past the canary this is roll-forward / stop-in-place.
+                                      # Past the canary: stop-in-place, or DR from the §3.8a
+                                      # etcd snapshot + Longhorn backups (§5.2).
 security_ref: null                    # no security driver
 finding_refs:
   - F-912f4778                        # "Talos Linux (cluster nodes): v1.13.10 → v1.14.1"
-                                      # — the finding's own title now names v1.14.1
-  - F-0a32b505                        # "Plan talos-1.14.0 ... has drifted ... re-seek the
-                                      # operator GO for the new target" — THIS FILE answers it
-  - F-9a58f400                        # the PR #212 mis-attribution this plan carries forward
-  # DROPPED F-fc435c71: resolved 2026-09-10 (window-capacity question, discharged).
-  # An ownership claim on a closed finding is noise.
-status: draft                         # re-drafted 2026-09-20 for the v1.14.1 re-target.
-                                      # The 2026-09-12 operator GO covered v1.14.0 ONLY and
-                                      # does NOT carry over — an approval is scoped to what
-                                      # was reviewed. Needs re-vet, then a fresh GO.
-window: "sun-attended:2026-09-27"     # inherited from the superseded talos-1.14.0, which
-                                      # held this slot. sun-attended is the ONLY
-                                      # allow_reboot window; a node roll may not be stamped
-                                      # `now:` (on_demand has allow_reboot: false).
+  # DROPPED 2026-09-26: F-0a32b505 (resolved 2026-09-21) and F-9a58f400 (resolved
+  # 2026-09-22). An ownership claim on a resolved finding is noise.
+premises:
+  # All read-only, single commands, no pipes. The three upstream reads use
+  # `kubectl get --raw` against a public host with --kubeconfig=/dev/null and a dummy
+  # bearer (--token=none): kubectl is the only HTTP client plan-premises.py allows, the
+  # dummy token stops kubectl's basic-auth prompt, and no cluster credential is sent.
+  - id: nodes-on-v1.13.10
+    why: >-
+      `current:` claims all three nodes run v1.13.10. A node already on v1.14.x (or a
+      fourth node) prints a different string and fails.
+    run: kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.osImage}'
+    expect_exact: Talos (v1.13.10) Talos (v1.13.10) Talos (v1.13.10)
+  - id: etcd-protocol-3.6
+    why: >-
+      Talos 1.14 is compatible with etcd 3.6.x only. Reads Prometheus through the
+      apiserver service proxy: exactly one server_version group, 3.6.x, with count 3.
+      A mixed or 3.5/3.7 cluster prints a second group or another version and fails.
+    run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count%20by%20(server_version)%20(etcd_server_version)'
+    expect_matches: '^\{"status":"success","data":\{"resultType":"vector","result":\[\{"metric":\{"server_version":"3\.6\.[0-9]+"\},"value":\[[0-9.]+,"3"\]\}\]\}\}$'
+  - id: factory-publishes-schematic-v1.14.1
+    why: >-
+      The Image Factory serves the OCI index for our schematic at v1.14.1, and its
+      linux/amd64 entry is the digest measured 2026-09-26. Content-pinned, so a
+      TLS-intercepting middlebox answering every path (the 2026-09-06 failure) cannot
+      satisfy it, and a silently re-published tag fails it too. The v9.9.9 -> 404
+      NEGATIVE CONTROL cannot be a premise: kubectl prints NotFound on stderr with
+      rc=1, which plan-premises.py scores as a failure by design and redirects are
+      refused. It is therefore a hard gate at §3.1 instead.
+    run: kubectl --kubeconfig=/dev/null --server=https://factory.talos.dev --token=none get --raw /v2/installer/43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3/manifests/v1.14.1
+    expect_matches: '"mediaType":"application/vnd\.oci\.image\.index\.v1\+json".*"digest":"sha256:2c44ce6a02726daa6742eb1ba8efc6dad5dea692db5b8496f52f0523da1d6253","platform":\{"architecture":"amd64","os":"linux"\}'
+  - id: newest-stable-talos-is-v1.14.1
+    why: >-
+      The factory's version list (the set of installable releases) contains v1.14.1 and
+      no later STABLE tag (v1.14.2+, v1.15.0+ without a pre-release suffix). A new
+      stable release means re-seek the GO (§3.4). v1.15.0-alpha.0 is correctly ignored.
+    run: kubectl --kubeconfig=/dev/null --server=https://factory.talos.dev --token=none get --raw /versions
+    expect_matches: '^(?!.*"v1\.14\.([2-9]|[1-9][0-9])")(?!.*"v1\.(1[5-9]|[2-9][0-9])\.[0-9]+")(?=.*"v1\.14\.1")'
+  - id: longhorn-94-volumes-all-replica-2
+    why: >-
+      Sizes the §3.11 gate: 94 volumes, every one numberOfReplicas 2. A new volume or a
+      replica-count change prints a different sequence and fails.
+    run: kubectl get volumes.longhorn.io -n storage -o jsonpath='{.items[*].spec.numberOfReplicas}'
+    expect_matches: '^(2 ){93}2$'
+  - id: backup-cronjob-exists
+    why: >-
+      §2.6 and §6 name storage/daily-backup-all-volumes (NOT the stale
+      backup-of-all-volumes). Schedule is UTC (no timeZone set). Missing object fails.
+    run: kubectl get cronjob -n storage daily-backup-all-volumes -o jsonpath='{.metadata.name} {.spec.schedule} tz=[{.spec.timeZone}]'
+    expect_exact: daily-backup-all-volumes 0 3 * * * tz=[]
+  - id: pgadmin-selector
+    why: >-
+      §4.3 CONTENTS ASSERTION 1 writes through deploy/pgadmin and selects its pod with
+      app=pgadmin. A renamed deploy or a changed selector fails here, not mid-window.
+    run: kubectl get deploy -n databases pgadmin -o jsonpath='{.spec.selector.matchLabels}'
+    expect_exact: '{"app":"pgadmin"}'
+  - id: talhelper-3.1.17-published
+    why: >-
+      §3.5 bumps talhelper to 3.1.17. plan-premises.py cannot run `mise` (not an allowed
+      read command), so this reads the same upstream tag from the Go module proxy; a
+      non-existent tag returns NotFound (control v3.1.99 measured NotFound 2026-09-26).
+      Local installability is still gated by `mise ls-remote talhelper` at §3.5.
+    run: kubectl --kubeconfig=/dev/null --server=https://proxy.golang.org --token=none get --raw /github.com/budimanjojo/talhelper/v3/@v/v3.1.17.info
+    expect_contains: '"Version":"v3.1.17"'
+status: draft                         # re-drafted 2026-09-20 for v1.14.1; reviewer fix pass
+                                      # 2026-09-26. The 2026-09-12 GO covered v1.14.0 ONLY and
+                                      # does NOT carry over. Needs a FRESH operator GO.
+window: "sun-attended:2026-09-27"     # sun-attended is the ONLY allow_reboot window; a node
+                                      # roll may not be stamped `now:` (on_demand has
+                                      # allow_reboot: false).
 sops_refs:
   - docs/sops/talos-upgrade.md
   - docs/sops/application-update.md
@@ -119,14 +179,19 @@ sops_refs:
   - docs/sops/disaster-recovery.md
   - docs/sops/verification-contents-not-shape.md
   - docs/sops/monitoring.md
-generated: "2026-09-20"
+  - docs/sops/unifi-device-firmware.md
+generated: "2026-09-26"
 ---
 
 # Talos Linux node roll — v1.13.10 → v1.14.1
 
-> **Supersedes `talos-1.14.0.md`.** Same work, new target. Every premise below was
-> re-measured on 2026-09-20; nothing is carried forward from the 2026-09-09 draft.
-> Where a number moved, the old value is shown so the drift is visible.
+> **Supersedes `talos-1.14.0.md`.** Same work, new target. Re-measured on 2026-09-20, then
+> again on **2026-09-26** in a reviewer fix pass (plan-reviewer verdict `needs-fix`): the
+> machine-checkable facts now live in the frontmatter `premises:` block
+> (`plan-premises.py talos-1.14.1 --require-premises`), and every drifting baseline —
+> VIP owner, etcd leader, Longhorn engine counts, the not-healthy volume set, alert/target/
+> rule counts, HTTPRoute count — is **re-measured at §2 by rule, never compared to a number
+> written here.** Numbers quoted below are dated examples of what the rule printed.
 
 ## 1) Summary & why held
 
@@ -143,9 +208,9 @@ cluster.
 The operator approved **v1.14.0** on 2026-09-12. Upstream published **v1.14.1** on
 2026-09-15 16:41Z. An approval is scoped to what was reviewed, so the recorded GO does
 not authorise v1.14.1, and executing v1.14.0 now would deliberately install a
-superseded release on every control-plane node. Finding **F-0a32b505** called for
-exactly this re-resolution; **F-58f0bbab** is the general form (upstream drift must be
-caught *before* the GO, not mid-window).
+superseded release on every control-plane node. Finding F-0a32b505 called for exactly
+this re-resolution (resolved 2026-09-21 by this file); **F-58f0bbab** is the general form
+(upstream drift must be caught *before* the GO, not mid-window).
 
 **Measured 2026-09-20** — `gh api repos/siderolabs/talos/releases`:
 
@@ -160,7 +225,7 @@ v1.14.1 is the newest stable release on any line. `runbooks/check-all-versions.p
 agrees (*Latest stable Talos: v1.14.1*), as does finding **F-912f4778**, whose title
 now reads `v1.13.10 → v1.14.1`.
 
-### ATTRIBUTION — the correction this plan carries (F-9a58f400)
+### ATTRIBUTION — the correction this plan carries (F-9a58f400, resolved 2026-09-22)
 
 Two different artifacts have been conflated. They are not the same thing and they do
 not move at the same time.
@@ -375,124 +440,313 @@ embeds `v1.14.0-alpha.2`. Neither embeds GA machinery, so the warning fires on t
 version string and **no talhelper release will ever clear it** — it fired identically for
 v1.14.0. The warning is not a blocker (exit 0), but it means **talhelper is not the
 validator here — the generated diff and the canary node are.** §3.6 reviews the diff by
-hand; §4.1 gates on node 01 actually booting.
+hand; §4.1 gates on the canary actually booting.
 
 ## 2) Pre-checks
 
 Run all of these **inside the window, before touching a node**. Every one has a stated
-pass condition; a fail is a no-go, not a note. Baselines are from **2026-09-20**.
+pass condition; a fail is a no-go, not a note. **Every baseline is RE-MEASURED here and
+recorded to a file in `$SCR`; later gates compare against those files, never against a
+number printed in this plan.** Dated example readings (2026-09-26 ~06:00Z) are in italics.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 export KUBECONFIG="$PWD/kubeconfig"
 export TALOSCONFIG="$PWD/kubernetes/bootstrap/talos/clusterconfig/talosconfig"
+# Local-only scratch for baselines, the old node configs (§3.6) and the etcd snapshot (§3.8a).
+# NOT the repo, NOT /tmp of another session, NOT an iCloud/Nextcloud-synced path.
+SCR="$HOME/.cache/talos-1141"; mkdir -p "$SCR"; chmod 700 "$SCR"
+stat -f '%Lp %N' "$SCR"                     # MUST print 700
+P='/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1'
 ```
 
-**2.1 — No other plan is mid-flight.** This window is exclusive.
+**2.0 — Write the four gate helpers into `$SCR`.** Each was dry-run against the live
+cluster on 2026-09-26 **with a negative control** (a crafted baseline that must fail did
+fail). They read Prometheus through the apiserver service proxy (`kubectl get --raw`), so
+no port-forward can silently die mid-window.
+
+```bash
+cat > "$SCR/lh_gate.py" <<'PY'
+import json, subprocess, sys, collections
+mode, path = sys.argv[1], sys.argv[2]          # mode: baseline | gate
+def kget(*a):
+    return json.loads(subprocess.check_output(["kubectl", "get", *a, "-o", "json"]))["items"]
+vols = kget("volumes.longhorn.io", "-n", "storage")
+reps = kget("replicas.longhorn.io", "-n", "storage")
+pvs = {p["metadata"]["name"]: p["status"].get("phase") for p in kget("pv")}
+wl = kget("deploy,statefulset", "-A")
+def consumers(ns, pvc):
+    return [(w["kind"] + "/" + w["metadata"]["name"], w["spec"].get("replicas")) for w in wl
+            if w["metadata"]["namespace"] == ns and any(
+                (x.get("persistentVolumeClaim") or {}).get("claimName") == pvc
+                for x in (w["spec"]["template"]["spec"].get("volumes") or []))]
+nogo, nh = [], []
+for v in vols:
+    s, n = v["status"], v["metadata"]["name"]
+    if s.get("robustness") == "healthy": continue
+    nh.append(n)
+    if s.get("state") != "detached":
+        nogo.append(f"{n}: {s.get('robustness')} while {s.get('state')}"); continue
+    ks = s.get("kubernetesStatus") or {}
+    pv = pvs.get(ks.get("pvName") or n, "?"); cons = consumers(ks.get("namespace"), ks.get("pvcName"))
+    ok = pv == "Released" or (bool(cons) and all(r == 0 for _, r in cons))
+    print(f"  {'EXEMPT' if ok else 'NO-GO '} {n} detached pv={pv} consumers={cons}")
+    if not ok: nogo.append(f"{n}: detached but pv={pv}, consumers not all scaled to 0")
+total = len(reps)
+print("volumes", len(vols), "numberOfReplicas", dict(collections.Counter(v["spec"].get("numberOfReplicas") for v in vols)))
+print("replicas total", total, sorted(collections.Counter((r["spec"].get("nodeID"), r["status"].get("currentState")) for r in reps).items()))
+print("NOT-HEALTHY", sorted(nh))
+if mode == "baseline":
+    json.dump({"not_healthy": sorted(nh), "replica_total": total}, open(path, "w"))
+    print("recorded ->", path)
+else:
+    b = json.load(open(path))
+    if sorted(nh) != b["not_healthy"]: nogo.append(f"not-healthy set {sorted(nh)} != baseline {b['not_healthy']}")
+    if total != b["replica_total"]: nogo.append(f"replica total {total} != baseline {b['replica_total']}")
+for x in nogo: print("  FAIL:", x)
+print("VERDICT", "NO-GO" if nogo else "PASS")
+PY
+cat > "$SCR/bk.py" <<'PY'
+import json, subprocess, sys, datetime
+def kget(*a):
+    return json.loads(subprocess.check_output(["kubectl", "get", *a, "-o", "json"]))["items"]
+def ts(x):
+    return datetime.datetime.fromisoformat(x.replace("Z", "+00:00")) if x else None
+now = datetime.datetime.now(datetime.timezone.utc)
+exempt = set(json.load(open(sys.argv[1]))["not_healthy"])
+bv = {}
+for b in kget("backupvolumes.longhorn.io", "-n", "storage"):
+    vn = b["spec"].get("volumeName") or (b["metadata"].get("labels") or {}).get("backup-volume")
+    t = ts(b["status"].get("lastBackupAt"))
+    if vn and t and (vn not in bv or t > bv[vn]): bv[vn] = t
+stale, exempted, mismatch = [], [], []
+for v in kget("volumes.longhorn.io", "-n", "storage"):
+    n = v["metadata"]["name"]
+    tv = ts(v["status"].get("lastBackupAt")); tb = bv.get(n)
+    if tv and tb and abs((tv - tb).total_seconds()) > 3600:
+        mismatch.append((n, str(tv), str(tb)))
+    best = max([t for t in (tv, tb) if t], default=None)
+    age = "NEVER" if best is None else f"{(now - best).total_seconds() / 3600:.0f}h"
+    bad = best is None or (now - best).total_seconds() > 48 * 3600
+    if not bad: continue
+    if n in exempt and v["status"].get("state") == "detached":
+        exempted.append((n, age))
+    else:
+        stale.append((n, age, v["status"].get("state")))
+print("EXEMPT (detached, recorded at 2.5):", len(exempted))
+for e in exempted: print("   ", e)
+print("Volume-vs-BackupVolume lastBackupAt mismatch >1h:", len(mismatch))
+for m in mismatch: print("   ", m)
+print("STALE(>48h) or NEVER, not exempt:", len(stale))
+for s in stale: print("   ", s)
+print("VERDICT", "NO-GO" if stale else "GO")
+PY
+cat > "$SCR/alerts.py" <<'PY'
+import json, subprocess, sys
+mode, path = sys.argv[1], sys.argv[2]          # baseline | compare
+P = "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/alerts"
+al = json.loads(subprocess.check_output(["kubectl", "get", "--raw", P]))["data"]["alerts"]
+firing = [a for a in al if a["state"] == "firing"]
+wd = sum(1 for a in firing if a["labels"].get("alertname") == "Watchdog")
+def k(a):
+    l = a["labels"]
+    return "|".join([l.get("alertname", "")] + [f"{x}={l[x]}" for x in ("namespace", "volume", "instance", "account") if x in l])
+s = sorted({k(a) for a in firing if a["labels"].get("alertname") not in ("Watchdog", "InfoInhibitor")})
+# Allowed LATE alert (not in any baseline): expected ~11:38Z Sunday if the detached volume still exists
+ALLOWED_LATE = {"LonghornVolumeSnapshotChainNotPruned|volume=data-authentik-postgresql-0"}
+print("Watchdog firing:", wd)
+print("firing (excl. Watchdog/InfoInhibitor):", len(s))
+for x in s: print("   ", x)
+fail = []
+if wd != 1: fail.append("Watchdog not firing exactly once -> the alert pipeline itself is broken")
+if mode == "baseline":
+    json.dump(s, open(path, "w")); print("recorded ->", path)
+else:
+    new = [x for x in s if x not in set(json.load(open(path))) and x not in ALLOWED_LATE]
+    late = [x for x in s if x in ALLOWED_LATE]
+    if late: print("allowed late alert present:", late)
+    if new: fail.append(f"NEW alerts vs baseline: {new}")
+for f in fail: print("  FAIL:", f)
+print("VERDICT", "FAIL" if fail else "PASS")
+PY
+cat > "$SCR/notready.py" <<'PY'
+import json, subprocess, sys
+mode, path = sys.argv[1], sys.argv[2]           # baseline | compare
+pods = json.loads(subprocess.check_output(["kubectl", "get", "pods", "-A", "-o", "json"]))["items"]
+def key(p):
+    o = (p["metadata"].get("ownerReferences") or [{}])[0]
+    n = o.get("name") or p["metadata"]["name"]
+    if o.get("kind") == "ReplicaSet": n = n.rsplit("-", 1)[0]
+    if o.get("kind") == "Job": n = "job:" + n.rsplit("-", 1)[0]
+    return f"{p['metadata']['namespace']}/{n}"
+bad = set()
+for p in pods:
+    ph = p["status"].get("phase")
+    if ph == "Succeeded": continue
+    cs = p["status"].get("containerStatuses") or []
+    if ph != "Running" or not cs or not all(c.get("ready") for c in cs):
+        bad.add(key(p))
+print("NOT-READY workloads:", len(bad))
+for b in sorted(bad): print("   ", b)
+if mode == "baseline":
+    json.dump(sorted(bad), open(path, "w")); print("recorded ->", path)
+else:
+    new = sorted(bad - set(json.load(open(path))))
+    print("NEW vs baseline:", new)
+    print("VERDICT", "FAIL" if new else "PASS")
+PY
+cat > "$SCR/nodegate.py" <<'PY'
+import json, subprocess, sys
+# snap <file>  |  check <file> <rolled-node-name> <rolled-node-was-etcd-leader: yes|no>
+mode, path = sys.argv[1], sys.argv[2]
+IP = {"k8s-nuc14-01": "192.168.55.11", "k8s-nuc14-02": "192.168.55.12", "k8s-nuc14-03": "192.168.55.13"}
+Q = "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query="
+def q(expr):
+    r = json.loads(subprocess.check_output(["kubectl", "get", "--raw", Q + expr]))["data"]["result"]
+    return {x["metric"]["instance"].split(":")[0]: float(x["value"][1]) for x in r}
+carrier = q("node_network_carrier_changes_total%7Bdevice%3D~%22en.*%22%7D")
+leader = q("etcd_server_leader_changes_seen_total")
+if len(carrier) != 3 or len(leader) != 3:
+    sys.exit(f"FAIL: expected 3 series each, got carrier={carrier} leader={leader} (scrape gap? wait and retry)")
+print("carrier_changes", carrier); print("leader_changes", leader)
+if mode == "snap":
+    json.dump({"carrier": carrier, "leader": leader}, open(path, "w")); print("recorded ->", path); sys.exit(0)
+rolled, was_leader = sys.argv[3], sys.argv[4] == "yes"
+b = json.load(open(path)); fail = []
+for ip in IP.values():
+    if ip == IP[rolled]: continue            # its counters reset with the reboot
+    dc = carrier[ip] - b["carrier"][ip]; dl = leader[ip] - b["leader"][ip]
+    print(f"  survivor {ip}: carrier +{dc:.0f}  leader_changes +{dl:.0f}")
+    if dc > 0: fail.append(f"{ip} NIC carrier changed during another node's reboot -> STOP (switch/cabling, not Talos)")
+    if dl > (1 if was_leader else 0): fail.append(f"{ip} saw {dl:.0f} leader change(s); allowed {1 if was_leader else 0} -> etcd leader loss outside this node's own reboot, STOP")
+n = json.loads(subprocess.check_output(["kubectl", "get", "node", rolled, "-o", "json"]))["status"]["allocatable"]
+for res, want in (("gpu.intel.com/i915", "5"), ("npu.intel.com/accel", "1")):
+    print(f"  {rolled} {res}={n.get(res)}")
+    if n.get(res) != want: fail.append(f"{rolled} allocatable {res}={n.get(res)} (want {want}) -> device plugin not re-registered")
+for ns, ds in (("security", "falco"), ("security", "falco-log-rotate"), ("security", "wazuh-agent"), ("monitoring", "otel-operator-daemon-collector")):
+    s = json.loads(subprocess.check_output(["kubectl", "get", "ds", "-n", ns, ds, "-o", "json"]))["status"]
+    print(f"  ds {ns}/{ds} ready {s.get('numberReady')}/{s.get('desiredNumberScheduled')}")
+    if not (s.get("numberReady") == s.get("desiredNumberScheduled") == 3): fail.append(f"ds {ns}/{ds} not 3/3")
+for f in fail: print("  FAIL:", f)
+print("VERDICT", "FAIL" if fail else "PASS")
+PY
+ls -l "$SCR"/*.py | wc -l                   # MUST print 5
+```
+
+*Controls run 2026-09-26:* `lh_gate.py gate` against a baseline naming one volume and 190
+replicas → `NO-GO` on both lines; `bk.py` with an empty exempt set → `NO-GO` naming the
+detached `icloud-docker-andrea` session volume (147h); `nodegate.py check` against a
+baseline with one leader change fewer → `FAIL … leader loss`.
+
+**2.1 — Today's NOW run is finished and no other plan is mid-flight.** This window is
+exclusive (`exclusive: true`).
 
 ```bash
 .venv/bin/python3 runbooks/maintenance-plan.py --open
+grep -l 'window: "now:2026-09-26"' runbooks/maintenance/plans/*.md
+cat runbooks/state/active-updates.json
+git log --oneline -15
 ```
-**PASS:** no other plan carries `sun-attended:2026-09-27`. **Also confirm
-`talos-1.14.0` is NOT listed as executable** — it must be `superseded`, or the slot is
-double-booked at 145+140 min (§6).
+**PASS, all of:** (a) `--open` lists **no** plan under `now:2026-09-26`, and the `grep`
+prints nothing — every plan of the 2026-09-26 NOW run is executed-and-retired or
+re-windowed (on 2026-09-26 06:00Z fifteen were still stamped, mid-run); (b)
+`active-updates.json` has an empty `"active": []`; (c) no plan other than `talos-1.14.1`
+carries `sun-attended:2026-09-27`; (d) `talos-1.14.0` is `superseded` with `window: null`.
+**Any leftover `now:2026-09-26` plan = NO-GO**: a half-verified change from yesterday is a
+second candidate cause for anything this roll breaks.
 
-**2.2 — Nodes healthy and all on v1.13.10.**
+**2.2 — Nodes healthy and all on v1.13.10.** (also premise `nodes-on-v1.13.10`)
 
 ```bash
 mise exec -- kubectl get nodes -o wide
 ```
 **PASS:** 3× `Ready`, `Talos (v1.13.10)`, kubelet `v1.36.0`.
-*(Baseline: kernel `6.18.48-talos`, containerd `2.2.7`. Note both move: kernel →
-6.18.51, containerd → 2.3.5.)*
+*(Kernel `6.18.48-talos`, containerd `2.2.7`; both move: kernel → 6.18.51, containerd → 2.3.5.)*
 
-**2.3 — etcd quorum, and confirm we are on 3.6.x (the v1.14 prerequisite).**
+**2.3 — etcd quorum, 3.6.x, and the spontaneous-election rate.**
 
 ```bash
 mise exec -- talosctl -n 192.168.55.11 etcd members
 mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status
+mise exec -- kubectl get --raw "$P/query?query=max(increase(etcd_server_leader_changes_seen_total%5B24h%5D))"
 ```
-**PASS:** exactly 3 members, no `LEARNER`, empty `ERRORS`, converged `RAFT INDEX`, and
-`PROTOCOL` reporting **3.6.x**.
-*(Baseline: PROTOCOL 3.6.14 / STORAGE 3.6.0, leader `73a201c6b4bf6faf` =
-**k8s-nuc14-03**, raft term 65, index 402848902 identical on all three, DB 821–859 MB
-with 140 MB in use.)* **If `PROTOCOL` is not 3.6.x, STOP** — v1.14 states compatibility
-with 3.6.x only.
+**PASS:** exactly 3 members, no `LEARNER`, empty `ERRORS`, converged `RAFT INDEX`,
+`PROTOCOL` **3.6.x** on all three (else STOP — v1.14 is 3.6-only), and the 24h leader-change
+increase **< 6**. *(2026-09-26: PROTOCOL 3.6.14 / STORAGE 3.6.0, DB 845–886 MB with 244 MB
+in use. The leader was `a1ca2fde…` = k8s-nuc14-02 at 05:54Z and `73a201c6…` = k8s-nuc14-03
+at 06:03Z — **no reboot in between**. Spontaneous elections measured: 6 in 7d, 4 in 24h, 2
+in the busy hour of the NOW run. That base rate is why §3.10's leader-loss rule has a
+triage branch.)* ≥ 6 in 24h with no reboots = etcd is already unstable: NO-GO, investigate
+first.
 
-**2.4 — Re-derive the roll order. THE ORDER CHANGED since the v1.14.0 plan.**
+**2.4 — Roll order: derive it by RULE, now and again before every node.**
 
 ```bash
-# VIP owner (192.168.55.10) — must be the LAST node rolled
 for ip in 192.168.55.11 192.168.55.12 192.168.55.13; do
   echo -n "$ip vip=" ; mise exec -- talosctl -n $ip get addresses 2>/dev/null | grep -c '192.168.55.10/32'
 done
-# Longhorn attach load per node
-mise exec -- kubectl get volumes -n storage \
-  -o custom-columns='NODE:.status.currentNodeID' --no-headers | sort | uniq -c
+mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status   # LEADER column
+mise exec -- kubectl -n storage get engines.longhorn.io \
+  -o custom-columns='NODE:.spec.nodeID' --no-headers | sort | uniq -c
 ```
-**PASS:** exactly one node reports `vip=1`.
-*(Baseline 2026-09-20: **VIP on `k8s-nuc14-03`** — it was on 02 in the v1.14.0 plan.
-Attached volumes 01=17, 02=45, 03=30, plus 2 detached. So **node 03 now holds the VIP
-AND etcd leadership simultaneously**; §3.5 re-derives the order from that, and §7 prices
-the extra 5 minutes it costs.)*
+**PASS:** exactly one node reports `vip=1`, and all three MEMBER rows show the same LEADER.
 
-**2.5 — Longhorn: every volume healthy, with the two expected exceptions named.**
+**The rule (applied in §3.8):** walk the fixed tie-break order **02 → 01 → 03**. The
+**canary** is the first node in that order holding **neither** the VIP **nor** etcd
+leadership. The other two follow in the same 02 → 01 → 03 order. Never roll a node that
+holds BOTH the VIP and leadership while an un-rolled node holding neither exists — swap them.
+*(Examples: the reviewer's reading, VIP 01 / leader 03 → **02 → 01 → 03**. The 05:54Z
+reading, VIP 01 / leader 02 → 03 → 02 → 01. The 06:03Z reading, VIP 01 / leader 03 → 02 →
+01 → 03 again. Leadership moved twice in ten minutes; that is why the order is a rule.)*
+*Engines per node 2026-09-26: 01=20, 02=38, 03=34 (+2 detached with no node). So the canary
+may well be the HEAVIEST node — §7 prices it that way.*
+
+**2.5 — Longhorn: every not-healthy volume is explained, and the set is RECORDED.**
 
 ```bash
-mise exec -- kubectl get volumes -n storage -o json | python3 -c "
-import sys,json,collections
-d=json.load(sys.stdin)['items']
-bad=[(v['metadata']['name'],v['status'].get('robustness'),v['status'].get('state')) for v in d
-     if v['status'].get('robustness')!='healthy']
-print('total',len(d),'not-healthy',len(bad))
-for b in bad: print('  ',b)
-print('replica counts:',collections.Counter(v['spec'].get('numberOfReplicas') for v in d))
-print('state:',collections.Counter(v['status'].get('state') for v in d))"
+python3 "$SCR/lh_gate.py" baseline "$SCR/lh-baseline.json"
+cat "$SCR/lh-baseline.json"
 ```
+**The rule (in `lh_gate.py`):** every volume whose `robustness` is not `healthy` must be
+**detached** AND (its PV is `Released` OR every Deployment/StatefulSet mounting its PVC is
+scaled to **0**). **Any attached not-healthy volume is a NO-GO**, as is a detached one whose
+consumer still wants replicas. **PASS:** `VERDICT PASS`, `numberOfReplicas {2: 94}` (premise
+`longhorn-94-volumes-all-replica-2`), and the recorded file carries the not-healthy **names**
+and the **replica total**. §2.6 and §3.11 read that file.
+*(2026-09-26: `data-authentik-postgresql-0` — detached, PV `Released`, the retired pg17
+volume — and `pvc-f6ec0213-…` = PVC `backup/icloud-docker-andrea-session`, detached,
+consumer `Deployment/icloud-docker-andrea` at 0 replicas. Replica total **188**:
+01=59 running/2 stopped, 02=66/1, 03=59/1; the 4 `stopped` belong to the 2 detached volumes.
+`icloud-docker-mu-session` — exempt in the 2026-09-20 draft — is attached and healthy now.)*
 
-**PASS:** `total 94`, and the not-healthy set is **exactly these two, and no others**:
+> **If `authentik-pg17-volume-retire` (operator GO 2026-09-26) has run before the window,
+> `data-authentik-postgresql-0` no longer exists: the set shrinks to one name and the total
+> to 186.** That is exactly why the set is measured here and not written down: whatever
+> §2.5 records is the contract for §3.11. Never "correct" the file by hand to match this plan.
 
-```
-('icloud-docker-mu-session', 'unknown', 'detached')
-('pvc-f6ec0213-4b00-49d9-93b4-954d5fee1d31', 'unknown', 'detached')   # PVC icloud-docker-andrea-session
-```
+At `numberOfReplicas: 2` across 3 nodes, one node down leaves every volume with a replica
+there on a single replica — degraded but serving. There is no spare-replica cushion.
 
-> **This gate was WRONG in the v1.14.0 plan and would have false-failed the window.**
-> That plan asserted *"the live reading is 93/93 healthy with zero detached… Any
-> non-healthy or detached volume is now a no-go."* Today there are **94** volumes and
-> **two** are legitimately detached: both `icloud-docker` session volumes in namespace
-> `backup`, whose Deployments (`icloud-docker-mu`, `icloud-docker-andrea`) are scaled
-> **0/0** and have been for 33 days. Longhorn only computes `robustness` while a volume
-> is attached, so `unknown` on a deliberately-detached volume is the expected reading,
-> not a fault. Both still back up nightly (`lastBackupAt` 2026-09-20 03:07/03:08Z).
-> A gate that cries wolf gets waved through on the one occasion it is real.
-
-**Any THIRD non-healthy volume is a no-go.** **PASS also:** `replica counts:
-Counter({2: 94})`. **This is the number that sizes the gate.** At `numberOfReplicas: 2`
-across 3 nodes, taking one node down leaves a large share of volumes on a single replica
-— degraded but serving. There is no spare-replica cushion.
-
-**2.6 — Backups fresh.** `docs/sops/backup.md` warns `lastBackupAt` can lag one cycle.
+**2.6 — Backups fresh.** `docs/sops/backup.md` warns `lastBackupAt` can lag one cycle, and
+**Backup CRs can be unsynced (`status.volumeName` empty — hit two plans on 2026-09-26)**, so
+this gate does NOT enumerate Backup CRs: it reads `Volume.status.lastBackupAt` and
+cross-checks the matching `BackupVolume.status.lastBackupAt`, taking the newer of the two.
 
 ```bash
-mise exec -- kubectl get jobs -n storage --sort-by=.status.startTime \
-  | grep daily-backup-all-volumes | tail -1
-mise exec -- kubectl get volumes -n storage -o json | python3 -c "
-import sys,json,datetime
-now=datetime.datetime.now(datetime.timezone.utc); stale=[]
-for v in json.load(sys.stdin)['items']:
-    lb=v['status'].get('lastBackupAt') or ''
-    if not lb: stale.append((v['metadata']['name'],'NEVER')); continue
-    h=(now-datetime.datetime.fromisoformat(lb.replace('Z','+00:00'))).total_seconds()/3600
-    if h>48: stale.append((v['metadata']['name'],f'{h:.0f}h'))
-print('stale(>48h) or never:',len(stale))
-for s in stale: print(' ',s)"
+mise exec -- kubectl get jobs -n storage --sort-by=.status.startTime | grep daily-backup-all-volumes | tail -1
+python3 "$SCR/bk.py" "$SCR/lh-baseline.json"
 ```
-**PASS:** the most recent `daily-backup-all-volumes-*` Job is `Complete` within 24h, and
-the stale list is **empty**.
-*(Baseline: Job `daily-backup-all-volumes-29831220` Complete, 18h old; `stale: 0`.
-The CronJob `storage/daily-backup-all-volumes` runs `0 3 * * *` — verified to exist
-under that exact name, so a 09:00 window sees a ~6h-old backup.)*
+**PASS:** the newest `daily-backup-all-volumes-*` Job is `Complete` within 24h, and
+`VERDICT GO` — i.e. **no volume is NEVER-backed-up or older than 48h unless it is one of the
+DETACHED names recorded at §2.5**. The exempt names are printed with their age; read them.
+An **attached** volume older than 48h, or any `NEVER`, still fails. A `Volume-vs-BackupVolume
+mismatch` line is not a fail by itself but must be explained before GO.
+*(2026-09-26: Job `daily-backup-all-volumes-29839860` Complete 03:09:37Z; exempt:
+`pvc-f6ec0213-…` 147h — its consumer is scaled to 0, so nothing writes to it; stale 0.)*
+**Timing, corrected:** the CronJob `storage/daily-backup-all-volumes` is `0 3 * * *` with no
+`timeZone`, i.e. **03:00 UTC = 05:00 Europe/Berlin (CEST)**. The window opens 09:00 Berlin =
+07:00Z, so it sees a **~4h-old** backup (the 2026-09-20 draft said ~6h, reading the schedule
+as Berlin time).
 
 **2.7 — Flux fully green.** A reconcile landing mid-roll is a confounder.
 
@@ -500,77 +754,44 @@ under that exact name, so a 09:00 window sees a ~6h-old backup.)*
 mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
 mise exec -- flux get helmreleases   -A | awk 'NR==1 || $5 != "True"'
 ```
-**PASS:** both print only the header row. *(Baseline: both clean.)*
+**PASS:** both print only the header row.
 
-**2.8 — Observability baseline. THE ALERT BASELINE IS NOT ZERO. Write these down** —
-§4.4 diffs against them.
+**2.8 — Observability baseline, recorded to files.** §4.3/§4.4 compare against these.
 
 ```bash
-mise exec -- kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus \
-  9099:9090 >/dev/null 2>&1 & PF=$!
-sleep 6
-curl -s localhost:9099/api/v1/alerts | python3 -c "
-import sys,json
-a=[x for x in json.load(sys.stdin)['data']['alerts'] if x['state']=='firing'
-   and x['labels'].get('alertname') not in ('Watchdog','InfoInhibitor')]
-print('firing:',len(a))
-for x in a: print('  ',x['labels'].get('alertname'),x['labels'].get('account','-'))"
-curl -s localhost:9099/api/v1/targets | python3 -c "
+python3 "$SCR/alerts.py"   baseline "$SCR/alerts-baseline.json"
+python3 "$SCR/notready.py" baseline "$SCR/notready-baseline.json"
+mise exec -- kubectl get --raw "$P/targets" | python3 -c "
 import sys,json
 t=json.load(sys.stdin)['data']['activeTargets']
 print('targets',len(t),'up',sum(1 for x in t if x['health']=='up'))
-print('etcd:',[(x['labels'].get('instance'),x['health']) for x in t if 'etcd' in x['labels'].get('job','')])"
-curl -s localhost:9099/api/v1/rules | python3 -c "
+print('etcd:',[(x['labels'].get('instance'),x['health']) for x in t if 'etcd' in x['labels'].get('job','')])" \
+  | tee "$SCR/targets-baseline.txt"
+mise exec -- kubectl get --raw "$P/rules" | python3 -c "
 import sys,json; g=json.load(sys.stdin)['data']['groups']
-print('groups',len(g),'rules',sum(len(x['rules']) for x in g))"
-kill $PF 2>/dev/null
+print('groups',len(g),'rules',sum(len(x['rules']) for x in g))" | tee "$SCR/rules-baseline.txt"
 ```
-
-**PASS / baseline measured 2026-09-20:**
-
-| Signal | Baseline | v1.14.0 plan said |
-|---|---|---|
-| firing | **4** (see below) | 0 |
-| targets | **98 up 98** | 99 up 99 |
-| etcd targets | `.11:2381`, `.12:2381`, `.13:2381` all `up` | same |
-| rule groups / rules | **119 / 487** | 115 / 463 |
-
-The four firing alerts are **pre-existing and unrelated to this plan**:
-
-```
-ICloudBackupPhotosStale          account=andrea   severity=warning    active since 2026-09-20T14:24Z
-ICloudBackupPhotosStale          account=mu       severity=warning    active since 2026-09-20T14:24Z
-ICloudBackupPhotosStaleCritical  account=andrea   severity=critical   active since 2026-09-20T14:24Z
-ICloudBackupPhotosStaleCritical  account=mu       severity=critical   active since 2026-09-20T14:24Z
-```
-
-They are the same `icloud-docker` outage as the two detached volumes in §2.5 (both
-Deployments scaled 0/0), tracked as **F-21d7e2ec** *("The iCloud photo backup stopped on
-2026-09-06 and nothing noticed for 14 days")*. They are **not** suppressed by any
-noise rule or accepted risk, so they will still be firing during the window.
-
-> **The gate is therefore a SET comparison, not a count of zero.** `firing: 0` — the
-> v1.14.0 plan's pre-check *and* its final gate — is unreachable today and would have
-> either blocked the window at §2.8 or been waved through at §4.4. Record the exact
-> alertname set at pre-check time and compare names, not totals. **If F-21d7e2ec is
-> fixed before the window, the baseline legitimately drops to 0** — re-measure, never
-> assume the four.
+**PASS:** `alerts.py` prints `Watchdog firing: 1` and `VERDICT PASS` — **the Watchdog is the
+positive control that the alert pipeline is alive; an empty firing list proves nothing on
+its own.** Every target `up`; the three etcd targets `.11/.12/.13:2381` up.
+*(2026-09-26: Watchdog 1, other firing **0** at 05:54Z — the four `ICloudBackupPhotosStale*`
+alerts of the 2026-09-20 draft are gone; one transient `AuthentikTaskWorkersZero` fired at
+06:02Z during the concurrent authentik upgrade. Targets **101 up 101**; groups/rules
+**126 / 532**; not-ready workloads **0**.)* Whatever set is recorded is the baseline — do not
+edit it to match these examples.
 
 **2.9 — Envoy Gateway is the only HTTP data plane. Record its pre-state.**
 
 ```bash
 mise exec -- kubectl get gateway -A
-mise exec -- kubectl get httproute -A --no-headers | wc -l
+mise exec -- kubectl get httproute -A --no-headers | wc -l | tee "$SCR/httproutes-baseline.txt"
 mise exec -- kubectl get pods -n network -o wide | grep -E 'envoy-(internal|external|gateway)'
 ```
 **PASS:** `envoy-internal` (192.168.55.103) and `envoy-external` (192.168.55.104) both
-`PROGRAMMED=True`; **107** HTTPRoutes *(was 103 in the v1.14.0 plan — use the number you
-measure, this one drifts)*; and — the load-bearing one — **each of `envoy-internal`,
-`envoy-external` and `envoy-gateway` has 3 pods, one per node** (verified: all nine pods
-`Running`, spread 01/02/03). That is what makes a one-node-at-a-time roll survivable: two
-of three stay up throughout. If any of those Deployments is below 3 healthy pods across
-≥2 nodes, **stop** — there is no fallback controller. ingress-nginx was deleted
-2026-09-07 (`ad1ea7c2`); do not look for one.
+`PROGRAMMED=True`; the route count recorded (*109 on 2026-09-26*); and each of
+`envoy-internal`, `envoy-external`, `envoy-gateway` has **3 pods, one per node**. Below 3
+healthy pods across ≥2 nodes: **stop** — there is no fallback controller (ingress-nginx was
+deleted 2026-09-07, `ad1ea7c2`).
 
 **2.10 — Longhorn instance-manager PDBs.**
 
@@ -579,20 +800,52 @@ mise exec -- kubectl -n storage get pdb | grep instance-manager
 mise exec -- kubectl -n storage get pods -l longhorn.io/component=instance-manager -o wide
 ```
 **PASS:** exactly 3 PDBs, each with a live pod, one per node.
-**`ALLOWED DISRUPTIONS = 0` on all three is the correct steady state, not a fault** —
-each PDB selects exactly one pod with `minAvailable: 1`, so the arithmetic is always 0
-(`docs/sops/talos-upgrade.md` §9). *(Baseline: 3 PDBs, 3 `Running` instance-managers, one
-per node, all 14d old.)* Do not delete them. Do not reach for `--drain=false` on the
-strength of seeing a zero here.
+**`ALLOWED DISRUPTIONS = 0` on all three is the correct steady state, not a fault** (each
+selects one pod with `minAvailable: 1`; `docs/sops/talos-upgrade.md` §9). Do not delete them.
+Do not reach for `--drain=false` on the strength of seeing a zero here.
+
+**2.11 — UniFi: no switch firmware can land in this window.** (`docs/sops/unifi-device-firmware.md`
+— a switch reboot and a node reboot in the same slot is the 2026-09-24 partition, compounded.)
+
+```bash
+mise exec -- unifictl local health get >/dev/null && echo session-ok     # cached session only
+mise exec -- unifictl local device list -o json | python3 -c "
+import sys,json
+d=json.load(sys.stdin); d=d.get('data',d) if isinstance(d,dict) else d
+bad=[x.get('name') for x in d if x.get('upgradable')]
+print('devices',len(d),'upgradable=True:',bad)"
+```
+**PASS:** `session-ok`, `devices 10` (*2026-09-26*) and `upgradable=True: []` — every switch,
+AP and the gateway reports `upgradable=False`. **Plus, read by the operator in the Network UI**
+(UniFi OS Settings › Control Plane › Updates › UniFi Devices): device **auto-update OFF**
+(`mgmt.auto_upgrade: false`) and no scheduled `upgrade` task. `unifictl` has no reader for
+`get/setting/mgmt` (checked 2026-09-26: no `setting` subcommand), so this half is a
+human read, stated as such. **No switch firmware in this window, even if one becomes
+upgradable mid-roll.**
+
+**2.12 — Per-node baseline for §3.10.**
+
+```bash
+python3 "$SCR/nodegate.py" snap "$SCR/node-pre.json"
+mise exec -- kubectl get nodes -o json | python3 -c "
+import sys,json
+for n in json.load(sys.stdin)['items']:
+    a=n['status']['allocatable']; print(n['metadata']['name'],a.get('gpu.intel.com/i915'),a.get('npu.intel.com/accel'))"
+mise exec -- kubectl get ds -n security falco falco-log-rotate wazuh-agent
+mise exec -- kubectl get ds -n monitoring otel-operator-daemon-collector
+```
+**PASS:** 3 carrier series and 3 leader-change series recorded; every node allocates
+`gpu.intel.com/i915=5` and `npu.intel.com/accel=1`; the four DaemonSets are `3/3` ready.
+*(All true 2026-09-26.)*
 
 ## 3) Steps
 
-### Phase A — PREP, run BEFORE the window (~30 min, zero cluster effect)
+### Phase A — PREP, run BEFORE the window (~35 min, zero cluster effect)
 
 **Why this is safe to do early:** `kubernetes/bootstrap/talos/` is **not reconciled by
 Flux** — every Flux Kustomization `spec.path` points under `./kubernetes/apps` or the
 flux config dirs; none references `bootstrap`. The talhelper-generated configs are
-applied by `talosctl`, by hand. So committing and pushing a `talosVersion` bump changes
+gitignored local files, applied by `talosctl` by hand. So committing and pushing a `talosVersion` bump changes
 **nothing** on the cluster until §3.5 runs `talosctl upgrade`.
 
 **3.1 — Prove the factory publishes our schematic for the target, WITH a negative
@@ -675,26 +928,64 @@ GO** — do not silently retarget in-window. That is the whole lesson of this fi
 **3.5 — Bump talhelper to its final release.**
 
 ```bash
-# .mise.toml — talhelper 3.1.11 -> 3.1.17 (the LAST talhelper release, 2026-08-26;
-# confirmed installable: `mise ls-remote talhelper | tail -1` => 3.1.17)
-# Do NOT touch "aqua:siderolabs/talos" here — that is §3.7, after the roll.
+mise ls-remote talhelper | grep -c -x '3.1.17'            # MUST print 1 (installable here)
+sed -i '' 's|^talhelper = "3\.1\.11"$|talhelper = "3.1.17"|' .mise.toml
+git --no-pager diff -U0 .mise.toml
 mise install
-mise exec -- talhelper --version          # expect 3.1.17
+mise exec -- talhelper --version                           # expect 3.1.17
 ```
+**Expected diff — EXACTLY this one line (dry-tested on a scratch copy 2026-09-26, BSD sed):**
+
+```diff
+@@ -47 +47 @@
+-talhelper = "3.1.11"
++talhelper = "3.1.17"
+```
+Do NOT touch `"aqua:siderolabs/talos"` (line 28) here — that is PR #212, §3.12.
 
 **3.6 — Regenerate and READ THE DIFF. This is the real gate, because talhelper cannot
 be it.**
 
+**What these files are (corrected 2026-09-26):** `kubernetes/bootstrap/talos/clusterconfig/
+kubernetes-k8s-nuc14-0{1,2,3}.yaml` and `talosconfig` are **gitignored plaintext**
+(`clusterconfig/.gitignore`), written by `talhelper genconfig`, **not SOPS-encrypted and not
+in git** — `git show HEAD:` of them fails and `sops -d` has nothing to decrypt. The only copy
+of the "old" config is the one on this disk, and `genconfig` overwrites it. So snapshot it
+FIRST, and prove the snapshot matches what the nodes actually run:
+
 ```bash
-cd kubernetes/bootstrap/talos
-mise exec -- talhelper validate talconfig talconfig.yaml
-cd -
+# (1) Snapshot the CURRENT generated configs into the mode-700 scratch dir — BEFORE genconfig
+SCR="$HOME/.cache/talos-1141"; mkdir -p "$SCR"; chmod 700 "$SCR"
+for n in 01 02 03; do
+  cp -p kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-$n.yaml "$SCR/old-$n.yaml"
+done
+chmod 600 "$SCR"/old-*.yaml; ls -l "$SCR"/old-*.yaml
+
+# (2) The OLD install image must equal what the LIVE nodes run — else "old" is not the baseline
+for n in 01 02 03; do grep -h 'image: factory' "$SCR/old-$n.yaml"; done
+for ip in 11 12 13; do
+  mise exec -- talosctl -n 192.168.55.$ip get machineconfig -o yaml | grep 'image: factory' | sort -u
+done
+```
+**PASS (2):** all six lines are exactly
+`image: factory.talos.dev/installer/43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3:v1.13.10`
+(*measured 2026-09-26: 6/6*). A mismatch means the local files are stale relative to the
+cluster — STOP; regenerating on top of them diffs against the wrong baseline.
+
+```bash
+# (3) Validate + regenerate
+( cd kubernetes/bootstrap/talos && mise exec -- talhelper validate talconfig talconfig.yaml )
 mise exec -- task talos:generate-config
-git --no-pager diff --stat kubernetes/bootstrap/talos/
+# (4) Diff NEW vs the scratch OLD
+for n in 01 02 03; do
+  echo "=== nuc14-$n ==="
+  diff -u "$SCR/old-$n.yaml" kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-$n.yaml
+done
+git status --short kubernetes/bootstrap/talos/clusterconfig/   # MUST print nothing (still ignored)
 ```
 
 **Expected `validate` output — this warning is EXPECTED and is not a failure** (measured
-verbatim today against a v1.14.1 scratch copy, exit code 0):
+verbatim against a v1.14.1 scratch copy, exit code 0):
 
 ```
 There are issues with your talhelper config file:
@@ -702,43 +993,36 @@ field: "talosVersion"
   * WARNING: "v1.14.1" might not be compatible with this Talhelper version you're using
 ```
 
-Now diff the generated node configs by hand. The three files under `clusterconfig/` are
-SOPS-encrypted; diff the decrypted form:
-
-```bash
-for n in 01 02 03; do
-  echo "=== nuc14-$n ==="
-  mise exec -- sops -d kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-$n.yaml \
-    > /tmp/new-$n.yaml
-  git show HEAD:kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-$n.yaml \
-    | mise exec -- sops -d /dev/stdin > /tmp/old-$n.yaml
-  diff -u /tmp/old-$n.yaml /tmp/new-$n.yaml
-done
-```
-
-**PASS:** the only differences are the `machine.install.image` tag `v1.13.10 → v1.14.1`
-and the config version-contract stamp.
+**PASS (4):** per node, the only differences are the `machine.install.image` tag
+`v1.13.10 → v1.14.1` and the config version-contract stamp (if any).
 **STOP AND INVESTIGATE** if the diff shows any of: a new `SecurityProfileConfig` document
 (workload isolation — §1 item 9, must NOT appear), a new `UnattendedInstall` document
 replacing `machine.install`, `machine.sysctls` / `machine.udev.rules` / `machine.kubelet`
 rewritten into `SysctlConfig` / `UdevRulesConfig` / `KubeNodeConfig` documents, a changed
-`nameservers`/`searchDomain` block, or any **removed** field. Alpha machinery emitting a
-GA-era document shape is exactly the failure this step exists to catch — and v1.14.1's
-`fix: tighten the validation of v1alpha1 configs vs. migration` lands on precisely this
-surface. If it appears, do not "fix it up" in-window — abort Phase A and reschedule.
+`nameservers`/`searchDomain` block, any **removed** field, or **any change to a secret/cert
+field** (a regenerated secret here would mean `talsecret` was not used). Alpha machinery
+emitting a GA-era document shape is exactly the failure this step exists to catch — and
+v1.14.1's `fix: tighten the validation of v1alpha1 configs vs. migration` lands on precisely
+this surface. If it appears, do not "fix it up": restore the old files
+(`cp -p "$SCR/old-0N.yaml" kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-0N.yaml`),
+abort Phase A and reschedule.
 
-Then `rm -f /tmp/old-*.yaml /tmp/new-*.yaml` (they hold decrypted cluster secrets).
+Keep `$SCR/old-*.yaml` until §4.4 passes (they are the §5.3 restore source), then `rm -P`
+them — they hold the cluster's machine secrets in plaintext.
 
 **3.7 — Commit and push (still zero cluster effect).**
 
-Per `CLAUDE.md`, use `--only` with explicit paths — the worktree is shared.
+Per `CLAUDE.md`, use `--only` with explicit paths — the worktree is shared. The regenerated
+`clusterconfig/` files are **not** in this list: they are gitignored and never committed.
 
 ```bash
-cat > /tmp/talos-msg.txt <<'EOF'
+MSG="$SCR/talos-1141-commit-msg.txt"         # unique filename, not /tmp/talos-msg.txt
+cat > "$MSG" <<'MSGEOF'
 feat(talos)!: node image v1.13.10 -> v1.14.1 (config only; roll is manual)
 
-Bumps talosVersion in talconfig.yaml and regenerates the three SOPS-encrypted
-node configs. Flux does not reconcile kubernetes/bootstrap/talos/, so this
+Bumps talosVersion in talconfig.yaml and talhelper 3.1.11 -> 3.1.17 (its final
+release). Flux does not reconcile kubernetes/bootstrap/talos/, and the node
+configs under clusterconfig/ are gitignored and regenerated locally, so this
 commit changes nothing until `task talos:upgrade-node` runs in the window.
 
 Re-targeted from v1.14.0 (approved 2026-09-12) to v1.14.1 (published
@@ -753,74 +1037,92 @@ github-releases/siderolabs/talos, and refreshes the stale cluster version in
 the aqua:siderolabs/talos deny-rule reason.
 
 Plan: runbooks/maintenance/plans/talos-1.14.1.md
-Findings: F-912f4778, F-0a32b505, F-9a58f400
-EOF
+Finding: F-912f4778
+MSGEOF
 
 git commit --only \
   kubernetes/bootstrap/talos/talconfig.yaml \
-  kubernetes/bootstrap/talos/clusterconfig/ \
   runbooks/auto-update-policy.yaml \
   .mise.toml \
-  -F /tmp/talos-msg.txt
+  -F "$MSG"
 
 git log -1 --format=%s          # MUST be the feat(talos)! subject above — concurrent
-                                # sessions can swap COMMIT_EDITMSG; amend before push
-git show --stat HEAD            # every file here MUST be one of the four above
+                                # sessions can swap messages; amend before push
+git show --stat HEAD            # exactly these three files, nothing else
 git push
 ```
 
 ### Phase B — THE ROLL (in-window)
 
 **Concurrency rule, absolute: exactly ONE node down at a time.** All three nodes are etcd
-members; a 3-member cluster tolerates the loss of exactly one. Two down = quorum lost =
-the API server is gone and the roll cannot be driven. There is no step in this plan where
-two nodes are unavailable, and no circumstance in which "just do the last two together to
-save time" is acceptable.
+members; a 3-member cluster tolerates the loss of exactly one. Two down = quorum lost = the
+API server is gone and the roll cannot be driven. There is no step in this plan where two
+nodes are unavailable.
 
-**3.8 — Roll order. THIS CHANGED since the v1.14.0 plan** — re-derive from §2.4 at window
-time, because it moved once already.
+**3.8 — Roll order: apply the §2.4 rule, and RE-CHECK before EVERY node.**
 
-| Rule | Node (measured 2026-09-20) | Why |
-|---|---|---|
-| **1st — CANARY**: lightest Longhorn load, holds neither the VIP nor etcd leadership | **`k8s-nuc14-01` / 192.168.55.11** (17 attached, 58 running replicas) | Smallest state to move, so the fastest, cleanest first reboot. If v1.14.1 is bad we learn it while the API endpoint and etcd leadership — **both now on 03** — are untouched. **This is the go/no-go for the other two nodes.** |
-| **2nd**: heaviest load, but no VIP and not leader | **`k8s-nuc14-02` / 192.168.55.12** (45 attached, 67 running replicas) | Do the big drain while a proven-good v1.14.1 peer exists and the control-plane endpoint is still stationary. |
-| **3rd — LAST**: the VIP owner **and** the etcd leader | **`k8s-nuc14-03` / 192.168.55.13** (30 attached, 59 running replicas, **holds VIP 192.168.55.10**, **is etcd leader** `73a201c6b4bf6faf`) | Both disruptive control-plane events happen once, at the end, after two nodes have proven v1.14.1. |
+Before each node (including the first), re-run the §2.4 VIP/leader loop and apply the rule:
+tie-break order **02 → 01 → 03**; canary = first node in that order holding neither the VIP
+nor etcd leadership; then the remaining un-rolled nodes in the same order; never roll a node
+holding BOTH while an un-rolled node holding neither exists. Write down, per node, **who held
+the VIP and who led etcd immediately before it rolled** — §3.10 needs the leader flag.
 
-> **Why the order is not the v1.14.0 plan's.** That plan ordered 01 → 03 → 02 because the
-> VIP was on 02 and leadership on 03, deliberately separating the two events. They are now
-> **on the same node**, so separating them is impossible; the correct response is to put
-> that node last and accept one combined disruption. This is also where the +5 min in
-> §7 comes from.
+| Node | Engines 2026-09-26 | Note |
+|---|---:|---|
+| `k8s-nuc14-01` / .11 | 20 | held the VIP 192.168.55.10 on 2026-09-26 |
+| `k8s-nuc14-02` / .12 | **38** | heaviest; etcd leader at 05:54Z |
+| `k8s-nuc14-03` / .13 | 34 | etcd leader at 06:03Z |
 
-For each node, in that order, run **3.9 → 3.10 → 3.11** to completion before starting the
-next.
+**If the node about to roll holds the VIP**, expect the kubeconfig endpoint
+(192.168.55.10) to drop for up to ~1 min while the VIP moves; talosctl drives nodes by their
+own IPs and is unaffected. Do not interpret that blip as a failure; re-run `kubectl get nodes`
+until it answers, then continue watching the drain.
+
+For each node, in the order the rule gives, run **3.9 → 3.10 → 3.11** to completion before
+starting the next.
+
+**3.8a — Pre-roll etcd snapshot (ONCE, immediately before the first node).**
+Per `docs/sops/talos-upgrade.md` Step 0.4 (added 2026-09-26 — the SOP had no etcd snapshot
+procedure). Longhorn backups do not cover control-plane state.
+
+```bash
+LEADER_IP=<ip whose MEMBER id equals the LEADER column in §2.4's etcd status>
+mise exec -- talosctl -n "$LEADER_IP" etcd snapshot "$SCR/etcd-pre-v1.14.1.db"
+chmod 600 "$SCR/etcd-pre-v1.14.1.db"
+stat -f '%Lp %z %N' "$SCR/etcd-pre-v1.14.1.db"
+stat -f '%Lp %N' "$SCR"
+```
+**PASS:** file mode `600`, dir mode `700`, and a size in the same order as §2.3's `DB SIZE`
+(*845–886 MB on 2026-09-26*; a 0-byte or few-KB file is a FAIL — do not start the roll). It is
+**local only**: never copy it into the repo or a synced folder; it holds every Secret. Delete
+it (`rm -P`) after §4.4 has passed and the cluster has soaked 24h. Restore path: §5.2.
 
 **3.9 — Upgrade one node.**
 
 ```bash
+python3 "$SCR/nodegate.py" snap "$SCR/node-pre-<node-name>.json"     # counters just before
 mise exec -- task talos:upgrade-node IP=<node-ip>
 ```
 
 This installs the new image, then cordons, drains, and reboots. Expect it to sit on
 `evicting pod storage/instance-manager-<hash>` for a while. **That is normal.** Per
-`docs/sops/talos-upgrade.md` §9 the drain waits for Longhorn volumes to **detach**, not
-for a stuck PDB. Watch the engine count fall:
+`docs/sops/talos-upgrade.md` §9 the drain waits for Longhorn volumes to **detach**, not for a
+stuck PDB. Watch the engine count fall:
 
 ```bash
 mise exec -- kubectl -n storage get engines.longhorn.io -o json | python3 -c "
 import sys,json
 print(len([e for e in json.load(sys.stdin)['items'] if e['spec'].get('nodeID')=='<node-name>']))"
 ```
-*(Baseline engine counts, which are what must drain to 0: 01=17, 02=45, 03=30.)*
-Engines going N → 0 (~75s observed on the 2026-08-16 roll) is the drain progressing. When
-it hits 0, Longhorn deletes the PDB itself and the drain completes in seconds.
+*(Engines that must drain to 0, 2026-09-26: 01=20, 02=38, 03=34 — re-read §2.4's count for
+the node you are rolling.)* Engines going N → 0 is the drain progressing. When it hits 0,
+Longhorn deletes the PDB itself and the drain completes in seconds.
 
-**Do NOT** delete the PDBs. **Do NOT** use `EXTRA_FLAGS='--drain=false'` pre-emptively.
-Only if the drain **times out** with
-`error when waiting for pod "instance-manager-…" to terminate: context deadline exceeded`
-(the load-dependent recreate race in the SOP): **uncordon the node first**, then delete
-the `Pending` pods so the scheduler spreads the attach load. Do not wait it out — it does
-not self-resolve. `--drain=false` is a last resort and never unattended.
+**Do NOT** delete the PDBs. **Do NOT** use `EXTRA_FLAGS='--drain=false'` pre-emptively. Only if
+the drain **times out** with `error when waiting for pod "instance-manager-…" to terminate:
+context deadline exceeded` (the load-dependent recreate race in the SOP): **uncordon the node
+first**, then delete the `Pending` pods so the scheduler spreads the attach load. Do not wait it
+out. `--drain=false` is a last resort and never unattended.
 
 **3.10 — Node health gate.**
 
@@ -828,87 +1130,110 @@ not self-resolve. `--drain=false` is a last resort and never unattended.
 mise exec -- kubectl get nodes -o wide
 mise exec -- talosctl -n <node-ip> version --short
 mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status
+python3 "$SCR/nodegate.py" check "$SCR/node-pre-<node-name>.json" <node-name> <yes|no: was it etcd leader at 3.8?>
 ```
-**PASS, all of:** the node is `Ready` and **not** `SchedulingDisabled`; `Tag: v1.14.1`;
-etcd reports **3 members**, no `LEARNER`, empty `ERRORS`, and raft indexes converged. Do
-not proceed until etcd shows three healthy members — a node that is `Ready` but whose etcd
-member has not rejoined is a quorum of two, and the next node would take it to one.
+**PASS, all of:** the node is `Ready` and **not** `SchedulingDisabled`; `Tag: v1.14.1`; etcd
+reports **3 members**, no `LEARNER`, empty `ERRORS`, raft indexes converged (do not proceed
+until the rebooted member has rejoined — `Ready` with a missing member is a quorum of two);
+**and `nodegate.py` prints `VERDICT PASS`**, which asserts:
 
-*Expect `PROTOCOL` to read 3.7.x on upgraded members and 3.6.14 on not-yet-rolled ones; a
-mixed reading mid-roll is correct, not a fault.*
+- `gpu.intel.com/i915=5` and `npu.intel.com/accel=1` allocatable again on the rolled node
+  (the Intel device plugins re-registered — Frigate/Jellyfin/Plex/Immich and the NPU
+  workloads depend on them);
+- DaemonSets `security/falco`, `security/falco-log-rotate`, `security/wazuh-agent`,
+  `monitoring/otel-operator-daemon-collector` all **3/3** ready. **falco meets the new kernel
+  here** (6.18.48 → 6.18.51): it runs `driver.kind: modern_ebpf` (CO-RE, no kmod build), so a
+  load failure shows as the falco pod on this node not Ready — that is a FAIL, not noise;
+- **no NIC carrier change on the two nodes that did NOT reboot**
+  (`node_network_carrier_changes_total{device=~"en.*"}`, per survivor, unchanged);
+- **no etcd leader change on the survivors beyond what this node's own reboot explains**
+  (`etcd_server_leader_changes_seen_total`: +1 allowed only if this node was leader).
+
+*Expect `PROTOCOL` 3.7.x on upgraded members and 3.6.14 on the rest; a mixed reading
+mid-roll is correct. Expect the otel daemon collector on this node to log `memory_limiter`
+refusals / dropped data while it sheds the backlog buffered during the reboot — that is
+backpressure working, not a failure, as long as the DaemonSet is 3/3 and §4.3 CONTENTS
+ASSERTION 2 holds at the end.*
+
+**STOP rules (UniFi / network, from `docs/sops/unifi-device-firmware.md`):**
+- A **carrier change on a survivor** = the network moved under us (switch, cabling, a
+  firmware push): **STOP the roll**, do not start the next node, check §2.11 and
+  `unifictl local event list`. It is not a Talos problem and must not be diagnosed as one.
+- An **etcd leader change on the survivors that this node's reboot does not explain** =
+  STOP and triage. Base rate is non-zero (§2.3: 6 spontaneous elections in 7d, 2 in one busy
+  hour on 2026-09-26), so the operator may continue ONLY after confirming, together: no
+  carrier change anywhere, `etcd status` clean on all 3, and `min_over_time(etcd_server_has_leader[15m])`
+  = 1 on both survivors (a re-election, not a leaderless period). Otherwise stop part-rolled
+  (§5.2).
 
 **3.11 — THE LONGHORN GATE. This is the step that blows the time budget.**
 
 Do **not** start the next node until this passes. With `numberOfReplicas: 2` there is no
-cushion: starting the next node while volumes are still degraded means volumes running on
-**zero** replicas.
+cushion: starting the next node while volumes are still degraded means volumes on **zero**
+replicas.
 
 ```bash
-mise exec -- kubectl get volumes -n storage -o json | python3 -c "
-import sys,json,collections
-d=json.load(sys.stdin)['items']
-bad=[(v['metadata']['name'],v['status'].get('robustness'),v['status'].get('state'))
-     for v in d if v['status'].get('robustness')!='healthy']
-print('NOT-HEALTHY:',len(bad))
-for b in bad: print('  ',b)
-print('robustness:',collections.Counter(v['status'].get('robustness') for v in d))"
-
-mise exec -- kubectl get replicas.longhorn.io -n storage -o json | python3 -c "
-import sys,json,collections
-rs=json.load(sys.stdin)['items']
-c=collections.Counter((r['spec'].get('nodeID','?'), r['status'].get('currentState','?')) for r in rs)
-for k,v in sorted(c.items()): print(k,v)
-print('total replicas',len(rs))"
+python3 "$SCR/lh_gate.py" gate "$SCR/lh-baseline.json"
 ```
 
-**PASS — all three conditions, together:**
+**PASS — `VERDICT PASS`, which asserts together:**
 
-1. `NOT-HEALTHY: 2`, and **both are the known `icloud-docker` session volumes from
-   §2.5**. Not 3, not a different pair. Not `degraded`, not `rebuilding` — `degraded`
-   means one replica, which is exactly the state we must not enter the next reboot in.
-2. The just-rebooted node appears again in the replica table with a **`running`** count in
-   the same order as before the reboot (baseline 2026-09-20: 01=58 running/6 stopped,
-   02=67/1, 03=59/1 — the `stopped` ones are replicas of the detached volumes).
-3. `total replicas` is back at **192**.
+1. The not-healthy set is **exactly the names recorded at §2.5** — same names, no more, no
+   fewer — and each is still detached with its PV Released / consumer at 0. Any **attached**
+   not-healthy volume (`degraded`, `rebuilding`) fails: `degraded` means one replica, exactly
+   the state we must not enter the next reboot in.
+2. The replica total equals **the total recorded at §2.5** (*188 on 2026-09-26; 186 if the
+   pg17 volume was retired first*).
+3. Read the printed per-node table yourself: the just-rebooted node is back with a
+   `running` count in the same order as its §2.5 line.
 
-**Why this can run long, and what to do about it.** `replica-replenishment-wait-interval`
-is **600s** (verified live), so Longhorn waits 10 minutes before replenishing a missing
-replica elsewhere. If the node returns inside that window (typical), replicas restart in
-place and rebuild incrementally — fast. If the reboot overruns 10 minutes, Longhorn starts
-building **full** replicas on the surviving nodes and the gate can take far longer over 92
-attached volumes. `concurrent-replica-rebuild-per-node-limit` is **8** and
-`replica-rebuild-concurrent-sync-limit` is `{"v1":"1"}` (both verified live), so it is
-deliberately paced.
+**Why this can run long.** `replica-replenishment-wait-interval` is **600s**, so Longhorn
+waits 10 minutes before replenishing a missing replica elsewhere. If the node returns inside
+that window (typical), replicas restart in place and rebuild incrementally — fast. If the
+reboot overruns 10 minutes, Longhorn builds **full** replicas on the survivors and the gate
+can take far longer over 92 attached volumes. `concurrent-replica-rebuild-per-node-limit` is
+**8** and `replica-rebuild-concurrent-sync-limit` is `{"v1":"1"}`, deliberately paced.
 
 **Budget rule: if the gate has not passed 25 minutes after the node returned `Ready`, stop
 rolling.** Do not skip the gate, do not shorten it, do not start the next node. Leave the
-cluster part-rolled (a supported transient), finish §4.4 on the current mix, and reschedule
-the remainder. A part-rolled cluster is fine; a cluster with volumes on zero replicas is
-not.
+cluster part-rolled (a supported transient), finish §4.4 on the current mix, and reschedule.
 
 **3.12 — Merge PR #212 (the talosctl CLI pin) — LAST, and only after all three nodes
 report v1.14.1.**
 
+PR #212 edits `.mise.toml` **line 28** (`"aqua:siderolabs/talos"`); §3.5 already changed
+**line 47** (`talhelper`). The hunks do not overlap, but the PR's base is older than §3.7's
+commit, so GitHub may report it `BEHIND`/`CONFLICTING` or its checks may be stale.
+
 ```bash
 mise exec -- kubectl get nodes -o wide | grep -c 'Talos (v1.14.1)'   # MUST be 3
+gh pr view 212 --json mergeable,mergeStateStatus,files --jq '{mergeable,mergeStateStatus,files:[.files[].path]}'
+# if mergeStateStatus is BEHIND or DIRTY, or mergeable is CONFLICTING:
+#   gh pr comment 212 --body '@renovatebot rebase'     # then wait for the new head + checks
 gh pr checks 212
+gh pr diff 212
+```
+**Merge PASS condition — all of:** exactly 3 nodes on `Talos (v1.14.1)`; `files` is exactly
+`[".mise.toml"]`; `mergeable` = `MERGEABLE`; `gh pr checks 212` all pass on the CURRENT head
+(including `Flate Render Gate`); and `gh pr diff 212` changes **only line 28** —
+`"aqua:siderolabs/talos" = "1.13.10"` → `"1.14.1"` — and **does not revert
+`talhelper = "3.1.17"`** (a stale base shows up here as a `-talhelper = "3.1.17"` line; that is
+a FAIL, rebase first). Then:
+
+```bash
 gh pr merge 212 --squash
 git pull
 mise install
-mise exec -- talosctl version --short                                # Client: Talos v1.14.1
+mise exec -- talosctl version --short         # Client: v1.14.1, and it still reaches the nodes
+grep -n -E '^(talhelper|"aqua:siderolabs/talos")' .mise.toml   # talhelper 3.1.17 AND talos 1.14.1
 ```
-**PASS:** client reports `v1.14.1` — **exactly the cluster version**, because #212 was
-retargeted to 1.14.1 upstream on 2026-09-19 — and `talosctl -n <any> version --short`
-still talks to the nodes.
 
 **If fewer than 3 nodes reached v1.14.1, do NOT merge #212.** Leave it open; a v1.13.10
-client drives a mixed cluster correctly (Talos supports n±1, older client is the normal
-direction).
+client drives a mixed cluster correctly (n±1, older client is the normal direction).
 
 **Explicitly NOT in this window:** `task talos:upgrade-k8s`. Kubernetes stays on v1.36.0,
-which §1 proves is inside Talos 1.14's supported range (1.32.0 – 1.37.99). A Kubernetes
-minor bump is its own plan, its own window, and it needs a client matching the cluster
-(SOP lesson #6).
+which §1 proves is inside Talos 1.14's supported range (1.32.0 – 1.37.99). A Kubernetes minor
+bump is its own plan, its own window (SOP lesson #6).
 
 ## 4) Verification
 
@@ -930,10 +1255,12 @@ install — re-run `task talos:upgrade-node` for that IP before moving on.
 *(The doubled `init_on_alloc` is expected: the kernel default is emitted before the
 schematic's override. It is present today on all three nodes.)*
 
-**CANARY GO/NO-GO (after node 01 only).** All of §3.10, §3.11 and the cmdline check pass,
-**and** `kubectl get pods -A --field-selector spec.nodeName=k8s-nuc14-01` shows pods
-scheduling and running there again. If any fails: **stop, roll node 01 back (§5.1), and do
-not touch nodes 02/03.** This is the one point in the plan with a clean exit.
+**CANARY GO/NO-GO (after the first node only — whichever node §3.8's rule picked).** All of
+§3.10 (incl. `nodegate.py` PASS), §3.11 and the cmdline check pass, **and**
+`kubectl get pods -A --field-selector spec.nodeName=<canary>` shows pods scheduling and running
+there again. **Time the canary** (upgrade start → §3.11 PASS) and re-plan the remaining two
+from that measurement, not from §7's table. If any check fails: **stop, roll the canary back
+(§5.1), and do not touch the other two.** This is the one point in the plan with a clean exit.
 
 ### 4.2 — Storage: the iSCSI record trap (run after the LAST node)
 
@@ -975,8 +1302,11 @@ perfect.
 > Bound, 5Gi), mounted at **`/var/lib/pgadmin`**; the container has `sh`.
 >
 > ```bash
-> # the pod must be on a ROLLED node — resolve it, don't assume it
-> mise exec -- kubectl -n databases get pod -l app.kubernetes.io/name=pgadmin \
+> # the pod must be on a ROLLED node — resolve it, don't assume it.
+> # Selector is app=pgadmin (deploy/pgadmin spec.selector, premise `pgadmin-selector`).
+> # The 2026-09-20 draft used app.kubernetes.io/name=pgadmin, which matches NOTHING, so
+> # jsonpath '{.items[0]...}' errored and the "rolled node" check could never run.
+> mise exec -- kubectl -n databases get pod -l app=pgadmin \
 >   -o jsonpath='{.items[0].spec.nodeName}{"\n"}'
 > mise exec -- kubectl -n databases exec deploy/pgadmin -- sh -c \
 >   'echo talos-1141-probe-$$ > /var/lib/pgadmin/.probe && cat /var/lib/pgadmin/.probe && rm /var/lib/pgadmin/.probe'
@@ -994,27 +1324,27 @@ perfect.
 > returning a non-empty result. **Compared to:** the §2.8 baseline.
 >
 > ```bash
-> mise exec -- kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus \
->   9099:9090 >/dev/null 2>&1 & PF=$!
-> sleep 6
-> curl -s localhost:9099/api/v1/targets | python3 -c "
+> P='/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1'
+> mise exec -- kubectl get --raw "$P/targets" | python3 -c "
 > import sys,json
 > t=json.load(sys.stdin)['data']['activeTargets']
 > print('targets',len(t),'up',sum(1 for x in t if x['health']=='up'))
+> print('etcd:',[(x['labels'].get('instance'),x['health']) for x in t if 'etcd' in x['labels'].get('job','')])
 > for x in t:
 >     if x['health']!='up': print('  DOWN',x['labels'].get('job'),x['labels'].get('instance'))"
+> cat "$SCR/targets-baseline.txt"
 > # the floor — etcd must still be PRODUCING, not merely 'up'
-> curl -s --get localhost:9099/api/v1/query \
->   --data-urlencode 'query=count(etcd_server_has_leader)' \
->   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['status'], d['data']['result'])"
-> curl -s localhost:9099/api/v1/rules | python3 -c "
+> mise exec -- kubectl get --raw "$P/query?query=count(etcd_server_has_leader)"
+> mise exec -- kubectl get --raw "$P/rules" | python3 -c "
 > import sys,json; g=json.load(sys.stdin)['data']['groups']
 > print('groups',len(g),'rules',sum(len(x['rules']) for x in g))"
-> kill $PF 2>/dev/null
+> cat "$SCR/rules-baseline.txt"
 > ```
-> **PASS:** `targets 98 up 98` (≥ the baseline; a *smaller total* is a FAIL — a disappeared
-> target reads as 100% up), the etcd query returns **`success [... value 3]`**, and
-> `groups 119 rules 487` (±0 — no rule group should vanish across a node roll).
+> **PASS — compared to the §2.8 FILES, not to numbers in this plan:** `targets N up N` where N
+> is **≥ the recorded target total** (a *smaller total* is a FAIL — a disappeared target reads
+> as 100% up) and up == total; the etcd query returns `"value":[…,"3"]`; and `groups`/`rules`
+> **equal the recorded line** (no rule group should vanish across a node roll). *(2026-09-26
+> reading, for orientation only: 101 up 101, 126 groups / 532 rules.)*
 >
 > > **The v1.14.0 plan's version of this query was BROKEN and could never pass.** It used
 > > `count(count by (instance) (etcd_server_has_leader[10m]))`, which Prometheus rejects:
@@ -1035,6 +1365,7 @@ perfect.
 > ```bash
 > mise exec -- kubectl get gateway -A
 > mise exec -- kubectl get httproute -A --no-headers | wc -l      # MUST equal the §2.9 count
+> cat "$SCR/httproutes-baseline.txt"
 > mise exec -- kubectl get httproute -A -o json | python3 -c "
 > import sys,json
 > bad=[]
@@ -1052,7 +1383,8 @@ perfect.
 >   -H "Host: <a real ingressed host>" https://192.168.55.104/ -k
 > ```
 > **PASS:** both Gateways `PROGRAMMED=True`; the HTTPRoute count equals the §2.9 baseline
-> (**107** today — re-measure, it drifted from 103 since the v1.14.0 plan); `routes NOT
+> recorded in `$SCR/httproutes-baseline.txt` (*109 on 2026-09-26; it was 107 on 09-20 and 103
+> before that — this number drifts, which is why it is a file*); `routes NOT
 > Accepted/ResolvedRefs: 0`; and both curls return 2xx/3xx with a **non-zero body size**. A
 > 200 with `0B`, or a route count that quietly dropped to 40, is a FAIL. *(Substitute a real
 > host at run time; this repo is public, so no hostname is written here. The point is a
@@ -1074,30 +1406,51 @@ for ip in 192.168.55.11 192.168.55.12 192.168.55.13; do
   echo -n "$ip vip=" ; mise exec -- talosctl -n $ip get addresses 2>/dev/null | grep -c '192.168.55.10/32'
 done                                       # PASS: exactly one node reports 1
 
-# 4. no pod left behind
+# 4. no pod left behind — phase AND readiness, vs the §2.8 baseline
 mise exec -- kubectl get pods -A --field-selector status.phase!=Running,status.phase!=Succeeded
+python3 "$SCR/notready.py" compare "$SCR/notready-baseline.json"
 
 # 5. Flux still green (it has been reconciling against a moving cluster all window)
 mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
 mise exec -- flux get helmreleases   -A | awk 'NR==1 || $5 != "True"'
 
 # 6. Longhorn: the §3.11 gate one final time + the §4.2 per-node attach check
+python3 "$SCR/lh_gate.py" gate "$SCR/lh-baseline.json"
 # 7. all three CONTENTS ASSERTIONS from §4.3
-# 8. alerts back to the baseline SET — after a settle period, NOT immediately
+# 8. alerts vs the §2.8 baseline SET — after a settle period, NOT immediately
+python3 "$SCR/alerts.py" compare "$SCR/alerts-baseline.json"
 ```
 
-**PASS on 8 — this is a SET comparison, not `firing: 0`:** the firing alertname set equals
-the §2.8 baseline set (today: `ICloudBackupPhotosStale` ×2, `ICloudBackupPhotosStaleCritical`
-×2, all `component=icloud-docker`), **sustained for ≥15 minutes** after the last node
-returned, with **no new alertname** present. Any alertname not in the baseline is a real
-regression, not reboot noise. Node-level alerts fire during every reboot and clear on their
-own — that is why the 15 minutes exist, and why they are budgeted in §7 rather than skipped.
+**PASS on 4:** the field-selector query prints no pods **and** `notready.py` prints
+`VERDICT PASS` (no workload not-ready that was ready at §2.8). The phase query alone is a
+shape check: a **CrashLoopBackOff pod still reports `phase: Running`**, so it is invisible to
+`status.phase!=Running`; `notready.py` reads every container's `ready` flag instead. A
+transient CronJob pod may appear as `job:<name>` — re-run after it completes before calling it.
 
-> **Positive control, so this gate can be trusted:** the four baseline alerts are themselves
-> proof the alert pipeline is live and reaching Prometheus. If the firing set comes back
-> **empty**, do not read that as success — `ICloudBackupPhotosStale` cannot self-resolve
-> while both `icloud-docker` Deployments are scaled 0/0 (F-21d7e2ec). An empty set means the
-> alerting path broke during the roll, which is a FAIL.
+**PASS on 8 — a SET comparison, with a live-pipeline control:** `alerts.py compare` prints
+`Watchdog firing: 1` **and** `VERDICT PASS`, **sustained for ≥15 minutes** after the last node
+returned. The Watchdog is the positive control: the §2.8 baseline firing set was **empty**
+on 2026-09-26, so "no alerts" cannot distinguish a healthy cluster from a dead
+Prometheus → Alertmanager path — a missing Watchdog does. Any alertname not in the baseline
+is a real regression, not reboot noise; node-level alerts fire during every reboot and clear
+on their own, which is what the 15 minutes are for (budgeted in §7).
+
+**One allowed LATE alert, and only this one:**
+`LonghornVolumeSnapshotChainNotPruned{volume="data-authentik-postgresql-0"}`
+(rule in `kubernetes/apps/monitoring/kube-prometheus-stack/app/longhorn-alerts.yaml`). It is
+expected to start firing around **11:38Z Sunday** — after the window (07:00Z–10:20Z) unless
+the run overruns — because that detached, retired volume's snapshot chain stops being pruned.
+`alerts.py` whitelists exactly that alertname+volume pair and prints it as `allowed late
+alert`. If `authentik-pg17-volume-retire` removed the volume before the window, the alert
+cannot fire and the allowance is inert. Any OTHER volume on that alert is a FAIL.
+
+CONTROL: metric ALERTS — `alerts.py` reads the firing set from Prometheus `/api/v1/alerts`; the gate asserts the Watchdog firing exactly once and no alertname outside the §2.8 set (+ the one allowed late pair).
+CONTROL: alertname LonghornVolumeSnapshotChainNotPruned — allowed to be firing ONLY for volume data-authentik-postgresql-0; firing for any other volume fails §4.4.8.
+CONTROL: metric etcd_server_has_leader — §4.3 CA2 asserts `count(...) == 3` (the floor), and §3.10's triage branch asserts `min_over_time` = 1 on survivors.
+CONTROL: metric etcd_server_leader_changes_seen_total — §3.10 `nodegate.py`: survivors may rise by at most 1, and only when the rolled node was leader.
+CONTROL: metric node_network_carrier_changes_total — §3.10 `nodegate.py`: survivors' `device=~"en.*"` counters unchanged across each node's reboot.
+CONTROL: metric etcd_server_version — premise `etcd-protocol-3.6` (exactly one `server_version` group, 3.6.x, count 3).
+CONTROL: metric up — §4.3 CA2 target total ≥ the §2.8 recorded total, all up.
 
 ### 4.5 — Confirm workload isolation was NOT silently enabled
 
@@ -1124,7 +1477,7 @@ nothing about isolation. The config document above is the property that actually
 
 **Be honest about this: a Talos node-image upgrade is not a clean revert, and
 `rollback_class` is `one-way` for that reason. Rolling back a node is ANOTHER REBOOT CYCLE
-(~45 min for node 01, including its Longhorn re-gate), never a `git revert`.** The git
+(~45–50 min for the canary, including its Longhorn re-gate), never a `git revert`.** The git
 commit is inert; reverting it moves no node.
 
 ### 5.1 — Per-node rollback (REAL, and it is the canary's abort path)
@@ -1143,9 +1496,10 @@ replicas running, and §4.1 for its kernel cmdline.
   upgrade — nothing further back.
 - It does **not** unwind cluster-level state.
 
-**Use it at exactly one point: the canary (§4.1). That is the clean exit.** With node 01
-rolled back and 02/03 never touched, the cluster is where it started and the §3.7 commit can
-simply be reverted.
+**Use it at exactly one point: the canary (§4.1). That is the clean exit.** With the canary
+rolled back and the other two never touched, the cluster is where it started (etcd never left
+3.6 — a single 3.7 member rolled back rejoins a 3.6 majority) and the §3.7 commit can simply be
+reverted (§5.3).
 
 **Cost, which is the number the window is sized around:** one node reboot cycle
 (~10 min) plus its Longhorn replica-rebuild gate (up to the 25-min budget rule) plus
@@ -1171,20 +1525,44 @@ underneath an advanced etcd. Do not read the compatibility constant as a rollbac
   right answer to "we ran out of time" and to most "something looks off".
 - **If a specific node is broken:** `talosctl rollback` that **one** node (§5.1) and leave
   the rest. Same supported mixed state.
-- **If the cluster itself is broken:** this is **disaster recovery**, not rollback.
-  `docs/sops/disaster-recovery.md` + the Longhorn backups verified in §2.6 + an etcd
-  snapshot. Do not improvise it inside the window; escalate to the operator.
+- **If the cluster itself is broken (etcd quorum lost and not coming back):** this is
+  **disaster recovery**, not rollback — operator decision, never improvised in-window. The
+  restore source is the **§3.8a snapshot** `$SCR/etcd-pre-v1.14.1.db`, via
+  `docs/sops/talos-upgrade.md` §11.4 (added 2026-09-26):
+
+  ```bash
+  mise exec -- talosctl -n <ip> service etcd                      # confirm etcd down on all 3
+  # wipe EPHEMERAL on each control-plane node -- on THIS cluster that also destroys every
+  # Longhorn replica on the node (/var/lib/longhorn lives on EPHEMERAL, nvme0n1p6)
+  mise exec -- talosctl -n <ip> reset --graceful=false --reboot --system-labels-to-wipe=EPHEMERAL
+  # when `service etcd` shows Preparing on all three, bootstrap ONE node from the snapshot
+  mise exec -- talosctl -n <one-ip> bootstrap --recover-from="$SCR/etcd-pre-v1.14.1.db"
+  mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status
+  ```
+  Then restore Longhorn volumes from the §2.6-verified backups
+  (`docs/sops/backup.md`, `docs/sops/disaster-recovery.md`). Everything created in-window is
+  lost from etcd; Flux re-applies git on top. **No `--recover-skip-hash-check`** — that flag is
+  for a copied data directory, not a real snapshot.
 
 ### 5.3 — Reverting the git commit
 
 The §3.7 commit is inert on its own, so reverting it is safe and does **not** move any node:
 
 ```bash
-git revert <sha>                 # restores talosVersion: v1.13.10 + the annotation
-mise exec -- task talos:generate-config
-git commit --only kubernetes/bootstrap/talos/ -m "Revert Talos v1.14.1 node config"
+git revert --no-commit <sha>     # restores talosVersion v1.13.10, the annotation, talhelper
+                                 # 3.1.11 and the deny-rule text (3 files)
+git status --short               # exactly talconfig.yaml, .mise.toml, auto-update-policy.yaml
+MSG="$SCR/talos-1141-revert-msg.txt"; printf 'Revert Talos v1.14.1 node config\n\nPlan: talos-1.14.1 (section 5.3)\n' > "$MSG"
+git commit --only kubernetes/bootstrap/talos/talconfig.yaml .mise.toml runbooks/auto-update-policy.yaml -F "$MSG"
 git log -1 --format=%s           # confirm the subject is yours before pushing
+git show --stat HEAD
 git push
+mise install                     # back to talhelper 3.1.11
+# The local node configs are gitignored: restore them from the §3.6 scratch copies
+for n in 01 02 03; do
+  cp -p "$SCR/old-$n.yaml" kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-$n.yaml
+done
+grep -h 'image: factory' kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-0*.yaml   # 3x :v1.13.10
 ```
 **Confirm the cluster is back** by the state of the *nodes*, never the state of the repo:
 `kubectl get nodes -o wide` showing the expected Talos tag on each node, plus §3.11
@@ -1202,21 +1580,32 @@ times. Any other plan running in the same window is verifying its change against
 in motion — and if something breaks, there are two candidate causes and no way to separate
 them.
 
-**FIRST, A HOUSEKEEPING BLOCKER — the superseded plan must not keep claiming this slot.**
-`talos-1.14.0.md` held `sun-attended:2026-09-27` at `awaiting-go`, 140 min. If both files
-are live the scheduler sees **145 + 140 = 285 min** against a **180-min** budget. This plan
-is only schedulable once `talos-1.14.0` is `superseded` with `window: null`. Verify at §2.1.
+**Enforced two ways (refreshed 2026-09-26):** `exclusive: true` makes `window-scheduler.py`
+refuse any other plan for `sun-attended:2026-09-27` (and refuse this plan an occupied slot),
+including plans not written yet; `conflicts_with` names every existing plan that names this
+one back. `talos-1.14.0` is `superseded` with `window: null`, so it no longer claims the slot.
 
-**Six other plans name `talos-1.14.0` in their `conflicts_with`** — `cilium-1.20.2`,
-`flux-oci-chart-sources`, `helm-drift-detection`, `n8n-2.39.8`, `edot-collector-0.161.0`,
-`otel-operator-0.23.0`. Those refs still *resolve* (the superseded file stays on disk, so
-`--validate`'s dead-cross-reference check passes), but they now point at a plan that will
-never run, so they no longer protect against **this** one.
+**Reciprocity (house rule; `--validate` does not check it):** as of 2026-09-26 every plan
+that names `talos-1.14.1` is named back here — `flux-oci-chart-sources`,
+`helm-drift-detection`, `n8n-2.39.8`, `edot-collector-0.161.0`, `otel-operator-0.23.0`,
+`authentik-pg17-volume-retire`, `authentik-2026.8.3`, `elasticsearch-obs-recovery-3.14.7`,
+`falco-9.2.0`, `flux-reconciler-impersonation`, `icloud-backup-freshness-3.24.2`,
+`n8n-chart-2.1.1`, `prometheus-pushgateway-3.9.0`, `wazuh-2xx-edge-coverage`. Several of those
+are in the 2026-09-26 NOW run and will be retired when they execute; their refs must then be
+dropped here in the same commit that retires them (a dead ref is a `--validate` ERROR).
+`kube-prometheus-stack-91.4.1` was dropped (executed) — any **future** same-night
+kube-prometheus-stack plan must be added, because §4 reads Prometheus.
 
-> **REPO CORRECTION for the vetter:** those six should be updated to name `talos-1.14.1`.
-> This plan declares all six on its own side, and the scheduler honours the field from
-> either side, so the window is safe today — but reciprocity is the documented house rule
-> and `--validate` does not check it.
+**The day before matters as much as the day itself.** The 2026-09-26 NOW run is changing
+authentik, falco, the edot/otel collectors, elasticsearch, the pushgateway and more the day
+before this roll. §2.1 refuses to start while any of it is still stamped, and §2.8 records
+its after-effects (e.g. a transient `AuthentikTaskWorkersZero`) as baseline rather than
+blaming them on Talos. `authentik-pg17-volume-retire` (GO 2026-09-26) may delete
+`data-authentik-postgresql-0` first — §2.5 re-measures, §4.4's allowed late alert becomes inert.
+
+**UniFi:** no switch/AP firmware in this slot — `docs/sops/unifi-device-firmware.md` now
+says so explicitly (2026-09-26). §2.11 checks `upgradable=False` everywhere; §3.10 stops on
+any carrier change on a survivor.
 
 **Sequencing within the window:** this plan runs **alone**. If the operator insists on
 pairing it with something, the only defensible shape is a short, fully-reversible,
@@ -1228,9 +1617,9 @@ interleaved between nodes.
   but it fires at 03:30 the same day; verify via §2.7 that its reconciles have fully landed.
 - **This window's OWN Step 0.** It runs first, every window, unattended-or-not, and the
   scheduler reserves 20 min for it. It is not optional and must not be skipped to buy time.
-- **The Longhorn backup CronJob `daily-backup-all-volumes` (`0 3 * * *`)** and the
-  `*-filesystem-trim` / `*-snapshot-cleanup` CronJobs (`0 2` / `30 2`). A 09:00 window clears
-  all of them, but do not let this plan slip earlier into their path — a backup running
+- **The Longhorn backup CronJob `daily-backup-all-volumes` (`0 3 * * *`, no `timeZone` =
+  03:00 **UTC** = 05:00 Berlin)** and the `*-filesystem-trim` / `*-snapshot-cleanup` CronJobs
+  (`0 2` / `30 2`, UTC). A 09:00-Berlin (07:00Z) window clears all of them, but do not let this plan slip earlier into their path — a backup running
   against volumes whose replicas are rebuilding competes for exactly the bandwidth the gate
   is waiting on.
 - **The 04:00-anchored operation sweep.** Same reasoning; it must be finished.
@@ -1246,9 +1635,13 @@ interleaved between nodes.
 
 | Shared thing | Effect | Who notices |
 |---|---|---|
-| `gateway/envoy` | one of three pods of each of `envoy-internal`/`envoy-external`/`envoy-gateway` down per node | **every ingressed app** (107 HTTPRoutes) — brief connection resets; **no fallback controller exists** |
-| `etcd` | one member down per node; leadership re-elects on the **final** node; 3.6.14 → 3.7.1 | whole control plane; API blips |
-| VIP 192.168.55.10 | fails over once, on the final node (**same node as the leader now**) | anything using the kubeconfig endpoint, incl. this session |
+| `gateway/envoy` | one of three pods of each of `envoy-internal`/`envoy-external`/`envoy-gateway` down per node | **every routed app** (109 HTTPRoutes on 2026-09-26) incl. the public edge — brief connection resets; **no fallback controller exists** |
+| `etcd` | one member down per node; 3.6.14 → 3.7.1; snapshot taken first (§3.8a) | whole control plane; API blips |
+| VIP 192.168.55.10 | fails over when its owner rolls (owner re-checked before every node, §3.8) | anything using the kubeconfig endpoint, incl. this session |
+| `etcd` leadership | re-elects when the leader rolls — and spontaneously (6× in 7d, §2.3) | control plane; §3.10's triage branch |
+| `igpu-i915` / NPU | device plugins re-register per node | Frigate, Jellyfin, Plex, Immich, NPU workloads |
+| `security` DaemonSets | falco (modern_ebpf vs kernel 6.18.51), wazuh-agent, otel daemon restart per node | security telemetry gap per node; otel sheds its backlog via memory_limiter |
+| `authentik` | server/worker/outposts reschedule | SSO logins, briefly |
 | `storage/longhorn` | instance-manager restart + replica rebuild ×3 | every stateful app; the databases in particular |
 | `cni/cilium` | DaemonSet pod restart per node | all pod networking, briefly |
 | `coredns` | Talos-bundled version moves | cluster DNS, briefly |
@@ -1277,77 +1670,65 @@ has always done, and it changes this plan's fit:
 
 So `sun-attended` is **200 wall-clock / 180 schedulable**, not 200 for plans.
 
-### Re-measured duration: 145 min in-window
+### Re-priced duration: 160 min in-window (was 145)
 
-| Phase | Min | Basis (re-measured 2026-09-20) |
+| Phase | Min | Basis (re-measured 2026-09-26) |
 |---|---:|---|
-| **A — prep (BEFORE the window)** | **~30** | *Not counted in `est_duration_min`.* Flux does not reconcile `kubernetes/bootstrap/talos/`, so §3.1–§3.7 are inert until `talosctl upgrade` runs. |
-| §2 pre-checks | 15 | 10 checks, several with per-node loops |
-| Node 01 — canary: upgrade + drain + reboot + §3.10 + §3.11 + §4.1 + canary go/no-go | 35 | lightest node (17 attached, 58 replicas); includes the extra canary verification the other two skip |
-| Node 02 — upgrade + gate | 40 | heaviest (45 attached, 67 replicas) |
-| Node 03 — upgrade + gate; **VIP failover AND etcd leader re-election** | 35 | mid load (30 attached, 59 replicas) but carries both control-plane events |
-| §4.2 + §4.4 + §4.5 whole-cluster verification (incl. the 15-min alert settle) | 20 | overlaps the settle wait |
-| **In-window total** | **145** | |
+| **A — prep (BEFORE the window)** | **~35** | *Not counted.* Flux does not reconcile `kubernetes/bootstrap/talos/`; §3.1–§3.7 are inert until `talosctl upgrade`. +5 vs 09-20 for the §3.6 scratch snapshot + live-image check. |
+| §2 pre-checks | 20 | 12 checks + writing the 5 helpers + UniFi (§2.11) + per-node baseline (§2.12); +5 vs 09-20 |
+| §3.8a etcd snapshot | 3 | ~0.9 GB streamed over the LAN |
+| **Canary** — upgrade + drain + reboot + §3.10 + §3.11 + §4.1 + canary go/no-go | **45** | **priced for the HEAVIEST node**: the §2.4 rule can pick node 02 (38 engines, 67 replicas). The 09-20 plan priced a 17-engine canary at 35; drain and rebuild scale with engines, +10 |
+| 2nd node — upgrade + gates | 37 | 20–38 engines; possibly a VIP failover |
+| 3rd node — upgrade + gates | 35 | possibly a VIP failover and/or leader re-election |
+| §4.2 + §4.3 + §4.4 + §4.5 (incl. the 15-min alert settle) | 20 | overlaps the settle wait |
+| **In-window total** | **160** | |
 
-**This is 5 minutes more than the v1.14.0 plan's 140, and the task framing asked me to say
-so explicitly. Here is where it went:** node 03 now holds **both** the VIP and etcd
-leadership. The v1.14.0 plan could sequence those two disruptions onto different nodes
-(leader on 03 in mid-position, VIP on 02 last) and priced them separately. They are now
-inseparable, so the final node carries a failover *and* a re-election plus its own rebuild
-gate. That is a genuine +5, not padding.
+Where the +15 went: +10 because the canary can no longer be assumed light (the rule picks by
+VIP/leadership, and leadership moves — it moved twice in ten minutes on 2026-09-26), +5 for
+the snapshot / UniFi / per-node gates the reviewer required. The old "+5 because node 03
+holds both VIP and leader" is gone: that pairing no longer holds and the order is a rule now.
 
-### Does it still fit, with a real rollback budget? Honestly: yes, but tighter than 45.
+### Does it still fit, with a real rollback budget? Yes on the scheduler's rule; the rollback budget is 20, and that is acceptable only because of WHEN it is needed.
 
 ```
 slot wall clock                      200
   − Step 0 reserve (mandatory)        20
-  − this plan                        145
+  − this plan                        160
   ────────────────────────────────────────
-  = residual                          35    ← the rollback budget
+  = residual                          20    ← the late-rollback budget
 ```
 
-- **Against the scheduler's rule it fits comfortably:** 145 ≤ 180 schedulable, with 35 min
-  of schedulable room to spare.
-- **Against the intended rollback budget it is 10 minutes short.** The slot was sized as
-  140 + 45 + 15. The 15-min alert settle is already *inside* my 145 (it lives in the §4.4
-  block), so the honest decomposition is 20 + 145 + **35**, against a realistic worst-case
-  single-node rollback of **45**.
-
-**Why that 10-minute shortfall is acceptable, and the one case where it is not:**
-
-1. **The rollback budget is only genuinely needed at the canary**, which completes around
-   **T+50** (15 pre-checks + 35 for node 01). At that moment ~110 minutes of slot remain —
-   more than double the 45-min rollback cost. The clean exit is cheap precisely because it
-   is early.
-2. **Past the canary the correct response is not rollback at all — it is to stop
-   part-rolled** (§5.2), which costs *nothing* and is a supported transient. So the
-   end-of-window scenario that would consume a 45-min rollback does not call for one.
-3. **The squeeze only bites in one case:** node 03 fails at the very end AND the operator
-   decides to roll that single node back rather than stop. That is a deliberate, attended
-   decision with the operator present, and it would overrun the slot by ~10 minutes. **Flag
-   it at the go/no-go rather than discovering it at 12:20.**
-
-**Stopping part-way is a designed outcome, not a failure.** A mixed v1.13.10 / v1.14.1
-cluster is supported. If the budget goes, stop after whichever node just passed its gate, run
-§4.4 against the mix, and take the rest next window. Do **not** trim the estimate to make
-three nodes fit — that is how a gate gets skipped.
+- **Scheduler:** 160 ≤ 180 schedulable. Fits, with `exclusive: true` so nothing else can.
+- **The canary rollback (~45–50 min) is fully covered:** the canary finishes around
+  **T+68** (20 pre-checks + 3 snapshot + 45); ~110 minutes of slot remain at that point.
+- **Past the canary the answer is stop-part-rolled (§5.2), which costs nothing.** The only
+  case the 20-min residual does not cover: the LAST node fails at the very end AND the
+  operator chooses to roll that one node back rather than stop. That overruns by ~25–30 min,
+  attended, operator present. **Flag it at the go/no-go rather than discovering it at 12:20.**
+- If the canary alone takes > 60 min, re-plan: stop after the canary, run §4.4 on the mix,
+  take the other two next Sunday. Do **not** trim the estimate to make three nodes fit.
 
 ## Open items — could not be determined read-only
 
-1. **RESOLVED (was open item #1 on the v1.14.0 plan).** Talos v1.14 ↔ Kubernetes support
-   matrix: answered from upstream code (1.32.0 – 1.37.99; host upgrade floor 1.12.0), not
-   from the JS-rendered docs site. No Phase-A follow-up needed.
-2. **`talhelper genconfig` output diff for v1.14.1** was reasoned about, not executed:
-   running it writes SOPS-encrypted node configs into the repo, which is outside this agent's
-   write boundary. §3.6 makes reviewing that diff an explicit, gated step with a named list
-   of things that must **not** appear — and v1.14.1's tightened v1alpha1-vs-migration
-   validation makes that review more load-bearing than it was for v1.14.0.
-3. **Node-reboot duration on v1.14.1 specifically.** The 35/40/35 per-node figures are
-   extrapolated from the 2026-08-16 v1.13.8 roll and today's measured per-node Longhorn load.
-   v1.14 adds `sandboxd` to the boot path even with workload isolation off; whether that
-   changes boot time is unmeasured. **The canary is where this becomes a fact — time it, and
-   re-plan nodes 02/03 from the measurement rather than from this table.**
-4. **Repo corrections owed** (reported, not silently worked around): the stale schematic
-   `b85cceac…` in `machine-intelgpu.yaml` (§1), the six plans still naming `talos-1.14.0` in
-   `conflicts_with` (§6), and the stale `v1.13.10` in the `aqua:siderolabs/talos` deny-rule
-   reason (§3.3, fixed by this plan's own commit).
+1. **RESOLVED.** Talos v1.14 ↔ Kubernetes support matrix: answered from upstream code
+   (1.32.0 – 1.37.99; host upgrade floor 1.12.0).
+2. **`talhelper genconfig` output diff for v1.14.1** was reasoned about, not executed: running
+   it overwrites the gitignored local node configs, outside this agent's write boundary.
+   §3.6 makes the diff an explicit gate against a scratch snapshot of the old files, verified
+   against the live machineconfig first.
+3. **Node-reboot duration on v1.14.1.** Extrapolated from the 2026-08-16 roll and today's
+   engine counts; `sandboxd` joins the boot path. **Time the canary and re-plan from it.**
+4. **Tooling gaps found in this fix pass (repo corrections, reported not worked around):**
+   - `runbooks/plan-premises.py` allows no HTTP client other than `kubectl`, and scores any
+     command with rc≠0 as failed — so a **404 negative control can never be a premise**, and
+     `mise ls-remote` / `gh` checks cannot be either. This plan uses `kubectl get --raw` with
+     `--kubeconfig=/dev/null --token=none` against public hosts (content-pinned) and keeps the
+     404 control and `mise ls-remote` as in-window hard gates (§3.1, §3.5).
+   - `unifictl` has no reader for the controller's `get/setting/mgmt` (`auto_upgrade`), so
+     §2.11's auto-update half is a human read.
+   - `runbooks/maintenance-windows.yaml` says the nightly 03:30 window starts "after the
+     03:00 Longhorn backup kicks off" — the CronJob is 03:00 **UTC** (05:00 Berlin), i.e.
+     *after* a 03:30-Berlin nightly window, not before it.
+   - The stale schematic `b85cceac…` in `patches/global/machine-intelgpu.yaml` (§1) and the
+     stale `v1.13.10` in the `aqua:siderolabs/talos` deny-rule reason (§3.3, fixed by this
+     plan's own commit) are still owed.
