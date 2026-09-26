@@ -747,34 +747,57 @@ can confirm it exists (all four PRESENT in the live label index 2026-09-22):
    ```bash
    /tmp/ncmcp/call.sh tools/call '{"name":"nc_calendar_list_calendars","arguments":{}}' > /tmp/ncmcp/calendars.after
    /tmp/ncmcp/call.sh tools/call '{"name":"nc_webdav_list_directory","arguments":{"path":""}}' > /tmp/ncmcp/files.after
-   python3 - <<'EOF'
-   import json,re
-   def names(p):
-       d=json.load(open(p)); r=d["result"]; assert not r.get("isError"), (p, r)
-       txt=" ".join(c.get("text","") for c in r.get("content",[]))
-       return txt
-   cb, ca = names("/tmp/ncmcp/calendars.before"), names("/tmp/ncmcp/calendars.after")
-   fb, fa = names("/tmp/ncmcp/files.before"),     names("/tmp/ncmcp/files.after")
-   assert len(ca) > 0 and len(fa) > 0, "empty result after bump"
-   # calendar identity must survive the DAV-encoding change. 0.195.x unquote()s the `name` field
-   # (client/calendar.py:730) and two live calendars carry percent-encoded names, so a raw-text
-   # diff of `name` reads 2 missing on a HEALTHY rollout (reviewer 2026-09-23). Compare the parsed
-   # display_name sets, with name unquoted on both sides as a second witness.
+   # Paths are ARGUMENTS so §5 can replay the identical gate on calendars.revert/files.revert.
+   python3 - /tmp/ncmcp/calendars.before /tmp/ncmcp/calendars.after /tmp/ncmcp/files.before /tmp/ncmcp/files.after <<'EOF'
+   import json, sys
    from urllib.parse import unquote
-   def cal_ids(txt):
-       try:
-           items = json.loads(txt)
-           if isinstance(items, dict): items = items.get("calendars") or items.get("items") or [items]
-       except Exception:
-           items = [json.loads(m) for m in re.findall(r'\{[^{}]*"display_name"[^{}]*\}', txt)]
-       return ({c.get("display_name") for c in items if isinstance(c, dict)} - {None},
-               {unquote(c.get("name", "")) for c in items if isinstance(c, dict)} - {""})
-   (db, nb), (da, na) = cal_ids(cb), cal_ids(ca)
-   assert db and da, "could not parse a calendar list on one side -- fix the parser before judging"
-   missing = (db - da) | (nb - na)
-   assert not missing, f"calendars missing after bump: {missing}"
-   print("calendars before/after:", len(db), len(da), "| files listing bytes before/after:", len(fb), len(fa))
+   CB, CA, FB, FA = sys.argv[1:5]
+   def result(p):
+       r = json.load(open(p))["result"]; assert not r.get("isError"), (p, r)
+       return r
+   def full_unquote(s):
+       # 0.184.5 emits `name` as the RAW href segment; 0.185.5+ unquote()s it once
+       # (client/calendar.py:584 at v0.185.5, :730 at v0.195.4). A calendar whose Nextcloud URI itself
+       # holds a literal `%28` therefore reads `%2528` on 0.184.5 and `%28` on 0.195.x -- SAME calendar.
+       # ONE unquote leaves the two shapes one level apart: that false STOP reverted the 2026-09-26 run.
+       # Decode until stable so both collapse to one key.
+       for _ in range(8):
+           n = unquote(s)
+           if n == s: return s
+           s = n
+       raise AssertionError(f"unquote did not converge: {s!r}")
+   def cals(p):
+       r = result(p)
+       sc = r.get("structuredContent") or json.loads(" ".join(c.get("text", "") for c in r.get("content", [])))
+       items = sc.get("calendars")
+       assert isinstance(items, list) and items, f"{p}: no non-empty `calendars` list -- fix the parser before judging"
+       assert sc.get("total_count", len(items)) == len(items), f"{p}: total_count {sc.get('total_count')} != {len(items)} rows"
+       out, shapes = {}, []
+       for c in items:
+           seg = c["href"].rstrip("/").split("/")[-1]
+           # name must be the href segment raw (<=0.185.4) or decoded ONCE (>=0.185.5); anything else
+           # (over-decoded to "(", truncated, swapped) breaks the name->URL round-trip the tools rely on.
+           assert c["name"] in (seg, unquote(seg)), f"{p}: name {c['name']!r} is neither raw nor once-decoded href segment {seg!r}"
+           if seg != unquote(seg): shapes.append("raw" if c["name"] == seg else "once")
+           key = full_unquote(c["href"])      # href is byte-identical across 0.184.5/0.195.4 (measured 2026-09-26)
+           assert key not in out, f"{p}: two calendars collapse to one key {key!r} -- compare raw hrefs instead"
+           out[key] = (c["display_name"], full_unquote(c["name"]))
+       return out, shapes
+   (b, sb), (a, sa) = cals(CB), cals(CA)
+   missing, added = sorted(b.keys() - a.keys()), sorted(a.keys() - b.keys())
+   changed = sorted(k for k in b.keys() & a.keys() if b[k] != a[k])
+   assert not (missing or added or changed), f"calendar set differs: missing={missing} added={added} changed={[(k, b[k], a[k]) for k in changed]}"
+   fb, fa = (" ".join(c.get("text", "") for c in result(p).get("content", [])) for p in (FB, FA))
+   assert len(fa) > 0, "empty file listing after bump"
+   print(f"calendars before/after: {len(b)} {len(a)} | encoded-name shape before={sorted(set(sb))} after={sorted(set(sa))} | files listing bytes before/after: {len(fb)} {len(fa)}")
    EOF
+   # expect (forward): calendars before/after: 4 4 | encoded-name shape before=['raw'] after=['once'] | ...
+   #   after=['raw'] on the forward run means the 0.185.5 fix is NOT in the running image -- cross-check §4.2's digest.
+   # PROVEN 2026-09-26 (reviewer) on the recorded /tmp/ncmcp readings: PASS on calendars.before vs .after
+   #   (0.184.5 `%2528` vs 0.195.4 `%28`) and vs .revert; the OLD one-unquote gate reproduces the false
+   #   "2 missing". FAILS (rc=1) on synthetic copies of calendars.after with: an encoded calendar removed,
+   #   a plain calendar removed, a display_name renamed, a URI renamed, a name over-decoded to "(",
+   #   isError=true, and an empty list.
    ```
 6. **CONTENTS ASSERTION (the 0.192.0 BREAKING, made visible):
    `nc_calendar_bulk_operations` now carries `apply_to_series`** — measured on
@@ -859,11 +882,47 @@ can confirm it exists (all four PRESENT in the live label index 2026-09-22):
    memory metric first, so a dead scrape is caught there.
 10. **The actual consumers, not just the endpoint** — the only assertion that
     can catch a client-library/protocol mismatch (§1.4):
-    - From the OpenClaw session (`ai`; `mcporter 0.9.0` / TS SDK 1.30.0,
-      offers `2025-11-25`): exercise one read through its `nextcloud` MCP entry
-      (list the same root folder or the calendars) and confirm real data comes
-      back — the same folder names as `/tmp/ncmcp/files.after`, not an empty
-      list and not a tool error.
+    - From OpenClaw (`ai`; `mcporter` / TS SDK, offers `2025-11-25`) — the SAME
+      client binary, URL and Authorization header the agent uses. The pod's
+      `/etc/openclaw-mcp/mcp-servers.json` is OpenClaw's own map (`url`,
+      placeholder tokens), NOT mcporter's `{"mcpServers":{..."baseUrl"...}}`
+      schema, so a throwaway mcporter config is built from the pod env. mcporter
+      interpolates `${VAR}` in `headers` but NOT in `baseUrl` (0.9.0 throws
+      `ERR_INVALID_URL` on it), hence the printf; the header value never lands
+      on disk. **mcporter exits 0 on HTTP 500 and on `isError`** (measured
+      0.9.0), so the gate is the JSON body, never `$?`:
+      ```bash
+      kubectl exec -n ai deploy/openclaw -c app -- sh -c '
+        M=/home/node/.openclaw/lib/node_modules/mcporter/dist/cli.js
+        node "$M" --version >&2
+        cfg=$(mktemp /tmp/mcporter-ncmcp.XXXXXX)
+        printf "{\"imports\":[],\"mcpServers\":{\"nextcloud\":{\"baseUrl\":\"%s\",\"headers\":{\"Authorization\":\"\${NEXTCLOUD_MCP_AUTH_HEADER}\"}}}}" "$NEXTCLOUD_MCP_URL" > "$cfg"
+        node "$M" call --config "$cfg" --output json --timeout 30000 nextcloud.nc_webdav_list_directory path=""
+        rm -f "$cfg"' > /tmp/ncmcp/openclaw.after
+      python3 - /tmp/ncmcp/openclaw.after /tmp/ncmcp/files.after <<'EOF'
+      import json, sys
+      out, ref = sys.argv[1], sys.argv[2]
+      raw = open(out).read()
+      assert raw.strip(), f"{out}: empty -- mcporter printed nothing (its exit status is 0 even on HTTP 500/isError)"
+      d = json.loads(raw)
+      assert "error" not in d and not d.get("isError"), f"OpenClaw/mcporter call FAILED: {json.dumps(d)[:300]}"
+      got = {f["name"] for f in d.get("files", [])}
+      r = json.load(open(ref))["result"]
+      want = {f["name"] for f in (r.get("structuredContent") or json.loads(r["content"][0]["text"]))["files"]}
+      assert got, f"{out}: no `files` in the mcporter result -- not real data"
+      assert got == want, f"root listing via OpenClaw differs from files.after: missing={sorted(want-got)} extra={sorted(got-want)}"
+      print(f"4.10 OpenClaw/mcporter PASS: {len(got)} root entries, identical to files.after")
+      EOF
+      # record the mcporter version printed on stderr (install_npm mcporter is UNPINNED; npm head is
+      # 0.14.x, the plan measured 0.9.0 on 2026-09-22) so a failure is attributable.
+      ```
+      PROVEN 2026-09-26 (reviewer, mcporter 0.9.0 AND 0.14.1 locally, identical `sh -c`
+      body): the config parses, the Authorization header is interpolated onto
+      the POST to `/mcp`; the checker PASSes on a result carrying the 26 root
+      entries of `files.after`, and FAILs on an `isError` result, on an HTTP 500
+      (`{"error": "SSE error: Non-200 status code (500)", ...}`, exit 0) and on
+      empty output. What the fake server could NOT prove is the real TS-SDK ↔
+      `mcp 2.1.1` handshake — that is exactly what this live call is for.
     - Attended windows: the operator repeats it once from Claude Desktop
       (`mcp-proxy` 0.12.0 with python `mcp` 2.2.0 — a 2.x client): open the
       `nextcloud` server, list the root folder. Note in the run log which
@@ -910,7 +969,9 @@ kubectl get pod -n office -l app.kubernetes.io/name=nextcloud-mcp -o jsonpath='{
 Confirm the cluster is back by re-running §4.4 and §4.5 against the reverted
 pod: `tools.after` must equal `tools.before` exactly (96 names, `comm` empty
 both ways), `protocol.after` must read `2025-06-18 1.29.0`, and both tool
-calls must return the baseline data. Then re-run §4.10 from OpenClaw. If the
+calls must return the baseline data (replay §4.5 with its 2nd and 4th path
+arguments replaced by `/tmp/ncmcp/calendars.revert` and `/tmp/ncmcp/files.revert`;
+expect `after=['raw']`). Then re-run §4.10 from OpenClaw. If the
 failure was a consumer-side protocol mismatch rather than the server, note it
 on `F-9af9baf7` (`policy-cli.py finding detail`) — the fix is pinning the
 client (`install_npm mcporter@<ver>` / `uvx --from mcp-proxy==<ver>`), not
