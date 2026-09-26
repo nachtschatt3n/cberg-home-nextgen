@@ -6,6 +6,7 @@ metadata:
   namespace: office
 spec:
   interval: 30m
+  timeout: 20m                    # RESTORE (remove) in step 3.9
   chart:
     spec:
       chart: paperless-ngx
@@ -21,16 +22,21 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 1
+      retries: 0                    # RESTORE to 1 in step 3.9
+      remediateLastFailure: false   # RESTORE (remove) in step 3.9
   uninstall:
     keepHistory: false
   values:
     global:
       security:
         allowInsecureImages: true
+    probes:
+      startup:
+        spec:
+          failureThreshold: 120     # RESTORE to 30 in step 3.9
     image:
       repository: ghcr.io/paperless-ngx/paperless-ngx
-      tag: "3.1.3"
+      tag: "3.2.1"
       pullPolicy: IfNotPresent
     env:
       TZ: UTC
