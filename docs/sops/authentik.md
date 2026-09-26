@@ -186,7 +186,8 @@ then rolled back (`Importer.validate()` + `apply()` under an outer `atomic()`):
 | `authentik Embedded Outpost` | **No blueprint declares any outpost** (grep of all 45 files: zero `authentik_outposts.*` entries). It is created by code — `outposts/apps.py` `update_or_create(defaults={type, name}, managed=…)`; `config` is not in `defaults`. | `embedded-outpost-blueprint.yaml` sets `kubernetes_disabled_components: [ingress]` | Ours. Nothing upstream can reset `config`; the hijacking Ingress cannot come back through a re-apply. Still re-check after every upgrade (audit below) — code, not files, owns this object. |
 | `default-authentication-flow` (`6b45105d-…`) | `default/flow-default-authentication-flow.yaml`: the flow by `slug` (attrs `designation`, `name`, `title`, `authentication`) and bindings **10/20/30/100** by `(target, stage, order)` | `login-reputation-blueprint.yaml`: a **new** order-**15** deny binding targeting the flow by pk, plus its policy binding | Both. Different identifier tuples; upstream never declares order 15 and never prunes. Dry-run delta on bindings: **none**. Live flow attrs equal upstream's, so the flow row is a no-op. |
 | `default-authentication-login` (user-login stage) | `default/flow-default-authentication-flow.yaml`: identifiers `name` only, **no attrs** | `session-lifetime-blueprint.yaml`: `session_duration: days=365` | Ours. Upstream declares no attrs, so a re-apply cannot reset it. Re-check after every image bump: `grep -A6 userloginstage /blueprints/default/flow-default-authentication-flow.yaml`. If upstream ever declares `session_duration`, sessions silently fall back to browser-close. |
-| Default brand `authentik-default` | `state: created` behind `!Condition [NOR, default brand exists]` | none | Skipped entirely here. |
+| Default brand `authentik-default` | `state: created` behind `!Condition [NOR, default brand exists]` | `mfa-recovery-blueprint.yaml`: `flow_recovery: cberg-recovery` (2026-09-26) | Ours. Upstream is skipped entirely here, so it never touches `flow_recovery`. |
+| MFA/recovery fields on upstream stages (added 2026-09-26, **by source reading, not dry-run measured** like the rows above) | `default-authentication-identification`: `user_fields` only; `default-authentication-mfa-validation`: no attrs; WebAuthn setup: `configure_flow`, `friendly_name`; static setup: `configure_flow`, `friendly_name`, **`token_count: 6`** | `mfa-recovery-blueprint.yaml`: identification `recovery_flow`, `webauthn_stage` (+ identical `user_fields`); validation `device_classes`, `not_configured_action`, `webauthn_user_verification`; WebAuthn `user_verification`, `resident_key_requirement`; static `token_count: 10` | Ours, **except `token_count`**: upstream re-declares it, so an image bump resets it to 6 until our file is re-applied (see "Email, recovery and MFA"). |
 | Managed scope / property mappings (38 ids under `system/`) | re-asserted, `state: present` | referenced read-only via `!Find` | Upstream — by design. We only read them; the re-apply is how e.g. the `profile` scope's `groups` claim stays current. |
 | Groups, users, providers, applications | `authentik Admins` (`created`), RBAC groups, `akadmin` (`created`) | our own names only | No shared identifier for any model (checked model by model). |
 | Deletions | `flow-oobe.yaml` `state: absent` → the retired `default-oobe-flow-set-authentication` policy and its binding on the **OOBE** flow; `migrations/` → already gone | — | The only deletions a re-apply performs. None of ours. |
@@ -203,10 +204,11 @@ prefer not to.
 **Changing the layout or the ConfigMap mount path moves every row.** A
 `BlueprintInstance` keys on `path`, so after such a change the old rows point at
 files that no longer exist and `clear_failed_blueprints` deletes them on the
-first worker boot, while discovery creates fresh rows under the new path. Two of
+first worker boot, while discovery creates fresh rows under the new path. Four of
 our files carry `metadata.name` (`authentik-embedded-outpost`,
-`login-reputation-throttle`) and `BlueprintInstance.name` is unique: if discovery
-runs before cleanup on that first boot, the insert for those two raises an
+`login-reputation-throttle`, `session-lifetime`, `cberg-mfa-recovery`) and
+`BlueprintInstance.name` is unique: if discovery
+runs before cleanup on that first boot, the insert for those four raises an
 `IntegrityError`, the discovery task fails and is retried
 (`worker.task_max_retries: 5`, exponential backoff) — it converges once cleanup
 has run, normally within a minute. Deterministic path, **after** the new pods are
