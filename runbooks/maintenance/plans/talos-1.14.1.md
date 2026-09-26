@@ -15,13 +15,14 @@ risk: high                            # rolling reboot of every control-plane no
                                       # 3-node hyper-converged cluster: etcd quorum,
                                       # 93 Longhorn volumes at replica=2, and the ONLY
                                       # HTTP data plane (Envoy Gateway) all ride on it
-est_duration_min: 187                 # RE-PRICED 2026-09-26 PM (was 160) for the etcd-stability
+est_duration_min: 180                 # RE-PRICED 2026-09-26 PM (was 160 -> 187) for the etcd-stability
                                       # additions (F-84a27c15, F-58141d46): push freeze + freeze-sha
-                                      # gate, §2.3 Prometheus etcd gates, §3.8.0 defrag of 3
-                                      # members, and a >=10-min settle + etcd gate between nodes
-                                      # (§3.10b). FLAGGED: 187 > the 180 schedulable, and
-                                      # Step 0 (20) + 187 = 207 > the 200-min slot. §7 has the
-                                      # arithmetic and the operator's options. IN-WINDOW only;
+                                      # gate, §2.3 Prometheus etcd gates, and a >=10-min settle +
+                                      # etcd gate between nodes (§3.10b). 187 -> 180 on 2026-09-26
+                                      # ~15:00Z: §3.8.0 defrag (7 min) was DONE AHEAD OF THE WINDOW
+                                      # (operator option 2, §7) and is SKIPPED in-window. 180 == the
+                                      # 180 schedulable; Step 0 (20) + 180 = 200 = the slot, residual
+                                      # 0. §7 has the arithmetic. IN-WINDOW only;
                                       # Phase A prep (~35 min) is Flux-inert and runs BEFORE it.
 needs_reboot: true                    # three sequential node reboots
 exclusive: true                       # the node roll must have sun-attended:2026-09-27 TO
@@ -51,7 +52,7 @@ touches:
     - node/k8s-nuc14-03                           # 192.168.55.13
     - "etcd (3 members, 3.6.14 -> 3.7.1; pre-roll snapshot taken at §3.8a)"
     - "all Longhorn replicas (186 on 2026-09-26, after the pg17 volume retire) / 93 volumes (numberOfReplicas: 2)"
-    - "etcd defrag of all 3 members, followers first, leader last (§3.8.0)"
+    - "etcd defrag of all 3 members (§3.8.0) — DONE AHEAD OF WINDOW 2026-09-26 14:47-14:50Z, skipped in-window"
     # NOT gitrepository/flux-system: deliberately NOT suspended (source-controller storage is
     # emptyDir; a suspended source loses its artifact when a drain moves that pod — §2.0b)
     - imageupdateautomation/my-software-production/absenty-image-updates   # suspended: it pushes to main
@@ -114,7 +115,7 @@ security_ref: null                    # no security driver
 finding_refs:
   - F-912f4778                        # "Talos Linux (cluster nodes): v1.13.10 → v1.14.1"
   - F-84a27c15                        # etcd-disk-latency gate + git-push freeze (§2.0b, §2.3, §3.10b)
-  - F-58141d46                        # etcd defrag before the one-way 3.6 -> 3.7 roll (§3.8.0)
+  - F-58141d46                        # etcd defrag before the one-way 3.6 -> 3.7 roll (§3.8.0) — DONE 2026-09-26, closed
   - F-7b842e62                        # Longhorn rebuild concurrency: DECIDED here, left at 8 (§3.11)
   # NOT claimed: F-baf94b64 (flux-system spec.ignore — landed b4ed1d63 2026-09-26 14:35Z, not this plan's)
   # and F-3602cfa9 (the 09-24 20:28Z stall, owned by health-check-agent; named in §7 risk).
@@ -1340,6 +1341,37 @@ For each node, in the order the rule gives, run **3.9 → 3.10 → 3.10a → 3.1
 completion before starting the next. §3.10b (≥10-min settle + etcd gates) is the LAST thing
 before the next node's §3.9; after the third node it is replaced by §4.
 
+> **§3.8.0 is DONE AHEAD OF THE WINDOW — SKIP IT IN-WINDOW.** Run attended on
+> 2026-09-26 (operator-approved, §7 option 2) exactly per the procedure below, with the §2.3b
+> gates. Evidence (all times UTC, `$SCR = ~/.cache/talos-1141`):
+> - **Pre-gates 14:47:22Z** — `etcdgate.py --lookback 1h --leader-window 2h` `VERDICT PASS`:
+>   worst 5m-p99 WAL fsync 28.3 / 23.4 / 28.5 ms, backend commit 25.9 / 16.0 / 30.0 ms
+>   (.11/.12/.13); leader changes 2h 0/0/0; kustomize-controller 1.56 MB/s. `etcdstat.py
+>   converged` PASS (spread 0). Negative controls all printed `VERDICT FAIL` (1 ms latency
+>   limits; 7d leader window = 8 changes; `defragged .12` = 19%). `etcd alarm list` empty.
+> - **Leader** `a1ca2fde…` = k8s-nuc14-02 (.12), RAFT TERM 73. Order: .11 → .13 → .12 (leader last);
+>   in-loop gate (`--lookback 10m`) + `etcdstat.py defragged <done>` PASS before each member; 60 s between.
+>
+> | Member | Defrag (UTC) | `real` | DB SIZE before → after | IN USE after |
+> |---|---|---:|---|---|
+> | .11 k8s-nuc14-01 (follower) | 14:47:31Z | 0.86 s | 872 MB → 174 MB | 100% |
+> | .13 k8s-nuc14-03 (follower) | 14:48:47Z | 0.74 s | 867 MB → 175 MB | 100% |
+> | .12 k8s-nuc14-02 (LEADER)   | 14:49:56Z | 0.86 s | 912 MB → 167 MB | 99.99% |
+>
+> - **Post 14:51:04Z** — `etcdstat.py defragged .11 .13 .12` PASS (178/178/170 MB, 96/96/100% in use,
+>   spread 0); `etcdgate.py --lookback 10m` PASS (worst fsync 22.9 ms, commit 16.0 ms);
+>   `etcd alarm list` empty on all three; `kubectl get --raw /readyz` = `ok`. **No election:** the
+>   LEADER stayed `a1ca2fde…` and RAFT TERM stayed 73 through all three defrags, including the
+>   leader's; `leader-allow.log` was NOT written.
+> - **+10 min watch 15:00:30Z** — `etcd_server_leader_changes_seen_total - … offset 11m` = 0 / 0 / 0;
+>   `etcdgate.py` PASS (worst fsync 22.8 ms, commit 26.6 ms, kc 0.01 MB/s); leader still `a1ca2fde…`,
+>   term 73, RAFT INDEX identical on all three; DB 176 / 178 / 178 MB, 82% in use; alarms empty;
+>   `/readyz` `ok`.
+> - **In-window:** do NOT re-run the loop. §3.8a's snapshot-size expectation is now **~170–300 MB**
+>   (the DB regrows with churn overnight). Only if the §2.3 status read on 09-27 shows IN USE
+>   **< 50%** of DB SIZE on any member again (it was ~20% before today's defrag) is a re-run worth
+>   its minutes — then run this section unchanged and add its 7 min back.
+
 **3.8.0 — etcd defrag (F-58141d46), gated, ONE member at a time, followers first, leader
 last. Runs once, after §2.3b PASS and BEFORE the §3.8a snapshot.** *2026-09-26: DB SIZE
 867–912 MB, IN USE ~227–250 MB (25–29%) on every member* — ~75% free pages. Defrag rewrites
@@ -1408,7 +1440,8 @@ stat -f '%Lp %z %N' "$SCR/etcd-pre-v1.14.1.db"
 stat -f '%Lp %N' "$SCR"
 ```
 **PASS:** file mode `600`, dir mode `700`, and a size in the same order as the POST-DEFRAG
-`DB SIZE` from §3.8.0's last `etcdstat.py` line (*expect ~230–300 MB; the pre-defrag 845–912 MB
+`DB SIZE` from §3.8.0's last `etcdstat.py` line — §3.8.0 ran ahead on 2026-09-26, so read
+the §2.3 `etcd status` instead (*expect ~170–300 MB; post-defrag 2026-09-26 was 167–178 MB; the pre-defrag 845–912 MB
 of 2026-09-26 would mean the defrag did not happen*; a 0-byte or few-KB file is a FAIL — do not
 start the roll). It is
 **local only**: never copy it into the repo or a synced folder; it holds every Secret. Delete
@@ -2208,15 +2241,15 @@ has always done, and it changes this plan's fit:
 
 So `sun-attended` is **200 wall-clock / 180 schedulable**, not 200 for plans.
 
-### Re-priced duration: 187 min in-window (was 160) — FLAGGED: over the slot
+### Re-priced duration: 180 min in-window (was 160, then 187) — fits the slot with 0 residual
 
 | Phase | Min | Basis |
 |---|---:|---|
 | **A — prep (BEFORE the window)** | **~35** | *Not counted.* Flux does not reconcile `kubernetes/bootstrap/talos/`; §3.1–§3.7 are inert until `talosctl upgrade`. |
 | §2.0b push freeze + automation suspend + freeze sha | 2 | 2 suspends + read-back; the per-node freeze-sha check is seconds |
 | §2 pre-checks incl. §2.3b etcd gates | 23 | was 20; +3 for two gate helpers + controls. Assumes 2.3b passes first time — its own budget rule caps waiting at T+60 |
-| §3.8.0 etcd defrag, 3 members, gated | 7 | ~3 × (gate ~40 s + defrag seconds + 60 s catch-up) + final checks |
-| §3.8a etcd snapshot | 3 | now ~0.25 GB after the defrag (was ~0.9 GB) |
+| ~~§3.8.0 etcd defrag, 3 members, gated~~ | ~~7~~ **0** | **DONE AHEAD 2026-09-26 14:47–14:50Z** (option 2 below; evidence at §3.8.0). Measured cost: ~4 min wall clock incl. gates, defrags 0.74–0.86 s each, no election |
+| §3.8a etcd snapshot | 3 | now ~0.17–0.3 GB after the defrag (was ~0.9 GB) |
 | **Canary** — upgrade + drain + reboot + §3.10 + §3.10a + §3.11 + §4.1 + go/no-go | **45** | priced for the HEAVIEST node (unchanged) |
 | §3.10b settle after canary | 7 | 10-min floor; ~3 min of it overlaps §4.1's cmdline check, the go/no-go and §3.8's re-check |
 | 2nd node | 37 | unchanged |
@@ -2224,7 +2257,7 @@ So `sun-attended` is **200 wall-clock / 180 schedulable**, not 200 for plans.
 | 3rd node | 35 | unchanged |
 | §4.2–§4.5 incl. 15-min alert settle and the §4.4 #9 etcd gate | 20 | the etcd gate runs inside the settle |
 | §5.4 resume + read-back | 1 | during the settle |
-| **In-window total** | **187** | +27 vs 160 |
+| **In-window total** | **180** | +20 vs 160 (was 187 until the defrag ran ahead) |
 
 Longhorn rebuild concurrency stays at 8 (§3.11), so no rebuild time was added; lowering it
 would add an estimated 40–60 min on top and push the plan past the 200-min slot outright.
@@ -2232,12 +2265,16 @@ would add an estimated 40–60 min on top and push the plan past the 200-min slo
 ```
 slot wall clock                      200
   − Step 0 reserve (mandatory)        20
-  − this plan                        187
+  − this plan                        180   (was 187; §3.8.0 done ahead 2026-09-26)
   ────────────────────────────────────────
-  = residual                         −7    ← NO rollback budget; overruns the slot by 7 min
+  = residual                          0    ← fits exactly; still NO rollback budget
 ```
 
-- **Scheduler: 187 > 180 schedulable. FLAG.** `maintenance-plan.py --validate` still passes
+- **2026-09-26 ~15:00Z: option 2 TAKEN** — §3.8.0 ran ahead (evidence at §3.8.0), so the plan is
+  180 = the 180 schedulable with residual 0. The freeze caveat in option 2 does not apply: no
+  freeze was held for it (the gates were green without one), and §2.0b's freeze starts in-window
+  as written. Options 1 / 3 below still stand as the answer to "no rollback budget".
+- **Scheduler (history): 187 > 180 schedulable. FLAG.** `maintenance-plan.py --validate` still passes
   (it rejects only a plan longer than the raw 200-min slot), so nothing mechanical stops this
   window from being run over-committed. The operator must choose at the GO:
   1. **extend `sun-attended` on 2026-09-27** to ≥ 250 min (`runbooks/maintenance-windows.yaml`
@@ -2251,8 +2288,8 @@ slot wall clock                      200
   3. **accept a stop-after-2 outcome**: plan for canary + 2nd node, take the 3rd if §3.10b
      passes before T+170, otherwise stop part-rolled (§5.2, a supported transient) and finish
      next Sunday.
-- **The canary rollback is still covered in time:** the canary ends around **T+80** (2 + 23 +
-  7 + 3 + 45), leaving ~100 min of slot. Past the canary the answer is stop-part-rolled (§5.2),
+- **The canary rollback is still covered in time:** the canary ends around **T+73** (2 + 23 +
+  3 + 45; the defrag's 7 ran ahead), leaving ~107 min of slot. Past the canary the answer is stop-part-rolled (§5.2),
   which costs nothing — so option 3 is safe, merely slow.
 - If the canary alone takes > 60 min, re-plan: stop after the canary, run §4.4 on the mix, §5.4,
   take the other two next Sunday. Do **not** trim the estimate to make three nodes fit.
