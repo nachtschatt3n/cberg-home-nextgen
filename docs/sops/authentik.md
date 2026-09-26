@@ -238,7 +238,7 @@ print(Counter(b.path.split('/')[0] if '/' in b.path else '<BARE>' for b in qs))
 print('not successful:', [(b.path, b.status) for b in qs if b.status != 'successful'])
 for b in qs: print(f'{b.status:<11} {b.last_applied:%Y-%m-%d %H:%M}  {b.path}')
 " 2>/dev/null | grep -v '^{'
-# expected on 2026.8.3: cberg 23, default 19, system 11, migrations 1 -> 54 rows, none <BARE>, none failed
+# expected on 2026.8.3: cberg 24, default 19, system 11, migrations 1 -> 55 rows, none <BARE>, none failed
 # (cberg = number of data keys in authentik-blueprints; +1 per new app blueprint)
 
 # 2. Embedded outpost (and every other) still suppresses the Ingress; zero Ingress objects
@@ -361,6 +361,111 @@ browser and PWA restarts. Three settings make that true, all in blueprints:
   dev tools shows an Expires date ~1 year out, not "Session". Existing sessions
   keep their old browser-session cookie until the next login.
 - Rollback: revert the commit, or set `session_duration: seconds=0`.
+
+### Email, recovery and MFA (phase 1, 2026-09-26)
+
+Operator project: MFA for the two human accounts (operator + Andrea; no kids,
+no guests). **Phase 1 = everything available, nothing enforced.** Phase 2
+(below) makes MFA required everywhere, internal apps included.
+
+**Email transport.** authentik sends through the operator's existing GMX
+account — the IMAP account paperless-ngx fetches from (it lives in the
+paperless DB, `paperless_mail.MailAccount`, not in a paperless SOPS secret;
+paperless's own *outgoing* SMTP is a different, Gmail account). Creds were
+copied into `authentik-secret` (SOPS) as `SECRET_AUTHENTIK_EMAIL_{USERNAME,PASSWORD,FROM}`;
+`helmrelease.yaml` sets `AUTHENTIK_EMAIL__HOST=mail.gmx.net`, `PORT=587`,
+`USE_TLS=true` (STARTTLS), `USE_SSL=false` and maps the three secret keys, on
+server **and** worker (the worker sends the mail). These `env` entries override
+the chart's `envFrom: secret/authentik` defaults (`USE_TLS=false`). GMX rejects
+a foreign sender, so `FROM` must be that GMX address. If the GMX password is
+rotated in paperless, rotate `SECRET_AUTHENTIK_EMAIL_PASSWORD` too.
+
+```bash
+# test mail (worker pod; the recipient is read from the user object, not typed)
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from authentik.core.models import User
+from authentik.stages.email.tasks import send_mails
+from authentik.stages.email.utils import TemplateEmailMessage
+u=User.objects.get(username='mu_adm')
+m=TemplateEmailMessage(subject='authentik test', to=[(u.name,u.email)], template_name='email/setup.html', template_context={})
+send_mails.send(None, m)" 2>/dev/null | tail -1
+# proof: an Event action=email_sent (or a task error with the SMTP reply)
+```
+
+**Blueprint `cberg/mfa-recovery-blueprint.yaml`** (`metadata.name: cberg-mfa-recovery`):
+
+| Object | Setting | Why |
+|---|---|---|
+| Flow `cberg-recovery` (designation `recovery`) | identification (10) → `login-reputation-deny` (15, same IP-reputation policy as login) → email link (20, `token_expiry: minutes=30`) → new-password prompt (30, `cberg-recovery-password-policy`: ≥12 chars, zxcvbn ≥3, HIBP) → user write (40, `never_create`) → login (100, 365 d) | self-service reset; unblocks accounts that never had a password |
+| Recovery identification | `pretend_user_exists: true`, `show_matched_user: false` | no user enumeration: an unknown identifier gets the same "check your email" page and **no** mail (`stages/email/stage.py` skips a pending user without pk in a recovery flow) |
+| Recovery email stage | `recovery_max_attempts: 3`, `recovery_cache_timeout: minutes=30`, `activate_user_on_success: false` | per-user throttle; a reset link never re-enables a disabled account |
+| `default-authentication-identification` | `recovery_flow: cberg-recovery`, `webauthn_stage: default-authentication-mfa-validation` | `recovery_flow` on **this stage** is what renders "Forgot password?" (the brand field alone does not); `webauthn_stage` = passkey autofill on the login page |
+| Brand `authentik-default` | `flow_recovery: cberg-recovery` | admin "Send recovery link" / `ak` recovery emails |
+| `default-authentication-mfa-validation` (order 30) | `device_classes: [webauthn, totp, static, email]`, `not_configured_action: skip`, `webauthn_user_verification: required` | second factor offered to anyone who has one; **nobody forced** |
+| `default-authenticator-webauthn-setup` | `user_verification: required`, `resident_key_requirement: preferred` | discoverable passkeys (autofill), biometrics required |
+| `default-authenticator-static-setup` | `token_count: 10` | 10 recovery codes |
+| `default-authenticator-totp-setup` | unchanged (upstream: 6 digits) | — |
+| Flow/stage `cberg-authenticator-email-setup` | email-OTP, `token_expiry: minutes=15` | fallback factor |
+
+Every authenticator stage with a `configure_flow` is listed at
+`https://auth.<domain>/if/user/` → **MFA Devices → Enroll**.
+
+**Passkey login UX.** With a passkey enrolled, the login page's username field
+offers the passkey via browser autofill (conditional mediation). Picking it
+signs in with no password; upstream's `default-authentication-flow-authenticator-validate-stage`
+policy then skips the MFA stage for `auth_method == auth_webauthn_pwl` — a
+user-verified passkey is already two factors. Password + passkey also works:
+the MFA stage offers the passkey as the second factor.
+
+**Upstream re-apply caveat.** Upstream declares `token_count: 6` on the static
+setup stage, so an image bump resets it to 6 (cosmetic: fewer codes on *new*
+enrolments). After every authentik bump, re-apply our file once (the "Fix" recipe
+in "A blueprint change can leave its row stuck", filtered to
+`path='cberg/mfa-recovery-blueprint.yaml'`). Everything else in this file is a
+field upstream does not declare, so it survives a bump.
+
+**Break-glass.** `ak create_recovery_key <years> <user>` prints a one-time
+login URL for that user. Generated 2026-09-26 for the operator's admin user,
+valid 1 year, stored off-cluster by the operator (never in git/logs). It
+bypasses the login flow entirely, so it still works after phase 2 locks the
+flow down. Regenerate yearly (or after use) with stdout redirected to a
+mode-600 file.
+
+**Verification (phase 1):**
+1. Login page shows "Forgot password?" (link to `/if/flow/cberg-recovery/`).
+2. A recovery for the operator's user produces an `email_sent` Event; an unknown
+   identifier shows the same page and produces none.
+3. `/if/user/` → MFA Devices → Enroll lists TOTP, static tokens, WebAuthn, Email.
+4. An existing browser session, a Grafana OIDC login and a forward-auth app
+   still pass.
+5. Login flow orders unchanged: `[10, 15, 20, 30, 100]`.
+
+**Phase 2 — enforcement (not yet done; operator go/no-go):**
+1. **Preconditions, checked per human user** (`mu_adm`, `andrea`): at least
+   two independent devices — a passkey **and** TOTP or static codes — so that
+   losing one phone is not a lock-out; the break-glass key file exists and is
+   in the password manager; recovery email for each user works.
+2. Set `configuration_stages` on `default-authentication-mfa-validation` to
+   [webauthn, totp] setup stages, then `not_configured_action: configure`:
+   a user with no device is walked through enrolment at next login instead of
+   being refused. (`deny` is the stricter alternative once both users are
+   enrolled; it gives no enrolment path at all.)
+3. Keep `last_auth_threshold` in mind: with 365-day sessions the MFA prompt
+   appears roughly once a year per device — the fridge-type devices use
+   password + TOTP typed from the phone.
+4. Recovery flow: add the MFA validation stage between email link and new
+   password (order 25) so an emailed link alone cannot take over an account
+   whose mailbox is compromised; keep `not_configured_action: skip` there or
+   a user with no device could never recover.
+5. Roll out with an existing admin session open in a second browser and the
+   break-glass file at hand; rollback is `git revert` (or break-glass → admin
+   UI) — the recovery key bypasses flows, so a broken flow cannot lock out
+   the admin.
+
+Rollback (phase 1): `git revert` the commit. The brand/identification-stage
+fields keep their new values after a revert (blueprints do not prune); clear
+them with a follow-up blueprint entry (`flow_recovery: null`, `recovery_flow:
+null`, `webauthn_stage: null`) if the flow itself must go.
 
 ---
 
@@ -1414,6 +1519,8 @@ rows freshly `last_applied`, zero Ingress objects and every outpost still
 and a real browser login. Read the upstream release notes for blueprint changes
 under `blueprints/default` before the bump — a renamed stage identifier there is
 what would make one of our `!Find` references start failing.
+Then re-apply `cberg/mfa-recovery-blueprint.yaml` once: upstream re-declares
+`token_count: 6` on the static setup stage (see "Email, recovery and MFA").
 
 ## Blueprint Reference: DO's and DON'Ts
 

@@ -90,6 +90,35 @@ spec:
         # blocks stay identical.
         - name: AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS
           value: "10.69.0.0/16"
+        # Outgoing mail (recovery links, email-OTP) via the operator's existing
+        # GMX account (the one paperless-ngx fetches from). GMX only accepts
+        # its own address as sender, so FROM carries that address. Creds live
+        # only in authentik-secret (SOPS). These env entries override the
+        # chart's own AUTHENTIK_EMAIL__* (envFrom secret/authentik, USE_TLS=false).
+        # docs/sops/authentik.md "Email, recovery and MFA".
+        - name: AUTHENTIK_EMAIL__HOST
+          value: "mail.gmx.net"
+        - name: AUTHENTIK_EMAIL__PORT
+          value: "587"
+        - name: AUTHENTIK_EMAIL__USE_TLS
+          value: "true"
+        - name: AUTHENTIK_EMAIL__USE_SSL
+          value: "false"
+        - name: AUTHENTIK_EMAIL__USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: SECRET_AUTHENTIK_EMAIL_USERNAME
+        - name: AUTHENTIK_EMAIL__PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: SECRET_AUTHENTIK_EMAIL_PASSWORD
+        - name: AUTHENTIK_EMAIL__FROM
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: SECRET_AUTHENTIK_EMAIL_FROM
       initContainers:
         # Wait for the authentik-pg Deployment (postgres 18.6) to be reachable
         # before starting the server. Without this, authentik tries to connect
@@ -222,6 +251,35 @@ spec:
         # blocks stay identical.
         - name: AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS
           value: "10.69.0.0/16"
+        # Outgoing mail (recovery links, email-OTP) via the operator's existing
+        # GMX account (the one paperless-ngx fetches from). GMX only accepts
+        # its own address as sender, so FROM carries that address. Creds live
+        # only in authentik-secret (SOPS). These env entries override the
+        # chart's own AUTHENTIK_EMAIL__* (envFrom secret/authentik, USE_TLS=false).
+        # docs/sops/authentik.md "Email, recovery and MFA".
+        - name: AUTHENTIK_EMAIL__HOST
+          value: "mail.gmx.net"
+        - name: AUTHENTIK_EMAIL__PORT
+          value: "587"
+        - name: AUTHENTIK_EMAIL__USE_TLS
+          value: "true"
+        - name: AUTHENTIK_EMAIL__USE_SSL
+          value: "false"
+        - name: AUTHENTIK_EMAIL__USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: SECRET_AUTHENTIK_EMAIL_USERNAME
+        - name: AUTHENTIK_EMAIL__PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: SECRET_AUTHENTIK_EMAIL_PASSWORD
+        - name: AUTHENTIK_EMAIL__FROM
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: SECRET_AUTHENTIK_EMAIL_FROM
       # WORKAROUND for Authentik 2025.10.1 bug - Remove when upgrading to 2025.10.2+
       # Issue: Workers try to connect to port 9000 (server port) instead of checking heartbeat file
       # Upstream: https://github.com/goauthentik/authentik/issues/17923
