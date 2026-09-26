@@ -229,7 +229,10 @@ stops at 0.159.0 and must not be used to judge the head) lists exactly
 2026-09-25T12:56:04Z, marked Latest, not a pre-release; none of
 v0.195.1–v0.195.4 is a pre-release — the channel is stable (upstream publishes
 no rc/beta tags on this line). 0.195.4 clears the 48h
-`minimum_release_age_hours` gate on 2026-09-27, before the 2026-10-03 slot.
+`minimum_release_age_hours` gate only at 2026-09-27T12:56Z. **Executed 2026-09-26 in an attended NOW
+run it is ~17-30 h old**: G5 governs the unattended lane and is waived for security-driven bumps
+(`security_ref: F-80459b23`), so it does not block this attended run -- but the operator's GO takes a
+sub-48h artifact knowingly (0.195.0, 7 days old, was the reviewed alternative).
 Tags carry no `v` prefix on GHCR (`0.195.4`), only on GitHub releases
 (`v0.195.4`).
 
@@ -274,7 +277,7 @@ list is a strict subset of the names registered by `server/*.py` at
 |---|---|---|---|---|
 | 0.195.1 | 2026-09-23 | fix/refactor | *"webdav: scope a range read's failed-parse fallback to the slice"*; *"webdav: reap the read-path parse worker, add page-range reads"* | **Additive on a live tool.** `nc_webdav_read_file` gains two OPTIONAL args `page_start`/`page_end` (PDF only; rejected with `parse_document="raw"`) and `ReadFileResponse` gains three optional fields `page_count`/`page_start`/`page_end` (`server/webdav.py`, `models/webdav.py` diff). No field removed, default behaviour unchanged when the args are omitted. The parse worker is now reaped after a read — if anything, LOWERS §4.8 working set. Dockerfile: base `python:3.14-slim-trixie` digest bump + `uv` 0.12.14 → 0.12.18; no entrypoint change. |
 | 0.195.2 | 2026-09-24 | fix | *"observability: classify tool errors from the wire-shaped result"* | Metrics labelling only. Inert. |
-| 0.195.3 | 2026-09-24 | fix (contacts) | *"contacts: drop only unparseable vCard properties, not the whole contact"* | **Applies, benign.** A contact with a property pythonvCard4 rejects (reduced-form `BDAY:--MMDD`, vCard-3 `GEO:`) now keeps its name/phone/email instead of an empty projection; emits a `WARNING Dropped unparseable vCard properties` log line. §4.7 can only get MORE populated; the §4.2 grep counts ERROR/CRITICAL/Traceback, so the WARNING does not trip it. |
+| 0.195.3 | 2026-09-24 | fix (contacts) | *"contacts: drop only unparseable vCard properties, not the whole contact"* | **Applies, benign.** A contact with a property pythonvCard4 rejects (reduced-form `BDAY:--MMDD`, vCard-3 `GEO:`) now keeps its name/phone/email instead of an empty projection; emits a `WARNING Dropped unparseable vCard properties` log line. §4.7 can only get MORE populated. **It does NOT rescue a vCard with no `FN`** (`_parses_alone` prepends `FN:x`, so no line fails alone, `dropped` is empty and the error re-raises): the caller still logs `WARNING Could not parse vCard ...` **with `exc_info=True` — a Traceback** (`client/contacts.py:733-739` at v0.195.4). Two contacts in the household's first addressbook hit exactly this on 0.184.5 today (`FN is required`), so §4.2 attributes vCard Tracebacks instead of counting every Traceback (reviewer 2026-09-26). |
 | 0.195.4 | 2026-09-25 | fix (documents) | *"documents: skip the RLIMIT_AS cap when the OS refuses it"* | Hardening of the document-parse isolation worker; no config. Inert unless `setrlimit` fails in the pod, in which case 0.195.0 would have failed the parse. |
 
 `uv.lock` across 0.195.0..0.195.4 changes only the project version and the
@@ -535,14 +538,18 @@ with `target:` at 0.195.0 that gate clears — it does not replace the GO.
    `nc_shopping_list_*`. **Re-take A–E on the day of execution**, after any
    Nextcloud server move (nextcloud-34.0.4 is the day after; if the order ever
    flips, re-take), so the §4 diff is against the true pre-state.
-5. **No firing alerts for office/ai** (Watchdog/InfoInhibitor carry no
-   namespace label and are excluded by the filter):
+5. **No firing alerts for office/ai** (Watchdog/InfoInhibitor are excluded
+   by NAME — InfoInhibitor DOES carry a namespace label: `{alertname="InfoInhibitor",namespace="ai"}`
+   fired within the last 30 d, reviewer 2026-09-26):
    ```bash
    kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 >/dev/null 2>&1 & PF=$!; sleep 2
-   curl -s --data-urlencode 'query=ALERTS{namespace=~"office|ai",alertstate="firing"}' http://localhost:9090/api/v1/query \
+   curl -s --data-urlencode 'query=ALERTS{namespace=~"office|ai",alertstate="firing",alertname!~"Watchdog|InfoInhibitor"}' http://localhost:9090/api/v1/query \
      | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; print([x['metric'].get('alertname') for x in r] or 'NONE FIRING')" | tee /tmp/ncmcp/alerts.before
    kill $PF 2>/dev/null
-   # measured 2026-09-22: NONE FIRING
+   # measured 2026-09-22 and 2026-09-26: NONE FIRING
+   # CAN FAIL (absence gate, demonstrated 2026-09-26): count_over_time(ALERTS{namespace=~"office|ai",
+   #   alertstate="firing"}[30d]) returned KubeJobFailed (office, ai) and MealiePodRestarted (office) --
+   #   this selector does match real firing alerts in these namespaces.
    ```
 6. **Active-update marker** (SOP §4 step 1) so alert-triage treats rollout
    noise as expected. A full Alertmanager silence is optional here — single
@@ -569,7 +576,7 @@ with `target:` at 0.195.0 that gate clears — it does not replace the GO.
    confirm the subject is yours before pushing (two sessions committing in the
    same second can swap message files):
    ```bash
-   cat > /tmp/ncmcp/msg.txt <<'EOF'
+   cat > /tmp/ncmcp/msg-nextcloud-mcp-0.187.1.txt <<'EOF'
    feat(nextcloud-mcp): image 0.184.5 -> 0.195.4
 
    Crosses eleven 0.x minor lines (0.185 .. 0.195, twenty-four tags); at major 0
@@ -593,10 +600,11 @@ with `target:` at 0.195.0 that gate clears — it does not replace the GO.
    finding_refs: F-9af9baf7, F-80459b23, F-bb713800
    EOF
    git fetch origin main && git merge --ff-only origin/main
-   git commit --only kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml -F /tmp/ncmcp/msg.txt
+   git commit --only kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml -F /tmp/ncmcp/msg-nextcloud-mcp-0.187.1.txt
    git show --stat HEAD      # exactly ONE file: the helmrelease. Anything else rode in from the shared index — fix before pushing.
-   git log -1 --format=%s    # expect: feat(nextcloud-mcp): image 0.184.5 -> 0.195.4 — if not, `git commit --amend -F /tmp/ncmcp/msg.txt` before pushing
+   git log -1 --format=%s    # expect: feat(nextcloud-mcp): image 0.184.5 -> 0.195.4 — if not, `git commit --amend --only -F /tmp/ncmcp/msg-nextcloud-mcp-0.187.1.txt` before pushing (`--only` with no paths = reword only; a bare `--amend` would sweep another session's staged hunks into this commit)
    git push origin main
+   git rev-parse HEAD > /tmp/ncmcp/bump.sha && cat /tmp/ncmcp/bump.sha   # fixed path: §5 and the run log read it; no shell variable crosses blocks
    ```
 4. Let Flux reconcile (`interval: 30m`). Forcing is permitted by the SOP when
    the window needs it sooner (`kustomization/nextcloud-mcp` lives in
@@ -641,7 +649,25 @@ can confirm it exists (all four PRESENT in the live label index 2026-09-22):
    # expect: ONE pod, restarts=0, imageID ending sha256:24417dcb804fc65bcb8712226bf70be71018aefd2ec7b27e9392a4d4e1ed707c
    #         (the OLD digest f6d88397… here means the roll did not happen or was remediated back;
    #          33c37e00… means the 0.195.0 bytes — the superseded target — are running: wrong tag committed)
-   kubectl logs -n office deploy/nextcloud-mcp --tail=300 | grep -cE '(^|[[:space:]])(ERROR|CRITICAL)[[:space:]]|Traceback'; echo '^ expect 0 (log format is "<LEVEL> [ts] module - msg"; a 3.14/2.x import failure prints a Traceback here)'
+   kubectl logs -n office deploy/nextcloud-mcp > /tmp/ncmcp/log.after-start     # whole log of the NEW container, no --tail
+   python3 - <<'EOF'
+   import re
+   L=open("/tmp/ncmcp/log.after-start").read().splitlines()
+   err=[l for l in L if re.search(r'(^|\s)(ERROR|CRITICAL)\s', l)]
+   tb=[i for i,l in enumerate(L) if l.startswith('Traceback')]
+   vc=[i for i in tb if i>0 and 'Could not parse vCard' in L[i-1]]
+   print(f"lines={len(L)} ERROR/CRITICAL={len(err)} Traceback={len(tb)} vCard-attributed={len(vc)}")
+   assert L, "EMPTY log -- wrong pod/container or log not yet written; do not pass"
+   assert not err and len(tb)==len(vc), "unattributed ERROR/CRITICAL/Traceback in the new pod's log -- read /tmp/ncmcp/log.after-start"
+   EOF
+   # PASS: ERROR/CRITICAL=0 and every Traceback is vCard-attributed (0.195.4 still logs WARNING
+   #   'Could not parse vCard ...' WITH exc_info for contacts lacking FN -- client/contacts.py:733-739 at
+   #   v0.195.4; the 0.195.3 per-property fallback cannot rescue a missing FN). Those are known data, not
+   #   a regression, and appear as soon as ANY caller lists the first addressbook.
+   # CAN FAIL (demonstrated 2026-09-26, reviewer): the identical matcher on the live 0.184.5 log read
+   #   Traceback=4 vCard-attributed=4 ERROR/CRITICAL=0 (so it DOES match this container's Tracebacks), and a
+   #   scratch copy with one injected unattributed Traceback + one 'ERROR [x] uvicorn.error' line read
+   #   ERROR/CRITICAL=1 Traceback=5 vCard-attributed=4 -> assertion fires.
    # (reviewer 2026-09-23: the 'Configuring MCP server for ... mode' line is logged at app.py:1824 BEFORE the
    #  first log handler exists (installed inside NextcloudMCPServer at 1825) and never reaches the log --
    #  demonstrated on the live pod. The mode is proven by premise 3 and by the §4.3 'Starting MCP session' line.)
@@ -804,6 +830,11 @@ can confirm it exists (all four PRESENT in the live label index 2026-09-22):
    print("contacts listed (limit 5) — has_photo present, inline photos:", len(inline))
    EOF
    ```
+   *Absence half demonstrated 2026-09-26 (reviewer):* the identical `"photo"` regex on a 0.184.5
+   `nc_contacts_list_contacts` of the same first addressbook matched 91 inline payloads, 4 of them in
+   the first 5 contacts -- so on the new build "0 inline" is the default working, not a regex that
+   cannot match. The first addressbook is also the one holding the two FN-less vCards, so this call
+   adds vCard Tracebacks to the log (expected; §4.2 attributes them).
 8. **Memory settle (python 3.14 + four native readers at import, §1.6)** —
    5 minutes after Ready, read the working set through Prometheus and assert
    the ceiling; the limit is 1Gi and an OOMKill would show as the §4.2
@@ -843,8 +874,8 @@ can confirm it exists (all four PRESENT in the live label index 2026-09-22):
     `F-9af9baf7` are script-owned and close themselves on the next sweep when
     the tag on the record no longer matches the live image — verify that
     happened rather than assuming it. `F-bb713800` (plan drift) is
-    policy-cli-authored: close it with `runbooks/policy-cli.py finding close
-    F-bb713800 --commit <bump-sha>` in the same turn.
+    already `resolved` (2026-09-23T14:48Z, re-read 2026-09-26) -- nothing to close; kept in
+    `finding_refs` as history only.
 
 ## 5. Rollback
 
@@ -852,8 +883,23 @@ Stateless bridge, no data, no owned schema (premises 4–5) — a straight
 image-tag revert:
 
 ```bash
-git revert --no-edit <bump-commit-sha>
-git log -1 --format=%s     # expect: Revert "feat(nextcloud-mcp): image 0.184.5 -> 0.195.4"
+# NOT `git revert`: in this shared worktree it refuses with rc=128 ("your local changes would be
+# overwritten by revert") whenever ANY other session has something staged -- the index held a foreign
+# staged add at the start of the 2026-09-26 review; reproduced in a scratch repo. Inverse edit + --only
+# instead (inverse sed dry-tested 2026-09-26 on a scratch copy: restores the file byte-identical).
+cd /Users/mu/code/cberg-home-nextgen || exit 1
+sed -i '' 's/^\([[:space:]]*tag: \)0\.195\.4$/\10.184.5/' kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml
+git diff --stat -- kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml   # expect 1 file, 1+/1- ; 0 files = sed no-op: STOP
+cat > /tmp/ncmcp/msg-revert-nextcloud-mcp-0.187.1.txt <<'EOF'
+Revert "feat(nextcloud-mcp): image 0.184.5 -> 0.195.4"
+
+Rollback per runbooks/maintenance/plans/nextcloud-mcp-0.187.1.md section 5
+(stateless bridge, image tag only). Reverts the bump commit recorded in
+/tmp/ncmcp/bump.sha.
+EOF
+git commit --only kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml -F /tmp/ncmcp/msg-revert-nextcloud-mcp-0.187.1.txt
+git show --stat HEAD      # exactly ONE file: the helmrelease
+git log -1 --format=%s    # expect: Revert "feat(nextcloud-mcp): image 0.184.5 -> 0.195.4"
 git push origin main
 flux reconcile kustomization nextcloud-mcp -n office --with-source && flux reconcile hr -n office nextcloud-mcp
 kubectl rollout status deploy/nextcloud-mcp -n office --timeout=180s
@@ -910,7 +956,9 @@ holding the server forever.
   conflict added 2026-09-22. It quiesces the server and restarts the Redis
   that holds PHP sessions/file locks — every §4 contents gate here is a live
   call into that server. Different slots.
-- **`kube-prometheus-stack-91.4.1`** (`monitoring`, draft, unwindowed): added
+- **`kube-prometheus-stack-91.4.1`** (`monitoring`): **EXECUTED 2026-09-26** (91.5.2, on-demand;
+  Prometheus pod restarted ~05:00Z and all four §4 CONTROL series re-read PRESENT at 05:2xZ by the
+  reviewer) -- the conflict is moot for today's run. History: added
   on THIS side 2026-09-22 because §2.5, §4.8 and §4.9 read Prometheus; a
   Prometheus/operator restart mid-window makes the memory gate print EMPTY
   (which §4.8 refuses to pass, but cannot turn into a pass either). The
