@@ -30,6 +30,7 @@ touches:
     - deployment/nextcloud                      # rolls (new env); quiesced for the window
     - cronjob/nextcloud-cron                    # new env via the chart; suspended in-window
     - deployment/nextcloud-notify-push          # rolls after config.php carries the password
+    - deployment/nextcloud-whiteboard           # Reloader-rolled at §3.6 (auto annotation + reads Secret nextcloud-config)
     - pvc/nextcloud-config                      # config.php rewritten IN PLACE by occ (backed up first)
     - kustomization/nextcloud                   # suspended during the quiesce
   shared: []                                    # office-local. NOT `storage`: no volume operation.
@@ -52,6 +53,9 @@ conflicts_with:
                                         # plan takes down for ~20 min. Keep them apart.
 security_ref: F-069b1775              # posture detail lives on the finding, not here
 capability_change: false              # same cache/session/lock service, same app behaviour
+autonomy_override: human-gated        # REVIEW 2026-09-26: mechanics derived AUTO-NIGHT, but this
+                                      # plan logs every user out and needs a human on §3.7 —
+                                      # it must never land in the unattended nightly slot.
 rollback_class: git-revert            # ONE commit, three files, reverts cleanly — PLUS the
                                       # occ un-set of config.php (§5), which the revert
                                       # cannot do because config.php lives on the PVC.
@@ -234,10 +238,13 @@ echo "backup age=${AGE_H}h"
 # Failing input: an empty LB fails the parse and exits 1.
 
 # --- Gate 4: notify_push is healthy BEFORE we touch it (so a red after is ours)
-kubectl -n office exec deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ notify_push:self-test" > /tmp/np-pre.txt
-grep -q "receiving redis messages" /tmp/np-pre.txt && ! grep -q "✗" /tmp/np-pre.txt \
-  || { echo "ABORT: notify_push self-test is not clean before the change:"; cat /tmp/np-pre.txt; exit 1; }
-# Measured 2026-09-22: six ✓ lines, no ✗ -> PASS.
+rc=0; kubectl -n office exec deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ notify_push:self-test" > /tmp/np-pre.txt 2>&1 || rc=$?
+[ "$rc" -eq 0 ] && grep -qF 'push server is receiving redis messages' /tmp/np-pre.txt && ! grep -qF 'is not receiving' /tmp/np-pre.txt \
+  || { echo "ABORT (rc=$rc): notify_push self-test is not clean before the change:"; cat /tmp/np-pre.txt; exit 1; }
+# REVIEW 2026-09-26: upstream SelfTest.php marks failures with U+1F5F4, never U+2717, and
+# its failure line reads "push server is NOT receiving redis messages" — the old
+# `grep "receiving redis messages" && ! grep "✗"` PASSED on exactly that failure.
+# occ exits non-zero on every <error> path, so rc is the primary gate.
 ```
 
 **ABORT if** any gate exits non-zero, or if the window is unattended — users
@@ -249,16 +256,11 @@ All cluster writes are executed by the window agent / cberg-agent. Manifest and
 Secret changes are GitOps; the one in-place write (`config.php`, §3.7) is the
 documented no-GitOps-path exception (CLAUDE.md) and is backed up first.
 
-**3.0 Generate the password on this Mac — alphanumeric ONLY:**
-
-```bash
-PW=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40); echo "${#PW} chars"
-[ "${#PW}" -eq 40 ] || { echo "ABORT: generator produced ${#PW} chars"; exit 1; }
-```
-
-Why no symbols: the chart embeds it in `redis://:<pw>@host:port` and the image
+**3.0 Password — generated straight into SOPS in ONE non-interactive block (§3.2).**
+Alphanumeric only: the chart embeds it in `redis://:<pw>@host:port` and the image
 entrypoint in `?auth=<pw>` — URL-reserved characters (`@ : / ? & # %`) corrupt
-both. Keep `$PW` in this shell; it is typed into `sops` once and never printed.
+both. It is never held in a shell variable (agent Bash calls share no variables),
+never printed, and §3.7 reads it back from the pod env, not from this Mac.
 
 **3.1 Back up config.php, then quiesce (silence + marker first):**
 
@@ -284,7 +286,8 @@ kubectl -n office scale deploy/nextcloud-notify-push --replicas=0
 kubectl -n office wait --for=delete pod -l app.kubernetes.io/component=app,app.kubernetes.io/instance=nextcloud --timeout=180s
 kubectl -n office wait --for=delete pod -l app=nextcloud-notify-push --timeout=120s
 # any in-flight cron pod finishes on its own; wait for it:
-kubectl -n office wait --for=delete pod -l app.kubernetes.io/component=cronjob --timeout=300s || true
+kubectl -n office wait --for=jsonpath='{.status.phase}'=Succeeded pod -l app.kubernetes.io/component=cronjob \
+  --field-selector=status.phase=Running --timeout=300s 2>/dev/null || true   # only RUNNING cron pods; Completed ones persist
 
 # PROVE the quiesce at the server, not at the pod list:
 N=$(kubectl -n office exec deploy/nextcloud-redis -- redis-cli CLIENT LIST | grep -vc 'addr=127.0.0.1' || true)
@@ -295,10 +298,16 @@ echo "non-local redis clients=$N"
 **3.2 Secret — add the key (repo path, never `/tmp`):**
 
 ```bash
-sops kubernetes/apps/office/nextcloud/app/secrets.sops.yaml
-#   under stringData of Secret nextcloud-config add:
-#   redis-password: <paste $PW>
-sops -d kubernetes/apps/office/nextcloud/app/secrets.sops.yaml | grep -c '^  redis-password:'   # 1
+cd /Users/mu/code/cberg-home-nextgen && export SOPS_AGE_KEY_FILE=/Users/mu/code/cberg-home-nextgen/age.key
+F=kubernetes/apps/office/nextcloud/app/secrets.sops.yaml
+sops -d "$F" | grep -qE '^ +redis-password *:' && { echo "ABORT: key already exists — do NOT regenerate it mid-plan"; exit 1; }
+.venv/bin/python3 -c 'import secrets,string,json;print(json.dumps("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(40))),end="")' \
+  | sops set --value-stdin "$F" '["stringData"]["redis-password"]' || { echo "ABORT: sops set failed"; exit 1; }
+sops -d "$F" | .venv/bin/python3 -c 'import sys,yaml; d=yaml.safe_load(sys.stdin)["stringData"]; v=d.get("redis-password",""); assert len(v)==40 and v.isalnum(), "ABORT: redis-password missing/malformed"; print("redis-password OK (40 alnum), %d keys" % len(d))'
+# Dry-tested 2026-09-26 on a scratch copy with sops 3.13.0: 11 -> 12 keys, other
+# ciphertexts unchanged. NOTE: `sops set` re-emits the file with 4-space indent —
+# a cosmetic whole-file diff, expected; the old `grep '^  redis-password:'` check
+# read 0 on a correct file for that reason.
 ```
 
 **3.3 `redis-deployment.yaml` — wrapper, env, and the `from:` block:**
@@ -384,9 +393,13 @@ Update the "No password — matches the retired instance" comment under
 
 ```bash
 task kubeconform
-helm template nextcloud --repo https://nextcloud.github.io/helm/ --version 9.2.6 \
-  -f <(yq '.spec.values' kubernetes/apps/office/nextcloud/app/helmrelease.yaml) 2>/dev/null \
-  | grep -c 'REDIS_HOST_PASSWORD'     # expect >= 2 (main deployment + cron)
+V=$(yq '.spec.chart.spec.version' kubernetes/apps/office/nextcloud/app/helmrelease.yaml)
+C=$(helm template nextcloud --repo https://nextcloud.github.io/helm/ --version "$V" \
+  -f <(yq '.spec.values' kubernetes/apps/office/nextcloud/app/helmrelease.yaml) | grep -c 'name: REDIS_HOST_PASSWORD')
+echo "chart $V: $C REDIS_HOST_PASSWORD entries"
+[ "$C" -eq 3 ] || { echo "ABORT: expected 3 (main, worker sidecar, cron) — got $C"; exit 1; }
+# Verified 2026-09-26: 3 on both 9.2.6 and 9.3.0 (the redis helper is byte-identical
+# across them; 9.3.0 only adds CronJob `suspend`). Before the edit this reads 0.
 git fetch origin main && git merge --ff-only origin/main
 git commit --only kubernetes/apps/office/nextcloud/app/secrets.sops.yaml \
                   kubernetes/apps/office/nextcloud/app/redis-deployment.yaml \
@@ -402,6 +415,10 @@ git push origin main
 flux resume    kustomization nextcloud -n office
 flux reconcile kustomization nextcloud -n office --with-source
 kubectl -n office rollout status deploy/nextcloud-redis --timeout=180s
+[ "$(kubectl -n office get hr nextcloud -o jsonpath='{.spec.suspend}')" = "true" ] || echo "WARN: HR no longer suspended — the app may already be rolling with the new env"
+# NOTE: this reconcile ALSO re-applies notify-push.yaml `replicas: 1` (Flux reverts
+# the §3.1 scale-down) — notify-push restarts HERE on the OLD config.php and
+# NOAUTH-loops until the §3.7 restart. Expected; §3.7 restarts it explicitly.
 # §4 gates 1 and 2 NOW — do not resume the HelmRelease until both pass.
 ```
 
@@ -419,11 +436,17 @@ kubectl -n office rollout status deploy/nextcloud --timeout=300s
 # §4 gate 3 (env) and gate 4 (app) NOW.
 
 # Persist into config.php — the ONLY way notify_push learns the password:
-kubectl -n office exec -i deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c \
-  "php occ config:system:set redis password --value=\"$PW\" && php occ config:system:get redis password | wc -c"
-# expect a byte count of 41 (40 chars + newline)
+kubectl -n office exec deploy/nextcloud -c nextcloud -- sh -c '
+  [ -n "$REDIS_HOST_PASSWORD" ] || { echo "ABORT: REDIS_HOST_PASSWORD empty in the main container"; exit 1; }
+  su -s /bin/sh www-data -c "php occ config:system:set redis password --value=$REDIS_HOST_PASSWORD" >/dev/null || { echo "ABORT: occ set failed"; exit 1; }
+  n=$(grep -cF "$REDIS_HOST_PASSWORD" /var/www/html/config/config.php)
+  [ "$n" -ge 1 ] && echo "PERSISTED: password present in config.php" || { echo "ABORT: password NOT in config.php"; exit 1; }'
+# The value comes from the pod env (= the Secret, proven by §4 gate 3), so nothing
+# crosses a shell boundary on the Mac. The assertion reads the FILE notify_push
+# parses; before this step it counts 0 (live redis.password is ''), so it can fail.
 
 kubectl -n office scale deploy/nextcloud-notify-push --replicas=1
+kubectl -n office rollout restart deploy/nextcloud-notify-push   # REQUIRED: §3.6 already brought it back at 1 on the OLD config.php — a scale is a no-op
 kubectl -n office rollout status deploy/nextcloud-notify-push --timeout=180s
 # §4 gate 5 NOW.
 
@@ -469,10 +492,14 @@ echo "pod=$P secret=$S"
 # 4. The app is USING the authenticated Redis, not erroring past it.
 kubectl -n office exec deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ status" | grep -q 'installed: true' \
   || { echo "ABORT: occ status not installed:true"; exit 1; }
-curl -s -o /dev/null -w '%{http_code}\n' --max-time 15 https://<nextcloud-host>/status.php | grep -q '^200$' \
+H=$(kubectl -n office get httproute nextcloud -o jsonpath='{.spec.hostnames[0]}')
+[ -n "$H" ] || { echo "ABORT: could not read the nextcloud HTTPRoute hostname"; exit 1; }
+curl -s -o /dev/null -w '%{http_code}\n' --max-time 15 "https://$H/status.php" | grep -q '^200$' \
   || { echo "ABORT: status.php not 200"; exit 1; }
-NA=$(kubectl -n office logs deploy/nextcloud -c nextcloud --since=10m | grep -ci 'NOAUTH\|AUTH failed' || true)
-[ "$NA" -eq 0 ] || { echo "ABORT: $NA NOAUTH/AUTH lines in the last 10m"; exit 1; }
+# REVIEW 2026-09-26: a `kubectl logs | grep NOAUTH` absence check was removed — the
+# container's stdout is the Apache access log only (298/298 lines in 30m were
+# access-log lines), Nextcloud's own errors go to nextcloud.log, so that grep read 0
+# on every run. DBSIZE below is the positive signal that the app writes via auth.
 K=$(kubectl -n office exec deploy/nextcloud-redis -- sh -c 'redis-cli DBSIZE' | awk '{print $NF}')
 echo "keys=$K"
 [ "$K" -gt 0 ] || { echo "ABORT: 0 keys after the app served status.php — it is not writing to this Redis"; exit 1; }
@@ -484,10 +511,12 @@ echo "keys=$K"
 
 ```bash
 # 5. notify_push re-parsed config.php WITH the password — the d6070b82 trap.
-kubectl -n office exec deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ notify_push:self-test" > /tmp/np-post.txt
+rc=0; kubectl -n office exec deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ notify_push:self-test" > /tmp/np-post.txt 2>&1 || rc=$?
 cat /tmp/np-post.txt
-grep -q "receiving redis messages" /tmp/np-post.txt && ! grep -q "✗" /tmp/np-post.txt \
-  || { echo "ABORT: notify_push is not healthy after the change — check config.php redis.password and roll the Deployment"; exit 1; }
+[ "$rc" -eq 0 ] && grep -qF 'push server is receiving redis messages' /tmp/np-post.txt && ! grep -qF 'is not receiving' /tmp/np-post.txt \
+  || { echo "ABORT (rc=$rc): notify_push is not healthy after the change — check config.php redis.password and ROLLOUT RESTART the Deployment"; exit 1; }
+# Failing input (upstream SelfTest.php): "🗴 push server is not receiving redis messages
+# (received N, got 0)" + non-zero exit — dry-tested 2026-09-26: old grep PASSED it, this FAILS it.
 # CATCHES: §3.7's occ write skipped or the Deployment not rolled after it. This
 # exact gate went red on 2026-08-19 behind a green HelmRelease.
 ```
@@ -498,7 +527,7 @@ J=nextcloud-cron-verify-$(date +%H%M)
 kubectl -n office create job --from=cronjob/nextcloud-cron $J
 kubectl -n office wait --for=condition=complete job/$J --timeout=300s \
   || { echo "ABORT: verify cron job did not complete"; kubectl -n office logs job/$J | tail -20; exit 1; }
-kubectl -n office logs job/$J | grep -qi 'NOAUTH' && { echo "ABORT: cron job hit NOAUTH"; exit 1; }
+kubectl -n office logs job/$J | grep -ci 'NOAUTH' || true   # INFORMATIONAL only (cron.php logs to nextcloud.log); the gate is `complete` above
 kubectl -n office delete job $J
 ```
 
@@ -543,8 +572,10 @@ dropped a second time; say so.
    ```
    If `occ` itself is unhappy, restore the file: `cp config.php.pre-redis-auth-<ts> config.php`
    in-pod (same directory, same owner — read back and `wc -c` compare).
-6. Scale notify-push to 1, `occ notify_push:self-test` clean; un-suspend the
-   CronJob; remove the marker.
+6. `kubectl -n office rollout restart deploy/nextcloud-notify-push` (step 3's
+   Kustomization reconcile already brought it back at 1 on the password-bearing
+   config.php — scaling is a no-op), `occ notify_push:self-test` clean by the §4
+   gate 5 form; un-suspend the CronJob; remove the marker.
 
 The Secret key `redis-password` may stay in SOPS after a revert; it is inert
 without consumers. Do not delete anything on the PVC.
@@ -566,6 +597,8 @@ without consumers. Do not delete anything on the PVC.
   already holds the database password; that is Nextcloud's design, not a new
   exposure. It also sits in the container argv of `nextcloud-redis` (readable
   inside that container only), the same as the two sibling Redis deployments.
-- **After this lands**, F-069b1775 closes with `finding close F-069b1775 --commit <sha>`
-  in the same turn (agent-authored rows never auto-close), and the
+- **After this lands**: F-069b1775 is ALREADY `resolved` (closed 2026-09-22 on plan
+  authorship, `aab921ba` — its action was "author a hardening plan"), so there is
+  nothing to close; record the landing commit on it via `policy-cli finding` and
+  do not re-open it. The
   `redis-deployment.yaml` header must no longer describe the open posture.
