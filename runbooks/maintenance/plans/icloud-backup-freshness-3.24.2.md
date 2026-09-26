@@ -34,6 +34,7 @@ conflicts_with:
   - talos-1.14.1                      # node reboots remount CIFS and restart pushgateway (in-memory,
                                       # no persistence) — both would make §4 fail for reasons
                                       # unrelated to this bump.
+  - prometheus-pushgateway-3.9.0      # pushgateway is in-memory; its upgrade wipes the group §2.2/§4.3 compare against
   - flux-reconciler-impersonation     # rewrites how Flux applies namespace `backup`; if that
                                       # regresses, this plan's reconcile (§3.3) stalls and would
                                       # be misread as a bad image.
@@ -42,7 +43,7 @@ security_ref: null
 capability_change: false              # same script, same busybox; no behaviour change
 rollback_class: git-revert            # stateless CronJob; nothing forward-only happens
 finding_refs: [F-16ac7b93]
-status: draft
+status: vetted   # 2026-09-26 plan-reviewer ready-for-go (0 blocking); 4 non-blocking corrections applied (pushgateway conflict, informational gates, one-line diff)
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -154,8 +155,7 @@ Expected diff (exactly one line, line 98):
 <               image: docker.io/library/alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 >               image: docker.io/library/alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 ```
-Optionally update the comment above it ("resolved against Docker Hub 2026-09-20") to the
-window date; no other edit.
+Do NOT edit the comment above it: the expected diff is exactly one line, and 3.2's git show --stat check keys on that.
 
 3.2 Commit (shared worktree — `--only`, then verify ownership):
 ```bash
@@ -201,7 +201,7 @@ insensitively, both account lines and the push line:
 ```bash
 kubectl -n backup logs job/$J | grep -ciE '^account=(mu|andrea) dir=.* newest_mtime=[0-9]+ '   # PASS: 2
 kubectl -n backup logs job/$J | grep -ciE '^pushed to pushgateway job=icloud-backup-freshness' # PASS: 1
-kubectl -n backup logs job/$J | grep -ciE 'fatal|bad request|not found'                       # PASS: 0
+kubectl -n backup logs job/$J | grep -ciE 'fatal|bad request|not found' || true               # INFORMATIONAL only (absence, never shown non-zero); the two positive counts above are the gate
 ```
 What the guarded failure prints: a busybox regression in `stat`/`find` lands in the
 script's `FATAL: could not determine a numeric newest mtime` branch and exits 1 (count 2 → <2,
@@ -258,8 +258,8 @@ curl -s -G http://localhost:19090/api/v1/query --data-urlencode 'query=ALERTS{al
   | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['result']))"
 kill $PF 2>/dev/null
 ```
-PASS: first value < 600 (seconds since the verify push; `EMPTY` = FAIL), second = `2`,
-third = `0`.
+PASS: first value < 600 (seconds since the verify push; `EMPTY` = FAIL; reads ~2345 at rest, so it can fail), second = `2`.
+The third (firing ICloudBackupFreshness* count) is INFORMATIONAL: every rule has for: >= 5m, so it reads 0 on a failed push too; re-read it at 4.5.
 
 CONTROL: metric icloud_backup_probe_last_success_timestamp_seconds — age must drop below 600 s after the verify Job (it is ~1-60 min old at rest).
 CONTROL: metric icloud_backup_newest_file_timestamp_seconds — exactly 2 series (mu, andrea), each ≥ its §2.2 baseline.
