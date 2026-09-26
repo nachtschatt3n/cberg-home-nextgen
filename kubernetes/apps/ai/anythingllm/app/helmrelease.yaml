@@ -68,15 +68,33 @@ spec:
                     volumeMounts:
                       - name: storage
                         mountPath: /storage
+          # The chart renders `.Values.strategy` under the POD spec (templates/
+          # deployment.yaml:35-38) and defaults it to Recreate in its own values.yaml,
+          # so the field is present even with no value of ours. A pod spec has no
+          # `strategy`: a server-side apply rejects the whole Deployment with
+          # `.spec.template.spec.strategy: field not declared in schema` -- invisible
+          # to Helm's 3-way merge, fatal to Flux drift detection (plan
+          # helm-drift-detection section 3.0.1). Strategic-merge null deletes the key
+          # whether or not the chart renders it; the Deployment-level strategy is
+          # still forced to Recreate by the patch above (RWO Longhorn PVC).
+          - target:
+              kind: Deployment
+              name: anythingllm
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: anythingllm
+              spec:
+                template:
+                  spec:
+                    strategy: null
           # The Ingress-targeting patch that used to follow was correctly
           # removed: with no Ingress rendered its target matches nothing and
           # kustomize fails the ENTIRE post-render. Its gethomepage label now
           # lives on the HTTPRoute.
   values:
     replicaCount: 1
-
-    strategy:
-      type: Recreate
 
     image:
       repository: mintplexlabs/anythingllm
