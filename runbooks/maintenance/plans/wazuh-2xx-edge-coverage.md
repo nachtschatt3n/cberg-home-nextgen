@@ -3,72 +3,78 @@ plan_id: wazuh-2xx-edge-coverage
 component: wazuh
 pr: null
 kind: infra
-current: "Edge HTTP detection (Wazuh rules 100700-100708, ported to Envoy Gateway access logs 2026-09-09 in 9d9dad86) sees only non-2xx traffic — the level-0 baseline rule deliberately keeps 2xx/3xx out of the indexer for volume. Authentication that SUCCEEDS is therefore invisible at the edge. The stated mitigation was 'app-level and Authentik logging'; measured 2026-09-09, that mitigation does not exist: Authentik writes successful logins to its Postgres `authentik_events_event` table ONLY (no stdout line, no webhook transport, no notification rule on `action: login`), Wazuh has zero authentik decoders or rules, and the `client_ip` Authentik does record is the envoy-external POD IP, identical for every external user."
-target: "Phase 1 ONLY, and only Phase 1 is windowed here: Authentik records the true client IP on every auth event, so that any later detection has an identity axis to correlate on. Phases 2 and 3 (getting successful-auth out of Authentik, and building the detection) are scoped in §7 and each need their own plan."
-update_type: install                  # this is new detection capability, not a version bump
-risk: medium                          # touches the request path of the external
-                                      # gateway, i.e. every internet-facing app
-est_duration_min: 45                  # PHASE 1 ONLY. Phases 2-3 are not in this number.
+current: "Phase 1's goal is ALREADY MET (re-measured 2026-09-26). envoy-external switched from `customHeader: CF-Connecting-IP` to `xForwardedFor.trustedCIDRs: [10.69.0.0/16]` in 2df8ec7f (2026-09-11), and authentik got `AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS: 10.69.0.0/16` on server+worker in f2d6c667 (2026-09-22, F-649e78b6, resolved). authentik_events_event since 2026-09-11 09:00: 0 login/login_failed rows with a pod (10.69.x) client_ip, 7 with a public client_ip, all carrying a residential/mobile ISP ASN (none Cloudflare); the same query over 2026-09-01..09-11 09:00 returns 4 pod-IP rows. The 2xx edge blind spot itself (Phases 2-3) is NOT closed: successful auth is still not shipped off-box."
+target: "Phase 1 VERIFICATION ONLY, no manifest change: prove on authentik 2026.8.3 that a fresh external login records the operator's real public IP and a fresh LAN login records the LAN address, then retire Phase 1. Phases 2 and 3 (getting successful-auth out of Authentik, and building the detection) are scoped in section 7 and each need their own plan."
+update_type: n/a                      # verification only; nothing is installed or bumped
+risk: low                             # read-only: two logins + SELECTs; no manifest,
+                                      # gateway or authentik change
+est_duration_min: 15
 needs_reboot: false
 touches:
-  namespaces: [network, kube-system]
+  namespaces: [kube-system]
   resources:
-    - "gateway/envoy-external (network)"
-    - "clientTrafficPolicy / envoy-gateway policies.yaml"
-    - helmrelease/authentik
-    - deployment/authentik-server
-  shared: [gateway/envoy]             # the external gateway's request path
-depends_on: []
-conflicts_with: []                    # deliberately EMPTY. The plans that could
-                                      # collide are other gateway/envoy changes;
-                                      # none is open today. No forward reference
-                                      # to an unconfirmed plan_id — a dangling
-                                      # ref silently disables the guard.
-capability_change: false              # no user-visible behaviour change; this
-                                      # changes what gets RECORDED, not what the
-                                      # apps do
-autonomy_override: human-gated        # RESTRICTS only. A change on the external
-                                      # gateway's request path must not run
-                                      # unattended, whatever the policy derives.
-rollback_class: git-revert            # pure manifest change; revert + reconcile
-status: draft                         # PROPOSED, not approved. Goes to
-                                      # awaiting-go when the window agent or the
-                                      # operator picks it up; the window below is
-                                      # a capacity claim, not a granted go.
-window: "sat-attended:2026-09-26"     # attended (external request path), and the
-                                      # first Saturday with real slack: 09-12
-                                      # already holds 4 plans / 100 min against a
-                                      # 90 min cap, and 09-19 holds
-                                      # media-audit-durable-output at 45 min, so
-                                      # adding this plan's 45 would put that slot
-                                      # at exactly 90/90 with zero margin. 09-26
-                                      # is empty. NOT sun-attended:2026-09-27,
-                                      # which is at 140 of 150 min for talos-1.14.0,
-                                      # and not a Sunday slot generally — this is
-                                      # not reboot work.
-security_ref: F-aae0f363              # CORRECTED 2026-09-09 after a security-agent
-                                      # pass. The earlier value was `null`, on the
-                                      # reasoning that 9d9dad86 already describes
-                                      # the gap. That reasoning does not hold:
-                                      # 9d9dad86 disclosed the blind spot AND
-                                      # asserted a mitigation, and this plan's
-                                      # thesis is that the mitigation does not
-                                      # exist. Prior publication of a fact does
-                                      # not license publishing its negation, so
-                                      # the plan needs a durable finding to cite.
-                                      # See §1.6 for what still belongs on the
-                                      # finding record rather than in this file.
-finding_refs:
-  - F-aae0f363                        # external attack attribution blind: real client IP absent
+    - "authentik_events_event (SELECT only, via deployment/authentik-pg)"
+  shared: [authentik]                 # its baseline must be taken on the
+                                      # post-upgrade authentik, never mid-roll
+depends_on:
+  - authentik-2026.8.3                # the client_ip baseline must be taken on
+                                      # 2026.8.3, after its 20-min soak (section 3.0)
+conflicts_with:
+  - authentik-2026.8.3                # reciprocal of its own conflicts_with entry;
+                                      # a roll mid-verification makes the login
+                                      # land on a terminating pod
+  - authentik-pg17-decommission       # same component, same DB; must not co-run
+  - talos-1.14.1                      # a node roll evicts authentik-server mid-verification
+capability_change: false              # records nothing new, changes nothing
+autonomy_override: human-gated        # RESTRICTS only. The verification needs a
+                                      # human to log in from a known off-LAN
+                                      # address; it cannot run unattended.
+rollback_class: git-revert            # nothing is changed, so nothing to roll back
+status: vetted   # 2026-09-26 plan-reviewer needs-fix -> rewritten check-only (Phase 1 already shipped in 2df8ec7f + f2d6c667); depends_on authentik-2026.8.3 + 20-min soak
+window: null                          # the orchestrator stamps the slot
+security_ref: null                    # the client-IP defect this plan was written
+                                      # for is FIXED (F-649e78b6 resolved,
+                                      # f2d6c667); F-aae0f363 (the ingress-nginx
+                                      # ES-field finding) was resolved 2026-09-20.
+                                      # Neither is open, and a fixed defect needs
+                                      # no DB-held detail.
+finding_refs: []                      # re-checked 2026-09-26: `finding list --grep`
+                                      # wazuh/authentik/client/login/attribution/edge
+                                      # returns no open finding for this target.
+                                      # F-649e78b6 and F-aae0f363 are both resolved.
+premises:
+  - id: authentik-server-trusts-pod-cidr
+    why: "Phase 1 is met only because authentik-server trusts XFF from the pod CIDR (f2d6c667). If this was reverted, the plan is stale and Phase 1 is open again."
+    run: kubectl get deploy -n kube-system authentik-server -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS")].value}'
+    expect_exact: "10.69.0.0/16"
+  - id: authentik-worker-trusts-pod-cidr
+    why: "f2d6c667 mirrors the setting on the worker; both env blocks must stay identical."
+    run: kubectl get deploy -n kube-system authentik-worker -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS")].value}'
+    expect_exact: "10.69.0.0/16"
+  - id: envoy-external-xff-pod-cidr-only
+    why: "The external gateway must resolve the client from XFF trusting only the pod CIDR (2df8ec7f). A return to customHeader, or any extra trusted range, changes what authentik records."
+    run: kubectl get clienttrafficpolicy -n network envoy-external-client -o jsonpath='{.spec.clientIPDetection}'
+    expect_exact: '{"xForwardedFor":{"trustedCIDRs":["10.69.0.0/16"]}}'
 sops_refs:
-  - docs/sops/gateway-api-httproute.md
   - docs/sops/authentik.md
-  - docs/sops/monitoring.md
+  - docs/sops/gateway-api-httproute.md
   - docs/sops/verification-contents-not-shape.md
 generated: "2026-09-09"
 ---
 
 # Close the 2xx blind spot at the edge — Phase 1: recover the client IP
+
+> **Status 2026-09-26 (plan-reviewer re-measurement): Phase 1's goal is already
+> met.** Sections 1.1-1.3 below are the 2026-09-09 diagnosis and are kept as the
+> historical "why"; they no longer describe the cluster. The client-IP loss was
+> fixed in two commits: `2df8ec7f` (envoy-external: `customHeader` ->
+> `xForwardedFor` trusting only the pod CIDR, 2026-09-11) and `f2d6c667`
+> (authentik: `AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS` = pod CIDR, 2026-09-22).
+> Since 2026-09-11 09:00 no `login`/`login_failed` row carries a pod address and
+> every external login carries a residential or mobile ISP address. This plan is
+> therefore VERIFICATION ONLY: one fresh external and one fresh LAN login on
+> authentik 2026.8.3, then Phase 1 is retired. Phases 2-3 (section 7) remain open
+> and still need their own plans.
 
 ## 1. Summary & why this is held
 
@@ -195,123 +201,84 @@ defeats it by design (SOP §2.4), which is an argument for extending
 
 ## 2. Scope of THIS plan
 
-**In scope (Phase 1, 45 min):** make Authentik record the true client IP on every
-auth event, and prove it with a real login.
+**In scope (15 min, verification only, no commit):** prove on authentik 2026.8.3
+that the recorded `client_ip` is the real client for both an off-LAN and a LAN
+login, then retire Phase 1.
 
-**Explicitly out of scope, each needing its own plan:** emitting successful-auth
-off-box (Phase 2), and the decoder + ruleset + thresholds that turn it into
-detection (Phase 3). §7 scopes both so the sequencing is on the record; neither
-is windowed here and neither should be started before Phase 1 verifies.
+**Out of scope:** any manifest change. If a gate below fails, STOP and re-plan;
+do not improvise the old Case A/Case B remedies in-window. Phases 2 and 3 are
+scoped in section 7 and need their own plans.
 
 ## 3. Pre-checks
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
+.venv/bin/python3 runbooks/plan-premises.py wazuh-2xx-edge-coverage --require-premises
+# EXPECT: 3/3 PASS. Any FAIL -> STOP (Phase 1 may be open again).
 
-# 3.1 Baseline: what does Authentik record RIGHT NOW? (this is the §5 baseline)
-mise exec -- kubectl -n kube-system exec deploy/authentik-pg -- \
-  psql -U authentik -d authentik -c \
-  "select action, client_ip, created from authentik_events_event
-    where action in ('login','login_failed','authorize_application')
-    order by created desc limit 20;"
-# EXPECT (the defect): client_ip is a 10.69.0.x pod address on every row.
+# 3.0 ORDER GATE: authentik-2026.8.3 has landed AND soaked >= 20 min.
+mise exec -- kubectl -n kube-system get pods \
+  -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=server \
+  -o jsonpath='{range .items[*]}{.metadata.name} {.status.startTime} {.spec.containers[0].image}{"\n"}{end}'
+# EXPECT: every line ends ghcr.io/goauthentik/server:2026.8.3 AND the newest
+# startTime is >= 20 min ago. Any 2026.8.2 line, or a younger pod -> STOP/wait.
 
-# 3.2 Which pods own those addresses — confirm they are the gateway, not clients
-mise exec -- kubectl get pods -A -o wide | grep -E 'envoy-external|envoy-internal'
-
-# 3.3 Current gateway client-IP config
-sed -n '1,60p' kubernetes/apps/network/envoy-gateway/app/policies.yaml
-
-# 3.4 Cluster quiet + external routing healthy before touching the gateway
-mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
-mise exec -- kubectl -n network get gateway envoy-external -o wide
+# 3.1 Historical gate, WITH its known-bad control (same query, two windows).
+for w in "'2026-09-01' and '2026-09-11 09:00'" "'2026-09-11 09:00' and now()"; do
+  mise exec -- kubectl -n kube-system exec deploy/authentik-pg -- \
+    psql -U authentik -d authentik -At -F ' ' -c \
+    "select count(*) filter (where host(client_ip) ~ '^(::ffff:)?10\.69\.') as pod_rows,
+            count(*) as total
+       from authentik_events_event
+      where action in ('login','login_failed') and created between $w;"
+done
+# EXPECT line 1 (control, pre-fix window): pod_rows >= 1 (measured 4 of 10 on
+#   2026-09-26). If it prints 0, the query cannot detect the defect -> STOP.
+# EXPECT line 2 (post-fix window): pod_rows = 0 (measured 0 of 15).
 ```
-
-### 3.5 Diagnose BEFORE changing anything — which layer drops the IP?
-
-There are two candidate layers and the remedy differs. **Do not guess.** Capture
-the headers Authentik actually receives:
-
-```bash
-# Tail an authentik-server pod while performing ONE login from an external client,
-# then inspect the request line and any XFF/CF-Connecting-IP header it logged.
-mise exec -- kubectl -n kube-system logs deploy/authentik-server --tail=200 -f
-```
-
-- **Case A — Envoy is not forwarding a usable header.** `CF-Connecting-IP` is
-  consumed for client-IP detection but nothing propagates the resolved address
-  to the backend. Remedy: configure the external gateway's client traffic policy
-  to append the resolved client IP to `x-forwarded-for` for backends.
-- **Case B — Envoy forwards it, Authentik does not trust it.** Remedy:
-  `AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS` covering the pod CIDR.
-
-The measured evidence leans to Case A (the recorded peer `10.69.0.235` is inside
-the private ranges Authentik trusts by default, so had an XFF header been
-present it should already have been used) — **but that is an inference, and this
-step is what turns it into a measurement.** Apply only the remedy the diagnosis
-selects; applying both blindly makes the verification unattributable.
 
 ## 4. Steps
 
-1. Run §3.5 and write down which case it is.
-2. Apply the corresponding remedy as a GitOps change:
-   - **Case A:** edit `kubernetes/apps/network/envoy-gateway/app/policies.yaml`
-     so the external gateway propagates the resolved client IP to backends.
-     Keep `failClosed: false` — changing it in the same commit would conflate a
-     logging fix with an availability decision.
-   - **Case B:** add `AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS` to the authentik
-     HelmRelease env, scoped to the pod CIDR only.
-3. Validate and commit on exactly the touched paths (shared worktree):
-   ```bash
-   mise exec -- task kubeconform
-   git commit --only <the one path you edited> -F /tmp/msg.txt
-   git show --stat HEAD      # every file must be yours
-   git push
-   ```
-4. Watch Flux reconcile; for Case A confirm the gateway's Envoy deployment rolled
-   and every external HTTPRoute is still `Accepted`.
+1. Operator, on a phone with Wi-Fi OFF (mobile data): look up the phone's
+   current public IP on any IP-echo page and note it (not via authentik; that
+   would be circular). Open a private/incognito browser tab so a fresh `login`
+   event is created (an existing session emits none), and log in to authentik.
+2. Operator, on a LAN machine on the home network: note its LAN address
+   (192.168.x, or its own 2a00:6020:ad52:43xx address if it connects over
+   IPv6), open a private tab, log in to authentik.
+3. Run the section 5 query. No commit, no reconcile.
 
 ## 5. Verification
 
-```
-CONTENTS ASSERTION — the recorded client IP is the REAL client, not the gateway:
-  perform ONE login from a known external client whose public IP you know, then
-  re-run the §3.1 query. The newest `login` row's `client_ip` must equal that
-  public IP. Compared against the §3.1 baseline, where every row was 10.69.0.x.
-
-  This is the assertion, and nothing weaker substitutes for it:
-   - "Authentik pods are Ready" is green today, with the defect present.
-   - "the header is now set" proves the header, not what Authentik stored.
-   - "client_ip changed" is not enough — it must change to a value you can
-     independently confirm is your client's address. A different WRONG IP (the
-     Cloudflare edge) reads as success and re-buries the same problem one layer
-     out.
-
-NEGATIVE CONTROL — prove the assertion could have failed:
-  perform a second login from an internal LAN client via envoy-internal. Its
-  `client_ip` must be that host's 192.168.x address, NOT the external client's
-  and NOT a pod IP. Two logins from different networks yielding two different,
-  correct addresses is what distinguishes "IP propagation works" from "one
-  hardcoded value happens to match".
-```
-
-Plus, because this touches the external request path:
-
 ```bash
-# every external app still routes (the change's real blast radius)
-mise exec -- kubectl -n network get httproutes -A -o wide | awk 'NR==1 || $0 !~ /True/'
-mise exec -- kubectl -n network get gateway envoy-external -o yaml | grep -A5 conditions
+mise exec -- kubectl -n kube-system exec deploy/authentik-pg -- \
+  psql -U authentik -d authentik -At -F ' ' -c \
+  "select created, host(client_ip), coalesce(context->'asn'->>'asn','-')
+     from authentik_events_event
+    where action = 'login' and created > now() - interval '20 minutes'
+    order by created desc;"
 ```
 
-Then run `health-check-agent` and `security-agent`.
+```
+G1 CONTENTS (external): a row whose host(client_ip) EQUALS the IP noted in
+   step 4.1, and whose asn is NOT 13335 (Cloudflare). Can fail: a pod address
+   (the 2026-09-07/08 rows) or a Cloudflare edge address prints a different
+   value; a missing row (session reused) prints nothing -> FAIL, not PASS.
+G2 NEGATIVE CONTROL (LAN): a second row whose host(client_ip) EQUALS the LAN
+   address from step 4.2 and differs from G1's. Two different, independently
+   known addresses rule out one hard-coded value matching by accident.
+G3 NO POD ADDRESS: neither row starts 10.69. -- already covered by G1/G2
+   equality; its standalone form is the 3.1 query, whose control window
+   demonstrates it returns non-zero on the defect.
+PASS = G1 and G2. Any other outcome -> STOP, record the observed values on a
+new finding (DB, not this file), leave Phase 1 open.
+```
 
 ## 6. Rollback
 
-`git revert` the single commit from §4.3 and push; Flux restores the previous
-gateway policy or authentik env within one reconcile. There is no state change to
-undo — nothing was migrated, and the Authentik event rows already written keep
-whatever `client_ip` they were written with. Confirm rollback with the §3.1 query
-returning to pod IPs.
+None needed: this plan changes nothing (two logins and SELECTs). On PASS, set
+`status: executed`; the orchestrator records Phase 1 as retired. On FAIL, leave
+the plan open and re-plan from the observed values.
 
 ## 7. Phases 2 and 3 — scoped here, NOT windowed here
 
@@ -372,21 +339,16 @@ existing 4xx-side coverage.
 
 ## 8. Interference notes for the window agent
 
-- **Shared infra:** `gateway/envoy`. Case A rolls the external gateway's Envoy
-  deployment — a brief external-routing blip for every internet-facing app. Do
-  not co-schedule with any other plan touching Gateway API, cert-manager, or
-  external-dns; in particular this and `external-dns-unowned-cnames` must not
-  share a window (both perturb the external request/name path, and a failure in
-  either would be misattributed to the other). They are deliberately one week
-  apart — this at `sat-attended:2026-09-26`, that at `sat-attended:2026-10-03`.
-  Not encoded in `conflicts_with:` because both plans are `draft`; promote to a
-  real pair when either is vetted, and never write a forward reference to a
-  plan_id that has not been confirmed to exist.
-- **Attended only** (`autonomy_override: human-gated`), because the change is on
-  the request path of every external app and the verification requires a human to
-  perform a login from a known external address.
-- **The verification needs an external client.** Schedule it when someone can
-  reach the services from off-LAN; an operator on the LAN alone cannot complete
-  §5.
-- **Case B is materially smaller than Case A** (an authentik env var, no gateway
-  roll). If §3.5 selects Case B, tell the window agent — the slot frees ~25 min.
+- **Order (operator instruction, 2026-09-26):** `authentik-pg17-decommission`
+  residual -> `authentik-2026.8.3` -> 20-min soak -> THIS plan. Encoded as
+  `depends_on: [authentik-2026.8.3]`, reciprocal `conflicts_with`, and the
+  section 3.0 order gate. Never co-run with either authentik plan: a roll while
+  the operator logs in lands the login on a terminating pod and the baseline is
+  taken on the wrong version.
+- **No gateway change any more.** The earlier `gateway/envoy` touch and the
+  external-dns pairing note were for the Case A remedy, which already shipped
+  in `2df8ec7f`; this plan does not perturb the external request path.
+- **Does not read Prometheus**, so a same-night `kube-prometheus-stack` bump is
+  not interference for this plan.
+- **Attended only** (`autonomy_override: human-gated`): the verification needs a
+  human logging in from an independently known off-LAN address.
