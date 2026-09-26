@@ -56,7 +56,7 @@ finding_refs: []                  # checked 2026-09-26: `finding list --grep` au
                                   # for this volume. F-8ab2ee07 (the 17.11 pin phantom) is owned
                                   # by authentik-pg17-decommission and is NOT claimed here.
 status: vetted   # 2026-09-26 plan-reviewer needs-fix -> E1-E9 applied (depends_on authentik-2026.8.3 + 30-min soak gate, restore probe run in background with log/rc file); operator GO now:2026-09-26
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 premises:
   # All read-only, pipe-free jq stages (plan-premises refuses ; && > etc.).
   # Each was dry-run 2026-09-26 against the negative control named in its `why`.
