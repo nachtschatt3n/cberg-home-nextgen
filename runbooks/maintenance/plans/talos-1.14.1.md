@@ -1191,6 +1191,50 @@ ASSERTION 2 holds at the end.*
   = 1 on both survivors (a re-election, not a leaderless period). Otherwise stop part-rolled
   (§5.2).
 
+**3.10a — Forward-auth gate (F-89376ab7). Forward-auth must stay available across every node
+reboot; check it after EACH node, before 3.11.**
+
+The 13 authentik forward-auth outposts (`kube-system/ak-outpost-*`) are **single-replica**,
+and that is deliberate for now. A non-embedded proxy outpost on 2026.8.3 keeps its sessions
+in the pod's own `/tmp` (the filesystem store; only the embedded outpost uses PostgreSQL).
+On a session miss it clears the cookie and restarts login. Envoy load-balances every
+ext_authz check per request across the outpost's endpoints, so `kubernetes_replicas: 2`
+would ping-pong users between two session stores and break XHR and assets on every protected app.
+**Do not "fix" a failure here by scaling outposts.** What the drain gives us instead: 3.9
+cordons and drains first, so each outpost on the rolled node is evicted and restarts on a
+survivor within seconds. **Expect** a short 5xx on the apps whose outpost lived on that node
+and one silent re-login per user per app (their session file died with the pod). A page
+reload fixes it. Homepage widgets may error until then.
+
+```bash
+# (a) all 13 outposts back at 1/1 and none on the node that just rolled
+mise exec -- kubectl get deploy -n kube-system -l app.kubernetes.io/managed-by=goauthentik.io
+mise exec -- kubectl get pods -n kube-system -l app.kubernetes.io/managed-by=goauthentik.io -o wide
+# (b) every forward-auth host answers through the gateway (hosts come from the live
+#     SecurityPolicies -> HTTPRoutes; the list stays in $SCR, never in this repo)
+mise exec -- kubectl get securitypolicy -A -o json | python3 -c "
+import sys, json, subprocess
+for p in json.load(sys.stdin)['items']:
+    if not p['spec'].get('extAuth'): continue
+    ns = p['metadata']['namespace']
+    for t in p['spec'].get('targetRefs', []):
+        h = subprocess.run(['mise','exec','--','kubectl','get','httproute','-n',ns,t['name'],
+            '-o','jsonpath={.spec.hostnames[0]}'], capture_output=True, text=True).stdout
+        print(t['name'], h)" > "$SCR/fwd-auth-hosts.txt"
+while read -r name host; do
+  code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "https://$host/")
+  echo "$name $code"
+done < "$SCR/fwd-auth-hosts.txt"
+```
+**PASS:** (a) 13/13 deployments `1/1`, no outpost pod on a `SchedulingDisabled` node;
+(b) every host returns **302** (to the authentik authorize endpoint) or **200**, and none
+returns 5xx/000. Baseline 2026-09-26 (dry-run of exactly this block): 12 SecurityPolicy hosts,
+all 302. The 13th outpost, uptime-kuma, is `mode: proxy` with no SecurityPolicy (its HTTPRoute
+points at the outpost itself), so the loop does not cover it. Curl its host once by hand and
+expect 302. **FAIL** means an outpost is
+Pending or CrashLooping: `kubectl describe` it and read its logs before starting the next node.
+Losing forward-auth on two nodes' worth of apps at once is what this gate exists to prevent.
+
 **3.11 — THE LONGHORN GATE. This is the step that blows the time budget.**
 
 Do **not** start the next node until this passes. With `numberOfReplicas: 2` there is no
