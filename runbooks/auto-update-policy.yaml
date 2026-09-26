@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.23.1"
+version: "2026.09.26.1"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -71,14 +71,17 @@ deny:
       anyway, which is a fail-open on the household SSO front door. Every service
       behind forward-auth is downstream of a bad authentik roll, and the Flux
       controllers that would revert it are reachable only through it.
-      SECOND REASON, independent of the first: the chart version and the server
-      image are pinned SEPARATELY. helmrelease.yaml pins
-      ghcr.io/goauthentik/server:2026.8.2 inline at two sites, so a chart-only
-      bump moves the templates while the running image stays put and leaves the
-      two skewed, with nothing asserting they agree.
-      REMOVE THIS RULE once the upgrade is done deliberately: move the chart
-      version and BOTH inline image pins together in one reviewed commit, in an
-      attended window, after confirming the 2026.8.3 image tag is published.
+      SECOND REASON, independent of the first: the chart and the two
+      patch-session-settings initContainers are pinned SEPARATELY. The main
+      server/worker image is NOT pinned in values, so a chart-only bump DOES
+      move the running image (it follows the chart appVersion). What stays put
+      is the pair of patch-session-settings initContainers, which pin
+      ghcr.io/goauthentik/server inline at two sites and would then overlay an
+      OLD settings.py onto NEW server code, with nothing asserting they agree.
+      (Corrected 2026-09-26: the previous text said the running image stays put,
+      which is backwards.) REMOVE THIS RULE only when every upgrade moves the
+      chart version and BOTH initContainer pins together in one reviewed commit,
+      in an attended window, after confirming the target image tag is published.
   # Reason REWRITTEN 2026-09-22 (F-af4e0882). The previous text justified the
   # hold with the 3.x -> 5.x MAJOR migration only — which G1 blocks on its own,
   # and which has since EXECUTED (every consumer is on one 5.x chart line) — so
@@ -101,8 +104,16 @@ deny:
       semantics and auto-merge; if a patch ever regresses broadly, restore the FULL
       block rather than reasoning about which of the 79 broke."
     max: patch
-  - match: "*affine*"
-    reason: "affine chart/image bumps carry breaking env→config.json changes even on patch tags (0.27.3) — hold for manual review."
+  # NARROWED 2026-09-26 from "*affine*" to the AFFiNE application image. The
+  # hazard (env -> config.json moves on patch tags) is a property of the AFFiNE
+  # app, but the old glob also matched every sibling component whose NAME
+  # contains "affine" -- it diverted two consecutive plain redis patches of
+  # `affine-redis` (redis:8.x-alpine) into window plans with this false reason.
+  # AFFiNE runs on the shared app-template chart, so there is no affine chart to
+  # hold; the direct-bump lane matches this glob against the image repository
+  # (denied_for_item), the PR lane against the Renovate depName.
+  - match: "*toeverything/affine*"
+    reason: "AFFiNE app image bumps carry breaking env→config.json changes even on patch tags (0.27.3) — hold for manual review."
   - match: "*cilium*"
     reason: "CNI datapath — never an unattended bump. The hold is about CONSEQUENCE,
       not a specific release: a bad cilium roll takes the cluster network with it, and
@@ -234,7 +245,15 @@ deny:
   # correct stable successor and appears nowhere in the tooling today. Revisit
   # when n8n promotes 2.39.x to stable -- the hold is on the CHANNEL, not the
   # version.
-  - match: "*n8n*"
+  #
+  # NARROWED 2026-09-26 from "*n8n*" to the `n8nio/n8n` image. The channel
+  # hazard is the IMAGE's release layout; the 8gears n8n Helm chart (depName /
+  # component `n8n`, oci://8gears.container-registry.com/library/n8n) has no
+  # beta channel, and the old glob held its minors under this false reason.
+  # The chart now goes through the ordinary gates. The image is matched by
+  # repository in both lanes (Renovate depName `n8nio/n8n`; coverage.py
+  # denied_for_item checks each image repo after the component key).
+  - match: "*n8nio/n8n*"
     reason: "n8n ships its beta/next channel on the next MINOR line (2.39.x today) with no
       prerelease marker in the tag, so a bare semver bump can carry a beta unattended. Patch
       bumps stay on the stable line and remain safe to auto-merge. Minor+ is PLAN lane only,

@@ -4814,7 +4814,7 @@ def load_update_policy():
         return None
 
 
-def bump_action(component, kind, current, target, utype, policy):
+def bump_action(component, kind, current, target, utype, policy, repos=()):
     """Action text for a patch/minor bump, in lane-engine priority order:
 
     1. `held by auto-update-policy (<glob>) — PLAN lane` — a deny rule blocks
@@ -4827,10 +4827,11 @@ def bump_action(component, kind, current, target, utype, policy):
 
     `component` is the HelmRelease/Deployment name: that — lowercased, and
     collapsed to `app-template` for a 5.x CHART target — is the key
-    assign_lane() feeds the deny list, so it is the key used here. The image
-    repository is deliberately NOT matched: the lane engine does not match it,
-    and matching more here than there would let the action promise a hold the
-    window never applies.
+    assign_lane() feeds the deny list, so it is the key used here. Image
+    `repos`, when passed, are tried AFTER the key — the lane engine has done
+    the same since F-7bad8aeb (`denied_for_item`), so this cannot promise a
+    hold the window does not apply. (This text used to say the repo was
+    deliberately not matched; that predated denied_for_item.)
 
     `policy=None` (coverage.py unavailable) yields (3) unconditionally. A parse
     failure of the YAML inside coverage.py already yields an empty deny list
@@ -4845,6 +4846,14 @@ def bump_action(component, kind, current, target, utype, policy):
         if kind == "chart" and str(target or "").startswith("5."):
             key = "app-template"  # assign_lane()'s collapse — keep in step
         rule = cov.deny_rule_for(policy, key, utype)
+        # Then each image repository, the order coverage.py's
+        # deny_rule_for_item() uses. Needed since 2026-09-26: the n8n and
+        # affine rules match the image repo (`*n8nio/n8n*`,
+        # `*toeverything/affine*`), not the component name.
+        for repo in (repos or ()):
+            if rule or not repo:
+                break
+            rule = cov.deny_rule_for(policy, str(repo).lower(), utype)
         if rule:
             return f"held by auto-update-policy ({rule.get('match')}) — PLAN lane"
         zt, zc = cov._ver_tuple(target), cov._ver_tuple(current)
@@ -5011,7 +5020,8 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
                     severity='monitor',
                     title=f"{name}: image {img.get('repository')} {img.get('current_tag')} → {img.get('latest_tag')} (minor)",
                     action=bump_action(name, 'image', img.get('current_tag'),
-                                       img.get('latest_tag'), 'minor', policy),
+                                       img.get('latest_tag'), 'minor', policy,
+                                       repos=[img.get('repository')]),
                     evidence_path=evidence_path,
                     subsection="helmrelease_image",
                     metadata={
@@ -5025,7 +5035,8 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
                     severity='monitor',
                     title=f"{name}: image {img.get('repository')} {img.get('current_tag')} → {img.get('latest_tag')} (patch)",
                     action=bump_action(name, 'image', img.get('current_tag'),
-                                       img.get('latest_tag'), 'patch', policy),
+                                       img.get('latest_tag'), 'patch', policy,
+                                       repos=[img.get('repository')]),
                     evidence_path=evidence_path,
                     subsection="helmrelease_image",
                     metadata={
