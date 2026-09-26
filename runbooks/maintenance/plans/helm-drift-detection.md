@@ -101,8 +101,14 @@ autonomy_override: human-gated        # RESTRICTS only. P0 and P1 are nightly-sa
                                       # file cannot be one AUTO-NIGHT unit, so the scheduler
                                       # must not treat it as one.
 finding_refs: []
-status: vetted   # 2026-09-26 plan-reviewer needs-fix -> 19 edits applied; ready-for-go for P0+P1 ONLY, as a SEPARATE on-demand run after the main now:2026-09-26 run is finalized; P1 then sets awaiting-soak (7-day warn inventory)
-window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
+status: draft   # 2026-09-26 NOW run: P0 EXECUTED GREEN (d17af8e0: anythingllm + jellyfin stored manifests pass
+                      # SSA, no pod-template change). P1 REVERTED (fbc220f7 -> 5bdd3164): the rev-gate caught 3
+                      # unexplained Helm upgrades (databases/influxdb, default/homepage, network/adguard-home)
+                      # because the parent-ks spec.patches pass drops explicit `key: null` entries from
+                      # spec.values, so chart defaults return. P1 is NOT spec-only for null-bearing values
+                      # (7 HRs carry nulls). Re-plan P1 (replace nulls with explicit values, or deliver the
+                      # field another way) + re-review + fresh GO before any re-run.
+window: null   # cleared 2026-09-26 after P1 revert (was now:2026-09-26)
                                       # set status back to `vetted`; after P1 and after P2 set
                                       # `awaiting-soak` (run-now.py refuses it, so no NOW run
                                       # can collapse a soak; flip to `vetted` when it ends)
