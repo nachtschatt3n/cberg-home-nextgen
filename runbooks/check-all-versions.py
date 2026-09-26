@@ -592,6 +592,18 @@ DISTRO_RELEASE_NOTES: Dict[str, str] = {
     'python': 'python',
 }
 
+# Charts whose GitHub releases live in a shared charts monorepo under a
+# `<chart>-<version>` tag, so neither the chart name nor the OCI path derives
+# the release URL. bjw-s publishes app-template from `oci://ghcr.io/bjw-s-labs/
+# helm`, which get_chart_repo_info() turns into `bjw-s-labs/app-template` -- a
+# repository that does not exist. The releases are in bjw-s-labs/helm-charts
+# (verified 2026-09-26: releases/tag/app-template-5.2.1 resolves, the other 404s).
+# Used for the version report's source link and notes fetch only; G3's resolver
+# is deliberately untouched by this map.
+CHART_RELEASE_SOURCES: Dict[str, Tuple[str, str, str]] = {
+    'app-template': ('bjw-s-labs', 'helm-charts', '{chart}-{version}'),
+}
+
 
 def _image_map_key(image_repo: str) -> str:
     """Registry-host-free, `library/`-free, lowercase key for the image maps."""
@@ -3940,14 +3952,25 @@ class VersionChecker:
                     
                     # Try to fetch release notes for breaking changes
                     breaking_changes = assessment.get('breaking_changes', [])
-                    chart_repo_info = self.get_chart_repo_info(hr['chart_name'], hr['repository_name'], repo_url)
+                    # Charts released from a shared charts monorepo under a
+                    # `<chart>-<version>` tag (CHART_RELEASE_SOURCES) first:
+                    # app-template's releases are bjw-s-labs/helm-charts
+                    # `app-template-X.Y.Z`, which nothing below derives.
+                    release_tag = latest_chart
+                    shared = CHART_RELEASE_SOURCES.get(hr['chart_name'])
+                    if shared:
+                        chart_repo_info = (shared[0], shared[1])
+                        release_tag = shared[2].format(chart=hr['chart_name'], version=latest_chart)
+                    else:
+                        chart_repo_info = self.get_chart_repo_info(hr['chart_name'], hr['repository_name'], repo_url)
                     
                     if chart_repo_info:
                         owner, repo = chart_repo_info
                         result['chart']['github_repo'] = f"{owner}/{repo}"
+                        result['chart']['release_tag'] = release_tag
                         
                         # Try to fetch release notes
-                        release_notes = self.fetch_release_notes(owner, repo, latest_chart)
+                        release_notes = self.fetch_release_notes(owner, repo, release_tag)
                         if release_notes:
                             detected = self.detect_breaking_changes(release_notes['body'], assessment['type'])
                             breaking_changes.extend(detected)
@@ -4578,7 +4601,7 @@ class VersionChecker:
                             
                             # Always add GitHub link as source
                             if 'github_repo' in chart:
-                                lines.append(f"- **Source:** https://github.com/{chart['github_repo']}/releases/tag/{chart['latest_version']}")
+                                lines.append(f"- **Source:** https://github.com/{chart['github_repo']}/releases/tag/{chart.get('release_tag') or chart['latest_version']}")
                             
                             # Add release notes if available
                             if 'release_notes' in chart and chart['release_notes']:
