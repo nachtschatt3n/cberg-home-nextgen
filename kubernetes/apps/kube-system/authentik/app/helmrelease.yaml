@@ -73,9 +73,11 @@ spec:
               key: SECRET_AUTHENTIK_DB_PASSWORD
         - name: AUTHENTIK_POSTGRESQL__PORT
           value: "5432"
-        # Session configuration - 1 year lifetime
-        # NOTE: SESSION_EXPIRE_AT_BROWSER_CLOSE is hardcoded to True in Authentik's settings.py
-        # Sessions will expire on browser close regardless of age setting
+        # Unauthenticated (pre-login) session age only. Logged-in SSO session
+        # length is the user-login stage session_duration (days=365) in blueprint
+        # cberg/session-lifetime-blueprint.yaml; that per-session set_expiry()
+        # overrides SESSION_EXPIRE_AT_BROWSER_CLOSE (docs/sops/authentik.md
+        # "Session lifetime").
         - name: AUTHENTIK_SESSIONS__UNAUTHENTICATED_AGE
           value: "days=365"
         # F-649e78b6: only the pod CIDR may set proxy headers (X-Forwarded-For).
@@ -203,9 +205,11 @@ spec:
               key: SECRET_AUTHENTIK_DB_PASSWORD
         - name: AUTHENTIK_POSTGRESQL__PORT
           value: "5432"
-        # Session configuration - 1 year lifetime
-        # NOTE: SESSION_EXPIRE_AT_BROWSER_CLOSE is hardcoded to True in Authentik's settings.py
-        # Sessions will expire on browser close regardless of age setting
+        # Unauthenticated (pre-login) session age only. Logged-in SSO session
+        # length is the user-login stage session_duration (days=365) in blueprint
+        # cberg/session-lifetime-blueprint.yaml; that per-session set_expiry()
+        # overrides SESSION_EXPIRE_AT_BROWSER_CLOSE (docs/sops/authentik.md
+        # "Session lifetime").
         - name: AUTHENTIK_SESSIONS__UNAUTHENTICATED_AGE
           value: "days=365"
         # F-649e78b6: only the pod CIDR may set proxy headers (X-Forwarded-For).

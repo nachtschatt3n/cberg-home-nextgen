@@ -185,6 +185,7 @@ then rolled back (`Importer.validate()` + `apply()` under an outer `atomic()`):
 |---|---|---|---|
 | `authentik Embedded Outpost` | **No blueprint declares any outpost** (grep of all 45 files: zero `authentik_outposts.*` entries). It is created by code — `outposts/apps.py` `update_or_create(defaults={type, name}, managed=…)`; `config` is not in `defaults`. | `embedded-outpost-blueprint.yaml` sets `kubernetes_disabled_components: [ingress]` | Ours. Nothing upstream can reset `config`; the hijacking Ingress cannot come back through a re-apply. Still re-check after every upgrade (audit below) — code, not files, owns this object. |
 | `default-authentication-flow` (`6b45105d-…`) | `default/flow-default-authentication-flow.yaml`: the flow by `slug` (attrs `designation`, `name`, `title`, `authentication`) and bindings **10/20/30/100** by `(target, stage, order)` | `login-reputation-blueprint.yaml`: a **new** order-**15** deny binding targeting the flow by pk, plus its policy binding | Both. Different identifier tuples; upstream never declares order 15 and never prunes. Dry-run delta on bindings: **none**. Live flow attrs equal upstream's, so the flow row is a no-op. |
+| `default-authentication-login` (user-login stage) | `default/flow-default-authentication-flow.yaml`: identifiers `name` only, **no attrs** | `session-lifetime-blueprint.yaml`: `session_duration: days=365` | Ours. Upstream declares no attrs, so a re-apply cannot reset it. Re-check after every image bump: `grep -A6 userloginstage /blueprints/default/flow-default-authentication-flow.yaml`. If upstream ever declares `session_duration`, sessions silently fall back to browser-close. |
 | Default brand `authentik-default` | `state: created` behind `!Condition [NOR, default brand exists]` | none | Skipped entirely here. |
 | Managed scope / property mappings (38 ids under `system/`) | re-asserted, `state: present` | referenced read-only via `!Find` | Upstream — by design. We only read them; the re-apply is how e.g. the `profile` scope's `groups` claim stays current. |
 | Groups, users, providers, applications | `authentik Admins` (`created`), RBAC groups, `akadmin` (`created`) | our own names only | No shared identifier for any model (checked model by model). |
@@ -237,7 +238,7 @@ print(Counter(b.path.split('/')[0] if '/' in b.path else '<BARE>' for b in qs))
 print('not successful:', [(b.path, b.status) for b in qs if b.status != 'successful'])
 for b in qs: print(f'{b.status:<11} {b.last_applied:%Y-%m-%d %H:%M}  {b.path}')
 " 2>/dev/null | grep -v '^{'
-# expected on 2026.8.2: cberg 22, default 19, system 11, migrations 1 -> 53 rows, none <BARE>, none failed
+# expected on 2026.8.3: cberg 23, default 19, system 11, migrations 1 -> 54 rows, none <BARE>, none failed
 # (cberg = number of data keys in authentik-blueprints; +1 per new app blueprint)
 
 # 2. Embedded outpost (and every other) still suppresses the Ingress; zero Ingress objects
@@ -333,6 +334,33 @@ from authentik.blueprints.v1.importer import Importer
 print('VALID', Importer.from_string(base64.b64decode('$B64').decode()).validate()[0])
 " 2>/dev/null | grep VALID
 ```
+
+### Session lifetime (persistent SSO)
+
+Operator requirement (2026-09-26): one login holds about a year, across
+browser and PWA restarts. Three settings make that true, all in blueprints:
+
+| Setting | Where | Value | Effect |
+|---|---|---|---|
+| user-login stage `session_duration` | `session-lifetime-blueprint.yaml` (`default-authentication-login`) | `days=365` | `authentik_session` cookie gets `Expires` ~1 year out |
+| proxy provider `access_token_validity` | each app blueprint | `days=365` | outpost session cookie Max-Age |
+| OIDC provider `refresh_token_validity` | each app blueprint | `days=365` | only used if the client requests `offline_access` (none do today) |
+
+- `session_duration: seconds=0` makes the stage call `session.set_expiry(0)`:
+  a **browser-session cookie**. That per-session call overrides the
+  `SESSION_EXPIRE_AT_BROWSER_CLOSE=False` settings.py patch, so the patch
+  alone never made sessions persistent. `AUTHENTIK_SESSIONS__UNAUTHENTICATED_AGE`
+  covers only pre-login sessions.
+- **Apps keep their own session cookie.** A persistent authentik session only
+  makes the silent re-auth work; if the app's own cookie is a session cookie,
+  closing the browser still logs out of the app. Mealie needs
+  `OIDC_REMEMBER_ME: "true"` and `TOKEN_TIME: "8760"` (hours).
+- Network/GeoIP session binding stays `no_binding` (phones change IP between
+  mobile and Wi-Fi).
+- Verify: after a fresh login, the `authentik_session` cookie in the browser's
+  dev tools shows an Expires date ~1 year out, not "Session". Existing sessions
+  keep their old browser-session cookie until the next login.
+- Rollback: revert the commit, or set `session_duration: seconds=0`.
 
 ---
 
@@ -540,6 +568,7 @@ existing `grafana-oauth2-blueprint.yaml` / `immich-oauth2-blueprint.yaml` /
     client_id: "<43-char alphanumeric, unique per app>"     # openssl rand
     client_secret: "<128-char alphanumeric>"                # openssl rand
     client_type: confidential
+    refresh_token_validity: days=365  # only issued when the client requests offline_access (house standard)
     grant_types:                     # REQUIRED for blueprint-only providers (see gotchas)
       - authorization_code
       - refresh_token
@@ -921,6 +950,7 @@ entries:
       external_host: "https://myapp.domain.com"
       internal_host: "http://myapp.{namespace}.svc.cluster.local:{PORT}"
       internal_host_ssl_validation: false
+      access_token_validity: days=365   # outpost cookie Max-Age follows this (house standard, see "Session lifetime")
       authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"
       invalidation_flow: "b8a97e00-f02f-48d9-b854-b26bf837779c"
 
