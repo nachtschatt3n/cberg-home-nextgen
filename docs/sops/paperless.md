@@ -1,8 +1,8 @@
 # SOP: Paperless-ngx Document Management
 
 > Description: Operating standard for paperless-ngx and its full ingestion pipeline — Epson ES-580W scanner → SMB inbox → validator → consume, email ingestion, native AI (LLM suggestions + RAG), OCR tuning, and library curation.
-> Version: `2026.09.14`
-> Last Updated: `2026-09-14`
+> Version: `2026.09.26`
+> Last Updated: `2026-09-26`
 > Owner: `paperless-agent` (global, `~/.claude/agents/paperless-agent.md`)
 
 ---
@@ -320,6 +320,16 @@ Run all three after every image/chart bump of `paperless-ngx` or roll of
    `ALTER TABLE paperless.<t> CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;`
    (the varchar(1024) unique indexes on `documents_document` are long-unique
    HASH indexes on MariaDB 11.x — no key-length limit, CONVERT is safe).
+4. **Search-index rebuild budget (measured).** A tantivy `SCHEMA_VERSION` bump
+   forces a full index rebuild at container start (s6 `init-search-index`
+   blocks `svc-webserver`, so port 8000 and the `tcpSocket` startupProbe stay
+   down until it finishes). Measured on the 3.1.3 -> 3.2.1 roll (2026-09-26,
+   schema v1 -> v2, 977 documents): **`READY_AFTER` 115 s** from reconcile to
+   Ready, 0 restarts; a no-op restart on the current index took 96 s. The
+   stock budget is 150 s (`failureThreshold: 30` x 5 s), so a library ~30%
+   larger would exceed it: for a future schema bump, raise the startup
+   `failureThreshold` for the roll (and restore it after), and verify
+   index-side membership (`MISSING_FROM_INDEX 0`), never the sentinel alone.
 
 ### 6b) Paperless API token consumers (rotation checklist)
 
@@ -480,3 +490,4 @@ AI titles on German docs; foreign-language invoices scoring low on a German dict
 | `2026.09.03` | 2026-09-03 | Fix the §2 overview DB row, which contradicted this SOP's own §6a charset invariant: image was `mariadb:11.8.8` (live and git are `11.8.9`), charset was `utf8mb3` (converted to `utf8mb4_general_ci` on 2026-08-30, `9cb10b76`), and `paperless-mariadb` was described as a live rollback floor after being deleted 2026-08-30 (`aa825d8f`). Same three facts corrected in `docs/applications.md`. |
 | `2026.09.04` | 2026-09-04 | Point native-AI suggestions at the MLX build (`llm_model` `gemma4:26b` -> `gemma4:26b-mlx`) and set `llm_request_timeout=45` (was inheriting the 120s code default), to stop paperless pulling the 18GB GGUF back onto the 48GB shared Ollama host. Document in SS4a that the DB row wins over env and is picked up without a pod restart, and add the RAG index rebuild-trigger table (embedding-model change / schema migration / lost store) after confirming an `llm_model` change cannot trigger a re-embed. Open issue at time of writing: `gemma4:26b-mlx` GPU-OOM-panics on every request on the host -> ollama-agent. |
 | `2026.09.14` | 2026-09-14 | Full system + data-quality review. Corrected two stale facts: the `helmrelease.yaml` `mariadb.enabled: false` comment still claimed the charset was pinned `utf8mb3` with "utf8mb4 is a separate migration" (that migration landed 2026-08-30, `9cb10b76`), and the §2 / `docs/applications.md` DB image was `mariadb:11.8.9` (live and git are `12.3.3` since 2026-09-06, `ecaaa439`). Verified the 2026-09-04 open issue is **resolved**: a live `/api/documents/{id}/suggestions/` call against `gemma4:26b-mlx` returns cleanly, no GPU-OOM panic. Data fix: the 7 non-split Food docs from the 2026-08-23 batch (919/920/925/926/931/933/934) had never received the treatment the 147 split recipes got — all 7 still carried raw-timestamp titles and lacked `Recipe`+protein tags, and 3 (919/931/933) had the lot-code date misparse (`2010-04-03`/`2014-12-01`/`1996-03-02`). Titles for 919/920 recovered by manual page-image review (decorative title font OCRs to nothing — the documented fallback). Note: the AI date *suggestion* still reproduces the same footer lot-code misparse, so never accept it blind on meal-kit recipe cards. |
+| `2026.09.26` | 2026-09-26 | paperless-ngx 3.1.3 -> 3.2.1 (search index schema v1 -> v2 rebuild at startup): add §6a item 4 with the measured rebuild budget (`READY_AFTER` 115 s for 977 docs vs a 150 s stock startup budget) and the index-membership check. |
