@@ -490,8 +490,8 @@ kubectl -n ai exec deploy/openclaw -c app -- sh -lc \
 | Pane state | Looks like | `run` (cron) | `retry` | `run-now` | `operation sweep --trigger cron` |
 |---|---|---|---|---|---|
 | `idle` | empty or drafted `❯` input, nothing running | deliver (cron: `/clear` + ctrl+u first), then poll | deliver + poll | deliver | deliver |
-| `busy` | spinner with `esc to interrupt`, **or** `Waiting for N background agents` / the `← for agents` tray (`openclaude status` calls this "idle" — do not trust it) | **exit 8**, nothing typed | occurrence LOST: **exit 8**, nothing typed (failureAlert pages); row exists: no-op, exit 0 | exit 8 | delivers (not gated — see below) |
-| `menu` | question menu, permission prompt, `/resume` list, or no input prompt visible | **exit 8**, nothing typed | occurrence LOST: **exit 8**, nothing typed; row exists: no-op, exit 0 | exit 8 | delivers (not gated) |
+| `busy` | spinner with `esc to interrupt`, **or** `Waiting for N background agents` / the `← for agents` tray (`openclaude status` calls this "idle" — do not trust it) | **exit 8**, nothing typed | occurrence LOST: **exit 8**, nothing typed (failureAlert pages); row exists: no-op, exit 0 | exit 8 | **exit 13**, nothing typed (F-28af989d) |
+| `menu` | question menu, permission prompt, `/resume` list, or no input prompt visible | **exit 8**, nothing typed | occurrence LOST: **exit 8**, nothing typed; row exists: no-op, exit 0 | exit 8 | **exit 13**, nothing typed |
 | `exhausted-idle` | `/clear to save …` / `100% context used` in the footer, idle, EMPTY input | `/clear`, wait ≤30s for a fresh prompt, log `CONSOLE_AUTO_CLEARED`, deliver | same | **exit 4** (attended, never cleared) | same auto-clear |
 | `exhausted-draft` | as above but text in the input | exit 4 | exit 4 | exit 4 | exit 4 |
 | `exhausted-busy` | exhausted + spinner / agents / menu | exit 4 | exit 4 | exit 4 | exit 4 |
@@ -534,10 +534,22 @@ not poll. Measured 2026-09-15..25: the row lands 0:24–4:10 after the fire.
 | 11 | prompt delivered but window_runs could not be read during the poll |
 | 12 | prompt delivered but no new window_runs row appeared in the poll budget |
 
-`operation` keeps its own codes (4 refused/unreachable, 7–9 restart, 11/12
-the `--wait` sweep_cycles completion gate). Known gap: `operation sweep` still
-does not gate on `busy`/`menu` (its exit 8 already means "Claude survived TERM
-and KILL" in `restart`); only its exhaustion handling changed.
+`operation` keeps its own codes:
+
+| Exit | Meaning (operation) |
+|---|---|
+| 0 | delivered (and, for `sweep --wait --trigger` ≠ manual, the sweep_cycles row appeared) |
+| 2 / 3 | openclaude binary missing / call timed out |
+| 4 | pane refused or unreachable (wrong cwd, dead, exhausted and not auto-clearable, `/clear` did not take) |
+| 5 / 6 | send / ask failed |
+| 7 / 8 / 9 | `restart` only: healthy console refused without `--force` / Claude survived TERM and KILL / no TUI after relaunch |
+| 11 / 12 | `--wait` completion gate: sweep_cycles unreadable / no new row |
+| 13 | pane not at the prompt (busy / background agents / menu) — nothing typed, not even ctrl+u (`sweep`, `fix`, `versions`; cron and manual) |
+
+13 rather than 8 because `operation` already used 8 for `restart`'s
+"survived TERM and KILL" (F-28af989d, 2026-09-26). The exhausted-idle auto-clear
+applies to `sweep`/`fix`/`versions` with `--trigger` ≠ `manual`, and the cleared
+pane then passes through the same busy/menu gate before anything is typed.
 
 ### Plan-authoring lessons (2026-08-18, bitnamilegacy-exit-phase1 incident)
 
@@ -620,6 +632,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.26 | 2026-09-26 | **`operation` gates on busy/menu (F-28af989d).** The §7 "known gap": `operation sweep|fix|versions` sent ctrl+u and the prompt into a busy or menu pane. They now refuse with **exit 13** (8 is `restart`'s "survived TERM and KILL"), nothing typed, cron and manual alike; exhausted-idle auto-clear for unattended runs unchanged and followed by the same gate. §7 gains an `operation` exit-code table. Test `runbooks/tests/test-openclaw-console-delivery.py`. |
 | 2026.09.26 | 2026-09-26 | **Retry refusals page (operator decision).** `maintenance-window retry` used to no-op with exit 0 when the occurrence was LOST but the console was busy or in a menu, which left the 01:30 alert as the only same-day signal. It now exits 8, nothing typed, with a message naming the lost (slot, date), so the retry cron's failureAlert fires. An exhausted pane that cannot be auto-cleared still exits 4, now with the same LOST wording. When a row exists, retry stays a no-op with exit 0. Test `runbooks/tests/test-openclaw-console-delivery.py`. |
 | 2026.09.26 | 2026-09-26 | **A same-day on-demand run covers the nightly (operator decision).** `expected_slots`/`missing_window_runs` counted `(nightly, date)` missed unless a nightly row existed, so a day spent in an attended NOW run paged a missed nightly although Step 0 ran. A completed, non-aborted `now`/ad-hoc row on the same Europe/Berlin date (of `started_at`) now covers it; open or aborted rows do not; sat/sun are not covered. Same function feeds the Pushgateway liveness push. Test `runbooks/tests/test-window-liveness-now-covers-nightly.py`. |
 | 2026.09.25 | 2026-09-25 | **Ops-console delivery states (F-b8c6b6d6, F-7d9b201b).** `maintenance-window run` typed the nightly prompt into a mid-turn console (skipping only `/clear`, still sending ctrl+u) and exited ok — 09-21/09-22 lost; the busy marker `" esc to "` matched menus and missed `Waiting for N background agents`. Now one pure `classify_pane` in both skills: run refuses exit 8 on busy/menu, nothing typed; cron runs poll ≤300s for the Step 0 running row (exit 12/11); an exhausted-but-idle pane with an empty input is auto-`/clear`ed for unattended runs (operator decision) instead of exit 4; `classify` verb; new §7 subsection + test `runbooks/tests/test-openclaw-console-delivery.py`. |

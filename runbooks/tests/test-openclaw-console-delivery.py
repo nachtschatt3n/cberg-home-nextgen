@@ -34,6 +34,12 @@ pins that classifier against captured pane shapes and pins the delivery rules:
     * manual trigger and run-now -> exit 4, never auto-cleared
     * /clear that does not take -> exit 4, no prompt sent
     * the same for `operation sweep --trigger cron`
+  operation sweep/fix/versions pane gate (F-28af989d, 2026-09-26)
+    * busy / background agents / menu -> exit 13 (8 is restart's "survived
+      TERM+KILL"), NOTHING typed, cron AND manual, --wait or not
+    * idle -> ctrl+u + exactly one prompt, exit 0; exhausted-idle cron still
+      auto-clears and then passes the gate
+    * classify reports "REFUSE exit 13" for busy/menu; dry-run names it
   classify intent is read-only (types nothing, exit 0) in both skills
   neither skill carries a brace-form shell var (Flux postBuild strict mode)
 
@@ -448,6 +454,38 @@ def test_operation(op):
             code, out = run_main(op.main, ["sweep"], via_sys_argv=True)
             check("op sweep MANUAL exhausted-idle: exit 4, never auto-cleared",
                   code == 4 and not con.typed(), f"{code} {con.typed()}")
+            # -- F-28af989d: the sweep path gates on busy/menu too, exit 13 --
+            check("op: pane-not-at-prompt exit is 13 (8 stays restart's TERM+KILL)",
+                  getattr(op, "PANE_NOT_AT_PROMPT_EXIT", None) == 13)
+            for name in ("busy-spinner", "busy-bg-agents", "menu-question",
+                         "menu-permission", "menu-resume-list"):
+                for argv in (["sweep", "--trigger", "cron"], ["sweep", "--trigger", "cron", "--wait"],
+                             ["sweep"], ["fix"], ["versions", "--trigger", "cron"]):
+                    con.set(S[name], after_clear=S["idle"])
+                    code, out = run_main(op.main, argv, via_sys_argv=True)
+                    check(f"op {' '.join(argv)} into {name}: exit 13, NOTHING typed",
+                          code == 13 and not con.typed()
+                          and "OPERATION_SWEEP_HANDOFF_FAILED" in out and "not at the prompt" in out,
+                          f"{code} {con.typed()} {out[-300:]}")
+            for name in ("idle", "idle-draft"):
+                con.set(S[name])
+                code, out = run_main(op.main, ["sweep", "--trigger", "cron"], via_sys_argv=True)
+                keys = [c for c in con.calls if c[0] == "key"]
+                check(f"op sweep cron into {name}: ctrl+u + one prompt, exit 0",
+                      code == 0 and len(con.prompts()) == 1 and not con.clears()
+                      and keys == [("key", "EF748825-0000", "ctrl+u")],
+                      f"{code} {con.typed()} {out[-300:]}")
+            con.set(S["busy-bg-agents"])
+            code, out = run_main(op.main, ["classify"], via_sys_argv=True)
+            check("op classify busy: read-only, reports REFUSE exit 13",
+                  code == 0 and not con.typed() and '"busy"' in out and "REFUSE exit 13" in out,
+                  f"{code} {out[:300]}")
+            con.set(S["idle"])
+            code, out = run_main(op.main, ["sweep", "--trigger", "cron", "--dry-run"],
+                                 via_sys_argv=True)
+            check("op dry-run: names the exit-13 refusal, types nothing",
+                  code == 0 and "REFUSE exit 13" in out and not con.typed(), out[:400])
+
             con.set(S["exhausted-idle"])
             code, out = run_main(op.main, ["classify"], via_sys_argv=True)
             check("op classify: read-only, exit 0, reports exhausted-idle",
