@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.09.24`
-> Last Updated: `2026-09-24`
+> Version: `2026.09.26`
+> Last Updated: `2026-09-26`
 > Owner: `Platform`
 
 ---
@@ -236,7 +236,8 @@ print(Counter(b.path.split('/')[0] if '/' in b.path else '<BARE>' for b in qs))
 print('not successful:', [(b.path, b.status) for b in qs if b.status != 'successful'])
 for b in qs: print(f'{b.status:<11} {b.last_applied:%Y-%m-%d %H:%M}  {b.path}')
 " 2>/dev/null | grep -v '^{'
-# expected on 2026.8.2: cberg 21, default 19, system 11, migrations 1 -> 52 rows, none <BARE>, none failed
+# expected on 2026.8.2: cberg 22, default 19, system 11, migrations 1 -> 53 rows, none <BARE>, none failed
+# (cberg = number of data keys in authentik-blueprints; +1 per new app blueprint)
 
 # 2. Embedded outpost (and every other) still suppresses the Ingress; zero Ingress objects
 #    -> run the outpost audit from "The rule covers MANAGED/SYSTEM outposts too" above
@@ -250,6 +251,86 @@ print([(b.order, b.stage.name) for b in FlowStageBinding.objects.filter(
 " 2>/dev/null | grep -v '^{'
 
 # 4. A real browser login still works (an unauthenticated curl cannot prove this — see grant_types).
+```
+
+### A blueprint change can leave its row stuck in `error` (concurrent-apply deadlock)
+
+**Symptom.** Right after a commit that adds or edits a key in
+`authentik-blueprints`, one `BlueprintInstance` shows `status=error` while every
+object it declares exists and works. It never clears by itself. First seen
+2026-09-25 on `cberg/gods-eye-view-blueprint.yaml` (`fda69f17`).
+
+**Mechanism — the same blueprint is applied several times at once.** One
+ConfigMap change fans out into parallel `apply_blueprint` runs:
+
+1. every running worker's file watcher sees the kubelet swap the mounted
+   ConfigMap and enqueues an apply (`on_modified` / `on_created` in
+   `authentik/blueprints/v1/tasks.py`);
+2. Reloader (`configmap.reloader.stakater.com/reload: authentik-blueprints`)
+   rolls server **and** worker, and each new worker runs `blueprints_discovery`
+   on boot, which enqueues an apply for every file whose hash changed.
+
+With 3 workers that was **5 applies of one blueprint within 3 seconds**. Every
+apply of a proxy/forward-auth blueprint rebuilds the provider's RBAC rows
+(`guardian_roleobjectpermission`) and sends an outpost update, so parallel
+applies of the same provider **deadlock in Postgres** (`deadlock detected`,
+also visible on `outpost_send_update` in the worker logs).
+
+**Why it sticks.** `apply_blueprint` sets `status=error` on any
+`DatabaseError`, but an earlier parallel run already succeeded and stored
+`last_applied_hash`. Discovery (worker boot + hourly) only re-applies when the
+file hash differs from `last_applied_hash` (`check_blueprint_v1_file`), so it
+never retries. The objects are correct; only the status is wrong — but a
+non-successful row fails the verification in "Blueprint directory layout" and
+hides the next real failure.
+
+**Fix — one single, targeted re-apply, AFTER the rollout has settled** (all
+server/worker pods Ready). Idempotent. Do **not** "fix" it with another
+ConfigMap edit: that re-runs the same fan-out and can deadlock again.
+
+```bash
+POD=$(kubectl get pod -n kube-system -l app.kubernetes.io/component=worker \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from authentik.blueprints.models import BlueprintInstance
+from authentik.blueprints.v1.tasks import apply_blueprint
+for b in BlueprintInstance.objects.exclude(status='successful'):
+    print('re-applying', b.path)
+    apply_blueprint.send_with_options(args=(b.pk,), rel_obj=b)
+" 2>/dev/null | grep -v '^{'
+# (UI equivalent: Customization -> Blueprints -> <row> -> Apply)
+```
+
+Then re-run the verification query above: `not successful: []`.
+
+**Before you blame the race, prove it.** Read the failed run's own log — if it
+is not a deadlock, the blueprint is genuinely broken and a re-apply will fail
+the same way:
+
+```bash
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+from authentik.tasks.models import Task
+t = Task.objects.filter(actor_name__endswith='apply_blueprint',
+                        aggregated_status='error').order_by('-mtime').first()
+print(t.mtime, t.rel_obj)
+for l in t.tasklogs.all().order_by('timestamp'): print('  ', l.event)
+" 2>/dev/null | grep -v '^{'
+# race: '... deadlock detected'. Anything else (EntryInvalidError, !Find
+# returned nothing, ...) is a real blueprint bug -> fix the blueprint.
+```
+
+**Prevention.** Validate a changed blueprint before committing — it runs
+inside a rolled-back transaction and writes nothing — and after every blueprint
+commit run the verification query once the pods are Ready:
+
+```bash
+B64=$(sops -d kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml \
+  | python3 -c "import sys,yaml,base64; print(base64.b64encode(yaml.safe_load(sys.stdin)['data']['<key>.yaml'].encode()).decode())")
+kubectl exec -n kube-system $POD -c worker -- ak shell -c "
+import base64
+from authentik.blueprints.v1.importer import Importer
+print('VALID', Importer.from_string(base64.b64decode('$B64').decode()).validate()[0])
+" 2>/dev/null | grep VALID
 ```
 
 ---
@@ -876,6 +957,30 @@ entries:
 - Use SOPS-encrypted ConfigMap for actual domain values (Flux substitution doesn't work in ConfigMap data)
 - `kubernetes_namespace: kube-system` is standard for all outposts
 
+**Restricting who may open the app (optional, recommended for internet-facing
+apps).** An application with **no** policy binding admits every Authentik user —
+that is the default for most apps here. To limit it to a group, add a binding
+entry to the same blueprint (first used by `gods-eye-view`, 2026-09-26):
+
+```yaml
+  - id: my-app-admins-binding
+    model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      target: !KeyOf my-app-application
+      group: !Find [authentik_core.group, [name, "authentik Admins"]]
+    attrs:
+      target: !KeyOf my-app-application
+      group: !Find [authentik_core.group, [name, "authentik Admins"]]
+      order: 0
+      enabled: true
+      negate: false
+      timeout: 30
+```
+
+Verify with a NON-member account: forward-auth must answer the access-denied
+page, not the app.
+
 ### Step 2: Add Blueprint to Authentik ConfigMap
 
 The ConfigMap is the source Authentik reads. It's SOPS-encrypted.
@@ -1439,6 +1544,7 @@ kubectl get all -n kube-system -l goauthentik.io/outpost-name={app}-forward-auth
 | Host resolves to a dead IP / 404 after a routing change, config looks correct everywhere | Outpost published its own Ingress holding the hostname — in no git repo, no ownerRefs | `kubectl get ingress -A`; set `kubernetes_disabled_components: [ingress]`, then delete the object once (deleting alone does not hold) |
 | 401 on auth-url | Wrong outpost service name | Check `ak-outpost-{app}-forward-auth.kube-system.svc.cluster.local` |
 | Blueprint fails with UUID error | Using slug instead of UUID | Replace slug with UUID in blueprint |
+| One `BlueprintInstance` stuck at `error` right after a blueprint commit, all its objects exist and work | Parallel applies (per-worker file watcher + Reloader rollout) deadlocked; hash already stored, so discovery never retries | One targeted re-apply after the rollout settles — see "A blueprint change can leave its row stuck in `error`". Never another ConfigMap edit |
 
 ---
 

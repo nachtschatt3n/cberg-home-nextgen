@@ -272,7 +272,7 @@ compensating control (drop its HTTPRoute, gate it behind Authentik, restrict its
 network policy). `_UNBUMPABLE_CRIT_ESCALATE` escalates to a human decision
 rather than absorbing it silently.
 
-**THE EXCEPTION — our own images.** ~31 images under
+**THE EXCEPTION — our own images.** ~32 images under
 `ghcr.io/nachtschatt3n/**` are BUILT BY US. For those, "wait for upstream" is a
 category error: we *are* upstream, a rebuild is exactly the remedy, and it is
 entirely within our control. A fixable CVE in a self-built image is ordinary

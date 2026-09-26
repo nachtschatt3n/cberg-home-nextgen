@@ -3,8 +3,8 @@
 > Description: How to clear CVEs on container images we build ourselves, where there is
 > no upstream version to bump to and remediation is a **rebuild in the source repo**
 > followed by a GitOps tag bump — not a version bump.
-> Version: `2026.09.25`
-> Last Updated: `2026-09-25`
+> Version: `2026.09.26`
+> Last Updated: `2026-09-26`
 > Owner: `homelab-operator`
 
 ---
@@ -59,6 +59,29 @@ Known first-party images and their source repos (extend as they are added):
 | `ghcr.io/nachtschatt3n/arag-web` | `nachtschatt3n/arag-web` |
 | `ghcr.io/nachtschatt3n/sweep-dashboard` | `nachtschatt3n/sweep-dashboard` |
 | `ghcr.io/nachtschatt3n/gods-eye-view` | `nachtschatt3n/gods-eye-view` (branch `cberg`; packages the latest upstream `bilawalsidhu/gods-eye-view` release — weekly `container.yml` rebuild, or dispatch with `upstream_tag`) |
+| `ghcr.io/nachtschatt3n/gas-price-monitor` | `nachtschatt3n/gas-price-monitor` |
+| `ghcr.io/nachtschatt3n/globalmobility-group-gmbh-globaldispo` | `nachtschatt3n/globalmobility-group-gmbh-globaldispo` |
+| `ghcr.io/nachtschatt3n/haarfabrik-extranet` | `nachtschatt3n/haarfabrik-extranet` |
+| `ghcr.io/nachtschatt3n/holm-backend` | `nachtschatt3n/holm-backend` |
+| `ghcr.io/nachtschatt3n/ibgastro` | `nachtschatt3n/ibgastro` |
+| `ghcr.io/nachtschatt3n/inbewegung-familymanager` | `nachtschatt3n/inbewegung-familymanager` |
+| `ghcr.io/nachtschatt3n/kfa_medienarchiv` | `nachtschatt3n/kfa_medienarchiv` |
+| `ghcr.io/nachtschatt3n/mangold-smarthomeadvisor` | `nachtschatt3n/mangold-smarthomeadvisor` |
+| `ghcr.io/nachtschatt3n/max-jung-transporte-fahrzeugcontrolling` | `nachtschatt3n/max-jung-transporte-fahrzeugcontrolling` |
+| `ghcr.io/nachtschatt3n/metaldyne-mini-erp` | `nachtschatt3n/metaldyne-mini-erp` |
+| `ghcr.io/nachtschatt3n/oc8-backend` | `nachtschatt3n/oc8` |
+| `ghcr.io/nachtschatt3n/oc8-frontend` | `nachtschatt3n/oc8` |
+| `ghcr.io/nachtschatt3n/opencode-web-devcontainer` | `nachtschatt3n/opencode-web-devcontainer` |
+| `ghcr.io/nachtschatt3n/ordiga` | `nachtschatt3n/ordiga` |
+| `ghcr.io/nachtschatt3n/pellet-price-monitor` | `nachtschatt3n/pellet-price-monitor` |
+| `ghcr.io/nachtschatt3n/rainbow-rescue` | `nachtschatt3n/rainbow-rescue-party-hunt` |
+| `ghcr.io/nachtschatt3n/see-edv-ibspm` | `nachtschatt3n/see-edv-ibspm` |
+| `ghcr.io/nachtschatt3n/solarfocus-scraper` | `nachtschatt3n/solarfocus-scraper` |
+| `ghcr.io/nachtschatt3n/stepbystepguide` | `nachtschatt3n/stepbystepguide` |
+| `ghcr.io/nachtschatt3n/u-zeit` | `nachtschatt3n/u-zeit` |
+| `ghcr.io/nachtschatt3n/uzeit-de` | `nachtschatt3n/uzeit-de` |
+| `ghcr.io/nachtschatt3n/zero-export-controller` | `nachtschatt3n/zero-export-controller` |
+| `ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager` | `nachtschatt3n/zuhause-betreut-caretakermanager` |
 
 ---
 
@@ -419,3 +442,6 @@ reconcile — never patch the Deployment directly (GitOps rule).
   the absenty rebuild plan, which were the only written record of the five traps.
 - `2026.09.25`: Add `ghcr.io/nachtschatt3n/gods-eye-view` (fork packaging of an
   upstream release, weekly `container.yml` rebuild) to the first-party table.
+- `2026.09.26`: Backfill the first-party table to every `ghcr.io/nachtschatt3n/*`
+  image referenced under `kubernetes/` (31 of 32; source repo per GHCR package metadata —
+  one row omitted because its repo name is also a cluster Secret value).
