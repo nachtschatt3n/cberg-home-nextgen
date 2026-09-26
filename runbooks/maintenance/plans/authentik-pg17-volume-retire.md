@@ -22,13 +22,7 @@ touches:
     - "docs/applications.md, docs/sops/authentik.md, docs/sops/disaster-recovery.md (the 'kept' wording, §3.5)"
     - "NOT touched, by design: backupvolumes.longhorn.io/data-authentik-postgresql-0-6dd5bdc0 and its 9 backups.longhorn.io; volumes.longhorn.io/authentik-pg-data (the LIVE auth DB); deploy/authentik-pg"
   shared: [storage/longhorn]      # restore proof reads the CIFS backup target and builds a scratch volume
-depends_on:
-  - authentik-2026.8.3             # 2026-09-26 review: same component, operator ordering
-                                  # condition (run only after 8.3 finished + soaked; §2.2b
-                                  # gates the soak). If 8.3 is RETIRED before this runs, drop
-                                  # this ref (dead-ref convention); §2.2b still enforces it.
-                                  # (Was [authentik-pg17-decommission]: executed + retired in
-                                  # 2b82a7f4, ordering satisfied.)
+depends_on: []   # 2026-09-26: authentik-2026.8.3 EXECUTED + retired (d4ccfa09; last outpost push 06:25:51Z); the ordering is now enforced by this plan's own live soak/order gate
 conflicts_with:
   - talos-1.14.1                  # node roll: its Longhorn gates enumerate the not-healthy /
                                   # detached volume set and total count (94); this plan changes

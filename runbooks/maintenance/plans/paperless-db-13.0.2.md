@@ -29,9 +29,7 @@ touches:
                                                 # NOT `storage`: this perturbs one volume, not
                                                 # the Longhorn control plane.
 depends_on: []
-conflicts_with: [bitnamilegacy-exit-nextcloud-db, paperless-ngx-3.2.0,
-                 jellyfin-12.1, media-naming-p3,
-                 n8n-2.39.8, nextcloud-34.0.4, nocodb-2026.09.0]
+conflicts_with: [bitnamilegacy-exit-nextcloud-db, paperless-ngx-3.2.0, jellyfin-12.1, media-naming-p3, n8n-2.39.8, nextcloud-34.0.4]   # 2026-09-26: nocodb-2026.09.0 executed + retired, ref removed
                  # 2026-09-23: external-dns-unowned-cnames removed from this list — it EXECUTED
                  # (57280084) and was retired; a ref to a missing plan is an unenforced guard.
                                       # ROLLBACK-CLASS STACKING, added 2026-09-21 as a

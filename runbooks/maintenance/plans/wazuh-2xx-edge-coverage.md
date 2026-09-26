@@ -16,11 +16,11 @@ touches:
     - "authentik_events_event (SELECT only, via deployment/authentik-pg)"
   shared: [authentik]                 # its baseline must be taken on the
                                       # post-upgrade authentik, never mid-roll
-depends_on:
-  - authentik-2026.8.3                # the client_ip baseline must be taken on
-                                      # 2026.8.3, after its 20-min soak (section 3.0)
+depends_on: []   # 2026-09-26: authentik-2026.8.3 EXECUTED + retired (d4ccfa09, last outpost push 06:25:51Z);
+                                      # the client_ip baseline must still be taken on 2026.8.3 after
+                                      # its 20-min soak - enforced live by section 3.0
 conflicts_with:
-  - authentik-2026.8.3                # reciprocal of its own conflicts_with entry;
+  # - authentik-2026.8.3 (RESOLVED 2026-09-26: executed + retired; ref removed) # reciprocal of its own conflicts_with entry;
                                       # a roll mid-verification makes the login
                                       # land on a terminating pod
   # - authentik-pg17-decommission   # RESOLVED 2026-09-26: executed + retired in the now:2026-09-26 run; ref removed

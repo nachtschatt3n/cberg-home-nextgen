@@ -105,7 +105,7 @@ conflicts_with:
                                                 # slots of one weekend in either order are fine
                                                 # (its server premise tolerates 34.0.x and it
                                                 # re-takes its baselines the same day). §6.
-  - nocodb-2026.09.0                            # ADDED 2026-09-26 (reciprocity; that plan lists
+  # - nocodb-2026.09.0 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # ADDED 2026-09-26 (reciprocity; that plan lists
                                                 # this one). ROLLBACK-CLASS STACKING, not a shared
                                                 # resource: both are backup-restore. Same slot only
                                                 # SERIALLY, nocodb first, and only once nocodb's

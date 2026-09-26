@@ -74,13 +74,13 @@ conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended S
   - jellyfin-12.1                     # sat-attended:2026-10-10; same reason
   # ADDED 2026-09-26 for reciprocity — each of these already names talos-1.14.1:
   - authentik-pg17-volume-retire      # deletes a detached Longhorn volume that §2.5 exempts
-  - authentik-2026.8.3
+  # - authentik-2026.8.3 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
   - elasticsearch-obs-recovery-3.14.7
   - falco-9.2.0                       # falco's eBPF probe meets the new kernel in this plan
   - flux-reconciler-impersonation
-  - icloud-backup-freshness-3.24.2
+  # - icloud-backup-freshness-3.24.2 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
   - n8n-chart-2.1.1
-  - prometheus-pushgateway-3.9.0
+  # - prometheus-pushgateway-3.9.0 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
   - wazuh-2xx-edge-coverage
   # DROPPED 2026-09-26: kube-prometheus-stack-91.4.1 (status executed). The rule still
   # stands: any FUTURE same-night kube-prometheus-stack plan must be added here, because

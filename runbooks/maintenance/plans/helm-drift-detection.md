@@ -79,7 +79,7 @@ conflicts_with:
                                       # kept per the n8n-2.39.8 / cilium-1.20.2 convention.
   - grafana-chart-13.2.3              # §6.4: pure attribution — a Helm upgrade in the same
                                       # window as P3 gives every grafana rollout two causes
-  - affine-redis-8.10.2               # §4.1 revision-identity diff: that plan upgrades
+  # - affine-redis-8.10.2 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # §4.1 revision-identity diff: that plan upgrades
                                       # office/affine-redis (rev 14 -> 15). Reciprocal of
                                       # its own declaration; added 2026-09-26 (plan review).
   - flux-reconciler-impersonation     # Reciprocal of its own declaration (it swaps the identity

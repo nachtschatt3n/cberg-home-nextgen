@@ -29,7 +29,7 @@ touches:
                                       # the i915 interaction is expressed via conflicts_with below.
 depends_on: []
 conflicts_with:
-  - nocodb-2026.09.0                  # declared on nocodb's side (its old reason: Batch B named
+  # - nocodb-2026.09.0 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # declared on nocodb's side (its old reason: Batch B named
                                       # nocodb). That file-level collision is GONE — nocodb runs a
                                       # calver tag (2026.08.2) and is not in any remaining batch —
                                       # but the declaration stands until nocodb's file drops it, so
