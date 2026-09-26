@@ -51,7 +51,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/gods-eye-view
-              tag: 0.1.1-b20260925@sha256:7a7fd86e01656ddca6d8ca3f66c2d8eefa5326ac23a297a921c1148374c2b852
+              tag: 0.1.1-b20260926@sha256:9757c297e54cc27fa11cc34f83394c88ef6fd9c5efcc4ced301c9f25c6d1ae6e
               pullPolicy: IfNotPresent
             env:
               - name: TZ
