@@ -13,10 +13,10 @@ update_type: minor                    # one minor hop, but it SKIPS OVER v1.14.0
                                       # both release notes because we never run 1.14.0
 risk: high                            # rolling reboot of every control-plane node in a
                                       # 3-node hyper-converged cluster: etcd quorum,
-                                      # 94 Longhorn volumes at replica=2, and the ONLY
+                                      # 93 Longhorn volumes at replica=2, and the ONLY
                                       # HTTP data plane (Envoy Gateway) all ride on it
 est_duration_min: 160                 # RE-PRICED 2026-09-26 (was 145): the canary may now be
-                                      # the HEAVIEST node (38 engines on 02 measured today),
+                                      # the HEAVIEST node (39 engines on 02, re-measured 2026-09-26),
                                       # plus the pre-roll etcd snapshot, the UniFi and per-node
                                       # DaemonSet/device-plugin gates. IN-WINDOW only; Phase A
                                       # prep (~35 min) is Flux-inert and runs BEFORE the window.
@@ -28,7 +28,7 @@ touches:
   namespaces:
     - kube-system                     # etcd, kube-apiserver, controller-manager,
                                       # scheduler, coredns, cilium, authentik
-    - storage                         # longhorn-manager, instance-manager, CSI, 94 volumes
+    - storage                         # longhorn-manager, instance-manager, CSI, 93 volumes
     - network                         # envoy-gateway, envoy-internal, envoy-external,
                                       # k8s-gateway, external-dns, adguard-home, cloudflared
     - monitoring                      # prometheus, alertmanager, grafana, edot/otel collectors
@@ -42,10 +42,10 @@ touches:
     # NOT kubernetes/bootstrap/talos/clusterconfig/: those files are gitignored
     # plaintext (clusterconfig/.gitignore), regenerated locally by §3.6 and never committed.
     - node/k8s-nuc14-01                           # 192.168.55.11 — held the VIP on 2026-09-26
-    - node/k8s-nuc14-02                           # 192.168.55.12 — heaviest (38 engines); etcd leader on 2026-09-26
+    - node/k8s-nuc14-02                           # 192.168.55.12 — heaviest (39 engines); etcd leader on 2026-09-26
     - node/k8s-nuc14-03                           # 192.168.55.13
     - "etcd (3 members, 3.6.14 -> 3.7.1; pre-roll snapshot taken at §3.8a)"
-    - "all Longhorn replicas (188 on 2026-09-26) / 94 volumes (numberOfReplicas: 2)"
+    - "all Longhorn replicas (186 on 2026-09-26, after the pg17 volume retire) / 93 volumes (numberOfReplicas: 2)"
   shared:
     - etcd                            # quorum 3; exactly ONE member may be down
     - cni/cilium                      # DaemonSet restarts per node
@@ -73,7 +73,6 @@ conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended S
   - nextcloud-34.0.4                  # declared in case either plan slips onto the other's date
   - jellyfin-12.1                     # sat-attended:2026-10-10; same reason
   # ADDED 2026-09-26 for reciprocity — each of these already names talos-1.14.1:
-  # - authentik-pg17-volume-retire (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # deletes a detached Longhorn volume that §2.5 exempts
   # - authentik-2026.8.3 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
   # - elasticsearch-obs-recovery-3.14.7 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
   - falco-9.2.0                       # falco's eBPF probe meets the new kernel in this plan
@@ -84,7 +83,8 @@ conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended S
   - wazuh-2xx-edge-coverage
   # DROPPED 2026-09-26: kube-prometheus-stack-91.4.1 (status executed). The rule still
   # stands: any FUTURE same-night kube-prometheus-stack plan must be added here, because
-  # §4 reads Prometheus. cilium-1.20.2 / authentik-pg17-decommission: retired earlier.
+  # §4 reads Prometheus. cilium-1.20.2 / authentik-pg17-decommission / authentik-pg17-volume-retire
+  # (0591e95b, plan file deleted): retired.
 capability_change: true               # v1.14 changes node-level behaviour on upgrade:
                                       # containerd NRI now ENABLED by default,
                                       # net.ipv4.conf.*.send_redirects=0 by default,
@@ -138,12 +138,15 @@ premises:
       stable release means re-seek the GO (§3.4). v1.15.0-alpha.0 is correctly ignored.
     run: kubectl --kubeconfig=/dev/null --server=https://factory.talos.dev --token=none get --raw /versions
     expect_matches: '^(?!.*"v1\.14\.([2-9]|[1-9][0-9])")(?!.*"v1\.(1[5-9]|[2-9][0-9])\.[0-9]+")(?=.*"v1\.14\.1")'
-  - id: longhorn-94-volumes-all-replica-2
+  - id: longhorn-all-volumes-replica-2
     why: >-
-      Sizes the §3.11 gate: 94 volumes, every one numberOfReplicas 2. A new volume or a
-      replica-count change prints a different sequence and fails.
+      A RULE, not a count: every Longhorn volume has numberOfReplicas 2 (93 volumes on
+      2026-09-26). The volume count is deliberately not pinned — §2.5 measures the live set
+      and the replica total and §3.11 gates against that recording, so a volume added or
+      retired before the window must not stale this premise. Any volume at 1 or 3 replicas
+      (changes the one-node-down arithmetic in §2.5) or an empty list fails.
     run: kubectl get volumes.longhorn.io -n storage -o jsonpath='{.items[*].spec.numberOfReplicas}'
-    expect_matches: '^(2 ){93}2$'
+    expect_matches: '^2( 2)*$'
   - id: backup-cronjob-exists
     why: >-
       §2.6 and §6 name storage/daily-backup-all-volumes (NOT the stale
@@ -371,7 +374,7 @@ we boot NVMe by serial with no overlay, no LVM, no BGP.
    (non-isolated) behavior until it is added — upgrades change nothing on their own."*
    **DO NOT add a `SecurityProfileConfig` document in this window.** The same notes warn:
    *"With workload isolation enabled, the deprecated in-tree Kubernetes iSCSI volume
-   plugin does not work."* Our storage is 94 Longhorn volumes over iSCSI. Longhorn uses
+   plugin does not work."* Our storage is 93 Longhorn volumes over iSCSI. Longhorn uses
    its own CSI driver (the supported path), but flipping a node-isolation boundary
    underneath the iSCSI stack in the same window as a version roll would make any storage
    failure undiagnosable. Separate plan, separate window, or never.
@@ -553,8 +556,6 @@ def k(a):
     l = a["labels"]
     return "|".join([l.get("alertname", "")] + [f"{x}={l[x]}" for x in ("namespace", "volume", "instance", "account") if x in l])
 s = sorted({k(a) for a in firing if a["labels"].get("alertname") not in ("Watchdog", "InfoInhibitor")})
-# Allowed LATE alert (not in any baseline): expected ~11:38Z Sunday if the detached volume still exists
-ALLOWED_LATE = {"LonghornVolumeSnapshotChainNotPruned|volume=data-authentik-postgresql-0"}
 print("Watchdog firing:", wd)
 print("firing (excl. Watchdog/InfoInhibitor):", len(s))
 for x in s: print("   ", x)
@@ -563,9 +564,7 @@ if wd != 1: fail.append("Watchdog not firing exactly once -> the alert pipeline 
 if mode == "baseline":
     json.dump(s, open(path, "w")); print("recorded ->", path)
 else:
-    new = [x for x in s if x not in set(json.load(open(path))) and x not in ALLOWED_LATE]
-    late = [x for x in s if x in ALLOWED_LATE]
-    if late: print("allowed late alert present:", late)
+    new = [x for x in s if x not in set(json.load(open(path)))]
     if new: fail.append(f"NEW alerts vs baseline: {new}")
 for f in fail: print("  FAIL:", f)
 print("VERDICT", "FAIL" if fail else "PASS")
@@ -699,7 +698,8 @@ holds BOTH the VIP and leadership while an un-rolled node holding neither exists
 *(Examples: the reviewer's reading, VIP 01 / leader 03 → **02 → 01 → 03**. The 05:54Z
 reading, VIP 01 / leader 02 → 03 → 02 → 01. The 06:03Z reading, VIP 01 / leader 03 → 02 →
 01 → 03 again. Leadership moved twice in ten minutes; that is why the order is a rule.)*
-*Engines per node 2026-09-26: 01=20, 02=38, 03=34 (+2 detached with no node). So the canary
+*Engines per node 2026-09-26 (re-measured after the pg17 volume retire): 01=19, 02=39, 03=34
+(+1 detached with no node). So the canary
 may well be the HEAVIEST node — §7 prices it that way.*
 
 **2.5 — Longhorn: every not-healthy volume is explained, and the set is RECORDED.**
@@ -711,19 +711,17 @@ cat "$SCR/lh-baseline.json"
 **The rule (in `lh_gate.py`):** every volume whose `robustness` is not `healthy` must be
 **detached** AND (its PV is `Released` OR every Deployment/StatefulSet mounting its PVC is
 scaled to **0**). **Any attached not-healthy volume is a NO-GO**, as is a detached one whose
-consumer still wants replicas. **PASS:** `VERDICT PASS`, `numberOfReplicas {2: 94}` (premise
-`longhorn-94-volumes-all-replica-2`), and the recorded file carries the not-healthy **names**
+consumer still wants replicas. **PASS:** `VERDICT PASS`, `numberOfReplicas` all `2` (premise
+`longhorn-all-volumes-replica-2`; `{2: 93}` on 2026-09-26), and the recorded file carries the not-healthy **names**
 and the **replica total**. §2.6 and §3.11 read that file.
-*(2026-09-26: `data-authentik-postgresql-0` — detached, PV `Released`, the retired pg17
-volume — and `pvc-f6ec0213-…` = PVC `backup/icloud-docker-andrea-session`, detached,
-consumer `Deployment/icloud-docker-andrea` at 0 replicas. Replica total **188**:
-01=59 running/2 stopped, 02=66/1, 03=59/1; the 4 `stopped` belong to the 2 detached volumes.
+*(2026-09-26, re-measured after `authentik-pg17-volume-retire` deleted `data-authentik-postgresql-0`:
+the only not-healthy volume is `pvc-f6ec0213-…` = PVC `backup/icloud-docker-andrea-session`,
+detached, consumer `Deployment/icloud-docker-andrea` at 0 replicas. Replica total **186**:
+01=59 running/1 stopped, 02=66/0, 03=59/1; the 2 `stopped` belong to that one detached volume.
 `icloud-docker-mu-session` — exempt in the 2026-09-20 draft — is attached and healthy now.)*
 
-> **If `authentik-pg17-volume-retire` (operator GO 2026-09-26) has run before the window,
-> `data-authentik-postgresql-0` no longer exists: the set shrinks to one name and the total
-> to 186.** That is exactly why the set is measured here and not written down: whatever
-> §2.5 records is the contract for §3.11. Never "correct" the file by hand to match this plan.
+> The set and total are measured here, not written down: whatever §2.5 records is the
+> contract for §3.11. Never "correct" the file by hand to match this plan.
 
 At `numberOfReplicas: 2` across 3 nodes, one node down leaves every volume with a replica
 there on a single replica — degraded but serving. There is no spare-replica cushion.
@@ -1081,8 +1079,8 @@ the VIP and who led etcd immediately before it rolled** — §3.10 needs the lea
 
 | Node | Engines 2026-09-26 | Note |
 |---|---:|---|
-| `k8s-nuc14-01` / .11 | 20 | held the VIP 192.168.55.10 on 2026-09-26 |
-| `k8s-nuc14-02` / .12 | **38** | heaviest; etcd leader at 05:54Z |
+| `k8s-nuc14-01` / .11 | 19 | held the VIP 192.168.55.10 on 2026-09-26 |
+| `k8s-nuc14-02` / .12 | **39** | heaviest; etcd leader at 05:54Z |
 | `k8s-nuc14-03` / .13 | 34 | etcd leader at 06:03Z |
 
 **If the node about to roll holds the VIP**, expect the kubeconfig endpoint
@@ -1126,7 +1124,7 @@ mise exec -- kubectl -n storage get engines.longhorn.io -o json | python3 -c "
 import sys,json
 print(len([e for e in json.load(sys.stdin)['items'] if e['spec'].get('nodeID')=='<node-name>']))"
 ```
-*(Engines that must drain to 0, 2026-09-26: 01=20, 02=38, 03=34 — re-read §2.4's count for
+*(Engines that must drain to 0, 2026-09-26: 01=19, 02=39, 03=34 — re-read §2.4's count for
 the node you are rolling.)*
 
 **POSITIVE CONTROL for §4.4 check 4 — canary only, mid-drain.** `notready.py` and the phase
@@ -1209,8 +1207,7 @@ python3 "$SCR/lh_gate.py" gate "$SCR/lh-baseline.json"
    fewer — and each is still detached with its PV Released / consumer at 0. Any **attached**
    not-healthy volume (`degraded`, `rebuilding`) fails: `degraded` means one replica, exactly
    the state we must not enter the next reboot in.
-2. The replica total equals **the total recorded at §2.5** (*188 on 2026-09-26; 186 if the
-   pg17 volume was retired first*).
+2. The replica total equals **the total recorded at §2.5** (*186 on 2026-09-26*).
 3. Read the printed per-node table yourself: the just-rebooted node is back with a
    `running` count in the same order as its §2.5 line.
 
@@ -1218,7 +1215,7 @@ python3 "$SCR/lh_gate.py" gate "$SCR/lh-baseline.json"
 waits 10 minutes before replenishing a missing replica elsewhere. If the node returns inside
 that window (typical), replicas restart in place and rebuild incrementally — fast. If the
 reboot overruns 10 minutes, Longhorn builds **full** replicas on the survivors and the gate
-can take far longer over 92 attached volumes. `concurrent-replica-rebuild-per-node-limit` is
+can take far longer over 92 attached volumes (93 minus the one detached). `concurrent-replica-rebuild-per-node-limit` is
 **8** and `replica-rebuild-concurrent-sync-limit` is `{"v1":"1"}`, deliberately paced.
 
 **Budget rule: if the gate has not passed 25 minutes after the node returned `Ready`, stop
@@ -1463,17 +1460,7 @@ Prometheus → Alertmanager path — a missing Watchdog does. Any alertname not 
 is a real regression, not reboot noise; node-level alerts fire during every reboot and clear
 on their own, which is what the 15 minutes are for (budgeted in §7).
 
-**One allowed LATE alert, and only this one:**
-`LonghornVolumeSnapshotChainNotPruned{volume="data-authentik-postgresql-0"}`
-(rule in `kubernetes/apps/monitoring/kube-prometheus-stack/app/longhorn-alerts.yaml`). It is
-expected to start firing around **11:38Z Sunday** — after the window (07:00Z–10:20Z) unless
-the run overruns — because that detached, retired volume's snapshot chain stops being pruned.
-`alerts.py` whitelists exactly that alertname+volume pair and prints it as `allowed late
-alert`. If `authentik-pg17-volume-retire` removed the volume before the window, the alert
-cannot fire and the allowance is inert. Any OTHER volume on that alert is a FAIL.
-
-CONTROL: metric ALERTS — `alerts.py` reads the firing set from Prometheus `/api/v1/alerts`; the gate asserts the Watchdog firing exactly once and no alertname outside the §2.8 set (+ the one allowed late pair).
-CONTROL: alertname LonghornVolumeSnapshotChainNotPruned — allowed to be firing ONLY for volume data-authentik-postgresql-0; firing for any other volume fails §4.4.8.
+CONTROL: metric ALERTS — `alerts.py` reads the firing set from Prometheus `/api/v1/alerts`; the gate asserts the Watchdog firing exactly once and no alertname outside the §2.8 set (no allowances).
 CONTROL: metric etcd_server_has_leader — §4.3 CA2 asserts `count(...) == 3` (the floor), and §3.10's triage branch asserts `min_over_time` = 1 on survivors.
 CONTROL: metric etcd_server_leader_changes_seen_total — §3.10 `nodegate.py`: survivors may rise by at most 1, and only when the rolled node was leader.
 CONTROL: metric node_network_carrier_changes_total — §3.10 `nodegate.py`: survivors' `device=~"en.*"` counters unchanged across each node's reboot.
@@ -1618,7 +1605,7 @@ one back. `talos-1.14.0` is `superseded` with `window: null`, so it no longer cl
 **Reciprocity (house rule; `--validate` does not check it):** as of 2026-09-26 every plan
 that names `talos-1.14.1` is named back here — `flux-oci-chart-sources`,
 `helm-drift-detection`, `n8n-2.39.8`, `edot-collector-0.161.0`, `otel-operator-0.23.0`,
-`authentik-pg17-volume-retire`, `authentik-2026.8.3`, `elasticsearch-obs-recovery-3.14.7`,
+`authentik-2026.8.3`, `elasticsearch-obs-recovery-3.14.7`,
 `falco-9.2.0`, `flux-reconciler-impersonation`, `icloud-backup-freshness-3.24.2`,
 `n8n-chart-2.1.1`, `prometheus-pushgateway-3.9.0`, `wazuh-2xx-edge-coverage`. Several of those
 are in the 2026-09-26 NOW run and will be retired when they execute; their refs must then be
@@ -1630,8 +1617,9 @@ kube-prometheus-stack plan must be added, because §4 reads Prometheus.
 authentik, falco, the edot/otel collectors, elasticsearch, the pushgateway and more the day
 before this roll. §2.1 refuses to start while any of it is still stamped, and §2.8 records
 its after-effects (e.g. a transient `AuthentikTaskWorkersZero`) as baseline rather than
-blaming them on Talos. `authentik-pg17-volume-retire` (GO 2026-09-26) may delete
-`data-authentik-postgresql-0` first — §2.5 re-measures, §4.4's allowed late alert becomes inert.
+blaming them on Talos. `authentik-pg17-volume-retire` executed 2026-09-26 (0591e95b):
+`data-authentik-postgresql-0` is gone, so §2.5's exempt set is one name and §4.4 carries no
+allowed-late alert.
 
 **UniFi:** no switch/AP firmware in this slot — `docs/sops/unifi-device-firmware.md` now
 says so explicitly (2026-09-26). §2.11 checks `upgradable=False` everywhere; §3.10 stops on
@@ -1707,8 +1695,8 @@ So `sun-attended` is **200 wall-clock / 180 schedulable**, not 200 for plans.
 | **A — prep (BEFORE the window)** | **~35** | *Not counted.* Flux does not reconcile `kubernetes/bootstrap/talos/`; §3.1–§3.7 are inert until `talosctl upgrade`. +5 vs 09-20 for the §3.6 scratch snapshot + live-image check. |
 | §2 pre-checks | 20 | 12 checks + writing the 5 helpers + UniFi (§2.11) + per-node baseline (§2.12); +5 vs 09-20 |
 | §3.8a etcd snapshot | 3 | ~0.9 GB streamed over the LAN |
-| **Canary** — upgrade + drain + reboot + §3.10 + §3.11 + §4.1 + canary go/no-go | **45** | **priced for the HEAVIEST node**: the §2.4 rule can pick node 02 (38 engines, 67 replicas). The 09-20 plan priced a 17-engine canary at 35; drain and rebuild scale with engines, +10 |
-| 2nd node — upgrade + gates | 37 | 20–38 engines; possibly a VIP failover |
+| **Canary** — upgrade + drain + reboot + §3.10 + §3.11 + §4.1 + canary go/no-go | **45** | **priced for the HEAVIEST node**: the §2.4 rule can pick node 02 (39 engines, 66 replicas on 2026-09-26). The 09-20 plan priced a 17-engine canary at 35; drain and rebuild scale with engines, +10 |
+| 2nd node — upgrade + gates | 37 | 19–39 engines; possibly a VIP failover |
 | 3rd node — upgrade + gates | 35 | possibly a VIP failover and/or leader re-election |
 | §4.2 + §4.3 + §4.4 + §4.5 (incl. the 15-min alert settle) | 20 | overlaps the settle wait |
 | **In-window total** | **160** | |
