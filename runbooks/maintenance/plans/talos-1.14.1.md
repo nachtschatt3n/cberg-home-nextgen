@@ -73,9 +73,9 @@ conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended S
   - nextcloud-34.0.4                  # declared in case either plan slips onto the other's date
   - jellyfin-12.1                     # sat-attended:2026-10-10; same reason
   # ADDED 2026-09-26 for reciprocity — each of these already names talos-1.14.1:
-  - authentik-pg17-volume-retire      # deletes a detached Longhorn volume that §2.5 exempts
+  # - authentik-pg17-volume-retire (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # deletes a detached Longhorn volume that §2.5 exempts
   # - authentik-2026.8.3 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
-  - elasticsearch-obs-recovery-3.14.7
+  # - elasticsearch-obs-recovery-3.14.7 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
   - falco-9.2.0                       # falco's eBPF probe meets the new kernel in this plan
   - flux-reconciler-impersonation
   # - icloud-backup-freshness-3.24.2 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed)
