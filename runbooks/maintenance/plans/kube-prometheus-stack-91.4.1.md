@@ -200,20 +200,21 @@ finding_refs:
                                       # overall", and no open finding names the 91.x major.
                                       # Ref kept (it is this plan's origin); see §2.1a for
                                       # what a Step-0 landing of 90.2.0 does to this plan.
-status: vetted   # 2026-09-25 on-demand NOW run: preflight refused ONLY for "no operator approval
-                      # pending" — the GO reached the window agent as a relayed agent message, which is not
-                      # operator consent. go_no_go issue ingested (window now:2026-09-25); approve via
-                      # `home-operation run --issue kube-prometheus-stack-91.4.1` or Telegram, then re-run.
-                      # RE-VETTED 2026-09-25 against 91.5.2: plan-reviewer verdict needs-fix (5 blocking,
-                 # all text), corrections applied in this commit, then re-checked mechanically:
-                 # plan-premises --require-premises PASS (9), --controls --prom-url PASS (5 instruments),
-                 # maintenance-plan.py --validate PASS. History: was `vetted` (REVIEWED 2026-09-15, plan-reviewer fan-out, corrections
-                 # applied in c36388bc). RESET TO draft 2026-09-20 because the TARGET moved
-                 # (91.4.0 -> 91.4.1): a vetted stamp may not outlive the version it was
-                 # granted for. Must be re-reviewed before it can be scheduled.
-                 # 2026-09-25: target moved AGAIN (91.4.1 -> 91.5.2); stays draft, needs a
-                 # fresh plan-reviewer pass against 91.5.2.
-window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
+status: executed   # EXECUTED 2026-09-26 on-demand NOW run (attended; consent: home-operation approve by operator
+                   # 2026-09-26T04:50:32Z). Landing commit 87432c93 (chart 90.0.0 -> 91.5.2), helm rev 41 deployed
+                   # over rev 40 superseded. Verified live 04:57-05:08Z: HR True 91.5.2 v0.94.1; operator v0.94.1,
+                   # AM v0.34.1, prometheus v3.14.0-distroless (pod imageIDs read); 10/10 CRDs opver 0.94.1, served
+                   # versions unchanged; targets 101/101 (baseline 101); rules 532 vs 531 (+1 upstream recording
+                   # rule); Watchdog in AM updatedAt 05:02:03Z > AM start 04:57:01Z; AM 0.34.1 + telegram receiver;
+                   # tsdb_floor 2026-09-19 00:00Z unchanged; active series 354132 -> 353206 (head_series 369200 ->
+                   # 421399 = WAL-replay churn of restarted pods, not new scrape load); node_load1 4 samples/node;
+                   # AM alerts received 5m 16.6; operator 172 log lines, 0 denied, 0 errors; ClusterRole 0 wildcard
+                   # verbs; bundled grafana 0, separate grafana 13.2.5 restarts 0, GF_PLUGINS_PREINSTALL_DISABLED
+                   # still true, Prometheus datasource health OK; 28/33 dashboard CMs, sidecar re-read. Transient:
+                   # container.memory.rules eval failures 04:58:43-05:01:43 ("duplicate series" kube_pod_container_
+                   # resource_limits from old+new kube-state-metrics pod in the staleness window), 0 after 05:03.
+                   # File KEPT (not deleted) only because 21 plans name this id; retire with that ref pass.
+window: null       # was now:2026-09-26 (run-now.py stamp, 9c369c21); cleared on execution
 premises:
   - id: hr-still-on-90.0.0
     why: >-
