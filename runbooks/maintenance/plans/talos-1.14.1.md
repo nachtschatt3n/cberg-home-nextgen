@@ -164,9 +164,10 @@ premises:
       Local installability is still gated by `mise ls-remote talhelper` at §3.5.
     run: kubectl --kubeconfig=/dev/null --server=https://proxy.golang.org --token=none get --raw /github.com/budimanjojo/talhelper/v3/@v/v3.1.17.info
     expect_contains: '"Version":"v3.1.17"'
-status: draft                         # re-drafted 2026-09-20 for v1.14.1; reviewer fix pass
-                                      # 2026-09-26. The 2026-09-12 GO covered v1.14.0 ONLY and
-                                      # does NOT carry over. Needs a FRESH operator GO.
+status: awaiting-go                   # plan-reviewer re-review 2026-09-26: ready-for-go.
+                                      # NO GO RECORDED. The 2026-09-12 GO covered v1.14.0 ONLY
+                                      # and does NOT carry over — the operator must give a
+                                      # FRESH GO for v1.14.1 before the window.
 window: "sun-attended:2026-09-27"     # sun-attended is the ONLY allow_reboot window; a node
                                       # roll may not be stamped `now:` (on_demand has
                                       # allow_reboot: false).
@@ -786,7 +787,18 @@ edit it to match these examples.
 mise exec -- kubectl get gateway -A
 mise exec -- kubectl get httproute -A --no-headers | wc -l | tee "$SCR/httproutes-baseline.txt"
 mise exec -- kubectl get pods -n network -o wide | grep -E 'envoy-(internal|external|gateway)'
+# Pick ONE real host per gateway that answers 2xx WITH A BODY (not an auth 302 with 0B —
+# measured 2026-09-26: the first envoy-external route returned 302 0B). Hostnames stay out
+# of this public repo; they live only in $SCR.
+INT_HOST=<host routed on envoy-internal>; EXT_HOST=<host routed on envoy-external>
+printf '%s\n%s\n' "$INT_HOST" "$EXT_HOST" > "$SCR/probe-hosts.txt"
+{ curl -sS -o /dev/null -w 'internal %{http_code} %{size_download}\n' -H "Host: $INT_HOST" https://192.168.55.103/ -k
+  curl -sS -o /dev/null -w 'external %{http_code} %{size_download}\n' -H "Host: $EXT_HOST" https://192.168.55.104/ -k
+} | tee "$SCR/curl-baseline.txt"
 ```
+**PASS (probe baseline):** both lines `2xx` with a size **> 0**; if a host gives 3xx/0B, pick
+another before continuing.
+
 **PASS:** `envoy-internal` (192.168.55.103) and `envoy-external` (192.168.55.104) both
 `PROGRAMMED=True`; the route count recorded (*109 on 2026-09-26*); and each of
 `envoy-internal`, `envoy-external`, `envoy-gateway` has **3 pods, one per node**. Below 3
@@ -1115,7 +1127,22 @@ import sys,json
 print(len([e for e in json.load(sys.stdin)['items'] if e['spec'].get('nodeID')=='<node-name>']))"
 ```
 *(Engines that must drain to 0, 2026-09-26: 01=20, 02=38, 03=34 — re-read §2.4's count for
-the node you are rolling.)* Engines going N → 0 is the drain progressing. When it hits 0,
+the node you are rolling.)*
+
+**POSITIVE CONTROL for §4.4 check 4 — canary only, mid-drain.** `notready.py` and the phase
+query pass on an ABSENCE, and on 2026-09-26 both read 0, so neither has been seen to fail.
+While the canary's engine count is still **above 0**, run once:
+
+```bash
+python3 "$SCR/notready.py" compare "$SCR/notready-baseline.json"
+mise exec -- kubectl get pods -A --field-selector status.phase!=Running,status.phase!=Succeeded
+```
+**PASS (of the control):** `notready.py` prints `VERDICT FAIL` naming **≥1** workload **and**
+the phase query prints **≥1** pod. Expected, because evicted pods sit Pending/not-Ready
+mid-drain — e.g. `envoy-internal`/`envoy-external`/`envoy-gateway` use
+`topologySpreadConstraints` (`DoNotSchedule` on hostname) with a PDB `minAvailable: 2`, so the
+evicted replica stays Pending until the node returns. **A `VERDICT PASS` mid-drain means the
+helper is blind: STOP before §3.10** and fix it; do not trust §4.4 check 4 without it. Engines going N → 0 is the drain progressing. When it hits 0,
 Longhorn deletes the PDB itself and the drain completes in seconds.
 
 **Do NOT** delete the PDBs. **Do NOT** use `EXTRA_FLAGS='--drain=false'` pre-emptively. Only if
@@ -1377,15 +1404,16 @@ perfect.
 > print('routes NOT Accepted/ResolvedRefs:',len(bad))
 > for b in bad: print('  ',b)"
 > # real traffic, both data planes, from the LAN
-> curl -sS -o /dev/null -w 'internal %{http_code} %{size_download}B\n' \
->   -H "Host: <a real ingressed host>" https://192.168.55.103/ -k
-> curl -sS -o /dev/null -w 'external %{http_code} %{size_download}B\n' \
->   -H "Host: <a real ingressed host>" https://192.168.55.104/ -k
+> INT_HOST=$(sed -n 1p "$SCR/probe-hosts.txt"); EXT_HOST=$(sed -n 2p "$SCR/probe-hosts.txt")
+> curl -sS -o /dev/null -w 'internal %{http_code} %{size_download}\n' -H "Host: $INT_HOST" https://192.168.55.103/ -k
+> curl -sS -o /dev/null -w 'external %{http_code} %{size_download}\n' -H "Host: $EXT_HOST" https://192.168.55.104/ -k
+> cat "$SCR/curl-baseline.txt"
 > ```
 > **PASS:** both Gateways `PROGRAMMED=True`; the HTTPRoute count equals the §2.9 baseline
 > recorded in `$SCR/httproutes-baseline.txt` (*109 on 2026-09-26; it was 107 on 09-20 and 103
 > before that — this number drifts, which is why it is a file*); `routes NOT
-> Accepted/ResolvedRefs: 0`; and both curls return 2xx/3xx with a **non-zero body size**. A
+> Accepted/ResolvedRefs: 0`; and both curls return the **same status class as
+> `$SCR/curl-baseline.txt` (2xx) with a non-zero body size** in the same order of magnitude. A
 > 200 with `0B`, or a route count that quietly dropped to 40, is a FAIL. *(Substitute a real
 > host at run time; this repo is public, so no hostname is written here. The point is a
 > body, not a status line.)*
@@ -1485,8 +1513,9 @@ commit is inert; reverting it moves no node.
 Talos keeps the previous installed image on the alternate boot partition:
 
 ```bash
-mise exec -- talosctl get machinestatus -n <node-ip> -o yaml | grep -i image
+mise exec -- talosctl -n <node-ip> version --short     # Tag: v1.14.1 before the rollback
 mise exec -- talosctl rollback --nodes <node-ip>
+mise exec -- talosctl -n <node-ip> version --short     # Tag: v1.13.10 after it returns
 ```
 Then re-run §3.10 + §3.11 to confirm the node came back on v1.13.10 with its Longhorn
 replicas running, and §4.1 for its kernel cmdline.
@@ -1508,11 +1537,12 @@ budget and not slack.
 
 ### 5.2 — Past the canary: there is no clean revert. Stop, don't unwind.
 
-Once **two or more** nodes are on v1.14.1, the etcd cluster has advanced from 3.6.14 toward
-3.7.1 on a majority of its members. Downgrading a Talos node image does not downgrade an
-etcd data directory, so "revert the commit and re-roll" is **not** a rollback — it is an
-untested downgrade across an etcd storage-version boundary on a cluster holding an ~820 MB
-database (140 MB in use).
+etcd's **cluster** version is the minimum across members, so it only moves to 3.7 once
+**all three** members run 3.7.1 — the hard one-way point is the THIRD node, not the second.
+Before that, each upgraded member's own binary is 3.7.1 on a 3.6 cluster. The plan still treats
+everything past the canary as stop-don't-unwind, deliberately: downgrading a Talos node image
+does not downgrade an etcd data directory, and "revert the commit and re-roll" is an untested
+downgrade on a cluster holding a ~850–890 MB database (~230–245 MB in use, 2026-09-26).
 
 *(For completeness: upstream's `MaximumHostDowngradeVersion = 1.16.0` means Talos permits
 downgrading **to** 1.14 from below 1.16 — it says nothing about downgrading 1.14 → 1.13
