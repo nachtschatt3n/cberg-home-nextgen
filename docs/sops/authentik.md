@@ -407,7 +407,7 @@ call_command('test_email', User.objects.get(username='mu_adm').email)" 2>/dev/nu
 | `default-authenticator-static-setup` | `token_count: 10` | 10 recovery codes |
 | `default-authenticator-totp-setup` | unchanged (upstream: 6 digits) | — |
 | Flow/stage `cberg-authenticator-email-setup` | email-OTP, `token_expiry: minutes=15` | fallback factor (login only, it does not count on recovery) |
-| User `akadmin` | `is_active: false` (added 2026-09-26) | unused bootstrap superuser: pk 14, re-created by upstream `system/bootstrap.yaml` after the original admin was renamed to the operator's account; never logged in, no usable password, owns no tokens, no outpost/service account/blueprint authenticates as it. Upstream's entry is `state: created`, so an image bump never re-activates it. The operator's own superuser is the only active admin; break-glass is issued for that user, so it is unaffected. |
+| User `akadmin` | `is_active: false` (added 2026-09-26) | unused bootstrap superuser, re-created by upstream `system/bootstrap.yaml` after the original admin was renamed to the operator's account; never logged in, no usable password, owns no tokens, no outpost/service account/blueprint authenticates as it. Upstream's entry is `state: created`, so an image bump never re-activates it. The operator's own superuser is the only active admin; break-glass is issued for that user, so it is unaffected. |
 
 Every authenticator stage with a `configure_flow` is listed at
 `https://auth.<domain>/if/user/` → **MFA Devices → Enroll**.
@@ -468,8 +468,12 @@ mode-600 file.
    phase 1** (2026-09-26, before the first enrolment). Keep
    `not_configured_action: skip` there even in phase 2, or a user with no
    device could never recover. Note that a second factor on recovery means a
-   user who loses *every* device can no longer self-recover: that is what the
-   break-glass key (admin) and an admin-issued recovery link are for.
+   user who loses *every* device can no longer self-recover. An admin-issued
+   recovery link does NOT help: it is built from the brand's recovery flow,
+   i.e. `cberg-recovery`, so order 25 still asks for the lost device. The
+   way back in is either an admin deleting that user's registered devices
+   (the stage then skips) followed by a normal recovery, or
+   `ak create_recovery_key` for that user (bypasses flows entirely).
 5. Roll out with an existing admin session open in a second browser and the
    break-glass file at hand; rollback is `git revert` (or break-glass → admin
    UI) — the recovery key bypasses flows, so a broken flow cannot lock out
