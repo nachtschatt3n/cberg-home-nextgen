@@ -213,7 +213,7 @@ status: vetted   # 2026-09-25 on-demand NOW run: preflight refused ONLY for "no 
                  # granted for. Must be re-reviewed before it can be scheduled.
                  # 2026-09-25: target moved AGAIN (91.4.1 -> 91.5.2); stays draft, needs a
                  # fresh plan-reviewer pass against 91.5.2.
-window: null
+window: "now:2026-09-26"   # ON-DEMAND NOW run 2026-09-26 (run-now.py stamp; was None)
 premises:
   - id: hr-still-on-90.0.0
     why: >-
