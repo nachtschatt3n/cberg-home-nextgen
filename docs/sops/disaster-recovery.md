@@ -365,8 +365,8 @@ Wazuh dashboard SAML SSO fails.
 > `deployment/authentik-pg` on the `longhorn-static` volume `authentik-pg-data`.
 > The pre-cutover rollback `statefulset/authentik-postgresql` was retired on
 > 2026-09-24 (plan `authentik-pg17-decommission`). Its PV/Longhorn volume
-> `data-authentik-postgresql-0` and backups are KEPT but hold a frozen
-> 2026-08-19 snapshot. Restoring them recovers the pre-cutover dataset, not
+> `data-authentik-postgresql-0` was deleted 2026-09-26; its Longhorn backups
+> are KEPT but hold a frozen 2026-08-19 snapshot. Restoring them recovers the pre-cutover dataset, not
 > current data. This section named the rollback until 2026-09-12. See
 > `docs/sops/authentik.md` §"Two databases answered to `-U authentik -d authentik`".
 

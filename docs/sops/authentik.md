@@ -41,10 +41,11 @@ Authentik provides unified SSO and forward-auth proxy for all cluster services.
 
 Plan `authentik-pg17-decommission` retired it on 2026-09-24
 (`postgresql.enabled: false`, PVC `data-authentik-postgresql-0` deleted). The
-PV and Longhorn volume `data-authentik-postgresql-0` are `Retain` and its
-Longhorn backups are kept as the pre-cutover recovery floor. They hold a
-frozen 2026-08-19 snapshot, not current data. **Never restore that volume to
-recover authentik.** The current data lives on `authentik-pg-data`.
+PV and Longhorn volume `data-authentik-postgresql-0` were deleted 2026-09-26
+(plan `authentik-pg17-volume-retire`); its Longhorn backups are kept as the
+pre-cutover recovery floor — restore via `runbooks/backup-restore-proof.py
+--keep` (flags in that plan's §3.1). They hold a frozen 2026-08-19 snapshot,
+not current data. **Never restore those backups to recover authentik.** The current data lives on `authentik-pg-data`.
 
 Still name the host explicitly in every query:
 
