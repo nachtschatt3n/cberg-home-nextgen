@@ -52,7 +52,12 @@ weights:
 thresholds:
   composite_buy: 70.0          # composite >= 70 → BUY
   composite_wait_below: 40.0   # composite <= 40 → WAIT
-  explicit_floor_eur_per_t: 330.0   # local price <= 330 EUR/t → BUY regardless of composite
+  # local price <= floor → BUY regardless of composite. The floor is compared
+  # against the ALL-IN local price (quoted 6 t total / t, incl. ~8 EUR/t
+  # per-order charges) since sha-9487a05 (2026-09-26). It was 330 on the old
+  # LISTED basis; 322 all-in keeps the same meaning (operator-approved
+  # 2026-09-26). Pinned by tests/test_price_basis.py.
+  explicit_floor_eur_per_t: 322.0
 
   # Seasonal rebound-from-trough BUY override (data-driven, not calendar-based —
   # the seasonal trough month moves year to year). Promotes BUY when ALL hold:
