@@ -472,7 +472,10 @@ spec:
       annotations:
         summary: Authentik reports zero task workers
         description: |
-          authentik_tasks_workers is 0. Authentik persists audit events through
+          At least one Authentik server sees no connected task worker of ANY
+          version (authentik_tasks_workers summed per server pod is 0), or the
+          gauge has vanished entirely while the servers are being scraped.
+          Authentik persists audit events through
           this task queue, so with no workers the request path keeps serving
           logins while the audit trail silently stops -- the exact failure mode
           AuthentikAuditLogStale needs 10 days to notice. This catches it in
@@ -482,8 +485,41 @@ spec:
         runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
       # Measured 2026-09-12: steady at 3 across all three server pods, so the
       # series exists and the rule is armed rather than matching nothing.
+      #
+      # 2026-09-26: `min(authentik_tasks_workers) == 0` fired as a FALSE
+      # POSITIVE after the 2026.8.3 roll. Since upstream PR #25882 (first in
+      # 2026.8.3) the gauge drops its `pid` label and each server process
+      # ZEROES every (version, version_matched) labelset it has ever exported
+      # instead of deleting it (authentik/tasks/signals.py). A server that saw
+      # the outgoing 2026.8.2 workers during the roll therefore keeps a
+      # {version="2026.8.2",version_matched="False"} = 0 series for its whole
+      # lifetime, next to the real {version="2026.8.3"} = 3; min() over raw
+      # series read the leftover. Fix: total per server pod across all version
+      # labels, then min across pods. A leftover is re-zeroed on every
+      # collection, so it can only ever add 0 -- it cannot mask a real zero --
+      # and old-version workers that ARE connected still drain the queue, so
+      # they rightly count.
+      # NOT `{version_matched="True"}`: a server that has never seen a
+      # current-version worker exports no True series at all, so an upgrade
+      # whose new workers never come up would leave that selector empty and
+      # this rule inert -- the one case it exists for.
+      # The `or on()` absent() branch is the inertness guard: the gauge only
+      # exists once a server has seen a worker, so after a full restart with
+      # dead workers there is nothing to compare against 0. It is gated with
+      # `and on()` on the server scrape being up (bare `and` is permanently
+      # inert against absent()'s empty label set -- see
+      # AuthentikAuditFreshnessProbeMissing above), so a scrape outage stays
+      # AuthentikServerDown's job. Proven live 2026-09-26: empty at rest;
+      # the same expr with `* 0` and with the metric renamed each returned a
+      # sample; over the 7 days of retention it was never true, while the old
+      # expr was true for 44 min from 05:53Z.
       expr: |
-        min(authentik_tasks_workers) == 0
+        min(sum by (pod) (authentik_tasks_workers)) == 0
+        or on()
+        (
+          absent(authentik_tasks_workers)
+          and on() (sum(up{job="authentik-server-metrics"}) > 0)
+        )
       for: 10m
       labels:
         category: authentication
