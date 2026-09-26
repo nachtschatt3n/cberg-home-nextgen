@@ -1171,6 +1171,26 @@ def _plan_delivers(plan, item, heads=None, ignore_kind=False):
     if uv and _CONCRETE_VER.match(ptgt):
         pv = _ver_tuple(ptgt)
         if pv and _release_line(pv) == _release_line(uv):
+            if uv < pv:
+                # The plan is AHEAD of the snapshot's newest tag (F-drift-order,
+                # 2026-09-26): nextcloud-mcp-0.187.1 targets 0.195.4 (reviewed,
+                # digest == `latest`) while a snapshot generated before 0.195.4
+                # shipped still names 0.195.3. Drift means a NEWER version than
+                # the reviewed target; an OLDER tag is not a re-target, so this
+                # used to raise a false NEEDS-DECISION on every run-now
+                # preflight. Compared numerically (_ver_tuple), never lexically.
+                #
+                # NOT a blanket pass: if a positively-resolved stable-channel
+                # head is itself newer than the plan, that is still drift and
+                # still reported. Whether the snapshot is fresh enough to see
+                # newer tags at all is the separate snapshot-age gate
+                # (VERSION_MD age), not this comparison's job.
+                rec = (heads or {}).get((str(item.get("component", "")).lower(),
+                                         str(item.get("kind", "")).lower()))
+                hv = _ver_tuple(rec[0]) if rec and rec[0] else None
+                if hv and hv > pv:
+                    return True, _drift_note(item, ptgt, pv, heads)
+                return True, None
             return True, _drift_note(item, ptgt, pv, heads)
     return False, None
 
