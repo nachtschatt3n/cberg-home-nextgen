@@ -235,8 +235,14 @@ refs are untouched, so a mistake in this policy **cannot** break Kustomization o
 source resolution. Adding a namespace to `allowed_namespaces` is a reviewable git change and
 should be read as "granting git-push capability to this namespace".
 
+> **2026-09-27:** `my-software-showcase` was added to `allowed_namespaces`, making 3. Its
+> `showcase-image-updates` IUA auto-deploys the 15 showcase apps' weekly rebuilds.
+> `my-software-production` also gained `gas-price-monitor-image-updates`. The Setters
+> sites are now 3 absenty + 15 showcase + 1 gas-price-monitor. See
+> `docs/sops/self-built-image-rebuild.md` §"Weekly rebuild + deploy mode".
+
 Residual after the guardrail: the (Setters-bounded) capability is still reachable from the
-2 allowlisted namespaces. It is no longer reachable from the other ~40. Two further limits
+allowlisted namespaces (2 when this section was written; 3 since 2026-09-27). It is no longer reachable from the other ~40. Two further limits
 worth knowing before you rely on it: the allowlist pins the *referrer*, not the *target*, so
 an allowlisted namespace may cross-reference any future write-capable source; and
 `spec.git.push.branch` / `push.refspec` are unconstrained, so while the commit *content*

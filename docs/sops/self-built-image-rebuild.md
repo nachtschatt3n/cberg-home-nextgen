@@ -3,8 +3,8 @@
 > Description: How to clear CVEs on container images we build ourselves, where there is
 > no upstream version to bump to and remediation is a **rebuild in the source repo**
 > followed by a GitOps tag bump — not a version bump.
-> Version: `2026.09.26`
-> Last Updated: `2026-09-26`
+> Version: `2026.09.27`
+> Last Updated: `2026-09-27`
 > Owner: `homelab-operator`
 
 ---
@@ -240,6 +240,87 @@ These are the mistakes this SOP exists to prevent. Read them before starting.
    convention in `docs/sops/maintenance-windows.md`, and file a follow-up plan for any
    survivor.
 
+### Weekly rebuild + deploy mode (program item F, 2026-09-27)
+
+Every self-built image has a **weekly scheduled rebuild** in its source repo:
+Monday 05:00 UTC (gods-eye-view 04:17), plus `workflow_dispatch`. Each one uses
+`pull: true` + `no-cache` (fresh base), runs the repo's tests or smoke test
+before pushing, and ends with a **keepalive** step
+(`gh api -X PUT .../actions/workflows/<file>/enable`, `actions: write`).
+
+**Why the keepalive exists:** GitHub silently disables a scheduled workflow
+after 60 days without repo activity. The ai-sre and solarfocus-scraper schedules
+stopped firing in July, and nothing reported it. Dormant repos are exactly the
+ones whose schedule matters.
+
+Tag schemes. A rebuild never re-pushes a tag the cluster pins, because a
+pinned tag must not change content:
+
+| Scheme | Rebuild tag | Source |
+|---|---|---|
+| P | `production-<YYYYMMDDHHMMSS>` (a NEW tag from HEAD) | `schedule` added to the repo's existing `ci.yml` |
+| S | `sha-<7hex>-b<YYYYMMDD>` + `weekly` | new `scheduled-rebuild.yml`; the push CI keeps its plain sha tags |
+| V | `<version>-b<YYYYMMDD>` + `weekly` (newest `v*` release) | `scheduled-rebuild.yml` |
+
+Deploy modes:
+
+- **AUTO**: Flux `ImagePolicy` (anchored regex on the rebuild scheme,
+  numerical on the timestamp) plus an `ImageUpdateAutomation` (Setters) commits
+  the new tag to `main`. The gate is the app's probes plus
+  `upgrade.remediation.strategy: rollback`: a rebuilt image that fails its probes
+  makes the Helm upgrade time out, and helm-controller rolls it back. The
+  HelmRelease is then left not-Ready, which the sweep's Flux check reports. This
+  is NOT the maintenance-window health gate. The weekly rebuild lands Monday
+  ~05:30 UTC, outside a window.
+- **MANUAL**: the rebuild is published, but a human (or the owning agent) bumps
+  the tag in git. Coverage keeps these images in the REBUILD lane.
+
+AUTO requires all of: a HelmRelease with rollback remediation, a real
+liveness/readiness probe, and not a stateful control-plane, finance or health-data
+app, and not a live interactive session. **An internet-facing site also needs an
+HTTP health probe.**
+
+| Image | Source repo | Scheme / rebuild tag | Rebuild workflow | Cluster pin | Mode | Why |
+|---|---|---|---|---|---|---|
+| globalmobility-group-gmbh-globaldispo | same name | S | scheduled-rebuild.yml | IUA `my-software-showcase` | **AUTO** | internal showcase, full probes, rollback |
+| ibgastro | ibgastro | S | scheduled-rebuild.yml | IUA showcase | **AUTO** | same |
+| uzeit-de | uzeit-de | S | scheduled-rebuild.yml | IUA showcase | **AUTO** | same |
+| haarfabrik-extranet, holm-backend, inbewegung-familymanager, kfa_medienarchiv, mangold-smarthomeadvisor, max-jung-transporte-fahrzeugcontrolling, metaldyne-mini-erp, ordiga, see-edv-ibspm, stepbystepguide, u-zeit, zuhause-betreut-caretakermanager | same names | P | ci.yml (schedule) | IUA showcase | **AUTO** | same; their bases are EOL Debian (jessie/stretch), so there is no OS upgrade, and a rebuild only refreshes what the archive mirror still serves |
+| gas-price-monitor | gas-price-monitor | S | scheduled-rebuild.yml | IUA `my-software-production/gas-price-monitor-image-updates` | **AUTO** | internet-facing, but has HTTP liveness/readiness + rollback |
+| absenty | Absenty | P (matrix: production + development) | ci.yml (schedule) | IUA prod (**suspended**, dependabot drain) / IUA dev (active) | AUTO (prod held) | keep prod suspended until the drain completes |
+| andreamosteller (prod + dev) | the site repo | S (both branches) | scheduled-rebuild.yml | manual sha tag | MANUAL | internet-facing, startup probe only |
+| rainbow-rescue | rainbow-rescue-party-hunt | V | scheduled-rebuild.yml | manual `0.1.3` | MANUAL | internet-facing, no probes |
+| gods-eye-view | gods-eye-view (branch `cberg`) | V | container.yml | manual tag@digest | MANUAL | internet-facing, digest-pinned |
+| sure | sure (fork `main` == deploy `integration`) | S | scheduled-rebuild.yml | manual 40-hex sha | MANUAL | finance data + migrations; sure-agent owns deploys |
+| arag-web | arag-web | S | scheduled-rebuild.yml | manual sha | MANUAL | health-insurance data + migrations |
+| zero-export-controller | zero-export-controller | V | scheduled-rebuild.yml | manual `0.4.2` | MANUAL | drives the inverters; solar-controller owns releases |
+| solarfocus-scraper | solarfocus-scraper | S | scheduled-rebuild.yml | manual sha | MANUAL | owning agent tags releases; candidate for AUTO |
+| pellet-price-monitor | pellet-price-monitor | S | scheduled-rebuild.yml | manual sha | MANUAL | no probes |
+| harness-home-server / -frontend | ha-ai-harrnes | V | scheduled-rebuild.yml | manual `0.5.4-alpha` | MANUAL | no probes |
+| ai-sre | ai-sre | V (was `weekly-<date>`, not selectable) | scheduled-rebuild.yml | manual `2.1.5` | MANUAL | security tooling with cluster credentials |
+| oc8-backend / -frontend | oc8 (fork) | S (rebuilds the newest `oc8home-*` tag) | scheduled-rebuild.yml | manual sha@digest | MANUAL | chart and images must describe the same commit |
+| opencode-web-devcontainer | opencode-web-devcontainer | S | scheduled-rebuild.yml | manual sha | MANUAL | live dev sessions; a roll kills them |
+| sweep-dashboard | this repo, `containers/sweep-dashboard` | S (7hex = last commit touching the dir) | `.github/workflows/sweep-dashboard.yaml` | manual sha (plain Deployment) | MANUAL | no Helm rollback gate |
+
+**To move an image to AUTO**, all of these must hold:
+
+1. It meets the criteria above.
+2. Its namespace is in the `flux-imageupdateautomation-sourceref` VAP allowlist.
+   Adding a namespace grants git-push; review it as such.
+3. The `$imagepolicy` marker is on its tag line.
+4. The IUA `update.path` is scoped to the app or namespace directory.
+
+**To hold one AUTO app**, delete its `$imagepolicy` marker. Do not suspend
+the shared showcase IUA.
+
+Check rebuild liveness per repo:
+
+```bash
+gh run list -R nachtschatt3n/<repo> -e schedule -L 3   # a scheduled run within ~8 days
+gh api repos/nachtschatt3n/<repo>/actions/workflows --jq '.workflows[]|.path+" "+.state'
+kubectl get imagepolicy -A      # AUTO: resolves to a -b<date>/production-<ts> from the last week
+```
+
 ---
 
 ## 5) Examples
@@ -445,3 +526,7 @@ reconcile — never patch the Deployment directly (GitOps rule).
 - `2026.09.26`: Backfill the first-party table to every `ghcr.io/nachtschatt3n/*`
   image referenced under `kubernetes/` (31 of 32; source repo per GHCR package metadata —
   one row omitted because its repo name is also a cluster Secret value).
+- `2026.09.27`: Weekly rebuild + deploy mode section: a scheduled no-cache rebuild with
+  keepalive in every source repo, three tag schemes, and a per-image AUTO/MANUAL table.
+  The 15 showcase apps and gas-price-monitor are now auto-deployed by Flux image
+  automation.
