@@ -1,4 +1,3 @@
----
 # yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
 # HelmRelease for IB Gastro (CakePHP) — bjw-s/app-template v3.7.3
 # Converted from a hand-rolled Deployment + ConfigMap + plaintext Secret + PVC.
@@ -34,7 +33,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/ibgastro
-              tag: sha-c5cefcd64bcda51d8732475a3fdea899fab718e4 # {"$imagepolicy": "my-software-showcase:ibgastro:tag"}
+              tag: sha-588985e-b20260927 # {"$imagepolicy": "my-software-showcase:ibgastro:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the

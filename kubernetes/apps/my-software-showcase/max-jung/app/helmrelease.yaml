@@ -1,4 +1,3 @@
----
 # yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
 # HelmRelease for Max Jung Fahrzeugcontrolling (bjw-s/app-template v3.7.3)
 # Replaces BOTH the hand-rolled Deployment and a HelmRelease that used the dead
@@ -35,7 +34,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/max-jung-transporte-fahrzeugcontrolling
-              tag: production-20260818133752 # {"$imagepolicy": "my-software-showcase:max-jung:tag"}
+              tag: production-20260927102351 # {"$imagepolicy": "my-software-showcase:max-jung:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the

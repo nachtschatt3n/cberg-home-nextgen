@@ -1,4 +1,3 @@
----
 # yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
 # HelmRelease for Holm Backend (bjw-s/app-template v3.7.3)
 # Converted from a hand-rolled Deployment: the app is a Rails app on :3000,
@@ -42,7 +41,7 @@ spec:
             args: ["rm -f /app/tmp/pids/server.pid; exec /usr/local/bin/ruby script/rails server -b 0.0.0.0 -p 3000"]
             image:
               repository: ghcr.io/nachtschatt3n/holm-backend
-              tag: production-20260818133744 # {"$imagepolicy": "my-software-showcase:holm-backend:tag"}
+              tag: production-20260927102259 # {"$imagepolicy": "my-software-showcase:holm-backend:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the

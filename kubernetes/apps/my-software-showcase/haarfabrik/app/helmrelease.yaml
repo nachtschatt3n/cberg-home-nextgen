@@ -1,4 +1,3 @@
----
 # yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
 # HelmRelease for Haarfabrik Extranet (bjw-s/app-template v3.7.3)
 # Converted from a hand-rolled Deployment + ConfigMap + RBAC + ServiceMonitor.
@@ -34,7 +33,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/haarfabrik-extranet
-              tag: production-20260818133740 # {"$imagepolicy": "my-software-showcase:haarfabrik:tag"}
+              tag: production-20260927102255 # {"$imagepolicy": "my-software-showcase:haarfabrik:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the
