@@ -40,6 +40,21 @@ pins that classifier against captured pane shapes and pins the delivery rules:
     * idle -> ctrl+u + exactly one prompt, exit 0; exhausted-idle cron still
       auto-clears and then passes the gate
     * classify reports "REFUSE exit 13" for busy/menu; dry-run names it
+  operation retro (weekly ops retro, 2026-09-27) — same delivery rules
+    * busy / background agents / menu -> exit 13, NOTHING typed, cron and manual
+    * cron + exhausted-idle -> one /clear, then ONE prompt that points the
+      session at runbooks/ops-retro.md and carries the unattended directive
+    * manual + exhausted-idle -> exit 4, never auto-cleared; exhausted-busy -> exit 4
+    * idle -> ctrl+u + exactly one prompt; dry-run names exit 13 + the runbook
+  headless delivery (F-bc8d3fca / F-2a965f05, 2026-09-27): unattended runs try
+  the headless dispatcher pane (runbooks/headless-dispatcher.py) FIRST
+    * dispatcher READY + console busy/exhausted -> ONE HRUN line to the dispatcher,
+      the console untouched, the same window_runs / sweep_cycles proof, exit 0
+    * dispatcher REFUSED / no marker -> exit 14, never a console fallback
+    * dispatcher absent / no READY banner -> HEADLESS_UNAVAILABLE, console rules
+      unchanged (busy -> 8/13); manual runs never use the dispatcher
+    * the HRUN line round-trips through the real dispatcher's parse_line
+    * shared headless block byte-identical in both skills
   classify intent is read-only (types nothing, exit 0) in both skills
   neither skill carries a brace-form shell var (Flux postBuild strict mode)
 
@@ -460,7 +475,8 @@ def test_operation(op):
             for name in ("busy-spinner", "busy-bg-agents", "menu-question",
                          "menu-permission", "menu-resume-list"):
                 for argv in (["sweep", "--trigger", "cron"], ["sweep", "--trigger", "cron", "--wait"],
-                             ["sweep"], ["fix"], ["versions", "--trigger", "cron"]):
+                             ["sweep"], ["fix"], ["versions", "--trigger", "cron"],
+                             ["retro", "--trigger", "cron"], ["retro"]):
                     con.set(S[name], after_clear=S["idle"])
                     code, out = run_main(op.main, argv, via_sys_argv=True)
                     check(f"op {' '.join(argv)} into {name}: exit 13, NOTHING typed",
@@ -486,12 +502,280 @@ def test_operation(op):
             check("op dry-run: names the exit-13 refusal, types nothing",
                   code == 0 and "REFUSE exit 13" in out and not con.typed(), out[:400])
 
+            # -- weekly ops retro (2026-09-27): same console delivery rules --
+            check("op: retro is a SENDING intent (gated like sweep/fix/versions)",
+                  "retro" in getattr(op, "SENDING_INTENTS", ()))
+            con.set(S["exhausted-idle"], after_clear=S["idle"])
+            code, out = run_main(op.main, ["retro", "--trigger", "cron"], via_sys_argv=True)
+            pr = con.prompts()
+            check("op retro cron exhausted-idle: one /clear, then ONE prompt, exit 0",
+                  code == 0 and len(con.clears()) == 1 and len(pr) == 1
+                  and "CONSOLE_AUTO_CLEARED" in out, f"{code} {con.typed()} {out[-300:]}")
+            check("op retro prompt points at runbooks/ops-retro.md + carries the unattended directive",
+                  bool(pr) and "runbooks/ops-retro.md" in pr[0][2]
+                  and "AUTOMATED SCHEDULED RUN" in pr[0][2] and "do not apply" in pr[0][2],
+                  str(pr)[:300])
+            con.set(S["exhausted-idle"], after_clear=S["idle"])
+            code, out = run_main(op.main, ["retro"], via_sys_argv=True)
+            check("op retro MANUAL exhausted-idle: exit 4, never auto-cleared",
+                  code == 4 and not con.typed(), f"{code} {con.typed()}")
+            con.set(S["exhausted-busy"], after_clear=S["idle"])
+            code, out = run_main(op.main, ["retro", "--trigger", "cron"], via_sys_argv=True)
+            check("op retro cron exhausted-busy: exit 4, nothing typed",
+                  code == 4 and not con.typed(), f"{code} {con.typed()}")
+            con.set(S["idle"])
+            code, out = run_main(op.main, ["retro", "--trigger", "cron"], via_sys_argv=True)
+            keys = [c for c in con.calls if c[0] == "key"]
+            check("op retro cron idle: ctrl+u + one prompt, exit 0",
+                  code == 0 and len(con.prompts()) == 1 and not con.clears()
+                  and keys == [("key", "EF748825-0000", "ctrl+u")], f"{code} {con.typed()}")
+            con.set(S["idle"])
+            code, out = run_main(op.main, ["retro", "--trigger", "cron", "--dry-run"],
+                                 via_sys_argv=True)
+            check("op retro dry-run: names exit 13 + the runbook, types nothing",
+                  code == 0 and "REFUSE exit 13" in out and "runbooks/ops-retro.md" in out
+                  and not con.typed(), out[:500])
+            code, out = run_main(op.main, ["sweep", "--trigger", "cron", "--dry-run"],
+                                 via_sys_argv=True)
+            check("op sweep prompt is untouched by the retro directive",
+                  "ops-retro" not in out and "weekly ops retro" not in out, out[:300])
+
             con.set(S["exhausted-idle"])
             code, out = run_main(op.main, ["classify"], via_sys_argv=True)
             check("op classify: read-only, exit 0, reports exhausted-idle",
                   code == 0 and not con.typed() and '"exhausted-idle"' in out, f"{code} {out[:200]}")
     finally:
         op.oc = orig
+
+
+DISPATCHER_SID = "D15FA7C0-0000"
+
+
+class FakeDispatcher(FakeConsole):
+    """FakeConsole plus a headless-dispatcher pane. mode: started | refused |
+    silent. exit_rc: None (still running) or the rc the job exits with."""
+
+    def __init__(self, mod):
+        super().__init__(mod)
+        self.up, self.ready, self.mode, self.exit_rc = True, True, "started", 0
+        self.dtext, self.hrun = "", []
+
+    def setd(self, console_text, up=True, ready=True, mode="started", exit_rc=0,
+             after_clear=None):
+        self.set(console_text, after_clear)
+        self.up, self.ready, self.mode, self.exit_rc = up, ready, mode, exit_rc
+        self.dtext = "HEADLESS_DISPATCHER_READY pid=1 running=-" if ready else "zsh ➜"
+        self.hrun = []
+
+    def oc(self, *args, timeout=120):
+        if args[0] == "resolve" and args[1] == self.mod.HEADLESS_SELECTOR:
+            self.calls.append(args)
+            if not self.up:
+                return Res(1, "", f"openclaude: no session matches {args[1]!r}")
+            return Res(0, json.dumps({"session_id": DISPATCHER_SID, "label": "ai-server-cron",
+                                      "path": self.mod.OPERATION_REPO,
+                                      "command_line": "python3 runbooks/headless-dispatcher.py"}))
+        if len(args) > 1 and args[1] == DISPATCHER_SID:
+            self.calls.append(("dispatcher",) + args)
+            if args[0] == "screen":
+                return Res(0, self.dtext)
+            if args[0] == "send":
+                self.hrun.append(args[2])
+                job = json.loads(__import__("base64").b64decode(args[2][5:]))
+                run = job["run"]
+                if self.mode == "started":
+                    self.dtext += f"\nHEADLESS_STARTED run={run} pid=4242\n  kind={job['kind']} log=/x"
+                    if self.exit_rc is not None:
+                        self.dtext += (f"\nHEADLESS_EXITED run={run} rc={self.exit_rc} is_error=False"
+                                       f"\nHEADLESS_RESULT run={run}\n  sweep summary: all green"
+                                       f"\nHEADLESS_RESULT_END run={run}")
+                elif self.mode == "refused":
+                    self.dtext += f"\nHEADLESS_REFUSED run={run} reason={job['kind']}-already-running"
+                return Res(0, "")
+            return Res(0, "")
+        return super().oc(*args, timeout=timeout)
+
+    def console_typed(self):
+        return [c for c in self.calls if c[0] in ("send", "ask", "key")]
+
+
+def _load_dispatcher():
+    return load("headless_dispatcher_under_test", REPO / "runbooks/headless-dispatcher.py")
+
+
+def test_headless(mw, op):
+    disp = _load_dispatcher()
+    for mod, tag in ((mw, "mw"), (op, "op")):
+        line = mod.headless_line("mw-nightly-0927033000-abcdef", "mw-nightly", "line1\nline2 ${x}")
+        job, why = disp.parse_line(line)
+        check(f"{tag} HRUN line round-trips through the real dispatcher parse_line",
+              job is not None and job["prompt"] == "line1\nline2 ${x}" and job["kind"] == "mw-nightly",
+              str(why))
+        rid = mod.headless_run_id("op-sweep")
+        check(f"{tag} run id is dispatcher-valid", bool(disp.RUN_RE.match(rid)), rid)
+        m = mod.headless_markers("HEADLESS_STARTED run=r1-000000 pid=7\nHEADLESS_EXITED run=r1-000000 "
+                                 "rc=0 is_error=False\nHEADLESS_RESULT run=r1-000000\n  ok line\n"
+                                 "HEADLESS_RESULT_END run=r1-000000\nHEADLESS_STARTED run=r2-000000 pid=8",
+                                 "r1-000000")
+        check(f"{tag} markers parse started/exited/result for THIS run only",
+              m["started"] == 7 and m["exited"] == 0 and m["result"] == "ok line", str(m))
+
+    # ---- maintenance-window ------------------------------------------------
+    con = FakeDispatcher(mw)
+    ledger = {"counts": [0], "rc": 0}
+
+    def fake_run(argv, **kw):
+        if argv[:3] == ["kubectl", "-n", "databases"] and "secret" in argv:
+            return Res(0, __import__("base64").b64encode(b"postgres://reader:pw@db/s").decode())
+        if argv[:len(mw.PG_EXEC)] == mw.PG_EXEC:
+            if ledger["rc"]:
+                return Res(ledger["rc"], "", "psql: connection refused")
+            c = ledger["counts"]
+            n = c.pop(0) if len(c) > 1 else c[0]
+            return Res(0, f"{n}\n")
+        raise AssertionError(f"unexpected subprocess {argv}")
+
+    orig = (mw.oc, mw.subprocess.run)
+    mw.oc, mw.subprocess.run = con.oc, fake_run
+    try:
+        with fake_time():
+            for name in ("busy-spinner", "busy-bg-agents", "menu-question", "exhausted-busy",
+                         "exhausted-draft"):
+                con.setd(S[name])
+                ledger.update(counts=[0, 1], rc=0)
+                code, out = run_main(mw.main, ["run", "--window", "nightly", "--trigger", "cron"])
+                check(f"mw headless: run cron with console {name}: exit 0 + completion verified",
+                      code == 0 and "completion verified" in out and "HEADLESS_STARTED" in out,
+                      f"{code} {out[-300:]}")
+                check(f"mw headless ...{name}: console untouched, exactly ONE HRUN line",
+                      not con.console_typed() and len(con.hrun) == 1,
+                      f"{con.console_typed()} {len(con.hrun)}")
+            job = json.loads(__import__("base64").b64decode(con.hrun[0][5:]))
+            check("mw headless: payload kind mw-nightly carries the cron preamble",
+                  job["kind"] == "mw-nightly" and "MAINTENANCE_WINDOW_TRIGGER=cron" in job["prompt"],
+                  job["kind"])
+            # retry of a LOST occurrence while the console is busy: the whole point
+            con.setd(S["busy-spinner"])
+            ledger.update(counts=[0, 0, 1], rc=0)
+            code, out = run_main(mw.main, ["retry", "--window", "nightly", "--trigger", "cron"])
+            check("mw headless: retry of a LOST occurrence with a BUSY console runs headless, exit 0",
+                  code == 0 and "completion verified" in out and not con.console_typed()
+                  and len(con.hrun) == 1, f"{code} {out[-300:]}")
+            con.setd(S["busy-spinner"])
+            ledger.update(counts=[1], rc=0)
+            code, out = run_main(mw.main, ["retry", "--window", "nightly", "--trigger", "cron"])
+            check("mw headless: retry with a row already present is still a no-op (nothing typed anywhere)",
+                  code == 0 and not con.hrun and not con.console_typed(), f"{code} {out[-200:]}")
+            # the Step 0 row never appears: the ledger still decides
+            con.setd(S["idle"])
+            ledger.update(counts=[0], rc=0)
+            code, out = run_main(mw.main, ["run", "--window", "nightly", "--trigger", "cron"])
+            check("mw headless: started but no running row -> exit 12 (delivery is not completion)",
+                  code == 12, f"{code} {out[-200:]}")
+            # typed, then refused / silent: exit 14, NEVER a console fallback
+            for mode in ("refused", "silent"):
+                con.setd(S["idle"], mode=mode)
+                ledger.update(counts=[0, 1], rc=0)
+                code, out = run_main(mw.main, ["run", "--window", "nightly", "--trigger", "cron"])
+                check(f"mw headless {mode}: exit 14, one HRUN line, console NOT used as fallback",
+                      code == 14 and len(con.hrun) == 1 and not con.console_typed()
+                      and mw.FAIL_TOKEN in out, f"{code} {con.console_typed()} {out[-300:]}")
+            # dispatcher absent / not READY: console rules unchanged
+            for up, ready, label in ((False, True, "absent"), (True, False, "no READY banner")):
+                con.setd(S["busy-spinner"], up=up, ready=ready)
+                ledger.update(counts=[0], rc=0)
+                code, out = run_main(mw.main, ["run", "--window", "nightly", "--trigger", "cron"])
+                check(f"mw headless {label}: HEADLESS_UNAVAILABLE, busy console still refuses exit 8",
+                      code == 8 and "HEADLESS_UNAVAILABLE" in out and not con.hrun
+                      and not con.console_typed(), f"{code} {out[-300:]}")
+            con.setd(S["idle"], up=False)
+            ledger.update(counts=[0, 1], rc=0)
+            code, out = run_main(mw.main, ["run", "--window", "nightly", "--trigger", "cron"])
+            check("mw headless absent + idle console: delivered via the console as before, exit 0",
+                  code == 0 and len(con.prompts()) == 1 and not con.hrun, f"{code} {out[-200:]}")
+            # manual never uses the dispatcher
+            con.setd(S["idle"])
+            ledger.update(counts=[0], rc=0)
+            code, out = run_main(mw.main, ["run", "--window", "nightly"])
+            check("mw headless: MANUAL run goes to the console, never the dispatcher",
+                  code == 0 and not con.hrun and len(con.prompts()) == 1, f"{code} {out[-200:]}")
+            con.setd(S["busy-spinner"])
+            code, out = run_main(mw.main, ["run", "--window", "nightly", "--trigger", "cron",
+                                           "--dry-run"])
+            check("mw headless dry-run: names the dispatcher-first path, types nothing",
+                  code == 0 and "headless dispatcher FIRST" in out and not con.hrun
+                  and not con.console_typed(), out[:400])
+            code, out = run_main(mw.main, ["classify"])
+            check("mw classify reports the cron path (headless READY), types nothing",
+                  code == 0 and "headless dispatcher READY" in out and not con.hrun
+                  and not con.console_typed(), out[-300:])
+    finally:
+        mw.oc, mw.subprocess.run = orig
+
+    # ---- operation -----------------------------------------------------------
+    con = FakeDispatcher(op)
+    cyc = {"n": 1}
+    orig = (op.oc, op.cycles_since)
+    op.oc, op.cycles_since = con.oc, (lambda t0, trig: cyc["n"])
+    try:
+        with fake_time():
+            con.setd(S["exhausted-busy"])
+            cyc["n"] = 1
+            code, out = run_main(op.main, ["sweep", "--wait", "--trigger", "cron"], via_sys_argv=True)
+            check("op headless: sweep --wait cron with an exhausted-busy console: exit 0, "
+                  "result relayed, completion verified",
+                  code == 0 and "sweep summary: all green" in out and "completion verified" in out
+                  and not con.console_typed() and len(con.hrun) == 1, f"{code} {out[-300:]}")
+            con.setd(S["busy-spinner"])
+            cyc["n"] = 0
+            code, out = run_main(op.main, ["sweep", "--wait", "--trigger", "cron"], via_sys_argv=True)
+            check("op headless: job exited but no sweep_cycles row -> exit 12",
+                  code == 12 and not con.console_typed(), f"{code} {out[-200:]}")
+            con.setd(S["busy-spinner"], exit_rc=3)
+            cyc["n"] = 1
+            code, out = run_main(op.main, ["sweep", "--wait", "--trigger", "cron"], via_sys_argv=True)
+            check("op headless: job exit rc!=0 -> exit 6", code == 6, f"{code} {out[-200:]}")
+            con.setd(S["busy-spinner"], exit_rc=None)
+            cyc["n"] = 1
+            code, out = run_main(op.main, ["sweep", "--wait", "--trigger", "cron", "--timeout", "90"],
+                                 via_sys_argv=True)
+            check("op headless: still running at --timeout -> ledger decides (row present), exit 0, "
+                  "nothing killed", code == 0 and "still running" in out
+                  and not [c for c in con.calls if c[0] == "kill-job"], f"{code} {out[-200:]}")
+            for intent in [i for i in ("retro", "fix", "versions") if i in op.SENDING_INTENTS]:
+                con.setd(S["menu-question"], exit_rc=None)
+                code, out = run_main(op.main, [intent, "--trigger", "cron"], via_sys_argv=True)
+                check(f"op headless: {intent} cron with a console in a menu starts headless, exit 0",
+                      code == 0 and "started headless" in out and len(con.hrun) == 1
+                      and not con.console_typed(), f"{code} {out[-200:]}")
+            con.setd(S["busy-spinner"], mode="refused")
+            code, out = run_main(op.main, ["sweep", "--trigger", "cron"], via_sys_argv=True)
+            check("op headless refused: exit 14, no console fallback",
+                  code == 14 and not con.console_typed(), f"{code} {out[-200:]}")
+            con.setd(S["busy-spinner"], up=False)
+            code, out = run_main(op.main, ["sweep", "--trigger", "cron"], via_sys_argv=True)
+            check("op headless absent: HEADLESS_UNAVAILABLE, busy console still refuses exit 13",
+                  code == 13 and "HEADLESS_UNAVAILABLE" in out and not con.console_typed(),
+                  f"{code} {out[-200:]}")
+            con.setd(S["idle"])
+            code, out = run_main(op.main, ["sweep"], via_sys_argv=True)
+            check("op headless: MANUAL sweep goes to the console, never the dispatcher",
+                  code == 0 and not con.hrun and len(con.prompts()) == 1, f"{code} {out[-200:]}")
+            con.setd(S["idle"])
+            code, out = run_main(op.main, ["sweep", "--trigger", "cron", "--dry-run"], via_sys_argv=True)
+            check("op headless dry-run names the dispatcher-first path",
+                  code == 0 and "headless dispatcher FIRST" in out and not con.hrun, out[:300])
+            code, out = run_main(op.main, ["classify"], via_sys_argv=True)
+            check("op classify reports the cron path (headless READY), types nothing",
+                  code == 0 and "headless dispatcher READY" in out and not con.hrun
+                  and not con.console_typed(), out[-300:])
+    finally:
+        op.oc, op.cycles_since = orig
+
+
+def shared_headless_block(src: str) -> str:
+    m = re.search(r"# BEGIN shared headless block.*?# END shared headless block", src, re.S)
+    return m.group(0) if m else ""
 
 
 def shared_block(src: str) -> str:
@@ -522,6 +806,9 @@ def main() -> int:
         b1, b2 = shared_block(mw_src), shared_block(op_src)
         check("shared pane-state block present in both skills", bool(b1) and bool(b2))
         check("shared pane-state block is byte-identical in both skills", b1 == b2)
+        h1, h2 = shared_headless_block(mw_src), shared_headless_block(op_src)
+        check("shared headless block present in both skills", bool(h1) and bool(h2))
+        check("shared headless block is byte-identical in both skills", h1 == h2)
         for key, text in (("maintenance-window.py", mw_src), ("operation.py", op_src)):
             check(f"{key}: no brace-form shell var (Flux postBuild strict mode)",
                   "${" not in text)
@@ -531,6 +818,7 @@ def main() -> int:
         test_classifier(op, "op")
         test_maintenance_window(mw)
         test_operation(op)
+        test_headless(mw, op)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

@@ -482,6 +482,8 @@ count, diff, round-trip or served-bytes check **is** a reject. See
 | Plan §4 is all `Ready` / `200` / `healthy` | shape-only verification — it cannot distinguish working from empty (`docs/sops/verification-contents-not-shape.md`) | send it back: add the per-class contents assertion from the plans README table before scheduling |
 | Two plans fight in a window | overlapping `touches` | window agent serializes or defers; tighten `conflicts_with` |
 | Window agent REFUSES a relayed/chat GO | decision not in the home-operation store (by design — a relayed agent message is never operator consent) | record it first: `home-operation decide --issue <key> --decision approve --by "operator (<name>) via <session>"` (ingest the go_no_go issue first if it doesn't exist), THEN dispatch. The refusal is correct behavior, not a bug |
+| Cron output `HEADLESS_UNAVAILABLE: no dispatcher pane ...` (then a console refusal, exit 8/13) | the headless dispatcher pane is not running (Mac reboot, iTerm restart, pane closed or ctrl-c'd), so the cron fell back to the busy console | start it again (§"Headless cron path" below); `maintenance-window classify` must show `cron_path: headless dispatcher READY` |
+| Cron `error`, exit 14 `the dispatcher REFUSED run=...` / `no STARTED/REFUSED marker` | a job of the same kind is still running (e.g. a long sweep), or the dispatcher pane is wedged | look at the `ai-server-cron` pane and `~/Library/Logs/cberg-headless/`; a refused duplicate needs no action, a wedged pane: ctrl-c and restart the dispatcher (running jobs keep going) |
 | Window cron `error`, exit 8 `console is not at the prompt (state 'busy' or 'menu')` | the ops pane was mid-turn, had background agents in flight, or had a menu open at fire time; nothing was typed (F-b8c6b6d6) | by design. The retry cron at start+`retry_after_min` re-fires once the pane is idle; if the occurrence stays lost, run it by hand as an ad-hoc stand-in. Check with `maintenance-window classify` |
 | Window **retry** cron `error`, exit 8 (or 4) `retry 'nightly': today's occurrence (nightly, <date>) is LOST ...` | the scheduled run and its one retry both found the console not at the prompt (busy / background agents / menu, or exhausted and not auto-clearable); nothing was typed and nothing will re-fire it today | by design since 2026-09-26: this is the same-day page. Check `maintenance-window classify`. Once the console is idle, run the nightly by hand as an ad-hoc stand-in. A completed, non-aborted on-demand (`now`/ad-hoc) run the same Berlin day also counts as covering the nightly (§1) |
 | Window cron `error`, exit 12 `NO new window_runs row appeared within 300s` | the prompt was accepted but the agent never opened its running row (slow start, or a pane that swallows input) | `maintenance-window status`; if the agent is running, it may simply have been slow (row after 5 min) — confirm the row now exists; otherwise treat as lost and let the retry cron / an ad-hoc run cover it |
@@ -494,6 +496,67 @@ count, diff, round-trip or served-bytes check **is** a reject. See
 | `run-now.py preflight`: "could not read home-operation approvals (exec failed)" | openclaw pod down / mid-roll | fail-closed by design; wait for the pod, or the operator confirms at the console (`--operator-go`) |
 | `STALE ON-DEMAND stamp now:<date>` warning | plans were stamped for a NOW run that did not execute them. Timing: the reconciler warns from day+1 (date < today); `home-operation tick` voids the GO only at ≥ 2 days; `run-now.py` still accepts a `now:` GO dated today or yesterday — so on day+1 the warning shows while the GO may still be live | on day+1: re-run it (`home-operation run --issue <key>`, which re-scopes the GO to today) or revoke it (`resolve --by cleared`) and clear `window:`. From day+2 `tick` has voided the GO: re-approve before re-running, or clear `window:` |
 | Background window agent stalls "waiting to settle" | agent ended its turn on a passive wait — background agents get NO timer wakeups | agent must poll in-turn (bounded retries) or explicitly hand the wait back to its coordinator with what-to-check; coordinator: verify the settle yourself and resume it with the result |
+
+### Headless cron path: crons no longer need the ops console (2026-09-27)
+
+**Why.** Every unattended run (`maintenance-window run|retry --trigger cron`, the
+48h `operation sweep --wait --trigger cron`, `operation retro|fix|versions
+--trigger cron`) used to TYPE its prompt into the interactive ops pane
+(`ai-server-ops`). When the operator was working there, the cron correctly
+refused (exit 8/13) and the occurrence was lost: 4 of 7 nightlies in the week to
+2026-09-27 (F-bc8d3fca, F-2a965f05), plus both attended windows on 09-26/27.
+
+**Design.** A dedicated pane on the Mac mini runs
+`runbooks/headless-dispatcher.py` in the foreground (tab title `ai-server-cron`;
+the pod finds it by its command line `headless-dispatcher`, and the dispatcher
+reports its cwd to iTerm so the repo-cwd identity check holds). For unattended
+runs the skills now:
+
+1. resolve the dispatcher pane and require its `HEADLESS_DISPATCHER_READY`
+   banner (read-only; nothing typed);
+2. type ONE line, `HRUN <base64 JSON {run, kind, prompt}>`. The dispatcher reads
+   it with echo off in cbreak mode (no 1024-byte MAX_CANON cut), validates it,
+   and starts a fresh detached `caffeinate -i claude -p
+   --dangerously-skip-permissions --output-format stream-json` in the repo with
+   the prompt on stdin. The payload is only ever a prompt on stdin, never a shell
+   command. Log: `~/Library/Logs/cberg-headless/<ts>-<kind>-<run>.log`;
+3. poll the pane for `HEADLESS_STARTED run=<id>` (45 s), then keep the SAME
+   proof as before: window runs poll `window_runs` for the Step 0 `running` row;
+   `sweep --wait` waits for `HEADLESS_EXITED run=<id>` (bounded by `--timeout`,
+   the job is never killed), relays the result excerpt, and requires its
+   `sweep_cycles` row.
+
+The dispatcher runs at most one job per `kind` (`mw-nightly`, `op-sweep`, ...;
+a pidfile per kind survives a dispatcher restart) and refuses a duplicate.
+Different kinds may overlap (a sweep can run while a window runs; the sweep is
+read-only). Each headless run starts with ZERO context, so context exhaustion
+cannot eat a cron any more.
+
+**Fallback and refusal semantics.** Only an ABSENT dispatcher (no pane, or no
+READY banner) falls back to the console path, printing `HEADLESS_UNAVAILABLE:
+<why>`; the console path keeps every refusal gate in the table below unchanged.
+Once the HRUN line was typed there is never a fallback (it could double-run the
+job): a refusal (`HEADLESS_REFUSED`, same kind still running) or no marker
+within 45 s exits **14** in both skills. Manual (`--trigger manual`) runs and
+`run-now` still go to the console.
+
+**Start / check the dispatcher** (after a Mac reboot or iTerm restart; the
+crons fall back to the console until it is back):
+
+```bash
+# on the Mac, in a NEW iTerm tab/window reserved for it (never type into it after)
+cd ~/code/cberg-home-nextgen && python3 runbooks/headless-dispatcher.py
+# from anywhere: which path would the crons take right now?
+kubectl -n ai exec deploy/openclaw -c app -- sh -lc \
+  'OPERATION_SESSION=ai-server-ops /home/node/.openclaw/bin/maintenance-window classify'
+#   "cron_path": "headless dispatcher READY -- crons bypass this console"
+python3 runbooks/headless-dispatcher.py --self-test   # contract self-test, starts nothing
+```
+
+Verified 2026-09-27: a `selftest` kind sent from the openclaw pod through the
+harness came back `HEADLESS_STARTED` then `HEADLESS_EXITED rc=0` with the reply,
+while `ai-server-ops` was `busy`. Unit tests:
+`runbooks/tests/test-openclaw-console-delivery.py` (headless section).
 
 ### Ops-console delivery path: pane states and exit codes (2026-09-25)
 
@@ -555,6 +618,7 @@ not poll. Measured 2026-09-15..25: the row lands 0:24–4:10 after the fire.
 | 10 | an on-demand NOW run is still open (run-now) |
 | 11 | prompt delivered but window_runs could not be read during the poll |
 | 12 | prompt delivered but no new window_runs row appeared in the poll budget |
+| 14 | headless path: the dispatcher refused the run (same kind still running), or no STARTED marker within 45 s after typing -- never a console fallback |
 
 `operation` keeps its own codes:
 
@@ -567,6 +631,7 @@ not poll. Measured 2026-09-15..25: the row lands 0:24–4:10 after the fire.
 | 7 / 8 / 9 | `restart` only: healthy console refused without `--force` / Claude survived TERM and KILL / no TUI after relaunch |
 | 11 / 12 | `--wait` completion gate: sweep_cycles unreadable / no new row |
 | 13 | pane not at the prompt (busy / background agents / menu) — nothing typed, not even ctrl+u (`sweep`, `fix`, `versions`; cron and manual) |
+| 14 | headless path (cron only): dispatcher refused / no STARTED marker after typing -- never a console fallback |
 
 13 rather than 8 because `operation` already used 8 for `restart`'s
 "survived TERM and KILL" (F-28af989d, 2026-09-26). The exhausted-idle auto-clear
