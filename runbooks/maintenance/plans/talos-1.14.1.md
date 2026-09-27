@@ -15,15 +15,14 @@ risk: high                            # rolling reboot of every control-plane no
                                       # 3-node hyper-converged cluster: etcd quorum,
                                       # 93 Longhorn volumes at replica=2, and the ONLY
                                       # HTTP data plane (Envoy Gateway) all ride on it
-est_duration_min: 180                 # RE-PRICED 2026-09-26 PM (was 160 -> 187) for the etcd-stability
-                                      # additions (F-84a27c15, F-58141d46): push freeze + freeze-sha
-                                      # gate, §2.3 Prometheus etcd gates, and a >=10-min settle +
-                                      # etcd gate between nodes (§3.10b). 187 -> 180 on 2026-09-26
-                                      # ~15:00Z: §3.8.0 defrag (7 min) was DONE AHEAD OF THE WINDOW
-                                      # (operator option 2, §7) and is SKIPPED in-window. 180 == the
-                                      # 180 schedulable; Step 0 (20) + 180 = 200 = the slot, residual
-                                      # 0. §7 has the arithmetic. IN-WINDOW only;
-                                      # Phase A prep (~35 min) is Flux-inert and runs BEFORE it.
+est_duration_min: 187                 # RE-PRICED 2026-09-27 (option B, operator GO): 180 + 7 for the
+                                      # §3.8.0 defrag RE-RUN (etcd IN USE ~40% of DB SIZE on 09-27,
+                                      # under §3.8.0's 50% re-run rule). History: 160 -> 187 (etcd
+                                      # gates, 09-26) -> 180 (defrag ran ahead 09-26) -> 187.
+                                      # Roll starts ~09:00Z, ends ~12:07Z; the operator extended
+                                      # sun-attended on 09-27 to about 14:00 CEST (12:00Z). §7 has
+                                      # the arithmetic. Phase A prep (§3.1-§3.7, ~25 min) is
+                                      # Flux-inert and runs BEFORE 09:00Z.
 needs_reboot: true                    # three sequential node reboots
 exclusive: true                       # the node roll must have sun-attended:2026-09-27 TO
                                       # ITSELF — including plans not yet written (§6).
@@ -43,16 +42,16 @@ touches:
                                       # rescheduled once; this is not a scoped change
   resources:
     - kubernetes/bootstrap/talos/talconfig.yaml   # talosVersion — THE node image bump
-    - .mise.toml                                  # talhelper pin (§3.5) + talosctl CLI pin (§3.12, via PR #212)
+    - .mise.toml                                  # talosctl CLI pin ONLY (§3.12, via PR #212); talhelper stays 3.1.11 (§3.5 DROPPED 2026-09-27)
     - runbooks/auto-update-policy.yaml            # stale reason text (§3.3)
     # NOT kubernetes/bootstrap/talos/clusterconfig/: those files are gitignored
-    # plaintext (clusterconfig/.gitignore), regenerated locally by §3.6 and never committed.
+    # plaintext (clusterconfig/.gitignore), left untouched by §3.6 (option B), never committed.
     - node/k8s-nuc14-01                           # 192.168.55.11 — held the VIP on 2026-09-26
     - node/k8s-nuc14-02                           # 192.168.55.12 — heaviest (39 engines); etcd leader on 2026-09-26
     - node/k8s-nuc14-03                           # 192.168.55.13
     - "etcd (3 members, 3.6.14 -> 3.7.1; pre-roll snapshot taken at §3.8a)"
     - "all Longhorn replicas (186 on 2026-09-26, after the pg17 volume retire) / 93 volumes (numberOfReplicas: 2)"
-    - "etcd defrag of all 3 members (§3.8.0) — DONE AHEAD OF WINDOW 2026-09-26 14:47-14:50Z, skipped in-window"
+    - "etcd defrag of all 3 members (§3.8.0) — ran ahead 2026-09-26; RE-RUN IN-WINDOW 2026-09-27 (IN USE ~40% < the 50% rule)"
     # NOT gitrepository/flux-system: deliberately NOT suspended (source-controller storage is
     # emptyDir; a suspended source loses its artifact when a drain moves that pod — §2.0b)
     - imageupdateautomation/my-software-production/absenty-image-updates   # suspended: it pushes to main
@@ -178,14 +177,6 @@ premises:
       app=pgadmin. A renamed deploy or a changed selector fails here, not mid-window.
     run: kubectl get deploy -n databases pgadmin -o jsonpath='{.spec.selector.matchLabels}'
     expect_exact: '{"app":"pgadmin"}'
-  - id: talhelper-3.1.17-published
-    why: >-
-      §3.5 bumps talhelper to 3.1.17. plan-premises.py cannot run `mise` (not an allowed
-      read command), so this reads the same upstream tag from the Go module proxy; a
-      non-existent tag returns NotFound (control v3.1.99 measured NotFound 2026-09-26).
-      Local installability is still gated by `mise ls-remote talhelper` at §3.5.
-    run: kubectl --kubeconfig=/dev/null --server=https://proxy.golang.org --token=none get --raw /github.com/budimanjojo/talhelper/v3/@v/v3.1.17.info
-    expect_contains: '"Version":"v3.1.17"'
   - id: etcd-latency-histograms-scraped
     why: >-
       §2.3 and §3.10b gate on the worst 5m-p99 of etcd WAL fsync and backend commit. An
@@ -208,10 +199,10 @@ premises:
       and the §7 price are wrong — re-price rather than run.
     run: kubectl get settings.longhorn.io -n storage concurrent-replica-rebuild-per-node-limit -o jsonpath='{.value}'
     expect_exact: "8"
-status: awaiting-go                   # plan-reviewer re-review 2026-09-26: ready-for-go.
-                                      # NO GO RECORDED. The 2026-09-12 GO covered v1.14.0 ONLY
-                                      # and does NOT carry over — the operator must give a
-                                      # FRESH GO for v1.14.1 before the window.
+status: awaiting-go                   # 2026-09-27: operator chose OPTION B (roll with the EXISTING
+                                      # machine configs, NO talconfig multi-doc migration) and gave a
+                                      # FRESH GO for this amended plan; the coordinator records it.
+                                      # The 2026-09-12 GO covered v1.14.0 only and does not carry over.
 window: "sun-attended:2026-09-27"     # sun-attended is the ONLY allow_reboot window; a node
                                       # roll may not be stamped `now:` (on_demand has
                                       # allow_reboot: false).
@@ -436,6 +427,16 @@ we boot NVMe by serial with no overlay, no LVM, no BGP.
     `DiscoveryServiceConfig`, …). Every v1alpha1 field this repo uses is **deprecated but
     still supported**. **Do not migrate any of it in this window.** A config-shape
     migration and a node roll must not fail together.
+    > **2026-09-27 — tested, and rejected for today by the operator (option B).** The morning's
+    > §3.6 `talhelper genconfig` (3.1.17) failed with 6 "already set in v1alpha1 config" errors.
+    > The operator first authorised an in-window migration; a scratch migration was built,
+    > generated and compared field-by-field against the LIVE machineconfigs (Appendix B). It
+    > validates under talosctl 1.14.1 but is **not equivalent**: talhelper's alpha.2 machinery
+    > renames the etcd secretbox key `key2` → `key1` and drops the `identity` provider (applied,
+    > every existing Secret becomes undecryptable), drops the apiserver cert SANs, turns anonymous
+    > auth on for health paths and enables `FilesystemTrimConfig`. The operator then chose to roll
+    > with the existing configs. **This roll never applies a machine config** (see §3.6), so
+    > item 11 holds as written; the migration is a separate plan due before 1.15 (Appendix A, C1).
 12. **Dedicated system volumes / LVM / RAID / BGP / DoT-DoH / NTS** — all new opt-in
     features. Not configured, not enabled, out of scope.
 
@@ -486,6 +487,22 @@ version string and **no talhelper release will ever clear it** — it fired iden
 v1.14.0. The warning is not a blocker (exit 0), but it means **talhelper is not the
 validator here — the generated diff and the canary node are.** §3.6 reviews the diff by
 hand; §4.1 gates on the canary actually booting.
+
+> **MEASURED 2026-09-27 — `talhelper genconfig` is NOT used for this roll.** With
+> `talosVersion: v1.14.1`, every talhelper release (3.1.11: 3 errors, 3.1.17: 6 errors) emits
+> the 1.14 multi-document Kubernetes/network docs on top of our v1alpha1 fields and the
+> machinery rejects the mix. It was never on the roll's critical path: `task talos:upgrade-node`
+> runs `talhelper gencommand upgrade`, which only prints `talosctl upgrade --image …:v1.14.1`
+> (verified with talhelper **3.1.11** against a v1.14.1 talconfig, 2026-09-27), and Talos's
+> Upgrade handler takes the image from the request and **does not write the machine config**
+> (`internal/app/machined/internal/server/v1alpha1/v1alpha1_server.go` `Upgrade()` @ v1.13.10 —
+> the running server that handles the roll — and @ v1.14.1; neither writes config).
+> Each node therefore keeps its current v1alpha1 config through the roll — and those live
+> configs pass `talosctl validate --mode metal` with talosctl **1.14.1** (§3.6 re-measures it).
+> **Consequence after §3.7 lands:** `task talos:generate-config` fails on main until the
+> multi-doc migration plan (Appendix A, C1) is done. The gitignored local
+> `clusterconfig/` files stay the v1.13.10-contract generation, which equals live. Do NOT
+> `apply-config` regenerated files in the meantime, and do not hand-patch around the error.
 
 ## 2) Pre-checks
 
@@ -1099,13 +1116,13 @@ mise exec -- kubectl get ds -n monitoring otel-operator-daemon-collector
 
 ## 3) Steps
 
-### Phase A — PREP, run BEFORE the window (~35 min, zero cluster effect)
+### Phase A — PREP, run BEFORE the roll (~25 min, zero cluster effect; done by ~09:00Z on 2026-09-27)
 
 **Why this is safe to do early:** `kubernetes/bootstrap/talos/` is **not reconciled by
 Flux** — every Flux Kustomization `spec.path` points under `./kubernetes/apps` or the
 flux config dirs; none references `bootstrap`. The talhelper-generated configs are
 gitignored local files, applied by `talosctl` by hand. So committing and pushing a `talosVersion` bump changes
-**nothing** on the cluster until §3.5 runs `talosctl upgrade`.
+**nothing** on the cluster until §3.9 runs `talosctl upgrade`.
 
 **3.1 — Prove the factory publishes our schematic for the target, WITH a negative
 control.** Mandatory per `docs/sops/talos-upgrade.md` §4 Step 1 — that guard exists
@@ -1184,105 +1201,107 @@ gh api repos/siderolabs/talos/releases --jq \
 **PASS:** `v1.14.1`. **If a v1.14.2 (or later stable) has appeared, STOP and re-seek the
 GO** — do not silently retarget in-window. That is the whole lesson of this file.
 
-**3.5 — Bump talhelper to its final release.**
+**3.5 — DROPPED 2026-09-27 (option B).** talhelper stays on **3.1.11**; `.mise.toml` is not
+edited in Phase A. The 3.1.17 bump existed only to feed §3.6's `genconfig`, which this roll
+no longer runs (§1 "The tooling constraint"). `task talos:upgrade-node` works on 3.1.11 with
+a v1.14.1 talconfig (measured: it printed
+`talosctl upgrade … --image=factory.talos.dev/installer/43b3cbfc…99a3:v1.14.1`).
+
+**3.6 — Validate the LIVE machineconfigs with talosctl 1.14.1 + the upgrade-image check.
+REPLACES "regenerate and diff" (2026-09-27, option B). No `genconfig`, no write to
+`clusterconfig/`.**
+
+Why this is the right gate: the roll (§3.9) keeps each node's CURRENT config (upgrade does not
+apply config — §1 "The tooling constraint"), so the question is "will v1.14.1 machinery accept
+the config the node already has?" — and v1.14.1 ships `fix: tighten the validation of v1alpha1
+configs vs. migration` on exactly that surface.
 
 ```bash
-mise ls-remote talhelper | grep -c -x '3.1.17'            # MUST print 1 (installable here)
-sed -i '' 's|^talhelper = "3\.1\.11"$|talhelper = "3.1.17"|' .mise.toml
-git --no-pager diff -U0 .mise.toml
-mise install
-mise exec -- talhelper --version                           # expect 3.1.17
-```
-**Expected diff — EXACTLY this one line (dry-tested on a scratch copy 2026-09-26, BSD sed):**
-
-```diff
-@@ -47 +47 @@
--talhelper = "3.1.11"
-+talhelper = "3.1.17"
-```
-Do NOT touch `"aqua:siderolabs/talos"` (line 28) here — that is PR #212, §3.12.
-
-**3.6 — Regenerate and READ THE DIFF. This is the real gate, because talhelper cannot
-be it.**
-
-**What these files are (corrected 2026-09-26):** `kubernetes/bootstrap/talos/clusterconfig/
-kubernetes-k8s-nuc14-0{1,2,3}.yaml` and `talosconfig` are **gitignored plaintext**
-(`clusterconfig/.gitignore`), written by `talhelper genconfig`, **not SOPS-encrypted and not
-in git** — `git show HEAD:` of them fails and `sops -d` has nothing to decrypt. The only copy
-of the "old" config is the one on this disk, and `genconfig` overwrites it. So snapshot it
-FIRST, and prove the snapshot matches what the nodes actually run:
-
-```bash
-# (1) Snapshot the CURRENT generated configs into the mode-700 scratch dir — BEFORE genconfig
 SCR="$HOME/.cache/talos-1141"; mkdir -p "$SCR"; chmod 700 "$SCR"
-for n in 01 02 03; do
-  cp -p kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-$n.yaml "$SCR/old-$n.yaml"
-done
-chmod 600 "$SCR"/old-*.yaml; ls -l "$SCR"/old-*.yaml
+export TALOSCONFIG="$PWD/kubernetes/bootstrap/talos/clusterconfig/talosconfig"
+python3 -c 'import yaml' || echo "NO PyYAML on this python3 -- use .venv/bin/python3 in (2)"
+# (1) talosctl 1.14.1 client into the mode-700 scratch (NOT the mise pin — that is PR #212, §3.12)
+curl -sfL -o "$SCR/talosctl-1.14.1" https://github.com/siderolabs/talos/releases/download/v1.14.1/talosctl-darwin-arm64
+curl -sfL https://github.com/siderolabs/talos/releases/download/v1.14.1/sha256sum.txt | grep ' talosctl-darwin-arm64$'
+shasum -a 256 "$SCR/talosctl-1.14.1"; chmod 700 "$SCR/talosctl-1.14.1"
+"$SCR/talosctl-1.14.1" version --client --short                 # Client: Talos v1.14.1
 
-# (2) The OLD install image must equal what the LIVE nodes run — else "old" is not the baseline
-for n in 01 02 03; do grep -h 'image: factory' "$SCR/old-$n.yaml"; done
+# (2) live configs -> scratch (they hold machine secrets: never print, never commit).
+#     A node has TWO MachineConfig resources: `v1alpha1` (active) and `persistent` (what it boots
+#     from STATE). Name the ID — a bare `get machineconfig` returns both, and a single-doc YAML
+#     load then throws and leaves 0-byte files (dry-run 2026-09-27). Both must be identical.
+( umask 077; for ip in 11 12 13; do for id in v1alpha1 persistent; do
+    mise exec -- talosctl -n 192.168.55.$ip get machineconfig $id -o yaml \
+      | python3 -c "import sys,yaml; d=list(yaml.safe_load_all(sys.stdin)); assert len(d)==1, len(d); sys.stdout.write(d[0]['spec'])" \
+      > "$SCR/$id-$ip.yaml"
+  done; cmp -s "$SCR/v1alpha1-$ip.yaml" "$SCR/persistent-$ip.yaml" && echo "$ip persistent==active" || echo "$ip DIFFER"
+  mv "$SCR/v1alpha1-$ip.yaml" "$SCR/live-$ip.yaml"; rm -P "$SCR/persistent-$ip.yaml"
+done )
+ls -l "$SCR"/live-*.yaml                                         # 3 files, -rw-------, 14155 B each (09-27)
+
+# (3) validate, one exit code per node (no pipe: a pipe's $? is the last command's)
 for ip in 11 12 13; do
-  mise exec -- talosctl -n 192.168.55.$ip get machineconfig -o yaml | grep 'image: factory' | sort -u
+  "$SCR/talosctl-1.14.1" validate --config "$SCR/live-$ip.yaml" --mode metal > "$SCR/validate-$ip.out" 2>&1
+  echo "live-$ip exit=$?"; cat "$SCR/validate-$ip.out"
 done
+
+# (4) NEGATIVE CONTROL — the validator must be able to fail on this exact surface
+cp "$SCR/live-11.yaml" "$SCR/neg.yaml"
+printf -- '---\napiVersion: v1alpha1\nkind: KubeProxyConfig\nenabled: false\n' >> "$SCR/neg.yaml"
+"$SCR/talosctl-1.14.1" validate --config "$SCR/neg.yaml" --mode metal > "$SCR/neg.out" 2>&1
+echo "neg exit=$?"; grep -i "can't be used with KubeProxyConfig" "$SCR/neg.out"; rm -P "$SCR/neg.yaml"
+
+# (5) upgrade-image check: the image the roll will install, and the one the nodes run now
+( cd kubernetes/bootstrap/talos && mise exec -- talhelper gencommand upgrade --node 192.168.55.12 \
+    --extra-flags "--image='factory.talos.dev/installer/43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3:v1.14.1' --timeout=10m" )
+for ip in 11 12 13; do grep -h 'image: factory' "$SCR/live-$ip.yaml"; done
 ```
-**PASS (2):** all six lines are exactly
-`image: factory.talos.dev/installer/43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3:v1.13.10`
-(*measured 2026-09-26: 6/6*). A mismatch means the local files are stale relative to the
-cluster — STOP; regenerating on top of them diffs against the wrong baseline.
+**PASS — all of:**
+- (2) `11/12/13 persistent==active` and three non-empty files (*measured 2026-09-27: all three
+  equal, 14155 B each*). `DIFFER` = a staged config is pending on that node: STOP and find out
+  what staged it before rolling.
+- (1) the published sha256 line and `shasum` print the **same** hash
+  (*2026-09-27: `8335917a…99a8f8`*), and the client reports v1.14.1.
+- (3) `live-11/12/13 exit=0`, each `.out` saying `is valid for metal mode`. The **only**
+  permitted extra line is `WARNING: .machine.files is deprecated; use dedicated configuration
+  documents instead` (*measured 2026-09-27 on all three*). Any other WARNING or error: STOP,
+  do not roll — that is v1.14.1 rejecting the node's config. Client-side validation only
+  (`ValidateAsClient`); boot adds `ValidateAtRuntime` checks (install-disk match, system-volume
+  partitions — `container/validate.go`), so this is necessary, not sufficient: the §4.1 canary
+  remains the sufficient gate.
+- (4) `neg exit=1` **and** the grep prints the `can't be used with KubeProxyConfig` line
+  (*measured 2026-09-27: exit 1, that message*). If the control passes, (3) proves nothing:
+  STOP. (A `version: v1alpha9` edit is NOT a usable control — measured: it still validates.)
+- (5) the generated command carries
+  `--image=factory.talos.dev/installer/43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3:v1.14.1`
+  (talhelper also emits its own `--image` from talconfig, with the same value; the task's
+  quoted one is last and wins), which requires §3.2's `talosVersion: v1.14.1` to be in the
+  working tree; and the three live lines read `…43b3cbfc…99a3:v1.13.10`. They KEEP reading
+  `:v1.13.10` after the roll — the running version is asserted by §4.4 #1 (`kubectl get nodes`
+  OS-IMAGE), never by `machine.install.image`.
 
-```bash
-# (3) Validate + regenerate
-( cd kubernetes/bootstrap/talos && mise exec -- talhelper validate talconfig talconfig.yaml )
-mise exec -- task talos:generate-config
-# (4) Diff NEW vs the scratch OLD
-for n in 01 02 03; do
-  echo "=== nuc14-$n ==="
-  diff -u "$SCR/old-$n.yaml" kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-$n.yaml
-done
-git status --short kubernetes/bootstrap/talos/clusterconfig/   # MUST print nothing (still ignored)
-```
-
-**Expected `validate` output — this warning is EXPECTED and is not a failure** (measured
-verbatim against a v1.14.1 scratch copy, exit code 0):
-
-```
-There are issues with your talhelper config file:
-field: "talosVersion"
-  * WARNING: "v1.14.1" might not be compatible with this Talhelper version you're using
-```
-
-**PASS (4):** per node, the only differences are the `machine.install.image` tag
-`v1.13.10 → v1.14.1` and the config version-contract stamp (if any).
-**STOP AND INVESTIGATE** if the diff shows any of: a new `SecurityProfileConfig` document
-(workload isolation — §1 item 9, must NOT appear), a new `UnattendedInstall` document
-replacing `machine.install`, `machine.sysctls` / `machine.udev.rules` / `machine.kubelet`
-rewritten into `SysctlConfig` / `UdevRulesConfig` / `KubeNodeConfig` documents, a changed
-`nameservers`/`searchDomain` block, any **removed** field, or **any change to a secret/cert
-field** (a regenerated secret here would mean `talsecret` was not used). Alpha machinery
-emitting a GA-era document shape is exactly the failure this step exists to catch — and
-v1.14.1's `fix: tighten the validation of v1alpha1 configs vs. migration` lands on precisely
-this surface. If it appears, do not "fix it up": restore the old files
-(`cp -p "$SCR/old-0N.yaml" kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-0N.yaml`),
-abort Phase A and reschedule.
-
-Keep `$SCR/old-*.yaml` until §4.4 passes (they are the §5.3 restore source), then `rm -P`
-them — they hold the cluster's machine secrets in plaintext.
+Do NOT run `task talos:generate-config`: it fails by design here (§1). The gitignored
+`clusterconfig/` files are left exactly as they are; they equal live.
+`rm -P "$SCR"/live-*.yaml` after §4.4 passes (plaintext machine secrets).
 
 **3.7 — Commit and push (still zero cluster effect).**
 
-Per `CLAUDE.md`, use `--only` with explicit paths — the worktree is shared. The regenerated
-`clusterconfig/` files are **not** in this list: they are gitignored and never committed.
+Per `CLAUDE.md`, use `--only` with explicit paths — the worktree is shared. The gitignored
+`clusterconfig/` files (not regenerated, option B) are **not** in this list: they are gitignored and never committed.
 
 ```bash
 MSG="$SCR/talos-1141-commit-msg.txt"         # unique filename, not /tmp/talos-msg.txt
 cat > "$MSG" <<'MSGEOF'
 feat(talos)!: node image v1.13.10 -> v1.14.1 (config only; roll is manual)
 
-Bumps talosVersion in talconfig.yaml and talhelper 3.1.11 -> 3.1.17 (its final
-release). Flux does not reconcile kubernetes/bootstrap/talos/, and the node
-configs under clusterconfig/ are gitignored and regenerated locally, so this
-commit changes nothing until `task talos:upgrade-node` runs in the window.
+Bumps talosVersion in talconfig.yaml. Flux does not reconcile
+kubernetes/bootstrap/talos/, so this commit changes nothing until
+`task talos:upgrade-node` runs in the window. Machine configs are NOT
+regenerated (option B, 2026-09-27): talhelper genconfig cannot emit
+equivalent v1.14 multi-doc configs, and `talosctl upgrade` keeps each
+node's current v1alpha1 config, which validates under talosctl 1.14.1.
+`task talos:generate-config` fails on main until the multi-doc migration
+plan lands -- known and intended.
 
 Re-targeted from v1.14.0 (approved 2026-09-12) to v1.14.1 (published
 2026-09-15): the recorded GO was scoped to v1.14.0 and does not carry over.
@@ -1302,12 +1321,11 @@ MSGEOF
 git commit --only \
   kubernetes/bootstrap/talos/talconfig.yaml \
   runbooks/auto-update-policy.yaml \
-  .mise.toml \
   -F "$MSG"
 
 git log -1 --format=%s          # MUST be the feat(talos)! subject above — concurrent
                                 # sessions can swap messages; amend before push
-git show --stat HEAD            # exactly these three files, nothing else
+git show --stat HEAD            # exactly these TWO files, nothing else (.mise.toml is NOT in it — §3.5 dropped)
 git push
 ```
 
@@ -1367,7 +1385,12 @@ before the next node's §3.9; after the third node it is replaced by §4.
 >   `etcdgate.py` PASS (worst fsync 22.8 ms, commit 26.6 ms, kc 0.01 MB/s); leader still `a1ca2fde…`,
 >   term 73, RAFT INDEX identical on all three; DB 176 / 178 / 178 MB, 82% in use; alarms empty;
 >   `/readyz` `ok`.
-> - **In-window:** do NOT re-run the loop. §3.8a's snapshot-size expectation is now **~170–300 MB**
+> - **2026-09-27 UPDATE — RE-RUN IT IN-WINDOW.** The coordinator's 09-27 read put IN USE at
+>   **~40%** of DB SIZE, under the 50% rule in the next bullet, so §3.8.0 runs in-window
+>   exactly as written (gates, followers first, leader last) and its 7 min are back in §7.
+>   Re-read `etcd status` at §2.3 first; if all three members are ≥ 50% by then, skip it and
+>   note the reading. The previous in-window instruction, kept for the record:
+> - **In-window (09-26 instruction):** do NOT re-run the loop. §3.8a's snapshot-size expectation is now **~170–300 MB**
 >   (the DB regrows with churn overnight). Only if the §2.3 status read on 09-27 shows IN USE
 >   **< 50%** of DB SIZE on any member again (it was ~20% before today's defrag) is a re-run worth
 >   its minutes — then run this section unchanged and add its 7 min back.
@@ -1709,9 +1732,9 @@ reboot and the leader count is unreliable: STOP.
 **3.12 — Merge PR #212 (the talosctl CLI pin) — LAST, and only after all three nodes
 report v1.14.1.**
 
-PR #212 edits `.mise.toml` **line 28** (`"aqua:siderolabs/talos"`); §3.5 already changed
-**line 47** (`talhelper`). The hunks do not overlap, but the PR's base is older than §3.7's
-commit, so GitHub may report it `BEHIND`/`CONFLICTING` or its checks may be stale.
+PR #212 edits `.mise.toml` **line 28** (`"aqua:siderolabs/talos"`). Since 2026-09-27 nothing
+else in this plan edits `.mise.toml` (§3.5 dropped; talhelper stays 3.1.11 on line 47). The
+PR's base may still be older than main, so GitHub may report it `BEHIND` or its checks stale.
 
 ```bash
 mise exec -- kubectl get nodes -o wide | grep -c 'Talos (v1.14.1)'   # MUST be 3
@@ -1724,16 +1747,15 @@ gh pr diff 212
 **Merge PASS condition — all of:** exactly 3 nodes on `Talos (v1.14.1)`; `files` is exactly
 `[".mise.toml"]`; `mergeable` = `MERGEABLE`; `gh pr checks 212` all pass on the CURRENT head
 (including `Flate Render Gate`); and `gh pr diff 212` changes **only line 28** —
-`"aqua:siderolabs/talos" = "1.13.10"` → `"1.14.1"` — and **does not revert
-`talhelper = "3.1.17"`** (a stale base shows up here as a `-talhelper = "3.1.17"` line; that is
-a FAIL, rebase first). Then:
+`"aqua:siderolabs/talos" = "1.13.10"` → `"1.14.1"` — and **does not touch the `talhelper`
+line** (any `talhelper` hunk is a FAIL, rebase first). Then:
 
 ```bash
 gh pr merge 212 --squash
 git pull
 mise install
 mise exec -- talosctl version --short         # Client: v1.14.1, and it still reaches the nodes
-grep -n -E '^(talhelper|"aqua:siderolabs/talos")' .mise.toml   # talhelper 3.1.17 AND talos 1.14.1
+grep -n -E '^(talhelper|"aqua:siderolabs/talos")' .mise.toml   # talhelper 3.1.11 AND talos 1.14.1
 ```
 
 **ORDER: §3.12 is a push to main, so it runs only AFTER §4.4 PASS and §5.4's resume has ended
@@ -2061,19 +2083,17 @@ underneath an advanced etcd. Do not read the compatibility constant as a rollbac
 The §3.7 commit is inert on its own, so reverting it is safe and does **not** move any node:
 
 ```bash
-git revert --no-commit <sha>     # restores talosVersion v1.13.10, the annotation, talhelper
-                                 # 3.1.11 and the deny-rule text (3 files)
-git status --short               # exactly talconfig.yaml, .mise.toml, auto-update-policy.yaml
+git revert --no-commit <sha>     # restores talosVersion v1.13.10, the annotation and the
+                                 # deny-rule text (2 files; .mise.toml was never touched)
+git status --short               # exactly talconfig.yaml, auto-update-policy.yaml
 MSG="$SCR/talos-1141-revert-msg.txt"; printf 'Revert Talos v1.14.1 node config\n\nPlan: talos-1.14.1 (section 5.3)\n' > "$MSG"
-git commit --only kubernetes/bootstrap/talos/talconfig.yaml .mise.toml runbooks/auto-update-policy.yaml -F "$MSG"
+git commit --only kubernetes/bootstrap/talos/talconfig.yaml runbooks/auto-update-policy.yaml -F "$MSG"
 git log -1 --format=%s           # confirm the subject is yours before pushing
 git show --stat HEAD
 git push
-mise install                     # back to talhelper 3.1.11
-# The local node configs are gitignored: restore them from the §3.6 scratch copies
-for n in 01 02 03; do
-  cp -p "$SCR/old-$n.yaml" kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-$n.yaml
-done
+# Nothing to restore locally: option B never regenerated clusterconfig/ (§3.6), so the
+# gitignored node configs are still the v1.13.10 generation. The revert also makes
+# `task talos:generate-config` work again (talosVersion back to v1.13.10).
 grep -h 'image: factory' kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-0*.yaml   # 3x :v1.13.10
 ```
 **Confirm the cluster is back** by the state of the *nodes*, never the state of the repo:
@@ -2241,7 +2261,24 @@ has always done, and it changes this plan's fit:
 
 So `sun-attended` is **200 wall-clock / 180 schedulable**, not 200 for plans.
 
-### Re-priced duration: 180 min in-window (was 160, then 187) — fits the slot with 0 residual
+### 2026-09-27 re-price (option B): 187 min; roll 09:00Z → ~12:07Z
+
+| Change vs the 180 below | Min |
+|---|---:|
+| §3.8.0 defrag RE-RUN in-window (IN USE ~40% < 50%) | **+7** |
+| §3.5 talhelper bump dropped; §3.6 is now validate-only | 0 in-window (Phase A, ~25 min, before 09:00Z) |
+| **In-window total** | **187** |
+
+Step 0 already ran this morning (`ed1d4026`, the cloudflared direct-bump), so its 20-min reserve
+is spent, not pending. Start of §2.0b at **~09:00Z** → canary done ~**T+80 ≈ 10:20Z** →
+all three nodes + §4 + §5.4 ≈ **12:07Z (14:07 CEST)**. The operator extended the window to
+**about 14:00 CEST (12:00Z)**: that is **~7 min over with zero rollback budget**. Rule for the
+executor: if the 2nd node's §3.10b has not PASSED by **11:20Z**, take option 3 below
+(stop part-rolled after 2, §5.2, finish next Sunday) unless the operator, present, extends
+again. Note 11:20Z + node 3 (35) + §4 (20) + §5.4 (1) ends ~12:16Z; ending by 12:00Z needs the
+2nd node's §3.10b PASS by ~11:04Z (nominal 11:11Z) — tell the operator at the canary go/no-go. Never trim a gate or a settle to make the third node fit.
+
+### Re-priced duration: 180 min in-window (was 160, then 187) — fits the slot with 0 residual (09-26, superseded above)
 
 | Phase | Min | Basis |
 |---|---:|---|
@@ -2298,10 +2335,9 @@ slot wall clock                      200
 
 1. **RESOLVED.** Talos v1.14 ↔ Kubernetes support matrix: answered from upstream code
    (1.32.0 – 1.37.99; host upgrade floor 1.12.0).
-2. **`talhelper genconfig` output diff for v1.14.1** was reasoned about, not executed: running
-   it overwrites the gitignored local node configs, outside this agent's write boundary.
-   §3.6 makes the diff an explicit gate against a scratch snapshot of the old files, verified
-   against the live machineconfig first.
+2. **RESOLVED 2026-09-27 (measured, not reasoned):** `talhelper genconfig` for v1.14.1 FAILS
+   (3.1.17: 6 errors, 3.1.11: 3), and a hand-migrated config is non-equivalent (Appendix B).
+   Option B: genconfig is not used; §3.6 validates the live configs with talosctl 1.14.1.
 3. **Node-reboot duration on v1.14.1.** Extrapolated from the 2026-08-16 roll and today's
    engine counts; `sandboxd` joins the boot path. **Time the canary and re-plan from it.**
 4. **Tooling gaps found in this fix pass (repo corrections, reported not worked around):**
@@ -2309,7 +2345,7 @@ slot wall clock                      200
      command with rc≠0 as failed — so a **404 negative control can never be a premise**, and
      `mise ls-remote` / `gh` checks cannot be either. This plan uses `kubectl get --raw` with
      `--kubeconfig=/dev/null --token=none` against public hosts (content-pinned) and keeps the
-     404 control and `mise ls-remote` as in-window hard gates (§3.1, §3.5).
+     404 control as an in-window hard gate (§3.1; the §3.5 `mise ls-remote` gate was dropped 2026-09-27).
    - `unifictl` has no reader for the controller's `get/setting/mgmt` (`auto_upgrade`), so
      §2.11's auto-update half is a human read.
    - `runbooks/maintenance-windows.yaml` says the nightly 03:30 window starts "after the
@@ -2318,3 +2354,66 @@ slot wall clock                      200
    - The stale schematic `b85cceac…` in `patches/global/machine-intelgpu.yaml` (§1) and the
      stale `v1.13.10` in the `aqua:siderolabs/talos` deny-rule reason (§3.3, fixed by this
      plan's own commit) are still owed.
+
+## Appendix A — Hardware inventory and 1.13 → 1.14 settings triage (2026-09-27)
+
+Read-only `talosctl get cpus,memorymodules,pcidevices,links,disks,systemdisk,extensions,
+kernelparamstatus,volumestatus` on all three nodes (operator request, 2026-09-27). Serials
+and MACs omitted.
+
+| | k8s-nuc14-01 (.11) | k8s-nuc14-02 (.12) | k8s-nuc14-03 (.13) |
+|---|---|---|---|
+| CPU | Core Ultra 5 125H (Meteor Lake), 14C/18T, 4.5 GHz max | same | same |
+| RAM | 2 × 32 GiB @ 5600 MT/s = 64 GiB | same | same |
+| iGPU | Intel Arc, driver **i915** (not `xe`) | same | same |
+| NPU | Meteor Lake NPU, `intel_vpu` | same | same |
+| NIC | Intel I226-V, `igc`, 2.5 GbE link | same | same |
+| NVMe (system + EPHEMERAL) | Samsung 980 PRO 1 TB (consumer, no PLP) | Samsung 980 PRO 1 TB | **Samsung 990 PRO 1 TB** (consumer, no PLP) — the one asymmetry |
+| etcd location | `/var/lib/etcd` **directory on EPHEMERAL** — etcd, images and Longhorn share one NVMe | same | same |
+| Extensions (schematic `43b3cbfc…99a3`) | i915, intel-ice-firmware, intel-npu, intel-ucode, iscsi-tools, mei, thunderbolt, util-linux-tools, v4l-uvc-drivers | same | same |
+
+**Triage.** A = equivalent/required for this roll, lands with the image, no authored change.
+B = beneficial + low-risk + reversible + does not touch etcd/apiserver/network. C = behaviour
+change or higher risk → follow-up plan, **never in this window**.
+
+| Item | Source (v1.14.1 tag) | Class | Note |
+|---|---|---|---|
+| etcd metrics default 2379 → 2383 | `CHANGELOG.md` v1.14.0 "etcd" | A | We set `listen-metrics-urls: http://0.0.0.0:2381` explicitly (`patches/controller/cluster.yaml`); custom URLs are untouched. §2.3b's scrape premise still guards it. |
+| etcd 3.7.1, TLS 1.3 minimum | `CHANGELOG.md` v1.14.0 | A | Comes with the image; no custom cipher suites here. |
+| v1alpha1 `sysctls`/`udev`/`files`/`kernel` deprecated, still honoured | `CHANGELOG.md` v1.14.0 multi-doc sections | A | §3.6 measured it: only a `.machine.files is deprecated` WARNING. |
+| Installer only from Image Factory | `CHANGELOG.md` v1.14.0 "Default Installer Image" | A | Already on `factory.talos.dev`. |
+| FlexVolume host path removed | `CHANGELOG.md` v1.14.0 | A | CSI only here. |
+| Containerd NRI on by default | `CHANGELOG.md` v1.14.0 | A (watch) | No NRI consumer known; §4 pod baseline would show a surprise. |
+| `send_redirects=0` default | `CHANGELOG.md` v1.14.0 | A (network, not authored) | Automatic. |
+| Workload isolation (`SecurityProfileConfig`) | `CHANGELOG.md` v1.14.0 | A (stays off) | §1 item 9 / §4.5 assert it is absent. |
+| `DiscoveryServiceConfig` replacing `.cluster.discovery` | `CHANGELOG.md` v1.14.0 | A (no migration) | Old fields still work; part of C1. |
+| **B — none found.** | | B | Nothing met all four B conditions; nothing rides along today. |
+| **C1 — multi-doc config migration** | `CHANGELOG.md` v1.14.0 "Kubernetes Multi-document Configuration"; Appendix B | C — **own plan, due before 1.15** | The whole v1alpha1 Kubernetes surface is deprecated; likeliest removal in 1.15+. Needs a GA-aware generator (talhelper is EOL on alpha machinery) and must fix every Appendix B mismatch — the etcd secretbox key name (`key2`) + `identity` above all. Until it lands, `task talos:generate-config` fails on main (§1). |
+| **C2 — dedicated etcd partition** (`VolumeConfig` system volume) | `CHANGELOG.md` v1.14.0 "Dedicated System Volumes" | C — own project | The structural fix for the etcd/Longhorn fsync contention (F-84a27c15 class). Directory vs partition is fixed at provisioning: needs `talosctl reset` + etcd member replace per node. |
+| **C3 — `FilesystemTrimConfig`** (weekly fstrim) | `CHANGELOG.md` v1.14.0 "Filesystem Trim" | C | Adds periodic I/O on the contended no-PLP NVMe; needs a monitored trial vs the existing `*-filesystem-trim` CronJobs (§1 item 10). Note talhelper's 1.14 output switches it on by default. |
+| **C4 — `i915` → `xe` driver** | `CHANGELOG.md` 1.12.0-alpha.2 (predates this bump) | C | Not a 1.14 change; a driver swap under Frigate/Plex/Jellyfin iGPU workloads (`igpu-i915`) is its own decision. |
+| XFS allocation-group geometry | `CHANGELOG.md` v1.14.0 | C (moot) | Only for filesystems formatted under 1.14+ — rides with C2. |
+| In-tree iSCSI volume plugin deprecated | `CHANGELOG.md` v1.14.0 | watch | Confirm every iSCSI disk is Longhorn-CSI before C1/workload isolation. |
+
+## Appendix B — Why the multi-doc migration was not done today (2026-09-27 evidence)
+
+Scratch-only (mode 700, `$SCR`), no cluster writes. Candidate: the v1alpha1 fields talhelper
+rejected were moved into `KubeAPIServerConfig`/`KubeControllerManagerConfig`/
+`KubeSchedulerConfig`/`KubeProxyConfig (enabled: false)`/`ResolverConfig` patches; talhelper
+3.1.17 then generated (exit 0) and `talosctl 1.14.1 validate --mode metal` passed. A
+field-by-field normalised diff against the LIVE `machineconfig v1alpha1` (secrets compared by
+hash, never printed) showed:
+
+| Effective setting | Live (v1.13.10 config) | talhelper 3.1.17 multi-doc | Verdict |
+|---|---|---|---|
+| etcd encryption providers | secretbox **`key2`** + `identity` (read from the node's `encryptionconfig.yaml`) | secretbox **`key1`**, no `identity` (same secret) | **FATAL if applied** — stored Secrets carry the key name; upstream GA `generate/kubernetes.go` keeps `key2` and warns about exactly this |
+| apiserver cert SANs | `192.168.55.10`, `k8s.example.com`, `127.0.0.1` | absent | dropped (fixable via `certExtraSANs`) |
+| anonymous auth | `anonymous-auth=false` (legacy path) | authentication-config, anonymous ON for `/livez` `/readyz` `/healthz` | behaviour change |
+| `FilesystemTrimConfig` | absent | 168h | behaviour change (C3) |
+| nameservers / search domain / discovery / extraArgs / kube-proxy off / CNI none / CoreDNS off / etcd / kubelet / sysctls / udev / links / secret values | — | equal | equivalent (CNI: no Flannel doc and no `cluster.network` ⇒ no Flannel, `v1alpha1_k8s_bridge.go` `K8sFlannelCNIConfig`) |
+
+Each mismatch can be patched in scratch (a replaced `KubeEtcdEncryptionConfig` needs the
+secretbox secret via a new SOPS'd talenv), but that is hand-rebuilding GA semantics on alpha
+machinery on the apiserver's authn/encryption surface, and a config-level diff cannot show
+the rendered static-pod flag deltas. Validation passing while the config is non-equivalent is
+the `verification-contents-not-shape` lesson in one line. → C1, its own plan.
