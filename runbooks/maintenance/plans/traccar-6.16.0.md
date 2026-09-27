@@ -68,7 +68,7 @@ rollback_class: git-revert            # valid ONLY because 6.16.0 ships no Liqui
                                       # gate). If that gate fails, rollback becomes the §5.3
                                       # pg_restore procedure — the dump in §3.2 is taken regardless.
 finding_refs: [F-36932ec1]            # "traccar: image traccar/traccar 6.15.3 → 6.16 (minor)"
-status: draft
+status: vetted
 window: null
 premises:
   - id: live-image-still-6.15.3
@@ -107,6 +107,7 @@ sops_refs:
   - docs/sops/verification-contents-not-shape.md
   - docs/sops/vulnerability-disclosure.md
 generated: "2026-09-27"
+review: ready-for-go@2026-09-27   # plan-reviewer ready-for-go 2026-09-27 (7fff8d81 batch)
 ---
 
 # traccar 6.15.3 → 6.16.0 (pinned by digest)

@@ -80,7 +80,7 @@ rollback_class: git-revert            # nothing forward-only: settings.conf is a
                                       # file, MakeMKV rewrites its header on every start; the
                                       # nightly Longhorn backup of makemkv-config is the backstop.
 finding_refs: [F-0b69c5d9]
-status: draft
+status: vetted
 window: null
 premises:
   - id: image-is-still-v26.01.1
@@ -136,6 +136,7 @@ sops_refs:
   - docs/sops/longhorn-rwo-multi-attach.md
   - docs/sops/verification-contents-not-shape.md
 generated: "2026-09-27"
+review: ready-for-go@2026-09-27   # plan-reviewer ready-for-go 2026-09-27 (7fff8d81 batch)
 ---
 
 # makemkv v26.01.1 -> v26.09.2 (MakeMKV 1.18.2 -> 2.0.0)
