@@ -59,7 +59,7 @@
 # HUMAN-GATED. KILL SWITCH: empty the `classes:` map (or delete this file)
 # => every plan derives HUMAN-GATED.
 # Changes here are code-reviewed; bump `version`.
-version: "2026.09.12"
+version: "2026.09.27"
 
 first_runs_supervised: 2
 
@@ -79,5 +79,33 @@ classes:
     forbid_shared: [storage, longhorn]
     forbid_risk: [high]                  # see the `risk: high` note in the header
     require_backup_gate: true            # plan must name its gate; gate must PASS at runtime
+
+# ── PRE-APPROVED LOW-RISK PLANS (SD-10, throughput program item D, operator-
+# approved 2026-09-27) ────────────────────────────────────────────────────────
+# A plan that derives AUTO-NIGHT above AND meets every condition below is
+# PRE-APPROVED: the nightly window runs it WITHOUT an operator GO and WITHOUT
+# the `first_runs_supervised` track record. The independent plan review
+# (plan-reviewer-agent verdict ready-for-go, recorded in the plan frontmatter as
+# `review: ready-for-go@YYYY-MM-DD` by the sweep's rule 4d0b) plus `risk: low`
+# stand in for the supervised runs. Conditions (ALL, derived by
+# maintenance-plan.py::preapproval(); the premises re-check is at RUNTIME):
+#   * derived class auto-night (=> capability_change false, rollback git-revert,
+#     no reboot, no shared-infra floor token, not risk: high, no
+#     autonomy_override: human-gated);
+#   * risk: low (exactly — medium/high still need a GO);
+#   * review: ready-for-go@<date>, date not in the future and at most
+#     max_review_age_days old (a stale review re-reviews, it does not carry);
+#   * status vetted | scheduled | awaiting-go (never draft/blocked/...);
+#   * plan-premises.py --require-premises PASSES in the window (Step 4 item 0).
+# Runs ONLY in the windows listed. Every run keeps the full Step 4 contract
+# (pre-checks, verification, rollback, two-abort cap) and is reported in a
+# morning-report home-operation issue. KILL SWITCH: delete this block.
+preapproved_low_risk:
+  class: auto-night
+  require_risk: low
+  require_review: ready-for-go
+  max_review_age_days: 30
+  statuses: [vetted, scheduled, awaiting-go]
+  windows: [nightly]
 
 default: human-gated

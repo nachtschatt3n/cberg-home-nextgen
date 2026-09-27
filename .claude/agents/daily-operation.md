@@ -234,6 +234,15 @@ needs their decision, and what got auto-fixed.
       window-scheduler refuses `draft`, so an unreviewed plan never runs —
       but an unreviewed plan also never gets scheduled, which is the other
       failure. Note the reviewed ids and verdicts on the board.
+      **Record the verdict in the plan frontmatter in the SAME edit that sets
+      `status: vetted`: `review: ready-for-go@<YYYY-MM-DD>`** (the date of the
+      `ready-for-go` review; a `needs-fix` that was repaired needs a fresh
+      review before it gets this line). It is the fact SD-10 pre-approval
+      reads (throughput item D, 2026-09-27): a `risk: low` AUTO-NIGHT plan
+      carrying it runs in the nightly window without an operator GO. Never
+      write it on anything but a reviewer's `ready-for-go`; a retarget or a
+      material amendment re-reviews and rewrites the date. Malformed values
+      fail `maintenance-plan.py --validate`.
     - **If `covered` is false (any CRACK) → emit a CRITICAL `coverage` finding
       AND page via OpenClaw home-operation.** An actionable update with no lane
       is the exact failure this guarantee exists to prevent — it must be loud.

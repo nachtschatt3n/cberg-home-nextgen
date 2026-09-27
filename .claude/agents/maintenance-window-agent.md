@@ -150,15 +150,51 @@ channel unacceptable — the gate sits ABOVE the Renovate-PR shortcut, so a PR
 does not launder a beta), 0.x release-line moves (at major 0 the minor is the
 breaking axis), and anything lockstep-coupled to a held sibling of the same
 component (`lockstep` in the `--json` output — e.g. a chart whose image major
-is PLAN-held; its plan must describe BOTH halves). Note you run `coverage.py`
-WITHOUT `SWEEP_PG_DSN`, so only the tag-marker and git-tracked `CHANNEL_RULES`
-layers gate here — that offline property is exactly why the rule lives in git
-and not in the policy DB.
+is PLAN-held; its plan must describe BOTH halves). The tag-marker and
+git-tracked `CHANNEL_RULES` layers gate here even with no DB — that offline
+property is exactly why the rule lives in git and not in the policy DB.
+
+**The fast lanes need `SWEEP_PG_DSN` — it is up from the first action; keep it
+up through Step 0 (throughput program item B, 2026-09-27).** Both
+`auto-update.py` and `coverage.py` read `component_autonomy` (earned autonomy)
+and `sweep_findings` (security fast lane) through `runbooks/lib/fast_lane.py`.
+`fast_lane_sources` in each `--json` says where they read from; a value
+starting `unverified` means that lane was OFF this run (fail-safe — today's
+behaviour), and your report must say so rather than imply the lane was empty.
+What the lanes do (policy: `runbooks/auto-update-policy.yaml`):
+- **cooldown** — patch 24h, minor 48h.
+- **security** (`fast_lane: security`, `security_ref: F-…`) — a non-major bump
+  whose CURRENT tag has an open fixable CRITICAL/HIGH "newer upstream tag
+  available" finding skips the cooldown. Nothing else is skipped.
+- **earned** (`fast_lane: earned`) — a patch/minor whose release notes could not
+  be verified is AUTO anyway when the component has >= 3 green and 0 reverted
+  `component_autonomy` rows in 90 days. A positive breaking/structural signal
+  still routes it to PLAN.
 
 Report what merged, what was direct-bumped, and any revert. This runs in EVERY
 window (incl. no-reboot tue/thu), so safe bumps flow automatically without an
 operator asking. Auto-reverts are already surfaced via OpenClaw — note and
 continue to the plans.
+
+**Record every DIRECT-BUMPED item in the component ledger — after the health
+gate settles, one row per item (item B.4/B.5, 2026-09-27):**
+
+```bash
+.venv/bin/python3 runbooks/autonomy-record.py component-record \
+  --component <coverage component> --dep <image_repo or chart> --version <target> \
+  --lane direct-bump --fast-lane <the item's fast_lane: earned|security|normal> \
+  --outcome <green|reverted> --slot <bare-window-id> [--finding-ref <security_ref>] \
+  --notes "<bump commit sha>"
+```
+
+Merged PRs need nothing from you: `auto-update.py --apply` writes its own rows
+(`autonomy_records` in its JSON — an entry with `error` is a record that did
+NOT land; re-record it by hand with `--lane pr`). **A revert is `--outcome
+reverted` for EVERY item in the reverted batch** — that row is what resets the
+component's earned autonomy to zero, so skipping it would let a component that
+just broke the cluster keep landing unverified bumps. Copy `fast_lane` from the
+coverage item; never choose it. The weekly retro reads
+`autonomy-record.py component-summary --days 7`.
 
 ## Step 1 — establish the window + candidate set
 - Read `runbooks/maintenance-windows.yaml`. Identify the target window (the one
@@ -198,7 +234,8 @@ continue to the plans.
   `blocked`, `superseded`, and any `orphan` (PR no longer held). A `status:
   draft` plan may be loaded ONLY to be surfaced to the operator as a go/no-go
   (the GO is the vetting); it is NEVER auto-executed under an AUTO-* class, in
-  any window, whatever `execution_classes` derives for it — `execution_class()`
+  any window, whatever `execution_classes` derives for it (SD-10 pre-approval
+  requires a runnable status, so it never covers a draft) — `execution_class()`
   reads facts, not status, and `autonomy-record.py eligible` does not refuse
   `draft`, so this rule lives here and in `window-scheduler.py`, nowhere else.
 - **Gate the candidate set on premises BEFORE you build it (2026-09-14):**
@@ -283,6 +320,14 @@ DERIVED by `runbooks/maintenance-plan.py` from declared facts against
   `backup_gate` probe and require it to PASS **in this window**. A gate that
   fails or cannot run means DEFER, loudly — a backup that merely exists is not
   a backup that restores.
+- **AUTO-NIGHT, SD-10 pre-approved** (`preapproved: true` in
+  `execution_classes`, listed under `preapproved_low_risk`) — in the windows
+  named by `preapproved_windows` (**nightly only**) this plan is PRE-APPROVED:
+  execute it WITHOUT an operator GO and WITHOUT the `first_runs_supervised`
+  track record (`autonomy-record.py eligible` says so). Everything else still
+  applies: interference analysis, capacity, the premises re-check below, and
+  the full Step 4 contract. In an attended window it is ordinary AUTO-NIGHT.
+  See SD-10 for the conditions and the morning report.
 - **HUMAN-GATED** — operator go/no-go, attended window. This is also the
   answer whenever the class is missing, the policy is unreadable, or anything
   about the derivation looks off. A go/no-go is NEVER silently skipped or
@@ -359,7 +404,8 @@ follows a subcommand is `ingest --json '<payload>'` above, which is a different
 flag entirely (the required issue payload, not an output mode).
 
 Execute only plans that are either in this cleared-to-run set or classed
-AUTO-* for this window's `mode` (with gates passed and supervision satisfied).
+AUTO-* for this window's `mode` (with gates passed and supervision satisfied),
+or — in the nightly window — SD-10 pre-approved (`preapproved: true`).
 
 **If this `decisions` exec FAILS (non-zero — e.g. the openclaw pod is mid-roll):
 treat it as "no confirmed approvals available," NOT as "approved."** Retry a few
@@ -518,6 +564,24 @@ next sweep — save `maintenance-plan.py --json` to a file and:
 done: <x> applied, <y> awaiting-go, <z> blocked"}'`) so the operator always gets a
 close-out even when nothing needed a decision. OpenClaw surfaces it in the
 briefing.
+
+**Nightly only, when anything ran without a GO: the MORNING REPORT (SD-10).**
+If this run executed any SD-10 pre-approved plan, or auto-reverted anything
+(Step 0 or Step 4), ingest ONE more issue after the window-complete one, so the
+operator reads over coffee what ran on its own and what came back:
+
+```bash
+kubectl -n ai exec deploy/openclaw -c app -- \
+  /home/node/.openclaw/bin/home-operation ingest --json \
+  '{"key":"morning-report-<YYYY-MM-DD>","kind":"window_warning","source":"maintenance",
+    "severity":"<info, or warning if anything reverted>","action":"ack",
+    "title":"Nightly <date>: auto-ran <n> low-risk plan(s) without a GO; <r> revert(s)",
+    "detail":"auto-ran: <plan_id> -> <commit> (green|reverted); ... reverts: <component/plan + cause>; none"}'
+```
+
+`window_warning` is the valid kind for an ack-only awareness issue; it rides
+the same ORDER rule as the window-complete issue (after the reconcile). Fall
+back to `runbooks/lib/notify.py "<same summary>"` if the exec fails.
 
 **THAT ORDER IS LOAD-BEARING — do not swap it back.** The reconcile's open set
 is `maintenance-plan.py`'s `open_issue_keys`, which by construction holds PLAN
@@ -745,6 +809,26 @@ override: reboots in non-reboot slots, storage-safety rules, quorum LOSS
   roll transients (node/etcd/Longhorn/TargetDown/DaemonSet/pod/outpost
   alerts) ending at window end + 30 min, keep Watchdog unsilenced, and note it.
   Pre-existing alerts are NOT covered by it (report them separately).
+- **SD-10 Low-risk reviewed plans auto-run in the nightly window without a GO
+  (throughput program item D, operator-approved 2026-09-27).** A plan is
+  pre-approved when `maintenance-plan.py --json` lists it under
+  `preapproved_low_risk` (policy block `preapproved_low_risk` in
+  `runbooks/autonomy-policy.yaml`) — ALL of: derived class AUTO-NIGHT
+  (reversible `git-revert`, `needs_reboot: false`, `capability_change: false`,
+  no shared-infra floor token, no `autonomy_override: human-gated`);
+  `risk: low`; `review: ready-for-go@<date>` recorded by the sweep's rule 4d0b
+  and at most 30 days old; status `vetted|scheduled|awaiting-go`; and
+  `plan-premises.py --require-premises` PASSES in this window (Step 4 item 0).
+  In the `nightly` window treat it as approved in Steps 1 and 3 — do NOT ingest
+  a `go_no_go` for it, do NOT set it `awaiting-go` — and execute it under the
+  full Step 4 contract (premises re-check, pre-checks, GitOps via cberg-agent,
+  verification, rollback, two-abort cap). Record it with
+  `autonomy-record.py record --class AUTO-NIGHT` WITHOUT `--supervised` (nobody
+  was watching; that is the point), and put it in the morning report (Step 5).
+  **Still needs a GO:** risk medium/high, any reboot, any capability change,
+  backup-restore or one-way rollback, a missing/stale/non-ready review, a draft,
+  and anything the derivation cannot read — the absence of a fact is never
+  pre-approval. Never re-derive `preapproved` yourself; copy it.
 
 ## Boundaries
 - You orchestrate + verify; **cberg-agent performs cluster mutations**, ha-agent

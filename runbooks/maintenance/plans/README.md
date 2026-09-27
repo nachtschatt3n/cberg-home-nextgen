@@ -234,6 +234,17 @@ finding_refs: []                  # sweep findings this plan ANSWERS (P2.2). The
                                   # Format-checked by maintenance-plan.py --validate.
                                   # The DETAIL stays in the DB — see "Public repo"
                                   # below. Never inline CVE IDs or counts here.
+review: null                      # `ready-for-go@YYYY-MM-DD` — the plan-reviewer
+                                  # verdict, written by the sweep (rule 4d0b) in the
+                                  # SAME edit that sets status: vetted, and ONLY on a
+                                  # ready-for-go review. SD-10 (autonomy-policy.yaml
+                                  # `preapproved_low_risk`, 2026-09-27): an AUTO-NIGHT
+                                  # plan with risk: low, a runnable status and a review
+                                  # <= 30d old is PRE-APPROVED for the nightly window
+                                  # — it runs with NO operator GO (premises still
+                                  # re-checked at runtime; morning report after).
+                                  # A retarget/material amendment re-reviews. Never
+                                  # hand-write it without a reviewer verdict.
 status: draft                     # draft | vetted | scheduled | awaiting-go |
                                   #   awaiting-soak | executed | blocked |
                                   #   superseded | reference

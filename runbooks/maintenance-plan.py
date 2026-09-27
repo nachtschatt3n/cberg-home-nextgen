@@ -245,8 +245,11 @@ def reconcile(cfg, today, decisions=_FETCH_DECISIONS):
         if p.get("status") in TERMINAL_PLAN_STATUSES:
             continue
         cls, why = execution_class(p, autonomy)
+        pre, pre_why = preapproval(p, autonomy, cls, today)
         exec_classes.append({"plan_id": p.get("plan_id"), "class": cls,
-                             "reason": why, "window": p.get("window")})
+                             "reason": why, "window": p.get("window"),
+                             # SD-10: runs in `preapproved_windows` with no GO
+                             "preapproved": pre, "preapproval": pre_why})
 
     # 1) held updates lacking a fresh plan.
     # Matching via lib/plan_matching (PR number / normalized names / version
@@ -513,6 +516,10 @@ def reconcile(cfg, today, decisions=_FETCH_DECISIONS):
         "sweep_cron_liveness": dict(sweep_liveness),
         "cron_parity": {"errors": parity_errors, "verified": parity_verified},
         "execution_classes": exec_classes,   # ENFORCED since P2.1b (a39d8766)
+        # SD-10 (item D): plan ids pre-approved for the windows below — the
+        # window agent runs these without an operator GO (premises at runtime)
+        "preapproved_low_risk": [e["plan_id"] for e in exec_classes if e.get("preapproved")],
+        "preapproved_windows": preapproved_windows(autonomy),
         "stale": stale,
         "orphan_plans": orphan,
         "awaiting_go": awaiting_go,
@@ -564,7 +571,8 @@ def human(r, cfg):
     if ec:
         L.append("\nexecution classes (ENFORCED — window agent executes AUTO-* only, P2.1b):")
         for e in ec:
-            L.append(f"  {e['class']:<18} {e['plan_id']:<34} {e['reason']}")
+            tag = " [SD-10 pre-approved]" if e.get("preapproved") else ""
+            L.append(f"  {e['class']:<18} {e['plan_id']:<34} {e['reason']}{tag}")
     cp = r.get("cron_parity") or {}
     if not cp.get("verified", True):
         L.append("\n⚠️  cron↔YAML parity NOT VERIFIED (cron list unreadable) — the schedule's executor is unconfirmed")
@@ -779,6 +787,10 @@ def validate_plans(cfg, plans=None) -> list[str]:
         w = pl.get("window")
         if st and st not in VALID_STATUSES:
             errs.append(f"{pid}: unknown status {st!r}")
+        # SD-10: a malformed `review:` silently never pre-approves — say so.
+        if pl.get("review") is not None and parse_review(pl.get("review")) is None:
+            errs.append(f"{pid}: review {pl.get('review')!r} is not <verdict>@<YYYY-MM-DD> "
+                        f"(e.g. ready-for-go@2026-09-27)")
         # a plan that claims a slot must name a real, dated, weekday-consistent one
         if st in ("scheduled", "awaiting-go"):
             if not w:
@@ -1515,6 +1527,89 @@ def execution_class(plan: dict, policy: dict | None) -> tuple[str, str]:
                                    f"an ungated backup-restore plan is not pre-approved")
         return cname.upper(), f"policy class {cname}"
     return "HUMAN-GATED", "matches no pre-approved class (default)"
+
+
+# ---------------------------------------------------------------------------
+# Pre-approved low-risk plans (SD-10, throughput program item D, 2026-09-27).
+# A plan deriving AUTO-NIGHT that ALSO carries a recorded ready-for-go review,
+# `risk: low` and a runnable status is pre-approved for the windows the policy
+# lists (nightly): it runs WITHOUT an operator GO and WITHOUT the
+# first_runs_supervised track record. Everything else about it is unchanged —
+# premises re-checked at runtime, full Step 4 contract, morning report.
+# Pure, like execution_class(): facts in, verdict out; nothing is claimed.
+# ---------------------------------------------------------------------------
+
+_REVIEW_RE = re.compile(r"^\s*([a-z-]+)@(\d{4}-\d{2}-\d{2})\s*$")
+
+
+def parse_review(value):
+    """(verdict, date) from a `review:` frontmatter value, or None when the
+    field is absent or malformed. Shape: `ready-for-go@YYYY-MM-DD`."""
+    if value is None:
+        return None
+    m = _REVIEW_RE.match(str(value))
+    if not m:
+        return None
+    try:
+        return m.group(1), date.fromisoformat(m.group(2))
+    except ValueError:
+        return None
+
+
+def preapproval(plan: dict, policy: dict | None, klass: str,
+                today: date | None = None) -> tuple[bool, list[str]]:
+    """(pre_approved, reasons). reasons lists every UNMET condition when not
+    pre-approved (so the report says what is missing, not just "no"), or the
+    basis when it is. Fail-safe: no policy block => nothing is pre-approved."""
+    spec = (policy or {}).get("preapproved_low_risk")
+    if not isinstance(spec, dict):
+        return False, ["pre-approval disabled (no preapproved_low_risk in autonomy-policy.yaml)"]
+    today = today or date.today()
+    missing = []
+    want_class = str(spec.get("class") or "auto-night").upper()
+    if klass != want_class:
+        missing.append(f"class {klass} (needs {want_class})")
+    if plan.get("needs_reboot") is not False:
+        missing.append("needs_reboot not declared false")
+    if plan.get("capability_change") is not False:
+        missing.append("capability_change not declared false")
+    if str(plan.get("autonomy_override") or "").strip() == "human-gated":
+        missing.append("autonomy_override: human-gated")
+    _rt = str(plan.get("risk") or "").split()
+    risk = _rt[0].strip().lower() if _rt else None
+    if risk != str(spec.get("require_risk") or "low").lower():
+        missing.append(f"risk {risk or 'undeclared'} (needs {spec.get('require_risk') or 'low'})")
+    status = str(plan.get("status") or "").strip()
+    statuses = [str(x) for x in (spec.get("statuses") or ["vetted", "scheduled", "awaiting-go"])]
+    if status not in statuses:
+        missing.append(f"status {status or 'none'} (needs {'|'.join(statuses)})")
+    rv = parse_review(plan.get("review"))
+    want = str(spec.get("require_review") or "ready-for-go")
+    max_age = int(spec.get("max_review_age_days") or 30)
+    if rv is None:
+        missing.append(f"no recorded review (needs `review: {want}@YYYY-MM-DD`)")
+    else:
+        verdict, rdate = rv
+        age = (today - rdate).days
+        if verdict != want:
+            missing.append(f"review verdict {verdict} (needs {want})")
+        if age < 0:
+            missing.append(f"review dated in the future ({rdate})")
+        elif age > max_age:
+            missing.append(f"review {age}d old (max {max_age}d — re-review)")
+    if missing:
+        return False, missing
+    wins = ",".join(str(w) for w in (spec.get("windows") or ["nightly"]))
+    return True, [f"SD-10 pre-approved low-risk: {want_class}, risk low, review "
+                  f"{rv[0]}@{rv[1]}, status {status}; windows: {wins}; premises "
+                  f"re-checked at runtime"]
+
+
+def preapproved_windows(policy) -> list[str]:
+    spec = (policy or {}).get("preapproved_low_risk")
+    if not isinstance(spec, dict):
+        return []
+    return [str(w) for w in (spec.get("windows") or ["nightly"])]
 
 
 # ---------------------------------------------------------------------------

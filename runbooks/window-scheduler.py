@@ -228,10 +228,15 @@ def check_premises_subprocess(plan_id, timeout=PREMISES_TIMEOUT_S) -> tuple[bool
 
 
 def assign(plans, cfg, classes, graduated, today, horizon_days=21,
-           premises_check=check_premises_subprocess):
+           premises_check=check_premises_subprocess, preapproved=None,
+           preapproved_windows=("nightly",)):
     """Pure planner. Returns (assignments, skipped).
 
     `graduated` maps category -> bool. `classes` maps plan_id -> execution class.
+    `preapproved` (SD-10, item D) is the set of plan ids maintenance-plan.py
+    derived as pre-approved low-risk: they route to an UNATTENDED slot whose
+    window id is in `preapproved_windows` (nightly) without a graduated
+    category — the recorded review + risk: low stand in for supervised runs.
     `premises_check(plan_id) -> (ok, reason)` is the one impure step — it
     defaults to the plan-premises.py subprocess and is injectable so tests can
     exercise every refusal without shelling out. A checker that raises is
@@ -282,8 +287,9 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21,
             skip(plan, f"premises not verified — {why}")
             continue
 
-        want_attended = not graduated.get(
-            f"{plan.get('kind')}/{klass}", False)
+        is_pre = pid in (preapproved or ())
+        want_attended = not (is_pre or graduated.get(
+            f"{plan.get('kind')}/{klass}", False))
         dur = int(plan.get("est_duration_min") or 0)
         conflicts = set(plan.get("conflicts_with") or [])
 
@@ -292,6 +298,9 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21,
         for s in slots:
             attended = str(s.get("mode")) == "attended"
             if want_attended != attended:
+                continue
+            if is_pre and not graduated.get(f"{plan.get('kind')}/{klass}", False) \
+                    and str(s.get("id")) not in set(preapproved_windows or ()):
                 continue
             if dur and not s.get("allow_reboot") and plan.get("needs_reboot"):
                 continue
@@ -341,6 +350,9 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21,
             "category": f"{plan.get('kind')}/{klass}",
             "reason": ("earning supervised runs — category not yet graduated"
                        if want_attended else
+                       ("SD-10 pre-approved low-risk (reviewed ready-for-go) — "
+                        "runs in the nightly window without a GO")
+                       if is_pre and not graduated.get(f"{plan.get('kind')}/{klass}", False) else
                        "category graduated — eligible for unattended execution"),
             "minutes": dur, "risk": risk_of(plan),
         })
@@ -393,8 +405,12 @@ def main() -> int:
 
     today = dt.date.fromisoformat(os.environ.get("SCHEDULER_TODAY",
                                                  dt.date.today().isoformat()))
+    preapproved = {p.get("plan_id") for p in plans
+                   if mp.preapproval(p, policy, classes.get(p.get("plan_id"), "HUMAN-GATED"),
+                                     today)[0]}
     assignments, skipped = assign(plans, cfg, classes, graduated, today,
-                                  args.horizon_days)
+                                  args.horizon_days, preapproved=preapproved,
+                                  preapproved_windows=mp.preapproved_windows(policy))
 
     out = {"today": today.isoformat(), "track_record_verified": verified,
            "threshold": threshold, "graduated": graduated,

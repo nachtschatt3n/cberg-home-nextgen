@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.09.26`
-> Last Updated: `2026-09-26`
+> Version: `2026.09.27`
+> Last Updated: `2026-09-27`
 
 ## 1) Description
 
@@ -224,6 +224,28 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   auto-closed by `reconcile` — stayed readable as a current approval. A window
   agent MUST still treat a decision whose `window` has passed as expired, not
   as a standing GO.
+- **Pre-approved low-risk plans — SD-10 (throughput program item D,
+  operator-approved 2026-09-27).** A plan runs in the `nightly` window with NO
+  operator GO and NO `first_runs_supervised` track record when ALL hold:
+  derived class **AUTO-NIGHT** (reversible `git-revert`, `needs_reboot: false`,
+  `capability_change: false`, no shared-infra floor token, no
+  `autonomy_override: human-gated`); **`risk: low`**; **`review:
+  ready-for-go@<YYYY-MM-DD>`** in its frontmatter, at most 30 days old (written
+  by the sweep's rule 4d0b in the same edit that sets `status: vetted`);
+  status `vetted|scheduled|awaiting-go`; and **premises PASS** at runtime.
+  Derived — never claimed — by `maintenance-plan.py::preapproval()` from the
+  `preapproved_low_risk` block of `runbooks/autonomy-policy.yaml`; reported as
+  `preapproved: true` per `execution_classes` entry and as the
+  `preapproved_low_risk` id list (with every UNMET condition listed for the
+  rest). `window-scheduler.py` routes such plans to the nightly slot;
+  `autonomy-record.py eligible` answers yes for them. The window agent executes
+  them under the full Step 4 contract and, after the close-out reconcile,
+  ingests a **morning report** (`kind: window_warning`, `action: ack`,
+  `source: maintenance`, key `morning-report-<date>`) listing what auto-ran and
+  every revert. **Still needs a GO:** medium/high risk, any reboot, any
+  capability change, backup-restore/one-way rollback, a missing, stale or
+  non-ready review, a draft. KILL SWITCH: delete `preapproved_low_risk` from the
+  policy. Test: `runbooks/tests/test-preapproved-low-risk-class.py`.
 - **Durability caveats (both PVC-only, not git):** (1) the `home-operation`
   issue store + the `tick` reminder cron live in OpenClaw's PVC — the skill
   itself is in git (`skills-configmap.sops.yaml`) and re-seeds on boot, but the
@@ -632,6 +654,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.27 | 2026-09-27 | **SD-10: low-risk reviewed plans auto-run in the nightly window without a GO (throughput program item D).** New `review: ready-for-go@<date>` frontmatter (written by rule 4d0b), `preapproved_low_risk` policy block (`autonomy-policy.yaml` `2026.09.27`), `maintenance-plan.py::preapproval()` + `preapproved_low_risk` JSON key, scheduler routes them to nightly, `autonomy-record.py eligible` honours it, morning-report issue after the run. Medium/high risk, reboots and capability changes still need a GO. |
 | 2026.09.26 | 2026-09-26 | **`operation` gates on busy/menu (F-28af989d).** The §7 "known gap": `operation sweep|fix|versions` sent ctrl+u and the prompt into a busy or menu pane. They now refuse with **exit 13** (8 is `restart`'s "survived TERM and KILL"), nothing typed, cron and manual alike; exhausted-idle auto-clear for unattended runs unchanged and followed by the same gate. §7 gains an `operation` exit-code table. Test `runbooks/tests/test-openclaw-console-delivery.py`. |
 | 2026.09.26 | 2026-09-26 | **Retry refusals page (operator decision).** `maintenance-window retry` used to no-op with exit 0 when the occurrence was LOST but the console was busy or in a menu, which left the 01:30 alert as the only same-day signal. It now exits 8, nothing typed, with a message naming the lost (slot, date), so the retry cron's failureAlert fires. An exhausted pane that cannot be auto-cleared still exits 4, now with the same LOST wording. When a row exists, retry stays a no-op with exit 0. Test `runbooks/tests/test-openclaw-console-delivery.py`. |
 | 2026.09.26 | 2026-09-26 | **A same-day on-demand run covers the nightly (operator decision).** `expected_slots`/`missing_window_runs` counted `(nightly, date)` missed unless a nightly row existed, so a day spent in an attended NOW run paged a missed nightly although Step 0 ran. A completed, non-aborted `now`/ad-hoc row on the same Europe/Berlin date (of `started_at`) now covers it; open or aborted rows do not; sat/sun are not covered. Same function feeds the Pushgateway liveness push. Test `runbooks/tests/test-window-liveness-now-covers-nightly.py`. |

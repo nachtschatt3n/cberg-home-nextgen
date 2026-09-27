@@ -43,6 +43,21 @@ USAGE
     # would THIS plan be allowed to run unattended tonight?
     autonomy-record.py eligible --plan-id edot-collector-0.160.0 --json
 
+COMPONENT AUTONOMY (throughput program item B, 2026-09-27)
+A second ledger, `component_autonomy`, is keyed on the COMPONENT an unattended
+Step 0 update touched (not a plan). auto-update.py writes it itself for merged
+PRs; the window agent writes it for every direct bump. It is what EARNS a
+component the right to land an unverified patch/minor (policy `earned_autonomy`
+in auto-update-policy.yaml: >= 3 green, 0 reverts, 90 days) and it records WHY
+each item landed (`--fast-lane earned|security|normal`) for the weekly retro.
+
+    autonomy-record.py component-record --component mealie \
+        --dep ghcr.io/mealie-recipes/mealie --version v3.27.0 \
+        --lane direct-bump --fast-lane normal --outcome green --slot nightly
+    autonomy-record.py component-track-record --component mealie \
+        --repo ghcr.io/mealie-recipes/mealie --json
+    autonomy-record.py component-summary --days 7 --json     # the retro's view
+
 Reads SWEEP_PG_DSN (see runbooks/lib/sweep-pg-dsn.sh). Without it, every query
 returns `verified: false` and eligibility is DENIED — an unreadable ledger must
 never read as permission. That is the same failure this tool exists to fix, so
@@ -189,7 +204,7 @@ DEAD_STATUSES = ("blocked", "executed", "superseded")
 
 
 def eligibility_verdict(status, execution_class, threshold,
-                        clean_supervised, verified):
+                        clean_supervised, verified, preapproved=False):
     """(eligible, reason). Pure — no DB, no filesystem — so the refusals can be
     tested directly instead of inferred from the source text.
 
@@ -200,6 +215,12 @@ def eligibility_verdict(status, execution_class, threshold,
         return False, f"plan status is {status!r} — must not execute"
     if not str(execution_class or "").startswith("AUTO"):
         return False, "class is not auto-executable"
+    if preapproved and execution_class == "AUTO-NIGHT":
+        # SD-10: a recorded ready-for-go review + risk: low stand in for the
+        # supervised runs — in the pre-approved windows (nightly) ONLY. The
+        # caller (window agent) still re-checks premises before executing.
+        return True, ("SD-10 pre-approved low-risk plan (reviewed ready-for-go) — "
+                      "nightly window only; track record not required")
     if threshold is None:
         return False, "autonomy policy unreadable (fail-safe)"
     if not verified:
@@ -228,9 +249,11 @@ def cmd_eligible(args) -> int:
     category = derive_category(plan.get("kind"), klass)
 
     status = str(plan.get("status") or "").strip()
+    pre, pre_why = mp.preapproval(plan, policy, klass)
     verdict = {"plan_id": args.plan_id, "category": category, "status": status,
                "execution_class": klass, "class_reason": reason,
-               "threshold": threshold}
+               "threshold": threshold, "preapproved": pre, "preapproval": pre_why,
+               "preapproved_windows": mp.preapproved_windows(policy) if pre else []}
 
     clean, verified = 0, False
     # Only reach for the DB when the cheap, local refusals have not already
@@ -243,11 +266,83 @@ def cmd_eligible(args) -> int:
             clean = rows[0]["clean_supervised"] if rows else 0
             verified = True
 
-    eligible, why = eligibility_verdict(status, klass, threshold, clean, verified)
+    eligible, why = eligibility_verdict(status, klass, threshold, clean, verified,
+                                        preapproved=pre)
     verdict.update(eligible=eligible, reason=why,
                    verified=verified, clean_supervised=clean)
     print(json.dumps(verdict, indent=2) if args.json else json.dumps(verdict))
     return 0 if verdict.get("eligible") else 1
+
+
+def _fast_lane():
+    sys.path.insert(0, str(SCRIPT_DIR / "lib"))
+    import fast_lane
+    return fast_lane
+
+
+def _au_policy():
+    try:
+        import yaml
+        return yaml.safe_load((SCRIPT_DIR / "auto-update-policy.yaml").read_text()) or {}
+    except Exception:
+        return {}
+
+
+def cmd_component_record(args) -> int:
+    fl = _fast_lane()
+    try:
+        rid = fl.record(args.component, args.dep, args.version, args.lane,
+                        args.fast_lane, args.outcome, window_slot=args.slot,
+                        finding_ref=args.finding_ref, notes=args.notes)
+    except Exception as e:
+        print(f"ERROR: component autonomy NOT recorded — {e}", file=sys.stderr)
+        print("       source runbooks/lib/sweep-pg-dsn.sh && sweep_pg_dsn_up", file=sys.stderr)
+        return 1
+    out = {"recorded": rid, "component": args.component, "outcome": args.outcome,
+           "fast_lane": args.fast_lane}
+    if args.outcome == "reverted":
+        out["note"] = "earned autonomy for this component is now RESET to zero"
+    print(json.dumps(out))
+    return 0
+
+
+def cmd_component_track_record(args) -> int:
+    fl = _fast_lane()
+    policy = _au_policy()
+    keys = fl.keys_for(args.component, args.repo or [])
+    ok, note = fl.earned(policy, keys)
+    verified = fl.SOURCE["track_record"].startswith("component_autonomy")
+    out = {"component": args.component, "keys": sorted(keys), "earned": ok,
+           "verified": verified, "detail": note, "source": fl.SOURCE["track_record"],
+           "policy": fl.earned_policy(policy)}
+    print(json.dumps(out, indent=2) if args.json else
+          f"{args.component}: {'EARNED' if ok else 'not earned'} — {note}")
+    return 0 if verified else 1
+
+
+def cmd_component_summary(args) -> int:
+    """Per-fast-lane / per-outcome counts over the last N days (weekly retro)."""
+    fl = _fast_lane()
+    conn = fl._connect()
+    if conn is None:
+        print(json.dumps({"verified": False, "reason": "SWEEP_PG_DSN unset or unreachable"}))
+        return 1
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute("""SELECT fast_lane, outcome, lane, count(*),
+                                  array_agg(DISTINCT component ORDER BY component)
+                             FROM component_autonomy
+                            WHERE recorded_at >= now() - make_interval(days => %s)
+                            GROUP BY fast_lane, outcome, lane ORDER BY 1, 2, 3""",
+                        (args.days,))
+            rows = [{"fast_lane": r[0], "outcome": r[1], "lane": r[2], "count": r[3],
+                     "components": list(r[4] or [])} for r in cur.fetchall()]
+    except Exception as e:
+        print(json.dumps({"verified": False, "reason": f"component_autonomy unreadable ({type(e).__name__})"}))
+        return 1
+    print(json.dumps({"verified": True, "days": args.days, "rows": rows},
+                     indent=2 if args.json else None))
+    return 0
 
 
 def main() -> int:
@@ -277,6 +372,32 @@ def main() -> int:
     e.add_argument("--plan-id", required=True)
     e.add_argument("--json", action="store_true")
     e.set_defaults(func=cmd_eligible)
+
+    cr = sub.add_parser("component-record",
+                        help="record one unattended Step 0 apply (or its revert) per component")
+    cr.add_argument("--component", required=True, help="app/component name (coverage `component`)")
+    cr.add_argument("--dep", help="image repository or chart name")
+    cr.add_argument("--version", required=True, help="the target that was applied")
+    cr.add_argument("--lane", required=True, choices=("pr", "direct-bump"))
+    cr.add_argument("--fast-lane", required=True, choices=("earned", "security", "normal"),
+                    help="coverage.py/auto-update.py `fast_lane` for the item — copy it")
+    cr.add_argument("--outcome", required=True, choices=("green", "reverted"),
+                    help="reverted RESETS the component's earned autonomy to zero")
+    cr.add_argument("--slot", help="bare window id, e.g. nightly")
+    cr.add_argument("--finding-ref", help="F-xxxxxxxx for a security fast-lane item")
+    cr.add_argument("--notes")
+    cr.set_defaults(func=cmd_component_record)
+
+    ct = sub.add_parser("component-track-record", help="has this component EARNED autonomy?")
+    ct.add_argument("--component", required=True)
+    ct.add_argument("--repo", action="append", help="image repo(s) the component mounts")
+    ct.add_argument("--json", action="store_true")
+    ct.set_defaults(func=cmd_component_track_record)
+
+    cs = sub.add_parser("component-summary", help="fast-lane counts for the weekly retro")
+    cs.add_argument("--days", type=int, default=7)
+    cs.add_argument("--json", action="store_true")
+    cs.set_defaults(func=cmd_component_summary)
 
     args = ap.parse_args()
     return args.func(args)
