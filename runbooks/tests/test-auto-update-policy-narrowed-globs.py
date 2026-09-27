@@ -57,7 +57,7 @@ def item_rule(component, kind, repo, utype):
 
 
 check("policy parses and is not the deny-all fail-safe", not POLICY.get("_deny_all"), POLICY)
-check("policy version bumped to 2026.09.26.x", str(POLICY.get("version", "")).startswith("2026.09.26"),
+check("policy version bumped to >= 2026.09.26 (the narrowing is not older than the file)", str(POLICY.get("version", "")) >= "2026.09.26",
       POLICY.get("version"))
 
 print("affine")

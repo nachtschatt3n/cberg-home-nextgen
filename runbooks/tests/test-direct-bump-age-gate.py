@@ -171,7 +171,10 @@ def main() -> int:
         FAILURES.append("policy-sourced threshold")
     src = (REPO / "runbooks/coverage.py").read_text()
     body = src.split("def direct_bump_age_gate", 1)[1].split("\ndef ", 1)[0]
-    ok = not re.search(r"min_age\s*=\s*\d", body) and "minimum_release_age_hours" in body
+    # Since 2026-09-27 the threshold comes from fast_lane.cooldown_hours(),
+    # which reads minimum_release_age_hours(+_by_type) from the SAME policy.
+    ok = not re.search(r"min_age\s*=\s*\d", body) and (
+        "minimum_release_age_hours" in body or "fast_lane.cooldown_hours(policy" in body)
     print(f"  {'PASS' if ok else 'FAIL'}  gate reads the policy key, no hardcoded threshold")
     if not ok:
         FAILURES.append("no hardcoded threshold")

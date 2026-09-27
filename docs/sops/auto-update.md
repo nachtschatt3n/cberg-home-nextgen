@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.09.26`
-> Last Updated: `2026-09-26`
+> Version: `2026.09.27`
+> Last Updated: `2026-09-27`
 
 ## 1) Description
 
@@ -92,7 +92,9 @@ that SOP has the `vN`-rename fix and the detection command.
      run (reopen or rebase); the hold reason names that case explicitly.
 - **G5 age**: a supply-chain cooldown — nothing may land in the unattended
   nightly lane until it has been public for `minimum_release_age_hours` (48h,
-  policy-set 2026-08-26). **Unknown age HOLDS, in both lanes.**
+  policy-set 2026-08-26) — **24h for a PATCH** since 2026-09-27
+  (`minimum_release_age_hours_by_type`, see §2a). **Unknown age HOLDS, in both
+  lanes.** A security-driven bump skips it in both lanes (§2a).
 
   G5 has TWO implementations, because there are two lanes and they measure
   different objects:
@@ -135,7 +137,12 @@ that SOP has the `vN`-rename fix and the detection command.
   what `runbooks/tests/test-oci-chart-age.py` asserts against in both
   directions.
 
-  > **The security waiver cannot fire in the direct-bump lane.** It reads a
+  > **Superseded 2026-09-27 by the security fast lane (§2a)** for any bump whose
+> current tag has an open "newer upstream tag available" finding — both lanes
+> now read that from `sweep_findings`. The note below still describes
+> `age_waive`, which remains for the cases the finding cannot express.
+>
+> **The security waiver cannot fire in the direct-bump lane.** It reads a
   > security marker out of the **Renovate PR title**, and the no-PR direct-bump
   > half (`coverage.py`) has no title to read — so a bump that *is* the
   > remediation for an open finding is held by G5 for the full 48h precisely
@@ -169,6 +176,50 @@ that SOP has the `vN`-rename fix and the detection command.
   `2` applied-then-reverted, `1` error.
 - **Fail-safe:** if `auto-update-policy.yaml` is missing/unparseable, the engine
   **denies everything**.
+
+## 2a) Fast lanes — earned autonomy, per-type cooldown, security bypass (2026-09-27)
+
+Operator-approved throughput program, item B ("patches aren't keeping pace").
+One shared module, `runbooks/lib/fast_lane.py`, used by BOTH lanes so they
+cannot disagree. Policy knobs live in `auto-update-policy.yaml` (`2026.09.27`).
+
+| Lane | Rule | Applies in |
+|---|---|---|
+| **per-type cooldown** | patch waits 24h, minor (and anything unlisted) 48h (`minimum_release_age_hours_by_type`). A malformed value falls back to the 48h base, never 0. | PR lane G5, direct-bump G5 |
+| **security** | a NON-MAJOR bump whose CURRENT tag carries an open, non-accepted `sweep_findings` security row "`<repo>:<tag>`: N fixable CRITICAL\|HIGH CVE(s) — newer upstream tag available" skips the cooldown. Only the cooldown — G1-G4, G3/G3s and the health gate all still apply. The PR lane needs a KNOWN current tag (spanned title). `security_cooldown_bypass: true`. | both |
+| **earned** | a patch/minor whose release notes could NOT be verified (`release notes unavailable`, or an unreadable G3 range) is still AUTO when the component has **>= 3 green and 0 reverted** rows in `component_autonomy` over **90 days** (`earned_autonomy`). A positive breaking or structural signal still holds it; the structural gate runs on this path too. Deny rules, 0.x minors, channel/pre-release holds and majors are decided BEFORE this and are never lifted. | direct-bump (the PR lane never held unverified notes) |
+
+**The ledger** is `component_autonomy` in sweep_history (schema v9, init Job
+`sweep-history-init-v9`): one row per applied item — `component`, `dep`,
+`version`, `lane` (pr|direct-bump), `fast_lane` (earned|security|normal),
+`outcome` (green|reverted), `finding_ref` (F-id only). `auto-update.py --apply`
+writes its own rows; the window agent writes one per direct bump with
+`autonomy-record.py component-record`. **A revert resets**: greens count only
+after the latest revert, any revert inside 90 days disqualifies, and a batch
+revert writes `reverted` for every component in the batch (the culprit is not
+isolated — the conservative direction).
+
+**Fail-safe.** Both lanes need `SWEEP_PG_DSN`. No DSN, table missing or a query
+error => `fast_lane_sources` reads `unverified …` and that lane is OFF
+(today's behaviour). The `--json` of both scripts carries `fast_lane` per item
+(coverage also `fast_lane_counts`), which is what the retro counts
+(`autonomy-record.py component-summary --days 7`).
+
+**Kill switches** (git-tracked, bump `version`): delete `earned_autonomy`;
+set `security_cooldown_bypass: false`; delete `minimum_release_age_hours_by_type`.
+
+Tests: `runbooks/tests/test-fast-lane-earned-autonomy.py` (earned vs not, revert
+resets, security bypass, a major never auto, both lanes).
+
+**Same day, two G3/G2 fixes from the redis fleet planner.** (1) `redis:*-alpine`
+had NO readable notes: `IMAGE_RELEASE_NOTES_PROJECTS` gains `redis ->
+redis/redis`, and the new `IMAGE_TAG_FLAVOUR_SUFFIXES` + `release_tag_for()`
+(check-all-versions.py) strip `-alpine` so `8.10.2-alpine` reads release
+`8.10.2` (proven live 2026-09-27). (2) `*sure-redis*` deny rule with a `paths:`
+list — a deny rule may now name repo files; the PR lane holds a PR changing
+one (`path_block`, fail-safe hold when the file list is unreadable), because a
+consumer-specific hold is invisible in a shared depName. Test:
+`runbooks/tests/test-redis-notes-and-sure-redis-hold.py`.
 
 ## 3) Blueprints
 
@@ -317,7 +368,7 @@ dist-tag stay on `CHANNEL_RULES` membership (see
 Run the synthetic matrix. **It must assert every deny rule that exists, not a
 memorable subset** — a rule absent from the matrix is a rule the test cannot
 catch the removal of — and a rule whose `max:` is mis-stated is a hold the test
-cannot catch the WIDENING of. As of `2026.09.22` that is all 27 globs:
+cannot catch the WIDENING of. As of `2026.09.27` that is all 29 globs:
 
 | Deny glob | Assert |
 |---|---|
@@ -329,6 +380,7 @@ cannot catch the WIDENING of. As of `2026.09.22` that is all 27 globs:
 | `*gateway-crds-helm*` | held at every update_type |
 | `*k8s-gateway*` | held at every update_type |
 | `*envoy-gateway*` | held at every update_type |
+| `*envoyproxy/envoy*` | held at every update_type — the Envoy DATA-PLANE image pinned in the EnvoyProxy resource is coupled to the controller and moves only in the same change as the `gateway-helm` bump (row added 2026-09-27: Test 2b reported it MISSING) |
 | `*external-dns*` | held at every update_type — **including `minor`**, which is the case that matters: chart 1.22.x will ship appVersion 0.22.0 and would otherwise score a safe MINOR into the unattended nightly lane |
 | `*frigate*` | `max: patch` (added 2026-09-15, F-71dc3610) — patch ALLOWED, minor held: a 0.x MINOR is a release-line move with config + sqlite migrations, and the read-only ConfigMap config cannot be auto-migrated (safe-mode-with-zero-cameras failure is invisible to probes) |
 | `*mariadb*` | `max: patch` — patch ALLOWED, minor and major held |
@@ -340,7 +392,7 @@ cannot catch the WIDENING of. As of `2026.09.22` that is all 27 globs:
 | `*nextcloud*` | held at every update_type |
 | `*scrypted*` | held at every update_type |
 | `*grafana*` | `max: patch` (narrowed 2026-09-12) — patch ALLOWED, minor held (a chart MINOR can move appVersion across forward-only sqlite migrations; a chart PATCH does not) |
-| `*unpoller*` | held at every update_type |
+| `*unpoller*` | `max: patch` (narrowed 2026-09-22, `e20c3cc5`) — patch ALLOWED, minor+ held: no chart templates the v4+ image line yet (row corrected 2026-09-27: Test 2b reported the blanket-hold claim WRONG) |
 | `*openclaw*` | held at every update_type |
 | `*@openclaw/*` | held at every update_type |
 | `*coredns*` | held at every update_type |
@@ -348,6 +400,7 @@ cannot catch the WIDENING of. As of `2026.09.22` that is all 27 globs:
 | `siderolabs/*` | held at every update_type |
 | `*talos*` | held at every update_type |
 | `*valkey*` | held at every update_type (INTERIM, added 2026-09-21) — the only upstream tag above the pin is a PRE-RELEASE: a floating 2-component tag digest-identical to an `-rc1`, with no GA above the pin. Withdraw the rule when a real GA publishes, or it freezes valkey on a genuine future release. It also has to reach the DIRECT-BUMP lane, which resolves a deny rule by the component key first and then by each image repository the item names (`denied_for_item`) — the component key alone did not match this glob |
+| `*sure-redis*` | held at every update_type (added 2026-09-27, redis fleet planner) — sure's sidekiq-cron registers its cron jobs only at worker start and keeps them in this redis, so a redis roll can silently empty the schedule (bank sync included) while every probe stays green; the window plan must restart `sure-worker` and assert the `cron_jobs:default` set has 11 members. The Renovate depName is the SHARED `redis`, so this rule also carries `paths:` (the sure redis HelmRelease) and the PR lane holds any PR changing that file (`path_block`) |
 
 Rule ORDER is load-bearing for the three `nextcloud` globs: the first match
 wins, so `*nextcloud-mcp*` and `*nextcloud-redis*` must precede `*nextcloud*`.
@@ -506,6 +559,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.27 | 2026-09-27 | **Fast lanes (throughput program item B, operator-approved).** New §2a: patch cooldown 48h -> 24h (minor stays 48h); a non-major bump remediating an open fixable CRITICAL/HIGH "newer upstream tag available" finding on the running tag bypasses the cooldown in BOTH lanes (finding id recorded, never CVE detail); an unverified-notes patch/minor is AUTO for a component with >= 3 green / 0 reverts in 90 days (`component_autonomy`, schema v9), a revert resetting it. Policy `2026.09.27`. Shared module `runbooks/lib/fast_lane.py`; test `test-fast-lane-earned-autonomy.py`. Also: redis notes resolve (`redis/redis`, `-alpine` stripped via `IMAGE_TAG_FLAVOUR_SUFFIXES`), and `*sure-redis*` held with a path-scoped rule (`paths:`, PR-lane `path_block`) — matrix now 29 globs (the pre-existing `*envoyproxy/envoy*` gap closed too). |
 | 2026.09.26 | 2026-09-26 | **Four false holds removed (planner findings, operator-approved).** (a) **G3 reads non-GitHub notes**: `library/alpine` (news posts, parsed from the multi-version slug `Alpine-3.21.8-…-3.24.2-released.html`) and `library/python` (the "What's New In Python X.Y" page of every minor a hop enters; for a patch hop the target minor's "Notable changes in X.Y.N" sections) — `check-all-versions.py` `DISTRO_RELEASE_NOTES` / `fetch_distro_release_notes()`. Both were "release notes unavailable" by construction and routed to a window as unverified. An unreadable source is still unresolved, never clean. (b) **G3s is scoped to the image's build context** (`IMAGE_BUILD_CONTEXTS`, seeded only from the upstream build workflow): `emqx/mqttx-web` → `web/`, so a migration in the Electron desktop tree no longer holds the web image; unlisted images keep the whole-repo scan. (c) **Policy `2026.09.26.1`**: `*affine*` → `*toeverything/affine*`, `*n8n*` → `*n8nio/n8n*`, and the `*authentik*` reason's mechanism corrected. (d) **app-template source link** points at `bjw-s-labs/helm-charts` `app-template-X.Y.Z` (`CHART_RELEASE_SOURCES`). Tests: `test-g3-distro-release-notes.py`, `test-g3s-build-context.py`, `test-auto-update-policy-narrowed-globs.py`, `test-chart-release-source-link.py`. |
 | 2026.09.23 | 2026-09-23 | **flux-local test retired; the Flate Render Gate is the single render gate (F-6b1dd22b, operator decision).** The `Flux Local Test` and `Flux Local successful` jobs are gone from `.github/workflows/flux-local.yaml`; the flux-local *diff* jobs stay (they post PR diffs flate does not replace), so the file keeps its name. G4 needed no re-pointing — it never named a check; it holds on any non-green rollup entry — but a check run left on a PR's head SHA by a removed job outlives the job (PR #219: `Flux Local Test=FAILURE` beside a green `Flate Render Gate` on the same SHA), so `ci_state()` now appends "stale check run on this head SHA; reopen or rebase" to that hold reason. Verdict unchanged (hold). New Troubleshooting row. |
 | 2026.09.22 | 2026-09-22 | **Two gaps, both found by the SOP asserting something the code stopped doing.** (a) **G5 was documented as a commit-age rule only (F-b5445561)** — the SOP had zero mentions of `oci://` or artifact publish dates, although the engine has had a SECOND G5 implementation since 2026-09-07 and `_oci_chart_created()` since `5c53e313`. The no-PR direct-bump lane has no Renovate commit to measure, so it ages the ARTIFACT: Docker Hub `last_updated`, the OCI image config blob's `created` (youngest across every repo carrying the tag), chart `index.yaml` `created`, and for `oci://` charts the `org.opencontainers.image.created` annotation on the chart manifest. Documented under G5 with the fail-safe direction and why an unresolvable `oci://` age used to make the hold *permanent* rather than timed. Live-verified against `kube-prometheus-stack` 90.0.0 / 90.2.0 / a bogus version. (b) **Test 2b compared glob MEMBERSHIP only, so a wrong `max:` assertion passed (F-28c62378)** — the exact decay the 2026.09.13 entry below flagged as "Test 2b only checks glob MEMBERSHIP, so it cannot see a wrong Assert". It now parses each row's Assert cell and diffs the backticked `max:` against the rule's own key in both directions. Matrix resynced to policy `2026.09.22.1` — 27 globs, with `*authentik*` (`0193f2e4`) and `*valkey*` added. |

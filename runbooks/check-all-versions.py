@@ -547,7 +547,35 @@ IMAGE_RELEASE_NOTES_PROJECTS: Dict[str, Tuple[str, str]] = {
     'wazuh/wazuh-agent': ('wazuh', 'wazuh'),
     'actualbudget/actual-server': ('actualbudget', 'actual'),
     'curlimages/curl': ('curl', 'curl-container'),
+    # verified 2026-09-27 (redis fleet plan, 23457609): the official image's
+    # `8.10.1-alpine` / `8.10.2-alpine` resolve to redis/redis releases
+    # `8.10.1` / `8.10.2` once the flavour suffix is stripped — see
+    # IMAGE_TAG_FLAVOUR_SUFFIXES below. Before this every redis:*-alpine bump
+    # (eight consumers) was "release notes unavailable" by construction.
+    'redis': ('redis', 'redis'),
 }
+
+# Image repository -> build-FLAVOUR suffixes its image tags carry but its
+# GitHub release tags do not (`redis:8.10.2-alpine` is release `8.10.2`).
+# G3 strips a listed suffix before asking for the release (release_tag_for);
+# the range walk already ignores `-suffix` (_vt), so only the TARGET read
+# needed this. Same seeding rule as the map above: listed only after the
+# stripped tag was proven to resolve. Unlisted images keep their tag verbatim,
+# so a guess can never make one image read another tag's notes.
+IMAGE_TAG_FLAVOUR_SUFFIXES: Dict[str, Tuple[str, ...]] = {
+    # verified 2026-09-27: 8.10.1-alpine -> 8.10.1, 8.10.2-alpine -> 8.10.2
+    'redis': ('-alpine', '-bookworm', '-trixie'),
+}
+
+
+def release_tag_for(image_repo: str, tag: str) -> str:
+    """The GitHub RELEASE tag for an image tag: a listed flavour suffix is
+    stripped (IMAGE_TAG_FLAVOUR_SUFFIXES); anything else comes back as-is."""
+    t = str(tag or '')
+    for suf in IMAGE_TAG_FLAVOUR_SUFFIXES.get(_image_map_key(image_repo), ()):
+        if t.lower().endswith(suf):
+            return t[: -len(suf)]
+    return t
 
 # Image repository -> the sub-directory of its source repository that is the
 # image's Docker BUILD CONTEXT.

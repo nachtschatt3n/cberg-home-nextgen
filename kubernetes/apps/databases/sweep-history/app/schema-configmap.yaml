@@ -330,3 +330,33 @@ data:
     );
     CREATE INDEX IF NOT EXISTS idx_media_audit_runs_ran_at
       ON media_audit_runs (ran_at DESC);
+
+    -- ─── schema v9: component_autonomy ──────────────────────────────
+    -- Per-COMPONENT track record of unattended Step 0 updates (throughput
+    -- program item B, 2026-09-27). One row per applied item: a merged
+    -- Renovate PR (written by auto-update.py) or a direct bump (written by
+    -- the window agent via autonomy-record.py component-record). `outcome`
+    -- green|reverted; a `reverted` row RESETS the component's earned
+    -- autonomy (greens count only after the latest revert, and any revert
+    -- in the window disqualifies). `fast_lane` earned|security|normal is WHY
+    -- the item landed, for the weekly retro; `finding_ref` is an F-id only,
+    -- never CVE detail. Distinct from plan_executions on purpose: plans and
+    -- component updates are different cohorts and the retro counts them
+    -- separately. Pure additive CREATE IF NOT EXISTS.
+    CREATE TABLE IF NOT EXISTS component_autonomy (
+      id           BIGSERIAL PRIMARY KEY,
+      component    TEXT NOT NULL,
+      dep          TEXT,
+      version      TEXT,
+      lane         VARCHAR(16) NOT NULL,   -- pr | direct-bump
+      fast_lane    VARCHAR(16) NOT NULL,   -- earned | security | normal
+      outcome      VARCHAR(16) NOT NULL,   -- green | reverted
+      window_slot  TEXT,
+      finding_ref  TEXT,
+      notes        TEXT,
+      recorded_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_component_autonomy_component
+      ON component_autonomy (component, recorded_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_component_autonomy_dep
+      ON component_autonomy (dep, recorded_at DESC);

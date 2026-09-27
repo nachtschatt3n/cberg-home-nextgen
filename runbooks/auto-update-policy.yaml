@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.26.1"
+version: "2026.09.27"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -27,6 +27,39 @@ version: "2026.09.26.1"
 # are WAIVED (merge at age 0): a known-bad current version outranks an
 # unknown-new one. Unknown age HOLDS. Set 0 to disable the gate.
 minimum_release_age_hours: 48
+
+# Per-update_type override of the cooldown above (throughput program item B,
+# operator-approved 2026-09-27: "patches aren't keeping pace"). A PATCH waits
+# 24h; a MINOR (and anything unlisted) keeps the 48h base. Read by BOTH lanes
+# via runbooks/lib/fast_lane.py::cooldown_hours(). A malformed value falls back
+# to the base, never to 0. Delete the key to restore 48h for everything.
+minimum_release_age_hours_by_type:
+  patch: 24
+
+# ── Security fast lane (item B.3, 2026-09-27) ────────────────────────────────
+# true => a NON-MAJOR bump whose CURRENT tag carries an open, non-accepted
+# security finding "`<repo>:<tag>`: N fixable CRITICAL|HIGH CVE(s) — newer
+# upstream tag available" skips the cooldown in BOTH lanes. The finding id is
+# carried with the item and recorded (fast_lane=security); never the CVE detail.
+# Needs SWEEP_PG_DSN; without it the bypass is OFF (cooldown holds). Everything
+# else (G1-G4, G3 breaking/structural, health gate + auto-revert) still applies.
+# Set false (or delete) to turn the bypass off.
+security_cooldown_bypass: true
+
+# ── Earned autonomy (item B.1, 2026-09-27) ───────────────────────────────────
+# A non-major, non-0.x-minor, not-denied patch/minor whose release notes could
+# NOT be verified ("notes unverified") is still AUTO-eligible when its
+# component has a clean track record in sweep_history `component_autonomy`:
+# >= min_green green applies AND <= max_reverts reverts in the last
+# window_days. Greens count only AFTER the latest revert — a revert resets the
+# component to zero. A POSITIVE breaking/structural signal still holds it; the
+# cooldown still applies. Components without the record keep today's behaviour
+# (unverified => PLAN). Needs SWEEP_PG_DSN; unreadable ledger => lane OFF.
+# KILL SWITCH: delete this block.
+earned_autonomy:
+  min_green: 3
+  window_days: 90
+  max_reverts: 0
 
 # deps whose bumps skip the cooldown even without a security marker in the PR
 # (shell globs against depName, same syntax as deny.match). Keep short.
@@ -463,6 +496,24 @@ deny:
       is still the guard on that path and the earlier "or the digest-sibling check
       lands" clause is withdrawn. Left beyond a real GA it would freeze valkey on a
       genuine future release. security_ref: F-aff597aa, F-f2f1f1a9, F-7bad8aeb
+  - match: "*sure-redis*"
+    # A Renovate redis PR is keyed on the SHARED depName (`redis`), which this
+    # glob cannot see — so the PR lane also holds any PR that CHANGES this file
+    # (`paths`, auto-update.py::path_block). The direct-bump lane matches the
+    # component key `sure-redis` itself.
+    paths:
+      - "kubernetes/apps/office/sure/app/redis-helmrelease.yaml"
+    reason: >-
+      HELD from the unattended lanes 2026-09-27 (redis fleet planner, plan
+      redis-fleet-8.10.2). Sure's sidekiq-cron registers its cron jobs ONLY when
+      the worker starts, and keeps them in this redis. A redis roll can come back
+      with the schedule silently EMPTY - bank sync included - while every probe is
+      green; nothing in the Step 0 health gate reads the schedule. The engine has
+      no post-apply hook, so instead of an unattended bump this goes through a
+      window plan whose steps are: bump sure-redis, then `kubectl -n office
+      rollout restart deploy/sure-worker`, then assert the sidekiq-cron set
+      `cron_jobs:default` (NOT `cron_jobs`) has 11 members (SCARD). Remove this
+      rule only when that restart+assert is automated in the apply path.
 # ── Hard blocks by Renovate manager ─────────────────────────────────────────
 # github-actions patch/minor are already auto-merged by Renovate itself
 # (packageRules in .github/renovate.json5); don't double-handle them here.

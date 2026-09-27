@@ -119,7 +119,10 @@ def main() -> int:
     check("an UNMAPPED image still derives from the registry path (fallback intact)",
           ck.get_release_notes_project("ghcr.io/foo/bar") == ("foo", "bar"))
     check("an image with no derivation is None, not a guess",
-          ck.get_release_notes_project("redis") is None)
+          # `redis` was this example until 2026-09-27, when it was MAPPED
+          # (redis/redis, IMAGE_RELEASE_NOTES_PROJECTS); any bare official
+          # image that is not in the map must still resolve to None.
+          ck.get_release_notes_project("memcached") is None)
 
     # the second root cause: the registry host was taken as the owner
     check("docker.io/<owner>/<repo> derives (<owner>, <repo>), not ('docker.io', <repo>)",

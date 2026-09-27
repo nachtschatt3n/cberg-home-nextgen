@@ -72,10 +72,16 @@
 #         CREATE TABLE IF NOT EXISTS + one index; cannot fail on existing
 #         data. The rename re-runs the idempotent bootstrap, whose ALL-TABLES
 #         grants are what give both roles access to the new table.
+#   v9  — component_autonomy table (throughput program item B): the per-
+#         component track record behind the earned-autonomy fast lane and the
+#         fast_lane reason recorded per applied Step 0 item. Pure additive
+#         CREATE TABLE IF NOT EXISTS + two indexes; cannot fail on existing
+#         data. Until this Job has run the earned lane reads "unverified" and
+#         stays OFF (fail-safe) — nothing depends on the table existing.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v8  # v7->v8: media_audit_runs table. Rename forces recreate (Job spec immutable).
+  name: sweep-history-init-v9  # v8->v9: component_autonomy table. Rename forces recreate (Job spec immutable).
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history

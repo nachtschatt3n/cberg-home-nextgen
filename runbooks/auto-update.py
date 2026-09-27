@@ -88,6 +88,9 @@ from pathlib import Path
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).parent.resolve() / "lib"))
+import fast_lane  # noqa: E402  (shared with coverage.py — ONE definition of both fast lanes)
+
 SCRIPT_DIR = Path(__file__).parent.resolve()
 REPO_ROOT = SCRIPT_DIR.parent
 POLICY_PATH = SCRIPT_DIR / "auto-update-policy.yaml"
@@ -186,6 +189,38 @@ def policy_block(policy, dep, update_type):
 
 
 # ── PR discovery + parse ─────────────────────────────────────────────────────
+def pr_files(number):
+    """Paths a PR changes, or None when unknowable."""
+    rc, out, _ = run(["gh", "pr", "view", str(number), "--json", "files"], timeout=45)
+    if rc != 0:
+        return None
+    try:
+        return [f["path"] for f in json.loads(out or "{}").get("files", [])]
+    except Exception:
+        return None
+
+
+def path_block(policy, files):
+    """Reason string when a deny rule's `paths` globs match a file the PR
+    changes, else None. For rules a depName cannot express: Renovate keys a
+    shared image (`redis`) on ONE depName across every consumer, so a
+    consumer-specific hold (`*sure-redis*`) is only visible in the FILES.
+    `files is None` (unknowable) with any path rule present HOLDS — a rule
+    that cannot be evaluated must not read as a pass."""
+    rules = [r for r in (policy.get("deny") or []) if r.get("paths")]
+    if not rules:
+        return None
+    if files is None:
+        return "PR file list unreadable — path-scoped deny rules cannot be evaluated (fail-safe hold)"
+    for rule in rules:
+        for pat in rule.get("paths") or []:
+            hit = next((f for f in files if fnmatch.fnmatch(f, pat)), None)
+            if hit:
+                return (f"{rule.get('reason', 'blocked by path rule')} "
+                        f"[path rule {rule.get('match')!r}: PR changes {hit}]")
+    return None
+
+
 def list_renovate_prs():
     rc, out, err = run([
         "gh", "pr", "list", "--author", "app/renovate", "--state", "open",
@@ -291,7 +326,11 @@ def _owner_repo(checker, dep):
     """
     try:
         owner_repo = None
-        if "/" in dep and (dep.count("/") >= 1 and any(c in dep for c in ".:")) or "/" in dep:
+        # A slash-less dep is normally a CHART name — except an official
+        # Docker Hub image listed in the notes map (`redis`, 2026-09-27),
+        # which would otherwise fall through to the chart lookup and never
+        # resolve.
+        if "/" in dep or _in_notes_map(dep):
             owner_repo = checker.get_release_notes_project(dep)
         if not owner_repo:
             owner_repo = checker.get_chart_repo_info(dep.split("/")[-1], "", "")
@@ -450,13 +489,21 @@ def breaking_signal(checker, dep, new_tag, cur_tag=None):
     if not owner_repo:
         return [], False
     owner, repo = owner_repo
-    tags, resolved_range = [new_tag], True
+    # A build-flavour suffix the RELEASE tag does not carry (redis
+    # `8.10.2-alpine` is release `8.10.2`; check-all-versions.py
+    # IMAGE_TAG_FLAVOUR_SUFFIXES) is stripped for the target read only.
+    rel_tag = new_tag
+    try:
+        rel_tag = _CAV_RELEASE_TAG(dep, new_tag)
+    except Exception:
+        rel_tag = new_tag
+    tags, resolved_range = [rel_tag], True
     if cur_tag and str(cur_tag) not in ("", "?"):
         between, _why = release_tags_between(checker, dep, cur_tag, new_tag)
         if between is None:
             resolved_range = False
         else:
-            tags = between + [new_tag]
+            tags = between + [rel_tag]
     found, any_resolved = [], False
     for tag in tags:
         try:
@@ -465,10 +512,39 @@ def breaking_signal(checker, dep, new_tag, cur_tag=None):
                 continue
             any_resolved = True
             for d in checker.detect_breaking_changes(notes["body"], "minor") or []:
-                found.append(d if tag == new_tag else f"[skipped release {tag}] {d}")
+                found.append(d if tag == rel_tag else f"[skipped release {tag}] {d}")
         except Exception:
             continue
     return found, bool(any_resolved and resolved_range)
+
+
+def _cav_module():
+    """check-all-versions.py as a module, loaded once by path (its
+    module-level maps/helpers, as opposed to the VersionChecker instance)."""
+    global _CAV_MOD
+    if _CAV_MOD is None:
+        spec = importlib.util.spec_from_file_location(
+            "cberg_cav_tags", SCRIPT_DIR / "check-all-versions.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)  # type: ignore
+        _CAV_MOD = m
+    return _CAV_MOD
+
+
+def _CAV_RELEASE_TAG(dep, tag):
+    """check-all-versions.py's release_tag_for()."""
+    return _cav_module().release_tag_for(dep, tag)
+
+
+def _in_notes_map(dep):
+    try:
+        m = _cav_module()
+        return m._image_map_key(dep) in m.IMAGE_RELEASE_NOTES_PROJECTS
+    except Exception:
+        return False
+
+
+_CAV_MOD = None
 
 
 def _distro_source(checker, dep):
@@ -959,17 +1035,39 @@ def upstream_release_age_hours(checker, dep, new_tag):
     return None, None
 
 
-def age_gate(pr, parsed, policy, checker=None):
+def age_gate(pr, parsed, policy, checker=None, info=None):
     """None = pass; else (gate, reason) hold tuple. Fail-safe: unknown HOLDS.
 
     Prefers the upstream release timestamp; falls back to the PR's newest
     commit (the stricter, force-push-resettable measure) when upstream is
-    unknowable, and names the measure used either way."""
-    min_age = policy.get("minimum_release_age_hours") or 0
+    unknowable, and names the measure used either way.
+
+    The cooldown is per update_type since 2026-09-27 (patch 24h, minor 48h —
+    fast_lane.cooldown_hours). `info`, when given, receives `fast_lane`
+    (security|normal) and `security_ref` so the caller can record WHY the item
+    passed G5 (item B.5, for the weekly retro)."""
+    info = info if info is not None else {}
+    info.setdefault("fast_lane", "normal")
+    min_age = fast_lane.cooldown_hours(policy, parsed.get("update_type"))
+    info["cooldown_h"] = min_age
     if not min_age:
         return None
+    # Security fast lane (B.3): the CURRENT tag carries an open fixable
+    # CRITICAL/HIGH finding with a newer upstream tag. Needs a KNOWN current
+    # tag — a bare-shape title cannot prove the running image is the flagged one.
+    if parsed.get("cur_known") and parsed.get("update_type") in SAFE_TYPES:
+        fid = fast_lane.security_bypass(policy, [parsed["dep"]], parsed.get("cur"))
+        if fid:
+            info.update(fast_lane="security", security_ref=fid,
+                        cooldown_note=f"cooldown bypassed — CVE fix for open finding {fid}")
+            log(f"   G5 #{pr['number']}: security fast lane ({fid}) — cooldown bypassed")
+            return None
     waiver = security_waived({**pr, "_dep": parsed["dep"]}, policy)
     if waiver:
+        if waiver == "security-marked PR":
+            info.update(fast_lane="security", cooldown_note="cooldown waived — security-marked PR")
+        else:
+            info["cooldown_note"] = f"cooldown waived — {waiver}"
         return None
     age = source = None
     if checker is not None:
@@ -982,8 +1080,9 @@ def age_gate(pr, parsed, policy, checker=None):
                        f"{min_age}h cooldown elapsed) — holding")
     log(f"   G5 #{pr['number']}: age {age:.0f}h via {source}")
     if age < min_age:
-        return ("age", f"release only {age:.0f}h old via {source} (< {min_age}h "
-                       f"cooldown); auto-merges after the cooldown or on a security signal")
+        return ("age", f"release only {age:.0f}h old via {source} (< {min_age:g}h "
+                       f"{parsed.get('update_type')} cooldown); auto-merges after the "
+                       f"cooldown or on a security signal")
     return None
 
 
@@ -1090,8 +1189,17 @@ def classify(pr, policy, checker):
     blocked = policy_block(policy, parsed["dep"], parsed["update_type"])
     if blocked:
         return {**r, "verdict": "hold", "gate": "policy", "reason": blocked}
+    # G2 by FILE — consumer-specific holds on a shared depName (sure-redis)
+    if any(rule.get("paths") for rule in (policy.get("deny") or [])):
+        blocked = path_block(policy, pr_files(pr["number"]))
+        if blocked:
+            return {**r, "verdict": "hold", "gate": "policy", "reason": blocked}
     # G5 age (before the expensive gates; cheap policy checks already passed)
-    held = age_gate(pr, parsed, policy, checker)
+    g5 = {}
+    held = age_gate(pr, parsed, policy, checker, info=g5)
+    r["fast_lane"] = g5.get("fast_lane", "normal")
+    if g5.get("security_ref"):
+        r["security_ref"] = g5["security_ref"]
     if held:
         return {**r, "verdict": "hold", "gate": held[0], "reason": held[1]}
     # G3 breaking
@@ -1118,6 +1226,7 @@ def classify(pr, policy, checker):
         return {**r, "verdict": "hold", "gate": "ci", "reason": detail}
     return {**r, "verdict": "safe", "gate": "-",
             "reason": "patch/minor, not denied, no breaking signal, CI green"
+                      + (f" [fast lane: security, {r['security_ref']}]" if r.get("security_ref") else "")
                       + ("" if resolved else " (release notes unavailable — relied on CI + policy)")
                       + ("" if s_resolved else f" (diff not inspected for migrations/schema — {s_note})")}
 
@@ -1210,6 +1319,26 @@ def revert_batch(shas):
     return reverted
 
 
+def record_autonomy(merged, outcome):
+    """One component_autonomy row per merged PR (B.4/B.5). A failed write is
+    LOUD in the log and in the JSON (`error`), never silent — but it does not
+    undo a healthy merge: the record is bookkeeping, the merge is the change."""
+    out = []
+    slot = os.environ.get("MAINTENANCE_WINDOW_SLOT") or None
+    for c in merged:
+        try:
+            rid = fast_lane.record(
+                component=str(c["dep"]).rsplit("/", 1)[-1], dep=c["dep"], version=c["new"],
+                lane="pr", fast_lane=c.get("fast_lane", "normal"), outcome=outcome,
+                window_slot=slot, finding_ref=c.get("security_ref"),
+                notes=f"PR #{c['number']} {c.get('merge_sha') or ''}".strip())
+            out.append({"dep": c["dep"], "id": rid, "outcome": outcome})
+        except Exception as e:
+            log(f"  !! autonomy record FAILED for {c['dep']}: {e}")
+            out.append({"dep": c["dep"], "error": str(e), "outcome": outcome})
+    return out
+
+
 # ── findings / alert ─────────────────────────────────────────────────────────
 def _writer():
     try:
@@ -1269,7 +1398,10 @@ def main(argv=None):
             f"[{c.get('update_type','?')}] — {c['reason']}")
 
     result = {"trigger": trigger, "apply": apply, "safe": safe, "held": held,
-              "merged": [], "reverted": [], "health": None}
+              "merged": [], "reverted": [], "health": None,
+              # where the fast lanes read from — "unverified" means that lane
+              # was OFF this run (fail-safe), not that it found nothing
+              "fast_lane_sources": dict(fast_lane.SOURCE)}
 
     if apply_blocked:
         log("\n-- --apply given but trigger is not 'cron' (and AUTO_UPDATE_APPLY≠1): "
@@ -1305,7 +1437,9 @@ def main(argv=None):
         merged.append(c)
         all_apps |= affected_apps(c["number"])
         log(f"  ✔ merged #{c['number']} {c['dep']} → {c['new']} ({str(sha)[:8]})")
-    result["merged"] = [{"number": c["number"], "dep": c["dep"], "new": c["new"], "sha": c.get("merge_sha")} for c in merged]
+    result["merged"] = [{"number": c["number"], "dep": c["dep"], "new": c["new"],
+                         "sha": c.get("merge_sha"), "fast_lane": c.get("fast_lane", "normal"),
+                         "security_ref": c.get("security_ref")} for c in merged]
 
     if not merged:
         log("== no PRs merged (all merge attempts failed) ==")
@@ -1328,6 +1462,11 @@ def main(argv=None):
             log(f"     - {p}")
         reverted = revert_batch([c.get("merge_sha") for c in merged])
         result["reverted"] = reverted
+        # B.4: a revert RESETS earned autonomy to zero. The batch is reverted as
+        # a whole and the culprit is not isolated, so EVERY merged component gets
+        # a `reverted` row — the conservative direction (an innocent component
+        # re-earns; a guilty one never skates).
+        result["autonomy_records"] = record_autonomy(merged, "reverted")
         reconcile(all_apps)  # push cluster back to reverted state
         title = f"Auto-update reverted: {len(reverted)} merge(s) regressed the cluster"
         # Emit the sweep finding first so we can key the OpenClaw issue on its
@@ -1367,6 +1506,7 @@ def main(argv=None):
         return 2
 
     log(f"\n== applied {len(merged)} update(s), post-apply health OK ==")
+    result["autonomy_records"] = record_autonomy(merged, "green")
     if w:
         with w:
             w.emit("clean", f"Auto-update merged {len(merged)} safe update(s), cluster healthy",

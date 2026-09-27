@@ -58,6 +58,8 @@ from pathlib import Path
 import yaml
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
+sys.path.insert(0, str(SCRIPT_DIR / "lib"))
+import fast_lane  # noqa: E402  (shared with auto-update.py — ONE definition of both fast lanes)
 REPO_ROOT = SCRIPT_DIR.parent
 VERSION_MD = SCRIPT_DIR / "version-check-current.md"
 POLICY = SCRIPT_DIR / "auto-update-policy.yaml"
@@ -1605,12 +1607,24 @@ def _active_age_waivers(policy):
 
 
 def direct_bump_age_gate(item, policy):
-    """None = may auto-apply; else a reason string that HOLDS it."""
-    min_age = (policy or {}).get("minimum_release_age_hours") or 0
+    """None = may auto-apply; else a reason string that HOLDS it.
+
+    The cooldown is per update_type since 2026-09-27 (throughput item B.2:
+    patch 24h, minor 48h — fast_lane.cooldown_hours). A NON-MAJOR image bump
+    whose CURRENT tag carries an open fixable CRITICAL/HIGH security finding
+    with a newer upstream tag skips it (B.3); the finding id is stamped on the
+    item (`fast_lane: security`, `security_ref`) so Step 0 records it."""
+    min_age = fast_lane.cooldown_hours(policy, item.get("type"))
     if not min_age:
         return None
     dep = (item.get("component") or "").lower()
     repos = item.get("image_repos") or ([item["image_repo"]] if item.get("image_repo") else [])
+    if item.get("kind") == "image" and item.get("type") in ("patch", "minor") and repos:
+        fid = fast_lane.security_bypass(policy, repos, item.get("current"))
+        if fid:
+            item["fast_lane"] = "security"
+            item["security_ref"] = fid
+            return None
     for pat in _active_age_waivers(policy):
         if fnmatch.fnmatch(dep, str(pat).lower()) or any(
                 fnmatch.fnmatch((r or "").lower(), str(pat).lower()) for r in repos):
@@ -2557,10 +2571,23 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
         # That shape routes to an assessed window. "No image repository" also
         # passes through: G5 already holds it one gate earlier with a truer reason.
         # Measured on the live rows when added: zero flips that day.
+        #
+        # EARNED AUTONOMY (throughput item B.1, 2026-09-27): a component with a
+        # clean track record (policy `earned_autonomy`: >= 3 green applies and 0
+        # reverts in 90 days, from sweep_history component_autonomy) may land an
+        # UNVERIFIED patch/minor anyway — its record is the evidence the notes
+        # would have been. Everything above this line (deny, 0.x, channel,
+        # pre-release, major, cooldown, a POSITIVE breaking signal) has already
+        # held it if it applies, and the structural gate still runs below.
+        # Unreadable ledger => not earned => today's PLAN routing.
+        earned_note = None
         if "release notes unavailable" in str(g3):
-            return "PLAN", (f"G3 could not verify the release notes ({g3}) — an "
-                            f"unverified bump needs an assessed window, never the "
-                            f"unattended lane"), None
+            ok, why = fast_lane.earned(policy, fast_lane.keys_for(comp, _item_repos(item)))
+            if not ok:
+                return "PLAN", (f"G3 could not verify the release notes ({g3}) — an "
+                                f"unverified bump needs an assessed window, never the "
+                                f"unattended lane (earned autonomy: {why})"), None
+            earned_note = f"G3 unverified — EARNED autonomy ({why})"
         # G3 over the RANGE, not the target alone (F-51728488): a breaking
         # change announced in a release this hop LEAPFROGS is exactly as
         # breaking as one in the target, and the target-only read made the
@@ -2569,9 +2596,14 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
         if rstatus == "breaking":
             return "PLAN", f"G3 breaking-change signal in a SKIPPED release — {rnote}", None
         if rstatus == "unreadable":
-            return "PLAN", (f"G3 range UNEVALUATED across a minor boundary — {rnote}. "
-                            f"The hop leapfrogs at least one release whose notes were "
-                            f"not read; needs an assessed window plan"), None
+            ok, why = fast_lane.earned(policy, fast_lane.keys_for(comp, _item_repos(item)))
+            if not ok:
+                return "PLAN", (f"G3 range UNEVALUATED across a minor boundary — {rnote}. "
+                                f"The hop leapfrogs at least one release whose notes were "
+                                f"not read; needs an assessed window plan (earned "
+                                f"autonomy: {why})"), None
+            earned_note = (earned_note or "") + (f"; " if earned_note else "") + \
+                f"G3 range unreadable — EARNED autonomy ({why})"
         # G3s STRUCTURAL companion (F-ea1000ff): the DIFF between the two tags,
         # not the prose. Runs only when the notes resolver WORKED ("checked"):
         # it rides the same GitHub project resolution, and when G3 could not
@@ -2579,7 +2611,9 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
         # PLAN (unavailable) above — a second unreadable verdict adds nothing
         # and would make every offline run reach for the network twice.
         s_note = ""
-        if "checked" in g3:
+        # The structural companion also runs on the EARNED path: the notes could
+        # not be read, but the diff may be — and a migration there still holds.
+        if "checked" in g3 or earned_note:
             is_struct, s_note = _direct_bump_structural_gate(item)
             if is_struct:
                 return "PLAN", (f"G3 structural signal — {s_note}; a migration or "
@@ -2592,6 +2626,14 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
             g3_note += f"; G3 range: {rnote}"
         if pr_note:
             g3_note += f"; {pr_note}"
+        # Fast-lane reason, recorded per applied item for the weekly retro (B.5).
+        # security wins over earned: it is the reason the item is here TODAY.
+        if item.get("fast_lane") != "security":
+            item["fast_lane"] = "earned" if earned_note else "normal"
+        if earned_note:
+            g3_note += f"; {earned_note}"
+        if item.get("fast_lane") == "security":
+            g3_note += f"; fast lane: security ({item.get('security_ref')}) — cooldown bypassed"
         return "AUTO", f"safe patch/minor — window applies (hybrid: PR or direct-bump){g3_note}", None
     return "CRACK", "actionable but unclassifiable — MUST be triaged", None
 
@@ -3082,6 +3124,11 @@ def reconcile():
 
     return {
         "counts": {k: len(v) for k, v in lanes.items()},
+        # B.5: why each AUTO item is in the lane (earned | security | normal),
+        # and where the fast lanes read from — "unverified" = that lane was OFF.
+        "fast_lane_counts": {fl: sum(1 for e in lanes["AUTO"] if e.get("fast_lane") == fl)
+                             for fl in fast_lane.FAST_LANES},
+        "fast_lane_sources": dict(fast_lane.SOURCE),
         "max_rule_fallback": fallbacks,     # allowed update masked by a blocked one
         "already_applied": applied,         # in the snapshot, already in git
         "snapshot_age_hours": snapshot_age_hours(),
