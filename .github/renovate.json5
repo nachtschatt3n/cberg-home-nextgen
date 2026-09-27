@@ -18,25 +18,47 @@
   // an open, render-gate-checked PR (flate) by 03:30 and Step 0 merges that instead.
   // Latency is unchanged (the G5 release-age gate measures upstream age); this
   // only shifts volume into the stricter lane. Automerge stays github-actions-only.
-  "schedule": ["before 6am every day"],
+  //
+  // timezone (2026-09-27): without it the schedule was evaluated in UTC, i.e.
+  // "before 08:00 Berlin" in summer — the window drifted with DST and did not
+  // line up with the 03:30 Europe/Berlin nightly window it exists to feed.
+  // ("before 6am every day" -> "before 6am" is Renovate's own config migration;
+  // identical meaning.)
+  "timezone": "Europe/Berlin",
+  "schedule": ["before 6am"],
+  // THROUGHPUT FIX (2026-09-27, operator-approved program item A). Renovate was
+  // running with EVERY update behind Dependency Dashboard approval, a setting
+  // that has never been in this file (git log -p .github/renovate.json5) and so
+  // came from outside the repo (Mend app / inherited config). Evidence: the
+  // dashboard (#7) listed all ~100 updates, github-actions patches included,
+  // under "Pending Approval"; and 111/111 Renovate PRs opened since 2026-02-22
+  // were on a branch ticked on that dashboard on 2026-02-21 — no other branch
+  // ever got a PR. The dashboard body then froze (never rewritten after
+  // 2026-02-21) and was closed 2026-09-24, so no new update could be approved
+  // at all. Set explicitly false so repo config wins over whatever injected it:
+  // every update gets a normal labelled PR, and the maintenance window's Step 0
+  // (runbooks/auto-update.py + auto-update-policy.yaml) decides what merges.
+  // The three per-package approval rules below stay — each guards a coupled pin
+  // that a single-file PR would break.
+  "dependencyDashboardApproval": false,
   "ignorePaths": ["**/*.sops.*"],
   "flux": {
-    "fileMatch": ["(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$"]
+    "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$/"]
   },
   "helm-values": {
-    "fileMatch": ["(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$"]
+    "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$/"]
   },
   "helmfile": {
-    "fileMatch": ["(^|/)helmfile\\.ya?ml(?:\\.j2)?$"]
+    "managerFilePatterns": ["/(^|/)helmfile\\.ya?ml(?:\\.j2)?$/"]
   },
   "kubernetes": {
-    "fileMatch": ["(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$"]
+    "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$/"]
   },
   "kustomize": {
-    "fileMatch": ["(^|/)kustomization\\.ya?ml(?:\\.j2)?$"]
+    "managerFilePatterns": ["/(^|/)kustomization\\.ya?ml(?:\\.j2)?$/"]
   },
   "pip_requirements": {
-    "fileMatch": ["(^|/)[\\w-]*requirements(-\\w+)?\\.(txt|pip)(?:\\.j2)?$"]
+    "managerFilePatterns": ["/(^|/)[\\w-]*requirements(-\\w+)?\\.(txt|pip)(?:\\.j2)?$/"]
   },
   "packageRules": [
     {
@@ -50,7 +72,7 @@
     {
       "description": ["Flux Operator Group"],
       "groupName": "Flux Operator",
-      "matchPackagePatterns": ["flux-operator", "flux-instance"],
+      "matchPackageNames": ["/flux-operator/", "/flux-instance/"],
       "matchDatasources": ["docker", "helm"],
       "group": {
         "commitMessageTopic": "{{{groupName}}} group"
@@ -59,10 +81,7 @@
     {
       "description": ["Talos Group"],
       "groupName": "Talos",
-      "matchPackagePatterns": [
-        "siderolabs/talosctl",
-        "siderolabs/installer"
-      ],
+      "matchPackageNames": ["/siderolabs/talosctl/", "/siderolabs/installer/"],
       "matchDatasources": ["docker"],
       "group": {
         "commitMessageTopic": "{{{groupName}}} group"
@@ -260,7 +279,8 @@
       "description": ["Flux GitRepository chart sources — dashboard-approval only"],
       "matchDatasources": ["github-releases"],
       "matchPackageNames": ["kubernetes-csi/csi-driver-smb"],
-      "dependencyDashboardApproval": true
+      "dependencyDashboardApproval": true,
+      "addLabels": ["renovate/coupled-pin"]
     },
     {
       // csi-driver-smb's GitRepository ALSO reaches Renovate through the built-in
@@ -335,7 +355,8 @@
       "matchDatasources": ["github-tags"],
       "matchPackageNames": ["nachtschatt3n/oc8"],
       "versioning": "regex:^oc8home-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
-      "dependencyDashboardApproval": true
+      "dependencyDashboardApproval": true,
+      "addLabels": ["renovate/coupled-pin"]
     },
     {
       // Envoy DATA-PLANE image (F-58dbe939), pinned in
@@ -361,14 +382,15 @@
       "matchDatasources": ["docker"],
       "matchPackageNames": ["docker.io/envoyproxy/envoy"],
       "versioning": "regex:^distroless-v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
-      "dependencyDashboardApproval": true
+      "dependencyDashboardApproval": true,
+      "addLabels": ["renovate/coupled-pin"]
     }
   ],
   "customManagers": [
     {
       "customType": "regex",
       "description": ["Process YAML custom dependencies"],
-      "fileMatch": ["(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$"],
+      "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$/"],
       "matchStrings": [
         "datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( repository=(?<registryUrl>\\S+))?\\n.+(:\\s|=)(&\\S+\\s)?(?<currentValue>\\S+)",
       ],
@@ -381,7 +403,7 @@
       // repository: line and this regex picks it up as a Docker datasource.
       "customType": "regex",
       "description": ["Sub-chart nested image refs annotated with `# renovate: image=...`"],
-      "fileMatch": ["(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$"],
+      "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$/"],
       "matchStrings": [
         "#\\s*renovate:\\s*image=(?<depName>\\S+)\\s*\\n\\s*repository:\\s*\\S+\\s*\\n\\s*tag:\\s*[\"']?(?<currentValue>[^\"'\\s]+)[\"']?"
       ],
@@ -417,7 +439,7 @@
       // only one of the four places the version lives.
       "customType": "regex",
       "description": ["Chart version pinned inside a commit-pinned Flux GitRepository"],
-      "fileMatch": ["(^|/)kubernetes/flux/meta/repositories/git/[^/]+\\.ya?ml$"],
+      "managerFilePatterns": ["/(^|/)kubernetes/flux/meta/repositories/git/[^/]+\\.ya?ml$/"],
       "matchStrings": [
         "url:\\s+https://github\\.com/(?<depName>[^/\\s]+/[^/\\s]+?)(?:\\.git)?\\s*\\n[\\s\\S]*?\\n\\s*ignore:[\\s\\S]*?!/charts/v(?<currentValue>\\d+\\.\\d+\\.\\d+)"
       ],
