@@ -1,4 +1,3 @@
----
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -37,7 +36,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/gas-price-monitor
-              tag: sha-bd934d1 # {"$imagepolicy": "my-software-production:gas-price-monitor:tag"}
+              tag: sha-e2ec290-b20260927 # {"$imagepolicy": "my-software-production:gas-price-monitor:tag"}
               pullPolicy: IfNotPresent
             # TANKERKOENIG_API_KEY is sourced from the SOPS-encrypted Secret
             # `gas-price-monitor` (see ./secret.sops.yaml). The reloader
@@ -112,7 +111,6 @@ spec:
         fsGroupChangePolicy: "OnRootMismatch"
         seccompProfile:
           type: RuntimeDefault
-
     service:
       app:
         controller: gas-price-monitor
@@ -120,7 +118,6 @@ spec:
           http:
             port: 80
             targetPort: 3000
-
     # Ephemeral state (history + alerts) is intentional — pod restart wipes both.
     # Per the source repo CLAUDE.md, switching to a PVC also requires reconsidering
     # the single-replica rule (shared-fs caches can race on writes).
