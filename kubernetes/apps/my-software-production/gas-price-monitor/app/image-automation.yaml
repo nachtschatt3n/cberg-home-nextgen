@@ -1,0 +1,77 @@
+---
+# Flux image automation for gas-price-monitor (program item F, operator-approved
+# 2026-09-27). Mode table: docs/sops/self-built-image-rebuild.md
+# "Weekly rebuild + deploy mode".
+#
+# Internet-facing, so auto-deploy is only acceptable because the rollout is
+# health-gated: HTTP liveness + readiness probes on /api/config, and
+# `upgrade.remediation.strategy: rollback` -- a rebuilt image that fails its
+# probes times the Helm upgrade out and is rolled back automatically.
+#
+# Selects ONLY the weekly no-cache rebuild tag `sha-<7hex>-b<YYYYMMDD>` from the
+# repo's scheduled-rebuild.yml. The push CI's plain `sha-<7hex>` / `main` /
+# `latest` tags deliberately do NOT match, so an ad-hoc push is never deployed
+# by this automation. ^...$ anchors are load-bearing (Flux matches unanchored).
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: gas-price-monitor
+  namespace: my-software-production
+spec:
+  image: ghcr.io/nachtschatt3n/gas-price-monitor
+  interval: 1h
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: gas-price-monitor
+  namespace: my-software-production
+spec:
+  imageRepositoryRef:
+    name: gas-price-monitor
+  filterTags:
+    pattern: '^sha-[0-9a-f]{7}-b(?P<ts>\d{8})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: gas-price-monitor-image-updates
+  namespace: my-software-production
+spec:
+  # Separate from absenty-image-updates on purpose: that one is SUSPENDED for
+  # the dependabot drain and must stay so; this one's update.path is scoped to
+  # this app's directory only.
+  interval: 30m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcdbot@users.noreply.github.com
+        name: fluxcdbot
+      messageTemplate: |
+        chore(gas-price-monitor): update container image (weekly rebuild)
+
+        Automation name: {{ .AutomationObject }}
+
+        Objects updated:
+        {{ range $resource, $changes := .Changed.Objects -}}
+        - {{ $resource.Kind }} {{ $resource.Name }}
+        {{- range $_, $change := $changes }}
+          {{ $change.OldValue }} -> {{ $change.NewValue }}
+        {{ end -}}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    strategy: Setters
+    path: "./kubernetes/apps/my-software-production/gas-price-monitor"
