@@ -691,6 +691,61 @@ above still applies EXCEPT where this section replaces it.
    plan (Step 0 still counts in `--safe-updates`). Then the Step 5 report and
    `openclaw-sync.py` reconcile as usual.
 
+## Standing operator decisions (pre-decided — do NOT stop to ask)
+
+Recorded from the 2026-09-26/27 attended runs, where the operator answered each
+of these the same way every time and asked for fewer human-in-the-loop stops.
+Apply them silently, **log each use in the run evidence** ("standing decision
+SD-n"), and still STOP for anything outside their exact conditions. They never
+override: reboots in non-reboot slots, storage-safety rules, quorum LOSS
+(`has_leader` min = 0), an unexplained regression, or data-destructive steps.
+
+- **SD-1 Gate false positive with evidence → fix the gate, keep the change.**
+  If a gate trips and you can PROVE the thing it measures is healthy (e.g. a
+  stale metric series after an upgrade, a renamed label, a check that decodes
+  once where the product now encodes once), do not roll back: record the gate
+  as FAIL-explained, file a finding for the gate/rule fix (fix it via GitOps in
+  the same run if it is an alert rule), and continue. Rollback stays mandatory
+  when the evidence is not conclusive.
+- **SD-2 Garbage objects after a drain → delete them.** Failed/stopped
+  Longhorn `replicas.longhorn.io` on the node just rolled, whose volume is
+  healthy with the full replica count running elsewhere, are deleted (via
+  cberg-agent, pre-check logged per replica) so the replica-count gate passes
+  as written. Never a PVC/PV/Volume.
+- **SD-3 etcd elections explained by drain-induced disk stall → continue.**
+  Leader changes during a node's own drain/reboot are accepted when ALL hold:
+  carrier +0 on survivors; `min_over_time(etcd_server_has_leader[15m])` = 1 on
+  survivors; survivor etcd log shows `slow fdatasync` inside that window; etcd
+  clean + converged afterwards. If a condition is unverifiable (monitoring
+  blind), record the gate as FAIL-explained (SD-5) and continue if there is no
+  node left; otherwise STOP.
+- **SD-4 Recording choices default to the honest exception.** When the only
+  question is how to *record* an outcome (accept-with-caveat vs recorded
+  exception), record the exception with the evidence and do not ask.
+- **SD-5 "Proof by inspection" is acceptable when the known failure mode is
+  demonstrably absent** (e.g. a node with 0 attached volumes after rolling
+  last, empty iSCSI node records, no FailedAttach). Do not bounce workloads just
+  to manufacture a live proof.
+- **SD-6 Approvals survive scope-reducing or patch-level amendments.** A plan
+  amended to do LESS (e.g. dropping a migration step) or re-targeted within the
+  same minor line with an unchanged risk class keeps its operator GO; note the
+  amendment in the run notes. A new capability, a higher risk class, or a
+  reboot the GO did not cover still needs a fresh GO.
+- **SD-7 A plan's own rule blocks while the operator is present → present
+  options, do NOT close the window.** Keep the window open, give 2–3 concrete
+  options (incl. an in-window amendment path with re-review), and let the
+  operator choose. Closing/rescheduling is only the default when unattended.
+- **SD-8 Operator-present browser/UI checks are done by the coordinator in
+  Chrome** (existing session; never passwords). Only credential entry and
+  physical steps (scanner, phone on mobile data, device buttons) go to the
+  operator. Existing-session logins count as satisfied-with-caveat for
+  "fresh login" gates.
+- **SD-9 Transient roll noise is silenced up front.** At the start of a
+  reboot/roll plan, create a time-boxed Alertmanager silence for the expected
+  roll transients (node/etcd/Longhorn/TargetDown/DaemonSet/pod/outpost
+  alerts) ending at window end + 30 min, keep Watchdog unsilenced, and note it.
+  Pre-existing alerts are NOT covered by it (report them separately).
+
 ## Boundaries
 - You orchestrate + verify; **cberg-agent performs cluster mutations**, ha-agent
   for Home Assistant, and node-reboot upgrades follow `docs/sops/talos-upgrade.md`.
