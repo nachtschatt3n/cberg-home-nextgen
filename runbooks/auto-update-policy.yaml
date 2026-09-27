@@ -420,7 +420,7 @@ deny:
   # reader to discount a reason that is load-bearing on the OTHER rule.
   - match: "aqua:siderolabs/talos"
     reason: "talosctl CLI pin — tracks the CLUSTER version (talosVersion in
-      kubernetes/bootstrap/talos/talconfig.yaml, currently v1.13.10), so it must
+      kubernetes/bootstrap/talos/talconfig.yaml, currently v1.14.1), so it must
       never move AHEAD of the nodes. It FOLLOWS a node upgrade; it does not
       authorise one. Merge only after the cluster is actually on the new
       version. This is a local binary — no reboot window, no maintenance plan."
