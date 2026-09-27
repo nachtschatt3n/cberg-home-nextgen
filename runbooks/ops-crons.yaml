@@ -1,0 +1,34 @@
+# ops-crons.yaml — git mirror of the OpenClaw crons that drive the Mac ops
+# console for scheduled OPERATIONS work that is not a maintenance window.
+#
+# Same contract as maintenance-windows.yaml <-> window-crons.py: the YAML is the
+# reviewed declaration, the OpenClaw cron (on the openclaw PVC, not in git) is
+# the executor, and `runbooks/window-crons.py --check` (run by every sweep via
+# maintenance-plan.py reconcile) asserts that each entry below has exactly one
+# enabled cron with this schedule/tz, and a failureAlert whose cooldown is
+# STRICTLY shorter than the period (F-e6dda67f). `--render` prints the exact
+# `openclaw cron add` to recreate a missing one.
+#
+# The work still runs ON THE MAC (local SOPS key, kubectl, mise tooling) — the
+# cron only types the intent into the `ai-server-ops` console via the
+# `operation` skill, which refuses a busy/menu pane (exit 13) and auto-clears an
+# exhausted-idle one. Never replace an entry with a session-local /loop or
+# CronCreate, and never with a cloud sandbox (CLAUDE.md "Scheduled Sweeps").
+version: "2026.09.27"
+timezone: Europe/Berlin
+
+crons:
+  - id: ops-retro
+    name: "Weekly Ops Retro"
+    description: >-
+      Weekly operations-efficiency retro (runbooks/ops-retro.md): measure the
+      last 7 days vs the previous 7, rank unnecessary human stops, gate
+      misfires, agent stalls and toil; ingest one report to home-operation;
+      emit findings; PROPOSE standing-decision changes. Monday 07:30 is after
+      the nightly window (03:30 + retry 05:45) and before the operator's day.
+    # substring the cron's command argv must contain (one cron per entry)
+    command: "/home/node/.openclaw/bin/operation retro --trigger cron"
+    cron: "30 7 * * 1"
+    period: weekly
+    failure_alert_cooldown: 6d
+    timeout_seconds: 600          # fire-and-return (no --wait): resolve + optional /clear

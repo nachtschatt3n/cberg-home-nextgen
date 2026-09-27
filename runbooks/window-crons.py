@@ -40,6 +40,13 @@ cooldown and was swallowed; the retry cron had no failureAlert at all.
 presence, after>=1, a destination, and cooldown < period. The Telegram
 destination is never committed (public repo) — --render reads it from
 $FAILURE_ALERT_TO at paste time.
+
+Ops crons (2026-09-27). `runbooks/ops-crons.yaml` mirrors the crons that
+drive the ops console for scheduled work that is NOT a window — first the
+weekly ops retro (`operation retro --trigger cron`, Mon 07:30). --check
+asserts the same things per entry: exactly one cron whose argv contains the
+declared command, enabled, at the declared expr/tz, with a failureAlert
+(after>=1, a destination, cooldown < period). --render prints its cron add.
 """
 
 from __future__ import annotations
@@ -55,6 +62,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WINDOWS_YAML = Path(__file__).resolve().parent / "maintenance-windows.yaml"
+OPS_CRONS_YAML = Path(__file__).resolve().parent / "ops-crons.yaml"
 
 _DOW = {"sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3,
         "thursday": 4, "friday": 5, "saturday": 6}
@@ -129,6 +137,98 @@ def check_failure_alerts(windows: list, crons: list) -> list[str]:
             if int(fa.get("after") or 0) < 1:
                 errs.append(f"window {wid!r}: {kind} failureAlert after={fa.get('after')!r} (< 1)")
     return errs
+
+
+_PERIOD_MS = {"daily": _DAY_MS, "weekly": 7 * _DAY_MS}
+
+
+def _dur_ms(text: str) -> int:
+    """'6d' / '20h' / '90m' -> ms."""
+    t = str(text).strip()
+    return int(float(t[:-1]) * {"d": _DAY_MS, "h": 3600_000, "m": 60_000}[t[-1]])
+
+
+def load_ops_crons(path: Path = OPS_CRONS_YAML) -> tuple[list, str]:
+    if not path.exists():
+        return [], "Europe/Berlin"
+    cfg = yaml.safe_load(path.read_text()) or {}
+    return cfg.get("crons", []) or [], cfg.get("timezone", "Europe/Berlin")
+
+
+def _argv_text(cron: dict) -> str:
+    return " ".join(str(a) for a in ((cron.get("payload") or {}).get("argv") or []))
+
+
+def check_ops_crons(decls: list, tz: str, crons: list) -> list[str]:
+    """Pure logic (testable): every ops-crons.yaml entry is driven by exactly
+    one enabled cron at the declared expr/tz, with a failureAlert whose
+    cooldown is < the period. Also refuses a declared cooldown >= period."""
+    errs = []
+    for d in decls:
+        did, cmd = str(d["id"]), str(d["command"])
+        period = _PERIOD_MS.get(str(d.get("period", "weekly")))
+        if period is None:
+            errs.append(f"ops cron {did!r}: unknown period {d.get('period')!r}")
+            continue
+        if _dur_ms(d.get("failure_alert_cooldown", "0m")) >= period:
+            errs.append(f"ops cron {did!r}: DECLARED failure_alert_cooldown "
+                        f"{d.get('failure_alert_cooldown')!r} >= period — would swallow "
+                        f"the next failure (F-e6dda67f)")
+        matches = [c for c in crons if cmd in _argv_text(c)]
+        if not matches:
+            errs.append(f"ops cron {did!r} declared but NO cron runs {cmd!r} — "
+                        f"the scheduled {did} silently never happens")
+            continue
+        if len(matches) > 1:
+            errs.append(f"ops cron {did!r} driven by {len(matches)} crons — double-fires")
+        c = matches[0]
+        if not c.get("enabled", True):
+            errs.append(f"ops cron {did!r}: cron exists but is DISABLED")
+        sched = c.get("schedule") or {}
+        if sched.get("expr") != d.get("cron"):
+            errs.append(f"ops cron {did!r}: cron expr {sched.get('expr')!r} != "
+                        f"declared {d.get('cron')!r}")
+        if sched.get("tz") != tz:
+            errs.append(f"ops cron {did!r}: cron tz {sched.get('tz')!r} != {tz!r}")
+        fa = c.get("failureAlert")
+        if not fa:
+            errs.append(f"ops cron {did!r}: NO failureAlert — a failed run pages nobody")
+            continue
+        cd = fa.get("cooldownMs")
+        if not isinstance(cd, (int, float)) or cd >= period:
+            errs.append(f"ops cron {did!r}: failureAlert cooldownMs {cd!r} >= period "
+                        f"{period} (F-e6dda67f)")
+        if not fa.get("to"):
+            errs.append(f"ops cron {did!r}: failureAlert has no destination")
+        if int(fa.get("after") or 0) < 1:
+            errs.append(f"ops cron {did!r}: failureAlert after={fa.get('after')!r} (< 1)")
+    return errs
+
+
+def render_ops_crons(decls: list, tz: str) -> str:
+    ops_session = os.environ.get("OPERATION_SESSION", "ai-server-ops")
+    out = []
+    for d in decls:
+        out.append(
+            "kubectl -n ai exec deploy/openclaw -c app -- "
+            "/home/node/.openclaw/bin/openclaw cron add \\\n"
+            f"  --name \"{d['name']}\" \\\n"
+            f"  --description \"{' '.join(str(d.get('description', '')).split())}\" \\\n"
+            f"  --cron \"{d['cron']}\" --tz {tz} --exact \\\n"
+            "  --session isolated \\\n"
+            f"  --command-argv '[\"sh\",\"-lc\",\"{d['command']}\"]' \\\n"
+            f"  --command-cwd /home/node/clawd --command-env OPERATION_SESSION={ops_session} \\\n"
+            f"  --no-output-timeout-seconds {int(d.get('timeout_seconds', 600))} "
+            f"--timeout-seconds {int(d.get('timeout_seconds', 600))} --no-deliver --json\n"
+            # OpenClaw 2026.6.x: `cron add` has no --failure-alert* flags; they
+            # exist only on `cron edit` (found registering ops-retro 2026-09-27).
+            "# then attach the failure alert to the id printed above:\n"
+            "kubectl -n ai exec deploy/openclaw -c app -- "
+            "/home/node/.openclaw/bin/openclaw cron edit <id> \\\n"
+            "  --failure-alert --failure-alert-after 1 --failure-alert-channel telegram "
+            "--failure-alert-to \"${FAILURE_ALERT_TO:?set to the ops Telegram chat id}\" \\\n"
+            f"  --failure-alert-mode announce --failure-alert-cooldown {d['failure_alert_cooldown']}\n")
+    return "\n".join(out)
 
 
 def load_windows(path: Path = WINDOWS_YAML) -> tuple[list, str]:
@@ -303,8 +403,11 @@ def main() -> int:
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     windows, tz = load_windows()
+    ops, ops_tz = load_ops_crons()
     if a.render:
         print(render(windows, tz))
+        if ops:
+            print(render_ops_crons(ops, ops_tz))
         return 0
     crons = fetch_crons()
     if crons is None:
@@ -312,7 +415,8 @@ def main() -> int:
                "note": "cron list unreadable — parity NOT verified (this is not a pass)"}
         print(json.dumps(msg) if a.json else f"⚠️  {msg['note']}")
         return 2
-    errs = check(windows, tz, crons) + check_failure_alerts(windows, crons)
+    errs = (check(windows, tz, crons) + check_failure_alerts(windows, crons)
+            + check_ops_crons(ops, ops_tz, crons))
     if a.json:
         print(json.dumps({"verified": True, "errors": errs}))
     else:
@@ -323,7 +427,8 @@ def main() -> int:
         else:
             n_retry = sum(1 for w in windows if w.get("retry_after_min"))
             print(f"parity holds: {len(windows)} window(s), each driven by exactly "
-                  f"one enabled cron ({n_retry} with a retry cron)")
+                  f"one enabled cron ({n_retry} with a retry cron); {len(ops)} ops "
+                  f"cron(s) from ops-crons.yaml present")
     return 1 if errs else 0
 
 
