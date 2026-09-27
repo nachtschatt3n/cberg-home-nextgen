@@ -449,7 +449,10 @@ def windows() -> dict:
     """Next window + warnings via the reconciler (source of truth)."""
     try:
         r = subprocess.run(
-            [sys.executable, str(REPO / "runbooks" / "maintenance-plan.py"), "--json"],
+            # --skip-coverage: the board reads only next/warnings/status here;
+            # the needs-a-plan dispatch list comes from rule 4d0's coverage run
+            [sys.executable, str(REPO / "runbooks" / "maintenance-plan.py"), "--json",
+             "--skip-coverage"],
             capture_output=True, text=True, timeout=120)
         d = json.loads(r.stdout)
         nxt = (d.get("next_windows") or [None])[0]

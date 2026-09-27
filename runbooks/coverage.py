@@ -2982,6 +2982,203 @@ def _prune_needs_plan_shared_image(lanes, needs_plan):
     return dropped
 
 
+# ── Grouped planner targets (needs_plan_groups) ─────────────────────────────
+# WHY (2026-09-27, throughput program item C). `needs_plan` is one row per
+# COMPONENT, but a planner is one agent writing one plan. Eight consumers of
+# `redis:*-alpine` moving to the same patch are ONE change (one plan:
+# redis-fleet-8.10.2), and the ~80 app-template wrappers are one chart bump —
+# dispatching per row either burns eight planners on one diff or, worse,
+# produces eight plans that must be kept in step by hand. So the sweep
+# dispatches per GROUP, and a group whose plan already exists is never
+# re-dispatched. Grouping rules (a union-find, so they compose):
+#   G1 image fleet   — image rows moving to the SAME target (dedupe-normalised)
+#                      that share an image repository;
+#   G2 same component — a component's rows join each other (a lockstep app leg
+#                      travels with its held sibling's group);
+#   G3 chart family  — chart rows with an identical current→target whose names
+#                      share the first dash token (flux-instance + flux-operator);
+#   G4 app-template  — every app-template chart row is ONE group.
+# A group is `security_driven` when any member carries a security ref, a
+# security marker in its reason, or an open fixable `security` finding names
+# its image — and security-driven groups sort first. The sweep dispatches at
+# most PLANNER_DISPATCH_CAP groups per cycle, in list order.
+PLANNER_DISPATCH_CAP = 5
+_GROUP_SEC_MARKERS = ("cve", "security", "vulnerab", "ghsa")
+_SEC_IMAGE_CACHE = None
+_SEC_IMAGE_SOURCE = "not queried"
+
+
+def security_image_rows() -> list:
+    """[{finding_id, repo, tag}] — OPEN, not-accepted, FIXABLE security rows on
+    ANY image (third-party included), from sweep_findings. Best-effort like
+    security_rebuild_rows(); absence is stated in `_SEC_IMAGE_SOURCE`, never
+    read as "no security-driven group"."""
+    global _SEC_IMAGE_CACHE, _SEC_IMAGE_SOURCE
+    if _SEC_IMAGE_CACHE is not None:
+        return _SEC_IMAGE_CACHE
+    _SEC_IMAGE_CACHE = []
+    dsn = os.environ.get("SWEEP_PG_DSN")
+    if not dsn:
+        _SEC_IMAGE_SOURCE = "unavailable — no SWEEP_PG_DSN; security_driven reads member data only"
+        return _SEC_IMAGE_CACHE
+    try:
+        import psycopg
+        with psycopg.connect(dsn, connect_timeout=5) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT finding_id, title FROM sweep_findings "
+                "WHERE section = 'security' AND resolved_at IS NULL "
+                "AND severity IN ('critical', 'warning') AND title LIKE %s",
+                ("%fixable%",))
+            rows = list(cur.fetchall())
+    except Exception as e:
+        _SEC_IMAGE_SOURCE = f"unavailable — sweep_findings query failed ({type(e).__name__})"
+        return _SEC_IMAGE_CACHE
+    for fid, title in rows:
+        m = _SEC_TITLE_REF.match(str(title or ""))
+        if not m:
+            continue
+        ref = m.group(1).split("@", 1)[0]
+        repo, sep, tag = ref.rpartition(":")
+        if not sep or "/" in tag:
+            repo, tag = ref, ""
+        _SEC_IMAGE_CACHE.append({"finding_id": fid, "repo": _norm_repo(repo), "tag": tag})
+    _SEC_IMAGE_SOURCE = f"sweep_findings ({len(_SEC_IMAGE_CACHE)} open fixable image row(s))"
+    return _SEC_IMAGE_CACHE
+
+
+def _slug(s) -> str:
+    """Plan-id shaped: lowercase, dots KEPT (plan ids carry versions)."""
+    return re.sub(r"[^a-z0-9.]+", "-", str(s or "").lower()).strip("-.")
+
+
+def _is_app_template(e) -> bool:
+    return (e.get("kind") == "chart"
+            and str(e.get("component", "")).lower().startswith("app-template"))
+
+
+def _member_security(e, sec_rows) -> list:
+    """Why this member is security-driven (list of evidence strings)."""
+    why = list(e.get("security_refs") or ([e["security_ref"]] if e.get("security_ref") else []))
+    hay = f"{e.get('reason', '')} {e.get('pr_title', '')}".lower()
+    if any(m in hay for m in _GROUP_SEC_MARKERS):
+        why.append("security marker in reason")
+    repos = {_norm_repo(r) for r in _item_repos(e)}
+    cur = _dedupe_tag(e.get("current"))
+    for row in sec_rows or ():
+        if row["repo"] in repos and (not row["tag"] or _dedupe_tag(row["tag"]) == cur):
+            why.append(row["finding_id"])
+    return sorted(set(why))
+
+
+def _group_plan(members, slug, plans):
+    """plan_id of a LIVE plan that already covers this group, else None.
+
+    Three ways, any suffices: (a) its plan_id / file stem IS the group slug;
+    (b) its component/also_covers keys name a member (or, for an image fleet,
+    the image basename) AND its `target` text carries the group's version;
+    (c) its `target` text names a member component AND that member's version
+    (redis-fleet-8.10.2 declares the open-webui app leg this way)."""
+    live = [p for p in plans or () if p.get("status") not in DEAD_PLAN_STATUSES]
+    member_keys, bases, vers = set(), set(), set()
+    for m in members:
+        member_keys |= _name_keys(m.get("component"))
+        if _is_app_template(m):
+            member_keys.add("app-template")
+        for r in _item_repos(m):
+            bases.add(_norm_repo(r).rsplit("/", 1)[-1])
+        vers.add(_dedupe_tag(m.get("target")).replace("-pre", ""))
+    for p in live:
+        if p.get("plan_id") == slug or str(p.get("file", "")).rsplit(".md", 1)[0] == slug:
+            return p.get("plan_id")
+    for p in live:
+        ptgt = str(p.get("target") or "")
+        pkeys = set(p.get("keys") or ()) | set(p.get("also_keys") or ())
+        if (pkeys & (member_keys | bases)) and any(v and v in ptgt for v in vers):
+            return p.get("plan_id")
+        low = ptgt.lower()
+        for m in members:
+            v = _dedupe_tag(m.get("target")).replace("-pre", "")
+            if v and v in ptgt and str(m.get("component", "")).lower() in low:
+                return p.get("plan_id")
+    return None
+
+
+def group_needs_plan(needs_plan, plans, sec_rows=None) -> list:
+    """Collapse `needs_plan` rows into planner targets (see block comment)."""
+    rows = list(needs_plan or ())
+    parent = list(range(len(rows)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+
+    for i, a in enumerate(rows):
+        for j in range(i + 1, len(rows)):
+            b = rows[j]
+            ca, cb = str(a.get("component", "")).lower(), str(b.get("component", "")).lower()
+            if ca and ca == cb:                                               # G2
+                union(i, j)
+            elif _is_app_template(a) and _is_app_template(b):                 # G4
+                union(i, j)
+            elif (a.get("kind") == b.get("kind") == "image"                   # G1
+                  and _dedupe_tag(a.get("target")) == _dedupe_tag(b.get("target"))
+                  and {_norm_repo(r) for r in _item_repos(a)}
+                  & {_norm_repo(r) for r in _item_repos(b)}):
+                union(i, j)
+            elif (a.get("kind") == b.get("kind") == "chart"                   # G3
+                  and _dedupe_tag(a.get("current")) == _dedupe_tag(b.get("current"))
+                  and _dedupe_tag(a.get("target")) == _dedupe_tag(b.get("target"))
+                  and ca.split("-", 1)[0] == cb.split("-", 1)[0]):
+                union(i, j)
+    buckets: dict = {}
+    for i in range(len(rows)):
+        buckets.setdefault(find(i), []).append(rows[i])
+    groups = []
+    for members in buckets.values():
+        first = members[0]
+        core = _dedupe_tag(first.get("target")).replace("-pre", "")
+        if any(_is_app_template(m) for m in members):
+            gkind, slug = "app-template", _slug(f"app-template-{core}")
+        elif len(members) == 1:
+            gkind, slug = "single", _slug(f"{first.get('component')}-{core}")
+        else:
+            shared = set.intersection(*[{_norm_repo(r) for r in _item_repos(m)} for m in members])
+            if shared and all(m.get("kind") == "image" for m in members):
+                base = sorted(shared)[0].rsplit("/", 1)[-1]
+                gkind, slug = "image-fleet", _slug(f"{base}-fleet-{core}")
+            elif all(m.get("kind") == "chart" for m in members):
+                token = str(first.get("component", "")).lower().split("-", 1)[0]
+                gkind, slug = "chart-family", _slug(f"{token}-fleet-{core}")
+            else:
+                gkind, slug = "component", _slug(f"{first.get('component')}-{core}")
+        sec = sorted({w for m in members for w in _member_security(m, sec_rows)})
+        plan = _group_plan(members, slug, plans)
+        groups.append({
+            "group_id": slug,
+            "group_kind": gkind,
+            "size": len(members),
+            "members": [{"component": m.get("component"), "namespace": m.get("namespace"),
+                         "kind": m.get("kind"), "current": m.get("current"),
+                         "target": m.get("target"),
+                         "image_repos": _item_repos(m)} for m in members],
+            "security_driven": bool(sec),
+            "security_evidence": sec,
+            "plan": plan,               # a LIVE plan already covers it
+            "dispatch": plan is None,   # → one upgrade-planner-agent
+            "reason": str(first.get("reason", ""))[:200],
+        })
+    groups.sort(key=lambda g: (not g["security_driven"], not g["dispatch"],
+                               -g["size"], g["group_id"]))
+    return groups
+
+
 def reconcile():
     policy = load_policy()
     actionable = parse_actionable()
@@ -3104,6 +3301,8 @@ def reconcile():
     sec_rows = security_rebuild_rows()
     from_security = _rebuild_from_security(lanes, repo_index, sec_rows, ns_index)
 
+    needs_plan_groups = group_needs_plan(needs_plan, plans, security_image_rows())
+
     # Stamp each fallback's FINAL lane back onto its record, so the operator can
     # see a candidate that was generated correctly and then legitimately parked
     # (a live plan already targets it, or G5's cooldown has not elapsed). A
@@ -3145,7 +3344,12 @@ def reconcile():
                               for e in from_security],
             "unresolved_self_built": unresolved_self_built,
         },
-        "needs_plan": needs_plan,           # dispatch an upgrade-planner for each
+        "needs_plan": needs_plan,           # per-component rows (the evidence)
+        # the DISPATCH list: one upgrade-planner per group with dispatch=true,
+        # in list order (security-driven first), at most PLANNER_DISPATCH_CAP
+        "needs_plan_groups": needs_plan_groups,
+        "planner_dispatch_cap": PLANNER_DISPATCH_CAP,
+        "needs_plan_security_source": _SEC_IMAGE_SOURCE,
         "plan_drift": plan_drift,           # plan exists but its target is stale
         "cracks": lanes["CRACK"],           # MUST be empty
         "covered": len(lanes["CRACK"]) == 0,
@@ -3186,9 +3390,20 @@ def human(r):
                      f"— {tag}{lane}")
             L.append(f"      {str(e.get('reason'))[:160]}")
     if r["needs_plan"]:
-        L.append(f"\nNEEDS A PLAN ({len(r['needs_plan'])}) — dispatch an upgrade-planner for each:")
+        L.append(f"\nNEEDS A PLAN ({len(r['needs_plan'])} row(s)) — dispatch is PER GROUP, see PLANNER TARGETS:")
         for e in r["needs_plan"]:
             L.append(f"  • {e['component']} [{e['kind']} {e['current']}→{e['target']}] — {e['reason'][:70]}")
+    groups = r.get("needs_plan_groups") or []
+    if groups:
+        todo = [g for g in groups if g["dispatch"]]
+        cap = r.get("planner_dispatch_cap", PLANNER_DISPATCH_CAP)
+        L.append(f"\nPLANNER TARGETS ({len(groups)} group(s), {len(todo)} to dispatch, "
+                 f"cap {cap}/sweep, security first):")
+        for g in groups:
+            head = ("→ DISPATCH" if g["dispatch"] else f"plan exists: {g['plan']}")
+            sec = " 🔒security" if g["security_driven"] else ""
+            names = ", ".join(str(m["component"]) for m in g["members"])
+            L.append(f"  • {g['group_id']} [{g['group_kind']}, {g['size']}]{sec} — {head} — {names[:90]}")
     if r.get("lockstep"):
         L.append(f"\nLOCKSTEP HOLDS ({len(r['lockstep'])}) — pulled OUT of AUTO: a sibling of the "
                  f"same component is held, so this must move with it, not before it:")

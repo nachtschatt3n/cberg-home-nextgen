@@ -68,6 +68,7 @@ def reconcile(held_rows, plans=()):
     """reconcile() with every external reader stubbed: no gh, no cluster, no DB."""
     mp.load_plans = lambda cfg: [dict(p) for p in plans]
     mp.get_held = lambda: ([dict(h) for h in held_rows], None)
+    mp.get_coverage = lambda: ({"needs_plan": [], "needs_plan_groups": []}, None)   # coverage.py is exercised in test-maintenance-plan-coverage-source.py
     mp.cron_parity = lambda cfg: ([], False)
     mp.window_liveness_report = lambda cfg, today, now=None: {
         "missing": [], "stuck": [], "verified": False}
@@ -126,9 +127,10 @@ def main() -> int:
     check("the age hold is carried in the JSON payload for downstream readers",
           [c["key"] for c in r["age_cooldown"]] == ["pr9002"], str(r["age_cooldown"]))
 
-    # with nothing held at all the old all-clear is unchanged
+    # with nothing held AND coverage.py empty (stubbed) the all-clear prints;
+    # since 2026-09-27 it names coverage.py, the needs-a-plan source of truth
     check("no held updates at all still reports the plain all-clear",
-          "all held updates have a plan" in mp.human(reconcile([]), CFG))
+          "every update that needs a plan has one" in mp.human(reconcile([]), CFG))
 
     # --- an age hold that HAS a plan is untouched by any of this -------------
     pl = {"plan_id": "app9001", "_path": "p.md", "component": "app9001",

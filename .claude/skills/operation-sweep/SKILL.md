@@ -46,7 +46,8 @@ sections that did not report.
   cluster before it reaches the operator.
 - **Do not block the board on planners.** If coverage reports `needs_plan`,
   dispatch upgrade-planner-agents in the BACKGROUND and note it on the
-  board; never make the operator wait on them.
+  board; never make the operator wait on them. The dispatch is MECHANICAL
+  (step 2b below): one planner per `needs_plan_groups` entry, never per row.
 
 ## Flow
 
@@ -62,6 +63,30 @@ sections that did not report.
    recommendation that exists only in report prose does not exist. The security
    section scores contextual tiers automatically (`risk_model.py`);
    paging is dry unless `SWEEP_NOTIFY_BY_TIER` is set.
+
+2b. **Dispatch planners from the grouped list — mechanically (2026-09-27).**
+   Run coverage once and keep the file (rule 4d0 and the reconciler both read it):
+
+       python3 runbooks/coverage.py --json > /tmp/coverage-<cycle>.json
+       python3 runbooks/maintenance-plan.py --json --coverage-json /tmp/coverage-<cycle>.json
+
+   `needs_plan_groups` is the dispatch list. Same-image fleets are ALREADY
+   collapsed into one target (every `redis:*-alpine` consumer at one patch =
+   `redis-fleet-<ver>`; every app-template wrapper = `app-template-<ver>`;
+   `flux-instance` + `flux-operator` = `flux-fleet-<ver>`), security-driven
+   groups sort first, and a group whose live plan exists has `dispatch: false`.
+   Take the entries with `dispatch: true` **in list order, at most
+   `planner_dispatch_cap` (5) per sweep**, and dispatch ONE
+   `upgrade-planner-agent` per group with `run_in_background: true`. Brief it
+   with the group's `group_id` (use it as the plan_id / filename), every
+   member (component, namespace, current→target, image repos), the
+   `security_evidence` refs (F-ids only, never CVE ids), and the `reason`.
+   Before dispatching, skip a group a planner from an EARLIER sweep is still
+   working on (a `runbooks/maintenance/plans/<group_id>.md` draft appears the
+   moment it writes). Groups beyond the cap wait for the next sweep — list
+   them on the board as "queued for planning", never drop them silently.
+   Do not dispatch from the raw `needs_plan` rows: that is per-component
+   evidence and re-creates the one-planner-per-consumer waste.
 
 3. **Update the lists** (this is the "updates" half of the skill):
    - `python3 runbooks/sweep-run.py --reconcile-only` with the cycle id and

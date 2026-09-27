@@ -81,6 +81,7 @@ def reconcile(decisions, plans=PLANS):
     """reconcile() with every external reader stubbed: no gh, no cluster, no DB."""
     mp.load_plans = lambda cfg: [dict(p) for p in plans]
     mp.get_held = lambda: ([], None)
+    mp.get_coverage = lambda: ({"needs_plan": [], "needs_plan_groups": []}, None)   # coverage.py is exercised in test-maintenance-plan-coverage-source.py
     mp.cron_parity = lambda cfg: ([], False)
     mp.window_liveness_report = lambda cfg, today, now=None: {
         "missing": [], "stuck": [], "verified": False}

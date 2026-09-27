@@ -508,7 +508,12 @@ reconciliation point** — it still dispatches planners under rule 4d and
 reconciles the plan set; this step only stops a missed sweep from starving
 the pipeline.
 
-For every item in `needs_plan` from the Step 0 `coverage.py --json` output:
+For every entry in **`needs_plan_groups`** with `dispatch: true` from the
+Step 0 `coverage.py --json` output — one planner per GROUP, never per
+`needs_plan` row (a same-image fleet such as every `redis:*-alpine` consumer,
+or every app-template wrapper, is ONE plan target; 2026-09-27), in list order
+(security-driven first), at most `planner_dispatch_cap` (5) per run — and
+reading "component" below as the group's `group_id` / members:
 
 1. Its `reason` must NOT start with `plan exists:` (coverage already filters
    these out, but re-check — a plan that appeared mid-run is not yours to
@@ -534,9 +539,10 @@ last night is still `draft` two sweeps later, that is a sweep gap to report,
 not a plan to run.
 
 For each item that clears all three, dispatch **ONE `upgrade-planner-agent`
-in the background** (Agent tool, `run_in_background`, one per component,
-carrying the component, `current`→`target`, the coverage `reason` and the PR
-number if any) and **do not wait for it**. The planner is read-only against
+in the background** (Agent tool, `run_in_background`, one per group,
+carrying the `group_id` as plan_id, every member's component/namespace and
+`current`→`target`, the `security_evidence` F-ids, the coverage `reason` and
+the PR number if any) and **do not wait for it**. The planner is read-only against
 the cluster by its own contract and may only create a `status: draft` file
 under `runbooks/maintenance/plans/`; `window-scheduler.py` refuses `draft` and
 Step 1 never auto-executes a `draft`, so nothing a planner writes tonight can be

@@ -104,8 +104,14 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   `docs/sops/verification-contents-not-shape.md`). A plan whose §4 is only
   "Ready/200/healthy" is **not vettable** — the window agent sends it back.
 - **Reconciler:** `runbooks/maintenance-plan.py` — read-only glue the sweep runs.
-  Reports held-updates-without-a-plan, stale/orphan plans, the next window + its
-  queue, and capacity/reboot/interference warnings.
+  Reports updates-without-a-plan, stale/orphan plans, the next window + its
+  queue, and capacity/reboot/interference warnings. Its needs-a-plan verdict is
+  sourced from **`coverage.py`** (`planner_dispatch`, `all_planned`), with
+  auto-update's held-PR list only as a cross-check — the held list is built from
+  open Renovate PRs, so with 0 PRs it was empty and the report printed "all held
+  updates have a plan ✅" beside 22 coverage needs_plan rows (fixed 2026-09-27).
+  Pass the sweep's saved coverage output with `--coverage-json <file>`; an
+  unreadable/skipped coverage result prints UNKNOWN, never the all-clear.
 - **Coverage guarantee (no cracks):** `runbooks/coverage.py` (added 2026-08-02)
   closes the hole that the auto-updater only ever sees OPEN Renovate PRs. It
   enumerates the FULL actionable universe from `version-check-current.md` and
@@ -134,9 +140,15 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
        so a chart must not move ahead of its held image (or vice versa). These
        appear under the `lockstep` key in `coverage.py --json`.
   - **PLAN** — major/deny-listed: needs an assessed window plan. The sweep (rule
-    4d0) dispatches an `upgrade-planner-agent` for **every** `needs_plan` item —
-    the whole non-safe universe, not just deny-listed open PRs — so the PLAN lane
-    covers everything.
+    4d0) dispatches planners for the whole non-safe universe — not just
+    deny-listed open PRs — so the PLAN lane covers everything. Dispatch is **per
+    GROUP** from `needs_plan_groups` (2026-09-27): same-image fleets (all
+    `redis:*-alpine` consumers at one patch → `redis-fleet-<ver>`), every
+    app-template wrapper (`app-template-<ver>`), same-version chart families
+    (`flux-fleet-<ver>`) and a component's own rows collapse into ONE target; a
+    group whose live plan exists is `dispatch: false`; security-driven groups
+    sort first; at most 5 planners per sweep, in the background. Rules and tests:
+    `coverage.py::group_needs_plan`, `runbooks/tests/test-coverage-needs-plan-groups.py`.
   - **REBUILD** — self-built `ghcr.io/nachtschatt3n/*`: can't be tag-bumped,
     surfaced as a human action-row (rebuild in its source repo).
   - **HELD** — explicitly accepted (e.g. openclaw node 22). **CRACK** —

@@ -212,12 +212,31 @@ needs their decision, and what got auto-fixed.
     repo; matched on the IMAGE, not the app name),
     **HELD** (explicitly accepted), **CRACK** (unclassifiable — must be zero).
     Then:
-    - **For EVERY `needs_plan` item, dispatch an `upgrade-planner-agent`** (one
-      per item, in parallel) so every non-safe actionable update — not just
-      deny-listed open PRs — gets a window plan. This is the mechanism that makes
-      the PLAN lane cover the whole universe. (Manual/dry-run sweep: report the
-      gap instead of dispatching, but never leave `needs_plan` unactioned across
-      cycles.)
+    - **Dispatch one `upgrade-planner-agent` per `needs_plan_groups` entry
+      with `dispatch: true`** — NOT per `needs_plan` row (2026-09-27). Coverage
+      collapses same-image fleets into one plan target (all `redis:*-alpine`
+      consumers moving to one patch → `redis-fleet-<ver>`; every app-template
+      wrapper → `app-template-<ver>`; same-version chart families such as
+      `flux-instance`+`flux-operator` → `flux-fleet-<ver>`; a component's rows,
+      incl. a lockstep app leg, stay together) and marks a group whose LIVE
+      plan already exists `dispatch: false` (matched by plan_id == `group_id`,
+      by component/also_covers + target version, or by the plan's target text
+      naming the member at its version). Mechanics:
+      1. Save the coverage output to a file and pass it to rule 4d
+         (`maintenance-plan.py --coverage-json <file>`) — one coverage run.
+      2. Take `dispatch: true` groups **in list order** (security-driven
+         first, then larger fleets), **at most `planner_dispatch_cap` = 5 per
+         sweep**, each with `run_in_background: true`. Skip a group whose
+         `runbooks/maintenance/plans/<group_id>.md` a still-running planner
+         from an earlier sweep is writing.
+      3. Brief: `group_id` (= plan_id/filename), every member (component,
+         namespace, current→target, image repos), `security_evidence` F-ids
+         (never CVE ids), `reason`, and "one plan covering ALL members".
+      4. Anything over the cap is listed on the board as "queued for
+         planning (n)"; it dispatches next sweep. Never drop it silently.
+      This is the mechanism that makes the PLAN lane cover the whole universe.
+      (Manual/dry-run sweep: report the groups instead of dispatching, but
+      never leave a `dispatch: true` group unactioned across cycles.)
     - **4d0b — REVIEW every draft before it can be vetted (added 2026-09-15).**
       A planner's draft is a claim, not a plan. For every plan file with
       `status: draft` that was written or retargeted since the previous
@@ -262,9 +281,13 @@ needs their decision, and what got auto-fixed.
     to a scheduled maintenance window (`runbooks/maintenance-windows.yaml`, 7/
     week). Run the reconciler:
 
-        .venv/bin/python3 runbooks/maintenance-plan.py --json
+        .venv/bin/python3 runbooks/maintenance-plan.py --json --coverage-json <4d0 coverage file>
 
-    It reports, read-only: held updates with NO plan, stale/orphan plans, the
+    Its needs-a-plan verdict comes from coverage.py (`planner_dispatch`,
+    `all_planned`), not only from auto-update's held-PR list — with 0 open
+    Renovate PRs that list is empty, and until 2026-09-27 the report said
+    "all held updates have a plan ✅" beside 22 coverage needs_plan rows. A
+    `coverage_error` means UNKNOWN, never zero. It reports, read-only: held updates with NO plan, stale/orphan plans, the
     next window + what's queued, and capacity/reboot/interference warnings. Then:
 
     - **Do NOT dispatch planners here.** Rule 4d0 is the single dispatch point

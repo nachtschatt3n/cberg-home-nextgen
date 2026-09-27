@@ -204,6 +204,7 @@ check("human: an empty cron ledger is a loud line naming every expected occurren
 
 # 7 — reconcile() carries the key (held / parity / plans stubbed; no DSN => unverified)
 mp.get_held = lambda: ([], None)
+mp.get_coverage = lambda: ({"needs_plan": [], "needs_plan_groups": []}, None)   # coverage.py is exercised in test-maintenance-plan-coverage-source.py
 mp.cron_parity = lambda cfg: ([], True)
 mp.load_plans = lambda cfg: []
 rec = mp.reconcile({**CFG, "planning": {"stale_after_days": 14}}, NOW.date(), decisions=[])

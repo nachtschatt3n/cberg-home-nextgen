@@ -155,6 +155,47 @@ def get_held():
     return data.get("held", []), None
 
 
+# ── coverage.py is the SOURCE OF TRUTH for "needs a plan" (2026-09-27) ──────
+# get_held() reads auto-update.py, which only ever sees OPEN RENOVATE PRs. With
+# 0 open PRs it returns an empty held list, and this report printed
+# "all held updates have a plan ✅" while coverage.py listed 22 needs_plan rows
+# (17 with no plan file) — the direct-bump universe is invisible to the PR
+# reader. coverage.py enumerates the FULL actionable universe, so its
+# needs_plan / needs_plan_groups is authoritative; the held-PR check stays as a
+# cross-check (union — strictly safer). An unreadable coverage result is
+# UNKNOWN, never "all planned".
+COVERAGE_JSON_PATH: str | None = None   # --coverage-json: reuse the sweep's 4d0 run
+COVERAGE_SKIP: str | None = None        # reason, when the caller opted out
+
+
+def get_coverage():
+    """(coverage_dict, error). `error` non-None => needs-plan state UNKNOWN."""
+    if COVERAGE_SKIP:
+        return None, f"coverage not consulted ({COVERAGE_SKIP})"
+    try:
+        if COVERAGE_JSON_PATH:
+            text = Path(COVERAGE_JSON_PATH).read_text()
+            rc, err = 0, ""
+        else:
+            p = subprocess.run(
+                [sys.executable, str(SCRIPT_DIR / "coverage.py"), "--json"],
+                capture_output=True, text=True, timeout=420)
+            text, rc, err = p.stdout or "", p.returncode, p.stderr or ""
+    except Exception as e:
+        return None, f"coverage.py did not run: {type(e).__name__}: {e}"
+    data = _last_json_object(text)
+    if data is None:
+        tail = err.strip().splitlines()[-1:] or [""]
+        return None, (f"coverage.py --json produced no parseable JSON "
+                      f"(rc={rc}; last stderr: {tail[0][:120]})")
+    if data.get("error"):
+        return None, f"coverage.py reported: {data['error']}"
+    if "needs_plan" not in data or "needs_plan_groups" not in data:
+        return None, ("coverage.py output has no needs_plan/needs_plan_groups key "
+                      "(older coverage.py or a truncated file?)")
+    return data, None
+
+
 def next_occurrence(day_name, start_hhmm, today, now=None):
     """The next date this window runs — TIME-AWARE (fixed 2026-08-18, F-f95a8b52).
 
@@ -234,6 +275,7 @@ _FETCH_DECISIONS = object()   # "caller supplied nothing" — reconcile fetches
 
 def reconcile(cfg, today, decisions=_FETCH_DECISIONS):
     held, held_error = get_held()
+    coverage, coverage_error = get_coverage()
     plans = load_plans(cfg)
     validation_errors = validate_plans(cfg, plans)
     liveness = window_liveness_figures(cfg, today)
@@ -504,6 +546,18 @@ def reconcile(cfg, today, decisions=_FETCH_DECISIONS):
         # non-None => held_count is NOT a fact; render it as unknown
         "held_error": held_error,
         "needs_plan": needs_plan,
+        # coverage.py — the SOURCE OF TRUTH for "needs a plan" (see get_coverage)
+        "coverage_error": coverage_error,
+        "coverage_needs_plan": (coverage or {}).get("needs_plan") or [],
+        "needs_plan_groups": (coverage or {}).get("needs_plan_groups") or [],
+        "planner_dispatch": [g for g in (coverage or {}).get("needs_plan_groups") or []
+                             if g.get("dispatch")],
+        # True only when BOTH readers answered and neither found a gap — the
+        # sole condition under which the all-clear may be printed
+        "all_planned": (coverage_error is None and held_error is None
+                        and not needs_plan
+                        and not [g for g in (coverage or {}).get("needs_plan_groups") or []
+                                 if g.get("dispatch")]),
         # held only by the release-age cooldown: no plan, no planner dispatch
         "age_cooldown": cooling,
         "ambiguous_matches": ambiguous,
@@ -552,14 +606,27 @@ def human(r, cfg):
         L.append(f"next window: {nxt['slot']} {nxt['start']} {cfg['timezone']} "
                  f"({nxt['duration_min']}m, cap {nxt['capacity_risk']}, reboot={'yes' if nxt.get('allow_reboot') else 'no'})")
     cooling = r.get("age_cooldown") or []
+    if r.get("coverage_error"):
+        L.append(f"\n!! coverage unavailable — needs-a-plan is UNKNOWN, NOT zero: "
+                 f"{r['coverage_error']}")
+    dispatch = r.get("planner_dispatch") or []
+    if dispatch:
+        L.append(f"\nNEEDS A PLAN — {len(dispatch)} planner target(s) from coverage.py "
+                 f"({len(r.get('coverage_needs_plan') or [])} row(s)); one upgrade-planner-agent "
+                 f"per group, security first, max 5/sweep:")
+        for g in dispatch:
+            sec = " 🔒security" if g.get("security_driven") else ""
+            names = ", ".join(str(m.get("component")) for m in g.get("members") or [])
+            L.append(f"  • {g['group_id']} [{g.get('group_kind')}, {g.get('size')}]{sec} — {names[:90]}")
     if r["needs_plan"]:
-        L.append(f"\nNEEDS A PLAN ({len(r['needs_plan'])}) — dispatch an upgrade-planner-agent for each:")
+        L.append(f"\nNEEDS A PLAN (held Renovate PRs, {len(r['needs_plan'])}):")
         for n in r["needs_plan"]:
             L.append(f"  • {n['dep']} {n['cur']}→{n['new']} (PR #{n['pr']}, held:{n['gate']}) — {n['reason'][:80]}")
-    elif cooling:
-        L.append("\nevery held update that needs a plan has one ✅")
-    else:
-        L.append("\nall held updates have a plan ✅")
+    if r.get("all_planned"):
+        L.append("\nevery update that needs a plan has one ✅ (coverage.py + held PRs)")
+    elif not (dispatch or r["needs_plan"]):
+        L.append("\nneeds-a-plan UNCONFIRMED ⚠ — a reader failed or was skipped (see !! above); "
+                 "this is not an all-clear")
     if cooling:
         L.append(f"\nCOOLING OFF ({len(cooling)}) — held ONLY by the release-age gate; "
                  f"no plan and no planner needed, the next window merges them once "
@@ -1763,7 +1830,19 @@ def main(argv=None):
                     help="print the window-liveness figures in Prometheus text exposition "
                          "(window_runs_missing_count etc.) for an exporter / PrometheusRule; "
                          "reads only the window_runs ledger, no plan reconcile")
+    ap.add_argument("--coverage-json", metavar="PATH",
+                    help="reuse a saved `coverage.py --json` output (the sweep's rule 4d0 run) "
+                         "instead of running coverage.py again")
+    ap.add_argument("--skip-coverage", action="store_true",
+                    help="do not consult coverage.py (callers that only read the schedule, "
+                         "e.g. render-board); needs-a-plan is then reported UNKNOWN")
     args = ap.parse_args(argv)
+    global COVERAGE_JSON_PATH, COVERAGE_SKIP
+    COVERAGE_JSON_PATH = args.coverage_json
+    if args.skip_coverage:
+        COVERAGE_SKIP = "--skip-coverage"
+    elif args.verify or args.validate or args.open:
+        COVERAGE_SKIP = "not needed for --verify/--validate/--open"
     cfg = load_windows()
     today = datetime.now().date()
     if args.liveness_metrics:
