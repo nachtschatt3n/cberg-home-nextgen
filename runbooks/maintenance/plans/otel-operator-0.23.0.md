@@ -118,20 +118,7 @@ conflicts_with:                        # HARD slot exclusions — window-schedul
                                        # further correction. The note previously here, saying
                                        # the ref was still owed, was stale.
   # RESOLVED 2026-09-21: cilium-1.20.2 EXECUTED (80395710, chart 1.20.1 -> 1.20.2) and retired (c0797253) -- there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention: --validate treats an unresolvable ref as an ERROR, because a guard pointing at nothing enforces nothing.
-  - talos-1.14.0                       # a node roll restarts every collector pod and moves
-                                       # workloads between nodes, which blows up the per-node
-                                       # ES assertion in §4.4 and the 98-target baseline in §4.6.
-  - talos-1.14.1                       # ADDED 2026-09-21 — this is the LIVE talos plan.
-                                       # talos-1.14.0 above was SUPERSEDED the same day
-                                       # (commit 9c19acc3); its window was cleared and
-                                       # this successor inherited sun-attended:2026-09-27.
-                                       # Same mechanism as above: a node roll restarts
-                                       # every collector pod and moves workloads between
-                                       # nodes, blowing up §4.4's per-node ES assertion
-                                       # and §4.6's 98-target baseline. The old ref still
-                                       # resolves, so --validate stayed clean throughout.
-                                       # Predecessor kept per the n8n-2.39.8 /
-                                       # cilium-1.20.2 convention.
+  # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
   - flux-oci-chart-sources             # ADDED 2026-09-20 (was missing). Verified in that
                                        # plan's own frontmatter: its touches.resources names
                                        # "daemonset/otel-operator-daemon-collector (ROLL)",

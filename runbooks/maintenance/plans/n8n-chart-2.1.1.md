@@ -45,8 +45,7 @@ conflicts_with:
                                       # of the same HelmRelease in one window = a failed
                                       # reconcile nobody can attribute, and §5 stops being a
                                       # one-commit revert. Same reasoning n8n-2.39.8 uses.
-  - talos-1.14.1                      # a node drain during the Recreate is harmless to data
-                                      # but makes §4's restart-count gate unreadable.
+  # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
 exclusive: false
 security_ref: null                    # no security driver: the chart carries no image of its
                                       # own for this deployment (§1.2 — image is pinned).

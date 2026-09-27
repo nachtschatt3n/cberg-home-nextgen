@@ -39,11 +39,7 @@ touches:
                                       # nothing in authentik is changed.
 depends_on: []
 conflicts_with:
-  - talos-1.14.1                      # sun-attended:2026-09-27, exclusive. A node roll evicts the Kuma
-                                      # pod and reboots ping targets, so §4's "down-count == baseline"
-                                      # gate cannot be read on the same night. (talos-1.14.1 is exclusive,
-                                      # so the scheduler already refuses the slot; named here for the
-                                      # on-demand path and for the reason.)
+  # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
   - flux-oci-chart-sources            # stage 7 moves the dirsigler chart source (uptime-kuma) to the
                                       # charts-mirror track: same HelmRelease, different spec.chart.
   - helm-drift-detection              # adds spec.driftDetection to every HelmRelease incl. this one;

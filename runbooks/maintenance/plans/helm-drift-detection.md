@@ -66,17 +66,7 @@ touches:
     # names which shared surface it would touch.
 depends_on: []
 conflicts_with:
-  - talos-1.14.0                      # §6.5: needs the whole sun-attended slot; a node roll
-                                      # plus a first correcting reconcile = two candidate
-                                      # causes for any cilium/longhorn rollout
-  - talos-1.14.1                      # ADDED 2026-09-21 — this is the LIVE talos plan.
-                                      # talos-1.14.0 above was SUPERSEDED the same day
-                                      # (commit 9c19acc3) and its window was cleared;
-                                      # this successor inherited sun-attended:2026-09-27,
-                                      # which is precisely the "whole sun-attended slot"
-                                      # §6.5 argues about. The old ref still resolves, so
-                                      # --validate never surfaced the drift. Predecessor
-                                      # kept per the n8n-2.39.8 / cilium-1.20.2 convention.
+  # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
   - grafana-chart-13.2.3              # §6.4: pure attribution — a Helm upgrade in the same
                                       # window as P3 gives every grafana rollout two causes
   # - affine-redis-8.10.2 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # §4.1 revision-identity diff: that plan upgrades

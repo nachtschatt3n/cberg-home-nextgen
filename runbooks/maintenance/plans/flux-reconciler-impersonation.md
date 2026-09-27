@@ -44,7 +44,7 @@ conflicts_with:                       # exclusive: true already keeps the slot e
   - flux-oci-chart-sources            # these name WHY. Rewrites Flux sources.
   - helm-drift-detection              # changes HelmRelease behaviour cluster-wide.
   - kube-prometheus-stack-91.4.1      # the window's instrument (section 4 reads it).
-  - talos-1.14.1                      # node roll restarts the controllers mid-proof.
+  # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
 exclusive: true                       # No other change may be IN FLIGHT while the
                                       # identity Flux applies under is being swapped:
                                       # a concurrent plan's git-revert rollback needs a
