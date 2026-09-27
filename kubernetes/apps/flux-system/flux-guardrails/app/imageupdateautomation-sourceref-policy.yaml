@@ -42,11 +42,16 @@
 # RESIDUAL RISK (documented, not eliminated)
 # ------------------------------------------
 # `spec.update.strategy` has exactly one legal value, `Setters`, so this deputy
-# can only rewrite values already marked `$imagepolicy` in the repo -- 3 sites,
-# all absenty image tags. It CANNOT push arbitrary manifests. The realistic
-# escalation is therefore "steer the absenty image tag", not "cluster admin".
-# After this policy that capability remains reachable from the 2 allowlisted
-# namespaces; it is no longer reachable from the other ~40.
+# can only rewrite values already marked `$imagepolicy` in the repo -- 3 absenty
+# image tags plus (since 2026-09-27) the 15 my-software-showcase image tags. It
+# CANNOT push arbitrary manifests. The realistic escalation is therefore "steer
+# a self-built app's image tag", not "cluster admin". After this policy that
+# capability remains reachable from the 3 allowlisted namespaces; it is no
+# longer reachable from the other ~40.
+#
+# my-software-showcase added 2026-09-27 (operator-approved program item F:
+# weekly self-built rebuilds auto-deploy for the internal showcase apps).
+# Its automation's update.path is ./kubernetes/apps/my-software-showcase.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -76,7 +81,7 @@ spec:
     # Adding a namespace here is a deliberate, reviewable grant of git-push
     # capability -- treat it as such.
     - name: allowed_namespaces
-      expression: "['my-software-development', 'my-software-production']"
+      expression: "['my-software-development', 'my-software-production', 'my-software-showcase']"
   validations:
     # The leading `has(object.spec.sourceRef)` is a FAIL-CLOSED guard, not redundancy.
     # Without it, a future Flux API that renames or relocates sourceRef would make
@@ -97,7 +102,8 @@ spec:
         ' across namespaces. That source carries the cluster git-write credential, so a' +
         ' cross-namespace reference lets this namespace push to the GitOps branch without' +
         ' ever holding the credential (confused deputy). Namespaces allowed to do this:' +
-        ' my-software-development, my-software-production. To add one, amend the' +
+        ' my-software-development, my-software-production, my-software-showcase.' +
+        ' To add one, amend the' +
         ' flux-imageupdateautomation-sourceref ValidatingAdmissionPolicy in git.'
 ---
 apiVersion: admissionregistration.k8s.io/v1

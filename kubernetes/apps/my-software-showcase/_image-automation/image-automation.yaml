@@ -1,0 +1,459 @@
+---
+# Flux image automation for the my-software-showcase portfolio (program item F,
+# operator-approved 2026-09-27). Mode per image: docs/sops/self-built-image-rebuild.md
+# section "Weekly rebuild + deploy mode".
+#
+# WHY AUTO HERE: all 15 apps are internal-only (envoy-internal), non-critical demo
+# deployments, each with liveness/readiness/startup probes, `strategy: Recreate`
+# and `upgrade.remediation.strategy: rollback`. A rolled image that fails its
+# probes makes the Helm upgrade time out and roll back automatically (the
+# auto-revert); the HelmRelease is then left not-Ready, which the sweep's Flux
+# check reports.
+#
+# TAG SCHEMES (both emitted by the source repos' weekly Monday 05:00 UTC rebuild):
+#   P  `production-<YYYYMMDDHHMMSS>` -- ci.yml on push to the default branch AND on
+#      the weekly schedule (no-cache, fresh base) -- a rebuild is a NEW tag, never a
+#      re-push, so the newest timestamp is the newest build.
+#   S  `sha-<7hex>-b<YYYYMMDD>` -- scheduled-rebuild.yml only (the push CI keeps
+#      publishing plain sha tags, which this pattern deliberately does NOT match,
+#      so an ad-hoc push is never auto-deployed; only the weekly rebuild is).
+# The ^...$ anchors are load-bearing: Flux matches filterTags unanchored (see
+# the absenty ImagePolicy for the incident that taught this).
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: globalmobility
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/globalmobility-group-gmbh-globaldispo
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: globalmobility
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: globalmobility
+  filterTags:
+    pattern: '^sha-[0-9a-f]{7}-b(?P<ts>\d{8})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: haarfabrik
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/haarfabrik-extranet
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: haarfabrik
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: haarfabrik
+  filterTags:
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: holm-backend
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/holm-backend
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: holm-backend
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: holm-backend
+  filterTags:
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: ibgastro
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/ibgastro
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: ibgastro
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: ibgastro
+  filterTags:
+    pattern: '^sha-[0-9a-f]{7}-b(?P<ts>\d{8})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: inbewegung
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/inbewegung-familymanager
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: inbewegung
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: inbewegung
+  filterTags:
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: kfa-medienarchiv
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/kfa_medienarchiv
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: kfa-medienarchiv
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: kfa-medienarchiv
+  filterTags:
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: mangold-smarthomeadvisor
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/mangold-smarthomeadvisor
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: mangold-smarthomeadvisor
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: mangold-smarthomeadvisor
+  filterTags:
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: max-jung
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/max-jung-transporte-fahrzeugcontrolling
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: max-jung
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: max-jung
+  filterTags:
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: metaldyne
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/metaldyne-mini-erp
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: metaldyne
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: metaldyne
+  filterTags:
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: ordiga
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/ordiga
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: ordiga
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: ordiga
+  filterTags:
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: see-edv-ibspm
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/see-edv-ibspm
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: see-edv-ibspm
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: see-edv-ibspm
+  filterTags:
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: stepbystepguide
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/stepbystepguide
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: stepbystepguide
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: stepbystepguide
+  filterTags:
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: u-zeit
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/u-zeit
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: u-zeit
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: u-zeit
+  filterTags:
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: uzeit-de
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/uzeit-de
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: uzeit-de
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: uzeit-de
+  filterTags:
+    pattern: '^sha-[0-9a-f]{7}-b(?P<ts>\d{8})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: zuhause-betreut
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
+  interval: 1h
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: zuhause-betreut
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: zuhause-betreut
+  filterTags:
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: showcase-image-updates
+  namespace: my-software-showcase
+spec:
+  # Cross-namespace sourceRef to the write-capable flux-system GitRepository:
+  # my-software-showcase is on the allowlist of the
+  # flux-imageupdateautomation-sourceref ValidatingAdmissionPolicy
+  # (kubernetes/apps/flux-system/flux-guardrails). Setters strategy bounds the
+  # write to the 15 `$imagepolicy`-marked tag lines under update.path.
+  # NOTE: a SUSPENDED ImageUpdateAutomation still reports READY=True; check
+  # `.spec.suspend` directly. To hold ONE app, remove its `$imagepolicy` marker.
+  interval: 30m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcdbot@users.noreply.github.com
+        name: fluxcdbot
+      messageTemplate: |
+        chore(showcase): update container images (weekly rebuild)
+
+        Automation name: {{ .AutomationObject }}
+
+        Files updated:
+        {{ range $filename, $_ := .Changed.FileChanges -}}
+        - {{ $filename }}
+        {{ end -}}
+
+        Objects updated:
+        {{ range $resource, $changes := .Changed.Objects -}}
+        - {{ $resource.Kind }} {{ $resource.Name }}
+        {{- range $_, $change := $changes }}
+          {{ $change.OldValue }} -> {{ $change.NewValue }}
+        {{ end -}}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    strategy: Setters
+    path: "./kubernetes/apps/my-software-showcase"

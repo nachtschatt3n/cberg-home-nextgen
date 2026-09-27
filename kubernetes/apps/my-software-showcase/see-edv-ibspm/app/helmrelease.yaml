@@ -41,7 +41,7 @@ spec:
             args: ["rm -f /app/tmp/pids/server.pid; exec /usr/local/bin/ruby script/rails server -b 0.0.0.0 -p 3000"]
             image:
               repository: ghcr.io/nachtschatt3n/see-edv-ibspm
-              tag: production-20260818110306
+              tag: production-20260818110306 # {"$imagepolicy": "my-software-showcase:see-edv-ibspm:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the

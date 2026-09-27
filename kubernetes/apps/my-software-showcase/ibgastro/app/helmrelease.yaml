@@ -34,7 +34,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/ibgastro
-              tag: sha-c5cefcd64bcda51d8732475a3fdea899fab718e4
+              tag: sha-c5cefcd64bcda51d8732475a3fdea899fab718e4 # {"$imagepolicy": "my-software-showcase:ibgastro:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the

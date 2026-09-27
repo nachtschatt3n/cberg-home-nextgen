@@ -41,7 +41,7 @@ spec:
             args: ["rm -f /app/tmp/pids/server.pid; exec /usr/local/bin/ruby bin/rails server -b 0.0.0.0 -p 3000"]
             image:
               repository: ghcr.io/nachtschatt3n/metaldyne-mini-erp
-              tag: production-20260923142917
+              tag: production-20260923142917 # {"$imagepolicy": "my-software-showcase:metaldyne:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the

@@ -37,7 +37,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/globalmobility-group-gmbh-globaldispo
-              tag: master-ae96ef4
+              tag: master-ae96ef4 # {"$imagepolicy": "my-software-showcase:globalmobility:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the

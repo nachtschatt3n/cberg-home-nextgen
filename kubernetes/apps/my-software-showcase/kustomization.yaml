@@ -9,6 +9,8 @@ resources:
   # Namespace-scoped shared objects (ghcr-secret). Every app Kustomization
   # below dependsOn this one, so it is listed first.
   - ./_shared/ks.yaml
+  # Flux image automation (weekly rebuild -> auto-deploy); own ks, wait: false.
+  - ./_image-automation/ks.yaml
   # Core Portfolio Apps — STAGED ROLLOUT (operator go 2026-08-17):
   # Wave 1 canary below; Waves 2/3 are commented until the canary soaks 24h.
   - ./globalmobility/ks.yaml

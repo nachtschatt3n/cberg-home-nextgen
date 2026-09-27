@@ -1,0 +1,29 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
+# Image automation for the showcase portfolio. Its OWN Kustomization with
+# wait: false, deliberately NOT folded into showcase-shared: that one is
+# wait: true and every app dependsOn it, so an ImagePolicy that cannot resolve
+# yet (an S-scheme repo before its first weekly rebuild) would block all 15 apps.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app showcase-image-automation
+  namespace: &namespace my-software-showcase
+spec:
+  targetNamespace: *namespace
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  dependsOn:
+    # the ImageRepositories authenticate with the shared ghcr-secret
+    - name: showcase-shared
+  path: ./kubernetes/apps/my-software-showcase/_image-automation
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  wait: false
+  interval: 30m
+  retryInterval: 5m
+  timeout: 5m
