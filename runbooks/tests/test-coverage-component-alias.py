@@ -90,10 +90,17 @@ def main() -> int:
           lane == "PLAN" and "plan exists" in reason, f"{lane}: {reason}")
 
     # ── the real plans directory, not a fixture ────────────────────────
+    # Plans are one-shot and retired once executed (talos-1.14.1: 40ca20d6),
+    # so "no talos plan right now" is a legitimate state, not a regression --
+    # the fixture checks above pin the matching. Assert only when one exists.
     live = [p for p in cov.load_plans() if p["plan_id"].startswith("talos-")]
-    check("the real plans dir still keys a talos plan this item can reach",
-          any(cov._name_keys("Talos Linux") & p["keys"] for p in live),
-          f"talos plans: {[(p['plan_id'], sorted(p['keys'])) for p in live]}")
+    if live:
+        check("the real plans dir still keys a talos plan this item can reach",
+              any(cov._name_keys("Talos Linux") & p["keys"] for p in live),
+              f"talos plans: {[(p['plan_id'], sorted(p['keys'])) for p in live]}")
+    else:
+        print("  SKIP  real plans dir holds no talos plan (retired after execution) -- "
+              "live-dir reachability not checked this run; fixtures above still pin it")
 
     # ── BOTH SIDES normalized: the other component that moves ──────────
     hd = plan("flux/helm-controller", "1.2.3", kind="config")
