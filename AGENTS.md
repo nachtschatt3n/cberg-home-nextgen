@@ -14,6 +14,14 @@ Recurring health/security/version/doc/media sweeps **must execute on this Mac mi
 
 **Do NOT create session-local `/loop` sweeps.** The old 8:17am `/loop` (CronCreate `de44f77b`) is retired and confirmed gone (2026-06-28). A local loop would double-run the sweep and clash with the cluster-driven one. For an ad-hoc sweep, send `operation sweep` (or type "run a sweep" into the `daily-operation` session) — **once**, never on a `/loop` or `CronCreate` schedule.
 
+**Weekly ops retro (since 2026-09-27)** follows the same pattern. The OpenClaw cron "Weekly Ops Retro" (`e9ce4ac3`) runs every Monday at 07:30 Europe/Berlin and types `operation retro --trigger cron` into the ops console. The console then follows `runbooks/ops-retro.md`:
+- measure with `runbooks/ops-retro.py`;
+- deliver one ranked report via `home-operation ingest`;
+- emit findings;
+- propose standing-decision changes as a diff for the operator (never self-applied).
+
+The cron is mirrored in `runbooks/ops-crons.yaml`, and every sweep asserts it with `window-crons.py --check`. SOP: `docs/sops/ops-retro.md`.
+
 **Safe version updates are AUTO-APPLIED IN THE MAINTENANCE WINDOWS, not in the
 sweep** (architecture updated 2026-07-31 — do NOT revert to the older
 "sweep-applies" model). The `daily-operation` **sweep is READ-ONLY**: it only
