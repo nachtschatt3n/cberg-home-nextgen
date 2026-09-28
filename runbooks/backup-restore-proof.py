@@ -79,12 +79,21 @@ def kubectl_json(args, timeout=60):
 
 def newest_backup(volume: str):
     d = kubectl_json(["-n", "storage", "get", "backups.longhorn.io"])
+    # Match status.volumeName OR, when status never synced (nightly CRs can sit
+    # Completed with volumeName='' -- F-a915dd47), the backup-volume label.
+    # A restore still needs status.url, so a CR without one is skipped.
+    def _is_vol(b):
+        st = b.get("status", {})
+        if st.get("volumeName"):
+            return st["volumeName"] == volume
+        return b.get("metadata", {}).get("labels", {}).get("backup-volume") == volume
     cands = [b for b in d["items"]
-             if b.get("status", {}).get("volumeName") == volume
-             and b.get("status", {}).get("state") == "Completed"]
+             if _is_vol(b) and b.get("status", {}).get("state") == "Completed"
+             and b.get("status", {}).get("url")]
     if not cands:
         return None
-    return max(cands, key=lambda b: b["status"].get("snapshotCreatedAt", ""))
+    return max(cands, key=lambda b: b["status"].get("snapshotCreatedAt")
+               or b["metadata"].get("creationTimestamp", ""))
 
 
 def main() -> int:

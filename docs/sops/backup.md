@@ -3,8 +3,8 @@
 > Standard Operating Procedures for cluster backup management.
 > Covers Longhorn volume backups and external backup integrations.
 > Description: Running, validating, and restoring Longhorn/iCloud backup workflows.
-> Version: `2026.09.20`
-> Last Updated: `2026-09-20`
+> Version: `2026.09.28`
+> Last Updated: `2026-09-28`
 > Owner: `Platform`
 
 ---
@@ -423,6 +423,33 @@ kubectl get backups -n storage -l backup-volume=<volume> \
 `runbooks/health-check.sh` (`longhorn_backup_age_hours`, incl.
 `--per-volume`) implements this judgment: newest Completed Backup CR per
 volume first, `lastBackupAt` as fallback.
+
+### Backup CR status can stay UNSYNCED — gate with the shared helper
+
+The opposite failure also happens (F-a915dd47, 2026-09-26 and 2026-09-28): the
+nightly RecurringJob's Backup CR is `state: Completed` but its status never
+syncs — `status.volumeName` and `status.backupCreatedAt` empty,
+`status.lastSyncedAt` null — for hours. Any gate that filters Backup CRs on
+`status.volumeName` then silently reads the PREVIOUS night's backup (~26h) and
+false-aborts. So neither `lastBackupAt` nor `Backup.status.volumeName` alone is
+trustworthy.
+
+**Every plan premise / pre-check / backup_gate uses the shared helper:**
+
+```bash
+python3 runbooks/longhorn-backup-age.py <volume> [<volume> ...] --max-hours 26
+# -> "<vol> 2.6h FRESH via backup-cr-label backup=backup-... at=..."
+# exit 0 = all FRESH, 1 = any STALE/NONE, 2 = lookup error (fails closed)
+```
+
+It takes the freshest CONFIRMED evidence of: a Completed CR by
+`status.volumeName`; a Completed CR with unsynced status matched by its
+`backup-volume` label; `Volume.status.lastBackup/lastBackupAt` only when the
+BackupVolume's `lastBackupName` (or a Completed CR of that name) corroborates
+it; the BackupVolume's `lastBackupName/lastBackupAt` when that CR exists.
+Uncorroborated claims are printed as notes and never counted. Inline
+`status.volumeName` freshness filters in active plans are rejected by
+`runbooks/tests/test-longhorn-backup-age.py`.
 
 ### Backup Job Failing
 

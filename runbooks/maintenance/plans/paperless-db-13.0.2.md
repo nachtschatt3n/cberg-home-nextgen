@@ -481,19 +481,15 @@ echo "volume=$VS"
 # --- Gate 3: the nightly backup is FRESH (<26h) ------------------------------
 # Reads the Backup CRs directly — the authoritative source — so the documented
 # lastBackupAt lag (docs/sops/backup.md) cannot manufacture a false abort.
-LB=$(kubectl -n storage get backups.longhorn.io \
-       -o jsonpath='{range .items[*]}{.status.volumeName}{" "}{.status.state}{" "}{.status.backupCreatedAt}{"\n"}{end}' \
-     | awk '$1=="paperless-db-data" && $2=="Completed" {print $3}' | sort | tail -1)
-echo "newest Completed backup=[$LB]"
-BSEC=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$LB" "+%s" 2>/dev/null) \
-  || { echo "ABORT: no parseable Completed backup for paperless-db-data"; exit 1; }
-AGE_H=$(( ( $(date -u +%s) - BSEC ) / 3600 ))
-echo "backup age=${AGE_H}h"
-[ "$AGE_H" -lt 26 ] || { echo "ABORT: newest backup is ${AGE_H}h old (bound 26h)"; exit 1; }
-# Dry-tested 2026-09-21 against the live CR (2026-09-21T03:05:10Z -> age 15h,
-# PASS) and against an EMPTY timestamp, which is the case that matters: the
-# `date` parse fails, the `||` branch fires, exit 1. It does NOT silently
-# compute an age from an empty string.
+# Shared helper (F-a915dd47): counts the nightly Backup CR even when its status
+# never synced (status.volumeName empty), cross-checked against the BackupVolume.
+# Exit 0 = FRESH, 1 = STALE/NONE, 2 = lookup error -- all non-zero ABORT.
+python3 runbooks/longhorn-backup-age.py paperless-db-data --max-hours 26 \
+  || { echo "ABORT: paperless-db-data has no confirmed backup < 26h (see output above)"; exit 1; }
+# Dry-tested 2026-09-28: live -> "paperless-db-data 2.6h FRESH via backup-cr", rc 0;
+# --max-hours 1 -> STALE rc 1; unknown volume / unreachable API -> rc 2. Every
+# non-zero exit hits the ABORT branch. (Replaced the inline status.volumeName
+# filter, which missed the nightly CR whenever its status had not synced.)
 
 # --- Gate 4: COLLATION + table count (the assertion premises cannot make) ----
 COLL=$(kubectl -n office exec deploy/paperless-db -- sh -c \

@@ -406,18 +406,11 @@ for p in json.load(sys.stdin)["items"]:
 cons_snap | tee "$BASE"                      # 7 lines expected
 
 # g) backups fresh (< 26 h) — ground truth is the newest Completed Backup CR
-for v in open-webui-20g tube-archivist-redis-data \
-         $(kubectl get pvc -n databases redis-data -o jsonpath='{.spec.volumeName}'); do
-  kubectl get backups.longhorn.io -n storage -o json | python3 -c '
-import sys, json, datetime as d
-v = sys.argv[1]
-ts = [b["status"].get("backupCreatedAt") or b["metadata"]["creationTimestamp"]
-      for b in json.load(sys.stdin)["items"]
-      if b["status"].get("volumeName") == v and b["status"].get("state") == "Completed"]
-if not ts: print("NO_BACKUP", v); sys.exit(1)
-t = max(ts); a = (d.datetime.now(d.timezone.utc) - d.datetime.fromisoformat(t.replace("Z","+00:00"))).total_seconds()/3600
-print(("FRESH" if a < 26 else "STALE"), v, round(a,1), "h"); sys.exit(0 if a < 26 else 1)' "$v"
-done
+# Shared helper (F-a915dd47): counts the nightly Backup CR even when its status
+# never synced (status.volumeName empty), cross-checked against the BackupVolume.
+python3 runbooks/longhorn-backup-age.py open-webui-20g tube-archivist-redis-data \
+  $(kubectl get pvc -n databases redis-data -o jsonpath='{.spec.volumeName}') --max-hours 26 \
+  || { echo "ABORT: a volume has no confirmed backup < 26h"; exit 1; }
 #    PASS: three FRESH lines. (Daily job: CronJob storage/daily-backup-all-volumes, 03:00.)
 
 # h) drain checks — record; each is re-run immediately before its own leg.
