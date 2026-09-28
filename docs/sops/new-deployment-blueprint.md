@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/gateway-api-httproute.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/log-volume-runaway.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.09.23`
-> Last Updated: `2026-09-23`
+> Version: `2026.09.28`
+> Last Updated: `2026-09-28`
 > Owner: `Platform`
 
 ---
@@ -27,7 +27,7 @@ It defines where the app should live, how it should be configured, and how to ve
 | GitOps trigger | Push to GitHub, then Flux webhook receiver triggers reconciliation |
 | Manual reconcile | Not part of default flow for this SOP |
 | Namespace placement | Follow existing namespace model in `docs/applications.md` and `docs/infrastructure.md` |
-| App structure | `kubernetes/apps/{namespace}/{app}/` with `ks.yaml` + `app/` manifests |
+| App structure | `kubernetes/apps/{namespace}/{app}/` with `ks.yaml` + `app/` manifests. Everything Flux reads must live under `kubernetes/`: the `flux-system` source ships only that tree (`spec.ignore`, `b4ed1d63`), so a `ks.yaml` path or kustomize file reference outside it fails with `path not found` — see `docs/sops/flux-image-automation-push-auth.md` §3 "Source filter" |
 | Secrets | Must be SOPS-encrypted (`*.sops.yaml`) before commit |
 | Storage | Use `longhorn-static` with a speaking PV name by default; `longhorn` (dynamic, UUID PV) only where a name is impossible — StatefulSet volumeClaimTemplates |
 | Homepage | All user-facing web apps must include Homepage annotations + label |
@@ -1311,3 +1311,4 @@ Rollback success criteria:
 | `2026.09.15` | `2026-09-15` | Gotcha #11, the HTTPRoute blueprint notes and Operational Instructions step 6: Gateway `envoy-external` carries BOTH external-dns target keys (GA `external-dns.kubernetes.io/target` added `fbcd93c2`; alpha kept as the v0.21 rollback path) and new work uses the GA key. external-dns v0.22.0 (chart 1.22.0, `0a316a51`) reads only the GA prefix with no fallback (upstream #6424) — the actual mechanism of the 2026-09-08 outage. Plan external-dns-1.22.0 |
 | `2026.08.23` | `2026-08-23` | F-750d8a3c — realign with 2026-08 practice: Gotcha #1 reframed (`bitnamilegacy/*` is an unblock, not a target; new deployments stand the datastore up standalone per `bundled-datastore-exit.md`); new Gotcha #1b requiring version- or digest-pinned tags for every image (a floating tag never emits a Renovate PR, so the image ages invisibly — 19 of them, cleared in batches A–D); troubleshooting row for a from-scratch install exceeding Helm's 5m default timeout (uzeit-de `152cb651`) |
 | `2026.09.20` | `2026-09-20` | F-a52c4e76 — add Known Gotcha #15: a registration appended to the END of a `kustomization.yaml` joins whatever list is last, which for 9 of the 18 namespace files is `patches:`, not `resources:` — a bare string where kustomize wants an object. `cluster-apps` went `BuildFailed` and every app in the cluster stopped reconciling (2026-09-17, `e6b48baa`). Records why the checks were green (valid YAML plus a `resources` count are both true and neither is the question; `task kubeconform` ignores `kustomization.yaml` by filename pattern and exits 0 on the broken file) and the two gates that catch it: `kustomize build` on the directory, plus a key assertion naming the list the entry landed in. Render gate added to Operational Instructions step 11, registration rule to steps 3/9 and Test 7, troubleshooting row added |
+| `2026.09.28` | `2026-09-28` | App-structure row: Flux only sees `kubernetes/` since the `spec.ignore` source filter (`b4ed1d63`); paths outside it fail with `path not found` (F-ea25fa13) |

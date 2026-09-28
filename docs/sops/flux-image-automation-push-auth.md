@@ -1,8 +1,8 @@
 # SOP: Flux Image Automation Push Authentication
 
 > Description: Diagnose and remediate `ImageUpdateAutomation` objects that scan, resolve, and run on schedule but never push a commit, because their `sourceRef` GitRepository has no write-capable credential. Anonymous HTTPS read succeeds, so every other Flux signal stays green while image updates silently never happen.
-> Version: `2026.08.18` (rev 3)
-> Last Updated: `2026-08-18`
+> Version: `2026.09.28`
+> Last Updated: `2026-09-28`
 > Owner: `cberg-agent / cluster-ops`
 
 ---
@@ -126,7 +126,7 @@ The `flux-system` GitRepository is **not** a file in this repo. It is generated 
 flux-operator from the `FluxInstance`, whose values live in:
 
 ```yaml
-# kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml
+# kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml (current, abridged)
 instance:
   sync:
     kind: GitRepository
@@ -134,7 +134,63 @@ instance:
     ref: "refs/heads/main"
     path: kubernetes/flux/cluster
     pullSecret: flux-system-git-auth   # <-- CORRECT KEY. See the trap below.
+  # FluxInstance .spec.sync has no `ignore` field, so the source filter is patched onto
+  # the GENERATED GitRepository (b4ed1d63). See "Source filter" below.
+  kustomize:
+    patches:
+      - target:
+          kind: GitRepository
+          name: flux-system
+        patch: |
+          - op: add
+            path: /spec/ignore
+            value: |
+              # exclude everything
+              /*
+              # include only what Flux reconciles
+              !/kubernetes
 ```
+
+### Source filter: the artifact contains ONLY `kubernetes/` (since 2026-09-26, `b4ed1d63`)
+
+The generated `flux-system` GitRepository carries `spec.ignore: "/*" + "!/kubernetes"`, so
+the source artifact every Kustomization downloads holds only `kubernetes/` (7.1 MB → 1.9 MB).
+Before this, each new revision made kustomize-controller download and unpack the whole repo
+(docs/ and runbooks/ are the bulk) once per Kustomization — ~141× per commit, and again on
+every interval — on the NVMe partition etcd shares, which caused fsync stalls and etcd leader
+elections (F-baf94b64; mechanism in `docs/sops/etcd.md` §4.5).
+
+**Consequence — a path outside `kubernetes/` now fails.** Any Flux `Kustomization.spec.path`,
+or any `resources:`/`components:`/`patches:`/generator file reference in a
+`kustomization.yaml` that resolves outside `kubernetes/`, is simply absent from the artifact
+and fails with **`path not found`** (or a kustomize "no such file" for a referenced file). It
+is not a permissions or branch problem; do not debug the credential.
+
+**How to allow a path outside `kubernetes/`** — prefer moving the manifests under
+`kubernetes/`. If that is genuinely impossible, add a *precise* negation for exactly the
+directory Flux needs, never a broad one (a broad include brings the IO back):
+
+```yaml
+            value: |
+              /*
+              !/kubernetes
+              !/<top-level-dir>/<exact-subdir>     # ONE line per needed path; gitignore syntax
+```
+
+Rules for the negation: gitignore semantics — a child cannot be re-included if its parent
+directory stays excluded, so for a nested path re-include the parent and re-exclude its
+siblings (`!/deploy`, `/deploy/*`, `!/deploy/flux`). Then verify:
+
+```bash
+# the new value landed on the GENERATED object (the values file alone proves nothing)
+kubectl get gitrepository -n flux-system flux-system -o jsonpath='{.spec.ignore}'
+# artifact size stays small (was 1,922,733 B after b4ed1d63); a jump back toward 7 MB = too broad
+kubectl get gitrepository -n flux-system flux-system -o jsonpath='{.status.artifact.size}{"\n"}'
+flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
+```
+
+Not affected: HelmCharts from other GitRepositories (`oc8`, `plex`, `csi-driver-smb` have
+their own), and `ImageUpdateAutomation`, which clones independently of the artifact.
 
 ### The pruning trap (root cause of the 2026-08-18 incident)
 
@@ -709,6 +765,12 @@ are Helm/operator-owned and will be overwritten on the next reconcile.
 
 ## Version History
 
+- `2026.09.28`: §3 settings block brought up to date with the live values: added the
+  `instance.kustomize.patches` block that sets `spec.ignore` (`/*`, `!/kubernetes`) on the
+  generated GitRepository (`b4ed1d63`, F-baf94b64). New subsection "Source filter": why it
+  exists (etcd disk contention), that any Flux path outside `kubernetes/` now fails with
+  `path not found`, and how to add a precise negation and verify it on the generated object
+  (F-ea25fa13).
 - `2026.08.18` (rev 3): Closed the confused-deputy exposure that rev 2's fix created.
   Established by cluster-wide inventory that cross-namespace source refs are load-bearing
   (130/135 Kustomizations, 123/125 HelmReleases, 2/2 ImageUpdateAutomations point at
