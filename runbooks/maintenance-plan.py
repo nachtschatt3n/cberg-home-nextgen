@@ -1052,7 +1052,8 @@ def missing_window_runs(expected, run_rows, covered=()):
     """Pure logic, DB-free: expected (slot,date) pairs minus recorded ones.
 
     covered: extra (slot,date) pairs that count as run although no row for
-    that slot exists — see nightly_covered_by_on_demand()."""
+    that slot exists — see nightly_covered_by_on_demand() and
+    attended_absorbed_by_on_demand()."""
     have = {(str(s), str(d)) for s, d in run_rows}
     have |= {(str(s), str(d)) for s, d in covered}
     return [f"{s}:{d}" for s, d in expected if (s, d) not in have]
@@ -1106,6 +1107,46 @@ def nightly_covered_by_on_demand(run_rows, on_demand_id="now",
             continue
         day = _berlin_date(r[2]) if r[2] is not None else str(r[1])
         out.add((nightly_slot, day))
+    return sorted(out)
+
+
+# Operator decision 2026-09-28 ("fix the open points"): an on-demand run may
+# ABSORB an attended slot — but only EXPLICITLY. The 09-26 NOW run (window_runs
+# 48) ran the Saturday's attended plan batch with the operator present and said
+# so in its notes ("absorbs sat-attended:2026-09-26"); liveness still paged the
+# Saturday as missed. Unlike the nightly rule above there is NO implicit
+# coverage for attended slots — a NOW run does not by default carry an attended
+# window's plan capacity or Sunday reboot allowance. Coverage requires ALL of:
+#   * the notes carry the literal token `absorbs <slot>:<YYYY-MM-DD>`;
+#   * the covering row is slot `now` (on_demand id) OR trigger `ad-hoc`, in a
+#     slot other than the absorbed one (a row in that slot is already direct);
+#   * the row is TERMINAL and not `aborted` (same reasoning as the nightly rule);
+#   * <date> equals the Europe/Berlin date of the row's started_at ("same-day":
+#     a run cannot absorb a slot on another day — that token is ignored).
+ABSORBS_RE = __import__("re").compile(
+    r"(?<![\w-])absorbs\s+([a-z][a-z0-9-]*):(\d{4}-\d{2}-\d{2})\b")
+
+
+def attended_absorbed_by_on_demand(run_rows, on_demand_id="now", notes_index=6):
+    """Pure, DB-free: {(slot, berlin_date)} explicitly absorbed by a completed,
+    non-aborted `now`/ad-hoc row's notes. row: (slot, run_date, started_at,
+    finished_at, outcome, trigger, notes) — `notes_index` locates notes for
+    callers with a wider tuple; a row too short to carry notes absorbs nothing."""
+    out = set()
+    for r in run_rows:
+        if len(r) <= notes_index or not r[notes_index]:
+            continue
+        slot = str(r[0])
+        if _is_open_run(r) or r[4] == _WINDOW_RUNNING or r[4] in NON_COVERING_OUTCOMES:
+            continue
+        trigger = str(r[5]) if len(r) > 5 and r[5] is not None else ""
+        if not (slot == str(on_demand_id) or trigger == COVERING_TRIGGER):
+            continue
+        day = _berlin_date(r[2]) if r[2] is not None else str(r[1])
+        for a_slot, a_day in ABSORBS_RE.findall(str(r[notes_index])):
+            if a_slot == slot or a_slot == str(on_demand_id) or a_day != day:
+                continue
+            out.add((a_slot, a_day))
     return sorted(out)
 
 
@@ -1271,7 +1312,7 @@ def window_liveness_report(cfg, today, now=None):
         import psycopg
         with psycopg.connect(dsn, connect_timeout=10) as c, c.cursor() as cur:
             cur.execute("SELECT slot, run_date::text, started_at, finished_at,"
-                        " outcome, trigger FROM window_runs WHERE run_date >= %s",
+                        " outcome, trigger, notes FROM window_runs WHERE run_date >= %s",
                         # one day earlier: a NOW row opened after 22:00 UTC
                         # carries the previous run_date but covers the next
                         # Berlin day's nightly (nightly_covered_by_on_demand)
@@ -1281,7 +1322,9 @@ def window_liveness_report(cfg, today, now=None):
         return unverified
     now = now or datetime.now(timezone.utc)
     od = on_demand_slot(cfg)
-    covered = nightly_covered_by_on_demand(rows, on_demand_id=(od or {}).get("id", "now"))
+    od_id = (od or {}).get("id", "now")
+    covered = (nightly_covered_by_on_demand(rows, on_demand_id=od_id)
+               + attended_absorbed_by_on_demand(rows, on_demand_id=od_id))
     return {"missing": missing_window_runs(expected, completed_run_rows(rows), covered),
             "stuck": stuck_window_runs(cfg.get("windows", []), rows, now,
                                        on_demand=on_demand_slot(cfg)),

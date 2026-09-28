@@ -95,6 +95,26 @@ ADVISORY_RE = re.compile(r"\b(?:CVE-\d{4}-\d+|GHSA(?:-[0-9a-z]{4}){3}|[A-Z]+-SU-
                          r"ALSA-[\d:-]+|RHSA-[\d:-]+|USN-[\d-]+)\b")
 BUMP_RE = re.compile(r"(?:->|→)")
 AUTO_BUMP_RE = re.compile(r"(?i)step 0|direct-bump|auto-update|\(#\d+\)\s*$")
+# F-5ca8a134 (ops-retro 2026-W40): the week read auto=5 against 13 safe updates
+# landed, because three kinds of machine-landed bump fell through to "operator"
+# (or were not counted at all):
+#   * bot authors other than Renovate -- Flux image automation commits as
+#     `fluxcdbot`, and its subject ("update container images (weekly rebuild)")
+#     carries no arrow, so it was not even recognised as a bump;
+#   * window/agent-landed bumps whose subject names the window rather than
+#     "Step 0" ("(nightly window direct-bump)", "(sun-attended ...)", headless);
+#   * self-built REBUILD-lane rolls ("roll image", "OS-fresh rebuilds",
+#     "refreshed alpine packages") and any bump whose commit body carries the
+#     sweep's `security_ref: F-...` -- the security lane chose the target, an
+#     agent landed it; no operator decision was involved.
+# A feature bump of a self-built app ("sha-a -> sha-b -- restore the dropped
+# decimal") has none of these markers and stays "operator".
+BOT_AUTHOR_RE = re.compile(r"(?i)\[bot\]|renovate|fluxcdbot|github-actions|dependabot")
+IMAGE_AUTOMATION_RE = re.compile(r"(?i)\bupdate container images?\b|weekly rebuild|image automation")
+WINDOW_BUMP_RE = re.compile(r"(?i)\b(?:nightly|sat-attended|sun-attended|maintenance) window\b|"
+                            r"\((?:nightly|sat-attended|sun-attended)\b|\bheadless\b")
+REBUILD_ROLL_RE = re.compile(r"(?i)\broll(?:s|ed)?\b|\brebuil(?:d|ds|t)\b|\brefreshed\b|os-fresh")
+SECURITY_REF_BODY_RE = re.compile(r"(?m)^security_ref:\s*F-[0-9a-f]{8}\b")
 PLAN_BUMP_RE = re.compile(r"(?i)\(plan [\w.-]+|plan [\w.-]+\)")
 LANES = ("AUTO", "PLAN", "REBUILD", "HELD", "CRACK")
 STATE_DIR = Path(os.path.expanduser(os.environ.get("OPS_RETRO_STATE_DIR", "~/.local/state/ops-retro")))
@@ -164,7 +184,8 @@ def _load_mp():
 # ============================================================================
 def window_metrics(mp, cfg, run_rows, end_day, span):
     """run_rows: (slot, run_date, started_at, finished_at, outcome, trigger,
-    safe_updates) or None. end_day: the Berlin date the period ends on —
+    safe_updates[, notes]) or None — notes feeds the explicit
+    `absorbs <slot>:<date>` coverage (attended_absorbed_by_on_demand). end_day: the Berlin date the period ends on —
     expected slots are the fully-past days (end_day-7 .. end_day-1)."""
     if run_rows is None:
         why = "window_runs unreadable (sweep_history Postgres)"
@@ -173,7 +194,9 @@ def window_metrics(mp, cfg, run_rows, end_day, span):
     expected = mp.expected_slots(cfg, end_day, lookback_days=PERIOD_DAYS)
     base = [r[:6] for r in run_rows]
     od = (mp.on_demand_slot(cfg) or {}).get("id", "now")
-    covered = mp.nightly_covered_by_on_demand(base, on_demand_id=od)
+    covered = (mp.nightly_covered_by_on_demand(base, on_demand_id=od)
+               # notes is column 7 of this query (after safe_updates)
+               + mp.attended_absorbed_by_on_demand(run_rows, on_demand_id=od, notes_index=7))
     missing = mp.missing_window_runs(expected, mp.completed_run_rows(base), covered)
     in_span = [r for r in run_rows if _in(r[2], span)]
     outcomes = Counter(str(r[4]) for r in in_span)
@@ -496,30 +519,36 @@ def velocity_backlog(cov, prev_snapshot, is_current):
              snapshot_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"), **extra)
 
 
-def classify_bump(subject, author=""):
-    """'auto' | 'plan' | 'operator' | None (not a version bump)."""
+def classify_bump(subject, author="", body=""):
+    """'auto' | 'plan' | 'operator' | None (not a version bump).
+
+    `body` is the commit body; it only ever PROMOTES a bump to auto (the
+    security-lane `security_ref:` trailer), never makes a non-bump a bump."""
     s = subject or ""
-    if "renovate" in (author or "").lower():
-        return "auto"
-    if not (BUMP_RE.search(s) or re.search(r"(?i)\bupdate .*\(.*\)", s)):
-        return None
     if re.match(r"(?i)^(plan|docs|test|revert)\b", s) or s.startswith("Revert"):
         return None
+    bot = bool(BOT_AUTHOR_RE.search(author or ""))
+    image_automation = bool(IMAGE_AUTOMATION_RE.search(s))
+    if not (BUMP_RE.search(s) or re.search(r"(?i)\bupdate .*\(.*\)", s) or image_automation):
+        return None
+    if bot or image_automation:
+        return "auto"
     if PLAN_BUMP_RE.search(s):
         return "plan"
-    if AUTO_BUMP_RE.search(s):
+    if (AUTO_BUMP_RE.search(s) or WINDOW_BUMP_RE.search(s) or REBUILD_ROLL_RE.search(s)
+            or SECURITY_REF_BODY_RE.search(body or "")):
         return "auto"
     return "operator"
 
 
 def velocity_share(commits, span):
-    """commits: [(ts, subject, author)] or None."""
+    """commits: [(ts, subject, author[, body])] or None."""
     if commits is None:
         return U("git log unreadable")
     c = Counter()
-    for ts, subj, author in commits:
+    for ts, subj, author, *rest in commits:
         if _in(ts, span):
-            k = classify_bump(subj, author)
+            k = classify_bump(subj, author, rest[0] if rest else "")
             if k:
                 c[k] += 1
     total = sum(c.values())
@@ -527,7 +556,7 @@ def velocity_share(commits, span):
         return M({}, "git log bump commits", total=0)
     return M(dict(c), "git log bump commits (subject/author classified)", total=total,
              auto_pct=round(100 * c["auto"] / total), coverage="partial",
-             note="classified by commit subject; a bump whose subject names no plan/Step 0 counts as operator")
+             note="classified by author, subject and security_ref trailer; a bump with no bot/plan/window/rebuild marker counts as operator")
 
 
 def velocity_lead_time(bumps, span):
@@ -722,7 +751,7 @@ def fetch_git(since):
             t = _as_utc(ts)
             commits.append((t, subj))
             msgs.append((t, subj + "\n" + body))
-            authored.append((t, subj, author, sha))
+            authored.append((t, subj, author, sha, body))
         return {"commits": commits, "messages": msgs, "authored": authored}, None
     except Exception as e:  # noqa: BLE001
         return None, f"git: {e}"
@@ -775,8 +804,8 @@ def fetch_bumps(authored, max_commits=60):
         cov = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cov)
         out = []
-        for ts, subj, author, sha in authored:
-            if not classify_bump(subj, author) or len(out) >= max_commits:
+        for ts, subj, author, sha, *rest in authored:
+            if not classify_bump(subj, author, rest[0] if rest else "") or len(out) >= max_commits:
                 continue
             refs = bump_refs(_git("show", "--format=", "--unified=6", sha, "--", "*.yaml", "*.yml"))
             if not refs:
@@ -920,7 +949,7 @@ def build(now=None):
     for name, span in spans.items():
         end_day = span[1].astimezone(ZoneInfo("Europe/Berlin")).date()
         sec = report[name]
-        sec["windows"] = window_metrics(mp, cfg, [r[:7] for r in wr] if wr is not None else None,
+        sec["windows"] = window_metrics(mp, cfg, [r[:8] for r in wr] if wr is not None else None,
                                         end_day, span)
         sec["plans"] = plan_metrics([r[:4] for r in pe] if pe is not None else None, draft,
                                     open_gng, span, now)
@@ -940,7 +969,7 @@ def build(now=None):
         sec["velocity"] = {
             "backlog": velocity_backlog(cov, prev_backlog, cur_),
             "lead_time_days": velocity_lead_time(bumps, span),
-            "landed_by": velocity_share(gitd["authored"] and [(t, s_, a) for t, s_, a, _ in gitd["authored"]]
+            "landed_by": velocity_share(gitd["authored"] and [(t, s_, a, b) for t, s_, a, _, b in gitd["authored"]]
                                         if gitd else None, span),
             **security_velocity(pg["security_fixable"] if pg else None, span, cur_),
             "renovate_prs_opened": renovate_intake(prs, span),

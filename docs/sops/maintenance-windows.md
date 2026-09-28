@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.09.27`
-> Last Updated: `2026-09-27`
+> Version: `2026.09.28`
+> Last Updated: `2026-09-28`
 
 ## 1) Description
 
@@ -92,6 +92,21 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   section, `reconcile()` and `--liveness-metrics` (which `sweep-run.py` pushes
   to the Pushgateway as `window_runs_missing_count`). Test:
   `runbooks/tests/test-window-liveness-now-covers-nightly.py`.
+- **An on-demand run may cover an ATTENDED slot only by EXPLICIT declaration
+  (operator decision 2026-09-28).** There is no implicit coverage for
+  `sat-attended` / `sun-attended`. A `window_runs` row covers `<slot>:<date>`
+  only when its `notes` contain the literal token `absorbs <slot>:<YYYY-MM-DD>`
+  AND it is slot `now` (or trigger `ad-hoc` in another slot) AND it is terminal
+  and not `aborted` AND `<date>` equals the Europe/Berlin date of its
+  `started_at` (same-day only — a token for another day is ignored). Write the
+  token into the NOW row's notes when the run deliberately stands in for that
+  day's attended window (the 09-26 NOW run, `window_runs` 48, is the
+  precedent: "absorbs sat-attended:2026-09-26"). Code:
+  `maintenance-plan.py:attended_absorbed_by_on_demand()`, applied in
+  `window_liveness_report()` (so the Pushgateway `window_runs_missing_count`)
+  and in `ops-retro.py` `window_metrics()`. Test:
+  `runbooks/tests/test-window-liveness-now-absorbs-attended.py` (negative
+  control: the same row without the token stays missed).
 - **Plans:** `runbooks/maintenance/plans/<component>-<target>.md` — frontmatter
   (component, PR, current→target, risk, duration, `needs_reboot`, precise
   `touches`, `depends_on`, `conflicts_with`, status, window) + six body sections
@@ -731,6 +746,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.28 | 2026-09-28 | **An on-demand run covers an attended slot only by explicit `absorbs <slot>:<date>` (operator decision).** Liveness paged `sat-attended:2026-09-26` missed although the 09-26 NOW run (window_runs 48) declared it absorbed. A terminal, non-aborted `now`/ad-hoc row whose notes carry the token for its own Berlin date now covers that slot; no implicit coverage. Test `runbooks/tests/test-window-liveness-now-absorbs-attended.py`. |
 | 2026.09.27 | 2026-09-27 | **SD-10: low-risk reviewed plans auto-run in the nightly window without a GO (throughput program item D).** New `review: ready-for-go@<date>` frontmatter (written by rule 4d0b), `preapproved_low_risk` policy block (`autonomy-policy.yaml` `2026.09.27`), `maintenance-plan.py::preapproval()` + `preapproved_low_risk` JSON key, scheduler routes them to nightly, `autonomy-record.py eligible` honours it, morning-report issue after the run. Medium/high risk, reboots and capability changes still need a GO. |
 | 2026.09.26 | 2026-09-26 | **`operation` gates on busy/menu (F-28af989d).** The §7 "known gap": `operation sweep|fix|versions` sent ctrl+u and the prompt into a busy or menu pane. They now refuse with **exit 13** (8 is `restart`'s "survived TERM and KILL"), nothing typed, cron and manual alike; exhausted-idle auto-clear for unattended runs unchanged and followed by the same gate. §7 gains an `operation` exit-code table. Test `runbooks/tests/test-openclaw-console-delivery.py`. |
 | 2026.09.26 | 2026-09-26 | **Retry refusals page (operator decision).** `maintenance-window retry` used to no-op with exit 0 when the occurrence was LOST but the console was busy or in a menu, which left the 01:30 alert as the only same-day signal. It now exits 8, nothing typed, with a message naming the lost (slot, date), so the retry cron's failureAlert fires. An exhausted pane that cannot be auto-cleared still exits 4, now with the same LOST wording. When a row exists, retry stays a no-op with exit 0. Test `runbooks/tests/test-openclaw-console-delivery.py`. |
