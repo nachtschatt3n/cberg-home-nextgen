@@ -98,6 +98,14 @@ spec:
       media:
         enabled: true
         existingClaim: makemkv-media
+        # /output is MakeMKV's app_DestinationDir (autodiscripper target).
+        # Without this mount it is the image's anonymous VOLUME on node-local
+        # disk and every rip is lost on pod restart (F-6b04715e). The legacy
+        # extraVolumeMounts entry below is ignored by app-template 5.x.
+        # cifs-makemkv-media: subdir /Transcode, reclaim Retain (Severe tier).
+        globalMounts:
+          - path: /media
+          - path: /output
 
     securityContext:
       privileged: true
@@ -151,6 +159,14 @@ spec:
     controllers:
       main:
         type: deployment
+        # RWO Longhorn config volume at replicas 1 -> never RollingUpdate
+        # (docs/sops/longhorn-rwo-multi-attach.md).
+        strategy: Recreate
+        pod:
+          # The optical drive (/dev/sr0) exists only on k8s-nuc14-03; no NFD
+          # label identifies it, so pin by hostname (F-6b04715e).
+          nodeSelector:
+            kubernetes.io/hostname: k8s-nuc14-03
         containers:
           main:
             image:
