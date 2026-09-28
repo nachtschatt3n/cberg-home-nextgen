@@ -200,6 +200,12 @@ unifictl local devices -o json      # JSON for scripting
 unifictl local devices -o csv       # CSV for reports
 ```
 
+**Device firmware (switches/APs):** never bulk-upgrade. Switches go one at a time
+(SW-48 first, SW-24 only after SW-48 is back and etcd is healthy), only in the Sunday
+attended window, and never in the same slot as a Talos node roll: all three cluster nodes
+hang off Basement-SW-24-PoE, so a switch reboot costs etcd its quorum links. Full
+procedure: `docs/sops/unifi-device-firmware.md`.
+
 ### Kubernetes Network
 ```bash
 kubectl exec -n {ns} {pod} -- ip addr

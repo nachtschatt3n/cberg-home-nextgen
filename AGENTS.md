@@ -694,7 +694,9 @@ unifictl local device restart <MAC>
 # Adopt an unadopted device
 unifictl local device adopt <MAC>
 
-# Upgrade device firmware
+# Upgrade device firmware -- manual, ONE device at a time, sun-attended only, never
+# bulk/"Update All", never in the same slot as a Talos node roll, etcd gate around each
+# core switch: docs/sops/unifi-device-firmware.md
 unifictl local device upgrade <MAC>
 
 # Bulk adopt all unadopted devices

@@ -1,8 +1,8 @@
 # SOP: UniFi Device Firmware Updates
 
 > Description: How UniFi switch/AP firmware is updated in this homelab — manually, one device at a time, in the Sunday attended window, with an etcd health gate before and after each core switch.
-> Version: `2026.09.26`
-> Last Updated: `2026-09-26`
+> Version: `2026.09.28`
+> Last Updated: `2026-09-28`
 > Owner: `homelab-operator` (executed via `unifi-agent`)
 
 ---
@@ -33,8 +33,8 @@ This SOP makes device firmware a **manual, serial, attended** operation.
    SW-48 is back, adopted (`state=1`) and etcd is healthy.** Never both together.
 3. **Only in the Sunday attended window** (`sun-attended`, 09:00 Europe/Berlin, the only
    reboot-capable slot in `runbooks/maintenance-windows.yaml`). Never unattended.
-   **Never in the same `sun-attended` slot as a Talos node roll** (e.g. plan
-   `talos-1.14.1`): a switch reboot and a node reboot each cost etcd a member or its
+   **Never in the same `sun-attended` slot as a Talos node roll** (any plan that reboots
+   cluster nodes, e.g. a Talos version roll): a switch reboot and a node reboot each cost etcd a member or its
    leader, and together they can drop quorum — and a failure in either would be
    undiagnosable against the other. One or the other per Sunday, never both.
 4. **Pre-check etcd** has a leader and 3 healthy members before each switch.
@@ -325,4 +325,7 @@ done, it applies to both core switches at the same hour, which recreates this in
 
 ## Version History
 
+- `2026.09.28`: Rule 3 example no longer names the retired plan `talos-1.14.1` (executed
+  and deleted in `40ca20d6`); it now says "a Talos node roll" generically. Linked from
+  AGENTS.md and `docs/network.md` (F-10e01ab3).
 - `2026.09.25`: Initial version after the 2026-09-24 dual-switch firmware partition.

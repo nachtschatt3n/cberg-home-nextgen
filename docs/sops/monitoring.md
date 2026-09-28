@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.09.25`
-> Last Updated: `2026-09-25`
+> Version: `2026.09.28`
+> Last Updated: `2026-09-28`
 > Owner: `Platform`
 
 ---
@@ -567,7 +567,7 @@ Key dashboards to check during health checks:
 
 ## Alert Authoring Rules
 
-Four rules, each of which exists because an alert can be **loaded, healthy, and
+Five rules, each of which exists because an alert can be **loaded, healthy, and
 completely useless** — and look identical on every dashboard to one that works.
 A rule matching no series sits at `state=inactive`, which is the same thing a
 quiet, working rule looks like. All figures below were measured 2026-09-20.
@@ -620,6 +620,32 @@ in exactly the same way.
 PrometheusRule files and 268 rules: 25 bare `absent()` guards (the correct
 default), 0 using `and on()`, **0 AND-ed without `on()`**. So rule 3 is
 preventive, not remedial — it was caught in review before shipping.
+
+**5. Aggregate the one side of a join with `max by (...)` first — duplicate series
+appear during exporter overlaps.** When an exporter's pod is replaced (a chart bump
+rolling kube-state-metrics, a node drain), the old and new pods are scraped together for
+a few minutes and every series exists **twice**, differing only in `instance` /
+`kubernetes_node` / `pod`. A bare one-to-one or `group_left` join needs the "one" side
+unique per match group, so the whole rule errors with `found duplicate series for the
+match group ... on the right hand-side` and evaluates to nothing — the rule is blind
+during exactly the changes that most often move the thing it watches (2026-09-26:
+16 evaluation failures, 05:00–05:03Z, every `ContainerMemory*` rule blind; fixed in
+`c430a771`).
+
+```promql
+# fragile: breaks while two kube-state-metrics pods overlap
+container_memory_working_set_bytes / on(namespace,pod,container) group_left
+  kube_pod_container_resource_limits{resource="memory"}
+# robust: collapse the duplicate first (both copies carry the same value, so max changes nothing)
+container_memory_working_set_bytes / on(namespace,pod,container) group_left
+  max by (namespace,pod,container) (kube_pod_container_resource_limits{resource="memory"})
+```
+
+Generic rule: the `by (...)` list is exactly the `on(...)` list, and the aggregator must
+be value-preserving for identical duplicates (`max`/`min`, never `sum`, which doubles the
+value during the overlap). Leave `absent()` guards on the bare selector. Check a rule
+for this with `/api/v1/rules`: `health: err` with `lastError` containing `duplicate
+series` during a rollout is this trap.
 
 > **Audit it by PARSING, not grepping.** Six alert files contain the string
 > `and on()` only inside comments warning about this trap, and four quote the
@@ -1241,6 +1267,10 @@ Rollback validation:
 
 ## Version History
 
+- `2026.09.28`: Alert Authoring Rules #5 — duplicate series during an exporter overlap
+  (e.g. two kube-state-metrics pods mid-rollout) break bare `on()`/`group_left` joins with
+  "found duplicate series for the match group"; aggregate the one side with
+  `max by (<on-labels>)` first (`c430a771`).
 - `2026.09.20`: Added "Alert Authoring Rules" — the four ways an alert can be
   loaded, healthy and useless (missing `release` label; no `absent()` guard;
   `absent()` AND-ed with a labelled vector without `on()`, which is permanently

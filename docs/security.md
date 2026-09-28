@@ -151,6 +151,33 @@ forward-auth pattern only; OIDC and SAML integrations follow `docs/sops/authenti
 
 **Deployment:** `kubernetes/apps/kube-system/authentik/`
 
+### Authentication posture (since 2026-09-26)
+
+All of it is blueprint-managed; details, blueprint files and rollback in
+`docs/sops/authentik.md` "Email, recovery and MFA" and "Session lifetime".
+
+- **MFA is enforced on every password login**, internal apps included, with no network/IP
+  exemption: `default-authentication-mfa-validation` has `not_configured_action: configure`,
+  so a user with no device is walked through passkey-or-TOTP enrolment at that login rather
+  than denied. Accepted factors: WebAuthn (user verification required), TOTP, static codes,
+  email OTP.
+- **Sessions last 365 days** (`session_duration: days=365` on the login stage; proxy-provider
+  `access_token_validity` 365 d). A long session is the deliberate trade for household
+  usability; revoking a session is the control when a device is lost.
+- **Self-service recovery requires a second factor:** flow `cberg-recovery` = email link
+  (30-min token) → second factor at order 25 (WebAuthn/TOTP/static, **not** email, since an
+  email code lands in the same inbox as the link) → password policy (≥ 12 chars, zxcvbn ≥ 3,
+  HIBP) → login. Every account should therefore hold a passkey or TOTP device, not only
+  email OTP (see the SOP).
+- **`akadmin` is deactivated** (`is_active: false`): the unused bootstrap superuser. The
+  operator's own account is the only active admin; upstream's entry is `state: created`, so
+  an image bump does not re-activate it.
+- **Break-glass:** `ak create_recovery_key <MINUTES> <user>` prints a one-time login URL that
+  bypasses the flows. **The first argument is MINUTES** (`timedelta(minutes=duration)`), not
+  days or years: `1` is valid for one minute; a one-year key is `525600`. Treat the URL as a
+  credential.
+- Per-account enrolment state is tracked on finding F-e2535a1a, not here.
+
 ### Blueprint-Only Approach
 
 **ALWAYS use blueprints for Authentik configuration — never the UI.** Blueprints are:
