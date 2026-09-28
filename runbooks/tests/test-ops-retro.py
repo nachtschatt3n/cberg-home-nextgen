@@ -236,6 +236,36 @@ def test_velocity():
     check("classify_bump: bare bump -> operator", R.classify_bump("feat(x): 1 -> 2") == "operator")
     check("classify_bump: plan/doc commits are not bumps",
           R.classify_bump("plan(x): draft 1 -> 2") is None and R.classify_bump("Revert \"feat: 1 -> 2\"") is None)
+    # F-5ca8a134: machine-landed bumps must not read as operator work.
+    check("classify_bump: fluxcdbot weekly rebuild (no arrow) -> auto",
+          R.classify_bump("chore(showcase): update container images (weekly rebuild)", "fluxcdbot") == "auto")
+    check("classify_bump: image-automation subject without bot author -> auto",
+          R.classify_bump("chore(gas-price-monitor): update container image (weekly rebuild)", "x") == "auto")
+    check("classify_bump: nightly-window direct-bump -> auto",
+          R.classify_bump("chore(anythingllm): 1.16.1 -> 1.16.2 (nightly window direct-bump)") == "auto")
+    check("classify_bump: sun-attended window-landed -> auto",
+          R.classify_bump("chore(x): 1.0 -> 1.1 (sun-attended 2026-09-27)") == "auto")
+    check("classify_bump: self-built rebuild roll -> auto",
+          R.classify_bump("fix(ai-sre): roll image 2.1.4 -> 2.1.5") == "auto"
+          and R.classify_bump("fix(rainbow-rescue): image 0.1.2 -> 0.1.3 (refreshed alpine packages)") == "auto")
+    check("classify_bump: security_ref trailer in body -> auto",
+          R.classify_bump("fix(arag-web): image sha-2873ce3 -> sha-e8d9f51", "Mathias Uhl",
+                          "Rebuilt on a fresh base.\n\nsecurity_ref: F-89c74756\n") == "auto")
+    check("classify_bump: security_ref mentioned mid-line is NOT the trailer",
+          R.classify_bump("feat(x): 1 -> 2", "", "see security_ref: F-89c74756 elsewhere") == "operator")
+    check("classify_bump: plan tag still wins over a window marker",
+          R.classify_bump("feat(makemkv): v1 -> v2 (plan makemkv-v2, nightly 2026-09-28)") == "plan")
+    check("classify_bump: self-built FEATURE bump stays operator",
+          R.classify_bump("feat(solarfocus-scraper): sha-5f31bd6 -> sha-357aa5f -- restore the dropped decimal") == "operator")
+    check("classify_bump: bot author on a docs commit is still not a bump",
+          R.classify_bump("docs(x): note 1 -> 2", "renovate[bot]") is None)
+    check("classify_bump: 'enrolled'/'controller' do not match the roll marker",
+          R.classify_bump("feat(authentik): enrolled users 1 -> 2 via controller") == "operator")
+    m = R.velocity_share([(t(1), "chore(s): update container images (weekly rebuild)", "fluxcdbot", ""),
+                          (t(1), "fix(a): image sha-1 -> sha-2", "Mathias Uhl", "security_ref: F-0123abcd"),
+                          (t(1), "feat(b): 1 -> 2", "Mathias Uhl")], CUR)
+    check("velocity share: bot rebuild + security-lane roll auto, bare bump operator (3-tuple still accepted)",
+          m["value"] == {"auto": 2, "operator": 1} and m["auto_pct"] == 67, str(m))
     check("velocity share: no commits readable -> unmeasured", unmeasured(R.velocity_share(None, CUR)))
     m = R.velocity_lead_time([{"ts": t(1), "published": t(4)}, {"ts": t(2), "published": None}], CUR)
     check("lead time: publish->landed days, unresolved flagged partial",
