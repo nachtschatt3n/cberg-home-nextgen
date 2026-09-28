@@ -475,6 +475,15 @@ spec:
           # spike). Bumping to 1.5 GiB pushes the next OOM to ~3 weeks
           # of uptime — acceptable cadence for a leak we don't own.
           memory: 1536Mi
+      # jemalloc for Sidekiq (F-c99004a9: glibc-arena growth 370Mi -> 750-1000Mi).
+      # The image's bin/docker-entrypoint already exports LD_PRELOAD=jemalloc,
+      # but the chart overrides the worker's `command` (bash -lc sidekiq), which
+      # bypasses the ENTRYPOINT — so only the worker ran on glibc malloc. The
+      # web pod keeps the entrypoint and already maps jemalloc (verified
+      # /proc/1/maps 2026-09-28), so it is deliberately NOT set there.
+      # Path verified in the running image (Ruby 3.4.11, Debian, x86_64).
+      extraEnv:
+        LD_PRELOAD: /usr/lib/x86_64-linux-gnu/libjemalloc.so.2
       extraVolumes:
         - name: uploads
           persistentVolumeClaim:
