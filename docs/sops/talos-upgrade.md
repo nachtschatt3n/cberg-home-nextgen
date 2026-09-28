@@ -1,11 +1,11 @@
 # SOP: Talos Linux Upgrade with Performance Tuning
 
-> Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. **Current cluster state: Talos v1.13.8 + Kubernetes v1.36.0 (kernel 6.18.42-talos, Clang/ThinLTO) — rolled 2026-08-16.**
-> Version: `2026.09.26`
-> Last Updated: `2026-09-26`
+> Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. Section 14 records the `v1.13.10 → v1.14.1` roll (2026-09-27) and its lessons; section 15 is the post-roll verification and expected-transient list. **Current cluster state: Talos v1.14.1 + Kubernetes v1.36.0 (kernel 6.18.51-talos, Clang/ThinLTO; containerd 2.3.5; etcd 3.7.1) — rolled 2026-09-27.**
+> Version: `2026.09.28`
+> Last Updated: `2026-09-28`
 > Owner: `homelab-ops`
 
-> **Cluster state (2026-08-16):** All three nodes (`k8s-nuc14-01/02/03`) are running Talos `v1.13.8` + Kubernetes `v1.36.0`. Performance sweep (BBR, conntrack, kubelet reservations, RPS mask, hugepages), intelgpu/udev patches, and Longhorn v2 OS prerequisites are all wired in. See §13 for the full two-stage traversal record and lessons learned.
+> **Cluster state (2026-09-27):** All three nodes (`k8s-nuc14-01/02/03`) are running Talos `v1.14.1` + Kubernetes `v1.36.0` (kernel `6.18.51-talos`, containerd `2.3.5`, etcd `3.7.1` / storage `3.7.0`). **`talhelper genconfig` cannot render v1.14 configs for this cluster — `task talos:generate-config` fails on `main` until the multi-document config migration lands (§14.2). Do not regenerate or `apply-config` node configs until then.** Performance sweep (BBR, conntrack, kubelet reservations, RPS mask, hugepages), intelgpu/udev patches, and Longhorn v2 OS prerequisites are all wired in. See §13 for the full two-stage traversal record and lessons learned.
 
 ---
 
@@ -25,13 +25,15 @@ Full-cluster Talos upgrade combined with a performance tuning sweep. Performs a 
 
 ## 2) Overview
 
-**Current cluster state (2026-05-03):**
+**Current cluster state (2026-09-27, after the v1.14.1 roll):**
 
 | Setting | Value |
 |---------|-------|
-| Talos version | `v1.13.8` ✅ |
+| Talos version | `v1.14.1` ✅ |
 | Kubernetes version | `v1.36.0` ✅ |
-| Kernel | `6.18.42-talos` (Clang/ThinLTO) ✅ |
+| Kernel | `6.18.51-talos` (Clang/ThinLTO) ✅ |
+| containerd | `2.3.5` |
+| etcd | `3.7.1` (storage `3.7.0`); `/var/lib/etcd` is a directory on EPHEMERAL, shared with Longhorn — see `docs/sops/etcd.md` |
 | `CONFIG_IPV6_MROUTE` | `=y` ✅ |
 | CPU governor | `powersave` |
 | `machine-intelgpu.yaml` | ✅ wired (i915.enable_guc=3, hugepages=1024) |
@@ -44,7 +46,7 @@ Full-cluster Talos upgrade combined with a performance tuning sweep. Performs a 
 | NPU (IVPU) | ✅ exposed at `/sys/class/accel/accel0` on all 3 nodes |
 | Source of truth | `kubernetes/bootstrap/talos/talconfig.yaml` |
 
-**For next upgrade:** bump `talosVersion` and `kubernetesVersion` in `talconfig.yaml`, regenerate schematic at factory.talos.dev (same extension set), run steps 1–9. For a two-minor jump, use §13's two-stage pattern.
+**For next upgrade:** bump `talosVersion` and `kubernetesVersion` in `talconfig.yaml`, regenerate schematic at factory.talos.dev (same extension set), run steps 1–9. For a two-minor jump, use §13's two-stage pattern. **Since v1.14 read §14 first:** the installer is published only by the Image Factory, `talhelper genconfig` no longer works for this cluster (roll with the existing configs), and the etcd drain/defrag gates there are mandatory.
 
 ---
 
@@ -53,7 +55,7 @@ Full-cluster Talos upgrade combined with a performance tuning sweep. Performs a 
 Declarative source of truth is `talhelper`-managed. Regenerate cluster configs after editing `talconfig.yaml` or any patch.
 
 - **Source of truth**: `kubernetes/bootstrap/talos/talconfig.yaml`
-- **Generated configs**: `kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-0{1,2,3}.yaml` (SOPS-encrypted)
+- **Generated configs**: `kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-0{1,2,3}.yaml` — **gitignored plaintext** (`clusterconfig/.gitignore`), never committed; they hold machine secrets. The local copies are still the v1.13.10-contract generation, which equals what the nodes run (§14.2).
 - **Patches**: `kubernetes/bootstrap/talos/patches/global/*.yaml` and `patches/controller/*.yaml`
 
 ### Files to create/modify
@@ -335,7 +337,9 @@ grep -A15 "extraKernelArgs" kubernetes/bootstrap/talos/clusterconfig/kubernetes-
 
 **Expected**: `extraKernelArgs` section contains `i915.enable_guc=3`, `intel_iommu=on`, `mitigations=off`, `init_on_alloc=0`.
 
-**SOPS note**: `talhelper genconfig` produces SOPS-encrypted cluster configs. Ensure `SOPS_AGE_KEY_FILE` is exported (should be handled by `.mise.toml`).
+**SOPS note**: `talhelper genconfig` decrypts `talsecret.sops.yaml`/`talenv.sops.yaml`, so `SOPS_AGE_KEY_FILE` must be exported (handled by `.mise.toml`); its OUTPUT is plaintext and gitignored.
+
+> **v1.14+: this step currently FAILS and is SKIPPED (since 2026-09-27).** With `talosVersion: v1.14.1` every talhelper release emits the 1.14 multi-document Kubernetes/network docs on top of our v1alpha1 fields and the machinery rejects the mix (3.1.11: 3 errors, 3.1.17: 6 `already set in v1alpha1` errors). A node-image-only upgrade does not need it — see §14.2. Do not hand-patch around the error and do not `apply-config` anything regenerated until the multi-doc migration plan (F-59b12b2b) lands.
 
 ### Step 8 — Commit and push
 
@@ -1040,6 +1044,7 @@ git push
 ## 12) References
 
 ### Related SOPs
+- `docs/sops/etcd.md` — etcd latency thresholds, leader-change triage (pattern (ii)), defrag, snapshot/restore, shared-NVMe contention.
 - `docs/sops/home-assistant-updates.md` — **run its post-restart checklist after every rolling reboot**: HA reinstalls HACS requirements on each boot (certifi/EBUSY class failures) and restarts tend to wedge the HmIP cloud session.
 
 ### Official Talos documentation
@@ -1310,8 +1315,269 @@ In practice, if Stage B fails: stop at `v1.12.7`, file the issue, plan Stage B r
 
 ---
 
+## 14) v1.13.10 → v1.14.1 roll (2026-09-27): lessons
+
+> **Status:** Executed in `sun-attended:2026-09-27` (extended by the operator to ~12:00Z).
+> Roll order `k8s-nuc14-03` (canary) → `k8s-nuc14-02` → `k8s-nuc14-01`. Config commit
+> `cad2bd3f`; talosctl CLI pin (Renovate PR #212) merged LAST in `a6704ad6`; plan retired in
+> `40ca20d6`. Result: 3× Ready on v1.14.1, kernel 6.18.51, containerd 2.3.5, kubelet v1.36.0
+> unchanged, etcd 3.7.1 on all members (storage 3.7.0), Longhorn 93/93 healthy at 186
+> replicas. The full executed plan, including the gate helpers (`etcdgate.py`, `etcdstat.py`,
+> `lh_gate.py`, `nodegate.py`, `notready.py`, `alerts.py`), lives only in git history:
+> `git show 40ca20d6^:runbooks/maintenance/plans/talos-1.14.1.md`. Reuse those helpers for
+> the next roll instead of rewriting them. Findings: F-2cb2dbc9, F-b91ef6e5, F-59b12b2b,
+> F-3625b9f6, F-e8bb3113, F-b7f34c39.
+
+### 14.1 What v1.14 changes on upgrade (not opt-in)
+
+| Change | Impact here |
+|---|---|
+| Installer published **only** by the Image Factory since v1.14.0 (`ghcr.io/siderolabs/installer` stopped) | Already on `factory.talos.dev`. The Renovate annotation on `talosVersion` was repointed to `github-releases/siderolabs/talos` in `cad2bd3f`. |
+| etcd 3.6 → **3.7** | **One-way.** `talosctl rollback` reverts the boot partition only; it does not unwind etcd. Past the canary there is no clean revert — stop part-rolled or DR from the pre-roll snapshot (§11.4). |
+| etcd + kube-apiserver minimum TLS 1.3 | No custom cipher suites here; no effect observed. |
+| etcd default metrics port 2379 → 2383 | We set `listen-metrics-urls: http://0.0.0.0:2381` explicitly (`patches/controller/cluster.yaml`), so scraping is unaffected. Re-check if that patch is ever removed. |
+| containerd 2.2.7 → 2.3.5, NRI enabled by default | No NRI consumer known. |
+| `net.ipv4.conf.*.send_redirects=0` default | Automatic. |
+| v1alpha1 Kubernetes/`sysctls`/`udev`/`files` fields deprecated (still honoured) | Only a `.machine.files is deprecated` warning. This is what breaks talhelper (§14.2). |
+| Workload isolation (`SecurityProfileConfig`) is **opt-in** and breaks the in-tree iSCSI plugin | NOT enabled. Verify after every roll (§15.1 step 9). |
+
+### 14.2 talhelper cannot render v1.14 configs — upgrade with the EXISTING configs
+
+With `talosVersion: v1.14.1`, every talhelper release emits the 1.14 multi-document
+Kubernetes/network docs on top of our v1alpha1 fields, and the machinery rejects the mix
+(3.1.11: 3 errors; 3.1.17: 6 `already set in v1alpha1` errors for discovery, nameservers,
+apiServer, controllerManager, scheduler, proxy). talhelper is end-of-life (3.1.17 is the last
+release) and embeds only **alpha** 1.14 machinery, so its "might not be compatible" warning
+fires on the version string forever.
+
+**It was never on the roll's critical path.** `task talos:upgrade-node` runs
+`talhelper gencommand upgrade`, which only prints `talosctl upgrade --image <factory>:<tag>`,
+and Talos's `Upgrade()` handler takes the image from the request and **does not write the
+machine config**. Each node keeps its live v1alpha1 config through the roll ("option B").
+
+Procedure that worked:
+
+1. Pull each node's live config into a mode-700 local scratch dir (never the repo, never a
+   synced folder — it holds machine secrets). Name the resource ID: a node has **two**
+   `MachineConfig` resources, `v1alpha1` (active) and `persistent` (what it boots from STATE);
+   a bare `get machineconfig` returns both and a single-document YAML load then leaves 0-byte
+   files. Both must be identical — `DIFFER` means something is staged: STOP.
+2. Validate each live config with the **target** talosctl client (downloaded into scratch,
+   checksum verified — not the mise pin, which moves last):
+   `talosctl-<target> validate --config live-<ip>.yaml --mode metal`, one exit code per node.
+   Run a negative control (append a doc the validator must reject) so a validator that
+   cannot fail is caught.
+3. Bump `talosVersion` only, commit (Flux does not reconcile `kubernetes/bootstrap/talos/`),
+   then `task talos:upgrade-node IP=<ip>` per node.
+4. Merge the talosctl CLI pin PR **after the last node** (a client ahead of the servers is not
+   "up to date"; F-9a58f400).
+
+**Consequences until the multi-doc migration (F-59b12b2b) lands:**
+- `task talos:generate-config` **fails on `main`** — known and intended. Do not hand-patch
+  around it and do not `apply-config` regenerated files.
+- The gitignored local `clusterconfig/` files stay the v1.13.10-contract generation, which
+  equals live. Any machine-config change (patch, sysctl, kernel arg) is blocked until then.
+- The migration is its own reviewed plan, **due before 1.15**, and needs a **semantic diff
+  against the live machineconfig**. A scratch trial on 2026-09-27 showed talhelper 3.1.17's
+  auto-migration validates cleanly (`exit 0`) yet is NOT equivalent: it renames the etcd
+  secretbox key (`key2` → `key1`) and drops the `identity` provider (**fatal if applied** —
+  stored Secrets carry the key name), drops apiserver cert SANs, turns anonymous auth on for
+  health endpoints, and enables `FilesystemTrimConfig` by default. Validation passing is not
+  equivalence (`docs/sops/verification-contents-not-shape.md`).
+
+### 14.3 Drain-driven etcd stalls and the pattern (ii) rule
+
+**Observed:** during each node's drain the two **survivors** saw WAL fdatasync stalls — worst
+1.8 s (canary) → 3.6 s → 7.3 s — and etcd leader elections, although the drained node was not
+the leader. Cause: etcd, container images and Longhorn share one consumer NVMe per node
+(no power-loss protection); a drain is a mass eviction plus Longhorn engine moves and replica
+rebuilds plus a cold `kustomize-controller` re-extracting artifacts, all on the disks carrying
+quorum. Mechanism and thresholds: `docs/sops/etcd.md`.
+
+**Rule — pattern (ii).** An etcd leader change on the survivors that the rolled node's own
+reboot does not explain (+1 is allowed only when the rolled node WAS the leader, and is
+pre-recorded before the upgrade) = **STOP and triage**. The operator may continue ONLY when
+ALL of these hold; otherwise stop part-rolled (a supported transient):
+
+1. **No NIC carrier change** on any node — `node_network_carrier_changes_total{device=~"en.*"}`
+   unchanged (+0) on the survivors across the drain. A carrier change means the network
+   moved (switch, cabling, firmware push): not a Talos problem.
+2. **Never leaderless** — `min_over_time(etcd_server_has_leader[15m]) = 1` on both survivors
+   (a re-election, not a quorum loss).
+3. **Slow fdatasync only inside the drain window, clean after** — worst 5m-p99 WAL fsync and
+   backend commit back under 50 ms once the drain/rebuild finished.
+4. `talosctl etcd status` clean on all three: one leader, no learner, empty ERRORS, raft index
+   converged.
+
+On 2026-09-27: canary accepted (operator option A), node 02 accepted under pattern (ii),
+node 01's two changes are a RECORDED EXCEPTION because condition 2 could not be measured
+(§14.5).
+
+**Mandatory etcd gates for a roll** (all from the retired plan, all fail-closed):
+- **Push freeze** on `main` for the window; `origin/main` must equal the recorded freeze SHA
+  before every node (commit bursts drive the disk; see `docs/sops/etcd.md`). Suspend any
+  `ImageUpdateAutomation` that pushes to `main`. Do NOT suspend the `flux-system`
+  GitRepository (source-controller storage is emptyDir; a suspended source loses its artifact
+  when a drain moves that pod).
+- **Pre-start:** worst 5m-p99 WAL fsync and backend commit < 50 ms over 1 h, no unexplained
+  leader change in 2 h, `kustomize-controller` writes < 5 MB/s over 10 min, and < 6 leader
+  changes in 24 h (≥ 6 with no reboots = etcd already unstable: NO-GO).
+- **Defrag first** if IN USE < 50 % of DB SIZE on any member (`docs/sops/etcd.md` §4.3),
+  then the §0.4 snapshot.
+- **Between nodes:** ≥ 10 min settle after the Longhorn gate passes, then the same latency
+  gates over the 10-min settle window and raft index converged.
+- **Node-down tripwire:** a node not back `Ready` within 10 min of its reboot = Longhorn starts
+  FULL rebuilds on the two quorum disks; watch the survivors every 2 min; any survivor
+  election or p99 ≥ 50 ms = no next node today.
+
+**Mitigations for the next roll (F-2cb2dbc9):** lower
+`concurrent-replica-rebuild-per-node-limit` 8 → 2 for the window via a **top-level**
+`values.defaultSettings.concurrentReplicaRebuildPerNodeLimit` in the Longhorn HelmRelease
+(the `values.longhorn:` block is INERT — the chart has no such subchart) and restore `8`
+**explicitly** afterwards (`git revert` leaves the Setting CR at 2), or raise
+`replicaReplenishmentWaitInterval` so full rebuilds never start during a reboot. Price the
+extra rebuild time first (§14.6). Root fix: dedicated etcd partition (C2, `docs/sops/etcd.md`).
+
+### 14.4 Failed Longhorn replica cleanup after each node
+
+After each node returned, some volumes kept **failed** replica CRs on the rolled node and the
+replica-total gate (186 = 93 × 2) never converged. Cause: those volumes have
+`staleReplicaTimeout: 0`, so Longhorn never garbage-collects a failed replica (F-b91ef6e5;
+on 2026-09-27 two app volumes, 4 CRs across the roll — the rest auto-GC'd).
+
+Standing operator rule (2): delete **only failed replicas on the rolled node**, and only
+after confirming the volume already has 2 healthy running replicas elsewhere.
+
+```bash
+NODE=<rolled-node>
+mise exec -- kubectl -n storage get replicas.longhorn.io -o json | python3 -c "
+import sys, json
+from collections import defaultdict
+items = json.load(sys.stdin)['items']
+ok = defaultdict(int)
+for r in items:
+    if r['status'].get('currentState') == 'running' and not r['spec'].get('failedAt'):
+        ok[r['spec']['volumeName']] += 1
+for r in items:
+    s = r['spec']
+    if s.get('nodeID') == '$NODE' and s.get('failedAt'):
+        v = s['volumeName']
+        print(('DELETE-OK ' if ok[v] >= 2 else 'KEEP(<2 healthy) ') + r['metadata']['name'], v, 'healthy=%d' % ok[v])"
+# delete ONLY the DELETE-OK names, one by one:
+# mise exec -- kubectl -n storage delete replicas.longhorn.io <replica-name>
+```
+
+Never delete a replica of a volume with fewer than 2 healthy replicas, and never touch
+Volume/PV/PVC objects for this (`docs/sops/storage-safety.md`). Durable fix: a sane
+`staleReplicaTimeout` (20–30 min) on every volume / StorageClass default.
+
+### 14.5 The Prometheus blind spot — a roll blinds its own instrument
+
+`prometheus-kube-prometheus-stack-0` ran on `k8s-nuc14-01`. Draining 01 left **no samples
+~08:50–08:56Z — exactly the reboot window** — so pattern (ii) condition 2 could not be
+verified for the last node, and the survivors' etcd logs had already rotated past it
+(`apply request took too long` spam fills talosctl's log ring) (F-e8bb3113).
+
+Next roll:
+- Find Prometheus's node before choosing the order and **roll that node FIRST** (a canary
+  whose gaps are covered by the later nodes' data), or move Prometheus off before draining it:
+  `kubectl -n monitoring get pod prometheus-kube-prometheus-stack-0 -o wide`.
+- During every drain, capture survivor etcd logs continuously so elections stay recoverable:
+  `talosctl -n <survivor-ip> logs etcd -f > "$SCR/etcd-<survivor>-<node>.log" &` (local
+  scratch only).
+
+### 14.6 Kernel hwmon renumbering
+
+Kernel 6.18.51 renamed the thermal hwmon chip `thermal_thermal_zone0` → `thermal_thermal_zone1`
+on all three nodes (and added `i2c_0_0_0050`/`i2c_0_0_0052` DIMM sensors). The Uptime Kuma
+"Cluster GPU Temp" monitor's PromQL pinned `thermal_thermal_zone0`, returned NaN, and
+`KumaMonitorDown` fired — a real, roll-caused regression, not reboot noise (F-b7f34c39; the
+monitor lives only in Uptime Kuma's DB). After any kernel bump:
+
+```promql
+count by (chip) (node_hwmon_temp_celsius)          # run before AND after; diff the chip set
+```
+
+Never pin a zone/hwmon index in a regex (`thermal_thermal_zone[0-9]+`, or select by label).
+
+### 14.7 Timings (measured, for pricing the next roll)
+
+| Item | Measured 2026-09-26/27 | Was priced |
+|---|---|---|
+| Per node, drain → Longhorn gate PASS | **~23 min**: drain ~2, reboot ~1, **Longhorn rebuild ~20 (dominates)** | 45 min (F-3625b9f6) |
+| Inter-node settle | ≥ 10 min (fixed gate) | 10 |
+| etcd defrag, 3 members incl. gates | ~4–7 min; each defrag < 1 s; DB ~370 → 151 MB in-window | 7 |
+| Pre-roll etcd snapshot | ~3 min (~150–300 MB after defrag) | 3 |
+| Prep (client download, live-config validation, baselines) | ~25 min, before the window, Flux-inert | — |
+| End-of-window alert settle | ≥ 15 min | 15 |
+
+Rule of thumb: **~25 min per node + 10 min settle between nodes + ~40 min fixed** (defrag,
+snapshot, final verification). The whole roll was priced at 187 min against the slot; it
+needed the operator's window extension, so the next one should either use the measured
+figures above or split prep into the evening before.
+
+---
+
+## 15) Post-roll verification and expected transients
+
+Run after the LAST node, inside the ≥ 15-min alert settle, and again at the next sweep.
+The rule for every row below: **a transient explains a signal only while its "transient if"
+condition holds.** Anything else is a regression — report it, don't absorb it.
+
+### 15.1 Verification
+
+```bash
+# 1. every node on the target (OS, kernel, runtime, kubelet)
+mise exec -- kubectl get nodes -o custom-columns=N:.metadata.name,OS:.status.nodeInfo.osImage,K:.status.nodeInfo.kernelVersion,CR:.status.nodeInfo.containerRuntimeVersion,KL:.status.nodeInfo.kubeletVersion
+# 2. etcd: 3 members, one leader, no learner, empty ERRORS, raft converged, SAME protocol on all
+mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status
+# 3. the VIP (192.168.55.10) is held by exactly one node
+for ip in 192.168.55.11 192.168.55.12 192.168.55.13; do echo -n "$ip vip="; mise exec -- talosctl -n $ip get addresses 2>/dev/null | grep -c '192.168.55.10/32'; done
+# 4. pods: phase AND container readiness (a CrashLoopBackOff pod still reports phase Running)
+mise exec -- kubectl get pods -A --field-selector status.phase!=Running,status.phase!=Succeeded
+# 5. Flux
+mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
+mise exec -- flux get helmreleases -A   | awk 'NR==1 || $5 != "True"'
+# 6. Longhorn: all healthy, replica total == pre-roll baseline, AND volumes attached on every node (§9 iSCSI trap)
+mise exec -- kubectl get volumes -n storage -o custom-columns='NODE:.status.currentNodeID' --no-headers | sort | uniq -c
+# 7. DaemonSets: desired == ready everywhere
+mise exec -- kubectl get ds -A | awk 'NR==1 || $4 != $6'
+# 8. device plugins re-registered on every node (i915=5, npu accel=1)
+mise exec -- kubectl get nodes -o custom-columns='N:.metadata.name,GPU:.status.allocatable.gpu\.intel\.com/i915,NPU:.status.allocatable.npu\.intel\.com/accel'
+# 9. workload isolation NOT silently enabled: securityprofileconfig=0 AND positive control >= 1 on every node
+#    (a grep against a failed talosctl call also prints 0; `sandboxd` existing on v1.14 proves nothing)
+for ip in 192.168.55.11 192.168.55.12 192.168.55.13; do
+  echo -n "$ip securityprofileconfig="; mise exec -- talosctl -n $ip get machineconfig -o yaml | grep -ci 'securityprofileconfig'
+  echo -n "   positive-control(machine:)="; mise exec -- talosctl -n $ip get machineconfig -o yaml | grep -ci 'machine:'
+done
+# 10. kernel bump: hwmon chip set unchanged (§14.6) — Prometheus: count by (chip) (node_hwmon_temp_celsius)
+```
+
+Alerts: compare the firing SET with the pre-roll baseline after ≥ 15 min, and require the
+`Watchdog` to be firing (positive control — an empty set cannot distinguish a healthy
+cluster from a dead Prometheus → Alertmanager path).
+
+### 15.2 Expected transients
+
+| Signal | Why it happens during a roll | Transient if | NOT transient if |
+|---|---|---|---|
+| **etcd leader changes** (sweep `etcd-leader-changes`, e.g. 9 in 24 h vs ~6/7 d background on 2026-09-27) and the kube-system error-log spike `watch chan error: etcdserver: no leader` | One election per rolled node that was leader, plus drain-driven survivor elections (§14.3). The sweep's 24 h / 7 d windows keep counting them for a day / a week after the roll. | Every change falls inside a drain/reboot window, pattern (ii) held for it, and `etcd_server_leader_changes_seen_total - etcd_server_leader_changes_seen_total offset 1h` is 0 on all members once the roll ended. | Any election after the roll ended, or a leaderless period (`min_over_time(etcd_server_has_leader[15m]) < 1`) → `docs/sops/etcd.md` §7. |
+| **ES rejection tail** (sweep `edot ES per-doc rejections`, e.g. ~21k/6h split `internal_server_error` + `timeout` on 2026-09-27) | Elasticsearch data pods are evicted and restarted with their nodes; bulk requests time out or 5xx while shards recover. The health check sums a **6 h** window, so the finding persists up to ~6 h after ES is green again. | Only server-side outcomes (`timeout`, `internal_server_error`, `failed_server`, `too_many`); **zero `failed_client`** (parse/mapping); ES health green; the 1 h increase back near 0. | Any `failed_client` / `document_parsing_exception` (a real schema problem) or rejections still climbing an hour after ES is green → `docs/sops/monitoring.md` "ES Rejected Documents". |
+| **iSCSI connection resets** in `talosctl dmesg` / `ext-iscsid` logs | Longhorn instance-managers restart and engines move with each drain; initiators on the rolled node and on survivors see sessions drop and reconnect. | All volumes `healthy`, replica total == baseline, and step 6 above shows attached volumes on **every** node. | A node with **0** attached volumes while the others hold dozens = the stale iSCSI record trap (§9 "node cannot attach ANY Longhorn volume") — fix the records, do not reboot/drain. |
+| **`FailedDaemonPod` events** (`Found failed daemon pod <ns>/<pod> on node <node>, will try to kill it`) | The node's DaemonSet pods end `Failed` across the shutdown; the DaemonSet controller deletes and recreates them. Events expire after 1 h, so look promptly. | Step 7 shows desired == ready for every DaemonSet after the node is `Ready`, and no new `FailedDaemonPod` event for that DaemonSet after that. | Repeats for the same DaemonSet after the node is `Ready` (a crash loop, e.g. falco's eBPF probe against a new kernel = FAIL). |
+| otel daemon collector `memory_limiter` refusals on the rolled node | It sheds the telemetry buffered during the reboot. | DaemonSet 3/3 and no OOMKill. | Restarts / OOMKilled. |
+| `KubeJobFailed` for a CronJob run that overlapped a drain | Its pod was evicted mid-run. | Subsequent runs of that CronJob succeed. | The next scheduled run fails too. |
+| Node-level alerts (NodeNotReady, target down, `KubeDaemonSetRolloutStuck`) | The node is away for ~1–3 min. | Cleared within the 15-min settle. | Still firing after the settle. |
+
+**Not a transient, even though it appeared during the roll:** `KumaMonitorDown` from the hwmon
+rename (§14.6). A roll-caused alert that does not clear on its own is a regression the roll
+introduced — record it as a finding, do not wait it out.
+
+---
+
 ## Version History
 
+- `2026.09.28`: Recorded the executed `v1.13.10 → v1.14.1` roll (2026-09-27, `cad2bd3f`/`a6704ad6`/`40ca20d6`). Header, reader note and §2 table now v1.14.1 / kernel 6.18.51 / containerd 2.3.5 / etcd 3.7.1. New §14 (lessons): v1.14 upgrade-time changes incl. Image-Factory-only installer and one-way etcd 3.7; talhelper cannot render v1.14 configs, so the roll used the existing live configs (option B) and `task talos:generate-config` fails on main until the multi-doc migration (F-59b12b2b); drain-driven survivor fsync stalls and the operator's pattern (ii) continue-rule (F-2cb2dbc9); failed-replica cleanup for `staleReplicaTimeout: 0` volumes (F-b91ef6e5); the Prometheus blind spot (F-e8bb3113); hwmon chip renumbering (F-b7f34c39); measured timings (~23 min/node, F-3625b9f6). New §15: post-roll verification and an expected-transient table (etcd leader changes, ES rejection tail, iSCSI resets, `FailedDaemonPod`). Fixed §3/Step 7: generated configs are gitignored plaintext, not SOPS-encrypted. Linked `docs/sops/etcd.md`.
 - `2026.08.16b`: Added §9 "Host-state issue 2 — leaked kubelet pod directory, endless unmount retry". Documents the 2026-08-16 `k8s-nuc14-01` orphan (retired VLAN-10 NAS `192.168.31.230`) and three traps: (a) the loop covered **two** volumes, the second a *live* Longhorn RWX volume, so enumerate every volumeName before acting; (b) `rm -rf` of the pod dir is an anti-fix — losing `vol_data.json` moves the failure earlier than `nestedpendingoperations`, removing the backoff and amplifying the loop ~230x (2/2min → 230/min) while permanently wedging kubelet's actual-state; the fix is to restore `vol_data.json` with an **empty** `mount/` and let kubelet finish its own teardown; (c) verify by per-minute counts, not `grep -c`, since the ring buffer retains the historical burst. Also records the stub-vs-real-data tell (root:root 6-byte dirs vs app-owned 4096-byte dirs with `lost+found`) and that RWX `currentNodeID` means share-manager placement, not local consumption.
 - `2026.05.03`: Updated to reflect completed state — cluster is on Talos v1.13.0 + K8s v1.36.0. Rewrote header description and §2 Overview table from "Current → Target" planning format to "current cluster state" reference. Reader's note updated to cluster-state note.
 - `2026.04.30`: Documented the actual Stage A → Stage B path (`v1.11.0 → v1.12.7 → v1.13.0`, K8s `v1.34 → v1.35.4 → v1.36.0`) executed in this cluster. Added 13 lessons learned: powercycle-stuck on node 03 (cross-link to `docs/troubleshooting/talos-powercycle-stuck.md`), KSPP filtering of `install.extraKernelArgs` in v1.12+, `grubUseUKICmdline` default flip, JSON6902 PSA patch breaking, `talhelper` `$patch`/`$i` escaping, `talosctl` client `n±1` compatibility window, drain rate-limiter workaround, Longhorn `Retain` PV cascade-delete on backup-restore, intel-device-plugin operator `--devices` flag format, NPU NFD rule requirement, OTBR `replicas: 0` hardcode, etcd churn from concurrent `apply-config`, hugepages cmdline loss recovery. Section 2–6 perf sweep reframed as "applied during Stage A 2026-04-30". Longhorn v2 OS prereqs (hugepages=1024, `vfio_pci`, `uio_pci_generic`) recorded as wired in during Stage A via `machine-intelgpu.yaml`.
