@@ -502,6 +502,19 @@ def test_operation(op):
             check("op dry-run: names the exit-13 refusal, types nothing",
                   code == 0 and "REFUSE exit 13" in out and not con.typed(), out[:400])
 
+            # -- pre-nightly version snapshot (F-539b186e, 2026-09-28) --
+            check("op: snapshot is a SENDING intent (headless-first for crons)",
+                  "snapshot" in getattr(op, "SENDING_INTENTS", ()))
+            sp = getattr(op, "PROMPTS", {}).get("snapshot", "")
+            check("op snapshot prompt: runs check-all-versions WITHOUT the DSN and forbids "
+                  "commits/bumps/auto-update", "check-all-versions.py" in sp
+                  and "env -u SWEEP_PG_DSN" in sp and "Do NOT commit" in sp
+                  and "auto-update.py" in sp, sp[:200])
+            con.set(S["busy-spinner"], after_clear=S["idle"])
+            code, out = run_main(op.main, ["snapshot"], via_sys_argv=True)
+            check("op snapshot MANUAL into a busy console: exit 13, nothing typed",
+                  code == 13 and not con.typed(), f"{code} {out[-200:]}")
+
             # -- weekly ops retro (2026-09-27): same console delivery rules --
             check("op: retro is a SENDING intent (gated like sweep/fix/versions)",
                   "retro" in getattr(op, "SENDING_INTENTS", ()))
@@ -742,7 +755,7 @@ def test_headless(mw, op):
             check("op headless: still running at --timeout -> ledger decides (row present), exit 0, "
                   "nothing killed", code == 0 and "still running" in out
                   and not [c for c in con.calls if c[0] == "kill-job"], f"{code} {out[-200:]}")
-            for intent in [i for i in ("retro", "fix", "versions") if i in op.SENDING_INTENTS]:
+            for intent in [i for i in ("retro", "fix", "versions", "snapshot") if i in op.SENDING_INTENTS]:
                 con.setd(S["menu-question"], exit_rc=None)
                 code, out = run_main(op.main, [intent, "--trigger", "cron"], via_sys_argv=True)
                 check(f"op headless: {intent} cron with a console in a menu starts headless, exit 0",

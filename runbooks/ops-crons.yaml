@@ -14,7 +14,7 @@
 # `operation` skill, which refuses a busy/menu pane (exit 13) and auto-clears an
 # exhausted-idle one. Never replace an entry with a session-local /loop or
 # CronCreate, and never with a cloud sandbox (CLAUDE.md "Scheduled Sweeps").
-version: "2026.09.27"
+version: "2026.09.28"
 timezone: Europe/Berlin
 
 crons:
@@ -32,3 +32,18 @@ crons:
     period: weekly
     failure_alert_cooldown: 6d
     timeout_seconds: 600          # fire-and-return (no --wait): resolve + optional /clear
+
+  - id: version-snapshot
+    name: "Version Snapshot Refresh (pre-nightly)"
+    description: >-
+      Refresh runbooks/version-check-current.md (check-all-versions.py, no DSN,
+      no bumps, no commits) at 02:45 so the 03:30 nightly window's Step 0 safe
+      lane reads a snapshot minutes old instead of running the refresh inside
+      its own 15-min cap (F-539b186e: the in-window refresh overran in 3 of 5
+      runs, leaving the lane on 9-53 h old snapshots). Runs via the headless
+      dispatcher (kind op-snapshot), never the ops console when it is busy.
+    command: "/home/node/.openclaw/bin/operation snapshot --trigger cron"
+    cron: "45 2 * * *"
+    period: daily
+    failure_alert_cooldown: 20h
+    timeout_seconds: 600          # fire-and-return (no --wait): the dispatcher runs the job

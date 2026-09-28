@@ -29,6 +29,11 @@ GOOD = {"name": "Weekly Ops Retro", "enabled": True,
         "schedule": {"kind": "cron", "expr": "30 7 * * 1", "tz": TZ},
         "payload": {"kind": "command", "argv": ["sh", "-lc", CMD]},
         "failureAlert": {"after": 1, "channel": "telegram", "to": "x", "cooldownMs": 6 * 86_400_000}}
+SNAP_CMD = "/home/node/.openclaw/bin/operation snapshot --trigger cron"
+SNAP_GOOD = {"name": "Version Snapshot Refresh (pre-nightly)", "enabled": True,
+             "schedule": {"kind": "cron", "expr": "45 2 * * *", "tz": TZ},
+             "payload": {"kind": "command", "argv": ["sh", "-lc", SNAP_CMD]},
+             "failureAlert": {"after": 1, "channel": "telegram", "to": "x", "cooldownMs": 20 * 3_600_000}}
 FAILURES: list[str] = []
 
 
@@ -79,7 +84,18 @@ def main():
     decls, tz = wc.load_ops_crons()
     check("repo ops-crons.yaml declares ops-retro at Mon 07:30 Europe/Berlin, cooldown < 7d",
           any(d["id"] == "ops-retro" and d["cron"] == "30 7 * * 1" for d in decls) and tz == TZ
-          and wc.check_ops_crons(decls, tz, [GOOD]) == [], str(decls))
+          and wc.check_ops_crons(decls, tz, [GOOD, SNAP_GOOD]) == [], str(decls))
+    # F-539b186e (2026-09-28): the pre-nightly snapshot refresh is a DAILY ops cron.
+    check("repo ops-crons.yaml declares version-snapshot daily 02:45, before the 03:30 nightly",
+          any(d["id"] == "version-snapshot" and d["cron"] == "45 2 * * *" and d["period"] == "daily"
+              and d["command"] == SNAP_CMD for d in decls), str(decls))
+    e = wc.check_ops_crons(decls, tz, [GOOD])
+    check("a missing snapshot cron is reported (the retro cron does not satisfy it)",
+          any("version-snapshot" in x for x in e), str(e))
+    bad = dict(SNAP_GOOD, failureAlert=dict(SNAP_GOOD["failureAlert"], cooldownMs=86_400_000))
+    e = wc.check_ops_crons(decls, tz, [GOOD, bad])
+    check("snapshot cron with a 24h cooldown on a 24h period is refused (F-e6dda67f)",
+          any("cooldownMs" in x for x in e), str(e))
     r = wc.render_ops_crons(decls, tz)
     check("--render emits the cron add with the command and a failure alert",
           CMD in r and "--failure-alert-cooldown 6d" in r and "FAILURE_ALERT_TO" in r, r[:300])

@@ -82,12 +82,27 @@ yet would otherwise wait days for Renovate's schedule (the crack). So next,
 direct-bump the safe ones that have no PR:
 
 ```bash
+# 0. is the 02:45 pre-nightly refresh already on disk? (F-539b186e, 2026-09-28)
+.venv/bin/python3 -c "import importlib.util as u;s=u.spec_from_file_location('c','runbooks/coverage.py');m=u.module_from_spec(s);s.loader.exec_module(m);print(m.snapshot_age_hours())"
 # 1. refresh runbooks/version-check-current.md — the same command sweep-run.py runs
+#    SKIP this step when step 0 printed <= 2 (hours): the `version-snapshot`
+#    ops cron (runbooks/ops-crons.yaml, daily 02:45 Europe/Berlin, headless
+#    dispatcher) refreshed it minutes ago. Say "snapshot from the 02:45
+#    pre-nightly refresh" in the report. Any other value: refresh here.
 date -u +%FT%TZ   # note the start; cap this at ~15 min wall clock
 .venv/bin/python3 runbooks/check-all-versions.py
 # 2. then, and only then, the lane report
 .venv/bin/python3 runbooks/coverage.py --json
 ```
+
+**Why the 02:45 refresh exists (F-539b186e):** the in-window refresh overran
+the 15-min cap in 3 of 5 runs in W40, so the safe lane read 9-53 h old
+snapshots. Measured 2026-09-28 the refresh itself took 979 s, 58 % of it in
+per-HelmRelease `helm search repo` / `helm show chart` subprocesses; those
+are now answered from per-run caches, and the scheduled refresh moves the
+remaining cost out of the window entirely. The window still refreshes when
+the 02:45 run did not land (dispatcher down, cron refused) — that is the
+fallback, not the plan.
 
 `coverage.py` reads that snapshot, and the sweep rewrites it only every 48 h —
 so without the refresh the direct-bump lane carried 0-48 h of pure lag on
