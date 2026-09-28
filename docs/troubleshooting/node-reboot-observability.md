@@ -54,8 +54,8 @@ scrape.
   restart (and a wedged sender does NOT recover via config re-apply or even a
   forced URL-toggle — only a node reboot clears it). UDP is connectionless and
   survives collector restarts. KmsgLogConfig `url: udp://192.168.55.18:5171/`;
-  collector `udplog/talos-kernel` receiver; LB service + container port are UDP.
-- **Node attribution:** Talos kmsg carries no hostname. The `udplog` receiver
+  collector `udp_log/talos-kernel` receiver; LB service + container port are UDP.
+- **Node attribution:** Talos kmsg carries no hostname. The `udp_log` receiver
   has `add_attributes: true`, so each record gets `attributes.net.peer.ip` =
   the node (192.168.55.11/12/13). Query ES:
   `attributes.log_source:talos-kernel AND attributes.net.peer.ip:192.168.55.11`.

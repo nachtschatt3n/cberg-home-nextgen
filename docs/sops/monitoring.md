@@ -367,7 +367,7 @@ Two rejection classes (both in `kubectl logs -n monitoring deploy/edot-collector
    points dropped:
    - *"dropping cumulative temporality histogram X"* — ES otel-mode only
      accepts **delta** histograms. Fix: add X to the
-     `cumulativetodelta/es-histograms` include list in
+     `cumulative_to_delta/es-histograms` include list in
      `kubernetes/apps/monitoring/edot-collector/app/configmap.yaml`.
    - *"invalid number data point X, wrong ValueType Empty"* — untyped/info
      series ES can never store; the `filter/drop-es-invalid-metrics`
@@ -396,7 +396,7 @@ Two rejection classes (both in `kubectl logs -n monitoring deploy/edot-collector
    kubectl logs -n monitoring deploy/edot-collector --since=1h \
      | grep -oE "dropping [a-z]+ [a-z]+|invalid number data point" | wc -l
 
-   # which histogram families — add each to cumulativetodelta/es-histograms
+   # which histogram families — add each to cumulative_to_delta/es-histograms
    kubectl logs -n monitoring deploy/edot-collector --since=1h \
      | grep -oE 'histogram \\"[a-zA-Z0-9_]+' | sed 's/^histogram \\"//' | sort -u
    ```

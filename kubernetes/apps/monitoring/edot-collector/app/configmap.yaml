@@ -49,7 +49,7 @@ data:
       # collector restart. UDP is connectionless so it survives pod restarts.
       # Captures mce:/Hardware Error/thermal/panic lines that survive a reboot —
       # see docs/troubleshooting/node-reboot-observability.md (Tier 2).
-      udplog/talos-kernel:
+      udp_log/talos-kernel:
         listen_address: 0.0.0.0:5171
         # add_attributes => each record gets net.peer.ip = the source node
         # (192.168.55.11/12/13), the only way to attribute a kmsg line to a node
@@ -100,7 +100,7 @@ data:
       # four (silently lost). Convert just them to delta so they index.
       # New histogram metrics that appear later will log the same drop — the
       # health-check ES-rejection assertion (added 2026-08-07) catches that.
-      cumulativetodelta/es-histograms:
+      cumulative_to_delta/es-histograms:
         include:
           # regexp, not strict: strict is a fixed list, so every NEW Envoy
           # histogram family arrived cumulative and was rejected by ES
@@ -341,7 +341,7 @@ data:
           talos_kernel_hardware_errors:
             description: Talos kmsg hardware-error lines (mce/machine check/Hardware Error/thermal)
             conditions:
-              - 'attributes["log_source"] == "talos-kernel" and IsString(body) and IsMatch(body, "(?i)(mce:|machine check|hardware error|uncorrected|cpu[0-9]+: machine check|thermal throttl|critical temperature)")'
+              - 'log.attributes["log_source"] == "talos-kernel" and IsString(log.body) and IsMatch(log.body, "(?i)(mce:|machine check|hardware error|uncorrected|cpu[0-9]+: machine check|thermal throttl|critical temperature)")'
             attributes:
               - key: net.peer.ip
           # Counts EVERY kmsg line per node, so we can tell a node has gone
@@ -353,7 +353,7 @@ data:
           talos_kernel_kmsg_lines:
             description: All Talos kmsg lines received, labelled by source node
             conditions:
-              - 'attributes["log_source"] == "talos-kernel"'
+              - 'log.attributes["log_source"] == "talos-kernel"'
             attributes:
               - key: net.peer.ip
 
@@ -365,7 +365,7 @@ data:
           processors: [memory_limiter, filter/drop-malformed-json-log-keys, transform/strip-k8s-managedfields, batch]
           exporters: [elasticsearch/logs]
         logs/talos-kernel:
-          receivers: [udplog/talos-kernel]
+          receivers: [udp_log/talos-kernel]
           processors: [memory_limiter, batch]
           # shares logs-generic-default (proven path); filter by
           # attributes.log_source=talos-kernel + attributes.net.peer.ip (node).
@@ -377,7 +377,7 @@ data:
           exporters: [prometheus/hwerrors]
         metrics:
           receivers: [otlp]
-          processors: [memory_limiter, filter/drop-es-invalid-metrics, filter/drop-envoy-cluster-metrics, cumulativetodelta/es-histograms, batch]
+          processors: [memory_limiter, filter/drop-es-invalid-metrics, filter/drop-envoy-cluster-metrics, cumulative_to_delta/es-histograms, batch]
           exporters: [elasticsearch/metrics]
         traces:
           receivers: [otlp]
