@@ -63,7 +63,8 @@ touches:
 depends_on: []
 conflicts_with:
   # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
-  - grafana-chart-13.2.3              # §6.4: pure attribution — a Helm upgrade in the same
+  - grafana-chart-13.2.3              # (status superseded 2026-09-14; kept until that file is
+                                      # retired — ref still resolves.) §6.4: pure attribution — a Helm upgrade in the same
                                       # window as P3 gives every grafana rollout two causes
   # - affine-redis-8.10.2 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # §4.1 revision-identity diff: that plan upgrades
                                       # office/affine-redis (rev 14 -> 15). Reciprocal of
@@ -95,28 +96,32 @@ conflicts_with:
   - penpot-chart-1.10.0
   - redis-fleet-8.10.2
   - traccar-6.16.0
+  - otel-operator-0.23.0              # reciprocal (it names this plan); HR bump -> attribution
 security_ref: null
 capability_change: false              # no user-visible behaviour changes; Flux reconciles the
                                       # same manifests, it merely starts to notice edits
 rollback_class: git-revert            # every phase is ONE commit; the revert restores the
                                       # previous state on the next reconcile (P2's hand
                                       # re-apply is a no-op to revert — see §5)
-autonomy_override: human-gated        # RESTRICTS only. P0 and P1 are nightly-safe (§7) and
-                                      # the operator may give their GO up front; P2 (DaemonSet
-                                      # roll) and P3 are attended. A multi-phase plan in one
+autonomy_override: human-gated        # RESTRICTS only. P0 executed. P1 is a dedicated
+                                      # operator-GO run since the 2026-09-26 revert (§7); P2
+                                      # (DaemonSet roll) and P3 are attended. A multi-phase plan in one
                                       # file cannot be one AUTO-NIGHT unit, so the scheduler
                                       # must not treat it as one.
 finding_refs: []
-status: draft   # 2026-09-28 P1 RE-PLANNED (§1.5, §3.0.0): child patch is now JSON6902 op:add (proven to keep all
+review: ready-for-go@2026-09-28   # plan-reviewer: needs-fix (render-gate false-FAIL on self-growing
+                      # ConfigMap cluster-settings + 9 non-blocking) -> fixed -> READY-FOR-GO same day.
+status: vetted   # 2026-09-28 P1 RE-PLANNED (§1.5, §3.0.0): child patch is now JSON6902 op:add (proven to keep all
                       # 18 null leaves on the 7 null-bearing HRs), with pre-commit parent/render gates and a
-                      # post-apply values gate, each demonstrated to FAIL on the fbc220f7 shape. Under review.
+                      # post-apply values gate, each demonstrated to FAIL on the fbc220f7 shape. Vetted for P1
+                      # ONLY, as a dedicated operator-GO NOW run; risk medium -> NOT SD-10 preapproved; no GO recorded.
                       # HISTORY — 2026-09-26 NOW run: P0 EXECUTED GREEN (d17af8e0: anythingllm + jellyfin stored manifests pass
                       # SSA, no pod-template change). P1 REVERTED (fbc220f7 -> 5bdd3164): the rev-gate caught 3
                       # unexplained Helm upgrades (databases/influxdb, default/homepage, network/adguard-home)
                       # because the parent-ks spec.patches pass drops explicit `key: null` entries from
                       # spec.values, so chart defaults return. P1 is NOT spec-only for null-bearing values
-                      # (7 HRs carry nulls). Re-plan P1 (replace nulls with explicit values, or deliver the
-                      # field another way) + re-review + fresh GO before any re-run.
+                      # (7 HRs carry nulls). [Superseded 2026-09-28: the chosen fix is the JSON6902 child
+                      # patch (§1.5); the nulls stay as they are.]
 window: null   # cleared 2026-09-26 after P1 revert (was now:2026-09-26)
                                       # set status back to `vetted`; after P1 and after P2 set
                                       # `awaiting-soak` (run-now.py refuses it, so no NOW run
@@ -222,7 +227,7 @@ generated: "2026-09-28"
 
 ## 0) Decision memo — "no drift" today means "nothing is looking"
 
-Every one of the 124 HelmReleases in this cluster runs with
+Every one of the 126 HelmReleases (124 when first measured 2026-09-14) in this cluster runs with
 `spec.driftDetection` unset, and the CRD is explicit about what that means:
 *"If not explicitly set, it defaults to DiftModeDisabled"* — helm-controller
 never compares what Helm last applied with what is in the cluster. The
@@ -284,7 +289,7 @@ construction, nothing to correct.
   workload. A `spec.driftDetection` change is not part of the Helm release
   (chart + values); helm-controller reconciles the HelmRelease's new
   generation without a `helm upgrade`. **That is a claim, and §4.1 asserts
-  it** (Helm revision numbers identical across all 124 releases
+  it** (Helm revision numbers identical across all 126 releases
   before/after).
 - **Phase 1 is NOT guaranteed read-only.** `warn` never *writes* (§1.2), but
   the comparison is a server-side dry-run apply of the stored manifest, and a
@@ -293,7 +298,7 @@ construction, nothing to correct.
   any release action) and stays there every interval until the manifest is
   fixed. Today that set is exactly `ai/anythingllm` and `media/jellyfin`
   (measured in §2.1). P0 fixes them; the §2.1 gate refuses P1 while the set is
-  non-empty; §4.1 re-asserts `124 Ready=True` AFTER propagation.
+  non-empty; §4.1 re-asserts `126 Ready=True` AFTER propagation.
 - **P1 is NOT spec-only if delivered as a strategic-merge patch** (learned
   2026-09-26, root-caused 2026-09-28, §1.5): kustomize's SMP drops bare
   `key:` (implicit-null) entries from the HelmRelease it patches, so a
@@ -458,17 +463,18 @@ The exact patch text is in §3.1.1. Rendered form on a child (what
 spec:
   patches:
   - patch: |-
-      apiVersion: helm.toolkit.fluxcd.io/v2
-      kind: HelmRelease
-      metadata:
-        name: not-used
-      spec:
-        driftDetection:
+      - op: add
+        path: /spec/driftDetection
+        value:
           mode: warn
     target:
       group: helm.toolkit.fluxcd.io
       kind: HelmRelease
 ```
+
+(Corrected 2026-09-28: the 2026-09-14 proof above used the strategic-merge
+child form that failed on 2026-09-26 — §1.5. The render proof for the JSON6902
+form is §1.5's gate output.)
 
 ### 1.5 The 2026-09-26 P1 failure, root-caused (2026-09-28, read-only)
 
@@ -497,10 +503,17 @@ are an explicit `null`/`~` survived. `flux build` of each child with the
 2026-09-26 SMP child patch reproduces the live outcome row for row (11 paths
 dropped on 3 HRs, 7 kept on 4), and the same build with a JSON6902
 `- op: add / path: /spec/driftDetection / value: {mode: warn}` keeps all 18.
-The live helm history confirms nothing else moved: in the 14:28-14:45 UTC
-window on 2026-09-26 the ONLY revisions are those three releases (twice each);
-the other 123 HelmReleases received `spec.driftDetection` with no upgrade —
-which is also the live proof that the field itself does not trigger one.
+**Why the field alone is not an upgrade — primary evidence is the code:**
+helm-controller v1.6.3 `internal/reconcile/state.go` `DetermineReleaseState`
+(~lines 138-172) returns out-of-sync only for a chart change, a values
+(config) digest change, or a postRenderers/commonMetadata digest change;
+`driftDetection` feeds only the diff branch. Live corroboration (not proof —
+P1 was live only ~3.5 min, 14:28:57-14:32:11 UTC, and it is not established
+that every HR reconciled in that time): in the 14:28-14:45 UTC window the only
+revisions besides P0 (14:26) and flux-instance rev 6 (14:26:17, before the P1
+commit) are the three casualties, twice each; 106 of 126 HRs show a
+kustomize-controller write at 14:33-14:34 (the revert stripping the field), so
+they did carry it without being upgraded.
 
 **Why not "just write `null` in the three files"?** It would make the SMP
 survive today (explicit null is kept), but it is a rule every future
@@ -895,6 +908,16 @@ else:
              "target": TARGET}
 
 
+# Excluded from comparison: ConfigMap */cluster-settings. Its SETTING_EXAMPLE value
+# substitutes itself (`${SETTING_EXAMPLE}` inside its own value) and grows ~54 bytes on
+# every apply by cluster-apps/eck-operator/kibana/elasticsearch, so two renders seconds
+# apart can differ for a reason unrelated to the patch (plan review 2026-09-28; repo
+# correction owed in kubernetes/flux/components/common/cluster-settings.yaml). The
+# drift-detection child patch targets kind HelmRelease only and cannot touch it.
+def excluded(k):
+    return k[0] == "ConfigMap" and k[2] == "cluster-settings"
+
+
 def kget(*args):
     return json.loads(subprocess.check_output(["kubectl", "get", *args, "-o", "json"]))
 
@@ -952,6 +975,8 @@ def check(ks):
     if set(base) != set(cand):
         fails.append(f"object set differs: {sorted(map(str, set(base) ^ set(cand)))}")
     for k in sorted(set(base) & set(cand), key=str):
+        if excluded(k):
+            continue
         b, c = base[k], json.loads(json.dumps(cand[k]))
         if k[0] == "HelmRelease":
             nhr += 1
@@ -1010,6 +1035,16 @@ VALUE = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {"mode": "warn"}
 TARGET = {"group": "helm.toolkit.fluxcd.io", "kind": "HelmRelease"}
 
 
+# Excluded from comparison: ConfigMap */cluster-settings. Its SETTING_EXAMPLE value
+# substitutes itself (`${SETTING_EXAMPLE}` inside its own value) and grows ~54 bytes on
+# every apply by cluster-apps/eck-operator/kibana/elasticsearch, so two renders seconds
+# apart can differ for a reason unrelated to the patch (plan review 2026-09-28; repo
+# correction owed in kubernetes/flux/components/common/cluster-settings.yaml). The
+# drift-detection child patch targets kind HelmRelease only and cannot touch it.
+def excluded(k):
+    return k[0] == "ConfigMap" and k[2] == "cluster-settings"
+
+
 def is_expected(patches):
     if not isinstance(patches, list) or len(patches) != 1:
         return False
@@ -1048,6 +1083,8 @@ fails, nks, npatched = [], 0, 0
 if set(base) != set(cand):
     fails.append(f"object set differs: {sorted(map(str, set(base) ^ set(cand)))}")
 for k in sorted(set(base) & set(cand), key=str):
+    if excluded(k):
+        continue
     b, c = json.loads(json.dumps(base[k])), json.loads(json.dumps(cand[k]))
     if k[0] == "Kustomization":
         nks += 1
@@ -1073,7 +1110,12 @@ cat > /private/tmp/claude-501/helm-drift-detection/values-gate.py <<'VALUESGATE'
 #!/usr/bin/env python3
 """Live HelmRelease spec-identity gate for helm-drift-detection P1.
   values-gate.py snapshot NAME   -> <dir>/values-NAME.json (every live HR's spec minus driftDetection)
-  values-gate.py compare NAME    -> deep-compare the live specs now with the snapshot
+  values-gate.py compare NAME [--expect ns/name ...]
+                                 -> deep-compare the live specs now with the snapshot;
+                                    --expect lists HelmReleases whose spec change is
+                                    INTENDED in this step (e.g. P2's reloader switch):
+                                    they are printed EXPECTED and do not fail the gate,
+                                    but an --expect entry that did NOT change fails it
 The ONLY permitted difference is spec.driftDetection. null vs missing is a
 difference (the 2026-09-26 failure was exactly `key: null` -> key absent).
 Prints ids + JSON paths only, never values. Exit 0 PASS, 1 FAIL."""
@@ -1111,6 +1153,7 @@ def paths(a, b, p=""):
 
 
 mode, name = sys.argv[1], sys.argv[2]
+expect = set(sys.argv[sys.argv.index("--expect") + 1:]) if "--expect" in sys.argv else set()
 f = f"{D}/values-{name}.json"
 cur = live()
 if mode == "snapshot":
@@ -1124,11 +1167,18 @@ if mode == "snapshot":
     sys.exit(0)
 base = json.load(open(f))
 bad = 0
+changed = set()
 for k in sorted(set(base) | set(cur)):
     if k not in base or k not in cur:
         print(f"FAIL {k}: {'new' if k not in base else 'gone'}"); bad += 1; continue
     for p in paths(base[k], cur[k], "/spec"):
-        print(f"FAIL {k}: {p}"); bad += 1
+        changed.add(k)
+        if k in expect:
+            print(f"EXPECTED {k}: {p}")
+        else:
+            print(f"FAIL {k}: {p}"); bad += 1
+for k in sorted(expect - changed):
+    print(f"FAIL {k}: --expect given but its spec did not change"); bad += 1
 print(f"VALUES-GATE {'FAIL' if bad else 'PASS'}: {len(cur)} HelmReleases, {bad} difference(s) outside spec.driftDetection")
 sys.exit(1 if bad else 0)
 VALUESGATE
@@ -1195,8 +1245,10 @@ D=/private/tmp/claude-501/helm-drift-detection
 .venv/bin/python3 $D/render-gate.py --patch smp; echo "rc=$?"
 # MUST print RENDER-GATE FAIL, rc=1, naming exactly databases/influxdb, default/homepage,
 # network/adguard-home with "/spec/values/... (missing in CAND)" rows (11 paths; measured
-# 2026-09-28). A DIFFERENT set means the bare-key null inventory in git changed since
-# 2026-09-28 — re-run the §1.5 enumeration and record it; a PASS here means no bare-key
+# 2026-09-28). A DIFFERENT set of HelmRelease rows means the bare-key null inventory in git
+# changed since 2026-09-28 — re-run the §1.5 enumeration and record it (non-HelmRelease rows
+# cannot appear: the one self-growing object, ConfigMap */cluster-settings, is excluded in
+# the script — see its comment); a PASS here means no bare-key
 # null is left anywhere (then 3b/3c alone carry the fail-ability demonstration).
 # 3b. Parent gate against the reverted P1 shape:
 git show fbc220f7:kubernetes/flux/cluster/ks.yaml > $D/ks-fbc220f7.yaml
@@ -1242,6 +1294,8 @@ git diff -- kubernetes/flux/cluster/ks.yaml | grep -c '^-[^-]'        # 0 (pure 
 .venv/bin/python3 $D/render-gate.py --patch json6902; echo "rc=$?"
 # MUST: "rendered_helmreleases=H live_helmreleases=H non_pass=0" (H=126 on 2026-09-28) + RENDER-GATE PASS, rc 0
 # Either FAILS: git checkout -- kubernetes/flux/cluster/ks.yaml, STOP, read the paths printed.
+# (2026-09-28 review: 2 of 5 unpatched runs false-failed on ConfigMap cluster-settings, which
+#  grows on every apply; the scripts now exclude it. Re-verified PASS 3/3 json6902, FAIL 3/3 smp.)
 ```
 
    Why the two gates together are the proof: `parent-gate` proves the edited
@@ -1287,7 +1341,11 @@ python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py compare B --req
 .venv/bin/python3 /private/tmp/claude-501/helm-drift-detection/values-gate.py compare B; echo "rc=$?"
 # rc 0 "VALUES-GATE PASS: 126 HelmReleases, 0 difference(s) outside spec.driftDetection".
 # On 2026-09-26 this would have printed 11 "(removed)" rows on 3 HelmReleases.
-# rc 1 = STOP -> §5 P1 revert NOW (a values change IS a Helm upgrade within seconds).
+# rc 1 = STOP -> §5 P1 revert NOW (a values change IS a Helm upgrade within seconds) —
+# UNLESS every FAIL row names a HelmRelease that the rev-gate line above printed as
+# EXPLAINED (a concurrent session's commit to that app's path since snapshot B). Then re-run
+# as `values-gate.py compare B --expect <ns/name> ...` for exactly those releases; it must
+# PASS. Never pass --expect for a release rev-gate did not EXPLAIN.
 ```
 
    Then §4.1 assertions 1 and 3.
@@ -1566,8 +1624,8 @@ Land it through §3.0.0 steps 4-8 with the P2 value: snapshots B2, edit, then
 and `render-gate.py --patch json6902 --value '<P2 value JSON>'` both PASS
 (the P2 shape was dry-run 2026-09-28: PASS), `git commit --only` of `ks.yaml`
 (+ the reloader HR if switched — then rev-gate EXPLAINS reloader's upgrade by
-that commit, and values-gate lists `kube-system/reloader` as its ONE expected
-difference), push, rev-gate + values-gate. This plan's `generated:` is
+that commit, and values-gate runs as `compare B2 --expect kube-system/reloader`,
+which prints its change as EXPECTED and fails if it did NOT change), push, rev-gate + values-gate. This plan's `generated:` is
 refreshed in the close-out commit. Then **soak again until the §2.3 gate is clean** — a
 rule set that still leaves `Drifted=True` somewhere is not finished.
 
@@ -1663,19 +1721,19 @@ for d in yaml.safe_load_all(sys.stdin):
 ```bash
 # CONTENTS ASSERTION 0 (premise all-helmreleases-ready, RE-CHECKED AFTER PROPAGATION): every
 # HelmRelease reconciled its new generation successfully — the dry-run diff step did not
-# reject any stored manifest. Exactly one line, "124 True" (or the premise range).
+# reject any stored manifest. Exactly one line, "126 True" (or the premise range).
 kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | sort | uniq -c
 python3 runbooks/plan-premises.py helm-drift-detection            # all 10 PASS, again, AFTER P1
 
 # Shape: the field landed everywhere
-kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.driftDetection.mode}{"\n"}{end}' | sort | uniq -c   # "124 warn" (no blank line)
-kubectl get kustomization -n monitoring grafana -o jsonpath='{.spec.patches[*].target.kind}'                     # HelmRelease
+kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.driftDetection.mode}{"\n"}{end}' | sort | uniq -c   # "126 warn" (no blank line)
+kubectl get kustomization -n monitoring grafana -o jsonpath='{.spec.patches[0].patch}' | grep -c 'op: add'        # 1 (the SMP shape of 2026-09-26 prints 0)
 
 # CONTENTS ASSERTION 1: detection actually RAN on every release — a `Drifted` condition
 # (True OR False) exists on all of them. Measured by the count of HRs carrying the
 # condition, compared to the HR count. A release with no condition was never compared.
 kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Drifted")].reason}{"\n"}{end}' | sort | uniq -c
-# expect: only DriftDetected / NoDriftDetected lines, summing to 124, no empty line;
+# expect: only DriftDetected / NoDriftDetected lines, summing to 126, no empty line;
 #         DriftDetected == 2 on day 1 (§1.2), and §3.1.3 names exactly those two HRs.
 
 # CONTENTS ASSERTION 2: no Helm upgrade was triggered by the spec change — every
@@ -1727,8 +1785,8 @@ kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{
 ### 4.3 Phase 3
 
 ```bash
-kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.driftDetection.mode}{"\n"}{end}' | sort | uniq -c   # "124 enabled"
-kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | sort | uniq -c   # "124 True"
+kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.driftDetection.mode}{"\n"}{end}' | sort | uniq -c   # "126 enabled"
+kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | sort | uniq -c   # "126 True"
 
 # CONTENTS ASSERTION 1: the first enabled reconcile corrected NOTHING (gate honesty):
 kubectl get events -A --field-selector reason=DriftCorrected --no-headers | wc -l            # 0 for the first 30 min
@@ -1754,8 +1812,8 @@ git push
 flux reconcile kustomization flux-system --with-source
 # Confirm the cluster is back:
 kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.driftDetection.mode}{"\n"}{end}' | sort | uniq -c
-#   after P1 revert: one blank line x124 (field gone)   after P2 revert: "124 warn", no ignore
-#   after P3 revert: "124 warn"
+#   after P1 revert: one blank line x126 (field gone)   after P2 revert: "126 warn", no ignore
+#   after P3 revert: "126 warn"
 kubectl get kustomization -n flux-system cluster-apps -o jsonpath='{.spec.patches[*].target.labelSelector}'   # P1 revert: only the substitution selector
 ```
 
@@ -1892,7 +1950,11 @@ the premises `flux-distribution-is-2.9` / `kustomize-controller-is-v1.9` (+ the 
 proof. `flux-reconciler-impersonation` edits the same file with
 `yq -i` — a full re-serialisation of `ks.yaml`; if it lands between P1 and
 P3, re-run parent-gate on its result (the parsed comparison tolerates a
-reformatted block scalar, a changed op list does not).
+reformatted block scalar, a changed op list does not). If it lands BEFORE P1
+(its window is sun-attended:2026-10-11), `p1-edit.py`'s end-of-file anchor
+refuses ("file changed since review") — fail-closed, but P1 then needs its
+anchor re-derived and re-reviewed. Preferred order: P1 first (a weekday run
+before 2026-10-03).
 
 ### 6.6 What Phase 3 changes for everyone, permanently
 
@@ -1948,8 +2010,12 @@ soaks into a daily nightly cadence (`maintenance-windows.yaml` soak rule).
    JSON6902.** The local `flux build` reproduced the controller's SMP null
    drop exactly (§1.5), which is strong evidence the two share the relevant
    kustomize code; that the controller also keeps the nulls under JSON6902 is
-   observed only after the push. That is why the post-apply values-gate and
-   rev-gate remain, and why §5's revert is one file.
+   observed only after the push. Supporting evidence (plan review 2026-09-28):
+   flux2 CLI v2.9.0 and kustomize-controller v1.9.4 pin the same
+   kustomize/api + kyaml v0.21.1, and fluxcd/pkg/kustomize 1.35.1 -> 1.35.4
+   changes only image-merge / OpenAPI-reset code, not patch or null handling.
+   The post-apply values-gate and rev-gate remain anyway, and §5's revert is
+   one file.
 6. **The intel-gpu-plugin DaemonSet roll is inferred from operator source
    (v0.36.0 `getPodArgs` / `UpdateDaemonSet`), not observed.** §3.2.0 records
    the generation before/after; if it does not move, the note in §1.2 is
