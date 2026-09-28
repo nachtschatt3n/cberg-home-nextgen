@@ -84,6 +84,12 @@ conflicts_with:
   - paperless-db-13.0.2               # reciprocal (backup-restore stacking; that plan lists us) — review 2026-09-28
   - helm-drift-detection              # touches helmrelease/media/jellyfin; P2 rolls intel-gpu-plugin (i915 re-register) — review 2026-09-28
   - flux-oci-chart-sources            # mirrors the jellyfin chart source (touches helmrelease/jellyfin) — review 2026-09-28
+  - jellyfin-config-rwo-migration     # ADDED 2026-09-28: sun-attended:2026-10-25 moves /config from the RWX
+                                      # volume `jellyfin-config` to a new RWO volume `jellyfin-config-rwo`.
+                                      # THIS plan's backup_gate, premises and §5 restore name the OLD volume
+                                      # `jellyfin-config`; they are valid only while this plan runs FIRST
+                                      # (10-10 < 10-25). If the order is ever swapped, re-derive them for
+                                      # jellyfin-config-rwo before executing.
   # - nextcloud-34.0.4 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # Two backup-restore rollbacks in one slot leave no
                                       # rollback capacity for either — which is precisely why
                                       # THIS plan was moved off sun-attended:2026-10-04 on
