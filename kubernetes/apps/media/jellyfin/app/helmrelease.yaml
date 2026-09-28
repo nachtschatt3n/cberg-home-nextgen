@@ -149,23 +149,23 @@ spec:
         memory: 12Gi
         gpu.intel.com/i915: 1
 
-    # Liveness is tcpSocket (2026-09-28). The httpGet /health probe killed
-    # the pod MID-SCAN: jellyfin-config is a Longhorn RWX volume served over
-    # NFS, SQLite WAL over NFS answers "database is locked" under scan load,
-    # /health stalls behind the DB, and 10 x 30s ran out before the scan
-    # did. A restart mid-scan is worse than a slow scan. tcpSocket still
-    # restarts a process that has stopped accepting connections; a hung
-    # /health with an open port is left to the operator (alerting covers
-    # the pod). Real fix: plan jellyfin-config-rwo-migration (RWO volume).
-    # `httpGet: null` is required, same as readiness below.
+    # Liveness grace raised to 20 x 30s = 10 min (2026-09-28). The old
+    # 10 x 30s killed the pod MID-SCAN: jellyfin-config is a Longhorn RWX
+    # volume served over NFS, SQLite WAL over NFS answers "database is
+    # locked" under scan load and /health stalls behind the DB. (A swap to
+    # tcpSocket was tried in ceda2aa3 and REJECTED by the API server: Helm's
+    # 3-way patch kept the live httpGet next to the new tcpSocket -> "may not
+    # specify more than 1 handler type". Changing the handler type needs a
+    # replace, not a patch; raising the threshold does not.) Real fix: plan
+    # jellyfin-config-rwo-migration (RWO volume).
     livenessProbe:
-      httpGet: null
-      tcpSocket:
+      httpGet:
+        path: /health
         port: http
       initialDelaySeconds: 60
       periodSeconds: 30
       timeoutSeconds: 15
-      failureThreshold: 10
+      failureThreshold: 20
     # Readiness uses tcpSocket: kubelet flapped the previous httpGet
     # probe ~70 times in 42h with "context deadline exceeded" because
     # /health intermittently takes >10s under DB lock contention or
