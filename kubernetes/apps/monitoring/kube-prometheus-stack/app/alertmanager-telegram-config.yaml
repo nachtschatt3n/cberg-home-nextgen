@@ -77,7 +77,7 @@ spec:
           parseMode: HTML  # use HTML parsing to avoid escaping issues
           sendResolved: true
           message: |
-            🚨 <b>{{ .CommonLabels.alertname }}</b> ({{ len .Alerts }} alerts)
+            {{- if eq .Status "resolved" }}✅ <b>RESOLVED: {{ .CommonLabels.alertname }}</b>{{- else }}🚨 <b>{{ .CommonLabels.alertname }}</b>{{- end }} ({{ len .Alerts }} alerts)
             Severity: {{ .CommonLabels.severity | toUpper }}
             {{- if .CommonLabels.component }} | Component: {{ .CommonLabels.component }}{{- end }}
             {{- if .CommonLabels.node }} | Node: {{ .CommonLabels.node }}{{- end }}
