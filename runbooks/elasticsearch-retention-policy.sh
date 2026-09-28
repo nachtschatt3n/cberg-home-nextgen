@@ -25,30 +25,35 @@ SECRET=elasticsearch-es-elastic-user
 
 PASS=$(kubectl get secret -n "$NS" "$SECRET" -o jsonpath='{.data.elastic}' | base64 -d)
 
+# The credential reaches curl as a config on stdin (`-K -`), never on argv:
+# `curl -u elastic:$PASS` showed the password in `ps` on this Mac (kubectl's
+# argv) and inside the pod (F-4e822c2f). printf is a builtin -- no exec.
+auth_cfg() { printf 'user = "elastic:%s"\n' "$PASS"; }
+
 echo "Applying 14d delete phase to ECK 'metrics' ILM policy..."
-kubectl exec -n "$NS" "$POD" -- bash -c "curl -sk -u 'elastic:$PASS' -X PUT 'https://localhost:9200/_ilm/policy/metrics' -H 'Content-Type: application/json' -d '{
-  \"policy\": {
-    \"phases\": {
-      \"hot\": {
-        \"min_age\": \"0ms\",
-        \"actions\": {
-          \"rollover\": {
-            \"max_age\": \"30d\",
-            \"max_primary_shard_size\": \"50gb\"
+auth_cfg | kubectl exec -i -n "$NS" "$POD" -- curl -sk -K - -X PUT 'https://localhost:9200/_ilm/policy/metrics' -H 'Content-Type: application/json' -d '{
+  "policy": {
+    "phases": {
+      "hot": {
+        "min_age": "0ms",
+        "actions": {
+          "rollover": {
+            "max_age": "30d",
+            "max_primary_shard_size": "50gb"
           }
         }
       },
-      \"delete\": {
-        \"min_age\": \"14d\",
-        \"actions\": { \"delete\": {} }
+      "delete": {
+        "min_age": "14d",
+        "actions": { "delete": {} }
       }
     },
-    \"_meta\": {
-      \"managed_by\": \"cberg-home-nextgen\",
-      \"description\": \"x-pack metrics policy + 14d delete phase (homelab retention)\"
+    "_meta": {
+      "managed_by": "cberg-home-nextgen",
+      "description": "x-pack metrics policy + 14d delete phase (homelab retention)"
     }
   }
-}'"
+}'
 
 echo "Verifying..."
-kubectl exec -n "$NS" "$POD" -- bash -c "curl -sk -u 'elastic:$PASS' 'https://localhost:9200/_ilm/policy/metrics?pretty' | grep -A 3 delete"
+auth_cfg | kubectl exec -i -n "$NS" "$POD" -- curl -sk -K - 'https://localhost:9200/_ilm/policy/metrics?pretty' | grep -A 3 delete

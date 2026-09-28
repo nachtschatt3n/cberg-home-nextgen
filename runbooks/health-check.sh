@@ -1083,6 +1083,18 @@ ES_PF_PID=""
 ES_PASSWORD_SHARED=""
 ES_PORT=9202
 
+# Emit a curl config line carrying the elastic credential. Used as
+# `curl -K <(es_curl_auth "$pw") ...`: printf is a builtin and the process
+# substitution hands curl only a /dev/fd path, so the password never appears
+# on any argv (`ps`) -- `curl -u elastic:$pw` exposed it for the whole
+# health check (F-4e822c2f). Quotes/backslashes escaped per curl's -K syntax.
+es_curl_auth() {
+    local v="${2:-elastic}:$1"
+    v=${v//\\/\\\\}
+    v=${v//\"/\\\"}
+    printf 'user = "%s"\n' "$v"
+}
+
 es_init() {
     # Kill any leftover port-forward on our port
     lsof -ti:${ES_PORT} 2>/dev/null | xargs kill 2>/dev/null || true
@@ -1103,7 +1115,7 @@ es_init() {
 
     # Wait for port to open (max 10 attempts)
     for i in $(seq 1 10); do
-        if curl -k -s -m 2 -u "elastic:${ES_PASSWORD_SHARED}" \
+        if curl -k -s -m 2 -K <(es_curl_auth "$ES_PASSWORD_SHARED") \
             "https://localhost:${ES_PORT}/" >/dev/null 2>&1; then
             ES_AVAILABLE="true"
             echo "  ES enrichment: connected on port ${ES_PORT}"
@@ -1120,7 +1132,7 @@ es_query() {
         echo ""
         return 1
     fi
-    curl -k -s -m 15 -u "elastic:${ES_PASSWORD_SHARED}" \
+    curl -k -s -m 15 -K <(es_curl_auth "$ES_PASSWORD_SHARED") \
         -X POST "https://localhost:${ES_PORT}/logs-generic-default/_search" \
         -H 'Content-Type: application/json' \
         -d "$query_body" 2>/dev/null || { echo ""; return 1; }
@@ -1384,11 +1396,11 @@ ns_error_attribution() {
             \"must_not\": [{\"wildcard\": {\"body.text\": {\"value\": \"*noerror*\", \"case_insensitive\": true}}}],
             \"filter\": [{\"range\": {\"@timestamp\": {\"gte\": \"$gte\", \"lt\": \"$lt\"}}},
                        {\"term\": {\"resource.attributes.k8s.namespace.name\": \"$ns\"}}]"
-    curl -k -s -m 20 -u "elastic:$pw" -X POST "https://localhost:${port}/logs-generic-default/_search" \
+    curl -k -s -m 20 -K <(es_curl_auth "$pw") -X POST "https://localhost:${port}/logs-generic-default/_search" \
         -H 'Content-Type: application/json' -d "{\"size\": 0, \"query\": {\"bool\": {$filter}},
         \"aggs\": {\"per10m\": {\"date_histogram\": {\"field\": \"@timestamp\", \"fixed_interval\": \"10m\", \"min_doc_count\": 1}}}}" \
         > "$tmp/hist.json" 2>/dev/null
-    curl -k -s -m 20 -u "elastic:$pw" -X POST "https://localhost:${port}/logs-generic-default/_search" \
+    curl -k -s -m 20 -K <(es_curl_auth "$pw") -X POST "https://localhost:${port}/logs-generic-default/_search" \
         -H 'Content-Type: application/json' -d "{\"size\": 200, \"_source\": [\"body.text\"],
         \"query\": {\"function_score\": {\"query\": {\"bool\": {$filter}},
         \"random_score\": {\"seed\": 20260926, \"field\": \"_seq_no\"}, \"boost_mode\": \"replace\"}}}" \
@@ -3516,7 +3528,7 @@ for o in offline:
 
     influx_query() {
         curl -s --connect-timeout 5 \
-            -H "Authorization: Token ${INFLUX_TOKEN}" \
+            -K <(printf 'header = "Authorization: Token %s"\n' "$INFLUX_TOKEN") \
             -H "Content-Type: application/vnd.flux" \
             "http://localhost:${INFLUX_PORT}/api/v2/query?org=${INFLUX_ORG}" \
             --data "$1" 2>/dev/null
@@ -6231,7 +6243,7 @@ except: print('0')
         # probe up to ~20s; only trust the ingestion checks once ES answered.
         ES_STATUS="unknown"
         for _es_try in $(seq 1 20); do
-            ES_STATUS=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/_cluster/health" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "unknown")
+            ES_STATUS=$(curl -k -s -K <(es_curl_auth "$ES_PW_EARLY") "https://localhost:9201/_cluster/health" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "unknown")
             case "$ES_STATUS" in green|yellow|red) break ;; esac
             sleep 1
         done
@@ -6255,7 +6267,7 @@ except: print('0')
         if [ "$ES_STATUS" = "unknown" ]; then
             log_warning "ES health probe did not respond within timeout - skipping OTel ingestion measurement (measurement error, not a confirmed outage)"
         else
-        LOGS_COUNT=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/logs-generic-default/_count" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
+        LOGS_COUNT=$(curl -k -s -K <(es_curl_auth "$ES_PW_EARLY") "https://localhost:9201/logs-generic-default/_count" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
         echo "logs-generic-default document count: $LOGS_COUNT"
         LOGS_COUNT_INT=$(echo "$LOGS_COUNT" | tr -cd '0-9' || echo "0")
         [ -z "$LOGS_COUNT_INT" ] && LOGS_COUNT_INT=0
@@ -6266,7 +6278,7 @@ except: print('0')
             log_success "OTel log documents present in logs-generic-default: $LOGS_COUNT_INT"
         fi
 
-        METRICS_COUNT=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/metrics-generic.otel-default/_count" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
+        METRICS_COUNT=$(curl -k -s -K <(es_curl_auth "$ES_PW_EARLY") "https://localhost:9201/metrics-generic.otel-default/_count" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
         echo "metrics-generic.otel-default document count: $METRICS_COUNT"
         METRICS_COUNT_INT=$(echo "$METRICS_COUNT" | tr -cd '0-9' || echo "0")
         [ -z "$METRICS_COUNT_INT" ] && METRICS_COUNT_INT=0
@@ -6278,7 +6290,7 @@ except: print('0')
         fi
 
         # ES metric ingestion verification: how many distinct metric names in last 5 minutes?
-        METRIC_NAMES=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/metrics-generic.otel-default/_search?size=0" \
+        METRIC_NAMES=$(curl -k -s -K <(es_curl_auth "$ES_PW_EARLY") "https://localhost:9201/metrics-generic.otel-default/_search?size=0" \
             -H 'Content-Type: application/json' \
             -d '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}},"aggs":{"names":{"cardinality":{"field":"_metric_names_hash"}}}}' 2>/dev/null | \
             python3 -c "
@@ -6299,7 +6311,7 @@ except: print(0)
         fi
 
         # Recent ingestion check (last 5 minutes)
-        RECENT_LOGS=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/logs-generic-default/_count" \
+        RECENT_LOGS=$(curl -k -s -K <(es_curl_auth "$ES_PW_EARLY") "https://localhost:9201/logs-generic-default/_count" \
             -H 'Content-Type: application/json' \
             -d '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}}}' 2>/dev/null | \
             python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
@@ -6348,7 +6360,7 @@ except: print(0)
         # As of 2026-08-18 the VERDICT honours that comment: the cluster-wide total no
         # longer raises an issue on its own; the per-namespace buckets do. See the
         # rationale block at the verdict itself.
-        ERROR_DATA=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${LOG_DS}/_search" -H 'Content-Type: application/json' -d '{
+        ERROR_DATA=$(curl -k -K <(es_curl_auth "$ES_PASSWORD") -X GET "https://localhost:9200/${LOG_DS}/_search" -H 'Content-Type: application/json' -d '{
           "size": 0,
             "track_total_hits": true,
           "query": {
@@ -6476,7 +6488,7 @@ except:
 
         es_count() {
             # $1 = should-clause JSON array body, $2 = must_not-clause JSON array body
-            curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${LOG_DS}/_search" \
+            curl -k -K <(es_curl_auth "$ES_PASSWORD") -X GET "https://localhost:9200/${LOG_DS}/_search" \
               -H 'Content-Type: application/json' -d "{
               \"size\": 0,
               \"track_total_hits\": true,

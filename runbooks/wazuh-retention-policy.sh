@@ -30,8 +30,11 @@ POD=wazuh-indexer-0
 USER=admin
 PASS=admin   # see AR-024 for why these are the demo defaults
 
+# Credential via a curl config on stdin, never argv (F-4e822c2f).
+auth_cfg() { printf 'user = "%s:%s"\n' "$USER" "$PASS"; }
+
 echo "Applying wazuh-retention-14d ISM policy..."
-kubectl exec -n "$NS" "$POD" -- curl -sk -u "${USER}:${PASS}" -X PUT \
+auth_cfg | kubectl exec -i -n "$NS" "$POD" -- curl -sk -K - -X PUT \
   'https://localhost:9200/_plugins/_ism/policies/wazuh-retention-14d' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -59,7 +62,7 @@ kubectl exec -n "$NS" "$POD" -- curl -sk -u "${USER}:${PASS}" -X PUT \
 echo
 
 echo "Verifying..."
-kubectl exec -n "$NS" "$POD" -- curl -sk -u "${USER}:${PASS}" \
+auth_cfg | kubectl exec -i -n "$NS" "$POD" -- curl -sk -K - \
   'https://localhost:9200/_plugins/_ism/policies/wazuh-retention-14d?pretty' \
   | head -c 400
 echo

@@ -156,6 +156,9 @@ else:
     else:
         import base64
         password = base64.b64decode(pw.stdout).decode()
+        # credential on stdin as a curl config, never argv (F-4e822c2f)
+        auth_cfg = 'user = "elastic:{}"\n'.format(
+            password.replace("\\", "\\\\").replace('"', '\\"'))
         pf = subprocess.Popen(
             ["kubectl", "port-forward", "-n", "monitoring",
              "svc/elasticsearch-es-http", "19277:9200"],
@@ -166,9 +169,9 @@ else:
             connected = False
             for _ in range(15):
                 r = subprocess.run(
-                    ["curl", "-k", "-s", "-m", "2", "-u", f"elastic:{password}",
+                    ["curl", "-k", "-s", "-m", "2", "-K", "-",
                      "https://127.0.0.1:19277/"],
-                    capture_output=True, text=True,
+                    input=auth_cfg, capture_output=True, text=True,
                 )
                 if r.returncode == 0:
                     connected = True
@@ -179,10 +182,10 @@ else:
             else:
                 body = bodies["Top Error Producers (7d)"]
                 r = subprocess.run(
-                    ["curl", "-k", "-s", "-m", "20", "-u", f"elastic:{password}",
+                    ["curl", "-k", "-s", "-m", "20", "-K", "-",
                      "-X", "POST", "https://127.0.0.1:19277/logs-generic-default/_search",
                      "-H", "Content-Type: application/json", "-d", body],
-                    capture_output=True, text=True,
+                    input=auth_cfg, capture_output=True, text=True,
                 )
                 d = json.loads(r.stdout)
                 check("live cluster: the fixed query returns a hits.total (no parse error)",

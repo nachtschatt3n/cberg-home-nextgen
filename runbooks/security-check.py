@@ -761,12 +761,27 @@ def _search_cap_seconds(timeout: int) -> int:
     return timeout + _EXEC_SEARCH_GRACE_S
 
 
+def _curl_config_quote(value: str) -> str:
+    """Quote `value` for a curl config file (`-K`): inside double quotes curl
+    unescapes \\ and \" (plus \n/\r/\t/\v), so escape backslash first."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _curl_stdin_config(userpass: str, body: str) -> str:
+    """curl config carrying credential, header and JSON body -- fed on stdin
+    so none of it lands on any process argv."""
+    return (f"user = {_curl_config_quote(userpass)}\n"
+            f"header = {_curl_config_quote('Content-Type: application/json')}\n"
+            f"data = {_curl_config_quote(body)}\n")
+
+
 def _exec_search(ns: str, pod: str, container: str, userpass: str | None,
                  index: str, body: dict, timeout: int) -> dict | None:
     """Run an _search against the indexer from inside its own pod.
 
-    JSON body is piped to curl via stdin (`-d @-`) so there's no shell
-    quoting of the query. Returns parsed JSON, or None on any failure.
+    Credential and JSON body are piped to curl as a config on stdin
+    (`-K -`): no shell quoting of the query, no password on argv.
+    Returns parsed JSON, or None on any failure.
 
     A failure is recorded as DEGRADED in one of two shapes, because they call
     for opposite responses: three timeouts mean the QUERY is slower than the
@@ -778,11 +793,13 @@ def _exec_search(ns: str, pod: str, container: str, userpass: str | None,
         DEGRADED.record(_scope(), _indexer_name(index),
                         "no pod name or no credentials — query not attempted")
         return None
-    data = json.dumps(body)
+    # The credential AND the body travel on stdin as a curl config (`-K -`),
+    # never on argv: `curl -u user:pw` put the password in `ps` on the Mac
+    # (kubectl's argv) and inside the pod for the whole sweep (F-4e822c2f).
+    data = _curl_stdin_config(userpass, json.dumps(body))
     cmd = [
         "kubectl", "exec", "-i", "-n", ns, pod, "-c", container, "--",
-        "curl", "-sk", "-u", userpass, "-H", "Content-Type: application/json",
-        f"https://localhost:9200/{index}/_search", "-d", "@-",
+        "curl", "-sk", "-K", "-", f"https://localhost:9200/{index}/_search",
     ]
     cap = _search_cap_seconds(timeout)
     last = "no response"
