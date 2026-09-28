@@ -29,7 +29,7 @@ touches:
                                                 # NOT `storage`: this perturbs one volume, not
                                                 # the Longhorn control plane.
 depends_on: []
-conflicts_with: [bitnamilegacy-exit-nextcloud-db, jellyfin-12.1, media-naming-p3, n8n-2.39.8]   # 2026-09-26: nextcloud-34.0.4 executed + retired, ref removed   # 2026-09-26: paperless-ngx-3.2.0 executed + retired, ref removed   # 2026-09-26: nocodb-2026.09.0 executed + retired, ref removed
+conflicts_with: [bitnamilegacy-exit-nextcloud-db, jellyfin-12.1, media-naming-p3, n8n-2.39.8, nextcloud-fleet-35.0.1, penpot-chart-1.10.0, flux-oci-chart-sources]   # 2026-09-26: nextcloud-34.0.4 executed + retired, ref removed   # 2026-09-26: paperless-ngx-3.2.0 executed + retired, ref removed   # 2026-09-26: nocodb-2026.09.0 executed + retired, ref removed
                  # 2026-09-23: external-dns-unowned-cnames removed from this list — it EXECUTED
                  # (57280084) and was retired; a ref to a missing plan is an unenforced guard.
                                       # ROLLBACK-CLASS STACKING, added 2026-09-21 as a
@@ -61,11 +61,7 @@ conflicts_with: [bitnamilegacy-exit-nextcloud-db, jellyfin-12.1, media-naming-p3
                                       # a 90-min window. nextcloud-db is `blocked` with
                                       # window:null, so the collision is LATENT, not live —
                                       # but nothing else would stop them sharing a slot if it
-                                      # unblocks. NOTE: reciprocity is one-sided — that plan
-                                      # lists `paperless-db-12.3.3` (now executed), not this
-                                      # plan_id. --validate checks refs resolve, not
-                                      # reciprocity, so the other side needs updating by
-                                      # whoever next touches it (reported, not edited here).
+                                      # unblocks. Reciprocal since 2026-09-26: that plan lists paperless-db-13.0.2.
                                       # (2) paperless-ngx-3.2.0 — ADDED 2026-09-21. That plan
                                       # (written 2026-09-20, after this one) already declares a
                                       # HARD conflict against this plan_id, and it touches the
@@ -102,7 +98,9 @@ finding_refs: [F-1c080cce]            # CORRECTED 2026-09-21 (was []). The sweep
                                       # This is a PLAN-lane critical: without the ref here the
                                       # plan-or-page join leaves it reading as unplanned and it
                                       # pages the operator after plan_sla_days.
-status: vetted                        # VETTED 2026-09-21. An independent plan-reviewer
+status: vetted                        # 2026-09-28 (F-2c849d1e): was vetted with no recorded review; review needs-fix (B1 mariadb-check green on failed exec, B2 log grep green on empty log, B3 restore liveness loop) -> fixed -> re-review ready-for-go.
+review: ready-for-go@2026-09-28
+                                      # WAS: VETTED 2026-09-21. An independent plan-reviewer
                                       # returned ready-for-go on the SECOND pass, after B1-B3
                                       # were repaired, and then a further pass cleared six
                                       # non-blocking items — including the one that mattered:
@@ -121,17 +119,7 @@ status: vetted                        # VETTED 2026-09-21. An independent plan-r
                                       # deleted). §2's ABORT list keys on exactly that override
                                       # existing, so it is recorded HERE and in the block, not
                                       # only in conversation.
-                                      # WHY `draft` IS NOW CORRECT, AND WAS NOT BEFORE:
-                                      # F-61d8147e records that a plan stopped by a prose header
-                                      # while its machine-readable status says `draft` is a
-                                      # plan-state hygiene defect — the two must not disagree.
-                                      # While the recommendation stood, `blocked` was the only
-                                      # honest value. The recommendation is now overridden, so
-                                      # the prose and the status agree again and `draft` is the
-                                      # accurate state: written, not yet reviewed.
-                                      # NOT `vetted`: no plan-reviewer has passed this since the
-                                      # override, and the scheduler ignores `draft`, so nothing
-                                      # can claim a slot before that review.
+                                      # HISTORY: blocked -> draft (2026-09-21 override) -> vetted (66d43605, reviewer ready-for-go 2026-09-21) -> draft (2026-09-28 re-review needs-fix, see status line).
                                       # WHAT THE OPERATOR ACCEPTED, recorded so the trade is not
                                       # re-litigated from memory: MariaDB 13.0 is a ROLLING
                                       # release whose community support ends 2026-12-31, against
@@ -239,7 +227,7 @@ generated: "2026-09-16"
 > `paperless-db-data` 2026-09-21T03:05:10Z (620756992 bytes) — inside §2's 26h
 > freshness bound.
 >
-> STILL REQUIRED before this runs: a plan-reviewer pass (`draft` → `vetted`), a
+> STILL REQUIRED before this runs: a
 > window that does not stack it with another `backup-restore` plan, and an
 > operator GO recorded for that specific window.
 >
@@ -600,6 +588,13 @@ kubectl -n office exec deploy/paperless-db -- sh -c \
 # ^ under `set -e` the dump's OWN exit status is now load-bearing: a failed or
 #   reset exec aborts here instead of being discarded.
 chmod 0600 "$DUMP"
+# Healthcheck credentials (review 2026-09-28 B3): a §5.4 re-init writes a NEW
+# random healthcheck password into .my-healthcheck.cnf, while the restored
+# mysql.global_priv carries the OLD hash -> healthcheck.sh probes fail and
+# liveness restarts the pod in a loop. Keep the pre-upgrade file to restore.
+HC=~/backups/paperless-db/my-healthcheck.cnf.pre-13.0.2
+kubectl -n office exec deploy/paperless-db -- cat /var/lib/mysql/.my-healthcheck.cnf > "$HC"; chmod 0600 "$HC"
+grep -q '^user=healthcheck' "$HC" || { echo "ABORT: healthcheck cnf not captured"; exit 1; }
 
 tail -1 "$DUMP" | grep -q -- '-- Dump completed' || { echo "ABORT: dump incomplete (no '-- Dump completed' trailer)"; exit 1; }
 
@@ -719,6 +714,16 @@ CANARY_PRE=$(kubectl -n office exec deploy/paperless-db -- sh -c \
 [ -n "$CANARY_PRE" ] && [ "$CANARY_PRE" -gt 0 ] || { echo "ABORT: 4-byte canary baseline is $CANARY_PRE — there is NO canary to check after the upgrade, so §4.4 could not fail; stop and find out why"; exit 1; }
 echo "$CANARY_PRE" > /tmp/paperless-db-canary-pre.txt
 echo "4-byte canary baseline=$CANARY_PRE"        # 1 on 2026-09-21
+
+# --- mariadb-check baseline (what §4.2 is compared against; review 2026-09-28 B1) ---
+CHK=$(kubectl -n office exec deploy/paperless-db -- sh -c \
+  'mariadb-check --protocol=socket --all-databases -uroot -p"$MARIADB_ROOT_PASSWORD"') \
+  || { echo "ABORT: mariadb-check exec failed"; exit 1; }
+NOK=$(printf '%s\n' "$CHK" | grep -ciE '[[:space:]]ok$' || true)
+BAD=$(printf '%s\n' "$CHK" | grep -ivE '[[:space:]]ok$' | grep -c . || true)
+[ "$NOK" -ge 74 ] || { echo "ABORT: only $NOK OK lines at baseline — the §4.2 gate would measure nothing"; exit 1; }
+echo "$BAD" > /tmp/paperless-db-check-bad-pre.txt
+echo "mariadb-check baseline: OK-lines=$NOK non-OK-lines=$BAD"
 ```
 
 Dry-tested 2026-09-21 against the live DB: the loop produced exactly 74 lines,
@@ -740,6 +745,7 @@ spec:
   volume: paperless-db-data
   createSnapshot: true
 EOF
+kubectl -n storage wait --for=jsonpath='{.status.readyToUse}'=true snapshot.longhorn.io/paperless-db-data-pre-13-0-2 --timeout=120s
 kubectl -n storage get snapshot.longhorn.io paperless-db-data-pre-13-0-2 \
   -o jsonpath='{.status.readyToUse}{"\n"}'
 # expect: true   (name verified free 2026-09-16 — the only snapshot on this
@@ -836,9 +842,18 @@ kubectl -n office exec deploy/paperless-db -- sh -c \
 
 ```bash
 # 2. Integrity across every schema.
-kubectl -n office exec deploy/paperless-db -- sh -c \
-  'mariadb-check --protocol=socket --all-databases -uroot -p"$MARIADB_ROOT_PASSWORD"' \
-  | grep -ivE '[[:space:]]ok$' || echo "all OK"
+CHK=$(kubectl -n office exec deploy/paperless-db -- sh -c \
+  'mariadb-check --protocol=socket --all-databases -uroot -p"$MARIADB_ROOT_PASSWORD"') \
+  || { echo "ABORT: mariadb-check exec failed"; exit 1; }
+NOK=$(printf '%s\n' "$CHK" | grep -ciE '[[:space:]]ok$' || true)
+BAD=$(printf '%s\n' "$CHK" | grep -ivE '[[:space:]]ok$' | grep -c . || true)
+echo "OK-lines=$NOK non-OK-lines=$BAD (pre: $(cat /tmp/paperless-db-check-bad-pre.txt))"
+[ "$NOK" -ge 74 ] || { echo "ABORT: only $NOK OK lines — mariadb-check did not measure the paperless schema"; exit 1; }
+[ "$BAD" -le "$(cat /tmp/paperless-db-check-bad-pre.txt)" ] || { printf '%s\n' "$CHK" | grep -ivE '[[:space:]]ok$'; echo "ABORT: non-OK lines rose"; exit 1; }
+# REVIEW 2026-09-28 (F-2c849d1e B1): the old `| grep -ivE ... || echo "all OK"`
+# printed "all OK" on a FAILED exec (empty stdout, measured in sh and zsh).
+# NOK>=74 proves the check ran over the paperless schema; the §3.3 baseline
+# absorbs benign `note :` lines.
 # CATCHES: tables the upgrade left needing repair.
 # ON THE PATTERN '[[:space:]]ok$' — this is DEFENCE IN DEPTH, not a reproduced
 # failure, and the distinction is recorded so nobody "simplifies" it back.
@@ -918,7 +933,12 @@ echo "tables=$NT non-utf8mb4=$NB"
 ```bash
 # 5. The dependent app works. A DB its app cannot use is the failure worth catching.
 kubectl -n office get pods -l app.kubernetes.io/name=paperless-ngx   # 1/1 Running
-kubectl -n office logs deploy/paperless-ngx --since=15m | grep -iE '1366|OperationalError|mailbox.login' || echo clean
+LOG=$(kubectl -n office logs deploy/paperless-ngx -c paperless-ngx --since=15m)
+NL=$(printf '%s\n' "$LOG" | grep -c . || true)
+[ "$NL" -gt 0 ] || { echo "ABORT: 0 log lines in 15m — check cannot see anything"; exit 1; }
+HITS=$(printf '%s\n' "$LOG" | grep -ciE '1366|OperationalError|mailbox.login' || true)
+echo "log lines=$NL db-error hits=$HITS"; [ "$HITS" -eq 0 ] || { echo "ABORT: DB errors in app log"; exit 1; }
+# pattern control (review 2026-09-28 B2): printf 'django.db.utils.OperationalError: (1366, x)\n' | grep -ciE '1366|OperationalError|mailbox.login'  -> 1
 # Then the paperless.md §6a canary (API token, from the openclaw pod) and the UI:
 # the dashboard document count MUST equal the §3.3 MEASURED baseline — read it,
 # do not type it:
@@ -1023,6 +1043,14 @@ paperless cannot serve its library.
    `--default-character-set=utf8mb4` on the way IN as well, or the restore
    re-introduces the 1366 bug.
 
+   Restore the pre-upgrade healthcheck credentials first — the restored
+   `mysql.global_priv` carries the PRE-upgrade healthcheck hashes, the re-init
+   wrote a new random password, and without this the `healthcheck.sh` probes fail
+   and liveness restarts the pod in a loop (review 2026-09-28 B3):
+   ```bash
+   kubectl -n office exec -i deploy/paperless-db -- sh -c 'cat > /var/lib/mysql/.my-healthcheck.cnf' < ~/backups/paperless-db/my-healthcheck.cnf.pre-13.0.2
+   ```
+
    **Then reload the grant tables before step 6 verifies anything.** The dump is
    `--all-databases`, so it rewrites `mysql.global_priv` (and the rest of the
    `mysql` schema) **on disk**, while the running server keeps serving its
@@ -1044,7 +1072,7 @@ paperless cannot serve its library.
    documented consequence of reloading `mysql.*` under a live server, and the
    cost of including it if unnecessary is one statement.)
 5. **Last resort — restore from the Longhorn backup** (newest Completed backup of
-   `paperless-db-data`, e.g. `backup-3416ef68e9e74554` @ 2026-09-15T03:03:17Z):
+   `paperless-db-data` — look it up in-window with `runbooks/longhorn-backup-age.py paperless-db-data`, never from a name typed here):
    restore it into a new volume and rebind, per `docs/sops/backup.md`. Costs up to
    24h of documents — the dump and snapshot exist precisely so this is not needed.
 6. **Confirm the back-state, don't assume it:** `SELECT VERSION();` → 12.3.3,
@@ -1061,10 +1089,7 @@ paperless cannot serve its library.
     one-way MariaDB datadir operations, and 60 + 80 = 140 min cannot fit a
     90-min window. That plan is currently `blocked` with `window: null`, so the
     collision is latent — but nothing else would stop them sharing a slot if it
-    unblocks. **Reciprocity gap:** that plan's `conflicts_with` still names
-    `paperless-db-12.3.3` (executed), not this plan_id. `--validate` checks that
-    refs resolve, not that they are mutual, so the other side needs the same
-    edit — flagged, not edited here.
+    unblocks. The pair is mutual (that plan lists this plan_id).
   - **`paperless-ngx-3.2.0`** — ADDED 2026-09-21; this plan's list predated it.
     That plan was written 2026-09-20 and already declares a HARD conflict
     against `paperless-db-13.0.2` (`cb7c2acd`), so until now the pair was
@@ -1095,7 +1120,7 @@ paperless cannot serve its library.
 - **The suspend/scale in §3.1 must be symmetric**, and the order in §3.6/§3.7 is
   deliberate: the Kustomization resumes (DB rolls, DB verified) *before* the
   HelmRelease resumes (app returns). Do not resume the HR early.
-- **Dumps contain `mysql.global_priv` password hashes** — keep them `0600` in a
+- **Dumps (and `my-healthcheck.cnf.pre-13.0.2`) contain credentials** — the dump carries `mysql.global_priv` password hashes, the cnf a plaintext healthcheck password — keep them `0600` in a
   `0700` directory, never commit them, and delete them once the post-upgrade
   nightly backup has completed.
 - **`scan-inbox-validator` rides the paperless-ngx image, not the DB image** — it

@@ -83,6 +83,8 @@ conflicts_with:
   - chart-patches-coredns-reloader-blackbox  # draft. A CoreDNS roll while consumers re-resolve
                                         # their redis Service names would confound every reconnect
                                         # gate in §4. Not reciprocal yet in that file.
+  - nextcloud-fleet-35.0.1              # draft. Restarts nextcloud (a v_cons consumer) and lists this plan.
+  - flux-fleet-0.60.0                   # draft. Flux controller upgrade under this plan's GitOps legs.
 exclusive: false
 security_ref: F-6cfc5079                # related: the open-webui image's accepted security finding
                                         # (detail on the record). Whether 0.11.4 changes it is for the
@@ -97,14 +99,15 @@ rollback_class: git-revert              # one commit per leg, each reverts clean
                                         # unchanged (RDB_VERSION 15 in both tags) and open-webui adds no
                                         # alembic migration (§1.3). Backups are taken anyway (backup_gate).
 backup_gate: "Completed Longhorn backup < 26h for open-webui-20g, tube-archivist-redis-data and the redis-data volume (§2 g); PLUS in-pod copies taken in §3 immediately before their leg: webui.db -> webui.db.pre-0.11.4 (sqlite online-backup API, size compared) and tube-archivist dump.rdb -> local scratch file (byte count compared)."
-finding_refs: [F-d2bb762b, F-8c50c463, F-625d3a3f, F-c637a09a, F-3fcdca7b, F-3a75c9aa, F-2e326f86, F-e8a41b1b, F-db500cce]
+finding_refs: [F-d2bb762b, F-8c50c463, F-625d3a3f, F-c637a09a, F-3fcdca7b, F-3a75c9aa, F-2e326f86, F-e8a41b1b, F-db500cce, F-31c19a7f]
                                         # the 8 per-consumer redis image findings + open-webui
                                         # 0.11.3 -> 0.11.4 (policy-cli finding list --grep redis /
                                         # --grep open-webui, 2026-09-27). The app-template chart
                                         # 5.1.0 -> 5.2.1 findings (F-94bbd7ee, F-b5e13899, F-2983fb7e,
-                                        # F-6d39efbe) and open-webui chart 16.6.0 (F-31c19a7f) are
-                                        # NOT answered here — separate held items.
-status: draft   # plan-reviewer 2026-09-27: needs-fix (3 blocking) -> fixed -> re-review READY-FOR-GO.
+                                        # F-6d39efbe) are NOT answered here — separate held items.
+                                        # open-webui chart 16.6.0 (F-31c19a7f) IS answered by leg 3.
+status: vetted   # plan-reviewer 2026-09-27: needs-fix (3 blocking) -> fixed; 2026-09-28 (F-2c849d1e): needs-fix (unreachable restore pod, chart 16.6.0 lockstep) -> fixed -> re-review ready-for-go. HUMAN-GATED.
+review: ready-for-go@2026-09-28
                 # No operator GO recorded; awaiting vetting/scheduling + go/no-go.
 window: null
 sops_refs:
@@ -183,11 +186,11 @@ premises:
       The open-webui leg rolls the app on its sqlite PVC. A Completed Longhorn
       backup must exist (9 Completed on 2026-09-27); freshness is asserted in §2.
     run: kubectl get backups.longhorn.io -n storage -o jsonpath='{.items[?(@.status.volumeName=="open-webui-20g")].status.state}'
-    expect_contains: Completed
+    expect_contains: Completed   # existence only; plan-premises.py refuses python3, so freshness is the §2 g longhorn-backup-age.py gate
   - id: tube-archivist-redis-backed-up
     why: The one redis whose contents are persistent. Freshness asserted in §2.
     run: kubectl get backups.longhorn.io -n storage -o jsonpath='{.items[?(@.status.volumeName=="tube-archivist-redis-data")].status.state}'
-    expect_contains: Completed
+    expect_contains: Completed   # existence only; plan-premises.py refuses python3, so freshness is the §2 g longhorn-backup-age.py gate
   - id: manifest-pins-current
     why: >-
       §3's seds are anchored on these exact literals; each file must hold exactly
@@ -208,7 +211,7 @@ premises:
 Eight Docker Hub `redis` instances move `8.10.1-alpine → 8.10.2-alpine`, one
 commit per consumer, in blast-radius order (§3). The eighth, open-webui's
 chart-rendered websocket redis, moves in ONE commit with the open-webui app
-`0.11.3 → 0.11.4` because coverage.py lockstep-binds them (the app image is
+`0.11.3 → 0.11.4` and chart `16.5.0 → 16.6.0` (appVersion-only chart bump) because coverage.py lockstep-binds all three (image rows are held behind the chart row; the app image is
 PLAN, so the sidecar may not move unattended ahead of it — and vice versa).
 `affine-redis` is already on 8.10.2 (`e16ddbeb`, plan `affine-redis-8.10.2`,
 executed green 2026-09-26) and is the fleet's first in-cluster proof of the tag.
@@ -403,7 +406,7 @@ for p in json.load(sys.stdin)["items"]:
     print(sys.argv[1] + "/" + p["metadata"]["name"], r, p["status"]["startTime"])' "$ns"
   done
 }
-cons_snap | tee "$BASE"                      # 7 lines expected
+cons_snap | tee "$BASE"; [ "$(wc -l < "$BASE" | tr -d ' ')" = 7 ] || { echo "BASELINE_INCOMPLETE"; exit 1; }   # 7 lines expected; an empty baseline would make v_cons pass unchecked
 
 # g) backups fresh (< 26 h) — ground truth is the newest Completed Backup CR
 # Shared helper (F-a915dd47): counts the nightly Backup CR even when its status
@@ -498,7 +501,7 @@ leg_commit
 wait_img databases deploy/superset-redis-official redis:8.10.2-alpine
 ```
 
-### Leg 3 — ai/open-webui: redis sidecar + app 0.11.3 → 0.11.4 (ONE commit)
+### Leg 3 — ai/open-webui: chart 16.5.0 → 16.6.0 + redis sidecar + app 0.11.3 → 0.11.4 (ONE commit)
 
 Backup first (sqlite online-backup API, WAL-safe; 88 MB, PVC 16 GB free on
 2026-09-27):
@@ -515,7 +518,10 @@ Edit (three substitutions, one file — the comment line keeps the file honest):
 ```bash
 sed -i '' -e 's/^\([[:space:]]*tag:[[:space:]]*\)8\.10\.1-alpine$/\18.10.2-alpine/' \
           -e 's/^\([[:space:]]*tag:[[:space:]]*\)0\.11\.3$/\10.11.4/' \
-          -e 's/ 8\.10\.1-alpine is$/ 8.10.2-alpine is/' kubernetes/apps/ai/open-webui/app/helmrelease.yaml
+          -e 's/ 8\.10\.1-alpine is$/ 8.10.2-alpine is/' \
+          -e 's/^\([[:space:]]*version:[[:space:]]*\)16\.5\.0$/\116.6.0/' kubernetes/apps/ai/open-webui/app/helmrelease.yaml
+#   -      version: 16.5.0
+#   +      version: 16.6.0
 #   -      # only — no persistence, no ACL/auth, no modules. 8.10.1-alpine is
 #   +      # only — no persistence, no ACL/auth, no modules. 8.10.2-alpine is
 #   -          tag: 8.10.1-alpine
@@ -523,7 +529,7 @@ sed -i '' -e 's/^\([[:space:]]*tag:[[:space:]]*\)8\.10\.1-alpine$/\18.10.2-alpin
 #   -      tag: 0.11.3
 #   +      tag: 0.11.4
 LEG=3 FILE=kubernetes/apps/ai/open-webui/app/helmrelease.yaml
-SUBJ="chore(open-webui): 0.11.3 -> 0.11.4 + redis sidecar 8.10.2-alpine (plan redis-fleet-8.10.2 leg 3)"
+SUBJ="chore(open-webui): chart 16.6.0 + app 0.11.4 + redis sidecar 8.10.2-alpine (plan redis-fleet-8.10.2 leg 3)"
 leg_commit
 wait_img ai deploy/open-webui-redis redis:8.10.2-alpine
 wait_img ai sts/open-webui ghcr.io/open-webui/open-webui:0.11.4
@@ -869,7 +875,13 @@ Leg-specific additions:
   delete it, then push the revert and `flux resume hr -n ai open-webui` (the
   revert's reconcile restores replicas 1 on 0.11.3). Restore command, run in
   that throw-away pod —
-  `kubectl exec -n ai open-webui-0 -c open-webui -- python3 -c "import sqlite3; s=sqlite3.connect('/app/backend/data/webui.db.pre-0.11.4'); d=sqlite3.connect('/app/backend/data/webui.db'); s.backup(d); d.close()"`
+  (the StatefulSet is at 0 here, so `open-webui-0` does NOT exist — review 2026-09-28):
+  ```bash
+  kubectl run -n ai owui-restore --restart=Never --image=ghcr.io/open-webui/open-webui:0.11.4 --overrides='{"apiVersion":"v1","spec":{"containers":[{"name":"r","image":"ghcr.io/open-webui/open-webui:0.11.4","command":["sleep","3600"],"volumeMounts":[{"name":"d","mountPath":"/app/backend/data"}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"open-webui-20g"}}]}}'
+  kubectl wait -n ai pod/owui-restore --for=condition=Ready --timeout=300s
+  kubectl exec -n ai owui-restore -c r -- python3 -c "import sqlite3; s=sqlite3.connect('/app/backend/data/webui.db.pre-0.11.4'); d=sqlite3.connect('/app/backend/data/webui.db'); s.backup(d); d.close(); print('RESTORED')"
+  kubectl delete pod -n ai owui-restore --wait=true
+  ```
   then, once `sts/open-webui` is back on 0.11.3 with 1 replica, assert
   alembic head `d4c1a8e37b62` and `/api/version` 0.11.3. Chats written between
   upgrade and restore are lost — say so to the users.
@@ -897,19 +909,19 @@ Cleanup after a successful window (not a rollback): leave
   appears, add it here (§4 reads Prometheus).
 - **Not in scope, same HelmReleases:** app-template chart 5.1.0 → 5.2.1 for
   redis, tube-archivist-redis, immich-redis, sure-redis (F-94bbd7ee, F-b5e13899,
-  F-2983fb7e, F-6d39efbe) and open-webui chart 16.5.0 → 16.6.0 (F-31c19a7f).
+  F-2983fb7e, F-6d39efbe). (open-webui chart 16.5.0 → 16.6.0, F-31c19a7f, IS in leg 3.)
   Any plan for those touches these HelmReleases and must be serialized with
   this one.
 - **No reboot, no storage-class or PVC operation** — two Longhorn PVCs are
   remounted by their own Recreate; storage-safety pre-flight N/A (no delete).
 - **Repo corrections found while planning (not made here — planner writes only
   this file):**
-  1. `runbooks/check-all-versions.py` `IMAGE_RELEASE_NOTES_PROJECTS` lacks
+  1. DONE (check-all-versions.py:555/567, verified 2026-09-28). `runbooks/check-all-versions.py` `IMAGE_RELEASE_NOTES_PROJECTS` lacked
      `'redis': ('redis', 'redis')`, and the `-alpine` suffix must be stripped
      to find release `8.10.2`. Until fixed, every redis patch bump lands in
      PLAN on G3 "release notes unavailable" (this is the second fleet-wide
      redis patch to do so).
-  2. **sure-redis is not safe for the unattended lane as-is**: any image swap
+  2. DONE (auto-update-policy.yaml `*sure-redis*` rule, verified 2026-09-28). **sure-redis is not safe for the unattended lane as-is**: any image swap
      silently empties Sure's sidekiq-cron schedule until sure-worker restarts
      (§1.4). Either add a `*sure-redis*` deny rule with that reason or give the
      auto-updater a post-bump consumer restart. Worth checking whether the

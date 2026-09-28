@@ -36,6 +36,7 @@ conflicts_with:
   - flux-oci-chart-sources            # rewrites penpot spec.chart (mirror track)
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. penpot
   - app-template-5.2.1                # helm-upgrades penpot-db + penpot-cache, which penpot dependsOn (committed 5eca9410, vetted)
+  - paperless-db-13.0.2               # reciprocal (office namespace; that plan lists us) — review 2026-09-28
   - chart-patches-coredns-reloader-blackbox  # coredns roll; 1.10.0 frontend nginx resolver = cluster DNS
 exclusive: false
 security_ref: F-4c3c5206              # exporter image finding; 2.18.0 answers it (see §1, measured)

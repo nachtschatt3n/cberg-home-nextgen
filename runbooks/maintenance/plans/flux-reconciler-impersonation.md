@@ -43,7 +43,8 @@ depends_on: []
 conflicts_with:                       # exclusive: true already keeps the slot empty;
   - flux-oci-chart-sources            # these name WHY. Rewrites Flux sources.
   - helm-drift-detection              # changes HelmRelease behaviour cluster-wide.
-  - kube-prometheus-stack-91.4.1      # the window's instrument (section 4 reads it).
+  - flux-fleet-0.60.0                 # bumps flux-operator/flux-instance charts; moves premise operator-v0.57.0 and gate C2's chartVersion.
+  # RESOLVED 2026-09-26: kube-prometheus-stack-91.4.1 EXECUTED -- ref removed per the dead-ref convention.
   # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
 exclusive: true                       # No other change may be IN FLIGHT while the
                                       # identity Flux applies under is being swapped:
@@ -76,13 +77,17 @@ premises:                             # read 2026-09-22 ~15:00Z; 10/10 PASS at a
       | jq 'map(select(startswith("--default-service-account")))'
       | jq 'length'
     expect_exact: "0"
-  - id: fluxinstance-patches-empty
+  - id: fluxinstance-patches-only-gitrepo-ignore
     why: >-
-      Stage C sets spec.kustomize.patches from an EMPTY list. A non-empty list means
-      someone already customises the controllers and the yq edit in section 3.4 would
-      clobber it — merge by hand instead.
-    run: kubectl get fluxinstance -n flux-system flux -o jsonpath='{.spec.kustomize.patches}'
-    expect_exact: "[]"
+      Stage C APPENDS one Deployment patch. Since b4ed1d63 (F-baf94b64) the list holds exactly
+      one GitRepository spec.ignore patch that MUST survive. Any other entry means someone
+      else customises the controllers — merge by hand. (Re-expressed 2026-09-28 by review:
+      the old `expect_exact: "[]"` premise went stale when b4ed1d63 landed.)
+    run: >-
+      kubectl get fluxinstance -n flux-system flux -o json
+      | jq '[.spec.kustomize.patches[].target.kind]'
+      | jq -r 'join(" ")'
+    expect_exact: "GitRepository"
   - id: multitenant-off
     why: >-
       The design deliberately does NOT enable the multitenant profile (it would add
@@ -182,7 +187,8 @@ premises:                             # read 2026-09-22 ~15:00Z; 10/10 PASS at a
       | jq 'map(select(.status == "False"))'
       | jq 'length'
     expect_exact: "0"
-status: awaiting-go   # reviewed 2026-09-23 (needs-fix -> both blocking gate fixes applied below)
+status: awaiting-go   # reviewed 2026-09-23; RE-REVIEWED 2026-09-28 (F-2c849d1e): needs-fix (Stage C yq clobbered the F-baf94b64 ignore patch, break-glass same, --only on untracked files, stale premise, absolute floors) -> fixed -> 3 passes -> ready-for-go. Window prerequisite: §6.3 health-check/SOP items.
+review: ready-for-go@2026-09-28
 window: "sun-attended:2026-10-11"   # scheduled 2026-09-23 per the review: earliest reboot-free attended slot; needs a fresh GO on the day
                                       # the slot shape (attended, exclusive, no reboot).
 sops_refs:
@@ -289,7 +295,7 @@ this plan is read-only against the DB and has not done so.
 
 | Measure | Value |
 |---|---|
-| Kustomizations / HelmReleases | **140 / 125**, all Ready |
+| Kustomizations / HelmReleases | **140 / 125** at authoring, all Ready (re-measure; 142/126 on 2026-09-28) |
 | Namespaces hosting either | **18**: ai backup cert-manager databases default download flux-system home-automation kube-system media monitoring my-software-development my-software-production my-software-showcase network office security storage |
 | Kustomizations living in `flux-system` | 6 (`flux-system` root, `cluster-meta`, `cluster-apps`, `flux-guardrails`, `flux-operator`, `flux-instance`); the other 134 live in their app namespace with `targetNamespace` = own namespace |
 | Explicit `spec.serviceAccountName` / `spec.kubeConfig` | **0 / 0** on both kinds |
@@ -368,11 +374,12 @@ mise exec -- kubectl get gitrepository -n flux-system flux-system -o jsonpath='{
 # 2.4 Record the baselines the gates compare against
 mise exec -- kubectl get pods -n flux-system -o custom-columns='NAME:.metadata.name,STARTED:.status.startTime' | grep -E 'kustomize-controller|helm-controller'
 date -u +%Y-%m-%dT%H:%M:%SZ   # T0 — every "since" below is relative to this
+mise exec -- kubectl get hr -n flux-system flux-instance -o jsonpath='{.status.history[0].chartVersion}{"\n"}'   # record: gate C2 expects this chart version
 
 # 2.5 Instruments alive (section 4 CONTROL lines are meaningless otherwise)
 mise exec -- kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19090:9090 >/dev/null 2>&1 & PF=$!; sleep 3
 curl -s 'http://localhost:19090/api/v1/query' --data-urlencode 'query=count by (kind) (flux_resource_info{kind=~"Kustomization|HelmRelease", suspended="False"})' | grep -o '"kind":"[A-Za-z]*"},"value":\[[0-9.]*,"[0-9]*"'
-# EXPECT: Kustomization 140, HelmRelease 125 (re-measure; the numbers are the FLOOR for section 4).
+# EXPECT: re-measure; 142/126 on 2026-09-28 (was 140/125 at authoring; the numbers are the FLOOR for section 4).
 curl -s 'http://localhost:19090/api/v1/query' --data-urlencode 'query=ALERTS{alertname=~"Flux.*",alertstate="firing"}' | grep -c alertname
 # EXPECT: 0
 kill $PF 2>/dev/null
@@ -635,7 +642,7 @@ mise exec -- kubectl kustomize $D/app | grep -c 'namespace: flux-system$'
 mise exec -- task kubeconform
 
 printf 'feat(flux): per-namespace flux-reconciler identities + tiered RBAC (stage A of F-7b847e3e)\n\nInert until --default-service-account renders (stage C). Adds ServiceAccount\nflux-reconciler + RoleBinding in the 18 namespaces that host a Kustomization or\nHelmRelease, cluster-admin CRBs for the 9 platform namespaces whose content\nowns ClusterRoles/CRDs/webhooks, PV/StorageClass CRBs for the 8 storage-owning\napp namespaces, and a window-scoped impersonation probe in kube-public.\n\nPlan: runbooks/maintenance/plans/flux-reconciler-impersonation.md\n' > /tmp/msg-a.txt
-git commit --only kubernetes/apps/flux-system/kustomization.yaml $D -F /tmp/msg-a.txt
+git add -N $D && git commit --only kubernetes/apps/flux-system/kustomization.yaml $D -F /tmp/msg-a.txt
 git log -1 --format=%s        # MUST be the subject above (feedback_commit_editmsg_race)
 git show --stat HEAD          # MUST list only kustomization.yaml + the 8 new files
 git push
@@ -717,15 +724,14 @@ Run gates **B2-1 … B2-3** (section 4.3). **These explicit names are kept**
 
 ### 3.4 Stage C — flip the default for both controllers
 
-One block appended to `instance:` in
+One entry appended to the existing `instance.kustomize.patches` list (after the
+F-baf94b64 GitRepository spec.ignore patch, which must survive) in
 `kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml`
-(dry-tested 2026-09-22 with the yq below; the diff is exactly this):
+(dry-tested 2026-09-22, re-dry-tested with the `+=` append 2026-09-28; the diff is exactly this):
 
 ```diff
-@@ -25,3 +25,12 @@
-     pullSecret: flux-system-git-auth
-+  kustomize:
-+    patches:
+@@ appended after line 52 (`              !/kubernetes`; dry-run 2026-09-28: 52a53,59) @@
+               !/kubernetes
 +      - target:
 +          kind: Deployment
 +          name: (kustomize-controller|helm-controller)
@@ -750,11 +756,12 @@ impersonation within minutes.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-mise exec -- yq -i '.instance.kustomize.patches = [{"target": {"kind": "Deployment", "name": "(kustomize-controller|helm-controller)"}, "patch": "- op: add\n  path: /spec/template/spec/containers/0/args/-\n  value: --default-service-account=flux-reconciler\n"}]' \
+mise exec -- yq -i '.instance.kustomize.patches += [{"target": {"kind": "Deployment", "name": "(kustomize-controller|helm-controller)"}, "patch": "- op: add\n  path: /spec/template/spec/containers/0/args/-\n  value: --default-service-account=flux-reconciler\n"}]' \
   kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml
 git diff -- kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml   # MUST equal the diff above
-mise exec -- yq '.instance.kustomize.patches[0].target.name' kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml
+mise exec -- yq '.instance.kustomize.patches[1].target.name' kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml
 # EXPECT: (kustomize-controller|helm-controller)
+mise exec -- yq '.instance.kustomize.patches[0].target.kind' kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml   # EXPECT: GitRepository
 mise exec -- task kubeconform
 T_C=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo "T_C=$T_C"
 
@@ -827,7 +834,7 @@ controllers are not scraped, so the instruments are flux-operator's
 `.status`, and SubjectAccessReview (`kubectl auth can-i --as`).
 
 ```
-CONTROL: metric flux_resource_info — count by (kind) of {kind=~"Kustomization|HelmRelease", ready="False", suspended="False", name!="impersonation-probe"} must read 0 for 10 consecutive minutes after each stage, AND count of {kind="Kustomization"} must still read the pre-check floor (140 on 2026-09-22; 141 while the probe exists) and {kind="HelmRelease"} 125 — a disappearing series is a failed scrape, not a healthy cluster.
+CONTROL: metric flux_resource_info — count by (kind) of {kind=~"Kustomization|HelmRelease", ready="False", suspended="False", name!="impersonation-probe"} must read 0 for 10 consecutive minutes after each stage, AND count of {kind="Kustomization"} must still read the §2.5 Kustomization floor (+1 while the probe exists) and {kind="HelmRelease"} the §2.5 HelmRelease floor (142/126 on 2026-09-28) — a disappearing series is a failed scrape, not a healthy cluster.
 CONTROL: metric flux_instance_info — {name="flux", ready="True"} == 1 after Stage C; ready="False" with reason ReconciliationFailed is the operator's 5-minute rollout wait expiring.
 CONTROL: metric controller_runtime_reconcile_errors_total — {namespace="flux-system", controller="fluxinstance"} increase over the window == 0 (the operator itself must not be erroring on the patched build).
 CONTROL: alertname FluxResourceNotReady — not firing at close-out for anything but the (silenced, then deleted) probe.
@@ -983,18 +990,20 @@ mise exec -- kubectl get deploy -n flux-system kustomize-controller helm-control
 # PASS: 2.   FAIL: 0 (patch not rendered — check `kubectl get fluxinstance -n flux-system flux -o jsonpath='{.status.conditions}'` for BuildFailed) or 1 (regex matched one name).
 mise exec -- kubectl get pods -n flux-system -o custom-columns='NAME:.metadata.name,STARTED:.status.startTime' | grep -E 'kustomize-controller|helm-controller'
 # PASS: both STARTED > T_C (from section 3.4).
+mise exec -- kubectl get gitrepository -n flux-system flux-system -o jsonpath='{.spec.ignore}' | grep -c '^!/kubernetes$'
+# C1b PASS: 1 (measured live 2026-09-28). FAIL: 0 = Stage C dropped the F-baf94b64 ignore patch; revert Stage C (5.1) now.
 
 # C2 — the operator is happy with the patched build
 mise exec -- kubectl get fluxinstance -n flux-system flux -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.conditions[?(@.type=="Ready")].reason} {.status.conditions[?(@.type=="Ready")].message}{"\n"}'
 # PASS: True ReconciliationSucceeded Reconciliation finished in ...   FAIL: False ReconciliationFailed <timeout / not-ready deployments>
 mise exec -- kubectl get helmrelease -n flux-system flux-instance -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.history[0].chartVersion} {.status.history[0].status}{"\n"}'
-# PASS: True 0.57.0 deployed (a "superseded"/rolled-back history[0] means the CR was rejected and Helm remediated — the flag is NOT on; stop).
+# PASS: True <chart version live at pre-check 2.4> deployed (a "superseded"/rolled-back history[0] means the CR was rejected and Helm remediated — the flag is NOT on; stop).
 
 # C3 — EVERY object re-reconciled under impersonation and none was forbidden.
 #      No --since: the current pods started at the flip, so their whole log IS "since the flag".
 #      Wait until both distinct counts reach the floor (typically < 5 min; hard stop 10 min).
-fluxlog kustomize-controller       # PASS: distinct Kustomizations logged: >= 141 (140 + probe), forbidden lines: <= the probe's own (namespace kube-public) and NOTHING else
-fluxlog helm-controller            # PASS: distinct HelmReleases logged: 125, forbidden/unauthorized lines: 0
+fluxlog kustomize-controller       # PASS: distinct Kustomizations logged: >= §2.5 Kustomization floor + 1 (probe) (142 + 1 = 143 on 2026-09-28), forbidden lines: <= the probe's own (namespace kube-public) and NOTHING else
+fluxlog helm-controller            # PASS: distinct HelmReleases logged: >= the §2.5 HelmRelease floor (126 on 2026-09-28), forbidden/unauthorized lines: 0
 # FAIL shape (kustomize): FORBIDDEN ('office', 'nextcloud', 'Reconciliation failed ...', 'storageclasses.storage.k8s.io "cifs-nextcloud-data" is forbidden: User "system:serviceaccount:office:flux-reconciler" ...')
 # FAIL shape (helm):      FORBIDDEN ('media', 'plex', 'Failed to determine release state', 'secrets is forbidden: User "system:serviceaccount:media:flux-reconciler" cannot list ...')
 
@@ -1021,7 +1030,7 @@ for i in 1 2 3; do
   sleep 300
 done
 kill $PF 2>/dev/null
-# PASS on all three samples (10 min): not-ready count 0 (or the `or vector(0)` zero), totals 141/125, ready:"True", alert count 0.
+# PASS on all three samples (10 min): not-ready count 0 (or the `or vector(0)` zero), totals = §2.5 Kustomization floor + 1 (probe) / §2.5 HelmRelease floor, ready:"True", alert count 0.
 # FAIL: a non-zero not-ready count, OR a total BELOW the floor (series vanished = scrape broke = shape check would have said "0 failures").
 
 # C6 — negative control on the instrument, same session: a metric that cannot exist must read empty
@@ -1075,11 +1084,11 @@ its own ServiceAccount (`flux-operator`, cluster-admin, AR-011) and does not
 impersonate — so it can be told directly to drop the patch:
 
 ```bash
-mise exec -- kubectl -n flux-system patch fluxinstance flux --type=json -p '[{"op":"replace","path":"/spec/kustomize/patches","value":[]}]'
+mise exec -- kubectl -n flux-system patch fluxinstance flux --type=json -p '[{"op":"test","path":"/spec/kustomize/patches/1/target/kind","value":"Deployment"},{"op":"remove","path":"/spec/kustomize/patches/1"}]'
 # The operator's watch fires within seconds: it rebuilds without the arg, re-applies both
 # Deployments, the pods restart as plain cluster-admin. Confirm exactly as 5.1 (grep -c == 0).
 # THEN land the git revert (5.1) so git and cluster agree; helm-controller's next upgrade of
-# flux-instance (generation bump from the revert) re-applies the CR with patches: [] — same state.
+# flux-instance (generation bump from the revert) re-applies the CR with only the GitRepository ignore patch — same state. Then run gate C1b (must print 1).
 ```
 
 This is a direct cluster mutation and is documented here precisely because it
@@ -1123,9 +1132,15 @@ which git cannot reach the cluster.
 
 ### 6.1 For the window agent
 
+- **If `flux-fleet-0.60.0` lands first** (it should run in a separate, earlier window),
+  premise `operator-v0.57.0` fails and this plan STOPs at pre-check. Re-express it to
+  `expect_contains: "flux-operator:v0.60.0"` (id `operator-v0.60.0`, `why` citing
+  flux-fleet-0.60.0) before the window: the flux-fleet reviewer verified 2026-09-28 that
+  internal/builder and the fluxinstance controller are unchanged v0.57.0..v0.60.0, so the
+  flag rendering this plan relies on holds. Gate C2 is already version-relative.
+
 - **`exclusive: true`, attended, no reboot.** Sat-attended at full budget
-  (70 of 70 usable minutes) or a Sunday with no reboot plan. Do NOT put it in
-  `sun-attended:2026-09-27` (talos-1.14.1) and do not let it displace a reboot
+  (70 of 70 usable minutes) or a Sunday with no reboot plan. Do not let it displace a reboot
   plan from a Sunday — it is not reboot work.
 - **Step 0 (safe updates) runs BEFORE this plan, as always, and NOTHING may be
   applied through Flux after Stage C except this plan's own Stage D.** A safe
@@ -1141,9 +1156,8 @@ which git cannot reach the cluster.
   `flux-oci-chart-sources` rewrites the sources every reconcile reads;
   `helm-drift-detection` changes what helm-controller does on every
   reconcile (and drift correction under impersonation is untested here);
-  `kube-prometheus-stack-91.4.1` is the instrument section 4 reads;
-  `talos-1.14.1` restarts the controllers mid-proof and would make the
-  "since pod start" log gate lie.
+  `flux-fleet-0.60.0` bumps the flux-operator/flux-instance charts this plan
+  patches — run it in a separate, earlier window.
 - **Shared worktree.** On 2026-09-22 `kubernetes/flux/components/common/namespace.yaml`
   carried someone else's uncommitted PSA edit (F-b0ec926b / F-481fadb8).
   Pre-check 2.2 refuses to start while any file this plan's `cluster-apps`
@@ -1152,6 +1166,8 @@ which git cannot reach the cluster.
   identity change being tested.
 
 ### 6.2 Things that are NOT touched and must stay that way
+
+- The GitRepository spec.ignore patch in instance.kustomize.patches[0] (b4ed1d63, F-baf94b64) stays; Stage C appends after it, 5.2 removes only index 1, gate C1b asserts it survives.
 
 - `spec.cluster.multitenant` stays `false` — see 1.2; premise `multitenant-off`.
 - `clusterrolebinding/cluster-reconciler-flux-system` stays — the controllers
@@ -1178,7 +1194,7 @@ which git cannot reach the cluster.
    cluster-scoped objects), regenerate, commit BEFORE the app", and
    `runbooks/health-check.sh` should assert `namespaces hosting ks/hr ⊆
    namespaces with serviceaccount/flux-reconciler` every sweep. Neither edit
-   is a window action; both are owed the BEFORE the window (reviewer 2026-09-23: any namespace outside the tenant generator stops reconciling at Stage C).
+   is a window action; both are owed BEFORE the window (reviewer 2026-09-23: any namespace outside the tenant generator stops reconciling at Stage C).
 2. **Demote `default` and `ai` from Tier A** by moving homepage's and
    ai-sre/mcpo's ClusterRole/ClusterRoleBinding under a flux-system-owned
    Kustomization (as `flux-reconciler-rbac` already is). Both are

@@ -45,6 +45,9 @@ conflicts_with:
                                       # of the same HelmRelease in one window = a failed
                                       # reconcile nobody can attribute, and §5 stops being a
                                       # one-commit revert. Same reasoning n8n-2.39.8 uses.
+  - helm-drift-detection              # adds a spec field to every HelmRelease incl.
+                                      # helmrelease/n8n: two writers, one object, one
+                                      # reconcile. Undeclared on both sides until 2026-09-28.
   # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
 exclusive: false
 security_ref: null                    # no security driver: the chart carries no image of its
@@ -56,9 +59,10 @@ rollback_class: git-revert            # nothing forward-only: same image, no DB 
 finding_refs:                         # queried 2026-09-25 with SWEEP_PG_DSN up
                                       # (`finding list --grep n8n`)
   - F-8e5e5c66                        # "n8n: chart 2.0.1 -> 2.1.1 (minor)" — THIS plan.
-                                      # NOT claimed: F-09588936 / F-910a4a4b (image; owned by
+                                      # NOT claimed: F-09588936 / F-1beea963 (image; owned by
                                       # n8n-2.39.8).
-status: draft
+status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (V7 absence gate, undeclared helm-drift conflict) -> fixed -> ready-for-go. Premise image-is-2.40.7 is the designed ordering lock: cannot run before n8n-2.39.8 executes (+24h, §2.2).
+review: ready-for-go@2026-09-28
 window: null
 premises:
   - id: image-is-2.40.7
@@ -109,11 +113,13 @@ One line in `kubernetes/apps/home-automation/n8n/app/helmrelease.yaml`:
 registry, HelmRepository `flux-system/n8n`). The image stays pinned by
 `values.image.tag`.
 
-**Why held:** auto-update-policy rule `match: "*n8n*"`, `max: patch`. That
-rule exists for the n8n *image*, whose beta ships on the next minor line with
-no prerelease marker. Its glob also catches this *chart*, where the concern
-does not apply. So the hold is **a false positive in substance**, even though
-the rule behaved as written. See the repo correction in §6.4.
+**Why held:** originally by the auto-update-policy rule `*n8n*` (`max: patch`),
+a false positive for this chart. That rule was narrowed to `*n8nio/n8n*` on
+2026-09-26 (80eb6bf0). Since then the chart is held ONLY because this plan
+exists (coverage.py lane PLAN, reason "plan exists: n8n-chart-2.1.1"). Do NOT
+retire or supersede this plan before n8n-2.39.8 executes: the chart would then
+leave the PLAN lane and could be direct-bumped at Step 0 ahead of the
+migration night, which is the ordering §1.3 rejects.
 
 ### 1.2 The chart diff, measured (2026-09-25)
 
@@ -339,11 +345,14 @@ never a pass.
 ```bash
 # V7 settle 10 min, then: no probe-driven restarts
 kubectl get pods -n home-automation -l app.kubernetes.io/name=n8n -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}{"\n"}'   # 0
-kubectl get events -n home-automation --field-selector involvedObject.kind=Pod | grep -i n8n | grep -iE 'unhealthy|probe' || echo NO_PROBE_EVENTS
+kubectl get pods -n home-automation -l app.kubernetes.io/name=n8n -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}{"\n"}'   # True
+kubectl get events -n home-automation --field-selector involvedObject.kind=Pod | grep -i n8n | grep -iE 'unhealthy|probe' || echo NO_PROBE_EVENTS   # INFORMATIONAL ONLY
 ```
-PASS: `0` and `NO_PROBE_EVENTS`. A readiness path the image does not serve
-would show `Readiness probe failed: HTTP probe failed with statuscode: 404`
-here. The grep is case-insensitive.
+PASS: restartCount `0` AND Ready `True` (both positive readings; together with
+V4 ready=true and V5 readiness=200 they catch a readiness path the image does
+not serve, which would leave the pod NotReady). The events line is
+informational, NOT a PASS criterion: an absence of events cannot distinguish
+"no probe failures" from "query matched nothing".
 
 `configmap/n8n-worker-config` now exists. This is expected (§1.2 item 3) and
 is not a failure.
@@ -387,15 +396,15 @@ Prometheus. No kube-prometheus-stack conflict is needed.
 
 ### 6.3 Other plans that touch hr/n8n
 - `flux-oci-chart-sources` (chart source) is listed in `conflicts_with`.
-- `flux-reconciler-impersonation` and `float-tag-pinning` list home-automation
-  but do not edit this chart's version. They are not declared.
+- `helm-drift-detection` adds a spec field to helmrelease/n8n: declared in
+  `conflicts_with` (two writers, one object).
+- `flux-reconciler-impersonation` lists home-automation but is `exclusive: true`,
+  so the scheduler already keeps it alone in its slot. Not declared.
 
 ### 6.4 Repo correction (reported, not fixed here)
-The `*n8n*` rule in `runbooks/auto-update-policy.yaml` is justified only by
-the n8n image's channel layout ("beta on the next MINOR line"). Its glob also
-holds the 8gears chart, which has no such channel. Consider narrowing it to
-the image (e.g. `n8nio/n8n`), so that future chart minors like this one go
-through the ordinary safe-update gates.
+DONE 2026-09-26 (80eb6bf0): the `*n8n*` rule in
+`runbooks/auto-update-policy.yaml` was narrowed to `*n8nio/n8n*`. Future chart
+minors go through the ordinary safe-update gates.
 
 Upstream correction worth filing with 8gears: the startupProbe rationale in
 `values.yaml` ("n8n only starts listening once … migrations are done") does
