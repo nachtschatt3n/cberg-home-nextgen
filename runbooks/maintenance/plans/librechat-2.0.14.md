@@ -54,7 +54,7 @@ rollback_class: git-revert            # nothing forward-only: no image change, n
 finding_refs: [F-fbe854a6]            # "librechat: chart 2.0.7 → 2.0.14 (patch)"
 status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (§4.4(c) browser gate unrunnable unattended) -> fixed -> delta re-review ready-for-go. AUTO-NIGHT + risk low => SD-10 pre-approved for the nightly.
 review: ready-for-go@2026-09-28
-window: null
+window: "nightly:2026-09-30"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); SD-10 pre-approved, runs without a GO
 premises:
   - id: hr-chart-still-2.0.7
     why: >-

@@ -74,7 +74,7 @@ rollback_class: git-revert            # valid ONLY because 6.16.0 ships no Liqui
                                       # pg_restore procedure — the dump in §3.2 is taken regardless.
 finding_refs: [F-36932ec1]            # "traccar: image traccar/traccar 6.15.3 → 6.16 (minor)"
 status: vetted
-window: null
+window: "nightly:2026-09-29"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); SD-10 pre-approved, runs without a GO
 premises:
   - id: live-image-still-6.15.3
     why: >-

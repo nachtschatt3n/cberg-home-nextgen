@@ -64,8 +64,8 @@ finding_refs: [F-59b12b2b]            # "Talos 1.15 blocker: talconfig must migr
                                       # SWEEP_PG_DSN up: `finding list --grep talconfig|talhelper|
                                       # multi-doc` -> only this id.
 review: ready-for-go@2026-09-28   # plan-reviewer-agent, 2nd pass (1st: needs-fix B1-B3, fixed)
-status: vetted
-window: null
+status: awaiting-go  # 2026-09-28 go_no_go ingested (data-loss decision) — was: vetted;
+window: "sun-attended:2026-10-04"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO pending: etcd/control-plane config, exclusive slot
 premises:
   - id: nodes-on-talos-1.14.1
     why: "The migration renders for talosVersion v1.14.1 and was measured against v1.14.1 nodes. A node on another version invalidates the dry-run reboot verdict and the semantic baseline."

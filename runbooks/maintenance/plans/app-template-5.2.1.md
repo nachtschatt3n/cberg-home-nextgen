@@ -100,7 +100,7 @@ premises:
     expect_exact: "1"
 status: vetted   # 2026-09-27 plan-reviewer: needs-fix (4 blocking) -> all applied -> re-check ready-for-go. NO operator GO recorded.
 review: ready-for-go@2026-09-27
-window: null
+window: "nightly:2026-10-02"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); SD-11 candidate; GO-free only once SD-11 lands, else needs a GO
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md

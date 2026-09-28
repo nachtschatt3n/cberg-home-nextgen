@@ -109,7 +109,7 @@ finding_refs: [F-d2bb762b, F-8c50c463, F-625d3a3f, F-c637a09a, F-3fcdca7b, F-3a7
 status: vetted   # plan-reviewer 2026-09-27: needs-fix (3 blocking) -> fixed; 2026-09-28 (F-2c849d1e): needs-fix (unreachable restore pod, chart 16.6.0 lockstep) -> fixed -> re-review ready-for-go. HUMAN-GATED.
 review: ready-for-go@2026-09-28
                 # No operator GO recorded; awaiting vetting/scheduling + go/no-go.
-window: null
+window: "sun-attended:2026-10-25"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed: capability_change (open-webui leg), 85m > nightly budget; serialize before penpot-chart
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/verification-contents-not-shape.md

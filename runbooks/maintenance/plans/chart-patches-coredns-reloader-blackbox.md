@@ -115,7 +115,7 @@ premises:
     expect_matches: "(?s)dns-k8s-gateway-primary.*dns-k8s-gateway-secondary.*http-ingress-internal.*http-ingress-external"
 status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e backlog review): ready-for-go, 0 blocking; 3 bookkeeping fixes applied
 review: ready-for-go@2026-09-28
-window: null
+window: "sun-attended:2026-11-01"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed: coredns failure disables its own GitOps rollback, attended
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md

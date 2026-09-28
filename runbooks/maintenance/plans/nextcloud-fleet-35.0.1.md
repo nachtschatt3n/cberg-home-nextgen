@@ -99,9 +99,9 @@ finding_refs: [F-7344f3ec, F-7bcfda63]
                                       # F-7344f3ec version/critical nextcloud 34.0.4 -> 35.0.1
                                       # F-7bcfda63 version/critical nextcloud-notify-push 34.0.4 -> 35.0.1
                                       # both measured open (last_seen 2026-09-27) before claiming.
-status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (mail exit masked by tail, absence gates, 7 conflicts) -> fixed -> needs-fix (34.0.4 baseline not runnable) -> fixed -> ready-for-go. HUMAN-GATED; needs an operator GO (D1) and a sun-attended slot.
+status: awaiting-go  # 2026-09-28 go_no_go ingested (data-loss decision) — was: vetted;    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (mail exit masked by tail, absence gates, 7 conflicts) -> fixed -> needs-fix (34.0.4 baseline not runnable) -> fixed -> ready-for-go. HUMAN-GATED; needs an operator GO (D1) and a sun-attended slot.
 review: ready-for-go@2026-09-28
-window: null                          # needs an ATTENDED, long slot: sun-attended. Never nightly:
+window: "sun-attended:2026-10-18"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO pending: major, one-way occ migrations + feature changes; attended long slot
                                       # the executor must read the entrypoint log live in §3.4
                                       # and run §5.1/§5.2 inside the same slot.
 premises:

@@ -51,9 +51,9 @@ finding_refs: [F-922ffce7, F-4c3c5206]
                                       # F-4c3c5206: exporter image finding — 2.18.0 measured to answer it.
                                       # NOT claimed: F-220e7d7b (backend) and F-9ac47520 (frontend) —
                                       #   re-rated by the sweep after landing; detail on the records.
-status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e backlog review): ready-for-go, 0 blocking; bookkeeping fixes applied. HUMAN-GATED (capability_change: true) — needs an operator GO.
+status: awaiting-go  # 2026-09-28 go_no_go ingested (data-loss decision) — was: vetted;    # plan-reviewer 2026-09-28 (F-2c849d1e backlog review): ready-for-go, 0 blocking; bookkeeping fixes applied. HUMAN-GATED (capability_change: true) — needs an operator GO.
 review: ready-for-go@2026-09-28
-window: null
+window: "sat-attended:2026-10-31"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO pending: DB migration, backup-restore (moved off sun 10-25: shares monitoring+office with redis-fleet)
 premises:
   - id: live-backend-still-2.17.2
     why: "current: claims 2.17.2; if the backend already moved, the dump/baseline and rollback target are wrong."

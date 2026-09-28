@@ -168,7 +168,7 @@ finding_refs: [F-60ebcdb5]             # CORRECTED 2026-09-20. The previous valu
                                        # and double-claiming breaks the plan-or-page join.
 status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (6 stale gates/rollback rev) -> fixed -> re-review ready-for-go. HUMAN-GATED via risk high; needs an operator GO.
 review: ready-for-go@2026-09-28
-window: null
+window: "nightly:2026-10-03"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); SD-11 candidate; GO-free only once SD-11 lands, else needs a GO
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/monitoring.md

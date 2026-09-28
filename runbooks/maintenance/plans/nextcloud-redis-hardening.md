@@ -73,7 +73,7 @@ status: vetted  # 2026-09-28 RE-PLAN (plan-reviewer ready-for-go, HUMAN-GATED; n
                 # password` so notify_push would read it from config.php) was a deterministic
                 # no-op. This revision drops the config.php write entirely and gives notify_push
                 # the password through its own REDIS_URL env. Needs review + a fresh GO.
-window: null
+window: "nightly:2026-10-01"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); SD-11 candidate (logouts = accepted interruption); GO-free only once the SD-11 policy change lands, else deferred for a GO
 premises:
   # Read-verb only (plan-premises.py refuses exec). Each run 2026-09-28 and
   # returned the expected value.

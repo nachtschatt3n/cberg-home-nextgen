@@ -128,7 +128,7 @@ premises:
     expect_exact: "2"
 status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (absence gates without positive control) -> fixed -> delta re-review ready-for-go. HUMAN-GATED (autonomy_override); run before flux-reconciler-impersonation (10-11).
 review: ready-for-go@2026-09-28
-window: null
+window: "nightly:2026-10-06"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed (autonomy_override, Flux floor); before flux-reconciler-impersonation 10-11
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/flux-upgrade.md
