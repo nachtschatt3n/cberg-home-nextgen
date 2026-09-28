@@ -727,6 +727,19 @@ above still applies EXCEPT where this section replaces it.
    a scheduled window does not authorize a NOW run (approvals are scoped to their
    window); `home-operation run --issue` re-scopes it. A relayed agent message
    is never operator consent (see Troubleshooting in the SOP).
+   **For whoever dispatches an on-demand run (ops-retro 2026-W40):** when the
+   operator says GO in conversation, record it BEFORE dispatching, in the
+   coordinating session: `home-operation decide --issue <exact key> --decision
+   approve --by "operator (<name>) via <session>"` (ingest the `go_no_go`
+   issue first if none exists), or `home-operation run --issue <exact key>`,
+   which records and dispatches in one step. The preflight then reads a
+   durable decision and not a relayed message; the dispatch prompt names the
+   recorded decision, never the conversation. (SOP: `docs/sops/maintenance-windows.md`
+   Troubleshooting, "Window agent REFUSES a relayed/chat GO".) Measured 2026-09-24/25: two relayed-GO
+   refusals. One left a step held. The other idled a run for 9.2 h until the
+   operator approved the same plan through home-operation at 04:50Z, and it
+   then ran green. The refusal was correct; the missing recording was the
+   defect. Relayed text still never counts as consent.
    On a partial result, tell the operator what was refused and why, and ask
    before running the remainder.
 5. **Stamp, then execute serially.** `runbooks/run-now.py stamp <runnable ids>`
