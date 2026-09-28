@@ -80,8 +80,16 @@ rollback_class: git-revert            # nothing forward-only: settings.conf is a
                                       # file, MakeMKV rewrites its header on every start; the
                                       # nightly Longhorn backup of makemkv-config is the backstop.
 finding_refs: [F-0b69c5d9]
-status: blocked
-blocked_reason: "nightly 2026-09-28: image v26.09.2 LANDED and is healthy (656a896a; G1-G4,G7,G8 PASS, G6 works but its noVNC_app_name probe no longer matches the new UI) -- G5 FAIL fail-closed: Recreate rescheduled the pod onto k8s-nuc14-01 (no /dev/sr0; autodiscripper disabled). Not an image fault, not rolled back. Needs operator: nodeSelector k8s-nuc14-03 via git (plan section 6) or an approved pod reschedule; then re-run G5 and retire this plan. G6 probe needs updating (title MakeMKV / noVNC_container)."
+status: executed   # EXECUTED: image landed nightly 2026-09-28 (656a896a); G5 failed closed there (pod on
+                   # k8s-nuc14-01, no /dev/sr0; blocked e97b1304). Operator-present follow-up 2026-09-28 (F-6b04715e)
+                   # 0b2a3349: nodeSelector kubernetes.io/hostname=k8s-nuc14-03, persistence.media also mounted at
+                   # /output (was node-local anonymous VOLUME, rips lost on restart), strategy Recreate explicit.
+                   # Re-verified 05:38-05:50Z on pod makemkv-77cb9f9678-*: G1 imageID bfdddd29 restarts 0; G2 HR True
+                   # (release v11); G3 App 2.0.0 / image 26.09.2; G4 "registration key already up-to-date"; G5 PASS
+                   # node k8s-nuc14-03, /dev/sr0 block 11,0, "[autodiscripper-0] Ready."; G6 200 17355, 0 error
+                   # markers, noVNC_container/title MakeMKV 2 hits (old noVNC_app_name probe obsolete in this UI),
+                   # WEB_TERMINAL=0 WEB_FILE_MANAGER=0; G7 /media RW-OK + /output RW-OK, /output now the CIFS mount
+                   # //<nas>/media/Transcode (/proc/mounts); G8 05:49Z (+10m) replicas_available 1, restarts 0.
 window: null
 premises:
   - id: image-is-still-v26.01.1
