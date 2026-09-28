@@ -88,6 +88,20 @@ sections that did not report.
    Do not dispatch from the raw `needs_plan` rows: that is per-component
    evidence and re-creates the one-planner-per-consumer waste.
 
+2c. **Review drafts AND drain the review backlog (rule 4d0b; ops-retro
+   2026-W40, F-2c849d1e).** Dispatch ONE `plan-reviewer-agent` (background,
+   read-only, ~20 min) per draft written or retargeted since the previous
+   sweep, PLUS up to 5 more plans, oldest first, whose status is
+   `draft|vetted|awaiting-go` and that carry no `review: ready-for-go@…`
+   line (or one older than 30 days) — skip `blocked` plans and files another
+   session has dirty in `git status`. The since-last-sweep filter alone
+   stranded every draft a missed sweep skipped: on 2026-09-28, 24 of 27 plans
+   had no recorded review and the oldest draft dated from 2026-08-15. Apply
+   the corrections, re-review substantive fixes, and write `review:` +
+   `status: vetted` only on `ready-for-go` (full rule in
+   `.claude/agents/daily-operation.md` 4d0b). List the reviewed ids and
+   verdicts on the board.
+
 3. **Update the lists** (this is the "updates" half of the skill):
    - `python3 runbooks/sweep-run.py --reconcile-only` with the cycle id and
      `--ran <sections-that-actually-ran>` — AR suppression + auto-close.

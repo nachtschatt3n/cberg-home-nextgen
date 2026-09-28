@@ -46,16 +46,41 @@ touches:
     - "fluxinstance/flux spec.kustomize.patches (Stage 10 — emptyDir sizeLimit)"
   shared: [flux-sources, cni-adjacent, cert-manager, storage/longhorn, dns-internal, monitoring]
 depends_on: []
-conflicts_with: []
-  # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
-security_ref: F-0e310ef2
+conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, otel-operator-0.23.0, nextcloud-fleet-35.0.1, jellyfin-12.1, penpot-chart-1.10.0, app-template-5.2.1, chart-patches-coredns-reloader-blackbox, flux-fleet-0.60.0, mariadb-chart-27.3.0, paperless-db-13.0.2, uptime-kuma-2.5.5-slim-rootless]
+  # talos-1.14.1/1.14.0 retired 2026-09-27 (dead refs removed). impersonation + drift-detection edit every HelmRelease;
+  # otel/nextcloud/jellyfin/penpot edit the same helmrelease.yaml a stage switches to chartRef (review 2026-09-28).
+  # flux-fleet-0.60.0: restarts flux-operator (sole flux_* exporter) and moves the flux-operator/flux-instance HRs; source-controller is NOT expected to roll (builder/ssa unchanged v0.57.0..v0.60.0; flux-fleet gate 4.4 checks it).
+security_ref: null                     # F-0e310ef2 (plan-section, not security) RESOLVED 102ec800; no security finding drives this plan
 capability_change: true                # Stage 9 gives Flux chart-provenance ENFORCEMENT it
                                        # does not have today (spec.verify fails CLOSED), and
-                                       # Stage 1 deletes live cluster objects. Reviewed as a
-                                       # fact, not a claim: stages 0-8 alone would be false.
+                                       # Stage 10 adds an eviction limit (emptyDir sizeLimit).
+                                       # Stage 1 is already executed (7c048735). Stages 0-8
+                                       # alone would be false.
 rollback_class: git-revert
-finding_refs: [F-0e310ef2, F-764e4fc3]
-status: draft
+finding_refs: [F-0e310ef2, F-764e4fc3]   # both RESOLVED (102ec800 / 2026-09-20); kept as provenance -- no open driver
+premises:
+  - id: cluster-meta-still-gates
+    why: "The whole plan exists because cluster-meta wait:true blocks cluster-apps; if that changed, the risk model changed."
+    run: kubectl get kustomization cluster-meta -n flux-system -o jsonpath='{.spec.wait}'
+    expect_exact: "true"
+  - id: http-helmrepos-29
+    why: "Scope is 29 HTTP HelmRepositories (28 referenced + external-secrets HELD). A different count means sources moved since 2026-09-28."
+    run: kubectl get helmrepository -A -o jsonpath='{range .items[*]}{.spec.type}{"\n"}{end}' | grep -c '^$'
+    expect_exact: "29"
+  - id: one-ocirepository
+    why: "Only k8s-gateway is migrated; another OCIRepository means a stage ran outside this plan."
+    run: kubectl get ocirepository -A --no-headers | wc -l
+    expect_exact: "1"
+  - id: chartref-roll-still-observed
+    why: "§1.4's roll prediction rests on the build-metadata chart label."
+    run: kubectl get deploy k8s-gateway -n network -o jsonpath='{.spec.template.metadata.labels.helm\.sh/chart}'
+    expect_contains: "_3783b0b4bc41"
+  - id: unpoller-still-2.4.0
+    why: "Stage 8 is blocked only while the pin predates the OCI registry's first tag (2.5.0)."
+    run: kubectl get helmrelease -n monitoring -o jsonpath='{range .items[*]}{.spec.chart.spec.chart}={.spec.chart.spec.version}{"\n"}{end}' | grep '^unpoller='
+    expect_exact: "unpoller=2.4.0"
+status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (B1-B9) -> fixed -> re-review ready-for-go as a staged programme. Stages 3-7 HOLD on the G3 fail-open (item 3) and stages 4/6-longhorn on the charts-mirror trust decision -- both fail-closed prerequisites, not review defects.
+review: ready-for-go@2026-09-28
 window: null                           # DELIBERATE. Three reasons, in order:
                                        # (1) it is a staged programme — which stage runs when
                                        #     is an operator judgement, not a scheduler's;
@@ -75,6 +100,7 @@ autonomy_override: human-gated         # Staged programme; est_duration_min is p
                                        # riskiest stages roll the CNI and the CSI driver.
                                        # The scheduler must not treat this as one unit.
 sops_refs:
+  - docs/sops/flux-chart-source-pinning.md
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
   - docs/sops/maintenance-windows.md
@@ -374,10 +400,10 @@ source inventory this table is derived from is in §7.
 | 1 | ~~Delete the 6 unreferenced HelmRepositories~~ **5 of 6 DONE 2026-09-11 (`7c048735`)** — `backube`, `democratic-csi`, `guerzon`, `piraeus`, `rook-ceph` deleted (45 → 40 live). **`external-secrets` is deliberately HELD by the operator — do NOT delete it, and do not re-run this row against it.** | — | 0 | — | no | executed: five third-party URLs out of the `cluster-meta` gate. **Do not execute this row.** |
 | 2 | ~~`csi-driver-smb` → charts-mirror OCI~~ **DONE 2026-09-11 via a DIFFERENT route — see §3.4** | csi-driver-smb | 0 | — | **no roll occurred** | executed as a GitRepository pinned to commit `59dce96e` (the v1.20.3 cut), NOT charts-mirror. **Do not execute this row.** |
 | 3 | **No-roll, upstream-native OCI** | intel (3 releases), node-feature-discovery, gabe565/paperless-ngx, falcosecurity/falco | 15 ea | low | **no** | 6 releases off HTTP with zero workload impact — build confidence here |
-| 4 | **No-roll, charts-mirror** | descheduler, external-dns, headlamp, metrics-server | 15 ea | low-med | **no** | external-dns is DNS-adjacent; still no pod roll |
+| 4 | **No-roll, charts-mirror — BLOCKED on an operator trust decision** (docs/sops/flux-chart-source-pinning.md §4.1 rung 4: a third-party mirror is never a cleanup step of a plan) | descheduler, external-dns, headlamp, metrics-server | 15 ea | low-med | **no** | only after the operator records the charts-mirror trust decision in this plan |
 | 5 | **Rolling, upstream-native OCI, app tier** | authentik, grafana, nextcloud, open-webui, opentelemetry, mintplex-labs | 25 ea | medium | yes | the apps where a restart is tolerable but not free |
-| 6 | **Rolling, cluster-critical — ONE PER WINDOW** | cilium, jetstack/cert-manager, longhorn | 30 ea | **high** | yes | the sources whose failure blocks recovery |
-| 7 | **The 11 charts with no OCI anywhere — mirror track** | plex FIRST (mutable branch), then apache-superset, blakeblackshear, dirsigler, elastic, influxdata, jameswynn, jellyfin, penpot, rm3l, sure | decision + 20 ea | medium | some | the long tail; needs §3.6 decided first |
+| 6 | **Rolling, cluster-critical — ONE PER WINDOW** | cilium, jetstack/cert-manager, longhorn (charts-mirror — BLOCKED on the same operator trust decision as stage 4) | 30 ea | **high** | yes | the sources whose failure blocks recovery |
+| 7 | **The 11 charts with no OCI anywhere — mirror track** | ~~plex~~ (DONE 102ec800, Shape D GitRepository), then apache-superset, blakeblackshear, dirsigler, elastic, influxdata, jameswynn, jellyfin, penpot, rm3l, sure | decision + 20 ea | medium | some | the long tail; needs §3.6 decided first |
 | 8 | **`unpoller` — blocked, coupled to a chart upgrade** | unpoller | — | — | — | own plan; see §3.5 |
 | 9 | **`spec.verify` — pilot, then per registry** | signed registries only | 30 pilot | medium | no | the capability gain from §1.3 |
 | 10 | **`source-controller` emptyDir `sizeLimit`** | flux-system | 15 | low | yes (source-controller) | caps an unbounded emptyDir on a 69%-full node disk; answers the other half of `F-764e4fc3` |
@@ -394,9 +420,9 @@ rollback must be able to name exactly one thing.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-S=/Users/mu/.claude/jobs/flux-oci/$1-$$        # scratch; NOT /tmp, and namespaced —
-mkdir -p "$S"                                   # the shared scratch dir has had filename collisions
-NS=<namespace>; REL=<helmrelease>; CHART=<chart-name>; VER=<pinned-version>
+export NS=<namespace> REL=<helmrelease> CHART=<chart-name> VER=<pinned-version>
+export S=/Users/mu/.claude/jobs/flux-oci/$NS-$REL   # scratch; NOT /tmp. FIXED path: every agent Bash call is a
+mkdir -p "$S"                                       # new shell ($$ changes, vars vanish) -- re-run these 3 lines at the top of EVERY step
 REPO=<helmrepository-name>; APPDIR=kubernetes/apps/$NS/.../$REL; OCI_PATH=<from §7>
 ```
 
@@ -405,18 +431,21 @@ REPO=<helmrepository-name>; APPDIR=kubernetes/apps/$NS/.../$REL; OCI_PATH=<from 
 ```bash
 cat > "$S/collect.sh" <<'EOS'
 kubectl -n $NS get helmrelease $REL -o json | python3 -c "import sys,json;d=json.load(sys.stdin);print('HR revision',d['status'].get('lastAttemptedRevision'));print('history',[(h['version'],h['chartVersion'],h['status']) for h in d['status'].get('history',[])])"
-kubectl -n $NS get deploy,sts,ds -l app.kubernetes.io/instance=$REL -o json | python3 -c "
-import sys,json
-for i in json.load(sys.stdin)['items']:
+kubectl -n $NS get deploy,sts,ds -l helm.toolkit.fluxcd.io/name=$REL -o json | python3 -c "
+import sys,json,subprocess
+items=json.load(sys.stdin)['items']
+if not items and '$REL' not in ('descheduler',):
+    print('ABORT: 0 workloads for helm.toolkit.fluxcd.io/name=$REL'); sys.exit(1)
+for i in items:
     m=i['metadata']; t=i['spec']['template']
-    print(i['kind'], m['name'], 'gen', m['generation'],
-          'chartlabel', (t['metadata'].get('labels') or {}).get('helm.sh/chart'),
-          'images', sorted(c['image'] for c in t['spec']['containers']))"
-kubectl -n $NS get pods -l app.kubernetes.io/instance=$REL -o json | python3 -c "
-import sys,json
-for p in json.load(sys.stdin)['items']:
-    print(p['metadata']['name'], p['metadata']['creationTimestamp'],
-          [c['restartCount'] for c in p['status'].get('containerStatuses',[])])"
+    print('SPEC', i['kind'], m['name'], 'replicas', i['spec'].get('replicas'),
+          'containers', sorted((c['name'], c['image']) for c in t['spec']['containers']))
+    print('VOL', i['kind'], m['name'], 'gen', m['generation'],
+          'chartlabel', (t['metadata'].get('labels') or {}).get('helm.sh/chart'))
+    sel=','.join(f'{k}={v}' for k,v in i['spec']['selector']['matchLabels'].items())
+    for p in json.loads(subprocess.check_output(['kubectl','-n','$NS','get','pods','-l',sel,'-o','json']))['items']:
+        print('VOL pod', p['metadata']['name'], p['metadata']['creationTimestamp'],
+              [c['restartCount'] for c in p['status'].get('containerStatuses',[])])"
 kubectl -n flux-system get helmchart $NS-$REL -o jsonpath='{.status.artifact.revision} {.status.artifact.digest}{"\n"}'
 EOS
 bash "$S/collect.sh" | tee "$S/baseline.txt"
@@ -428,7 +457,8 @@ re-download from the HTTP index: the index may already serve a different artifac
 
 ```bash
 POD=$(kubectl -n flux-system get pod -l app=source-controller -o name | cut -d/ -f2)
-P=$(kubectl -n flux-system exec "$POD" -- /bin/sh -c "ls /data/helmchart/$NS/$REL/*.tgz | tail -1")
+P=/data/$(kubectl -n flux-system get helmchart "$NS-$REL" -o jsonpath='{.status.artifact.path}')
+test "$P" != /data/ || { echo "ABORT: HelmChart $NS-$REL has no artifact path"; exit 1; }
 kubectl -n flux-system cp "flux-system/$POD:$P" "$S/deployed.tgz"
 shasum -a 256 "$S/deployed.tgz"; ls -l "$S/deployed.tgz"
 ```
@@ -436,16 +466,14 @@ shasum -a 256 "$S/deployed.tgz"; ls -l "$S/deployed.tgz"
 **Step 3 — fetch the candidate OCI chart and record the digest you will pin.**
 
 ```bash
-mise exec -- helm pull "oci://$OCI_PATH" --version "$VER" -d "$S"
+mise exec -- helm pull "oci://$OCI_PATH" --version "$VER" -d "$S" 2>&1 | tee "$S/pull.txt"
 shasum -a 256 "$S/$CHART-$VER.tgz"; ls -l "$S/$CHART-$VER.tgz"
 
-# ref.digest is the MANIFEST digest (not the chart-layer digest):
-REG=<ghcr.io|quay.io|registry.k8s.io>; PATH_=<org/path/chart>
-TOK=$(curl -s "https://$REG/token?scope=repository:$PATH_:pull&service=$REG" \
-       | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-curl -sI -H "Authorization: Bearer $TOK" \
-  -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
-  "https://$REG/v2/$PATH_/manifests/$VER" | grep -i docker-content-digest | tee "$S/digest.txt"
+# ref.digest is the MANIFEST digest = helm pull's "Digest:" line (verified equal to
+# docker-content-digest on ghcr.io, quay.io and registry.k8s.io, 2026-09-28).
+DIGEST=$(sed -n 's/^Digest: //p' "$S/pull.txt")
+echo "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || { echo "ABORT: no manifest digest"; exit 1; }
+echo "$DIGEST" > "$S/digest.txt"
 ```
 
 If the tarball digests match, note it. **If they differ, do not stop** — a
@@ -677,11 +705,15 @@ indistinguishable from an absent one over anonymous pulls, so treat each as
 |---|---|---|---|
 | **Upstream's own OCI registry** | **none** — Renovate tracks the tag, upstream carries publishing | highest: the chart's canonical distribution point | **always first choice** — it is what stages 3, 5 and 6 use |
 | **Contribute the chart to `home-operations/charts-mirror`** | **none per version** after the PR lands — the community runs the sync, artifacts are cosign-signed and Renovate-tracked. **But:** its README prunes a chart **6 months after upstream ships OCI** and says it is our responsibility to move to the official source, so this adds a **recurring re-check**, not a permanent home | maintained community project rather than one person's Pages site | **second choice** and the right answer for most of the 11; one upstream PR per chart |
-| **`flux mirror` into `ghcr.io/nachtschatt3n`** | **yes, bounded**: one config file + one scheduled runner (GitHub Action cron or a CronJob) + a GHCR push credential. New upstream versions are picked up automatically by a `version:` semver range — **no per-version push** — but a failing mirror job becomes a new way for a pinned version to be missing | we control the registry; nothing signed upstream to carry over, so we would sign our own | **third choice**, and the right one for `plex` if upstream stays HTTP-only. **Explicitly NOT a fork — it is an automated re-publish, there is nothing to hand-merge.** Note it is v0.x (`flux plugin install mirror` works on our v2.9.0; not installed today) |
+| **`flux mirror` into `ghcr.io/nachtschatt3n`** | **yes, bounded**: one config file + one scheduled runner (GitHub Action cron or a CronJob) + a GHCR push credential. New upstream versions are picked up automatically by a `version:` semver range — **no per-version push** — but a failing mirror job becomes a new way for a pinned version to be missing | we control the registry; nothing signed upstream to carry over, so we would sign our own | **third choice**, and the right one for `plex` if upstream stays HTTP-only. **Explicitly NOT a fork — it is an automated re-publish, there is nothing to hand-merge.** Note it is v0.x (`flux plugin install mirror` works on our v2.9.3; not installed today) |
 
 What none of these is: **vendoring the chart into this repo.** The operator
 rejected that on maintenance-burden grounds and it stays rejected — it is the one
 option that creates unbounded per-version hand-work.
+
+**Update 2026-09-28:** `plex` is DONE (102ec800, Shape D GitRepository). `rm3l` was repointed
+(59c24761, 2026-09-18) after its host died — a second outage of this plan's exact shape — to a
+`raw.githubusercontent.com/rm3l/helm-charts/gh-pages` index, i.e. a mutable-branch source.
 
 **Recommended split for the 11:** propose `plex` and `jellyfin` to
 `charts-mirror` first (both are widely used, so the contribution is likely
@@ -740,7 +772,7 @@ Measured, so the recommendation is evidence-led and the answer is **no PVC**:
   still the wrong one here.
 - **The real defect is that both emptyDirs have no `sizeLimit`** while `/data`
   sits on the node root filesystem already at **69% (638 of 930 GB)**. Cap it via
-  `FluxInstance.spec.kustomize.patches` (currently `[]`): `sizeLimit: 2Gi` on
+  `FluxInstance.spec.kustomize.patches` (currently holds one GitRepository `ignore` patch — APPEND, do not replace): `sizeLimit: 2Gi` on
   `data`, something small on `tmp`.
 - **And the honest correction to a claim made today:** an OCIRepository's stored
   artifact lives in *the same emptyDir* (`/data/ocirepository`, 2 files measured),
@@ -772,6 +804,8 @@ python3 runbooks/check-all-versions.py                        # or the sweep's r
 grep -n '| `k8s-gateway`' runbooks/version-check-current.md   # chart cell must read 3.7.2, not '-'
 python3 runbooks/coverage.py --json | python3 -c "import sys,json;d=json.load(sys.stdin);print([i for i in d.get('items',[]) if i.get('component')=='k8s-gateway'])"
 python3 runbooks/maintenance-plan.py --validate && echo VALIDATE_OK
+# Item 3 (G3 fail-open) — the half that HOLDS stages 3-7. Today this prints 1 → HOLD.
+grep -c 'release notes unavailable — relied on CI + policy' runbooks/auto-update.py   # must be 0 (or the operator records an explicit waiver here) before any of stages 3-7
 ```
 
 A still-empty chart cell means Stage 0 did not work and **stages 2-7 must not
@@ -800,7 +834,11 @@ git log -1 --format=%cI HEAD
 > diffing against `$S/baseline.txt`.
 
 ```bash
-diff <(bash "$S/collect.sh") "$S/baseline.txt"
+test "$(grep -c '^SPEC' "$S/baseline.txt")" -gt 0 || { echo "ABORT: empty baseline"; exit 1; }
+diff <(bash "$S/collect.sh" | grep '^SPEC') <(grep '^SPEC' "$S/baseline.txt") && echo SPEC-IDENTICAL   # must print SPEC-IDENTICAL
+diff <(bash "$S/collect.sh" | grep '^VOL') <(grep '^VOL' "$S/baseline.txt")   # EXPECTED non-empty: gen +1, chartlabel gains _<digest>, new pod names, restarts all 0
+# Known-bad demo (run once, Stage 3 first component): sed 's/:[^:)]*)/:bogus)/' "$S/baseline.txt" > "$S/bad.txt";
+# diff <(grep '^SPEC' "$S/bad.txt") <(grep '^SPEC' "$S/baseline.txt") must be NON-empty.
 kubectl -n $NS get events --field-selector type=Warning --sort-by=.lastTimestamp | tail -20
 ```
 
@@ -810,12 +848,12 @@ kubectl -n $NS get events --field-selector type=Warning --sort-by=.lastTimestamp
 | component | the assertion — not `Ready`, not `Running` |
 |---|---|
 | `csi-driver-smb` | **A real read/write round-trip through an already-mounted CIFS volume** in an existing pod (write a probe file, read it back, remove it), on a **non-catastrophic** class; plus all 21 CIFS PVCs still `Bound` and `csi-smb-node` 3/3 Ready. **Create and delete NO CIFS PVC** (`docs/sops/storage-safety.md`). |
-| `longhorn` | RW round-trip through an existing `longhorn` PVC, **and** volume counts by `state`/`robustness` identical to the §2(4) baseline, **and** the next `storage/backup-of-all-volumes` run completes. |
-| `cilium` | Cross-node pod-to-pod reachability **and** in-cluster DNS resolution from a pod, after the DaemonSet settles; `cilium-dbg status --brief` on each node; zero `NetworkPluginNotReady` events. |
+| `longhorn` | RW round-trip through an existing `longhorn` PVC, **and** volume counts by `state`/`robustness` identical to the §2(4) baseline, **and** the next `storage/daily-backup-all-volumes` run completes (cross-check its newest Completed Backup CR — lastBackupAt can lag, docs/sops/backup.md). |
+| `cilium` | Cross-node pod-to-pod reachability **and** in-cluster DNS resolution from a pod, after the DaemonSet settles; `cilium-dbg status --brief` on each node returns OK on all 3. |
 | `jetstack` (cert-manager) | Create a throwaway `Certificate` in a scratch namespace, assert it reaches `Ready` within 2 min (this exercises the webhook, which is the part that rolls), then delete it. |
 | `authentik` | **A real login through each affected path** (`docs/sops/authentik.md`); do not trust `/-/health/ready`. Re-run the outpost `kubernetes_disabled_components` audit **from the live outpost list**, not a repo grep. |
 | `grafana`, `opentelemetry`, `unpoller`, `elastic` | **The series still arrive**: scrape target `up == 1` *and* a representative series non-empty over a window starting **after** the roll; for log-emitting components a **non-zero document floor** in Elasticsearch, not just a ceiling. |
-| `external-dns` | A record it owns still resolves publicly **and** internal names still resolve through the internal resolver; zero error-level log lines about the zone. Counts, not names. |
+| `external-dns` | A record it owns still resolves publicly **and** internal names still resolve through the internal resolver. Counts, not names. (Log-absence is NOT a PASS criterion — it was never shown to match a known-bad case.) |
 | `nextcloud` | `occ status` plus a file listing returning a non-zero count — its MariaDB StatefulSet rolls. |
 | `gabe565` (paperless-ngx) | A document count equal to the pre-change count **and** one consume-directory round trip. |
 | `plex`, `jellyfin` | Library item **counts** match the pre-roll baseline (counts only — never titles, in any committed artifact). |
@@ -894,7 +932,8 @@ emptyDir.
   window with a stage of this plan**, and the window agent should run this plan's
   stage **first** so a failure is diagnosed before other work is misattributed to
   it.
-- **`conflicts_with: [talos-1.14.0]` is load-bearing, not bookkeeping.** A node
+- **A node roll restarts source-controller (cold cache): never share a window with one;
+  talos-1.14.1 executed 2026-09-27.** (Historical: this was `conflicts_with: [talos-1.14.0]`.) A node
   roll restarts `source-controller` and empties the 122-artifact cache; it also
   rebuilds ~50 Longhorn replicas per node. Stages 2 and 6 roll the CSI driver,
   `longhorn-manager` and the CNI DaemonSet. Never the same window, preferably not
@@ -974,6 +1013,10 @@ HelmRelease already uses (`v1.21.1`) so the render diff stays empty.
 (stage 2) · `descheduler` 0.36.0 · `external-dns` 1.21.1 · `headlamp` 0.45.0 ·
 `metrics-server` 3.14.0 (stage 4) · `longhorn` 1.12.1 (stage 6).
 
+**BLOCKED on an operator trust decision (review 2026-09-28):** docs/sops/flux-chart-source-pinning.md
+§4.1 rung 4 (2026-09-22, postdates this plan) says a third-party mirror is a different trust decision and
+never a cleanup step of a plan. None of these six moves to charts-mirror until the operator records it here.
+
 Two things to carry forward: the mirror **prunes a chart 6 months after upstream
 ships OCI**, so these six need a recurring upstream re-check (fold it into the
 sweep rather than remembering it). And `headlamp`'s apparent upstream OCI
@@ -987,7 +1030,7 @@ charts-mirror is the correct source for it today, not the ghcr path.
 `elastic` (eck-operator) · `influxdata` · `jameswynn` (homepage) · `jellyfin` ·
 `penpot` · **`plex`** · `rm3l` (adguard-home) · `sure`.
 
-`plex` is the priority of the eleven: like `csi-driver-smb` it tracks a **mutable
+`plex` WAS the priority of the eleven (DONE 102ec800, Shape D GitRepository); like `csi-driver-smb` it tracks a **mutable
 git branch** (`raw.githubusercontent.com/plexinc/pms-docker/gh-pages`). `elastic`
 is worth a note because it looks migratable and is not:
 `docker.elastic.co/eck/eck-operator:3.5.0` is the **operator image**, not a chart
@@ -1007,7 +1050,7 @@ charts-mirror, if it is ever wanted again) · `democratic-csi` · `guerzon` ·
 - **No signature was *validated*.** Only the presence of a signature artifact at
   the expected location was checked; no `cosign verify` ran (cosign is not
   installed locally).
-- **Whether Flux 2.9.0 accepts the sigstore-bundle-v0.3 layout** — untested, and
+- **Whether Flux 2.9.3 accepts the sigstore-bundle-v0.3 layout** — untested, and
   it gates 6 of the signed candidates. Hence the pilot in §3.7.
 - **`registry.k8s.io` cannot be tag-enumerated anonymously** (`tags/list` returns
   an empty array for every path). NFD 0.19.0 was instead confirmed positively by

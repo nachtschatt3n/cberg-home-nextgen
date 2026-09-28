@@ -58,8 +58,10 @@ conflicts_with:
                                       # a CoreDNS roll in the same night muddies its reconnect gate
   - penpot-chart-1.10.0               # its frontend nginx resolver moves to cluster DNS; its gate resolves
                                       # through CoreDNS
-  # PARKED 2026-09-27: app-template-5.2.1 is an uncommitted draft from another session (DEAD-REF on main); re-add to conflicts_with once it lands.
-  # - app-template-5.2.1                # rolls ~78 workloads (incl. monitoring) whose readiness/verification
+  - redis-fleet-8.10.2                # reciprocal: lists this plan (CoreDNS roll while consumers re-resolve)
+  # PARKED 2026-09-28: flux-fleet-0.60.0 is untracked (DEAD-REF on main); add once committed — it
+  # upgrades helm-controller/source-controller, which apply these HRs and carry the §5 revert path.
+  - app-template-5.2.1                # rolls ~78 workloads (incl. monitoring) whose readiness/verification
                                       # resolves through CoreDNS; must not overlap item C's roll.
                                       # Concurrent draft — it should list this plan back.
                                       # No kube-prometheus-stack plan is open (91.4.1 executed). If one
@@ -111,7 +113,8 @@ premises:
       §4 reads probe_success from these Probe CRs; if they were renamed/removed the gate reads empty.
     run: kubectl get probe -n monitoring dns-k8s-gateway-primary dns-k8s-gateway-secondary http-ingress-internal http-ingress-external -o name
     expect_matches: "(?s)dns-k8s-gateway-primary.*dns-k8s-gateway-secondary.*http-ingress-internal.*http-ingress-external"
-status: draft
+status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e backlog review): ready-for-go, 0 blocking; 3 bookkeeping fixes applied
+review: ready-for-go@2026-09-28
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -190,7 +193,9 @@ last line reads `rc=0`, the harness cannot detect failure. STOP.
 bug was hit while authoring this plan.)
 
 ```bash
-kubectl -n kube-system get cm coredns -o jsonpath='{.data.Corefile}' | shasum -a 256 | tee /private/tmp/claude-501/chart-patches-corefile.pre
+kubectl -n kube-system get cm coredns -o jsonpath='{.data.Corefile}' > /private/tmp/claude-501/chart-patches-corefile.txt
+test -s /private/tmp/claude-501/chart-patches-corefile.txt || echo 'ABORT: empty Corefile read'
+shasum -a 256 < /private/tmp/claude-501/chart-patches-corefile.txt | tee /private/tmp/claude-501/chart-patches-corefile.pre
 kubectl -n monitoring get cm prometheus-blackbox-exporter -o jsonpath='{.data.blackbox\.yaml}' \
   | python3 -c "import sys,yaml; print(sorted(yaml.safe_load(sys.stdin)['modules']))"
 # expect: ['dns_k8s_gateway_primary', 'dns_k8s_gateway_secondary', 'http_2xx_ingress']

@@ -47,6 +47,8 @@ conflicts_with:
   - flux-reconciler-impersonation     # exclusive; rewrites how helm-controller applies this release.
                                       # No kube-prometheus-stack plan is open (91.4.1 executed): if one
                                       # appears, it must be added here — §4 reads Prometheus.
+  - chart-patches-coredns-reloader-blackbox  # reciprocal: that draft lists this plan; a CoreDNS
+                                      # roll mid-§4 poisons the Kuma heartbeat and Prometheus gates.
 capability_change: true               # the slim variant drops Chromium (Real-Browser monitor type) and
                                       # the embedded MariaDB option, and rootless can no longer start
                                       # nscd via sudo. None is used here (0 real-browser monitors,
@@ -104,7 +106,8 @@ premises:
       file must still be tracked; a deleted file prints nothing and fails.
     run: git ls-files kubernetes/apps/monitoring/kube-prometheus-stack/app/uptime-kuma-alerts.yaml
     expect_exact: kubernetes/apps/monitoring/kube-prometheus-stack/app/uptime-kuma-alerts.yaml
-status: awaiting-go                   # plan-reviewer 2026-09-26: ready-for-go (2 blockers fixed). NO GO RECORDED — the operator gives it.
+status: awaiting-go                   # plan-reviewer 2026-09-28: ready-for-go (F-2c849d1e backlog review). NO GO RECORDED — the operator gives it.
+review: ready-for-go@2026-09-28
 window: "sat-attended:2026-10-03"      # reviewer-recommended empty attended slot; set because validate rejects a slotless awaiting-go. The window agent may move it.
 sops_refs:
   - docs/sops/application-update.md
@@ -266,6 +269,7 @@ POD=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=uptime-kuma -o jso
 echo $POD > $E/pod-before.txt
 kubectl exec -n monitoring $POD -- sqlite3 -readonly /app/data/kuma.db \
   "select count(distinct h.monitor_id) from heartbeat h join monitor m on m.id=h.monitor_id where m.type='ping' and m.active=1 and h.status=1 and h.ping is not null and h.time > datetime('now','-4 minutes');" \
+  "select count(distinct h.monitor_id) from heartbeat h join monitor m on m.id=h.monitor_id where m.type='ping' and m.active=1 and h.status in (0,2) and h.time > datetime('now','-4 minutes');" \
   "select count(*) from monitor where active=1;" \
   "select key||'='||length(value) from setting where key='cloudflaredTunnelToken';" | tee $E/db-baseline.txt
 for Q in 'count(monitor_status{monitor_type!="group"} == 1)' 'count(monitor_status == 0) or vector(0)' 'count(monitor_response_time{monitor_type="ping"} > 0)' 'ALERTS{alertname=~"KumaMonitorDown|KumaMonitorMetricsAbsent|KumaPingLatencyMetricAbsent"}'; do
@@ -273,7 +277,7 @@ for Q in 'count(monitor_status{monitor_type!="group"} == 1)' 'count(monitor_stat
 done | tee $E/prom-baseline.txt
 ```
 EXPECT (2026-09-26 values):
-- DB lines: `58`, `68`, `cloudflaredTunnelToken=0`.
+- DB lines: `58`, `0`, `68`, `cloudflaredTunnelToken=0` (the second is the ping down baseline §4.4 compares against).
 - Prometheus lines: `62`, `0`, `58`, then an `ALERTS` result of `[]`. That last
   result is the known-down alert set §4.5 compares against. Any `KumaMonitorDown`
   series it lists (monitor_name) is pre-existing and is recorded, not caused by
@@ -399,10 +403,11 @@ EXPECT: `docker.io/louislam/uptime-kuma@sha256:c74379ac4509ce2d2c2633f509e67003e
 **3.2 Re-own the data to uid/gid 1000 while the root image is still running.**
 This is a data-level operation on a PVC. It has no GitOps path and is operator-requested.
 ```bash
+kubectl exec -n monitoring $POD -- sh -c 'find /app/data \( ! -uid 1000 -o ! -gid 1000 \) -print | wc -l' | tee $E/chown-before.txt   # known-bad control: non-zero (15 on 2026-09-28)
 kubectl exec -n monitoring $POD -- chown -R 1000:1000 /app/data
 kubectl exec -n monitoring $POD -- sh -c 'find /app/data \( ! -uid 1000 -o ! -gid 1000 \) -print | wc -l; stat -c "%u:%g %a %n" /app/data /app/data/kuma.db /app/data/kuma.db-wal /app/data/kuma.db-shm'
 ```
-EXPECT: `0`, and `1000:1000` on all four paths.
+EXPECT: `$E/chown-before.txt` non-zero (15 on 2026-09-28), then `0`, and `1000:1000` on all four paths.
 
 The root process keeps working after the chown, because root ignores DAC.
 - A file the root process creates in the gap between here and §3.4 would be
@@ -755,17 +760,9 @@ monitoring history, and acceptable.
     Kuma, or on `KumaMonitorDown` staying quiet.
   - Nextcloud's plans pre-silence Nextcloud's Kuma alerts, for example. Run this
     one first or last, alone.
-- **talos-1.14.1** (sun-attended:2026-09-27, `exclusive: true`) must not share a
-  window. It is in `conflicts_with` for that reason.
-  - After the roll, this plan is unaffected. fsGroup plus `OnRootMismatch` makes a
-    rescheduled pod on another node a cheap no-op.
-  - Before the roll, the talos plan does not care which Kuma image runs.
-  - Either order works. **Not the same night**: the node reboots take ping targets
-    (the nodes themselves) down and poison §4.4's baseline comparison.
-  - `talos-1.14.1` does not list this plan back. It is exclusive, so the scheduler
-    already refuses the slot. Reciprocity is flagged to the coordinator as a repo
-    correction rather than edited here, because that file is being refreshed by
-    another session.
+- **Node reboots:** talos-1.14.1 executed 2026-09-27 (40ca20d6) and is retired. If a node-reboot
+  plan is opened, it must not share this window (reboots take ping targets down and poison §4.4's
+  baseline) and must be added to `conflicts_with`.
 - **flux-oci-chart-sources** stage 7 (dirsigler → charts-mirror) and
   **helm-drift-detection** both modify this HelmRelease's spec. Serialize them.
 - **Longhorn:** the on-demand backup lands inside the 03:00Z

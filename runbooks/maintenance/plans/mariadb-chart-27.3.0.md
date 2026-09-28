@@ -44,8 +44,7 @@ conflicts_with:
                                       # Helm upgrade here muddies its "no upgrade happened" proof.
   - flux-oci-chart-sources            # moves chart sources; the bitnami OCI HelmRepository this HR pulls
                                       # from must not change underneath the bump.
-  # PARKED 2026-09-27: app-template-5.2.1 is an uncommitted draft from another session (DEAD-REF on main); re-add to conflicts_with once it lands.
-  # - app-template-5.2.1                # helm-upgrades phpmyadmin + all 15 my-software-showcase HRs —
+  - app-template-5.2.1                # helm-upgrades phpmyadmin + all 15 my-software-showcase HRs —
                                       # the exact consumer set §4.3 measures; never the same night.
   - chart-patches-coredns-reloader-blackbox  # rolls coredns: the 15 tenants re-resolve
                                       # mariadb.databases.svc when they reconnect after §3.5, so a
@@ -59,7 +58,8 @@ rollback_class: git-revert            # no engine/schema change, nothing forward
 security_ref: null
 finding_refs:
   - F-8ef629f2                        # "mariadb: chart 27.0.1 → 27.3.0 (minor)" — cycle 58d45ed0
-status: draft
+status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (app-template-5.2.1 conflict parked) -> fixed -> delta re-review ready-for-go. HUMAN-GATED; needs an operator GO.
+review: ready-for-go@2026-09-28
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -530,8 +530,8 @@ done
 CONTROL: metric kube_statefulset_status_replicas_ready — `{namespace="databases",statefulset="mariadb"}` must read 1 (measured 1 at T0); 0 for more than 5 min after the push = the new pod never became Ready.
 CONTROL: metric kube_pod_status_ready — `sum(kube_pod_status_ready{namespace="my-software-showcase",condition="true"})` must return to 15 (measured 15 at T0) within 5 min of `mariadb-0` Ready; the DB-checking tenants (§1.4) drop out during the gap, so a value stuck below 15 names a tenant that did not reconnect.
 CONTROL: metric kube_pod_container_status_restarts_total — `increase(kube_pod_container_status_restarts_total{namespace="my-software-showcase",pod!~"globalmobility-.*|ibgastro-.*"}[30m])` must be 0 for every series: those 13 tenants' liveness probes are DB-independent (§1.4), so a non-zero value means one crashed on the lost connection. For `pod=~"globalmobility-.*|ibgastro-.*"` (liveness reads the DB, 3 × 30 s) the bound is ≤ 1 each: expected 0 if the gap stays under ~90 s, 1 is acceptable if it ran longer, and PASS additionally requires that pod to be Ready again (in the `kube_pod_status_ready` sum above) with its `poke.sh` line `200`. ≥ 2 = restart loop ⇒ FAIL.
-CONTROL: alertname OrdigaPodCrashLooping — must NOT be firing 15 min after the roll (representative of the per-tenant `<App>PodCrashLooping` rules in `kube-prometheus-stack/app/*-alerts.yaml`; silenced during the window, so read it from `/api/v1/alerts` state, not from Telegram).
-CONTROL: alertname MetaldynePodRestarted — must NOT be firing (same family; guards the restarts gate above from the alert side).
+DIAGNOSTIC (not a gate; absence reading, the restarts CONTROL above is the gate): alertname OrdigaPodCrashLooping — should not be firing 15 min after the roll (representative of the per-tenant `<App>PodCrashLooping` rules in `kube-prometheus-stack/app/*-alerts.yaml`; silenced during the window, so read it from `/api/v1/alerts` state, not from Telegram).
+DIAGNOSTIC (not a gate; absence reading): alertname MetaldynePodRestarted — should not be firing (same family; guards the restarts gate above from the alert side).
 
 Delete the silence and clear the marker (`runbooks/update-marker.sh clear mariadb`) once 4.1–4.4 pass.
 
@@ -593,8 +593,9 @@ restore the §2.4 Longhorn backup (newest `Completed` Backup CR for
   HR is applied, touches both namespaces), `helm-drift-detection` (adds a field
   to this HR), `flux-oci-chart-sources` (could move the chart source),
   `chart-patches-coredns-reloader-blackbox` (coredns roll during tenant
-  reconnects confounds §4.3). These
-  plans must list `mariadb-chart-27.3.0` back — reciprocity is not validated.
+  reconnects confounds §4.3), `app-template-5.2.1` (helm-upgrades phpMyAdmin
+  and all 15 showcase HRs — the §4.3 consumer set). The scheduler honours
+  these symmetrically; the other plans should still list this one back.
 - §4.5 reads Prometheus; no kube-prometheus-stack plan is open. If one is
   written, it goes into `conflicts_with` on both sides.
 - No reboot, no node drain, no Longhorn engine change.

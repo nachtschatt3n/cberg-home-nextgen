@@ -35,8 +35,7 @@ conflicts_with:
   - flux-reconciler-impersonation     # changes helm-controller's apply identity incl. office
   - flux-oci-chart-sources            # rewrites penpot spec.chart (mirror track)
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. penpot
-  # PARKED 2026-09-27: app-template-5.2.1 is an uncommitted draft from another session (DEAD-REF on main); re-add to conflicts_with once it lands.
-  # - app-template-5.2.1                # helm-upgrades penpot-db + penpot-cache, which penpot dependsOn
+  - app-template-5.2.1                # helm-upgrades penpot-db + penpot-cache, which penpot dependsOn (committed 5eca9410, vetted)
   - chart-patches-coredns-reloader-blackbox  # coredns roll; 1.10.0 frontend nginx resolver = cluster DNS
 exclusive: false
 security_ref: F-4c3c5206              # exporter image finding; 2.18.0 answers it (see §1, measured)
@@ -50,8 +49,9 @@ finding_refs: [F-922ffce7, F-4c3c5206]
                                       # F-922ffce7: "penpot: chart 1.9.0 -> 1.10.0 (minor)" — this plan.
                                       # F-4c3c5206: exporter image finding — 2.18.0 measured to answer it.
                                       # NOT claimed: F-220e7d7b (backend) and F-9ac47520 (frontend) —
-                                      #   measured NOT fully answered by 2.18.0; detail on the records.
-status: draft
+                                      #   re-rated by the sweep after landing; detail on the records.
+status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e backlog review): ready-for-go, 0 blocking; bookkeeping fixes applied. HUMAN-GATED (capability_change: true) — needs an operator GO.
+review: ready-for-go@2026-09-28
 window: null
 premises:
   - id: live-backend-still-2.17.2
@@ -155,16 +155,15 @@ with trivy 0.70.0 (`--scanners vuln --severity CRITICAL,HIGH --ignore-unfixed`),
 2.17.2 as the control that the method reproduces the findings.
 - `F-4c3c5206` (exporter): **answered** — `penpotapp/exporter:2.18.0` shows 0
   fixable CRITICAL. Claimed in `finding_refs`, cited as `security_ref`.
-- `F-220e7d7b` (backend) and `F-9ac47520` (frontend): **not answered** by
-  2.18.0 (measured); not claimed. They stay AR-029/rebump material after this
-  lands. The planner did not write to the records (read-only).
+- `F-220e7d7b` (backend) and `F-9ac47520` (frontend): not claimed; the sweep
+  re-rates them against 2.18.0 after this lands (detail on the records only).
 
 ## 2. Pre-checks
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 
-# 2.1 premises (all 5 must PASS)
+# 2.1 premises (all 6 must PASS)
 .venv/bin/python3 runbooks/plan-premises.py penpot-chart-1.10.0
 
 # 2.2 Flux + pods healthy, nothing in flight

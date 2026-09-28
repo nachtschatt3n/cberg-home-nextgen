@@ -81,6 +81,9 @@ conflicts_with:
                                       # (`maintenance-plan.py --open`, 2026-09-15).
   - media-naming-p3                   # ROLLBACK-CLASS STACKING — ADDED 2026-09-21. Those three
   - n8n-2.39.8                        # and this plan are all `rollback_class: backup-restore`.
+  - paperless-db-13.0.2               # reciprocal (backup-restore stacking; that plan lists us) — review 2026-09-28
+  - helm-drift-detection              # touches helmrelease/media/jellyfin; P2 rolls intel-gpu-plugin (i915 re-register) — review 2026-09-28
+  - flux-oci-chart-sources            # mirrors the jellyfin chart source (touches helmrelease/jellyfin) — review 2026-09-28
   # - nextcloud-34.0.4 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # Two backup-restore rollbacks in one slot leave no
                                       # rollback capacity for either — which is precisely why
                                       # THIS plan was moved off sun-attended:2026-10-04 on
@@ -121,7 +124,8 @@ backup_gate: "on-demand Longhorn backup of the jellyfin-config volume (holds jel
   plugin-removal step (§3 step 1). Triggered via cronjob/daily-backup-all-volumes (ns
   storage) — NOT `backup-of-all-volumes`, which does not exist. See §3 step 4 and §5."
 finding_refs: [F-fc5e2913, F-3a72570a]
-status: awaiting-go   # REVIEWED 2026-09-15 (plan-reviewer fan-out, corrections applied in c36388bc)
+status: awaiting-go   # REVIEWED 2026-09-15 (c36388bc); RE-REVIEWED 2026-09-28 (F-2c849d1e): needs-fix (3 blocking: rollback order, plugin expectation, §4.6 gate) -> fixed -> ready-for-go
+review: ready-for-go@2026-09-28
 window: "sat-attended:2026-10-10"   # 2026-09-23: moved off 10-11 (flux-reconciler-impersonation is exclusive there; media-audit-durable-output left 10-10 by executing early). Earlier, 2026-09-15: moved off 10-04: reconciler RISK-CLASS STACKING — two backup-restore plans (frigate, jellyfin) in one slot leaves no rollback capacity; jellyfin has the heavier prerequisite list
 premises:
   - id: image-is-still-10.11.11
@@ -532,9 +536,9 @@ GitOps + one in-window manual admin action (plugin removal). Follow
 `docs/sops/application-update.md` §"Attended" tier (silence -> disable
 rollback -> bump -> watch -> verify -> restore rollback).
 
-0. **ALREADY IN FLIGHT — the library-tools header switch is being landed
-   separately by cberg-agent (2026-09-15), as its own `git commit --only`
-   outside this plan. Do NOT redo it here.** It is backward-compatible
+0. **LANDED — the library-tools header switch is commit 5b8193c9 (2026-09-15),
+   outside this plan; live ConfigMap shows 0 X-Emby-Token call sites
+   (2026-09-28). Do NOT redo it here.** It is backward-compatible
    (measured working on 10.11.11: the `Authorization: MediaBrowser` header is
    unguarded in `AuthorizationContext.cs`), and its hunks — the four
    `X-Emby-Token` call sites in `rescan.py` (`/Library/Refresh`),
@@ -772,11 +776,18 @@ curl -s "http://localhost:8097/ScheduledTasks" -H "Authorization: MediaBrowser T
 
 ```bash
 # library-tools (this repo): a coverage run returns real Jellyfin figures on 12.1
-kubectl create job -n media --from=cronjob/media-metadata-coverage coverage-post12-$(date +%H%M)
-kubectl logs -n media job/coverage-post12-$(date +%H%M) | grep -iE 'jellyfin|401|unauthor' | head
-#   non-zero Jellyfin figures, no 401.
-# media-dashboard renders a Jellyfin section (not "no Jellyfin data"):
-curl -s http://<media-dashboard via port-forward>/ | grep -c 'no Jellyfin data'    # expect 0
+J=coverage-post12-$(date +%H%M)
+kubectl create job -n media --from=cronjob/media-metadata-coverage "$J"
+kubectl wait -n media job/"$J" --for=condition=complete --timeout=10m
+kubectl logs -n media job/"$J" | python3 -c "
+import sys,json
+ev=[json.loads(l) for l in sys.stdin if l.startswith('{')]
+jf=[e for e in ev if e.get('event')=='coverage-jellyfin']
+err=[e.get('code') for e in ev if e.get('event')=='coverage-http-error']
+print('coverage-jellyfin total:', jf[0]['total'] if jf else 'MISSING', '| http errors:', err)"
+#   PASS: total > 0 and no 401 in http errors (baseline 2026-09-28 on 10.11.11: total 537, errors []).
+#   FAIL: 'MISSING' — jellyfin_items() returned None; a 401 logs coverage-http-error code 401.
+#   (media-dashboard renders this same coverage result; no separate dashboard grep.)
 
 # Home Assistant `jellyfin` integration (HA 2026.9.2, jellyfin-apiclient-python 1.16.0 — §1.4):
 #   EXPECTED GREEN: entities / media_player not `unavailable` (ha-agent / hactl) — the
@@ -796,6 +807,8 @@ curl -s http://<media-dashboard via port-forward>/ | grep -c 'no Jellyfin data' 
 ### 4.7 External reachability + no new alerts
 
 ```bash
+SECRET_DOMAIN=$(kubectl get secret -n flux-system cluster-secrets -o jsonpath='{.data.SECRET_DOMAIN}' | base64 -d)
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 >/dev/null 2>&1 & sleep 3
 curl -s -o /dev/null -w 'http=%{http_code}\n' https://jellyfin.${SECRET_DOMAIN}/System/Ping    # 200 via envoy-external
 curl -s http://localhost:9090/api/v1/alerts | python3 -c "
 import sys, json
@@ -811,6 +824,7 @@ for a in json.load(sys.stdin)['data']['alerts']:
 
 ```bash
 # same flags the sweep's CVE check uses; TAG is the tag now running
+TAG=12.1.20260915-010956
 trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed docker.io/jellyfin/jellyfin:$TAG
 ```
 Compare the result against the **finding record**, not against this file —
@@ -831,6 +845,10 @@ must not be represented as a completed rollback.
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 
+# 0) Suspend FIRST: the revert push must not run 10.11.11 against the migrated DB
+#    (a bare tag revert, §2.3) nor re-arm Helm remediation mid-restore.
+flux suspend kustomization -n media jellyfin
+flux suspend helmrelease -n media jellyfin
 # 1) Revert the manifest (cosmetic without the restore, but keeps git honest):
 git log --oneline -5 -- kubernetes/apps/media/jellyfin/app/helmrelease.yaml
 git revert --no-edit <the-bump-commit>
@@ -903,7 +921,9 @@ curl -s "http://localhost:8097/Items/Counts" -H "Authorization: MediaBrowser Tok
 #   MUST match the pre-upgrade §2.5 baseline — proves the RESTORED database,
 #   not just the reverted binary
 kubectl exec -n media $POD -- sh -c 'ls /config/plugins'
-#   the restored volume brings TubeArchivistMetadata_1.4.4.0 back with it
+#   the backup_gate backup was taken AFTER §3 step 1, so TubeArchivistMetadata is
+#   ABSENT on the restored volume — expected, not a failed restore. Reinstall it from
+#   Dashboard -> Plugins -> Catalog on the restored 10.11.11 if wanted.
 ```
 
 Then clear the silence and marker:
@@ -914,8 +934,7 @@ runbooks/update-marker.sh clear jellyfin
 
 ## 6. Interference notes
 
-- **`conflicts_with: [media-audit-durable-output]`** — that plan (vetted,
-  `sat-attended:2026-09-19`) rewrites `configmap/library-tools-scripts`; so
+- **`media-audit-durable-output` (RETIRED — executed 960f3d4e)** — it rewrote `configmap/library-tools-scripts`; so
   does the step-0 header switch. Never in the same window. The step-0 commit
   itself is being landed now by cberg-agent (outside this plan): its hunks
   (the X-Emby-Token lines) do not overlap 09-19's `audit.py` edit on a single
@@ -962,8 +981,7 @@ runbooks/update-marker.sh clear jellyfin
     5/6 and 100/90 — over time. Neither fits without dropping something.
   - `sun-attended:2026-09-27` is the Talos node-reboot window
     (`talos-1.14.0`, high, 140/200) — do not add a second high-risk item.
-  `window:` is left `null` for the window agent to confirm against the live
-  queue.
+  Superseded: window is `sat-attended:2026-10-10` (sole occupant as of 2026-09-28).
 - **TubeArchivistMetadata has no 12.x build** (upstream issue #96 open since
   2026-09-08, `targetAbi 10.11.0.0`). Removing it is required by upstream and
   is a standing capability loss for the Tube Archivist -> Jellyfin bridge

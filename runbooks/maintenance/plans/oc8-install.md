@@ -14,7 +14,13 @@ update_type: install                  # house value — plans/README.md line 130
                                       # Corrected from `new-install` (doc-agent, 2026-09-17),
                                       # which was used by this file alone; the validator does
                                       # not enforce the enum, so it would have passed silently.
-status: blocked                       # DELIBERATE, and the whole point of this file. The brief
+status: superseded                    # RETIRED 2026-09-28 (F-2c849d1e backlog review): oc8 was installed
+                                      # outside this plan — HelmRelease ai/oc8 Ready since 2026-09-17
+                                      # (GitRepository oc8, tag oc8home-2026.09.17), 7 oc8-* Deployments live.
+                                      # `current: "not installed"` is false; nothing here is left to run.
+                                      # Remaining oc8 image pinning is float-tag-pinning Batch O.
+                                      # HISTORICAL rationale below:
+                                      # DELIBERATE, and the whole point of this file. The brief
                                       # allowed `draft`; the facts do not. Four independent
                                       # blockers in §1.2, any ONE of which is sufficient. The
                                       # plan is written out in full anyway (§3) so that if the

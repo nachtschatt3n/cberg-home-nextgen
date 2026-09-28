@@ -242,7 +242,19 @@ needs their decision, and what got auto-fixed.
       `status: draft` that was written or retargeted since the previous
       sweep (`git log --since=<prev cycle start> --diff-filter=AMR --name-only
       -- runbooks/maintenance/plans/`), dispatch ONE `plan-reviewer-agent`
-      (parallel, read-only, `run_in_background`; deadline ~20 min). Apply
+      (parallel, read-only, `run_in_background`; deadline ~20 min).
+      **Then drain the review backlog (ops-retro 2026-W40):** also dispatch a
+      reviewer for up to 5 more plans, oldest first, whose status is
+      `draft|vetted|awaiting-go` and whose frontmatter has NO
+      `review: ready-for-go@…` line (or one older than SD-10's
+      `max_review_age_days`, 30), whatever their age. Skip plans another
+      session is editing (dirty in `git status`) and `blocked` plans — a
+      blocked plan needs its blocker fixed, not a review. The since-last-sweep
+      filter alone strands a draft forever once one sweep is missed. It also
+      strands a plan vetted before the `review:` line existed, which SD-10
+      can then never pre-approve. Measured 2026-09-28: 24 of 27 live plans
+      had no recorded review, 6 drafts were older than 7 days (the oldest
+      from 2026-08-15), and only 1 plan was SD-10-eligible. Apply
       its `repo_corrections` and blocking fixes yourself (or re-dispatch the
       planner with the blocking list), then set `status: vetted` ONLY on a
       `ready-for-go` verdict — never on the planner's own word. Measured

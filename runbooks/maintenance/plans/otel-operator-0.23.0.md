@@ -72,7 +72,7 @@ touches:
     - "crd/{servicemonitors,podmonitors,probes,scrapeconfigs}.monitoring.coreos.com — NOT
        written by this plan, because `depends_on: prometheus-crd-ownership` means
        crds.installPrometheus is already false and the prometheus-crds subchart is no longer
-       collected. Asserted UNCHANGED in §4.2 (gen 30, opver 0.92.0). If that dependency were
+       collected. Asserted UNCHANGED in §4.2 against the §2.5 baseline (2026-09-28: gen 32, opver 0.94.1, origin kube-prometheus-stack). If that dependency were
        skipped, this bump WOULD re-stamp them — see §6."
   shared:
     - monitoring                       # the cluster's ONLY log/metric/trace collection path.
@@ -102,10 +102,11 @@ conflicts_with:                        # HARD slot exclusions — window-schedul
                                        # helm upgrades in one window confound BOTH plans' CRD
                                        # assertions (and it must run in an EARLIER window
                                        # anyway — it is the depends_on above).
-  - kube-prometheus-stack-91.4.1       # (a) both write the ten monitoring.coreos.com CRDs via
-                                       # CreateReplace; (b) §4.6 of THIS plan reads Prometheus,
-                                       # and that plan restarts Prometheus + Alertmanager — the
-                                       # window's instrument is shared infra (authoring rule 4).
+  # RESOLVED 2026-09-28: kube-prometheus-stack-91.4.1 executed (91.5.2, 2026-09-26) -- ref removed.
+                                       # A FUTURE kube-prometheus-stack plan must be added here:
+                                       # §4.6 of THIS plan reads Prometheus (shared instrument).
+  - helm-drift-detection               # ADDED 2026-09-28 (review): its P1/P3 write spec.driftDetection
+                                       # into every HelmRelease, including this plan's helmrelease.yaml.
   # - edot-collector-0.161.0 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # the daemon collectors export OTLP to
                                        # edot-collector.monitoring.svc:4317, and §4.4 proves
                                        # this plan through documents landing in ES *via edot*.
@@ -135,15 +136,12 @@ security_ref: null                     # no security driver. NOTE: this bump DOE
                                        # the tag two AR-072/AR-124-accepted image findings are
                                        # written against; that is a side benefit, not the
                                        # driver, and the counts stay on the finding records.
-capability_change: true                # DELIBERATELY true. Operator 0.159.0 gains the ability
-                                       # to CREATE NetworkPolicies for itself and its operands
-                                       # by DEFAULT (§1.3) — a change in what the software does
-                                       # to the cluster, not just its version. This plan pins
-                                       # both gates OFF so the effective behaviour is unchanged,
-                                       # but the decision to pin is a judgement a human should
-                                       # see. Over-declaring costs one attended window;
-                                       # under-declaring runs a 5-minor operator jump on the
-                                       # sole telemetry path unattended. => never unattended.
+capability_change: false               # CORRECTED 2026-09-28 (review, F-a0d0edb4). With both gates
+                                       # pinned off, the NetworkPolicy capability is NOT enabled; the
+                                       # only other additions (instrumentations/status RBAC,
+                                       # resizePolicy key) are inert (0 Instrumentation CRs, key unset).
+                                       # Attended-only still follows from risk: high (autonomy-policy
+                                       # forbid_risk).
 rollback_class: git-revert             # the EXPECTED path: no data, no migration, helm history
                                        # keeps revision 24 (5 revisions retained, measured).
                                        # BUT §5.3 is a real procedure, not decoration: IF the
@@ -168,7 +166,8 @@ finding_refs: [F-60ebcdb5]             # CORRECTED 2026-09-20. The previous valu
                                        # F-a85e8943 (CRD ownership) is still deliberately NOT
                                        # claimed here — it is owned by prometheus-crd-ownership,
                                        # and double-claiming breaks the plan-or-page join.
-status: draft
+status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (6 stale gates/rollback rev) -> fixed -> re-review ready-for-go. HUMAN-GATED via risk high; needs an operator GO.
+review: ready-for-go@2026-09-28
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -488,10 +487,7 @@ landing on it is the safe side of that fence.
 **2.1 — premises.** `.venv/bin/python3 runbooks/plan-premises.py otel-operator-0.23.0 --require-premises`
 must pass **all twelve** (the runner reports the count; it is 12, not 11).
 `crd-ownership-fix-is-in-place` failing means the dependency has not landed:
-**stop, do not proceed** (§6). As of 2026-09-20 that is exactly the state —
-11 of 12 pass, and that one fails with `got 'crds=[]'` because
-`prometheus-crd-ownership` (window `sun-attended:2026-09-20`) has not executed
-yet.
+**stop, do not proceed** (§6). As of 2026-09-28 all 12 pass (prometheus-crd-ownership executed 1a551276).
 
 **2.2 — cluster is quiet and Flux is not mid-reconcile.**
 
@@ -579,6 +575,9 @@ curl -k -s -u "elastic:$ES_PW" -H 'Content-Type: application/json' \
   -d '{"query":{"range":{"@timestamp":{"gte":"now-15m"}}}}'; echo
 kill $PF 2>/dev/null
 
+# (f) HELM REVISION — the rollback target in §5.1 and the Floor's rev+1.
+helm history otel-operator -n monitoring --max 1
+
 # (e) RUNNING IMAGE DIGESTS — the baseline §4.1 compares against.
 #     WITHOUT this, §4.1's "the digest changed" limb has nothing to compare to
 #     and cannot fail. imageID prints a BARE digest with no tag, so the tag
@@ -643,7 +642,7 @@ the diff below is the real output, not a sketch:
        sourceRef:
          kind: HelmRepository
          name: opentelemetry
-@@ -36,6 +36,9 @@
+@@ -36,6 +36,9 @@   # header stale since 2026-09-24 (manager block now ~line 49); git apply absorbs the offset
            enabled: true
            recreate: true
        manager:
@@ -745,11 +744,15 @@ test -n "$ROLLOUT_TS" || echo "EMPTY ROLLOUT_TS — do NOT run §4.4 with an emp
 kubectl get helmrelease otel-operator -n monitoring \
   -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.history[0].chartVersion} {.status.history[0].appVersion} rev={.status.history[0].version}'; echo
 kubectl get daemonset otel-operator-daemon-collector -n monitoring -o jsonpath='{.status.numberReady}/{.status.desiredNumberScheduled}'; echo
-kubectl logs -n monitoring deploy/otel-operator-opentelemetry-operator --tail=80 \
-  | grep -iE 'error|panic|failed to create the operator network policies' || echo "no startup errors"
+kubectl get pods -n monitoring -l app.kubernetes.io/name=opentelemetry-operator \
+  -o jsonpath='{range .items[*]}{.metadata.name} {.spec.containers[0].image} restarts={.status.containerStatuses[0].restartCount}{"\n"}{end}'
+OPPOD=$(kubectl get pods -n monitoring -l app.kubernetes.io/name=opentelemetry-operator -o jsonpath='{.items[0].metadata.name}')
+echo "version-line: $(kubectl logs -n monitoring "$OPPOD" | grep -c 'apis/v0.159.0')"   # POSITIVE: must be >=1
+echo "error-lines: $(kubectl logs -n monitoring "$OPPOD" | grep -ciE 'panic|"level":"error"|failed to create the operator network policies')"   # must be 0
 ```
-**PASS:** `True 0.23.0 0.159.0 rev=25`; `3/3`; no error lines. The grep is
-case-insensitive deliberately — upstream logs mixed case.
+**PASS:** `True 0.23.0 0.159.0 rev=<§2.5 recorded rev + 1>` (rev 26 deployed 2026-09-25, so expect rev=27 unless something upgraded it since); `3/3`; the operator-pod check below.
+Exactly ONE operator pod, image `:0.159.0`, `restarts=0`, `version-line: 1` (or more), `error-lines: 0`. If more than one pod is listed, the roll has not finished: the old pod is still serving, so wait. The same version-line grep with `apis/v0.154.0` returns 1 on today's pod (measured 2026-09-28), so the positive limb can read non-zero. The grep is
+case-insensitive deliberately — upstream logs mixed case (`"level":"INFO"`).
 
 ### CONTENTS ASSERTION 4.1 — the new bytes are actually running
 
@@ -884,14 +887,15 @@ for c in json.load(sys.stdin)['items']:
 - **`instrumentations.opentelemetry.io` stays `gen=2`** — byte-identical between
   the two charts. Do **not** read this as a failure; predicting a bump for a
   byte-identical re-apply is the error F-7235625a records.
-- **SUBJECT (must NOT move):** the four `monitoring.coreos.com` → `gen=30`,
-  `opver=0.92.0`, `hc_write` still `2026-09-14T05:45:08Z` (the §2.5 baseline),
-  and 14 rows total with none missing.
+- **SUBJECT (must NOT move):** the four `monitoring.coreos.com` → `gen`, `opver`,
+  `origin` and `hc_write` IDENTICAL to the §2.5(a) rows recorded in-window (as of
+  2026-09-28: `gen=32`, `opver=0.94.1`, `origin=kube-prometheus-stack`,
+  `hc_write=2026-09-26T04:56:4xZ`, column `older(Ns)`), and 14 rows total with none missing.
 
 **FAIL conditions:** the control did **not** move → the CRD pass did not run at
 all and the subject's "unchanged" reading proves nothing — investigate before
-believing anything else in §4. Any of the four subjects moving, or `opver`
-reading anything but `0.92.0` → `crds.installPrometheus` is not actually false;
+believing anything else in §4. Any of the four subjects moving, `opver` differing from its §2.5 value, or `origin`
+changing to `otel-operator` → `crds.installPrometheus` is not actually false;
 stop and re-derive §6 with `prometheus-crd-ownership`. Any CRD **missing** → §5.3
 immediately.
 
@@ -909,6 +913,7 @@ kubectl get deploy otel-operator-opentelemetry-operator -n monitoring \
 kubectl get netpol -n monitoring -o name | wc -l
 kubectl get opentelemetrycollector otel-operator-daemon -n monitoring -o jsonpath='np=[{.spec.networkPolicy.enabled}]'; echo
 ```
+**Positive demonstration (run the same query cluster-wide first):** `kubectl get netpol -A -o name | wc -l` must print NON-zero (5 on 2026-09-28: ai, databases, flux-system, office). That proves the count query can see NetworkPolicies, so `0` in `monitoring` is a real reading.
 **PASS:** the arg line reads `--feature-gates=-operand.networkpolicy,-operator.networkpolicy`;
 the NetworkPolicy count is **`0`**; and `np=[]` (still unset).
 **FAILS AS:** count `1` or `2` — upstream would name them `opentelemetry-operator`
@@ -966,7 +971,7 @@ A trickle is a failure, not a pass.
 ```
 CONTENTS ASSERTION: every CR of the four kinds still exists and Prometheus still
   scrapes what they generate — measured by per-kind counts and up-target counts,
-  compared to the §2.5 baseline (49/3/4/3; 98/98).
+  compared to the §2.5 baseline recorded in-window.
 ```
 ```bash
 for k in servicemonitors podmonitors probes scrapeconfigs; do
@@ -976,7 +981,8 @@ P=/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/p
 kubectl get --raw "${P}?query=count(up)"; echo
 kubectl get --raw "${P}?query=count(up%3D%3D1)"; echo
 ```
-**PASS:** `49 / 3 / 4 / 3` exactly (a CRD delete would cascade these to 0, so
+**PASS:** the four counts EXACTLY equal the §2.5(b) values recorded in-window
+(2026-09-28: `50 / 3 / 5 / 3`; a CRD delete would cascade these to 0, so
 "non-zero" is not enough), and `count(up==1) == count(up)` at ~98. A deviation in
 the target count is acceptable **only** if another plan in the same window
 legitimately added or removed targets — name it, or treat it as a failure.
@@ -1009,8 +1015,8 @@ kubectl -n monitoring rollout status daemonset/otel-operator-daemon-collector --
 This restores chart 0.21.0 **and** removes the gate pin together — correct, since
 at 0.154.0 both gates are alpha/off anyway (§1.3). The HR carries
 `upgrade.remediation.strategy: rollback, retries: 3`, and helm keeps 5 revisions
-(20–24 live today), so revision 24 stays reachable for a manual
-`helm rollback otel-operator 24 -n monitoring` if Flux cannot converge.
+(22–26 live on 2026-09-28), so the pre-change revision recorded in §2.5(f) (26 today) stays reachable for a manual
+`helm rollback otel-operator <§2.5(f) rev> -n monitoring` if Flux cannot converge. NEVER 24: it predates crds.installPrometheus=false (rev 25) and the memory_limiter pipeline (rev 26).
 
 **5.2 — confirm the cluster is actually back** (not just that the commit landed):
 
@@ -1118,6 +1124,6 @@ NetworkPolicy would survive the downgrade.
 - **edot-collector is downstream, not touched.** It is a plain Kustomize Deployment
   and this plan does not modify it — but every assertion in §4.4 travels through it,
   which is the whole reason `edot-collector-0.161.0` is a slot exclusion.
-- **Window shape:** ~50 min, no reboot, but `risk: high` + `capability_change: true`
+- **Window shape:** ~50 min, no reboot, but `risk: high` (capability_change is false since 2026-09-28: both NetworkPolicy gates pinned off)
   ⇒ **attended, operator-present, never unattended**. It fits `sat-attended` /
   `sun-attended` (90 / 200 min); it must not be placed in `nightly`.

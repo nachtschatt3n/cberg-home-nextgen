@@ -47,7 +47,7 @@ finding_refs: [F-aa4d1184, F-eed33ead]  # the two OPEN floating-tag findings in 
 capability_change: false
 rollback_class: git-revert            # Batch M changes addressability only, not bytes.
 autonomy_override: human-gated        # A PROGRAMME: which batch runs when is an operator call.
-status: draft    # Batch M EXECUTED 2026-09-26 (ab5a41b3). Programme stays open: Batch O not yet planned; component/current/target/touches/premises below still describe Batch M and must be rotated when Batch O is planned
+status: blocked  # Batch M EXECUTED 2026-09-26 (ab5a41b3), superseded 2026-09-28 by makemkv-v26.09.2 (656a896a). Batch O (oc8 caddy/redis/pg15-init) NOT YET PLANNED — re-dispatch upgrade-planner to rotate component/current/target/touches/premises/§3-§6 to Batch O. Review 2026-09-28 (F-2c849d1e): needs-fix, 3/5 premises FAIL (all Batch M, now obsolete).
 window: null     # reset after Batch M ran in now:2026-09-26
 generated: "2026-09-26"               # Batch M re-planned 2026-09-26 by plan-reviewer from a LIVE
                                       # inventory; the 2026-09-06 inventory (19 images) is obsolete.
@@ -104,10 +104,10 @@ line tag). Result — 10 refs, 4 images:
 
 | Batch | Namespace / workload | Image | Open finding | Status |
 |---|---|---|---|---|
-| M (done) | media/makemkv | `jlesage/makemkv:latest` -> `v26.01.1@sha256:12ce7fc0…` | none (no fixable-CVE warning) | **DONE 2026-09-26 in now:2026-09-26, pin commit ab5a41b3; G1/G2/G3 green, imageID unchanged** |
+| M (done) | media/makemkv | `jlesage/makemkv:latest` -> `v26.01.1@sha256:12ce7fc0…` | none (no fixable-CVE warning) | **DONE 2026-09-26 (ab5a41b3); SUPERSEDED 2026-09-28 by makemkv-v26.09.2 (656a896a), live `v26.09.2@sha256:bfdddd29…`** |
 | O (later) | ai/oc8-caddy | `caddy:2` | F-eed33ead | later window |
 | O (later) | ai/oc8-redis | `redis:7-alpine` | none | later window |
-| O (later) | ai/oc8-{backend,worker,scheduler,ingestion-worker} init `wait-for-postgres` | `pgvector/pgvector:pg15` | F-aa4d1184 | later; the image is hard-coded in the FORK chart `deploy/helm/oc8` (GitRepository source), so the fix is a fork commit, not an edit in this repo |
+| O (later) | ai/oc8-{backend,worker,scheduler,ingestion-worker} init `wait-for-postgres` | `pgvector/pgvector:pg15` | F-aa4d1184 | later; values-driven: fork chart `_helpers.tpl` `oc8.waitForPostgresInit` renders `images.postgres.repository:tag` (chart default `pgvector/pgvector:pg15`), so the fix is an `images.postgres` override in `kubernetes/apps/ai/oc8/app/helmrelease.yaml` `values.images`, not a fork commit. Running digest 2026-09-28: `sha256:a947c45c…` |
 | — | office/nextcloud, nextcloud-mariadb | `bitnamilegacy/mariadb:latest` | F-ac22c0ba (AR-010) | owned by `bitnamilegacy-exit-nextcloud-db`; do not touch here |
 | — | default/echo-server | `http-https-echo:41` | none | outside this plan's namespaces; add to Batch O or drop |
 
@@ -123,8 +123,13 @@ resolved in sweep_findings.
 elasticsearch-obs-recovery python images (their own plans), paperclip, nocodb,
 nextcloud, paperless, mqttx, unpoller.
 
-**Batch O preconditions (not today):** `oc8-install` is `status: blocked` and
-describes this workload; resolve ownership with that plan first. oc8's
+**Batch O preconditions (not today):** `oc8-install` was stale (oc8 has been
+live since 2026-09-18: HelmRelease ai/oc8, GitRepository oc8 tag
+oc8home-2026.09.17) and was retired 2026-09-28, so ownership is this plan's.
+caddy/redis tags are set in THIS repo (helmrelease.yaml
+values.images.{caddy,redis}); both Deployments are RollingUpdate — check
+oc8-caddy's data/config volumes for RWO before any pin. Running digests
+2026-09-28: caddy `sha256:13ba145c…`, redis `sha256:ee64a64e…`. oc8's
 HelmRelease takes values from a Secret (`oc8-values`) plus inline values, and the
 chart comes from a GitRepository with `reconcileStrategy: Revision` — any pin
 re-renders the whole release, so Batch O needs its own helm-template diff and

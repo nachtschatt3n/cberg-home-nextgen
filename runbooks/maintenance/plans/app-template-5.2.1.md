@@ -43,6 +43,7 @@ conflicts_with:
   - traccar-6.16.0                    # edits home-automation/traccar helmrelease.yaml (Batch A file); lists us already
   - chart-patches-coredns-reloader-blackbox  # a Reloader/CoreDNS roll during §4 reads as GEN_CHANGED; lists us already
   - penpot-chart-1.10.0               # works against penpot-db + penpot-cache (Batch A members); lists us already
+  - mariadb-chart-27.3.0              # rolls databases/mariadb-0 under phpmyadmin + all 15 showcase HRs (our Batch members); same-night confounds both §4s (review 2026-09-28)
 exclusive: false
 security_ref: null
 capability_change: false              # template-library bump; rendered objects byte-identical except the chart label
