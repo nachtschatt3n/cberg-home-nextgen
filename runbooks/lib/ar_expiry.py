@@ -12,9 +12,12 @@ policy.
 
 THREE RULES, ALL LOAD-BEARING:
 
-  * ABSENT means NO DEADLINE and stays silent forever. Condition-based
-    acceptances (AR-053/054 "until upstream ships a fix") and permanent
-    decisions must not be nagged.
+  * ABSENT means NO DEADLINE *for suppression* — a hand-inserted row must not
+    flip a class of findings at once. It is no longer a sanctioned state,
+    though: since F-d5486ff1 (2026-09-28) every AR must carry an expiry, the
+    CLI cannot create or clear one without, and `risk lint` / the sweep board
+    name any that lack it. (Until then condition-based acceptances were left
+    open-ended; that is withdrawn — the condition is re-checked on a date.)
   * UNPARSEABLE means EXPIRED. A value we cannot read stops the suppression
     rather than extending it: un-suppressing is noisy and self-announcing,
     silently continuing to suppress is how this bug class hides.
@@ -34,9 +37,12 @@ THREE RULES, ALL LOAD-BEARING:
     115 rows is not a query-planner problem. Filter in Python, where the tests
     can see it.
 
-Consumers: runbooks/sweep-run.py (the suppressor), runbooks/security-check.py
-(the second, emit-time suppressor), runbooks/policy-cli.py (`risk lint`).
-Tested by runbooks/tests/test-ar-expiry-gate.py.
+Consumers: runbooks/sweep-run.py (the suppressor + the auto-disable),
+runbooks/security-check.py (the second, emit-time suppressor),
+runbooks/policy-cli.py (`risk add/edit/renew/lint`), runbooks/render-board.py
+and runbooks/ops-retro.py (the 14-day renewal warning).
+Tested by runbooks/tests/test-ar-expiry-gate.py and
+runbooks/tests/test-ar-systematic-expiry.py.
 """
 
 from __future__ import annotations
@@ -147,3 +153,166 @@ def prose_deadline(justification: str):
     only a human can read, else None."""
     m = _RE_PROSE_DEADLINE.search(justification or "")
     return (m.group(1), m.group(2)) if m else None
+
+
+# ---------------------------------------------------------------------------
+# Systematic expiry (F-d5486ff1, operator request 2026-09-28)
+# ---------------------------------------------------------------------------
+# The gate above made a RECORDED deadline binding, but left three holes the
+# operator named: most ARs recorded no deadline at all (so nothing ever came
+# back up for review), an expired AR stayed `enabled=true` in the register
+# (the register kept claiming a decision nobody had renewed), and nothing
+# warned BEFORE the date, so a lapse always arrived as a surprise.
+#
+# The contract now:
+#   * every AR carries `accepted_at` (the column, NOT NULL — the "created"
+#     date) and `metadata.expires_at`;
+#   * `risk add` / `risk edit --expires` / `risk renew` refuse a date further
+#     out than MAX_HORIZON_DAYS, and refuse clearing it — an acceptance is
+#     re-decided at least twice a year, whatever its nature;
+#   * `auto_disable_expired()` runs every sweep (sweep-run.py, before AR
+#     suppression) and flips an expired AR to `enabled=false`, recording WHY
+#     in metadata — so the register tells the truth and the findings it masked
+#     re-surface at their own severity on the same pass;
+#   * `expiry_report()` names ARs expiring within WARN_DAYS (and those
+#     auto-disabled recently) for the sweep board and the weekly ops retro.
+#
+# Absence is still "no deadline" for SUPPRESSION (is_expired(None) is False):
+# a row inserted by hand must not flip a whole class of findings at once. It is
+# reported instead (`missing` in expiry_report, `risk lint`), because since
+# 2026-09-28 no sanctioned path can produce it.
+
+DEFAULT_HORIZON_DAYS = 90
+MAX_HORIZON_DAYS = 180
+WARN_DAYS = 14
+
+DISABLED_REASON_KEY = "disabled_reason"
+DISABLED_AT_KEY = "disabled_at"
+DISABLED_BY_KEY = "disabled_by"
+EXPIRED_REASON = "expired"
+
+
+def horizon_problem(day, today: "_dt.date | None" = None,
+                    max_days: int = MAX_HORIZON_DAYS) -> "str | None":
+    """Why `day` is not an acceptable new expiry, or None if it is.
+
+    Past dates are refused by the callers separately (they have an explicit
+    override for recording an already-lapsed decision); this is the ceiling."""
+    today = today or _dt.date.today()
+    limit = today + _dt.timedelta(days=max_days)
+    if day > limit:
+        return (f"--expires {day} is {(day - today).days} days out; the maximum "
+                f"horizon is {max_days} days ({limit}). An acceptance is "
+                f"re-decided at least that often — renew it when it comes up.")
+    return None
+
+
+def default_expiry(today: "_dt.date | None" = None,
+                   days: int = DEFAULT_HORIZON_DAYS) -> "_dt.date":
+    return (today or _dt.date.today()) + _dt.timedelta(days=days)
+
+
+def days_left(value, today: "_dt.date | None" = None) -> "int | None":
+    """Days until the last day in force (0 = expires today), or None when the
+    value is absent or unreadable."""
+    day = as_date(value)
+    if day is None:
+        return None
+    return (day - (today or _dt.date.today())).days
+
+
+def _meta(m) -> dict:
+    if isinstance(m, dict):
+        return m
+    if isinstance(m, str) and m.strip():
+        import json
+        try:
+            v = json.loads(m)
+            return v if isinstance(v, dict) else {}
+        except ValueError:
+            return {}
+    return {}
+
+
+def expiry_report(rows, today: "_dt.date | None" = None,
+                  warn_days: int = WARN_DAYS, recent_days: int = 7) -> dict:
+    """Classify the register for operator-facing surfaces. Pure.
+
+    rows: iterable of (ar_id, enabled, description, metadata) — metadata as a
+    dict or JSON text.
+
+    Returns {"expiring": [...], "expired_enabled": [...], "missing": [...],
+             "recently_disabled": [...]}:
+      expiring          enabled, expires within `warn_days` (inclusive, today=0)
+      expired_enabled   enabled but already past — the auto-disable has not run
+                        yet (or failed): the board must say so, not hide it
+      missing           enabled with no expires_at recorded at all
+      recently_disabled auto-disabled for expiry within `recent_days`
+    """
+    today = today or _dt.date.today()
+    out = {"expiring": [], "expired_enabled": [], "missing": [],
+           "recently_disabled": []}
+    for ar_id, enabled, desc, meta in rows:
+        m = _meta(meta)
+        exp = m.get(EXPIRY_KEY)
+        if enabled:
+            if exp is None:
+                out["missing"].append({"ar_id": ar_id, "description": desc})
+            elif is_expired(exp, today):
+                out["expired_enabled"].append(
+                    {"ar_id": ar_id, "expires": exp, "description": desc})
+            else:
+                left = days_left(exp, today)
+                if left is not None and left <= warn_days:
+                    out["expiring"].append({"ar_id": ar_id, "expires": exp,
+                                            "days_left": left, "description": desc})
+        elif m.get(DISABLED_REASON_KEY) == EXPIRED_REASON:
+            at = as_date(str(m.get(DISABLED_AT_KEY) or "")[:10])
+            if at is not None and (today - at).days <= recent_days:
+                out["recently_disabled"].append(
+                    {"ar_id": ar_id, "expires": exp, "disabled_at": at.isoformat(),
+                     "description": desc})
+    for k in out:
+        out[k].sort(key=lambda r: (r.get("days_left", 0), r["ar_id"]))
+    return out
+
+
+def select_expired(rows, today: "_dt.date | None" = None) -> list:
+    """(ar_id, expires) for the ENABLED rows that have lapsed. Pure — the
+    decision the auto-disable acts on, testable without a database.
+
+    rows: iterable of (ar_id, expires_value)."""
+    return [(a, e) for a, e in rows if is_expired(e, today)]
+
+
+def auto_disable_expired(conn, today: "_dt.date | None" = None,
+                         actor: str = "sweep-run") -> list:
+    """Disable every enabled AR whose expiry has passed. Returns the
+    [(ar_id, expires)] it disabled. Commits.
+
+    The comparison is Python (select_expired) for the reasons in the module
+    docstring; the UPDATE is per ar_id and re-checks `enabled = true`, so two
+    concurrent sweeps cannot double-stamp a row. Nothing is deleted: the row,
+    its justification and its history stay in the register with
+    disabled_reason='expired', and `policy-cli risk renew` brings it back as a
+    conscious decision."""
+    import json
+    today = today or _dt.date.today()
+    with conn.cursor() as cur:
+        cur.execute("SELECT ar_id, " + EXPIRY_SELECT + " FROM accepted_risks "
+                    "WHERE enabled = true AND status = 'accepted' ORDER BY ar_id")
+        lapsed = select_expired([(r[0], r[1]) for r in cur.fetchall()], today)
+        done = []
+        for ar_id, exp in lapsed:
+            stamp = {DISABLED_REASON_KEY: EXPIRED_REASON,
+                     DISABLED_AT_KEY: today.isoformat(),
+                     DISABLED_BY_KEY: actor}
+            cur.execute(
+                "UPDATE accepted_risks SET enabled = false, "
+                "metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb "
+                "WHERE ar_id = %s AND enabled = true",
+                (json.dumps(stamp), ar_id))
+            if cur.rowcount:
+                done.append((ar_id, exp))
+    conn.commit()
+    return done

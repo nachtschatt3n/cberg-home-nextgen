@@ -1,8 +1,8 @@
 # SOP: policy-cli — operator interface for sweep_history policy tables
 
 > Description: How to edit the four operator-curated policy tables that back the daily sweep (accepted_risks, slo_definitions, noise_suppressions, security_acceptances) from the operator's local Claude CLI / mise session.
-> Version: `2026.09.23`
-> Last Updated: `2026-09-23`
+> Version: `2026.09.28`
+> Last Updated: `2026-09-28`
 > Owner: `homelab-operator`
 
 ---
@@ -28,9 +28,20 @@ The four tables and their CLI namespaces:
 | `noise_suppressions` | `policy-cli noise …` | `runbooks/noise_allowlist.yaml` |
 | `security_acceptances` | `policy-cli sec …` | `runbooks/security_check_acceptances.py` |
 
-Every entity supports `list`, `add`, `disable`, `delete`. Risk + SLO also have `show`. Risk also has `review` (bumps `last_reviewed_at`), `edit` (update description/severity/justification/**expiry** **in place** — the only way to change an AR without losing `accepted_at`), `match` (preview which open findings a candidate description would suppress — **run this before every `risk add`**), and `lint` (reports AR descriptions that have drifted out of matching, gone inert, or EXPIRED — and names the ARs that are REGISTER-ONLY, i.e. enforced elsewhere). SLO also has `update` (patch numerator/denominator/target/window in place).
+Every entity supports `list`, `add`, `disable`, `delete`. Risk + SLO also have `show`. Risk also has `review` (bumps `last_reviewed_at`), `renew` (new expiry, re-enables a lapsed AR), `edit` (update description/severity/justification/**expiry** **in place** — the only way to change an AR without losing `accepted_at`), `match` (preview which open findings a candidate description would suppress — **run this before every `risk add`**), and `lint` (reports AR descriptions that have drifted out of matching, gone inert, or EXPIRED — and names the ARs that are REGISTER-ONLY, i.e. enforced elsewhere). SLO also has `update` (patch numerator/denominator/target/window in place).
 
-**Every new AR must state a deadline or declare it has none.** `risk add` REFUSES without either `--expires YYYY-MM-DD` (the last day in force — inclusive) or `--no-expiry` (condition-based: accepted until upstream ships a fix, not until a date; name the condition in `--justification`). It also refuses an `--expires` already in the past, which would be inert from the moment it is written. Set or clear one later with `risk edit AR-0xx --expires 2026-12-01` / `--expires none`. Past its date an AR stops suppressing — in BOTH layers, the sweep's `_apply_ar_suppression` and `security-check.py`'s emit-time re-tag — and the findings it masked re-surface at their own severity, announced in the sweep log. The rule lives once, in `runbooks/lib/ar_expiry.py`. **The gate binds only on a RECORDED `metadata.expires_at`**: a deadline written in justification prose enforces nothing, which is how AR-042 suppressed a flat battery cell for 14 days past its own "accept until" date. `risk lint` now names those (`justification states a deadline that NOTHING ENFORCES`) — it is the control against this gate being blind, not a nicety.
+**Every AR expires — systematically (F-d5486ff1, 2026-09-28).** Each AR carries a created date (`accepted_at`) and a deadline (`metadata.expires_at`, the LAST day in force — inclusive). The lifecycle:
+
+| Stage | What happens | Where |
+|---|---|---|
+| add | `risk add` REFUSES without `--expires YYYY-MM-DD`, refuses a date more than **180 days** out, refuses a past date (unless `--allow-expired`), and refuses the withdrawn `--no-expiry`. Name the condition you are waiting for in `--justification`; the date is when you re-check it. | `policy-cli.py` |
+| change | `risk edit AR-0xx --expires D` (same 180-day ceiling). `--expires none` is REFUSED — a deadline cannot be cleared. | `policy-cli.py` |
+| warn | 14 days before expiry the AR appears as a numbered `AR-RENEW?` line on the sweep board and in the weekly ops retro ("Accepted-risk renewals"). | `render-board.py`, `ops-retro.py` |
+| renew | `risk renew AR-0xx [--expires D \| --days N]` — default +90 days, max 180; bumps `last_reviewed_at`, counts `renew_count`. It also re-enables an AR the sweep auto-disabled for expiry — and ONLY that: an AR disabled for any other reason stays off. | `policy-cli.py` |
+| lapse | Every sweep (`_apply_ar_suppression`, before suppressing) AUTO-DISABLES each enabled AR past its date: `enabled=false`, `metadata.disabled_reason=expired`, `disabled_at`, `disabled_by`. The row is kept; its findings re-surface at their own severity on the same pass, and the sweep log + board name it. | `sweep-run.py` → `lib/ar_expiry.auto_disable_expired` |
+| retire | `risk disable AR-0xx --reason '...'` — `--reason` is required and kept in `metadata.disabled_reason`. Prefer this over `delete`: the register is the history. | `policy-cli.py` |
+
+Past its date an AR stops suppressing in BOTH layers even before the disable runs (the sweep's `_apply_ar_suppression` and `security-check.py`'s emit-time re-tag compare in Python via `lib/ar_expiry.is_expired`; an UNREADABLE date counts as expired). A MISSING expiry still suppresses — a hand-inserted row must not flip a class of findings — but no sanctioned path can produce one any more, and `risk lint` + the board flag it (`NO EXPIRY recorded`). **The gate binds only on a RECORDED `metadata.expires_at`**: a deadline written in justification prose enforces nothing, which is how AR-042 suppressed a flat battery cell for 14 days past its own "accept until" date. `risk lint` names those too (`justification states a deadline that NOTHING ENFORCES`). The rules live once, in `runbooks/lib/ar_expiry.py`; tests in `runbooks/tests/test-ar-expiry-gate.py` and `test-ar-systematic-expiry.py`.
 
 **AR descriptions are substring matchers, so they must be drift-stable.** `risk add` and `risk edit` both REFUSE a description containing a patch-level version (`x.y.z`) or a volatile count (CVE/device tally) unless `--allow-drift` is passed. `risk lint` flags two signals: `at risk` (static — embeds a version/count) and `DRIFTING NOW` (the description matches zero open findings but a shorter prefix of it matches one — proof the tail already drifted). AR-030 and AR-047 both lapsed this way.
 
@@ -137,7 +148,13 @@ python3 runbooks/policy-cli.py risk match --description 'authentik'
 python3 runbooks/policy-cli.py risk add AR-028 \
     --description 'authentik' \
     --severity informational \
+    --expires 2026-12-27 \
     --justification 'admin password rotated 2026-06-01; previous credential was committed, rotated + service restarted'
+
+# renew one that came up on the board as AR-RENEW? (default +90d, max 180d)
+python3 runbooks/policy-cli.py risk renew AR-028
+# retire one — the reason is required and kept on the row
+python3 runbooks/policy-cli.py risk disable AR-028 --reason 'premise false: fixed upstream in <tag>'
 
 python3 runbooks/policy-cli.py slo add my-new-slo \
     --source prom --target 0.99 --window 30d \
@@ -183,6 +200,7 @@ never matched against anything):
 python3 runbooks/policy-cli.py risk add AR-028 \
     --description 'argocd-repo-server' \
     --severity warning \
+    --expires 2026-09-18 \
     --justification 'Falco rule 100412 (drop+exec): the Argo CD container does a legitimate fs-write during sync; rule tuning planned for sprint X. Re-review 2026-09-18.'
 ```
 

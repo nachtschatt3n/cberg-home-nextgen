@@ -677,6 +677,10 @@ def fetch_pg(dsn, since):
                         "AND title LIKE '%%fixable%%' AND (status IN ('new','unchanged') "
                         "OR resolved_at >= %s)", (since,))
             out["security_fixable"] = cur.fetchall()
+            # Accepted-risk expiry (F-d5486ff1): point-in-time register state.
+            cur.execute("SELECT ar_id, enabled, description, metadata FROM accepted_risks "
+                        "WHERE status = 'accepted' ORDER BY ar_id")
+            out["accepted_risks"] = cur.fetchall()
         return out, None
     except Exception as e:  # noqa: BLE001
         return None, f"sweep_history Postgres: {type(e).__name__}: {str(e)[:200]}"
@@ -975,7 +979,19 @@ def build(now=None):
             "renovate_prs_opened": renovate_intake(prs, span),
             "earned_lane": earned_lane(cov, None, span) if cur_ else U("point-in-time: current period only"),
         }
+    report["ar_expiry"] = ar_expiry_metrics(pg["accepted_risks"] if pg else None)
     return report
+
+
+def ar_expiry_metrics(rows, today=None):
+    """Accepted risks up for renewal in the next 14 days, ones the sweep
+    auto-disabled for expiry in the last 7, and any with no expiry at all
+    (lib/ar_expiry.expiry_report). None rows = source unavailable."""
+    if rows is None:
+        return U("sweep_history Postgres unavailable")
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from lib.ar_expiry import expiry_report
+    return M(expiry_report(rows, today), "accepted_risks.metadata.expires_at")
 
 
 # ---- rendering --------------------------------------------------------------
@@ -1081,6 +1097,22 @@ def render_md(r):
     ag = c["plans"]["awaiting_go_over_7d"]
     if ag["measured"] and ag["value"]:
         L += ["", "**Go/no-go open > 7 days:** " + ", ".join(f"{k} ({d}d)" for k, d in ag["items"])]
+    ae = r.get("ar_expiry") or U("not collected")
+    L += ["", "## Accepted-risk renewals (next 14 days)", ""]
+    if not ae.get("measured"):
+        L.append(f"UNMEASURED ({ae.get('reason')})")
+    else:
+        v = ae["value"]
+        L += [f"- {x['ar_id']} expires {x['expires']} (in {x['days_left']}d) — "
+              f"renew consciously or let it lapse: {redact(x['description'])[:80]}"
+              for x in v["expiring"]] or ["- none expiring"]
+        L += [f"- {x['ar_id']} AUTO-DISABLED {x['disabled_at']} (expired {x['expires']})"
+              for x in v["recently_disabled"]]
+        if v["expired_enabled"]:
+            L.append(f"- WARNING: {len(v['expired_enabled'])} expired AR(s) still enabled "
+                     f"(auto-disable did not run)")
+        if v["missing"]:
+            L.append(f"- WARNING: {len(v['missing'])} enabled AR(s) with NO expiry")
     pk = c["git"]["peak_per_hour"]
     if pk["measured"]:
         L += ["", f"**Git:** peak {pk['value']} commits in {pk.get('hour')}; "

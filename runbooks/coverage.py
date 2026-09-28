@@ -272,9 +272,16 @@ def accepted_risk_rows() -> list:
     try:
         import psycopg
         with psycopg.connect(dsn, connect_timeout=5) as conn, conn.cursor() as cur:
-            cur.execute("SELECT ar_id, description, justification FROM accepted_risks "
-                        "WHERE enabled = true AND status = 'accepted'")
-            _AR_ROWS_CACHE = list(cur.fetchall())
+            # Same deadline gate as the two suppressors (lib/ar_expiry,
+            # F-d5486ff1): an expired AR disposes of nothing here either, even
+            # in the gap before the sweep's auto-disable flips it. Python, not
+            # SQL — a `::date` cast raises on a malformed value.
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from lib.ar_expiry import EXPIRY_SELECT, is_expired
+            cur.execute("SELECT ar_id, description, justification, " + EXPIRY_SELECT +
+                        " FROM accepted_risks WHERE enabled = true AND status = 'accepted'")
+            _AR_ROWS_CACHE = [(a, d, j) for a, d, j, e in cur.fetchall()
+                              if not is_expired(e)]
     except Exception:
         _AR_ROWS_CACHE = []
     return _AR_ROWS_CACHE

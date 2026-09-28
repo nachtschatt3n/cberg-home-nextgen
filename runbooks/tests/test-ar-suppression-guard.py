@@ -51,7 +51,14 @@ class FakeCursor:
     def execute(self, sql, params=None):
         norm = " ".join(sql.split())
         self.conn.log.append((norm, params))
-        if norm.upper().startswith("SELECT AR_ID"):
+        if norm.upper().startswith("SELECT AR_ID, METADATA->>'EXPIRES_AT'"):
+            # lib/ar_expiry.auto_disable_expired's read (F-d5486ff1): nothing
+            # in these fixtures has lapsed, so it disables nothing.
+            self._mode = "expiry"
+        elif norm.upper().startswith("UPDATE ACCEPTED_RISKS"):
+            self._mode = "disable"
+            self.rowcount = 1
+        elif norm.upper().startswith("SELECT AR_ID"):
             self._mode = "ars"
         elif norm.upper().startswith("SELECT COUNT(*)"):
             self._mode = "count"
@@ -63,6 +70,8 @@ class FakeCursor:
             self._mode = "select"
 
     def fetchall(self):
+        if getattr(self, "_mode", None) == "expiry":
+            return [(a[0], a[2] if len(a) > 2 else None) for a in self.conn.ars]
         return list(self.conn.ars)
 
     def fetchone(self):

@@ -588,8 +588,11 @@ def _apply_ar_suppression(dsn: str) -> int:
     deadline (`metadata.expires_at`, see lib/ar_expiry.py). AR-042 carried
     "accept until 2026-09-03" in justification PROSE, which no code could read,
     so it masked a genuinely flat cell for 14 days past the operator's own
-    deadline (F-da238139). An AR with no recorded expiry is unaffected and
-    suppresses indefinitely, by design.
+    deadline (F-da238139). Since F-d5486ff1 (2026-09-28) an expired AR is also
+    AUTO-DISABLED here, every cycle, before suppression runs. An AR with no
+    recorded expiry still suppresses (a hand-inserted row must not flip a
+    class of findings), but no sanctioned path can create one any more and
+    `risk lint` / the board name it.
 
     The expiry column is SELECTED and compared in PYTHON, never in SQL — a
     `::date` cast raises on a date-shaped-but-impossible value, and that
@@ -605,7 +608,25 @@ def _apply_ar_suppression(dsn: str) -> int:
     if str(SCRIPT_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPT_DIR))
     try:
-        from lib.ar_expiry import EXPIRY_SELECT, is_expired, lapse_note
+        from lib.ar_expiry import (EXPIRY_SELECT, auto_disable_expired,
+                                   is_expired, lapse_note)
+        # AUTO-DISABLE FIRST (F-d5486ff1). An expired AR already suppressed
+        # nothing (the Python gate below), but it stayed `enabled=true`, so the
+        # register kept claiming a decision nobody had renewed. Flip it, with
+        # the reason stamped in metadata, in its OWN transaction and its own
+        # try: a failure here must never cost the cycle its suppression pass —
+        # the gate below still refuses to apply an expired AR either way.
+        try:
+            with psycopg.connect(dsn) as _c:
+                for _ar_id, _exp in auto_disable_expired(_c, actor="sweep-run"):
+                    print(f"==> AR-expiry: {_ar_id} EXPIRED {_exp} — AUTO-DISABLED "
+                          f"(metadata.disabled_reason=expired). Its findings "
+                          f"re-surface at their own severity; renew consciously "
+                          f"with `policy-cli.py risk renew {_ar_id}`.")
+        except Exception as _e:  # noqa: BLE001
+            print(f"==> AR-expiry: auto-disable FAILED ({type(_e).__name__}: {_e}) — "
+                  f"expired ARs still suppress nothing (gate below), but the "
+                  f"register was not updated this cycle")
         with psycopg.connect(dsn) as conn:
             with conn.cursor() as cur:
                 cur.execute(

@@ -19,6 +19,9 @@ Sections, in order (the operator's definition):
   4. SECTIONS      — non-security sections: new vs carried counts + gaps.
   5. SLO/SLI       — latest snapshot per SLO: compliance, burn, budget.
   6. WINDOWS       — next maintenance window + queue warnings.
+  7. AR EXPIRY     — accepted risks expiring within 14 days (renew
+                     consciously or let lapse), ones the sweep auto-disabled
+                     this week, and any AR with no expiry (F-d5486ff1).
 
 Usage:
   python3 runbooks/render-board.py                 # newest cycle with findings
@@ -41,6 +44,21 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 EXPECTED_SECTIONS = ["health", "security", "version", "doc", "media", "slo"]
+
+sys.path.insert(0, str(REPO / "runbooks"))
+
+
+def collect_ar_expiry(cur) -> dict:
+    """The register's expiry state (lib/ar_expiry.expiry_report). Separate
+    from collect() so the cycle-scoped queries stay as they were; a failure is
+    reported on the board as UNMEASURED, never rendered as "nothing expiring"."""
+    try:
+        from lib.ar_expiry import expiry_report
+        cur.execute("SELECT ar_id, enabled, description, metadata "
+                    "FROM accepted_risks WHERE status = 'accepted' ORDER BY ar_id")
+        return expiry_report(cur.fetchall())
+    except Exception as e:  # noqa: BLE001 — the board must render regardless
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 def _dsn() -> str | None:
@@ -521,6 +539,20 @@ def render(d: dict, w: dict) -> str:
         item("DECISION", f"security/escalation/{e.get('tier') or 'untiered'}",
              _desc(e["title"]) + " — DECISION REQUESTED: variant/base switch, "
              "replacement, or a compensating control; not an accepted risk" + note)
+    # Accepted-risk deadlines (F-d5486ff1): a renewal is an operator decision,
+    # so each one is its own numbered line — collapsing them would turn "decide
+    # by the 14th" into a count nobody acts on.
+    are = d.get("ar_expiry") or {}
+    for r in are.get("expired_enabled", []):
+        item("AR-LAPSED", "policy/ar-expiry",
+             f"{r['ar_id']} expired {r['expires']} but is still ENABLED — the "
+             f"sweep's auto-disable has not run or failed; it suppresses nothing")
+    for r in are.get("expiring", []):
+        when = "TODAY" if r["days_left"] == 0 else f"in {r['days_left']}d"
+        item("AR-RENEW?", "policy/ar-expiry",
+             f"{r['ar_id']} (`{_desc(r['description'], 50)}`) expires {r['expires']} "
+             f"({when}) — renew consciously (`policy-cli.py risk renew "
+             f"{r['ar_id']}`) or let it lapse")
     high_planned = [h for h in d["high"] if h["id"] in planned]
     for h in [h for h in d["high"] if h["id"] not in planned]:
         # category: real exposure when recorded; else derive from subsection
@@ -596,6 +628,30 @@ def render(d: dict, w: dict) -> str:
             L.append(f"- ⚠ {warn}")
         if not (w.get("warnings") or []):
             L.append("- reconciler: 0 warnings")
+    L.append("")
+    L.append("## 6 · Accepted-risk expiry")
+    L.append("")
+    are = d.get("ar_expiry")
+    if are is None:
+        L.append("- not collected")
+    elif "error" in are:
+        L.append(f"- UNMEASURED — could not read accepted_risks: {are['error']}")
+    else:
+        L.append(f"- expiring within 14 days: {len(are['expiring'])}"
+                 + (" (" + ", ".join(f"{r['ar_id']} {r['expires']}"
+                                     for r in are["expiring"]) + ")"
+                    if are["expiring"] else ""))
+        for r in are["recently_disabled"]:
+            L.append(f"- {r['ar_id']} AUTO-DISABLED {r['disabled_at']} (expired "
+                     f"{r['expires']}) — its findings re-surface; `risk renew "
+                     f"{r['ar_id']}` to re-accept")
+        if are["expired_enabled"]:
+            L.append(f"- ⚠ {len(are['expired_enabled'])} expired AR(s) still "
+                     f"enabled — auto-disable did not run")
+        if are["missing"]:
+            L.append(f"- ⚠ {len(are['missing'])} enabled AR(s) with NO expiry: "
+                     + ", ".join(r["ar_id"] for r in are["missing"][:10])
+                     + (" …" if len(are["missing"]) > 10 else ""))
     return "\n".join(L)
 
 
@@ -612,6 +668,7 @@ def main(argv=None) -> int:
     import psycopg
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         data = collect(cur, args.cycle)
+        data["ar_expiry"] = collect_ar_expiry(cur)
     w = windows()
     if args.json:
         print(json.dumps({"board": data, "windows": w}, indent=2, default=str))

@@ -21,10 +21,11 @@ Usage examples:
   policy-cli risk match --description 'node:22.'   # PREVIEW what a needle would suppress
                                         # — run this BEFORE `risk add`
   policy-cli risk lint                  # descriptions that drifted, went inert, or EXPIRED
-  policy-cli risk edit AR-042 --expires 2026-12-01   # last day in force
-  policy-cli risk edit AR-042 --expires none         # clear it (open-ended)
+  policy-cli risk edit AR-042 --expires 2026-12-01   # last day in force (<= 180d out)
+  policy-cli risk renew AR-042 [--expires D | --days N]  # conscious renewal; default +90d,
+                                        # re-enables an AR the sweep auto-disabled for expiry
   policy-cli risk review AR-001         # bumps last_reviewed_at to now
-  policy-cli risk disable AR-001        # soft-disable (enabled=false)
+  policy-cli risk disable AR-001 --reason 'why'   # soft-disable, reason kept in metadata
   policy-cli risk delete AR-001         # hard delete
 
   # SLO definitions
@@ -86,7 +87,9 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from lib.ar_expiry import (  # noqa: E402
-    EXPIRY_KEY, EXPIRY_SELECT, is_expired, parse_expiry, prose_deadline,
+    DEFAULT_HORIZON_DAYS, DISABLED_AT_KEY, DISABLED_BY_KEY, DISABLED_REASON_KEY,
+    EXPIRED_REASON, EXPIRY_KEY, EXPIRY_SELECT, MAX_HORIZON_DAYS, default_expiry,
+    horizon_problem, is_expired, parse_expiry, prose_deadline,
 )
 
 
@@ -350,23 +353,40 @@ def cmd_risk_match(args, dsn):
 
 
 def cmd_risk_add(args, dsn):
-    # Forward-only ratchet: every NEW acceptance states a deadline or says
-    # explicitly that it has none. The 105 pre-existing ARs are untouched —
-    # back-filling by parsing justification prose was measured and rejected as
-    # policy (see lib/ar_expiry.prose_deadline, which REPORTS them instead).
-    if args.expires is None and not args.no_expiry:
+    # Every acceptance carries a deadline (F-d5486ff1, 2026-09-28). The
+    # open-ended `--no-expiry` escape of 2026-09-17 is withdrawn: a
+    # condition-based acceptance ("until upstream ships a fix") is re-decided
+    # on a date too, because nobody is watching the condition. Renewing is one
+    # command (`risk renew`); an acceptance nobody renews lapses and the sweep
+    # auto-disables it.
+    if getattr(args, "no_expiry", False):
+        print("REFUSING: --no-expiry is withdrawn (F-d5486ff1) — every accepted "
+              "risk expires. Pass --expires YYYY-MM-DD (at most "
+              f"{MAX_HORIZON_DAYS} days out; {DEFAULT_HORIZON_DAYS} is the "
+              "default horizon) and name the condition you are waiting for in "
+              "--justification; renew with `risk renew` when it comes up.",
+              file=sys.stderr)
+        return 2
+    if args.expires is None:
         print("REFUSING: state how long this acceptance is good for.",
               file=sys.stderr)
-        print("  --expires YYYY-MM-DD   last day in force; the sweep stops "
-              "suppressing after it and the finding re-surfaces.", file=sys.stderr)
-        print("  --no-expiry            open-ended: accepted until a CONDITION "
-              "changes (upstream ships a fix), not until a date. Name the "
-              "condition in --justification.", file=sys.stderr)
+        print(f"  --expires YYYY-MM-DD   last day in force (at most "
+              f"{MAX_HORIZON_DAYS} days out, e.g. {default_expiry()}); the sweep "
+              f"auto-disables it after that and the finding re-surfaces.",
+              file=sys.stderr)
         return 2
     try:
-        expiry = parse_expiry(args.expires) if args.expires is not None else None
+        expiry = parse_expiry(args.expires)
     except ValueError as exc:
         print(f"REFUSING: {exc}", file=sys.stderr)
+        return 2
+    if expiry is None:
+        print("REFUSING: an accepted risk cannot be added without a deadline "
+              "(F-d5486ff1) — pass a date, not 'none'.", file=sys.stderr)
+        return 2
+    problem = horizon_problem(expiry)
+    if problem:
+        print(f"REFUSING: {problem}", file=sys.stderr)
         return 2
     # An already-past deadline is inert the instant it is written — the same
     # failure the needle gate below refuses, wearing a date. Refuse it here
@@ -375,9 +395,8 @@ def cmd_risk_add(args, dsn):
     if expiry is not None and is_expired(expiry.isoformat()):
         print(f"REFUSING: --expires {expiry} is already past, so this AR would "
               f"suppress nothing from the moment it is written.", file=sys.stderr)
-        print("  Pick a future date, or --no-expiry for a condition-based "
-              "acceptance. Use --allow-expired only to record a decision that "
-              "has already lapsed.", file=sys.stderr)
+        print("  Pick a future date. Use --allow-expired only to record a "
+              "decision that has already lapsed.", file=sys.stderr)
         if not args.allow_expired:
             return 2
     warn = _drift_warnings(args.description)
@@ -581,8 +600,17 @@ def cmd_risk_edit(args, dsn):
             print(f"REFUSING: {exc}", file=sys.stderr)
             return 2
         if expiry is None:
-            meta_expr += " - %s"
-            meta_params.append(EXPIRY_KEY)
+            # Clearing a deadline was the 2026-09-17 escape hatch for
+            # condition-based ARs. Withdrawn with F-d5486ff1: every AR expires.
+            print("REFUSING: every accepted risk carries an expiry "
+                  "(F-d5486ff1) — it cannot be cleared. Set a new date (at "
+                  f"most {MAX_HORIZON_DAYS} days out), or retire it with "
+                  "`risk disable --reason`.", file=sys.stderr)
+            return 2
+        problem = horizon_problem(expiry)
+        if problem:
+            print(f"REFUSING: {problem}", file=sys.stderr)
+            return 2
         else:
             # `|| %s::jsonb` with ONE json-encoded parameter, the idiom
             # `risk add` already uses. NOT jsonb_build_object(%s, %s): psycopg
@@ -795,38 +823,42 @@ def cmd_risk_lint(args, dsn):
                     "WHERE position(%s in lower(title)) > 0",
                     ((desc or "").strip().lower(),))
                 inert = cur.fetchone()["n"] == 0
-            if warn or miss or inert or expired or unrecorded or args.all:
+            missing = expires is None
+            if warn or miss or inert or expired or unrecorded or missing or args.all:
                 rows.append((ar_id, desc, matches, warn, miss, inert,
                              expired, expires, unrecorded, anchors.get(ar_id),
-                             meta))
+                             meta, missing))
     if not rows:
         print("all enabled AR descriptions are drift-stable and matching")
         return 0
     print(f"{'AR':<8} {'open-match':>10}  description")
     attention = register_only = 0
     for (ar_id, desc, matches, warn, miss, inert, expired, expires, unrecorded,
-         anchor, meta) in rows:
+         anchor, meta, missing) in rows:
         flag = lint_flag(matches, warn, miss, 0 if inert else 1, expired=expired,
                          register_only=anchor)
         if flag == "REGISTER-ONLY":
             register_only += 1
-        if flag not in ("ok", "REGISTER-ONLY") or unrecorded:
+        if flag not in ("ok", "REGISTER-ONLY") or unrecorded or missing:
             attention += 1
         print(f"{ar_id:<8} {matches:>10}  {desc!r}  [{flag}]")
         if expired:
             print(f"{'':<21}! stated expiry {expires!r} has passed — it no "
                   f"longer suppresses anything (the sweep skips it).")
-            print(f"{'':<23}Renew: `risk edit {ar_id} --expires <date>`; "
-                  f"retire: `risk disable {ar_id}`; or `--expires none` if "
-                  f"the deadline was never real.")
+            print(f"{'':<23}The next sweep auto-disables it. Renew: `risk "
+                  f"renew {ar_id}`; retire: `risk disable {ar_id} --reason ...`.")
+        if missing:
+            print(f"{'':<21}! NO EXPIRY recorded — every AR must carry one "
+                  f"(F-d5486ff1). `risk renew {ar_id}` sets the default "
+                  f"+{DEFAULT_HORIZON_DAYS}d; `risk edit {ar_id} --expires <date>` "
+                  f"for another (max {MAX_HORIZON_DAYS}d).")
         if unrecorded:
             _phrase, _date = unrecorded
             print(f"{'':<21}! justification states a deadline ({_phrase} "
                   f"{_date}) that NOTHING ENFORCES — no metadata.expires_at is "
                   f"recorded, so this AR suppresses indefinitely.")
             print(f"{'':<23}Record it: `risk edit {ar_id} --expires {_date}` "
-                  f"(or a renewed date), or `--no-expiry` semantics: reword the "
-                  f"justification as a CONDITION, not a date.")
+                  f"(or a renewed date).")
         for w in warn:
             print(f"{'':<21}! {w}")
         if miss:
@@ -869,15 +901,89 @@ def cmd_risk_review(args, dsn):
 
 
 def cmd_risk_disable(args, dsn):
+    """Soft-disable, keeping WHY in the row. Nothing is deleted: the register
+    is the history of what was accepted, and a disabled row with a reason
+    answers "why did this finding come back" without a git archaeology dig."""
+    reason = (getattr(args, "reason", None) or "").strip()
+    if not reason:
+        print("REFUSING: say why — `risk disable AR-xxx --reason '...'` (kept "
+              "in metadata.disabled_reason so the register records it).",
+              file=sys.stderr)
+        return 2
+    stamp = {DISABLED_REASON_KEY: reason,
+             DISABLED_AT_KEY: _dt.date.today().isoformat(),
+             DISABLED_BY_KEY: "policy-cli"}
     with _connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(
-            "UPDATE accepted_risks SET enabled = false WHERE ar_id = %s",
-            (args.ar_id,),
+            "UPDATE accepted_risks SET enabled = false, last_reviewed_at = now(), "
+            "metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb "
+            "WHERE ar_id = %s",
+            (json.dumps(stamp), args.ar_id),
         )
         if cur.rowcount == 0:
             print(f"AR {args.ar_id} not found", file=sys.stderr); return 1
         conn.commit()
-        print(f"disabled {args.ar_id}")
+        print(f"disabled {args.ar_id} — reason recorded; the findings it masked "
+              f"re-surface at their own severity on the next sweep")
+    return 0
+
+
+def cmd_risk_renew(args, dsn):
+    """Conscious renewal: set a new expiry (default +DEFAULT_HORIZON_DAYS,
+    at most MAX_HORIZON_DAYS out), bump last_reviewed_at, count the renewal —
+    and, only for an AR the sweep auto-disabled for EXPIRY, re-enable it.
+
+    An AR disabled for any other reason (premise false, superseded) is NOT
+    re-enabled by a renewal: that was a decision, and undoing it needs its own
+    (`risk edit` + a reviewed re-enable), not a side effect of a date bump."""
+    today = _dt.date.today()
+    if args.expires is not None and args.days is not None:
+        print("REFUSING: pass --expires OR --days, not both", file=sys.stderr)
+        return 2
+    if args.expires is not None:
+        try:
+            expiry = parse_expiry(args.expires)
+        except ValueError as exc:
+            print(f"REFUSING: {exc}", file=sys.stderr)
+            return 2
+        if expiry is None:
+            print("REFUSING: a renewal needs a date", file=sys.stderr)
+            return 2
+    else:
+        expiry = default_expiry(today, args.days if args.days is not None
+                                else DEFAULT_HORIZON_DAYS)
+    if expiry < today:
+        print(f"REFUSING: --expires {expiry} is already past", file=sys.stderr)
+        return 2
+    problem = horizon_problem(expiry, today)
+    if problem:
+        print(f"REFUSING: {problem}", file=sys.stderr)
+        return 2
+    with _connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT enabled, metadata FROM accepted_risks WHERE ar_id = %s",
+                    (args.ar_id,))
+        row = cur.fetchone()
+        if not row:
+            print(f"AR {args.ar_id} not found", file=sys.stderr); return 1
+        meta = row["metadata"] or {}
+        if not row["enabled"] and meta.get(DISABLED_REASON_KEY) != EXPIRED_REASON:
+            print(f"REFUSING: {args.ar_id} was disabled for a reason other than "
+                  f"expiry ({meta.get(DISABLED_REASON_KEY)!r}); a renewal does "
+                  f"not overturn that decision.", file=sys.stderr)
+            return 2
+        stamp = {EXPIRY_KEY: expiry.isoformat(),
+                 "renewed_at": today.isoformat(),
+                 "renew_count": int(meta.get("renew_count") or 0) + 1}
+        cur.execute(
+            "UPDATE accepted_risks SET enabled = true, last_reviewed_at = now(), "
+            "metadata = (COALESCE(metadata, '{}'::jsonb) - %s - %s - %s) || %s::jsonb "
+            "WHERE ar_id = %s",
+            (DISABLED_REASON_KEY, DISABLED_AT_KEY, DISABLED_BY_KEY,
+             json.dumps(stamp), args.ar_id))
+        conn.commit()
+    was = "" if row["enabled"] else " and RE-ENABLED (it had lapsed)"
+    print(f"renewed {args.ar_id} until {expiry}{was}")
+    return 0
 
 
 def cmd_risk_delete(args, dsn):
@@ -1556,7 +1662,7 @@ def build_parser() -> argparse.ArgumentParser:
     ra.add_argument("--expires", metavar="YYYY-MM-DD",
                     help="last day this acceptance is in force")
     ra.add_argument("--no-expiry", action="store_true",
-                    help="open-ended (condition-based) acceptance")
+                    help=argparse.SUPPRESS)   # withdrawn (F-d5486ff1): refused with a pointer
     ra.add_argument("--allow-expired", action="store_true",
                     help="record an acceptance whose deadline has already passed")
     ra.add_argument("--allow-drift", action="store_true",
@@ -1581,7 +1687,7 @@ def build_parser() -> argparse.ArgumentParser:
     re_.add_argument("--severity")
     re_.add_argument("--justification")
     re_.add_argument("--expires", metavar="YYYY-MM-DD",
-                     help="set the last day in force; 'none' clears it")
+                     help=f"set the last day in force (at most {MAX_HORIZON_DAYS} days out)")
     re_.add_argument("--allow-drift", action="store_true",
                      help="accept a description that pins a patch version / count")
     re_.add_argument("--register-only", metavar="ANCHOR",
@@ -1595,7 +1701,15 @@ def build_parser() -> argparse.ArgumentParser:
     rv = risk.add_parser("review"); rv.add_argument("ar_id")
     rv.set_defaults(handler=cmd_risk_review)
     rd = risk.add_parser("disable"); rd.add_argument("ar_id")
+    rd.add_argument("--reason", required=True,
+                    help="why it is retired — kept in metadata.disabled_reason")
     rd.set_defaults(handler=cmd_risk_disable)
+    rr = risk.add_parser("renew", help="set a new expiry (default +90d, max 180d); "
+                                       "re-enables an AR auto-disabled for expiry")
+    rr.add_argument("ar_id")
+    rr.add_argument("--expires", metavar="YYYY-MM-DD")
+    rr.add_argument("--days", type=int, metavar="N")
+    rr.set_defaults(handler=cmd_risk_renew)
     rD = risk.add_parser("delete"); rD.add_argument("ar_id")
     rD.set_defaults(handler=cmd_risk_delete)
 

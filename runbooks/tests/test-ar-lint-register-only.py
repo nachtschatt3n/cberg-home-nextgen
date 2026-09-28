@@ -58,6 +58,10 @@ CODE_ANCHOR = "security-check.py:ACCEPTED_PRIVILEGED"
 
 # ---- a fake database: just enough SQL dispatch for the three commands ------
 
+import datetime as _dt
+_FUTURE = (_dt.date.today() + _dt.timedelta(days=30)).isoformat()
+
+
 class FakeCursor:
     """Answers the queries cmd_risk_lint / cmd_risk_add / cmd_risk_edit issue,
     keyed on the table each one names. Records every statement so a test can
@@ -75,7 +79,9 @@ class FakeCursor:
         if s.startswith("SELECT") and "FROM accepted_risks" in s and "ar_id = %s" in s:
             self._rows = [r for r in self.ars if r["ar_id"] == params[0]]
         elif s.startswith("SELECT") and "FROM accepted_risks" in s:
-            self._rows = [{**r, "expires_at": (r.get("metadata") or {}).get("expires_at")}
+            # A recorded expiry by default: this suite is about register-only
+            # classification, not the missing-expiry nag (test-ar-expiry-gate).
+            self._rows = [{**r, "expires_at": (r.get("metadata") or {}).get("expires_at", _FUTURE)}
                           for r in self.ars]
         elif "FROM security_acceptances" in s:
             self._rows = [r for r in self.sec_rows if r.get("enabled", True)]
@@ -292,7 +298,7 @@ def main() -> int:
     # ---- the flags reach the handlers and write exactly the two keys -------------
     print("risk add / risk edit wiring:")
     parser = pc.build_parser()
-    a = parser.parse_args(["risk", "add", "AR-999", "--description", "x", "--no-expiry",
+    a = parser.parse_args(["risk", "add", "AR-999", "--description", "x", "--expires", _FUTURE,
                            "--register-only", CODE_ANCHOR])
     check("risk add accepts --register-only", a.register_only == CODE_ANCHOR)
     e = parser.parse_args(["risk", "edit", "AR-009", "--register-only", "none"])
@@ -349,7 +355,7 @@ def main() -> int:
     with contextlib.redirect_stdout(out):
         rc = pc.cmd_risk_add(parser.parse_args(
             ["risk", "add", "AR-999", "--description", "A Heading That Matches Nothing",
-             "--no-expiry", "--register-only", pc.POSTURE_ANCHOR]), "fake")
+             "--expires", _FUTURE, "--register-only", pc.POSTURE_ANCHOR]), "fake")
     ins = next(((s, p) for s, p in cur.executed if s.startswith("INSERT")), ("", ()))
     written = json.loads(ins[1][-1]) if ins[1] else {}
     check("risk add --register-only passes the nomatch gate without --allow-nomatch",
@@ -360,7 +366,7 @@ def main() -> int:
     err = io.StringIO()
     with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
         rc = pc.cmd_risk_add(parser.parse_args(
-            ["risk", "add", "AR-998", "--description", "x", "--no-expiry",
+            ["risk", "add", "AR-998", "--description", "x", "--expires", _FUTURE,
              "--register-only", "none"]), "fake")
     check("risk add --register-only none is refused (nothing to clear on a new AR)",
           rc == 2 and "REFUSING" in err.getvalue())

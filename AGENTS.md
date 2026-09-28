@@ -323,6 +323,17 @@ has shipped three times. `risk add` now refuses an inert, over-broad, or
 drift-unstable needle; scope to the major line (`postgres:17.`, `node:22.`) so it
 survives patch drift and lapses at the major boundary as the re-review trigger.
 
+**Every AR expires (F-d5486ff1, 2026-09-28).** `risk add` refuses without
+`--expires YYYY-MM-DD` (max 180 days out; `--no-expiry` is withdrawn and a
+deadline cannot be cleared). 14 days before the date the AR shows as an
+`AR-RENEW?` line on the sweep board and in the weekly ops retro; renew it
+consciously with `risk renew AR-0xx` (default +90d). An AR nobody renews is
+AUTO-DISABLED by the sweep (`metadata.disabled_reason=expired`) and its findings
+re-surface at their own severity. Never renew an AR silently or in bulk to clear
+the board — each renewal is a decision. Retire with
+`risk disable AR-0xx --reason '…'` (reason required, kept on the row). Full
+lifecycle: `docs/sops/policy-cli.md`.
+
 Browse: `https://sweep.<DOMAIN>/policies/`. JSON API at
 `/api/policies/{accepted-risks,slos,noise,security}`.
 

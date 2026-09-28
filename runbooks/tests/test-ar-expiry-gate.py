@@ -84,6 +84,15 @@ class FakeCursor:
         if up.startswith("SELECT COUNT(*)"):
             self._mode = "count"
             self._count = self.conn.count_exempt(norm, params)
+        elif up.startswith("UPDATE ACCEPTED_RISKS"):
+            # lib/ar_expiry.auto_disable_expired (F-d5486ff1): record it.
+            self._mode = "disable"
+            self.conn.disabled.append(params[1])
+            self.rowcount = 1
+        elif up.startswith("SELECT AR_ID, METADATA->>'EXPIRES_AT'"):
+            # the auto-disable's own (ar_id, expires) read
+            self._mode = "ars"
+            self._rows = [(a, e) for a, _d, e in self.conn.ars]
         elif "FROM ACCEPTED_RISKS" in up:
             self._mode = "ars"
             self._rows = self.conn.ar_rows(norm)
@@ -110,6 +119,7 @@ class FakeConn:
         self.today = today
         self.log: list = []
         self.tagged: list = []
+        self.disabled: list = []
 
     def __enter__(self):
         return self

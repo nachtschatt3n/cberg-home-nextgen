@@ -328,7 +328,7 @@ kubectl -n backup rollout status deploy/icloud-docker-$INSTANCE --timeout=120s
 If the outage was parked under an AR (e.g. AR-044), disable it after recovery:
 
 ```bash
-# via runbooks/policy-cli.py risk disable AR-NNN  (see docs/sops/policy-cli.md)
+python3 runbooks/policy-cli.py risk disable AR-NNN --reason 'recovered <date>'  # see docs/sops/policy-cli.md
 ```
 
 ---
