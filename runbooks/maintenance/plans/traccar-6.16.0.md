@@ -19,10 +19,15 @@ risk: low                             # schema changelog + Dockerfile byte-ident
                                       # the three behaviour changes that could bite were measured
                                       # against live data and hit 0 rows. Held for the float, not
                                       # for the software.
-est_duration_min: 95                  # ~15 active (pre-checks, dump, push, roll ~2 min outage) +
-                                      # up to 80 min for §4.3 (45 min wait + INCONCLUSIVE extension,
-                                      # capped so the whole plan stays inside the window; beyond
-                                      # that it goes awaiting-soak). Night ingest is ~4-12 positions/h.
+est_duration_min: 60                  # RE-PRICED 2026-09-28 (F-592f3a24, operator "fix the open points"):
+                                      # active ~15 min = premises+2.2-2.6 ~4, §3.1 baselines + §3.2
+                                      # pg_dump of an 88 MB DB (265k positions, measured 09-28) ~3,
+                                      # §3.3 push + reconcile + Recreate roll ~5, §4.1/4.2/4.4 ~3;
+                                      # PLUS §4.3 capped at 45 min IN-WINDOW. The old 95 also budgeted
+                                      # the INCONCLUSIVE extension (to 80 min) inside the window; that
+                                      # extension now leaves the window by the plan's own existing
+                                      # route (status awaiting-soak, §4.3 handed to the next sweep).
+                                      # 15 + 45 = 60 <= 70 (nightly usable = 90 - 20).
 needs_reboot: false
 touches:
   namespaces: [home-automation]
@@ -417,10 +422,13 @@ outage are expected and **lossless**: the sync only stamps
 `lastUploadedFixAt` on a 2xx, so a failed fix is re-sent next cycle
 (`is_unchanged_fix`, findmy_json_traccar_bridge.py). If 45 min pass with no
 changed fix at all (0 uploads, 0 failures — nobody moved), the result is
-INCONCLUSIVE, not PASS: keep polling (the est_duration_min of 95 budgets up to
-80 min for this section). If it is still INCONCLUSIVE at that point, the
-extension spills out of the window: leave the plan `awaiting-soak`, hand the
-§4.3 check to the next sweep, and do not mark it executed on 4.4 alone.
+INCONCLUSIVE, not PASS. The in-window budget for this section is 45 min
+(est_duration_min 60, re-priced 2026-09-28): do NOT extend the poll inside the
+window. Leave the plan `awaiting-soak`, hand the §4.3 check to the next sweep
+(it re-runs the three reads above against the same BASE/ROLL_START/READY_AT),
+and do not mark it executed on 4.4 alone. At the measured night rate of
+4-12 positions/h the chance of 45 min with zero changed fixes is ~5% at the
+low end, so awaiting-soak is the exception path, not the expected one.
 
 **§4.3 and §4.4 are the ONLY gates that prove the upgraded server ingests and
 serves.** §4.5 is a feeder precondition, not an upgrade gate (see there).
