@@ -9,6 +9,7 @@ resources:
   - ./scripts-configmap.yaml
   - ./audit-cronjob.yaml
   - ./organize-cronjob.yaml
+  - ./intake-cronjob.yaml
   - ./sidecar-cronjob.yaml
   - ./episode-sidecar-cronjob.yaml
   - ./cleanup-cronjob.yaml

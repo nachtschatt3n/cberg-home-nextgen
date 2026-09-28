@@ -1,0 +1,111 @@
+---
+# Automatic media intake (CronJob media/media-intake-watcher, every 30 min).
+# Gauges arrive via prometheus-pushgateway (job="media-intake-watcher").
+# The daily human summary is NOT an alert: it goes to the OpenClaw briefing
+# (runbooks/media-intake-digest.py, home-operation kind window_warning).
+# These rules are IT-ops signals only: a failed move, an item stuck
+# ambiguous for a day, a safety stop, or the watcher itself going dark.
+#
+# Pushgateway has no TTL, so the ambiguous-age rule reads a first-seen
+# TIMESTAMP (keeps ageing in PromQL even if the watcher dies), and the
+# watcher's liveness is its own last-run timestamp — never a pre-computed age.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: media-intake-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: media-intake.watcher
+      interval: 1m
+      rules:
+        - alert: MediaIntakeMoveFailed
+          annotations:
+            summary: Media intake has {{ $value }} item(s) whose move failed
+            description: |
+              media-intake-watcher could not complete a move (or a two-step
+              REPLACE rolled back). Nothing was deleted: a failed step leaves
+              the file where the last successful rename put it, and a failed
+              REPLACE is rolled back so the library copy is back in place.
+              Check `kubectl -n media logs job/<latest media-intake-watcher-*>`
+              for `organize-group-step-failed` / `organize-rollback-failed`
+              (the latter is the case that needs a human: the file is in
+              <Section>/_duplicates/ and the item's slot is empty).
+              Kill switch: INTAKE_APPLY="0" in
+              kubernetes/apps/media/library-tools/app/intake-cronjob.yaml.
+          expr: max(media_intake_items{job="media-intake-watcher", state="failed"}) > 0
+          for: 5m
+          labels:
+            severity: warning
+            category: media
+            component: media-intake
+        - alert: MediaIntakeAmbiguousStale
+          annotations:
+            summary: A download has sat in the JDownloader intake as ambiguous for over 24h
+            description: |
+              {{ $value | humanizeDuration }} since the oldest ambiguous item
+              was first seen. The watcher could not classify it (no year, no
+              confident TMDb match, inconsistent album tags, fps/duration
+              mismatch with the library copy, YouTube-looking, ...). The
+              reason counts are in media_intake_ambiguous_items{reason}. Sort
+              it by hand (media-manager agent) or rename it so it classifies.
+          expr: |
+            max(media_intake_items{job="media-intake-watcher", state="ambiguous"}) > 0
+            and on()
+            (time() - max(media_intake_ambiguous_oldest_first_seen_timestamp_seconds{job="media-intake-watcher"})) > 86400
+          for: 30m
+          labels:
+            severity: warning
+            category: media
+            component: media-intake
+        - alert: MediaIntakeRunAborted
+          annotations:
+            summary: Media intake hit a safety stop ({{ $labels.reason }})
+            description: |
+              too-many-items: more than INTAKE_MAX_ITEMS (50) items would have
+              moved, so nothing moved. free-space: free space fell by more
+              than 1 GiB during the run (a rename never uses space, so either
+              something copied or JDownloader was writing heavily). preflight:
+              the intake or library mount is missing, or they are two
+              filesystems (EXDEV). Persisting for 2h = several runs in a row.
+          expr: max by (reason) (media_intake_run_aborted{job="media-intake-watcher", reason!="none"}) > 0
+          for: 2h
+          labels:
+            severity: warning
+            category: media
+            component: media-intake
+        - alert: MediaIntakeWatcherStale
+          annotations:
+            summary: media-intake-watcher has not completed a run for {{ $value | humanizeDuration }}
+            description: |
+              The watcher runs every 30 min and pushes
+              media_intake_last_run_timestamp_seconds at the end of every run.
+              3h without a push means the CronJob is failing before the push,
+              hung on the CIFS mount (activeDeadlineSeconds kills it), or was
+              removed. The other media-intake rules read stale data meanwhile.
+          expr: time() - max(media_intake_last_run_timestamp_seconds{job="media-intake-watcher"}) > 10800
+          for: 15m
+          labels:
+            severity: warning
+            category: media
+            component: media-intake
+        # Inertness guard: every rule above is silent when the series are
+        # missing entirely (pushgateway restarted empty, watcher never ran).
+        - alert: MediaIntakeMetricsMissing
+          annotations:
+            summary: media-intake-watcher metrics are absent from Prometheus
+            description: |
+              media_intake_items has no series at all, so MediaIntakeMoveFailed,
+              MediaIntakeAmbiguousStale and MediaIntakeWatcherStale are blind.
+              Either the CronJob has not run since pushgateway lost its
+              in-memory state (self-heals within 30 min) or it is gone.
+          expr: absent(media_intake_items{job="media-intake-watcher"})
+          for: 3h
+          labels:
+            severity: warning
+            category: media
+            component: media-intake

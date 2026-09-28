@@ -154,6 +154,16 @@ The naive query (folder name + year) hits ~60%. The full ladder gets to 95%+:
 
 ## Standard workflow — JDownloader intake
 
+> **Since 2026-09-28 this loop is AUTOMATIC** for new downloads: CronJob
+> `media-intake-watcher` (`intake.py`) classifies, dedupes (ffprobe:
+> identical/worse → `_duplicates/`, better → two-step REPLACE, anything else
+> left as ambiguous), moves, sidecars, cleans up and rescans folder-scoped,
+> every 30 min. Kill switch `INTAKE_APPLY=0`. Rules:
+> `docs/sops/media-library-standards.md` "Automatic intake". The manual steps
+> below now apply to what the watcher leaves **ambiguous** and to bulk work.
+> Templated jobs use ONE share-root mount (`/data`, intake at
+> `/data/downloads/jdownloader`) — two mounts = EXDEV on every rename.
+
 1. **List intake** via a debug pod that mounts `jdownloader-downloads`:
    ```bash
    kubectl -n media create job --from=cronjob/media-library-audit media-list-$(date +%s)
@@ -169,7 +179,7 @@ The naive query (folder name + year) hits ~60%. The full ladder gets to 95%+:
 6. **Apply on approval.** Run `kubectl create job --from=cronjob/media-organize ...` with the plan as a ConfigMap input. The Job creates destination folders, runs `mv`, then writes/refreshes sidecars (`.nfo`, folder-level `poster.jpg` + `fanart.jpg`, episode `-thumb.jpg`), fetching missing artwork from TMDb / TVDb.
 7. **Verify each target** exists with `size > 0` (sample-stat in the same Job after the moves; the Job exits non-zero if any target is missing).
 8. **Cleanup.** Invoke `cleanup.py` against the **specific** JDownloader subdirectories whose contents are now fully verified at destination. The script re-verifies before deleting; refuses globs; refuses share-root paths.
-9. **Delegate rescan to `cluster-ops-agent`.** Brief: "Trigger Plex section rescan + Jellyfin library refresh for sections X/Y because we just moved N items in." cluster-ops-agent calls the Plex `POST /library/sections/{id}/refresh` + Jellyfin `POST /Library/Refresh` endpoints with credentials from `media-manager-tokens.sops.yaml`.
+9. **Folder-scoped rescan only.** Run `media-rescan` with `RESCAN_PATHS` = the JSON list of library folders you changed (Plex `/library/sections/{id}/refresh?path=`, Jellyfin `POST /Library/Media/Updated` per folder). NEVER a full-library refresh (`/Library/Refresh`, section refresh without `path=`) — it locks Jellyfin's SQLite and got the pod liveness-killed mid-scan (removed from rescan.py 2026-09-28).
 10. **Spot-check.** Item count delta in Plex/Jellyfin matches move count; zero "unmatched" entries in touched sections.
 
 ## Migration workflow — flat → nested

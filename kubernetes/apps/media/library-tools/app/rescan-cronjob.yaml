@@ -1,5 +1,8 @@
 ---
-# Suspended CronJob — invoked on-demand to call Plex + Jellyfin rescan APIs.
+# Suspended CronJob — invoked on-demand to call Plex + Jellyfin FOLDER-SCOPED
+# rescans. Pass RESCAN_PATHS (JSON list of /data/data/... folders); with no
+# paths it does nothing. Full-library scans were removed (2026-09-28): they
+# locked Jellyfin's SQLite and got the pod liveness-killed mid-scan.
 # Tokens read from media-manager-tokens secret (optional — script logs and
 # skips if absent so the cluster doesn't fail to come up before user supplies).
 apiVersion: batch/v1
@@ -16,6 +19,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0
+      # Templated jobs are created by hand / by agents; without a TTL every
+      # run's Job + pod lingered until the history limit swept it.
+      ttlSecondsAfterFinished: 86400
       template:
         spec:
           securityContext:

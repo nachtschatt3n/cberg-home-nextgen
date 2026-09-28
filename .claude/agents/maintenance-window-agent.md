@@ -608,6 +608,17 @@ kubectl -n ai exec deploy/openclaw -c app -- \
 the same ORDER rule as the window-complete issue (after the reconcile). Fall
 back to `runbooks/lib/notify.py "<same summary>"` if the exec fails.
 
+**Nightly only, every night: the MEDIA INTAKE DIGEST (2026-09-28).** After the
+reconcile (same ORDER rule), run
+`.venv/bin/python3 runbooks/media-intake-digest.py` — it reads the
+media-intake-watcher gauges from pushgateway and ingests ONE ack-only
+`media-intake-<date>` issue (`window_warning`, `source: maintenance`) so the
+operator's briefing says what the automatic JDownloader intake sorted,
+deduplicated, replaced, or left ambiguous in the last 24h. Exit 2 = metrics
+unreadable or ingest failed: note it in the close-out, do not Telegram it
+(business summary, not an IT-ops alert; the failure alerts are in
+`media-intake-alerts.yaml`).
+
 **THAT ORDER IS LOAD-BEARING — do not swap it back.** The reconcile's open set
 is `maintenance-plan.py`'s `open_issue_keys`, which by construction holds PLAN
 IDS ONLY (`runbooks/maintenance-plan.py`: every plan whose `status` is not

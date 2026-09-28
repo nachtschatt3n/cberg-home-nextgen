@@ -42,7 +42,9 @@ data:
     # CronJob templates the dashboard can fire
     TRIGGERS = {
         "audit":     ("media", "media-library-audit"),
-        "rescan":    ("media", "media-rescan"),
+        # Full-library rescans were removed (they lock Jellyfin); the intake
+        # watcher rescans only the folders it changed.
+        "intake":    ("media", "media-intake-watcher"),
         "coverage":  ("media", "media-metadata-coverage"),
     }
 
@@ -314,7 +316,7 @@ data:
 
       <h2>Triggers</h2>
       <form method="post" action="/trigger/audit"><button>Run Audit</button></form>
-      <form method="post" action="/trigger/rescan"><button>Rescan Plex + Jellyfin</button></form>
+      <form method="post" action="/trigger/intake"><button>Run intake now</button></form>
       <form method="post" action="/trigger/coverage"><button>Refresh coverage</button></form>
       <p class="meta">Triggers create a Kubernetes Job from the matching CronJob template.</p>
 
@@ -325,7 +327,7 @@ data:
             <tr><th>Item</th><th>Kind</th><th>Size</th><th>Age (h)</th></tr>
             {intake_rows}
           </table>
-          <p class="meta">Live <code>ls /intake</code>. Items remain until the agent moves them.</p>
+          <p class="meta">Live <code>ls /intake</code>. The intake watcher sorts finished items every 30 min; ambiguous ones stay here.</p>
         </div>
         <div>
           <h2>Recent jobs</h2>

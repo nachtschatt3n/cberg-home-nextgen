@@ -2,6 +2,13 @@
 # Suspended CronJob — invoked on-demand via:
 #   kubectl -n media create job --from=cronjob/media-organize media-organize-<id> -- \
 #     /bin/sh -ec 'cat /plan/plan.json | python /app/organize.py'
+#
+# ONE mount of the share root (plex-media-smb at /data): the intake is
+# /data/downloads/jdownloader, the library /data/data. The previous layout
+# mounted the intake as a SECOND CIFS mount at /intake, which the kernel sees
+# as a different filesystem, so every rename failed with EXDEV. Plan paths
+# must therefore use /data/downloads/jdownloader/..., not /intake/...
+# Automatic intake (media-intake-watcher) supersedes this for new downloads.
 # A move plan must be supplied via stdin (mount a ConfigMap as /plan or use
 # --command -- with a shell that pipes in the plan). See the dashboard or the
 # media-manager sub-agent for full invocation patterns.
@@ -19,6 +26,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0
+      # Templated jobs are created by hand / by agents; without a TTL every
+      # run's Job + pod lingered until the history limit swept it.
+      ttlSecondsAfterFinished: 86400
       template:
         spec:
           securityContext:
@@ -34,14 +44,12 @@ spec:
                 - name: MEDIA_ROOT
                   value: "/data/data"
                 - name: JDOWNLOADER_ROOT
-                  value: "/intake"
+                  value: "/data/downloads/jdownloader"
               volumeMounts:
                 - name: scripts
                   mountPath: /app
                 - name: media
                   mountPath: /data
-                - name: intake
-                  mountPath: /intake
               resources:
                 requests:
                   cpu: 100m
@@ -55,6 +63,3 @@ spec:
             - name: media
               persistentVolumeClaim:
                 claimName: plex-media-smb
-            - name: intake
-              persistentVolumeClaim:
-                claimName: jdownloader-intake

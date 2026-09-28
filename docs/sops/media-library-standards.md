@@ -1,14 +1,14 @@
 # SOP: Media Library Standards (Plex + Jellyfin + Tube Archivist)
 
 > Description: Canonical on-disk layout, naming, sidecar/NFO conventions, and intake workflow for the shared Plex/Jellyfin/Tube Archivist media library.
-> Version: `2026.09.22`
-> Last Updated: `2026-09-22`
+> Version: `2026.09.28`
+> Last Updated: `2026-09-28`
 > Owner: `media-manager`
 
 | Field | Value |
 |---|---|
-| **Version** | 2026.09.22 |
-| **Last Updated** | 2026-09-22 |
+| **Version** | 2026.09.28 |
+| **Last Updated** | 2026-09-28 |
 | **Owner** | media-manager |
 | **Applies to** | All content under `//${NAS_HOSTNAME}/media/data/` consumed by Plex (`media/plex`) and Jellyfin (`media/jellyfin`); JDownloader intake at `//${NAS_HOSTNAME}/media/downloads/jdownloader`; Tube Archivist content at `//${NAS_HOSTNAME}/media/downloads/tube-archivist` (surfaced in Jellyfin only — Plex is intentionally not configured for YouTube). |
 
@@ -34,7 +34,7 @@ This SOP is the source of truth for the `media-manager` sub-agent (`.claude/agen
 | Library root (SMB share) | `//${NAS_HOSTNAME}/media/data/` |
 | Plex pod mount | `/data/data/` (PVC `plex-media-smb`, StorageClass `cifs-plex-media`, `reclaim: Retain`) |
 | Jellyfin pod mount | `/media/data/` (PVC `jellyfin-media-smb`, StorageClass `cifs-jellyfin-media`, `reclaim: Retain`) |
-| JDownloader intake | `/mnt/nas/media/downloads/jdownloader/` (pod path `/output`, PVC `jdownloader-downloads`) |
+| JDownloader intake | `/mnt/nas/media/downloads/jdownloader/` (JDownloader pod path `/output`, PVC `jdownloader-downloads`; library-tools jobs reach it as `/data/downloads/jdownloader` on the single `plex-media-smb` share-root mount) |
 | Tube Archivist source | `/mnt/nas/media/downloads/tube-archivist/` (pod path `/youtube`, PVC `tube-archivist-youtube`) |
 | Sections (Plex) | `Movies`, `TV Shows`, `Music` |
 | Sections (Jellyfin) | `Movies`, `TV Shows`, `Music`, plus a `YouTube` library pointed directly at `/media/downloads/tube-archivist/` |
@@ -155,7 +155,7 @@ ffprobe -v error -select_streams v:0 \
   -of default=noprint_wrappers=1 FILE
 ```
 
-Decision rule: prefer higher bitrate, native film fps (`23.976` over PAL `25`), longer/complete duration. Never overwrite without surfacing the probe diff to the user for explicit go/no-go.
+Decision rule: prefer higher bitrate, native film fps (`23.976` over PAL `25`), longer/complete duration. Nothing is ever overwritten: the automatic intake (below) applies a fixed rule set and displaces the loser into `_duplicates/`; anything outside that rule set (an fps mismatch, a duration off by more than 2%, a mixed resolution/bitrate verdict) is left in the intake for a human.
 
 ### Duplicate quarantine — `_duplicates/` requires a `.plexignore`, not just the prefix
 
@@ -175,7 +175,7 @@ _archive/**
 
 Apply via an ephemeral Job mounting the existing `plex-media-smb` PVC (same pattern as `organize.py` — write-only, no deletes), then force a Plex section refresh via `cluster-ops-agent` (`POST /library/sections/{id}/refresh?force=1`) so the new ignore rules are honored on the next directory walk. Jellyfin has its own equivalent ignore mechanism per library (check current Jellyfin version's docs — do not assume it matches Plex's `.plexignore` syntax) — verify separately if Jellyfin's Movies/TV Shows libraries also walk `_duplicates/`.
 
-**Known related gap**: the Plex "Movies" library section's configured root may be broader than `<mount>/Movies` (e.g. scoped to the whole mount root instead). A `.plexignore` at the `Movies/` level still works regardless, since Plex applies ignore rules cascading down from wherever the file lives in the tree. Correcting an overly-broad section root is a separate, out-of-scope change (Plex UI / library recreation, not covered by this SOP) — flag it to the user rather than changing it inline with a dedup fix.
+**Known related gap**: the Plex "Movies" section (id 1) is rooted at `/data/data` (the share's data root), not `/data/data/Movies`. Every item does live under `Movies/`, so the broad root is tidiness, not a bug, and a `.plexignore` at the `Movies/` level still works (ignore rules cascade from wherever the file sits). **Do not fix it through the API by adding `/data/data/Movies` and removing the root.** Plex ties every media item to the location id it was first scanned under (`media_items.section_location_id`), and a scan of a newly added nested location does not move items to it (verified 2026-09-28: 501/501 items stayed on the root id after a folder-scoped scan of the new location). Removing the root would leave every item without a location, and with `autoEmptyTrash` on they would be deleted. The only in-place fix is a DB edit with Plex scaled to 0 (move the location ids, then rewrite `section_locations.root_path`), after a DB snapshot. That needs an operator go/no-go.
 
 ### Audit thresholds
 
@@ -235,20 +235,105 @@ album under a synthetic, art-less "Various Artists" artist.
    the tags now consistent, a later rescan keeps it there; reversible via Plex
    "Split Apart". (2026-08-10: cleared the last Music unmatched item this way → 100%.)
 
-### Intake from JDownloader
+### Automatic intake from JDownloader (media-intake-watcher)
 
-The `media-manager` sub-agent owns the loop. Summary:
+Since 2026-09-28 new downloads are sorted **automatically**. CronJob
+`media/media-intake-watcher` runs `intake.py`
+(`kubernetes/apps/media/library-tools/app/`) every 30 min. It mounts the share
+root once (`plex-media-smb` at `/data`); the intake is
+`/data/downloads/jdownloader`, the library is `/data/data`. **Never mount the
+intake as a second PVC**: two CIFS mounts are two filesystems, every rename
+between them fails with `EXDEV`, and the watcher's preflight refuses to run.
 
-1. List `/mnt/nas/media/downloads/jdownloader/` via a debug pod that mounts `jdownloader-downloads`.
-2. Classify each item: TV iff filename matches `S\d{2}E\d{2}` (case-insensitive); else movie; else escalate.
-3. ffprobe each candidate; if a same-name target exists, build a quality-diff table.
-4. Compute target paths under `/mnt/nas/media/data/{Movies,TV Shows}/...` per the nested layout.
-5. Render the move plan + conflicts as a table; surface to user for go/no-go.
-6. On approval: ephemeral Job creates destination folders, runs `mv` (atomic, same CIFS mount), writes/refreshes sidecars, fetches missing artwork from TMDb / TVDb.
-7. Verify each target exists with `size > 0` (sample-stat in the same Job).
-8. Cleanup: `rm -rf` the **specific** JDownloader subdirectory whose contents are now fully verified at destination. Hard-coded path. Never glob the share root.
-9. Trigger Plex section rescan + Jellyfin library refresh for the affected sections only (delegated to `cluster-ops-agent`).
-10. Report counts + any "unmatched" items in Plex/Jellyfin after rescan.
+Per top-level intake item (names starting with `.` or `_` are ignored):
+
+1. **Incomplete guard.** The watcher skips (`pending`) any item that holds a
+   `.rar`/`.rNN`/`.part` file, or that has anything modified in the last 30 min.
+2. **Classify.**
+   - `SxxEyy` on every video: **TV**.
+   - One feature video and a year matching `(19|20)\d{2}`: **movie**.
+   - Audio only: **music**, grouped by the album tag. Album, album-artist
+     (majority), year and track tags must be consistent.
+   - YouTube-looking names (`[<11-char id>]`, "youtube") are flagged and left
+     in place. Tube Archivist owns YouTube.
+   - Anything else is **ambiguous** and stays in the intake.
+3. **Resolve the target** per the layout above.
+   - Movies and shows: an existing library folder wins (normalised name
+     match). If there is none, a TMDb match is used, and it must be
+     confident: same year and an equal normalised title. Its German title
+     names the folder. If there is no confident match, the item is ambiguous.
+   - Episodes: `<Show> - SXXEYY[ - <TMDb episode title>]`.
+   - Music: `Music/<Album Artist>/<Album> (<Year>)/NN - <Title>.<ext>`,
+     or `D-NN - <Title>` when the album has more than one disc.
+4. **Dedupe** when the target slot is occupied. The watcher ffprobes both
+   files:
+
+   | Verdict | Rule | Action |
+   |---|---|---|
+   | identical | same size and same probe | intake copy → `_duplicates/` |
+   | better | higher resolution **and** higher bitrate, same fps, duration within ±2% (audio: higher bitrate, duration within ±2%) | **REPLACE**: library file → `_duplicates/` first, then the new file takes the same name (the extension may change). NFO and artwork stay untouched. |
+   | worse | lower resolution **and** lower bitrate, same fps, duration within ±2% | intake copy → `_duplicates/` |
+   | anything else | e.g. 25 vs 23.976 fps, or a mixed resolution/bitrate verdict | left in the intake as ambiguous |
+
+5. **`_duplicates/` layout:**
+   - TV: `TV Shows/_duplicates/<Show>/Season XX/<orig filename>`
+   - Movies: `Movies/_duplicates/<Title (Year)> - intake dup <YYYY-MM-DD>/<orig filename>`
+   - Music: `Music/_duplicates/<Artist>/<Album (Year)> - intake dup <date>/<orig>`
+
+   The watcher also ensures the section's `.plexignore` lists `_duplicates/`
+   and that `_duplicates/.ignore` exists for Jellyfin. **Nothing in
+   `_duplicates/` is ever deleted automatically.** Emptying it is a manual
+   operator decision.
+6. **Execute** through `organize.apply_plan`:
+   - Renames only. `atomic_mv` never overwrites, refuses cross-device moves
+     and size-verifies every destination.
+   - A REPLACE is an ordered group. If step 2 fails, step 1 is rolled back.
+   - Then sidecars: `sidecar.py` for a new movie or show folder, and
+     `episode_sidecar.py` (write-missing-only) for episodes.
+   - For music, before the move: a stream-copy tag fix of album-artist and
+     disc numbers (the audio is not re-encoded). After the move: `folder.jpg`
+     (the loose cover, or the embedded art) and `album.nfo`.
+   - Then `cleanup()` removes the intake folder. It first re-verifies every
+     destination and refuses while any audio file or any non-sample video
+     remains. Only scene junk (`.nfo`, `.txt`, `.sfv`, samples) is ever
+     deleted.
+7. **Rescan only the changed folders.** Plex gets
+   `/library/sections/{id}/refresh?path=`. Jellyfin gets
+   `POST /Library/Media/Updated` once per folder, 2s apart. Full-library
+   scans were removed from `rescan.py`: they locked Jellyfin's SQLite.
+
+**Safety stops:**
+- The whole run is aborted before the first move if more than 50 items
+  would move.
+- The run stops if free space drops by more than 1 GiB during it. A rename
+  never consumes space.
+- The intake root can never be removed (`cleanup` and `assert_safe_target`
+  both refuse it).
+- Logs and metrics carry only counts, reason codes, anonymised paths and an
+  8-hex item id. They never carry a title.
+
+**Kill switch:** set `INTAKE_APPLY` to `"0"` in
+`kubernetes/apps/media/library-tools/app/intake-cronjob.yaml`, then commit and
+push. The watcher keeps planning, logging and pushing metrics, but nothing on
+disk changes, not even its state file (`<intake>/.intake-state.json`, which
+holds hashed first-seen times and failures).
+
+**Notifications:**
+- IT-ops alerts come from `media-intake-alerts.yaml`: a failed move,
+  ambiguous for more than 24h, a safety stop, the watcher going stale, and an
+  `absent()` guard. The gauges are pushed to pushgateway as
+  `media_intake_items{state=pending|ambiguous|failed|planned}` and related
+  series.
+- The daily business summary goes to the OpenClaw briefing, not Telegram.
+  `runbooks/media-intake-digest.py` runs at the nightly maintenance-window
+  close-out and ingests `media-intake-<date>` (`window_warning`, `info`,
+  source `maintenance`).
+
+**Manual path** (ambiguous items, bulk migrations): the `media-manager` agent
+still owns it. It uses the suspended `media-organize` / `media-cleanup` /
+`media-rescan` templates, which now use the same single share-root mount (plan
+paths `/data/downloads/jdownloader/...`), a 24h TTL, and a folder-scoped
+`RESCAN_PATHS`.
 
 ### Migration: existing flat layout → nested
 
@@ -552,6 +637,7 @@ For the GitOps pieces (library-tools app): `git revert <commit>` on the introduc
 
 ## Version History
 
+- `2026.09.28`: Automatic intake (`media-intake-watcher`, `intake.py`): classification, confident-TMDb-only naming, ffprobe dedupe (identical / better→two-step REPLACE / worse / ambiguous incl. the fps rule), `_duplicates/` layout + Jellyfin `.ignore`, music layout + tag fixes, incomplete-download guard, safety stops, kill switch `INTAKE_APPLY=0`, pushgateway alerts + OpenClaw daily digest. Single share-root mount (EXDEV fix) for organize/cleanup. `rescan.py` is folder-scoped only. The Plex Movies-root gap is documented as NOT API-fixable (items stay bound to the root location id).
 - `2026.09.22`: Added the Jellyfin API auth note next to the TMDb trap (F-5d27f37e): 12.x disables the four legacy forms (`X-Emby-Token`, `X-MediaBrowser-Token`, `api_key=`, `X-Emby-Authorization`); use `Authorization: MediaBrowser Token="<key>"`. Live 10.11.11 responses measured; scripts already switched in `5b8193c9`.
 - `2026.08.15`: Removed the stale Tube Archivist→Plex bridge references (scope line, applies-to, troubleshooting row) — TA content is Jellyfin-only and no bridge CronJob exists. Documented that Jellyfin's scan-exclusion mechanism is an empty `.ignore` file inside the folder, not the `.plexignore` at the section root.
 - `2026.07.05`: Documented that `_duplicates/`/`_archive/` prefixes are naming-only and require a `.plexignore` file per section root to actually stop Plex from scanning them (found via daily sweep: a quarantined duplicate was still indexed under `Movies/_duplicates/`). Confirmed Plex's built-in keyword exclusion doesn't cover custom prefixes.

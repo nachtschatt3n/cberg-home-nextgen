@@ -24,6 +24,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0
+      # Templated jobs are created by hand / by agents; without a TTL every
+      # run's Job + pod lingered until the history limit swept it.
+      ttlSecondsAfterFinished: 86400
       template:
         spec:
           securityContext:

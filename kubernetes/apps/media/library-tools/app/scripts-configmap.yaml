@@ -28,7 +28,15 @@ data:
     # Layout under MEDIA_ROOT:
     #   Movies/, "TV Shows"/, Music/, YouTube/
     MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/data/data"))
-    JDOWNLOADER_ROOT = Path(os.environ.get("JDOWNLOADER_ROOT", "/intake"))
+    # The intake lives on the SAME share as the library (//NAS/media ->
+    # downloads/jdownloader vs data/). Jobs that move files must mount the
+    # share ROOT once (PVC plex-media-smb at /data) and reach the intake as a
+    # sub-path of that single mount. Two separate CIFS mounts (the old
+    # /intake + /data layout) are two filesystems to the kernel, so every
+    # rename between them failed with EXDEV (errno 18). atomic_mv() now
+    # refuses a cross-device move explicitly instead of trying it.
+    JDOWNLOADER_ROOT = Path(os.environ.get("JDOWNLOADER_ROOT",
+                                           "/data/downloads/jdownloader"))
 
     SECTIONS = {
         "movies":   MEDIA_ROOT / "Movies",
@@ -102,24 +110,62 @@ data:
 
     def anon_path(p: Path) -> str:
         """Return an anonymised path: only the section and depth, no titles."""
+        p = Path(p)
+        try:
+            rel = p.relative_to(JDOWNLOADER_ROOT)
+            if not rel.parts:
+                return "intake/<root>"
+            return "intake/<item>" + ("/<sub>" * (len(rel.parts) - 1))
+        except ValueError:
+            pass
         try:
             rel = p.relative_to(MEDIA_ROOT)
             parts = rel.parts
             if not parts:
                 return "<root>"
             section = parts[0]
+            if len(parts) > 1 and parts[1] == "_duplicates":
+                return f"{section}/_duplicates/<item>" + ("/<sub>" * (len(parts) - 3) if len(parts) > 3 else "")
             return f"{section}/<item>" + ("/<sub>" * (len(parts) - 2) if len(parts) > 2 else "")
         except ValueError:
             return "<external>"
 
     # ---- ffprobe wrapper ---------------------------------------------------
+    # Static ffmpeg/ffprobe are mounted from an OCI image volume at /tools in
+    # the jobs that need them (media-intake-watcher); plain `ffprobe` on PATH
+    # everywhere else.
+    FFPROBE = os.environ.get("FFPROBE", "ffprobe")
+    FFMPEG = os.environ.get("FFMPEG", "ffmpeg")
+
+    def ffprobe_full(path: Path) -> dict:
+        """Raw ffprobe JSON (all streams + format + tags) or {} on failure.
+        Used for music: tags live in format.tags, cover art is a video stream
+        with disposition.attached_pic == 1."""
+        try:
+            r = subprocess.run(
+                [FFPROBE, "-v", "error", "-show_streams", "-show_format",
+                 "-of", "json", str(path)],
+                capture_output=True, timeout=60, check=False)
+            if r.returncode != 0:
+                return {}
+            return json.loads(r.stdout or "{}")
+        except Exception as e:
+            log_event("ffprobe-error", severity="warn", error=type(e).__name__)
+            return {}
+
+    def sanitize_name(name: str) -> str:
+        """Make a title safe as an SMB path component. `:` -> ` -` (Plex
+        convention); `?*"<>|` dropped; `/` and backslash -> `-`."""
+        name = name.replace(":", " -").replace("/", "-").replace("\\", "-")
+        name = re.sub(r'[?*"<>|]', "", name)
+        return " ".join(name.split()).strip(" .")
     def ffprobe(path: Path) -> dict:
         """Return {width, height, duration, bit_rate, size, fps} or {} on failure."""
         if not path.exists():
             return {}
         try:
             r = subprocess.run(
-                ["ffprobe", "-v", "error",
+                [FFPROBE, "-v", "error",
                  "-select_streams", "v:0",
                  "-show_entries", "stream=width,height,r_frame_rate",
                  "-show_entries", "format=duration,bit_rate,size",
@@ -200,8 +246,26 @@ data:
             return (0, 0)
 
     # ---- atomic move helper ------------------------------------------------
+    def _existing_ancestor(p: Path) -> Path:
+        p = Path(p)
+        while not p.exists() and p != p.parent:
+            p = p.parent
+        return p
+
+    def same_filesystem(a: Path, b: Path) -> bool:
+        """True iff a and b (or b's nearest existing ancestor) share st_dev."""
+        try:
+            return (os.stat(_existing_ancestor(a)).st_dev
+                    == os.stat(_existing_ancestor(b)).st_dev)
+        except OSError:
+            return False
+
     def atomic_mv(src: Path, dst: Path) -> bool:
-        """mv src → dst on the same filesystem; verify size > 0; never overwrite."""
+        """mv src → dst on the same filesystem; verify size; never overwrite.
+
+        Rename only — never a copy. A cross-device move is REFUSED up front
+        (the old two-mount job layout hit EXDEV on every rename)."""
+        src, dst = Path(src), Path(dst)
         if dst.exists():
             log_event("mv-skip-exists", path=anon_path(dst))
             return False
@@ -212,11 +276,20 @@ data:
         if src_size == 0:
             log_event("mv-skip-empty-src", path=anon_path(src), severity="warn")
             return False
+        if not same_filesystem(src, dst.parent):
+            log_event("mv-refused-exdev", severity="error",
+                      src=anon_path(src), dst=anon_path(dst))
+            return False
         dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():   # re-check after mkdir (narrows the race)
+            log_event("mv-skip-exists", path=anon_path(dst))
+            return False
         try:
             os.replace(str(src), str(dst))   # atomic on same fs
         except OSError as e:
-            log_event("mv-fail", severity="error", error=str(e), path=anon_path(src))
+            # errno only: str(e) embeds both full paths (titles) in the log.
+            log_event("mv-fail", severity="error", errno=e.errno,
+                      error=type(e).__name__, path=anon_path(src))
             return False
         # verify
         if not dst.exists() or dst.stat().st_size != src_size:
@@ -347,13 +420,20 @@ data:
     # ---- safety: refuse share-root operations ------------------------------
     BANNED_DELETE_PATHS = {
         Path("/data"), Path("/data/data"), Path("/intake"),
-        MEDIA_ROOT, JDOWNLOADER_ROOT,
+        Path("/data/downloads"), MEDIA_ROOT, JDOWNLOADER_ROOT,
+        MEDIA_ROOT / "Movies", MEDIA_ROOT / "TV Shows", MEDIA_ROOT / "Music",
     }
 
     def assert_safe_target(path: Path):
-        """Raise if path is the share root or contains a glob."""
+        """Raise if path is the share root or contains a glob.
+
+        Only `*` counts as a glob marker. `?` legitimately occurs in release
+        and folder names (the old check refused every title containing one),
+        and nothing here expands globs — paths go to os.* calls verbatim,
+        never to a shell."""
+        path = Path(path)
         p = path.resolve()
-        if "*" in str(path) or "?" in str(path):
+        if "*" in str(path):
             raise SystemExit(f"REFUSED: glob in path: {anon_path(path)}")
         for banned in BANNED_DELETE_PATHS:
             if p == banned.resolve():
@@ -699,56 +779,138 @@ data:
   # rescan.py — trigger Plex + Jellyfin library refresh
   # =========================================================================
   rescan.py: |
-    """Trigger library rescan in Plex + Jellyfin.
+    """Folder-scoped library rescan in Plex + Jellyfin.
 
-    Required env (from media-manager-tokens secret):
-      PLEX_URL          (default http://plex-plex-media-server.media.svc.cluster.local:32400)
-      PLEX_TOKEN
-      PLEX_SECTION_IDS  (comma-separated, e.g. "1,2,3")
-      JELLYFIN_URL      (default http://jellyfin.media.svc.cluster.local:8096)
-      JELLYFIN_API_KEY
+    FULL-LIBRARY SCANS WERE REMOVED ON PURPOSE (2026-09-28). A whole-section
+    Plex refresh and Jellyfin's /Library/Refresh walk every item; on Jellyfin
+    (SQLite on an NFS-served Longhorn RWX volume) that produced "database is
+    locked" and liveness-probe kills mid-scan. Only the folders that actually
+    changed are announced now:
+
+      Plex:     GET  /library/sections/{id}/refresh?path=<folder>
+                (section chosen by longest matching Location; paths outside
+                 every section are skipped, never widened to a full scan)
+      Jellyfin: POST /Library/Media/Updated  {"Updates":[{"Path":..,"UpdateType":"Created"}]}
+                one request per folder, throttled (RESCAN_THROTTLE_S, default 2s)
+
+    Env:
+      RESCAN_PATHS       JSON list of library folders as seen in THIS pod
+                         (e.g. /data/data/Movies/<item>). Empty/unset => no-op.
+      PLEX_URL / PLEX_TOKEN
+      JELLYFIN_URL / JELLYFIN_API_KEY
+      PLEX_PATH_MAP      "<pod-prefix>=<plex-prefix>"     default "/data/=/data/"
+      JELLYFIN_PATH_MAP  "<pod-prefix>=<jellyfin-prefix>" default "/data/=/media/"
+        (Plex mounts the share root at /data like the tools jobs; Jellyfin
+         mounts it at /media — see docs/sops/media-library-standards.md.)
 
     Note: the Plex chart names its service `plex-plex-media-server`, NOT `plex`.
-    Defaults below match the actual cluster service names — overriding via env
-    is supported but rarely needed.
     """
+    import json
     import os
     import sys
+    import time
+    import urllib.parse
     import urllib.request
     import urllib.error
+    import xml.etree.ElementTree as ET
     sys.path.insert(0, "/app")
-    from common import log, log_event
+    from common import log_event
 
-    def post(url, headers=None):
-        req = urllib.request.Request(url, headers=headers or {}, method="POST")
+
+    def _req(url, method="GET", headers=None, body=None, timeout=30):
+        data = json.dumps(body).encode() if body is not None else None
+        h = dict(headers or {})
+        if data is not None:
+            h["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, headers=h, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return r.status
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, r.read()
         except urllib.error.HTTPError as e:
-            return e.code
+            return e.code, b""
         except Exception as e:
             log_event("rescan-error", severity="warn", error=type(e).__name__)
-            return 0
+            return 0, b""
 
-    def main():
-        plex_url = os.environ.get("PLEX_URL", "http://plex-plex-media-server.media.svc.cluster.local:32400")
-        plex_token = os.environ.get("PLEX_TOKEN", "")
-        sections = [s.strip() for s in os.environ.get("PLEX_SECTION_IDS", "").split(",") if s.strip()]
-        jf_url = os.environ.get("JELLYFIN_URL", "http://jellyfin.media.svc.cluster.local:8096")
-        jf_key = os.environ.get("JELLYFIN_API_KEY", "")
 
-        if plex_token and sections:
-            for sid in sections:
-                code = post(f"{plex_url}/library/sections/{sid}/refresh?X-Plex-Token={plex_token}")
-                log_event("plex-rescan", section=sid, status=code)
+    def map_path(p, mapping):
+        src, _, dst = mapping.partition("=")
+        return dst + p[len(src):] if src and p.startswith(src) else p
+
+
+    def plex_sections(url, token):
+        """[(section_id, location_path)] from /library/sections."""
+        code, body = _req(f"{url}/library/sections?X-Plex-Token={token}")
+        if code != 200:
+            log_event("plex-sections-error", severity="warn", status=code)
+            return []
+        out = []
+        for d in ET.fromstring(body).iter("Directory"):
+            for loc in d.iter("Location"):
+                out.append((d.get("key"), loc.get("path", "").rstrip("/")))
+        return out
+
+
+    def pick_section(path, sections):
+        best = None
+        for sid, loc in sections:
+            if loc and (path == loc or path.startswith(loc + "/")):
+                if best is None or len(loc) > len(best[1]):
+                    best = (sid, loc)
+        return best[0] if best else None
+
+
+    def rescan_paths(paths, env=os.environ, sleep=time.sleep):
+        paths = sorted({p.rstrip("/") for p in paths if p})
+        if not paths:
+            log_event("rescan-skipped", reason="no-paths")
+            return {"plex": 0, "jellyfin": 0}
+        throttle = float(env.get("RESCAN_THROTTLE_S", "2"))
+        plex_url = env.get("PLEX_URL", "http://plex-plex-media-server.media.svc.cluster.local:32400")
+        plex_token = env.get("PLEX_TOKEN", "")
+        jf_url = env.get("JELLYFIN_URL", "http://jellyfin.media.svc.cluster.local:8096")
+        jf_key = env.get("JELLYFIN_API_KEY", "")
+        plex_map = env.get("PLEX_PATH_MAP", "/data/=/data/")
+        jf_map = env.get("JELLYFIN_PATH_MAP", "/data/=/media/")
+        done = {"plex": 0, "jellyfin": 0}
+
+        if plex_token:
+            sections = plex_sections(plex_url, plex_token)
+            for p in paths:
+                pp = map_path(p, plex_map)
+                sid = pick_section(pp, sections)
+                if not sid:
+                    log_event("plex-rescan-skipped", reason="no-section-for-path", severity="warn")
+                    continue
+                q = urllib.parse.quote(pp, safe="")
+                code, _ = _req(f"{plex_url}/library/sections/{sid}/refresh?path={q}&X-Plex-Token={plex_token}")
+                log_event("plex-rescan-folder", section=sid, status=code)
+                done["plex"] += code == 200
+                sleep(throttle)
         else:
-            log_event("plex-rescan-skipped", reason="missing-token-or-sections", severity="warn")
+            log_event("plex-rescan-skipped", reason="missing-token", severity="warn")
 
         if jf_key:
-            code = post(f"{jf_url}/Library/Refresh", headers={"Authorization": f'MediaBrowser Token="{jf_key}"'})
-            log_event("jellyfin-rescan", status=code)
+            hdr = {"Authorization": f'MediaBrowser Token="{jf_key}"'}
+            for p in paths:
+                body = {"Updates": [{"Path": map_path(p, jf_map), "UpdateType": "Created"}]}
+                code, _ = _req(f"{jf_url}/Library/Media/Updated", "POST", hdr, body)
+                log_event("jellyfin-rescan-folder", status=code)
+                done["jellyfin"] += code in (200, 204)
+                sleep(throttle)
         else:
             log_event("jellyfin-rescan-skipped", reason="missing-key", severity="warn")
+        return done
+
+
+    def main():
+        raw = os.environ.get("RESCAN_PATHS", "")
+        try:
+            paths = json.loads(raw) if raw else []
+        except ValueError:
+            sys.exit("REFUSED: RESCAN_PATHS is not a JSON list")
+        rescan_paths(paths)
+
 
     if __name__ == "__main__":
         main()
@@ -760,10 +922,16 @@ data:
     """Remove a specific JDownloader subdirectory after re-verifying that all
     its media files exist at known destination paths with size > 0.
 
-    Required env:
-      CLEANUP_PATH           absolute path inside /intake (no globs)
+    Required env (standalone Job use):
+      CLEANUP_PATH           absolute path inside the intake root (no globs)
       VERIFY_DESTINATIONS    JSON list of dst paths that MUST all exist with
                              size > 0 before any rm. Empty list => REFUSE.
+
+    intake.py calls cleanup() directly with guard_media=True, which additionally
+    refuses when the directory still holds anything that is not scene junk: any
+    audio file, or any video file above SAMPLE_MAX_BYTES. So the only things this
+    ever deletes after an automatic intake are .nfo/.txt/.url/.jpg/.sfv and
+    sample clips — and only once every destination re-verifies.
     """
     import json
     import os
@@ -772,29 +940,50 @@ data:
     from pathlib import Path
     sys.path.insert(0, "/app")
     from common import (
-        log, log_event, anon_path, assert_safe_target, JDOWNLOADER_ROOT,
+        log_event, anon_path, assert_safe_target, JDOWNLOADER_ROOT,
     )
 
-    def main():
-        path = Path(os.environ.get("CLEANUP_PATH", ""))
-        verify = os.environ.get("VERIFY_DESTINATIONS", "")
-        if not str(path):
-            sys.exit("REFUSED: CLEANUP_PATH unset")
-        if not verify:
-            sys.exit("REFUSED: VERIFY_DESTINATIONS empty (no proof that moves succeeded)")
-        try:
-            destinations = [Path(p) for p in json.loads(verify)]
-        except Exception:
-            sys.exit("REFUSED: VERIFY_DESTINATIONS not valid JSON list")
+    VIDEO_EXT = {".mkv", ".mp4", ".avi", ".m4v", ".ts", ".m2ts", ".mov", ".wmv", ".mpg", ".mpeg", ".webm"}
+    AUDIO_EXT = {".mp3", ".flac", ".m4a", ".ogg", ".opus", ".wav", ".aac", ".alac", ".wma", ".aiff"}
+    SAMPLE_MAX_BYTES = 150 * 1024 * 1024
+
+
+    def leftover_media(path: Path) -> int:
+        """Count files under path that are NOT scene junk."""
+        n = 0
+        for dp, _dn, fn in os.walk(path):
+            for f in fn:
+                fp = Path(dp) / f
+                ext = fp.suffix.lower()
+                try:
+                    size = fp.stat().st_size
+                except OSError:
+                    n += 1
+                    continue
+                if ext in AUDIO_EXT or (ext in VIDEO_EXT and size > SAMPLE_MAX_BYTES):
+                    n += 1
+        return n
+
+
+    def cleanup(path: Path, destinations, guard_media=False) -> bool:
+        """Returns True if removed (or already gone), False if refused."""
+        path = Path(path)
+        destinations = [Path(d) for d in destinations]
         if not destinations:
-            sys.exit("REFUSED: VERIFY_DESTINATIONS list is empty")
-
-        # Hard rail: target must be a real subpath of /intake, not a glob, not the root
-        assert_safe_target(path)
-        if path == JDOWNLOADER_ROOT:
-            sys.exit("REFUSED: refuses to delete the intake root itself")
-
-        # Pre-flight: every destination must exist with size > 0
+            log_event("cleanup-refused", severity="error", reason="no-destinations")
+            return False
+        # Hard rail: a real sub-path of the intake root, never a glob/root.
+        # Returned as a refusal (not SystemExit) so an in-process caller such as
+        # intake.py records it and carries on with the other items.
+        try:
+            assert_safe_target(path)
+        except SystemExit as e:
+            log_event("cleanup-refused", severity="error", reason=str(e).split(":")[0])
+            return False
+        if path.resolve() == JDOWNLOADER_ROOT.resolve() \
+                or JDOWNLOADER_ROOT.resolve() not in path.resolve().parents:
+            log_event("cleanup-refused", severity="error", reason="not-an-intake-subpath")
+            return False
         missing = []
         for d in destinations:
             if not d.exists():
@@ -804,15 +993,35 @@ data:
         if missing:
             log_event("cleanup-refused", severity="critical",
                       reason="verification-failed", missing=missing)
-            sys.exit(1)
-
-        # OK to remove
+            return False
         if not path.exists():
             log_event("cleanup-skip-missing", path=anon_path(path))
-            return
+            return True
+        if guard_media and leftover_media(path):
+            log_event("cleanup-refused", severity="error",
+                      reason="non-junk-media-left", count=leftover_media(path))
+            return False
         log_event("cleanup-remove-start", path=anon_path(path))
         shutil.rmtree(path)
         log_event("cleanup-remove-ok", path=anon_path(path))
+        return True
+
+
+    def main():
+        path = os.environ.get("CLEANUP_PATH", "")
+        verify = os.environ.get("VERIFY_DESTINATIONS", "")
+        if not path:
+            sys.exit("REFUSED: CLEANUP_PATH unset")
+        if not verify:
+            sys.exit("REFUSED: VERIFY_DESTINATIONS empty (no proof that moves succeeded)")
+        try:
+            destinations = json.loads(verify)
+        except Exception:
+            sys.exit("REFUSED: VERIFY_DESTINATIONS not valid JSON list")
+        if not destinations:
+            sys.exit("REFUSED: VERIFY_DESTINATIONS list is empty")
+        sys.exit(0 if cleanup(Path(path), destinations) else 1)
+
 
     if __name__ == "__main__":
         main()
@@ -821,52 +1030,106 @@ data:
   # organize.py — apply a move plan from stdin (JSON)
   # =========================================================================
   organize.py: |
-    """Apply a move plan from stdin.
+    """Apply a move plan (JSON on stdin, or apply_plan() from intake.py).
 
-    Plan format (JSON):
+    Plan format:
       {"dry_run": true,
-       "moves": [{"src": "/intake/foo.mkv", "dst": "/data/data/Movies/Foo (2024)/Foo (2024).mkv"},
-                 ...]}
+       "moves":  [{"src": "...", "dst": "..."}, ...],          # independent moves
+       "groups": [{"id": "g1", "moves": [{"src","dst"}, ...]}]} # ordered, all-or-rollback
 
-    Refuses globs, refuses share-root targets, mv-only (atomic on same fs),
-    verify-before-delete is implicit (mv does not delete src on failure).
+    `moves` are independent: one failing does not affect the others.
+    `groups` are ORDERED and TRANSACTIONAL — the two-step replace is a group:
+      1. library file   -> <Section>/_duplicates/...   (displace the old copy)
+      2. intake file    -> library path                (bring the new copy in)
+    If step N fails, steps N-1..1 are undone in reverse (dst -> src). If an undo
+    itself fails the group is reported `rollback-failed` (critical) and the file
+    stays wherever the last successful rename left it — never deleted, never
+    overwritten, since atomic_mv() refuses an existing destination.
+
+    Refuses globs and share-root targets; rename-only (atomic_mv never copies and
+    refuses cross-device moves); every destination is size-verified by atomic_mv.
+    dry_run defaults to TRUE: a plan without the key moves nothing.
     """
     import json
     import sys
     from pathlib import Path
     sys.path.insert(0, "/app")
-    from common import atomic_mv, assert_safe_target, log, log_event, anon_path
+    from common import atomic_mv, assert_safe_target, log_event, anon_path
 
-    def main():
-        try:
-            plan = json.load(sys.stdin)
-        except Exception as e:
-            sys.exit(f"REFUSED: stdin is not valid JSON: {e}")
-        moves = plan.get("moves", [])
-        dry_run = bool(plan.get("dry_run", True))   # default safe
-        if not moves:
-            sys.exit("REFUSED: empty moves list")
 
+    def _validate(moves):
         for m in moves:
-            src = Path(m["src"])
-            dst = Path(m["dst"])
-            assert_safe_target(src)
-            assert_safe_target(dst)
+            assert_safe_target(Path(m["src"]))
+            assert_safe_target(Path(m["dst"]))
 
-        log_event("organize-start", count=len(moves), dry_run=dry_run)
-        ok, fail = 0, 0
+
+    def apply_group(group, dry_run, mv=atomic_mv):
+        """Run one ordered group. Returns 'ok' | 'failed' | 'rollback-failed'."""
+        done = []
+        for m in group["moves"]:
+            src, dst = Path(m["src"]), Path(m["dst"])
+            if dry_run:
+                log_event("organize-plan", group=group.get("id"),
+                          src=anon_path(src), dst=anon_path(dst))
+                continue
+            if mv(src, dst):
+                done.append((src, dst))
+                continue
+            log_event("organize-group-step-failed", severity="error",
+                      group=group.get("id"), step=len(done) + 1)
+            for s, d in reversed(done):
+                if not mv(d, s):
+                    log_event("organize-rollback-failed", severity="critical",
+                              group=group.get("id"), stranded=anon_path(d))
+                    return "rollback-failed"
+            log_event("organize-group-rolled-back", severity="warn",
+                      group=group.get("id"), undone=len(done))
+            return "failed"
+        return "ok"
+
+
+    def apply_plan(plan, mv=atomic_mv):
+        """Returns {"ok": n, "fail": n, "groups": {id: outcome}}."""
+        dry_run = bool(plan.get("dry_run", True))   # default safe
+        moves = plan.get("moves", []) or []
+        groups = plan.get("groups", []) or []
+        _validate(moves)
+        for g in groups:
+            _validate(g["moves"])
+        log_event("organize-start", moves=len(moves), groups=len(groups),
+                  dry_run=dry_run)
+        ok = fail = 0
+        outcomes = {}
         for m in moves:
             src, dst = Path(m["src"]), Path(m["dst"])
             if dry_run:
                 log_event("organize-plan", src=anon_path(src), dst=anon_path(dst))
                 ok += 1
-                continue
-            if atomic_mv(src, dst):
+            elif mv(src, dst):
+                ok += 1
+            else:
+                fail += 1
+        for g in groups:
+            res = apply_group(g, dry_run, mv)
+            outcomes[g.get("id")] = res
+            if res == "ok":
                 ok += 1
             else:
                 fail += 1
         log_event("organize-done", ok=ok, fail=fail, dry_run=dry_run)
-        sys.exit(0 if fail == 0 else 1)
+        return {"ok": ok, "fail": fail, "groups": outcomes}
+
+
+    def main():
+        try:
+            plan = json.load(sys.stdin)
+        except Exception as e:
+            sys.exit(f"REFUSED: stdin is not valid JSON ({type(e).__name__})")
+        if not plan.get("moves") and not plan.get("groups"):
+            sys.exit("REFUSED: empty plan (no moves, no groups)")
+        res = apply_plan(plan)
+        sys.exit(0 if res["fail"] == 0 else 1)
+
 
     if __name__ == "__main__":
         main()
@@ -1839,6 +2102,931 @@ data:
             f"no_path={no_resolvable_path} | gap fs_missing={fs_missing_in_plex} stale={plex_stale} "
             f"skip_leftover={skip_dir_leftover} bundled_extra={bundled_extra_subdir}")
         sys.exit(0)
+
+    if __name__ == "__main__":
+        main()
+
+  # =========================================================================
+  # intake.py — automatic JDownloader intake (CronJob media-intake-watcher)
+  # =========================================================================
+  intake.py: |
+    """Automatic JDownloader intake: classify, dedupe, move, sidecar, clean up.
+
+    Runs every 30 min as CronJob media-intake-watcher. SOP:
+    docs/sops/media-library-standards.md "Automatic intake".
+
+    Invariants (do not weaken):
+      * RENAME ONLY. Media is never deleted and never overwritten. atomic_mv()
+        refuses an existing destination and refuses a cross-device move. The
+        only deletion is cleanup() of a fully-moved intake folder, and that
+        refuses while any audio file or any non-sample video is still inside.
+      * `_duplicates/` keeps every displaced file. A better-quality REPLACE is an
+        ordered two-step group (organize.apply_group): the library copy goes to
+        `_duplicates/` FIRST, then the new file takes its name; a failed second
+        step rolls the first back.
+      * Kill switch: INTAKE_APPLY=0 -> plan + log + metrics only, nothing on disk
+        changes (not even the state file).
+      * Safety stops: > INTAKE_MAX_ITEMS (50) items to act on -> whole run
+        aborted before the first move; free space dropping by more than
+        INTAKE_MAX_FREE_DROP_BYTES (1 GiB) during the run -> stop (a rename
+        never consumes space, so a drop means something is copying).
+      * Privacy: logs carry counts, outcome codes, anonymised paths and an 8-hex
+        item id (sha1 of the name) — never a title. Same for metrics.
+
+    Env:
+      INTAKE_APPLY (default 0 here; the CronJob sets 1), INTAKE_MIN_AGE_MIN (30),
+      INTAKE_MAX_ITEMS (50), INTAKE_MAX_FREE_DROP_BYTES (1073741824),
+      INTAKE_RESCAN (1), INTAKE_SIDECARS (1), TMDB_API_KEY, PUSHGATEWAY_URL,
+      INTAKE_METRICS_FILE (optional textfile copy), MEDIA_ROOT, JDOWNLOADER_ROOT.
+    """
+    import datetime
+    import hashlib
+    import json
+    import os
+    import re
+    import shutil
+    import subprocess
+    import sys
+    import time
+    import urllib.request
+    from collections import Counter
+    from pathlib import Path
+
+    APP_DIR = os.environ.get("APP_DIR", "/app")
+    sys.path.insert(0, APP_DIR)
+    import common as C  # noqa: E402
+    from common import (  # noqa: E402
+        log_event, anon_path, sanitize_name, MEDIA_ROOT, JDOWNLOADER_ROOT,
+    )
+    import organize  # noqa: E402
+    import cleanup as CL  # noqa: E402
+
+    VIDEO_EXT = CL.VIDEO_EXT
+    AUDIO_EXT = CL.AUDIO_EXT
+    SUB_EXT = {".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt", ".sup"}
+    COVER_NAMES = {"folder.jpg", "cover.jpg", "front.jpg", "folder.png", "cover.png"}
+    INCOMPLETE_RE = re.compile(r"\.(rar|r\d{2}|part|partial|crdownload|jdtmp|tmp)$", re.I)
+    EP_ANY_RE = re.compile(r"(?<![A-Za-z0-9])[Ss](\d{1,2})[ ._-]?[Ee](\d{2,3})(?![0-9])")
+    MULTI_EP_RE = re.compile(r"[Ss]\d{1,2}[ ._-]?[Ee]\d{2,3}[ ._-]?-?[Ee]\d{2,3}")
+    YEAR_ANY_RE = re.compile(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)")
+    SAMPLE_RE = re.compile(r"(^|[ ._\-/])(sample|trailer)([ ._\-/]|$)", re.I)
+    DISC_DIR_RE = re.compile(r"^(?:cd|disc|disk)\s*[-_ ]?(\d{1,2})$", re.I)
+    PART_RE = re.compile(r"[ ._-](cd|part|pt|disc)[ ._-]?\d", re.I)
+    YOUTUBE_RE = re.compile(r"youtube|youtu\.be", re.I)
+
+    SECTION_DIR = {"movie": "Movies", "tv": "TV Shows", "music": "Music"}
+
+
+    def env_int(name, default):
+        try:
+            return int(os.environ.get(name, default))
+        except ValueError:
+            return default
+
+
+    APPLY = os.environ.get("INTAKE_APPLY", "0") == "1"
+    MIN_AGE_S = env_int("INTAKE_MIN_AGE_MIN", 30) * 60
+    MAX_ITEMS = env_int("INTAKE_MAX_ITEMS", 50)
+    MAX_FREE_DROP = env_int("INTAKE_MAX_FREE_DROP_BYTES", 1 << 30)
+    RESCAN = os.environ.get("INTAKE_RESCAN", "1") == "1"
+    SIDECARS = os.environ.get("INTAKE_SIDECARS", "1") == "1"
+    TMDB_KEY = os.environ.get("TMDB_API_KEY", "")
+    STATE_FILE = JDOWNLOADER_ROOT / ".intake-state.json"
+    TODAY = datetime.date.today().isoformat()
+
+
+    def item_id(name):
+        return hashlib.sha1(name.encode("utf-8", "surrogateescape")).hexdigest()[:8]
+
+
+    def norm(s):
+        """Comparison key: casefold, umlauts folded, only alphanumerics."""
+        s = s.casefold()
+        for a, b in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+            s = s.replace(a, b)
+        return re.sub(r"[^0-9a-z]", "", s)
+
+
+    # ---- injectable probes (tests replace these) ------------------------------
+    def probe_video(path):
+        return C.ffprobe(Path(path))
+
+
+    def probe_audio(path):
+        """{duration, bit_rate, size, tags{lowercase}, has_cover} or {}."""
+        d = C.ffprobe_full(Path(path))
+        if not d:
+            return {}
+        fmt = d.get("format", {})
+        tags = {k.lower(): v for k, v in (fmt.get("tags") or {}).items()}
+        for s in d.get("streams", []):
+            if s.get("codec_type") == "audio":
+                for k, v in (s.get("tags") or {}).items():
+                    tags.setdefault(k.lower(), v)
+        has_cover = any((s.get("disposition") or {}).get("attached_pic") == 1
+                        for s in d.get("streams", []))
+        return {"duration": float(fmt.get("duration") or 0),
+                "bit_rate": int(fmt.get("bit_rate") or 0),
+                "size": int(fmt.get("size") or 0),
+                "width": 0, "height": 0, "fps": 0.0,
+                "tags": tags, "has_cover": has_cover}
+
+
+    def run_ffmpeg(args):
+        try:
+            r = subprocess.run([C.FFMPEG, "-v", "error", "-nostdin"] + args,
+                               capture_output=True, timeout=600, check=False)
+            return r.returncode == 0
+        except Exception as e:
+            log_event("ffmpeg-error", severity="warn", error=type(e).__name__)
+            return False
+
+
+    def tmdb_movie(title, year):
+        """Confident TMDb match or None: same year AND normalized title equal."""
+        if not TMDB_KEY:
+            return None
+        for q in dict.fromkeys([title, C.umlaut_fix(title)]):
+            for lang in ("de-DE", None):
+                res = C.tmdb_search("movie", q, year, lang, TMDB_KEY)
+                for r in res:
+                    ry = (r.get("release_date") or "")[:4]
+                    if ry != str(year):
+                        continue
+                    if norm(q) in (norm(r.get("title") or ""), norm(r.get("original_title") or "")):
+                        if lang is None:   # re-fetch German title for naming
+                            de = C.tmdb_search("movie", q, year, "de-DE", TMDB_KEY)
+                            r = next((x for x in de if x.get("id") == r.get("id")), r)
+                        return r
+        return None
+
+
+    def tmdb_show(name):
+        if not TMDB_KEY:
+            return None
+        for q in dict.fromkeys([name, C.umlaut_fix(name)]):
+            for lang in ("de-DE", None):
+                for r in C.tmdb_search("tv", q, None, lang, TMDB_KEY):
+                    if norm(q) in (norm(r.get("name") or ""), norm(r.get("original_name") or "")):
+                        return r
+        return None
+
+
+    def tmdb_episode_title(tv_id, season, episode):
+        if not (TMDB_KEY and tv_id):
+            return ""
+        body = C.http_get(f"https://api.themoviedb.org/3/tv/{tv_id}/season/{season}/"
+                          f"episode/{episode}?api_key={TMDB_KEY}&language=de-DE")
+        try:
+            name = (json.loads(body or b"{}").get("name") or "").strip()
+        except ValueError:
+            return ""
+        if re.fullmatch(r"(episode|folge|episodio)\s*\d+", name, re.I):
+            return ""
+        return sanitize_name(name)
+
+
+    # ---- enumeration + guards -------------------------------------------------
+    def enumerate_items(root):
+        items = []
+        for e in sorted(root.iterdir()):
+            if e.name.startswith((".", "_")):
+                continue
+            items.append(e)
+        return items
+
+
+    def walk_files(item):
+        if item.is_file():
+            return [item]
+        out = []
+        for dp, dn, fn in os.walk(item):
+            dn[:] = [d for d in dn if not d.startswith(".")]
+            out.extend(Path(dp) / f for f in fn if not f.startswith("."))
+        return out
+
+
+    def newest_mtime(item):
+        t = item.stat().st_mtime
+        if item.is_dir():
+            for dp, dn, fn in os.walk(item):
+                for x in dn + fn:
+                    try:
+                        t = max(t, (Path(dp) / x).stat().st_mtime)
+                    except OSError:
+                        pass
+        return t
+
+
+    def incomplete_reason(item, files, now):
+        if any(INCOMPLETE_RE.search(f.name) for f in files):
+            return "archive-or-partial"
+        if now - newest_mtime(item) < MIN_AGE_S:
+            return "recent-mtime"
+        return None
+
+
+    def is_sample(f, item):
+        rel = str(f.relative_to(item)) if f != item else f.name
+        return bool(SAMPLE_RE.search(rel)) and f.stat().st_size <= CL.SAMPLE_MAX_BYTES
+
+
+    # ---- classification -------------------------------------------------------
+    def split_movie_name(name):
+        """(title, year) from a scene/folder name, or (None, None)."""
+        stem = name
+        matches = [m for m in YEAR_ANY_RE.finditer(stem) if m.start() > 0]
+        if not matches:
+            return None, None
+        m = matches[-1]
+        title, _ = C.clean_tmdb_query(stem[:m.start()])
+        return (title or None), int(m.group(1))
+
+
+    def show_from_name(stem):
+        m = EP_ANY_RE.search(stem)
+        if not m or m.start() == 0:
+            return None
+        title, _ = C.clean_tmdb_query(stem[:m.start()])
+        return title or None
+
+
+    def classify(item):
+        files = walk_files(item)
+        names = [item.name] + [f.name for f in files]
+        if any(YOUTUBE_RE.search(n) or C.YT_ID_RE.search(n) for n in names):
+            return {"kind": "ambiguous", "reason": "youtube"}
+        videos = [f for f in files if f.suffix.lower() in VIDEO_EXT and not is_sample(f, item)]
+        audios = [f for f in files if f.suffix.lower() in AUDIO_EXT]
+        subs = [f for f in files if f.suffix.lower() in SUB_EXT]
+        if videos and audios:
+            return {"kind": "ambiguous", "reason": "mixed-audio-video"}
+        if videos:
+            eps = [(v, EP_ANY_RE.search(v.name)) for v in videos]
+            if all(m for _, m in eps):
+                if any(MULTI_EP_RE.search(v.name) for v in videos):
+                    return {"kind": "ambiguous", "reason": "multi-episode-file"}
+                shows = {norm(show_from_name(v.stem) or show_from_name(item.name) or "")
+                         for v, _ in eps}
+                show = show_from_name(videos[0].stem) or show_from_name(item.name)
+                if not show or len(shows) != 1:
+                    return {"kind": "ambiguous", "reason": "show-name-unclear"}
+                episodes = [{"file": v, "season": int(m.group(1)), "episode": int(m.group(2))}
+                            for v, m in eps]
+                if len({(e["season"], e["episode"]) for e in episodes}) != len(episodes):
+                    return {"kind": "ambiguous", "reason": "duplicate-episode-in-item"}
+                return {"kind": "tv", "show": show, "episodes": episodes, "subs": subs}
+            if any(m for _, m in eps):
+                return {"kind": "ambiguous", "reason": "mixed-episode-and-other"}
+            if len(videos) != 1:
+                return {"kind": "ambiguous", "reason": "multiple-videos"}
+            title, year = split_movie_name(item.name if item.is_dir() else item.stem)
+            if not title:
+                title, year = split_movie_name(videos[0].stem)
+            if not title:
+                return {"kind": "ambiguous", "reason": "no-year"}
+            return {"kind": "movie", "title": title, "year": year,
+                    "file": videos[0], "subs": subs}
+        if audios:
+            return {"kind": "music", "tracks": audios,
+                    "covers": [f for f in files if f.name.lower() in COVER_NAMES]}
+        return {"kind": "ambiguous", "reason": "no-media"}
+
+
+    # ---- quality decision -----------------------------------------------------
+    def decide(new, old):
+        """identical | better | worse | ambiguous (rules: SOP 'Automatic intake')."""
+        if not new or not old:
+            return "ambiguous"
+        key = lambda p: (p.get("width"), p.get("height"), round(p.get("fps", 0), 3),
+                         round(p.get("duration", 0), 1), p.get("bit_rate"))
+        if new.get("size") == old.get("size") and key(new) == key(old):
+            return "identical"
+        od, nd = old.get("duration", 0), new.get("duration", 0)
+        if od <= 0 or abs(nd - od) / od > 0.02:
+            return "ambiguous"
+        if abs(new.get("fps", 0) - old.get("fps", 0)) >= 0.01:
+            return "ambiguous"
+        nres = new.get("width", 0) * new.get("height", 0)
+        ores = old.get("width", 0) * old.get("height", 0)
+        nbr, obr = new.get("bit_rate", 0), old.get("bit_rate", 0)
+        if nres == 0 and ores == 0:        # audio: bitrate is the only axis
+            if nbr > obr:
+                return "better"
+            if nbr < obr:
+                return "worse"
+            return "ambiguous"
+        if nres > ores and nbr > obr:
+            return "better"
+        if nres < ores and nbr < obr:
+            return "worse"
+        return "ambiguous"
+
+
+    # ---- library lookups ------------------------------------------------------
+    def section(kind):
+        return MEDIA_ROOT / SECTION_DIR[kind]
+
+
+    def find_existing_dir(parent, wanted_names):
+        """Existing child dir of `parent` whose norm() equals any wanted name
+        (with or without a trailing ' (YYYY)')."""
+        if not parent.is_dir():
+            return None
+        keys = {norm(w) for w in wanted_names if w}
+        for d in parent.iterdir():
+            if not d.is_dir() or d.name.startswith(("_", ".")):
+                continue
+            k = norm(d.name)
+            k2 = norm(re.sub(r"\s*\((19|20)\d{2}\)$", "", d.name))
+            if k in keys or k2 in keys:
+                return d
+        return None
+
+
+    def main_videos(folder):
+        if not folder.is_dir():
+            return []
+        return [f for f in folder.iterdir() if f.is_file() and f.suffix.lower() in VIDEO_EXT
+                and not SAMPLE_RE.search(f.name)]
+
+
+    def ep_key(name):
+        m = EP_ANY_RE.search(name)
+        return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+    def dup_target(kind, orig_name, *, show=None, season=None, item_label=None, artist=None):
+        base = section(kind) / "_duplicates"
+        if kind == "tv":
+            d = base / show / f"Season {season:02d}"
+        elif kind == "music":
+            d = base / artist / f"{item_label} - intake dup {TODAY}"
+        else:
+            d = base / f"{item_label} - intake dup {TODAY}"
+        t = d / orig_name
+        n = 2
+        while t.exists():
+            t = d / f"{Path(orig_name).stem} ({n}){Path(orig_name).suffix}"
+            n += 1
+        return t
+
+
+    def tvshow_tmdb_id(show_dir):
+        nfo = show_dir / "tvshow.nfo"
+        try:
+            m = re.search(r'<uniqueid type="tmdb"[^>]*>(\d+)<', nfo.read_text(errors="ignore"))
+            return int(m.group(1)) if m else None
+        except OSError:
+            return None
+
+
+    # ---- planning -------------------------------------------------------------
+    class Plan:
+        def __init__(self, item):
+            self.item = item
+            self.groups = []        # organize groups
+            self.group_outcome = {} # group id -> moved|duplicate|replaced|sidecar
+            self.outcomes = Counter()
+            self.ambiguous = []     # reasons for things left behind
+            self.rescan = set()
+            self.verify = []        # destinations cleanup must re-verify
+            self.sidecars = []      # post-move sidecar tasks
+            self.music = None       # music post-processing context
+            self.needs_dupdir = set()
+
+        def add(self, gid, moves, outcome, verify):
+            gid = f"{item_id(self.item.name)}-{gid}"
+            self.groups.append({"id": gid, "moves": moves})
+            self.group_outcome[gid] = outcome
+            self.outcomes[outcome] += 1
+            self.verify.extend(verify)
+
+        @property
+        def acts(self):
+            return bool(self.groups)
+
+
+    def sub_moves(subs, video_stem_old, target_dir, target_stem):
+        """Move subtitles whose name starts with the source video's stem."""
+        out = []
+        for s in subs:
+            if s.name.startswith(video_stem_old):
+                tail = s.name[len(video_stem_old):]
+                dst = target_dir / f"{target_stem}{tail}"
+                if not dst.exists():
+                    out.append({"src": str(s), "dst": str(dst)})
+        return out
+
+
+    def plan_video(plan, kind, src, target_dir, target_stem, label, dup_kw, subs):
+        """Common new/identical/better/worse handling for one video file."""
+        existing = main_videos(target_dir)
+        if kind == "tv":
+            existing = [v for v in existing if ep_key(v.name) == ep_key(src.name)]
+        dst = target_dir / f"{target_stem}{src.suffix.lower()}"
+        if not existing:
+            moves = [{"src": str(src), "dst": str(dst)}]
+            moves += sub_moves(subs, src.stem, target_dir, target_stem)
+            plan.add(label, moves, "moved", [dst])
+            plan.rescan.add(str(target_dir))
+            return "moved"
+        if len(existing) > 1 or (kind == "movie" and any(PART_RE.search(v.stem) for v in existing)):
+            plan.ambiguous.append("multiple-existing-copies")
+            return "ambiguous"
+        old = existing[0]
+        verdict = decide(probe_video(src), probe_video(old))
+        if verdict in ("identical", "worse"):
+            d = dup_target(kind, src.name, **dup_kw)
+            plan.needs_dupdir.add(kind)
+            plan.add(label, [{"src": str(src), "dst": str(d)}], "duplicate", [d])
+            return verdict
+        if verdict == "better":
+            d = dup_target(kind, old.name, **dup_kw)
+            new_dst = old.with_suffix(src.suffix.lower())
+            if new_dst != old and new_dst.exists():
+                plan.ambiguous.append("replace-target-occupied")
+                return "ambiguous"
+            plan.needs_dupdir.add(kind)
+            # ORDER IS LOAD-BEARING: displace the library copy first, then the
+            # new file takes its name. organize.apply_group rolls step 1 back if
+            # step 2 fails.
+            plan.add(label, [{"src": str(old), "dst": str(d)},
+                             {"src": str(src), "dst": str(new_dst)}], "replaced", [d, new_dst])
+            plan.rescan.add(str(target_dir))
+            return "replaced"
+        plan.ambiguous.append("quality-undecidable")
+        return "ambiguous"
+
+
+    def plan_movie(plan, c):
+        title, year = c["title"], c["year"]
+        sec = section("movie")
+        folder = find_existing_dir(sec, [f"{title} ({year})"])
+        tm = None
+        if not folder:
+            tm = tmdb_movie(title, year)
+            if not tm:
+                plan.ambiguous.append("no-confident-tmdb-match" if TMDB_KEY else "no-tmdb-key")
+                return
+            folder = find_existing_dir(sec, [f"{tm.get('title')} ({year})",
+                                             f"{tm.get('original_title')} ({year})"])
+        new_folder = folder is None
+        if new_folder:
+            folder = sec / sanitize_name(f"{tm.get('title')} ({year})")
+        label = folder.name
+        plan_video(plan, "movie", c["file"], folder, label, "m",
+                   {"item_label": label}, c["subs"])
+        if new_folder and plan.acts:
+            plan.sidecars.append({"script": "sidecar.py", "env": {
+                "ITEM_PATH": str(folder), "ITEM_KIND": "movie",
+                "TMDB_QUERY": tm.get("title") or title, "TMDB_YEAR": str(year)}})
+
+
+    def plan_tv(plan, c):
+        sec = section("tv")
+        show_dir = find_existing_dir(sec, [c["show"]])
+        tv_id = tvshow_tmdb_id(show_dir) if show_dir else None
+        new_show = show_dir is None
+        if new_show:
+            tm = tmdb_show(c["show"])
+            if not tm:
+                plan.ambiguous.append("no-confident-tmdb-match" if TMDB_KEY else "no-tmdb-key")
+                return
+            tv_id = tm.get("id")
+            show_dir = sec / sanitize_name(tm.get("name") or c["show"])
+        show = show_dir.name
+        for i, ep in enumerate(sorted(c["episodes"], key=lambda e: (e["season"], e["episode"]))):
+            s, e = ep["season"], ep["episode"]
+            season_dir = show_dir / f"Season {s:02d}"
+            title = tmdb_episode_title(tv_id, s, e)
+            stem = f"{show} - S{s:02d}E{e:02d}" + (f" - {title}" if title else "")
+            plan_video(plan, "tv", ep["file"], season_dir, stem, f"e{i}",
+                       {"show": show, "season": s}, c["subs"])
+        if plan.acts:
+            if new_show:
+                plan.sidecars.append({"script": "sidecar.py", "env": {
+                    "ITEM_PATH": str(show_dir), "ITEM_KIND": "show",
+                    "TMDB_QUERY": show}})
+            plan.sidecars.append({"script": "episode_sidecar.py", "env": {
+                "SHOW_PATH": str(show_dir), "DRY_RUN": "0", "OVERWRITE": "0",
+                **({"TMDB_ID": str(tv_id)} if tv_id else {})}})
+
+
+    def _num(v):
+        m = re.match(r"\s*(\d+)", str(v or ""))
+        return int(m.group(1)) if m else None
+
+
+    def _majority(values):
+        vals = [v for v in values if v]
+        if not vals:
+            return None
+        (top, n), = Counter(vals).most_common(1)
+        return top if n * 2 > len(vals) else None
+
+
+    def plan_music(plan, c):
+        probes = {t: probe_audio(t) for t in c["tracks"]}
+        if any(not p for p in probes.values()):
+            plan.ambiguous.append("audio-probe-failed")
+            return
+        tags = {t: p["tags"] for t, p in probes.items()}
+        albums = {(tg.get("album") or "").strip() for tg in tags.values()}
+        if len(albums) != 1 or "" in albums:
+            plan.ambiguous.append("album-tags-inconsistent")
+            return
+        album = albums.pop()
+        aa = _majority([(tg.get("album_artist") or tg.get("albumartist") or "").strip()
+                        for tg in tags.values()])
+        if not aa:
+            artists = {(tg.get("artist") or "").strip() for tg in tags.values()}
+            aa = artists.pop() if len(artists) == 1 and "" not in artists else None
+        if not aa:
+            plan.ambiguous.append("album-artist-unclear")
+            return
+        year = _majority([(_num((tg.get("date") or tg.get("year") or "")[:4]) or None)
+                          for tg in tags.values()])
+        if not year or not (1900 <= year <= 2099):
+            plan.ambiguous.append("album-year-missing")
+            return
+        tracks = []
+        for t, tg in tags.items():
+            n = _num(tg.get("track"))
+            disc = _num(tg.get("disc"))
+            if disc is None:
+                m = DISC_DIR_RE.match(t.parent.name)
+                disc = int(m.group(1)) if m else 1
+            title = (tg.get("title") or "").strip()
+            if not n or not title:
+                plan.ambiguous.append("track-tags-missing")
+                return
+            tracks.append({"file": t, "track": n, "disc": disc, "title": title, "tags": tg})
+        if len({(x["disc"], x["track"]) for x in tracks}) != len(tracks):
+            plan.ambiguous.append("track-numbers-collide")
+            return
+        multi = max(x["disc"] for x in tracks) > 1
+        discs = max(x["disc"] for x in tracks)
+        sec = section("music")
+        artist_dir = find_existing_dir(sec, [aa]) or sec / sanitize_name(aa)
+        album_label = sanitize_name(f"{album} ({year})")
+        album_dir = find_existing_dir(artist_dir, [f"{album} ({year})"]) or artist_dir / album_label
+        for x in sorted(tracks, key=lambda x: (x["disc"], x["track"])):
+            prefix = f"{x['disc']}-{x['track']:02d}" if multi else f"{x['track']:02d}"
+            stem = sanitize_name(f"{prefix} - {x['title']}")
+            dst = album_dir / f"{stem}{x['file'].suffix.lower()}"
+            existing = [f for f in (album_dir.iterdir() if album_dir.is_dir() else [])
+                        if f.suffix.lower() in AUDIO_EXT and f.name.startswith(prefix + " - ")]
+            label = f"t{x['disc']}-{x['track']}"
+            if not existing:
+                plan.add(label, [{"src": str(x["file"]), "dst": str(dst)}], "moved", [dst])
+                plan.rescan.add(str(album_dir))
+                continue
+            old = existing[0]
+            verdict = decide(probes[x["file"]], probe_audio(old)) if len(existing) == 1 else "ambiguous"
+            dkw = {"artist": artist_dir.name, "item_label": album_dir.name}
+            if verdict in ("identical", "worse"):
+                d = dup_target("music", x["file"].name, **dkw)
+                plan.needs_dupdir.add("music")
+                plan.add(label, [{"src": str(x["file"]), "dst": str(d)}], "duplicate", [d])
+            elif verdict == "better":
+                d = dup_target("music", old.name, **dkw)
+                new_dst = old.with_suffix(x["file"].suffix.lower())
+                if new_dst != old and new_dst.exists():
+                    plan.ambiguous.append("replace-target-occupied")
+                    continue
+                plan.needs_dupdir.add("music")
+                plan.add(label, [{"src": str(old), "dst": str(d)},
+                                 {"src": str(x["file"]), "dst": str(new_dst)}], "replaced", [d, new_dst])
+                plan.rescan.add(str(album_dir))
+            else:
+                plan.ambiguous.append("quality-undecidable")
+        # Loose cover image -> folder.jpg (a move, never a delete).
+        if (plan.outcomes["moved"] and not (album_dir / "folder.jpg").exists()):
+            jpgs = [f for f in c["covers"] if f.suffix.lower() == ".jpg"]
+            if jpgs:
+                plan.add("cover", [{"src": str(jpgs[0]), "dst": str(album_dir / "folder.jpg")}],
+                         "sidecar", [album_dir / "folder.jpg"])
+        plan.music = {"album_dir": album_dir, "album": album, "artist": aa, "year": year,
+                      "discs": discs, "tracks": tracks}
+
+
+    # ---- music post-processing (apply only) -----------------------------------
+    def fix_track_tags(t, album_artist, discs):
+        """Rewrite album-artist / disc tags on the INTAKE copy before the move.
+        Stream copy into a sibling temp file, verify, then rename over. The
+        audio stream is not re-encoded; the track's display `artist` is kept."""
+        tg = t["tags"]
+        meta = []
+        if (tg.get("album_artist") or tg.get("albumartist") or "").strip() != album_artist:
+            meta += ["-metadata", f"album_artist={album_artist}"]
+        if discs > 1 and _num(tg.get("disc")) != t["disc"]:
+            meta += ["-metadata", f"disc={t['disc']}/{discs}"]
+        if not meta:
+            return False
+        src = t["file"]
+        tmp = src.with_name(f".tagfix-{item_id(src.name)}{src.suffix}")
+        ok = run_ffmpeg(["-i", str(src), "-map", "0", "-c", "copy",
+                         "-map_metadata", "0"] + meta + ["-y", str(tmp)])
+        if ok and tmp.exists():
+            a, b = probe_audio(src), probe_audio(tmp)
+            if a and b and a["duration"] and abs(a["duration"] - b["duration"]) / a["duration"] < 0.005:
+                os.replace(tmp, src)
+                return True
+        if tmp.exists():
+            tmp.unlink()
+        log_event("music-tagfix-skipped", severity="warn")
+        return False
+
+
+    def write_album_nfo(ctx):
+        nfo = ctx["album_dir"] / "album.nfo"
+        if nfo.exists():
+            return
+        esc = lambda s: (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        nfo.write_text("<album>\n"
+                       f"  <title>{esc(ctx['album'])}</title>\n"
+                       f"  <artist>{esc(ctx['artist'])}</artist>\n"
+                       f"  <albumartist>{esc(ctx['artist'])}</albumartist>\n"
+                       f"  <year>{ctx['year']}</year>\n"
+                       "</album>\n", encoding="utf-8")
+        log_event("nfo-written", path=anon_path(nfo))
+
+
+    def extract_cover(ctx):
+        target = ctx["album_dir"] / "folder.jpg"
+        if target.exists():
+            return
+        for f in sorted(ctx["album_dir"].iterdir()):
+            if f.suffix.lower() in AUDIO_EXT and probe_audio(f).get("has_cover"):
+                if run_ffmpeg(["-i", str(f), "-an", "-map", "0:v:0", "-frames:v", "1",
+                               "-y", str(target)]) and target.exists():
+                    log_event("cover-extracted", path=anon_path(target))
+                return
+
+
+    # ---- execution helpers ----------------------------------------------------
+    def ensure_dup_dir(kind):
+        """`_duplicates/` needs a .plexignore line at the section root and an
+        empty `.ignore` inside for Jellyfin (SOP 'Duplicate quarantine')."""
+        sec = section(kind)
+        dup = sec / "_duplicates"
+        dup.mkdir(parents=True, exist_ok=True)
+        (dup / ".ignore").touch(exist_ok=True)
+        pi = sec / ".plexignore"
+        have = pi.read_text().splitlines() if pi.exists() else []
+        add = [ln for ln in ("_duplicates/", "_duplicates/**") if ln not in have]
+        if add:
+            with pi.open("a") as fh:
+                if have and have[-1] != "":
+                    fh.write("\n")
+                fh.write("\n".join(add) + "\n")
+
+
+    def run_sidecar(task):
+        env = dict(os.environ, **task["env"], TMDB_API_KEY=TMDB_KEY)
+        try:
+            r = subprocess.run([sys.executable, str(Path(APP_DIR) / task["script"])],
+                               env=env, capture_output=True, timeout=900, check=False)
+            # the child logs structured events only; pass them through
+            sys.stdout.write(r.stdout.decode(errors="replace"))
+            log_event("sidecar-run", script=task["script"], rc=r.returncode)
+        except Exception as e:
+            log_event("sidecar-error", severity="warn", error=type(e).__name__)
+
+
+    def load_state():
+        try:
+            return json.loads(STATE_FILE.read_text())
+        except (OSError, ValueError):
+            return {"version": 1, "first_seen": {}, "failed": {}, "events": []}
+
+
+    def save_state(state):
+        tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+        tmp.write_text(json.dumps(state, sort_keys=True))
+        os.replace(tmp, STATE_FILE)
+
+
+    def free_bytes():
+        return shutil.disk_usage(str(MEDIA_ROOT)).free
+
+
+    def render_metrics(m):
+        lines = []
+        def g(name, help_, samples):
+            lines.append(f"# HELP {name} {help_}")
+            lines.append(f"# TYPE {name} gauge")
+            for labels, v in samples:
+                lab = ",".join(f'{k}="{val}"' for k, val in labels.items())
+                lines.append(f"{name}{{{lab}}} {v}" if lab else f"{name} {v}")
+        g("media_intake_items", "Top-level intake items by state after the last run.",
+          [({"state": s}, m["items"].get(s, 0)) for s in ("pending", "ambiguous", "failed", "planned")])
+        g("media_intake_ambiguous_items", "Ambiguous intake items by reason.",
+          [({"reason": r}, n) for r, n in sorted(m["ambiguous_reasons"].items())] or [({"reason": "none"}, 0)])
+        g("media_intake_ambiguous_oldest_first_seen_timestamp_seconds",
+          "First-seen time of the oldest ambiguous item (run time when none).",
+          [({}, int(m["oldest_ambiguous"]))])
+        g("media_intake_run_actions", "Actions taken by the last run.",
+          [({"action": a}, m["run_actions"].get(a, 0)) for a in ("moved", "duplicate", "replaced", "cleaned", "failed")])
+        g("media_intake_actions_24h", "Actions taken in the last 24h (from the state file).",
+          [({"action": a}, m["actions_24h"].get(a, 0)) for a in ("moved", "duplicate", "replaced", "cleaned", "failed")])
+        g("media_intake_run_aborted", "1 if the last run hit a safety stop.",
+          [({"reason": m["abort_reason"] or "none"}, 1 if m["abort_reason"] else 0)])
+        g("media_intake_apply_enabled", "0 when the INTAKE_APPLY kill switch is off.", [({}, 1 if APPLY else 0)])
+        g("media_intake_last_run_timestamp_seconds", "End of the last run.", [({}, int(m["now"]))])
+        return "\n".join(lines) + "\n"
+
+
+    def push_metrics(body):
+        """Pushgateway PUT replaces the whole group. Returns False on failure."""
+        ok = True
+        mf = os.environ.get("INTAKE_METRICS_FILE")
+        if mf:
+            Path(mf).write_text(body)
+        url = os.environ.get("PUSHGATEWAY_URL", "")
+        if not url:
+            return ok
+        try:
+            req = urllib.request.Request(f"{url.rstrip('/')}/metrics/job/media-intake-watcher",
+                                         data=body.encode(), method="PUT",
+                                         headers={"Content-Type": "text/plain"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                ok = 200 <= r.status < 300
+        except Exception as e:
+            log_event("metrics-push-failed", severity="error", error=type(e).__name__)
+            ok = False
+        return ok
+
+
+    # ---- main -----------------------------------------------------------------
+    def run():
+        now = time.time()
+        result = {"items": Counter(), "ambiguous_reasons": Counter(), "run_actions": Counter(),
+                  "abort_reason": None, "now": now, "oldest_ambiguous": now,
+                  "actions_24h": Counter(), "rescanned": 0}
+        if not JDOWNLOADER_ROOT.is_dir() or not MEDIA_ROOT.is_dir():
+            log_event("intake-preflight-failed", severity="critical", reason="mount-missing")
+            result["abort_reason"] = "preflight"
+            return result
+        if not C.same_filesystem(JDOWNLOADER_ROOT, MEDIA_ROOT):
+            # The single-mount rule. A rename across two mounts is EXDEV.
+            log_event("intake-preflight-failed", severity="critical", reason="exdev-two-mounts")
+            result["abort_reason"] = "preflight"
+            return result
+        state = load_state()
+        seen_now = {}
+        plans = []
+        for item in enumerate_items(JDOWNLOADER_ROOT):
+            iid = item_id(item.name)
+            seen_now[iid] = state["first_seen"].get(iid, now)
+            try:
+                files = walk_files(item)
+                why = incomplete_reason(item, files, now)
+                if why:
+                    result["items"]["pending"] += 1
+                    log_event("intake-skip", item=iid, reason=why)
+                    continue
+                if item.is_dir() and not files:
+                    # An empty leftover folder (every file already moved or the
+                    # package was removed in JDownloader) is not media and would
+                    # otherwise sit "ambiguous" forever. os.rmdir only ever
+                    # removes EMPTY directories, so this cannot touch data.
+                    if APPLY:
+                        for dp, _dn, _fn in sorted(os.walk(item), key=lambda w: -len(w[0])):
+                            try:
+                                os.rmdir(dp)
+                            except OSError:
+                                pass
+                        if not item.exists():
+                            result["run_actions"]["cleaned"] += 1
+                            state["events"].append([now, "cleaned"])
+                            log_event("intake-empty-dir-removed", item=iid)
+                            continue
+                    result["items"]["planned" if not APPLY else "ambiguous"] += 1
+                    continue
+                c = classify(item)
+                plan = Plan(item)
+                if c["kind"] == "movie":
+                    plan_movie(plan, c)
+                elif c["kind"] == "tv":
+                    plan_tv(plan, c)
+                elif c["kind"] == "music":
+                    plan_music(plan, c)
+                else:
+                    plan.ambiguous.append(c["reason"])
+                log_event("intake-classified", item=iid, kind=c["kind"],
+                          actions=dict(plan.outcomes), left=len(plan.ambiguous),
+                          reasons=sorted(set(plan.ambiguous)))
+                plans.append(plan)
+            except Exception as e:   # one bad item must not stop the rest
+                log_event("intake-item-error", severity="error", item=iid, error=type(e).__name__)
+                result["items"]["failed"] += 1
+                state["failed"][iid] = {"ts": now, "reason": type(e).__name__}
+
+        acting = [p for p in plans if p.acts]
+        if len(acting) > MAX_ITEMS:
+            log_event("intake-aborted", severity="critical", reason="too-many-items",
+                      count=len(acting), limit=MAX_ITEMS)
+            result["abort_reason"] = "too-many-items"
+            acting = []
+
+        free0 = free_bytes()
+        for p in plans:
+            iid = item_id(p.item.name)
+            if p not in acting:
+                if p.acts:
+                    result["items"]["pending"] += 1   # blocked by the abort
+                elif p.ambiguous:
+                    result["items"]["ambiguous"] += 1
+                    result["ambiguous_reasons"].update(set(p.ambiguous))
+                    result["oldest_ambiguous"] = min(result["oldest_ambiguous"], seen_now[iid])
+                continue
+            if not APPLY:
+                result["items"]["planned"] += 1
+                try:
+                    organize.apply_plan({"dry_run": True, "groups": p.groups})
+                except SystemExit:
+                    log_event("intake-plan-refused", severity="error", item=iid)
+                if p.ambiguous:
+                    result["ambiguous_reasons"].update(set(p.ambiguous))
+                continue
+            if result["abort_reason"]:
+                result["items"]["pending"] += 1
+                continue
+            for kind in sorted(p.needs_dupdir):
+                ensure_dup_dir(kind)
+            if p.music:
+                for t in p.music["tracks"]:
+                    fix_track_tags(t, p.music["artist"], p.music["discs"])
+            try:
+                res = organize.apply_plan({"dry_run": False, "groups": p.groups})
+            except SystemExit:   # a path rail refused the whole plan: nothing moved
+                res = {"groups": {g["id"]: "refused" for g in p.groups}}
+            failed = [g for g, o in res["groups"].items() if o != "ok"]
+            oc = Counter(p.group_outcome[g] for g, o in res["groups"].items()
+                         if o == "ok" and p.group_outcome[g] != "sidecar")
+            result["run_actions"].update(oc)
+            for a, n in oc.items():
+                state["events"].extend([[now, a]] * n)
+            if failed:
+                result["items"]["failed"] += 1
+                result["run_actions"]["failed"] += len(failed)
+                state["events"].extend([[now, "failed"]] * len(failed))
+                state["failed"][iid] = {"ts": now, "reason": "move-failed", "groups": len(failed)}
+                log_event("intake-item-failed", severity="error", item=iid, groups=len(failed))
+            else:
+                state["failed"].pop(iid, None)
+                if p.music:
+                    write_album_nfo(p.music)
+                    extract_cover(p.music)
+                if SIDECARS and TMDB_KEY:
+                    for task in p.sidecars:
+                        run_sidecar(task)
+                if p.item.is_dir() and not p.ambiguous:
+                    if CL.cleanup(p.item, [str(v) for v in p.verify], guard_media=True):
+                        result["run_actions"]["cleaned"] += 1
+                        state["events"].append([now, "cleaned"])
+                if p.ambiguous:
+                    result["items"]["ambiguous"] += 1
+                    result["ambiguous_reasons"].update(set(p.ambiguous))
+                    result["oldest_ambiguous"] = min(result["oldest_ambiguous"], seen_now[iid])
+            if RESCAN and p.rescan and not failed:
+                import rescan as R
+                R.rescan_paths(sorted(p.rescan))
+                result["rescanned"] += len(p.rescan)
+            drop = free0 - free_bytes()
+            if drop > MAX_FREE_DROP:
+                log_event("intake-aborted", severity="critical", reason="free-space-drop",
+                          dropped_bytes=drop)
+                result["abort_reason"] = "free-space"
+
+        # Failed items still present keep counting until they succeed or vanish.
+        for iid in list(state["failed"]):
+            if iid not in seen_now:
+                state["failed"].pop(iid)
+        result["items"]["failed"] = max(result["items"]["failed"], len(state["failed"]))
+        state["first_seen"] = seen_now
+        state["events"] = [e for e in state["events"] if now - e[0] < 7 * 86400]
+        for ts, a in state["events"]:
+            if now - ts < 86400:
+                result["actions_24h"][a] += 1
+        if APPLY:
+            save_state(state)
+        return result
+
+
+    def main():
+        log_event("intake-start", apply=APPLY, min_age_min=MIN_AGE_S // 60,
+                  max_items=MAX_ITEMS, rescan=RESCAN)
+        res = run()
+        pushed = push_metrics(render_metrics(res))
+        log_event("intake-done", apply=APPLY, items=dict(res["items"]),
+                  actions=dict(res["run_actions"]), aborted=res["abort_reason"],
+                  rescanned=res["rescanned"], pushed=pushed)
+        bad = res["abort_reason"] == "preflight" or res["run_actions"].get("failed") or not pushed
+        sys.exit(1 if bad else 0)
+
 
     if __name__ == "__main__":
         main()

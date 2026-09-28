@@ -2,6 +2,8 @@
 # Suspended CronJob — invoked on-demand to remove a SPECIFIC JDownloader
 # subdirectory after re-verifying every move target exists with size > 0.
 # Refuses globs, share roots, missing VERIFY_DESTINATIONS. See cleanup.py.
+# Single share-root mount (see organize-cronjob.yaml for the EXDEV reason):
+# CLEANUP_PATH is /data/downloads/jdownloader/<item>.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -16,6 +18,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0
+      # Templated jobs are created by hand / by agents; without a TTL every
+      # run's Job + pod lingered until the history limit swept it.
+      ttlSecondsAfterFinished: 86400
       template:
         spec:
           securityContext:
@@ -31,17 +36,16 @@ spec:
                 - name: MEDIA_ROOT
                   value: "/data/data"
                 - name: JDOWNLOADER_ROOT
-                  value: "/intake"
+                  value: "/data/downloads/jdownloader"
                 # Overridden per-invocation:
                 # CLEANUP_PATH, VERIFY_DESTINATIONS
               volumeMounts:
                 - name: scripts
                   mountPath: /app
+                # read-write: the intake sub-path is removed from this mount.
+                # cleanup.py refuses anything outside the intake root.
                 - name: media
                   mountPath: /data
-                  readOnly: true   # cleanup never writes to library, only verifies
-                - name: intake
-                  mountPath: /intake
               resources:
                 requests:
                   cpu: 50m
@@ -55,6 +59,3 @@ spec:
             - name: media
               persistentVolumeClaim:
                 claimName: plex-media-smb
-            - name: intake
-              persistentVolumeClaim:
-                claimName: jdownloader-intake

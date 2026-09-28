@@ -1,0 +1,122 @@
+---
+# Automatic JDownloader intake (2026-09-28). Every 30 min: classify each
+# finished download (movie / TV / music / ambiguous), dedupe against the
+# library by ffprobe, move it into the SOP layout, write sidecars, clean the
+# emptied intake folder, and trigger FOLDER-SCOPED Plex/Jellyfin rescans.
+# Logic + invariants: intake.py in scripts-configmap.yaml.
+# SOP: docs/sops/media-library-standards.md "Automatic intake".
+#
+# KILL SWITCH: set INTAKE_APPLY to "0" below (commit + push). The job then
+# only plans, logs and pushes metrics; nothing on disk changes.
+#
+# Rename-only: media is never deleted or overwritten. Displaced copies (dupes,
+# and the old file of a better-quality REPLACE) go to <Section>/_duplicates/.
+#
+# ONE mount of the share root (plex-media-smb at /data). The intake is the
+# sub-path /data/downloads/jdownloader. Do NOT add jdownloader-intake as a
+# second mount: two CIFS mounts are two filesystems, and every rename between
+# them fails with EXDEV (intake.py's preflight refuses to run in that case).
+#
+# ffmpeg/ffprobe come from an OCI image volume (static build, digest-pinned),
+# mounted read-only at /tools into the stock python image. No custom image.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: media-intake-watcher
+  namespace: media
+spec:
+  schedule: "*/30 * * * *"
+  timeZone: Europe/Berlin
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 86400
+      # Below the 30-min period: a run hung on a wedged CIFS mount fails
+      # loudly instead of blocking every later run via Forbid.
+      activeDeadlineSeconds: 1500
+      template:
+        metadata:
+          labels:
+            app: media-intake-watcher
+        spec:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          restartPolicy: Never
+          containers:
+            - name: intake
+              image: python:3.14.7-slim
+              command: ["python", "/app/intake.py"]
+              env:
+                - name: INTAKE_APPLY          # kill switch: "0" = plan only
+                  value: "1"
+                - name: INTAKE_MIN_AGE_MIN    # skip items touched this recently
+                  value: "30"
+                - name: INTAKE_MAX_ITEMS      # abort the run above this
+                  value: "50"
+                - name: INTAKE_MAX_FREE_DROP_BYTES
+                  value: "1073741824"
+                - name: MEDIA_ROOT
+                  value: "/data/data"
+                - name: JDOWNLOADER_ROOT
+                  value: "/data/downloads/jdownloader"
+                - name: FFPROBE
+                  value: "/tools/ffprobe"
+                - name: FFMPEG
+                  value: "/tools/ffmpeg"
+                - name: PUSHGATEWAY_URL
+                  value: "http://prometheus-pushgateway.monitoring.svc.cluster.local:9091"
+                - name: TMDB_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-manager-tokens
+                      key: TMDB_API_KEY
+                      optional: true
+                - name: PLEX_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-manager-tokens
+                      key: PLEX_TOKEN
+                      optional: true
+                - name: JELLYFIN_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-manager-tokens
+                      key: JELLYFIN_API_KEY
+                      optional: true
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: scripts
+                  mountPath: /app
+                - name: media
+                  mountPath: /data
+                - name: ffmpeg
+                  mountPath: /tools
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+          volumes:
+            - name: scripts
+              configMap:
+                name: library-tools-scripts
+            - name: media
+              persistentVolumeClaim:
+                claimName: plex-media-smb
+            - name: ffmpeg
+              image:
+                reference: docker.io/mwader/static-ffmpeg:9.0.2@sha256:7d9bdaaf887f7e6ce6151f67325c344074b5ff1fb75316011c3376503e449a7b
+                pullPolicy: IfNotPresent

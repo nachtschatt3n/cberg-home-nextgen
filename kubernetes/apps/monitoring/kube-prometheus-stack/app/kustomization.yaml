@@ -72,3 +72,4 @@ resources:
   - ./scrypted-alerts.yaml
   - ./vaultwarden-alerts.yaml
   - ./maintenance-window-alerts.yaml
+  - ./media-intake-alerts.yaml

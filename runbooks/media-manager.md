@@ -50,13 +50,63 @@ less runbooks/media-library-current.md
 
 The report lists per-section compliance against the thresholds in `docs/sops/media-library-standards.md` plus a worst-N table, an orphan-sidecar list, and a drift list. It is gitignored and overwritten on every run — do not hand-edit.
 
-### 2. Organise a new JDownloader batch
+### 2. New JDownloader downloads — automatic (media-intake-watcher)
 
-```text
-Invoke the agent: "organise the latest jdownloader batch"
+Nothing to do for the normal case. `media/media-intake-watcher` runs every 30
+min and sorts finished downloads into Movies / TV Shows / Music. Full rules
+are in `docs/sops/media-library-standards.md` under "Automatic intake".
+Summary:
+
+- It skips items with `.rar`/`.part` files and items touched in the last
+  30 min.
+- It dedupes by ffprobe.
+  - identical or clearly worse: the intake copy goes to `_duplicates/`.
+  - clearly better (higher resolution **and** bitrate, same fps, duration
+    within ±2%): a two-step REPLACE. The old library file goes to
+    `_duplicates/` first.
+  - anything else stays in the intake as **ambiguous**.
+- It leaves YouTube-looking items alone.
+
+```bash
+# What did the last run do? (counts + anonymised paths only)
+kubectl -n media logs job/$(kubectl -n media get jobs -l app=media-intake-watcher \
+  --sort-by=.metadata.creationTimestamp -o name | tail -1 | cut -d/ -f2) | grep intake-done
+# Run it now
+kubectl -n media create job --from=cronjob/media-intake-watcher media-intake-watcher-manual-$(date +%s)
+# Current gauges
+kubectl get --raw /api/v1/namespaces/monitoring/services/prometheus-pushgateway:9091/proxy/metrics | grep '^media_intake_items'
+# Daily digest to the OpenClaw briefing (the nightly window close-out runs this)
+.venv/bin/python3 runbooks/media-intake-digest.py --dry-run
 ```
 
-The agent will:
+**Kill switch:** set `INTAKE_APPLY: "0"` in
+`kubernetes/apps/media/library-tools/app/intake-cronjob.yaml`, then commit
+and push. The watcher then plans and logs only.
+
+**Undo a REPLACE or a duplicate move:** the log line
+`mv-ok src=... dst=Movies/_duplicates/...` tells you where the file went.
+Move it back by hand from a debug pod that mounts `plex-media-smb`. Use
+hard-coded paths and no globs, and check that the destination is empty
+first. Nothing in `_duplicates/` is ever deleted automatically.
+
+**Alerts** (`media-intake-alerts.yaml`):
+- `MediaIntakeMoveFailed`
+- `MediaIntakeAmbiguousStale` (more than 24h)
+- `MediaIntakeRunAborted` (the 50-item or 1 GiB free-space stop)
+- `MediaIntakeWatcherStale`
+- `MediaIntakeMetricsMissing`
+
+### 2b. Ambiguous intake items — manual organise
+
+```text
+Invoke the agent: "organise the ambiguous jdownloader items"
+```
+
+The suspended templates `media-organize` / `media-cleanup` now mount the share
+root ONCE at `/data`. Plan paths are therefore `/data/downloads/jdownloader/...`,
+not `/intake/...`, because the old two-mount layout failed every rename with
+EXDEV. `media-rescan` takes `RESCAN_PATHS` (a JSON list of folders) and never
+runs a full-library scan. The agent will:
 
 1. List `/mnt/nas/media/downloads/jdownloader` via a debug pod.
 2. ffprobe each candidate.
