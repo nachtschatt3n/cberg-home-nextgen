@@ -80,7 +80,8 @@ rollback_class: git-revert            # nothing forward-only: settings.conf is a
                                       # file, MakeMKV rewrites its header on every start; the
                                       # nightly Longhorn backup of makemkv-config is the backstop.
 finding_refs: [F-0b69c5d9]
-status: vetted
+status: blocked
+blocked_reason: "nightly 2026-09-28: image v26.09.2 LANDED and is healthy (656a896a; G1-G4,G7,G8 PASS, G6 works but its noVNC_app_name probe no longer matches the new UI) -- G5 FAIL fail-closed: Recreate rescheduled the pod onto k8s-nuc14-01 (no /dev/sr0; autodiscripper disabled). Not an image fault, not rolled back. Needs operator: nodeSelector k8s-nuc14-03 via git (plan section 6) or an approved pod reschedule; then re-run G5 and retire this plan. G6 probe needs updating (title MakeMKV / noVNC_container)."
 window: null
 premises:
   - id: image-is-still-v26.01.1
