@@ -286,8 +286,10 @@ def reconcile(cfg, today, decisions=_FETCH_DECISIONS):
     for p in plans:
         if p.get("status") in TERMINAL_PLAN_STATUSES:
             continue
-        cls, why = execution_class(p, autonomy)
-        pre, pre_why = preapproval(p, autonomy, cls, today)
+        # effective_class = execution_class + SD-10 pre-approval + SD-11
+        # (interruption-tolerant nightly); one function so the scheduler,
+        # autonomy-record.py eligible and this report can never disagree.
+        cls, why, pre, pre_why = effective_class(p, autonomy, today, cfg)
         exec_classes.append({"plan_id": p.get("plan_id"), "class": cls,
                              "reason": why, "window": p.get("window"),
                              # SD-10: runs in `preapproved_windows` with no GO
@@ -638,7 +640,8 @@ def human(r, cfg):
     if ec:
         L.append("\nexecution classes (ENFORCED — window agent executes AUTO-* only, P2.1b):")
         for e in ec:
-            tag = " [SD-10 pre-approved]" if e.get("preapproved") else ""
+            tag = ((" [SD-11 interruption-tolerant]" if str(e.get("reason", "")).startswith("SD-11")
+                    else " [SD-10 pre-approved]") if e.get("preapproved") else "")
             L.append(f"  {e['class']:<18} {e['plan_id']:<34} {e['reason']}{tag}")
     cp = r.get("cron_parity") or {}
     if not cp.get("verified", True):
@@ -1732,11 +1735,158 @@ def preapproval(plan: dict, policy: dict | None, klass: str,
                   f"re-checked at runtime"]
 
 
-def preapproved_windows(policy) -> list[str]:
-    spec = (policy or {}).get("preapproved_low_risk")
+# ---------------------------------------------------------------------------
+# SD-11 "interruption acceptable, loss not" (operator direction 2026-09-28).
+#
+# SD-10 pre-approves only `risk: low` AUTO-NIGHT plans. That left every
+# reversible, capability-neutral plan whose only cost is DOWNTIME (a restart,
+# a user logout, a 79-release helm re-render) waiting for an operator GO,
+# although the operator's actual rule is: in the nightly window, service
+# interruption is fine; DATA loss and FEATURE loss are not. SD-11 is that rule:
+#
+#   * `risk:` is IGNORED here — it stays the capacity weight. Interruption is
+#     what `risk: medium/high` usually encodes, and interruption is accepted.
+#   * DATA LOSS is gated by the rollback path: git-revert qualifies; a
+#     backup-restore plan qualifies ONLY with a declared `backup_gate` AND a
+#     `restore_proof` (a gate that proves the backup RESTORES, not that it
+#     exists); one-way never qualifies.
+#   * FEATURE LOSS: `capability_change` must be declared false.
+#   * QUORUM / SELF-REVERT: the SD-11 floor (below) keeps plans touching
+#     storage, etcd/control plane, CNI, cluster DNS or Flux out — those are the
+#     substrates whose failure either risks data/quorum or disables the git
+#     revert that makes an unattended night recoverable. (gateway is NOT in the
+#     floor: an ingress outage is pure interruption and Flux egress is
+#     unaffected.)
+#   * `autonomy_override: human-gated` still RESTRICTS (credentials, physical
+#     steps and anything else the plan author knows a human must do).
+#   * review ready-for-go <= max_review_age_days, runnable status, no reboot,
+#     est_duration_min fits the slot's schedulable budget; premises are
+#     re-checked at RUNTIME by the window agent (Step 4 item 0), as for SD-10.
+# Pure: facts in, verdict out. KILL SWITCH: delete `interruption_tolerant:`
+# from autonomy-policy.yaml.
+# ---------------------------------------------------------------------------
+
+SD11_FLOOR = ("storage", "longhorn", "etcd", "talos", "apiserver", "cni",
+              "cilium", "dns", "coredns", "flux")
+
+# Step 0 reserve, same figure window-scheduler.py uses (STEP0_RESERVE_MIN).
+SD11_STEP0_RESERVE_MIN = 20
+
+
+def sd11_budget_min(cfg, spec) -> int | None:
+    """Schedulable minutes of the smallest SD-11 window (duration - Step 0)."""
+    wins = {str(w) for w in ((spec or {}).get("windows") or ["nightly"])}
+    durs = [int(w.get("duration_min") or 0) for w in ((cfg or {}).get("windows") or [])
+            if str(w.get("id")) in wins]
+    if not durs:
+        return None
+    return min(durs) - SD11_STEP0_RESERVE_MIN
+
+
+def sd11_eligibility(plan: dict, policy: dict | None, today: date | None = None,
+                     budget_min: int | None = None) -> tuple[bool, list[str]]:
+    """(eligible, reasons) for SD-11. Reasons list every unmet condition, or
+    the basis when eligible. Fail-safe: no policy block => never eligible."""
+    spec = (policy or {}).get("interruption_tolerant")
+    if not isinstance(spec, dict):
+        return False, ["SD-11 disabled (no interruption_tolerant in autonomy-policy.yaml)"]
+    today = today or date.today()
+    missing = []
+    if str(plan.get("autonomy_override") or "").strip() == "human-gated":
+        missing.append("autonomy_override: human-gated (plan restricts itself)")
+    cc = plan.get("capability_change")
+    if cc is True:
+        missing.append("capability_change: true (feature change/loss needs a GO)")
+    elif cc is not False:
+        missing.append("capability_change not declared false")
+    if plan.get("needs_reboot") is not False:
+        missing.append("needs_reboot not declared false (nightly allows no reboot)")
+    rc = plan.get("rollback_class")
+    ok_rc = [str(x) for x in (spec.get("rollback_classes") or ["git-revert", "backup-restore"])]
+    if rc not in ok_rc:
+        missing.append(f"rollback_class {rc!r} (needs {'|'.join(ok_rc)})")
+    elif rc == "backup-restore":
+        if not plan.get("backup_gate"):
+            missing.append("backup-restore without a backup_gate (possible data loss)")
+        if not str(plan.get("restore_proof") or "").strip():
+            missing.append("backup-restore without a restore_proof gate "
+                           "(a backup that exists is not a backup that restores)")
+    shared = shared_tokens((plan.get("touches") or {}).get("shared"))
+    floor = ({str(x).strip().lower() for x in (spec.get("forbid_shared") or [])}
+             | set(SD11_FLOOR))
+    hit = sorted(shared & floor)
+    if hit:
+        missing.append(f"touches data/quorum/self-revert infra ({', '.join(hit)})")
+    status = str(plan.get("status") or "").strip()
+    statuses = [str(x) for x in (spec.get("statuses") or ["vetted", "scheduled", "awaiting-go"])]
+    if status not in statuses:
+        missing.append(f"status {status or 'none'} (needs {'|'.join(statuses)})")
+    rv = parse_review(plan.get("review"))
+    want = str(spec.get("require_review") or "ready-for-go")
+    max_age = int(spec.get("max_review_age_days") or 30)
+    if rv is None:
+        missing.append(f"no recorded review (needs `review: {want}@YYYY-MM-DD`)")
+    else:
+        verdict, rdate = rv
+        age = (today - rdate).days
+        if verdict != want:
+            missing.append(f"review verdict {verdict} (needs {want})")
+        if age < 0:
+            missing.append(f"review dated in the future ({rdate})")
+        elif age > max_age:
+            missing.append(f"review {age}d old (max {max_age}d — re-review)")
+    try:
+        dur = int(plan.get("est_duration_min") or 0)
+    except (TypeError, ValueError):
+        dur = 0
+    if dur <= 0:
+        missing.append("est_duration_min not declared")
+    elif budget_min is not None and dur > budget_min:
+        missing.append(f"est_duration_min {dur} exceeds the nightly budget {budget_min}")
+    if missing:
+        return False, missing
+    wins = ",".join(str(w) for w in (spec.get("windows") or ["nightly"]))
+    return True, [f"SD-11 interruption-tolerant: capability-neutral, rollback {rc}, "
+                  f"no data/quorum infra, review {rv[0]}@{rv[1]}, {dur}m fits; "
+                  f"windows: {wins}; premises re-checked at runtime"]
+
+
+def effective_class(plan: dict, policy: dict | None, today: date | None = None,
+                    cfg: dict | None = None) -> tuple[str, str, bool, list[str]]:
+    """(class, reason, preapproved, preapproval_reasons) — the ONE derivation
+    every consumer uses. execution_class() + SD-10, then SD-11 when SD-10 does
+    not already pre-approve. An SD-11 plan derives AUTO-NIGHT (git-revert) or
+    AUTO-BACKUP-GATED (backup-restore with restore proof) and is pre-approved
+    for the SD-11 windows — the runtime contract (premises, backup gate PASS,
+    Step 4) is unchanged."""
+    klass, why = execution_class(plan, policy)
+    pre, pre_why = preapproval(plan, policy, klass, today)
+    if pre:
+        return klass, why, pre, pre_why
+    spec = (policy or {}).get("interruption_tolerant")
+    ok, s_why = sd11_eligibility(plan, policy, today, sd11_budget_min(cfg, spec))
+    if not ok:
+        return klass, why, False, pre_why + [f"SD-11: {r}" for r in s_why]
+    sd_class = ("AUTO-BACKUP-GATED" if plan.get("rollback_class") == "backup-restore"
+                else "AUTO-NIGHT")
+    return sd_class, "SD-11 interruption-tolerant (policy interruption_tolerant)", True, s_why
+
+
+def sd11_windows(policy) -> list[str]:
+    spec = (policy or {}).get("interruption_tolerant")
     if not isinstance(spec, dict):
         return []
     return [str(w) for w in (spec.get("windows") or ["nightly"])]
+
+
+def preapproved_windows(policy) -> list[str]:
+    """Windows where a pre-approved plan (SD-10 or SD-11) runs without a GO."""
+    spec = (policy or {}).get("preapproved_low_risk")
+    out = [str(w) for w in (spec.get("windows") or ["nightly"])] if isinstance(spec, dict) else []
+    for w in sd11_windows(policy):
+        if w not in out:
+            out.append(w)
+    return out
 
 
 # ---------------------------------------------------------------------------

@@ -59,7 +59,7 @@
 # HUMAN-GATED. KILL SWITCH: empty the `classes:` map (or delete this file)
 # => every plan derives HUMAN-GATED.
 # Changes here are code-reviewed; bump `version`.
-version: "2026.09.27"
+version: "2026.09.28"
 
 first_runs_supervised: 2
 
@@ -106,6 +106,42 @@ preapproved_low_risk:
   require_review: ready-for-go
   max_review_age_days: 30
   statuses: [vetted, scheduled, awaiting-go]
+  windows: [nightly]
+
+# ── SD-11 "INTERRUPTION ACCEPTABLE, LOSS NOT" (operator direction 2026-09-28) ──
+# Operator, verbatim essence: "Especially in the nightly window, service
+# interruption is totally OK. The only thing that's not fine is DATA LOSS or
+# FEATURE LOSS." SD-10 above pre-approves only `risk: low`; `risk:` mostly
+# encodes interruption, which is exactly what the operator accepts at night.
+# A plan is pre-approved for the windows below WITHOUT a GO and WITHOUT the
+# track record when ALL hold (maintenance-plan.py::sd11_eligibility()):
+#   * review ready-for-go@<date>, at most max_review_age_days old;
+#   * capability_change: false                        (no feature loss);
+#   * rollback git-revert, OR backup-restore with BOTH `backup_gate` and a
+#     `restore_proof` gate (proves the backup RESTORES) (no data loss);
+#     one-way never qualifies;
+#   * needs_reboot: false (the nightly window allows none);
+#   * no touches.shared token in forbid_shared + the SD-11 floor in code
+#     (storage, longhorn, etcd, talos, apiserver, cni, cilium, dns, coredns,
+#     flux) — data, quorum, or the git-revert path itself (no quorum loss,
+#     no un-revertable night);
+#   * no `autonomy_override: human-gated` (credentials, physical steps, or
+#     anything else the author knows needs a human);
+#   * est_duration_min fits the window's schedulable budget
+#     (duration_min - 20 Step-0 reserve);
+#   * status vetted|scheduled|awaiting-go; premises PASS at runtime.
+# `risk:` is deliberately NOT a condition (it stays the capacity weight).
+# Downtime and user logouts are NOT reasons for an operator GO any more.
+# The operator is still asked ONLY for: possible data loss, capability or
+# feature removal, quorum loss, credentials/physical actions, and an
+# unexplained regression after an auto-revert.
+# KILL SWITCH: delete this block.
+interruption_tolerant:
+  require_review: ready-for-go
+  max_review_age_days: 30
+  statuses: [vetted, scheduled, awaiting-go]
+  rollback_classes: [git-revert, backup-restore]   # backup-restore needs restore_proof
+  forbid_shared: []                                # widens the in-code SD-11 floor only
   windows: [nightly]
 
 default: human-gated

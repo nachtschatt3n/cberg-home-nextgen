@@ -55,8 +55,10 @@ conflicts_with:
                                         # its side (review 2026-09-28); the scheduler honours either.
 security_ref: F-069b1775              # posture detail lives on the finding, not here
 capability_change: false              # same cache/session/lock service, same app behaviour
-autonomy_override: human-gated        # logs every user out; must never land in the unattended
-                                      # nightly slot. Not SD-10 eligible (risk: medium anyway).
+# autonomy_override REMOVED 2026-09-28 under SD-11 ("interruption acceptable, loss
+# not"): its only reason was that the redis swap logs every user out. That is
+# interruption, which the operator accepts in the nightly window. No data (no
+# PVC, cache/sessions/locks only) and no capability change (declared false).
 rollback_class: git-revert            # ONE commit, four files, reverts cleanly. Unlike the
                                       # 09-26 revision there is NO in-place config.php write,
                                       # so the revert is the whole rollback.

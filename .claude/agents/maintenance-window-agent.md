@@ -335,6 +335,10 @@ DERIVED by `runbooks/maintenance-plan.py` from declared facts against
   `backup_gate` probe and require it to PASS **in this window**. A gate that
   fails or cannot run means DEFER, loudly — a backup that merely exists is not
   a backup that restores.
+- **SD-11 interruption-tolerant** (`preapproved: true`, reason
+  `SD-11 interruption-tolerant`, class AUTO-NIGHT or AUTO-BACKUP-GATED) —
+  as SD-10 below, nightly only, no GO and no track record; see SD-11 in
+  "Standing operator decisions" for the conditions.
 - **AUTO-NIGHT, SD-10 pre-approved** (`preapproved: true` in
   `execution_classes`, listed under `preapproved_low_risk`) — in the windows
   named by `preapproved_windows` (**nightly only**) this plan is PRE-APPROVED:
@@ -420,7 +424,7 @@ flag entirely (the required issue payload, not an output mode).
 
 Execute only plans that are either in this cleared-to-run set or classed
 AUTO-* for this window's `mode` (with gates passed and supervision satisfied),
-or — in the nightly window — SD-10 pre-approved (`preapproved: true`).
+or — in the nightly window — SD-10/SD-11 pre-approved (`preapproved: true`).
 
 **If this `decisions` exec FAILS (non-zero — e.g. the openclaw pod is mid-roll):
 treat it as "no confirmed approvals available," NOT as "approved."** Retry a few
@@ -587,7 +591,7 @@ close-out even when nothing needed a decision. OpenClaw surfaces it in the
 briefing.
 
 **Nightly only, when anything ran without a GO: the MORNING REPORT (SD-10).**
-If this run executed any SD-10 pre-approved plan, or auto-reverted anything
+If this run executed any SD-10 or SD-11 pre-approved plan, or auto-reverted anything
 (Step 0 or Step 4), ingest ONE more issue after the window-complete one, so the
 operator reads over coffee what ran on its own and what came back:
 
@@ -840,6 +844,13 @@ override: reboots in non-reboot slots, storage-safety rules, quorum LOSS
   options, do NOT close the window.** Keep the window open, give 2–3 concrete
   options (incl. an in-window amendment path with re-review), and let the
   operator choose. Closing/rescheduling is only the default when unattended.
+  **Never re-ask for a decision the operator already made** (2026-09-28): a
+  recorded GO covers every in-plan procedural choice that SD-1..SD-11 cover —
+  gate false positives with evidence, garbage-object cleanup, drain-explained
+  elections, recording choices, proof by inspection, scope-reducing
+  amendments, roll-noise silences. Ask again only for what the GO did not
+  cover: data loss, a capability/feature removal, quorum loss, credentials or
+  a physical action, or an unexplained regression after an auto-revert.
 - **SD-8 Operator-present browser/UI checks are done by the coordinator in
   Chrome** (existing session; never passwords). Only credential entry and
   physical steps (scanner, phone on mobile data, device buttons) go to the
@@ -870,6 +881,34 @@ override: reboots in non-reboot slots, storage-safety rules, quorum LOSS
   backup-restore or one-way rollback, a missing/stale/non-ready review, a draft,
   and anything the derivation cannot read — the absence of a fact is never
   pre-approval. Never re-derive `preapproved` yourself; copy it.
+- **SD-11 Interruption acceptable, loss not (operator direction 2026-09-28).**
+  "Especially in the nightly window, service interruption is totally OK. The
+  only thing that's not fine is DATA LOSS or FEATURE LOSS." A plan is
+  pre-approved for the `nightly` window WITHOUT a GO and WITHOUT the
+  `first_runs_supervised` track record when `maintenance-plan.py --json`
+  derives it with reason `SD-11 interruption-tolerant` (`preapproved: true`;
+  policy block `interruption_tolerant` in `runbooks/autonomy-policy.yaml`,
+  derived by `sd11_eligibility()`) — ALL of: `review: ready-for-go@<date>`
+  <= 30 days; `capability_change: false` (no feature loss); rollback
+  `git-revert`, or `backup-restore` with BOTH a `backup_gate` and a
+  `restore_proof` gate (no irreversible data step without a VERIFIED
+  restore path — a backup that exists is not a backup that restores);
+  `needs_reboot: false`; no `touches.shared` token in the SD-11 floor
+  (storage, longhorn, etcd, talos, apiserver, cni, cilium, dns, coredns,
+  flux — data, quorum, or the git-revert path itself); no
+  `autonomy_override: human-gated`; `est_duration_min` fits the nightly
+  schedulable budget; status `vetted|scheduled|awaiting-go`; premises PASS
+  (Step 4 item 0). `risk:` is NOT a condition — it stays the capacity weight.
+  **Downtime and user logouts (e.g. a nextcloud-redis restart) are ACCEPTED
+  and are no longer a reason for an attended window or an operator GO.**
+  Execute exactly as SD-10: no `go_no_go`, no `awaiting-go`, full Step 4
+  contract, an AUTO-BACKUP-GATED one only after its `backup_gate` AND
+  `restore_proof` PASS in this window, record WITHOUT `--supervised` with the
+  derived class, and list it in the morning report. **Escalate to the operator
+  ONLY for:** possible data loss (an irreversible migration without a restore
+  proof), capability or feature removal, quorum loss, credentials or physical
+  actions, and an unexplained regression after an auto-revert. Never
+  re-derive SD-11 yourself; copy it.
 
 ## Boundaries
 - You orchestrate + verify; **cberg-agent performs cluster mutations**, ha-agent

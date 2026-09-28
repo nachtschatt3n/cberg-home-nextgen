@@ -264,7 +264,12 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21,
         klass = classes.get(pid, "HUMAN-GATED")
         status = str(plan.get("status") or "").strip()
 
-        if klass not in SCHEDULABLE_CLASSES:
+        # A pre-approved plan (SD-10, or SD-11 which may derive
+        # AUTO-BACKUP-GATED with a declared restore proof) is schedulable into
+        # its pre-approved windows; admitting that is the operator decision
+        # the AUTO-BACKUP-GATED note in the docstring asked for (SD-11,
+        # 2026-09-28). The backup gate still has to PASS at runtime.
+        if klass not in SCHEDULABLE_CLASSES and pid not in (preapproved or ()):
             skip(plan, f"class {klass} is not auto-schedulable")
             continue
         if status not in SCHEDULABLE_STATUSES:
@@ -350,7 +355,7 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21,
             "category": f"{plan.get('kind')}/{klass}",
             "reason": ("earning supervised runs — category not yet graduated"
                        if want_attended else
-                       ("SD-10 pre-approved low-risk (reviewed ready-for-go) — "
+                       ("pre-approved (SD-10 low-risk or SD-11 interruption-tolerant, reviewed ready-for-go) — "
                         "runs in the nightly window without a GO")
                        if is_pre and not graduated.get(f"{plan.get('kind')}/{klass}", False) else
                        "category graduated — eligible for unattended execution"),
@@ -389,7 +394,12 @@ def main() -> int:
     cfg = mp.load_windows()
     plans = mp.load_plans(cfg)
     policy = mp.load_autonomy_policy()
-    classes = {p.get("plan_id"): mp.execution_class(p, policy)[0] for p in plans}
+    today = dt.date.fromisoformat(os.environ.get("SCHEDULER_TODAY",
+                                                 dt.date.today().isoformat()))
+    # ONE derivation (execution_class + SD-10 + SD-11), shared with
+    # maintenance-plan.py's report and autonomy-record.py eligible.
+    eff = {p.get("plan_id"): mp.effective_class(p, policy, today, cfg) for p in plans}
+    classes = {pid: e[0] for pid, e in eff.items()}
 
     # graduation: unreadable track record => nothing is graduated => everything
     # routes to an attended window. Denying autonomy on an unreadable ledger is
@@ -403,11 +413,7 @@ def main() -> int:
                 graduated[row["category"]] = row["clean_supervised"] >= threshold
         verified = True
 
-    today = dt.date.fromisoformat(os.environ.get("SCHEDULER_TODAY",
-                                                 dt.date.today().isoformat()))
-    preapproved = {p.get("plan_id") for p in plans
-                   if mp.preapproval(p, policy, classes.get(p.get("plan_id"), "HUMAN-GATED"),
-                                     today)[0]}
+    preapproved = {pid for pid, e in eff.items() if e[2]}
     assignments, skipped = assign(plans, cfg, classes, graduated, today,
                                   args.horizon_days, preapproved=preapproved,
                                   preapproved_windows=mp.preapproved_windows(policy))

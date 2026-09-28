@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.27"
+version: "2026.09.28"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -334,7 +334,7 @@ deny:
   # disproves the stated reason overrides the hold, and the real risk (user
   # impact) rides along unnoticed.
   - match: "*nextcloud-redis*"
-    reason: "session + file-lock store with no persistence: any restart signs out every logged-in Nextcloud user and drops held locks. Not chart-coupled to the server and no occ migrations — hold is about user impact, so schedule an ATTENDED low-traffic slot, never the unattended nightly lane."
+    reason: "session + file-lock store with no persistence: any restart signs out every logged-in Nextcloud user and drops held locks. Not chart-coupled to the server and no occ migrations — hold is about user impact, so it stays a PLAN (never auto-merged). Since SD-11 (2026-09-28, operator: 'in the nightly window service interruption is totally OK; only data loss or feature loss is not') the logout is ACCEPTED interruption: the plan may run in the unattended nightly window, which is the lowest-traffic slot there is."
   - match: "*nextcloud*"
     reason: "chart+image must bump together and run occ migrations (Mail custom_app / stuck-maintenance trap) — operator-supervised only."
   # Pre-release CHANNEL, not a version pin. Upstream ships tags to the registry

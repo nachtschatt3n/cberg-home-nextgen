@@ -244,12 +244,12 @@ def cmd_eligible(args) -> int:
         return 1
     plan = plans[0]
     policy = mp.load_autonomy_policy()
-    klass, reason = mp.execution_class(plan, policy)
+    # the ONE derivation: execution_class + SD-10 + SD-11 (maintenance-plan.py)
+    klass, reason, pre, pre_why = mp.effective_class(plan, policy, None, mp.load_windows())
     threshold = load_policy()
     category = derive_category(plan.get("kind"), klass)
 
     status = str(plan.get("status") or "").strip()
-    pre, pre_why = mp.preapproval(plan, policy, klass)
     verdict = {"plan_id": args.plan_id, "category": category, "status": status,
                "execution_class": klass, "class_reason": reason,
                "threshold": threshold, "preapproved": pre, "preapproval": pre_why,
