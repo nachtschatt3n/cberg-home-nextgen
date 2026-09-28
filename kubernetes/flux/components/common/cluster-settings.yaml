@@ -4,5 +4,8 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cluster-settings
-data:
-  SETTING_EXAMPLE: This value will be available to all YAML resources as ${SETTING_EXAMPLE}
+# SETTING_EXAMPLE removed 2026-09-28: its value contained its own ${...} reference, so
+# Flux postBuild substituted it into itself on every reconcile (+54 B each; 821 KB live),
+# on course to exceed the 1 MiB ConfigMap limit and stop cluster-apps applying.
+# Never put a self-reference in a cluster-settings value.
+data: {}
