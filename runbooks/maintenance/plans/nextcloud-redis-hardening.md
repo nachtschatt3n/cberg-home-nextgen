@@ -2,23 +2,20 @@
 plan_id: nextcloud-redis-hardening
 component: nextcloud-redis
 pr: null                              # Not a version bump. No Renovate PR exists or can
-                                      # exist: this changes a Deployment's command, a
-                                      # NetworkPolicy's `from:`, a SOPS Secret and three
-                                      # HelmRelease values. security_ref carries the driver.
+                                      # exist: this changes two Deployments, a
+                                      # NetworkPolicy, a SOPS Secret and HelmRelease
+                                      # values. security_ref carries the driver.
 kind: config
-current: "deploy/office/nextcloud-redis runs `redis-server --save \"\" --appendonly no` with NO --requirepass (live 2026-09-22); networkpolicy/office/nextcloud-redis ingress is `ports: [6379/TCP]` with NO `from:` (allow-from-anywhere on that port, live 2026-09-22); the main container's REDIS_URL is the unauthenticated `redis://$(REDIS_HOST):$(REDIS_HOST_PORT)` form; config.php persists `redis.password: ''`"
-target: "requirepass from a SOPS-managed key (`nextcloud-config/redis-password`) enforced by a sh -c wrapper that REFUSES to start unauthenticated; every consumer (main container, cron pods, the hand-declared sidecar, notify_push via config.php) authenticates; the NetworkPolicy admits only the three real consumer pod sets; a non-consumer pod is PROVEN unable to connect"
+current: "deploy/office/nextcloud-redis runs `redis-server --save \"\" --appendonly no` with NO --requirepass; networkpolicy/office/nextcloud-redis ingress is `ports: [6379/TCP]` with NO `from:`; the main container's REDIS_URL is the unauthenticated form; deploy/nextcloud-notify-push env is exactly `PORT NEXTCLOUD_URL` and its redis config comes from config.php (password None) -- all re-measured live 2026-09-28"
+target: "requirepass from SOPS key `nextcloud-config/redis-password` behind a sh -c wrapper that REFUSES to start unauthenticated; main/cron/worker-sidecar authenticate via the chart's externalRedis.existingSecret + one hand-added env; notify_push authenticates via its OWN `REDIS_URL` env (upstream env-over-config.php precedence), NOT via config.php; the NetworkPolicy admits only the three real consumer pod sets"
 update_type: hardening
-risk: medium                          # No data at risk — this Redis holds cache, PHP
-                                      # sessions and transient file locks, no PVC, nothing
-                                      # survives a restart by design. What IS at risk is
-                                      # availability during the window (every request 500s
-                                      # if server and clients disagree on auth for even a
-                                      # minute — hence the quiesce) and one known trap:
-                                      # notify_push reads config.php, not env, and
-                                      # reconnect-loops behind a green HelmRelease if the
-                                      # password is not persisted there (d6070b82 lesson).
-est_duration_min: 45                  # quiesce 5 · git+reconcile 10 · verify 20 · resume 10
+risk: medium                          # No data at risk: this Redis holds cache, PHP
+                                      # sessions and transient file locks, no PVC. What IS
+                                      # at risk is availability during the window (every
+                                      # request 500s if server and clients disagree on
+                                      # auth, hence the quiesce) and every logged-in user
+                                      # is logged out. Not low: attended, user-visible.
+est_duration_min: 40                  # quiesce 5 · git+reconcile 10 · verify 20 · resume 5
 needs_reboot: false
 touches:
   namespaces: [office]
@@ -26,98 +23,97 @@ touches:
     - deployment/nextcloud-redis                # command (wrapper + --requirepass), env
     - networkpolicy/nextcloud-redis             # ingress `from:` podSelectors
     - secret/nextcloud-config                   # NEW key redis-password (SOPS)
-    - helmrelease/nextcloud                     # externalRedis.existingSecret + sidecar env
+    - helmrelease/nextcloud                     # externalRedis.existingSecret + worker sidecar env
     - deployment/nextcloud                      # rolls (new env); quiesced for the window
     - cronjob/nextcloud-cron                    # new env via the chart; suspended in-window
-    - deployment/nextcloud-notify-push          # rolls after config.php carries the password
-    - deployment/nextcloud-whiteboard           # Reloader-rolled at §3.6 (auto annotation + reads Secret nextcloud-config)
-    - pvc/nextcloud-config                      # config.php rewritten IN PLACE by occ (backed up first)
+    - deployment/nextcloud-notify-push          # NEW env REDIS_PASSWORD + REDIS_URL; rolls
+    - deployment/nextcloud-whiteboard           # Reloader-rolled (auto annotation) when Secret nextcloud-config changes
     - kustomization/nextcloud                   # suspended during the quiesce
-  shared: []                                    # office-local. NOT `storage`: no volume operation.
+  shared: []                                    # office-local. No storage operation: config.php
+                                                # on pvc/nextcloud-config is NOT written by this
+                                                # revision (that was the 09-26 failure mode).
 depends_on: []
 conflicts_with:
-  # - nextcloud-34.0.4 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # vetted, sun-attended:2026-10-04. Same helmrelease.yaml,
-                                        # same deployment/nextcloud roll, same quiesce shape.
-                                        # Two plans editing one HelmRelease in one slot is the
-                                        # interference the window agent exists to catch.
-                                        # RECIPROCITY GAP: that plan's list does not name this
-                                        # plan_id (it predates this file); the scheduler honours
-                                        # either side, so this one-sided entry is sufficient.
-  - bitnamilegacy-exit-nextcloud-db     # blocked, window:null — latent. Same app quiesced,
-                                        # risk:high, and its rollback is a DB restore; never
-                                        # stack a session-store auth change on that.
-  - nextcloud-mcp-0.187.1               # awaiting-go, sat-attended:2026-10-03. Different
-                                        # HelmRelease and nextcloud-mcp does NOT connect to
-                                        # this Redis (CLIENT LIST, 2026-09-22) — but its
-                                        # verification calls the Nextcloud API, which this
-                                        # plan takes down for ~20 min. Keep them apart.
+  - bitnamilegacy-exit-nextcloud-db     # blocked, latent. Same app quiesced, risk:high, DB-restore
+                                        # rollback; never stack a session-store auth change on it.
+  - nextcloud-mcp-0.187.1               # its verification calls the Nextcloud API, which this plan
+                                        # takes down for ~20 min. Lists this plan reciprocally.
+  - nextcloud-fleet-35.0.1              # draft. Edits helmrelease.yaml AND notify-push.yaml (image
+                                        # lockstep) and rolls the same Deployments. Lists this plan.
+  - redis-fleet-8.10.2                  # draft. Bumps the image line in redis-deployment.yaml, the
+                                        # same file §3.2 patches (3-way merge proven clean, §3.2),
+                                        # and Recreate-rolls the same Redis. Lists this plan.
+  - flux-reconciler-impersonation       # awaiting-go sun-attended:2026-10-11. Changes how Flux
+                                        # applies EVERY namespace incl. office; this plan's §3.3
+                                        # depends on the nextcloud Kustomization applying cleanly.
+                                        # Not reciprocal on its side (the scheduler honours either).
+  - flux-oci-chart-sources              # draft. Its stage 5 moves office/nextcloud to an OCI
+                                        # chartRef: rewrites the same helmrelease.yaml §3.2(a)
+                                        # 3-way-patches, and after it §3.2(c)'s
+                                        # `yq .spec.chart.spec.version` reads null -> render gate
+                                        # aborts. Also rolls nextcloud-mariadb. Not reciprocal on
+                                        # its side (review 2026-09-28); the scheduler honours either.
 security_ref: F-069b1775              # posture detail lives on the finding, not here
 capability_change: false              # same cache/session/lock service, same app behaviour
-autonomy_override: human-gated        # REVIEW 2026-09-26: mechanics derived AUTO-NIGHT, but this
-                                      # plan logs every user out and needs a human on §3.7 —
-                                      # it must never land in the unattended nightly slot.
-rollback_class: git-revert            # ONE commit, three files, reverts cleanly — PLUS the
-                                      # occ un-set of config.php (§5), which the revert
-                                      # cannot do because config.php lives on the PVC.
-backup_gate: "config.php copied IN-POD to config.php.pre-redis-auth-<ts> BEFORE the quiesce (§3.1, asserted by a byte-count compare), and a Completed Longhorn backup of volume nextcloud-config < 26h (premise config-volume-backed-up + §2 gate 3). No datastore dump: this Redis holds nothing durable."
-finding_refs: [F-069b1775]            # filed 2026-08-19 (policy-cli finding show,
-                                      # 2026-09-22). Its `action` is exactly this plan.
-status: draft   # 2026-09-26 NOW run: REVERTED at 3.7 (landing da77a7de, revert b65617d1, no partial state).
-                      # 3.7 is deterministic-broken: `occ config:system:set redis password` is a no-op
-                      # (exit 0, no write) because the chart's redis.config.php overlay already puts
-                      # REDIS_HOST_PASSWORD into the MERGED config, so config.php on disk (what notify_push
-                      # parses) never gets it. Needs a re-plan of 3.7 (untested idea: the zz_touch pattern
-                      # from notify-push.yaml - set+delete a throwaway key to force a full rewrite, then
-                      # roll notify-push; also update-marker.sh `remove` -> `clear`) and a fresh review +
-                      # GO. Deliberately not re-planned inside the window.
-                                      # below names an object verified to exist on
-                                      # 2026-09-22; every gate was designed to have a
-                                      # concrete failing input (stated inline). A
-                                      # plan-reviewer pass is still required before `vetted`.
-window: null   # cleared 2026-09-26 after the reverted NOW-run attempt (was now:2026-09-26)
-                                      # logged-in user is logged out (PHP sessions live in
-                                      # this Redis, no persistence) — announce it.
+autonomy_override: human-gated        # logs every user out; must never land in the unattended
+                                      # nightly slot. Not SD-10 eligible (risk: medium anyway).
+rollback_class: git-revert            # ONE commit, four files, reverts cleanly. Unlike the
+                                      # 09-26 revision there is NO in-place config.php write,
+                                      # so the revert is the whole rollback.
+backup_gate: null                     # nothing durable is touched: no PVC write, no DB, and the
+                                      # Redis holds only cache/sessions/locks by design.
+finding_refs: [F-069b1775]            # resolved 2026-09-22 on plan authorship (aab921ba; its
+                                      # action was "author a hardening plan"). Re-queried
+                                      # 2026-09-28: still the only nextcloud-redis posture
+                                      # finding. F-3fcdca7b (8.10.1 -> 8.10.2 patch) is a
+                                      # version row owned by redis-fleet-8.10.2, not this plan.
+review: ready-for-go@2026-09-28
+status: vetted  # 2026-09-28 RE-PLAN (plan-reviewer ready-for-go, HUMAN-GATED; needs an operator GO) after the 2026-09-26 NOW run was reverted at old §3.7
+                # (landing da77a7de, revert b65617d1). Old §3.7 (`occ config:system:set redis
+                # password` so notify_push would read it from config.php) was a deterministic
+                # no-op. This revision drops the config.php write entirely and gives notify_push
+                # the password through its own REDIS_URL env. Needs review + a fresh GO.
+window: null
 premises:
-  # Read-verb only (plan-premises.py refuses exec). Each was run 2026-09-22 and
+  # Read-verb only (plan-premises.py refuses exec). Each run 2026-09-28 and
   # returned the expected value.
   - id: redis-still-unauthenticated
     why: >-
       The whole plan assumes the server has no requirepass. If the command
       already carries one, the quiesce/cutover shape is wrong and §3 must be
-      re-planned from the live state. Measured 2026-09-22.
+      re-planned from the live state. Measured 2026-09-28.
     run: kubectl get deploy -n office nextcloud-redis -o jsonpath='{.spec.template.spec.containers[0].command}'
     expect_exact: '["redis-server","--save","","--appendonly","no"]'
   - id: netpol-source-open
     why: >-
       The `from:`-less rule is half of the finding. If someone already added a
-      source restriction, §3.3's edit must merge with it rather than replace it.
-      Measured 2026-09-22.
+      source restriction, the patch would conflict or overwrite it.
+      Measured 2026-09-28.
     run: kubectl get networkpolicy -n office nextcloud-redis -o jsonpath='{.spec.ingress[0]}'
     expect_exact: '{"ports":[{"port":6379,"protocol":"TCP"}]}'
   - id: main-url-unauthenticated
     why: >-
-      Proves the chart currently renders the password-less REDIS_URL form, i.e.
-      externalRedis.existingSecret is not yet set. §4 gate 3 asserts the OTHER
-      form after the change, so this is the before-state that makes that gate
-      meaningful. Measured 2026-09-22.
+      Before-state of §4 gate 3: the chart currently renders the password-less
+      REDIS_URL form, i.e. externalRedis.existingSecret is not yet set.
+      Measured 2026-09-28.
     run: kubectl get deploy -n office nextcloud -o jsonpath='{.spec.template.spec.containers[?(@.name=="nextcloud")].env[?(@.name=="REDIS_URL")].value}'
     expect_exact: 'redis://$(REDIS_HOST):$(REDIS_HOST_PORT)'
-  - id: notify-push-parses-config-php
+  - id: notify-push-env-before
     why: >-
-      notify_push is started with config.php as its argument and parses it
-      directly — that is why §3.7's occ write is mandatory and why a green
-      HelmRelease proves nothing for it. If this ever changes (e.g. it starts
-      reading REDIS_* env), §3.7 becomes optional. Measured 2026-09-22.
-    run: kubectl get deploy -n office nextcloud-notify-push -o jsonpath='{.spec.template.spec.containers[0].command[1]}'
-    expect_exact: /var/www/html/config/config.php
-  - id: config-volume-backed-up
+      notify_push's env is exactly PORT + NEXTCLOUD_URL today, so its redis
+      config comes from config.php (live --dump-config 2026-09-28: host
+      nextcloud-redis, password None). The §3.2 patch hunk anchors on this env
+      block; if someone already added REDIS_URL, re-derive the patch.
+    run: kubectl get deploy -n office nextcloud-notify-push -o jsonpath='{.spec.template.spec.containers[0].env[*].name}'
+    expect_exact: 'PORT NEXTCLOUD_URL'
+  - id: secret-has-no-redis-password
     why: >-
-      §3.7 rewrites config.php on pvc/nextcloud-config. A Completed Longhorn
-      backup of that volume must exist before anything writes to it (11
-      Completed on 2026-09-22). Freshness is asserted in §2 because it is
-      time-relative.
-    run: kubectl get backups.longhorn.io -n storage -o jsonpath='{.items[?(@.status.volumeName=="nextcloud-config")].status.state}'
-    expect_contains: Completed
+      §3.2 restores the encrypted key from da77a7de. If the live Secret already
+      carries a redis-password key, something else wrote it and §3.2 must stop
+      rather than silently replace it. Measured 2026-09-28 (11 keys, none of them
+      redis-password).
+    run: kubectl get secret -n office nextcloud-config -o jsonpath='{.data}'
+    expect_matches: '^(?!.*redis-password)'
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/bundled-datastore-exit.md      # §4 "Redis variant" — the wiring this plan completes
@@ -125,510 +121,528 @@ sops_refs:
   - docs/sops/sops-encryption.md
   - docs/sops/container-dependencies.md
   - docs/sops/verification-contents-not-shape.md
-generated: "2026-09-22"
+generated: "2026-09-28"
 ---
 
-# nextcloud-redis: requirepass + source-restricted NetworkPolicy
+# nextcloud-redis: requirepass + source-restricted NetworkPolicy (re-plan)
 
 ## 1. Summary & why
 
-`deploy/office/nextcloud-redis` (official `redis:8.10.1-alpine`, plain manifests in
-`kubernetes/apps/office/nextcloud/app/redis-deployment.yaml`) replaced the
-chart-bundled Redis on 2026-08-19 (`d6070b82`) as a *pure registry move*: it
-deliberately kept the retired instance's posture — no `--requirepass`, and a
-NetworkPolicy that names a port but no source. Both were inherited, not
-introduced; the operator deferred hardening out of that already-crowded window
-and filed **`F-069b1775`** with the shape of the fix. This plan is that fix,
-and closes that finding when it lands (§6). Posture detail stays on the finding record.
+`deploy/office/nextcloud-redis` (official `redis:*-alpine`, plain manifests in
+`kubernetes/apps/office/nextcloud/app/redis-deployment.yaml`) kept the retired
+bundled instance's posture when it replaced it on 2026-08-19 (`d6070b82`): no
+`--requirepass`, and a NetworkPolicy that names a port but no source. The
+operator filed **`F-069b1775`**; this plan is the fix. Posture detail stays on
+the finding. Contextual tier: ClusterIP, no HTTPRoute, internal-only, so not
+`critical`; but it stores PHP **sessions** and **file locks**
+(`memcache.locking`/`memcache.distributed` = `\OC\Memcache\Redis`), so medium.
 
-**Contextual tier, per CLAUDE.md:** the Service is `ClusterIP` with no
-HTTPRoute — internal-only, not external-unauth, so it does not reach this
-household's `critical` tier. It is nonetheless the store for PHP **sessions**
-and **file locks** (`memcache.locking` and `memcache.distributed` are both
-`\OC\Memcache\Redis`, read via `occ` 2026-09-22), so the exposure is not
-limited to cache poisoning. Medium, worth one attended window.
+### 1.1 What failed on 2026-09-26, and why this revision cannot fail the same way
 
-### 1.1 What must move together — measured, not inferred (2026-09-22)
+The NOW run landed `da77a7de` (Secret key + wrapper + NetworkPolicy +
+`externalRedis.existingSecret` + worker-sidecar env). **§4 gates 1-4 (server
+refuses unauth, auth path works, main container carries the same password as
+the Secret, app serves + writes keys) were GREEN.** It was reverted
+(`b65617d1`) at the old §3.7 only: `occ config:system:set redis password`
+exited 0 but did not write `config.php` (mtime/size unchanged,
+byte-identical to the backup). Nextcloud's `SystemConfig` compares against the
+MERGED config, and the chart-mounted `redis.config.php` overlay already puts
+`getenv('REDIS_HOST_PASSWORD')` there, so the set is a no-op. `notify_push`
+parses `config.php` on disk (it cannot evaluate `getenv()` in overlays), so it
+never received the password.
 
-The password has to appear in **five** places in the same change set, or every
-Nextcloud request fails:
+**This revision does not touch `config.php` at all.** `notify_push` gets the
+password from its own environment, which upstream gives precedence over
+`config.php`:
 
-| Consumer | How it gets the host today | How it will get the password | Proof |
-|---|---|---|---|
-| main container | chart `externalRedis.host` → `REDIS_HOST`; `redis.config.php` overlay reads `getenv('REDIS_HOST_PASSWORD')` | `externalRedis.existingSecret.{enabled,secretName,passwordKey}` renders `REDIS_HOST_PASSWORD` from `secretKeyRef` AND flips `REDIS_URL` to `redis://:$(REDIS_HOST_PASSWORD)@…` | `helm template` of chart **9.2.6** with those values, run locally 2026-09-22 (`_helpers.tpl` L197-226); in-pod `redis.config.php` read the same day |
-| image entrypoint (`session.save_path`) | `/entrypoint.sh` L98-117 builds `tcp://host:port?auth=<REDIS_HOST_PASSWORD>` | same env var — nothing extra | read in-pod 2026-09-22 |
-| cron pods (`cronjob/nextcloud-cron`) | chart includes `nextcloud.env` in the CronJob template too | same values, automatically | `helm template`: the rendered `nextcloud-cron` carries the same four `REDIS_*` env entries |
-| the hand-declared sidecar in `helmrelease.yaml` (~L296-330, the container that carries its OWN `REDIS_HOST: nextcloud-redis`) | hardcoded env, **not** chart-driven — no `externalRedis` value reaches it | add `REDIS_HOST_PASSWORD` from `secretKeyRef` by hand, next to its `REDIS_HOST` | the manifest comment says exactly this: "keep in lockstep with externalRedis.host" |
-| `deployment/nextcloud-notify-push` | **parses `config.php` directly**, ignores env and the overlay (`notify-push.yaml` note; premise `notify-push-parses-config-php`) | `occ config:system:set redis password --value=…` so the value is PERSISTED in `config.php`, then roll the Deployment | live `occ config:system:get redis` shows `password: ''` today; `occ notify_push:self-test` is the gate that can fail |
+- `nextcloud/notify_push` **v1.4.1** (the binary in the pod,
+  `notify_push --version` → `notify_push 1.4.1`, `appinfo/info.xml` 1.4.1),
+  `src/config.rs`:
+  ```
+  let from_config = opt.config_file ... PartialConfig::from_file(...)
+  let from_env = PartialConfig::from_env()?;      // reads REDIS_URL
+  let from_opt = PartialConfig::from_opt(opt);
+  from_opt.merge(from_env).merge(from_config).try_into()
+  ```
+  and `merge()` takes `redis` **whole** from the higher-priority side
+  (`redis: if self.redis.is_some() { self.redis } else { fallback.redis }`).
+  So `REDIS_URL` (host, port, db, password) replaces the config.php redis
+  block entirely; the DB URL and everything else still come from config.php.
+- `from_env` parses `REDIS_URL` as a `redis::ConnectionInfo` and copies
+  `redis_settings().password()`; `redis.rs::open_single` then calls
+  `RedisConnectionInfo::set_password`, i.e. AUTH on connect.
+- **Measured on the live binary, 2026-09-28** (read-only, `--dump-config`
+  prints the parsed config and exits; nothing started or changed):
+  without env → `host: "nextcloud-redis" … password: None`;
+  with `REDIS_URL="redis://:dummyPW123@nextcloud-redis:6379"` →
+  `host: "nextcloud-redis" … username: None, password: Some("dummyPW123")`.
+  That is the exact URL shape §3.2 renders.
+- Why the old `notify-push.yaml` note "Adding REDIS_HOST here does NOT work"
+  is still true and not a contradiction: `from_env` reads `REDIS_URL`, never
+  `REDIS_HOST`. The note is amended in the same patch.
 
-Who actually connects (Redis `CLIENT LIST`, 2026-09-22): the main pod (19
-connections), one `nextcloud-cron` pod (1), `nextcloud-notify-push` (1), plus
-the probe on `127.0.0.1`. `nextcloud-metrics`, `nextcloud-mcp`,
-`nextcloud-whiteboard`, `nextcloud-mariadb` do **not** connect — the
-NetworkPolicy `from:` below is derived from that, not from "what sounds
-related". Pod labels, read live: main `app.kubernetes.io/instance=nextcloud` +
-`app.kubernetes.io/component=app`; cron `…/instance=nextcloud` +
-`…/component=cronjob`; notify-push `app=nextcloud-notify-push`.
+### 1.2 What must move together (measured 2026-09-22, re-checked 2026-09-28)
 
-### 1.2 Why a `sh -c` wrapper and not `$(REDIS_PASSWORD)` argv expansion
+| Consumer | How it gets the password after this plan | Proof |
+|---|---|---|
+| main container | `externalRedis.existingSecret` renders `REDIS_HOST_PASSWORD` (secretKeyRef) + `REDIS_URL=redis://:$(REDIS_HOST_PASSWORD)@…`; `redis.config.php` overlay reads the env | `helm template` chart **9.3.0** (the live chart) with the patched values: `REDIS_HOST_PASSWORD` entries 0 → **3** (re-run 2026-09-28); gate 3 GREEN on 09-26 |
+| image entrypoint (`session.save_path`) | same env var (`?auth=`) | gate 4 GREEN on 09-26 |
+| cron pods | chart includes the same env in the CronJob | same render (the 3rd entry) |
+| worker sidecar (hand-declared in `helmrelease.yaml`) | hand-added `REDIS_HOST_PASSWORD` next to its `REDIS_HOST` | same render (the 2nd entry) |
+| `deployment/nextcloud-notify-push` | **NEW: own env `REDIS_PASSWORD` (secretKeyRef) + `REDIS_URL=redis://:$(REDIS_PASSWORD)@nextcloud-redis:6379`** | upstream precedence + live `--dump-config` above; gates 5/6 |
 
-The two sibling deployments (`paperless-redis`, `superset-redis-official`) use
-Kubernetes `$(REDIS_PASSWORD)` expansion in `command:`. That works — but if the
-env var is ever missing, Kubernetes leaves the literal `$(REDIS_PASSWORD)` in
-place and Redis starts with *that* as the password, and an **empty** value
-yields `--requirepass ""`, which Redis documents as "no password" (not
-exercised here — stated from the Redis config semantics). The wrapper below
-asserts non-empty and refuses to start otherwise, so a broken Secret produces a
-CrashLoopBackOff instead of an unauthenticated server that every check reads as
-healthy. Both forms leave the password in the container's argv; `REDISCLI_AUTH`
-keeps it off the probe's.
+Who connects (CLIENT LIST 2026-09-28): the main pod (15 conns), notify-push
+(1, `cmd=ping`), cron pods intermittently, plus the local `redis-cli`.
+`nextcloud-metrics`, `-mcp`, `-whiteboard`, `-mariadb` do not. The NetworkPolicy
+`from:` (main+cron by `app.kubernetes.io/instance=nextcloud` +
+`component in [app, cronjob]`, notify-push by `app=nextcloud-notify-push`) is
+derived from that list — unchanged from `da77a7de`, which applied cleanly.
 
-### 1.3 Why a quiesce, not a rolling change
+### 1.3 Why a `sh -c` wrapper, and why a quiesce
 
-Redis has no dual mode: the moment `requirepass` is live, un-authenticated
-clients get `NOAUTH`; before it is live, an authenticating client gets
-`ERR AUTH … called without any password configured`. There is no order of
-operations with zero errors, so the app is scaled to 0 for the swap and brought
-back only after the server side is proven (§4 gates 1-2). Every user is logged
-out regardless — sessions live in this Redis and it has no persistence.
+Unchanged from the reviewed 09-26 revision: the wrapper refuses to start with
+an empty `REDIS_PASSWORD` (an empty `--requirepass` means "no password"), so a
+broken Secret is a CrashLoop, not a silently open server. Redis has no dual
+mode (NOAUTH vs "AUTH called without any password configured"), so the app is
+scaled to 0 for the swap and brought back only after the server side is proven.
+Every user is logged out regardless — sessions live in this Redis.
 
 ## 2. Pre-checks
 
-Run `runbooks/plan-premises.py nextcloud-redis-hardening --require-premises`
-first — fails closed. Then the gates below, which need `exec` and time
-arithmetic the premise runner cannot do.
+Run `.venv/bin/python3 runbooks/plan-premises.py nextcloud-redis-hardening --require-premises`
+first — fails closed. Then (zsh on the Mac mini; quoted jsonpaths):
 
 ```bash
-# Informational first:
-flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
+flux get kustomizations -A | awk 'NR==1 || $5 != "True"'     # informational
 flux get helmreleases -A   | awk 'NR==1 || $5 != "True"'
-kubectl -n office get pods -l app=nextcloud-redis            # 1/1 Running
-kubectl -n office get pods -l app.kubernetes.io/instance=nextcloud
 ```
 
 ```bash
 set -euo pipefail
+cd /Users/mu/code/cberg-home-nextgen
+A=kubernetes/apps/office/nextcloud/app
 
-# --- Gate 1: the server answers UNauthenticated today (before-state) --------
+# --- Gate 1: unauthenticated PONG today (before-state) ----------------------
 R=$(kubectl -n office exec deploy/nextcloud-redis -- redis-cli ping | tr -d '[:space:]')
-echo "ping=$R"
-[ "$R" = "PONG" ] || { echo "ABORT: expected PONG from an unauthenticated ping, got '$R' — the before-state is not what this plan assumes"; exit 1; }
-# Failing input: a server already carrying requirepass answers NOAUTH -> exit 1.
+[ "$R" = "PONG" ] || { echo "ABORT: expected unauth PONG, got '$R'"; exit 1; }
+# Failing input: a server already carrying requirepass answers NOAUTH.
 
-# --- Gate 2: the consumer set is still exactly the three we selector-for ----
+# --- Gate 2: consumer set is still exactly the three we selector-for --------
 kubectl -n office exec deploy/nextcloud-redis -- redis-cli CLIENT LIST \
   | awk '{for(i=1;i<=NF;i++) if($i ~ /^addr=/) print $i}' | sed 's/addr=//; s/:[0-9]*$//' | sort -u > /tmp/nc-redis-clients.txt
-kubectl -n office get pods -o custom-columns='IP:.status.podIP,NAME:.metadata.name' --no-headers > /tmp/nc-pods.txt
+[ -s /tmp/nc-redis-clients.txt ] || { echo "ABORT: CLIENT LIST read empty"; exit 1; }
+kubectl -n office get pods -o 'custom-columns=IP:.status.podIP,NAME:.metadata.name' --no-headers > /tmp/nc-pods.txt
 while read ip; do
   [ "$ip" = "127.0.0.1" ] && continue
   n=$(awk -v ip="$ip" '$1==ip{print $2}' /tmp/nc-pods.txt)
   echo "client $ip -> ${n:-UNKNOWN}"
-  case "$n" in nextcloud-[0-9a-f]*|nextcloud-cron-*|nextcloud-notify-push-*) ;;
-    *) echo "ABORT: a client outside the selector set is connected ($ip -> ${n:-UNKNOWN}); the from: block below would cut it off"; exit 1 ;;
+  case "$n" in nextcloud-[0-9a-f]*-*|nextcloud-cron-*|nextcloud-notify-push-*) ;;
+    *) echo "ABORT: client outside the selector set ($ip -> ${n:-UNKNOWN})"; exit 1 ;;
   esac
 done < /tmp/nc-redis-clients.txt
-# Failing input: any connected IP that maps to a pod not matched by the case
-# (or to no pod at all) exits 1. Dry-tested 2026-09-22 against the live list:
-# three pods, all matched -> PASS; an injected 10.0.0.1 -> ABORT.
+# Failing input: any IP mapping to another pod (or none) exits 1. 2026-09-28
+# live list: 10.69.0.25 -> nextcloud-77bfc7f4f4-ctz5r, 10.69.0.63 ->
+# nextcloud-notify-push-6b7579cf96-vjwwz -> PASS.
 
-# --- Gate 3: the config volume's newest Completed backup is FRESH (<26h) -----
-LB=$(kubectl -n storage get backups.longhorn.io \
-      -o jsonpath='{range .items[*]}{.status.volumeName}{" "}{.status.state}{" "}{.status.backupCreatedAt}{"\n"}{end}' \
-    | awk '$1=="nextcloud-config" && $2=="Completed" {print $3}' | sort | tail -1)
-echo "newest Completed backup=[$LB]"
-BSEC=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$LB" "+%s" 2>/dev/null) \
-  || { echo "ABORT: no parseable Completed backup for nextcloud-config"; exit 1; }
-AGE_H=$(( ( $(date -u +%s) - BSEC ) / 3600 ))
-echo "backup age=${AGE_H}h"
-[ "$AGE_H" -lt 26 ] || { echo "ABORT: newest backup is ${AGE_H}h old (bound 26h)"; exit 1; }
-# BSD date form, same as paperless-db-13.0.2 §2 gate 3 (macOS: no `date -d`).
-# Failing input: an empty LB fails the parse and exits 1.
+# --- Gate 3: the four files are where the patch expects them ----------------
+# §3.2 re-applies da77a7de as a 3-way patch. secrets.sops.yaml must be
+# byte-identical to the revert (a 3-way merge of a SOPS file would break its MAC).
+git fetch -q origin main && git merge --ff-only origin/main
+git diff --quiet b65617d1 HEAD -- $A/secrets.sops.yaml \
+  || { echo "ABORT: secrets.sops.yaml changed since b65617d1 — do not 3-way a SOPS file; use the fallback in §3.2"; exit 1; }
+git diff --quiet HEAD -- $A/ || { echo "ABORT: uncommitted changes under $A (shared worktree) — resolve first"; exit 1; }
 
-# --- Gate 4: notify_push is healthy BEFORE we touch it (so a red after is ours)
+# --- Gate 4: notify_push is healthy BEFORE (so a red after is ours) ---------
 rc=0; kubectl -n office exec deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ notify_push:self-test" > /tmp/np-pre.txt 2>&1 || rc=$?
-[ "$rc" -eq 0 ] && grep -qF 'push server is receiving redis messages' /tmp/np-pre.txt && ! grep -qF 'is not receiving' /tmp/np-pre.txt \
-  || { echo "ABORT (rc=$rc): notify_push self-test is not clean before the change:"; cat /tmp/np-pre.txt; exit 1; }
-# REVIEW 2026-09-26: upstream SelfTest.php marks failures with U+1F5F4, never U+2717, and
-# its failure line reads "push server is NOT receiving redis messages" — the old
-# `grep "receiving redis messages" && ! grep "✗"` PASSED on exactly that failure.
-# occ exits non-zero on every <error> path, so rc is the primary gate.
+cat /tmp/np-pre.txt
+[ "$rc" -eq 0 ] && grep -qiF 'push server is receiving redis messages' /tmp/np-pre.txt && ! grep -qiF 'is not receiving' /tmp/np-pre.txt \
+  || { echo "ABORT (rc=$rc): notify_push self-test not clean before the change"; exit 1; }
+# Live 2026-09-28: six ✓ lines, rc=0. Upstream SelfTest.php failure line is
+# "push server is not receiving redis messages" with a non-zero exit.
 ```
 
-**ABORT if** any gate exits non-zero, or if the window is unattended — users
-are logged out and this plan needs a human on the `occ` step.
+**ABORT if** any gate fails, or if the window is unattended.
 
 ## 3. Steps
 
-All cluster writes are executed by the window agent / cberg-agent. Manifest and
-Secret changes are GitOps; the one in-place write (`config.php`, §3.7) is the
-documented no-GitOps-path exception (CLAUDE.md) and is backed up first.
+Executed by the window agent / cberg-agent. Everything is GitOps; there is
+**no in-pod write** in this revision.
 
-**3.0 Password — generated straight into SOPS in ONE non-interactive block (§3.2).**
-Alphanumeric only: the chart embeds it in `redis://:<pw>@host:port` and the image
-entrypoint in `?auth=<pw>` — URL-reserved characters (`@ : / ? & # %`) corrupt
-both. It is never held in a shell variable (agent Bash calls share no variables),
-never printed, and §3.7 reads it back from the pod env, not from this Mac.
-
-**3.1 Back up config.php, then quiesce (silence + marker first):**
+**3.1 Marker, silence, quiesce:**
 
 ```bash
+set -euo pipefail
+cd /Users/mu/code/cberg-home-nextgen
 runbooks/update-marker.sh add nextcloud office 1 "redis auth hardening — users logged out"
 # pre-silence the Nextcloud HTTP/Kuma alerts per docs/sops/application-update.md Step 1
-
-set -euo pipefail
-TS=$(date +%Y%m%d%H%M)
-kubectl -n office exec deploy/nextcloud -c nextcloud -- sh -c \
-  "cp /var/www/html/config/config.php /var/www/html/config/config.php.pre-redis-auth-$TS && \
-   wc -c < /var/www/html/config/config.php && wc -c < /var/www/html/config/config.php.pre-redis-auth-$TS" \
-  | tr -d ' ' | uniq -c | awk '$1!=2{print "ABORT: backup byte count differs from source"; exit 1}'
-echo "backup: config.php.pre-redis-auth-$TS"
-# Failing input: a copy that produced a different size prints two distinct
-# counts -> uniq -c yields lines with count 1 -> ABORT.
 
 flux suspend helmrelease   nextcloud -n office
 flux suspend kustomization nextcloud -n office
 kubectl -n office patch cronjob nextcloud-cron -p '{"spec":{"suspend":true}}'
-kubectl -n office scale deploy/nextcloud            --replicas=0
+kubectl -n office scale deploy/nextcloud             --replicas=0
 kubectl -n office scale deploy/nextcloud-notify-push --replicas=0
 kubectl -n office wait --for=delete pod -l app.kubernetes.io/component=app,app.kubernetes.io/instance=nextcloud --timeout=180s
 kubectl -n office wait --for=delete pod -l app=nextcloud-notify-push --timeout=120s
-# any in-flight cron pod finishes on its own; wait for it:
-kubectl -n office wait --for=jsonpath='{.status.phase}'=Succeeded pod -l app.kubernetes.io/component=cronjob \
-  --field-selector=status.phase=Running --timeout=300s 2>/dev/null || true   # only RUNNING cron pods; Completed ones persist
+# let a RUNNING cron pod finish (Completed ones persist and are irrelevant):
+for p in $(kubectl -n office get pod -l app.kubernetes.io/component=cronjob --field-selector=status.phase=Running -o name); do
+  kubectl -n office wait --for=delete "$p" --timeout=300s || kubectl -n office wait --for=jsonpath='{.status.phase}'=Succeeded "$p" --timeout=60s
+done
 
-# PROVE the quiesce at the server, not at the pod list:
+# PROVE the quiesce at the server:
 CL=$(kubectl -n office exec deploy/nextcloud-redis -- redis-cli CLIENT LIST)
-echo "$CL" | grep -q 'addr=127.0.0.1' \
-  || { echo "ABORT: CLIENT LIST read failed (redis-cli's own 127.0.0.1 connection absent) — the quiesce is unproven"; exit 1; }
+echo "$CL" | grep -q 'addr=127.0.0.1' || { echo "ABORT: CLIENT LIST read failed — quiesce unproven"; exit 1; }
 N=$(echo "$CL" | grep -vc 'addr=127.0.0.1' || true)
-# REVIEW 2026-09-26 (re-review): the old one-liner read N=0 when the exec itself failed.
-echo "non-local redis clients=$N"
-[ "$N" -eq 0 ] || { echo "ABORT: $N client(s) still connected — quiesce did not hold"; exit 1; }
+[ "$N" -eq 0 ] || { echo "ABORT: $N client(s) still connected"; exit 1; }
 ```
 
-**3.2 Secret — add the key (repo path, never `/tmp`):**
+**3.2 Build the change (four files) — pre-tested patches, no hand edits:**
 
 ```bash
+set -euo pipefail
 cd /Users/mu/code/cberg-home-nextgen && export SOPS_AGE_KEY_FILE=/Users/mu/code/cberg-home-nextgen/age.key
-F=kubernetes/apps/office/nextcloud/app/secrets.sops.yaml
-sops -d "$F" | grep -qE '^ +redis-password *:' && { echo "ABORT: key already exists — do NOT regenerate it mid-plan"; exit 1; }
+A=kubernetes/apps/office/nextcloud/app
+
+# (a) Re-apply the reviewed, 09-26-proven server/app half EXACTLY: the diff between
+#     the revert and the original landing = da77a7de's change to three files
+#     (Secret key redis-password, redis wrapper + REDISCLI_AUTH + NetworkPolicy from:,
+#     externalRedis.existingSecret + worker-sidecar REDIS_HOST_PASSWORD).
+git diff b65617d1 da77a7de -- $A/helmrelease.yaml $A/redis-deployment.yaml $A/secrets.sops.yaml | git apply --3way
+# Dry-tested 2026-09-28 in a --shared clone of this repo: clean on HEAD; and ALSO clean
+# (3-way) after a simulated redis 8.10.1 -> 8.10.2 image bump (the image line is hunk
+# context), which it PRESERVED: `image: redis:8.10.2-alpine` + `--requirepass` both present.
+# Result on HEAD: 3 files changed, 59 insertions(+), 45 deletions(-).
+
+# (b) notify_push gets the password from its OWN env (§1.1):
+git apply <<'PATCH'
+diff --git a/kubernetes/apps/office/nextcloud/app/notify-push.yaml b/kubernetes/apps/office/nextcloud/app/notify-push.yaml
+--- a/kubernetes/apps/office/nextcloud/app/notify-push.yaml
++++ b/kubernetes/apps/office/nextcloud/app/notify-push.yaml
+@@ -60,9 +60,31 @@ spec:
+           # `occ notify_push:self-test` — a green HelmRelease will not catch
+           # it (found the hard way during the 2026-08-19 redis registry move).
+           # Adding REDIS_HOST here does NOT work; it was tried and reverted.
++          #
++          # REDIS_URL, however, DOES work and is how the password reaches
++          # notify_push (plan nextcloud-redis-hardening). notify_push's
++          # Config::from_opt merges CLI > env > config.php and takes the env
++          # `redis` block WHOLE when REDIS_URL is set (src/config.rs
++          # v1.4.1, `from_opt.merge(from_env).merge(from_config)`), so the
++          # host AND the password below override config.php. This is also
++          # why `occ config:system:set redis password` cannot be the path:
++          # the chart's redis.config.php overlay already supplies the value
++          # in the merged config, so the set is a no-op and config.php on
++          # disk never changes (reverted b65617d1). Keep the host in
++          # lockstep with externalRedis.host. Verify with
++          # `notify_push --dump-config` (count only, never print it).
+           env:
+             - name: PORT
+               value: "7867"
++            # Declared BEFORE REDIS_URL: $(VAR) expansion only sees earlier
++            # entries. Alphanumeric by construction, so no URL-encoding.
++            - name: REDIS_PASSWORD
++              valueFrom:
++                secretKeyRef:
++                  name: nextcloud-config
++                  key: redis-password
++            - name: REDIS_URL
++              value: "redis://:$(REDIS_PASSWORD)@nextcloud-redis:6379"
+             - name: NEXTCLOUD_URL
+               value: "http://nextcloud:8080"
+           volumeMounts:
+PATCH
+# Dry-tested 2026-09-28 (`git apply --check` on HEAD). Its hunk is the env block at
+# L60-68, away from the `image:` line (L38) that nextcloud-fleet-35.0.1 edits.
+
+# (c) Assert the CONTENTS of what we are about to commit:
+sops -d $A/secrets.sops.yaml | .venv/bin/python3 -c 'import sys,yaml; d=yaml.safe_load(sys.stdin)["stringData"]; v=d.get("redis-password",""); assert len(v)==40 and v.isalnum(), "ABORT: redis-password missing/malformed"; print("redis-password OK (40 alnum), %d keys" % len(d))'
+# FAILS on: a SOPS MAC mismatch (sops -d exits non-zero), a missing key, or a non-alnum
+# value that would corrupt both redis:// URLs.
+[ "$(yq '.spec.template.spec.containers[0].env[].name' $A/notify-push.yaml | tr '\n' ' ')" = "PORT REDIS_PASSWORD REDIS_URL NEXTCLOUD_URL " ] \
+  || { echo "ABORT: notify-push env order wrong — REDIS_PASSWORD must precede REDIS_URL"; exit 1; }
+grep -q -- '--requirepass "\$REDIS_PASSWORD"' $A/redis-deployment.yaml || { echo "ABORT: wrapper not in redis-deployment.yaml"; exit 1; }
+yq 'select(.kind=="NetworkPolicy") | .spec.ingress[0].from | length' $A/redis-deployment.yaml | grep -qx 2 \
+  || { echo "ABORT: NetworkPolicy from: does not carry the two podSelectors"; exit 1; }
+V=$(yq '.spec.chart.spec.version' $A/helmrelease.yaml)
+C=$(helm template nextcloud --repo https://nextcloud.github.io/helm/ --version "$V" -f <(yq '.spec.values' $A/helmrelease.yaml) | grep -c 'name: REDIS_HOST_PASSWORD')
+[ "$C" -eq 3 ] || { echo "ABORT: expected 3 REDIS_HOST_PASSWORD (main, worker, cron) on chart $V — got $C"; exit 1; }
+# Measured 2026-09-28 on chart 9.3.0: 0 before, 3 after.
+kubeconform -summary -ignore-missing-schemas $A/notify-push.yaml $A/redis-deployment.yaml
+# Measured 2026-09-28: 5 resources, Valid: 5.
+```
+
+**If the window aborts anywhere between §3.2 and the §3.3 commit**, clear the
+shared index/worktree of the staged change (it contains the new Secret key and
+another session's plain `git commit` would pick it up):
+`git restore --staged --worktree -- $A/secrets.sops.yaml $A/redis-deployment.yaml $A/helmrelease.yaml $A/notify-push.yaml`.
+
+**Fallback if §2 gate 3 aborted** (secrets.sops.yaml changed since the revert):
+apply (a) to `helmrelease.yaml` + `redis-deployment.yaml` only, then generate a
+fresh key straight into SOPS, never into a shell variable (repo cwd so
+`.sops.yaml` applies):
+
+```bash
 .venv/bin/python3 -c 'import secrets,string,json;print(json.dumps("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(40))),end="")' \
-  | sops set --value-stdin "$F" '["stringData"]["redis-password"]' || { echo "ABORT: sops set failed"; exit 1; }
-sops -d "$F" | .venv/bin/python3 -c 'import sys,yaml; d=yaml.safe_load(sys.stdin)["stringData"]; v=d.get("redis-password",""); assert len(v)==40 and v.isalnum(), "ABORT: redis-password missing/malformed"; print("redis-password OK (40 alnum), %d keys" % len(d))'
-# Dry-tested 2026-09-26 (re-review) on a scratch copy with sops 3.13.0 FROM THE REPO CWD:
-# 11 -> 12 keys, the other 11 ciphertexts byte-identical, 40 alnum, and the existence
-# check above then ABORTs (rc=1). From the repo cwd `.sops.yaml` (indent: 2) applies, so
-# the real diff is SMALL (~9 lines: the new key + sops lastmodified/mac/recipient order).
-# A whole-file 4-space re-indent means `.sops.yaml` was NOT picked up (wrong cwd) — stop
-# and re-run from the repo root. The `^ +` regex matches 2- and 4-space output alike.
+  | sops set --value-stdin $A/secrets.sops.yaml '["stringData"]["redis-password"]'
 ```
+then run (c) unchanged. (Dry-tested 2026-09-26 with sops 3.13.0: +1 key, other
+ciphertexts byte-identical.)
 
-**3.3 `redis-deployment.yaml` — wrapper, env, and the `from:` block:**
-
-```yaml
-        command:
-        - /bin/sh
-        - -c
-        - |
-          # Refuse to start unauthenticated: an empty --requirepass means "no
-          # password" to Redis, and a missing env var must be a crash, not a
-          # silently open server.
-          [ -n "$REDIS_PASSWORD" ] || { echo "REDIS_PASSWORD is empty — refusing to start"; exit 1; }
-          exec redis-server --save "" --appendonly no --requirepass "$REDIS_PASSWORD"
-        env:
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: nextcloud-config
-              key: redis-password
-        # redis-cli reads REDISCLI_AUTH — keeps the password off the probe argv.
-        - name: REDISCLI_AUTH
-          valueFrom:
-            secretKeyRef:
-              name: nextcloud-config
-              key: redis-password
-```
-
-Probes stay `redis-cli ping | grep -q PONG` (bare `redis-cli ping` exits 0 on
-`NOAUTH` — measured 2026-09-22 against `paperless-redis`: `exit=0`, grep form
-`exit=1`).
-
-```yaml
-  ingress:
-  - from:
-    - podSelector:
-        matchExpressions:
-        - {key: app.kubernetes.io/instance,  operator: In, values: [nextcloud]}
-        - {key: app.kubernetes.io/component, operator: In, values: [app, cronjob]}
-    - podSelector:
-        matchLabels:
-          app: nextcloud-notify-push
-    ports:
-    - port: 6379
-      protocol: TCP
-```
-
-Rewrite the file's header comment: the "Deliberately NO --requirepass" and
-"READ THE SEMANTICS" paragraphs describe the state this plan removes — replace
-them with one line pointing at this plan's commit, do not leave them to mislead.
-
-**3.4 `helmrelease.yaml` — three edits:**
-
-```yaml
-    externalRedis:
-      enabled: true
-      host: nextcloud-redis
-      port: "6379"
-      existingSecret:
-        enabled: true
-        secretName: nextcloud-config
-        passwordKey: redis-password
-```
-
-Leave `redis.enabled: false` and `redis.auth.enabled: false` exactly as they
-are — in the `externalRedis` branch the URL form is selected by
-`existingSecret`, and the existing comment's reason for keeping `auth.enabled:
-false` still holds. Then, in the hand-declared sidecar (~L327, next to its
-`REDIS_HOST: nextcloud-redis`):
-
-```yaml
-            - name: REDIS_HOST_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: nextcloud-config
-                  key: redis-password
-```
-
-Update the "No password — matches the retired instance" comment under
-`externalRedis` in the same edit.
-
-**3.5 Render-check locally, commit, push:**
+**3.3 Commit, push, land the server side (HR still suspended), prove it:**
 
 ```bash
-task kubeconform
-V=$(yq '.spec.chart.spec.version' kubernetes/apps/office/nextcloud/app/helmrelease.yaml)
-C=$(helm template nextcloud --repo https://nextcloud.github.io/helm/ --version "$V" \
-  -f <(yq '.spec.values' kubernetes/apps/office/nextcloud/app/helmrelease.yaml) | grep -c 'name: REDIS_HOST_PASSWORD')
-echo "chart $V: $C REDIS_HOST_PASSWORD entries"
-[ "$C" -eq 3 ] || { echo "ABORT: expected 3 (main, worker sidecar, cron) — got $C"; exit 1; }
-# Verified 2026-09-26: 3 on both 9.2.6 and 9.3.0 (the redis helper is byte-identical
-# across them; 9.3.0 only adds CronJob `suspend`). Before the edit this reads 0.
-git fetch origin main && git merge --ff-only origin/main
-git commit --only kubernetes/apps/office/nextcloud/app/secrets.sops.yaml \
-                  kubernetes/apps/office/nextcloud/app/redis-deployment.yaml \
-                  kubernetes/apps/office/nextcloud/app/helmrelease.yaml -F <msgfile>
-git log -1 --format=%s     # shared worktree: YOUR subject
-git show --stat HEAD       # exactly the three files
-git push origin main
-```
+set -euo pipefail
+cd /Users/mu/code/cberg-home-nextgen
+A=kubernetes/apps/office/nextcloud/app
+MSG=$(mktemp /tmp/nc-redis-hardening-msg.XXXXXX)
+printf '%s\n' "feat(nextcloud-redis): requirepass + source-restricted NetworkPolicy; notify_push via REDIS_URL" "" \
+  "Plan nextcloud-redis-hardening (security_ref F-069b1775). Re-lands da77a7de and" \
+  "adds REDIS_PASSWORD/REDIS_URL env to nextcloud-notify-push (upstream env-over-config.php)." > "$MSG"
+git commit --only $A/secrets.sops.yaml $A/redis-deployment.yaml $A/helmrelease.yaml $A/notify-push.yaml -F "$MSG"
+git log -1 --format=%s        # MUST be the subject above (shared worktree message race)
+git show --stat HEAD          # exactly the four files
+git push origin main || { git pull --rebase --autostash origin main && git show --stat HEAD && git push origin main; } \
+  || { echo "ABORT: push failed — an UNPUSHED local commit sits on shared main; do NOT reset it, resolve with the operator (nothing reached the cluster yet: KS/HR still suspended)"; exit 1; }
+git rev-parse HEAD > /tmp/nc-redis-hardening.landing; cat /tmp/nc-redis-hardening.landing   # §5 reads it (agent shells keep no variables)
 
-**3.6 Land the server side first (HR still suspended), prove it:**
-
-```bash
-set -euo pipefail   # REVIEW 2026-09-26 (re-review): a failed reconcile/rollout must stop here
 flux resume    kustomization nextcloud -n office
 flux reconcile kustomization nextcloud -n office --with-source
 kubectl -n office rollout status deploy/nextcloud-redis --timeout=180s
-[ "$(kubectl -n office get hr nextcloud -o jsonpath='{.spec.suspend}')" = "true" ] || echo "WARN: HR no longer suspended — the app may already be rolling with the new env"
-# NOTE: this reconcile ALSO re-applies notify-push.yaml `replicas: 1` (Flux reverts
-# the §3.1 scale-down) — notify-push restarts HERE on the OLD config.php and
-# NOAUTH-loops until the §3.7 restart. Expected; §3.7 restarts it explicitly.
-# §4 gates 1 and 2 NOW — do not resume the HelmRelease until both pass.
+[ "$(kubectl -n office get hr nextcloud -o jsonpath='{.spec.suspend}')" = "true" ] || echo "WARN: HR no longer suspended"
+# This reconcile also re-applies notify-push.yaml (replicas: 1 + the new env). The new
+# notify-push pod starts while Nextcloud is still scaled to 0, fails its startup
+# self-test against NEXTCLOUD_URL and restarts (seen 2026-09-27 08:52 in its log:
+# "Self test failed: Error while communicating with nextcloud instance"). Expected;
+# §3.4 restarts it explicitly once the app is back.
+# §4 gates 1 and 2 NOW. Do not resume the HelmRelease until both pass.
 ```
 
-**3.7 Bring the app back, persist the password for notify_push, resume the rest:**
+**3.4 Bring the app back, then notify_push, then cron:**
 
 ```bash
-set -euo pipefail   # REVIEW 2026-09-26 (re-review): the config.php persistence ABORT below
-                    # must STOP the block — without this it printed ABORT and went on to
-                    # restart notify-push, un-suspend cron and remove the update marker.
+set -euo pipefail
 flux resume    helmrelease nextcloud -n office
 flux reconcile helmrelease nextcloud -n office
-# The values change fires a Helm upgrade, which re-asserts the chart's replicas;
-# assert rather than assume (the paperless-db plan measured a no-values-change
-# resume NOT restoring replicas):
 [ "$(kubectl -n office get deploy nextcloud -o jsonpath='{.spec.replicas}')" = "1" ] \
   || kubectl -n office scale deploy/nextcloud --replicas=1
 kubectl -n office rollout status deploy/nextcloud --timeout=300s
-# §4 gate 3 (env) and gate 4 (app) NOW.
+# §4 gates 3 and 4 NOW.
 
-# Persist into config.php — the ONLY way notify_push learns the password:
-kubectl -n office exec deploy/nextcloud -c nextcloud -- sh -c '
-  [ -n "$REDIS_HOST_PASSWORD" ] || { echo "ABORT: REDIS_HOST_PASSWORD empty in the main container"; exit 1; }
-  su -s /bin/sh www-data -c "php occ config:system:set redis password --value=$REDIS_HOST_PASSWORD" >/dev/null || { echo "ABORT: occ set failed"; exit 1; }
-  n=$(grep -cF "$REDIS_HOST_PASSWORD" /var/www/html/config/config.php)
-  [ "$n" -ge 1 ] && echo "PERSISTED: password present in config.php" || { echo "ABORT: password NOT in config.php"; exit 1; }'
-# The value comes from the pod env (= the Secret, proven by §4 gate 3), so nothing
-# crosses a shell boundary on the Mac. The assertion reads the FILE notify_push
-# parses; before this step it counts 0 (live redis.password is ''), so it can fail.
-
-kubectl -n office scale deploy/nextcloud-notify-push --replicas=1
-kubectl -n office rollout restart deploy/nextcloud-notify-push   # REQUIRED: §3.6 already brought it back at 1 on the OLD config.php — a scale is a no-op
-kubectl -n office rollout status deploy/nextcloud-notify-push --timeout=180s
-# §4 gate 5 NOW.
+kubectl -n office rollout restart deploy/nextcloud-notify-push   # resets any CrashLoop backoff from §3.3
+kubectl -n office rollout status  deploy/nextcloud-notify-push --timeout=180s
+# §4 gates 5 and 6 NOW.
 
 kubectl -n office patch cronjob nextcloud-cron -p '{"spec":{"suspend":false}}'
-# §4 gates 6 and 7, then:
-runbooks/update-marker.sh remove nextcloud office
+# §4 gates 7, 8 and 9, then:
+runbooks/update-marker.sh clear nextcloud
 ```
 
 ## 4. Verification
 
 Each gate names the failure it catches and the input that turns it red.
 
+CONTENTS ASSERTION: notify_push's PARSED redis config carries the Secret's password — measured by `notify_push --dump-config` inside the new pod (count of the quoted value, never printed), compared to the before-state `password: None` (live 2026-09-28).
+CONTENTS ASSERTION: the app writes through the authenticated Redis — `DBSIZE > 0` after a served `status.php`, compared to 0 on a freshly started server.
+CONTENTS ASSERTION: end-to-end push delivery — `occ notify_push:self-test` "push server is receiving redis messages" (PHP publishes over the authenticated connection, notify_push must receive it over its own).
+CONTROL: metric kube_deployment_status_replicas_available — gate 9 asserts `{namespace="office",deployment="nextcloud-notify-push"} == 1`.
+CONTROL: metric kube_pod_container_status_restarts_total — gate 9 asserts the ABSOLUTE value `max(...{pod="<the new notify-push pod>"}) == 0` (not `increase()`, which reads 0 on restarts that precede a fresh pod's first scrape — review 2026-09-28 replayed it on the 09-27 episode: increase=0, absolute=2).
+
 ```bash
 set -euo pipefail
 # 1. requirepass is LIVE: an unauthenticated ping is refused.
 U=$(kubectl -n office exec deploy/nextcloud-redis -- sh -c 'env -u REDISCLI_AUTH redis-cli ping 2>&1' || true)
 echo "unauth ping -> $U"
-echo "$U" | grep -q NOAUTH || { echo "ABORT: unauthenticated ping was NOT refused — the server is open"; exit 1; }
-# CATCHES: the wrapper not taking effect (old ReplicaSet still serving, empty
-# password, wrong Secret key). Failing input: the pre-change server answers PONG.
+echo "$U" | grep -qi NOAUTH || { echo "ABORT: unauth ping NOT refused — server is open"; exit 1; }
+# CATCHES: wrapper not in effect. Failing input: today's server answers PONG.
+# GREEN on 2026-09-26 with this exact manifest.
 ```
 
 ```bash
 # 2. …and the authenticated path works (the probes depend on it).
 A=$(kubectl -n office exec deploy/nextcloud-redis -- sh -c 'redis-cli ping' | tr -d '[:space:]')
-[ "$A" = "PONG" ] || { echo "ABORT: authenticated ping got '$A' — REDISCLI_AUTH and --requirepass disagree"; exit 1; }
-# CATCHES: two different values in the two env entries (typo in one key name).
+[ "$A" = "PONG" ] || { echo "ABORT: authenticated ping got '$A'"; exit 1; }
+# CATCHES: REDISCLI_AUTH and --requirepass reading different keys.
 ```
 
 ```bash
-# 3. The MAIN container carries the password form, and the SAME value.
+# 3. MAIN container carries the password form, and the SAME value as the Secret.
 URL=$(kubectl -n office get deploy nextcloud -o jsonpath='{.spec.template.spec.containers[?(@.name=="nextcloud")].env[?(@.name=="REDIS_URL")].value}')
 [ "$URL" = 'redis://:$(REDIS_HOST_PASSWORD)@$(REDIS_HOST):$(REDIS_HOST_PORT)' ] \
-  || { echo "ABORT: REDIS_URL is '$URL' — externalRedis.existingSecret did not render"; exit 1; }
+  || { echo "ABORT: REDIS_URL is '$URL' — existingSecret did not render"; exit 1; }
 P=$(kubectl -n office exec deploy/nextcloud -c nextcloud -- sh -c 'printf %s "$REDIS_HOST_PASSWORD" | sha256sum | cut -c1-8')
 S=$(kubectl -n office get secret nextcloud-config -o jsonpath='{.data.redis-password}' | base64 -d | shasum -a 256 | cut -c1-8)
-echo "pod=$P secret=$S"
-[ "$S" != e3b0c442 ] || { echo "ABORT: Secret key redis-password is empty/missing (sha256 of '')"; exit 1; }
-[ -n "$P" ] && [ "$P" = "$S" ] || { echo "ABORT: pod value ($P) != Secret ($S) — pod started before the Secret landed (docs/sops/secret-rotation.md)"; exit 1; }
-# CATCHES: the exact bc4a2fbf failure — a pod rolled before the Secret rewrite.
+[ "$S" != e3b0c442 ] || { echo "ABORT: Secret key redis-password empty/missing"; exit 1; }
+[ -n "$P" ] && [ "$P" = "$S" ] || { echo "ABORT: pod ($P) != Secret ($S)"; exit 1; }
+# CATCHES: a pod rolled before the Secret landed (bc4a2fbf). e3b0c442 = sha256("").
 ```
 
 ```bash
-# 4. The app is USING the authenticated Redis, not erroring past it.
-kubectl -n office exec deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ status" | grep -q 'installed: true' \
+# 4. The app is USING the authenticated Redis.
+kubectl -n office exec deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ status" | grep -qi 'installed: true' \
   || { echo "ABORT: occ status not installed:true"; exit 1; }
 H=$(kubectl -n office get httproute nextcloud -o jsonpath='{.spec.hostnames[0]}')
-[ -n "$H" ] || { echo "ABORT: could not read the nextcloud HTTPRoute hostname"; exit 1; }
-curl -s -o /dev/null -w '%{http_code}\n' --max-time 15 "https://$H/status.php" | grep -q '^200$' \
-  || { echo "ABORT: status.php not 200"; exit 1; }
-# REVIEW 2026-09-26: a `kubectl logs | grep NOAUTH` absence check was removed — the
-# container's stdout is the Apache access log only (298/298 lines in 30m were
-# access-log lines), Nextcloud's own errors go to nextcloud.log, so that grep read 0
-# on every run. DBSIZE below is the positive signal that the app writes via auth.
+[ -n "$H" ] || { echo "ABORT: no HTTPRoute hostname"; exit 1; }
+curl -s -o /dev/null -w '%{http_code}\n' --max-time 15 "https://$H/status.php" | grep -q '^200$' || { echo "ABORT: status.php not 200"; exit 1; }
 K=$(kubectl -n office exec deploy/nextcloud-redis -- sh -c 'redis-cli DBSIZE' | awk '{print $NF}')
-echo "keys=$K"
-[ "$K" -gt 0 ] || { echo "ABORT: 0 keys after the app served status.php — it is not writing to this Redis"; exit 1; }
-# CATCHES: an app that came up but silently lost its cache/locks. DBSIZE was
-# ~140 steady-state before the change (redis-deployment.yaml comment); a fresh
-# server that stays at 0 after traffic is the red. Failing input: point the app
-# at a wrong password and it 500s AND DBSIZE stays 0.
+echo "keys=$K"; [ "$K" -gt 0 ] || { echo "ABORT: 0 keys — app not writing to this Redis"; exit 1; }
+# CATCHES: an app up but not using the cache/locks. The server was restarted in §3.3
+# with the app at 0, so it starts empty; >0 can only come from the authenticated app.
 ```
 
 ```bash
-# 5. notify_push re-parsed config.php WITH the password — the d6070b82 trap.
+# 5. notify_push PARSED the password from its env (the 09-26 failure, now as a gate).
+R=$(kubectl -n office exec deploy/nextcloud-notify-push -- sh -c '
+  [ -n "$REDIS_PASSWORD" ] || { echo "NOENV"; exit 0; }
+  D=$(/var/www/html/custom_apps/notify_push/bin/x86_64/notify_push --dump-config /var/www/html/config/config.php 2>&1)
+  printf "pw=%s host=%s none=%s\n" \
+    "$(printf "%s\n" "$D" | grep -cF "\"$REDIS_PASSWORD\",")" \
+    "$(printf "%s\n" "$D" | grep -cF "host: \"nextcloud-redis\"")" \
+    "$(printf "%s\n" "$D" | grep -A12 "redis:" | grep -c "password. None")"')
+echo "dump-config: $R"
+[ "$R" = "pw=1 host=1 none=0" ] || { echo "ABORT: notify_push does not carry the password ($R)"; exit 1; }
+# Output is COUNTS only — the dump holds the DB and Redis passwords and never leaves the pod.
+# FAILS on: env missing (NOENV), REDIS_URL not honoured (pw=0, none=1 — exactly today's
+# live dump: `password: None`), wrong host (host=0). The multi-line Debug format
+# (`password: Some(\n "…",\n)`) was measured on the live binary 2026-09-28, which is why
+# the quoted value is matched with its trailing comma rather than on the `Some(` line.
+# DRY-TESTED 2026-09-28 against the live pod, env injected into the exec only:
+#   no env                                  -> NOENV                    (ABORT)
+#   REDIS_PASSWORD set, no REDIS_URL        -> pw=0 host=1 none=1       (ABORT)
+#   REDIS_PASSWORD + REDIS_URL (§3.2 shape) -> pw=1 host=1 none=0       (PASS)
+```
+
+```bash
+# 6. End-to-end: PHP publishes, notify_push receives, both over authenticated Redis.
 rc=0; kubectl -n office exec deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ notify_push:self-test" > /tmp/np-post.txt 2>&1 || rc=$?
 cat /tmp/np-post.txt
-[ "$rc" -eq 0 ] && grep -qF 'push server is receiving redis messages' /tmp/np-post.txt && ! grep -qF 'is not receiving' /tmp/np-post.txt \
-  || { echo "ABORT (rc=$rc): notify_push is not healthy after the change — check config.php redis.password and ROLLOUT RESTART the Deployment"; exit 1; }
-# Failing input (upstream SelfTest.php): "🗴 push server is not receiving redis messages
-# (received N, got 0)" + non-zero exit — dry-tested 2026-09-26: old grep PASSED it, this FAILS it.
-# CATCHES: §3.7's occ write skipped or the Deployment not rolled after it. This
-# exact gate went red on 2026-08-19 behind a green HelmRelease.
+[ "$rc" -eq 0 ] && grep -qiF 'push server is receiving redis messages' /tmp/np-post.txt && ! grep -qiF 'is not receiving' /tmp/np-post.txt \
+  || { echo "ABORT (rc=$rc): notify_push not healthy after the change"; exit 1; }
+# Failing input (upstream SelfTest.php): "🗴 push server is not receiving redis messages"
+# + non-zero exit. This gate went red on 2026-08-19 behind a green HelmRelease.
 ```
 
 ```bash
-# 6. Cron pods authenticate (they get the env from the chart, not from us).
+# 7. Cron pods authenticate (env from the chart).
 J=nextcloud-cron-verify-$(date +%H%M)
 kubectl -n office create job --from=cronjob/nextcloud-cron $J
 kubectl -n office wait --for=condition=complete job/$J --timeout=300s \
   || { echo "ABORT: verify cron job did not complete"; kubectl -n office logs job/$J | tail -20; exit 1; }
-kubectl -n office logs job/$J | grep -ci 'NOAUTH' || true   # INFORMATIONAL only (cron.php logs to nextcloud.log); the gate is `complete` above
 kubectl -n office delete job $J
 ```
 
 ```bash
-# 7. NetworkPolicy: a NON-consumer cannot reach 6379; a consumer-labelled pod can.
+# 8. NetworkPolicy: a NON-consumer cannot reach 6379; a consumer-labelled pod can.
 NEG=$(kubectl -n office run np-neg --rm -i --restart=Never --image=busybox:1.38.0 --quiet -- \
         sh -c 'nc -z -w 3 nextcloud-redis 6379; echo rc=$?' 2>/dev/null | tail -1)
 POS=$(kubectl -n office run np-pos --rm -i --restart=Never --image=busybox:1.38.0 --quiet \
         --labels=app.kubernetes.io/instance=nextcloud,app.kubernetes.io/component=app -- \
         sh -c 'nc -z -w 3 nextcloud-redis 6379; echo rc=$?' 2>/dev/null | tail -1)
-echo "negative control: $NEG   positive control: $POS"
-[ "$NEG" = "rc=1" ] || { echo "ABORT: an unlabelled pod reached Redis — the from: block is not enforced (or not applied)"; exit 1; }
-[ "$POS" = "rc=0" ] || { echo "ABORT: a consumer-labelled pod could NOT reach Redis — selector too narrow, the app would be locking out"; exit 1; }
-# CATCHES both directions: a policy that does not restrict (NEG rc=0) and one
-# that restricts too much (POS rc=1). busybox:1.38.0 is the image the chart's
-# wait-for-redis init container already uses, so it is present on the nodes.
+echo "neg=$NEG pos=$POS"
+[ "$NEG" = "rc=1" ] || { echo "ABORT: unlabelled pod reached Redis — from: not enforced"; exit 1; }
+[ "$POS" = "rc=0" ] || { echo "ABORT: consumer-labelled pod blocked — selector too narrow"; exit 1; }
+# CATCHES both directions. busybox:1.38.0 = the chart's wait-for-redis image, on the nodes.
 ```
 
-Nightly Longhorn backup of `nextcloud-config` must complete on the next 03:00
-cycle (it now holds the rewritten `config.php`). Keep the in-pod
-`config.php.pre-redis-auth-*` copy until then.
+```bash
+# 9. notify-push stays up and has NOT restarted (run ≥10 min after §3.4).
+PODS=$(kubectl -n office get pod -l app=nextcloud-notify-push -o 'jsonpath={range .items[*]}{.metadata.name}{" "}{.status.containerStatuses[0].restartCount}{"\n"}{end}')
+echo "$PODS"
+[ "$(printf '%s\n' "$PODS" | grep -c .)" -eq 1 ] || { echo "ABORT: expected exactly one notify-push pod"; exit 1; }
+NP=$(printf '%s\n' "$PODS" | awk '{print $1}'); RC=$(printf '%s\n' "$PODS" | awk '{print $2}')
+[ "$RC" = "0" ] || { echo "ABORT: $NP restartCount=$RC — auth/connect loop"; exit 1; }
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 >/dev/null 2>&1 & PF=$!; sleep 3
+q() { curl -s --get http://localhost:9090/api/v1/query --data-urlencode "query=$1" \
+      | .venv/bin/python3 -c 'import sys,json; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "EMPTY")'; }
+AV=$(q 'kube_deployment_status_replicas_available{namespace="office",deployment="nextcloud-notify-push"}')
+RS=$(q "max(kube_pod_container_status_restarts_total{namespace=\"office\",pod=\"$NP\"})")
+kill $PF 2>/dev/null
+echo "available=$AV restarts(abs)=$RS"
+[ "$AV" = "1" ] || { echo "ABORT: notify-push available=$AV"; exit 1; }
+[ "$RS" = "0" ] || { echo "ABORT: notify-push restarts=$RS (EMPTY = not scraped yet: wait 1 min and re-run; never a pass)"; exit 1; }
+# KNOWN-BAD DEMONSTRATION (review 2026-09-28): the same absolute read on pod
+# nextcloud-notify-push-6b7579cf96-vjwwz returns 2 (its 09-27 08:49-08:51 startup
+# self-test restarts), where the old increase()[10m..3d] form read 0.
+# notify-push has no probes, so available=1 only means "running"; gate 6 is the real signal.
+```
+
+Nightly Longhorn backups are unaffected (no PVC written).
 
 ## 5. Rollback
 
-Trigger: gate 1/2 red after §3.6 (server side wrong) → revert before resuming
-the HelmRelease; gate 3-7 red after §3.7 → full sequence below. Sessions are
-dropped a second time; say so.
+Trigger: `nextcloud-redis` rollout not complete / CrashLoop in §3.3, or gate 1/2 red after §3.3 → steps 1-3 then resume the HR; any of gates
+3-9 red after §3.4 → the full sequence. Sessions drop a second time; say so.
 
-1. Quiesce again (§3.1 minus the backup).
-2. `git revert --no-edit --no-commit <the §3.5 commit>` then
-   `git commit --only kubernetes/apps/office/nextcloud/app/{secrets.sops.yaml,redis-deployment.yaml,helmrelease.yaml} -F <msgfile>`,
-   `git show --stat HEAD` (exactly those three), `git push origin main` — shared worktree:
-   a plain `git revert` refuses on a dirty index. Restores the unauthenticated
-   command, the `from:`-less policy, and the password-less HelmRelease values
-   in one revision.
-3. `flux resume kustomization nextcloud -n office && flux reconcile kustomization nextcloud -n office --with-source`;
-   `kubectl -n office rollout status deploy/nextcloud-redis` — gate 1 must now
-   FAIL (PONG unauthenticated), which is the rollback's success condition.
-4. `flux resume helmrelease nextcloud -n office && flux reconcile helmrelease nextcloud -n office`;
-   scale to 1; `occ status`.
-5. **Un-persist the password — the revert cannot do this:**
+1. Quiesce again. If the Redis server is SERVING with working auth (gate 2 green),
+   use §3.1 including the CLIENT LIST proof. If it is NOT (wrapper CrashLoop,
+   §3.3 `rollout status` timed out, or gate 2 red so CLIENT LIST errors), the
+   CLIENT LIST proof cannot run — prove the quiesce by replica state instead:
    ```bash
-   kubectl -n office exec deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c \
-     "php occ config:system:set redis password --value=''"
+   flux suspend kustomization nextcloud -n office                      # else the next reconcile re-scales notify-push to 1
+   kubectl -n office scale deploy/nextcloud-notify-push --replicas=0   # the §3.3 reconcile set it back to 1
+   [ "$(kubectl -n office get deploy nextcloud -o jsonpath='{.spec.replicas}')" = "0" ] || kubectl -n office scale deploy/nextcloud --replicas=0
+   kubectl -n office wait --for=delete pod -l app.kubernetes.io/component=app,app.kubernetes.io/instance=nextcloud --timeout=180s
+   kubectl -n office wait --for=delete pod -l app=nextcloud-notify-push --timeout=120s
+   [ "$(kubectl -n office get cronjob nextcloud-cron -o jsonpath='{.spec.suspend}')" = "true" ] || { echo "ABORT: cron not suspended"; exit 1; }
    ```
-   If `occ` itself is unhappy, restore the file: `cp config.php.pre-redis-auth-<ts> config.php`
-   in-pod (same directory, same owner — read back and `wc -c` compare).
-6. `kubectl -n office rollout restart deploy/nextcloud-notify-push` (step 3's
-   Kustomization reconcile already brought it back at 1 on the password-bearing
-   config.php — scaling is a no-op), `occ notify_push:self-test` clean by the §4
-   gate 5 form; un-suspend the CronJob; remove the marker.
+2. Revert the landing commit (shared worktree: `--no-commit` + `--only`):
+   ```bash
+   cd /Users/mu/code/cberg-home-nextgen && A=kubernetes/apps/office/nextcloud/app
+   LANDING=$(cat /tmp/nc-redis-hardening.landing); [ -n "$LANDING" ] || { echo "ABORT: no landing sha recorded"; exit 1; }
+   git revert --no-edit --no-commit "$LANDING"      # the sha recorded in §3.3
+   MSG=$(mktemp /tmp/nc-redis-rollback-msg.XXXXXX); printf 'Revert nextcloud-redis hardening (plan nextcloud-redis-hardening §5)\n' > "$MSG"
+   git commit --only $A/secrets.sops.yaml $A/redis-deployment.yaml $A/helmrelease.yaml $A/notify-push.yaml -F "$MSG"
+   git log -1 --format=%s; git show --stat HEAD      # yours; exactly the four files
+   git push origin main
+   ```
+   Restores the unauthenticated command, the `from:`-less policy, the
+   password-less HelmRelease values and notify-push's two-var env in one revision.
+3. `flux resume kustomization nextcloud -n office && flux reconcile kustomization nextcloud -n office --with-source`;
+   `kubectl -n office rollout status deploy/nextcloud-redis` — §2 gate 1 must now
+   read PONG unauthenticated (the rollback's success condition).
+4. `flux resume helmrelease nextcloud -n office && flux reconcile helmrelease nextcloud -n office`;
+   scale `deploy/nextcloud` to 1 if needed; `occ status`.
+5. `kubectl -n office rollout restart deploy/nextcloud-notify-push`; then §2 gate 4's
+   self-test form must be clean (it reads config.php again, which was never
+   modified — `password: None` against an open server, the 2026-09-28 state).
+6. Un-suspend the CronJob; `runbooks/update-marker.sh clear nextcloud`.
 
-The revert also removes the Secret key `redis-password` (it is in the §3.5 commit);
-nothing consumes it after the revert, and a re-run of §3.2 generates a fresh one. Do not delete anything on the PVC.
+Nothing on any PVC is changed by this plan, so there is nothing else to restore
+(the 09-26 revision's config.php backup/un-set steps are gone with its config.php write).
 
 ## 6. Interference notes
 
-- **`nextcloud-34.0.4` (sun-attended 2026-10-04) is a hard conflict** — same
-  HelmRelease file, same Deployment roll, same quiesce. Whichever lands first,
-  the other must re-read `helmrelease.yaml` before editing; the sidecar env
-  block and `externalRedis` are edited by THIS plan only.
-- **`nextcloud-34.0.4`'s rollback is a Longhorn snapshot revert of `nextcloud-config`
-  taken BEFORE this plan.** If that restore is ever run after this plan lands, config.php
-  loses `redis.password` while the server keeps requirepass: notify_push NOAUTH-loops
-  behind a green HelmRelease. After any such restore, re-run §3.7's persistence exec +
-  notify-push `rollout restart` + §4 gate 5 (or revert this plan first). Hence: run this
-  plan only after 34.0.4 is fully green, never in the same attempt as its rollback.
-- **Open version finding `F-3fcdca7b`** (this image, patch, safe lane) edits the same
-  `redis-deployment.yaml`; Step 0 may land it in the same run. §3.5's ff-merge absorbs it;
-  it is a separate Recreate roll, not a finding_ref of this plan.
-- **Attended only.** Every logged-in user is logged out; the `occ` write is a
-  human-verified step; and gate 7 creates two throwaway pods in `office`.
-- **No storage operation.** `pvc/nextcloud-config` is written through `occ`
-  (one file), never detached, resized or deleted. The Longhorn backup is the
-  floor beneath the in-pod copy.
-- **Silence Nextcloud's Kuma/HTTP alerts for the window** and drop the
-  active-update marker so the alert-triage agent reads the noise as EXPECTED.
-- **Password lands in `config.php` in plaintext** on the PVC — the same file
-  already holds the database password; that is Nextcloud's design, not a new
-  exposure. It also sits in the container argv of `nextcloud-redis` (readable
-  inside that container only), the same as the two sibling Redis deployments.
-- **After this lands**: F-069b1775 is ALREADY `resolved` (closed 2026-09-22 on plan
-  authorship, `aab921ba` — its action was "author a hardening plan"), so there is
-  nothing to close; record the landing commit on it via `policy-cli finding` and
-  do not re-open it. The
-  `redis-deployment.yaml` header must no longer describe the open posture.
+- **`nextcloud-fleet-35.0.1`** (draft) edits the same `helmrelease.yaml` and
+  `notify-push.yaml` and rolls the same Deployments. Whichever lands second must
+  re-run §2 gate 3 / its own pre-flight; §3.2's notify-push hunk does not overlap
+  the image line.
+- **`redis-fleet-8.10.2`** / finding `F-3fcdca7b` (image patch on the same
+  `redis-deployment.yaml`, safe lane, may land at Step 0 of the same window):
+  §3.2(a) is a 3-way apply proven to merge cleanly over that bump and keep it.
+  Do not run both plans in one window — two Recreate rolls of the session store.
+- **`flux-oci-chart-sources`** (stage 5) switches the nextcloud HelmRelease to
+  an OCI `chartRef`; §3.2(c)'s render gate reads `.spec.chart.spec.version`. If
+  it lands first, re-derive the render command from the chartRef before running.
+- Adjacent, not conflicts: `helm-drift-detection` (driftDetection on this HR),
+  `chart-patches-coredns-reloader-blackbox` (Reloader rolls whiteboard here).
+- **`flux-reconciler-impersonation`** changes how Flux applies `office`; do not
+  put both in one window — a failed apply in §3.3 would be ambiguous.
+- **Attended only** (`autonomy_override: human-gated`). Every logged-in user is
+  logged out; gate 8 creates two throwaway pods in `office`.
+- **Password exposure surface:** notify-push's container env (readable in that
+  container only) and redis-server's argv, the same as the two sibling Redis
+  deployments; the pod spec shows only `$(REDIS_PASSWORD)`. The password is NOT
+  written to `config.php`. The Secret key restored from `da77a7de` was live for
+  ~6 min on 2026-09-26 and never left SOPS/etcd; if the operator prefers a fresh
+  value, use the §3.2 fallback generator instead of (a) for the Secret.
+- **After this lands:** `F-069b1775` is already `resolved` (plan authorship,
+  `aab921ba`); record the landing commit on it via `policy-cli finding`, do not
+  re-open it. The old notify-push.yaml note about `zz_touch` + config.php for
+  a HOST change remains valid for hosts; for the password it is superseded by
+  the REDIS_URL env above (REDIS_URL now also pins the host, so a future host
+  rename must edit REDIS_URL too — hence "keep in lockstep" in the comment).
+- **Repo correction (not planned around):** the old plan's §3.7 idea and the
+  `notify-push.yaml` comment both treated config.php as notify_push's only redis
+  source; upstream v1.4.1 gives env precedence. The 09-26 status note's untested
+  `zz_touch` idea was NOT pursued: whether a forced rewrite would persist an
+  overlay value into config.php is unmeasured, and it would put a second copy of
+  the password on the PVC plus an in-pod write that git cannot revert. The env
+  path needs neither.
