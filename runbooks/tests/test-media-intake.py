@@ -320,7 +320,8 @@ check("nothing reached the library", list((MEDIA / "Movies").iterdir()), [])
 reset()
 (INTAKE / "Empty.Pkg" / "sub").mkdir(parents=True)
 res = run_()
-check("empty leftover folder removed (rmdir only)", ((INTAKE / "Empty.Pkg").exists(), res["run_actions"]["cleaned"]), (False, 1))
+check("empty folder is left alone and not counted ambiguous",
+      ((INTAKE / "Empty.Pkg").exists(), res["items"]["ambiguous"], res["run_actions"]["cleaned"]), (True, 0, 0))
 
 # ---------------------------------------------------------------------------
 print("6. `?` in titles")

@@ -2888,22 +2888,11 @@ data:
                     log_event("intake-skip", item=iid, reason=why)
                     continue
                 if item.is_dir() and not files:
-                    # An empty leftover folder (every file already moved or the
-                    # package was removed in JDownloader) is not media and would
-                    # otherwise sit "ambiguous" forever. os.rmdir only ever
-                    # removes EMPTY directories, so this cannot touch data.
-                    if APPLY:
-                        for dp, _dn, _fn in sorted(os.walk(item), key=lambda w: -len(w[0])):
-                            try:
-                                os.rmdir(dp)
-                            except OSError:
-                                pass
-                        if not item.exists():
-                            result["run_actions"]["cleaned"] += 1
-                            state["events"].append([now, "cleaned"])
-                            log_event("intake-empty-dir-removed", item=iid)
-                            continue
-                    result["items"]["planned" if not APPLY else "ambiguous"] += 1
+                    # Empty folder: not media, so not "ambiguous" (it would alert
+                    # forever), and deliberately NOT removed either -- an empty
+                    # top-level folder may be a JDownloader category/target dir
+                    # (the live intake has one). Ignored, logged, left alone.
+                    log_event("intake-skip", item=iid, reason="empty-dir")
                     continue
                 c = classify(item)
                 plan = Plan(item)
