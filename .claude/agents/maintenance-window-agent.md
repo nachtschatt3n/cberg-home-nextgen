@@ -689,6 +689,13 @@ above still applies EXCEPT where this section replaces it.
    An on-demand slot has no cron and no expected occurrences, so liveness never
    asserts on it — but `window_liveness.stuck` does watch an open `now` row
    against the 480-minute ceiling, so the finalize is still mandatory.
+   **Standing in for today's attended window?** If this NOW run deliberately
+   does the work of today's `sat-attended` / `sun-attended` occurrence, put the
+   literal token `absorbs <slot>:<YYYY-MM-DD>` (today's Europe/Berlin date) in
+   `--notes` — e.g. `--notes "on-demand: <ids>; absorbs sat-attended:2026-10-03"`.
+   It is the ONLY way liveness counts that attended slot as run
+   (`attended_absorbed_by_on_demand()`, operator decision 2026-09-28); free text
+   ("stands in for Saturday") covers nothing, and there is no implicit coverage.
 2. **Step 0 still runs first.** House rule: Step 0 runs in EVERY run, and a NOW
    run is a run. Do not scope it away because the operator named plans.
 3. **Candidate set = ONLY the named plans.** Plans scheduled into `nightly` /

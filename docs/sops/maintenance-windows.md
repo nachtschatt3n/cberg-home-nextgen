@@ -587,6 +587,12 @@ iTerm's "OK to run script?" modal (which also blocks the harness). iTerm's own
 AutoLaunch API needs neither. Log for both halves:
 `~/Library/Logs/cberg-headless-keeper.log`.
 
+The plist is **machine-specific**: it hard-codes `/Users/mu/...` (program path,
+WorkingDirectory, PATH with the mise shims, `OPERATION_REPO`, log path) and the
+repo at `~/code/cberg-home-nextgen`. On another user or checkout path, edit
+those before `cp`. It also runs whatever is in the live checkout at login
+(security-agent 2026-09-28, accepted: same user, no privilege gain).
+
 ```bash
 # INSTALL (once, on the Mac, as mu -- never sudo)
 cd ~/code/cberg-home-nextgen
