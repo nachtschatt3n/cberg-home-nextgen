@@ -190,7 +190,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | flux-system | Flux GitOps operator + admission guardrails | 2 |
 | backup | External backup integrations | 3 |
 | my-software-development | Custom app development | 3 |
-| my-software-production | Custom app production | 4 |
+| my-software-production | Custom app production | 5 |
 | my-software-showcase | Portfolio showcase (containerized legacy client apps) | 15 |
 | security | Security monitoring (Wazuh, Falco) | 2 |
 
