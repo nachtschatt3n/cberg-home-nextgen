@@ -27,5 +27,5 @@ editing the spec and re-delivering — do not hand-edit the HTML).
 ## Applications
 
 - [Paperless Document Ingestion](paperless-ingestion.html){ target=_blank } — scanner + email intake, validation, OCR, native AI, storage.
-- [Media Intake Workflow](media-intake.html){ target=_blank } — ffprobe evidence, operator gate, atomic moves, targeted rescans.
+- [Media Intake Workflow](media-intake.html){ target=_blank } — manual `media-organize` path (operator-gated). New downloads are handled by the automatic 30-min `media-intake-watcher` (ffprobe dedupe, atomic moves, folder-scoped rescans); see `docs/sops/media-library-standards.md`.
 - [Home Automation Stack](home-automation.html){ target=_blank } — Zigbee mesh → Z2M → MQTT → Home Assistant, Matter/Thread, NVR.

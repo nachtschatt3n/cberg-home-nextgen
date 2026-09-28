@@ -69,6 +69,7 @@ Service+ServiceMonitor on short-lived CronJobs.
 | `home-automation/pallet-price-monitor` | `pellet-price-monitor` | twice daily (08:00/20:00) | `pellet_*` | `pallet-price-monitor-alerts.yaml` |
 | `kube-system/authentik-db-probe` | `authentik-db-probe` | hourly at :17 | `authentik_audit_*`, `authentik_db_connections_*`, `authentik_db_probe_last_success_timestamp_seconds` | `authentik-alerts.yaml` (`authentik.audit.freshness`) |
 | `backup/icloud-backup-freshness` | `icloud-backup-freshness` | hourly at :23 | `icloud_backup_newest_file_timestamp_seconds{account}`, `icloud_backup_probe_last_success_timestamp_seconds` | `icloud-backup-alerts.yaml` (`icloud-backup.freshness`) |
+| `media/media-intake-watcher` | `media-intake-watcher` | every 30 min | `media_intake_items{state}`, `media_intake_ambiguous_items{reason}`, `media_intake_ambiguous_oldest_first_seen_timestamp_seconds`, `media_intake_run_actions`, `media_intake_actions_24h`, `media_intake_run_aborted{reason}`, `media_intake_apply_enabled`, `media_intake_last_run_timestamp_seconds` | `media-intake-alerts.yaml` (`media-intake.watcher`) |
 
 Three rules, each of which has already cost real time:
 
@@ -960,6 +961,7 @@ cronjobs -A` is the source of truth; ~22 manifests exist under
 - `kube-system/authentik-channels-cleanup` (django-channels message prune, every 6h)
 - `kube-system/authentik-db-probe` (audit-log freshness gauges → Pushgateway, hourly :17)
 - `backup/icloud-backup-freshness` (iCloud photo-backup file-recency gauges → Pushgateway, hourly :23)
+- `media/media-intake-watcher` (automatic JDownloader intake, every 30 min → Pushgateway)
 - `databases/sweep-heartbeat`, `monitoring/obs-recovery`, `ai/openclaw-probe`,
   `ai/paperclip-backup-cleanup`, `home-automation/frigate-nvr` restart,
   `office/mealie` shopping-sync, tube-archivist maintenance
@@ -1267,6 +1269,7 @@ Rollback validation:
 
 ## Version History
 
+- `2026.09.28`: Pushgateway pusher table + Known CronJobs: added `media/media-intake-watcher` (automatic JDownloader intake, `media-intake-alerts.yaml`).
 - `2026.09.28`: Alert Authoring Rules #5 — duplicate series during an exporter overlap
   (e.g. two kube-state-metrics pods mid-rollout) break bare `on()`/`group_left` joins with
   "found duplicate series for the match group"; aggregate the one side with

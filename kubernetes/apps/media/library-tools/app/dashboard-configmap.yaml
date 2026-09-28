@@ -398,7 +398,8 @@ data:
                 jobs = list_jobs("media")
                 jobs = [j for j in jobs if j["metadata"]["name"].startswith(
                     ("media-library", "media-organize", "media-sidecar",
-                     "media-cleanup", "media-rescan", "media-metadata-coverage"))]
+                     "media-cleanup", "media-rescan", "media-metadata-coverage",
+                     "media-intake-watcher"))]
                 jobs.sort(key=lambda j: j.get("status", {}).get("startTime", ""), reverse=True)
                 cov = latest_coverage()
                 html = PAGE.format(

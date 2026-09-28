@@ -1,8 +1,8 @@
 # SOP: Secret Rotation — rotate the value, then roll EVERY consumer
 
 > Description: How to rotate a Kubernetes Secret that one or more running workloads consume, so that no consumer keeps serving the old value behind a green HelmRelease. Covers consumer enumeration, Stakater Reloader, Flux `postBuild` substitution, and in-pod verification.
-> Version: `2026.09.25`
-> Last Updated: `2026-09-25`
+> Version: `2026.09.28`
+> Last Updated: `2026-09-28`
 > Owner: `Platform`
 
 ---
@@ -96,7 +96,7 @@ annotation; `NONE` means the consumer must be rolled by hand.
 
 | Secret | Consumer manifest (kind) | Reloader in that file |
 |---|---|---|
-| `media-manager-tokens` | `media/library-tools/app/{episode-sidecar,per-item-refresh,plex-fs-classifier,rescan,sidecar}-cronjob.yaml` (5 CronJobs) | NONE — CronJob pods read the Secret at each Job start (§4 note) |
+| `media-manager-tokens` | `media/library-tools/app/{episode-sidecar,intake,per-item-refresh,plex-fs-classifier,rescan,sidecar}-cronjob.yaml` (6 CronJobs) | NONE — CronJob pods read the Secret at each Job start (§4 note) |
 | `authentik-secret` | `kube-system/authentik/app/helmrelease.yaml` | `auto` + named |
 | `authentik-secret` | `kube-system/authentik/app/pg-deployment.yaml`, `cronjob-channels-cleanup.yaml`, `cronjob-db-probe.yaml` | NONE |
 | `paperless-ngx-secret` | `office/paperless-ngx/app/helmrelease.yaml`, `db-deployment.yaml`, `redis-deployment.yaml` | NONE (all three) |
@@ -444,5 +444,6 @@ kubectl -n <ns> rollout restart deploy/<consumer>           # per un-annotated c
 
 ## Version History
 
+- `2026.09.28`: `media-manager-tokens` consumers: added `intake-cronjob.yaml` (media-intake-watcher), now 6 CronJobs.
 - `2026.09.25`: Added the `$` → `$$` rule for Secret values (F-95d6d080). This is the lesson from `79d2d504`: Flux postBuild substitution runs on the decrypted Secret and rewrites `$` sequences, so argon2/bcrypt hashes must store every `$` as `$$`. Added §3 block, §6 Test 4 (in-pod prefix check), and a §7 row. `$$` → `$` was verified live in the vaultwarden pod.
 - `2026.09.22`: Initial SOP (F-c04cc353). Grounded in the bc4a2fbf incident, the live Reloader (v1.4.21) log, and a 2026-09-22 scan of shared Secrets under kubernetes/apps.

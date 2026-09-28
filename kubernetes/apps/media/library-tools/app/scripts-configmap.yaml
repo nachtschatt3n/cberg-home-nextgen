@@ -928,13 +928,15 @@ data:
                              size > 0 before any rm. Empty list => REFUSE.
 
     intake.py calls cleanup() directly with guard_media=True, which additionally
-    refuses when the directory still holds anything that is not scene junk: any
-    audio file, or any video file above SAMPLE_MAX_BYTES. So the only things this
-    ever deletes after an automatic intake are .nfo/.txt/.url/.jpg/.sfv and
-    sample clips — and only once every destination re-verifies.
+    refuses when the directory still holds ANY file that is not on the scene-junk
+    ALLOWLIST (JUNK_EXT, or a sample/trailer-named video under SAMPLE_MAX_BYTES).
+    An allowlist, not a denylist (F-718fdeea): an unknown extension (.zip, .iso,
+    .ape, a Subs/ folder, a small unnamed video) blocks the delete instead of
+    being removed with the junk.
     """
     import json
     import os
+    import re
     import shutil
     import sys
     from pathlib import Path
@@ -946,22 +948,31 @@ data:
     VIDEO_EXT = {".mkv", ".mp4", ".avi", ".m4v", ".ts", ".m2ts", ".mov", ".wmv", ".mpg", ".mpeg", ".webm"}
     AUDIO_EXT = {".mp3", ".flac", ".m4a", ".ogg", ".opus", ".wav", ".aac", ".alac", ".wma", ".aiff"}
     SAMPLE_MAX_BYTES = 150 * 1024 * 1024
+    JUNK_EXT = {".nfo", ".txt", ".url", ".jpg", ".jpeg", ".png", ".sfv", ".srr",
+                ".md5", ".nzb", ".log", ".html", ".htm", ".website"}
+    SAMPLE_NAME_RE = re.compile(r"(^|[ ._\-/])(sample|trailer)([ ._\-/]|$)", re.I)
 
 
     def leftover_media(path: Path) -> int:
-        """Count files under path that are NOT scene junk."""
+        """Count files under path that are NOT on the scene-junk allowlist."""
         n = 0
         for dp, _dn, fn in os.walk(path):
             for f in fn:
                 fp = Path(dp) / f
                 ext = fp.suffix.lower()
+                if f.startswith(".") and ext not in VIDEO_EXT | AUDIO_EXT:
+                    continue          # .DS_Store, ._foo, .intake tag-fix leftovers
                 try:
                     size = fp.stat().st_size
                 except OSError:
                     n += 1
                     continue
-                if ext in AUDIO_EXT or (ext in VIDEO_EXT and size > SAMPLE_MAX_BYTES):
-                    n += 1
+                if ext in JUNK_EXT:
+                    continue
+                rel = str(fp.relative_to(path))
+                if ext in VIDEO_EXT and size <= SAMPLE_MAX_BYTES and SAMPLE_NAME_RE.search(rel):
+                    continue
+                n += 1
         return n
 
 

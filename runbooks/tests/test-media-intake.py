@@ -188,8 +188,8 @@ two = INTAKE / "Two.Videos.2011"
 vid(two / "a.mkv")
 vid(two / "b.mkv")
 check("two feature videos -> ambiguous", I.classify(two).get("reason"), "multiple-videos")
-yt = INTAKE / "Channel - clip [dQw4w9WgXcQ]"
-vid(yt / "Channel - clip [dQw4w9WgXcQ].mp4")
+yt = INTAKE / "Channel - clip [AbCdEfGhIjK]"
+vid(yt / "Channel - clip [AbCdEfGhIjK].mp4")
 check("YouTube-looking -> flagged ambiguous", I.classify(yt).get("reason"), "youtube")
 mus = INTAKE / "Artist - Album (2001) FLAC"
 aud(mus / "01.flac", "Album", "Artist", "One", 1)
@@ -367,6 +367,15 @@ check("cleanup(guard_media) refuses while a feature video is left", CL.cleanup(d
 aud(d / "t.mp3", "A", "B", "C", 1)
 check("cleanup(guard_media) refuses while audio is left", CL.cleanup(d, [str(dest)], guard_media=True), False)
 (d / "t.mp3").unlink()
+for leftover in ("Subs/other-name.srt", "extra.zip", "disc.iso", "album.ape", "tiny-unnamed.mkv"):
+    f = d / leftover
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("x")
+    check(f"cleanup(guard_media) refuses unknown leftover {pathlib.Path(leftover).suffix}",
+          CL.cleanup(d, [str(dest)], guard_media=True), False)
+    f.unlink()
+vid(d / "Sample" / "grp-sample.mkv")
+(d / "grp.sfv").write_text("x")
 check("cleanup removes junk-only folder after verify", CL.cleanup(d, [str(dest)], guard_media=True), True)
 check("cleanup refuses the intake root", CL.cleanup(INTAKE, [str(dest)]), False)
 check("intake root survives", INTAKE.exists(), True)

@@ -1,8 +1,8 @@
 ---
-# library-tools mounts the JDownloader share read-write so it can move finished
-# downloads into the library and clean up emptied subdirs. The same physical
-# share is also mounted by the JDownloader pod (in download namespace) — CIFS
-# tolerates shared access. RWM lets jobs land on any cluster node.
+# Read by the media-dashboard only (live intake-queue listing). Write jobs
+# (media-intake-watcher, media-organize, media-cleanup) reach the intake via
+# the plex-media-smb share-root mount at /data/downloads/jdownloader: a second
+# CIFS mount is a second filesystem and made every rename fail with EXDEV.
 #
 # Hard rule: this PVC is against the cifs-jdownloader-media StorageClass which
 # is "Severe" per docs/sops/storage-safety.md (per-app share wipe on PVC delete
