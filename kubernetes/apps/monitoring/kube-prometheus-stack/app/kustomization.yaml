@@ -37,6 +37,7 @@ resources:
   - ./zero-export-controller-alerts.yaml
   - ./pallet-price-monitor-alerts.yaml
   - ./gas-price-monitor-alerts.yaml
+  - ./splitfairy-alerts.yaml
   - ./mosquitto-alerts.yaml
   - ./prometheus-httproute.yaml
   - ./alertmanager-httproute.yaml

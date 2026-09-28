@@ -1,0 +1,42 @@
+---
+# Public-internet route. Splitfairy has its own passwordless email-code auth,
+# and its PWA/API must work unauthenticated at the edge, so there is
+# deliberately NO Authentik forward-auth / SecurityPolicy on this route.
+#
+# NO external-dns target annotation: with --source=gateway-httproute
+# external-dns reads the target from the parent GATEWAY and silently ignores it
+# on the route. It is already set on Gateway/envoy-external, so this route gets
+# the proxied Cloudflare CNAME to the tunnel automatically (Known Gotcha #11).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: splitfairy
+  namespace: my-software-production
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Splitfairy"
+    gethomepage.dev/description: "Shared expenses and receipt splitting"
+    gethomepage.dev/group: "Software Development"
+    gethomepage.dev/icon: "mdi-receipt-text-outline"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/name=splitfairy"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      # https only. The http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "splitfairy.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: splitfairy
+          port: 80

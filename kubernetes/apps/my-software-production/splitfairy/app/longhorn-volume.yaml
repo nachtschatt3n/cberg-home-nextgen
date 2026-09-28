@@ -1,0 +1,26 @@
+---
+# Physical Longhorn volume for splitfairy's /data (SQLite + WAL, receipts/,
+# backups/). Block storage on purpose: SQLite WAL needs POSIX locking and
+# shared-memory mmap semantics that SMB/NFS do not provide reliably.
+#
+# NOT managed by Flux (see ./kustomization.yaml). Apply once, manually:
+#   mise exec -- kubectl apply -f kubernetes/apps/my-software-production/splitfairy/app/longhorn-volume.yaml
+#
+# Backups: no recurring-job label needed. Longhorn puts every volume without
+# an explicit recurring-job label into the `default` group, which carries
+# global-filesystem-trim (02:00), global-snapshot-cleanup (02:30) and
+# daily-backup-all-volumes (03:00, retain 7). docs/sops/longhorn.md.
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: splitfairy-data
+  namespace: storage
+spec:
+  size: "5368709120"  # 5Gi in bytes
+  numberOfReplicas: 2
+  staleReplicaTimeout: 30
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false

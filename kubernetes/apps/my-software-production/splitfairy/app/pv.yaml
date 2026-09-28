@@ -1,0 +1,22 @@
+---
+# Bound to the Longhorn Volume `splitfairy-data` (./longhorn-volume.yaml).
+# Volume name = PV name = volumeHandle = PVC volumeName = PVC name.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: splitfairy-data
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: longhorn-static
+  csi:
+    driver: driver.longhorn.io
+    fsType: ext4
+    volumeAttributes:
+      numberOfReplicas: "2"
+      staleReplicaTimeout: "30"
+    volumeHandle: splitfairy-data

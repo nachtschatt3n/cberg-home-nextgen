@@ -1,0 +1,143 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: splitfairy
+  namespace: my-software-production
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 5.1.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      # Load-bearing for image automation: a release tag whose pod fails its
+      # startup/readiness probes times the upgrade out and is rolled back.
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      splitfairy:
+        # Single writer on a SQLite (WAL) database on an RWO Longhorn volume:
+        # exactly one replica, and Recreate so a rollout never tries to attach
+        # the volume to a second pod (Known Gotcha #12, longhorn-rwo-multi-attach.md).
+        replicas: 1
+        strategy: Recreate
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/splitfairy
+              # Release tags (v<major>.<minor>.<patch>) only; updated by the
+              # ImageUpdateAutomation in ./image-automation.yaml.
+              tag: v0.1.0 # {"$imagepolicy": "my-software-production:splitfairy:tag"}
+              pullPolicy: IfNotPresent
+            env:
+              - name: NODE_ENV
+                value: production
+              - name: PORT
+                value: "3000"
+              - name: DATA_DIR
+                value: /data
+              - name: TZ
+                value: Europe/Berlin
+              # Shared Mac mini Ollama host. gemma4:26b-mlx is in the pinned
+              # warm set (vision + structured output). The client must NOT send
+              # keep_alive or a num_ctx other than 65536 -- either one reloads
+              # or un-pins the shared model for ~15 other apps.
+              # docs/ai-usage-map.md, docs/sops/ai-integration.md.
+              - name: OLLAMA_URL
+                value: http://192.168.30.111:11434
+              - name: OLLAMA_MODEL
+                value: gemma4:26b-mlx
+            # ADMIN_EMAIL, AUTH_SECRET, SMTP_* come from the SOPS-encrypted
+            # Secret `splitfairy` (./secret.sops.yaml). Reloader restarts the
+            # pod when it changes.
+            envFrom:
+              - secretRef:
+                  name: splitfairy
+            probes:
+              # /healthz is static (process up); /readyz touches SQLite.
+              # Startup is the DEPLOY gate (fires 0x/hour in steady state), so
+              # it uses the deep /readyz: a release that cannot open its DB
+              # never reports successful and gets rolled back (Gotcha #13).
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /readyz
+                    port: 3000
+                  periodSeconds: 5
+                  timeoutSeconds: 5
+                  failureThreshold: 30
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 3000
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /readyz
+                    port: 3000
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 50m
+                memory: 192Mi
+              limits:
+                cpu: 1000m
+                memory: 512Mi
+    # Image USER is `node` (non-numeric); kubelet cannot enforce runAsNonRoot
+    # without a numeric UID, so pin uid/gid 1000 explicitly. fsGroup makes the
+    # fresh ext4 volume writable for uid 1000.
+    defaultPodOptions:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
+        seccompProfile:
+          type: RuntimeDefault
+    service:
+      app:
+        controller: splitfairy
+        ports:
+          http:
+            port: 80
+            targetPort: 3000
+    persistence:
+      data:
+        existingClaim: splitfairy-data
+        globalMounts:
+          - path: /data
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp

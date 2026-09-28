@@ -1,0 +1,83 @@
+---
+# Flux image automation for splitfairy. Mode table:
+# docs/sops/self-built-image-rebuild.md "Weekly rebuild + deploy mode".
+#
+# AUTO on RELEASE TAGS ONLY. The ImagePolicy selects exactly
+# `v<major>.<minor>.<patch>` and nothing else, so:
+#   - a merge to main (CI tags `sha-<7hex>` / `main` / `latest`) is NEVER deployed;
+#   - pre-releases (`v1.2.3-rc.1`) and V-scheme weekly rebuilds
+#     (`v1.2.3-b<YYYYMMDD>`) are NOT deployed by this automation either --
+#     a CVE rebuild reaches the cluster only via a new release or a manual bump.
+# The ^...$ anchors are load-bearing: Flux matches filterTags unanchored.
+#
+# Internet-facing auto-deploy is gated by the HelmRelease's startup/readiness
+# probes (/readyz hits SQLite) plus `upgrade.remediation.strategy: rollback`.
+# NOTE: the app holds user data in SQLite; a release that migrates the schema
+# and is then rolled back leaves the DB on the newer schema. Keep migrations
+# backward-compatible, or hold a release by removing the $imagepolicy marker.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: splitfairy
+  namespace: my-software-production
+spec:
+  # Public GHCR package: no secretRef needed.
+  image: ghcr.io/nachtschatt3n/splitfairy
+  interval: 1h
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: splitfairy
+  namespace: my-software-production
+spec:
+  imageRepositoryRef:
+    name: splitfairy
+  filterTags:
+    pattern: '^v(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$'
+    extract: '$version'
+  policy:
+    semver:
+      range: '>=0.1.0'
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: splitfairy-image-updates
+  namespace: my-software-production
+spec:
+  # Own automation, scoped to this app's directory (same shape as
+  # gas-price-monitor-image-updates). absenty-image-updates covers the whole
+  # namespace path but is SUSPENDED for the dependabot drain and must stay so.
+  # When it is unsuspended it will also see this marker; both write the same
+  # value from the same ImagePolicy, so the overlap is idempotent.
+  interval: 30m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcdbot@users.noreply.github.com
+        name: fluxcdbot
+      messageTemplate: |
+        chore(splitfairy): update container image (release)
+
+        Automation name: {{ .AutomationObject }}
+
+        Objects updated:
+        {{ range $resource, $changes := .Changed.Objects -}}
+        - {{ $resource.Kind }} {{ $resource.Name }}
+        {{- range $_, $change := $changes }}
+          {{ $change.OldValue }} -> {{ $change.NewValue }}
+        {{ end -}}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    strategy: Setters
+    path: "./kubernetes/apps/my-software-production/splitfairy"

@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: splitfairy-data
+  namespace: my-software-production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn-static
+  volumeName: splitfairy-data
+  resources:
+    requests:
+      storage: 5Gi

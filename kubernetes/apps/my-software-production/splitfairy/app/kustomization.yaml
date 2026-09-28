@@ -1,0 +1,16 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# longhorn-volume.yaml is deliberately NOT listed: the Flux Kustomization's
+# targetNamespace (my-software-production) would override its
+# `namespace: storage` and create a broken duplicate Volume that Longhorn
+# ignores. Apply it ONCE by hand before the first reconcile:
+#   mise exec -- kubectl apply -f kubernetes/apps/my-software-production/splitfairy/app/longhorn-volume.yaml
+# See docs/sops/new-deployment-blueprint.md "Storage blueprint".
+resources:
+  - ./pv.yaml
+  - ./data-pvc.yaml
+  - ./secret.sops.yaml
+  - ./helmrelease.yaml
+  - ./httproute.yaml
+  - ./image-automation.yaml
