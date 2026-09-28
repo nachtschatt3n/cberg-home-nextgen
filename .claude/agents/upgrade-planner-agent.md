@@ -73,6 +73,17 @@ Rules:
   confirm the cluster is back.
 - **Risk honesty** — set `risk: high` and `needs_reboot: true` when true; those
   route the plan to a longer, reboot-capable, operator-present window.
+- **Always declare `capability_change: true|false` and `rollback_class:`
+  explicitly** (ops-retro 2026-W40, F-a0d0edb4). The execution-class
+  derivation treats a missing field as "not false", which routes the plan to
+  HUMAN-GATED even when it is a plain patch. `maintenance-plan.py --validate`
+  now REFUSES a non-terminal plan that omits either fact. Decide the value
+  from what the change does (a new feature, route, permission, API or
+  exposure is `true`; a same-behaviour version bump is `false`) — never
+  `true` "to be safe": a truthful `false` is what lets a low-risk plan reach
+  SD-10. (Measured 2026-09-28: the 11 plans the SD-10 report listed under
+  "capability_change not declared false" all DECLARED `true`; the report's
+  wording, since fixed, made them look undeclared.)
 - Set `status: draft` and `pr:` to the Renovate PR number. Leave `window: null`
   (the window agent assigns it).
 - If the update turns out to be genuinely trivial and the hold was a

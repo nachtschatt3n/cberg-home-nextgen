@@ -915,6 +915,18 @@ def validate_plans(cfg, plans=None) -> list[str]:
         cc = pl.get("capability_change")
         if cc is not None and not isinstance(cc, bool):
             errs.append(f"{pid}: capability_change must be a bare boolean, got {cc!r}")
+        # F-a0d0edb4 (ops-retro 2026-W40): the derivation reads an ABSENT fact
+        # as "not false" and routes the plan to HUMAN-GATED -- fail-safe, but
+        # silent: the plan looks like a capability change when nobody decided
+        # that. Every plan that can still run (i.e. not executed/superseded)
+        # must therefore DECLARE both facts; the reviewer checks the value.
+        if st not in ("executed", "superseded"):
+            for fact in ("capability_change", "rollback_class"):
+                if fact not in pl or pl.get(fact) is None:
+                    errs.append(f"{pid}: {fact} is not declared -- declare it explicitly "
+                                f"(capability_change: true|false, rollback_class: "
+                                f"git-revert|backup-restore|one-way); an absent fact "
+                                f"silently derives HUMAN-GATED and blocks SD-10")
         ao = pl.get("autonomy_override")
         if ao is not None and ao != "human-gated":
             errs.append(f"{pid}: autonomy_override may only RESTRICT (only legal value: human-gated)")
@@ -1681,7 +1693,12 @@ def preapproval(plan: dict, policy: dict | None, klass: str,
         missing.append(f"class {klass} (needs {want_class})")
     if plan.get("needs_reboot") is not False:
         missing.append("needs_reboot not declared false")
-    if plan.get("capability_change") is not False:
+    if plan.get("capability_change") is True:
+        # A declared capability change is never pre-approved (by design);
+        # say so, rather than reading like a missing declaration (F-a0d0edb4:
+        # the old wording made 11 true-declaring plans look undeclared).
+        missing.append("capability_change: true (capability changes always need a GO)")
+    elif plan.get("capability_change") is not False:
         missing.append("capability_change not declared false")
     if str(plan.get("autonomy_override") or "").strip() == "human-gated":
         missing.append("autonomy_override: human-gated")

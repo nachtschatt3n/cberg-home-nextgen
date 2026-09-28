@@ -12,6 +12,12 @@ risk: medium                        # CNI-adjacent (Talos machine-config VLAN
                                     # (cni.exclusive already false); existing pods
                                     # unaffected until they opt in via annotation
 est_duration_min: 90
+capability_change: true             # DECLARED 2026-09-28 (F-a0d0edb4): installs a new CNI
+                                    # meta-plugin and a VLAN-30 macvlan attachment — a new
+                                    # network capability for every pod that opts in.
+rollback_class: git-revert          # DECLARED 2026-09-28: additive; the Rollback section is
+                                    # revert commits + apply-config removal of the sub-iface.
+                                    # The UniFi trunk change is a manual (reversible) undo.
 needs_reboot: false                 # talosctl apply-config for the VLAN sub-iface
                                     # is no-reboot; switch trunk is UniFi config
 touches:

@@ -35,7 +35,9 @@ CFG = {"windows": [
 ]}
 
 GOOD = {"plan_id": "good", "status": "scheduled", "window": "sat-early:2026-08-29",
-        "est_duration_min": 45, "depends_on": [], "conflicts_with": []}
+        "est_duration_min": 45, "depends_on": [], "conflicts_with": [],
+        "capability_change": False, "rollback_class": "git-revert"}
+FACTS = {"capability_change": False, "rollback_class": "git-revert"}
 
 FAILURES: list[str] = []
 
@@ -120,7 +122,25 @@ def main() -> int:
     check("reference + window -> error",
           v(dict(GOOD, status="reference")), "must not carry a window")
     check("reference without window is clean",
-          v({"plan_id": "r", "status": "reference", "window": None}), None)
+          v({"plan_id": "r", "status": "reference", "window": None, **FACTS}), None)
+
+    # F-a0d0edb4: an undeclared autonomy fact silently derives HUMAN-GATED
+    # (and reads as "not declared false" in the SD-10 report). Every plan that
+    # can still run must declare both; terminal plans are exempt.
+    nocc = {k: val for k, val in GOOD.items() if k != "capability_change"}
+    check("undeclared capability_change on a live plan -> error",
+          v(nocc), "capability_change is not declared")
+    check("capability_change: null counts as undeclared",
+          v(dict(GOOD, capability_change=None)), "capability_change is not declared")
+    check("undeclared rollback_class on a draft -> error",
+          v({k: val for k, val in dict(GOOD, status="draft", window=None).items()
+             if k != "rollback_class"}), "rollback_class is not declared")
+    check("capability_change: true is a declaration (clean)",
+          v(dict(GOOD, capability_change=True)), None)
+    check("executed plan without the facts is exempt",
+          v({"plan_id": "old", "status": "executed", "window": None}), None)
+    check("superseded plan without the facts is exempt",
+          v({"plan_id": "old2", "status": "superseded", "window": None}), None)
 
     # unknown status strings don't pass silently
     check("unknown status -> error",

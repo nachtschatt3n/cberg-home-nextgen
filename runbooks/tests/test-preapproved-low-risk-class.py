@@ -95,6 +95,14 @@ def main() -> int:
     for name, p in cases:
         k, (pre, why) = derive(p)
         check(f"NOT pre-approved: {name}", not pre, repr((k, why)))
+    # F-a0d0edb4: a DECLARED capability change must not read as undeclared.
+    _, (_, why) = derive(plan(capability_change=True))
+    check("capability_change: true is reported as a declared capability change",
+          any("capability_change: true" in w for w in why)
+          and not any("not declared" in w for w in why), repr(why))
+    _, (_, why) = derive(plan(capability_change=None))
+    check("capability_change absent is reported as not declared",
+          any("capability_change not declared false" in w for w in why), repr(why))
     for st in ("scheduled", "awaiting-go"):
         k, (pre, _) = derive(plan(status=st))
         check(f"status {st} is runnable", pre)
