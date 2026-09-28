@@ -8,7 +8,7 @@ _... managed with Talos, Flux, and GitHub Actions_ 🤖
 
 <div align="center">
 
-[![Talos](https://img.shields.io/badge/Talos-v1.13.8-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
+[![Talos](https://img.shields.io/badge/Talos-v1.14.1-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.36.0-blue?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)&nbsp;&nbsp;
 [![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.9.3-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
 [![Renovate](https://img.shields.io/badge/Renovate-enabled-brightgreen?style=for-the-badge&logo=renovatebot&logoColor=white)](https://github.com/renovatebot/renovate)&nbsp;&nbsp;
@@ -32,10 +32,10 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 
 ### Core Components
 
-- **Operating System**: [Talos Linux v1.13.8](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration (kernel 6.18.42, Clang/ThinLTO build)
+- **Operating System**: [Talos Linux v1.14.1](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration (kernel 6.18.51, Clang/ThinLTO build)
 - **Container Runtime**: [Containerd 2.2.6](https://containerd.io/) with [Spegel](https://github.com/spegel-org/spegel) for distributed container image caching
 - **Networking**: [Cilium v1.19.4](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
-- **Storage**: [Longhorn v1.11.2](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
+- **Storage**: [Longhorn v1.12.1](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
 - **Ingress / Routing**: [Envoy Gateway](https://gateway.envoyproxy.io/) (Gateway API) — two Gateways, `envoy-internal` (192.168.55.103) and `envoy-external` (192.168.55.104), in namespace `network`. All HTTP(S) traffic is carried by `HTTPRoute`s. ingress-nginx was removed on 2026-09-07; there are no `Ingress` or `IngressClass` objects in the cluster
 - **Identity**: [Authentik](https://goauthentik.io/) is the cluster IdP — forward-auth for internal apps, SAML SSO for Wazuh, OIDC for selected apps. Blueprints are managed as code in `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` (see `docs/sops/authentik.md`).
 - **Security / SIEM**: [Wazuh 4.14.5](https://wazuh.com/) (single-node Manager + Indexer + Dashboard) ingests Talos node logs, K8s container logs, UniFi CEF syslog, and [Falco](https://falco.org/) runtime syscall events. Custom decoders for UniFi and ingress-nginx (cf_connecting_ip correlation; the nginx decoder set is retained for historical log analysis — the controller itself was removed 2026-09-07).
@@ -417,7 +417,7 @@ Wazuh alerts. Accepted-risk record: `accepted_risks` table in sweep_history Post
 
 ### Longhorn — Distributed block storage
 
-[Longhorn v1.11.2](kubernetes/apps/storage/longhorn) is the default
+[Longhorn v1.12.1](kubernetes/apps/storage/longhorn) is the default
 `StorageClass` for application data. Choose between two classes per the
 [`docs/sops/longhorn.md`](docs/sops/longhorn.md) standard:
 
@@ -593,7 +593,7 @@ This repository uses [mise](https://mise.jdx.dev/) for unified development tool 
 - **Python 3.12** + **uv** - Automation scripts and fast package install
 - **kubectl 1.36.0** - Kubernetes CLI
 - **flux 2.9.0** - GitOps toolkit CLI (cluster distribution is `flux-v2.9.3`)
-- **talosctl 1.13.4** + **talhelper 3.1.11** - Talos Linux management
+- **talosctl 1.14.1** + **talhelper 3.1.11** - Talos Linux management
 - **sops 3.13.0** + **age 1.3.1** - Secrets encryption
 - **helm 3.21.0** - Kubernetes package manager
 - **kustomize 5.6.0** - Kubernetes manifest customization

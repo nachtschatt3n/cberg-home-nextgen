@@ -14,11 +14,11 @@ and worker). See `docs/applications.md` for the authoritative application count 
 | Attribute | Value |
 |-----------|-------|
 | Kubernetes | v1.36.0 |
-| Talos Linux | v1.13.10 |
+| Talos Linux | v1.14.1 |
 | Flux | v2.9.3 |
 | Nodes | 3 × Intel NUC14 Pro |
 | CNI | Cilium v1.20.2 |
-| Storage | Longhorn v1.11.2 |
+| Storage | Longhorn v1.12.1 |
 | GitOps | Flux (Helm Operator) |
 | Secrets | SOPS + age encryption |
 | Admission Control | Native `ValidatingAdmissionPolicy` (CEL, in-apiserver — no webhook, no Kyverno/Gatekeeper/OPA). 2 policies: `flux-imageupdateautomation-sourceref` (house-owned confused-deputy guardrail, `failurePolicy: Fail`, see `docs/sops/flux-image-automation-push-auth.md`) and `safe-upgrades.gateway.networking.k8s.io` (shipped inside the Gateway API bundle). Separately, 6 `ValidatingWebhookConfiguration` + 5 `MutatingWebhookConfiguration` come from vendor charts (cert-manager, longhorn, kube-prometheus-stack, elastic-operator, otel-operator, intel device plugins) — verified live 2026-09-08. Was 8+5 until ingress-nginx was deleted (`ad1ea7c2`), which took its two admission webhooks with it. |
@@ -120,12 +120,12 @@ manages all subsequent deployments including upgrades to these components.
 
 | Component | Details |
 |-----------|---------|
-| OS | Talos Linux v1.13.10 (immutable, minimal, Kubernetes-focused; kernel 6.18.48-talos, Clang/ThinLTO) |
-| Container Runtime | Containerd 2.2.7 + Spegel (distributed image caching) |
+| OS | Talos Linux v1.14.1 (immutable, minimal, Kubernetes-focused; kernel 6.18.51-talos, Clang/ThinLTO; etcd 3.7.1). Rolled 2026-09-27 from v1.13.10, see `docs/sops/talos-upgrade.md` §14 |
+| Container Runtime | Containerd 2.3.5 + Spegel (distributed image caching) |
 | CNI | Cilium v1.20.2 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS v1.14.7 (cluster-internal; image tag pinned ahead of the chart) + k8s-gateway (split-DNS for `*.domain`) |
 | Ingress | **Envoy Gateway only (migration completed 2026-09-07).** ingress-nginx is DELETED — zero `Ingress` objects, zero `IngressClass` objects, zero nginx controllers. All HTTP traffic rides 105 `HTTPRoute`s on `envoy-internal` `192.168.55.103` (internal) and `envoy-external` `192.168.55.104` (external, behind the cloudflared wildcard). k8s-gateway publishes DNS from HTTPRoutes. Routing model, conversion rules and the verification gate: `docs/sops/gateway-api-httproute.md`; version upgrades: `docs/sops/envoy-gateway-upgrade.md`. |
-| Storage | Longhorn v1.11.2 (distributed, replicated, with backup) |
+| Storage | Longhorn v1.12.1 (distributed, replicated, with backup) |
 | Certificate Management | cert-manager v1.21.0 + Let's Encrypt |
 | Secrets | SOPS + age encryption |
 | Identity Provider | Authentik (forward-auth for apps with no user model; app-native OIDC or SAML for those that have one) |
@@ -201,14 +201,14 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Kubernetes | v1.36.0 | Container orchestration |
-| Talos Linux | v1.13.10 | Cluster OS |
+| Talos Linux | v1.14.1 | Cluster OS |
 | Flux | v2.9.3 | GitOps operator |
 | Cilium | v1.20.2 | CNI / network |
-| Longhorn | v1.11.2 | Distributed storage |
+| Longhorn | v1.12.1 | Distributed storage |
 | cert-manager | v1.21.0 | TLS management |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.36.x | CLI |
-| talosctl | v1.13.10 | CLI (client) — ALIGNED to the cluster OS (79b1b49b, 2026-09-06). Pinned in `.mise.toml` as `aqua:siderolabs/talos`. Renovate PR #212 proposed 1.14.0, a minor AHEAD of the cluster, and was closed rather than merged: a client ahead of the servers is not the same as up to date (F-9a58f400) |
+| talosctl | v1.14.1 | CLI (client) — ALIGNED to the cluster OS. Pinned in `.mise.toml` as `aqua:siderolabs/talos`; the pin tracks `talosVersion` in `talconfig.yaml`, not Renovate. Renovate PR #212 (retargeted to 1.14.1) was merged in `a6704ad6` as the last step of the 2026-09-27 node roll, so client and servers moved together (history: in September it had proposed 1.14.0 while the nodes were still on 1.13.x and was held, because a client ahead of the servers is not the same as up to date, F-9a58f400) |
 | talhelper | 3.1.11 | Talos config helper |
 | sops | 3.12.1 | Secrets encryption |
 | age | 1.3.1 | Encryption backend |
