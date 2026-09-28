@@ -321,11 +321,25 @@ Sessions expire every ~30-60 days and need an interactive re-auth:
 surfaces this as `icloud-docker-<instance> auth/session errors (re-auth
 needed): N` — the leading token tells you which Apple ID.
 
-**Freshness monitoring (the load-bearing signal).** `kubernetes/apps/backup/icloud-backup-freshness/`
-— an hourly CronJob pushing to Pushgateway — walks the backup share from OUTSIDE
-the sync processes and publishes the newest photo file's mtime per account,
-alerting via `ICloudBackupPhotosStale` (24h) and `ICloudBackupPhotosStaleCritical`
-(72h). It exists because no in-band signal can see a wedged sync: on 2026-09-06
+**Sync-health monitoring (the load-bearing signal, since 2026-09-28).**
+`CronJob/icloud-sync-probe` (every 10 min, in `kubernetes/apps/backup/icloud-backup-freshness/`)
+reads each instance's pod log via the Kubernetes API (Role: pods get/list +
+pods/log get in `backup` only) and pushes per-account gauges to Pushgateway:
+the newest `Photos synced` timestamp, an auth-required flag and per-cycle
+download failures. Alerts: `ICloudBackupSyncStalled` (6h warning / 24h
+critical), `ICloudBackupAuthRequired`, `ICloudBackupPersistentDownloadFailures`
+(info) and `ICloudBackupDeploymentUnavailable`, each with absence/probe guards.
+It keys on the ABSENCE of the success line, so a wedged process (no log lines at
+all) still ages into `SyncStalled`.
+
+**File-recency backstop.** The hourly `icloud-backup-freshness` CronJob
+walks the backup share from OUTSIDE the sync processes and publishes the newest
+photo file's mtime per account, alerting via `ICloudBackupPhotosStale` at
+**14 days**. The mtime is the photo's CAPTURE date, so this measures the user's
+photo-taking, not the backup: at its former 24h/72h thresholds it paged on
+2026-09-28 after two quiet days while the sync was healthy (false positive,
+fixed by the sync probe above). It remains only to catch the app claiming
+`Photos synced` while writing nothing to the share. It was originally added because no in-band signal can see a wedged sync: on 2026-09-06
 both pods sat `Running 1/1` with 0 restarts for 14 days while backing up nothing
 (F-21d7e2ec), and the log-scrape finding above read zero the whole time, because
 a hung process writes no logs. The probe mounts the read-only

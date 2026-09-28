@@ -5,3 +5,6 @@ kind: Kustomization
 resources:
   - ./pvc.yaml
   - ./cronjob.yaml
+  - ./sync-probe-rbac.yaml
+  - ./sync-probe-configmap.yaml
+  - ./sync-probe-cronjob.yaml

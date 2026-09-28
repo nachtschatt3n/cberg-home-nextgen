@@ -1,8 +1,8 @@
 # SOP: iCloud Docker Re-authentication (2FA session recovery)
 
 > Description: Recover the Apple session of any `icloud-docker-*` instance (mandarons/icloud-drive) when it expires, including the modern-2FA flow that the bundled `icloud` CLI gets wrong, and the quota-exhaustion mitigation (stop the retry loop before re-auth).
-> Version: `2026.09.25`
-> Last Updated: `2026-09-25`
+> Version: `2026.09.28`
+> Last Updated: `2026-09-28`
 > Owner: `operator`
 
 ---
@@ -429,46 +429,100 @@ If unclear:
 
 ## 9) Health Check
 
-### Primary trigger — the backup-freshness alert
+### Primary trigger — the sync-health alerts
 
-**Run this SOP when `ICloudBackupPhotosStale` (warning, >24h) or
-`ICloudBackupPhotosStaleCritical` (critical, >72h) fires.** The alert's
-`account` label names the Apple ID: set `INSTANCE` to it and fix only that
-instance — the two are independent.
+**Run this SOP when `ICloudBackupAuthRequired` fires, or when
+`ICloudBackupSyncStalled` (warning, >6h) / `ICloudBackupSyncStalledCritical`
+(critical, >24h) fires and the triage below points at the session.** The
+alert's `account` label names the Apple ID: set `INSTANCE` to it and fix only
+that instance — the two are independent.
 
-Those rules live in
+The rules live in
 `kubernetes/apps/monitoring/kube-prometheus-stack/app/icloud-backup-alerts.yaml`
-and read an hourly EXTERNAL probe of the backup share
-(`kubernetes/apps/backup/icloud-backup-freshness/`, pushing to Pushgateway).
-They watch the OUTPUT — the mtime of the newest file actually landing under
-`<account>/photos` on the NAS — which is the only signal that still works when
-the sync process is stuck.
+(group `icloud-backup.sync`) and read `CronJob/icloud-sync-probe`
+(`kubernetes/apps/backup/icloud-backup-freshness/app/sync-probe-*.yaml`, every
+10 min). The probe reads each instance's pod log through the Kubernetes API
+(Role: `pods` get/list + `pods/log` get in `backup`, nothing else) and pushes
+per-account gauges to Pushgateway (group `job=icloud-sync-probe/account=<a>`):
+
+| Gauge | Meaning | Alert |
+|---|---|---|
+| `icloud_sync_last_success_timestamp_seconds` | newest `Photos synced` line | `ICloudBackupSyncStalled` 6h warning / `…Critical` 24h |
+| `icloud_auth_required` | 1 if an auth error (`2FA is required`, `(421)`, `INCORRECT_PCS_KEY`, keyring password) is newer than the newest success | `ICloudBackupAuthRequired` (warning, 10m) |
+| `icloud_sync_items_failed` + `icloud_sync_failing_item_since_timestamp_seconds` | failed downloads in the newest completed cycle, and how long a still-failing item has failed on every cycle | `ICloudBackupPersistentDownloadFailures` (info, 24h) |
+| `icloud_sync_probe_last_success_timestamp_seconds` | the probe observed this account | `ICloudBackupSyncProbeStale` (1h) |
+
+Plus `ICloudBackupDeploymentUnavailable` (kube-state-metrics, 0 available
+replicas for 30m: scaled to 0 / Pending / crash-looping), the per-account
+absence guards `ICloudBackupSyncMetricMissing{,Andrea}` and
+`ICloudBackupSyncProbeJobFailed`.
+
+**Why this is not blind to the silent wedge (F-21d7e2ec).** The 2026-09-20
+lesson below still holds — a wedged process writes *no* log lines, so a count
+of error lines proves nothing. This detector does the opposite: it keys on the
+ABSENCE of the success line. A wedged process writes no `Photos synced`, so its
+last-success timestamp keeps ageing. The probe never invents a success; when it
+finds none it pushes nothing for that gauge, and Pushgateway's previous value
+keeps ageing (and if Pushgateway lost it, the absence guard fires).
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
-kubectl -n backup get deploy icloud-docker-$INSTANCE -o jsonpath='replicas={.spec.replicas}{"\n"}'
+kubectl -n backup get deploy icloud-docker-$INSTANCE -o jsonpath='replicas={.spec.replicas} available={.status.availableReplicas}{"\n"}'
 
-# Age of the newest backed-up photo, per account — exactly what the alert reads.
+# Exactly what the sync alerts read, per account.
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 >/dev/null &
-curl -s http://localhost:9090/api/v1/query --data-urlencode \
-  'query=time() - max by (account) (icloud_backup_newest_file_timestamp_seconds)' \
-  | python3 -c 'import sys, json
+for Q in 'time() - max by (account) (icloud_sync_last_success_timestamp_seconds)' \
+         'max by (account) (icloud_auth_required)' \
+         'max by (account) (icloud_sync_items_failed)'; do
+  echo "== $Q"
+  curl -s http://localhost:9090/api/v1/query --data-urlencode "query=$Q" \
+    | python3 -c 'import sys, json
 for r in json.load(sys.stdin)["data"]["result"]:
-    print(r["metric"]["account"], round(float(r["value"][1]) / 3600, 1), "h")'
+    print(" ", r["metric"]["account"], r["value"][1])'
+done
+
+# The probe's own reasoning, per account (latest run).
+kubectl -n backup logs job/$(kubectl -n backup get jobs -o name | grep icloud-sync-probe | sort | tail -1 | cut -d/ -f2)
 ```
 
 Expected:
-- `replicas=1`.
-- Each account's age is comfortably under `24` h. Over 24 h is the warning
-  tier; over 72 h the backup is dead and this SOP is the recovery path.
-- No freshness-probe alert is firing. Four rules guard the watcher itself:
-  `ICloudBackupFreshnessMetricMissing` and
-  `ICloudBackupFreshnessMetricMissingAndrea` (gauge absent — per-account,
-  because a bare `absent()` only fires when BOTH Apple IDs vanish),
-  `ICloudBackupFreshnessProbeStale` (no successful probe run in 6h) and
-  `ICloudBackupFreshnessProbeJobFailed`. If any of those is firing, the ages
-  above are a stale snapshot from the last good scan — fix the probe first,
-  then re-read them.
+- `replicas=1 available=1`.
+- Last-success age well under `21600` s (6 h); healthy instances complete a
+  photo cycle every 20–40 min.
+- `icloud_auth_required` is `0` for both accounts.
+- `icloud_sync_items_failed` is usually `0`. A small constant non-zero (e.g. one
+  asset answering `Service Unavailable (503)` every cycle) is Apple refusing
+  that asset, not a broken sync — `Photos synced` is still logged, and only the
+  info-level `ICloudBackupPersistentDownloadFailures` fires after 24h.
+
+Reading the alerts:
+- **`ICloudBackupAuthRequired`** → session expired: this SOP from **Step 1**
+  (stop the retry loop first), and do not skip **Step 4b** (prove data access;
+  a 421 right after a good re-auth means pending iCloud terms).
+- **`ICloudBackupSyncStalled` without `AuthRequired`, pod `Running`** → the
+  silent wedge (case 1). `kubectl -n backup rollout restart
+  deploy/icloud-docker-$INSTANCE` unblocks it if the session is valid; confirm
+  recovery by the last-success age dropping, not by the pod being Running.
+- **`ICloudBackupDeploymentUnavailable`** → scaled to 0 (possibly a re-auth in
+  progress — silence it until Step 5) or crash-looping (read `--previous` logs;
+  a `THROTTLED` exception is Apple rate-limiting and self-recovers).
+- During a deliberate re-auth, `SyncStalled`, `AuthRequired` and
+  `DeploymentUnavailable` all fire by design: silence them for the SOP's
+  duration rather than editing the rules.
+
+### Backstop — the file-recency alert (`ICloudBackupPhotosStale`, 14 days)
+
+`CronJob/icloud-backup-freshness` still walks the backup share hourly and
+publishes the newest photo file's mtime
+(`icloud_backup_newest_file_timestamp_seconds{account}`). **That mtime is the
+photo's CAPTURE date**, so it measures when the user last took a photo, not
+when the backup last worked. Until 2026-09-28 it was the primary trigger at
+24h/72h, and it paged for `mu` after two quiet days while the pod was syncing
+every 20–40 min — a false positive by construction. It is now a 14-day warning
+backstop for the one case the sync probe cannot see: the app logging
+`Photos synced` while writing nothing to the share. If it fires while the sync
+alerts are quiet, check the phone first (no photos taken?), then the data PVC
+mount and destination path of `icloud-docker-$INSTANCE`.
 
 ### Secondary — recent auth/session log errors (corroborating only)
 
@@ -482,18 +536,8 @@ kubectl -n backup logs $POD --tail=50 | grep -ciE "421|2fa is required"
 > failure you have, never *whether* you have one. A wedged process writes no
 > log lines at all, so the count reads `0` while nothing whatsoever is being
 > backed up — which is precisely what it did for the entire 14-day 2026-09-06
-> outage (F-21d7e2ec), with both pods `Running 1/1` at 0 restarts. An operator
-> following a "0 errors = healthy" reading would have closed the check and
-> walked away, as happened for 14 days. Only the freshness alert above can
-> assert health.
-
-Read it as:
-- **Non-zero** → the Apple session expired and 2FA is required (case 2): this
-  SOP's main path, from Step 1.
-- **Zero, while a freshness alert is firing** → the sync process wedged
-  silently (case 1). Restarting the deployment is what unblocks that case, and
-  a full interactive re-auth may not be needed at all — but confirm recovery
-  against the freshness metric above, not against the log count.
+> outage (F-21d7e2ec), with both pods `Running 1/1` at 0 restarts. Only the
+> ABSENCE of `Photos synced` (the sync-health alerts above) asserts health.
 
 The daily sweep's `health` findings `icloud-docker-$INSTANCE auth/session errors
 (re-auth needed): N` and `icloud-docker-$INSTANCE recent log errors: N` come from
@@ -544,9 +588,13 @@ flux resume helmrelease icloud-docker-$INSTANCE -n backup
   this SOP for 2FA accounts)
 - `kubernetes/apps/backup/icloud-docker-{mu,andrea}/app/` (manifests + SOPS secret)
 - `kubernetes/apps/monitoring/kube-prometheus-stack/app/icloud-backup-alerts.yaml`
-  (the freshness alerts that trigger this SOP — §9)
-- `kubernetes/apps/backup/icloud-backup-freshness/` (the external probe feeding them)
-- `runbooks/controls.yaml` (control ledger row `icloud-backup-freshness`)
+  (the sync-health alerts that trigger this SOP, plus the 14-day file-recency
+  backstop — §9)
+- `kubernetes/apps/backup/icloud-backup-freshness/app/sync-probe-*.yaml`
+  (`CronJob/icloud-sync-probe`, the log-reading probe feeding the sync alerts)
+  and `app/cronjob.yaml` (the share-walking file-recency probe)
+- `runbooks/controls.yaml` (control ledger rows `icloud-sync-probe` and
+  `icloud-backup-freshness`)
 - `kubernetes/apps/backup/TODO.md` (what else of an Apple account is backed up)
 - `docs/sops/policy-cli.md` (AR lifecycle — park/disable accepted risks)
 - `docs/sops/cifs-mount-options.md` (CIFS ownership/`uid=1000` context)
@@ -595,3 +643,17 @@ flux resume helmrelease icloud-docker-$INSTANCE -n backup
   icloudpy runtime patch drafted for the 409 turned out to be unnecessary.
   Added the token-only probe (no password sign-in, no 2FA) and a Troubleshooting
   row.
+
+- `2026.09.28`: **Replaced the primary trigger again — it was a false
+  positive by construction.** `ICloudBackupPhotosStale` read the newest photo
+  file's mtime, which icloud-docker sets to the photo's CAPTURE date, so it
+  paged for `mu` at 2d 0h while the pod logged `Photos synced` every 20–40 min
+  (the operator had simply taken no photos). Fixed at the audit logic rather
+  than by raising the threshold: new `CronJob/icloud-sync-probe` reads the app's
+  own `Photos synced` / auth-error / `Failed to download` lines via the
+  Kubernetes API, feeding `ICloudBackupSyncStalled` (6h/24h),
+  `ICloudBackupAuthRequired`, `ICloudBackupPersistentDownloadFailures`,
+  `ICloudBackupDeploymentUnavailable` and their absence/probe guards. The
+  file-recency rule is kept as a 14-day backstop; `ICloudBackupPhotosStaleCritical`
+  was removed. §9 rewritten; the silent-wedge lesson of 2026.09.20 is preserved
+  (the new detector keys on the ABSENCE of the success line, not on error lines).

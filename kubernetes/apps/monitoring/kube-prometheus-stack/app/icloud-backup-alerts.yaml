@@ -1,5 +1,5 @@
 ---
-# iCloud photo-backup freshness. Added 2026-09-20 for finding F-21d7e2ec.
+# iCloud photo-backup freshness + sync health. Added 2026-09-20 for finding F-21d7e2ec.
 #
 # WHY THESE RULES EXIST
 # ---------------------
@@ -12,6 +12,13 @@
 # These rules watch the OUTPUT instead of the process — the mtime of the newest
 # file actually landing under <account>/photos on the NAS. That is the only
 # signal that still works when the application itself is stuck.
+#
+# 2026-09-28 REVISION (false-positive root-cause fix): the file-mtime rule
+# turned out to measure the user's photo-taking, not the backup — icloud-docker
+# stamps files with the CAPTURE date. It is now a 14-day backstop, and the
+# primary detector is the icloud-backup.sync group at the bottom of this file,
+# which watches the sync cycle itself (still from OUTSIDE the process, so the
+# silent-wedge case stays covered: a wedged process logs no `Photos synced`).
 #
 # Gauges come from CronJob/icloud-backup-freshness (namespace backup, hourly)
 # via prometheus-pushgateway. The probe exports a TIMESTAMP, never a
@@ -38,93 +45,54 @@ spec:
     - interval: 1m
       name: icloud-backup.freshness
       rules:
-        # THRESHOLD PROVENANCE — read this before tightening or loosening.
-        # These are NOT derived from a measured inter-arrival distribution the
-        # way the authentik audit thresholds were; no such history exists,
-        # because nothing has ever recorded this signal. They come from two
-        # honest inputs: the operator's stated cadence (photos genuinely arrive
-        # most days) and the measured outage (at 2026-09-20 the newest file was
-        # 2026-09-03 for mu and 2026-09-06 for andrea — 16 and 13 days).
+        # DEMOTED 2026-09-28 from the primary detector to a 14-day BACKSTOP.
         #
-        # 24h is therefore the WARNING tier and is expected to be the noisy
-        # one: a quiet weekend away from the phone will trip it. 72h is the
-        # load-bearing CRITICAL tier and sits far below the 13-day real
-        # outage while staying well above any plausible quiet spell.
-        # If the 24h warning proves noisy in practice, MEASURE the gap
-        # distribution from this metric's own history and raise it from data —
-        # do not silence it and do not tighten the critical to compensate.
+        # This rule used to fire at 24h (warning) / 72h (critical, as
+        # ICloudBackupPhotosStaleCritical, now removed). That was a FALSE
+        # POSITIVE by construction: icloud-docker stamps each file with the
+        # photo's CAPTURE date, so this gauge measures "when did the user last
+        # take a photo", not "when did the backup last work". On 2026-09-28 it
+        # paged for account mu at 2d 0h while the pod logged `Photos synced`
+        # every 20-40 min — the operator had simply taken no photos since 09-26.
+        # Raising the threshold would only have moved the false positive; the
+        # fix is a detector that watches the SYNC: see the icloud-backup.sync
+        # group below (ICloudBackupSyncStalled / AuthRequired /
+        # PersistentDownloadFailures, fed by CronJob/icloud-sync-probe).
+        #
+        # Why keep it at all: it is the only signal that looks at the NAS
+        # rather than at the app's own claims. If icloud-docker ever logged
+        # `Photos synced` while writing nothing (wrong destination, broken
+        # mount, a silent filter change), only this rule would notice. 14 days
+        # sits above any plausible quiet spell and at the 13-16 day scale of
+        # the real 2026-09-06 outage, which the sync group now catches in 6h.
         - alert: ICloudBackupPhotosStale
           annotations:
-            summary: iCloud photo backup for account {{ $labels.account }} is stale ({{ $value | humanizeDuration }})
+            summary: No new iCloud photo file for account {{ $labels.account }} in {{ $value | humanizeDuration }} (14-day backstop)
             description: |
               No new file has landed under {{ $labels.account }}/photos on the
-              backup share for {{ $value | humanizeDuration }}. The icloud-docker
-              pod being Running proves nothing here: in the 2026-09-06 incident
-              (F-21d7e2ec) both pods sat Running 1/1 with 0 restarts for 14 days
-              while syncing nothing.
+              backup share for {{ $value | humanizeDuration }}. This is the
+              BACKSTOP, not the primary detector: file mtimes are the photo
+              CAPTURE dates, so this also fires if nobody took a photo for two
+              weeks.
 
-              The two causes seen in practice:
-                1. The sync process WEDGES SILENTLY. It stays alive but blocked,
-                   and because icloud-docker has no liveness/readiness probes
-                   nothing restarts it. This is the case that produced the
-                   14-day outage.
-                2. The iCloud SESSION EXPIRES and Apple requires 2FA. The Apple
-                   session expires every ~30-60 days, and re-auth cannot be
-                   automated — it needs the operator to approve the push on a
-                   trusted device and enter the code.
+              Check the primary signal first. If ICloudBackupSyncStalled /
+              ICloudBackupAuthRequired are NOT firing for this account, the app
+              believes it is syncing — then either the user genuinely took no
+              photos (compare with the phone), or icloud-docker is logging
+              `Photos synced` while writing nothing to the share, which is the
+              case this backstop exists for: check the destination path and the
+              data PVC mount of icloud-docker-{{ $labels.account }}.
 
-              DO NOT wait for the app's own Telegram 2FA notification to tell
-              you which one it is. That notification is rate-limited to once
-              per 24h, and in the 2026-09-06 incident it never fired at all
-              because the process hung BEFORE reaching the auth branch. It is a
-              convenience, not a control.
-
-              Recovery is an interactive operator-driven login (the same shape
-              as an `occ`-style console login — it cannot run unattended):
-              follow docs/sops/icloud-docker-reauth.md, and note its
-              retry-storm warning — STOP the sync loop (scale to 0 + suspend
-              Flux for that instance) BEFORE re-authing, or Apple's per-Apple-ID
-              2FA quota is exhausted and it silently stops pushing codes to
-              every device. Instances are independent; fix only the one that is
-              stale. Background and history: finding F-21d7e2ec.
+              If the sync IS broken, recover via docs/sops/icloud-docker-reauth.md
+              (stop the retry loop FIRST — scale to 0 + suspend Flux — or
+              Apple's 2FA quota is burned). Background: F-21d7e2ec.
           expr: |
-            time() - max by (account) (icloud_backup_newest_file_timestamp_seconds) > 60 * 60 * 24
-          for: 30m
+            time() - max by (account) (icloud_backup_newest_file_timestamp_seconds) > 60 * 60 * 24 * 14
+          for: 1h
           labels:
             category: backup
             component: icloud-docker
             severity: warning
-        - alert: ICloudBackupPhotosStaleCritical
-          annotations:
-            summary: iCloud photo backup for account {{ $labels.account }} has been dead for over 72h ({{ $value | humanizeDuration }})
-            description: |
-              No new file has landed under {{ $labels.account }}/photos for
-              {{ $value | humanizeDuration }}. At this point this is an outage,
-              not a quiet spell — photos normally arrive most days, and the only
-              precedent for a gap this long is the 14-day silent wedge of
-              2026-09-06 (F-21d7e2ec).
-
-              Causes, in the order they have actually occurred:
-                1. The sync process wedged silently — alive, blocked, no
-                   restarts, no probe to catch it.
-                2. The iCloud session expired and 2FA is required.
-
-              The app's own Telegram 2FA alert is rate-limited to once per 24h
-              and did not fire at all in the 2026-09-06 incident (the hang came
-              before the auth branch), so its silence is NOT evidence that the
-              session is healthy.
-
-              Recovery is an interactive, operator-driven login that cannot be
-              automated: docs/sops/icloud-docker-reauth.md. Stop the retry loop
-              first (scale the instance to 0 and suspend its Flux Kustomization)
-              or Apple's 2FA quota is burned and no device receives a code.
-          expr: |
-            time() - max by (account) (icloud_backup_newest_file_timestamp_seconds) > 60 * 60 * 72
-          for: 30m
-          labels:
-            category: backup
-            component: icloud-docker
-            severity: critical
         # INERTNESS GUARDS. An expr matching no series sits at state=inactive
         # and is indistinguishable from healthy, so the staleness rules above
         # need an absence companion — exactly as nas-share-alerts.yaml pairs
@@ -151,8 +119,8 @@ spec:
             summary: iCloud backup freshness gauge for account mu is not present in Prometheus
             description: |
               icloud_backup_newest_file_timestamp_seconds{account="mu"} has no
-              series at all. ICloudBackupPhotosStale and
-              ICloudBackupPhotosStaleCritical are BLIND for this account while
+              series at all. the 14-day ICloudBackupPhotosStale
+              backstop is BLIND for this account while
               this fires and must not be read as evidence the backup is healthy.
               Most likely the icloud-backup-freshness CronJob in namespace
               backup was removed or has never run successfully, or
@@ -170,8 +138,8 @@ spec:
             summary: iCloud backup freshness gauge for account andrea is not present in Prometheus
             description: |
               icloud_backup_newest_file_timestamp_seconds{account="andrea"} has
-              no series at all. ICloudBackupPhotosStale and
-              ICloudBackupPhotosStaleCritical are BLIND for this account while
+              no series at all. the 14-day ICloudBackupPhotosStale
+              backstop is BLIND for this account while
               this fires and must not be read as evidence the backup is healthy.
               See ICloudBackupFreshnessMetricMissing for triage — same probe,
               same causes.
@@ -241,6 +209,243 @@ spec:
               mount, which is a storage problem, not an iCloud problem.
           expr: |
             sum(kube_job_failed{namespace="backup", job_name=~"icloud-backup-freshness-.*", condition="true"}) > 0
+          for: 5m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+    # ------------------------------------------------------------------------
+    # SYNC HEALTH (primary detector since 2026-09-28).
+    #
+    # Gauges come from CronJob/icloud-sync-probe (namespace backup, every
+    # 10 min), which reads the icloud-docker-<account> pod logs through the
+    # Kubernetes API (Role: pods get/list, pods/log get — nothing else) and
+    # pushes to pushgateway group job=icloud-sync-probe/account=<account>.
+    #
+    # WHY LOGS, AND WHY THE API RATHER THAN ELASTICSEARCH: icloud-docker has no
+    # metrics endpoint, no health endpoint and no post-sync hook, so its own
+    # `Photos synced` line is the only first-hand statement that a cycle
+    # finished. The API read has one dependency (the apiserver); the ES path
+    # would add the ingestion pipeline, which has stalled for hours before
+    # (TSDB rollover, 2026-07-17 translog corruption) — a detector must not be
+    # blinded by an unrelated pipeline.
+    #
+    # WHAT EACH REAL FAILURE LOOKS LIKE HERE
+    #   wedged process (F-21d7e2ec) -> no new `Photos synced`; last_success ages
+    #   session expired / 2FA        -> icloud_auth_required 1 (+ stall)
+    #   pod scaled to 0 / deleted    -> ICloudBackupDeploymentUnavailable
+    #                                   (+ stall: the probe pushes no success)
+    #   crash loop                   -> DeploymentUnavailable + KubePodCrashLooping
+    #                                   (+ stall if no cycle ever completes)
+    #   same items failing for 24h+  -> ICloudBackupPersistentDownloadFailures
+    #
+    # THE PROBE NEVER INVENTS A SUCCESS. When it finds no `Photos synced` it
+    # omits the gauge and pushgateway (POST semantics, per-account group) keeps
+    # serving the previous timestamp, which keeps ageing. If pushgateway also
+    # lost its state, the series is ABSENT, which ICloudBackupSyncMetricMissing
+    # catches — absent never reads as healthy.
+    #
+    # NOTE `Photos synced` is logged even when every download in the cycle
+    # failed (it closes the cycle, it does not grade it). That is why download
+    # failures are a SEPARATE signal and not folded into "success".
+    - interval: 1m
+      name: icloud-backup.sync
+      rules:
+        # 6h = ~10 missed photo cycles at the configured 500s interval plus the
+        # observed 20-40 min cycle length; no healthy instance has ever gone
+        # 6h without a `Photos synced`. Critical at 24h.
+        - alert: ICloudBackupSyncStalled
+          annotations:
+            summary: iCloud photo sync for account {{ $labels.account }} has not completed a cycle in {{ $value | humanizeDuration }}
+            description: |
+              icloud-docker-{{ $labels.account }} last logged `Photos synced`
+              {{ $value | humanizeDuration }} ago; a healthy instance does so
+              every 20-40 min. This is independent of whether new photos exist.
+
+              Triage in this order:
+                1. Is the pod there? `kubectl -n backup get pods -l
+                   app.kubernetes.io/name=icloud-docker-{{ $labels.account }}`
+                   (scaled to 0 / Pending / CrashLoopBackOff).
+                2. Is it an auth loop? ICloudBackupAuthRequired would fire too;
+                   logs show `2FA is required` / `(421)`.
+                3. Otherwise it is the SILENT WEDGE of F-21d7e2ec: Running 1/1,
+                   0 restarts, no new log lines. A `kubectl -n backup rollout
+                   restart deploy/icloud-docker-{{ $labels.account }}` recovers
+                   it if the session is still valid.
+              Re-auth, if needed: docs/sops/icloud-docker-reauth.md — STOP the
+              retry loop first (scale to 0 + suspend Flux) or Apple's 2FA quota
+              is burned. Probe: CronJob/icloud-sync-probe in namespace backup.
+          expr: |
+            time() - max by (account) (icloud_sync_last_success_timestamp_seconds) > 60 * 60 * 6
+          for: 15m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+        - alert: ICloudBackupSyncStalledCritical
+          annotations:
+            summary: iCloud photo sync for account {{ $labels.account }} has been broken for over 24h ({{ $value | humanizeDuration }})
+            description: |
+              icloud-docker-{{ $labels.account }} has not logged `Photos synced`
+              for over 24h (a healthy instance does every 20-40 min). Photos
+              taken since then exist only in iCloud. Triage and recovery are in
+              ICloudBackupSyncStalled's description (pod state -> auth loop ->
+              silent wedge) and docs/sops/icloud-docker-reauth.md.
+          expr: |
+            time() - max by (account) (icloud_sync_last_success_timestamp_seconds) > 60 * 60 * 24
+          for: 15m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: critical
+        # "Immediate": the probe runs every 10 min and flips this only when an
+        # auth error is NEWER than the newest success, so a transient 421 in a
+        # cycle that still completed never sets it. `for: 10m` = one more probe
+        # run confirming it, which is still well under one sync interval.
+        - alert: ICloudBackupAuthRequired
+          annotations:
+            summary: iCloud session for account {{ $labels.account }} needs re-authentication (2FA)
+            description: |
+              icloud-docker-{{ $labels.account }} logged an auth/session error
+              (`2FA is required`, `Authentication required for Account (421)`,
+              `INCORRECT_PCS_KEY` or `Password is not stored in keyring`) and
+              has not completed a sync since. Apple sessions expire every
+              ~30-60 days; re-auth is interactive and cannot be automated.
+
+              Follow docs/sops/icloud-docker-reauth.md end to end:
+                * Step 1 FIRST — scale icloud-docker-{{ $labels.account }} to 0
+                  and suspend its Flux Kustomization. The container retries
+                  login every 10 min and each retry spends Apple's per-Apple-ID
+                  2FA quota; once exhausted, NO device receives a code.
+                * Step 4b — after `requires_2fa = False`, PROVE data access
+                  before resuming. A 421 on `validate` right after a good
+                  re-auth means pending iCloud terms (`termsUpdateNeeded`), not
+                  a bug: the account owner must accept them at icloud.com.
+              Do not wait for the app's own Telegram 2FA message: it is
+              rate-limited to once per 24h.
+          expr: |
+            max by (account) (icloud_auth_required) == 1
+          for: 10m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+        # Item-level, not account-level: the oldest start of an unbroken run of
+        # failed cycles among items that are STILL failing. A different item
+        # failing each cycle does not accumulate. Info, because the rest of the
+        # library is backing up; it is a to-do, not an outage. Coverage is
+        # bounded by the logs the probe can see (current + previous container,
+        # 48h), so after a restart the run restarts too — it can only fire LATE,
+        # never early.
+        - alert: ICloudBackupPersistentDownloadFailures
+          annotations:
+            summary: "{{ $labels.account }}: an iCloud photo has failed to download on every cycle for {{ $value | humanizeDuration }}"
+            description: |
+              At least one item in icloud-docker-{{ $labels.account }} has
+              failed to download in every completed photo cycle for
+              {{ $value | humanizeDuration }}. The rest of the library is still
+              syncing (otherwise ICloudBackupSyncStalled would fire).
+              Find it: `kubectl -n backup logs deploy/icloud-docker-{{ $labels.account }}
+              | grep 'Failed to download'`. A repeating `Service Unavailable (503)`
+              on one asset is Apple refusing that asset (often an item still
+              processing or damaged in iCloud); check it in the Photos app.
+              Nothing to fix in the cluster unless many items fail.
+          expr: |
+            (time() - max by (account) (icloud_sync_failing_item_since_timestamp_seconds) > 60 * 60 * 24)
+              and on (account) max by (account) (icloud_sync_items_failed) > 0
+          for: 30m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: info
+        # KSM-based, independent of the probe: scaled to 0, deleted pod, or a
+        # container in CrashLoopBackOff (no probes are configured, so Ready ==
+        # running). Fires during an intentional re-auth too — silence it for
+        # the duration of the SOP instead of weakening it.
+        - alert: ICloudBackupDeploymentUnavailable
+          annotations:
+            summary: icloud-docker-{{ $labels.account }} has no available replica
+            description: |
+              Deployment icloud-docker-{{ $labels.account }} in namespace backup
+              has had 0 available replicas for 30m (scaled to 0, Pending, or
+              crash-looping). No photos are being backed up for this Apple ID.
+              If this is a deliberate re-auth per
+              docs/sops/icloud-docker-reauth.md, silence it until Step 5.
+          expr: |
+            label_replace(
+              max by (deployment) (kube_deployment_status_replicas_available{namespace="backup", deployment=~"icloud-docker-(mu|andrea)"}),
+              "account", "$1", "deployment", "icloud-docker-(.*)"
+            ) < 1
+          for: 30m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+        # INERTNESS GUARDS — one per account, same reasoning as the freshness
+        # group above (a bare absent() only fires when BOTH accounts vanish).
+        # Do NOT gate these with `and up{...}` (permanently inert, see above).
+        - alert: ICloudBackupSyncMetricMissing
+          annotations:
+            summary: iCloud sync-health gauge for account mu is not present in Prometheus
+            description: |
+              icloud_sync_last_success_timestamp_seconds has no series for this
+              account. ICloudBackupSyncStalled is BLIND for it. Either
+              CronJob/icloud-sync-probe (namespace backup) has not run
+              successfully, or pushgateway lost its in-memory state AND the
+              probe has found no `Photos synced` line since — which, if the probe
+              itself is healthy, means the sync really is not completing. Check
+              the latest icloud-sync-probe Job log and the icloud-docker pod.
+          expr: absent(icloud_sync_last_success_timestamp_seconds{account="mu"})
+          for: 1h
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+        - alert: ICloudBackupSyncMetricMissingAndrea
+          annotations:
+            summary: iCloud sync-health gauge for account andrea is not present in Prometheus
+            description: |
+              icloud_sync_last_success_timestamp_seconds has no series for
+              account andrea; ICloudBackupSyncStalled is BLIND for it. See
+              ICloudBackupSyncMetricMissing for triage — same probe, same causes.
+          expr: absent(icloud_sync_last_success_timestamp_seconds{account="andrea"})
+          for: 1h
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+        # Per account: the probe pushes this for every account it OBSERVED,
+        # even when it found no success, so a stale value means the probe
+        # itself stopped (and the other sync gauges are frozen snapshots —
+        # the stall rule still ages correctly off its timestamp).
+        - alert: ICloudBackupSyncProbeStale
+          annotations:
+            summary: iCloud sync probe has not observed account {{ $labels.account }} for {{ $value | humanizeDuration }}
+            description: |
+              CronJob/icloud-sync-probe (namespace backup, every 10 min) last
+              completed for this account {{ $value | humanizeDuration }} ago.
+              ICloudBackupAuthRequired and PersistentDownloadFailures are
+              reading a frozen snapshot. Check the latest Job's log
+              (`kubectl -n backup logs job/<latest icloud-sync-probe job>`):
+              an RBAC 403, apiserver timeout or pushgateway error is printed
+              per account.
+          expr: |
+            time() - max by (account) (icloud_sync_probe_last_success_timestamp_seconds) > 60 * 60
+          for: 15m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+        - alert: ICloudBackupSyncProbeJobFailed
+          annotations:
+            summary: iCloud sync probe Job failed
+            description: |
+              The icloud-sync-probe Job {{ $labels.job_name }} failed. The probe
+              exits non-zero after handling both accounts if either one hit an
+              API or push error — see `kubectl -n backup logs job/{{ $labels.job_name }}`.
+              Same metric choice and caveats as ICloudBackupFreshnessProbeJobFailed.
+          expr: |
+            sum by (job_name) (kube_job_failed{namespace="backup", job_name=~"icloud-sync-probe-.*", condition="true"}) > 0
           for: 5m
           labels:
             category: backup

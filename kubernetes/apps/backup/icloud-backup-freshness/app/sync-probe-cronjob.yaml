@@ -1,0 +1,83 @@
+---
+# iCloud SYNC-health probe -> Prometheus Pushgateway (job=icloud-sync-probe,
+# grouped per account). Companion to CronJob/icloud-backup-freshness.
+#
+# Why a second probe instead of tuning the first: the freshness probe measures
+# the newest photo file's mtime, and icloud-docker stamps files with the photo's
+# CAPTURE date. That metric therefore answers "did the user take a photo", not
+# "does the backup work" -- on 2026-09-28 it paged for account mu after two
+# quiet days while the pod was syncing every 20-40 min (false positive, fixed
+# at the audit logic rather than by raising the threshold). This probe reads
+# the app's own `Photos synced` / auth-error / `Failed to download` log lines
+# through the Kubernetes API, which is what distinguishes a broken sync from a
+# quiet user. The wedge case of F-21d7e2ec (process alive, blocked, silent) is
+# still caught: a wedged process writes no `Photos synced`, so the last success
+# keeps ageing.
+#
+# Kept SEPARATE from the freshness CronJob on purpose: that one walks a CIFS
+# mount and can hang on it; this one only talks to the API server. Neither
+# failure domain should blind the other.
+#
+# Every 10 min: auth expiry should surface within ~15 min, stall thresholds
+# are 6h/24h. Cost is two log reads of ~50 KB each.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: icloud-sync-probe
+  namespace: backup
+spec:
+  schedule: "*/10 * * * *"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 3600
+      # Load-bearing with concurrencyPolicy Forbid: a hung API call must fail
+      # the Job, not block every later run.
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app: icloud-sync-probe
+        spec:
+          serviceAccountName: icloud-sync-probe
+          automountServiceAccountToken: true
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: probe
+              # Same digest-pinned image as monitoring/elasticsearch-obs-recovery.
+              image: docker.io/library/python:3.14.7-alpine@sha256:9e9fde4d32eedce0b661d9ab91e826b62dddf28e928c230ec55f1866cac66b01
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "-u", "/script/icloud_sync_probe.py"]
+              env:
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+          volumes:
+            - name: script
+              configMap:
+                name: icloud-sync-probe

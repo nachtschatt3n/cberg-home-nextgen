@@ -157,4 +157,24 @@ controls:
         13:54Z), the absence guards went pending -> inactive as those samples
         landed, and at 14:54:12Z four alerts reached Alertmanager —
         ICloudBackupPhotosStale (warning) and ICloudBackupPhotosStaleCritical
-        (critical) for each account."
+        (critical) for each account. DEMOTED 2026-09-28 to a 14-day backstop
+        (StaleCritical removed): file mtime is the photo CAPTURE date, so it
+        measured the user's photo-taking and paged on a healthy sync. The
+        primary detector is now the icloud-sync-probe row below."
+
+  - id: icloud-sync-probe
+    kind: k8s-cronjob
+    what: "10-min read of the icloud-docker pod logs via the Kubernetes API,
+      publishing per Apple ID the newest `Photos synced` timestamp, an
+      auth-required flag and per-cycle download failures — the primary
+      iCloud backup detector since 2026-09-28"
+    cadence: 10m
+    watched_by:
+      assertion: ICloudBackupSyncMetricMissing
+      in: kubernetes/apps/monitoring/kube-prometheus-stack/app/icloud-backup-alerts.yaml
+      note: "watcher-of-the-watcher: per-account absent() guards (same reason as
+        the freshness row), ICloudBackupSyncProbeStale covers the probe dying
+        while pushgateway keeps serving its last push, and
+        ICloudBackupSyncProbeJobFailed names the failed Job. The probe never
+        invents a success: with no `Photos synced` line it omits the gauge and
+        the previous timestamp keeps ageing into ICloudBackupSyncStalled."

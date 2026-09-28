@@ -1,0 +1,236 @@
+---
+# Script for CronJob/icloud-sync-probe (sync-probe-cronjob.yaml). Added
+# 2026-09-28 to fix a FALSE POSITIVE at its root: ICloudBackupPhotosStale read
+# the newest photo's mtime, but icloud-docker sets mtime to the CAPTURE date,
+# so two quiet days without taking photos paged as a broken backup while the
+# pod logged `Photos synced` every 20-40 min. This probe asserts the SYNC
+# itself from the app's own log lines. Design notes are in the docstring.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: icloud-sync-probe
+  namespace: backup
+data:
+  icloud_sync_probe.py: |
+    """iCloud sync-health probe -> Prometheus Pushgateway.
+
+    Reads the icloud-docker-<account> pod logs through the Kubernetes API
+    (pods get/list + pods/log get in namespace backup, nothing else) and pushes,
+    per account, the facts that say whether the SYNC works -- as opposed to
+    whether the user happened to take a photo:
+
+      icloud_sync_last_success_timestamp_seconds      newest "Photos synced" line
+      icloud_sync_items_failed                        failed downloads, newest completed cycle
+      icloud_sync_failing_item_since_timestamp_seconds  start of the longest unbroken
+                                                      failure run of an item that is
+                                                      STILL failing (now if none)
+      icloud_auth_required                            1 if an auth/2FA error is newer
+                                                      than the newest success
+      icloud_sync_probe_last_success_timestamp_seconds  this probe observed the account
+
+    Design rules (read before "simplifying"):
+      * Timestamps, never ages: pushgateway has no TTL, so an age would freeze when
+        this probe dies. A timestamp keeps ageing in PromQL.
+      * One pushgateway GROUP PER ACCOUNT (job/icloud-sync-probe/account/<a>) and
+        POST, not PUT: POST replaces only the metric names in the body. So when a
+        run finds NO success line (wedged process, scaled to 0, crash loop, auth
+        loop, rotated log) it simply omits last_success, and the previously pushed
+        value keeps ageing into ICloudBackupSyncStalled. The probe NEVER invents a
+        success timestamp and never writes a fallback value.
+      * Fail loud: any API/push error for an account -> exit 1 after the other
+        account has been handled (Job failed -> ICloudBackupSyncProbeJobFailed,
+        and the per-account probe timestamp goes stale).
+      * No brace-dollar sequences anywhere in this file: Flux postBuild
+        substitution would blank them.
+    """
+
+    import json
+    import os
+    import re
+    import ssl
+    import sys
+    import time
+    import calendar
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    NAMESPACE = "backup"
+    ACCOUNTS = ["mu", "andrea"]
+    LOG_WINDOW_SECONDS = 48 * 3600
+    PUSHGATEWAY = "http://prometheus-pushgateway.monitoring:9091"
+    PUSH_JOB = "icloud-sync-probe"
+
+    SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+    RE_SUCCESS = re.compile(r":: Photos synced")
+    RE_CYCLE_START = re.compile(r":: Syncing photos\.\.\.")
+    RE_FAILED_ITEM = re.compile(r"Failed to download (\S+)")
+    # Every auth/session failure string icloud-docker emits (src/sync.py:
+    # _handle_2fa_required, _handle_password_error) plus the icloudpy session
+    # errors documented in docs/sops/icloud-docker-reauth.md.
+    RE_AUTH = re.compile(
+        r"2FA is required|2SA is required|Password is not stored in keyring"
+        r"|Authentication required for Account|\(421\)|INCORRECT_PCS_KEY",
+        re.IGNORECASE,
+    )
+
+
+    def parse_ts(line):
+        """RFC3339 prefix added by timestamps=true -> unix seconds (None if absent)."""
+        head = line[:19]
+        try:
+            return calendar.timegm(time.strptime(head, "%Y-%m-%dT%H:%M:%S"))
+        except ValueError:
+            return None
+
+
+    def analyse(containers, now):
+        """containers: list of line-lists, OLDEST container first.
+
+        Returns a dict of metric -> value (a metric is omitted when the logs do not
+        establish it, so pushgateway keeps the previous value ageing).
+        """
+        last_success = None
+        last_auth = None
+        cycles = []  # list of (end_ts, set_of_failed_paths)
+
+        for lines in containers:
+            in_cycle = False
+            failed = set()
+            for line in lines:
+                ts = parse_ts(line)
+                if ts is None:
+                    continue
+                if RE_AUTH.search(line):
+                    last_auth = ts
+                if RE_CYCLE_START.search(line):
+                    in_cycle = True
+                    failed = set()
+                    continue
+                m = RE_FAILED_ITEM.search(line)
+                if m and in_cycle:
+                    failed.add(m.group(1))
+                    continue
+                if RE_SUCCESS.search(line):
+                    last_success = ts
+                    if in_cycle:
+                        cycles.append((ts, failed))
+                    in_cycle = False
+                    failed = set()
+            # A cycle still open at the end of a container (crash, wedge) is not a
+            # completed cycle; it is dropped, not counted as a success.
+
+        out = {}
+        if last_success is not None:
+            out["icloud_sync_last_success_timestamp_seconds"] = last_success
+        out["icloud_auth_required"] = 1 if (
+            last_auth is not None and (last_success is None or last_auth > last_success)
+        ) else 0
+
+        if cycles:
+            latest_failed = cycles[-1][1]
+            out["icloud_sync_items_failed"] = len(latest_failed)
+            since = now
+            for path in latest_failed:
+                start = cycles[-1][0]
+                for end_ts, fset in reversed(cycles):
+                    if path in fset:
+                        start = end_ts
+                    else:
+                        break
+                since = min(since, start)
+            out["icloud_sync_failing_item_since_timestamp_seconds"] = since
+        return out
+
+
+    class Kube:
+        def __init__(self):
+            host = os.environ["KUBERNETES_SERVICE_HOST"]
+            port = os.environ["KUBERNETES_SERVICE_PORT"]
+            self.base = "https://" + host + ":" + port
+            with open(SA_DIR + "/token") as f:
+                self.token = f.read().strip()
+            self.ctx = ssl.create_default_context(cafile=SA_DIR + "/ca.crt")
+
+        def get(self, path, params=None, allow_400=False):
+            url = self.base + path
+            if params:
+                url += "?" + urllib.parse.urlencode(params)
+            req = urllib.request.Request(url, headers={"Authorization": "Bearer " + self.token})
+            try:
+                with urllib.request.urlopen(req, context=self.ctx, timeout=60) as r:
+                    return r.read().decode("utf-8", "replace")
+            except urllib.error.HTTPError as e:
+                if allow_400 and e.code == 400:
+                    return None
+                raise
+
+
+    def collect(kube, account):
+        selector = "app.kubernetes.io/name=icloud-docker-" + account
+        pods = json.loads(kube.get(
+            "/api/v1/namespaces/" + NAMESPACE + "/pods", {"labelSelector": selector}
+        ))["items"]
+        pods = [p for p in pods if p["status"].get("phase") == "Running"
+                and not p["metadata"].get("deletionTimestamp")]
+        if not pods:
+            print(f"account={account} no Running pod (scaled to 0 / pending / deleted);"
+                  " pushing no sync facts so the last success keeps ageing")
+            return None
+        pod = pods[0]
+        name = pod["metadata"]["name"]
+        restarts = sum(c.get("restartCount", 0) for c in pod["status"].get("containerStatuses", []))
+        base = {"container": "app", "timestamps": "true", "sinceSeconds": str(LOG_WINDOW_SECONDS)}
+        path = "/api/v1/namespaces/" + NAMESPACE + "/pods/" + name + "/log"
+        containers = []
+        if restarts > 0:
+            prev = kube.get(path, dict(base, previous="true"), allow_400=True)
+            if prev:
+                containers.append(prev.splitlines())
+        containers.append(kube.get(path, base).splitlines())
+        print(f"account={account} pod={name} restarts={restarts} "
+              f"log_lines={sum(len(c) for c in containers)}")
+        return containers
+
+
+    def push(account, metrics, now):
+        lines = []
+        for key, val in sorted(metrics.items()):
+            lines.append(f"# TYPE {key} gauge")
+            lines.append(f"{key} {int(val)}")
+        lines.append("# TYPE icloud_sync_probe_last_success_timestamp_seconds gauge")
+        lines.append(f"icloud_sync_probe_last_success_timestamp_seconds {int(now)}")
+        body = ("\n".join(lines) + "\n").encode()
+        url = PUSHGATEWAY + "/metrics/job/" + PUSH_JOB + "/account/" + account
+        req = urllib.request.Request(url, data=body, method="POST",
+                                     headers={"Content-Type": "text/plain; version=0.0.4"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            if r.status // 100 != 2:
+                raise RuntimeError(f"pushgateway HTTP {r.status}")
+
+
+    def main():
+        kube = Kube()
+        errors = 0
+        for account in ACCOUNTS:
+            try:
+                now = int(time.time())
+                containers = collect(kube, account)
+                metrics = analyse(containers, now) if containers is not None else {}
+                if containers is not None and "icloud_sync_last_success_timestamp_seconds" not in metrics:
+                    print(f"account={account} NO 'Photos synced' line in the last "
+                          f"{LOG_WINDOW_SECONDS // 3600}h of logs; last success left to age")
+                shown = {k: (v if not k.endswith("timestamp_seconds") else f"{v} (age {now - v}s)")
+                         for k, v in metrics.items()}
+                print(f"account={account} {shown}")
+                push(account, metrics, now)
+                print(f"account={account} pushed")
+            except Exception as e:  # noqa: BLE001 -- fail loud, after the other account
+                errors += 1
+                print(f"account={account} FAILED: {type(e).__name__}: {e}", file=sys.stderr)
+        sys.exit(1 if errors else 0)
+
+
+    if __name__ == "__main__":
+        main()
