@@ -34,7 +34,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/max-jung-transporte-fahrzeugcontrolling
-              tag: production-20260927102351 # {"$imagepolicy": "my-software-showcase:max-jung:tag"}
+              tag: production-20260928112208 # {"$imagepolicy": "my-software-showcase:max-jung:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the

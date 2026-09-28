@@ -39,7 +39,7 @@ spec:
             args: ["rm -f /app/tmp/pids/server.pid; exec /usr/local/bin/ruby bin/rails server -b 0.0.0.0 -p 3000"]
             image:
               repository: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
-              tag: production-20260927102351 # {"$imagepolicy": "my-software-showcase:zuhause-betreut:tag"}
+              tag: production-20260928112536 # {"$imagepolicy": "my-software-showcase:zuhause-betreut:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the

@@ -41,7 +41,7 @@ spec:
             args: ["rm -f /app/tmp/pids/server.pid; exec /usr/local/bin/ruby script/rails server -b 0.0.0.0 -p 3000"]
             image:
               repository: ghcr.io/nachtschatt3n/holm-backend
-              tag: production-20260927102259 # {"$imagepolicy": "my-software-showcase:holm-backend:tag"}
+              tag: production-20260928112710 # {"$imagepolicy": "my-software-showcase:holm-backend:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the

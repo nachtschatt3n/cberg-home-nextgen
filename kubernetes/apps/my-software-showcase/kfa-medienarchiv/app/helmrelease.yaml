@@ -39,7 +39,7 @@ spec:
             args: ["rm -f /app/tmp/pids/server.pid; exec /usr/local/bin/ruby bin/rails server -b 0.0.0.0 -p 3000"]
             image:
               repository: ghcr.io/nachtschatt3n/kfa_medienarchiv
-              tag: production-20260927102256 # {"$imagepolicy": "my-software-showcase:kfa-medienarchiv:tag"}
+              tag: production-20260928113604 # {"$imagepolicy": "my-software-showcase:kfa-medienarchiv:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the

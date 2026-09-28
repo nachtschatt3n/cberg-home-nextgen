@@ -40,7 +40,7 @@ spec:
             args: ["rm -f /app/tmp/pids/server.pid; exec /usr/local/bin/ruby script/rails server -b 0.0.0.0 -p 3000 -e production"]
             image:
               repository: ghcr.io/nachtschatt3n/ordiga
-              tag: production-20260927102347 # {"$imagepolicy": "my-software-showcase:ordiga:tag"}
+              tag: production-20260928112348 # {"$imagepolicy": "my-software-showcase:ordiga:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the
