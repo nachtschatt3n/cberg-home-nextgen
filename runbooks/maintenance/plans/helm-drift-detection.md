@@ -5,7 +5,7 @@ pr: null                              # No Renovate PR exists or can exist: this
                                       # CONFIG change (a field on every HelmRelease),
                                       # not a version bump. Renovate has no opinion.
 kind: config
-current: "126 HelmReleases in 138 child Kustomizations, spec.driftDetection unset on all 126 (mode defaults to `disabled`: helm-controller v1.6.3 never compares the Helm storage manifest with the cluster). Two stored manifests (ai/anythingllm, media/jellyfin) are REJECTED by a server-side dry-run apply and would fail their reconcile the moment detection is switched on. Measured 2026-09-14, re-measured unchanged 2026-09-26 (plan review)."
+current: "126 HelmReleases in 139 child Kustomizations, spec.driftDetection unset on all 126 (mode defaults to `disabled`: helm-controller v1.6.3 never compares the Helm storage manifest with the cluster). P0 EXECUTED 2026-09-26 (d17af8e0: the two SSA-rejected stored manifests fixed). P1 attempted 2026-09-26 (fbc220f7) and REVERTED (5bdd3164): its strategic-merge child patch dropped bare `key:` nulls from spec.values of 3 HelmReleases -> 3 unintended Helm upgrades. Re-measured 2026-09-28."
 target: "spec.driftDetection.mode: enabled on every HelmRelease, with ignore rules derived from a measured >=7-day warn-mode inventory — delivered in FOUR windowed steps (P0 fix the two SSA-rejected charts -> P1 warn -> P2 ignores + retire the two known day-1 diffs -> P3 enabled), each its own window, each one commit, each independently revertible"
 update_type: refactor
 risk: medium                          # Two sources. (1) Phase 1 is NOT read-only for a
@@ -36,20 +36,16 @@ needs_reboot: false
 touches:
   namespaces:
     - flux-system                     # the file edited in P1/P2/P3 lives here (cluster-apps Kustomization)
-    - ai                              # P0: anythingllm values + postRenderer fix -> Helm upgrade -> Recreate restart
-    - media                           # P0: jellyfin values fix -> Helm upgrade -> Recreate restart
     - kube-system                     # P2: hand re-apply of GpuDevicePlugin/intel-gpu-plugin -> DaemonSet roll (3 nodes)
     - monitoring                      # P2: hand re-apply of Prometheus/kube-prometheus-stack (benign, no rollout)
-    - "ALL (every namespace that holds a HelmRelease — SPEC ONLY: a new field on 124 HelmReleases; no workload change in P1/P2/P3 given a clean §2.1 / §2.3 gate)"
+    - "ALL (every namespace that holds a HelmRelease — SPEC ONLY: a new field on 126 HelmReleases; no workload change in P1/P2/P3 given clean §2.1 / §3.0.0-step-6 / §2.3 gates)"
   resources:
     - kubernetes/flux/cluster/ks.yaml                    # THE edit, phases 1-3
     - kustomization/flux-system/cluster-apps             # gains one spec.patches entry
-    - "134 child Kustomizations (each gains one spec.patches entry, rendered by cluster-apps)"
-    - "124 HelmReleases (each gains spec.driftDetection; no Helm upgrade — verified in §4.1)"
-    - helmrelease/ai/anythingllm                        # P0 (values + postRenderer) — restarts the app
-    - deployment/ai/anythingllm
-    - helmrelease/media/jellyfin                        # P0 (values) — restarts the app
-    - deployment/media/jellyfin
+    - "139 child Kustomizations (each gains one spec.patches entry, rendered by cluster-apps)"
+    - "126 HelmReleases (each gains spec.driftDetection; no Helm upgrade — gated pre-commit by §3.0.0 step 6, verified post-apply by step 8)"
+    # P0 resources (anythingllm, jellyfin) removed 2026-09-28: P0 EXECUTED 2026-09-26 (d17af8e0).
+    - "the 7 HelmReleases whose spec.values carry nulls (databases/influxdb, default/homepage, network/adguard-home, kube-system/authentik, monitoring/uptime-kuma, monitoring/prometheus-blackbox-exporter, media/jellyfin) — spec-only like the rest; §1.5 proves their values are untouched by the JSON6902 patch, and §3.0.0 steps 6/8 gate it. adguard-home is the LAN DNS (192.168.55.5): the one casualty of 2026-09-26 with a household-wide blast radius."
     - gpudeviceplugin/intel-gpu-plugin                  # P2 §3.2.0 hand re-apply (warn mode)
     - daemonset/kube-system/intel-gpu-plugin-intel-gpu-plugin   # rolled by that re-apply
     - prometheus/monitoring/kube-prometheus-stack       # P2 §3.2.0 hand re-apply (benign add)
@@ -79,6 +75,26 @@ conflicts_with:
                                       # plan but are NOT listed: both run/ran in the 2026-09-26
                                       # main NOW run and are retired on execution, and a ref to a
                                       # deleted plan is a --validate DEAD-REF.
+  # Added 2026-09-28 (P1 re-plan). Two reasons, both about the P1 gates' validity:
+  - flux-fleet-0.60.0                 # Flux operator/instance bump: a kustomize-controller or
+                                      # flux CLI change can change patch/null semantics, which is
+                                      # exactly what §3.0.0 steps 3/6 measure. Never the same
+                                      # window; after it lands, re-run the gates (premises pin
+                                      # kustomize-controller v1.9 / distribution 2.9). Reciprocal.
+  - flux-oci-chart-sources            # rewrites chart sources on HelmReleases incl. kube-system/
+                                      # authentik (a null-bearing HR) — a same-window HR spec
+                                      # change invalidates values-gate snapshot B.
+  - jellyfin-12.1                     # edits media/jellyfin HR values (null-bearing); same reason.
+  - uptime-kuma-2.5.5-slim-rootless   # edits monitoring/uptime-kuma HR values (null-bearing). Reciprocal.
+  - chart-patches-coredns-reloader-blackbox   # edits prometheus-blackbox-exporter HR (null-bearing). Reciprocal.
+  # Reciprocals of plans that already name this one (a HelmRelease change in the P1 run
+  # breaks rev-gate/values-gate attribution, and P1 must be the day's LAST HR change):
+  - app-template-5.2.1
+  - librechat-2.0.14
+  - mariadb-chart-27.3.0
+  - penpot-chart-1.10.0
+  - redis-fleet-8.10.2
+  - traccar-6.16.0
 security_ref: null
 capability_change: false              # no user-visible behaviour changes; Flux reconciles the
                                       # same manifests, it merely starts to notice edits
@@ -91,7 +107,10 @@ autonomy_override: human-gated        # RESTRICTS only. P0 and P1 are nightly-sa
                                       # file cannot be one AUTO-NIGHT unit, so the scheduler
                                       # must not treat it as one.
 finding_refs: []
-status: draft   # 2026-09-26 NOW run: P0 EXECUTED GREEN (d17af8e0: anythingllm + jellyfin stored manifests pass
+status: draft   # 2026-09-28 P1 RE-PLANNED (§1.5, §3.0.0): child patch is now JSON6902 op:add (proven to keep all
+                      # 18 null leaves on the 7 null-bearing HRs), with pre-commit parent/render gates and a
+                      # post-apply values gate, each demonstrated to FAIL on the fbc220f7 shape. Under review.
+                      # HISTORY — 2026-09-26 NOW run: P0 EXECUTED GREEN (d17af8e0: anythingllm + jellyfin stored manifests pass
                       # SSA, no pod-template change). P1 REVERTED (fbc220f7 -> 5bdd3164): the rev-gate caught 3
                       # unexplained Helm upgrades (databases/influxdb, default/homepage, network/adguard-home)
                       # because the parent-ks spec.patches pass drops explicit `key: null` entries from
@@ -176,7 +195,27 @@ premises:
       One Alert with eventSeverity info or a HelmRelease source changes that.
     run: kubectl get alerts.notification.toolkit.fluxcd.io -A --no-headers | wc -l
     expect_exact: "0"
-generated: "2026-09-26"
+  - id: flux-distribution-is-2.9
+    why: >-
+      §3.0.0's pre-commit gates run the LOCAL `flux build` as a stand-in for
+      kustomize-controller's kustomize. That stand-in reproduced the live
+      2026-09-26 failure exactly (the same 3 HelmReleases, the same 11 paths),
+      measured with CLI v2.9.0 against distribution v2.9.3. A different
+      distribution minor ships a different kustomize and the proof no longer
+      transfers. (The CLI side cannot be a premise — plan-premises.py refuses
+      `flux version` — so §3.0.0 step 1 asserts `flux version --client` prints
+      `flux: v2.9.` by hand.)
+    run: kubectl get fluxinstance -n flux-system flux -o jsonpath='{.spec.distribution.version}'
+    expect_contains: "v2.9."
+  - id: kustomize-controller-is-v1.9
+    why: >-
+      The controller side of the same claim: kustomize-controller v1.9.x is the
+      applier whose SMP behaviour dropped the bare-key nulls on 2026-09-26. A
+      bump (flux-fleet-0.60.0 or a distribution change) needs the §3.0.0 step-3
+      demonstration re-read before P1.
+    run: kubectl get deploy -n flux-system kustomize-controller -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_contains: "ghcr.io/fluxcd/kustomize-controller:v1.9."
+generated: "2026-09-28"
 ---
 
 # Helm drift detection: fix the SSA-rejected charts -> warn -> ignore rules -> enabled, cluster-wide
@@ -255,6 +294,13 @@ construction, nothing to correct.
   fixed. Today that set is exactly `ai/anythingllm` and `media/jellyfin`
   (measured in §2.1). P0 fixes them; the §2.1 gate refuses P1 while the set is
   non-empty; §4.1 re-asserts `124 Ready=True` AFTER propagation.
+- **P1 is NOT spec-only if delivered as a strategic-merge patch** (learned
+  2026-09-26, root-caused 2026-09-28, §1.5): kustomize's SMP drops bare
+  `key:` (implicit-null) entries from the HelmRelease it patches, so a
+  chart-default deletion in `spec.values` disappears, the values digest
+  changes, and helm-controller runs a `helm upgrade`. P1 therefore delivers the
+  field with a JSON6902 `op: add`, which touches nothing else — proven over
+  every child and every HelmRelease before commit (§3.0.0 step 6).
 - **Why held / why a plan:** there is no version to bump and no auto-updater
   lane for "add a field to 124 HelmReleases", and the end state changes
   platform behaviour cluster-wide (manual edits get reverted). Phase 3 is
@@ -367,6 +413,12 @@ can be excluded without touching the substitution behaviour.
    `flux reconcile kustomization flux-system --with-source` is the one
    `docs/sops/flux-upgrade.md`-sanctioned nudge; everything downstream is
    spec-change-triggered.
+4. **The CHILD patch must be a JSON6902 `op: add`, never a strategic-merge
+   patch** (§1.5). The PARENT patch (Kustomization -> child Kustomization)
+   stays strategic-merge, like the existing decryption/substitution patch it
+   sits next to: §3.0.0 step 6's parent-gate proves it changes nothing in any
+   child spec except `/spec/patches`. P2 and P3 edit only the `value:` of the
+   same op — the form never changes back.
 
 ### 1.4 Proof of render (2026-09-14, read-only, `flux build`)
 
@@ -418,13 +470,76 @@ spec:
       kind: HelmRelease
 ```
 
+### 1.5 The 2026-09-26 P1 failure, root-caused (2026-09-28, read-only)
+
+**Inventory — every HelmRelease in git with a null in `spec`** (PyYAML over all
+`kubernetes/**/*.yaml`, 127 HelmRelease documents; `key:`, `key: null` and
+`key: ~` all load as None). Seven HelmReleases, 18 null leaves, all under
+`spec.values`, all deliberate deletions of a chart default (Helm treats a
+user-supplied null as "remove this default key"). `helm get values` shows the
+same 18 nulls stored in the live releases, so each is part of the values digest
+helm-controller compares — removing any one is a Helm upgrade, whatever it
+renders to. Preservation is therefore required for all 18; none is safe to drop.
+
+| HelmRelease | null leaves (paths under `spec.values`) | YAML form in git | SMP child patch (render) | 2026-09-26 live |
+|---|---|---|---|---|
+| databases/influxdb | `backup/resources/requests`, `backup/persistence/annotations`, `backupRetention/resources/requests`, `backupRetention/startingDeadlineSeconds` | bare `key:` | **all 4 dropped** | **upgraded** rev 11, reverted rev 12 |
+| default/homepage | `config/docker`, `config/settings` | bare `key:` | **both dropped** | **upgraded** rev 30, reverted rev 31 |
+| network/adguard-home | `services/dns/externalTrafficPolicy`, `.../tcp/nodePort`, `.../udp/nodePort`, `.../ipFamilyPolicy`, `.../ipFamilies` | bare `key:` | **all 5 dropped** | **upgraded** rev 22, reverted rev 23 |
+| kube-system/authentik | `worker/livenessProbe`, `worker/readinessProbe`, `worker/startupProbe` | `key: null` | kept | not upgraded (rev 50 unchanged) |
+| monitoring/uptime-kuma | `serviceMonitor/scheme`, `serviceMonitor/namespace` | `key: ~` | kept | not upgraded (rev 18) |
+| monitoring/prometheus-blackbox-exporter | `config/modules/http_2xx` | `key: null` | kept | not upgraded (rev 3) |
+| media/jellyfin | `readinessProbe/httpGet` | `key: null` | kept | not upgraded (rev 37 = P0) |
+
+**The mechanism, measured:** the three casualties are exactly the three files
+whose nulls are written as a bare `key:` with no value; the four whose nulls
+are an explicit `null`/`~` survived. `flux build` of each child with the
+2026-09-26 SMP child patch reproduces the live outcome row for row (11 paths
+dropped on 3 HRs, 7 kept on 4), and the same build with a JSON6902
+`- op: add / path: /spec/driftDetection / value: {mode: warn}` keeps all 18.
+The live helm history confirms nothing else moved: in the 14:28-14:45 UTC
+window on 2026-09-26 the ONLY revisions are those three releases (twice each);
+the other 123 HelmReleases received `spec.driftDetection` with no upgrade —
+which is also the live proof that the field itself does not trigger one.
+
+**Why not "just write `null` in the three files"?** It would make the SMP
+survive today (explicit null is kept), but it is a rule every future
+`helmrelease.yaml` author must remember, with the failure mode "silent Helm
+upgrade of an unrelated app". The JSON6902 form removes the class: it cannot
+touch a field it does not name. (Normalising the three files is still a
+reasonable hygiene follow-up; it is NOT a P1 precondition.)
+
+**Whole-tree proof, 2026-09-28** (tools in §3.0.0 step 2):
+
+```
+render-gate.py --patch smp       -> FAIL databases/influxdb, default/homepage, network/adguard-home
+                                    children=139 rendered_helmreleases=126 live_helmreleases=126 non_pass=3   rc=1
+render-gate.py --patch json6902  -> children=139 rendered_helmreleases=126 live_helmreleases=126 non_pass=0
+                                    RENDER-GATE PASS                                                        rc=0
+render-gate.py --patch json6902 --value '{"mode":"warn","ignore":[{"paths":[".../kubectl.kubernetes.io~1restartedAt"],"target":{"kind":"Deployment"}}]}'
+                                 -> RENDER-GATE PASS (the P2 shape — nested lists in the value are fine)
+parent-gate.py <HEAD ks.yaml> <p1-edit.py result>     -> objects=211 child_kustomizations=139 patched=139 fails=0  PASS rc=0
+parent-gate.py <HEAD ks.yaml> <fbc220f7 ks.yaml>      -> patched=0 fails=139  PARENT-GATE FAIL rc=1
+parent-gate.py <HEAD ks.yaml> <p1 result> '{"mode":"enabled"}'  -> PARENT-GATE FAIL rc=1 (wrong value is caught)
+values-gate.py snapshot T; compare T                   -> PASS, 126 HelmReleases, 18 null leaves
+values-gate.py compare T (snapshot doctored: influxdb backup/resources/requests deleted) -> FAIL (added) rc=1
+```
+
+The P1 edit applied to a scratch copy of `kubernetes/flux/cluster/ks.yaml` by
+`p1-edit.py` is byte-identical to the gated candidate; `diff -u` is a pure
+31-line append after line 72 (`labelSelector: substitution.flux.home.arpa/disabled notin (true)`),
+first added line `+    - # Cluster-wide Helm drift detection (plan helm-drift-detection, phase 1: warn).`,
+the JSON6902 lines `+                - op: add` / `+                  path: /spec/driftDetection`.
+A second run of `p1-edit.py` on the edited copy refuses (`STOP: ks.yaml already
+carries driftDetection`, rc 1).
+
 ## 2) Pre-checks
 
 ### 2.0 Every phase
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-python3 runbooks/plan-premises.py helm-drift-detection          # all 8 must PASS
+python3 runbooks/plan-premises.py helm-drift-detection          # all 10 must PASS
 flux get kustomizations -A | awk 'NR==1 || $5 != "True"'         # header only
 flux get helmreleases -A   | awk 'NR==1 || $5 != "True"'         # header only
 git status --porcelain kubernetes/flux/cluster/ks.yaml            # empty: nobody else mid-edit
@@ -574,7 +689,7 @@ kubectl get helmrelease -A -o jsonpath='{range .items[?(@.spec.suspend==true)]}{
 # expect: NO output — a suspended HR is skipped by helm-controller and would be corrected on resume
 
 # 4. No other plan in this window touches a Helm-managed workload by hand (§6);
-#    conflicts_with (talos-1.14.0, grafana-chart-13.2.3) is enforced by the sequencer.
+#    conflicts_with (grafana-chart-13.2.3 and the rest of the frontmatter list) is enforced by the sequencer.
 ```
 
 If step 1, 1b or 2 prints anything: **do not run Phase 3.** Either the drift
@@ -595,52 +710,54 @@ to the edit date** (and bumps `status`) — `maintenance-plan.py` flags a plan
 `unused > stale_after_days` (14 days from `generated`), and this plan is
 legitimately mid-soak from ~2026-09-29 otherwise.
 
-### 3.0 Phase 0 — make the two SSA-rejected manifests valid (nightly-safe, BEFORE Phase 1)
+### 3.0 Phase 0 — EXECUTED 2026-09-26 (`d17af8e0`)
 
-Both are real chart/values bugs that Helm's three-way merge has been hiding;
-both fixes are a values change, therefore a Helm upgrade and a `Recreate`
-restart of the app (single-replica, RWO-backed — `Recreate` is the required
-strategy per `docs/sops/longhorn-rwo-multi-attach.md`). Expect ~1-2 min of
-downtime each. **The opt-out label** (`drift-detection.flux.home.arpa/disabled:
-"true"` on the app's `ks.yaml`) is acceptable only as a documented stop-gap if
-a fix cannot land before P1's window — it leaves two real chart bugs unfixed
-and those two releases unwatched, so it must be recorded in the inventory
-finding with a follow-up date.
+The two SSA-rejected stored manifests were fixed (anythingllm: pod-level
+`strategy` dropped + postRenderer `strategy: null`; jellyfin: container-only
+keys removed from `podSecurityContext`). Result recorded in `2326ab02`: SSA gate
+126/126 with only the two known DIFF rows, no pod roll (the removed keys had
+already been pruned from the live pod templates). The step-by-step P0 text
+(§3.0.1-§3.0.3 of the 2026-09-26 revision) is in git history at `355ef7ee`;
+it is not repeated here because it will not run again. **P0 is a P1
+precondition only through the §2.1 gate**, which is re-run in step 4 below: a
+new SSA-invalid manifest since 2026-09-26 blocks P1 the same way.
 
-### 3.0.0 TODAY — on-demand NOW run 2026-09-26: P0 + P1 as ONE dedicated, FINAL run
+### 3.0.0 P1 re-run — dedicated, FINAL run (re-planned 2026-09-28)
 
-Reviewed 2026-09-26 (plan-reviewer, read-only). Re-measured live that morning:
-126 HelmReleases, 138 child Kustomizations; the §2.1 gate (through the
-fail-closed wrapper below) = `SSA-GATE FAIL: FAIL=2 DIFF=2` — the same two
-rejected Deployments (ai/anythingllm, media/jellyfin) and the same two day-1
-diffs (GpuDevicePlugin `monitoringMode`, which SURVIVED intel-device-plugin
-0.37.0 / rev 6 executed the same morning; Prometheus `paused`). So P1 cannot
-run before P0, and P2/P3 cannot run before the >= 7-day soak.
+**What went wrong on 2026-09-26 and what changed** (full evidence §1.5): the
+child patch was a strategic-merge patch; kustomize's SMP path re-serialises the
+target HelmRelease and drops every bare `key:` (implicit null) from
+`spec.values`, so 11 deliberate chart-default deletions on three HelmReleases
+vanished and helm-controller upgraded them (influxdb rev 11, homepage rev 30,
+adguard-home rev 22; the revert re-upgraded them at rev 12/31/23). The child
+patch is now a JSON6902 `op: add /spec/driftDetection`, which never touches
+another field, and two new PRE-COMMIT render gates prove over the whole tree
+that nothing but `spec.driftDetection` changes — both demonstrated to FAIL on
+the 2026-09-26 shape. A third, post-apply gate compares every live HelmRelease
+spec with a pre-commit snapshot.
 
-**Why a dedicated FINAL run, not a step of the main run.** `run-now.py`
-orders plans with a non-empty `touches.shared` FIRST (this plan carries the
-P2-only intel-gpu-plugin entry), so inside the main run P1 would land before
-the other HelmRelease-changing plans. P1 must be the LAST HelmRelease change
-of the day: (a) the §2.1 gate must cover every stored manifest as it will be
-after today's upgrades — once `warn` is on, a later upgrade to an SSA-invalid
-manifest goes `Ready=False` inside ANOTHER plan's verification; (b) the
-revision gate below must attribute every Helm upgrade. `run-now.py` cannot
-express "last", hence a second run. P0 rides in it (no reason to split: the
-jellyfin hunk is disjoint from `jellyfin-12.1`'s image/remediation hunks, that
-plan's rollback is `git revert <its bump commit>`, and the two removed keys
-were already pruned from the live pod templates — see §3.0.3).
+**Why still a dedicated FINAL run** (unchanged reasoning): P1 must be the last
+HelmRelease change of its day — the §2.1 SSA gate must cover every stored
+manifest as it will be after that day's upgrades, and the revision gate must
+attribute every Helm upgrade. `run-now.py` cannot express "last", so P1 is its
+own on-demand run (or the last plan of an attended window with nothing
+HelmRelease-changing after it).
 
-Every block below is self-contained (no shell variable, function or
-port-forward survives between blocks); state lives in fixed files under
+Every block is self-contained (no shell variable, function or port-forward
+survives between blocks); state lives in fixed files under
 `/private/tmp/claude-501/helm-drift-detection/`.
 
-1. **Preconditions.** The main NOW run is FINALIZED (`run-now.py` exits 10 while
-   any `now` row is open). This plan is `status: vetted`. Then
+1. **Preconditions.** Any main NOW run of the day is FINALIZED (`run-now.py`
+   exits 10 while a `now` row is open). This plan is `status: vetted`. Then
    `.venv/bin/python3 runbooks/run-now.py preflight helm-drift-detection --operator-go "<who/how>"`
-   -> exit 0. Step 0 of this run lands first as always; the settle check in
-   `rev-gate.py` absorbs it. §2.0 as written, minus its baseline lines.
-2. **Tooling** — run the §2.1 heredoc block (it now writes
-   `/private/tmp/claude-501/helm-drift-detection/hr-ssa-gate.py`), then:
+   -> exit 0. Step 0 of the run lands first as always; the settle check in
+   `rev-gate.py` absorbs it. §2.0 as written (all premises PASS — including
+   `flux-distribution-is-2.9` and `kustomize-controller-is-v1.9`, which pin the
+   claim that the local `flux build` reproduces the controller's kustomize), and
+   `flux version --client` prints `flux: v2.9.` (the CLI half of that claim;
+   2.9.0 on 2026-09-28 — any other minor: STOP and re-run step 3 before trusting
+   step 6).
+2. **Tooling** — run the §2.1 heredoc block (writes `hr-ssa-gate.py`), then:
 
 ```bash
 mkdir -p /private/tmp/claude-501/helm-drift-detection
@@ -739,265 +856,304 @@ def main(argv, settled=settled):
 if __name__ == "__main__":
   main(sys.argv)
 REVGATE
-cat > /private/tmp/claude-501/helm-drift-detection/p0-edit.py <<'P0EDIT'
+cat > /private/tmp/claude-501/helm-drift-detection/render-gate.py <<'RENDERGATE'
+#!/usr/bin/env python3
+"""helm-drift-detection render gate: prove the CHILD-level patch changes nothing
+in any rendered object except adding spec.driftDetection to HelmReleases.
+
+For every live child Kustomization of cluster-apps (not opted out), `flux build`
+twice: BASE = the live child spec as applied today; CAND = the same spec plus the
+candidate child patch. Require per rendered object:
+  - HelmRelease: CAND minus spec.driftDetection == BASE (deep; null != missing,
+    PyYAML loads both `key:` and `key: null` as None), and
+    CAND.spec.driftDetection == VALUE
+  - every other object: CAND == BASE
+Coverage: rendered HelmReleases == live HelmReleases (minus opted-out children),
+so a crash or a skipped child can never read as PASS. Prints ids and JSON paths
+only, never values (values carry cluster-secrets substitutions).
+--patch smp reproduces the 2026-09-26 fbc220f7 shape: KNOWN-BAD CONTROL ONLY.
+Exit 0 = RENDER-GATE PASS, 1 = FAIL. Read-only."""
+import argparse, json, os, subprocess, sys, tempfile
+from concurrent.futures import ThreadPoolExecutor
+import yaml
+
+OPT_OUT = "drift-detection.flux.home.arpa/disabled"
+ap = argparse.ArgumentParser()
+ap.add_argument("--patch", choices=["smp", "json6902"], required=True)
+ap.add_argument("--value", default='{"mode": "warn"}',
+                help="JSON of spec.driftDetection (P1 warn; P2 adds ignore; P3 enabled)")
+ap.add_argument("--repo", default="/Users/mu/code/cberg-home-nextgen")
+a = ap.parse_args()
+VALUE = json.loads(a.value)
+TARGET = {"group": "helm.toolkit.fluxcd.io", "kind": "HelmRelease"}
+if a.patch == "smp":
+    PATCH = {"patch": yaml.safe_dump({"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease",
+                                      "metadata": {"name": "not-used"},
+                                      "spec": {"driftDetection": VALUE}}), "target": TARGET}
+else:
+    PATCH = {"patch": yaml.safe_dump([{"op": "add", "path": "/spec/driftDetection", "value": VALUE}]),
+             "target": TARGET}
+
+
+def kget(*args):
+    return json.loads(subprocess.check_output(["kubectl", "get", *args, "-o", "json"]))
+
+
+def diffpaths(x, y, p=""):
+    if type(x) is not type(y):
+        return [p or "/"]
+    if isinstance(x, dict):
+        out = []
+        for k in sorted(set(x) | set(y), key=str):
+            if k not in x or k not in y:
+                out.append(f"{p}/{k} ({'missing in CAND' if k not in y else 'added in CAND'})")
+            else:
+                out += diffpaths(x[k], y[k], f"{p}/{k}")
+        return out
+    if isinstance(x, list):
+        if len(x) != len(y):
+            return [f"{p} (len {len(x)}->{len(y)})"]
+        return sum((diffpaths(i, j, f"{p}/{n}") for n, (i, j) in enumerate(zip(x, y))), [])
+    return [] if x == y else [p]
+
+
+def build(ks, extra):
+    obj = {"apiVersion": ks["apiVersion"], "kind": ks["kind"],
+           "metadata": {"name": ks["metadata"]["name"], "namespace": ks["metadata"]["namespace"]},
+           "spec": json.loads(json.dumps(ks["spec"]))}
+    if extra:
+        obj["spec"]["patches"] = list(obj["spec"].get("patches") or []) + [PATCH]
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump(obj, f)
+        fn = f.name
+    try:
+        r = subprocess.run(["flux", "build", "kustomization", obj["metadata"]["name"],
+                            "-n", obj["metadata"]["namespace"], "--path", obj["spec"]["path"],
+                            "--kustomization-file", fn], cwd=a.repo, capture_output=True, text=True)
+    finally:
+        os.unlink(fn)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip().splitlines()[-1] if r.stderr.strip() else f"rc={r.returncode}")
+    docs = {}
+    for d in yaml.safe_load_all(r.stdout):
+        if isinstance(d, dict):
+            m = d.get("metadata", {})
+            docs[(d.get("kind"), m.get("namespace"), m.get("name"))] = d
+    return docs
+
+
+def check(ks):
+    name = f'{ks["metadata"]["namespace"]}/{ks["metadata"]["name"]}'
+    try:
+        base, cand = build(ks, False), build(ks, True)
+    except Exception as e:  # noqa: BLE001
+        return name, "ERROR", [str(e)], 0
+    fails, nhr = [], 0
+    if set(base) != set(cand):
+        fails.append(f"object set differs: {sorted(map(str, set(base) ^ set(cand)))}")
+    for k in sorted(set(base) & set(cand), key=str):
+        b, c = base[k], json.loads(json.dumps(cand[k]))
+        if k[0] == "HelmRelease":
+            nhr += 1
+            dd = c.get("spec", {}).pop("driftDetection", "ABSENT")
+            if dd != VALUE:
+                fails.append(f"{k}: spec.driftDetection is not the expected value")
+        fails += [f"{k[0]} {k[1]}/{k[2]}: {p}" for p in diffpaths(b, c)]
+    return name, ("FAIL" if fails else "PASS"), fails, nhr
+
+
+items = [k for k in kget("kustomization", "-A")["items"]
+         if (k["metadata"].get("labels") or {}).get("kustomize.toolkit.fluxcd.io/name") == "cluster-apps"
+         and (k["metadata"].get("labels") or {}).get(OPT_OUT) != "true"]
+optout_ns = {k["metadata"]["namespace"] + "/" + k["metadata"]["name"]
+             for k in kget("kustomization", "-A")["items"]
+             if (k["metadata"].get("labels") or {}).get(OPT_OUT) == "true"}
+live_hr = sum(1 for h in kget("helmrelease", "-A")["items"]
+              if f'{h["metadata"].get("labels", {}).get("kustomize.toolkit.fluxcd.io/namespace")}/'
+                 f'{h["metadata"].get("labels", {}).get("kustomize.toolkit.fluxcd.io/name")}' not in optout_ns)
+with ThreadPoolExecutor(8) as ex:
+    res = list(ex.map(check, items))
+nfail = 0
+for name, st, fails, _ in sorted(res):
+    if st != "PASS":
+        nfail += 1
+        print(f"{st} {name}")
+        for f in fails:
+            print(f"    {f}")
+rendered_hr = sum(r[3] for r in res)
+print(f"children={len(items)} rendered_helmreleases={rendered_hr} live_helmreleases={live_hr} "
+      f"non_pass={nfail} patch={a.patch} value={json.dumps(VALUE, sort_keys=True)[:80]}")
+ok = nfail == 0 and rendered_hr == live_hr and rendered_hr > 0
+print("RENDER-GATE PASS" if ok else "RENDER-GATE FAIL")
+sys.exit(0 if ok else 1)
+RENDERGATE
+cat > /private/tmp/claude-501/helm-drift-detection/parent-gate.py <<'PARENTGATE'
+#!/usr/bin/env python3
+"""helm-drift-detection parent gate: render cluster-apps from the CURRENT and the
+CANDIDATE kubernetes/flux/cluster/ks.yaml and require
+  - an identical rendered object set,
+  - every non-Kustomization object deep-identical,
+  - every child Kustomization identical outside /spec/patches, and /spec/patches
+    == exactly ONE JSON6902 patch [{op: add, path: /spec/driftDetection, value: VALUE}]
+    targeting HelmRelease (compared PARSED, so ks.yaml whitespace is free, but the
+    fbc220f7 strategic-merge shape -- a mapping, not an op list -- can never match),
+  - opted-out children (drift-detection.flux.home.arpa/disabled=true) unchanged.
+Together with render-gate.py (which proves THAT child patch preserves every value)
+this covers the whole parent -> child -> HelmRelease path.
+Usage: parent-gate.py <current ks.yaml> <candidate ks.yaml> ['<VALUE JSON>']
+Exit 0 = PARENT-GATE PASS, 1 = FAIL. Prints ids only, never values."""
+import json, os, subprocess, sys, tempfile
+import yaml
+
+REPO = "/Users/mu/code/cberg-home-nextgen"
+VALUE = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {"mode": "warn"}
+TARGET = {"group": "helm.toolkit.fluxcd.io", "kind": "HelmRelease"}
+
+
+def is_expected(patches):
+    if not isinstance(patches, list) or len(patches) != 1:
+        return False
+    p = patches[0]
+    try:
+        ops = yaml.safe_load(p.get("patch", ""))
+    except yaml.YAMLError:
+        return False
+    return p.get("target") == TARGET and ops == [{"op": "add", "path": "/spec/driftDetection", "value": VALUE}]
+
+
+def render(ksfile):
+    doc = next(d for d in yaml.safe_load_all(open(ksfile)) if d and d["metadata"]["name"] == "cluster-apps")
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump(doc, f)
+        fn = f.name
+    try:
+        r = subprocess.run(["flux", "build", "kustomization", "cluster-apps", "-n", "flux-system",
+                            "--path", "./kubernetes/apps", "--kustomization-file", fn],
+                           cwd=REPO, capture_output=True, text=True)
+    finally:
+        os.unlink(fn)
+    if r.returncode:
+        print(f"PARENT-GATE FAIL: flux build rc={r.returncode}")
+        sys.exit(1)
+    out = {}
+    for d in yaml.safe_load_all(r.stdout):
+        if isinstance(d, dict):
+            m = d["metadata"]
+            out[(d["kind"], m.get("namespace"), m["name"])] = d
+    return out
+
+
+base, cand = render(sys.argv[1]), render(sys.argv[2])
+fails, nks, npatched = [], 0, 0
+if set(base) != set(cand):
+    fails.append(f"object set differs: {sorted(map(str, set(base) ^ set(cand)))}")
+for k in sorted(set(base) & set(cand), key=str):
+    b, c = json.loads(json.dumps(base[k])), json.loads(json.dumps(cand[k]))
+    if k[0] == "Kustomization":
+        nks += 1
+        optout = (c["metadata"].get("labels") or {}).get("drift-detection.flux.home.arpa/disabled") == "true"
+        bp, cp = b["spec"].pop("patches", None), c["spec"].pop("patches", None)
+        if optout:
+            if bp != cp:
+                fails.append(f"{k}: opted-out child's patches changed")
+        elif bp is not None or not is_expected(cp):
+            fails.append(f"{k}: patches base={'set' if bp else 'none'} cand={'EXPECTED' if is_expected(cp) else 'UNEXPECTED'}")
+        else:
+            npatched += 1
+    if b != c:
+        fails.append(f"{k}: differs outside /spec/patches")
+for f in fails:
+    print("FAIL", f)
+print(f"objects={len(cand)} child_kustomizations={nks} patched={npatched} fails={len(fails)}")
+ok = not fails and npatched > 0
+print("PARENT-GATE PASS" if ok else "PARENT-GATE FAIL")
+sys.exit(0 if ok else 1)
+PARENTGATE
+cat > /private/tmp/claude-501/helm-drift-detection/values-gate.py <<'VALUESGATE'
+#!/usr/bin/env python3
+"""Live HelmRelease spec-identity gate for helm-drift-detection P1.
+  values-gate.py snapshot NAME   -> <dir>/values-NAME.json (every live HR's spec minus driftDetection)
+  values-gate.py compare NAME    -> deep-compare the live specs now with the snapshot
+The ONLY permitted difference is spec.driftDetection. null vs missing is a
+difference (the 2026-09-26 failure was exactly `key: null` -> key absent).
+Prints ids + JSON paths only, never values. Exit 0 PASS, 1 FAIL."""
+import json, os, subprocess, sys
+D = os.path.dirname(os.path.abspath(__file__))
+
+
+def live():
+    items = json.loads(subprocess.run(["kubectl", "get", "helmrelease", "-A", "-o", "json"],
+                                      capture_output=True, text=True, check=True).stdout)["items"]
+    out = {}
+    for h in items:
+        s = dict(h["spec"])
+        s.pop("driftDetection", None)
+        out[h["metadata"]["namespace"] + "/" + h["metadata"]["name"]] = s
+    return out
+
+
+def paths(a, b, p=""):
+    if type(a) is not type(b):
+        return [p or "/"]
+    if isinstance(a, dict):
+        r = []
+        for k in sorted(set(a) | set(b)):
+            if k not in a or k not in b:
+                r.append(f"{p}/{k} ({'removed' if k not in b else 'added'})")
+            else:
+                r += paths(a[k], b[k], f"{p}/{k}")
+        return r
+    if isinstance(a, list):
+        if len(a) != len(b):
+            return [f"{p} (len {len(a)}->{len(b)})"]
+        return sum((paths(x, y, f"{p}/{i}") for i, (x, y) in enumerate(zip(a, b))), [])
+    return [] if a == b else [p]
+
+
+mode, name = sys.argv[1], sys.argv[2]
+f = f"{D}/values-{name}.json"
+cur = live()
+if mode == "snapshot":
+    json.dump(cur, open(f, "w"))
+    def nulls(o):
+        if isinstance(o, dict): return sum(1 if v is None else nulls(v) for v in o.values())
+        if isinstance(o, list): return sum(1 if v is None else nulls(v) for v in o)
+        return 0
+    nv = sum(nulls(v.get("values") or {}) for v in cur.values())
+    print(f"VALUES SNAPSHOT {name}: {len(cur)} HelmReleases, {nv} null leaves in spec.values -> {f}")
+    sys.exit(0)
+base = json.load(open(f))
+bad = 0
+for k in sorted(set(base) | set(cur)):
+    if k not in base or k not in cur:
+        print(f"FAIL {k}: {'new' if k not in base else 'gone'}"); bad += 1; continue
+    for p in paths(base[k], cur[k], "/spec"):
+        print(f"FAIL {k}: {p}"); bad += 1
+print(f"VALUES-GATE {'FAIL' if bad else 'PASS'}: {len(cur)} HelmReleases, {bad} difference(s) outside spec.driftDetection")
+sys.exit(1 if bad else 0)
+VALUESGATE
+cat > /private/tmp/claude-501/helm-drift-detection/p1-edit.py <<'P1EDIT'
+#!/usr/bin/env python3
+"""Append the P1 drift-detection patch to cluster-apps' spec.patches in
+kubernetes/flux/cluster/ks.yaml. Text-level append (the file is NEVER
+re-serialised), anchored: refuses unless the file ends with the substitution
+patch's target block exactly once and carries no driftDetection yet."""
 import sys
-R = "/Users/mu/code/cberg-home-nextgen/"
-def edit(path, old, new):
-    t = open(R + path).read()
-    n = t.count(old)
-    if n != 1: sys.exit(f"STOP: {path}: anchor matched {n}x (need exactly 1) -- file changed since review")
-    open(R + path, "w").write(t.replace(old, new))
-    print("edited", path)
-edit("kubernetes/apps/ai/anythingllm/app/helmrelease.yaml",
-     "    replicaCount: 1\n\n    strategy:\n      type: Recreate\n\n    image:\n",
-     "    replicaCount: 1\n\n    image:\n")
-edit("kubernetes/apps/ai/anythingllm/app/helmrelease.yaml",
-     "                      - name: storage\n                        mountPath: /storage\n",
-     "                      - name: storage\n                        mountPath: /storage\n"
-     "          # The chart renders `.Values.strategy` under the POD spec (templates/\n"
-     "          # deployment.yaml:35-38) and defaults it to Recreate in its own values.yaml,\n"
-     "          # so the field is present even with no value of ours. A pod spec has no\n"
-     "          # `strategy`: a server-side apply rejects the whole Deployment with\n"
-     "          # `.spec.template.spec.strategy: field not declared in schema` -- invisible\n"
-     "          # to Helm's 3-way merge, fatal to Flux drift detection (plan\n"
-     "          # helm-drift-detection section 3.0.1). Strategic-merge null deletes the key\n"
-     "          # whether or not the chart renders it; the Deployment-level strategy is\n"
-     "          # still forced to Recreate by the patch above (RWO Longhorn PVC).\n"
-     "          - target:\n              kind: Deployment\n              name: anythingllm\n"
-     "            patch: |\n              apiVersion: apps/v1\n              kind: Deployment\n"
-     "              metadata:\n                name: anythingllm\n              spec:\n"
-     "                template:\n                  spec:\n                    strategy: null\n")
-edit("kubernetes/apps/media/jellyfin/app/helmrelease.yaml",
-     "    podSecurityContext:\n      privileged: true\n      capabilities:\n        add:\n          - SYS_ADMIN\n"
-     "      allowPrivilegeEscalation: true\n      runAsUser: 0\n",
-     "    podSecurityContext:\n      runAsUser: 0\n")
-P0EDIT
-ls -l /private/tmp/claude-501/helm-drift-detection/
-```
-
-3. **Known-bad demonstration + baseline A (before P0).**
-
-```bash
-cd /Users/mu/code/cberg-home-nextgen
-python3 /private/tmp/claude-501/helm-drift-detection/ssa-gate-check.py; echo "rc=$?"
-# MUST print SSA-GATE FAIL with exactly two FAIL rows (ai/anythingllm, media/jellyfin) and rc=1:
-# this is the identical command that must print PASS in step 6, so the gate is shown able to FAIL.
-# (If it already prints PASS, someone fixed both: skip P0, go to step 6.)
-python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py snapshot A; echo "rc=$?"
-# rc=0 "SNAPSHOT A". rc=2 = NOT-SETTLED (reasons printed): re-run until 0 (Monitor tool;
-# no sleep loops). NEVER proceed on rc=2.
-```
-
-4. **P0 — edit, prove, commit** (one call; anchors asserted exactly once, a
-   file changed since this review STOPs instead of mis-editing):
-
-```bash
-cd /Users/mu/code/cberg-home-nextgen
-git status --porcelain kubernetes/apps/ai/anythingllm/app/helmrelease.yaml kubernetes/apps/media/jellyfin/app/helmrelease.yaml  # empty
-python3 /private/tmp/claude-501/helm-drift-detection/p0-edit.py
-git diff --stat -- kubernetes/apps/ai/anythingllm/app/helmrelease.yaml kubernetes/apps/media/jellyfin/app/helmrelease.yaml   # 2 files, +12/-2 and -5
-```
-
-   Then run the §3.0.1 step 3 and §3.0.2 step 2 proof blocks unchanged (both
-   expect `serverside-applied (server dry run)`; the review re-ran them on
-   2026-09-26 and ALSO ran the negative control — the unedited anythingllm
-   render is rejected with `field not declared in schema`). Commit, in ONE call:
-
-```bash
-cd /Users/mu/code/cberg-home-nextgen
-M=/private/tmp/claude-501/helm-drift-detection/msg-helm-drift-detection-p0-$(date +%s).txt
-printf '%s\n' "fix(anythingllm,jellyfin): make stored manifests pass server-side apply" "" \
-  "anythingllm: the chart renders .Values.strategy under the pod spec (and defaults it)," \
-  "so drop our copy and delete the pod-level key in the postRenderer; the Deployment" \
-  "strategy stays Recreate (RWO PVC). jellyfin: privileged/capabilities/" \
-  "allowPrivilegeEscalation are container-only keys, removed from podSecurityContext" \
-  "(the container securityContext already carries them). Both were rejected by a" \
-  "server-side dry-run apply, the comparison Flux drift detection performs." \
-  "Phase 0 of runbooks/maintenance/plans/helm-drift-detection.md." > "$M"
-git commit --only kubernetes/apps/ai/anythingllm/app/helmrelease.yaml kubernetes/apps/media/jellyfin/app/helmrelease.yaml -F "$M"
-git show --stat HEAD          # exactly these 2 files
-git log -1 --format=%s        # the subject above, not someone else's
-git push
-```
-
-5. **P0 verification.**
-
-```bash
-cd /Users/mu/code/cberg-home-nextgen
-python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py compare A --no-explain; echo "rc=$?"
-# rc=2: not settled yet, re-run. Then REQUIRED: rc=1 listing ai/anythingllm AND media/jellyfin
-# UNEXPLAINED (proves both Helm upgrades happened AND that the revision gate can FAIL).
-# Any OTHER release listed: run `rev-gate.py compare A` (with explanation) and read it before going on.
-```
-
-   Then §4.0.
-6. **P1 gate** — `python3 /private/tmp/claude-501/helm-drift-detection/ssa-gate-check.py; echo "rc=$?"` MUST print
-   `SSA-GATE PASS` (rc 0: script exit 0, releases == HelmRelease count, 0 FAIL
-   rows). The two DIFF rows are expected. Anything else: STOP (the opt-out label
-   of §3.0 is a stop-gap only on the operator's say-so).
-7. **Baseline B** — `python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py snapshot B` -> rc 0 (re-run on 2).
-8. **P1** — §3.1.1 edit, §3.1.2 render proof; commit `kubernetes/flux/cluster/ks.yaml`
-   ALONE (not this plan file — the close-out in step 10 carries the plan, so a
-   P1 revert stays one file), with a message file exactly as in step 4
-   (`msg-helm-drift-detection-p1-$(date +%s).txt`), `git show --stat HEAD`
-   (1 file), `git log -1 --format=%s`, push, then the §3.1.2 nudge.
-9. **P1 verification** — `python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py compare B --require-warn; echo "rc=$?"`.
-   rc 2 while propagating (re-run). rc 0 = every HelmRelease has
-   `mode: warn`, `observedGeneration == generation`, `Ready=True`, a `Drifted`
-   condition (detection RAN), and no unexplained revision change (the pre-P1
-   state fails `--require-warn` on every release, measured 2026-09-26, so this
-   cannot pass on a stale read). rc 1 = STOP -> §5 P1 revert. Then §4.1
-   assertions 1 and 3.
-10. **Close-out commit (this plan file only):** `status: awaiting-soak` (NOT
-    `vetted`: `run-now.py` refuses awaiting-soak, so no NOW run can collapse the
-    soak), `window: null`, `generated: "2026-09-26"`, the §3.1.3 day-1 finding id
-    in `finding_refs`. P2 not before 2026-10-03 and only after the inventory spans
-    a weekend window (§2.2).
-
-Rollback today: P1 revert first, then P0 revert — two separate `git revert`s (§5).
-
-#### 3.0.1 `kubernetes/apps/ai/anythingllm/app/helmrelease.yaml`
-
-The chart (`mintplex-labs/anythingllm` 1.0.0, `templates/deployment.yaml`
-lines 35-38) renders `{{ .Values.strategy }}` **under the pod spec**, and its
-own `values.yaml` (lines 89-91) defaults `strategy.type: Recreate`. So
-deleting our `values.strategy` block (lines 78-79) alone does NOT remove the
-bad field — the chart default re-renders it (proven 2026-09-14 with
-`helm template` minus the value: pod-level `strategy: {type: Recreate}` still
-present). Setting `strategy: null` in HR values does not reach Helm either:
-kustomize-controller applies the HelmRelease with SSA, and a null on a field
-it owns REMOVES the key, so Helm sees the chart default again (proven with a
-server-side dry-run of the edited HR). The fix that is provably correct is
-therefore: **remove the values block (it is not ours) AND delete the mis-placed
-field in the postRenderer that already owns this Deployment's shape**, with a
-strategic-merge `null` (deletes the key whether the chart renders it or not —
-robust across a future chart fix, unlike a JSON6902 `remove`, which errors on
-a missing path).
-
-1. Delete lines 78-79 (`strategy:` / `  type: Recreate`) from `values:`.
-2. Append a second patch to the existing `postRenderers[0].kustomize.patches`
-   list (after the JSON6902 patch that carries `replace /spec/strategy`):
-
-```yaml
-          # The chart renders `.Values.strategy` under the POD spec (templates/
-          # deployment.yaml:35-38) and defaults it to Recreate in its own values.yaml,
-          # so the field is present even with no value of ours. A pod spec has no
-          # `strategy`: a server-side apply rejects the whole Deployment with
-          # `.spec.template.spec.strategy: field not declared in schema` — invisible
-          # to Helm's 3-way merge, fatal to Flux drift detection (plan
-          # helm-drift-detection §3.0.1). Strategic-merge null deletes the key
-          # whether or not the chart renders it; the Deployment-level strategy is
-          # still forced to Recreate by the patch above (RWO Longhorn PVC).
-          - target:
-              kind: Deployment
-              name: anythingllm
-            patch: |
-              apiVersion: apps/v1
-              kind: Deployment
-              metadata:
-                name: anythingllm
-              spec:
-                template:
-                  spec:
-                    strategy: null
-```
-
-3. **Re-prove before committing** — the RWO Multi-Attach deadlock recorded in
-   the file's own comment (2026-09-07) is what returns if the Deployment-level
-   `Recreate` is lost:
-
-```bash
-cd /Users/mu/code/cberg-home-nextgen
-MREPO=$(kubectl get helmrepository -n flux-system mintplex-labs -o jsonpath='{.spec.url}')
-python3 -c "
-import yaml;hr=yaml.safe_load(open('kubernetes/apps/ai/anythingllm/app/helmrelease.yaml'))
-yaml.safe_dump(hr['spec']['values'],open('/tmp/allm-values.yaml','w'))
-yaml.safe_dump({'resources':['all.yaml'],'patches':hr['spec']['postRenderers'][0]['kustomize']['patches']},open('/tmp/allm-kz.yaml','w'))"
-mkdir -p /tmp/allm && helm template anythingllm anythingllm --repo "$MREPO" --version 1.0.0 -n ai -f /tmp/allm-values.yaml > /tmp/allm/all.yaml \
-  && cp /tmp/allm-kz.yaml /tmp/allm/kustomization.yaml && (cd /tmp/allm && kustomize build .) > /tmp/allm-out.yaml
-grep -n -A1 'strategy' /tmp/allm-out.yaml            # EXACTLY one hit, at Deployment level: "strategy:\n  type: Recreate"
-python3 -c "
-import yaml
-for d in yaml.safe_load_all(open('/tmp/allm-out.yaml')):
-    if d and d['kind']=='Deployment': print(yaml.safe_dump(d))" | kubectl apply --server-side --dry-run=server --field-manager=helm-controller --force-conflicts -n ai -f -
-# expect: deployment.apps/anythingllm serverside-applied (server dry run)
-```
-
-(Both proven 2026-09-14 on the exact edit above, with the chart rendering the
-pod-level field AND with it absent: `kustomize build` exit 0, one
-Deployment-level `strategy: Recreate`, dry-run accepted.)
-
-#### 3.0.2 `kubernetes/apps/media/jellyfin/app/helmrelease.yaml`
-
-`podSecurityContext` (lines 78-84) carries `privileged`, `capabilities`,
-`allowPrivilegeEscalation` — container-only keys; the chart copies the block
-verbatim into `spec.template.spec.securityContext`, which the API server
-rejects. The container `securityContext` (lines 98-105) already carries all
-three, so nothing about the running container changes.
-
-1. Delete from `podSecurityContext` exactly: `privileged: true`, the
-   `capabilities:` block (3 lines), `allowPrivilegeEscalation: true`. Keep
-   `runAsUser: 0`, `runAsGroup: 0`, `fsGroup: 0`. Leave `securityContext`
-   (container) untouched. `deploymentStrategy: Recreate` (line 118) stays.
-2. Re-prove:
-
-```bash
-JREPO=$(kubectl get helmrepository -n flux-system jellyfin -o jsonpath='{.spec.url}')
-python3 -c "
-import yaml;hr=yaml.safe_load(open('kubernetes/apps/media/jellyfin/app/helmrelease.yaml'))
-yaml.safe_dump(hr['spec']['values'],open('/tmp/jf-values.yaml','w'))"
-helm template jellyfin jellyfin --repo "$JREPO" --version 3.2.0 -n media -f /tmp/jf-values.yaml > /tmp/jf-out.yaml
-grep -n -A8 'securityContext' /tmp/jf-out.yaml       # pod-level: fsGroup/runAsGroup/runAsUser ONLY; container-level: unchanged (privileged, SYS_ADMIN, ...)
-python3 -c "
-import yaml
-for d in yaml.safe_load_all(open('/tmp/jf-out.yaml')):
-    if d and d['kind']=='Deployment': print(yaml.safe_dump(d))" | kubectl apply --server-side --dry-run=server --field-manager=helm-controller --force-conflicts -n media -f -
-# expect: deployment.apps/jellyfin serverside-applied (server dry run)   (proven 2026-09-14)
-```
-
-#### 3.0.3 Land it (one commit, two files; nightly window or with operator GO)
-
-```bash
-git commit --only kubernetes/apps/ai/anythingllm/app/helmrelease.yaml kubernetes/apps/media/jellyfin/app/helmrelease.yaml \
-  -m "fix(anythingllm,jellyfin): make stored manifests pass server-side apply
-
-anythingllm: chart renders .Values.strategy under the pod spec (and defaults it),
-so drop our copy and delete the pod-level key in the postRenderer; Deployment
-strategy stays Recreate (RWO PVC). jellyfin: privileged/capabilities/
-allowPrivilegeEscalation are container-only keys, removed from podSecurityContext
-(container securityContext already carries them). Both were rejected by
-kubectl apply --server-side --dry-run=server (field not declared in schema),
-which is the comparison Flux drift detection performs. Prereq for
-runbooks/maintenance/plans/helm-drift-detection.md phase 1."
-git show --stat HEAD                                   # exactly 2 files
-git push
-# Rollout: values changed -> Helm upgrade. Measured 2026-09-26: both removed keys were already
-# pruned from the LIVE pod templates (the API server dropped them), so the rendered pod
-# template does not change and NO restart is expected. rollout status passes either way and
-# is NOT the gate — the stored-manifest dry-run (§4.0) and the revision bump (§3.0.0 step 5) are:
-kubectl rollout status deploy/anythingllm -n ai --timeout=5m
-kubectl rollout status deploy/jellyfin -n media --timeout=5m
-```
-
-Verification and rollback for P0: §4.0 and §5.
-
-### 3.1 Phase 1 — `mode: warn` cluster-wide (nightly-safe once §2.1 is clean)
-
-#### 3.1.1 The edit
-
-```yaml
-    - # Cluster-wide Helm drift detection (plan helm-drift-detection, phase 1: warn).
+F = sys.argv[1] if len(sys.argv) > 1 else "/Users/mu/code/cberg-home-nextgen/kubernetes/flux/cluster/ks.yaml"
+ANCHOR = ("      target:\n        group: kustomize.toolkit.fluxcd.io\n        kind: Kustomization\n"
+          "        labelSelector: substitution.flux.home.arpa/disabled notin (true)\n")
+BLOCK = """    - # Cluster-wide Helm drift detection (plan helm-drift-detection, phase 1: warn).
       # Every child Kustomization gets a patch that stamps spec.driftDetection onto
       # each HelmRelease it renders. `warn` only compares (server-side dry-run) and
       # emits DriftDetected events + a Drifted condition; it never patches anything.
-      # A release whose stored manifest the API server REJECTS fails its reconcile
-      # in warn mode (Ready=False) — every manifest must pass the plan's §2.1 gate
-      # before this lands.
+      # The child patch MUST stay a JSON6902 `op: add`: a strategic-merge patch
+      # re-serialises the HelmRelease and drops bare `key:` (implicit-null) values
+      # from spec.values -> Helm upgrade (influxdb/homepage/adguard-home, 2026-09-26,
+      # fbc220f7 reverted in 5bdd3164).
       # OPT-OUT: label the app's ks.yaml with
       #   drift-detection.flux.home.arpa/disabled: "true"
-      # and its own helmrelease.yaml owns the field (this patch REPLACES, it does
-      # not merge — a per-HR ignore list, or a child's own spec.patches, would be
-      # overwritten).
+      # and its own helmrelease.yaml owns the field (the child's spec.patches list is
+      # REPLACED by this one).
       patch: |-
         apiVersion: kustomize.toolkit.fluxcd.io/v1
         kind: Kustomization
@@ -1006,12 +1162,176 @@ Verification and rollback for P0: §4.0 and §5.
         spec:
           patches:
             - patch: |-
-                apiVersion: helm.toolkit.fluxcd.io/v2
+                - op: add
+                  path: /spec/driftDetection
+                  value:
+                    mode: warn
+              target:
+                group: helm.toolkit.fluxcd.io
                 kind: HelmRelease
-                metadata:
-                  name: not-used
-                spec:
-                  driftDetection:
+      target:
+        group: kustomize.toolkit.fluxcd.io
+        kind: Kustomization
+        labelSelector: drift-detection.flux.home.arpa/disabled notin (true)
+"""
+t = open(F).read()
+if "driftDetection" in t:
+    sys.exit("STOP: ks.yaml already carries driftDetection")
+if t.count(ANCHOR) != 1 or not t.endswith(ANCHOR):
+    sys.exit("STOP: ks.yaml no longer ends with the substitution patch target -- file changed since review")
+open(F, "w").write(t + BLOCK)
+print("edited", F)
+P1EDIT
+ls -l /private/tmp/claude-501/helm-drift-detection/
+```
+
+3. **Known-bad demonstrations — every new gate must be seen to FAIL** on the
+   identical command that must PASS in step 6/8:
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+D=/private/tmp/claude-501/helm-drift-detection
+# 3a. Render gate with the 2026-09-26 child patch shape (strategic merge). ~10 s.
+.venv/bin/python3 $D/render-gate.py --patch smp; echo "rc=$?"
+# MUST print RENDER-GATE FAIL, rc=1, naming exactly databases/influxdb, default/homepage,
+# network/adguard-home with "/spec/values/... (missing in CAND)" rows (11 paths; measured
+# 2026-09-28). A DIFFERENT set means the bare-key null inventory in git changed since
+# 2026-09-28 — re-run the §1.5 enumeration and record it; a PASS here means no bare-key
+# null is left anywhere (then 3b/3c alone carry the fail-ability demonstration).
+# 3b. Parent gate against the reverted P1 shape:
+git show fbc220f7:kubernetes/flux/cluster/ks.yaml > $D/ks-fbc220f7.yaml
+git show HEAD:kubernetes/flux/cluster/ks.yaml > $D/ks-before.yaml
+.venv/bin/python3 $D/parent-gate.py $D/ks-before.yaml $D/ks-fbc220f7.yaml > $D/pg-fbc.txt; echo "rc=$?"; tail -2 $D/pg-fbc.txt
+# MUST print "patched=0 fails=<child count>" + PARENT-GATE FAIL (every child's patch is the SMP
+# mapping, not the JSON6902 op). Measured 2026-09-28: fails=139, rc=1.
+# 3c. Values gate against a doctored snapshot (one null leaf deleted):
+.venv/bin/python3 $D/values-gate.py snapshot DEMO
+.venv/bin/python3 -c "
+import json; f='$D/values-DEMO.json'; d=json.load(open(f))
+del d['databases/influxdb']['values']['backup']['resources']['requests']; json.dump(d, open(f,'w'))"
+.venv/bin/python3 $D/values-gate.py compare DEMO; echo "rc=$?"
+# MUST print "FAIL databases/influxdb: /spec/values/backup/resources/requests (added)" +
+# VALUES-GATE FAIL, rc=1 (measured 2026-09-28). If influxdb's null moved, pick any path from
+# `.venv/bin/python3 $D/values-gate.py snapshot X` output's null leaves instead.
+```
+
+4. **SSA gate** — `python3 /private/tmp/claude-501/helm-drift-detection/ssa-gate-check.py; echo "rc=$?"`
+   MUST print `SSA-GATE PASS` (rc 0: script exit 0, releases == HelmRelease
+   count, 0 FAIL rows). The two DIFF rows (GpuDevicePlugin, Prometheus) are
+   expected. Anything else: STOP.
+5. **Baselines, immediately before the edit:**
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py snapshot B; echo "rc=$?"      # rc 0; re-run on 2 (never proceed on 2)
+.venv/bin/python3 /private/tmp/claude-501/helm-drift-detection/values-gate.py snapshot B      # "126 HelmReleases, 18 null leaves" on 2026-09-28
+```
+
+6. **Edit + prove (pre-commit; nothing is pushed if either gate fails):**
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+D=/private/tmp/claude-501/helm-drift-detection
+git status --porcelain kubernetes/flux/cluster/ks.yaml                 # empty
+git show HEAD:kubernetes/flux/cluster/ks.yaml > $D/ks-before.yaml
+.venv/bin/python3 $D/p1-edit.py                                        # "edited ..."; STOP text = file changed since review
+git diff --stat -- kubernetes/flux/cluster/ks.yaml                    # 1 file changed, 31 insertions(+)
+git diff -- kubernetes/flux/cluster/ks.yaml | grep -c '^-[^-]'        # 0 (pure append)
+.venv/bin/python3 $D/parent-gate.py $D/ks-before.yaml kubernetes/flux/cluster/ks.yaml; echo "rc=$?"
+# MUST: "child_kustomizations=N patched=N fails=0" (N=139 on 2026-09-28) + PARENT-GATE PASS, rc 0
+.venv/bin/python3 $D/render-gate.py --patch json6902; echo "rc=$?"
+# MUST: "rendered_helmreleases=H live_helmreleases=H non_pass=0" (H=126 on 2026-09-28) + RENDER-GATE PASS, rc 0
+# Either FAILS: git checkout -- kubernetes/flux/cluster/ks.yaml, STOP, read the paths printed.
+```
+
+   Why the two gates together are the proof: `parent-gate` proves the edited
+   `ks.yaml` hands EVERY child exactly `[{op: add, path: /spec/driftDetection,
+   value: {mode: warn}}]` and changes nothing else in any child or any other
+   object `cluster-apps` renders; `render-gate` proves that exact child patch,
+   applied to every live child spec, changes nothing in any rendered object
+   except adding `spec.driftDetection` — null-vs-missing distinguished, so the
+   2026-09-26 failure is the thing it measures (3a).
+
+7. **Commit `kubernetes/flux/cluster/ks.yaml` ALONE** (the close-out in step 10
+   carries this plan, so a P1 revert stays one file). Message file first; the
+   commit in a shell that has NOT sourced `sweep-pg-dsn.sh` (a sourced DSN
+   breaks the pre-commit hook):
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+M=/private/tmp/claude-501/helm-drift-detection/msg-helm-drift-detection-p1b-$(date +%s).txt
+printf '%s\n' "feat(flux): helm drift detection phase 1 (re-run) - mode: warn via JSON6902" "" \
+  "One parent patch on cluster-apps; each child Kustomization adds" \
+  "spec.driftDetection {mode: warn} to its HelmReleases with a JSON6902 op:add," \
+  "never a strategic-merge patch: the SMP form dropped bare key: nulls from" \
+  "spec.values and upgraded influxdb/homepage/adguard-home (fbc220f7, reverted" \
+  "in 5bdd3164). Pre-commit gates: parent-gate + render-gate PASS over all" \
+  "children, 0 changed values; SSA gate PASS. Detection only, no correction." \
+  "Plan: runbooks/maintenance/plans/helm-drift-detection.md section 3.0.0" > "$M"
+git commit --only kubernetes/flux/cluster/ks.yaml -F "$M"
+git show --stat HEAD          # exactly kubernetes/flux/cluster/ks.yaml
+git log -1 --format=%s        # the subject above — amend BEFORE push if not
+git push
+flux reconcile kustomization flux-system --with-source   # the flux-upgrade.md-sanctioned nudge
+```
+
+8. **P1 verification** (Monitor tool re-runs; no sleep loops):
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py compare B --require-warn; echo "rc=$?"
+# rc 2 while propagating (re-run). rc 0 = every HelmRelease has mode: warn,
+# observedGeneration == generation, Ready=True, a Drifted condition, and NO unexplained
+# revision change (the P1 commit touches no app path, so ANY upgrade is UNEXPLAINED —
+# exactly how it caught the 2026-09-26 run). rc 1 = STOP -> §5 P1 revert NOW.
+.venv/bin/python3 /private/tmp/claude-501/helm-drift-detection/values-gate.py compare B; echo "rc=$?"
+# rc 0 "VALUES-GATE PASS: 126 HelmReleases, 0 difference(s) outside spec.driftDetection".
+# On 2026-09-26 this would have printed 11 "(removed)" rows on 3 HelmReleases.
+# rc 1 = STOP -> §5 P1 revert NOW (a values change IS a Helm upgrade within seconds).
+```
+
+   Then §4.1 assertions 1 and 3.
+9. **If step 8 fails**, the revert is §5 "P1 revert"; after it, re-run both
+   step-8 commands: values-gate PASS again, and every UNEXPLAINED release in
+   rev-gate reverted to the pre-P1 values (a second upgrade, as on 2026-09-26 —
+   expected, not a new fault).
+10. **Close-out commit (this plan file only):** `status: awaiting-soak` (NOT
+    `vetted`: `run-now.py` refuses awaiting-soak, so no NOW run can collapse the
+    soak), `window: null`, `generated: "<today>"`, the §3.1.3 day-1 finding id
+    in `finding_refs`. P2 not before P1 + 7 days and only after the inventory
+    spans a weekend window (§2.2).
+
+### 3.1 Phase 1 — `mode: warn` cluster-wide (landed ONLY via §3.0.0; operator GO)
+
+#### 3.1.1 The edit
+
+Appended verbatim to `spec.patches` of `cluster-apps` by `p1-edit.py`
+(§3.0.0 step 2/6) — a text append, the file is never re-serialised:
+
+```yaml
+    - # Cluster-wide Helm drift detection (plan helm-drift-detection, phase 1: warn).
+      # Every child Kustomization gets a patch that stamps spec.driftDetection onto
+      # each HelmRelease it renders. `warn` only compares (server-side dry-run) and
+      # emits DriftDetected events + a Drifted condition; it never patches anything.
+      # The child patch MUST stay a JSON6902 `op: add`: a strategic-merge patch
+      # re-serialises the HelmRelease and drops bare `key:` (implicit-null) values
+      # from spec.values -> Helm upgrade (influxdb/homepage/adguard-home, 2026-09-26,
+      # fbc220f7 reverted in 5bdd3164).
+      # OPT-OUT: label the app's ks.yaml with
+      #   drift-detection.flux.home.arpa/disabled: "true"
+      # and its own helmrelease.yaml owns the field (the child's spec.patches list is
+      # REPLACED by this one).
+      patch: |-
+        apiVersion: kustomize.toolkit.fluxcd.io/v1
+        kind: Kustomization
+        metadata:
+          name: not-used
+        spec:
+          patches:
+            - patch: |-
+                - op: add
+                  path: /spec/driftDetection
+                  value:
                     mode: warn
               target:
                 group: helm.toolkit.fluxcd.io
@@ -1024,36 +1344,12 @@ Verification and rollback for P0: §4.0 and §5.
 
 #### 3.1.2 Land it
 
-```bash
-cd /Users/mu/code/cberg-home-nextgen
-# 0. §2.1 gate: /private/tmp/claude-501/helm-drift-detection/ssa-gate-check.py prints SSA-GATE PASS, run TODAY (§3.0.0 step 6).
-# 1. Re-prove the render against TODAY's tree (the §1.4 proof is dated):
-cp kubernetes/flux/cluster/ks.yaml /tmp/ks-before.yaml
-#    ...apply the §3.1.1 edit...
-flux build kustomization cluster-apps --path ./kubernetes/apps --kustomization-file kubernetes/flux/cluster/ks.yaml \
-  | grep -c 'mode: warn'                     # == child Kustomizations: kubectl get ks -A --no-headers | wc -l, minus 3
-                                             # (flux-system, cluster-meta, cluster-apps) — 138 on 2026-09-26
-# 2. In THIS plan file: status: vetted -> scheduled/executing per the window agent, and
-#    generated: "<today>" (stale-check clock). Commit both files, nothing else:
-git commit --only kubernetes/flux/cluster/ks.yaml runbooks/maintenance/plans/helm-drift-detection.md \
-  -m "feat(flux): helm drift detection phase 1 — mode: warn on every HelmRelease
-
-One parent patch on cluster-apps; each child Kustomization stamps
-spec.driftDetection.mode=warn onto its HelmReleases. Detection only:
-DriftDetected events + Drifted condition, no correction. All 124 stored
-manifests pass a server-side dry-run (plan §2.1). Inventory soak >= 7 days
-before phase 2. Plan: runbooks/maintenance/plans/helm-drift-detection.md"
-git show --stat HEAD                          # exactly 2 files
-git push
-# 3. Optional, to fit the window: compress the 10-minute source interval
-flux reconcile kustomization flux-system --with-source
-# 4. Propagation (parent -> 138 children -> 126 HRs), typically < 5 min after the source pull.
-#    NOT `watch` (interactive; never returns in an agent shell). Re-run this one-shot check
-#    (Monitor tool) until rc != 2 — it is also §4.1 assertions 0 and 2:
-python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py compare B --require-warn; echo "rc=$?"
-# 5. rc=1 naming a Ready=False release is a manifest §2.1 should have caught; opt that
-#    child out (label) and re-run §2.1 — or revert P1 (§5).
-```
+Only through §3.0.0 steps 1-10 (known-bad demonstrations, SSA gate, baselines,
+`p1-edit.py`, parent-gate + render-gate PASS, commit `ks.yaml` ALONE, push,
+rev-gate + values-gate). The 2026-09-26 text of this subsection (commit plan +
+`ks.yaml` together, `grep -c 'mode: warn'` as the render proof) is retired: a
+count of `mode: warn` lines is exactly the proof that PASSED on 2026-09-26 while
+three HelmReleases lost values.
 
 #### 3.1.3 Inventory collection (runs for the whole soak, not just in the window)
 
@@ -1184,15 +1480,18 @@ finding with the DaemonSet generation before/after.
 
 #### 3.2.1 The ignore rules
 
-Edit the SAME nested patch: keep `mode: warn`, add `ignore:`. **Only rules
+Edit the SAME nested patch: keep `mode: warn`, add `ignore:` **inside the
+JSON6902 `value:`** (the op, path and target lines do not change — never
+convert it back to a strategic-merge document, §1.5). **Only rules
 with an inventory line survive.** The catalogue below gives the concrete
 syntax for each known mutator (all shapes accepted by a server-side dry-run of
 a HelmRelease on v1.6.3, 2026-09-14); JSON Pointer per RFC 6901, `/` inside a
 key escaped as `~1`.
 
 ```yaml
-                spec:
-                  driftDetection:
+                - op: add
+                  path: /spec/driftDetection
+                  value:
                     mode: warn
                     ignore:
                       # B) kubectl rollout restart (nightly frigate-restart 02:30, docs-site-refresh 05:30,
@@ -1262,9 +1561,14 @@ vars stay on the 10 Deployments until their next rollout (they are foreign
 fields, not drift); future reloads stamp the annotation instead. Same commit
 as the P2 rule, since the rule and the strategy are one decision.
 
-Land it exactly like §3.1.2 (re-prove with `flux build`, `git commit --only`
-of `ks.yaml` + this plan with `generated:` refreshed (+ the reloader HR if
-switched), push, watch). Then **soak again until the §2.3 gate is clean** — a
+Land it through §3.0.0 steps 4-8 with the P2 value: snapshots B2, edit, then
+`parent-gate.py <HEAD ks.yaml> kubernetes/flux/cluster/ks.yaml '<P2 value JSON>'`
+and `render-gate.py --patch json6902 --value '<P2 value JSON>'` both PASS
+(the P2 shape was dry-run 2026-09-28: PASS), `git commit --only` of `ks.yaml`
+(+ the reloader HR if switched — then rev-gate EXPLAINS reloader's upgrade by
+that commit, and values-gate lists `kube-system/reloader` as its ONE expected
+difference), push, rev-gate + values-gate. This plan's `generated:` is
+refreshed in the close-out commit. Then **soak again until the §2.3 gate is clean** — a
 rule set that still leaves `Drifted=True` somewhere is not finished.
 
 ### 3.3 Phase 3 — `mode: enabled` cluster-wide (attended)
@@ -1273,10 +1577,13 @@ rule set that still leaves `Drifted=True` somewhere is not finished.
    **What WILL be corrected on the first reconcile is exactly that list** —
    every `Drifted=True` object not covered by a P2 ignore rule; the contract
    is that it is empty, and if it is not, the plan stops here.
-2. Edit: `mode: warn` -> `mode: enabled` in the nested patch. Nothing else in
-   `ks.yaml`. In this plan: `generated: "<today>"`.
-3. `flux build ... | grep -c 'mode: enabled'` == child count; `git commit --only`
-   (ks.yaml + plan); push; `flux reconcile kustomization flux-system --with-source`.
+2. Edit: `mode: warn` -> `mode: enabled` inside the JSON6902 `value:`. Nothing
+   else in `ks.yaml`. In this plan: `generated: "<today>"` (close-out commit).
+3. §3.0.0 steps 5-8 with the P3 value: parent-gate + render-gate with
+   `--value '<P3 value JSON>'` PASS; `git commit --only kubernetes/flux/cluster/ks.yaml`;
+   push; `flux reconcile kustomization flux-system --with-source`; rev-gate +
+   values-gate PASS (a values change in P3 would be an upgrade AND a correction
+   baseline shift in the same reconcile).
 4. For the first full HR interval (30 min) watch, in this order:
 
 ```bash
@@ -1358,7 +1665,7 @@ for d in yaml.safe_load_all(sys.stdin):
 # HelmRelease reconciled its new generation successfully — the dry-run diff step did not
 # reject any stored manifest. Exactly one line, "124 True" (or the premise range).
 kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | sort | uniq -c
-python3 runbooks/plan-premises.py helm-drift-detection            # all 8 PASS, again, AFTER P1
+python3 runbooks/plan-premises.py helm-drift-detection            # all 10 PASS, again, AFTER P1
 
 # Shape: the field landed everywhere
 kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.driftDetection.mode}{"\n"}{end}' | sort | uniq -c   # "124 warn" (no blank line)
@@ -1382,6 +1689,11 @@ python3 /private/tmp/claude-501/helm-drift-detection/rev-gate.py compare B --req
 # baseline: 2 UNEXPLAINED -> rc=1, and the live intel-device-plugin / mqttx-web bumps of the
 # main run -> EXPLAINED by their commits. Also asserts assertion 0 (Ready=True on all) with
 # observedGeneration == generation, so a stale Ready cannot pass it.
+
+# CONTENTS ASSERTION 2b (added 2026-09-28): no HelmRelease spec changed except driftDetection —
+# the direct measurement of the 2026-09-26 failure (null leaves removed from spec.values):
+.venv/bin/python3 /private/tmp/claude-501/helm-drift-detection/values-gate.py compare B; echo "rc=$?"   # rc=0 VALUES-GATE PASS
+# Shown able to fail in §3.0.0 step 3c; on 2026-09-26 it would have printed 11 "(removed)" rows.
 
 # CONTENTS ASSERTION 3 (positive control, warn does not correct): scale a stateless,
 # PVC-less, helm-managed Deployment UP by one and wait one reconcile.
@@ -1454,7 +1766,15 @@ Per-phase notes:
   so P1 must NOT run until the fix is re-landed (the §2.1 gate says so). If
   only one app misbehaves, revert that file alone. The anythingllm
   Deployment-level `Recreate` is present in both states (proven §3.0.1).
-- **P1 revert:** `Drifted` conditions linger on HR status until each HR's
+- **P1 revert (re-planned 2026-09-28):** `git revert --no-edit <P1 sha>` —
+  one file, `kubernetes/flux/cluster/ks.yaml`. Confirm: `values-gate.py compare B`
+  -> PASS (the revert removes only `spec.driftDetection`, which the gate
+  ignores) and `kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.driftDetection.mode}{"\n"}{end}' | sort -u`
+  -> one empty line. If step 8 had already caught upgrades, the revert
+  re-upgrades those releases back to the git values (2026-09-26: rev 12/31/23)
+  — expected; `helm get values -n <ns> <rel> -o json` then shows the null leaves
+  back (§1.5 table).
+  `Drifted` conditions linger on HR status until each HR's
   next reconcile, then disappear (the field is unset). Harmless; do not chase
   them. An HR that went `Ready=False` in P1 recovers on the revert as well —
   but the right fix is its manifest, not the revert.
@@ -1562,6 +1882,18 @@ a reboot day. P2's GPU DaemonSet roll (§3.2.0) should also not share the
 Talos Sunday: a plugin re-registration during a node drain is one more
 variable.
 
+### 6.7 Flux version changes and other `ks.yaml` editors (added 2026-09-28)
+
+The P1 safety argument rests on how kustomize applies a JSON6902 vs a
+strategic-merge patch, measured with flux CLI v2.9.0 against
+kustomize-controller v1.9.4. `flux-fleet-0.60.0` (operator/instance bump) and
+any distribution change can move that; both are now in `conflicts_with`, and
+the premises `flux-distribution-is-2.9` / `kustomize-controller-is-v1.9` (+ the step-1 CLI check) refuse a stale
+proof. `flux-reconciler-impersonation` edits the same file with
+`yq -i` — a full re-serialisation of `ks.yaml`; if it lands between P1 and
+P3, re-run parent-gate on its result (the parsed comparison tolerates a
+reformatted block scalar, a changed op list does not).
+
 ### 6.6 What Phase 3 changes for everyone, permanently
 
 From Phase 3 on, the in-pod-edit exception in `CLAUDE.md` still applies to
@@ -1576,7 +1908,7 @@ commit.
 | Phase | In-window work | est_min | Window class | Why that class |
 |---|---|---|---|---|
 | 0 — SSA-clean the two charts | 2 file edits, `helm template` + `kustomize build` + dry-run proofs, commit, 2 x Recreate rollout, §4.0 | 20 | **nightly** (unattended-safe with operator GO) or sat-attended | same blast radius as any image bump of these two apps; git revert; no shared infra |
-| 1 — warn | §2.1 gate (~3 min), edit, prove render, commit, propagate, §4.1 (incl. Ready re-check + positive control) | 20 | **nightly** (unattended-safe) | controller only reads once §2.1 is clean; 0 Alert objects so events cannot page; single-file git revert; positive control is a stateless +1 replica |
+| 1 — warn | §3.0.0: known-bad demos (~1 min), §2.1 SSA gate (~3 min), snapshots, edit, parent+render gates (~1 min), commit, propagate, rev+values gates, §4.1 | 30 | **dedicated on-demand run or the LAST plan of an attended window, operator GO** (was "nightly, unattended-safe" — that claim failed on 2026-09-26) | controller only reads once §2.1 is clean; the pre-commit gates now prove 0 value changes; but it must be the day's last HelmRelease change for the attribution gates, which the nightly scheduler cannot guarantee |
 | soak | >= 7 calendar days, snapshots per nightly window + sweep | 0 | — | inventory must span both weekend windows, Step 0 upgrades, both restart CronJobs |
 | 2 — retire day-1 diffs + ignore rules | §3.2.0 two hand re-applies (GPU DaemonSet roll ~5 min + checks), rules from inventory, prove render, commit, §4.2 (+ Reloader switch if needed) | 40 | **sat-attended / sun-attended** (not nightly: the DaemonSet roll) | still warn; rule authoring is human work done BEFORE the window from the exported inventory |
 | soak | until §2.3 is clean, min 2 nightly windows | 0 | — | proves the rule set, not the calendar |
@@ -1612,6 +1944,12 @@ soaks into a daily nightly cadence (`maintenance-windows.yaml` soak rule).
    field has been identical across revisions since at least rev 38). The
    mechanism (3-way merge never re-sends an unchanged field) is sufficient
    for the plan; the history is not.
+7. **CLI-vs-controller kustomize equivalence is inferred, not proven for
+   JSON6902.** The local `flux build` reproduced the controller's SMP null
+   drop exactly (§1.5), which is strong evidence the two share the relevant
+   kustomize code; that the controller also keeps the nulls under JSON6902 is
+   observed only after the push. That is why the post-apply values-gate and
+   rev-gate remain, and why §5's revert is one file.
 6. **The intel-gpu-plugin DaemonSet roll is inferred from operator source
    (v0.36.0 `getPodArgs` / `UpdateDaemonSet`), not observed.** §3.2.0 records
    the generation before/after; if it does not move, the note in §1.2 is
