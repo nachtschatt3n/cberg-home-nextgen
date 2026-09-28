@@ -38,8 +38,9 @@ Safety:
   * jobs run in their own session (start_new_session) and survive a dispatcher
     restart or the pane being closed.
 
-Start it (once per Mac login; `docs/sops/maintenance-windows.md` section 7):
-    cd ~/code/cberg-home-nextgen && python3 runbooks/headless-dispatcher.py
+Started automatically (2026-09-28): a LaunchAgent keeps iTerm running and an
+iTerm AutoLaunch script keeps this pane open (runbooks/launchd/, SOP section 7).
+By hand: cd ~/code/cberg-home-nextgen && python3 runbooks/headless-dispatcher.py
 Check it from the pod: `operation classify` / `maintenance-window classify`
 print which path a cron would take.
 

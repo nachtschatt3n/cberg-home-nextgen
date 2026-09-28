@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Keeps the headless cron dispatcher (runbooks/headless-dispatcher.py)
+       alive in an iTerm pane across Mac reboots and iTerm restarts
+       (2026-09-28). launchd runs the KEEPER as the login user (gui domain,
+       Aqua session, never root); the keeper starts the dispatcher inside
+       iTerm because the OpenClaw pod reaches it through the iterm2-harness.
+       Install / uninstall: docs/sops/maintenance-windows.md section 7. -->
+  <key>Label</key><string>com.cberg.headless-dispatcher</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/mu/code/cberg-home-nextgen/runbooks/launchd/headless-dispatcher-keeper.sh</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/mu/code/cberg-home-nextgen</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/Users/mu/.local/share/mise/shims:/Users/mu/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>OPERATION_REPO</key><string>/Users/mu/code/cberg-home-nextgen</string>
+  </dict>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/mu/Library/Logs/cberg-headless-keeper.log</string>
+  <key>StandardErrorPath</key><string>/Users/mu/Library/Logs/cberg-headless-keeper.log</string>
+</dict>
+</plist>

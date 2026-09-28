@@ -567,8 +567,53 @@ job): a refusal (`HEADLESS_REFUSED`, same kind still running) or no marker
 within 45 s exits **14** in both skills. Manual (`--trigger manual`) runs and
 `run-now` still go to the console.
 
-**Start / check the dispatcher** (after a Mac reboot or iTerm restart; the
-crons fall back to the console until it is back):
+**Auto-start: the dispatcher survives a Mac reboot and an iTerm restart
+(2026-09-28).** The pod reaches the dispatcher THROUGH iTerm (harness `resolve`
+by command line, `send`, `screen`), so it must live in an iTerm session with a
+tty; a plain launchd job would be invisible to the pod and the dispatcher
+refuses to start without a tty. Two halves, both running as the login user
+`mu` (never root):
+
+| Piece | Runs as | Job |
+|---|---|---|
+| `runbooks/launchd/com.cberg.headless-dispatcher.plist` → `headless-dispatcher-keeper.sh` | LaunchAgent, `gui/<uid>`, Aqua, `RunAtLoad` + `KeepAlive` | keeps **iTerm** running (`open -g -a iTerm` at login and within 30 s after iTerm quits/crashes) and logs dispatcher up/down transitions |
+| `runbooks/launchd/iterm2-headless-dispatcher-keeper.py` | iTerm2 **AutoLaunch** API script (symlinked), started by iTerm on every iTerm start | every 30 s: no session whose commandLine contains `headless-dispatcher` → open a new window running `start-headless-dispatcher.command`; single-instance lock; grace/backoff so it never storms windows |
+| `runbooks/launchd/start-headless-dispatcher.command` | the new window's program (`zsh -il`, so mise `python3` and `claude` resolve as in the operator's panes) | titles the tab `ai-server-cron`, `exec python3 runbooks/headless-dispatcher.py`; the window ends with the dispatcher |
+
+Why not osascript from launchd: creating an iTerm window via Apple Events
+needs a macOS Automation grant ("bash wants to control iTerm") that no one is
+present to click after an unattended reboot, and `open -a iTerm <script>` pops
+iTerm's "OK to run script?" modal (which also blocks the harness). iTerm's own
+AutoLaunch API needs neither. Log for both halves:
+`~/Library/Logs/cberg-headless-keeper.log`.
+
+```bash
+# INSTALL (once, on the Mac, as mu -- never sudo)
+cd ~/code/cberg-home-nextgen
+ln -sf "$PWD/runbooks/launchd/iterm2-headless-dispatcher-keeper.py" \
+  ~/.config/iterm2/AppSupport/Scripts/AutoLaunch/headless-dispatcher-keeper.py
+osascript -e 'tell application "iTerm2" to launch API script named "headless-dispatcher-keeper"'  # or restart iTerm
+cp runbooks/launchd/com.cberg.headless-dispatcher.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cberg.headless-dispatcher.plist
+
+# CHECK
+bash runbooks/launchd/headless-dispatcher-keeper.sh --check     # exit 0 = dispatcher running
+launchctl print gui/$(id -u)/com.cberg.headless-dispatcher | grep -E 'state|pid|runs'
+tail ~/Library/Logs/cberg-headless-keeper.log
+
+# UNINSTALL (back to starting it by hand)
+launchctl bootout gui/$(id -u)/com.cberg.headless-dispatcher
+rm ~/Library/LaunchAgents/com.cberg.headless-dispatcher.plist
+rm ~/.config/iterm2/AppSupport/Scripts/AutoLaunch/headless-dispatcher-keeper.py
+pkill -f 'AutoLaunch/headless-dispatcher-keeper.py'   # the running iTerm-side keeper
+```
+
+To stop the dispatcher on purpose, stop the iTerm-side keeper first (last line
+above), else it reopens the window within 30 s. With the LaunchAgent loaded,
+quitting iTerm is undone within 30 s too -- `launchctl bootout` it first.
+
+**Manual start / check** (fallback when the keepers are not installed; the
+crons fall back to the console until the dispatcher is back):
 
 ```bash
 # on the Mac, in a NEW iTerm tab/window reserved for it (never type into it after)
@@ -584,6 +629,10 @@ Verified 2026-09-27: a `selftest` kind sent from the openclaw pod through the
 harness came back `HEADLESS_STARTED` then `HEADLESS_EXITED rc=0` with the reply,
 while `ai-server-ops` was `busy`. Unit tests:
 `runbooks/tests/test-openclaw-console-delivery.py` (headless section).
+Verified 2026-09-28 (auto-start): SIGINT and SIGKILL of the dispatcher were each
+followed by a fresh dispatcher pid within ~45 s; SIGKILL of the launchd keeper
+was restarted by launchd (`runs = 2`); a second keeper instance exited on the
+lock; `--self-test` ok; pod `classify` reported `headless dispatcher READY`.
 
 ### Ops-console delivery path: pane states and exit codes (2026-09-25)
 
@@ -746,6 +795,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.28 | 2026-09-28 | **Headless dispatcher auto-starts (operator: "fix the open points").** It died with every Mac reboot or iTerm restart, silently sending crons back to the busy console. Now a LaunchAgent (`com.cberg.headless-dispatcher`, user `mu`, KeepAlive) keeps iTerm running and an iTerm AutoLaunch script keeps a dispatcher session open inside it (files in `runbooks/launchd/`). osascript from launchd was rejected: it needs an Automation grant nobody can click after an unattended reboot. §7 gains install/check/uninstall. |
 | 2026.09.28 | 2026-09-28 | **An on-demand run covers an attended slot only by explicit `absorbs <slot>:<date>` (operator decision).** Liveness paged `sat-attended:2026-09-26` missed although the 09-26 NOW run (window_runs 48) declared it absorbed. A terminal, non-aborted `now`/ad-hoc row whose notes carry the token for its own Berlin date now covers that slot; no implicit coverage. Test `runbooks/tests/test-window-liveness-now-absorbs-attended.py`. |
 | 2026.09.27 | 2026-09-27 | **SD-10: low-risk reviewed plans auto-run in the nightly window without a GO (throughput program item D).** New `review: ready-for-go@<date>` frontmatter (written by rule 4d0b), `preapproved_low_risk` policy block (`autonomy-policy.yaml` `2026.09.27`), `maintenance-plan.py::preapproval()` + `preapproved_low_risk` JSON key, scheduler routes them to nightly, `autonomy-record.py eligible` honours it, morning-report issue after the run. Medium/high risk, reboots and capability changes still need a GO. |
 | 2026.09.26 | 2026-09-26 | **`operation` gates on busy/menu (F-28af989d).** The §7 "known gap": `operation sweep|fix|versions` sent ctrl+u and the prompt into a busy or menu pane. They now refuse with **exit 13** (8 is `restart`'s "survived TERM and KILL"), nothing typed, cron and manual alike; exhausted-idle auto-clear for unattended runs unchanged and followed by the same gate. §7 gains an `operation` exit-code table. Test `runbooks/tests/test-openclaw-console-delivery.py`. |
