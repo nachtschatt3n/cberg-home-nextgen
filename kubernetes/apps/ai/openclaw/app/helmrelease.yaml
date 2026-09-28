@@ -1006,6 +1006,17 @@ spec:
                   const idAndrea = (process.env.TELEGRAM_ID_ANDREA || '').trim();
                   cfg.session = cfg.session || {};
                   cfg.session.dmScope = 'per-channel-peer';
+                  // Keep chat context across days (operator decision
+                  // 2026-09-28: "Keep the context"). OpenClaw's default is a
+                  // DAILY reset at 04:00, which silently archived the family
+                  // group's multi-day thread on 2026-09-27. Direct chats and
+                  // groups now start fresh only after 7 days without messages;
+                  // /new and /reset still work, and the model's context window
+                  // compacts long sessions. Threads keep the default.
+                  cfg.session.resetByType = Object.assign({}, cfg.session.resetByType, {
+                    direct: { mode: 'idle', idleMinutes: 10080 },
+                    group: { mode: 'idle', idleMinutes: 10080 },
+                  });
                   // Headless browser (operator-approved 2026-08-04): managed
                   // profile on the pod's playwright chromium. SSRF policy left
                   // at default (private-network blocked). executablePath is
