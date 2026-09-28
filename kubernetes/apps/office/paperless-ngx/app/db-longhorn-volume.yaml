@@ -12,6 +12,7 @@ metadata:
 spec:
   size: "5368709120"   # 5 Gi
   numberOfReplicas: 2
+  staleReplicaTimeout: 30
   dataEngine: v1
   accessMode: rwo
   frontend: blockdev

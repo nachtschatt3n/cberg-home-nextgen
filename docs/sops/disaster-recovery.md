@@ -451,6 +451,7 @@ metadata:
 spec:
   fromBackup: "s3://backups@/<volume-name>?backup=<backup-id>"
   numberOfReplicas: 2
+  staleReplicaTimeout: 30   # minutes; Longhorn CR default is 0 = never GC failed replicas
   size: "<size-bytes>"
 EOF
 

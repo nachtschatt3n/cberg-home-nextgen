@@ -256,6 +256,7 @@ metadata:
 spec:
   size: "10737418240"    # 10Gi in bytes (N * 1024^3)
   numberOfReplicas: 2
+  staleReplicaTimeout: 30   # minutes; Longhorn CR default is 0 = never GC failed replicas
   dataEngine: v1
   accessMode: rwo        # rwo = ReadWriteOnce, rw = ReadWriteMany
   frontend: blockdev     # Required!
