@@ -2864,6 +2864,18 @@ def _newer_upstream_tag_exists(image_ref: str):
     """
     before = _degradation_marks(_VER_CHECKER)
     verdict = _newer_upstream_tag_lookup(image_ref)
+    if image_ref.startswith(_PRIVATE_REGISTRY_PREFIX) and verdict is not True:
+        # OUR OWN image (F-3355f834): we ARE upstream, so "is there a newer
+        # upstream tag to wait for?" has a definite answer — no, the remedy is
+        # a rebuild in the app's own repo. None here parked 15 self-built images
+        # in the "newer-tag lookup UNDETERMINED" bucket, because their tags are
+        # timestamp/branch/pre-release shaped (`production-20260818133740`,
+        # `master-ae96ef4`, `0.5.4-alpha`) and never semver-compare. False routes
+        # them to the caller's SELF-BUILT/REBUILD branch — never to AR-029,
+        # which that branch refuses for this prefix — so the fail-closed rule
+        # below (a False must not open an acceptance) is not weakened.
+        # A True (a newer semver tag of ours exists) still reads "bump".
+        return False
     if verdict is False:
         after = _degradation_marks(_VER_CHECKER)
         if before is None and after is not None:

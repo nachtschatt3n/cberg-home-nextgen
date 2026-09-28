@@ -1669,9 +1669,19 @@ class VersionChecker:
         "could not check latest"). `helm show chart oci://<repo>/<chart>` pulls
         the latest tag's Chart.yaml directly and we read its `version:`.
         """
+        base = repo_url if repo_url.startswith('oci://') else f"oci://{repo_url}"
+        ref = f"{base.rstrip('/')}/{chart_name}"
+        # One `helm show chart` per OCI ref per run (F-539b186e). ~40
+        # HelmReleases pin the same app-template chart, and each call pulls the
+        # chart over the network: measured 2026-09-28, 94 calls / 212 s of a
+        # 979 s run. The answer cannot differ within one run, and a failure is
+        # recorded once (the degradation is per ref, not per consumer).
+        if not hasattr(self, '_oci_chart_version_cache'):
+            self._oci_chart_version_cache: Dict[str, Optional[str]] = {}
+        if ref in self._oci_chart_version_cache:
+            return self._oci_chart_version_cache[ref]
+        found: Optional[str] = None
         try:
-            base = repo_url if repo_url.startswith('oci://') else f"oci://{repo_url}"
-            ref = f"{base.rstrip('/')}/{chart_name}"
             result = subprocess.run(
                 ['helm', 'show', 'chart', ref],
                 capture_output=True, text=True, timeout=30,
@@ -1679,7 +1689,8 @@ class VersionChecker:
             if result.returncode == 0:
                 for line in result.stdout.splitlines():
                     if line.startswith('version:'):
-                        return line.split(':', 1)[1].strip().strip('"\'')
+                        found = line.split(':', 1)[1].strip().strip('"\'')
+                        break
             else:
                 self.degraded.record(
                     f"chart {chart_name}", f"OCI registry {repo_url}",
@@ -1687,11 +1698,32 @@ class VersionChecker:
         except Exception as e:
             self.degraded.record(f"chart {chart_name}", f"OCI registry {repo_url}",
                                  f"{type(e).__name__}: {e}")
-
-        return None
+        self._oci_chart_version_cache[ref] = found
+        return found
 
     def get_helm_repo_chart_version(self, repo_url: str, chart_name: str) -> Optional[str]:
-        """Get latest version from traditional Helm repository."""
+        """Get latest version from traditional Helm repository.
+
+        Reads the repo's index.yaml through `_chart_index_entries()` -- the
+        SAME per-run cache the freshness check and the candidate listing
+        already filled -- and picks the newest stable version exactly as
+        `helm search repo` (no --devel) does. The old path shelled out
+        `helm repo add` + `helm search repo` + `helm repo remove` per
+        HelmRelease: `helm search repo` loads EVERY index in the operator's
+        local helm cache, so each call took ~11 s. Measured 2026-09-28 (F-539b186e):
+        30 calls, 343 s + 31 s of `repo add` in a 979 s run -- the largest
+        single reason the window's Step 0 snapshot refresh overran its 15-min
+        cap. The helm path stays as the fallback when the index is
+        unreachable, so an index outage degrades to the old (slow) behaviour,
+        never to a silent None.
+        """
+        entries = self._chart_index_entries(repo_url) if repo_url.startswith('http') else None
+        if entries is not None:
+            versions = [str(e.get('version')) for e in (entries.get(chart_name) or [])
+                        if e.get('version')]
+            picked = self._pick_latest_semver_tag(versions) if versions else None
+            if picked:
+                return picked
         try:
             # Add repo temporarily
             temp_repo_name = f"temp-{hash(repo_url) % 10000}"
@@ -1755,7 +1787,14 @@ class VersionChecker:
     _VARIANT_NAMES = (r'alpine\d*|bookworm|bullseye|buster|slim|debian|ubuntu|'
                       r'focal|jammy|noble|'
                       r'openvino|cuda\d*|rocm|armnn|rknn|'
-                      r'distroless|debug|tools|contrib|google_vrp')
+                      r'distroless|debug|tools|contrib|google_vrp|'
+                      # Postgres-major flavour of extension images
+                      # (`pgvector/pgvector:0.8.6-pg16`, `-pg16-trixie`). Without
+                      # it NO tag of such a repo was version-shaped, the picker
+                      # returned None and the CVE sweep reported "newer-tag
+                      # lookup UNDETERMINED" for an image already at the newest
+                      # tag of its pg16 line (2026-09-28).
+                      r'pg\d+')
     # Some vendors publish a COMPOUND variant: a distro codename plus a build
     # flavour (`v0.143.0-noble-full`, `-noble-nvidia`, `-noble-lite`). The
     # anchor stays a known distro name, so this cannot swallow a pre-release or
