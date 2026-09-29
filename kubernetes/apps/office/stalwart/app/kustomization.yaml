@@ -13,5 +13,6 @@ resources:
   # longhorn-volume.yaml is deliberately NOT listed: this Kustomization's
   # targetNamespace (office) would override its `namespace: storage` and create
   # a broken duplicate Longhorn ignores. Apply it by hand, once.
-  # bootstrap-plan.ndjson is not a Kubernetes object; it is the stalwart-cli
-  # apply plan, run from the operator Mac (see docs/sops/stalwart.md).
+  # ../bootstrap/plan.ndjson.tmpl + apply-bootstrap.sh are not Kubernetes
+  # objects: they are the stalwart-cli apply seed, run from the operator Mac
+  # (see docs/sops/stalwart.md).
