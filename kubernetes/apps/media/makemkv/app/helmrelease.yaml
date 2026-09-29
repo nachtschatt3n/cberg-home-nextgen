@@ -149,12 +149,10 @@ spec:
     env:
       - name: MAKEMKV_KEY
         value: "BETA"
+      # No physical optical drive exists on any node. /dev/sr0 on nuc14-03
+      # is the PiKVM virtual-media drive: the ripper must never touch it.
       - name: AUTO_DISC_RIPPER
-        value: "1"
-      - name: AUTO_DISC_RIPPER_EJECT
-        value: "1"
-      - name: AUTO_DISC_RIPPER_PARALLEL_RIP
-        value: "1"
+        value: "0"
 
     controllers:
       main:
@@ -162,11 +160,6 @@ spec:
         # RWO Longhorn config volume at replicas 1 -> never RollingUpdate
         # (docs/sops/longhorn-rwo-multi-attach.md).
         strategy: Recreate
-        pod:
-          # The optical drive (/dev/sr0) exists only on k8s-nuc14-03; no NFD
-          # label identifies it, so pin by hostname (F-6b04715e).
-          nodeSelector:
-            kubernetes.io/hostname: k8s-nuc14-03
         containers:
           main:
             image:
@@ -176,12 +169,10 @@ spec:
             env:
               - name: MAKEMKV_KEY
                 value: "BETA"
+              # No physical optical drive exists on any node. /dev/sr0 on nuc14-03
+              # is the PiKVM virtual-media drive: the ripper must never touch it.
               - name: AUTO_DISC_RIPPER
-                value: "1"
-              - name: AUTO_DISC_RIPPER_EJECT
-                value: "1"
-              - name: AUTO_DISC_RIPPER_PARALLEL_RIP
-                value: "1"
+                value: "0"
             securityContext:
               privileged: true
               capabilities:
