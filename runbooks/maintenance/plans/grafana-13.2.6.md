@@ -41,8 +41,8 @@ capability_change: false              # chart packaging patch: same app (13.2.2)
 rollback_class: git-revert            # appVersion 13.2.2 on both sides -> no forward-only
                                       # sqlite/unified-storage migration is crossed
 finding_refs: [F-cce839da]
-review: null
-status: draft
+review: ready-for-go@2026-09-29
+status: vetted
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -203,7 +203,8 @@ kill $PF
 kubectl get cm,secret -A -l grafana_dashboard -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | wc -l   # 2026-09-29: 37
 
 # Longhorn backup of the config volume exists (belt-and-braces; not needed for this rollback class)
-kubectl get volume -n storage grafana-config -o jsonpath='{.status.lastBackupAt}{"\n"}'   # must be < 26h old
+kubectl get volume -n storage grafana-config -o jsonpath='{.status.lastBackupAt}{"\n"}'   # must be < 26h old; if older, cross-check the newest Completed Backup CR
+# (lastBackupAt lags one cycle, docs/sops/backup.md) -- not a STOP for this git-revert rollback class.
 ```
 
 Record `BASE_DS`, `BASE_DASH` and `BASE_SC`. They are the pass bars in §4.
