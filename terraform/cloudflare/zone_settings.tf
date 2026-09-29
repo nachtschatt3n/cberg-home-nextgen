@@ -1,7 +1,9 @@
-# DNS records are intentionally NOT managed here.
-# external-dns (running in the cluster, managed via Flux) owns all CNAME/A records
-# and writes them directly to Cloudflare. Adding cloudflare_record resources here
-# would cause conflicts and duplicate records.
+# No A/AAAA/CNAME records here: external-dns (running in the cluster, managed via
+# Flux) owns them and writes them directly to Cloudflare. Adding app records
+# here would conflict with it and duplicate them.
+# Mail-auth records (SPF/DMARC/DKIM TXT, Brevo verification) live in
+# email_dns.tf; the MX records are added and locked by Cloudflare Email Routing
+# (email_routing.tf). external-dns never manages MX/TXT, so nothing overlaps.
 
 # ── Settings to fix ───────────────────────────────────────────────────────────
 

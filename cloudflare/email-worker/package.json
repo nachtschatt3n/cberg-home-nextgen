@@ -1,0 +1,9 @@
+{
+  "name": "mail-ingest-email-worker",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Email Worker deployed by terraform/cloudflare/email_worker.tf (no build step)",
+  "scripts": {
+    "test": "node --test"
+  }
+}

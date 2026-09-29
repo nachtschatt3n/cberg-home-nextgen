@@ -1,22 +1,68 @@
 #!/usr/bin/env bash
+# Terraform wrapper for the Cloudflare stack: pulls every credential/secret from
+# SOPS into TF_VAR_* so nothing sensitive is typed, committed or echoed.
 set -euo pipefail
 cd "$(dirname "$0")"
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 SOPS=$(command -v sops 2>/dev/null || echo "$HOME/.local/share/mise/shims/sops")
 
-export TF_VAR_cloudflare_api_token=$(
-  "$SOPS" -d "$REPO_ROOT/kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml" \
-  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['api-token'])")
+# API token: prefer the dedicated Terraform token (write scopes for the mail
+# stack); fall back to the read-mostly security-audit token so the pre-existing
+# zone-settings/bot resources keep working until the new token exists.
+TOKEN_FILE="$REPO_ROOT/terraform/cloudflare/token.sops.yaml"
+if [ -f "$TOKEN_FILE" ]; then
+  export TF_VAR_cloudflare_api_token=$(
+    "$SOPS" -d "$TOKEN_FILE" \
+    | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['api-token'])")
+else
+  echo "tf: WARNING: $TOKEN_FILE not found -- using the cf-security-audit token (too narrow for the email_*.tf resources)" >&2
+  export TF_VAR_cloudflare_api_token=$(
+    "$SOPS" -d "$REPO_ROOT/kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml" \
+    | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['api-token'])")
+fi
 
-# Resolve zone_id from domain name (provider v5 data source requires zone_id directly)
 _domain=$(
   "$SOPS" -d "$REPO_ROOT/kubernetes/flux/components/common/cluster-secrets.sops.yaml" \
   | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['SECRET_DOMAIN'])")
+export TF_VAR_secret_domain="$_domain"
 
-export TF_VAR_zone_id=$(
+# Resolve zone_id + account_id from the domain (provider v5 data source needs
+# zone_id directly; Workers/Access/routing addresses are account-level).
+_zone_json=$(
   curl -sf "https://api.cloudflare.com/client/v4/zones?name=$_domain" \
-    -H "Authorization: Bearer $TF_VAR_cloudflare_api_token" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['id'])")
+    -H "Authorization: Bearer $TF_VAR_cloudflare_api_token")
+export TF_VAR_zone_id=$(
+  printf '%s' "$_zone_json" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['id'])")
+export TF_VAR_account_id=$(
+  printf '%s' "$_zone_json" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['account']['id'])")
+unset _zone_json
+
+# Mail secrets (optional until the mail stack is rolled out). Top-level keys:
+#   ingest-hmac-key         -> TF_VAR_ingest_hmac_key     (same value as the cluster's stalwart-secret)
+#   fallback-address        -> TF_VAR_fallback_address
+#   stalwart-dkim-records   -> TF_VAR_stalwart_dkim_records (map selector => TXT value)
+#   brevo-records           -> TF_VAR_brevo_records         (map label => {name,type,content})
+EMAIL_FILE="$REPO_ROOT/terraform/cloudflare/email.sops.yaml"
+if [ -f "$EMAIL_FILE" ]; then
+  _email_env=$("$SOPS" -d "$EMAIL_FILE" | python3 -c '
+import json, shlex, sys, yaml
+d = yaml.safe_load(sys.stdin) or {}
+keys = {
+    "ingest-hmac-key": "ingest_hmac_key",
+    "fallback-address": "fallback_address",
+    "stalwart-dkim-records": "stalwart_dkim_records",
+    "brevo-records": "brevo_records",
+}
+for k, var in keys.items():
+    if k in d and d[k] not in (None, ""):
+        v = d[k] if isinstance(d[k], str) else json.dumps(d[k])
+        print(f"export TF_VAR_{var}={shlex.quote(v)}")
+')
+  eval "$_email_env"
+  unset _email_env
+else
+  echo "tf: WARNING: $EMAIL_FILE not found -- ingest_hmac_key/fallback_address unset (fine while mail_edge_enabled = false)" >&2
+fi
 
 export KUBECONFIG="$REPO_ROOT/kubeconfig"
 export KUBE_CONFIG_PATH="$REPO_ROOT/kubeconfig"

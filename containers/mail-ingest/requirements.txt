@@ -1,0 +1,4 @@
+# mail-ingest runtime dependencies (pinned; the weekly rebuild refreshes the
+# base image and Debian packages, a Renovate/manual bump moves these)
+aiohttp==3.14.3
+aiosmtplib==5.1.3

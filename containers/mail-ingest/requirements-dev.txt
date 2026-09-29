@@ -1,0 +1,6 @@
+# test-only dependencies (installed in CI before the image build, never in the image)
+-r requirements.txt
+aiosmtpd==1.4.6
+pytest==9.1.1
+pytest-aiohttp==1.1.1
+pytest-asyncio==1.4.0
