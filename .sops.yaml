@@ -20,6 +20,13 @@ creation_rules:
     key_groups:
       - age:
           - "age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6"
+  - # Terraform inputs read by terraform/*/tf wrappers (Cloudflare API token,
+    # mail ingest HMAC key, fallback address). Whole-file encryption.
+    path_regex: terraform/.*\.sops\.ya?ml
+    mac_only_encrypted: true
+    key_groups:
+      - age:
+          - "age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6"
 stores:
   yaml:
     indent: 2
