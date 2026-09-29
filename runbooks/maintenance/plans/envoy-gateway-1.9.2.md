@@ -70,8 +70,8 @@ autonomy_override: human-gated        # belt and braces: shared `gateway`/`dns` 
 security_ref: null
 finding_refs: []                      # checked 2026-09-29: `finding list --grep` for envoy / envoyproxy /
                                       # gateway / 1.9.2 returns no row for this component+target
-review: null
-status: draft
+review: ready-for-go@2026-09-29
+status: vetted
 window: null
 sops_refs:
   - docs/sops/envoy-gateway-upgrade.md
