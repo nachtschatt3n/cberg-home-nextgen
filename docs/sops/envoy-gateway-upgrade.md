@@ -76,7 +76,7 @@ print(len(c), {x['metadata']['annotations'].get(
 ```bash
 kubectl -n network rollout restart deploy/k8s-gateway
 kubectl -n network rollout status deploy/k8s-gateway --timeout=180s
-kubectl -n network logs deploy/k8s-gateway --tail=80 | grep -icE 'could not sync|failed to list'   # must be 0
+for p in $(kubectl -n network get pods -l app.kubernetes.io/name=k8s-gateway -o name); do kubectl -n network logs $p --tail=80; done | grep -icE 'could not sync|failed to list'   # must be 0 (all pods; deploy/ reads only one)
 # then resolve several known hosts against 192.168.55.101 and check the VIPs
 ```
 

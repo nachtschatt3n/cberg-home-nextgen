@@ -379,7 +379,8 @@ for i in 1 2; do
   kubectl -n network rollout restart deploy/k8s-gateway
   kubectl -n network rollout status deploy/k8s-gateway --timeout=180s
   sleep 20
-  kubectl -n network logs deploy/k8s-gateway --tail=80 | grep -icE 'could not sync|failed to list'   # must print 0
+  for p in $(kubectl -n network get pods -l app.kubernetes.io/name=k8s-gateway -o name); do kubectl -n network logs $p --tail=80; done | grep -icE 'could not sync|failed to list'   # must print 0 (all 3 pods, not deploy/ = 1 pod)
+  # Demonstrated able to match: the archived failure lines in docs/sops/k8s-gateway-dns.md:238-240 give 2 through this regex.
   awk '{print $2, $1}' /tmp/eg192-win/hosts.txt | head -20 | while read -r v h; do a=$(dig +short @192.168.55.101 "$h" | tail -1); [ "$a" = "$v" ] || echo "DNS MISMATCH $h -> '$a' (want $v)"; done; echo "dns pass $i done"
 done
 ```
@@ -411,8 +412,9 @@ CONTENTS ASSERTION: the per-host HTTP status through its VIP is unchanged for al
 new pods. Reuse `q()` from §2.5.
 ```bash
 q 'count(up{namespace="network",job="network/envoy-gateway"}==1)'                               # 6
-q 'sum(increase(envoy_listener_manager_lds_update_rejected{namespace="network"}[10m]))'           # 0
-q 'sum(increase(envoy_cluster_manager_cds_update_rejected{namespace="network"}[10m]))'           # 0
+q 'sum(envoy_listener_manager_lds_update_rejected{namespace="network"})'   # 0 (all 6 pods are new after §3.6)
+q 'sum(envoy_cluster_manager_cds_update_rejected{namespace="network"})'    # 0
+q 'count(envoy_listener_manager_lds_update_rejected{namespace="network"})' # 6 (non-vacuous guard: an empty result cannot pass)
 q 'sum(rate(envoy_http_downstream_rq_xx{namespace="network",envoy_response_code_class="2"}[5m]))' # > 0 (2026-09-29: ~1.03 rps)
 q 'sum(rate(envoy_http_downstream_rq_xx{namespace="network",envoy_response_code_class="5"}[5m])) / sum(rate(envoy_http_downstream_rq_xx{namespace="network"}[5m]))'   # < 0.02 (baseline ~0.005)
 q 'min(probe_success{probe_class=~"http|dns"})'                                                   # 1
@@ -421,13 +423,15 @@ q 'min(probe_success{probe_class=~"http|dns"})'                                 
   that is the floor, and it guards against a data plane that is up but serves
   nothing. The 5xx ratio must be `< 0.02`. Scraped from all 6 proxy pods,
   measured 2026-09-29.
-- CONTROL: metric `envoy_listener_manager_lds_update_rejected`. The 10m
-  increase must be `0`. This is the direct signal for the listener-rejection
+- CONTROL: metric `envoy_listener_manager_lds_update_rejected`. The raw
+  counter summed over the 6 new pods must be `0` (increase() would miss a
+  rejection of the initial xDS config before the first scrape, because it
+  ignores a new series' first sample), with a series count of `6`. This is the direct signal for the listener-rejection
   bugs 1.9.2 fixes, and for any new translation Envoy refuses. The baseline was
   0 while the success counter read 1343, so the series is live and this gate
   can move.
-- CONTROL: metric `envoy_cluster_manager_cds_update_rejected`. The 10m
-  increase must be `0`.
+- CONTROL: metric `envoy_cluster_manager_cds_update_rejected`. The raw
+  counter summed over the 6 new pods must be `0` (same reason as LDS).
 - CONTROL: metric `probe_success`. The minimum over the 5 http/dns blackbox
   probes must be `1`.
 - CONTROL: alertname `EnvoyGatewayMetricsAbsent`. It must NOT be firing. It is
@@ -455,9 +459,10 @@ Confirm that before relying on it (step 5.1).
 
 5.1 Pre-flight (read-only, ~30 s). This proves the revert bundle applies:
 ```bash
-git show HEAD~1:kubernetes/apps/network/envoy-gateway/crds/envoy-gateway.yaml > /tmp/eg191-crds.yaml
-git show HEAD~1:kubernetes/apps/network/envoy-gateway/crds/gateway-api-standard.yaml > /tmp/eg191-gwapi.yaml
-kubectl apply --server-side --dry-run=server --field-manager=kustomize-controller -f /tmp/eg191-crds.yaml -f /tmp/eg191-gwapi.yaml | grep -vc 'serverside-applied'   # must be 0
+git show <sha-of-3.4>~1:kubernetes/apps/network/envoy-gateway/crds/envoy-gateway.yaml > /tmp/eg191-crds.yaml
+git show <sha-of-3.4>~1:kubernetes/apps/network/envoy-gateway/crds/gateway-api-standard.yaml > /tmp/eg191-gwapi.yaml
+kubectl apply --server-side --dry-run=server --field-manager=kustomize-controller -f /tmp/eg191-crds.yaml -f /tmp/eg191-gwapi.yaml 2>&1 | tee /tmp/eg191-dry.txt | grep -vc 'serverside-applied'   # must be 0 (2>&1: a rejection goes to stderr)
+grep -c 'serverside-applied' /tmp/eg191-dry.txt   # must equal the `kind: CustomResourceDefinition` count in both files (positive count; a failed apply prints 0 here)
 ```
 
 5.2 Revert and push:
