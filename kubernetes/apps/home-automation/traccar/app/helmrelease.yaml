@@ -33,7 +33,7 @@ spec:
           main:
             image:
               repository: traccar/traccar
-              tag: "6.15.3"
+              tag: "6.16.0@sha256:03ebb7ed2b219d4f25c326873bd022f5062f80bcae622a9d9422846b51951eda"
             # Wrapper to surface Traccar's file-based logs to stdout for kubectl logs
             command:
               - /bin/sh
