@@ -179,7 +179,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | home-automation | Smart home integrations | 20 |
 | databases | Database backends | 11 |
 | monitoring | Observability stack | 14 |
-| office | Productivity and document management | 12 |
+| office | Productivity and document management | 11 |
 | media | Media servers | 5 |
 | download | Download managers | 2 |
 | kube-system | Core cluster infrastructure | 11 |

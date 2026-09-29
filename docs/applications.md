@@ -20,7 +20,7 @@
 | home-automation | 20 |
 | databases | 11 |
 | monitoring | 14 |
-| office | 12 |
+| office | 11 |
 | media | 5 |
 | download | 2 |
 | kube-system | 11 |
@@ -34,7 +34,7 @@
 | my-software-development | 3 |
 | my-software-production | 5 |
 | my-software-showcase | 15 |
-| **Total** | **126** |
+| **Total** | **125** |
 
 ---
 
@@ -139,7 +139,6 @@
 | omni-tools | Productivity utilities collection | Internal | Office |
 | nextcloud-mcp | MCP server bridge for Nextcloud AI integration | Internal | Office |
 | arag-web | ARAG health insurance data visualiser (Rails 8.1, SQLite, Solid Queue via Thruster). **Split-route auth (2026-09-11, `d1440d50`).** The web UI is gated: `SecurityPolicy office/arag-web-forward-auth` (`failOpen: false`, `headersToExtAuth: [cookie, accept, user-agent]`) targets HTTPRoute `office/arag-web` (`PathPrefix /`), with the login callback on `office/arag-web-authentik-outpost` (`PathPrefix /outpost.goauthentik.io`, never gated). **`/api` is a separate and DELIBERATELY UNGATED route** (`office/arag-web-api`) — do not gate it. The Mac-mini scraper pushes `POST /api/v1/sync` unattended every 6h using `urllib.request` with an `Authorization: Bearer` header, no cookie jar and no OIDC, and its error path re-raises below HTTP 500, so a single redirect to Authentik would kill the ingest permanently with no retry. That prefix is authenticated inside the app by `Api::V1::BaseController#authenticate!`, which `secure_compare`s against `ARAG_SYNC_TOKEN` (Secret `office/arag-web-secret`); `GET /api/v1/health` is intentionally anonymous and exposes only sync freshness. A `SecurityPolicy` targets a whole `HTTPRoute` rather than one rule, which is why the split is two routes and not two rules. This supersedes AR-118, which had accepted the previously anonymous UI on a LAN-only basis. LAN-only (`envoy-internal`), never published externally. | Internal | Office |
-| stalwart | Own-domain mail server (Stalwart v0.16: SMTP/IMAP/JMAP + web admin). Single replica, `strategy: Recreate`, RocksDB on the `longhorn-static` volume `stalwart-data` (Volume CR hand-applied, out of `kustomization.yaml`). v0.16 keeps ALL config (domain, listeners, DKIM, relay route, accounts) inside the datastore; `config.json` only names the store. That config is seeded/re-converged from `kubernetes/apps/office/stalwart/bootstrap/plan.ndjson.tmpl` with `stalwart-cli apply` run from the operator Mac (not a Flux Job: account passwords cannot reference env vars). ClusterIP only: 8080 http/JMAP/admin, 25 (internal, for the future Cloudflare ingest shim), 465, 587, 993; no LoadBalancer and no external route yet (phases 3/4). TLS `mail.<domain>` via cert-manager DNS-01 (`stalwart-tls`). Uses public resolvers 1.1.1.1/9.9.9.9 because the in-cluster split-DNS view has no MX/TXT. SOP: `docs/sops/stalwart.md`. | Internal | Office |
 
 > **Shared Sure API key — rotate in two places.** `openclaw` and `arag-web` both
 > authenticate to `sure` with the **same** Sure API key (sent via the `X-Api-Key`

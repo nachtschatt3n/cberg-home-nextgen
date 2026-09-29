@@ -50,7 +50,6 @@ resources:
   - ./cloudflared-alerts.yaml
   - ./wazuh-alerts.yaml
   - ./arag-web-alerts.yaml
-  - ./stalwart-alerts.yaml
   - ./mealie-alerts.yaml
   - ./uptime-kuma-alerts.yaml
   - ./blackbox-exporter-alerts.yaml
