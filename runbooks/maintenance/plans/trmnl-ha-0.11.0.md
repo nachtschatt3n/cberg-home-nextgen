@@ -339,7 +339,7 @@ CONTROL: metric kube_deployment_status_replicas_available — must read `1` (not
 CONTROL: metric kube_pod_container_status_restarts_total — summed over trmnl-ha pods must read `0` (confirmed present, 0 at authoring). `EMPTY` on either is a FAIL, not a pass: the pod selector matched nothing.
 trmnl-ha exposes no scrape target (`up{namespace="home-automation",service="trmnl-ha"}` is empty), so app-level truth comes from G4/G5, not Prometheus.
 
-**G8 — security bookkeeping (post-window, next sweep).** The sweep's security-check re-scans the deployed `ghcr.io/usetrmnl/trmnl-ha-amd64:0.11.0`. Confirm F-2b739b70 / F-abfb145e resolve on the old tag, then re-evaluate AR-059 and AR-029 with `runbooks/policy-cli.py risk` — their "already the newest tag" / "no upstream fix" premises are false once 0.11.0 is deployed; renew or disable it consciously, never silently.
+**G8 — security bookkeeping (post-window, next sweep).** The sweep's security-check re-scans the deployed `ghcr.io/usetrmnl/trmnl-ha-amd64:0.11.0`. Confirm F-2b739b70 / F-abfb145e resolve on the old tag, then re-evaluate AR-059 and AR-029 with `runbooks/policy-cli.py risk` — their acceptance premises no longer hold once 0.11.0 is deployed; renew or disable it consciously, never silently.
 
 ## 5. Rollback
 

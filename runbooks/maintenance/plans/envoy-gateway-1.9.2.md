@@ -114,7 +114,7 @@ premises:
   - id: k8s-gateway-no-sync-errors
     why: "The DNS gate in §4.3 counts sync errors after restart; a non-zero baseline would make it unreadable."
     run: >-
-      kubectl logs deploy/k8s-gateway -n network --tail=80 | awk 'tolower($0) ~ /could not sync/ {n++} tolower($0) ~ /failed to list/ {n++} END {print n+0}'
+      kubectl logs -n network -l app.kubernetes.io/name=k8s-gateway --tail=80 --prefix | awk 'tolower($0) ~ /could not sync/ {n++} tolower($0) ~ /failed to list/ {n++} END {print n+0}'
     expect_exact: "0"
 ---
 
@@ -380,7 +380,7 @@ for i in 1 2; do
   kubectl -n network rollout status deploy/k8s-gateway --timeout=180s
   sleep 20
   for p in $(kubectl -n network get pods -l app.kubernetes.io/name=k8s-gateway -o name); do kubectl -n network logs $p --tail=80; done | grep -icE 'could not sync|failed to list'   # must print 0 (all 3 pods, not deploy/ = 1 pod)
-  # Demonstrated able to match: the archived failure lines in docs/sops/k8s-gateway-dns.md:238-240 give 2 through this regex.
+  # Demonstrated able to match: the archived failure lines in docs/sops/k8s-gateway-dns.md:238-240 give 3 through this regex.
   awk '{print $2, $1}' /tmp/eg192-win/hosts.txt | head -20 | while read -r v h; do a=$(dig +short @192.168.55.101 "$h" | tail -1); [ "$a" = "$v" ] || echo "DNS MISMATCH $h -> '$a' (want $v)"; done; echo "dns pass $i done"
 done
 ```
@@ -462,7 +462,8 @@ Confirm that before relying on it (step 5.1).
 git show <sha-of-3.4>~1:kubernetes/apps/network/envoy-gateway/crds/envoy-gateway.yaml > /tmp/eg191-crds.yaml
 git show <sha-of-3.4>~1:kubernetes/apps/network/envoy-gateway/crds/gateway-api-standard.yaml > /tmp/eg191-gwapi.yaml
 kubectl apply --server-side --dry-run=server --field-manager=kustomize-controller -f /tmp/eg191-crds.yaml -f /tmp/eg191-gwapi.yaml 2>&1 | tee /tmp/eg191-dry.txt | grep -vc 'serverside-applied'   # must be 0 (2>&1: a rejection goes to stderr)
-grep -c 'serverside-applied' /tmp/eg191-dry.txt   # must equal the `kind: CustomResourceDefinition` count in both files (positive count; a failed apply prints 0 here)
+grep -c 'serverside-applied' /tmp/eg191-dry.txt   # must equal: cat /tmp/eg191-crds.yaml /tmp/eg191-gwapi.yaml | grep -c '^kind: '
+#   (20 on 2026-09-29 = 18 CRDs + the safe-upgrades ValidatingAdmissionPolicy + its binding; a failed apply prints 0 here)
 ```
 
 5.2 Revert and push:
