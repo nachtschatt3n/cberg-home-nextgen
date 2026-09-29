@@ -39,7 +39,7 @@ spec:
               repository: ghcr.io/nachtschatt3n/splitfairy
               # Release tags (v<major>.<minor>.<patch>) only; updated by the
               # ImageUpdateAutomation in ./image-automation.yaml.
-              tag: v0.13.0 # {"$imagepolicy": "my-software-production:splitfairy:tag"}
+              tag: v0.14.0 # {"$imagepolicy": "my-software-production:splitfairy:tag"}
               pullPolicy: IfNotPresent
             env:
               - name: NODE_ENV
