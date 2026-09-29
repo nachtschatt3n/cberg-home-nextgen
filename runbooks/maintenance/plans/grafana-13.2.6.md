@@ -271,9 +271,19 @@ kubectl -n monitoring get pod $POD -o jsonpath='{range .status.containerStatuses
 # PASS: restarts=0 for all three containers.
 for c in grafana-sc-dashboard grafana-sc-datasources grafana; do
   printf '%s rofs_errors=' $c; kubectl -n monitoring logs $POD -c $c | grep -ci 'read-only file system'
+  printf '%s update_errors=' $c; kubectl -n monitoring logs $POD -c $c | grep -c 'Error when updating from'
 done
-# PASS: 0 for each. The failure this guards: k8s-sidecar os.makedirs()/open() raising
+# PASS: 0 for each, both needles. The failure this guards: k8s-sidecar os.makedirs()/open() raising
 # "OSError: [Errno 30] Read-only file system: '<path>'" (Python strerror for EROFS).
+# k8s-sidecar's _update_file wraps the write in try/except + logger.exception, so a write
+# failure does NOT crash or restart the container -- restarts=0 and the "Writing" count
+# cannot see it; these greps are the only detector. update_errors catches ANY write
+# failure regardless of errno.
+# Demonstrated to fire (plan review 2026-09-29): with the sidecar's own JSON formatter
+# (pythonjsonlogger, rename_fields msg/level, src/logger.py @ 2.11.2) a raised EROFS
+# OSError logs {"level": "ERROR", "msg": "Error when updating from 'k' into '/f'",
+# "exc_info": "Traceback ...\nOSError: [Errno 30] Read-only file system: '/etc/x'"}
+# and both greps print 1.
 # Case-insensitive on purpose. (grep -c prints 0 and exits 1 on no match -- read the
 # number, not the exit code.)
 kubectl -n monitoring logs $POD -c grafana-sc-dashboard | grep -c '"msg": "Writing '
@@ -288,10 +298,12 @@ Errno 98 is not a gate failure. Errno 30 is.
 
 **4.3 No schema migration ran (appVersion unchanged).**
 ```bash
-kubectl -n monitoring logs $POD -c grafana | grep 'msg="migrations completed"'
-# PASS: every line (migrator, secret-migrator, resource-migrator, unifiedstorage-migrator)
-# shows performed=0. FAIL: performed=N>0 means the app version moved -> the rollback
-# class is no longer git-revert; follow section 5 "if a migration ran".
+kubectl -n monitoring logs $POD -c grafana | grep 'msg="migrations completed"' \
+  | awk '{n++; if ($0 !~ /performed=0 /) bad++} END{print "lines="n+0, "nonzero="bad+0}'
+# PASS: lines=4 nonzero=0 (live 2026-09-29: 4 lines = migrator, secret-migrator,
+# resource-migrator, unifiedstorage-migrator). FAIL: lines=0 (query captured nothing --
+# wrong container, rotated log, reworded message) or nonzero>0 (the app version moved ->
+# the rollback class is no longer git-revert; follow section 5 "if a migration ran").
 ```
 
 **4.4 Datasource gate (mandatory for any Grafana restart, SOP grafana-image-changes §6).**
@@ -324,7 +336,8 @@ curl -s -u "$U:$P" 'http://127.0.0.1:33011/api/search?type=dash-db&limit=5000' \
 # sidecar file would NOT drop this count. The sidecar gate is 4.2, not this one.
 kill $PF
 kubectl -n monitoring logs $POD -c grafana | grep -ciE 'plugin.*not (found|registered)|read-only file system'
-# PASS: 0.
+# SUPPLEMENTARY (absence gate): PASS 0. The positive datasource gates above cover the same
+# failure; the archived slim-incident string `plugin prometheus not found` matches this regex.
 ```
 
 ## 5) Rollback

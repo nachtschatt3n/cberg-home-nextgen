@@ -166,7 +166,9 @@ curl -s -u "$U:$P" 'http://127.0.0.1:33001/api/datasources/proxy/uid/alertmanage
 # a real query through the data path, not just a connection test
 curl -s -u "$U:$P" -H 'Content-Type: application/json' -X POST \
   'http://127.0.0.1:33001/api/ds/query' \
-  -d '{"queries":[{"refId":"A","datasource":{"uid":"prometheus","type":"prometheus"},"expr":"count(kube_pod_info)","instant":true}]}'
+  -d '{"from":"now-5m","to":"now","queries":[{"refId":"A","datasource":{"uid":"prometheus","type":"prometheus"},"expr":"count(kube_pod_info)","instant":true,"range":false}]}'
+# "from"/"to" are REQUIRED: without them a HEALTHY Grafana returns "data":{"values":[]}
+# and this check can never pass (measured 2026-09-29).
 ```
 
 **Pass criteria:** bundled-plugin count not lower than baseline; datasource

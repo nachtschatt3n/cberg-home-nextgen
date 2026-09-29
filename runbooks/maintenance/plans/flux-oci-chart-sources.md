@@ -46,7 +46,7 @@ touches:
     - "fluxinstance/flux spec.kustomize.patches (Stage 10 — emptyDir sizeLimit)"
   shared: [flux-sources, cni-adjacent, cert-manager, storage/longhorn, dns-internal, monitoring]
 depends_on: []
-conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, otel-operator-0.23.0, nextcloud-fleet-35.0.1, jellyfin-12.1, penpot-chart-1.10.0, app-template-5.2.1, chart-patches-coredns-reloader-blackbox, flux-fleet-0.60.0, mariadb-chart-27.3.0, paperless-db-13.0.2, uptime-kuma-2.5.5-slim-rootless]
+conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, otel-operator-0.23.0, nextcloud-fleet-35.0.1, jellyfin-12.1, penpot-chart-1.10.0, app-template-5.2.1, chart-patches-coredns-reloader-blackbox, flux-fleet-0.60.0, mariadb-chart-27.3.0, paperless-db-13.0.2, uptime-kuma-2.5.5-slim-rootless, grafana-13.2.6]
   # talos-1.14.1/1.14.0 retired 2026-09-27 (dead refs removed). impersonation + drift-detection edit every HelmRelease;
   # otel/nextcloud/jellyfin/penpot edit the same helmrelease.yaml a stage switches to chartRef (review 2026-09-28).
   # flux-fleet-0.60.0: restarts flux-operator (sole flux_* exporter) and moves the flux-operator/flux-instance HRs; source-controller is NOT expected to roll (builder/ssa unchanged v0.57.0..v0.60.0; flux-fleet gate 4.4 checks it).
@@ -990,7 +990,7 @@ stale digest in a plan is worse than no digest.
 | `cilium` | `quay.io/cilium/charts/cilium` | 1.20.1 ✓ | yes (referrers) | yes | 6 |
 | `falcosecurity` | `ghcr.io/falcosecurity/charts/falco` | 9.1.0 ✓ | yes (bundle v0.3) | no | 3 |
 | `gabe565` | `ghcr.io/gabe565/charts/paperless-ngx` | 0.24.1 ✓ | no | no | 3 |
-| `grafana` | `ghcr.io/grafana-community/helm-charts/grafana` | 13.2.1 ✓ | no | yes | 5 |
+| `grafana` | `ghcr.io/grafana-community/helm-charts/grafana` | 13.2.6 ✓ (re-verify the live pin at execution) | no | yes | 5 |
 | `intel` | `ghcr.io/intel/helm-charts/intel-device-plugins-{operator,gpu,npu}` | 0.36.0 ✓ (all 3) | no | no | 3 |
 | `jetstack` | `quay.io/jetstack/charts/cert-manager` | `v1.21.1` and `1.21.1` ✓ | yes (legacy `.sig`) | yes | 6 |
 | `mintplex-labs` | `ghcr.io/mintplex-labs/helm-charts/anythingllm` | 1.0.0 ✓ | no | yes | 5 |

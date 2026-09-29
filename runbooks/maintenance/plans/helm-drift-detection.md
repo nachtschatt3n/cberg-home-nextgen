@@ -63,9 +63,8 @@ touches:
 depends_on: []
 conflicts_with:
   # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
-  - grafana-chart-13.2.3              # (status superseded 2026-09-14; kept until that file is
-                                      # retired — ref still resolves.) §6.4: pure attribution — a Helm upgrade in the same
-                                      # window as P3 gives every grafana rollout two causes
+  - grafana-13.2.6                    # §6.4 attribution: a grafana Helm upgrade in the same window as P3 gives
+                                      # the rollout two causes (replaces superseded grafana-chart-13.2.3, review 2026-09-29)
   # - affine-redis-8.10.2 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # §4.1 revision-identity diff: that plan upgrades
                                       # office/affine-redis (rev 14 -> 15). Reciprocal of
                                       # its own declaration; added 2026-09-26 (plan review).
