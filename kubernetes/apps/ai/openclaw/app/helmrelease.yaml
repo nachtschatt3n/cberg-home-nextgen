@@ -1449,7 +1449,28 @@ spec:
                     url: '$${SPLITFAIRY_URL}/mcp',
                     transport: 'streamable-http',
                     headers: { Authorization: 'Bearer $${SPLITFAIRY_PAT}' },
+                    // Access scope (2026-09-29): ONLY Juno (Mathias) = `main`
+                    // and Juno (Andrea) = `juno-andrea`. Codex app-server
+                    // projection honours codex.agents (all agents run on the
+                    // codex harness); non-empty list required.
+                    codex: { agents: ['main', 'juno-andrea'] },
                   };
+                  // Second guard for non-codex (embedded) runs: every OTHER
+                  // agent in agents.list denies the splitfairy MCP tools
+                  // (documented server glob `splitfairy__*` + explicit names).
+                  // UNION with existing deny entries (e.g. sessions_spawn) —
+                  // never removes anything; covers unmanaged agents (voice).
+                  const sfAllowed = new Set(['main', 'juno-andrea']);
+                  const sfDeny = ['splitfairy__*'].concat(
+                    ['list_trips', 'get_trip', 'create_trip', 'update_trip',
+                     'delete_trip', 'save_item', 'delete_item', 'add_expense',
+                     'get_balances', 'invite_member'].map((t) => 'splitfairy__' + t));
+                  (cfg.agents.list || []).forEach((a) => {
+                    if (!a || !a.id || sfAllowed.has(a.id)) return;
+                    a.tools = a.tools || {};
+                    const cur = Array.isArray(a.tools.deny) ? a.tools.deny : [];
+                    a.tools.deny = Array.from(new Set(cur.concat(sfDeny)));
+                  });
 
                   delete cfg.model;
 
