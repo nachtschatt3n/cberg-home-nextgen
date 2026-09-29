@@ -95,7 +95,7 @@ conflicts_with:
   - mariadb-chart-27.3.0
   - penpot-chart-1.10.0
   - redis-fleet-8.10.2
-  - traccar-6.16.0
+  # traccar-6.16.0 REMOVED 2026-09-29: executed green in nightly:2026-09-29 (3a943035), plan retired (1a40b257)
   - otel-operator-0.23.0              # reciprocal (it names this plan); HR bump -> attribution
 security_ref: null
 capability_change: false              # no user-visible behaviour changes; Flux reconciles the

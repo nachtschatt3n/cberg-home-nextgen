@@ -52,8 +52,7 @@ conflicts_with:
                                       # Prometheus; a CoreDNS roll mid-verification poisons its gate
   - oc8-install                       # declares shared k8s-gateway DNS; its DNS verification must not
                                       # overlap a CoreDNS roll (blocked today; listed for when it unblocks)
-  - traccar-6.16.0                    # reciprocal: that draft (written concurrently, 2026-09-27) already
-                                      # lists this plan in its own conflicts_with
+  # traccar-6.16.0 REMOVED 2026-09-29: executed green in nightly:2026-09-29 (3a943035), plan retired (1a40b257)
   - mariadb-chart-27.3.0              # tenants re-resolve the DB service on reconnect after mariadb-0 rolls;
                                       # a CoreDNS roll in the same night muddies its reconnect gate
   - penpot-chart-1.10.0               # its frontend nginx resolver moves to cluster DNS; its gate resolves

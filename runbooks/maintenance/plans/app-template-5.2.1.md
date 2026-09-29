@@ -40,7 +40,8 @@ conflicts_with:
   - redis-fleet-8.10.2                # edits 4 Batch A HR files (redis, tube-archivist-redis, immich-redis,
                                       # sure-redis) and ROLLS them -> §4 would read GEN_CHANGED
   - makemkv-v26.09.2                  # edits media/makemkv helmrelease.yaml (Batch A file); lists us already
-  - traccar-6.16.0                    # edits home-automation/traccar helmrelease.yaml (Batch A file); lists us already
+  # traccar-6.16.0 REMOVED 2026-09-29: executed green in nightly:2026-09-29 (3a943035), plan retired (1a40b257);
+  # traccar helmrelease.yaml now pins image 6.16.0@sha256 (chart still 5.1.0) -- Batch A's chart sed is unaffected
   - chart-patches-coredns-reloader-blackbox  # a Reloader/CoreDNS roll during §4 reads as GEN_CHANGED; lists us already
   - penpot-chart-1.10.0               # works against penpot-db + penpot-cache (Batch A members); lists us already
   - mariadb-chart-27.3.0              # rolls databases/mariadb-0 under phpmyadmin + all 15 showcase HRs (our Batch members); same-night confounds both §4s (review 2026-09-28)
