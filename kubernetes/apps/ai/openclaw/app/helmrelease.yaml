@@ -1432,6 +1432,25 @@ spec:
                     enabled: true,
                   };
 
+                  // ── Splitfairy MCP server (2026-09-29) ─────────────────────
+                  // Group-trip planner / cost splitting (my-software-production).
+                  // Native OpenClaw mcp.servers entry (streamable HTTP). URL and
+                  // bearer (a Splitfairy personal access token for Mathias'
+                  // account) come from openclaw-secret (SPLITFAIRY_URL /
+                  // SPLITFAIRY_PAT via envFrom) and are expanded by OpenClaw's
+                  // config env-substitution at load time -- the literal token
+                  // never lands in openclaw.json. `$$` escapes Flux postBuild
+                  // substitution. Companion skill: skill-splitfairy.md in
+                  // openclaw-skills.
+                  cfg.mcp = cfg.mcp || {};
+                  cfg.mcp.servers = cfg.mcp.servers || {};
+                  cfg.mcp.servers.splitfairy = {
+                    ...(cfg.mcp.servers.splitfairy || {}),
+                    url: '$${SPLITFAIRY_URL}/mcp',
+                    transport: 'streamable-http',
+                    headers: { Authorization: 'Bearer $${SPLITFAIRY_PAT}' },
+                  };
+
                   delete cfg.model;
 
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));

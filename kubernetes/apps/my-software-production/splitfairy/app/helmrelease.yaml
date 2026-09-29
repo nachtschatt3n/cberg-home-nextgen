@@ -59,6 +59,10 @@ spec:
                 value: http://192.168.30.111:11434
               - name: OLLAMA_MODEL
                 value: gemma4:26b-mlx
+              # Absolute base URL for links in emails (weekly settle-up
+              # reminders).
+              - name: PUBLIC_URL
+                value: "https://splitfairy.${SECRET_DOMAIN}"
             # ADMIN_EMAIL, AUTH_SECRET, SMTP_* come from the SOPS-encrypted
             # Secret `splitfairy` (./secret.sops.yaml). Reloader restarts the
             # pod when it changes.
