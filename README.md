@@ -482,7 +482,7 @@ quarterly.
 
 ## 📦 Applications
 
-~125 apps across 18 namespaces. Full inventory with per-app purpose, exposure
+~126 apps across 18 namespaces. Full inventory with per-app purpose, exposure
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 
@@ -508,9 +508,9 @@ docs-site · eck-operator · edot-collector · elasticsearch · grafana · headl
 kibana · kube-prometheus-stack · otel-operator · prometheus-blackbox-exporter ·
 prometheus-pushgateway · sweep-dashboard · unpoller · uptime-kuma
 
-### 📄 Office & Productivity (`office` — 11)
+### 📄 Office & Productivity (`office` — 12)
 actual-budget · affine · arag-web · mealie · nextcloud · nextcloud-mcp ·
-omni-tools · paperless-ngx · penpot · sure · vaultwarden
+omni-tools · paperless-ngx · penpot · stalwart · sure · vaultwarden
 
 ### 🎬 Media (`media` — 5)
 immich · jellyfin · library-tools · makemkv · plex

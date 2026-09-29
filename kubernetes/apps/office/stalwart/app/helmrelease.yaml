@@ -101,6 +101,12 @@ spec:
                 # privileged mail ports (25/465/587/993).
                 add: ["NET_BIND_SERVICE"]
         pod:
+          annotations:
+            # Stalwart binds NetworkListeners only at process start; a
+            # ReloadSettings action does NOT open/close ports. After changing
+            # listeners via bootstrap/plan.ndjson.tmpl, bump this value to
+            # roll the pod through git (docs/sops/stalwart.md).
+            stalwart.cberg/listener-revision: "1"
           securityContext:
             runAsUser: 2000
             runAsGroup: 2000

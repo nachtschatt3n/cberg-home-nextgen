@@ -71,3 +71,23 @@ spec:
         category: office
         component: stalwart
         severity: warning
+  - interval: 60s
+    name: stalwart.auth
+    rules:
+    # auth_failed is observed live on /metrics/prometheus (counter, created on
+    # first event). Queue/delivery rules are deliberately NOT here yet: no
+    # queue metric exists until mail flows (phase 2); add them from the names
+    # seen live then, never from docs.
+    - alert: StalwartAuthFailuresHigh
+      annotations:
+        description: Stalwart recorded {{ $value | printf "%.0f" }} failed
+          authentications in 15 minutes. Check for a misconfigured client or
+          password guessing (IMAP/submission/web are LAN/VPN-only).
+        summary: Stalwart authentication failures are elevated
+      expr: |
+        sum(increase(auth_failed{namespace="office", service="stalwart"}[15m])) > 20
+      for: 5m
+      labels:
+        category: office
+        component: stalwart
+        severity: warning
