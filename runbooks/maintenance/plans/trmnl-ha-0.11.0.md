@@ -42,8 +42,12 @@ conflicts_with:
   - flux-oci-chart-sources            # rewrites spec.chart of app-template HRs incl. this one.
   - flux-reconciler-impersonation     # exclusive:true already keeps its slot empty; named because this plan's
                                       # delivery path IS the Flux apply that plan re-identities.
+  - flux-fleet-0.60.0                 # helm-controller upgrade = this plan's delivery path; not the same night
+                                      # (plan review 2026-09-29).
 exclusive: false
-security_ref: null                    # no security driver (dispatch: "No security evidence").
+security_ref: F-2b739b70              # open accepted image finding on 0.10.3 (AR-059); 0.11.0 is the first newer
+                                      # upstream tag and is a full base rebuild (plan review 2026-09-29, trivy-measured;
+                                      # counts kept out of the repo).
 capability_change: false              # 0.11.0 adds two OPT-IN schedule fields (crop_fit, timestampPosition);
                                       # both default off/absent and our only schedule sets neither
                                       # (live /data/schedules.json read 2026-09-29). http-router.ts is NOT in the
@@ -52,9 +56,9 @@ capability_change: false              # 0.11.0 adds two OPT-IN schedule fields (
 rollback_class: git-revert            # nothing forward-only: no schema/migration; scheduleStore is not in the
                                       # diff; schedules.json is rewritten only on a UI save, and the only new
                                       # keys are optional fields 0.10.3 ignores. §2 takes a local copy anyway.
-finding_refs: []                      # `policy-cli.py finding list --grep trmnl --all` (2026-09-29): no finding
-                                      # names the 0.11.0 image target (tag is <24h old). F-8016b6d3 is the CHART
-                                      # 5.1.0->5.2.1 finding, owned by app-template-5.2.1, not this plan.
+finding_refs: [F-2b739b70, F-abfb145e] # both open against the 0.10.3 image (AR-059 / AR-029); this bump is their
+                                      # remedy. F-8016b6d3 is the CHART 5.1.0->5.2.1 finding, owned by
+                                      # app-template-5.2.1, not this plan.
 review: null
 status: draft
 window: null
@@ -265,7 +269,7 @@ git push
 
 3.3 Let the webhook reconcile (no manual `flux reconcile` by default). If the HR has
 not picked up the new revision within 5 min, the SOP permits
-`flux reconcile kustomization trmnl-ha -n flux-system --with-source`.
+`flux reconcile kustomization trmnl-ha -n home-automation --with-source` (the live Kustomization is in `home-automation`: the parent's targetNamespace overrides ks.yaml's flux-system; `-n flux-system` returns NotFound, verified 2026-09-29).
 
 ## 4. Verification
 
@@ -292,7 +296,7 @@ curl -s -w '\nHTTP=%{http_code}\n' http://localhost:11000/health | python3 -c "
 import sys; raw=sys.stdin.read(); body,code=raw.rsplit('HTTP=',1); import json; d=json.loads(body)
 b=d['browser']; print('status',d['status'],'healthy',b['healthy'],'fail',b['consecutiveFailures'],'last',b['lastSuccessfulRequest'],'HTTP',code.strip())"
 ```
-PASS: `status ok healthy True fail 0 HTTP 200`. Fail shape: `degraded`/HTTP 503 (router returns 503 when `checkHealth().healthy` is false). Note: on a fresh pod `lastSuccessfulRequest` is `None` and healthy is trivially true — that is why G4 exists; re-run G3 after G4 and require `last` to be a timestamp later than `$T0`.
+PASS: `status ok healthy True fail 0 HTTP 200`. Fail shape: `degraded`/HTTP 503 (router returns 503 when `checkHealth().healthy` is false). Note: on a fresh pod `lastSuccessfulRequest` equals process start (browserFacade `#lastSuccess = Date.now()` at construction, verified in upstream v0.11.0 source), so healthy is trivially true — that is why G4 exists. Record `$T0` BEFORE the push (or compare against the new pod's `.status.startTime`), re-run G3 after G4, and require `last` to be later than both.
 
 **G4 — CONTENTS: the dashboard actually renders to a 1-bit e-ink image.** (read-only GET, no webhook, same params as our schedule; keep the G3 port-forward)
 ```bash
@@ -335,6 +339,8 @@ CONTROL: metric kube_deployment_status_replicas_available — must read `1` (not
 CONTROL: metric kube_pod_container_status_restarts_total — summed over trmnl-ha pods must read `0` (confirmed present, 0 at authoring). `EMPTY` on either is a FAIL, not a pass: the pod selector matched nothing.
 trmnl-ha exposes no scrape target (`up{namespace="home-automation",service="trmnl-ha"}` is empty), so app-level truth comes from G4/G5, not Prometheus.
 
+**G8 — security bookkeeping (post-window, next sweep).** The sweep's security-check re-scans the deployed `ghcr.io/usetrmnl/trmnl-ha-amd64:0.11.0`. Confirm F-2b739b70 / F-abfb145e resolve on the old tag, then re-evaluate AR-059 with `runbooks/policy-cli.py risk` — its "already the newest tag" premise is false once 0.11.0 is deployed; renew or disable it consciously, never silently.
+
 ## 5. Rollback
 
 Trigger: any of G1–G7 FAIL that is not explained by HA itself being down (check 2.1 again first).
@@ -361,7 +367,8 @@ Trigger: any of G1–G7 FAIL that is not explained by HA itself being down (chec
 
 ## 6. Interference notes
 
-- Serialize with **app-template-5.2.1** (nightly 2026-10-02 at authoring): it edits the same `helmrelease.yaml` (chart line). Either order is fine; one window each so a failure is attributable. That plan's frontmatter does not yet list this one — reciprocity must be added there by its owner.
+- Serialize with **app-template-5.2.1** (nightly 2026-10-02 at authoring): it edits the same `helmrelease.yaml` (chart line). Either order is fine; one window each so a failure is attributable. Reciprocal `conflicts_with` added to that plan (review 2026-09-29).
+- **flux-fleet-0.60.0** (nightly 2026-10-06): helm-controller upgrade = this plan's delivery path; not the same night.
 - helm-drift-detection / flux-oci-chart-sources / flux-reconciler-impersonation: same HelmRelease object / same delivery path — listed in `conflicts_with`.
 - Depends at runtime on **home-assistant** (render target). Step 0 safe updates frequently bump HA in the same nightly window (e.g. 2026.9.3 -> 2026.9.4 tonight); run this plan only after HA is Ready, otherwise G4/G5 fail for a reason that is not this image.
 - No `kube-prometheus-stack` plan is open; G7 reads kube-state-metrics — if one appears on the same night, add it to `conflicts_with`.
