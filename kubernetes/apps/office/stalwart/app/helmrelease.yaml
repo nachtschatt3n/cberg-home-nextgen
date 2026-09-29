@@ -48,12 +48,18 @@ spec:
                 secretKeyRef:
                   name: stalwart-secret
                   key: STALWART_RECOVERY_ADMIN
-            # Remaining secret values are exposed as env so store objects can
-            # reference them with {"@type":"EnvironmentVariable"} secrets
-            # instead of copying plaintext into the datastore.
-            envFrom:
-              - secretRef:
+              # Only the secrets the datastore objects reference by
+              # {"@type":"EnvironmentVariable"}. The mailbox password (used by
+              # the bootstrap script on the Mac) and INGEST_HMAC_KEY (for the
+              # phase-3 shim) are deliberately NOT injected here.
+              METRICS_PASSWORD:
+                secretKeyRef:
                   name: stalwart-secret
+                  key: METRICS_PASSWORD
+              BREVO_SMTP_PASSWORD:
+                secretKeyRef:
+                  name: stalwart-secret
+                  key: BREVO_SMTP_PASSWORD
             probes:
               liveness:
                 enabled: true
