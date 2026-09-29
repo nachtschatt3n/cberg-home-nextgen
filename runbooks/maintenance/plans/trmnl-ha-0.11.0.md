@@ -56,11 +56,11 @@ capability_change: false              # 0.11.0 adds two OPT-IN schedule fields (
 rollback_class: git-revert            # nothing forward-only: no schema/migration; scheduleStore is not in the
                                       # diff; schedules.json is rewritten only on a UI save, and the only new
                                       # keys are optional fields 0.10.3 ignores. §2 takes a local copy anyway.
-finding_refs: [F-2b739b70, F-abfb145e] # both open against the 0.10.3 image (AR-059 / AR-029); this bump is their
-                                      # remedy. F-8016b6d3 is the CHART 5.1.0->5.2.1 finding, owned by
+finding_refs: [F-f1c20bc7, F-2b739b70, F-abfb145e] # F-f1c20bc7 = the version finding for this bump; the other two
+                                      # are open against the 0.10.3 image (AR-059 / AR-029); this bump is their remedy. F-8016b6d3 is the CHART 5.1.0->5.2.1 finding, owned by
                                       # app-template-5.2.1, not this plan.
-review: null
-status: draft
+review: ready-for-go@2026-09-29
+status: vetted
 window: null
 premises:
   - id: image-is-still-0.10.3
@@ -273,7 +273,7 @@ not picked up the new revision within 5 min, the SOP permits
 
 ## 4. Verification
 
-Record the rollout time: `T0=$(date -u +%Y-%m-%dT%H:%M:%SZ)` once the new pod is Running.
+Record the rollout time: `T0=$(date -u +%Y-%m-%dT%H:%M:%SZ)` immediately BEFORE the §3 push (G3 also compares against the new pod's `.status.startTime`).
 
 **G1 — the new image, by digest, is what runs.**
 ```bash
@@ -339,7 +339,7 @@ CONTROL: metric kube_deployment_status_replicas_available — must read `1` (not
 CONTROL: metric kube_pod_container_status_restarts_total — summed over trmnl-ha pods must read `0` (confirmed present, 0 at authoring). `EMPTY` on either is a FAIL, not a pass: the pod selector matched nothing.
 trmnl-ha exposes no scrape target (`up{namespace="home-automation",service="trmnl-ha"}` is empty), so app-level truth comes from G4/G5, not Prometheus.
 
-**G8 — security bookkeeping (post-window, next sweep).** The sweep's security-check re-scans the deployed `ghcr.io/usetrmnl/trmnl-ha-amd64:0.11.0`. Confirm F-2b739b70 / F-abfb145e resolve on the old tag, then re-evaluate AR-059 with `runbooks/policy-cli.py risk` — its "already the newest tag" premise is false once 0.11.0 is deployed; renew or disable it consciously, never silently.
+**G8 — security bookkeeping (post-window, next sweep).** The sweep's security-check re-scans the deployed `ghcr.io/usetrmnl/trmnl-ha-amd64:0.11.0`. Confirm F-2b739b70 / F-abfb145e resolve on the old tag, then re-evaluate AR-059 and AR-029 with `runbooks/policy-cli.py risk` — their "already the newest tag" / "no upstream fix" premises are false once 0.11.0 is deployed; renew or disable it consciously, never silently.
 
 ## 5. Rollback
 
