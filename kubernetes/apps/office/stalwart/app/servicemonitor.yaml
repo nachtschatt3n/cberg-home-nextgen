@@ -1,0 +1,26 @@
+---
+# Stalwart's Prometheus endpoint is /metrics/prometheus on the plain-HTTP
+# management listener, protected by basic auth (credentials seeded into the
+# store by the bootstrap plan from the same stalwart-secret keys).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: stalwart
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: stalwart
+      app.kubernetes.io/service: stalwart
+  endpoints:
+    - port: http
+      path: /metrics/prometheus
+      interval: 60s
+      basicAuth:
+        username:
+          name: stalwart-secret
+          key: METRICS_USERNAME
+        password:
+          name: stalwart-secret
+          key: METRICS_PASSWORD

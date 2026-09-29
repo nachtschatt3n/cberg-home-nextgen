@@ -19,3 +19,4 @@ resources:
  - ./sure/ks.yaml
  - ./arag-web/ks.yaml
  - ./mealie/ks.yaml
+ - ./stalwart/ks.yaml

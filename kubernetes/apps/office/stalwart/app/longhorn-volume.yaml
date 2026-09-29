@@ -1,0 +1,21 @@
+---
+# DELIBERATELY NOT REGISTERED in kustomization.yaml: the stalwart Flux
+# Kustomization's targetNamespace (office) would override `namespace: storage`
+# and create a broken duplicate that Longhorn ignores, leaving the PVC Pending.
+# Apply by hand, once (see docs/sops/longhorn.md and docs/sops/stalwart.md):
+#
+#   mise exec -- kubectl apply -f kubernetes/apps/office/stalwart/app/longhorn-volume.yaml
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: stalwart-data
+  namespace: storage
+spec:
+  size: "21474836480"   # 20 Gi  (20 * 1024^3)
+  numberOfReplicas: 2
+  staleReplicaTimeout: 30
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false

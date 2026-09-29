@@ -1,0 +1,14 @@
+---
+# v0.16 model: config.json describes ONLY the datastore. Every other setting
+# (domains, listeners, DKIM, relay, accounts) lives inside that store as JMAP
+# objects and is seeded by bootstrap-plan.ndjson via stalwart-cli apply.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stalwart-config
+data:
+  config.json: |
+    {
+      "@type": "RocksDb",
+      "path": "/var/lib/stalwart/data"
+    }

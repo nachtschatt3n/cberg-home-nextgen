@@ -1,0 +1,22 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/cert-manager.io/certificate_v1.json
+# TLS for the mail protocols (SMTPS/submission/IMAPS). Issued via DNS-01, so it
+# needs no public A record. Mounted into the pod as a whole directory (no
+# subPath, so renewals propagate); Reloader restarts Stalwart on renewal
+# because Stalwart reads the PEM files at startup.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: stalwart-mail
+spec:
+  secretName: stalwart-tls
+  issuerRef:
+    name: letsencrypt-production
+    kind: ClusterIssuer
+  commonName: "mail.${SECRET_DOMAIN}"
+  dnsNames:
+    - "mail.${SECRET_DOMAIN}"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
