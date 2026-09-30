@@ -49,8 +49,7 @@ conflicts_with:
                                       # chart source to OCIRepository) and edits cluster-meta.
   - helm-drift-detection              # changes HelmRelease behaviour cluster-wide incl. these two
                                       # HRs; attribution of any flux-system diff would be ambiguous.
-  - librechat-2.0.14                  # helm-controller upgrade same night makes a failed librechat
-                                      # upgrade un-attributable (review 2026-09-28; librechat lists us).
+  # - librechat-2.0.14 (RESOLVED 2026-09-30: executed + retired in nightly:2026-09-30, c75c5c39/4465c3c1; ref removed per the dead-ref convention)
   - redis-fleet-8.10.2                # Flux controller upgrade under its GitOps legs (review 2026-09-28).
   - nextcloud-fleet-35.0.1            # helm-controller restart mid-§3.4 strands its release
                                       # pending-upgrade (retries: 0) (review 2026-09-28).

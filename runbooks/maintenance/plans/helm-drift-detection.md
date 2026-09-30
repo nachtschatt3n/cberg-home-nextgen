@@ -63,8 +63,7 @@ touches:
 depends_on: []
 conflicts_with:
   # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
-  - grafana-13.2.6                    # §6.4 attribution: a grafana Helm upgrade in the same window as P3 gives
-                                      # the rollout two causes (replaces superseded grafana-chart-13.2.3, review 2026-09-29)
+  # - grafana-13.2.6 (RESOLVED 2026-09-30: executed + retired in nightly:2026-09-30, a64bb61e; ref removed per the dead-ref convention)
   # - affine-redis-8.10.2 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # §4.1 revision-identity diff: that plan upgrades
                                       # office/affine-redis (rev 14 -> 15). Reciprocal of
                                       # its own declaration; added 2026-09-26 (plan review).
@@ -90,7 +89,7 @@ conflicts_with:
   # Reciprocals of plans that already name this one (a HelmRelease change in the P1 run
   # breaks rev-gate/values-gate attribution, and P1 must be the day's LAST HR change):
   - app-template-5.2.1
-  - librechat-2.0.14
+  # - librechat-2.0.14 (RESOLVED 2026-09-30: executed + retired in nightly:2026-09-30, c75c5c39; ref removed)
   - mariadb-chart-27.3.0
   - penpot-chart-1.10.0
   - redis-fleet-8.10.2
