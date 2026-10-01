@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.28"
+version: "2026.10.01"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -260,6 +260,14 @@ deny:
       mariadb-upgrade on a server-major roll while reporting Ready and the right
       SELECT VERSION() — leaving old-format system tables under the new binary.
       See docs/sops/mariadb-major-upgrade.md."
+    max: patch
+  - match: "*longhorn*"
+    reason: "Storage engine for every RWO volume: a MINOR is an engine/instance-manager
+      line move (1.11->1.12 needed a hand-checked upgrade, cd2ed987; the 1.12.1 patch
+      flipped a network-policy default that broke Prometheus scraping, 3c73a7b0).
+      Added 2026-10-01 by the cron sweep (F-f79c74ac): chart 1.13.0 was held ONLY by
+      the G5 cooldown and would have landed unattended in nightly:2026-10-02.
+      Patches stay AUTO; minor+ goes through a plan. Operator may narrow or drop."
     max: patch
   - match: "*mcpo*"
     reason: "python init base image major (3.11→3.14) rides these tags."
