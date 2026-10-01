@@ -83,8 +83,8 @@ finding_refs: [F-15d4b6c4]            # `finding list --grep nocodb` 2026-10-01 
                                       # plan). No version-lane row for 2026.09.1 exists yet (the last
                                       # sweep, 2026-09-29 02:18Z, predates the tag); add it here when
                                       # the next sweep emits one.
-review: null
-status: draft
+review: ready-for-go@2026-10-01   # plan-reviewer-agent, sweep b23be87b
+status: vetted
 window: null
 premises:
   - id: live-image-is-still-2026.09.0
