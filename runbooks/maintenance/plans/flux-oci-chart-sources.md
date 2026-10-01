@@ -46,7 +46,7 @@ touches:
     - "fluxinstance/flux spec.kustomize.patches (Stage 10 — emptyDir sizeLimit)"
   shared: [flux-sources, cni-adjacent, cert-manager, storage/longhorn, dns-internal, monitoring]
 depends_on: []
-conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, otel-operator-0.23.0, nextcloud-fleet-35.0.1, jellyfin-12.1, penpot-chart-1.10.0, app-template-5.2.1, chart-patches-coredns-reloader-blackbox, flux-fleet-0.60.0, mariadb-chart-27.3.0, paperless-db-13.0.2, uptime-kuma-2.5.5-slim-rootless]   # grafana-13.2.6 removed 2026-09-30: executed + retired in nightly:2026-09-30 (a64bb61e)
+conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, otel-operator-0.23.0, nextcloud-fleet-35.0.1, jellyfin-12.1, penpot-chart-1.10.0, app-template-5.2.1, chart-patches-coredns-reloader-blackbox, flux-fleet-0.60.0, mariadb-chart-27.3.0, paperless-db-13.0.2, uptime-kuma-2.5.5-slim-rootless, grafana-13.2.7]   # grafana-13.2.7 added 2026-10-01 (rolls deployment/grafana); grafana-13.2.6 removed 2026-09-30: executed + retired in nightly:2026-09-30 (a64bb61e)
   # talos-1.14.1/1.14.0 retired 2026-09-27 (dead refs removed). impersonation + drift-detection edit every HelmRelease;
   # otel/nextcloud/jellyfin/penpot edit the same helmrelease.yaml a stage switches to chartRef (review 2026-09-28).
   # flux-fleet-0.60.0: restarts flux-operator (sole flux_* exporter) and moves the flux-operator/flux-instance HRs; source-controller is NOT expected to roll (builder/ssa unchanged v0.57.0..v0.60.0; flux-fleet gate 4.4 checks it).

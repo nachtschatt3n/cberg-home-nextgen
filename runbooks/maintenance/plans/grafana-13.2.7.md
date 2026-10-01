@@ -29,6 +29,7 @@ conflicts_with:
   - helm-drift-detection              # writes a field on every HelmRelease incl. grafana
   - flux-reconciler-impersonation     # changes how helm-controller reconciles every HR
   - flux-fleet-0.60.0                 # helm-controller swap mid-upgrade would confound the verdict
+  - talos-linux-1.14.2                # exclusive node roll; evicts grafana and touches monitoring
 exclusive: false
 security_ref: F-38473276              # the 13.2.2-distroless image row; upstream 13.2.3 is a
                                       # security release -- detail stays on the DB record
@@ -119,8 +120,8 @@ values or subchart change. The chart release note is a single line:
 
 Because we set no `image` override (premise `no-image-override`), the rendered
 grafana container moves `grafana:13.2.2-distroless -> grafana:13.2.3-distroless`.
-Docker Hub lists that tag (pushed 2026-09-29, amd64 digest
-`sha256:202e5d5b3f84...`). The render diff otherwise matches 13.2.6: the
+Docker Hub lists that tag (pushed 2026-09-29; index digest
+`sha256:202e5d5b3f84...`, linux/amd64 manifest `sha256:8c7801a8ed84...`). The render diff otherwise matches 13.2.6: the
 `helm.sh/chart` label on every object, and the image tag.
 
 **Upstream Grafana v13.2.3** (GitHub release `v13.2.3`, published
@@ -205,6 +206,32 @@ EOF
 python3 /tmp/grafana-prov-count.py                                         # 2026-10-01: dashboards=72 provisioned=65 fetch_errors=0
 kill $PF
 
+# Error-signature baseline for section 4.3: one line per distinct logger|msg|document of a
+# level=error line. logger=context (per-request HTTP lines, incl. our own probes) is excluded;
+# section 4.4 gates the datasources.
+cat > /tmp/grafana-err-sig.py <<'EOF'
+import sys, re
+sig = set()
+for line in sys.stdin:
+    if not re.search(r'\blevel=error\b', line, re.I):
+        continue
+    lg = re.search(r'\blogger=(\S+)', line)
+    lg = lg.group(1) if lg else "?"
+    if lg == "context":
+        continue
+    msg = re.search(r'\bmsg="([^"]*)"', line)
+    doc = re.search(r'\bdocument=(\S+)', line)
+    sig.add(f'{lg} | {msg.group(1) if msg else "?"} | {doc.group(1) if doc else "-"}')
+print("\n".join(sorted(sig)))
+EOF
+OLDPOD=$(kubectl -n monitoring get pods -l app.kubernetes.io/name=grafana -o jsonpath='{.items[0].metadata.name}')
+kubectl -n monitoring logs $OLDPOD -c grafana | python3 /tmp/grafana-err-sig.py > /tmp/grafana-err-base.txt
+cat /tmp/grafana-err-base.txt
+# 2026-10-01 (pod grafana-6d4c855556-v4w5r, started 2026-09-30T01:39:22Z) printed exactly one line,
+# a BOOT-TIME dashboard-store error (logged 2s after start) that recurs on every start and is NOT
+# caused by this hop:
+#   services.store.kind.dashboard | Unexpected element in Dashboard JSON | default/dashboard.grafana.app/dashboards/1iY4QMJVk-psee
+
 kubectl get cm,secret -A -l grafana_dashboard -o name | wc -l               # 2026-10-01: 37 (sidecar objects)
 
 # Longhorn backup of the config volume -- the restore point if section 5's migration branch is ever reached
@@ -213,8 +240,8 @@ kubectl get volume -n storage grafana-config -o jsonpath='{.status.lastBackupAt}
 # cross-check the newest Completed Backup CR for grafana-config before you call it a STOP.
 ```
 
-Record `BASE_DS` (18), `BASE_DASH` (72), `BASE_PROV` (65) and `BASE_SC` (37).
-These are the pass bars in section 4.
+Record `BASE_DS` (18), `BASE_DASH` (72), `BASE_PROV` (65) and `BASE_SC` (37),
+and keep `/tmp/grafana-err-base.txt`. These are the pass bars in section 4.
 
 **STOP** if the backup is older than 26h and no Completed Backup CR from the last
 26h exists. The git-revert class assumes no migration. If that assumption fails,
@@ -299,17 +326,42 @@ kubectl -n monitoring logs $POD -c grafana | grep 'msg="migrations completed"' \
 # longer git-revert; use section 5 "If a migration ran").
 python3 /tmp/grafana-prov-count.py
 # PASS: dashboards == BASE_DASH (72), provisioned >= BASE_PROV (65), fetch_errors=0.
-# FAIL: provisioned drops = the new classic-FP gate (managed.go enforceClassicFPAssignment) refused
-# provenance for file-provisioned dashboards, so they now read as unmanaged. fetch_errors>0 =
-# dashboards listed but not loadable from unified storage. dashboards alone is a FLOOR ONLY:
-# provisioners run with disableDelete, so a failed provisioning keeps the old rows and cannot lower it.
+# What this CAN detect: fetch_errors>0 (dashboards listed but not loadable from unified storage),
+# and provisioned or dashboards FALLING (provenance metadata lost on existing rows, or rows gone).
+# What it CANNOT detect: a classic-FP gate refusal. enforceClassicFPAssignment is skipped for an
+# object that is ALREADY classic-file-provisioned (managed.go@v13.2.3,
+# checkManagerPropertiesOnUpdateSpec ~L157), so all 65 existing provisioned dashboards bypass it on
+# update; and the providers run with disableDelete, so a refused write keeps the old row and
+# neither number moves.
+```
+
+**This hop has NO gate for the classic-FP create path.** The new check only bites
+when the provisioner *newly* assigns the classic-FP manager, i.e. creates a
+dashboard that does not exist yet. This plan adds no dashboard, so that path is
+not exercised in the window. Its first real exercise is the next new sidecar or
+dashboardProviders dashboard after the hop; the error-signature gate below sees
+a refusal only if one happens during this boot.
+
+```bash
+kubectl -n monitoring logs $POD -c grafana | python3 /tmp/grafana-err-sig.py \
+  | LC_ALL=C comm -13 /tmp/grafana-err-base.txt - | tee /tmp/grafana-err-new.txt
+echo "new_error_sigs=$(grep -c . /tmp/grafana-err-new.txt)"
+# PASS: new_error_sigs=0. FAIL: >0. Each printed line is a level=error signature (logger | msg |
+# document) the 13.2.2 pod did not have: a dashboard-store, provisioning or unified-storage error,
+# whatever its logger name or wording. This replaces the earlier `level=error | grep provision`
+# filter, which missed the real dashboard-store error class (logger=services.store.kind.dashboard,
+# msg="Unexpected element in Dashboard JSON") and printed 0 on a log that contained it.
+# Demonstrated able to fail (2026-10-01, live 13.2.2 log as the known-bad input):
+#   - vs an EMPTY baseline it prints 1 line (the psee "Unexpected element in Dashboard JSON" error);
+#   - vs its own baseline it prints 0;
+#   - with a synthetic `level=error msg="Can not set the classic-file-provisioning resource manager"`
+#     line appended, it prints exactly that signature.
+# The script sorts by codepoint, hence LC_ALL=C for comm. A log that was not read at all also
+# prints 0 here -- the migrations gate above (lines=4) is what proves the right log was read.
 kubectl -n monitoring logs $POD -c grafana | grep -ciE 'classic-file-provisioning resource manager'
-# PASS: 0. FAIL: >0 = upstream's new 403 ("Can not set the classic-file-provisioning resource
-# manager", managed.go) fired against a provisioning write. Case-insensitive on purpose. Read the
-# number, not the exit code (grep -c prints 0 and exits 1 on no match).
-kubectl -n monitoring logs $POD -c grafana | grep -iE 'level=error' | grep -ciE 'provision'
-# PASS: 0 (live 2026-10-01 on 13.2.2: 0). FAIL: >0 = a dashboard/datasource provisioning error,
-# whatever its wording.
+# INFORMATIONAL, not a gate. The string is upstream's 403 text from managed.go and has never been
+# observed in a real log here (0 on 13.2.2), so a 0 proves nothing. If non-zero, read the lines;
+# the signature gate above will already have printed them as a FAIL.
 ```
 
 **4.4 Datasource gate (mandatory for any Grafana binary change, SOP grafana-image-changes section 6).**
@@ -404,6 +456,9 @@ migrated.
     HelmRelease, grafana included, is reconciled.
   - `flux-fleet-0.60.0` (nightly 2026-10-06) swaps helm-controller. A controller
     restart mid-upgrade would make a failed section 4.1 ambiguous.
+  - `talos-linux-1.14.2` (draft, exclusive, sun-attended) evicts and reschedules
+    every pod including grafana, and names `monitoring` in its touches. Never
+    the same window.
 - **Namespace neighbours in `monitoring`** (shared namespace, no resource
   overlap): `otel-operator-0.23.0` (nightly 2026-10-03),
   `uptime-kuma-2.5.5-slim-rootless` (sat 2026-10-03), `app-template-5.2.1`
@@ -434,5 +489,6 @@ migrated.
   container's log before blaming 13.2.3.
 - **Superseded sibling:** `grafana-chart-13.2.3.md` is `superseded` and does not
   interact.
-- **Window fit:** 20 min, low risk, no reboot. A nightly slot is fine. The
-  default go/no-go applies, because the item is G3-held.
+- **Window fit:** 20 min, low risk, no reboot. A nightly slot is fine.
+  Derived class AUTO-NIGHT (risk low, `capability_change: false`,
+  `rollback_class: git-revert`).
