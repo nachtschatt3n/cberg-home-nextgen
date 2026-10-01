@@ -33,7 +33,7 @@ conflicts_with:
                                       # SAME 79 HelmReleases — a same-night failure could not be attributed
   - helm-drift-detection              # adds spec.driftDetection to all 124 HRs incl. these 79 (same objects, same helm-controller)
   - flux-oci-chart-sources            # rewrites HelmRelease chart sources (up to 32 -> chartRef); same spec.chart block
-  - nextcloud-mcp-0.187.1             # edits kubernetes/apps/ai/openclaw/app/helmrelease.yaml (Batch C's file)
+  - nextcloud-mcp-0.198.0             # edits office/nextcloud-mcp helmrelease.yaml (Batch A file); was nextcloud-mcp-0.187.1 (superseded 2026-10-01)
   - absenty-drop-npm-runtime          # edits my-software-production/absenty helmrelease.yaml (Batch A file)
   - float-tag-pinning                 # edits media/makemkv helmrelease.yaml (Batch A file)
   - penpot-cache-9.2                  # edits office/penpot-cache helmrelease.yaml (Batch A file)
@@ -499,7 +499,7 @@ kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.chart.spec.chart
   HelmReleases, controller identity), `helm-drift-detection` (spec change on
   the same 79 HRs), and `flux-oci-chart-sources` (rewrites `spec.chart`) all
   change how helm-controller treats these very objects. Also listed are four
-  plans that edit a file in this batch set (`nextcloud-mcp-0.187.1` → openclaw,
+  plans that edit a file in this batch set (`nextcloud-mcp-0.198.0` → nextcloud-mcp,
   `absenty-drop-npm-runtime` → absenty, `float-tag-pinning` → makemkv,
   `penpot-cache-9.2` → penpot-cache, `redis-fleet-8.10.2` → 4 redis HRs that it
   also rolls, `makemkv-v26.09.2`, `traccar-6.16.0`, `penpot-chart-1.10.0`), and

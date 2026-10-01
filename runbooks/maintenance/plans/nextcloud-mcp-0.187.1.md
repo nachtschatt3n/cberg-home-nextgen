@@ -84,7 +84,7 @@ rollback_class: git-revert            # stateless bridge: no PVC, no volumes, no
                                       # `values.image.tag` is the diff.
 finding_refs: [F-9af9baf7, F-80459b23, F-bb713800]   # F-bb713800 ADDED 2026-09-22: the drift
                                       # finding this refresh answers (plan-or-page joins on this field).
-status: blocked
+status: superseded   # 2026-10-01 superseded by nextcloud-mcp-0.198.0 (or revived as option B per its §1.6)
 blocked_reason: >-
   2026-09-26 NOW run, TWO aborts (retry cap): attempt 1 (3007ffb1, rollback 90413987)
   false-STOPped at gate 4.5 (calendar `name` encoding; gate fixed a1e5c69e). Attempt 2

@@ -36,7 +36,7 @@ depends_on: []
 conflicts_with:
   - bitnamilegacy-exit-nextcloud-db     # blocked, latent. Same app quiesced, risk:high, DB-restore
                                         # rollback; never stack a session-store auth change on it.
-  - nextcloud-mcp-0.187.1               # its verification calls the Nextcloud API, which this plan
+  - nextcloud-mcp-0.198.0               # its verification calls the Nextcloud API, which this plan
                                         # takes down for ~20 min. Lists this plan reciprocally.
   - nextcloud-fleet-35.0.1              # draft. Edits helmrelease.yaml AND notify-push.yaml (image
                                         # lockstep) and rolls the same Deployments. Lists this plan.

@@ -63,7 +63,7 @@ conflicts_with:
                                                 # parent that predates THIS bump. Serial, other slot.
   - bitnamilegacy-exit-nextcloud-db             # same helmrelease.yaml, same DB this plan migrates
                                                 # one-way; that plan's dump would capture a half-state.
-  - nextcloud-mcp-0.187.1                       # its verification talks to this server; the §2.5
+  - nextcloud-mcp-0.198.0                       # its verification talks to this server; the §2.5
                                                 # silence here is office-wide.
   - redis-fleet-8.10.2                          # restarts nextcloud-redis and (by its own touches)
                                                 # deployment/nextcloud + notify-push — a restart
@@ -1064,7 +1064,7 @@ Confirm back: `occ status` = `34.0.4.1`, maintenance false; HelmRelease Ready on
   browser checks). Never `nightly`/`sat-attended` (90 min).
 - **Office-wide silence (§2.5)**: no other `office` plan in the same slot. The
   declared conflicts: `nextcloud-redis-hardening`, `bitnamilegacy-exit-nextcloud-db`
-  (same helmrelease.yaml / same DB), `nextcloud-mcp-0.187.1` (consumer),
+  (same helmrelease.yaml / same DB), `nextcloud-mcp-0.198.0` (consumer),
   `redis-fleet-8.10.2` (restarts nextcloud-redis + our Deployments),
   `flux-oci-chart-sources` (moves this chart's source, rolls mariadb),
   `flux-reconciler-impersonation` (changes office/nextcloud's reconcile identity),

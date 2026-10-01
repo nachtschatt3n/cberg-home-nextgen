@@ -5,12 +5,14 @@ pr: null                              # no Renovate PR; held by the `*nextcloud-
                                       # (runbooks/auto-update-policy.yaml) via coverage.py's PLAN lane
 kind: image
 current: "0.184.5"
-target: "0.198.0"                     # verified 2026-09-29T02:17Z: GHCR 0.198.0 index digest sha256:dbfeb3eb… is
-                                      # IDENTICAL to `latest`; 0.198.1 and 0.199.0 404; GitHub v0.198.0 is Latest,
-                                      # not a pre-release (published 2026-09-28T10:53Z). §1.1
+target: "0.198.1"                     # RETARGETED in place 2026-10-01 (plan_id/filename kept as 0.198.0). Verified
+                                      # 2026-10-01T02:11Z: GHCR 0.198.1 index digest sha256:427e0826… is IDENTICAL
+                                      # to `latest`; 0.198.2 and 0.199.0 404; GitHub v0.198.1 is Latest, not a
+                                      # pre-release (published 2026-09-30T12:13Z). v0.198.0...v0.198.1 touches only
+                                      # auth/cimd.py + packaging; client/calendar.py is byte-identical. §1.1/§1.2
 update_type: minor                    # semver label only -- at major 0 the MINOR digit is the breaking axis; this
                                       # hop crosses FOURTEEN minor lines (0.185 .. 0.198). 0.185..0.195.4 were read
-                                      # tag-by-tag in nextcloud-mcp-0.187.1 (carried in §1.3); 0.195.5..0.198.0 are
+                                      # tag-by-tag in nextcloud-mcp-0.187.1 (carried in §1.3); 0.195.5..0.198.1 are
                                       # read here (§1.2).
 risk: medium                          # stateless bridge, cheap git-revert -- BUT §1.2's regression means the
                                       # EXPECTED outcome today is a STOP at §2.7 (see Summary). Not raised to high:
@@ -30,14 +32,13 @@ touches:
 depends_on: []                        # Flux `dependsOn: nextcloud` is ordering-only; no release note in range states
                                       # a minimum Nextcloud server version.
 conflicts_with:
-  - nextcloud-mcp-0.187.1             # SAME image, predecessor plan (blocked). Must never share a slot with this one;
-                                      # moot once it is marked `superseded` (§1.5).
+  - nextcloud-mcp-0.187.1             # SAME image, predecessor plan -- marked `superseded` 2026-10-01 (§1.5). Kept
+                                      # because option B (§1.6) revives it; the two must never share a slot.
   - app-template-5.2.1                # nightly:2026-10-02 -- its Batch A sed edits THIS helmrelease.yaml (chart
                                       # 5.1.0 -> 5.2.1, line 12) and re-renders this Deployment; a same-night run
-                                      # makes §4.2's roll unattributable. It lists nextcloud-mcp-0.187.1 today; the
-                                      # reciprocal entry for THIS id is owed on that plan (§1.5).
+                                      # makes §4.2's roll unattributable. Reciprocal entry re-pointed 2026-10-01.
   - nextcloud-redis-hardening         # nightly:2026-10-01 -- quiesces the Nextcloud server + restarts its Redis;
-                                      # every §4 contents gate is a live call into that server. Reciprocal owed.
+                                      # every §4 contents gate is a live call into that server. Reciprocal re-pointed.
   - nextcloud-fleet-35.0.1            # sun-attended:2026-10-18 -- Nextcloud 34 -> 35 MAJOR; §4.5/§4.6 read CalDAV
                                       # from that server. After it runs, premise 2 fails closed -> re-vet here.
   - bitnamilegacy-exit-nextcloud-db   # blocked/unwindowed; restarts deployment/nextcloud if revived -- same reason.
@@ -49,9 +50,9 @@ capability_change: true               # 21 new tools (4 of them WRITE), behaviou
                                       # find_availability), and the 0.195.5 calendar-addressing change (§1.2).
 rollback_class: git-revert            # no PVC, no volumes, no DATABASE_URL/TOKEN_STORAGE_DB: alembic runs against an
                                       # ephemeral /tmp SQLite recreated each start (premises 4+5).
-finding_refs: [F-9af9baf7, F-80459b23] # F-9af9baf7 = the version finding (title names 0.198.0, re-read 2026-09-29);
-                                      # F-80459b23 = the security finding. Both are ALSO claimed by
-                                      # nextcloud-mcp-0.187.1 until that file is marked superseded.
+finding_refs: [F-9af9baf7, F-80459b23] # F-9af9baf7 = the version finding (title names 0.198.1, re-read 2026-10-01);
+                                      # F-80459b23 = the security finding. nextcloud-mcp-0.187.1 also lists
+                                      # both but is `superseded` (terminal) since 2026-10-01.
 review: null
 status: draft
 window: null
@@ -71,8 +72,8 @@ premises:
     expect_matches: 'docker\.io/nextcloud:34\.0\.[0-9]+$'
   - id: deployment-mode-still-single-user-basic
     why: >-
-      0.185.0's elicitation break, 0.190.0's CIMD/OAuth changes and 0.197.0's
-      sar.read/sar.write scopes all fire only on the OAuth / multi-user path.
+      0.185.0's elicitation break, 0.190.0's and 0.198.1's CIMD/OAuth changes and
+      0.197.0's sar.read/sar.write scopes all fire only on the OAuth / multi-user path.
       single_user_basic makes them inert; any other mode voids §1.2/§1.3.
     run: kubectl get secret -n office nextcloud-mcp-config -o json | jq -r '.data.MCP_DEPLOYMENT_MODE' | jq -Rr '@base64d'
     expect_exact: single_user_basic
@@ -82,7 +83,9 @@ premises:
       VECTOR_SYNC_ENABLED/ENABLE_SEMANTIC_SEARCH, EMBEDDING_GATEWAY_URL or
       SAR_ENABLED, so the 0.196.0 indexing BREAKING and the 0.197.0/0.198.0 SAR
       tools, routes and scopes stay off (SAR registers only inside the
-      vector-sync branch, app.py:1880-1888 at v0.198.0); (c) no COLLABORA_URL /
+      vector-sync branch, app.py:1880-1888 at v0.198.0/v0.198.1 -- app.py is
+      untouched by that patch); (c) no CIMD_ALLOWED_HOSTS, so the 0.198.1
+      CIMD fix is unreachable; (d) no COLLABORA_URL /
       DOCLING_API_URL, so optional processors stay off.
     run: kubectl get secret -n office nextcloud-mcp-config -o go-template='{{range $k,$v := .data}}{{$k}},{{end}}'
     expect_exact: MCP_DEPLOYMENT_MODE,NEXTCLOUD_HOST,NEXTCLOUD_PASSWORD,NEXTCLOUD_USERNAME,
@@ -111,7 +114,10 @@ generated: "2026-09-29"
 
 `kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml:34` pins
 `ghcr.io/cbcoutinho/nextcloud-mcp-server` at `0.184.5`; upstream head is
-`0.198.0` (`F-9af9baf7`). coverage.py: *"0.x release-line move (0.184 -> 0.198)
+`0.198.1` (`F-9af9baf7`). **Retargeted in place 2026-10-01** from 0.198.0 to
+0.198.1 (plan_id and filename keep `0.198.0`): the patch touches only
+`auth/cimd.py` + packaging, so every 0.198.0 conclusion below carries.
+coverage.py: *"0.x release-line move (0.184 -> 0.198)
 -- at major 0 the minor IS the breaking axis"*; the `*nextcloud-mcp*` deny rule
 (`max: patch`) requires a human read of every minor hop. Security driver:
 `F-80459b23` (§1.4).
@@ -123,12 +129,12 @@ calendars the MCP user owns have a Nextcloud calendar URI that contains a
 literal `%28`/`%29` (read from `occ dav:list-calendars` AND from the href the
 server returns). From 0.195.5 on, `_get_calendar_url()` runs `unquote()` on the
 calendar name before encoding it once (`client/calendar.py:561-568` at
-v0.198.0). Upstream's own justification in the code and commit `855c0f8b`:
+v0.198.0, byte-identical at v0.198.1 and `master`). Upstream's own justification in the code and commit `855c0f8b`:
 *"Nextcloud calendar URIs never contain a literal `%`, so the unquote is
 lossless in practice"* -- false for our data. The request goes to a
 non-existent URI, and Nextcloud answers with an empty calendar, not an error.
 Emulated live on 0.184.5 on 2026-09-29, by passing the doubly-decoded name that
-0.198.0 will build: `nc_calendar_list_events` returned `isError=false,
+0.198.0 (and so 0.198.1) will build: `nc_calendar_list_events` returned `isError=false,
 total_found=0` for a calendar that returns **200 (limit-capped)** events with
 its real name. The new `errors: [...]` field (0.195.5) does NOT catch it,
 because nothing raised. Consumers would get "no events" / "you are free"
@@ -139,28 +145,31 @@ gate (§4.6, new) catches it.
 So §2.7 is a hard STOP gate. It passes only if (a) no owned calendar URI holds
 a literal `%` any more, or (b) the target tag no longer has
 `unquote(calendar_name)` in `_get_calendar_url`. Neither holds today:
-upstream `main` still has it (checked 2026-09-29). **The operator has to choose
+v0.198.1 and upstream's default branch `master` still have it (checked
+2026-10-01; `calendar.py` sha256 identical across v0.198.0, v0.198.1, master). **The operator has to choose
 the way forward (§1.6). The window agent cannot pick it.** Everything else in
 the hop was read and is inert or additive for this deployment (§1.2, §1.3).
 
-### 1.1 Registry verification (2026-09-29T02:17Z; re-run at §2.0)
+### 1.1 Registry verification (2026-10-01T02:11Z; re-run at §2.0)
 
 | tag | GHCR (anonymous token, OCI index) |
 |---|---|
 | `0.184.5` (live) | 200 -- running pod `imageID` `sha256:f6d8839722587f2cd37ec5218a18479f9e313be9904ad4f6bbb36f98bc827065` |
 | `0.195.4` (predecessor's target, last tag WITHOUT the §1.2 regression) | 200, `sha256:24417dcb804fc65bcb8712226bf70be71018aefd2ec7b27e9392a4d4e1ed707c` |
 | `0.195.5` (regression enters) | 200, `sha256:079f02fb6b4bea5612b5aa4d90423d7df3ceca1dff473a9309e596bee6b2aba4` |
-| **`0.198.0` (target)** | **200, `sha256:dbfeb3eb78c6fc75c155407f64d7f86eeea3d4a4aa544ae7ec785da121394143`** |
-| `latest` | 200, identical to 0.198.0 |
-| `0.198.1`, `0.199.0` | 404 |
+| `0.198.0` (original target) | 200, `sha256:dbfeb3eb78c6fc75c155407f64d7f86eeea3d4a4aa544ae7ec785da121394143` |
+| **`0.198.1` (target)** | **200, `sha256:427e08268bdbbbc0b7f6fea5c2e6cd906a5e72caeeff027e55b208ca08e72af7`** |
+| `latest` | 200, identical to 0.198.1 |
+| `0.198.2`, `0.199.0` | 404 |
 
 GitHub releases: v0.195.5 (2026-09-27T09:50Z), v0.196.0 (2026-09-27T21:09Z),
-v0.197.0 (21:13Z), v0.197.1 (22:37Z), v0.198.0 (2026-09-28T10:53Z, Latest). None
-is a pre-release. v0.196.1/v0.197.2 do not exist. 0.198.0 clears the 48 h
-`minimum_release_age_hours` gate at 2026-09-30T10:53Z. Five releases shipped in
-25 h, so the line is moving fast. Re-run §2.0 on the day.
+v0.197.0 (21:13Z), v0.197.1 (22:37Z), v0.198.0 (2026-09-28T10:53Z),
+v0.198.1 (2026-09-30T12:13Z, Latest). None is a pre-release. v0.196.1/v0.197.2
+do not exist. 0.198.1 clears the 48 h `minimum_release_age_hours` gate at
+2026-10-02T12:13Z. Six releases in four days, so the line is moving fast. Re-run
+§2.0 on the day.
 
-### 1.2 What changed 0.195.4 -> 0.198.0, read per tag + source diff
+### 1.2 What changed 0.195.4 -> 0.198.1, read per tag + source diff
 
 Release bodies (`gh release view vX -R cbcoutinho/nextcloud-mcp-server`) and
 `git diff v0.195.4 v0.198.0` (36 non-test files). Under `server/`, only
@@ -168,6 +177,11 @@ Release bodies (`gh release view vX -R cbcoutinho/nextcloud-mcp-server`) and
 `uv.lock` changes only the project version and the `ty` dev dependency, so
 **`mcp` stays 2.1.1**. The Dockerfile moves only the `python:3.14-slim-trixie`
 base digest and `uv` 0.12.18 -> 0.12.19. The entrypoint is unchanged.
+`v0.198.0...v0.198.1` (GitHub compare, read 2026-10-01) touches only
+`nextcloud_mcp_server/auth/cimd.py` (+54/-2), its unit test, `CHANGELOG.md`,
+`pyproject.toml`/`uv.lock` (version line), and two CI workflow pins. No
+Dockerfile, `app.py`, `server/` or `client/` change; `client/calendar.py` is
+byte-identical, so the 0.195.5 regression is still present.
 
 | tag | class | what it says | applies to us? |
 |---|---|---|---|
@@ -176,6 +190,7 @@ base digest and `uv` 0.12.18 -> 0.12.19. The entrypoint is unchanged.
 | **0.197.0** | **BREAKING** | `/api/v1/status` reports `sar_available`; SAR tools/routes need `sar.read`/`sar.write` scopes; NER client API change; SAR case/export/redaction feature (ADR-040). | **Inert**: SAR tools register only inside `if settings.vector_sync_enabled:` and `sar_available()` (app.py:1880-1888). Routes are behind the same check. Scopes are advertised only via DCR (OAuth mode). Nothing is registered in single_user_basic with 4 config keys. |
 | 0.197.1 | fix (redaction) | NER windowing / job-title redaction fixes | Inert (SAR off). |
 | **0.198.0** | **BREAKING** | *"SAR cases and redacted export are no longer served implicitly when vector sync and EMBEDDING_GATEWAY_URL are configured. Set SAR_ENABLED=true to keep them."* | **Inert**: we never had SAR (no vector sync). `sar_available()` now also requires `sar_enabled` (default False), and a startup `ValueError` fires only if SAR_ENABLED is set without its prerequisites. That key is absent here (premise 4). |
+| 0.198.1 | fix (auth) | *"accept any port on portless loopback CIMD redirect URIs"* (upstream PR #1578) | **Inert in single_user_basic**: `validate_cimd_client` is reached only from `auth/oauth_routes.py` (the OAuth authorize route), and CIMD is disabled when `cimd_allowed_hosts` is empty (`config.py:86-87`, default `""`; no such key here, premise 4). |
 
 **Tool surface is unchanged versus 0.195.4.** The only `@mcp.tool` additions
 in range are in `server/sar.py` (7 tools), which are not registered here.
@@ -220,19 +235,19 @@ operator decision the old plan never carried;
 On review/commit of this file, the coordinator should do these steps. This
 planner writes only this file.
 
-- Set `nextcloud-mcp-0.187.1` to `status: superseded` with a pointer here, or re-open it as option B (§1.6). Do not leave both live.
-- Re-point the reverse refs that name `nextcloud-mcp-0.187.1`: `app-template-5.2.1`, `nextcloud-redis-hardening`, `nextcloud-fleet-35.0.1` (conflicts_with), plus prose in `n8n-2.39.8`, `bitnamilegacy-exit-nextcloud-db`, `kube-prometheus-stack-91.4.1` (executed). `--validate` will raise DEAD-REF only if the old file is deleted.
-- Re-key the home-operation `go_no_go` issue from `nextcloud-mcp-0.187.1` to this id, with target 0.198.0 (or 0.195.4 if B).
+- DONE 2026-10-01: `nextcloud-mcp-0.187.1` set to `status: superseded` with a pointer here (re-open it if the operator picks option B, §1.6).
+- DONE 2026-10-01: reverse refs re-pointed in `app-template-5.2.1`, `nextcloud-redis-hardening`, `nextcloud-fleet-35.0.1` (conflicts_with) and the prose in `n8n-2.39.8`. Left as-is: `bitnamilegacy-exit-nextcloud-db`, `kube-prometheus-stack-91.4.1` (executed; historical prose).
+- STILL OWED: re-key the home-operation `go_no_go` issue from `nextcloud-mcp-0.187.1` to this id, with target 0.198.1 (or 0.195.4 if B).
 - `finding_refs` carried: F-9af9baf7, F-80459b23. F-bb713800 (old drift finding) is resolved, so it was not carried.
 
 ### 1.6 The operator decision this plan cannot make
 
 | option | what | cost |
 |---|---|---|
-| **A. Wait for upstream** (recommended default) | File an upstream issue: *"`_get_calendar_url` unquotes names; Nextcloud calendar URIs CAN contain a literal `%` (created by CalDAV clients that percent-encode the URI); reads silently empty."* Retarget this plan to the first tag whose `_get_calendar_url` no longer unquotes blindly (§2.7 B detects it). | Security finding stays open until then. |
+| **A. Wait for upstream** (recommended default) | **Prerequisite: someone must FILE the upstream issue first** -- none exists (§7), so without it "wait" has no end. Issue text: *"`_get_calendar_url` unquotes names; Nextcloud calendar URIs CAN contain a literal `%` (created by CalDAV clients that percent-encode the URI); reads silently empty."* Retarget this plan to the first tag whose `_get_calendar_url` no longer unquotes blindly (§2.7 B detects it). | Security finding stays open until then. |
 | **B. Take 0.195.4 now** | Revive `nextcloud-mcp-0.187.1` (its blocker is cleared, §1.3). Add this plan's §4.6 event gate to it. Supersede THIS file until upstream fixes the regression. | Only if 0.195.4 actually remediates F-80459b23 (unverified, §1.4). Next hop is then again a minor-line plan. |
 | **C. Change the data** | Recreate the two `%`-URI calendars with clean URIs in Nextcloud, then run this plan (§2.7 A passes). | Recreating changes the URI, which breaks every CalDAV client syncing them (phones/desktops) and may lose subscription/share state. This is data surgery, so operator only. |
-| D. Accept | Run 0.198.0 and accept that MCP consumers read 0 events from the household's busiest calendar. | Feature loss. Per operator policy, "interruption OK, data/feature loss not". Not recommended. |
+| D. Accept | Run 0.198.1 and accept that MCP consumers read 0 events from the household's busiest calendar. | Feature loss. Per operator policy, "interruption OK, data/feature loss not". Not recommended. |
 
 ## 2. Pre-checks
 
@@ -240,13 +255,14 @@ planner writes only this file.
    ```bash
    TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:cbcoutinho/nextcloud-mcp-server:pull&service=ghcr.io" \
      | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
-   for t in 0.198.0 latest 0.198.1 0.199.0; do
+   for t in 0.198.1 latest 0.198.2 0.199.0; do
      printf '%-8s ' "$t"
      curl -sI -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.oci.image.index.v1+json" \
        "https://ghcr.io/v2/cbcoutinho/nextcloud-mcp-server/manifests/$t" \
        | tr -d '\r' | awk 'NR==1{printf "%s ",$2} tolower($1)=="docker-content-digest:"{print $2}'; echo
    done
-   # expect: 0.198.0 200 sha256:dbfeb3eb…; latest 200 SAME digest; 0.198.1 404; 0.199.0 404.
+   # expect: 0.198.1 200 sha256:427e08268bdbbbc0b7f6fea5c2e6cd906a5e72caeeff027e55b208ca08e72af7;
+   #         latest 200 SAME digest; 0.198.2 404; 0.199.0 404.  (measured 2026-10-01T02:11Z)
    # A newer tag -> STOP, read its release body + re-run §2.7 B against it before retargeting.
    ```
 1. **Premises** (six, fail-closed):
@@ -367,7 +383,7 @@ planner writes only this file.
    ```
 6. **Active-update marker**:
    ```bash
-   runbooks/update-marker.sh add nextcloud-mcp office 2 "0.184.5->0.198.0 image bump"
+   runbooks/update-marker.sh add nextcloud-mcp office 2 "0.184.5->0.198.1 image bump"
    ```
 7. **HARD STOP GATE: the 0.195.5 calendar-addressing regression (§1.2).** Proceed only if A or B passes:
    ```bash
@@ -375,36 +391,43 @@ planner writes only this file.
    python3 -c 'import json; d=json.load(open("/tmp/ncmcp/events.before.json")); n=sum(v["pct_uri"] for v in d.values()); print("pct-URI calendars:", n); raise SystemExit(0 if n==0 else 1)' \
      && echo "7A PASS" || echo "7A FAIL"
    # B) code side: does the TARGET tag still unquote the name before encoding?
-   gh api "repos/cbcoutinho/nextcloud-mcp-server/contents/nextcloud_mcp_server/client/calendar.py?ref=v0.198.0" \
-     -H 'Accept: application/vnd.github.raw' | grep -c 'unquote(calendar_name)'
-   # 0 -> 7B PASS (code changed: re-read the new _get_calendar_url, then still run §4.6); >=1 -> 7B FAIL
-   # measured 2026-09-29: 7A FAIL (2), 7B FAIL (v0.198.0: 1; v0.195.4: 0; main: 1)
+   #    Fetch to a file and FAIL CLOSED: a failed fetch (bad ref, rate limit, 404 body) must never read as "0 matches".
+   REF=v0.198.1; F=/tmp/ncmcp/calendar.py.$REF; rm -f "$F"
+   if ! gh api "repos/cbcoutinho/nextcloud-mcp-server/contents/nextcloud_mcp_server/client/calendar.py?ref=$REF" \
+        -H 'Accept: application/vnd.github.raw' > "$F"; then echo "7B FAIL ($REF): fetch failed -- gate NOT evaluated"
+   elif ! grep -q 'def _get_calendar_url' "$F"; then echo "7B FAIL ($REF): _get_calendar_url absent -- file moved/renamed, re-read by hand"
+   elif [ "$(grep -c 'unquote(calendar_name)' "$F")" -eq 0 ]; then echo "7B PASS ($REF): unquote(calendar_name) count=0 -- re-read the new _get_calendar_url, then still run §4.6"
+   else echo "7B FAIL ($REF): unquote(calendar_name) count=$(grep -c 'unquote(calendar_name)' "$F")"; fi
+   # measured 2026-10-01: 7A FAIL (2); 7B FAIL at v0.198.1 (count=1), v0.198.0 (1), master (1); PASS at v0.195.4 (0);
+   #   REF=main -> "7B FAIL (main): fetch failed" (the default branch is `master`; the old pipe form printed 0 = false PASS here)
    # BOTH FAIL -> STOP. Do not commit. Clear the marker (runbooks/update-marker.sh clear nextcloud-mcp)
    #   and return the plan to the operator with §1.6. This is the expected outcome today.
    ```
-   *Gate can fail AND pass:* 7A read 2 on live data, and 7B distinguishes v0.195.4 (0) from v0.198.0 (1). Measured 2026-09-29.
-   The `grep -c` exit status is irrelevant. Read the printed number.
+   *Gate can fail AND pass:* 7A read 2 on live data (2026-09-29). 7B was dry-run 2026-10-01 against four refs and printed
+   FAIL for v0.198.1/master (count 1), PASS for v0.195.4 (count 0), and FAIL-closed for the non-existent ref `main`
+   (fetch error, gh rc=1). Read the printed `7B PASS`/`7B FAIL` verdict line; there is no other output to interpret.
 
 ## 3. Steps
 
 1. §2.0-2.7 green (in practice: §2.7 passed via A or B). Otherwise stop here.
-2. Edit the tag (BSD-sed safe, POSIX class). Dry-tested 2026-09-29 on a scratch copy: `34c34 <               tag: 0.184.5 / >               tag: 0.198.0`, one hunk. The inverse restores byte-identical:
+2. Edit the tag (BSD-sed safe, POSIX class). Dry-tested 2026-10-01 on a scratch copy: `34c34 <               tag: 0.184.5 / >               tag: 0.198.1`, one hunk. The inverse restores byte-identical:
    ```bash
    cd /Users/mu/code/cberg-home-nextgen || exit 1
-   sed -i '' 's/^\([[:space:]]*tag: \)0\.184\.5$/\10.198.0/' kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml
+   sed -i '' 's/^\([[:space:]]*tag: \)0\.184\.5$/\10.198.1/' kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml
    git diff --stat -- kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml    # expect 1 file, 1+/1-; 0 files = no-op: STOP
    git diff -- kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml | grep -E '^[-+][[:space:]]+tag:'
-   # expect exactly:  -              tag: 0.184.5   /   +              tag: 0.198.0
+   # expect exactly:  -              tag: 0.184.5   /   +              tag: 0.198.1
    ```
 3. Commit + push (shared worktree: `--only`, verify subject):
    ```bash
    cat > /tmp/ncmcp/msg-nextcloud-mcp-0.198.0.txt <<'EOF'
-   feat(nextcloud-mcp): image 0.184.5 -> 0.198.0
+   feat(nextcloud-mcp): image 0.184.5 -> 0.198.1
 
    Crosses fourteen 0.x minor lines (0.185 .. 0.198). Release bodies and
    source diffs read per tag (runbooks/maintenance/plans/nextcloud-mcp-0.198.0.md
    section 1). BREAKING tags 0.185.0/0.194.0/0.196.0/0.197.0/0.198.0 are inert
-   for single_user_basic with no vector sync/SAR; 0.192.0 adds apply_to_series
+   for single_user_basic with no vector sync/SAR; 0.198.1 is a CIMD/OAuth-only
+   fix (inert here); 0.192.0 adds apply_to_series
    (safer default). 21 new tools, no tool removed, mcp 2.1.1, python 3.14 base.
    The 0.195.5 calendar-addressing gate (section 2.7) passed before this commit.
 
@@ -414,7 +437,7 @@ planner writes only this file.
    git fetch origin main && git merge --ff-only origin/main
    git commit --only kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml -F /tmp/ncmcp/msg-nextcloud-mcp-0.198.0.txt
    git show --stat HEAD      # exactly ONE file
-   git log -1 --format=%s    # expect: feat(nextcloud-mcp): image 0.184.5 -> 0.198.0 ; else `git commit --amend --only -F <msg>` before push
+   git log -1 --format=%s    # expect: feat(nextcloud-mcp): image 0.184.5 -> 0.198.1 ; else `git commit --amend --only -F <msg>` before push
    git push origin main
    git rev-parse HEAD > /tmp/ncmcp/bump.sha && cat /tmp/ncmcp/bump.sha
    ```
@@ -447,8 +470,8 @@ Instruments (for `plan-premises.py --controls`):
 2. **New bytes running, clean start log**:
    ```bash
    kubectl get pod -n office -l app.kubernetes.io/name=nextcloud-mcp -o jsonpath='{range .items[*]}{.metadata.name} restarts={.status.containerStatuses[0].restartCount} {.status.containerStatuses[0].imageID}{"\n"}{end}'
-   # expect ONE pod, restarts=0, imageID ending sha256:dbfeb3eb78c6fc75c155407f64d7f86eeea3d4a4aa544ae7ec785da121394143
-   #   (f6d88397… = old build still serving; 24417dcb… = 0.195.4 committed by mistake)
+   # expect ONE pod, restarts=0, imageID ending sha256:427e08268bdbbbc0b7f6fea5c2e6cd906a5e72caeeff027e55b208ca08e72af7
+   #   (f6d88397… = old build still serving; dbfeb3eb… = 0.198.0 committed by mistake; 24417dcb… = 0.195.4 by mistake)
    kubectl logs -n office deploy/nextcloud-mcp > /tmp/ncmcp/log.after-start
    python3 - <<'EOF'
    import re
@@ -460,13 +483,16 @@ Instruments (for `plan-premises.py --controls`):
    assert L, "EMPTY log -- wrong pod/container; do not pass"
    assert not err and len(tb)==len(vc), "unattributed ERROR/CRITICAL/Traceback -- read /tmp/ncmcp/log.after-start"
    EOF
-   # vCard Tracebacks are known data (FN-less contacts; client/contacts.py:734 at v0.198.0, unchanged since 0.195.4).
+   # vCard Tracebacks are known data (FN-less contacts; client/contacts.py:734 at v0.198.0/v0.198.1, unchanged since 0.195.4).
+   # RE-RUN this scan AFTER §4.6 into /tmp/ncmcp/log.after-events (same script, other path): §4.6 is the first traffic
+   # that addresses the %-URI calendars, and caldav's "Deviation from expectations found" ERROR lines it logs on a
+   # wrong-collection request are an INDEPENDENT signal of the §1.2 regression, not tied to event counts.
    # CAN FAIL: predecessor's reviewer injected one unattributed Traceback + one ERROR line into a copy -> assertion fired.
    ```
 3. **CONTENTS ASSERTION (mcp 2.x lifespan landed)**:
    ```bash
    kubectl logs -n office deploy/nextcloud-mcp | grep -c 'Starting MCP session in single-user BasicAuth mode'
-   # expect 1 right after start and STILL 1 after §4.4's sessions. The log string is at app.py:979 at v0.198.0.
+   # expect 1 right after start and STILL 1 after §4.4's sessions. The log string is at app.py:979 at v0.198.0 (app.py unchanged in 0.198.1).
    #   On 0.184.5 it climbs per session: 24 lines on the live pod 2026-09-29. A climbing count = old build.
    ```
 4. **CONTENTS ASSERTION (surface = baseline + the 21 names; SAR absent)**:
@@ -509,7 +535,7 @@ Instruments (for `plan-premises.py --controls`):
    kill $PF 2>/dev/null
    # expect "2025-06-18 " (echoed offer; EMPTY serverInfo.version is the mcp 2.x signature; "1.29.0" = old build)
    ```
-   117 and the exact 21 names were measured live on 0.195.4 (predecessor attempt 2, gate PASS). 0.195.5-0.198.0 add tools only in the gated `server/sar.py` (§1.2).
+   117 and the exact 21 names were measured live on 0.195.4 (predecessor attempt 2, gate PASS). 0.195.5-0.198.1 add tools only in the gated `server/sar.py` (§1.2).
 5. **CONTENTS ASSERTION (calendar LIST: same set, encoding-shape tolerant).** Carried verbatim from the predecessor's fixed gate (`a1e5c69e`, reviewer-proven 2026-09-26). This gate CANNOT see the §1.2 regression. §4.6 is the one that can.
    ```bash
    /tmp/ncmcp/call.sh tools/call '{"name":"nc_calendar_list_calendars","arguments":{}}' > /tmp/ncmcp/calendars.after
@@ -557,8 +583,10 @@ Instruments (for `plan-premises.py --controls`):
    python3 /tmp/ncmcp/events_gate.py /tmp/ncmcp/events.before.json /tmp/ncmcp/events.after.json
    # PASS: every calendar non-empty before is non-empty after, |delta| <= 2 (edits during the window).
    # FAIL prints: "calendar #N (pct_uri=True): 200 -> 0 events (SILENT EMPTY READ)" -> §5 rollback.
+   kubectl logs -n office deploy/nextcloud-mcp > /tmp/ncmcp/log.after-events
+   # then re-run the §4.2 python scan with "log.after-start" replaced by "log.after-events"; any unattributed ERROR -> §5.
    ```
-   *Demonstrated 2026-09-29 on 0.184.5.* `events.py … --emulate-double-decode` sends exactly the URI that 0.198.0's `_get_calendar_url` builds, `quote(unquote(name))`. It read `[3, 0, 0, 0]` against a real `[3, 0, 200, 0]` with `isError=false` throughout, and the gate FAILED with the SILENT EMPTY READ line (rc=1). Before-vs-before PASSes. **Limit:** the second `%`-URI calendar holds 0 events in range, so a regression on it is invisible to counts. §2.7 A covers it structurally.
+   *Demonstrated 2026-09-29 on 0.184.5.* `events.py … --emulate-double-decode` sends exactly the URI that 0.198.0's (= 0.198.1's) `_get_calendar_url` builds, `quote(unquote(name))`. It read `[3, 0, 0, 0]` against a real `[3, 0, 200, 0]` with `isError=false` throughout, and the gate FAILED with the SILENT EMPTY READ line (rc=1). Before-vs-before PASSes. **Limit:** the second `%`-URI calendar holds 0 events in range, so a regression on it is invisible to counts. §2.7 A covers it structurally.
 7. **CONTENTS ASSERTION (0.192.0 BREAKING visible)**: `nc_calendar_bulk_operations` gains `apply_to_series`, default False, and loses no property:
    ```bash
    python3 - <<'EOF'
@@ -653,23 +681,23 @@ Stateless (premises 4-5), so the rollback is an inverse image-tag edit. Not `git
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen || exit 1
-sed -i '' 's/^\([[:space:]]*tag: \)0\.198\.0$/\10.184.5/' kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml
+sed -i '' 's/^\([[:space:]]*tag: \)0\.198\.1$/\10.184.5/' kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml
 git diff --stat -- kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml    # expect 1 file 1+/1-; 0 files = no-op: STOP
 cat > /tmp/ncmcp/msg-revert-nextcloud-mcp-0.198.0.txt <<'EOF'
-Revert "feat(nextcloud-mcp): image 0.184.5 -> 0.198.0"
+Revert "feat(nextcloud-mcp): image 0.184.5 -> 0.198.1"
 
 Rollback per runbooks/maintenance/plans/nextcloud-mcp-0.198.0.md section 5
 (stateless bridge, image tag only). Reverts the commit in /tmp/ncmcp/bump.sha.
 EOF
 git commit --only kubernetes/apps/office/nextcloud-mcp/app/helmrelease.yaml -F /tmp/ncmcp/msg-revert-nextcloud-mcp-0.198.0.txt
-git show --stat HEAD && git log -1 --format=%s    # ONE file; subject = Revert "feat(nextcloud-mcp): image 0.184.5 -> 0.198.0"
+git show --stat HEAD && git log -1 --format=%s    # ONE file; subject = Revert "feat(nextcloud-mcp): image 0.184.5 -> 0.198.1"
 git push origin main
 flux reconcile kustomization nextcloud-mcp -n office --with-source && flux reconcile hr -n office nextcloud-mcp
 kubectl rollout status deploy/nextcloud-mcp -n office --timeout=180s
 kubectl get pod -n office -l app.kubernetes.io/name=nextcloud-mcp -o jsonpath='{range .items[*]}{.metadata.name} {.status.containerStatuses[0].imageID}{"\n"}{end}'
 # expect imageID ending sha256:f6d8839722587f2cd37ec5218a18479f9e313be9904ad4f6bbb36f98bc827065
 ```
-(Inverse sed dry-tested 2026-09-29: restores the scratch copy byte-identical, `cmp` clean.)
+(Inverse sed dry-tested 2026-10-01 against the 0.198.1 forward edit: restores the scratch copy byte-identical, `cmp` clean.)
 
 Confirm the cluster is back:
 - Re-run §4.4. `tools.after` must equal `tools.before` (96, `comm` empty both ways), and protocol must read `2025-06-18 1.29.0`.
@@ -684,12 +712,13 @@ Confirm the cluster is back:
 - **Nextcloud server work** (`nextcloud-redis-hardening` 10-01, `nextcloud-fleet-35.0.1` 10-18, `bitnamilegacy-exit-nextcloud-db` if revived): every §4 contents gate is a live call into that server, so never the same slot. After 35.0.1 lands, premise 2 fails closed. Re-vet, because Nextcloud 35 CalDAV behaviour feeds straight into §1.2's analysis.
 - **Prometheus**: §2.5/§4.9/§4.10 read it. No kube-prometheus-stack plan is open (91.x executed 2026-09-26). A new one must be added to `conflicts_with` on both sides.
 - **Attended only.** The deny rule mandates it, and `capability_change: true` routes it there anyway. Never `nightly`. Nothing here touches Longhorn, cert-manager, cilium, coredns or the Gateways.
-- **Supersession bookkeeping** (§1.5) is owed by the coordinator. Until `nextcloud-mcp-0.187.1` is marked superseded, both plans claim the same `finding_refs`, and the scheduler must never place both.
+- **`talos-linux-1.14.2`** (draft, `exclusive: true`, needs_reboot, sun-attended only): its node roll restarts this pod and the Nextcloud server it reads. Its `exclusive` flag already keeps every other plan out of its slot, so it is not listed in `conflicts_with`. If the two ever land on adjacent days, take §2.4's baseline AFTER the roll, never before it.
+- **Supersession bookkeeping** (§1.5): `nextcloud-mcp-0.187.1` is `superseded` and the reverse refs are re-pointed (2026-10-01). Only the `go_no_go` re-key is still owed. If option B revives 0.187.1, the scheduler must never place both.
 
-## 7. What I could not verify (2026-09-29)
+## 7. What I could not verify (2026-09-29; re-read 2026-10-01 for the 0.198.1 retarget)
 
 - **Whether 0.195.4 remediates F-80459b23.** No per-tag scan was run. This decides whether option B (§1.6) closes the security driver.
 - **The upstream fix timeline.** No upstream issue exists for the literal-`%` calendar-URI case (searched 2026-09-29; the only related one is #1449, closed). Filing one is an operator/agent action outside this plan.
-- **Write-path behaviour of 0.198.0 on the `%`-URI calendars** (create/update/delete event). By code, they target the same wrong URI. Not exercised: no writes were made against the live calendars.
+- **Write-path behaviour of 0.198.x on the `%`-URI calendars** (create/update/delete event). By code, they target the same wrong URI. Not exercised: no writes were made against the live calendars.
 - **The second `%`-URI calendar** holds no events in 2015-2030, so §4.6 cannot see a regression on it. §2.7 A covers it structurally.
 - **Behaviour on the wire of TS SDK 1.30.0 (mcporter) against mcp 2.1.1.** Not re-measured here. The predecessor's attempt 2 did reach 4.10 on 0.195.4 (same mcp 2.1.1), where it failed only on the since-fixed URL.
