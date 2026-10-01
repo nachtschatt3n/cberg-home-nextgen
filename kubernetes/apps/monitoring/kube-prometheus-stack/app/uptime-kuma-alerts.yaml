@@ -99,7 +99,7 @@ spec:
     # server round trip, and groups carry no signal of their own.
     #
     # MEDIAN, NOT MEAN (2026-10-01, F-deb6264e). The 15m AVERAGE above was
-    # still spike-driven: Wyze Cam Margaret (WiFi, ~46% retries) answers in
+    # still spike-driven: one WiFi camera (~46% tx retries) answers in
     # 2-45 ms with isolated 3-15 s samples, and 2-3 of those drag a 15m mean
     # past 1000 ms. avg_over_time fired 5 times for it in 7d (09-25..10-01),
     # every one while its stream was healthy; at the 10-01 17:02 firing the
