@@ -113,7 +113,7 @@
 | eck-operator | Elastic Cloud on Kubernetes operator | None | — |
 | elasticsearch | Elasticsearch cluster (via ECK) | None — cluster-only Services (`elasticsearch-es-http` et al.); no HTTPRoute of its own | Monitoring |
 | elasticsearch-bootstrap | Initial ES index/ILM configuration Job (within `elasticsearch/` dir, no standalone directory) | None | — |
-| edot-collector | Log collection and forwarding to Elasticsearch (EDOT) | Internal — `envoy-internal` | — |
+| edot-collector | Log collection and forwarding to Elasticsearch (EDOT). Includes the companion `kmsg-heartbeat` DaemonSet (busybox, `privileged` as the minimum for `/dev/kmsg`, no host namespaces) that writes one `cberg-kmsg-heartbeat` line per node per hour into the kernel ring buffer so `TalosKernelLogsMissingFromNode` can tell a dead kmsg sender from a quiet node; watched by `TalosKmsgHeartbeatNotRunning` | Internal — `envoy-internal` | — |
 | otel-operator | OpenTelemetry Operator for collector management | None | — |
 | kibana | Kibana log analytics UI | Internal | Monitoring |
 | unpoller | UniFi metrics exporter for Prometheus | None | — |

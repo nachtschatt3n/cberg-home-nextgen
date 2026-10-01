@@ -194,17 +194,15 @@ spec:
         # true. Ground truth at the time: Elasticsearch had 59/31/33 kmsg docs in
         # the preceding 10 minutes from .11/.12/.13 respectively — all three were
         # shipping fine.
-        # The DETECTION GAP IS STILL REAL (nuc14-03 shipped nothing for 4 days and
-        # nobody noticed), so this needs re-implementing against a signal that
-        # actually moves. Options: fix the connector's temporality so the counter
-        # accumulates, or drive the check from Elasticsearch (where the data
-        # demonstrably is) via an Uptime Kuma json-query monitor per node.
+        # Re-implemented 2026-10-01 as the per-node TalosKernelLogsMissingFromNode
+        # in platform-alerts.yaml: absent_over_time()[3h] per node IP, kept
+        # meaningful by the hourly kmsg-heartbeat DaemonSet (F-f5763417).
         # Not left in place at a longer `for:` — a rule that is permanently true
         # would just page forever.
         - alert: TalosKmsgPipelineDown
           # Guard for the guard: if the metric vanishes entirely (collector down,
-          # connector renamed, ServiceMonitor broken) the rule above silently
-          # stops evaluating and we go blind without any signal.
+          # connector renamed, ServiceMonitor broken) the per-node rules go
+          # quiet with it and we go blind without any signal.
           expr: absent(talos_kernel_kmsg_lines_total)
           for: 15m
           labels:
