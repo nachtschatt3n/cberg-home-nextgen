@@ -415,7 +415,8 @@ deny:
       shape), so a CHART bump would score as a safe minor and land unattended while
       templating for an older app line - and chart templates change semantics
       between releases (one added a Service that would have collided with our
-      hand-written one). Chart minors go through the PLAN lane until a chart ships
+      hand-written one). Chart AND image minors go through the PLAN lane (max: patch);
+      chart minors stay there until a chart ships
       an appVersion at or above the pinned tag AND its values diff is re-vetted
       against our Service/PodMonitor overrides. Narrowed to max: patch on
       2026-09-22 (F-84472f89, operator call): that hazard is about chart MINORS,

@@ -58,6 +58,8 @@ conflicts_with:                       # re-checked 2026-09-30 against maintenanc
   - chart-patches-coredns-reloader-blackbox  # rolls CoreDNS; §4.6 writes/reads InfluxDB by
                                       # service DNS name (influxdb-influxdb2.databases.svc), so a DNS
                                       # blip would be misread as an unpoller write-path regression.
+  - coredns-1.48.1                    # same CoreDNS-roll reason as the entry above (chart
+                                      # 1.47.0 -> 1.48.1, draft 2026-09-30).
 exclusive: false
 security_ref: null                    # version-currency driver only. The two security findings on
                                       # this component (F-cafe8865/AR-114, F-2991c787/AR-115) are
@@ -71,11 +73,11 @@ capability_change: false              # FACT, not a hedge: no new route, permiss
                                       # The sysinfo change is a bug fix: the same 16 existing
                                       # unpoller_controller_* series start carrying real values.
 rollback_class: git-revert            # stateless exporter, no PVC, no migration, no schema change
-finding_refs: [F-23119c27]            # version-lane row for this component (producer=script; title
-                                      # on 2026-09-30 reads "unpoller: image … v5.2.8 → v5.2.10
-                                      # (patch)" and re-targets itself to the live pin vs newest
-                                      # upstream; it auto-closes once the pin moves — do not close
-                                      # it by hand).
+finding_refs: [F-464c9d8b]            # the OPEN version-lane row for this target (title "… v5.2.8 ->
+                                      # v5.4.0 (minor)"). Script-owned (producer=script), ONE row per
+                                      # target: it auto-closes when the pin moves off v5.2.8 — never
+                                      # close it by hand. (F-23119c27, the earlier v5.2.10-patch row,
+                                      # is already resolved and must not be cited.)
 review: null
 status: draft
 window: null
@@ -318,10 +320,11 @@ the hold is **not** a pure false positive. `risk: low`, because every delta is
 either inert here, semantically identical, or strictly a fix, and the rollback
 is a clean revert of a stateless exporter.
 
-**Repo correction (reported, not edited):** the rule reason says "Chart minors
-go through the PLAN lane" but `max: patch` also routes **image** minors here —
-the reason text no longer describes everything the rule blocks. Operator's call
-whether to reword it; nothing in this plan edits policy.
+**Repo correction (applied 2026-10-01, text only):** the rule reason said
+"Chart minors go through the PLAN lane" but `max: patch` also routes **image**
+minors here. The reason now reads "Chart AND image minors go through the PLAN
+lane (max: patch); chart minors stay there until …". No version field or
+`max:` changed; executing this plan still does not edit policy.
 
 ### 1.6 Derived execution class
 
@@ -395,17 +398,32 @@ calls share no shell variables, so every later step reads files, not variables.
    q 'count({__name__=~"unpoller_.*"})'                                # ['8024']
    q 'unpoller_prometheus_cache_age_seconds'                           # ['38.79']
    q 'increase(unpoller_prometheus_refresh_failures_total[24h])'       # ['0']
+   q 'unpoller_prometheus_refresh_failures_total'                      # raw counter; if > 0, evaluate §4.5 only at >= 10 min after Ready
+   q 'max_over_time(increase(unpoller_prometheus_refresh_failures_total[10m])[30d:5m])'  # ['2.22'] - proves §4.5's ==0 gate CAN read non-zero
+   q 'max_over_time(unpoller_prometheus_cache_age_seconds[30d])'       # ['329.9'] - proves the < 150 gate CAN fail
    q 'unpoller_controller_uptime_seconds'                              # ['0']   <- the sysinfo bug (§1.4b)
    q 'count({__name__=~"unpoller_(lte|sensor|protect).*"})'            # []      (0 series)
    kill $PF 2>/dev/null
    kubectl -n monitoring get pod -l app.kubernetes.io/name=unpoller \
      -o jsonpath='{.items[0].status.containerStatuses[0].imageID}{"\n"}' | tee "$D/baseline-imageid.txt"
    ```
-   Authoring values 2026-09-30 in the comments. The 6 h spread of the total
-   series count was `min 8011 / max 8140` (±0.8%), which is what makes a ±2%
-   band against a **same-session** baseline both meaningful and passable. The
-   count tracks associated wireless clients, so it drifts by the day — never
-   compute the band from the printed 8024.
+   Authoring values 2026-09-30 in the comments. The total series count tracks
+   associated wireless clients and drifts by the day; re-measured by the plan
+   review (sweep b23be87b) its 6 h spread was `min 7684 / max 7920` (a 3.0%
+   range, ±1.5% about the middle), wider than the 8011–8140 seen at authoring.
+   §4.4 therefore uses ±2% against a **same-session** baseline taken right
+   before the bump (nightly window, few clients joining/leaving), widened to
+   **±3%** if the window runs in daytime. Never compute the band from a printed
+   number above.
+   The two `max_over_time` lines are the **bad-case evidence** for §4.5: over
+   30 d the 10-min refresh-failure increase reached **2.22** and the counter
+   moved (`changes(unpoller_prometheus_refresh_failures_total[30d])` = **2**),
+   and cache age peaked at **329.9 s** — both gates have demonstrably read
+   their failing side on this exact series, so they are not inert.
+   If the raw `unpoller_prometheus_refresh_failures_total` is already > 0 here
+   that is fine (it is a counter since pod start); it only means §4.5 must be
+   read at ≥ 10 min after Ready so the `[10m]` window excludes the v5.2.8 pod's
+   history.
    **If `unpoller_controller_uptime_seconds` is already > 0 here**, something
    other than v5.2.8 is answering (or upstream's controller changed) — §4.3 would
    then prove nothing; stop and find out.
@@ -510,7 +528,8 @@ calls share no shell variables, so every later step reads files, not variables.
    grep -rn 'unpoller-5\.4\.0' runbooks/maintenance/plans/ | grep -v 'plans/unpoller-5.4.0.md'
    .venv/bin/python3 runbooks/maintenance-plan.py --validate
    ```
-   `F-23119c27` is `producer: script` and closes itself on the next sweep — do not close it by hand.
+   `F-464c9d8b` is script-owned (one row per target) and auto-closes on the next
+   sweep once the pin has moved off v5.2.8 — never close it by hand.
 
 ## 4) Verification
 
@@ -591,10 +610,10 @@ N=0 is a rollout FAIL, not a flaky query. Identity (old vs new) is §4.1's job.
    q 'up{job="unpoller"}'                                        # == ['1']
    q 'count(unpoller_site_adopted)'                              # == baseline (3)
    q 'count(unpoller_device_uptime_seconds)'                     # == baseline (10)
-   q 'count({__name__=~"unpoller_.*"})'                          # within ±2% of baseline AND >= 6000
+   q 'count({__name__=~"unpoller_.*"})'                          # within ±2% of baseline (±3% daytime) AND >= 6000
    q 'count(count_over_time(unpoller_site_adopted[5m]))'         # > 0
-   q 'unpoller_prometheus_cache_age_seconds'                     # < 150
-   q 'increase(unpoller_prometheus_refresh_failures_total[10m])' # == ['0']
+   q 'unpoller_prometheus_cache_age_seconds'                     # >= 0 and < 150  (-1 = never refreshed = FAIL)
+   q 'increase(unpoller_prometheus_refresh_failures_total[10m])' # == ['0']  (read >= 10 min after Ready)
    q 'unpoller_controller_uptime_seconds'                        # §4.3
    q 'count(unpoller_controller_info{version!=""})'              # §4.3
    q 'count({__name__=~"unpoller_(lte|sensor|protect).*"})'      # §4.8 (expected [])
@@ -612,13 +631,23 @@ N=0 is a rollout FAIL, not a flaky query. Identity (old vs new) is §4.1's job.
    > (§1.4b) and both identities sit inside the 5-min lookback until it passes.
    > That is +16 at most (~0.2%), inside the band — but read after the settle anyway.
 5. **CONTENTS ASSERTION (the cache poller runs at OUR interval and logins keep working):**
-   `unpoller_prometheus_cache_age_seconds` exists and is `< 150` on two samples
-   3 min apart (re-run the §4.4 block), and `increase(unpoller_prometheus_refresh_failures_total[10m])`
-   == `['0']`. The failure signature for a broken config is `[]` (the gauge is only
-   registered when the cache is enabled); for a broken login (§1.4a) it is a
-   growing age and a non-zero increase. Baseline 38.8 s at authoring; the
-   last 24 h increase was 0 despite the known re-auth lines, so a non-zero
-   10-minute increase right after the roll is signal, not noise.
+   `unpoller_prometheus_cache_age_seconds` exists and is `>= 0 and < 150` on two
+   samples 3 min apart (re-run the §4.4 block), and
+   `increase(unpoller_prometheus_refresh_failures_total[10m])` == `['0']`,
+   read **≥ 10 min after Ready**. The failure signature for a broken config is
+   `[]` (the gauge is only registered when the cache is enabled); `-1` means the
+   cache has never completed a refresh and is a FAIL, not a small age; for a
+   broken login (§1.4a) it is a growing age and a non-zero increase.
+   **These gates can fail — measured, not argued** (§2.5 bad-case lines,
+   re-measured by the plan review in sweep b23be87b):
+   `max_over_time(increase(unpoller_prometheus_refresh_failures_total[10m])[30d:5m])`
+   = **2.22**, `changes(unpoller_prometheus_refresh_failures_total[30d])` = **2**,
+   `max_over_time(unpoller_prometheus_cache_age_seconds[30d])` = **329.9** s.
+   So both series have read their failing side in the last 30 d on this exact
+   exporter; an empty or always-zero instrument would have shown neither.
+   Baseline 38.8 s at authoring; the last 24 h increase was 0 despite the known
+   re-auth lines, and refresh failures happened only twice in 30 d, so a
+   non-zero 10-minute increase right after the roll is signal, not noise.
 6. **CONTENTS ASSERTION (the InfluxDB write path still advances):** re-run the
    §2.6 query with the same `range(start:-2h)` ≥ 2 min after the new pod's
    `Poller->InfluxDB started` line; the newest `uap_radios` `_time` must be
@@ -642,7 +671,7 @@ N=0 is a rollout FAIL, not a flaky query. Identity (old vs new) is §4.1's job.
    - CONTROL: metric up — `up{job="unpoller"}` must be exactly 1 (§4.4).
    - CONTROL: metric unpoller_site_adopted — count equals the same-session baseline (§4.4).
    - CONTROL: metric unpoller_device_uptime_seconds — count equals the same-session baseline (§4.4).
-   - CONTROL: metric unpoller_prometheus_cache_age_seconds — present and < 150 on two samples (§4.5).
+   - CONTROL: metric unpoller_prometheus_cache_age_seconds — present and >= 0 and < 150 on two samples; -1 = never refreshed = FAIL (§4.5).
    - CONTROL: metric unpoller_prometheus_refresh_failures_total — 10m increase exactly 0 (§4.5).
    - CONTROL: metric unpoller_controller_uptime_seconds — > 0 is the new-binary proof; 0/absent is recorded, not reverted (§4.3).
    - CONTROL: alertname UnifiMetricsAbsent — not firing 15 min after Ready (§4.8).
@@ -706,8 +735,8 @@ reads them, nothing needs cleaning. If Helm is ever wedged `pending-upgrade`
   `flux-oci-chart-sources` (owns unpoller's chart-source move, §1.1);
   `helm-drift-detection` (edits `helmrelease/unpoller` itself);
   `flux-fleet-0.60.0` (restarts the reconcilers this rollout depends on);
-  `chart-patches-coredns-reloader-blackbox` (CoreDNS roll vs §4.6's DNS-named
-  InfluxDB write path). `flux-reconciler-impersonation` and
+  `chart-patches-coredns-reloader-blackbox` and `coredns-1.48.1` (CoreDNS roll
+  vs §4.6's DNS-named InfluxDB write path). `flux-reconciler-impersonation` and
   `talconfig-multidoc-migration` are `exclusive: true` and exclude everything
   on their own. No open `kube-prometheus-stack` plan exists (91.4.1 is
   `executed`); **a future kps bump must name this plan** (the §4 instrument is
@@ -722,4 +751,4 @@ reads them, nothing needs cleaning. If Helm is ever wedged `pending-upgrade`
   commit would silently downgrade the exporter.
 - **Deny rule:** untouched. After this plan the pin is v5.4.0 and no chart ships
   an appVersion ≥ it, so the rule's removal precondition is still unmet (§1.5
-  carries the reason-text correction for the operator).
+  records the reason-text correction already applied).
