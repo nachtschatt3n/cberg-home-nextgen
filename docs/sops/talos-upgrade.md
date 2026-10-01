@@ -1,8 +1,8 @@
 # SOP: Talos Linux Upgrade with Performance Tuning
 
 > Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. Section 14 records the `v1.13.10 → v1.14.1` roll (2026-09-27) and its lessons; section 15 is the post-roll verification and expected-transient list. **Current cluster state: Talos v1.14.1 + Kubernetes v1.36.0 (kernel 6.18.51-talos, Clang/ThinLTO; containerd 2.3.5; etcd 3.7.1) — rolled 2026-09-27.**
-> Version: `2026.09.28`
-> Last Updated: `2026-09-28`
+> Version: `2026.10.01`
+> Last Updated: `2026-10-01`
 > Owner: `homelab-ops`
 
 > **Cluster state (2026-09-27):** All three nodes (`k8s-nuc14-01/02/03`) are running Talos `v1.14.1` + Kubernetes `v1.36.0` (kernel `6.18.51-talos`, containerd `2.3.5`, etcd `3.7.1` / storage `3.7.0`). **`talhelper genconfig` cannot render v1.14 configs for this cluster — `task talos:generate-config` fails on `main` until the multi-document config migration lands (§14.2). Do not regenerate or `apply-config` node configs until then.** Performance sweep (BBR, conntrack, kubelet reservations, RPS mask, hugepages), intelgpu/udev patches, and Longhorn v2 OS prerequisites are all wired in. See §13 for the full two-stage traversal record and lessons learned.
@@ -982,6 +982,18 @@ mise exec -- talosctl get machinestatus -n 192.168.55.11 -o yaml | grep image
 mise exec -- talosctl rollback --nodes 192.168.55.11
 ```
 
+> **WARNING — `talosctl rollback` is UNDRAINED (hard reboot).** In Talos v1.14.2
+> `Server.Rollback` runs `SequenceReboot`, whose phases are `StopAllPods → preShutdown →
+> stopAll → reboot` — there is no `CordonAndDrainNode` phase (that exists only in the
+> `Upgrade` and `Shutdown` sequences; `internal/app/machined/pkg/runtime/v1alpha1/v1alpha1_sequencer.go`).
+> On a `Ready` node it kills Longhorn engines un-migrated and bypasses every PDB. Therefore:
+> - **Node `Ready`:** drain first (`kubectl drain` with the same instance-manager PDB wait as a
+>   normal upgrade, §9), or — preferred — downgrade with a drained upgrade to the previous
+>   image: `talosctl -n <ip> upgrade --image factory.talos.dev/installer/<schematic>:<previous-tag>`
+>   (not `task talos:upgrade-node`, which reads the already-bumped `talosVersion`).
+> - **Node `NotReady`** (kubelet/CRI never came up — nothing to drain): bare `talosctl rollback`
+>   is acceptable; treat it as a hard reboot and budget a full Longhorn recovery (§14.4) for it.
+
 ### 11.2 Full cluster rollback
 
 ```bash
@@ -1359,9 +1371,16 @@ Procedure that worked:
 
 1. Pull each node's live config into a mode-700 local scratch dir (never the repo, never a
    synced folder — it holds machine secrets). Name the resource ID: a node has **two**
-   `MachineConfig` resources, `v1alpha1` (active) and `persistent` (what it boots from STATE);
-   a bare `get machineconfig` returns both and a single-document YAML load then leaves 0-byte
-   files. Both must be identical — `DIFFER` means something is staged: STOP.
+   `MachineConfig` resource. **On v1.14 there is exactly ONE id, `v1alpha1`** — `persistent`
+   returns NotFound on a healthy v1.14.1 node (measured 2026-10-01 on all three), so the old
+   two-id `DIFFER` comparison (written for v1.13, where `persistent` held what the node boots
+   from STATE) prints `DIFFER` on a healthy node and must not be used. Check
+   `talosctl -n <ip> get machineconfig | awk 'NR>1{print $4}' | sort -u` (the ID column of the
+   table; `-o json` is pretty-printed multi-line, so a per-line JSON parse fails): PASS = the
+   single line `v1alpha1` (measured 2026-10-01 on .11). **Any extra id = a config is
+   staged (e.g. `apply-config --mode staged`) → STOP.** Pull the config with
+   `get machineconfig v1alpha1 -o yaml` (name the id; a bare get + a single-document YAML load
+   leaves 0-byte files).
 2. Validate each live config with the **target** talosctl client (downloaded into scratch,
    checksum verified — not the mise pin, which moves last):
    `talosctl-<target> validate --config live-<ip>.yaml --mode metal`, one exit code per node.
@@ -1415,8 +1434,12 @@ node 01's two changes are a RECORDED EXCEPTION because condition 2 could not be 
 
 **Mandatory etcd gates for a roll** (all from the retired plan, all fail-closed):
 - **Push freeze** on `main` for the window; `origin/main` must equal the recorded freeze SHA
-  before every node (commit bursts drive the disk; see `docs/sops/etcd.md`). Suspend any
-  `ImageUpdateAutomation` that pushes to `main`. Do NOT suspend the `flux-system`
+  before every node (commit bursts drive the disk; see `docs/sops/etcd.md`). Suspend every
+  `ImageUpdateAutomation` that pushes to `main` **and is not already suspended**: record the
+  pre-state `(namespace, name, spec.suspend)` first, suspend only the `false`/unset rows, and at
+  the end resume ONLY those — an automation that is `suspend: true` in git (e.g. both
+  `absenty-image-updates`, 2026-10-01) is an operator hold, and a blanket resume overrides it.
+  End-of-window PASS = resumed set `false` AND pre-suspended set still `true`. Do NOT suspend the `flux-system`
   GitRepository (source-controller storage is emptyDir; a suspended source loses its artifact
   when a drain moves that pod).
 - **Pre-start:** worst 5m-p99 WAL fsync and backend commit < 50 ms over 1 h, no unexplained

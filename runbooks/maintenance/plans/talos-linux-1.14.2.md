@@ -31,8 +31,10 @@ exclusive: true                       # the node roll must have its sun-attended
 touches:
   namespaces:
     - flux-system                     # freeze sha recorded + gated before every node (§2.0b); source NOT suspended
-    - my-software-production          # 3 ImageUpdateAutomations suspended/resumed (they push to main)
-    - my-software-development         # 1 ImageUpdateAutomation suspended/resumed
+    - my-software-production          # 2 ImageUpdateAutomations suspended/resumed (gas-price-monitor, splitfairy);
+                                      # absenty-image-updates is suspend:true IN GIT -> read, never touched (§2.0b)
+    - my-software-development         # read-only today: its only IUA (absenty) is suspend:true in git; touched
+                                      # only if that git hold is lifted before the window (§2.0b re-derives)
     - my-software-showcase            # 1 ImageUpdateAutomation suspended/resumed
     - kube-system                     # etcd, kube-apiserver/-controller-manager/-scheduler static
                                       # pods, coredns, cilium, authentik + 13 outposts
@@ -54,7 +56,7 @@ touches:
     - node/k8s-nuc14-03                           # 192.168.55.13 — held VIP AND etcd leadership 2026-10-01 03:40Z
     - "etcd (3 members, 3.7.1 -> 3.7.1: NO protocol move in this hop; defrag §3.8.0 + snapshot §3.8a)"
     - "all Longhorn replicas (188 = 94 volumes x numberOfReplicas 2, 2026-10-01)"
-    - "imageupdateautomation (EVERY one whose spec.git.push.branch is main — 5 on 2026-10-01, enumerated live at §2.0b)"
+    - "imageupdateautomation (every main-pushing one NOT already suspended — 3 of 5 on 2026-10-01; the 2 absenty ones are suspend:true in git and left alone; enumerated live at §2.0b)"
   shared:
     - etcd                            # quorum 3; exactly ONE member may be down
     - cni/cilium                      # DaemonSet restarts per node
@@ -100,9 +102,11 @@ rollback_class: git-revert            # HONEST, and different from talos-1.14.1 
                                       # forward-only crosses this hop — etcd stays 3.7.1/storage 3.7.0,
                                       # Kubernetes stays v1.36.0, no machine config is written. The
                                       # git commit is inert (Flux does not reconcile bootstrap/talos/);
-                                      # the NODE revert is `talosctl rollback` (one boot partition deep,
-                                      # back to v1.14.1) per affected node, at ANY point of the roll —
-                                      # §5.1. Each node revert is another reboot cycle (~25 min).
+                                      # the NODE revert is a DRAINED `talosctl upgrade --image
+                                      # <factory>:v1.14.1` on a Ready node (bare `talosctl rollback`
+                                      # does NOT drain — hard reboot, NotReady nodes only), per
+                                      # affected node, at ANY point of the roll — §5.1. Each node
+                                      # revert is another reboot cycle (~25-30 min).
                                       # The §3.8a etcd snapshot is defence in depth, not the rollback.
 security_ref: null                    # no security driver
 finding_refs:
@@ -292,7 +296,7 @@ window**, and K8s v1.36.0 stays supported.
 | **pkgs `cc717ed` `feat: enable CONFIG_BLK_WBT`** — the patch sets `CONFIG_BLK_WBT=y` **and `CONFIG_BLK_WBT_MQ=y`** (default-on for blk-mq devices). Motivated by talos#14461, *"periodic trim disrupts cluster workloads … bad enough to cause etcd leader elections … CONFIG_BLK_WBT is not configured in the Talos kernel, and that's supposed to help prevent discards from impacting other workloads."* | **YES — the one real behaviour change.** | Measured 2026-10-01 on all three nodes: `/sys/block/nvme0n1/queue/wbt_lat_usec` → **NotFound** (WBT not built), scheduler `[none]`, `write_cache` = `write back`. After the roll the kernel throttles buffered writeback on the NVMe that etcd, Longhorn replicas and container images share (consumer 980/990 PRO, no PLP — talos-1.14.1 Appendix A). Expected effect neutral-to-positive for etcd fsync tail latency (that is upstream's intent), but it is a change on **exactly** the disk path behind F-84a27c15 / F-2cb2dbc9, so it is MEASURED, not assumed: §4.3 CONTENTS ASSERTION 4 proves WBT is live, §4.4 #9 + the §3.10b gates hold the etcd p99 floor, §4.6 records a before/after p99 comparison. |
 | `a015f81` kubelet CPU/memory-manager state validation (the headline feature) | Inert in practice | Live state files on 2026-10-01: `{"policyName":"none",…}` and `{"policyName":"None","machineState":{}…}` — default policies; `machine-kubelet.yaml` sets only reservations/GC/maxPods, no `cpuManagerPolicy`/`reservedSystemCPUs`/`reservedMemory`. A valid default-policy state file is kept. |
 | `c792fa4` stricter validation of hostnames / search domains | Inert; **gated** | Code (`pkg/machinery/nethelpers/dnsname.go` @ v1.14.2): rejects only whitespace/control bytes; for machine config it is a **WARNING, not an error** (*"to keep accepting machine configuration which was valid before"*). Our hostnames `k8s-nuc14-0N`; `disableSearchDomain: true`. Measured: `talosctl 1.14.2 validate` on all three LIVE configs prints the same single warning as 1.14.1 (§3.6). /etc/hosts rendering moved to `etcrender.Hosts`, which drops the hostname line for an invalid name — §4.3 CONTENTS ASSERTION 5 checks the line is still written. |
-| `c7e2524` CRI ↔ sandboxd start conditions (`sandboxd` now starts early and unconditionally; CRI starts once the legacy v1alpha1 config is available) | Boot-path change | Fixes talos#14374. Workload isolation stays OFF (no `SecurityProfileConfig`, §4.5). A boot-order regression shows as kubelet/CRI not coming up → caught by §3.10 (node Ready) on the canary, whose `talosctl rollback` is clean (§5.1). |
+| `c7e2524` CRI ↔ sandboxd start conditions (`sandboxd` now starts early and unconditionally; CRI starts once the legacy v1alpha1 config is available) | Boot-path change | Fixes talos#14374. Workload isolation stays OFF (no `SecurityProfileConfig`, §4.5). A boot-order regression shows as kubelet/CRI not coming up → caught by §3.10 (node Ready) on the canary; a node whose kubelet never came up has nothing to drain, so §5.1b's bare `talosctl rollback` (hard reboot) applies. |
 | `3137edf` routes without `outLinkName` no longer loop | Inert/benign | Our only route is the per-interface default route in `talconfig.yaml` `networkInterfaces[].routes`, which v1alpha1 binds to its link. |
 | `f53a000` block: drop devices gone from the last generation | Inert | Matters for re-created `/dev/dm-*`; no LVM/dm here. |
 | containerd 2.3.5 → 2.3.6, runc → 1.5.2, kernel 6.18.51 → 6.18.54 | Yes (versions) | Kernel bump ⇒ hwmon renumbering risk (talos-upgrade.md §14.6) → §2.8/§4.4 diff the chip set; falco `modern_ebpf` meets the new kernel → §3.10 DaemonSet gate. |
@@ -696,15 +700,34 @@ mise exec -- kubectl get imageupdateautomation -A -o json | python3 -c "
 import sys, json
 for i in json.load(sys.stdin)['items']:
     if (i['spec'].get('git', {}).get('push') or {}).get('branch') == 'main':
-        print(i['metadata']['namespace'], i['metadata']['name'])" > "$SCR/iua-main.txt"
-cat "$SCR/iua-main.txt"; wc -l < "$SCR/iua-main.txt"
+        print(i['metadata']['namespace'], i['metadata']['name'], 'true' if i['spec'].get('suspend') else 'false')" > "$SCR/iua-pre.txt"
+cat "$SCR/iua-pre.txt"; wc -l < "$SCR/iua-pre.txt"
+# split: ONLY the rows not already suspended are ours to suspend (and later resume)
+awk '$3=="false"{print $1, $2}' "$SCR/iua-pre.txt" > "$SCR/iua-main.txt"     # we suspend + resume these
+awk '$3=="true"{print $1, $2}'  "$SCR/iua-pre.txt" > "$SCR/iua-presusp.txt"  # suspended IN GIT; never touch
+wc -l < "$SCR/iua-main.txt"; wc -l < "$SCR/iua-presusp.txt"
 while read -r ns name; do mise exec -- flux suspend image update "$name" -n "$ns"; done < "$SCR/iua-main.txt"
 mise exec -- kubectl get imageupdateautomation -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,SUSPEND:.spec.suspend' --no-headers
 ```
+*2026-10-01 live (the expected split):* `iua-pre.txt` has 5 rows; **`absenty-image-updates` in
+`my-software-production` AND `my-software-development` are already `suspend: true` — set IN GIT**
+(`kubernetes/apps/my-software-{production,development}/absenty/app/image-automation.yaml`,
+line 54, a deliberate operator hold) → `iua-presusp.txt` = those 2; `iua-main.txt` = the 3 at
+`<none>`: `gas-price-monitor-image-updates`, `splitfairy-image-updates` (production),
+`showcase-image-updates` (showcase). Re-derive live; if the git hold was lifted by then, the
+split moves and that is fine — the rule is the column, not this list.
+
 **PASS:** (1) `ignore=[…]` non-empty and `rev=` reads `refs/heads/main@sha1:<freeze-sha>` (else
-wait for the 1-min interval); (2) one 40-hex sha; (3) `iua-main.txt` lists ≥ 1 automation
-(an empty file is a FAIL — the enumeration is blind) and every row of the final read prints
-`true`. **Before** the suspend the same read prints `<none>` — its negative control.
+wait for the 1-min interval); (2) one 40-hex sha; (3) `iua-pre.txt` lists ≥ 1 automation
+(an empty file is a FAIL — the enumeration is blind), `iua-main.txt` + `iua-presusp.txt` line
+counts sum to it, and every row of the final read prints `true`. **Negative control:** the
+`iua-main.txt` rows read `<none>` in the pre-suspend `cat "$SCR/iua-pre.txt"` (column 3 =
+`false`) and flip to `true` only after the loop — a read that printed `true` for them BEFORE
+the loop would mean the column is not `.spec.suspend`. The `iua-presusp.txt` rows are `true`
+both before and after and cannot serve as a control; their job is §5.4's
+"still `true`" assertion (resuming them would override an operator hold made in git; the
+owning Kustomization's next apply should restore it, but until then the automation is live and
+can push absenty bumps to `main` — not measured how long that gap is, so never create it).
 
 **The flux-system GitRepository is NOT suspended** (talos-upgrade.md §14.3: source-controller
 storage is emptyDir; a suspended source never rebuilds its artifact after a drain moves the
@@ -732,6 +755,27 @@ git log --oneline -15
 `talconfig-multidoc-migration` is executed/retired (premise
 `multidoc-migration-applied-on-all-nodes` already proved the cluster side); no `now:<today>`
 stamp outstanding.
+
+**2.1b — What did THIS window's Step 0 apply?** Step 0 ran before the freeze (§2.0b) and may
+have moved shared infra this plan's gates read or depend on.
+
+```bash
+git log --oneline "$(git log -1 --before='6 hours ago' --format=%H)"..HEAD -- kubernetes/ \
+  | tee "$SCR/step0-commits.txt"
+grep -iE 'kube-prometheus-stack|prometheus|longhorn|flux|cert-manager|cilium|coredns|envoy' "$SCR/step0-commits.txt" || echo "no shared-infra bump in Step 0"
+git diff --stat "$(git log -1 --before='6 hours ago' --format=%H)"..HEAD -- kubernetes/ \
+  | grep -iE 'kube-prometheus-stack|longhorn|flux|cert-manager|cilium|coredns|envoy' || true
+```
+**PASS:** `no shared-infra bump in Step 0`. **If kube-prometheus-stack, Longhorn, Flux,
+cert-manager, cilium, coredns or envoy moved** (by commit subject OR by a touched path —
+both greps are case-insensitive; a Renovate subject names the chart, the path names the
+component): wait **≥ 10 min after its HelmRelease is `Ready` on the new version**, then
+re-take every baseline recorded so far (§2.3b gates, §2.5 Longhorn baseline, §2.8 alert set
+and hwmon, `notready-baseline.json`) — the 2026-09-27 baselines would otherwise attribute
+Step 0's restarts to the canary. Do not proceed on a Longhorn manager/engine move without the
+operator (§6.3: never with a Longhorn upgrade in flight). Negative control: on a Step-0-empty
+morning the first grep prints the `echo` line; widening `--before` to `14 days ago` must list
+at least one Renovate commit, proving the range expression is not empty by construction.
 
 **2.2 — Nodes healthy, all on v1.14.1.** (premise `nodes-on-v1.14.1`)
 
@@ -1195,6 +1239,15 @@ delete the `Pending` pods so the scheduler spreads the attach load.
 start FULL rebuilds on the two quorum disks. Every 2 min until it returns:
 `mise exec -- python3 "$SCR/etcdgate.py" --members 0 --lookback 5m --allow-file "$SCR/leader-allow.log"`,
 reading the two SURVIVORS' lines. Any survivor election or survivor p99 ≥ 50 ms = no next node today.
+**When Prometheus is on the node that is down** (it was on canary 02 on 2026-10-01 — check
+`kubectl -n monitoring get pod -o wide | grep prometheus-kube-prometheus-stack` before §3.9a),
+`etcdgate.py` has no instrument for exactly this interval: it prints a query/connection error
+or a no-series FAIL, which is NOT a survivor verdict. The tripwire for that interval is the
+§3.9a survivor probe log instead:
+`python3 "$SCR/probe.py" "$SCR/probe-$NODE.log" "$S1" "$S2" --allow-elections <1 if this node was leader, else 0>` every 2 min (PASS/FAIL on
+survivor elections and leaderless samples, Prometheus-independent), plus
+`tail -3 "$SCR/probe-$NODE.log" | cut -c1-200` by eye. Resume `etcdgate.py` once Prometheus is
+Running again.
 
 **3.10 — Node health gate + pattern (ii).** When the node is `Ready`:
 
@@ -1419,6 +1472,14 @@ PV/PVC/Volume/Replica.
 > a node reporting `Talos (v1.14.2)` = the node is not running the kernel this plan priced:
 > FAIL, stop, investigate before the next node. **Negative control:** `wbt-pre.txt` itself —
 > the same read printed NotFound on v1.14.1, so this assertion cannot pass on the old kernel.
+> **Third outcome — `invalid argument` (EINVAL):** linux v6.18 `block/blk-sysfs.c`
+> `queue_wb_lat_show()` returns `-EINVAL` when the attribute EXISTS but no WBT rq_qos is
+> attached to this queue (`!wbt_rq_qos(q)`), and `0` only when attached-but-disabled. So
+> `EINVAL` = kernel built with WBT (the image is right) but WBT not active on `nvme0n1` — the
+> behaviour change §1.2 priced is absent on that node. Not a node defect and not a rollback
+> trigger: record it, it is a PASS for "the priced kernel booted" and a note that §4.6's
+> before/after comparison measures nothing for that node. It is distinguishable from
+> `NotFound` (old kernel) by the error text — read the line, do not reduce it to "not a number".
 
 > **CONTENTS ASSERTION 5 (`/etc/hosts` still carries the node's own name — the `c792fa4`
 > render path).** v1.14.2 moved /etc/hosts rendering into `etcrender.Hosts`, which silently
@@ -1518,16 +1579,49 @@ point of the roll — unlike talos-1.14.1, whose etcd 3.6 → 3.7 move made it o
 canary. It is still **another reboot cycle per node (~25 min incl. its Longhorn gate)**, never a
 `git revert` alone: the commit is inert.
 
-### 5.1 — Per-node rollback (`talosctl rollback`, one boot partition deep)
+### 5.1 — Per-node rollback — DRAINED by default; bare `talosctl rollback` only for a NotReady node
 
+**`talosctl rollback` does NOT cordon or drain.** Measured in v1.14.2 source: `Server.Rollback`
+(`internal/app/machined/internal/server/v1alpha1/v1alpha1_server.go`) runs
+`runtime.SequenceReboot`, and `Sequencer.Reboot` (`…/runtime/v1alpha1/v1alpha1_sequencer.go`
+L257–271) is `StopAllPods → preShutdown → stopAll → reboot` — no `CordonAndDrainNode` phase
+(that phase is in `Upgrade`, L453–455, and `Shutdown`, L370–372, only). On a `Ready` node a bare
+rollback is therefore a **hard reboot under load**: Longhorn engines on it die un-migrated
+(every attached volume with a replica-less engine there goes degraded/faulted for the reboot),
+envoy/authentik/coredns pods vanish without PDB protection. So:
+
+**(5.1a) Node is `Ready` (the normal case — CA/DaemonSet/WBT defect found after it returned):**
+roll it back with a **drained downgrade-upgrade** to the exact v1.14.1 image. Do NOT use
+`task talos:upgrade-node` — it reads `talosVersion` from `talconfig.yaml`, which says v1.14.2
+until §5.3. Run talosctl directly, with the same §3.9 FREEZE-HELD check, nodegate snap and §3.9a
+survivor probe before it:
 ```bash
 mise exec -- talosctl -n <node-ip> version --short          # Tag: v1.14.2
-mise exec -- talosctl rollback --nodes <node-ip>
+mise exec -- talosctl -n <node-ip> upgrade --timeout=10m \
+  --image factory.talos.dev/installer/43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3:v1.14.1
 mise exec -- talosctl -n <node-ip> version --short          # Tag: v1.14.1 after it returns
 ```
-Then re-run §3.10 (with a fresh §3.9 snap + §3.9a probe around the rollback reboot), §3.11 and
-§4.1 for that node. **One partition deep:** it returns to the image booted before the last
-upgrade (v1.14.1) — nothing further. **Canary**: roll it back, stop, leave the other two on
+`Upgrade` cordons + drains, so it waits on `storage/instance-manager-<hash>` exactly like §3.9
+(normal; same engine-count watch, same rule: never delete PDBs, never `--drain=false` up front;
+on a drain **timeout** only, uncordon then delete the `Pending` pods). v1.14.1 is inside the
+downgrade window (`MaximumHostDowngradeVersion 1.16.0`) and the factory serves it (§1.4: `200`).
+Price: same as a roll node, ~25–30 min incl. §3.11.
+
+**(5.1b) Node is NotReady / API unreachable (kubelet/CRI never came up — nothing to drain):**
+bare rollback, **labelled a hard reboot**:
+```bash
+mise exec -- talosctl -n <node-ip> version --short          # Tag: v1.14.2 (apid answers even if kubelet does not)
+mise exec -- talosctl rollback --nodes <node-ip>            # HARD REBOOT: no cordon, no drain
+mise exec -- talosctl -n <node-ip> version --short          # Tag: v1.14.1 after it returns
+```
+Price it as a full §3.11 Longhorn recovery, not an incremental rebuild: the node has been out
+for the whole failed boot plus this one, so expect replicas past the 10-min tripwire to be
+FULL rebuilds (~20+ min at concurrency 8, possibly the 25-min budget, §14.4 failed-replica
+procedure). A bare rollback on a `Ready` node is never the shortcut.
+
+Either way, then re-run §3.10 (with a fresh §3.9 snap + §3.9a probe around the reboot), §3.11
+and §4.1 for that node. **(b) is one partition deep:** it returns to the image booted before the
+last upgrade (v1.14.1) — nothing further; (a) writes v1.14.1 as a fresh install. **Canary**: roll it back, stop, leave the other two on
 v1.14.1 — the cluster is exactly where it started; then §5.3. **Later nodes**: roll back the
 broken node only, or all rolled nodes one at a time with the full gate set between them; a mixed
 v1.14.1/v1.14.2 cluster is a supported transient (same etcd, same K8s).
@@ -1546,6 +1640,19 @@ decision, never improvised: restore from the §3.8a snapshot via talos-upgrade.m
 `docs/sops/etcd.md` §4.4 (`reset --system-labels-to-wipe=EPHEMERAL` destroys every Longhorn
 replica on that node; restore volumes from the §2.6-verified backups per `docs/sops/backup.md`
 and `docs/sops/disaster-recovery.md`; no `--recover-skip-hash-check`).
+
+### 5.2a — Window aborted BEFORE the canary (Phase A pushed, no node touched)
+
+Phase A's §3.7 commit (`talosVersion: v1.14.2` + deny-rule text) is pushed before the window
+and is Flux-inert, but it is NOT harmless to leave: `task talos:upgrade-node` and every later
+reader of `talconfig.yaml` (the migration plan's re-review, the version check, the next
+planner) would take v1.14.2 as the cluster state. If the window ends — for any reason —
+before §3.9a's `talos:upgrade-node` was issued on the canary:
+`kubectl get nodes -o wide` shows `Talos (v1.14.1)` on all three (prove it, do not assume),
+then run **§5.3** to revert Phase A, then **§5.4** (the freeze may already be up). Record
+the abort reason in the window report. **Alternative that avoids this path:** run Phase A
+the same morning, immediately before §2.0b, at the cost of +25 min in-window (§7 already
+prices that case: stop after the canary + 2nd node unless the operator extends).
 
 ### 5.3 — Reverting the git commit (only after no node runs v1.14.2)
 
@@ -1566,16 +1673,30 @@ must track the cluster).
 
 ```bash
 git fetch -q origin && git log --oneline "$(cat "$SCR/freeze-sha.txt")"..origin/main     # MUST be empty
-while read -r ns name; do mise exec -- flux resume image update "$name" -n "$ns"; done < "$SCR/iua-main.txt"
+while read -r ns name; do mise exec -- flux resume image update "$name" -n "$ns"; done < "$SCR/iua-main.txt"   # ONLY ours
+mise exec -- kubectl get imageupdateautomation -A -o json | python3 -c "
+import sys, json
+live = {(i['metadata']['namespace'], i['metadata']['name']): bool(i['spec'].get('suspend')) for i in json.load(sys.stdin)['items']}
+def rows(p): return [tuple(l.split()[:2]) for l in open(p) if l.strip()]
+bad = 0
+for k in rows('$SCR/iua-main.txt'):
+    ok = k in live and live[k] is False; bad += not ok; print('resumed   ', *k, 'suspend=%s' % live.get(k), 'OK' if ok else 'FAIL')
+for k in rows('$SCR/iua-presusp.txt'):
+    ok = k in live and live[k] is True;  bad += not ok; print('git-held  ', *k, 'suspend=%s' % live.get(k), 'OK' if ok else 'FAIL')
+print('VERDICT', 'PASS' if bad == 0 else 'FAIL')"
 mise exec -- kubectl get imageupdateautomation -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,SUSPEND:.spec.suspend,READY:.status.conditions[0].status' --no-headers
 mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
 kill $PROBE $L1 $L2 2>/dev/null; true
 ```
-**PASS:** the `git log` is empty (else name the commits/session to the operator); every
-automation `SUSPEND false`, Ready `True` — **every** one listed in `iua-main.txt`, not a
-remembered subset (a forgotten suspension silently stops that app's image bumps while reading
-`Ready=True`); Kustomizations header only. Tell the other sessions the freeze is over. Only
-then §3.12 and the window agent's bookkeeping commits.
+**PASS:** the `git log` is empty (else name the commits/session to the operator); `VERDICT PASS`
+= **every** row of `iua-main.txt` reads `suspend=False` (a forgotten suspension silently stops
+that app's image bumps while reading `Ready=True`) **AND every row of `iua-presusp.txt` still
+reads `suspend=True`** (the absenty git holds survived — resuming them would undo an operator
+decision made in git); the resumed rows Ready `True`; Kustomizations header only. **This gate
+can fail both ways:** before the resume loop it prints `FAIL` on every `iua-main.txt` row (they
+are `True` then) — run it once before the loop on the first use as the control; a stray
+`flux resume` on an absenty row prints `git-held … suspend=False FAIL`. Tell the other sessions
+the freeze is over. Only then §3.12 and the window agent's bookkeeping commits.
 
 ## 6) Interference notes
 
@@ -1602,10 +1723,9 @@ share a slot; the question is only order, and it is not symmetric:
 and re-reviewed before its own window. Say so at the GO; do not let the scheduler discover it.
 
 **Reciprocity (house rule; `--validate` does not check it):** `talconfig-multidoc-migration`
-(`conflicts_with: []`) and `multus-macvlan-foundation` do not name this plan yet. Both are
-`exclusive`/unwindowed so the scheduler is safe today, but the owner of each should add
-`talos-linux-1.14.2` to its `conflicts_with` in its next edit (reported, not done here — this
-planner writes only its own file).
+now names this plan in `conflicts_with` (2026-10-01). `multus-macvlan-foundation` does not yet;
+it is unwindowed so the scheduler is safe today, but its owner should add `talos-linux-1.14.2`
+in its next edit.
 
 ### 6.2 — Slot
 
@@ -1648,7 +1768,7 @@ redis-fleet-8.10.2, 11-01 chart-patches-coredns-reloader-blackbox — the first 
 | `storage/longhorn` | instance-manager restart + replica rebuild ×3 | every stateful app |
 | `cni/cilium`, `coredns`, `cert-manager` | pods restart/reschedule per node | pod networking/DNS/webhooks, briefly |
 | `monitoring` | Prometheus loses samples while its node drains (§3.9a covers etcd) | §4 waits 15 min before judging |
-| `flux-source` / `git-main` | push freeze, freeze-sha gate before every node, all main-pushing ImageUpdateAutomations suspended | every session/bot that commits |
+| `flux-source` / `git-main` | push freeze, freeze-sha gate before every node, every main-pushing ImageUpdateAutomation not already git-suspended is suspended (and only those resumed) | every session/bot that commits |
 | `cifs-share` | smb.csi mounts torn down/remounted with their pods | media apps, paperless, backups |
 
 ## 7) Risk and duration against the slot
@@ -1673,7 +1793,7 @@ sun-attended only.
 | Phase | Min | Basis |
 |---|---:|---|
 | Phase A (§3.1–§3.7) | (25) | **before the window**, Flux-inert — not counted |
-| §2.0b freeze + suspend 5 automations + read-back | 3 | |
+| §2.0b freeze + suspend 3 automations (2 git-held left alone) + read-back | 3 | |
 | §2 pre-checks incl. premises, §2.3b gates + controls, baselines | 20 | 09-27 took ~23 incl. helper writing; helpers now written in Phase A |
 | §3.8.0 defrag (IN USE 32–33 % on 2026-10-01) | 7 | measured 4–7 |
 | §3.8a snapshot | 3 | measured |
@@ -1695,7 +1815,7 @@ slot wall clock                      200   (sun-attended, runbooks/maintenance-w
   = residual                          15
 ```
 The residual is not the rollback budget; the **timeline** is: the canary ends at about
-**T+63** (3 + 20 + 7 + 3 + 30), leaving ~117 min of slot, and a canary rollback costs ~35 min
+**T+63** (3 + 20 + 7 + 3 + 30), leaving ~117 min of slot, and a canary rollback costs ~35 min drained (§5.1a; a §5.1b hard-reboot rollback of a NotReady canary prices as a full Longhorn recovery, ~45+ min)
 (reboot + Longhorn gate + re-verify). Past the canary the answer is stop-part-rolled (§5.2) or a
 per-node rollback, both supported. **Executor rule:** if the 2nd node's §3.10b has not PASSED by
 **T+140**, stop part-rolled after two nodes (§5.2) unless the operator, present, extends. If
@@ -1710,15 +1830,19 @@ the third node. If the canary alone takes > 45 min, re-plan from that measuremen
    returns NotFound (measured 2026-10-01 on all three) and the loop prints `DIFFER` on a healthy
    node. `docs/sops/talos-upgrade.md` §14.2 step 1 still prescribes it ("Both must be identical —
    `DIFFER` means something is staged: STOP") — that SOP text would halt the next roll falsely.
-   This plan uses the one-id premise `single-machineconfig-per-node` instead. **SOP correction
-   owed.**
+   This plan uses the one-id premise `single-machineconfig-per-node` instead. **SOP corrected
+   2026-10-01** (§14.2 step 1 now: single `v1alpha1` id, any extra id = staged → STOP; §11.1
+   now carries the rollback-is-undrained warning).
 2. **The 2026-09-27 plan's "expected doubled `init_on_alloc`" cmdline is stale** — v1.14.1 emits
    a single `init_on_alloc=0`. §4.1 now compares against a recorded per-node file instead of a
    written set.
 3. **ImageUpdateAutomations that push to `main` grew from 2 to 5** (gas-price-monitor,
    splitfairy, showcase). talos-upgrade.md §14.3 says "suspend any ImageUpdateAutomation that
    pushes to main" (correct, rule-based); any runbook that names only the two absenty ones is stale.
-   §2.0b enumerates live.
+   §2.0b enumerates live. **The SOP rule is incomplete in the other direction:** both absenty
+   automations are `suspend: true` IN GIT (operator hold), and a blanket suspend-then-resume-all
+   would resume them. talos-upgrade.md §14.3 should say "suspend those not already suspended;
+   record the pre-state; resume only what you suspended" (reported, not edited here).
 4. **No version finding exists for Talos v1.14.1 → v1.14.2.** The version sweep did not file one
    (the previous one, F-912f4778, closed with the roll); the plan-or-page pass therefore has no
    finding to join this plan to for the version itself. Worth checking why the version check is

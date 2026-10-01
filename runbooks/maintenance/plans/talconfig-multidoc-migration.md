@@ -42,7 +42,8 @@ touches:
                                       # every API client (Flux, operators, kubectl) sees one
                                       # apiserver restart per node behind the VIP 192.168.55.10.
 depends_on: []
-conflicts_with: []                    # §4 reads etcd/apiserver metrics through Prometheus; no OPEN
+conflicts_with: [talos-linux-1.14.2] # reciprocity: that roll depends_on this plan (it MUST run
+                                      # second, talos-linux-1.14.2 §6.1); never one slot. Also: §4 reads etcd/apiserver metrics through Prometheus; no OPEN
                                       # kube-prometheus-stack plan exists (91.4.1 executed 2026-09-26).
                                       # Everything else is covered by `exclusive: true` below: no other
                                       # change may be in flight while the control plane is re-rendered
