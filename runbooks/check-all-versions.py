@@ -1815,6 +1815,19 @@ class VersionChecker:
         rf'^v?\d+\.\d+(\.\d+)?(\.\d+)?(-[0-9a-f]+)?(-(?:{_VARIANT_TAIL}))?$',
         re.IGNORECASE,
     )
+    # Single-architecture tags. `_SEMVER_TAG_RE`'s `(-[0-9a-f]+)?` build-suffix
+    # group accepts `-386` because 386 is valid hex, so a release that publishes
+    # its per-arch tags before the multi-arch manifest list (otel collector-contrib
+    # 0.162.0, 2026-10-01: `0.162.0-386` live, plain `0.162.0` still 404) was
+    # offered as the bump target -- a 32-bit image, to the unattended Step-0 lane.
+    # The other arch names are not hex and were already rejected by accident; list
+    # them anyway so the exclusion is deliberate. A tag whose CURRENT pin is itself
+    # arch-suffixed keeps the old behaviour (see _pick_latest_semver_tag).
+    _ARCH_SUFFIX_RE = re.compile(
+        r'-(?:386|i386|i686|amd64|x86_64|arm64|aarch64|arm64v8|armv[5-8]l?|armhf|armel|'
+        r'arm|ppc64le|s390x|riscv64|mips64le)$',
+        re.IGNORECASE,
+    )
     # Pre-release markers. `_SEMVER_TAG_RE` already rejects most of them by
     # accident (`beta1` is not hex, `rc.1` has a dot), which is exactly why this
     # needs to be explicit: the accident does NOT cover short hex-lookalike
@@ -1944,6 +1957,11 @@ class VersionChecker:
                         if t and self._SEMVER_TAG_RE.match(self._canonical_tag(t))]
         if not version_tags:
             return None
+        if not self._ARCH_SUFFIX_RE.search(str(current_tag or '')):
+            version_tags = [t for t in version_tags
+                            if not self._ARCH_SUFFIX_RE.search(t)]
+            if not version_tags:
+                return None
         # Never recommend a pre-release. Conditional on a stable candidate
         # surviving, so a component deliberately pinned to a pre-release line
         # with no stable release yet still gets an answer instead of None.
