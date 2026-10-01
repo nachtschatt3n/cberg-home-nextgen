@@ -42,19 +42,25 @@ touches:
 depends_on: []
 conflicts_with:
   - app-template-5.2.1                # Batch A sed edits the SAME file (teslamate/app/helmrelease.yaml,
-                                      #   chart line) and re-renders the SAME HR — scheduled nightly:2026-10-02.
-                                      #   Two writers, one object; a same-night roll of teslamate would read
-                                      #   as GEN_CHANGED in its §4 and mine. That plan does NOT list this one
-                                      #   yet — reciprocity is owed there (reported, not edited by me).
+                                      #   chart line) and upgrades the SAME HR. Its Batch A change is label-only
+                                      #   (rendered objects identical but the chart label), so IT does not roll
+                                      #   teslamate — but this plan DOES, and its §4 whole-fleet generation gate
+                                      #   would read our roll as GEN_CHANGED; two writers on one file/HR in one
+                                      #   night also make either §4 unattributable. Reciprocal entry added there.
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. helmrelease/teslamate
   - flux-reconciler-impersonation     # changes the identity helm-controller applies home-automation/ with
   - flux-oci-chart-sources            # rewrites HR chart sources (bjw-s app-template) — same spec.chart block
   - kube-prometheus-stack-91.4.1      # §4.5 reads kube-state-metrics through Prometheus (the window's
                                       #   instrument). Executed 2026-09-26; kept so a re-run/revert serializes.
+  - talos-linux-1.14.2                # node roll (exclusive, sun-attended) reschedules every pod incl.
+                                      #   teslamate + teslamate-postgres; a same-slot roll would void §4.2-4.6.
+                                      #   exclusive:true already keeps it out of the slot; named for the record.
 exclusive: false
 security_ref: F-7d7fb365              # AR-029 record on the 4.2.0 image ("already on newest tag"). A newer
                                       # tag now exists, so that acceptance's premise lapses and this bump is
-                                      # its remedy. Detail stays on the record — nothing about it here.
+                                      # its remedy. Its twin F-50167e66 (AR-029, 4.2.0, the no-upstream-fix
+                                      # subset) is the same image's other record and is re-evaluated by the
+                                      # first sweep after the bump. Detail stays on the records — nothing here.
 capability_change: true               # HONEST, not "to be safe". 4.3.0 adds: two new GET routes
                                       # (/notice, /license — router.ex, PR #5779), a new settings-page
                                       # control that reorders vehicles (#5741) and a settings-page action
@@ -185,9 +191,12 @@ index digest** (same form as `traccar` 6.16.0), so a later move of `4.3` to
   here (premise `ha-discovery-off`), and we come from 4.2.0, not 4.1.x.
 - **Auth (#5781):** token refresh "no longer follow[s] redirects". Correct-
   direction hardening; if Tesla's refresh endpoint ever redirected for us, the
-  refresh would fail and the UI would name the cause. Refresh does not
-  necessarily happen at boot, so this is a post-window soak item (§4.7), not a
-  window gate.
+  refresh would fail. Refresh **does happen at boot** — measured on the live
+  4.2.0 pod's full log (started 2026-09-28): `POST https://auth.tesla.com/oauth2/v3/token
+  -> 200`, `Refreshed api tokens`, `Scheduling token refresh in 6 h`, all within
+  3 s of `Version: 4.2.0`. So the #5781 path is exercised in the window and is
+  gated by §4.6 (presence of `Refreshed api tokens`); §4.7 keeps only the 6 h
+  scheduled refresh + positions soak.
 - **Grafana:** "use Grafana 13.2.2" and the new temperatures dashboard concern
   the separate `teslamate/grafana` image and the repo's dashboard JSON. We run
   neither: our grafana (ns monitoring) pulls 8 TeslaMate dashboards from
@@ -370,23 +379,54 @@ selector/metric is wrong, not that all is well); restarts `0` for the new pod,
 available `1`, image_id `…516fc9f0…`. Expect the OLD pod's restart series to
 linger in the first query for a few minutes — judge by the new pod name.
 
-**4.6 Boot log is clean** (the #5800 wait path and the vehicle process):
+**4.6 CONTENTS ASSERTION: the boot reached each milestone on 4.3.0** — measured
+on the NEW pod's FULL log (no `--since`: the boot lines are written once, in the
+first ~3 s, and a `--since` window started later silently drops them, turning
+an absence grep into a gate that cannot fail). Pod name from §4.2:
 ```bash
-kubectl -n home-automation logs deploy/teslamate --since=15m | \
-  grep -i -c -E 'waiting for the database|\*\* \(|terminating|crash|exited'
+NEWPOD=$(kubectl get pod -n home-automation -l app.kubernetes.io/instance=teslamate -o jsonpath='{.items[0].metadata.name}')
+kubectl -n home-automation logs "$NEWPOD" -c main > /tmp/tm-boot.log
+wc -l < /tmp/tm-boot.log                                   # must be > 0 (empty log = FAIL, not PASS)
+for p in 'Version: 4.3.0' 'Migrations already up' 'Running TeslaMateWeb.Endpoint' 'Refreshed api tokens'; do
+  printf '%s => %s\n' "$p" "$(grep -c -i -F "$p" /tmp/tm-boot.log)"
+done
+# secondary (absence) pattern:
+grep -i -c -E 'waiting for the database|\*\* \(|terminating|crash|exited' /tmp/tm-boot.log
 ```
-PASS: `0` on a start against a live DB (the PR's state table: "Database accepts
-connections -> migrates right away, no wait logged"). Baseline 2026-09-30 on 4.2.0:
-the recurring Tesla-side `[warning] TeslaApi.Error … timeout / vehicle not
-connected` and `car_id=1 [error] Error / :unknown` lines are pre-existing
-API-side noise and are deliberately NOT in this pattern — do not count them.
-Guards against: DB wait loop (`Waiting for the database`), OTP crash reports
-(`** (`, `terminating`).
+PASS (primary, presence): `Version: 4.3.0` = **1**, `Migrations already up` =
+**1**, `Running TeslaMateWeb.Endpoint` = **1**, `Refreshed api tokens` **>= 1**.
+Measured on the live 4.2.0 pod (full log, 67 780 lines, pod started
+2026-09-28): `Version: ` 1 (as `Version: 4.2.0`), `Migrations already up` 1,
+`Running TeslaMateWeb.Endpoint` 1, `Refreshed api tokens` 1 — so each marker is
+emitted exactly once per boot and the strings exist upstream. Each can fail:
+- `Version: 4.3.0` = 0 -> the old image/old pod is being read (prints `Version:
+  4.2.0`) or the app never got past release start;
+- `Migrations already up` = 0 -> the #5800 `wait_for_database_and_migrate` path
+  either ran a migration (logs `Migrated …` instead — cross-check §4.3, go to
+  §5.2) or never connected;
+- `Running TeslaMateWeb.Endpoint` = 0 -> the web endpoint did not start;
+- `Refreshed api tokens` = 0 -> the #5781 refresh failed at boot (look for
+  `oauth2/v3/token` with a non-200 / a refresh error in the same file) -> §5.1.
+Counts > 1 for the first three mean the container restarted and `logs` shows a
+later boot — read §4.5's restart count.
+PASS (secondary, absence): `0`. Guards against the DB wait loop (`Waiting for the
+database`) and OTP crash reports (`** (`, `terminating`). The recurring Tesla-
+side `[warning] TeslaApi.Error … timeout / vehicle not connected` and
+`car_id=1 [error] Error / :unknown` lines are pre-existing API-side noise and
+deliberately NOT in this pattern.
 
-**4.7 Post-window soak (non-gating, next sweep):** within 24 h, `logs --since=24h`
-shows no new auth/token-refresh failure class vs the §2 baseline (#5781
-changed refresh redirect handling), and `positions` max(date) advances after the
-car's next drive. Report in the morning summary; a failure here is §5.1.
+**4.7 Post-window soak (non-gating, next sweep):** the boot refresh is already
+gated in §4.6; here only (a) the first SCHEDULED refresh, 6 h after boot, and
+(b) `positions` max(date) advancing after the car's next drive. The scheduled
+refresh does NOT log `Refreshed api tokens` (that line is boot-only — measured on
+the 4.2.0 pod over 3 days: 1x `Refreshed api tokens`, 11x `Refreshing access
+token ...`, 12x `POST https://auth.tesla.com/oauth2/v3/token -> 200`), so read:
+```bash
+kubectl -n home-automation logs "$NEWPOD" -c main > /tmp/tm-soak.log
+grep -c -i -F 'Refreshing access token' /tmp/tm-soak.log                       # >= 1 after T+6h
+grep -i -F 'oauth2/v3/token' /tmp/tm-soak.log | grep -c -v -E -- '-> 200 '      # 0 (any non-200 token POST = FAIL)
+```
+Report in the morning summary; a failure here is §5.1.
 
 Then: clear marker (`runbooks/update-marker.sh clear teslamate`), expire the silence.
 
@@ -421,10 +461,16 @@ expected per §1; means upstream shipped something the file-set diff did not sho
 
 ## 6. Interference notes
 
-- **Same HR file as `app-template-5.2.1`** (Batch A, nightly:2026-10-02): its sed
-  touches the chart line, this plan the image line. Textually compatible, but
-  both roll `deployment/teslamate`; never the same night. That plan should add
-  `teslamate-4.3` to its `conflicts_with` (reciprocity; not edited by this planner).
+- **Same HR file as `app-template-5.2.1`** (Batch A): its sed touches the chart
+  line, this plan the image line. Textually compatible. Its Batch A change is
+  label-only and does not roll teslamate, but this plan rolls it, and that
+  plan's §4 whole-fleet generation gate would print `GEN_CHANGED
+  home-automation/deployment/teslamate`; two upgrades of one HR in one night also
+  blur both plans' attribution. Never the same night; reciprocal
+  `conflicts_with` entry added to `app-template-5.2.1.md` (2026-10-01).
+- **`talos-linux-1.14.2`** (exclusive, sun-attended, three node reboots) would
+  reschedule teslamate and teslamate-postgres; never the same slot. Its
+  `exclusive: true` enforces this; listed in `conflicts_with` for the record.
 - `helm-drift-detection`, `flux-reconciler-impersonation`, `flux-oci-chart-sources`
   all rewrite how/what helm-controller applies to this HR — serialized via
   `conflicts_with`.

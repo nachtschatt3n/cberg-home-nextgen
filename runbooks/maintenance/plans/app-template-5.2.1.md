@@ -46,6 +46,7 @@ conflicts_with:
   # - trmnl-ha-0.11.0 (RESOLVED 2026-09-30: executed + retired in nightly:2026-09-30, 4eec3614/0f0f3ba0; ref removed per the dead-ref convention)
   - penpot-chart-1.10.0               # works against penpot-db + penpot-cache (Batch A members); lists us already
   - mariadb-chart-27.3.0              # rolls databases/mariadb-0 under phpmyadmin + all 15 showcase HRs (our Batch members); same-night confounds both §4s (review 2026-09-28)
+  - teslamate-4.3                     # edits home-automation/teslamate helmrelease.yaml (Batch A file) and ROLLS it -> §4 would read GEN_CHANGED
 exclusive: false
 security_ref: null
 capability_change: false              # template-library bump; rendered objects byte-identical except the chart label
