@@ -70,7 +70,7 @@ finding_refs: [F-069b1775]            # resolved 2026-09-22 on plan authorship (
                                       # finding. F-3fcdca7b (8.10.1 -> 8.10.2 patch) is a
                                       # version row owned by redis-fleet-8.10.2, not this plan.
 review: ready-for-go@2026-09-28
-status: vetted  # 2026-09-28 RE-PLAN (plan-reviewer ready-for-go, HUMAN-GATED; needs an operator GO) after the 2026-09-26 NOW run was reverted at old §3.7
+status: awaiting-go  # 2026-10-01 nightly: DEFERRED + go_no_go ingested -- SD-11 derives it pre-approved, but §2 "ABORT if ... the window is unattended" and §6 "Attended only (autonomy_override: human-gated)" were never updated when the override was removed; risk medium. Reconcile the body (or GO it for an attended slot). Was: vetted  # 2026-09-28 RE-PLAN (plan-reviewer ready-for-go, HUMAN-GATED; needs an operator GO) after the 2026-09-26 NOW run was reverted at old §3.7
                 # (landing da77a7de, revert b65617d1). Old §3.7 (`occ config:system:set redis
                 # password` so notify_push would read it from config.php) was a deterministic
                 # no-op. This revision drops the config.php write entirely and gives notify_push
