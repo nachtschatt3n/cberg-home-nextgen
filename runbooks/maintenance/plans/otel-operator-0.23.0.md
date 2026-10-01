@@ -120,6 +120,12 @@ conflicts_with:                        # HARD slot exclusions — window-schedul
                                        # the ref was still owed, was stale.
   # RESOLVED 2026-09-21: cilium-1.20.2 EXECUTED (80395710, chart 1.20.1 -> 1.20.2) and retired (c0797253) -- there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention: --validate treats an unresolvable ref as an ERROR, because a guard pointing at nothing enforces nothing.
   # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
+  - edot-collector-0.162.0             # ADDED 2026-10-01 (review b23be87b): reciprocal of that
+                                       # plan's ref. Same mechanism as the retired 0.161.0 pair
+                                       # below: the daemon collectors export into
+                                       # edot-collector.monitoring.svc:4317 and §4.4 proves this
+                                       # plan via docs landing in ES through it; a same-night
+                                       # edot roll makes either plan's ES gate unattributable.
   - flux-oci-chart-sources             # ADDED 2026-09-20 (was missing). Verified in that
                                        # plan's own frontmatter: its touches.resources names
                                        # "daemonset/otel-operator-daemon-collector (ROLL)",

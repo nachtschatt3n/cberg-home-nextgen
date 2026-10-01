@@ -94,6 +94,14 @@ conflicts_with:                   # HARD slot exclusions (the only field
                                   # non-success outcomes in §4.2(b), which carries
                                   # revert authority. That plan already declares the
                                   # same mechanism against uptime-kuma/mariadb/redis.
+  - talos-linux-1.14.2            # ADDED 2026-10-01 (review b23be87b). A node roll
+                                  # drains/reboots each node in turn: it evicts this
+                                  # single replica (RWO queue PVC re-attaches on the
+                                  # new node) and silences each node's kmsg UDP feed
+                                  # for its reboot, so §4.1/§4.3 (incl. the .11 kmsg
+                                  # gate) would read the roll as this plan's
+                                  # regression. Its sun-attended slot is exclusive
+                                  # anyway; declared so the pair is explicit.
 exclusive: false
 security_ref: null                # no open security finding on the 0.161.0 image
                                   # (`finding list --grep collector-contrib`, 2026-09-30:
@@ -287,8 +295,10 @@ and the `without_type_suffix`/`without_units`/`without_scope_info` pins. A
 silently ignored `without_type_suffix` would rename
 `otelcol_exporter_sent_*_total` and blind `EsLogIngestionStalled` /
 `EsMetricsIngestionStalled`. §2.3 therefore stays as a gate for the failures it
-CAN see, and the rename mode is caught by §4.1 (empty result = FAIL) and by the
-`Es*ExporterSeriesMissing` absent() alerts (§4.5). The 0.161.0 plan's claim that
+CAN see, and the rename mode is caught by §4.1 (empty result = FAIL), pinned to
+the named exporter by §4.5's direct `absent()` evaluation (the
+`Es*ExporterSeriesMissing` alerts themselves carry `for: 15m` and cannot have
+fired by T+15m, so they are not read as a gate). The 0.161.0 plan's claim that
 validate would reject "an unknown `without_type_suffix`" was never tested and is
 false; it is corrected here.
 
@@ -353,28 +363,68 @@ ES_PASSWORD=dummy ./otelcol-contrib validate --config=live-otel.yml > pos.out 2>
 cat pos.out
 # NEGATIVE CONTROL — must exit NON-zero, proving this gate can fail:
 python3 -c "t=open('live-otel.yml').read();open('neg.yml','w').write(t.replace('num_consumers: 4','num_consumers: notanint',1))"
-ES_PASSWORD=dummy ./otelcol-contrib validate --config=neg.yml >/dev/null 2>&1; echo "negative-control exit=$?"
+ES_PASSWORD=dummy ./otelcol-contrib validate --config=neg.yml > neg.out 2>&1; echo "negative-control exit=$?"
+head -3 neg.out    # kept: §4.0 demonstrates its startup-error grep against this file
 cd /Users/mu/code/cberg-home-nextgen
-# PASS: validate exit=0 with EMPTY pos.out, AND negative-control exit=1
-#       (both measured exactly so on 2026-09-30).
+# PASS: validate exit=0 with EMPTY pos.out, AND negative-control exit=1 with
+#       neg.out starting "Error: failed to get config: cannot unmarshal" (measured
+#       exactly so on 2026-09-30 and again 2026-10-01).
 # FAILS AS: non-zero exit naming the rejected key/type (e.g. "'num_consumers'
 #       expected type 'int'"), or a pipeline "references exporter ... which is not
 #       configured". If it fails -> BLOCKED; the fix is a config change = a
 #       different plan. REMEMBER §1.3: this gate is BLIND to unknown keys in the ES
 #       exporters and the telemetry reader; §4.1 covers that mode.
 #
-# (b) in-cluster with the linux image that will actually run (only after 2.2 passed):
-kubectl run edot-validate-0162 --rm -i --restart=Never \
-  --image=otel/opentelemetry-collector-contrib:0.162.0 \
-  --overrides='{"spec":{"containers":[{"name":"edot-validate-0162","image":"otel/opentelemetry-collector-contrib:0.162.0","command":["/otelcol-contrib","validate","--config=/config/otel.yml"],"env":[{"name":"ES_PASSWORD","value":"dummy-validate-only"}],"volumeMounts":[{"name":"cfg","mountPath":"/config"}]}],"volumes":[{"name":"cfg","configMap":{"name":"edot-collector-config"}}]}}'
-echo "in-cluster validate exit=$?"
-kubectl run edot-validate-0162-neg --rm -i --restart=Never \
-  --image=otel/opentelemetry-collector-contrib:0.162.0 \
-  --overrides='{"spec":{"containers":[{"name":"edot-validate-0162-neg","image":"otel/opentelemetry-collector-contrib:0.162.0","command":["/otelcol-contrib","validate","--config=/nonexistent/otel.yml"]}]}}'
-echo "in-cluster negative-control exit=$?   # MUST be non-zero"
-# PASS: exit 0 and no output matching (case-insensitive) error|invalid|cannot
-#       unmarshal; the negative control non-zero. An "exec format error" here means
-#       the pulled image is the wrong architecture -> STOP (that is the -386 trap).
+# (b) in-cluster with the linux image that will actually run (only after 2.2 passed).
+# EVERY command carries `-n monitoring`: the kube context's namespace is `default`
+# (measured 2026-10-01), where configmap/edot-collector-config does not exist — the
+# pod would sit in ContainerCreating and read as a false STOP.
+# NO `-i --rm`: `--overrides` defaults to `--override-type=merge` (JSON merge
+# patch), which REPLACES the generated containers list and so drops the
+# stdin/stdinOnce that `-i` sets — the attach then hangs or returns kubectl's exit
+# code, not the container's. Instead: run detached, wait for a terminal phase, read
+# the container's own exitCode + logs, delete. Rendered spec checked 2026-10-01 with
+# `--dry-run=client -o yaml` (namespace monitoring, configMap volume present,
+# runAsUser 10001). monitoring is PSA `privileged`, so nothing is rejected at admission.
+edot_validate() {  # $1 = pod name, $2 = --config path, $3 = mount cm? (yes|no)
+  local OV
+  if [ "$3" = yes ]; then
+    OV='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":10001,"runAsGroup":10001},"containers":[{"name":"'"$1"'","image":"otel/opentelemetry-collector-contrib:0.162.0","command":["/otelcol-contrib","validate","--config='"$2"'"],"env":[{"name":"ES_PASSWORD","value":"dummy-validate-only"}],"volumeMounts":[{"name":"cfg","mountPath":"/config","readOnly":true}]}],"volumes":[{"name":"cfg","configMap":{"name":"edot-collector-config"}}]}}'
+  else
+    OV='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":10001,"runAsGroup":10001},"containers":[{"name":"'"$1"'","image":"otel/opentelemetry-collector-contrib:0.162.0","command":["/otelcol-contrib","validate","--config='"$2"'"]}]}}'
+  fi
+  kubectl delete pod -n monitoring "$1" --ignore-not-found >/dev/null
+  kubectl run "$1" -n monitoring --restart=Never \
+    --image=otel/opentelemetry-collector-contrib:0.162.0 --overrides="$OV" >/dev/null
+  local PH=""
+  for i in $(seq 1 60); do
+    PH=$(kubectl get pod -n monitoring "$1" -o jsonpath='{.status.phase}')
+    case "$PH" in Succeeded|Failed) break ;; esac
+    sleep 3
+  done
+  case "$PH" in Succeeded|Failed) ;; *)
+    echo "NOT_TERMINAL phase=$PH -> STOP; pod $1 left in place for: kubectl describe pod -n monitoring $1"
+    return 1 ;; esac
+  echo "phase=$PH exitCode=$(kubectl get pod -n monitoring "$1" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')"
+  kubectl logs -n monitoring "$1" > "/private/tmp/claude-501/$1.out" 2>&1
+  cat "/private/tmp/claude-501/$1.out"
+  kubectl delete pod -n monitoring "$1" --ignore-not-found >/dev/null
+}
+edot_validate edot-validate-0162     /config/otel.yml    yes
+edot_validate edot-validate-0162-neg /nonexistent/otel.yml no
+grep -ic 'nonexistent/otel.yml' /private/tmp/claude-501/edot-validate-0162-neg.out
+# PASS (positive): `phase=Succeeded exitCode=0` and the log file contains nothing
+#       matching (case-insensitive) error|invalid|cannot unmarshal.
+# PASS (negative control — proves the harness can fail): `phase=Failed` with a
+#       NON-zero exitCode AND the final grep prints >= 1, i.e. the output names
+#       /nonexistent/otel.yml. A non-zero exit WITHOUT that path in the output means
+#       the pod failed for some other reason (pull error, admission, wrong arch) and
+#       proves nothing about the harness — investigate, do not count it as a pass.
+# FAILS AS: positive pod Failed / non-zero / error text -> BLOCKED (config change =
+#       different plan). `NOT_TERMINAL` after the 180s loop = image pull or volume
+#       problem -> STOP, read `kubectl describe pod`, then delete the pod by hand
+#       (`kubectl delete pod -n monitoring <name>`). An "exec format error" means the pulled image is the
+#       wrong architecture -> STOP (that is the -386 trap).
 
 # 2.4 — BASELINES for §4, each over the SAME window its gate uses.
 # Measured 2026-09-30 for reference (yours will differ):
@@ -400,7 +450,9 @@ flux get kustomizations -n monitoring | awk 'NR==1 || $4 != "True"'
 name below exists in
 `kubernetes/apps/monitoring/kube-prometheus-stack/app/otel-collector-alerts.yaml`
 (checked 2026-09-30). The three `Es*ExporterSeriesMissing` absent() guards are
-deliberately NOT silenced — §4.5 asserts them quiet.
+deliberately NOT silenced, so a real disappearance still pages after the
+window; §4.5 evaluates their expressions directly (their `for: 15m` hides them
+at T+15m).
 
 ```bash
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF=$!
@@ -504,9 +556,22 @@ case "$LIVE_ID" in
   *) echo "DIGEST_MISMATCH" ;;
 esac
 kubectl logs -n monitoring deploy/edot-collector | head -80 | grep -iE "error|invalid configuration|panic|exec format" || echo "no startup errors"
+# Positive demonstration of the SAME grep against the collector's own error format
+# (the §2.3(a) negative-control output — capture it there with
+#  `ES_PASSWORD=dummy ./otelcol-contrib validate --config=neg.yml > neg.out 2>&1`):
+grep -ciE "error|invalid configuration|panic|exec format" /private/tmp/claude-501/otel162/neg.out
+# MUST print >= 1 (measured 2026-10-01 on the 0.162.0 binary: exit 1, 6 matching
+# lines, first line "Error: failed to get config: cannot unmarshal the configuration").
+# The live pos.out under the same grep: 0 lines.
 ```
 
-**PASS:** `readyReplicas` 1, `DIGEST_OK`, `no startup errors`.
+**PASS (gating):** `readyReplicas` 1 and `DIGEST_OK`.
+**Startup-error grep:** a hit is a FAIL (read the lines, then §5). Zero hits is
+supporting evidence only, not proof: the pattern is shown to match the
+collector's error output (the demonstration above), but a config the binary
+rejects outright crashloops and is already caught by `readyReplicas`, and the
+mode this grep exists for — a runtime error after a clean start — is gated on
+contents in §4.1/§4.2, not here.
 **FAILS AS:** `DIGEST_MISMATCH` — the pod runs something other than the
 manifest list captured in §2.2 (measured precedent: `imageID` carries the
 MANIFEST-LIST digest, e.g. today's `…@sha256:fd328de2…5ac1` for 0.161.0, so a
@@ -612,35 +677,58 @@ counts; the next sweep owes a ">= 1 per node over 24h after ROLLOUT_TS" check.
 
 ### 4.4 Talos kmsg counter re-registered
 
-CONTROL: alertname TalosKmsgPipelineDown — must be NOT firing at T+15m (it fires after `absent(talos_kernel_kmsg_lines_total)` for 15m)
+CONTROL: metric talos_kernel_kmsg_lines_total — `absent(talos_kernel_kmsg_lines_total)` must return an EMPTY result at T+15m (direct eval, see §4.5)
 
 The `prometheus/hwerrors` exporter is in-memory, so the restart wipes its
 series; they reappear with the first kmsg line from any node (`.11` ships
-~10 lines/min). Read it in §4.5's alert listing. Informational if it is merely
-`pending` at T+15m; FAIL if `firing`.
+~10 lines/min). `TalosKmsgPipelineDown` wraps this expression with `for: 15m`,
+so at T+15m the alert can at most be pending — reading the alert is useless
+here; the expression is evaluated directly in §4.5.
 
-### 4.5 Alerts quiet — including the un-silenced absent() guards
+### 4.5 The exporter series EXIST — direct absent() evaluation
 
-CONTROL: alertname EsLogExporterSeriesMissing — NOT firing (absent() of the logs exporter series, 15m)
-CONTROL: alertname EsMetricsExporterSeriesMissing — NOT firing (absent() of the metrics exporter series, 15m)
+The `Es*ExporterSeriesMissing` / `TalosKmsgPipelineDown` rules all carry
+`for: 15m` (`otel-collector-alerts.yaml`, `node-hardware-alerts.yaml`), so a
+series that vanished at the roll is at most `pending` at T+15m and never shows
+in Alertmanager — an Alertmanager read here could not fail. Evaluate the rules'
+own expressions in Prometheus instead; an `absent()` that returns a sample IS
+the failure, with no `for:` delay.
+
+CONTROL: metric otelcol_exporter_sent_log_records_total — `absent(...{exporter="elasticsearch/logs"})` must be EMPTY
+CONTROL: metric otelcol_exporter_sent_metric_points_total — `absent(...{exporter="elasticsearch/metrics"})` must be EMPTY
 
 ```bash
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF=$!
-sleep 3
-curl -s http://localhost:9093/api/v2/alerts | python3 -c "
+P=/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query
+for Q in \
+  'absent(otelcol_exporter_sent_log_records_total{exporter="elasticsearch/logs"})' \
+  'absent(otelcol_exporter_sent_metric_points_total{exporter="elasticsearch/metrics"})' \
+  'absent(talos_kernel_kmsg_lines_total)' \
+  'absent(otelcol_exporter_sent_log_records_total{exporter="elasticsearch/bogus"})'; do
+  E=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))" "$Q")
+  kubectl get --raw "${P}?query=${E}" | python3 -c "
 import sys,json
-for a in json.load(sys.stdin):
-    n=a['labels'].get('alertname')
-    if n in ('Watchdog','InfoInhibitor'): continue
-    if a['labels'].get('namespace')=='monitoring' or n.startswith(('Es','Otel','Edot','TalosK')):
-        print(n, a['status']['state'])"
-kill $PF 2>/dev/null
+d=json.load(sys.stdin); r=d['data']['result']
+print('ABSENT' if r else 'PRESENT', sys.argv[1])" "$Q"
+done
 ```
 
-**PASS:** nothing `active` that the §3.1 silence does not cover; in particular
-no `Es*ExporterSeriesMissing` and no `TalosKmsgPipelineDown`. These are the
-detectors for the disappearance mode §1.3 says the validator cannot see.
-`EsTracesExporterSeriesMissing` is recorded, not gated (no trace producers).
+**PASS:** the first three print `PRESENT`; the fourth (the positive control)
+prints `ABSENT`.
+**Both sides DEMONSTRATED live 2026-10-01** with these exact expressions: the
+logs, metrics and kmsg `absent()` each returned `"result":[]`; the
+`exporter="elasticsearch/bogus"` control returned
+`[{"metric":{"exporter":"elasticsearch/bogus"},"value":[…,"1"]}]`. If the
+control does NOT print `ABSENT`, the harness is broken (query mangled, wrong
+endpoint) and the three PRESENT lines mean nothing — FAIL.
+**FAILS AS:** `ABSENT` on line 1 or 2 — the exporter series is gone under that
+name (the §1.3 rename mode) → §5. `ABSENT` on line 3 at T+15m is a FAIL only if
+§4.3 also printed `KMSG_FAIL`; with `KMSG_OK` (lines landed in ES) re-check once
+after 5 more minutes before reverting.
+**Scope:** this is a corroborating check. The primary detector for the
+disappearance mode §1.3 says the validator cannot see is §4.1's empty-result
+FAIL — §4.1 already fails if either `…_total` series is gone; §4.5 pins it to
+the named exporter. `EsTracesExporterSeriesMissing` is not gated (no trace
+producers).
 
 ## 5) Rollback
 
@@ -677,9 +765,24 @@ queue file** (`kubectl logs -n monitoring deploy/edot-collector --tail=50 | grep
 1. `kubectl scale deploy/edot-collector -n monitoring --replicas=0` (releases
    the RWO volume). Note Flux will scale it back on its next reconcile
    (interval 30m) — do steps 2–3 promptly.
-2. Mount `pvc/edot-collector-queue` in a throwaway pod (uid 10001) and delete
-   the contents of the mount (the Deployment mounts it at
-   `/var/lib/otelcol/sending-queue`).
+2. Wait until the collector pod is gone (`kubectl get pods -n monitoring -l
+   app=edot-collector` prints nothing — the RWO volume must be detached), then
+   mount `pvc/edot-collector-queue` in a throwaway pod with the Deployment's
+   uid/gid/fsGroup 10001 and empty it (the Deployment mounts it at
+   `/var/lib/otelcol/sending-queue`; here it is `/q`). Spec checked 2026-10-01
+   with `--dry-run=client` (namespace monitoring, claimName edot-collector-queue):
+
+   ```bash
+   kubectl run edot-queue-wipe -n monitoring --restart=Never --image=busybox:1.37 \
+     --overrides='{"spec":{"securityContext":{"runAsUser":10001,"runAsGroup":10001,"fsGroup":10001},"containers":[{"name":"edot-queue-wipe","image":"busybox:1.37","command":["sh","-c","ls -la /q; find /q -mindepth 1 -delete; echo REMAINING=$(find /q -mindepth 1 | wc -l)"],"volumeMounts":[{"name":"q","mountPath":"/q"}]}],"volumes":[{"name":"q","persistentVolumeClaim":{"claimName":"edot-collector-queue"}}]}}'
+   kubectl wait pod/edot-queue-wipe -n monitoring --for=jsonpath='{.status.phase}'=Succeeded --timeout=180s
+   kubectl logs -n monitoring edot-queue-wipe      # MUST end with REMAINING=0
+   kubectl delete pod -n monitoring edot-queue-wipe
+   ```
+
+   A timeout with the pod `ContainerCreating` = the volume is still attached
+   elsewhere (Multi-Attach) — the collector pod has not fully terminated; wait,
+   do not force-detach.
 3. `kubectl scale deploy/edot-collector -n monitoring --replicas=1`, re-run
    §4.1–§4.3.
 
@@ -704,20 +807,27 @@ kill $PF 2>/dev/null
   fine; executing is not until `TAG_OK`. If the window arrives and §2.2 still
   prints `TAG_MISSING`, skip the plan (no change made) and leave it scheduled
   for the next slot.
-- **`conflicts_with` carries three mechanisms** (frontmatter): otel-operator
+- **`conflicts_with` carries four mechanisms** (frontmatter): otel-operator
   (producer roll into this sink), app-template (mass roll perturbs the §4.1
-  volumes), CoreDNS (ES endpoint resolution under §4.2(b)).
+  volumes), CoreDNS (ES endpoint resolution under §4.2(b)), talos-linux-1.14.2
+  (node drains evict this replica and pause each node's kmsg feed — §4.1/§4.3).
   `kube-prometheus-stack-91.4.1` is executed and no other kube-prometheus-stack
-  plan is open (checked 2026-09-30); if one appears it MUST be added here —
-  every §4.1/§4.2 gate reads Prometheus. No talos node-roll plan is open; one
-  that appears must be added too (a node drain evicts this single replica
-  mid-verification).
+  plan is open (re-checked 2026-10-01); if one appears it MUST be added here —
+  every §4.1/§4.2/§4.5 gate reads Prometheus.
+- **flux-reconciler-impersonation** (draft, `exclusive: true`) rewires the
+  identity every Kustomization — including `kustomization/edot-collector` in
+  `monitoring` — is applied under. Its exclusivity already keeps it out of
+  this slot, so it is not in `conflicts_with`. If it has executed before this
+  plan runs, `monitoring` is one of its cluster-admin-tier namespaces, so §3.4's
+  reconcile is expected to apply unchanged; but if §3.4 reports a Forbidden /
+  impersonation error, that is the impersonation change, not this bump — STOP
+  and report rather than retrying or reverting.
 - **Reciprocal refs (readability, not a scheduling hole):** the scheduler
   honours a declaration in either direction, but `otel-operator-0.23.0`'s
-  frontmatter should name `edot-collector-0.162.0` back (it named 0.161.0 and
-  dropped it on that plan's retirement), as should `app-template-5.2.1` and
-  `chart-patches-coredns-reloader-blackbox`. Left for those plans' owners —
-  this planner writes only its own file.
+  frontmatter now names `edot-collector-0.162.0` back (added 2026-10-01 in the
+  same commit as this amendment). `app-template-5.2.1`,
+  `chart-patches-coredns-reloader-blackbox` and `talos-linux-1.14.2` do not yet
+  name it back — left for those plans' owners.
 - **flux-fleet-0.60.0** (nightly 2026-10-06) upgrades the Flux controllers this
   plan's §3.4 reconcile depends on. No telemetry mechanism links them, so it is
   not a conflict; if both land in one window, run this plan only after
