@@ -1,0 +1,90 @@
+---
+# kmsg-heartbeat — writes one recognisable line per hour into each node's
+# kernel ring buffer, so the Talos kmsg -> edot-collector UDP feed has a
+# guaranteed liveness floor.
+#
+# WHY THIS EXISTS (2026-10-01, F-f5763417)
+# TalosKernelLogsMissingFromNode (platform-alerts.yaml) must tell a node whose
+# UDP kmsg SENDER has died (2026-09-06: node03 stopped after an edot-collector
+# reschedule and nothing said so) from a node that simply has nothing to say.
+# Without a floor those are indistinguishable: node03 wrote 4 kernel lines in
+# ~3 days with gaps up to ~16.5h, so a 24h presence window fired on a healthy
+# node, and any window long enough to be quiet-proof is too slow to be useful.
+# With this heartbeat every live sender ships >=1 line/hour, so the rule keys
+# on "no line at all from this node for 3h" and a quiet node can never trip it.
+#
+# The heartbeat lands in the SAME talos_kernel_kmsg_lines_total counter as
+# every other kmsg line — deliberately no separate collector metric. Any line
+# arriving proves the sender is alive, which is all the alert guards, and not
+# touching the collector config avoids a collector restart, which is itself the
+# known trigger for a sender stall.
+#
+# Volume: 1 line/hour/node (72/day cluster-wide) into logs-generic-default and
+# the node's /var/log/kernel.log (tailed by the wazuh-agent). Grep for
+# `cberg-kmsg-heartbeat` to filter it out.
+#
+# WHY PRIVILEGED
+# /dev/kmsg is a character device. An unprivileged container has neither the
+# device node nor a device-cgroup allowance for it (a hostPath CharDevice mount
+# still fails the open on the cgroup filter), and Kubernetes has no
+# per-device grant short of a device plugin. `privileged` is therefore the
+# minimum; everything else is locked down: no host namespaces, no service
+# account token, read-only root, no volumes, tiny resources. The monitoring
+# namespace already enforces PodSecurity `privileged`.
+# Talos `kernel.printk_devkmsg` is `on` (verified 2026-10-01), so userspace
+# writes are accepted and not rate-limited away.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kmsg-heartbeat
+  labels:
+    app.kubernetes.io/name: kmsg-heartbeat
+    app.kubernetes.io/part-of: edot-collector
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kmsg-heartbeat
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kmsg-heartbeat
+        app.kubernetes.io/part-of: edot-collector
+    spec:
+      # Every node ships kmsg, control-plane included.
+      tolerations:
+        - operator: Exists
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: heartbeat
+          image: busybox:1.38.0
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # EVERY shell $ is escaped as $$: cluster-wide Flux postBuild
+              # substitution runs envsubst over this manifest.
+              # <14> = facility user, level info. Writes at start (so a pod
+              # restart is visible at once) and then hourly.
+              while true; do
+                echo "<14>cberg-kmsg-heartbeat node=$${NODE_NAME}" > /dev/kmsg \
+                  || echo "kmsg write failed" >&2
+                sleep 3600 &
+                wait $$!
+              done
+          securityContext:
+            privileged: true
+            readOnlyRootFilesystem: true
+            runAsUser: 0
+          resources:
+            requests:
+              cpu: 1m
+              memory: 4Mi
+            limits:
+              memory: 16Mi

@@ -18,7 +18,7 @@
 #
 # Keep this under ~15 entries. If it grows past that, the system has too many
 # mechanisms — prune mechanisms, don't grow the ledger.
-version: "2026.08.26"
+version: "2026.10.01"
 
 controls:
   - id: sweep-cron
@@ -178,3 +178,17 @@ controls:
         ICloudBackupSyncProbeJobFailed names the failed Job. The probe never
         invents a success: with no `Photos synced` line it omits the gauge and
         the previous timestamp keeps ageing into ICloudBackupSyncStalled."
+
+  - id: kmsg-heartbeat
+    kind: k8s-daemonset
+    what: "hourly `cberg-kmsg-heartbeat` line written into every node's
+      /dev/kmsg, the liveness floor that lets TalosKernelLogsMissingFromNode
+      tell a dead UDP kmsg sender from a quiet kernel (F-f5763417)"
+    cadence: 1h
+    watched_by:
+      assertion: TalosKmsgHeartbeatNotRunning
+      in: kubernetes/apps/monitoring/kube-prometheus-stack/app/platform-alerts.yaml
+      note: "absent() guard on the DaemonSet metric so a deleted DaemonSet
+        fires too. A heartbeat pod that is Ready but whose writes fail would
+        surface as TalosKernelLogsMissingFromNode for that node — fails loud
+        either way."

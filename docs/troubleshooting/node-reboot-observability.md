@@ -30,16 +30,22 @@ name: ship-kmsg-to-otel, url: udp://192.168.55.18:5172/}'` then patch back to
 **minimize collector restarts**, and after an unavoidable one, spot-check
 per-node kmsg counts in ES and toggle any node that went silent.
 
-**Detecting a silent node is no longer manual (2026-09-06).**
-`TalosKernelLogsMissingFromNode` in
+**Detecting a silent node is no longer manual (2026-09-06; heartbeat-keyed
+since 2026-10-01).** `TalosKernelLogsMissingFromNode` in
 `kubernetes/apps/monitoring/kube-prometheus-stack/app/platform-alerts.yaml`
-fires when fewer than 3 nodes are shipping. It counts DISTINCT senders —
-`count(count by (net_peer_ip) (talos_kernel_kmsg_lines_total)) < 3` — rather
-than using a per-node `absent()`, because the `net_peer_ip` label only exists
-while that node sends: a silent node's series does not go to zero, it
-disappears, so there is nothing for `absent()` to match. A companion
-`TalosKernelLogsAbsent` covers the case where all three stop and the
-count-based rule therefore cannot fire either.
+fires per node when NO kmsg line from that node has arrived for 3h —
+`absent_over_time(talos_kernel_kmsg_lines_total{net_peer_ip="<node>"}[3h])`,
+one term per node IP. That is only meaningful because of the `kmsg-heartbeat`
+DaemonSet (`kubernetes/apps/monitoring/edot-collector/app/kmsg-heartbeat-daemonset.yaml`),
+which writes `cberg-kmsg-heartbeat node=<name>` into every node's `/dev/kmsg`
+once an hour: a live sender always ships >=1 line/hour, so a quiet kernel can
+no longer look like a dead sender. Before the heartbeat, the rule counted
+distinct senders over 24h and still fired on a healthy node03 that had written
+4 kernel lines in ~3 days (F-f5763417). `TalosKmsgHeartbeatNotRunning` watches
+the DaemonSet itself, and `TalosKernelLogsAbsent` covers all three stopping.
+Heartbeat lines go to `logs-generic-default` and the node's
+`/var/log/kernel.log` (wazuh-agent tails it) at 1/hour/node; filter on
+`cberg-kmsg-heartbeat`.
 
 Confirmed against a real occurrence the same day: node03 shipped for nine
 minutes after its 07:23 boot, then went silent for ~10h. Measured during

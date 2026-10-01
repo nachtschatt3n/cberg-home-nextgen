@@ -101,29 +101,46 @@ spec:
         # (docs/troubleshooting/node-reboot-observability.md). Losing them on
         # the node that just rebooted is losing them exactly when needed.
         - alert: TalosKernelLogsMissingFromNode
-          # Counts DISTINCT sending nodes, not total lines. A per-node absent()
-          # cannot work here: the label value only exists while that node sends,
-          # so the series does not go to zero, it disappears.
+          # Keyed on ARRIVAL per node over 3h, made possible by the kmsg-heartbeat
+          # DaemonSet (edot-collector/app/kmsg-heartbeat-daemonset.yaml), which
+          # writes one `cberg-kmsg-heartbeat` line into every node's kernel ring
+          # buffer each hour. A live sender therefore ships >=1 line/hour no
+          # matter how quiet the node's kernel is, and "nothing for 3h" can only
+          # mean the sender (or the heartbeat pod on that node) is dead.
           #
-          # Presence is read over a 24h RANGE, not the instant vector
-          # (F-02e86261, 2026-09-23): after a collector restart a node's series
-          # exists only once it has sent a line, and one node writes ~7 kernel
-          # lines a day against ~600/h on the others, so the instant form fired
-          # for most of a day and flapped exactly when that node logged. A node
-          # still counts while it has ANY sample in the last 24h; a node that
-          # has sent nothing for a full day is the real signal.
-          expr: count(count by (net_peer_ip) (max_over_time(talos_kernel_kmsg_lines_total[24h]))) < 3
-          for: 30m
+          # History: the 09-06 instant form flapped for a quiet node; the
+          # 24h-range form (F-02e86261) still fired on a HEALTHY node03, which
+          # wrote 4 kernel lines in ~3 days with gaps up to ~16.5h (F-f5763417,
+          # 2026-10-01). Widening the window further would only make a dead
+          # sender take days to surface; the heartbeat removes the ambiguity.
+          #
+          # Per-node absent_over_time, one per node IP: the edot-collector
+          # exporter sends sample timestamps, so a node's series only has
+          # samples at the moments its lines arrive — "no sample in 3h" is
+          # exactly "nothing arrived in 3h", and the result keeps the
+          # net_peer_ip label from the matcher. A count of distinct senders
+          # could not say WHICH node; this can. Adding a node means adding a
+          # term here.
+          expr: |
+            absent_over_time(talos_kernel_kmsg_lines_total{net_peer_ip="192.168.55.11"}[3h])
+            or absent_over_time(talos_kernel_kmsg_lines_total{net_peer_ip="192.168.55.12"}[3h])
+            or absent_over_time(talos_kernel_kmsg_lines_total{net_peer_ip="192.168.55.13"}[3h])
+          for: 15m
           labels:
             severity: warning
             category: platform
             component: talos
           annotations:
-            summary: "Only {{ $value }} of 3 nodes are shipping Talos kernel logs"
+            summary: "Node {{ $labels.net_peer_ip }} has shipped no Talos kernel log line for 3h"
             description: >-
-              At least one node has stopped sending kmsg to the collector.
-              Compare `count by (net_peer_ip) (talos_kernel_kmsg_lines_total)`
-              against 192.168.55.11/12/13 to find which.
+              No kmsg line (not even the hourly cberg-kmsg-heartbeat) from
+              {{ $labels.net_peer_ip }} has reached the collector for 3h.
+              FIRST rule out the heartbeat itself: `kubectl -n monitoring get
+              pods -l app.kubernetes.io/name=kmsg-heartbeat -o wide` must show a
+              Ready pod on that node (TalosKmsgHeartbeatNotRunning fires if not),
+              and `talosctl -n <node> dmesg | grep cberg-kmsg-heartbeat` must
+              show an entry from the last hour. If the heartbeat IS in the node's
+              dmesg but not arriving, the node's UDP sender is dead.
               RECOVERY, verified on node03 2026-09-06 — two things that do NOT
               work, then the one that does. Restarting the COLLECTOR does not
               fix it: the dead sender is on the node. Re-applying the SAME
@@ -136,8 +153,31 @@ spec:
               `talosctl -n <node> patch mc --patch '{apiVersion: v1alpha1,
               kind: KmsgLogConfig, name: ship-kmsg-to-otel,
               url: udp://192.168.55.18:5172/}'` then patch back to 5171.
-              Senders returned to 3/3 within one scrape. The toggle only takes
-              once the collector has stopped churning.
+              The node's series returned within one scrape. The toggle only
+              takes once the collector has stopped churning. The alert clears
+              at the next heartbeat (<=1h) after recovery.
+        - alert: TalosKmsgHeartbeatNotRunning
+          # Watcher of the heartbeat: without it TalosKernelLogsMissingFromNode
+          # falls back to depending on the node's own kernel chatter. Paired with
+          # an absent() guard on the DaemonSet metric so a deleted DaemonSet
+          # does not read as healthy.
+          expr: |
+            kube_daemonset_status_number_ready{namespace="monitoring",daemonset="kmsg-heartbeat"}
+              < kube_daemonset_status_desired_number_scheduled{namespace="monitoring",daemonset="kmsg-heartbeat"}
+            or absent(kube_daemonset_status_desired_number_scheduled{namespace="monitoring",daemonset="kmsg-heartbeat"})
+          for: 30m
+          labels:
+            severity: warning
+            category: platform
+            component: talos
+          annotations:
+            summary: "kmsg-heartbeat DaemonSet is not running on every node"
+            description: >-
+              The kmsg-heartbeat DaemonSet (monitoring) is missing or not Ready on
+              every node, so TalosKernelLogsMissingFromNode can no longer tell a
+              quiet node from a dead kmsg sender and may fire for the node
+              without a heartbeat pod. Check
+              `kubectl -n monitoring get ds,pods -l app.kubernetes.io/name=kmsg-heartbeat`.
         - alert: TalosKernelLogsAbsent
           expr: absent(talos_kernel_kmsg_lines_total)
           for: 30m
