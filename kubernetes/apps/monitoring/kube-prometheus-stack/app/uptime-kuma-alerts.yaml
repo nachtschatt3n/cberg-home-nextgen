@@ -97,25 +97,48 @@ spec:
     # one second sustained is a device or an AP in trouble, not the air.
     # Scoped to monitor_type="ping": json-query/snmp response times measure a
     # server round trip, and groups carry no signal of their own.
+    #
+    # MEDIAN, NOT MEAN (2026-10-01, F-deb6264e). The 15m AVERAGE above was
+    # still spike-driven: Wyze Cam Margaret (WiFi, ~46% retries) answers in
+    # 2-45 ms with isolated 3-15 s samples, and 2-3 of those drag a 15m mean
+    # past 1000 ms. avg_over_time fired 5 times for it in 7d (09-25..10-01),
+    # every one while its stream was healthy; at the 10-01 17:02 firing the
+    # window MEAN was >1000 ms while its MEDIAN was 36 ms. The rule exists to
+    # catch a host that is PERSISTENTLY slow ("wedged but answering"), so it
+    # now reads the 15m median: it trips only when more than half of the
+    # window's pings are slow, and no number of isolated spikes below half
+    # can move it. Replayed over the same 7d: 5 firings -> 0. Negative
+    # control: the identical expression at a 300 ms threshold still fires
+    # on the Shelly plugs whose RTT really sat >300 ms for 15m+, so the
+    # detector is not blinded, only de-spiked.
+    # SAMPLE FLOOR: Kuma pings every 60s and Prometheus scrapes every 30s,
+    # so a full 15m window holds 30 samples (each heartbeat twice). The
+    # `count_over_time >= 20` clause (~10 min of data) stops a median of
+    # 2-3 samples after a Kuma restart or scrape gap from paging. A
+    # persistently slow host still answering keeps the window full.
     # ------------------------------------------------------------------------
     - name: uptime-kuma.latency
       interval: 30s
       rules:
         - alert: KumaPingLatencyHigh
           expr: |
-            avg_over_time(monitor_response_time{monitor_type="ping"}[15m]) > 1000
+            quantile_over_time(0.5, monitor_response_time{monitor_type="ping"}[15m]) > 1000
+            and
+            count_over_time(monitor_response_time{monitor_type="ping"}[15m]) >= 20
           for: 15m
           labels:
             severity: warning
             category: uptime
             component: uptime-kuma
           annotations:
-            summary: "Ping latency to {{ $labels.monitor_name }} averaging {{ $value | printf \"%.0f\" }} ms"
+            summary: "Ping latency to {{ $labels.monitor_name }}: 15m median {{ $value | printf \"%.0f\" }} ms"
             description: >-
-              Uptime Kuma's ping to {{ $labels.monitor_name }}
-              ({{ $labels.monitor_hostname }}) has averaged over 1000 ms for the
-              last 15 minutes, and stayed there a further 15 — the device is
-              answering (no DOWN) but barely. On this network that is a WiFi
+              The MEDIAN of Uptime Kuma's pings to {{ $labels.monitor_name }}
+              ({{ $labels.monitor_hostname }}) over the last 15 minutes has been
+              above 1000 ms, and stayed there a further 15 — more than half of
+              its pings are slow, persistently, not a few isolated spikes (a
+              median ignores those). The device is answering (no DOWN) but
+              barely. On this network that is a WiFi
               client with a bad link, an AP under load, or a device that is
               wedged but still answering ICMP. Check the client in UniFi
               (`unifictl local correlate client <MAC>`) and the AP it sits on.
