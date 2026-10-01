@@ -43,6 +43,10 @@ conflicts_with:
   - flux-reconciler-impersonation     # exclusive:true already keeps its slot empty; named for reciprocity
                                       # with the other media/i915 plans.
   - float-tag-pinning                 # blocked; re-claims an i915 slot on its consumer when it runs.
+  - flux-oci-chart-sources            # re-points chart sources incl. namespace media (touches.namespaces);
+                                      # a source swap under this HR in the same window confounds §4.1.
+  - talos-linux-1.14.2                # node roll (exclusive, reboots every node): re-registers i915 and
+                                      # reschedules this pod; never in the same window.
 exclusive: false
 security_ref: F-5ca2e3d9              # security driver on the CURRENT image; detail on the DB record only.
 capability_change: false              # same-behaviour patch: upstream ML source diff v3.2.2..v3.2.4 is the
@@ -103,7 +107,11 @@ direct-bumped to `v3.2.4` (commit `3e222f1d`, green).
 
 **Security driver:** `security_ref: F-5ca2e3d9` (detail on the DB record only).
 No newer tag exists beyond v3.2.4 at time of writing; this is the "bump to a
-newer upstream tag" remediation.
+newer upstream tag" remediation. **The fix is PARTIAL:** per the plan-reviewer
+measurement (sweep b23be87b), the v3.2.4-openvino image still carries fixable
+CRITICAL findings (counts and detail on the DB record only). F-5ca2e3d9 will
+therefore not necessarily close after this bump; the next sweep re-rates it
+against the new image, and remaining items wait for a newer upstream tag.
 
 **Why held (G3, "release notes unavailable") — a false positive.** The release
 notes exist: GitHub release `immich-app/immich` `v3.2.4` (published
@@ -138,9 +146,13 @@ repo correction.)
 Functionally no. The server's ML client (`server/src/repositories/machine-learning.repository.ts`
 at v3.2.4) only calls `GET /ping` and `POST /predict`; there is no version
 handshake, and the ML request/response code is unchanged between the tags.
-Live proof: the v3.2.4 server logged `Machine learning server became healthy
-(http://immich-machine-learning:3003)` for both its Api and Microservices
-processes at 03:33 against the v3.2.2 ML pod. The skew does violate the
+Live proof: the v3.2.4 server (pod start 2026-09-30T01:33Z) has repeatedly
+logged `Machine learning server became healthy (http://immich-machine-learning:3003)`
+for both its Api and Microservices processes against the v3.2.2 ML pod — most
+recently 2026-10-01 00:00:44/00:01:10 and 03:03:51 CEST (read 04:10 CEST). Note
+the same log also shows a spontaneous `became unhealthy` at 03:02:52 with the
+ML pod untouched (running since 2026-09-27): the transition lines flap on their
+own, which is why §4.4 is time-anchored. The skew does violate the
 house convention in `docs/sops/immich.md` ("keep `<ver>` IDENTICAL to the
 `immich-server` pin"), which is a reason to close it, not an outage.
 
@@ -179,6 +191,16 @@ kill $PF 2>/dev/null
 Expected (measured live 2026-09-30 04:16 against v3.2.2-openvino): `pong`,
 `dim 512 nonzero 512`, and `Internal Server Error` for the negative control.
 If the positive probe already fails here, the ML service is broken today — stop.
+
+2.3b Baseline the OpenVINO device enumeration (the §4.3 GPU gate's instrument):
+```bash
+kubectl exec -n media deploy/immich-machine-learning -- python -c \
+  "import onnxruntime as ort; print(ort.__version__); print(ort.capi._pybind_state.get_available_openvino_device_ids())"
+```
+Expected (measured live 2026-10-01 04:08 CEST against v3.2.2-openvino, pod
+`immich-machine-learning-759c58f779-mxvqn` on k8s-nuc14-03): `1.24.1` and
+`['CPU', 'GPU']`. If `GPU` is already absent here, the iGPU path is broken
+today (inference already on CPU) — stop and investigate before bumping.
 
 2.4 No other i915 consumer is mid-Recreate:
 ```bash
@@ -243,42 +265,63 @@ if the old pod is still the only one (imageID `4013ec28…`), or on a crash loop
 ```bash
 kubectl exec -n media deploy/immich-machine-learning -- ls /dev/dri
 ```
-PASS: output contains `renderD128`. FAILS (no such file / empty) if the
-hostPath or i915 allocation broke.
+PASS: output contains `renderD128`. This is a SHAPE check only: it FAILS
+(no such file / empty) if the `/dev/dri` hostPath mount broke, but it can NOT
+detect a failed or missing `gpu.intel.com/i915` allocation — the hostPath
+presents the node's render node regardless of what the device plugin
+allocated, and it says nothing about whether OpenVINO can open the device.
+The GPU-usable gate is §4.3b.
 
-4.3 CONTENTS ASSERTION: the ML service returns real embeddings AND selects
-the OpenVINO provider — measured by re-running the exact §2.3 probe block
-against the NEW pod, then:
-```bash
-kubectl logs -n media deploy/immich-machine-learning | sed 's/\x1b\[[0-9;]*m//g' \
-  | grep -ic 'OpenVINOExecutionProvider'
-```
+4.3a CONTENTS ASSERTION: the ML service returns real embeddings — re-run the
+exact §2.3 probe block against the NEW pod.
 PASS: `pong`; `dim 512 nonzero 512` (compared to the §2.3 baseline of 512/512);
-negative control still `Internal Server Error`; the provider count is `>= 1`.
-What failure prints: an OpenVINO/iGPU init regression either crashes the model
-load (the positive probe prints `Internal Server Error` / a Python traceback,
-and `json.load` raises) or silently falls back to CPU, in which case the
-"Setting execution providers to" line lists only `CPUExecutionProvider` and
-the grep prints `0`. The `sed` strips ANSI colour (the ML log is rich-coloured,
-and the provider list wraps over two lines — the token itself is never split;
-measured 2026-09-30). The negative control proves the endpoint discriminates
-(an unknown model raises `ValueError: Unknown model combination`, so a
-blanket-200 proxy would fail it). The pod is fresh, so the log contains only
-this probe's model load.
+negative control still `Internal Server Error`.
+What failure prints: an OpenVINO/iGPU init regression that crashes the model
+load makes the positive probe print `Internal Server Error` / a Python
+traceback, and `json.load` raises. The negative control proves the endpoint
+discriminates (an unknown model raises `ValueError: Unknown model combination`,
+so a blanket-200 proxy would fail it). This gate does NOT detect a silent
+GPU->CPU fallback — CPU inference returns the same 512/512 embedding. That is
+§4.3b's job.
 
-4.4 CONTENTS ASSERTION (consumer side): immich-server re-established its ML
-backend — measured by the LAST ML-health transition line of each server
-process:
+4.3b CONTENTS ASSERTION: OpenVINO still enumerates the iGPU, i.e. inference
+will run on GPU and not silently on CPU — re-run the exact §2.3b command
+against the NEW pod.
+PASS: the printed list contains an entry starting with `GPU` (baseline
+`['CPU', 'GPU']`). FAIL: `['CPU']` (or an import error / traceback).
+Why this is the right instrument (upstream code, v3.2.4
+`machine-learning/immich_ml/sessions/ort.py` L145-154): the device choice in
+`_provider_options_default` is literally
+`device_ids = ort.capi._pybind_state.get_available_openvino_device_ids()`,
+`gpu_devices = [d for d in device_ids if d.startswith("GPU")]`, and only if
+that list is empty is `device_type = "CPU"` chosen — logged at DEBUG only, so
+the INFO log cannot show it. Note also that `OpenVINOExecutionProvider` is
+listed among the session providers in BOTH cases (CPU is an OpenVINO device),
+so grepping the provider list for it cannot fail and is NOT a gate. This probe
+calls the same function the session does, so a GPU missing here is exactly the
+silent-fallback condition. Limits: the container is `privileged` with a
+`/dev/dri` hostPath, so this gate proves the image's OpenVINO/IGC/compute-runtime
+stack can open the iGPU (the real risk of a rebuilt image); it does not prove
+the `gpu.intel.com/i915` slot accounting, which is the device plugin's concern.
+
+4.4 INFORMATIONAL (consumer side, not a pass/fail gate): immich-server's view
+of its ML backend. The server's transition lines flap on their own (measured:
+`became unhealthy` 03:02:52 -> `became healthy` 03:03:51 CEST on 2026-10-01
+with the ML pod untouched), and if the Recreate gap falls between two pings no
+new line is written at all, so "the last line says healthy" cannot attribute
+health to the NEW pod. Read it for context only:
 ```bash
-kubectl logs -n media deploy/immich-server -c main | sed 's/\x1b\[[0-9;]*m//g' \
-  | grep 'Machine learning server became' | awk '{p=($0 ~ /Microservices:/)?"micro":"api"; last[p]=$0} END{for(k in last) print k": "last[k]}'
+kubectl get pod -n media -l app.kubernetes.io/instance=immich-machine-learning \
+  -o jsonpath='{.items[0].status.startTime}'; echo     # UTC
+kubectl logs -n media deploy/immich-server -c main --since=30m | sed 's/\x1b\[[0-9;]*m//g' \
+  | grep -i 'Machine learning server became'
 ```
-PASS: two lines (`api:` and `micro:`), each ending `became healthy (http://immich-machine-learning:3003).`
-Source: `setHealthy()` in `machine-learning.repository.ts` logs only on a
-healthy/unhealthy TRANSITION, from a periodic `GET /ping`. If the new ML pod
-never comes up, the last line reads `became unhealthy`; if the Recreate gap fell
-between two pings, no new line appears and the 03:33 `healthy` line remains
-last — correct either way. Wait ≥ 2 min after 4.1 passes before reading.
+Server log timestamps are Europe/Berlin local (`TZ=Europe/Berlin` in the
+container; CEST = UTC+2 until 2026-10-25). If a `became unhealthy` line
+appears AFTER the new ML pod's startTime with no later `became healthy`,
+treat it as a FAIL signal and investigate (§5 trigger); otherwise the
+consumer-side health is carried by §4.3a (real embeddings from the new pod)
+and §4.5 (ImmichMLNotReady quiet). Wait ≥ 2 min after 4.1 passes before reading.
 
 4.5 Alerts quiet:
 ```bash
@@ -310,9 +353,9 @@ kubectl rollout status deploy/immich-machine-learning -n media --timeout=15m
 5.2 Confirm the cluster is back: §4.1 with the old values — image
 `...:v3.2.2-openvino`, one pod, imageID ends
 `@sha256:4013ec28ccf6344d7ae24554743a116d7f61124b98858f5646a401d5c5df12e2`,
-`ready=true`; then re-run §4.3 (expect 512/512 and provider count >= 1) and
-§4.4. v3.2.2 ML with v3.2.4 server is the state that ran green all morning
-of 2026-09-30 (skew is harmless, §1).
+`ready=true`; then re-run §4.3a (expect 512/512) and §4.3b (expect
+`['CPU', 'GPU']`, the §2.3b baseline). v3.2.2 ML with v3.2.4 server is the
+state that has run green since 2026-09-30 (skew is harmless, §1).
 
 5.3 Alternative if ONLY the OpenVINO path regressed and the security driver
 must still land: the SOP-documented CPU fallback — change the tag to the plain
@@ -336,6 +379,10 @@ model name and shared by both versions. No backup/restore is required.
   line, so no merge conflict, but its §4 workload-generation compare would
   count our Recreate — keep them in separate windows.
 - **redis-fleet-8.10.2** restarts immich-server, whose log §4.4 reads.
+- **flux-oci-chart-sources** (staged, touches namespace `media`) swaps chart
+  sources under media HRs; **talos-linux-1.14.2** is an exclusive node roll
+  that reboots every node, re-registers i915 and reschedules this pod. Both
+  are in `conflicts_with`; never share a window.
 - **User impact**: ~1-2 min without smart search / face / OCR inference. The
   server keeps serving the library; jobs that hit the gap fail and are re-run
   by the server's queue. The nightly ML jobs start at 00:00 (model loads seen
