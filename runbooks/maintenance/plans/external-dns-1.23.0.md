@@ -37,6 +37,8 @@ conflicts_with:
   - flux-fleet-0.60.0                 # upgrades helm-controller, which applies this HelmRelease
   - flux-reconciler-impersonation     # exclusive; changes the identity that applies this HelmRelease
   - flux-oci-chart-sources            # moves chart sources; external-dns is in its stage-4 set
+  - coredns-1.48.1                    # rolls CoreDNS (external-dns resolves the Cloudflare API through it);
+                                      # that plan already lists external-dns-1.23.0 -> made reciprocal 2026-10-01
 security_ref: null                    # queried 2026-10-01: no open sweep finding for external-dns (only
                                       # resolved rows; F-14528040 was the v0.21.0 image and closed 2026-09-17)
 capability_change: false              # same-behaviour version bump + a deprecated-flag rename to its documented
@@ -234,14 +236,18 @@ print('RULES_OK' if not miss else 'RULES_MISSING ' + ' '.join(miss))"
 
 # 2.3 BASELINE — record these three numbers; section 4 compares against them, not a constant
 q(){ curl -s --get http://localhost:19090/api/v1/query --data-urlencode "query=$1" \
-  | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; print(r[0]['value'][1] if r else 'EMPTY')"; }
+  | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; print('MULTI' if len(r)>1 else (r[0]['value'][1] if r else 'EMPTY'))"; }
+# MULTI = the query matched >1 series (e.g. the replaced pod's series still inside the lookback after a
+# Recreate). Never read r[0] of a multi-series result: replayed at the 2026-09-27 restart, r[0] was the OLD
+# pod (2.42). MULTI or EMPTY in ANY gate field = FAIL, never PASS.
 echo "B_VERIFIED=$(q 'external_dns_controller_verified_records{record_type="cname"}')"
 echo "B_SOURCE=$(q 'external_dns_source_endpoints_total')"
 echo "B_REGERR7D=$(q 'sum(increase(external_dns_registry_errors_total[7d]))')"
 # Measured 2026-10-01: B_VERIFIED=27 B_SOURCE=27 B_REGERR7D=0.
-# PASS: B_VERIFIED == B_SOURCE, B_REGERR7D == 0, none EMPTY.
+# PASS: B_VERIFIED == B_SOURCE, B_REGERR7D == 0, none EMPTY, none MULTI.
 # EMPTY -> STOP: the instrument is not scraping, every later gate would read empty on both sides.
-# NOTE: docs/sops/external-dns.md section 2 still says "25" — stale; use the measured value.
+# MULTI -> STOP: more than one external-dns series is live (a second pod?) — two writers under sync.
+# (docs/sops/external-dns.md was corrected 25 -> 27 on 2026-10-01; still compare to the measured value.)
 
 # 2.4 independent cross-check of the source count from the cluster, and the public-resolution baseline
 mise exec -- kubectl get httproute -A -o json | python3 -c "
@@ -355,10 +361,9 @@ mise exec -- kubeconform -summary -ignore-missing-schemas kubernetes/apps/networ
 git commit --only "$F" -F /tmp/edns-msgB.txt
 git log -1 --format=%s     # MUST read: chore(external-dns): chart 1.22.0 -> 1.23.0 (image v0.22.0 -> v0.23.0)
 git show --stat HEAD       # MUST list only helmrelease.yaml
-# Stage the revert BEFORE pushing so it is one command away:
-SHA_B_PARENT=$(git rev-parse HEAD~1)
+SHA_B=$(git rev-parse HEAD); echo "SHA_B=$SHA_B"   # captured BEFORE push: 5.2's revert is one command away
 git push
-SHA_B=$(git rev-parse HEAD); echo "SHA_B=$SHA_B"; PUSH_B=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+PUSH_B=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # STAY and watch the first syncs live (Ctrl-C after ~3 "All records are already up to date" lines):
 mise exec -- kubectl -n network logs -l app.kubernetes.io/name=external-dns -f --tail=20
@@ -382,7 +387,10 @@ Run after the v0.23.0 pod has been up >= 4 minutes (>= 3 sync intervals at
 cd /Users/mu/code/cberg-home-nextgen
 mise exec -- kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19090:9090 >/dev/null 2>&1 & PF=$!; sleep 3
 q(){ curl -s --get http://localhost:19090/api/v1/query --data-urlencode "query=$1" \
-  | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; print(r[0]['value'][1] if r else 'EMPTY')"; }
+  | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; print('MULTI' if len(r)>1 else (r[0]['value'][1] if r else 'EMPTY'))"; }
+# MULTI = the query matched >1 series (e.g. the replaced pod's series still inside the lookback after a
+# Recreate). Never read r[0] of a multi-series result: replayed at the 2026-09-27 restart, r[0] was the OLD
+# pod (2.42). MULTI or EMPTY in ANY gate field = FAIL, never PASS.
 ```
 
 **Gate 1 — the running binary is v0.23.0, and Prometheus is reading the NEW pod.**
@@ -396,6 +404,10 @@ mise exec -- kubectl -n network get pod -l app.kubernetes.io/name=external-dns \
 curl -s --get http://localhost:19090/api/v1/query --data-urlencode 'query=external_dns_build_info' \
   | python3 -c "import sys,json; print([r['metric']['version'] for r in json.load(sys.stdin)['data']['result']])"
 # PASS: a single version ending in -v0.23.0 (today reads ['v20260820-v0.22.0']). Two entries = stale series; wait one scrape.
+NEWPOD=$(mise exec -- kubectl -n network get pod -l app.kubernetes.io/name=external-dns -o jsonpath='{.items[0].metadata.name}')
+echo "NEWPOD=$NEWPOD"
+# PASS: non-empty, equals the single pod listed above. Gates 2-3 scope every per-pod series to it, so the
+# replaced v0.22.0 pod's series (still inside the 5m lookback after Recreate) cannot be read as the new pod's.
 ```
 CONTROL: metric external_dns_build_info — `version` label must end `v0.23.0`; it reads `...-v0.22.0` today, so this gate fails if the old pod is still the one scraped.
 
@@ -407,12 +419,24 @@ rewrite or the cloudflare-go batch path shows up here first).
 mise exec -- kubectl -n network logs deploy/external-dns > /tmp/edns-B.log
 echo "noop=$(grep -ci 'all records are already up to date' /tmp/edns-B.log) changes=$(grep -ci 'changing record' /tmp/edns-B.log) errors=$(grep -ciE 'level=error|9003|not allowed' /tmp/edns-B.log)"
 # PASS: noop >= 3, changes == 0, errors == 0
-echo "NOOP_INC=$(q 'increase(external_dns_controller_no_op_runs_total[5m])')"
-# PASS: NOOP_INC >= 2 (counter only increments when a sync computes no changes; controller/controller.go)
+echo "NOOP_INC=$(q "increase(external_dns_controller_no_op_runs_total{pod=\"$NEWPOD\"}[5m])")"
+# PASS: NOOP_INC >= 2 (counter only increments when a sync computes no changes; controller/controller.go).
+# MULTI/EMPTY = FAIL. Unscoped, this query returns one series PER POD for 5m after the Recreate (measured
+# 2026-10-01: count(last_over_time(external_dns_controller_no_op_runs_total[7d])) = 2 = old + current pod),
+# and the old pod's frozen counter would be read as the new pod's.
 ```
 CONTENTS ASSERTION: the set of records external-dns wants equals the set it already has — measured by zero `Changing record.` lines from the v0.23.0 pod and a rising no-op counter, compared to the 2.5 baseline (changes == 0, noop >= 10 per 15 min).
 CONTROL: metric external_dns_controller_no_op_runs_total — must increase by >= 2 over 5 min on the new pod.
-*Can it fail?* Yes: `Changing record.` is logged once per submitted change at
+*Can it fail? — demonstrated, not argued.* The identical greps, run read-only
+on 2026-10-01 against the CURRENT v0.22.0 pod's full log
+(`external-dns-5447855d4f-vcrvj`, started 2026-09-27T08:23:06Z, 5984 lines):
+`changes=2` — the `2026-09-28T07:08:10Z` `action=CREATE` pair (one CNAME + its
+TXT ownership record, a route added that morning), `noop=5977`, and the
+deprecation grep `grep -ci 'request-timeout is deprecated'` = **1** (the
+`2026-09-27T08:23:09Z` startup warning). So both the `changes` gate here and
+Gate A's deprecation-absence gate match real lines in this exact log format;
+a 0 after the bump is a measured absence, not a dead grep.
+`Changing record.` is logged once per submitted change at
 `provider/cloudflare/cloudflare.go:563` (v0.23.0) **before** the API call; the
 2026-09-08 outage shape was exactly a burst of these. The log string and the
 "All records are already up to date" string (`controller/controller.go:131`)
@@ -421,9 +445,12 @@ were both confirmed at the v0.23.0 tag; greps are case-insensitive.
 **Gate 3 — CONTENTS: the record set is intact, against the 2.3 baseline (not a constant).**
 
 ```bash
-echo "VERIFIED=$(q 'external_dns_controller_verified_records{record_type="cname"}') SOURCE=$(q 'external_dns_source_endpoints_total') REGERR=$(q 'increase(external_dns_registry_errors_total[10m])') SRCERR=$(q 'increase(external_dns_source_errors_total[10m])') STALE=$(q 'time()-external_dns_controller_last_sync_timestamp_seconds')"
+echo "VERIFIED=$(q "external_dns_controller_verified_records{record_type=\"cname\",pod=\"$NEWPOD\"}") SOURCE=$(q "external_dns_source_endpoints_total{pod=\"$NEWPOD\"}") REGERR=$(q 'sum(increase(external_dns_registry_errors_total[10m]))') SRCERR=$(q 'sum(increase(external_dns_source_errors_total[10m]))') STALE=$(q "time()-external_dns_controller_last_sync_timestamp_seconds{pod=\"$NEWPOD\"}")"
 # PASS: VERIFIED == B_VERIFIED, SOURCE == B_SOURCE, REGERR == 0, SRCERR == 0, STALE < 150
-# EMPTY in any field = FAIL (instrument blind), not PASS.
+# EMPTY or MULTI in any field = FAIL (instrument blind / ambiguous), not PASS.
+# The error increases are sum()-wrapped across pods on purpose: an error booked by EITHER pod in the
+# 10 min window counts (old-pod errors during the swap are still a FAIL to investigate).
+# Live 2026-10-01 on the v0.22.0 pod with this exact q(): noop-scoped=11.1, REGERR=0, SRCERR=0, VERIFIED=27.
 ```
 CONTENTS ASSERTION: every public CNAME external-dns owned before the bump is still verified after it — measured by `external_dns_controller_verified_records{record_type="cname"}`, compared to B_VERIFIED from 2.3 (27 on 2026-10-01). A drop of even 1 is a FAIL.
 CONTROL: metric external_dns_controller_verified_records — equals B_VERIFIED.
@@ -442,7 +469,10 @@ Resolver caching (proxied records, 300 s TTL) means this gate can lag a real
 deletion by up to 5 minutes — it is the end-to-end confirmation, not the
 primary detector (gates 2-3 are). The 2.4 negative control proves it can fail.
 
-**Gate 5 — the outage alerts are quiet and still able to fire.**
+**Gate 5 (SUPPLEMENTARY — not a primary detector) — the outage alerts are quiet and still able to fire.**
+Every alert here has a `for:` of >= 3 min and is derived from the same series
+Gates 2-3 read directly, so it lags them; a PASS here never overrides a Gate
+2/3 FAIL, and a firing alert here is a FAIL regardless.
 
 ```bash
 curl -s --get http://localhost:19090/api/v1/query --data-urlencode 'query=ALERTS{alertname=~"ExternalDNS.*",alertstate="firing"}' \
@@ -530,7 +560,7 @@ next reconcile.
   `app-template-5.2.1` (relabels every routed app's HTTPRoute) are in
   `conflicts_with`. Plans that only roll a backend behind an unchanged route
   (jellyfin, n8n, penpot, uptime-kuma) do not conflict.
-- **CoreDNS and reloader** (`chart-patches-coredns-reloader-blackbox`):
+- **CoreDNS and reloader** (`chart-patches-coredns-reloader-blackbox`, `coredns-1.48.1`):
   external-dns resolves the Cloudflare API through cluster DNS, and its pod
   carries `secret.reloader.stakater.com/reload`; a CoreDNS roll mid-sync books
   provider errors that Gate 3 would attribute to v0.23.0.
@@ -544,8 +574,8 @@ next reconcile.
 - **Monitoring is the instrument.** No open `kube-prometheus-stack` plan exists
   today (`kube-prometheus-stack-91.4.1` executed 2026-09-26); any future one
   must not share this window.
-- **Reciprocity:** this plan lists seven conflicts; the planner may write only
-  this file, so the reciprocal entries on those seven plans are owed (see the
-  planner report).
+- **Reciprocity:** this plan lists eight conflicts; `coredns-1.48.1` already
+  lists this plan back. The planner may write only this file, so reciprocal
+  entries on the other seven plans are owed (see the planner report).
 - **No reboot, no storage, no Authentik, no secret change.** The SOPS secret
   `external-dns-secret` is not touched; the pod reads it unchanged.

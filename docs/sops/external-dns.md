@@ -1,8 +1,8 @@
 # SOP: external-dns — public DNS publication (Cloudflare, `policy: sync`)
 
 > Description: How public DNS records for this cluster are created, changed and destroyed by external-dns, why `policy: sync` makes a failed *create* a total outage rather than a no-op, and the version/annotation traps that have taken public DNS down twice in two days.
-> Version: `2026.09.23`
-> Last Updated: `2026-09-23`
+> Version: `2026.10.01`
+> Last Updated: `2026-10-01`
 > Owner: `homelab-sre`
 
 ---
@@ -69,7 +69,7 @@ capture the record set before and after (§4).
 | Record target | `external-dns.kubernetes.io/target` (**GA key — this is the one the running v0.22.0 reads**) on the **Gateway** `envoy-external`. Its alpha twin `external-dns.alpha.kubernetes.io/target` is still present on the same Gateway with the same value and is retained deliberately as the rollback path to v0.21.x — do not delete it (§3) |
 | Registry | TXT, `txtPrefix: k8s.`, `txtOwnerId: default` |
 | Domain filter | `${SECRET_DOMAIN}` |
-| Steady-state record count | 25 verified CNAMEs (healthy 24h floor: 24) — re-verified live 2026-09-22 (`external_dns_controller_verified_records{record_type="cname"}` = 25, registry errors over 7 d = 0) |
+| Steady-state record count | 27 verified CNAMEs (healthy 24h floor: 27) — re-verified live 2026-10-01 (`external_dns_controller_verified_records{record_type="cname"}` = 27, `min_over_time(...[24h])` = 27, registry errors over 7 d = 0; was 25 on 2026-09-22). The count follows the number of `envoy-external` route hostnames + the cloudflared DNSEndpoint, so compare against a fresh measurement, not this constant |
 | Sync interval / staleness | ~60 s; worst observed excursion 147 s |
 | Metrics | `--metrics-address=0.0.0.0:7979`, ServiceMonitor at 30 s |
 | Alerts | `external-dns.sync.health` + `external-dns.metrics.presence` (§9) |
@@ -359,7 +359,7 @@ for r in json.load(sys.stdin)['data']['result']:
 ```
 
 Expected:
-- `cname` count is **25** (healthy 24h floor 24). A value in the low single
+- `cname` count is **27** (healthy 24h floor 27, measured 2026-10-01). A value in the low single
   digits is the 2026-09-08 outage shape.
 
 If failed:
@@ -522,7 +522,7 @@ series, with the measurement recorded next to the rule in the manifest.
 | `ExternalDNSRegistryErrors` | `increase(external_dns_registry_errors_total[10m]) > 0`, `for: 5m` | critical | **Treat as an active public-DNS outage, not a warning.** external-dns is failing to write at the provider, and under `policy: sync` the old record is already deleted — so hostnames are unresolvable *now*. Baseline is exactly zero errors over 7 days. Go to §8 Diagnose 1. |
 | `ExternalDNSSourceErrors` | `increase(external_dns_source_errors_total[10m]) > 0`, `for: 5m` | warning | external-dns cannot read its Kubernetes sources (`crd`, `gateway-httproute`). Publishing stalls and the record set drifts from cluster state, but nothing is being deleted by this alone — hence warning. |
 | `ExternalDNSSyncStalled` | `time() - external_dns_controller_last_sync_timestamp_seconds > 900`, `for: 5m` | critical | The controller is not reconciling at all. Records are frozen at their last state and every cluster change is unpublished. **This is the case the error alerts cannot catch: a controller that never tries never books an error.** Normal interval ~60 s, worst observed 147 s; 900 s is ~6× that. Also covers "came up and never synced" — the gauge reads 0 before the first sync, and `for: 5m` rides through a healthy start. |
-| `ExternalDNSRecordsCollapsed` | `external_dns_controller_verified_records{record_type="cname"} < 20`, `for: 3m` | critical | Published records have been deleted and not recreated. This is the exact 2026-09-08 failure shape. Steady state 25, healthy 24h floor 24, incident pod 1. `for: 3m` rather than 5m because a collapsed record set is unambiguous and already user-visible. |
+| `ExternalDNSRecordsCollapsed` | `external_dns_controller_verified_records{record_type="cname"} < 20`, `for: 3m` | critical | Published records have been deleted and not recreated. This is the exact 2026-09-08 failure shape. Steady state 27 (2026-10-01; was 25 on 2026-09-22), healthy 24h floor 27, incident pod 1. `for: 3m` rather than 5m because a collapsed record set is unambiguous and already user-visible. |
 
 `increase()` over a 10-minute window rather than `rate`/`irate` is
 load-bearing: the outage lasted 94 seconds, so an instantaneous expression would
