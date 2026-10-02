@@ -32,9 +32,9 @@
 | backup | 3 |
 | security | 2 |
 | my-software-development | 3 |
-| my-software-production | 5 |
+| my-software-production | 6 |
 | my-software-showcase | 15 |
-| **Total** | **125** |
+| **Total** | **126** |
 
 ---
 

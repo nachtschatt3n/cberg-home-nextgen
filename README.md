@@ -482,7 +482,7 @@ quarterly.
 
 ## 📦 Applications
 
-~125 apps across 18 namespaces. Full inventory with per-app purpose, exposure
+~126 apps across 18 namespaces. Full inventory with per-app purpose, exposure
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 
@@ -542,7 +542,7 @@ reloader · spegel
 
 ### 🛠️ Custom applications (`my-software-development`, `my-software-production`, `my-software-showcase`, `default`)
 - dev (3): absenty · andreamosteller · opencode-andreamosteller  
-- prod (4): absenty · andreamosteller · gas-price-monitor · rainbow-rescue  
+- prod (6): absenty · andreamosteller · gas-price-monitor · rainbow-rescue · splitfairy · the-ninth-banner  
 - default (2): echo-server · homepage (the homepage app dashboard)
 
 ### 🏢 Showcase applications (`my-software-showcase` — 15)

@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.09.26`
-> Last Updated: `2026-09-26`
+> Version: `2026.10.02`
+> Last Updated: `2026-10-02`
 > Owner: `Platform`
 
 ---
@@ -1356,6 +1356,28 @@ Non-obvious points, each of which has cost time:
   there in the same commit, or the backend silently fails to resolve.
 - A `mode: proxy` provider does NOT use this shape — see the mode table in
   "Outpost-published Ingress" above; there the route points at the outpost.
+
+**First-time protection of a NEW app — use two commits, never one.** Adding
+a SecurityPolicy adds a new ext_authz filter to the gateway LISTENER. Envoy
+keeps already-open downstream connections on the old filter chain for its drain
+time (60s here) while new ROUTES apply to them immediately. If the app route
+and its backend go live in the same change as the policy, a pooled keep-alive
+connection (e.g. from the cloudflared tunnel) can be routed to the app WITHOUT
+the auth filter for up to a minute. Ordering the policy "before" the route in
+one commit does not help: a SecurityPolicy whose target does not exist yet
+attaches nothing. Do this instead:
+
+1. **Commit A:** SecurityPolicy + callback route + ReferenceGrant + the app
+   HTTPRoute(s) with every rule sent to an `HTTPRouteFilter` `directResponse`
+   (503) — no live app backend yet.
+2. **Gate:** SecurityPolicy `Accepted=True`, then wait **>= 90s** (longer than
+   the drain).
+3. **Commit B:** point the rules at the real Service and add the workload.
+   That changes routes/clusters only, not the listener.
+4. **After deploy:** probe EVERY envoy replica unauthenticated
+   (`kubectl port-forward pod/<envoy> PORT:10443` + `curl --resolve`) and expect
+   302 on every gated path; grep the envoy access log for
+   `"response_code":200` on the new host during the first minutes.
 
 Reference implementation: `kubernetes/apps/default/homepage/app/httproute.yaml`
 (all three objects in one file). Full routing pattern:

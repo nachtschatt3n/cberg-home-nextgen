@@ -1,8 +1,8 @@
 # SOP: Gateway API / HTTPRoute Routing (Envoy Gateway)
 
 > Description: How HTTP ingress works in this cluster now that ingress-nginx is gone — writing, reviewing and debugging HTTPRoutes on the two Envoy Gateways, including forward-auth, backend TLS, timeouts and the verification gate that catches the failures which are invisible at apply time.
-> Version: `2026.09.25`
-> Last Updated: `2026-09-25`
+> Version: `2026.10.02`
+> Last Updated: `2026-10-02`
 > Owner: `homelab operator (cberg-home-nextgen)`
 
 ---
@@ -12,7 +12,7 @@
 On **2026-09-07** the migration from ingress-nginx to Envoy Gateway completed.
 ingress-nginx is **deleted**: zero `Ingress` objects, zero `IngressClass`
 objects, zero nginx controllers cluster-wide. All HTTP traffic is carried by
-**104 HTTPRoutes** attached to two Gateways.
+**113 HTTPRoutes** (2026-10-02) attached to two Gateways.
 
 This SOP is the durable form of the conversion knowledge that previously lived
 in `docs/troubleshooting/envoy-phase2-conversion-pattern.md` (deleted with this
@@ -42,8 +42,8 @@ are not style preferences.
 |---------|-------|
 | GatewayClass | `envoy` |
 | Internal Gateway | `envoy-internal` in `network` — LB **192.168.55.103**, 70 hostnames / 83 routes |
-| External Gateway | `envoy-external` in `network` — LB **192.168.55.104**, 25 hostnames / 28 routes |
-| Total HTTPRoutes | 109 |
+| External Gateway | `envoy-external` in `network` — LB **192.168.55.104**, 27 hostnames / 32 routes |
+| Total HTTPRoutes | 113 |
 | Listeners (both) | `http` (80, redirect-only) and `https` (443, Terminate, wildcard cert `${SECRET_DOMAIN/./-}-production-tls`) |
 | Source of truth | `kubernetes/apps/network/envoy-gateway/app/` (`gateways.yaml`, `policies.yaml`, `gatewayclass.yaml`, `helmrelease.yaml`) |
 | Per-app routes | `kubernetes/apps/<ns>/<app>/app/httproute.yaml`, or the bjw-s `route:` values key in the HelmRelease |
@@ -51,7 +51,7 @@ are not style preferences.
 | Internal DNS | k8s-gateway at **192.168.55.101** watches HTTPRoutes and answers `*.${SECRET_DOMAIN}` with the parent Gateway's LB IP |
 | External DNS | external-dns `--source=gateway-httproute --cloudflare-proxied`; target read from the **Gateway** annotation |
 | External path | Cloudflare edge → cloudflared tunnel wildcard → `envoy-external` (192.168.55.104) |
-| Gateway-wide request timeout | **60s**, in the single `BackendTrafficPolicy` `envoy-compression` |
+| Gateway-wide request timeout | **60s**, in the single `BackendTrafficPolicy` `envoy-compression` (plus route-scoped, merged BTPs — see rule 10) |
 | Envoy's own route default | **15s** — the reason the above exists |
 | Critical dependency | k8s-gateway (internal), cloudflared + Cloudflare DNS (external), Authentik outposts (forward-auth apps) |
 
@@ -214,6 +214,14 @@ single existing object `envoy-compression` in
 suggests. Add there; never create a sibling. (Learned via `e6e64e5a` →
 `382a01c5`, "merged, not a second policy".)
 
+Route-scoped BTPs (`targetRefs` kind `HTTPRoute`) ARE allowed — e.g. the
+per-route local rate limit `my-software-production/the-ninth-banner-ai-generate`.
+They MUST set `mergeType: StrategicMerge`; without it a route-level BTP
+REPLACES the gateway policy for that route and silently drops its 60s timeout
+and compression. Expect status `Merged=True` ("Merged with policy
+network/envoy-compression") next to `Accepted=True`. Local rate limits are
+per Envoy replica (envoy-external runs 3), so divide the intended total.
+
 ### 4.2 Timeouts — the silent tightening
 
 nginx's `proxy-read-timeout`/`proxy-send-timeout` default is **60s**. **Envoy's
@@ -270,7 +278,7 @@ Per forward-auth app you need **four** objects:
    resolves by longest path match. Folded into one route, the login callback
    proxies to the app and loops.
 3. A **ReferenceGrant** — see below.
-4. A **SecurityPolicy** targeting **ONLY the app route** (targeting the
+4. A **SecurityPolicy** targeting **the app route(s) — every gated route, never the callback** (targeting the
    callback route makes it require the auth it exists to establish), with
    `failOpen: false`,
    `path: /outpost.goauthentik.io/auth/envoy` (**never** `/auth/nginx` or
@@ -920,7 +928,7 @@ Expected:
 
 ```bash
 # 1. Every forward-auth app still denies anonymously (302, never 200).
-#    These twelve are the actual extAuth subjects, by HOSTNAME — an older list
+#    These thirteen are the actual extAuth subjects, by HOSTNAME — an older list
 #    named `arag-web` and `uptime-kuma`, neither of which is a hostname (they are
 #    `arag` and `kuma`), so the loop scored two non-existent hosts and missed
 #    seven real ones.
@@ -934,7 +942,7 @@ Expected:
 #    ungated route (token-auth in-app, for the Mac-mini scraper), so `/api` there
 #    answers 401/404/503 and NOT 302. A 302 on `/api` would be the regression.
 for h in homepage headlamp nocodb phpmyadmin esphome frigate solarfocus \
-         alertmanager prometheus longhorn arag godseye; do
+         alertmanager prometheus longhorn arag godseye ninthbanner; do
   printf '%s ' "$h"
   curl -s -o /dev/null -w '%{http_code}\n' https://$h.${SECRET_DOMAIN}/
 done
@@ -945,7 +953,7 @@ done
 #     a fresh one per request. Churn => `headersToExtAuth` is missing `cookie`
 #     and the app answers 400 to real browsers.
 for h in homepage headlamp nocodb phpmyadmin esphome frigate solarfocus \
-         alertmanager prometheus longhorn arag godseye; do
+         alertmanager prometheus longhorn arag godseye ninthbanner; do
   c=$(curl -s -D - -o /dev/null https://$h.${SECRET_DOMAIN}/ \
         | awk 'tolower($1)=="set-cookie:"{print $2; exit}')
   c2=$(curl -s -D - -o /dev/null -H "Cookie: ${c%%;*}" https://$h.${SECRET_DOMAIN}/ \
@@ -1110,3 +1118,8 @@ Rollback cautions specific to this migration:
 - `2026.09.25`: Add `godseye` (ai/gods-eye-view, envoy-external) to the §10
   forward-auth host loops (twelve extAuth subjects); re-measure the gateway
   inventory (internal 70/83, external 25/28, 109 routes total).
+- `2026.10.02`: Add `ninthbanner` (my-software-production/the-ninth-banner,
+  envoy-external) to the §10 forward-auth host loops (thirteen extAuth subjects);
+  document route-scoped BTPs with `mergeType: StrategicMerge` under rule 10 and
+  one SecurityPolicy gating several routes in §4.3; re-measure the inventory
+  (external 27/32, 113 routes total).

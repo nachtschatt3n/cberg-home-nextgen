@@ -152,7 +152,7 @@ finite host default would not save you — one HA call re-pins whatever it loads
 
 | Model | Consumers |
 |-------|-----------|
-| `gemma4:26b-mlx` | **Migrated:** AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, Sure, hermes-agent, ha-ai-harness, AFFiNE, Frigate NVR, Paperless-ngx |
+| `gemma4:26b-mlx` | **Migrated:** AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, Sure, hermes-agent, ha-ai-harness, AFFiNE, Frigate NVR, Paperless-ngx; **native (never on GGUF):** Splitfairy, The Ninth Banner |
 | `gemma4:26b` (GGUF — **retired 2026-09-05**) | **Nothing autonomous requests it any more.** Remaining human-initiated paths only: Headlamp (per-browser localStorage) and LibreChat's picker (`fetch: true` lists whatever is pulled on disk). **Never re-point a consumer at this tag:** it needs 27.1 GiB (256k ctx alloc, `-np 2`, q8_0 KV) against the MLX build's 18.7 GiB — 45.8 of 48 GiB, so any state where both are requested is guaranteed to OOM. |
 | `nomic-embed-text:latest` | AnythingLLM (embeddings), Nextcloud (context_chat RAG), AFFiNE (embeddings), Paperless-ngx (native AI RAG embeddings) |
 
@@ -162,5 +162,5 @@ finite host default would not save you — one HA call re-pins whatever it loads
 
 | Endpoint | Git-Managed Apps | UI/DB-Configured Apps | Total |
 |----------|------------------|-----------------------|-------|
-| Mac Mini :11434 | 9 (AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, **Sure**, **hermes-agent**, **ha-ai-harness**, AFFiNE, Frigate NVR) | 6 (Paperless, Nextcloud, n8n, Home Assistant, Open WebUI, Headlamp) | 15 |
+| Mac Mini :11434 | 11 (AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, **Sure**, **hermes-agent**, **ha-ai-harness**, AFFiNE, Frigate NVR, Splitfairy, The Ninth Banner) | 6 (Paperless, Nextcloud, n8n, Home Assistant, Open WebUI, Headlamp) | 17 |
 | Cloud APIs | 1 (Paperclip) | 5 (HA x3, n8n x2) | 6 |
