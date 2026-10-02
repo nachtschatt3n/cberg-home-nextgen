@@ -1285,6 +1285,13 @@ spec:
                   // Default timeout is 60s per capability — raised so a longer
                   // note cannot silently fail the way turbo did.
                   cfg.tools = cfg.tools || {};
+                  // Node file-transfer tools need a paired node, and none is
+                  // paired (`openclaw nodes status` -> []). Offered anyway, a
+                  // local model picked dir_list to read its own workspace
+                  // (Vita monthly report, 2026-10-02) and failed. Workspace
+                  // files go through read/exec. Drop this if a node is paired.
+                  cfg.tools.deny = [...new Set([...(cfg.tools.deny || []),
+                    'dir_list', 'dir_fetch', 'file_fetch', 'file_write'])];
                   cfg.tools.media = cfg.tools.media || {};
                   // Bound parallel transcodes; each whisper run is ~850MiB.
                   cfg.tools.media.concurrency = 1;
