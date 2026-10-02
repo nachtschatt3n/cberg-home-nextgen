@@ -928,7 +928,7 @@ Expected:
 
 ```bash
 # 1. Every forward-auth app still denies anonymously (302, never 200).
-#    These thirteen are the actual extAuth subjects, by HOSTNAME — an older list
+#    These twelve are the actual extAuth subjects, by HOSTNAME — an older list
 #    named `arag-web` and `uptime-kuma`, neither of which is a hostname (they are
 #    `arag` and `kuma`), so the loop scored two non-existent hosts and missed
 #    seven real ones.
@@ -942,7 +942,7 @@ Expected:
 #    ungated route (token-auth in-app, for the Mac-mini scraper), so `/api` there
 #    answers 401/404/503 and NOT 302. A 302 on `/api` would be the regression.
 for h in homepage headlamp nocodb phpmyadmin esphome frigate solarfocus \
-         alertmanager prometheus longhorn arag godseye ninthbanner; do
+         alertmanager prometheus longhorn arag godseye; do
   printf '%s ' "$h"
   curl -s -o /dev/null -w '%{http_code}\n' https://$h.${SECRET_DOMAIN}/
 done
@@ -953,7 +953,7 @@ done
 #     a fresh one per request. Churn => `headersToExtAuth` is missing `cookie`
 #     and the app answers 400 to real browsers.
 for h in homepage headlamp nocodb phpmyadmin esphome frigate solarfocus \
-         alertmanager prometheus longhorn arag godseye ninthbanner; do
+         alertmanager prometheus longhorn arag godseye; do
   c=$(curl -s -D - -o /dev/null https://$h.${SECRET_DOMAIN}/ \
         | awk 'tolower($1)=="set-cookie:"{print $2; exit}')
   c2=$(curl -s -D - -o /dev/null -H "Cookie: ${c%%;*}" https://$h.${SECRET_DOMAIN}/ \
@@ -1123,3 +1123,8 @@ Rollback cautions specific to this migration:
   document route-scoped BTPs with `mergeType: StrategicMerge` under rule 10 and
   one SecurityPolicy gating several routes in §4.3; re-measure the inventory
   (external 27/32, 113 routes total).
+- `2026.10.02` (later): `ninthbanner` made PUBLIC by operator decision — its
+  SecurityPolicy and outpost callback route were removed, so it leaves the §10
+  forward-auth host loops again (twelve extAuth subjects). Its
+  `POST /ai/generate` local rate limit tightened to 2/min per envoy-external
+  replica.

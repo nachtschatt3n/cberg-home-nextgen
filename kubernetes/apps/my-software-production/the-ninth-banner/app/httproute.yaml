@@ -1,10 +1,14 @@
 ---
-# The Ninth Banner on envoy-EXTERNAL, ENTIRELY behind Authentik forward-auth
-# (owner decision 2026-10-02). Shape copied from ai/gods-eye-view: every path
-# except the outpost callback is gated -- the game, /ai/*, /api/* (same-origin
-# browser calls carry the authentik_proxy_* session cookie). Pattern + gotchas:
-# docs/sops/authentik.md "Integrating a New Application" Step 3 and
-# docs/sops/gateway-api-httproute.md §4.3.
+# The Ninth Banner on envoy-EXTERNAL, PUBLIC -- no Authentik forward-auth
+# (operator decision 2026-10-02: the game is meant to be shared). Forward-auth
+# was removed in the same change; the Authentik provider/app/outpost were
+# decommissioned blueprint-first. What still protects the host:
+#   - /metrics is 404'd at the gateway (below);
+#   - POST /ai/generate, the only path reaching the SHARED Mac mini Ollama, has
+#     its own route with a tight edge rate limit (BackendTrafficPolicy below);
+#     the game falls back to offline text on 429.
+# Accepted exposure is recorded in sweep_history security_acceptances
+# (runbooks/policy-cli.py sec). Route pattern: docs/sops/gateway-api-httproute.md.
 #
 # NO external-dns target annotation: external-dns reads the target from the
 # parent GATEWAY and silently ignores it on the route (Known Gotcha #11).
@@ -18,7 +22,7 @@ metadata:
   annotations:
     gethomepage.dev/enabled: "true"
     gethomepage.dev/name: "The Ninth Banner"
-    gethomepage.dev/description: "Turn-based fantasy tactics RPG for the browser (Authentik)"
+    gethomepage.dev/description: "Turn-based fantasy tactics RPG for the browser"
     gethomepage.dev/group: "Software Development"
     gethomepage.dev/icon: "mdi-flag-variant"
     gethomepage.dev/pod-selector: "app.kubernetes.io/name=the-ninth-banner"
@@ -35,8 +39,7 @@ spec:
     - "ninthbanner.${SECRET_DOMAIN}"
   rules:
     # Prometheus metrics are for the in-cluster ServiceMonitor only (it scrapes
-    # the Service directly). Never serve them through the gateway, even to an
-    # authenticated user.
+    # the Service directly). Never serve them through the public gateway.
     - matches:
         - path: { type: PathPrefix, value: /metrics }
       filters:
@@ -70,7 +73,7 @@ spec:
 # Ollama host. Its own route so the BackendTrafficPolicy below rate-limits
 # exactly this. An Exact path match outranks the PathPrefix "/" above for the
 # same hostname (Gateway API precedence); a non-POST falls through to the main
-# route and gets the app's own 404. Gated by the same SecurityPolicy.
+# route and gets the app's own 404. Public like the rest of the host.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -110,8 +113,10 @@ spec:
 # timeout settings. With it, this rateLimit is merged into envoy-compression.
 #
 # Local rate limits are enforced PER ENVOY REPLICA. envoy-external runs 3
-# replicas, so 10/min each = at most 30 req/min across the gateway. Excess
-# requests get a 429 from Envoy; the game client falls back to offline text.
+# replicas, so 2/min each = at most ~6 req/min across the gateway (operator
+# decision 2026-10-02 when the host went public: Ollama runs NUM_PARALLEL=1
+# and is shared with the rest of the household's AI). Excess requests get a
+# 429 from Envoy; the game client falls back to offline text.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
@@ -128,73 +133,5 @@ spec:
     local:
       rules:
         - limit:
-            requests: 10
+            requests: 2
             unit: Minute
----
-# Callback route -- separate and MORE specific than `/` (longest match wins),
-# and NEVER gated, or the login flow can never complete.
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: the-ninth-banner-authentik-outpost
-  namespace: my-software-production
-spec:
-  parentRefs:
-    - group: gateway.networking.k8s.io
-      kind: Gateway
-      name: envoy-external
-      namespace: network
-      sectionName: https
-  hostnames:
-    - "ninthbanner.${SECRET_DOMAIN}"
-  rules:
-    - matches:
-        - path: { type: PathPrefix, value: /outpost.goauthentik.io }
-      backendRefs:
-        # Authorised by ReferenceGrant kube-system/the-ninth-banner-outpost-access
-        # (kubernetes/apps/kube-system/authentik/app/referencegrants.yaml).
-        - group: ""
-          kind: Service
-          name: ak-outpost-the-ninth-banner-forward-auth
-          namespace: kube-system
-          port: 9000
----
-apiVersion: gateway.envoyproxy.io/v1alpha1
-kind: SecurityPolicy
-metadata:
-  name: the-ninth-banner-forward-auth
-  namespace: my-software-production
-spec:
-  # BOTH app routes -- never the callback route (instant redirect loop).
-  targetRefs:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      name: the-ninth-banner
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      name: the-ninth-banner-ai-generate
-  extAuth:
-    failOpen: false              # outpost down => deny, never publish
-    # cookie is MANDATORY (without it every check is anonymous and browsers get
-    # `oauth state does not match` 400s); x-forwarded-* deliberately NOT
-    # forwarded -- see the full rationale in office/arag-web/app/httproute.yaml.
-    headersToExtAuth:
-      - cookie
-      - accept
-      - user-agent
-    http:
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: ak-outpost-the-ninth-banner-forward-auth
-          namespace: kube-system
-          port: 9000
-      path: /outpost.goauthentik.io/auth/envoy   # /auth/nginx 500s here
-      # X-authentik-username reaches the app (structured logs' `user` field).
-      headersToBackend:
-        - Set-Cookie
-        - X-authentik-username
-        - X-authentik-groups
-        - X-authentik-email
-        - X-authentik-name
-        - X-authentik-uid
