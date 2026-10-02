@@ -42,8 +42,8 @@ are not style preferences.
 |---------|-------|
 | GatewayClass | `envoy` |
 | Internal Gateway | `envoy-internal` in `network` — LB **192.168.55.103**, 70 hostnames / 83 routes |
-| External Gateway | `envoy-external` in `network` — LB **192.168.55.104**, 27 hostnames / 32 routes |
-| Total HTTPRoutes | 113 |
+| External Gateway | `envoy-external` in `network` — LB **192.168.55.104**, 27 hostnames / 30 routes (routes with an `envoy-external` parentRef, `https-redirect` included; re-measured live 2026-10-03) |
+| Total HTTPRoutes | 112 |
 | Listeners (both) | `http` (80, redirect-only) and `https` (443, Terminate, wildcard cert `${SECRET_DOMAIN/./-}-production-tls`) |
 | Source of truth | `kubernetes/apps/network/envoy-gateway/app/` (`gateways.yaml`, `policies.yaml`, `gatewayclass.yaml`, `helmrelease.yaml`) |
 | Per-app routes | `kubernetes/apps/<ns>/<app>/app/httproute.yaml`, or the bjw-s `route:` values key in the HelmRelease |
@@ -1127,4 +1127,6 @@ Rollback cautions specific to this migration:
   SecurityPolicy and outpost callback route were removed, so it leaves the §10
   forward-auth host loops again (twelve extAuth subjects). Its
   `POST /ai/generate` local rate limit tightened to 2/min per envoy-external
-  replica.
+  replica. Inventory re-measured live: external 27 hostnames / 30
+  routes, 112 routes total (the earlier "32" external count did not reproduce
+  with the parentRef method; only the callback route was actually removed).
