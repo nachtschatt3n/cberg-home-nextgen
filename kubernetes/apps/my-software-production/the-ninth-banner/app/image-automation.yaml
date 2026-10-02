@@ -49,6 +49,14 @@ spec:
   # namespace path but is SUSPENDED and must stay so; if it is ever
   # unsuspended, both write the same value from the same ImagePolicy, so the
   # overlap is idempotent.
+  # Observe ONLY this app's ImagePolicy. Without a selector the automation
+  # lists every ImagePolicy in the namespace (absenty, splitfairy, ...) in
+  # status.observedPolicies, and health-check.sh's SILENT-NO-PUSH check then
+  # flags a sibling's undeployed tag as stuck here. The label comes from the
+  # Flux Kustomization's commonMetadata.
+  policySelector:
+    matchLabels:
+      app.kubernetes.io/name: the-ninth-banner
   interval: 30m
   sourceRef:
     kind: GitRepository
