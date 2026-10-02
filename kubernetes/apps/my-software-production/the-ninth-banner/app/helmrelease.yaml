@@ -58,13 +58,15 @@ spec:
               - name: OLLAMA_MODEL
                 value: gemma4:26b-mlx
             probes:
-              # /ai/health is static (process up, no Ollama call, no logging).
+              # /healthz (v0.1.1+): static {ok, version}, no Ollama call, and not
+              # access-logged on success (Gotcha #13). /ai/health still exists in the
+              # app for humans but is no longer a probe target.
               startup:
                 enabled: true
                 custom: true
                 spec:
                   httpGet:
-                    path: /ai/health
+                    path: /healthz
                     port: 8080
                   periodSeconds: 5
                   timeoutSeconds: 5
@@ -74,7 +76,7 @@ spec:
                 custom: true
                 spec:
                   httpGet:
-                    path: /ai/health
+                    path: /healthz
                     port: 8080
                   periodSeconds: 30
                   timeoutSeconds: 5
@@ -84,7 +86,7 @@ spec:
                 custom: true
                 spec:
                   httpGet:
-                    path: /ai/health
+                    path: /healthz
                     port: 8080
                   periodSeconds: 10
                   timeoutSeconds: 5
@@ -120,8 +122,8 @@ spec:
           http:
             port: 80
             targetPort: 8080
-    # In-cluster scrape of GET /metrics on the app port (from v0.1.1; v0.1.0
-    # has no /metrics). The gateway 404s /metrics, so it is never public.
+    # In-cluster scrape of GET /metrics on the app port. The gateway 404s
+    # /metrics, so it is never public.
     serviceMonitor:
       app:
         serviceName: the-ninth-banner
