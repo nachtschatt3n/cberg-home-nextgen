@@ -1686,6 +1686,9 @@ spec:
                 # still resolve.
                 # Repair a previous botched shim install if present.
                 rm -f /home/node/.openclaw/bin/codex-real
+                # The image ships python3 only; agents keep typing `python`
+                # (Jerry, 2026-10-02: "python: command not found").
+                ln -sf /usr/bin/python3 /home/node/.openclaw/bin/python
                 if [ -L /home/node/.openclaw/bin/codex ] || ! grep -q "codex-cli sandbox shim" /home/node/.openclaw/bin/codex 2>/dev/null; then
                   rm -f /home/node/.openclaw/bin/codex
                   # Single-quoted heredoc → no bash expansion at write time.
