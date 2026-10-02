@@ -50,6 +50,19 @@ spec:
             name: the-ninth-banner-not-found
     - matches:
         - path: { type: PathPrefix, value: / }
+      # No forward-auth any more, so nothing overwrites the X-authentik-*
+      # headers: strip them, or a client could set X-authentik-username and
+      # rotate it to dodge the app's per-client limits (clientKey() trusts it)
+      # and forge the `user` log field.
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - X-Authentik-Username
+              - X-Authentik-Groups
+              - X-Authentik-Email
+              - X-Authentik-Name
+              - X-Authentik-Uid
       backendRefs:
         - group: ""
           kind: Service
@@ -98,6 +111,16 @@ spec:
       # back to offline content on any failure.)
       timeouts:
         request: 125s
+      # Same header strip as the main route (see there).
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - X-Authentik-Username
+              - X-Authentik-Groups
+              - X-Authentik-Email
+              - X-Authentik-Name
+              - X-Authentik-Uid
       backendRefs:
         - group: ""
           kind: Service
