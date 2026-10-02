@@ -1,4 +1,3 @@
----
 # yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -37,7 +36,7 @@ spec:
               repository: ghcr.io/nachtschatt3n/the-ninth-banner
               # Release tags (v<major>.<minor>.<patch>) only; updated by the
               # ImageUpdateAutomation in ./image-automation.yaml.
-              tag: v0.1.0 # {"$imagepolicy": "my-software-production:the-ninth-banner:tag"}
+              tag: v0.1.1 # {"$imagepolicy": "my-software-production:the-ninth-banner:tag"}
               pullPolicy: IfNotPresent
             env:
               - name: PORT
