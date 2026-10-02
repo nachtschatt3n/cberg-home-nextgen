@@ -65,8 +65,8 @@ spec:
             category: my-software-production
             component: the-ninth-banner
             severity: critical
-    # App metrics from GET /metrics (ServiceMonitor, from v0.1.1 on). These
-    # rules evaluate to no data until the app exposes the series.
+    # App metrics from GET /metrics (ServiceMonitor). ai_generations_total
+    # source is one of ai | cache | template | disabled.
     - interval: 1m
       name: the-ninth-banner.app
       rules:
@@ -103,12 +103,13 @@ spec:
         - alert: TheNinthBannerAIFallbackRatioHigh
           annotations:
             description: '{{ $value | humanizePercentage }} of AI generations fell
-              back to templates over the last 30 minutes. The shared Ollama host
+              back to templates over the last 30 minutes (source=template; cache
+              hits and a disabled AI are not counted as fallbacks). The shared Ollama host
               may be unreachable, slow, or rejecting the model.'
             summary: The Ninth Banner AI template-fallback ratio is high
           expr: |
             (
-              sum(rate(ai_generations_total{namespace="my-software-production", job="the-ninth-banner", source!="ai"}[30m]))
+              sum(rate(ai_generations_total{namespace="my-software-production", job="the-ninth-banner", source="template"}[30m]))
               /
               sum(rate(ai_generations_total{namespace="my-software-production", job="the-ninth-banner"}[30m]))
             ) > 0.5
