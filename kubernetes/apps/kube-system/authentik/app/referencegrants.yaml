@@ -274,3 +274,21 @@ spec:
     - group: ""
       kind: Service
       name: ak-outpost-gods-eye-view-forward-auth
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: the-ninth-banner-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: my-software-production
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: my-software-production
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-the-ninth-banner-forward-auth

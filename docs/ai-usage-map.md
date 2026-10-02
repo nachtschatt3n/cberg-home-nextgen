@@ -1,7 +1,7 @@
 # AI Usage Map
 
 > Comprehensive mapping of all AI/LLM integrations across the cluster and Home Assistant.
-> Last Updated: 2026-09-04
+> Last Updated: 2026-10-02
 
 ---
 
@@ -50,6 +50,7 @@ the GGUF `gemma4:26b` unless its own owner has changed it.**
 | n8n | home-automation | `gemma4:26b-mlx` | Ollama (UI) | **DB ✅** | Migrated 2026-09-05. ONE node in the inactive `ai-sysadmin-agent` workflow; the `ollamaApi` credential holds only the base URL. Verified via `workflow_entity` **through the SQLite driver**: 14 workflows, 0 on the GGUF. A raw grep of the DB file says otherwise and is wrong — see the WAL/free-page note in `docs/integration.md`. |
 | Home Assistant | home-automation | `gemma4:26b-mlx` + `gemma4:e2b-mlx` (voice) | Native Ollama | **UI ✅** | Migrated 2026-09-05 by ha-agent, confirmed with five `/api/ps` snapshots. Covers 2 Ollama subentries **and** three direct-HTTP scripts in the `/config` PVC that no integration list shows: `ai_person_check.py`, `ai_person_check_file.py` (**both vision**, `images:[b64]`), `ai_water_check.py`. **HA sends an explicit `num_ctx` and cannot omit it** — an unset value sends 8192, not the host default — so HA must move in lockstep with any `OLLAMA_CONTEXT_LENGTH` change or every call evicts and reloads the pinned model. All subentries set `keep_alive: -1`. |
 | Splitfairy | my-software-production | `gemma4:26b-mlx` — **vision** (receipt photos) + structured JSON | Native Ollama (`OLLAMA_URL`) | git ✅ | `kubernetes/apps/my-software-production/splitfairy/app/helmrelease.yaml` (env `OLLAMA_MODEL`). Client must NOT send `keep_alive` or a `num_ctx` other than 65536, should send `think: false`, a JSON **schema** in `format` (plain `"json"` truncates to one object), and use a >=120 s timeout. Added 2026-09-28. |
+| The Ninth Banner | my-software-production | `gemma4:26b-mlx` — text + structured JSON (narrative/scenario generation) | Native Ollama (`OLLAMA_URL`) | git ✅ | `kubernetes/apps/my-software-production/the-ninth-banner/app/helmrelease.yaml` (env `OLLAMA_MODEL`, `AI_PROVIDER=ollama`). Client sends `think: false`, never `keep_alive`/`num_ctx`, one request in flight, 120 s timeout. Internet-facing but behind Authentik forward-auth (`authentik Admins`); an Envoy local rate limit on `POST /ai/generate` (30 req/min total) plus a per-client limit in the proxy protect the shared host. Added 2026-10-02. |
 | Headlamp | **monitoring** (not kube-system) | `gemma4:26b` | OpenAI `/v1` | **browser ❌** | AI Assistant plugin config lives in per-browser localStorage — no server-side config exists in the pod; cannot be fixed from cluster or repo |
 
 ---

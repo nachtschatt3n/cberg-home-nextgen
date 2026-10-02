@@ -1,0 +1,141 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: the-ninth-banner
+  namespace: my-software-production
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 5.1.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      # Load-bearing for image automation: a release tag whose pod fails its
+      # startup/readiness probes times the upgrade out and is rolled back.
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      the-ninth-banner:
+        # Stateless (static game + /ai/* proxy, writes nothing). One replica:
+        # the proxy's per-client rate limit and session budget are in-memory.
+        replicas: 1
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/the-ninth-banner
+              # Release tags (v<major>.<minor>.<patch>) only; updated by the
+              # ImageUpdateAutomation in ./image-automation.yaml.
+              tag: v0.1.0 # {"$imagepolicy": "my-software-production:the-ninth-banner:tag"}
+              pullPolicy: IfNotPresent
+            env:
+              - name: PORT
+                value: "8080"
+              - name: HOST
+                value: "0.0.0.0"
+              - name: TZ
+                value: Europe/Berlin
+              # The image defaults to AI_PROVIDER=offline; enable the proxy.
+              - name: AI_PROVIDER
+                value: ollama
+              # Shared Mac mini Ollama host. gemma4:26b-mlx is in the pinned
+              # warm set. The client sends think:false, never keep_alive or
+              # num_ctx, and keeps one request in flight -- either of the
+              # former would reload or un-pin the shared model for ~15 other
+              # apps. docs/ai-usage-map.md, docs/sops/ai-integration.md.
+              - name: OLLAMA_URL
+                value: http://192.168.30.111:11434
+              - name: OLLAMA_MODEL
+                value: gemma4:26b-mlx
+            probes:
+              # /ai/health is static (process up, no Ollama call, no logging).
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /ai/health
+                    port: 8080
+                  periodSeconds: 5
+                  timeoutSeconds: 5
+                  failureThreshold: 30
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /ai/health
+                    port: 8080
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /ai/health
+                    port: 8080
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 25m
+                memory: 96Mi
+              limits:
+                cpu: 500m
+                memory: 256Mi
+    # Image USER is numeric 1000:1000; pin it so runAsNonRoot is enforceable.
+    defaultPodOptions:
+      automountServiceAccountToken: false
+      # Private GHCR package (the source repo is private).
+      imagePullSecrets:
+        - name: ghcr-the-ninth-banner
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+    service:
+      app:
+        controller: the-ninth-banner
+        ports:
+          http:
+            port: 80
+            targetPort: 8080
+    # In-cluster scrape of GET /metrics on the app port (from v0.1.1; v0.1.0
+    # has no /metrics). The gateway 404s /metrics, so it is never public.
+    serviceMonitor:
+      app:
+        serviceName: the-ninth-banner
+        endpoints:
+          - port: http
+            scheme: http
+            path: /metrics
+            interval: 30s
+            scrapeTimeout: 10s
+        labels:
+          release: kube-prometheus-stack
+    persistence:
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp

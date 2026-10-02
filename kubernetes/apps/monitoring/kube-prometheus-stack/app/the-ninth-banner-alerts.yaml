@@ -1,0 +1,134 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: the-ninth-banner-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - interval: 30s
+      name: the-ninth-banner.pods.health
+      rules:
+        - alert: TheNinthBannerPodNotReady
+          annotations:
+            description: The Ninth Banner pod {{ $labels.pod }} has been not ready
+              for more than 5 minutes. The public browser game and its AI proxy
+              are unavailable.
+            summary: The Ninth Banner pod {{ $labels.pod }} is not ready
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="my-software-production", pod=~"the-ninth-banner-.*", condition="true"}
+              unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+            ) == 0
+          for: 5m
+          labels:
+            category: my-software-production
+            component: the-ninth-banner
+            severity: critical
+        - alert: TheNinthBannerPodCrashLooping
+          annotations:
+            description: The Ninth Banner pod {{ $labels.pod }} has restarted {{ $value
+              | printf "%.0f" }} times in the last 15 minutes.
+            summary: The Ninth Banner pod {{ $labels.pod }} is crash looping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="my-software-production", pod=~"the-ninth-banner-.*"}[15m]) * 900 > 2
+          for: 5m
+          labels:
+            category: my-software-production
+            component: the-ninth-banner
+            severity: critical
+        - alert: TheNinthBannerPodRestarted
+          annotations:
+            description: The Ninth Banner pod {{ $labels.pod }} has restarted at
+              least once in the last 15 minutes. Monitor for repeated restarts.
+            summary: The Ninth Banner pod {{ $labels.pod }} restarted
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="my-software-production", pod=~"the-ninth-banner-.*"}[15m]) > 0
+          for: 1m
+          labels:
+            category: my-software-production
+            component: the-ninth-banner
+            severity: warning
+        - alert: TheNinthBannerDown
+          annotations:
+            description: The Ninth Banner deployment has had no available replica
+              for 5 minutes.
+            summary: The Ninth Banner is down
+          expr: |
+            kube_deployment_status_replicas_available{namespace="my-software-production", deployment="the-ninth-banner"} == 0
+          for: 5m
+          labels:
+            category: my-software-production
+            component: the-ninth-banner
+            severity: critical
+    # App metrics from GET /metrics (ServiceMonitor, from v0.1.1 on). These
+    # rules evaluate to no data until the app exposes the series.
+    - interval: 1m
+      name: the-ninth-banner.app
+      rules:
+        - alert: TheNinthBannerHigh5xxRatio
+          annotations:
+            description: '{{ $value | humanizePercentage }} of The Ninth Banner
+              requests returned 5xx over the last 10 minutes.'
+            summary: The Ninth Banner 5xx ratio is high
+          expr: |
+            (
+              sum(rate(http_requests_total{namespace="my-software-production", job="the-ninth-banner", status_class="5xx"}[10m]))
+              /
+              sum(rate(http_requests_total{namespace="my-software-production", job="the-ninth-banner"}[10m]))
+            ) > 0.05
+            and sum(rate(http_requests_total{namespace="my-software-production", job="the-ninth-banner"}[10m])) > 0.01
+          for: 10m
+          labels:
+            category: my-software-production
+            component: the-ninth-banner
+            severity: warning
+        - alert: TheNinthBannerClientErrorSpike
+          annotations:
+            description: Browsers reported {{ $value | printf "%.0f" }} js_error /
+              react_error events in the last 15 minutes. Check the client-sourced
+              log lines (source:"client") in Elasticsearch.
+            summary: The Ninth Banner client error spike
+          expr: |
+            sum(increase(client_events_total{namespace="my-software-production", job="the-ninth-banner", kind=~"js_error|react_error"}[15m])) > 10
+          for: 5m
+          labels:
+            category: my-software-production
+            component: the-ninth-banner
+            severity: warning
+        - alert: TheNinthBannerAIFallbackRatioHigh
+          annotations:
+            description: '{{ $value | humanizePercentage }} of AI generations fell
+              back to templates over the last 30 minutes. The shared Ollama host
+              may be unreachable, slow, or rejecting the model.'
+            summary: The Ninth Banner AI template-fallback ratio is high
+          expr: |
+            (
+              sum(rate(ai_generations_total{namespace="my-software-production", job="the-ninth-banner", source!="ai"}[30m]))
+              /
+              sum(rate(ai_generations_total{namespace="my-software-production", job="the-ninth-banner"}[30m]))
+            ) > 0.5
+            and sum(increase(ai_generations_total{namespace="my-software-production", job="the-ninth-banner"}[30m])) >= 5
+          for: 15m
+          labels:
+            category: my-software-production
+            component: the-ninth-banner
+            severity: warning
+        - alert: TheNinthBannerAILatencyHigh
+          annotations:
+            description: The p95 AI generation latency is {{ $value | printf "%.0f" }}s
+              over the last 15 minutes (shared Ollama host, gemma4:26b-mlx).
+            summary: The Ninth Banner AI p95 latency is high
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(ai_generation_duration_seconds_bucket{namespace="my-software-production", job="the-ninth-banner"}[15m]))
+            ) > 60
+          for: 15m
+          labels:
+            category: my-software-production
+            component: the-ninth-banner
+            severity: warning

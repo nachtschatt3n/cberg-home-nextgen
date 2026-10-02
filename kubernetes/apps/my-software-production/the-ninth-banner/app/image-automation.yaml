@@ -1,0 +1,81 @@
+---
+# Flux image automation for the-ninth-banner. Mode table:
+# docs/sops/self-built-image-rebuild.md "Weekly rebuild + deploy mode".
+#
+# AUTO on RELEASE TAGS ONLY. Every main push publishes `sha-<full sha>`; a
+# `vX.Y.Z` git tag promotes that tested image to `vX.Y.Z`. The ImagePolicy
+# selects exactly `v<major>.<minor>.<patch>`, so `sha-*` builds, pre-releases
+# and V-scheme rebuilds (`v1.2.3-b<YYYYMMDD>`) are never deployed by it.
+# The ^...$ anchors are load-bearing: Flux matches filterTags unanchored.
+#
+# Internet-facing auto-deploy is gated by the HelmRelease's startup/readiness
+# probes plus `upgrade.remediation.strategy: rollback`. Stateless app, so a
+# rollback has no data-migration hazard.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: the-ninth-banner
+  namespace: my-software-production
+spec:
+  image: ghcr.io/nachtschatt3n/the-ninth-banner
+  interval: 1h
+  # PRIVATE GHCR package: scan tags with the same pull secret the pod uses.
+  secretRef:
+    name: ghcr-the-ninth-banner
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: the-ninth-banner
+  namespace: my-software-production
+spec:
+  imageRepositoryRef:
+    name: the-ninth-banner
+  filterTags:
+    pattern: '^v(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$'
+    extract: '$version'
+  policy:
+    semver:
+      range: '>=0.1.0'
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: the-ninth-banner-image-updates
+  namespace: my-software-production
+spec:
+  # Own automation, scoped to this app's directory (same shape as
+  # splitfairy-image-updates). absenty-image-updates covers the whole
+  # namespace path but is SUSPENDED and must stay so; if it is ever
+  # unsuspended, both write the same value from the same ImagePolicy, so the
+  # overlap is idempotent.
+  interval: 30m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcdbot@users.noreply.github.com
+        name: fluxcdbot
+      messageTemplate: |
+        chore(the-ninth-banner): update container image (release)
+
+        Automation name: {{ .AutomationObject }}
+
+        Objects updated:
+        {{ range $resource, $changes := .Changed.Objects -}}
+        - {{ $resource.Kind }} {{ $resource.Name }}
+        {{- range $_, $change := $changes }}
+          {{ $change.OldValue }} -> {{ $change.NewValue }}
+        {{ end -}}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    strategy: Setters
+    path: "./kubernetes/apps/my-software-production/the-ninth-banner"

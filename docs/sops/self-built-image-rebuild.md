@@ -3,8 +3,8 @@
 > Description: How to clear CVEs on container images we build ourselves, where there is
 > no upstream version to bump to and remediation is a **rebuild in the source repo**
 > followed by a GitOps tag bump — not a version bump.
-> Version: `2026.09.27`
-> Last Updated: `2026-09-27`
+> Version: `2026.10.02`
+> Last Updated: `2026-10-02`
 > Owner: `homelab-operator`
 
 ---
@@ -288,6 +288,7 @@ HTTP health probe.**
 | haarfabrik-extranet, holm-backend, inbewegung-familymanager, kfa_medienarchiv, mangold-smarthomeadvisor, max-jung-transporte-fahrzeugcontrolling, metaldyne-mini-erp, ordiga, see-edv-ibspm, stepbystepguide, u-zeit, zuhause-betreut-caretakermanager | same names | P | ci.yml (schedule) | IUA showcase | **AUTO** | same; their bases are EOL Debian (jessie/stretch), so there is no OS upgrade, and a rebuild only refreshes what the archive mirror still serves |
 | gas-price-monitor | gas-price-monitor | S | scheduled-rebuild.yml | IUA `my-software-production/gas-price-monitor-image-updates` | **AUTO** | internet-facing, but has HTTP liveness/readiness + rollback |
 | splitfairy | splitfairy | releases `v<semver>` (a V-scheme weekly rebuild `v*-b<date>` is NOT selected) | release workflow | IUA `my-software-production/splitfairy-image-updates` | **AUTO (release tags only)** | internet-facing; HTTP startup/readiness on `/readyz` (SQLite) + rollback. Stateful SQLite app: operator chose AUTO for releases on 2026-09-28; keep schema migrations backward-compatible or drop the `$imagepolicy` marker to hold |
+| the-ninth-banner | the-ninth-banner (private) | releases `v<semver>` (`sha-<full sha>` on every main push; a `vX.Y.Z` git tag promotes the tested image) | Image workflow (release) | IUA `my-software-production/the-ninth-banner-image-updates` | **AUTO (release tags only)** | internet-facing; HTTP startup/readiness on `/ai/health` + rollback. Stateless, so a rollback has no migration hazard. Private package: ImageRepository scans with `ghcr-the-ninth-banner` |
 | absenty | Absenty | P (matrix: production + development) | ci.yml (schedule) | IUA prod (**suspended**, dependabot drain) / IUA dev (active) | AUTO (prod held) | keep prod suspended until the drain completes |
 | andreamosteller (prod + dev) | the site repo | S (both branches) | scheduled-rebuild.yml | manual sha tag | MANUAL | internet-facing, startup probe only |
 | rainbow-rescue | rainbow-rescue-party-hunt | V | scheduled-rebuild.yml | manual `0.1.3` | MANUAL | internet-facing, no probes |
@@ -531,3 +532,5 @@ reconcile — never patch the Deployment directly (GitOps rule).
   keepalive in every source repo, three tag schemes, and a per-image AUTO/MANUAL table.
   The 15 showcase apps and gas-price-monitor are now auto-deployed by Flux image
   automation.
+- `2026.10.02`: Add `ghcr.io/nachtschatt3n/the-ninth-banner` (private package, release-tag
+  AUTO via its own IUA) to the deploy-mode table.
