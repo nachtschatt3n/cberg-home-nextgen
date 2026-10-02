@@ -84,8 +84,8 @@ finding_refs: [F-15d4b6c4]            # `finding list --grep nocodb` 2026-10-01 
                                       # sweep, 2026-09-29 02:18Z, predates the tag); add it here when
                                       # the next sweep emits one.
 review: ready-for-go@2026-10-01   # plan-reviewer-agent, sweep b23be87b
-status: vetted
-window: null
+status: awaiting-go   # 2026-10-02 nightly: go_no_go ingested (HUMAN-GATED: capability_change) — was: vetted
+window: "sun-attended:2026-11-08"   # proposed 2026-10-02 by maintenance-window-agent: first attended slot with no declared conflict (sat 10-03 = 90/90m TIGHT + monitoring overlap with uptime-kuma; 10-04..11-07 each hold a conflicts_with partner or DNS/monitoring churn). Operator may pull it earlier.
 premises:
   - id: live-image-is-still-2026.09.0
     why: >-
