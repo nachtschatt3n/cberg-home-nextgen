@@ -37,7 +37,12 @@ if [ "$rc" -eq 0 ]; then
             npm run check; rc=$?
             ;;
         e2e)
-            npm run build && npx playwright test --grep-invert @art "${pw_args[@]}"; rc=$?
+            # = the game's per-push CI (.github/workflows/ci.yml "End-to-end tests")
+            npm run build && npx playwright test --grep-invert "@art|@nightly" "${pw_args[@]}"; rc=$?
+            ;;
+        nightly)
+            # = the game's nightly e2e job: the slow/perf-sensitive specs
+            npm run build && npx playwright test --grep "@nightly|@perf" "${pw_args[@]}"; rc=$?
             ;;
         responsive)
             if [ ! -f playwright.responsive.config.ts ]; then
@@ -60,7 +65,7 @@ if [ "$rc" -eq 0 ]; then
             done
             ;;
         *)
-            log "unknown SUITE '${SUITE}' (unit|e2e|responsive|sims)"; rc=2
+            log "unknown SUITE '${SUITE}' (unit|e2e|nightly|responsive|sims)"; rc=2
             ;;
     esac
 fi

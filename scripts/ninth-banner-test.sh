@@ -2,10 +2,10 @@
 # Run The Ninth Banner's test suites as a sharded Kubernetes Job on the
 # cluster (namespace ci-runner) and collect the results on this Mac.
 #
-#   scripts/ninth-banner-test.sh <ref> <unit|e2e|responsive|sims> [shards]
+#   scripts/ninth-banner-test.sh <ref> <unit|e2e|nightly|responsive|sims> [shards]
 #
 #   ref     commit sha (short ok), branch or tag of nachtschatt3n/the-ninth-banner
-#   shards  default: e2e/responsive 3, sims 4 (one sweep each), unit 1 (forced)
+#   shards  default: e2e/nightly/responsive 3, sims 4 (one sweep each), unit 1 (forced)
 #
 # Env: RESULTS_DIR (default ~/ci-results), WORKERS (playwright workers per
 # shard, default 2), COLLECT=0 (fire and forget: no wait, no artifact copy).
@@ -25,7 +25,7 @@ k() { (cd "$REPO_ROOT" && mise exec -- kubectl "$@"); }
 ref_in="$1"; suite="$2"; shards="${3:-}"
 case "$suite" in
     unit) shards=1 ;;
-    e2e|responsive) shards="${shards:-3}" ;;
+    e2e|nightly|responsive) shards="${shards:-3}" ;;
     sims) shards="${shards:-4}" ;;
     *) echo "unknown suite '$suite'"; usage ;;
 esac

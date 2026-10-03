@@ -25,7 +25,7 @@ The Mac mini also hosts the shared Ollama runtime and many agent sessions. Paral
 | Static infra (GitOps) | `kubernetes/apps/ci-runner/the-ninth-banner-tests/app/`: ServiceAccount (no token, no RBAC), ResourceQuota + LimitRange, CiliumNetworkPolicy, scripts ConfigMap, git credential (SOPS) |
 | Flux Kustomization | `flux-system/the-ninth-banner-tests` (lives in `flux-system`, `targetNamespace: ci-runner`) |
 | Job template | `kubernetes/apps/ci-runner/the-ninth-banner-tests/job-template.yaml.tpl`. Not applied by Flux and not scanned by kubeconform (`.tpl`); rendered per run by the trigger |
-| Trigger | `scripts/ninth-banner-test.sh <ref> <unit\|e2e\|responsive\|sims> [shards]` |
+| Trigger | `scripts/ninth-banner-test.sh <ref> <unit\|e2e\|nightly\|responsive\|sims> [shards]` |
 | Image | `mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30…` (multi-arch index digest; Node 24, git, Chromium/Firefox/WebKit baked in). **Keep in lockstep with `@playwright/test` in the game's `package-lock.json`**. Bump: §4 step 5 |
 | Job shape | Indexed Job, `completions = shards`, `parallelism = min(shards, 3)`, `backoffLimitPerIndex: 0`, `maxFailedIndexes = shards` (no retries, one failing shard never stops the others), topology spread over `kubernetes.io/hostname`, `activeDeadlineSeconds: 5400`, `ttlSecondsAfterFinished: 3600` |
 | Per shard | requests 2 CPU / 6Gi / 8Gi ephemeral; limits **4 CPU (thermal cap)** / 10Gi / 16Gi; Playwright `--workers=2` (`WORKERS`, default 2, see Troubleshooting) |
@@ -48,7 +48,8 @@ Suites:
 | Suite | What runs | Default shards |
 |---|---|---|
 | `unit` | `npm run check` (typecheck, lint, validate:data, vitest, build, security), the same as GitHub CI "Check & test" | 1 (forced) |
-| `e2e` | `npm run build && npx playwright test --grep-invert @art --shard=i/N` (Chromium plus Firefox `@cross`, `CI=1`, so 1 retry and no snapshot assertions) | 3 |
+| `e2e` | `npm run build && npx playwright test --grep-invert "@art\|@nightly" --shard=i/N` (the game's per-push CI selection; Chromium plus Firefox `@cross`, `CI=1`, so 1 retry and no snapshot assertions) | 3 |
+| `nightly` | `npm run build && npx playwright test --grep "@nightly\|@perf" --shard=i/N` (the game's nightly e2e job: determinism, music, perf specs) | 3 |
 | `responsive` | `playwright test -c playwright.responsive.config.ts --shard=i/N` (WebKit). Fails with rc=2 until that config exists at the ref | 3 |
 | `sims` | CI nightly sweeps (`sim --n 30 --check`, `gen-sweep --n 2000`, `autoplay --n 10 --check`, `ending-hunt --n 4`), round-robin over shards | 4 |
 
