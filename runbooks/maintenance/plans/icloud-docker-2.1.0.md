@@ -86,8 +86,8 @@ finding_refs: [F-fb05162a]              # mu: 10 Drive items fail every drive cy
                                         # F-fb05162a (plan, this), F-b2c35615 (AR-029, cited above), F-dfd6adca /
                                         # F-68589ebb (chart 5.2.1 — owned by app-template-5.2.1), F-f9db709b
                                         # (photos 503 item — NOT claimed; may or may not clear, see §4.6).
-review: null
-status: draft
+review: ready-for-go@2026-10-03   # plan-reviewer 3rd pass (blockers from 2nd pass fixed in e20e3b73)
+status: vetted
 window: null
 premises:
   - id: live-image-is-main-build
