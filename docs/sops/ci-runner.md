@@ -58,6 +58,39 @@ Suites:
 
 ---
 
+## 2a) GPU mode (Intel iGPU, default for browser suites since 2026-10-03)
+
+| Item | Value |
+|---|---|
+| Hardware | Each NUC14: Meteor Lake **Intel Arc Graphics (MTL)**, PCI `8086:7D55`, driver **i915** (kernel 6.18 Talos), plus an NPU (`npu.intel.com/accel`, not used here) |
+| How a pod gets it | The existing Intel GPU device plugin (`kubernetes/apps/kube-system/intel-device-plugin/gpu`, `sharedDevNum: 5`) offers `gpu.intel.com/i915: 5` per node: 5 pods may **share** the one iGPU. A GPU shard requests 1. **No hostPath, no PSA change**: containerd hands the pod `/dev/dri/renderD128` chowned to its `runAsUser:runAsGroup` (1001), so `ci-runner` stays `restricted` |
+| Image | No derived image: the pinned Playwright image already contains Mesa 25.2.8 (`iris`). It has no Vulkan ICD, so ANGLE-Vulkan falls back to SwiftShader; use GL/EGL |
+| Flags | `--use-gl=angle --use-angle=gl-egl --ignore-gpu-blocklist --enable-gpu-rasterization`, appended to EVERY Chromium launch by a wrapper around the browser binaries (`run.sh`, shadow `PLAYWRIGHT_BROWSERS_PATH`); this also covers specs with their own `test.use({ launchOptions })` (perf.spec). Firefox and WebKit stay on software rendering |
+| Proof per shard | `run.sh` logs `WebGL renderer: ANGLE (Intel, Mesa Intel(R) Arc(tm) Graphics (MTL), OpenGL ES 3.2)`; anything else logs `GPU-FALLBACK` (the run continues on CPU) |
+| Sharing | Other GPU tenants per node (2026-10-03): nuc14-01 immich-server, jellyfin, makemkv (3/5); nuc14-02 frigate, plex (2/5); nuc14-03 scrypted, immich-ml (2/5). A CI shard is a short burst of WebGL; transcodes and detectors share the same iGPU time-sliced. If a node has no free slot, the shard waits in Pending until one frees |
+| Fallback | `GPU=0 scripts/ninth-banner-test.sh <ref> e2e`: no GPU request, no flags, SwiftShader (slow and hot; see the CPU measurements) |
+
+Measured 2026-10-03, game commit `302a819`, smoke + perf + journeys specs, Chromium, 1 shard, 2 workers, 4 CPU limit:
+
+| | CPU (SwiftShader) | GPU (Intel Arc) |
+|---|---|---|
+| WebGL renderer | SwiftShader (Vulkan/Subzero) | Mesa Intel Arc Graphics (MTL) |
+| Battle fps (perf.spec) | 6.2 (occlusion: 6.9) | 60.3 (occlusion: 60.1), vsync-capped |
+| Long journey (character creator → world) | 266 s | 15 s |
+| Mission loop journey | 264 s | 17 s |
+| "Title ready within 3 s" | FAIL (11.9 s) | pass (1.3 s) |
+| Test time for the 13 tests | 548 s, 3 failed | 61 s, all passed |
+| Runner CPU-seconds | 2,202 | 178 |
+| Node package temp, peak | 76 °C | 66 °C (node's own baseline before: 76-79 °C) |
+
+Full `e2e` (3 shards, parallelism 2, GPU): **135/136 passed in 5 min 5 s** wall time (the 4-CPU CPU run took ~34 min with 6 failures). Peak 89 °C on the node that ran two shards back to back (77 / 66 °C on the others). The one failure was Firefox `music.spec` (AudioContext `suspended`), which fails on the CPU path too, so it is not GPU-related. Power: not measurable from Prometheus (no RAPL/power collector is scraped), so CPU-seconds is the energy proxy.
+
+Limits / caveats:
+- The perf spec's annotation still says "(software WebGL)": the game decides that label by platform. The game-side launch-args hook (branch `ci-sharding`) should take over the flag set and the label; until then the runner wrapper applies the flags.
+- GPU mode does not change the CPU cap (4) or parallelism (2). Raising parallelism to 3 GPU shards (one per node) looks thermally safe from these numbers, but it is an owner decision (`docs/sops/ci-runner.md` §2 thermal note).
+
+---
+
 ## 3) Blueprints
 
 Pod flow, one per shard:
@@ -138,6 +171,8 @@ kubectl logs -n ci-runner <pod> -c clone
 | NUCs at 100°C+, `NodeCPUTemperatureHigh` pending, etcd slow applies or a leader change during a run | Thermal: 3 shards × 6 CPU drove the nodes to 100-102°C on 2026-10-03, with an etcd leader election (102°C caused a thermal reboot on 2026-08-08, `docs/sops/immich.md`). The limit is 4 CPU per shard for this reason. **Never raise it without re-measuring** `max_over_time(node_thermal_zone_temp{type="x86_pkg_temp"}[30m])` during an e2e run (target < 93°C) |
 | A red test run raises no alert | Expected since 2026-10-03: `KubeJobFailed` excludes `ci-runner` (a failing shard fails the Job by design) and `KubeCPUOvercommit` ignores `ci-low` pods, and `KubeQuotaAlmostFull`/`KubeQuotaFullyUsed` exclude `ci-runner` (the quota is a cap runs fill by design). Runner INFRA faults alert instead: `CIRunnerPodStuckPending` (Pending > 15m: unschedulable, ImagePullBackOff, hung clone) `CIRunnerCloneFailed` (clone init container failed) and `CIRunnerJobStarved` (info: a run got no pod for 60m, e.g. quota held by an orphaned run). Rules: `kubernetes/apps/monitoring/kube-prometheus-stack/app/ci-runner-alerts.yaml` |
 | npm/git `ENOTFOUND` or `EAI_AGAIN` after a policy change | The DNS allow-list (`networkpolicy.yaml`) is missing a name; Cilium REFUSES unlisted names |
+| Log shows `GPU-FALLBACK` | The pod got no usable `/dev/dri` (device plugin down, or no free `gpu.intel.com/i915` slot on that node and it was scheduled without one) or the flags changed. Check `kubectl describe pod` (resources), `kubectl get pods -n kube-system -l app.kubernetes.io/name=intel-gpu-plugin`, then rerun; `GPU=0` as the workaround |
+| GPU shard `Pending`, event `Insufficient gpu.intel.com/i915` | All 5 iGPU slots on the candidate nodes are taken (media/frigate/immich). It waits; or run `GPU=0` |
 | Shard OOMKilled | Lower `WORKERS`, or raise the runner memory limit in the template (keep the quota consistent) |
 | `responsive` rc=2 | `playwright.responsive.config.ts` is not in the repo at that ref yet |
 | Script hangs on a shard | Check `kubectl describe pod`; the deadline is 90 min (`activeDeadlineSeconds`) |
@@ -209,3 +244,4 @@ runbooks/policy-cli.py risk add AR-<next> \
 - `2026.10.03`: Initial runner: ci-runner namespace without `common`, restricted PSA, FQDN egress lockdown, indexed sharded Job template, one-command trigger with artifact collection.
 - `2026.10.03` (hardening): image pinned by index digest + bump procedure; `PriorityClass ci-low` (-1000, never preempts); declared `default` SA without token; DNS allow-list instead of `*`; per-shard CPU 3/6 to 2/4 (requests/limits) after the nodes hit 100-102°C at 6 CPU; quota 6.5/13 CPU.
 - `2026.10.03` (thermal/W1): at most 2 shards in parallel (thermal), runner declared best-effort (GitHub CI is the gate), shared-PAT risk recorded as owner-accepted (W1) with a prepared register entry.
+- `2026.10.03` (GPU): GPU mode via the existing Intel GPU device plugin (shared `gpu.intel.com/i915`), default for e2e/nightly/responsive; browser-binary wrapper for the flags; renderer preflight; SPECS/PROJECT/CPU knobs; CPU vs GPU measurements.

@@ -9,7 +9,8 @@
 #
 # Env: RESULTS_DIR (default ~/ci-results), WORKERS (playwright workers per
 # shard, default 2), COLLECT=0 (fire and forget: no wait, no artifact copy),
-# GPU=1 (Chromium on the node's Intel iGPU via the device plugin), SPECS
+# GPU=1|0 (Chromium on the node's Intel iGPU via the device plugin; default 1
+# for e2e/nightly/responsive, 0 for unit/sims), SPECS
 # (space-separated spec files), PROJECT (e.g. chromium), CPU_REQ/CPU_LIM
 # (per-shard CPU, default 2/4; never above 4, thermal cap).
 # Exit status: 0 if every shard passed, 1 otherwise, 2 on usage errors.
@@ -42,7 +43,9 @@ esac
 # 100-102 C); extra shards queue. Best-effort CI, GitHub CI is the gate.
 parallelism=$(( shards < 2 ? shards : 2 ))
 workers="${WORKERS:-2}"
-gpu="${GPU:-0}"
+# Browser suites default to the iGPU (10x faster, ~10-20 C cooler, measured
+# 2026-10-03); GPU=0 forces the CPU/SwiftShader fallback.
+case "$suite" in e2e|nightly|responsive) gpu="${GPU:-1}" ;; *) gpu="${GPU:-0}" ;; esac
 cpu_req="${CPU_REQ:-2}"; cpu_lim="${CPU_LIM:-4}"
 [[ "$cpu_lim" =~ ^[1-4]$ ]] || { echo "CPU_LIM must be 1..4 (thermal cap)"; exit 2; }
 if [ "$gpu" = 1 ]; then
