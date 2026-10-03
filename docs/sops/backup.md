@@ -330,7 +330,11 @@ download failures. Alerts: `ICloudBackupSyncStalled` (6h warning / 24h
 critical), `ICloudBackupAuthRequired`, `ICloudBackupPersistentDownloadFailures`
 (info) and `ICloudBackupDeploymentUnavailable`, each with absence/probe guards.
 It keys on the ABSENCE of the success line, so a wedged process (no log lines at
-all) still ages into `SyncStalled`.
+all) still ages into `SyncStalled`. Since 2026-10-03 it covers iCloud **Drive**
+the same way (`Drive synced`): `ICloudDriveSyncStalled` (12h warning / 24h
+critical, sized from the observed 5-8h drive cadence),
+`ICloudDrivePersistentDownloadFailures` (info) and per-account absence guards
+— see `docs/sops/icloud-docker-reauth.md` §9.
 
 **File-recency backstop.** The hourly `icloud-backup-freshness` CronJob
 walks the backup share from OUTSIDE the sync processes and publishes the newest

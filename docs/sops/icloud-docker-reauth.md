@@ -1,8 +1,8 @@
 # SOP: iCloud Docker Re-authentication (2FA session recovery)
 
 > Description: Recover the Apple session of any `icloud-docker-*` instance (mandarons/icloud-drive) when it expires, including the modern-2FA flow that the bundled `icloud` CLI gets wrong, and the quota-exhaustion mitigation (stop the retry loop before re-auth).
-> Version: `2026.09.28`
-> Last Updated: `2026-09-28`
+> Version: `2026.10.03`
+> Last Updated: `2026-10-03`
 > Owner: `operator`
 
 ---
@@ -510,6 +510,71 @@ Reading the alerts:
   `DeploymentUnavailable` all fire by design: silence them for the SOP's
   duration rather than editing the rules.
 
+### iCloud Drive — the drive-sync alerts (since 2026-10-03)
+
+The same probe run reads the **Drive** phase of each instance's log (group
+`icloud-backup.drive` in the same rules file). Both accounts have a `drive:`
+section (`sync_interval: 3600`, `remove_obsolete: false`) as of 2026-10-03.
+
+| Gauge | Meaning | Alert |
+|---|---|---|
+| `icloud_drive_sync_last_success_timestamp_seconds` | newest `Drive synced` line | `ICloudDriveSyncStalled` 12h warning / `…Critical` 24h |
+| `icloud_drive_items_failed` | failed downloads in the newest completed drive cycle (sum of its `Parallel downloads completed: S successful, F failed` lines) | — |
+| `icloud_drive_failing_item_since_timestamp_seconds` | how long an item still failing has failed on every drive cycle | `ICloudDrivePersistentDownloadFailures` (info, 24h) |
+
+Plus per-account absence guards `ICloudDriveSyncMetricMissing{,Andrea}`. If
+Drive is ever disabled for an account, remove that account's guard in the
+same commit, or it fires forever.
+
+**Why 12h and not "3 missed hourly cycles".** icloud-docker runs Drive and
+Photos in one serial loop, and its scheduler only counts *sleep* time against
+the drive countdown (time spent syncing photos is never subtracted). With
+`drive 3600 / photos 500` that yields a `Drive synced` every **~5–8 h**
+(measured 2026-09-27..10-03: mu 4.8–8.1 h, andrea ~5 h; one mu drive cycle can
+itself take ~2 h). A 3 h threshold would fire permanently. 12 h is 1.5× the
+longest healthy gap. The scheduler is unchanged upstream, so a version bump
+does not change this.
+
+`Drive synced` closes a cycle **even when every download in it failed** —
+exactly like `Photos synced` — which is why failures are a separate signal.
+Known persistent failure classes (2026-10-03, account mu, 10 items per cycle):
+Apple package formats (Numbers/Pages/Keynote/GarageBand bundles) that the
+running image cannot unpack (`Unhandled file type - cannot unpack the package
+application/octet-stream`, or an `[Errno 2]` on the `.zip` rename), and one
+item Apple answers with `Unknown reason`. Upstream fixed the package handling
+in icloud-docker v2.1.0 (2026-10-01, PRs #526/#461/#473/#550); our pinned
+`main` digest predates it, and v2.x is a major bump that needs a plan.
+
+**Listing the failing items (operator terminal only — the names are personal
+documents: never paste them into findings, commits, alerts or chat).**
+
+```bash
+export PATH="$HOME/.local/share/mise/shims:$PATH"
+# Explicitly named failures (Errno / Unknown reason):
+kubectl -n backup logs deploy/icloud-docker-$INSTANCE -c app --since=12h \
+  | grep 'drive_file_download.py' | grep 'Failed to download' | sort | uniq -c
+# Package errors name no file: the items are the `Downloading ...` lines of the
+# batch that ends in `0 successful, N failed`.
+kubectl -n backup logs deploy/icloud-docker-$INSTANCE -c app --since=12h \
+  | grep -E 'Starting parallel downloads|drive_file_download.py :: [0-9]+ :: Downloading|Parallel downloads completed'
+# What the probe pushed (counts only):
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 >/dev/null &
+for Q in 'time() - max by (account) (icloud_drive_sync_last_success_timestamp_seconds)' \
+         'max by (account) (icloud_drive_items_failed)' \
+         'time() - max by (account) (icloud_drive_failing_item_since_timestamp_seconds)'; do
+  echo "== $Q"
+  curl -s http://localhost:9090/api/v1/query --data-urlencode "query=$Q" \
+    | python3 -c 'import sys, json
+for r in json.load(sys.stdin)["data"]["result"]:
+    print(" ", r["metric"]["account"], r["value"][1])'
+done
+```
+
+Expected: drive last-success age under `43200` s (12 h); `icloud_drive_items_failed`
+`0` for a clean library. The parser and rules are pinned by
+`runbooks/tests/test-icloud-drive-probe.py` (synthetic logs + negative controls
++ `promtool test rules`).
+
 ### Backstop — the file-recency alert (`ICloudBackupPhotosStale`, 14 days)
 
 `CronJob/icloud-backup-freshness` still walks the backup share hourly and
@@ -657,3 +722,14 @@ flux resume helmrelease icloud-docker-$INSTANCE -n backup
   file-recency rule is kept as a 14-day backstop; `ICloudBackupPhotosStaleCritical`
   was removed. §9 rewritten; the silent-wedge lesson of 2026.09.20 is preserved
   (the new detector keys on the ABSENCE of the success line, not on error lines).
+
+- `2026.10.03`: **Extended §9 to iCloud Drive.** Nothing alerted on Drive: on
+  2026-10-03 account mu had 10 Drive items failing on every cycle (Apple
+  package bundles the running image cannot unpack, plus one `Unknown reason`
+  item) while `Drive synced` kept being logged. `CronJob/icloud-sync-probe` now
+  also pushes `icloud_drive_sync_last_success_timestamp_seconds`,
+  `icloud_drive_items_failed` and `icloud_drive_failing_item_since_timestamp_seconds`
+  (counts only, no file names), with `ICloudDriveSyncStalled` (12h/24h, sized
+  from the measured 5-8h drive cadence, not the 3600s config),
+  `ICloudDrivePersistentDownloadFailures` (info) and per-account absence
+  guards. Added the operator-only listing recipe.

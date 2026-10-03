@@ -451,3 +451,127 @@ spec:
             category: backup
             component: icloud-docker
             severity: warning
+    # ------------------------------------------------------------------------
+    # iCLOUD DRIVE SYNC HEALTH (added 2026-10-03).
+    #
+    # Same probe (CronJob/icloud-sync-probe), same pushgateway group, same
+    # never-invent-a-success contract as the photo group above, keyed on the
+    # app's `Drive synced` line. Until this group existed nothing covered
+    # Drive: on 2026-10-03 account mu had 10 Drive items failing on EVERY
+    # cycle for days (Apple package types icloud-docker cannot unpack, plus one
+    # item answering `Unknown reason`) while `Drive synced` kept being logged.
+    #
+    # THRESHOLDS ARE SIZED FROM THE OBSERVED CADENCE, NOT THE CONFIG. Both
+    # accounts set drive sync_interval 3600, but icloud-docker runs drive and
+    # photos in ONE serial loop and the drive countdown only advances while the
+    # loop sleeps between photo cycles. Measured 2026-09-27..10-03: `Drive
+    # synced` every 4.8-8.1h (mu), ~4.8-5h (andrea); a single mu drive cycle
+    # can itself take ~2h. A 3h threshold ("3 missed hourly cycles") would
+    # therefore fire permanently. 12h = 1.5x the longest observed healthy gap;
+    # critical at 24h.
+    #
+    # NO FILE NAMES ANYWHERE (labels, annotations): Drive holds personal
+    # documents and this repo is public. The probe pushes counts only; the SOP
+    # (docs/sops/icloud-docker-reauth.md section 9) shows how to list the items.
+    - interval: 1m
+      name: icloud-backup.drive
+      rules:
+        - alert: ICloudDriveSyncStalled
+          annotations:
+            summary: iCloud Drive sync for account {{ $labels.account }} has not completed a cycle in {{ $value | humanizeDuration }}
+            description: |
+              icloud-docker-{{ $labels.account }} last logged `Drive synced`
+              {{ $value | humanizeDuration }} ago; a healthy instance does so
+              every ~5-8h (the configured 3600s interval only counts loop sleep
+              time). Check the photo alerts first: the two share one process,
+              so ICloudBackupSyncStalled / ICloudBackupAuthRequired /
+              ICloudBackupDeploymentUnavailable firing for the same account
+              explain this one. If photos are healthy and only Drive stalls,
+              the drive phase itself is hanging (a long batch or a blocked
+              download): read the pod log from the last `Syncing drive...`.
+              Triage + recovery: docs/sops/icloud-docker-reauth.md section 9.
+          expr: |
+            time() - max by (account) (icloud_drive_sync_last_success_timestamp_seconds) > 60 * 60 * 12
+          for: 15m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+        - alert: ICloudDriveSyncStalledCritical
+          annotations:
+            summary: iCloud Drive sync for account {{ $labels.account }} has been broken for over 24h ({{ $value | humanizeDuration }})
+            description: |
+              icloud-docker-{{ $labels.account }} has not logged `Drive synced`
+              for over 24h (healthy: every ~5-8h). Drive changes since then
+              exist only in iCloud. Triage is in ICloudDriveSyncStalled's
+              description and docs/sops/icloud-docker-reauth.md section 9.
+          expr: |
+            time() - max by (account) (icloud_drive_sync_last_success_timestamp_seconds) > 60 * 60 * 24
+          for: 15m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: critical
+        # Item-level, same semantics as ICloudBackupPersistentDownloadFailures:
+        # the oldest start of an unbroken run of failed cycles among items still
+        # failing; a different item failing each cycle does not accumulate.
+        # Bounded by the 48h log window, so it can only fire late, never early.
+        - alert: ICloudDrivePersistentDownloadFailures
+          annotations:
+            summary: "{{ $labels.account }}: iCloud Drive items have failed to download on every cycle for {{ $value | humanizeDuration }}"
+            description: |
+              At least one iCloud Drive item of icloud-docker-{{ $labels.account }}
+              has failed in every completed drive cycle for
+              {{ $value | humanizeDuration }}; the rest of Drive is still syncing
+              (otherwise ICloudDriveSyncStalled would fire). Count per cycle:
+              icloud_drive_items_failed. Known cause classes: Apple package
+              formats (Numbers/Pages/Keynote/GarageBand) that icloud-docker
+              cannot unpack (`Unhandled file type - cannot unpack the package
+              application/octet-stream`) and items Apple answers with
+              `Unknown reason`. List them with the kubectl logs grep in
+              docs/sops/icloud-docker-reauth.md section 9 (do not paste file
+              names into findings, commits or alerts).
+          expr: |
+            (time() - max by (account) (icloud_drive_failing_item_since_timestamp_seconds) > 60 * 60 * 24)
+              and on (account) max by (account) (icloud_drive_items_failed) > 0
+          for: 30m
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: info
+        # INERTNESS GUARDS, one per account WITH DRIVE ENABLED. Both accounts'
+        # configs carry a `drive:` section (sync_interval 3600) as of
+        # 2026-10-03. If Drive is ever disabled for an account, remove that
+        # account's guard in the same commit -- it would otherwise fire
+        # forever. Do NOT gate with `and up{...}` (permanently inert, see the
+        # freshness group).
+        - alert: ICloudDriveSyncMetricMissing
+          annotations:
+            summary: iCloud Drive sync gauge for account mu is not present in Prometheus
+            description: |
+              icloud_drive_sync_last_success_timestamp_seconds has no series for
+              account mu; ICloudDriveSyncStalled is BLIND for it. Either
+              CronJob/icloud-sync-probe (namespace backup) has not run
+              successfully, or pushgateway lost its state AND the probe has
+              found no `Drive synced` line in the last 48h of logs -- which, if
+              the probe itself is healthy, means Drive really is not
+              completing. Check the latest icloud-sync-probe Job log.
+          expr: absent(icloud_drive_sync_last_success_timestamp_seconds{account="mu"})
+          for: 1h
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning
+        - alert: ICloudDriveSyncMetricMissingAndrea
+          annotations:
+            summary: iCloud Drive sync gauge for account andrea is not present in Prometheus
+            description: |
+              icloud_drive_sync_last_success_timestamp_seconds has no series for
+              account andrea; ICloudDriveSyncStalled is BLIND for it. See
+              ICloudDriveSyncMetricMissing for triage -- same probe, same causes.
+          expr: absent(icloud_drive_sync_last_success_timestamp_seconds{account="andrea"})
+          for: 1h
+          labels:
+            category: backup
+            component: icloud-docker
+            severity: warning

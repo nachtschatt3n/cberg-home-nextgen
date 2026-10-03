@@ -28,6 +28,34 @@ data:
                                                       than the newest success
       icloud_sync_probe_last_success_timestamp_seconds  this probe observed the account
 
+    and, since 2026-10-03, the same three facts for iCloud DRIVE (analyse_drive):
+
+      icloud_drive_sync_last_success_timestamp_seconds  newest "Drive synced" line
+      icloud_drive_items_failed                         failed downloads, newest completed
+                                                        drive cycle (sum of the cycle's
+                                                        "Parallel downloads completed:
+                                                        S successful, F failed" lines)
+      icloud_drive_failing_item_since_timestamp_seconds same run-start logic as photos
+
+    Drive specifics (verified against live logs 2026-10-03):
+      * A drive cycle is "Syncing drive..." .. "Drive synced", logged by the same
+        serial loop as photos, so the two never interleave. "Drive synced" closes
+        the cycle even when every download in it failed -- exactly like photos.
+      * Observed cadence is every 5-8h, NOT the configured sync_interval of 3600s:
+        the drive countdown only advances while the loop sleeps between photo
+        cycles. Alert thresholds are sized from that observation.
+      * Package downloads (.numbers, .band ...) fail with "Unhandled file type -
+        cannot unpack the package application/octet-stream", a line that names NO
+        file. Item identity therefore comes from the batch: every "Downloading
+        <path> ..." between "Starting parallel downloads" and "Parallel downloads
+        completed" is attributed as failed when the batch reports 0 successful;
+        in a mixed batch only paths with their own "Failed to download <path>"
+        line are. Failures that cannot be attributed still COUNT in items_failed
+        but cannot extend a persistence run (that can only make the info alert
+        late, never early).
+      * File names are personal documents (public repo, ES-shipped Job logs):
+        they are used as in-memory keys only and never printed or pushed.
+
     Design rules (read before "simplifying"):
       * Timestamps, never ages: pushgateway has no TTL, so an age would freeze when
         this probe dies. A timestamp keeps ageing in PromQL.
@@ -74,6 +102,15 @@ data:
         r"|Authentication required for Account|\(421\)|INCORRECT_PCS_KEY",
         re.IGNORECASE,
     )
+
+
+    RE_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+    # "Syncing drive..." only -- NOT config_logging's "Syncing drive every 3600 seconds."
+    RE_DRIVE_START = re.compile(r":: Syncing drive\.\.\.")
+    RE_DRIVE_SUCCESS = re.compile(r":: Drive synced")
+    RE_DRIVE_BATCH_START = re.compile(r":: Starting parallel downloads with \d+ threads for \d+ files")
+    RE_DRIVE_BATCH_END = re.compile(r":: Parallel downloads completed: (\d+) successful, (\d+) failed")
+    RE_DRIVE_DOWNLOADING = re.compile(r"drive_file_download\.py :: \d+ :: Downloading (.+) \.\.\.$")
 
 
     def parse_ts(line):
@@ -141,6 +178,82 @@ data:
                         break
                 since = min(since, start)
             out["icloud_sync_failing_item_since_timestamp_seconds"] = since
+        return out
+
+
+    def failing_since(cycles, now):
+        """Oldest start of an unbroken run of failed cycles among items failing in
+        the newest cycle; `now` when nothing identifiable is failing."""
+        since = now
+        for path in cycles[-1][1]:
+            start = cycles[-1][0]
+            for end_ts, fset in reversed(cycles):
+                if path in fset:
+                    start = end_ts
+                else:
+                    break
+            since = min(since, start)
+        return since
+
+
+    def analyse_drive(containers, now):
+        """Drive counterpart of analyse(); same contract (omit what the logs do
+        not establish, never invent a success). See the module docstring."""
+        last_success = None
+        cycles = []  # list of (end_ts, failed_count, set_of_attributed_paths)
+
+        for lines in containers:
+            in_cycle = False
+            failed_count = 0
+            failed = set()
+            batch = None  # list of paths while inside a parallel-download batch
+            batch_lines = []
+            for raw in lines:
+                ts = parse_ts(raw)
+                if ts is None:
+                    continue
+                line = RE_ANSI.sub("", raw).rstrip()
+                if RE_DRIVE_START.search(line):
+                    in_cycle, failed_count, failed, batch = True, 0, set(), None
+                    continue
+                if not in_cycle:
+                    if RE_DRIVE_SUCCESS.search(line):
+                        last_success = ts  # a success line without a seen start
+                    continue
+                if RE_DRIVE_BATCH_START.search(line):
+                    batch, batch_lines = [], []
+                    continue
+                m = RE_DRIVE_DOWNLOADING.search(line)
+                if m and batch is not None:
+                    batch.append(m.group(1))
+                    continue
+                m = RE_DRIVE_BATCH_END.search(line)
+                if m:
+                    ok, bad = int(m.group(1)), int(m.group(2))
+                    failed_count += bad
+                    if bad and batch:
+                        if ok == 0:
+                            failed.update(batch)
+                        else:
+                            failed.update(p for p in batch
+                                          if any("Failed to download " + p in b for b in batch_lines))
+                    batch = None
+                    continue
+                if batch is not None:
+                    batch_lines.append(line)
+                if RE_DRIVE_SUCCESS.search(line):
+                    last_success = ts
+                    cycles.append((ts, failed_count, failed))
+                    in_cycle = False
+            # An open cycle at container end (crash, wedge) is dropped, as for photos.
+
+        out = {}
+        if last_success is not None:
+            out["icloud_drive_sync_last_success_timestamp_seconds"] = last_success
+        if cycles:
+            out["icloud_drive_items_failed"] = cycles[-1][1]
+            out["icloud_drive_failing_item_since_timestamp_seconds"] = failing_since(
+                [(c[0], c[2]) for c in cycles], now)
         return out
 
 
@@ -218,9 +331,14 @@ data:
                 now = int(time.time())
                 containers = collect(kube, account)
                 metrics = analyse(containers, now) if containers is not None else {}
+                if containers is not None:
+                    metrics.update(analyse_drive(containers, now))
                 if containers is not None and "icloud_sync_last_success_timestamp_seconds" not in metrics:
                     print(f"account={account} NO 'Photos synced' line in the last "
                           f"{LOG_WINDOW_SECONDS // 3600}h of logs; last success left to age")
+                if containers is not None and "icloud_drive_sync_last_success_timestamp_seconds" not in metrics:
+                    print(f"account={account} NO 'Drive synced' line in the last "
+                          f"{LOG_WINDOW_SECONDS // 3600}h of logs; last drive success left to age")
                 shown = {k: (v if not k.endswith("timestamp_seconds") else f"{v} (age {now - v}s)")
                          for k, v in metrics.items()}
                 print(f"account={account} {shown}")

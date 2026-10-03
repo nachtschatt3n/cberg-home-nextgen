@@ -177,7 +177,10 @@ controls:
         while pushgateway keeps serving its last push, and
         ICloudBackupSyncProbeJobFailed names the failed Job. The probe never
         invents a success: with no `Photos synced` line it omits the gauge and
-        the previous timestamp keeps ageing into ICloudBackupSyncStalled."
+        the previous timestamp keeps ageing into ICloudBackupSyncStalled.
+        Since 2026-10-03 the same probe also covers iCloud DRIVE (`Drive
+        synced`, group icloud-backup.drive), guarded per account by
+        ICloudDriveSyncMetricMissing{,Andrea}."
 
   - id: kmsg-heartbeat
     kind: k8s-daemonset
