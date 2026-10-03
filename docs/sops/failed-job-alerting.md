@@ -3,16 +3,19 @@
 > Description: How `KubeJobFailed` pages after the underlying outage is already
 > over, why that happens, how to tell a real resolve from a rotation artifact,
 > and when a scoped silence is (and is not) the right stopgap.
-> Version: `2026.09.05`
-> Last Updated: `2026-09-05`
+> Version: `2026.10.03`
+> Last Updated: `2026-10-03`
 > Owner: `Platform`
 
 ---
 
 ## 1) Description
 
-`KubeJobFailed` (kube-prometheus-stack's default `kube_job_failed{...} > 0`
-rule) keys on the **existence of a failed Job object**, not on whether the
+`KubeJobFailed` (kube-prometheus-stack's `kube_job_failed{...} > 0` rule;
+since 2026-10-03 the stock copy is disabled via `defaultRules.disabled` and
+re-declared under the same name with `namespace!="ci-runner"` in
+`kubernetes/apps/monitoring/kube-prometheus-stack/app/ci-runner-alerts.yaml`,
+because a red CI test run fails its Job by design) keys on the **existence of a failed Job object**, not on whether the
 underlying condition is still true. Kubernetes garbage-collects that object on
 its own schedule (`failedJobsHistoryLimit` count-based rotation, or
 `ttlSecondsAfterFinished` time-based cleanup) — a schedule that has nothing to
@@ -40,7 +43,7 @@ recurred.
 | Setting | Value |
 |---------|-------|
 | Namespace | varies per CronJob (examples below: `databases`, `office`) |
-| Source of truth | the CronJob's `jobTemplate.spec.ttlSecondsAfterFinished` + the PrometheusRule that alerts on it |
+| Source of truth | the CronJob's `jobTemplate.spec.ttlSecondsAfterFinished` + the PrometheusRule that alerts on it (`KubeJobFailed` itself: `kubernetes/apps/monitoring/kube-prometheus-stack/app/ci-runner-alerts.yaml` — edit there, not `defaultRules`) |
 | Critical dependency | `kube-state-metrics` (`kube_job_failed`), Alertmanager |
 | Closes | sweep finding `F-d57b90bd` |
 
@@ -379,6 +382,9 @@ the Job's execution behavior. Shrinking it later is always safe.
 
 ## Version History
 
+- `2026.10.03`: `KubeJobFailed` is now a re-declared copy excluding the
+  `ci-runner` namespace (red test runs are results, not faults; runner infra
+  alerts as `CIRunner*` instead). No silence is needed for ci-runner Jobs.
 - `2026.09.05`: Initial SOP. Closes sweep finding `F-d57b90bd`. Documents
   the `KubeJobFailed` object-presence flapping pattern observed on the
   `sweep-heartbeat` CronJob (8-day continuous failure, ~15-minute

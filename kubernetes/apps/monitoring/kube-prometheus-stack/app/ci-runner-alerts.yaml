@@ -8,6 +8,10 @@
 # alert names (routing, silences and docs/sops/failed-job-alerting.md keep
 # working) with one narrow exclusion each:
 #
+# These are inline copies of the stock rules (chart 91.5.2): on every
+# kube-prometheus-stack minor/major bump, diff them against the chart's
+# kubernetes-apps / kubernetes-resources rules so upstream fixes are not lost.
+#
 #   KubeJobFailed     - a red test run fails its Job by design (every shard
 #                       fails its index). That is a test RESULT, not a fault.
 #                       Excluded: namespace="ci-runner". Every other namespace
@@ -19,7 +23,9 @@
 #                       (value -1000): on a node loss every production pod
 #                       (priority >= 0) preempts them, so they never consume
 #                       the N-1 headroom this alert protects. Excluded: pods
-#                       whose kube_pod_info priority_class is "ci-low".
+#                       in namespace ci-runner whose kube_pod_info
+#                       priority_class is "ci-low" (namespace-pinned: the
+#                       cluster-scoped class could otherwise hide any pod).
 #                       Everything else is the stock expression.
 #   KubeQuotaAlmostFull / KubeQuotaFullyUsed (info)
 #                     - ci-runner-quota is a deliberate capacity CAP sized to
@@ -83,7 +89,7 @@ spec:
                   * on (namespace, pod, cluster) group_left ()
                   max by (namespace, pod, cluster) (kube_pod_status_phase{phase=~"Pending|Running"} == 1)
                   unless on (namespace, pod, cluster)
-                  max by (namespace, pod, cluster) (kube_pod_info{job="kube-state-metrics", priority_class="ci-low"})
+                  max by (namespace, pod, cluster) (kube_pod_info{job="kube-state-metrics", namespace="ci-runner", priority_class="ci-low"})
                 )
                 - sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics", resource="cpu"}) > 0
               )
@@ -97,7 +103,7 @@ spec:
                 * on (namespace, pod, cluster) group_left ()
                 max by (namespace, pod, cluster) (kube_pod_status_phase{phase=~"Pending|Running"} == 1)
                 unless on (namespace, pod, cluster)
-                max by (namespace, pod, cluster) (kube_pod_info{job="kube-state-metrics", priority_class="ci-low"})
+                max by (namespace, pod, cluster) (kube_pod_info{job="kube-state-metrics", namespace="ci-runner", priority_class="ci-low"})
               )
               - (
                 sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics", resource="cpu"})
