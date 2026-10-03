@@ -482,7 +482,7 @@ quarterly.
 
 ## 📦 Applications
 
-~126 apps across 18 namespaces. Full inventory with per-app purpose, exposure
+~127 apps across 19 namespaces. Full inventory with per-app purpose, exposure
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 
@@ -544,6 +544,9 @@ reloader · spegel
 - dev (3): absenty · andreamosteller · opencode-andreamosteller  
 - prod (6): absenty · andreamosteller · gas-price-monitor · rainbow-rescue · splitfairy · the-ninth-banner  
 - default (2): echo-server · homepage (the homepage app dashboard)
+
+### 🧪 CI runner (`ci-runner` — 1)
+- the-ninth-banner-tests: sharded Kubernetes Jobs for The Ninth Banner's test suites, triggered from the Mac (`scripts/ninth-banner-test.sh`, [SOP](docs/sops/ci-runner.md))
 
 ### 🏢 Showcase applications (`my-software-showcase` — 15)
 Legacy/customer-facing apps kept running for reference. All internal-only:

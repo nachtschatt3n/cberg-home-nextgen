@@ -8,7 +8,7 @@
 #   shards  default: e2e/responsive 3, sims 4 (one sweep each), unit 1 (forced)
 #
 # Env: RESULTS_DIR (default ~/ci-results), WORKERS (playwright workers per
-# shard, default 4), COLLECT=0 (fire and forget: no wait, no artifact copy).
+# shard, default 2), COLLECT=0 (fire and forget: no wait, no artifact copy).
 # Exit status: 0 if every shard passed, 1 otherwise, 2 on usage errors.
 # Full procedure, security model and troubleshooting: docs/sops/ci-runner.md
 set -euo pipefail
@@ -31,7 +31,7 @@ case "$suite" in
 esac
 [[ "$shards" =~ ^[1-9][0-9]?$ ]] || { echo "shards must be 1..99"; exit 2; }
 parallelism=$(( shards < 3 ? shards : 3 ))
-workers="${WORKERS:-4}"
+workers="${WORKERS:-2}"   # 4 per 6-CPU shard starved Chromium (timing tests failed); see SOP
 collect="${COLLECT:-1}"
 
 sha="$(gh api "repos/$GH_REPO/commits/$ref_in" --jq .sha)" || { echo "cannot resolve ref '$ref_in'"; exit 2; }

@@ -28,11 +28,19 @@ The Mac mini also hosts the shared Ollama runtime and many agent sessions. Paral
 | Trigger | `scripts/ninth-banner-test.sh <ref> <unit\|e2e\|responsive\|sims> [shards]` |
 | Image | `mcr.microsoft.com/playwright:v1.63.0-noble` (Node 24, git, Chromium/Firefox/WebKit baked in). **Keep in lockstep with `@playwright/test` in the game's `package-lock.json`** |
 | Job shape | Indexed Job, `completions = shards`, `parallelism = min(shards, 3)`, `backoffLimitPerIndex: 0`, `maxFailedIndexes = shards` (no retries, one failing shard never stops the others), topology spread over `kubernetes.io/hostname`, `activeDeadlineSeconds: 5400`, `ttlSecondsAfterFinished: 3600` |
-| Per shard | requests 3 CPU / 6Gi / 8Gi ephemeral; limits 6 CPU / 10Gi / 16Gi; Playwright `--workers=4` (`WORKERS`) |
+| Per shard | requests 3 CPU / 6Gi / 8Gi ephemeral; limits 6 CPU / 10Gi / 16Gi; Playwright `--workers=2` (`WORKERS`, default 2 — see Troubleshooting) |
 | Quota | 4 pods, requests 9.5 CPU / 19Gi, limits 19 CPU / 32Gi; 0 Services, 0 PVCs. A second concurrent run queues (Pending) rather than squeezing production |
 | Egress | DNS (kube-dns, L7 DNS proxy) + TCP 443 to `github.com` and `registry.npmjs.org` only. Ingress: deny all |
 | Credential | `the-ninth-banner-git-credential` (dockerconfigjson). Mounted **only** into the `clone` init container, read by `git-askpass.sh`; never in env, logs, or the test container |
 | Results | `~/ci-results/<job>/` on the Mac: `summary.txt`, `shard-N.log`, `shard-N/{junit.xml, playwright-report/, test-results/ (traces), blob-report/, reports/, exit-code, commit}` |
+
+Measured runtimes (2026-10-03, commit `46eaae3`, wall clock from the trigger):
+
+| Run | Result | Wall time |
+|---|---|---|
+| `unit` (1 shard) | PASS, 38 files / 437 tests (+typecheck, lint, data, build, security) | 52 s incl. first image pull; suite 14 s |
+| `e2e` 3 shards, `WORKERS=2` | PASS 77/77, 0 flaky, one shard per node | 9 min 10 s (longest shard 8.9 min) |
+| `e2e` 3 shards, `WORKERS=4` | FAIL (CPU-starved timing tests) | 14 min 35 s |
 
 Suites:
 
@@ -115,6 +123,7 @@ kubectl logs -n ci-runner <pod> -c clone
 | `clone` init fails with 403/404 | The credential cannot read the private repo, or the SHA was force-pushed away. Check the PAT scope (needs repo read). See Security Check |
 | Pods `Pending`, event `exceeded quota` | Another run is still holding the quota (it waits up to 900s for collection). Wait, or delete the old Job |
 | `npm ci` fails with `ENOTFOUND`/`ETIMEDOUT` | A package now resolves from a host other than `registry.npmjs.org`. Add that FQDN to `networkpolicy.yaml` after review |
+| e2e timing tests fail (fps floor, clash fast-forward < 3000 ms, 120 s timeouts) while the pod sits at its 6-CPU limit | CPU oversubscription: Chromium renders in software here. Measured 2026-10-03 at `46eaae3`: `WORKERS=4` gave 3/3 shards FAIL (12 failed, 4 flaky, 14.6 min); `WORKERS=2` gave 77/77 passed, 0 flaky, 9.2 min. Keep 2 (the same per-worker CPU as GitHub's 4-vCPU runner) |
 | Shard OOMKilled | Lower `WORKERS`, or raise the runner memory limit in the template (keep the quota consistent) |
 | `responsive` rc=2 | `playwright.responsive.config.ts` is not in the repo at that ref yet |
 | Script hangs on a shard | Check `kubectl describe pod`; the deadline is 90 min (`activeDeadlineSeconds`) |
@@ -146,7 +155,8 @@ kubectl -n kube-system exec ds/cilium -- cilium-dbg monitor --type drop
 - `kubectl get secret -n ci-runner` shows exactly one Secret (the git credential).
 - `kubectl get rolebinding,role -n ci-runner` shows none. The ServiceAccount has `automountServiceAccountToken: false`.
 - The CiliumNetworkPolicy `ci-runner-lockdown` exists with `endpointSelector: {}`.
-- **Credential choice:** the runner reuses the shared GHCR PAT (ciphertext copied, never decrypted). Least privilege would be a read-only **deploy key** on `the-ninth-banner` alone. Do NOT substitute the Flux git token or the MCP `GITHUB_TOKEN`: both are account-wide and write-capable, and this namespace runs third-party install scripts.
+- **Credential choice (owner decision 2026-10-03: reuse an existing token):** the runner reuses the shared GHCR pull PAT (the same ciphertext as `ghcr-the-ninth-banner` / arag-web, copied, never decrypted). The first clone (2026-10-03) proved it can read a **private repo's contents**, so it is not read:packages-only: it carries `repo` scope (classic PAT, account-wide, write-capable). The mitigations are structural: it is mounted only into the `clone` init container, which runs nothing but `git fetch`, and npm install scripts and tests run in a container that never has it. Least privilege would still be a read-only **deploy key** on `the-ninth-banner` alone (no expiry, one repo, read-only). Switch when convenient. Do NOT substitute the Flux git token or the MCP `GITHUB_TOKEN`, which are account-wide too.
+- Egress verified 2026-10-03 from a live runner pod: `github.com` and `registry.npmjs.org` open; `example.com`, an in-cluster Service (Prometheus) and the LAN (Ollama host) blocked. The runner container has no `/secrets` mount and no token in env, and runs as uid 1001.
 
 ---
 
