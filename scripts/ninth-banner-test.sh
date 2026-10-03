@@ -13,6 +13,11 @@
 # Full procedure, security model and troubleshooting: docs/sops/ci-runner.md
 set -euo pipefail
 
+# The whole body is a function that is called on the LAST line, so bash has
+# parsed the complete file before anything runs. bash otherwise reads a script
+# incrementally, and an edit to this file mid-run (shared worktree: other
+# sessions edit it) corrupts the running instance.
+main() {
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TEMPLATE="$REPO_ROOT/kubernetes/apps/ci-runner/the-ninth-banner-tests/job-template.yaml.tpl"
 GH_REPO="nachtschatt3n/the-ninth-banner"
@@ -97,3 +102,6 @@ if ls "$dest"/shard-*/blob-report/*.zip >/dev/null 2>&1; then
 fi
 echo "the Job and its pods self-delete 1h after finishing (ttlSecondsAfterFinished=3600)"
 [ "$fails" -eq 0 ]
+}
+
+main "$@"
