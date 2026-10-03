@@ -27,7 +27,7 @@ spec:
   values:
     image:
       repository: louislam/uptime-kuma
-      tag: 2.5.5
+      tag: 2.5.5-slim-rootless
     env:
       - name: UPTIME_KUMA_DISABLE_FRAME_SAMEORIGIN
         value: "true"
@@ -117,3 +117,19 @@ spec:
 
     strategy:
       type: Recreate
+
+    # Rootless (plan uptime-kuma-2.5.5-slim-rootless). The image's USER is node
+    # (uid/gid 1000); fsGroup makes the Longhorn PVC group-writable for it.
+    podSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      fsGroupChangePolicy: OnRootMismatch
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+        # /usr/bin/ping carries file cap cap_net_raw=ep: without NET_RAW in the
+        # bounding set execve(ping) fails EPERM and every ping monitor goes DOWN.
+        add: [NET_RAW]
