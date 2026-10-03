@@ -196,8 +196,24 @@ spec:
             summary: "ARAG scrape is failing repeatedly"
             description: "The arag-scrape pipeline on {{ $labels.instance }} has had {{ $value | printf \"%.0f\" }} errors in the last 6 hours."
 
+        # Emulator health is split three ways since the 2026-10-03 menubar-app
+        # build, which exports arag_scrape_emulator_process_up (qemu alive,
+        # regardless of adb) next to arag_scrape_emulator_up (adb has a usable
+        # device), and relaunches a dead emulator itself (idle watchdog, every
+        # 15 min). Motivation: on 2026-10-03 the qemu process exited at 01:54Z
+        # and 07:23Z under host load ~150-280 (parallel Playwright runs) and
+        # stayed dead until the next 6h cycle cold-booted it.
+        #   Down         = DEAD (no process, or no adb device) and auto-restart
+        #                  did not recover it within 30m
+        #   Unresponsive = process alive but adb cannot use it (CPU starvation)
+        #   Flapping     = it keeps dying and being relaunched
+        # Down uses `unless`, not `and process_up == 0`, so it still fires on a
+        # build that does not export process_up. Unresponsive and Flapping have
+        # no absent() guard of their own: AragScrapeDown covers the
+        # unreachable-target case. Known gap: a reachable build that does not
+        # export process_up / auto_restarts_total leaves both rules inert.
         - alert: AragScrapeEmulatorDown
-          expr: arag_scrape_emulator_up == 0
+          expr: arag_scrape_emulator_up == 0 unless on(instance, job) arag_scrape_emulator_process_up == 1
           for: 30m
           labels:
             severity: warning
@@ -205,7 +221,47 @@ spec:
             component: arag-scrape
           annotations:
             summary: "ARAG scrape Android emulator is down"
-            description: "The Android emulator backing the arag-scrape pipeline on {{ $labels.instance }} has been reported down for more than 30 minutes. Scrapes cannot run without it."
+            description: >-
+              The Android emulator backing the arag-scrape pipeline on
+              {{ $labels.instance }} has been DEAD (no qemu process, or no adb
+              device) for more than 30 minutes, and the app's auto-restart
+              (attempted every 15 min while idle) did not bring it back. Scrapes
+              cannot run without it. Check data/logs/emulator.log on the Mac mini.
+
+        - alert: AragScrapeEmulatorUnresponsive
+          expr: arag_scrape_emulator_up == 0 and on(instance, job) arag_scrape_emulator_process_up == 1
+          for: 60m
+          labels:
+            severity: warning
+            category: macos
+            component: arag-scrape
+          annotations:
+            summary: "ARAG emulator alive but unresponsive"
+            description: >-
+              The Android emulator on {{ $labels.instance }} has a live qemu
+              process but adb has not been able to use it for more than 60
+              minutes. This is usually host CPU starvation on the shared Mac
+              mini (current 1-min load:
+              {{ with printf "arag_scrape_host_load1{instance='%s'}" $labels.instance | query }}{{ . | first | value | printf "%.0f" }}{{ else }}unknown{{ end }}).
+              Check what else is loading the Mac mini and data/logs/emulator.log.
+
+        - alert: AragScrapeEmulatorFlapping
+          # increase() extrapolates upward only, so 3 real relaunches in 24h
+          # always evaluate >= 3.
+          expr: increase(arag_scrape_emulator_auto_restarts_total[24h]) >= 3
+          for: 5m
+          labels:
+            severity: warning
+            category: macos
+            component: arag-scrape
+          annotations:
+            summary: "ARAG emulator keeps dying and being relaunched"
+            description: >-
+              The arag-scrape app on {{ $labels.instance }} has auto-relaunched a
+              dead Android emulator {{ $value | printf "%.0f" }} times in the
+              last 24h. The emulator keeps dying, most likely from recurring host
+              contention on the shared Mac mini. Check arag_scrape_host_load1 and
+              data/logs/emulator.log.
 
         # The PUSH leg of the ARAG pipeline had NO alert coverage until
         # 2026-09-11, and a 3.6-day (15-cycle) push outage starting
