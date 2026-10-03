@@ -132,9 +132,13 @@ premises:
     run: kubectl get volume -n storage icloud-docker-mu-session -o jsonpath='{.metadata.labels}'
     expect_contains: "recurring-job-group.longhorn.io/default"
   - id: andrea-session-backup-enrolled
-    why: Same for andrea (dynamic PV name, resolved from the PVC at §2.3).
-    run: kubectl get pvc -n backup icloud-docker-andrea-session -o jsonpath='{.spec.volumeName}'
-    expect_exact: "pvc-f6ec0213-4b00-49d9-93b4-954d5fee1d31"
+    why: >-
+      Same for andrea. Its session PV is dynamic (pvc-f6ec0213-…, the volumeName
+      of PVC icloud-docker-andrea-session on 2026-10-03); if the PVC was ever
+      recreated this name no longer exists and the premise fails, which is the
+      point — re-resolve before relying on §5.2.
+    run: kubectl get volume -n storage pvc-f6ec0213-4b00-49d9-93b4-954d5fee1d31 -o jsonpath='{.metadata.labels}'
+    expect_contains: "recurring-job-group.longhorn.io/default"
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/icloud-docker-reauth.md
@@ -217,8 +221,13 @@ Cloned `github.com/mandarons/icloud-docker` and read tag `v2.1.0`; copied
 - **Gate, not assumption:** §3.3 runs the 2.1.0 image with `--dry-run` against
   the real session. Its code (`sync.py` ~L1467) logs
   `DRY RUN: 2FA required — finish interactive auth first` and **returns
-  without requesting a push** when a second factor is needed, so the probe
-  cannot burn Apple's 2FA quota. Only a PASS proceeds to the commit.
+  without requesting a push** when a second factor is needed. On a NON-2FA
+  sign-in failure it does NOT return: `_handle_auth_transport_error`
+  (`sync.py` ~L1161-1190) logs `Sign-in failed and will be retried`, sends the
+  configured Telegram notification, sleeps >= 30 min and would sign in again —
+  so §3.3 polls the log for at most 10 min and kills the pod at the first
+  auth line. Net: at most ONE Apple sign-in per instance, never a push. Only a
+  PASS proceeds to the commit.
 - **Re-auth needed? Expected NO.** Phones are only needed on the contingency
   branch (§3.3 STOP-AUTH -> leave the instance on the old image; the old image
   keeps working since nothing was committed). mu's operator phone should be at
@@ -279,10 +288,17 @@ fires and `icloud_auth_required` stays 0 (the probe's `RE_AUTH` does not know
 the line). Only `ICloudBackupSyncStalled` (6 h) would catch it. §3.1 adds the
 three icloudpy `ICloudPyFailedLoginException` texts after that prefix to
 `RE_AUTH` (a plain network fault at sign-in is deliberately left to
-SyncStalled). Dry-tested on a scratch copy: clean log -> 0, `Sign-in failed …
-Invalid email/password combination.` -> 1, `Sign-in failed … HTTPSConnectionPool`
--> 0; and the full `runbooks/tests/test-icloud-drive-probe.py` (incl.
-`promtool test rules`) passes against the edited copy.
+SyncStalled). The handler formats `{error!s}` of a two-argument exception, so
+the REAL line is a tuple repr — rendered with icloudpy 0.10.0's own exception
+classes: `Sign-in failed and will be retried: ('Invalid email/password
+combination.', ICloudPyAPIResponseException('Unauthorized (401)'))`. The
+pattern therefore allows anything between the prefix and the reason (`: .*(`).
+Dry-tested on a scratch copy with that exact line (and a `Failed to initiate
+srp authentication.` / 409 variant): -> 1; clean log -> 0; network fault
+`HTTPSConnectionPool(...)` -> 0; the UNEDITED probe returns 0 for the real
+lines (the control that shows the gap exists); and the full
+`runbooks/tests/test-icloud-drive-probe.py` (incl. `promtool test rules`)
+passes against the edited copy.
 
 ## 2. Pre-checks
 
@@ -303,7 +319,7 @@ PASS: `sha256:c57e8248fefc55d490f090eb5edd08ff53045861e4b8f532403926b38af36ba9`.
 kubectl get volume -n storage icloud-docker-mu-session pvc-f6ec0213-4b00-49d9-93b4-954d5fee1d31 \
   -o custom-columns=NAME:.metadata.name,STATE:.status.state,ROBUST:.status.robustness,LAST_BACKUP:.status.lastBackupAt
 ```
-PASS: both `healthy`, `LAST_BACKUP` = today ~03:0x. If stale, cross-check per `docs/sops/backup.md` "lastBackupAt Can Lag".
+PASS: both rows `ROBUST`=`healthy` (STATE reads `attached`), `LAST_BACKUP` = today ~03:0x. If stale, cross-check per `docs/sops/backup.md` "lastBackupAt Can Lag".
 
 **2.4 Baseline gauges** (record the numbers in the window log):
 ```bash
@@ -343,24 +359,53 @@ p=sys.argv[1]; t=open(p).read()
 old='        r"|Authentication required for Account|\\(421\\)|INCORRECT_PCS_KEY",\n'
 new=('        r"|Authentication required for Account|\\(421\\)|INCORRECT_PCS_KEY"\n'
      '        # icloud-docker >= 2.1.0 (#529) no longer crash-loops on a non-2FA sign-in\n'
-     '        # failure; it backs off >= 30 min and logs this line instead. Only the\n'
-     '        # icloudpy ICloudPyFailedLoginException texts count as auth -- a plain\n'
-     '        # network fault at sign-in is left to ICloudBackupSyncStalled.\n'
-     '        r"|Sign-in failed and will be retried: (Invalid email/password|Invalid authentication token|Failed to initiate srp)",\n')
+     '        # failure; it backs off >= 30 min and logs this line instead. The error is\n'
+     '        # rendered as a tuple repr: "...retried: (\'Invalid email/password ...\', ...)".\n'
+     '        # Only the icloudpy ICloudPyFailedLoginException texts count as auth -- a\n'
+     '        # plain network fault at sign-in is left to ICloudBackupSyncStalled.\n'
+     '        r"|Sign-in failed and will be retried: .*(Invalid email/password|Invalid authentication token|Failed to initiate srp)",\n')
 assert t.count(old)==1, t.count(old)
 open(p,"w").write(t.replace(old,new)); print("edited")
 PY
-git diff --stat kubernetes/apps/backup/icloud-backup-freshness/app/sync-probe-configmap.yaml   # 1 file, +5 -1
+git diff --stat kubernetes/apps/backup/icloud-backup-freshness/app/sync-probe-configmap.yaml   # 1 file, +7 -1
+```
+Gate — the edited probe must flag the REAL v2 lines and not a network fault
+(any `FAIL` or a non-zero exit -> do not commit):
+```bash
+cat > /tmp/icloud-probe-gate-check.py <<'EOF'
+import sys, yaml, types
+src = yaml.safe_load(open(sys.argv[1]))["data"]["icloud_sync_probe.py"]
+m = types.ModuleType("p"); exec(compile(src, "p", "exec"), m.__dict__)
+T = "2026-10-03T10:%02d:00.000Z x :: "
+ok = [T % 0 + "INFO :: sync.py :: 627 :: Syncing photos...", T % 10 + "INFO :: sync.py :: 629 :: Photos synced"]
+cases = {
+  "clean": (ok, 0),
+  "signin-auth-real": (ok + [T % 20 + "ERROR :: sync.py :: 1171 :: Sign-in failed and will be retried: ('Invalid email/password combination.', ICloudPyAPIResponseException('Unauthorized (401)'))"], 1),
+  "signin-srp-real": (ok + [T % 20 + "ERROR :: sync.py :: 1171 :: Sign-in failed and will be retried: ('Failed to initiate srp authentication.', ICloudPyAPIResponseException('Conflict (409)'))"], 1),
+  "signin-network": (ok + [T % 20 + "ERROR :: sync.py :: 1171 :: Sign-in failed and will be retried: HTTPSConnectionPool(host='idmsa.apple.com', port=443): Read timed out."], 0),
+}
+bad = 0
+for name, (lines, want) in cases.items():
+    got = m.analyse([lines], 1759600000).get("icloud_auth_required")
+    print(name, got, "ok" if got == want else "FAIL"); bad += got != want
+sys.exit(1 if bad else 0)
+EOF
+.venv/bin/python3 /tmp/icloud-probe-gate-check.py kubernetes/apps/backup/icloud-backup-freshness/app/sync-probe-configmap.yaml   # 4x ok, exit 0
 .venv/bin/python3 runbooks/tests/test-icloud-drive-probe.py      # must end "OK: icloud drive probe + alert tests passed"
 ```
-Dry-tested 2026-10-03 on a scratch copy; resulting diff:
+Dry-tested 2026-10-03 on a scratch copy: edited -> 4x `ok`, exit 0; the
+UNEDITED configmap -> `signin-auth-real 0 FAIL`, `signin-srp-real 0 FAIL`,
+exit 1 (so the gate can fail); test suite `OK`. The real-line text was rendered
+with icloudpy 0.10.0's own exception classes. Resulting diff:
 ```
 <         r"|Authentication required for Account|\(421\)|INCORRECT_PCS_KEY",
 >         r"|Authentication required for Account|\(421\)|INCORRECT_PCS_KEY"
 >         # icloud-docker >= 2.1.0 (#529) no longer crash-loops on a non-2FA sign-in
 >         ...
->         r"|Sign-in failed and will be retried: (Invalid email/password|Invalid authentication token|Failed to initiate srp)",
+>         r"|Sign-in failed and will be retried: .*(Invalid email/password|Invalid authentication token|Failed to initiate srp)",
 ```
+Recommended in the same commit: add the two real lines above as fixtures to
+`runbooks/tests/test-icloud-drive-probe.py` so the suite pins them.
 Commit (`fix(icloud-sync-probe): count icloud-docker 2.x sign-in failures as auth-required`), push. Confirm applied:
 ```bash
 kubectl get configmap -n backup icloud-sync-probe -o jsonpath='{.data.icloud_sync_probe\.py}' | grep -c 'Sign-in failed and will be retried'   # 1
@@ -379,14 +424,23 @@ PASS: prints `2` (the cookie jar + the `.session` file). Shell logic dry-tested 
 
 ### 3.3 mu — stop the loop, then dry-run 2.1.0 against the real session + share
 
+Suspend FIRST, then scale (so no reconcile can race the scale-down):
 ```bash
-kubectl -n backup scale deploy icloud-docker-$INSTANCE --replicas=0
 flux suspend helmrelease icloud-docker-$INSTANCE -n backup
+kubectl -n backup scale deploy icloud-docker-$INSTANCE --replicas=0
 kubectl -n backup wait --for=delete pod -l app.kubernetes.io/name=icloud-docker-$INSTANCE --timeout=120s
+kubectl -n backup get pod -l app.kubernetes.io/name=icloud-docker-$INSTANCE -o name | wc -l    # 0
 ```
+(`kubectl wait --for=delete -l …` may print "no matching resources found" and
+exit non-zero when the pod is already gone — cosmetic; the `wc -l` = `0` line is the check.)
+
 Throwaway pod — NEW image, session RW (it must sign in), share **read-only**,
 same env as the HelmRelease. Runs the image's own `--dry-run --check-files 200`
-after the same uid remap the entrypoint does (`abc` -> 1000):
+after the same uid remap the entrypoint does (`abc` -> 1000). `/config` itself
+is chowned to abc because the app opens `app.logger.filename:
+/config/icloud.log` at import time; in this pod `/config` is a root-owned
+mountpoint (the real entrypoint chowns it), and without the chown python would
+die with a PermissionError before signing in.
 ```bash
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
@@ -410,7 +464,7 @@ spec:
       args:
         - >-
           groupmod -o -g 1000 abc && usermod -o -u 1000 abc &&
-          mkdir -p /config/python_keyring && chown abc:abc /config/python_keyring &&
+          mkdir -p /config/python_keyring && chown abc:abc /config /config/python_keyring &&
           exec su-exec abc sh -c 'cd /app && export PYTHONPATH=/app HOME=/home/abc &&
           exec python ./src/main.py --dry-run --check-files 200'
       env:
@@ -429,22 +483,44 @@ spec:
 EOF
 ```
 (Validated with `kubectl apply --dry-run=server` for both instances on 2026-10-03; TZ value = the live deployment's `TZ`.)
-Wait for it to finish (`kubectl -n backup get pod icloud-v2-dryrun-$INSTANCE` -> `Completed`; typically < 5 min; give it 15) and gate on counts only — the raw log names personal files:
+
+**Bounded wait — never let it sign in twice.** On a non-2FA sign-in failure the
+dry-run does not exit: it logs `Sign-in failed and will be retried`, sends the
+configured **Telegram notification** (expect one message to the ops chat on that
+branch — it is not a real outage), sleeps >= 30 min and would sign in again.
+So poll for at most 10 min and kill the pod at the first auth line:
 ```bash
-cat > /tmp/icloud-dryrun-gate.py <<'PY'
+for n in $(seq 1 20); do
+  sleep 30
+  PH=$(kubectl -n backup get pod icloud-v2-dryrun-$INSTANCE -o jsonpath='{.status.phase}')
+  kubectl -n backup logs icloud-v2-dryrun-$INSTANCE 2>/dev/null | grep -qiE 'Sign-in failed|2FA required|2FA is required' && { echo "AUTH LINE -> stop"; break; }
+  [ "$PH" = Succeeded ] || [ "$PH" = Failed ] && { echo "phase=$PH"; break; }
+done
+kubectl -n backup logs icloud-v2-dryrun-$INSTANCE > /tmp/icloud-dryrun-$INSTANCE.log 2>&1
+kubectl -n backup delete pod icloud-v2-dryrun-$INSTANCE --wait=true     # MUST be gone before the app scales up (RWO session)
+```
+Gate on counts only — the raw log names personal files; delete it afterwards:
+```bash
+cat > /tmp/icloud-dryrun-gate.py <<'EOF'
 import re, sys
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 lines = [ANSI.sub("", l) for l in sys.stdin.read().splitlines()]
-auth_ok = any("DRY RUN: authentication succeeded" in l for l in lines)
-need_2fa = any(re.search(r"DRY RUN: 2FA required|2FA is required|Sign-in failed", l, re.I) for l in lines)
-done = any("DRY RUN complete" in l for l in lines)
+def has(p): return any(re.search(p, l, re.I) for l in lines)
+auth_ok = has(r"DRY RUN: authentication succeeded")
+need_2fa = has(r"DRY RUN: 2FA required|2FA is required")
+signin_fail = has(r"Sign-in failed and will be retried")
+done = has(r"DRY RUN complete")
+tracebacks = sum(1 for l in lines if "Traceback (most recent call last)" in l)
 rx = re.compile(r"DRY RUN: (?P<lib>.+?) \(dest .*?\): sampled=(?P<s>\d+) would_skip=(?P<w>\d+) size_mismatch=(?P<m>\d+) not_found=(?P<n>\d+) errors=(?P<e>\d+)")
 rows = [m.groupdict() for l in lines for m in [rx.search(l)] if m]
-verdict = "PASS"
-if need_2fa or not auth_ok:
-    verdict = "STOP-AUTH"
-elif not done or not rows:
-    verdict = "STOP-INCOMPLETE"
+if need_2fa:
+    verdict = "STOP-AUTH"            # Apple wants a second factor: do NOT re-run
+elif signin_fail:
+    verdict = "STOP-SIGNIN"          # password/throttle/terms: do NOT re-run
+elif not auth_ok or not done or not rows:
+    verdict = "STOP-INCOMPLETE"      # crashed/killed before sign-in or mid-walk: fix + re-run is allowed
+else:
+    verdict = "PASS"
 for r in rows:
     s, w, m, n, e = (int(r[k]) for k in "swmne")
     kind = "drive" if r["lib"] == "Drive" else "photos"
@@ -456,30 +532,49 @@ for r in rows:
         verdict = "STOP-LAYOUT"
 if verdict == "PASS" and not (any(r["lib"] == "Drive" for r in rows) and any(r["lib"] != "Drive" and int(r["s"]) > 0 for r in rows)):
     verdict = "STOP-INCOMPLETE"
-print("auth_ok=%s need_2fa=%s complete=%s VERDICT=%s" % (auth_ok, need_2fa, done, verdict))
-PY
-kubectl -n backup logs icloud-v2-dryrun-$INSTANCE | python3 /tmp/icloud-dryrun-gate.py
-kubectl -n backup delete pod icloud-v2-dryrun-$INSTANCE --wait=true     # MUST be gone before the app scales up (RWO session)
+print("lines=%d auth_ok=%s need_2fa=%s signin_fail=%s complete=%s tracebacks=%d VERDICT=%s" % (len(lines), auth_ok, need_2fa, signin_fail, done, tracebacks, verdict))
+EOF
+python3 /tmp/icloud-dryrun-gate.py < /tmp/icloud-dryrun-$INSTANCE.log
+rm -f /tmp/icloud-dryrun-$INSTANCE.log
 ```
-Gate (controls run 2026-10-03 on synthetic logs: realistic -> `PASS`;
-200 photos `not_found` -> `STOP-LAYOUT`; drive 50 `not_found` -> `STOP-LAYOUT`;
-`DRY RUN: 2FA required` -> `STOP-AUTH`; missing `DRY RUN complete` ->
-`STOP-INCOMPLETE`; no non-empty photo library -> `STOP-INCOMPLETE`). Photos
+Gate controls (synthetic logs, 2026-10-03): realistic -> `PASS`; 200 photos
+`not_found` -> `STOP-LAYOUT`; drive 50 `not_found` -> `STOP-LAYOUT`;
+`DRY RUN: 2FA required` -> `STOP-AUTH`; the real tuple-repr `Sign-in failed …`
+line -> `STOP-SIGNIN`; a `PermissionError` traceback with no sign-in ->
+`STOP-INCOMPLETE`; missing `DRY RUN complete` -> `STOP-INCOMPLETE`. Photos
 allow <= 10 of 200 not-skip (newest-first sample: photos taken since the last
 cycle are legitimately `not_found`); Drive allows <= 20 `not_found`+`errors`
 (the 9 failing packages are `not_found` today) and ignores `size_mismatch`
 (an unpacked package dir never equals its zip size — `migration_check.py:236-279`).
+The drive check is size-only while the real `file_exists` also compares mtime;
+`file_exists` is byte-identical between the two versions, and §4.2's
+`drive_downloads <= 300` is the real re-download guard.
+
+**Restoring the old image on any STOP** (nothing was committed; `flux resume`
+alone does NOT rescale — helm-controller performs no action for an in-sync
+release without driftDetection, so the Deployment would stay at 0):
+```bash
+flux resume helmrelease icloud-docker-$INSTANCE -n backup
+kubectl -n backup scale deploy icloud-docker-$INSTANCE --replicas=1
+kubectl -n backup rollout status deploy/icloud-docker-$INSTANCE --timeout=300s
+kubectl -n backup get pod -l app.kubernetes.io/name=icloud-docker-$INSTANCE -o name | wc -l    # 1
+```
 
 - **PASS** -> 3.4.
-- **STOP-AUTH** -> do NOT re-run (each sign-in attempt costs quota). Leave mu on
-  the old image: `flux resume helmrelease icloud-docker-mu -n backup` (rescales to 1),
-  confirm the old pod's log shows `Syncing` and no `2FA is required` within 15 min.
-  If the OLD image now also needs 2FA, the session genuinely expired: run
-  `docs/sops/icloud-docker-reauth.md` from Step 1 (operator phone). Mark the
-  plan `blocked`, skip andrea's bump in this window (it is independent but the
-  verdict says auth behaviour differs from §1.2 — re-investigate first).
-- **STOP-LAYOUT / STOP-INCOMPLETE** -> resume the old image as above; mark `blocked`
-  with the counts; nothing was written to the share (mounted read-only).
+- **STOP-AUTH / STOP-SIGNIN** -> do NOT re-run (each sign-in attempt costs quota /
+  deepens a throttle). Restore the old image (block above) and confirm the old
+  pod's log shows `Syncing` and no `2FA is required` / crash within 15 min.
+  If the OLD image now also fails auth, the session genuinely expired or the
+  account needs attention: `docs/sops/icloud-docker-reauth.md` from Step 1
+  (incl. Step 4b terms check; that Apple ID's phone). Mark the plan `blocked`,
+  and do not bump the other instance in this window (the verdict contradicts
+  §1.2 — re-investigate first).
+- **STOP-INCOMPLETE** -> look at `tracebacks` / the pod's last lines (operator
+  terminal only). A crash before `authentication succeeded` cost no Apple
+  sign-in and may be fixed and re-run ONCE. Otherwise restore the old image and
+  mark `blocked`.
+- **STOP-LAYOUT** -> restore the old image; mark `blocked` with the counts;
+  nothing was written to the share (mounted read-only).
 
 ### 3.4 Commit B — mu image pin
 
@@ -527,7 +622,12 @@ Then release it (the SOP's resume; it upgrades and rescales to 1):
 T_SWITCH=$(date +%s); echo "T_SWITCH=$T_SWITCH"
 flux resume helmrelease icloud-docker-mu -n backup
 kubectl -n backup rollout status deploy/icloud-docker-mu --timeout=300s
+kubectl -n backup get pod -l app.kubernetes.io/name=icloud-docker-mu -o name | wc -l    # 1
 ```
+Here the resume DOES restore `replicas: 1`: the changed tag makes helm-controller
+run an upgrade, and Helm's three-way patch re-applies the rendered `replicas: 1`
+(reviewer verified with `helm template` on the live values). If `wc -l` prints 0
+after 5 min, `kubectl -n backup scale deploy icloud-docker-mu --replicas=1`.
 
 ### 3.5 mu — verify (§4) BEFORE touching andrea
 
@@ -569,6 +669,12 @@ reps = [
      "Release v1.25.0 and older bundle the broken icloudpy 0.8.0; until the 2.1.0\n"
      "upgrade the pin was a `main` build (`sha256:91486ec1…`). If you ever see the\n"
      "script print `icloudpy < 0.9.0 in this image`, the pin regressed — restore it.\n"),
+    ("      # MUST be the same pinned digest as the HelmRelease. `:latest` (v1.25.0)\n"
+     "      # ships icloudpy 0.8.0, which has no trigger_2fa_push_notification() —\n",
+     "      # MUST be the same pinned digest as the HelmRelease. Releases <= v1.25.0\n"
+     "      # ship icloudpy 0.8.0, which has no trigger_2fa_push_notification() —\n"),
+    ("0.9.0 build (tag `main`, digest sha256:91486ec1…) and retry.",
+     ">= 0.9.0 build (release 2.1.0, digest sha256:c57e8248…) and retry."),
     ("| Auth library | `icloudpy` 0.9.0 via the pinned image digest",
      "| Auth library | `icloudpy` 0.10.0 (icloud-docker 2.1.0) via the pinned image digest"),
 ]
@@ -580,7 +686,7 @@ open(p, "w").write(t); print("sop edited")
 PY
 python3 /tmp/icloud-sop-edit.py docs/sops/icloud-docker-reauth.md && git diff --stat docs/sops/icloud-docker-reauth.md
 ```
-Dry-tested on a copy 2026-10-03 (3 hunks: image line 138, paragraph 64-67, table row 91). Also bump the SOP header `Version`/`Last Updated` to the execution date and add a one-line changelog row. Commit (`docs(icloud-docker-reauth): re-auth pod image follows the 2.1.0 pin`), verify subject, push. If only mu was upgraded, do NOT run this — the re-auth pod must match andrea's still-old image too; note it as owed instead.
+Dry-tested on a copy 2026-10-03 (5 replacements: pod image line ~138 and its `:latest (v1.25.0)` comment ~134, the script's `main`/91486ec1 hint ~185, paragraph 64-67, table row 91; afterwards `91486ec1` survives only in the historical sentence). Also bump the SOP header `Version`/`Last Updated` to the execution date and add a one-line changelog row. Commit (`docs(icloud-docker-reauth): re-auth pod image follows the 2.1.0 pin`), verify subject, push. If only mu was upgraded, do NOT run this — the re-auth pod must match andrea's still-old image too; note it as owed instead.
 
 ### 3.9 Close-out
 
@@ -653,9 +759,13 @@ CONTROL: metric icloud_drive_sync_last_success_timestamp_seconds — must exceed
 
 **4.4 Web UI not listening** (inside the app pod; `/proc/net/tcp*` field 2 = local addr, field 4 `0A` = LISTEN, 8080 = `1F90`):
 ```bash
-kubectl -n backup exec deploy/icloud-docker-$INSTANCE -c app -- sh -c 'cat /proc/net/tcp /proc/net/tcp6 2>/dev/null' | awk '$4=="0A"{print $2}' | grep -ic ':1F90'
+kubectl -n backup exec deploy/icloud-docker-$INSTANCE -c app -- sh -c 'cat /proc/net/tcp /proc/net/tcp6 2>/dev/null' > /tmp/icloud-sockets-$INSTANCE.txt
+awk 'NR>0 && $1 ~ /^[0-9]+:$/' /tmp/icloud-sockets-$INSTANCE.txt | wc -l                          # socket rows read: must be >= 2
+awk '$4=="0A"{print $2}' /tmp/icloud-sockets-$INSTANCE.txt | grep -ic ':1F90'                       # listeners on 8080
 ```
-PASS: `0`. Control: `printf ' 0: 0100007F:1F90 00000000:0000 0A\n' | awk '$4=="0A"{print $2}' | grep -ic ':1F90'` prints `1`. Plus `kubectl get httproute,service -n backup -o name | wc -l` still `0`.
+PASS: socket rows `>= 2` (the app holds ESTABLISHED connections to Apple — an
+empty read, wrong container or exec error prints `0` here and FAILS the gate
+instead of passing as "no listener") AND listeners on 8080 = `0`. Live 2026-10-03 (mu, old image): rows `3`, listeners `0`; empty input -> rows `0`. Control: `printf ' 0: 0100007F:1F90 00000000:0000 0A\n' | awk '$4=="0A"{print $2}' | grep -ic ':1F90'` prints `1`. Plus `kubectl get httproute,service -n backup -o name | wc -l` still `0`.
 
 **4.5 Photos still syncing on 2.1.0:**
 ```bash
@@ -701,6 +811,8 @@ git commit --only "$F" -F <unique-msg-file>     # "revert(icloud-docker-<instanc
 git log -1 --format=%s && git show --stat HEAD && git push
 flux resume helmrelease icloud-docker-$INSTANCE -n backup 2>/dev/null
 flux reconcile helmrelease icloud-docker-$INSTANCE -n backup --force   # application-update SOP §11
+kubectl -n backup scale deploy icloud-docker-$INSTANCE --replicas=1    # in case step 1 scaled to 0 (resume alone does not rescale)
+kubectl -n backup get pod -l app.kubernetes.io/name=icloud-docker-$INSTANCE -o name | wc -l   # 1
 ```
 3. Confirm: §4.1 shows `91486ec1…` again; §4.2's script on the new pod shows `auth_errors=0` and `drive_start>=1` (old image prints `old_unpack_errors` again for mu — expected); §4.5 photos last-success advances past the rollback time.
 4. Commit A (probe) does NOT need reverting: the added pattern never matches the old image's output (that string does not exist there).
@@ -727,6 +839,7 @@ kubectl -n backup wait --for=condition=Ready pod/icloud-session-restore-$INSTANC
 kubectl -n backup exec icloud-session-restore-$INSTANCE -- sh -c "cd /config/session_data && for b in *.backup.$BK_TS; do cp -p \"\$b\" \"\${b%.backup.$BK_TS}\"; done && ls | grep -c 'backup.$BK_TS'"   # 2
 kubectl -n backup delete pod icloud-session-restore-$INSTANCE --wait=true
 flux resume helmrelease icloud-docker-$INSTANCE -n backup
+kubectl -n backup scale deploy icloud-docker-$INSTANCE --replicas=1    # resume alone does not rescale an in-sync release
 ```
 (Restore loop dry-tested on a scratch dir 2026-10-03.) Confirm with §4.2 (`auth_errors=0`). If 2FA is STILL required, the trust was revoked server-side — restoring files cannot fix that: run `docs/sops/icloud-docker-reauth.md` from Step 1, including **Step 4b** (pending-terms probe), with that Apple ID's phone (Andrea's for andrea). Last-resort floor for a corrupted volume: the 03:00 Longhorn backup of `icloud-docker-mu-session` / `pvc-f6ec0213-…` per `docs/sops/backup.md` (restore into the same volume name; NEVER delete the andrea session PVC — reclaim `Delete`).
 
