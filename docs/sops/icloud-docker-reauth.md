@@ -252,7 +252,7 @@ working on the `andrea` first-auth, 2026-08-08.
 export PATH="$HOME/.local/share/mise/shims:$PATH"
 export INSTANCE=mu        # or: andrea — everything below is scoped to it
 kubectl -n backup scale deploy icloud-docker-$INSTANCE --replicas=0
-flux suspend helmrelease icloud-docker-$INSTANCE -n backup   # stops the 30-min reconcile re-scaling to 1
+flux suspend helmrelease icloud-docker-$INSTANCE -n backup   # stops a git-triggered helm upgrade re-scaling to 1 mid-re-auth
 kubectl -n backup wait --for=delete pod -l app.kubernetes.io/name=icloud-docker-$INSTANCE --timeout=90s
 ```
 
@@ -319,9 +319,24 @@ or the app pod can't mount the volume.
 
 ```bash
 kubectl -n backup delete pod icloud-reauth-$INSTANCE
-flux resume helmrelease icloud-docker-$INSTANCE -n backup   # scales back to 1
+kubectl -n backup wait --for=delete pod/icloud-reauth-$INSTANCE --timeout=90s
+flux resume helmrelease icloud-docker-$INSTANCE -n backup   # re-enables reconcile; does NOT scale up
+kubectl -n backup scale deploy icloud-docker-$INSTANCE --replicas=1   # explicit: this is what brings the app back
 kubectl -n backup rollout status deploy/icloud-docker-$INSTANCE --timeout=120s
+kubectl -n backup get deploy icloud-docker-$INSTANCE -o jsonpath='{.spec.replicas}{"\n"}'   # must print 1
 ```
+
+**Why the explicit scale:** `flux resume` does not undo the Step 1
+`kubectl scale --replicas=0`. helm-controller (v1.6.3 live, verified 2026-10-03)
+treats a release whose chart + values are unchanged as in-sync and performs no
+upgrade, and these HelmReleases have no `spec.driftDetection`, so the manual
+`replicas: 0` on the Deployment is not detected or corrected. Without the scale
+step the instance silently stays at 0 replicas until the next git change to the
+HelmRelease forces an upgrade (`ICloudBackupDeploymentUnavailable` fires after
+30m). The scale is a restore-to-declared-state (the chart renders
+`replicas: 1`), not drift. If `spec.driftDetection` is ever enabled on these
+HRs (plan `helm-drift-detection`), resume alone would correct it — keep the
+explicit scale anyway; it is idempotent.
 
 ### Step 6 — Clear the accepted-risk (if one was opened)
 
@@ -646,7 +661,10 @@ To abandon and restore the prior (broken-but-running) state:
 
 ```bash
 kubectl -n backup delete pod icloud-reauth-$INSTANCE --ignore-not-found
+kubectl -n backup wait --for=delete pod/icloud-reauth-$INSTANCE --timeout=90s
 flux resume helmrelease icloud-docker-$INSTANCE -n backup
+kubectl -n backup scale deploy icloud-docker-$INSTANCE --replicas=1   # resume alone leaves it at 0 (see Step 5)
+kubectl -n backup rollout status deploy/icloud-docker-$INSTANCE --timeout=120s
 ```
 
 ---
