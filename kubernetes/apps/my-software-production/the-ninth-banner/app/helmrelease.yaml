@@ -36,7 +36,7 @@ spec:
               repository: ghcr.io/nachtschatt3n/the-ninth-banner
               # Release tags (v<major>.<minor>.<patch>) only; updated by the
               # ImageUpdateAutomation in ./image-automation.yaml.
-              tag: v0.2.1 # {"$imagepolicy": "my-software-production:the-ninth-banner:tag"}
+              tag: v0.2.2 # {"$imagepolicy": "my-software-production:the-ninth-banner:tag"}
               pullPolicy: IfNotPresent
             env:
               - name: PORT
