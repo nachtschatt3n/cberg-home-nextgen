@@ -27,7 +27,7 @@ The Mac mini also hosts the shared Ollama runtime and many agent sessions. Paral
 | Static infra (GitOps) | `kubernetes/apps/ci-runner/the-ninth-banner-tests/app/`: ServiceAccount (no token, no RBAC), ResourceQuota + LimitRange, CiliumNetworkPolicy, scripts ConfigMap, git credential (SOPS) |
 | Flux Kustomization | `flux-system/the-ninth-banner-tests` (lives in `flux-system`, `targetNamespace: ci-runner`) |
 | Job template | `kubernetes/apps/ci-runner/the-ninth-banner-tests/job-template.yaml.tpl`. Not applied by Flux and not scanned by kubeconform (`.tpl`); rendered per run by the trigger |
-| Trigger | `scripts/ninth-banner-test.sh <ref> <unit\|e2e\|nightly\|responsive\|sims> [shards]` |
+| Trigger | `scripts/ninth-banner-test.sh <ref> <unit\|e2e\|nightly\|responsive\|release\|sims> [shards]` |
 | Image | `mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30…` (multi-arch index digest; Node 24, git, Chromium/Firefox/WebKit baked in). **Keep in lockstep with `@playwright/test` in the game's `package-lock.json`**. Bump: §4 step 5 |
 | Job shape | Indexed Job, `completions = shards`, `parallelism = min(shards, 3)` in GPU mode, `min(shards, 2)` in CPU mode (**thermal cap**), `backoffLimitPerIndex: 0`, `maxFailedIndexes = shards` (no retries, one failing shard never stops the others), topology spread over `kubernetes.io/hostname`, `activeDeadlineSeconds: 5400`, `ttlSecondsAfterFinished: 3600` |
 | Per shard | requests 2 CPU / 6Gi / 8Gi ephemeral; limits **4 CPU (thermal cap)** / 10Gi / 16Gi; Playwright `--workers=2` (`WORKERS`, default 2, see Troubleshooting) |
@@ -46,14 +46,15 @@ Measured runtimes (2026-10-03, commit `46eaae3`, wall clock from the trigger):
 | `e2e` 3 shards, `WORKERS=4` | FAIL (CPU-starved timing tests) | 14 min 35 s |
 | `e2e` 3 shards, 4-CPU cap, `WORKERS=2`, per-push grep (`0fa1537`, larger suite) | 130 passed / 6 failed (CPU timing: 120 s timeouts, title-ready < 3 s, music render speed) | 34 min incl. queueing; nodes still peaked at 100–101°C with an overlapping 6-CPU run from another session |
 
-Suites:
+Suites (since game `77764e6` the runner calls the game's own shard scripts with `E2E_OUT=/results/shard-N`; the game owns selection, duration-balanced sharding, reporters and the GPU check. Contract: the-ninth-banner `docs/testing/test-execution-strategy.md`, "Hand-off to cberg-agent". Browser suites at refs before the split are refused):
 
 | Suite | What runs | Default shards |
 |---|---|---|
-| `unit` | `npm run check` (typecheck, lint, validate:data, vitest, build, security), the same as GitHub CI "Check & test" | 1 (forced) |
-| `e2e` | `npm run build && npx playwright test --grep-invert "@art\|@nightly" --shard=i/N` (the game's per-push CI selection; Chromium plus Firefox `@cross`, `CI=1`, so 1 retry and no snapshot assertions) | 3 |
-| `nightly` | `npm run build && npx playwright test --grep "@nightly\|@perf" --shard=i/N` (the game's nightly e2e job: determinism, music, perf specs) | 3 |
-| `responsive` | `playwright test -c playwright.responsive.config.ts --shard=i/N` (WebKit). Fails with rc=2 until that config exists at the ref | 3 |
+| `unit` | `npm run check && npx tsx tools/story-check.ts && npm run test:ci -- --no-build` (GitHub "Check & test" minus the Docker build) | 1 (forced) |
+| `e2e` | `npm run test:e2e:shard -- i N` (the game's former per-push selection). **GPU only**: refused with `GPU=0` (CPU/SwiftShader fails its timing budgets) | 3 |
+| `nightly` | `npm run test:nightly:shard -- i N` (`@nightly`: multi-seed determinism, music render) | 3 |
+| `responsive` | `npm run test:responsive:shard -- i N` (iPad/laptop matrix, WebKit + Chromium). **GPU only** | 3 |
+| `release` | **THE release suite on hardware WebGL**: `unset CI`, `PW_GPU_EXPECTED=1`, `PW_CHROMIUM_ARGS=<Intel flags>`, `npm run test:release:shard -- i N --retries=1` (every spec except `@art`/`@visual`, incl. the `@perf` fps budgets); shard 1 also runs the responsive matrix. The game's `gpu-check` fails a shard in seconds if it renders in software. When every shard has reported, the trigger posts the commit status **`E2E (GPU, k8s)`** (success/failure, counts from the shards' junit) on the game repo with the Mac's `gh`; never for a partial run. **GPU only** | 3 |
 | `sims` | CI nightly sweeps (`sim --n 30 --check`, `gen-sweep --n 2000`, `autoplay --n 10 --check`, `ending-hunt --n 4`), round-robin over shards | 4 |
 
 ---
@@ -65,7 +66,7 @@ Suites:
 | Hardware | Each NUC14: Meteor Lake **Intel Arc Graphics (MTL)**, PCI `8086:7D55`, driver **i915** (kernel 6.18 Talos), plus an NPU (`npu.intel.com/accel`, not used here) |
 | How a pod gets it | The existing Intel GPU device plugin (`kubernetes/apps/kube-system/intel-device-plugin/gpu`, `sharedDevNum: 5`) offers `gpu.intel.com/i915: 5` per node: 5 pods may **share** the one iGPU. A GPU shard requests 1. **No hostPath, no PSA change**: containerd hands the pod `/dev/dri/renderD128` **and `card0`** (the plugin passes both) chowned to its `runAsUser:runAsGroup` (1001), so `ci-runner` stays `restricted` |
 | Image | No derived image: the pinned Playwright image already contains Mesa 25.2.8 (`iris`). It has no Vulkan ICD, so ANGLE-Vulkan falls back to SwiftShader; use GL/EGL |
-| Flags | `--use-gl=angle --use-angle=gl-egl --ignore-gpu-blocklist --enable-gpu-rasterization`, appended to EVERY Chromium launch by a wrapper around the browser binaries (`run.sh`, shadow `PLAYWRIGHT_BROWSERS_PATH`); this also covers specs with their own `test.use({ launchOptions })` (perf.spec). Firefox and WebKit stay on software rendering |
+| Flags | `--use-gl=angle --use-angle=gl-egl --ignore-gpu-blocklist --enable-gpu-rasterization`, passed as `PW_CHROMIUM_ARGS`, which the game applies in `playwright.config.ts` and in specs with their own launch options (perf.spec). The earlier runner-side browser-binary wrapper was removed once the game took this over (`77764e6`). Firefox and WebKit stay on software rendering |
 | Proof per shard | `run.sh` logs `WebGL renderer: ANGLE (Intel, Mesa Intel(R) Arc(tm) Graphics (MTL), OpenGL ES 3.2)`; anything else logs `GPU-FALLBACK` (the run continues on CPU) |
 | Sharing | Other GPU tenants per node (2026-10-03): nuc14-01 immich-server, jellyfin, makemkv (3/5); nuc14-02 frigate, plex (2/5); nuc14-03 scrypted, immich-ml (2/5). A CI shard is a short burst of WebGL; transcodes and detectors share the same iGPU time-sliced. If a node has no free slot, the shard waits in Pending until one frees |
 | Fallback | `GPU=0 scripts/ninth-banner-test.sh <ref> e2e`: no GPU request, no flags, SwiftShader (slow and hot; see the CPU measurements) |
@@ -98,7 +99,7 @@ Security model for GPU mode (review 2026-10-03, no critical findings):
   ```
 
 Limits / caveats:
-- The perf spec's annotation still says "(software WebGL)": the game decides that label by platform. The game-side launch-args hook (branch `ci-sharding`) should take over the flag set and the label; until then the runner wrapper applies the flags.
+- Flag set and GPU check are owned by the game since `77764e6` (`PW_CHROMIUM_ARGS`, `PW_GPU_EXPECTED`); keep the flags in `scripts/ninth-banner-test.sh` in sync with the game's strategy doc.
 - Parallelism: **GPU mode runs up to 3 shards at once, one per node** (owner decision 2026-10-03). CPU mode (`GPU=0`) stays at 2 (thermal). CPU cap per shard stays 4.
   Verified 2026-10-03 at `302a819`, 3 GPU shards in parallel (one per node, all on the Intel renderer): **3 min 54 s** wall time, 134/136 passed (1 flaky). Peak package temperatures 69 / 83 / 77 °C (nuc14-01/02/03), against 64 / 81 / 69 °C in the 10 min before. The failure is the known Firefox `music.spec` AudioContext issue (it fails on CPU too).
 
@@ -187,7 +188,8 @@ kubectl logs -n ci-runner <pod> -c clone
 | Log shows `GPU-FALLBACK` | The GPU slot was granted but the device/driver path failed (plugin or driver problem after a Talos/Mesa change) or the flags changed. (A pod requesting `gpu.intel.com/i915` cannot be scheduled without a slot; that case is `Pending`, below.) Check `kubectl describe pod` (resources), `kubectl get pods -n kube-system -l app.kubernetes.io/name=intel-gpu-plugin`, then rerun; `GPU=0` as the workaround |
 | GPU shard `Pending`, event `Insufficient gpu.intel.com/i915` | All 5 iGPU slots on the candidate nodes are taken (media/frigate/immich). It waits; or run `GPU=0` |
 | Shard OOMKilled | Lower `WORKERS`, or raise the runner memory limit in the template (keep the quota consistent) |
-| `responsive` rc=2 | `playwright.responsive.config.ts` is not in the repo at that ref yet |
+| A browser suite exits rc=2 at once | `GPU=0` was set (browser suites are GPU-only), or the ref predates the game's `tools/e2e-shard.ts` |
+| `IMAGE MISMATCH` from the trigger | The game bumped Playwright: `tests/e2e/runner.json` at that ref names a different image. Bump `job-template.yaml.tpl` (§4 step 5) |
 | Script hangs on a shard | Check `kubectl describe pod`; the deadline is 90 min (`activeDeadlineSeconds`) |
 
 ---
@@ -259,3 +261,4 @@ runbooks/policy-cli.py risk add AR-<next> \
 - `2026.10.03` (thermal/W1): at most 2 shards in parallel (thermal), runner declared best-effort (GitHub CI is the gate), shared-PAT risk recorded as owner-accepted (W1) with a prepared register entry.
 - `2026.10.03` (GPU): GPU mode via the existing Intel GPU device plugin (shared `gpu.intel.com/i915`), default for e2e/nightly/responsive; browser-binary wrapper for the flags; renderer preflight; SPECS/PROJECT/CPU knobs; CPU vs GPU measurements.
 - `2026.10.03` (GPU parallel): GPU residual risk accepted by the owner; GPU mode runs 3 shards in parallel (quota i915 cap 3); CPU mode stays at 2.
+- `2026.10.03` (game hand-off `77764e6`): suites call the game's `test:*:shard` scripts with `E2E_OUT`; `e2e`/`responsive` GPU-only; new `release` suite + commit status `E2E (GPU, k8s)` posted from the Mac; image lockstep against `tests/e2e/runner.json`; runner-side browser wrapper removed.

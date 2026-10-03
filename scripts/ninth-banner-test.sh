@@ -2,10 +2,13 @@
 # Run The Ninth Banner's test suites as a sharded Kubernetes Job on the
 # cluster (namespace ci-runner) and collect the results on this Mac.
 #
-#   scripts/ninth-banner-test.sh <ref> <unit|e2e|nightly|responsive|sims> [shards]
+#   scripts/ninth-banner-test.sh <ref> <unit|e2e|nightly|responsive|release|sims> [shards]
 #
 #   ref     commit sha (short ok), branch or tag of nachtschatt3n/the-ninth-banner
-#   shards  default: e2e/nightly/responsive 3, sims 4 (one sweep each), unit 1 (forced)
+#   shards  default: e2e/nightly/responsive/release 3, sims 4, unit 1 (forced)
+#
+# release: when every shard has reported, posts the commit status
+# "E2E (GPU, k8s)" on the game repo with gh (the pods hold no token).
 #
 # Env: RESULTS_DIR (default ~/ci-results), WORKERS (playwright workers per
 # shard, default 2), COLLECT=0 (fire and forget: no wait, no artifact copy),
@@ -34,7 +37,7 @@ k() { (cd "$REPO_ROOT" && mise exec -- kubectl "$@"); }
 ref_in="$1"; suite="$2"; shards="${3:-}"
 case "$suite" in
     unit) shards=1 ;;
-    e2e|nightly|responsive) shards="${shards:-3}" ;;
+    e2e|nightly|responsive|release) shards="${shards:-3}" ;;
     sims) shards="${shards:-4}" ;;
     *) echo "unknown suite '$suite'"; usage ;;
 esac
@@ -45,7 +48,10 @@ parallelism=$(( shards < 2 ? shards : 2 ))   # CPU/SwiftShader mode
 workers="${WORKERS:-2}"   # 4 per 6-CPU shard starved Chromium (timing tests failed); see SOP
 # Browser suites default to the iGPU (10x faster, ~10-20 C cooler, measured
 # 2026-10-03); GPU=0 forces the CPU/SwiftShader fallback.
-case "$suite" in e2e|nightly|responsive) gpu="${GPU:-1}" ;; *) gpu="${GPU:-0}" ;; esac
+case "$suite" in e2e|nightly|responsive|release) gpu="${GPU:-1}" ;; *) gpu="${GPU:-0}" ;; esac
+case "$suite" in e2e|responsive|release)
+    [ "$gpu" = 1 ] || { echo "suite '$suite' is GPU-only: on 4 software-rendering CPUs it fails its timing budgets (docs/sops/ci-runner.md)"; exit 2; } ;;
+esac
 cpu_req="${CPU_REQ:-2}"; cpu_lim="${CPU_LIM:-4}"
 [[ "$cpu_lim" =~ ^[1-4]$ ]] || { echo "CPU_LIM must be 1..4 (thermal cap)"; exit 2; }
 # These values are pasted into sed and YAML: allow-list them.
@@ -68,6 +74,19 @@ if [ "$gpu" = 1 ]; then parallelism=$(( shards < 3 ? shards : 3 )); fi
 collect="${COLLECT:-1}"
 
 sha="$(gh api "repos/$GH_REPO/commits/$ref_in" --jq .sha)" || { echo "cannot resolve ref '$ref_in'"; exit 2; }
+
+# Image lockstep: the game pins the runner image (tests/e2e/runner.json, its
+# tag = @playwright/test). Refuse a mismatch; older refs have no runner.json.
+tpl_image="$(sed -n 's|^ *image: &image ||p' "$TEMPLATE")"
+want_image="$(gh api "repos/$GH_REPO/contents/tests/e2e/runner.json?ref=$sha" --jq .content 2>/dev/null | base64 -d 2>/dev/null \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["playwrightImage"])' 2>/dev/null || true)"
+if [ -z "$want_image" ]; then
+    echo "note: no tests/e2e/runner.json at ${sha:0:12}; image lockstep not checked"
+elif [ "$want_image" != "$tpl_image" ]; then
+    echo "IMAGE MISMATCH: the game at ${sha:0:12} wants $want_image"
+    echo "                the runner template has  $tpl_image"
+    echo "bump job-template.yaml.tpl first (docs/sops/ci-runner.md §4 step 5)"; exit 2
+fi
 job="tnb-${suite}$([ "$gpu" = 1 ] && echo -gpu)-${sha:0:7}-$(date +%m%d%H%M%S)"
 dest="${RESULTS_DIR:-$HOME/ci-results}/$job"
 mkdir -p "$dest"
@@ -127,8 +146,34 @@ else
     echo "FAIL  $suite @ ${sha:0:12}: $fails/$shards shards failed (${elapsed}s)"
 fi
 echo "artifacts: $dest  (shard-N/: junit.xml, playwright-report/, test-results/ traces, blob-report/)"
-if ls "$dest"/shard-*/blob-report/*.zip >/dev/null 2>&1; then
-    echo "merged HTML report: mkdir -p $dest/blobs && cp $dest/shard-*/blob-report/*.zip $dest/blobs/ && (cd ~/code/the-ninth-banner && npx playwright merge-reports --reporter html $dest/blobs && npx playwright show-report)"
+if ls "$dest"/shard-*/blob-report/*.zip "$dest"/shard-*/*/blob-report/*.zip >/dev/null 2>&1; then
+    echo "merged report (from a checkout of the game at ${sha:0:12}): npm run test:merge-reports -- \"$dest\" --out \"$dest/report\""
+fi
+
+# Counts from every shard's junit.xml (a test-list split never runs a test twice)
+counts="$(python3 - "$dest" <<'PY'
+import sys, glob, xml.etree.ElementTree as ET
+t = f = s = 0
+for p in glob.glob(sys.argv[1] + "/shard-*/**/junit.xml", recursive=True):
+    r = ET.parse(p).getroot()
+    for c in r.iter("testcase"):
+        t += 1
+        if c.find("failure") is not None or c.find("error") is not None: f += 1
+        elif c.find("skipped") is not None: s += 1
+print(f"{t - f - s} passed, {f} failed, {s} skipped")
+PY
+)"
+echo "tests: $counts"
+
+if [ "$suite" = release ]; then
+    # Only for a complete run: every shard reported above, or we never got here.
+    if [ "$fails" -eq 0 ]; then state=success; else state=failure; fi
+    desc="$counts; $shards GPU shards in ${elapsed}s"
+    if gh api "repos/$GH_REPO/statuses/$sha" -f state="$state" -f context="E2E (GPU, k8s)" -f description="${desc:0:140}" >/dev/null; then
+        echo "posted commit status 'E2E (GPU, k8s)' = $state on ${sha:0:12}: $desc"
+    else
+        echo "WARNING: could not post the commit status (gh api failed)"
+    fi
 fi
 echo "the Job and its pods self-delete 1h after finishing (ttlSecondsAfterFinished=3600)"
 [ "$fails" -eq 0 ]
