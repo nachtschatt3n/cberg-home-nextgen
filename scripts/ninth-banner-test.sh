@@ -145,7 +145,7 @@ if [ "$fails" -eq 0 ]; then
 else
     echo "FAIL  $suite @ ${sha:0:12}: $fails/$shards shards failed (${elapsed}s)"
 fi
-echo "artifacts: $dest  (shard-N/: junit.xml, playwright-report/, test-results/ traces, blob-report/)"
+echo "artifacts: $dest  (shard-N/: junit.xml, playwright-report/, test-results/ traces, blob-report/; release: per part in shard-N/{release,responsive}/)"
 if ls "$dest"/shard-*/blob-report/*.zip "$dest"/shard-*/*/blob-report/*.zip >/dev/null 2>&1; then
     echo "merged report (from a checkout of the game at ${sha:0:12}): npm run test:merge-reports -- \"$dest\" --out \"$dest/report\""
 fi

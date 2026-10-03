@@ -102,6 +102,7 @@ Limits / caveats:
 - Flag set and GPU check are owned by the game since `77764e6` (`PW_CHROMIUM_ARGS`, `PW_GPU_EXPECTED`); keep the flags in `scripts/ninth-banner-test.sh` in sync with the game's strategy doc.
 - Parallelism: **GPU mode runs up to 3 shards at once, one per node** (owner decision 2026-10-03). CPU mode (`GPU=0`) stays at 2 (thermal). CPU cap per shard stays 4.
   Verified 2026-10-03 at `302a819`, 3 GPU shards in parallel (one per node, all on the Intel renderer): **3 min 54 s** wall time, 134/136 passed (1 flaky). Peak package temperatures 69 / 83 / 77 °C (nuc14-01/02/03), against 64 / 81 / 69 °C in the 10 min before. The failure is the known Firefox `music.spec` AudioContext issue (it fails on CPU too).
+  `release` with `release-all` verified 2026-10-03 at game `4f26442`, 3 GPU shards: **6 min 57 s** wall time (was ~13 min with the whole responsive matrix on shard 1); shards 309 / 357 / 400 s test time; 188 passed, 0 failed, 26 skipped (3 flaky, passed on retry); status `E2E (GPU, k8s)` = success. Peak package temperatures 71 / 92 / 83 °C (nuc14-01/02/03) against 64 / 76 / 65 °C in the 10 min before; nuc14-02 is the warm node and touched 92 °C, just under the 93 °C target.
 
 ---
 
