@@ -67,6 +67,8 @@ conflicts_with:
   - flux-fleet-0.60.0                 # Flux controller upgrade underneath this plan's GitOps legs.
   - flux-reconciler-impersonation     # changes WHO applies the Kustomizations/HelmReleases this plan relies on.
   - flux-oci-chart-sources            # rewrites HR chart sources (incl. app-template for affine-pg/sure-pg).
+  - sure-0.7.5                        # helm upgrade re-runs sure-migrate (db:prepare) against sure-pg;
+                                      # never restart sure-pg under it. Listed back in that plan.
   - longhorn-1.13.0                   # storage engine upgrade; three RWO Longhorn volumes are re-attached here.
                                       # (talos-linux-1.14.2 / talconfig-multidoc-migration are exclusive:true
                                       # on their own side, which already keeps them out of this slot.)

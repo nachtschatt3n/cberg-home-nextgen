@@ -35,9 +35,8 @@ conflicts_with:
                                       # (its §1.4 sidekiq-cron trap); its §4 must not race this upgrade
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. helmrelease/sure
   - flux-oci-chart-sources            # stage 7 rewrites the `sure` chart source (same spec.chart block)
-  # pgvector-fleet-0.8.7 (rolls deployment/sure-pg) is being written the same night and does not exist
-  # yet, so it cannot be listed (maintenance-plan.py --validate raises DEAD-REF). Add it here once its
-  # file lands, and it must list sure-0.7.5 back — see §6.
+  - pgvector-fleet-0.8.7              # rolls deployment/sure-pg; a pg restart mid sure-migrate (db:prepare)
+                                      # breaks the Job — serialize (see §6). Listed back in that plan.
 exclusive: false
 security_ref: null
 capability_change: false              # chart diff is version metadata only; the app image is OUR fork,
