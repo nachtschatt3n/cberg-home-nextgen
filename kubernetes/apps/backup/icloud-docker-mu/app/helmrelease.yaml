@@ -31,13 +31,13 @@ spec:
           app:
             image:
               repository: mandarons/icloud-drive
-              # Pinned to the `main` build (2026-06-06) that bundles icloudpy 0.9.0,
-              # which adds trigger_2fa_push_notification() — REQUIRED for iOS 26.4+
-              # 2FA re-auth. The latest RELEASE (v1.25.0) still ships the broken
-              # icloudpy 0.8.0, so Apple never pushes the code and no 2FA dialog
-              # appears on any device. Move back to a release tag once icloud-docker
-              # cuts >= v1.26.0 with icloudpy 0.9.0. See docs/sops/icloud-docker-reauth.md.
-              tag: "main@sha256:91486ec1eaeb382e7af264b7ffa935c5ba110f11c3c2f1805976782ff5017917"
+              # Release 2.1.0 (2026-10-01): icloudpy 0.10.0 (keeps 0.9.0's
+              # trigger_2fa_push_notification() needed for iOS 26.4+ 2FA), and fixes
+              # Drive package handling (#525/#526 is_zipfile, #461, #473, #550).
+              # Web UI stays OFF (app.web_ui unset => disabled, loopback-only).
+              # KEEP IN SYNC with the other icloud-docker-* instance.
+              # See docs/sops/icloud-docker-reauth.md.
+              tag: "2.1.0@sha256:c57e8248fefc55d490f090eb5edd08ff53045861e4b8f532403926b38af36ba9"
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
