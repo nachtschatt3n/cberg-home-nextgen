@@ -36,6 +36,10 @@ data:
         # See 2026-10-03.
         KubeJobFailed: true
         KubeCPUOvercommit: true
+        # ci-runner-quota is a capacity cap every CI run fills by design.
+        # Re-declared without ci-runner in ci-runner-alerts.yaml.
+        KubeQuotaAlmostFull: true
+        KubeQuotaFullyUsed: true
       rules:
         kubeApiserverAvailability: false
         kubeControllerManager: false
