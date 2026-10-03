@@ -29,7 +29,7 @@ The Mac mini also hosts the shared Ollama runtime and many agent sessions. Paral
 | Job template | `kubernetes/apps/ci-runner/the-ninth-banner-tests/job-template.yaml.tpl`. Not applied by Flux and not scanned by kubeconform (`.tpl`); rendered per run by the trigger |
 | Trigger | `scripts/ninth-banner-test.sh <ref> <unit\|e2e\|nightly\|responsive\|sims> [shards]` |
 | Image | `mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30…` (multi-arch index digest; Node 24, git, Chromium/Firefox/WebKit baked in). **Keep in lockstep with `@playwright/test` in the game's `package-lock.json`**. Bump: §4 step 5 |
-| Job shape | Indexed Job, `completions = shards`, `parallelism = min(shards, 2)` (**thermal cap**: the 3rd shard queues), `backoffLimitPerIndex: 0`, `maxFailedIndexes = shards` (no retries, one failing shard never stops the others), topology spread over `kubernetes.io/hostname`, `activeDeadlineSeconds: 5400`, `ttlSecondsAfterFinished: 3600` |
+| Job shape | Indexed Job, `completions = shards`, `parallelism = min(shards, 3)` in GPU mode, `min(shards, 2)` in CPU mode (**thermal cap**), `backoffLimitPerIndex: 0`, `maxFailedIndexes = shards` (no retries, one failing shard never stops the others), topology spread over `kubernetes.io/hostname`, `activeDeadlineSeconds: 5400`, `ttlSecondsAfterFinished: 3600` |
 | Per shard | requests 2 CPU / 6Gi / 8Gi ephemeral; limits **4 CPU (thermal cap)** / 10Gi / 16Gi; Playwright `--workers=2` (`WORKERS`, default 2, see Troubleshooting) |
 | Priority | `PriorityClass ci-low` (value -1000, `preemptionPolicy: Never`, cluster-scoped, in the app kustomization): CI pods never preempt production and are evicted first under node pressure |
 | Quota | 4 pods, requests 6.5 CPU / 19Gi, limits 13 CPU / 32Gi; 0 Services, 0 PVCs. A second concurrent run queues (its shards are not created until quota frees) rather than squeezing production. `KubeQuotaAlmostFull`/`KubeQuotaFullyUsed` exclude `ci-runner` (the quota is a cap runs fill by design); `KubeQuotaExceeded` stays stock; a run starved by the quota raises `CIRunnerJobStarved` (info) after 60m |
@@ -86,10 +86,10 @@ Measured 2026-10-03, game commit `302a819`, smoke + perf + journeys specs, Chrom
 Full `e2e` (3 shards, parallelism 2, GPU): **135/136 passed in 5 min 5 s** wall time (the 4-CPU CPU run took ~34 min with 6 failures). Peak 89 °C on the node that ran two shards back to back (77 / 66 °C on the others). The one failure was Firefox `music.spec` (AudioContext `suspended`), which fails on the CPU path too, so it is not GPU-related. Power: not measurable from Prometheus (no RAPL/power collector is scraped), so CPU-seconds is the energy proxy.
 
 Security model for GPU mode (review 2026-10-03, no critical findings):
-- The quota caps `requests.gpu.intel.com/i915` at 2 and pins `gpu.intel.com/monitoring`, `i915_monitoring` and `npu.intel.com/accel` to 0, so a CI pod can never get the plugin's all-device monitoring resource or the NPU.
-- **Residual risk (owner decision; register entry below):** untrusted npm/test code gets ioctl access to the i915 kernel driver (a kernel exploit would mean node root), and `card0` would let the first opener become DRM master on these headless nodes. Mitigations: non-root, all capabilities dropped, own-repo and lockfile-pinned code only, egress locked down, `GPU=0` fallback. **Never use GPU mode for third-party or forked refs.** Keep Talos on current patch releases (i915 CVEs now matter for this namespace).
+- The quota caps `requests.gpu.intel.com/i915` at 3 and pins `gpu.intel.com/monitoring`, `i915_monitoring` and `npu.intel.com/accel` to 0, so a CI pod can never get the plugin's all-device monitoring resource or the NPU.
+- **ACCEPTED RISK (owner, 2026-10-03), residual:** untrusted npm/test code gets ioctl access to the i915 kernel driver (a kernel exploit would mean node root), and `card0` would let the first opener become DRM master on these headless nodes. Mitigations: non-root, all capabilities dropped, own-repo and lockfile-pinned code only, egress locked down, `GPU=0` fallback. **Never use GPU mode for third-party or forked refs.** Keep Talos on current patch releases (i915 CVEs now matter for this namespace).
 - Cross-tenant GPU memory leakage: low (per-process GPU address spaces, zeroed buffers). DoS: bounded. Frigate's detector runs on the NPU; transcodes use the video engines; render contention with immich-ml and tone-mapping is time-sliced, with per-context hang resets.
-- Prepared register entry (operator to run, as for W1):
+- Register entry, prepared but not yet recorded (owner or an operator session runs it, as for W1):
   ```bash
   runbooks/policy-cli.py risk add AR-<next> --register-only register-only:posture --severity medium \
     --description 'ci-runner GPU mode: shared i915 render+card0 node exposed to CI test code' \
@@ -99,7 +99,7 @@ Security model for GPU mode (review 2026-10-03, no critical findings):
 
 Limits / caveats:
 - The perf spec's annotation still says "(software WebGL)": the game decides that label by platform. The game-side launch-args hook (branch `ci-sharding`) should take over the flag set and the label; until then the runner wrapper applies the flags.
-- GPU mode does not change the CPU cap (4) or parallelism (2). Raising parallelism to 3 GPU shards (one per node) looks thermally safe from these numbers, but it is an owner decision (`docs/sops/ci-runner.md` §2 thermal note).
+- Parallelism: **GPU mode runs up to 3 shards at once, one per node** (owner decision 2026-10-03). CPU mode (`GPU=0`) stays at 2 (thermal). CPU cap per shard stays 4.
 
 ---
 
@@ -257,3 +257,4 @@ runbooks/policy-cli.py risk add AR-<next> \
 - `2026.10.03` (hardening): image pinned by index digest + bump procedure; `PriorityClass ci-low` (-1000, never preempts); declared `default` SA without token; DNS allow-list instead of `*`; per-shard CPU 3/6 to 2/4 (requests/limits) after the nodes hit 100-102°C at 6 CPU; quota 6.5/13 CPU.
 - `2026.10.03` (thermal/W1): at most 2 shards in parallel (thermal), runner declared best-effort (GitHub CI is the gate), shared-PAT risk recorded as owner-accepted (W1) with a prepared register entry.
 - `2026.10.03` (GPU): GPU mode via the existing Intel GPU device plugin (shared `gpu.intel.com/i915`), default for e2e/nightly/responsive; browser-binary wrapper for the flags; renderer preflight; SPECS/PROJECT/CPU knobs; CPU vs GPU measurements.
+- `2026.10.03` (GPU parallel): GPU residual risk accepted by the owner; GPU mode runs 3 shards in parallel (quota i915 cap 3); CPU mode stays at 2.

@@ -23,9 +23,9 @@ spec:
     services.nodeports: "0"
     persistentvolumeclaims: "0"
     # Device-plugin resources: at most one shared iGPU slot per running shard
-    # (parallelism cap 2), and NEVER the plugin's all-device monitoring
+    # (GPU-mode parallelism 3, one per node), and NEVER the plugin's all-device monitoring
     # resources or the NPU, whatever a future template edit asks for.
-    requests.gpu.intel.com/i915: "2"
+    requests.gpu.intel.com/i915: "3"
     requests.gpu.intel.com/monitoring: "0"
     requests.gpu.intel.com/i915_monitoring: "0"
     requests.npu.intel.com/accel: "0"

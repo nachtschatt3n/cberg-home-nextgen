@@ -41,8 +41,8 @@ esac
 [[ "$shards" =~ ^[1-9][0-9]?$ ]] || { echo "shards must be 1..99"; exit 2; }
 # THERMAL: at most 2 shards run at once (3 at 4-6 CPU drove the NUC14s to
 # 100-102 C); extra shards queue. Best-effort CI, GitHub CI is the gate.
-parallelism=$(( shards < 2 ? shards : 2 ))
-workers="${WORKERS:-2}"
+parallelism=$(( shards < 2 ? shards : 2 ))   # CPU/SwiftShader mode
+workers="${WORKERS:-2}"   # 4 per 6-CPU shard starved Chromium (timing tests failed); see SOP
 # Browser suites default to the iGPU (10x faster, ~10-20 C cooler, measured
 # 2026-10-03); GPU=0 forces the CPU/SwiftShader fallback.
 case "$suite" in e2e|nightly|responsive) gpu="${GPU:-1}" ;; *) gpu="${GPU:-0}" ;; esac
@@ -61,7 +61,10 @@ if [ "$gpu" = 1 ]; then
     chromium_args="--use-gl=angle --use-angle=gl-egl --ignore-gpu-blocklist --enable-gpu-rasterization"
 else
     gpu_res=""; chromium_args=""
-fi   # 4 per 6-CPU shard starved Chromium (timing tests failed); see SOP
+fi
+# GPU shards run cool (peak 66-89 C vs 100-102 C on SwiftShader): one per node,
+# 3 in parallel (owner decision 2026-10-03). CPU mode stays capped at 2.
+if [ "$gpu" = 1 ]; then parallelism=$(( shards < 3 ? shards : 3 )); fi
 collect="${COLLECT:-1}"
 
 sha="$(gh api "repos/$GH_REPO/commits/$ref_in" --jq .sha)" || { echo "cannot resolve ref '$ref_in'"; exit 2; }
