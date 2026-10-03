@@ -72,7 +72,7 @@ finding_refs: []                      # checked 2026-09-29: `finding list --grep
                                       # gateway / 1.9.2 returns no row for this component+target
 review: ready-for-go@2026-09-29
 status: vetted
-window: null
+window: "now:2026-10-03"   # ON-DEMAND NOW run 2026-10-03 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/envoy-gateway-upgrade.md
   - docs/sops/k8s-gateway-dns.md

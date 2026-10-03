@@ -75,7 +75,7 @@ status: awaiting-go  # 2026-10-01 nightly: DEFERRED + go_no_go ingested -- SD-11
                 # password` so notify_push would read it from config.php) was a deterministic
                 # no-op. This revision drops the config.php write entirely and gives notify_push
                 # the password through its own REDIS_URL env. Needs review + a fresh GO.
-window: "nightly:2026-10-01"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); SD-11 candidate (logouts = accepted interruption); GO-free only once the SD-11 policy change lands, else deferred for a GO
+window: "now:2026-10-03"   # ON-DEMAND NOW run 2026-10-03 (run-now.py stamp; was 'nightly:2026-10-01')
 premises:
   # Read-verb only (plan-premises.py refuses exec). Each run 2026-09-28 and
   # returned the expected value.

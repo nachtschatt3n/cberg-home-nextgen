@@ -60,7 +60,7 @@ finding_refs:
   - F-8ef629f2                        # "mariadb: chart 27.0.1 → 27.3.0 (minor)" — cycle 58d45ed0
 status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (app-template-5.2.1 conflict parked) -> fixed -> delta re-review ready-for-go. HUMAN-GATED; needs an operator GO.
 review: ready-for-go@2026-09-28
-window: "nightly:2026-10-05"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed (touches.shared storage/longhorn floor); interruption-only, not a data-loss decision
+window: "now:2026-10-03"   # ON-DEMAND NOW run 2026-10-03 (run-now.py stamp; was 'nightly:2026-10-05')
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/mariadb-major-upgrade.md     # dump discipline + marker check (no major here)
