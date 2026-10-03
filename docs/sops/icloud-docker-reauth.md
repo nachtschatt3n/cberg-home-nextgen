@@ -435,7 +435,11 @@ If unclear:
 `ICloudBackupSyncStalled` (warning, >6h) / `ICloudBackupSyncStalledCritical`
 (critical, >24h) fires and the triage below points at the session.** The
 alert's `account` label names the Apple ID: set `INSTANCE` to it and fix only
-that instance — the two are independent.
+that instance — the two are independent. **iCloud Drive** alerts
+(`ICloudDriveSyncStalled{,Critical}`, `ICloudDrivePersistentDownloadFailures`,
+group `icloud-backup.drive`) are covered in the Drive subsection below; if the
+photo alerts fire for the same account too, treat it as the photo case (one
+process serves both).
 
 The rules live in
 `kubernetes/apps/monitoring/kube-prometheus-stack/app/icloud-backup-alerts.yaml`

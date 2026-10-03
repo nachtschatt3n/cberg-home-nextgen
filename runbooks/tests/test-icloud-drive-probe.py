@@ -145,11 +145,21 @@ check("restart since", analyse_drive([prev, cur], NOW).get("icloud_drive_failing
 
 # ---------------------------------------------------------------- promtool
 def promtool():
-    p = shutil.which("promtool")
-    if p:
-        return p
-    hits = sorted(glob.glob(os.path.expanduser("~/.local/share/mise/installs/ubi-prometheus-prometheus/*/promtool")))
-    return hits[-1] if hits else None
+    # A mise shim with no pinned version is on PATH on the Mac and dies with
+    # "No version is set for shim: promtool" -- so every candidate must prove
+    # it RUNS, not merely exist, before it is used.
+    cands = [shutil.which("promtool")] + sorted(
+        glob.glob(os.path.expanduser("~/.local/share/mise/installs/ubi-prometheus-prometheus/*/promtool")),
+        reverse=True)
+    for c in cands:
+        if not c:
+            continue
+        try:
+            if subprocess.run([c, "--version"], capture_output=True, timeout=120).returncode == 0:
+                return c
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return None
 
 
 PT = promtool()
