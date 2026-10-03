@@ -61,9 +61,10 @@ The fix is **icloudpy 0.9.0** (2026-05-31), which adds
 icloudpy nor icloud-docker's own auth loop calls it automatically, so the
 re-auth script below calls it explicitly right after `requires_2fa` is `True`.
 
-**Image requirement:** the icloud-docker `:latest`/release tag (v1.25.0) still
-bundles the broken icloudpy 0.8.0. The HelmRelease is therefore pinned to the
-`main` build digest (`sha256:91486ec1…`, icloudpy 0.9.0). If you ever see the
+**Image requirement:** both HelmReleases pin release `2.1.0` by digest
+(`sha256:c57e8248…`, icloudpy 0.10.0, which keeps `trigger_2fa_push_notification()`).
+Release v1.25.0 and older bundle the broken icloudpy 0.8.0; until the 2.1.0
+upgrade the pin was a `main` build (`sha256:91486ec1…`). If you ever see the
 script print `icloudpy < 0.9.0 in this image`, the pin regressed — restore it.
 
 ### The retry-storm / quota trap
@@ -88,7 +89,7 @@ stop the loop first** (scale to 0 + suspend Flux), then re-auth once.
 | Session files | `<appleid-slug>` + `<appleid-slug>.session` (slug = Apple ID with `@`/`.` stripped) |
 | Credentials | secret `icloud-docker-$INSTANCE-secrets` → `SECRET_ICLOUD_USERNAME`, `SECRET_ICLOUD_PASSWORD` |
 | CIFS file owner | uid/gid **1000** (real pod remaps `abc` 911→1000 via `PUID=1000`) |
-| Auth library | `icloudpy` 0.9.0 via the pinned image digest (endpoint `idmsa.apple.com/appleauth/auth`) |
+| Auth library | `icloudpy` 0.10.0 (icloud-docker 2.1.0) via the pinned image digest (endpoint `idmsa.apple.com/appleauth/auth`) |
 | Session lifetime | ~30-60 days |
 
 ---
@@ -131,11 +132,11 @@ spec:
     fsGroup: 1000
   containers:
     - name: app
-      # MUST be the same pinned digest as the HelmRelease. `:latest` (v1.25.0)
-      # ships icloudpy 0.8.0, which has no trigger_2fa_push_notification() —
+      # MUST be the same pinned digest as the HelmRelease. Releases <= v1.25.0
+      # ship icloudpy 0.8.0, which has no trigger_2fa_push_notification() —
       # the script below would abort with `icloudpy < 0.9.0 in this image`
       # and no 2FA push would ever arrive.
-      image: mandarons/icloud-drive:main@sha256:91486ec1eaeb382e7af264b7ffa935c5ba110f11c3c2f1805976782ff5017917
+      image: mandarons/icloud-drive:2.1.0@sha256:c57e8248fefc55d490f090eb5edd08ff53045861e4b8f532403926b38af36ba9
       command: ["sleep", "infinity"]
       env:
         - name: HOME
@@ -182,7 +183,7 @@ if api.requires_2fa:
     else:
         print("!! icloudpy < 0.9.0 in this image — it CANNOT request the push that "
               "iOS 26.4+ requires, so no code will ever arrive. Pin the image to a "
-              "0.9.0 build (tag `main`, digest sha256:91486ec1…) and retry."); sys.exit(3)
+              ">= 0.9.0 build (release 2.1.0, digest sha256:c57e8248…) and retry."); sys.exit(3)
     code = input("Enter the 6-digit code shown on your device: ").strip()
     if not api.validate_2fa_code(code):
         print("!! Code rejected by Apple."); sys.exit(1)
@@ -407,6 +408,8 @@ If failed:
 | App pod stuck `ContainerCreating`, volume in use | `icloud-reauth-$INSTANCE` still holds the RWO PVC | Delete `icloud-reauth-$INSTANCE` before scaling the app up |
 | `Authentication required for Account. (421)` loop | session expired | Full SOP from step 1 |
 | 421 on `validate` then `409 ... signin/init` **right after a successful re-auth**; CloudKit `no auth method found` | `termsUpdateNeeded: true`: Apple won't issue `X-APPLE-WEBAUTH-TOKEN` until updated iCloud terms are accepted | Step 4b probe; owner accepts the terms at icloud.com; do NOT patch icloudpy |
+| `WARNING ... drive > remove_obsolete remove_obsolete is not found` (or `photos > remove_obsolete ...`) at startup although the config sets `remove_obsolete: false` | Cosmetic upstream log: 2.x `config_parser.get_{drive,photos}_remove_obsolete` reads exactly `drive.remove_obsolete` / `photos.remove_obsolete` with default False and logs "is not found" for ANY falsy value, including an explicit `false` | None. Deletion only runs when the value is truthy (`sync.py` / `drive_sync_directory.py` / `sync_photos.py`), and a missing key defaults to False. Keep `remove_obsolete: false` explicit |
+| After a restart on 2.x the first Drive cycle is long (mu measured ~2 h on 2026-10-03 vs ~31 min on the old build) with long silent stretches; Photos does not run until Drive finishes | Drive walks the tree folder-by-folder (collect + download per directory; existence checks are debug-level only), and on the first 2.x cycle it re-downloaded and unpacked the package bundles the old build could not unpack (~1 GB for mu) | Wait. Judge progress by pod network counters (`grep eth0 /proc/net/dev` inside the app container), not log lines; `ICloudBackupSyncStalled` (6 h) is the real alarm |
 
 ---
 
@@ -755,3 +758,8 @@ kubectl -n backup rollout status deploy/icloud-docker-$INSTANCE --timeout=120s
   from the measured 5-8h drive cadence, not the 3600s config),
   `ICloudDrivePersistentDownloadFailures` (info) and per-account absence
   guards. Added the operator-only listing recipe.
+
+- `2026.10.03 (b)`: Both instances moved from the `main@91486ec1` build to
+  release 2.1.0 (digest `c57e8248…`, icloudpy 0.10.0); the re-auth pod image
+  follows it. Added two §7 rows: the cosmetic `remove_obsolete is not found`
+  warning and the long first Drive cycle after a restart on 2.x.
