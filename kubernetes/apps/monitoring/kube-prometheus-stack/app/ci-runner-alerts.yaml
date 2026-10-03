@@ -1,0 +1,136 @@
+---
+# ci-runner alerting: test results must not page, runner INFRA must.
+#
+# The ci-runner namespace (docs/sops/ci-runner.md) runs The Ninth Banner test
+# suites as sharded, ephemeral Jobs. Two stock kube-prometheus-stack rules
+# treated ordinary CI activity as cluster faults, so both are disabled in
+# helmvalues.yaml (defaultRules.disabled) and re-declared here under the SAME
+# alert names (routing, silences and docs/sops/failed-job-alerting.md keep
+# working) with one narrow exclusion each:
+#
+#   KubeJobFailed     - a red test run fails its Job by design (every shard
+#                       fails its index). That is a test RESULT, not a fault.
+#                       Excluded: namespace="ci-runner". Every other namespace
+#                       keeps the stock expression verbatim.
+#   KubeCPUOvercommit - the N-1 check summed the CI pods' requests (2 CPU per
+#                       shard, 3 shards) on top of ~30.7 CPU of production
+#                       requests against a 34 CPU (51 - 17) budget, so every CI
+#                       run fired it. CI pods run at PriorityClass ci-low
+#                       (value -1000): on a node loss every production pod
+#                       (priority >= 0) preempts them, so they never consume
+#                       the N-1 headroom this alert protects. Excluded: pods
+#                       whose kube_pod_info priority_class is "ci-low".
+#                       Everything else is the stock expression.
+#
+# The ci-runner.infra group replaces the signal KubeJobFailed used to carry
+# for ci-runner: things that break the RUNNER, independent of test outcome.
+# Stock KubePodNotReady skips Job-owned pods and KubeContainerWaiting waits
+# 1h, so without these a broken runner would be silent.
+#
+# Labels verified on live series 2026-10-03: kube_pod_info{priority_class},
+# kube_pod_status_phase{phase}, kube_pod_init_container_status_terminated_reason
+# {container="clone",reason}. Healthy CI pods are Pending ~1 min (clone).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ci-runner-alerts
+  namespace: monitoring
+  labels:
+    # REQUIRED: without it the rule is never loaded, silently.
+    release: kube-prometheus-stack
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+spec:
+  groups:
+    - name: kubernetes-apps.overrides
+      rules:
+        - alert: KubeJobFailed
+          annotations:
+            description: Job {{ $labels.namespace }}/{{ $labels.job_name }} failed
+              to complete. Removing failed job after investigation should clear
+              this alert. (ci-runner test Jobs are excluded - a failing test run
+              is a result, not a fault; see ci-runner-alerts.yaml.)
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubejobfailed
+            summary: Job failed to complete.
+          expr: |
+            kube_job_failed{job="kube-state-metrics", namespace!="ci-runner"} > 0
+          for: 15m
+          labels:
+            severity: warning
+    - name: kubernetes-resources.overrides
+      rules:
+        - alert: KubeCPUOvercommit
+          annotations:
+            description: Cluster has overcommitted CPU resource requests for Pods
+              by {{ printf "%.2f" $value }} CPU shares and cannot tolerate node
+              failure. (Preemptible ci-low CI pods are not counted.)
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubecpuovercommit
+            summary: Cluster has overcommitted CPU resource requests.
+          # Stock expression with namespace_cpu:kube_pod_container_resource_requests:sum
+          # expanded inline so ci-low pods can be subtracted per pod.
+          expr: |
+            (
+              (
+                sum by (cluster) (
+                  max by (namespace, pod, container, cluster) (kube_pod_container_resource_requests{job="kube-state-metrics", resource="cpu"})
+                  * on (namespace, pod, cluster) group_left ()
+                  max by (namespace, pod, cluster) (kube_pod_status_phase{phase=~"Pending|Running"} == 1)
+                  unless on (namespace, pod, cluster)
+                  max by (namespace, pod, cluster) (kube_pod_info{job="kube-state-metrics", priority_class="ci-low"})
+                )
+                - sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics", resource="cpu"}) > 0
+              )
+              and
+              count by (cluster) (max by (cluster, node) (kube_node_role{job="kube-state-metrics", role="control-plane"})) < 3
+            )
+            or
+            (
+              sum by (cluster) (
+                max by (namespace, pod, container, cluster) (kube_pod_container_resource_requests{job="kube-state-metrics", resource="cpu"})
+                * on (namespace, pod, cluster) group_left ()
+                max by (namespace, pod, cluster) (kube_pod_status_phase{phase=~"Pending|Running"} == 1)
+                unless on (namespace, pod, cluster)
+                max by (namespace, pod, cluster) (kube_pod_info{job="kube-state-metrics", priority_class="ci-low"})
+              )
+              - (
+                sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics", resource="cpu"})
+                - max by (cluster) (kube_node_status_allocatable{job="kube-state-metrics", resource="cpu"})
+              ) > 0
+            )
+          for: 10m
+          labels:
+            severity: warning
+    - name: ci-runner.infra
+      interval: 1m
+      rules:
+        - alert: CIRunnerPodStuckPending
+          annotations:
+            description: CI pod {{ $labels.namespace }}/{{ $labels.pod }} has been
+              Pending for more than 15 minutes (healthy pods clone and start in
+              about a minute). Likely unschedulable, ImagePullBackOff on the
+              Playwright image, a missing ConfigMap/Secret, or a hung clone
+              init container. Test results are not affected - the runner is.
+            summary: CI runner pod stuck Pending
+          expr: |
+            max by (namespace, pod) (kube_pod_status_phase{namespace="ci-runner", phase="Pending"}) == 1
+          for: 15m
+          labels:
+            category: ci-runner
+            component: the-ninth-banner-tests
+            severity: warning
+        - alert: CIRunnerCloneFailed
+          annotations:
+            description: The clone init container of CI pod {{ $labels.pod }}
+              terminated with reason {{ $labels.reason }}. The test suite never
+              ran - check the git credential (the-ninth-banner-git-credential),
+              the NetworkPolicy/DNS allow-list, and that the ref exists.
+            summary: CI runner could not clone the repository
+          expr: |
+            max by (namespace, pod, reason) (
+              kube_pod_init_container_status_terminated_reason{namespace="ci-runner", container="clone", reason!="Completed"}
+            ) == 1
+          for: 1m
+          labels:
+            category: ci-runner
+            component: the-ninth-banner-tests
+            severity: warning
