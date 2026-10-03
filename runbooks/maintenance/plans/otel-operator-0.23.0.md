@@ -1,5 +1,9 @@
 ---
-plan_id: otel-operator-0.23.0
+plan_id: otel-operator-0.23.0          # KEPT on the 2026-10-03 retarget to 0.24.0 (README "When the
+                                       # held target MOVES": the id is an identifier, not an
+                                       # assertion; edot-collector-0.162.0, helm-drift-detection,
+                                       # flux-oci-chart-sources and the go/no-go issue resolve by
+                                       # it). `target:` is authoritative. See body §1.0.
 component: otel-operator               # HelmRelease name in `monitoring`. The CHART is the
                                        # umbrella `opentelemetry-kube-stack` (subcharts:
                                        # otel-crds, prometheus-crds, opentelemetry-operator);
@@ -11,8 +15,15 @@ kind: chart
 current: "0.21.0"                      # MEASURED live 2026-09-19, not copied: HR
                                        # .spec.chart.spec.version = 0.21.0, helm revision 24
                                        # (deployed 2026-09-17T01:53:52Z, commit 9a35168f).
-target: "0.23.0"                       # released 2026-09-18T18:52:35Z
-update_type: minor                     # 0.x line: the MINOR digit is the breaking axis.
+target: "0.24.0"                       # RETARGETED 2026-10-03 from 0.23.0 (sweep 5a150729,
+                                       # group otel-operator-0.24.0). 0.24.0 released
+                                       # 2026-10-02T19:13:15Z, index digest b5997191a944...
+                                       # SAME appVersion 0.159.0 and SAME operator subchart
+                                       # 0.123.0 as 0.23.0; render diff 0.23.0 vs 0.24.0 with our
+                                       # values is EMPTY (measured, §1.0). Same job, so refreshed
+                                       # in place, not superseded.
+update_type: minor                     # 0.x line: the MINOR digit is the breaking axis
+                                       # (0.21 -> 0.24 crosses three chart minors).
                                        # AND the appVersion moves underneath it:
                                        # 0.154.0 -> 0.159.0 (five operator minors), with the
                                        # opentelemetry-operator SUBCHART 0.119.0 -> 0.123.0.
@@ -148,6 +159,16 @@ capability_change: false               # CORRECTED 2026-09-28 (review, F-a0d0edb
                                        # resizePolicy key) are inert (0 Instrumentation CRs, key unset).
                                        # Attended-only still follows from risk: high (autonomy-policy
                                        # forbid_risk).
+autonomy_override: human-gated        # ADDED 2026-10-03 (retarget). Resolves the contradiction that
+                                       # deferred nightly:2026-10-03: SD-11 ignores `risk:`, so the
+                                       # old prose "risk high => attended" gated nothing and SD-11
+                                       # derived the plan pre-approved for nightly. The human need
+                                       # is real, not "to be safe": §5.3 step 1 is a break-glass
+                                       # DIRECT cluster mutation (kubectl delete netpol) that this
+                                       # plan itself says needs operator approval, and the failure
+                                       # it guards is a SILENT loss of the sole log/metric path,
+                                       # which no alert catches (§4.6). Same shape as
+                                       # coredns-1.48.1 ("§5.3 break-glass needs a human").
 rollback_class: git-revert             # the EXPECTED path: no data, no migration, helm history
                                        # keeps revision 24 (5 revisions retained, measured).
                                        # BUT §5.3 is a real procedure, not decoration: IF the
@@ -157,7 +178,12 @@ rollback_class: git-revert             # the EXPECTED path: no data, no migratio
                                        # merge preserves a live field absent from both
                                        # manifests, and the 0.154.0 builder honours it
                                        # identically). §4.3 is the gate that detects this.
-finding_refs: [F-60ebcdb5]             # CORRECTED 2026-09-20. The previous value `[]` was
+finding_refs: [F-60ebcdb5]             # RE-VERIFIED 2026-10-03 (retarget): the SAME record, now
+                                       # titled "otel-operator: chart 0.21.0 → 0.24.0 (minor)",
+                                       # status unchanged, last_seen 2026-10-03, cycle 5a150729.
+                                       # No other otel-operator finding exists (finding list
+                                       # --grep otel-operator returns only this row).
+                                       # CORRECTED 2026-09-20. The previous value `[]` was
                                        # wrong on BOTH of its claims, re-queried live against
                                        # sweep_history: F-60ebcdb5 is OPEN (status `new`,
                                        # section version, severity monitor, first/last seen
@@ -172,9 +198,21 @@ finding_refs: [F-60ebcdb5]             # CORRECTED 2026-09-20. The previous valu
                                        # F-a85e8943 (CRD ownership) is still deliberately NOT
                                        # claimed here — it is owned by prometheus-crd-ownership,
                                        # and double-claiming breaks the plan-or-page join.
-status: awaiting-go  # 2026-10-03 nightly: DEFERRED + go_no_go ingested -- SD-11 derives it pre-approved, but the body (frontmatter capability_change note + §6 "Window shape") still says risk high => attended, operator-present, never unattended, must not be placed in nightly; and §5.3 is a rollback path git-revert alone does not cover. Reconcile the body or GO it for an attended slot. Was: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (6 stale gates/rollback rev) -> fixed -> re-review ready-for-go. HUMAN-GATED via risk high; needs an operator GO.
-review: ready-for-go@2026-09-28
-window: "nightly:2026-10-03"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); SD-11 candidate; GO-free only once SD-11 lands, else needs a GO
+status: draft   # RESET 2026-10-03 by the 0.24.0 retarget (README: "a retarget/material amendment
+                # re-reviews"). HISTORY, preserved: drafted 2026-09-19 -> reviewer needs-fix ->
+                # fixed -> re-review ready-for-go@2026-09-28 -> vetted -> scheduled
+                # nightly:2026-10-03 -> 2026-10-03 nightly DEFERRED, status awaiting-go, with
+                # this note: "go_no_go ingested -- SD-11 derives it pre-approved, but the body
+                # ... still says risk high => attended ... must not be placed in nightly; and
+                # §5.3 is a rollback path git-revert alone does not cover. Reconcile the body or
+                # GO it for an attended slot." RECONCILED here via autonomy_override above.
+                # ANY GO OR SD-11 PRE-APPROVAL RECORDED FOR THIS plan_id APPLIED TO 0.23.0,
+                # NOT 0.24.0. Do not carry it across: the window agent must obtain a fresh GO
+                # against target 0.24.0 after a new plan-reviewer verdict.
+review: null    # was ready-for-go@2026-09-28 — that verdict reviewed target 0.23.0. Cleared on
+                # retarget; only the plan-reviewer (sweep rule 4d0b) may set it again.
+window: null    # was "nightly:2026-10-03" (deferred, never ran). Cleared; the window agent
+                # assigns. Attended slot only (sat-attended / sun-attended), see §6.
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/monitoring.md
@@ -279,16 +317,16 @@ premises:
       file at the deployed tag first.
     run: kubectl get deploy -n flux-system helm-controller -o jsonpath='{.spec.template.spec.containers[0].image}'
     expect_matches: "helm-controller:v1\\.6\\."
-generated: "2026-09-19"
+generated: "2026-09-19"   # refreshed 2026-10-03: retarget 0.23.0 -> 0.24.0 (§1.0)
 ---
 
-# otel-operator (opentelemetry-kube-stack): chart 0.21.0 → 0.23.0
+# otel-operator (opentelemetry-kube-stack): chart 0.21.0 → 0.24.0
 
 ## 1) Summary & why held
 
 Bump the `otel-operator` HelmRelease
 (`kubernetes/apps/monitoring/otel-operator/app/helmrelease.yaml`) from
-**opentelemetry-kube-stack 0.21.0 → 0.23.0**, and in the same commit **pin the
+**opentelemetry-kube-stack 0.21.0 → 0.24.0**, and in the same commit **pin the
 two NetworkPolicy feature gates off** (§1.3). That HelmRelease is the umbrella
 chart: subcharts `otel-crds`, `prometheus-crds` and `opentelemetry-operator`
 (`kube-state-metrics` and `prometheus-node-exporter` are disabled here — the
@@ -298,15 +336,77 @@ render contains neither). It renders **one** `OpenTelemetryCollector` CR,
 k8s_objects / k8s_cluster per node), all exported over OTLP to
 `edot-collector.monitoring.svc:4317`, which is what puts them in Elasticsearch.
 
+### 1.0 Retarget 0.23.0 → 0.24.0 (2026-10-03) — what changed and what did not
+
+This plan was written, reviewed and vetted for **0.23.0**, scheduled into
+`nightly:2026-10-03`, and **deferred there without running** (status
+`awaiting-go`, commit `a7e206de`). The same night upstream published 0.23.1,
+0.23.2 and 0.24.0, and sweep `5a150729` re-held the item as group
+`otel-operator-0.24.0`. `coverage.py` does not tolerate drift across a 0.x
+release line, so the 0.23.0 target no longer covered it.
+
+**Decision: refresh in place, do not supersede.** The plans README says to
+supersede only when the new target makes it a *different job*. It does not.
+Measured 2026-10-03 from the release tarballs, with the digest checked against
+the index Flux reads:
+
+| | 0.23.0 | 0.24.0 |
+|---|---|---|
+| chart `appVersion` (operator) | 0.159.0 | **0.159.0** |
+| `opentelemetry-operator` subchart | 0.123.0 | **0.123.0** |
+| `charts/` (all subcharts incl. otel-crds, prometheus-crds) | — | **`diff -rq`: identical to 0.23.0** |
+| render with our live values + gate pin | — | **`diff` vs 0.23.0: EMPTY** (bar `helm.sh/chart` label) |
+| render 0.21.0 → 0.24.0 | — | **exactly the five §1.2 items, nothing else** |
+
+All three upstream releases since 0.23.0 change only the umbrella's own
+templates, and all three render to nothing here:
+
+- **0.23.1** — PR #2426 *"schedule profiling preset on Linux nodes only"*: adds
+  a `kubernetes.io/os: linux` nodeSelector **only when
+  `presets.profiling.enabled`**. Our daemon collector does not enable the
+  profiling preset. Inert.
+- **0.23.2** — PR #2433 *"indent kubeEtcd serviceMonitor scrapeLimits
+  correctly"*: a template indent fix in the kubeEtcd ServiceMonitor. We render no
+  ServiceMonitor, which the empty diff confirms. Inert.
+- **0.24.0** — PR #2434 *"add trafficDistribution option for collectors"*: a new
+  `collectors.<name>.trafficDistribution` key, default `""`, behind
+  `{{- if $collector.trafficDistribution }}`. Unset here. Inert, and **not a
+  capability change** for us. `capability_change: false` stands.
+
+Upstream also shipped operator **subchart** 0.124.0, which carries **operator
+0.160.0**, but kube-stack 0.24.0 does **not** pull it in. Its `charts/` still
+holds 0.123.0 / 0.159.0. So §1.3/§1.4 (the 0.158.0 NetworkPolicy gate promotion)
+and the 0.159.0 fixes are **unchanged and still the whole risk story**. The next
+kube-stack minor will most likely bring 0.160.0, and that **will** be a new job
+needing a fresh look at the operator CHANGELOG.
+
+**What the retarget does NOT carry over:**
+- The `ready-for-go@2026-09-28` review and any GO or SD-11 pre-approval recorded
+  against `otel-operator-0.23.0` **applied to target 0.23.0**. They are cleared
+  (`status: draft`, `review: null`, `window: null`). A fresh plan-reviewer
+  verdict and a fresh GO against **0.24.0** are required.
+- The deferral reason is resolved, not inherited. The body said "risk high ⇒
+  attended", but SD-11 ignores `risk:`, so nothing enforced it. It is now enforced
+  by `autonomy_override: human-gated` (frontmatter, with the reason).
+
+**Re-measured live 2026-10-03 (read-only):** HR `0.21.0`, Ready, helm **rev 26**
+(2026-09-25); operator `:0.154.0`; DaemonSet `:0.154.0` `3/3`; CR
+`status.version 0.154.0`, `np=[]`; NetworkPolicies in `monitoring` `0`;
+Instrumentation/TargetAllocator/OpAMPBridge CRs `0`; **all 12 premises PASS**
+(`plan-premises.py otel-operator-0.23.0 --require-premises`). Target images
+`ghcr.io/open-telemetry/opentelemetry-operator/opentelemetry-operator:0.159.0` and
+`otel/opentelemetry-collector-k8s:0.159.0` both resolve (registry manifest HTTP
+200).
+
 ### 1.1 Why it was held
 
-`runbooks/coverage.py`: *"0.x release-line move (0.21 -> 0.23) — at major 0 the
+`runbooks/coverage.py` (now *"0.21 -> 0.24"*; quoted as first held): *"0.x release-line move (0.21 -> 0.23) — at major 0 the
 minor IS the breaking axis; needs an assessed window plan."* Correct policy, and
 here it is not a formality. **Both axes move:**
 
-| Axis | 0.21.0 | 0.23.0 |
+| Axis | 0.21.0 | 0.23.0 = 0.24.0 |
 |---|---|---|
-| chart `version` | 0.21.0 | 0.23.0 |
+| chart `version` | 0.21.0 | 0.23.0 / **0.24.0** |
 | chart `appVersion` (the operator) | **0.154.0** | **0.159.0** |
 | `opentelemetry-operator` subchart | 0.119.0 | 0.123.0 |
 | operator image | `…/opentelemetry-operator:0.154.0` | `:0.159.0` |
@@ -316,7 +416,7 @@ Measured from the pulled charts, not from the index. **A chart-level "minor" is
 not a safe minor when the appVersion moves five operator minors underneath it** —
 that is the whole reason this item is in the PLAN lane and not in Step 0.
 
-Upstream, the two releases are:
+Upstream, the five releases 0.21.0 → 0.24.0 are (0.23.1, 0.23.2 and 0.24.0 are covered in §1.0):
 
 - **0.22.0** (2026-09-17): PR #2413 *"bump operator to 0.123.0 and update crds"* —
   this is the release that carries the entire 0.154.0 → 0.159.0 jump.
@@ -327,7 +427,8 @@ Upstream, the two releases are:
 
 ### 1.2 What actually changes in the rendered release — measured
 
-`helm template` with **our live HR values**, 0.21.0 vs 0.23.0. Excluding the
+`helm template` with **our live HR values**, 0.21.0 vs 0.23.0 (**re-measured
+2026-10-03 for 0.21.0 vs 0.24.0: identical output, item for item**). Excluding the
 `helm.sh/chart` / `app.kubernetes.io/version` label churn and the webhook cert
 (regenerated on *every* upgrade by `autoGenerateCert.recreate: true`), the
 **entire** diff is **five** things — four functional, one inert. This is the
@@ -374,7 +475,8 @@ The object inventory is otherwise identical. The CRDs shipped in `crds/`:
   still generated from prometheus-operator **0.92.0**. The subchart still exists,
   still has **no `templates/`**, and `crds.installPrometheus` is still the
   `Chart.yaml` condition and a `values.yaml` key (default `true`). **So
-  `prometheus-crd-ownership`'s mechanism is intact at 0.23.0** — see §6.
+  `prometheus-crd-ownership`'s mechanism is intact at 0.23.0** (and at 0.24.0:
+  `prometheus-crds` byte-identical 0.21.0 vs 0.24.0, re-checked 2026-10-03) — see §6.
 
 ### 1.3 The breaking change that makes this non-safe, and what it requires
 
@@ -465,7 +567,7 @@ describes **exactly** our install (`otel-operator-opentelemetry-operator`), and
 the `NAMESPACE` env the chart newly sets in 0.123.0 is required by that path
 (`operatorNamespace := os.Getenv("NAMESPACE")`, else hard error). So the
 chart/appVersion pair at 0.22.0+ is coherent, and **0.158.0 is the version that
-must never be run here** — a point in favour of going to 0.23.0 rather than
+must never be run here** — a point in favour of going to 0.23.0+ (now 0.24.0) rather than
 stopping short.
 
 ### 1.5 Options considered
@@ -490,7 +592,7 @@ landing on it is the safe side of that fence.
 
 ## 2) Pre-checks
 
-**2.1 — premises.** `.venv/bin/python3 runbooks/plan-premises.py otel-operator-0.23.0 --require-premises`
+**2.1 — premises.** `.venv/bin/python3 runbooks/plan-premises.py otel-operator-0.23.0 --require-premises` (the plan_id is deliberately unchanged by the 0.24.0 retarget — §1.0)
 must pass **all twelve** (the runner reports the count; it is 12, not 11).
 `crd-ownership-fix-is-in-place` failing means the dependency has not landed:
 **stop, do not proceed** (§6). As of 2026-09-28 all 12 pass (prometheus-crd-ownership executed 1a551276).
@@ -504,34 +606,49 @@ kubectl get pods -n monitoring -o wide | grep -vE 'Running|Completed' || echo "a
 ```
 
 **2.3 — re-verify the chart at the target version** (do not trust this file's §1.2
-if the window is days later; 0.23.x may have moved):
+if the window is days later; 0.24.x may have moved). Pull the tarballs straight from
+the upstream GitHub release and check the digest against the SAME index Flux's
+`HelmRepository/opentelemetry` reads. (`helm repo add/update` + `helm pull` hung
+>120 s on this Mac on 2026-10-03 on an unrelated corrupt local repo entry; the
+curl path below was run end-to-end instead.)
 
 ```bash
-helm repo add otel-tmp https://open-telemetry.github.io/opentelemetry-helm-charts && helm repo update otel-tmp
-helm search repo otel-tmp/opentelemetry-kube-stack --versions | head -5
 # EXPORT the chart dir — §2.4 and §3.3 both need it AFTER §3.2 cd's back to the repo.
 export CHARTDIR="$(mktemp -d)"
 echo "CHARTDIR=$CHARTDIR"      # write this down; every later chart path uses it
-for v in 0.21.0 0.23.0; do helm pull otel-tmp/opentelemetry-kube-stack --version $v --untar --untardir "$CHARTDIR/v$v"; done
+for v in 0.21.0 0.24.0; do
+  mkdir -p "$CHARTDIR/v$v"
+  curl -sfL -o "$CHARTDIR/v$v.tgz" \
+    "https://github.com/open-telemetry/opentelemetry-helm-charts/releases/download/opentelemetry-kube-stack-$v/opentelemetry-kube-stack-$v.tgz" \
+    && tar -xzf "$CHARTDIR/v$v.tgz" -C "$CHARTDIR/v$v" || echo "PULL FAILED $v"
+done
+shasum -a256 "$CHARTDIR/v0.24.0.tgz"
+curl -s https://open-telemetry.github.io/opentelemetry-helm-charts/index.yaml | python3 -c "
+import sys,yaml
+e=[x for x in yaml.safe_load(sys.stdin)['entries']['opentelemetry-kube-stack'] if x['version']=='0.24.0'][0]
+print('index 0.24.0 appVersion', e['appVersion'], 'digest', e['digest'])"
+grep -E '^(version|appVersion)' "$CHARTDIR/v0.24.0/opentelemetry-kube-stack/charts/opentelemetry-operator/Chart.yaml"
 # the prometheus-crds subchart must still be crds/-only and byte-identical:
 diff -rq "$CHARTDIR/v0.21.0/opentelemetry-kube-stack/charts/prometheus-crds" \
-         "$CHARTDIR/v0.23.0/opentelemetry-kube-stack/charts/prometheus-crds" && echo "prometheus-crds IDENTICAL"
-grep -rn 'installPrometheus' "$CHARTDIR/v0.23.0/opentelemetry-kube-stack/Chart.yaml" \
-                             "$CHARTDIR/v0.23.0/opentelemetry-kube-stack/values.yaml"
+         "$CHARTDIR/v0.24.0/opentelemetry-kube-stack/charts/prometheus-crds" && echo "prometheus-crds IDENTICAL"
+grep -rn 'installPrometheus' "$CHARTDIR/v0.24.0/opentelemetry-kube-stack/Chart.yaml" \
+                             "$CHARTDIR/v0.24.0/opentelemetry-kube-stack/values.yaml"
 ```
-
-> `$CHARTDIR` is an **absolute** path and is exported, so it survives the `cd`
-> back to the repo in §3.2. Do not use relative `./v0.23.0/...` paths — §3.3 runs
-> from the repo root, where they do not exist, and the step that proves the
-> feature-gate flag reaches the binary would fail mid-window.
+**PASS (measured 2026-10-03):** the `shasum` equals the index digest
+(`b5997191a94402abfb91a32bcfac0b5a5e7b0e5a56a91f404a220d9bd5dc7895`), index
+appVersion `0.159.0`, subchart `version: 0.123.0` / `appVersion: 0.159.0`,
+`prometheus-crds IDENTICAL`, and `installPrometheus` present in both `Chart.yaml`
+(condition) and `values.yaml`. **FAILS AS:** a digest mismatch (the tarball is not
+what Flux will fetch); a subchart other than 0.123.0 (upstream re-cut 0.24.0 with a
+new operator; re-derive §1.3); `PULL FAILED`.
 
 **2.4 — render A/B with the LIVE values and confirm the §1.2 diff still holds:**
 
 ```bash
 kubectl get hr otel-operator -n monitoring -o json \
   | python3 -c "import sys,json,yaml;print(yaml.safe_dump(json.load(sys.stdin)['spec']['values'],default_flow_style=False))" > /tmp/hr-values.yaml
-for v in 0.21.0 0.23.0; do helm template otel-operator "$CHARTDIR/v$v/opentelemetry-kube-stack" -n monitoring -f /tmp/hr-values.yaml > /tmp/render-$v.yaml; done
-diff /tmp/render-0.21.0.yaml /tmp/render-0.23.0.yaml \
+for v in 0.21.0 0.24.0; do helm template otel-operator "$CHARTDIR/v$v/opentelemetry-kube-stack" -n monitoring -f /tmp/hr-values.yaml > /tmp/render-$v.yaml; done
+diff /tmp/render-0.21.0.yaml /tmp/render-0.24.0.yaml \
   | grep -E '^[<>]' | grep -vE 'helm.sh/chart|app.kubernetes.io/version|caBundle|tls\.|ca\.crt'
 ```
 **Expect exactly the FIVE items in §1.2** — the four functional ones, plus the
@@ -628,7 +745,7 @@ below are the authoring-time record, not the pass criteria.**
 DaemonSet roll makes `OtelDaemonCollectorDown` (`for: 5m`) plausible.
 
 ```bash
-runbooks/update-marker.sh add otel-operator monitoring 2 "chart 0.21.0->0.23.0 upgrade"
+runbooks/update-marker.sh add otel-operator monitoring 2 "chart 0.21.0->0.24.0 upgrade"
 ```
 
 ## 3) Steps
@@ -644,11 +761,11 @@ the diff below is the real output, not a sketch:
      spec:
        chart: opentelemetry-kube-stack
 -      version: 0.21.0
-+      version: 0.23.0
++      version: 0.24.0
        sourceRef:
          kind: HelmRepository
          name: opentelemetry
-@@ -36,6 +36,9 @@   # header stale since 2026-09-24 (manager block now ~line 49); git apply absorbs the offset
+@@ -49,6 +49,9 @@
            enabled: true
            recreate: true
        manager:
@@ -685,10 +802,10 @@ def nodup(loader,node,deep=False):
 S.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,nodup)
 d=yaml.load(open(p),Loader=S)
 op=d['spec']['values']['opentelemetry-operator']
-assert d['spec']['chart']['spec']['version']=='0.23.0', 'chart version not bumped'
+assert d['spec']['chart']['spec']['version']=='0.24.0', 'chart version not bumped'
 assert op['manager']['featureGatesMap']=={'operand.networkpolicy':False,'operator.networkpolicy':False}, 'gate pin missing'
 assert 'resources' in op['manager'], 'manager.resources was clobbered'
-print('OK: version 0.23.0, gates pinned, resources preserved, no duplicate keys')
+print('OK: version 0.24.0, gates pinned, resources preserved, no duplicate keys')
 EOF
 task kubeconform
 ```
@@ -698,7 +815,7 @@ whole point; a values key that does not reach an arg is a no-op):
 
 ```bash
 # $CHARTDIR was exported in §2.3 and is absolute, so this works from the repo root.
-helm template otel-operator "$CHARTDIR/v0.23.0/opentelemetry-kube-stack" -n monitoring \
+helm template otel-operator "$CHARTDIR/v0.24.0/opentelemetry-kube-stack" -n monitoring \
   -f <(kubectl get hr otel-operator -n monitoring -o json | python3 -c "
 import sys,json,yaml,copy
 v=json.load(sys.stdin)['spec']['values']
@@ -756,7 +873,7 @@ OPPOD=$(kubectl get pods -n monitoring -l app.kubernetes.io/name=opentelemetry-o
 echo "version-line: $(kubectl logs -n monitoring "$OPPOD" | grep -c 'apis/v0.159.0')"   # POSITIVE: must be >=1
 echo "error-lines: $(kubectl logs -n monitoring "$OPPOD" | grep -ciE 'panic|"level":"error"|failed to create the operator network policies')"   # must be 0
 ```
-**PASS:** `True 0.23.0 0.159.0 rev=<§2.5 recorded rev + 1>` (rev 26 deployed 2026-09-25, so expect rev=27 unless something upgraded it since); `3/3`; the operator-pod check below.
+**PASS:** `True 0.24.0 0.159.0 rev=<§2.5 recorded rev + 1>` (rev 26 deployed 2026-09-25, so expect rev=27 unless something upgraded it since); `3/3`; the operator-pod check below.
 Exactly ONE operator pod, image `:0.159.0`, `restarts=0`, `version-line: 1` (or more), `error-lines: 0`. If more than one pod is listed, the roll has not finished: the old pod is still serving, so wait. The same version-line grep with `apis/v0.154.0` returns 1 on today's pod (measured 2026-09-28), so the positive limb can read non-zero. The grep is
 case-insensitive deliberately — upstream logs mixed case (`"level":"INFO"`).
 
@@ -1130,6 +1247,21 @@ NetworkPolicy would survive the downgrade.
 - **edot-collector is downstream, not touched.** It is a plain Kustomize Deployment
   and this plan does not modify it — but every assertion in §4.4 travels through it,
   which is the whole reason `edot-collector-0.161.0` is a slot exclusion.
-- **Window shape:** ~50 min, no reboot, but `risk: high` (capability_change is false since 2026-09-28: both NetworkPolicy gates pinned off)
-  ⇒ **attended, operator-present, never unattended**. It fits `sat-attended` /
-  `sun-attended` (90 / 200 min); it must not be placed in `nightly`.
+- **Window shape (RECONCILED 2026-10-03):** ~50 min, no reboot, `risk: high`,
+  `capability_change: false`, **`autonomy_override: human-gated`** ⇒ attended,
+  operator present, never unattended. Fits `sat-attended` / `sun-attended`
+  (90 / 200 min). **Must not be placed in `nightly`.** The 0.23.0 incarnation was
+  scheduled there and deferred because SD-11 (which deliberately ignores
+  `risk:`) derived it pre-approved while this paragraph said otherwise. The
+  override makes the derivation agree with the prose. The reason is §5.3's
+  break-glass and the silent-failure mode, not the downtime.
+- **Other open plans checked 2026-10-03 (frontmatter parsed, all non-terminal):**
+  no `kube-prometheus-stack` plan is open (91.4.1 executed as 91.5.2), so the
+  Prometheus-instrument conflict has no current counterpart. Add one here if a
+  kps plan appears. `talos-linux-1.14.2` (draft) rolls every node, which restarts
+  all three daemon collectors and would make §4.4 unattributable. It is NOT added
+  to `conflicts_with` because that plan is `exclusive: true` and the scheduler
+  already keeps everything out of its slot. The existing refs
+  (`helm-drift-detection`, `edot-collector-0.162.0`, `flux-oci-chart-sources`)
+  are all still live, and all three name `otel-operator-0.23.0` back, which is
+  one more reason the id was kept.
