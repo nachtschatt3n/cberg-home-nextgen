@@ -9,6 +9,7 @@ kind: Kustomization
 resources:
   - ./git-credential.sops.yaml
   - ./serviceaccount.yaml
+  - ./priorityclass.yaml
   - ./resource-limits.yaml
   - ./networkpolicy.yaml
 generatorOptions:

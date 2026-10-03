@@ -26,11 +26,12 @@ The Mac mini also hosts the shared Ollama runtime and many agent sessions. Paral
 | Flux Kustomization | `flux-system/the-ninth-banner-tests` (lives in `flux-system`, `targetNamespace: ci-runner`) |
 | Job template | `kubernetes/apps/ci-runner/the-ninth-banner-tests/job-template.yaml.tpl`. Not applied by Flux and not scanned by kubeconform (`.tpl`); rendered per run by the trigger |
 | Trigger | `scripts/ninth-banner-test.sh <ref> <unit\|e2e\|responsive\|sims> [shards]` |
-| Image | `mcr.microsoft.com/playwright:v1.63.0-noble` (Node 24, git, Chromium/Firefox/WebKit baked in). **Keep in lockstep with `@playwright/test` in the game's `package-lock.json`** |
+| Image | `mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30…` (multi-arch index digest; Node 24, git, Chromium/Firefox/WebKit baked in). **Keep in lockstep with `@playwright/test` in the game's `package-lock.json`**. Bump: §4 step 5 |
 | Job shape | Indexed Job, `completions = shards`, `parallelism = min(shards, 3)`, `backoffLimitPerIndex: 0`, `maxFailedIndexes = shards` (no retries, one failing shard never stops the others), topology spread over `kubernetes.io/hostname`, `activeDeadlineSeconds: 5400`, `ttlSecondsAfterFinished: 3600` |
-| Per shard | requests 3 CPU / 6Gi / 8Gi ephemeral; limits 6 CPU / 10Gi / 16Gi; Playwright `--workers=2` (`WORKERS`, default 2 — see Troubleshooting) |
-| Quota | 4 pods, requests 9.5 CPU / 19Gi, limits 19 CPU / 32Gi; 0 Services, 0 PVCs. A second concurrent run queues (Pending) rather than squeezing production |
-| Egress | DNS (kube-dns, L7 DNS proxy) + TCP 443 to `github.com` and `registry.npmjs.org` only. Ingress: deny all |
+| Per shard | requests 2 CPU / 6Gi / 8Gi ephemeral; limits **4 CPU (thermal cap)** / 10Gi / 16Gi; Playwright `--workers=2` (`WORKERS`, default 2, see Troubleshooting) |
+| Priority | `PriorityClass ci-low` (value -1000, `preemptionPolicy: Never`, cluster-scoped, in the app kustomization): CI pods never preempt production and are evicted first under node pressure |
+| Quota | 4 pods, requests 6.5 CPU / 19Gi, limits 13 CPU / 32Gi; 0 Services, 0 PVCs. A second concurrent run queues (Pending) rather than squeezing production. `KubeQuotaAlmostFull` (info) going pending during a 3-shard run is expected |
+| Egress | DNS (kube-dns, L7 DNS proxy) answering ONLY `github.com`, `registry.npmjs.org` and `**.cluster.local` (search-domain expansions); everything else REFUSED. TCP 443 to those two hosts only. Ingress: deny all. Both ServiceAccounts (`default` included) have `automountServiceAccountToken: false` |
 | Credential | `the-ninth-banner-git-credential` (dockerconfigjson). Mounted **only** into the `clone` init container, read by `git-askpass.sh`; never in env, logs, or the test container |
 | Results | `~/ci-results/<job>/` on the Mac: `summary.txt`, `shard-N.log`, `shard-N/{junit.xml, playwright-report/, test-results/ (traces), blob-report/, reports/, exit-code, commit}` |
 
@@ -86,7 +87,13 @@ Security model: the runner executes third-party code (npm install scripts, the g
 2. The script resolves the ref to a full SHA (`gh api`), renders the template into `~/ci-results/<job>/job.yaml`, creates the Job, and prints one `CI-RESULT ...` line per shard as each finishes. It then copies the artifacts, prints `PASS`/`FAIL`, and exits 0 or 1.
 3. Fire and forget: `COLLECT=0 scripts/ninth-banner-test.sh <sha> e2e`. Pods don't wait for collection; read the logs with `kubectl logs -n ci-runner -l batch.kubernetes.io/job-name=<job> -c runner --prefix`. Artifacts are lost when the pod exits.
 4. Merged Playwright HTML report across shards: the script prints the `npx playwright merge-reports` command (needs `node_modules` in `~/code/the-ninth-banner`).
-5. Playwright upgrade in the game: bump the image tag in `job-template.yaml.tpl` to the same `v<version>-noble`.
+5. **Image bump** (whenever the game's `@playwright/test` changes; the tag MUST match it):
+   ```bash
+   V=1.64.0   # = package-lock.json node_modules/@playwright/test version
+   curl -sI -H 'Accept: application/vnd.oci.image.index.v1+json' \
+     https://mcr.microsoft.com/v2/playwright/manifests/v$V-noble | grep -i docker-content-digest
+   ```
+   Put `mcr.microsoft.com/playwright:v$V-noble@sha256:<that digest>` (the multi-arch **index** digest, not a per-arch one) into `job-template.yaml.tpl`, commit, then run `scripts/ninth-banner-test.sh main unit` and `... e2e 3` as the gate. No Flux reconcile is needed: the template is read by the trigger at run time.
 
 ---
 
@@ -124,6 +131,9 @@ kubectl logs -n ci-runner <pod> -c clone
 | Pods `Pending`, event `exceeded quota` | Another run is still holding the quota (it waits up to 900s for collection). Wait, or delete the old Job |
 | `npm ci` fails with `ENOTFOUND`/`ETIMEDOUT` | A package now resolves from a host other than `registry.npmjs.org`. Add that FQDN to `networkpolicy.yaml` after review |
 | e2e timing tests fail (fps floor, clash fast-forward < 3000 ms, 120 s timeouts) while the pod sits at its 6-CPU limit | CPU oversubscription: Chromium renders in software here. Measured 2026-10-03 at `46eaae3`: `WORKERS=4` gave 3/3 shards FAIL (12 failed, 4 flaky, 14.6 min); `WORKERS=2` gave 77/77 passed, 0 flaky, 9.2 min. Keep 2 (the same per-worker CPU as GitHub's 4-vCPU runner) |
+| NUCs at 100°C+, `NodeCPUTemperatureHigh` pending, etcd slow applies or a leader change during a run | Thermal: 3 shards × 6 CPU drove the nodes to 100-102°C on 2026-10-03, with an etcd leader election (102°C caused a thermal reboot on 2026-08-08, `docs/sops/immich.md`). The limit is 4 CPU per shard for this reason. **Never raise it without re-measuring** `max_over_time(node_thermal_zone_temp{type="x86_pkg_temp"}[30m])` during an e2e run (target < 93°C) |
+| `KubeJobFailed` (warning) fires after a red test run | Expected: a failing shard fails the Job; it clears when the TTL (1h) deletes the Job. Delete the Job earlier once you've read the results |
+| npm/git `ENOTFOUND` or `EAI_AGAIN` after a policy change | The DNS allow-list (`networkpolicy.yaml`) is missing a name; Cilium REFUSES unlisted names |
 | Shard OOMKilled | Lower `WORKERS`, or raise the runner memory limit in the template (keep the quota consistent) |
 | `responsive` rc=2 | `playwright.responsive.config.ts` is not in the repo at that ref yet |
 | Script hangs on a shard | Check `kubectl describe pod`; the deadline is 90 min (`activeDeadlineSeconds`) |
@@ -178,3 +188,4 @@ kubectl -n kube-system exec ds/cilium -- cilium-dbg monitor --type drop
 ## Version History
 
 - `2026.10.03`: Initial runner: ci-runner namespace without `common`, restricted PSA, FQDN egress lockdown, indexed sharded Job template, one-command trigger with artifact collection.
+- `2026.10.03` (hardening): image pinned by index digest + bump procedure; `PriorityClass ci-low` (-1000, never preempts); declared `default` SA without token; DNS allow-list instead of `*`; per-shard CPU 3/6 to 2/4 (requests/limits) after the nodes hit 100-102°C at 6 CPU; quota 6.5/13 CPU.

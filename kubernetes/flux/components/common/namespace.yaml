@@ -18,8 +18,10 @@ metadata:
     #   kube-system, media, monitoring, security, storage.
     # Baseline (8): ai, backup, default, my-software-{development,production,
     #   showcase}, network, office.
-    # Restricted (1): cert-manager — the only namespace tightened ABOVE the
-    #   default (apps/cert-manager/kustomization.yaml).
+    # Restricted (2): cert-manager — tightened ABOVE the default via the
+    #   not-used patch (apps/cert-manager/kustomization.yaml); ci-runner —
+    #   created WITHOUT this component (literal Namespace in
+    #   apps/ci-runner/namespace.yaml, so it holds no cluster-secrets/sops-age).
     # No enforce label (4): cilium-secrets, flux-system, kube-node-lease,
     #   kube-public — not created through this component.
     pod-security.kubernetes.io/enforce: baseline

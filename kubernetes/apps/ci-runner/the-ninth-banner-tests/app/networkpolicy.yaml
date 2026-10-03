@@ -27,8 +27,15 @@ spec:
             - port: "53"
               protocol: ANY
           rules:
+            # Only the two egress targets are resolvable, plus the in-cluster
+            # names glibc/c-ares try first via the pod's search domains
+            # (ndots:5 turns "github.com" into github.com.ci-runner.svc.cluster.local,
+            # ...). Anything else gets REFUSED, which also closes DNS as an
+            # exfiltration channel for third-party install scripts.
             dns:
-              - matchPattern: "*"
+              - matchName: github.com
+              - matchName: registry.npmjs.org
+              - matchPattern: "**.cluster.local"
     - toFQDNs:
         - matchName: github.com
         - matchName: registry.npmjs.org

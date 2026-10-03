@@ -1,8 +1,8 @@
 ---
-# Ceiling for the whole namespace = 3 concurrent shards at 3 CPU / 6Gi
-# requested. Measured 2026-10-03: each NUC has 17 allocatable CPU with
-# ~10-11 CPU and ~45-50% memory already REQUESTED by production, so 3 CPU per
-# node leaves every node >= 3 CPU of request headroom. A 4th shard pod (or a
+# Ceiling for the whole namespace = 3 concurrent shards at 2 CPU / 6Gi
+# requested (4 CPU limit: thermal cap, see job-template.yaml.tpl). Measured 2026-10-03: each NUC has 17 allocatable CPU with
+# ~13-14 CPU (76-81%) already REQUESTED by production, so 2 CPU per node keeps
+# >= 1 CPU of request headroom; PriorityClass ci-low never preempts. A 4th shard pod (or a
 # second concurrent run) waits in Pending instead of squeezing production.
 apiVersion: v1
 kind: ResourceQuota
@@ -12,10 +12,10 @@ metadata:
 spec:
   hard:
     pods: "4"
-    requests.cpu: "9500m"
+    requests.cpu: "6500m"
     requests.memory: 19Gi
     requests.ephemeral-storage: 30Gi
-    limits.cpu: "19"
+    limits.cpu: "13"
     limits.memory: 32Gi
     limits.ephemeral-storage: 54Gi
     services: "0"
@@ -40,5 +40,5 @@ spec:
         memory: 256Mi
         ephemeral-storage: 256Mi
       max:
-        cpu: "6"
+        cpu: "4"
         memory: 10Gi

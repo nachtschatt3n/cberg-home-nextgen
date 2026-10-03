@@ -33,6 +33,9 @@ spec:
     spec:
       restartPolicy: Never
       serviceAccountName: the-ninth-banner-tests
+      # Negative priority, never preempts: CI pods are evicted first under node
+      # pressure and can never displace a production pod to get scheduled.
+      priorityClassName: ci-low
       automountServiceAccountToken: false
       enableServiceLinks: false
       terminationGracePeriodSeconds: 10
@@ -53,7 +56,9 @@ spec:
               batch.kubernetes.io/job-name: __JOB_NAME__
       initContainers:
         - name: clone
-          image: &image mcr.microsoft.com/playwright:v1.63.0-noble
+          # Pinned by multi-arch INDEX digest; tag kept for readability. Bump
+          # procedure (tag must match @playwright/test): docs/sops/ci-runner.md §4.
+          image: &image mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
           command: ["bash", "/opt/ci/clone.sh"]
           env:
             - name: REF
@@ -96,8 +101,11 @@ spec:
               value: "6"
           securityContext: *csc
           resources:
-            requests: { cpu: "3", memory: 6Gi, ephemeral-storage: 8Gi }
-            limits: { cpu: "6", memory: 10Gi, ephemeral-storage: 16Gi }
+            # THERMAL cap: 6 CPU/shard drove all three NUC14s to 100-102 C
+            # (2026-10-03; 102 C caused a thermal reboot 2026-08-08, see
+            # docs/sops/immich.md). 4 CPU is at/below the Immich server cap.
+            requests: { cpu: "2", memory: 6Gi, ephemeral-storage: 8Gi }
+            limits: { cpu: "4", memory: 10Gi, ephemeral-storage: 16Gi }
           volumeMounts:
             - { name: work, mountPath: /work }
             - { name: tmp, mountPath: /tmp }

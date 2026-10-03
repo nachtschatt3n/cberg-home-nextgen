@@ -1,0 +1,12 @@
+---
+# Cluster-scoped. Lowest priority in the cluster (production pods default to 0)
+# and preemptionPolicy Never: a CI pod waits in Pending rather than evicting
+# anything, and the kubelet evicts it first under memory/disk pressure.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ci-low
+value: -1000
+preemptionPolicy: Never
+globalDefault: false
+description: "Ephemeral CI test Jobs (ci-runner): evicted first, never preempts."

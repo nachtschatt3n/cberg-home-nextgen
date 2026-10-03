@@ -1,8 +1,8 @@
 # SOP: Pod Security Admission (PSA)
 
 > Description: The cluster-wide Pod Security Admission convention — `baseline` by default from the shared Flux component, per-namespace overrides applied as kustomize patches against the placeholder Namespace, the full override inventory, and the mandatory `kubectl --dry-run=server` pre-check before tightening any level.
-> Version: `2026.09.22`
-> Last Updated: `2026-09-22`
+> Version: `2026.10.03`
+> Last Updated: `2026-10-03`
 > Owner: `homelab-sre`
 
 ---
@@ -44,7 +44,7 @@ This SOP exists so that neither failure mode is discovered the hard way.
 | API-server admission config | Talos' cluster-wide `PodSecurity` `admissionControl` was **removed** 2026-04-30; enforcement is per-namespace labels only (per the comment in `kubernetes/bootstrap/talos/talconfig.yaml` — *not independently verified for this SOP*) |
 | Files carrying PSA labels | **15** total (measured, see §3) |
 | Namespace-level overrides | **9** top-level + **3** nested re-assertions + **1** literal Namespace object |
-| Live distribution | 8 `privileged`, 8 `baseline`, 1 `restricted`, 4 with no `enforce` label `[verified 2026-09-22]` |
+| Live distribution | 8 `privileged`, 8 `baseline`, 2 `restricted`, 4 with no `enforce` label `[verified 2026-10-03]` |
 | Mandatory pre-check | `kubectl label … --dry-run=server` before **any** tightening |
 | Rollback | `git revert` — relaxing a level never evicts anything |
 
@@ -124,7 +124,8 @@ label). The remaining **13** are:
 
 | Namespace | Level | File | Note |
 |---|---|---|---|
-| `cert-manager` | `restricted` | `apps/cert-manager/kustomization.yaml` | the only namespace tightened above the default |
+| `cert-manager` | `restricted` | `apps/cert-manager/kustomization.yaml` | tightened above the default via the `not-used` patch |
+| `ci-runner` | `restricted` | `apps/ci-runner/namespace.yaml` | **literal Namespace object, created WITHOUT the common component** (so the namespace holds no cluster-secrets / sops-age); all three labels set directly, no patch. `docs/sops/ci-runner.md` |
 | `databases` | `privileged` | `apps/databases/kustomization.yaml` | |
 | `download` | `privileged` | `apps/download/kustomization.yaml` | |
 | `home-automation` | `privileged` | `apps/home-automation/kustomization.yaml` | |
@@ -138,8 +139,8 @@ label). The remaining **13** are:
 | `monitoring` | `privileged` | `apps/monitoring/kibana/app/kustomization.yaml` | **nested re-assertion** |
 | `security` | `privileged` | `apps/security/wazuh/app/namespace.yaml` | **literal Namespace object**, `enforce` + `enforce-version: latest` only — no `audit`/`warn` |
 
-So: **9 distinct namespaces are overridden** (8 to `privileged`, `cert-manager`
-to `restricted`), plus 3 nested kustomizations inside `monitoring` that
+So: **10 distinct namespaces are overridden** (8 to `privileged`, `cert-manager`
+and `ci-runner` to `restricted`), plus 3 nested kustomizations inside `monitoring` that
 re-assert `privileged`, plus one literal Namespace for `security`.
 
 ### Why the nested re-assertions exist — do not "clean them up"
@@ -155,14 +156,14 @@ This exact failure is recorded in
 **Rule: any kustomization that includes `flux/components/common` for a namespace
 whose level is not `baseline` must also carry that namespace's PSA patch.**
 
-### Live state `[verified 2026-09-22]`
+### Live state `[verified 2026-10-03]`
 
 ```
 privileged (8):  databases, download, home-automation, kube-system,
                  media, monitoring, security, storage
 baseline   (8):  ai, backup, default, my-software-development,
                  my-software-production, my-software-showcase, network, office
-restricted (1):  cert-manager
+restricted (2):  cert-manager, ci-runner (literal Namespace, no common component)
 no enforce (4):  flux-system, cilium-secrets, kube-public, kube-node-lease
 ```
 
@@ -354,7 +355,7 @@ print(collections.Counter(l for _, l in rows))
 ```
 
 Expected:
-- 8 `privileged`, 8 `baseline`, 1 `restricted`, 4 `<none>` `[verified 2026-09-22]`.
+- 8 `privileged`, 8 `baseline`, 2 `restricted`, 4 `<none>` `[verified 2026-10-03]`.
 
 If failed:
 - A count that drifted from §3 means either an undocumented change or a patch
@@ -564,3 +565,4 @@ that merely *looks* right proves nothing about PSA.
 | Version | Date | Change |
 |---------|------|--------|
 | `2026.09.22` | 2026-09-22 | Initial SOP (`F-75f3dc82`). Documents the previously-undocumented convention: `baseline` default from the shared component, the `name: not-used` patch target and why an inline Namespace is silently ignored, the mechanically-counted override inventory (15 files → 9 namespace overrides + 3 nested re-assertions + 1 literal Namespace), why the nested monitoring patches are load-bearing rather than redundant, the mandatory `--dry-run=server` pre-check with its verified output shape, and the deferred-failure property that makes tightening dangerous. Records the stale comment in `flux/components/common/namespace.yaml` as known drift rather than correcting it here. |
+| `2026.10.03` | 2026-10-03 | Add `ci-runner` as the second `restricted` namespace (literal Namespace in `apps/ci-runner/namespace.yaml`, deliberately created without `flux/components/common`); live distribution now 8/8/2/4. |
