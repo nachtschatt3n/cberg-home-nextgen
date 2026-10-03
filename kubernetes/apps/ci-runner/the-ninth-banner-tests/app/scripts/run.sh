@@ -128,12 +128,46 @@ if [ "$rc" -eq 0 ]; then
     esac
 fi
 dur=$(( $(date +%s) - t1 ))
+
+# NO-TESTS GUARD: a browser suite that executed nothing is a FAIL, never a
+# green. Playwright exits 0 when a --test-list matches no test (2026-10-03: a
+# describe title containing " › " made the game's shard list match nothing,
+# 22 planned, 0 run, PASS). Planned = the game's shard-*.json "tests";
+# executed = <testcase> entries in the junit.xml files.
+count_info=""
+case "$SUITE" in e2e|nightly|responsive|release)
+    read -r plans planned executed <<<"$(node -e '
+const fs = require("fs"), path = require("path");
+let plans = 0, planned = 0, executed = 0;
+const walk = (d) => { for (const n of fs.readdirSync(d, { withFileTypes: true })) {
+  const f = path.join(d, n.name);
+  if (n.isDirectory()) { if (n.name !== "test-results" && n.name !== "blob-report") walk(f); }
+  else if (n.name === "junit.xml") executed += (fs.readFileSync(f, "utf8").match(/<testcase\b/g) || []).length;
+  else if (/^shard-.*\.json$/.test(n.name)) { plans++; planned += Number(JSON.parse(fs.readFileSync(f, "utf8")).tests) || 0; }
+} };
+walk(process.argv[1]); console.log(plans, planned, executed);' "$OUT" 2>/dev/null || echo "? ? ?")"
+    count_info=" planned=${planned} executed=${executed}"
+    if [ "$rc" -eq 0 ]; then
+        if ! [[ "$executed" =~ ^[0-9]+$ ]]; then
+            log "NO-TESTS: cannot count the executed tests (junit.xml unreadable)"; rc=3
+        elif [ "$plans" = 0 ]; then
+            log "NO-TESTS: the game's shard tool wrote no plan (shard-*.json); nothing provably ran"; rc=3
+        elif [ "$executed" -eq 0 ] && { [ "$planned" -gt 0 ] || [ "$N" -eq 1 ]; }; then
+            log "NO-TESTS: ${planned} tests planned, 0 executed (SPECS='${SPECS:-}' PROJECT='${PROJECT:-}'); a run that tests nothing fails"; rc=3
+        elif [ "$executed" -eq 0 ]; then
+            log "note: this shard got no tests from the plan (more shards than tests); the trigger fails the run if ALL shards are empty"
+        elif [ "$executed" -lt "$planned" ]; then
+            log "TEST-COUNT-MISMATCH: ${planned} planned, only ${executed} executed; some tests were silently dropped (see docs/sops/ci-runner.md)"
+        fi
+    fi
+    ;;
+esac
 [ -d reports ] && cp -r reports "$OUT/" 2>/dev/null
 git rev-parse HEAD >"$OUT/commit"
 echo "$rc" >"$OUT/exit-code"
 
 if [ "$rc" -eq 0 ]; then verdict=PASS; else verdict=FAIL; fi
-echo "CI-RESULT suite=${SUITE} shard=${SHARD}/${N} result=${verdict} rc=${rc} test_seconds=${dur} total_seconds=$(( $(date +%s) - t0 ))"
+echo "CI-RESULT suite=${SUITE} shard=${SHARD}/${N} result=${verdict} rc=${rc}${count_info} test_seconds=${dur} total_seconds=$(( $(date +%s) - t0 ))"
 echo "CI-RESULTS-READY"
 # Hold for the collector (bounded). The trigger script copies /results and then
 # touches /results/.collected; COLLECT_WAIT_SECONDS=0 skips the wait.

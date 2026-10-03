@@ -172,6 +172,7 @@ kubectl logs -n ci-runner <pod> -c clone
 3. `scripts/ninth-banner-test.sh main unit` exits 0, and `~/ci-results/<job>/summary.txt` shows `result=PASS`.
 4. `scripts/ninth-banner-test.sh main e2e 3` gives 3 shards on 3 different nodes (`kubectl get pods -o wide` while running) and a PASS summary, with `junit.xml` per shard.
 5. Egress lockdown (while a runner pod is alive): `kubectl exec -n ci-runner <pod> -c runner -- node -e "fetch('https://example.com').then(()=>console.log('OPEN')).catch(()=>console.log('BLOCKED'))"` prints `BLOCKED`.
+6. No-tests guard (since 2026-10-03): `SPECS="tests/e2e/smoke.spec.ts" scripts/ninth-banner-test.sh main e2e 1` prints `PASS` and `tests: N passed ... (executed N of N planned)` with N > 0; `SPECS="tests/e2e/does-not-exist.spec.ts" scripts/ninth-banner-test.sh main e2e 1` must exit 1 with `FAIL`. A browser suite that executed 0 tests is never green.
 
 ---
 
@@ -191,6 +192,8 @@ kubectl logs -n ci-runner <pod> -c clone
 | Shard OOMKilled | Lower `WORKERS`, or raise the runner memory limit in the template (keep the quota consistent) |
 | A browser suite exits rc=2 at once | `GPU=0` was set (browser suites are GPU-only), or the ref predates the game's `tools/e2e-shard.ts` |
 | `IMAGE MISMATCH` from the trigger | The game bumped Playwright: `tests/e2e/runner.json` at that ref names a different image. Bump `job-template.yaml.tpl` (§4 step 5) |
+| `PASS` but `tests: 0 passed` / junit `tests="0"` (before 2026-10-03), now `NO-TESTS` in the shard log and `FAIL ... 0 tests executed` | Playwright exits 0 when the game's `--test-list` matches no test. Seen 2026-10-03 (`badbfd0`, `SPECS=tests/e2e/base-buildings.spec.ts`: 22 planned, 0 run, PASS): a `test.describe` title containing ` › ` (Playwright's title separator) makes the list line unmatchable. A wrong `SPECS` path or a `PROJECT` that selects nothing in a combined suite has the same effect. Both run.sh (per shard: planned from `shard-*.json` vs `<testcase>` count in `junit.xml`; rc=3) and the trigger (sum over all shards; exit 1) now fail such a run. Fix the title in the game, or the spec path |
+| `TEST-COUNT-MISMATCH` warning (executed < planned) | Some planned tests never ran, same mechanism as above but partial (e.g. full runs silently dropped the 22 base-buildings tests). Advisory, not failing; the root cause is in the game repo (`tools/e2e-shard.ts` should refuse titles containing ` › ` and compare junit vs plan) |
 | Script hangs on a shard | Check `kubectl describe pod`; the deadline is 90 min (`activeDeadlineSeconds`) |
 
 ---
@@ -264,3 +267,4 @@ runbooks/policy-cli.py risk add AR-<next> \
 - `2026.10.03` (GPU parallel): GPU residual risk accepted by the owner; GPU mode runs 3 shards in parallel (quota i915 cap 3); CPU mode stays at 2.
 - `2026.10.03` (game hand-off `77764e6`): suites call the game's `test:*:shard` scripts with `E2E_OUT`; `e2e`/`responsive` GPU-only; new `release` suite + commit status `E2E (GPU, k8s)` posted from the Mac; image lockstep against `tests/e2e/runner.json`; runner-side browser wrapper removed.
 - `2026.10.03` (release-all, game `4f26442`): `release` runs `test:release-all:shard` (release + responsive matrix as one pool over all shards, outputs in `shard-N/release/` and `shard-N/responsive/`); `E2E_RUNNER=k8s` exported for every suite; older refs keep the shard-1 responsive fallback.
+- `2026.10.03` (no-tests guard): a browser-suite shard with tests planned but 0 executed (or no plan at all, or 0 on a 1-shard run) fails with rc=3 (`NO-TESTS`); the trigger fails the run when the junit total is 0 (also posts `failure` for `release`) and warns on executed < planned; `CI-RESULT` carries `planned=`/`executed=`.

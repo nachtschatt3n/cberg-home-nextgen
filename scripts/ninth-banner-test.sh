@@ -139,31 +139,55 @@ done
 
 elapsed=$(( $(date +%s) - start ))
 printf '%s\n' "${summary[@]}" > "$dest/summary.txt"
+
+# Counts from every shard's junit.xml (a test-list split never runs a test twice)
+# and the plan from the game's shard-*.json. Line 1: "<executed> <planned>".
+counts_out="$(python3 - "$dest" <<'PY' || printf '? ?\ncounting failed (unreadable junit.xml)'
+import sys, glob, json, xml.etree.ElementTree as ET
+t = f = s = 0
+for p in glob.glob(sys.argv[1] + "/shard-*/**/junit.xml", recursive=True):
+    if "/test-results/" in p or "/blob-report/" in p: continue
+    r = ET.parse(p).getroot()
+    for c in r.iter("testcase"):
+        t += 1
+        if c.find("failure") is not None or c.find("error") is not None: f += 1
+        elif c.find("skipped") is not None: s += 1
+planned = 0
+for p in glob.glob(sys.argv[1] + "/shard-*/**/shard-*.json", recursive=True):
+    if "/test-results/" in p or "/blob-report/" in p: continue
+    try: planned += int(json.load(open(p)).get("tests", 0))
+    except Exception: pass
+print(t, planned)
+print(f"{t - f - s} passed, {f} failed, {s} skipped")
+PY
+)"
+read -r executed planned <<<"$(head -1 <<<"$counts_out")"
+counts="$(sed -n 2p <<<"$counts_out")"
+# NO-TESTS GUARD: a browser suite that executed nothing never passes (a
+# --test-list that matches nothing makes Playwright exit 0; 2026-10-03).
+no_tests=0
+case "$suite" in e2e|nightly|responsive|release)
+    if ! [[ "$executed" =~ ^[0-9]+$ ]] || [ "$executed" -eq 0 ]; then
+        no_tests=1; fails=$((fails + 1))
+    fi ;;
+esac
 echo "----"
-if [ "$fails" -eq 0 ]; then
+if [ "$no_tests" = 1 ]; then
+    echo "FAIL  $suite @ ${sha:0:12}: 0 tests executed (planned ${planned}; SPECS='${SPECS:-}' PROJECT='${PROJECT:-}'). A run that tests nothing is a failure: check the spec paths, or the shard logs for 'NO-TESTS'."
+elif [ "$fails" -eq 0 ]; then
     echo "PASS  $suite @ ${sha:0:12}: $shards/$shards shards passed in ${elapsed}s"
 else
     echo "FAIL  $suite @ ${sha:0:12}: $fails/$shards shards failed (${elapsed}s)"
+fi
+echo "tests: $counts (executed $executed of $planned planned)"
+if [[ "$executed" =~ ^[0-9]+$ ]] && [[ "$planned" =~ ^[0-9]+$ ]] && [ "$executed" -lt "$planned" ]; then
+    echo "WARNING: TEST-COUNT-MISMATCH: $((planned - executed)) planned tests never ran (dropped from the --test-list match; docs/sops/ci-runner.md)"
 fi
 echo "artifacts: $dest  (shard-N/: junit.xml, playwright-report/, test-results/ traces, blob-report/; release: per part in shard-N/{release,responsive}/)"
 if ls "$dest"/shard-*/blob-report/*.zip "$dest"/shard-*/*/blob-report/*.zip >/dev/null 2>&1; then
     echo "merged report (from a checkout of the game at ${sha:0:12}): npm run test:merge-reports -- \"$dest\" --out \"$dest/report\""
 fi
 
-# Counts from every shard's junit.xml (a test-list split never runs a test twice)
-counts="$(python3 - "$dest" <<'PY'
-import sys, glob, xml.etree.ElementTree as ET
-t = f = s = 0
-for p in glob.glob(sys.argv[1] + "/shard-*/**/junit.xml", recursive=True):
-    r = ET.parse(p).getroot()
-    for c in r.iter("testcase"):
-        t += 1
-        if c.find("failure") is not None or c.find("error") is not None: f += 1
-        elif c.find("skipped") is not None: s += 1
-print(f"{t - f - s} passed, {f} failed, {s} skipped")
-PY
-)"
-echo "tests: $counts"
 
 if [ "$suite" = release ]; then
     # Only for a complete run: every shard reported above, or we never got here.
