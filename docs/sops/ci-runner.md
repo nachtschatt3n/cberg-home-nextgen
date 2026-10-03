@@ -63,7 +63,7 @@ Suites:
 | Item | Value |
 |---|---|
 | Hardware | Each NUC14: Meteor Lake **Intel Arc Graphics (MTL)**, PCI `8086:7D55`, driver **i915** (kernel 6.18 Talos), plus an NPU (`npu.intel.com/accel`, not used here) |
-| How a pod gets it | The existing Intel GPU device plugin (`kubernetes/apps/kube-system/intel-device-plugin/gpu`, `sharedDevNum: 5`) offers `gpu.intel.com/i915: 5` per node: 5 pods may **share** the one iGPU. A GPU shard requests 1. **No hostPath, no PSA change**: containerd hands the pod `/dev/dri/renderD128` chowned to its `runAsUser:runAsGroup` (1001), so `ci-runner` stays `restricted` |
+| How a pod gets it | The existing Intel GPU device plugin (`kubernetes/apps/kube-system/intel-device-plugin/gpu`, `sharedDevNum: 5`) offers `gpu.intel.com/i915: 5` per node: 5 pods may **share** the one iGPU. A GPU shard requests 1. **No hostPath, no PSA change**: containerd hands the pod `/dev/dri/renderD128` **and `card0`** (the plugin passes both) chowned to its `runAsUser:runAsGroup` (1001), so `ci-runner` stays `restricted` |
 | Image | No derived image: the pinned Playwright image already contains Mesa 25.2.8 (`iris`). It has no Vulkan ICD, so ANGLE-Vulkan falls back to SwiftShader; use GL/EGL |
 | Flags | `--use-gl=angle --use-angle=gl-egl --ignore-gpu-blocklist --enable-gpu-rasterization`, appended to EVERY Chromium launch by a wrapper around the browser binaries (`run.sh`, shadow `PLAYWRIGHT_BROWSERS_PATH`); this also covers specs with their own `test.use({ launchOptions })` (perf.spec). Firefox and WebKit stay on software rendering |
 | Proof per shard | `run.sh` logs `WebGL renderer: ANGLE (Intel, Mesa Intel(R) Arc(tm) Graphics (MTL), OpenGL ES 3.2)`; anything else logs `GPU-FALLBACK` (the run continues on CPU) |
@@ -84,6 +84,18 @@ Measured 2026-10-03, game commit `302a819`, smoke + perf + journeys specs, Chrom
 | Node package temp, peak | 76 °C | 66 °C (node's own baseline before: 76-79 °C) |
 
 Full `e2e` (3 shards, parallelism 2, GPU): **135/136 passed in 5 min 5 s** wall time (the 4-CPU CPU run took ~34 min with 6 failures). Peak 89 °C on the node that ran two shards back to back (77 / 66 °C on the others). The one failure was Firefox `music.spec` (AudioContext `suspended`), which fails on the CPU path too, so it is not GPU-related. Power: not measurable from Prometheus (no RAPL/power collector is scraped), so CPU-seconds is the energy proxy.
+
+Security model for GPU mode (review 2026-10-03, no critical findings):
+- The quota caps `requests.gpu.intel.com/i915` at 2 and pins `gpu.intel.com/monitoring`, `i915_monitoring` and `npu.intel.com/accel` to 0, so a CI pod can never get the plugin's all-device monitoring resource or the NPU.
+- **Residual risk (owner decision; register entry below):** untrusted npm/test code gets ioctl access to the i915 kernel driver (a kernel exploit would mean node root), and `card0` would let the first opener become DRM master on these headless nodes. Mitigations: non-root, all capabilities dropped, own-repo and lockfile-pinned code only, egress locked down, `GPU=0` fallback. **Never use GPU mode for third-party or forked refs.** Keep Talos on current patch releases (i915 CVEs now matter for this namespace).
+- Cross-tenant GPU memory leakage: low (per-process GPU address spaces, zeroed buffers). DoS: bounded. Frigate's detector runs on the NPU; transcodes use the video engines; render contention with immich-ml and tone-mapping is time-sliced, with per-context hang resets.
+- Prepared register entry (operator to run, as for W1):
+  ```bash
+  runbooks/policy-cli.py risk add AR-<next> --register-only register-only:posture --severity medium \
+    --description 'ci-runner GPU mode: shared i915 render+card0 node exposed to CI test code' \
+    --justification 'Owner-requested GPU acceleration 2026-10-03; non-root, caps dropped, own-repo pinned code only, egress-locked, quota caps GPU/monitoring/NPU, GPU=0 fallback; no third-party refs.' \
+    --expires 2027-01-01
+  ```
 
 Limits / caveats:
 - The perf spec's annotation still says "(software WebGL)": the game decides that label by platform. The game-side launch-args hook (branch `ci-sharding`) should take over the flag set and the label; until then the runner wrapper applies the flags.
@@ -171,7 +183,7 @@ kubectl logs -n ci-runner <pod> -c clone
 | NUCs at 100°C+, `NodeCPUTemperatureHigh` pending, etcd slow applies or a leader change during a run | Thermal: 3 shards × 6 CPU drove the nodes to 100-102°C on 2026-10-03, with an etcd leader election (102°C caused a thermal reboot on 2026-08-08, `docs/sops/immich.md`). The limit is 4 CPU per shard for this reason. **Never raise it without re-measuring** `max_over_time(node_thermal_zone_temp{type="x86_pkg_temp"}[30m])` during an e2e run (target < 93°C) |
 | A red test run raises no alert | Expected since 2026-10-03: `KubeJobFailed` excludes `ci-runner` (a failing shard fails the Job by design) and `KubeCPUOvercommit` ignores `ci-low` pods, and `KubeQuotaAlmostFull`/`KubeQuotaFullyUsed` exclude `ci-runner` (the quota is a cap runs fill by design). Runner INFRA faults alert instead: `CIRunnerPodStuckPending` (Pending > 15m: unschedulable, ImagePullBackOff, hung clone) `CIRunnerCloneFailed` (clone init container failed) and `CIRunnerJobStarved` (info: a run got no pod for 60m, e.g. quota held by an orphaned run). Rules: `kubernetes/apps/monitoring/kube-prometheus-stack/app/ci-runner-alerts.yaml` |
 | npm/git `ENOTFOUND` or `EAI_AGAIN` after a policy change | The DNS allow-list (`networkpolicy.yaml`) is missing a name; Cilium REFUSES unlisted names |
-| Log shows `GPU-FALLBACK` | The pod got no usable `/dev/dri` (device plugin down, or no free `gpu.intel.com/i915` slot on that node and it was scheduled without one) or the flags changed. Check `kubectl describe pod` (resources), `kubectl get pods -n kube-system -l app.kubernetes.io/name=intel-gpu-plugin`, then rerun; `GPU=0` as the workaround |
+| Log shows `GPU-FALLBACK` | The GPU slot was granted but the device/driver path failed (plugin or driver problem after a Talos/Mesa change) or the flags changed. (A pod requesting `gpu.intel.com/i915` cannot be scheduled without a slot; that case is `Pending`, below.) Check `kubectl describe pod` (resources), `kubectl get pods -n kube-system -l app.kubernetes.io/name=intel-gpu-plugin`, then rerun; `GPU=0` as the workaround |
 | GPU shard `Pending`, event `Insufficient gpu.intel.com/i915` | All 5 iGPU slots on the candidate nodes are taken (media/frigate/immich). It waits; or run `GPU=0` |
 | Shard OOMKilled | Lower `WORKERS`, or raise the runner memory limit in the template (keep the quota consistent) |
 | `responsive` rc=2 | `playwright.responsive.config.ts` is not in the repo at that ref yet |

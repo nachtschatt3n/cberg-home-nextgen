@@ -48,6 +48,12 @@ workers="${WORKERS:-2}"
 case "$suite" in e2e|nightly|responsive) gpu="${GPU:-1}" ;; *) gpu="${GPU:-0}" ;; esac
 cpu_req="${CPU_REQ:-2}"; cpu_lim="${CPU_LIM:-4}"
 [[ "$cpu_lim" =~ ^[1-4]$ ]] || { echo "CPU_LIM must be 1..4 (thermal cap)"; exit 2; }
+# These values are pasted into sed and YAML: allow-list them.
+[[ "$cpu_req" =~ ^[1-4]$ ]] || { echo "CPU_REQ must be 1..4"; exit 2; }
+[[ "$gpu" =~ ^[01]$ ]] || { echo "GPU must be 0 or 1"; exit 2; }
+[[ "$workers" =~ ^[1-8]$ ]] || { echo "WORKERS must be 1..8"; exit 2; }
+[[ "${SPECS:-}" =~ ^[A-Za-z0-9._/@\ -]*$ ]] || { echo "SPECS: spec paths only"; exit 2; }
+[[ "${PROJECT:-}" =~ ^[A-Za-z0-9_-]*$ ]] || { echo "PROJECT: a project name only"; exit 2; }
 if [ "$gpu" = 1 ]; then
     gpu_res=', gpu.intel.com/i915: "1"'
     # verified 2026-10-03: ANGLE on GL/EGL renders on "Mesa Intel Arc Graphics
