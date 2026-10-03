@@ -100,6 +100,7 @@ Security model for GPU mode (review 2026-10-03, no critical findings):
 Limits / caveats:
 - The perf spec's annotation still says "(software WebGL)": the game decides that label by platform. The game-side launch-args hook (branch `ci-sharding`) should take over the flag set and the label; until then the runner wrapper applies the flags.
 - Parallelism: **GPU mode runs up to 3 shards at once, one per node** (owner decision 2026-10-03). CPU mode (`GPU=0`) stays at 2 (thermal). CPU cap per shard stays 4.
+  Verified 2026-10-03 at `302a819`, 3 GPU shards in parallel (one per node, all on the Intel renderer): **3 min 54 s** wall time, 134/136 passed (1 flaky). Peak package temperatures 69 / 83 / 77 °C (nuc14-01/02/03), against 64 / 81 / 69 °C in the 10 min before. The failure is the known Firefox `music.spec` AudioContext issue (it fails on CPU too).
 
 ---
 
