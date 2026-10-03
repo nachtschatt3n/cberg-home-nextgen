@@ -2026,6 +2026,152 @@ class VersionChecker:
             return True
         return False
 
+    # ── FLOATING named tags vs upstream RELEASES (F-b2c35615, 2026-10-03) ──
+    # A NAMED floating tag (`main`, `latest`, `edge`, … optionally Renovate
+    # digest-pinned `main@sha256:…`) used to end the version question at
+    # is_rolling_tag(): "no semver to compare -> skipped". Security-check took
+    # the same exit and answered "already newest" -> AR-029. Both compared the
+    # floating tag with ITSELF. Live: mandarons/icloud-drive:main@sha256:91486ec1
+    # sat as "already on newest" while upstream shipped v1.26.0, v2.0.0, v2.1.0.
+    # The right question for a floating pin is "is there a versioned RELEASE
+    # upstream, and is the image we run that release or older than it?".
+    #
+    # Deliberately NARROW: only the named floating set. Git-sha pins
+    # (`sha-…`, bare hex) are self-built CI artefacts with no release line and
+    # stay on the old path; head-of-line tags (`postgres:18`) are not rolling
+    # at all here and keep their semver compare.
+    _FLOATING_NAME_RE = re.compile(
+        r'^(latest|stable|dev|edge|main|master|nightly|rolling)'
+        r'(?:@(sha256:[0-9a-f]{64}))?$',
+        re.IGNORECASE,
+    )
+    # Reproducible builds stamp a fixed epoch; such a date orders nothing.
+    _BOGUS_CREATED_RE = re.compile(r'^(19[0-9]{2}|000[01])-')
+
+    def floating_tag_parts(self, tag) -> Optional[Tuple[str, Optional[str]]]:
+        """('main', 'sha256:…'|None) for a named floating tag, else None."""
+        m = self._FLOATING_NAME_RE.match(str(tag or ''))
+        if not m:
+            return None
+        return m.group(1).lower(), (m.group(2).lower() if m.group(2) else None)
+
+    def _ref_digest_and_created(self, repository: str, ref: str,
+                                timeout: int = 15) -> Tuple[Optional[str], Optional[str]]:
+        """(content digest, config `created`) for `repository:ref` (ref = a tag
+        or a `sha256:` digest), via the plain Registry v2 API. Registry-agnostic:
+        the 401 challenge names the token endpoint. Either half may be None;
+        never raises — the caller turns "unknown" into UNVERIFIED, never into a
+        verdict."""
+        try:
+            repo = repository.split('://')[-1].rstrip('/').split('@')[0]
+            host = repo.split('/')[0]
+            if ('.' not in host and ':' not in host) or host in self._DOCKERHUB_HOSTS:
+                path = repo
+                for pfx in self._DOCKERHUB_HOSTS:
+                    if path.startswith(pfx + '/'):
+                        path = path[len(pfx) + 1:]
+                        break
+                if '/' not in path:
+                    path = f"library/{path}"
+                host = 'registry-1.docker.io'
+            else:
+                path = repo.split('/', 1)[1]
+            accept = ",".join([
+                "application/vnd.oci.image.index.v1+json",
+                "application/vnd.docker.distribution.manifest.list.v2+json",
+                "application/vnd.oci.image.manifest.v1+json",
+                "application/vnd.docker.distribution.manifest.v2+json"])
+            hdrs = {"Accept": accept, "User-Agent": "cberg-version-check"}
+            with requests.Session() as s:
+                def _get(url, extra=None):
+                    return s.get(url, headers={**hdrs, **(extra or {})}, timeout=timeout)
+                url = f"https://{host}/v2/{path}/manifests/{ref}"
+                r = _get(url)
+                if r.status_code == 401:
+                    ch = self._parse_www_authenticate(r.headers.get('WWW-Authenticate', ''))
+                    realm = ch.get('realm')
+                    if not realm:
+                        return None, None
+                    tr = s.get(realm, params={'service': ch.get('service', host),
+                                              'scope': f"repository:{path}:pull"},
+                               timeout=timeout)
+                    tok = (tr.json() or {}).get('token') or (tr.json() or {}).get('access_token')
+                    if not tok:
+                        return None, None
+                    hdrs["Authorization"] = f"Bearer {tok}"
+                    r = _get(url)
+                if r.status_code != 200:
+                    return None, None
+                digest = r.headers.get('Docker-Content-Digest')
+                man = r.json()
+                if 'manifests' in man:
+                    real = [m for m in man['manifests']
+                            if (m.get('platform') or {}).get('architecture') not in (None, 'unknown')]
+                    real.sort(key=lambda m: (m.get('platform') or {}).get('architecture') != 'amd64')
+                    if not real:
+                        return digest, None
+                    r2 = _get(f"https://{host}/v2/{path}/manifests/{real[0]['digest']}")
+                    if r2.status_code != 200:
+                        return digest, None
+                    man = r2.json()
+                cfg = (man.get('config') or {}).get('digest')
+                if not cfg:
+                    return digest, None
+                rb = _get(f"https://{host}/v2/{path}/blobs/{cfg}", {"Accept": "*/*"})
+                if rb.status_code != 200:
+                    return digest, None
+                created = str((rb.json() or {}).get('created') or '') or None
+                if created and self._BOGUS_CREATED_RE.match(created):
+                    created = None
+                return digest, created
+        except Exception:
+            return None, None
+
+    def assess_floating_tag(self, repository: str, tag: str) -> Optional[Dict[str, Any]]:
+        """Compare a NAMED floating pin against upstream's newest semver RELEASE.
+
+        Returns None when `tag` is not a named floating tag (caller keeps its
+        old path). Otherwise a dict with `state`:
+
+          no-release        upstream publishes no semver tag -> nothing to
+                            compare; the old "rolling, skipped" answer stands.
+          at-release        the image we run IS the newest release (digest
+                            equal) -> current; pinning to the version is
+                            hygiene, not an update.
+          ahead-of-release  the image we run was built AFTER the newest
+                            release (a dev branch ahead of its last tag) -> no
+                            release to move to.
+          behind-release    the image we run was built BEFORE the newest
+                            release -> UPDATE AVAILABLE (`newest_release`).
+          unverified        a release exists but digest/build dates could not
+                            be compared -> surfaced, never "current".
+
+        `running` is the pinned digest when the tag is digest-pinned, else the
+        floating tag as the registry serves it now.
+        """
+        parts = self.floating_tag_parts(tag)
+        if not parts:
+            return None
+        name, pinned = parts
+        out: Dict[str, Any] = {'floating_name': name, 'pinned_digest': pinned,
+                               'newest_release': None, 'state': 'no-release'}
+        release = self.get_latest_image_tag(repository, name)
+        if not release or not self._SEMVER_TAG_RE.match(self._canonical_tag(release)):
+            return out
+        out['newest_release'] = release
+        rd, rc = self._ref_digest_and_created(repository, release)
+        fd, fc = self._ref_digest_and_created(repository, pinned or name)
+        fd = pinned or fd
+        out.update({'release_digest': rd, 'release_created': rc,
+                    'running_digest': fd, 'running_created': fc})
+        if rd and fd and rd.lower() == fd.lower():
+            out['state'] = 'at-release'
+        elif rc and fc and fc[:19] != rc[:19]:
+            out['state'] = 'ahead-of-release' if fc[:19] > rc[:19] else 'behind-release'
+        else:
+            out['state'] = 'unverified'
+        return out
+
     def get_latest_image_tag(self, repository: str, current_tag: str = '') -> Optional[str]:
         """Get latest image tag from container registry."""
         if not repository:
@@ -4100,7 +4246,27 @@ class VersionChecker:
                             'path': img['path'],
                             'rolling': True,
                         }
-                        print(f"  {Colors.CYAN}Image {img['repository']}: {img['tag']} (rolling tag — skipped){Colors.RESET}")
+                        # A NAMED floating tag is compared against upstream's
+                        # newest RELEASE (F-b2c35615). `latest_tag` stays None
+                        # on purpose: floating -> versioned is a deliberate
+                        # re-pin (often a major jump), never an auto-bump lane
+                        # candidate, so coverage.py's detail parser and the
+                        # direct-bump lane must not read it as one. The
+                        # finding is emitted from `floating` instead.
+                        fa = self.assess_floating_tag(img['repository'], img['tag'])
+                        if fa:
+                            img_result['floating'] = fa
+                        if fa and fa['state'] in ('behind-release', 'unverified'):
+                            _why = ('running image predates it' if fa['state'] == 'behind-release'
+                                    else 'could not compare digest/build date')
+                            print(f"  {Colors.YELLOW}Image {img['repository']}: {img['tag'][:24]} "
+                                  f"(floating) — newest release {fa['newest_release']} "
+                                  f"[{fa['state']}: {_why}]{Colors.RESET}")
+                        elif fa and fa['newest_release']:
+                            print(f"  {Colors.CYAN}Image {img['repository']}: {img['tag'][:24]} "
+                                  f"(floating, {fa['state']} vs release {fa['newest_release']}){Colors.RESET}")
+                        else:
+                            print(f"  {Colors.CYAN}Image {img['repository']}: {img['tag']} (rolling tag — skipped){Colors.RESET}")
                         result['images'].append(img_result)
                         continue
 
@@ -4451,12 +4617,18 @@ class VersionChecker:
             # Collect floating-tag images for this deployment (any image, not just main)
             for img in result.get('images', []):
                 tag = img.get('current_tag') or ''
-                if tag in floating_tag_set:
+                # Digest-pinned floats (`main@sha256:…`) and the whole named
+                # floating set count too — the old exact-match on four names
+                # left icloud-drive's `main@sha256:…` out of this table.
+                if tag in floating_tag_set or self.floating_tag_parts(tag):
+                    fa = img.get('floating') or {}
                     floating_tag_rows.append({
                         'app': name,
                         'namespace': namespace,
                         'image': img.get('repository', '') or '-',
-                        'tag': tag,
+                        'tag': tag if len(tag) <= 24 else tag[:24] + '…',
+                        'release': fa.get('newest_release') or '-',
+                        'state': fa.get('state') or '-',
                     })
             
             # Chart version info
@@ -4553,10 +4725,15 @@ class VersionChecker:
             lines.append("")
             lines.append("> Floating tags don't track upstream — pin a SHA or version for Renovate to update.")
             lines.append("")
-            lines.append("| App | Image | Tag |")
-            lines.append("|-----|-------|-----|")
+            lines.append("> `Newest release` is upstream's newest semver tag; `State` says whether the image we run")
+            lines.append("> is that release (`at-release`), built before it (`behind-release` = update available),")
+            lines.append("> built after it (`ahead-of-release`), or could not be compared (`unverified`).")
+            lines.append("")
+            lines.append("| App | Image | Tag | Newest release | State |")
+            lines.append("|-----|-------|-----|----------------|-------|")
             for row in sorted(floating_tag_rows, key=lambda r: (r['namespace'], r['app'], r['image'])):
-                lines.append(f"| `{row['app']}` | `{row['image']}` | `{row['tag']}` |")
+                lines.append(f"| `{row['app']}` | `{row['image']}` | `{row['tag']}` "
+                             f"| `{row['release']}` | {row['state']} |")
             lines.append("")
 
         # Upstream chart freshness — per-(repo,chart), including FALSE CURRENCY:
@@ -5078,6 +5255,45 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
 
         for img in r.get('images') or []:
             img_ua = img.get('update_assessment') or {}
+            fa = img.get('floating') or {}
+            if fa.get('state') in ('behind-release', 'unverified') and fa.get('newest_release'):
+                # Floating pin vs upstream RELEASE (F-b2c35615). Never a lane
+                # candidate (latest_tag stays None) — re-pinning a floating tag
+                # to a version is a deliberate change, typically a major jump.
+                _cur = img.get('current_tag') or ''
+                _cur_s = f"{fa['floating_name']}@{fa['pinned_digest'][:15]}" if fa.get('pinned_digest') else _cur
+                if fa['state'] == 'behind-release':
+                    warn += 1
+                    _sev = 'warning'
+                    _title = (f"{name}: image {img.get('repository')} {_cur_s} → "
+                              f"{fa['newest_release']} (floating tag behind release)")
+                    _action = (f"the running `{fa['floating_name']}` image was built "
+                               f"{str(fa.get('running_created'))[:10]}, before upstream's newest "
+                               f"release {fa['newest_release']} ({str(fa.get('release_created'))[:10]}). "
+                               f"Re-pin to the release tag (+digest) via an upgrade plan — "
+                               f"review the release notes across the gap; not an auto-bump.")
+                else:
+                    _sev = 'monitor'
+                    _title = (f"{name}: image {img.get('repository')} {_cur_s} vs release "
+                              f"{fa['newest_release']} (floating tag, unverified)")
+                    _action = ("upstream publishes semver releases but the running floating "
+                               "image could not be compared to the newest one (digest/build "
+                               "date unavailable) — check by hand or re-pin to a release.")
+                writer.emit(
+                    severity=_sev,
+                    title=_title,
+                    action=_action,
+                    evidence_path=evidence_path,
+                    subsection="helmrelease_image",
+                    metadata={
+                        "namespace": ns, "kind": "image", "type": "floating",
+                        "repository": img.get('repository'),
+                        "component": component_key('image', img.get('repository') or ''),
+                        "floating_state": fa['state'],
+                        "newest_release": fa['newest_release'],
+                    },
+                )
+                continue
             if img_ua.get('type') == 'major':
                 sev = 'critical' if img.get('breaking_changes') else 'warning'
                 if sev == 'critical':

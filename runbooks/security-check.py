@@ -2767,6 +2767,23 @@ def _newer_upstream_tag_lookup(image_ref: str):
         repo, _, tag = image_ref.split("@")[0].rpartition(":")
         if not repo or not tag:
             return None
+        # NAMED floating tag (latest/main/edge/…, digest-pinned or not): compare
+        # the image we run against upstream's newest semver RELEASE before
+        # concluding "already newest" (F-b2c35615). The old exit compared the
+        # floating tag with itself, so a digest-pinned `main` read as "already
+        # newest" while three newer upstream releases had shipped.
+        #   behind-release -> True  (a release tag to move to exists)
+        #   unverified     -> None  (release exists, comparison failed: surface)
+        #   at-release / ahead-of-release / no-release -> fall through to the
+        #   old answer (False: as current as the tag allows).
+        _assess = getattr(vc, "assess_floating_tag", None)
+        if _assess is not None:
+            _digest = image_ref.split("@", 1)[1] if "@" in image_ref else ""
+            fa = _assess(repo, f"{tag}@{_digest}" if _digest else tag)
+            if fa and fa.get("state") == "behind-release":
+                return True
+            if fa and fa.get("state") == "unverified":
+                return None
         if vc.is_rolling_tag(tag):
             return False  # latest/main/sha — as current as the tag allows
         if _is_floating_line_tag(tag):
