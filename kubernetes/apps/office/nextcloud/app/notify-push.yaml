@@ -60,9 +60,31 @@ spec:
           # `occ notify_push:self-test` — a green HelmRelease will not catch
           # it (found the hard way during the 2026-08-19 redis registry move).
           # Adding REDIS_HOST here does NOT work; it was tried and reverted.
+          #
+          # REDIS_URL, however, DOES work and is how the password reaches
+          # notify_push (plan nextcloud-redis-hardening). notify_push's
+          # Config::from_opt merges CLI > env > config.php and takes the env
+          # `redis` block WHOLE when REDIS_URL is set (src/config.rs
+          # v1.4.1, `from_opt.merge(from_env).merge(from_config)`), so the
+          # host AND the password below override config.php. This is also
+          # why `occ config:system:set redis password` cannot be the path:
+          # the chart's redis.config.php overlay already supplies the value
+          # in the merged config, so the set is a no-op and config.php on
+          # disk never changes (reverted b65617d1). Keep the host in
+          # lockstep with externalRedis.host. Verify with
+          # `notify_push --dump-config` (count only, never print it).
           env:
             - name: PORT
               value: "7867"
+            # Declared BEFORE REDIS_URL: $(VAR) expansion only sees earlier
+            # entries. Alphanumeric by construction, so no URL-encoding.
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nextcloud-config
+                  key: redis-password
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@nextcloud-redis:6379"
             - name: NEXTCLOUD_URL
               value: "http://nextcloud:8080"
           volumeMounts:

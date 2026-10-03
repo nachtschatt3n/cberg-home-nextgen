@@ -328,6 +328,11 @@ spec:
               value: nextcloud-redis
             - name: REDIS_HOST_PORT
               value: "6379"
+            - name: REDIS_HOST_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nextcloud-config
+                  key: redis-password
           volumeMounts:
             - name: nextcloud-main
               mountPath: /var/www/
@@ -594,8 +599,16 @@ spec:
       enabled: true
       host: nextcloud-redis
       port: "6379"
-      # No password — matches the retired instance's auth-disabled posture;
-      # redis.config.php carries no password either.
+      # Auth via SOPS key nextcloud-config/redis-password (plan
+      # nextcloud-redis-hardening, 2026-09-26). existingSecret renders
+      # REDIS_HOST_PASSWORD from secretKeyRef on the main container and the
+      # cron pods, and selects the redis://:$(REDIS_HOST_PASSWORD)@… URL form.
+      # notify_push reads config.php, NOT env: the password is also persisted
+      # there via `occ config:system:set redis password`.
+      existingSecret:
+        enabled: true
+        secretName: nextcloud-config
+        passwordKey: redis-password
 
 
 
