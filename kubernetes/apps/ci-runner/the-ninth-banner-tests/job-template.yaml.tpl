@@ -92,6 +92,14 @@ spec:
               value: "__WORKERS__"
             - name: COLLECT_WAIT_SECONDS
               value: "__COLLECT_WAIT__"
+            # GPU mode: flags appended to every Chromium launch (empty = CPU/SwiftShader)
+            - name: CHROMIUM_EXTRA_ARGS
+              value: "__CHROMIUM_ARGS__"
+            # optional narrowing: space-separated spec files / one Playwright project
+            - name: SPECS
+              value: "__SPECS__"
+            - name: PROJECT
+              value: "__PROJECT__"
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
@@ -104,8 +112,11 @@ spec:
             # THERMAL cap: 6 CPU/shard drove all three NUC14s to 100-102 C
             # (2026-10-03; 102 C caused a thermal reboot 2026-08-08, see
             # docs/sops/immich.md). 4 CPU is at/below the Immich server cap.
-            requests: { cpu: "2", memory: 6Gi, ephemeral-storage: 8Gi }
-            limits: { cpu: "4", memory: 10Gi, ephemeral-storage: 16Gi }
+            # __GPU_RES__ is empty, or `, gpu.intel.com/i915: "1"` (GPU=1): one
+            # of the 5 shared slots per node the Intel GPU device plugin offers
+            # (docs/sops/ci-runner.md "GPU mode").
+            requests: { cpu: "__CPU_REQ__", memory: 6Gi, ephemeral-storage: 8Gi__GPU_RES__ }
+            limits: { cpu: "__CPU_LIM__", memory: 10Gi, ephemeral-storage: 16Gi__GPU_RES__ }
           volumeMounts:
             - { name: work, mountPath: /work }
             - { name: tmp, mountPath: /tmp }

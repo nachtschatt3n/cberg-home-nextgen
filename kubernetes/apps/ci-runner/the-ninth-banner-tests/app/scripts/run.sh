@@ -22,7 +22,56 @@ if ! npm ci --no-audit --no-fund --loglevel=error >"$OUT/npm-ci.log" 2>&1; then
 fi
 log "npm ci done in $(( $(date +%s) - t0 ))s (rc=$rc)"
 
+# GPU mode: every Chromium launch (incl. specs that set their own launchOptions
+# via test.use) gets CHROMIUM_EXTRA_ARGS through a wrapper around the browser
+# binaries: PLAYWRIGHT_BROWSERS_PATH points at a shadow tree whose chrome /
+# chrome-headless-shell are scripts exec'ing the real binary + the flags.
+if [ -n "${CHROMIUM_EXTRA_ARGS:-}" ]; then
+    shadow=/work/pw-browsers
+    mkdir -p "$shadow"
+    for d in /ms-playwright/*; do
+        name=$(basename "$d")
+        case "$name" in
+            chromium-*|chromium_headless_shell-*)
+                mkdir -p "$shadow/$name"
+                for e in "$d"/*; do
+                    if [ -d "$e" ]; then
+                        mkdir -p "$shadow/$name/$(basename "$e")"
+                        for f in "$e"/*; do
+                            bn=$(basename "$f")
+                            if [ "$bn" = chrome ] || [ "$bn" = chrome-headless-shell ]; then
+                                printf '#!/bin/sh\nexec %s "$@" %s\n' "$f" "$CHROMIUM_EXTRA_ARGS" >"$shadow/$name/$(basename "$e")/$bn"
+                                chmod 755 "$shadow/$name/$(basename "$e")/$bn"
+                            else
+                                ln -s "$f" "$shadow/$name/$(basename "$e")/$bn"
+                            fi
+                        done
+                    else
+                        ln -s "$e" "$shadow/$name/"
+                    fi
+                done ;;
+            *) ln -s "$d" "$shadow/$name" ;;
+        esac
+    done
+    export PLAYWRIGHT_BROWSERS_PATH="$shadow"
+fi
+if [ "$rc" -eq 0 ] && [ -d node_modules/playwright ]; then
+    renderer=$(timeout 60 node -e '
+const { chromium } = require("playwright");
+(async () => { const b = await chromium.launch(); const p = await b.newPage();
+  const r = await p.evaluate(() => { const g = document.createElement("canvas").getContext("webgl2");
+    const i = g && g.getExtension("WEBGL_debug_renderer_info");
+    return g ? (i ? g.getParameter(i.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER)) : "no webgl2"; });
+  console.log(r); await b.close(); })().catch((e) => console.log("probe failed: " + e.message.split("\n")[0]));' 2>&1 | tail -1)
+    log "WebGL renderer: ${renderer}"
+    if [ -n "${CHROMIUM_EXTRA_ARGS:-}" ] && ! grep -qi "intel" <<<"$renderer"; then
+        log "GPU-FALLBACK: GPU mode requested but Chromium is not on the Intel GPU"
+    fi
+fi
+
 pw_args=(--shard="${SHARD}/${N}" --workers="${WORKERS}" --reporter=list,junit,html,blob --output="$OUT/test-results")
+[ -n "${PROJECT:-}" ] && pw_args+=(--project="$PROJECT")
+read -r -a spec_filter <<<"${SPECS:-}"
 export PLAYWRIGHT_JUNIT_OUTPUT_FILE="$OUT/junit.xml" \
        PLAYWRIGHT_HTML_OUTPUT_DIR="$OUT/playwright-report" \
        PLAYWRIGHT_HTML_OPEN=never \
@@ -38,17 +87,17 @@ if [ "$rc" -eq 0 ]; then
             ;;
         e2e)
             # = the game's per-push CI (.github/workflows/ci.yml "End-to-end tests")
-            npm run build && npx playwright test --grep-invert "@art|@nightly" "${pw_args[@]}"; rc=$?
+            npm run build && npx playwright test --grep-invert "@art|@nightly" "${pw_args[@]}" "${spec_filter[@]}"; rc=$?
             ;;
         nightly)
             # = the game's nightly e2e job: the slow/perf-sensitive specs
-            npm run build && npx playwright test --grep "@nightly|@perf" "${pw_args[@]}"; rc=$?
+            npm run build && npx playwright test --grep "@nightly|@perf" "${pw_args[@]}" "${spec_filter[@]}"; rc=$?
             ;;
         responsive)
             if [ ! -f playwright.responsive.config.ts ]; then
                 log "playwright.responsive.config.ts not present at this commit"; rc=2
             else
-                npm run build && npx playwright test -c playwright.responsive.config.ts "${pw_args[@]}"; rc=$?
+                npm run build && npx playwright test -c playwright.responsive.config.ts "${pw_args[@]}" "${spec_filter[@]}"; rc=$?
             fi
             ;;
         sims)

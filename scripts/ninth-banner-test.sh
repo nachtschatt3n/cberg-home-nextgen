@@ -8,7 +8,10 @@
 #   shards  default: e2e/nightly/responsive 3, sims 4 (one sweep each), unit 1 (forced)
 #
 # Env: RESULTS_DIR (default ~/ci-results), WORKERS (playwright workers per
-# shard, default 2), COLLECT=0 (fire and forget: no wait, no artifact copy).
+# shard, default 2), COLLECT=0 (fire and forget: no wait, no artifact copy),
+# GPU=1 (Chromium on the node's Intel iGPU via the device plugin), SPECS
+# (space-separated spec files), PROJECT (e.g. chromium), CPU_REQ/CPU_LIM
+# (per-shard CPU, default 2/4; never above 4, thermal cap).
 # Exit status: 0 if every shard passed, 1 otherwise, 2 on usage errors.
 # Full procedure, security model and troubleshooting: docs/sops/ci-runner.md
 set -euo pipefail
@@ -38,21 +41,34 @@ esac
 # THERMAL: at most 2 shards run at once (3 at 4-6 CPU drove the NUC14s to
 # 100-102 C); extra shards queue. Best-effort CI, GitHub CI is the gate.
 parallelism=$(( shards < 2 ? shards : 2 ))
-workers="${WORKERS:-2}"   # 4 per 6-CPU shard starved Chromium (timing tests failed); see SOP
+workers="${WORKERS:-2}"
+gpu="${GPU:-0}"
+cpu_req="${CPU_REQ:-2}"; cpu_lim="${CPU_LIM:-4}"
+[[ "$cpu_lim" =~ ^[1-4]$ ]] || { echo "CPU_LIM must be 1..4 (thermal cap)"; exit 2; }
+if [ "$gpu" = 1 ]; then
+    gpu_res=', gpu.intel.com/i915: "1"'
+    # verified 2026-10-03: ANGLE on GL/EGL renders on "Mesa Intel Arc Graphics
+    # (MTL)"; the Vulkan path falls back to SwiftShader (no Vulkan ICD in the image)
+    chromium_args="--use-gl=angle --use-angle=gl-egl --ignore-gpu-blocklist --enable-gpu-rasterization"
+else
+    gpu_res=""; chromium_args=""
+fi   # 4 per 6-CPU shard starved Chromium (timing tests failed); see SOP
 collect="${COLLECT:-1}"
 
 sha="$(gh api "repos/$GH_REPO/commits/$ref_in" --jq .sha)" || { echo "cannot resolve ref '$ref_in'"; exit 2; }
-job="tnb-${suite}-${sha:0:7}-$(date +%m%d%H%M%S)"
+job="tnb-${suite}$([ "$gpu" = 1 ] && echo -gpu)-${sha:0:7}-$(date +%m%d%H%M%S)"
 dest="${RESULTS_DIR:-$HOME/ci-results}/$job"
 mkdir -p "$dest"
 
 sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" \
     -e "s|__SHARDS__|$shards|g" -e "s|__PARALLELISM__|$parallelism|g" \
     -e "s|__WORKERS__|$workers|g" -e "s|__COLLECT_WAIT__|$([ "$collect" = 1 ] && echo 900 || echo 0)|g" \
+    -e "s|__CPU_REQ__|$cpu_req|g" -e "s|__CPU_LIM__|$cpu_lim|g" -e "s|__GPU_RES__|$gpu_res|g" \
+    -e "s|__CHROMIUM_ARGS__|$chromium_args|g" -e "s|__SPECS__|${SPECS:-}|g" -e "s|__PROJECT__|${PROJECT:-}|g" \
     "$TEMPLATE" > "$dest/job.yaml"
 k create -f "$dest/job.yaml" >/dev/null
 start=$(date +%s)
-echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)"
+echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  gpu=$gpu cpu=$cpu_req/$cpu_lim"
 if [ "$collect" != 1 ]; then
     echo "COLLECT=0: not waiting. Logs: kubectl logs -n $NS -l batch.kubernetes.io/job-name=$job -c runner --prefix"
     exit 0
