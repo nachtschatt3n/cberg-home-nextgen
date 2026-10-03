@@ -35,7 +35,9 @@ case "$suite" in
     *) echo "unknown suite '$suite'"; usage ;;
 esac
 [[ "$shards" =~ ^[1-9][0-9]?$ ]] || { echo "shards must be 1..99"; exit 2; }
-parallelism=$(( shards < 3 ? shards : 3 ))
+# THERMAL: at most 2 shards run at once (3 at 4-6 CPU drove the NUC14s to
+# 100-102 C); extra shards queue. Best-effort CI, GitHub CI is the gate.
+parallelism=$(( shards < 2 ? shards : 2 ))
 workers="${WORKERS:-2}"   # 4 per 6-CPU shard starved Chromium (timing tests failed); see SOP
 collect="${COLLECT:-1}"
 

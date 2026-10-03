@@ -11,6 +11,8 @@
 
 The Mac mini also hosts the shared Ollama runtime and many agent sessions. Parallel Playwright runs drove its load to 110–170. This runner moves the game's test suites onto the three Talos nodes, which have plenty of idle CPU, while a namespace quota keeps production headroom.
 
+**Status: best-effort.** GitHub Actions CI stays the release gate. The runner is capped for node temperature (4 CPU per shard, at most 2 shards at a time; owner decision 2026-10-03), and at that size a few CPU-timing e2e assertions can fail. A red shard here is a signal to re-check on GitHub CI, not a release blocker.
+
 - Scope: namespace `ci-runner`, Flux Kustomization `flux-system/the-ninth-banner-tests`, trigger `scripts/ninth-banner-test.sh`, private repo `nachtschatt3n/the-ninth-banner`.
 - Prerequisites: run from this repo on the Mac as `mu`, with the `mise` tool chain (kubeconfig) and `gh` authenticated as the repo owner (used only to resolve a ref to a full SHA).
 - Out of scope: GitHub Actions CI (it keeps running independently), deploying the app (see `docs/applications.md`).
@@ -27,7 +29,7 @@ The Mac mini also hosts the shared Ollama runtime and many agent sessions. Paral
 | Job template | `kubernetes/apps/ci-runner/the-ninth-banner-tests/job-template.yaml.tpl`. Not applied by Flux and not scanned by kubeconform (`.tpl`); rendered per run by the trigger |
 | Trigger | `scripts/ninth-banner-test.sh <ref> <unit\|e2e\|nightly\|responsive\|sims> [shards]` |
 | Image | `mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30…` (multi-arch index digest; Node 24, git, Chromium/Firefox/WebKit baked in). **Keep in lockstep with `@playwright/test` in the game's `package-lock.json`**. Bump: §4 step 5 |
-| Job shape | Indexed Job, `completions = shards`, `parallelism = min(shards, 3)`, `backoffLimitPerIndex: 0`, `maxFailedIndexes = shards` (no retries, one failing shard never stops the others), topology spread over `kubernetes.io/hostname`, `activeDeadlineSeconds: 5400`, `ttlSecondsAfterFinished: 3600` |
+| Job shape | Indexed Job, `completions = shards`, `parallelism = min(shards, 2)` (**thermal cap**: the 3rd shard queues), `backoffLimitPerIndex: 0`, `maxFailedIndexes = shards` (no retries, one failing shard never stops the others), topology spread over `kubernetes.io/hostname`, `activeDeadlineSeconds: 5400`, `ttlSecondsAfterFinished: 3600` |
 | Per shard | requests 2 CPU / 6Gi / 8Gi ephemeral; limits **4 CPU (thermal cap)** / 10Gi / 16Gi; Playwright `--workers=2` (`WORKERS`, default 2, see Troubleshooting) |
 | Priority | `PriorityClass ci-low` (value -1000, `preemptionPolicy: Never`, cluster-scoped, in the app kustomization): CI pods never preempt production and are evicted first under node pressure |
 | Quota | 4 pods, requests 6.5 CPU / 19Gi, limits 13 CPU / 32Gi; 0 Services, 0 PVCs. A second concurrent run queues (its shards are not created until quota frees) rather than squeezing production. `KubeQuotaAlmostFull`/`KubeQuotaFullyUsed` exclude `ci-runner` (the quota is a cap runs fill by design); `KubeQuotaExceeded` stays stock; a run starved by the quota raises `CIRunnerJobStarved` (info) after 60m |
@@ -42,6 +44,7 @@ Measured runtimes (2026-10-03, commit `46eaae3`, wall clock from the trigger):
 | `unit` (1 shard) | PASS, 38 files / 437 tests (+typecheck, lint, data, build, security) | 52 s incl. first image pull; suite 14 s |
 | `e2e` 3 shards, `WORKERS=2` | PASS 77/77, 0 flaky, one shard per node | 9 min 10 s (longest shard 8.9 min) |
 | `e2e` 3 shards, `WORKERS=4` | FAIL (CPU-starved timing tests) | 14 min 35 s |
+| `e2e` 3 shards, 4-CPU cap, `WORKERS=2`, per-push grep (`0fa1537`, larger suite) | 130 passed / 6 failed (CPU timing: 120 s timeouts, title-ready < 3 s, music render speed) | 34 min incl. queueing; nodes still peaked at 100–101°C with an overlapping 6-CPU run from another session |
 
 Suites:
 
@@ -166,8 +169,23 @@ kubectl -n kube-system exec ds/cilium -- cilium-dbg monitor --type drop
 - `kubectl get secret -n ci-runner` shows exactly one Secret (the git credential).
 - `kubectl get rolebinding,role -n ci-runner` shows none. The ServiceAccount has `automountServiceAccountToken: false`.
 - The CiliumNetworkPolicy `ci-runner-lockdown` exists with `endpointSelector: {}`.
+- **ACCEPTED RISK (owner, 2026-10-03; audit item W1):** the runner keeps the shared, account-wide `repo`-scoped GHCR PAT described below. The owner accepted the risk, mitigated by init-container-only mounting and the egress allow-list. Do not change the credential without a new owner decision. Re-evaluate when the PAT is rotated, or if the clone container ever runs anything besides `git fetch`. Register entry: see §10a.
 - **Credential choice (owner decision 2026-10-03: reuse an existing token):** the runner reuses the shared GHCR pull PAT (the same ciphertext as `ghcr-the-ninth-banner` / arag-web, copied, never decrypted). The first clone (2026-10-03) proved it can read a **private repo's contents**, so it is not read:packages-only: it carries `repo` scope (classic PAT, account-wide, write-capable). The mitigations are structural: it is mounted only into the `clone` init container, which runs nothing but `git fetch`, and npm install scripts and tests run in a container that never has it. Least privilege would still be a read-only **deploy key** on `the-ninth-banner` alone (no expiry, one repo, read-only). Switch when convenient. Do NOT substitute the Flux git token or the MCP `GITHUB_TOKEN`, which are account-wide too.
 - Egress verified 2026-10-03 from a live runner pod: `github.com` and `registry.npmjs.org` open; `example.com`, an in-cluster Service (Prometheus) and the LAN (Ollama host) blocked. The runner container has no `/secrets` mount and no token in env, and runs as uid 1001.
+
+### 10a) Accepted-risk register entry (to be recorded by the operator)
+
+The acceptance belongs in sweep_history `accepted_risks`. An agent prepared this and did NOT write it: the acceptance was relayed through an agent, and AR entries suppress findings. Run it after previewing the needle (`docs/sops/policy-cli.md`):
+
+```bash
+runbooks/policy-cli.py risk match --description 'ci-runner git credential'
+runbooks/policy-cli.py risk add AR-<next> \
+  --register-only register-only:posture \
+  --severity medium \
+  --description 'ci-runner git credential: shared account-wide repo-scoped GHCR PAT' \
+  --justification 'Owner accepted 2026-10-03 (W1): mounted only in the clone init container (git fetch via GIT_ASKPASS), never in the test container; egress limited to github.com and registry.npmjs.org; no other cluster secrets in ci-runner. Least-privilege alternative (read-only deploy key or fine-grained PAT) deferred by the owner.' \
+  --expires 2027-01-01
+```
 
 ---
 
@@ -190,3 +208,4 @@ kubectl -n kube-system exec ds/cilium -- cilium-dbg monitor --type drop
 
 - `2026.10.03`: Initial runner: ci-runner namespace without `common`, restricted PSA, FQDN egress lockdown, indexed sharded Job template, one-command trigger with artifact collection.
 - `2026.10.03` (hardening): image pinned by index digest + bump procedure; `PriorityClass ci-low` (-1000, never preempts); declared `default` SA without token; DNS allow-list instead of `*`; per-shard CPU 3/6 to 2/4 (requests/limits) after the nodes hit 100-102°C at 6 CPU; quota 6.5/13 CPU.
+- `2026.10.03` (thermal/W1): at most 2 shards in parallel (thermal), runner declared best-effort (GitHub CI is the gate), shared-PAT risk recorded as owner-accepted (W1) with a prepared register entry.
