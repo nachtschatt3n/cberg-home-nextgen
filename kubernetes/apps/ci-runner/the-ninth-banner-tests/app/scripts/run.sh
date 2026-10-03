@@ -16,8 +16,10 @@ OUT=/results/shard-${SHARD}
 mkdir -p "$OUT"
 export CI=1 HOME=/work/home npm_config_cache=/work/npm-cache npm_config_update_notifier=false
 # the game's shard scripts write blob-report/, junit.xml, test-results/ and
-# shard-<suite>-<i>.json here: the layout the trigger collects
-export E2E_OUT="$OUT"
+# shard-<suite>-<i>.json here: the layout the trigger collects. A combined
+# suite (release-all) writes one subfolder per part ($OUT/release/, $OUT/responsive/).
+# E2E_RUNNER=k8s selects the game's k8s speed factors when it plans the shards.
+export E2E_OUT="$OUT" E2E_RUNNER=k8s
 log() { echo "[ci $(date -u +%H:%M:%S) ${SUITE} ${SHARD}/${N}] $*"; }
 
 cd /work/src
@@ -93,11 +95,17 @@ if [ "$rc" -eq 0 ]; then
             # game's gpu-check fails the shard in seconds on a software renderer
             if need_gpu && need_split; then
                 unset CI
-                export PW_GPU_EXPECTED=1
-                npm run test:release:shard -- "$SHARD" "$N" "${extra[@]}" --retries=1; rc=$?
-                if [ "$SHARD" = 1 ]; then
-                    # shard 1 also runs the responsive matrix (one shard, already built)
-                    E2E_OUT="$OUT/responsive" npm run test:responsive:shard -- 1 1 --no-build --workers="${WORKERS}" --retries=1 || rc=1
+                export PW_GPU_EXPECTED=1 E2E_RUNNER=k8s
+                if has_script test:release-all:shard; then
+                    # release + the responsive matrix planned as one pool over every shard
+                    # (outputs in $OUT/release/ and $OUT/responsive/)
+                    npm run test:release-all:shard -- "$SHARD" "$N" "${extra[@]}" --retries=1; rc=$?
+                else
+                    # refs before release-all: release split, responsive whole on shard 1
+                    npm run test:release:shard -- "$SHARD" "$N" "${extra[@]}" --retries=1; rc=$?
+                    if [ "$SHARD" = 1 ]; then
+                        E2E_OUT="$OUT/responsive" npm run test:responsive:shard -- 1 1 --no-build --workers="${WORKERS}" --retries=1 || rc=1
+                    fi
                 fi
             fi
             ;;
