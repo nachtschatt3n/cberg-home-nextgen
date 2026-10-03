@@ -88,7 +88,7 @@ finding_refs: [F-fb05162a]              # mu: 10 Drive items fail every drive cy
                                         # (photos 503 item — NOT claimed; may or may not clear, see §4.6).
 review: ready-for-go@2026-10-03   # plan-reviewer 3rd pass (blockers from 2nd pass fixed in e20e3b73)
 status: vetted
-window: null
+window: "now:2026-10-03"   # ON-DEMAND NOW run 2026-10-03 (run-now.py stamp; was None)
 premises:
   - id: live-image-is-main-build
     why: >-
