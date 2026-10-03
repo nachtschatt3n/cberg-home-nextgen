@@ -3,20 +3,20 @@ plan_id: chart-patches-coredns-reloader-blackbox
 component: chart-patches
 also_covers:                          # coverage.py matches held items by name/also_covers;
   - coredns                           # maintenance-plan.py by BOTH version tokens below.
-  - reloader
+                                      # reloader CARVED OUT 2026-10-03 -> plan reloader-2.2.18 (target moved to 2.2.18)
   - prometheus-blackbox-exporter
 pr: null                              # no Renovate PR exists for any of the three (sweep cycle 58d45ed0)
 kind: chart
-current: "coredns 1.47.0, reloader 2.2.16 (image v1.4.21), prometheus-blackbox-exporter 11.18.0"
-target: "coredns 1.47.1, reloader 2.2.17 (image v1.4.22), prometheus-blackbox-exporter 11.19.1"
+current: "coredns 1.47.0, prometheus-blackbox-exporter 11.18.0"
+target: "coredns 1.47.1, prometheus-blackbox-exporter 11.19.1"
 update_type: minor                    # two chart patches + one chart minor (11.18 -> 11.19)
-risk: medium                          # blackbox + reloader alone are low. coredns is low-PROBABILITY
+risk: medium                          # blackbox alone is low. coredns is low-PROBABILITY
                                       # (rendered diff = labels + checksum only, image pin unchanged)
                                       # but cluster-wide IMPACT, and a DNS failure disables its own
                                       # GitOps rollback path (source-controller cannot resolve
                                       # github.com) — see §5.3. Weighted medium for that reason.
-est_duration_min: 60                  # §2 10 + A 10 + B 8 + C 15 + wait for B's 30m events floor
-                                      # (runs concurrently with C; ~15 min left after C) + slack 2
+est_duration_min: 45                  # §2 10 + A 10 + C 15 + slack 10 (item B and its 30m events-floor
+                                      # wait carved out 2026-10-03 -> reloader-2.2.18)
 needs_reboot: false
 exclusive: false
 touches:
@@ -25,15 +25,12 @@ touches:
     - helmrelease/monitoring/prometheus-blackbox-exporter   # chart 11.18.0 -> 11.19.1
     - deployment/monitoring/prometheus-blackbox-exporter    # 1 replica, surge-first roll (label change)
     - configmap/monitoring/prometheus-blackbox-exporter     # label only; modules must be unchanged
-    - helmrelease/kube-system/reloader                      # chart 2.2.16 -> 2.2.17
-    - deployment/kube-system/reloader                       # image v1.4.21 -> v1.4.22, surge-first roll
     - helmrelease/kube-system/coredns                       # chart 1.47.0 -> 1.47.1
     - deployment/kube-system/coredns                        # 2 replicas, maxUnavailable 1 roll (checksum/config)
     - configmap/kube-system/coredns                         # label only; Corefile must be byte-identical
     - configmap/kube-system/coredns-helm-values-<hash>      # comment edit => new generated name; old one
                                                             # is ORPHANED (ks prune: false), harmless
     - kubernetes/apps/monitoring/prometheus-blackbox-exporter/app/helmrelease.yaml
-    - kubernetes/apps/kube-system/reloader/app/helmrelease.yaml
     - kubernetes/apps/kube-system/coredns/app/helmrelease.yaml
     - kubernetes/apps/kube-system/coredns/app/helm-values.yaml
   shared:
@@ -41,9 +38,9 @@ touches:
                                       # through it; the *.<domain> zone forwards to k8s-gateway .101
     - monitoring                      # blackbox IS the DNS/ingress instrument (5 Probe CRs +
                                       # InternalDns*/IngressProbe* alerts); §4 reads Prometheus
-    - reloader                        # 24 auto + 19 named reload annotations cluster-wide depend on it
 depends_on: []
 conflicts_with:
+  - reloader-2.2.18                   # carve-out of former item B; same HR until this carve-out is re-reviewed
   - flux-oci-chart-sources            # moves HelmRepository sources incl. coredns/stakater/
                                       # prometheus-community and declares dns-internal; same HRs
   - helm-drift-detection              # adds spec.driftDetection to every HelmRelease incl. these three
@@ -66,16 +63,13 @@ conflicts_with:
                                       # No kube-prometheus-stack plan is open (91.4.1 executed). If one
                                       # appears it MUST be added here — §4 reads Prometheus.
 capability_change: false              # coredns: same image 1.14.7, byte-identical Corefile; blackbox: same
-                                      # image v0.28.0, labels only; reloader v1.4.22: new OPTIONAL
-                                      # leader-election flags (unused, enableHA false), rejects non-positive
-                                      # pause-period (0 pause-period annotations live, measured 2026-09-27)
+                                      # image v0.28.0, labels only (reloader item carved out 2026-10-03)
 rollback_class: git-revert
 autonomy_override: human-gated        # belt and braces: shared `dns` already derives HUMAN-GATED via
                                       # SHARED_INFRA_FLOOR. Recommended window class: sat-attended (§6).
-security_ref: F-0cf695f9              # reloader image finding (detail in DB only); v1.4.22 is the bump
+security_ref: null                    # was F-0cf695f9 (reloader image) - moved to reloader-2.2.18 with the carve-out
 finding_refs:
   - F-3893caaf                        # coredns chart 1.47.0 -> 1.47.1
-  - F-74a00f0b                        # reloader chart 2.2.16 -> 2.2.17
   - F-b7b896a4                        # prometheus-blackbox-exporter chart 11.18.0 -> 11.19.1
 premises:
   # All read-only single commands. Values measured 2026-09-27.
@@ -90,11 +84,6 @@ premises:
       11.19.1 keeps appVersion v0.28.0; §4.A asserts the image did NOT change. Baseline must be v0.28.0.
     run: kubectl get deploy -n monitoring prometheus-blackbox-exporter -o jsonpath='{.spec.template.spec.containers[0].image}'
     expect_exact: quay.io/prometheus/blackbox-exporter:v0.28.0
-  - id: reloader-is-current
-    why: >-
-      Item B edits `version: 2.2.16` and expects the image to move v1.4.21 -> v1.4.22.
-    run: kubectl get deploy -n kube-system reloader -o jsonpath='{.spec.template.spec.containers[0].image} {.spec.replicas}'
-    expect_exact: ghcr.io/stakater/reloader:v1.4.21 1
   - id: coredns-is-current-and-pinned
     why: >-
       Item C edits `version: 1.47.0` and relies on the helm-values image.tag pin (1.14.7) staying
@@ -114,6 +103,9 @@ premises:
     expect_matches: "(?s)dns-k8s-gateway-primary.*dns-k8s-gateway-secondary.*http-ingress-internal.*http-ingress-external"
 status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e backlog review): ready-for-go, 0 blocking; 3 bookkeeping fixes applied
 review: ready-for-go@2026-09-28
+# AMENDED 2026-10-03 (upgrade-planner, sweep cycle 5a150729): item B (reloader) CARVED OUT to plan
+# reloader-2.2.18 - held target moved 2.2.17 -> 2.2.18. Scope REDUCTION only (A and C unchanged);
+# needs a delta re-review of the removal before the 2026-11-01 window.
 window: "sun-attended:2026-11-01"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed: coredns failure disables its own GitOps rollback, attended
 sops_refs:
   - docs/sops/application-update.md
@@ -124,19 +116,21 @@ sops_refs:
 generated: "2026-09-27"
 ---
 
-# Low-risk chart patches: blackbox-exporter, reloader, coredns
+# Low-risk chart patches: blackbox-exporter, coredns (reloader carved out 2026-10-03)
 
 ## 1. Summary & why held
 
 Three chart bumps with no Renovate PR, bundled into one plan. Each item is its own commit, so each
-one can be reverted on its own. Order: **A blackbox, then B reloader, then C coredns.** Blackbox goes
-first because §4.C reads it. Reloader goes before coredns so the one item with a real blast radius
-runs last, with nothing else in flight.
+one can be reverted on its own. Order: **A blackbox, then C coredns.** (Item B, reloader, was carved out
+2026-10-03 into plan `reloader-2.2.18` after its held target moved to 2.2.18; the letters are kept so
+cross-references stay valid.) Blackbox goes
+first because §4.C reads it, so the one item with a real blast radius runs last, with nothing else in
+flight.
 
 | Item | Chart | App/image | Rendered diff with OUR values (`helm template` old vs new, diffed 2026-09-27) | Why held |
 |---|---|---|---|---|
 | A | prometheus-blackbox-exporter 11.18.0 → 11.19.1 | v0.28.0 → v0.28.0 (unchanged) | only `helm.sh/chart` labels (incl. pod template → one surge-first pod roll). Chart source diff: `Chart.yaml` version + default `configReloader.image.tag` v0.93.1→v0.94.1. That sidecar is disabled here (it does not render). | G3 could not read release notes (coverage "unverified"). This is a false positive in substance: nothing functional changes. |
-| B | reloader 2.2.16 → 2.2.17 | v1.4.21 → **v1.4.22** (tag verified on ghcr, HTTP 200) | labels + image tag only. Args, RBAC and strategy are unchanged. | G3 could not read release notes. Upstream v1.4.22 notes (github stakater/Reloader release v1.4.22): "reject non-positive pause-period durations", "expose client-go leader election timings as flags and Helm values", "Move leases RBAC to *-metadata-reader role when HA is enabled", Go 1.26.8, ubi9 base bump. Also in the v1.4.21..v1.4.22 range: "prevent panic on invalid regex in reload annotation". None of this reaches our config: `enableHA` is off, and 0 pause-period annotations exist live. The 24 `auto` and 19 named `…/reload` annotations are valid patterns. Security driver: `security_ref: F-0cf695f9` (detail on the DB record only). |
+| B | ~~reloader~~ | — | — | **CARVED OUT 2026-10-03** → plan `reloader-2.2.18` (target 2.2.18 / image v1.4.22, release-note evidence re-read there). Not executed by this plan. |
 | C | coredns 1.47.0 → 1.47.1 | **1.14.7 stays** (pinned in helm-values; chart appVersion is still 1.14.6) | `helm.sh/chart` labels + pod `checksum/config`. **The Corefile render is identical.** The checksum changes only because the hashed ConfigMap carries the chart label. Chart source diff is autoscaler-only ("Allow separate labels and selector for the cluster-proportional-autoscaler Deployment"). We do not enable the autoscaler. | Deny rule `*coredns*` in `runbooks/auto-update-policy.yaml`: cluster DNS, and the image is pinned ahead of the chart. |
 
 **Pin decision (item C):** `helm show chart oci://ghcr.io/coredns/charts/coredns --version 1.47.1`
@@ -145,8 +139,7 @@ helm-values comment's "1.47.0 is the newest" text is refreshed. Dropping the pin
 CoreDNS to 1.14.6 and bring back the forward `max_connect_attempts` default that the 1.14.7 bump
 had to pin.
 
-**Net effect:** three pod rolls. Two are no-op (identical image and config), and one is an image
-patch on reloader. The real risk is the CoreDNS pod roll itself (2 replicas, `maxUnavailable: 1`,
+**Net effect:** two pod rolls, both no-op (identical image and config). The real risk is the CoreDNS pod roll itself (2 replicas, `maxUnavailable: 1`,
 `lameduck 5s`) and what happens if DNS breaks (§5.3).
 
 ## 2. Pre-checks (all read-only; abort the whole plan on any failure)
@@ -156,12 +149,12 @@ cd /Users/mu/code/cberg-home-nextgen
 .venv/bin/python3 runbooks/plan-premises.py chart-patches-coredns-reloader-blackbox   # all PASS
 flux get kustomizations -A | awk 'NR==1 || $5 != "True"'     # header only
 flux get helmreleases -A   | awk 'NR==1 || $5 != "True"'     # header only
-git status --short -- kubernetes/apps/kube-system/coredns kubernetes/apps/kube-system/reloader \
+git status --short -- kubernetes/apps/kube-system/coredns \
   kubernetes/apps/monitoring/prometheus-blackbox-exporter     # empty (no foreign edits)
 ```
 
-**2.1 Step 0 has settled.** The window's safe-update batch must be fully reconciled before item B.
-Reloader rolls surge-first, so there is no watch gap, but do not stack changes. Check that the
+**2.1 Step 0 has settled.** The window's safe-update batch must be fully reconciled before item A.
+Do not stack changes. Check that the
 `flux-system` GitRepository revision equals `git rev-parse origin/main`:
 ```bash
 flux get sources git -n flux-system flux-system ; git rev-parse --short origin/main
@@ -210,11 +203,7 @@ q 'sum by (rcode)(rate(coredns_dns_responses_total[10m]))'     # note SERVFAIL (
 q 'ALERTS{alertstate="firing",alertname=~"InternalDns.*|IngressProbe.*|Blackbox.*"}'   # 0
 ```
 
-**2.4 Reloader log baseline** (§4.B requires the same count after the change):
-```bash
-kubectl -n kube-system logs deploy/reloader | grep -ciE 'level=(warning|error|fatal)|panic'
-# 1 on 2026-09-27 — the startup `KUBERNETES_NAMESPACE is unset…` warning; record the number
-```
+**2.4** (was: reloader log baseline) — removed with the item B carve-out.
 
 ## 3. Steps: one commit per item, verify each (§4) before the next
 
@@ -236,16 +225,7 @@ Flux picks it up via the push webhook. No manual reconcile. Wait for
 `kubectl get hr -n monitoring prometheus-blackbox-exporter` Ready, message `…11.19.1`
 (≤10 min; if nothing happens after 10 min, check the webhook before anything else). Then run §4.A.
 
-### 3.B reloader 2.2.16 → 2.2.17
-```bash
-F=kubernetes/apps/kube-system/reloader/app/helmrelease.yaml
-test "$(grep -c '^      version: 2\.2\.16$' $F)" = 1 || { echo ABORT; return 1 2>/dev/null || exit 1; }
-sed -i '' 's/^      version: 2\.2\.16$/      version: 2.2.17/' $F
-git diff -- $F     # exactly: -      version: 2.2.16  /  +      version: 2.2.17
-git commit --only $F -m "feat(kube-system): reloader chart 2.2.16 -> 2.2.17 (image v1.4.22) (F-74a00f0b)"
-git log -1 --format=%s && git show --stat HEAD && git push
-```
-Wait for the HR to be Ready at 2.2.17, then run §4.B.
+### 3.B — CARVED OUT to `reloader-2.2.18` (2026-10-03). Do nothing here.
 
 ### 3.C coredns 1.47.0 → 1.47.1 (image pin KEPT)
 ```bash
@@ -300,25 +280,7 @@ independent.
 - CONTROL: alertname BlackboxProbesAbsent — not firing.
 - CONTROL: alertname BlackboxExporterPodNotReady — not firing.
 
-### 4.B reloader
-- `kubectl get deploy -n kube-system reloader -o jsonpath='{.spec.template.spec.containers[0].image} {.status.readyReplicas}'`
-  → `ghcr.io/stakater/reloader:v1.4.22 1`. Restarts 0 after 5 min.
-- Startup log lines (case-insensitive; upstream mixes case):
-  `kubectl -n kube-system logs deploy/reloader | grep -ciE 'starting controller to watch resource type: (configmaps|secrets)'` → `2`.
-  `kubectl -n kube-system logs deploy/reloader | grep -ciE 'level=(warning|error|fatal)|panic'` → must EQUAL the
-  §2.4 baseline (1 on 2026-09-27: the startup `KUBERNETES_NAMESPACE is unset, will detect changes in all
-  namespaces` warning). That baseline line proves the grep matches this log format. Any extra
-  warning, error or panic raises the count. FAIL. A count of 0 means the startup warning disappeared,
-  so the log format or config changed: investigate before continuing.
-- CONTENTS ASSERTION: the new pod's informers actually receive update events. Measured by
-  `q 'sum(increase(reloader_events_received_total{event_type="update",pod="<NEW pod>"}[30m]))'`
-  (configmaps + secrets summed), read 30 min after the new pod started. The floor is `> 0`. Measured
-  over 24h on 2026-09-27: the 10m form read 0 in 38 of 144 windows, which would false-FAIL, so it is
-  not used. The summed 30m form read 0 in 0 of 144 windows, with a minimum of 7.1. A watch/RBAC
-  regression leaves it at 0 while the pod is Ready. FAIL. This read does not block item C: C proceeds
-  once B's image, Ready and log gates pass, and this floor is read at the end of the window.
-- CONTROL: metric reloader_events_received_total — floor above, new pod only (the old pod's stale series also exist until they age out; filter by `pod`).
-- CONTROL: metric reloader_reload_executed_total — soak, not a window gate: `{success="true"}` on the new pod `> 0` within 48 h (the live rate was 34 in 7 d), and `{success="false"}` stays 0. The window agent records this as a follow-up check for the next sweep.
+### 4.B — CARVED OUT to `reloader-2.2.18`.
 
 ### 4.C coredns
 - Pods: 2/2 Ready on 2 distinct nodes, both with image `coredns/coredns:1.14.7` (the **pin survived**;
@@ -345,10 +307,7 @@ Find the item's commit with `git log --oneline -3 -- <file>`, then
 `git revert --no-edit <sha> && git log -1 --format=%s && git push`.
 
 - **5.A blackbox:** revert → HR back at 11.18.0 (`helm history prometheus-blackbox-exporter -n monitoring` shows a new revision with chart 11.18.0). Re-run §4.A. Expected module set and image unchanged.
-- **5.B reloader:** revert → image `ghcr.io/stakater/reloader:v1.4.21`, HR 2.2.16. Re-run §4.B with v1.4.21.
-  Any workload whose ConfigMap/Secret changed while reloader was broken missed its reload. List what
-  changed (`git log --since=<item B push> --name-only -- kubernetes/`) and restart only those
-  workloads through their own GitOps path.
+- **5.B:** carved out to `reloader-2.2.18`.
 - **5.C coredns:** revert (both files) → HR 1.47.0. The old generated values ConfigMap still exists
   (prune: false). Pods roll again. Re-run §4.C: Corefile hash = `/private/tmp/claude-501/chart-patches-corefile.pre`, dnsmatrix = baseline.
 - **5.3 Break-glass, only if CoreDNS is serving failures:** the GitOps revert needs source-controller
@@ -372,9 +331,10 @@ Find the item's commit with `git log --oneline -3 -- <file>`, then
   the pin". **Recommended window: `sat-attended`** (60 min fits the 70 min budget). The plan reviewer
   (2026-09-27) named the next free slot as `sat-attended:2026-10-17`. That is recorded here as prose only:
   `window:` stays null for the scheduler.
-  If the operator wants A+B in `nightly`: split item C into its own plan. A and B alone derive
+  If the operator wants A in `nightly`: split item C into its own plan (reloader, former B, already
+  was: `reloader-2.2.18`). A alone derives
   AUTO-NIGHT (low risk, git-revert, no DNS/storage/gateway shared surface).
-- **Serialize A → B → C, gate between each.** C last, with nothing else in flight. The window's other
+- **Serialize A → C, gate between them.** C last, with nothing else in flight. The window's other
   plans must not verify through DNS or Prometheus during C's roll (~2 min). That is why
   `uptime-kuma-2.5.5-slim-rootless` and `oc8-install` are in `conflicts_with`.
 - **Blackbox is the window's own instrument.** During A's surge roll there is at most a ~30 s gap in
@@ -384,5 +344,5 @@ Find the item's commit with `git log --oneline -3 -- <file>`, then
   these same three HelmReleases or their sources. Never in the same window. Those plans should list
   this one in their own `conflicts_with` (reciprocity is not validated).
 - Retire this file (delete it) in the commit that records execution, and close the three findings with
-  `runbooks/policy-cli.py finding close <id> --commit <sha>` (F-3893caaf, F-74a00f0b, F-b7b896a4).
-  Re-measure F-0cf695f9 on the next security sweep rather than closing it by hand.
+  `runbooks/policy-cli.py finding close <id> --commit <sha>` (F-3893caaf, F-b7b896a4).
+  F-74a00f0b and the F-0cf695f9 citation moved to `reloader-2.2.18` with the carve-out.
