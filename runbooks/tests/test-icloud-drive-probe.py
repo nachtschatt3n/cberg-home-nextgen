@@ -142,6 +142,24 @@ prev = cycle(T0, batch(T0 + 5, ["/d/x.numbers"], 0, 1, [PKG_ERR]))
 cur = cycle(T0 + H6, batch(T0 + H6 + 5, ["/d/x.numbers"], 0, 1, [PKG_ERR]))
 check("restart since", analyse_drive([prev, cur], NOW).get("icloud_drive_failing_item_since_timestamp_seconds"), T0 + 600)
 
+# 10. icloud-docker >= 2.1.0 sign-in failure lines (real text, rendered with
+#     icloudpy 0.10.0's exception classes). Credential/SRP failures are
+#     auth-required; a plain network fault at sign-in is NOT (left to the
+#     sync-stalled alert).
+photos_ok = [L(T0, "sync.py", "Syncing photos..."), L(T0 + 600, "sync.py", "Photos synced")]
+SIGNIN = "Sign-in failed and will be retried: "
+for name, err, want in [
+    ("signin-auth-real", "('Invalid email/password combination.', "
+                         "ICloudPyAPIResponseException('Unauthorized (401)'))", 1),
+    ("signin-srp-real", "('Failed to initiate srp authentication.', "
+                        "ICloudPyAPIResponseException('Conflict (409)'))", 1),
+    ("signin-network (negative control)", "HTTPSConnectionPool(host='idmsa.apple.com', port=443): "
+                                          "Read timed out.", 0),
+]:
+    lines = photos_ok + [L(T0 + 1200, "sync.py", SIGNIN + err, "ERROR")]
+    check(f"{name} auth_required", analyse([lines], NOW).get("icloud_auth_required"), want)
+check("clean auth_required", analyse([photos_ok], NOW).get("icloud_auth_required"), 0)
+
 
 # ---------------------------------------------------------------- promtool
 def promtool():

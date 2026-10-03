@@ -99,7 +99,13 @@ data:
     # errors documented in docs/sops/icloud-docker-reauth.md.
     RE_AUTH = re.compile(
         r"2FA is required|2SA is required|Password is not stored in keyring"
-        r"|Authentication required for Account|\(421\)|INCORRECT_PCS_KEY",
+        r"|Authentication required for Account|\(421\)|INCORRECT_PCS_KEY"
+        # icloud-docker >= 2.1.0 (#529) no longer crash-loops on a non-2FA sign-in
+        # failure; it backs off >= 30 min and logs this line instead. The error is
+        # rendered as a tuple repr: "...retried: ('Invalid email/password ...', ...)".
+        # Only the icloudpy ICloudPyFailedLoginException texts count as auth -- a
+        # plain network fault at sign-in is left to ICloudBackupSyncStalled.
+        r"|Sign-in failed and will be retried: .*(Invalid email/password|Invalid authentication token|Failed to initiate srp)",
         re.IGNORECASE,
     )
 
