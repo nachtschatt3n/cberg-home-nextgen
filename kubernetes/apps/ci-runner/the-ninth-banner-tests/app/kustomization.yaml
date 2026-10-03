@@ -1,0 +1,24 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Static runner infrastructure only. The test Jobs themselves are EPHEMERAL:
+# scripts/ninth-banner-test.sh renders ../job-template.yaml.tpl per run and
+# `kubectl create`s it (ttlSecondsAfterFinished cleans up). Flux never owns a
+# test Job, so it never prunes or reverts one. docs/sops/ci-runner.md
+resources:
+  - ./git-credential.sops.yaml
+  - ./serviceaccount.yaml
+  - ./resource-limits.yaml
+  - ./networkpolicy.yaml
+generatorOptions:
+  disableNameSuffixHash: true   # the Job template references the name verbatim
+  annotations:
+    # bash `${VAR}` in the scripts must survive Flux postBuild substitution
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+configMapGenerator:
+  - name: the-ninth-banner-tests-scripts
+    files:
+      - ./scripts/clone.sh
+      - ./scripts/git-askpass.sh
+      - ./scripts/run.sh

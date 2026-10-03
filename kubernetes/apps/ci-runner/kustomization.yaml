@@ -1,0 +1,14 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# DELIBERATELY no `namespace:` transformer and NO ../../flux/components/common.
+# `common` would copy cluster-secrets (incl. GitHub/API tokens) and the SOPS age
+# key into every namespace it is applied to. This namespace runs third-party
+# code (npm install scripts, test suites), so it must hold no cluster secrets:
+# the child Flux Kustomization below lives in flux-system (where sops-age and
+# cluster-secrets already are) and only TARGETS ci-runner.
+# See docs/sops/ci-runner.md.
+resources:
+  - ./namespace.yaml
+  - ./the-ninth-banner-tests/ks.yaml

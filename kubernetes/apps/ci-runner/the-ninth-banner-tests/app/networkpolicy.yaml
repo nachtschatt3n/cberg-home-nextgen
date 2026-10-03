@@ -1,0 +1,38 @@
+---
+# Namespace-wide lockdown for everything in ci-runner.
+#  - ingress: one EMPTY rule = default-deny, nothing may connect in (no
+#    Service exists either; quota forbids creating one). kubectl cp/exec/logs
+#    go through the kubelet, not the pod network, and keep working.
+#  - egress: cluster DNS (with the L7 DNS proxy, required for toFQDNs) and
+#    HTTPS to exactly two hosts: github.com (git clone, init container) and
+#    registry.npmjs.org (npm ci; every package-lock entry resolves there).
+#    Browsers are baked into the Playwright image, so no Playwright CDN.
+#    No other cluster Service, node, LAN or internet destination is reachable.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ci-runner-lockdown
+  namespace: ci-runner
+spec:
+  endpointSelector: {}
+  ingress:
+    - {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: github.com
+        - matchName: registry.npmjs.org
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
