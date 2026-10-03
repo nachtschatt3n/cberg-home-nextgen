@@ -160,6 +160,47 @@ def test_case_insensitive_title_matching():
     assert _lane("CONTAINER IS AT ITS MEMORY LIMIT", REAL_POLICY)["lane"] == "PLAN"
 
 
+def _capture_page(overdue):
+    import json as _json
+    import subprocess as _sp
+    calls = []
+
+    class _P:
+        returncode = 0
+
+    real = _sp.run
+    _sp.run = lambda argv, **kw: calls.append(argv) or _P()
+    try:
+        ok = ft.page_overdue(overdue)
+    finally:
+        _sp.run = real
+    verbs = [c[c.index("/home/node/.openclaw/bin/home-operation") + 1] for c in calls]
+    payload = None
+    for c in calls:
+        if "ingest" in c:
+            payload = _json.loads(c[c.index("--json") + 1])
+    rec = next((c for c in calls if "reconcile" in c), None)
+    return ok, verbs, payload, rec
+
+
+def test_sla_pages_use_their_own_source_and_reconcile_it():
+    # 2026-10-03 04:28: three SLA pages filed under source "maintenance" were
+    # closed 11 s later by openclaw-sync's maintenance reconcile (plan ids),
+    # after the critical push had already woken the operator.
+    ok, verbs, payload, rec = _capture_page(
+        [{"finding_id": "F-1", "age_days": 4.0, "title": "x"}])
+    assert ok and verbs == ["ingest", "reconcile"], verbs
+    assert {i["source"] for i in payload} == {ft.PAGE_SOURCE} != {"maintenance"}, payload
+    assert all(i["severity"] == "warning" for i in payload), payload
+    assert rec[rec.index("--source") + 1] == ft.PAGE_SOURCE, rec
+    assert rec[rec.index("--open") + 1] == '["unplanned-F-1"]', rec
+
+
+def test_no_overdue_still_reconciles_so_old_pages_close():
+    ok, verbs, payload, rec = _capture_page([])
+    assert ok and verbs == ["reconcile"], verbs
+    assert rec[rec.index("--open") + 1] == "[]", rec
+
 def _main() -> int:
     fns = [v for k, v in sorted(globals().items())
            if k.startswith("test_") and callable(v)]

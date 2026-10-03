@@ -266,25 +266,43 @@ def plan_or_page(results: list, policy: dict, now=None) -> tuple[list, list]:
     return needs, overdue
 
 
+# Own home-operation source, reconciled by this script only. These pages used
+# to be filed under "maintenance", whose reconcile (openclaw-sync, plan ids as
+# the open set) closed them 11 s after opening — after the critical push had
+# already gone out: three such pages hit the operator at 04:28 on 2026-10-03
+# (and on 08-28, 09-24, 09-29). Severity is warning: a missing plan is
+# backlog for the planner agents, not an incident, so it belongs in the
+# daytime digest, not a 3-hourly night page.
+PAGE_SOURCE = "plan-sla"
+
+
 def page_overdue(overdue: list) -> bool:
-    """Best-effort OpenClaw page for overdue unplanned criticals. Loud on
-    failure (returns False), never raises — a broken pager must not kill the
-    triage run whose output the sweep still needs."""
+    """Best-effort OpenClaw page for overdue unplanned criticals, then a
+    reconcile of PAGE_SOURCE against exactly this run's overdue set, so a
+    page closes once its finding has a plan. Runs with an EMPTY list too
+    (that is what closes the last page). Loud on failure (returns False),
+    never raises — a broken pager must not kill the triage run whose output
+    the sweep still needs."""
     import subprocess  # noqa: PLC0415
     issues = [{
         "key": f"unplanned-{r['finding_id']}",
-        "kind": "blocked_plan", "source": "maintenance", "severity": "critical",
+        "kind": "blocked_plan", "source": PAGE_SOURCE, "severity": "warning",
         "title": (f"PLAN-lane critical {r['finding_id']} has NO PLAN after "
                   f"{r.get('age_days')}d (SLA breach): {(r.get('title') or '')[:100]}"),
         "action": "ack",
     } for r in overdue]
+    hop = ["kubectl", "-n", "ai", "exec", "deploy/openclaw", "-c", "app", "--",
+           "/home/node/.openclaw/bin/home-operation"]
+    ok = True
     try:
-        p = subprocess.run(
-            ["kubectl", "-n", "ai", "exec", "deploy/openclaw", "-c", "app", "--",
-             "/home/node/.openclaw/bin/home-operation", "ingest", "--json",
-             json.dumps(issues)],
-            capture_output=True, text=True, timeout=60)
-        return p.returncode == 0
+        if issues:
+            p = subprocess.run(hop + ["ingest", "--json", json.dumps(issues)],
+                               capture_output=True, text=True, timeout=60)
+            ok = p.returncode == 0
+        p = subprocess.run(hop + ["reconcile", "--source", PAGE_SOURCE, "--open",
+                                  json.dumps([i["key"] for i in issues])],
+                           capture_output=True, text=True, timeout=60)
+        return ok and p.returncode == 0
     except Exception:
         return False
 
@@ -414,7 +432,7 @@ def main():
         policy["plan_sla_days"] = args.plan_sla_days
     needs_plan, overdue = plan_or_page(results, policy)
     paged = None
-    if overdue and not args.no_page:
+    if not args.no_page:
         paged = page_overdue(overdue)
 
     counts = {lane: sum(1 for r in results if r["lane"] == lane) for lane in LANES}
