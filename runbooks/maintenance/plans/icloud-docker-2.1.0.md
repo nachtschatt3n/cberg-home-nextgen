@@ -217,7 +217,11 @@ Cloned `github.com/mandarons/icloud-docker` and read tag `v2.1.0`; copied
 - Trust cookie (`X-APPLE-WEBAUTH-HSA-TRUST`) expiry read from the jar
   (no network): mu 2026-12-24, andrea 2026-12-25 — ~82 days of headroom.
   2.1.0's default `trust_refresh_days: 14` will re-mint it in mid-December,
-  which REDUCES the next forced re-auth risk.
+  which REDUCES the next forced re-auth risk. Residual (low): if Apple were to
+  reject the stored trust token, icloudpy falls back to an SRP password
+  sign-in, which can surface a sign-in prompt on older trusted devices even
+  though no code is requested; with the cookies valid to 2026-12-24/25 and
+  both pods restarting cleanly on them this week, this is not expected.
 - **Gate, not assumption:** §3.3 runs the 2.1.0 image with `--dry-run` against
   the real session. Its code (`sync.py` ~L1467) logs
   `DRY RUN: 2FA required — finish interactive auth first` and **returns
@@ -319,7 +323,7 @@ PASS: `sha256:c57e8248fefc55d490f090eb5edd08ff53045861e4b8f532403926b38af36ba9`.
 kubectl get volume -n storage icloud-docker-mu-session pvc-f6ec0213-4b00-49d9-93b4-954d5fee1d31 \
   -o custom-columns=NAME:.metadata.name,STATE:.status.state,ROBUST:.status.robustness,LAST_BACKUP:.status.lastBackupAt
 ```
-PASS: both rows `ROBUST`=`healthy` (STATE reads `attached`), `LAST_BACKUP` = today ~03:0x. If stale, cross-check per `docs/sops/backup.md` "lastBackupAt Can Lag".
+PASS: both rows `ROBUST`=`healthy` (STATE reads `attached`), `LAST_BACKUP` = today ~03:0x **UTC** (the RecurringJob fires 03:00; Longhorn reports UTC timestamps). If stale, cross-check per `docs/sops/backup.md` "lastBackupAt Can Lag".
 
 **2.4 Baseline gauges** (record the numbers in the window log):
 ```bash
@@ -732,9 +736,10 @@ elif drive_start == 0: v = "WAIT-OR-FAIL-NO-DRIVE-START"
 elif drive_done == 0 or photos_done == 0: v = "WAIT"
 elif photo_dl > 100: v = "FAIL-MASS-PHOTO-DOWNLOAD"
 elif drive_dl > 300: v = "FAIL-MASS-DRIVE-DOWNLOAD"
+elif len(sys.argv) > 1 and sys.argv[1] == "mu" and unpacked == 0: v = "FAIL-NO-PACKAGES-HANDLED"
 print("VERDICT=" + v)
 PY
-kubectl -n backup logs deploy/icloud-docker-$INSTANCE -c app | python3 /tmp/icloud-v2-log-gate.py
+kubectl -n backup logs deploy/icloud-docker-$INSTANCE -c app | python3 /tmp/icloud-v2-log-gate.py $INSTANCE
 ```
 PASS criteria and what each failure prints:
 - `auth_errors=0` — FAIL-AUTH if any 2FA/421/sign-in/keyring line (go to §5.1 immediately; do not let it loop: `kubectl -n backup scale deploy icloud-docker-$INSTANCE --replicas=0` + `flux suspend` first, per the SOP's quota rule).
@@ -742,7 +747,7 @@ PASS criteria and what each failure prints:
 - `drive_done>=1` and `photos_done>=1` — `WAIT` until then; mu not done after 90 min -> check progress (`drive_downloads` still rising = slow first cycle, extend to 150 min; flat = FAIL).
 - `photo_downloads <= 100` — a layout/naming change would re-download the library (thousands of lines). Live control: the OLD image's mu log logged 176 photo downloads in 24 h (~7 per cycle, incl. the one 503 item), so <= 100 over one-two cycles is a real ceiling.
 - `drive_downloads <= 300`; `old_unpack_errors=0` (the string does not exist in 2.1.0 — a hit means the old code is running).
-- mu only: `packages_handled >= 1` (the 9 packages are now unpacked or kept; a floor, so "nothing happened" cannot pass).
+- mu only: `packages_handled >= 1` (the 9 packages are now unpacked or kept; a floor, so "nothing happened" cannot pass) — enforced in the VERDICT (`FAIL-NO-PACKAGES-HANDLED`, keyed on the `$INSTANCE` argument) once drive+photos are done. Controls: synthetic mu log without an unpack line -> `FAIL-NO-PACKAGES-HANDLED`; same log as `andrea` -> `PASS`; with `Successfully unpacked the package` -> `PASS`.
 Live negative control 2026-10-03: the same script on mu's current (old-image) 24 h log prints `old_unpack_errors=24 … VERDICT=FAIL-OLD-CODE`; synthetic controls: 2FA line -> `FAIL-AUTH`, 150 photo downloads -> `FAIL-MASS-PHOTO-DOWNLOAD`, no `Photos synced` -> `WAIT`, empty input -> `FAIL-NO-LOGS`.
 
 **4.3 CONTENTS ASSERTION: the Drive failing set shrank — measured by the probe on a cycle that ran on 2.1.0.**
@@ -760,12 +765,15 @@ CONTROL: metric icloud_drive_sync_last_success_timestamp_seconds — must exceed
 **4.4 Web UI not listening** (inside the app pod; `/proc/net/tcp*` field 2 = local addr, field 4 `0A` = LISTEN, 8080 = `1F90`):
 ```bash
 kubectl -n backup exec deploy/icloud-docker-$INSTANCE -c app -- sh -c 'cat /proc/net/tcp /proc/net/tcp6 2>/dev/null' > /tmp/icloud-sockets-$INSTANCE.txt
-awk 'NR>0 && $1 ~ /^[0-9]+:$/' /tmp/icloud-sockets-$INSTANCE.txt | wc -l                          # socket rows read: must be >= 2
+grep -c 'local_address' /tmp/icloud-sockets-$INSTANCE.txt                                           # table headers read: must be >= 1
 awk '$4=="0A"{print $2}' /tmp/icloud-sockets-$INSTANCE.txt | grep -ic ':1F90'                       # listeners on 8080
 ```
-PASS: socket rows `>= 2` (the app holds ESTABLISHED connections to Apple — an
+PASS: table headers `>= 1` (every successful read of `/proc/net/tcp*` starts
+with a `sl local_address rem_address st …` header, whatever sockets exist — an
 empty read, wrong container or exec error prints `0` here and FAILS the gate
-instead of passing as "no listener") AND listeners on 8080 = `0`. Live 2026-10-03 (mu, old image): rows `3`, listeners `0`; empty input -> rows `0`. Control: `printf ' 0: 0100007F:1F90 00000000:0000 0A\n' | awk '$4=="0A"{print $2}' | grep -ic ':1F90'` prints `1`. Plus `kubectl get httproute,service -n backup -o name | wc -l` still `0`.
+instead of passing as "no listener"; the socket ROW count is not usable as the
+proof: the second review measured 2 rows every sample and andrea had no
+ESTABLISHED socket at all, only CLOSE_WAIT) AND listeners on 8080 = `0`. Live 2026-10-03 (old image): mu and andrea both headers `2` (tcp + tcp6), listeners `0`; empty input -> headers `0`. Control: `printf ' 0: 0100007F:1F90 00000000:0000 0A\n' | awk '$4=="0A"{print $2}' | grep -ic ':1F90'` prints `1`. Plus `kubectl get httproute,service -n backup -o name | wc -l` still `0`.
 
 **4.5 Photos still syncing on 2.1.0:**
 ```bash
@@ -809,13 +817,26 @@ F=kubernetes/apps/backup/icloud-docker-$INSTANCE/app/helmrelease.yaml
 git show "$SHA^:$F" > "$F" && git diff --stat "$F"
 git commit --only "$F" -F <unique-msg-file>     # "revert(icloud-docker-<instance>): back to main@91486ec1 (2.1.0 failed <gate>)"
 git log -1 --format=%s && git show --stat HEAD && git push
+```
+3. **Wait until the revert is the HelmRelease spec — BEFORE any resume, force-reconcile or scale.**
+   A forced upgrade of a spec that still says 2.1.0 would restore `replicas: 1` on
+   the FAILED image, and on the FAIL-AUTH branch 2.1.0's `_handle_2fa_required`
+   (`sync.py` ~L995-1011, `_request_2fa_push_once`) would request a 2FA push and
+   send a Telegram message — exactly what this rollback exists to stop.
+```bash
+flux reconcile kustomization icloud-docker-$INSTANCE -n backup --with-source
+TAG=$(kubectl get hr -n backup icloud-docker-$INSTANCE -o jsonpath='{.spec.values.controllers.main.containers.app.image.tag}'); echo "$TAG"
+[ "$TAG" = "main@sha256:91486ec1eaeb382e7af264b7ffa935c5ba110f11c3c2f1805976782ff5017917" ] && echo REVERT-APPLIED || echo "STOP: HR spec is not the old pin yet -- do not resume/scale; re-check the push and the Kustomization"
+```
+   Only on `REVERT-APPLIED`:
+```bash
 flux resume helmrelease icloud-docker-$INSTANCE -n backup 2>/dev/null
 flux reconcile helmrelease icloud-docker-$INSTANCE -n backup --force   # application-update SOP §11
 kubectl -n backup scale deploy icloud-docker-$INSTANCE --replicas=1    # in case step 1 scaled to 0 (resume alone does not rescale)
 kubectl -n backup get pod -l app.kubernetes.io/name=icloud-docker-$INSTANCE -o name | wc -l   # 1
 ```
-3. Confirm: §4.1 shows `91486ec1…` again; §4.2's script on the new pod shows `auth_errors=0` and `drive_start>=1` (old image prints `old_unpack_errors` again for mu — expected); §4.5 photos last-success advances past the rollback time.
-4. Commit A (probe) does NOT need reverting: the added pattern never matches the old image's output (that string does not exist there).
+4. Confirm: §4.1 shows `91486ec1…` again; §4.2's script on the new pod shows `auth_errors=0` and `drive_start>=1` (old image prints `old_unpack_errors` again for mu — expected); §4.5 photos last-success advances past the rollback time.
+5. Commit A (probe) does NOT need reverting: the added pattern never matches the old image's output (that string does not exist there).
 
 ### 5.2 Session restore (only if the old image now asks for 2FA after rollback)
 
@@ -853,7 +874,7 @@ Nothing to restore: `remove_obsolete: false`, the dry-run mounted the share read
 - **Downtime:** each instance is down ~10-20 min (scale-0 + dry-run + Recreate). `ICloudBackupDeploymentUnavailable` needs 30 min, so it should not fire; if a dry-run drags past ~20 min, expect it pending/firing and do not treat it as a regression. No user-facing service (no route).
 - **Shared surfaces:** both data PVCs sit on `//NAS/backups` (`icloud-backup/mu`, `icloud-backup/andrea`); `icloud-backup-freshness` reads the parent read-only through `cifs-immich-icloud-backup` — not edited. First mu drive cycle downloads ~9 packages (tens of MB) — no bulk traffic.
 - **Monitoring is the instrument:** §4 reads Prometheus and Pushgateway. No `kube-prometheus-stack` / pushgateway plan is open (kube-prometheus-stack-91.4.1 executed); if one appears for the same night it must be added to `conflicts_with` on both sides.
-- **conflicts_with rationale:** app-template-5.2.1 edits the same two files and HRs (chart bump) — it should list this plan reciprocally (it does not yet; repo note for its owner). helm-drift-detection / flux-oci-chart-sources / flux-reconciler-impersonation / flux-fleet-0.60.0 all change how these HRs are reconciled while we suspend/resume them. longhorn-1.13.0 moves the engine under the session PVCs and touches `cifs/backups`. talos-linux-1.14.2 reschedules both pods.
+- **conflicts_with rationale:** app-template-5.2.1 edits the same two files and HRs (chart bump) — it lists this plan reciprocally (added in 0525329a). helm-drift-detection / flux-oci-chart-sources / flux-reconciler-impersonation / flux-fleet-0.60.0 all change how these HRs are reconciled while we suspend/resume them. longhorn-1.13.0 moves the engine under the session PVCs and touches `cifs/backups`. talos-linux-1.14.2 reschedules both pods.
 - **Window:** human-gated (capability_change true) and needs ~140 min -> a **sun-attended** slot (180 min budget) or an operator-triggered on-demand NOW run. Not sat-attended (70 min budget). The operator's phone should be within reach for the mu half (contingency only).
 - **Apple 2FA quota:** never re-run a dry-run that returned STOP-AUTH; never leave a 2.1.0 pod looping on `2FA is required` (2.1.0 requests a push once per re-auth episode — one quota unit — then loops on `retry_login_interval: 600`).
 - **Repo notes (not fixed by this plan):** (1) version-check/security-check compare the floating `main` tag with itself, so neither saw that a newer RELEASE (2.1.0) existed — AR-029 record F-b2c35615 says "already on newest" for an image that had three newer releases; after this bump the pin is a semver tag and the check works again.
