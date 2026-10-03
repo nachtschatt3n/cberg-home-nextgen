@@ -1,28 +1,33 @@
 ---
 plan_id: flux-fleet-0.60.0
 component: flux-fleet                 # chart-family group: flux-operator + flux-instance (ns flux-system)
-pr: null                              # No Renovate PR. Dispatched by the nightly window 2026-09-28
-                                      # Step 0.5 from coverage.py needs_plan_groups.
+                                      # plan_id KEPT at 0.60.0 on the 2026-10-03 retarget to 0.61.0
+                                      # (README "refresh in place": ~17 other plans' conflicts_with,
+                                      # the window stamp and finding_refs all resolve by this id).
+                                      # Coverage group id for the new target is flux-fleet-0.61.0;
+                                      # coverage._group_plan matches this file via target prose.
+pr: null                              # No Renovate PR. First dispatched by the nightly window 2026-09-28
+                                      # Step 0.5; retargeted by sweep cycle 5a150729 (2026-10-03).
 kind: chart
 current: "flux-operator chart 0.57.0 (operator image v0.57.0) + flux-instance chart 0.57.0; FluxInstance distribution v2.9.3 (unchanged by this plan)"
-target: "flux-operator chart 0.60.0 (operator image v0.60.0) + flux-instance chart 0.60.0; distribution stays v2.9.3"
-update_type: minor                    # 0.x line: 0.57 -> 0.60 is three "minors" at major 0
+target: "flux-operator chart 0.61.0 (operator image v0.61.0) + flux-instance chart 0.61.0; distribution stays v2.9.3"
+update_type: minor                    # 0.x line: 0.57 -> 0.61 is four "minors" at major 0
 risk: medium                          # NOT from the diff, which is measured trivial (section 1.2).
                                       # From the blast radius: this is the reconcile engine, and the
                                       # flux-operator pod is ALSO the only exporter of flux_* metrics
                                       # that every Flux alert reads. Low would route it to SD-10
                                       # unattended pre-approval; the control plane does not go there
                                       # on a first run.
-est_duration_min: 35                  # pre-checks 8 + edit/commit/push 3 + propagate/roll 8 +
+est_duration_min: 35                  # unchanged by the 0.61.0 retarget (same steps). pre-checks 8 + edit/commit/push 3 + propagate/roll 8 +
                                       # verification 12 (includes a 10-min not-ready soak) + docs
                                       # follow-up commit 4.
 needs_reboot: false
 touches:
   namespaces: [flux-system]
   resources:
-    - helmrelease/flux-operator (flux-system)          # chart 0.57.0 -> 0.60.0; helm rev 3 -> 4
-    - helmrelease/flux-instance (flux-system)          # chart 0.57.0 -> 0.60.0; helm rev 6 -> 7
-    - deployment/flux-operator (flux-system)           # ROLLS: image v0.57.0 -> v0.60.0 (1 replica)
+    - helmrelease/flux-operator (flux-system)          # chart 0.57.0 -> 0.61.0; helm rev 3 -> 4
+    - helmrelease/flux-instance (flux-system)          # chart 0.57.0 -> 0.61.0; helm rev 6 -> 7
+    - deployment/flux-operator (flux-system)           # ROLLS: image v0.57.0 -> v0.61.0 (1 replica)
     - crd/resourcesets.fluxcd.controlplane.io          # gains one CEL rule; 0 objects exist
     - crd/fluxinstances.fluxcd.controlplane.io         # labels only
     - crd/fluxreports.fluxcd.controlplane.io           # labels only
@@ -53,6 +58,23 @@ conflicts_with:
   - redis-fleet-8.10.2                # Flux controller upgrade under its GitOps legs (review 2026-09-28).
   - nextcloud-fleet-35.0.1            # helm-controller restart mid-§3.4 strands its release
                                       # pending-upgrade (retries: 0) (review 2026-09-28).
+  # ADDED 2026-10-03 (retarget): plans that already declare conflicts_with: flux-fleet-0.60.0
+  # one-sidedly. window-scheduler.py enforces either direction, so these change no
+  # scheduling outcome; they make this list carry every pairing (authoring rule 4).
+  # Several of those plans justify it with "restarts/upgrades helm-controller", which is
+  # NOT what this plan does (section 1.2 / gate 4.4) - the real shared surface is the
+  # flux-operator restart (flux_* scrape gap) and Flux reconcile attribution.
+  - nextcloud-9.4.0
+  - n8n-2.39.8
+  - pgvector-fleet-0.8.7
+  - python-fleet-3.14.8
+  - unpoller-5.4.0
+  - coredns-1.48.1
+  - anythingllm-1.17
+  - grafana-13.2.7
+  - external-dns-1.23.0
+  - envoy-gateway-1.9.2
+  - longhorn-1.13.0
 exclusive: false                      # the six controllers do NOT roll (section 1.2, gated in 4.4),
                                       # so reconciliation continues throughout and a co-scheduled
                                       # plan's git-revert still works. conflicts_with covers the
@@ -70,10 +92,12 @@ rollback_class: git-revert            # no forward-only step: no CRD stored-vers
                                       # storage migration, no data. Flux-independent helm rollback
                                       # to measured revisions is in section 5.
 finding_refs:
-  - F-60f2b033                        # flux-operator: chart 0.57.0 -> 0.60.0 (version, monitor)
-  - F-703d6382                        # flux-instance: chart 0.57.0 -> 0.60.0 (version, monitor)
+  - F-60f2b033                        # flux-operator: chart 0.57.0 -> 0.61.0 (version, monitor)
+  - F-703d6382                        # flux-instance: chart 0.57.0 -> 0.61.0 (version, monitor)
 premises:
-  # Read-verb only. All nine run 2026-09-28 ~04:05 CEST and returned the expected value.
+  # Read-verb only. All nine run 2026-09-28 ~04:05 CEST and RE-RUN 2026-10-03 (retarget to
+  # 0.61.0): every one returned the expected value (target charts pulled at 0.61.0;
+  # ghcr manifest flux-operator:v0.61.0 -> HTTP 200).
   - id: operator-image-current
     why: >-
       current claims operator image v0.57.0. If it moved, the chart diff in section 1.2
@@ -96,19 +120,19 @@ premises:
     expect_contains: "v2.9.3@sha256:448f13677f141ed1d67ace07e2459495f4b0ae4a11ae88c77e369174709631ec"
   - id: no-resourcesets
     why: >-
-      The two functional operator deltas in 0.57->0.60 (new CEL rule on ResourceSet
+      The two functional operator deltas in 0.57->0.61 (new CEL rule on ResourceSet
       dependsOn; PR 1011 honoring reconcile-disabled on ResourceSet-applied objects) are inert
       ONLY because zero ResourceSets/InputProviders exist. If one appeared, re-assess both.
     run: kubectl get resourcesets.fluxcd.controlplane.io,resourcesetinputproviders.fluxcd.controlplane.io -A -o name | wc -l | tr -d ' '
     expect_exact: "0"
   - id: target-operator-chart-published
     why: The target operator chart must still resolve from the OCI registry the HelmRepository points at.
-    run: helm show chart oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator --version 0.60.0 | grep '^version:'
-    expect_exact: "version: 0.60.0"
+    run: helm show chart oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator --version 0.61.0 | grep '^version:'
+    expect_exact: "version: 0.61.0"
   - id: target-instance-chart-published
     why: Same, for the instance chart.
-    run: helm show chart oci://ghcr.io/controlplaneio-fluxcd/charts/flux-instance --version 0.60.0 | grep '^version:'
-    expect_exact: "version: 0.60.0"
+    run: helm show chart oci://ghcr.io/controlplaneio-fluxcd/charts/flux-instance --version 0.61.0 | grep '^version:'
+    expect_exact: "version: 0.61.0"
   - id: cluster-reconciles-clean
     why: >-
       Gate 4.6 asserts notready=0 after the change; a pre-existing not-Ready object would make
@@ -118,26 +142,29 @@ premises:
       kubectl get kustomizations.kustomize.toolkit.fluxcd.io,helmreleases.helm.toolkit.fluxcd.io -A
       -o jsonpath='{range .items[*]}{.spec.suspend}{"/"}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
       | grep -v -e '^true/' -e '^false/True$' -e '^/True$' | wc -l | tr -d ' '
-    expect_exact: "0"          # count of unsuspended ks+hr not Ready=True (268 total, all "/True" at authoring)
+    expect_exact: "0"          # count of unsuspended ks+hr not Ready=True (272 total, all Ready at the 2026-10-03 refresh)
   - id: edit-anchor-unique
     why: The section 3 sed must match exactly one line per file (run from the repo root).
     run: >-
       cat kubernetes/apps/flux-system/flux-operator/app/helmrelease.yaml
       kubernetes/apps/flux-system/flux-operator/instance/helmrelease.yaml | grep -c '^      version: 0.57.0$'
     expect_exact: "2"
-status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (absence gates without positive control) -> fixed -> delta re-review ready-for-go. HUMAN-GATED (autonomy_override); run before flux-reconciler-impersonation (10-11).
-review: ready-for-go@2026-09-28
-window: "nightly:2026-10-06"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed (autonomy_override, Flux floor); before flux-reconciler-impersonation 10-11
+status: draft     # RESET from vetted on the 2026-10-03 retarget 0.60.0 -> 0.61.0 (a drift is a re-review).
+                  # Prior history: plan-reviewer 2026-09-28 (F-2c849d1e) needs-fix -> fixed -> ready-for-go
+                  # for the 0.60.0 target. The delta to re-review is section 1.2a only; every gate is unchanged
+                  # in shape. HUMAN-GATED (autonomy_override); run before flux-reconciler-impersonation (10-11).
+review: null      # was ready-for-go@2026-09-28 against target 0.60.0; void for 0.61.0 until re-reviewed
+window: "nightly:2026-10-06"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed (autonomy_override, Flux floor); before flux-reconciler-impersonation 10-11. KEPT on the 2026-10-03 retarget; the slot only runs if the delta re-review passes first (status is draft).
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/flux-upgrade.md
   - docs/sops/flux-image-automation-push-auth.md
   - docs/sops/maintenance-windows.md
   - docs/sops/disaster-recovery.md
-generated: "2026-09-28"
+generated: "2026-10-03"     # refreshed (retarget 0.60.0 -> 0.61.0); first written 2026-09-28
 ---
 
-# flux-fleet 0.57.0 -> 0.60.0 (flux-operator + flux-instance charts)
+# flux-fleet 0.57.0 -> 0.61.0 (flux-operator + flux-instance charts)
 
 ## 1. Summary & why held
 
@@ -147,8 +174,8 @@ Both halves of the Flux control-plane chart family move together, in **one commi
 
 | HelmRelease (ns flux-system) | chart | what it deploys | effect of this bump |
 |---|---|---|---|
-| `flux-operator` | 0.57.0 -> 0.60.0 | the operator Deployment (1 replica), its 4 CRDs, RBAC, Service, NetworkPolicy, ServiceMonitor | **operator pod rolls** to image `v0.60.0`; one CEL rule added to the ResourceSet CRD; everything else labels only |
-| `flux-instance` | 0.57.0 -> 0.60.0 | the `FluxInstance/flux` CR | **labels only** (`helm.sh/chart`, `app.kubernetes.io/version`); spec byte-identical |
+| `flux-operator` | 0.57.0 -> 0.61.0 | the operator Deployment (1 replica), its 4 CRDs, RBAC, Service, NetworkPolicy, ServiceMonitor | **operator pod rolls** to image `v0.61.0`; one CEL rule added to the ResourceSet CRD; everything else labels only |
+| `flux-instance` | 0.57.0 -> 0.61.0 | the `FluxInstance/flux` CR | **labels only** (`helm.sh/chart`, `app.kubernetes.io/version`); spec byte-identical |
 
 The **distribution is NOT touched**: `instance.distribution.version: v2.9.3` in
 `kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml` stays as is,
@@ -159,12 +186,13 @@ distribution (v2.9.4/v2.9.5 now exist) is the high-risk half described in
 
 ### 1.2 Why it was held, and what the evidence says
 
-Held by coverage.py: *"0.x release-line move (0.57 -> 0.60) - at major 0 the minor IS
-the breaking axis; needs an assessed window plan"*. That is a structural rule, not a
+Held by coverage.py: *"0.x release-line move (0.57 -> 0.61) - at major 0 the minor IS
+the breaking axis; needs an assessed window plan"* (first held as 0.57 -> 0.60 on 2026-09-28;
+upstream shipped v0.61.0 on 2026-10-01 and the hold retargeted). That is a structural rule, not a
 detected breaking change. Assessed against primary sources:
 
 **Upstream release notes** (github.com/controlplaneio-fluxcd/flux-operator releases
-v0.58.0, v0.58.1, v0.59.0, v0.60.0) declare **no breaking change**. The content is
+v0.58.0, v0.58.1, v0.59.0, v0.60.0, v0.61.0) declare **no breaking change**. The content is
 dominated by the web UI, the MCP server (stateless spec migration, new tools) and the
 CLI (`distro mirror --distribution-artifact`), plus dependency bumps (golang.org/x,
 grpc, k8s libs v0.36.2 -> v0.36.3). Two items touch operator reconcile behaviour, and
@@ -180,25 +208,56 @@ both are scoped to ResourceSets:
 **This cluster has zero ResourceSets and zero ResourceSetInputProviders** (measured;
 premise `no-resourcesets`), so both are inert here.
 
-**Rendered diff with OUR values** (measured 2026-09-28: `helm pull` both versions of both
+**Rendered diff with OUR values** (measured 2026-09-28, re-measured against 0.61.0 on 2026-10-03: `helm pull` both versions of both
 charts, `helm template` with `app/helm-values.yaml` / `instance/helm-values.yaml`, `diff`):
 
 - flux-instance: 2 changed lines, `helm.sh/chart` and `app.kubernetes.io/version` labels.
   The FluxInstance spec (distribution, components, sync incl. `pullSecret`, the
   GitRepository `ignore` patch) is identical.
-- flux-operator: labels on every object, `image: ...flux-operator:v0.57.0 -> v0.60.0`,
+- flux-operator: labels on every object, `image: ...flux-operator:v0.57.0 -> v0.61.0`,
   and the 3-line CEL rule above. No values-schema change affecting `serviceMonitor.create`.
 
 **Will the six controllers re-render?** The operator builds controller manifests from
-`internal/builder` + the distribution manifests. `git diff v0.57.0 v0.60.0` (upstream repo):
+`internal/builder` + the distribution manifests. `git diff v0.57.0 v0.61.0` (upstream repo):
 `internal/builder/` **unchanged**; `config/data/flux/v2.9.3/` **unchanged** (moot here: the live FluxInstance sets `distribution.artifact: oci://ghcr.io/controlplaneio-fluxcd/flux-operator-manifests:latest`, so the manifests come from that OCI artifact, which the running v0.57.0 operator already pulls and which this bump does not change);
-`internal/controller/fluxinstance_controller.go` changes one `//nolint` comment;
+`internal/controller/fluxinstance_controller.go` changes one `//nolint` comment (as do
+`fluxreport_controller.go` and `entitlement_controller.go`, same comment);
+`internal/inventory/inventory.go` `Diff()` was refactored from a loop to a map lookup (d62ffcd,
+v0.58.1; same result for unique inventory IDs) - it computes FluxInstance garbage-collection
+candidates, so gate 4.4/4.6 would surface a regression there as a pruned controller object;
 `github.com/fluxcd/pkg/ssa` v0.77.0, `fluxcd/pkg/kustomize` v1.39.0 and
 `sigs.k8s.io/kustomize/api` v0.21.1 are the **same versions** in both go.mod files (kustomize
 was only promoted from indirect to direct). The live controller pod templates carry no
 operator-version label or annotation (inspected `deploy/kustomize-controller`). So the
 expected outcome is a server-side-apply no-op for the controllers: **no controller
 restart**. Gate 4.4 turns this claim into a check that fails if it is wrong.
+
+#### 1.2a Retarget delta 0.60.0 -> 0.61.0 (measured 2026-10-03 — the part to re-review)
+
+**Upstream v0.61.0** (released 2026-10-01; github.com/controlplaneio-fluxcd/flux-operator/releases/tag/v0.61.0),
+full list: *"mcp: make docs tests independent of index content"* (#1039), *"web: fix reusing http
+client when refreshing oidc provider"* (#1044), *"mcp: Add tool annotations"* (#1045), and
+dependabot bumps of `/web` JS deps, CLI tools and GitHub Actions (#1052-#1057). **No breaking
+change, no operator-reconcile change.**
+
+`git diff --stat v0.60.0 v0.61.0` = 45 files. Outside `web/`, `cmd/mcp/`, `.github/`, `docs/`:
+- `internal/web/auth/oidc.go` (+2 lines; web UI only — not exposed here, no HTTPRoute to :9080);
+- `config/data/flux/v2.9.6/*` and `config/data/flux-images/v2.9.6/*` **added** (new distribution
+  data). `config/data/flux/v2.9.3/` untouched; moot anyway because the live FluxInstance pulls
+  manifests from `oci://ghcr.io/controlplaneio-fluxcd/flux-operator-manifests:latest` and pins
+  `distribution.version: v2.9.3`;
+- `config/manager/kustomization.yaml` image tag `v0.60.0 -> v0.61.0`;
+- **`go.mod`, `internal/builder/`, `internal/controller/`, `internal/inventory/` unchanged** between
+  v0.60.0 and v0.61.0. So everything 1.2 says about 0.57 -> 0.60 holds verbatim for 0.57 -> 0.61.
+
+**Rendered diff with OUR values** (`helm pull` + `helm template` of 0.57.0, 0.60.0 and 0.61.0,
+both charts, our `helm-values.yaml` files): 0.60.0 -> 0.61.0 is **the operator image tag and the
+version labels, nothing else** (Chart.yaml and README.md are the only differing chart files;
+`values.yaml` identical). 0.57.0 -> 0.61.0 non-label delta = the image tag + the same 3-line
+ResourceSet CEL rule described above. flux-instance 0.57.0 -> 0.61.0 = 2 label lines.
+
+Net: the retarget changes the number and nothing else in this plan's risk, steps, gates,
+duration or rollback.
 
 **Verdict:** the hold is effectively a **false positive for breakage**. What remains is
 blast radius: this is the reconcile engine, and the operator pod is the only exporter of
@@ -242,7 +301,7 @@ mise exec -- kubectl get crd fluxinstances.fluxcd.controlplane.io fluxreports.fl
 mise exec -- helm -n flux-system history flux-operator --max 3 > helm-op-before.txt
 mise exec -- helm -n flux-system history flux-instance --max 3 > helm-inst-before.txt
 tail -1 helm-op-before.txt; tail -1 helm-inst-before.txt
-# EXPECT (measured 2026-09-28): flux-operator rev 3 deployed flux-operator-0.57.0;
+# EXPECT (measured 2026-09-28, re-measured 2026-10-03): flux-operator rev 3 deployed flux-operator-0.57.0;
 #                              flux-instance rev 6 deployed flux-instance-0.57.0.
 # If the numbers differ, write the real ones down: section 5 step 2 uses them.
 cd /Users/mu/code/cberg-home-nextgen
@@ -251,12 +310,12 @@ cd /Users/mu/code/cberg-home-nextgen
 mise exec -- kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19090:9090 >/dev/null 2>&1 & PF=$!; sleep 3
 pq() { curl -s --get http://localhost:19090/api/v1/query --data-urlencode "query=$1" \
   | python3 -c 'import sys,json; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "EMPTY")'; }
-pq 'count(flux_resource_info)' | tee /tmp/flux-fleet/series-before.txt   # measured 478 on 2026-09-28
+pq 'count(flux_resource_info)' | tee /tmp/flux-fleet/series-before.txt   # measured 478 on 2026-09-28, 490 on 2026-10-03
 pq 'count(flux_resource_info{ready="False",suspended="False"})'           # PASS: EMPTY
 pq 'count(flux_operator_info{version="v0.57.0"})'                         # PASS: 1
-pq 'count(flux_operator_info{version="v0.60.0"})'                         # PASS: EMPTY  <- negative control for gate 4.2
-pq 'max_over_time(count(flux_resource_info{ready="False",suspended="False"})[14d:10m])'   # POSITIVE CONTROL for 4.6: must be non-EMPTY (47 on 2026-09-28); EMPTY -> the ready="False" gate cannot fail, STOP
-pq 'count(count_over_time(ALERTS{alertname="FluxResourceNotReady"}[14d]))'   # POSITIVE CONTROL for the 4.6 ALERTS gate: must be non-EMPTY (1205 series on 2026-09-28); if EMPTY retry with [30d], still EMPTY -> treat the 4.6 ALERTS line as informational only
+pq 'count(flux_operator_info{version="v0.61.0"})'                         # PASS: EMPTY  <- negative control for gate 4.2
+pq 'max_over_time(count(flux_resource_info{ready="False",suspended="False"})[14d:10m])'   # POSITIVE CONTROL for 4.6: must be non-EMPTY (47 on 2026-09-28 and 2026-10-03); EMPTY -> the ready="False" gate cannot fail, STOP
+pq 'count(count_over_time(ALERTS{alertname="FluxResourceNotReady"}[14d]))'   # POSITIVE CONTROL for the 4.6 ALERTS gate: must be non-EMPTY (1205 series on 2026-09-28, 1311 on 2026-10-03); if EMPTY retry with [30d], still EMPTY -> treat the 4.6 ALERTS line as informational only
 pq 'count(ALERTS{alertname=~"Flux.*",alertstate="firing"})'               # PASS: EMPTY
 kill $PF 2>/dev/null
 
@@ -276,29 +335,29 @@ detects a remediation rollback if one happens.
 
 ### 3.1 The coordinated bump (one commit, both HRs)
 
-Dry-tested on scratch copies on macOS 2026-09-28 (BSD sed). Resulting diff, identical in
+Dry-tested on scratch copies on macOS 2026-09-28, re-run with the 0.61.0 target 2026-10-03 (BSD sed). Resulting diff, identical in
 both files:
 
 ```
 -      version: 0.57.0
-+      version: 0.60.0
++      version: 0.61.0
 ```
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-sed -i '' 's/^      version: 0\.57\.0$/      version: 0.60.0/' \
+sed -i '' 's/^      version: 0\.57\.0$/      version: 0.61.0/' \
   kubernetes/apps/flux-system/flux-operator/app/helmrelease.yaml \
   kubernetes/apps/flux-system/flux-operator/instance/helmrelease.yaml
 git diff --stat -- kubernetes/apps/flux-system/flux-operator/     # EXPECT: 2 files, 2 insertions, 2 deletions
 mise exec -- yq '.spec.chart.spec.version' \
   kubernetes/apps/flux-system/flux-operator/app/helmrelease.yaml \
-  kubernetes/apps/flux-system/flux-operator/instance/helmrelease.yaml   # EXPECT: 0.60.0 / --- / 0.60.0
+  kubernetes/apps/flux-system/flux-operator/instance/helmrelease.yaml   # EXPECT: 0.61.0 / --- / 0.61.0
 mise exec -- kubeconform -summary -ignore-missing-schemas kubernetes/apps/flux-system/flux-operator/
 
 cat > /tmp/flux-fleet/msg-core.txt <<'EOF'
-feat(flux): flux-operator + flux-instance charts 0.57.0 -> 0.60.0 (plan flux-fleet-0.60.0)
+feat(flux): flux-operator + flux-instance charts 0.57.0 -> 0.61.0 (plan flux-fleet-0.60.0)
 
-Operator image v0.57.0 -> v0.60.0. Distribution stays v2.9.3; rendered
+Operator image v0.57.0 -> v0.61.0. Distribution stays v2.9.3; rendered
 FluxInstance spec and controller manifests unchanged (builder/ssa/kustomize
 identical between tags). Findings F-60f2b033 F-703d6382.
 
@@ -324,9 +383,9 @@ the flux-instance render is label-only, which the 0.57.0 operator handles identi
 SHA=$(cat /tmp/flux-fleet/core-sha.txt)
 for i in $(seq 1 20); do
   R=$(mise exec -- kubectl -n flux-system get hr flux-operator flux-instance -o jsonpath='{.items[*].status.history[0].chartVersion}')
-  echo "$(date +%T) $R"; [ "$R" = "0.60.0 0.60.0" ] && break; sleep 30
+  echo "$(date +%T) $R"; [ "$R" = "0.61.0 0.61.0" ] && break; sleep 30
 done
-[ "$R" = "0.60.0 0.60.0" ] && echo PROPAGATED || echo "PROPAGATION_NOT_COMPLETE after 10 min -> run the reconcile block below"
+[ "$R" = "0.61.0 0.61.0" ] && echo PROPAGATED || echo "PROPAGATION_NOT_COMPLETE after 10 min -> run the reconcile block below"
 ```
 
 If after 10 minutes the source revision has not reached `$SHA`, the webhook did not fire.
@@ -349,23 +408,23 @@ is kept separate so the section 5 revert of the core commit stays a single clean
 Dry-tested diffs (scratch copies, BSD sed):
 
 ```
-helmfile.yaml   41c41  <     version: 0.14.0   >     version: 0.60.0      (flux-operator)
-                48c48  <     version: 0.14.0   >     version: 0.60.0      (flux-instance)
-infrastructure.md 111,112: `| 0.57.0 | flux-system |` -> `| 0.60.0 | flux-system |`
-                  134: "(flux-operator/flux-instance chart 0.57.0)" -> "(... chart 0.60.0)"
+helmfile.yaml   41c41  <     version: 0.14.0   >     version: 0.61.0      (flux-operator)
+                48c48  <     version: 0.14.0   >     version: 0.61.0      (flux-instance)
+infrastructure.md 111,112: `| 0.57.0 | flux-system |` -> `| 0.61.0 | flux-system |`
+                  134: "(flux-operator/flux-instance chart 0.57.0)" -> "(... chart 0.61.0)"
 ```
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-sed -i '' -e '/charts\/flux-operator$/{n;s/^    version: 0\.14\.0$/    version: 0.60.0/;}' \
-          -e '/charts\/flux-instance$/{n;s/^    version: 0\.14\.0$/    version: 0.60.0/;}' \
+sed -i '' -e '/charts\/flux-operator$/{n;s/^    version: 0\.14\.0$/    version: 0.61.0/;}' \
+          -e '/charts\/flux-instance$/{n;s/^    version: 0\.14\.0$/    version: 0.61.0/;}' \
   kubernetes/bootstrap/apps/helmfile.yaml
-sed -i '' -e 's#^\(| [45] | Flux [A-Za-z]* | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-[a-z]*` | \)0\.57\.0 |#\10.60.0 |#' \
-          -e 's#(flux-operator/flux-instance chart 0\.57\.0)#(flux-operator/flux-instance chart 0.60.0)#' \
+sed -i '' -e 's#^\(| [45] | Flux [A-Za-z]* | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-[a-z]*` | \)0\.57\.0 |#\10.61.0 |#' \
+          -e 's#(flux-operator/flux-instance chart 0\.57\.0)#(flux-operator/flux-instance chart 0.61.0)#' \
   docs/infrastructure.md
 git diff --stat -- kubernetes/bootstrap/apps/helmfile.yaml docs/infrastructure.md   # EXPECT: 2 files, 5 insertions, 5 deletions
 cat > /tmp/flux-fleet/msg-docs.txt <<'EOF'
-docs(flux): bootstrap helmfile + infrastructure.md to flux charts 0.60.0
+docs(flux): bootstrap helmfile + infrastructure.md to flux charts 0.61.0
 
 Bootstrap helmfile pinned flux-operator/flux-instance 0.14.0 since before the
 2026-08-11 upgrade (DR path drift). No cluster effect. Plan flux-fleet-0.60.0.
@@ -386,7 +445,7 @@ Run in order; each gate names what its failure prints. Re-establish the Promethe
 port-forward (`PF=$!` form from section 2 d) and re-define `pq` first; the operator pod
 restart does not affect it (it targets Prometheus, not the operator).
 
-### 4.1 Both releases deployed at 0.60.0, no remediation rollback
+### 4.1 Both releases deployed at 0.61.0, no remediation rollback
 
 ```bash
 mise exec -- kubectl -n flux-system get hr flux-operator flux-instance \
@@ -394,9 +453,9 @@ mise exec -- kubectl -n flux-system get hr flux-operator flux-instance \
 mise exec -- helm -n flux-system history flux-operator --max 2
 mise exec -- helm -n flux-system history flux-instance --max 2
 ```
-PASS: `flux-instance 0.60.0 deployed True` and `flux-operator 0.60.0 deployed True`; helm
-latest revisions are 4 (`flux-operator-0.60.0`, "Upgrade complete") and 7
-(`flux-instance-0.60.0`). FAIL looks like: chartVersion `0.57.0` with a newer revision whose
+PASS: `flux-instance 0.61.0 deployed True` and `flux-operator 0.61.0 deployed True`; helm
+latest revisions are 4 (`flux-operator-0.61.0`, "Upgrade complete") and 7
+(`flux-instance-0.61.0`). FAIL looks like: chartVersion `0.57.0` with a newer revision whose
 description is `Rollback to 3` (remediation fired), or Ready `False` with
 `upgrade retries exhausted`.
 
@@ -407,16 +466,16 @@ mise exec -- kubectl -n flux-system get deploy flux-operator -o jsonpath='{.spec
 mise exec -- kubectl -n flux-system get pods -l app.kubernetes.io/name=flux-operator \
   -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{" restarts="}{.status.containerStatuses[0].restartCount}{"\n"}{end}'
 sleep 60   # one scrape interval after the new pod is Ready
-pq 'count(flux_operator_info{version="v0.60.0"})'
+pq 'count(flux_operator_info{version="v0.61.0"})'
 pq 'count(flux_operator_info{version="v0.57.0"})'
 ```
-PASS: image `...flux-operator:v0.60.0 avail=1`; one pod `Running restarts=0`;
-`v0.60.0` -> `1`, `v0.57.0` -> `EMPTY`.
-FAIL looks like: `v0.60.0` -> `EMPTY`. Proven able to fail: at authoring (2026-09-28) the
-same query returned `EMPTY` and `v0.57.0` returned `1`. `EMPTY` for BOTH means the scrape
+PASS: image `...flux-operator:v0.61.0 avail=1`; one pod `Running restarts=0`;
+`v0.61.0` -> `1`, `v0.57.0` -> `EMPTY`.
+FAIL looks like: `v0.61.0` -> `EMPTY`. Proven able to fail: at authoring (2026-09-28) and at the
+2026-10-03 refresh the same query returned `EMPTY` and `v0.57.0` returned `1`. `EMPTY` for BOTH means the scrape
 itself is broken (ServiceMonitor/port/NetworkPolicy) -> go to 4.3 and treat as FAIL.
 
-CONTROL: metric flux_operator_info — the gate reads `count` with `version="v0.60.0"`; must be exactly 1 after the roll, and the v0.57.0 series must be gone.
+CONTROL: metric flux_operator_info — the gate reads `count` with `version="v0.61.0"`; must be exactly 1 after the roll, and the v0.57.0 series must be gone.
 
 ### 4.3 The operator still reports the whole fleet (contents, not shape)
 
@@ -425,7 +484,7 @@ pq 'count(flux_resource_info)'; cat /tmp/flux-fleet/series-before.txt
 pq 'count by (kind) (flux_resource_info)'
 ```
 CONTENTS ASSERTION: the operator's report of every Flux object is complete — measured by
-`count(flux_resource_info)`, compared to the section 2 d baseline (478 at authoring): PASS if
+`count(flux_resource_info)`, compared to the section 2 d baseline (478 at authoring, 490 at the 2026-10-03 refresh): PASS if
 within +/-5 of the baseline AND all 10 kinds are present (HelmRelease, HelmChart,
 HelmRepository, Kustomization, GitRepository, OCIRepository, Receiver, ImagePolicy,
 ImageRepository, ImageUpdateAutomation). FAIL looks like `EMPTY` (scrape or reporter broken
@@ -446,7 +505,7 @@ mise exec -- kubectl -n flux-system get pods -l 'app in (source-controller,kusto
   | diff /tmp/flux-fleet/ctrl-pods-before.txt - && echo CONTROLLER_PODS_UNCHANGED
 ```
 PASS: both `..._UNCHANGED` lines print. FAIL looks like a `diff` hunk showing `gen=3` or a new
-pod name/startTime: the 0.60.0 operator re-rendered the controllers, contradicting section 1.2.
+pod name/startTime: the 0.61.0 operator re-rendered the controllers, contradicting section 1.2.
 That is not automatically an outage (check 4.6), but the plan's premise is falsified: stop,
 record the diff, and do not proceed to 3.3; decide revert-vs-keep with the operator. Proven
 able to fail: `diff` against the snapshot is exact-string; a digest or generation change prints.
@@ -480,7 +539,7 @@ pq 'count(ALERTS{alertname=~"FluxResourceNotReady|FluxSourceStalled|FluxMetricsA
 mise exec -- kubectl -n flux-system get ks flux-system cluster-apps flux-operator flux-instance \
   -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.lastAppliedRevision}{"\n"}{end}'
 ```
-PASS: `notready=0` with `total` within a few of the pre-check (268 at authoring);
+PASS: `notready=0` with `total` within a few of the pre-check (268 at authoring, 272 at the 2026-10-03 refresh);
 both PromQL lines `EMPTY` — valid only because 4.3 proved the series exist AND the section 2 d positive controls proved both queries can match (reviewer measurement 2026-09-28: ready="False" max 47 over 14d; FluxResourceNotReady pending 1205 samples over 14d); all four
 Kustomizations show `refs/heads/main@sha1:<core-sha or later>`. FAIL looks like
 `notready=N [ns/name...]`, a non-empty ALERTS count, or a Kustomization still on the
@@ -524,10 +583,10 @@ commit 3.3 is not applied to the cluster and never needs reverting for recovery.
    (`...patch hr $hr --type merge -p '{"spec":{"suspend":false}}'`). If even this fails,
    `docs/sops/disaster-recovery.md`.
 3. **Confirm the cluster is back:** re-run 4.1 expecting `0.57.0 deployed True` for both;
-   4.2 expecting `flux_operator_info{version="v0.57.0"}` -> `1` and `v0.60.0` -> `EMPTY`;
+   4.2 expecting `flux_operator_info{version="v0.57.0"}` -> `1` and `v0.61.0` -> `EMPTY`;
    4.3, 4.5 and 4.6 unchanged in their PASS criteria. The CRD snapshot in
    `/tmp/flux-fleet/operator-crds-before.yaml` exists only for the case where a schema
-   mismatch blocks the 0.57.0 operator (not expected: 0.60.0 only ADDS a rule); apply it
+   mismatch blocks the 0.57.0 operator (not expected: 0.61.0 only ADDS a rule); apply it
    with `mise exec -- kubectl apply -f` only in that case.
 
 ## 6. Interference notes
@@ -545,8 +604,9 @@ commit 3.3 is not applied to the cluster and never needs reverting for recovery.
   `operator-v0.57.0` (`expect_contains: "flux-operator:v0.57.0"`) will FAIL once this plan
   lands, and correctly so: it asks for a re-read of `internal/builder/profiles.go` and
   `fluxinstance_controller.go` at the new tag. That re-read is done here (section 1.2): builder
-  unchanged, controller change is one `//nolint` comment. Its owner must amend that premise
-  to `v0.60.0`, citing this plan, before 10-11 — or this plan must run after it. Running
+  unchanged, controller change is one `//nolint` comment; v0.60.0 -> v0.61.0 touches neither
+  (section 1.2a). Its owner must amend that premise
+  to `v0.61.0`, citing this plan, before 10-11 — or this plan must run after it. Running
   THIS plan first is preferred (smaller change, clean baseline for the identity swap).
 - **flux-oci-chart-sources** may later move these two HRs' chart source from
   `HelmRepository/controlplaneio` (already `type: oci`) to an `OCIRepository`; if that stage
@@ -555,6 +615,12 @@ commit 3.3 is not applied to the cluster and never needs reverting for recovery.
 - **helm-drift-detection** adds `spec.driftDetection` to every HelmRelease including these two;
   a same-window run makes any helm revision bump on flux-system unattributable.
 - **Reciprocity:** `flux-reconciler-impersonation` and `helm-drift-detection` already list `flux-fleet-0.60.0`; `flux-oci-chart-sources` gains the entry in the commit that tracks this plan. If impersonation runs first, premise `distribution-v2.9.3-digest` and gate 4.5's digest will fail by design (its FluxInstance patch changes the digest): re-baseline them, do not wave it through.
+- **Retarget 2026-10-03 (0.60.0 -> 0.61.0), plan_id kept.** Per `runbooks/maintenance/plans/README.md`
+  "refresh in place": the sweep dispatched this as coverage group `flux-fleet-0.61.0`, but ~17
+  plans' `conflicts_with`, the `nightly:2026-10-06` stamp and the F-60f2b033/F-703d6382 join all
+  resolve by `flux-fleet-0.60.0`. A new file plus a superseded old one would leave every one
+  of those guards pointing at a terminal plan. Coverage still recognises this file for the new
+  group (target prose names `flux-operator chart 0.61.0`).
 - **Out of scope, deliberately:** the distribution bump v2.9.3 -> v2.9.x (new controller
   images, the SOP's high-risk half) and the `.mise.toml` `flux` CLI pin. Neither moves here.
 - **Step 0 interplay:** coverage.py lists these under `needs_plan_groups`, so the nightly
