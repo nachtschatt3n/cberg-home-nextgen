@@ -86,6 +86,10 @@ conflicts_with:                       # exclusive: true already keeps everything
                                       # plane node by node. Ordering is depends_on above; this entry
                                       # keeps them out of one slot if either slips.
   - multus-macvlan-foundation         # reference/unwindowed; talosctl apply-config on the nodes
+  - talos-sysfs-power-caps            # reciprocity (added 2026-10-05 by that plan's planner): it writes a
+                                      # SysfsConfig (RAPL PL1/PL2, EPP, iGPU gt0 max) via apply-config; never
+                                      # the same night. If it executed BEFORE this roll, §4.1 re-checks its
+                                      # 21 keys after each reboot (the iGPU card index is boot-dependent).
   # No OPEN kube-prometheus-stack plan exists (91.4.1 executed 2026-09-26; finding F-ec382720
   # 91.5.2 -> 91.8.1 has no plan yet). §4 reads Prometheus — ANY future same-night
   # kube-prometheus-stack plan must be added here, and must name this plan back.
@@ -1386,6 +1390,17 @@ mise exec -- talosctl read /proc/meminfo -n <node-ip> | grep HugePages_Total
 **PASS:** `CMDLINE-SAME` against the §2.8 file (`<NN>` = 11/12/13) and `HugePages_Total: 1024`.
 Args silently vanishing across an upgrade is talos-upgrade.md lessons #2/#3/#13; a changed
 set = re-run `task talos:upgrade-node` for that IP before moving on.
+
+**Only if `talos-sysfs-power-caps` has executed** (its SysfsConfig is live: `mise exec -- talosctl -n <node-ip> get
+kernelparamstatuses` lists `sys.class/powercap/...` rows) - after each node returns, take `sysfs-readback.py` from
+that plan's Appendix A (its §2 awk loop extracts it; from git history if the plan file was retired) into `$SCR/`
+and run `mise exec -- python3 "$SCR/sysfs-readback.py" <node-ip> caps --status` -> **PASS:** `GATE_PASS ... keys=21
+mismatches=0`. This is the first boot after the caps: Talos must re-apply all 21 keys. A `MISMATCH` on the
+`class/drm/cardN/gt/gt0/rps_max_freq_mhz` key with `ERR(...no such file...)` means the iGPU card index moved across
+the reboot (nuc14-03 had i915 on card1 because simpledrm took card0): re-measure with
+`mise exec -- talosctl -n <node-ip> list /sys/class/drm`, fix that node's `patches/node/k8s-nuc14-NN-sysfs-igpu.yaml`
+in a follow-up apply (no reboot) - not a reason to roll back the node. Any other mismatch (RAPL/EPP not re-applied)
+-> STOP before the next node and report.
 
 **CANARY GO/NO-GO (after the first node).** §3.10 (incl. `nodegate.py` and `probe.py`
 PASS — plus the in-window bumped-term control of §2.0 on this probe log printing FAIL),
