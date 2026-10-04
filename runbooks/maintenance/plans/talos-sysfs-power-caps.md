@@ -73,7 +73,7 @@ finding_refs: []                      # Queried 2026-10-04 with the DB reachable
                                       # throttl, temperature, RAPL, power, package, sysfs, nuc14, hot, ci-runner
                                       # (--all) -> no finding owns node thermals/power. Nothing to claim.
 review: ready-for-go@2026-10-05     # plan-reviewer 3rd pass at a42dbacf+98ca43c0 (condition: premise multidoc = 3; holds)
-status: vetted
+status: awaiting-soak                 # caps LIVE on all 3 nodes 2026-10-04 23:09-23:17Z (now:2026-10-05); 24 h soak + 3.10 owed, due >= 2026-10-05T23:17Z
 window: "now:2026-10-05"   # ON-DEMAND NOW run 2026-10-05 (run-now.py stamp; was None)
                                       # slot after talconfig-multidoc-migration executed. Reviewer 2026-10-04:
                                       # sun-attended:2026-11-01 (45/180 booked); 10-11 exclusive, 10-18/10-25 too full.
@@ -665,6 +665,46 @@ dir holds machine secrets in plaintext and must not linger). The window report n
      pre-change value live (`resetKernelParam`).
   4. No sweep finding tracks node thermals/power (queried 2026-10-04); a PLAN-lane finding for "NUC14 package
      temperature / throttle" would let the sweep track this plan's soak. Not filed by the planner.
+
+## Execution record - on-demand run now:2026-10-05 (attended; operator GO via home-operation 2026-10-04T22:25:15Z)
+
+Config c2c155b8, alert retune 008988b9 (`> 31` loaded). Applied `--mode=no-reboot` by the coordinator (operator "A1" split),
+etcd leader last: 02 23:09:52Z, 03 23:13:21Z, 01 23:17:17Z. Per node: 4.1 `GATE_PASS keys=21 mismatches=0` with
+KernelParamStatus (re-read after Phase C: still 3x PASS), bootID unchanged, etcd 3/3 leader 187ea782 term 83 throughout
+(0 leader changes in 60 m), i915 dmesg error lines unchanged, intel-gpu-plugin 1/1 0 restarts, i915 allocatable 5,
+frigate OpenVINO 5.94 -> 6.03 ms; gt0 act_freq max under the AFTER CI run 800 MHz on every node (1170 samples, <= 1500).
+Execution-time deviations: render + dry-run (3.1-3.3) ran BEFORE Phase A (reviewer item 1, mutation-free); order
+02 -> 03 -> 01 because 01 was the etcd leader; `persistent` machineconfig id is the v1.14 on-disk copy of v1alpha1
+(same hash), not a staged config.
+
+**Gate 4.3 informational on all 3 nodes (coordinator/operator decision in-window):** an 18-thread capbench hot-aborted
+at 96 C on nuc14-02 within ~4 s (calib) and on nuc14-03 after ~25-30 s (`early_w=48.1`, i.e. inside the PL2/tau
+window, before PL1 binds); no retry, none on 01. These chassis cannot carry ~45-55 W even for 30 s. Follow-up
+(operator decision): PL2 ~40-45 W and/or a shorter PL1 tau, BIOS/fan/paste check (nuc14-02 first) - a plan amendment.
+
+BEFORE / AFTER (CI window, same ref d3ae92f, sims 4 + e2e 3; nodes 01 / 02 / 03):
+
+| metric | BEFORE (64 W) | AFTER (35/55 W, EPP balance_power) | delta % |
+|---|---|---|---|
+| pkg temp avg (C) | 63.1 / 71.5 / 67.0 | 51.8 / 55.3 / 53.8 | -18 / -23 / -20 |
+| pkg temp p95 (C) | 74.4 / 88.0 / 77.4 | 61.0 / 67.9 / 57.0 | -18 / -23 / -26 |
+| pkg temp max (C) | 77 / 89 / 87 | 62 / 70 / 71 | -19 / -21 / -18 |
+| minutes >= 100 C | 0 / 0 / 0 | 0 / 0 / 0 | - |
+| package throttles (CI window) | 1 / 380 / 0 | 1 / 0 / 0 | 02: -100 |
+| RAPL avg / max 1-min (W) | 23.9/32.6, 25.2/40.2, 19.4/32.5 | 15.6/18.9, 16.0/20.1, 12.7/18.6 | avg -34..-37, max -42..-50 |
+| NVMe max (C) | 38.9 / 41.9 / 38.9 | 39.9 / 42.9 / 40.9 | +1 C (noise) |
+| CI sims median shard run (s) | 350 (per node 01 538, 02 489) | 478 (01 692, 02 652) | +37 (per node +29..+33) |
+| CI e2e median shard run (s) | 197 (01 189, 02 224, 03 197) | 264 (01 264, 02 297, 03 258) | +34 (per node +31..+40) |
+| production 7 d (before-7d): p95 / max / min>=100 / throttles | 68/95/0/741, 89/102/56/64970, 75/103/6/56 | soak-24h owed | |
+| stability | - | 0 NotReady, 0 leader changes, 0 infra restarts | |
+
+Reading: AFTER CI never reached the 35 W PL1 (max 1-min ~20 W) and gt0 never exceeded 800 MHz, so the ~+35 % CI
+run-time is EPP balance_power, not the RAPL or iGPU caps. Over the 10-15 % expectation: flagged. e2e shard 2
+(nuc14-02) failed AFTER on a timing-sensitive animation assertion (ambient-life greeting bubble, 8 s `toBeVisible`,
+failed on retry; passed BEFORE); sims shard 4 failed identically BEFORE and AFTER (code, not caps). Option if CI speed
+matters more than the last few degrees: EPP back to balance_performance with the RAPL caps kept (amendment, re-review).
+Owed: 24 h soak (`capstats.py soak-24h 1440 "$W"`, >= 2026-10-05T23:17Z) -> 3.10 decision; delete
+`/private/tmp/sysfscaps-talos-sysfs-power-caps` after that, and no later than 2026-10-11.
 
 ## Appendix A - scripts (extracted by section 2's awk loop; all dry-tested 2026-10-04)
 
