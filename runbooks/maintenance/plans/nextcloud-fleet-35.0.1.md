@@ -101,6 +101,9 @@ finding_refs: [F-7344f3ec, F-7bcfda63]
                                       # F-7bcfda63 version/critical nextcloud-notify-push 34.0.4 -> 35.0.1
                                       # both measured open (last_seen 2026-09-27) before claiming.
 status: awaiting-go  # 2026-09-28 go_no_go ingested (data-loss decision) — was: vetted;    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (mail exit masked by tail, absence gates, 7 conflicts) -> fixed -> needs-fix (34.0.4 baseline not runnable) -> fixed -> ready-for-go. HUMAN-GATED; needs an operator GO (D1) and a sun-attended slot.
+# STATUS NOTE 2026-10-04: premise newest-published-chart-still-carries-a-34-appversion FAILS (helm cache refreshed, re-run): newest chart
+# 9.4.0 carries appVersion 35.0.1. Per this plan's own premise text the image-only shape is now STALE -- refresh in place to a
+# chart 9.4.0 + image 35.0.1 lockstep (README "When the held target MOVES"; plan nextcloud-9.4.0 covers the chart half) before the GO is used.
 review: ready-for-go@2026-09-28
 window: "sun-attended:2026-10-18"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO pending: major, one-way occ migrations + feature changes; attended long slot
                                       # the executor must read the entrypoint log live in §3.4
