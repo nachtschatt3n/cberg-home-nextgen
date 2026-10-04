@@ -19,7 +19,8 @@ Contract (docs/sops/ci-runner.md, "Thermal gate"):
     CI pod) or < SECOND_OPEN_BELOW_C (second pod: the node already has one);
   - its peak over the last 3 min is < HOT_C (first pod) or < SECOND_HOT_C
     (second pod);
-  - it holds < MAX_PER_NODE CI pods (bound or pinned, not finished);
+  - it holds < MAX_PER_NODE CI pods (bound or pinned, not finished), and a
+    second pod only on SECOND_POD_NODES (nuc14-01; data in the constant);
   - no CI pod was admitted or started there in the last SETTLE_SECONDS, so the
     previous pod's heat shows before another pod is added.
 * BRAKE: if ANY node's package temperature reached >= BRAKE_C in the last
@@ -53,6 +54,12 @@ HOT_C = float(os.environ.get("GATE_HOT_C", "93"))
 # nuc14-03 with 2 shards; 102 C rebooted a node on 2026-08-08):
 SECOND_OPEN_BELOW_C = float(os.environ.get("GATE_SECOND_OPEN_BELOW_C", "78"))
 SECOND_HOT_C = float(os.environ.get("GATE_SECOND_HOT_C", "90"))
+# Only these nodes may take a SECOND CI pod at all. Data 2026-10-04: nuc14-03
+# hit 103 C twice within ~2 min of its 2nd shard starting (15:32, 16:28) even
+# though it passed the 78/90 C pre-check (the new shard's npm ci/startup burst
+# is what spikes it); nuc14-01 with 2 shards peaked at 92-95 C; nuc14-02 reaches
+# 96-100 C with ONE shard or none. Comma-separated; empty = 1 CI pod per node.
+SECOND_POD_NODES = {n for n in os.environ.get("GATE_SECOND_POD_NODES", "k8s-nuc14-01").split(",") if n}
 BRAKE_C = float(os.environ.get("GATE_BRAKE_C", "100"))
 BRAKE_MINUTES = int(os.environ.get("GATE_BRAKE_MINUTES", "10"))
 MAX_PER_NODE = int(os.environ.get("GATE_MAX_PER_NODE", "2"))
@@ -140,6 +147,8 @@ def closed_reason(node, temps, count, last, now):
         return f"warm (2m avg {avg2:.0f}C >= {open_below:.0f}{tier})"
     if max3 >= hot:
         return f"hot (3m peak {max3:.0f}C >= {hot:.0f}{tier})"
+    if n >= 1 and node not in SECOND_POD_NODES:
+        return f"full ({n}/1 CI pods; no 2nd pod on this node)"
     if n >= MAX_PER_NODE:
         return f"full ({count[node]}/{MAX_PER_NODE} CI pods)"
     if now - last.get(node, 0.0) < SETTLE_SECONDS:
