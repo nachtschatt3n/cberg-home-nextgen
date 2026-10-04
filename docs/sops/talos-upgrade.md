@@ -339,7 +339,7 @@ grep -A15 "extraKernelArgs" kubernetes/bootstrap/talos/clusterconfig/kubernetes-
 
 **SOPS note**: `talhelper genconfig` decrypts `talsecret.sops.yaml`/`talenv.sops.yaml`, so `SOPS_AGE_KEY_FILE` must be exported (handled by `.mise.toml`); its OUTPUT is plaintext and gitignored.
 
-> **v1.14+: this step currently FAILS and is SKIPPED (since 2026-09-27).** With `talosVersion: v1.14.1` every talhelper release emits the 1.14 multi-document Kubernetes/network docs on top of our v1alpha1 fields and the machinery rejects the mix (3.1.11: 3 errors, 3.1.17: 6 `already set in v1alpha1` errors). A node-image-only upgrade does not need it — see §14.2. Do not hand-patch around the error and do not `apply-config` anything regenerated until the multi-doc migration plan (F-59b12b2b) lands.
+> **History (2026-09-27 → 2026-10-04): this step FAILED on v1.14** — talhelper emitted the 1.14 multi-document docs on top of our v1alpha1 fields and the machinery rejected the mix. Fixed by the multi-doc migration (plan `talconfig-multidoc-migration`, a7965251, applied to all three nodes 2026-10-04; F-59b12b2b closed). `task talos:generate-config` succeeds again and the regenerated configs semdiff to 0 against the live nodes.
 
 ### Step 8 — Commit and push
 
