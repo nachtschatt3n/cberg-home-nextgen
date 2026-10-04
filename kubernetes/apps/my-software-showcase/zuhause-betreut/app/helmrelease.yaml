@@ -73,16 +73,16 @@ spec:
               limits:
                 memory: 1Gi
             probes:
+              # F-9ab5f80f (2026-10-04): liveness is tcpSocket, NOT httpGet /health/liveness. The app server
+              # is effectively single-threaded: during a DB bounce DB-blocked readiness requests starve
+              # the liveness request, so an httpGet liveness restarted 5 tenants on the 2026-10-03
+              # mariadb roll. Liveness = process is listening; readiness stays DB-aware (httpGet).
               liveness:
                 enabled: true
                 custom: true
                 spec:
-                  httpGet:
-                    path: /health/liveness
+                  tcpSocket:
                     port: 3000
-                    httpHeaders:
-                      - name: X-Forwarded-Proto
-                        value: https
                   initialDelaySeconds: 30
                   periodSeconds: 30
                   timeoutSeconds: 5
