@@ -212,15 +212,31 @@ spec:
               about a minute). Likely unschedulable, ImagePullBackOff on the
               Playwright image, a missing ConfigMap/Secret, or a hung clone
               init container. Test results are not affected - the runner is.
-              Since 2026-10-04 shard pods are created behind the thermal gate
-              and wait Pending (SchedulingGated) while every node is hot or
-              full; check `scripts/ninth-banner-admit.py --status` first (all
-              nodes hot for 30 min, or no trigger running to admit them).
+              Thermal-gated pods (SchedulingGated) are NOT counted - the
+              30 min start when the gate releases the pod, so this is a pod
+              the scheduler/kubelet could not start after admission.
             summary: CI runner pod stuck Pending
-          # 30m (was 15m): a gated pod legitimately queues while nodes cool
-          # (thermal gate, docs/sops/ci-runner.md); 30 min of that is worth a look.
+          # Since 2026-10-04 shard pods are created behind the thermal gate
+          # (schedulingGates: ci.cberg.home/thermal, docs/sops/ci-runner.md) and
+          # queue Pending for as long as nodes are hot or full - by design, and
+          # on 2026-10-04 that was 16 pods at once, all of them firing this rule.
+          # Excluded: pods whose KSM kube_pod_status_reason is SchedulingGated
+          # (KSM v2.20 emits it from the PodScheduled condition; verified live
+          # 2026-10-04). NOT kube_pod_status_unschedulable: it is 1 for gated
+          # pods too. Once released, the pod drops the reason and the 30m
+          # timer starts - unschedulable, ImagePullBackOff, missing CM/Secret
+          # and a hung clone all still fire. A missing reason series fails
+          # toward firing. Tests: ci-runner-alerts.test.yaml (promtool).
+          # Known gap: a DEAD admitter (no trigger running) leaves pods gated
+          # until the Job's activeDeadlineSeconds kills them; gated pods count
+          # as Job active, so CIRunnerJobStarved does not see that either.
           expr: |
-            max by (namespace, pod) (kube_pod_status_phase{namespace="ci-runner", phase="Pending"}) == 1
+            (
+              max by (namespace, pod) (kube_pod_status_phase{namespace="ci-runner", phase="Pending"}) == 1
+            )
+            unless on (namespace, pod) (
+              max by (namespace, pod) (kube_pod_status_reason{namespace="ci-runner", reason="SchedulingGated"}) == 1
+            )
           for: 30m
           labels:
             category: ci-runner
