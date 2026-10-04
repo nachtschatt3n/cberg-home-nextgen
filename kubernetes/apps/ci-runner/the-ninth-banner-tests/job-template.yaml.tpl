@@ -26,7 +26,10 @@ spec:
   backoffLimitPerIndex: 0
   maxFailedIndexes: __SHARDS__
   activeDeadlineSeconds: 5400
-  ttlSecondsAfterFinished: 3600
+  # 600 s (2026-10-04, was 3600): pods hold until the trigger has copied their
+  # results (/results/.collected, COLLECT_WAIT_SECONDS 900), so the TTL only
+  # starts after collection; 1 h kept ~40 finished pods on the dashboard.
+  ttlSecondsAfterFinished: 600
   template:
     metadata:
       labels:

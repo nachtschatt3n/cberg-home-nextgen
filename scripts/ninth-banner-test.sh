@@ -229,7 +229,7 @@ if [ "$suite" = release ]; then
         echo "WARNING: could not post the commit status (gh api failed)"
     fi
 fi
-echo "the Job and its pods self-delete 1h after finishing (ttlSecondsAfterFinished=3600)"
+echo "the Job and its pods self-delete 10 min after the whole Job finishes (ttlSecondsAfterFinished=600)"
 [ "$fails" -eq 0 ]
 }
 
