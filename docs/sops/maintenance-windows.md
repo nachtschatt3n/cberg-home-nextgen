@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.09.28`
-> Last Updated: `2026-09-28`
+> Version: `2026.10.04`
+> Last Updated: `2026-10-04`
 
 ## 1) Description
 
@@ -738,6 +738,32 @@ pane then passes through the same busy/menu gate before anything is typed.
   RE-TEST at execution time**, not a fact — the paperclip Role claim was wrong
   and cost a 15-min outage.
 
+### Plan-authoring lessons (2026-10-04, mariadb roll + nextcloud-redis run)
+
+- **A DB bounce may restart dependent tenants ONCE; write the gate for that, not
+  for zero (F-9ab5f80f).** On the 2026-10-03 `databases/mariadb` roll five
+  `my-software-showcase` Rails tenants restarted once during a ~1 min bounce:
+  the single-threaded app server queued the liveness request behind DB-blocked
+  readiness requests and the kubelet killed a healthy process. The root cause is
+  fixed (`f515915c`: Rails liveness is now `tcpSocket`, readiness stays DB-aware),
+  but any plan that bounces a shared database must still (a) bound each consumer
+  at **<= 1 restart** during the bounce instead of asserting 0, and fail only on a
+  second restart or a pod still not Ready after the bounce settles, and (b) build
+  a processlist/connection-count tenant baseline from the **persistent-pool**
+  users only. PHP tenants (`globalmobility`, `ibgastro`, `uzeit-de`) connect per
+  request, so their users are absent from any snapshot that happens to fall
+  between requests -- counting them makes the baseline flap and the gate lie.
+- **Resuming a suspended HelmRelease re-renders its chart CronJobs and UNDOES a
+  manual CronJob suspend.** A plan that suspends an HR (`flux suspend hr`) and
+  ALSO suspends a chart-owned CronJob (`kubectl patch cronjob ... suspend:true`,
+  e.g. `nextcloud-cron` to quiesce the app) loses the CronJob suspend the moment
+  the HR is resumed: helm-controller re-applies the rendered CronJob with
+  `suspend: false`, and the job can fire mid-procedure. Every plan that does
+  both must **re-assert the CronJob suspend immediately after each in-plan HR
+  resume** (and read it back: `kubectl get cronjob <name> -o
+  jsonpath='{.spec.suspend}'` == `true`) until the step that intends to
+  un-suspend it. Observed on the nextcloud-redis-hardening run (2026-10-03).
+
 ## 8) Diagnose Examples
 
 ```bash
@@ -801,6 +827,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.10.04 | 2026-10-04 | **Two plan-authoring lessons (§7).** (a) DB-bounce gates bound each consumer at <=1 restart and build the tenant baseline from persistent-pool users only -- per-request PHP connections excluded (F-9ab5f80f; Rails liveness root cause fixed in `f515915c`). (b) Resuming a suspended HelmRelease re-renders chart CronJobs and undoes a manual CronJob suspend -- re-assert it after every in-plan HR resume (nextcloud-redis-hardening run). |
 | 2026.09.28 | 2026-09-28 | **Headless dispatcher auto-starts (operator: "fix the open points").** It died with every Mac reboot or iTerm restart, silently sending crons back to the busy console. Now a LaunchAgent (`com.cberg.headless-dispatcher`, user `mu`, KeepAlive) keeps iTerm running and an iTerm AutoLaunch script keeps a dispatcher session open inside it (files in `runbooks/launchd/`). osascript from launchd was rejected: it needs an Automation grant nobody can click after an unattended reboot. §7 gains install/check/uninstall. |
 | 2026.09.28 | 2026-09-28 | **An on-demand run covers an attended slot only by explicit `absorbs <slot>:<date>` (operator decision).** Liveness paged `sat-attended:2026-09-26` missed although the 09-26 NOW run (window_runs 48) declared it absorbed. A terminal, non-aborted `now`/ad-hoc row whose notes carry the token for its own Berlin date now covers that slot; no implicit coverage. Test `runbooks/tests/test-window-liveness-now-absorbs-attended.py`. |
 | 2026.09.27 | 2026-09-27 | **SD-10: low-risk reviewed plans auto-run in the nightly window without a GO (throughput program item D).** New `review: ready-for-go@<date>` frontmatter (written by rule 4d0b), `preapproved_low_risk` policy block (`autonomy-policy.yaml` `2026.09.27`), `maintenance-plan.py::preapproval()` + `preapproved_low_risk` JSON key, scheduler routes them to nightly, `autonomy-record.py eligible` honours it, morning-report issue after the run. Medium/high risk, reboots and capability changes still need a GO. |

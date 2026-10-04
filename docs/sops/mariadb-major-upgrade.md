@@ -1,8 +1,8 @@
 # SOP: MariaDB Major Upgrade (Bitnami chart)
 
 > Description: Taking a Bitnami-chart MariaDB across a server major (12 → 13 and onward) without leaving old-format system tables under a new binary, including the digest-pinning rule the free-tier catalog forces on us.
-> Version: `2026.08.19`
-> Last Updated: `2026-08-19`
+> Version: `2026.10.04`
+> Last Updated: `2026-10-04`
 > Owner: `cberg-agent / operator`
 
 ## Description
@@ -152,6 +152,14 @@ kubectl -n <ns> exec <pod> -- ls -la /bitnami/mariadb/data/mysql_upgrade_info
 
 Pod 1/1 with no restart loop; `mariadb-check --all-databases` all-OK; the
 consuming app serving; Longhorn volume healthy with its reclaim policy intact.
+
+Consumers during the bounce (F-9ab5f80f): a tenant may restart **once** while
+`mariadb-0` is down -- gate on <= 1 restart per consumer and Ready after the
+bounce, not on zero. Build any processlist tenant baseline from persistent-pool
+(Rails) users only; the PHP showcase tenants connect per request and are absent
+between requests. Showcase Rails liveness is `tcpSocket` since `f515915c`, so a
+restart there now indicates a real fault. See `docs/sops/maintenance-windows.md`
+§7 "Plan-authoring lessons (2026-10-04)".
 
 ## Security Check
 
