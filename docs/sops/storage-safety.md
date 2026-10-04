@@ -1,14 +1,14 @@
 # SOP: Storage Safety — Destructive Operations on Persistent Storage
 
 > Description: Pre-flight, guardrails, and recovery procedure for destructive PVC/PV operations on shared-filesystem (CIFS/SMB/NFS) and Longhorn storage classes.
-> Version: `2026.09.20`
-> Last Updated: `2026-09-20`
+> Version: `2026.10.04`
+> Last Updated: `2026-10-04`
 > Owner: `cluster-ops`
 
 | Field | Value |
 |---|---|
-| **Version** | 2026.09.20 |
-| **Last Updated** | 2026-09-20 |
+| **Version** | 2026.10.04 |
+| **Last Updated** | 2026-10-04 |
 | **Owner** | cluster-ops |
 | **Applies to** | All `kubectl delete pvc/pv` actions, all StorageClass changes, any teardown of stateful workloads |
 
@@ -96,7 +96,8 @@ If the brief is ambiguous (e.g. "clean up the test resources"), enumerate what e
 ### Hard Rule 3 — Dangerous StorageClasses on this cluster
 
 **Every CIFS StorageClass on this cluster is `reclaimPolicy: Retain` (19/19,
-verified live 2026-08-26).** This table used to record 17 of them as `Delete`,
+verified live 2026-08-26; 18 live since `cifs-scrypted-media` was pruned with
+scrypted-nvr on 2026-10-04).** This table used to record 17 of them as `Delete`,
 which had stopped being true. That is not a harmless over-warning: a table wrong
 on most of its rows teaches operators to discount it, and it hides real change —
 if someone flipped a class to `Delete`, the table would have looked identical.
@@ -125,7 +126,7 @@ not the whole share:**
 | StorageClass | Source | Subdir | Reclaim |
 |---|---|---|---|
 | `cifs-frigate-media` | `//192.168.55.240/frigate` | `/media` | Retain |
-| `cifs-scrypted-media` | `//192.168.55.240/scrypted` | `/media` | Retain |
+| `cifs-scrypted-media` — **class pruned 2026-10-04** (scrypted-nvr decommissioned); its Released `Retain` PV `pvc-07cdc111…` still exists and needs this pre-flight before any delete | `//192.168.55.240/scrypted` | `/media` | Retain |
 | `cifs-jdownloader-media` | `//192.168.55.240/media/downloads` | `/jdownloader` | Retain |
 | `cifs-makemkv-media` | `//192.168.55.240/media` | `/Transcode` | Retain |
 | `cifs-tube-archivist-media` | `//192.168.55.240/media/downloads` | `/tube-archivist` | Retain |
