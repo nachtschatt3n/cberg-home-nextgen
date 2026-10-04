@@ -12,9 +12,9 @@ risk: medium                          # Not high: no reboot (MEASURED dry-run, s
                                       # control-plane nodes, and it deliberately lowers sustained CPU/iGPU
                                       # throughput for every workload (capability_change below).
 est_duration_min: 125                 # EVERYTHING in-window (review 2026-10-04: a pre-window phase has no owner):
-                                      # Phase A baseline 35 (CI run ~20, 3 benches + calib ~12, stats 3);
+                                      # Phase A baseline 25 (CI run ~20, stats 3; no 64 W benchmark);
                                       # premises+pre-checks 8, render+gates+rollback pre-render 12, commit 3,
-                                      # per node (apply 1, gates 3, bench 3, settle 3) 10 x 3 = 30, final 5;
+                                      # per node (apply 1, gates 3, bench <=6, settle 3) 13 x 3 = 39 + calib 4, final 5;
                                       # Phase C after-CI run + stats 22; slack 10. Fits only sun-attended (180).
 needs_reboot: false                   # MEASURED 2026-10-04: `talosctl apply-config --dry-run --mode=no-reboot` with a
                                       # migrated+SysfsConfig render on k8s-nuc14-01 -> "Applied configuration without a
@@ -231,14 +231,14 @@ limit must be MEASURED (capbench), not assumed.
 Run from the repo root on the Mac mini, mise activated, talosctl v1.14.x client (`mise exec -- talosctl version
 --client --short`; the v1.13.10 client in some shells is too old for v1.14 documents). **`W` is a FIXED mode-700 scratch dir outside the repo** (`/private/tmp/sysfscaps-talos-sysfs-power-caps`); shell
 variables do not survive between agent Bash calls, so every later code block starts with the guard line
-`W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }`. If `$W` is lost
+`export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }`. If `$W` is lost
 mid-plan, re-create it with this block and re-run 3.2 (the rollback configs `rb/` are re-renderable from ANY tree
 with `sysfs-patches.py <tree> orig`, they do not depend on the forward commit) - but `live-*.yaml` (3.5) and the
 Phase A numbers are then gone: re-take them before continuing. Rendered configs contain machine secrets: never `cat` them, never print a dry-run diff.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-umask 077; W=/private/tmp/sysfscaps-talos-sysfs-power-caps; mkdir -p "$W"; chmod 700 "$W"   # FIXED path: it holds
+umask 077; export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; mkdir -p "$W"; chmod 700 "$W"   # FIXED path: it holds
 # the rollback configs, backups, bench-mb, ci-ref across Phase A, the window, Phase C and the +24 h soak.
 export SOPS_AGE_KEY_FILE=$PWD/age.key
 for b in sysfs-patches talconfig-edit sysfs-diffgate sysfs-readback capbench capstats; do
@@ -252,13 +252,15 @@ done
 
 2.2 **Cluster health**: 3 nodes `Ready`; `talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status` -> 3
 members, no learner, no ERRORS; `flux get kustomizations -A | awk 'NR==1 || $5 != "True"'` -> header only.
-Record the etcd leader (apply it LAST in 3.6).
+Record the etcd leader (apply it LAST in 3.6). Snapshot restart counts for gate 4.5:
+`kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {range .status.containerStatuses[*]}{.restartCount} {end}{"\n"}{end}' > "$W/restarts-before.txt"`
+(after the setup block; `wc -l` > 100 lines, else the snapshot is empty -> retake).
 
-2.3 **Single machineconfig, nothing staged**: `talosctl -n <ip> get machineconfig` lists only `v1alpha1` on each node.
+2.3 **Single machineconfig, nothing staged**: `mise exec -- talosctl -n <ip> get machineconfig` lists only `v1alpha1` on each node.
 
 2.4 **Card index and current values, per node** (also the rollback baseline):
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
 for ip in 192.168.55.11 192.168.55.12 192.168.55.13; do mise exec -- python3 "$W/sysfs-readback.py" $ip orig | tail -1; done
 talosctl -n 192.168.55.13 list /sys/class/drm | grep -E ' card[0-9]$'     # i915 card on 03: expect card1
 ```
@@ -269,9 +271,9 @@ key means the card index moved (e.g. after the talos-linux-1.14.2 roll or a moni
 message, and continue. Any other mismatch (a value is no longer the 2026-10-04 default) -> STOP: the rollback
 values would be wrong; re-plan.
 
-2.5 **No CI shard running during a benchmark**: `kubectl get pods -n ci-runner --field-selector=status.phase=Running
--o wide` - a benchmark on a node with a CI shard is still valid for the power gate but not for the BEFORE/AFTER
-performance figure; run that node's capbench when it is CI-free, or note "CI present" in the table.
+2.5 **No CI shard on a node during its benchmark** (3.6): `kubectl get pods -n ci-runner --field-selector=status.phase=Running
+-o wide` - a CI shard adds heat and load; the power gate stays valid but note "CI present" in 4.B, and prefer to wait
+(Monitor until-loop) for the node to be CI-free.
 
 ### 2.6 Phase A - BEFORE baseline (IN-WINDOW, the first ~35 min; owner: the window agent; nothing here changes config)
 
@@ -279,49 +281,53 @@ performance figure; run that node's capbench when it is CI-free, or note "CI pre
 `git commit --only talconfig.yaml` in 3.4 commits the WHOLE working-tree file, so another session's uncommitted
 hunks there (seen 2026-10-04 while the migration was in flight) would ride along. Not clean -> STOP.
 
-A1. **CI performance run** (fixed commit, fixed suites, recorded so Phase C repeats it exactly):
+**No synthetic 64 W benchmark (decision 2026-10-05, operator priority "stable system").** Nodes already peak at
+102-103 °C from production, and 102 °C rebooted a node on 2026-08-08; an 18-thread load at 64 W is exactly the
+event this plan exists to prevent. The BEFORE baseline is therefore the CI run (A1) + Prometheus stats of that run
+and of the last 7 days of production (A2). The fixed-work benchmark runs only AFTER the caps (3.6), where it is the
+contents gate 4.3 and carries its own in-run negative control (`early_w`, see 4.3).
+
+A1. **CI performance run** (fixed commit, fixed suites, recorded so Phase C repeats it exactly). `ninth-banner-test.sh`
+outlives the 600 s Bash limit: start it with `run_in_background: true` and wait with Monitor until-loops on its log
+(no foreground sleeps). Block 1 (foreground):
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
-REF=$(git ls-remote https://github.com/nachtschatt3n/the-ninth-banner.git HEAD | cut -c1-7); echo "$REF" > "$W/ci-ref"
-A1_START=$(date +%s); scripts/ninth-banner-test.sh "$REF" sims 4; echo "sims rc=$?"
-scripts/ninth-banner-test.sh "$REF" e2e 3; echo "e2e rc=$?"; A1_END=$(date +%s); echo "$A1_START $A1_END" > "$W/ci-before-window"
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+git ls-remote https://github.com/nachtschatt3n/the-ninth-banner.git HEAD | cut -c1-7 > "$W/ci-ref"; test -s "$W/ci-ref" && cat "$W/ci-ref"
+date +%s > "$W/ci-before-start"
+```
+Block 2 (`run_in_background: true`), then Monitor until `grep -q '^SUITES_DONE' "$W/ci-before.log"`:
+```bash
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+cd /Users/mu/code/cberg-home-nextgen
+{ scripts/ninth-banner-test.sh "$(cat "$W/ci-ref")" sims 4; echo "sims rc=$?"; scripts/ninth-banner-test.sh "$(cat "$W/ci-ref")" e2e 3; echo "e2e rc=$?"; date +%s > "$W/ci-before-end"; echo SUITES_DONE; } > "$W/ci-before.log" 2>&1
 ```
 Record per shard the RUNNING time (not the queue time: the thermal gate's admission wait differs before/after):
 for each finished shard pod, `kubectl get pod -n ci-runner <pod> -o jsonpath='{.status.startTime} {.status.containerStatuses[0].state.terminated.finishedAt}'`
-(the Job TTL is 600 s: read them right after each run; the run's `job.yaml` in `~/ci-results/<run>/` names the Job).
-Value = median shard run time per suite. Also note which nodes the shards ran on.
+(the Job TTL is 600 s: read them while the run is still collecting - Monitor on `Job .* complete`/the script's
+per-run summary in the log - or from `~/ci-results/<run>/shard-N.log` timestamps). Value = median shard run time per
+suite, plus the node each shard ran on.
 
-A2. **Heat/power under that CI load** (Prometheus, CI window from A1):
-`mise exec -- python3 "$W/capstats.py" before-ci <minutes of A1> $A1_END` -> one `CAPSTATS before-ci <ip> ...` line per node.
-`CAPSTATS_ABORT` (a metric family without exactly 3 nodes) -> fix the instrument first; never record a blind zero.
-Also a quiet-hour reference: `mise exec -- python3 "$W/capstats.py" before-24h 1440`.
-
-A3. **Fixed-work CPU benchmark per node, at 64 W** (busybox `sha256sum` x18 workers, steady package power read
-from `energy_uj` at t+40 s..t+70 s, watchdog force-deletes the pod at >= 95 °C, grace 0, workers trapped):
+A2. **Heat/power baselines** (Prometheus; JSON is written ONLY when every check passed, then `CAPSTATS_OK`):
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
-mise exec -- python3 "$W/capbench.py" 192.168.55.11 calib 2048     # calibrate ONCE: wall_s must be 90-150 s; else scale MB
-                                                      # (MB_new = 2048 * 120 / wall_s, rounded to 256) and repeat
-echo <MB> > "$W/bench-mb"
-for ip in 192.168.55.11 192.168.55.13 192.168.55.12; do mise exec -- python3 "$W/capbench.py" $ip before $(cat "$W/bench-mb"); sleep 180; done
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+S0=$(cat "$W/ci-before-start"); S1=$(cat "$W/ci-before-end"); M=$(( (S1 - S0) / 60 + 1 ))
+mise exec -- python3 "$W/capstats.py" before-ci $M "$W" $S1; echo "rc=$?"
+mise exec -- python3 "$W/capstats.py" before-7d 10080 "$W" --no-rapl; echo "rc=$?"   # production heat; RAPL series is only days old
 ```
-Keep every `CAPBENCH ...` line. **Negative control for gate 4.3, PER NODE:** each node's `before` `steady_w` must
-read **>= 42 W** (64 W cap, 18 busy threads; a hot-aborted run still prints `steady_w` when it ran past t+40 s).
-A node whose before-run read < 42 W (or aborted before t+40 s) has no proof that 4.3 can fail on it: for that node
-4.3 is downgraded to informational and the deciding gate is 4.1 alone - say so in the report.
-A `CAPBENCH_INVALID ... hot_abort=True` is itself a baseline result (record "aborted at 95 °C after N s"); the
-after-run then reports wall time without a before value.
+PASS = `rc=0` and `CAPSTATS_OK` for both. `CAPSTATS_ABORT` (a family without exactly 3 nodes, or < 90 % sample
+coverage) -> no JSON is written, fix the instrument; never record a blind zero. If `before-7d` aborts on coverage
+(retention ~6.6 days), use `8640` (6 days) and say so.
 
 ## 3. Steps
 
 ### 3.1 Repo change (Flux does NOT reconcile `kubernetes/bootstrap/talos/`)
 
-Gate: Phase A is complete - `test -s "$W/bench-mb" && test -s "$W/ci-ref" && test -s "$W/stats-before-ci.json"`
-and three `CAPBENCH ... phase=before` lines are in the window log. Missing -> run Phase A first (the BEFORE numbers
-cannot be taken once the caps are live).
+Gate: Phase A is complete - `export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -s "$W/ci-ref" && test -s "$W/stats-before-ci.json" && test -s "$W/stats-before-7d.json" && grep -q '^SUITES_DONE' "$W/ci-before.log" && echo PHASE_A_OK`
+prints `PHASE_A_OK` (capstats writes its JSON only after its node-count and coverage checks passed, so the files
+existing means rc 0). Missing -> run Phase A first (the BEFORE numbers cannot be taken once the caps are live).
 
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
 mise exec -- python3 "$W/sysfs-patches.py" kubernetes/bootstrap/talos caps      # -> SYSFS_PATCHES_OK mode=caps (4 files)
 mise exec -- python3 "$W/talconfig-edit.py"                                     # -> TALCONFIG_EDIT_OK
 git diff --stat kubernetes/bootstrap/talos/talconfig.yaml          # 1 file, 7 insertions
@@ -338,7 +344,7 @@ Resulting talconfig diff (dry-tested on the migrated scratch tree, identical to 
 ### 3.2 Render the forward AND the rollback configs into `$W` (never into `clusterconfig/`)
 
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
 (cd kubernetes/bootstrap/talos && mise exec -- talhelper genconfig -o "$W/fw") 2>&1 | grep -v '^generated'
 rsync -a --exclude clusterconfig kubernetes/bootstrap/talos/ "$W/rbsrc/"
 mise exec -- python3 "$W/sysfs-patches.py" "$W/rbsrc" orig                       # -> SYSFS_PATCHES_OK mode=orig
@@ -360,7 +366,7 @@ the `drm` key names card0 for 01/02 and card1 for 03 (or the card measured in 2.
 ### 3.3 Dry-run gates per node: forward AND rollback (the node decides, the gate reads the diff)
 
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
 for n in 1 2 3; do ip=192.168.55.1$n
   for d in fw rb; do
     mise exec -- talosctl -n $ip apply-config --dry-run --mode=no-reboot -f "$W/$d/kubernetes-k8s-nuc14-0$n.yaml" > "$W/dry-$d-$n.txt" 2>&1
@@ -380,6 +386,10 @@ somewhere else (drift, or the migration not fully applied) and this apply would 
 A real PASS on a post-migration node has NOT been observed (impossible before the migration); the gate's failure
 mode is a false STOP (e.g. an unexpected diff alignment of the new document's header lines), never a false GO:
 if it STOPs, inspect the diff's line COUNTS by hand (`grep -c '^[+-]' "$W/dry-fw-$n.txt"`), never print it.
+**Decision rule for a STOP here: no apply on ANY node in this window.** The gate is not overridden in-window, not even
+for a suspected false STOP (header alignment): record the counts, set the plan `blocked`, and fix the gate or the
+drift in a reviewed edit. Cost of a false STOP = one deferred window; cost of a false GO = an unreviewed config change
+on a control-plane node.
 
 ### 3.4 Commit before applying (config only)
 
@@ -391,9 +401,9 @@ Then `git log -1 --format=%s` is yours, `git show --stat HEAD` lists exactly the
 ### 3.5 Pre-apply backup per node (backup_gate)
 
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
 for n in 1 2 3; do ip=192.168.55.1$n
-  talosctl -n $ip get machineconfig v1alpha1 -o yaml | python3 -c 'import sys,yaml; print(list(yaml.safe_load_all(sys.stdin))[0]["spec"], end="")' > "$W/live-$ip.yaml"
+  mise exec -- talosctl -n $ip get machineconfig v1alpha1 -o yaml | python3 -c 'import sys,yaml; print(list(yaml.safe_load_all(sys.stdin))[0]["spec"], end="")' > "$W/live-$ip.yaml"
   test -s "$W/live-$ip.yaml" && echo "backup $ip ok"
 done
 ```
@@ -402,23 +412,37 @@ done
 ### 3.6 Apply per node - nuc14-01 first (coolest), then the other follower, etcd leader last
 
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
 ip=192.168.55.11; n=01; node=k8s-nuc14-01          # adjust per node
 kubectl get node $node -o jsonpath='{.status.nodeInfo.bootID}' > "$W/bootid-$ip"
 mise exec -- talosctl -n $ip apply-config --mode=no-reboot -f "$W/fw/kubernetes-k8s-nuc14-$n.yaml"
 # expected: "Applied configuration without a reboot"
-sleep 10
+python3 -c "import time; time.sleep(10)"   # agent Bash blocks a bare foreground sleep
 mise exec -- python3 "$W/sysfs-readback.py" $ip caps --status        # gate 4.1 - must print GATE_PASS
 ```
-Then gates 4.2-4.4 for this node, `mise exec -- python3 "$W/capbench.py" $ip after $(cat "$W/bench-mb")` (gate 4.3), wait
-3 min, re-check etcd (`talosctl -n <all three> etcd status`, 3 members, same leader or one clean election, no
-ERRORS) and node `Ready`. Only then the next node (SOP talos-upgrade.md §13 lesson 12: serial, health-gated).
+Then gates 4.2-4.4 for this node. The benchmark is ONE capbench per Bash call (Bash `timeout: 600000`; it ends
+within the pod's activeDeadlineSeconds 300 + 30 s and force-deletes its pod on any exit or signal). On the FIRST
+node only, calibrate first:
+```bash
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+mise exec -- python3 "$W/capbench.py" 192.168.55.11 calib 2048
+```
+`wall_s` must be 90-200 s; else MB = 2048 * 140 / wall_s rounded to 256, re-run calib once. `echo <MB> > "$W/bench-mb"`.
+Then, per node (next Bash call):
+```bash
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+mise exec -- python3 "$W/capbench.py" $ip after $(cat "$W/bench-mb")       # $ip set in this call
+```
+Settle: wait with a Monitor until-loop (no foreground sleep) until 3 min have passed AND the node's package temp
+(`talosctl -n $ip read /sys/class/thermal/thermal_zone<N>/temp`, zone with type x86_pkg_temp) is < 75000; then re-check etcd
+(`mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status`: 3 members, same leader or one clean
+election, no ERRORS) and node `Ready`. Only then the next node (SOP talos-upgrade.md §13 lesson 12: serial, health-gated).
 **Any gate failure -> section 5 for THAT node and stop the roll.**
 
 ### 3.7 After the third node: regenerate the local clusterconfig
 
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
 cp -Rp kubernetes/bootstrap/talos/clusterconfig "$W/clusterconfig-pre"
 mise exec -- task talos:generate-config
 git status --short kubernetes/bootstrap/talos/clusterconfig/      # nothing: gitignored
@@ -426,8 +450,9 @@ git status --short kubernetes/bootstrap/talos/clusterconfig/      # nothing: git
 
 ### 3.8 Phase C - AFTER measurements (IN-WINDOW, last ~22 min; owner: the window agent)
 
-Repeat A1 with the SAME `$(cat "$W/ci-ref")` and suites, then A2 (`capstats.py after-ci ...`). The A3 `after`
-benchmarks were taken per node in 3.6. Fill the table in section 4.B and attach it to the window report.
+Repeat A1 exactly (background run, log `$W/ci-after.log`, files `ci-after-start`/`ci-after-end`, SAME `ci-ref`),
+then `capstats.py after-ci $M "$W" $S1` from those files (rc 0 + `CAPSTATS_OK`). The `after` benchmarks were
+taken per node in 3.6. Fill the table in section 4.B and attach it to the window report.
 Then set the plan to `awaiting-soak` (24 h soak, 3.10).
 
 ### 3.9 Alert threshold follows the cap (Flux-reconciled; after all three nodes passed section 4)
@@ -437,7 +462,7 @@ the new cap"*. 90 % of 35 W = 31.5 -> 31. Committed separately from 3.4 on purpo
 leave the alert tuned for a cap that is not live. Dry-tested on scratch copies 2026-10-04 (promtool suite: 12/12
 PASS incl. the moved mutant; unmodified suite also PASS):
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
 sed -i '' 's/expr: rate(node_rapl_package_joules_total{job="node-exporter"}\[5m\]) > 58$/expr: rate(node_rapl_package_joules_total{job="node-exporter"}[5m]) > 31/' kubernetes/apps/monitoring/kube-prometheus-stack/app/node-thermal-alerts.yaml
 sed -i '' 's/(expected cap 64 W)/(expected cap 35 W)/' kubernetes/apps/monitoring/kube-prometheus-stack/app/node-thermal-alerts.yaml
 sed -i '' -e 's/s(rapl, "0+1800x80")\],  # 60 W/s(rapl, "0+1020x80")],  # 34 W/' \
@@ -450,7 +475,7 @@ PASS = `rc=0` and `0` non-PASS lines. Resulting diff: `> 58` -> `> 31`, `(expect
 test fixtures 60 W/40 W -> 34 W/28 W (fires above 31, silent below), mutant `> 31` -> `> 25` (must be caught).
 and the rule comment (lines 170-171, `Expected cap = the CURRENT PL1/PL2 of 64 W` / `Fires at >=90 % of it (58 W)`):
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
 F=kubernetes/apps/monitoring/kube-prometheus-stack/app/node-thermal-alerts.yaml
 sed -i '' -e 's/# Expected cap = the CURRENT PL1\/PL2 of 64 W (constraint_0\/1_power_limit_uw$/# Expected cap = PL1 35 W (SysfsConfig, plan talos-sysfs-power-caps; constraint_0_power_limit_uw/' \
           -e 's/# on all three nodes, 2026-10-04). Fires at >=90 % of it (58 W) held$/# on all three nodes). Fires at >=90 % of it (31 W) held/' "$F"
@@ -461,10 +486,11 @@ verify subject, push. Verify the rule is LOADED with the new threshold (memory: 
 `kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/rules' | python3 -c 'import sys,json; print([r["query"] for g in json.load(sys.stdin)["data"]["groups"] for r in g["rules"] if r["name"]=="NodeCPUPackagePowerAtCap"])'`
 -> contains `> 31` (may take one Flux interval + rule reload).
 
-### 3.10 SOAK step (+24 h, next sweep or operator): raise the CI thermal gate - conditional
+### 3.10 SOAK step (+24 h): raise the CI thermal gate - conditional. Owner: the OPERATOR or an attended window
+(the sweep is read-only: it may compute the evidence with `capstats.py soak-24h 1440 "$W"`, never apply the edit)
 
 Owner: the gate lives in THIS repo (`scripts/ninth-banner-admit.py`, runs on the Mac, ticked by every
-`ninth-banner-test.sh`; no Flux step) and was edited three times on 2026-10-04 by the ci-runner work -
+`ninth-banner-test.sh`; no Flux step) and was edited five times on 2026-10-04 by the ci-runner work -
 coordinate with whoever holds that work (check `git log -3 -- scripts/ninth-banner-admit.py` right before the edit;
 if it changed after this plan's premise run, re-read the thresholds before changing one).
 
@@ -473,14 +499,14 @@ if it changed after this plan's premise run, re-read the thresholds before chang
 threshold is the one that today keeps nuc14-02/03 mostly closed (SOP §2b: "nuc14-02 never gets a CI pod ...
 peaks at 96-98 °C even without CI"). 88 equals the cpu lane's existing `CPU_OPEN_BELOW_C`.
 
-**Evidence required (all four, from the 24 h soak `capstats.py soak-24h 1440` + the Phase C table):**
+**Evidence required (all four, from the 24 h soak `capstats.py soak-24h 1440 "$W"` + the Phase C table):**
 (a) every node's `temp_p95` <= 85 °C over 24 h; (b) `min_ge100` = 0 on every node (no brake-level minute);
 (c) `throttles` (24 h package-throttle increase) < 100 on every node (today: 77 / 29 018 / 10);
 (d) Phase C CI window: `temp_max` < 93 on every node that ran a shard (`CAPSTATS after-ci <ip> ... temp_max=`,
 from 3.8; it is the max over the 30 s-step node maximum, i.e. the gate's 1-min view or stricter). If any fails: do NOT raise; record the numbers on the
 plan and leave 85. If all pass:
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
 sed -i '' 's/^OPEN_BELOW_C = float(os.environ.get("GATE_OPEN_BELOW_C", "85"))$/OPEN_BELOW_C = float(os.environ.get("GATE_OPEN_BELOW_C", "88"))/' scripts/ninth-banner-admit.py
 python3 -c "import ast; ast.parse(open('scripts/ninth-banner-admit.py').read())" && grep -c 'GATE_OPEN_BELOW_C", "88"' scripts/ninth-banner-admit.py   # 1
 scripts/ninth-banner-admit.py --status | head -5      # read-only: prints node state with the new limit
@@ -510,19 +536,23 @@ to be able to read non-zero; a missing write is caught by 4.1's per-key `KernelP
 **Deciding gates** (the only ones that may PASS a node): 4.1 (`--status`, measured to fail both ways), 4.2 bootID,
 4.3 capbench (where its per-node negative control held), and `capstats.py` numbers (with its coverage abort).
 
-4.3 **CONTENTS ASSERTION: the cap actually binds under load.** Measured by `capbench.py <ip> after <MB>`:
-`steady_w` = RAPL package energy over t+40..t+70 s of an 18-thread fixed-work run, read with `talosctl read
-energy_uj` (Prometheus-independent). PASS = `CAPBENCH` (not `_INVALID`) and `steady_w <= 37.5` (35 W PL1 + 7 %
-measurement slack: two talosctl reads ~0.2 s each in a 30 s window). It can fail: Phase A's `before` run must
-have read >= 42 W on at least one node (negative control, 2.6 A3); a cap that did not take, or was clamped back by
-firmware, reads ~45-64 W. Idle reference 2026-10-04: 14-17 W on all nodes, so an idle node can NOT pass for the
-wrong reason - `_INVALID` (wall < 75 s or no samples) is not a pass.
+4.3 **CONTENTS ASSERTION: the cap actually binds under load.** Measured by `capbench.py <ip> after <MB>`, reading
+`energy_uj` with `talosctl` (Prometheus-independent): `steady_w` = package power over t+40..t+70 s of an 18-thread
+fixed-work run; `early_w` = t+2..t+12 s. PASS (per node) = a `CAPBENCH` line (not `_INVALID`) with
+`steady_w <= 37.5` (35 W PL1 + 7 % slack for two ~0.2 s talosctl reads in a 30 s window).
+**Negative control, PER NODE, inside the same run:** `early_w >= 42`. PL2 (55 W) lets the package exceed PL1 for
+the first ~10-20 s while the 28 s PL1 average catches up, so `early_w >= 42` proves THIS load on THIS node can draw
+more than 37.5 W - a later `steady_w <= 37.5` is then the cap binding, not a light load. Idle reference 2026-10-04:
+14-17 W. If a node's `early_w < 42`, gate 4.3 is INFORMATIONAL for that node (the run did not prove it could fail)
+and 4.1 alone decides - say so in the report. A cap that did not take reads `steady_w` well above 37.5.
+`_INVALID` (any watchdog abort, wall < 75 s, missing sample, pod `NO_PKG_ZONE`) is not a pass: re-run once after
+settle; a second `_INVALID` -> 4.3 informational for that node. A `POD_HOT_ABORT`/`mac_hot_abort=True` at 35 W is a
+STOP-and-look (the cap is not containing heat).
 CONTROL: metric node_rapl_package_joules_total - cross-check: `rate(...[1m])` for the node during the capbench run
 must peak <= 56 W (PL2) and settle <= 37.5 W; also feeds `rapl_avg_w`/`rapl_max1m_w` in 4.B.
 
-4.4 **EPP took effect on behaviour, not just on the file.** In the same capbench run, the after `peak_c` must be
-lower than the node's before `peak_c` (or the before run hot-aborted). Not a hard gate (room temperature varies);
-a HIGHER peak at 35 W is a STOP-and-look: it means something other than package power drives the heat.
+4.4 **Heat under the capped benchmark (informational).** `peak_c` of the after-run is recorded in 4.B; >= 90 °C at
+35 W sustained is a STOP-and-look (something other than package power drives the heat).
 
 4.5 **Cluster-wide, after the third node (and again at the 24 h soak):**
 - CONTROL: metric node_thermal_zone_temp - `capstats.py` `temp_avg/temp_p95/temp_max/min_ge100` per node
@@ -539,7 +569,9 @@ a HIGHER peak at 35 W is a STOP-and-look: it means something other than package 
   cap working, recorded in 4.B, not a failure.
 - Stability: `kubectl get nodes` all Ready the whole window; etcd leader changes during the window <= 1
   (`talosctl etcd status` before/after; `etcd_server_leader_changes_seen_total` increase via Prometheus);
-  no new pod restarts in kube-system/storage/network vs the 2.2 snapshot (`kubectl get pods -A` restart columns).
+  no new pod restarts in kube-system/storage/network vs `$W/restarts-before.txt` (same jsonpath into
+`$W/restarts-after.txt`, then `diff`; changed lines only for pods in those namespaces = FAIL, pods replaced by
+unrelated rollouts are listed and explained).
 - `capstats.py` aborting (`CAPSTATS_ABORT`) is a FAILED gate, not a skipped one.
 
 ### 4.B BEFORE / AFTER comparison (operator request 2026-10-04) - fill and attach to the window report
@@ -552,24 +584,24 @@ a HIGHER peak at 35 W is a STOP-and-look: it means something other than package 
 | package-throttle increase, 24 h (soak) | 77 / 29 018 / 10 (2026-10-04) | | | < 100 each |
 | RAPL avg W / max 1-min W, CI window | | | | max 1-min <= ~55 W |
 | NVMe max (°C) | | | | unchanged |
-| capbench steady W | | | | <= 37.5 W |
-| capbench wall s (fixed work) | | | | report; regression expected |
-| capbench peak °C | | | | lower |
+| production 7 d: temp p95 / max, minutes >= 100, throttles (`before-7d`) | | (soak-24h, scaled) | | p95 <= ~85, 0 min >= 100 |
+| capbench early W / steady W (AFTER only) | n/a - no 64 W run (stability) | | | early >= 42, steady <= 37.5 |
+| capbench wall s / peak °C (AFTER only) | n/a | | | report |
 | CI median shard run time, sims (s) | | | | regression <= ~10-15 % (flag worse) |
 | CI median shard run time, e2e (s) | | | | regression <= ~10-15 % (flag worse) |
 | stability: NotReady / etcd leader changes / kube-system restarts | | | | 0 / <= 1 / 0 |
 
 delta % = (after - before) / before. CI times are noisy (shard placement depends on the gate) - report the median and
-the nodes each shard ran on. **Soak point (+24 h, `capstats.py soak-24h 1440`)** fills the 24 h rows; it is the
+the nodes each shard ran on. **Soak point (+24 h, `capstats.py soak-24h 1440 "$W"`)** fills the 24 h rows; it is the
 input to 3.10.
 
 ## 5. Rollback
 
 **Per node (primary; no reboot): apply the pre-rendered, dry-run-proven rollback config with the explicit old values.**
 ```bash
-W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
+export W=/private/tmp/sysfscaps-talos-sysfs-power-caps; test -d "$W" || { echo NO_W; exit 1; }
 mise exec -- talosctl -n $ip apply-config --mode=no-reboot -f "$W/rb/kubernetes-k8s-nuc14-0$n.yaml"
-sleep 10; mise exec -- python3 "$W/sysfs-readback.py" $ip orig --status       # must print GATE_PASS ... mode=orig ... mismatches=0
+python3 -c "import time; time.sleep(10)"; mise exec -- python3 "$W/sysfs-readback.py" $ip orig --status       # must print GATE_PASS ... mode=orig ... mismatches=0
 ```
 Confirmed back when it prints `GATE_PASS`: PL1/PL2 64000000, EPP balance_performance on 18 CPUs, gt0 2200, and Talos
 holds them as `KernelParamStatus`. If the forward apply failed on a key (e.g. ENOENT), the rollback config carries
@@ -590,7 +622,9 @@ still carrying the rollback document would raise the MSR back to 64 W at every b
 
 **Forward-only parts:** none. No data, no reboot, no etcd or apiserver change.
 **Cleanup:** `rm -rf /private/tmp/sysfscaps-talos-sysfs-power-caps` (machine secrets) only AFTER the 3.10 soak step
-has run (or after a completed rollback) - it holds the rollback configs until then.
+has run (or after a completed rollback) - it holds the rollback configs until then - and in ANY case no later than
+7 days after the window (the rollback configs are re-renderable from git with `sysfs-patches.py <tree> orig`; the
+dir holds machine secrets in plaintext and must not linger). The window report names the deletion date.
 
 ## 6. Interference notes
 
@@ -769,14 +803,21 @@ sys.exit(0 if not bad else 1)
 ```python capbench
 #!/usr/bin/env python3
 # capbench.py <node-ip> <phase-label> <mb-per-worker> [--dry]
-# Fixed-work CPU benchmark on ONE node + Prometheus-independent package power.
-# 18 workers (one per logical CPU) each hash <mb> MiB of zeros with busybox
-# sha256sum. Prints one line: CAPBENCH node=.. phase=.. wall_s=.. steady_w=..
-# steady_w = RAPL package energy delta between t+40 s and t+70 s after the pod
-# is Running (past the PL1 tau of ~28 s, so it reads the SUSTAINED limit).
-# Watchdog: package >= HOT_ABORT_C (95 C) -> pod deleted, result _INVALID hot_abort=True.
-# A result line WITHOUT the _INVALID suffix needs: Succeeded, wall >= 75 s, both energy samples.
-import json, subprocess, sys, time
+# Fixed-work CPU benchmark on ONE node + Prometheus-independent package power. Run it AFTER the
+# caps only (no synthetic 64 W run: operator stability priority, 2026-10-05). One run per Bash call
+# (Bash timeout 600000): it ends within activeDeadlineSeconds 300 + 30 s.
+# 18 workers (one per logical CPU) each hash <mb> MiB of zeros with busybox sha256sum.
+#   early_w  = package power t+2..t+12 s after Running (PL2 window: proves the load CAN exceed 37.5 W)
+#   steady_w = package power t+40..t+70 s (past the PL1 tau ~28 s: the SUSTAINED limit)
+# Two independent hot-abort watchdogs at 95 C on the x86_pkg_temp zone:
+#   IN-POD  - the pod's own shell reads the zone every 1 s and kills its workers (works even if the
+#             Mac/controller dies); no zone found -> the pod exits 3 BEFORE starting any load.
+#   MAC     - this script force-deletes the pod (grace 0).
+# SIGTERM/SIGHUP/SIGINT on this script -> the finally block force-deletes the pod.
+# A line WITHOUT the _INVALID suffix needs: Succeeded, wall >= 75 s, all four energy samples.
+import json, signal, subprocess, sys, time
+for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+    signal.signal(s, lambda *_: sys.exit(1))
 ip, phase, mb = sys.argv[1], sys.argv[2], int(sys.argv[3]); dry = "--dry" in sys.argv
 node = {"192.168.55.11": "k8s-nuc14-01", "192.168.55.12": "k8s-nuc14-02", "192.168.55.13": "k8s-nuc14-03"}[ip]
 name = f"capbench-{node[-2:]}-{phase}"
@@ -784,21 +825,37 @@ RANGE = "/sys/class/powercap/intel-rapl:0/max_energy_range_uj"
 HOT_ABORT_C = 95
 def rd(p): return int(subprocess.check_output(["talosctl", "-n", ip, "read", p], text=True).strip())
 def energy(): return rd("/sys/class/powercap/intel-rapl:0/energy_uj"), time.time()
-script = (f"trap 'kill 0; exit 143' TERM; s=$(date +%s); for i in $(seq 18); do (dd if=/dev/zero bs=1M count={mb} 2>/dev/null | sha256sum >/dev/null) & done; "
-          "wait; echo BENCH_WALL_S=$(( $(date +%s) - s ))")
+POD_SH = r'''Z=""
+for z in /sys/class/thermal/thermal_zone*; do [ "$(cat $z/type 2>/dev/null)" = x86_pkg_temp ] && Z=$z/temp; done
+[ -n "$Z" ] && [ "$(cat $Z)" -gt 0 ] 2>/dev/null || { echo NO_PKG_ZONE; exit 3; }
+trap 'trap - TERM; kill 0; exit 143' TERM
+s=$(date +%s); pids=""
+for i in $(seq 18); do (dd if=/dev/zero bs=1M count=__MB__ 2>/dev/null | sha256sum >/dev/null) & pids="$pids $!"; done
+while :; do
+  alive=0; for p in $pids; do kill -0 $p 2>/dev/null && alive=1; done
+  [ $alive = 0 ] && break
+  t=$(cat $Z)
+  if [ "$t" -ge __HOT__ ]; then echo "POD_HOT_ABORT temp_mc=$t after_s=$(( $(date +%s) - s ))"; trap - TERM; kill 0; exit 4; fi
+  sleep 1
+done
+echo BENCH_WALL_S=$(( $(date +%s) - s ))
+'''
+script = POD_SH.replace("__MB__", str(mb)).replace("__HOT__", str(HOT_ABORT_C * 1000))
 pod = {"apiVersion": "v1", "kind": "Pod",
        "metadata": {"name": name, "namespace": "default", "labels": {"app": "capbench"}},
        "spec": {"nodeSelector": {"kubernetes.io/hostname": node}, "restartPolicy": "Never",
-                "activeDeadlineSeconds": 420, "terminationGracePeriodSeconds": 0,
+                "activeDeadlineSeconds": 300, "terminationGracePeriodSeconds": 0,
                 "securityContext": {"runAsNonRoot": True, "runAsUser": 65534, "seccompProfile": {"type": "RuntimeDefault"}},
                 "containers": [{"name": "bench", "image": "docker.io/library/busybox:1.38", "command": ["sh", "-c", script],
                                 "resources": {"requests": {"cpu": "100m", "memory": "32Mi"}, "limits": {"memory": "64Mi"}},
                                 "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True,
                                                     "capabilities": {"drop": ["ALL"]}}}]}}
 k = lambda *a, **kw: subprocess.run(["kubectl", *a], text=True, capture_output=True, **kw)
-r = k("apply", *(["--dry-run=server"] if dry else []), "-f", "-", input=json.dumps(pod))
-if r.returncode: print(f"CAPBENCH_ERROR apply: {r.stderr.strip()}"); sys.exit(2)
-if dry: print(f"CAPBENCH_DRY ok: {r.stdout.strip()}"); e1, t1 = energy(); print(f"energy read ok e={e1}"); sys.exit(0)
+DEL = ["delete", "pod", "-n", "default", name, "--ignore-not-found", "--grace-period=0", "--force", "--wait=false"]
+if dry:
+    r = k("apply", "--dry-run=server", "-f", "-", input=json.dumps(pod))
+    print(f"CAPBENCH_DRY rc={r.returncode} {r.stdout.strip() or r.stderr.strip()}"); e1, _ = energy(); print(f"energy read ok e={e1}")
+    sys.exit(r.returncode)
 def pkg_zone():
     for z in range(16):
         r = subprocess.run(["talosctl", "-n", ip, "read", f"/sys/class/thermal/thermal_zone{z}/type"], capture_output=True, text=True)
@@ -806,47 +863,56 @@ def pkg_zone():
         if r.stdout.strip() == "x86_pkg_temp": return f"/sys/class/thermal/thermal_zone{z}/temp"
     raise SystemExit("CAPBENCH_ERROR no x86_pkg_temp thermal zone")
 ZONE = pkg_zone()
+if rd(ZONE) // 1000 >= 80: raise SystemExit("CAPBENCH_ERROR node already >= 80 C - not starting a benchmark")
 try:
+    r = k("apply", "-f", "-", input=json.dumps(pod))
+    if r.returncode: raise SystemExit(f"CAPBENCH_ERROR apply: {r.stderr.strip()}")
     for _ in range(180):
         if k("get", "pod", "-n", "default", name, "-o", "jsonpath={.status.phase}").stdout in ("Running", "Succeeded", "Failed"): break
         time.sleep(1)
     else: raise SystemExit("CAPBENCH_ERROR pod never started")
-    t0, e1, e2, peak, hot, ph = time.time(), None, None, 0, False, ""
-    while time.time() - t0 < 400:
+    t0 = time.time(); S = {}; peak, hot, ph = 0, False, ""
+    while time.time() - t0 < 330:
         el = time.time() - t0
         c = rd(ZONE) // 1000; peak = max(peak, c)
-        if c >= HOT_ABORT_C:      # watchdog: never cook a node for a benchmark
-            hot = True; k("delete", "pod", "-n", "default", name, "--grace-period=0", "--force", "--wait=false"); break
-        if e1 is None and el >= 40: e1 = energy()
-        if e2 is None and el >= 70: e2 = energy()
+        if c >= HOT_ABORT_C:
+            hot = True; k(*DEL); break
+        for key, at in (("e0", 2), ("e1", 12), ("e2", 40), ("e3", 70)):
+            if key not in S and el >= at: S[key] = energy()
         ph = k("get", "pod", "-n", "default", name, "-o", "jsonpath={.status.phase}").stdout
         if ph in ("Succeeded", "Failed"): break
         time.sleep(2)
     log = k("logs", "-n", "default", name).stdout if not hot else ""
     wall = next((l.split("=", 1)[1] for l in log.splitlines() if l.startswith("BENCH_WALL_S=")), "NA")
-    sw = "NA"
-    if e1 is not None and e2 is None and hot: e2 = energy()   # abort after t+40: still report steady W
-    if e1 and e2:
-        (a, ta), (b, tb) = e1, e2
-        if b < a: b += rd(RANGE)
-        sw = f"{(b - a) / 1e6 / (tb - ta):.1f}"
-    valid = (not hot) and (tb - ta >= 20 if (e1 and e2) else True) and ph == "Succeeded" and wall != "NA" and int(wall) >= 75 and sw != "NA"
-    print(f"CAPBENCH{'' if valid else '_INVALID'} node={node} phase={phase} mb={mb} wall_s={wall} "
-          f"steady_w={sw} peak_c={peak} hot_abort={hot} pod_phase={ph}")
+    pod_hot = next((l for l in log.splitlines() if l.startswith(("POD_HOT_ABORT", "NO_PKG_ZONE"))), "")
+    def w(a, b, min_s):
+        if a not in S or b not in S: return "NA"
+        (x, tx), (y, ty) = S[a], S[b]
+        if ty - tx < min_s: return "NA"
+        if y < x: y += rd(RANGE)
+        return f"{(y - x) / 1e6 / (ty - tx):.1f}"
+    early, steady = w("e0", "e1", 8), w("e2", "e3", 20)
+    valid = not hot and not pod_hot and ph == "Succeeded" and wall != "NA" and int(wall) >= 75 and "NA" not in (early, steady)
+    print(f"CAPBENCH{'' if valid else '_INVALID'} node={node} phase={phase} mb={mb} wall_s={wall} early_w={early} "
+          f"steady_w={steady} peak_c={peak} mac_hot_abort={hot} pod={pod_hot or 'ok'} pod_phase={ph}")
 finally:
-    k("delete", "pod", "-n", "default", name, "--ignore-not-found", "--grace-period=0", "--force", "--wait=false")
+    k(*DEL)
 ```
 
 ### capstats.py
 
 ```python capstats
 #!/usr/bin/env python3
-# capstats.py <label> <minutes> [end_unix]  -> one CAPSTATS line per node + JSON in $W/stats-<label>.json
+# capstats.py <label> <minutes> <out-dir> [end_unix] [--no-rapl]
+#   -> one CAPSTATS line per node; ONLY if every check passes: <out-dir>/stats-<label>.json + "CAPSTATS_OK".
+#   --no-rapl: skip the RAPL families (for windows older than the RAPL series, enabled 2026-10-04).
 # Window = [end - minutes, end]. Reads Prometheus through the apiserver proxy (kubectl get --raw).
 # ABORTS (exit 2) if any metric family returns fewer than 3 nodes: an unscraped series must
 # not read as "0 throttles" or "no heat" (docs/sops/verification-contents-not-shape.md).
 import json, os, subprocess, sys, time, urllib.parse
-label, mins = sys.argv[1], int(sys.argv[2]); end = int(sys.argv[3]) if len(sys.argv) > 3 else int(time.time())
+args = [a for a in sys.argv[1:] if not a.startswith("--")]; norapl = "--no-rapl" in sys.argv
+label, mins, outdir = args[0], int(args[1]), args[2]; end = int(args[3]) if len(args) > 3 else int(time.time())
+if not os.path.isdir(outdir): print(f"CAPSTATS_ABORT out-dir {outdir!r} missing"); sys.exit(2)
 P = "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?"
 w = f"{mins}m"
 T = 'max by (instance) (node_thermal_zone_temp{type="x86_pkg_temp"})'   # one series per node even
@@ -865,6 +931,7 @@ Q = {"temp_avg": f"avg_over_time(({T})[{w}:30s])",
 # 16-19 W real while the RAPL series was 20 min old). Require >= 90 % of the 30 s steps per node.
 Q["cov_temp"] = f"count_over_time(({T})[{w}:30s]) / {mins * 2}"
 Q["cov_rapl"] = f"count_over_time((sum by (instance) (node_rapl_package_joules_total))[{w}:30s]) / {mins * 2}"
+if norapl: Q = {k: v for k, v in Q.items() if "rapl" not in k}
 out, short = {}, []
 for k, q in Q.items():
     raw = subprocess.run(["kubectl", "get", "--raw", P + urllib.parse.urlencode({"query": q, "time": end})],
@@ -873,10 +940,10 @@ for k, q in Q.items():
     if len(res) != 3: short.append(f"{k}:{len(res)}")
     for r in res: out.setdefault(r["metric"]["instance"].split(":")[0], {})[k] = round(float(r["value"][1]), 2)
 for n in sorted(out): print(f"CAPSTATS {label} {n} " + " ".join(f"{k}={v}" for k, v in sorted(out[n].items())))
-wd = os.environ.get("W", ".")
-json.dump({"label": label, "end": end, "minutes": mins, "nodes": out}, open(f"{wd}/stats-{label}.json", "w"), indent=1)
 lowcov = [f"{n}:{k}={v}" for n, d in out.items() for k, v in d.items() if k.startswith("cov_") and v < 0.9]
 if lowcov: print(f"CAPSTATS_ABORT sample coverage < 0.9 (window older than the series or a scrape gap): {lowcov}"); sys.exit(3)
 if short: print(f"CAPSTATS_ABORT families without exactly 3 nodes: {short}"); sys.exit(2)
+json.dump({"label": label, "end": end, "minutes": mins, "nodes": out}, open(f"{outdir}/stats-{label}.json", "w"), indent=1)
+print(f"CAPSTATS_OK {label} -> {outdir}/stats-{label}.json")
 ```
 
