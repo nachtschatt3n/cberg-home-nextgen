@@ -87,6 +87,11 @@ MAX_PER_NODE = int(os.environ.get("GATE_MAX_PER_NODE", "2"))   # browser lane
 CPU_OPEN_BELOW_C = float(os.environ.get("GATE_CPU_OPEN_BELOW_C", "88"))
 CPU_HOT_C = float(os.environ.get("GATE_CPU_HOT_C", "96"))
 MAX_CPU_PER_NODE = int(os.environ.get("GATE_MAX_CPU_PER_NODE", "2"))
+# Per-node cpu-lane cap overrides "node=N,...". nuc14-02 read 100 C at 22:44
+# 2026-10-04 with 2 sims pods admitted under 84/95 C (first watch of the
+# per-node brake); it peaks at 96-100 C from production alone, so 1 sims pod.
+CPU_MAX_OVERRIDE = {k: int(v) for k, v in (x.split("=") for x in
+                    os.environ.get("GATE_CPU_MAX_OVERRIDE", "k8s-nuc14-02=1").split(",") if "=" in x)}
 # CI CPU requests per node (owner 2026-10-04: CI gets >= 6 CPU per node while
 # the node is below the thermal limits; production leaves 6.4-7.2 of 17 free)
 NODE_CPU_BUDGET = float(os.environ.get("GATE_NODE_CPU_BUDGET", "6"))
@@ -241,8 +246,8 @@ def closed_reason(node, lane, req, temps, count, last, now, free, ci_req, brake)
             return f"full ({nb}/1 browser pods; no 2nd browser pod on this node)"
         if nb >= MAX_PER_NODE:
             return f"full ({nb}/{MAX_PER_NODE} browser pods)"
-    elif nc >= MAX_CPU_PER_NODE:
-        return f"full ({nc}/{MAX_CPU_PER_NODE} cpu-lane pods)"
+    elif nc >= CPU_MAX_OVERRIDE.get(node, MAX_CPU_PER_NODE):
+        return f"full ({nc}/{CPU_MAX_OVERRIDE.get(node, MAX_CPU_PER_NODE)} cpu-lane pods)"
     used = ci_req.get(node, {"cpu": 0.0, "memory": 0.0, "gpu": 0.0})
     if used["cpu"] + req["cpu"] > NODE_CPU_BUDGET + 1e-6:
         return f"budget (CI CPU requests {used['cpu']:g}+{req['cpu']:g} > {NODE_CPU_BUDGET:g})"
@@ -307,7 +312,7 @@ def main():
                 state = "  ".join(f"{ln}: " + ("CLOSED " + r if r else "open") for ln in ("browser", "cpu")
                                   for r in [closed_reason(n, ln, probe[ln], temps, count, last, now, free, ci_req, brake)])
                 print(f"{n}  2m-avg {temps[n][0]:5.1f}C  3m-peak {temps[n][1]:5.1f}C  "
-                      f"browser {c['browser']}/{MAX_PER_NODE} cpu {c['cpu']}/{MAX_CPU_PER_NODE} "
+                      f"browser {c['browser']}/{MAX_PER_NODE} cpu {c['cpu']}/{CPU_MAX_OVERRIDE.get(n, MAX_CPU_PER_NODE)} "
                       f"ci-cpu {u['cpu']:g}/{NODE_CPU_BUDGET:g}\n    {state}")
             for n, t in sorted(brake.items()):
                 print(f"BRAKE: {n} read >= {BRAKE_C:.0f}C; no admissions on {n} for {t - now:.0f}s more")
