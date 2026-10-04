@@ -6,7 +6,10 @@
 # treated ordinary CI activity as cluster faults, so both are disabled in
 # helmvalues.yaml (defaultRules.disabled) and re-declared here under the SAME
 # alert names (routing, silences and docs/sops/failed-job-alerting.md keep
-# working) with one narrow exclusion each:
+# working) with one narrow exclusion each.
+# KubeCPUQuotaOvercommit / KubeMemoryQuotaOvercommit stay stock: they compare
+# the SUM of hard quotas to allocatable (> 1.5x); ci-runner-quota is 12 CPU /
+# 36Gi (~0.24x / ~0.21x of 51 CPU / 174 GiB), nowhere near, so no override.
 #
 # These are inline copies of the stock rules (chart 91.5.2): on every
 # kube-prometheus-stack minor/major bump, diff them against the chart's
@@ -27,6 +30,10 @@
 #                       priority_class is "ci-low" (namespace-pinned: the
 #                       cluster-scoped class could otherwise hide any pod).
 #                       Everything else is the stock expression.
+#   KubeMemoryOvercommit - same reasoning and the identical exclusion as
+#                       KubeCPUOvercommit: fired 2026-10-04 with ~82.6 GiB of
+#                       production requests + 5-6 CI shards at 6Gi each against
+#                       a ~116 GiB (174 - 58) N-1 budget. Added 2026-10-04.
 #   KubeQuotaAlmostFull / KubeQuotaFullyUsed (info)
 #                     - ci-runner-quota is a deliberate capacity CAP sized to
 #                       exactly 3 shards; every run sits at 89-95% of it. Near
@@ -108,6 +115,57 @@ spec:
               - (
                 sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics", resource="cpu"})
                 - max by (cluster) (kube_node_status_allocatable{job="kube-state-metrics", resource="cpu"})
+              ) > 0
+            )
+          for: 10m
+          labels:
+            severity: warning
+        - alert: KubeMemoryOvercommit
+          annotations:
+            description: Cluster has overcommitted memory resource requests for
+              Pods by {{ $value | humanize }} bytes and cannot tolerate node
+              failure. (Preemptible ci-low CI pods are not counted.)
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubememoryovercommit
+            summary: Cluster has overcommitted memory resource requests.
+          # Stock expression (chart 91.5.2) with
+          # namespace_memory:kube_pod_container_resource_requests:sum expanded
+          # inline so ci-low pods can be subtracted per pod. Same exclusion as
+          # KubeCPUOvercommit above.
+          expr: |
+            # Non-HA clusters.
+            (
+              (
+                sum by (cluster) (
+                  max by (namespace, pod, container, cluster) (kube_pod_container_resource_requests{job="kube-state-metrics", resource="memory"})
+                  * on (namespace, pod, cluster) group_left ()
+                  max by (namespace, pod, cluster) (kube_pod_status_phase{phase=~"Pending|Running"} == 1)
+                  unless on (namespace, pod, cluster)
+                  max by (namespace, pod, cluster) (kube_pod_info{job="kube-state-metrics", namespace="ci-runner", priority_class="ci-low"})
+                )
+                -
+                sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics", resource="memory"}) > 0
+              )
+              and
+              count by (cluster) (max by (cluster, node) (kube_node_role{job="kube-state-metrics", role="control-plane"})) < 3
+            )
+            or
+            # HA clusters.
+            (
+              sum by (cluster) (
+                max by (namespace, pod, container, cluster) (kube_pod_container_resource_requests{job="kube-state-metrics", resource="memory"})
+                * on (namespace, pod, cluster) group_left ()
+                max by (namespace, pod, cluster) (kube_pod_status_phase{phase=~"Pending|Running"} == 1)
+                unless on (namespace, pod, cluster)
+                max by (namespace, pod, cluster) (kube_pod_info{job="kube-state-metrics", namespace="ci-runner", priority_class="ci-low"})
+              )
+              -
+              (
+                # Skip clusters with only one allocatable node.
+                (
+                  sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics", resource="memory"})
+                  -
+                  max by (cluster) (kube_node_status_allocatable{job="kube-state-metrics", resource="memory"})
+                ) > 0
               ) > 0
             )
           for: 10m

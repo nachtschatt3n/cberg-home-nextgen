@@ -30,12 +30,13 @@ data:
         NodeMemoryMajorPagesFaults: true
         # Stock KubeJobFailed fires for every red ci-runner test run (a failing
         # shard fails its Job by design: a test RESULT, not a fault) and stock
-        # KubeCPUOvercommit counts the preemptible ci-low CI pods against the
-        # N-1 headroom. Both re-declared under the same names with a narrow
-        # ci-runner exclusion, plus runner-infra alerts, in ci-runner-alerts.yaml.
-        # See 2026-10-03.
+        # KubeCPUOvercommit / KubeMemoryOvercommit count the preemptible ci-low
+        # CI pods against the N-1 headroom. All re-declared under the same names
+        # with a narrow ci-runner exclusion, plus runner-infra alerts, in
+        # ci-runner-alerts.yaml. See 2026-10-03 (memory: 2026-10-04).
         KubeJobFailed: true
         KubeCPUOvercommit: true
+        KubeMemoryOvercommit: true
         # ci-runner-quota is a capacity cap every CI run fills by design.
         # Re-declared without ci-runner in ci-runner-alerts.yaml.
         KubeQuotaAlmostFull: true
