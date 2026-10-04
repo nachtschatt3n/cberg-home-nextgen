@@ -11,7 +11,7 @@
 
 The Mac mini also hosts the shared Ollama runtime and many agent sessions. Parallel Playwright runs drove its load to 110–170. This runner moves the game's test suites onto the three Talos nodes, which have plenty of idle CPU, while a namespace quota keeps production headroom.
 
-**Status: best-effort.** GitHub Actions CI stays the release gate. The runner is capped for node temperature (4 CPU per shard, at most 2 shards at a time; owner decision 2026-10-03), and at that size a few CPU-timing e2e assertions can fail. A red shard here is a signal to re-check on GitHub CI, not a release blocker.
+**Status: best-effort.** GitHub Actions CI stays the release gate. The runner is capped for node temperature: 4 CPU per shard, and since 2026-10-04 a **live thermal gate** (§2b) decides where and when each shard starts (up to 6 shards, at most 2 per node, only on nodes below 85 °C), and at that size a few CPU-timing e2e assertions can fail. A red shard here is a signal to re-check on GitHub CI, not a release blocker.
 
 - Scope: namespace `ci-runner`, Flux Kustomization `flux-system/the-ninth-banner-tests`, trigger `scripts/ninth-banner-test.sh`, private repo `nachtschatt3n/the-ninth-banner`.
 - Prerequisites: run from this repo on the Mac as `mu`, with the `mise` tool chain (kubeconfig) and `gh` authenticated as the repo owner (used only to resolve a ref to a full SHA).
@@ -29,10 +29,11 @@ The Mac mini also hosts the shared Ollama runtime and many agent sessions. Paral
 | Job template | `kubernetes/apps/ci-runner/the-ninth-banner-tests/job-template.yaml.tpl`. Not applied by Flux and not scanned by kubeconform (`.tpl`); rendered per run by the trigger |
 | Trigger | `scripts/ninth-banner-test.sh <ref> <unit\|e2e\|nightly\|responsive\|release\|sims> [shards]` |
 | Image | `mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30…` (multi-arch index digest; Node 24, git, Chromium/Firefox/WebKit baked in). **Keep in lockstep with `@playwright/test` in the game's `package-lock.json`**. Bump: §4 step 5 |
+| Thermal gate | Every shard pod is created **gated** (`schedulingGates: ci.cberg.home/thermal`) and admitted onto a cool node with a free CI slot by `scripts/ninth-banner-admit.py`, ticked by every running trigger. See §2b |
 | Job shape | Indexed Job, `completions = shards`, `parallelism = min(shards, 3)` in GPU mode, `min(shards, 2)` in CPU mode (**thermal cap**), `backoffLimitPerIndex: 0`, `maxFailedIndexes = shards` (no retries, one failing shard never stops the others), topology spread over `kubernetes.io/hostname`, `activeDeadlineSeconds: 5400`, `ttlSecondsAfterFinished: 3600` |
 | Per shard | requests 2 CPU / 6Gi / 8Gi ephemeral; limits **4 CPU (thermal cap)** / 10Gi / 16Gi; Playwright `--workers=2` (`WORKERS`, default 2, see Troubleshooting). emptyDir caps: `work` 10Gi, `tmp` 4Gi, **`results` 6Gi** (raised from 2Gi on 2026-10-04: the `release` shard holding the responsive screen tours (iPad/desktop screenshots) + perf specs was evicted twice with `Usage of EmptyDir volume "results" exceeds the limit "2Gi"` although all its tests passed; the other shards write 2-3 MB). Measured `work` is ~0.8Gi, so the unchanged 16Gi container limit still covers a full `results` dir (each node has 340Gi+ free for 3 parallel shards). `run.sh` logs `results size:` plus the 10 largest entries (`du:` lines) right before `CI-RESULT`, so an oversize run shows what filled it |
 | Priority | `PriorityClass ci-low` (value -1000, `preemptionPolicy: Never`, cluster-scoped, in the app kustomization): CI pods never preempt production and are evicted first under node pressure |
-| Quota | 4 pods, requests 6.5 CPU / 19Gi, limits 13 CPU / 32Gi; 0 Services, 0 PVCs. A second concurrent run queues (its shards are not created until quota frees) rather than squeezing production. `KubeQuotaAlmostFull`/`KubeQuotaFullyUsed` exclude `ci-runner` (the quota is a cap runs fill by design); `KubeQuotaExceeded` stays stock; a run starved by the quota raises `CIRunnerJobStarved` (info) after 60m |
+| Quota | **6 pods**, requests 12 CPU / 36Gi, limits 24 CPU / 60Gi, i915 6 (since 2026-10-04; was 4 pods / 6.5 CPU, i.e. 3 shards). The quota is only the TOTAL cap; per-node placement is the thermal gate's (§2b). 0 Services, 0 PVCs. Further runs queue (their shards are not created until quota frees) rather than squeezing production. `KubeQuotaAlmostFull`/`KubeQuotaFullyUsed` exclude `ci-runner` (the quota is a cap runs fill by design); `KubeQuotaExceeded` stays stock; a run starved by the quota raises `CIRunnerJobStarved` (info) after 60m |
 | Egress | DNS (kube-dns, L7 DNS proxy) answering ONLY `github.com`, `registry.npmjs.org` and `**.cluster.local` (search-domain expansions); everything else REFUSED. TCP 443 to those two hosts only. Ingress: deny all. Both ServiceAccounts (`default` included) have `automountServiceAccountToken: false` |
 | Credential | `the-ninth-banner-git-credential` (dockerconfigjson). Mounted **only** into the `clone` init container, read by `git-askpass.sh`; never in env, logs, or the test container |
 | Results | `~/ci-results/<job>/` on the Mac: `summary.txt`, `shard-N.log`, `shard-N/{junit.xml, playwright-report/, test-results/ (traces), blob-report/, reports/, exit-code, commit}`; combined suites (`release` via `release-all`) put that layout once per part under `shard-N/<part>/` |
@@ -103,6 +104,39 @@ Limits / caveats:
 - Parallelism: **GPU mode runs up to 3 shards at once, one per node** (owner decision 2026-10-03). CPU mode (`GPU=0`) stays at 2 (thermal). CPU cap per shard stays 4.
   Verified 2026-10-03 at `302a819`, 3 GPU shards in parallel (one per node, all on the Intel renderer): **3 min 54 s** wall time, 134/136 passed (1 flaky). Peak package temperatures 69 / 83 / 77 °C (nuc14-01/02/03), against 64 / 81 / 69 °C in the 10 min before. The failure is the known Firefox `music.spec` AudioContext issue (it fails on CPU too).
   `release` with `release-all` verified 2026-10-03 at game `4f26442`, 3 GPU shards: **6 min 57 s** wall time (was ~13 min with the whole responsive matrix on shard 1); shards 309 / 357 / 400 s test time; 188 passed, 0 failed, 26 skipped (3 flaky, passed on retry); status `E2E (GPU, k8s)` = success. Peak package temperatures 71 / 92 / 83 °C (nuc14-01/02/03) against 64 / 76 / 65 °C in the 10 min before; nuc14-02 is the warm node and touched 92 °C, just under the 93 °C target.
+
+
+## 2b) Thermal gate (since 2026-10-04)
+
+The quota allows 6 shards, but **where and when** a shard starts is decided live from each node's package temperature. The NUC14s cannot get better cooling right now (owner, 2026-10-04), so heat is the hard limit and CPU capacity is not.
+
+| Item | Value |
+|---|---|
+| How a pod waits | `job-template.yaml.tpl` creates every shard pod with `schedulingGates: [ci.cberg.home/thermal]`. A gated pod is `Pending` (`SchedulingGated`): the scheduler ignores it and it uses no node resources (it does count against the quota) |
+| Who admits | `scripts/ninth-banner-admit.py`, one tick per poll (~10 s) of **every** running `ninth-banner-test.sh` (`COLLECT=0` runs stay until all their shards are admitted). A host-wide lock (`/tmp/ninth-banner-admit.lock`) lets one tick run at a time. It admits gated pods of **any** run, oldest first, at most one per node per tick: it pins the pod with `nodeSelector kubernetes.io/hostname=<node>`, removes the gate and annotates `ci.cberg.home/released-at` |
+| A node is open when | 2-min average `x86_pkg_temp` **< 85 °C** (`GATE_OPEN_BELOW_C`) AND 3-min peak **< 93 °C** (`GATE_HOT_C`, the SOP target) AND **< 2 CI pods** bound or pinned there (`GATE_MAX_PER_NODE`) AND no CI start there for **300 s** (`GATE_SETTLE_SECONDS`; 120 s let nuc14-02 take a 2nd shard before the 1st one's heat showed) |
+| Fail-closed | Missing or stale (> 90 s) Prometheus data closes the node. No trigger running means nothing is admitted (pods wait; `CIRunnerPodStuckPending` after 30 min) |
+| Production | Never touched: the tick reads Prometheus and patches only gated pods in `ci-runner`. Running pods are never changed or evicted. `ci-low` CI pods can still be preempted by production |
+| Status | `scripts/ninth-banner-admit.py --status` (node state + reason: `warm`/`hot`/`full`/`settling`, queue) |
+| Mechanism choice | Pod scheduling gates admitted by the trigger. A cluster-scoped `MutatingAdmissionPolicy` + controller was the first design and was not approved (cluster-wide workload); node labels/taints were rejected (a taint would affect production, a label cannot hard-cap pods per node between controller ticks) |
+
+Measured 2026-10-04 (nobody home; production 1.3-1.5 cores of container CPU per node; idle package 52-55 °C on nuc14-01/03, 62-76 °C on nuc14-02):
+
+| | Before (13:13-15:13, quota 3 shards) | Trial (15:14-16:06, gate, quota 6) |
+|---|---|---|
+| Running CI pods (avg / max) | 2.85 / 3 | 3.2 / 5, never > 2 per node |
+| Shards per hour | 30.5-31.5 | **35.8 (+15 %)** |
+| Peak package temp n01 / n02 / n03 | 86 / 102 / 95 °C | 95 / 100 / **103** °C (single-sample turbo spikes) |
+| Worst 2-min floor n01 / n02 / n03 | 73 / 87 / 85 °C | 88 / 94 / 92 °C (94 under the old 120 s settle) |
+| Time at >= 93 °C n01 / n02 / n03 | 0 / 23 / 0.4 % | first 30 min: 3.3 / 16.7 / 10 %; last 30 min (300 s settle): 0 / 9 / 10 % |
+| Time at >= 98 °C n02 | 13.8 % | first 30 min 8.3 %, last 30 min 1.7 % |
+| Production restarts / OOM / evictions | 0 | 0 |
+
+Reading: nuc14-02 is the hot node (it peaks at 96-98 °C with **no** CI pod: turbo bursts at ~1.7 busy cores), so the gate keeps CI off it most of the time and shifts the load to nuc14-01/03. Those are now admission-limited by the 2-per-node cap, not by heat.
+
+CPU per shard (measured 2026-10-04): `sims` shards are single-threaded (~1.0 core, never throttled), so their limit is irrelevant. Browser shards (`release`, `responsive`, `e2e`) sit at their limit (CFS-throttled in 78-99 % of periods). A 3-CPU trial made a responsive shard take 272 s against a 207 s median at 4 CPU (+31 %) for the same CPU-seconds, so the default **stays 4**: fewer cores would cost throughput and not admit more pods.
+
+Rollback triggers (watch during any change to these thresholds): any node with `min_over_time(node_thermal_zone_temp{type="x86_pkg_temp"}[2m]) >= 98` (>= 98 °C for 2 min), or a production restart/OOM/eviction. Neither fired in the trial.
 
 ---
 
@@ -181,6 +215,8 @@ kubectl logs -n ci-runner <pod> -c clone
 | Symptom | Cause / fix |
 |---|---|
 | `clone` init fails with 403/404 | The credential cannot read the private repo, or the SHA was force-pushed away. Check the PAT scope (needs repo read). See Security Check |
+| Pods `Pending` with status `SchedulingGated` | The thermal gate is holding them: every node is `warm`/`hot`/`full`/`settling`. `scripts/ninth-banner-admit.py --status` shows why. If no `ninth-banner-test.sh` is running, nothing admits them: start any run, or run `scripts/ninth-banner-admit.py` by hand (one tick) |
+| nuc14-02 never gets a CI pod | Expected: it peaks at 96-98 °C even without CI, so its 3-min peak is usually >= 93 °C (§2b) |
 | Pods `Pending`, event `exceeded quota` | Another run is still holding the quota (it waits up to 900s for collection). Wait, or delete the old Job |
 | `npm ci` fails with `ENOTFOUND`/`ETIMEDOUT` | A package now resolves from a host other than `registry.npmjs.org`. Add that FQDN to `networkpolicy.yaml` after review |
 | e2e timing tests fail (fps floor, clash fast-forward < 3000 ms, 120 s timeouts) while the pod sits at its 6-CPU limit | CPU oversubscription: Chromium renders in software here. Measured 2026-10-03 at `46eaae3`: `WORKERS=4` gave 3/3 shards FAIL (12 failed, 4 flaky, 14.6 min); `WORKERS=2` gave 77/77 passed, 0 flaky, 9.2 min. Keep 2 (the same per-worker CPU as GitHub's 4-vCPU runner) |
@@ -221,7 +257,7 @@ kubectl -n kube-system exec ds/cilium -- cilium-dbg monitor --type drop
 ## 10) Security Check
 
 - `kubectl get secret -n ci-runner` shows exactly one Secret (the git credential).
-- `kubectl get rolebinding,role -n ci-runner` shows none. The ServiceAccount has `automountServiceAccountToken: false`.
+- `kubectl get rolebinding,role -n ci-runner` shows none (the thermal gate runs in the trigger on the Mac with the operator kubeconfig; it adds no in-cluster RBAC). The ServiceAccount has `automountServiceAccountToken: false`.
 - The CiliumNetworkPolicy `ci-runner-lockdown` exists with `endpointSelector: {}`.
 - **ACCEPTED RISK (owner, 2026-10-03; audit item W1):** the runner keeps the shared, account-wide `repo`-scoped GHCR PAT described below. The owner accepted the risk, mitigated by init-container-only mounting and the egress allow-list. Do not change the credential without a new owner decision. Re-evaluate when the PAT is rotated, or if the clone container ever runs anything besides `git fetch`. Register entry: see §10a.
 - **Credential choice (owner decision 2026-10-03: reuse an existing token):** the runner reuses the shared GHCR pull PAT (the same ciphertext as `ghcr-the-ninth-banner` / arag-web, copied, never decrypted). The first clone (2026-10-03) proved it can read a **private repo's contents**, so it is not read:packages-only: it carries `repo` scope (classic PAT, account-wide, write-capable). The mitigations are structural: it is mounted only into the `clone` init container, which runs nothing but `git fetch`, and npm install scripts and tests run in a container that never has it. Least privilege would still be a read-only **deploy key** on `the-ninth-banner` alone (no expiry, one repo, read-only). Switch when convenient. Do NOT substitute the Flux git token or the MCP `GITHUB_TOKEN`, which are account-wide too.
@@ -245,6 +281,8 @@ runbooks/policy-cli.py risk add AR-<next> \
 
 ## 11) Rollback Plan
 
+- **Thermal gate / caps (2026-10-04)**: `git revert` the quota commit (`feat(ci-runner): raise ninth-banner quota to 6 shards ...`) and push; Flux restores 3 shards. To remove the gate as well, also revert `feat(ci-runner): thermal gate ...` and `fix(ci-runner): thermal gate settle ...`, then release pods still gated by the old template: `scripts/ninth-banner-admit.py --release-all` (run it from the pre-revert checkout, or `kubectl patch` each gated pod's `spec.schedulingGates` to `[]`). Thresholds alone: edit the `GATE_*` defaults in `scripts/ninth-banner-admit.py`; they take effect on the next tick, no deploy.
+
 - Stop runs: `kubectl delete jobs -n ci-runner --all`.
 - Remove the runner: `git revert` the commit that added `kubernetes/apps/ci-runner/` and push. The namespace is annotated `prune: disabled`, so delete it by hand afterwards: `kubectl delete ns ci-runner`.
 
@@ -267,4 +305,5 @@ runbooks/policy-cli.py risk add AR-<next> \
 - `2026.10.03` (GPU parallel): GPU residual risk accepted by the owner; GPU mode runs 3 shards in parallel (quota i915 cap 3); CPU mode stays at 2.
 - `2026.10.03` (game hand-off `77764e6`): suites call the game's `test:*:shard` scripts with `E2E_OUT`; `e2e`/`responsive` GPU-only; new `release` suite + commit status `E2E (GPU, k8s)` posted from the Mac; image lockstep against `tests/e2e/runner.json`; runner-side browser wrapper removed.
 - `2026.10.03` (release-all, game `4f26442`): `release` runs `test:release-all:shard` (release + responsive matrix as one pool over all shards, outputs in `shard-N/release/` and `shard-N/responsive/`); `E2E_RUNNER=k8s` exported for every suite; older refs keep the shard-1 responsive fallback.
+- `2026.10.04` (thermal gate): shard pods created gated; `scripts/ninth-banner-admit.py` (ticked by every trigger) admits them onto nodes < 85 °C 2-min avg, < 93 °C 3-min peak, < 2 CI pods, 300 s settle; quota 3 -> 6 shards; `CIRunnerPodStuckPending` 15 -> 30 min; CPU per shard stays 4 (3-CPU trial: +31 % shard time). Trial: +15 % shards/h, no rollback trigger.
 - `2026.10.03` (no-tests guard): a browser-suite shard with tests planned but 0 executed (or no plan at all, or 0 on a 1-shard run) fails with rc=3 (`NO-TESTS`); the trigger fails the run when the junit total is 0 (also posts `failure` for `release`) and warns on executed < planned; `CI-RESULT` carries `planned=`/`executed=`.
