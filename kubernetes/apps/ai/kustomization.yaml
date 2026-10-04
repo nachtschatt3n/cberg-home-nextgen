@@ -10,9 +10,9 @@ resources:
   - ./ai-sre/ks.yaml
   - ./openclaw/ks.yaml
   - ./anythingllm/ks.yaml
-  - ./librechat/ks.yaml
+  # - ./librechat/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./next-ai-draw-io/ks.yaml
   - ./paperclip/ks.yaml
-  - ./hermes-agent/ks.yaml
+  # - ./hermes-agent/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./oc8/ks.yaml
   - ./gods-eye-view/ks.yaml

@@ -13,18 +13,18 @@ resources:
   - ./_image-automation/ks.yaml
   # Core Portfolio Apps — STAGED ROLLOUT (operator go 2026-08-17):
   # Wave 1 canary below; Waves 2/3 are commented until the canary soaks 24h.
-  - ./globalmobility/ks.yaml
+  # - ./globalmobility/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./haarfabrik/ks.yaml
-  - ./holm-backend/ks.yaml
-  - ./ibgastro/ks.yaml
-  - ./inbewegung/ks.yaml
-  - ./kfa-medienarchiv/ks.yaml
-  - ./mangold-smarthomeadvisor/ks.yaml
-  - ./max-jung/ks.yaml
+  # - ./holm-backend/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./ibgastro/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./inbewegung/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./kfa-medienarchiv/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./mangold-smarthomeadvisor/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./max-jung/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./metaldyne/ks.yaml
-  - ./ordiga/ks.yaml
-  - ./see-edv-ibspm/ks.yaml
-  - ./stepbystepguide/ks.yaml
+  # - ./ordiga/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./see-edv-ibspm/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./stepbystepguide/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./u-zeit/ks.yaml
   - ./uzeit-de/ks.yaml
-  - ./zuhause-betreut/ks.yaml
+  # - ./zuhause-betreut/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)

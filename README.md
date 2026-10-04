@@ -486,6 +486,11 @@ quarterly.
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 
+> **Decommissioned 2026-10-04 (operator):** hermes-agent, librechat, scrypted-nvr,
+> actual-budget, omni-tools and 11 showcase apps (all but haarfabrik, metaldyne,
+> u-zeit, uzeit-de) are commented out of their namespace kustomizations. Their
+> directories stay in the repo, so the per-namespace counts below still include them.
+
 ### 🤖 AI (`ai` — 11)
 ai-sre · anythingllm · gods-eye-view · hermes-agent · librechat · mcpo ·
 next-ai-draw-io · oc8 · open-webui · openclaw · paperclip

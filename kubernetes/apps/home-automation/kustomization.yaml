@@ -19,7 +19,7 @@ resources:
  #   2026-05-29 → 2026-09-03 while the only Thread RCP sat on WiFi (spinel crashloop).
  #   Requirement stays: the RCP must be Ethernet-attached (see otbr/app/helmrelease.yaml).
  - ./pallet-price-monitor/ks.yaml
- - ./scrypted-nvr/ks.yaml
+ # - ./scrypted-nvr/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
  - ./solarfocus-scraper/ks.yaml
  - ./teslamate/ks.yaml
  - ./traccar/ks.yaml

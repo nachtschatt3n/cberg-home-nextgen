@@ -21,7 +21,7 @@ resources:
   - ./icloud-backup-alerts.yaml
   - ./immich-alerts.yaml
   - ./openclaw-alerts.yaml
-  - ./librechat-alerts.yaml
+  # - ./librechat-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./next-ai-draw-io-alerts.yaml
   - ./paperclip-alerts.yaml
   - ./platform-alerts.yaml
@@ -55,23 +55,23 @@ resources:
   - ./mealie-alerts.yaml
   - ./uptime-kuma-alerts.yaml
   - ./blackbox-exporter-alerts.yaml
-  - ./zuhause-betreut-alerts.yaml
-  - ./kfa-medienarchiv-alerts.yaml
-  - ./mangold-smarthomeadvisor-alerts.yaml
-  - ./globalmobility-alerts.yaml
+  # - ./zuhause-betreut-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./kfa-medienarchiv-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./mangold-smarthomeadvisor-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./globalmobility-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./haarfabrik-alerts.yaml
-  - ./holm-backend-alerts.yaml
-  - ./ibgastro-alerts.yaml
-  - ./inbewegung-alerts.yaml
-  - ./max-jung-alerts.yaml
+  # - ./holm-backend-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./ibgastro-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./inbewegung-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./max-jung-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./metaldyne-alerts.yaml
-  - ./ordiga-alerts.yaml
-  - ./see-edv-ibspm-alerts.yaml
-  - ./stepbystepguide-alerts.yaml
+  # - ./ordiga-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./see-edv-ibspm-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
+  # - ./stepbystepguide-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./u-zeit-alerts.yaml
   - ./uzeit-de-alerts.yaml
   - ./slo-burn-rate-alerts.yaml
-  - ./scrypted-alerts.yaml
+  # - ./scrypted-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./vaultwarden-alerts.yaml
   - ./maintenance-window-alerts.yaml
   - ./media-intake-alerts.yaml

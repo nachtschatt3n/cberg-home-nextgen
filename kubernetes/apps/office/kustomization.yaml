@@ -7,9 +7,9 @@ components:
   - ../../flux/components/common
 resources:
  - ./affine/ks.yaml
- - ./actual-budget/ks.yaml
+ # - ./actual-budget/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
  - ./nextcloud/ks.yaml
- - ./omni-tools/ks.yaml
+ # - ./omni-tools/ks.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
  - ./paperless-ngx/ks.yaml
  - ./penpot/ks.yaml
  - ./penpot-db/ks.yaml

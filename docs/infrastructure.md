@@ -77,7 +77,7 @@ Every existing LB service is pinned via `lbipam.cilium.io/ips` annotation so fut
 | `monitoring/edot-collector-talos-kmsg` | `.18` |
 | `home-automation/home-assistant` | `.24` |
 | `home-automation/iobroker` | `.25` |
-| `home-automation/scrypted` | `.26` |
+| `home-automation/scrypted` | `.26` (decommissioned 2026-10-04 — service pruned, IP free) |
 | `security/wazuh-syslog-unifi` | `.27` |
 | `ai/open-webui` | `.28` |
 | `home-automation/music-assistant-server` | `.29` |

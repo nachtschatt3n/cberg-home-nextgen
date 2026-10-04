@@ -3,6 +3,8 @@
 # operator-approved 2026-09-27). Mode per image: docs/sops/self-built-image-rebuild.md
 # section "Weekly rebuild + deploy mode".
 #
+# (2026-10-04: 11 of the 15 apps were decommissioned; their entries are
+# commented out below and only 4 remain active.)
 # WHY AUTO HERE: all 15 apps are internal-only (envoy-internal), non-critical demo
 # deployments, each with liveness/readiness/startup probes, `strategy: Recreate`
 # and `upgrade.remediation.strategy: rollback`. A rolled image that fails its
@@ -19,31 +21,33 @@
 #      so an ad-hoc push is never auto-deployed; only the weekly rebuild is).
 # The ^...$ anchors are load-bearing: Flux matches filterTags unanchored (see
 # the absenty ImagePolicy for the incident that taught this).
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
-  name: globalmobility
-  namespace: my-software-showcase
-spec:
-  image: ghcr.io/nachtschatt3n/globalmobility-group-gmbh-globaldispo
-  interval: 1h
-  secretRef:
-    name: ghcr-secret
+# DISABLED 2026-10-04 (operator: globalmobility decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImageRepository
+# metadata:
+#   name: globalmobility
+#   namespace: my-software-showcase
+# spec:
+#   image: ghcr.io/nachtschatt3n/globalmobility-group-gmbh-globaldispo
+#   interval: 1h
+#   secretRef:
+#     name: ghcr-secret
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: globalmobility
-  namespace: my-software-showcase
-spec:
-  imageRepositoryRef:
-    name: globalmobility
-  filterTags:
-    pattern: '^sha-[0-9a-f]{7}-b(?P<ts>\d{8})$'
-    extract: '$ts'
-  policy:
-    numerical:
-      order: asc
+# DISABLED 2026-10-04 (operator: globalmobility decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImagePolicy
+# metadata:
+#   name: globalmobility
+#   namespace: my-software-showcase
+# spec:
+#   imageRepositoryRef:
+#     name: globalmobility
+#   filterTags:
+#     pattern: '^sha-[0-9a-f]{7}-b(?P<ts>\d{8})$'
+#     extract: '$ts'
+#   policy:
+#     numerical:
+#       order: asc
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
@@ -71,161 +75,173 @@ spec:
     numerical:
       order: asc
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
-  name: holm-backend
-  namespace: my-software-showcase
-spec:
-  image: ghcr.io/nachtschatt3n/holm-backend
-  interval: 1h
-  secretRef:
-    name: ghcr-secret
+# DISABLED 2026-10-04 (operator: holm-backend decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImageRepository
+# metadata:
+#   name: holm-backend
+#   namespace: my-software-showcase
+# spec:
+#   image: ghcr.io/nachtschatt3n/holm-backend
+#   interval: 1h
+#   secretRef:
+#     name: ghcr-secret
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: holm-backend
-  namespace: my-software-showcase
-spec:
-  imageRepositoryRef:
-    name: holm-backend
-  filterTags:
-    pattern: '^production-(?P<ts>\d{14})$'
-    extract: '$ts'
-  policy:
-    numerical:
-      order: asc
+# DISABLED 2026-10-04 (operator: holm-backend decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImagePolicy
+# metadata:
+#   name: holm-backend
+#   namespace: my-software-showcase
+# spec:
+#   imageRepositoryRef:
+#     name: holm-backend
+#   filterTags:
+#     pattern: '^production-(?P<ts>\d{14})$'
+#     extract: '$ts'
+#   policy:
+#     numerical:
+#       order: asc
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
-  name: ibgastro
-  namespace: my-software-showcase
-spec:
-  image: ghcr.io/nachtschatt3n/ibgastro
-  interval: 1h
-  secretRef:
-    name: ghcr-secret
+# DISABLED 2026-10-04 (operator: ibgastro decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImageRepository
+# metadata:
+#   name: ibgastro
+#   namespace: my-software-showcase
+# spec:
+#   image: ghcr.io/nachtschatt3n/ibgastro
+#   interval: 1h
+#   secretRef:
+#     name: ghcr-secret
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: ibgastro
-  namespace: my-software-showcase
-spec:
-  imageRepositoryRef:
-    name: ibgastro
-  filterTags:
-    pattern: '^sha-[0-9a-f]{7}-b(?P<ts>\d{8})$'
-    extract: '$ts'
-  policy:
-    numerical:
-      order: asc
+# DISABLED 2026-10-04 (operator: ibgastro decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImagePolicy
+# metadata:
+#   name: ibgastro
+#   namespace: my-software-showcase
+# spec:
+#   imageRepositoryRef:
+#     name: ibgastro
+#   filterTags:
+#     pattern: '^sha-[0-9a-f]{7}-b(?P<ts>\d{8})$'
+#     extract: '$ts'
+#   policy:
+#     numerical:
+#       order: asc
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
-  name: inbewegung
-  namespace: my-software-showcase
-spec:
-  image: ghcr.io/nachtschatt3n/inbewegung-familymanager
-  interval: 1h
-  secretRef:
-    name: ghcr-secret
+# DISABLED 2026-10-04 (operator: inbewegung decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImageRepository
+# metadata:
+#   name: inbewegung
+#   namespace: my-software-showcase
+# spec:
+#   image: ghcr.io/nachtschatt3n/inbewegung-familymanager
+#   interval: 1h
+#   secretRef:
+#     name: ghcr-secret
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: inbewegung
-  namespace: my-software-showcase
-spec:
-  imageRepositoryRef:
-    name: inbewegung
-  filterTags:
-    pattern: '^production-(?P<ts>\d{14})$'
-    extract: '$ts'
-  policy:
-    numerical:
-      order: asc
+# DISABLED 2026-10-04 (operator: inbewegung decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImagePolicy
+# metadata:
+#   name: inbewegung
+#   namespace: my-software-showcase
+# spec:
+#   imageRepositoryRef:
+#     name: inbewegung
+#   filterTags:
+#     pattern: '^production-(?P<ts>\d{14})$'
+#     extract: '$ts'
+#   policy:
+#     numerical:
+#       order: asc
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
-  name: kfa-medienarchiv
-  namespace: my-software-showcase
-spec:
-  image: ghcr.io/nachtschatt3n/kfa_medienarchiv
-  interval: 1h
-  secretRef:
-    name: ghcr-secret
+# DISABLED 2026-10-04 (operator: kfa-medienarchiv decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImageRepository
+# metadata:
+#   name: kfa-medienarchiv
+#   namespace: my-software-showcase
+# spec:
+#   image: ghcr.io/nachtschatt3n/kfa_medienarchiv
+#   interval: 1h
+#   secretRef:
+#     name: ghcr-secret
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: kfa-medienarchiv
-  namespace: my-software-showcase
-spec:
-  imageRepositoryRef:
-    name: kfa-medienarchiv
-  filterTags:
-    pattern: '^production-(?P<ts>\d{14})$'
-    extract: '$ts'
-  policy:
-    numerical:
-      order: asc
+# DISABLED 2026-10-04 (operator: kfa-medienarchiv decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImagePolicy
+# metadata:
+#   name: kfa-medienarchiv
+#   namespace: my-software-showcase
+# spec:
+#   imageRepositoryRef:
+#     name: kfa-medienarchiv
+#   filterTags:
+#     pattern: '^production-(?P<ts>\d{14})$'
+#     extract: '$ts'
+#   policy:
+#     numerical:
+#       order: asc
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
-  name: mangold-smarthomeadvisor
-  namespace: my-software-showcase
-spec:
-  image: ghcr.io/nachtschatt3n/mangold-smarthomeadvisor
-  interval: 1h
-  secretRef:
-    name: ghcr-secret
+# DISABLED 2026-10-04 (operator: mangold-smarthomeadvisor decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImageRepository
+# metadata:
+#   name: mangold-smarthomeadvisor
+#   namespace: my-software-showcase
+# spec:
+#   image: ghcr.io/nachtschatt3n/mangold-smarthomeadvisor
+#   interval: 1h
+#   secretRef:
+#     name: ghcr-secret
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: mangold-smarthomeadvisor
-  namespace: my-software-showcase
-spec:
-  imageRepositoryRef:
-    name: mangold-smarthomeadvisor
-  filterTags:
-    pattern: '^production-(?P<ts>\d{14})$'
-    extract: '$ts'
-  policy:
-    numerical:
-      order: asc
+# DISABLED 2026-10-04 (operator: mangold-smarthomeadvisor decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImagePolicy
+# metadata:
+#   name: mangold-smarthomeadvisor
+#   namespace: my-software-showcase
+# spec:
+#   imageRepositoryRef:
+#     name: mangold-smarthomeadvisor
+#   filterTags:
+#     pattern: '^production-(?P<ts>\d{14})$'
+#     extract: '$ts'
+#   policy:
+#     numerical:
+#       order: asc
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
-  name: max-jung
-  namespace: my-software-showcase
-spec:
-  image: ghcr.io/nachtschatt3n/max-jung-transporte-fahrzeugcontrolling
-  interval: 1h
-  secretRef:
-    name: ghcr-secret
+# DISABLED 2026-10-04 (operator: max-jung decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImageRepository
+# metadata:
+#   name: max-jung
+#   namespace: my-software-showcase
+# spec:
+#   image: ghcr.io/nachtschatt3n/max-jung-transporte-fahrzeugcontrolling
+#   interval: 1h
+#   secretRef:
+#     name: ghcr-secret
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: max-jung
-  namespace: my-software-showcase
-spec:
-  imageRepositoryRef:
-    name: max-jung
-  filterTags:
-    pattern: '^production-(?P<ts>\d{14})$'
-    extract: '$ts'
-  policy:
-    numerical:
-      order: asc
+# DISABLED 2026-10-04 (operator: max-jung decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImagePolicy
+# metadata:
+#   name: max-jung
+#   namespace: my-software-showcase
+# spec:
+#   imageRepositoryRef:
+#     name: max-jung
+#   filterTags:
+#     pattern: '^production-(?P<ts>\d{14})$'
+#     extract: '$ts'
+#   policy:
+#     numerical:
+#       order: asc
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
@@ -253,83 +269,89 @@ spec:
     numerical:
       order: asc
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
-  name: ordiga
-  namespace: my-software-showcase
-spec:
-  image: ghcr.io/nachtschatt3n/ordiga
-  interval: 1h
-  secretRef:
-    name: ghcr-secret
+# DISABLED 2026-10-04 (operator: ordiga decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImageRepository
+# metadata:
+#   name: ordiga
+#   namespace: my-software-showcase
+# spec:
+#   image: ghcr.io/nachtschatt3n/ordiga
+#   interval: 1h
+#   secretRef:
+#     name: ghcr-secret
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: ordiga
-  namespace: my-software-showcase
-spec:
-  imageRepositoryRef:
-    name: ordiga
-  filterTags:
-    pattern: '^production-(?P<ts>\d{14})$'
-    extract: '$ts'
-  policy:
-    numerical:
-      order: asc
+# DISABLED 2026-10-04 (operator: ordiga decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImagePolicy
+# metadata:
+#   name: ordiga
+#   namespace: my-software-showcase
+# spec:
+#   imageRepositoryRef:
+#     name: ordiga
+#   filterTags:
+#     pattern: '^production-(?P<ts>\d{14})$'
+#     extract: '$ts'
+#   policy:
+#     numerical:
+#       order: asc
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
-  name: see-edv-ibspm
-  namespace: my-software-showcase
-spec:
-  image: ghcr.io/nachtschatt3n/see-edv-ibspm
-  interval: 1h
-  secretRef:
-    name: ghcr-secret
+# DISABLED 2026-10-04 (operator: see-edv-ibspm decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImageRepository
+# metadata:
+#   name: see-edv-ibspm
+#   namespace: my-software-showcase
+# spec:
+#   image: ghcr.io/nachtschatt3n/see-edv-ibspm
+#   interval: 1h
+#   secretRef:
+#     name: ghcr-secret
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: see-edv-ibspm
-  namespace: my-software-showcase
-spec:
-  imageRepositoryRef:
-    name: see-edv-ibspm
-  filterTags:
-    pattern: '^production-(?P<ts>\d{14})$'
-    extract: '$ts'
-  policy:
-    numerical:
-      order: asc
+# DISABLED 2026-10-04 (operator: see-edv-ibspm decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImagePolicy
+# metadata:
+#   name: see-edv-ibspm
+#   namespace: my-software-showcase
+# spec:
+#   imageRepositoryRef:
+#     name: see-edv-ibspm
+#   filterTags:
+#     pattern: '^production-(?P<ts>\d{14})$'
+#     extract: '$ts'
+#   policy:
+#     numerical:
+#       order: asc
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
-  name: stepbystepguide
-  namespace: my-software-showcase
-spec:
-  image: ghcr.io/nachtschatt3n/stepbystepguide
-  interval: 1h
-  secretRef:
-    name: ghcr-secret
+# DISABLED 2026-10-04 (operator: stepbystepguide decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImageRepository
+# metadata:
+#   name: stepbystepguide
+#   namespace: my-software-showcase
+# spec:
+#   image: ghcr.io/nachtschatt3n/stepbystepguide
+#   interval: 1h
+#   secretRef:
+#     name: ghcr-secret
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: stepbystepguide
-  namespace: my-software-showcase
-spec:
-  imageRepositoryRef:
-    name: stepbystepguide
-  filterTags:
-    pattern: '^production-(?P<ts>\d{14})$'
-    extract: '$ts'
-  policy:
-    numerical:
-      order: asc
+# DISABLED 2026-10-04 (operator: stepbystepguide decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImagePolicy
+# metadata:
+#   name: stepbystepguide
+#   namespace: my-software-showcase
+# spec:
+#   imageRepositoryRef:
+#     name: stepbystepguide
+#   filterTags:
+#     pattern: '^production-(?P<ts>\d{14})$'
+#     extract: '$ts'
+#   policy:
+#     numerical:
+#       order: asc
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
@@ -383,31 +405,33 @@ spec:
     numerical:
       order: asc
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
-  name: zuhause-betreut
-  namespace: my-software-showcase
-spec:
-  image: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
-  interval: 1h
-  secretRef:
-    name: ghcr-secret
+# DISABLED 2026-10-04 (operator: zuhause-betreut decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImageRepository
+# metadata:
+#   name: zuhause-betreut
+#   namespace: my-software-showcase
+# spec:
+#   image: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
+#   interval: 1h
+#   secretRef:
+#     name: ghcr-secret
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: zuhause-betreut
-  namespace: my-software-showcase
-spec:
-  imageRepositoryRef:
-    name: zuhause-betreut
-  filterTags:
-    pattern: '^production-(?P<ts>\d{14})$'
-    extract: '$ts'
-  policy:
-    numerical:
-      order: asc
+# DISABLED 2026-10-04 (operator: zuhause-betreut decommissioned)
+# apiVersion: image.toolkit.fluxcd.io/v1
+# kind: ImagePolicy
+# metadata:
+#   name: zuhause-betreut
+#   namespace: my-software-showcase
+# spec:
+#   imageRepositoryRef:
+#     name: zuhause-betreut
+#   filterTags:
+#     pattern: '^production-(?P<ts>\d{14})$'
+#     extract: '$ts'
+#   policy:
+#     numerical:
+#       order: asc
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageUpdateAutomation
