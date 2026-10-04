@@ -234,7 +234,7 @@ silently tightening every migrated app from 60s to 15s. The gateway-wide
 |------|---------|
 | Ordinary app | nothing — inherits the gateway's 60s |
 | App whose Ingress set an explicit longer `proxy-read-timeout` | carry that number explicitly (nextcloud: `300s`) |
-| Streaming / long-poll / websocket-capable apps | `3600s` (anythingllm, librechat, open-webui, jellyfin, immich, teslamate, matter-server, mosquitto, iobroker, ha-ai-harness …) |
+| Streaming / long-poll / websocket-capable apps | `3600s` (anythingllm, open-webui, jellyfin, immich, teslamate, matter-server, mosquitto, iobroker, ha-ai-harness …) |
 | **Persistent** websockets | **`0s`** = no timeout, per the Gateway API spec (nextcloud `/push` → `nextcloud-notify-push`) |
 
 > **A `curl /` check returns in milliseconds and can NEVER detect a timeout

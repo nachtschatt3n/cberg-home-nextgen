@@ -729,16 +729,17 @@ The `wazuh-blueprint.yaml` entry in the configmap shows this migration end-to-en
 ## OIDC / OAuth2 Provider Pattern
 
 Use OIDC (not forward-auth, not SAML) when the app **has its own user model** and
-speaks OpenID Connect — e.g. Grafana, pgAdmin, Superset, Sure, **Immich**, **LibreChat**. The app
+speaks OpenID Connect — e.g. Grafana, pgAdmin, Superset, Sure, **Immich**. The app
 redirects to Authentik, gets an ID token, and provisions/logs in its own user.
 
 ### Blueprint shape
 
 An OIDC integration is two entries in a single `*-oauth2-blueprint.yaml` data key:
 an `oauth2provider` and an `application` that references it. Modeled on the
-existing `grafana-oauth2-blueprint.yaml` / `immich-oauth2-blueprint.yaml` /
-`librechat-oauth2-blueprint.yaml` (the last two were authored blueprint-only with
-`grant_types` set from the start, so they are the cleanest references to copy):
+existing `grafana-oauth2-blueprint.yaml` / `immich-oauth2-blueprint.yaml` (immich
+was authored blueprint-only with `grant_types` set from the start, so it is the
+cleanest reference to copy; `librechat-oauth2-blueprint.yaml` was the other one
+until LibreChat was decommissioned 2026-10-04 and its key removed in `53a18b79`):
 
 ```yaml
 - id: <app>-oauth2-provider
@@ -834,7 +835,7 @@ blueprint entry.
   `goauthentik.io/providers/oauth2/scope-profile` expression already returns
   `"groups": [group.name for group in request.user.groups.all()]`, so binding the
   usual openid/email/profile trio is enough for an app to do group→role mapping off
-  the userinfo response. LibreChat uses this to promote members of the
+  the userinfo response. LibreChat (decommissioned 2026-10-04) used this to promote members of the
   `authentik Admins` group (`OPENID_ADMIN_ROLE` + `OPENID_ADMIN_ROLE_PARAMETER_PATH:
   groups` + `OPENID_ADMIN_ROLE_TOKEN_KIND: userinfo`). Verify what a provider will
   actually emit with

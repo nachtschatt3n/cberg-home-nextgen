@@ -226,7 +226,6 @@ Apps that crashlooped after the 2026-04-30 upgrade — apply first:
 - `ai/paperclip` (paperclip-postgresql)
 - `ai/openclaw` (openclaw-postgresql)
 - `office/sure` (sure-pg, sure-redis)
-- `office/actual-budget` (no deps — skip)
 - `office/affine` (affine-pg, affine-redis)
 - `home-automation/n8n` (n8n-postgresql)
 

@@ -185,7 +185,7 @@
 | csi-driver-smb | SMB/CIFS storage integration (NAS) | None | — |
 | descheduler | Pod descheduler for resource optimization | None | — |
 | intel-device-plugin | Intel device plugin operator (manages GPU + NPU sub-charts) | None | — |
-| intel-device-plugin-gpu | Intel GPU device plugin — exposes `gpu.intel.com/i915` to pods (Jellyfin, Plex, Frigate, Scrypted, MakeMKV) | None | — |
+| intel-device-plugin-gpu | Intel GPU device plugin — exposes `gpu.intel.com/i915` to pods (Jellyfin, Plex, Frigate, MakeMKV, Immich) | None | — |
 | intel-device-plugin-npu | Intel NPU/VPU device plugin — exposes `npu.intel.com/accel` to pods (Meteor Lake VPU 8086:7d1d, added 2026-04-30 with Talos v1.13.0) | None | — |
 | metrics-server | Kubernetes resource usage metrics API | None | — |
 | node-feature-discovery | Hardware feature detection and labeling | None | — |
@@ -299,8 +299,8 @@ calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 
 Portfolio showcase of 15 containerized legacy client apps (11 decommissioned 2026-10-04; `haarfabrik`, `metaldyne`, `u-zeit` and `uzeit-de` remain active) (TYPO3 4.2/6.2, Rails, PHP era), all on bjw-s app-template 5.1.0, deployed 2026-08-18. Databases live on the shared `databases/mariadb` (legacy-compat `sql_mode=NO_ENGINE_SUBSTITUTION` + `init_connect SET NAMES utf8` persisted in its HR for these tenants). **No outbound integrations by design** (no SMTP/Sentry/Twilio etc. — see `kubernetes/apps/my-software-showcase/README.md`). Homepage group "Software Portfolio".
 
-> **Observability gap on four apps in this namespace (2026-08-18, `F-a49c67c3`).**
-> `u-zeit`, `zuhause-betreut`, `metaldyne` and `uzeit-de` run normally (1/1, no
+> **Observability gap on three apps in this namespace (2026-08-18, `F-a49c67c3`; `zuhause-betreut`, the fourth, was decommissioned 2026-10-04).**
+> `u-zeit`, `metaldyne` and `uzeit-de` run normally (1/1, no
 > restarts) but ship **zero** documents to Elasticsearch. Their logs are written
 > to a file on an `emptyDir` instead of stdout, so they are never collected and
 > are destroyed on every pod restart. `RAILS_LOG_TO_STDOUT=1` is set on all of

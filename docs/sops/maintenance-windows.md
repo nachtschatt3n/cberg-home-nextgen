@@ -751,8 +751,8 @@ pane then passes through the same busy/menu gate before anything is typed.
   at **<= 1 restart** during the bounce instead of asserting 0, and fail only on a
   second restart or a pod still not Ready after the bounce settles, and (b) build
   a processlist/connection-count tenant baseline from the **persistent-pool**
-  users only. PHP tenants (`globalmobility`, `ibgastro`, `uzeit-de`) connect per
-  request, so their users are absent from any snapshot that happens to fall
+  users only. PHP tenants (`uzeit-de`; `globalmobility`/`ibgastro` until their
+  2026-10-04 decommission) connect per request, so their users are absent from any snapshot that happens to fall
   between requests -- counting them makes the baseline flap and the gate lie.
 - **Resuming a suspended HelmRelease re-renders its chart CronJobs and UNDOES a
   manual CronJob suspend.** A plan that suspends an HR (`flux suspend hr`) and

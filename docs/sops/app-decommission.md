@@ -194,6 +194,11 @@ git pull --rebase --autostash && git push
    `runbooks/coverage.py`, allowlists in `runbooks/security-check.py`. If a
    regression test was written against the app, keep the test and inject the
    app as a fixture — the guard tests the mechanism, not the app.
+6. **Version tooling still sees kept directories.** `check-all-versions.py`
+   and `coverage.py` walk `kubernetes/apps/` and may not honour a
+   commented-out `ks.yaml`. After the next version-check run, confirm the
+   removed apps no longer appear as pending bumps; if they do, hold them
+   (deny rule) or fix the walk before the next window's Step 0.
 
 ### 4.7 Source repos (self-built images)
 

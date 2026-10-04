@@ -29,7 +29,7 @@ for f in */app/secret.sops.yaml; do
   [ -z "$user" ] && user=$(get DATABASE_USER)
   name=$(get DB_DATABASE); [ -z "$name" ] && name=$(get DB_NAME)
   [ -z "$name" ] && name=$(get DATABASE_NAME)
-  # DB_PASS is the PHP tier's key name (ibgastro, globalmobility, uzeit-de).
+  # DB_PASS is the PHP tier's key name (uzeit-de; ibgastro/globalmobility until 2026-10-04).
   # Omitting it created those three users with an EMPTY password: the app could
   # not authenticate, and anything else in the cluster could. Refuse rather than
   # emit a passwordless CREATE USER.
