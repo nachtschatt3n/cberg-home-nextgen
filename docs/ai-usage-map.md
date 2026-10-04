@@ -1,7 +1,7 @@
 # AI Usage Map
 
 > Comprehensive mapping of all AI/LLM integrations across the cluster and Home Assistant.
-> Last Updated: 2026-10-02
+> Last Updated: 2026-10-04
 
 ---
 
@@ -20,7 +20,7 @@ Ports 11435 and 11436 are no longer in use.
 ### All Consumers
 
 > **Completeness warning (2026-09-04).** This table was found to be MISSING
-> three live consumers — `sure`, `hermes-agent` and `ha-ai-harness` — during
+> three live consumers — `sure`, `hermes-agent` (decommissioned 2026-10-04) and `ha-ai-harness` — during
 > the GGUF→MLX migration. Sure alone was ~85% of the day's load. Do NOT treat
 > this list as authoritative: verify with an exhaustive repo grep
 > (`gemma4`, `26b`, `192.168.30.111`, `11434`, `OPENAI_MODEL`, `LLM_MODEL`,
@@ -37,9 +37,7 @@ the GGUF `gemma4:26b` unless its own owner has changed it.**
 | AnythingLLM | ai | `nomic-embed-text:latest` (embeddings) | Native Ollama | n/a | `kubernetes/apps/ai/anythingllm/app/helmrelease.yaml:87-88` |
 | OpenClaw | ai | `gemma4:26b-mlx` | OpenAI `/v1` via `ollama-toolfix` | git ✅ | `kubernetes/apps/ai/openclaw/app/helmrelease.yaml` (env `OLLAMA_MODEL`, fallback rung, model catalog, memory-dreaming) **and** `skills-configmap.sops.yaml` (the model-switch skill) |
 | Next AI Draw.io | ai | `gemma4:26b-mlx` | Native Ollama `/api` | git ✅ | `kubernetes/apps/ai/next-ai-draw-io/app/helmrelease.yaml:37-40` |
-| LibreChat | ai | `gemma4:26b-mlx` (default, **`fetch: true`**) | OpenAI `/v1` | git ⚠️ | `kubernetes/apps/ai/librechat/app/helmrelease.yaml:162` — default only; `fetch: true` still lists every host model, so a user can pick the GGUF |
 | **Sure** | **office** | `gemma4:26b-mlx` | OpenAI `/v1` | git ✅ | **TWO places:** `kubernetes/apps/office/sure/app/helmrelease.yaml` (`OPENAI_MODEL`, plain env — this one wins) **and** `secret.sops.yaml` (`OPENAI_MODEL`). Was absent from this table until 2026-09-04 despite being the largest single consumer. |
-| **hermes-agent** | **ai** | `gemma4:26b-mlx` | OpenAI `/v1` | git ⚠️ | `kubernetes/apps/ai/hermes-agent/app/configmap.yaml:11` is a **SEED ONLY** — the live config is `/opt/data/config.yaml` on the `hermes-agent-data` PVC and the init container copies the seed only when that file is absent. Editing the ConfigMap changes NOTHING on a running install. See Known Gotcha #14 in `docs/sops/new-deployment-blueprint.md`. Was absent from this table until 2026-09-04. |
 | **ha-ai-harness** | **home-automation** | `gemma4:26b-mlx` (`DENSE_MODEL`) + `gemma4:e2b-mlx` (`EDGE_MODEL`, already MLX) | Native Ollama | git ✅ | `kubernetes/apps/home-automation/ha-ai-harness/app/helmrelease.yaml:38-41`. Was absent from this table until 2026-09-04. |
 | AFFiNE | office | `gemma4:26b-mlx` (6 scenarios) | OpenAI `/v1` | git ✅ | `kubernetes/apps/office/affine/app/configmap.yaml:58-65,71` |
 | Frigate NVR | home-automation | `gemma4:26b-mlx` — **vision**, 3 of 5 cameras have `genai.enabled: true` | OpenAI `/v1` | git ✅ | `configmap.sops.yaml` (`genai.model`, encrypted); host URL in `helmrelease.yaml:34` |
@@ -93,7 +91,7 @@ would keep the 27.1 GiB GGUF resident on the host.** All but Headlamp are done.
 | **Home Assistant** | Migrated 2026-09-05 | ha-agent | 2 subentries + 3 direct-HTTP scripts. Sends explicit `num_ctx` — must move with the host ceiling. All `keep_alive: -1` |
 | **Headlamp** | **OUTSTANDING — unfixable server-side** | user | AI Assistant plugin stores model + endpoint in **per-browser localStorage**. No server-side config exists in the pod, so neither GitOps nor a DB edit can reach it. The user must change it in the plugin's settings **in every browser and profile** he uses. Until then, that browser still requests the GGUF. |
 | **Open WebUI** | Migrated 2026-09-05 | cberg-agent | GGUF locked out server-side: removed from the `ollama.api_configs` connection allow-list (`model_ids`) **and** `is_active=0` on its `model` row. Verified persisted across a restart. Note the user's earlier UI pinning had *included* the GGUF in that allow-list. |
-| **LibreChat** | Migrated 2026-09-05 | cberg-agent | All 37 Mongo collections audited: 0 presets, 0 agents, 0 assistants, 0 user defaults. One dormant conversation (last touched 19 Aug) repointed. `messages`/`transactions` left as historical records. `fetch: true` still lists whatever is pulled on disk, so a human can pick the GGUF by hand until the tag is removed. |
+| **LibreChat** (decommissioned 2026-10-04) | Migrated 2026-09-05 | cberg-agent | All 37 Mongo collections audited: 0 presets, 0 agents, 0 assistants, 0 user defaults. One dormant conversation (last touched 19 Aug) repointed. `messages`/`transactions` left as historical records. `fetch: true` still lists whatever is pulled on disk, so a human can pick the GGUF by hand until the tag is removed. |
 | **Frigate NVR** | Migrated 2026-09-04 | git | `configmap.sops.yaml` — now in GitOps, not UI |
 
 ---
@@ -133,7 +131,6 @@ What lives on the consumer side:
 | Consumer | Setting | Purpose | Moves with the host ceiling? |
 |---|---|---|---|
 | `openclaw` | `contextWindow` on all four `ollama`/`ollama-native` refs | Compaction threshold for agent turns | **Yes — mirrors the host.** `/v1`, so no wire `num_ctx` |
-| `hermes-agent` | `context_length` in `configmap.yaml` **and** `/opt/data/config.yaml` (PVC) | Client-side prompt budgeting | **Yes.** Seed does not propagate — patch the PVC too |
 | `home-assistant` | `num_ctx` per Ollama subentry | Sent on the wire | **YES, mandatory.** Cannot be omitted — unset sends 8192, not the host default. A mismatch makes every HA call evict and reload the pinned 18 GB model |
 | `sure` | `LLM_CONTEXT_WINDOW` | Caps `BatchSlicer` input | No — a client-side cap well under the ceiling. Re-check the margin before raising it |
 | `sure` | `OPENAI_REQUEST_TIMEOUT` | Tolerates slow local inference | No |
@@ -152,8 +149,8 @@ finite host default would not save you — one HA call re-pins whatever it loads
 
 | Model | Consumers |
 |-------|-----------|
-| `gemma4:26b-mlx` | **Migrated:** AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, Sure, hermes-agent, ha-ai-harness, AFFiNE, Frigate NVR, Paperless-ngx; **native (never on GGUF):** Splitfairy, The Ninth Banner |
-| `gemma4:26b` (GGUF — **retired 2026-09-05**) | **Nothing autonomous requests it any more.** Remaining human-initiated paths only: Headlamp (per-browser localStorage) and LibreChat's picker (`fetch: true` lists whatever is pulled on disk). **Never re-point a consumer at this tag:** it needs 27.1 GiB (256k ctx alloc, `-np 2`, q8_0 KV) against the MLX build's 18.7 GiB — 45.8 of 48 GiB, so any state where both are requested is guaranteed to OOM. |
+| `gemma4:26b-mlx` | **Migrated:** AnythingLLM, OpenClaw, Next AI Draw.io, Sure, ha-ai-harness, AFFiNE, Frigate NVR, Paperless-ngx; **native (never on GGUF):** Splitfairy, The Ninth Banner |
+| `gemma4:26b` (GGUF — **retired 2026-09-05**) | **Nothing autonomous requests it any more.** Remaining human-initiated path only: Headlamp (per-browser localStorage). (LibreChat's `fetch: true` picker was the other one until LibreChat was decommissioned 2026-10-04.) **Never re-point a consumer at this tag:** it needs 27.1 GiB (256k ctx alloc, `-np 2`, q8_0 KV) against the MLX build's 18.7 GiB — 45.8 of 48 GiB, so any state where both are requested is guaranteed to OOM. |
 | `nomic-embed-text:latest` | AnythingLLM (embeddings), Nextcloud (context_chat RAG), AFFiNE (embeddings), Paperless-ngx (native AI RAG embeddings) |
 
 ---
@@ -162,5 +159,5 @@ finite host default would not save you — one HA call re-pins whatever it loads
 
 | Endpoint | Git-Managed Apps | UI/DB-Configured Apps | Total |
 |----------|------------------|-----------------------|-------|
-| Mac Mini :11434 | 11 (AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, **Sure**, **hermes-agent**, **ha-ai-harness**, AFFiNE, Frigate NVR, Splitfairy, The Ninth Banner) | 6 (Paperless, Nextcloud, n8n, Home Assistant, Open WebUI, Headlamp) | 17 |
+| Mac Mini :11434 | 9 (AnythingLLM, OpenClaw, Next AI Draw.io, **Sure**, **ha-ai-harness**, AFFiNE, Frigate NVR, Splitfairy, The Ninth Banner) | 6 (Paperless, Nextcloud, n8n, Home Assistant, Open WebUI, Headlamp) | 15 |
 | Cloud APIs | 1 (Paperclip) | 5 (HA x3, n8n x2) | 6 |

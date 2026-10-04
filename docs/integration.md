@@ -59,7 +59,6 @@ Consumers that declare a context window and must be moved in lockstep:
 | Consumer | Where | Sends `num_ctx` on the wire? |
 |---|---|---|
 | `openclaw` | `helmrelease.yaml` — `contextWindow` on all four `ollama`/`ollama-native` refs | No — uses `/v1`, which has no `num_ctx` field. Over-declaring only over-promises. |
-| `hermes-agent` | `configmap.yaml` **and** `/opt/data/config.yaml` on the PVC (the ConfigMap is a SEED — see Known Gotcha #14) | No — `/v1`. Client-side budgeting only. |
 | `home-assistant` | HA UI, per Ollama subentry | **YES — and it cannot be omitted.** |
 | `sure` | `LLM_CONTEXT_WINDOW` (client-side cap, currently far below the host ceiling) | No. Safe across host moves; re-check the margin before raising it. |
 
@@ -82,11 +81,9 @@ confirmed, so a claim can be re-checked rather than trusted.
 | App | Endpoint | Model | Provider Config | Verified |
 |-----|---------|-------|-----------------|----------|
 | sure | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` | **TWO places:** `OPENAI_MODEL` plain env in `helmrelease.yaml` (this one wins) **and** `OPENAI_MODEL` in `secret.sops.yaml`. Also `LLM_CONTEXT_WINDOW` (client-side cap) and `OPENAI_REQUEST_TIMEOUT`. | 2026-09-04, live pod env on `sure-web` + `sure-worker` |
-| hermes-agent | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` | `configmap.yaml` is a **SEED ONLY**; live config is `/opt/data/config.yaml` on the `hermes-agent-data` PVC. Also declares `context_length`. | 2026-09-04, file read in-container after restart |
 | anythingllm | `http://192.168.30.111:11434` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | `OLLAMA_BASE_PATH`, `EMBEDDING_BASE_PATH` | 2026-09-04, live container env after restart |
 | openclaw | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` | `OLLAMA_BASE`, `OLLAMA_MODEL` | 2026-09-05, live `openclaw.json` on the PVC after restart |
 | next-ai-draw-io | `http://192.168.30.111:11434/api` | `gemma4:26b-mlx` | `AI_PROVIDER: "ollama"`, `OLLAMA_BASE_URL` | 2026-09-04, live pod env |
-| librechat | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` (fetch=true) | Custom endpoint "Ollama" | 2026-09-05, config + all 37 Mongo collections audited |
 | open-webui | `http://192.168.30.111:11434` | (all available) | `ollamaUrls` | 2026-09-05, `webui.db` config + `model` table |
 | paperless-ngx (native AI) | `http://192.168.30.111:11434` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | DB-stored `ApplicationConfiguration` row (`ai_enabled`/`llm_*`/`llm_embedding_*`), not GitOps — see `docs/sops/paperless.md` §4a. Retired `paperless-gpt`/`paperless-ai` sidecars 2026-08-24. | 2026-09-04, `ApplicationConfiguration` DB row |
 | affine | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | OpenAI-compat copilot configmap | 2026-09-04, live ConfigMap JSON |
@@ -126,8 +123,8 @@ So a file grep can report the old value (from dead pages) *and* miss the new val
 
 **Always query through the application's own driver or CLI** (`n8n export:workflow`,
 `occ config:app:get`, `sqlite3`/driver, `mongosh`, `manage.py shell`). The same
-applies to any app that keeps its own state: AnythingLLM, LibreChat, Open WebUI,
-n8n, Nextcloud, paperless, OpenClaw, hermes-agent. A related false positive was hit
+applies to any app that keeps its own state: AnythingLLM, Open WebUI,
+n8n, Nextcloud, paperless, OpenClaw. A related false positive was hit
 on AnythingLLM the same night — three "hits" that turned out to be chat transcripts
 in `workspace_chats.response`, not configuration.
 

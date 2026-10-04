@@ -126,7 +126,7 @@ not the whole share:**
 | StorageClass | Source | Subdir | Reclaim |
 |---|---|---|---|
 | `cifs-frigate-media` | `//192.168.55.240/frigate` | `/media` | Retain |
-| `cifs-scrypted-media` — **class pruned 2026-10-04** (scrypted-nvr decommissioned); its Released `Retain` PV `pvc-07cdc111…` still exists and needs this pre-flight before any delete | `//192.168.55.240/scrypted` | `/media` | Retain |
+| `cifs-scrypted-media` — **class pruned 2026-10-04** (scrypted-nvr decommissioned); its Released `Retain` PV was deleted 2026-10-04 after this pre-flight (object-only; the share data is untouched) | `//192.168.55.240/scrypted` | `/media` | Retain |
 | `cifs-jdownloader-media` | `//192.168.55.240/media/downloads` | `/jdownloader` | Retain |
 | `cifs-makemkv-media` | `//192.168.55.240/media` | `/Transcode` | Retain |
 | `cifs-tube-archivist-media` | `//192.168.55.240/media/downloads` | `/tube-archivist` | Retain |

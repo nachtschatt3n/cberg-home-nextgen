@@ -3,8 +3,8 @@
 > Description: How to clear CVEs on container images we build ourselves, where there is
 > no upstream version to bump to and remediation is a **rebuild in the source repo**
 > followed by a GitOps tag bump — not a version bump.
-> Version: `2026.10.02`
-> Last Updated: `2026-10-02`
+> Version: `2026.10.04`
+> Last Updated: `2026-10-04`
 > Owner: `homelab-operator`
 
 ---
@@ -60,28 +60,17 @@ Known first-party images and their source repos (extend as they are added):
 | `ghcr.io/nachtschatt3n/sweep-dashboard` | `nachtschatt3n/sweep-dashboard` |
 | `ghcr.io/nachtschatt3n/gods-eye-view` | `nachtschatt3n/gods-eye-view` (branch `cberg`; packages the latest upstream `bilawalsidhu/gods-eye-view` release — weekly `container.yml` rebuild, or dispatch with `upstream_tag`) |
 | `ghcr.io/nachtschatt3n/gas-price-monitor` | `nachtschatt3n/gas-price-monitor` |
-| `ghcr.io/nachtschatt3n/globalmobility-group-gmbh-globaldispo` | `nachtschatt3n/globalmobility-group-gmbh-globaldispo` |
 | `ghcr.io/nachtschatt3n/haarfabrik-extranet` | `nachtschatt3n/haarfabrik-extranet` |
-| `ghcr.io/nachtschatt3n/holm-backend` | `nachtschatt3n/holm-backend` |
-| `ghcr.io/nachtschatt3n/ibgastro` | `nachtschatt3n/ibgastro` |
-| `ghcr.io/nachtschatt3n/inbewegung-familymanager` | `nachtschatt3n/inbewegung-familymanager` |
-| `ghcr.io/nachtschatt3n/kfa_medienarchiv` | `nachtschatt3n/kfa_medienarchiv` |
-| `ghcr.io/nachtschatt3n/mangold-smarthomeadvisor` | `nachtschatt3n/mangold-smarthomeadvisor` |
-| `ghcr.io/nachtschatt3n/max-jung-transporte-fahrzeugcontrolling` | `nachtschatt3n/max-jung-transporte-fahrzeugcontrolling` |
 | `ghcr.io/nachtschatt3n/metaldyne-mini-erp` | `nachtschatt3n/metaldyne-mini-erp` |
 | `ghcr.io/nachtschatt3n/oc8-backend` | `nachtschatt3n/oc8` |
 | `ghcr.io/nachtschatt3n/oc8-frontend` | `nachtschatt3n/oc8` |
 | `ghcr.io/nachtschatt3n/opencode-web-devcontainer` | `nachtschatt3n/opencode-web-devcontainer` |
-| `ghcr.io/nachtschatt3n/ordiga` | `nachtschatt3n/ordiga` |
 | `ghcr.io/nachtschatt3n/pellet-price-monitor` | `nachtschatt3n/pellet-price-monitor` |
 | `ghcr.io/nachtschatt3n/rainbow-rescue` | `nachtschatt3n/rainbow-rescue-party-hunt` |
-| `ghcr.io/nachtschatt3n/see-edv-ibspm` | `nachtschatt3n/see-edv-ibspm` |
 | `ghcr.io/nachtschatt3n/solarfocus-scraper` | `nachtschatt3n/solarfocus-scraper` |
-| `ghcr.io/nachtschatt3n/stepbystepguide` | `nachtschatt3n/stepbystepguide` |
 | `ghcr.io/nachtschatt3n/u-zeit` | `nachtschatt3n/u-zeit` |
 | `ghcr.io/nachtschatt3n/uzeit-de` | `nachtschatt3n/uzeit-de` |
 | `ghcr.io/nachtschatt3n/zero-export-controller` | `nachtschatt3n/zero-export-controller` |
-| `ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager` | `nachtschatt3n/zuhause-betreut-caretakermanager` |
 
 ---
 
@@ -282,10 +271,8 @@ HTTP health probe.**
 
 | Image | Source repo | Scheme / rebuild tag | Rebuild workflow | Cluster pin | Mode | Why |
 |---|---|---|---|---|---|---|
-| globalmobility-group-gmbh-globaldispo | same name | S | scheduled-rebuild.yml | IUA `my-software-showcase` | **AUTO** | internal showcase, full probes, rollback |
-| ibgastro | ibgastro | S | scheduled-rebuild.yml | IUA showcase | **AUTO** | same |
-| uzeit-de | uzeit-de | S | scheduled-rebuild.yml | IUA showcase | **AUTO** | same |
-| haarfabrik-extranet, holm-backend, inbewegung-familymanager, kfa_medienarchiv, mangold-smarthomeadvisor, max-jung-transporte-fahrzeugcontrolling, metaldyne-mini-erp, ordiga, see-edv-ibspm, stepbystepguide, u-zeit, zuhause-betreut-caretakermanager | same names | P | ci.yml (schedule) | IUA showcase | **AUTO** | same; their bases are EOL Debian (jessie/stretch), so there is no OS upgrade, and a rebuild only refreshes what the archive mirror still serves |
+| uzeit-de | uzeit-de | S | scheduled-rebuild.yml | IUA `my-software-showcase` | **AUTO** | internal showcase, full probes, rollback |
+| haarfabrik-extranet, metaldyne-mini-erp, u-zeit | same names | P | ci.yml (schedule) | IUA showcase | **AUTO** | same; their bases are EOL Debian (jessie/stretch), so there is no OS upgrade, and a rebuild only refreshes what the archive mirror still serves |
 | gas-price-monitor | gas-price-monitor | S | scheduled-rebuild.yml | IUA `my-software-production/gas-price-monitor-image-updates` | **AUTO** | internet-facing, but has HTTP liveness/readiness + rollback |
 | splitfairy | splitfairy | releases `v<semver>` (a V-scheme weekly rebuild `v*-b<date>` is NOT selected) | release workflow | IUA `my-software-production/splitfairy-image-updates` | **AUTO (release tags only)** | internet-facing; HTTP startup/readiness on `/readyz` (SQLite) + rollback. Stateful SQLite app: operator chose AUTO for releases on 2026-09-28; keep schema migrations backward-compatible or drop the `$imagepolicy` marker to hold |
 | the-ninth-banner | the-ninth-banner (private) | releases `v<semver>` (`sha-<full sha>` on every main push; a `vX.Y.Z` git tag promotes the tested image) | Image workflow (release) | IUA `my-software-production/the-ninth-banner-image-updates` | **AUTO (release tags only)** | internet-facing, public (no auth, AI path edge-rate-limited); HTTP startup/readiness on `/healthz` + rollback. Stateless, so a rollback has no migration hazard. Private package: ImageRepository scans with `ghcr-the-ninth-banner` |
@@ -534,3 +521,8 @@ reconcile — never patch the Deployment directly (GitOps rule).
   automation.
 - `2026.10.02`: Add `ghcr.io/nachtschatt3n/the-ninth-banner` (private package, release-tag
   AUTO via its own IUA) to the deploy-mode table.
+- `2026.10.04`: Remove the 11 showcase images decommissioned on 2026-10-04 (globalmobility,
+  holm-backend, ibgastro, inbewegung, kfa_medienarchiv, mangold-smarthomeadvisor, max-jung,
+  ordiga, see-edv-ibspm, stepbystepguide, zuhause-betreut) from the first-party and
+  deploy-mode tables; their source-repo scheduled workflows were disabled the same day.
+  Showcase apps still deployed: haarfabrik, metaldyne, u-zeit, uzeit-de.

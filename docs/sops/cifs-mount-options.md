@@ -1,8 +1,8 @@
 # SOP: CIFS / SMB Mount Options
 
 > Description: Reference for every CIFS/SMB mount in the cluster — the NAS share it points at, the mount options used, the trade-off it expresses, and the use case profile it belongs to. Use this when adding a new CIFS-backed PVC or troubleshooting backup/IO issues.
-> Version: `2026.06.07`
-> Last Updated: `2026-06-07`
+> Version: `2026.10.04`
+> Last Updated: `2026-10-04`
 > Owner: `infra`
 
 > **2026-06-07 — two rules every new share MUST follow:**
@@ -38,7 +38,7 @@ Three operational profiles emerged from the inventory below, plus a distinct bac
 | Profile | Where used | Cache | Consistency | Resilience |
 |---|---|---|---|---|
 | **A — Performance** | media reads (Plex, Jellyfin, Frigate, Paperless, Penpot, iCloud-docker) | `cache=loose` | eventual (30s attr timeout) | hard mount (default) |
-| **B — Strong-consistency** | continuously-written workdirs (jdownloader, Tube Archivist, Scrypted) | `cache=none` | strict | hard mount |
+| **B — Strong-consistency** | continuously-written workdirs (jdownloader, Tube Archivist) | `cache=none` | strict | hard mount |
 | **C — POSIX-correct** | apps that need locks/symlinks (Nextcloud, opencode-andreamosteller) | `cache=strict` + `mfsymlinks`/`nobrl`/`mapposix` | strict | hard mount |
 | **D — Backup** | Longhorn BackupTarget only | `cache=loose` | n/a (write-once) | **soft mount** (fails fast on hiccup) |
 
@@ -52,7 +52,7 @@ Source of truth is the YAML for each StorageClass / PV / BackupTarget — there 
 
 - Source of truth file(s):
   - `kubernetes/apps/storage/longhorn/app/helmrelease.yaml` (`defaultSettings.backupTarget` value drives the BackupTarget URL)
-  - Per-app `cifs-*` StorageClass definitions live alongside each consuming app, e.g. `kubernetes/apps/home-automation/scrypted-nvr/app/storageclass.yaml`, `kubernetes/apps/office/penpot/app/storageclass.yaml`
+  - Per-app `cifs-*` StorageClass definitions live alongside each consuming app, e.g. `kubernetes/apps/office/penpot/app/storageclass.yaml`
   - Static PVs live alongside their consuming app, e.g. `kubernetes/apps/office/nextcloud/app/pvc.yaml`
 - Related manifests: any `kind: PersistentVolume` with `spec.csi.driver: smb.csi.k8s.io`
 - Required IDs/constants: NAS host `192.168.55.240`, share names match table below
@@ -168,7 +168,6 @@ cache=loose, actimeo=30, serverino
 | StorageClass | Source / subdir | Profile |
 |---|---|---|
 | `cifs-jdownloader-media` | `//.../media/downloads` `/jdownloader` | B |
-| `cifs-scrypted-media` | `//.../scrypted` `/media` | B |
 | `cifs-tube-archivist-media` | `//.../media/downloads` `/tube-archivist` | B |
 
 Mount options:

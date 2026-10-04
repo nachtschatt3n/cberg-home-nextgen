@@ -3,8 +3,8 @@
 > Standard Operating Procedures for AI/ML service integration and management.
 > Reference: `docs/integration.md` for endpoint reference table.
 > Description: Operating and integrating Ollama-based AI endpoints for cluster applications.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.10.04`
+> Last Updated: `2026-10-04`
 > Owner: `Platform`
 
 ---
@@ -23,9 +23,9 @@ port 11434, using Metal Performance Shaders (MPS) for GPU acceleration.
 
 Ports 11435 and 11436 are no longer in use — all traffic goes to 11434.
 
-In-cluster AI services (Open WebUI, hermes-agent, etc.) connect to this external endpoint.
+In-cluster AI services (Open WebUI, AnythingLLM, OpenClaw, etc.) connect to this external endpoint.
 
-**hermes-agent** (`ai` namespace) is a self-improving AI agent with a Telegram gateway and skill-learning loop. It uses the same Ollama endpoint (`http://192.168.30.111:11434`) with `gemma4:26b-mlx` as its LLM backend. Both of its HTTPRoutes (`hermes-agent-api`, `hermes-agent-dashboard`) are parented to the LAN-only Gateway `envoy-internal` (ns `network`, `sectionName: https`) — never `envoy-external`; the Telegram bot token provides external reachability via the Telegram API, not via cluster routing.
+hermes-agent and LibreChat (both `ai`) were decommissioned on 2026-10-04 and are no longer Ollama consumers.
 
 ---
 
@@ -370,18 +370,6 @@ RAG chat and document embedding.
 | Config | `OLLAMA_BASE_PATH`, `EMBEDDING_BASE_PATH` |
 
 **Configuration:** `kubernetes/apps/ai/anythingllm/app/helmrelease.yaml` (env vars at ~line 81)
-
-### LibreChat (`ai/librechat`)
-
-Chat interface with multi-provider support.
-
-| Setting | Value |
-|---------|-------|
-| Endpoint | `http://192.168.30.111:11434/v1` |
-| Default Model | `gemma4:26b-mlx` (fetch=true for dynamic model list) |
-| Config | Custom endpoint "Ollama" with OpenAI-compatible API |
-
-**Configuration:** `kubernetes/apps/ai/librechat/app/helmrelease.yaml` (custom endpoint at ~line 94)
 
 ### Next AI Draw.io (`ai/next-ai-draw-io`)
 

@@ -1,8 +1,8 @@
 # SOP: SSO does not disable local auth — finding the bypass path
 
 > Description: How to determine whether an app fronted by Authentik still accepts a local username/password that bypasses SSO entirely, why "we configured OIDC" is not evidence that it does not, and what to assert per app.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.10.04`
+> Last Updated: `2026-10-04`
 > Owner: `cberg-home-ops`
 
 ---
@@ -45,8 +45,8 @@ false statement corrected in `6f326139`.
 | Authentik blueprints | `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` |
 | Integration reference | `docs/sops/authentik.md` |
 | Routing model | HTTPRoute → Gateway `envoy-internal` (LAN) / `envoy-external` (internet), ns `network` |
-| Apps with in-app OIDC (verified 2026-09-08) | `ai/librechat`, `ai/openclaw`, `databases/superset`, `monitoring/headlamp`, `office/mealie`, `office/sure`, `security/falco` |
-| Of those, internet-exposed | `ai/librechat`, `office/mealie` — highest priority |
+| Apps with in-app OIDC (verified 2026-09-08; `ai/librechat` removed — decommissioned 2026-10-04) | `ai/openclaw`, `databases/superset`, `monitoring/headlamp`, `office/mealie`, `office/sure`, `security/falco` |
+| Of those, internet-exposed | `office/mealie` — highest priority |
 | Everything else | forward-auth (e.g. Grafana, Longhorn, Frigate, phpMyAdmin) |
 
 **Rule:** for any app in the in-app-OIDC row, "SSO is configured" tells you
@@ -266,7 +266,7 @@ rollback artifacts that still carry the old value.
 
 ```bash
 # every in-app-OIDC app still classified correctly
-for a in "ai librechat" "ai openclaw" "databases superset" "monitoring headlamp" \
+for a in "ai openclaw" "databases superset" "monitoring headlamp" \
          "office mealie" "office sure" "security falco"; do
   set -- $a
   echo -n "$1/$2 parents: "
