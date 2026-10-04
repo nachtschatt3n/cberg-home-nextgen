@@ -39,6 +39,19 @@ cov = importlib.util.module_from_spec(spec)
 sys.modules["coverage_mod"] = cov
 spec.loader.exec_module(cov)
 
+# FIXTURE (2026-10-04): scrypted was decommissioned and CHANNEL_RULES is empty in
+# production. The fail-closed property is about the MECHANISM, so the test
+# re-installs the historical member it was written against instead of deleting
+# the guard along with the app.
+_LIVE_RULES = dict(cov.CHANNEL_RULES)
+cov.CHANNEL_RULES["scrypted"] = {
+    "ar": "AR-081",
+    "why": ("upstream pushes dev builds to the SAME docker repo as stable, "
+            "and stable-ness is decided by whether a non-prerelease GitHub "
+            "Release exists for that exact tag — not by the version string"),
+    "workload": "privileged NVR (privileged: true, SYS_ADMIN, i915)",
+}
+
 fails = []
 
 
@@ -80,7 +93,7 @@ src = (ROOT / "runbooks" / "coverage.py").read_text()
 check("_stable_by_rule is removed", "def _stable_by_rule" not in src)
 # Assert the DATA, not the source text: the explanatory comment quotes the old
 # predicate on purpose, so a grep would match the very documentation of the fix.
-parity = {c: r["stable"] for c, r in cov.CHANNEL_RULES.items() if "stable" in r}
+parity = {c: r["stable"] for c, r in _LIVE_RULES.items() if "stable" in r}
 check("no CHANNEL_RULES entry carries a 'stable' predicate", not parity,
       f"parity predicates still live: {parity}")
 

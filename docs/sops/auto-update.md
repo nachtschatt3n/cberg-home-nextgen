@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.09.27`
-> Last Updated: `2026-09-27`
+> Version: `2026.10.04`
+> Last Updated: `2026-10-04`
 
 ## 1) Description
 
@@ -390,7 +390,6 @@ cannot catch the WIDENING of. As of `2026.09.27` that is all 29 globs:
 | `*nextcloud-mcp*` | `max: patch` (narrowed 2026-09-12) — patch ALLOWED, minor held **with its own reason**, matched BEFORE `*nextcloud*` |
 | `*nextcloud-redis*` | held **with its own reason**, matched BEFORE `*nextcloud*` |
 | `*nextcloud*` | held at every update_type |
-| `*scrypted*` | held at every update_type |
 | `*grafana*` | `max: patch` (narrowed 2026-09-12) — patch ALLOWED, minor held (a chart MINOR can move appVersion across forward-only sqlite migrations; a chart PATCH does not) |
 | `*unpoller*` | `max: patch` (narrowed 2026-09-22, `e20c3cc5`) — patch ALLOWED, minor+ held: no chart templates the v4+ image line yet (row corrected 2026-09-27: Test 2b reported the blanket-hold claim WRONG) |
 | `*openclaw*` | held at every update_type |

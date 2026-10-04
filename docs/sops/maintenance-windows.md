@@ -140,8 +140,9 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
     1. the target is a **pre-release**: an explicit tag marker (`-beta`, `-rc`,
        `-nightly`, …), MEMBERSHIP in `CHANNEL_RULES` for an upstream that
        pushes dev builds to the SAME repo as stable — so no version string can
-       decide the channel, and membership itself is the hold (for scrypted,
-       stable-ness depends on whether a non-prerelease GitHub Release exists
+       decide the channel, and membership itself is the hold (the list is
+       EMPTY since scrypted, its only member, was decommissioned 2026-10-04;
+       for scrypted, stable-ness depends on whether a non-prerelease GitHub Release exists
        for that exact tag; the old "stable = ODD minors only" rule was
        DISPROVED 2026-09-11 — ~17 even-minor releases carry prerelease=false,
        and it also scored Release-less ODD-minor dev tags as stable) — or an

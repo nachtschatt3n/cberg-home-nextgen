@@ -48,6 +48,16 @@ cov._direct_bump_structural_gate = lambda item: (False, "clean (diff checked: st
 
 POLICY = {"deny": []}
 
+# FIXTURE (2026-10-04): scrypted was decommissioned and production CHANNEL_RULES
+# is empty. ChannelGateTest pins the MECHANISM, so it re-installs the historical
+# member rather than losing the guard together with the app.
+cov.CHANNEL_RULES.setdefault("scrypted", {
+    "ar": "AR-081",
+    "why": ("upstream pushes dev builds to the SAME docker repo as stable; "
+            "stable-ness needs a non-prerelease GitHub Release for that exact tag"),
+    "workload": "privileged NVR (privileged: true, SYS_ADMIN, i915)",
+})
+
 
 def item(component, kind="image", current="1.0.0", target="1.1.0", type_="minor", **kw):
     d = {"component": component, "namespace": "test", "kind": kind,

@@ -167,7 +167,7 @@ SELF_BUILT_REPO_PREFIXES = ("ghcr.io/nachtschatt3n/",)
 # direct-bump). That is how a beta build reaches the cluster with nobody in the
 # loop.
 #
-# scrypted is the live example (2026-08-18): upstream cuts GitHub releases on
+# scrypted was the live example (2026-08-18; decommissioned 2026-10-04): upstream cuts GitHub releases on
 # ODD minors only — v0.143.0 is the newest with prerelease=false, v0.144.x has
 # NO GitHub release at all, and the v0.144.0 docker tag was pushed 2025-10-31,
 # i.e. BEFORE stable v0.143.0 (2025-11-16). v0.144.x is a parallel beta channel,
@@ -195,17 +195,14 @@ SELF_BUILT_REPO_PREFIXES = ("ghcr.io/nachtschatt3n/",)
 # Membership must stay OFFLINE-decidable: the window agent runs coverage.py
 # without SWEEP_PG_DSN, so a DB- or network-gated check would fail open exactly
 # where it matters. A set membership test cannot fail open.
-CHANNEL_RULES = {
-    "scrypted": {
-        "ar": "AR-081",
-        "why": ("upstream pushes dev builds to the SAME docker repo as stable, "
-                "and stable-ness is decided by whether a non-prerelease GitHub "
-                "Release exists for that exact tag — not by the version string. "
-                "v0.146.1 was pullable from the registry with NO Release and no "
-                "git tag at all (verified 2026-09-11)"),
-        "workload": "privileged NVR (privileged: true, SYS_ADMIN, i915)",
-    },
-}
+# EMPTY since 2026-10-04: scrypted, the only member (AR-081), was decommissioned
+# that day together with its `*scrypted*` deny rule in auto-update-policy.yaml.
+# The mechanism stays — membership is still the hold, and the regression tests
+# (test-channel-rule-fail-closed.py, test-coverage-lane-safety.py) exercise it
+# with an injected fixture member. Entry shape:
+#   "<component>": {"ar": "AR-0xx", "why": "<why the channel is undecidable>",
+#                   "workload": "<what an unattended dev build would land on>"}
+CHANNEL_RULES: dict = {}
 
 # Explicit pre-release markers in a tag — universal, no per-component rule
 # needed. Never AUTO, whatever the semver delta says.

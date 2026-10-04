@@ -4269,7 +4269,6 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
         "databases/memgraph",             # init-sysctl (kernel tunables)
         "home-automation/frigate",        # GPU/Coral for object detection
         "home-automation/otbr",           # OpenThread Border Router — network interface manipulation (AR-009)
-        "home-automation/scrypted",       # Hardware transcoding
         "media/jellyfin",                 # HW-accelerated transcoding
         "media/makemkv",                  # Optical drive access
         "media/immich-machine-learning",  # OpenVINO iGPU (i915) — same rationale as jellyfin (AR-009)
@@ -4280,7 +4279,6 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
         "backup/icloud-docker-andrea",    # iCloud sync agent (requires root for keychain)
         "backup/icloud-docker-mu",        # iCloud sync agent (requires root for keychain)
         "home-automation/node-red",       # legacy image design
-        "home-automation/scrypted",       # same as privileged rationale
         "media/jellyfin",                 # same as privileged rationale
         "media/makemkv",                  # same as privileged rationale
         "media/immich-machine-learning",  # same as privileged rationale (iGPU)
