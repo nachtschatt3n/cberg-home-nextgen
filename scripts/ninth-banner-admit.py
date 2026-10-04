@@ -34,6 +34,7 @@ Contract (docs/sops/ci-runner.md, "Thermal gate"):
 """
 import fcntl
 import json
+import math
 import os
 import subprocess
 import sys
@@ -91,7 +92,9 @@ def node_temps():
     max3 = prom(f"max_over_time({TEMP}[3m]) {JOIN}")
     age = prom(f"(time() - timestamp({TEMP})) {JOIN}")
     # a node whose exporter stopped reporting is never open
-    return {n: (avg2[n], max3.get(n, 999.0)) for n in avg2 if age.get(n, 999.0) < 90}
+    # non-finite readings (NaN compares False with every threshold) close the node too
+    return {n: (avg2[n], max3.get(n, 999.0)) for n in avg2
+            if age.get(n, 999.0) < 90 and math.isfinite(avg2[n]) and math.isfinite(max3.get(n, 999.0))}
 
 
 def brake_until():
