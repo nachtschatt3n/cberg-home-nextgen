@@ -44,7 +44,10 @@ RELEASED_AT = "ci.cberg.home/released-at"
 OPEN_BELOW_C = float(os.environ.get("GATE_OPEN_BELOW_C", "85"))
 HOT_C = float(os.environ.get("GATE_HOT_C", "93"))
 MAX_PER_NODE = int(os.environ.get("GATE_MAX_PER_NODE", "2"))
-SETTLE_SECONDS = int(os.environ.get("GATE_SETTLE_SECONDS", "120"))
+# 300 s (trial 2026-10-04: 120 s let nuc14-02 take a 2nd shard before the 1st
+# one's test load had started - clone + npm ci take 1-2 min - and the node then
+# held a 94 C 2-min floor with 100 C peaks)
+SETTLE_SECONDS = int(os.environ.get("GATE_SETTLE_SECONDS", "300"))
 LOCK = "/tmp/ninth-banner-admit.lock"   # fixed path: shared by every user/session on the Mac
 PROM = "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?"
 TEMP = 'node_thermal_zone_temp{type="x86_pkg_temp"}'
