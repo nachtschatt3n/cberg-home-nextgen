@@ -50,7 +50,9 @@ conflicts_with:
                                       # storage engine out of its slot and vice versa
   - jellyfin-config-rwo-migration     # allocates a NEW Longhorn volume + restore-proof on the engine
                                       # this plan is replacing; run before or after, never with
-  - mariadb-chart-27.3.0              # its gates read Longhorn backup freshness; Phase B moves every
+  # - mariadb-chart-27.3.0 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+  - mariadb-28.1.1  # ADDED 2026-10-04: successor plan (same databases/mariadb HR + mariadb-0 roll); reciprocal -- it already lists this plan
+    # its gates read Longhorn backup freshness; Phase B moves every
                                       # engine under it
   - flux-fleet-0.60.0                 # Flux controllers are the instrument that judges the storm;
                                       # changing them in the same slot makes §4.1 unreadable

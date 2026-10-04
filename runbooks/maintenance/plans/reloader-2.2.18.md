@@ -38,7 +38,8 @@ conflicts_with:
                                               # race on the same HelmRelease.
   - nextcloud-fleet-35.0.1            # its Commit A RELIES on a reloader roll of deployment/nextcloud; a reloader
                                       # restart in the same window can drop or double that roll
-  - nextcloud-redis-hardening         # deployment/nextcloud-whiteboard is reloader-rolled on Secret change
+  # - nextcloud-redis-hardening (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+    # deployment/nextcloud-whiteboard is reloader-rolled on Secret change
   - external-dns-1.23.0               # external-dns pod carries a reloader annotation (it listed the bundle for this)
   - app-template-5.2.1                # edits ConfigMaps/Secrets of ~78 workloads; a reloader roll mid-§4 reads as
                                       # a missed/extra generation change (it listed the bundle for this)

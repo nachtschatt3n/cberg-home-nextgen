@@ -37,7 +37,8 @@ conflicts_with:
   - app-template-5.2.1                # nightly:2026-10-02 -- its Batch A sed edits THIS helmrelease.yaml (chart
                                       # 5.1.0 -> 5.2.1, line 12) and re-renders this Deployment; a same-night run
                                       # makes §4.2's roll unattributable. Reciprocal entry re-pointed 2026-10-01.
-  - nextcloud-redis-hardening         # nightly:2026-10-01 -- quiesces the Nextcloud server + restarts its Redis;
+  # - nextcloud-redis-hardening (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+    # nightly:2026-10-01 -- quiesces the Nextcloud server + restarts its Redis;
                                       # every §4 contents gate is a live call into that server. Reciprocal re-pointed.
   - nextcloud-fleet-35.0.1            # sun-attended:2026-10-18 -- Nextcloud 34 -> 35 MAJOR; §4.5/§4.6 read CalDAV
                                       # from that server. After it runs, premise 2 fails closed -> re-vet here.

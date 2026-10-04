@@ -27,7 +27,8 @@ touches:
     - monitoring                      # section 4 reads Prometheus (external_dns_* series) as its instrument
 depends_on: []
 conflicts_with:
-  - envoy-gateway-1.9.2               # rolls envoy-external; its gateway status/route re-translation feeds the
+  # - envoy-gateway-1.9.2 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+    # rolls envoy-external; its gateway status/route re-translation feeds the
                                       # gateway-httproute source and would confound the section 4 no-change gate
   - app-template-5.2.1                # relabels ~45 HTTPRoutes incl. every envoy-external route -> source re-list
                                       # in the same window; attribution of any record change becomes ambiguous

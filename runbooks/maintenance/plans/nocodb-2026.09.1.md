@@ -45,7 +45,9 @@ conflicts_with:
   - flux-oci-chart-sources            # rewrites HR chart sources across ns databases; same-night
                                       # reconcile churn in ns databases confounds §4.5's scoped gate
   # [same namespace: §4.5's alert gate is scoped to ns databases]
-  - mariadb-chart-27.3.0              # rolls databases/mariadb-0 (nightly:2026-10-05)
+  # - mariadb-chart-27.3.0 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+  - mariadb-28.1.1  # ADDED 2026-10-04: successor plan (same databases/mariadb HR + mariadb-0 roll); reciprocal -- it already lists this plan
+    # rolls databases/mariadb-0 (nightly:2026-10-05)
   - redis-fleet-8.10.2                # rolls redis workloads incl. ns databases
   # [rollback-class stacking (house rule 81fdd797: every backup-restore pair
   #     is declared; two in one slot leave no rollback capacity for either)]

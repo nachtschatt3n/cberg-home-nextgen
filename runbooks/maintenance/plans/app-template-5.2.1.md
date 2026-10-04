@@ -45,9 +45,12 @@ conflicts_with:
   - chart-patches-coredns-reloader-blackbox  # a Reloader/CoreDNS roll during §4 reads as GEN_CHANGED; lists us already
   # - trmnl-ha-0.11.0 (RESOLVED 2026-09-30: executed + retired in nightly:2026-09-30, 4eec3614/0f0f3ba0; ref removed per the dead-ref convention)
   - penpot-chart-1.10.0               # works against penpot-db + penpot-cache (Batch A members); lists us already
-  - mariadb-chart-27.3.0              # rolls databases/mariadb-0 under phpmyadmin + all 15 showcase HRs (our Batch members); same-night confounds both §4s (review 2026-09-28)
+  # - mariadb-chart-27.3.0 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+  - mariadb-28.1.1  # ADDED 2026-10-04: successor plan (same databases/mariadb HR + mariadb-0 roll); reciprocal -- it already lists this plan
+    # rolls databases/mariadb-0 under phpmyadmin + all 15 showcase HRs (our Batch members); same-night confounds both §4s (review 2026-09-28)
   - teslamate-4.3                     # edits home-automation/teslamate helmrelease.yaml (Batch A file) and ROLLS it -> §4 would read GEN_CHANGED
-  - icloud-docker-2.1.0               # edits backup/icloud-docker-{mu,andrea} helmrelease.yaml (both Batch A files, chart 5.1.0),
+  # - icloud-docker-2.1.0 (RESOLVED 2026-10-04: executed + retired 5ed0da58; dead ref removed per the dead-ref convention)
+    # edits backup/icloud-docker-{mu,andrea} helmrelease.yaml (both Batch A files, chart 5.1.0),
                                       # suspends/resumes + ROLLS both HRs -> §4 would read GEN_CHANGED; lists us already (reciprocal, 2026-10-03)
 exclusive: false
 security_ref: null

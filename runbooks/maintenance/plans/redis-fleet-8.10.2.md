@@ -57,7 +57,8 @@ touches:
                                         # remounted by their own pod.
 depends_on: []
 conflicts_with:
-  - nextcloud-redis-hardening           # draft, window:null. Edits the SAME file
+  # - nextcloud-redis-hardening (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+    # draft, window:null. Edits the SAME file
                                         # (office/nextcloud/app/redis-deployment.yaml: command,
                                         # NetworkPolicy) and restarts the same redis. Two
                                         # log-everyone-out changes in one slot also blur which one

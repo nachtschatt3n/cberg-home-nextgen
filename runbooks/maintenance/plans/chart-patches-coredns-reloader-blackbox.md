@@ -45,12 +45,15 @@ conflicts_with:
                                       # prometheus-community and declares dns-internal; same HRs
   - helm-drift-detection              # adds spec.driftDetection to every HelmRelease incl. these three
   - flux-reconciler-impersonation     # exclusive; rewrites how helm-controller applies these releases
-  - uptime-kuma-2.5.5-slim-rootless   # its §4 reads Kuma monitors that resolve via CoreDNS and
+  # - uptime-kuma-2.5.5-slim-rootless (RESOLVED 2026-10-04: executed sat-attended:2026-10-03 + retired d60d14f7; dead ref removed per the dead-ref convention)
+    # its §4 reads Kuma monitors that resolve via CoreDNS and
                                       # Prometheus; a CoreDNS roll mid-verification poisons its gate
   - oc8-install                       # declares shared k8s-gateway DNS; its DNS verification must not
                                       # overlap a CoreDNS roll (blocked today; listed for when it unblocks)
   # traccar-6.16.0 REMOVED 2026-09-29: executed green in nightly:2026-09-29 (3a943035), plan retired (1a40b257)
-  - mariadb-chart-27.3.0              # tenants re-resolve the DB service on reconnect after mariadb-0 rolls;
+  # - mariadb-chart-27.3.0 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+  - mariadb-28.1.1  # ADDED 2026-10-04: successor plan (same databases/mariadb HR + mariadb-0 roll); reciprocal -- it already lists this plan
+    # tenants re-resolve the DB service on reconnect after mariadb-0 rolls;
                                       # a CoreDNS roll in the same night muddies its reconnect gate
   - penpot-chart-1.10.0               # its frontend nginx resolver moves to cluster DNS; its gate resolves
                                       # through CoreDNS

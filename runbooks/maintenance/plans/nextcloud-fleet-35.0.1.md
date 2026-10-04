@@ -58,7 +58,8 @@ touches:
                                                 # see a 503 for the duration of maintenance — §6.
 depends_on: []
 conflicts_with:
-  - nextcloud-redis-hardening                   # same helmrelease.yaml + same Deployment restart;
+  # - nextcloud-redis-hardening (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+    # same helmrelease.yaml + same Deployment restart;
                                                 # its §5 would restore helmrelease.yaml from a
                                                 # parent that predates THIS bump. Serial, other slot.
   - bitnamilegacy-exit-nextcloud-db             # same helmrelease.yaml, same DB this plan migrates

@@ -56,7 +56,8 @@ conflicts_with:
                                       # silence that plan sets would mask this rollout's noise.
                                       # Reciprocal: that plan lists this id. Re-take the §2.4
                                       # baselines the SAME DAY as execution, after any server move.
-  - nextcloud-redis-hardening         # ADDED 2026-09-22 (RECIPROCITY — that draft already lists
+  # - nextcloud-redis-hardening (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+    # ADDED 2026-09-22 (RECIPROCITY — that draft already lists
                                       # this id). It quiesces the Nextcloud server and restarts
                                       # its Redis (sessions/file-locks); every §4 contents gate
                                       # here is a live call INTO that server. Different slots.

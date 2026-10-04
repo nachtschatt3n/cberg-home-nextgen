@@ -43,7 +43,8 @@ depends_on:
                                                 # the preferred path is to FOLD this line into the
                                                 # fleet plan's Commit B and supersede this file.
 conflicts_with:
-  - nextcloud-redis-hardening                   # same helmrelease.yaml + same helm release; its §5
+  # - nextcloud-redis-hardening (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+    # same helmrelease.yaml + same helm release; its §5
                                                 # restores helmrelease.yaml from a parent that would
                                                 # predate this bump; its render gate is pinned to
                                                 # "chart $V" measured on 9.3.0.

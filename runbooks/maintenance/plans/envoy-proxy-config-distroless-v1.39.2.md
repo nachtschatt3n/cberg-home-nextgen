@@ -31,7 +31,8 @@ touches:
     - authentik                       # 12 SecurityPolicies (forward-auth) are enforced inside Envoy
     - monitoring                      # §4 reads Prometheus + blackbox probe_success (the instrument)
 depends_on:
-  - envoy-gateway-1.9.2               # (a) the *envoyproxy/envoy* deny rule couples this pin to the
+  # - envoy-gateway-1.9.2 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+    # (a) the *envoyproxy/envoy* deny rule couples this pin to the
                                       # controller: move the data plane only on top of the CURRENT
                                       # controller (v1.9.2 compiles 1.39.1, measured below), and
                                       # (b) that plan's premise `gatewayclass-pin-unchanged`

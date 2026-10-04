@@ -60,7 +60,7 @@ conflicts_with:
   - paperless-db-13.0.2
   - bitnamilegacy-exit-nextcloud-db
   - nextcloud-fleet-35.0.1
-  - nocodb-2026.09.1                  # also namespace databases; lists mariadb-chart-27.3.0 (retired) — see report
+  - nocodb-2026.09.1                  # also namespace databases; its dead mariadb-chart-27.3.0 ref was retargeted to this plan 2026-10-04
   - n8n-2.39.8
   - jellyfin-12.1
   - media-naming-p3

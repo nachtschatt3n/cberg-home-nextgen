@@ -41,11 +41,15 @@ conflicts_with:
   - flux-fleet-0.60.0                 # upgrades source/helm-controller = the §5 revert path
   - flux-oci-chart-sources            # moves HelmRepository sources incl. coredns, declares dns-internal
   - helm-drift-detection              # adds driftDetection to every HR incl. this one
-  - envoy-gateway-1.9.2               # declares shared dns; its gates resolve through CoreDNS
+  # - envoy-gateway-1.9.2 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+    # declares shared dns; its gates resolve through CoreDNS
   - external-dns-1.23.0               # DNS-plane change; its verification resolves names
   - app-template-5.2.1                # rolls ~78 workloads whose readiness resolves through CoreDNS
-  - uptime-kuma-2.5.5-slim-rootless   # its §4 reads Kuma monitors that resolve via CoreDNS
-  - mariadb-chart-27.3.0              # tenants re-resolve the DB service on reconnect
+  # - uptime-kuma-2.5.5-slim-rootless (RESOLVED 2026-10-04: executed sat-attended:2026-10-03 + retired d60d14f7; dead ref removed per the dead-ref convention)
+    # its §4 reads Kuma monitors that resolve via CoreDNS
+  # - mariadb-chart-27.3.0 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+  - mariadb-28.1.1  # ADDED 2026-10-04: successor plan (same databases/mariadb HR + mariadb-0 roll); reciprocal -- it already lists this plan
+    # tenants re-resolve the DB service on reconnect
   - penpot-chart-1.10.0               # its nginx resolver moves to cluster DNS; gate resolves via CoreDNS
   - redis-fleet-8.10.2                # consumers re-resolve on reconnect
   - nextcloud-fleet-35.0.1            # lists the sibling coredns plan for the same reason

@@ -73,7 +73,7 @@ conflicts_with:
   - anythingllm-1.17
   - grafana-13.2.7
   - external-dns-1.23.0
-  - envoy-gateway-1.9.2
+  # - envoy-gateway-1.9.2 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
   - longhorn-1.13.0
 exclusive: false                      # the six controllers do NOT roll (section 1.2, gated in 4.4),
                                       # so reconciliation continues throughout and a co-scheduled

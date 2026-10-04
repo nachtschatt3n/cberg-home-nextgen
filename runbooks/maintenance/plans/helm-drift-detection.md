@@ -84,13 +84,15 @@ conflicts_with:
                                       # authentik (a null-bearing HR) — a same-window HR spec
                                       # change invalidates values-gate snapshot B.
   - jellyfin-12.1                     # edits media/jellyfin HR values (null-bearing); same reason.
-  - uptime-kuma-2.5.5-slim-rootless   # edits monitoring/uptime-kuma HR values (null-bearing). Reciprocal.
+  # - uptime-kuma-2.5.5-slim-rootless (RESOLVED 2026-10-04: executed sat-attended:2026-10-03 + retired d60d14f7; dead ref removed per the dead-ref convention)
+    # edits monitoring/uptime-kuma HR values (null-bearing). Reciprocal.
   - chart-patches-coredns-reloader-blackbox   # edits prometheus-blackbox-exporter HR (null-bearing). Reciprocal.
   # Reciprocals of plans that already name this one (a HelmRelease change in the P1 run
   # breaks rev-gate/values-gate attribution, and P1 must be the day's LAST HR change):
   - app-template-5.2.1
   # - librechat-2.0.14 (RESOLVED 2026-09-30: executed + retired in nightly:2026-09-30, c75c5c39; ref removed)
-  - mariadb-chart-27.3.0
+  # - mariadb-chart-27.3.0 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
+  - mariadb-28.1.1  # ADDED 2026-10-04: successor plan (same databases/mariadb HR + mariadb-0 roll); reciprocal -- it already lists this plan
   - penpot-chart-1.10.0
   - redis-fleet-8.10.2
   # traccar-6.16.0 REMOVED 2026-09-29: executed green in nightly:2026-09-29 (3a943035), plan retired (1a40b257)
