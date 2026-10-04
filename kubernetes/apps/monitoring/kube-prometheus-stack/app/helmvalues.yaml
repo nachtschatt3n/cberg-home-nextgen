@@ -99,6 +99,56 @@ data:
         limits:
           cpu: 200m
           memory: 512Mi
+    # RAPL (package power) for the NUC thermal monitoring - 2026-10-04.
+    # Since Linux 5.10 (PLATYPUS side-channel fix) every
+    # /sys/devices/virtual/powercap/*/energy_uj is mode 0400 root:root, so the
+    # non-root exporter (uid 65534) gets EACCES and node-exporter swallows it:
+    # node_scrape_collector_success{collector="rapl"} stays 1 while
+    # node_rapl_* is simply absent.
+    #
+    # Least privilege that works, chosen over the alternatives:
+    #   - non-root + CAP_DAC_READ_SEARCH: does NOT work - Kubernetes grants no
+    #     ambient capabilities, so an added cap is never effective for a
+    #     non-root process.
+    #   - running the exporter as uid 0: works (owner read), but turns the
+    #     long-running, hostNetwork-exposed process into root that can read
+    #     every root-only file under the /host/root mount.
+    #   - chosen: the chart's one-shot permission-fix init container (uid 0,
+    #     ALL caps dropped except CHOWN) chgrps ONLY the energy_uj files to a
+    #     dedicated gid (9100, used by nothing else) and adds g+r. The exporter
+    #     itself stays uid 65534 / non-root, read-only rootfs, read-only /sys.
+    #     The PLATYPUS read is opened to that one gid only, not to "nobody".
+    # Sysfs ownership resets on reboot; the init container re-runs whenever
+    # the pod sandbox is recreated (pod restart, node reboot), so it re-applies.
+    # Verify: count by (instance) (node_rapl_package_joules_total) == 3 nodes.
+    prometheus-node-exporter:
+      securityContext:
+        fsGroup: 65534
+        runAsGroup: 9100
+        runAsNonRoot: true
+        runAsUser: 65534
+      containerSecurityContext:
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      permissionInitContainer:
+        image:
+          registry: quay.io
+          repository: prometheus/busybox
+          tag: latest
+          sha: f07fff1d7544464a1041fc2b6be79873a335a3af8f0b747b82fa630287968d4d
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          runAsNonRoot: false
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+            add: ["CHOWN"]
+        fixes:
+          rapl: true
     kubelet:
       enabled: true
       serviceMonitor:
