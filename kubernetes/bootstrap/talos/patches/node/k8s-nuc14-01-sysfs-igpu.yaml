@@ -1,0 +1,9 @@
+# iGPU render GT (gt0) max frequency (RP0 2200 MHz). PER NODE because the DRM
+# card index is not stable: nuc14-03 boots with simpledrm on card0, so i915 is
+# card1 there (measured 2026-10-04). Do NOT use card-level gt_max_freq_mhz: on
+# Meteor Lake it writes EVERY GT and the media GT (gt1, RP0 1300) rejects a
+# value above 1300 with EINVAL (intel_guc_slpc_set_max_freq). Plan talos-sysfs-power-caps.
+apiVersion: v1alpha1
+kind: SysfsConfig
+params:
+  class/drm/card0/gt/gt0/rps_max_freq_mhz: "1500"

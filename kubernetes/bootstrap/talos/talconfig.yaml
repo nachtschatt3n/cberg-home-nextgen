@@ -25,6 +25,8 @@ cniConfig:
 
 nodes:
   - hostname: "k8s-nuc14-01"
+    patches:
+      - "@./patches/node/k8s-nuc14-01-sysfs-igpu.yaml"
     ipAddress: "192.168.55.11"
     installDiskSelector:
       serial: "S5GXNS0X201738E"
@@ -45,6 +47,8 @@ nodes:
         vip:
           ip: "192.168.55.10"
   - hostname: "k8s-nuc14-02"
+    patches:
+      - "@./patches/node/k8s-nuc14-02-sysfs-igpu.yaml"
     ipAddress: "192.168.55.12"
     installDiskSelector:
       serial: "S5GXNS0X207008P"
@@ -65,6 +69,8 @@ nodes:
         vip:
           ip: "192.168.55.10"
   - hostname: "k8s-nuc14-03"
+    patches:
+      - "@./patches/node/k8s-nuc14-03-sysfs-igpu.yaml"
     ipAddress: "192.168.55.13"
     installDiskSelector:
       serial: "S6Z1NU0XC43615L"
@@ -95,6 +101,7 @@ patches:
   - "@./patches/global/machine-network-rps.yaml"
   - "@./patches/global/no-filesystem-trim.yaml"
   - "@./patches/global/machine-sysctls.yaml"
+  - "@./patches/global/machine-sysfs-power.yaml"
   - "@./patches/global/machine-time.yaml"
   - "@./patches/global/machine-udev.yaml"
 
