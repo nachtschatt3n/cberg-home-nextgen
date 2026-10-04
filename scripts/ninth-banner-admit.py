@@ -32,9 +32,14 @@ Contract (docs/sops/ci-runner.md, "Thermal gate"):
     pending pod's requests (kube-state-metrics + the CI pods themselves);
   - no CI pod was admitted or started there in the last SETTLE_SECONDS, so the
     previous pod's heat shows before another pod is added.
-* BRAKE: if ANY node's package temperature reached >= BRAKE_C in the last
-  BRAKE_MINUTES (+1 min, i.e. a 1-min max >= BRAKE_C), nothing is admitted
-  ANYWHERE until BRAKE_MINUTES after that reading. Running pods are untouched.
+* BRAKE, PER NODE (since 2026-10-04 late evening): a node whose package
+  temperature reached >= BRAKE_C (a 1-min max >= BRAKE_C) gets no NEW CI pod
+  until BRAKE_MINUTES after that reading; the other nodes keep admitting under
+  their normal limits (a CI pod on one node does not heat another, and
+  nuc14-02 alone reaches >= 100 C from production load). GLOBAL hold: if
+  >= GLOBAL_BRAKE_NODES nodes are braked at once (each read >= BRAKE_C within
+  the last BRAKE_MINUTES), nothing is admitted anywhere (a shared cause such as
+  room heat). Running pods are untouched.
 * Fail-closed: no or stale Prometheus data (temperature or node capacity)
   means no node is open, and pods queue.
   Production pods are never touched: the tick only reads and patches pods in
@@ -72,6 +77,8 @@ SECOND_HOT_C = float(os.environ.get("GATE_SECOND_HOT_C", "90"))
 SECOND_POD_NODES = {n for n in os.environ.get("GATE_SECOND_POD_NODES", "k8s-nuc14-01").split(",") if n}
 BRAKE_C = float(os.environ.get("GATE_BRAKE_C", "100"))
 BRAKE_MINUTES = int(os.environ.get("GATE_BRAKE_MINUTES", "10"))
+# Braked nodes at once that freeze ALL admission; 0 = never global
+GLOBAL_BRAKE_NODES = int(os.environ.get("GATE_GLOBAL_BRAKE_NODES", "2"))
 MAX_PER_NODE = int(os.environ.get("GATE_MAX_PER_NODE", "2"))   # browser lane
 # CPU lane (sims/unit). Heat data 2026-10-04 (12 h, 1-min samples): one sims
 # shard is a single core at full turbo and costs about as much as a GPU browser
@@ -209,8 +216,14 @@ def snapshot():
     return count, last, queue, ci_req
 
 
-def closed_reason(node, lane, req, temps, count, last, now, free, ci_req):
+def global_hold(brake):
+    return GLOBAL_BRAKE_NODES > 0 and len(brake) >= GLOBAL_BRAKE_NODES
+
+
+def closed_reason(node, lane, req, temps, count, last, now, free, ci_req, brake):
     avg2, max3 = temps[node]
+    if node in brake:
+        return f"brake (read >= {BRAKE_C:.0f}C; {brake[node] - now:.0f}s more)"
     c = count.get(node, {"browser": 0, "cpu": 0})
     nb, nc = c["browser"], c["cpu"]
     if lane == "cpu":
@@ -292,29 +305,35 @@ def main():
                 c = count.get(n, {"browser": 0, "cpu": 0})
                 u = ci_req.get(n, {"cpu": 0.0})
                 state = "  ".join(f"{ln}: " + ("CLOSED " + r if r else "open") for ln in ("browser", "cpu")
-                                  for r in [closed_reason(n, ln, probe[ln], temps, count, last, now, free, ci_req)])
+                                  for r in [closed_reason(n, ln, probe[ln], temps, count, last, now, free, ci_req, brake)])
                 print(f"{n}  2m-avg {temps[n][0]:5.1f}C  3m-peak {temps[n][1]:5.1f}C  "
                       f"browser {c['browser']}/{MAX_PER_NODE} cpu {c['cpu']}/{MAX_CPU_PER_NODE} "
                       f"ci-cpu {u['cpu']:g}/{NODE_CPU_BUDGET:g}\n    {state}")
             for n, t in sorted(brake.items()):
-                print(f"BRAKE: {n} read >= {BRAKE_C:.0f}C; no admissions anywhere for {t - now:.0f}s more")
+                print(f"BRAKE: {n} read >= {BRAKE_C:.0f}C; no admissions on {n} for {t - now:.0f}s more")
+            if global_hold(brake):
+                print(f"GLOBAL HOLD: {len(brake)} nodes braked (>= {GLOBAL_BRAKE_NODES}); "
+                      f"no admissions anywhere for {min(brake.values()) - now:.0f}s more")
             print(f"gated (queued) pods: {len(queue)}")
             for p in queue:
                 print(f"  {p['metadata']['name']}  {lane_of(p)}  since {p['metadata']['creationTimestamp']}")
             return 0
-        if brake:
+        if global_hold(brake):
             if queue:
-                n, t = max(brake.items(), key=lambda kv: kv[1])
-                log(f"BRAKE: {n} read >= {BRAKE_C:.0f}C; {len(queue)} pod(s) held, "
-                    f"no admissions for {t - now:.0f}s more")
+                log(f"GLOBAL HOLD: {', '.join(sorted(brake))} read >= {BRAKE_C:.0f}C; "
+                    f"{len(queue)} pod(s) held, no admissions anywhere for "
+                    f"{min(brake.values()) - now:.0f}s more")
             return 0
+        if brake and queue:
+            log("BRAKE: " + ", ".join(f"{n} ({t - now:.0f}s more)" for n, t in sorted(brake.items()))
+                + f" read >= {BRAKE_C:.0f}C; no admissions there, other nodes admit")
         used = set()
         for p in queue:
             if len(used) >= len(temps):
                 break
             lane, req = lane_of(p), pod_requests(p)
             open_nodes = [n for n in temps if n not in used
-                          and not closed_reason(n, lane, req, temps, count, last, now, free, ci_req)]
+                          and not closed_reason(n, lane, req, temps, count, last, now, free, ci_req, brake)]
             if not open_nodes:
                 continue   # this lane is closed; a younger pod of the other lane may still fit
             # fewest CI pods first, then the coolest
