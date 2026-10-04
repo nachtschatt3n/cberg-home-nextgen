@@ -212,8 +212,17 @@ spec:
         # no absent() guard of their own: AragScrapeDown covers the
         # unreachable-target case. Known gap: a reachable build that does not
         # export process_up / auto_restarts_total leaves both rules inert.
+        # Since the 2026-10-04 build the app also exports
+        # arag_scrape_emulator_user_stopped (0/1): 1 after a CLEAN emulator
+        # exit (Quit / exit 0 / menu "Stop emulator"). The idle watchdog then
+        # deliberately does not relaunch it; the next scheduled 6h cycle boots
+        # it and resets the gauge to 0. Down excludes that state with a second
+        # `unless`, which stays backward-compatible (an older build exports no
+        # user_stopped series, so nothing is removed). AragScrapeEmulator-
+        # UserStoppedLong (7h > the 6h cycle) keeps the exclusion from
+        # blinding us if the scheduled restart never happens.
         - alert: AragScrapeEmulatorDown
-          expr: arag_scrape_emulator_up == 0 unless on(instance, job) arag_scrape_emulator_process_up == 1
+          expr: (arag_scrape_emulator_up == 0 unless on(instance, job) arag_scrape_emulator_process_up == 1) unless on(instance, job) arag_scrape_emulator_user_stopped == 1
           for: 30m
           labels:
             severity: warning
@@ -226,7 +235,26 @@ spec:
               {{ $labels.instance }} has been DEAD (no qemu process, or no adb
               device) for more than 30 minutes, and the app's auto-restart
               (attempted every 15 min while idle) did not bring it back. Scrapes
-              cannot run without it. Check data/logs/emulator.log on the Mac mini.
+              cannot run without it. A deliberate stop (clean exit,
+              arag_scrape_emulator_user_stopped == 1) is excluded; see
+              AragScrapeEmulatorUserStoppedLong for that case. Check
+              data/logs/emulator.log on the Mac mini.
+
+        - alert: AragScrapeEmulatorUserStoppedLong
+          expr: arag_scrape_emulator_user_stopped == 1
+          for: 7h
+          labels:
+            severity: warning
+            category: macos
+            component: arag-scrape
+          annotations:
+            summary: "ARAG emulator deliberately stopped for over 7h"
+            description: >-
+              The Android emulator on {{ $labels.instance }} was deliberately
+              stopped (clean exit) more than 7 hours ago, but the scheduled
+              6h sync cycle should have restarted it and reset
+              arag_scrape_emulator_user_stopped to 0. Check the AragScrape
+              menubar app and its sync timer on the Mac mini.
 
         - alert: AragScrapeEmulatorUnresponsive
           expr: arag_scrape_emulator_up == 0 and on(instance, job) arag_scrape_emulator_process_up == 1
