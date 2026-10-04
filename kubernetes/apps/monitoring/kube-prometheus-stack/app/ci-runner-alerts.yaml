@@ -226,7 +226,7 @@ spec:
           # pods too. Once released, the pod drops the reason and the 30m
           # timer starts - unschedulable, ImagePullBackOff, missing CM/Secret
           # and a hung clone all still fire. A missing reason series fails
-          # toward firing. Tests: ci-runner-alerts.test.yaml (promtool).
+          # toward firing. Tests: runbooks/tests/test-ci-runner-pending-alert.py.
           # Known gap: a DEAD admitter (no trigger running) leaves pods gated
           # until the Job's activeDeadlineSeconds kills them; gated pods count
           # as Job active, so CIRunnerJobStarved does not see that either.
