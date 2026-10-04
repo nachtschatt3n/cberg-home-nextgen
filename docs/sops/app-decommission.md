@@ -105,6 +105,39 @@ rg -l -i "$APP" kubernetes/ runbooks/ docs/ .github/ | sort
    Redis DB index, Authentik provider, LB IP, i915 slot) — those are cleaned
    in later steps, not by the prune.
 
+### 4.1a Find OFF-CLUSTER consumers (MANDATORY, before any removal)
+
+An app can have consumers that live in no Kubernetes manifest: Mac-mini
+scripts, menubar apps, launchd jobs, n8n/OpenClaw workflows, Home Assistant
+integrations. A cluster-side inventory cannot see them, and a pipeline that
+returns early on failure turns one dead stage into a silent outage of
+everything downstream.
+
+**Incident 2026-10-04:** the Mac-mini bank-refresh pipeline
+(`~/code/bank-refresh`, `doSyncCategorize` in `native-wrapper/main.swift`)
+imported into Actual Budget via `actual-monmon import`. After actual-budget
+was pruned that stage failed every cycle, and because the pipeline returns
+early on failure the downstream Sure sync + categorize silently stopped —
+Sure received no bank data from ~19:18Z (`BankRefreshFailing`, finding
+`F-059e2bae`). Nothing in the cluster-side inventory pointed at it.
+
+The check — grep the app's hostname, service name and port everywhere it
+could be consumed, list every hit, and fix or retire each consumer BEFORE the
+prune:
+
+```bash
+APP=<app>; HOST=<app-hostname-short>; PORT=<port>
+rg -n -i -e "$APP" -e "$HOST" -e ":$PORT\b" ~/code/*/ --glob '!**/node_modules/**' 2>/dev/null | grep -v '^/Users/mu/code/cberg-home-nextgen/kubernetes/apps/.*/'"$APP"'/'
+rg -n -i -e "$APP" -e "$HOST" ~/.config ~/Library/LaunchAgents /Library/LaunchAgents /Library/LaunchDaemons 2>/dev/null
+# other apps' env/configmaps in the cluster that point at it
+mise exec -- kubectl get cm,deploy,sts -A -o yaml | rg -n -i -e "$APP\." -e "$HOST"
+```
+
+Also check, by owner: n8n workflows and OpenClaw skills/crons (export and
+grep), Home Assistant integrations/REST sensors (ha-agent), and menubar apps
+on the Mac mini. Record the consumer list in the decommission commit
+message; "none found" must say which places were searched.
+
 ### 4.2 Storage pre-flight and backup verification
 
 1. **Every PV the app owns must be `Retain` before the prune.** Dynamic
@@ -289,6 +322,22 @@ Expected:
 If failed:
 - Application survived → stage 1 was not identifiers-only/application-first.
 
+### Test 3a: consumer-side alerts quiet for 2-4 h after the prune
+
+```bash
+mise exec -- kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 &
+curl -s http://localhost:9090/api/v1/alerts | python3 -c "import sys,json; [print(a['labels'].get('alertname'), a['labels'].get('namespace',''), a.get('activeAt')) for a in json.load(sys.stdin)['data']['alerts'] if a['state']=='firing']"
+```
+
+Expected:
+- No NEW firing alert whose `activeAt` is after the prune — in particular
+  pipeline/freshness alerts (`BankRefreshFailing`-class) on the Mac side or in
+  apps that consumed the removed one. Re-check at +2 h and +4 h.
+
+If failed:
+- An off-cluster consumer was missed in §4.1a: fix or retire it, or roll
+  back (§11) if the consumer cannot be fixed quickly.
+
 ### Test 4: no dangling references
 
 ```bash
@@ -385,6 +434,10 @@ Expected:
 - Authentik: revert both stage commits; the blueprint re-creates provider +
   application (new client secret — update the app's SOPS secret).
 - Source repos: `gh workflow enable <workflow> -R <owner>/<repo>`.
+- **Missed off-cluster consumer** (found by Test 3a): prefer fixing the
+  consumer (drop the dead stage, make it non-blocking) over restoring the
+  app; restore via the steps above only if the consumer cannot be fixed
+  within the alert's tolerance.
 
 ---
 
@@ -402,3 +455,6 @@ Expected:
 ## Version History
 
 - `2026.10.04`: Initial SOP, from the 2026-10-04 decommission of 16 apps.
+- `2026.10.04`: Add mandatory §4.1a off-cluster consumer search and Test 3a
+  (consumer-side alerts for 2-4 h after the prune), from the bank-refresh →
+  Actual Budget incident (`F-059e2bae`).
