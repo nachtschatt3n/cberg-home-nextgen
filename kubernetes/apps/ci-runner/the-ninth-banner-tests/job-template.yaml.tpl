@@ -5,7 +5,7 @@
 #
 # Indexed Job: one pod per shard (JOB_COMPLETION_INDEX -> --shard=i+1/N),
 # at most __PARALLELISM__ (3 GPU / 2 CPU) at a time per Job; node placement is
-# decided by the thermal gate below (at most 2 CI pods per node). backoffLimitPerIndex 0 +
+# decided by the thermal gate below (per node: browser lane + cpu lane slots). backoffLimitPerIndex 0 +
 # maxFailedIndexes N: a failing shard is NOT retried and does NOT stop the
 # others, so every shard reports.
 apiVersion: batch/v1
@@ -16,6 +16,7 @@ metadata:
   labels:
     app.kubernetes.io/name: the-ninth-banner-tests
     ci.cberg.home/suite: __SUITE__
+    ci.cberg.home/lane: __LANE__
   annotations:
     ci.cberg.home/ref: "__REF__"
 spec:
@@ -31,6 +32,8 @@ spec:
       labels:
         app.kubernetes.io/name: the-ninth-banner-tests
         ci.cberg.home/suite: __SUITE__
+        # browser | cpu: the thermal gate keeps separate per-node slots per lane
+        ci.cberg.home/lane: __LANE__
     spec:
       restartPolicy: Never
       serviceAccountName: the-ninth-banner-tests
@@ -42,9 +45,9 @@ spec:
       terminationGracePeriodSeconds: 10
       # THERMAL GATE: every shard pod is created gated (Pending, invisible to the
       # scheduler, no node resources). scripts/ninth-banner-admit.py, ticked by
-      # every running trigger, pins it to a cool node with < 2 CI pods (1st pod:
-      # 2m avg < 85 C, 3m peak < 93 C; 2nd pod: < 78 / < 90 C; brake 10 min after
-      # any node reads >= 100 C) and removes the gate.
+      # every running trigger, pins it to a cool node with a free slot in the
+      # pod's lane (thresholds, caps and the >= 100 C brake: SOP §2b) and
+      # removes the gate.
       # docs/sops/ci-runner.md "Thermal gate".
       schedulingGates:
         - name: ci.cberg.home/thermal
@@ -124,8 +127,11 @@ spec:
             # __GPU_RES__ is empty, or `, gpu.intel.com/i915: "1"` (GPU=1): one
             # of the 5 shared slots per node the Intel GPU device plugin offers
             # (docs/sops/ci-runner.md "GPU mode").
-            requests: { cpu: "__CPU_REQ__", memory: 6Gi, ephemeral-storage: 8Gi__GPU_RES__ }
-            limits: { cpu: "__CPU_LIM__", memory: 10Gi, ephemeral-storage: 16Gi__GPU_RES__ }
+            # cpu lane (sims/unit, no browser): 1 CPU / 1Gi request, 1.5 CPU /
+            # 3Gi limit, 2/8Gi disk (measured: sims ~1 core, <= 0.61Gi; unit
+            # <= 1.2Gi). Browser lane: 2/4 CPU, 6/10Gi, 8/16Gi disk.
+            requests: { cpu: "__CPU_REQ__", memory: __MEM_REQ__, ephemeral-storage: __EPH_REQ____GPU_RES__ }
+            limits: { cpu: "__CPU_LIM__", memory: __MEM_LIM__, ephemeral-storage: __EPH_LIM____GPU_RES__ }
           volumeMounts:
             - { name: work, mountPath: /work }
             - { name: tmp, mountPath: /tmp }

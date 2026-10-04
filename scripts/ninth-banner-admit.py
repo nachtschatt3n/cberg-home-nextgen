@@ -12,21 +12,31 @@ Contract (docs/sops/ci-runner.md, "Thermal gate"):
 * Jobs rendered from job-template.yaml.tpl create their pods with the scheduling
   gate GATE: Pending (SchedulingGated), invisible to the scheduler, no node
   resources used, so nothing runs until a tick admits it.
-* A tick admits gated pods OLDEST FIRST, at most one per node per tick. It pins
+* Two LANES, each with its own per-node slots: "browser" (Playwright suites,
+  usually on the iGPU, 2 CPU request / 4 limit) and "cpu" (sims/unit: Node
+  without a browser, 1 CPU request / 1.5 limit, no GPU). Lane = pod label
+  ci.cberg.home/lane; pods created before the label existed: suite sims/unit
+  without a GPU request = cpu, everything else = browser.
+* A tick admits gated pods OLDEST FIRST per lane (a pod whose lane is closed
+  does not block the other lane), at most one per node per tick. It pins
   the pod to a node (nodeSelector kubernetes.io/hostname) and removes the gate.
-  A node is open only if all of these hold:
-  - its package temperature, averaged over 2 min, is < OPEN_BELOW_C (first
-    CI pod) or < SECOND_OPEN_BELOW_C (second pod: the node already has one);
-  - its peak over the last 3 min is < HOT_C (first pod) or < SECOND_HOT_C
-    (second pod);
-  - it holds < MAX_PER_NODE CI pods (bound or pinned, not finished), and a
-    second pod only on SECOND_POD_NODES (nuc14-01; data in the constant);
+  A node is open for a pod only if all of these hold:
+  - its package temperature, averaged over 2 min, is below the lane's limit:
+    browser OPEN_BELOW_C (node has no CI pod) or SECOND_OPEN_BELOW_C (node
+    already has a CI pod); cpu CPU_OPEN_BELOW_C;
+  - its peak over the last 3 min is below HOT_C / SECOND_HOT_C / CPU_HOT_C;
+  - lane slots: < MAX_PER_NODE browser pods (a second one only on
+    SECOND_POD_NODES), < MAX_CPU_PER_NODE cpu pods (bound or pinned, not finished);
+  - CI CPU requests on the node stay <= NODE_CPU_BUDGET, and the pod's CPU,
+    memory and i915 requests fit the node's allocatable minus every running/
+    pending pod's requests (kube-state-metrics + the CI pods themselves);
   - no CI pod was admitted or started there in the last SETTLE_SECONDS, so the
     previous pod's heat shows before another pod is added.
 * BRAKE: if ANY node's package temperature reached >= BRAKE_C in the last
   BRAKE_MINUTES (+1 min, i.e. a 1-min max >= BRAKE_C), nothing is admitted
   ANYWHERE until BRAKE_MINUTES after that reading. Running pods are untouched.
-* Fail-closed: no or stale Prometheus data means no node is open, and pods queue.
+* Fail-closed: no or stale Prometheus data (temperature or node capacity)
+  means no node is open, and pods queue.
   Production pods are never touched: the tick only reads and patches pods in
   ci-runner. Running pods are never changed: the gate only decides where and
   when a NEW pod starts.
@@ -62,7 +72,20 @@ SECOND_HOT_C = float(os.environ.get("GATE_SECOND_HOT_C", "90"))
 SECOND_POD_NODES = {n for n in os.environ.get("GATE_SECOND_POD_NODES", "k8s-nuc14-01").split(",") if n}
 BRAKE_C = float(os.environ.get("GATE_BRAKE_C", "100"))
 BRAKE_MINUTES = int(os.environ.get("GATE_BRAKE_MINUTES", "10"))
-MAX_PER_NODE = int(os.environ.get("GATE_MAX_PER_NODE", "2"))
+MAX_PER_NODE = int(os.environ.get("GATE_MAX_PER_NODE", "2"))   # browser lane
+# CPU lane (sims/unit). Heat data 2026-10-04 (12 h, 1-min samples): one sims
+# shard is a single core at full turbo and costs about as much as a GPU browser
+# shard: node 2-min average +12 C on n01/n02, +22 C on n03 (browser +11/+13/+14);
+# its first 10 min peak a median +17-19 C above the pre-start 2-min average.
+CPU_OPEN_BELOW_C = float(os.environ.get("GATE_CPU_OPEN_BELOW_C", "88"))
+CPU_HOT_C = float(os.environ.get("GATE_CPU_HOT_C", "96"))
+MAX_CPU_PER_NODE = int(os.environ.get("GATE_MAX_CPU_PER_NODE", "2"))
+# CI CPU requests per node (owner 2026-10-04: CI gets >= 6 CPU per node while
+# the node is below the thermal limits; production leaves 6.4-7.2 of 17 free)
+NODE_CPU_BUDGET = float(os.environ.get("GATE_NODE_CPU_BUDGET", "6"))
+LANE = "ci.cberg.home/lane"
+CPU_SUITES = {"sims", "unit"}
+GPU_RES = "gpu.intel.com/i915"
 # 300 s (trial 2026-10-04: 120 s let nuc14-02 take a 2nd shard before the 1st
 # one's test load had started - clone + npm ci take 1-2 min - and the node then
 # held a 94 C 2-min floor with 100 C peaks)
@@ -110,6 +133,50 @@ def brake_until():
     return {n: t + 60 * BRAKE_MINUTES for n, t in last.items()}
 
 
+def qty(v):
+    """Kubernetes quantity -> float (cores for cpu, bytes for memory)."""
+    v = str(v)
+    for suf, mul in (("Ki", 2**10), ("Mi", 2**20), ("Gi", 2**30), ("Ti", 2**40),
+                     ("m", 1e-3), ("k", 1e3), ("M", 1e6), ("G", 1e9)):
+        if v.endswith(suf):
+            return float(v[:-len(suf)]) * mul
+    return float(v)
+
+
+def pod_requests(p):
+    """Effective pod requests {cpu, memory, gpu}: max(sum of containers, largest init)."""
+    def of(cs):
+        return [{k: qty(((c.get("resources") or {}).get("requests") or {}).get(r, 0))
+                 for k, r in (("cpu", "cpu"), ("memory", "memory"), ("gpu", GPU_RES))} for c in cs]
+    main_ = of(p["spec"].get("containers") or [])
+    init = of(p["spec"].get("initContainers") or [])
+    return {k: max(sum(c[k] for c in main_), max([c[k] for c in init] or [0])) for k in ("cpu", "memory", "gpu")}
+
+
+def lane_of(p):
+    lab = p["metadata"].get("labels") or {}
+    if lab.get(LANE) in ("browser", "cpu"):
+        return lab[LANE]
+    return "cpu" if lab.get("ci.cberg.home/suite") in CPU_SUITES and not pod_requests(p)["gpu"] else "browser"
+
+
+def node_free():
+    """{node: {cpu, memory, gpu}} allocatable minus requests of every NON-CI pod
+    that is Pending/Running on it (kube-state-metrics). CI pods are subtracted
+    from the live pod list in snapshot(), which also sees pinned-not-yet-bound pods."""
+    res = {"cpu": "cpu", "memory": "memory", "gpu": "gpu_intel_com_i915"}
+    def by(q):
+        out = json.loads(kubectl("get", "--raw", PROM + urllib.parse.urlencode({"query": q})))["data"]["result"]
+        return {(s["metric"]["node"], s["metric"]["resource"]): float(s["value"][1]) for s in out}
+    alloc = by('kube_node_status_allocatable{resource=~"cpu|memory|gpu_intel_com_i915"}')
+    used = by('sum by (node, resource) (kube_pod_container_resource_requests{namespace!="%s",'
+              'resource=~"cpu|memory|gpu_intel_com_i915"} * on(namespace, pod) group_left() '
+              'max by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Running"} == 1))' % NS)
+    nodes = {n for n, _ in alloc}
+    return {n: {k: alloc[(n, r)] - used.get((n, r), 0.0) for k, r in res.items()}
+            for n in nodes if (n, "cpu") in alloc and (n, "memory") in alloc and (n, "cpu") in used}
+
+
 def ts(s):
     return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
 
@@ -122,7 +189,7 @@ def snapshot():
     pods = json.loads(kubectl("get", "pods", "-n", NS, "-l", SELECTOR, "-o", "json"))["items"]
     live = [p for p in pods if p["status"].get("phase") in ("Pending", "Running")
             and not p["metadata"].get("deletionTimestamp")]
-    count, last, queue = {}, {}, []
+    count, last, queue, ci_req = {}, {}, [], {}
     for p in live:
         if gated(p):
             queue.append(p)
@@ -130,27 +197,47 @@ def snapshot():
         node = p["spec"].get("nodeName") or (p["spec"].get("nodeSelector") or {}).get("kubernetes.io/hostname")
         if not node:
             continue   # an ungated pod the scheduler has not placed yet
-        count[node] = count.get(node, 0) + 1
+        c = count.setdefault(node, {"browser": 0, "cpu": 0})
+        c[lane_of(p)] += 1
+        r, acc = pod_requests(p), ci_req.setdefault(node, {"cpu": 0.0, "memory": 0.0, "gpu": 0.0})
+        for k in acc:
+            acc[k] += r[k]
         t = (p["metadata"].get("annotations") or {}).get(RELEASED_AT) or p["status"].get("startTime")
         if t:
             last[node] = max(last.get(node, 0.0), ts(t))
     queue.sort(key=lambda p: (p["metadata"]["creationTimestamp"], p["metadata"]["name"]))
-    return count, last, queue
+    return count, last, queue, ci_req
 
 
-def closed_reason(node, temps, count, last, now):
+def closed_reason(node, lane, req, temps, count, last, now, free, ci_req):
     avg2, max3 = temps[node]
-    n = count.get(node, 0)
-    open_below, hot = (OPEN_BELOW_C, HOT_C) if n == 0 else (SECOND_OPEN_BELOW_C, SECOND_HOT_C)
-    tier = "" if n == 0 else ", 2nd-pod limit"
+    c = count.get(node, {"browser": 0, "cpu": 0})
+    nb, nc = c["browser"], c["cpu"]
+    if lane == "cpu":
+        open_below, hot, tier = CPU_OPEN_BELOW_C, CPU_HOT_C, ", cpu lane"
+    elif nb + nc == 0:
+        open_below, hot, tier = OPEN_BELOW_C, HOT_C, ""
+    else:
+        open_below, hot, tier = SECOND_OPEN_BELOW_C, SECOND_HOT_C, ", 2nd-pod limit"
     if avg2 >= open_below:
         return f"warm (2m avg {avg2:.0f}C >= {open_below:.0f}{tier})"
     if max3 >= hot:
         return f"hot (3m peak {max3:.0f}C >= {hot:.0f}{tier})"
-    if n >= 1 and node not in SECOND_POD_NODES:
-        return f"full ({n}/1 CI pods; no 2nd pod on this node)"
-    if n >= MAX_PER_NODE:
-        return f"full ({count[node]}/{MAX_PER_NODE} CI pods)"
+    if lane == "browser":
+        if nb >= 1 and node not in SECOND_POD_NODES:
+            return f"full ({nb}/1 browser pods; no 2nd browser pod on this node)"
+        if nb >= MAX_PER_NODE:
+            return f"full ({nb}/{MAX_PER_NODE} browser pods)"
+    elif nc >= MAX_CPU_PER_NODE:
+        return f"full ({nc}/{MAX_CPU_PER_NODE} cpu-lane pods)"
+    used = ci_req.get(node, {"cpu": 0.0, "memory": 0.0, "gpu": 0.0})
+    if used["cpu"] + req["cpu"] > NODE_CPU_BUDGET + 1e-6:
+        return f"budget (CI CPU requests {used['cpu']:g}+{req['cpu']:g} > {NODE_CPU_BUDGET:g})"
+    if node not in free:
+        return "no capacity data (fail-closed)"
+    short = [k for k in ("cpu", "memory", "gpu") if free[node][k] - used[k] < req[k] - 1e-6]
+    if short:
+        return f"no room ({', '.join(short)} requests do not fit next to production)"
     if now - last.get(node, 0.0) < SETTLE_SECONDS:
         return f"settling ({now - last[node]:.0f}s/{SETTLE_SECONDS}s since last CI start)"
     return ""
@@ -183,30 +270,37 @@ def main():
         return 0   # another trigger instance is admitting right now
     try:
         if mode == "--release-all":
-            _, _, queue = snapshot()
+            _, _, queue, _ = snapshot()
             for p in queue:
                 release(p, None)
                 log(f"ROLLBACK released {p['metadata']['name']} (unpinned)")
             return 0
         now = time.time()
-        brake = {}
+        brake, free = {}, {}
         try:
             temps = node_temps()
             brake = {n: t for n, t in brake_until().items() if t > now}
+            free = node_free()
         except Exception as e:
-            log(f"no temperature data, nothing admitted (fail-closed): {e}")
+            log(f"no temperature/capacity data, nothing admitted (fail-closed): {e}")
             temps = {}
-        count, last, queue = snapshot()
+        count, last, queue, ci_req = snapshot()
         if mode == "--status":
+            probe = {"browser": {"cpu": 2.0, "memory": 6.0 * 2**30, "gpu": 1.0},
+                     "cpu": {"cpu": 1.0, "memory": 1.0 * 2**30, "gpu": 0.0}}
             for n in sorted(temps):
-                r = closed_reason(n, temps, count, last, now)
+                c = count.get(n, {"browser": 0, "cpu": 0})
+                u = ci_req.get(n, {"cpu": 0.0})
+                state = "  ".join(f"{ln}: " + ("CLOSED " + r if r else "open") for ln in ("browser", "cpu")
+                                  for r in [closed_reason(n, ln, probe[ln], temps, count, last, now, free, ci_req)])
                 print(f"{n}  2m-avg {temps[n][0]:5.1f}C  3m-peak {temps[n][1]:5.1f}C  "
-                      f"ci {count.get(n, 0)}/{MAX_PER_NODE}  {'CLOSED ' + r if r else 'open'}")
+                      f"browser {c['browser']}/{MAX_PER_NODE} cpu {c['cpu']}/{MAX_CPU_PER_NODE} "
+                      f"ci-cpu {u['cpu']:g}/{NODE_CPU_BUDGET:g}\n    {state}")
             for n, t in sorted(brake.items()):
                 print(f"BRAKE: {n} read >= {BRAKE_C:.0f}C; no admissions anywhere for {t - now:.0f}s more")
             print(f"gated (queued) pods: {len(queue)}")
             for p in queue:
-                print(f"  {p['metadata']['name']}  since {p['metadata']['creationTimestamp']}")
+                print(f"  {p['metadata']['name']}  {lane_of(p)}  since {p['metadata']['creationTimestamp']}")
             return 0
         if brake:
             if queue:
@@ -216,19 +310,27 @@ def main():
             return 0
         used = set()
         for p in queue:
-            open_nodes = [n for n in temps if n not in used and not closed_reason(n, temps, count, last, now)]
-            if not open_nodes:
+            if len(used) >= len(temps):
                 break
+            lane, req = lane_of(p), pod_requests(p)
+            open_nodes = [n for n in temps if n not in used
+                          and not closed_reason(n, lane, req, temps, count, last, now, free, ci_req)]
+            if not open_nodes:
+                continue   # this lane is closed; a younger pod of the other lane may still fit
             # fewest CI pods first, then the coolest
-            n = min(open_nodes, key=lambda n: (count.get(n, 0), temps[n][0]))
+            n = min(open_nodes, key=lambda n: (sum(count.get(n, {}).values()), temps[n][0]))
             try:
                 release(p, n)
             except Exception as e:
                 log(f"admit {p['metadata']['name']} -> {n} failed: {e}")
                 continue
-            log(f"admitted {p['metadata']['name']} -> {n} (2m avg {temps[n][0]:.0f}C, "
-                f"3m peak {temps[n][1]:.0f}C, CI pods {count.get(n, 0)}->{count.get(n, 0) + 1})")
-            count[n] = count.get(n, 0) + 1
+            c = count.setdefault(n, {"browser": 0, "cpu": 0})
+            log(f"admitted {p['metadata']['name']} ({lane}) -> {n} (2m avg {temps[n][0]:.0f}C, "
+                f"3m peak {temps[n][1]:.0f}C, {lane} pods {c[lane]}->{c[lane] + 1})")
+            c[lane] += 1
+            acc = ci_req.setdefault(n, {"cpu": 0.0, "memory": 0.0, "gpu": 0.0})
+            for k in acc:
+                acc[k] += req[k]
             last[n] = now
             used.add(n)
         return 0

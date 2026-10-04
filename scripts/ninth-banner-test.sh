@@ -15,7 +15,8 @@
 # GPU=1|0 (Chromium on the node's Intel iGPU via the device plugin; default 1
 # for e2e/nightly/responsive, 0 for unit/sims), SPECS
 # (space-separated spec files), PROJECT (e.g. chromium), CPU_REQ/CPU_LIM
-# (per-shard CPU, default 2/4; never above 4, thermal cap).
+# (per-shard CPU, default 2/4 browser lane, 1/1.5 cpu lane = sims/unit
+# without GPU; never above 4, thermal cap).
 # Exit status: 0 if every shard passed, 1 otherwise, 2 on usage errors.
 # Full procedure, security model and troubleshooting: docs/sops/ci-runner.md
 set -euo pipefail
@@ -54,8 +55,16 @@ case "$suite" in e2e|nightly|responsive|release) gpu="${GPU:-1}" ;; *) gpu="${GP
 case "$suite" in e2e|responsive|release)
     [ "$gpu" = 1 ] || { echo "suite '$suite' is GPU-only: on 4 software-rendering CPUs it fails its timing budgets (docs/sops/ci-runner.md)"; exit 2; } ;;
 esac
-cpu_req="${CPU_REQ:-2}"; cpu_lim="${CPU_LIM:-4}"
-[[ "$cpu_lim" =~ ^[1-4]$ ]] || { echo "CPU_LIM must be 1..4 (thermal cap)"; exit 2; }
+# Lanes (thermal gate, SOP §2b): sims/unit without a browser run in the cpu
+# lane with small resources (single-threaded Node: ~1 core, <= 0.61Gi measured
+# 2026-10-04) and their own per-node slots; everything else is the browser lane.
+case "$suite" in unit|sims) [ "$gpu" = 0 ] && lane=cpu || lane=browser ;; *) lane=browser ;; esac
+if [ "$lane" = cpu ]; then
+    cpu_req="${CPU_REQ:-1}"; cpu_lim="${CPU_LIM:-1.5}"; mem_req=1Gi; mem_lim=3Gi; eph_req=2Gi; eph_lim=8Gi
+else
+    cpu_req="${CPU_REQ:-2}"; cpu_lim="${CPU_LIM:-4}"; mem_req=6Gi; mem_lim=10Gi; eph_req=8Gi; eph_lim=16Gi
+fi
+[[ "$cpu_lim" =~ ^([1-4]|[1-3]\.5)$ ]] || { echo "CPU_LIM must be 1..4 (halves allowed; thermal cap)"; exit 2; }
 # These values are pasted into sed and YAML: allow-list them.
 [[ "$cpu_req" =~ ^[1-4]$ ]] || { echo "CPU_REQ must be 1..4"; exit 2; }
 [[ "$gpu" =~ ^[01]$ ]] || { echo "GPU must be 0 or 1"; exit 2; }
@@ -98,11 +107,13 @@ sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" \
     -e "s|__SHARDS__|$shards|g" -e "s|__PARALLELISM__|$parallelism|g" \
     -e "s|__WORKERS__|$workers|g" -e "s|__COLLECT_WAIT__|$([ "$collect" = 1 ] && echo 900 || echo 0)|g" \
     -e "s|__CPU_REQ__|$cpu_req|g" -e "s|__CPU_LIM__|$cpu_lim|g" -e "s|__GPU_RES__|$gpu_res|g" \
+    -e "s|__LANE__|$lane|g" -e "s|__MEM_REQ__|$mem_req|g" -e "s|__MEM_LIM__|$mem_lim|g" \
+    -e "s|__EPH_REQ__|$eph_req|g" -e "s|__EPH_LIM__|$eph_lim|g" \
     -e "s|__CHROMIUM_ARGS__|$chromium_args|g" -e "s|__SPECS__|${SPECS:-}|g" -e "s|__PROJECT__|${PROJECT:-}|g" \
     "$TEMPLATE" > "$dest/job.yaml"
 k create -f "$dest/job.yaml" >/dev/null
 start=$(date +%s)
-echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  gpu=$gpu cpu=$cpu_req/$cpu_lim"
+echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  lane=$lane gpu=$gpu cpu=$cpu_req/$cpu_lim mem=$mem_req/$mem_lim"
 # THERMAL GATE: shard pods are created gated; every running trigger admits the
 # oldest gated CI pods (any run) onto cool nodes with a free CI slot, one tick
 # per poll. docs/sops/ci-runner.md "Thermal gate".

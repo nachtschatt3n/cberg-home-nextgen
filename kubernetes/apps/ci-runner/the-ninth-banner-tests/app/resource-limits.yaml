@@ -1,13 +1,15 @@
-# Ceiling for the whole namespace = 6 concurrent shards at 2 CPU / 6Gi requested
-# (4 CPU limit). Raised from 3 on 2026-10-04 TOGETHER WITH the thermal gate
-# (scripts/ninth-banner-admit.py): the quota is now only the total cap; WHERE and
-# WHEN a shard starts is decided by the gate (1st pod: node 2m avg < 85 C, 3m
-# peak < 93 C; 2nd pod: < 78 / < 90 C; at most 2 CI pods per node; brake after
-# any >= 100 C reading). Headroom measured 2026-10-04: production requests
-# 8.4-10.7 of 17 CPU and 21-32 of 58Gi per node, GPU slots free 2/3/3, so 2 shards
-# (4 CPU / 12Gi / 2 i915) fit every node. PriorityClass ci-low never preempts, and
-# production (priority >= 0) preempts CI. Gated (queued) pods count here too.
-# Rollback to 3: docs/sops/ci-runner.md §11 Rollback Plan (Thermal gate / caps).
+# Ceiling for the whole namespace. Since 2026-10-04 (evening) the THERMAL GATE
+# (scripts/ninth-banner-admit.py, docs/sops/ci-runner.md §2b) is the cap on
+# RUNNING pods: per node 2 browser-lane + 2 cpu-lane pods, <= 6 CPU of CI
+# requests, and the temperature limits, so at most 12 run. Gated (queued) pods
+# use no node resources but DO count here, so the quota has room for 12 running
+# + 12 queued (24 pods): with only 6, a full queue of one lane blocked the Job
+# controller from even creating the other lane's pods. Resources are sized for
+# 24 browser-sized pods (2 CPU / 6Gi request; cpu-lane pods ask 1 CPU / 1Gi).
+# i915: 2 browser pods per node running (6) + 6 queued. Production requests
+# leave 6.4-7.2 of 17 CPU and 2/3/3 GPU slots free per node (measured
+# 2026-10-04); PriorityClass ci-low never preempts, and production preempts CI.
+# Rollback: docs/sops/ci-runner.md §11 Rollback Plan (Thermal gate / caps).
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -15,21 +17,21 @@ metadata:
   namespace: ci-runner
 spec:
   hard:
-    pods: "6"
-    requests.cpu: "12"
-    requests.memory: 36Gi
-    requests.ephemeral-storage: 50Gi
-    limits.cpu: "24"
-    limits.memory: 60Gi
-    limits.ephemeral-storage: 100Gi
+    pods: "24"
+    requests.cpu: "48"
+    requests.memory: 144Gi
+    requests.ephemeral-storage: 192Gi
+    limits.cpu: "96"
+    limits.memory: 240Gi
+    limits.ephemeral-storage: 384Gi
     services: "0"
     services.loadbalancers: "0"
     services.nodeports: "0"
     persistentvolumeclaims: "0"
-    # Device-plugin resources: at most one shared iGPU slot per running shard
-    # (6 shards, at most 2 per node via the thermal gate), and NEVER the plugin's all-device monitoring
-    # resources or the NPU, whatever a future template edit asks for.
-    requests.gpu.intel.com/i915: "6"
+    # Device-plugin resources: one shared iGPU slot per browser shard (at most
+    # 2 running per node via the thermal gate, + queued), and NEVER the plugin's
+    # all-device monitoring resources or the NPU, whatever a future template edit asks for.
+    requests.gpu.intel.com/i915: "12"
     requests.gpu.intel.com/monitoring: "0"
     requests.gpu.intel.com/i915_monitoring: "0"
     requests.npu.intel.com/accel: "0"
