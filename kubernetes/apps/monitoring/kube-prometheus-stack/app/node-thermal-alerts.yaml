@@ -167,14 +167,14 @@ spec:
       interval: 30s
       rules:
         - alert: NodeCPUPackagePowerAtCap
-          # Expected cap = the CURRENT PL1/PL2 of 64 W (constraint_0/1_power_limit_uw
-          # on all three nodes, 2026-10-04). Fires at >=90 % of it (58 W) held
+          # Expected cap = PL1 35 W (SysfsConfig, plan talos-sysfs-power-caps; constraint_0_power_limit_uw
+          # on all three nodes). Fires at >=90 % of it (31 W) held
           # 15m: the package is running against its power limit. When the
           # talos-sysfs-power-caps plan lowers PL1, lower this threshold to
           # ~90 % of the new cap in the same commit. Info only: at-cap is
           # expected under batch load and is context for the thermal alerts.
           # Backtest: not possible (no RAPL history before 2026-10-04).
-          expr: rate(node_rapl_package_joules_total{job="node-exporter"}[5m]) > 58
+          expr: rate(node_rapl_package_joules_total{job="node-exporter"}[5m]) > 31
           for: 15m
           labels:
             severity: info
@@ -184,7 +184,7 @@ spec:
             summary: "CPU package at its power cap on {{ $labels.instance }}"
             description: >-
               {{ $labels.instance }} package power has averaged {{ $value | printf "%.0f" }} W for
-              15m (expected cap 64 W). Context for NodeCPUPackageHot / NodeCPUThermalThrottling.
+              15m (expected cap 35 W). Context for NodeCPUPackageHot / NodeCPUThermalThrottling.
         - alert: NodeRAPLMetricsMissing
           # Loud guard: RAPL needs the permission-fix init container. If a
           # chart bump drops it, a kernel change renames the zone, or a node
