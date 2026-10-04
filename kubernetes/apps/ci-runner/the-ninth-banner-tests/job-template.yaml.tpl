@@ -128,8 +128,15 @@ spec:
           emptyDir: { sizeLimit: 10Gi }
         - name: tmp
           emptyDir: { sizeLimit: 4Gi }
+        # 6Gi (was 2Gi): the release suite's shard with the responsive screen
+        # tours (iPad/desktop screenshots) + perf specs outgrew 2Gi and was
+        # evicted twice (2026-10-04, game 5328961) although all its tests passed;
+        # the other shards write 2-3 MB. run.sh logs `du` of /results before
+        # CI-RESULT so the next oversize run shows what fills it. Sum of the
+        # volume caps (20Gi) exceeds the 16Gi container limit on purpose: work
+        # really uses ~0.8Gi, so 16Gi still covers a full 6Gi results dir.
         - name: results
-          emptyDir: { sizeLimit: 2Gi }
+          emptyDir: { sizeLimit: 6Gi }
         - name: shm   # Chromium needs a real /dev/shm; counts against memory
           emptyDir: { medium: Memory, sizeLimit: 2Gi }
         - name: scripts

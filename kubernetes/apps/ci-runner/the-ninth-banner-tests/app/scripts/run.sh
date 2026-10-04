@@ -166,6 +166,10 @@ esac
 git rev-parse HEAD >"$OUT/commit"
 echo "$rc" >"$OUT/exit-code"
 
+# Size of what the trigger will copy (results emptyDir cap: 6Gi, see job-template.yaml.tpl)
+log "results size: $(du -sh "$OUT" 2>/dev/null | cut -f1) in $OUT; 10 largest entries:"
+du -ah "$OUT" 2>/dev/null | sort -h | tail -10 | sed 's/^/  du: /'
+
 if [ "$rc" -eq 0 ]; then verdict=PASS; else verdict=FAIL; fi
 echo "CI-RESULT suite=${SUITE} shard=${SHARD}/${N} result=${verdict} rc=${rc}${count_info} test_seconds=${dur} total_seconds=$(( $(date +%s) - t0 ))"
 echo "CI-RESULTS-READY"
