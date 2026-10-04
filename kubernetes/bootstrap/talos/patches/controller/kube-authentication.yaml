@@ -1,0 +1,12 @@
+# Live v1.13 kube-apiserver runs --anonymous-auth=false. Once a
+# KubeAPIServerConfig document exists, Talos v1.14 ALWAYS passes
+# --authentication-config (UseAuthenticationConfig() == true), and talhelper's
+# default KubeAuthenticationConfig enables anonymous access to
+# /livez,/readyz,/healthz. `configuration` is merge:"replace", so this patch
+# restores the live behaviour exactly: anonymous authentication off.
+apiVersion: v1alpha1
+kind: KubeAuthenticationConfig
+configuration:
+  anonymous:
+    enabled: false
+  jwt: []

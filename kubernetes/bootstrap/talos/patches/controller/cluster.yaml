@@ -1,30 +1,16 @@
 cluster:
   allowSchedulingOnControlPlanes: true
-  # Discovery: SERVICE registry only (discovery.talos.dev). The in-cluster
-  # kubernetes registry used to be enabled here "so member discovery survives
-  # a Sidero/WAN outage", but it cannot work on Kubernetes >= 1.32: the
-  # AuthorizeNodeWithSelectors node authorizer limits a kubelet identity to
-  # its OWN Node object, and the registry lists/watches ALL nodes as
-  # system:node:<name>. Upstream deprecated it and disables it by default for
-  # that reason. Measured 2026-09-22 (F-82fb3335): ~1,000 "nodes is forbidden"
-  # errors per hour per node from cluster.KubernetesPullController in
-  # controller-runtime, and `talosctl get members` is served entirely by the
-  # service registry — so the outage-resilience it was meant to buy has been
-  # zero since the K8s bump. Disabling it removes the log flood and nothing
-  # else. (Re-enabling would need the api-server feature gate off, which
-  # drops several other node-authorizer protections — not an option.)
-  discovery:
-    enabled: true
-    registries:
-      kubernetes:
-        disabled: true
-  apiServer:
-    extraArgs:
-      # https://kubernetes.io/docs/tasks/extend-kubernetes/configure-aggregation-layer/
-      enable-aggregator-routing: true
-  controllerManager:
-    extraArgs:
-      bind-address: 0.0.0.0
+  # Discovery / apiServer / controllerManager / scheduler / proxy moved to
+  # dedicated Talos v1.14 documents (talhelper >= 3.1.17 rejects the v1alpha1
+  # form next to the multi-doc defaults it emits): see kube-*.yaml,
+  # kube-proxy.yaml in this directory. Plan: talconfig-multidoc-migration.
+  #
+  # Discovery: SERVICE registry only (DiscoveryServiceConfig, emitted by
+  # default with endpoint https://discovery.talos.dev/). The in-cluster
+  # Kubernetes registry stays OFF: in v1.14 it is driven only by the legacy
+  # v1alpha1 .cluster.discovery block (controllers/cluster/config.go), which
+  # is now absent => RegistryKubernetesEnabled=false. It cannot work on
+  # Kubernetes >= 1.32 anyway (node authorizer; F-82fb3335).
   coreDNS:
     disabled: true
   etcd:
@@ -32,8 +18,3 @@ cluster:
       listen-metrics-urls: http://0.0.0.0:2381
     advertisedSubnets:
       - 192.168.55.0/24
-  proxy:
-    disabled: true
-  scheduler:
-    extraArgs:
-      bind-address: 0.0.0.0

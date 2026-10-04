@@ -1,0 +1,20 @@
+# Keep the LIVE encryption-provider layout. Under v1alpha1 Talos renders
+# providers [secretbox name=key2, identity] (k8stemplates/apiserver.go); the
+# v1.14 generator default is [secretbox name=key1] only. Every Secret in etcd
+# is stored with the prefix k8s:enc:secretbox:v1:key2:, so renaming the key
+# makes all Secrets unreadable, and dropping identity breaks any plaintext
+# object. Same secret value; it comes from talenv.sops.yaml via envsubst.
+apiVersion: v1alpha1
+kind: KubeEtcdEncryptionConfig
+config:
+  apiVersion: v1
+  kind: EncryptionConfig
+  resources:
+    - resources:
+        - secrets
+      providers:
+        - secretbox:
+            keys:
+              - name: key2
+                secret: ${TALOS_SECRETBOX_ENCRYPTION_SECRET}
+        - identity: {}

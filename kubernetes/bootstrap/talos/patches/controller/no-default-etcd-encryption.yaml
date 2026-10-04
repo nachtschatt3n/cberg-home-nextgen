@@ -1,0 +1,5 @@
+# Drop talhelper's default KubeEtcdEncryptionConfig (key1, no identity) so
+# kube-etcd-encryption.yaml (listed AFTER this file) is the only one.
+apiVersion: v1alpha1
+kind: KubeEtcdEncryptionConfig
+$$patch: delete

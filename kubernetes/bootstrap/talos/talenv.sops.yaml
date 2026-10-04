@@ -1,0 +1,17 @@
+TALOS_SECRETBOX_ENCRYPTION_SECRET: ENC[AES256_GCM,data:V173pZ7ar73VAX9KLQ49APzTf8C9IExZMoG/Cz7y3WJJT7jVYMoglFZc1vM=,iv:08dPeUHzJqaFOtlDs7JPdtPbBQXTCzn1XnOGaBzJnd4=,tag:0iKrkBLKmFYVH7U+xiXGww==,type:str]
+sops:
+  age:
+    - enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBDSFN3UVpCQm0wRkNWeHB0
+        N1htdEtxVDZHcTFtOXdCQ1ZjejJwZVpIeHlFClVJbkNmZmptOEpsOFZqTHl1M1lk
+        YlVoMHhKdTh5Yzh4RWdMaVJVa1ZYVmcKLS0tIFVXU28yTm1GcjNZQVJoMVo0cFlv
+        ekZ3eEpVSlhyUTBLcy9qeG5sb1pubTgKRUxD2JmeZ4RVw2f8bHNkHC1IpwJv1Lhc
+        c8mZWK26z8YGp4gKrp5CK2PNV3iuGHhdxFCJf+rqLFRDSFWaQ8NTeA==
+        -----END AGE ENCRYPTED FILE-----
+      recipient: age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6
+  lastmodified: "2026-10-04T21:37:48Z"
+  mac: ENC[AES256_GCM,data:M5lhfb6CQGSbsf2yBVEqZCKV7RSAXQAUIRl4+sc3RwTe4oa/d7IVqaZc/jYdxisd/W/HqefDWLMQwYIfadHF6nKEZzjbMvI4PUl5mbbtT58EGewGkkTmTQbNixqDmVg6EVSXNJV7nr1fxxiplluu835Fad5Aihjusd3BEA6hRac=,iv:AHMZp0zcqZ4RTUh2rh4bb3Wp0OfoVcOsn8emdKQ/wew=,tag:WbgFHshvFQqxP07XKl+OSg==,type:str]
+  mac_only_encrypted: true
+  unencrypted_suffix: _unencrypted
+  version: 3.13.0

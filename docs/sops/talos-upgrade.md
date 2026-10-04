@@ -1,11 +1,11 @@
 # SOP: Talos Linux Upgrade with Performance Tuning
 
 > Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. Section 14 records the `v1.13.10 → v1.14.1` roll (2026-09-27) and its lessons; section 15 is the post-roll verification and expected-transient list. **Current cluster state: Talos v1.14.1 + Kubernetes v1.36.0 (kernel 6.18.51-talos, Clang/ThinLTO; containerd 2.3.5; etcd 3.7.1) — rolled 2026-09-27.**
-> Version: `2026.10.01`
-> Last Updated: `2026-10-01`
+> Version: `2026.10.04`
+> Last Updated: `2026-10-04`
 > Owner: `homelab-ops`
 
-> **Cluster state (2026-09-27):** All three nodes (`k8s-nuc14-01/02/03`) are running Talos `v1.14.1` + Kubernetes `v1.36.0` (kernel `6.18.51-talos`, containerd `2.3.5`, etcd `3.7.1` / storage `3.7.0`). **`talhelper genconfig` cannot render v1.14 configs for this cluster — `task talos:generate-config` fails on `main` until the multi-document config migration lands (§14.2). Do not regenerate or `apply-config` node configs until then.** Performance sweep (BBR, conntrack, kubelet reservations, RPS mask, hugepages), intelgpu/udev patches, and Longhorn v2 OS prerequisites are all wired in. See §13 for the full two-stage traversal record and lessons learned.
+> **Cluster state (2026-09-27):** All three nodes (`k8s-nuc14-01/02/03`) are running Talos `v1.14.1` + Kubernetes `v1.36.0` (kernel `6.18.51-talos`, containerd `2.3.5`, etcd `3.7.1` / storage `3.7.0`). **History: `talhelper genconfig` could not render v1.14 configs for this cluster from 2026-09-27 until the multi-document config migration landed 2026-10-04 (plan `talconfig-multidoc-migration`, talhelper 3.1.17, §14.2).** Performance sweep (BBR, conntrack, kubelet reservations, RPS mask, hugepages), intelgpu/udev patches, and Longhorn v2 OS prerequisites are all wired in. See §13 for the full two-stage traversal record and lessons learned.
 
 ---
 
@@ -1391,7 +1391,7 @@ Procedure that worked:
 4. Merge the talosctl CLI pin PR **after the last node** (a client ahead of the servers is not
    "up to date"; F-9a58f400).
 
-**Consequences until the multi-doc migration (F-59b12b2b) lands:**
+**History — consequences until the multi-doc migration (F-59b12b2b) landed 2026-10-04, plan `talconfig-multidoc-migration`:**
 - `task talos:generate-config` **fails on `main`** — known and intended. Do not hand-patch
   around it and do not `apply-config` regenerated files.
 - The gitignored local `clusterconfig/` files stay the v1.13.10-contract generation, which
@@ -1403,6 +1403,11 @@ Procedure that worked:
   stored Secrets carry the key name), drops apiserver cert SANs, turns anonymous auth on for
   health endpoints, and enables `FilesystemTrimConfig` by default. Validation passing is not
   equivalence (`docs/sops/verification-contents-not-shape.md`).
+- A fifth auto-migration default the plan refuses: `KubeAPIServerConfig` with `startupProbes`
+  unset turns apiserver startup/liveness/readiness probes ON. They are anonymous `/livez`/`/readyz`
+  requests; with anonymous auth off they get 401, and ~250s after start the kubelet kills the
+  apiserver (CrashLoop on every node). The v1alpha1 shim kept them off, so the plan pins
+  `startupProbes: false` in `patches/controller/kube-apiserver.yaml`.
 
 ### 14.3 Drain-driven etcd stalls and the pattern (ii) rule
 

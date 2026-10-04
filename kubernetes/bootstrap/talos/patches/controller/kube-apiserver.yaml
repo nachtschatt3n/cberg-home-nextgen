@@ -1,0 +1,18 @@
+# Was .cluster.apiServer (v1alpha1). certExtraSANs repeats
+# additionalApiServerCertSans from talconfig.yaml because talhelper 3.1.17
+# does not carry that field into KubeAPIServerConfig (measured 2026-09-28).
+apiVersion: v1alpha1
+kind: KubeAPIServerConfig
+extraArgs:
+  # https://kubernetes.io/docs/tasks/extend-kubernetes/configure-aggregation-layer/
+  enable-aggregator-routing: "true"
+certExtraSANs:
+  - "192.168.55.10"
+  - "k8s.example.com"
+  - "127.0.0.1"
+# The v1alpha1 shim renders NO startup/liveness/readiness probes on the static
+# pod (StartupProbesEnabled()==false); a KubeAPIServerConfig doc defaults them
+# ON, and they are anonymous HTTPS requests to /livez,/readyz -- rejected 401
+# with kube-authentication.yaml's anonymous.enabled:false, so the kubelet
+# would kill the apiserver ~250s after start. Keep live: no probes.
+startupProbes: false

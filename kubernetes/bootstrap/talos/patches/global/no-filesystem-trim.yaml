@@ -1,0 +1,7 @@
+# talhelper >= 3.1.17 emits FilesystemTrimConfig (interval 168h) by default.
+# Live v1.13 configs have no such document, and in v1.14 its ABSENCE means
+# "no automatic trimming". Deleting it keeps behaviour identical; enabling
+# periodic fstrim on the Longhorn EPHEMERAL partition is a separate decision.
+apiVersion: v1alpha1
+kind: FilesystemTrimConfig
+$$patch: delete

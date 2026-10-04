@@ -1,7 +1,11 @@
-machine:
-  network:
-    disableSearchDomain: true
-    nameservers:
-      - 192.168.55.1
-      - 1.1.1.1
-      - 1.0.0.1
+# Was .machine.network.{nameservers,disableSearchDomain} (v1alpha1).
+# hostDNS (enabled + forwardKubeDNSToHost) comes from the talhelper default
+# ResolverConfig and is merged, matching the live machine.features.hostDNS.
+apiVersion: v1alpha1
+kind: ResolverConfig
+nameservers:
+  - address: 192.168.55.1
+  - address: 1.1.1.1
+  - address: 1.0.0.1
+searchDomains:
+  disableDefault: true

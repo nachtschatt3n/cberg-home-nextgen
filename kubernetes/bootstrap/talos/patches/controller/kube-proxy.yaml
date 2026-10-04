@@ -1,0 +1,4 @@
+# Cilium replaces kube-proxy (was .cluster.proxy.disabled: true).
+apiVersion: v1alpha1
+kind: KubeProxyConfig
+enabled: false
