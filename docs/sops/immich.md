@@ -74,7 +74,8 @@ library Scan). Rules:
   standing thermal-safety bound — the server `cpu:4` is the blast-radius bound
   that stops a software-fallback ffmpeg cooking the box, and ML `cpu:3` protects
   nuc14-03. Do **not** remove them without an explicit operator go-ahead.
-- Watch `NodeCPUTemperatureHigh/Critical` (`x86_pkg_temp > 90 / 100`) during the
+- Watch `NodeCPUPackageHot` warning/critical (5m-avg package temp > 90 / 100 °C,
+  `node-thermal-alerts.yaml`) and `NodeCPUThermalThrottling` during the
   scan; brief 100°C touches that throttle back are safe, *sustained* >100°C is
   the reboot risk.
 

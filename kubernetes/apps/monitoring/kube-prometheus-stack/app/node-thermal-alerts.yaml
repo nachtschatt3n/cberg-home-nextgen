@@ -1,0 +1,244 @@
+---
+# NUC14 thermal / power alerts — added 2026-10-04 (operator request).
+# SOP: docs/sops/monitoring.md -> "NUC Thermals"
+# Unit tests (both ways + mutants): runbooks/tests/test-node-thermal-alerts.py
+#
+# Sources (all node-exporter, job="node-exporter", instance=<node-ip>:9100):
+#   node_hwmon_temp_celsius{chip="platform_coretemp_0",sensor="temp1"}  CPU package
+#     ("Package id 0" per node_hwmon_sensor_label; same sensor as
+#     node_thermal_zone_temp{type="x86_pkg_temp"}). Tjmax/crit = 110 °C.
+#   node_hwmon_temp_celsius{chip="nvme_nvme0",sensor="temp1"}  NVMe "Composite";
+#     node_hwmon_temp_max_celsius on the same sensor = the drive's WCTEMP
+#     (81.85 °C on all three drives), _crit_ = CCTEMP (84.85 °C).
+#   node_cpu_package_throttles_total  thermal (PROCHOT) package-throttle events.
+#   node_rapl_package_joules_total  package energy; needs the permission-fix
+#     init container in helmvalues.yaml (energy_uj is root-only since 5.10).
+#
+# Baseline at authoring (Prometheus retention ~6.6 days, 2026-09-28..10-04):
+#   package temp  p50 51/67/64  p95 68/88/77  p99 79/96/87  max 95/102/103 °C
+#                 (nodes 01/02/03). Peaks are SPIKES: the longest contiguous run
+#                 above 90 °C was 2.5 min, above 100 °C 1 min.
+#   throttle events/24h  01: ~60-280  02: 32-32 000 (bursty)  03: <=11
+#   NVMe composite  max 44.85/47.85/44.85 °C.
+#
+# Why the temperature rules smooth with avg_over_time: the package sensor is
+# so spiky that a raw `> 90 for: 10m` NEVER fires — a single dipped sample
+# resets the pending timer (node 02 spent ~5 h above 90 °C in the window and
+# never held it 10 min). Averaging bridges the dips; a sustained hot period
+# still fires, a burst does not.
+#
+# History: the 2026-08-09 retune found raw >90 °C/10m nagged through Immich
+# transcode batches that park the package at 85-90 °C; the 5m-average >90
+# threshold sits above that plateau (0 firings in the backtest window).
+#
+# Replaces NodeCPUTemperatureHigh / NodeCPUTemperatureCritical (raw
+# x86_pkg_temp, formerly in node-hardware-alerts.yaml) so the same sensor does
+# not page twice. NodeCPUThermalCritAlarm moved here unchanged.
+#
+# Power caps are coming: a talos-sysfs-power-caps maintenance plan (not yet
+# written as of 2026-10-04) plus a BIOS follow-up. When PL1 changes, retune
+# NodeCPUPackagePowerAtCap in the same commit.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack  # required — Prometheus ruleSelector matchLabels
+  name: node-thermal-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: node.cpu-thermal.rules
+      interval: 30s
+      rules:
+        - alert: NodeCPUPackageHot
+          # 7-day backtest: 0 firings (no 10-min period averaged above 90 °C).
+          expr: |
+            avg_over_time(node_hwmon_temp_celsius{job="node-exporter",chip=~"platform_coretemp_[0-9]+",sensor="temp1"}[5m]) > 90
+          for: 10m
+          labels:
+            severity: warning
+            category: node-hardware
+            component: cpu-thermal
+          annotations:
+            summary: "CPU package hot on {{ $labels.instance }}"
+            description: >-
+              CPU package 5-minute average is {{ $value | printf "%.0f" }} °C (>90 °C for 10m)
+              on {{ $labels.instance }}. Tjmax is 110 °C. Check for an uncapped bulk job
+              (transcode, backup, CI) and airflow/dust. Context: NodeCPUThermalThrottling,
+              rate(node_rapl_package_joules_total[5m]). SOP: docs/sops/monitoring.md (NUC Thermals).
+        - alert: NodeCPUPackageHot
+          # 7-day backtest: 0 firings. Short (2m) smoothing keeps this as
+          # sensitive as the old raw ">100 for 2m" rule while still bridging a
+          # single dipped sample; a real near-Tjmax incident (2026-08-08 sat at
+          # 100-103 °C for over an hour) fires within ~5-7 min.
+          expr: |
+            avg_over_time(node_hwmon_temp_celsius{job="node-exporter",chip=~"platform_coretemp_[0-9]+",sensor="temp1"}[2m]) > 100
+          for: 5m
+          labels:
+            severity: critical
+            category: node-hardware
+            component: cpu-thermal
+          annotations:
+            summary: "CPU package near Tjmax on {{ $labels.instance }}"
+            description: >-
+              CPU package is averaging {{ $value | printf "%.0f" }} °C (>100 °C for 5m) on
+              {{ $labels.instance }} — within 10 °C of Tjmax (110 °C). The CPU is throttling
+              hard; stop/cordon the heavy workload now. SOP: docs/sops/monitoring.md (NUC Thermals).
+        - alert: NodeCPUThermalCritAlarm
+          # The chip's own critical-temperature alarm flag — hardware-asserted.
+          # Moved unchanged from node-hardware-alerts.yaml.
+          expr: node_hwmon_temp_crit_alarm_celsius == 1
+          for: 1m
+          labels:
+            severity: critical
+            category: node-hardware
+            component: cpu-thermal
+          annotations:
+            summary: "Hardware thermal critical alarm on {{ $labels.instance }}"
+            description: "Sensor {{ $labels.sensor }} on chip {{ $labels.chip }} asserted its critical-temperature alarm."
+    - name: node.cpu-throttle-thermal.rules
+      interval: 30s
+      rules:
+        - alert: NodeCPUThermalThrottling
+          # Thermal (PROCHOT) package-throttle EVENTS, not CFS throttling (that
+          # is CPUThrottlingHigh). Healthy nodes log 0-12 events per 15m (p99);
+          # node 02 bursts to thousands. >100 per 15m held 30m = sustained.
+          # keep_firing_for merges the gaps inside one throttling episode, so a
+          # bursty afternoon is one notification (warning route repeats 4h),
+          # not one per burst. Expected to fire on node 02 until the power-cap
+          # / BIOS work lands — that is a TRUE signal.
+          # 7-day backtest: 5 episodes, all node 02 (8 without keep_firing_for).
+          expr: increase(node_cpu_package_throttles_total{job="node-exporter"}[15m]) > 100
+          for: 30m
+          keep_firing_for: 30m
+          labels:
+            severity: warning
+            category: node-hardware
+            component: cpu-thermal
+          annotations:
+            summary: "Sustained CPU thermal throttling on {{ $labels.instance }}"
+            description: >-
+              {{ $labels.instance }} logged {{ $value | printf "%.0f" }} package thermal-throttle
+              events in the last 15m, sustained for 30m. The CPU is hitting its thermal limit
+              and losing clock speed. Fix is power capping / cooling (talos-sysfs-power-caps
+              plan, BIOS follow-up), not a pod limit. SOP: docs/sops/monitoring.md (NUC Thermals).
+    - name: node.nvme-thermal.rules
+      interval: 30s
+      rules:
+        - alert: NodeNVMeHot
+          # 7-day backtest: 0 firings (composite peak 47.85 °C).
+          expr: |
+            node_hwmon_temp_celsius{job="node-exporter",chip=~"nvme_.+",sensor="temp1"} > 65
+          for: 10m
+          labels:
+            severity: warning
+            category: node-hardware
+            component: nvme-thermal
+          annotations:
+            summary: "NVMe hot on {{ $labels.instance }}"
+            description: >-
+              NVMe {{ $labels.chip }} composite temperature is {{ $value | printf "%.0f" }} °C
+              (>65 °C for 10m) on {{ $labels.instance }}. Normal is 35-48 °C. Check airflow and
+              sustained write load (Longhorn rebuild/backup).
+        - alert: NodeNVMeHot
+          # >= the drive's own WCTEMP (warning composite temperature threshold,
+          # exported as node_hwmon_temp_max_celsius). Above it the controller
+          # throttles I/O and drive lifetime suffers. 7-day backtest: 0.
+          # No on(): both series come from the same scrape with identical
+          # labels, so default one-to-one matching keeps every series label.
+          expr: |
+            node_hwmon_temp_celsius{job="node-exporter",chip=~"nvme_.+",sensor="temp1"}
+              >=
+            node_hwmon_temp_max_celsius{job="node-exporter",chip=~"nvme_.+",sensor="temp1"}
+          for: 5m
+          labels:
+            severity: critical
+            category: node-hardware
+            component: nvme-thermal
+          annotations:
+            summary: "NVMe at/above its WCTEMP on {{ $labels.instance }}"
+            description: >-
+              NVMe {{ $labels.chip }} on {{ $labels.instance }} is at {{ $value | printf "%.0f" }} °C,
+              at or above the drive's warning composite temperature (WCTEMP) for 5m. The drive is
+              throttling I/O; reduce write load now (Longhorn rebuilds/backups) and check cooling.
+    - name: node.rapl.rules
+      interval: 30s
+      rules:
+        - alert: NodeCPUPackagePowerAtCap
+          # Expected cap = the CURRENT PL1/PL2 of 64 W (constraint_0/1_power_limit_uw
+          # on all three nodes, 2026-10-04). Fires at >=90 % of it (58 W) held
+          # 15m: the package is running against its power limit. When the
+          # talos-sysfs-power-caps plan lowers PL1, lower this threshold to
+          # ~90 % of the new cap in the same commit. Info only: at-cap is
+          # expected under batch load and is context for the thermal alerts.
+          # Backtest: not possible (no RAPL history before 2026-10-04).
+          expr: rate(node_rapl_package_joules_total{job="node-exporter"}[5m]) > 58
+          for: 15m
+          labels:
+            severity: info
+            category: node-hardware
+            component: cpu-power
+          annotations:
+            summary: "CPU package at its power cap on {{ $labels.instance }}"
+            description: >-
+              {{ $labels.instance }} package power has averaged {{ $value | printf "%.0f" }} W for
+              15m (expected cap 64 W). Context for NodeCPUPackageHot / NodeCPUThermalThrottling.
+        - alert: NodeRAPLMetricsMissing
+          # Loud guard: RAPL needs the permission-fix init container. If a
+          # chart bump drops it, a kernel change renames the zone, or a node
+          # reboots without the init re-running, node_rapl_* silently vanishes
+          # (the collector still reports success). Per node, so one node going
+          # blind is caught too.
+          expr: |
+            count by (instance) (node_uname_info{job="node-exporter"})
+            unless on (instance)
+            count by (instance) (node_rapl_package_joules_total{job="node-exporter"})
+          for: 30m
+          labels:
+            severity: warning
+            category: node-hardware
+            component: cpu-power
+          annotations:
+            summary: "RAPL power metrics missing on {{ $labels.instance }}"
+            description: >-
+              node-exporter on {{ $labels.instance }} is up but exports no node_rapl_package_joules_total.
+              Usually energy_uj is back to root-only: check the permission-fix init container in
+              the node-exporter DaemonSet (helmvalues.yaml prometheus-node-exporter.permissionInitContainer)
+              and its logs. SOP: docs/sops/monitoring.md (NUC Thermals).
+    - name: node.thermal-absent.rules
+      interval: 60s
+      rules:
+        - alert: NodeCoretempMetricsMissing
+          expr: |
+            count by (instance) (node_uname_info{job="node-exporter"})
+            unless on (instance)
+            count by (instance) (node_hwmon_temp_celsius{job="node-exporter",chip=~"platform_coretemp_[0-9]+",sensor="temp1"})
+          for: 30m
+          labels:
+            severity: warning
+            category: node-hardware
+            component: cpu-thermal
+          annotations:
+            summary: "CPU package temperature not exported on {{ $labels.instance }}"
+            description: >-
+              node-exporter on {{ $labels.instance }} is up but exports no coretemp package
+              temperature, so NodeCPUPackageHot is blind for this node. Check for a kernel/Talos
+              change (coretemp module, hwmon chip rename) or the hwmon collector.
+        - alert: NodeNVMeTempMetricsMissing
+          expr: |
+            count by (instance) (node_uname_info{job="node-exporter"})
+            unless on (instance)
+            count by (instance) (node_hwmon_temp_celsius{job="node-exporter",chip=~"nvme_.+",sensor="temp1"})
+          for: 30m
+          labels:
+            severity: warning
+            category: node-hardware
+            component: nvme-thermal
+          annotations:
+            summary: "NVMe temperature not exported on {{ $labels.instance }}"
+            description: >-
+              node-exporter on {{ $labels.instance }} is up but exports no NVMe composite
+              temperature, so NodeNVMeHot is blind for this node. Check for a kernel/Talos change
+              (nvme hwmon) or the hwmon collector.

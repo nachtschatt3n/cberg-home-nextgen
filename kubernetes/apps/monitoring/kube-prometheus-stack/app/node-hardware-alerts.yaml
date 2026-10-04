@@ -5,7 +5,7 @@
 #
 # All metrics verified present on these Talos v1.13.5 / Intel NUC14 nodes:
 #   - node_boot_time_seconds                 (reboot detection)
-#   - node_thermal_zone_temp{type=x86_pkg_temp} + node_hwmon_temp_crit_alarm_celsius (thermal)
+#   - (thermal rules moved to node-thermal-alerts.yaml on 2026-10-04)
 #   - node_edac_{correctable,uncorrectable}_errors_total  (ECC memory; works here
 #     despite being unavailable on stock Talos — our image exposes the EDAC mc nodes)
 # An absent-guard alert flags if EDAC ever stops being scraped (e.g. a Talos
@@ -54,50 +54,11 @@ spec:
           annotations:
             summary: "Node rebooting repeatedly: {{ $labels.instance }}"
             description: "{{ $labels.instance }} rebooted {{ $value }} times in the last hour — possible crash/power loop or failing hardware."
-    - name: node.thermal.rules
-      interval: 30s
-      rules:
-        - alert: NodeCPUTemperatureHigh
-          # Retuned 2026-08-09: was >90 for 10m, which nagged continuously during
-          # legitimate sustained GPU/CPU work — an Immich transcode batch parks the
-          # package at 85-90°C for hours, and a warning that fires through every
-          # normal batch trains you to ignore it.
-          # >93 for 20m instead: the 14-day baseline ceiling for these nodes is
-          # 70-85°C, so 20 minutes above 93°C is genuinely abnormal rather than
-          # merely busy. This would still have fired during the 2026-08-08 thermal
-          # incident, which sat at 100-103°C for over an hour.
-          # NodeCPUTemperatureCritical below is deliberately UNCHANGED — it is the
-          # rule that caught that incident and must stay sensitive.
-          expr: max by (instance) (node_thermal_zone_temp{type="x86_pkg_temp"}) > 93
-          for: 20m
-          labels:
-            severity: warning
-            category: node-hardware
-            component: cpu-thermal
-          annotations:
-            summary: "CPU package temp high on {{ $labels.instance }}"
-            description: "CPU package temperature is {{ $value | printf \"%.0f\" }}°C (>93°C for 20m). Tjmax on these NUC14 is ~110°C; investigate airflow/dust, and check whether a bulk media job is running uncapped."
-        - alert: NodeCPUTemperatureCritical
-          expr: max by (instance) (node_thermal_zone_temp{type="x86_pkg_temp"}) > 100
-          for: 2m
-          labels:
-            severity: critical
-            category: node-hardware
-            component: cpu-thermal
-          annotations:
-            summary: "CPU package temp critical on {{ $labels.instance }}"
-            description: "CPU package temperature is {{ $value | printf \"%.0f\" }}°C (>100°C). Approaching Tjmax (~110°C) — thermal throttle/shutdown risk."
-        - alert: NodeCPUThermalCritAlarm
-          # The chip's own critical-temperature alarm flag — hardware-asserted.
-          expr: node_hwmon_temp_crit_alarm_celsius == 1
-          for: 1m
-          labels:
-            severity: critical
-            category: node-hardware
-            component: cpu-thermal
-          annotations:
-            summary: "Hardware thermal critical alarm on {{ $labels.instance }}"
-            description: "Sensor {{ $labels.sensor }} on chip {{ $labels.chip }} asserted its critical-temperature alarm."
+    # node.thermal.rules (NodeCPUTemperatureHigh / NodeCPUTemperatureCritical /
+    # NodeCPUThermalCritAlarm) MOVED 2026-10-04 to node-thermal-alerts.yaml as
+    # NodeCPUPackageHot (warning/critical) + NodeCPUThermalCritAlarm, alongside
+    # throttling, NVMe, RAPL power and absent() guards. Same sensor; kept in one
+    # place so a hot package pages once.
     - name: node.cpu-throttle.rules
       interval: 30s
       rules:

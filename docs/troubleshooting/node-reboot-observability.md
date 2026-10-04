@@ -181,8 +181,10 @@ correlation is unambiguous; the specific protection that fired is not.
 live in Prometheus:
 
 - `NodeUnexpectedReboot` (critical, offset-guarded) + `NodeRebootFlapping` (warning)
-- `NodeCPUTemperatureHigh`/`Critical` (`node_thermal_zone_temp{type=x86_pkg_temp}`)
-  + `NodeCPUThermalCritAlarm` (chip hardware alarm flag)
+- `NodeCPUPackageHot` warning/critical (coretemp package temp, 5m/2m average;
+  replaced `NodeCPUTemperatureHigh`/`Critical` on 2026-10-04) +
+  `NodeCPUThermalCritAlarm` (chip hardware alarm flag) + `NodeCPUThermalThrottling`
+  — all in `node-thermal-alerts.yaml`, see `docs/sops/monitoring.md` (NUC Thermals)
 - `NodeMemoryECC{Correctable,Uncorrectable}Errors` (`node_edac_*` — works on our
   image) + `NodeEDACMetricsAbsent` guard
 

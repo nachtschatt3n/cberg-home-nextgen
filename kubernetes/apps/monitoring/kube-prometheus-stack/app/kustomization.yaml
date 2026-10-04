@@ -26,6 +26,7 @@ resources:
   - ./paperclip-alerts.yaml
   - ./platform-alerts.yaml
   - ./node-hardware-alerts.yaml
+  - ./node-thermal-alerts.yaml
   - ./container-memory-alerts.yaml
   - ./envoy-gateway-alerts.yaml
   - ./etcd-alerts.yaml

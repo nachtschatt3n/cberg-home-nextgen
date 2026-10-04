@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.09.28`
-> Last Updated: `2026-09-28`
+> Version: `2026.10.04`
+> Last Updated: `2026-10-04`
 > Owner: `Platform`
 
 ---
@@ -653,6 +653,92 @@ series` during a rollout is this trap.
 > `and on()` only inside comments warning about this trap, and four quote the
 > broken form as an example. A grep reports those as hits; loading the YAML and
 > inspecting each rule's `expr` reports the truth, which is zero of each.
+
+---
+
+## NUC Thermals (CPU package, throttling, NVMe, RAPL power)
+
+Added 2026-10-04. Rules: `kubernetes/apps/monitoring/kube-prometheus-stack/app/node-thermal-alerts.yaml`.
+Tests (promtool, both ways + 11 mutants): `python3 runbooks/tests/test-node-thermal-alerts.py`.
+
+### Where the metrics come from
+
+All from the kube-prometheus-stack `prometheus-node-exporter` DaemonSet (`job="node-exporter"`, `instance=<node-ip>:9100`).
+
+| Signal | Metric | Notes |
+|---|---|---|
+| CPU package temp | `node_hwmon_temp_celsius{chip="platform_coretemp_0",sensor="temp1"}` | "Package id 0"; same sensor as `node_thermal_zone_temp{type="x86_pkg_temp"}`. Tjmax/crit 110 °C |
+| Thermal throttling | `node_cpu_package_throttles_total` | PROCHOT package-throttle **events** (not CFS throttling, which is `CPUThrottlingHigh`) |
+| NVMe temp | `node_hwmon_temp_celsius{chip="nvme_nvme0",sensor="temp1"}` | "Composite". `node_hwmon_temp_max_celsius` on the same sensor is the drive's WCTEMP (81.85 °C), `_crit_` is CCTEMP (84.85 °C) |
+| Package power | `rate(node_rapl_package_joules_total[5m])` (W) | also `node_rapl_core_*` (cores) and `node_rapl_psys_*` (platform) |
+
+**RAPL needs a permission fix.** Since Linux 5.10 every powercap `energy_uj` is
+`0400 root:root`. The exporter runs as uid 65534, gets EACCES, and node-exporter
+swallows it: `node_scrape_collector_success{collector="rapl"}` stays `1` while
+`node_rapl_*` is simply absent. The fix (in `helmvalues.yaml`,
+`prometheus-node-exporter.permissionInitContainer`) is a one-shot init
+container (uid 0, all capabilities dropped except `CHOWN`) that chgrps only the
+`energy_uj` files to gid 9100 and adds `g+r`; the exporter runs with
+`runAsGroup: 9100` and stays non-root. Non-root + `CAP_DAC_READ_SEARCH` does not
+work (Kubernetes grants no ambient capabilities), and running the exporter as
+root would expose every root-only host file under its `/host/root` mount.
+Sysfs ownership resets at reboot; the init container re-runs when the pod
+sandbox is recreated. `NodeRAPLMetricsMissing` fires if it ever stops working.
+
+### Baseline at authoring (2026-09-28 .. 10-04, nodes 01/02/03)
+
+| | p50 | p95 | p99 | max |
+|---|---|---|---|---|
+| Package temp °C | 51 / 67 / 64 | 68 / 88 / 77 | 79 / 96 / 87 | 95 / 102 / 103 |
+| NVMe composite °C (max) | | | | 44.85 / 47.85 / 44.85 |
+
+Package peaks are **spikes**: the longest unbroken run above 90 °C was 2.5 min,
+above 100 °C 1 min. Throttle events per 24 h: node 01 ~60-280, node 02 32 to
+32 000 (bursty), node 03 <= 11. Package power at idle: ~15 W per node (psys ~30 W).
+PL1 = PL2 = 64 W on all three nodes (`constraint_{0,1}_power_limit_uw`).
+
+### Rules and thresholds
+
+| Alert | Condition | Severity | 7-day backtest |
+|---|---|---|---|
+| `NodeCPUPackageHot` | 5m-avg package > 90 °C for 10m | warning | 0 |
+| `NodeCPUPackageHot` | 2m-avg package > 100 °C for 5m | critical | 0 |
+| `NodeCPUThermalCritAlarm` | `node_hwmon_temp_crit_alarm_celsius == 1` for 1m | critical | 0 |
+| `NodeCPUThermalThrottling` | `increase(..._throttles_total[15m]) > 100` for 30m, `keep_firing_for: 30m` | warning | 5 episodes, all node 02 |
+| `NodeNVMeHot` | composite > 65 °C for 10m | warning | 0 |
+| `NodeNVMeHot` | composite >= the drive's WCTEMP for 5m | critical | 0 |
+| `NodeCPUPackagePowerAtCap` | package > 58 W (90 % of the 64 W cap) for 15m | info | n/a (no RAPL history) |
+| `NodeRAPLMetricsMissing` / `NodeCoretempMetricsMissing` / `NodeNVMeTempMetricsMissing` | node-exporter up on a node but the series absent, 30m | warning | 0 (RAPL guard: would have fired on all 3 nodes for the whole window before the fix) |
+
+Why the temperature rules average: on a sensor this spiky, a raw
+`> 90 for: 10m` never fires, because one dipped sample resets the pending
+timer. Averaging bridges single dips; a sustained hot period still fires.
+`NodeCPUPackageHot` replaced `NodeCPUTemperatureHigh`/`Critical` (raw
+`x86_pkg_temp`, same sensor), so a hot package pages once.
+
+`NodeCPUThermalThrottling` is expected to fire on node 02 until the power
+caps land. That is a true signal. The fix is power or cooling, not a pod limit.
+
+### Follow-ups
+
+- **Power caps:** a `talos-sysfs-power-caps` maintenance plan (not yet
+  written as of 2026-10-04) will lower PL1. Retune `NodeCPUPackagePowerAtCap`
+  to ~90 % of the new cap **in the same commit**.
+- **BIOS:** a BIOS-level fan/power-limit follow-up for the NUCs (node 02
+  in particular) after the caps are measured.
+
+### Diagnose
+
+```bash
+# Package watts / temps / throttle events per node
+rate(node_rapl_package_joules_total[5m])
+node_hwmon_temp_celsius{chip="platform_coretemp_0",sensor="temp1"}
+increase(node_cpu_package_throttles_total[15m])
+# RAPL permission state on a node (expect -r--r----- 0 9100)
+talosctl -n <node-ip> ls -l /sys/class/powercap/intel-rapl:0/ | grep energy_uj
+# Current power limits
+talosctl -n <node-ip> read /sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw
+```
 
 ---
 
