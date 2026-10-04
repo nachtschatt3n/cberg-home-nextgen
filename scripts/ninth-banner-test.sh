@@ -42,8 +42,10 @@ case "$suite" in
     *) echo "unknown suite '$suite'"; usage ;;
 esac
 [[ "$shards" =~ ^[1-9][0-9]?$ ]] || { echo "shards must be 1..99"; exit 2; }
-# THERMAL: at most 2 shards run at once (3 at 4-6 CPU drove the NUC14s to
-# 100-102 C); extra shards queue. Best-effort CI, GitHub CI is the gate.
+# Per-JOB parallelism: CPU/SwiftShader mode 2, GPU mode 3 (below). The
+# cluster-wide limit is the quota (6 shards) plus the thermal gate
+# (scripts/ninth-banner-admit.py: where and when each shard may start).
+# Best-effort CI, GitHub CI is the gate.
 parallelism=$(( shards < 2 ? shards : 2 ))   # CPU/SwiftShader mode
 workers="${WORKERS:-2}"   # 4 per 6-CPU shard starved Chromium (timing tests failed); see SOP
 # Browser suites default to the iGPU (10x faster, ~10-20 C cooler, measured
@@ -68,8 +70,9 @@ if [ "$gpu" = 1 ]; then
 else
     gpu_res=""; chromium_args=""
 fi
-# GPU shards run cool (peak 66-89 C vs 100-102 C on SwiftShader): one per node,
-# 3 in parallel (owner decision 2026-10-03). CPU mode stays capped at 2.
+# GPU shards run cool (peak 66-89 C vs 100-102 C on SwiftShader): 3 in parallel
+# per Job (owner decision 2026-10-03); node placement by the thermal gate.
+# CPU mode stays at 2 per Job.
 if [ "$gpu" = 1 ]; then parallelism=$(( shards < 3 ? shards : 3 )); fi
 collect="${COLLECT:-1}"
 

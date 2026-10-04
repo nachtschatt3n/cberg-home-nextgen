@@ -15,11 +15,16 @@ Contract (docs/sops/ci-runner.md, "Thermal gate"):
 * A tick admits gated pods OLDEST FIRST, at most one per node per tick. It pins
   the pod to a node (nodeSelector kubernetes.io/hostname) and removes the gate.
   A node is open only if all of these hold:
-  - its package temperature, averaged over 2 min, is < OPEN_BELOW_C;
-  - its peak over the last 3 min is < HOT_C (the SOP target);
+  - its package temperature, averaged over 2 min, is < OPEN_BELOW_C (first
+    CI pod) or < SECOND_OPEN_BELOW_C (second pod: the node already has one);
+  - its peak over the last 3 min is < HOT_C (first pod) or < SECOND_HOT_C
+    (second pod);
   - it holds < MAX_PER_NODE CI pods (bound or pinned, not finished);
   - no CI pod was admitted or started there in the last SETTLE_SECONDS, so the
     previous pod's heat shows before another pod is added.
+* BRAKE: if ANY node's package temperature reached >= BRAKE_C in the last
+  BRAKE_MINUTES (+1 min, i.e. a 1-min max >= BRAKE_C), nothing is admitted
+  ANYWHERE until BRAKE_MINUTES after that reading. Running pods are untouched.
 * Fail-closed: no or stale Prometheus data means no node is open, and pods queue.
   Production pods are never touched: the tick only reads and patches pods in
   ci-runner. Running pods are never changed: the gate only decides where and
@@ -43,12 +48,21 @@ GATE = "ci.cberg.home/thermal"
 RELEASED_AT = "ci.cberg.home/released-at"
 OPEN_BELOW_C = float(os.environ.get("GATE_OPEN_BELOW_C", "85"))
 HOT_C = float(os.environ.get("GATE_HOT_C", "93"))
+# Second pod on a node (2026-10-04 tightening after a 103 C single sample on
+# nuc14-03 with 2 shards; 102 C rebooted a node on 2026-08-08):
+SECOND_OPEN_BELOW_C = float(os.environ.get("GATE_SECOND_OPEN_BELOW_C", "78"))
+SECOND_HOT_C = float(os.environ.get("GATE_SECOND_HOT_C", "90"))
+BRAKE_C = float(os.environ.get("GATE_BRAKE_C", "100"))
+BRAKE_MINUTES = int(os.environ.get("GATE_BRAKE_MINUTES", "10"))
 MAX_PER_NODE = int(os.environ.get("GATE_MAX_PER_NODE", "2"))
 # 300 s (trial 2026-10-04: 120 s let nuc14-02 take a 2nd shard before the 1st
 # one's test load had started - clone + npm ci take 1-2 min - and the node then
 # held a 94 C 2-min floor with 100 C peaks)
 SETTLE_SECONDS = int(os.environ.get("GATE_SETTLE_SECONDS", "300"))
-LOCK = "/tmp/ninth-banner-admit.lock"   # fixed path: shared by every user/session on the Mac
+# Fixed path shared by every trigger on the Mac (they all run as mu). The file
+# is mu-owned, 0644: flock needs no write access, so it is opened read-only and
+# never followed through a symlink.
+LOCK = "/tmp/ninth-banner-admit.lock"
 PROM = "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?"
 TEMP = 'node_thermal_zone_temp{type="x86_pkg_temp"}'
 JOIN = "* on(instance) group_left(nodename) node_uname_info"
@@ -78,6 +92,12 @@ def node_temps():
     age = prom(f"(time() - timestamp({TEMP})) {JOIN}")
     # a node whose exporter stopped reporting is never open
     return {n: (avg2[n], max3.get(n, 999.0)) for n in avg2 if age.get(n, 999.0) < 90}
+
+
+def brake_until():
+    """{node: epoch until which admission is braked} for nodes that read >= BRAKE_C recently."""
+    last = prom(f"max_over_time(timestamp({TEMP} >= {BRAKE_C})[{BRAKE_MINUTES + 1}m:15s]) {JOIN}")
+    return {n: t + 60 * BRAKE_MINUTES for n, t in last.items()}
 
 
 def ts(s):
@@ -110,11 +130,14 @@ def snapshot():
 
 def closed_reason(node, temps, count, last, now):
     avg2, max3 = temps[node]
-    if avg2 >= OPEN_BELOW_C:
-        return f"warm (2m avg {avg2:.0f}C >= {OPEN_BELOW_C:.0f})"
-    if max3 >= HOT_C:
-        return f"hot (3m peak {max3:.0f}C >= {HOT_C:.0f})"
-    if count.get(node, 0) >= MAX_PER_NODE:
+    n = count.get(node, 0)
+    open_below, hot = (OPEN_BELOW_C, HOT_C) if n == 0 else (SECOND_OPEN_BELOW_C, SECOND_HOT_C)
+    tier = "" if n == 0 else ", 2nd-pod limit"
+    if avg2 >= open_below:
+        return f"warm (2m avg {avg2:.0f}C >= {open_below:.0f}{tier})"
+    if max3 >= hot:
+        return f"hot (3m peak {max3:.0f}C >= {hot:.0f}{tier})"
+    if n >= MAX_PER_NODE:
         return f"full ({count[node]}/{MAX_PER_NODE} CI pods)"
     if now - last.get(node, 0.0) < SETTLE_SECONDS:
         return f"settling ({now - last[node]:.0f}s/{SETTLE_SECONDS}s since last CI start)"
@@ -141,9 +164,7 @@ def release(p, node):
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "tick"
-    old = os.umask(0)
-    fd = os.open(LOCK, os.O_RDWR | os.O_CREAT, 0o666)
-    os.umask(old)
+    fd = os.open(LOCK, os.O_RDONLY | os.O_CREAT | os.O_NOFOLLOW, 0o644)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | (fcntl.LOCK_NB if mode == "tick" else 0))
     except BlockingIOError:
@@ -156,8 +177,10 @@ def main():
                 log(f"ROLLBACK released {p['metadata']['name']} (unpinned)")
             return 0
         now = time.time()
+        brake = {}
         try:
             temps = node_temps()
+            brake = {n: t for n, t in brake_until().items() if t > now}
         except Exception as e:
             log(f"no temperature data, nothing admitted (fail-closed): {e}")
             temps = {}
@@ -167,9 +190,17 @@ def main():
                 r = closed_reason(n, temps, count, last, now)
                 print(f"{n}  2m-avg {temps[n][0]:5.1f}C  3m-peak {temps[n][1]:5.1f}C  "
                       f"ci {count.get(n, 0)}/{MAX_PER_NODE}  {'CLOSED ' + r if r else 'open'}")
+            for n, t in sorted(brake.items()):
+                print(f"BRAKE: {n} read >= {BRAKE_C:.0f}C; no admissions anywhere for {t - now:.0f}s more")
             print(f"gated (queued) pods: {len(queue)}")
             for p in queue:
                 print(f"  {p['metadata']['name']}  since {p['metadata']['creationTimestamp']}")
+            return 0
+        if brake:
+            if queue:
+                n, t = max(brake.items(), key=lambda kv: kv[1])
+                log(f"BRAKE: {n} read >= {BRAKE_C:.0f}C; {len(queue)} pod(s) held, "
+                    f"no admissions for {t - now:.0f}s more")
             return 0
         used = set()
         for p in queue:

@@ -1,12 +1,13 @@
 # Ceiling for the whole namespace = 6 concurrent shards at 2 CPU / 6Gi requested
 # (4 CPU limit). Raised from 3 on 2026-10-04 TOGETHER WITH the thermal gate
 # (scripts/ninth-banner-admit.py): the quota is now only the total cap; WHERE and
-# WHEN a shard starts is decided by the gate (node 2m avg < 85 C, 3m peak < 93 C,
-# at most 2 CI pods per node). Headroom measured 2026-10-04: production requests
+# WHEN a shard starts is decided by the gate (1st pod: node 2m avg < 85 C, 3m
+# peak < 93 C; 2nd pod: < 78 / < 90 C; at most 2 CI pods per node; brake after
+# any >= 100 C reading). Headroom measured 2026-10-04: production requests
 # 8.4-10.7 of 17 CPU and 21-32 of 58Gi per node, GPU slots free 2/3/3, so 2 shards
 # (4 CPU / 12Gi / 2 i915) fit every node. PriorityClass ci-low never preempts, and
 # production (priority >= 0) preempts CI. Gated (queued) pods count here too.
-# Rollback to 3: docs/sops/ci-runner.md "Thermal gate" -> Rollback.
+# Rollback to 3: docs/sops/ci-runner.md §11 Rollback Plan (Thermal gate / caps).
 apiVersion: v1
 kind: ResourceQuota
 metadata:

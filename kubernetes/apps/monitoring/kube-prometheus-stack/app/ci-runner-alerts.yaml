@@ -36,8 +36,9 @@
 #                       a ~116 GiB (174 - 58) N-1 budget. Added 2026-10-04.
 #   KubeQuotaAlmostFull / KubeQuotaFullyUsed (info)
 #                     - ci-runner-quota is a deliberate capacity CAP sized to
-#                       exactly 3 shards; every run sits at 89-95% of it. Near
-#                       or at the cap is the design, not a warning sign.
+#                       6 shards (thermal gate, since 2026-10-04); gated pods
+#                       count against it, so busy periods sit near or at the
+#                       cap. That is the design, not a warning sign.
 #                       Excluded: namespace="ci-runner". KubeQuotaExceeded
 #                       (> 100%, only possible when the hard limit is lowered
 #                       under live usage) stays stock and still covers it.
@@ -207,7 +208,7 @@ spec:
         - alert: CIRunnerPodStuckPending
           annotations:
             description: CI pod {{ $labels.namespace }}/{{ $labels.pod }} has been
-              Pending for more than 15 minutes (healthy pods clone and start in
+              Pending for more than 30 minutes (healthy pods clone and start in
               about a minute). Likely unschedulable, ImagePullBackOff on the
               Playwright image, a missing ConfigMap/Secret, or a hung clone
               init container. Test results are not affected - the runner is.

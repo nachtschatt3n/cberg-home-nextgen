@@ -4,7 +4,8 @@
 # `kubectl create`s one Job per run. docs/sops/ci-runner.md
 #
 # Indexed Job: one pod per shard (JOB_COMPLETION_INDEX -> --shard=i+1/N),
-# at most 3 at a time, spread over the 3 nodes. backoffLimitPerIndex 0 +
+# at most __PARALLELISM__ (3 GPU / 2 CPU) at a time per Job; node placement is
+# decided by the thermal gate below (at most 2 CI pods per node). backoffLimitPerIndex 0 +
 # maxFailedIndexes N: a failing shard is NOT retried and does NOT stop the
 # others, so every shard reports.
 apiVersion: batch/v1
@@ -41,8 +42,9 @@ spec:
       terminationGracePeriodSeconds: 10
       # THERMAL GATE: every shard pod is created gated (Pending, invisible to the
       # scheduler, no node resources). scripts/ninth-banner-admit.py, ticked by
-      # every running trigger, pins it to a node that is cool (2m avg < 85 C,
-      # 3m peak < 93 C) with < 2 CI pods and removes the gate.
+      # every running trigger, pins it to a cool node with < 2 CI pods (1st pod:
+      # 2m avg < 85 C, 3m peak < 93 C; 2nd pod: < 78 / < 90 C; brake 10 min after
+      # any node reads >= 100 C) and removes the gate.
       # docs/sops/ci-runner.md "Thermal gate".
       schedulingGates:
         - name: ci.cberg.home/thermal
