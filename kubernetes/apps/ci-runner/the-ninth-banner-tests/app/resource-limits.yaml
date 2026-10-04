@@ -1,9 +1,12 @@
----
-# Ceiling for the whole namespace = 3 concurrent shards at 2 CPU / 6Gi
-# requested (4 CPU limit: thermal cap, see job-template.yaml.tpl). Measured 2026-10-03: each NUC has 17 allocatable CPU with
-# ~13-14 CPU (76-81%) already REQUESTED by production, so 2 CPU per node keeps
-# >= 1 CPU of request headroom; PriorityClass ci-low never preempts. A 4th shard pod (or a
-# second concurrent run) waits in Pending instead of squeezing production.
+# Ceiling for the whole namespace = 6 concurrent shards at 2 CPU / 6Gi requested
+# (4 CPU limit). Raised from 3 on 2026-10-04 TOGETHER WITH the thermal gate
+# (scripts/ninth-banner-admit.py): the quota is now only the total cap; WHERE and
+# WHEN a shard starts is decided by the gate (node 2m avg < 85 C, 3m peak < 93 C,
+# at most 2 CI pods per node). Headroom measured 2026-10-04: production requests
+# 8.4-10.7 of 17 CPU and 21-32 of 58Gi per node, GPU slots free 2/3/3, so 2 shards
+# (4 CPU / 12Gi / 2 i915) fit every node. PriorityClass ci-low never preempts, and
+# production (priority >= 0) preempts CI. Gated (queued) pods count here too.
+# Rollback to 3: docs/sops/ci-runner.md "Thermal gate" -> Rollback.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -11,21 +14,21 @@ metadata:
   namespace: ci-runner
 spec:
   hard:
-    pods: "4"
-    requests.cpu: "6500m"
-    requests.memory: 19Gi
-    requests.ephemeral-storage: 30Gi
-    limits.cpu: "13"
-    limits.memory: 32Gi
-    limits.ephemeral-storage: 54Gi
+    pods: "6"
+    requests.cpu: "12"
+    requests.memory: 36Gi
+    requests.ephemeral-storage: 50Gi
+    limits.cpu: "24"
+    limits.memory: 60Gi
+    limits.ephemeral-storage: 100Gi
     services: "0"
     services.loadbalancers: "0"
     services.nodeports: "0"
     persistentvolumeclaims: "0"
     # Device-plugin resources: at most one shared iGPU slot per running shard
-    # (GPU-mode parallelism 3, one per node), and NEVER the plugin's all-device monitoring
+    # (6 shards, at most 2 per node via the thermal gate), and NEVER the plugin's all-device monitoring
     # resources or the NPU, whatever a future template edit asks for.
-    requests.gpu.intel.com/i915: "3"
+    requests.gpu.intel.com/i915: "6"
     requests.gpu.intel.com/monitoring: "0"
     requests.gpu.intel.com/i915_monitoring: "0"
     requests.npu.intel.com/accel: "0"
