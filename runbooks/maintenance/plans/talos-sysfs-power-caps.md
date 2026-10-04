@@ -44,8 +44,10 @@ touches:
                                       # igpu-i915: render GT capped at 1500 MHz (media GT gt1 untouched) -
                                       # frigate/immich-ml OpenVINO, jellyfin/plex tone-mapping, CI Chromium.
                                       # monitoring: section 4 reads Prometheus (its instrument).
-depends_on:
-  - talconfig-multidoc-migration      # MUST RUN FIRST. SysfsConfig is a v1.14 document; until the migration lands
+depends_on: []                        # talconfig-multidoc-migration EXECUTED GREEN in now:2026-10-04 (config a7965251,
+                                      # retired 10bee773, plan file deleted) - the live gate is now the premise
+                                      # multidoc-migration-applied-on-all-nodes (reads 3). Original note:
+                                      # MUST RUN FIRST. SysfsConfig is a v1.14 document; until the migration lands
                                       # `task talos:generate-config` fails on main and NO machine-config change can
                                       # be rendered (talos-upgrade.md §14.2). It is `exclusive: true`, so it cannot
                                       # share this plan's slot: earliest is the NEXT attended window after it executes.
@@ -53,7 +55,6 @@ conflicts_with:
   - talos-linux-1.14.2                # rolling reboot of all 3 nodes; never the same night. If it runs FIRST, the
                                       # card-index premise (section 2.4) must be re-measured; if it runs AFTER, its
                                       # reboots are this plan's first real "re-applied at boot" test (section 6).
-  - talconfig-multidoc-migration      # reciprocity for depends_on (exclusive anyway)
   - multus-macvlan-foundation         # reference/unwindowed; also talosctl apply-config on the same nodes
   # No OPEN kube-prometheus-stack plan exists (91.4.1 executed 2026-09-26); section 4 reads Prometheus, so any
   # future same-night kube-prometheus-stack plan must be added here and must name this plan back.
@@ -71,9 +72,9 @@ backup_gate: "per node, BEFORE its apply: (1) $W/rb/kubernetes-k8s-nuc14-0N.yaml
 finding_refs: []                      # Queried 2026-10-04 with the DB reachable: `finding list --grep` thermal,
                                       # throttl, temperature, RAPL, power, package, sysfs, nuc14, hot, ci-runner
                                       # (--all) -> no finding owns node thermals/power. Nothing to claim.
-review: null
-status: draft
-window: null                          # suggestion only (the window agent assigns): 125 min needs a sun-attended
+review: ready-for-go@2026-10-05     # plan-reviewer 3rd pass at a42dbacf+98ca43c0 (condition: premise multidoc = 3; holds)
+status: vetted
+window: "now:2026-10-05"   # ON-DEMAND NOW run 2026-10-05 (run-now.py stamp; was None)
                                       # slot after talconfig-multidoc-migration executed. Reviewer 2026-10-04:
                                       # sun-attended:2026-11-01 (45/180 booked); 10-11 exclusive, 10-18/10-25 too full.
 premises:
