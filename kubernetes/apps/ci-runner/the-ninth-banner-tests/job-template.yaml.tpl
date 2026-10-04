@@ -39,6 +39,13 @@ spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
       terminationGracePeriodSeconds: 10
+      # THERMAL GATE: every shard pod is created gated (Pending, invisible to the
+      # scheduler, no node resources). scripts/ninth-banner-admit.py, ticked by
+      # every running trigger, pins it to a node that is cool (2m avg < 85 C,
+      # 3m peak < 93 C) with < 2 CI pods and removes the gate.
+      # docs/sops/ci-runner.md "Thermal gate".
+      schedulingGates:
+        - name: ci.cberg.home/thermal
       securityContext:
         # the Playwright image's own non-root user (pwuser, uid/gid 1001)
         runAsNonRoot: true

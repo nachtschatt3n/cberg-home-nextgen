@@ -100,8 +100,23 @@ sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" \
 k create -f "$dest/job.yaml" >/dev/null
 start=$(date +%s)
 echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  gpu=$gpu cpu=$cpu_req/$cpu_lim"
+# THERMAL GATE: shard pods are created gated; every running trigger admits the
+# oldest gated CI pods (any run) onto cool nodes with a free CI slot, one tick
+# per poll. docs/sops/ci-runner.md "Thermal gate".
+admit() { python3 "$REPO_ROOT/scripts/ninth-banner-admit.py" || true; }
 if [ "$collect" != 1 ]; then
-    echo "COLLECT=0: not waiting. Logs: kubectl logs -n $NS -l batch.kubernetes.io/job-name=$job -c runner --prefix"
+    # Fire and forget still has to stay until every shard is ADMITTED: a gated
+    # pod with no running trigger waits until another run's trigger admits it.
+    echo "COLLECT=0: waiting only until all $shards shard(s) are admitted by the thermal gate"
+    while :; do
+        admit
+        ungated="$(k get pods -n "$NS" -l "batch.kubernetes.io/job-name=$job" \
+            -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.schedulingGates}{"\n"}{end}' 2>/dev/null \
+            | grep -vc 'ci.cberg.home/thermal' || true)"
+        [ "${ungated:-0}" -ge "$shards" ] && break
+        sleep 10
+    done
+    echo "all shards admitted. Logs: kubectl logs -n $NS -l batch.kubernetes.io/job-name=$job -c runner --prefix"
     exit 0
 fi
 
@@ -111,6 +126,7 @@ done_idx=()   # indexed array: bash 3.2 (macOS) has no associative arrays
 summary=()
 fails=0
 while [ "${#done_idx[@]}" -lt "$shards" ]; do
+    admit
     for ((i = 0; i < shards; i++)); do
         [ -n "${done_idx[$i]:-}" ] && continue
         pod="$(pod_of "$i")"; [ -n "$pod" ] || continue

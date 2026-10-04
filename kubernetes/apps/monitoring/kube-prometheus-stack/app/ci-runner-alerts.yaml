@@ -153,10 +153,16 @@ spec:
               about a minute). Likely unschedulable, ImagePullBackOff on the
               Playwright image, a missing ConfigMap/Secret, or a hung clone
               init container. Test results are not affected - the runner is.
+              Since 2026-10-04 shard pods are created behind the thermal gate
+              and wait Pending (SchedulingGated) while every node is hot or
+              full; check `scripts/ninth-banner-admit.py --status` first (all
+              nodes hot for 30 min, or no trigger running to admit them).
             summary: CI runner pod stuck Pending
+          # 30m (was 15m): a gated pod legitimately queues while nodes cool
+          # (thermal gate, docs/sops/ci-runner.md); 30 min of that is worth a look.
           expr: |
             max by (namespace, pod) (kube_pod_status_phase{namespace="ci-runner", phase="Pending"}) == 1
-          for: 15m
+          for: 30m
           labels:
             category: ci-runner
             component: the-ninth-banner-tests
