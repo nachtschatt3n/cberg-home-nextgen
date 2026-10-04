@@ -187,9 +187,14 @@ premises:                             # read 2026-09-22 ~15:00Z; 10/10 PASS at a
       | jq 'map(select(.status == "False"))'
       | jq 'length'
     expect_exact: "0"
-status: awaiting-go   # reviewed 2026-09-23; RE-REVIEWED 2026-09-28 (F-2c849d1e): needs-fix (Stage C yq clobbered the F-baf94b64 ignore patch, break-glass same, --only on untracked files, stale premise, absolute floors) -> fixed -> 3 passes -> ready-for-go. Window prerequisite: §6.3 health-check/SOP items.
-review: ready-for-go@2026-09-28
-window: "sun-attended:2026-10-11"   # scheduled 2026-09-23 per the review: earliest reboot-free attended slot; needs a fresh GO on the day
+status: blocked   # BLOCKED 2026-10-04 (premise FAIL, re-run twice): storage-owner-set-unchanged -- my-software-production now owns PV splitfairy-data
+                  # (created 2026-09-28). The design gives that namespace namespace-admin ONLY, so under impersonation its reconciler could
+                  # not manage that PV. Needs re-plan (tenant tier + gen-tenants.sh + premise lists) and a fresh review before any GO.
+                  # UNBLOCK = amend for the new owner set (operator decision: storage CRB for production, or move the PV), NOT relaxing the premise.
+                  # was: awaiting-go   # reviewed 2026-09-23; RE-REVIEWED 2026-09-28 (F-2c849d1e): needs-fix (Stage C yq clobbered the F-baf94b64 ignore patch, break-glass same, --only on untracked files, stale premise, absolute floors) -> fixed -> 3 passes -> ready-for-go. Window prerequisite: §6.3 health-check/SOP items.
+review: null   # was ready-for-go@2026-09-28 -- cleared 2026-10-04: that verdict reviewed the pre-split owner set; the amendment re-reviews
+window: "sun-attended:2026-10-11"   # 2026-10-04: slot kept ONLY as a placeholder; it cannot run there as written. Clear it if not re-reviewed by 2026-10-10.
+  # (window was: scheduled 2026-09-23 per the review: earliest reboot-free attended slot; needs a fresh GO on the day
                                       # the slot shape (attended, exclusive, no reboot).
 sops_refs:
   - docs/sops/application-update.md
