@@ -14,7 +14,7 @@ est_duration_min: 310                 # PER EVENING (max of the two; review-2: e
                                       # was ~450 min with realistic run times, too close to the 480 ceiling). Run time ~32 min
                                       # (A0/C/D; B faster) incl. 300 s settle + 2-node packing; cooldowns <= 5 min each.
                                       # Evening 1 (A0 + B + C + back to A0): Step 0 15, pre 10, A0 32, 2 switches x 17,
-                                      # 6 runs x 32 + cooldowns 15, return to A0 10 -> ~290.
+                                      # 6 runs x 32 + cooldowns 15, return to A0 10, gate/settle margins -> ~308.
                                       # Evening 2 (A0 + D + decision + roll): Step 0 15, pre 10, A0 32, switch 17, 3 runs 96 +
                                       # cooldowns 10, decision 10, final roll + 02 watch 45, slack 10 -> ~245.
 needs_reboot: false
@@ -54,6 +54,8 @@ conflicts_with:
   - jellyfin-12.1                     # iGPU consumer on nuc14-01 (same reason)
   - jellyfin-config-rwo-migration     # iGPU consumer on nuc14-01 (same reason)
   - mariadb-28.1.1                    # backup-restore stacking (convention of 67ab1cc4): never two backup-restore plans in one run
+  - nextcloud-fleet-35.0.1            # reciprocity (review-3): it names this plan (backup-restore stacking)
+  - k8s-1.36.5                        # reciprocity (review-3): it names this plan
   - helm-drift-detection              # its P2 rolls intel-gpu-plugin (re-registers gpu.intel.com/i915 on every node)
 security_ref: null
 capability_change: true               # TRUE: the winner changes the CPU energy/performance bias (and for D the burst budget) of
@@ -269,8 +271,9 @@ echo d3ae92f > "$W/ci-ref"
 
 2.2 **Cluster health**: 3 nodes `Ready`; `mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status`
 -> 3 members, no learner, no ERRORS. **Record the leader and the RAFT TERM** (2026-10-05: `187ea782` = nuc14-01, term 83):
-`mise exec -- talosctl -n 192.168.55.11 etcd status | awk 'NR==2{print $5, $9}' > "$W/etcd-before.txt"` (columns LEADER,
-RAFT TERM: `462 MB` and `123 MB (26.61%)` split into 2 and 3 tokens; dry-tested 2026-10-05 -> `187ea782cbe2f8d1 83`). Per variant, apply the
+`mise exec -- talosctl -n 192.168.55.11 etcd status | awk 'NR==2{print $8, $10}' > "$W/etcd-before.txt"` (LEADER = token 8, RAFT TERM = token 10:
+DB SIZE `462 MB` and IN USE `141 MB (30.54%)` split into 2 and 3 tokens; measured live 2026-10-05 -> `187ea782cbe2f8d1 83`.
+Review-3 caught the earlier `$5, $9`, which read IN USE and RAFT INDEX). Per variant, apply the
 non-leader first. `flux get kustomizations -A | awk 'NR==1 || $5 != "True"'` -> header only.
 `mise exec -- talosctl -n <ip> get machineconfig` on 01/03 lists only `v1alpha1` (+ the v1.14 `persistent` copy with
 the SAME hash, which is not a staged config; predecessor execution record).
@@ -444,7 +447,14 @@ so evening 1 can close without a late extra touchpoint.
 **Plan status between the evenings (B6):** evening 1 leaves the plan status UNCHANGED (still the vetted/awaiting-go state
 it ran under; never `executed`). The window agent records the evening in `window_runs` as `partial`, with notes: "A0-1,
 B x3, C x3 measured; 01/03 back on A0; evening 2 owed". Evening 2 needs a FRESH operator GO, scoped `now:2026-10-07`
-(`run-now.py stamp` writes it; the 10-06 stamp is not reused).
+(`run-now.py stamp` writes it; the 10-06 stamp is not reused). **When evening 1 closes, the window agent resolves or
+consumes the 10-06 `approve` decision row** (`home-operation resolve --issue talos-power-tuning-ab ...` / decision
+consumed). `run-now.py approval_verdict` accepts an approve for `now:<yesterday>` (age 0..1), so a pending evening-1
+approval would otherwise pass evening 2's preflight without the fresh GO.
+**Invalid A0 control:** ab-run.sh refuses a reused label, so a replacement control run is `A0-1b` (or `A0-2b`).
+`ab-summary.py` uses the first VALID A0 label per evening as that evening's reference (tested: `A0-1b` stands in for
+`A0-1`). A variant normalised against the OTHER evening's A0 (its own is missing) always prints
+`CROSS_EVENING_UNRELIABLE` -> `AB_NEEDS_OPERATOR` (exit 4; tested with A0-1 + D removed).
 
 ### 3.7 Final roll
 **Winner A0 or AB_NO_WINNER:** dry-run P -> A0 on 03 and 01 (`ab-diffgate.py ... P A0`), `ab-works.py <ip> --snap`
@@ -550,7 +560,11 @@ lines not increased (INFORMATIONAL only: 01's ring buffer rotates within a day, 
 any pod of a Job NOT named in the run's own log, on 01/03, whose run overlaps the run window (`foreign_ci_pods`; another
 session's CI shared the nodes) -> `INVALID RUN`. Measured on the 10-04 files: the AFTER file contains 3 pods of the BEFORE
 e2e Job (23:05-23:09Z). Replayed with its TRUE window (from 23:17:44Z) it is correctly NOT flagged, because those pods
-had finished. With the window widened to overlap them it prints `INVALID RUN ... foreign_ci_pods=3`. A missing
+had finished. With the window widened to overlap them it prints `INVALID RUN ... foreign_ci_pods=2` (the third BEFORE pod ran on 02,
+outside the 01/03 filter). `ab-shards.py` now skips only pods that FINISHED before the run started. A foreign Job
+created gated before `t0` and admitted onto 01/03 during the run is therefore recorded and invalidates the run.
+Dry-tested with a fake pod list: a foreign pod created at t0-60 and started at t0+60 is recorded; a pod finished at
+t0-500 is not. A missing
 `stats-idle-L.json` ABORTS the summary (`AB_SUMMARY_ABORT ...`, fail closed: J/shard would read NaN). Re-run that
 capstats; the data is in Prometheus. `capstats.py` writes its JSON only after its node-count and coverage checks: `CAPSTATS_ABORT` = no
 data = re-run capstats, never a zero.
@@ -567,7 +581,7 @@ that run is invalid.
 **4.5 End state (after 3.7):** all three nodes `ab-readback.py <ip> <winner> --status` -> GATE_PASS (02: A0 if its watch
 failed, recorded). `ab-works.py --check` PASS on all three. `kubectl get pods -A ...` into `$W/restarts-after.txt`:
 `diff` against `restarts-before.txt` shows no new restarts in kube-system/storage/network. etcd leader changes during
-the run <= 1: `mise exec -- talosctl -n 192.168.55.11 etcd status | awk 'NR==2{print $5, $9}'` against
+the run <= 1: `mise exec -- talosctl -n 192.168.55.11 etcd status | awk 'NR==2{print $8, $10}'` against
 `$W/etcd-before.txt`. Each election increments RAFT TERM by >= 1, so the term delta must be <= 1. The same leader with
 the same term = 0 elections.
 
@@ -636,7 +650,7 @@ A0 controls, one per evening, which counterbalances the fixed B -> C -> D order 
 | 01:45 / 02:45 | hard stop for 3.7 / everything done (nightly 03:30) | - |
 
 On evening 2 the D dry-run starts from P = A0, because evening 1 ended on A0. The gate expects
-`plus=20/20 minus=19/19` (measured A0->D on 03). Capacity: evening 1 ~290 min, evening 2 ~245 min, both under the 480
+`plus=20/20 minus=19/19` (measured A0->D on 03). Capacity: evening 1 ~308 min, evening 2 ~245 min, both under the 480
 on-demand ceiling. `needs_reboot: false`, so NOW runs may carry it. A single long evening is still possible
 (B -> C -> D without the return to A0, ~450 min, start no later than 17:30). It is not recommended.
 
@@ -650,7 +664,7 @@ on-demand ceiling. `needs_reboot: false`, so NOW runs may carry it. A single lon
 - **talos-sysfs-power-caps**: conflicts_with plus the premise `soak-24h-recorded`, because its soak must finish first. Not
   depends_on: run-now refuses a dependency until it is `executed`, and the soak alone does not make it executed. Its 3.10 (CI gate 85 -> 88 °C) may land
   before tonight; that only changes admission temperatures, which the A/B's 1-shard-per-node runs rarely touch.
-  **Ask its executor to keep the six baseline files** (2.3) when cleaning its scratch dir.
+  Its close-out copies the **seven** baseline files into this plan's `$W` before wiping its own dir (§5 Copy-out, 3c8833b8).
 - **talos-linux-1.14.2** (reboot roll): never the same night. If it runs later, its post-reboot gates must read back
   the WINNER's values (`ab-readback.py <ip> <winner>`), not the 2026-10-04 caps. That is a repo correction for that plan,
   whose `sysfs-readback.py ... caps` check will FAIL against any winner other than A0.
@@ -871,7 +885,10 @@ while True:
     r = subprocess.run(["kubectl", "get", "pods", "-n", "ci-runner", "-l", "app.kubernetes.io/name=the-ninth-banner-tests", "-o", "json"], capture_output=True, text=True)
     if r.returncode == 0:
         for p in json.loads(r.stdout)["items"]:
-            if ts(p["metadata"]["creationTimestamp"]) < t0 - 5: continue          # older runs: not ours
+            # skip only pods that FINISHED before this run started: a foreign Job created (gated) BEFORE t0 but admitted
+            # onto 01/03 DURING the run must be recorded, so ab-summary.py foreign() can invalidate the run
+            fin0 = ((p.get("status", {}).get("containerStatuses") or [{}])[0].get("state", {}).get("terminated") or {}).get("finishedAt")
+            if fin0 and ts(fin0) < t0: continue
             n = p["metadata"]["name"]; st = p.get("status", {}); cs = (st.get("containerStatuses") or [{}])[0]
             term = cs.get("state", {}).get("terminated") or {}; run = cs.get("state", {}).get("running") or {}
             d = rec.setdefault(n, {})
@@ -947,7 +964,12 @@ for L in labels:
         raise SystemExit(f"AB_SUMMARY_ABORT stats-idle-{L}.json missing: run capstats.py idle-{L} 5 \"$W\" $(cat \"$W/run-{L}.start\")")
     valid[L] = (s, stt, idle, json.load(open(f"{W}/stats-{L}.json"))["minutes"])
 for b in bad: print("INVALID RUN (excluded):", b)
-a0 = {L: {(su, i): t for su, i, n, t in valid[L][0]} for L in ("A0-1", "A0-2") if L in valid}
+# A0 control per evening: label A0-<evening>[suffix]; a replacement for an INVALID control is A0-1b / A0-2b (ab-run.sh
+# refuses a reused label). The first VALID label per evening, in sorted order, is that evening's reference.
+a0 = {}
+for L in sorted(valid):
+    if L.startswith("A0-") and L[3:4] in ("1", "2") and f"A0-{L[3]}" not in a0:
+        a0[f"A0-{L[3]}"] = {(su, i): t for su, i, n, t in valid[L][0]}
 drift = None
 if len(a0) == 2:
     drift = gm(paired(a0["A0-2"], a0["A0-1"]))
@@ -971,7 +993,7 @@ for v in ("A0", "B", "C", "D"):
             k = len([y for y in s if y[2] == node])
             if k: th[ip]["j"].append((x["rapl_avg_w"] - idle[ip]["rapl_avg_w"]) * mins * 60 / k)
     res[v] = {"runs": len(Ls), "ref": ref or "-", "slow_own": 0.0 if v == "A0" else gm(rA), "slow_E": gm(rE),
-              "cross": ref is not None and v != "A0" and EVE[v] == 2 and ref == "A0-1",
+              "cross": ref is not None and v != "A0" and ref != f"A0-{EVE[v]}",   # normalised against ANOTHER evening's A0
               "med": {su: st.median([t for s_, i, n, t in sh if s_ == su]) for su in ("sims", "e2e")},
               "th": {ip: {"p95": max(x["p95"]), "max": max(x["max"]), "thr": sum(x["thr"]), "w": st.mean(x["w"]),
                           "ge100": sum(x["ge100"]), "j": st.mean(x["j"]) if x["j"] else float("nan")} for ip, x in th.items()}}
@@ -993,9 +1015,11 @@ best = min(r["slow_own"] for r in ok.values())
 near = [v for v, r in ok.items() if r["slow_own"] - best <= 0.03]          # within 3 points: stability first
 win = min(near, key=lambda v: (max(d["p95"] for d in ok[v]["th"].values()), sum(d["j"] for d in ok[v]["th"].values())))
 line = f"AB_WINNER={win} vs_own_evening_A0={ok[win]['slow_own']:+.1%} vs_BEFORE={ok[win]['slow_E']:+.1%} (eligible: {sorted(ok)}; tie band: {sorted(near)})"
-unreliable = (drift is None and "D" in ok) or (drift is not None and abs(drift) > 0.03) or any(r["cross"] for r in ok.values())
-if unreliable and len({EVE.get(v, 0) for v in ok if v != "A0"} | ({1} if "A0" in ok else set())) > 1:
-    print(f"CROSS_EVENING_UNRELIABLE: evening drift {'unknown' if drift is None else f'{drift:+.1%}'} (> 3 points or no A0-2): "
+multi = len({EVE[v] for v in ok if v != "A0"} | ({1} if "A0" in ok else set())) > 1   # candidates span both evenings
+cross = [v for v, r in ok.items() if r["cross"]]                                        # normalised against the OTHER evening
+if cross or (multi and (drift is None or abs(drift) > 0.03)):
+    print(f"CROSS_EVENING_UNRELIABLE: evening drift {'unknown' if drift is None else f'{drift:+.1%}'}; normalised against the other "
+          f"evening's A0: {cross or 'none'} (> 3 points, a missing A0 control, or a cross-evening reference): "
           "the B/C vs D ranking spans two evenings -> OPERATOR DECIDES from the table (both rankings above)")
     print("AB_NEEDS_OPERATOR provisional " + line); sys.exit(4)
 print(line)
