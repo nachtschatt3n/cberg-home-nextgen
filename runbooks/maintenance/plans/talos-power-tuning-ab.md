@@ -10,7 +10,7 @@ risk: medium                          # Not high: no reboot (every variant dry-r
                                       # without a reboot"), no etcd/apiserver change, every step is a live sysfs write the
                                       # pre-rendered A0 config undoes in seconds. Not low: up to 9 machine-config applies on
                                       # control-plane nodes in one evening, and the winner changes CPU behaviour for every workload.
-est_duration_min: 290                 # PER EVENING - the plan runs as TWO attended NOW runs (§6, reviewer 2026-10-05: one evening
+est_duration_min: 310                 # PER EVENING (max of the two; review-2: evening 1 ~308) - the plan runs as TWO attended NOW runs (§6, reviewer 2026-10-05: one evening
                                       # was ~450 min with realistic run times, too close to the 480 ceiling). Run time ~32 min
                                       # (A0/C/D; B faster) incl. 300 s settle + 2-node packing; cooldowns <= 5 min each.
                                       # Evening 1 (A0 + B + C + back to A0): Step 0 15, pre 10, A0 32, 2 switches x 17,
@@ -18,8 +18,9 @@ est_duration_min: 290                 # PER EVENING - the plan runs as TWO atten
                                       # Evening 2 (A0 + D + decision + roll): Step 0 15, pre 10, A0 32, switch 17, 3 runs 96 +
                                       # cooldowns 10, decision 10, final roll + 02 watch 45, slack 10 -> ~245.
 needs_reboot: false
-exclusive: false                      # NOT exclusive so ci-runner-exclude-node02 (which this depends on) may run first in the
-                                      # same NOW run if the nightly did not take it. Nothing ELSE may share the run (§6).
+exclusive: true                       # review-2 B1: nothing may share either evening's slot. ci-runner-exclude-node02 must be
+                                      # EXECUTED beforehand (run-now checks ALL premises at preflight, so it can never run
+                                      # "first in the same run": node02-excluded-from-ci would refuse the whole run).
 touches:
   namespaces: [ci-runner, monitoring]  # ci-runner: 10 measurement CI runs (sims 4 + e2e 3 each). monitoring: read-only
                                        # (capstats, NodeCPUPackagePowerAtCap check); no monitoring object is changed.
@@ -76,15 +77,15 @@ premises:
     run: kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.osImage}'
     expect_matches: '^Talos \(v1\.14\.[0-9]+\) Talos \(v1\.14\.[0-9]+\) Talos \(v1\.14\.[0-9]+\)$'
   - id: soak-24h-recorded
-    why: "Ordering gate vs talos-sysfs-power-caps (in conflicts_with, deliberately not depends_on; see depends_on comment): its 24 h soak (capstats soak-24h, owed >= 2026-10-05T23:17Z) writes this JSON ONLY on a CAPSTATS_OK. Missing = the soak has not been taken; the A/B would overwrite the config it measures. EXPECTED TO FAIL until then."
-    run: "grep -c '\"label\": \"soak-24h\"' /private/tmp/sysfscaps-talos-sysfs-power-caps/stats-soak-24h.json"
+    why: "Ordering gate vs talos-sysfs-power-caps (conflicts_with, deliberately not depends_on; see depends_on comment): its 24 h soak JSON exists only after a CAPSTATS_OK. Read from THIS plan's $W: the predecessor's close-out (Copy-out step, 3c8833b8) copies 7 secret-free files here BEFORE it wipes its own scratch dir tonight. Missing = soak not taken, or not copied: STOP. A premise cannot read 'copy OR source' (grep exits 2 on any missing file), so the copy is the contract."
+    run: "grep -c '\"label\": \"soak-24h\"' /private/tmp/powerab-talos-power-tuning-ab/stats-soak-24h.json"
     expect_exact: "1"
   - id: baseline-files-present
-    why: "The paired BEFORE/AFTER comparison needs the 2026-10-04 shard records + logs from the predecessor's scratch dir (copied in §2). That dir holds machine secrets and is due for deletion after the soak: if it is gone, copy-in fails and the 'vs BEFORE' column cannot be computed (see §2.3 fallback)."
-    run: "grep -c '' /private/tmp/sysfscaps-talos-sysfs-power-caps/shards-before.json /private/tmp/sysfscaps-talos-sysfs-power-caps/shards-after.json /private/tmp/sysfscaps-talos-sysfs-power-caps/ci-before.log /private/tmp/sysfscaps-talos-sysfs-power-caps/ci-after.log /private/tmp/sysfscaps-talos-sysfs-power-caps/stats-before-ci.json /private/tmp/sysfscaps-talos-sysfs-power-caps/stats-after-ci.json | wc -l | tr -d ' '"
+    why: "The paired BEFORE/AFTER comparison needs the 2026-10-04 shard records, logs and stats, copied from the predecessor's scratch dir into $W by its close-out (same 7-file Copy-out). Owned steps: talos-sysfs-power-caps §5 Copy-out + reminders talos-sysfs-power-caps-soak-3.10 / -scratch-wipe + F-6c7843e4 item (5), all updated 2026-10-05."
+    run: "grep -c '' /private/tmp/powerab-talos-power-tuning-ab/shards-before.json /private/tmp/powerab-talos-power-tuning-ab/shards-after.json /private/tmp/powerab-talos-power-tuning-ab/ci-before.log /private/tmp/powerab-talos-power-tuning-ab/ci-after.log /private/tmp/powerab-talos-power-tuning-ab/stats-before-ci.json /private/tmp/powerab-talos-power-tuning-ab/stats-after-ci.json | wc -l | tr -d ' '"
     expect_exact: "6"
   - id: node02-excluded-from-ci
-    why: "depends_on ci-runner-exclude-node02: without the knob the gate can pin an A/B shard on nuc14-02, and that run is INVALID (ab-summary.py drops runs with a shard on 02)."
+    why: "depends_on ci-runner-exclude-node02 (must be EXECUTED before the run; preflight checks this premise): without the knob the gate can pin an A/B shard on nuc14-02, and that run is INVALID (ab-summary.py drops runs with a shard on 02)."
     run: "grep '^EXCLUDE_NODES = ' scripts/ninth-banner-admit.py | wc -l | tr -d ' '"
     expect_exact: "1"
   - id: sysfs-patch-committed-shape
@@ -96,11 +97,27 @@ premises:
     run: "grep -c 'energy_performance_preference: \"balance_power\"$' kubernetes/bootstrap/talos/patches/global/machine-sysfs-power.yaml"
     expect_exact: "18"
   - id: meteor-lake-epp-table
-    why: "The variant meanings rest on intel_pstate's Meteor Lake table (intel_epp_default, v6.18: INTEL_METEORLAKE_L -> balance_power 179, balance_performance 64, performance 16): family 6 model 170 on all 18 CPUs. Another model = another table: B would no longer equal the pre-2026-10-04 EPP and the read-back mapping in ab-readback.py is wrong."
+    why: "The variant meanings rest on intel_pstate's Meteor Lake table (intel_epp_default, v6.18: INTEL_METEORLAKE_L -> balance_power 179, balance_performance 64, performance 16): family 6 model 170 on all 18 CPUs of all 3 nodes (02 gets the winner too). Another model = another table: B would no longer equal the pre-2026-10-04 EPP and the read-back mapping in ab-readback.py is wrong."
     run: "talosctl --nodes=192.168.55.11 read /proc/cpuinfo | grep -c '^model[[:space:]]*: 170$'"
     expect_exact: "18"
+  - id: meteor-lake-epp-table-02
+    why: "same as meteor-lake-epp-table, node 02 (talosctl read takes exactly one node; 02 receives the winner in 3.7)"
+    run: "talosctl --nodes=192.168.55.12 read /proc/cpuinfo | grep -c '^model[[:space:]]*: 170$'"
+    expect_exact: "18"
+  - id: meteor-lake-epp-table-03
+    why: "same as meteor-lake-epp-table, node 03"
+    run: "talosctl --nodes=192.168.55.13 read /proc/cpuinfo | grep -c '^model[[:space:]]*: 170$'"
+    expect_exact: "18"
   - id: hwp-epp-numeric-write-allowed
-    why: "store_energy_performance_preference accepts a raw 0-255 EPP only with X86_FEATURE_HWP_EPP (else returns the match_string error): the hwp_epp flag on every CPU of node 03 (01 identical, measured 2026-10-05)."
+    why: "store_energy_performance_preference accepts a raw 0-255 EPP only with X86_FEATURE_HWP_EPP (else returns the match_string error): the hwp_epp flag on every CPU of all 3 nodes."
+    run: "talosctl --nodes=192.168.55.11 read /proc/cpuinfo | grep -c 'hwp_epp'"
+    expect_exact: "18"
+  - id: hwp-epp-numeric-write-allowed-02
+    why: "same as hwp-epp-numeric-write-allowed, node 02"
+    run: "talosctl --nodes=192.168.55.12 read /proc/cpuinfo | grep -c 'hwp_epp'"
+    expect_exact: "18"
+  - id: hwp-epp-numeric-write-allowed-03
+    why: "same as hwp-epp-numeric-write-allowed, node 03"
     run: "talosctl --nodes=192.168.55.13 read /proc/cpuinfo | grep -c 'hwp_epp'"
     expect_exact: "18"
   - id: rapl-not-locked-01
@@ -214,7 +231,17 @@ every `talosctl apply-config` on the operator's OK; the agent does everything el
    Record `PL1_BINDING_NOTE` and propose **PL1 40 W as the next test, NOT in this plan**. Caveat: the BEFORE baseline
    ran sims shard 0 on the throttling nuc14-02, and one e2e shard has no finish time. Every "vs BEFORE" ratio carries that
    skew. The ranking BETWEEN variants is unaffected (same baseline), but treat the 15 % line as approximate.
-4. No eligible variant -> `AB_NO_WINNER`: A0 stays, nothing is committed.
+4. No eligible variant -> `AB_NO_WINNER`: A0 stays (the decision is still recorded, 3.7).
+5. **Ranking is per evening (B4).** Each variant is compared with ITS OWN evening's A0 control, paired by shard index:
+   B and C against A0-1, D against A0-2. The summary prints the paired A0-2 vs A0-1 drift. If that drift is more than 3
+   points, or A0-2 is missing, the cross-evening (B/C vs D) ranking is unreliable: it prints `CROSS_EVENING_UNRELIABLE` and
+   `AB_NEEDS_OPERATOR provisional ...` (exit 4), and **the operator decides** from the table. Tested 2026-10-05 on
+   synthetic two-evening data: 0 % drift -> `AB_WINNER=D`; +6 % drift -> `AB_NEEDS_OPERATOR`.
+6. **The rule ignores nuc14-02** (no A/B data there by design). 02 is covered by the 3.7.5 20-min watch, its per-node
+   rollback, and the open F-6c7843e4 (24 h check before closing).
+**Expectation to state in the GO text:** B will very likely be DISQUALIFIED. The 10-04 BEFORE run (same EPP, 64 W)
+already read 03 p95 77.35 °C (> 75), and B differs only by the 35/55 W caps, which CI never reached. The synthetic test
+of the rule disqualifies it on exactly that number. B is still run: it is the only clean measure of the EPP share.
 Per-core-type EPP (P-cores cpu0-7 = 4 x 2 HT at 4.5 GHz max, E-cores cpu8-15 at 3.6 GHz, LP-E cpu16-17 at 2.5 GHz,
 measured via `cpuinfo_max_freq`) was evaluated and NOT included. Each extra variant costs ~100 min tonight, and sims
 (single-threaded) runs on a P-core under ITMT anyway. If the winner is B or C, "EPP 64 on cpu0-7 only, 179 on cpu8-17"
@@ -241,24 +268,25 @@ echo d3ae92f > "$W/ci-ref"
 (`soak-24h-recorded` fails until the predecessor's soak ran: STOP, too early).
 
 2.2 **Cluster health**: 3 nodes `Ready`; `mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status`
--> 3 members, no learner, no ERRORS. **Record the leader** (2026-10-05: `187ea782` = nuc14-01). Per variant, apply the
+-> 3 members, no learner, no ERRORS. **Record the leader and the RAFT TERM** (2026-10-05: `187ea782` = nuc14-01, term 83):
+`mise exec -- talosctl -n 192.168.55.11 etcd status | awk 'NR==2{print $5, $9}' > "$W/etcd-before.txt"` (columns LEADER,
+RAFT TERM: `462 MB` and `123 MB (26.61%)` split into 2 and 3 tokens; dry-tested 2026-10-05 -> `187ea782cbe2f8d1 83`). Per variant, apply the
 non-leader first. `flux get kustomizations -A | awk 'NR==1 || $5 != "True"'` -> header only.
 `mise exec -- talosctl -n <ip> get machineconfig` on 01/03 lists only `v1alpha1` (+ the v1.14 `persistent` copy with
 the SAME hash, which is not a staged config; predecessor execution record).
 
-2.3 **Baselines (copy, no secrets):**
+2.3 **Baselines (no secrets; already in `$W`, premises).** The predecessor's close-out copies the 7 files here as soon as
+its soak printed `CAPSTATS_OK` (`talos-sysfs-power-caps` §5 Copy-out, 3c8833b8). This step only renames them to the run
+labels `ab-summary.py` reads:
 ```bash
 export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
-O=/private/tmp/sysfscaps-talos-sysfs-power-caps
-cp "$O/shards-before.json" "$W/shards-E.json"; cp "$O/ci-before.log" "$W/run-E.log"; cp "$O/stats-before-ci.json" "$W/stats-E.json"
-cp "$O/shards-after.json" "$W/shards-A1004.json"; cp "$O/ci-after.log" "$W/run-A1004.log"; cp "$O/stats-after-ci.json" "$W/stats-A1004.json"
-cp "$O/stats-soak-24h.json" "$W/stats-soak-24h.json"; ls "$W" | grep -cE '^(shards|run|stats)-(E|A1004)\.(json|log)$'    # 6
+cp -p "$W/shards-before.json" "$W/shards-E.json"; cp -p "$W/ci-before.log" "$W/run-E.log"; cp -p "$W/stats-before-ci.json" "$W/stats-E.json"
+cp -p "$W/shards-after.json" "$W/shards-A1004.json"; cp -p "$W/ci-after.log" "$W/run-A1004.log"; cp -p "$W/stats-after-ci.json" "$W/stats-A1004.json"
+ls "$W" | grep -cE '^(shards|run|stats)-(E|A1004)\.(json|log)$'    # 6
+git hash-object scripts/ninth-banner-admit.py > "$W/gate-hash"; cat "$W/gate-hash"     # ab-run.sh refuses a run if the gate changed
 ```
-Fallback if the premise `baseline-files-present` fails (the dir was cleaned after the soak): run anyway. `ab-summary.py`
-then aborts on the missing `run-E.log`, so judge variants against **A0 only**: paired ratio vs the A0 run, done by hand
-from the `shards-*.json`. The "> 15 % vs BEFORE" check uses the predecessor's recorded medians (sims 350 s, e2e 197 s),
-flagged as unpaired. **Ask the soak executor not to delete these 6 files before the A/B** (they hold no secrets; only
-`fw/ rb/ live-*` do).
+The gate hash is re-taken on evening 2 only if `git log -1 -- scripts/ninth-banner-admit.py` shows no new commit since
+evening 1. If there is one, read it first: a changed gate between evenings changes the experiment.
 
 2.4 **No CI in flight and none planned 18:30-02:45 Berlin**: `scripts/ninth-banner-admit.py --status` -> `gated (queued)
 pods: 0` and `ci-cpu 0/6` on every node; `kubectl get jobs -n ci-runner` shows no active Job. Tell the ci-runner owner
@@ -379,7 +407,8 @@ Both PASS -> next node. Either FAIL -> §5 for that node (A0), stop this variant
 **d) Settle:** Monitor until-loop until 5 min after the second apply AND `scripts/ninth-banner-admit.py --status` shows
 2-min avg < 65 °C on 01 and 03. Then the idle window before run 1 reflects V.
 
-**e) Three runs V-1, V-2, V-3** (`ab-shards.py` keeps polling up to 180 s after `SUITES_DONE` until every pod of the
+**e) Three runs V-1, V-2, V-3** (`ab-run.sh` refuses with `GATE_CHANGED` if `scripts/ninth-banner-admit.py` no longer
+matches `$W/gate-hash` from 2.3. Dry-tested: a mismatched hash exits 2 before creating any run file; (`ab-shards.py` keeps polling up to 180 s after `SUITES_DONE` until every pod of the
 run's Jobs has `finishedAt`, else it prints `SHARDS_UNFINISHED`. That fixes the 10-04 race, where the BEFORE run lost
 its last pod's finish time),, each exactly as 3.3 (`"$W/ab-run.sh" $V-1` in the background, Monitor on
 `^SHARDS_DONE`, then the two `capstats.py` calls with `L=$V-1`). Before each next run: Monitor until both nodes'
@@ -394,7 +423,8 @@ to 3.5.
 export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
 mise exec -- python3 "$W/ab-summary.py" "$W" | tee "$W/summary.txt"
 ```
-It prints the A0 drift check vs the 10-04 AFTER, any `INVALID RUN`, the per-variant table, any `DISQUALIFIED`, the
+It prints the evening drift (A0-2 vs A0-1, paired), each A0 vs the 10-04 AFTER, any `INVALID RUN` (< 7 finished
+shards, a shard on 02, or a FOREIGN CI pod on 01/03 overlapping the run window, B3), the per-variant table, any `DISQUALIFIED`, the
 `PL1_BINDING_NOTE`, and the verdict `AB_WINNER=<v> ...` or `AB_NO_WINNER` (rc 3). Fill §4.B from it. **The operator
 confirms the winner** before 3.6. That is the third touchpoint, and it can share the OK with the final applies.
 
@@ -406,11 +436,19 @@ confirms the winner** before 3.6. That is the third touchpoint, and it can share
   P -> A0 must PASS) and defer the roll to a later on-demand run. The decision stays valid for 7 days. Everything
   must be done by 02:45 (nightly at 03:30).
 
-**End of evening 1:** after C's runs, apply A0 to 03 and 01 per §5 (dry-run `C A0` must PASS; gates `ab-readback.py <ip> A0
---status` + `ab-works.py --check`). Evening 2 starts from A0 with a fresh control run `A0-2`.
+**End of evening 1:** after C's runs, apply A0 to 03 and 01 per §5 (`ab-works.py <ip> --snap` immediately before each
+apply; dry-run `C A0` must PASS; gates `ab-readback.py <ip> A0 --status` + `ab-works.py --check`). Evening 2 starts from A0
+with a fresh control run `A0-2`. **Suggested: the operator pre-grants this return-to-A0 apply together with OK #2 (C)**,
+so evening 1 can close without a late extra touchpoint.
+
+**Plan status between the evenings (B6):** evening 1 leaves the plan status UNCHANGED (still the vetted/awaiting-go state
+it ran under; never `executed`). The window agent records the evening in `window_runs` as `partial`, with notes: "A0-1,
+B x3, C x3 measured; 01/03 back on A0; evening 2 owed". Evening 2 needs a FRESH operator GO, scoped `now:2026-10-07`
+(`run-now.py stamp` writes it; the 10-06 stamp is not reused).
 
 ### 3.7 Final roll
-**Winner A0 or AB_NO_WINNER:** dry-run P -> A0 on 03 and 01 (`ab-diffgate.py ... P A0`), apply A0 (coordinator) to 03
+**Winner A0 or AB_NO_WINNER:** dry-run P -> A0 on 03 and 01 (`ab-diffgate.py ... P A0`), `ab-works.py <ip> --snap`
+immediately before each apply, apply A0 (coordinator) to 03
 then 01, gates `ab-readback.py <ip> A0 --status` + `ab-works.py <ip> --check`. Then RECORD the decision in git, so
 dependants (`ci-gate-primary-control-rework` premise `power-tuning-decided`) have something to key on:
 `mise exec -- python3 "$W/ab-patches.py" kubernetes/bootstrap/talos A0 --record` (one comment line, render-neutral:
@@ -423,7 +461,7 @@ Go to 3.9.
    ```bash
    cd /Users/mu/code/cberg-home-nextgen; export W=/private/tmp/powerab-talos-power-tuning-ab; WIN=D     # the winner
    mise exec -- python3 "$W/ab-patches.py" kubernetes/bootstrap/talos $WIN          # AB_PATCHES_OK variant=$WIN
-   git diff --stat kubernetes/bootstrap/talos      # 1 file: B/C 19 ins 18 del; D 22 ins 19 del (incl. 2 comment lines)
+   git diff --stat kubernetes/bootstrap/talos      # 1 file: B/C 19 ins 18 del; D 25 ins 21 del (measured 2026-10-05: header + RAPL comment + tau lines)
    M=$(mktemp /private/tmp/claude-powerab-msg.XXXXXX)
    printf '%s\n\n%s\n' "feat(talos): SysfsConfig power tuning -> variant $WIN (talos-power-tuning-ab A/B winner)" \
      "A/B on nuc14-01/03, 3 runs per variant at ninth-banner d3ae92f; table in the plan's 4.B. F-6c7843e4. Config only; applied per node in window." > "$M"
@@ -448,11 +486,13 @@ Go to 3.9.
    decides the rest: `non_sysfs_changed_lines=0`.)
 3. Dry-run r-final: on 03 and 01 from P (= last variant; if P == winner the gate expects an empty diff: `... $WIN $WIN`),
    on 02 from A0 (`ab-diffgate.py <dry> A0 $WIN`). All must PASS.
-4. Apply r-final (coordinator): 03, 01 (skip a node whose dry-run was empty), with the 3.4c gates against `$WIN`.
+4. Apply r-final (coordinator): 03, 01 (skip a node whose dry-run was empty). `ab-works.py <ip> --snap` immediately
+   before each apply, then the 3.4c gates against `$WIN`.
 5. **nuc14-02 last, with a 20-min watch** (it is the suspected-defect node and runs production only):
    ```bash
    export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
    T0=$(date +%s); echo $T0 > "$W/n02-apply"; mise exec -- python3 "$W/capstats.py" pre02 20 "$W" $T0     # the 20 min BEFORE
+   mise exec -- python3 "$W/ab-works.py" 192.168.55.12 --snap        # immediately before the apply
    # coordinator: talosctl -n 192.168.55.12 apply-config --mode=no-reboot -f "$W/r-final/kubernetes-k8s-nuc14-02.yaml"
    ```
    Gates: `ab-readback.py 192.168.55.12 $WIN --status` + `ab-works.py 192.168.55.12 --check`. Then wait 20 min (Monitor)
@@ -506,8 +546,13 @@ the node; `gpu.intel.com/i915` allocatable > 0; every iGPU pod on the node Runni
 (2026-10-05: 01 = immich-server, jellyfin, makemkv; 02 = frigate, plex; 03 = immich-machine-learning); i915 dmesg error
 lines not increased (INFORMATIONAL only: 01's ring buffer rotates within a day, so the count can fall). Negative controls measured 2026-10-05: a changed bootID and a changed restart count each FAIL.
 
-**4.4 Measurement validity (per run):** `ab-summary.py` drops a run with < 7 finished shards or any shard on nuc14-02
-(`INVALID RUN`). `capstats.py` writes its JSON only after its node-count and coverage checks: `CAPSTATS_ABORT` = no
+**4.4 Measurement validity (per run):** `ab-summary.py` drops a run with < 7 finished shards, any shard on nuc14-02, or
+any pod of a Job NOT named in the run's own log, on 01/03, whose run overlaps the run window (`foreign_ci_pods`; another
+session's CI shared the nodes) -> `INVALID RUN`. Measured on the 10-04 files: the AFTER file contains 3 pods of the BEFORE
+e2e Job (23:05-23:09Z). Replayed with its TRUE window (from 23:17:44Z) it is correctly NOT flagged, because those pods
+had finished. With the window widened to overlap them it prints `INVALID RUN ... foreign_ci_pods=3`. A missing
+`stats-idle-L.json` ABORTS the summary (`AB_SUMMARY_ABORT ...`, fail closed: J/shard would read NaN). Re-run that
+capstats; the data is in Prometheus. `capstats.py` writes its JSON only after its node-count and coverage checks: `CAPSTATS_ABORT` = no
 data = re-run capstats, never a zero.
 CONTROL: metric node_thermal_zone_temp - `temp_p95`/`temp_max`/`min_ge100` per run, `max by (instance)` aggregated
 (decision rule 1).
@@ -522,7 +567,9 @@ that run is invalid.
 **4.5 End state (after 3.7):** all three nodes `ab-readback.py <ip> <winner> --status` -> GATE_PASS (02: A0 if its watch
 failed, recorded). `ab-works.py --check` PASS on all three. `kubectl get pods -A ...` into `$W/restarts-after.txt`:
 `diff` against `restarts-before.txt` shows no new restarts in kube-system/storage/network. etcd leader changes during
-the run <= 1.
+the run <= 1: `mise exec -- talosctl -n 192.168.55.11 etcd status | awk 'NR==2{print $5, $9}'` against
+`$W/etcd-before.txt`. Each election increments RAFT TERM by >= 1, so the term delta must be <= 1. The same leader with
+the same term = 0 elections.
 
 ### 4.B Result table (fill from `summary.txt`; attach to the run report)
 
@@ -543,9 +590,11 @@ the run <= 1.
 ```bash
 export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
 P=B; ip=192.168.55.13; n=3                  # P = what the node holds now
+mise exec -- python3 "$W/ab-works.py" $ip --snap    # immediately before the apply (the check after it compares to this)
 mise exec -- talosctl -n $ip apply-config --dry-run --mode=no-reboot -f "$W/r-A0/kubernetes-k8s-nuc14-0$n.yaml" > "$W/dry-rb-$n.txt" 2>&1; mise exec -- python3 "$W/ab-diffgate.py" "$W/dry-rb-$n.txt" $P A0
 mise exec -- talosctl -n $ip apply-config --mode=no-reboot -f "$W/r-A0/kubernetes-k8s-nuc14-0$n.yaml"      # coordinator
 python3 -c "import time; time.sleep(10)"; mise exec -- python3 "$W/ab-readback.py" $ip A0 --status | tail -1      # GATE_PASS ... variant=A0
+mise exec -- python3 "$W/ab-works.py" $ip --check | tail -1        # CONFIGWORKS_PASS
 ```
 Back when it prints `GATE_PASS ... variant=A0 keys=21 mismatches=0`: EPP balance_power on 18 CPUs, PL2 55 W, the PL1
 window back at 27983872 with no time-window status (Talos `resetKernelParam` after D), and KernelParamStatus for
@@ -569,14 +618,14 @@ A0 controls, one per evening, which counterbalances the fixed B -> C -> D order 
 | Berlin (UTC) | step | operator |
 |---|---|---|
 | **Evening 1, Tue 2026-10-06** | | |
-| 18:30 (16:30Z) | run-now preflight, Step 0 (safe updates), 2.x pre-checks; `ci-runner-exclude-node02` first if the nightly did not run it (+45) | GO |
+| 18:30 (16:30Z) | run-now preflight (needs `ci-runner-exclude-node02` EXECUTED, nightly 10-06), Step 0 (safe updates), 2.x pre-checks | GO |
 | 18:55 (16:55Z) | 3.3 A0 control `A0-1` (renders 3.1 + A0 dry-runs 3.2 in parallel) | - |
 | 19:30 (17:30Z) | **B: dry-run, apply 03 + 01** | **OK #1** |
 | 19:50-21:30 | B-1..B-3 | - |
-| 21:30 (19:30Z) | **C apply** | **OK #2** |
+| 21:30 (19:30Z) | **C apply** | **OK #2** (suggest: also pre-grant the 23:10 return to A0) |
 | 21:50-23:10 | C-1..C-3 | - |
 | 23:10 (21:10Z) | **back to A0 on 03 + 01** (§5 procedure, dry-run gated) -> no node stays overnight on a measured-only variant | **OK #3** |
-| ~23:20 | evening 1 done; `ab-summary.py` interim table (no decision) | - |
+| ~23:40 | evening 1 done (~308 min); `ab-summary.py` interim table (no decision) | - |
 | **Evening 2, Wed 2026-10-07** | | |
 | 18:30 (16:30Z) | preflight, Step 0, 2.2/2.4/2.5 again (the 2.3 baselines and renders in `$W` are reused; re-run 3.2 A0 dry-runs) | GO |
 | 18:55 | A0 control `A0-2` | - |
@@ -591,8 +640,10 @@ On evening 2 the D dry-run starts from P = A0, because evening 1 ended on A0. Th
 on-demand ceiling. `needs_reboot: false`, so NOW runs may carry it. A single long evening is still possible
 (B -> C -> D without the return to A0, ~450 min, start no later than 17:30). It is not recommended.
 
-- **Nothing else in this NOW run** except `ci-runner-exclude-node02` before it. Every other plan changes load or the
-  instrument. `exclusive` is false only to allow that one.
+- **Nothing else in either NOW run** (`exclusive: true`). `ci-runner-exclude-node02` must have EXECUTED before evening 1
+  (nightly 2026-10-06). If that nightly does not run it (e.g. the soak was not captured in time), it runs in the nightly
+  of 10-07 and **both A/B evenings shift by one day** (10-07/10-08). It cannot join the A/B's run, because run-now
+  checks every premise at preflight.
 - **No other CI** 18:30-02:45: the A/B's triggers export `GATE_SECOND_POD_NODES=` and `GATE_MAX_CPU_PER_NODE=1` (one
   shard per node, as in BEFORE/AFTER where each shard ran alone on its node). Another session's trigger would admit
   with the defaults and break that. Coordinate with the ci-runner owner (2.4).
@@ -604,8 +655,10 @@ on-demand ceiling. `needs_reboot: false`, so NOW runs may carry it. A single lon
   the WINNER's values (`ab-readback.py <ip> <winner>`), not the 2026-10-04 caps. That is a repo correction for that plan,
   whose `sysfs-readback.py ... caps` check will FAIL against any winner other than A0.
 - **kube-prometheus-stack-91.9.0 / immich-ml / jellyfin / helm-drift-detection**: conflicts_with (instrument or iGPU/CPU
-  load on 01/03). Their windows (2026-10-10 and later) do not overlap 10-06, but the refs keep the scheduler from
-  putting them into the same run. Reciprocity owed by those authors.
+  load on 01/03). kube-prometheus-stack-91.9.0 and immich-machine-learning-3.2.4 have `window: null` today (immich-ml
+  is vetted and the scheduler proposes nightly:2026-10-06, i.e. 03:30, BEFORE evening 1, which is fine). jellyfin-12.1
+  sat 10-10, jellyfin-config-rwo-migration sun 10-25, helm-drift-detection sat 11-07. The refs keep the scheduler from
+  putting any of them into an A/B run. Reciprocity owed by those authors.
 - **ci-gate-primary-control-rework** (backlog) depends on this plan's committed winner.
 - **Per-node exception for nuc14-02:** not possible with the current patch layout (fact 7). If 02 fails its watch,
   the clean fix is moving the 18 EPP keys from the global patch into the three per-node patches (a follow-up plan),
@@ -645,6 +698,10 @@ if v == "A0":
 t = t.replace(E, f'energy_performance_preference: "{epp}"\n')
 new = f'  class/powercap/intel-rapl:0/constraint_1_power_limit_uw: "{pl2}"\n'
 if tau:
+    C1 = "  # RAPL package-0: PL1 (long_term), PL2 (short_term). Time windows (PL1 tau\n  # ~28 s, PL2 2.44 ms) and PL4 (peak_power 120 W) stay at BIOS values.\n"
+    assert t.count(C1) == 1, "RAPL comment not in the c2c155b8 shape"
+    t = t.replace(C1, "  # RAPL package-0: PL1 (long_term), PL2 (short_term). PL1 tau is set below (variant D);\n"
+                      "  # the PL2 window (2.44 ms) and PL4 (peak_power 120 W) stay at BIOS values.\n")
     new += ("  # PL1 time window (tau) 28 s -> 10 s: the package falls back to PL1 sooner after a burst\n"
             "  # (RAPL quantizes 10000000 us to 9994240 us; plan talos-power-tuning-ab)\n"
             f'  class/powercap/intel-rapl:0/constraint_0_time_window_us: "{tau}"\n')
@@ -842,82 +899,106 @@ print("SHARDS_DONE", L, len(rec))
 
 ```python ab-summary
 #!/usr/bin/env python3
-# ab-summary.py [W]  -- plan talos-power-tuning-ab §4.B table + decision rule. Reads, per run label L (A0-1, B-1..3,
-# C-1..3, D-1..3): shards-L.json (ab-shards.py), stats-L.json + stats-idle-L.json (capstats.py). Baselines copied in
-# §2: E = 2026-10-04 BEFORE (64 W, EPP 64), A1004 = 2026-10-04 AFTER (35/55 W, EPP 179), both at ref d3ae92f.
-# Primary time metric: PAIRED per shard index (same tests) -> geometric-mean ratio vs E; medians reported too.
+# ab-summary.py [W]  -- plan talos-power-tuning-ab §4.B table + decision rule.
+# Runs: A0-1, B-1..3, C-1..3 (evening 1) and A0-2, D-1..3 (evening 2). Per run L: shards-L.json (ab-shards.py),
+# run-L.{start,end,log}, stats-L.json + stats-idle-L.json (capstats.py). Baselines (copied in §2): E = 2026-10-04 BEFORE,
+# A1004 = 2026-10-04 AFTER, both at ref d3ae92f (they carry no .start/.end; never validity-checked, never ranked).
+# PRIMARY metric: each variant against ITS OWN EVENING's A0 control, PAIRED by shard index (same tests on the same
+# evening) -> geometric-mean ratio - 1. "vs BEFORE" (paired vs E) is reported and feeds only the PL1 note.
 import calendar, glob, json, math, re, statistics as st, sys, time
 W = sys.argv[1] if len(sys.argv) > 1 else "/private/tmp/powerab-talos-power-tuning-ab"
 N = {"192.168.55.11": "k8s-nuc14-01", "192.168.55.13": "k8s-nuc14-03"}
-def ts(s): return calendar.timegm(time.strptime(s, "%Y-%m-%dT%H:%M:%SZ"))  # UTC; mktime would apply local DST
+EVE = {"A0-1": 1, "B": 1, "C": 1, "A0-2": 2, "D": 2}
+def ts(s): return calendar.timegm(time.strptime(s, "%Y-%m-%dT%H:%M:%SZ"))   # UTC
+def jobs_of(L):
+    j = set(re.findall(r"^job ci-runner/(\S+) ", open(f"{W}/run-{L}.log").read(), re.M))
+    if not j: raise SystemExit(f"AB_SUMMARY_ABORT run-{L}.log names no Job")
+    return j
+def raw(L): return json.load(open(f"{W}/shards-{L}.json"))
 def shards(L):
-    # only the Jobs this run's own log created ("job ci-runner/<name> ..."): the 2026-10-04 AFTER collector
-    # also caught the BEFORE run's e2e pods, which would pair a run with itself
-    jobs = set(re.findall(r"^job ci-runner/(\S+) ", open(f"{W}/run-{L}.log").read(), re.M))
-    if not jobs: raise SystemExit(f"AB_SUMMARY_ABORT run-{L}.log names no Job")
-    out = []
-    for name, d in json.load(open(f"{W}/shards-{L}.json")).items():
+    # only the Jobs this run's own log created: the 2026-10-04 AFTER collector also caught the BEFORE run's e2e pods
+    jobs, out = jobs_of(L), []
+    for name, d in raw(L).items():
         m = re.match(r"tnb-(sims|e2e)(?:-gpu)?-[0-9a-f]{7}-\d+-(\d+)-", name)
         if m and d.get("job") in jobs and d.get("runStarted") and d.get("finishedAt"):
             out.append((m.group(1), int(m.group(2)), d["node"], ts(d["finishedAt"]) - ts(d["runStarted"])))
     return out
+def foreign(L):
+    # a CI pod of ANOTHER Job on 01/03 whose run overlaps this run's window = someone else's CI shared the nodes
+    jobs, s0, s1 = jobs_of(L), int(open(f"{W}/run-{L}.start").read()), int(open(f"{W}/run-{L}.end").read())
+    return [n for n, d in raw(L).items() if d.get("job") not in jobs and d.get("node") in N.values() and d.get("runStarted")
+            and ts(d["runStarted"]) < s1 and (ts(d["finishedAt"]) if d.get("finishedAt") else s1) > s0]
 def ld(f):
     try: return json.load(open(f))["nodes"]
     except Exception: return None
-base = {(s, i): t for s, i, n, t in shards("E")}
 def gm(rs): return math.exp(sum(math.log(r) for r in rs) / len(rs)) - 1 if rs else float("nan")
-runs = {}
-for f in sorted(glob.glob(f"{W}/shards-*.json")):
-    L = f.split("shards-", 1)[1][:-5]
-    if L in ("E", "A1004"): continue
-    runs.setdefault(L.split("-")[0], []).append(L)
-res, bad_runs = {}, []
-for v, Ls in sorted(runs.items()):
-    sh, ratios, th = [], [], {ip: {"p95": [], "max": [], "thr": [], "w": [], "ge100": [], "j": []} for ip in N}
-    for L in Ls:
-        s = shards(L); stt = ld(f"{W}/stats-{L}.json"); idle = ld(f"{W}/stats-idle-{L}.json")
-        on02 = [x for x in s if x[2] == "k8s-nuc14-02"]
-        if len(s) < 7 or on02 or stt is None:
-            bad_runs.append(f"{L}: shards={len(s)} on_nuc14-02={len(on02)} stats={'ok' if stt else 'MISSING'}"); continue
-        sh += s; ratios += [t / base[(su, i)] for su, i, n, t in s if (su, i) in base]
-        mins = json.load(open(f"{W}/stats-{L}.json"))["minutes"]
-        for ip, node in N.items():
-            d = stt[ip]; th[ip]["p95"].append(d["temp_p95"]); th[ip]["max"].append(d["temp_max"])
-            th[ip]["thr"].append(d["throttles"]); th[ip]["w"].append(d["rapl_avg_w"]); th[ip]["ge100"].append(d["min_ge100"])
-            k = len([x for x in s if x[2] == node])
-            if idle and k: th[ip]["j"].append((d["rapl_avg_w"] - idle[ip]["rapl_avg_w"]) * mins * 60 / k)
-    if not sh: continue
-    med = {su: st.median([t for s_, i, n, t in sh if s_ == su]) for su in ("sims", "e2e")}
-    nvalid = len(Ls) - len([b for b in bad_runs if b.split(":")[0] in Ls])
-    res[v] = {"runs": nvalid, "med": med, "slow_E": gm(ratios), "n": len(ratios),
-              "th": {ip: {"p95": max(x["p95"]), "max": max(x["max"]), "thr": sum(x["thr"]), "w": st.mean(x["w"]),
-                          "ge100": sum(x["ge100"]), "j": st.mean(x["j"]) if x["j"] else float("nan")} for ip, x in th.items() if x["p95"]}}
-# A = the A0 control run (tonight, current config). Cross-check against the 2026-10-04 AFTER run (paired, +-10 %).
+def paired(a, b):   # ratios a/b for shard keys present in both (a, b: {(suite, idx): seconds})
+    return [a[k] / b[k] for k in a if k in b]
+base = {(s, i): t for s, i, n, t in shards("E")}
+labels = sorted(f.split("shards-", 1)[1][:-5] for f in glob.glob(f"{W}/shards-*.json"))
+labels = [L for L in labels if L not in ("E", "A1004")]
+valid, bad = {}, []
+for L in labels:
+    s = shards(L); fo = foreign(L); stt = ld(f"{W}/stats-{L}.json"); idle = ld(f"{W}/stats-idle-{L}.json")
+    on02 = [x for x in s if x[2] == "k8s-nuc14-02"]
+    if len(s) < 7 or on02 or fo or stt is None:
+        bad.append(f"{L}: shards={len(s)} on_nuc14-02={len(on02)} foreign_ci_pods={len(fo)} stats={'ok' if stt else 'MISSING'}"); continue
+    if idle is None:   # fail closed: J/shard would silently read NaN; the data is in Prometheus, re-run capstats
+        raise SystemExit(f"AB_SUMMARY_ABORT stats-idle-{L}.json missing: run capstats.py idle-{L} 5 \"$W\" $(cat \"$W/run-{L}.start\")")
+    valid[L] = (s, stt, idle, json.load(open(f"{W}/stats-{L}.json"))["minutes"])
+for b in bad: print("INVALID RUN (excluded):", b)
+a0 = {L: {(su, i): t for su, i, n, t in valid[L][0]} for L in ("A0-1", "A0-2") if L in valid}
+drift = None
+if len(a0) == 2:
+    drift = gm(paired(a0["A0-2"], a0["A0-1"]))
+    print(f"EVENING DRIFT A0-2 vs A0-1 (paired, {len(paired(a0['A0-2'], a0['A0-1']))} shards): {drift:+.1%}")
 aft = {(s, i): t for s, i, n, t in shards("A1004") if n != "k8s-nuc14-02"}
-if "A0" in res:
-    a0 = [t / aft[(s, i)] for L in runs["A0"] for s, i, n, t in shards(L) if (s, i) in aft]
-    drift = gm(a0); res["A0"]["drift_vs_A1004"] = drift
-    print(f"A0 control vs 2026-10-04 AFTER (paired, {len(a0)} shards): {drift:+.1%} -> AFTER data "
-          f"{'CONSISTENT: the 10-04 AFTER numbers stand' if abs(drift) <= 0.10 else 'DRIFT > 10 %: tonight differs from 10-04; judge variants against A0 only'}")
-for b in bad_runs: print("INVALID RUN (excluded):", b)
-print(f"{'var':4} {'runs':>4} {'sims med s':>10} {'e2e med s':>9} {'vs BEFORE':>9} | per node 01 / 03: p95 C, max C, throttles, avg W, J/shard, min>=100")
+for L in a0: print(f"{L} vs 2026-10-04 AFTER (paired): {gm(paired(a0[L], aft)):+.1%} (informational)")
+res = {}
+for v in ("A0", "B", "C", "D"):
+    Ls = [L for L in valid if L.split("-")[0] == v]
+    if not Ls: continue
+    ref = None if v == "A0" else (f"A0-{EVE[v]}" if f"A0-{EVE[v]}" in a0 else next(iter(a0), None))
+    sh, rE, rA, th = [], [], [], {ip: {k: [] for k in ("p95", "max", "thr", "w", "ge100", "j")} for ip in N}
+    for L in Ls:
+        s, stt, idle, mins = valid[L]; sh += s
+        d = {(su, i): t for su, i, n, t in s}
+        rE += paired(d, base)
+        if ref: rA += paired(d, a0[ref])
+        for ip, node in N.items():
+            x = stt[ip]; th[ip]["p95"].append(x["temp_p95"]); th[ip]["max"].append(x["temp_max"]); th[ip]["thr"].append(x["throttles"])
+            th[ip]["w"].append(x["rapl_avg_w"]); th[ip]["ge100"].append(x["min_ge100"])
+            k = len([y for y in s if y[2] == node])
+            if k: th[ip]["j"].append((x["rapl_avg_w"] - idle[ip]["rapl_avg_w"]) * mins * 60 / k)
+    res[v] = {"runs": len(Ls), "ref": ref or "-", "slow_own": 0.0 if v == "A0" else gm(rA), "slow_E": gm(rE),
+              "cross": ref is not None and v != "A0" and EVE[v] == 2 and ref == "A0-1",
+              "med": {su: st.median([t for s_, i, n, t in sh if s_ == su]) for su in ("sims", "e2e")},
+              "th": {ip: {"p95": max(x["p95"]), "max": max(x["max"]), "thr": sum(x["thr"]), "w": st.mean(x["w"]),
+                          "ge100": sum(x["ge100"]), "j": st.mean(x["j"]) if x["j"] else float("nan")} for ip, x in th.items()}}
+print(f"{'var':4} {'runs':>4} {'ref':>5} {'vs own A0':>9} {'vs BEFORE':>9} {'sims/e2e med s':>14} | per node 01 / 03: p95/max C, throttles, avg W, J/shard, min>=100")
 for v, r in res.items():
     t = "  ".join(f"{d['p95']:.0f}/{d['max']:.0f}C thr={d['thr']:.0f} {d['w']:.1f}W {d['j']:.0f}J ge100={d['ge100']:.0f}" for ip, d in sorted(r["th"].items()))
-    print(f"{v:4} {r['runs']:>4} {r['med']['sims']:>10.0f} {r['med']['e2e']:>9.0f} {r['slow_E']:>+9.1%} | {t}")
-# minimum VALID runs (plan 3.6): 2 for B/C/D, 1 for the A0 control; a single lucky run must not win
-MINRUNS = {"A0": 1}
+    print(f"{v:4} {r['runs']:>4} {r['ref']:>5} {r['slow_own']:>+9.1%} {r['slow_E']:>+9.1%} {r['med']['sims']:>6.0f}/{r['med']['e2e']:<6.0f} | {t}")
+MINRUNS = {"A0": 1}   # plan 3.6: >= 2 VALID runs for B/C/D, >= 1 for the A0 control
 for v, r in res.items():
     if r["runs"] < MINRUNS.get(v, 2): print(f"DISQUALIFIED {v}: {r['runs']} valid run(s) < {MINRUNS.get(v, 2)}")
-ok = {v: r for v, r in res.items() if r["runs"] >= MINRUNS.get(v, 2) and len(r["th"]) == 2 and all(d["p95"] <= 75 and d["thr"] <= 5 and d["max"] < 95 and d["ge100"] == 0 for d in r["th"].values())}
+ok = {v: r for v, r in res.items() if r["runs"] >= MINRUNS.get(v, 2) and all(
+      d["p95"] <= 75 and d["thr"] <= 5 and d["max"] < 95 and d["ge100"] == 0 for d in r["th"].values())}
 for v in res:
     if v not in ok and res[v]["runs"] >= MINRUNS.get(v, 2): print(f"DISQUALIFIED {v}: package p95 > 75 C, throttles > 5, max >= 95 C or a minute >= 100 C on 01/03")
 if "B" in res and res["B"]["slow_E"] > 0.15:
     print(f"PL1_BINDING_NOTE: B (EPP 64 = the BEFORE EPP) is still {res['B']['slow_E']:+.1%} vs BEFORE -> the 35 W PL1 / 1500 MHz cap binds; next test PL1 40 W (NOT in this plan)")
 if not ok: print("AB_NO_WINNER keep A0 (the committed config)"); sys.exit(3)
-best = min(r["slow_E"] for r in ok.values())
-near = [v for v, r in ok.items() if r["slow_E"] - best <= 0.03]          # within 3 points: stability first
+best = min(r["slow_own"] for r in ok.values())
+near = [v for v, r in ok.items() if r["slow_own"] - best <= 0.03]          # within 3 points: stability first
 win = min(near, key=lambda v: (max(d["p95"] for d in ok[v]["th"].values()), sum(d["j"] for d in ok[v]["th"].values())))
-print(f"AB_WINNER={win} slowdown_vs_BEFORE={ok[win]['slow_E']:+.1%} (eligible: {sorted(ok)}; within 3 points of best: {sorted(near)})")
+line = f"AB_WINNER={win} vs_own_evening_A0={ok[win]['slow_own']:+.1%} vs_BEFORE={ok[win]['slow_E']:+.1%} (eligible: {sorted(ok)}; tie band: {sorted(near)})"
+unreliable = (drift is None and "D" in ok) or (drift is not None and abs(drift) > 0.03) or any(r["cross"] for r in ok.values())
+if unreliable and len({EVE.get(v, 0) for v in ok if v != "A0"} | ({1} if "A0" in ok else set())) > 1:
+    print(f"CROSS_EVENING_UNRELIABLE: evening drift {'unknown' if drift is None else f'{drift:+.1%}'} (> 3 points or no A0-2): "
+          "the B/C vs D ranking spans two evenings -> OPERATOR DECIDES from the table (both rankings above)")
+    print("AB_NEEDS_OPERATOR provisional " + line); sys.exit(4)
+print(line)
 ```
 
 ### capstats.py (verbatim copy of talos-sysfs-power-caps Appendix A; that plan will be retired)
@@ -978,6 +1059,9 @@ set -u; W=/private/tmp/powerab-talos-power-tuning-ab; L=$1
 cd /Users/mu/code/cberg-home-nextgen || exit 2
 test -s "$W/ci-ref" || { echo NO_CI_REF; exit 2; }
 test -e "$W/run-$L.start" && { echo "LABEL_USED $L"; exit 2; }
+# the CI gate must be the file recorded in plan 2.4 (edited often by other sessions): a changed gate = a changed
+# experiment, refuse instead of measuring it
+test "$(git hash-object scripts/ninth-banner-admit.py)" = "$(cat "$W/gate-hash" 2>/dev/null)" || { echo "GATE_CHANGED: scripts/ninth-banner-admit.py differs from $W/gate-hash"; exit 2; }
 # one shard per node at a time, as in the 2026-10-04 BEFORE/AFTER runs (each shard alone on its node): the gate
 # reads these for every tick THIS trigger runs (no other CI may run meanwhile, plan section 2.4)
 export GATE_SECOND_POD_NODES= GATE_MAX_CPU_PER_NODE=1

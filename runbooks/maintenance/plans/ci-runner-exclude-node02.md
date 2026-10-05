@@ -44,12 +44,12 @@ review: null
 status: draft
 window: null                          # PROPOSED nightly:2026-10-06 (03:30 Europe/Berlin = 01:30Z), i.e. after the
                                       # talos-sysfs-power-caps 24 h soak closes (>= 2026-10-05T23:17Z) and before the A/B.
-                                      # Fallback: first plan of the attended NOW run 2026-10-06 18:30 Berlin (talos-power-tuning-ab
-                                      # depends_on this plan).
+                                      # Fallback (review-2 B1): nightly:2026-10-07. It can NOT join the A/B's NOW run (that plan is
+                                      # exclusive and run-now checks all premises at preflight); the A/B evenings then shift a day.
 premises:
   - id: soak-24h-recorded
-    why: "talos-sysfs-power-caps' 24 h soak (capstats soak-24h, owed >= 2026-10-05T23:17Z) must be captured BEFORE this lands: capstats ends its window at 'now', so a later soak read would include the post-exclusion period (02 cooler, 01/03 + this plan's CI run hotter). The JSON exists only after a CAPSTATS_OK. EXPECTED TO FAIL until the soak is taken."
-    run: "grep -c '\"label\": \"soak-24h\"' /private/tmp/sysfscaps-talos-sysfs-power-caps/stats-soak-24h.json"
+    why: "talos-sysfs-power-caps' 24 h soak (capstats soak-24h, owed >= 2026-10-05T23:17Z) must be captured BEFORE this lands: capstats ends its window at 'now', so a later soak read would include the post-exclusion period (02 cooler, 01/03 + this plan's CI run hotter). The JSON exists only after a CAPSTATS_OK; read from the copy the predecessor's close-out puts into the A/B's dir (talos-sysfs-power-caps §5 Copy-out), because its own scratch dir is wiped afterwards. EXPECTED TO FAIL until the soak is taken and copied."
+    run: "grep -c '\"label\": \"soak-24h\"' /private/tmp/powerab-talos-power-tuning-ab/stats-soak-24h.json"
     expect_exact: "1"
   - id: gate-has-no-exclusion-yet
     why: "The edit (exclude-edit.py) asserts the anchor shape and refuses a second run; a non-zero count means someone already added an exclusion knob - re-plan instead of stacking a second one."
@@ -229,8 +229,9 @@ No forward-only parts.
 ## 6. Interference notes
 
 - **talos-power-tuning-ab depends on this plan**: its A/B runs on 01/03 only and compares per-shard times. The
-  unmodified gate has no exclusion knob at all, so the A/B cannot be run correctly without this plan. Run this first
-  (nightly 10-06, or first in the 10-06 NOW run).
+  unmodified gate has no exclusion knob at all, so the A/B cannot be run correctly without this plan. It must be
+  EXECUTED before the A/B's first evening: nightly 10-06, else nightly 10-07 (the A/B then shifts a day). It cannot run
+  inside the A/B's NOW run (exclusive; preflight checks the A/B premise `node02-excluded-from-ci`).
 - **talos-sysfs-power-caps 3.10** (soak step, operator/attended) edits `OPEN_BELOW_C` in the same file. Independent
   anchors: either order works, but not in parallel sessions (shared worktree, `git commit --only` takes whole files).
   Listed in `conflicts_with`.
@@ -241,12 +242,13 @@ No forward-only parts.
   executor to read any newer commit first. The SOP edit keeps the §2b table the single place that lists gate knobs.
 - **Nightly 2026-10-06 needs the soak captured first.** Premise `soak-24h-recorded` passes only if someone runs
   `capstats.py soak-24h 1440 "$W"` (talos-sysfs-power-caps 3.10 evidence, `W=/private/tmp/sysfscaps-talos-sysfs-power-caps`)
-  between 2026-10-05T23:17Z and 01:30Z. The coordinator will try, if its session is active. Otherwise this plan STOPs
-  safely on its premises in the nightly and runs first in the 18:30 NOW run. A Mac reboot wipes `/private/tmp`, i.e.
-  that `$W` and the soak evidence with it.
+  between 2026-10-05T23:17Z and 01:30Z, and the predecessor's Copy-out puts `stats-soak-24h.json` into
+  `/private/tmp/powerab-talos-power-tuning-ab`. The coordinator will try, if its session is active. Otherwise this plan
+  STOPs safely on its premises in the nightly and goes to nightly 10-07. A Mac reboot wipes `/private/tmp`, i.e. the
+  soak evidence with it.
 - **Nightly capacity:** flux-fleet-0.60.0 (35) + this plan (45) = 80 of 90 min, plus Step 0. If the window runs long,
-  §4.2's e2e verification run may move to the evening NOW run. §4.1 alone already proves the gate change. The A/B's
-  first run then repeats the §4.2 check (no shard on 02).
+  §4.2's e2e verification run may be deferred. §4.1 alone already proves the gate change. The A/B's control run `A0-1`
+  then serves as the §4.2 evidence: its `ab-summary.py` marks a run with any shard on nuc14-02 `INVALID`.
 - **ci-gate-primary-control-rework** (backlog draft) depends on this plan and edits the same two files later.
 - **Nightly 2026-10-06 ordering:** `flux-fleet-0.60.0` is scheduled into the same night (shared `monitoring`). Run
   this plan after its health gate, so a Flux/monitoring disturbance cannot read as a "stuck" §4.2 run.
