@@ -92,8 +92,8 @@ finding_refs:
   - F-8ef629f2                        # predecessor version finding (27.0.1->27.3.0), status resolved 2026-10-03
   - F-9ab5f80f                        # restart-gate template (resolved 2026-10-04 by f515915c + a6bf8413); §4.3/§4.5
                                       # implement it here: restart bound <=1, processlist baseline = 3 Rails pool users
-status: draft
-review: null
+status: vetted
+review: ready-for-go@2026-10-05   # plan-reviewer 3rd pass at 355f9a96, 0 blocking; 0e2544c1 = 2 fail-safe follow-ups (T0 corrupt STOP, rerun evidence copy), not re-reviewed
 window: null
 sops_refs:
   - docs/sops/application-update.md
