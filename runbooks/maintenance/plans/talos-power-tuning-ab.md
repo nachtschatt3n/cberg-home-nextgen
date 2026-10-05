@@ -1,0 +1,990 @@
+---
+plan_id: talos-power-tuning-ab
+component: talos
+pr: null                              # no Renovate PR: operator-requested follow-up to talos-sysfs-power-caps (chat 2026-10-05)
+kind: infra
+current: "SysfsConfig c2c155b8 on all 3 nodes: RAPL PL1 35 W / PL2 55 W (PL1 tau BIOS 27983872 us), EPP balance_power (179) on cpu0-17, iGPU gt0 1500 MHz"
+target: "the A/B winner of {A0 current, B = EPP 64, C = EPP 96, D = EPP 96 + PL2 45 W + PL1 tau 10 s}, committed to the global SysfsConfig patch and applied to all 3 nodes (PL1 35 W and iGPU 1500 MHz unchanged in every variant)"
+update_type: refactor
+risk: medium                          # Not high: no reboot (every variant dry-run-proven 2026-10-05: "Applied configuration
+                                      # without a reboot"), no etcd/apiserver change, every step is a live sysfs write the
+                                      # pre-rendered A0 config undoes in seconds. Not low: up to 9 machine-config applies on
+                                      # control-plane nodes in one evening, and the winner changes CPU behaviour for every workload.
+est_duration_min: 290                 # PER EVENING - the plan runs as TWO attended NOW runs (§6, reviewer 2026-10-05: one evening
+                                      # was ~450 min with realistic run times, too close to the 480 ceiling). Run time ~32 min
+                                      # (A0/C/D; B faster) incl. 300 s settle + 2-node packing; cooldowns <= 5 min each.
+                                      # Evening 1 (A0 + B + C + back to A0): Step 0 15, pre 10, A0 32, 2 switches x 17,
+                                      # 6 runs x 32 + cooldowns 15, return to A0 10 -> ~290.
+                                      # Evening 2 (A0 + D + decision + roll): Step 0 15, pre 10, A0 32, switch 17, 3 runs 96 +
+                                      # cooldowns 10, decision 10, final roll + 02 watch 45, slack 10 -> ~245.
+needs_reboot: false
+exclusive: false                      # NOT exclusive so ci-runner-exclude-node02 (which this depends on) may run first in the
+                                      # same NOW run if the nightly did not take it. Nothing ELSE may share the run (§6).
+touches:
+  namespaces: [ci-runner, monitoring]  # ci-runner: 10 measurement CI runs (sims 4 + e2e 3 each). monitoring: read-only
+                                       # (capstats, NodeCPUPackagePowerAtCap check); no monitoring object is changed.
+  resources:
+    - talos-machineconfig/k8s-nuc14-01             # variant applies (B, C, D) + final, --mode=no-reboot
+    - talos-machineconfig/k8s-nuc14-03             # variant applies (B, C, D) + final
+    - talos-machineconfig/k8s-nuc14-02             # final roll only
+    - "sysfs: /sys/devices/system/cpu/cpu{0..17}/cpufreq/energy_performance_preference (01,03 in the A/B; all 3 at the end)"
+    - "sysfs: /sys/class/powercap/intel-rapl:0/constraint_1_power_limit_uw (variant D / winner D)"
+    - "sysfs: /sys/class/powercap/intel-rapl:0/constraint_0_time_window_us (variant D / winner D; NEW key)"
+    - file/kubernetes/bootstrap/talos/patches/global/machine-sysfs-power.yaml   # final commit, only if the winner is B/C/D
+    - "pod/tnb-sims-d3ae92f-*, pod/tnb-e2e-gpu-d3ae92f-* (ci-runner, transient, Job TTL 600 s)"
+  shared: [talos-machineconfig, node-power-thermal, igpu-i915, monitoring, ci-runner-thermal-gate]
+                                      # node-power-thermal: every pod on 01/03 runs under each variant for ~100 min.
+                                      # igpu-i915: e2e shards use the iGPU on 01/03 (gt0 cap unchanged at 1500).
+                                      # monitoring: every gate reads Prometheus (capstats) - the instrument.
+                                      # ci-runner-thermal-gate: the A/B runs set GATE_SECOND_POD_NODES= and GATE_MAX_CPU_PER_NODE=1
+                                      # for its own triggers (one shard per node), so NO other CI may run meanwhile.
+depends_on:                           # talos-sysfs-power-caps is NOT here on purpose (2026-10-05): run-now.py preflight refuses
+                                      # an unmet depends_on while that plan sits in awaiting-soak, i.e. even AFTER its soak was
+                                      # captured, and a retired (deleted) plan becomes a DEAD-REF. The real gate is the premise
+                                      # soak-24h-recorded (the soak JSON exists only after CAPSTATS_OK); the ordering is in
+                                      # conflicts_with below.
+  - ci-runner-exclude-node02          # the A/B runs on 01/03 only; the exclusion keeps the gate from placing a shard on 02
+conflicts_with:
+  - talos-sysfs-power-caps            # never the same run: its soak (3.10 evidence) measures the config this plan changes
+  - talos-linux-1.14.2                # rolling reboot; a reboot mid-A/B voids the variant and re-reads the card index
+  - multus-macvlan-foundation         # also talosctl apply-config on the same nodes
+  - kube-prometheus-stack-91.9.0      # every gate reads Prometheus; a kps restart punches a hole in a run's capstats
+  - immich-machine-learning-3.2.4     # iGPU + CPU consumer on nuc14-03: its roll during a run changes that run's load
+  - jellyfin-12.1                     # iGPU consumer on nuc14-01 (same reason)
+  - jellyfin-config-rwo-migration     # iGPU consumer on nuc14-01 (same reason)
+  - mariadb-28.1.1                    # backup-restore stacking (convention of 67ab1cc4): never two backup-restore plans in one run
+  - helm-drift-detection              # its P2 rolls intel-gpu-plugin (re-registers gpu.intel.com/i915 on every node)
+security_ref: null
+capability_change: true               # TRUE: the winner changes the CPU energy/performance bias (and for D the burst budget) of
+                                      # every workload on every node: user-visible throughput and heat. Never unattended.
+rollback_class: backup-restore        # rollback = re-apply the PRE-RENDERED A0 config (= HEAD at plan start), proven byte-equal
+                                      # to the live config by an EMPTY dry-run diff before the first forward apply. Flux does not
+                                      # reconcile kubernetes/bootstrap/talos/, so a git revert alone changes nothing on the nodes.
+restore_proof: "§3.2: the A0 config ($W/r-A0, rendered from HEAD) dry-run against every node prints 'Applied configuration without a reboot' and ab-diffgate.py <dry> A0 A0 prints GATE_PASS (empty diff = the live config IS A0); §5 then re-reads every key (ab-readback.py <ip> A0 --status -> GATE_PASS, incl. the PL1 tau back at 27983872 after D)."
+backup_gate: "per node, before its FIRST forward apply: (1) $W/r-A0/kubernetes-k8s-nuc14-0N.yaml exists and validates for metal mode, (2) its dry-run against the node gives an empty diff (ab-diffgate.py ... A0 A0 -> GATE_PASS), (3) ab-readback.py <ip> A0 --status -> GATE_PASS (the live values are the values the rollback restores), (4) $W/live-<ip>.yaml break-glass copy written and non-empty"
+finding_refs:
+  - F-6c7843e4                        # "decide PL2 40-45 W and/or shorter PL1 tau via a reviewed plan amendment ... CI +35 % from
+                                      # EPP balance_power": this plan is that amendment, measured
+review: null
+status: draft
+window: null                          # PROPOSED: two on-demand NOW runs, 2026-10-06 and 2026-10-07, each 18:30 Europe/Berlin
+                                      # (16:30Z); evening 1 ends ~23:20, evening 2 ~22:30 Berlin; hard stop 01:45, everything done
+                                      # by 02:45 (nightly 03:30). Stamped only by run-now.py stamp inside each run.
+premises:
+  - id: nodes-on-talos-1.14
+    why: "Every render and dry-run below was measured on v1.14.1 (kernel 6.18). Another minor invalidates the renders and the no-reboot verdict."
+    run: kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.osImage}'
+    expect_matches: '^Talos \(v1\.14\.[0-9]+\) Talos \(v1\.14\.[0-9]+\) Talos \(v1\.14\.[0-9]+\)$'
+  - id: soak-24h-recorded
+    why: "Ordering gate vs talos-sysfs-power-caps (in conflicts_with, deliberately not depends_on; see depends_on comment): its 24 h soak (capstats soak-24h, owed >= 2026-10-05T23:17Z) writes this JSON ONLY on a CAPSTATS_OK. Missing = the soak has not been taken; the A/B would overwrite the config it measures. EXPECTED TO FAIL until then."
+    run: "grep -c '\"label\": \"soak-24h\"' /private/tmp/sysfscaps-talos-sysfs-power-caps/stats-soak-24h.json"
+    expect_exact: "1"
+  - id: baseline-files-present
+    why: "The paired BEFORE/AFTER comparison needs the 2026-10-04 shard records + logs from the predecessor's scratch dir (copied in §2). That dir holds machine secrets and is due for deletion after the soak: if it is gone, copy-in fails and the 'vs BEFORE' column cannot be computed (see §2.3 fallback)."
+    run: "grep -c '' /private/tmp/sysfscaps-talos-sysfs-power-caps/shards-before.json /private/tmp/sysfscaps-talos-sysfs-power-caps/shards-after.json /private/tmp/sysfscaps-talos-sysfs-power-caps/ci-before.log /private/tmp/sysfscaps-talos-sysfs-power-caps/ci-after.log /private/tmp/sysfscaps-talos-sysfs-power-caps/stats-before-ci.json /private/tmp/sysfscaps-talos-sysfs-power-caps/stats-after-ci.json | wc -l | tr -d ' '"
+    expect_exact: "6"
+  - id: node02-excluded-from-ci
+    why: "depends_on ci-runner-exclude-node02: without the knob the gate can pin an A/B shard on nuc14-02, and that run is INVALID (ab-summary.py drops runs with a shard on 02)."
+    run: "grep '^EXCLUDE_NODES = ' scripts/ninth-banner-admit.py | wc -l | tr -d ' '"
+    expect_exact: "1"
+  - id: sysfs-patch-committed-shape
+    why: "ab-patches.py asserts the c2c155b8 shape (18 balance_power EPP lines, PL2 55 W, no time-window key) and the talos dir must be clean, or the final git commit --only would carry foreign hunks."
+    run: "git status --porcelain kubernetes/bootstrap/talos | wc -l | tr -d ' '"
+    expect_exact: "0"
+  - id: epp-lines-balance-power
+    why: "Same shape check, on content: 18 EPP keys at balance_power in the committed global patch."
+    run: "grep -c 'energy_performance_preference: \"balance_power\"$' kubernetes/bootstrap/talos/patches/global/machine-sysfs-power.yaml"
+    expect_exact: "18"
+  - id: meteor-lake-epp-table
+    why: "The variant meanings rest on intel_pstate's Meteor Lake table (intel_epp_default, v6.18: INTEL_METEORLAKE_L -> balance_power 179, balance_performance 64, performance 16): family 6 model 170 on all 18 CPUs. Another model = another table: B would no longer equal the pre-2026-10-04 EPP and the read-back mapping in ab-readback.py is wrong."
+    run: "talosctl --nodes=192.168.55.11 read /proc/cpuinfo | grep -c '^model[[:space:]]*: 170$'"
+    expect_exact: "18"
+  - id: hwp-epp-numeric-write-allowed
+    why: "store_energy_performance_preference accepts a raw 0-255 EPP only with X86_FEATURE_HWP_EPP (else returns the match_string error): the hwp_epp flag on every CPU of node 03 (01 identical, measured 2026-10-05)."
+    run: "talosctl --nodes=192.168.55.13 read /proc/cpuinfo | grep -c 'hwp_epp'"
+    expect_exact: "18"
+  - id: rapl-not-locked-01
+    why: "PL2 and the PL1 time window share MSR_PKG_POWER_LIMIT's lock bit; enabled=1 = not BIOS-locked (rapl_write_pl_data would return EACCES)."
+    run: talosctl --nodes=192.168.55.11 read /sys/class/powercap/intel-rapl:0/enabled
+    expect_exact: "1"
+  - id: rapl-not-locked-03
+    why: same as -01, node 03
+    run: talosctl --nodes=192.168.55.13 read /sys/class/powercap/intel-rapl:0/enabled
+    expect_exact: "1"
+  - id: pl1-tau-bios-value-01
+    why: "ab-readback.py expects the untouched PL1 window at 27983872 us for A0/B/C (2^14 x 1.75 x 976 us). Another value = BIOS changed: re-plan the D window."
+    run: talosctl --nodes=192.168.55.11 read /sys/class/powercap/intel-rapl:0/constraint_0_time_window_us
+    expect_exact: "27983872"
+  - id: pl1-tau-bios-value-03
+    why: same as -01, node 03
+    run: talosctl --nodes=192.168.55.13 read /sys/class/powercap/intel-rapl:0/constraint_0_time_window_us
+    expect_exact: "27983872"
+  - id: igpu-card-index-node03-card1
+    why: "ab-readback.py/ab-works.py hard-code card1 on 03, card0 on 01/02 (simpledrm on 03). Re-measured 2026-10-05."
+    run: talosctl --nodes=192.168.55.13 read /sys/class/drm/card1/gt/gt0/rps_max_freq_mhz
+    expect_exact: "1500"
+  - id: runner-image-lockstep
+    why: "ninth-banner-test.sh refuses to run a ref whose tests/e2e/runner.json names a different Playwright image than the template (IMAGE MISMATCH, exit 2). The fixed ref d3ae92f ran with this digest on 2026-10-04; a template bump since then breaks every A/B run."
+    run: "grep -c 'playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27' kubernetes/apps/ci-runner/the-ninth-banner-tests/job-template.yaml.tpl"
+    expect_exact: "1"
+  - id: power-at-cap-alert-31w
+    why: "PL1 stays 35 W in every variant, so NodeCPUPackagePowerAtCap keeps its 31 W threshold (90 % of PL1). A different value means someone retuned it: re-check before claiming no retune is needed."
+    run: grep -c 'joules_total{job="node-exporter"}.5m.) . 31$' kubernetes/apps/monitoring/kube-prometheus-stack/app/node-thermal-alerts.yaml
+    expect_exact: "1"
+sops_refs:
+  - docs/sops/talos-upgrade.md
+  - docs/sops/application-update.md
+  - docs/sops/ci-runner.md
+  - docs/sops/monitoring.md
+  - docs/sops/verification-contents-not-shape.md
+generated: "2026-10-05"
+---
+
+# Talos power tuning A/B: EPP and PL2/tau on nuc14-01/03, winner to all three nodes
+
+## 1. Summary & why held
+
+**What this is.** An amendment to `talos-sysfs-power-caps` (live since 2026-10-04 23:17Z). Its BEFORE/AFTER showed:
+package temperature -18..-26 %, nuc14-02 CI throttles 380 -> 0, and package power -34..-50 %. The cost was CI
+**~+35 % slower** (sims median 350 -> 478 s, e2e 197 -> 264 s; paired per shard index +36.6 %, recomputed 2026-10-05
+by `ab-summary.py` on the 10-04 files). During that AFTER run the package never exceeded ~20 W (1-min max), far below
+the 35 W PL1, and gt0 never exceeded 800 MHz, below the 1500 cap. So the RAPL and iGPU caps did not bind. The suspect
+is the EPP change `balance_performance -> balance_power`. This plan measures that live on two nodes, picks a winner by
+a fixed rule, and rolls it out.
+
+**Variants** (PL1 35 W and gt0 1500 MHz in ALL of them; written as SysfsConfig values):
+
+| variant | PL2 (`constraint_1_power_limit_uw`) | PL1 tau (`constraint_0_time_window_us`) | EPP (cpu0-17) | data |
+|---|---|---|---|---|
+| E (not run) | 64 W (PL1 = PL2 = 64 W) | BIOS 27 983 872 | balance_performance (64) | REUSED: 2026-10-04 BEFORE (stability priority) |
+| **A0** = committed now | 55 W | BIOS 27 983 872 (key absent) | balance_power (179) | 1 control run tonight + the 2026-10-04 AFTER |
+| **B** | 55 W | BIOS (key absent) | `"64"` | 3 runs |
+| **C** | 55 W | BIOS (key absent) | `"96"` | 3 runs |
+| **D** | **45 W** | **`"10000000"`** (reads back 9 994 240) | `"96"` | 3 runs |
+
+**Primary-source facts the plan rests on (each verified 2026-10-05):**
+1. *EPP numbers on this CPU.* `drivers/cpufreq/intel_pstate.c` (v6.18) `intel_epp_default[]`:
+   `X86_MATCH_VFM(INTEL_METEORLAKE_L, HWP_SET_EPP_VALUES(HWP_EPP_POWERSAVE, 179, 64, 16))` (arguments: powersave,
+   balance_power, balance_perf, performance). The nodes report family 6 **model 170** (= 0xAA, METEORLAKE_L) and the
+   `hwp_epp` flag on all 18 CPUs (premises). So **B (EPP 64) is exactly the pre-2026-10-04 `balance_performance`**, and
+   B isolates the EPP effect under the new caps. C (96) sits between 64 and 179. Caveat
+   (`intel_pstate_update_epp_defaults`): when HWP is BIOS-forced and the firmware EPP is <= 0x80, the kernel takes the
+   firmware value as `balance_performance` instead. dmesg reads "HWP enabled" (not "by BIOS") on 02/03; 01's boot lines
+   have rotated. If 01 were forced, B's read-back on 01 FAILS loudly (gate 4.1), so nothing silent can happen.
+2. *Numeric EPP writes are accepted.* `store_energy_performance_preference`: when the string matches no name and
+   `boot_cpu_has(X86_FEATURE_HWP_EPP)`, it parses `kstrtouint(buf, 10, &epp)`, rejects `> 255`, and writes the raw
+   value (`raw = true`). Active mode (`intel_pstate_driver == &intel_pstate`) applies it directly.
+3. *Read-back shows NAMES for table values.* `show_energy_performance_preference` -> `intel_pstate_get_energy_pref_index`
+   returns the name when the raw EPP equals a table entry. So after B, `/sys/.../energy_performance_preference` reads
+   **`balance_performance`, not `64`**, and after C/D it reads `96`. `ab-readback.py` maps this. A gate comparing the
+   sysfs text with the written string would false-FAIL every B apply.
+4. *Talos status holds the WRITTEN string.* Talos v1.14.1 `kernel_param_spec.go` `updateKernelParam`:
+   `res.TypedSpec().Current = value` (the spec value, no re-read). So `KernelParamStatus` reads `64` while sysfs
+   reads `balance_performance`. Every reconcile re-writes every key (no compare), and a key that leaves the config
+   is `resetKernelParam`-ed: the captured pre-first-write default is written back live and its status is DESTROYED.
+   So D -> any other variant writes the PL1 window back to 27 983 872 without a reboot, and the A0/B/C read-back
+   expects NO time-window status.
+5. *PL1 window is writable and quantized.* `intel_rapl_common.c` (v6.18): the powercap op `set_time_window_us` ->
+   `rapl_write_pl_data(rd, id, PL_TIME_WINDOW, ...)` (lock bit as for PL1/PL2: `enabled=1` on 01/03).
+   `rapl_compute_time_window_core` stores `2^Y * (1 + F/4)` time units. The time unit is 976 us here: the live
+   27 983 872 = 2^14 x 1.75 x 976 exactly. 10 000 000 us therefore becomes Y=13, F=1 -> **9 994 240 us**.
+   `constraint_0` is `long_term` (PL1), `constraint_1` is `short_term` (PL2, window 2 440 us, untouched).
+6. *Every variant applies live.* Talhelper renders (scratch, 2026-10-05) give one SysfsConfig document per node with
+   21 keys (A0/B/C) or 22 keys (D), and all 12 pass `talosctl validate --mode metal`. A dry-run of each against
+   k8s-nuc14-03 answered "Applied configuration without a reboot (skipped in dry-run)". `ab-diffgate.py` passed
+   A0->A0 (empty diff: **the repo IS the live config**), A0->B and A0->C (18-/18+), and A0->D (19-/20+). It FAILED on
+   every negative control: wrong target variant, wrong value, injected `+machine:` line, A0->A0 on a real diff.
+7. *A per-node patch cannot override a global SysfsConfig key* (talhelper 3.1.17, scratch render 2026-10-05: EPP keys
+   added to `k8s-nuc14-02-sysfs-igpu.yaml` were overridden by the global patch; 02 still rendered `64`). So the winner
+   goes to all three nodes. A per-node exception for 02 would need the EPP keys moved out of the global patch (§6).
+
+**Why it is a plan.** Up to 9 machine-config applies on control-plane nodes, and a behaviour change for every
+workload (`capability_change: true`). The operator's apply split from the predecessor holds: **the coordinator runs
+every `talosctl apply-config` on the operator's OK; the agent does everything else.**
+
+**Decision rule (fixed before any data; implemented in `ab-summary.py`, tested on the 10-04 data):**
+1. A variant is ELIGIBLE only if it has >= 2 VALID runs (A0: >= 1, the control) and on BOTH 01 and 03, over all its runs: package `temp_p95` <= 75 °C, `temp_max` < 95 °C,
+   0 minutes >= 100 °C, and package throttles <= 5 in total. A0 is filtered like the others. If nothing is eligible the verdict is
+   `AB_NO_WINNER` and A0 stays anyway (it is the committed config).
+2. Among eligible variants, the lowest paired CI slowdown vs BEFORE (geometric mean of per-shard-index time ratios,
+   sims + e2e, all runs) wins. **Stability tie-break:** every variant within 3 percentage points of the best is a tie,
+   and the tie goes to the lower max p95, then the lower J/shard. So A0 keeps its place unless a variant is clearly
+   faster.
+3. If **B is still > 15 % slower than BEFORE**, then EPP is not the whole story and the 35 W PL1 / 1500 MHz cap binds.
+   Record `PL1_BINDING_NOTE` and propose **PL1 40 W as the next test, NOT in this plan**. Caveat: the BEFORE baseline
+   ran sims shard 0 on the throttling nuc14-02, and one e2e shard has no finish time. Every "vs BEFORE" ratio carries that
+   skew. The ranking BETWEEN variants is unaffected (same baseline), but treat the 15 % line as approximate.
+4. No eligible variant -> `AB_NO_WINNER`: A0 stays, nothing is committed.
+Per-core-type EPP (P-cores cpu0-7 = 4 x 2 HT at 4.5 GHz max, E-cores cpu8-15 at 3.6 GHz, LP-E cpu16-17 at 2.5 GHz,
+measured via `cpuinfo_max_freq`) was evaluated and NOT included. Each extra variant costs ~100 min tonight, and sims
+(single-threaded) runs on a P-core under ITMT anyway. If the winner is B or C, "EPP 64 on cpu0-7 only, 179 on cpu8-17"
+is the obvious next test.
+
+## 2. Pre-checks (in the NOW run, before any apply; mutation-free)
+
+From the repo root on the Mac mini, as `mu`, mise activated, talosctl v1.14.x client. **`W` is a FIXED mode-700 dir
+outside the repo.** It holds rendered machine configs (secrets): never `cat` a render or print a dry-run diff. Shell
+variables do not survive between agent Bash calls: every block starts with the guard line.
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+umask 077; export W=/private/tmp/powerab-talos-power-tuning-ab; mkdir -p "$W"; chmod 700 "$W"
+export SOPS_AGE_KEY_FILE=$PWD/age.key
+for b in ab-patches ab-diffgate ab-readback ab-works ab-shards ab-summary capstats; do
+  awk -v b="$b" '$0=="```python " b {f=1;next} /^```$/{f=0} f' runbooks/maintenance/plans/talos-power-tuning-ab.md > "$W/$b.py"
+  python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$W/$b.py" && test -s "$W/$b.py" || echo "EXTRACT FAILED $b"
+done
+awk '$0=="```bash ab-run" {f=1;next} /^```$/{f=0} f' runbooks/maintenance/plans/talos-power-tuning-ab.md > "$W/ab-run.sh"
+bash -n "$W/ab-run.sh" && test -s "$W/ab-run.sh" && chmod 700 "$W/ab-run.sh" || echo "EXTRACT FAILED ab-run"
+echo d3ae92f > "$W/ci-ref"
+```
+2.1 **Premises**: `.venv/bin/python3 runbooks/plan-premises.py talos-power-tuning-ab --require-premises` -> all PASS
+(`soak-24h-recorded` fails until the predecessor's soak ran: STOP, too early).
+
+2.2 **Cluster health**: 3 nodes `Ready`; `mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status`
+-> 3 members, no learner, no ERRORS. **Record the leader** (2026-10-05: `187ea782` = nuc14-01). Per variant, apply the
+non-leader first. `flux get kustomizations -A | awk 'NR==1 || $5 != "True"'` -> header only.
+`mise exec -- talosctl -n <ip> get machineconfig` on 01/03 lists only `v1alpha1` (+ the v1.14 `persistent` copy with
+the SAME hash, which is not a staged config; predecessor execution record).
+
+2.3 **Baselines (copy, no secrets):**
+```bash
+export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
+O=/private/tmp/sysfscaps-talos-sysfs-power-caps
+cp "$O/shards-before.json" "$W/shards-E.json"; cp "$O/ci-before.log" "$W/run-E.log"; cp "$O/stats-before-ci.json" "$W/stats-E.json"
+cp "$O/shards-after.json" "$W/shards-A1004.json"; cp "$O/ci-after.log" "$W/run-A1004.log"; cp "$O/stats-after-ci.json" "$W/stats-A1004.json"
+cp "$O/stats-soak-24h.json" "$W/stats-soak-24h.json"; ls "$W" | grep -cE '^(shards|run|stats)-(E|A1004)\.(json|log)$'    # 6
+```
+Fallback if the premise `baseline-files-present` fails (the dir was cleaned after the soak): run anyway. `ab-summary.py`
+then aborts on the missing `run-E.log`, so judge variants against **A0 only**: paired ratio vs the A0 run, done by hand
+from the `shards-*.json`. The "> 15 % vs BEFORE" check uses the predecessor's recorded medians (sims 350 s, e2e 197 s),
+flagged as unpaired. **Ask the soak executor not to delete these 6 files before the A/B** (they hold no secrets; only
+`fw/ rb/ live-*` do).
+
+2.4 **No CI in flight and none planned 18:30-02:45 Berlin**: `scripts/ninth-banner-admit.py --status` -> `gated (queued)
+pods: 0` and `ci-cpu 0/6` on every node; `kubectl get jobs -n ci-runner` shows no active Job. Tell the ci-runner owner
+(game sessions) that CI is reserved for the A/B tonight. Their runs would share the gate and the nodes. The A/B runs
+override `GATE_SECOND_POD_NODES`/`GATE_MAX_CPU_PER_NODE` for their own ticks.
+
+**Step 0 first.** Every NOW run starts with the safe-update batch (Step 0, `docs/sops/auto-update.md`). It can roll
+Prometheus or iGPU pods. Take 2.5 only after Step 0 has settled, and record which pods it rolled.
+
+2.5 **Snapshots** (`backup_gate` part 4 + works baseline; `ab-works.py --snap` is RE-TAKEN right before every apply, 3.4c):
+```bash
+export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
+for ip in 192.168.55.11 192.168.55.12 192.168.55.13; do
+  mise exec -- talosctl -n $ip get machineconfig v1alpha1 -o yaml | python3 -c 'import sys,yaml; print(list(yaml.safe_load_all(sys.stdin))[0]["spec"], end="")' > "$W/live-$ip.yaml"
+  test -s "$W/live-$ip.yaml" && echo "backup $ip ok"
+  mise exec -- python3 "$W/ab-works.py" $ip --snap          # WORKS_SNAP_OK ... gpu_pods>=1
+  mise exec -- python3 "$W/ab-readback.py" $ip A0 --status | tail -1   # GATE_PASS ... variant=A0 keys=21 mismatches=0
+done
+kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {range .status.containerStatuses[*]}{.restartCount} {end}{"\n"}{end}' > "$W/restarts-before.txt"; wc -l < "$W/restarts-before.txt"   # > 100
+```
+`ab-readback.py` on 02 also PASSES (02 has the same A0 config). The gate was measured to fail both ways on 2026-10-05:
+A0 -> `GATE_PASS ... mismatches=0` on 01 and 03, B -> `GATE_FAIL ... mismatches=36` (18 sysfs + 18 status).
+`ab-works.py` was measured 2026-10-05: `CONFIGWORKS_PASS` on 01 (3 iGPU pods) and 03 (1). It FAILED on an injected
+bootID change and an injected restart-count change.
+
+## 3. Steps
+
+**Apply convention for every `talosctl apply-config` below:** the agent prepares the exact command and gate, and asks
+the operator. The **coordinator** runs it on the operator's OK (one OK may cover both nodes of a variant switch;
+the operator decides). Then the agent runs the gates. Any gate failure -> §5 for THAT node, then stop that variant.
+
+### 3.1 Render A0, B, C, D (from HEAD, into `$W`, never into `clusterconfig/`) - parallel to 3.3
+```bash
+export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
+cd /Users/mu/code/cberg-home-nextgen; export SOPS_AGE_KEY_FILE=$PWD/age.key
+for v in A0 B C D; do
+  rsync -a --exclude clusterconfig kubernetes/bootstrap/talos/ "$W/src-$v/"
+  mise exec -- python3 "$W/ab-patches.py" "$W/src-$v" $v                          # AB_PATCHES_OK variant=$v
+  (cd "$W/src-$v" && mise exec -- talhelper genconfig -o "$W/r-$v") 2>&1 | grep -v -E '^generated|talosVersion|might not be compatible|issues with your Talhelper'
+done
+for v in A0 B C D; do for n in 01 02 03; do
+  mise exec -- talosctl validate --config "$W/r-$v/kubernetes-k8s-nuc14-$n.yaml" --mode metal 2>&1 | tail -1
+  python3 - "$W/r-$v/kubernetes-k8s-nuc14-$n.yaml" $v <<'PY'
+import sys, yaml
+s = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind") == "SysfsConfig"]
+p = s[0]["params"] if s else {}
+print(sys.argv[2], sys.argv[1][-8:-5], "docs", len(s), "keys", len(p), sorted(set(p.values())))
+PY
+done; done
+```
+PASS (measured on the scratch render 2026-10-05) = 12x `is valid for metal mode` and per variant (each node):
+`A0 docs 1 keys 21 ['1500','35000000','55000000','balance_power']`, `B ... keys 21 [...,'64']`, `C ... keys 21 [...,'96']`,
+`D docs 1 keys 22 ['10000000','1500','35000000','45000000','96']`. The talhelper `talosVersion v1.14.1 might not be
+compatible` warning is expected (talhelper 3.1.17). Anything else -> STOP.
+
+### 3.2 A0 dry-run = the rollback proof (restore_proof / backup_gate 1-3)
+```bash
+export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
+for n in 1 2 3; do ip=192.168.55.1$n
+  mise exec -- talosctl -n $ip apply-config --dry-run --mode=no-reboot -f "$W/r-A0/kubernetes-k8s-nuc14-0$n.yaml" > "$W/dry-A0-$n.txt" 2>&1
+  echo "node0$n rc=$? $(sed -n 2p "$W/dry-A0-$n.txt")"; mise exec -- python3 "$W/ab-diffgate.py" "$W/dry-A0-$n.txt" A0 A0
+done
+```
+PASS = 3x `rc=0 Applied configuration without a reboot (skipped in dry-run).` + `GATE_PASS from=A0 to=A0 (expect no
+diff)`. Measured on 03 2026-10-05: PASS. A diff here means the live config is not the repo -> STOP (drift; the rollback
+target would be wrong).
+
+### 3.3 A0 control run (current config; no apply) - start first, it overlaps 3.1/3.2
+Idle reference, then the run (`run_in_background: true`; wait with a Monitor until-loop on
+`grep -q '^SHARDS_DONE' "$W/shards-A0-1.out"`, never a foreground sleep):
+```bash
+export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
+"$W/ab-run.sh" A0-1
+```
+After it: stats for the run window and for the 5 min before it (marginal energy):
+```bash
+export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
+L=A0-1; S0=$(cat "$W/run-$L.start"); S1=$(cat "$W/run-$L.end"); M=$(( (S1 - S0) / 60 + 1 ))
+mise exec -- python3 "$W/capstats.py" $L $M "$W" $S1; echo "rc=$?"
+mise exec -- python3 "$W/capstats.py" idle-$L 5 "$W" $S0; echo "rc=$?"
+```
+PASS = `rc=0` + `CAPSTATS_OK` twice. A `CAPSTATS_ABORT` is a failed instrument: fix it and re-run capstats (the data
+is in Prometheus), never skip it. The run itself is valid when `ab-summary.py` lists it without `INVALID RUN`: >= 7
+finished shards and none on nuc14-02. Shard PASS/FAIL does not matter (sims shard 4 fails at this ref in every
+variant; e2e shard 2's animation assertion is timing-sensitive). Only the run times matter.
+
+### 3.4 Per variant V = B, then C, then D (fixed order: the variant closest to BEFORE first)
+`P` = the variant the nodes hold now (A0 before B, B before C, C before D).
+
+**a) Dry-run gates P -> V on 03 and 01** (mutation-free):
+```bash
+export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
+P=A0; V=B                                   # set per switch
+for n in 3 1; do ip=192.168.55.1$n
+  mise exec -- talosctl -n $ip apply-config --dry-run --mode=no-reboot -f "$W/r-$V/kubernetes-k8s-nuc14-0$n.yaml" > "$W/dry-$V-$n.txt" 2>&1
+  echo "node0$n rc=$? $(sed -n 2p "$W/dry-$V-$n.txt")"; mise exec -- python3 "$W/ab-diffgate.py" "$W/dry-$V-$n.txt" $P $V
+done
+```
+PASS = `rc=0`, `Applied configuration without a reboot`, and `GATE_PASS from=P to=V` with the expected counts.
+A0->B / B->C: `plus=18/18 minus=18/18`. C->D: `plus=2/2 minus=1/1` (PL2 changed, tau added; EPP 96 unchanged).
+`non_sysfs_changed_lines=0` in every case. A STOP here is never overridden in-window (predecessor rule): skip the
+variant and record the counts.
+
+**b) Quiet node:** the previous run has `SHARDS_DONE`, `scripts/ninth-banner-admit.py --status` shows 0 CI pods on 01/03.
+
+**c) Apply (coordinator, operator OK) - 03 first, then 01 (leader last); gates after EACH node:**
+```bash
+export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
+V=B; ip=192.168.55.13; n=3                  # then ip=192.168.55.11; n=1
+mise exec -- python3 "$W/ab-works.py" $ip --snap    # fresh baseline: a Flux roll since 18:30 must not read as "pod gone"
+mise exec -- talosctl -n $ip apply-config --mode=no-reboot -f "$W/r-$V/kubernetes-k8s-nuc14-0$n.yaml"     # coordinator
+python3 -c "import time; time.sleep(10)"
+mise exec -- python3 "$W/ab-readback.py" $ip $V --status | tail -3     # GATE_PASS node=... variant=V keys=21|22 mismatches=0
+mise exec -- python3 "$W/ab-works.py" $ip --check | tail -3            # CONFIGWORKS_PASS
+```
+Both PASS -> next node. Either FAIL -> §5 for that node (A0), stop this variant, and record why.
+
+**d) Settle:** Monitor until-loop until 5 min after the second apply AND `scripts/ninth-banner-admit.py --status` shows
+2-min avg < 65 °C on 01 and 03. Then the idle window before run 1 reflects V.
+
+**e) Three runs V-1, V-2, V-3** (`ab-shards.py` keeps polling up to 180 s after `SUITES_DONE` until every pod of the
+run's Jobs has `finishedAt`, else it prints `SHARDS_UNFINISHED`. That fixes the 10-04 race, where the BEFORE run lost
+its last pod's finish time),, each exactly as 3.3 (`"$W/ab-run.sh" $V-1` in the background, Monitor on
+`^SHARDS_DONE`, then the two `capstats.py` calls with `L=$V-1`). Before each next run: Monitor until both nodes'
+2-min avg < 65 °C (max 5 min). Then start it anyway and note "warm start".
+**In-run abort (disqualifies V, ends its runs, go to the next variant):** after any run, its `stats-$V-k.json` shows on
+01 or 03 `temp_max >= 95` or `min_ge100 > 0`, or `CAPSTATS ... throttles` > 5 in one run. Note it, and go to 3.4 for the
+next variant (its dry-run starts from P = V; that path is gated like any other). If the abort is on D (last), go
+to 3.5.
+
+### 3.5 Decision
+```bash
+export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
+mise exec -- python3 "$W/ab-summary.py" "$W" | tee "$W/summary.txt"
+```
+It prints the A0 drift check vs the 10-04 AFTER, any `INVALID RUN`, the per-variant table, any `DISQUALIFIED`, the
+`PL1_BINDING_NOTE`, and the verdict `AB_WINNER=<v> ...` or `AB_NO_WINNER` (rc 3). Fill §4.B from it. **The operator
+confirms the winner** before 3.6. That is the third touchpoint, and it can share the OK with the final applies.
+
+### 3.6 Time box (decide BEFORE starting a variant)
+- Each evening: start a variant's runs only if all 3 fit before 01:00 Berlin, else run 2 (`ab-summary.py` counts VALID
+  runs and DISQUALIFIES a B/C/D variant with < 2; tested 2026-10-05: C with 1 valid run -> `DISQUALIFIED C: 1 valid run(s) < 2`).
+  A variant whose runs come out INVALID (< 7 finished shards, a shard on 02) gets a replacement run if time allows.
+- **01:45 Berlin = hard stop for the final roll.** If 3.7 has not started, apply A0 to 03 and 01 (§5, dry-run first:
+  P -> A0 must PASS) and defer the roll to a later on-demand run. The decision stays valid for 7 days. Everything
+  must be done by 02:45 (nightly at 03:30).
+
+**End of evening 1:** after C's runs, apply A0 to 03 and 01 per §5 (dry-run `C A0` must PASS; gates `ab-readback.py <ip> A0
+--status` + `ab-works.py --check`). Evening 2 starts from A0 with a fresh control run `A0-2`.
+
+### 3.7 Final roll
+**Winner A0 or AB_NO_WINNER:** dry-run P -> A0 on 03 and 01 (`ab-diffgate.py ... P A0`), apply A0 (coordinator) to 03
+then 01, gates `ab-readback.py <ip> A0 --status` + `ab-works.py <ip> --check`. Then RECORD the decision in git, so
+dependants (`ci-gate-primary-control-rework` premise `power-tuning-decided`) have something to key on:
+`mise exec -- python3 "$W/ab-patches.py" kubernetes/bootstrap/talos A0 --record` (one comment line, render-neutral:
+dry-tested 2026-10-05, a render with it dry-runs against 03 with an EMPTY diff, `ab-diffgate.py ... A0 A0` -> GATE_PASS).
+Commit exactly as step 1 below with subject `docs(talos): power tuning A/B kept variant A0 (talos-power-tuning-ab)`.
+Go to 3.9.
+
+**Winner B, C or D:**
+1. Repo edit + commit (the talos dir is clean; premise):
+   ```bash
+   cd /Users/mu/code/cberg-home-nextgen; export W=/private/tmp/powerab-talos-power-tuning-ab; WIN=D     # the winner
+   mise exec -- python3 "$W/ab-patches.py" kubernetes/bootstrap/talos $WIN          # AB_PATCHES_OK variant=$WIN
+   git diff --stat kubernetes/bootstrap/talos      # 1 file: B/C 19 ins 18 del; D 22 ins 19 del (incl. 2 comment lines)
+   M=$(mktemp /private/tmp/claude-powerab-msg.XXXXXX)
+   printf '%s\n\n%s\n' "feat(talos): SysfsConfig power tuning -> variant $WIN (talos-power-tuning-ab A/B winner)" \
+     "A/B on nuc14-01/03, 3 runs per variant at ninth-banner d3ae92f; table in the plan's 4.B. F-6c7843e4. Config only; applied per node in window." > "$M"
+   # append the session's attribution trailer lines (Co-Authored-By / Claude-Session) to "$M" before committing
+   git commit --only kubernetes/bootstrap/talos/patches/global/machine-sysfs-power.yaml -F "$M"
+   git log -1 --format=%s; git show --stat HEAD     # subject is ours; exactly that 1 file
+   git pull --rebase --autostash && git push
+   ```
+2. Render the committed tree and prove it equals the measured winner render:
+   ```bash
+   export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
+   cd /Users/mu/code/cberg-home-nextgen; export SOPS_AGE_KEY_FILE=$PWD/age.key
+   (cd kubernetes/bootstrap/talos && mise exec -- talhelper genconfig -o "$W/r-final") 2>&1 | grep -v -E '^generated|talosVersion|might not be compatible|issues with your Talhelper'
+   for n in 01 02 03; do python3 - "$W/r-final/kubernetes-k8s-nuc14-$n.yaml" "$W/r-$WIN/kubernetes-k8s-nuc14-$n.yaml" <<'PY'
+   import sys, yaml
+   g = lambda f: [d for d in yaml.safe_load_all(open(f)) if d and d.get("kind") == "SysfsConfig"][0]["params"]
+   print(sys.argv[1][-8:-5], "SAME_SYSFS" if g(sys.argv[1]) == g(sys.argv[2]) else "DIFFERENT_SYSFS")
+   PY
+   done
+   ```
+   PASS = `SAME_SYSFS` x3. (The full render may differ only where talhelper is non-deterministic. The dry-run gate below
+   decides the rest: `non_sysfs_changed_lines=0`.)
+3. Dry-run r-final: on 03 and 01 from P (= last variant; if P == winner the gate expects an empty diff: `... $WIN $WIN`),
+   on 02 from A0 (`ab-diffgate.py <dry> A0 $WIN`). All must PASS.
+4. Apply r-final (coordinator): 03, 01 (skip a node whose dry-run was empty), with the 3.4c gates against `$WIN`.
+5. **nuc14-02 last, with a 20-min watch** (it is the suspected-defect node and runs production only):
+   ```bash
+   export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
+   T0=$(date +%s); echo $T0 > "$W/n02-apply"; mise exec -- python3 "$W/capstats.py" pre02 20 "$W" $T0     # the 20 min BEFORE
+   # coordinator: talosctl -n 192.168.55.12 apply-config --mode=no-reboot -f "$W/r-final/kubernetes-k8s-nuc14-02.yaml"
+   ```
+   Gates: `ab-readback.py 192.168.55.12 $WIN --status` + `ab-works.py 192.168.55.12 --check`. Then wait 20 min (Monitor)
+   and run `capstats.py post02 20 "$W"`. PASS on 02 = `min_ge100` 0, `temp_max` <= pre02 `temp_max` + 3 °C, and
+   `throttles` <= max(2 x pre02, pre02 + 20). FAIL -> §5 for 02 only (apply `$W/r-A0/kubernetes-k8s-nuc14-02.yaml`,
+   whose empty dry-run was proven in 3.2). Record the **known drift**: git = winner, nuc14-02 = A0. It is cured by the
+   BIOS/cooler fix or by moving the EPP keys to per-node patches (§6). Set the plan `blocked` with that note, not
+   `executed`.
+
+### 3.8 Alert threshold: no change (asserted, not assumed)
+PL1 is 35 W in every variant, and `NodeCPUPackagePowerAtCap` fires at 90 % of PL1 (31 W). Premise
+`power-at-cap-alert-31w` holds the repo side. Check the loaded rule once at the end:
+`kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/rules' | python3 -c 'import sys,json; print([r["query"] for g in json.load(sys.stdin)["data"]["groups"] for r in g["rules"] if r["name"]=="NodeCPUPackagePowerAtCap"])'`
+-> contains `> 31`. D lowers only PL2 (45 W): the alert reads the 5-min rate against PL1, so it is unaffected.
+
+### 3.9 Close-out
+- Regenerate the local clusterconfig (gitignored): `cp -Rp kubernetes/bootstrap/talos/clusterconfig "$W/clusterconfig-pre"; mise exec -- task talos:generate-config`.
+- `.venv/bin/python3 runbooks/policy-cli.py finding detail F-6c7843e4 --plan talos-power-tuning-ab --detail-file "$W/summary.txt"`
+  (with `SWEEP_PG_DSN` up, in a separate Bash call from any `git commit`). Close the finding with the 3.7 commit
+  (`finding close F-6c7843e4 --commit <sha>`) only if the winner's 01/03 `temp_max` stayed < 90 °C in every run AND 02
+  passed its watch AND a 24 h `capstats.py` on 02 at the next sweep shows no minute >= 100 °C (the 20-min night watch is
+  short). Otherwise leave it open with the numbers.
+- Write the §4.B table into this plan's execution record. Status `executed` (or `blocked` per 3.7.5).
+- Cleanup: `rm -rf /private/tmp/powerab-talos-power-tuning-ab /private/tmp/powerab-planning-dryrun` (machine secrets)
+  within 7 days and no later than 2026-10-13. Keep `summary.txt` and the `stats-*`/`shards-*` files (no secrets) by
+  copying them out first if wanted.
+
+## 4. Verification
+
+**4.1 CONTENTS ASSERTION: each node holds exactly the variant's values, and Talos owns them.** Measured by
+`ab-readback.py <ip> <V> --status` after every apply. It reads every written key back from `/sys`, applying the
+Meteor Lake name mapping (`64` -> `balance_performance`) and the RAPL quantization (`10000000` -> `9994240`). It checks
+the untouched neighbours: PL4 120000000, PL2 window 2440, gt1 1300, and the PL1 window 27983872 when V has no tau
+key. It requires one `KernelParamStatus` per key whose `current` is the WRITTEN string, and no other `sys.*` status.
+PASS = `GATE_PASS node=<ip> variant=<V> keys=21|22 mismatches=0`.
+What failure prints: an EPP write the kernel refused reads back the old name (`want balance_performance got
+balance_power`). A tau that did not apply reads `27983872`. A tau not reset after leaving D shows
+`unexpected sys.* statuses`. A locked RAPL leaves `got 55000000`.
+Measured 2026-10-05: A0 PASS on 01/03, B on the A0 node FAIL (36 mismatches). The gate fails both ways.
+CONTROL: metric node_rapl_package_joules_total - capstats `rapl_avg_w`/`rapl_max1m_w` per run. D must show
+`rapl_max1m_w` <= ~46 W on 01/03 if any run ever reached PL2 (informational: CI reached only ~20 W on 10-04).
+
+**4.2 CONTENTS ASSERTION: every apply changed exactly the planned keys and nothing else.** `ab-diffgate.py` on the
+node's own dry-run before each apply: `GATE_PASS ... values_ok=True non_sysfs_changed_lines=0`. Measured: A0->A0
+(empty), A0->B, A0->C and A0->D PASS on 03. Five negative controls FAIL (wrong target, wrong value, foreign line,
+A0->A0 on a real diff).
+
+**4.3 "Config works" per node** (`ab-works.py --check`): bootID unchanged (no reboot, deciding); node Ready; etcd 3
+members, no learner, no ERRORS; gt0 max 1500 and gt1 max 1300 (iGPU caps intact); intel-gpu-plugin 1/1 Running on
+the node; `gpu.intel.com/i915` allocatable > 0; every iGPU pod on the node Running+Ready with unchanged restarts
+(2026-10-05: 01 = immich-server, jellyfin, makemkv; 02 = frigate, plex; 03 = immich-machine-learning); i915 dmesg error
+lines not increased (INFORMATIONAL only: 01's ring buffer rotates within a day, so the count can fall). Negative controls measured 2026-10-05: a changed bootID and a changed restart count each FAIL.
+
+**4.4 Measurement validity (per run):** `ab-summary.py` drops a run with < 7 finished shards or any shard on nuc14-02
+(`INVALID RUN`). `capstats.py` writes its JSON only after its node-count and coverage checks: `CAPSTATS_ABORT` = no
+data = re-run capstats, never a zero.
+CONTROL: metric node_thermal_zone_temp - `temp_p95`/`temp_max`/`min_ge100` per run, `max by (instance)` aggregated
+(decision rule 1).
+CONTROL: metric node_cpu_package_throttles_total - `throttles` per run (decision rule 1; in-run abort > 5).
+CONTROL: metric node_hwmon_temp_celsius - NVMe max per run (informational; a rise points at airflow, not the CPU).
+CONTROL: alertname NodeCPUPackagePowerAtCap - rule loaded with `> 31` at the end (3.8). It may fire (info) under load;
+that is the cap working, not a failure.
+CONTROL: alertname NodeCPUPackageHot - INFORMATIONAL (capstats decides).
+CONTROL: alertname CIRunnerThermalGateStalled - must not fire during a run. If it does, a shard never got a slot and
+that run is invalid.
+
+**4.5 End state (after 3.7):** all three nodes `ab-readback.py <ip> <winner> --status` -> GATE_PASS (02: A0 if its watch
+failed, recorded). `ab-works.py --check` PASS on all three. `kubectl get pods -A ...` into `$W/restarts-after.txt`:
+`diff` against `restarts-before.txt` shows no new restarts in kube-system/storage/network. etcd leader changes during
+the run <= 1.
+
+### 4.B Result table (fill from `summary.txt`; attach to the run report)
+
+| | E BEFORE 10-04 | A0 (control + 10-04 AFTER) | B | C | D |
+|---|---|---|---|---|---|
+| runs (valid) | 1 | 1 (+1) | | | |
+| sims / e2e median shard s | 350 / 197 | 478 / 264 (10-04) | | | |
+| paired slowdown vs BEFORE | 0 | +36.6 % (10-04) | | | |
+| 01: temp p95 / max °C | 74.4 / 77 | 61.0 / 62 (10-04) | | | |
+| 03: temp p95 / max °C | 77.4 / 87 | 57.0 / 71 (10-04) | | | |
+| 01 / 03 throttles (sum) | 1 / 0 | 1 / 0 (10-04) | | | |
+| 01 / 03 avg W, J/shard | 23.9 / 19.4 W | 15.6 / 12.7 W (10-04) | | | |
+| eligible / verdict | n/a | | | | |
+
+## 5. Rollback
+
+**Per node (primary; no reboot): apply the A0 render (= HEAD at plan start, proven equal to the live config in 3.2).**
+```bash
+export W=/private/tmp/powerab-talos-power-tuning-ab; test -d "$W" || { echo NO_W; exit 1; }
+P=B; ip=192.168.55.13; n=3                  # P = what the node holds now
+mise exec -- talosctl -n $ip apply-config --dry-run --mode=no-reboot -f "$W/r-A0/kubernetes-k8s-nuc14-0$n.yaml" > "$W/dry-rb-$n.txt" 2>&1; mise exec -- python3 "$W/ab-diffgate.py" "$W/dry-rb-$n.txt" $P A0
+mise exec -- talosctl -n $ip apply-config --mode=no-reboot -f "$W/r-A0/kubernetes-k8s-nuc14-0$n.yaml"      # coordinator
+python3 -c "import time; time.sleep(10)"; mise exec -- python3 "$W/ab-readback.py" $ip A0 --status | tail -1      # GATE_PASS ... variant=A0
+```
+Back when it prints `GATE_PASS ... variant=A0 keys=21 mismatches=0`: EPP balance_power on 18 CPUs, PL2 55 W, the PL1
+window back at 27983872 with no time-window status (Talos `resetKernelParam` after D), and KernelParamStatus for
+exactly the 21 committed keys. In a rollback the diff gate is advisory. If it FAILs (unexpected live state), apply A0
+anyway: it is the known-good repo state. Break-glass if the A0 apply itself errors:
+`talosctl -n $ip apply-config --mode=no-reboot -f "$W/live-$ip.yaml"` (the 2.5 copy), then
+`ab-readback.py $ip A0 --status`.
+
+**Repo (only if 3.7 committed):** `git revert <3.7 sha>`, verify subject and stat, push; then apply A0 per node as above.
+Flux reconciles nothing for the talos part. Restore the local dir: `rm -rf kubernetes/bootstrap/talos/clusterconfig && cp -Rp
+"$W/clusterconfig-pre" kubernetes/bootstrap/talos/clusterconfig`.
+
+**Forward-only parts:** none. No data, no reboot. Every EPP/PL/tau value is rewritten by the next apply.
+
+## 6. Interference notes
+
+**Proposed timetable: TWO attended on-demand NOW runs** (Europe/Berlin = UTC+2 until 2026-10-25). Reviewer 2026-10-05:
+realistic run times (~32 min) put a single evening at ~450 min, too close to the 480 ceiling. Two evenings also give two
+A0 controls, one per evening, which counterbalances the fixed B -> C -> D order against evening load drift.
+
+| Berlin (UTC) | step | operator |
+|---|---|---|
+| **Evening 1, Tue 2026-10-06** | | |
+| 18:30 (16:30Z) | run-now preflight, Step 0 (safe updates), 2.x pre-checks; `ci-runner-exclude-node02` first if the nightly did not run it (+45) | GO |
+| 18:55 (16:55Z) | 3.3 A0 control `A0-1` (renders 3.1 + A0 dry-runs 3.2 in parallel) | - |
+| 19:30 (17:30Z) | **B: dry-run, apply 03 + 01** | **OK #1** |
+| 19:50-21:30 | B-1..B-3 | - |
+| 21:30 (19:30Z) | **C apply** | **OK #2** |
+| 21:50-23:10 | C-1..C-3 | - |
+| 23:10 (21:10Z) | **back to A0 on 03 + 01** (§5 procedure, dry-run gated) -> no node stays overnight on a measured-only variant | **OK #3** |
+| ~23:20 | evening 1 done; `ab-summary.py` interim table (no decision) | - |
+| **Evening 2, Wed 2026-10-07** | | |
+| 18:30 (16:30Z) | preflight, Step 0, 2.2/2.4/2.5 again (the 2.3 baselines and renders in `$W` are reused; re-run 3.2 A0 dry-runs) | GO |
+| 18:55 | A0 control `A0-2` | - |
+| 19:30 (17:30Z) | **D: dry-run A0 -> D, apply 03 + 01** | **OK #4** |
+| 19:50-21:30 | D-1..D-3 | - |
+| 21:30 (19:30Z) | 3.5 decision over A0-1, A0-2, B, C, D | **confirm winner + OK #5 (final applies)** |
+| 21:40-22:30 | 3.7 final roll (03, 01, 02 + 20-min watch), 3.8, 3.9 | - |
+| 01:45 / 02:45 | hard stop for 3.7 / everything done (nightly 03:30) | - |
+
+On evening 2 the D dry-run starts from P = A0, because evening 1 ended on A0. The gate expects
+`plus=20/20 minus=19/19` (measured A0->D on 03). Capacity: evening 1 ~290 min, evening 2 ~245 min, both under the 480
+on-demand ceiling. `needs_reboot: false`, so NOW runs may carry it. A single long evening is still possible
+(B -> C -> D without the return to A0, ~450 min, start no later than 17:30). It is not recommended.
+
+- **Nothing else in this NOW run** except `ci-runner-exclude-node02` before it. Every other plan changes load or the
+  instrument. `exclusive` is false only to allow that one.
+- **No other CI** 18:30-02:45: the A/B's triggers export `GATE_SECOND_POD_NODES=` and `GATE_MAX_CPU_PER_NODE=1` (one
+  shard per node, as in BEFORE/AFTER where each shard ran alone on its node). Another session's trigger would admit
+  with the defaults and break that. Coordinate with the ci-runner owner (2.4).
+- **talos-sysfs-power-caps**: conflicts_with plus the premise `soak-24h-recorded`, because its soak must finish first. Not
+  depends_on: run-now refuses a dependency until it is `executed`, and the soak alone does not make it executed. Its 3.10 (CI gate 85 -> 88 °C) may land
+  before tonight; that only changes admission temperatures, which the A/B's 1-shard-per-node runs rarely touch.
+  **Ask its executor to keep the six baseline files** (2.3) when cleaning its scratch dir.
+- **talos-linux-1.14.2** (reboot roll): never the same night. If it runs later, its post-reboot gates must read back
+  the WINNER's values (`ab-readback.py <ip> <winner>`), not the 2026-10-04 caps. That is a repo correction for that plan,
+  whose `sysfs-readback.py ... caps` check will FAIL against any winner other than A0.
+- **kube-prometheus-stack-91.9.0 / immich-ml / jellyfin / helm-drift-detection**: conflicts_with (instrument or iGPU/CPU
+  load on 01/03). Their windows (2026-10-10 and later) do not overlap 10-06, but the refs keep the scheduler from
+  putting them into the same run. Reciprocity owed by those authors.
+- **ci-gate-primary-control-rework** (backlog) depends on this plan's committed winner.
+- **Per-node exception for nuc14-02:** not possible with the current patch layout (fact 7). If 02 fails its watch,
+  the clean fix is moving the 18 EPP keys from the global patch into the three per-node patches (a follow-up plan),
+  or the BIOS/cooler fix. Until then git and 02 differ, recorded in the plan and the finding.
+- **BIOS follow-up (operator, physical):** when the BIOS PL1/PL2/tau are set to match the chosen OS values, the
+  SysfsConfig RAPL keys still overwrite the MSR at boot. Measure after the BIOS change (predecessor §6 procedure); an
+  ASUS BIOS update can also move the DRM card index (premise `igpu-card-index-node03-card1`).
+- **Repo correction, not planned around:** `talos-sysfs-power-caps` §1 says "EPP balance_power on cpu0..cpu17" as if
+  it were driver-independent. On this CPU it is the raw value 179, and `64` == `balance_performance`. The read-back
+  of a raw-EPP config differs from the written string (fact 3); anyone writing a numeric-EPP gate must map it.
+
+## Appendix - scripts (extracted by §2; all dry-tested 2026-10-05 as stated in §2/§3/§4)
+
+### ab-patches.py
+
+```python ab-patches
+# ab-patches.py <talos-dir> <A0|B|C|D>  -- rewrites patches/global/machine-sysfs-power.yaml for one variant
+# (plan talos-power-tuning-ab). Input MUST be the committed c2c155b8 shape (asserted). PL1 35 W and the
+# iGPU key never change. Only D carries the PL1 time-window key; for A0/B/C it stays at the BIOS value
+# 27983872 us, and removing it after D makes Talos write the captured default back (resetKernelParam).
+import sys
+T, v = sys.argv[1], sys.argv[2]
+V = {"A0": ("55000000", None, "balance_power"), "B": ("55000000", None, "64"),
+     "C": ("55000000", None, "96"), "D": ("45000000", "10000000", "96")}
+pl2, tau, epp = V[v]
+p = f"{T}/patches/global/machine-sysfs-power.yaml"; t = open(p).read()
+L2 = '  class/powercap/intel-rapl:0/constraint_1_power_limit_uw: "55000000"\n'
+E = 'energy_performance_preference: "balance_power"\n'
+assert t.count(L2) == 1 and t.count(E) == 18 and "constraint_0_time_window_us" not in t \
+    and t.count('constraint_0_power_limit_uw: "35000000"\n') == 1, "patch not in the committed c2c155b8 shape"
+if v == "A0":
+    if "--record" in sys.argv:   # final roll, A0 kept: record the decision in git (comment only, render-neutral)
+        t = t.replace("apiVersion: v1alpha1\n", "# Power tuning A/B (plan talos-power-tuning-ab): variant A0 kept, no value change "
+                      "(EPP 179 = balance_power, PL2 55 W).\napiVersion: v1alpha1\n", 1)
+        open(p, "w").write(t); print("AB_PATCHES_OK variant=A0 recorded"); sys.exit(0)
+    print("AB_PATCHES_OK variant=A0 (unchanged)"); sys.exit(0)
+t = t.replace(E, f'energy_performance_preference: "{epp}"\n')
+new = f'  class/powercap/intel-rapl:0/constraint_1_power_limit_uw: "{pl2}"\n'
+if tau:
+    new += ("  # PL1 time window (tau) 28 s -> 10 s: the package falls back to PL1 sooner after a burst\n"
+            "  # (RAPL quantizes 10000000 us to 9994240 us; plan talos-power-tuning-ab)\n"
+            f'  class/powercap/intel-rapl:0/constraint_0_time_window_us: "{tau}"\n')
+t = t.replace(L2, new)
+t = t.replace("apiVersion: v1alpha1\n", f"# Variant {v} of plan talos-power-tuning-ab: PL2 {int(pl2)//1000000} W, EPP {epp} "
+              f"(Meteor Lake: 64 = balance_performance, 179 = balance_power){', PL1 tau 10 s' if tau else ''}.\napiVersion: v1alpha1\n", 1)
+open(p, "w").write(t); print(f"AB_PATCHES_OK variant={v}")
+```
+
+### ab-diffgate.py
+
+```python ab-diffgate
+# ab-diffgate.py <dry-run-output> <from-variant> <to-variant>
+# Every changed line of the Talos dry-run diff must be one of the plan's SysfsConfig keys, '-' with the FROM
+# value and '+' with the TO value, and exactly the keys whose value differs must appear. Content never printed.
+import re, sys
+txt = open(sys.argv[1]).read(); fr, to = sys.argv[2], sys.argv[3]
+V = {"A0": ("55000000", None, "balance_power"), "B": ("55000000", None, "64"),
+     "C": ("55000000", None, "96"), "D": ("45000000", "10000000", "96")}
+def keys(v):
+    pl2, tau, epp = V[v]
+    d = {"class/powercap/intel-rapl:0/constraint_1_power_limit_uw": pl2}
+    d.update({f"devices/system/cpu/cpu{i}/cpufreq/energy_performance_preference": epp for i in range(18)})
+    if tau: d["class/powercap/intel-rapl:0/constraint_0_time_window_us"] = tau
+    return d
+F, Tt = keys(fr), keys(to)
+want_minus = {k: v for k, v in F.items() if Tt.get(k) != v}
+want_plus = {k: v for k, v in Tt.items() if F.get(k) != v}
+if fr == to:
+    ok = "No changes" in txt or ("Config diff:" in txt and not [l for l in txt.split("Config diff:", 1)[1].splitlines() if l[:1] in "+-" and l not in ("--- a", "+++ b")])
+    print(f"{'GATE_PASS' if ok else 'GATE_FAIL'} from={fr} to={to} (expect no diff)"); sys.exit(0 if ok else 1)
+if "Config diff:" not in txt: print('GATE_FAIL no "Config diff:" in dry-run output'); sys.exit(2)
+KEY = re.compile(r'^([+-]) {4}([a-z0-9/:_-]+): "?([a-z_0-9]+)"?$')
+plus, minus, bad = {}, {}, 0
+for l in txt.split("Config diff:", 1)[1].splitlines():
+    if l in ("--- a", "+++ b") or not l or l[0] not in "+-": continue
+    m = KEY.match(l)
+    if m and m.group(2) in set(F) | set(Tt):
+        (plus if m.group(1) == "+" else minus)[m.group(2)] = m.group(3)
+    else: bad += 1
+ok = bad == 0 and plus == want_plus and minus == want_minus
+print(f"{'GATE_PASS' if ok else 'GATE_FAIL'} from={fr} to={to} plus={len(plus)}/{len(want_plus)} minus={len(minus)}/{len(want_minus)} "
+      f"values_ok={plus == want_plus and minus == want_minus} non_sysfs_changed_lines={bad}")
+sys.exit(0 if ok else 1)
+```
+
+### ab-readback.py
+
+```python ab-readback
+#!/usr/bin/env python3
+# ab-readback.py <node-ip> <A0|B|C|D> [--status]  -- reads every SysfsConfig key back from /sys (talosctl read)
+# and, with --status, requires one Talos KernelParamStatus per key whose `current` is the WRITTEN string and no
+# other sys.* status. Sysfs shows Meteor Lake's named EPPs for 64/179 (intel_pstate show_energy_performance_
+# preference prints the name when the raw EPP equals a table value) and the quantized tau (9994240 for 10000000).
+import json, subprocess, sys
+ip, v = sys.argv[1], sys.argv[2]; want_status = "--status" in sys.argv
+CARD = {"192.168.55.11": "card0", "192.168.55.12": "card0", "192.168.55.13": "card1"}[ip]
+V = {"A0": ("55000000", None, "balance_power"), "B": ("55000000", None, "64"),
+     "C": ("55000000", None, "96"), "D": ("45000000", "10000000", "96")}
+pl2, tau, epp = V[v]
+written = {"class/powercap/intel-rapl:0/constraint_0_power_limit_uw": "35000000",
+           "class/powercap/intel-rapl:0/constraint_1_power_limit_uw": pl2,
+           f"class/drm/{CARD}/gt/gt0/rps_max_freq_mhz": "1500"}
+written.update({f"devices/system/cpu/cpu{i}/cpufreq/energy_performance_preference": epp for i in range(18)})
+if tau: written["class/powercap/intel-rapl:0/constraint_0_time_window_us"] = tau
+SHOW = {"64": "balance_performance", "179": "balance_power", "16": "performance", "10000000": "9994240"}
+neigh = {"class/powercap/intel-rapl:0/constraint_2_power_limit_uw": "120000000",
+         "class/powercap/intel-rapl:0/constraint_1_time_window_us": "2440",
+         f"class/drm/{CARD}/gt/gt1/rps_max_freq_mhz": "1300"}
+if not tau: neigh["class/powercap/intel-rapl:0/constraint_0_time_window_us"] = "27983872"
+bad = []
+def rd(k):
+    r = subprocess.run(["talosctl", "-n", ip, "read", "/sys/" + k], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else f"ERR({r.stderr.strip()[-60:]})"
+for k, w in written.items():
+    got = rd(k); exp = SHOW.get(w, w)
+    if got != exp: bad.append(f"{k}: want {exp} got {got}")
+for k, w in neigh.items():
+    got = rd(k)
+    if got != w: bad.append(f"{k} (untouched): want {w} got {got}")
+if want_status:
+    out = subprocess.run(["talosctl", "-n", ip, "get", "kernelparamstatuses", "-o", "json"], capture_output=True, text=True).stdout
+    dec, i, st, n = json.JSONDecoder(), 0, {}, 0
+    while i < len(out):
+        while i < len(out) and out[i].isspace(): i += 1
+        if i >= len(out): break
+        o, i = dec.raw_decode(out, i); n += 1
+        if o["metadata"]["id"].startswith("sys."): st[o["metadata"]["id"]] = str(o["spec"]["current"])
+    if n == 0: bad.append("KernelParamStatus list EMPTY (talosctl error?) - cannot assert")
+    for k, w in written.items():
+        if st.get("sys." + k) != w: bad.append(f"KernelParamStatus sys.{k}: want {w} got {st.get('sys.' + k)}")
+    extra = set(st) - {"sys." + k for k in written}
+    if extra: bad.append(f"unexpected sys.* statuses: {sorted(extra)}")
+for b in bad[:30]: print("  MISMATCH", b)
+print(f"{'GATE_PASS' if not bad else 'GATE_FAIL'} node={ip} variant={v} keys={len(written)} mismatches={len(bad)}")
+sys.exit(0 if not bad else 1)
+```
+
+### ab-works.py
+
+```python ab-works
+#!/usr/bin/env python3
+# ab-works.py <node-ip> --snap | --check   (read-only; plan talos-power-tuning-ab "config works")
+#   --snap : record bootID, i915 dmesg error-line count and the restart counts of every iGPU-consumer pod on the node
+#   --check: bootID unchanged, node Ready, etcd 3 members/no errors, gt0 max 1500 + gt1 max 1300 (untouched), intel-gpu-plugin
+#            1/1 Running on the node, i915 allocatable > 0, every pod requesting gpu.intel.com/i915 on the node Running+Ready
+#            with restarts unchanged, i915 error lines not increased.  -> CONFIGWORKS_PASS / CONFIGWORKS_FAIL
+import json, re, subprocess, sys
+ip, mode = sys.argv[1], sys.argv[2]
+W = "/private/tmp/powerab-talos-power-tuning-ab"
+node = {"192.168.55.11": "k8s-nuc14-01", "192.168.55.12": "k8s-nuc14-02", "192.168.55.13": "k8s-nuc14-03"}[ip]
+card = {"192.168.55.11": "card0", "192.168.55.12": "card0", "192.168.55.13": "card1"}[ip]
+def sh(*a): return subprocess.run(list(a), capture_output=True, text=True)
+def gpu_pods():
+    out = {}
+    for p in json.loads(sh("kubectl", "get", "pods", "-A", "-o", "json").stdout)["items"]:
+        if p["spec"].get("nodeName") != node or p["metadata"]["namespace"] == "ci-runner": continue
+        if any("gpu.intel.com/i915" in ((c.get("resources") or {}).get("requests") or {}) for c in p["spec"]["containers"]):
+            cs = p["status"].get("containerStatuses") or []
+            out[f'{p["metadata"]["namespace"]}/{p["metadata"]["name"]}'] = {
+                "restarts": sum(c.get("restartCount", 0) for c in cs), "phase": p["status"].get("phase"),
+                "ready": bool(cs) and all(c.get("ready") for c in cs)}
+    return out
+def i915_err(): return len([l for l in sh("talosctl", "-n", ip, "dmesg").stdout.splitlines() if re.search(r"i915.*(error|fail|hang|reset)", l, re.I)])
+boot = sh("kubectl", "get", "node", node, "-o", "jsonpath={.status.nodeInfo.bootID}").stdout.strip()
+snapf = f"{W}/works-snap-{ip}.json"
+if mode == "--snap":
+    s = {"boot": boot, "i915_err": i915_err(), "pods": gpu_pods()}
+    if not boot or not s["pods"]: print("WORKS_SNAP_FAIL empty bootID or no iGPU pods on node"); sys.exit(1)
+    json.dump(s, open(snapf, "w")); print(f"WORKS_SNAP_OK node={node} gpu_pods={len(s['pods'])} i915_err={s['i915_err']}"); sys.exit(0)
+s = json.load(open(snapf)); bad = []
+if boot != s["boot"]: bad.append(f"bootID changed ({s['boot'][:8]} -> {boot[:8]}): REBOOT")
+ready = sh("kubectl", "get", "node", node, "-o", 'jsonpath={.status.conditions[?(@.type=="Ready")].status}').stdout.strip()
+if ready != "True": bad.append(f"node Ready={ready}")
+et = sh("talosctl", "-n", "192.168.55.11,192.168.55.12,192.168.55.13", "etcd", "status").stdout.splitlines()[1:]
+# healthy row = 14 tokens ("462 MB", "123 MB (26.61%)" split); an ERRORS value adds tokens; LEARNER is token 11
+if len(et) != 3 or any(len(l.split()) != 14 or l.split()[11] != "false" for l in et): bad.append(f"etcd: {len(et)} members, a learner, or ERRORS set")
+for g, w in (("gt0", "1500"), ("gt1", "1300")):
+    got = sh("talosctl", "-n", ip, "read", f"/sys/class/drm/{card}/gt/{g}/rps_max_freq_mhz").stdout.strip()
+    if got != w: bad.append(f"{g} max {got} != {w}")
+pl = [l.split() for l in sh("kubectl", "-n", "kube-system", "get", "pods", "-o", "wide", "--no-headers").stdout.splitlines() if "intel-gpu-plugin" in l and node in l]
+if not pl or pl[0][1] != "1/1" or pl[0][2] != "Running": bad.append(f"intel-gpu-plugin on {node}: {pl[0][1:4] if pl else 'MISSING'}")
+alloc = sh("kubectl", "get", "node", node, "-o", "jsonpath={.status.allocatable.gpu\\.intel\\.com/i915}").stdout.strip()
+if alloc in ("", "0"): bad.append(f"i915 allocatable '{alloc}'")
+now = gpu_pods()
+for k, v in s["pods"].items():
+    n = now.get(k)
+    if n is None: bad.append(f"iGPU pod {k} gone (replaced? check its owner)"); continue
+    if n["phase"] != "Running" or not n["ready"] or n["restarts"] != v["restarts"]: bad.append(f"iGPU pod {k}: {n} (was restarts={v['restarts']})")
+e = i915_err()
+if e > s["i915_err"]: bad.append(f"i915 dmesg error lines {s['i915_err']} -> {e}")
+for b in bad: print("  WORKS_FAIL", b)
+print(f"{'CONFIGWORKS_PASS' if not bad else 'CONFIGWORKS_FAIL'} node={node} gpu_pods={len(s['pods'])} checks_failed={len(bad)}")
+sys.exit(0 if not bad else 1)
+```
+
+### ab-shards.py
+
+```python ab-shards
+# ab-shards.py <label>  -- records every CI shard pod of run <label> (node, container start, finish) until the run's
+# log says SUITES_DONE; writes $W/shards-<label>.json (same shape as the 2026-10-04 shards-before/after.json).
+import calendar, json, os, re, subprocess, sys, time
+W = "/private/tmp/powerab-talos-power-tuning-ab"; L = sys.argv[1]
+t0 = int(open(f"{W}/run-{L}.start").read()); out = f"{W}/shards-{L}.json"; rec = {}; done_at = None
+def ts(s): return calendar.timegm(time.strptime(s, "%Y-%m-%dT%H:%M:%SZ")) if s else 0   # UTC (mktime would apply local DST)
+while True:
+    r = subprocess.run(["kubectl", "get", "pods", "-n", "ci-runner", "-l", "app.kubernetes.io/name=the-ninth-banner-tests", "-o", "json"], capture_output=True, text=True)
+    if r.returncode == 0:
+        for p in json.loads(r.stdout)["items"]:
+            if ts(p["metadata"]["creationTimestamp"]) < t0 - 5: continue          # older runs: not ours
+            n = p["metadata"]["name"]; st = p.get("status", {}); cs = (st.get("containerStatuses") or [{}])[0]
+            term = cs.get("state", {}).get("terminated") or {}; run = cs.get("state", {}).get("running") or {}
+            d = rec.setdefault(n, {})
+            d.update({"job": p["metadata"]["labels"].get("batch.kubernetes.io/job-name"), "node": p["spec"].get("nodeName") or d.get("node"),
+                      "runStarted": run.get("startedAt") or term.get("startedAt") or d.get("runStarted"),
+                      "finishedAt": term.get("finishedAt") or d.get("finishedAt"), "exitCode": term.get("exitCode", d.get("exitCode")),
+                      "phase": st.get("phase")})
+        json.dump(rec, open(out, "w"), indent=1)
+    log = open(f"{W}/run-{L}.log").read() if os.path.exists(f"{W}/run-{L}.log") else ""
+    if "SUITES_DONE" in log:
+        # the trigger finishes a shard when it has COPIED its results; the container ends seconds later (10-04 BEFORE:
+        # +4 s, finishedAt missed). Keep polling until every pod of this run's Jobs has finishedAt, bounded to 180 s.
+        done_at = done_at or time.time()
+        jobs = set(re.findall(r"^job ci-runner/(\S+) ", log, re.M))
+        open_pods = [n for n, d in rec.items() if d.get("job") in jobs and not d.get("finishedAt")]
+        if not open_pods or time.time() - done_at > 180:
+            if open_pods: print("SHARDS_UNFINISHED", L, open_pods)
+            break
+        time.sleep(5); continue
+    time.sleep(15)
+print("SHARDS_DONE", L, len(rec))
+```
+
+### ab-summary.py
+
+```python ab-summary
+#!/usr/bin/env python3
+# ab-summary.py [W]  -- plan talos-power-tuning-ab §4.B table + decision rule. Reads, per run label L (A0-1, B-1..3,
+# C-1..3, D-1..3): shards-L.json (ab-shards.py), stats-L.json + stats-idle-L.json (capstats.py). Baselines copied in
+# §2: E = 2026-10-04 BEFORE (64 W, EPP 64), A1004 = 2026-10-04 AFTER (35/55 W, EPP 179), both at ref d3ae92f.
+# Primary time metric: PAIRED per shard index (same tests) -> geometric-mean ratio vs E; medians reported too.
+import calendar, glob, json, math, re, statistics as st, sys, time
+W = sys.argv[1] if len(sys.argv) > 1 else "/private/tmp/powerab-talos-power-tuning-ab"
+N = {"192.168.55.11": "k8s-nuc14-01", "192.168.55.13": "k8s-nuc14-03"}
+def ts(s): return calendar.timegm(time.strptime(s, "%Y-%m-%dT%H:%M:%SZ"))  # UTC; mktime would apply local DST
+def shards(L):
+    # only the Jobs this run's own log created ("job ci-runner/<name> ..."): the 2026-10-04 AFTER collector
+    # also caught the BEFORE run's e2e pods, which would pair a run with itself
+    jobs = set(re.findall(r"^job ci-runner/(\S+) ", open(f"{W}/run-{L}.log").read(), re.M))
+    if not jobs: raise SystemExit(f"AB_SUMMARY_ABORT run-{L}.log names no Job")
+    out = []
+    for name, d in json.load(open(f"{W}/shards-{L}.json")).items():
+        m = re.match(r"tnb-(sims|e2e)(?:-gpu)?-[0-9a-f]{7}-\d+-(\d+)-", name)
+        if m and d.get("job") in jobs and d.get("runStarted") and d.get("finishedAt"):
+            out.append((m.group(1), int(m.group(2)), d["node"], ts(d["finishedAt"]) - ts(d["runStarted"])))
+    return out
+def ld(f):
+    try: return json.load(open(f))["nodes"]
+    except Exception: return None
+base = {(s, i): t for s, i, n, t in shards("E")}
+def gm(rs): return math.exp(sum(math.log(r) for r in rs) / len(rs)) - 1 if rs else float("nan")
+runs = {}
+for f in sorted(glob.glob(f"{W}/shards-*.json")):
+    L = f.split("shards-", 1)[1][:-5]
+    if L in ("E", "A1004"): continue
+    runs.setdefault(L.split("-")[0], []).append(L)
+res, bad_runs = {}, []
+for v, Ls in sorted(runs.items()):
+    sh, ratios, th = [], [], {ip: {"p95": [], "max": [], "thr": [], "w": [], "ge100": [], "j": []} for ip in N}
+    for L in Ls:
+        s = shards(L); stt = ld(f"{W}/stats-{L}.json"); idle = ld(f"{W}/stats-idle-{L}.json")
+        on02 = [x for x in s if x[2] == "k8s-nuc14-02"]
+        if len(s) < 7 or on02 or stt is None:
+            bad_runs.append(f"{L}: shards={len(s)} on_nuc14-02={len(on02)} stats={'ok' if stt else 'MISSING'}"); continue
+        sh += s; ratios += [t / base[(su, i)] for su, i, n, t in s if (su, i) in base]
+        mins = json.load(open(f"{W}/stats-{L}.json"))["minutes"]
+        for ip, node in N.items():
+            d = stt[ip]; th[ip]["p95"].append(d["temp_p95"]); th[ip]["max"].append(d["temp_max"])
+            th[ip]["thr"].append(d["throttles"]); th[ip]["w"].append(d["rapl_avg_w"]); th[ip]["ge100"].append(d["min_ge100"])
+            k = len([x for x in s if x[2] == node])
+            if idle and k: th[ip]["j"].append((d["rapl_avg_w"] - idle[ip]["rapl_avg_w"]) * mins * 60 / k)
+    if not sh: continue
+    med = {su: st.median([t for s_, i, n, t in sh if s_ == su]) for su in ("sims", "e2e")}
+    nvalid = len(Ls) - len([b for b in bad_runs if b.split(":")[0] in Ls])
+    res[v] = {"runs": nvalid, "med": med, "slow_E": gm(ratios), "n": len(ratios),
+              "th": {ip: {"p95": max(x["p95"]), "max": max(x["max"]), "thr": sum(x["thr"]), "w": st.mean(x["w"]),
+                          "ge100": sum(x["ge100"]), "j": st.mean(x["j"]) if x["j"] else float("nan")} for ip, x in th.items() if x["p95"]}}
+# A = the A0 control run (tonight, current config). Cross-check against the 2026-10-04 AFTER run (paired, +-10 %).
+aft = {(s, i): t for s, i, n, t in shards("A1004") if n != "k8s-nuc14-02"}
+if "A0" in res:
+    a0 = [t / aft[(s, i)] for L in runs["A0"] for s, i, n, t in shards(L) if (s, i) in aft]
+    drift = gm(a0); res["A0"]["drift_vs_A1004"] = drift
+    print(f"A0 control vs 2026-10-04 AFTER (paired, {len(a0)} shards): {drift:+.1%} -> AFTER data "
+          f"{'CONSISTENT: the 10-04 AFTER numbers stand' if abs(drift) <= 0.10 else 'DRIFT > 10 %: tonight differs from 10-04; judge variants against A0 only'}")
+for b in bad_runs: print("INVALID RUN (excluded):", b)
+print(f"{'var':4} {'runs':>4} {'sims med s':>10} {'e2e med s':>9} {'vs BEFORE':>9} | per node 01 / 03: p95 C, max C, throttles, avg W, J/shard, min>=100")
+for v, r in res.items():
+    t = "  ".join(f"{d['p95']:.0f}/{d['max']:.0f}C thr={d['thr']:.0f} {d['w']:.1f}W {d['j']:.0f}J ge100={d['ge100']:.0f}" for ip, d in sorted(r["th"].items()))
+    print(f"{v:4} {r['runs']:>4} {r['med']['sims']:>10.0f} {r['med']['e2e']:>9.0f} {r['slow_E']:>+9.1%} | {t}")
+# minimum VALID runs (plan 3.6): 2 for B/C/D, 1 for the A0 control; a single lucky run must not win
+MINRUNS = {"A0": 1}
+for v, r in res.items():
+    if r["runs"] < MINRUNS.get(v, 2): print(f"DISQUALIFIED {v}: {r['runs']} valid run(s) < {MINRUNS.get(v, 2)}")
+ok = {v: r for v, r in res.items() if r["runs"] >= MINRUNS.get(v, 2) and len(r["th"]) == 2 and all(d["p95"] <= 75 and d["thr"] <= 5 and d["max"] < 95 and d["ge100"] == 0 for d in r["th"].values())}
+for v in res:
+    if v not in ok and res[v]["runs"] >= MINRUNS.get(v, 2): print(f"DISQUALIFIED {v}: package p95 > 75 C, throttles > 5, max >= 95 C or a minute >= 100 C on 01/03")
+if "B" in res and res["B"]["slow_E"] > 0.15:
+    print(f"PL1_BINDING_NOTE: B (EPP 64 = the BEFORE EPP) is still {res['B']['slow_E']:+.1%} vs BEFORE -> the 35 W PL1 / 1500 MHz cap binds; next test PL1 40 W (NOT in this plan)")
+if not ok: print("AB_NO_WINNER keep A0 (the committed config)"); sys.exit(3)
+best = min(r["slow_E"] for r in ok.values())
+near = [v for v, r in ok.items() if r["slow_E"] - best <= 0.03]          # within 3 points: stability first
+win = min(near, key=lambda v: (max(d["p95"] for d in ok[v]["th"].values()), sum(d["j"] for d in ok[v]["th"].values())))
+print(f"AB_WINNER={win} slowdown_vs_BEFORE={ok[win]['slow_E']:+.1%} (eligible: {sorted(ok)}; within 3 points of best: {sorted(near)})")
+```
+
+### capstats.py (verbatim copy of talos-sysfs-power-caps Appendix A; that plan will be retired)
+
+```python capstats
+#!/usr/bin/env python3
+# capstats.py <label> <minutes> <out-dir> [end_unix] [--no-rapl]
+#   -> one CAPSTATS line per node; ONLY if every check passes: <out-dir>/stats-<label>.json + "CAPSTATS_OK".
+#   --no-rapl: skip the RAPL families (for windows older than the RAPL series, enabled 2026-10-04).
+# Window = [end - minutes, end]. Reads Prometheus through the apiserver proxy (kubectl get --raw).
+# ABORTS (exit 2) if any metric family returns fewer than 3 nodes: an unscraped series must
+# not read as "0 throttles" or "no heat" (docs/sops/verification-contents-not-shape.md).
+import json, os, subprocess, sys, time, urllib.parse
+args = [a for a in sys.argv[1:] if not a.startswith("--")]; norapl = "--no-rapl" in sys.argv
+label, mins, outdir = args[0], int(args[1]), args[2]; end = int(args[3]) if len(args) > 3 else int(time.time())
+if not os.path.isdir(outdir): print(f"CAPSTATS_ABORT out-dir {outdir!r} missing"); sys.exit(2)
+P = "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?"
+w = f"{mins}m"
+T = 'max by (instance) (node_thermal_zone_temp{type="x86_pkg_temp"})'   # one series per node even
+# across node-exporter pod rolls (a roll splits the raw series by `pod`; un-aggregated, the last
+# pod's series silently wins -- measured 2026-10-04: raw max 59 C vs real 102 C on nuc14-02)
+Q = {"temp_avg": f"avg_over_time(({T})[{w}:30s])",
+     "temp_p95": f"quantile_over_time(0.95, ({T})[{w}:30s])",
+     "temp_max": f"max_over_time(({T})[{w}:30s])",
+     "min_ge100": f"sum_over_time(({T} >= bool 100)[{w}:1m])",
+     "throttles": f'sum by (instance) (increase(node_cpu_package_throttles_total[{w}]))',
+     "rapl_avg_w": f'sum by (instance) (rate(node_rapl_package_joules_total[{w}]))',
+     "rapl_max1m_w": f'max_over_time((sum by (instance) (rate(node_rapl_package_joules_total[1m])))[{w}:30s])',
+     "nvme_max": f'max by (instance) (max_over_time(node_hwmon_temp_celsius{{chip=~"nvme_.+",sensor="temp1"}}[{w}]))'}
+# Sample coverage: an under-covered window (series younger than the window, scrape gap) under-reads
+# averages/increases WITHOUT any error (measured 2026-10-04: rapl_avg_w over 60m read 5 W against
+# 16-19 W real while the RAPL series was 20 min old). Require >= 90 % of the 30 s steps per node.
+Q["cov_temp"] = f"count_over_time(({T})[{w}:30s]) / {mins * 2}"
+Q["cov_rapl"] = f"count_over_time((sum by (instance) (node_rapl_package_joules_total))[{w}:30s]) / {mins * 2}"
+if norapl: Q = {k: v for k, v in Q.items() if "rapl" not in k}
+out, short = {}, []
+for k, q in Q.items():
+    raw = subprocess.run(["kubectl", "get", "--raw", P + urllib.parse.urlencode({"query": q, "time": end})],
+                         capture_output=True, text=True)
+    res = json.loads(raw.stdout)["data"]["result"] if raw.returncode == 0 else []
+    if len(res) != 3: short.append(f"{k}:{len(res)}")
+    for r in res: out.setdefault(r["metric"]["instance"].split(":")[0], {})[k] = round(float(r["value"][1]), 2)
+for n in sorted(out): print(f"CAPSTATS {label} {n} " + " ".join(f"{k}={v}" for k, v in sorted(out[n].items())))
+lowcov = [f"{n}:{k}={v}" for n, d in out.items() for k, v in d.items() if k.startswith("cov_") and v < 0.9]
+if lowcov: print(f"CAPSTATS_ABORT sample coverage < 0.9 (window older than the series or a scrape gap): {lowcov}"); sys.exit(3)
+if short: print(f"CAPSTATS_ABORT families without exactly 3 nodes: {short}"); sys.exit(2)
+json.dump({"label": label, "end": end, "minutes": mins, "nodes": out}, open(f"{outdir}/stats-{label}.json", "w"), indent=1)
+print(f"CAPSTATS_OK {label} -> {outdir}/stats-{label}.json")
+```
+
+### ab-run.sh
+
+```bash ab-run
+#!/bin/bash
+# ab-run.sh <label>  -- ONE A/B CI run (run_in_background: true): sims 4 then e2e 3 at the fixed ref, exactly the
+# 2026-10-04 BEFORE/AFTER protocol. Writes run-<label>.{start,end,log}, shards-<label>.json; last log line SUITES_DONE.
+set -u; W=/private/tmp/powerab-talos-power-tuning-ab; L=$1
+cd /Users/mu/code/cberg-home-nextgen || exit 2
+test -s "$W/ci-ref" || { echo NO_CI_REF; exit 2; }
+test -e "$W/run-$L.start" && { echo "LABEL_USED $L"; exit 2; }
+# one shard per node at a time, as in the 2026-10-04 BEFORE/AFTER runs (each shard alone on its node): the gate
+# reads these for every tick THIS trigger runs (no other CI may run meanwhile, plan section 2.4)
+export GATE_SECOND_POD_NODES= GATE_MAX_CPU_PER_NODE=1
+date +%s > "$W/run-$L.start"
+mise exec -- python3 "$W/ab-shards.py" "$L" > "$W/shards-$L.out" 2>&1 & C=$!
+{ scripts/ninth-banner-test.sh "$(cat "$W/ci-ref")" sims 4; echo "sims rc=$?"
+  scripts/ninth-banner-test.sh "$(cat "$W/ci-ref")" e2e 3; echo "e2e rc=$?"; } > "$W/run-$L.log" 2>&1
+date +%s > "$W/run-$L.end"; echo SUITES_DONE >> "$W/run-$L.log"
+wait $C; cat "$W/shards-$L.out"
+```
