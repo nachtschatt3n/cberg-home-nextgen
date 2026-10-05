@@ -27,6 +27,9 @@ from pathlib import Path
 
 # Make `runbooks/lib/...` importable when the script is invoked from any CWD.
 sys.path.insert(0, str(Path(__file__).parent))
+from lib.decommissioned_apps import (  # noqa: E402
+    find_disabled_app_dirs, is_disabled, skip_line,
+)
 from lib.findings_writer import (  # noqa: E402
     FindingsWriter, DegradationLog, cycle_id_from_env, trigger_from_env, git_head,
 )
@@ -246,7 +249,7 @@ class Findings:
 # App inventory scanner
 # ---------------------------------------------------------------------------
 
-def find_helmrelease_apps() -> dict[str, list[str]]:
+def find_helmrelease_apps(skip_decommissioned: bool = False) -> dict[str, list[str]]:
     """
     Scan kubernetes/apps/ for all app directories: those containing a
     HelmRelease, and raw-manifest apps identified by their ks.yaml.
@@ -257,6 +260,7 @@ def find_helmrelease_apps() -> dict[str, list[str]]:
     """
     apps_dir = REPO_ROOT / "kubernetes" / "apps"
     result: dict[str, list[str]] = {}
+    disabled = find_disabled_app_dirs(REPO_ROOT) if skip_decommissioned else []
 
     HR_NAMES = {"helmrelease.yaml", "helm-release.yaml"}
 
@@ -268,6 +272,8 @@ def find_helmrelease_apps() -> dict[str, list[str]]:
 
         for app_dir in sorted(ns_dir.iterdir()):
             if not app_dir.is_dir() or app_dir.name.startswith("_"):
+                continue
+            if disabled and is_disabled(app_dir, disabled):
                 continue
 
             # Standard layout: {ns}/{app}/app/helmrelease.yaml
@@ -340,7 +346,7 @@ def _bare(app: str) -> str:
 WORKLOAD_KINDS = ("Deployment", "StatefulSet", "DaemonSet")
 
 
-def find_repo_subworkloads() -> list[tuple[str, str, str, str]]:
+def find_repo_subworkloads(skip_decommissioned: bool = False) -> list[tuple[str, str, str, str]]:
     """
     Workloads AUTHORED IN THE REPO that do not own an app directory.
 
@@ -358,6 +364,7 @@ def find_repo_subworkloads() -> list[tuple[str, str, str, str]]:
     Returns: [(namespace, parent_app, workload_name, kind), ...]
     """
     apps_dir = REPO_ROOT / "kubernetes" / "apps"
+    disabled = find_disabled_app_dirs(REPO_ROOT) if skip_decommissioned else []
     appdirs: set[str] = set()
     for ns_dir in apps_dir.iterdir():
         if ns_dir.is_dir() and not ns_dir.name.startswith("."):
@@ -372,6 +379,8 @@ def find_repo_subworkloads() -> list[tuple[str, str, str, str]]:
             continue
         for app_dir in sorted(ns_dir.iterdir()):
             if not app_dir.is_dir() or app_dir.name.startswith("_"):
+                continue
+            if disabled and is_disabled(app_dir, disabled):
                 continue
             for y in sorted(app_dir.rglob("*.yaml")):
                 try:
@@ -440,8 +449,14 @@ def find_unexplained_workloads(scope: str) -> tuple[list[str], int]:
         DEGRADED.record(scope, "kubectl deploy/sts JSON", repr(e))
         return [], 0
 
-    repo_names = {n for _ns, _p, n, _k in find_repo_subworkloads()}
-    for apps in find_helmrelease_apps().values():
+    # A DECOMMISSIONED app dir (ks.yaml reference commented out, Flux pruned
+    # it) explains nothing: if its workload is still running, the prune did
+    # not happen and that IS drift. Before 2026-10-05 its directory name
+    # silently explained the leftover. Skipped visibly, by name.
+    cprint(C.CYAN, "  cluster cross-check: "
+                   + skip_line(find_disabled_app_dirs(REPO_ROOT)))
+    repo_names = {n for _ns, _p, n, _k in find_repo_subworkloads(skip_decommissioned=True)}
+    for apps in find_helmrelease_apps(skip_decommissioned=True).values():
         repo_names.update(apps)
         repo_names.update(_bare(a) for a in apps)
 

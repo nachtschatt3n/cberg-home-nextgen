@@ -42,6 +42,9 @@ from lib.findings_writer import (  # noqa: E402
     FindingsWriter, DegradationLog, cycle_id_from_env, trigger_from_env, git_head,
     component_key,
 )
+from lib.decommissioned_apps import (  # noqa: E402
+    find_disabled_app_dirs, is_disabled, skip_line,
+)
 
 # Self-activate mise toolchain so kubectl/talosctl/flux/sops + KUBECONFIG/etc are
 # set regardless of how the script is invoked (cron, sub-agent, fresh shell).
@@ -682,6 +685,21 @@ class VersionChecker:
         # place. main() applies it to the writer before close().
         self.degraded = _DEGRADED
 
+        # Decommissioned app dirs (ks.yaml reference commented out in the
+        # parent kustomization, no live reference anywhere): Flux pruned them,
+        # so their manifests describe nothing that runs. Before 2026-10-05
+        # the rglob below still reported version findings for them and a
+        # planner was dispatched for actual-budget after ac7bf0e0 removed it.
+        # Skipped VISIBLY (check_all prints skip_line, the report lists them).
+        # A helper failure fails toward SCANNING everything, never toward
+        # skipping.
+        try:
+            self.decommissioned = find_disabled_app_dirs(self.repo_root)
+        except Exception as e:  # noqa: BLE001
+            self.decommissioned = []
+            print(f"{Colors.YELLOW}decommissioned-app detection failed "
+                  f"({type(e).__name__}: {e}) — scanning every app dir{Colors.RESET}")
+
         # Check if gh CLI is available
         self.use_gh_cli = self._check_gh_available()
         self._gh_api_token: Any = _UNSET   # lazily resolved by _github_api_token()
@@ -706,7 +724,7 @@ class VersionChecker:
         found = set()
         for pattern in ("*helmrelease.yaml", "*helm-release.yaml"):
             found.update(apps_dir.rglob(pattern))
-        return sorted(found)
+        return sorted(f for f in found if not is_disabled(f, self.decommissioned))
 
     # CronJob and Job were absent until 2026-09-21 (F-b6a4bf95): 22 container
     # images across ~20 CronJobs and 2 Jobs were never enumerated at all — not
@@ -768,6 +786,8 @@ class VersionChecker:
         for file_path in sorted(apps_dir.rglob("*.yaml")):
             if "helmrelease" in file_path.name.lower():
                 continue  # already covered by find_helmreleases()
+            if is_disabled(file_path, self.decommissioned):
+                continue  # decommissioned app dir — reported by check_all()
             try:
                 text = file_path.read_text()
             except OSError as e:
@@ -4062,6 +4082,11 @@ class VersionChecker:
         else:
             print("No open Renovate PRs found")
 
+        # Decommissioned app dirs are excluded from BOTH enumerations below.
+        # Say so, with names — a silent skip is indistinguishable from a gap.
+        print(f"{Colors.YELLOW if self.decommissioned else Colors.GREEN}"
+              f"{skip_line(self.decommissioned)}{Colors.RESET}")
+
         # Find and parse all HelmReleases
         helmrelease_files = self.find_helmreleases()
         print(f"Found {len(helmrelease_files)} HelmRelease files")
@@ -4489,6 +4514,8 @@ class VersionChecker:
         lines.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append("")
         lines.append("> **Note:** Release notes are fetched from GitHub API. If rate limited, some release notes may not be available. Check source links for full details.")
+        lines.append("")
+        lines.append(f"> **Scope:** {skip_line(self.decommissioned)}")
         lines.append("")
         lines.append("## Summary")
         lines.append("")
