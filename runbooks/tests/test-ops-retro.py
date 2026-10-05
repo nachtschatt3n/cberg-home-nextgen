@@ -249,7 +249,7 @@ def test_velocity():
           R.classify_bump("fix(ai-sre): roll image 2.1.4 -> 2.1.5") == "auto"
           and R.classify_bump("fix(rainbow-rescue): image 0.1.2 -> 0.1.3 (refreshed alpine packages)") == "auto")
     check("classify_bump: security_ref trailer in body -> auto",
-          R.classify_bump("fix(arag-web): image sha-2873ce3 -> sha-e8d9f51", "Mathias Uhl",
+          R.classify_bump("fix(arag-web): image sha-2873ce3 -> sha-e8d9f51", "operator",
                           "Rebuilt on a fresh base.\n\nsecurity_ref: F-89c74756\n") == "auto")
     check("classify_bump: security_ref mentioned mid-line is NOT the trailer",
           R.classify_bump("feat(x): 1 -> 2", "", "see security_ref: F-89c74756 elsewhere") == "operator")
@@ -262,8 +262,8 @@ def test_velocity():
     check("classify_bump: 'enrolled'/'controller' do not match the roll marker",
           R.classify_bump("feat(authentik): enrolled users 1 -> 2 via controller") == "operator")
     m = R.velocity_share([(t(1), "chore(s): update container images (weekly rebuild)", "fluxcdbot", ""),
-                          (t(1), "fix(a): image sha-1 -> sha-2", "Mathias Uhl", "security_ref: F-0123abcd"),
-                          (t(1), "feat(b): 1 -> 2", "Mathias Uhl")], CUR)
+                          (t(1), "fix(a): image sha-1 -> sha-2", "operator", "security_ref: F-0123abcd"),
+                          (t(1), "feat(b): 1 -> 2", "operator")], CUR)
     check("velocity share: bot rebuild + security-lane roll auto, bare bump operator (3-tuple still accepted)",
           m["value"] == {"auto": 2, "operator": 1} and m["auto_pct"] == 67, str(m))
     check("velocity share: no commits readable -> unmeasured", unmeasured(R.velocity_share(None, CUR)))
