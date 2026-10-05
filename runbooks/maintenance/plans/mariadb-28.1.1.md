@@ -434,6 +434,7 @@ grep -cE '[[:space:]]OK$' "$W/check-T0.txt" > "$W/check-T0.okcount"
 [ "$(cat "$W/check-T0.okcount")" -ge 212 ] || { echo "STOP: only $(cat "$W/check-T0.okcount") OK lines at T0 — the floor would measure nothing (212 user tables alone)"; exit 1; }
 grep -vE '[[:space:]]OK$|^RC=' "$W/check-T0.txt" | grep -v 'password on the command line' | LC_ALL=C sort -u > "$W/check-T0.nonok"
 echo "T0: $(cat "$W/check-T0.okcount") OK lines, $(wc -l < "$W/check-T0.nonok" | tr -d ' ') distinct non-OK lines"; cat "$W/check-T0.nonok"
+grep -iE 'error|corrupt|crashed' "$W/check-T0.nonok" && { echo "STOP: corruption reported at T0 — fix before the bump, never baseline it"; exit 1; }
 ```
 
 The non-OK lines at T0 (CSV log tables, Aria notes, `sys` views, if any)
@@ -635,6 +636,7 @@ Trust the Backup CR, not `lastBackupAt` (`docs/sops/backup.md`).
 7. **Run mariadb-upgrade by hand: MANDATORY (§1.4)**, over the socket,
    without TLS:
    ```bash
+   for x in upgrade.log upgrade.rc upgrade-bad.txt; do [ -e "$W/$x" ] && cp "$W/$x" "$W/$x.1"; done   # a re-run keeps the first run's evidence
    kubectl -n databases exec mariadb-0 -c mariadb -- sh -c \
      'mariadb-upgrade --protocol=socket --skip-ssl -uroot -p"$MARIADB_ROOT_PASSWORD"' > "$W/upgrade.log" 2>&1
    echo "$?" > "$W/upgrade.rc"; cat "$W/upgrade.log"        # no pipe: $? is mariadb-upgrade's own exit status (via kubectl exec)
