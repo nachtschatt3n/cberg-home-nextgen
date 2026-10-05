@@ -46,7 +46,7 @@ conflicts_with:
                                       # reconcile churn in ns databases confounds §4.5's scoped gate
   # [same namespace: §4.5's alert gate is scoped to ns databases]
   # - mariadb-chart-27.3.0 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
-  - mariadb-28.1.1  # ADDED 2026-10-04: successor plan (same databases/mariadb HR + mariadb-0 roll); reciprocal -- it already lists this plan
+  # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
     # rolls databases/mariadb-0 (nightly:2026-10-05)
   - redis-fleet-8.10.2                # rolls redis workloads incl. ns databases
   # [rollback-class stacking (house rule 81fdd797: every backup-restore pair

@@ -59,7 +59,7 @@ conflicts_with:                       # every OPEN plan that reads Prometheus in
   - otel-operator-0.23.0
   - edot-collector-0.162.0
   - reloader-2.2.18
-  - mariadb-28.1.1
+  # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
   - immich-machine-learning-3.2.4
   - app-template-5.2.1
   - external-dns-1.23.0

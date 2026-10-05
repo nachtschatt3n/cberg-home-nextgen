@@ -46,7 +46,7 @@ conflicts_with:
   # ADDED 2026-10-05 (retarget): reciprocals — each of these already lists this plan; serialize.
   - coredns-1.48.2                    # same coredns-resolver reason as the chart-patches plan
   - envoy-proxy-config-distroless-v1.39.2  # rolls envoy-external proxies; its per-host diff + our public route
-  - mariadb-28.1.1                    # lists us (reciprocity; one failing restore at a time)
+  # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
   - nextcloud-fleet-35.0.1            # office-wide silence would hide this plan's failures
   - nocodb-2026.09.1                  # lists us (backup-restore set, same window family)
 exclusive: false

@@ -53,7 +53,7 @@ conflicts_with:
   - immich-machine-learning-3.2.4     # iGPU + CPU consumer on nuc14-03: its roll during a run changes that run's load
   - jellyfin-12.1                     # iGPU consumer on nuc14-01 (same reason)
   - jellyfin-config-rwo-migration     # iGPU consumer on nuc14-01 (same reason)
-  - mariadb-28.1.1                    # backup-restore stacking (convention of 67ab1cc4): never two backup-restore plans in one run
+  # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
   - nextcloud-fleet-35.0.1            # reciprocity (review-3): it names this plan (backup-restore stacking)
   - k8s-1.36.5                        # reciprocity (review-3): it names this plan
   - helm-drift-detection              # its P2 rolls intel-gpu-plugin (re-registers gpu.intel.com/i915 on every node)

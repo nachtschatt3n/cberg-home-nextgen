@@ -55,7 +55,7 @@ conflicts_with:
   - envoy-proxy-config-distroless-v1.39.2   # its §4 reads probe_success + resolves through CoreDNS; it lists coredns-1.48.1
   - external-dns-1.23.0               # DNS-plane change; its verification resolves names
   - app-template-5.2.1                # rolls ~78 workloads whose readiness resolves through CoreDNS
-  - mariadb-28.1.1                    # tenants re-resolve the DB service on reconnect; lists coredns-1.48.1
+  # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
   - penpot-chart-1.10.0               # its nginx resolver moves to cluster DNS; gate resolves via CoreDNS
   - redis-fleet-8.10.2                # consumers re-resolve on reconnect
   - nextcloud-fleet-35.0.1            # appstore downloads resolve through CoreDNS

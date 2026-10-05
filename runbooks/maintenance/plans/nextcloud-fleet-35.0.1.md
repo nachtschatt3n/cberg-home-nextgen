@@ -113,7 +113,7 @@ conflicts_with:
   - longhorn-1.13.0                             # one-way storage engine move; §2.4 snapshots + §5.3 revert need a stable Longhorn
   # [rollback-class stacking (house rule 81fdd797: every backup-restore pair is
   #  declared; two in one slot leave no rollback capacity for either)]
-  - mariadb-28.1.1                              # (reciprocal) backup-restore
+  # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
   - jellyfin-12.1                               # backup-restore
   - n8n-2.39.8                                  # backup-restore
   - nocodb-2026.09.1                            # backup-restore (reciprocal)
