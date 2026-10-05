@@ -72,19 +72,13 @@ touches:
     - flux-source                     # PUSH FREEZE: origin/main must equal the freeze sha before every node
     - git-main                        # no session/bot pushes to main in-window
     - talos-machineconfig             # node OS + kernel 6.18.51 -> 6.18.54 (block WBT newly ON, §1.2)
-depends_on:
-  - talconfig-multidoc-migration      # MUST RUN FIRST (§6.1): (a) its premise `nodes-on-talos-1.14.1`
-                                      # and its ready-for-go render are pinned to v1.14.1 — rolling
-                                      # v1.14.2 first invalidates its review; (b) until it lands NO
-                                      # machine-config change is possible (task talos:generate-config
-                                      # fails on main), so the only remedy for a bad WBT effect (§1.2,
-                                      # a udev/sysfs knob) would be unavailable.
+depends_on: []                        # talconfig-multidoc-migration EXECUTED now:2026-10-04 and retired (10bee773);
+                                      # dead ref removed 2026-10-05 (sweep 481b9c1f). Premise
+                                      # multidoc-migration-applied-on-all-nodes is the live gate.
 conflicts_with:                       # exclusive: true already keeps everything out of the slot;
                                       # these are the plans that ALSO mutate Talos machine config or
                                       # the same nodes and must never share a night with this roll.
-  - talconfig-multidoc-migration      # exclusive, sun-attended:2026-10-04; re-renders the control
-                                      # plane node by node. Ordering is depends_on above; this entry
-                                      # keeps them out of one slot if either slips.
+  # talconfig-multidoc-migration: EXECUTED now:2026-10-04 and retired (10bee773); dead ref removed 2026-10-05 (sweep 481b9c1f)
   - multus-macvlan-foundation         # reference/unwindowed; talosctl apply-config on the nodes
   - talos-sysfs-power-caps            # reciprocity (added 2026-10-05 by that plan's planner): it writes a
                                       # SysfsConfig (RAPL PL1/PL2, EPP, iGPU gt0 max) via apply-config; never

@@ -149,11 +149,11 @@ premises:
       cat kubernetes/apps/flux-system/flux-operator/app/helmrelease.yaml
       kubernetes/apps/flux-system/flux-operator/instance/helmrelease.yaml | grep -c '^      version: 0.57.0$'
     expect_exact: "2"
-status: draft     # RESET from vetted on the 2026-10-03 retarget 0.60.0 -> 0.61.0 (a drift is a re-review).
+status: vetted    # re-vetted 2026-10-05 after the 0.61.0 retarget review (was RESET to draft on 2026-10-03).
                   # Prior history: plan-reviewer 2026-09-28 (F-2c849d1e) needs-fix -> fixed -> ready-for-go
                   # for the 0.60.0 target. The delta to re-review is section 1.2a only; every gate is unchanged
                   # in shape. HUMAN-GATED (autonomy_override); run before flux-reconciler-impersonation (10-11).
-review: null      # was ready-for-go@2026-09-28 against target 0.60.0; void for 0.61.0 until re-reviewed
+review: ready-for-go@2026-10-05   # plan-reviewer re-review of the 0.61.0 retarget; sole blocker (4.6 hardcoded total) fixed same day
 window: "nightly:2026-10-06"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed (autonomy_override, Flux floor); before flux-reconciler-impersonation 10-11. KEPT on the 2026-10-03 retarget; the slot only runs if the delta re-review passes first (status is draft).
 sops_refs:
   - docs/sops/application-update.md
@@ -318,6 +318,11 @@ pq 'max_over_time(count(flux_resource_info{ready="False",suspended="False"})[14d
 pq 'count(count_over_time(ALERTS{alertname="FluxResourceNotReady"}[14d]))'   # POSITIVE CONTROL for the 4.6 ALERTS gate: must be non-EMPTY (1205 series on 2026-09-28, 1311 on 2026-10-03); if EMPTY retry with [30d], still EMPTY -> treat the 4.6 ALERTS line as informational only
 pq 'count(ALERTS{alertname=~"Flux.*",alertstate="firing"})'               # PASS: EMPTY
 kill $PF 2>/dev/null
+# Fleet-size baseline for gate 4.6 (review 2026-10-05: never compare against a hardcoded total;
+# it read 241 live on 2026-10-05 vs the 268/272 once quoted in prose)
+mise exec -- kubectl get kustomizations.kustomize.toolkit.fluxcd.io,helmreleases.helm.toolkit.fluxcd.io -A -o json \
+  | python3 -c 'import sys,json; it=json.load(sys.stdin)["items"]; bad=[i["metadata"]["namespace"]+"/"+i["metadata"]["name"] for i in it if not i["spec"].get("suspend") and not any(c["type"]=="Ready" and c["status"]=="True" for c in i.get("status",{}).get("conditions",[]))]; print("total=%d notready=%d %s" % (len(it), len(bad), bad))' | tee /tmp/flux-fleet/total-before.txt
+# PASS: notready=0. The total= value is the 4.6 baseline.
 
 # e) SOPS/push path works (the rollback is a push)
 mise exec -- sops -d kubernetes/apps/flux-system/flux-operator/instance/git-auth-secret.sops.yaml >/dev/null && echo SOPS_OK
@@ -533,13 +538,14 @@ CONTROL: metric flux_instance_info — `count` with ready="True" and the exact v
 ```bash
 sleep 600
 mise exec -- kubectl get kustomizations.kustomize.toolkit.fluxcd.io,helmreleases.helm.toolkit.fluxcd.io -A -o json \
-  | python3 -c 'import sys,json; it=json.load(sys.stdin)["items"]; bad=[i["metadata"]["namespace"]+"/"+i["metadata"]["name"] for i in it if not i["spec"].get("suspend") and not any(c["type"]=="Ready" and c["status"]=="True" for c in i.get("status",{}).get("conditions",[]))]; print("total=%d notready=%d %s" % (len(it), len(bad), bad))'
+  | python3 -c 'import sys,json; it=json.load(sys.stdin)["items"]; bad=[i["metadata"]["namespace"]+"/"+i["metadata"]["name"] for i in it if not i["spec"].get("suspend") and not any(c["type"]=="Ready" and c["status"]=="True" for c in i.get("status",{}).get("conditions",[]))]; print("total=%d notready=%d %s" % (len(it), len(bad), bad))' | tee /tmp/flux-fleet/total-after.txt
+cat /tmp/flux-fleet/total-before.txt   # compare total= against this baseline
 pq 'count(flux_resource_info{ready="False",suspended="False"})'
 pq 'count(ALERTS{alertname=~"FluxResourceNotReady|FluxSourceStalled|FluxMetricsAbsent",alertstate=~"pending|firing"})'
 mise exec -- kubectl -n flux-system get ks flux-system cluster-apps flux-operator flux-instance \
   -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.lastAppliedRevision}{"\n"}{end}'
 ```
-PASS: `notready=0` with `total` within a few of the pre-check (268 at authoring, 272 at the 2026-10-03 refresh);
+PASS: `notready=0` with `total` within ±3 of the section 2 d baseline in `/tmp/flux-fleet/total-before.txt` (NOT a hardcoded number; 241 live on 2026-10-05);
 both PromQL lines `EMPTY` — valid only because 4.3 proved the series exist AND the section 2 d positive controls proved both queries can match (reviewer measurement 2026-09-28: ready="False" max 47 over 14d; FluxResourceNotReady pending 1205 samples over 14d); all four
 Kustomizations show `refs/heads/main@sha1:<core-sha or later>`. FAIL looks like
 `notready=N [ns/name...]`, a non-empty ALERTS count, or a Kustomization still on the

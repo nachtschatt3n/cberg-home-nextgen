@@ -1139,7 +1139,7 @@ which git cannot reach the cluster.
 
 - **If `flux-fleet-0.60.0` lands first** (it should run in a separate, earlier window),
   premise `operator-v0.57.0` fails and this plan STOPs at pre-check. Re-express it to
-  `expect_contains: "flux-operator:v0.60.0"` (id `operator-v0.60.0`, `why` citing
+  `expect_contains: "flux-operator:v0.61.0"` (id `operator-v0.61.0`, `why` citing
   flux-fleet-0.60.0) before the window: the flux-fleet reviewer verified 2026-09-28 that
   internal/builder and the fluxinstance controller are unchanged v0.57.0..v0.60.0, so the
   flag rendering this plan relies on holds. Gate C2 is already version-relative.

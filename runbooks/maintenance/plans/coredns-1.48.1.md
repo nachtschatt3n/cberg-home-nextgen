@@ -36,7 +36,7 @@ conflicts_with:
                                               # this plan supersedes that item. Never the same window.
                                               # §3 tolerates either order (anchor accepts 1.47.0 or 1.47.1).
   - talos-linux-1.14.2                # exclusive node roll; reschedules both CoreDNS pods and touches coredns
-  - talconfig-multidoc-migration      # exclusive; rewrites node-resolver/hostDNS = CoreDNS's `.` upstream
+  # talconfig-multidoc-migration: EXECUTED now:2026-10-04 and retired (10bee773); dead ref removed 2026-10-05 (sweep 481b9c1f)
   - flux-reconciler-impersonation     # exclusive; changes how helm-controller applies this HR
   - flux-fleet-0.60.0                 # upgrades source/helm-controller = the §5 revert path
   - flux-oci-chart-sources            # moves HelmRepository sources incl. coredns, declares dns-internal

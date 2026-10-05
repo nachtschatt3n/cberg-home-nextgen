@@ -60,7 +60,7 @@ security_ref: F-0cf695f9              # reloader image finding; v1.4.22 is the b
 finding_refs:
   - F-74a00f0b                        # "reloader: chart 2.2.16 → 2.2.18 (patch)" (version finding; moved here from
                                       # chart-patches-coredns-reloader-blackbox with the carve-out)
-review: null
+review: ready-for-go@2026-10-05
 premises:
   # All read-only single commands. Values measured 2026-10-03.
   - id: reloader-hr-on-2-2-16
@@ -84,7 +84,7 @@ premises:
     why: "§3's sed assumes exactly one `      version: 2.2.16` line in the HR file (run from the repo root)."
     run: "grep -c '^      version: 2.2.16$' kubernetes/apps/kube-system/reloader/app/helmrelease.yaml"
     expect_exact: "1"
-status: draft
+status: vetted    # plan-reviewer 2026-10-05: ready-for-go, 0 blocking
 window: null
 sops_refs:
   - docs/sops/application-update.md

@@ -125,7 +125,7 @@ finding_refs: []                  # CHECKED 2026-09-30 with SWEEP_PG_DSN up:
                                   # otel-operator-0.23.0). If the next sweep files one,
                                   # add its id here — the plan-or-page pass joins on it.
 review: null
-status: draft
+status: blocked   # BLOCKED 2026-10-05 (plan-reviewer, sweep 481b9c1f): target tag 0.162.0 is 404 on Docker Hub AND ghcr (only -amd64 per-arch tags exist); upstream re-push tracked in open-telemetry/community#3738. UNBLOCK = manifest list published (or retarget to 0.163.0) + add a target-manifest-list-published premise + per-node kmsg-heartbeat gate for .11/.12/.13 (kmsg-sender stall on collector restart), then re-review.
 window: null
 premises:
   # Re-checked at EXECUTION time. All three RUN on 2026-09-30 while writing this plan.

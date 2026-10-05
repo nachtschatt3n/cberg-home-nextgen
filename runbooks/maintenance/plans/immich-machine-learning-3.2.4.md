@@ -47,6 +47,8 @@ conflicts_with:
                                       # a source swap under this HR in the same window confounds §4.1.
   - talos-linux-1.14.2                # node roll (exclusive, reboots every node): re-registers i915 and
                                       # reschedules this pod; never in the same window.
+  - talos-sysfs-power-caps            # awaiting-soak until >=2026-10-05T23:17Z; shares igpu-i915 +
+                                      # node-power-thermal, its 24 h throttle/temp soak must not see our roll.
 exclusive: false
 security_ref: F-5ca2e3d9              # security driver on the CURRENT image; detail on the DB record only.
 capability_change: false              # same-behaviour patch: upstream ML source diff v3.2.2..v3.2.4 is the
@@ -55,8 +57,8 @@ capability_change: false              # same-behaviour patch: upstream ML source
 rollback_class: git-revert            # nothing forward-only: ML is stateless; /cache holds downloaded
                                       # model files keyed by model name, identical for both versions.
 finding_refs: [F-5ca2e3d9, F-6d0f4efc]  # security finding (current image) + the version finding for this bump.
-review: null
-status: draft
+review: ready-for-go@2026-10-05
+status: vetted
 window: null
 premises:
   - id: ml-image-is-v3.2.2-openvino

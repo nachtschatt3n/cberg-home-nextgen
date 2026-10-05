@@ -58,7 +58,7 @@ conflicts_with:
   - penpot-chart-1.10.0
   - media-naming-p3
   - bitnamilegacy-exit-nextcloud-db
-  - talconfig-multidoc-migration      # also exclusive on its own side
+  # talconfig-multidoc-migration: EXECUTED now:2026-10-04 and retired (10bee773); dead ref removed 2026-10-05 (sweep 481b9c1f)
 exclusive: false
 security_ref: F-15d4b6c4              # open security record on the running 2026.09.0 image, currently
                                       # accepted under AR-029 because 2026.09.0 WAS the newest tag.

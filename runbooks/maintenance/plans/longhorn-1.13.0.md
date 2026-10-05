@@ -46,8 +46,7 @@ depends_on: []
 conflicts_with:
   - talos-linux-1.14.2                # node roll restarts instance-managers + rebuilds replicas; never
                                       # pair with a storage-engine upgrade (same rule as 34abe2bb)
-  - talconfig-multidoc-migration      # control-plane/etcd config change; exclusive, keep the
-                                      # storage engine out of its slot and vice versa
+  # talconfig-multidoc-migration: EXECUTED now:2026-10-04 and retired (10bee773); dead ref removed 2026-10-05 (sweep 481b9c1f)
   - jellyfin-config-rwo-migration     # allocates a NEW Longhorn volume + restore-proof on the engine
                                       # this plan is replacing; run before or after, never with
   # - mariadb-chart-27.3.0 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)

@@ -54,7 +54,7 @@ security_ref: F-160fc0dd              # descheduler v0.36.0 image finding (AR-02
                                       # first newer tag. Detail in the DB only.
 finding_refs:
   - F-160fc0dd                        # the bump is this finding's remediation; re-measure on the next security sweep
-review: null
+review: ready-for-go@2026-10-05
 premises:
   # All read-only single pipelines. Values measured 2026-10-05.
   - id: descheduler-hr-on-0-36-0
@@ -90,7 +90,7 @@ premises:
     why: "§3's sed assumes exactly one `      version: 0.36.0` line in the HR file (run from the repo root)."
     run: "grep -c '^      version: 0.36.0$' kubernetes/apps/kube-system/descheduler/app/helmrelease.yaml"
     expect_exact: "1"
-status: draft
+status: vetted
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -267,6 +267,14 @@ Wait for a `descheduler-<n>` Job created after the HR became Ready. List the can
 - CONTENTS ASSERTION: no RBAC or eviction errors, and no PVC-backed pod was evicted.
   - `kubectl logs -n kube-system job/<J> | grep -cE '^E[0-9]{4} |forbidden'` must print `0`. A
     `forbidden` here means the narrowed ClusterRole broke something.
+    DEMONSTRATED (plan-reviewer, 2026-10-05): on the real 2026-10-04 v0.36.0 job log (38 lines) this
+    exact grep prints `0`, while the sibling anchor `^[IWE][0-9]{4} ` matches all 38 lines (prefix shape
+    right). The same log with ONE appended real-format line
+    `E1004 04:00:02.900000 1 evictions.go:574] "Error evicting pod" err="pods \"x\" is forbidden: …pods/eviction…"`
+    prints `1`. The gate can fail.
+  - CONSISTENCY: the count of `"Evicted pod"` lines must equal `totalEvicted=<n>` from the summary
+    line. The eviction line is V(1); a log-level or string drift would otherwise hide evictions and
+    make the PVC review below vacuous.
   - For every `"Evicted pod"` line, check that the named pod's owner workload mounts no PVC:
     `kubectl logs -n kube-system job/<J> | grep -E '"Evicted pod"'` lists them, and it printed nothing
     on the last 3 runs.

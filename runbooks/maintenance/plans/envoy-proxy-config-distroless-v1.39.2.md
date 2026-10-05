@@ -63,11 +63,8 @@ rollback_class: git-revert            # the old image is digest-pinned, still pu
                                       # migration. §5 is a one-line digest restore.
 autonomy_override: human-gated        # shared `gateway` derives HUMAN-GATED via SHARED_INFRA_FLOOR anyway;
                                       # attended window only.
-security_ref: null                    # upstream marks v1.39.2 a security release; NO sweep finding records
-                                      # it yet (`finding list --grep` envoyproxy/envoy, envoy-proxy, 1.39 ->
-                                      # no rows, 2026-10-03). Detail belongs on a finding, not here -- the
-                                      # sweep should add one and set this field.
-finding_refs: []                      # checked 2026-10-03: no finding for this component+target
+security_ref: F-61035b6e              # security driver; detail on the DB record only (review 2026-10-05)
+finding_refs: [F-4a6327dd, F-61035b6e]  # version row for this target + the planner-raised plan-section row
 review: null
 status: draft
 window: null
@@ -131,7 +128,7 @@ cluster.
   No Envoy behaviour, xDS API or config semantics change.
 - Upstream labels this a security release (4 Envoy lines patched the same day). Per
   `docs/sops/vulnerability-disclosure.md` the advisory detail does not belong in this
-  file. No sweep finding records it yet (`security_ref: null`, see the frontmatter).
+  file; it is recorded on F-61035b6e (`security_ref`, see the frontmatter).
 
 **Registry facts (measured 2026-10-03, Docker Hub v2 API).**
 - `distroless-v1.39.2` is an OCI index, `sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a`.

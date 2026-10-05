@@ -46,6 +46,8 @@ touches:
                                       # same-night kube-prometheus-stack plan is listed in conflicts_with.
 depends_on: []
 conflicts_with:
+  - flux-fleet-0.60.0                 # Flux controller bump changes the delivery path this bump rides (review 2026-10-05)
+  - flux-oci-chart-sources            # its bjw-s chartRef switch edits this same helm-release.yaml (review 2026-10-05)
   - app-template-5.2.1                # edits THIS helm-release.yaml (chart 5.1.0 -> 5.2.1) and its
                                       # --compare-workloads gate covers sts/iobroker: our pod roll reads
                                       # as GEN_CHANGED there, and a mixed chart+image change breaks our
@@ -220,7 +222,8 @@ flux get kustomizations -n home-automation iobroker
 flux get helmreleases -n home-automation iobroker
 
 # 2.2 BASELINE capture (writes $W for §4 diffs)
-W=/tmp/iobroker-12-$(date +%Y%m%d-%H%M); mkdir -p "$W"
+W=/private/tmp/claude-501/iobroker-12.0.0   # FIXED plan-scoped path: shell vars do not survive between the window agent's Bash calls (review 2026-10-05)
+if [ -d "$W" ] && [ -n "$(ls -A "$W" 2>/dev/null)" ]; then echo "STOP: $W holds files from an earlier attempt -- move them aside first"; exit 1; fi; mkdir -p "$W"
 kubectl -n home-automation exec iobroker-0 -- bash -c 'node -v; . /etc/os-release; echo "debian=$VERSION_ID"' | tee "$W/runtime-before.txt"
 #   expect: v22.22.0 / debian=12
 kubectl -n home-automation exec iobroker-0 -- bash -c 'cd /opt/iobroker && iobroker object list "*" 2>/dev/null | wc -l' | tr -d ' ' | tee "$W/objcount-before.txt"
@@ -295,6 +298,7 @@ kubectl get hr -n home-automation iobroker -o jsonpath='{.status.conditions[?(@.
 #   PASS: "True". FAIL: False + an upgrade error message.
 
 # G3 — CONTENTS: the runtime actually changed (guards: right digest label, wrong runtime)
+W=/private/tmp/claude-501/iobroker-12.0.0   # re-set: fresh shell; same fixed path as §2.2
 kubectl -n home-automation exec iobroker-0 -- bash -c 'node -v; . /etc/os-release; echo "debian=$VERSION_ID"' | tee "$W/runtime-after.txt"
 #   PASS: v24.* and debian=13.  FAIL: v22.22.0 / debian=12 (= same as $W/runtime-before.txt).
 
@@ -309,6 +313,7 @@ kubectl -n home-automation exec iobroker-0 -- bash -c 'cd /opt/iobroker; iobroke
 
 # G5 — CONTENTS ASSERTION (the property that could silently break): the EXISTING install was
 #      used, not a fresh one (guards: first-run path extracting initial_iobroker.tar over/next to the PVC)
+W=/private/tmp/claude-501/iobroker-12.0.0   # re-set: fresh shell; same fixed path as §2.2
 kubectl -n home-automation exec iobroker-0 -- bash -c 'cd /opt/iobroker && iobroker object list "*" 2>/dev/null | wc -l' | tr -d ' ' | tee "$W/objcount-after.txt"
 kubectl -n home-automation exec iobroker-0 -- bash -c 'cd /opt/iobroker && iobroker list instances 2>/dev/null | grep -c "^+ system.adapter\."' | tee "$W/instances-after.txt"
 kubectl -n home-automation exec iobroker-0 -- bash -c 'cd /opt/iobroker && iobroker object get system.config 2>/dev/null' \

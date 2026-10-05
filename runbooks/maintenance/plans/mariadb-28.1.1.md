@@ -65,7 +65,7 @@ conflicts_with:
   - jellyfin-12.1
   - media-naming-p3
   - penpot-chart-1.10.0
-  - talconfig-multidoc-migration
+  # talconfig-multidoc-migration: EXECUTED now:2026-10-04 and retired (10bee773); dead ref removed 2026-10-05 (sweep 481b9c1f)
   # No kube-prometheus-stack plan is open (91.4.1 executed). §4.5 reads Prometheus: a future one MUST be added here.
 capability_change: false              # same service, same tenant-visible behaviour: the one default that would change
                                       # behaviour (utf8 = utf8mb4) is pinned back by old_mode (§1.3) and asserted in §4.2.

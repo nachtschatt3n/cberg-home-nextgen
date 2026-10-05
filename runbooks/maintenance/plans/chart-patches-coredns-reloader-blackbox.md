@@ -104,8 +104,8 @@ premises:
       §4 reads probe_success from these Probe CRs; if they were renamed/removed the gate reads empty.
     run: kubectl get probe -n monitoring dns-k8s-gateway-primary dns-k8s-gateway-secondary http-ingress-internal http-ingress-external -o name
     expect_matches: "(?s)dns-k8s-gateway-primary.*dns-k8s-gateway-secondary.*http-ingress-internal.*http-ingress-external"
-status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e backlog review): ready-for-go, 0 blocking; 3 bookkeeping fixes applied
-review: ready-for-go@2026-09-28
+status: draft     # RESET 2026-10-05 (sweep 481b9c1f): amended 2026-10-03 (reloader carve-out) and its own text asks for a delta re-review; item C still overlaps coredns-1.48.1
+review: null      # was ready-for-go@2026-09-28, pre-amendment
 # AMENDED 2026-10-03 (upgrade-planner, sweep cycle 5a150729): item B (reloader) CARVED OUT to plan
 # reloader-2.2.18 - held target moved 2.2.17 -> 2.2.18. Scope REDUCTION only (A and C unchanged);
 # needs a delta re-review of the removal before the 2026-11-01 window.
