@@ -180,9 +180,9 @@ finding_refs:
   # here, §3.11, left open as the standing knob), F-3602cfa9 (unexplained 09-24 stall, owned by
   # health-check-agent, named as residual risk in §7), F-59b12b2b (owned by
   # talconfig-multidoc-migration).
-review: null
-status: draft
-window: null                          # sun-attended is the ONLY allow_reboot window. 2026-10-05: the
+review: ready-for-go@2026-10-06   # plan-reviewer 2026-10-05/06: three needs-fix rounds (Phase K clock, window-open source, roll-record glob) -> fixed -> narrow delta ready-for-go (6b0375a7). Open nonblocking: clear stale g310/pattern-ii files at §2.0; ${CRI:-0} in k0clock; (0a) never piped
+status: awaiting-go   # HUMAN-GATED (3 node reboots + upgrade-k8s): operator GO required; decide at the GO whether the ~30-min Phase K extension is pre-approved
+window: "sun-attended:2026-11-01"   # scheduled 2026-10-06: exclusive Sunday (180 declared / 210 priced; Phase K defers on price unless the extension is pre-approved); 2 weeks before longhorn-1.13.0 (11-15)
                                       # flux-reconciler-impersonation placeholder on 10-11 was released;
                                       # n8n-2.39.8 now holds sun-attended:2026-10-11. The coordinator will
                                       # PROPOSE sun-attended:2026-11-01 for this plan — not assigned here;
