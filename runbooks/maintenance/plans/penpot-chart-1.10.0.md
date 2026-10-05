@@ -34,6 +34,7 @@ touches:
                                       # monitoring: §4 CONTROL lines read Prometheus.
 depends_on: []
 conflicts_with:
+  - flux-distribution-2.9.6           # 2026-10-05 review: reciprocity
   - penpot-cache-9.2                  # both perturb backend/exporter <-> cache connections (§6)
   - kube-prometheus-stack-91.9.0      # §4 CONTROL metrics read through it
   - flux-reconciler-impersonation     # changes helm-controller's apply identity incl. office
@@ -63,10 +64,10 @@ finding_refs: [F-922ffce7, F-4c3c5206]
                                       # F-4c3c5206: exporter image finding — 2.18.x measured to answer it (§1.C).
                                       # NOT claimed: F-220e7d7b (backend) and F-9ac47520 (frontend) —
                                       #   re-rated by the sweep after landing; detail on the records.
-status: draft        # RESET 2026-10-05 by the 1.11.1 retarget (was awaiting-go / review ready-for-go@2026-09-28
+status: awaiting-go   # retarget 1.10.0 -> 1.11.1 is MATERIAL (SD-6): a FRESH operator GO is required; §2.0 enforces it
                      # for 1.10.0). A retarget voids the old review AND the old GO: needs a fresh
                      # plan-reviewer pass, then a NEW operator GO (HUMAN-GATED, capability_change: true).
-review: null
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (sole blocker: stale 10-02 GO not stopped) -> §2.0 GO-currency gate added by coordinator (same gate as n8n-2.39.8, tested STALE/CURRENT live)
 window: "sat-attended:2026-10-31"   # KEPT on the 2026-10-05 retarget (flux-fleet-0.60.0 precedent); the slot only runs if the re-review passes and a new GO is recorded first (status is draft). Originally SCHEDULED 2026-09-28 by maintenance-window-agent (moved off sun 10-25: shares monitoring+office with redis-fleet)
 premises:
   - id: live-backend-still-2.17.2
@@ -253,6 +254,23 @@ with trivy 0.70.0 (`--scanners vuln --severity CRITICAL,HIGH --ignore-unfixed`),
   re-rates them after this lands (detail on the records only).
 
 ## 2. Pre-checks
+
+### 2.0 GO-currency gate (added 2026-10-05 by the scheduling pass, per plan-review blocker — STOP, not a judgement call)
+
+The home-operation ledger still carries `penpot-chart-1.10.0 approve decided_at=2026-10-02T08:18:48Z`
+for the RETIRED target chart 1.10.0 (app 2.18.0). The 2026-10-05 retarget to chart 1.11.1 / app 2.18.1
+crosses a chart minor and adds the frontend :8082 stub_status listener (capability), so under SD-6 that
+GO does NOT carry over. Approvals are keyed on plan_id only, so nothing else stops it. Before anything else:
+
+```bash
+kubectl -n ai exec deploy/openclaw -c app -- /home/node/.openclaw/bin/home-operation --json decisions --pending-exec \
+  | .venv/bin/python3 -c "import sys,json;d=json.load(sys.stdin);r=[x for x in (d if isinstance(d,list) else d.get('decisions',[])) if x.get('key')=='penpot-chart-1.10.0' and x.get('decision')=='approve'];print('GO-CURRENT' if r and max(x.get('decided_at','') for x in r)>='2026-10-05T04:15' else 'GO-STALE-OR-MISSING')"
+```
+
+PASS = `GO-CURRENT` (an approve recorded after the 2026-10-05T04:15Z retarget). `GO-STALE-OR-MISSING`
+→ STOP, (re-)ingest the go_no_go issue with target "chart 1.11.1 (app 2.18.1)" naming the :8082
+stub_status capability, defer. An exec failure is NOT a GO.
+
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen

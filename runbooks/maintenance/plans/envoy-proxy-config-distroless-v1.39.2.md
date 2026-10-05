@@ -30,14 +30,10 @@ touches:
     - public-edge                     # envoy-external is the internet-facing data plane
     - authentik                       # 12 SecurityPolicies (forward-auth) are enforced inside Envoy
     - monitoring                      # §4 reads Prometheus + blackbox probe_success (the instrument)
-depends_on:
-  # - envoy-gateway-1.9.2 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
-    # (a) the *envoyproxy/envoy* deny rule couples this pin to the
-                                      # controller: move the data plane only on top of the CURRENT
-                                      # controller (v1.9.2 compiles 1.39.1, measured below), and
-                                      # (b) that plan's premise `gatewayclass-pin-unchanged`
-                                      # expect_exact's the 1.39.1 pin -- running this first would make
-                                      # a vetted plan fail its own premise. See §6 for the fold option.
+depends_on: []
+  # envoy-gateway-1.9.2 RESOLVED: executed + retired in 418faa1e; the controller is live on chart 1.9.2
+  # (re-measured 2026-10-05). The coupling it carried is now the premise `controller-is-1.9.2`:
+  # the data plane moves only on top of the CURRENT controller, which compiles 1.39.1 (same MINOR).
 conflicts_with:
   - app-template-5.2.1                # declares gateway/envoy; rolls ~78 apps whose routes §4.3's
                                       # per-host status diff reads -- an app roll mid-window fakes
@@ -53,8 +49,11 @@ conflicts_with:
   - flux-fleet-0.60.0                 # upgrades kustomize-controller, which applies gatewayclass.yaml
                                       # and carries the §5 revert path
   - flux-reconciler-impersonation     # exclusive; rewrites how kustomize-controller applies this
-                                      # No kube-prometheus-stack plan is open (checked 2026-10-03). If one
-                                      # appears it MUST be added here -- §4 reads Prometheus.
+  - kube-prometheus-stack-91.9.0      # §2.7/§4.4 read Prometheus + Alertmanager rules: the window's
+                                      # instrument is shared infra (review 2026-10-05)
+  - flux-distribution-2.9.6           # exclusive; upgrades the Flux controllers that apply §3 and carry
+                                      # the §5 revert path (review 2026-10-05)
+  - flux-oci-chart-sources            # moves Flux sources; same §3/§5 apply-and-revert path
 capability_change: false              # same-behaviour patch: 0 source/ changes upstream, no new route,
                                       # permission, API surface or exposure; the EnvoyProxy object only
                                       # changes its image string.
@@ -67,7 +66,7 @@ security_ref: F-61035b6e              # security driver; detail on the DB record
 finding_refs: [F-4a6327dd, F-61035b6e]  # version row for this target + the planner-raised plan-section row
 review: null
 status: draft
-window: null
+window: null                          # proposed sun-attended:2026-10-11 after n8n-2.39.8 (52+45 of 180), else sat-attended:2026-11-14
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/envoy-gateway-upgrade.md
@@ -75,7 +74,7 @@ sops_refs:
 generated: "2026-10-03"
 premises:
   - id: controller-is-1.9.2
-    why: "depends_on envoy-gateway-1.9.2. If the controller is still 1.9.1 that plan has not run, and running this one first fails its premise gatewayclass-pin-unchanged."
+    why: "The data plane moves only on top of the CURRENT controller (envoy-gateway-1.9.2 executed in 418faa1e; v1.9.2 compiles distroless-v1.39.1, same MINOR). Any other chart version means the controller moved since this plan was written; re-check §1 compatibility before proceeding."
     run: kubectl get helmrelease envoy-gateway -n network -o jsonpath='{.spec.chart.spec.version}'
     expect_exact: "1.9.2"
   - id: envoy-gateway-hr-ready
@@ -153,8 +152,9 @@ cluster.
 moves "only in the SAME change as the gateway-helm chart bump … never on its own". That
 is stricter than upstream's stated contract. Read literally, a security-only Envoy patch
 inside the supported minor could never land until EG cuts a release. This plan follows
-upstream's matrix, and it keeps the rule's real intent through `depends_on` (the
-controller is current first) and the attended window. The rule text should say
+upstream's matrix, and it keeps the rule's real intent through the premise
+`controller-is-1.9.2` (the controller is current first) and the attended window.
+Executing it therefore departs from the rule's literal "never on its own"; see §6. The rule text should say
 "MINOR moves only with the chart; same-minor patches may lead the compiled default".
 
 **Verdict.** This is a genuinely small patch, but it rolls every HTTP-serving pod, so
@@ -162,8 +162,18 @@ it runs in an attended window and is human-gated. No reboot.
 
 ## 2. Pre-checks (read-only, ~10 min)
 
-Run these AFTER Step 0 of the window has settled, and AFTER `envoy-gateway-1.9.2` has
-finished its §4.6 soak if that plan ran earlier in the same window.
+Run these AFTER Step 0 of the window has settled. (`envoy-gateway-1.9.2` already
+executed and was retired in 418faa1e; the premise `controller-is-1.9.2` re-checks it.)
+
+**Shell state does not survive between agent Bash calls.** §2.4 writes every helper
+(`envver`, `routes`, `policies`, `sweep`, `changed`, `q`, `alerts`, `pfprom`, `pfstop`)
+to `/tmp/envoy1392-win/fns.sh`. EVERY later block in §2.4–§5 starts with
+`. /tmp/envoy1392-win/fns.sh`, which also `cd`s into `/tmp/envoy1392-win`. `q()` and
+`alerts()` start their own Prometheus port-forward on :19090, or reuse a ready one, so no
+block depends on a port-forward that an earlier call started. Measured 2026-10-05:
+without the source line, `sweep > status.after` in a fresh shell prints
+"command not found", writes 0 lines, and an unguarded diff then reports 0 CHANGED. That
+is a vacuous PASS, so every after-file below is checked with `test -s` before it is read.
 
 2.1 Premises: `.venv/bin/python3 runbooks/plan-premises.py envoy-proxy-config-distroless-v1.39.2`.
 Every premise must PASS.
@@ -190,25 +200,21 @@ curl -fsSL https://raw.githubusercontent.com/envoyproxy/gateway/v1.9.2/api/v1alp
 - FAIL shape: a different digest for 1.39.2 (the tag was re-pushed), or an empty line
   (tag gone or registry unreachable). Either is a STOP.
 
-2.4 Baseline Envoy build version on all 6 pods. This is the input to the §4.1 CONTENTS
-assertion.
+2.4 Write the helper file once, then take the baseline Envoy build version on all 6
+pods. The version is the input to the §4.1 CONTENTS assertion. The block below writes
+the file, so paste it exactly as written. It was dry-run on 2026-10-05 under both zsh
+and bash. The run wrote 9 functions, and `changed()` returned rc 0 / 1 / 2 / 2 / 2 on the
+inputs identical / one-row-000 / empty / short / key-mismatch.
 ```bash
-mkdir -p /tmp/envoy1392-win && cd /tmp/envoy1392-win
+mkdir -p "${W:-/tmp/envoy1392-win}"
+cat > "${W:-/tmp/envoy1392-win}/fns.sh" <<'FNS'
+# envoy1392 window helpers. SOURCE at the top of EVERY later block:  . /tmp/envoy1392-win/fns.sh
+W="${W:-/tmp/envoy1392-win}"; cd "$W" || return 1
 envver() { i=0; for p in $(kubectl -n network get pods -l app.kubernetes.io/component=proxy -o name); do
   port=$((19100+i)); i=$((i+1))
   kubectl -n network port-forward "$p" "$port":19000 >/dev/null 2>&1 & pf=$!; sleep 2
   v=$(curl -s --max-time 5 "http://localhost:$port/server_info" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['version'].split('/')[1], d['state'])" 2>/dev/null)
   kill $pf 2>/dev/null; echo "${p#pod/} ${v:-UNREADABLE}"; done; }
-envver | tee ver.before
-# 2026-10-03 (one pod sampled live): "1.39.1 LIVE". Expect 6 lines "<pod> 1.39.1 LIVE".
-```
-The instrument was measured live on 2026-10-03. The Envoy admin endpoint is bound to the
-pod's localhost:19000, and port-forward reaches it. `server_info.version` reads
-`b579d07d…/1.39.1/Clean/RELEASE/BoringSSL`.
-
-2.5 Baseline route and policy acceptance. Write it to files; §4.2 diffs against them.
-```bash
-cd /tmp/envoy1392-win
 routes() { kubectl get httproute -A -o json | python3 -c '
 import sys,json;from collections import Counter;c=Counter()
 for r in json.load(sys.stdin)["items"]:
@@ -223,14 +229,53 @@ for o in json.load(sys.stdin)["items"]:
   v=[x["status"] for y in a for x in y.get("conditions",[]) if x["type"]=="Accepted"] or [x["status"] for x in st.get("conditions",[]) if x["type"]=="Accepted"]
   c[(o["kind"],tuple(sorted(set(v))))]+=1
 print(sorted(c.items()))'; }
-routes > routes.before; policies > policies.before; cat routes.before policies.before
+sweep() { test -s "$W/hosts.txt" || { echo "GUARD: $W/hosts.txt missing or empty" >&2; return 2; }
+  while read -r h v; do printf '%s %s %s\n' "$v" "$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 --resolve "$h:443:$v" "https://$h/" </dev/null)" "$h"; done < "$W/hosts.txt"; }
+# changed BEFORE AFTER -- rows "<vip> <code> <host>", joined on key host|vip.
+# rc 0 = no change, rc 1 = CHANGED lines printed, rc 2 = GUARD (empty input / row-count / join mismatch)
+changed() { b=$1; a=$2
+  test -s "$b" && test -s "$a" || { echo "GUARD: empty input ($b / $a)"; return 2; }
+  nb=$(wc -l < "$b" | tr -d ' '); na=$(wc -l < "$a" | tr -d ' ')
+  [ "$nb" = "$na" ] || { echo "GUARD: row count $nb (before) != $na (after)"; return 2; }
+  awk '{print $3"|"$1, $2}' "$b" | sort > "$W/.kb"; awk '{print $3"|"$1, $2}' "$a" | sort > "$W/.ka"
+  nj=$(join "$W/.kb" "$W/.ka" | wc -l | tr -d ' ')
+  [ "$nj" = "$nb" ] || { echo "GUARD: join matched $nj of $nb rows"; return 2; }
+  join "$W/.kb" "$W/.ka" | awk '$2!=$3 {print "CHANGED", $1, $2, "->", $3; n++} END {print "CHECKED " NR " rows, CHANGED " n+0; exit (n>0)}'; }
+# Prometheus: q()/alerts() own their port-forward (reuse a ready one on :19090, else start one, wait for /-/ready)
+pfprom() { curl -sf --max-time 3 http://localhost:19090/-/ready >/dev/null 2>&1 && return 0
+  kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19090:9090 >/dev/null 2>&1 & echo $! > "$W/pf.pid"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 1; curl -sf --max-time 3 http://localhost:19090/-/ready >/dev/null 2>&1 && return 0; done
+  echo "GUARD: prometheus port-forward not ready" >&2; return 2; }
+pfstop() { [ -f "$W/pf.pid" ] && kill "$(cat "$W/pf.pid")" 2>/dev/null; rm -f "$W/pf.pid"; }
+q() { pfprom || { echo PF_FAILED; return 2; }
+  curl -s --get http://localhost:19090/api/v1/query --data-urlencode "query=$1" | python3 -c 'import sys,json;r=json.load(sys.stdin)["data"]["result"];print(r[0]["value"][1] if r else "EMPTY")' 2>/dev/null || echo QUERY_FAILED; }
+alerts() { pfprom || { echo PF_FAILED; return 2; }
+  curl -s http://localhost:19090/api/v1/alerts | python3 -c 'import sys,json;print(sorted({a["labels"]["alertname"] for a in json.load(sys.stdin)["data"]["alerts"] if a["state"]=="firing" and a["labels"]["alertname"].startswith(("EnvoyGateway","IngressProbe"))}))'; }
+FNS
+echo "FNS_WRITTEN $(grep -c '() {' "${W:-/tmp/envoy1392-win}/fns.sh") functions"
+. /tmp/envoy1392-win/fns.sh
+envver | tee ver.before
+test -s ver.before && grep -c ' 1\.39\.1 LIVE$' ver.before    # must print 6 (2026-10-05 live: 6)
+```
+The instrument was re-measured live on 2026-10-05. The Envoy admin endpoint is bound to
+the pod's localhost:19000, port-forward reaches it, and all 6 pods read `1.39.1 LIVE`.
+`server_info.version` reads `b579d07d…/1.39.1/Clean/RELEASE/BoringSSL`.
+
+2.5 Baseline route and policy acceptance. Write it to files; §4.2 diffs against them.
+```bash
+. /tmp/envoy1392-win/fns.sh
+routes > routes.before; policies > policies.before
+test -s routes.before && test -s policies.before && cat routes.before policies.before   # empty = STOP (kubectl/API failed)
 ```
 Any non-True line already in the baseline must be noted and not blamed on this change.
 
 2.6 **Behavioural baseline of BOTH gateways.** Record the per-hostname HTTP status
-through each VIP. Hostnames are pulled live into /tmp only and never committed.
+through each VIP. Hostnames are pulled live into /tmp only and never committed. The
+row key is **host+VIP**, not the host alone. Today there are 80 host/VIP pairs
+(54 on .103 and 26 on .104, measured 2026-10-05) and 80 distinct hosts. A hostname that
+is later attached to both Gateways is then still two separate rows.
 ```bash
-cd /tmp/envoy1392-win
+. /tmp/envoy1392-win/fns.sh
 kubectl get httproute -A -o json | python3 -c '
 import sys,json
 vip={"envoy-internal":"192.168.55.103","envoy-external":"192.168.55.104"};seen=set()
@@ -239,26 +284,32 @@ for r in json.load(sys.stdin)["items"]:
     if p.get("sectionName")=="http" or p["name"] not in vip: continue
     for h in r["spec"].get("hostnames") or []:
       if (h,vip[p["name"]]) not in seen: seen.add((h,vip[p["name"]])); print(h,vip[p["name"]])' > hosts.txt
-sweep() { while read -r h v; do printf '%s %s %s\n' "$v" "$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 --resolve "$h:443:$v" "https://$h/")" "$h"; done < /tmp/envoy1392-win/hosts.txt; }
-sweep > status.before; wc -l < hosts.txt; awk '{print $1,$2}' status.before | sort | uniq -c
+test -s hosts.txt && wc -l < hosts.txt                       # ~80; empty = STOP
+sweep > status.before
+test -s status.before && [ "$(wc -l < status.before)" -eq "$(wc -l < hosts.txt)" ] && echo BASELINE_ROWS_OK
+awk '{print $1,$2}' status.before | sort | uniq -c
 awk '{print $2}' hosts.txt | sort | uniq -c        # BOTH 192.168.55.103 and 192.168.55.104 must appear
 # negative control -- proves the sweep can SEE a missing route (Envoy answers 404 for an unrouted host):
 for v in 192.168.55.103 192.168.55.104; do curl -sk -o /dev/null -w "$v %{http_code}\n" --max-time 8 --resolve "nohost-negative-control.invalid:443:$v" https://nohost-negative-control.invalid/; done   # must print 404 twice
 ```
-On 2026-09-29 the same sweep covered 96 host/VIP pairs on both VIPs in about 45 s, and
-the negative control returned 404 on both.
+On 2026-10-05 the sourced sweep covered 80 pairs. The baseline already contained a few
+`404`, `405` and one `503` rows: hosts whose `/` is unrouted, or a backend that is down.
+They are pre-existing, and §4.3 only judges a row that CHANGED. On 2026-09-29 the
+negative control returned 404 on both VIPs.
 
-2.7 Prometheus and alert baseline:
+2.7 Prometheus and alert baseline. `q()` and `alerts()` own the port-forward. `pfstop`
+kills the port-forward at the end, and §4.4 starts a fresh one.
 ```bash
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19090:9090 >/dev/null 2>&1 & PF=$!; sleep 3
-q(){ curl -s --get http://localhost:19090/api/v1/query --data-urlencode "query=$1" | python3 -c 'import sys,json;r=json.load(sys.stdin)["data"]["result"];print(r[0]["value"][1] if r else "EMPTY")'; }
-q 'count(up{namespace="network",job="network/envoy-gateway"}==1)'          # 6   (2026-10-03: 6)
+. /tmp/envoy1392-win/fns.sh
+q 'count(up{namespace="network",job="network/envoy-gateway"}==1)'          # 6   (2026-10-05: 6)
 q 'sum(envoy_listener_manager_lds_update_rejected{namespace="network"})'   # 0   (2026-10-03: 0)
 q 'sum(envoy_cluster_manager_cds_update_rejected{namespace="network"})'    # 0   (2026-10-03: 0)
 q 'sum(rate(envoy_http_downstream_rq_xx{namespace="network",envoy_response_code_class="2"}[5m]))'  # >0 (2026-10-03: ~1.03)
 q 'min(probe_success{probe_class=~"http|dns"})'                            # 1   (2026-10-03: 1, over 5 probes)
-curl -s http://localhost:19090/api/v1/alerts | python3 -c 'import sys,json;print(sorted({a["labels"]["alertname"] for a in json.load(sys.stdin)["data"]["alerts"] if a["state"]=="firing" and a["labels"]["alertname"].startswith(("EnvoyGateway","IngressProbe"))}))'   # must be []
+alerts                                                                     # must be [] (2026-10-05: [])
+pfstop
 ```
+`PF_FAILED`, `QUERY_FAILED` or `EMPTY` from any `q` line is a STOP, never a pass.
 
 **STOP** if any of these fails:
 - a premise fails;
@@ -267,12 +318,14 @@ curl -s http://localhost:19090/api/v1/alerts | python3 -c 'import sys,json;print
 - a PDB allows 0 disruptions;
 - `ver.before` has an `UNREADABLE` line (the §4.1 instrument is then blind);
 - the negative control does not print 404 twice;
-- an `EnvoyGateway*` or `IngressProbe*` alert is firing.
+- an `EnvoyGateway*` or `IngressProbe*` alert is firing;
+- any `test -s` guard in §2.4–§2.6 prints nothing, or `BASELINE_ROWS_OK` is missing;
+- any `q` prints `PF_FAILED`, `QUERY_FAILED` or `EMPTY`.
 
 ## 3. Steps (GitOps)
 
 3.1 Move the pin and annotate it. Both edits were dry-tested on a scratch copy on
-macOS (BSD sed + python3). The resulting diff is the image line
+macOS (BSD sed + `.venv/bin/python3`). The resulting diff is the image line
 `-          image: docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c1…`
 replaced by
 `+          image: docker.io/envoyproxy/envoy:distroless-v1.39.2@sha256:dced08cf…`,
@@ -281,7 +334,7 @@ plus 5 comment lines above it. The file still parses as YAML.
 cd /Users/mu/code/cberg-home-nextgen
 F=kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml
 sed -i '' 's|envoyproxy/envoy:distroless-v1\.39\.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4$|envoyproxy/envoy:distroless-v1.39.2@sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a|' "$F"
-python3 - "$F" <<'EOF'
+.venv/bin/python3 - "$F" <<'EOF'
 import sys
 p=sys.argv[1]; s=open(p).read()
 anchor="          image: docker.io/envoyproxy/envoy:distroless-v1.39.2@"
@@ -295,7 +348,7 @@ open(p,"w").write(s.replace(anchor, note+anchor))
 EOF
 git diff --stat "$F"                       # 1 file, 6 insertions(+), 1 deletion(-)
 grep -c 'distroless-v1.39.2@sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a' "$F"   # 1
-python3 -c "import yaml,sys;list(yaml.safe_load_all(open('$F')));print('YAML_OK')"
+.venv/bin/python3 -c "import yaml,sys;list(yaml.safe_load_all(open('$F')));print('YAML_OK')"   # bare python3 may lack PyYAML
 ```
 
 3.2 Commit with `--only` (shared worktree), verify, then push:
@@ -339,7 +392,10 @@ kubectl -n network rollout status deploy/envoy-external --timeout=600s
 ```bash
 kubectl -n network get pods -l app.kubernetes.io/component=proxy -o jsonpath='{range .items[*]}{range .status.containerStatuses[?(@.name=="envoy")]}{.imageID}{"\n"}{end}{end}' | sort | uniq -c
 #   expect: 6 x docker.io/envoyproxy/envoy@sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a
-cd /tmp/envoy1392-win && envver | tee ver.after       # envver() from §2.4
+. /tmp/envoy1392-win/fns.sh                          # helpers from §2.4; also cd's into the dir
+envver | tee ver.after
+test -s ver.after || echo 'FAIL: ver.after empty -- instrument did not run'
+[ "$(wc -l < ver.after)" -eq 6 ] || echo 'FAIL: ver.after does not have 6 rows'
 grep -c ' 1\.39\.2 LIVE$' ver.after                   # must print 6
 grep -vc ' 1\.39\.2 LIVE$' ver.after                  # must print 0
 kubectl -n network get pods -l app.kubernetes.io/component=proxy -o wide   # 3 per gateway, one per node
@@ -355,9 +411,13 @@ kubectl -n network get pods -l app.kubernetes.io/component=proxy -o wide   # 3 p
 
 4.2 Route and policy acceptance must not regress. Diff against §2.5:
 ```bash
-cd /tmp/envoy1392-win && routes > routes.after && policies > policies.after
-diff routes.before routes.after && diff policies.before policies.after && echo ACCEPTANCE_UNCHANGED
+. /tmp/envoy1392-win/fns.sh
+routes > routes.after; policies > policies.after
+test -s routes.after && test -s policies.after && test -s routes.before && test -s policies.before \
+  && diff routes.before routes.after && diff policies.before policies.after && echo ACCEPTANCE_UNCHANGED
 ```
+- PASS only if `ACCEPTANCE_UNCHANGED` prints. Without the `test -s` guards, two empty
+  files would diff equal; with them, an empty file prints nothing, and that is a FAIL.
 - FAIL shape: a line moves to `Accepted=False` or `ResolvedRefs=False`, a count drops,
   or a policy kind gains a `False`.
 - The controller did not change, so this is the floor check, not the main signal.
@@ -365,14 +425,30 @@ diff routes.before routes.after && diff policies.before policies.after && echo A
 4.3 **CONTENTS ASSERTION, behavioural probe of BOTH gateways.** Every hostname must
 still serve the same answer through its own VIP.
 ```bash
-cd /tmp/envoy1392-win && sweep > status.after   # sweep() from §2.6
+. /tmp/envoy1392-win/fns.sh
+sweep > status.after
+test -s status.after && echo AFTER_NONEMPTY                                   # absent = FAIL (sweep did not run)
+wc -l < status.before; wc -l < status.after                                   # must be EQUAL (~80)
 awk '{print $1}' status.after | sort | uniq -c   # both .103 and .104 rows present, same counts as status.before
-join -j 3 <(sort -k3 status.before) <(sort -k3 status.after) | awk '$3!=$5 {print "CHANGED", $1, $2, $3, "->", $5}'
+# (c) prove the comparator can FAIL: one baseline row forced to 000 must give rc 1 and exactly one CHANGED line
+sed '1s/^\([^ ]*\) [0-9]*/\1 000/' status.after > status.knownbad
+changed status.before status.knownbad; echo "control rc=$?"                    # must print CHANGED ... -> 000 and "control rc=1"
+# the real comparison: changed() refuses (rc 2, GUARD:) on an empty file, unequal row counts,
+# or a host|VIP join that matches fewer rows than the baseline -- it never reads CHANGED off a partial join
+changed status.before status.after; echo "rc=$?"                              # rc 0 = clean, rc 1 = CHANGED rows, rc 2 = GUARD = FAIL
 ```
+- The pipeline was dry-run on 2026-10-05 against a live 80-row sweep. Identical input gave
+  `CHECKED 80 rows, CHANGED 0` and rc 0. A copy with row 1 sed'ed to `000` gave
+  exactly one `CHANGED … -> 000` and rc 1. Empty, short and key-mismatched inputs gave
+  `GUARD:` and rc 2. If `control rc=1` does not print, the comparator is blind:
+  FAIL the gate and do not read the real result.
+- Any `GUARD:` line, or `rc=2`, is a FAIL of the instrument. Never read it as "0 CHANGED".
 - Re-probe each `CHANGED` line once after 60 s, because an app pod can legitimately be
   mid-restart.
-- PASS: every `CHANGED` line returns to its baseline status on the re-probe, and both
-  VIPs are present with unchanged row counts.
+- PASS: `AFTER_NONEMPTY` is printed, the row counts are equal, `control rc=1`, and the
+  real run gives rc 0. A real run with rc 1 also passes if every `CHANGED` line returns
+  to its baseline status on the re-probe. Both VIPs must be present with unchanged row
+  counts.
 - FAIL: any pair that stays at `000`. That is a TLS or listener failure, the exact
   shape a TLS-library swap would produce. The §2.6 baseline has no `000` for a
   reachable host.
@@ -384,8 +460,9 @@ join -j 3 <(sort -k3 status.before) <(sort -k3 status.after) | awk '$3!=$5 {prin
   handshakes or routes wrongly. Neither Flux nor the Gateway status can see that.
 
 4.4 Prometheus gates. Wait 10 minutes after §3.4 so the 5m windows cover only the new
-pods. Reuse `q()` from §2.7.
+pods. Source the helpers; `q()` starts its own port-forward.
 ```bash
+. /tmp/envoy1392-win/fns.sh
 q 'count(up{namespace="network",job="network/envoy-gateway"}==1)'                               # 6
 q 'sum(envoy_listener_manager_lds_update_rejected{namespace="network"})'   # 0
 q 'count(envoy_listener_manager_lds_update_rejected{namespace="network"})' # 6 (non-vacuous: EMPTY cannot pass)
@@ -393,7 +470,10 @@ q 'sum(envoy_cluster_manager_cds_update_rejected{namespace="network"})'    # 0
 q 'sum(rate(envoy_http_downstream_rq_xx{namespace="network",envoy_response_code_class="2"}[5m]))' # > 0
 q 'sum(rate(envoy_http_downstream_rq_xx{namespace="network",envoy_response_code_class="5"}[5m])) / sum(rate(envoy_http_downstream_rq_xx{namespace="network"}[5m]))'   # < 0.02
 q 'min(probe_success{probe_class=~"http|dns"})'                                                   # 1
+alerts                                                                                            # must be []
+pfstop
 ```
+`PF_FAILED`, `QUERY_FAILED` or `EMPTY` on any line is a FAIL, never a pass.
 - CONTROL: metric `envoy_http_downstream_rq_xx`. The 2xx rate must be `> 0`; that is
   the floor against a data plane that is up but serves nothing (2026-10-03 baseline
   ~1.03 rps). The 5xx ratio must be `< 0.02`.
@@ -415,7 +495,9 @@ q 'min(probe_success{probe_class=~"http|dns"})'                                 
 All 5 alert rules were verified to exist live on 2026-10-03, in PrometheusRules
 `envoy-gateway-alerts`, `gateway-availability-alerts` and `blackbox-exporter-alerts`.
 
-4.5 Soak: re-run 4.3 and 4.4 once more, 7 minutes later. Then retire this plan file
+4.5 Soak: re-run 4.3 and 4.4 once more, 7 minutes later. Each block begins with
+`. /tmp/envoy1392-win/fns.sh`, so it is safe in a fresh shell, and `status.after` is
+overwritten and re-guarded. Then retire this plan file
 in the same commit series, per `README.md`.
 
 ## 5. Rollback
@@ -447,9 +529,12 @@ sed -i '' 's|envoyproxy/envoy:distroless-v1\.39\.2@sha256:dced08cf7c472e1a1d067f
 Then commit it with `--only` as in §3.2.
 
 5.2 Confirm the cluster is back:
-- Re-run 4.1, expecting 6 × imageID `sha256:eb2c01c1…` and 6 × `1.39.1 LIVE`.
-- Re-run 4.2, 4.3 and 4.4 against the SAME `/tmp/envoy1392-win/*.before` baselines.
-  They must pass.
+- Re-run 4.1, starting with `. /tmp/envoy1392-win/fns.sh` and keeping the `test -s ver.after`
+  and 6-row guards. Expect 6 × imageID `sha256:eb2c01c1…`. In the two greps, use
+  `1\.39\.1` in place of `1\.39\.2`: `grep -c ' 1\.39\.1 LIVE$' ver.after` must print 6.
+- Re-run 4.2, 4.3 (including the `status.knownbad` control) and 4.4 against the SAME
+  `/tmp/envoy1392-win/*.before` baselines. Each block sources `fns.sh` first, and every
+  guard applies. They must pass.
 
 5.3 **Break-glass, if the data plane is dark and the revert cannot reach the cluster.**
 Flux fetches from GitHub over cluster DNS and egress, not through Envoy, so a dark
@@ -464,27 +549,32 @@ undo is overwritten at the next reconcile. Follow it with 5.1 immediately.
   `gateway/envoy` and is in `SHARED_INFRA_FLOOR`; `autonomy_override: human-gated`
   says so explicitly. No reboot and no `exclusive`, but this should be the only
   routing-perturbing plan in its window.
-- **`depends_on: envoy-gateway-1.9.2`.** That plan is `vetted` and unwindowed. Its
-  premise `gatewayclass-pin-unchanged` expect_exact's the 1.39.1 pin, and its §2.6
-  STOPs if the pin differs. Running THIS plan first would invalidate a vetted plan.
-  Same-window execution is fine if it is sequential: EG 1.9.2 runs through its §4.6
-  soak, then this plan's §2 takes fresh baselines.
-- **Faster alternative, operator's call.** Fold §3.1 into `envoy-gateway-1.9.2` §3.3
-  as one commit. That gives one data-plane roll instead of two (EG 1.9.2 already rolls
-  every proxy pod via the shutdown-manager tag). It requires amending that plan
-  (its premise + §2.6 + §4.1 expectations) and re-reviewing it. This plan would then
-  become `superseded`.
-- **Run it FIRST among the remaining plans**, right after Step 0 (and EG 1.9.2 if
-  present) settles. §4.3 diffs every hostname, so any app with an HTTPRoute restarted
-  by another same-window plan becomes a `CHANGED` line here. `conflicts_with` covers
+- **Deny-rule departure: the operator accepts it at the GO.** Rule `*envoyproxy/envoy*`
+  in `runbooks/auto-update-policy.yaml` says this pin moves "only in the SAME change as
+  the gateway-helm chart bump … never on its own". Executing this plan is exactly that
+  on-its-own move. §1 argues it is inside upstream's supported matrix, but a plan cannot
+  waive a policy rule. At the GO the operator must either accept the departure explicitly
+  for this one change, or first approve a rule reword ("MINOR moves only with the chart;
+  same-minor patches may lead the compiled default"). Without one of those, this is a
+  NO-GO.
+- **Controller prerequisite is already met.** `envoy-gateway-1.9.2` executed and was
+  retired in 418faa1e, and chart 1.9.2 is live (re-measured 2026-10-05). The premise
+  `controller-is-1.9.2` keeps that coupling checked, so there is no `depends_on` and no
+  fold option any more.
+- **Proposed slot:** `sun-attended:2026-10-11`, after `n8n-2.39.8` (52+45 of 180 min).
+  The fallback is `sat-attended:2026-11-14`. The window agent assigns the slot.
+- **Run it FIRST among the remaining plans**, right after Step 0 settles. §4.3
+  diffs every hostname, so any app with an HTTPRoute restarted by another same-window plan becomes a `CHANGED` line here. `conflicts_with` covers
   the known ones.
 - **Reciprocity.** The `conflicts_with` entries were added from this side only.
   `--validate` does not check reciprocity. The partners are:
   - `app-template-5.2.1` and `penpot-chart-1.10.0`: gateway/envoy;
   - `talos-linux-1.14.2`: a node drain competes for the single PDB disruption;
   - `external-dns-1.23.0`: public-edge;
-  - `coredns-1.48.1` and `chart-patches-coredns-reloader-blackbox`: the instrument path;
-  - `flux-fleet-0.60.0` and `flux-reconciler-impersonation`: the apply and revert path.
+  - `coredns-1.48.2` and `chart-patches-coredns-reloader-blackbox`: the instrument path;
+  - `kube-prometheus-stack-91.9.0`: Prometheus/Alertmanager is the §2.7/§4.4 instrument;
+  - `flux-fleet-0.60.0`, `flux-reconciler-impersonation`, `flux-distribution-2.9.6` and
+    `flux-oci-chart-sources`: the apply and revert path.
 - **Traffic during the roll.** Both proxy Deployments roll surge-first, one pod at a
   time: strategy 25%/25% gives maxSurge 1 and maxUnavailable 0, and the PDB is
   minAvailable 2. The shutdown-manager drains each old pod (terminationGracePeriod
