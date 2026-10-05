@@ -46,6 +46,7 @@ depends_on: [flux-fleet-0.60.0]       # operator chart/image 0.57.0 -> 0.61.0 mu
                                       # sequencing; flux-fleet gate 4.5 asserts the distribution is UNCHANGED, so
                                       # the two can never share a commit or a slot).
 conflicts_with:
+  - cli-tool-pins                     # 2026-10-05: exclusive; touches the flux CLI pin this plan's retire step moves
   - flux-fleet-0.60.0                 # same control plane; it also gates "distribution unchanged" (4.5) and a
                                       # same-slot run would make both plans' gates unattributable.
   - flux-oci-chart-sources            # rewrites Flux chart sources: needs a stable source-controller under it.
@@ -151,7 +152,7 @@ premises:
     expect_exact: "1"
 status: draft
 review: null
-window: null
+window: null   # 2026-10-05 schedule: proposed operator NOW evening 2026-10-09 18:30 (GO) after (a) flux-fleet-0.60.0 executed 10-06 + >=1 nightly Step 0 on operator v0.61.0, (b) premise operator-is-0.61.0 PASSES and a delta re-review records ready-for-go; fallback nightly:2026-10-14 with GO
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/flux-upgrade.md
@@ -190,8 +191,9 @@ waiting for them (`spec.wait: true`).
 | image-automation-controller | v1.2.3 | v1.2.5 |
 
 Out of scope: the operator/instance charts (flux-fleet-0.60.0, must run first) and the local
-`flux` CLI pin in `.mise.toml` (`"aqua:fluxcd/flux2" = "2.9.0"`), which is owned by a separate
-cli-tool-pins plan. The CLI stays usable against v2.9.6 controllers (same API versions; 2.9.x
+`flux` CLI pin in `.mise.toml` (`"aqua:fluxcd/flux2" = "2.9.0"`): cli-tool-pins moves it to
+2.9.3 (today's cluster), and the 2.9.3 -> 2.9.6 CLI catch-up is owned by THIS plan's §3.4 retire
+step (ownership settled 2026-10-05 after both plans disclaimed it). The CLI stays usable against v2.9.6 controllers (same API versions; 2.9.x
 patch line), so it does not block this plan.
 
 ### 1.2 Why it was held
@@ -495,7 +497,11 @@ git push origin main
 
 ### 3.4 Retire
 
-After section 4 is fully green: delete this plan file in the next commit (README: plans are
+After section 4 is fully green, first catch the local CLI up (attended, never as root, outside
+03:15-06:00): `mise install aqua:fluxcd/flux2@2.9.6` BEFORE editing `.mise.toml`, then change the
+one line `"aqua:fluxcd/flux2" = "2.9.3"` -> `"2.9.6"` and verify `mise exec -- flux version --client`
+prints 2.9.6 (commit with `git commit --only .mise.toml`). If cli-tool-pins has not run yet (pin
+still 2.9.0), leave the CLI to cli-tool-pins and note it. Then: delete this plan file in the next commit (README: plans are
 transient). Do NOT hand-close the six finding_refs: they are sweep-owned security rows —
 let the next sweep resolve them and VERIFY that it did (`policy-cli.py finding show <F-id>`
 for each; any still open after the sweep is a finding, not something to close by hand).

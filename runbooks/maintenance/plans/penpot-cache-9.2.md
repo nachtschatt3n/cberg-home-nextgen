@@ -29,7 +29,7 @@ touches:
   shared: []                          # dedicated cache, no PVC, no route; not a shared redis
 depends_on: []
 conflicts_with: [kube-prometheus-stack-91.9.0, flux-reconciler-impersonation, penpot-chart-1.10.0]
-                                      # kube-prometheus-stack-91.4.1: §4 reads kube-state-metrics
+                                      # kube-prometheus-stack-91.9.0: §4 reads kube-state-metrics
                                       #   through Prometheus — the window's instrument.
                                       # flux-reconciler-impersonation: changes how kustomize/helm
                                       #   controllers apply in every namespace incl. office; a

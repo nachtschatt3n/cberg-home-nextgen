@@ -30,21 +30,23 @@ conflicts_with:
   - flux-reconciler-impersonation     # changes how helm-controller reconciles every HR
   - flux-fleet-0.60.0                 # helm-controller swap mid-upgrade would confound the verdict
   - talos-linux-1.14.2                # exclusive node roll; evicts grafana and touches monitoring
+  - kube-prometheus-stack-91.9.0      # 2026-10-05 review: §4.4 reads Prometheus through Grafana (exclusive)
+  - flux-distribution-2.9.6           # 2026-10-05 review: reciprocity (exclusive, it lists this plan)
 exclusive: false
-security_ref: F-38473276              # the 13.2.2-distroless image row; upstream 13.2.3 is a
-                                      # security release -- detail stays on the DB record
+security_ref: F-32942d31              # 2026-10-05 review: the OPEN 13.2.2-distroless image row (F-38473276
+                                      # closed 2026-10-01); upstream 13.2.3 is a security release --
+                                      # detail stays on the DB record
 capability_change: false              # Grafana patch 13.2.2 -> 13.2.3: same features, no new route,
                                       # permission or exposure. The CSP default gains `blob:` in img-src,
                                       # which is inert here (content_security_policy is off by default
                                       # and our values do not set it).
 rollback_class: git-revert            # valid ONLY while section 4.3 reads performed=0 on every
                                       # migrator; the 13.2.2..13.2.3 diff adds no migration files
-finding_refs: [F-38473276]            # no version finding for 13.2.6 -> 13.2.7 existed at write time
-                                      # (last sweep 2026-09-29, before chart 13.2.7 was indexed);
-                                      # add it here once the next sweep mints it
-review: null
-status: draft
-window: null
+finding_refs: [F-cce839da, F-32942d31]  # 2026-10-05 review: version finding (chart 13.2.6 -> 13.2.7) + the
+                                      # open image security row; F-38473276 was closed 2026-10-01
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (finding refs, disclosure wording) -> fixed -> delta ready-for-go
+status: vetted
+window: "nightly:2026-10-13"   # scheduled 2026-10-05: AUTO-NIGHT (chart/AUTO-NIGHT graduated); with n8n-chart-2.1.1 (20+25 = 45 of 70)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/grafana-image-changes.md
@@ -126,7 +128,7 @@ Docker Hub lists that tag (pushed 2026-09-29; index digest
 
 **Upstream Grafana v13.2.3** (GitHub release `v13.2.3`, published
 2026-09-29T09:02Z). The release notes have one section, `### Security`, with
-three security fixes. Their identifiers stay on the `security_ref` record per
+security fixes only (a security release). Their identifiers and detail stay on the `security_ref` record per
 `docs/sops/vulnerability-disclosure.md`. There is no breaking-change, deprecation
 or migration entry.
 
@@ -473,9 +475,9 @@ migrated.
     `unpoller-influxdb` and `elasticsearch` datasources, and an unpoller or
     edot roll does not take those down: they are InfluxDB and Elasticsearch,
     not the exporters.
-  - This plan reads Prometheus through Grafana (section 4.4 query), and no open
-    kube-prometheus-stack plan exists (`kube-prometheus-stack-91.4.1` executed
-    2026-09-26).
+  - This plan reads Prometheus through Grafana (section 4.4 query). The open
+    `kube-prometheus-stack-91.9.0` (exclusive; scheduled nightly:2026-10-08) is
+    therefore in conflicts_with (corrected 2026-10-05; 91.4.1 executed 2026-09-26).
 - **`teslamate-4.3`** (draft) does not roll `teslamate-postgres`, so the
   `TeslaMate` datasource health in section 4.4 is unaffected if both land the
   same night.

@@ -45,6 +45,8 @@ conflicts_with:                       # exclusive: true already keeps the slot e
   - helm-drift-detection              # changes HelmRelease behaviour cluster-wide.
   - flux-fleet-0.60.0                 # bumps flux-operator/flux-instance charts; moves premise operator-v0.57.0 and gate C2's chartVersion.
   # RESOLVED 2026-09-26: kube-prometheus-stack-91.4.1 EXECUTED -- ref removed per the dead-ref convention.
+  - kube-prometheus-stack-91.9.0      # ADDED 2026-10-05 (re-point of the executed 91.4.1 ref; reciprocal):
+                                      # restarts the Prometheus section 4 reads (the window's instrument).
   # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
 exclusive: true                       # No other change may be IN FLIGHT while the
                                       # identity Flux applies under is being swapped:

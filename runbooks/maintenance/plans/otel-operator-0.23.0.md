@@ -116,6 +116,9 @@ conflicts_with:                        # HARD slot exclusions — window-schedul
   # RESOLVED 2026-09-28: kube-prometheus-stack-91.4.1 executed (91.5.2, 2026-09-26) -- ref removed.
                                        # A FUTURE kube-prometheus-stack plan must be added here:
                                        # §4.6 of THIS plan reads Prometheus (shared instrument).
+  - kube-prometheus-stack-91.9.0       # ADDED 2026-10-05: that future plan (re-point of the
+                                       # executed 91.4.1 ref; reciprocal). Restarts the
+                                       # Prometheus §4.6 reads.
   - helm-drift-detection               # ADDED 2026-09-28 (review): its P1/P3 write spec.driftDetection
                                        # into every HelmRelease, including this plan's helmrelease.yaml.
   # - edot-collector-0.161.0 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # the daemon collectors export OTLP to

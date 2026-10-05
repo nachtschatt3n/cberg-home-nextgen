@@ -95,12 +95,8 @@ conflicts_with:
   - coredns-1.48.1                              # appstore downloads inside occ upgrade need DNS (superseded
                                                 # 2026-10-05 by coredns-1.48.2; kept until that file retires)
   - coredns-1.48.2                              # same reason (reciprocal: it lists this plan)
-  # - flux-distribution-2.9.6 (2026-10-05: NOT listed yet — its frontmatter did not parse while this
-  #   re-plan was written, so --validate reads the ref as DEAD-REF. It restarts all six Flux controllers,
-  #   is `exclusive: true` and already lists this plan, so the scheduler keeps them apart from ITS side.
-  #   The reviewer adds this line once that file parses.)
-  - k8s-1.36.5                                  # control-plane roll: kube-apiserver restarts break the §3.4
-                                                # log/exec reads and helm-controller's upgrade watch
+  - flux-distribution-2.9.6                     # restarts all six Flux controllers mid-§3.4 => release stranded
+                                                # with retries: 0 (reciprocal; that plan is exclusive anyway)
   - flux-fleet-0.60.0                           # helm-controller restart mid-§3.4 strands the release pending-upgrade (retries: 0)
   - helm-drift-detection                        # patches helmrelease/nextcloud; its no-upgrade gate collides with Commit B
   - kube-prometheus-stack-91.9.0                # §4 gate 4 reads Prometheus; §2.5 silence lives in its
@@ -109,7 +105,11 @@ conflicts_with:
   - penpot-chart-1.10.0                         # office namespace, hidden by the §2.5 office-wide silence
   - penpot-cache-9.2                            # office namespace, hidden by the §2.5 office-wide silence
   - paperless-db-13.0.2                         # office namespace, hidden by the §2.5 office-wide silence
-  - talos-linux-1.14.2                          # node reboots; a drain of the nextcloud node mid-§3.4 is §5.2
+  - sure-0.7.5                                  # office namespace, hidden by the §2.5 office-wide silence
+  - python-fleet-3.14.8                         # touches office workloads, hidden by the §2.5 office-wide silence
+  - pgvector-fleet-0.8.7                        # touches office workloads, hidden by the §2.5 office-wide silence
+  - talos-linux-1.14.2                          # node reboots (+ the k8s control-plane roll folded in from the
+                                                # superseded k8s-1.36.5); a drain/apiserver restart mid-§3.4 is §5.2
   - longhorn-1.13.0                             # one-way storage engine move; §2.4 snapshots + §5.3 revert need a stable Longhorn
   # [rollback-class stacking (house rule 81fdd797: every backup-restore pair is
   #  declared; two in one slot leave no rollback capacity for either)]
@@ -140,11 +140,13 @@ finding_refs: [F-7344f3ec, F-7bcfda63, F-38fecaa8, F-c5e87023]
                                       #   (moved here from the superseded nextcloud-9.4.0)
                                       # F-c5e87023 security/warning on the 34.0.4 image (remedied by the bump)
                                       # all four measured open (last_seen 2026-10-05) before claiming.
-status: draft                         # RE-PLANNED 2026-10-05: image-only -> chart 9.4.0 + image 35.0.1
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (GO carry-over, conflicts) -> fixed -> delta ready-for-go. Needs the one-line operator re-confirm of the lockstep shape (§3.1 STOPs without it)
+status: awaiting-go                         # RE-PLANNED 2026-10-05: image-only -> chart 9.4.0 + image 35.0.1
                                       # lockstep (operator decision relayed by the coordinator). Was
                                       # awaiting-go/ready-for-go@2026-09-28 on the image-only shape; the
                                       # review field is REMOVED — a fresh plan-reviewer pass is owed.
-                                      # GO materiality: §1.7 (verdict: scope-neutral).
+                                      # GO: §1.7 — a ONE-LINE operator re-confirm is required (bundled
+                                      # with the go/no-go), the 2026-10-02 GO covered image-only only.
 window: "sun-attended:2026-10-18"     # SCHEDULED 2026-09-28 by maintenance-window-agent; kept on re-plan.
                                       # The executor must read the entrypoint log live in §3.4
                                       # and run §5.1/§5.2 inside the same slot.
@@ -468,26 +470,32 @@ docker image version (...) and downgrading is not supported."*
   (version, app paths). Covered by the §2.4 snapshot AND by a local tar copy
   taken in §2.3b (a second, file-level restore path for config alone).
 
-### 1.7 Does the operator GO carry over? — verdict: SCOPE-NEUTRAL
+### 1.7 Does the operator GO carry over? — NO: one-line re-confirm required
 
-The GO recorded 2026-09-28 (D1, data-loss decision) covered the **image-only**
-shape. What the re-plan changes, measured:
+The GO in the decision ledger (decided_at 2026-10-02T08:18:48Z, per the
+plan-reviewer's ledger read 2026-10-05) chose the **image-only** shape. What the
+re-plan changes:
 
-| Change | Effect on data-loss / feature-loss surface | Material? |
+| Change | Effect | Inside SD-6 (scope-reducing / patch-level)? |
 |---|---|---|
-| chart 9.3.0 -> 9.4.0 in Commit B | 14 metadata-label lines; no pod template, value, object, migration or capability change (§1.2). Rollback §5.3(d) restores `helmrelease.yaml` from `<bump-sha>^`, which carries 9.3.0 back with the image. | No |
-| §3.2b pre-drain of 5 app PATCHES on 34 | The same updates `occ upgrade` would apply anyway (Updater.php 397-411), moved earlier so Mail is gated on its own; inside the operator's standing "app updates always take-able" rule; covered by the §2.3 dump and §2.4 snapshot taken BEFORE it. | No |
-| app drift since 09-28 (spreed 25.0.2->25.0.5, richdocuments 12.0.0->12.0.1, mail 5.12.3 exists) | patch-level drift of apps already in the GO'd set; same enabled-app outcome (only context_chat leaves) | No |
-| est 130 -> 150 min, more gates | duration only | No |
+| chart 9.3.0 -> 9.4.0 in Commit B | 14 metadata-label lines; no pod template, value, object, migration or capability change (§1.2). Rollback §5.3(d) restores 9.3.0 with the image. | No — it ADDS a leg |
+| §3.2b pre-drain of 5 app patches on 34, incl. **Mail 5.12.2 -> 5.12.3** | the same updates `occ upgrade` would apply anyway (Updater.php 397-411), moved earlier so Mail is gated on its own; covered by the §2.3 dump + §2.4 snapshot taken before it | No — it moves the operator's hard-gate app before the major |
+| dump-to-Commit-B gap grows ~35-45 min (Commit A + §3.2b + mini-gate) | user writes in that gap are lost on a §5.3 restore (the dump is the floor) | No — widens the data-loss window |
+| app drift since the GO (spreed 25.0.5, richdocuments 12.0.1) | patch-level drift of apps already in the GO'd set | Yes |
+| est 130 -> 150 min | duration only | Yes |
 
-**Verdict: scope-neutral** — the chart leg is exactly the lockstep the
-operator's own standing rule demands (it is WHY the image-only plan carried a
-premise that forced this refresh), and it adds no data- or feature-loss path.
-Per `feedback_interruption_ok_data_loss_not` / SD rules, a re-confirmation is not
-required on substance. Procedurally: the plan is back at `status: draft` and
-needs a fresh plan-reviewer pass before it can return to `awaiting-go`; the
-window agent should record the existing GO against this refreshed shape (or
-send the operator a one-line FYI), not open a new decision.
+My planner judgement is that none of this adds a new data- or feature-loss
+CLASS (the chart leg is exactly the lockstep the operator's standing rule
+demands). But it is not a scope-reducing amendment, so SD-6 does not carry the GO
+over, and a coordinator relay is not consent. **Required:** a one-line operator
+re-confirm, bundled into the window's go/no-go and NOT presented as a new
+data-loss decision:
+
+> "nextcloud: lockstep chart 9.4.0 + image 35.0.1, with an app pre-drain on 34
+> (Mail 5.12.2 -> 5.12.3 first, gated) — still GO?"
+
+Record the answer with `home-operation decide` against this plan_id at once. No
+§3 step runs before it.
 
 ## 2) Pre-checks
 
@@ -775,8 +783,8 @@ namespace scope is honest about what it hides. That is why §6 keeps every other
 ## 3) Steps
 
 **3.1 Go/no-go.** All premises PASS; §2.0 (a)-(e), §2.1-2.5 clean; dump, config
-tar and snapshots verified; operator present; the 2026-09-28 GO recorded against
-this refreshed lockstep shape (§1.7 — scope-neutral, no new decision).
+tar and snapshots verified; operator present; the operator's one-line re-confirm
+of the lockstep shape (§1.7) is recorded via `home-operation decide`. Without it: STOP.
 
 **3.2 Commit A — openclaw_mail compatibility ONLY (reloader rolls a 34.0.4 restart).**
 
@@ -846,10 +854,35 @@ PY2
 #   EXPECT: no AssertionError; mail 5.12.2 -> 5.12.3 (or newer 34-compatible), openclaw_mail 0.1.0 -> 0.1.0.
 ```
 
-Then the **Mail mini-gate on 34** — re-run the §2.2b CONTROL 1, the mailbox loop
-(into `mail-mailboxcount-predrain.txt`, diffed against `mail-mailboxcount-pre.txt`)
-and the (c-pre) sync/test loop (into `mail-imap-predrain.txt`; same per-account
-shape as `mail-imap-pre.txt`). PASS: identical mailbox counts, every account
+Then the **Mail mini-gate on 34** — the §2.2b instruments, written to `-predrain-`
+files so the §2.2b `-pre-` baselines are never overwritten (one Bash call):
+
+```bash
+kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ list mail" \
+  | grep -cE '^ +mail:(mailbox:list|account:test|account:sync) '          # EXPECT 3 (else the gate measures nothing: STOP)
+kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c \
+  'mariadb -uroot -p"$(cat $MARIADB_ROOT_PASSWORD_FILE)" -N -B nextcloud -e "select account_id, count(*) from oc_mail_mailboxes group by account_id order by account_id"' \
+  2>/dev/null > /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-mailboxes-db-predrain.txt
+for N in $(cut -f1 /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-mailboxes-db-pre.txt); do
+  printf '%s\t' "$N"
+  kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ mail:mailbox:list $N" \
+    2>/dev/null | grep -c '^| [0-9]'
+done > /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-mailboxcount-predrain.txt
+diff /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-mailboxes-db-pre.txt  /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-mailboxes-db-predrain.txt  && echo "PASS DB mailboxes identical (predrain)"
+diff /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-mailboxcount-pre.txt /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-mailboxcount-predrain.txt && echo "PASS occ mailboxes identical (predrain)"
+for N in $(cut -f1 /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-mailboxes-db-pre.txt); do
+  echo "===== account $N ====="
+  kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ mail:account:sync $N" > /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-sync-predrain-$N.txt 2>&1
+  echo "----- sync exit=$? -----"
+  tail -3 /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-sync-predrain-$N.txt
+  kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ mail:account:test $N" > /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-test-predrain-$N.txt 2>&1
+  echo "----- test exit=$? -----"
+  tail -5 /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-test-predrain-$N.txt
+done > /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-imap-predrain.txt 2>&1
+cat /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-imap-predrain.txt
+```
+
+Compare `mail-imap-predrain.txt` with `mail-imap-pre.txt` (same per-account shape). PASS: identical mailbox counts, every account
 `sync exit=0` + `IMAP connection test passed`, i.e. §4 gate 2's rule. HOW IT
 FAILS: an autoload error naming `custom_apps/mail` or a lost account => §5.1
 steps 1-3 for `mail` ON 34 (the instance is not yet migrated, so this is cheap);
@@ -936,6 +969,13 @@ diff /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-93.yaml /Users/mu/db-dumps/
 diff /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-93.yaml /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-94-b.yaml | grep -c '^>'
 #   PASS (dry-run 2026-10-05): first count 0; second count 18 (14 labels + 3 image lines + 1 probe line).
 #   HOW IT FAILS: first count > 0 => Commit B renders something the plan did not plan: STOP, git checkout the two files.
+# Row baseline RIGHT BEFORE Commit B (users wrote for ~35-45 min since §2.2): §4 gate 1 diffs against THIS.
+kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c '
+  mariadb -uroot -p"$(cat $MARIADB_ROOT_PASSWORD_FILE)" -N -B nextcloud -e "show tables" | wc -l
+  for T in oc_filecache oc_mail_accounts oc_mail_mailboxes oc_mail_messages oc_users oc_calendarobjects oc_cards oc_migrations oc_appconfig oc_share; do
+    printf "%s=%s\n" "$T" "$(mariadb -uroot -p"$(cat $MARIADB_ROOT_PASSWORD_FILE)" -N -B nextcloud -e "select count(*) from $T")"
+  done' 2>/dev/null > /Users/mu/db-dumps/nextcloud-35.0.1-exec/rows-preB.txt
+cat /Users/mu/db-dumps/nextcloud-35.0.1-exec/rows-preB.txt        # EXPECT 11 lines, every count > 0; empty/0 => exec failed: re-run before committing
 printf '%s\n\n%s\n\n%s\n\nCo-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>\n' \
   "feat(nextcloud): 34.0.4 -> 35.0.1 (major) + chart 9.3.0 -> 9.4.0 lockstep + notify-push (plan nextcloud-fleet-35.0.1)" \
   "Chart 9.4.0 differs from 9.3.0 only in Chart.yaml appVersion 34.0.4 -> 35.0.1 (rendered: metadata labels only). TEMPORARY for this rollout: upgrade.remediation.retries 0 and startupProbe.failureThreshold 50 (26 min budget for occ upgrade + 5 app-major downloads); both restored in the follow-up commit." \
@@ -1062,7 +1102,8 @@ kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -
 ```
 
 **1. CONTENTS ASSERTION: the database still holds the data** — same loop as
-§2.2 into `rows-post.txt`, diffed with `rows-pre.txt`.
+§2.2 into `rows-post.txt`, diffed with `rows-preB.txt` (taken in §3.3 right before
+Commit B; `rows-pre.txt` is ~35-45 min older and is the §5.3 restore reference only).
 
 ```bash
 kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c '
@@ -1070,12 +1111,13 @@ kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c '
   for T in oc_filecache oc_mail_accounts oc_mail_mailboxes oc_mail_messages oc_users oc_calendarobjects oc_cards oc_migrations oc_appconfig oc_share; do
     printf "%s=%s\n" "$T" "$(mariadb -uroot -p"$(cat $MARIADB_ROOT_PASSWORD_FILE)" -N -B nextcloud -e "select count(*) from $T")"
   done' 2>/dev/null > /Users/mu/db-dumps/nextcloud-35.0.1-exec/rows-post.txt
-diff /Users/mu/db-dumps/nextcloud-35.0.1-exec/rows-pre.txt /Users/mu/db-dumps/nextcloud-35.0.1-exec/rows-post.txt
+diff /Users/mu/db-dumps/nextcloud-35.0.1-exec/rows-preB.txt /Users/mu/db-dumps/nextcloud-35.0.1-exec/rows-post.txt
 ```
 
-PASS: every count > 0; `oc_users`, `oc_mail_accounts`, `oc_calendarobjects`,
-`oc_cards`, `oc_share` **equal** (maintenance blocked writes; cron may move
-`oc_filecache`/`oc_mail_messages` slightly — allow +/- 1 %, never a large drop);
+PASS: every count > 0; `oc_users`, `oc_mail_accounts` **equal**;
+`oc_calendarobjects`, `oc_cards`, `oc_share` **no decrease** (DAV clients may
+write between `rows-preB` and the Recreate; a DROP is the failure); cron may move
+`oc_filecache`/`oc_mail_messages` slightly — allow +/- 1 %, never a large drop;
 `oc_migrations` **strictly greater** (the 35 migrations are recorded); table
 count >= pre (a major may add tables). HOW IT FAILS: a structurally healthy but
 emptied table — `occ status` would never see it.
@@ -1124,9 +1166,13 @@ up to 3x — `project_nextcloud_mail_account_quirks`), and a Gmail account's
 HOW IT FAILS: an auth error, a PHP autoload error naming `custom_apps/mail`
 (the 2026-06-06 failure: every occ breaks while `status.php` stays 200), a
 mailbox count change, or an exit != 0 that persists across 3 retries.
-Finally **the operator opens Mail in a browser and reads one message body per
-account** (a body-fetch 500 on Gmail right after a relabel is the stale-UID
-quirk: `mail:account:sync` and re-open before concluding anything).
+Finally, **MANDATORY browser check (SD-8, done by the coordinator in Chrome —
+not delegated to the operator, not skippable):** open Mail in the web UI and
+read one message body per account (3 accounts), and confirm the account list
+shows all 3. PASS only with 3 bodies rendered. A body-fetch 500 on Gmail right
+after a relabel is the stale-UID quirk: `mail:account:sync` and re-open before
+concluding anything. Record the result in the window report; gate 2 is not
+green without it.
 
 **3. CONTENTS ASSERTION: the enabled-app set is what §1.4 predicts, and the
 custom OpenClaw route survived.**
@@ -1269,6 +1315,13 @@ flux suspend kustomization -n office nextcloud && flux suspend helmrelease -n of
 kubectl -n office scale deploy/nextcloud deploy/nextcloud-notify-push --replicas=0
 kubectl -n office patch cronjob nextcloud-cron -p '{"spec":{"suspend":true}}'
 kubectl -n office wait --for=delete pod -l app.kubernetes.io/name=nextcloud,app.kubernetes.io/component=app --timeout=5m
+# cron Job pods also mount the RWX nextcloud-config volume: suspend (above) stops NEW runs; wait out a running one
+for i in $(seq 1 20); do
+  R=$(kubectl get pods -n office -l app.kubernetes.io/name=nextcloud,app.kubernetes.io/component=cronjob --field-selector=status.phase=Running -o name | wc -l | tr -d ' ')
+  echo "running cron pods=$R"; [ "$R" = "0" ] && break; sleep 15
+done
+#   EXPECT: running cron pods=0 (read 0 live 2026-10-05; runs last ~20 s). Still >0 after 5 min => a hung
+#   cron pod holds the volume: STOP, inspect it with the operator; do NOT detach/revert under it.
 # (b) DB back to the §2.3 dump — CHECK THE FILE FIRST, the DROP is irreversible
 ls -l /Users/mu/db-dumps/nextcloud-35.0.1-exec/nextcloud-pre-35.0.1.sql
 tail -1 /Users/mu/db-dumps/nextcloud-35.0.1-exec/nextcloud-pre-35.0.1.sql     # "-- Dump completed" or STOP

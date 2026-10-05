@@ -56,8 +56,8 @@ premises:
   - id: flux-distribution-still-2.9.3
     why: >-
       The flux CLI target (2.9.3) is chosen to EQUAL the live distribution. If
-      flux-distribution-2.9.6 executed first, this fails: retarget the flux line
-      to 2.9.6 (same patch line, notes re-read) before running, do not run as written.
+      flux-distribution-2.9.6 executed first, this fails: STOP and re-plan (refresh
+      this plan's flux target via the planner + review). No in-window retarget.
     run: kubectl get fluxinstance -n flux-system flux -o jsonpath='{.status.lastAppliedRevision}'
     expect_matches: '^v2\.9\.3@sha256:'
   - id: out-of-scope-pins-untouched
@@ -69,9 +69,9 @@ sops_refs:
   - docs/sops/application-update.md
   - docs/sops/vulnerability-disclosure.md
   - docs/sops/audit-script-correctness.md
-review: null
-status: draft
-window: null
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (sole blocker §4.2 busybox Results-key control) -> fixed per the reviewer's exact correction (rc==0 + version + tally None), dry-tested on 0.70
+status: vetted
+window: null   # 2026-10-05 schedule: operator NOW run (daytime, attended, exclusive) on 2026-10-08, BEFORE flux-distribution-2.9.6 (its premise flux-distribution-still-2.9.3); stamp via run-now.py at run time
 generated: "2026-10-05"
 ---
 
@@ -140,7 +140,8 @@ What I checked against upstream (tags v0.70.0..v0.75.0, CHANGELOG and source):
 - `flux-distribution-2.9.6` is `draft` and itself `depends_on: [flux-fleet-0.60.0]`, which is also draft. Gating this plan behind two un-reviewed medium-risk control-plane plans would hold the priority trivy fix hostage to them.
 - A 2.9.x CLI is compatible across the 2.9 patch line (same CRD API versions).
 - The CLI move to 2.9.6 is a one-line follow-up that belongs in flux-distribution-2.9.6's retire step (reported to the coordinator as a cross-plan note).
-- If that plan lands first, premise `flux-distribution-still-2.9.3` fails, and the executor retargets this line to 2.9.6.
+- If that plan lands first, premise `flux-distribution-still-2.9.3` fails and the executor STOPS; this plan is re-planned (no in-window retarget).
+- The later CLI catch-up 2.9.3 -> 2.9.6 is OWNED by flux-distribution-2.9.6's retire step (the coordinator is adding it there); this plan does not do it.
 
 **Why held:** nothing auto-applies `.mise.toml`, and the version check cannot tell
 a sweep-critical scanner from a convenience CLI. The changes are low-risk, but
@@ -165,11 +166,14 @@ Also untouched:
 
 ## 2. Pre-checks
 
-Run as the normal user `mu` and **never as root** (`whoami` must print `mu`).
+All scratch lives in the FIXED dir `/private/tmp/claude-501/cli-tool-pins` (never the repo),
+re-set at the top of every block, because the executor's shell state (vars, cwd) does not
+persist between Bash calls. Run as the normal user `mu` and **never as root** (`whoami` must print `mu`).
 Root-owned files in mise installs or `.git` break every other session (see
 CLAUDE.md, 2026-09-25/26 incident).
 
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 cd /Users/mu/code/cberg-home-nextgen
 whoami                                                    # mu — anything else: STOP
 .venv/bin/python3 runbooks/plan-premises.py cli-tool-pins # all PASS, or STOP
@@ -177,13 +181,13 @@ whoami                                                    # mu — anything else
 ps -axo pid,command | grep -E 'sweep-run\.py|security-check\.py|health-check\.sh|maintenance-window' | grep -v grep   # must print nothing
 date '+%a %H:%M %Z'       # not within 03:15-06:00 (nightly window + 48h sweep) nor Mon 07:15-08:30 (retro)
 git status --short .mise.toml                             # must be empty (no foreign edit in flight)
-export S=$(mktemp -d)                                     # all baselines/scratch here; never in the repo
 mise ls --current | grep -E 'flux2|sops|age|task|kustomize|yq|jq|cloudflared|trivy' | tee "$S/versions-pre.txt"
 ```
 
 **Baselines (all on the CURRENT pins).** These are the "before" side of every §4 gate.
 
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 # B1 — trivy fleet baseline: the sweep's command + parser over every running image,
 #      on a freshly UPDATED DB (the post run reuses this exact DB with --skip-db-update).
 cat > "$S/fleet_scan.py" <<'EOF'
@@ -260,6 +264,7 @@ before the edit. Between an edited `.mise.toml` and its binaries existing, every
 first leaves that gap at zero.
 
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 cd /Users/mu/code/cberg-home-nextgen
 mise install aqua:fluxcd/flux2@2.9.3 aqua:getsops/sops@3.13.3 aqua:FiloSottile/age@1.3.2 \
   aqua:go-task/task@3.54.0 aqua:kubernetes-sigs/kustomize@5.8.2 aqua:mikefarah/yq@4.54.1 \
@@ -272,6 +277,7 @@ matches exactly once. Dry-tested on a scratch copy on 2026-10-05: `edited 9 pins
 and `tomllib` parses the result.
 
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 F=.mise.toml python3 - <<'EOF'
 import os
 p = os.environ["F"]
@@ -308,11 +314,12 @@ The expected diff (dry run, 2026-10-05) is these nine lines and nothing else:
 `.mise.toml`. The CI render gate reads only the `flate` pin, which is unchanged.
 
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 printf 'chore(tooling): bump Mac CLI pins (flux 2.9.3, sops 3.13.3, age 1.3.2, task 3.54.0, kustomize 5.8.2, yq 4.54.1, jq 1.8.2, cloudflared 2026.9.3, trivy 0.75.0)\n\nplan: cli-tool-pins\n' > "$S/msg.txt"
 git commit --only .mise.toml -F "$S/msg.txt"
 git log -1 --format=%s        # must be YOUR subject; amend before push if a concurrent commit swapped it
 git show --stat HEAD          # exactly .mise.toml
-git push
+git pull --rebase --autostash && git push
 ```
 
 ## 4. Verification
@@ -322,6 +329,7 @@ Each gate names its failure mode. All output stays in `$S`, never in the repo.
 4.1 **Every bumped binary resolves to its target** (a stale shim or missing
 install shows the old version or "not installed"):
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 mise ls --current | grep -E 'flux2|sops|age|task|kustomize|yq|jq|cloudflared|trivy'
 mise exec -- sh -c 'flux version --client; sops --version | head -1; age --version; task --version; kustomize version; yq --version; jq --version; cloudflared --version; trivy --version | head -1'
 ```
@@ -332,6 +340,12 @@ PASS: `flux: v2.9.3`, `sops 3.13.3`, `v1.3.2`, `3.54.0`, `v5.8.2`, `v4.54.1`,
 modes: the positive control reads `tallied=NONE` (the silent-zero hazard), or the
 scan exits non-zero.
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
+export TRIVY_USERNAME=nachtschatt3n TRIVY_PASSWORD="$(gh auth token)"       # env only, never argv
+# 0.75 can fetch + open the DB on its own (not only reuse the one 0.70 wrote in B1):
+mise exec -- trivy image --download-db-only --quiet --cache-dir "$S/c75"; echo rc=$?          # 0
+mise exec -- trivy image --cache-dir "$S/c75" --skip-db-update --skip-java-db-update --severity CRITICAL,HIGH --exit-code 0 --quiet --format json --timeout 90s alpine:3.10.0 \
+  | python3 -c "import sys,json;d=json.load(sys.stdin);print('own-db', d['Trivy']['Version'], len(d.get('Results') or []))"   # own-db 0.75.0 >=1
 mise exec -- trivy image --severity CRITICAL,HIGH --exit-code 0 --quiet --format json --timeout 90s alpine:3.10.0 > "$S/pc.json"; echo rc=$?
 mise exec -- trivy image --severity CRITICAL,HIGH --exit-code 0 --quiet --format json --timeout 90s busybox:1.38.0 > "$S/nc.json"; echo rc=$?
 _MISE_ACTIVATED=1 python3 -c "
@@ -339,9 +353,11 @@ import json,os,importlib.util,sys
 s=importlib.util.spec_from_file_location('sc','runbooks/security-check.py');m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 pc=json.load(open('$S/pc.json'));nc=json.load(open('$S/nc.json'))
 print('pc', pc['Trivy']['Version'], pc.get('SchemaVersion'), 'tallied' if m.tally_trivy_report(pc) else 'NONE')
-print('nc', nc['Trivy']['Version'], 'results' if nc.get('Results') is not None else 'NO-RESULTS-KEY')"
+print('nc', nc['Trivy']['Version'], 'clean' if m.tally_trivy_report(nc) is None else 'NOT-CLEAN')"
 ```
-PASS: `pc 0.75.0 2 tallied` and `nc 0.75.0 results`. The positive control is a
+PASS: both scans `rc=0`, `pc 0.75.0 2 tallied` and `nc 0.75.0 clean` (a clean image reads
+clean; trivy OMITS the `Results` key for this image on both 0.70.0 and 0.75.0, so do not gate
+on that key — reviewer measurement 2026-10-05). The positive control is a
 public EOL image we do not run; measured `tallied` on both 0.70.0 and 0.75.0 on
 2026-10-05.
 
@@ -349,6 +365,7 @@ public EOL image we do not run; measured `tallied` on both 0.70.0 and 0.75.0 on
 on every running image. Measured by the B1 harness re-run on 0.75.0 against **the
 same DB** as B1 and diffed per image.
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 export TRIVY_USERNAME=nachtschatt3n TRIVY_PASSWORD="$(gh auth token)"
 _MISE_ACTIVATED=1 mise exec -- python3 "$S/fleet_scan.py" "$(mise which trivy)" "$S/imgs.txt" "$S/post.json" --skip-db-update --skip-java-db-update
 python3 "$S/fleet_diff.py" "$S/pre.json" "$S/post.json"
@@ -374,6 +391,7 @@ window report.
 4.4 **sops / age decrypt, encrypt and key identity.** A MAC or format regression
 fails `sops -d`. The round trip proves that encrypt plus decrypt is lossless.
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 mise exec -- sops -d kubernetes/bootstrap/talos/talsecret.sops.yaml | mise exec -- yq 'keys | length'          # 4 (2026-10-05)
 mise exec -- sops -d kubernetes/apps/ai/anythingllm/app/secret.sops.yaml | mise exec -- yq '.kind + " " + ((.stringData // .data) | length | tostring)'   # "Secret 4"
 mise exec -- sops -d runbooks/operator-tools.sops.yaml >/dev/null; echo rc=$?                                 # 0
@@ -388,6 +406,7 @@ The round trip was dry-tested on 3.13.0 from a scratch dir on 2026-10-05. With n
 
 4.5 **jq 1.8: proven active, and the sweep's jq consumers raise no errors.**
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 echo 1 | mise exec -- jq 'ltrimstr("a")' 2>&1 | grep -ci 'jq: error'      # 1 — positive control: only 1.8 errors here (1.7.1 prints 1)
 env -u SWEEP_PG_DSN bash runbooks/health-check.sh "$S/hc-post.txt" > "$S/hc-post.out" 2>&1; echo rc=$?
 grep -ciE 'jq: |parse error' "$S/hc-post.txt" "$S/hc-post.out"            # must equal B3 (0 / 0)
@@ -400,6 +419,7 @@ that this grep catches jq's error format (case-insensitive). A pre-plan shadow r
 4.6 **task, kubeconform and the audit suite.** A Taskfile parse break fails
 `task --list-all`.
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 mise exec -- task --list-all >/dev/null; echo rc=$?                    # 0 (parses root + bootstrap/talos includes)
 mise exec -- task test > "$S/task-test.txt" 2>&1; echo rc=$?            # 0
 grep -E 'audit test suites passed|FAIL' "$S/task-test.txt" | tail -3    # same "N audit test suites passed" as B2 (191 on 2026-10-05), no FAIL
@@ -408,6 +428,7 @@ grep -E '^Summary' "$S/task-test.txt"                                   # kubeco
 
 4.7 **kustomize and yq give identical renders and reads.**
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 for d in kubernetes/apps/ai/paperclip/app kubernetes/flux/meta kubernetes/apps/monitoring/kube-prometheus-stack/app; do
   echo "$d $(mise exec -- kustomize build "$d" | shasum -a 256 | cut -c1-16)"; done > "$S/kbuild-post.txt"
 diff "$S/kbuild-pre.txt" "$S/kbuild-post.txt" && echo RENDER-IDENTICAL
@@ -425,6 +446,7 @@ before treating it as a fault.
 version, not on trivy version, so without this the next sweep (within 24h) would
 serve 0.70 results.
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 C="$TMPDIR/cberg-trivy-cve-cache-v4.json"; [ -f "$C" ] && mv "$C" "$C.pre-trivy-0.75" && echo moved-aside
 ```
 
@@ -446,10 +468,11 @@ CONTROL: alertname SweepPipelineDead — must NOT be firing during and after the
 The old binaries are still installed: §3.1 installs alongside and this plan never
 runs `mise prune`. Rollback is therefore instant and needs no download.
 ```bash
+S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 cd /Users/mu/code/cberg-home-nextgen
 git revert --no-edit <sha-from-3.3>
 git log -1 --format=%s        # your revert subject
-git push
+git pull --rebase --autostash && git push
 mise install                  # no-op unless an old version was pruned elsewhere
 mise exec -- trivy --version | head -1      # Version: 0.70.0
 mise exec -- jq --version                   # jq-1.7.1
@@ -477,14 +500,17 @@ Prune the old versions only after one clean sweep cycle:
   and outside Mon 07:15-08:30 (retro), with the §2 `ps` check clean. A sat/sun
   attended window also works if the plan has the slot to itself. **Never as root.**
 - **flux-distribution-2.9.6 ordering:** either order works. If it runs first,
-  premise `flux-distribution-still-2.9.3` fails, and this plan's flux line must be
-  retargeted to 2.9.6 before running. If this plan runs first, flux-distribution's
-  retire step should bump the CLI pin 2.9.3 -> 2.9.6 (cross-plan note for the
-  coordinator; this plan does not edit that file).
+  premise `flux-distribution-still-2.9.3` fails and this plan STOPS for a re-plan
+  (no in-window retarget). If this plan runs first, the CLI catch-up 2.9.3 -> 2.9.6
+  is owned by flux-distribution-2.9.6's retire step (being added there by the
+  coordinator); this plan does not touch it.
 - **Concurrency window inside the plan:** between 3.2 and 3.3, the working-tree
-  `.mise.toml` already carries the new pins. Because 3.1 pre-installed them, other
-  sessions simply start using the new binaries; they never hit "not installed".
-  A session that was mid-command keeps its old binary until that command exits.
+  `.mise.toml` already carries the new pins. Because 3.1 pre-installed them, nobody hits
+  "not installed". Sessions that resolve per call (`mise exec`, shims) pick up the new
+  binaries on their next command. Long-lived sessions that activated mise earlier keep a
+  PATH snapshot pointing at the OLD install dirs until they re-activate; that is harmless
+  (the old versions stay installed, nothing is pruned) — they simply keep running the old
+  binaries until restarted. A command already mid-run keeps its binary until it exits.
 - **trivy DB/cache:** the post run reuses the DB that B1 downloaded
   (`--skip-db-update`), so the parity diff compares binaries, not DB days. Both
   versions read schema-v2 DB and java-db v1 from the same default cache dir.
