@@ -103,7 +103,7 @@ premises:
     expect_exact: 1/1
 review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: ready-for-go, 0 blocking; nonblocking fixes (test -s guard, 2-Running-pods precondition, flux-distribution-2.9.6 conflict) applied by coordinator
 status: vetted
-window: null
+window: "sat-attended:2026-10-17"   # scheduled 2026-10-05 (operator "plan all and time them"): HUMAN-GATED -> operator GO; alone in the slot; after blackbox (nightly 10-10)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md

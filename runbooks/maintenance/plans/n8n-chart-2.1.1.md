@@ -64,7 +64,7 @@ finding_refs:                         # queried 2026-09-25 with SWEEP_PG_DSN up
 amended: "2026-10-05 dependency n8n-2.39.8 retargeted 2.40.7 -> 2.41.7 (stable); every 2.40.7 token here (ordering-lock premise image-is-2.41.7, V-gates, rollback notes) moved to 2.41.7. abstract-server.ts / base-command.ts re-checked unchanged at 2.41.7 by the n8n planner; scope-neutral."
 status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (V7 absence gate, undeclared helm-drift conflict) -> fixed -> ready-for-go. Premise image-is-2.41.7 is the designed ordering lock: cannot run before n8n-2.39.8 executes (+24h, §2.2).
 review: ready-for-go@2026-09-28
-window: null
+window: "nightly:2026-10-13"   # scheduled 2026-10-05 (operator "plan all and time them"): SD-10 pre-approved; depends_on n8n-2.39.8 (sun 10-11) + >=24h settle; ordering-lock premise refuses it before
 premises:
   - id: image-is-2.41.7
     why: >-
@@ -160,7 +160,7 @@ commit.
 n8n@2.38.7 and n8n@2.41.7, `abstract-server.ts` `setupHealthCheck()` answers
 `/healthz/readiness` with 200 only when `connected && migrated &&
 fullyReady`. `server.ts` calls `markAsReady()` at the end of init (line 121 at
-2.38.7, line 124 at 2.41.7). Live on 2.38.7 (2026-09-25, port-forward):
+2.38.7, line 124 at 2.40.7, line 123 at 2.41.7 — re-read 2026-10-05). Live on 2.38.7 (2026-09-25, port-forward):
 `healthz=200 readiness=200`.
 
 ### 1.3 Decision: separate plan, chart AFTER the image. Not folded, not before.
@@ -190,7 +190,7 @@ running migrations":
   `hr/n8n` has no `spec.timeout` (read live), so Flux's default 5 min applies.
   Helm waits on Deployment readiness. Under 2.0.1, readiness is `/healthz`,
   which returns 200 at listen, so the upgrade completes in seconds while
-  migrations continue. Under 2.1.1, readiness is 503 until all 13 migrations
+  migrations continue. Under 2.1.1, readiness is 503 until all 18 migrations
   and full init finish. If that exceeds 5 min on the 489 MiB SQLite file, the
   HelmRelease goes **Failed** mid-migration. n8n-2.39.8 §3.3 disables
   remediation, so no auto-rollback fires, but its §3.8 then restores
@@ -206,7 +206,8 @@ running migrations":
 - The high-risk plan runs unchanged: its `chart-still-2.0.1` premise stays
   true and needs no edit.
 - The finding is severity `monitor` with no security driver, so waiting
-  until after 2026-10-18 is free.
+  until after the image plan (now sun-attended:2026-10-11) plus its >=24h
+  settle — earliest chart slot nightly:2026-10-13 — is free.
 
 ## 2) Pre-checks
 
@@ -383,8 +384,9 @@ revert), not as a chart rollback. §3.3 exists so this cannot happen.
 ### 6.1 Ordering and windows
 - `depends_on: [n8n-2.39.8]` plus `conflicts_with: [n8n-2.39.8]`: this plan
   runs in a *later* window than the image upgrade. The earliest sensible slot
-  is the first window ≥24 h after n8n-2.39.8 executes (it is proposed for
-  sun-attended:2026-10-18).
+  is the first window ≥24 h after n8n-2.39.8 executes (it moved to
+  sun-attended:2026-10-11 on 2026-10-05, so the earliest chart slot is
+  nightly:2026-10-13).
 - Risk low, `capability_change: false`, git-revert. It fits a Saturday or
   nightly slot. The execution class comes from `autonomy-policy.yaml`, not
   from this file.

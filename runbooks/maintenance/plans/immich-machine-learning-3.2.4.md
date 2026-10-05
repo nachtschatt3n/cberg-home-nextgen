@@ -59,7 +59,7 @@ rollback_class: git-revert            # nothing forward-only: ML is stateless; /
 finding_refs: [F-5ca2e3d9, F-6d0f4efc]  # security finding (current image) + the version finding for this bump.
 review: ready-for-go@2026-10-05
 status: vetted
-window: null
+window: "nightly:2026-10-11"   # scheduled 2026-10-05 (operator "plan all and time them"): SD-10 pre-approved; after the A/B evenings + sysfs soak (igpu/thermal conflicts)
 premises:
   - id: ml-image-is-v3.2.2-openvino
     why: >-

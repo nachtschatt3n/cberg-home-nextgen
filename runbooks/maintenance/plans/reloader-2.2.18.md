@@ -85,7 +85,7 @@ premises:
     run: "grep -c '^      version: 2.2.16$' kubernetes/apps/kube-system/reloader/app/helmrelease.yaml"
     expect_exact: "1"
 status: vetted    # plan-reviewer 2026-10-05: ready-for-go, 0 blocking
-window: null
+window: "nightly:2026-10-11"   # scheduled 2026-10-05 (operator "plan all and time them"): SD-10 pre-approved; 25+45 = 70 = nightly budget with immich
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md

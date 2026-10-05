@@ -82,7 +82,7 @@ premises:
     expect_exact: "unpoller=2.4.0"
 status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (B1-B9) -> fixed -> re-review ready-for-go as a staged programme. Stages 3-7 HOLD on the G3 fail-open (item 3) and stages 4/6-longhorn on the charts-mirror trust decision -- both fail-closed prerequisites, not review defects.
 review: ready-for-go@2026-09-28
-window: null                           # DELIBERATE. Three reasons, in order:
+window: "sun-attended:2026-11-22"   # scheduled 2026-10-05 (operator "plan all and time them"): HUMAN-GATED (autonomy_override, capability change) -> operator GO; conflicts with ~12 plans, so it gets a Sunday nobody else uses
                                        # (1) it is a staged programme — which stage runs when
                                        #     is an operator judgement, not a scheduler's;
                                        # (2) no slot currently fits. Measured 2026-09-11:

@@ -80,7 +80,7 @@ status: vetted
 # AMENDED 2026-10-05 (upgrade-planner refresh): item C (coredns 1.47.0 -> 1.47.1, pin kept) carved out;
 # superseded by coredns-1.48.2. Window `sun-attended:2026-11-01` REMOVED (it was attended only for coredns);
 # the coordinator re-schedules. Blackbox target re-verified as newest (11.19.1).
-window: null
+window: "nightly:2026-10-10"   # scheduled 2026-10-05 (operator "plan all and time them"): reviewed ready-for-go 2026-10-05; must land BEFORE coredns-1.48.2 (sat 10-17), whose DNS matrix runs in this pod
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md

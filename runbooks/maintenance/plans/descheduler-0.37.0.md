@@ -91,7 +91,7 @@ premises:
     run: "grep -c '^      version: 0.36.0$' kubernetes/apps/kube-system/descheduler/app/helmrelease.yaml"
     expect_exact: "1"
 status: vetted
-window: null
+window: "nightly:2026-10-12"   # scheduled 2026-10-05 (operator "plan all and time them"): SD-10 pre-approved; alone (shares the monitoring surface with the 10-10 blackbox roll); kept off the A/B evenings (pod placement would confound the thermal comparison)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
