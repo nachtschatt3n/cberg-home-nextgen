@@ -2,9 +2,14 @@
 # yaml-language-server: $schema=https://json.schemastore.org/kustomization
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# Stateless: no PVC, no Longhorn volume.
+# No PVC, no Longhorn volume. Player feedback lives in the shared postgresql
+# (databases/ninth-banner-feedback-db provisions the role + database).
 resources:
   - ./ghcr-secret.sops.yaml
+  # Operator-written SOPS secret: FEEDBACK_DATABASE_URL + FEEDBACK_ADMIN_TOKEN.
+  # The DSN password MUST equal NINTH_BANNER_FEEDBACK_PASSWORD in
+  # databases/ninth-banner-feedback-db/app/secret.sops.yaml.
+  - ./feedback-secret.sops.yaml
   - ./helmrelease.yaml
   - ./httproute.yaml
   - ./image-automation.yaml

@@ -27,7 +27,8 @@ spec:
   values:
     controllers:
       the-ninth-banner:
-        # Stateless (static game + /ai/* proxy, writes nothing). One replica:
+        # No local state (static game + /ai/* proxy; feedback goes to the
+        # shared postgresql). One replica:
         # the proxy's per-client rate limit and session budget are in-memory.
         replicas: 1
         containers:
@@ -57,6 +58,25 @@ spec:
                 value: http://192.168.30.111:11434
               - name: OLLAMA_MODEL
                 value: gemma4:26b-mlx
+              # Player feedback store (shared postgresql, databases ns; db +
+              # role from databases/ninth-banner-feedback-db). The app creates
+              # its own tables. Secret: ./feedback-secret.sops.yaml.
+              - name: FEEDBACK_DATABASE_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: the-ninth-banner-feedback
+                    key: FEEDBACK_DATABASE_URL
+              - name: FEEDBACK_ADMIN_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: the-ninth-banner-feedback
+                    key: FEEDBACK_ADMIN_TOKEN
+              # Store cap on the SHARED 5Gi postgresql volume (~0.5Gi used
+              # by all tenants at 2026-10-05), and retention.
+              - name: FEEDBACK_MAX_MB
+                value: "512"
+              - name: FEEDBACK_RETENTION_DAYS
+                value: "180"
             probes:
               # /healthz (v0.1.1+): static {ok, version}, no Ollama call, and not
               # access-logged on success (Gotcha #13). /ai/health still exists in the

@@ -133,3 +133,16 @@ spec:
             category: my-software-production
             component: the-ninth-banner
             severity: warning
+        - alert: TheNinthBannerFeedbackStoreDown
+          annotations:
+            description: The Ninth Banner feedback store (shared postgresql,
+              database ninth_banner_feedback) has been unreachable for 15
+              minutes. Player feedback reports are not being saved.
+            summary: The Ninth Banner feedback store is down
+          expr: |
+            feedback_store_up{namespace="my-software-production", job="the-ninth-banner"} == 0
+          for: 15m
+          labels:
+            category: my-software-production
+            component: the-ninth-banner
+            severity: warning
