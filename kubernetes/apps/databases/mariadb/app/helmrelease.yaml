@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: mariadb
-      version: 27.3.0
+      version: 28.1.1
       sourceRef:
         kind: HelmRepository
         name: bitnami
@@ -21,7 +21,7 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 3
+      retries: 0
   valuesFrom:
     - kind: Secret
       name: mariadb
@@ -43,7 +43,7 @@ spec:
     # Bitnami's free-tier catalog publishes NO versioned tags for this image —
     # only a floating `latest` plus sha256-* digest tags. An unpinned `latest`
     # silently changed the server major underneath this release, so the image is
-    # pinned BY DIGEST. This digest is MariaDB 13.0.1 (built 2026-08-14).
+    # pinned BY DIGEST. This digest is MariaDB 13.1.1 (built 2026-09-30).
     # Trade-off: the pin also freezes patching at that build. Re-pin to a newer
     # digest deliberately (check the target's version label first) rather than
     # ever letting the tag float again.
@@ -57,7 +57,7 @@ spec:
     image:
       registry: registry-1.docker.io
       repository: bitnami/mariadb
-      digest: "sha256:47bdb03b349e22c62443fa91d95b3f10366aa48ce9e4419990c99b7c23400fa9"
+      digest: "sha256:354e5aec20455bce931a05fa791c51e4a45879015bee09591295c76fe88c037e"
     auth:
       usePasswordFiles: false
     primary:
@@ -88,6 +88,7 @@ spec:
         long_query_time=10.0
         sql_mode=NO_ENGINE_SUBSTITUTION
         init_connect="SET NAMES utf8"
+        old_mode=UTF8_IS_UTF8MB3
 
         [client]
         port=3306
