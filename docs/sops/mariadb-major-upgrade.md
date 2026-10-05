@@ -1,8 +1,8 @@
 # SOP: MariaDB Major Upgrade (Bitnami chart)
 
 > Description: Taking a Bitnami-chart MariaDB across a server major (12 → 13 and onward) without leaving old-format system tables under a new binary, including the digest-pinning rule the free-tier catalog forces on us.
-> Version: `2026.10.04`
-> Last Updated: `2026-10-04`
+> Version: `2026.10.05`
+> Last Updated: `2026-10-05`
 > Owner: `cberg-agent / operator`
 
 ## Description
@@ -20,7 +20,16 @@ entrypoint and will hit both traps.
 
 Two things go wrong, and both are silent:
 
-**1. The entrypoint can skip `mariadb-upgrade` on a server-major roll.**
+**1. The Bitnami entrypoint ALWAYS skips `mariadb-upgrade`.**
+Root cause (read live in the 13.0.1 image, 2026-10-04):
+`/opt/bitnami/scripts/libmariadb.sh:538` calls
+`"${DB_BIN_DIR}/mariadb_upgrade" … || info "This installation is already upgraded"`,
+but `DB_BIN_DIR=/opt/bitnami/mariadb/bin` holds only `mariadb-upgrade`
+(hyphen) and the `mysql_upgrade` symlink — there is no `mariadb_upgrade`. The
+call fails with not-found and the `||` turns it into the reassuring info line
+on EVERY start, so on a server-major roll the upgrade never runs. Run it by
+hand (below) on every engine bump; if a future Bitnami build fixes the name,
+the manual run is a harmless no-op.
 It logged *"This installation is already upgraded"* and moved on. The
 HelmRelease reported `Ready=True`, and `SELECT VERSION()` returned the NEW
 version — while the datadir marker still recorded the OLD one. That is
@@ -106,7 +115,7 @@ Version alone is **not** sufficient — it was the misleading signal:
 
 ```bash
 SELECT VERSION();                                   # necessary, not sufficient
-cat /bitnami/mariadb/data/mysql_upgrade_info        # must show the NEW version
+cat /bitnami/mariadb/data/mariadb_upgrade_info      # must show the NEW version (Bitnami file name; NOT mysql_upgrade_info)
 mariadb-check --protocol=socket --all-databases -uroot -p"$PW"   # expect all OK
 ```
 
@@ -145,7 +154,7 @@ The two sides must agree on both. See step 2, and
 
 ```bash
 kubectl -n <ns> logs <pod> | grep -iE 'upgrade|already upgraded'
-kubectl -n <ns> exec <pod> -- ls -la /bitnami/mariadb/data/mysql_upgrade_info
+kubectl -n <ns> exec <pod> -- ls -la /bitnami/mariadb/data/mariadb_upgrade_info
 ```
 
 ## Health Check
