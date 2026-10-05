@@ -54,7 +54,30 @@
   // The three per-package approval rules below stay — each guards a coupled pin
   // that a single-file PR would break.
   "dependencyDashboardApproval": false,
-  "ignorePaths": ["**/*.sops.*"],
+  // Decommissioned 2026-10-04: their ks.yaml is commented out of the namespace
+  // kustomization, so Flux deploys nothing from these dirs. The manifests are kept
+  // for restore. Renovate would still open PRs against them (dry-run measured
+  // hermes-agent and actual-budget branches). Remove an entry when its app is
+  // re-enabled.
+  "ignorePaths": [
+    "**/*.sops.*",
+    "kubernetes/apps/ai/librechat/**",
+    "kubernetes/apps/ai/hermes-agent/**",
+    "kubernetes/apps/home-automation/scrypted-nvr/**",
+    "kubernetes/apps/office/actual-budget/**",
+    "kubernetes/apps/office/omni-tools/**",
+    "kubernetes/apps/my-software-showcase/globalmobility/**",
+    "kubernetes/apps/my-software-showcase/holm-backend/**",
+    "kubernetes/apps/my-software-showcase/ibgastro/**",
+    "kubernetes/apps/my-software-showcase/inbewegung/**",
+    "kubernetes/apps/my-software-showcase/kfa-medienarchiv/**",
+    "kubernetes/apps/my-software-showcase/mangold-smarthomeadvisor/**",
+    "kubernetes/apps/my-software-showcase/max-jung/**",
+    "kubernetes/apps/my-software-showcase/ordiga/**",
+    "kubernetes/apps/my-software-showcase/see-edv-ibspm/**",
+    "kubernetes/apps/my-software-showcase/stepbystepguide/**",
+    "kubernetes/apps/my-software-showcase/zuhause-betreut/**"
+  ],
   "flux": {
     "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$/"]
   },
@@ -132,8 +155,17 @@
       // `max: patch` on *n8n* stays as defence in depth, because followTag
       // trusts upstream to keep the pointer honest and the policy rule does
       // not.
+      //
+      // 2026-10-05: followTag never worked against the docker datasource. It
+      // does not return a tag->version map, so every run logged "Can't find
+      // version with tag stable for docker package n8nio/n8n" and n8n got NO
+      // Renovate update after 09-12. The `stable` channel is an npm dist-tag
+      // (npm `n8n`; image tags mirror npm versions), so the version lookup
+      // reads npm. The image reference being bumped is unchanged.
       "matchDatasources": ["docker"],
       "matchPackageNames": ["n8nio/n8n"],
+      "overrideDatasource": "npm",
+      "overridePackageName": "n8n",
       "followTag": "stable"
     },
     {
