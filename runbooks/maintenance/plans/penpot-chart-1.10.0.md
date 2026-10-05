@@ -199,8 +199,11 @@ body. Read from primary sources:
   exporter Dockerfiles untouched, so uid 1001 and `/bin/bash` hold as in §1.A;
   (b) `backend/src/app/http.clj` + `main.clj` add an Undertow metrics sampler
   (`penpot_http_worker_*`, `penpot_http_connector_*`) — we scrape no penpot
-  `/metrics`, so inert here; it does log `unexpected error on http metrics
-  sampling` on a sampler failure, which §4.7's error grep would NOT hide;
+  `/metrics` (live 2026-10-05: no ServiceMonitor/PodMonitor matching penpot,
+  no `prometheus.io/scrape` annotation on its Services/Deployments), so inert
+  here. A sampler failure only logs a WARN (`unexpected error on http metrics
+  sampling`) and never stops the server, so it cannot fail any §4 gate — read
+  it in the backend log if §4 is otherwise odd;
   (c) `docker/images/files/nginx.conf.template` (the frontend) changes
   `access_log` to a `penpot_upstream` format and adds a **second `server`
   block `listen 8082` serving only `location = /stub_status`**. That is the
