@@ -81,7 +81,7 @@ finding_refs:                         # 2026-10-04 pre-plan query found no findi
                                       # ~+35% under EPP balance_power. NO amendment yet: operator decides after
                                       # the 24 h soak (3.10) + external research.
 review: ready-for-go@2026-10-05     # plan-reviewer 3rd pass at a42dbacf+98ca43c0 (condition: premise multidoc = 3; holds)
-status: awaiting-soak                 # caps LIVE on all 3 nodes 2026-10-04 23:09-23:17Z (now:2026-10-05); 24 h soak + 3.10 owed, due >= 2026-10-05T23:17Z
+status: executed                      # caps LIVE on all 3 nodes 2026-10-04 23:09-23:17Z (now:2026-10-05); 24 h soak CAPSTATS_OK 2026-10-05T23:18Z (p95 51/55/55, max 62/75/71, 0 min>=100, throttles 88/1/14); 7 baseline files copied to the A/B $W; 3.10 gate 85->88 applied 2026-10-06. Owed: wipe $W (machine secrets) by 2026-10-11
 window: "now:2026-10-05"   # ON-DEMAND NOW run 2026-10-05 (run-now.py stamp; was None)
                                       # slot after talconfig-multidoc-migration executed. Reviewer 2026-10-04:
                                       # sun-attended:2026-11-01 (45/180 booked); 10-11 exclusive, 10-18/10-25 too full.

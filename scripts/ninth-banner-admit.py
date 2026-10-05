@@ -63,7 +63,7 @@ NS = "ci-runner"
 SELECTOR = "app.kubernetes.io/name=the-ninth-banner-tests"
 GATE = "ci.cberg.home/thermal"
 RELEASED_AT = "ci.cberg.home/released-at"
-OPEN_BELOW_C = float(os.environ.get("GATE_OPEN_BELOW_C", "85"))
+OPEN_BELOW_C = float(os.environ.get("GATE_OPEN_BELOW_C", "88"))
 HOT_C = float(os.environ.get("GATE_HOT_C", "93"))
 # Second pod on a node (2026-10-04 tightening after a 103 C single sample on
 # nuc14-03 with 2 shards; 102 C rebooted a node on 2026-08-08):
