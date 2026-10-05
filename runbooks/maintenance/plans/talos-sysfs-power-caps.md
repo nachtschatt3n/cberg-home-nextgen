@@ -630,7 +630,11 @@ machine-config apply from the reverted repo removes the document, and Talos writ
 still carrying the rollback document would raise the MSR back to 64 W at every boot - remove the document then.
 
 **Forward-only parts:** none. No data, no reboot, no etcd or apiserver change.
-**Cleanup:** `rm -rf /private/tmp/sysfscaps-talos-sysfs-power-caps` (machine secrets) only AFTER the 3.10 soak step
+**Copy-out BEFORE any cleanup (added 2026-10-05 for plan talos-power-tuning-ab, whose premises read these files):**
+as soon as the soak printed `CAPSTATS_OK`, `D=/private/tmp/powerab-talos-power-tuning-ab; mkdir -p "$D"; chmod 700 "$D";
+for f in shards-before.json shards-after.json ci-before.log ci-after.log stats-before-ci.json stats-after-ci.json
+stats-soak-24h.json; do cp -p "$W/$f" "$D/$f"; done; ls "$D" | wc -l` (7). These 7 files hold no secrets.
+**Cleanup:** `rm -rf /private/tmp/sysfscaps-talos-sysfs-power-caps` (machine secrets) only AFTER the copy-out above and the 3.10 soak step
 has run (or after a completed rollback) - it holds the rollback configs until then - and in ANY case no later than
 7 days after the window (the rollback configs are re-renderable from git with `sysfs-patches.py <tree> orig`; the
 dir holds machine secrets in plaintext and must not linger). The window report names the deletion date.
@@ -711,8 +715,9 @@ run-time is EPP balance_power, not the RAPL or iGPU caps. Over the 10-15 % expec
 (nuc14-02) failed AFTER on a timing-sensitive animation assertion (ambient-life greeting bubble, 8 s `toBeVisible`,
 failed on retry; passed BEFORE); sims shard 4 failed identically BEFORE and AFTER (code, not caps). Option if CI speed
 matters more than the last few degrees: EPP back to balance_performance with the RAPL caps kept (amendment, re-review).
-Owed: 24 h soak (`capstats.py soak-24h 1440 "$W"`, >= 2026-10-05T23:17Z) -> 3.10 decision; delete
-`/private/tmp/sysfscaps-talos-sysfs-power-caps` after that, and no later than 2026-10-11.
+Owed: 24 h soak (`capstats.py soak-24h 1440 "$W"`, >= 2026-10-05T23:17Z) -> COPY the 7 A/B baseline files to
+`/private/tmp/powerab-talos-power-tuning-ab` (section 5 "Copy-out", plan talos-power-tuning-ab needs them) -> 3.10
+decision; then delete `/private/tmp/sysfscaps-talos-sysfs-power-caps`, no later than 2026-10-11.
 
 ## Appendix A - scripts (extracted by section 2's awk loop; all dry-tested 2026-10-04)
 

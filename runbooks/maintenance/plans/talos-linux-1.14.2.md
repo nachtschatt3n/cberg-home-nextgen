@@ -85,6 +85,8 @@ conflicts_with:                       # exclusive: true already keeps everything
                                       # SysfsConfig (RAPL PL1/PL2, EPP, iGPU gt0 max) via apply-config; never
                                       # the same night. If it executed BEFORE this roll, §4.1 re-checks its
                                       # 21 keys after each reboot (the iGPU card index is boot-dependent).
+  - talos-power-tuning-ab            # reciprocity (2026-10-05): live SysfsConfig A/B applies on 01/03 + final roll on all
+                                      # 3 nodes; never the same night (a reboot voids a variant and re-reads the card index).
   - kube-prometheus-stack-91.9.0       # reciprocity (2026-10-05): that plan (chart 91.5.2 -> 91.9.0,
                                       # Prometheus restart) names this plan in its conflicts_with. §4
                                       # reads Prometheus (canary choice, etcd latency, alerts); a
@@ -1405,7 +1407,11 @@ set = re-run `task talos:upgrade-node` for that IP before moving on.
 kernelparamstatuses` lists `sys.class/powercap/...` rows) - after each node returns, take `sysfs-readback.py` from
 that plan's Appendix A (its §2 awk loop extracts it; from git history if the plan file was retired) into `$SCR/`
 and run `mise exec -- python3 "$SCR/sysfs-readback.py" <node-ip> caps --status` -> **PASS:** `GATE_PASS ... keys=21
-mismatches=0`. This is the first boot after the caps: Talos must re-apply all 21 keys. A `MISMATCH` on the
+mismatches=0`. **If `talos-power-tuning-ab` has executed** (2026-10-05 correction, its §6): the 2026-10-04 `caps`
+values are no longer the committed ones, so use THAT plan's read-back instead:
+`mise exec -- python3 "$SCR/ab-readback.py" <node-ip> <winner> --status` (extract `ab-readback.py` from its Appendix,
+`<winner>` = the variant its execution record names; PASS `GATE_PASS ... keys=21|22 mismatches=0`). EPP 64 reads back
+as `balance_performance` there by design. This is the first boot after the caps: Talos must re-apply all 21 keys. A `MISMATCH` on the
 `class/drm/cardN/gt/gt0/rps_max_freq_mhz` key with `ERR(...no such file...)` means the iGPU card index moved across
 the reboot (nuc14-03 had i915 on card1 because simpledrm took card0): re-measure with
 `mise exec -- talosctl -n <node-ip> list /sys/class/drm`, fix that node's `patches/node/k8s-nuc14-NN-sysfs-igpu.yaml`
