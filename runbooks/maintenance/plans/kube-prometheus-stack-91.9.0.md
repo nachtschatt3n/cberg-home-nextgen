@@ -57,6 +57,9 @@ conflicts_with:                       # every OPEN plan that reads Prometheus in
   - penpot-cache-9.2                  # (*)
   - penpot-chart-1.10.0               # (*)
   - teslamate-4.3                     # (*)
+  - ci-runner-exclude-node02          # reciprocity 2026-10-05: its §4 reads Prometheus through the CI thermal gate (fail-closed)
+  - ci-gate-primary-control-rework    # reciprocity 2026-10-05 (backlog): same gate, same instrument
+  - talos-power-tuning-ab             # reciprocity 2026-10-05: every A/B gate (capstats) reads this Prometheus
 security_ref: null                    # not security-driven. Related (NOT owned): F-f7f3736e is the image
                                       # finding on the CURRENT prometheus tag; this bump moves that tag, the
                                       # next security sweep decides whether it clears. Detail stays in the DB.
