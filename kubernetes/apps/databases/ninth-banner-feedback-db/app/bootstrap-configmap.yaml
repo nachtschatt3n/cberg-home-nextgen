@@ -1,0 +1,45 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ninth-banner-feedback-db-bootstrap
+  namespace: databases
+data:
+  # $${VAR} escapes survive Flux postBuild substitution as a literal ${VAR}
+  # (same reason as sweep-history/app/schema-configmap.yaml).
+  bootstrap.sh: |
+    #!/usr/bin/env bash
+    # Idempotent: guarded CREATE ROLE / CREATE DATABASE, ALTER ROLE re-asserts
+    # the SOPS-held password, GRANT/REVOKE are naturally idempotent. No DROP,
+    # TRUNCATE, DELETE or INSERT. Safe to re-run.
+    set -euo pipefail
+
+    : "$${PGHOST:?PGHOST required}"
+    : "$${PGUSER:?PGUSER required}"
+    : "$${PGPASSWORD:?PGPASSWORD required}"
+    : "$${NINTH_BANNER_FEEDBACK_PASSWORD:?NINTH_BANNER_FEEDBACK_PASSWORD required}"
+
+    export PGCONNECT_TIMEOUT=10
+    psql_admin() { PGDATABASE=postgres psql -v ON_ERROR_STOP=1 "$@"; }
+
+    # Inline interpolation below; the password is also embedded in a DSN, so
+    # it must be URL- and SQL-safe. Refuse anything but [A-Za-z0-9].
+    case "$${NINTH_BANNER_FEEDBACK_PASSWORD}" in
+      *[!A-Za-z0-9]*) echo "FATAL: password must be alphanumeric only" >&2; exit 1;;
+    esac
+
+    echo "==> Ensure role ninth_banner_feedback"
+    psql_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname='ninth_banner_feedback'" | grep -q 1 \
+      || psql_admin -c "CREATE ROLE ninth_banner_feedback LOGIN"
+    psql_admin -c "ALTER ROLE ninth_banner_feedback WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '$${NINTH_BANNER_FEEDBACK_PASSWORD}'"
+
+    echo "==> Ensure database ninth_banner_feedback (owner: ninth_banner_feedback)"
+    psql_admin -tAc "SELECT 1 FROM pg_database WHERE datname='ninth_banner_feedback'" | grep -q 1 \
+      || psql_admin -c "CREATE DATABASE ninth_banner_feedback OWNER ninth_banner_feedback"
+    psql_admin -c "ALTER DATABASE ninth_banner_feedback OWNER TO ninth_banner_feedback"
+
+    # Isolation on the shared instance: only the owner (and admin) may connect.
+    psql_admin -c "REVOKE CONNECT, TEMPORARY ON DATABASE ninth_banner_feedback FROM PUBLIC"
+    psql_admin -c "GRANT CONNECT, TEMPORARY ON DATABASE ninth_banner_feedback TO ninth_banner_feedback"
+
+    echo "==> Done"

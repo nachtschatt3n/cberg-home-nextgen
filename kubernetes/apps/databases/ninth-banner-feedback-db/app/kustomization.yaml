@@ -1,0 +1,16 @@
+---
+# Database + login role for The Ninth Banner's player-feedback store on the
+# shared postgresql (databases ns). Same pattern as ../../sweep-history: an
+# idempotent init Job running as the postgres admin. The app creates its own
+# tables on start; this only provisions the role and the empty database.
+#
+# secret.sops.yaml is written by the operator (SOPS, never committed in
+# plaintext). Its NINTH_BANNER_FEEDBACK_PASSWORD MUST equal the password inside
+# FEEDBACK_DATABASE_URL in
+# my-software-production/the-ninth-banner/app/feedback-secret.sops.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - secret.sops.yaml
+  - bootstrap-configmap.yaml
+  - init-job.yaml

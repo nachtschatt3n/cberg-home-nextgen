@@ -1,0 +1,65 @@
+---
+# One-shot init Job. Job .spec.template is immutable: any change to this Job
+# (image bump, env) must rename it (v1 -> v1a / v2) so Flux prunes and
+# recreates it. docs/sops/immutable-job-image-bumps.md.
+#
+# History:
+#   v1 -- role + database for The Ninth Banner feedback store.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ninth-banner-feedback-db-init-v1
+  namespace: databases
+  labels:
+    app.kubernetes.io/name: ninth-banner-feedback-db
+    app.kubernetes.io/component: init
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 604800  # 7d, keep logs inspectable
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ninth-banner-feedback-db
+        app.kubernetes.io/component: init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          # Same image/digest as the shared postgresql Deployment.
+          image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+          command: ["bash", "/sql/bootstrap.sh"]
+          env:
+            - name: PGHOST
+              value: postgresql
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql
+                  key: POSTGRES_USER
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql
+                  key: POSTGRES_PASSWORD
+            - name: NINTH_BANNER_FEEDBACK_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ninth-banner-feedback-db
+                  key: NINTH_BANNER_FEEDBACK_PASSWORD
+          volumeMounts:
+            - name: sql
+              mountPath: /sql
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: sql
+          configMap:
+            name: ninth-banner-feedback-db-bootstrap
+            defaultMode: 0o555
