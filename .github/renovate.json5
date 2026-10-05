@@ -10,6 +10,19 @@
     ":separatePatchReleases"
   ],
   "dependencyDashboard": true,
+  // mode (2026-10-05): explicit "full". Since ~2026-02-21 the Mend-hosted app has
+  // behaved exactly like Renovate's mode=silent (lib/workers/repository/
+  // dependency-dashboard.ts + update/branch/index.ts): the dashboard (#7) was
+  // never rewritten again, and a branch was created ONLY when its checkbox was
+  // already ticked in that frozen body (e.g. coredns-1.x -> #220/#221 on
+  // 2026-09-29, outside the schedule, which a dashboard check bypasses), while
+  // existing branches kept being rebased. A local dry-run of this exact config
+  // (renovate 44.133.0, mode=full) rewrites the dashboard and plans 77 branches.
+  // The 09-27 dependencyDashboardApproval=false fix could not help: silent mode
+  // gates branch creation independently of approval. `mode` is not globalOnly,
+  // so repo config can override an injected silent default; if the Mend
+  // portal FORCES silent, switch the repo to Interactive there.
+  "mode": "full",
   "dependencyDashboardTitle": "Renovate Dashboard 🤖",
   "suppressNotifications": ["prEditedNotification", "prIgnoreNotification"],
   // Run every night before 6am local (operator call 2026-09-14). Mon/Thu/weekend
@@ -384,6 +397,23 @@
       "versioning": "regex:^distroless-v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
       "dependencyDashboardApproval": true,
       "addLabels": ["renovate/coupled-pin"]
+    },
+    {
+      // Private self-built ghcr packages Renovate cannot read (no read:packages
+      // for the app) -> "Failed to look up docker package" on every run, which
+      // the dashboard lists as a repo problem. They are released by their own
+      // pipelines (the-ninth-banner: Flux ImageUpdateAutomation; the others:
+      // their repos' CI), not by Renovate. Scoped by file, so a public
+      // nachtschatt3n image elsewhere keeps being tracked.
+      "description": ["Private self-built ghcr images - no Renovate lookup"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["/^ghcr\\.io/nachtschatt3n//"],
+      "matchFileNames": [
+        "kubernetes/apps/my-software-*/andreamosteller/app/helmrelease.yaml",
+        "kubernetes/apps/my-software-production/rainbow-rescue/app/helmrelease.yaml",
+        "kubernetes/apps/my-software-production/the-ninth-banner/app/helmrelease.yaml"
+      ],
+      "enabled": false
     }
   ],
   "customManagers": [
