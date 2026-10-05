@@ -4,11 +4,14 @@ component: mariadb
 pr: null                              # no Renovate PR; surfaced by coverage.py needs_plan_groups (group_kind single)
 kind: chart
 current: "27.3.0"                     # bitnamicharts/mariadb (OCI), appVersion 13.0.1, image digest-pinned to 13.0.1
-                                      # (live 2026-10-04: HR 27.3.0 Ready, SELECT VERSION() 13.0.1-MariaDB)
+                                      # (re-measured live 2026-10-05: HR 27.3.0 Ready, chart history 27.3.0/13.0.1,
+                                      # SELECT VERSION() 13.0.1-MariaDB, marker 13.0.1, mariadb-0 started
+                                      # 2026-10-03T19:35Z = the 0ddd0b54 roll, restartCount 0)
 target: "28.1.1"                      # appVersion 13.1.1 — chart + image digest re-pin to a VERIFIED 13.1.1 build,
                                       # in lockstep (§1.2). Chart-only would leave 13.0.1 running under 13.1.1 labels.
 update_type: major                    # chart major; carries the server release-series change 13.0 -> 13.1
-risk: high                            # one-way system-table conversion of a SHARED DB (15 tenants + phpMyAdmin)
+risk: high                            # one-way system-table conversion of a SHARED DB (4 showcase tenants +
+                                      # 2 ibTime_* schemas + phpMyAdmin; 11 tenants decommissioned 2026-10-04)
                                       # AND an upstream default change (utf8 -> utf8mb4) that silently changes
                                       # the legacy-compat charset config those tenants depend on (§1.3). The
                                       # entrypoint's own upgrade step is BROKEN (§1.4) so a manual step is mandatory.
@@ -36,27 +39,33 @@ touches:
     - pod/databases/mariadb-restoretest           # scratch pod for restore_proof (§2.5), deleted in the same step
     - volume.longhorn.io/storage/mariadb-data-5g  # snapshot created; reverted only on §5.2
     - deployment/databases/phpmyadmin             # consumer; loses its backend for the roll
-    - deployments in my-software-showcase (15)    # consumers; DB-checking readiness flaps; Rails liveness can
-                                                  # restart once (F-9ab5f80f), globalmobility/ibgastro liveness reads the DB
+    - deployment/my-software-showcase/haarfabrik  # consumers (Rails, persistent pool); DB-aware readiness flaps,
+    - deployment/my-software-showcase/metaldyne   # liveness is tcpSocket :3000 since f515915c, so a bounce should
+    - deployment/my-software-showcase/u-zeit      # not restart them (bound <=1 kept per maintenance-windows.md s7)
+    - deployment/my-software-showcase/uzeit-de    # consumer (PHP, per-request connections)
   shared:
-    - shared-mariadb                  # databases/mariadb IS shared infra: 15 tenant schemas + phpMyAdmin.
+    - shared-mariadb                  # databases/mariadb IS shared infra: 4 showcase schemas + 2 ibTime_* + phpMyAdmin.
                                       # NOT nextcloud (office/nextcloud-mariadb) and NOT paperless (office/paperless-db).
     - storage/longhorn                # in-window VolumeSnapshot; snapshot revert on rollback
     - monitoring                      # §4.5 reads Prometheus
 depends_on: []
 conflicts_with:
-  # shared-infra / same-object guards (carried from the executed mariadb-chart-27.3.0, re-checked 2026-10-04)
+  # shared-infra / same-object guards (carried from the executed mariadb-chart-27.3.0; every id re-checked
+  # against load_plans() 2026-10-05 — all still open)
   - flux-reconciler-impersonation     # exclusive; changes how helm-controller applies this HR
   - helm-drift-detection              # adds spec.driftDetection to this HR
   - flux-oci-chart-sources            # moves the bitnami OCI source this HR pulls 28.1.1 from
   - flux-fleet-0.60.0                 # restarts helm-controller mid-upgrade; retries:0 makes a half-applied release sticky
-  - app-template-5.2.1                # helm-upgrades phpMyAdmin + all 15 showcase HRs = the §4.3 consumer set
+  - app-template-5.2.1                # helm-upgrades phpMyAdmin + all 4 showcase HRs = the §4.3 consumer set
   - chart-patches-coredns-reloader-blackbox  # coredns roll confounds the tenant-reconnect gate
   - coredns-1.48.1                    # same reason
   - longhorn-1.13.0                   # storage engine move under a snapshot + in-place conversion
+  - jellyfin-config-rwo-migration     # hands-on Longhorn volume work + its own restore-test; same storage/longhorn surface as the §2.6 snapshot / §5.2 revert (review 2026-10-05)
   - talos-linux-1.14.2                # node roll would evict mariadb-0 / detach the volume mid-procedure
+  - kube-prometheus-stack-91.9.0      # exclusive; restarts Prometheus, which §4.5 reads (it already lists this plan)
   # ROLLBACK-CLASS STACKING (convention from paperless-db-13.0.2): two backup-restore rollbacks in one slot
-  # leave no rollback capacity for either. Every live backup-restore plan, read via load_plans() 2026-10-04:
+  # leave no rollback capacity for either. Every live backup-restore plan, read via load_plans() 2026-10-05:
+  - talos-sysfs-power-caps            # backup-restore (now:2026-10-05, awaiting-soak); added 2026-10-05
   - paperless-db-13.0.2
   - bitnamilegacy-exit-nextcloud-db
   - nextcloud-fleet-35.0.1
@@ -66,23 +75,22 @@ conflicts_with:
   - media-naming-p3
   - penpot-chart-1.10.0
   # talconfig-multidoc-migration: EXECUTED now:2026-10-04 and retired (10bee773); dead ref removed 2026-10-05 (sweep 481b9c1f)
-  # No kube-prometheus-stack plan is open (91.4.1 executed). §4.5 reads Prometheus: a future one MUST be added here.
+  # kube-prometheus-stack-91.9.0 (draft, d8ecdb2e) is listed above; §4.5 reads Prometheus.
 capability_change: false              # same service, same tenant-visible behaviour: the one default that would change
                                       # behaviour (utf8 = utf8mb4) is pinned back by old_mode (§1.3) and asserted in §4.2.
                                       # 13.1's new SQL features are unused by any tenant.
 rollback_class: backup-restore        # NOT git-revert: mariadb-upgrade rewrites mysql.* system tables for 13.1; a
                                       # revert alone points a 13.0.1 binary at them. §5.2 = quiesced Longhorn snapshot
                                       # revert, §5.3 = logical dump restore.
-backup_gate: "TWO artifacts, both BEFORE the §3 push: (a) logical dump of --all-databases from the LIVE 13.0.1 pod over the socket with --default-character-set=utf8mb4, proven by the fail-closed §2.4 script under set -euo pipefail (exits non-zero on a missing '-- Dump completed' trailer, <20 CREATE DATABASE, no FLUSH PRIVILEGES, any dump stderr, or <1 MB); (b) VolumeSnapshot mariadb-data-pre-13-1 (class longhorn-snapshot) readyToUse=true with its snap:// handle recorded to $W/snaphandle.txt (§2.6) — the PRIMARY rollback artifact"
-restore_proof: "§2.5: the §2.4 dump is loaded into a scratch pod mariadb-restoretest running the ROLLBACK binary (same 13.0.1 digest, emptyDir datadir, root password from secret/mariadb), and the exact per-table COUNT(*) of all 586 user tables must equal counts-T0.tsv (diff empty, line count >= 586) and 4 tenant users must be present. Pod deleted afterwards. A dump that exists is not a dump that restores."
+backup_gate: "TWO artifacts, both BEFORE the §3 push: (a) logical dump of --all-databases from the LIVE 13.0.1 pod over the socket with --default-character-set=utf8mb4, proven by the fail-closed §2.4 script under set -euo pipefail (exits non-zero on a missing '-- Dump completed' trailer, <9 CREATE DATABASE, no FLUSH PRIVILEGES, any dump stderr, or <1 MB); (b) VolumeSnapshot mariadb-data-pre-13-1 (class longhorn-snapshot) readyToUse=true with its snap:// handle recorded to $W/snaphandle.txt (§2.6) — the PRIMARY rollback artifact"
+restore_proof: "§2.5: the §2.4 dump is loaded into a scratch pod mariadb-restoretest running the ROLLBACK binary (same 13.0.1 digest, emptyDir datadir, root password from secret/mariadb), and the exact per-table COUNT(*) of all 212 user tables must equal counts-T0.tsv (diff empty, line count >= 212) and the 4 showcase_* users must be present in mysql.global_priv (both asserted by the §2.5 script). Pod deleted afterwards. A dump that exists is not a dump that restores."
 security_ref: null                    # version-currency driver, not a security driver
 finding_refs:
   - F-1fa39efd                        # chart 27.3.0 -> 28.1.1 version finding (sweep 481b9c1f, 2026-10-05); supersedes
                                       # F-8ef629f2, auto-closed when the 27.3.0 row executed
-  - F-8ef629f2                        # mariadb chart version finding (fingerprint stable per component+kind; the
-                                      # 27.0.1->27.3.0 row executed 2026-10-03, the next sweep re-titles it to 28.x)
-  - F-9ab5f80f                        # "fix the restart-gate template for future mariadb plans" — §4.3/§4.5 here
-                                      # implement it (Rails restart bound <=1, processlist baseline = 12 Rails users)
+  - F-8ef629f2                        # predecessor version finding (27.0.1->27.3.0), status resolved 2026-10-03
+  - F-9ab5f80f                        # restart-gate template (resolved 2026-10-04 by f515915c + a6bf8413); §4.3/§4.5
+                                      # implement it here: restart bound <=1, processlist baseline = 3 Rails pool users
 status: draft
 review: null
 window: null
@@ -94,8 +102,9 @@ sops_refs:
   - docs/sops/storage-safety.md            # no PVC/PV is deleted on any path
   - docs/sops/verification-contents-not-shape.md
 generated: "2026-10-04"
+regenerated: "2026-10-05"            # re-planned after the 2026-10-04 showcase decommission (11 tenants dropped)
 premises:
-  # All read-only. Values measured live 2026-10-04.
+  # All read-only. Values measured live 2026-10-04, re-measured 2026-10-05 after the showcase decommission.
   - id: hr-on-27.3.0-ready
     why: >-
       current claims chart 27.3.0 and Ready. If already bumped or failing, §3 lands on a broken release.
@@ -151,10 +160,18 @@ premises:
     why: "phpMyAdmin is checked in §4.4."
     run: kubectl get deploy -n databases phpmyadmin -o jsonpath='{.metadata.name}'
     expect_exact: phpmyadmin
-  - id: fifteen-showcase-tenants
-    why: "§4.3 pokes exactly these 15 apps; a different count means the consumer list is stale."
-    run: kubectl get deploy -n my-software-showcase --no-headers -o name | wc -l | tr -d ' '
-    expect_exact: "15"
+  - id: four-showcase-tenants
+    why: >-
+      §4.3 pokes exactly these 4 apps (11 were decommissioned 2026-10-04). Prints a different list if a tenant
+      was added or removed since, i.e. the consumer list is stale.
+    run: kubectl get deploy -n my-software-showcase --no-headers -o custom-columns=N:.metadata.name | sort | tr '\n' ' '
+    expect_exact: "haarfabrik metaldyne u-zeit uzeit-de"
+  - id: rails-liveness-tcpsocket
+    why: >-
+      The <=1 restart bound in §4.3 assumes the f515915c fix: Rails liveness is tcpSocket :3000, so a DB bounce
+      cannot fail it. Prints an httpGet/empty value if the fix was reverted.
+    run: kubectl get deploy -n my-software-showcase haarfabrik metaldyne u-zeit -o jsonpath='{range .items[*]}{.spec.template.spec.containers[0].livenessProbe.tcpSocket.port} {end}'
+    expect_exact: "3000 3000 3000"
 ---
 
 # mariadb (Bitnami chart) 27.3.0 → 28.1.1 — server 13.0.1 → 13.1.1
@@ -164,7 +181,8 @@ premises:
 Bump `databases/mariadb` chart `27.3.0 → 28.1.1` **and** re-pin the image
 digest from the 13.0.1 build to the 13.1.1 build, add one `my.cnf` line that
 keeps today's charset semantics, run `mariadb-upgrade` by hand, and prove the
-15 showcase tenants and phpMyAdmin still work against the same data.
+4 remaining showcase tenants (haarfabrik, metaldyne, u-zeit, uzeit-de), the
+2 `ibTime_*` schemas and phpMyAdmin still work against the same data.
 
 **Why held:** `runbooks/auto-update-policy.yaml` deny rule for `*mariadb*` —
 *"A DB-engine bump is never unattended-safe. The bitnami entrypoint can SKIP
@@ -205,8 +223,8 @@ stamping `13.1.1` on every object. That is the labels lying, which the 27.3.0
 plan §1.3 already rejected. So the target digest is the current `latest` index
 **`sha256:354e5aec…037e`**, verified from the registry 2026-10-04: amd64 child
 `sha256:b1aa4edf…`, config label `org.opencontainers.image.version=13.1.1`,
-`APP_VERSION=13.1.1`, created 2026-09-30, base `photon:5.0`. Premise
-`target-digest-is-13.1.1` re-checks it at runtime. The current pin
+`APP_VERSION=13.1.1`, created 2026-09-30, base `photon:5.0`. The §2.0
+exec-only check (`TARGET_DIGEST_OK`) re-checks it at runtime. The current pin
 `47bdb03b…` (amd64 `1a9e52dd…`, label 13.0.1) still resolves. It is also the
 rollback binary.
 
@@ -225,8 +243,10 @@ TYPO3 4.2 / Rails 3.2 tenants. Every charset line in it says `utf8`:
 `character-set-server=UTF8`, `collation-server=utf8_general_ci`,
 `init_connect="SET NAMES utf8"`, `[client] default-character-set=UTF8`. Live
 today: `@@old_mode = UTF8_IS_UTF8MB3`, `character_set_server = utf8mb3`,
-`collation_server = utf8mb3_general_ci`. Every tenant table is `latin1` (39) or
-`utf8mb3` (547), and there are **zero utf8mb4 tables**.
+`collation_server = utf8mb3_general_ci`. Re-measured 2026-10-05 (after the
+2026-10-04 decommission dropped 11 tenants, which took every `latin1` table
+with them): all 212 user tables are `utf8mb3` (166 `utf8mb3_general_ci`, 46
+`utf8mb3_uca1400_ai_ci`), and there are **zero utf8mb4 tables**.
 
 Under a 13.1 binary with the config unchanged, the same text would silently
 become `utf8mb4` server defaults, and `init_connect` would force
@@ -275,16 +295,34 @@ root cause.)
 
 ### 1.5 Consumers (live, 2026-10-04)
 
-- **my-software-showcase**: 15 Deployments, 586 user base tables across their
-  schemas. Processlist right now holds exactly **12 Rails users**
-  (`showcase_{haarfabrik,holm,inbewegung,kfa_medienarchiv,mangold,max_jung,metaldyne,ordiga,see_edv,stepbystepguide,u_zeit,zuhause_betreut}_user`).
-  The 3 PHP apps (globalmobility, ibgastro, uzeit-de) connect per request.
-  Probe map as measured in the 27.3.0 run, refined by **F-9ab5f80f**: Rails
-  liveness is *not* DB-independent in practice. Single-threaded WEBrick starves
-  on DB-blocked readiness calls, and on 2026-10-03 5 tenants restarted once.
-  Cumulative restartCount is already 1 on haarfabrik, metaldyne, ordiga,
-  stepbystepguide and u-zeit, so every restart gate below is a **delta** from
-  T0.
+- **Decommission, 2026-10-04:** eleven showcase apps were removed and their
+  databases and users dropped (globalmobility, holm, ibgastro, inbewegung,
+  kfa_medienarchiv, mangold, max_jung, ordiga, see_edv, stepbystepguide,
+  zuhause_betreut). This plan was re-measured against what is left
+  (2026-10-05): 12 schemata, 6 accounts in `mysql.user`, 212 user base tables,
+  2434 rows in total, dump 3.17 MB with 9 `CREATE DATABASE`.
+- **my-software-showcase**: 4 Deployments, all `strategy: Recreate`. Schemas
+  `showcase_{haarfabrik,metaldyne,u_zeit,uzeit_de}_prod`. The processlist holds
+  exactly **3 Rails pool users**
+  (`showcase_{haarfabrik,metaldyne,u_zeit}_user`, 4/2/2 sleeping connections).
+  The PHP app uzeit-de connects per request, so its user is absent between
+  requests and is kept out of the tenant baseline (maintenance-windows.md §7).
+- **`ibTime_demo_companies`, `ibTime_sample_orgs`** (23 tables each) and
+  `my_database`, `test`: no dedicated account, no connected client. They are
+  covered by the counts, dump and restore gates, not by a poke.
+- Probe map (live 2026-10-05): the 3 Rails tenants have liveness
+  `tcpSocket :3000` since **f515915c** (F-9ab5f80f root-cause fix), with
+  readiness `httpGet /health/readiness` (DB-aware). uzeit-de has liveness
+  `httpGet /health.php?mode=liveness` and readiness `/health.php`. uzeit-de
+  was NOT restarted by the 2026-10-03 bounce (startTime 2026-09-28,
+  restartCount 0). The Rails pods were re-created 2026-10-04 07:02Z by
+  f515915c and all four have restartCount 0 now.
+  History (F-9ab5f80f): on 2026-10-03, with the old `httpGet` liveness,
+  single-threaded WEBrick starved on DB-blocked readiness calls and 5 Rails
+  tenants restarted once. With `tcpSocket` liveness the expected delta is now
+  **0**. The gate still allows **<= 1** per consumer during the bounce and
+  fails on a second restart (SOP rule). Every restart gate below is a
+  **delta** from T0.
 - **databases/phpmyadmin** (`PMA_HOST mariadb.databases.svc`).
 - Not consumers: `office/nextcloud-mariadb`, `office/paperless-db` (separate
   engines), and nothing in household services.
@@ -345,7 +383,7 @@ WHERE table_type='BASE TABLE'
   AND table_schema NOT IN ('mysql','sys','information_schema','performance_schema');" | $M
 EOF
 kubectl -n databases exec -i mariadb-0 -c mariadb -- sh -s < "$W/counts.sh" > "$W/counts-T0.tsv" 2>/dev/null
-test "$(wc -l < "$W/counts-T0.tsv")" -ge 586 || { echo "STOP: count baseline short/empty"; exit 1; }   # measured 586
+test "$(wc -l < "$W/counts-T0.tsv")" -ge 212 || { echo "STOP: count baseline short/empty"; exit 1; }   # measured 212 (2026-10-05)
 awk -F'\t' '{s+=$2} END{print s}' "$W/counts-T0.tsv"      # must be > 0
 ```
 
@@ -365,26 +403,26 @@ SELECT table_collation, COUNT(*) FROM information_schema.tables WHERE table_sche
 EOF
 kubectl -n databases exec -i mariadb-0 -c mariadb -- sh -s < "$W/engine.sh" > "$W/engine-T0.txt"
 cat "$W/engine-T0.txt"
-# measured 2026-10-04: 17 / 23 / 17 user@host lines / NO_ENGINE_SUBSTITUTION SET NAMES utf8 utf8mb3 utf8mb3_general_ci /
-# utf8mb3 / latin1_swedish_ci 39, utf8mb3_general_ci 447, utf8mb3_uca1400_ai_ci 100
+# measured 2026-10-05: 6 / 12 / 6 user@host lines / NO_ENGINE_SUBSTITUTION SET NAMES utf8 utf8mb3 utf8mb3_general_ci /
+# utf8mb3 / utf8mb3_general_ci 166, utf8mb3_uca1400_ai_ci 46
 grep -qx 'utf8mb3' "$W/engine-T0.txt" || { echo "STOP: CONVERT(... USING utf8) is not utf8mb3 at T0"; exit 1; }
 
-RAILS='showcase_(haarfabrik|holm|inbewegung|kfa_medienarchiv|mangold|max_jung|metaldyne|ordiga|see_edv|stepbystepguide|u_zeit|zuhause_betreut)_user'
+RAILS='showcase_(haarfabrik|metaldyne|u_zeit)_user'     # persistent-pool users only; uzeit_de (PHP) excluded
 echo "$RAILS" > "$W/rails-re.txt"
 kubectl -n databases exec mariadb-0 -c mariadb -- sh -c \
   'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" --protocol=socket -N -e "SELECT DISTINCT user FROM information_schema.processlist WHERE user LIKE '"'"'showcase%'"'"';"' \
   2>/dev/null | grep -E "^($RAILS)\$" | LC_ALL=C sort > "$W/tenants-T0.txt"
-test "$(wc -l < "$W/tenants-T0.txt" | tr -d ' ')" = 12 || { echo "STOP: expected the 12 Rails users connected at T0"; cat "$W/tenants-T0.txt"; exit 1; }
+test "$(wc -l < "$W/tenants-T0.txt" | tr -d ' ')" = 3 || { echo "STOP: expected the 3 Rails pool users connected at T0"; cat "$W/tenants-T0.txt"; exit 1; }
 
 kubectl -n my-software-showcase get pods -o 'custom-columns=N:.metadata.labels.app\.kubernetes\.io/name,R:.status.containerStatuses[0].restartCount' --no-headers \
   | LC_ALL=C sort > "$W/restarts-T0.txt"
-test "$(wc -l < "$W/restarts-T0.txt" | tr -d ' ')" = 15 || echo "CHECK: not 15 showcase pods (label column) — fix the label key before relying on §4.3"
+test "$(wc -l < "$W/restarts-T0.txt" | tr -d ' ')" = 4 || { echo "STOP: not 4 showcase pods (label column) — fix the label key before relying on §4.3"; cat "$W/restarts-T0.txt"; exit 1; }
 kubectl -n databases get pod mariadb-0 -o jsonpath='{.status.containerStatuses[0].imageID}{"\n"}' > "$W/imageid-T0.txt"
 ```
 
-Restricting the processlist baseline to the 12 Rails users is the F-9ab5f80f
-fix. The 27.3.0 baseline mixed in per-request PHP users, which made its gate
-able to fail spuriously.
+Restricting the processlist baseline to the 3 Rails pool users is the
+F-9ab5f80f / maintenance-windows.md §7 rule. The 27.3.0 baseline mixed in
+per-request PHP users, which made its gate able to fail spuriously.
 
 **2.4 backup_gate (a): logical dump, fail-closed**
 
@@ -398,9 +436,9 @@ kubectl -n databases exec mariadb-0 -c mariadb -- sh -c \
   > "$D" 2> "$W/dump.err"
 chmod 600 "$D"
 tail -1 "$D" | grep -q '^-- Dump completed' || { echo "FAIL: no Dump completed trailer"; exit 1; }
-N=$(grep -c '^CREATE DATABASE' "$D"); [ "$N" -ge 20 ] || { echo "FAIL: only $N CREATE DATABASE"; exit 1; }
+N=$(grep -c '^CREATE DATABASE' "$D"); [ "$N" -ge 9 ] || { echo "FAIL: only $N CREATE DATABASE (measured 9 on 2026-10-05)"; exit 1; }
 grep -q '^/\*! FLUSH PRIVILEGES \*/;$' "$D" || { echo "FAIL: no FLUSH PRIVILEGES"; exit 1; }
-[ "$(wc -c < "$D")" -ge 1000000 ] || { echo "FAIL: dump < 1 MB (measured 4.6 MB on 2026-09-27)"; exit 1; }
+[ "$(wc -c < "$D")" -ge 1000000 ] || { echo "FAIL: dump < 1 MB (measured 3.17 MB on 2026-10-05)"; exit 1; }
 if grep -iv 'password on the command line' "$W/dump.err" | grep -q .; then echo "FAIL: dump stderr:"; cat "$W/dump.err"; exit 1; fi
 echo "DUMP_OK $D $(wc -c < "$D") bytes, $N databases"
 EOF
@@ -447,7 +485,9 @@ kubectl -n databases exec -i mariadb-restoretest -- sh -c \
   'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" --protocol=socket --default-character-set=utf8mb4' \
   < "$W/mariadb-all-pre-13.1.sql" 2> "$W/restoretest.err"; echo "restore rc=$?"
 kubectl -n databases exec -i mariadb-restoretest -- sh -s < "$W/counts.sh" > "$W/counts-restoretest.tsv" 2>/dev/null
-if [ "$(wc -l < "$W/counts-restoretest.tsv")" -ge 586 ] && diff -q "$W/counts-T0.tsv" "$W/counts-restoretest.tsv" >/dev/null; then
+U=$(kubectl -n databases exec mariadb-restoretest -- sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" --protocol=socket -N -e "SELECT COUNT(*) FROM mysql.global_priv WHERE User LIKE '"'"'showcase%'"'"'"' 2>/dev/null)
+echo "restored showcase users: $U"      # measured 4 on the live server 2026-10-05
+if [ "$(wc -l < "$W/counts-restoretest.tsv")" -ge 212 ] && diff -q "$W/counts-T0.tsv" "$W/counts-restoretest.tsv" >/dev/null && [ "$U" = 4 ]; then
   echo RESTORE_PROOF_PASS
 else
   echo "RESTORE_PROOF_FAIL"; wc -l "$W/counts-restoretest.tsv"; diff "$W/counts-T0.tsv" "$W/counts-restoretest.tsv" | head; cat "$W/restoretest.err"
@@ -456,7 +496,8 @@ kubectl -n databases delete pod mariadb-restoretest --wait=true
 ```
 
 **PASS: `RESTORE_PROOF_PASS`.** This proves the dump reloads into a clean
-13.0.1 server with byte-equal per-table counts for all 586 tables. Failure
+13.0.1 server with byte-equal per-table counts for all 212 tables and the 4
+`showcase_*` accounts. Failure
 looks like `RESTORE_PROOF_FAIL` with a short file (for example the pod never
 answered `ping`, so 0 lines), or a non-empty diff (for example a tenant schema
 missing from the dump). Tenant writes between §2.3 and §2.4 can produce a tiny
@@ -500,7 +541,11 @@ Trust the Backup CR, not `lastBackupAt` (`docs/sops/backup.md`).
 
 ## 3. Steps
 
-1. **Edit** (dry-tested on a scratch copy with BSD sed 2026-10-04):
+1. **Edit** (dry-tested on a scratch copy of the live file with macOS BSD
+   sed + system perl, 2026-10-05; the `old_mode` line is inserted by perl,
+   which COPIES the indentation of the `init_connect` line from the file, so
+   the result does not depend on how this code block is indented when
+   pasted. The earlier `sed a\` form inserted 11 spaces, found in review):
 
    ```bash
    F=kubernetes/apps/databases/mariadb/app/helmrelease.yaml
@@ -508,11 +553,11 @@ Trust the Backup CR, not `lastBackupAt` (`docs/sops/backup.md`).
     -e 's/^\([[:space:]]*version:[[:space:]]*\)27\.3\.0$/\128.1.1/' \
     -e 's/sha256:47bdb03b349e22c62443fa91d95b3f10366aa48ce9e4419990c99b7c23400fa9/sha256:354e5aec20455bce931a05fa791c51e4a45879015bee09591295c76fe88c037e/' \
     -e 's/This digest is MariaDB 13\.0\.1 (built 2026-08-14)\./This digest is MariaDB 13.1.1 (built 2026-09-30)./' \
-    -e '/^[[:space:]]*init_connect="SET NAMES utf8"$/a\
-           old_mode=UTF8_IS_UTF8MB3
-   ' "$F"
+    "$F"
+   perl -pi -e 's/^([ ]*)init_connect="SET NAMES utf8"\n\z/$&$1old_mode=UTF8_IS_UTF8MB3\n/' "$F"
    sed -i '' '/^  upgrade:$/,/^[[:space:]]*retries:/ s/^\([[:space:]]*retries:[[:space:]]*\)3$/\10/' "$F"
    git diff "$F"
+   grep -c '^        old_mode=UTF8_IS_UTF8MB3$' "$F"     # must print 1 (exactly 8 spaces); 0 = not inserted / wrong indent
    ```
 
    Expected diff: exactly these five changes (`old_mode` indented 8 spaces,
@@ -614,7 +659,7 @@ diff "$W/engine-T0.txt" "$W/engine-T2.txt" && echo ENGINE_SAME
 ```
 
 CONTENTS ASSERTION (charset): `engine-T2.txt` is **identical** to T0. That
-means the same 17 users at the same hosts, 23 schemata,
+means the same 6 users at the same hosts, 12 schemata,
 `NO_ENGINE_SUBSTITUTION / SET NAMES utf8 / utf8mb3 / utf8mb3_general_ci`,
 **`CONVERT('x' USING utf8)` → `utf8mb3`**, and the same table-collation
 histogram. This gate can fail, and here is how. Without `old_mode` (line
@@ -637,19 +682,19 @@ repair prints a non-`OK` line. Either way the result is `CHECK_FAIL`.
 
 ```bash
 kubectl -n databases exec -i mariadb-0 -c mariadb -- sh -s < "$W/counts.sh" > "$W/counts-T2.tsv" 2>/dev/null
-test "$(wc -l < "$W/counts-T2.tsv")" -ge 586 || echo "FAIL: count file short/empty"
+test "$(wc -l < "$W/counts-T2.tsv")" -ge 212 || echo "FAIL: count file short/empty"
 diff "$W/counts-T1.tsv" "$W/counts-T2.tsv"
 ```
-CONTENTS ASSERTION (data): all 586 user tables hold the same exact `COUNT(*)`
+CONTENTS ASSERTION (data): all 212 user tables hold the same exact `COUNT(*)`
 as at T1. PASS: an empty diff, or only tables that also moved T0→T1 (tenant
-writes). FAIL: line count < 586, a schema at zero, or an empty file (server not
+writes). FAIL: line count < 212, a schema at zero, or an empty file (server not
 accepting root over the socket).
 
 **4.3 Tenants reconnected: the property a DB roll can silently break**
 
 Wait 3 min after `mariadb-0` is Ready. Then send each app one request that is
 measured to execute SQL, and require `200` (paths measured 2026-09-27,
-27.3.0 plan §1.4):
+27.3.0 plan §1.4; all four re-checked `200` live 2026-10-05):
 
 ```bash
 cat > "$W/poke.sh" <<'EOF'
@@ -663,20 +708,9 @@ while read APP KIND PORT PATHQ; do
   echo "$APP $PATHQ $CODE"; [ "$CODE" = 200 ] || RC=1
 done <<'LIST'
 haarfabrik svc 3000 /health/readiness
-holm-backend svc 3000 /health/readiness
-inbewegung svc 3000 /health/readiness
-max-jung svc 3000 /health/readiness
 metaldyne svc 3000 /health/readiness
-ordiga svc 3000 /health/readiness
-stepbystepguide svc 3000 /health/readiness
-see-edv-ibspm svc 3000 /health/readiness
-kfa-medienarchiv svc 3000 /login
 u-zeit svc 3000 /login
-zuhause-betreut svc 3000 /login
-mangold-smarthomeadvisor svc 3000 /
-globalmobility svc 80 /health.php
 uzeit-de svc 80 /health.php
-ibgastro svc 80 /health
 LIST
 exit $RC
 EOF
@@ -690,8 +724,8 @@ LC_ALL=C comm -23 "$W/tenants-T0.txt" "$W/tenants-T2.txt" > "$W/tenants-missing.
 if [ -s "$W/tenants-T2.txt" ] && [ ! -s "$W/tenants-missing.txt" ]; then echo "TENANTS_PASS $(wc -l < "$W/tenants-T2.txt")"; else echo "TENANTS_FAIL missing:"; cat "$W/tenants-missing.txt"; fi
 ```
 
-PASS requires `POKE_PASS` **and** `TENANTS_PASS 12`. Both the baseline and the
-check are restricted to the 12 Rails users (F-9ab5f80f), so a PHP app with no
+PASS requires `POKE_PASS` **and** `TENANTS_PASS 3`. Both the baseline and the
+check are restricted to the 3 Rails pool users (F-9ab5f80f), so a PHP app with no
 open connection at that instant cannot fail the gate, and a Rails app that
 never reconnected cannot pass it. An empty `tenants-T2.txt` also fails. On
 FAIL: `kubectl -n my-software-showcase rollout restart deploy/<app>` once,
@@ -705,12 +739,16 @@ kubectl -n my-software-showcase get pods -o 'custom-columns=N:.metadata.labels.a
   | LC_ALL=C sort > "$W/restarts-T2.txt"
 LC_ALL=C join "$W/restarts-T0.txt" "$W/restarts-T2.txt" | awk '{d=$3-$2; print $1, d; if (d>=2 || d<0) bad=1} END{exit bad}' \
   && echo RESTARTS_PASS || echo "RESTARTS_FAIL (delta >=2 = restart loop; negative = pod replaced, inspect)"
-test "$(LC_ALL=C join "$W/restarts-T0.txt" "$W/restarts-T2.txt" | wc -l | tr -d ' ')" = 15 || echo "RESTARTS_FAIL: not all 15 tenants joined"
+test "$(LC_ALL=C join "$W/restarts-T0.txt" "$W/restarts-T2.txt" | wc -l | tr -d ' ')" = 4 || echo "RESTARTS_FAIL: not all 4 tenants joined"
 ```
 
-PASS: every tenant's restart delta is 0 or 1, and all 15 joined. On
-2026-10-03, five Rails tenants restarted once on a ~1 min bounce. That is the
-measured, accepted shape, and pairs with `POKE_PASS`. A delta ≥2 is a restart
+PASS: every tenant's restart delta is 0 or 1, and all 4 joined. Expected is
+**0** everywhere: Rails liveness is `tcpSocket` since f515915c, and uzeit-de
+did not restart on the 2026-10-03 bounce. A delta of 1 is still a PASS (SOP
+§7: a DB bounce may restart each consumer at most once; on 2026-10-03 five
+Rails tenants did, under the old probe), but record it in the run log: a
+Rails restart with `tcpSocket` liveness means the f515915c premise no longer
+explains the behaviour. A delta ≥2 is a restart
 loop: FAIL.
 
 **4.4 phpMyAdmin**
@@ -719,14 +757,16 @@ loop: FAIL.
 kubectl -n databases port-forward svc/phpmyadmin 18090:80 >/dev/null 2>&1 & PF=$!; sleep 2
 curl -s -m 10 http://127.0.0.1:18090/ | grep -ciE 'phpmyadmin|pma_username' ; kill $PF
 ```
-PASS: count ≥1 (login page rendered). If attended, log in once and confirm
-the 15 `showcase_*_prod` schemas are listed.
+PASS: count ≥1 (login page rendered). This only proves phpMyAdmin itself is up:
+the login page renders without a DB backend, so it cannot fail on a MariaDB
+outage (review 2026-10-05). The DB-facing gate is the attended login: log in once and confirm
+the 4 `showcase_*_prod` and 2 `ibTime_*` schemas are listed.
 
 **4.5 Instruments**
 
 CONTROL: metric kube_statefulset_status_replicas_ready — `{namespace="databases",statefulset="mariadb"}` must read 1 (T0 = 1); 0 for >5 min after the push = the 13.1 pod never became Ready.
-CONTROL: metric kube_pod_status_ready — `sum(kube_pod_status_ready{namespace="my-software-showcase",condition="true"})` must return to 15 (T0 = 15) within 5 min of `mariadb-0` Ready; a value stuck below 15 names a tenant that did not reconnect.
-CONTROL: metric kube_pod_container_status_restarts_total — `increase(kube_pod_container_status_restarts_total{namespace="my-software-showcase"}[45m])` must be ≤ 1 for every series (same bound as the kubectl delta above; ≥ 2 = restart loop ⇒ FAIL).
+CONTROL: metric kube_pod_status_ready — `sum(kube_pod_status_ready{namespace="my-software-showcase",condition="true"})` must return to 4 (T0 = 4, measured 2026-10-05) within 5 min of `mariadb-0` Ready; a value stuck below 4 names a tenant that did not reconnect.
+CONTROL: metric kube_pod_container_status_restarts_total — `round(increase(kube_pod_container_status_restarts_total{namespace="my-software-showcase"}[45m]))` must be ≤ 1 for every series (same bound as the kubectl delta above; ≥ 2 = restart loop ⇒ FAIL). `round()` is required: `increase()` extrapolates, and replaying the 2026-10-03 bounce it read 1.005 for a single restart, which would fail a raw ≤ 1 on the case SOP §7 allows (plan review 2026-10-05).
 DIAGNOSTIC (not a gate): `kubectl -n databases logs mariadb-0 -c mariadb | grep -iE 'old_mode|deprecat'` should show the expected UTF8_IS_UTF8MB3 deprecation warning. Its ABSENCE is not a failure (the §4.2 CONVERT gate is the control), but a `[ERROR] unknown variable 'old_mode…'` would be — the pod would not be Ready either.
 
 Then delete the silence and clear the marker (`runbooks/update-marker.sh clear mariadb`). After that, run §3 step 9.
@@ -787,7 +827,7 @@ Confirm recovery. Each check has a known-bad reading:
 - the counts diff against `counts-T1.tsv` is empty apart from rows written
   between snapshot and failure, which are lost by design (tenant demo data, a
   window of minutes);
-- `POKE_PASS` and `TENANTS_PASS 12`.
+- `POKE_PASS` and `TENANTS_PASS 3`.
 
 **5.3 Floor: logical restore of the §2.4 dump (only if §5.2 fails)**
 
@@ -815,7 +855,7 @@ volume) and `rm -rf "$W"` (the dump contains password hashes).
 
 - **Shared DB, one-way.** `mariadb-0` is down for ~2–3 min (new image pull +
   start), and the server runs 13.1 binaries on 13.0 system tables for the
-  ~1 min until §3.7 completes. 15 showcase tenants and phpMyAdmin are
+  ~1 min until §3.7 completes. 4 showcase tenants and phpMyAdmin are
   affected. No household service uses this instance.
 - **Attended only.** `risk: high` + `rollback_class: backup-restore` →
   human-gated. §5.2 needs an operator at the Longhorn UI. Forward path is 55
@@ -827,6 +867,18 @@ volume) and `rm -rf "$W"` (the dump contains password hashes).
   node or Longhorn. `nocodb-2026.09.1` shares namespace `databases` (different
   engine) and is backup-restore. It is listed for the stacking reason, not
   shared objects.
+- **Namespace `databases` is also touched by `redis-fleet-8.10.2` and
+  `pgvector-fleet-0.8.7`** (git-revert class, different engines). They share
+  no object, Service or PVC with `mariadb`, so they are not in
+  `conflicts_with`. The window agent's namespace-overlap check will still flag
+  them; serialize rather than run them in parallel, so a §4 failure is
+  attributable.
+- **Re-plan 2026-10-05.** The 2026-10-04 showcase decommission shrank the
+  consumer set from 15 to 4 apps, the tenant baseline from 12 to 3 Rails pool
+  users, and the data from 586 to 212 tables. Every gate count in §2–§5 was
+  re-measured live, not derived. If a tenant is added or removed before the
+  window, the `four-showcase-tenants` premise fails and this plan must be
+  re-measured again.
 - **paperless-db-13.0.2 is listed for stacking only.** It shares no object
   with this plan. Its own mariadb trap (the 13.1 charset default) does not
   apply to it at 13.0.2, but will apply to its next hop. The same applies to
