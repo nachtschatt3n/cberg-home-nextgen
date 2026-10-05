@@ -38,7 +38,7 @@ conflicts_with:
   - flux-fleet-0.60.0                 # upgrades helm-controller, which applies this HelmRelease
   - flux-reconciler-impersonation     # exclusive; changes the identity that applies this HelmRelease
   - flux-oci-chart-sources            # moves chart sources; external-dns is in its stage-4 set
-  - coredns-1.48.1                    # rolls CoreDNS (external-dns resolves the Cloudflare API through it);
+  - coredns-1.48.2                    # rolls CoreDNS (external-dns resolves the Cloudflare API through it);
                                       # that plan already lists external-dns-1.23.0 -> made reciprocal 2026-10-01
 security_ref: null                    # queried 2026-10-01: no open sweep finding for external-dns (only
                                       # resolved rows; F-14528040 was the v0.21.0 image and closed 2026-09-17)

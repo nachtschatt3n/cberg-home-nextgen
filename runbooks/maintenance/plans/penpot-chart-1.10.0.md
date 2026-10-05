@@ -43,7 +43,7 @@ conflicts_with:
   - paperless-db-13.0.2               # reciprocal (office namespace; that plan lists us) — review 2026-09-28
   - chart-patches-coredns-reloader-blackbox  # coredns roll; 1.10.0+ frontend nginx resolver = cluster DNS
   # ADDED 2026-10-05 (retarget): reciprocals — each of these already lists this plan; serialize.
-  - coredns-1.48.1                    # same coredns-resolver reason as the chart-patches plan
+  - coredns-1.48.2                    # same coredns-resolver reason as the chart-patches plan
   - envoy-proxy-config-distroless-v1.39.2  # rolls envoy-external proxies; its per-host diff + our public route
   - mariadb-28.1.1                    # lists us (reciprocity; one failing restore at a time)
   - nextcloud-fleet-35.0.1            # office-wide silence would hide this plan's failures

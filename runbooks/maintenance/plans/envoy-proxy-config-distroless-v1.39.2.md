@@ -47,7 +47,7 @@ conflicts_with:
                                       # disruption to give -- a drain and this roll would compete for it
   - external-dns-1.23.0               # public-edge: reads Gateway envoy-external's target; a public
                                       # DNS change mid-roll makes §4.3 external rows unattributable
-  - coredns-1.48.1                    # cluster DNS under the §4 Prometheus/blackbox instrument path
+  - coredns-1.48.2                    # cluster DNS under the §4 Prometheus/blackbox instrument path
   - chart-patches-coredns-reloader-blackbox   # rolls prometheus-blackbox-exporter = the probe_success
                                       # instrument §4.4 reads, and CoreDNS
   - flux-fleet-0.60.0                 # upgrades kustomize-controller, which applies gatewayclass.yaml

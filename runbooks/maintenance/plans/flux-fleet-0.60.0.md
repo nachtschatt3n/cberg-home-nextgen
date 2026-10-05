@@ -69,7 +69,7 @@ conflicts_with:
   - pgvector-fleet-0.8.7
   - python-fleet-3.14.8
   - unpoller-5.4.0
-  - coredns-1.48.1
+  - coredns-1.48.2
   - anythingllm-1.17
   - grafana-13.2.7
   - external-dns-1.23.0

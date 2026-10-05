@@ -67,7 +67,9 @@ conflicts_with:
   - pgvector-fleet-0.8.7
   - python-fleet-3.14.8
   - unpoller-5.4.0
-  - coredns-1.48.1
+  - coredns-1.48.2                    # 2026-10-05: coredns-1.48.1 superseded
+  - talos-linux-1.14.2                # 2026-10-05 review: node roll + folded upgrade-k8s (exclusive covers it; named anyway)
+  - talos-power-tuning-ab             # 2026-10-05 review: named for completeness
   - anythingllm-1.17
   - grafana-13.2.7
   - external-dns-1.23.0
@@ -383,9 +385,11 @@ for x in "helm-controller v1.6.5" "image-automation-controller v1.2.5" "image-re
 
 Not taken, and why: the SOP step 2 guard (`retries: 0`, `cleanupOnFail: false` on both HRs)
 protects against helm remediation half-reverting a slow controller roll. Measured: helm does
-not wait for the controller roll — `helm history flux-instance` rev 4 reports "Upgrade complete"
-at 11:10:40 on 2026-08-11 while the FluxInstance's first reconcile of that revision started at
-11:10:54 (FluxInstance `status.history`). The helm upgrade here only changes a CR, completes in
+not wait for the controller roll — `helm history flux-instance` rev 6 reports "Upgrade complete"
+at 14:26:17 on 2026-09-26 while the FluxInstance's first reconcile of that digest started at
+14:26:24 (FluxInstance `status.history`) — rev 6 was run by helm-controller v1.6.3 on Helm v4,
+the setup this plan runs under (the earlier rev-4 citation was a pre-2.9 Helm v3 run; corrected
+2026-10-05 per review). The helm upgrade here only changes a CR, completes in
 seconds, and finishes **before** helm-controller is rolled, so remediation has nothing to trip on.
 Leaving it as-is keeps this a one-file commit with a one-commit revert. If remediation ever did
 fire, gate 4.3 catches it (FluxInstance back on v2.9.3 while git says v2.9.6).
@@ -492,9 +496,10 @@ git push origin main
 ### 3.4 Retire
 
 After section 4 is fully green: delete this plan file in the next commit (README: plans are
-transient), and close the six finding_refs with the core sha, one call each, e.g.
-`.venv/bin/python3 runbooks/policy-cli.py finding close F-411a07b6 --commit $(cat /tmp/flux-dist/core-sha.txt)`
-(source the DSN helper in a separate Bash call from any `git commit`). Then tell the
+transient). Do NOT hand-close the six finding_refs: they are sweep-owned security rows —
+let the next sweep resolve them and VERIFY that it did (`policy-cli.py finding show <F-id>`
+for each; any still open after the sweep is a finding, not something to close by hand).
+(Review 2026-10-05: the earlier `finding close` example also lacked the required `--reason`.) Then tell the
 helm-drift-detection and flux-reconciler-impersonation owners their distribution-bound
 premises/baselines need a re-run (section 6).
 

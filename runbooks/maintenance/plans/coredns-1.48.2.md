@@ -40,6 +40,7 @@ touches:
     - monitoring                      # §4 reads Prometheus + blackbox (read-only; the instrument is shared)
 depends_on: []
 conflicts_with:
+  - flux-distribution-2.9.6           # 2026-10-05 review: exclusive, upgrades the Flux controllers = this plan's §5 revert path
   # Every open (non-terminal) plan whose execution or verification touches kube-system DNS, the
   # HR's apply/revert path, or the Prometheus/blackbox instrument §4 reads. Plan set re-read 2026-10-05.
   - chart-patches-coredns-reloader-blackbox   # now blackbox-only (coredns carved out 2026-10-05), but it rolls
@@ -100,7 +101,8 @@ premises:
       cannot run and every DNS gate reads empty.
     run: kubectl get deploy -n monitoring prometheus-blackbox-exporter -o jsonpath='{.status.readyReplicas}/{.spec.replicas}'
     expect_exact: 1/1
-status: draft
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: ready-for-go, 0 blocking; nonblocking fixes (test -s guard, 2-Running-pods precondition, flux-distribution-2.9.6 conflict) applied by coordinator
+status: vetted
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -346,7 +348,7 @@ within 10 min, check the webhook and `flux get sources git` before anything else
   UID 65532, SECCOMP RuntimeDefault.
   - A `1.14.6` image means the chart default won without the pin, which contradicts §1. FAIL.
   - `<none>` in UID (today's value) means 1.48.x was not rendered. FAIL.
-- CONTENTS ASSERTION: the running image is byte-identical to the pre-change one. Measured by re-running the §2.2 `imageID` command and `diff`-ing it against `/private/tmp/coredns-1.48.2/imageid.pre` (silent = pass). A different digest means a different image even under the same tag. FAIL.
+- CONTENTS ASSERTION: the running image is byte-identical to the pre-change one. Measured — only after the roll shows exactly 2 Running kube-dns pods (no Terminating pod left; lameduck 5 s), which also gates the 8-line dnsmatrix count — by first asserting `test -s /private/tmp/coredns-1.48.2/imageid.pre` (an empty baseline is a FAIL, never a silent pass), then re-running the §2.2 `imageID` command and `diff`-ing it against `/private/tmp/coredns-1.48.2/imageid.pre` (silent = pass). A different digest means a different image even under the same tag. FAIL.
 - CONTENTS ASSERTION: the served Corefile is byte-identical. Measured by `kubectl -n kube-system get cm coredns -o jsonpath='{.data.Corefile}' | shasum -a 256 | diff - /private/tmp/coredns-1.48.2/corefile.pre` (silent = pass). The render diff says the Corefile does not change, so any difference means the chart altered DNS config (for example `max_connect_attempts 6` was lost). FAIL.
 - CONTENTS ASSERTION: every NEW replica answers all three name classes correctly and still fails the negative control. Measured by `dnsmatrix | tee /private/tmp/coredns-1.48.2/dnsmatrix.post` (§2.1 function, against the NEW pod IPs). Required: exactly 8 lines. Per IP: cluster name `rc=0 ans=10.96.0.1`, `sweep` `rc=0 ans=192.168.55.103`, `github.com` `rc=0` with an IP, negative control `rc=1 ans=NONE`. Any `rc≠0` on the first three, `rc=0` on the fourth, or fewer than 8 lines is a FAIL. The pod IPs differ from the baseline, so compare the `ans=` and `rc=` columns, not the whole line.
 - CONTROL: metric coredns_build_info — exactly 2 series, both `version="1.14.7"`, with the NEW pod names as `pod` labels. 0 series means the scrape broke, so nothing else in this list can be trusted. FAIL.

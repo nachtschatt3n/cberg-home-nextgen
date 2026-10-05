@@ -74,7 +74,8 @@ premises:
       §4 reads probe_success from these 5 Probe CRs; if they were renamed/removed the gate reads empty.
     run: kubectl get probe -n monitoring dns-k8s-gateway-primary dns-k8s-gateway-secondary http-ingress-internal http-ingress-external http-vaultwarden -o name
     expect_matches: "(?s)dns-k8s-gateway-primary.*dns-k8s-gateway-secondary.*http-ingress-internal.*http-ingress-external.*http-vaultwarden"
-status: draft     # 2026-10-05: coredns item carved out -> coredns-1.48.2; scope reduction, needs a re-review
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05 delta (blackbox-only): ready-for-go, 0 blocking; nonblocking .venv python fix applied by coordinator
+status: vetted
 # AMENDED 2026-10-03: item B (reloader) carved out to reloader-2.2.18.
 # AMENDED 2026-10-05 (upgrade-planner refresh): item C (coredns 1.47.0 -> 1.47.1, pin kept) carved out;
 # superseded by coredns-1.48.2. Window `sun-attended:2026-11-01` REMOVED (it was attended only for coredns);
@@ -137,7 +138,7 @@ flux get sources git -n flux-system flux-system ; git rev-parse --short origin/m
 **2.1 Module-set baseline (§4 compares against it):**
 ```bash
 kubectl -n monitoring get cm prometheus-blackbox-exporter -o jsonpath='{.data.blackbox\.yaml}' \
-  | python3 -c "import sys,yaml; print(sorted(yaml.safe_load(sys.stdin)['modules']))"
+  | .venv/bin/python3 -c "import sys,yaml; print(sorted(yaml.safe_load(sys.stdin)['modules']))"
 # expect (2026-10-05): ['dns_k8s_gateway_primary', 'dns_k8s_gateway_secondary', 'http_2xx_ingress']
 ```
 

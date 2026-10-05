@@ -193,7 +193,7 @@ status: blocked   # BLOCKED 2026-10-04 (premise FAIL, re-run twice): storage-own
                   # UNBLOCK = amend for the new owner set (operator decision: storage CRB for production, or move the PV), NOT relaxing the premise.
                   # was: awaiting-go   # reviewed 2026-09-23; RE-REVIEWED 2026-09-28 (F-2c849d1e): needs-fix (Stage C yq clobbered the F-baf94b64 ignore patch, break-glass same, --only on untracked files, stale premise, absolute floors) -> fixed -> 3 passes -> ready-for-go. Window prerequisite: §6.3 health-check/SOP items.
 review: null   # was ready-for-go@2026-09-28 -- cleared 2026-10-04: that verdict reviewed the pre-split owner set; the amendment re-reviews
-window: "sun-attended:2026-10-11"   # 2026-10-04: slot kept ONLY as a placeholder; it cannot run there as written. Clear it if not re-reviewed by 2026-10-10.
+window: null   # 2026-10-05 (scheduling pass): sun-attended:2026-10-11 placeholder RELEASED -- blocked on the operator storage-owner decision, so it cannot run as written; an exclusive placeholder was holding the only free Sunday. Re-place after the decision + re-review (earliest free exclusive Sunday: 2026-11-22).
   # (window was: scheduled 2026-09-23 per the review: earliest reboot-free attended slot; needs a fresh GO on the day
                                       # the slot shape (attended, exclusive, no reboot).
 sops_refs:
