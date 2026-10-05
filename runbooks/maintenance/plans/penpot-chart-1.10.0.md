@@ -1,24 +1,28 @@
 ---
 plan_id: penpot-chart-1.10.0
 component: penpot
-pr: null                              # no Renovate PR; routed to PLAN by the sweep (cycle 58d45ed0)
+pr: null                              # no Renovate PR; routed to PLAN by the sweep (cycle 58d45ed0),
+                                      # re-dispatched for the 1.11.1 retarget by cycle 481b9c1f
 kind: chart
-current: "chart 1.9.0 (app 2.17.2)"   # live 2026-09-27: HR penpot Ready "penpot@1.9.0",
-                                      # all three Deployments on penpotapp/*:2.17.2
-target: "chart 1.10.0 (app 2.18.0)"
+current: "chart 1.9.0 (app 2.17.2)"   # live 2026-10-05: HR penpot Ready "penpot@1.9.0" (helm rev 30),
+                                      # all three Deployments on penpotapp/*:2.17.2, migrations 161
+target: "chart 1.11.1 (app 2.18.1)"   # RETARGETED 2026-10-05 from "chart 1.10.0 (app 2.18.0)";
+                                      # plan_id kept per plans/README "refresh in place". One hop
+                                      # 1.9.0 -> 1.11.1 (no intermediate stop at 1.10.0, §1).
 update_type: minor
 risk: medium                          # forward DB migration (benign for 2.17.2, see §1) +
                                       # base-image switch ubuntu -> Docker Hardened Images on all
-                                      # three images + internet-facing app. Single-user instance.
+                                      # three images (2.18.0) + internet-facing app. Single-user
+                                      # instance. The 1.10.0 -> 1.11.1 delta adds no risk (§1.B).
 est_duration_min: 45
 needs_reboot: false
 touches:
   namespaces: [office]
   resources:
     - helmrelease/penpot                  # the one-line chart version edit
-    - deployment/penpot-backend           # image 2.18.0, runs DB migration 0152 on start
-    - deployment/penpot-frontend          # image 2.18.0, PENPOT_INTERNAL_RESOLVER env removed by chart
-    - deployment/penpot-exporter          # image 2.18.0
+    - deployment/penpot-backend           # image 2.18.1, runs DB migration 0152 on start
+    - deployment/penpot-frontend          # image 2.18.1, PENPOT_INTERNAL_RESOLVER env removed by chart
+    - deployment/penpot-exporter          # image 2.18.1
     - statefulset/penpot-db               # NOT edited: pg_dump read in §3, schema migration by backend
     - pvc/penpot-db-data                  # NOT edited (Longhorn volume pvc-280be202-...)
     - pvc/penpot-assets                   # NOT edited: CIFS RWX, mounted by backend+frontend. NO deletes.
@@ -37,23 +41,33 @@ conflicts_with:
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. penpot
   - app-template-5.2.1                # helm-upgrades penpot-db + penpot-cache, which penpot dependsOn (committed 5eca9410, vetted)
   - paperless-db-13.0.2               # reciprocal (office namespace; that plan lists us) — review 2026-09-28
-  - chart-patches-coredns-reloader-blackbox  # coredns roll; 1.10.0 frontend nginx resolver = cluster DNS
+  - chart-patches-coredns-reloader-blackbox  # coredns roll; 1.10.0+ frontend nginx resolver = cluster DNS
+  # ADDED 2026-10-05 (retarget): reciprocals — each of these already lists this plan; serialize.
+  - coredns-1.48.1                    # same coredns-resolver reason as the chart-patches plan
+  - envoy-proxy-config-distroless-v1.39.2  # rolls envoy-external proxies; its per-host diff + our public route
+  - mariadb-28.1.1                    # lists us (reciprocity; one failing restore at a time)
+  - nextcloud-fleet-35.0.1            # office-wide silence would hide this plan's failures
+  - nocodb-2026.09.1                  # lists us (backup-restore set, same window family)
 exclusive: false
-security_ref: F-4c3c5206              # exporter image finding; 2.18.0 answers it (see §1, measured)
+security_ref: F-4c3c5206              # exporter image finding; 2.18.x answers it (see §1, measured)
 capability_change: true               # 2.18.0 changes user-visible behaviour (new drawing tools,
-                                      # comments in workspace, backend password-complexity enforcement)
+                                      # comments in workspace, backend password-complexity enforcement);
+                                      # 2.18.1 adds a frontend stub_status listener on :8082 (§1.B)
 rollback_class: backup-restore        # migration 0152 is forward-only; primary rollback is still a
                                       # git revert (2.17.2 tolerates the migrated schema, §5 A), the
                                       # pg_dump restore (§5 B) is the floor if data is damaged.
-backup_gate: "plain-SQL pg_dump of database penpot taken from pod penpot-db-0 (container app) to $HOME/penpot-backups/pre-2.18.0/penpot.sql BEFORE the chart edit is pushed, verified non-empty + contains '-- PostgreSQL database dump complete' + >= 50 'COPY public.' blocks, with the §2.4 baseline counts captured beside it; plus the nightly Longhorn backup of pvc-280be202-dcc0-4eb6-b959-58ab70711d78 (penpot-db-data) Completed < 26h"
+backup_gate: "plain-SQL pg_dump of database penpot taken from pod penpot-db-0 (container app) to $HOME/penpot-backups/pre-2.18.1/penpot.sql BEFORE the chart edit is pushed, verified non-empty + contains '-- PostgreSQL database dump complete' + >= 50 'COPY public.' blocks, with the §2.4 baseline counts captured beside it; plus the nightly Longhorn backup of pvc-280be202-dcc0-4eb6-b959-58ab70711d78 (penpot-db-data) Completed < 26h"
 finding_refs: [F-922ffce7, F-4c3c5206]
-                                      # F-922ffce7: "penpot: chart 1.9.0 -> 1.10.0 (minor)" — this plan.
-                                      # F-4c3c5206: exporter image finding — 2.18.0 measured to answer it.
+                                      # F-922ffce7: "penpot: chart 1.9.0 -> 1.11.1 (minor)" (title
+                                      #   re-read 2026-10-05; the same record moved with the target) — this plan.
+                                      # F-4c3c5206: exporter image finding — 2.18.x measured to answer it (§1.C).
                                       # NOT claimed: F-220e7d7b (backend) and F-9ac47520 (frontend) —
                                       #   re-rated by the sweep after landing; detail on the records.
-status: awaiting-go  # 2026-09-28 go_no_go ingested (data-loss decision) — was: vetted;    # plan-reviewer 2026-09-28 (F-2c849d1e backlog review): ready-for-go, 0 blocking; bookkeeping fixes applied. HUMAN-GATED (capability_change: true) — needs an operator GO.
-review: ready-for-go@2026-09-28
-window: "sat-attended:2026-10-31"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO pending: DB migration, backup-restore (moved off sun 10-25: shares monitoring+office with redis-fleet)
+status: draft        # RESET 2026-10-05 by the 1.11.1 retarget (was awaiting-go / review ready-for-go@2026-09-28
+                     # for 1.10.0). A retarget voids the old review AND the old GO: needs a fresh
+                     # plan-reviewer pass, then a NEW operator GO (HUMAN-GATED, capability_change: true).
+review: null
+window: "sat-attended:2026-10-31"   # KEPT on the 2026-10-05 retarget (flux-fleet-0.60.0 precedent); the slot only runs if the re-review passes and a new GO is recorded first (status is draft). Originally SCHEDULED 2026-09-28 by maintenance-window-agent (moved off sun 10-25: shares monitoring+office with redis-fleet)
 premises:
   - id: live-backend-still-2.17.2
     why: "current: claims 2.17.2; if the backend already moved, the dump/baseline and rollback target are wrong."
@@ -90,20 +104,32 @@ sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md
   - docs/sops/storage-safety.md
-generated: "2026-09-27"
+generated: "2026-10-05"     # refreshed (retarget 1.10.0 -> 1.11.1, sweep cycle 481b9c1f); first written 2026-09-27
 ---
 
-# penpot: chart 1.9.0 -> 1.10.0 (app 2.17.2 -> 2.18.0)
+# penpot: chart 1.9.0 -> 1.11.1 (app 2.17.2 -> 2.18.1)
+
+> **Retarget note (2026-10-05).** This plan was written and reviewed for chart
+> 1.10.0 / app 2.18.0. coverage.py now holds 1.9.0 -> 1.11.1 ("G3 could not
+> verify the release notes"). The 2.17.2 -> 2.18.0 analysis in §1.A is
+> unchanged and still governs the risky part; §1.B is the new 1.10.0 -> 1.11.1
+> delta, read from the chart tarballs and the upstream 2.18.0...2.18.1 compare.
+> Verdict: take 1.11.1 directly — it is a bug-fix patch on top of 1.10.0 with
+> no new migration, no values change, and a byte-identical render apart from
+> image tags/labels. Stopping at 1.10.0 would buy nothing and leave a second
+> bump owed.
 
 ## 1. Summary & why held
 
 One-line chart bump in `kubernetes/apps/office/penpot/app/helmrelease.yaml`
 (`spec.chart.spec.version`). The chart pins all three images, so this moves
-`penpotapp/{backend,frontend,exporter}` 2.17.2 -> 2.18.0. Standalone
+`penpotapp/{backend,frontend,exporter}` 2.17.2 -> 2.18.1. Standalone
 `penpot-db` (postgres 18.6 StatefulSet) and `penpot-cache` (valkey 9.1.2) are
 separate HelmReleases and are NOT edited.
 
-Why it is not auto-safe (evidence gathered 2026-09-27):
+### 1.A — 2.17.2 -> 2.18.0 / chart 1.9.0 -> 1.10.0 (evidence gathered 2026-09-27, still valid)
+
+Why it is not auto-safe:
 
 1. **Forward-only DB migration.** `backend/src/app/migrations.clj@2.18.0` adds
    exactly one step over 2.17.2 (161 -> 162):
@@ -151,13 +177,77 @@ HTTPRoute collides with our `httproute/penpot`.
 the chart; `PENPOT_REDIS_URI` rendering is byte-identical. 2.18.0 runs against
 the current valkey 9.1.2 — this plan does not depend on `penpot-cache-9.2`.
 
+### 1.B — the retarget delta: chart 1.10.0 -> 1.11.1 / app 2.18.0 -> 2.18.1 (gathered 2026-10-05)
+
+Why coverage held it: G3 found no release notes, not a breaking change. The
+notes exist — they are in `CHANGES.md` at tag 2.18.1, not a GitHub release
+body. Read from primary sources:
+
+- **App 2.18.1 is a bug-fix patch.** `CHANGES.md@2.18.1` has only a
+  ":bug: Bugs fixed" section, four items: workspace stack overflow on a
+  context menu for an off-page shape; repeated error toasts from injected
+  third-party scripts; register flow from a workspace URL; empty response when
+  exporting a binfile via the API. None is a migration or config change.
+- **No new DB migration.** `backend/src/app/migrations.clj` is byte-identical
+  between tags 2.18.0 and 2.18.1 (`diff` empty; 162 `:name "0...` entries in
+  both). So the schema end state is still 162 with `0152` the only new step
+  over our 161 — §4.2 and §5 A are unchanged.
+- **Upstream compare 2.18.0...2.18.1** (18 commits, 52 files): the
+  deploy-relevant ones are
+  (a) `Dockerfile.backend` adds `jdk.management` to the jlink module list (so
+  JVM process metrics appear) — no user/uid/entrypoint change; frontend and
+  exporter Dockerfiles untouched, so uid 1001 and `/bin/bash` hold as in §1.A;
+  (b) `backend/src/app/http.clj` + `main.clj` add an Undertow metrics sampler
+  (`penpot_http_worker_*`, `penpot_http_connector_*`) — we scrape no penpot
+  `/metrics`, so inert here; it does log `unexpected error on http metrics
+  sampling` on a sampler failure, which §4.7's error grep would NOT hide;
+  (c) `docker/images/files/nginx.conf.template` (the frontend) changes
+  `access_log` to a `penpot_upstream` format and adds a **second `server`
+  block `listen 8082` serving only `location = /stub_status`**. That is the
+  one capability change in the delta: an nginx connection-count page bound on
+  every pod interface. Our Service `penpot` exposes only 8080 (the chart
+  render below has no 8082 port) and `httproute/penpot` targets the Service, so
+  it is not reachable from the edge — only pod-IP-to-pod-IP inside the cluster.
+  It reveals connection counters, no data. Recorded, not mitigated; §4.1b
+  asserts the Service still has exactly one port so a future chart that
+  publishes it fails loudly;
+  (d) `srepl/main.clj` adds `delete-profiles-by-email!` helpers to the admin
+  REPL (we run `enable-prepl-server`, localhost-only) — additive, nothing calls
+  it; (e) `frontend` auth/register/verify-token fixes (the CHANGES items).
+  `exporter/` is untouched between the tags, so the §4.7 (b) log string
+  `redis connection established` is still emitted.
+- **Chart 1.10.0 -> 1.11.0 -> 1.11.1** (tarballs diffed with `diff -r`):
+  1.11.0 = image tags 2.18.0 -> 2.18.1 only; 1.11.1 = refactor of the
+  `PENPOT_REDIS_URI` env into a `penpot.redisUriEnv` helper (same output) plus
+  `PENPOT_MCP_REDIS_URI` on the MCP deployment, which we do not render
+  (the MCP and Admin Console Deployments are gated on `penpot.mcpEnabled` /
+  `penpot.adminConsoleEnabled`, i.e. on flags we do not set — neither renders
+  with our values). No values keys added/renamed; `values.schema.json`
+  identical (`diff -r` lists no change to it).
+- **Rendered with OUR values** (`helm template` 1.10.0 vs 1.11.1, placeholder
+  domain): both rc 0, both `3 Deployment, 3 Service, 1 ServiceAccount, 1 Pod
+  (helm test hook)`; the diff is exclusively `helm.sh/chart`,
+  `app.kubernetes.io/version` labels and the three `image:` lines
+  2.18.0 -> 2.18.1. `PENPOT_REDIS_URI` renders identically (value
+  `redis://penpot-cache:6379/0`).
+
+Conclusion: no reason to stop at 1.10.0. Every 1.10.0 gate below applies
+unchanged with `2.18.1` substituted; the only addition is §4.1b (Service
+port set). Baselines re-measured live 2026-10-05 and unchanged from
+2026-09-27: migrations 161; profile 1 / team 1 / project 1 / file_live 1 /
+storage_object_live 66 / file_media_object 6; probe asset
+`de519720-...` 1788 image/jpeg; cache CLIENT LIST 4 backend + 1 exporter +
+1 cli; HR history rev 30 = penpot-1.9.0.
+
 **Security findings** (cited, detail on the records): images scanned locally
 with trivy 0.70.0 (`--scanners vuln --severity CRITICAL,HIGH --ignore-unfixed`),
 2.17.2 as the control that the method reproduces the findings.
-- `F-4c3c5206` (exporter): **answered** — `penpotapp/exporter:2.18.0` shows 0
-  fixable CRITICAL. Claimed in `finding_refs`, cited as `security_ref`.
-- `F-220e7d7b` (backend) and `F-9ac47520` (frontend): not claimed; the sweep
-  re-rates them against 2.18.0 after this lands (detail on the records only).
+- `F-4c3c5206` (exporter): **answered** — `penpotapp/exporter:2.18.0` (2026-09-27)
+  and `penpotapp/exporter:2.18.1` (re-scanned 2026-10-05, same method) both
+  show 0 fixable CRITICAL. Claimed in `finding_refs`, cited as `security_ref`.
+- `F-220e7d7b` (backend) and `F-9ac47520` (frontend): not claimed — the
+  2026-10-05 re-scan of 2.18.1 does not let this plan claim them; the sweep
+  re-rates them after this lands (detail on the records only).
 
 ## 2. Pre-checks
 
@@ -190,7 +280,7 @@ kubectl -n storage get backups.longhorn.io -l backup-volume=pvc-280be202-dcc0-4e
 # (cronjob/daily-backup-all-volumes in ns storage — live-checked — produces it.)
 
 # 2.4 BASELINE (contents) — captured to a file the §4 diff reads
-B=$HOME/penpot-backups/pre-2.18.0; mkdir -p "$B"
+B=$HOME/penpot-backups/pre-2.18.1; mkdir -p "$B"
 kubectl -n office exec penpot-db-0 -c app -- psql -U penpot -d penpot -At -c "
  select 'profile',count(*) from profile union all
  select 'team',count(*) from team union all
@@ -201,7 +291,7 @@ kubectl -n office exec penpot-db-0 -c app -- psql -U penpot -d penpot -At -c "
 cat "$B/counts.txt"
 kubectl -n office exec penpot-db-0 -c app -- psql -U penpot -d penpot -At -c "select count(*) from migrations;"
 # Reading 2026-09-27: profile 1, team 1, project 1, file_live 1, storage_object_live 66; migrations 161.
-# If migrations is already 162, STOP: something ran 2.18.0 already.
+# If migrations is already 162, STOP: something ran 2.18.x already.
 
 # 2.5 the asset-fetch probe object (oldest live file-media-object) + its size/type
 kubectl -n office exec penpot-db-0 -c app -- psql -U penpot -d penpot -At -F' ' -c "
@@ -219,7 +309,7 @@ kill $PF 2>/dev/null
 # 2.6 (optional) re-render proof — schema needs a real-looking URI locally
 S=$(mktemp -d); yq '.spec.values' kubernetes/apps/office/penpot/app/helmrelease.yaml \
   | sed 's/\${SECRET_DOMAIN}/example.com/' > "$S/v.yaml"
-helm template penpot penpot/penpot --version 1.10.0 -n office -f "$S/v.yaml" | grep -E '^kind:' | sort | uniq -c
+helm template penpot penpot/penpot --version 1.11.1 -n office -f "$S/v.yaml" | grep -E '^kind:' | sort | uniq -c
 # PASS: 3 Deployment, 3 Service, 1 ServiceAccount, 1 Pod (helm test hook, not run by Flux).
 ```
 
@@ -231,7 +321,7 @@ helm template penpot penpot/penpot --version 1.10.0 -n office -f "$S/v.yaml" | g
    `\unrestrict` line after the marker, so grep the whole file, not `tail -1`).
 
    ```bash
-   B=$HOME/penpot-backups/pre-2.18.0
+   B=$HOME/penpot-backups/pre-2.18.1
    date -u +%Y-%m-%dT%H:%M:%SZ > "$B/T0"; cat "$B/T0"
    kubectl -n office exec penpot-db-0 -c app -- pg_dump -U penpot -d penpot --clean --if-exists > "$B/penpot.sql"
    echo "rc=$? bytes=$(wc -c < "$B/penpot.sql")"
@@ -240,21 +330,21 @@ helm template penpot penpot/penpot --version 1.10.0 -n office -f "$S/v.yaml" | g
    ```
    Any of: rc != 0, bytes < 1000000, marker != 1, COPY < 50 -> **STOP**, do not push.
 
-2. **Edit the pin** (dry-tested on a scratch copy with BSD sed 2026-09-27;
-   resulting diff exactly `<       version: 1.9.0` / `>       version: 1.10.0`):
+2. **Edit the pin** (dry-tested on a scratch copy with BSD sed 2026-10-05;
+   resulting diff exactly `<       version: 1.9.0` / `>       version: 1.11.1`):
 
    ```bash
    cd /Users/mu/code/cberg-home-nextgen
-   sed -i '' 's/^\([[:space:]]*\)version: 1\.9\.0$/\1version: 1.10.0/' kubernetes/apps/office/penpot/app/helmrelease.yaml
+   sed -i '' 's/^\([[:space:]]*\)version: 1\.9\.0$/\1version: 1.11.1/' kubernetes/apps/office/penpot/app/helmrelease.yaml
    git diff --stat kubernetes/apps/office/penpot/app/helmrelease.yaml    # 1 file, 1+/1-
-   yq '.spec.chart.spec.version' kubernetes/apps/office/penpot/app/helmrelease.yaml   # 1.10.0
+   yq '.spec.chart.spec.version' kubernetes/apps/office/penpot/app/helmrelease.yaml   # 1.11.1
    ```
 
 3. **Commit only that file, verify, push.**
 
    ```bash
    git commit --only kubernetes/apps/office/penpot/app/helmrelease.yaml \
-     -m "feat(penpot): chart 1.9.0 -> 1.10.0 (app 2.18.0) (plan penpot-chart-1.10.0)"
+     -m "feat(penpot): chart 1.9.0 -> 1.11.1 (app 2.18.1) (plan penpot-chart-1.10.0)"
    git log -1 --format=%s     # must be YOUR subject (shared-worktree message swap)
    git show --stat HEAD       # exactly one file
    git push
@@ -268,20 +358,28 @@ helm template penpot penpot/penpot --version 1.10.0 -n office -f "$S/v.yaml" | g
 
 ## 4. Verification
 
-Start once `flux get hr -n office penpot` shows `penpot@1.10.0` Ready.
+Start once `flux get hr -n office penpot` shows `penpot@1.11.1` Ready.
 
 ```bash
-B=$HOME/penpot-backups/pre-2.18.0; T0=$(cat "$B/T0"); read AID ASIZE ATYPE < "$B/asset-probe.txt"
+B=$HOME/penpot-backups/pre-2.18.1; T0=$(cat "$B/T0"); read AID ASIZE ATYPE < "$B/asset-probe.txt"
 
-# 4.1 all three run 2.18.0, old pods gone, postRenderer patch survived
+# 4.1 all three run 2.18.1, old pods gone, postRenderer patch survived
 kubectl -n office get pods -l app.kubernetes.io/instance=penpot \
   -o 'custom-columns=POD:.metadata.name,IMG:.status.containerStatuses[0].image,READY:.status.containerStatuses[0].ready,RST:.status.containerStatuses[0].restartCount'
 kubectl -n office get deploy penpot-backend -o jsonpath='{.spec.template.spec.initContainers[*].name}{"\n"}'
 kubectl -n office get deploy -l app.kubernetes.io/instance=penpot -o name | wc -l
-# PASS: exactly 3 pods, each penpotapp/<c>:2.18.0, READY true, RST 0; initContainers
+# PASS: exactly 3 pods, each penpotapp/<c>:2.18.1, READY true, RST 0; initContainers
 #   "wait-for-postgresql wait-for-redis"; exactly 3 Deployments (no admin-console).
 # FAIL shapes: a 2.17.2 row = roll incomplete; empty initContainers = postRenderer
 #   target no longer matched; 4 deployments = admin console appeared (flags changed).
+
+# 4.1b the 2.18.1 frontend stub_status listener (:8082) is NOT published by a Service (§1.B c)
+kubectl -n office get svc -l app.kubernetes.io/instance=penpot \
+  -o jsonpath='{range .items[*]}{.metadata.name}={range .spec.ports[*]}{.port}{","}{end}{"\n"}{end}'
+# PASS: exactly "penpot=8080," "penpot-backend=6060," "penpot-exporter=6061," (read live
+#   2026-10-05 for svc/penpot: "8080"; the 1.11.1 render has no 8082 anywhere).
+# FAIL: any 8082 in the output = the chart started publishing nginx stub_status; that is a
+#   new in-cluster surface this plan did not assess — STOP and surface, do not proceed.
 
 # 4.2 migration applied (contents of the schema, not "backend Ready")
 kubectl -n office exec penpot-db-0 -c app -- psql -U penpot -d penpot -At -c \
@@ -310,7 +408,7 @@ curl -s -o "$B/asset-post.bin" -w 'code=%{http_code} bytes=%{size_download} ctyp
 cmp "$B/asset-pre.bin" "$B/asset-post.bin" && echo ASSET_BYTES_IDENTICAL
 kill $PF 2>/dev/null
 # PASS: code=200, bytes=$ASIZE (1788), ctype=$ATYPE, ASSET_BYTES_IDENTICAL.
-# Why this can fail and still be the right probe: in 2.18.0 assets.clj `objects-handler`
+# Why this can fail and still be the right probe: in 2.18.0 (unchanged in 2.18.1) assets.clj `objects-handler`
 #   returns 401 for any bucket NOT in `public-buckets`; file-media-object IS in that set,
 #   so anonymous 200 is the correct expectation. A DHI uid/permission regression on the
 #   CIFS share prints 404/500 with a small JSON/HTML body and cmp differs.
@@ -344,7 +442,7 @@ kubectl -n office exec deploy/penpot-cache -- valkey-cli CLIENT LIST | awk '{pri
 #     reconnected (only 127.0.0.1 / stale IPs listed). Run only once exactly one pod per
 #     component exists (the jsonpath takes items[0]).
 kubectl -n office logs deploy/penpot-exporter | grep -c 'redis connection established'
-# (b) PASS: >= 1 (string logged by exporter/src/app/redis.cljs@2.18.0 on connect; present in
+# (b) PASS: >= 1 (string logged by exporter/src/app/redis.cljs@2.18.0, exporter/ untouched in 2.18.1, on connect; present in
 #     the 2.17.2 exporter log 2026-09-27 = 1). FAIL: 0 = exporter never connected.
 kubectl -n office logs deploy/penpot-backend --since=10m | grep -i -c -E 'RedisCommandTimeout|RedisConnectionException|Connection refused'
 # Extra FAIL signal only: a non-zero count from T+3 min is a FAIL; a zero proves nothing by itself.
@@ -362,7 +460,7 @@ the pre-change fetch), 4.2 (migration count 161 -> 162 with the 0152 step
 present), 4.5 (a new `http_session_v2` row after T0 from a real login) and 4.6
 (a `tempfile` storage object after T0 from a real exporter render).
 
-CONTROL: metric kube_pod_container_info — `{namespace="office",pod=~"penpot-(backend|frontend|exporter).*"}` must return exactly three series, each with `image` ending `:2.18.0` (read 2026-09-27: three series on `:2.17.2`).
+CONTROL: metric kube_pod_container_info — `{namespace="office",pod=~"penpot-(backend|frontend|exporter).*"}` must return exactly three series, each with `image` ending `:2.18.1` (read 2026-09-27: three series on `:2.17.2`).
 CONTROL: metric kube_deployment_status_replicas_available — `{namespace="office",deployment=~"penpot-(backend|frontend|exporter)"}` must be 1 for each for 10 min after the roll (baseline 1/1/1).
 CONTROL: metric kube_pod_container_status_restarts_total — `{namespace="office",pod=~"penpot-(backend|frontend|exporter).*"}` must not increase during the 10 min after the roll (baseline 0); a DHI permission or migration crash-loop shows here first.
 
@@ -400,14 +498,14 @@ after T0 stay on the CIFS share as orphans — harmless; **never delete anything
 on `penpot-assets`**, see `docs/sops/storage-safety.md`).
 
 ```bash
-B=$HOME/penpot-backups/pre-2.18.0
+B=$HOME/penpot-backups/pre-2.18.1
 flux suspend helmrelease penpot -n office          # stop helm-controller re-scaling
 kubectl -n office scale deploy penpot-backend penpot-exporter --replicas=0
 kubectl -n office get pods -l app.kubernetes.io/instance=penpot   # backend/exporter gone
-kubectl cp "$B/penpot.sql" office/penpot-db-0:/tmp/penpot-pre-2.18.0.sql -c app
-kubectl -n office exec penpot-db-0 -c app -- psql -U penpot -d penpot -v ON_ERROR_STOP=1 -q -f /tmp/penpot-pre-2.18.0.sql
+kubectl cp "$B/penpot.sql" office/penpot-db-0:/tmp/penpot-pre-2.18.1.sql -c app
+kubectl -n office exec penpot-db-0 -c app -- psql -U penpot -d penpot -v ON_ERROR_STOP=1 -q -f /tmp/penpot-pre-2.18.1.sql
 kubectl -n office exec penpot-db-0 -c app -- psql -U penpot -d penpot -At -c "select count(*) from migrations;"   # 161
-kubectl -n office exec penpot-db-0 -c app -- rm -f /tmp/penpot-pre-2.18.0.sql
+kubectl -n office exec penpot-db-0 -c app -- rm -f /tmp/penpot-pre-2.18.1.sql
 # then do rollback A (git revert + push), then:
 flux resume helmrelease penpot -n office           # re-applies replicas: 1 with 2.17.2
 ```
@@ -430,13 +528,13 @@ flux resume helmrelease penpot-db -n office
   `penpot-cache`; that plan restarts the cache (Recreate) and verifies by counting
   exactly those reconnects (`CLIENT LIST` backend + exporter IPs) and the backend's
   redis-error log count. Run together, a reconnect or redis-error failure has two
-  possible causes and neither plan's rollback is attributable. Penpot 2.18.0 has
-  **no** redis/valkey version requirement (CHANGES.md 2.18.0 and the chart
+  possible causes and neither plan's rollback is attributable. Penpot 2.18.0/2.18.1 have
+  **no** redis/valkey version requirement (CHANGES.md 2.18.0 + 2.18.1 and the chart
   render are silent; `PENPOT_REDIS_URI` is unchanged), so there is no ordering
   dependency either way — they simply must not share a night. `penpot-cache-9.2`
-  is `blocked` (no GA valkey 9.2.N) and this plan does not wait for it. Repo
-  correction: that plan's `conflicts_with` should list `penpot-chart-1.10.0`
-  back (reciprocity is not checked by `--validate`).
+  is `blocked` (no GA valkey 9.2.N) and this plan does not wait for it. That
+  plan's `conflicts_with` now lists `penpot-chart-1.10.0` back (re-read
+  2026-10-05; reciprocity is not checked by `--validate`).
 - `kube-prometheus-stack-91.4.1` (status executed; ref kept while the file
   exists) — §4 CONTROL metrics read through it.
 - `flux-oci-chart-sources` rewrites penpot's `spec.chart` (mirror track) — the
@@ -444,7 +542,7 @@ flux resume helmrelease penpot-db -n office
   to every HR including penpot; `app-template-5.2.1` helm-upgrades `penpot-db`
   and `penpot-cache`, which penpot `dependsOn`. Each would make a failure here
   unattributable.
-- `chart-patches-coredns-reloader-blackbox` rolls coredns. After 1.10.0 the
+- `chart-patches-coredns-reloader-blackbox` rolls coredns. From 1.10.0 on (so in 1.11.1) the
   frontend nginx `resolver` is the pod's `/etc/resolv.conf` nameserver (cluster
   DNS) instead of the pod IP, so a coredns disturbance the same night lands on
   the path this plan just changed.
@@ -460,5 +558,11 @@ flux resume helmrelease penpot-db -n office
   re-mounted by the new pods. Nothing in this plan deletes a PVC; the rollback
   explicitly forbids cleaning orphan blobs.
 - Step 0 of the window must not touch penpot's siblings: `penpot-db`/`penpot-cache`
-  chart bumps are AR-accepted (`F-434c3acd`, `F-afc9bd6a`) and the `*valkey*`
-  deny rule holds the cache image.
+  chart bumps are AR-accepted (`F-434c3acd` under AR-038, `F-afc9bd6a` under
+  AR-039; both re-read 2026-10-05: accepted, expire 2026-12-27) and the `*valkey*`
+  deny rule holds the cache image. No interaction with this retarget: AR-038/039
+  freeze the app-template chart under `penpot-db`/`penpot-cache` only; penpot
+  1.11.1 needs no newer postgres or valkey (CHANGES.md 2.18.0/2.18.1 silent,
+  render unchanged). If an AR lapses and `app-template-5.2.1` runs, it is already
+  in `conflicts_with`. `penpot-cache-9.2` is still `blocked` (no GA 9.2.N) and
+  remains a never-same-night conflict, not a dependency.
