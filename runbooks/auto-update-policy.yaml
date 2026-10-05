@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.10.04"
+version: "2026.10.05"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -256,10 +256,11 @@ deny:
       stays green. Patch bumps stay on the line and auto-merge; minor+ is PLAN lane."
     max: patch
   - match: "*mariadb*"
-    reason: "A DB-engine bump is never unattended-safe. The bitnami entrypoint can SKIP
-      mariadb-upgrade on a server-major roll while reporting Ready and the right
-      SELECT VERSION() — leaving old-format system tables under the new binary.
-      See docs/sops/mariadb-major-upgrade.md."
+    reason: "A DB-engine bump is never unattended-safe. The bitnami entrypoint ALWAYS
+      skips mariadb-upgrade (libmariadb.sh calls the nonexistent
+      ${DB_BIN_DIR}/mariadb_upgrade and `||` logs 'already upgraded') while reporting
+      Ready and the right SELECT VERSION() — leaving old-format system tables under
+      the new binary. See docs/sops/mariadb-major-upgrade.md."
     max: patch
   - match: "*longhorn*"
     reason: "Storage engine for every RWO volume: a MINOR is an engine/instance-manager
