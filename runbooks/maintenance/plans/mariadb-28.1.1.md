@@ -60,6 +60,7 @@ conflicts_with:
   - chart-patches-coredns-reloader-blackbox  # coredns roll confounds the tenant-reconnect gate
   - coredns-1.48.1                    # same reason
   - longhorn-1.13.0                   # storage engine move under a snapshot + in-place conversion
+  - descheduler-0.37.0                # evicts pods cluster-wide; an eviction of mariadb-0 or a tenant mid-procedure breaks §3.5-§4.3 attribution and the restart gates — must not share the window
   - jellyfin-config-rwo-migration     # hands-on Longhorn volume work + its own restore-test; same storage/longhorn surface as the §2.6 snapshot / §5.2 revert (review 2026-10-05)
   - talos-linux-1.14.2                # node roll would evict mariadb-0 / detach the volume mid-procedure
   - kube-prometheus-stack-91.9.0      # exclusive; restarts Prometheus, which §4.5 reads (it already lists this plan)
@@ -265,8 +266,11 @@ effect directly: `SELECT CHARSET(CONVERT('x' USING utf8))` must return
 `utf8mb3`. Without the line, 13.1 returns `utf8mb4`.
 
 Other 13.1 items reviewed and judged irrelevant for a standalone server with
-these tenants: DENY grants and new JSON operators (new syntax, which changes
-the `mysql.*` privilege tables and confirms `mariadb-upgrade` is needed),
+these tenants: DENY grants and new JSON operators (new syntax; correction
+2026-10-05: the 13.0.1 → 13.1.1 `system_tables_fix` changes only one line, so
+the system-table delta is small, not a privilege-table rewrite — but
+`mariadb-upgrade` is still mandatory, because the marker and the server's
+own upgrade check key on the version, not on the size of the delta),
 replication domain-id validation, mariadb-dump generated-column handling (our
 dump is taken with the 13.0.1 client), and short-circuit AND/OR evaluation.
 13.1 is a **rolling** release, like the 13.0 line we are on.
@@ -418,7 +422,23 @@ kubectl -n my-software-showcase get pods -o 'custom-columns=N:.metadata.labels.a
   | LC_ALL=C sort > "$W/restarts-T0.txt"
 test "$(wc -l < "$W/restarts-T0.txt" | tr -d ' ')" = 4 || { echo "STOP: not 4 showcase pods (label column) — fix the label key before relying on §4.3"; cat "$W/restarts-T0.txt"; exit 1; }
 kubectl -n databases get pod mariadb-0 -o jsonpath='{.status.containerStatuses[0].imageID}{"\n"}' > "$W/imageid-T0.txt"
+
+# mariadb-check BASELINE (T0) for the §4.2 floor — the identical command §4.2 runs at T2
+cat > "$W/check.sh" <<'EOF'
+mariadb-check --protocol=socket -uroot -p"$MARIADB_ROOT_PASSWORD" --all-databases 2>&1; echo "RC=$?"
+EOF
+kubectl -n databases exec -i mariadb-0 -c mariadb -- sh -s < "$W/check.sh" > "$W/check-T0.txt" \
+  || { echo "STOP: mariadb-check exec failed at T0"; exit 1; }
+grep -qx 'RC=0' "$W/check-T0.txt" || { echo "STOP: mariadb-check non-zero at T0"; tail -20 "$W/check-T0.txt"; exit 1; }
+grep -cE '[[:space:]]OK$' "$W/check-T0.txt" > "$W/check-T0.okcount"
+[ "$(cat "$W/check-T0.okcount")" -ge 212 ] || { echo "STOP: only $(cat "$W/check-T0.okcount") OK lines at T0 — the floor would measure nothing (212 user tables alone)"; exit 1; }
+grep -vE '[[:space:]]OK$|^RC=' "$W/check-T0.txt" | grep -v 'password on the command line' | LC_ALL=C sort -u > "$W/check-T0.nonok"
+echo "T0: $(cat "$W/check-T0.okcount") OK lines, $(wc -l < "$W/check-T0.nonok" | tr -d ' ') distinct non-OK lines"; cat "$W/check-T0.nonok"
 ```
+
+The non-OK lines at T0 (CSV log tables, Aria notes, `sys` views, if any)
+are the allowed set for T2. A T0 non-OK line that names a real corruption
+(`error`, `corrupt`, `crashed`) is a **STOP** before the push, not a baseline.
 
 Restricting the processlist baseline to the 3 Rails pool users is the
 F-9ab5f80f / maintenance-windows.md §7 rule. The 27.3.0 baseline mixed in
@@ -557,7 +577,8 @@ Trust the Backup CR, not `lastBackupAt` (`docs/sops/backup.md`).
    perl -pi -e 's/^([ ]*)init_connect="SET NAMES utf8"\n\z/$&$1old_mode=UTF8_IS_UTF8MB3\n/' "$F"
    sed -i '' '/^  upgrade:$/,/^[[:space:]]*retries:/ s/^\([[:space:]]*retries:[[:space:]]*\)3$/\10/' "$F"
    git diff "$F"
-   grep -c '^        old_mode=UTF8_IS_UTF8MB3$' "$F"     # must print 1 (exactly 8 spaces); 0 = not inserted / wrong indent
+   grep -c '^        old_mode=UTF8_IS_UTF8MB3$' "$F" | grep -qx 1 \
+     || { echo "STOP: old_mode line not present exactly once at 8 spaces"; exit 1; }
    ```
 
    Expected diff: exactly these five changes (`old_mode` indented 8 spaces,
@@ -591,6 +612,7 @@ Trust the Backup CR, not `lastBackupAt` (`docs/sops/backup.md`).
    git show --stat HEAD          # exactly one file
    git push
    echo "$(git rev-parse HEAD)" > "$W/bump-sha.txt"
+   date +%s > "$W/push-epoch.txt"                            # §4.5 derives its Prometheus range from this
    ```
 
 4. **Reconcile Kustomization THEN HelmRelease** (mariadb SOP step 4: a
@@ -614,12 +636,24 @@ Trust the Backup CR, not `lastBackupAt` (`docs/sops/backup.md`).
    without TLS:
    ```bash
    kubectl -n databases exec mariadb-0 -c mariadb -- sh -c \
-     'mariadb-upgrade --protocol=socket --skip-ssl -uroot -p"$MARIADB_ROOT_PASSWORD"' 2>&1 | tee "$W/upgrade.log"
+     'mariadb-upgrade --protocol=socket --skip-ssl -uroot -p"$MARIADB_ROOT_PASSWORD"' > "$W/upgrade.log" 2>&1
+   echo "$?" > "$W/upgrade.rc"; cat "$W/upgrade.log"        # no pipe: $? is mariadb-upgrade's own exit status (via kubectl exec)
    grep -ciE 'phase [0-9]+/[0-9]+' "$W/upgrade.log"          # expect all phases listed (8 on 13.0; count whatever 13.1 prints)
-   grep -iE 'error|gone away|reset by peer' "$W/upgrade.log" && echo "UPGRADE_ERRORS (see SOP Troubleshooting)" || echo UPGRADE_CLEAN
-   kubectl -n databases exec mariadb-0 -c mariadb -- cat /bitnami/mariadb/data/mariadb_upgrade_info; echo
+   # The view phase prints `sys.statements_with_errors_or_warnings   OK` on EVERY clean run (print_result in
+   # client/mysqlcheck.c), so OK-terminated lines are excluded before the error grep, or it always "fails".
+   grep -vE '[[:space:]]OK$' "$W/upgrade.log" | grep -iE 'error|gone away|reset by peer|failed|needs upgrade' > "$W/upgrade-bad.txt"
+   MARK=$(kubectl -n databases exec mariadb-0 -c mariadb -- cat /bitnami/mariadb/data/mariadb_upgrade_info); echo "marker=$MARK"
+   if [ "$(cat "$W/upgrade.rc")" = 0 ] && [ ! -s "$W/upgrade-bad.txt" ] && [ "$MARK" = "13.1.1-MariaDB" ]; then
+     echo UPGRADE_CLEAN
+   else
+     echo "UPGRADE_FAIL rc=$(cat "$W/upgrade.rc") marker=$MARK (see SOP Troubleshooting)"; cat "$W/upgrade-bad.txt"
+   fi
    ```
-   PASS: `UPGRADE_CLEAN` and the marker reads `13.1.1-MariaDB`. If the run
+   PASS: `UPGRADE_CLEAN`, which needs all three: exit status 0, no non-`OK`
+   line matching an error pattern, and the marker reading `13.1.1-MariaDB`.
+   The marker is a strong signal: `mariadb-upgrade` writes it
+   (`finish_mariadb_upgrade_info_file`) only after every phase succeeded, so
+   a run that died part-way leaves `13.0.1-MariaDB`. If the run
    stops part-way, re-run it once. The SOP explains why: transport failures
    move around, and a bad statement fails in the same place every time. A
    second failure means §5.2.
@@ -633,6 +667,7 @@ Trust the Backup CR, not `lastBackupAt` (`docs/sops/backup.md`).
    git diff "$F"                     # exactly: -      retries: 0  /  +      retries: 3
    git commit --only "$F" -m "chore(mariadb): restore upgrade remediation retries after 13.1.1 (plan mariadb-28.1.1)"
    git log -1 --format=%s; git show --stat HEAD; git push
+   git rev-parse HEAD > "$W/step9-sha.txt"                  # §5.2 reverts this first if a late rollback is needed
    ```
    This re-renders nothing in the pod template, so there is no second roll.
    Check `startTime` is unchanged afterwards.
@@ -671,14 +706,23 @@ affected) or go to §5.2. A `sys`-schema difference cannot appear: `engine.sh`
 does not read `sys`.
 
 ```bash
-mariadb_mariadbcheck() { kubectl -n databases exec mariadb-0 -c mariadb -- sh -c \
-  'mariadb-check --protocol=socket -uroot -p"$MARIADB_ROOT_PASSWORD" --all-databases 2>&1; echo "RC=$?"'; }
-mariadb_mariadbcheck > "$W/check.txt"
-grep -q '^RC=0$' "$W/check.txt" && ! grep -viE '[[:space:]]OK$|^RC=0$|^note|^status' "$W/check.txt" | grep -q . \
-  && echo CHECK_OK || { echo CHECK_FAIL; grep -viE '[[:space:]]OK$' "$W/check.txt" | head -20; }
+kubectl -n databases exec -i mariadb-0 -c mariadb -- sh -s < "$W/check.sh" > "$W/check-T2.txt"
+OK2=$(grep -cE '[[:space:]]OK$' "$W/check-T2.txt")
+grep -vE '[[:space:]]OK$|^RC=' "$W/check-T2.txt" | grep -v 'password on the command line' | LC_ALL=C sort -u > "$W/check-T2.nonok"
+LC_ALL=C comm -13 "$W/check-T0.nonok" "$W/check-T2.nonok" > "$W/check-new-nonok.txt"
+if grep -qx 'RC=0' "$W/check-T2.txt" && [ "$OK2" -ge "$(cat "$W/check-T0.okcount")" ] && [ ! -s "$W/check-new-nonok.txt" ]; then
+  echo "CHECK_OK $OK2 OK lines (T0 $(cat "$W/check-T0.okcount"))"
+else
+  echo "CHECK_FAIL OK=$OK2 (T0 $(cat "$W/check-T0.okcount")); new non-OK lines:"; cat "$W/check-new-nonok.txt"; tail -5 "$W/check-T2.txt"
+fi
 ```
-PASS: `CHECK_OK`. A failed exec prints no `RC=0`. A table needing upgrade or
-repair prints a non-`OK` line. Either way the result is `CHECK_FAIL`.
+PASS: `CHECK_OK`: exit 0, at least as many `OK` tables as at T0, and no
+non-`OK` line that was not already present at T0 (the same command, §2.3).
+The baseline makes it both able to pass on benign notes that exist today and
+able to fail. A failed exec prints no `RC=0` and 0 OK lines. A table that
+needs upgrade or repair after the 13.1 conversion prints a new non-`OK` line
+(e.g. `Table upgrade required` / `error`). Either way the result is
+`CHECK_FAIL`.
 
 ```bash
 kubectl -n databases exec -i mariadb-0 -c mariadb -- sh -s < "$W/counts.sh" > "$W/counts-T2.tsv" 2>/dev/null
@@ -766,7 +810,7 @@ the 4 `showcase_*_prod` and 2 `ibTime_*` schemas are listed.
 
 CONTROL: metric kube_statefulset_status_replicas_ready — `{namespace="databases",statefulset="mariadb"}` must read 1 (T0 = 1); 0 for >5 min after the push = the 13.1 pod never became Ready.
 CONTROL: metric kube_pod_status_ready — `sum(kube_pod_status_ready{namespace="my-software-showcase",condition="true"})` must return to 4 (T0 = 4, measured 2026-10-05) within 5 min of `mariadb-0` Ready; a value stuck below 4 names a tenant that did not reconnect.
-CONTROL: metric kube_pod_container_status_restarts_total — `round(increase(kube_pod_container_status_restarts_total{namespace="my-software-showcase"}[45m]))` must be ≤ 1 for every series (same bound as the kubectl delta above; ≥ 2 = restart loop ⇒ FAIL). `round()` is required: `increase()` extrapolates, and replaying the 2026-10-03 bounce it read 1.005 for a single restart, which would fail a raw ≤ 1 on the case SOP §7 allows (plan review 2026-10-05).
+CONTROL: metric kube_pod_container_status_restarts_total — `round(increase(kube_pod_container_status_restarts_total{namespace="my-software-showcase"}[${R}s]))` with `R=$(( $(date +%s) - $(cat "$W/push-epoch.txt") + 300 ))` (push time recorded in §3 step 3, plus 5 min of lead-in; a fixed 45m would miss the bounce if §4 runs late or read pre-push restarts if it runs early) must be ≤ 1 for every series (same bound as the kubectl delta above; ≥ 2 = restart loop ⇒ FAIL). `round()` is required: `increase()` extrapolates, and replaying the 2026-10-03 bounce it read 1.005 for a single restart, which would fail a raw ≤ 1 on the case SOP §7 allows (plan review 2026-10-05).
 DIAGNOSTIC (not a gate): `kubectl -n databases logs mariadb-0 -c mariadb | grep -iE 'old_mode|deprecat'` should show the expected UTF8_IS_UTF8MB3 deprecation warning. Its ABSENCE is not a failure (the §4.2 CONVERT gate is the control), but a `[ERROR] unknown variable 'old_mode…'` would be — the pod would not be Ready either.
 
 Then delete the silence and clear the marker (`runbooks/update-marker.sh clear mariadb`). After that, run §3 step 9.
@@ -811,13 +855,20 @@ This is the same procedure as n8n-2.39.8 §5.2 and paperless-db-13.0.2 §5.
 
 Step 3: put the 13.0.1 binary back and resume.
 ```bash
-git revert --no-edit "$(cat "$W/bump-sha.txt")"   # restores 27.3.0, the 13.0.1 digest, no old_mode, retries: 3
-git log -1 --format=%s; git show --stat HEAD; git push
+# Newest first. If §3 step 9 landed, its SHA is in $W/step9-sha.txt and is reverted BEFORE the bump;
+# otherwise only the bump is reverted.
+if [ -s "$W/step9-sha.txt" ]; then
+  git revert --no-edit "$(cat "$W/step9-sha.txt")" "$(cat "$W/bump-sha.txt")"
+else
+  git revert --no-edit "$(cat "$W/bump-sha.txt")"   # restores 27.3.0, the 13.0.1 digest, no old_mode, retries: 3
+fi
+git log -2 --format=%s; git show --stat HEAD; git push
 flux resume kustomization mariadb -n databases
 flux resume helmrelease   mariadb -n databases     # Helm re-renders replicas: 1
 ```
-If §3 step 9 had already landed, revert that commit as well (retries back to
-3 is harmless at this point).
+Reverting step 9 first (newest first) keeps each revert a clean inverse of
+one commit; the net result is 27.3.0, the 13.0.1 digest, no `old_mode`, and
+`retries: 3`, which is harmless once the volume holds 13.0.1 system tables.
 
 Confirm recovery. Each check has a known-bad reading:
 - imageID contains `47bdb03b…` (a 13.1 pod shows `354e5aec…`);
@@ -873,6 +924,10 @@ volume) and `rm -rf "$W"` (the dump contains password hashes).
   `conflicts_with`. The window agent's namespace-overlap check will still flag
   them; serialize rather than run them in parallel, so a §4 failure is
   attributable.
+- **descheduler-0.37.0 must not share the window** (in `conflicts_with`).
+  A descheduler bump/run evicts pods cluster-wide: evicting `mariadb-0`
+  during the snapshot, roll or `mariadb-upgrade`, or a tenant during §4.3,
+  makes the restart/tenant gates unattributable.
 - **Re-plan 2026-10-05.** The 2026-10-04 showcase decommission shrank the
   consumer set from 15 to 4 apps, the tenant baseline from 12 to 3 Rails pool
   users, and the data from 586 to 212 tables. Every gate count in §2–§5 was
