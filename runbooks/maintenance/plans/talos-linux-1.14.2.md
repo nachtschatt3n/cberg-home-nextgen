@@ -85,9 +85,11 @@ conflicts_with:                       # exclusive: true already keeps everything
                                       # SysfsConfig (RAPL PL1/PL2, EPP, iGPU gt0 max) via apply-config; never
                                       # the same night. If it executed BEFORE this roll, §4.1 re-checks its
                                       # 21 keys after each reboot (the iGPU card index is boot-dependent).
-  # No OPEN kube-prometheus-stack plan exists (91.4.1 executed 2026-09-26; finding F-ec382720
-  # 91.5.2 -> 91.8.1 has no plan yet). §4 reads Prometheus — ANY future same-night
-  # kube-prometheus-stack plan must be added here, and must name this plan back.
+  - kube-prometheus-stack-91.9.0       # reciprocity (2026-10-05): that plan (chart 91.5.2 -> 91.9.0,
+                                      # Prometheus restart) names this plan in its conflicts_with. §4
+                                      # reads Prometheus (canary choice, etcd latency, alerts); a
+                                      # Prometheus restart the same night blanks that evidence. Any
+                                      # further kube-prometheus-stack plan must be added here too.
 capability_change: true               # v1.14.2 changes node behaviour, not just versions (§1.2):
                                       # kernel CONFIG_BLK_WBT=y + CONFIG_BLK_WBT_MQ=y turns block
                                       # writeback throttling ON by default for the NVMe that etcd,
@@ -174,14 +176,26 @@ premises:
       the multi-document config — STOP.
     run: "talosctl --nodes=192.168.55.11,192.168.55.12,192.168.55.13 get machineconfig v1alpha1 -o yaml | grep -c 'kind: KubeAPIServerConfig'"
     expect_exact: "3"
-  - id: single-machineconfig-per-node
+  - id: no-pending-machineconfig-per-node
     why: >-
-      On v1.14.1 each node exposes exactly ONE MachineConfig resource, id v1alpha1 (measured
-      2026-10-01; the `persistent` id the talos-1.14.1 plan read on v1.13.10 no longer exists and
-      returns NotFound). Any extra id (e.g. a staged config) means a config change is pending and
-      would land on the reboot: STOP and find out what staged it.
-    run: talosctl --nodes=192.168.55.11,192.168.55.12,192.168.55.13 get machineconfig -o jsonpath='{.metadata.id}'
-    expect_matches: '^v1alpha1\s+v1alpha1\s+v1alpha1$'
+      Intent: NO config change is pending that would land on the reboot. On v1.14.1 every node
+      carries exactly two MachineConfig resources: `v1alpha1` (config.ActiveID, the running
+      config) and `persistent` (config.PersistentID, the copy saved to disk). Talos v1.14.1
+      pkg/machinery/resources/config/machine_config.go documents that PersistentID is AHEAD of
+      the active config after a --mode=staged apply and BEHIND it after --mode=try; the two
+      specs are equal only when nothing is staged. (The 2026-10-01 measurement of a single
+      v1alpha1 id predates the 2026-10-04 multidoc migration + sysfs-caps apply-configs, after
+      which `persistent` reappeared; measured 2026-10-05: persistent v2 / v1alpha1 v3 on all three
+      nodes, specs equal, 16459 chars.) The specs carry machine secrets, so they are compared
+      INSIDE jq and never printed or stored; the output is only node, sorted id list, and
+      spec-equality. plan-premises.py allows no hashing tool, and in-memory equality is
+      stricter than a hash compare anyway. FAILS on: specs differing (true -> false), any extra id
+      (e.g. a third resource), a missing `persistent`, or an unreachable node (pipefail).
+      Negative control 2026-10-05: appending a byte to node .12's persistent spec in-stream
+      printed false for .12; injecting a third id on .13 printed its 3-id list and false.
+      STOP on failure and find out what staged it.
+    run: talosctl --nodes=192.168.55.11,192.168.55.12,192.168.55.13 get machineconfig -o json | jq -sc 'group_by(.node)[]' | jq -c 'sort_by(.metadata.id)' | jq -c '[.[0].node, map(.metadata.id), unique_by(.spec)[1] == null]'
+    expect_matches: '^\["192\.168\.55\.11",\["persistent","v1alpha1"\],true\]\s+\["192\.168\.55\.12",\["persistent","v1alpha1"\],true\]\s+\["192\.168\.55\.13",\["persistent","v1alpha1"\],true\]$'
   - id: longhorn-all-volumes-replica-2
     why: >-
       A RULE, not a count: every Longhorn volume has numberOfReplicas 2 (94 volumes on
@@ -1049,8 +1063,8 @@ migration will have applied).
 cd /Users/mu/code/cberg-home-nextgen
 T2="$SCR/talosctl-1.14.2"
 mise exec -- talosctl version --client --short                     # MUST be v1.14.1 (the pin; it moves at §3.12)
-# (1) live configs -> scratch (machine secrets: never print, never commit). ONE resource id per
-#     node on v1.14 (premise single-machineconfig-per-node); `persistent` no longer exists.
+# (1) live configs -> scratch (machine secrets: never print, never commit). Read the ACTIVE id
+#     `v1alpha1`; its `persistent` twin is byte-equal (premise no-pending-machineconfig-per-node).
 ( umask 077; for ip in 11 12 13; do
     mise exec -- talosctl -n 192.168.55.$ip get machineconfig v1alpha1 -o yaml \
       | .venv/bin/python3 -c "import sys,yaml; d=list(yaml.safe_load_all(sys.stdin)); assert len(d)==1, len(d); sys.stdout.write(d[0]['spec'])" \
@@ -1734,7 +1748,8 @@ share a slot; the question is only order, and it is not symmetric:
 and re-reviewed before its own window. Say so at the GO; do not let the scheduler discover it.
 
 **Reciprocity (house rule; `--validate` does not check it):** `talconfig-multidoc-migration`
-now names this plan in `conflicts_with` (2026-10-01). `multus-macvlan-foundation` does not yet;
+now names this plan in `conflicts_with` (2026-10-01), as does `kube-prometheus-stack-91.9.0`
+(named back here 2026-10-05). `multus-macvlan-foundation` does not yet;
 it is unwindowed so the scheduler is safe today, but its owner should add `talos-linux-1.14.2`
 in its next edit.
 
