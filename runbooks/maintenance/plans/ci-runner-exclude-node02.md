@@ -95,7 +95,8 @@ so neither the browser lane nor the cpu lane ever pins a shard there. Diff (dry-
 +        return "excluded (GATE_EXCLUDE_NODES)"
 ```
 `docs/sops/ci-runner.md` gets the matching §2b row, the troubleshooting row "nuc14-02 never gets a CI pod" now
-names the exclusion, a Version History line, and a new `Version:`.
+names the exclusion, a Version History line, a new `Version:`/`Last Updated:`, and the browser-slot totals in §1 and
+the §2b "browser lane open when" row now read 3 (1 on 03, up to 2 on 01) instead of 4 (anchored, dry-tested).
 
 **Why.** Measured during `talos-sysfs-power-caps` (2026-10-04/05): an 18-thread benchmark hot-aborted at 96 °C
 on nuc14-02 within ~4 s at the new 35/55 W cap, versus ~25-30 s on nuc14-03. Over 7 days nuc14-02 logged
@@ -153,7 +154,8 @@ printf '%s\n\n%s\n' 'fix(ci-runner): thermal gate excludes k8s-nuc14-02 (GATE_EX
 git commit --only scripts/ninth-banner-admit.py docs/sops/ci-runner.md -F "$M"
 git log -1 --format=%s        # must be the subject above; else amend before push
 git show --stat HEAD          # exactly these 2 files
-git pull --rebase && git push       # no --autostash: shared worktree (it would stash other sessions' work)
+git pull --rebase --autostash && git push   # --autostash REQUIRED: another session's unstaged file in the shared worktree
+                                             # (e.g. runbooks/state/active-updates.json) makes a plain pull --rebase exit 128
 ```
 
 ## 4. Verification
@@ -211,9 +213,11 @@ an e2e/release 3-shard run waits up to 300 s for nuc14-01's second slot (settle)
 
 ## 5. Rollback
 
-- Per run, no commit: `GATE_EXCLUDE_NODES= scripts/ninth-banner-test.sh ...` (empty = nothing excluded).
+- Per run, no commit: `GATE_EXCLUDE_NODES= scripts/ninth-banner-test.sh ...` (empty = nothing excluded). It applies
+  only to the ticks THAT trigger runs: the host lock is shared, and a concurrent trigger ticks with its own env (default =
+  02 excluded), so with two triggers running, 02 is open only on this trigger's ticks.
 - Permanent: `git revert <3.3 sha>`, verify `git log -1 --format=%s` and `git show --stat HEAD` (= the 2 files),
-  `git pull --rebase && git push`. The next tick of any running trigger reads the reverted file. Confirm with the
+  `git pull --rebase --autostash && git push`. The next tick of any running trigger reads the reverted file. Confirm with the
   positive guard `scripts/ninth-banner-admit.py --status | grep -c -E '^k8s-nuc14-0[123] '` -> `3`, AND
   `scripts/ninth-banner-admit.py --status | grep -c excluded` -> `0` (before the revert the same command reads `1`).
   If `git revert` refuses because other sessions have staged files in the shared index, use the per-run override
@@ -235,6 +239,14 @@ No forward-only parts.
   `ci-runner-exclude-node02` to its `conflicts_with`; the planner writes only its own files).
 - **CI owner coordination**: the ci-runner work edits this file often. The premises pin the shape, and §2.2 tells the
   executor to read any newer commit first. The SOP edit keeps the §2b table the single place that lists gate knobs.
+- **Nightly 2026-10-06 needs the soak captured first.** Premise `soak-24h-recorded` passes only if someone runs
+  `capstats.py soak-24h 1440 "$W"` (talos-sysfs-power-caps 3.10 evidence, `W=/private/tmp/sysfscaps-talos-sysfs-power-caps`)
+  between 2026-10-05T23:17Z and 01:30Z. The coordinator will try, if its session is active. Otherwise this plan STOPs
+  safely on its premises in the nightly and runs first in the 18:30 NOW run. A Mac reboot wipes `/private/tmp`, i.e.
+  that `$W` and the soak evidence with it.
+- **Nightly capacity:** flux-fleet-0.60.0 (35) + this plan (45) = 80 of 90 min, plus Step 0. If the window runs long,
+  §4.2's e2e verification run may move to the evening NOW run. §4.1 alone already proves the gate change. The A/B's
+  first run then repeats the §4.2 check (no shard on 02).
 - **ci-gate-primary-control-rework** (backlog draft) depends on this plan and edits the same two files later.
 - **Nightly 2026-10-06 ordering:** `flux-fleet-0.60.0` is scheduled into the same night (shared `monitoring`). Run
   this plan after its health gate, so a Flux/monitoring disturbance cannot read as a "stuck" §4.2 run.
@@ -267,18 +279,23 @@ R = "| Brake (per node, since 2026-10-04 late evening) |"
 H = "- `2026.10.04` (gate-stall alert):"
 V = "> Version: `2026.10.04`\n"
 U = "> Last Updated: `2026-10-04`\n"
+B4 = "So nuc14-02/03 take 1 CI pod, nuc14-01 up to 2 (total 4)."
+S4 = "browser shards at most 4 running (1 each on nuc14-02/03, up to 2 on nuc14-01)"
 T = "| nuc14-02 never gets a CI pod | Expected: it peaks at 96-98 °C even without CI, so its 3-min peak is usually >= 93 °C (§2b) |"
-assert d.count(R) == 1 and d.count(H) == 1 and d.count(V) == 1 and d.count(T) == 1 and d.count(U) == 1 and "GATE_EXCLUDE_NODES" not in d, "SOP not in the expected shape"
+assert d.count(R) == 1 and d.count(H) == 1 and d.count(V) == 1 and d.count(T) == 1 and d.count(U) == 1 and d.count(B4) == 1 and d.count(S4) == 1 and "GATE_EXCLUDE_NODES" not in d, "SOP not in the expected shape"
 row = ("| Excluded nodes (plan ci-runner-exclude-node02) | `GATE_EXCLUDE_NODES` (default `k8s-nuc14-02`): an excluded node takes **no** CI pod in either lane "
        "(reason `excluded` in `--status`), checked before every other limit. nuc14-02 hit 96 °C ~4 s into an 18-thread load at 35/55 W and logged ~65k package "
        "throttles in 7 days (01: 741, 03: 56): suspected cooler defect. Remove it from the default once the cooler is repaired/replaced. "
-       "One-run override: `GATE_EXCLUDE_NODES= scripts/ninth-banner-test.sh ...` (empty = none excluded) |\n")
+       "One-run override: `GATE_EXCLUDE_NODES= scripts/ninth-banner-test.sh ...` (empty = none excluded); it applies only to the ticks THAT trigger runs "
+       "(the host lock is shared, concurrent triggers tick with their own env) |\n")
 i = d.index(R); j = d.index("\n", i) + 1; d = d[:j] + row + d[j:]
 i = d.index(H); j = d.index("\n", i) + 1
 d = d[:j] + f"- `{ver}` (node exclusion): `GATE_EXCLUDE_NODES` (default `k8s-nuc14-02`) keeps CI off nuc14-02 in both lanes until its cooling is fixed (plan ci-runner-exclude-node02).\n" + d[j:]
 d = d.replace(V, f"> Version: `{ver}`\n")
 d = d.replace(U, f"> Last Updated: `{ver.replace('.', '-')}`\n")
 d = d.replace(T, "| nuc14-02 never gets a CI pod | Expected: it is in `GATE_EXCLUDE_NODES` (§2b, suspected cooler defect); `--status` shows `CLOSED excluded` for both lanes |")
+d = d.replace(B4, "So nuc14-03 takes 1 CI pod, nuc14-01 up to 2 (total 3 while nuc14-02 is in `GATE_EXCLUDE_NODES`; 4 without the exclusion).")
+d = d.replace(S4, "browser shards at most 3 running (1 on nuc14-03, up to 2 on nuc14-01; nuc14-02 excluded via `GATE_EXCLUDE_NODES`)")
 open(s, "w").write(d)
 print("EXCLUDE_EDIT_OK")
 ```

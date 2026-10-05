@@ -99,6 +99,10 @@ it as `GATE_MAX_CPU_PER_NODE=0` next to the old check (`nc >= 0` is always true 
 clear `GATE_SECOND_POD_NODES` and the `GATE_CPU_MAX_OVERRIDE` default (`k8s-nuc14-02=1`); `GATE_BRAKE_C=90`. Remove the `OPEN_BELOW_C`/`SECOND_*`/`CPU_OPEN_BELOW_C`/`*_HOT_C`
 admission checks from `closed_reason()` (or default them to 200 so they never bind, which is the smaller diff). An
 anchored python edit, dry-tested on a scratch copy, as in `ci-runner-exclude-node02`.
+3.1b `global_hold()` must ignore nodes in `EXCLUDE_NODES` (coordinator follow-up 2026-10-05): today a brake on
+nuc14-02 from its own production heat counts toward `GATE_GLOBAL_BRAKE_NODES`, so 02 plus one other hot node freezes CI
+everywhere even though 02 never takes CI. Filter `brake` by `EXCLUDE_NODES` before the global-hold count (dry-test it
+with an injected brake on 02 + 01: must NOT hold; on 01 + 03: must hold).
 3.2 SOP `docs/sops/ci-runner.md` §2b table rewritten (control = cap + 1 pod/node + 90 °C brake), Version History.
 3.3 `git commit --only` the two files, verify the subject, push.
 
