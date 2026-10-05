@@ -64,9 +64,9 @@ autonomy_override: human-gated        # shared `gateway` derives HUMAN-GATED via
                                       # attended window only.
 security_ref: F-61035b6e              # security driver; detail on the DB record only (review 2026-10-05)
 finding_refs: [F-4a6327dd, F-61035b6e]  # version row for this target + the planner-raised plan-section row
-review: null
-status: draft
-window: null                          # proposed sun-attended:2026-10-11 after n8n-2.39.8 (52+45 of 180), else sat-attended:2026-11-14
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (helpers across Bash calls, vacuous §4.3) -> fixed -> delta ready-for-go (zsh + bash verified)
+status: awaiting-go   # GO must ALSO record acceptance of departing from the *envoyproxy/envoy* deny-rule wording "never on its own" (or approve the reword first) -- §6
+window: "sun-attended:2026-11-08"   # scheduled 2026-10-05: FIRST in the slot, before nocodb-2026.09.1 (45+45 = 90 of 180). Not 10-11 (external-dns, declared conflict), not 10-17 (coredns), 10-18/10-24/10-25 full or over budget, 11-01 exclusive talos
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/envoy-gateway-upgrade.md
@@ -521,8 +521,9 @@ kubectl -n network rollout status deploy/envoy-internal --timeout=600s
 kubectl -n network rollout status deploy/envoy-external --timeout=600s
 ```
 If the revert conflicts because another commit touched the same lines, restore the pin
-with the reverse sed instead. It was dry-tested: forward then reverse gives a
-byte-identical file.
+with the reverse sed instead. Note (review 2026-10-05): the reverse sed restores ONLY the
+image line; the 5 comment lines §3.1's python inserted stay behind and must be deleted by hand
+in the same commit (otherwise the file claims the pin moved ahead of the default).
 ```bash
 sed -i '' 's|envoyproxy/envoy:distroless-v1\.39\.2@sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a$|envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4|' kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml
 ```

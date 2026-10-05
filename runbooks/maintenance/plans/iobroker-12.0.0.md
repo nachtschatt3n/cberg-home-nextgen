@@ -164,6 +164,21 @@ backitup 3.3.5 / discovery 5.0.0 — unchanged — on Node 24.21.0**. Upstream's
 current" advice is therefore relevant; see §1.6 for why this plan does not do an in-pod
 `iob upgrade` first.
 
+### 1.2b The main uncertainty, stated (added 2026-10-05 per plan review, option (a))
+
+**js-controller 7.0.6 on Node 24 is untested upstream.** Its own CI matrix at `v7.0.6`
+(`.github/workflows/ci-tests.yml`) is `node: [18, 20, 22]`; Node 24 entered the matrix only in the
+7.2 line (`@v7.2.4`: `[22, 24, 26]`). The image vendor's v12.0.0 release note asks to bring
+js-controller and adapters to latest stable FIRST; §1.6 deliberately does not, to keep this a
+single-variable change. Consequence, accepted explicitly: **a loud revert is a plausible outcome
+of this window**, not an edge case. That is acceptable for AUTO-NIGHT because (1) nothing is
+migrated on first boot (startup scripts byte-identical to v11.1.0; same js-controller, same jsonl
+DBs on the PVC), so `git revert` restores the exact prior runtime with no data at risk; (2) every
+failure mode of an incompatible controller is loud and gated (G1/G3/G4/G7); (3) the hub is idle
+(3 instances, no consumers in the repo). The alternative -- a separate js-controller 7.2.x plan
+first, on v11 (7.2.x needs Node >= 22.19; live 22.22.0) -- is the follow-up if this reverts.
+`risk: low` stays the IMPACT rating; the likelihood of a revert is higher than "low" suggests.
+
 ### 1.3 Native modules, checked one by one on the live PVC (2026-10-05)
 
 `find node_modules -name '*.node' -path '*build/Release*'` + `binding.gyp` scan:
@@ -407,7 +422,7 @@ Confirm the cluster is back: G1 shows a v11 digest, G3 prints `v22.*` / `debian=
   edited here). Either order works; the line edits do not overlap, so whichever runs second
   rebases trivially.
 - **helm-drift-detection** touches every HR incl. this one; **flux-reconciler-impersonation**
-  (exclusive) re-identities the apply path; **kube-prometheus-stack-91.4.1** would take G7's
+  (exclusive) re-identities the apply path; **kube-prometheus-stack-91.9.0 (91.4.1 executed 2026-09-26)** would take G7's
   instrument down. All in `conflicts_with`.
 - **Longhorn backup timing:** the storage RecurringJob `daily-backup-all-volumes` fires 03:00;
   the nightly window starts 03:30. §2.4 requires today's iobroker-config backup to be Completed

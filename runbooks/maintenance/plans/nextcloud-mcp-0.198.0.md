@@ -35,6 +35,7 @@ touches:
 depends_on: []                        # Flux `dependsOn: nextcloud` is ordering-only; no release note in range states
                                       # a minimum Nextcloud server version.
 conflicts_with:
+  - redis-fleet-8.10.2                # 2026-10-05 review: restarts office/nextcloud-redis (logs every user out); every §4 gate here calls into Nextcloud
   # - nextcloud-mcp-0.187.1 (DROPPED 2026-10-05: `superseded` = terminal, so the entry binds nothing. If
   #   option B (§1.6) revives it, re-add it here AND reciprocally there -- the two must never share a slot.)
   - app-template-5.2.1                # nightly:2026-10-02 -- its Batch A sed edits THIS helmrelease.yaml (chart
@@ -63,7 +64,8 @@ finding_refs: [F-9af9baf7, F-80459b23] # F-9af9baf7 = the version finding (title
                                       # F-80459b23 = the security finding. nextcloud-mcp-0.187.1 also lists
                                       # both but is `superseded` (terminal) since 2026-10-01.
 review: null
-status: draft
+status: blocked
+blocked_reason: "2026-10-05 review: §2.7 STOPs on every date until the operator picks §1.6 option A (wait for upstream fix; no upstream issue exists yet), B (0.195.4, revive 0.187.1 -- first scan 0.195.4 against F-80459b23) or C (recreate the two %-URI calendars). Not schedulable before that decision; then fresh review + fresh GO (capability change: +21 tools, 4 write)."
 window: null
 premises:
   - id: image-is-still-0.184.5

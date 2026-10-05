@@ -45,7 +45,7 @@ touches:
     - deployment/oc8-scheduler
     - deployment/sweep-dashboard            # monitoring (reads sweep_history)
     - deployment/media-dashboard            # media (reads sweep_history)
-    - cronjob/sweep-heartbeat               # databases, 17 */6 * * * — must not run during the shared restart (§6)
+    - cronjob/sweep-heartbeat               # databases, 17 */6 * * * timeZone Europe/Berlin (00:17/06:17/12:17/18:17) — must not run during the shared restart (§6)
   shared: [postgresql, monitoring]          # postgresql = the shared databases/postgresql instance (same token
                                             # nocodb-2026.09.1 uses, so the scheduler sees the intersection).
                                             # monitoring = §4 reads Prometheus. No gateway/DNS/CNI/storage-class
@@ -71,6 +71,9 @@ conflicts_with:
                                       # never restart sure-pg under it. Listed back in that plan.
   - kube-prometheus-stack-91.9.0      # vetted, nightly:2026-10-08, exclusive:true. §4 reads Prometheus
                                       # (CONTROL gates); the window's instrument must not move in the same slot.
+  - flux-distribution-2.9.6           # Flux controller upgrade underneath this plan's four GitOps legs.
+  - nextcloud-fleet-35.0.1            # rolls office workloads; never stack with the affine-pg/sure-pg legs
+                                      # (two office restarts in one slot confound §4.A/B attribution).
   - longhorn-1.13.0                   # storage engine upgrade; three RWO Longhorn volumes are re-attached here.
                                       # (talos-linux-1.14.2 / talconfig-multidoc-migration are exclusive:true
                                       # on their own side, which already keeps them out of this slot.)
@@ -78,8 +81,11 @@ exclusive: false
 security_ref: F-d6d47945              # OPEN accepted security finding on the 0.8.6-pg16 tag whose remedy is
                                       # "newer upstream tag available, bump the image" — this plan IS that
                                       # bump. Detail lives on the record only. (F-bb62d310, the earlier
-                                      # "already newest" row, is resolved.) Whether 0.8.7 clears it is for
-                                      # the next sweep to MEASURE, not for this plan to claim.
+                                      # "already newest" row, is resolved.) Related, NOT addressed here:
+                                      # F-fa3325bc (accepted, same tag, findings with no upstream fix —
+                                      # a bump cannot remedy those; the next sweep re-measures them on
+                                      # 0.8.7). Whether 0.8.7 clears either is for the next sweep to
+                                      # MEASURE, not for this plan to claim.
 capability_change: false              # same server binary, same extension catalog version (no ALTER
                                       # EXTENSION), same SQL surface; bug-fix-only shared library.
 rollback_class: git-revert            # nothing forward-only happens: datadir untouched (same PG build), no
@@ -253,44 +259,69 @@ for v in sorted(want): print(v, best.get(v))
 print('BACKUP_GATE_PASS' if not bad else 'BACKUP_GATE_FAIL '+' '.join(sorted(bad)))"
 # PASS: BACKUP_GATE_PASS. FAIL names the stale/missing volume -> stop (do not substitute lastBackupAt; it lags, docs/sops/backup.md).
 
-# 2.5 Not inside the heartbeat minute: sweep-heartbeat runs at 17 */6 (03:17, 09:17, ...).
-date '+%H:%M'
-# The shared-instance leg (§3.5) must not START between hh:15 and hh:20 of 03/09/15/21. Nightly 03:30 is clear.
+# 2.5 Not inside the heartbeat minute: sweep-heartbeat is "17 */6 * * *" with timeZone Europe/Berlin
+#     (verified live 2026-10-05), i.e. 00:17, 06:17, 12:17, 18:17 Berlin.
+TZ=Europe/Berlin date '+%H:%M'
+# The shared-instance leg (§3.5) must not START between hh:15 and hh:20 of 00/06/12/18 Berlin.
+# Nightly 03:30 is clear of every heartbeat; jit.sh enforces this mechanically.
 
 # 2.6 Shared-instance quiet gate (jit.sh). Written here, run here AND again immediately before the
-#     leg-C push (§3.5). Read-only. STOPs on: an unfinished sweep_cycles row started < 6 h ago (a
-#     sweep is writing), any transaction older than 300 s, a 48h-sweep night at >= 03:55 Berlin (the
-#     04:00 cron sweep is due: last cron cycle started >= 40 h ago — cron cycles land 02:00Z every
-#     other day, measured 10-01/10-03/10-05), the heartbeat minute (hh:15-20 of 03/09/15/21), or
-#     SWEEP_PG_DSN still set in this shell. Fails CLOSED on a psql error or unparsable output.
+#     leg-C push (§3.5). Read-only. STOPs on: an unfinished sweep_cycles row started < 6 h ago; ANY
+#     sweep_cycles start or sweep_findings.last_seen within 30 min (finished_at alone is NOT proof a
+#     sweep ended — every specialist's FindingsWriter.close() stamps it, findings_writer.py
+#     _finalise_cycle_row, so the row reads finished after the first of six specialists); a non-idle
+#     sweep_writer backend; a sweep script running on this Mac (sweep-run/health-check/
+#     check-all-versions/slo-check/render-board); any open `port-forward … postgresql`; a
+#     transaction older than 300 s; a 48h-sweep night at >= 03:55 Berlin (the 04:00 cron sweep is
+#     due: last cron cycle started >= 40 h ago — cron cycles land 02:00Z every other day, measured
+#     10-01/10-03/10-05); the heartbeat minute (hh:15-20 of 00/06/12/18 Berlin); or SWEEP_PG_DSN
+#     still set in this shell. Fails CLOSED on a psql error or unparsable output.
 cat > jit.sh <<'JIT'
 # Leg-C just-in-time gate. Read-only. Prints JIT_GO or JIT_STOP <reasons>; exit 0 only on GO.
+# sweep_cycles.finished_at is NOT a "sweep is over" signal: every specialist's FindingsWriter.close()
+# stamps it (runbooks/lib/findings_writer.py _finalise_cycle_row), so it reads finished after the
+# first of six specialists. Hence the process, recent-write and writer-session checks below.
 r=$(kubectl exec -i -n databases deploy/postgresql -- sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d sweep_history -tA -F"|"' <<'SQL'
 select
   (select count(*) from sweep_cycles where finished_at is null and started_at > now() - interval '6 hours'),
   (select coalesce(floor(extract(epoch from now() - max(started_at))/3600)::int, 999) from sweep_cycles where trigger = 'cron'),
-  (select count(*) from pg_stat_activity where datname is not null and pid <> pg_backend_pid() and now() - xact_start > interval '300 seconds');
+  (select count(*) from pg_stat_activity where datname is not null and pid <> pg_backend_pid() and now() - xact_start > interval '300 seconds'),
+  (select (select count(*) from sweep_cycles where started_at > now() - interval '30 minutes')
+        + (select count(*) from sweep_findings where last_seen > now() - interval '30 minutes')),
+  (select count(*) from pg_stat_activity where usename = 'sweep_writer' and state <> 'idle' and pid <> pg_backend_pid());
 SQL
 ) || { echo "JIT_STOP psql-failed (cannot prove the gate -> stop)"; exit 2; }
 echo "raw=$r"
-unf=${r%%|*}; rest=${r#*|}; hrs=${rest%%|*}; longtx=${rest#*|}
-case "$unf$hrs$longtx" in ''|*[!0-9]*) echo "JIT_STOP unparsable '$r'"; exit 2;; esac
+IFS='|' read -r unf hrs longtx recent wr <<RAW
+$r
+RAW
+case "$unf$hrs$longtx$recent$wr" in ''|*[!0-9]*) echo "JIT_STOP unparsable '$unf|$hrs|$longtx|$recent|$wr'"; exit 2;; esac
+[ -n "$wr" ] || { echo "JIT_STOP unparsable '$unf|$hrs|$longtx|$recent|$wr'"; exit 2; }
 hm=$(TZ=Europe/Berlin date '+%H%M'); why=''
 [ "$unf" -gt 0 ] && why="$why unfinished-sweep-cycle=$unf"
 [ "$longtx" -gt 0 ] && why="$why long-txn=$longtx"
+[ "$recent" -gt 0 ] && why="$why sweep-write-within-30min=$recent"
+[ "$wr" -gt 0 ] && why="$why active-sweep_writer-session=$wr"
+procs=$(pgrep -fl '[s]weep-run\.py|[h]ealth-check\.py|[c]heck-all-versions\.py|[s]lo-check\.py|[r]ender-board\.py')
+[ -n "$procs" ] && why="$why sweep-process-on-mac"
+pf=$(pgrep -fl '[p]ort-forward.*postgresql')
+[ -n "$pf" ] && why="$why postgresql-port-forward-open"
 # Sweep night = the 48h cron sweep (04:00 Berlin) is due tonight: last cron cycle started >= 40h ago.
 if [ "$hrs" -ge 40 ] && [ "$hm" -ge 0355 ] && [ "$hm" -lt 0600 ]; then why="$why sweep-night-clock=$hm(last-cron-sweep-${hrs}h-ago)"; fi
-# Heartbeat minute (17 */6): never start inside hh:15-hh:20 of 03/09/15/21 Berlin.
-case "$(TZ=Europe/Berlin date '+%H')" in 03|09|15|21) m=$(TZ=Europe/Berlin date '+%M'); [ "${m#0}" -ge 15 ] && [ "${m#0}" -le 20 ] && why="$why heartbeat-minute";; esac
+# Heartbeat: sweep-heartbeat is "17 */6 * * *" timeZone Europe/Berlin = 00:17/06:17/12:17/18:17 Berlin.
+case "$(TZ=Europe/Berlin date '+%H')" in 00|06|12|18) m=$(TZ=Europe/Berlin date '+%M'); [ "${m#0}" -ge 15 ] && [ "${m#0}" -le 20 ] && why="$why heartbeat-minute";; esac
 [ -n "$(env | grep '^SWEEP_PG_DSN=')" ] && why="$why SWEEP_PG_DSN-set-in-this-shell"
-if [ -n "$why" ]; then echo "JIT_STOP$why"; exit 1; fi
-echo "JIT_GO clock=$hm last-cron-sweep=${hrs}h-ago unfinished=0 long-txn=0"
+if [ -n "$why" ]; then echo "JIT_STOP$why"; [ -n "$procs" ] && echo "$procs"; [ -n "$pf" ] && echo "$pf"; exit 1; fi
+echo "JIT_GO clock=$hm last-cron-sweep=${hrs}h-ago unfinished=0 long-txn=0 recent-writes=0 writer-sessions=0 procs=none"
 JIT
 bash jit.sh
-# PASS: "JIT_GO clock=... unfinished=0 long-txn=0", exit 0.
-# FAIL shapes (all dry-run 2026-10-05 on scratch copies with injected values): "JIT_STOP unfinished-sweep-cycle=1
-# sweep-night-clock=0402(last-cron-sweep-44h-ago)" exit 1; "JIT_STOP unparsable '0|x|0'" exit 2;
-# "JIT_STOP psql-failed" exit 2. Live run 2026-10-05 10:46 printed: raw=0|6|0 / JIT_GO.
+# PASS: "JIT_GO clock=... unfinished=0 long-txn=0 recent-writes=0 writer-sessions=0 procs=none", exit 0.
+# FAIL shapes (all dry-run 2026-10-05 on scratch copies with injected values):
+#   "JIT_STOP unfinished-sweep-cycle=1 sweep-write-within-30min=3 active-sweep_writer-session=1
+#    sweep-night-clock=0402(last-cron-sweep-44h-ago)" exit 1;
+#   "JIT_STOP sweep-process-on-mac" + the matching process line (a dummy `sh -c '...; : sweep-run.py'`) exit 1;
+#   "JIT_STOP unparsable '0|x|0|0|0'" and "JIT_STOP unparsable '0|6|0||'" (short row) exit 2;
+#   "JIT_STOP psql-failed" exit 2. Live run 2026-10-05 10:57 printed: raw=0|6|0|0|0 / JIT_GO.
 # Note: one STALE unfinished cycle exists in the table (older than 6 h); the 6 h bound is why it does not block.
 ```
 
@@ -362,15 +393,22 @@ kubectl exec -i -n office deploy/sure-pg    -- sh -c 'psql -X -U "$POSTGRES_USER
 cat pairs-*-before.txt
 # Sure positive in-app DB query baseline (§4.B compares against this line)
 kubectl exec -n office deploy/sure-web -c web -- sh -c 'timeout 90 bin/rails runner "puts \"SURE_DB_OK families=#{Family.count} accounts=#{Account.count}\"" 2>&1 | tail -1' | tee sure-app-before.txt
-# Presence gate used by §4.A/B/C (dry-run 2026-10-05: PASS path on all three instances with push=0;
-# FAIL paths "CONN_FAIL ... missing: ghost|ghost" (injected pair), "CONN_FAIL postmaster=<old> push=<now>"
-# (pod not restarted) and "CONN_FAIL empty-baseline" all printed and exited non-zero).
+# Presence gate used by §4.A/B/C. Push epochs come from FILES (/tmp/pgv-87/push-{a,b,c}.epoch, written
+# by the push line), never from shell variables. Dry-run 2026-10-05: PASS with a baseline whose
+# postmaster epoch was set older; FAIL "postmaster=X ... before=X" (same postmaster = no restart),
+# FAIL "push=<now>" (postmaster older than the push), "CONN_FAIL bad-push-epoch-file" for an empty and
+# for a missing file, and earlier "missing: ghost|ghost" / "empty-baseline" — all exit non-zero.
 cat > conn.sh <<'CONN'
-# Consumer presence gate. Usage: sh conn.sh <push_epoch> <pairs-before-file> <ns> <deploy>
-# PASS needs: the postmaster started AFTER the push (the pod really restarted) AND every REQUIRED
-# (datname|usename) pair of the BEFORE baseline has >=1 backend newer than the postmaster.
-# Polls ${TRIES:-20} x 30 s (10 min max). pellets|pellets (Grafana datasource pool) is informational.
-push=$1; base=$2; ns=$3; dp=$4
+# Consumer presence gate. Usage: sh conn.sh <push-epoch-file> <pairs-before-file> <ns> <deploy>
+# PASS needs ALL of: (1) the push epoch file holds a number; (2) the postmaster started AFTER that push
+# AND differs from (is newer than) the postmaster epoch recorded in field 4 of the BEFORE file — proof
+# of a restart independent of the push clock; (3) every REQUIRED (datname|usename) pair of the BEFORE
+# baseline has >=1 backend newer than the new postmaster. Polls ${TRIES:-20} x 30 s (10 min max).
+# pellets|pellets (Grafana datasource pool) is informational, see §4.C.
+push=$(cat "$1" 2>/dev/null); base=$2; ns=$3; dp=$4
+case "$push" in ''|*[!0-9]*) echo "CONN_FAIL bad-push-epoch-file '$1' content='$push'"; exit 2;; esac
+oldpm=$(head -1 "$base" 2>/dev/null | cut -d'|' -f4)
+case "$oldpm" in ''|*[!0-9]*) echo "CONN_FAIL bad-baseline-postmaster '$oldpm' in $base"; exit 2;; esac
 req=$(cut -d'|' -f1,2 "$base" | grep -vxE 'pellets\|pellets' | sort -u)
 [ -n "$req" ] || { echo "CONN_FAIL empty-baseline (cannot anchor)"; exit 2; }
 for i in $(seq 1 ${TRIES:-20}); do
@@ -383,10 +421,11 @@ for i in $(seq 1 ${TRIES:-20}); do
   now=$(kubectl exec -i -n "$ns" deploy/"$dp" -- sh -c 'psql -X -U "$POSTGRES_USER" -d postgres -tA' < pairs.sql)
   pm=$(echo "$now" | head -1 | cut -d'|' -f4)
   miss=''; for k in $req; do n=$(echo "$now" | grep "^$k|" | cut -d'|' -f3); [ "${n:-0}" -ge 1 ] || miss="$miss $k"; done
-  if [ -n "$pm" ] && [ "$pm" -gt "$push" ] && [ -z "$miss" ]; then echo "CONN_PASS $ns/$dp postmaster=$pm>push=$push"; echo "$now"; exit 0; fi
-  echo "try $i: postmaster=${pm:-none} push=$push missing:${miss:- none}"; sleep 27
+  if [ -n "$pm" ] && [ "$pm" -gt "$push" ] && [ "$pm" -gt "$oldpm" ] && [ "$pm" != "$oldpm" ] && [ -z "$miss" ]; then
+    echo "CONN_PASS $ns/$dp postmaster=$pm>push=$push,>before=$oldpm"; echo "$now"; exit 0; fi
+  echo "try $i: postmaster=${pm:-none} push=$push before=$oldpm missing:${miss:- none}"; sleep 27
 done
-echo "CONN_FAIL $ns/$dp postmaster=${pm:-none} push=$push missing:$miss"; exit 1
+echo "CONN_FAIL $ns/$dp postmaster=${pm:-none} push=$push before=$oldpm missing:$miss"; exit 1
 CONN
 ```
 
@@ -434,7 +473,7 @@ Dry-run diff:
 printf 'fix(affine): pgvector 0.8.6-pg16 -> 0.8.7-pg16 (digest re-pinned)\n\nCanary leg of plan pgvector-fleet-0.8.7. Same PG 16.15 build; library-only\nchange; extension catalog deliberately NOT altered (keeps git-revert rollback).\n\nCo-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>\n' > /tmp/pgv-87/msg-a.txt
 git commit --only kubernetes/apps/office/affine/app/postgres-helmrelease.yaml -F /tmp/pgv-87/msg-a.txt
 git log -1 --format=%s && git show --stat HEAD | tail -3      # must be YOUR subject and ONE file
-git push && PUSH_A=$(date +%s) && echo "PUSH_A=$PUSH_A"
+git push && date +%s > /tmp/pgv-87/push-a.epoch && cat /tmp/pgv-87/push-a.epoch
 ```
 
 Flux applies via the webhook. If `kubectl get hr -n office affine-pg` has not moved to the new revision
@@ -445,7 +484,7 @@ go to §5 and do not continue.
 
 Same as 3.2 with `kubernetes/apps/office/sure/app/postgres-helmrelease.yaml`. The identical two-line
 diff was dry-run. Commit subject: `fix(sure): pgvector 0.8.6-pg16 -> 0.8.7-pg16 (digest re-pinned)`.
-After `git push`, record `PUSH_B=$(date +%s)`. Fallback reconcile: `flux reconcile ks sure -n office --with-source`.
+Push with the same line shape as leg A: `git push && date +%s > /tmp/pgv-87/push-b.epoch && cat /tmp/pgv-87/push-b.epoch`. Fallback reconcile: `flux reconcile ks sure -n office --with-source`.
 Then run **§4.B**.
 
 ### 3.4 Logical dumps — BEFORE touching the shared instance (backup_gate)
@@ -475,6 +514,10 @@ Prerequisites: §2.7 (no shell holds `SWEEP_PG_DSN`; Step-0 writes finished). Th
 the check and the restart.
 
 ```bash
+# Re-take the shared consumer baseline NOW (the §3.1 copy is ~30 min old; nocodb's session count
+# moves with traffic). conn.sh in §4.C requires exactly these pairs and this postmaster epoch.
+( cd /tmp/pgv-87 && kubectl exec -i -n databases deploy/postgresql -- sh -c 'psql -X -U "$POSTGRES_USER" -d postgres -tA' < pairs.sql > pairs-shared-before.txt && cat pairs-shared-before.txt )
+# STOP if the file is empty.
 cd /Users/mu/code/cberg-home-nextgen
 sed -i '' -e "s#${OLD}#${NEW}#" kubernetes/apps/databases/postgresql/app/deployment.yaml
 git diff kubernetes/apps/databases/postgresql/app/deployment.yaml | grep '^[-+] '
@@ -484,7 +527,7 @@ printf 'fix(postgresql): pgvector 0.8.6-pg16 -> 0.8.7-pg16 (digest re-pinned)\n\
 git commit --only kubernetes/apps/databases/postgresql/app/deployment.yaml -F /tmp/pgv-87/msg-c.txt
 git log -1 --format=%s && git show --stat HEAD | tail -3
 # JUST-IN-TIME HARD GATE — re-run §2.6 now; push ONLY on JIT_GO.
-( cd /tmp/pgv-87 && bash jit.sh ) && git push && PUSH_C=$(date +%s) && echo "PUSH_C=$PUSH_C"
+( cd /tmp/pgv-87 && bash jit.sh ) && git push && date +%s > /tmp/pgv-87/push-c.epoch && cat /tmp/pgv-87/push-c.epoch
 ```
 
 On `JIT_STOP` the commit is **not pushed**. Wait out the reason (a sweep finishing, the heartbeat
@@ -627,10 +670,10 @@ cat vec-affine-after.txt
   ```bash
   kubectl port-forward -n office svc/affine 13010:3010 >/dev/null 2>&1 & PF=$!; sleep 2
   curl -s -o /dev/null -w '%{http_code}\n' localhost:13010/; curl -s localhost:13010/info; kill $PF 2>/dev/null
-  sh conn.sh "$PUSH_A" pairs-affine-pg-before.txt office affine-pg
+  sh conn.sh push-a.epoch pairs-affine-pg-before.txt office affine-pg
   ```
   PASS: `200`, a JSON body containing `"AFFiNE` (measured 200 / `AFFiNE 0.27.4 Server` before),
-  **and** `CONN_PASS office/affine-pg postmaster=<epoch>>push=<PUSH_A>` listing `affine|affine|N|…`
+  **and** `CONN_PASS office/affine-pg postmaster=<new>>push=<push-a>,>before=<old>` listing `affine|affine|N|…`
   with N ≥ 1. The pair is keyed on (database, user), so a backend of the `affine` role in the
   `affine` database whose `backend_start` is later than the new postmaster's start is a session the
   app opened **after** the restart. Today the app holds 10 such sessions, so this is the
@@ -655,7 +698,7 @@ kubectl get deploy -n office sure-web sure-worker -o jsonpath='{.items[*].status
 kubectl exec -n office deploy/sure-web -c web -- sh -c 'timeout 90 bin/rails runner "puts \"SURE_DB_OK families=#{Family.count} accounts=#{Account.count}\"" 2>&1 | tail -1'
 # PASS: the line equals sure-app-before.txt (§3.1) — "SURE_DB_OK families=1 accounts=11" on 2026-10-05. FAIL: a PG::ConnectionBad /
 # ActiveRecord::ConnectionNotEstablished trace, a timeout (no line), or different counts.
-sh conn.sh "$PUSH_B" pairs-sure-pg-before.txt office sure-pg
+sh conn.sh push-b.epoch pairs-sure-pg-before.txt office sure-pg
 # PASS: CONN_PASS office/sure-pg ... with "sure|sure|N|…", N >= 1 — sidekiq (sure-worker) holds a
 # session on the NEW postmaster. FAIL: CONN_FAIL ... missing: sure|sure (sidekiq never reconnected).
 ```
@@ -692,9 +735,9 @@ diff <(grep ^VEC vec-shared-before.txt) <(grep ^VEC vec-shared-after.txt) && ech
   backend newer than the NEW postmaster, within a bounded 10-min wait:
   ```bash
   cd /tmp/pgv-87
-  sh conn.sh "$PUSH_C" pairs-shared-before.txt databases postgresql
+  sh conn.sh push-c.epoch pairs-shared-before.txt databases postgresql
   ```
-  PASS: `CONN_PASS databases/postgresql postmaster=<epoch>>push=<PUSH_C>` and every pair of
+  PASS: `CONN_PASS databases/postgresql postmaster=<new>>push=<push-c>,>before=<old>` and every pair of
   `pairs-shared-before.txt` except `pellets|pellets` present with N ≥ 1 (2026-10-05 baseline:
   `nocodb|nocodb`, `oc8|oc8_app`, `sweep_history|sweep_reader`). Before each poll the script sends
   one HTTP request each to nocodb and sweep-dashboard, which open a session on demand (measured: a
@@ -719,7 +762,7 @@ diff <(grep ^VEC vec-shared-before.txt) <(grep ^VEC vec-shared-after.txt) && ech
 - CONTROL: metric kube_deployment_status_replicas_available — `kube_deployment_status_replicas_available{namespace="databases",deployment="postgresql"}`
   is `1` (reads 1 today).
 - CONTROL: alertname SweepPipelineDead — must remain **not firing**. It fires if the next
-  `sweep-heartbeat` run (`17 */6`) cannot reach `sweep_history`. Check it after the next hh:17 run
+  `sweep-heartbeat` run (`17 */6`, Europe/Berlin: 00:17/06:17/12:17/18:17) cannot reach `sweep_history`. For a 03:30 nightly window that is the 06:17 Berlin run; check it after that run
   following the window. In the morning report, check that `kube_cronjob_status_last_successful_time{cronjob="sweep-heartbeat"}`
   is newer than the window end.
 
@@ -820,7 +863,9 @@ delete without the 3-step pre-flight. None is in scope here (all three volumes a
   It also backs `oc8`, `nocodb` and `pellets`, and `sweep-dashboard` / `media-dashboard` read from
   it. The outage lasts ~30-60 s. Run leg C **after** Step 0 has recorded its results and with the
   window agent's DSN forward closed (§2.7), and never inside a `sweep-heartbeat` minute (`17 */6`,
-  §2.5). The nightly 03:30 slot is clear of the 03:17 heartbeat and before the 04:00 sweep.
+  §2.5; Europe/Berlin 00:17/06:17/12:17/18:17). The nightly 03:30 slot sits between the 00:17 and
+  06:17 heartbeats, but on a 48h sweep night the 04:00 sweep follows at once — `jit.sh` stops leg C
+  from 03:55 on such nights.
 - **Longhorn backup at 03:00.** By 03:30 the snapshots are normally taken. If `kubectl get backups.longhorn.io -n storage`
   shows one `InProgress` for `postgresql-data-5g` or either office volume, wait for it to finish
   before restarting that pod.

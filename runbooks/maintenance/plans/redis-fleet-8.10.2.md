@@ -57,6 +57,7 @@ touches:
                                         # remounted by their own pod.
 depends_on: []
 conflicts_with:
+  - nextcloud-mcp-0.198.0             # 2026-10-05 nextcloud-mcp review: reciprocity (nextcloud-redis restart)
   - sure-0.7.5                        # 2026-10-05 sure review: reciprocity (rolls sure-redis)
   # - nextcloud-redis-hardening (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
     # draft, window:null. Edits the SAME file
