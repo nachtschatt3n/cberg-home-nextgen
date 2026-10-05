@@ -61,6 +61,8 @@ conflicts_with:
                                       # inside the soak punches a gap in the evidence. Any further kps plan too.
   - immich-machine-learning-3.2.4     # ADDED 2026-10-05 (reciprocity; it names us): shares igpu-i915 +
                                       # node-power-thermal; its roll must not land inside the soak.
+  - mariadb-28.1.1                    # ADDED 2026-10-05 (reciprocity; it names us): both are rollback_class
+                                      # backup-restore — never two backup-restore rollbacks in one slot.
 security_ref: null
 capability_change: true               # TRUE, deliberately: lowers sustained CPU package power (64 -> 35 W PL1),
                                       # biases P-state selection toward efficiency on every CPU and caps the iGPU
