@@ -891,12 +891,14 @@ split moves and that is fine — the rule is the column, not this list.
 Authoritative source: `window_runs.started_at` for today's `sun-attended` row(s), which the window
 agent writes (`runbooks/window-run-record.py --outcome running`) when it opens the window, before
 Step 0. The EARLIEST row of the day is used (a retried Sunday then prices the retry against the
-first open, the conservative side). Only when no row exists does it fall back to the scheduled
-09:00 Europe/Berlin and mark the source `fallback-0900`, in which case §3.K0 clamps S0 ≥ 20
-(STEP0_RESERVE_MIN) and disables ASK-EXTENSION. The files are overwritten every run, so a stale
-value in the fixed `$SCR` cannot survive into a retried window.
+first open, the conservative side). When no row exists (or the read fails) it automatically writes the
+scheduled 09:00 Europe/Berlin with source `fallback-0900`, and §3.K0 then asks the present
+operator for the actual open time (`operator-stated`) or DEFERs. Both files are deleted first and
+rewritten every run, so a stale value in the fixed `$SCR` cannot survive into a retried window.
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
+SCR="$HOME/.cache/talos-1142"                 # own Bash call: re-set, never inherit
+rm -f "$SCR/t-window-open.txt" "$SCR/t-window-open.src"   # a retried Sunday never reuses a stale open
 cat > "$SCR/winopen.py" <<'PY'
 import os, sys, datetime as d, zoneinfo as z
 # winopen.py <out-epoch-file> <out-source-file> [YYYY-MM-DD]   (READ-ONLY; needs SWEEP_PG_DSN)
@@ -913,19 +915,27 @@ else:
 open(sys.argv[1], "w").write(f"{ep}\n"); open(sys.argv[2], "w").write(f"{src}\n")
 print(f"window-open {d.datetime.fromtimestamp(ep, tz).isoformat()} source={src}")
 PY
-source runbooks/lib/sweep-pg-dsn.sh && sweep_pg_dsn_up >/dev/null || { echo "DSN-FAIL: window-open unreadable -> run the fallback by hand and accept the clamp"; }
-[ -n "$SWEEP_PG_DSN" ] && .venv/bin/python3 "$SCR/winopen.py" "$SCR/t-window-open.txt" "$SCR/t-window-open.src"
+if source runbooks/lib/sweep-pg-dsn.sh && sweep_pg_dsn_up >/dev/null; then
+  .venv/bin/python3 "$SCR/winopen.py" "$SCR/t-window-open.txt" "$SCR/t-window-open.src" || echo "winopen.py FAILED"
+else
+  echo "DSN-FAIL: window_runs unreadable"
+fi
 sweep_pg_dsn_down >/dev/null 2>&1; true
+# AUTOMATIC fallback pair on DSN-FAIL / query error / missing output (§3.K0 then asks the operator or DEFERs)
+if [ ! -s "$SCR/t-window-open.txt" ] || [ ! -s "$SCR/t-window-open.src" ]; then
+  python3 -c "import datetime as d, zoneinfo as z; tz = z.ZoneInfo('Europe/Berlin'); print(int(d.datetime.combine(d.datetime.now(tz).date(), d.time(9, 0), tz).timestamp()))" > "$SCR/t-window-open.txt"
+  echo fallback-0900 > "$SCR/t-window-open.src"; echo "window-open FALLBACK written (09:00 Europe/Berlin)"
+fi
 echo "S0 (informational; §3.K0 decides) = $(( ($(cat "$SCR/t-plan-start.txt") - $(cat "$SCR/t-window-open.txt")) / 60 )) min, source $(cat "$SCR/t-window-open.src")"
 ```
 **Expected:** one `window-open … source=window_runs (earliest of N row(s) …)` line. *Read-only
 dry-run 2026-10-05:* `2026-09-27` → `08:47:38+02:00` from `window_runs` (that ad-hoc Sunday
 opened 13 min BEFORE 09:00 — exactly the case the 09:00 fallback gets wrong), `2026-10-04` →
 `09:00:14+02:00` from `window_runs`, `2026-10-05` (no row) → `09:00:00+02:00 source=fallback-0900`.
-`fallback-0900` on a real window day means the window agent did not record its open: say so in
-the report; Phase K is then clamped, not blocked. On `DSN-FAIL`, write the fallback by hand
-(`python3 -c` with the 09:00 epoch into `t-window-open.txt`, `fallback-0900` into
-`t-window-open.src`) — never leave the previous run's files in place.
+`fallback-0900` (no row, `DSN-FAIL`, or a `winopen.py` error — the fallback pair is written
+automatically, dry-tested 2026-10-05 in the Bash tool's shell with a simulated DSN failure over
+stale files) means the window agent's open is unknown: say so in the report; §3.K0 then asks the
+present operator for the actual open time or DEFERs.
 
 **PASS:** (1) `ignore=[…]` non-empty and `rev=` reads `refs/heads/main@sha1:<freeze-sha>` (else
 wait for the 1-min interval); (2) one 40-hex sha; (3) `iua-pre.txt` lists ≥ 1 automation
@@ -1645,17 +1655,19 @@ the clock needs an extension.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
+SCR="$HOME/.cache/talos-1142"                                               # re-set, never inherit
 N=192.168.55.11,192.168.55.12,192.168.55.13
 rm -f "$SCR/k-klim.txt"                                                     # never inherit a GO
-git fetch -q origin && [ "$(git rev-parse origin/main)" = "$(cat "$SCR/freeze-sha.txt")" ] && echo FREEZE-HELD
+FH=0; git fetch -q origin && [ "$(git rev-parse origin/main)" = "$(cat "$SCR/freeze-sha.txt")" ] && { echo FREEZE-HELD; FH=1; } || echo "FREEZE BROKEN"
 mise exec -- kubectl get nodes -o 'custom-columns=N:.metadata.name,R:.status.conditions[?(@.type=="Ready")].status,OS:.status.nodeInfo.osImage,KL:.status.nodeInfo.kubeletVersion'
-grep -c '^kubernetesVersion: v1.36.0$' kubernetes/bootstrap/talos/talconfig.yaml      # 1
+KV=$(grep -c '^kubernetesVersion: v1.36.0$' kubernetes/bootstrap/talos/talconfig.yaml); echo "talconfig v1.36.0 lines: $KV"   # 1
 # roll record: PRESENCE gate PER NODE on the §3.10 files (each: exactly 2 PASS = nodegate + probe,
-# 0 FAIL), plus the absence of pattern-(ii) triage records. zsh: `(N)` = empty glob is not an error.
+# 0 FAIL), plus the absence of pattern-(ii) triage records. `find`, NOT a glob: the executor's zsh
+# runs with nobareglobqual + nomatch, where `g310-*.txt(N)` aborts with "no matches found".
 n=0; bad=0
-for f in "$SCR"/g310-*.txt(N); do n=$((n+1)); p=$(grep -c '^VERDICT PASS$' "$f"); x=$(grep -c '^VERDICT FAIL$' "$f"); echo "$(basename "$f") pass=$p fail=$x"; [ "$p" -eq 2 ] && [ "$x" -eq 0 ] || bad=$((bad+1)); done
+for f in $(find "$SCR" -maxdepth 1 -name 'g310-*.txt'); do n=$((n+1)); p=$(grep -c '^VERDICT PASS$' "$f"); x=$(grep -c '^VERDICT FAIL$' "$f"); echo "  $(basename "$f") pass=$p fail=$x"; [ "$p" -eq 2 ] && [ "$x" -eq 0 ] || bad=$((bad+1)); done
 pii=$(find "$SCR" -maxdepth 1 -name 'pattern-ii-*.txt' | wc -l | tr -d ' ')
-[ "$n" -eq 3 ] && [ "$bad" -eq 0 ] && [ "$pii" -eq 0 ] && echo "K0-ROLLRECORD PASS (files=$n pattern-ii=$pii)" || echo "K0-ROLLRECORD FAIL (files=$n bad=$bad pattern-ii=$pii)"
+RR=0; [ "$n" -eq 3 ] && [ "$bad" -eq 0 ] && [ "$pii" -eq 0 ] && { echo "K0-ROLLRECORD PASS (files=$n pattern-ii=$pii)"; RR=1; } || echo "K0-ROLLRECORD FAIL (files=$n bad=$bad pattern-ii=$pii)"
 # §3.7b pre-pull counts (after the reboots) feed the clock: missing images = Phase K costs 49, not 45
 CRI=$(mise exec -- talosctl -n $N image list --namespace cri    | grep -cE 'registry\.k8s\.io/kube-(apiserver|controller-manager|scheduler):v1\.36\.5[[:space:]]')
 SYS=$(mise exec -- talosctl -n $N image list --namespace system | grep -cE 'ghcr\.io/siderolabs/kubelet:v1\.36\.5[[:space:]]')
@@ -1663,41 +1675,60 @@ cat > "$SCR/k0clock.py" <<'PY'
 import sys
 # k0clock.py <window-open-epoch> <window-open-source> <plan-start-epoch> <now-epoch> <prepull-cri> <prepull-sys> <klim-out-file>
 tw = int(sys.argv[1]); src = sys.argv[2]; t0, now, cri, sysc = map(int, sys.argv[3:7]); out = sys.argv[7]
-fallback = not src.startswith("window_runs")
-s0_meas = (t0 - tw) // 60; el = (now - t0) // 60
-s0 = max(s0_meas, 20) if fallback else s0_meas        # no recorded open: assume >= STEP0_RESERVE_MIN
+if not (src.startswith("window_runs") or src.startswith("operator-stated")):
+    print(f"open-source={src}")
+    print("K0-CLOCK DEFER (no recorded window open: ask the present operator for the actual open time,"
+          " record it as operator-stated (§3.K0) and re-run; no answer = DEFER)")
+    sys.exit(0)
+s0 = (t0 - tw) // 60; el = (now - t0) // 60
 kcost = 45 if (cri == 9 and sysc == 3) else 49        # §7: +4 when upgrade-k8s must pull
 close = 6                                              # §5.4 + §3.12
 raw = 200 - s0 - kcost - close                         # latest start that still ends inside the raw 200
 klim = min(180 - kcost - close, raw)                   # 129 with the pre-pull and S0 = 20
-print(f"open-source={src} S0={s0}min (measured {s0_meas}) EL=T+{el} prepull cri={cri}/9 sys={sysc}/3 -> Phase K {kcost}min; KLIM=T+{klim}; raw-limit=T+{raw}")
-if s0_meas < 0 and not fallback:
-    print("K0-CLOCK DEFER (clock inconsistent: recorded window open is after plan start)")
+print(f"open-source={src} S0={s0}min EL=T+{el} prepull cri={cri}/9 sys={sysc}/3 -> Phase K {kcost}min; KLIM=T+{klim}; raw-limit=T+{raw}")
+if s0 < 0:
+    print("K0-CLOCK DEFER (clock inconsistent: window open is after plan start)")
 elif el < 0:
     print("K0-CLOCK DEFER (clock inconsistent: plan start in the future)")
 elif el <= klim:
     open(out, "w").write(f"{klim}\n"); print("K0-CLOCK GO")
-elif el <= raw and not fallback:
+elif el <= raw:
     print(f"K0-CLOCK ASK-EXTENSION (limit {raw})")
 else:
-    print("K0-CLOCK DEFER" + (" (no recorded window open: extension disabled)" if fallback and el <= raw else ""))
+    print("K0-CLOCK DEFER")
 PY
-python3 "$SCR/k0clock.py" "$(cat "$SCR/t-window-open.txt")" "$(cat "$SCR/t-window-open.src")" "$(cat "$SCR/t-plan-start.txt")" "$(date -u +%s)" "$CRI" "$SYS" "$SCR/k-klim.txt"
+# the clock runs ONLY when the roll record, the freeze and the untouched pin all hold
+if [ "$RR" -eq 1 ] && [ "$FH" -eq 1 ] && [ "$KV" -eq 1 ]; then
+  python3 "$SCR/k0clock.py" "$(cat "$SCR/t-window-open.txt")" "$(cat "$SCR/t-window-open.src")" "$(cat "$SCR/t-plan-start.txt")" "$(date -u +%s)" "$CRI" "$SYS" "$SCR/k-klim.txt"
+else
+  echo "K0 DEFER (rollrecord=$RR freeze-held=$FH talconfig-v1.36.0=$KV): clock not run, no k-klim.txt"
+fi
 ```
-The clock prints **exactly one** of `K0-CLOCK GO` / `K0-CLOCK DEFER` / `K0-CLOCK ASK-EXTENSION
-(limit L)`, and only `GO` writes `$SCR/k-klim.txt` — the file §3.K5's guard requires. Dry-tested
-2026-10-05 on synthetic epochs (source `window_runs` unless stated): S0 20/EL 120 → GO (KLIM 129,
-file written); S0 20/EL 130 → DEFER; S0 5/EL 130 → ASK-EXTENSION (limit 144); **S0 40 (early
-ad-hoc open, 40-min Step 0)/EL 120 → DEFER (KLIM 109)**; `fallback-0900` with measured S0 0/EL 120
-→ GO at the clamped KLIM 129; `fallback-0900` S0 5/EL 135 → DEFER (no ASK on fallback); S0 20/EL
-126 with pre-pull 0/0 → DEFER (KLIM 125); recorded open after plan start → DEFER (inconsistent).
-No `k-klim.txt` in every non-GO case.
+The block prints `K0 DEFER (rollrecord=… freeze-held=… talconfig-v1.36.0=…)` without running the
+clock unless all three preconditions hold. The clock then prints **exactly one** of `K0-CLOCK GO`
+/ `K0-CLOCK DEFER` / `K0-CLOCK ASK-EXTENSION (limit L)`, and only `GO` writes `$SCR/k-klim.txt` —
+the file §3.K5's guard requires. Dry-tested 2026-10-05 on synthetic epochs (source `window_runs`
+unless stated): S0 20/EL 120 → GO (KLIM 129, file written); S0 20/EL 130 → DEFER; S0 5/EL 130 →
+ASK-EXTENSION (limit 144); **S0 40 (early ad-hoc open, 40-min Step 0)/EL 120 → DEFER (KLIM
+109)**; `operator-stated` S0 40/EL 100 → GO (KLIM 109); `fallback-0900` → DEFER with the
+ask-the-operator instruction; S0 20/EL 126 with pre-pull 0/0 → DEFER (KLIM 125); open after plan
+start → DEFER (inconsistent). No `k-klim.txt` in every non-GO case.
 
-**Roll-record known-bad demo (dry-tested 2026-10-05 in a scratch dir, run the same lines with
-`SCR` pointed at it):** three files with 2/2/2 PASS → `K0-ROLLRECORD PASS`; files with 2/1/3 PASS
-(total still 6) → `FAIL (files=3 bad=2 …)`; 2/2/2 plus one `pattern-ii-*.txt` → `FAIL (…
-pattern-ii=1)`; empty dir → `FAIL (files=0 …)`. One-line demo for the executor's own control:
-`D=$(mktemp -d); printf 'VERDICT PASS\n' > $D/g310-x.txt; SCR=$D` then the block above → `FAIL`.
+**On `fallback-0900` (N4):** ask the present operator once for the actual window-open time (the
+moment Step 0 started). If stated: `python3 -c "import datetime as d, zoneinfo as z;
+print(int(d.datetime.combine(d.date.today(), d.time(H, M), z.ZoneInfo('Europe/Berlin')).timestamp()))"
+> "$SCR/t-window-open.txt"; echo "operator-stated HH:MM" > "$SCR/t-window-open.src"` and re-run this
+block (the clock accepts sources `window_runs …` and `operator-stated …` only). No answer → DEFER.
+
+**Roll-record known-bad demo — dry-tested 2026-10-05 IN THE BASH TOOL'S OWN SHELL (zsh 5.9,
+`nobareglobqual`), not `zsh -f`:** 2/2/2 PASS → `K0-ROLLRECORD PASS (files=3 pattern-ii=0)`;
+2/1/3 (total still 6) → `FAIL (files=3 bad=2 …)`; 2/2/2 + a `pattern-ii-*.txt` → `FAIL (…
+pattern-ii=1)`; empty dir → `FAIL (files=0 …)`; 2 files → `FAIL (files=2 …)`; 4 files → `FAIL
+(files=4 …)`; 2/2/2 with one extra `VERDICT FAIL` line → `FAIL (… bad=1 …)`. (An earlier draft
+used `g310-*.txt(N)`, which passed under a fresh `zsh` but aborts with "no matches found" in the
+executor's shell — Phase K could never have GONE.) Executor's own control: run the
+`n=0 … RR=` lines only, with `SCR=$(mktemp -d)` holding one `g310-x.txt` of a single `VERDICT
+PASS` line → must print `K0-ROLLRECORD FAIL (files=1 bad=1 …)`.
 
 **GO to §3.K1 only if ALL hold:**
 1. **The OS roll is complete and green:** §4.4 #1–#11 and §4.5 all PASS (3× `Talos (v1.14.2)`,
@@ -1708,10 +1739,11 @@ pattern-ii=1)`; empty dir → `FAIL (files=0 …)`. One-line demo for the execut
    reason to leave the control plane alone today. Any other file count or per-file tally = the record is
    missing or broken, not clean: DEFER.
 2. **Clock:** `K0-CLOCK GO`. KLIM = min(180 − Kcost − 6, 200 − S0 − Kcost − 6) with Kcost 45
-   (49 if the pre-pull counts are not `9`/`3`) and S0 = T0 − the §2.0b(0a) window open (clamped
-   ≥ 20 when the source is `fallback-0900`); 129 when S0 = 20 and the pre-pull held.
+   (49 if the pre-pull counts are not `9`/`3`) and S0 = T0 − the §2.0b(0a) window open (source
+   `window_runs` or `operator-stated`; `fallback-0900` → ask or DEFER, above); 129 when S0 = 20
+   and the pre-pull held.
 3. **Extension — only on `K0-CLOCK ASK-EXTENSION (limit L)`**, which the clock prints only when
-   a RECORDED S0 < 20 left room inside the raw 200 (never on `fallback-0900`): ask the present operator once — *"Phase K needs ~Kcost
+   a recorded or operator-stated S0 < 20 left room inside the raw 200: ask the present operator once — *"Phase K needs ~Kcost
    min, ending inside the raw window end; extend past the 180 budget?"* (no live question if the
    operator pre-stated the answer at the GO, §7). On yes: `echo L > "$SCR/k-klim.txt"` and record
    the answer in the window report. No answer, "no", or `K0-CLOCK DEFER` → **DEFER**. Never trim
