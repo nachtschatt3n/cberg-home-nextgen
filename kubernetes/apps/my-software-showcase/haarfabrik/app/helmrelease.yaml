@@ -33,7 +33,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/haarfabrik-extranet
-              tag: production-20260928112316 # {"$imagepolicy": "my-software-showcase:haarfabrik:tag"}
+              tag: production-20261005115900 # {"$imagepolicy": "my-software-showcase:haarfabrik:tag"}
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the
