@@ -29,6 +29,8 @@ touches:
     - monitoring                      # §4 reads Prometheus (sure-alerts rules + kube-state-metrics)
 depends_on: []
 conflicts_with:
+  - kube-prometheus-stack-91.9.0      # 2026-10-05 review (blocking): §4.6 reads Prometheus; kps added 2026-10-05
+  - nextcloud-fleet-35.0.1            # 2026-10-05 review: reciprocity (office-wide silence; does not blind §4.6)
   - app-template-5.2.1                # upgrades helmrelease/sure-pg + sure-redis, which helmrelease/sure
                                       # dependsOn; a same-night failure there blocks/obscures this one
   - redis-fleet-8.10.2                # rolls deployment/sure-redis and REQUIRES a sure-worker restart
@@ -46,7 +48,7 @@ rollback_class: git-revert            # nothing forward-only happens: the migrat
                                       # with the identical image that revision 50 already migrated, so
                                       # schema_migrations does not move (asserted in §4.3)
 finding_refs: [F-adff57e0]            # version finding "sure: chart 0.7.4 -> 0.7.5 (patch)"
-review: null
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (sole blocker: undeclared kps-91.9.0 conflict) -> fixed by coordinator per the exact correction
 premises:
   - id: hr-deployed-on-0.7.4-at-current-generation
     why: >-
@@ -68,8 +70,8 @@ premises:
       only on success). §4.2 uses the Job's absence as its gate, so it must start absent.
     run: kubectl get job -n office -o name | grep -c 'job.batch/sure-migrate$'
     expect_exact: "0"
-status: draft
-window: null
+status: vetted
+window: "nightly:2026-10-12"   # scheduled 2026-10-05: AUTO-NIGHT (chart graduated); with descheduler-0.37.0 (35+15 = 50 of 70)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md

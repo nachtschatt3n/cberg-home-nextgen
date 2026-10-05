@@ -43,6 +43,7 @@ exclusive: true                       # this component IS the window's instrumen
                                       # directions; NOT by run-now.py preflight — in a NOW run, run it alone).
 depends_on: []
 conflicts_with:                       # every OPEN plan that reads Prometheus in §4 AND names this plan
+  - sure-0.7.5                        # 2026-10-05: reciprocity (sure §4.6 reads Prometheus)
   - grafana-13.2.7                    # 2026-10-05: reciprocity (its §4.4 reads Prometheus through Grafana)
   - cli-tool-pins                     # 2026-10-05 delta review: reciprocity
   - paperclip-backup-cleanup-busybox-pin  # 2026-10-05 delta review: reciprocity

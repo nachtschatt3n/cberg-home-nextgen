@@ -27,6 +27,8 @@ touches:
                                               # Prometheus read in §4 is covered by conflicts_with.
 depends_on: []
 conflicts_with:
+  - flux-fleet-0.60.0                 # 2026-10-05 review: Flux controller roll (named for completeness)
+  - cli-tool-pins                     # 2026-10-05 review: its kustomize render-hash gate covers paperclip/app
   - paperclip-26.04                   # Recreates deploy/paperclip; the cleanup Job's required podAffinity
                                       # targets that pod, so a same-slot run leaves the verify Job Pending
                                       # and both plans' gates unattributable (same ns, same PVC).
@@ -62,9 +64,9 @@ sops_refs:
   - docs/sops/application-update.md
   - docs/sops/longhorn-rwo-multi-attach.md
   - docs/sops/storage-safety.md
-review: null
-status: draft
-window: null
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: ready-for-go, 0 blocking; nonblocking timing-guard + conflicts applied by coordinator
+status: vetted
+window: "nightly:2026-10-10"   # scheduled 2026-10-05: AUTO-NIGHT (image graduated); with the blackbox chart patch (25+20 = 45 of 70); 01:30Z exercises the delete path (PRE_OLD=1)
 generated: "2026-10-05"
 ---
 
@@ -127,8 +129,12 @@ cd /Users/mu/code/cberg-home-nextgen
 .venv/bin/python3 runbooks/plan-premises.py paperclip-backup-cleanup-busybox-pin   # all PASS, or STOP
 flux get kustomizations -n ai --no-header | awk '$1=="paperclip"'                  # Ready True
 kubectl get cronjob -n ai paperclip-backup-cleanup -o jsonpath='{.status.lastSuccessfulTime}{"\n"}'   # today 04:00Z-ish
-# Do NOT run inside 03:50-04:20Z (paperclip's in-app backup + the scheduled cleanup run):
+# Do NOT run inside 03:50-04:20Z (the scheduled 04:00Z cleanup run) NOR within +-20 min of paperclip's
+# in-app backup, whose timer is relative to POD START (measured 08:56Z daily on 2026-10-05; it moves on
+# every pod restart) -- live guard: newest *.sql mtime + 24h must be > 20 min away (review 2026-10-05).
+# A +1 total in 4.3 means a backup landed: re-baseline, it is not a failure.
 date -u +%H:%M
+kubectl exec -n ai deploy/paperclip -c app -- sh -c 'find /paperclip/instances/default/data/backups -maxdepth 1 -name "*.sql" -printf "%TY-%Tm-%Td %TH:%TM\n" | sort | tail -1'   # newest backup (GNU find in the app container)
 # Baseline for 4.3 (counts only, no file names needed):
 kubectl exec -n ai deploy/paperclip -c app -- sh -c 'D=/paperclip/instances/default/data/backups; echo total=$(find $D -maxdepth 1 -name "*.sql" | wc -l) old=$(find $D -maxdepth 1 -name "*.sql" -mtime +7 | wc -l)'
 # record PRE_TOTAL / PRE_OLD. STOP if total=0: the floor gate in 4.3 would then be untestable.

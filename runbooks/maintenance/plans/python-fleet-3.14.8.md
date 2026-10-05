@@ -32,6 +32,9 @@ touches:
                                         # three has an HTTPRoute, a PVC, or an SSO path.
 depends_on: []
 conflicts_with:
+  - kube-prometheus-stack-91.9.0      # 2026-10-05 review (blocking): §4 reads Prometheus
+  - nextcloud-fleet-35.0.1            # 2026-10-05 review: reciprocity
+  - flux-distribution-2.9.6           # 2026-10-05 review: reciprocity
   - app-template-5.2.1                  # nightly:2026-10-02 — edits the SAME file kubernetes/apps/ai/mcpo/app/
                                         # helmrelease.yaml (chart line, Batch A) and rolls helmrelease/openclaw in
                                         # the SAME Flux Kustomization (ai/openclaw) as cronjob/openclaw-probe.
@@ -41,11 +44,11 @@ conflicts_with:
   - flux-fleet-0.60.0                   # restarts the Flux controllers that apply this change
   - flux-oci-chart-sources              # rewrites HelmRelease chart sources (bjw-s app-template consumers incl. mcpo)
 exclusive: false
-security_ref: F-141129dd                # the python:3.14.7-slim image finding (detail in sweep_findings only)
+security_ref: F-8bac0223                # 2026-10-05 review: the OPEN python:3.14.7-slim "newer tag" row (F-141129dd resolved)
 capability_change: false                # same-behaviour interpreter patch under unchanged scripts; no new
                                         # route, permission, API or exposure
 rollback_class: git-revert              # nothing forward-only: no PVC, no schema, no data written by the bump
-finding_refs: [F-141129dd]              # python:3.14.7-slim image row; this plan moves the 3 PLAN-lane consumers off it
+finding_refs: [F-8bac0223, F-12279835, F-f78e1e01, F-959b2979, F-237bd599]   # 2026-10-05 review: image row + 3 per-consumer version rows + the ops-retro policy-narrowing proposal
 premises:
   # All read-only. Values measured live 2026-10-02 ~03:40 Europe/Berlin.
   - id: probe-on-3.14.7
@@ -69,7 +72,7 @@ premises:
   # They are §2 pre-check gates 2.1/2.2 instead, each printing a STOP token on failure.
 review: null
 status: draft
-window: null
+window: null   # 2026-10-05: NOT scheduled -- operator decision first: land the F-237bd599 policy narrowing (then RETIRE this plan; the nightly AUTO lane bumps all 17 slim consumers) or execute this plan (then it needs a STOP pre-check for that hunk + re-review)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
