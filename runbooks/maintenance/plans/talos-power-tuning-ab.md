@@ -68,8 +68,8 @@ backup_gate: "per node, before its FIRST forward apply: (1) $W/r-A0/kubernetes-k
 finding_refs:
   - F-6c7843e4                        # "decide PL2 40-45 W and/or shorter PL1 tau via a reviewed plan amendment ... CI +35 % from
                                       # EPP balance_power": this plan is that amendment, measured
-review: null
-status: draft
+review: ready-for-go@2026-10-05     # 4th pass @5a27a9b8 (0 blocking)
+status: vetted
 window: null                          # PROPOSED: two on-demand NOW runs, 2026-10-06 and 2026-10-07, each 18:30 Europe/Berlin
                                       # (16:30Z); evening 1 ends ~23:20, evening 2 ~22:30 Berlin; hard stop 01:45, everything done
                                       # by 02:45 (nightly 03:30). Stamped only by run-now.py stamp inside each run.

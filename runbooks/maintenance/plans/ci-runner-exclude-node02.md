@@ -9,9 +9,11 @@ update_type: refactor
 risk: low                             # Mac-side admission script, no Flux object, no node/config change. The edit only
                                       # REMOVES a placement option; running pods are never touched by the gate. Instant
                                       # per-run override (GATE_EXCLUDE_NODES=) and a one-commit revert.
-est_duration_min: 45                  # pre-checks 3, edit+parse+status gate 3, commit/push 3, verification e2e run 25-30
-                                      # (3 GPU shards on 2 nodes: the 3rd waits for nuc14-01's 2nd slot (settle 300 s, < 78 C)
-                                      # or for a finished shard), slack 6. Reviewer 2026-10-05: 30 was optimistic.
+est_duration_min: 28                  # = the NIGHTLY VARIANT (§4.2): window-scheduler.py reads ONLY est_duration_min against
+                                      # duration_min - STEP0_RESERVE_MIN (90 - 20 = 70 schedulable). Co-scheduled after
+                                      # flux-fleet-0.60.0 (35): 35 + 28 = 63 <= 70. Breakdown: premises+pre-checks 6,
+                                      # edit+parse+§4.1 gate 6, commit/push 4, §2.x/§4.1 re-reads 4, slack 8.
+                                      # FULL variant (attended slot, §4.2 e2e run included): ~45-58 (the e2e run is 17-30).
 needs_reboot: false
 exclusive: false
 touches:
@@ -32,6 +34,10 @@ conflicts_with:
                                       # each one's premise reads the file the other left. It is awaiting-soak (now:2026-10-05).
   - kube-prometheus-stack-91.9.0      # the gate and §4 read Prometheus: a kps restart mid-verification closes every node
                                       # (fail-closed) and the run reads as "stuck", not as "excluded".
+  - flux-distribution-2.9.6           # Flux control-plane change (window null today): never the same night as this plan's
+                                      # Prometheus-read gate. ORDERING (not a conflict, because a conflicts_with entry would
+                                      # forbid the chosen co-scheduling): in nightly:2026-10-06 flux-fleet-0.60.0 runs FIRST,
+                                      # and this plan starts only after flux-fleet's health gate (§6).
 security_ref: null
 capability_change: false              # FALSE: no new feature, route, permission, API or exposure. It narrows WHERE the
                                       # existing best-effort CI may place a shard (one node fewer); production workloads
@@ -40,9 +46,9 @@ rollback_class: git-revert            # one commit; the file is read fresh on ev
 finding_refs:
   - F-6c7843e4                        # "BIOS/fan/paste check on nuc14-02's cooler first": this keeps CI heat off that node
                                       # until the physical fix; shared with talos-sysfs-power-caps / talos-power-tuning-ab
-review: null
-status: draft
-window: null                          # PROPOSED nightly:2026-10-06 (03:30 Europe/Berlin = 01:30Z), i.e. after the
+review: ready-for-go@2026-10-05     # review fix applied per the reviewer's exact correction (nightly variant, §4.2/§6)
+status: vetted
+window: "nightly:2026-10-06"          # was PROPOSED nightly:2026-10-06 (03:30 Europe/Berlin = 01:30Z), i.e. after the
                                       # talos-sysfs-power-caps 24 h soak closes (>= 2026-10-05T23:17Z) and before the A/B.
                                       # Fallback (review-2 B1): nightly:2026-10-07. It can NOT join the A/B's NOW run (that plan is
                                       # exclusive and run-now checks all premises at preflight); the A/B evenings then shift a day.
@@ -182,6 +188,14 @@ Measured 2026-10-05 on the dry-tested scratch copy against the live cluster: `1`
 CONTROL: metric node_thermal_zone_temp - the gate's input (`x86_pkg_temp` 2-min avg/3-min peak); the guard proves it
 is read for all three nodes.
 
+**NIGHTLY VARIANT (the default in `nightly:2026-10-06`, co-scheduled after flux-fleet-0.60.0): §4.2 is DEFERRED.** The
+nightly runs §2, §3 and §4.1 only (~28 min, `est_duration_min`). §4.1 proves the gate change by its own reading (guards
+3, `1`/`0`/`3`/`0`). The §4.2 evidence is then the A/B's evening-1 control run **`A0-1`** (`talos-power-tuning-ab` §3.3,
+2026-10-06 ~18:55 Berlin). It is the same ref and suite set, and its `ab-summary.py` marks a run `INVALID RUN ...
+on_nuc14-02=N` if any shard lands on 02. Record the link in this plan's execution record: "§4.2 deferred, evidence =
+talos-power-tuning-ab A0-1 (`shards-A0-1.json`: 0 pods on k8s-nuc14-02)". If the A/B does not run within 48 h, run
+§4.2 as below in the next attended slot. In an attended slot (or a nightly with spare capacity) run §4.2 directly.
+
 **4.2 CONTENTS ASSERTION: a real run places every shard on 01/03 and none on 02.** One e2e run (3 GPU shards, the same
 ref the A/B uses), started with `run_in_background: true` (it outlives the 600 s Bash limit). Wait for `^SUITES_DONE`
 with a Monitor until-loop, never a foreground sleep:
@@ -213,6 +227,9 @@ an e2e/release 3-shard run waits up to 300 s for nuc14-01's second slot (settle)
 
 ## 5. Rollback
 
+- Caveat for every `git pull --rebase --autostash` in this plan: it temporarily stashes OTHER sessions' uncommitted
+  changes in the shared worktree and restores them UNSTAGED. Check that the pull ends with `Applied autostash.` A
+  conflict on restore leaves them in `git stash list`: restore them, never drop them.
 - Per run, no commit: `GATE_EXCLUDE_NODES= scripts/ninth-banner-test.sh ...` (empty = nothing excluded). It applies
   only to the ticks THAT trigger runs: the host lock is shared, and a concurrent trigger ticks with its own env (default =
   02 excluded), so with two triggers running, 02 is open only on this trigger's ticks.
@@ -246,9 +263,10 @@ No forward-only parts.
   `/private/tmp/powerab-talos-power-tuning-ab`. The coordinator will try, if its session is active. Otherwise this plan
   STOPs safely on its premises in the nightly and goes to nightly 10-07. A Mac reboot wipes `/private/tmp`, i.e. the
   soak evidence with it.
-- **Nightly capacity:** flux-fleet-0.60.0 (35) + this plan (45) = 80 of 90 min, plus Step 0. If the window runs long,
-  §4.2's e2e verification run may be deferred. §4.1 alone already proves the gate change. The A/B's control run `A0-1`
-  then serves as the §4.2 evidence: its `ab-summary.py` marks a run with any shard on nuc14-02 `INVALID`.
+- **Nightly capacity (corrected, review 2026-10-05):** the schedulable nightly is 90 - 20 Step-0 reserve = **70 min**
+  (`window-scheduler.py` `STEP0_RESERVE_MIN`, `maintenance-windows.yaml` nightly). flux-fleet-0.60.0 (35) + the FULL
+  variant (45) = **80 > 70 schedulable**, so the nightly runs the NIGHTLY VARIANT (28 min, §4.2 deferred to the A/B's
+  `A0-1`, see §4): 35 + 28 = 63 <= 70. **Order: flux-fleet-0.60.0 first**, this plan after its health gate.
 - **ci-gate-primary-control-rework** (backlog draft) depends on this plan and edits the same two files later.
 - **Nightly 2026-10-06 ordering:** `flux-fleet-0.60.0` is scheduled into the same night (shared `monitoring`). Run
   this plan after its health gate, so a Flux/monitoring disturbance cannot read as a "stuck" §4.2 run.
