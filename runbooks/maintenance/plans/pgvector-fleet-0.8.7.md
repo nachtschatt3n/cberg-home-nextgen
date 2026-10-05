@@ -96,9 +96,9 @@ finding_refs: [F-c10b4143, F-ed3c402c, F-e48a1da6, F-96a49661, F-9e3a8bdd]
                                       # (verified 2026-10-05 with `finding show`): postgresql, affine-pg,
                                       # sure-pg, oc8-db-init-v1, sweep-history-init-v9 — all
                                       # "0.8.6-pg16 -> 0.8.7-pg16 (patch)". The plan-or-page pass joins on these.
-review: null
-status: draft
-window: null
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix x2 (bookkeeping, absence gates, sweep guard, epochs) -> fixed -> second delta ready-for-go; leg-A cd nit applied
+status: vetted
+window: "nightly:2026-10-16"   # scheduled 2026-10-05: AUTO-NIGHT (image graduated); alone (45 min); EVEN date = not a 48h sweep night (sweeps land 02:00Z on odd dates), so jit.sh will not stop leg C
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/immutable-job-image-bumps.md     # §4a live-DB checklist governs the two Job renames
@@ -669,7 +669,7 @@ cat vec-affine-after.txt
   ```bash
   kubectl port-forward -n office svc/affine 13010:3010 >/dev/null 2>&1 & PF=$!; sleep 2
   curl -s -o /dev/null -w '%{http_code}\n' localhost:13010/; curl -s localhost:13010/info; kill $PF 2>/dev/null
-  sh conn.sh push-a.epoch pairs-affine-pg-before.txt office affine-pg
+  cd /tmp/pgv-87 && sh conn.sh push-a.epoch pairs-affine-pg-before.txt office affine-pg   # cd: agent cwd resets between calls (review 2026-10-05)
   ```
   PASS: `200`, a JSON body containing `"AFFiNE` (measured 200 / `AFFiNE 0.27.4 Server` before),
   **and** `CONN_PASS office/affine-pg postmaster=<new>>push=<push-a>,>before=<old>` listing `affine|affine|N|…`

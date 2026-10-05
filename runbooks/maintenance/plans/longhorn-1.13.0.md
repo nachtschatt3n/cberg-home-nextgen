@@ -122,9 +122,9 @@ premises:
       against 0; a non-zero baseline means the pin is already broken and §4.3 cannot attribute.
     run: kubectl get networkpolicy -n storage -o name | wc -l | tr -d ' '
     expect_exact: "0"
-review: null
-status: draft
-window: null
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (no premises, CSI findings, inert gates) -> fixed -> delta ready-for-go
+status: awaiting-go   # HUMAN-GATED, one-way storage-engine minor: operator GO required
+window: "sun-attended:2026-11-15"   # scheduled 2026-10-05: exclusive Sunday, 70 of 180; two weeks after talos-linux-1.14.2 (proposed 11-01), after kps-91.9.0 (10-08)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/longhorn.md

@@ -14,7 +14,7 @@ target: "v12.0.0@sha256:46b7b467244ef54bf4f1faadad988a630f94aff16613d4a3a0c161e7
                                       # tag API — identical. amd64 child sha256:4091d15c237c8bcf798189be6fe62d41272b5b1458bdfee45a60ea458e95fba8.
                                       # GitHub release "Stable Release v12.0.0", published 2026-10-04.
 update_type: major
-risk: low                             # Honest reading: the major is a RUNTIME swap (Debian 12->13,
+risk: low                             # IMPACT rating; revert likelihood elevated (js-controller 7.0.6 untested on Node 24), see §1.2b. Honest reading: the major is a RUNTIME swap (Debian 12->13,
                                       # Node 22->24), not an ioBroker data/format change. /opt/iobroker
                                       # (js-controller 7.0.6, adapters, jsonl DBs) lives on the PVC and is
                                       # NOT replaced by the image. This install runs only 3 instances
@@ -78,9 +78,9 @@ finding_refs: [F-2466513f]            # version finding v11.1.0 -> v12.0.0, emit
                                       # two AR-029 security rows and F-0a5ad294 (chart 5.1.0->5.2.1, owned
                                       # by app-template-5.2.1). No version finding for v12.0.0 exists yet
                                       # (the tag shipped 2026-10-04, after the last sweep 2026-10-03).
-review: null
-status: draft
-window: null
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (unstated Node 24 risk) -> §1.2b option (a) -> delta ready-for-go
+status: vetted
+window: "nightly:2026-10-15"   # scheduled 2026-10-05: AUTO-NIGHT (image graduated); alone (30 min); a loud data-safe revert is an accepted outcome (§1.2b)
 premises:
   # All read-only. Values measured live 2026-10-05.
   - id: sts-on-v11.1.0

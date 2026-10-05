@@ -40,6 +40,7 @@ touches:
                                        # plan is deliberately NOT eligible for unattended nights.
 depends_on: []
 conflicts_with:
+  - longhorn-1.13.0                   # 2026-10-05 longhorn review: reciprocity (new Longhorn volume + restore-proof on the engine it replaces)
   - jellyfin-12.1                      # sat-attended:2026-10-10 — same helmrelease/jellyfin and
                                        # pvc/jellyfin-config; its backup_gate/restore steps name the
                                        # OLD volume `jellyfin-config`. This plan is placed AFTER it
