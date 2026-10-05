@@ -32,8 +32,12 @@ conflicts_with:
                                       # gateway-httproute source and would confound the section 4 no-change gate
   - app-template-5.2.1                # relabels ~45 HTTPRoutes incl. every envoy-external route -> source re-list
                                       # in the same window; attribution of any record change becomes ambiguous
-  - chart-patches-coredns-reloader-blackbox   # rolls CoreDNS (external-dns resolves the Cloudflare API through
-                                      # it) AND reloader (external-dns pod carries a reloader annotation)
+  - reloader-2.2.18                    # 2026-10-05 review: rolls reloader (external-dns pod carries a reloader
+                                      # annotation); was carried by chart-patches before the 2026-10-03/05 carve-outs
+  - kube-prometheus-stack-91.9.0      # 2026-10-05 review: owns external-dns-alerts.yaml (§2.2, Gate 5) + the instrument
+  - flux-distribution-2.9.6           # 2026-10-05 review: upgrades helm-controller (apply + revert path), exclusive
+  - envoy-proxy-config-distroless-v1.39.2  # 2026-10-05 review: rolls envoy-external (Gateway source of this plan)
+  - talos-linux-1.14.2                # 2026-10-05 review: exclusive node roll, lists this plan
   - helm-drift-detection              # adds spec.driftDetection to every HelmRelease incl. this one
   - flux-fleet-0.60.0                 # upgrades helm-controller, which applies this HelmRelease
   - flux-reconciler-impersonation     # exclusive; changes the identity that applies this HelmRelease
@@ -47,7 +51,7 @@ capability_change: false              # same-behaviour version bump + a deprecat
                                       # record type or exposure. --enable-legacy-annotation-prefix NOT added.
 rollback_class: git-revert            # no forward-only state: TXT registry format unchanged (#6680 changes only
                                       # how a DELETE matches the stored value), no CRD/schema, no data on disk
-finding_refs: []                      # policy-cli finding list --grep external-dns (and --all): zero open rows
+finding_refs: [F-7ef7af04]            # 2026-10-05 review: open version finding "external-dns: chart 1.22.0 -> 1.23.0"; earlier "zero open rows" note was wrong
 review: null
 status: draft
 window: null                          # ATTENDED slot only (sat-attended / sun-attended) — docs/sops/external-dns.md
@@ -419,7 +423,9 @@ rewrite or the cloudflare-go batch path shows up here first).
 ```bash
 mise exec -- kubectl -n network logs deploy/external-dns > /tmp/edns-B.log
 echo "noop=$(grep -ci 'all records are already up to date' /tmp/edns-B.log) changes=$(grep -ci 'changing record' /tmp/edns-B.log) errors=$(grep -ciE 'level=error|9003|not allowed' /tmp/edns-B.log)"
-# PASS: noop >= 3, changes == 0, errors == 0
+# PASS: noop >= 3, changes == 0. `errors` is SUPPLEMENTARY (not part of PASS; review 2026-10-05: it has never been
+# shown to read non-zero on this pod's log -- 0 level=error lines in 12,827). A non-zero `errors` -> triage, and Gate 3's
+# REGERR/SRCERR counters (EMPTY/MULTI-guarded) are the authoritative error detector.
 echo "NOOP_INC=$(q "increase(external_dns_controller_no_op_runs_total{pod=\"$NEWPOD\"}[5m])")"
 # PASS: NOOP_INC >= 2 (counter only increments when a sync computes no changes; controller/controller.go).
 # MULTI/EMPTY = FAIL. Unscoped, this query returns one series PER POD for 5m after the Recreate (measured
@@ -561,7 +567,7 @@ next reconcile.
   `app-template-5.2.1` (relabels every routed app's HTTPRoute) are in
   `conflicts_with`. Plans that only roll a backend behind an unchanged route
   (jellyfin, n8n, penpot, uptime-kuma) do not conflict.
-- **CoreDNS and reloader** (`chart-patches-coredns-reloader-blackbox`, `coredns-1.48.1`):
+- **CoreDNS and reloader** (`coredns-1.48.2`, `reloader-2.2.18`; chart-patches is blackbox-only since 2026-10-05):
   external-dns resolves the Cloudflare API through cluster DNS, and its pod
   carries `secret.reloader.stakater.com/reload`; a CoreDNS roll mid-sync books
   provider errors that Gate 3 would attribute to v0.23.0.
@@ -572,10 +578,10 @@ next reconcile.
   here. `flux-oci-chart-sources` additionally moves external-dns's chart source
   in its stage 4 — if that lands first, the 3.3 edit target is unchanged
   (`spec.chart.spec.version`) but re-run the premises.
-- **Monitoring is the instrument.** No open `kube-prometheus-stack` plan exists
-  today (`kube-prometheus-stack-91.4.1` executed 2026-09-26); any future one
-  must not share this window.
-- **Reciprocity:** this plan lists eight conflicts; `coredns-1.48.1` already
+- **Monitoring is the instrument.** `kube-prometheus-stack-91.9.0` (vetted,
+  nightly:2026-10-08, exclusive) is open and is in conflicts_with (corrected
+  2026-10-05; 91.4.1 executed 2026-09-26). It must not share this window.
+- **Reciprocity:** this plan lists eight conflicts; `coredns-1.48.2` (replaces superseded coredns-1.48.1) already
   lists this plan back. The planner may write only this file, so reciprocal
   entries on the other seven plans are owed (see the planner report).
 - **No reboot, no storage, no Authentik, no secret change.** The SOPS secret

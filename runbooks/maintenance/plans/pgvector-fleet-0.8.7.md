@@ -15,8 +15,8 @@ risk: low                             # MEASURED, not assumed (§1.2): the targe
                                       # left catalogs alone). The residual risk is the ~30-60s restart
                                       # of the SHARED instance (sweep_history, oc8, nocodb, pellets) —
                                       # blast radius, not change risk; §6.
-est_duration_min: 40                  # pre-checks+baseline 8 · affine-pg leg 6 · sure-pg leg 6 ·
-                                      # dumps 4 · shared postgresql leg 8 · init-Job leg 5 · slack 3
+est_duration_min: 45                  # pre-checks+baseline 9 · affine-pg leg 7 · sure-pg leg 7 ·
+                                      # dumps 4 · shared postgresql leg 10 · init-Job leg 5 · slack 3 (conn.sh polls up to 10 min per leg; typical < 1)
 needs_reboot: false
 touches:
   namespaces: [databases, office, ai]
@@ -52,7 +52,7 @@ touches:
                                             # change; three Longhorn volumes are only remounted by their own pod.
 depends_on: []
 conflicts_with:
-  - app-template-5.2.1                # vetted, nightly:2026-10-02. Bumps the chart on 80 app-template HRs
+  - app-template-5.2.1                # vetted, nightly:2026-10-09. Bumps the chart on 80 app-template HRs
                                       # INCLUDING affine-pg and sure-pg (same files
                                       # office/{affine,sure}/app/postgres-helmrelease.yaml) and rolls them.
                                       # Two edits to one file in one slot, and its SAME_GEN gate would read
@@ -69,27 +69,28 @@ conflicts_with:
   - flux-oci-chart-sources            # rewrites HR chart sources (incl. app-template for affine-pg/sure-pg).
   - sure-0.7.5                        # helm upgrade re-runs sure-migrate (db:prepare) against sure-pg;
                                       # never restart sure-pg under it. Listed back in that plan.
+  - kube-prometheus-stack-91.9.0      # vetted, nightly:2026-10-08, exclusive:true. §4 reads Prometheus
+                                      # (CONTROL gates); the window's instrument must not move in the same slot.
   - longhorn-1.13.0                   # storage engine upgrade; three RWO Longhorn volumes are re-attached here.
                                       # (talos-linux-1.14.2 / talconfig-multidoc-migration are exclusive:true
                                       # on their own side, which already keeps them out of this slot.)
 exclusive: false
-security_ref: F-bb62d310              # RELATED, not the driver: the accepted image finding on the 0.8.6-pg16
-                                      # tag (detail on the record only). Whether the 0.8.7 rebuild changes it
-                                      # is for the next sweep to MEASURE, not for this plan to claim.
+security_ref: F-d6d47945              # OPEN accepted security finding on the 0.8.6-pg16 tag whose remedy is
+                                      # "newer upstream tag available, bump the image" — this plan IS that
+                                      # bump. Detail lives on the record only. (F-bb62d310, the earlier
+                                      # "already newest" row, is resolved.) Whether 0.8.7 clears it is for
+                                      # the next sweep to MEASURE, not for this plan to claim.
 capability_change: false              # same server binary, same extension catalog version (no ALTER
                                       # EXTENSION), same SQL surface; bug-fix-only shared library.
 rollback_class: git-revert            # nothing forward-only happens: datadir untouched (same PG build), no
                                       # catalog change (ALTER EXTENSION explicitly excluded — §1.3), the two
                                       # bootstrap re-runs are idempotent. Dumps are taken anyway (backup_gate).
 backup_gate: "Completed Longhorn Backup CR < 26h for postgresql-data-5g, pvc-27866fc8-77df-4fe6-8397-e69f3fa0fa7d (affine-pg-data) and pvc-bd4b4e52-0a71-4690-aade-ad99b1cddfe6 (sure-pg-data) (§2.4), PLUS in-window logical dumps taken in §3.4 BEFORE the shared-instance leg: pg_dump -Fc of sweep_history, oc8, nocodb, pellets and pg_dumpall --globals-only, each validated by local pg_restore -l TABLE DATA count against the live table count (sweep_history=11, oc8=71, nocodb=157, pellets=10 measured 2026-10-03)."
-finding_refs: []                      # CHECKED 2026-10-03 with SWEEP_PG_DSN up: `finding list --grep` for
-                                      # pgvector / postgresql / affine-pg / sure-pg / sweep-history-init /
-                                      # oc8-db / 0.8.7 returns NO version finding for 0.8.6 -> 0.8.7 (upstream
-                                      # published 2026-10-01; the direct-bump lane dispatched this plan, not a
-                                      # PLAN-lane finding). The affine-pg / sure-pg rows that do exist
-                                      # (F-081877c1, F-1efe0176) are the app-template CHART 5.1.0 -> 5.2.1
-                                      # findings, answered by app-template-5.2.1, NOT here. If a sweep later
-                                      # files a pgvector 0.8.7 version finding, add its id here.
+finding_refs: [F-c10b4143, F-ed3c402c, F-e48a1da6, F-96a49661, F-9e3a8bdd]
+                                      # the five open version findings for this bump, one per pin
+                                      # (verified 2026-10-05 with `finding show`): postgresql, affine-pg,
+                                      # sure-pg, oc8-db-init-v1, sweep-history-init-v9 — all
+                                      # "0.8.6-pg16 -> 0.8.7-pg16 (patch)". The plan-or-page pass joins on these.
 review: null
 status: draft
 window: null
@@ -152,10 +153,13 @@ are renamed (`v1a`, `v9a`), and the rename **re-runs** their bootstrap against l
 them a `docs/sops/immutable-job-image-bumps.md` §4a case.
 
 **Why it was held:** coverage gate G3 could not fetch the release notes ("unavailable"). Earned
-autonomy has no track record (0 green / 0 revert in 90d). No security driver, no Renovate PR. The
-hold was mostly a **false positive** on evidence availability: once the evidence is read, the change
-is a bug-fix library swap. Risk stays `low`. The care below is for the shared-instance restart, not
-for the version.
+autonomy has no track record (0 green / 0 revert in 90d). There is no Renovate PR. There **is** a
+security reason to land it: the open, accepted finding `F-d6d47945` (`security_ref`) records that the
+current 0.8.6-pg16 tag has fixable image findings and that a newer upstream tag exists. This bump is
+the remedy that finding names. The detail stays on the DB record. Whether the 0.8.7 rebuild actually
+clears it is for the next sweep to measure; this plan does not claim it. The hold itself was mostly a
+**false positive** on evidence availability: once the evidence is read, the change is a bug-fix
+library swap. Risk stays `low`. The care below is for the shared-instance restart, not for the version.
 
 ### 1.1 Upstream evidence (primary sources, read 2026-10-03)
 
@@ -253,15 +257,52 @@ print('BACKUP_GATE_PASS' if not bad else 'BACKUP_GATE_FAIL '+' '.join(sorted(bad
 date '+%H:%M'
 # The shared-instance leg (§3.5) must not START between hh:15 and hh:20 of 03/09/15/21. Nightly 03:30 is clear.
 
-# 2.6 Who is connected to the shared instance right now (expected consumers only, no long txn)
-kubectl exec -n databases deploy/postgresql -- sh -c 'psql -U "$POSTGRES_USER" -d postgres -tA -F"|" -c "select datname, usename, state, coalesce(extract(epoch from now()-xact_start)::int,0) from pg_stat_activity where datname is not null and pid<>pg_backend_pid() order by 4 desc"'
-# PASS: no row with a transaction age > 300 s. A long txn (e.g. a dump or a stuck sweep write) -> wait or find its owner first.
+# 2.6 Shared-instance quiet gate (jit.sh). Written here, run here AND again immediately before the
+#     leg-C push (§3.5). Read-only. STOPs on: an unfinished sweep_cycles row started < 6 h ago (a
+#     sweep is writing), any transaction older than 300 s, a 48h-sweep night at >= 03:55 Berlin (the
+#     04:00 cron sweep is due: last cron cycle started >= 40 h ago — cron cycles land 02:00Z every
+#     other day, measured 10-01/10-03/10-05), the heartbeat minute (hh:15-20 of 03/09/15/21), or
+#     SWEEP_PG_DSN still set in this shell. Fails CLOSED on a psql error or unparsable output.
+cat > jit.sh <<'JIT'
+# Leg-C just-in-time gate. Read-only. Prints JIT_GO or JIT_STOP <reasons>; exit 0 only on GO.
+r=$(kubectl exec -i -n databases deploy/postgresql -- sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d sweep_history -tA -F"|"' <<'SQL'
+select
+  (select count(*) from sweep_cycles where finished_at is null and started_at > now() - interval '6 hours'),
+  (select coalesce(floor(extract(epoch from now() - max(started_at))/3600)::int, 999) from sweep_cycles where trigger = 'cron'),
+  (select count(*) from pg_stat_activity where datname is not null and pid <> pg_backend_pid() and now() - xact_start > interval '300 seconds');
+SQL
+) || { echo "JIT_STOP psql-failed (cannot prove the gate -> stop)"; exit 2; }
+echo "raw=$r"
+unf=${r%%|*}; rest=${r#*|}; hrs=${rest%%|*}; longtx=${rest#*|}
+case "$unf$hrs$longtx" in ''|*[!0-9]*) echo "JIT_STOP unparsable '$r'"; exit 2;; esac
+hm=$(TZ=Europe/Berlin date '+%H%M'); why=''
+[ "$unf" -gt 0 ] && why="$why unfinished-sweep-cycle=$unf"
+[ "$longtx" -gt 0 ] && why="$why long-txn=$longtx"
+# Sweep night = the 48h cron sweep (04:00 Berlin) is due tonight: last cron cycle started >= 40h ago.
+if [ "$hrs" -ge 40 ] && [ "$hm" -ge 0355 ] && [ "$hm" -lt 0600 ]; then why="$why sweep-night-clock=$hm(last-cron-sweep-${hrs}h-ago)"; fi
+# Heartbeat minute (17 */6): never start inside hh:15-hh:20 of 03/09/15/21 Berlin.
+case "$(TZ=Europe/Berlin date '+%H')" in 03|09|15|21) m=$(TZ=Europe/Berlin date '+%M'); [ "${m#0}" -ge 15 ] && [ "${m#0}" -le 20 ] && why="$why heartbeat-minute";; esac
+[ -n "$(env | grep '^SWEEP_PG_DSN=')" ] && why="$why SWEEP_PG_DSN-set-in-this-shell"
+if [ -n "$why" ]; then echo "JIT_STOP$why"; exit 1; fi
+echo "JIT_GO clock=$hm last-cron-sweep=${hrs}h-ago unfinished=0 long-txn=0"
+JIT
+bash jit.sh
+# PASS: "JIT_GO clock=... unfinished=0 long-txn=0", exit 0.
+# FAIL shapes (all dry-run 2026-10-05 on scratch copies with injected values): "JIT_STOP unfinished-sweep-cycle=1
+# sweep-night-clock=0402(last-cron-sweep-44h-ago)" exit 1; "JIT_STOP unparsable '0|x|0'" exit 2;
+# "JIT_STOP psql-failed" exit 2. Live run 2026-10-05 10:46 printed: raw=0|6|0 / JIT_GO.
+# Note: one STALE unfinished cycle exists in the table (older than 6 h); the 6 h bound is why it does not block.
 ```
 
 **2.7 The window agent's OWN `SWEEP_PG_DSN` port-forward targets this instance.** Finish any
 Step-0 writes first (`window_runs`, `component_autonomy`, `plan_executions`). Then run
-`sweep_pg_dsn_down` before §3.5 and re-establish it after §4.C. The forward dies with the pod, and a
-write in flight during the restart errors out (it is not lost silently).
+`sweep_pg_dsn_down` in every shell that sourced it **before** §3.5 starts. No shell may hold the DSN
+(or its port-forward) open across the §3.5 push and the restart: `jit.sh` refuses to print `JIT_GO`
+while `SWEEP_PG_DSN` is set in the running shell. **Between the §3.5 push and the end of §4.C, write
+nothing to `sweep_history`** — no `plan_executions`, no `window_runs`, no `component_autonomy`, no
+`finding` edits. Record this plan's outcome only after §4.C passes, from a freshly sourced DSN
+(`sweep_pg_dsn_up`), and run `sweep_pg_dsn_down` again before any commit. The forward dies with the
+pod, and a write in flight during the restart errors out (it is not lost silently).
 
 ## 3. Steps
 
@@ -308,6 +349,45 @@ snap() {  # $1 = before|after
 }
 snap before
 wc -l counts-*-before.txt; cat vec-*-before.txt
+
+# Consumer-presence baseline: (datname|usename|backends-newer-than-postmaster|postmaster-epoch)
+cat > pairs.sql <<'SQL'
+select datname||'|'||usename||'|'||count(*) filter (where backend_start > pg_postmaster_start_time())||'|'||extract(epoch from pg_postmaster_start_time())::bigint
+from pg_stat_activity where datname is not null and usename is not null and pid <> pg_backend_pid()
+group by datname, usename order by 1;
+SQL
+kubectl exec -i -n databases deploy/postgresql -- sh -c 'psql -X -U "$POSTGRES_USER" -d postgres -tA' < pairs.sql > pairs-shared-before.txt
+kubectl exec -i -n office deploy/affine-pg  -- sh -c 'psql -X -U "$POSTGRES_USER" -d postgres -tA' < pairs.sql > pairs-affine-pg-before.txt
+kubectl exec -i -n office deploy/sure-pg    -- sh -c 'psql -X -U "$POSTGRES_USER" -d postgres -tA' < pairs.sql > pairs-sure-pg-before.txt
+cat pairs-*-before.txt
+# Sure positive in-app DB query baseline (§4.B compares against this line)
+kubectl exec -n office deploy/sure-web -c web -- sh -c 'timeout 90 bin/rails runner "puts \"SURE_DB_OK families=#{Family.count} accounts=#{Account.count}\"" 2>&1 | tail -1' | tee sure-app-before.txt
+# Presence gate used by §4.A/B/C (dry-run 2026-10-05: PASS path on all three instances with push=0;
+# FAIL paths "CONN_FAIL ... missing: ghost|ghost" (injected pair), "CONN_FAIL postmaster=<old> push=<now>"
+# (pod not restarted) and "CONN_FAIL empty-baseline" all printed and exited non-zero).
+cat > conn.sh <<'CONN'
+# Consumer presence gate. Usage: sh conn.sh <push_epoch> <pairs-before-file> <ns> <deploy>
+# PASS needs: the postmaster started AFTER the push (the pod really restarted) AND every REQUIRED
+# (datname|usename) pair of the BEFORE baseline has >=1 backend newer than the postmaster.
+# Polls ${TRIES:-20} x 30 s (10 min max). pellets|pellets (Grafana datasource pool) is informational.
+push=$1; base=$2; ns=$3; dp=$4
+req=$(cut -d'|' -f1,2 "$base" | grep -vxE 'pellets\|pellets' | sort -u)
+[ -n "$req" ] || { echo "CONN_FAIL empty-baseline (cannot anchor)"; exit 2; }
+for i in $(seq 1 ${TRIES:-20}); do
+  if [ "$dp" = postgresql ]; then  # pool-on-demand consumers: each request below opens a DB session (measured 2026-10-05)
+    kubectl port-forward -n databases svc/nocodb 18080:8080 >/dev/null 2>&1 & p1=$!
+    kubectl port-forward -n monitoring svc/sweep-dashboard 18081:80 >/dev/null 2>&1 & p2=$!
+    sleep 3; curl -s -o /dev/null localhost:18080/api/v1/auth/user/me; curl -s -o /dev/null localhost:18081/
+    kill $p1 $p2 2>/dev/null; wait $p1 $p2 2>/dev/null
+  fi
+  now=$(kubectl exec -i -n "$ns" deploy/"$dp" -- sh -c 'psql -X -U "$POSTGRES_USER" -d postgres -tA' < pairs.sql)
+  pm=$(echo "$now" | head -1 | cut -d'|' -f4)
+  miss=''; for k in $req; do n=$(echo "$now" | grep "^$k|" | cut -d'|' -f3); [ "${n:-0}" -ge 1 ] || miss="$miss $k"; done
+  if [ -n "$pm" ] && [ "$pm" -gt "$push" ] && [ -z "$miss" ]; then echo "CONN_PASS $ns/$dp postmaster=$pm>push=$push"; echo "$now"; exit 0; fi
+  echo "try $i: postmaster=${pm:-none} push=$push missing:${miss:- none}"; sleep 27
+done
+echo "CONN_FAIL $ns/$dp postmaster=${pm:-none} push=$push missing:$miss"; exit 1
+CONN
 ```
 
 Expected BEFORE (measured 2026-10-03): `counts-shared` has 249 rows (nocodb 157 tables, oc8 71,
@@ -322,6 +402,12 @@ EXPR|sure|0.8.6|0.8.6|[2,3]|1|5
 
 There is one VEC line per vector column (8 total). `affine ai_workspace_embeddings` reads
 `2:3faf1cf17d52b147d9cf997b0b57df41`. Empty columns read `0:3a3ea00cfc35332cedf6e5e9a32e94da`.
+
+Expected `pairs-*-before.txt` (measured 2026-10-05; the third field varies): shared
+`nocodb|nocodb`, `oc8|oc8_app`, `pellets|pellets`, `sweep_history|sweep_reader`; affine-pg
+`affine|affine`; sure-pg `sure|sure` (sidekiq). nocodb holds no idle session (0 at 08:30Z, 1 after one
+HTTP request), which is why `conn.sh` fires a request before each poll. Whatever pairs the baseline
+holds on the night are the ones the gate requires.
 **If any file is empty or an EXPR line is missing, stop.** A baseline that did not measure cannot
 anchor a gate.
 
@@ -348,7 +434,7 @@ Dry-run diff:
 printf 'fix(affine): pgvector 0.8.6-pg16 -> 0.8.7-pg16 (digest re-pinned)\n\nCanary leg of plan pgvector-fleet-0.8.7. Same PG 16.15 build; library-only\nchange; extension catalog deliberately NOT altered (keeps git-revert rollback).\n\nCo-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>\n' > /tmp/pgv-87/msg-a.txt
 git commit --only kubernetes/apps/office/affine/app/postgres-helmrelease.yaml -F /tmp/pgv-87/msg-a.txt
 git log -1 --format=%s && git show --stat HEAD | tail -3      # must be YOUR subject and ONE file
-git push
+git push && PUSH_A=$(date +%s) && echo "PUSH_A=$PUSH_A"
 ```
 
 Flux applies via the webhook. If `kubectl get hr -n office affine-pg` has not moved to the new revision
@@ -359,7 +445,8 @@ go to §5 and do not continue.
 
 Same as 3.2 with `kubernetes/apps/office/sure/app/postgres-helmrelease.yaml`. The identical two-line
 diff was dry-run. Commit subject: `fix(sure): pgvector 0.8.6-pg16 -> 0.8.7-pg16 (digest re-pinned)`.
-Fallback reconcile: `flux reconcile ks sure -n office --with-source`. Then run **§4.B**.
+After `git push`, record `PUSH_B=$(date +%s)`. Fallback reconcile: `flux reconcile ks sure -n office --with-source`.
+Then run **§4.B**.
 
 ### 3.4 Logical dumps — BEFORE touching the shared instance (backup_gate)
 
@@ -383,7 +470,9 @@ policy data.
 
 ### 3.5 Leg C — the shared databases/postgresql
 
-Prerequisites: §2.5 (not inside the heartbeat minute) and §2.7 (window agent's DSN forward is down).
+Prerequisites: §2.7 (no shell holds `SWEEP_PG_DSN`; Step-0 writes finished). The **hard gate is
+`jit.sh` run immediately before the push**, after the commit is built, so no minutes pass between
+the check and the restart.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
@@ -394,8 +483,16 @@ git diff kubernetes/apps/databases/postgresql/app/deployment.yaml | grep '^[-+] 
 printf 'fix(postgresql): pgvector 0.8.6-pg16 -> 0.8.7-pg16 (digest re-pinned)\n\nShared-instance leg of plan pgvector-fleet-0.8.7. Same PG 16.15 build; catalog\nextversions left as-is (postgres 0.8.1, oc8 0.8.6). Dumps taken first.\n\nCo-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>\n' > /tmp/pgv-87/msg-c.txt
 git commit --only kubernetes/apps/databases/postgresql/app/deployment.yaml -F /tmp/pgv-87/msg-c.txt
 git log -1 --format=%s && git show --stat HEAD | tail -3
-git push
+# JUST-IN-TIME HARD GATE — re-run §2.6 now; push ONLY on JIT_GO.
+( cd /tmp/pgv-87 && bash jit.sh ) && git push && PUSH_C=$(date +%s) && echo "PUSH_C=$PUSH_C"
 ```
+
+On `JIT_STOP` the commit is **not pushed**. Wait out the reason (a sweep finishing, the heartbeat
+minute) and re-run the gated line. If it is a sweep night past 03:55, do not wait into the sweep:
+`git reset --soft HEAD~1 && git restore --staged kubernetes/apps/databases/postgresql/app/deployment.yaml && git checkout -- kubernetes/apps/databases/postgresql/app/deployment.yaml`
+(only while the commit is unpushed and `git log -1 --format=%s` is YOUR leg-C subject), skip legs C
+and D, and report legs A/B as done with C/D deferred. **From the push until §4.C passes, no write to
+`sweep_history`** (§2.7).
 
 (`${OLD}`/`${NEW}` are from §3.2. Re-set them if this is a fresh shell.) The Deployment's
 `maxSurge: 0 / maxUnavailable: 1` tears the old pod down before the new one starts. Do **not**
@@ -526,11 +623,22 @@ cat vec-affine-after.txt
   PASS: `COUNTS_PASS tables=93 …`. This fails on the classic restart disaster (wrong PGDATA, so
   initdb creates an empty cluster). That cluster shows a different table set and a zero total. It
   also fails on any table whose count went down.
-- App: `kubectl port-forward -n office svc/affine 13010:3010 >/dev/null 2>&1 & PF=$!; sleep 2; curl -s -o /dev/null -w '%{http_code}\n' localhost:13010/; curl -s localhost:13010/info; kill $PF 2>/dev/null`.
-  PASS: `200` and a JSON body containing `"AFFiNE`. Measured 200 / `AFFiNE 0.27.4 Server` before.
-  Then, 2 min after the pod became Ready, run `kubectl logs -n office deploy/affine --since=2m | grep -ciE "prisma|ECONNREFUSED|database.*(error|unreachable)"`.
-  PASS: `0`. The 2-minute window starts after the reconnect, so connection-refused lines from the
-  restart itself fall outside it.
+- CONSUMER PRESENCE GATE (the app is back ON the new database, not merely silent):
+  ```bash
+  kubectl port-forward -n office svc/affine 13010:3010 >/dev/null 2>&1 & PF=$!; sleep 2
+  curl -s -o /dev/null -w '%{http_code}\n' localhost:13010/; curl -s localhost:13010/info; kill $PF 2>/dev/null
+  sh conn.sh "$PUSH_A" pairs-affine-pg-before.txt office affine-pg
+  ```
+  PASS: `200`, a JSON body containing `"AFFiNE` (measured 200 / `AFFiNE 0.27.4 Server` before),
+  **and** `CONN_PASS office/affine-pg postmaster=<epoch>>push=<PUSH_A>` listing `affine|affine|N|…`
+  with N ≥ 1. The pair is keyed on (database, user), so a backend of the `affine` role in the
+  `affine` database whose `backend_start` is later than the new postmaster's start is a session the
+  app opened **after** the restart. Today the app holds 10 such sessions, so this is the
+  DB-touching half that HTTP 200 alone cannot prove (`/info` answers from the Node process).
+  It FAILS with `CONN_FAIL … missing: affine|affine` if the app never reconnected within 10 min,
+  and with `postmaster=<old>` if the pod never restarted.
+  Informational only (not a gate): `kubectl logs -n office deploy/affine --since=2m | grep -ciE "prisma|ECONNREFUSED|database.*(error|unreachable)"`.
+  A non-zero count is a lead for investigation, not a verdict; zero proves nothing by itself.
 - CONTROL: metric kube_pod_container_status_restarts_total — `kube_pod_container_status_restarts_total{namespace="office",pod=~"affine-pg-.*"}`
   must be 0 for the new pod (the series exists today and reads 0 for the current pod).
 
@@ -538,11 +646,24 @@ cat vec-affine-after.txt
 
 Same as 4.A with `-l app.kubernetes.io/instance=sure-pg`, `vec.sh` arg `sure` and `counts-sure-*`.
 EXPR must read exactly `EXPR|sure|0.8.6|0.8.7|[2,3]|1|5`. VEC diff must be empty.
-`COUNTS_PASS tables=132`. App: run
-`kubectl logs -n office deploy/sure-worker --since=2m | grep -ciE "PG::|ConnectionBad|could not connect"`
-and the same against `deploy/sure-web`. Both must be `0`, taken 2 min after Ready. Run
-`kubectl get deploy -n office sure-web sure-worker -o jsonpath='{.items[*].status.readyReplicas}'`.
-PASS: `1 1`.
+`COUNTS_PASS tables=132`. Then the consumer gates:
+
+```bash
+cd /tmp/pgv-87
+kubectl get deploy -n office sure-web sure-worker -o jsonpath='{.items[*].status.readyReplicas}{"\n"}'
+# PASS: "1 1"
+kubectl exec -n office deploy/sure-web -c web -- sh -c 'timeout 90 bin/rails runner "puts \"SURE_DB_OK families=#{Family.count} accounts=#{Account.count}\"" 2>&1 | tail -1'
+# PASS: the line equals sure-app-before.txt (§3.1) — "SURE_DB_OK families=1 accounts=11" on 2026-10-05. FAIL: a PG::ConnectionBad /
+# ActiveRecord::ConnectionNotEstablished trace, a timeout (no line), or different counts.
+sh conn.sh "$PUSH_B" pairs-sure-pg-before.txt office sure-pg
+# PASS: CONN_PASS office/sure-pg ... with "sure|sure|N|…", N >= 1 — sidekiq (sure-worker) holds a
+# session on the NEW postmaster. FAIL: CONN_FAIL ... missing: sure|sure (sidekiq never reconnected).
+```
+
+The `rails runner` boots a fresh Rails process in the sure-web pod, so it proves the image's DB
+config reaches the new sure-pg; the sidekiq session in `conn.sh` proves the long-running worker
+pool reconnected. Informational only: `kubectl logs -n office deploy/sure-worker --since=2m | grep -ciE "PG::|ConnectionBad|could not connect"`
+and the same against `deploy/sure-web`.
 
 - CONTROL: alertname SurePostgresDown — must be **not firing** 6 min after the roll (`for: 5m`
   on `kube_pod_status_ready{pod=~"sure-pg-.*"}`). If it is firing, the pod never became Ready.
@@ -567,18 +688,31 @@ diff <(grep ^VEC vec-shared-before.txt) <(grep ^VEC vec-shared-after.txt) && ech
   PASS: `COUNTS_PASS tables=249`. Increases are allowed only in tables that live traffic writes, and
   each must be explained: `sweep_history.public.{sweep_cycles,sweep_findings,window_runs,plan_executions,component_autonomy,slo_snapshots}`,
   nocodb audit tables, and `pellets` price rows. Any decrease is a FAIL, and so is a changed table set.
-- Consumers reconnected. 2 min after Ready:
+- CONSUMER PRESENCE GATE — every (database, user) pair connected before the restart has ≥ 1
+  backend newer than the NEW postmaster, within a bounded 10-min wait:
   ```bash
-  for x in "databases nocodb" "ai oc8-backend" "ai oc8-worker" "ai oc8-scheduler" "monitoring sweep-dashboard" "media media-dashboard"; do
-    ns=${x%% *}; dp=${x##* }
-    printf '%s/%s ready=%s errs=%s\n' "$ns" "$dp" "$(kubectl get deploy -n "$ns" "$dp" -o jsonpath='{.status.readyReplicas}')" \
-      "$(kubectl logs -n "$ns" deploy/"$dp" --since=2m 2>/dev/null | grep -ciE 'could not connect|connection refused|terminating connection|server closed the connection')"
-  done
+  cd /tmp/pgv-87
+  sh conn.sh "$PUSH_C" pairs-shared-before.txt databases postgresql
   ```
-  PASS: every line `ready=1 errs=0`. `errs` counts only the 2 min **after** reconnect. A consumer
-  that never reconnected keeps logging and reads > 0. A missing deployment prints `ready=` (empty),
-  which is also a FAIL.
-- `sweep_history` readable by its reader role: re-establish the DSN (`source runbooks/lib/sweep-pg-dsn.sh && sweep_pg_dsn_up`).
+  PASS: `CONN_PASS databases/postgresql postmaster=<epoch>>push=<PUSH_C>` and every pair of
+  `pairs-shared-before.txt` except `pellets|pellets` present with N ≥ 1 (2026-10-05 baseline:
+  `nocodb|nocodb`, `oc8|oc8_app`, `sweep_history|sweep_reader`). Before each poll the script sends
+  one HTTP request each to nocodb and sweep-dashboard, which open a session on demand (measured: a
+  single nocodb request took `nocodb|nocodb` from 0 to 1). FAIL shapes: `CONN_FAIL … missing: oc8|oc8_app`
+  (oc8's pool never came back — check `kubectl logs -n ai deploy/oc8-scheduler`), `postmaster=<old>`
+  (the pod never restarted, so the "reconnect" proves nothing), `empty-baseline`.
+  `pellets|pellets` is excluded from the requirement on purpose: that session is Grafana's datasource
+  pool (client IP = the grafana pod), which reconnects only when someone opens a pellets panel, and
+  the pellets data itself is covered by the counts gate. Its write-side consumer is the
+  `home-automation/pallet-price-monitor` CronJob (`0 8,20 * * *` Berlin), checked in the morning: its
+  `kube_cronjob_status_last_successful_time` must be newer than the window end after the 08:00 run.
+- Readiness (supporting, not the gate):
+  `for x in "databases nocodb" "ai oc8-backend" "ai oc8-worker" "ai oc8-scheduler" "monitoring sweep-dashboard" "media media-dashboard"; do kubectl get deploy -n ${x%% *} ${x##* } -o jsonpath='{.metadata.name}={.status.readyReplicas}{"\n"}'; done`
+  — every line `=1`; an empty value is a FAIL.
+- Informational only (not a gate): `kubectl logs -n <ns> deploy/<dp> --since=2m | grep -ciE 'could not connect|connection refused|terminating connection|server closed the connection'`
+  for the six deployments above. A non-zero count is a lead to read, not a verdict.
+- `sweep_history` readable by its reader role (this is also the first moment a DSN may be held
+  again; §2.7): re-establish the DSN (`source runbooks/lib/sweep-pg-dsn.sh && sweep_pg_dsn_up`).
   In that shell, `.venv/bin/python3 runbooks/policy-cli.py finding list --grep pgvector | grep -c '^F-'`
   must be ≥ 1 (6 rows on 2026-10-03). It reads 0 or an error if the DB or grants are gone. Do
   `sweep_pg_dsn_down` before any commit.
@@ -596,10 +730,15 @@ kubectl get job -n databases oc8-db-init-v1a sweep-history-init-v9a -o jsonpath=
 # PASS: both "1" and both on …0.8.7-pg16@sha256:7b822b0a…
 kubectl get job -n databases oc8-db-init-v1 sweep-history-init-v9 2>&1 | grep -c NotFound
 # PASS: 2 (Flux pruned both old Jobs)
-kubectl logs -n databases job/oc8-db-init-v1a | tail -1
+# Read both Job logs RIGHT AFTER each Job shows succeeded=1. Do not defer this to the morning
+# report: on 2026-10-05 `kubectl logs job/oc8-db-init-v1` (completed earlier) already returned
+# "error: timed out waiting for the condition" — the pod is no longer readable, and a gate that
+# reads nothing must count as FAIL, not as "no errors".
+kubectl wait -n databases --for=condition=complete job/oc8-db-init-v1a job/sweep-history-init-v9a --timeout=300s
+kubectl logs -n databases job/oc8-db-init-v1a | tail -1 | tee jobs-oc8.log
 # PASS: "==> Done. vector: 0.8.6"  — the bootstrap completed AND CREATE EXTENSION IF NOT EXISTS left the catalog alone
-kubectl logs -n databases job/sweep-history-init-v9a | tail -1
-# PASS: "==> Done"
+kubectl logs -n databases job/sweep-history-init-v9a | tail -1 | tee jobs-sweep.log
+# PASS: "==> Done". An empty file or "error: timed out" is a FAIL (re-read immediately; if the pod is gone, assert via §4.D CONTENTS below and record the gap).
 flux get ks -A | grep -E '^(databases|ai)[[:space:]]+(oc8-db|oc8|sweep-history)[[:space:]]'
 # PASS: three rows READY True (oc8-db is wait:true and gates ai/oc8)
 ```
@@ -609,9 +748,19 @@ flux get ks -A | grep -E '^(databases|ai)[[:space:]]+(oc8-db|oc8|sweep-history)[
   because the apply failed with `field is immutable`. Then the ks shows `False`.
 - CONTENTS ASSERTION: policy data survived the bootstrap re-run (SOP §4a f). Re-run `counts.sh`
   against the shared instance into `counts-shared-afterD.txt` and run the 4.A Python block on
-  `counts-shared-after.txt counts-shared-afterD.txt`. PASS: `COUNTS_PASS`, and
-  `sweep_history.public.{accepted_risks,slo_definitions,noise_suppressions,security_acceptances}`
-  must be **identical** (nothing writes those at night). A decrease in any of them: restore it from
+  `counts-shared-after.txt counts-shared-afterD.txt`. PASS: `COUNTS_PASS`. Then the explicit
+  equality check for the four operator-policy tables (nothing writes those at night, so any
+  difference, up OR down, is a FAIL):
+  ```bash
+  cd /tmp/pgv-87
+  for t in accepted_risks slo_definitions noise_suppressions security_acceptances; do
+    b=$(grep "^sweep_history|public.$t|" counts-shared-before.txt | cut -d'|' -f3)
+    a=$(grep "^sweep_history|public.$t|" counts-shared-afterD.txt | cut -d'|' -f3)
+    [ -n "$b" ] && [ "$b" = "$a" ] && echo "EQ_PASS $t=$a" || echo "EQ_FAIL $t before=${b:-missing} after=${a:-missing}"
+  done
+  ```
+  PASS: four `EQ_PASS` lines. `EQ_FAIL … before=missing` means the baseline did not measure the
+  table (stop and look, the gate did not run). A decrease in any of them: restore it from
   `dump-sweep_history.pgc` (§5.3) immediately.
 
 ## 5. Rollback
@@ -683,8 +832,10 @@ delete without the 3-step pre-flight. None is in scope here (all three volumes a
 - **`maxSurge: 0` on postgresql is load-bearing** (`docs/sops/longhorn-rwo-multi-attach.md`). Do not
   change the strategy in the same commit.
 - `conflicts_with` covers every same-file, same-instance or same-controller plan found on
-  2026-10-03 (frontmatter comments give each reason). `kube-prometheus-stack-91.4.1` is executed, so
-  there is no same-night Prometheus bump to guard. talos/talconfig/longhorn-class work is exclusive
-  or listed.
+  2026-10-03, re-checked 2026-10-05 (frontmatter comments give each reason).
+  `kube-prometheus-stack-91.9.0` is vetted for `nightly:2026-10-08` and `exclusive: true`. §4's
+  CONTROL gates read Prometheus, so it is listed in `conflicts_with`: never schedule this plan on
+  that night. `app-template-5.2.1` is now `nightly:2026-10-09` (same files for affine-pg/sure-pg),
+  so 10-09 is excluded too. talos/talconfig/longhorn-class work is exclusive or listed.
 - Not covered here on purpose: catalog alignment (`ALTER EXTENSION vector UPDATE`). It is cosmetic
   for 0.8.7 and it converts the rollback class to one-way. Do not fold it into this plan.

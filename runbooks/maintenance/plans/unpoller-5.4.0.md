@@ -64,9 +64,9 @@ conflicts_with:                       # re-checked 2026-10-05 against maintenanc
                                       # blackbox (now blackbox-only since 2026-10-05; this plan reads no
                                       # blackbox probe, so that entry is dropped). Reciprocal present.
   - kube-prometheus-stack-91.9.0      # restarts Prometheus, the instrument §2.5/§4.3-§4.5/§4.7 read
-                                      # (authoring rule 4). NOT yet reciprocal: that plan's list lacks
-                                      # unpoller-5.4.0 (repo correction; the scheduler honours this
-                                      # field symmetrically, so this entry binds on its own).
+                                      # (authoring rule 4). Reciprocal present (8921c1bd).
+  - flux-distribution-2.9.6           # upgrades the Flux controllers that reconcile this commit (same
+                                      # reason as flux-fleet-0.60.0). Reciprocal present in its list.
 exclusive: false
 security_ref: null                    # version-currency driver only. The two security findings on
                                       # this component (F-cafe8865/AR-114, F-2991c787/AR-115) are
@@ -86,13 +86,12 @@ finding_refs: [F-464c9d8b, F-8551ca27] # F-464c9d8b = the OPEN version-lane row 
                                       # 2026-10-05: "… v5.2.8 -> v5.5.0 (minor)"). Script-owned, ONE row
                                       # per component: it auto-closes when the pin moves off v5.2.8 —
                                       # never close it by hand. F-8551ca27 = the plan-section row
-                                      # "re-target unpoller-5.4.0 to v5.5.0" (policy-cli, agent-authored:
-                                      # never auto-closes) — this refresh IS its remedy; the coordinator
-                                      # closes it with `finding close F-8551ca27 --commit <sha>`.
+                                      # "re-target unpoller-5.4.0 to v5.5.0" — remedied by this refresh,
+                                      # already RESOLVED (commit ced94db9); kept as the provenance ref.
                                       # (F-23119c27, the earlier v5.2.10-patch row, is resolved.)
-review: null
-status: draft
-window: null
+review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (B1 30d-vs-1w evidence, B2 absence greps) -> fixed -> delta ready-for-go
+status: vetted
+window: "nightly:2026-10-14"   # scheduled 2026-10-05: AUTO-NIGHT (image graduated); alone; clear of kps (10-08), flux-distribution, coredns-1.48.2 (sat 10-17)
 premises:
   - id: live-image-still-v5.2.x
     why: >-
@@ -419,9 +418,17 @@ calls share no shell variables, so every later step reads files, not variables.
    grep -ciE 'save_protect' "$S"                              # expect 0  (§1.3 Protect path off)
    grep -ciE 'otel|opentelemetry' "$S"                        # expect 0
    grep -cE '^[[:space:]]*pass[[:space:]]*=.*[<>&\\]' "$S"    # expect 0  (§1.4a: no JSON-special chars; a '"' inside the value would already break TOML)
+   grep -cE '^[[:space:]]*user[[:space:]]*=.*[<>&\\]' "$S"    # expect 0  (§1.4a, same check for the username)
+   # POSITIVE CONTROLS -- prove the file decrypted and the absence greps above read the real config:
+   grep -cE '^[[:space:]]*pass[[:space:]]*=' "$S"             # expect 1
+   grep -cE '^[[:space:]]*user[[:space:]]*=' "$S"             # expect 1
+   grep -cF '[unifi]' "$S"                                     # expect >= 1
    rm -f "$S"
    ```
-   Measured 2026-09-30: 2 / 1 / 0 / 0 / 0. The patterns are `[[:space:]]`-based
+   Measured 2026-09-30: 2 / 1 / 0 / 0 / 0; positive controls and the `user`
+   special-char line re-measured 2026-10-05: 0 / 1 / 1 / 1. **If any positive
+   control reads 0, the decrypt or the file layout failed and every `expect 0`
+   above is meaningless — STOP.** The patterns are `[[:space:]]`-based
    and unanchored at column 0 on purpose: the TOML is indented inside the
    Secret's `stringData`, and `\s` is not a BSD `grep -E` class.
    **If `save_protect` is now present/true, stop** — §1.3's inertness claim no
@@ -440,8 +447,8 @@ calls share no shell variables, so every later step reads files, not variables.
    q 'unpoller_prometheus_cache_age_seconds'                           # ['38.79']
    q 'increase(unpoller_prometheus_refresh_failures_total[24h])'       # ['0']
    q 'unpoller_prometheus_refresh_failures_total'                      # raw counter; if > 0, evaluate §4.5 only at >= 10 min after Ready
-   q 'max_over_time(increase(unpoller_prometheus_refresh_failures_total[10m])[30d:5m])'  # ['2.22'] - proves §4.5's ==0 gate CAN read non-zero
-   q 'max_over_time(unpoller_prometheus_cache_age_seconds[30d])'       # ['329.9'] - proves the < 150 gate CAN fail
+   q 'max_over_time(increase(unpoller_prometheus_refresh_failures_total[10m])[7d:5m])'  # INFORMATIONAL: ['0'] 2026-10-05 (archived 2.22, see below)
+   q 'max_over_time(unpoller_prometheus_cache_age_seconds[7d])'        # INFORMATIONAL: ['101.33'] 2026-10-05 (archived 329.9, see below)
    q 'unpoller_controller_uptime_seconds'                              # ['0']   <- the sysinfo bug (§1.4b)
    q 'count({__name__=~"unpoller_(lte|sensor|protect|device_mbb).*"})' # []      (0 series)
    q 'count by (type) (unpoller_device_info)'                          # uap 4, udm 1, usw 5 — a `umbb` type here voids §1.3's UMBB bullet
@@ -458,11 +465,15 @@ calls share no shell variables, so every later step reads files, not variables.
    before the bump (nightly window, few clients joining/leaving), widened to
    **±3%** if the window runs in daytime. Never compute the band from a printed
    number above.
-   The two `max_over_time` lines are the **bad-case evidence** for §4.5: over
-   30 d the 10-min refresh-failure increase reached **2.22** and the counter
-   moved (`changes(unpoller_prometheus_refresh_failures_total[30d])` = **2**),
-   and cache age peaked at **329.9 s** — both gates have demonstrably read
-   their failing side on this exact series, so they are not inert.
+   The two `max_over_time` lines relate to the **bad-case evidence** for §4.5.
+   Prometheus retention is **1w** (live `storage.tsdb.retention.time`, 2026-10-05),
+   so they use `[7d]`. The evidence itself is **ARCHIVED**: measured 2026-09-30
+   (sweep b23be87b), the 10-min refresh-failure increase had reached **2.22**,
+   the counter had moved (`changes(...)` = **2**) and cache age had peaked at
+   **329.9 s** — both gates demonstrably read their failing side on this exact
+   series, so they are not inert. Those samples have **aged out of the 1w
+   retention**; on 2026-10-05 the `[7d]` lines read `0` / `0` / `101.33`.
+   **A reading of 0 / < 150 at execution is expected and is NOT a STOP.**
    If the raw `unpoller_prometheus_refresh_failures_total` is already > 0 here
    that is fine (it is a counter since pod start); it only means §4.5 must be
    read at ≥ 10 min after Ready so the `[10m]` window excludes the v5.2.8 pod's
@@ -687,16 +698,16 @@ N=0 is a rollout FAIL, not a flaky query. Identity (old vs new) is §4.1's job.
    `[]` (the gauge is only registered when the cache is enabled); `-1` means the
    cache has never completed a refresh and is a FAIL, not a small age; for a
    broken login (§1.4a) it is a growing age and a non-zero increase.
-   **These gates can fail — measured, not argued** (§2.5 bad-case lines,
-   re-measured by the plan review in sweep b23be87b):
-   `max_over_time(increase(unpoller_prometheus_refresh_failures_total[10m])[30d:5m])`
-   = **2.22**, `changes(unpoller_prometheus_refresh_failures_total[30d])` = **2**,
-   `max_over_time(unpoller_prometheus_cache_age_seconds[30d])` = **329.9** s.
-   So both series have read their failing side in the last 30 d on this exact
-   exporter; an empty or always-zero instrument would have shown neither.
-   Baseline 38.8 s at authoring; the last 24 h increase was 0 despite the known
-   re-auth lines, and refresh failures happened only twice in 30 d, so a
-   non-zero 10-minute increase right after the roll is signal, not noise.
+   **These gates can fail — measured, not argued** (ARCHIVED evidence, measured
+   2026-09-30 in sweep b23be87b over the then-available history; aged out of the
+   1w retention since): the 10-min refresh-failure increase peaked at **2.22**,
+   `changes(unpoller_prometheus_refresh_failures_total)` = **2**, cache age
+   peaked at **329.9** s. So both series have read their failing side on this
+   exact exporter; an empty or always-zero instrument would have shown neither.
+   Today's `[7d]` re-reads (`0` / `0` / `101.33` on 2026-10-05) are expected
+   and NOT a STOP. Baseline 38.8 s at authoring; refresh failures are rare
+   (twice in the archived window, zero in the last 7 d), so a non-zero 10-minute
+   increase right after the roll is signal, not noise.
 6. **CONTENTS ASSERTION (the InfluxDB write path still advances):** re-run the
    §2.6 query with the same `range(start:-2h)` ≥ 2 min after the new pod's
    `Poller->InfluxDB started` line; the newest `uap_radios` `_time` must be
@@ -790,8 +801,9 @@ reads them, nothing needs cleaning. If Helm is ever wedged `pending-upgrade`
   serialize with — no §4 gate reads a blackbox probe);
   `kube-prometheus-stack-91.9.0` (restarts the Prometheus every §4 gate reads).
   `flux-reconciler-impersonation` is `exclusive: true` and excludes everything
-  on its own. **Repo correction:** `kube-prometheus-stack-91.9.0`'s
-  `conflicts_with` does not yet name this plan; add it there for reciprocity. `otel-operator-0.23.0` (nightly 2026-10-03, `shared: [monitoring]`)
+  on its own. `flux-distribution-2.9.6` (upgrades the Flux controllers, same
+  reason as flux-fleet). `otel-operator-0.23.0` (draft, unwindowed since its
+  0.24.0 retarget; `shared: [monitoring]`)
   restarts neither Prometheus nor anything on unpoller's scrape path — sharing a
   window is acceptable, but do not interleave their verifications.
 - **Chart-leg follow-up for whoever runs `flux-oci-chart-sources` stage 8:** the
