@@ -11,8 +11,13 @@ kind: infra
 current: "v1.14.1"                    # live on all 3 nodes, measured 2026-10-01 ~03:40Z (premise
                                       # nodes-on-v1.14.1): kernel 6.18.51-talos, containerd 2.3.5,
                                       # kubelet v1.36.0, etcd 3.7.1 / storage 3.7.0
-target: "v1.14.2"                     # released 2026-09-29T20:44:07Z, prerelease=false; newest
-                                      # stable on any line (v1.15.0-alpha.0 is a prerelease)
+target: "v1.14.2 + Kubernetes 1.36.5" # Talos v1.14.2: released 2026-09-29T20:44:07Z, prerelease=false;
+                                      # newest stable on any line (v1.15.0-alpha.0 is a prerelease).
+                                      # Kubernetes v1.36.0 -> v1.36.5 FOLDED IN 2026-10-05 (operator decision,
+                                      # chat 2026-10-05): `talosctl upgrade-k8s` as Phase K, AFTER the three
+                                      # node rolls converge, no reboot, behind its own go/no-go (§3.K0).
+                                      # Was the standalone plan k8s-1.36.5 (now superseded, kept as the
+                                      # deferral fallback, §3.K0 DEFER).
 update_type: patch
 risk: high                            # NOT because v1.14.2 looks dangerous (20 commits, no etcd/K8s
                                       # move, §1) but because it is a rolling reboot of all three
@@ -21,11 +26,20 @@ risk: high                            # NOT because v1.14.2 looks dangerous (20 
                                       # replica 2, the only HTTP data plane, and a MEASURED history of
                                       # drain-driven survivor fsync stalls + elections on the last roll
                                       # (docs/sops/talos-upgrade.md §14.3, F-2cb2dbc9).
-est_duration_min: 165                 # IN-WINDOW, from the 2026-09-27 MEASURED timings
-                                      # (talos-upgrade.md §14.7, F-3625b9f6), not the old 45-min/node
-                                      # guess. Phase A prep (~25 min, Flux-inert) runs BEFORE the window
-                                      # opens. Arithmetic in §7.
-needs_reboot: true                    # three sequential node reboots
+est_duration_min: 180                 # = the sun-attended SCHEDULABLE CAP (200 - 20 Step-0), NOT the full
+                                      # scope. FULL SCOPE IS 210 > 180: OS roll 165 (2026-09-27 MEASURED
+                                      # timings, talos-upgrade.md §14.7, F-3625b9f6) + Phase K 45 (with the
+                                      # Phase A pre-pull; 49 without). Phase K is the DESIGNED OVERFLOW:
+                                      # it starts only if §3.K0 is reached by T+129 (or the present
+                                      # operator extends), else it is DEFERRED and the OS roll alone is
+                                      # the complete, green outcome. Declared 180 (not 210) because 210
+                                      # could never be placed and would strand the OS roll too; the
+                                      # plan is exclusive, so the figure only decides fit. Arithmetic §7.
+                                      # Phase A prep (~30 min incl. the §3.7b pre-pull) runs BEFORE the
+                                      # window opens and is not counted.
+needs_reboot: true                    # three sequential node reboots (Phase B). Phase K reboots
+                                      # nothing: every upgrade-k8s machine-config patch is
+                                      # ApplyConfigurationRequest_NO_REBOOT (talos pkg/cluster/kubernetes/patch.go)
 exclusive: true                       # the node roll must have its sun-attended slot TO ITSELF,
                                       # including plans not written yet (§6)
 touches:
@@ -37,7 +51,10 @@ touches:
                                       # only if that git hold is lifted before the window (§2.0b re-derives)
     - my-software-showcase            # 1 ImageUpdateAutomation suspended/resumed
     - kube-system                     # etcd, kube-apiserver/-controller-manager/-scheduler static
-                                      # pods, coredns, cilium, authentik + 13 outposts
+                                      # pods (rescheduled by the roll; IMAGE-BUMPED by Phase K), coredns,
+                                      # cilium, authentik + 13 outposts; Phase K: 7 Talos bootstrap
+                                      # objects (SSA annotation adoption) + configmap
+                                      # talos-bootstrap-manifests-inventory
     - storage                         # longhorn-manager, instance-manager, CSI, 94 volumes
     - network                         # envoy-gateway, envoy-internal, envoy-external, k8s-gateway,
                                       # external-dns, adguard-home, cloudflared
@@ -46,11 +63,17 @@ touches:
     - security                        # falco (modern_ebpf meets kernel 6.18.54), wazuh-agent
     - "ALL (cluster-wide)"            # every pod is evicted and rescheduled once per node
   resources:
-    - kubernetes/bootstrap/talos/talconfig.yaml   # talosVersion v1.14.1 -> v1.14.2 (THE node image bump)
+    - kubernetes/bootstrap/talos/talconfig.yaml   # Phase A: talosVersion v1.14.1 -> v1.14.2 (THE node image
+                                                  # bump); Phase K: kubernetesVersion v1.36.0 -> v1.36.5 (§3.K2)
     - runbooks/auto-update-policy.yaml            # stale "currently v1.14.1" reason text (§3.3)
     - .mise.toml                                  # talosctl CLI pin ONLY, LAST, after §5.4 (§3.12)
-    # NOT kubernetes/bootstrap/talos/clusterconfig/: gitignored plaintext, NOT regenerated, NOT
-    # applied by this plan (talosctl upgrade does not write machine config, §1.3).
+    - kubernetes/bootstrap/talos/clusterconfig/   # gitignored local render: NOT touched by Phases A/B
+                                                  # (talosctl upgrade does not write machine config, §1.3);
+                                                  # RE-RENDERED in Phase K (§3.K3, 12 lines/node measured)
+                                                  # so a later apply-config cannot downgrade K8s. Never applied.
+    - "node images: kube-apiserver/-controller-manager/-scheduler:v1.36.5 (cri ns) + siderolabs/kubelet:v1.36.5 (system ns) pre-pulled on all 3 nodes in Phase A (§3.7b, ~140 MB/node)"
+    - "machine config (all 3 nodes, Phase K, NO_REBOOT): apiserver/controller-manager/scheduler/kubelet/kube-proxy image fields only"
+    - "clusterrolebinding/system-bootstrap-approve-node-client-csr, system-bootstrap-node-bootstrapper, system-bootstrap-node-renewal, system:talos-nodes; clusterrole/system:talos-nodes; secret/kube-system/bootstrap-token-*; configmap/kube-system/kubeconfig-in-cluster (Phase K annotation-only SSA adoption, §1.5)"
     - node/k8s-nuc14-01                           # 192.168.55.11
     - node/k8s-nuc14-02                           # 192.168.55.12 — runs prometheus-kube-prometheus-stack-0 (2026-10-01)
     - node/k8s-nuc14-03                           # 192.168.55.13 — held VIP AND etcd leadership 2026-10-01 03:40Z
@@ -58,6 +81,11 @@ touches:
     - "all Longhorn replicas (188 = 94 volumes x numberOfReplicas 2, 2026-10-01)"
     - "imageupdateautomation (every main-pushing one NOT already suspended — 3 of 5 on 2026-10-01; the 2 absenty ones are suspend:true in git and left alone; enumerated live at §2.0b)"
   shared:
+    - apiserver                       # Phase B: one apiserver down per node reboot; Phase K: all 3
+                                      # kube-apiservers restart on v1.36.5, one node at a time
+                                      # (VIP holder's restart blips the executor's kubectl)
+    - flux                            # Phase K: Flux controllers' watches drop with each apiserver
+                                      # restart; §3.K6 reads Flux health (SSA path fixed in 1.36.3)
     - etcd                            # quorum 3; exactly ONE member may be down
     - cni/cilium                      # DaemonSet restarts per node
     - coredns                         # cluster CoreDNS pods reschedule per node
@@ -71,7 +99,8 @@ touches:
     - cifs-share                      # every smb.csi mount is torn down/remounted with its pods
     - flux-source                     # PUSH FREEZE: origin/main must equal the freeze sha before every node
     - git-main                        # no session/bot pushes to main in-window
-    - talos-machineconfig             # node OS + kernel 6.18.51 -> 6.18.54 (block WBT newly ON, §1.2)
+    - talos-machineconfig             # node OS + kernel 6.18.51 -> 6.18.54 (block WBT newly ON, §1.2);
+                                      # Phase K patches the live machine config (image fields, NO_REBOOT)
 depends_on: []                        # RESOLVED 2026-10-05 (F-c688c50f): satisfied depends_on removed --
                                       # talconfig-multidoc-migration was executed green on 2026-10-04
                                       # (now:2026-10-04) in a7965251, retired 10bee773. Premise
@@ -92,11 +121,21 @@ conflicts_with:                       # exclusive: true already keeps everything
                                       # reads Prometheus (canary choice, etcd latency, alerts); a
                                       # Prometheus restart the same night blanks that evidence. Any
                                       # further kube-prometheus-stack plan must be added here too.
-  - k8s-1.36.5                        # reciprocity (2026-10-05, that plan's planner): `talosctl
-                                      # upgrade-k8s` patches every node's machine config (NO_REBOOT) and
-                                      # restarts all apiservers + kubelets; never the same night. If it
-                                      # runs FIRST, this plan's §2.2/§4 PASS lines must read v1.36.5,
-                                      # not v1.36.0 (k8s-1.36.5 §6).
+  # - k8s-1.36.5 (REMOVED 2026-10-05: folded into this plan as Phase K and marked superseded_by
+  #   talos-linux-1.14.2; a conflict with one's own folded scope is meaningless. If Phase K is
+  #   DEFERRED and k8s-1.36.5 is re-activated, re-add it here — §3.K0 DEFER.)
+  # Carried forward from k8s-1.36.5's conflicts_with for the folded Phase K scope (exclusive: true
+  # already keeps them out of the slot; listed so the relation survives if exclusivity is dropped):
+  - longhorn-1.13.0                   # Phase K: CSI plugin re-registration under every kubelet restart
+                                      # must not overlap a Longhorn manager/engine/CSI move (and §6.3:
+                                      # never roll nodes with a Longhorn upgrade in flight)
+  - flux-fleet-0.60.0                 # Phase K: Flux controllers restarting while apiservers roll would
+                                      # confound the §3.K6 Flux gate
+  - flux-reconciler-impersonation     # same Flux surface (exclusive plan; blocked 2026-10-04)
+  - nextcloud-fleet-35.0.1            # reciprocity: it names k8s-1.36.5 (apiserver restarts break its
+                                      # §3.4 log/exec reads + helm-controller's upgrade watch); the folded
+                                      # scope inherits the relation. Its owner should retarget its line to
+                                      # talos-linux-1.14.2.
 capability_change: true               # v1.14.2 changes node behaviour, not just versions (§1.2):
                                       # kernel CONFIG_BLK_WBT=y + CONFIG_BLK_WBT_MQ=y turns block
                                       # writeback throttling ON by default for the NVMe that etcd,
@@ -105,10 +144,13 @@ capability_change: true               # v1.14.2 changes node behaviour, not just
                                       # deletes kubelet CPU/memory-manager state files it judges
                                       # invalid before kubelet starts; sandboxd now starts early and
                                       # unconditionally and CRI start conditions changed. => never
-                                      # unattended. Operator present.
+                                      # unattended. Operator present. (Phase K alone would be false:
+                                      # 1.36.0 -> 1.36.5 is bug-fix only, no API/feature-gate move.)
 rollback_class: git-revert            # HONEST, and different from talos-1.14.1 (one-way): NOTHING
                                       # forward-only crosses this hop — etcd stays 3.7.1/storage 3.7.0,
-                                      # Kubernetes stays v1.36.0, no machine config is written. The
+                                      # no storage-version migration (K8s patch releases ship none).
+                                      # Phase B writes no machine config. Phase K's rollback is a second
+                                      # `upgrade-k8s --to 1.36.0` (path table "1.36->1.36", §5.5). The
                                       # git commit is inert (Flux does not reconcile bootstrap/talos/);
                                       # the NODE revert is a DRAINED `talosctl upgrade --image
                                       # <factory>:v1.14.1` on a Ready node (bare `talosctl rollback`
@@ -116,8 +158,15 @@ rollback_class: git-revert            # HONEST, and different from talos-1.14.1 
                                       # affected node, at ANY point of the roll — §5.1. Each node
                                       # revert is another reboot cycle (~25-30 min).
                                       # The §3.8a etcd snapshot is defence in depth, not the rollback.
-security_ref: null                    # no security driver
+security_ref: F-f3f2af15              # Phase K's driver: control-plane image security finding (detail
+                                      # in the DB only). The Talos OS hop itself has no security driver.
 finding_refs:
+  - F-f3f2af15                        # kube-apiserver:v1.36.0 image finding — Phase K is the remedy
+  - F-c0de81ca                        # kube-controller-manager:v1.36.0 image finding — Phase K
+  - F-b2d00c28                        # kube-scheduler:v1.36.0 image finding — Phase K
+                                      # (moved here from k8s-1.36.5 on the fold, 2026-10-05; if Phase K is
+                                      # DEFERRED these three move BACK to the re-activated k8s-1.36.5,
+                                      # §3.K0 DEFER, or they read as planned-by-a-plan-that-skipped-them)
   - F-2cb2dbc9                        # "Talos roll: node drain triggers etcd fsync stalls on survivors"
                                       # — this plan codifies pattern (ii) as gates (§3.10) and makes the
                                       # Longhorn-throttle decision explicit (§3.11; default: keep 8)
@@ -133,10 +182,11 @@ finding_refs:
   # talconfig-multidoc-migration).
 review: null
 status: draft
-window: null                          # sun-attended is the ONLY allow_reboot window. Earliest viable:
-                                      # after talconfig-multidoc-migration executes (2026-10-04) and on
-                                      # a Sunday no exclusive plan holds — 10-11 is held by
-                                      # flux-reconciler-impersonation (exclusive). The window agent assigns.
+window: null                          # sun-attended is the ONLY allow_reboot window. 2026-10-05: the
+                                      # flux-reconciler-impersonation placeholder on 10-11 was released;
+                                      # n8n-2.39.8 now holds sun-attended:2026-10-11. The coordinator will
+                                      # PROPOSE sun-attended:2026-11-01 for this plan — not assigned here;
+                                      # the window agent assigns.
 premises:
   # All read-only, single pipelines. Upstream reads use `kubectl get --raw` against a public
   # host with --kubeconfig=/dev/null and a dummy bearer (--token=none): kubectl is the only HTTP
@@ -244,6 +294,30 @@ premises:
       (double count) fails here.
     run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count(container_fs_writes_bytes_total%7Bnamespace%3D%22flux-system%22%2Ccontainer%3D%22manager%22%2Cpod%3D~%22kustomize-controller-.*%22%7D)'
     expect_matches: '"value":\[[0-9.]+,"1"\]'
+  # Phase K (Kubernetes 1.36.5) premises, carried from k8s-1.36.5 (all read-only; passed
+  #     2026-10-05 under `plan-premises.py k8s-1.36.5`). They describe the PRE-WINDOW state; Phase
+  #     K re-measures after the roll at §3.K1/§3.K4. talos-uniform-1.14 is subsumed by
+  #     nodes-on-v1.14.1 above.
+  - id: kubelets-on-1.36.0
+    why: "Phase K's `current` is kubelet v1.36.0 x3. Anything else means a partial earlier upgrade-k8s run (re-run resumes; read §5.5 first) or someone already upgraded."
+    run: kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.kubeletVersion}'
+    expect_exact: "v1.36.0 v1.36.0 v1.36.0"
+  - id: talconfig-pins-1.36.0
+    why: "§3.K2's anchored sed rewrites exactly this line (dry-tested 2026-10-05 on a scratch copy already carrying talosVersion v1.14.2). A different value means the sed is a no-op and upgrade-k8s would read the wrong --to."
+    run: "grep -c '^kubernetesVersion: v1.36.0$' kubernetes/bootstrap/talos/talconfig.yaml"
+    expect_exact: "1"
+  - id: apiserver-configs-on-1.36.0
+    why: "Talos' own APIServerConfig resources (what upgrade-k8s patches) carry v1.36.0 on all nodes: 6 image lines across 3 nodes, measured 2026-10-05. §3.K6 expects 6 at v1.36.5."
+    run: "talosctl --nodes=192.168.55.11,192.168.55.12,192.168.55.13 get apiserverconfigs -o yaml | grep -c 'image: registry.k8s.io/kube-apiserver:v1.36.0'"
+    expect_exact: "6"
+  - id: build-info-scraped-12
+    why: "§3.K6's CONTENTS ASSERTION reads kubernetes_build_info: 12 series (apiserver, kubelet, kube-scheduler, kube-controller-manager x3). Fewer means a scrape job went blind and the post-check could pass on an empty set."
+    run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count(kubernetes_build_info%7Bgit_version%3D%22v1.36.0%22%7D)'
+    expect_matches: '"value":\[[0-9.]+,"12"\]'
+  - id: bootstrap-inventory-7
+    why: "upgrade-k8s prunes against this SSA inventory. The 2026-10-05 dry-run diff showed 7 objects, all `configured` (annotation adoption), zero deletes, against an inventory of 7 entries. A different entry count means the prune set changed: §3.K4's dry-run must be read action by action."
+    run: kubectl get configmap -n kube-system talos-bootstrap-manifests-inventory -o jsonpath='{.data}'
+    expect_matches: '^\{(?:"[^"]+":"[^"]*",?){7}\}$'
   - id: longhorn-rebuild-limit-8
     why: >-
       §3.11 and §7 price the roll at concurrent-replica-rebuild-per-node-limit 8 (measured ~20 min
@@ -265,7 +339,17 @@ sops_refs:
 generated: "2026-10-01"
 ---
 
-# Talos Linux node roll — v1.14.1 → v1.14.2
+# Talos Linux node roll — v1.14.1 → v1.14.2, then Kubernetes v1.36.0 → v1.36.5
+
+> **2026-10-05 — Kubernetes 1.36.5 FOLDED IN (operator decision, relayed by the coordinator).**
+> The standalone plan `k8s-1.36.5` is `superseded_by: talos-linux-1.14.2`; its live-verified
+> `upgrade-k8s` procedure is **Phase K** here (§1.5, §3.K0–§3.K7, §5.5), run in the same Sunday
+> window **after** all three node rolls have converged and §4.4 is green, with no reboot, behind
+> its own go/no-go (§3.K0). The OS roll alone remains a complete, green outcome: Phase K is the
+> designed overflow and is DEFERRED rather than squeezed (§7 — full scope 210 min vs 180
+> schedulable). Phase A gains one Flux-inert prep step: pre-pulling the four 1.36.5 images
+> (§3.7b). **Expected outcome on price: Phase K DEFERRED unless the operator pre-approves the
+> ~30-min extension at the GO** (§7) — the GO should state that answer.
 
 > **Built on the executed `talos-1.14.1` plan** (retired in `40ca20d6`; full text:
 > `git show 40ca20d6^:runbooks/maintenance/plans/talos-1.14.1.md`) and on the lessons it
@@ -281,8 +365,11 @@ generated: "2026-10-01"
 
 Roll all three control-plane/worker nodes (`k8s-nuc14-01/02/03`, 192.168.55.11–.13, VLAN 55)
 from Talos **v1.14.1** to **v1.14.2**, one node at a time, with the Longhorn and etcd gates
-between nodes. Kubernetes stays **v1.36.0** (Talos 1.14.2's *default* moves to 1.37.1; ours is
-pinned in `talconfig.yaml` and is not touched). etcd stays **3.7.1**.
+between nodes. During the roll Kubernetes stays **v1.36.0** (Talos 1.14.2's *default* moves to
+1.37.1; ours is pinned in `talconfig.yaml`, and Phase B does not touch it). etcd stays **3.7.1**
+throughout. **Then, Phase K:** once the roll has converged and §4.4 is green, upgrade the control
+plane (kube-apiserver / -controller-manager / -scheduler static pods) and the kubelet on all three
+nodes from **v1.36.0 to v1.36.5** with `task talos:upgrade-k8s` (§1.5). No reboot.
 
 **Why held:** it reboots every node in the cluster. That is a sun-attended,
 operator-present, reboot-capable job by definition; nothing about the content makes it "safe".
@@ -339,9 +426,13 @@ talhelper **3.1.11** against a scratch `talconfig.yaml` at `v1.14.2`:
 talosctl upgrade --talosconfig=<path> --nodes=192.168.55.12 --image=factory.talos.dev/installer/43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3:v1.14.2 --image='factory.talos.dev/installer/43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3:v1.14.2' --timeout=10m;
 ```
 
-`talconfig-multidoc-migration` (which this plan depends on, §6.1) bumps talhelper to 3.1.17 and
-makes `task talos:generate-config` work again; neither matters to the roll. **This plan does
-not regenerate `clusterconfig/` and does not `apply-config` anything.** After it, each node's
+`talconfig-multidoc-migration` (executed 2026-10-04, a7965251; formerly this plan's depends_on,
+§6.1) bumped talhelper to 3.1.17 and
+made `task talos:generate-config` work again; neither matters to the roll. **Phases A and B do
+not regenerate `clusterconfig/` and nothing in this plan ever `apply-config`s.** (Phase K
+re-renders the gitignored `clusterconfig/` locally at §3.K3, after all three nodes run v1.14.2,
+so the render's installer tag and K8s images are both truthful; it applies nothing — upgrade-k8s
+patches the image fields itself.) After it, each node's
 `machine.install.image` still names the tag its last applied config carried (`:v1.13.10` today,
 `:v1.14.1` after the migration) — the running version is asserted by `kubectl get nodes`
 OS-IMAGE, never by that field.
@@ -352,6 +443,61 @@ All three nodes run `factory.talos.dev/installer/43b3cbfc…99a3` (live machinec
 Factory, 2026-10-01: `v1.14.2 → 200`, `v1.14.1 → 200`, `v9.9.9 → 404` (control). The stale
 `b85cceac…` comment in `patches/global/machine-intelgpu.yaml` reported by talos-1.14.1 §1 is
 still owed (repo correction, not this plan's file).
+
+### 1.5 Phase K — Kubernetes v1.36.0 → v1.36.5 (folded from `k8s-1.36.5`, 2026-10-05)
+
+**What `upgrade-k8s` does here** (upstream code, `siderolabs/talos` `pkg/cluster/kubernetes/
+talos_managed.go`, `kubelet.go`, `patch.go`, read at v1.14.1 and — `prePullImages` — re-read at
+v1.14.2 for this fold):
+1. **Compatibility check** against the Talos version, then `upgrade.NewChecks`. The path table
+   (`siderolabs/go-kubernetes` v0.2.41 `kubernetes/upgrade/path.go`) keys on major.minor and
+   lists `"1.36->1.36"`: v1.36.0→v1.36.5 and the rollback v1.36.5→v1.36.0 are both accepted.
+   `talos114.go` (§1.1): K8s 1.32.0–1.37.99 is supported on v1.14.1 **and** v1.14.2, so a later
+   per-node Talos rollback (§5.1) under K8s 1.36.5 is also supported (the 2026-10-05 dry-run
+   printed `Talos version 1.14.1 is compatible with Kubernetes version 1.36.5` ×3).
+2. **Image pre-pull** (`--pre-pull-images`, default true): `ImagePull` of apiserver,
+   controller-manager and scheduler `:v1.36.5` into the **`cri`** namespace of each control-plane
+   node, then `ghcr.io/siderolabs/kubelet:v1.36.5` (our kubelet image has no suffix) into the
+   **`system`** namespace of every node. **Not gated on `--dry-run`** (no DryRun check in
+   `prePullImages`), hence `--pre-pull-images=false` on every dry-run here. `talosctl image pull
+   --namespace cri|system` calls the same `ImagePull` API, which is what makes the §3.7b Phase A
+   pre-pull an exact, earlier copy of this step and nothing more.
+3. **Static pods**, apiserver → controller-manager → scheduler, one node at a time: patch the
+   image in the node's machine config with `ApplyConfigurationRequest_NO_REBOOT` (multi-doc
+   aware — patches our v1.14 `KubeAPIServerConfig` documents), wait for the new static pod Ready.
+4. **kube-proxy**: only the `KubeProxyConfig` image field changes (ours is `enabled: false`,
+   `daemonset/kube-proxy` NotFound — measured).
+5. **Kubelet**, one node at a time (NO_REBOOT): wait for kubelet down → healthy → Node reports
+   the new version and Ready.
+6. **Bootstrap-manifest sync** (SSA with an inventory, then prune). The 2026-10-05 dry-run (on
+   v1.14.1 nodes) showed **7 actions, all `configured`, 0 `created`, 0 `deleted`** — each only adds
+   `config.k8s.io/owning-inventory: talos-bootstrap-manifests-inventory` to an existing object
+   (4 ClusterRoleBindings, 1 ClusterRole, `secret/kube-system/bootstrap-token-*`,
+   `configmap/kube-system/kubeconfig-in-cluster`); the inventory lists exactly those 7. **The
+   manifests are rendered by the nodes' Talos machinery**, so this must be re-dry-run after the
+   roll, on v1.14.2 nodes (§3.K4) — the v1.14.1 reading is not transferable.
+
+**Upstream evidence** (`kubernetes/kubernetes` `CHANGELOG/CHANGELOG-1.36.md`, "since v1.36.0"
+through "since v1.36.4"): none of the five patch releases has an *Urgent Upgrade Notes*, *API
+Change* or *Deprecation* section; no API added or removed. Load-bearing here: 1.36.3 *"Fixed a
+kubelet memory leak regression in 1.36 caused by leaked contexts on every Pod sync"* (every node
+has run a 1.36.0 kubelet since 2026-04-30) and *"Fixes a 1.36 regression in server side apply
+where patching a container type (list or map) could result in `422 required` errors"* (Flux
+applies everything with SSA); 1.36.4 *"Update golang.org/x/text and golang.org/x/net
+dependencies to include security updates"* plus the Go toolchain bumps — the content behind
+`security_ref` (detail in the DB only). Upstream docs: *"Kubelet upgrades may cause workloads to
+restart"* — §3.K6 CA-K3 measures whether any did.
+
+**Why it was held:** the `siderolabs/*` deny rule in `auto-update-policy.yaml`. Its reason
+("needs a rolling node-reboot maintenance window") is wrong for the kubelet dep — upgrade-k8s
+reboots nothing — reported as a repo correction (Open items #7), not planned around. The hold
+itself is right: every apiserver and kubelet restarts, and the action is an imperative `talosctl`
+call Flux cannot revert.
+
+**Why after the roll, not before:** operator decision 2026-10-05. Either order is supported by
+upstream (§1.1 compatibility); after-the-roll means Phase B's gates and PASS lines (§2.2, §4.4
+#1: kubelet `v1.36.0`) stay exactly as reviewed, and Phase K's dry-run sees the final Talos
+machinery.
 
 ## 2) Pre-checks
 
@@ -709,6 +855,9 @@ commits to this repo; **merge no PRs** (incl. any talosctl CLI-pin PR — that i
 §5.4); no manual Renovate run.
 
 ```bash
+# (0) T0 for the §3.K0 clock = now (Step 0 is done). The window-open time is read in its OWN
+#     Bash call (0a) below, because a sourced SWEEP_PG_DSN must not share a shell with git commits.
+date -u +%s | tee "$SCR/t-plan-start.txt"
 # (1) record the source state (spec.ignore from F-baf94b64 should be set)
 mise exec -- kubectl -n flux-system get gitrepository flux-system \
   -o jsonpath='ignore=[{.spec.ignore}] size={.status.artifact.size} rev={.status.artifact.revision}{"\n"}' \
@@ -737,6 +886,46 @@ line 54, a deliberate operator hold) → `iua-presusp.txt` = those 2; `iua-main.
 `<none>`: `gas-price-monitor-image-updates`, `splitfairy-image-updates` (production),
 `showcase-image-updates` (showcase). Re-derive live; if the git hold was lifted by then, the
 split moves and that is fine — the rule is the column, not this list.
+
+**(0a) — Window-open time, ALWAYS rewritten (separate Bash call, READ-ONLY on sweep_history).**
+Authoritative source: `window_runs.started_at` for today's `sun-attended` row(s), which the window
+agent writes (`runbooks/window-run-record.py --outcome running`) when it opens the window, before
+Step 0. The EARLIEST row of the day is used (a retried Sunday then prices the retry against the
+first open, the conservative side). Only when no row exists does it fall back to the scheduled
+09:00 Europe/Berlin and mark the source `fallback-0900`, in which case §3.K0 clamps S0 ≥ 20
+(STEP0_RESERVE_MIN) and disables ASK-EXTENSION. The files are overwritten every run, so a stale
+value in the fixed `$SCR` cannot survive into a retried window.
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+cat > "$SCR/winopen.py" <<'PY'
+import os, sys, datetime as d, zoneinfo as z
+# winopen.py <out-epoch-file> <out-source-file> [YYYY-MM-DD]   (READ-ONLY; needs SWEEP_PG_DSN)
+import psycopg
+tz = z.ZoneInfo("Europe/Berlin")
+day = d.date.fromisoformat(sys.argv[3]) if len(sys.argv) > 3 else d.datetime.now(tz).date()
+with psycopg.connect(os.environ["SWEEP_PG_DSN"]) as c, c.cursor() as cur:
+    cur.execute("SELECT min(started_at), count(*) FROM window_runs WHERE slot = 'sun-attended' AND run_date = %s", (day,))
+    t, n = cur.fetchone()
+if t is not None:
+    ep, src = int(t.timestamp()), f"window_runs (earliest of {n} row(s) for sun-attended {day})"
+else:
+    ep, src = int(d.datetime.combine(day, d.time(9, 0), tz).timestamp()), "fallback-0900"
+open(sys.argv[1], "w").write(f"{ep}\n"); open(sys.argv[2], "w").write(f"{src}\n")
+print(f"window-open {d.datetime.fromtimestamp(ep, tz).isoformat()} source={src}")
+PY
+source runbooks/lib/sweep-pg-dsn.sh && sweep_pg_dsn_up >/dev/null || { echo "DSN-FAIL: window-open unreadable -> run the fallback by hand and accept the clamp"; }
+[ -n "$SWEEP_PG_DSN" ] && .venv/bin/python3 "$SCR/winopen.py" "$SCR/t-window-open.txt" "$SCR/t-window-open.src"
+sweep_pg_dsn_down >/dev/null 2>&1; true
+echo "S0 (informational; §3.K0 decides) = $(( ($(cat "$SCR/t-plan-start.txt") - $(cat "$SCR/t-window-open.txt")) / 60 )) min, source $(cat "$SCR/t-window-open.src")"
+```
+**Expected:** one `window-open … source=window_runs (earliest of N row(s) …)` line. *Read-only
+dry-run 2026-10-05:* `2026-09-27` → `08:47:38+02:00` from `window_runs` (that ad-hoc Sunday
+opened 13 min BEFORE 09:00 — exactly the case the 09:00 fallback gets wrong), `2026-10-04` →
+`09:00:14+02:00` from `window_runs`, `2026-10-05` (no row) → `09:00:00+02:00 source=fallback-0900`.
+`fallback-0900` on a real window day means the window agent did not record its open: say so in
+the report; Phase K is then clamped, not blocked. On `DSN-FAIL`, write the fallback by hand
+(`python3 -c` with the 09:00 epoch into `t-window-open.txt`, `fallback-0900` into
+`t-window-open.src`) — never leave the previous run's files in place.
 
 **PASS:** (1) `ignore=[…]` non-empty and `rev=` reads `refs/heads/main@sha1:<freeze-sha>` (else
 wait for the 1-min interval); (2) one 40-hex sha; (3) `iua-pre.txt` lists ≥ 1 automation
@@ -975,12 +1164,13 @@ mise exec -- kubectl get nodes -o custom-columns='N:.metadata.name,GPU:.status.a
 
 ## 3) Steps
 
-### Phase A — PREP, BEFORE the window opens (~25 min, zero cluster effect)
+### Phase A — PREP, BEFORE the window opens (~30 min, zero workload/config effect)
 
 `kubernetes/bootstrap/talos/` is **not reconciled by Flux** (no Kustomization `spec.path`
 points there; configs are applied by `talosctl` by hand). Committing the bump changes nothing
 until §3.9 runs `talosctl upgrade`. Run Phase A the evening before or before 09:00 on the day;
-§7's price excludes it.
+§7's price excludes it. The one node-side write is §3.7b's image pre-pull (~140 MB into each
+node's image store; nothing references the images until Phase K patches the machine config).
 
 **3.1 — The factory publishes our schematic at the target, WITH a negative control.**
 (talos-upgrade.md §4 Step 1; the 2026-09-06 intercepting-middlebox lesson.)
@@ -1122,8 +1312,8 @@ configs; re-run on the post-migration configs is the point of running it in Phas
   requires §3.2 in the working tree) *(measured with talhelper 3.1.11 on a scratch copy; 3.1.17
   after the migration prints the same shape)*.
 
-`rm -P "$SCR"/live-*.yaml` after §4.4 passes. Do NOT run `task talos:generate-config` or
-`apply-config` in this plan (§1.3).
+`rm -P "$SCR"/live-*.yaml` after §4.4 passes. Do NOT run `task talos:generate-config` in
+Phases A/B (only Phase K's §3.K3 renders, locally) and never `apply-config` (§1.3).
 
 **3.7 — Commit and push (still zero cluster effect).** `--only` with explicit paths; the
 worktree is shared. Write the message file BEFORE the commit; do not source `SWEEP_PG_DSN` in
@@ -1155,6 +1345,45 @@ git log -1 --format=%s          # MUST be the feat(talos) subject above; amend b
 git show --stat HEAD            # exactly these TWO files
 git push
 ```
+
+**3.7b — Pre-pull the Kubernetes 1.36.5 images for Phase K (Flux-inert; cuts ~4 min from
+Phase K). Runs ONLY after the operator's GO for this plan is recorded** (it writes to every
+node; a plan without a GO does not touch nodes, however inertly). This is upgrade-k8s's own step 2 (§1.5), done early through the same `ImagePull`
+API: apiserver/controller-manager/scheduler into the `cri` namespace, the kubelet into `system`,
+on all three nodes. It writes only to each node's image store; no pod, static pod, kubelet or
+machine config references a v1.36.5 image until §3.K5. **Survives Phase B's reboots — measured
+2026-10-05 on .12:** `ghcr.io/siderolabs/kubelet:v1.36.0` (system ns) and
+`registry.k8s.io/kube-apiserver:v1.36.0` (cri ns) carry CREATED `2026-04-30T13:49–13:50Z` (the
+2026-04-30 upgrade-k8s pull) on a node that booted `2026-09-27T08:26Z` in the v1.14.1 roll, and an
+unused `kube-apiserver:v1.34.0` pulled 2026-01-05 is still present — Talos upgrades preserve
+EPHEMERAL and kubelet image GC has not pruned unused images here. If the images are nevertheless
+gone at §3.K5, upgrade-k8s simply pulls them (+~4 min), so this step is an optimisation, never a
+gate on Phase K.
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+N=192.168.55.11,192.168.55.12,192.168.55.13
+CRI_RE='registry\.k8s\.io/kube-(apiserver|controller-manager|scheduler):v1\.36\.5[[:space:]]'
+SYS_RE='ghcr\.io/siderolabs/kubelet:v1\.36\.5[[:space:]]'
+# control BEFORE: target images absent; the same grep on v1.36.0 proves the reader works
+mise exec -- talosctl -n $N image list --namespace cri    | grep -cE "$CRI_RE"                                  # 0 (2026-10-05)
+mise exec -- talosctl -n $N image list --namespace cri    | grep -cE 'registry\.k8s\.io/kube-(apiserver|controller-manager|scheduler):v1\.36\.0[[:space:]]'   # 9
+mise exec -- talosctl -n $N image list --namespace system | grep -cE "$SYS_RE"                                  # 0
+for ip in 192.168.55.11 192.168.55.12 192.168.55.13; do
+  for img in registry.k8s.io/kube-apiserver:v1.36.5 registry.k8s.io/kube-controller-manager:v1.36.5 registry.k8s.io/kube-scheduler:v1.36.5; do
+    mise exec -- talosctl -n "$ip" image pull --namespace cri "$img" || echo "PULL-FAIL $ip $img"
+  done
+  mise exec -- talosctl -n "$ip" image pull --namespace system ghcr.io/siderolabs/kubelet:v1.36.5 || echo "PULL-FAIL $ip kubelet"
+done
+# AFTER
+mise exec -- talosctl -n $N image list --namespace cri    | grep -cE "$CRI_RE" | tee "$SCR/prepull-cri.txt"     # 9
+mise exec -- talosctl -n $N image list --namespace system | grep -cE "$SYS_RE" | tee "$SCR/prepull-sys.txt"     # 3
+```
+**PASS:** before `0` / `9` / `0`; no `PULL-FAIL` line; after `9` and `3`. A `PULL-FAIL` (registry
+outage, tag missing) is not a Phase B blocker — record it; §3.K5 will pull (and fail loudly if the
+tag really is missing, before touching anything: pre-pull runs first and aborts the run). The
+v1.36.0 grep printing `0` means the reader is blind: STOP the step. Re-read both counts at §3.K1
+(after the reboots).
 
 ### Phase B — THE ROLL (in-window)
 
@@ -1277,8 +1506,8 @@ kill $PROBE $L1 $L2 2>/dev/null
 mise exec -- kubectl get nodes -o wide
 mise exec -- talosctl -n <node-ip> version --short
 mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status
-mise exec -- python3 "$SCR/nodegate.py" check "$SCR/node-pre-<node-name>.json" <node-name> <yes|no: was it leader at 3.8?>
-python3 "$SCR/probe.py" "$SCR/probe-<node-name>.log" "$S1" "$S2" --allow-elections <1 if it was leader, else 0>
+mise exec -- python3 "$SCR/nodegate.py" check "$SCR/node-pre-<node-name>.json" <node-name> <yes|no: was it leader at 3.8?> | tee "$SCR/g310-<node-name>.txt"
+python3 "$SCR/probe.py" "$SCR/probe-<node-name>.log" "$S1" "$S2" --allow-elections <1 if it was leader, else 0> | tee -a "$SCR/g310-<node-name>.txt"
 grep -ciE 'elected leader|lost leader|leader changed' "$SCR/etcd-$S1-<node-name>.log" "$SCR/etcd-$S2-<node-name>.log"
 ```
 **PASS, all of:** node `Ready`, not `SchedulingDisabled`, `Tag: v1.14.2`; etcd **3 members**, no
@@ -1288,7 +1517,9 @@ wazuh-agent, otel daemon collector, node-exporter **3/3** — falco's `modern_eb
 6.18.54 here; survivors' NIC carrier +0; survivors' leader changes within the allowance);
 `probe.py` `VERDICT PASS` (≥ 6 samples, never 2 consecutive samples without a common healthy
 leader, elections within the allowance). The log grep is evidence for triage, not a gate
-(case-insensitive on purpose; etcd's wording varies by version).
+(case-insensitive on purpose; etcd's wording varies by version). `$SCR/g310-<node-name>.txt` is
+the per-node record §3.K0 reads (first `tee` overwrites, so a re-run of §3.10 for that node
+replaces a failed record rather than appending to it).
 
 **Pattern (ii) — talos-upgrade.md §14.3, now a written rule (F-2cb2dbc9).** If `nodegate.py` or
 `probe.py` reports an election that this node's own reboot does not explain: **STOP and triage.**
@@ -1373,8 +1604,8 @@ tracking reboots and the leader count is unreliable: STOP. Not PASS within 20 mi
 start → stop part-rolled (§5.2). Why 10 min not 1h: the last hour contains this plan's own
 drain by construction (talos-1.14.1 §3.10b).
 
-**3.12 — talosctl CLI pin → 1.14.2 — LAST, after §4.4 PASS and §5.4 ended the freeze, and only
-if all three nodes report v1.14.2.** No Renovate PR existed on 2026-10-01. If one has appeared
+**3.12 — talosctl CLI pin → 1.14.2 — LAST, after §4.4 PASS, Phase K (§3.K7 pushed, or K
+DEFERRED at §3.K0) and §5.4 ended the freeze, and only if all three nodes report v1.14.2.** No Renovate PR existed on 2026-10-01. If one has appeared
 by then whose diff changes ONLY the `"aqua:siderolabs/talos"` line to `"1.14.2"` with green
 checks (incl. `Flate Render Gate`), merge it (`gh pr merge <n> --squash`). Otherwise edit by hand:
 
@@ -1392,8 +1623,246 @@ mise install && mise exec -- talosctl version --short            # Client v1.14.
 Fewer than 3 nodes on v1.14.2 → do NOT bump; a v1.14.1 client drives a mixed cluster fine.
 The `talhelper` line is not touched here (the migration owns it).
 
-**Explicitly NOT in this window:** `task talos:upgrade-k8s` (K8s stays v1.36.0, supported),
-`generate-config`, `apply-config`, any machine-config patch.
+**Explicitly NOT in Phases A/B:** `task talos:upgrade-k8s` (that is Phase K, after §4.4),
+`generate-config` (Phase K §3.K3 only), `apply-config` (never), any machine-config patch other
+than the ones upgrade-k8s itself writes in Phase K.
+
+### Phase K — Kubernetes v1.36.0 → v1.36.5 (in-window, AFTER §4.4 + §4.5 PASS, no reboot)
+
+**Execution order of the window tail:** Phase B → §4.1–§4.6 → **§3.K0 checkpoint** → (K1–K6 +
+§4.7, or DEFER) → §5.4 freeze lift → §3.K7 commit/push (if K ran) → §3.12 CLI pin. The push
+freeze stays up through Phase K: `talconfig.yaml` is edited in the working tree from §3.K2 to
+§3.K7, and a concurrent edit of it (Renovate, another session) would ride into §3.K7's commit or
+make §3.K3's render diff unreadable. Phase K reads Prometheus through the same apiserver proxy
+as Phase B; while one of the three apiservers restarts, a `kubectl get --raw` through the VIP
+can be refused for a few seconds (Talos does not move the VIP on an apiserver restart) — retry
+the read, never "fix" it. In-cluster clients use the `kubernetes` Service, Cilium uses KubePrism
+(`127.0.0.1:7445`); both fail over to the other two apiservers.
+
+**3.K0 — GO / NO-GO / DEFER checkpoint (the designed overflow valve).** Mechanical, not an extra
+human stop: the operator's window GO covers Phase K; this checkpoint only asks the operator when
+the clock needs an extension.
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+N=192.168.55.11,192.168.55.12,192.168.55.13
+rm -f "$SCR/k-klim.txt"                                                     # never inherit a GO
+git fetch -q origin && [ "$(git rev-parse origin/main)" = "$(cat "$SCR/freeze-sha.txt")" ] && echo FREEZE-HELD
+mise exec -- kubectl get nodes -o 'custom-columns=N:.metadata.name,R:.status.conditions[?(@.type=="Ready")].status,OS:.status.nodeInfo.osImage,KL:.status.nodeInfo.kubeletVersion'
+grep -c '^kubernetesVersion: v1.36.0$' kubernetes/bootstrap/talos/talconfig.yaml      # 1
+# roll record: PRESENCE gate PER NODE on the §3.10 files (each: exactly 2 PASS = nodegate + probe,
+# 0 FAIL), plus the absence of pattern-(ii) triage records. zsh: `(N)` = empty glob is not an error.
+n=0; bad=0
+for f in "$SCR"/g310-*.txt(N); do n=$((n+1)); p=$(grep -c '^VERDICT PASS$' "$f"); x=$(grep -c '^VERDICT FAIL$' "$f"); echo "$(basename "$f") pass=$p fail=$x"; [ "$p" -eq 2 ] && [ "$x" -eq 0 ] || bad=$((bad+1)); done
+pii=$(find "$SCR" -maxdepth 1 -name 'pattern-ii-*.txt' | wc -l | tr -d ' ')
+[ "$n" -eq 3 ] && [ "$bad" -eq 0 ] && [ "$pii" -eq 0 ] && echo "K0-ROLLRECORD PASS (files=$n pattern-ii=$pii)" || echo "K0-ROLLRECORD FAIL (files=$n bad=$bad pattern-ii=$pii)"
+# §3.7b pre-pull counts (after the reboots) feed the clock: missing images = Phase K costs 49, not 45
+CRI=$(mise exec -- talosctl -n $N image list --namespace cri    | grep -cE 'registry\.k8s\.io/kube-(apiserver|controller-manager|scheduler):v1\.36\.5[[:space:]]')
+SYS=$(mise exec -- talosctl -n $N image list --namespace system | grep -cE 'ghcr\.io/siderolabs/kubelet:v1\.36\.5[[:space:]]')
+cat > "$SCR/k0clock.py" <<'PY'
+import sys
+# k0clock.py <window-open-epoch> <window-open-source> <plan-start-epoch> <now-epoch> <prepull-cri> <prepull-sys> <klim-out-file>
+tw = int(sys.argv[1]); src = sys.argv[2]; t0, now, cri, sysc = map(int, sys.argv[3:7]); out = sys.argv[7]
+fallback = not src.startswith("window_runs")
+s0_meas = (t0 - tw) // 60; el = (now - t0) // 60
+s0 = max(s0_meas, 20) if fallback else s0_meas        # no recorded open: assume >= STEP0_RESERVE_MIN
+kcost = 45 if (cri == 9 and sysc == 3) else 49        # §7: +4 when upgrade-k8s must pull
+close = 6                                              # §5.4 + §3.12
+raw = 200 - s0 - kcost - close                         # latest start that still ends inside the raw 200
+klim = min(180 - kcost - close, raw)                   # 129 with the pre-pull and S0 = 20
+print(f"open-source={src} S0={s0}min (measured {s0_meas}) EL=T+{el} prepull cri={cri}/9 sys={sysc}/3 -> Phase K {kcost}min; KLIM=T+{klim}; raw-limit=T+{raw}")
+if s0_meas < 0 and not fallback:
+    print("K0-CLOCK DEFER (clock inconsistent: recorded window open is after plan start)")
+elif el < 0:
+    print("K0-CLOCK DEFER (clock inconsistent: plan start in the future)")
+elif el <= klim:
+    open(out, "w").write(f"{klim}\n"); print("K0-CLOCK GO")
+elif el <= raw and not fallback:
+    print(f"K0-CLOCK ASK-EXTENSION (limit {raw})")
+else:
+    print("K0-CLOCK DEFER" + (" (no recorded window open: extension disabled)" if fallback and el <= raw else ""))
+PY
+python3 "$SCR/k0clock.py" "$(cat "$SCR/t-window-open.txt")" "$(cat "$SCR/t-window-open.src")" "$(cat "$SCR/t-plan-start.txt")" "$(date -u +%s)" "$CRI" "$SYS" "$SCR/k-klim.txt"
+```
+The clock prints **exactly one** of `K0-CLOCK GO` / `K0-CLOCK DEFER` / `K0-CLOCK ASK-EXTENSION
+(limit L)`, and only `GO` writes `$SCR/k-klim.txt` — the file §3.K5's guard requires. Dry-tested
+2026-10-05 on synthetic epochs (source `window_runs` unless stated): S0 20/EL 120 → GO (KLIM 129,
+file written); S0 20/EL 130 → DEFER; S0 5/EL 130 → ASK-EXTENSION (limit 144); **S0 40 (early
+ad-hoc open, 40-min Step 0)/EL 120 → DEFER (KLIM 109)**; `fallback-0900` with measured S0 0/EL 120
+→ GO at the clamped KLIM 129; `fallback-0900` S0 5/EL 135 → DEFER (no ASK on fallback); S0 20/EL
+126 with pre-pull 0/0 → DEFER (KLIM 125); recorded open after plan start → DEFER (inconsistent).
+No `k-klim.txt` in every non-GO case.
+
+**Roll-record known-bad demo (dry-tested 2026-10-05 in a scratch dir, run the same lines with
+`SCR` pointed at it):** three files with 2/2/2 PASS → `K0-ROLLRECORD PASS`; files with 2/1/3 PASS
+(total still 6) → `FAIL (files=3 bad=2 …)`; 2/2/2 plus one `pattern-ii-*.txt` → `FAIL (…
+pattern-ii=1)`; empty dir → `FAIL (files=0 …)`. One-line demo for the executor's own control:
+`D=$(mktemp -d); printf 'VERDICT PASS\n' > $D/g310-x.txt; SCR=$D` then the block above → `FAIL`.
+
+**GO to §3.K1 only if ALL hold:**
+1. **The OS roll is complete and green:** §4.4 #1–#11 and §4.5 all PASS (3× `Talos (v1.14.2)`,
+   kubelet still `v1.36.0`, Longhorn gate PASS, etcd converged, alerts sustained ≥ 15 min);
+   `FREEZE-HELD`; no node was rolled back (§5.1) and the roll was not stopped part-rolled
+   (§5.2). **Roll record present:** `K0-ROLLRECORD PASS` — exactly 3 g310 files, each with exactly
+   2 `VERDICT PASS` (nodegate + probe) and 0 `VERDICT FAIL`, and `0` `pattern-ii-*.txt` — a triaged-and-continued election is a
+   reason to leave the control plane alone today. Any other file count or per-file tally = the record is
+   missing or broken, not clean: DEFER.
+2. **Clock:** `K0-CLOCK GO`. KLIM = min(180 − Kcost − 6, 200 − S0 − Kcost − 6) with Kcost 45
+   (49 if the pre-pull counts are not `9`/`3`) and S0 = T0 − the §2.0b(0a) window open (clamped
+   ≥ 20 when the source is `fallback-0900`); 129 when S0 = 20 and the pre-pull held.
+3. **Extension — only on `K0-CLOCK ASK-EXTENSION (limit L)`**, which the clock prints only when
+   a RECORDED S0 < 20 left room inside the raw 200 (never on `fallback-0900`): ask the present operator once — *"Phase K needs ~Kcost
+   min, ending inside the raw window end; extend past the 180 budget?"* (no live question if the
+   operator pre-stated the answer at the GO, §7). On yes: `echo L > "$SCR/k-klim.txt"` and record
+   the answer in the window report. No answer, "no", or `K0-CLOCK DEFER` → **DEFER**. Never trim
+   a K gate or the 10-min soak to fit.
+4. `talconfig.yaml` still pins `v1.36.0` (`1`) — Phase K has not been half-started.
+
+**DEFER (any condition fails):** touch nothing of Phase K. The §3.7b images stay on the nodes,
+unreferenced and harmless (they are reused when Phase K runs). Continue with §5.4 and §3.12; the
+OS roll is the complete outcome of this window. Window report: `Phase K DEFERRED: <which
+condition, EL>`. **Follow-up for the coordinator (not the executor):** re-activate
+`k8s-1.36.5` (its file is kept intact for exactly this) — `status: draft`, drop
+`superseded_by`, move `security_ref` + the three Phase K `finding_refs` back to it, and re-add the
+mutual `conflicts_with` here. Its premise `talos-uniform-1.14` accepts a uniform v1.14.2 and its
+§3.1 diff tolerates the moved `talosVersion` context line; **one amendment is owed:** its §3.2
+render PASS expects `10` lines/node, but the local `clusterconfig/` will still be the v1.14.1
+render, so it reads **`12`** (the two installer-image lines `:v1.14.1 → :v1.14.2`, measured
+2026-10-05) unless something re-rendered it after the roll. It fits sat-attended (55 ≤ 70).
+
+**3.K1 — Phase K baselines** (re-measured now, after the roll; Phase B's files are not reused
+for these instruments because every pod moved since §2).
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+N=192.168.55.11,192.168.55.12,192.168.55.13
+pq(){ mise exec -- kubectl get --raw "$P/query?query=$1" | python3 -c "import sys,json;r=json.load(sys.stdin)['data']['result'];print(len(r),sorted((tuple(sorted(x['metric'].items())),x['value'][1]) for x in r))"; }
+date -u +%Y-%m-%dT%H:%M:%SZ | tee "$SCR/k-t0.txt"; date -u +%s > "$SCR/k-t0.epoch"
+mise exec -- talosctl -n $N get apiserverconfigs -o yaml | grep -c 'image: registry.k8s.io/kube-apiserver:v1.36.0'   # 6
+mise exec -- talosctl -n $N get kubeletspecs -o yaml   | grep -c 'image: ghcr.io/siderolabs/kubelet:v1.36.0'        # 3
+mise exec -- kubectl get configmap -n kube-system talos-bootstrap-manifests-inventory -o jsonpath='{.data}' | python3 -c "import sys,json;print(len(json.load(sys.stdin)))"   # 7
+pq 'count%20by%20(job)(kubernetes_build_info%7Bgit_version%3D%22v1.36.0%22%7D)' | tee "$SCR/k-build-pre.txt"
+pq 'sum%20by%20(job)(up%7Bjob%3D~%22apiserver%7Ckubelet%7Ckube-scheduler%7Ckube-controller-manager%7Ckube-etcd%22%7D)' | tee "$SCR/k-up-pre.txt"
+mise exec -- python3 "$SCR/alerts.py" baseline "$SCR/k-alerts-baseline.json"
+mise exec -- flux get kustomizations -A --no-header | awk '$5!="True"' | wc -l | tee "$SCR/k-ks-notready.txt"
+mise exec -- flux get helmreleases   -A --no-header | awk '$5!="True"' | wc -l | tee "$SCR/k-hr-notready.txt"
+mise exec -- talosctl -n $N get kernelparamstatuses | grep -c ' sys\.' | tee "$SCR/k-sysfs-pre.txt"
+mise exec -- talosctl -n $N image list --namespace cri    | grep -cE 'registry\.k8s\.io/kube-(apiserver|controller-manager|scheduler):v1\.36\.5[[:space:]]'   # 9 if §3.7b held
+mise exec -- talosctl -n $N image list --namespace system | grep -cE 'ghcr\.io/siderolabs/kubelet:v1\.36\.5[[:space:]]'                                      # 3 if §3.7b held
+mise exec -- talosctl version --short                                                        # client v1.14.1, servers v1.14.2
+```
+**PASS:** `6`, `3`, `7` (a different inventory count = the prune set moved: §3.K4 must be read
+action by action); `k-build-pre` 4 jobs × `'3'` (fewer = a scrape job is blind, STOP — §4.7
+could then pass on an empty set); `k-up-pre` apiserver 3, kubelet 9, kube-scheduler 3,
+kube-controller-manager 3, kube-etcd 3 (*2026-10-05*); `alerts.py` `Watchdog firing: 1`;
+`k-sysfs-pre` recorded (*63 on 2026-10-05 with talos-sysfs-power-caps applied; re-read, since a
+reboot may have re-read the iGPU card index, §4.1*); the client is within n±1 of the servers
+(SOP §13 lesson 6: two minors behind fails `upgrade-k8s`). Pre-pull counts below `9`/`3` are
+**not** a STOP — note them and add ~4 min to the clock (§3.K5 pulls).
+
+**3.K2 — Bump the pin.** Anchored BSD sed, not `yq` (`yq -i` strips blank lines).
+```bash
+sed -i '' -e 's|^kubernetesVersion: v1\.36\.0$|kubernetesVersion: v1.36.5|' kubernetes/bootstrap/talos/talconfig.yaml
+git --no-pager diff kubernetes/bootstrap/talos/talconfig.yaml
+```
+**Expected diff — EXACTLY this** (dry-tested 2026-10-05 on a scratch copy of the current file
+with §3.2's `talosVersion: v1.14.2` already applied, 126 lines; a second run is a no-op):
+```diff
+@@ -3,7 +3,7 @@
+ # renovate: datasource=github-releases depName=siderolabs/talos
+ talosVersion: v1.14.2
+ # renovate: datasource=docker depName=ghcr.io/siderolabs/kubelet
+-kubernetesVersion: v1.36.0
++kubernetesVersion: v1.36.5
+ 
+ clusterName: kubernetes
+ endpoint: https://192.168.55.10:6443
+```
+The context line must read `talosVersion: v1.14.2` (§3.7 is committed). Any other `-`/`+` line,
+or a `talosVersion` hunk (= §3.7 not on HEAD), is a **STOP** → `git checkout --
+kubernetes/bootstrap/talos/talconfig.yaml`, DEFER.
+
+**3.K3 — Re-render the local machine configs** (gitignored, holds machine secrets — copy into
+`$SCR` only; never print a non-image line).
+```bash
+( umask 077; cp -R kubernetes/bootstrap/talos/clusterconfig "$SCR/clusterconfig.pre" )
+mise exec -- task talos:generate-config
+for n in 01 02 03; do echo "$n $(diff "$SCR/clusterconfig.pre/kubernetes-k8s-nuc14-$n.yaml" kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-$n.yaml | grep -c '^[<>]')"; done
+for n in 01 02 03; do diff "$SCR/clusterconfig.pre/kubernetes-k8s-nuc14-$n.yaml" kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-$n.yaml | grep '^[<>]' | grep -vc 'image: '; done
+diff "$SCR/clusterconfig.pre/kubernetes-k8s-nuc14-01.yaml" kubernetes/bootstrap/talos/clusterconfig/kubernetes-k8s-nuc14-01.yaml | grep '^[<>]' | grep 'image: ' | sed 's/^\([<>]\).*image: /\1 /' | sort
+```
+**PASS — measured 2026-10-05** by rendering a scratch copy with both bumps (talhelper genconfig,
+scratch dir, deleted after) against today's local `clusterconfig/` (which was byte-identical to a
+HEAD render): **`12` per node**, **`0` non-image lines** per node, and exactly these 6 old / 6 new
+image values: the installer `factory.talos.dev/installer/43b3cbfc…99a3` `:v1.14.1 → :v1.14.2`
+(Phase A's bump, never rendered before because Phases A/B do not render) and `kubelet`,
+`kube-apiserver`, `kube-controller-manager`, `kube-proxy`, `kube-scheduler` `:v1.36.0 →
+:v1.36.5`. Anything else = the render picked up unrelated patch drift: **STOP**, restore with
+`cp "$SCR"/clusterconfig.pre/* kubernetes/bootstrap/talos/clusterconfig/`, revert §3.K2, DEFER.
+(If someone re-rendered `clusterconfig/` after §3.7, the installer pair is absent and the count
+is `10` — acceptable only with `0` non-image lines and the five K8s pairs above.)
+
+**3.K4 — Read-only dry-run against the v1.14.2 nodes.** `--pre-pull-images=false` explicitly:
+the pre-pull is NOT gated on `--dry-run` (§1.5 step 2). This is the reading that matters — the
+bootstrap manifests are rendered by the nodes' (now v1.14.2) Talos machinery.
+```bash
+( cd kubernetes/bootstrap/talos && mise exec -- talosctl upgrade-k8s --talosconfig=./clusterconfig/talosconfig --to=v1.36.5 --dry-run --pre-pull-images=false --nodes=192.168.55.11 > "$SCR/k-dryrun.txt" 2>&1; echo "rc=$?" )
+grep -c 'Talos version 1.14.2 is compatible with Kubernetes version 1.36.5' "$SCR/k-dryrun.txt"
+grep -c 'skipped in dry-run' "$SCR/k-dryrun.txt"
+grep '^ < ' "$SCR/k-dryrun.txt" | awk '{print $2}' | sort | uniq -c
+grep -E '^ < ' "$SCR/k-dryrun.txt" | grep -ciE 'deleted|created'
+```
+**PASS:** `rc=0`; compatible count `3` (the string names **1.14.2** — `1.14.1` here would mean a
+node is not on the roll's target: STOP); `skipped in dry-run` > 0 (the update lines were
+reached); the manifest actions read exactly **`7 configured`**, and the created/deleted grep
+prints **`0`** (*2026-10-05 on v1.14.1 nodes: 7 configured / 0*). **Any `deleted` or `created`
+action, or a configured object outside the 7 named in §1.5, is a STOP:** the prune set changed
+with the Talos version — read every diff in `$SCR/k-dryrun.txt`, revert §3.K2/§3.K3, DEFER; do
+not decide a prune in-window.
+
+**3.K5 — Run the upgrade** (repo task, `docs/sops/talos-upgrade.md` §9.4). The task reads
+`kubernetesVersion` from the working-tree `talconfig.yaml`, so §3.K2 must be in place.
+```bash
+(cd kubernetes/bootstrap/talos && mise exec -- talhelper gencommand upgrade-k8s --extra-flags "--to 'v1.36.5'")
+# expect: talosctl upgrade-k8s --talosconfig=./clusterconfig/talosconfig --to=v1.36.5 --to 'v1.36.5' --nodes=192.168.55.11;
+# CLOCK GUARD at the acting step (a skipped or stale §3.K0 still stops here): needs the GO/extension
+# file §3.K0 wrote, and T+EL <= KLIM + 10 (10 = §3.K1..§3.K4's budget).
+KL=$(cat "$SCR/k-klim.txt" 2>/dev/null); EL=$(( ($(date -u +%s) - $(cat "$SCR/t-plan-start.txt")) / 60 ))
+if [ -n "$KL" ] && [ "$EL" -le $(( KL + 10 )) ]; then
+  echo "K5-CLOCK OK (T+$EL <= T+$((KL + 10)))"
+  mise exec -- task talos:upgrade-k8s 2>&1 | tee "$SCR/k-upgrade.log"
+else
+  echo "K5-CLOCK STOP (T+$EL, limit ${KL:-none}+10): do NOT run upgrade-k8s -> §5.5 STOP path, DEFER"
+fi
+grep -c 'pre-pulling' "$SCR/k-upgrade.log"; grep -c 'successfully updated' "$SCR/k-upgrade.log"
+```
+**Guard PASS:** `K5-CLOCK OK`. `K5-CLOCK STOP` = nothing ran (dry-tested 2026-10-05 under zsh:
+limit 129/T+100 → OK; 129/T+140 → STOP; no `k-klim.txt` → STOP): take §5.5's pre-run STOP path
+(restore `talconfig.yaml` + `clusterconfig.pre`) and DEFER. Do not interrupt a running task.
+Expected log: 12 `pre-pulling` lines (fast — near no-op after §3.7b), then
+`updating "kube-apiserver"`, `"kube-controller-manager"`, `"kube-scheduler"` with `successfully
+updated` ×3 each, then `updating kubelet` with `successfully updated` ×3, then `updating
+manifests` with 7 `configured`. **Resumable:** on a partial failure (pull timeout, apiserver slow
+to Ready) re-run the same task; components already on v1.36.5 are skipped (`staticPodImage`
+returns `errUpdateSkipped`). **Never** reboot or `apply-config` a node to unstick it; read
+`talosctl -n <ip> logs kubelet` / `talosctl -n <ip> containers -k` first (§5.5). etcd is not
+touched by this phase, so talos-upgrade §11.4 etcd recovery is never the answer here.
+
+**3.K6 — Verify: run §4.7 in full** (CONTENTS ASSERTIONS, then the 10-min soak). FAIL → §5.5.
+
+**3.K7 — Commit the pin — after §4.7 PASS and AFTER §5.4's freeze check** (§5.4 asserts
+`freeze-sha..origin/main` is empty, so this push must come after it).
+```bash
+MSG="$SCR/k-commit-msg.txt"
+printf '%s\n' "feat(talos): kubernetesVersion v1.36.0 -> v1.36.5 (plan talos-linux-1.14.2, Phase K)" "" \
+  "Applied with task talos:upgrade-k8s after the v1.14.2 node roll; verified per plan section 4.7." "" \
+  "<executing session's attribution lines>" > "$MSG"
+git commit --only kubernetes/bootstrap/talos/talconfig.yaml -F "$MSG"
+git log -1 --format=%s; git show --stat HEAD     # subject is yours; exactly talconfig.yaml, one -/+ pair
+git push
+```
+Flux does not reconcile `kubernetes/bootstrap/talos/`; this push is the record that keeps git in
+step with the cluster. Then §3.12.
 
 ## 4) Verification
 
@@ -1536,7 +2005,7 @@ PV/PVC/Volume/Replica.
 ```bash
 # 1. every node on the target
 mise exec -- kubectl get nodes -o 'custom-columns=N:.metadata.name,OS:.status.nodeInfo.osImage,K:.status.nodeInfo.kernelVersion,CR:.status.nodeInfo.containerRuntimeVersion,KL:.status.nodeInfo.kubeletVersion'
-#    PASS: 3x Talos (v1.14.2), 6.18.54-talos, containerd://2.3.6, v1.36.0
+#    PASS: 3x Talos (v1.14.2), 6.18.54-talos, containerd://2.3.6, v1.36.0  (kubelet moves only in Phase K, AFTER this; §4.7 then asserts v1.36.5)
 # 2. etcd: 3 members, no LEARNER, empty ERRORS, converged, PROTOCOL 3.7.1 on ALL (unchanged)
 mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status
 # 3. VIP on exactly one node
@@ -1606,11 +2075,108 @@ Run once ≥ 1 h after the last node (or at the next sweep) and write the per-me
 to `$SCR/etcdgate-2.3.txt`'s pre-roll line in the window report. It is a recorded comparison for
 the WBT change (§1.2), not a gate: §3.10b/§4.4 #9 already hold the 50 ms floor.
 
+### 4.7 — Phase K verification (after §3.K5; `pq`, `$P`, `$N` from §3.K1)
+
+> **CA-K1 — every control-plane component and kubelet REPORTS v1.36.5** (the binaries' own
+> `kubernetes_build_info`, independent of what Talos configured). Allow 2 scrape intervals.
+> ```bash
+> pq 'count%20by%20(job)(kubernetes_build_info%7Bgit_version%3D%22v1.36.5%22%7D)'
+> pq 'count(kubernetes_build_info)'
+> pq 'count%20by%20(kubelet_version)(kube_node_info)'
+> mise exec -- kubectl get nodes -o 'custom-columns=N:.metadata.name,OS:.status.nodeInfo.osImage,KL:.status.nodeInfo.kubeletVersion'
+> ```
+> **PASS:** 4 jobs (apiserver, kubelet, kube-scheduler, kube-controller-manager) each `'3'`;
+> total `'12'`; `kube_node_info` one group `v1.36.5` = `'3'`; nodes `Talos (v1.14.2)` +
+> `v1.36.5` ×3. **Fails on:** a component left on v1.36.0 (`<4` jobs or a job `<3`), a blind
+> scrape (total `<12`, or result count `0` — empty is FAIL; premise `build-info-scraped-12` and
+> §3.K1's `k-build-pre` prove the series exist).
+
+> **CA-K2 — Talos holds the new images and nothing else in the machine config moved.**
+> ```bash
+> mise exec -- talosctl -n $N get apiserverconfigs -o yaml | grep -c 'image: registry.k8s.io/kube-apiserver:v1.36.5'
+> mise exec -- talosctl -n $N get kubeletspecs -o yaml   | grep -c 'image: ghcr.io/siderolabs/kubelet:v1.36.5'
+> mise exec -- kubectl -n kube-system get pods -l tier=control-plane -o 'custom-columns=N:.metadata.name,I:.spec.containers[0].image,R:.status.containerStatuses[0].ready'
+> mise exec -- talosctl -n $N get kernelparamstatuses | grep -c ' sys\.'; cat "$SCR/k-sysfs-pre.txt"
+> ```
+> **PASS:** `6` and `3` (the same readers printed `6`/`3` for v1.36.0 on 2026-10-05, so they can
+> count); all 9 control-plane pods `:v1.36.5` and `true`; the `sys.*` count equals
+> `k-sysfs-pre.txt`. **Fails on:** a node left on v1.36.0 (`<6`/`<3`), or a patch that clobbered
+> the SysfsConfig documents (a lower `sys.*` count would silently undo talos-sysfs-power-caps /
+> talos-power-tuning-ab).
+
+> **CA-K3 — the kubelet restarts did not restart workload containers.** Lists every container
+> whose last termination falls inside Phase K. Dry-tested 2026-10-05 (k8s-1.36.5 §4.3) over the
+> previous 24 h: 315 pods read, 3 real hits (the 2026-10-04 multidoc apply's control-plane
+> restarts), so it can fail.
+> ```bash
+> cat > "$SCR/restarts.py" <<'EOF'
+> import sys, json, subprocess, datetime as dt
+> t0 = dt.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+> t1 = dt.datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
+> pods = json.loads(subprocess.run(["kubectl", "get", "pods", "-A", "-o", "json"], check=True, capture_output=True, text=True).stdout)["items"]
+> if not pods:
+>     sys.exit("ABORT: 0 pods read - instrument empty")
+> hits = []
+> for p in pods:
+>     for cs in (p.get("status", {}).get("containerStatuses") or []):
+>         term = (cs.get("lastState") or {}).get("terminated")
+>         if not term or not term.get("finishedAt"):
+>             continue
+>         f = dt.datetime.fromisoformat(term["finishedAt"].replace("Z", "+00:00"))
+>         if t0 <= f <= t1:
+>             hits.append(f'{p["metadata"]["namespace"]}/{p["metadata"]["name"]}/{cs["name"]} reason={term.get("reason")} exit={term.get("exitCode")} at={term["finishedAt"]}')
+> print(f"pods_read={len(pods)} container_restarts_in_window={len(hits)}")
+> for h in hits:
+>     print("  " + h)
+> EOF
+> mise exec -- python3 "$SCR/restarts.py" "$(cat "$SCR/k-t0.txt")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | grep -v -E 'kube-system/kube-(apiserver|controller-manager|scheduler)-k8s-nuc14-'
+> ```
+> **PASS:** `pods_read` in the 300s and no hit left after excluding the control-plane static
+> pods. Per hit: caused by this phase, or a known crash-looper (did the same container restart in
+> the hour before `k-t0`)? A cluster-wide wave of hits is a FAIL → §5.5. (`t0` is Phase K's own
+> start, so Phase B's drain/reboot restarts are outside the window by construction.)
+
+**Health floor after a 10-minute soak** from the end of §3.K5 (`sleep` is not allowed in the
+agent shell; wait with Monitor or the window agent's clock):
+```bash
+KW="$(( ($(date -u +%s) - $(cat "$SCR/k-t0.epoch")) / 60 ))m"; echo "phase K window $KW"
+pq 'sum%20by%20(job)(up%7Bjob%3D~%22apiserver%7Ckubelet%7Ckube-scheduler%7Ckube-controller-manager%7Ckube-etcd%22%7D)'; cat "$SCR/k-up-pre.txt"
+mise exec -- python3 "$SCR/etcdgate.py" --lookback 10m --leader-window "$KW" --allow-file "$SCR/leader-allow.log"
+mise exec -- python3 "$SCR/etcdstat.py" converged
+mise exec -- flux get kustomizations -A --no-header | awk '$5!="True"' | wc -l; cat "$SCR/k-ks-notready.txt"
+mise exec -- flux get helmreleases   -A --no-header | awk '$5!="True"' | wc -l; cat "$SCR/k-hr-notready.txt"
+mise exec -- python3 "$SCR/lh_gate.py" gate "$SCR/lh-baseline.json"
+mise exec -- python3 "$SCR/alerts.py" compare "$SCR/k-alerts-baseline.json"
+mise exec -- kubectl get csinodes -o 'custom-columns=N:.metadata.name,D:.spec.drivers[*].name'
+```
+**PASS:**
+- `up` per-job sums equal `k-up-pre.txt` (a 0 = a scrape job lost a target).
+- `etcdgate.py` `VERDICT PASS` over Phase K's window: no leader change (nothing in Phase K
+  explains one — do not add a `leader-allow.log` line for it), fsync/commit p99 < 50 ms, kc < 5
+  MB/s. The third node's restart is > 45 min before `k-t0`, so every member counts for the whole
+  window. `etcdstat.py` PASS.
+- Flux not-Ready counts ≤ the `k-*-notready.txt` baselines. This is the SSA path 1.36.3 fixed, so
+  a new `422`-style apply error is a regression signal, not noise.
+- `lh_gate.py` `VERDICT PASS` against the §2.5 recording (the kubelet restarts re-registered the
+  CSI plugins without disturbing a replica).
+- `alerts.py` `Watchdog firing: 1` and `VERDICT PASS` vs `k-alerts-baseline.json`. A new
+  `KubeVersionMismatch`, `KubeAPIDown`, `KubeletDown`, `etcd*` or `TargetDown` is a FAIL.
+- Every CSINode lists both `driver.longhorn.io` and `smb.csi.k8s.io` (a missing driver = a CSI
+  node plugin did not re-register with its restarted kubelet).
+
+CONTROL: metric kubernetes_build_info — §4.7 CA-K1: `count by (job)` at git_version v1.36.5 = 4×3, total 12; empty = FAIL (premise build-info-scraped-12 + §3.K1 prove 12 series exist).
+CONTROL: metric kube_node_info — §4.7 CA-K1: single kubelet_version group v1.36.5 = 3.
+
 ## 5) Rollback
 
-**This hop crosses nothing forward-only** — etcd stays 3.7.1 (storage 3.7.0), Kubernetes stays
-v1.36.0, no machine config is written, and v1.14.2 → v1.14.1 is inside upstream's downgrade
-window (`MaximumHostDowngradeVersion 1.16.0`). Rolling a node back is therefore real at ANY
+**Rollback is per phase.** Phase B (OS) → §5.1–§5.3; Phase K (Kubernetes) → §5.5. They are
+independent: a Phase K rollback never touches the OS, and a later per-node OS rollback under K8s
+1.36.5 is supported (§1.5: v1.14.1 accepts 1.32–1.37.99; measured `1.14.1 is compatible with
+1.36.5`). Never roll back both at once — Phase K first if both are wanted.
+
+**This hop crosses nothing forward-only** — etcd stays 3.7.1 (storage 3.7.0), Phase B writes no
+machine config, Phase K is a patch hop with no storage-version migration, and v1.14.2 → v1.14.1
+is inside upstream's downgrade window (`MaximumHostDowngradeVersion 1.16.0`). Rolling a node back is therefore real at ANY
 point of the roll — unlike talos-1.14.1, whose etcd 3.6 → 3.7 move made it one-way past the
 canary. It is still **another reboot cycle per node (~25 min incl. its Longhorn gate)**, never a
 `git revert` alone: the commit is inert.
@@ -1686,11 +2252,17 @@ planner) would take v1.14.2 as the cluster state. If the window ends — for any
 before §3.9a's `talos:upgrade-node` was issued on the canary:
 `kubectl get nodes -o wide` shows `Talos (v1.14.1)` on all three (prove it, do not assume),
 then run **§5.3** to revert Phase A, then **§5.4** (the freeze may already be up). Record
-the abort reason in the window report. **Alternative that avoids this path:** run Phase A
+the abort reason in the window report. The §3.7b pre-pulled v1.36.5 images need no revert: they
+are referenced by nothing and are reused by whichever plan later runs Phase K (`talosctl image
+remove` exists if the operator wants them gone; not required). **Alternative that avoids this path:** run Phase A
 the same morning, immediately before §2.0b, at the cost of +25 min in-window (§7 already
 prices that case: stop after the canary + 2nd node unless the operator extends).
 
 ### 5.3 — Reverting the git commit (only after no node runs v1.14.2)
+
+If Phase K ran, it stays (K8s 1.36.5 on v1.14.1 is supported); only the `talosVersion` line is
+reverted. If §3.K7 is on top of §3.7, `git revert` of §3.7 still applies cleanly (different
+lines) — check the `git status` line below.
 
 ```bash
 git revert --no-commit <sha-of-3.7>          # talosVersion back to v1.14.1 + the reason text
@@ -1732,14 +2304,58 @@ decision made in git); the resumed rows Ready `True`; Kustomizations header only
 can fail both ways:** before the resume loop it prints `FAIL` on every `iua-main.txt` row (they
 are `True` then) — run it once before the loop on the first use as the control; a stray
 `flux resume` on an absenty row prints `git-held … suspend=False FAIL`. Tell the other sessions
-the freeze is over. Only then §3.12 and the window agent's bookkeeping commits.
+the freeze is over. Only then §3.K7 (if Phase K ran), §3.12 and the window agent's bookkeeping
+commits.
+
+### 5.5 — Phase K rollback: Kubernetes v1.36.5 → v1.36.0 (~25 min, no reboot)
+
+**When:** a §3.K2–§3.K4 STOP (nothing changed in the cluster yet: `git checkout --
+kubernetes/bootstrap/talos/talconfig.yaml`, `cp "$SCR"/clusterconfig.pre/*
+kubernetes/bootstrap/talos/clusterconfig/`, then DEFER as in §3.K0), or a §4.7 FAIL attributable
+to the new version. **Supported:** the go-kubernetes path table keys on major.minor and lists
+`"1.36->1.36"`; `--from` is auto-detected as the lowest running version, so `--to 1.36.0` is
+accepted. Upstream does not certify patch downgrades in so many words, but nothing forward-only
+happens in this hop (no API added/removed, no storage-version migration, no etcd change). The
+SSA inventory annotation on the 7 bootstrap objects stays — harmless, and what a 1.36.0 run also
+writes.
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+# 1) restore the pin — uncommitted case (§3.K7 not yet run):
+git checkout -- kubernetes/bootstrap/talos/talconfig.yaml
+#    ... or, if §3.K7 was already pushed:
+#    git revert --no-edit <sha of the §3.K7 commit> && git log -1 --format=%s && git show --stat HEAD && git push
+grep -c '^kubernetesVersion: v1.36.0$' kubernetes/bootstrap/talos/talconfig.yaml      # 1
+grep -c '^talosVersion: v1.14.2$'      kubernetes/bootstrap/talos/talconfig.yaml      # 1 (the OS bump stays)
+cp "$SCR"/clusterconfig.pre/* kubernetes/bootstrap/talos/clusterconfig/               # back to the pre-K render
+# 2) roll the cluster back with the same tool (read-only preview first)
+(cd kubernetes/bootstrap/talos && mise exec -- talosctl upgrade-k8s --talosconfig=./clusterconfig/talosconfig --to=v1.36.0 --dry-run --pre-pull-images=false --nodes=192.168.55.11 | grep -E 'update |compatible|^ < ')
+mise exec -- task talos:upgrade-k8s 2>&1 | tee "$SCR/k-rollback.log"
+```
+(The restored `clusterconfig.pre` carries the installer `:v1.14.1` line — that matches the
+render before Phase K, and nothing in this plan applies it. Re-render after the window if the
+operator wants it truthful for v1.14.2.)
+
+**Confirm the cluster is back:** §4.7 CA-K1 with `v1.36.0` in place of `v1.36.5` (4 jobs × 3,
+total 12, `kube_node_info` v1.36.0 = 3), CA-K2 expecting `v1.36.0` counts `6`/`3` and the
+`k-sysfs-pre.txt` `sys.*` count, then the §4.7 health floor against the same `k-*` baselines.
+
+**Wedged run** (one apiserver not Ready): the other two keep API traffic. Do NOT reboot or
+`apply-config` a node to unstick it — re-run the task (it resumes; already-matching components
+are skipped), and read `talosctl -n <ip> logs kubelet` / `talosctl -n <ip> containers -k` for the
+static pod first. A part-upgraded control plane (some components 1.36.5, some 1.36.0) is inside
+the Kubernetes version-skew policy, so a rollback that would overrun the window may be finished
+in a later reboot-free slot with the operator's say-so; it is never a reason to touch etcd or a
+node.
 
 ## 6) Interference notes
 
-### 6.1 — Ordering against `talconfig-multidoc-migration` (awaiting-go, sun-attended:2026-10-04)
+### 6.1 — Ordering against `talconfig-multidoc-migration` — RESOLVED (executed 2026-10-04)
 
-**The migration goes first; this plan `depends_on` it.** Both are `exclusive`, so they can never
-share a slot; the question is only order, and it is not symmetric:
+**Historical.** The migration executed green on 2026-10-04 (a7965251, retired 10bee773); the
+`depends_on` was removed 2026-10-05 (F-c688c50f) and premise
+`multidoc-migration-applied-on-all-nodes` is now the live proof it is still applied. The
+reasoning that fixed the order is kept below for the record:
 
 - **Roll first → the migration's ready-for-go review is void.** Its premise
   `nodes-on-talos-1.14.1` (`expect_exact: Talos (v1.14.1) ×3`) fails, and its render, semantic
@@ -1754,13 +2370,8 @@ share a slot; the question is only order, and it is not symmetric:
 - **The migration must also not run after a PART-rolled cluster** (its premise again). If this
   plan ever stops part-rolled (§5.2), finish or roll back the roll before the migration runs.
 
-**If the operator decides to reverse the order:** delete `depends_on`, delete the premise
-`multidoc-migration-applied-on-all-nodes`, and the migration plan must be retargeted to v1.14.2
-and re-reviewed before its own window. Say so at the GO; do not let the scheduler discover it.
-
-**Reciprocity (house rule; `--validate` does not check it):** `talconfig-multidoc-migration`
-now names this plan in `conflicts_with` (2026-10-01), as does `kube-prometheus-stack-91.9.0`
-(named back here 2026-10-05). `multus-macvlan-foundation` does not yet;
+**Reciprocity (house rule; `--validate` does not check it):** `kube-prometheus-stack-91.9.0`
+names this plan in `conflicts_with` (named back here 2026-10-05); the migration plan is retired. `multus-macvlan-foundation` does not yet;
 it is unwindowed so the scheduler is safe today, but its owner should add `talos-linux-1.14.2`
 in its next edit.
 
@@ -1768,10 +2379,10 @@ in its next edit.
 
 This plan needs a whole `sun-attended` window alone (`exclusive: true`): every pod is evicted and
 rescheduled three times; any other change verified in the same window has two candidate causes.
-2026-10-01 schedule: 10-04 migration (exclusive), 10-11 flux-reconciler-impersonation
-(exclusive), 10-18 nextcloud-fleet-35.0.1, 10-25 jellyfin-config-rwo-migration +
-redis-fleet-8.10.2, 11-01 chart-patches-coredns-reloader-blackbox — the first free Sunday is
-**2026-11-08** unless the window agent reshuffles. After 2026-10-25, 09:00 Berlin = **08:00Z**
+State 2026-10-05: the 10-04 migration has executed (a7965251); the flux-reconciler-impersonation
+placeholder on 10-11 was released and **n8n-2.39.8 now holds sun-attended:2026-10-11**. The
+coordinator will propose **sun-attended:2026-11-01** for this plan (the window agent assigns; the
+2026-10-01 listing of later Sundays is stale — read `maintenance-plan.py --open` at assignment). After 2026-10-25, 09:00 Berlin = **08:00Z**
 (CET); all UTC timestamps in the gates are absolute and unaffected.
 
 ### 6.3 — Things that must not run concurrently
@@ -1790,12 +2401,27 @@ redis-fleet-8.10.2, 11-01 chart-patches-coredns-reloader-blackbox — the first 
   Run `docs/sops/home-assistant-updates.md`'s post-restart checklist afterwards.
 - **Any kube-prometheus-stack change** — §4 reads Prometheus (see `conflicts_with` note).
 
+### 6.3a — Phase K (folded `k8s-1.36.5`) — what changed in the plan set
+
+- `k8s-1.36.5` is `status: superseded`, `superseded_by: talos-linux-1.14.2`, `window: null`. Its
+  file is kept intact: it is the **deferral fallback** (§3.K0 DEFER) and its §1–§5 are the source
+  of Phase K's procedure.
+- Other plans that still name `k8s-1.36.5` in `conflicts_with` (`nextcloud-fleet-35.0.1`,
+  `talos-power-tuning-ab`) keep a now-terminal reference; their owners should retarget the line to
+  `talos-linux-1.14.2` (both already conflict with this plan by exclusivity; `talos-power-tuning-ab`
+  names it explicitly). Not edited from here.
+- `kube-prometheus-stack-91.9.0` was asked (k8s-1.36.5 §6) to list `k8s-1.36.5` back; it already
+  lists this plan, which now covers the folded scope.
+- Phase K's own slot need (no reboot) no longer matters: it rides this plan's exclusive Sunday.
+
 ### 6.4 — Shared infra this perturbs
 
 | Shared thing | Effect | Who notices |
 |---|---|---|
 | `gateway/envoy` | one of three pods of each Envoy deployment down per node | every routed app (110 HTTPRoutes on 2026-10-01) incl. the public edge — brief resets; no fallback controller |
 | `etcd` | one member down per node (no version move); defrag + snapshot first | control plane; API blips |
+| `apiserver` (Phase K) | each kube-apiserver restarts on v1.36.5, one node at a time; every watch re-lists against etcd | executor's kubectl via the VIP (seconds); Flux controllers; operators/webhooks with watches |
+| kubelet (Phase K) | each kubelet restarts once (NO_REBOOT); CSI + intel device plugins re-register | §4.7 CA-K3 (workload restarts) + CSINode check |
 | VIP 192.168.55.10 | fails over when its owner rolls (03 held it 2026-10-01) | kubeconfig clients incl. the executor |
 | etcd leadership | re-elects when the leader rolls; drain-driven survivor elections possible (§14.3) | §3.10 pattern (ii) |
 | `talos-machineconfig` / kernel | 6.18.54 + WBT on the shared NVMe | etcd, Longhorn, image pulls — measured by §3.10b/§4.4 #9/§4.6 |
@@ -1813,7 +2439,9 @@ redis-fleet-8.10.2, 11-01 chart-patches-coredns-reloader-blackbox — the first 
 **Risk: `high`** — blast radius is the whole cluster and the last roll measured drain-driven
 survivor fsync stalls (worst 1.8 s → 3.6 s → 7.3 s) and elections (talos-upgrade.md §14.3). The
 CONTENT of v1.14.2 is low-risk (a patch, no etcd/K8s move) and, unlike v1.14.1, **rollback is real
-at every node** (§5). `needs_reboot: true`, `capability_change: true` → operator-present,
+at every node** (§5). Phase K alone would be `medium` (bug-fix patch, rolling and readiness-gated
+by upstream tooling, no reboot; but it restarts every apiserver and kubelet and adopts 7 bootstrap
+objects into an SSA inventory); it does not raise the plan's risk, and its rollback (§5.5) is real. `needs_reboot: true`, `capability_change: true` → operator-present,
 sun-attended only.
 
 **Residual risks the operator should weigh at the GO:**
@@ -1842,15 +2470,53 @@ sun-attended only.
 | §4 incl. ≥ 15-min alert settle (#9/#10 inside it) | 20 | |
 | §5.4 resume + read-back | 3 | |
 | §3.12 CLI pin commit | 3 | after §5.4 |
-| **In-window total** | **163 → priced 165** | |
+| **OS roll in-window total** | **163 → priced 165** | |
+| Phase A §3.7b pre-pull | (5) | before the window — not counted |
+| §3.K0 checkpoint | 2 | |
+| §3.K1 baselines (re-measured after the roll) | 3 | |
+| §3.K2 sed + §3.K3 render diff + §3.K4 dry-run | 5 | dry-run measured rc 0 in seconds; render measured |
+| §3.K5 `upgrade-k8s` | 15 | k8s-1.36.5 priced ~20 incl. 12 pulls; the pulls are near no-ops after §3.7b (−4..5); 9 static-pod restarts + 3 kubelet restarts each waited to Ready — **NOT measured here; the 2026-04-30 run left no timing**. Without §3.7b: 19–20 |
+| §4.7 CA-K1..K3 | 5 | |
+| §4.7 10-min soak + health floor | 13 | fixed soak + reads |
+| §3.K7 commit + push | 2 | after §5.4 |
+| **Phase K in-window total** | **45** (49 without §3.7b) | |
+| **FULL SCOPE** | **210** | |
 
 ```
 slot wall clock                      200   (sun-attended, runbooks/maintenance-windows.yaml)
   − Step 0 reserve (mandatory)        20
-  − this plan                        165
+  = schedulable                      180
+  − OS roll (Phases B + §4 + close)  165
   ────────────────────────────────────────
-  = residual                          15
+  = residual                          15   <  Phase K 45   ->  FULL SCOPE 210 = 180 + 30 OVER
 ```
+
+**Phase K does NOT fit the priced slot: 210 > 180 by 30 min** (and > the raw 200 even if Step 0
+took 0 min). Declared `est_duration_min: 180` = the cap, because a declared 210 could never be
+placed and would strand the OS roll with it; the plan is `exclusive: true`, so the figure only
+decides fit. The design that makes this honest:
+
+1. **The deferral checkpoint is the overflow valve (§3.K0).** Phase K starts only if the OS roll
+   reached §3.K0 by **T+129** (180 − 45 − 6 close). The priced OS timeline reaches §3.K0 at
+   **~T+159**, so on the price Phase K **defers**; it runs inside 180 only if the roll beats its
+   price by ≥ 30 min. Plausible but not expected: 09-27 measured ~23 min/node against the 27/30
+   priced here (−11 over three nodes), §3.8.0's defrag is skipped if IN USE ≥ 50 % (−7), and
+   §4.4's 15-min alert settle mostly overlaps node 3's ~20-min Longhorn gate (§4.4 #11 counts
+   from the node's return, not from §3.11 PASS) — together roughly −25.
+2. **Operator extension (§3.K0 #3)** is the other path: Phase K is reboot-free, the operator is
+   present, and the window's raw end is T+(200 − Step 0 actual). If Step 0 is quick (≤ 10 min),
+   the full scope ends at ~T+190–200 ≤ the raw end — a ~30-min extension past the 180 budget,
+   asked once at §3.K0. **Recommended at the GO:** the operator pre-states whether such an
+   extension is acceptable, so §3.K0 needs no live question.
+3. **On DEFER** the folded work falls back to `k8s-1.36.5` (re-activated by the coordinator,
+   §3.K0) in a sat-attended slot (55 ≤ 70) — no work lost, the OS roll stands complete.
+4. **Not proposed:** trimming the 10-min soak, the §3.K4 dry-run (the only gate on the prune set
+   under v1.14.2 machinery), or any Phase B gate/settle to make room.
+
+**Phase K's own overrun risk:** a §5.5 rollback adds ~25 min and cannot fit any K start time
+inside 180. Because K8s patch skew is supported and Phase K reboots nothing, a rollback that would
+cross the raw window end is finished in a later reboot-free slot with the operator's say-so
+(§5.5 "Wedged run"), never squeezed.
 The residual is not the rollback budget; the **timeline** is: the canary ends at about
 **T+63** (3 + 20 + 7 + 3 + 30), leaving ~117 min of slot, and a canary rollback costs ~35 min drained (§5.1a; a §5.1b hard-reboot rollback of a NotReady canary prices as a full Longhorn recovery, ~45+ min)
 (reboot + Longhorn gate + re-verify). Past the canary the answer is stop-part-rolled (§5.2) or a
@@ -1867,9 +2533,12 @@ the third node. If the canary alone takes > 45 min, re-plan from that measuremen
    returns NotFound (measured 2026-10-01 on all three) and the loop prints `DIFFER` on a healthy
    node. `docs/sops/talos-upgrade.md` §14.2 step 1 still prescribes it ("Both must be identical —
    `DIFFER` means something is staged: STOP") — that SOP text would halt the next roll falsely.
-   This plan uses the one-id premise `single-machineconfig-per-node` instead. **SOP corrected
+   This plan first used a one-id premise (`single-machineconfig-per-node`, RETIRED); after the
+   2026-10-04 multidoc + sysfs apply-configs `persistent` reappeared, and the live premise is now
+   `no-pending-machineconfig-per-node` (ids `persistent` + `v1alpha1`, specs equal). **SOP corrected
    2026-10-01** (§14.2 step 1 now: single `v1alpha1` id, any extra id = staged → STOP; §11.1
-   now carries the rollback-is-undrained warning).
+   now carries the rollback-is-undrained warning) — that 2026-10-01 SOP text ("single `v1alpha1`
+id") is itself stale since 2026-10-04 and should follow the premise above (reported, not edited).
 2. **The 2026-09-27 plan's "expected doubled `init_on_alloc`" cmdline is stale** — v1.14.1 emits
    a single `init_on_alloc=0`. §4.1 now compares against a recorded per-node file instead of a
    written set.
@@ -1888,3 +2557,11 @@ the third node. If the canary alone takes > 45 min, re-plan from that measuremen
    `patches/global/machine-intelgpu.yaml`.
 6. `plan-premises.py` cannot express the factory `v9.9.9 → 404` control (rc≠0 with no stdout
    always fails) — kept as the §3.1 hard gate, as before.
+7. **(carried from k8s-1.36.5 on the fold)** The `siderolabs/*` deny-rule reason in
+   `runbooks/auto-update-policy.yaml` ("needs a rolling node-reboot maintenance window") is wrong
+   for the `ghcr.io/siderolabs/kubelet` dep — that dep is a no-reboot `upgrade-k8s`. The hold is
+   right; the reason misroutes it to reboot-capable Sundays. Fix: a dedicated rule above the
+   glob, `match: "ghcr.io/siderolabs/kubelet"`, whose reason names `upgrade-k8s`. Not edited here.
+8. **Pre-pull persistence is measured once, not per release:** §3.7b relies on images surviving
+   a Talos upgrade (measured on .12 against the 09-27 roll). If a future Talos release changes
+   EPHEMERAL handling, upgrade-k8s silently re-pulls (cost: minutes, not correctness).
