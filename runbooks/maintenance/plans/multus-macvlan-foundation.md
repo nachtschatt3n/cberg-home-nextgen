@@ -30,7 +30,10 @@ touches:
     - "esphome: hostNetwork=false -> plain pod network + ping status + use_address (easy win, needs NO macvlan)"
   shared: [cni-adjacent]            # do NOT co-schedule with any Cilium/Talos plan
 depends_on: []                      # independent of the EG migration
-conflicts_with: []                    # RESOLVED 2026-08-16: was [talos-v1.13.8], dropped
+conflicts_with:                       # ADDED 2026-10-05 (F-c688c50f close-out): reciprocity -- both name us already
+  - talos-linux-1.14.2                # the "next talos-* plan" the note below asks to re-point at; node-reboot roll
+  - talos-sysfs-power-caps            # SysfsConfig via talosctl apply-config on the same 3 nodes; awaiting-soak
+                                      # Earlier history: RESOLVED 2026-08-16: was [talos-v1.13.8], dropped
                                       # because that work SHIPPED (all 3 nodes on v1.13.8, plan
                                       # retired). An unresolvable conflicts_with is silently
                                       # UNENFORCED — it reads as a guard while being none.

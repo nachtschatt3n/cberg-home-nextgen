@@ -56,8 +56,11 @@ conflicts_with:
                                       # card-index premise (section 2.4) must be re-measured; if it runs AFTER, its
                                       # reboots are this plan's first real "re-applied at boot" test (section 6).
   - multus-macvlan-foundation         # reference/unwindowed; also talosctl apply-config on the same nodes
-  # No OPEN kube-prometheus-stack plan exists (91.4.1 executed 2026-09-26); section 4 reads Prometheus, so any
-  # future same-night kube-prometheus-stack plan must be added here and must name this plan back.
+  - kube-prometheus-stack-91.9.0      # ADDED 2026-10-05 (reciprocity; it names us): section 4 and the 24 h soak
+                                      # (3.10) read node_rapl_* / thermal series from Prometheus; a kps restart
+                                      # inside the soak punches a gap in the evidence. Any further kps plan too.
+  - immich-machine-learning-3.2.4     # ADDED 2026-10-05 (reciprocity; it names us): shares igpu-i915 +
+                                      # node-power-thermal; its roll must not land inside the soak.
 security_ref: null
 capability_change: true               # TRUE, deliberately: lowers sustained CPU package power (64 -> 35 W PL1),
                                       # biases P-state selection toward efficiency on every CPU and caps the iGPU
@@ -69,9 +72,12 @@ rollback_class: backup-restore        # The node rollback is a re-apply of a PRE
                                       # so a git revert alone changes nothing on the nodes.
 restore_proof: "section 3.3: the PRE-RENDERED rollback config ($W/rb) is dry-run against every node BEFORE the first forward apply and must print GATE_PASS keys=21/21 from sysfs-diffgate.py (Talos accepts it, no reboot, it changes exactly the 21 keys to the 2026-10-04 values); section 5 then re-reads all 21 keys (sysfs-readback.py <ip> orig --status -> GATE_PASS)."
 backup_gate: "per node, BEFORE its apply: (1) $W/rb/kubernetes-k8s-nuc14-0N.yaml rendered from the same tree with sysfs-patches.py orig, (2) sysfs-diffgate.py on its --dry-run --mode=no-reboot output prints GATE_PASS keys=21/21 (adds only the 21 SysfsConfig keys with the ORIGINAL values), (3) sysfs-readback.py <ip> orig prints GATE_PASS (the values the rollback restores are the values the node has right now)"
-finding_refs: []                      # Queried 2026-10-04 with the DB reachable: `finding list --grep` thermal,
-                                      # throttl, temperature, RAPL, power, package, sysfs, nuc14, hot, ci-runner
-                                      # (--all) -> no finding owns node thermals/power. Nothing to claim.
+finding_refs:                         # 2026-10-04 pre-plan query found no finding owning node thermals/power.
+  - F-6c7843e4                        # ADDED 2026-10-05: post-apply observation -- nodes reach 96 C inside the
+                                      # PL2 window at ~45-55 W; candidate PL2 ~40-45 W and/or shorter PL1 tau,
+                                      # BIOS/fan/paste check on nuc14-02's cooler first; CI shard run-time
+                                      # ~+35% under EPP balance_power. NO amendment yet: operator decides after
+                                      # the 24 h soak (3.10) + external research.
 review: ready-for-go@2026-10-05     # plan-reviewer 3rd pass at a42dbacf+98ca43c0 (condition: premise multidoc = 3; holds)
 status: awaiting-soak                 # caps LIVE on all 3 nodes 2026-10-04 23:09-23:17Z (now:2026-10-05); 24 h soak + 3.10 owed, due >= 2026-10-05T23:17Z
 window: "now:2026-10-05"   # ON-DEMAND NOW run 2026-10-05 (run-now.py stamp; was None)

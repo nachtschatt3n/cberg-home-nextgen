@@ -72,13 +72,14 @@ touches:
     - flux-source                     # PUSH FREEZE: origin/main must equal the freeze sha before every node
     - git-main                        # no session/bot pushes to main in-window
     - talos-machineconfig             # node OS + kernel 6.18.51 -> 6.18.54 (block WBT newly ON, §1.2)
-depends_on: []                        # talconfig-multidoc-migration EXECUTED now:2026-10-04 and retired (10bee773);
-                                      # dead ref removed 2026-10-05 (sweep 481b9c1f). Premise
+depends_on: []                        # RESOLVED 2026-10-05 (F-c688c50f): satisfied depends_on removed --
+                                      # talconfig-multidoc-migration was executed green on 2026-10-04
+                                      # (now:2026-10-04) in a7965251, retired 10bee773. Premise
                                       # multidoc-migration-applied-on-all-nodes is the live gate.
 conflicts_with:                       # exclusive: true already keeps everything out of the slot;
                                       # these are the plans that ALSO mutate Talos machine config or
                                       # the same nodes and must never share a night with this roll.
-  # talconfig-multidoc-migration: EXECUTED now:2026-10-04 and retired (10bee773); dead ref removed 2026-10-05 (sweep 481b9c1f)
+  # - talconfig-multidoc-migration (RESOLVED 2026-10-05: executed green now:2026-10-04 in a7965251 + retired 10bee773; dead ref removed per the dead-ref convention, sweep 481b9c1f / F-c688c50f)
   - multus-macvlan-foundation         # reference/unwindowed; talosctl apply-config on the nodes
   - talos-sysfs-power-caps            # reciprocity (added 2026-10-05 by that plan's planner): it writes a
                                       # SysfsConfig (RAPL PL1/PL2, EPP, iGPU gt0 max) via apply-config; never
@@ -165,11 +166,12 @@ premises:
     expect_matches: '^(?!.*"v1\.14\.([3-9]|[1-9][0-9])")(?!.*"v1\.(1[5-9]|[2-9][0-9])\.[0-9]+")(?=.*"v1\.14\.2")'
   - id: multidoc-migration-applied-on-all-nodes
     why: >-
-      depends_on talconfig-multidoc-migration (§6.1). Its apply puts a KubeAPIServerConfig
-      document into every node's live machine config. Prints 3 after it ran; prints 0 TODAY
-      (measured 2026-10-01, rc=1 with output "0") — so this premise is EXPECTED TO FAIL until the
-      migration executes, and that failure is the gate. If the operator deliberately reorders
-      (§6.1), this premise is the line to remove, in the same edit that drops depends_on.
+      Formerly the gate behind depends_on talconfig-multidoc-migration (§6.1). Its apply puts a
+      KubeAPIServerConfig document into every node's live machine config. Printed 0 on 2026-10-01
+      (before the migration); the migration EXECUTED green on 2026-10-04 (a7965251, plan retired
+      10bee773) and the depends_on was removed 2026-10-05 (F-c688c50f), so this premise is now the
+      live proof that the migration is still applied: expect 3. Anything else means a node lost
+      the multi-document config — STOP.
     run: "talosctl --nodes=192.168.55.11,192.168.55.12,192.168.55.13 get machineconfig v1alpha1 -o yaml | grep -c 'kind: KubeAPIServerConfig'"
     expect_exact: "3"
   - id: single-machineconfig-per-node
