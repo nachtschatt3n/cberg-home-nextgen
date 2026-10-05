@@ -21,7 +21,7 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 0
+      retries: 3
   valuesFrom:
     - kind: Secret
       name: mariadb
