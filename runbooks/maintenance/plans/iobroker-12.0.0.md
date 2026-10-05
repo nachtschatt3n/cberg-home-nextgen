@@ -73,7 +73,8 @@ rollback_class: git-revert            # nothing forward-only (§1.5): the image 
 backup_gate: null                     # not required: rollback_class git-revert, no one-way data step.
                                       # §2.4 still REQUIRES a Completed Longhorn backup <= 26 h old as a
                                       # belt-and-braces pre-check.
-finding_refs: []                      # `policy-cli.py finding list --grep iobroker` (2026-10-05): only the
+finding_refs: [F-2466513f]            # version finding v11.1.0 -> v12.0.0, emitted by sweep 481b9c1f (2026-10-05).
+                                      # Earlier note: `policy-cli.py finding list --grep iobroker` (2026-10-05): only the
                                       # two AR-029 security rows and F-0a5ad294 (chart 5.1.0->5.2.1, owned
                                       # by app-template-5.2.1). No version finding for v12.0.0 exists yet
                                       # (the tag shipped 2026-10-04, after the last sweep 2026-10-03).

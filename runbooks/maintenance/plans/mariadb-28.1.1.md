@@ -77,6 +77,8 @@ backup_gate: "TWO artifacts, both BEFORE the §3 push: (a) logical dump of --all
 restore_proof: "§2.5: the §2.4 dump is loaded into a scratch pod mariadb-restoretest running the ROLLBACK binary (same 13.0.1 digest, emptyDir datadir, root password from secret/mariadb), and the exact per-table COUNT(*) of all 586 user tables must equal counts-T0.tsv (diff empty, line count >= 586) and 4 tenant users must be present. Pod deleted afterwards. A dump that exists is not a dump that restores."
 security_ref: null                    # version-currency driver, not a security driver
 finding_refs:
+  - F-1fa39efd                        # chart 27.3.0 -> 28.1.1 version finding (sweep 481b9c1f, 2026-10-05); supersedes
+                                      # F-8ef629f2, auto-closed when the 27.3.0 row executed
   - F-8ef629f2                        # mariadb chart version finding (fingerprint stable per component+kind; the
                                       # 27.0.1->27.3.0 row executed 2026-10-03, the next sweep re-titles it to 28.x)
   - F-9ab5f80f                        # "fix the restart-gate template for future mariadb plans" — §4.3/§4.5 here
