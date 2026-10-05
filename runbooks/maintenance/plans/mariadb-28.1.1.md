@@ -94,7 +94,7 @@ finding_refs:
                                       # implement it here: restart bound <=1, processlist baseline = 3 Rails pool users
 status: vetted
 review: ready-for-go@2026-10-05   # plan-reviewer 3rd pass at 355f9a96, 0 blocking; 0e2544c1 = 2 fail-safe follow-ups (T0 corrupt STOP, rerun evidence copy), not re-reviewed
-window: null
+window: "now:2026-10-05"   # ON-DEMAND NOW run 2026-10-05 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/mariadb-major-upgrade.md     # dump discipline, socket-only upgrade; two stale claims, see §1.4
