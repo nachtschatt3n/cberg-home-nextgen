@@ -82,9 +82,8 @@ security_ref: F-d6d47945              # OPEN accepted security finding on the 0.
                                       # "newer upstream tag available, bump the image" — this plan IS that
                                       # bump. Detail lives on the record only. (F-bb62d310, the earlier
                                       # "already newest" row, is resolved.) Related, NOT addressed here:
-                                      # F-fa3325bc (accepted, same tag, findings with no upstream fix —
-                                      # a bump cannot remedy those; the next sweep re-measures them on
-                                      # 0.8.7). Whether 0.8.7 clears either is for the next sweep to
+                                      # F-fa3325bc (accepted register row on the same tag; out of this
+                                      # plan's scope -- the next sweep re-measures it on 0.8.7). Whether 0.8.7 clears either is for the next sweep to
                                       # MEASURE, not for this plan to claim.
 capability_change: false              # same server binary, same extension catalog version (no ALTER
                                       # EXTENSION), same SQL surface; bug-fix-only shared library.
