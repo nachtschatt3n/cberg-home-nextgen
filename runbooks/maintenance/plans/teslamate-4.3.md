@@ -50,7 +50,7 @@ conflicts_with:
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. helmrelease/teslamate
   - flux-reconciler-impersonation     # changes the identity helm-controller applies home-automation/ with
   - flux-oci-chart-sources            # rewrites HR chart sources (bjw-s app-template) — same spec.chart block
-  - kube-prometheus-stack-91.4.1      # §4.5 reads kube-state-metrics through Prometheus (the window's
+  - kube-prometheus-stack-91.9.0      # §4.5 reads kube-state-metrics through Prometheus (the window's
                                       #   instrument). Executed 2026-09-26; kept so a re-run/revert serializes.
   - talos-linux-1.14.2                # node roll (exclusive, sun-attended) reschedules every pod incl.
                                       #   teslamate + teslamate-postgres; a same-slot roll would void §4.2-4.6.

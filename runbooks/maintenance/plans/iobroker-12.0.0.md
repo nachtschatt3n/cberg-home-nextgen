@@ -56,7 +56,7 @@ conflicts_with:
                                       # same object, same helm-controller pass
   - flux-reconciler-impersonation     # exclusive:true already keeps its slot empty; named so the
                                       # dependency is explicit (our delivery path is the Flux apply it re-identities)
-  - kube-prometheus-stack-91.4.1      # §4 G7 reads kube-state-metrics through Prometheus — the window's
+  - kube-prometheus-stack-91.9.0      # §4 G7 reads kube-state-metrics through Prometheus — the window's
                                       # instrument is shared infra
 exclusive: false
 security_ref: null                    # no security driver for this plan. Related, NOT owned: the two

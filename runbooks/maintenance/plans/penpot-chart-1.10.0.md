@@ -35,7 +35,7 @@ touches:
 depends_on: []
 conflicts_with:
   - penpot-cache-9.2                  # both perturb backend/exporter <-> cache connections (§6)
-  - kube-prometheus-stack-91.4.1      # §4 CONTROL metrics read through it
+  - kube-prometheus-stack-91.9.0      # §4 CONTROL metrics read through it
   - flux-reconciler-impersonation     # changes helm-controller's apply identity incl. office
   - flux-oci-chart-sources            # rewrites penpot spec.chart (mirror track)
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. penpot
