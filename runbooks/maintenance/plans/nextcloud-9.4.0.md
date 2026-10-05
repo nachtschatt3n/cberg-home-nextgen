@@ -63,12 +63,17 @@ capability_change: false              # metadata labels only; no image, value, t
                                       # Every user-visible change of NC 35 belongs to (and is declared
                                       # true by) nextcloud-fleet-35.0.1.
 rollback_class: git-revert            # nothing forward-only: no pod start, no occ, no DB write (§5).
-finding_refs: []                      # none exists for chart 9.3.0 -> 9.4.0 (queried 2026-10-01 with
+finding_refs: []                      # F-38fecaa8 (chart 9.3.0 -> 9.4.0, found open 2026-10-05) is
+                                      # claimed by nextcloud-fleet-35.0.1, which now delivers this leg.
+                                      # Original note: none existed for chart 9.3.0 -> 9.4.0 (queried 2026-10-01 with
                                       # SWEEP_PG_DSN up). The image findings F-7344f3ec / F-7bcfda63
                                       # are owned by nextcloud-fleet-35.0.1 and deliberately NOT
                                       # double-claimed here.
 review: null
-status: draft
+status: superseded                    # 2026-10-05: FOLDED into nextcloud-fleet-35.0.1 Commit B (the
+                                      # preferred path of §1.3) per operator decision relayed by the
+                                      # coordinator. Kept for the evidence trail; never runs.
+superseded_by: nextcloud-fleet-35.0.1
 window: null
 premises:
   # Runner grammar (plan-premises.py): kubectl/flux/git/helm READ verbs + bare text filters.
@@ -121,6 +126,12 @@ generated: "2026-10-01"
 ---
 
 # nextcloud chart 9.3.0 -> 9.4.0 (appVersion 34.0.4 -> 35.0.1) — the chart leg of the 35 lockstep
+
+> **SUPERSEDED 2026-10-05 by `nextcloud-fleet-35.0.1`.** The FOLD path (§1.3) was
+> taken: the chart line `version: 9.3.0 -> 9.4.0` now rides in that plan's
+> Commit B together with image 35.0.1, its render-diff gate is that plan's
+> §2.0(e), and the chart finding F-38fecaa8 is claimed there. Nothing below is to
+> be executed; the measurements (§1.2) remain the evidence for the fold.
 
 ## 1) Summary & why held
 

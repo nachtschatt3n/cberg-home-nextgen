@@ -1,273 +1,189 @@
 ---
-plan_id: chart-patches-coredns-reloader-blackbox
-component: chart-patches
-also_covers:                          # coverage.py matches held items by name/also_covers;
-  - coredns                           # maintenance-plan.py by BOTH version tokens below.
-                                      # reloader CARVED OUT 2026-10-03 -> plan reloader-2.2.18 (target moved to 2.2.18)
-  - prometheus-blackbox-exporter
-pr: null                              # no Renovate PR exists for any of the three (sweep cycle 58d45ed0)
+plan_id: chart-patches-coredns-reloader-blackbox   # id KEPT on purpose (other plans + home-operation key on it);
+                                                   # since 2026-10-05 this is a blackbox-only plan
+component: prometheus-blackbox-exporter
+also_covers: []                       # coredns CARVED OUT 2026-10-05 -> plan coredns-1.48.2 (chart 1.48.2, pin dropped)
+                                      # reloader CARVED OUT 2026-10-03 -> plan reloader-2.2.18
+pr: null                              # no Renovate PR for the blackbox chart (gh pr list --search blackbox: none, 2026-10-05)
 kind: chart
-current: "coredns 1.47.0, prometheus-blackbox-exporter 11.18.0"
-target: "coredns 1.47.1, prometheus-blackbox-exporter 11.19.1"
-update_type: minor                    # two chart patches + one chart minor (11.18 -> 11.19)
-risk: medium                          # blackbox alone is low. coredns is low-PROBABILITY
-                                      # (rendered diff = labels + checksum only, image pin unchanged)
-                                      # but cluster-wide IMPACT, and a DNS failure disables its own
-                                      # GitOps rollback path (source-controller cannot resolve
-                                      # github.com) — see §5.3. Weighted medium for that reason.
-est_duration_min: 45                  # §2 10 + A 10 + C 15 + slack 10 (item B and its 30m events-floor
-                                      # wait carved out 2026-10-03 -> reloader-2.2.18)
+current: "prometheus-blackbox-exporter 11.18.0"
+target: "11.19.1"                     # newest published (prometheus-community index, re-read 2026-10-05:
+                                      # 11.19.1 created 2026-09-24, nothing newer)
+update_type: minor                    # chart minor 11.18 -> 11.19; app/image v0.28.0 unchanged
+risk: low                             # rendered diff with our values = 6 helm.sh/chart labels only (re-diffed
+                                      # 2026-10-05). One surge-first pod roll of the probe exporter; no DNS,
+                                      # no storage, no gateway. The coredns item that made this `medium` is gone.
+est_duration_min: 25                  # §2 5 + §3 5 + Flux pickup/roll ~5 + §4 5 (2 min probe window) + slack 5
 needs_reboot: false
 exclusive: false
 touches:
-  namespaces: [kube-system, monitoring]
+  namespaces: [monitoring]
   resources:
     - helmrelease/monitoring/prometheus-blackbox-exporter   # chart 11.18.0 -> 11.19.1
-    - deployment/monitoring/prometheus-blackbox-exporter    # 1 replica, surge-first roll (label change)
+    - deployment/monitoring/prometheus-blackbox-exporter    # 1 replica, maxSurge 1 / maxUnavailable 0 (label change rolls it)
     - configmap/monitoring/prometheus-blackbox-exporter     # label only; modules must be unchanged
-    - helmrelease/kube-system/coredns                       # chart 1.47.0 -> 1.47.1
-    - deployment/kube-system/coredns                        # 2 replicas, maxUnavailable 1 roll (checksum/config)
-    - configmap/kube-system/coredns                         # label only; Corefile must be byte-identical
-    - configmap/kube-system/coredns-helm-values-<hash>      # comment edit => new generated name; old one
-                                                            # is ORPHANED (ks prune: false), harmless
+    - service/monitoring/prometheus-blackbox-exporter       # label only
+    - servicemonitor/monitoring/prometheus-blackbox-exporter   # label only (selfMonitor)
     - kubernetes/apps/monitoring/prometheus-blackbox-exporter/app/helmrelease.yaml
-    - kubernetes/apps/kube-system/coredns/app/helmrelease.yaml
-    - kubernetes/apps/kube-system/coredns/app/helm-values.yaml
   shared:
-    - dns/coredns                     # cluster DNS (Service kube-dns 10.96.0.10) — every pod resolves
-                                      # through it; the *.<domain> zone forwards to k8s-gateway .101
-    - monitoring                      # blackbox IS the DNS/ingress instrument (5 Probe CRs +
-                                      # InternalDns*/IngressProbe* alerts); §4 reads Prometheus
+    - monitoring                      # blackbox IS the ingress/DNS probe instrument (5 Probe CRs ->
+                                      # probe_success, IngressProbe*/InternalDns*/Blackbox* alerts). Other
+                                      # plans' §4 read it, hence the conflicts below.
+                                      # `dns/coredns` REMOVED 2026-10-05 with the coredns carve-out.
 depends_on: []
 conflicts_with:
-  - reloader-2.2.18                   # carve-out of former item B; same HR until this carve-out is re-reviewed
-  - flux-oci-chart-sources            # moves HelmRepository sources incl. coredns/stakater/
-                                      # prometheus-community and declares dns-internal; same HRs
-  - helm-drift-detection              # adds spec.driftDetection to every HelmRelease incl. these three
-  - flux-reconciler-impersonation     # exclusive; rewrites how helm-controller applies these releases
-  # - uptime-kuma-2.5.5-slim-rootless (RESOLVED 2026-10-04: executed sat-attended:2026-10-03 + retired d60d14f7; dead ref removed per the dead-ref convention)
-    # its §4 reads Kuma monitors that resolve via CoreDNS and
-                                      # Prometheus; a CoreDNS roll mid-verification poisons its gate
-  - oc8-install                       # declares shared k8s-gateway DNS; its DNS verification must not
-                                      # overlap a CoreDNS roll (blocked today; listed for when it unblocks)
-  # traccar-6.16.0 REMOVED 2026-09-29: executed green in nightly:2026-09-29 (3a943035), plan retired (1a40b257)
-  # - mariadb-chart-27.3.0 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
-  - mariadb-28.1.1  # ADDED 2026-10-04: successor plan (same databases/mariadb HR + mariadb-0 roll); reciprocal -- it already lists this plan
-    # tenants re-resolve the DB service on reconnect after mariadb-0 rolls;
-                                      # a CoreDNS roll in the same night muddies its reconnect gate
-  - penpot-chart-1.10.0               # its frontend nginx resolver moves to cluster DNS; its gate resolves
-                                      # through CoreDNS
-  - redis-fleet-8.10.2                # reciprocal: lists this plan (CoreDNS roll while consumers re-resolve)
-  # PARKED 2026-09-28: flux-fleet-0.60.0 is untracked (DEAD-REF on main); add once committed — it
-  # upgrades helm-controller/source-controller, which apply these HRs and carry the §5 revert path.
-  - app-template-5.2.1                # rolls ~78 workloads (incl. monitoring) whose readiness/verification
-                                      # resolves through CoreDNS; must not overlap item C's roll.
-                                      # Concurrent draft — it should list this plan back.
-                                      # No kube-prometheus-stack plan is open (91.4.1 executed). If one
-                                      # appears it MUST be added here — §4 reads Prometheus.
-capability_change: false              # coredns: same image 1.14.7, byte-identical Corefile; blackbox: same
-                                      # image v0.28.0, labels only (reloader item carved out 2026-10-03)
+  - coredns-1.48.2                    # the carved-out coredns item; its §2.1/§4 dnsmatrix execs INTO this pod
+                                      # and its gates read probe_success. Never the same window (or this plan
+                                      # strictly first, §4 green, before coredns-1.48.2 §2 starts).
+  - reloader-2.2.18                   # former item B; reciprocal (it lists this plan). No shared object any more
+                                      # (blackbox carries no reloader annotation); kept until its own file drops it.
+  - envoy-proxy-config-distroless-v1.39.2   # its §4 gates on probe_success / IngressProbeFailing = this exporter
+  - flux-oci-chart-sources            # moves the prometheus-community HelmRepository source; same HR
+  - helm-drift-detection              # adds spec.driftDetection to every HelmRelease incl. this one
+  - flux-reconciler-impersonation     # exclusive; rewrites how helm-controller applies this release
+  - flux-fleet-0.60.0                 # upgrades helm-/source-controller = this plan's apply AND revert path
+  - kube-prometheus-stack-91.9.0      # exclusive; restarts the Prometheus that §4 reads (rule 4)
+  - talos-linux-1.14.2                # exclusive node roll; belt and braces
+  # REMOVED 2026-10-05 with the coredns carve-out (they were listed only because item C rolled CoreDNS;
+  # none reads probe_success): app-template-5.2.1, mariadb-28.1.1, penpot-chart-1.10.0,
+  # redis-fleet-8.10.2, oc8-install (superseded). Their reciprocal refs to this plan are now
+  # over-constraining and should be re-pointed to coredns-1.48.2 (repo correction, not done here).
+capability_change: false              # same image v0.28.0, same modules, labels only
 rollback_class: git-revert
-autonomy_override: human-gated        # belt and braces: shared `dns` already derives HUMAN-GATED via
-                                      # SHARED_INFRA_FLOOR. Recommended window class: sat-attended (§6).
-security_ref: null                    # was F-0cf695f9 (reloader image) - moved to reloader-2.2.18 with the carve-out
+# autonomy_override REMOVED 2026-10-05: it existed only for the coredns item (§5.3 break-glass).
+# Blackbox alone derives AUTO-NIGHT on mechanics (risk low, git-revert, no reboot, shared: monitoring).
+security_ref: null                    # was F-0cf695f9 (reloader image) - moved to reloader-2.2.18 with that carve-out
 finding_refs:
-  - F-3893caaf                        # coredns chart 1.47.0 -> 1.47.1
   - F-b7b896a4                        # prometheus-blackbox-exporter chart 11.18.0 -> 11.19.1
+                                      # (F-3893caaf coredns 1.47.1 RESOLVED 2026-10-01; coredns now owned by coredns-1.48.2)
 premises:
-  # All read-only single commands. Values measured 2026-09-27.
+  # All read-only single commands. Values measured 2026-10-05.
   - id: blackbox-is-current
     why: >-
-      Item A edits `version: 11.18.0`; if the chart or image already moved, §3.A's anchor and
-      §4.A's "image unchanged" assertion are wrong. Prints a different string and fails.
-    run: kubectl get helmrelease -n monitoring prometheus-blackbox-exporter -o jsonpath='{.spec.chart.spec.version} {.status.lastAttemptedRevision}'
-    expect_exact: 11.18.0 11.18.0
+      §3 edits `version: 11.18.0`; if the chart already moved, the anchor and §4's "image unchanged"
+      assertion are wrong. Prints a different string and fails.
+    run: kubectl get helmrelease -n monitoring prometheus-blackbox-exporter -o jsonpath='{.spec.chart.spec.version} {.status.lastAttemptedRevision} {.status.conditions[?(@.type=="Ready")].status}'
+    expect_exact: 11.18.0 11.18.0 True
   - id: blackbox-image
     why: >-
-      11.19.1 keeps appVersion v0.28.0; §4.A asserts the image did NOT change. Baseline must be v0.28.0.
+      11.19.1 keeps appVersion v0.28.0; §4 asserts the image did NOT change. Baseline must be v0.28.0.
     run: kubectl get deploy -n monitoring prometheus-blackbox-exporter -o jsonpath='{.spec.template.spec.containers[0].image}'
     expect_exact: quay.io/prometheus/blackbox-exporter:v0.28.0
-  - id: coredns-is-current-and-pinned
+  - id: probes-exist
     why: >-
-      Item C edits `version: 1.47.0` and relies on the helm-values image.tag pin (1.14.7) staying
-      in force, because chart 1.47.1 still ships appVersion 1.14.6. If the pin was dropped or the
-      image moved, the "image unchanged" gate in §4.C is wrong. Prints a different string and fails.
-    run: kubectl get deploy -n kube-system coredns -o jsonpath='{.spec.template.spec.containers[0].image} {.spec.replicas} {.status.readyReplicas}'
-    expect_exact: coredns/coredns:1.14.7 2 2
-  - id: coredns-hr-chart
-    why: >-
-      HelmRelease must be on 1.47.0 and Ready; a failed/in-flight release makes §5 rollback targets wrong.
-    run: kubectl get helmrelease -n kube-system coredns -o jsonpath='{.spec.chart.spec.version} {.status.lastAttemptedRevision} {.status.conditions[?(@.type=="Ready")].status}'
-    expect_exact: 1.47.0 1.47.0 True
-  - id: dns-probes-exist
-    why: >-
-      §4 reads probe_success from these Probe CRs; if they were renamed/removed the gate reads empty.
-    run: kubectl get probe -n monitoring dns-k8s-gateway-primary dns-k8s-gateway-secondary http-ingress-internal http-ingress-external -o name
-    expect_matches: "(?s)dns-k8s-gateway-primary.*dns-k8s-gateway-secondary.*http-ingress-internal.*http-ingress-external"
-status: draft     # RESET 2026-10-05 (sweep 481b9c1f): amended 2026-10-03 (reloader carve-out) and its own text asks for a delta re-review; item C still overlaps coredns-1.48.1
-review: null      # was ready-for-go@2026-09-28, pre-amendment
-# AMENDED 2026-10-03 (upgrade-planner, sweep cycle 5a150729): item B (reloader) CARVED OUT to plan
-# reloader-2.2.18 - held target moved 2.2.17 -> 2.2.18. Scope REDUCTION only (A and C unchanged);
-# needs a delta re-review of the removal before the 2026-11-01 window.
-window: "sun-attended:2026-11-01"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed: coredns failure disables its own GitOps rollback, attended
+      §4 reads probe_success from these 5 Probe CRs; if they were renamed/removed the gate reads empty.
+    run: kubectl get probe -n monitoring dns-k8s-gateway-primary dns-k8s-gateway-secondary http-ingress-internal http-ingress-external http-vaultwarden -o name
+    expect_matches: "(?s)dns-k8s-gateway-primary.*dns-k8s-gateway-secondary.*http-ingress-internal.*http-ingress-external.*http-vaultwarden"
+status: draft     # 2026-10-05: coredns item carved out -> coredns-1.48.2; scope reduction, needs a re-review
+# AMENDED 2026-10-03: item B (reloader) carved out to reloader-2.2.18.
+# AMENDED 2026-10-05 (upgrade-planner refresh): item C (coredns 1.47.0 -> 1.47.1, pin kept) carved out;
+# superseded by coredns-1.48.2. Window `sun-attended:2026-11-01` REMOVED (it was attended only for coredns);
+# the coordinator re-schedules. Blackbox target re-verified as newest (11.19.1).
+window: null
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
-  - docs/sops/k8s-gateway-dns.md
   - docs/sops/monitoring.md
   - docs/sops/verification-contents-not-shape.md
-generated: "2026-09-27"
+generated: "2026-10-05"
 ---
 
-# Low-risk chart patches: blackbox-exporter, coredns (reloader carved out 2026-10-03)
+# prometheus-blackbox-exporter chart 11.18.0 -> 11.19.1 (former chart-patches bundle; coredns + reloader carved out)
 
 ## 1. Summary & why held
 
-Three chart bumps with no Renovate PR, bundled into one plan. Each item is its own commit, so each
-one can be reverted on its own. Order: **A blackbox, then C coredns.** (Item B, reloader, was carved out
-2026-10-03 into plan `reloader-2.2.18` after its held target moved to 2.2.18; the letters are kept so
-cross-references stay valid.) Blackbox goes
-first because §4.C reads it, so the one item with a real blast radius runs last, with nothing else in
-flight.
+**Scope history.** This file started (2026-09-27) as a three-chart bundle: A blackbox, B reloader,
+C coredns. B moved to `reloader-2.2.18` on 2026-10-03. C moved on 2026-10-05: chart 1.48.2 was
+published with appVersion 1.14.7, so the coredns image pin can finally be dropped, and that is now
+plan `coredns-1.48.2` (which supersedes the 1.47.1 bump this file used to carry). What is left is
+item A only. The plan_id is kept so the cross-references and the go/no-go key stay valid; the item
+letter is dropped below.
 
-| Item | Chart | App/image | Rendered diff with OUR values (`helm template` old vs new, diffed 2026-09-27) | Why held |
-|---|---|---|---|---|
-| A | prometheus-blackbox-exporter 11.18.0 → 11.19.1 | v0.28.0 → v0.28.0 (unchanged) | only `helm.sh/chart` labels (incl. pod template → one surge-first pod roll). Chart source diff: `Chart.yaml` version + default `configReloader.image.tag` v0.93.1→v0.94.1. That sidecar is disabled here (it does not render). | G3 could not read release notes (coverage "unverified"). This is a false positive in substance: nothing functional changes. |
-| B | ~~reloader~~ | — | — | **CARVED OUT 2026-10-03** → plan `reloader-2.2.18` (target 2.2.18 / image v1.4.22, release-note evidence re-read there). Not executed by this plan. |
-| C | coredns 1.47.0 → 1.47.1 | **1.14.7 stays** (pinned in helm-values; chart appVersion is still 1.14.6) | `helm.sh/chart` labels + pod `checksum/config`. **The Corefile render is identical.** The checksum changes only because the hashed ConfigMap carries the chart label. Chart source diff is autoscaler-only ("Allow separate labels and selector for the cluster-proportional-autoscaler Deployment"). We do not enable the autoscaler. | Deny rule `*coredns*` in `runbooks/auto-update-policy.yaml`: cluster DNS, and the image is pinned ahead of the chart. |
+**What changes:** the `monitoring/prometheus-blackbox-exporter` HelmRelease moves from chart
+11.18.0 to 11.19.1. The exporter image stays `quay.io/prometheus/blackbox-exporter:v0.28.0`.
 
-**Pin decision (item C):** `helm show chart oci://ghcr.io/coredns/charts/coredns --version 1.47.1`
-gives `appVersion: 1.14.6`. That is still below the pinned `1.14.7`, so the pin STAYS. Only the
-helm-values comment's "1.47.0 is the newest" text is refreshed. Dropping the pin would downgrade
-CoreDNS to 1.14.6 and bring back the forward `max_connect_attempts` default that the 1.14.7 bump
-had to pin.
+**Upstream evidence (primary sources, re-read 2026-10-05):**
+- prometheus-community chart index: 11.19.1 (appVersion v0.28.0, created 2026-09-24) is the
+  newest; 11.18.0 (2026-08-31) is what runs. No newer chart exists, so the target stays 11.19.1.
+- Chart source diff (`helm pull` of both from `oci://ghcr.io/prometheus-community/charts`, the
+  `type: oci` source Flux uses, `diff -r`): exactly two lines — `Chart.yaml` `version`, and the
+  default `configReloader.image.tag` v0.93.1 → v0.94.1. That sidecar is disabled here and does not
+  render.
+- Rendered diff with OUR values (`helm template` 11.18.0 vs 11.19.1, values extracted from the
+  HelmRelease with `${SECRET_DOMAIN}` substituted, helm v3.22.0): **6 `helm.sh/chart` label lines,
+  nothing else**. Same kinds in both (ConfigMap, Deployment, Service, ServiceAccount,
+  ServiceMonitor). The pod-template label change rolls the one pod, surge-first
+  (`maxSurge: 1, maxUnavailable: 0`).
 
-**Net effect:** two pod rolls, both no-op (identical image and config). The real risk is the CoreDNS pod roll itself (2 replicas, `maxUnavailable: 1`,
-`lameduck 5s`) and what happens if DNS breaks (§5.3).
+**Why held:** G3 could not read release notes (coverage "unverified"). This is a false positive in
+substance: nothing functional changes. Risk `low`.
 
-## 2. Pre-checks (all read-only; abort the whole plan on any failure)
+**Execution class:** with coredns gone, nothing in `touches.shared` hits SHARED_INFRA_FLOOR
+(`monitoring` only), `capability_change: false`, `rollback_class: git-revert`, no reboot — it
+derives AUTO-NIGHT. `autonomy_override: human-gated` was removed because its only reason was the
+coredns break-glass.
+
+## 2. Pre-checks (all read-only; abort on any failure)
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 .venv/bin/python3 runbooks/plan-premises.py chart-patches-coredns-reloader-blackbox   # all PASS
 flux get kustomizations -A | awk 'NR==1 || $5 != "True"'     # header only
 flux get helmreleases -A   | awk 'NR==1 || $5 != "True"'     # header only
-git status --short -- kubernetes/apps/kube-system/coredns \
-  kubernetes/apps/monitoring/prometheus-blackbox-exporter     # empty (no foreign edits)
+git status --short -- kubernetes/apps/monitoring/prometheus-blackbox-exporter   # empty (no foreign edits)
+flux get sources git -n flux-system flux-system ; git rev-parse --short origin/main   # same revision (Step 0 settled)
 ```
 
-**2.1 Step 0 has settled.** The window's safe-update batch must be fully reconciled before item A.
-Do not stack changes. Check that the
-`flux-system` GitRepository revision equals `git rev-parse origin/main`:
+**2.1 Module-set baseline (§4 compares against it):**
 ```bash
-flux get sources git -n flux-system flux-system ; git rev-parse --short origin/main
-```
-
-**2.2 DNS baseline (record the output; §4.C compares against it).** Resolution runs from inside the
-blackbox pod. Its busybox `nslookup` exits 1 on NXDOMAIN (the negative control below proves the gate
-can fail). Pod IPs are not routable from the Mac, so do not use `dig` from the Mac.
-```bash
-D=$(kubectl -n flux-system get secret cluster-secrets -o jsonpath='{.data.SECRET_DOMAIN}' | base64 -d)
-dnsmatrix() {
-  for ip in $(kubectl -n kube-system get pods -l k8s-app=kube-dns -o jsonpath='{.items[*].status.podIP}'); do
-    for n in kubernetes.default.svc.cluster.local "sweep.$D" github.com does-not-exist-zz9.svc.cluster.local; do
-      out=$(kubectl -n monitoring exec deploy/prometheus-blackbox-exporter -- nslookup -type=A "$n" "$ip" 2>&1); rc=$?
-      a=$(printf '%s\n' "$out" | awk '/^Name:/{f=1} f&&/^Address/{print $2}' | head -1)
-      echo "$ip rc=$rc ans=${a:-NONE} name=${n%%.$D}"
-    done
-  done
-}
-dnsmatrix
-```
-Expected (measured 2026-09-27, 2 replicas × 4 names):
-`kubernetes.default…` → `rc=0 ans=10.96.0.1`; `sweep.<domain>` → `rc=0 ans=192.168.55.103`
-(this goes through the `${SECRET_DOMAIN}` server block → forward to 192.168.55.101); `github.com` →
-`rc=0` with a public IP; `does-not-exist-zz9…` → `rc=1 ans=NONE`. **Negative control:** if that
-last line reads `rc=0`, the harness cannot detect failure. STOP.
-(`for ip in $(…)` word-splits correctly under zsh. Holding the IP list in a scalar does not; that
-bug was hit while authoring this plan.)
-
-```bash
-kubectl -n kube-system get cm coredns -o jsonpath='{.data.Corefile}' > /private/tmp/claude-501/chart-patches-corefile.txt
-test -s /private/tmp/claude-501/chart-patches-corefile.txt || echo 'ABORT: empty Corefile read'
-shasum -a 256 < /private/tmp/claude-501/chart-patches-corefile.txt | tee /private/tmp/claude-501/chart-patches-corefile.pre
 kubectl -n monitoring get cm prometheus-blackbox-exporter -o jsonpath='{.data.blackbox\.yaml}' \
   | python3 -c "import sys,yaml; print(sorted(yaml.safe_load(sys.stdin)['modules']))"
-# expect: ['dns_k8s_gateway_primary', 'dns_k8s_gateway_secondary', 'http_2xx_ingress']
+# expect (2026-10-05): ['dns_k8s_gateway_primary', 'dns_k8s_gateway_secondary', 'http_2xx_ingress']
 ```
 
-**2.3 Prometheus baseline** (the port-forward stays up for §4):
+**2.2 Prometheus baseline** (the port-forward stays up for §4):
 ```bash
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19090:9090 >/dev/null 2>&1 & PF=$!; sleep 3
 q(){ curl -s --get http://localhost:19090/api/v1/query --data-urlencode "query=$1" \
-  | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; print(len(r)); [print(' ',{k:v for k,v in x['metric'].items() if k in ('probe_component','instance','rcode','to','version','pod','event_type')},x['value'][1]) for x in r]"; }
+  | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; print(len(r)); [print(' ',{k:v for k,v in x['metric'].items() if k in ('probe_component','instance','version','pod')},x['value'][1]) for x in r]"; }
 q 'probe_success'                                              # 5 series, all 1
-q 'sum by (rcode)(rate(coredns_dns_responses_total[10m]))'     # note SERVFAIL (absent/0 on 2026-09-27)
+q 'blackbox_exporter_build_info'                               # 1 series, version="0.28.0"; note the pod name
 q 'ALERTS{alertstate="firing",alertname=~"InternalDns.*|IngressProbe.*|Blackbox.*"}'   # 0
 ```
 
-**2.4** (was: reloader log baseline) — removed with the item B carve-out.
+## 3. Steps (one commit)
 
-## 3. Steps: one commit per item, verify each (§4) before the next
+Shared-worktree rule: `git commit --only <path>`, then check with `git log -1 --format=%s` that the
+subject is yours and `git show --stat HEAD` that the file is yours, BEFORE `git push`. The sed was
+dry-tested on a scratch copy with macOS BSD sed; the anchor matches exactly once (`grep -c` = 1,
+re-measured 2026-10-05).
 
-Shared-worktree rule: use `git commit --only <paths>`, then check with `git log -1 --format=%s` that
-the subject is yours, and `git show --stat HEAD` that every file is yours, BEFORE `git push`.
-Each sed was dry-tested on a scratch copy with macOS BSD sed. The resulting diff line is quoted below.
-Each anchor matches exactly once (`grep -c` = 1, measured).
-
-### 3.A prometheus-blackbox-exporter 11.18.0 → 11.19.1
 ```bash
+cd /Users/mu/code/cberg-home-nextgen
 F=kubernetes/apps/monitoring/prometheus-blackbox-exporter/app/helmrelease.yaml
 test "$(grep -c '^      version: 11\.18\.0$' $F)" = 1 || { echo ABORT; return 1 2>/dev/null || exit 1; }
 sed -i '' 's/^      version: 11\.18\.0$/      version: 11.19.1/' $F
 git diff -- $F     # exactly: -      version: 11.18.0  /  +      version: 11.19.1
-git commit --only $F -m "feat(monitoring): prometheus-blackbox-exporter chart 11.18.0 -> 11.19.1 (F-b7b896a4)"
+git commit --only $F -m "feat(monitoring): prometheus-blackbox-exporter chart 11.18.0 -> 11.19.1 (F-b7b896a4)" \
+  -m "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 git log -1 --format=%s && git show --stat HEAD && git push
 ```
 Flux picks it up via the push webhook. No manual reconcile. Wait for
 `kubectl get hr -n monitoring prometheus-blackbox-exporter` Ready, message `…11.19.1`
-(≤10 min; if nothing happens after 10 min, check the webhook before anything else). Then run §4.A.
+(≤10 min; if nothing happens after 10 min, check the webhook before anything else). Then §4.
 
-### 3.B — CARVED OUT to `reloader-2.2.18` (2026-10-03). Do nothing here.
+**Do NOT touch** coredns here; that is `coredns-1.48.2`.
 
-### 3.C coredns 1.47.0 → 1.47.1 (image pin KEPT)
-```bash
-F=kubernetes/apps/kube-system/coredns/app/helmrelease.yaml
-V=kubernetes/apps/kube-system/coredns/app/helm-values.yaml
-test "$(grep -c '^      version: 1\.47\.0$' $F)" = 1 || { echo ABORT; return 1 2>/dev/null || exit 1; }
-test "$(grep -c '^# Chart 1\.47\.0 is the newest published chart and still ships appVersion 1\.14\.6,$' $V)" = 1 || { echo ABORT; return 1 2>/dev/null || exit 1; }
-sed -i '' 's/^      version: 1\.47\.0$/      version: 1.47.1/' $F
-sed -i '' 's/^# Chart 1\.47\.0 is the newest published chart and still ships appVersion 1\.14\.6,$/# Chart 1.47.1 (newest published, re-checked 2026-09-27) still ships appVersion 1.14.6,/' $V
-git diff -- $F $V
-#   -      version: 1.47.0
-#   +      version: 1.47.1
-#   -# Chart 1.47.0 is the newest published chart and still ships appVersion 1.14.6,
-#   +# Chart 1.47.1 (newest published, re-checked 2026-09-27) still ships appVersion 1.14.6,
-grep -n 'tag: "1.14.7"' $V     # MUST still print the pin line
-git commit --only $F $V -m "feat(kube-system): coredns chart 1.47.0 -> 1.47.1, keep image pin 1.14.7 (F-3893caaf)"
-git log -1 --format=%s && git show --stat HEAD && git push
-```
-The comment edit changes the generated `coredns-helm-values-<hash>` ConfigMap name. Because
-`ks prune: false`, the old one stays as an orphan. That is harmless, and it makes a revert re-point
-to an object that already exists. Watch the roll:
-`kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide -w` (Ctrl-C once 2/2 new pods are Ready,
-on 2 distinct nodes). Then run §4.C.
+## 4. Verification (any FAIL → §5)
 
-**Do NOT touch** the `*coredns*` deny rule in `runbooks/auto-update-policy.yaml`. Its removal
-condition ("a chart ships appVersion >= the pinned tag AND the image.tag override is dropped") is
-still unmet.
-
-## 4. Verification
-
-A failed gate means that item's §5 rollback. Earlier items stay applied, because each gate is
-independent.
-
-### 4.A blackbox
-- HR Ready at 11.19.1. **Image unchanged**:
+- HR Ready at 11.19.1:
+  `kubectl get hr -n monitoring prometheus-blackbox-exporter -o jsonpath='{.spec.chart.spec.version} {.status.lastAttemptedRevision} {.status.conditions[?(@.type=="Ready")].status}'`
+  → `11.19.1 11.19.1 True`.
+- **Image unchanged**:
   `kubectl get deploy -n monitoring prometheus-blackbox-exporter -o jsonpath='{.spec.template.spec.containers[0].image}'`
-  → `quay.io/prometheus/blackbox-exporter:v0.28.0`. If a different tag prints, the chart moved the
-  image contrary to the render. FAIL.
-- CONTENTS ASSERTION: the live module set is still exactly our three and the chart-default `http_2xx` is still nulled. Measured by the §2.2 `python3 … sorted(modules)` command, compared to the baseline `['dns_k8s_gateway_primary', 'dns_k8s_gateway_secondary', 'http_2xx_ingress']`. If the Helm map-merge regressed, `http_2xx` appears in the list. FAIL.
+  → `quay.io/prometheus/blackbox-exporter:v0.28.0`. A different tag means the chart moved the image
+  contrary to the render. FAIL.
+- CONTENTS ASSERTION: the live module set is still exactly our three and the chart-default `http_2xx` is still nulled. Measured by the §2.1 `python3 … sorted(modules)` command, compared to the baseline `['dns_k8s_gateway_primary', 'dns_k8s_gateway_secondary', 'http_2xx_ingress']`. If the Helm map-merge regressed, `http_2xx` appears in the list. FAIL.
 - Negative control through the live exporter (proves the module is really gone, not just absent from
   a list we parsed):
   ```bash
@@ -276,76 +192,46 @@ independent.
   curl -s -o /dev/null -w '%{http_code}\n' 'http://localhost:19115/probe?module=http_2xx&target=192.168.55.101'           # 400 (unknown module)
   kill $BF
   ```
-  A `200` on the second curl means the permissive default module is back. FAIL.
-- CONTROL: metric probe_success — all 5 series = 1, over a window after the new pod's start (wait 2 min; `q 'min_over_time(probe_success[2m])'` → 5 series, all 1). 0 series means the scrape broke. FAIL.
-- CONTROL: metric blackbox_exporter_config_last_reload_successful — `= 1` on the new pod (the `pod` label must be the new pod name).
-- CONTROL: metric blackbox_exporter_build_info — `version="0.28.0"`, exactly 1 series from the new pod.
+  A `200` on the second curl means the permissive default module is back. FAIL. A `probe_success 0`
+  on the first means the DNS module broke. FAIL.
+- CONTROL: metric probe_success — all 5 series = 1 over a window after the new pod's start (wait 2 min; `q 'min_over_time(probe_success[2m])'` → 5 series, all 1). 0 series means the scrape broke. FAIL.
+- CONTROL: metric blackbox_exporter_config_last_reload_successful — `= 1` on the new pod (the `pod` label must be the new pod name, not the §2.2 one).
+- CONTROL: metric blackbox_exporter_build_info — `version="0.28.0"`, exactly 1 series, from the new pod.
 - CONTROL: alertname BlackboxProbesAbsent — not firing.
 - CONTROL: alertname BlackboxExporterPodNotReady — not firing.
 
-### 4.B — CARVED OUT to `reloader-2.2.18`.
-
-### 4.C coredns
-- Pods: 2/2 Ready on 2 distinct nodes, both with image `coredns/coredns:1.14.7` (the **pin survived**;
-  `1.14.6` = the pin was lost = FAIL):
-  `kubectl -n kube-system get pods -l k8s-app=kube-dns -o 'custom-columns=N:.metadata.name,NODE:.spec.nodeName,IMG:.spec.containers[0].image,READY:.status.containerStatuses[0].ready,RS:.status.containerStatuses[0].restartCount'`
-- CONTENTS ASSERTION: the served Corefile is byte-identical to the pre-change one. Measured by `kubectl -n kube-system get cm coredns -o jsonpath='{.data.Corefile}' | shasum -a 256 | diff - /private/tmp/claude-501/chart-patches-corefile.pre` (silent = pass). The render diff says only labels change; any Corefile change means the chart altered DNS config. FAIL and roll back.
-- CONTENTS ASSERTION: every replica resolves all three name classes correctly. Measured by re-running `dnsmatrix` from §2.2 against the NEW pod IPs, compared to the §2.2 baseline. Required: 2 IPs × (cluster name → 10.96.0.1, `sweep.<domain>` → 192.168.55.103, github.com → rc=0 public IP, negative control → rc=1 NONE). Any `rc≠0` on the first three, or `rc=0` on the fourth, is a FAIL.
-- CONTROL: metric coredns_build_info — exactly 2 series, both `version="1.14.7"`, with the NEW pod names.
-- CONTROL: metric coredns_dns_responses_total — `sum by (rcode)(rate(coredns_dns_responses_total[5m]))` 5 min after roll: NOERROR > 0 (a floor: traffic is served), SERVFAIL not above the §2.3 baseline.
-- CONTROL: metric coredns_proxy_request_duration_seconds_count — `sum by (to,rcode)(rate(coredns_proxy_request_duration_seconds_count[5m]))` shows `to="192.168.55.101:53"` NOERROR > 0, so the `${SECRET_DOMAIN}` block still forwards to k8s-gateway.
-- CONTROL: metric probe_success — the three `probe_class="http"` probes (ingress-internal, ingress-external, vaultwarden) resolve their hostnames through CoreDNS inside the blackbox pod, so they are the Prometheus-side end-to-end check: `min_over_time(probe_success{probe_class="http"}[5m])` = 1. **Note:** the two `dns_*` probes target k8s-gateway (192.168.55.101) DIRECTLY and do **not** exercise CoreDNS. They stay green even if CoreDNS is dead. They are not a CoreDNS gate; `dnsmatrix` is.
-- CONTROL: alertname InternalDnsResolutionFailing — not firing.
-- CONTROL: alertname InternalDnsResolverDown — not firing.
-- CONTROL: alertname IngressProbeFailing — not firing.
-- Rollback-path health: wait >= 2 min after the roll completes, then `flux get sources git -n flux-system flux-system`
-  must show READY `True` (the real gate; a post-roll fetch is not observable without a new commit)
-  (needs github.com resolution via CoreDNS). This proves §5 is still usable.
-
 Finally: `kill $PF`.
 
-## 5. Rollback (per item; each is one revert commit)
+## 5. Rollback
 
-Find the item's commit with `git log --oneline -3 -- <file>`, then
-`git revert --no-edit <sha> && git log -1 --format=%s && git push`.
-
-- **5.A blackbox:** revert → HR back at 11.18.0 (`helm history prometheus-blackbox-exporter -n monitoring` shows a new revision with chart 11.18.0). Re-run §4.A. Expected module set and image unchanged.
-- **5.B:** carved out to `reloader-2.2.18`.
-- **5.C coredns:** revert (both files) → HR 1.47.0. The old generated values ConfigMap still exists
-  (prune: false). Pods roll again. Re-run §4.C: Corefile hash = `/private/tmp/claude-501/chart-patches-corefile.pre`, dnsmatrix = baseline.
-- **5.3 Break-glass, only if CoreDNS is serving failures:** the GitOps revert needs source-controller
-  to resolve github.com THROUGH CoreDNS, so a DNS-breaking upgrade can block its own revert. Helm's own
-  `upgrade.remediation.strategy: rollback` covers a failed upgrade, but not an upgrade that is Ready
-  and serving wrong answers. If §4.C fails AND `flux get sources git` shows no fetch after the revert
-  push, an operator (not unattended) runs:
-  `flux suspend helmrelease coredns -n kube-system && helm rollback coredns 10 -n kube-system --wait`
-  Revision 10 is `coredns-1.47.0`, deployed 2026-08-19; confirm with `helm history coredns -n kube-system`
-  first, because it will be 10 only if nothing else upgraded it. Then push the revert, and
-  `flux resume helmrelease coredns -n kube-system` once the source shows the revert revision. This is
-  the one direct cluster mutation in the plan. It is why this plan is attended.
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+SHA=$(git log -1 --format=%h -- kubernetes/apps/monitoring/prometheus-blackbox-exporter/app/helmrelease.yaml)
+git show --stat "$SHA"     # confirm it is the 11.19.1 commit (1 file)
+git revert --no-edit "$SHA" && git log -1 --format=%s && git show --stat HEAD && git push
+```
+Confirm: HR back at `11.18.0 11.18.0 True`; `helm history prometheus-blackbox-exporter -n monitoring --max 2`
+shows a new revision on chart 11.18.0; re-run §4 — image v0.28.0, module set = §2.1 baseline,
+`probe_success` 5 series all 1. Nothing forward-only happens in this plan (no CRD, no PVC, no
+migration), so the revert is complete.
 
 ## 6. Interference notes
 
-- **Not nightly-unattended, by design and by derivation.** `touches.shared` carries `dns/coredns`.
-  `dns` is in `SHARED_INFRA_FLOOR`, so `maintenance-plan.py` derives HUMAN-GATED, and
-  `autonomy_override: human-gated` states it explicitly. The reason is not the diff, which is
-  trivial. It is §5.3: a CoreDNS failure at 03:30 disables the GitOps revert and needs a human with
-  `helm`. The `*coredns*` deny rule also says coredns "should never bump unattended regardless of
-  the pin". **Recommended window: `sat-attended`** (60 min fits the 70 min budget). The plan reviewer
-  (2026-09-27) named the next free slot as `sat-attended:2026-10-17`. That is recorded here as prose only:
-  `window:` stays null for the scheduler.
-  If the operator wants A in `nightly`: split item C into its own plan (reloader, former B, already
-  was: `reloader-2.2.18`). A alone derives
-  AUTO-NIGHT (low risk, git-revert, no DNS/storage/gateway shared surface).
-- **Serialize A → C, gate between them.** C last, with nothing else in flight. The window's other
-  plans must not verify through DNS or Prometheus during C's roll (~2 min). That is why
-  `uptime-kuma-2.5.5-slim-rootless` and `oc8-install` are in `conflicts_with`.
-- **Blackbox is the window's own instrument.** During A's surge roll there is at most a ~30 s gap in
+- **Nightly-eligible.** Derives AUTO-NIGHT (see §1); with a `ready-for-go` review and `risk: low` it
+  meets SD-10. The previous `sun-attended:2026-11-01` slot was chosen only for coredns and is removed.
+- **This pod is the window's instrument.** During the surge roll there is at most a ~30 s gap in
   `probe_success`. `BlackboxProbesAbsent` needs 10 m and `InternalDns*` need 2 m, so neither should
-  fire. A firing one is a real signal.
-- `flux-oci-chart-sources`, `helm-drift-detection` and `flux-reconciler-impersonation` rewrite
-  these same three HelmReleases or their sources. Never in the same window. Those plans should list
-  this one in their own `conflicts_with` (reciprocity is not validated).
-- Retire this file (delete it) in the commit that records execution, and close the three findings with
-  `runbooks/policy-cli.py finding close <id> --commit <sha>` (F-3893caaf, F-b7b896a4).
-  F-74a00f0b and the F-0cf695f9 citation moved to `reloader-2.2.18` with the carve-out.
+  fire; a firing one is a real signal. No other plan in the same window should be inside its own
+  §4 probe/alert gates during this roll — hence `envoy-proxy-config-distroless-v1.39.2` and
+  `coredns-1.48.2` in `conflicts_with`.
+- **coredns-1.48.2:** its DNS harness execs `nslookup` inside this Deployment. If the operator puts
+  both in one window anyway, run this plan first and let §4 go green before coredns §2 starts.
+- `flux-oci-chart-sources`, `helm-drift-detection`, `flux-reconciler-impersonation` and
+  `flux-fleet-0.60.0` rewrite this HelmRelease, its source, or the controller that applies/reverts it.
+  Never in the same window.
+- **Repo corrections (not done here):** `app-template-5.2.1`, `mariadb-28.1.1`, `penpot-chart-1.10.0`,
+  `redis-fleet-8.10.2`, `nextcloud-fleet-35.0.1`, `edot-collector-0.162.0`, `external-dns-1.23.0` and
+  `unpoller-5.4.0` list this plan in `conflicts_with` because it used to roll CoreDNS. That reason now
+  belongs to `coredns-1.48.2`; they should re-point (and may drop this plan).
+- Retire this file (delete it) in the commit that records execution, and close
+  `runbooks/policy-cli.py finding close F-b7b896a4 --commit <sha>`.

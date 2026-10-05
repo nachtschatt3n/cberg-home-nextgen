@@ -6,32 +6,50 @@ kind: chart
 current: "app-template 5.1.0"
 target: "app-template 5.2.1"
 update_type: minor
-risk: medium                          # rendered diff is label-only for all 79 (see §1 table), but it is 79 helm
+risk: medium                          # rendered diff is label-only for all 66 live (see §1 table), but it is 66 helm
                                       # upgrades in one night, and one consumer (openclaw) needs a values edit
                                       # to render at all. Medium = honest capacity weight; not `high`.
-est_duration_min: 55
+est_duration_min: 55                  # kept at 55 on the 2026-10-05 refresh (fleet 79 -> 66 live); fits nightly budget 70
 needs_reboot: false
 touches:
   namespaces: [ai, backup, databases, default, download, home-automation, media, monitoring,
                my-software-development, my-software-production, my-software-showcase, network, office]
   resources:
-    - "78 x helmrelease/* on app-template 5.1.0 (Batch A: every consumer except openclaw + echo-server; list = §3 A.1 file set)"
+    - "64 x helmrelease/* on app-template 5.1.0 (Batch A: every live consumer except openclaw + echo-server (paperclip already 5.2.1); list = §2 d2 batchA.hr, derived from the live HRs)"
+    - "15 x kubernetes/apps/**/helmrelease.yaml of apps DECOMMISSIONED 2026-10-04 (ac7bf0e0: ks.yaml commented out, not deployed) -- file edit only, nothing reconciles; bumped in Batch A (hermes-agent, scrypted-nvr, actual-budget, omni-tools, 11 my-software-showcase apps)"
     - "kubernetes/apps/my-software-development/_template/app/helmrelease.yaml (scaffold, not deployed; bumped in Batch A)"
     - helmrelease/echo-server           # Batch B (default)
     - helmrelease/openclaw              # Batch C (ai): chart bump + two-placeholder escape, ONE commit
-    - "81 workloads = 79 Deployment incl. paperclip + 2 StatefulSet iobroker/penpot-db (covered by --compare-workloads); plus 1 CronJob pallet-price-monitor (render gate only): metadata label helm.sh/chart only"
+    - "68 workloads = 66 Deployment incl. paperclip + 2 StatefulSet iobroker/penpot-db (covered by --compare-workloads); plus 1 CronJob pallet-price-monitor (render gate only): metadata label helm.sh/chart only"
     - "every chart-owned Service/PVC/ServiceAccount/HTTPRoute/ConfigMap of those releases: metadata label only"
   shared:
-    - gateway/envoy                   # ~45 HTTPRoutes get a metadata-label change (spec identical) -> Envoy Gateway
-                                      # re-translates; no route/listener change. Both envoy-internal and envoy-external.
+    - gateway/envoy                   # 31 HTTPRoutes (23 envoy-internal, 8 envoy-external; live 2026-10-05) get a
+                                      # metadata-label change (spec identical) -> Envoy Gateway re-translates; no route/listener change.
     - public-edge                     # network/cloudflared is a consumer (label-only, no pod roll)
     - mqtt                            # home-automation/mosquitto is a consumer (label-only, no pod roll)
     - monitoring                      # §4 reads Prometheus (flux_resource_info, kube-state-metrics) — the instrument
 depends_on: []
 conflicts_with:
   - flux-reconciler-impersonation     # exclusive; rewires helm-controller/kustomize-controller identity for the
-                                      # SAME 79 HelmReleases — a same-night failure could not be attributed
-  - helm-drift-detection              # adds spec.driftDetection to all 124 HRs incl. these 79 (same objects, same helm-controller)
+                                      # SAME 66 HelmReleases — a same-night failure could not be attributed
+  - helm-drift-detection              # adds spec.driftDetection to all HRs incl. these 66 (same objects, same helm-controller)
+  - flux-fleet-0.60.0                 # ADDED 2026-10-05: rolls deployment/flux-operator, the exporter of flux_resource_info
+                                      # that §4's first CONTROL reads -> same night = an EMPTY/stale instrument
+  - kube-prometheus-stack-91.9.0      # ADDED 2026-10-05: §4 reads Prometheus (shared instrument); reciprocal -- it lists us
+  - iobroker-12.0.0                   # ADDED 2026-10-05: edits + ROLLS home-automation/iobroker (Batch A StatefulSet) -> GEN_CHANGED; reciprocal
+  # ADDED 2026-10-05, reciprocal only (each already lists this plan; none was carried here):
+  - coredns-1.48.2                    # 1.48.1 superseded 2026-10-05 by this (untracked as of this refresh)
+  - edot-collector-0.162.0
+  - envoy-proxy-config-distroless-v1.39.2
+  - external-dns-1.23.0
+  - immich-machine-learning-3.2.4
+  - nextcloud-fleet-35.0.1
+  - nocodb-2026.09.1
+  - paperclip-26.04
+  - pgvector-fleet-0.8.7
+  - python-fleet-3.14.8
+  - reloader-2.2.18
+  - sure-0.7.5
   - flux-oci-chart-sources            # rewrites HelmRelease chart sources (up to 32 -> chartRef); same spec.chart block
   - nextcloud-mcp-0.198.0             # edits office/nextcloud-mcp helmrelease.yaml (Batch A file); was nextcloud-mcp-0.187.1 (superseded 2026-10-01)
   - absenty-drop-npm-runtime          # edits my-software-production/absenty helmrelease.yaml (Batch A file)
@@ -39,7 +57,7 @@ conflicts_with:
   - penpot-cache-9.2                  # edits office/penpot-cache helmrelease.yaml (Batch A file)
   - redis-fleet-8.10.2                # edits 4 Batch A HR files (redis, tube-archivist-redis, immich-redis,
                                       # sure-redis) and ROLLS them -> §4 would read GEN_CHANGED
-  - makemkv-v26.09.2                  # edits media/makemkv helmrelease.yaml (Batch A file); lists us already
+  # - makemkv-v26.09.2 (RESOLVED: status executed; dead ref removed 2026-10-05 per the dead-ref convention)
   # traccar-6.16.0 REMOVED 2026-09-29: executed green in nightly:2026-09-29 (3a943035), plan retired (1a40b257);
   # traccar helmrelease.yaml now pins image 6.16.0@sha256 (chart still 5.1.0) -- Batch A's chart sed is unaffected
   - chart-patches-coredns-reloader-blackbox  # a Reloader/CoreDNS roll during §4 reads as GEN_CHANGED; lists us already
@@ -65,33 +83,40 @@ finding_refs: [F-081877c1, F-08398bf3, F-0a5ad294, F-0d31e9d4, F-0d5c12a7, F-111
                F-8b9d5d30, F-8d9677a0, F-8e34fea8, F-908550f6, F-922d30b2, F-943e4773, F-94bbd7ee, F-a20805e9,
                F-ad2c78a0, F-afc9bd6a, F-b5e13899, F-b9646099, F-c0bca7f3, F-c5d55409, F-c676683f, F-ca7b2d59,
                F-cdab7cec, F-cf5d675b, F-d0b1c69d, F-d7e34f0d, F-d9cdd507, F-dd055cec, F-dda0af9f, F-dfd6adca,
-               F-e1846243, F-e1936864, F-e4bffed7, F-e7135a91, F-ecd3db25, F-f6dabba5]
+               F-e1846243, F-e1936864, F-e4bffed7, F-e7135a91, F-ecd3db25, F-f6dabba5,
+               F-76741a97, F-9d6fd381]    # +2 on 2026-10-05: splitfairy, the-ninth-banner (new consumers)
 premises:
   - id: fleet-still-on-5.1.0
     why: >-
-      `current:` claims 79 app-template HelmReleases on 5.1.0 (plus paperclip,
-      already 5.2.1). A different count means a consumer was added, removed or
-      bumped since the 2026-09-27 render — the §1 table no longer covers the fleet.
+      `current:` claims 66 app-template HelmReleases on 5.1.0 (plus paperclip,
+      already 5.2.1) — re-measured 2026-10-05 (was 79: -15 decommissioned
+      2026-10-04 by ac7bf0e0, +2 new splitfairy/the-ninth-banner). A different
+      count means a consumer was added, removed, re-enabled or bumped since the
+      2026-10-05 render — the §1 table and every hard-coded §2-§4 PASS number no
+      longer cover the fleet. Deliberately EXACT: a new consumer is unrendered here.
     run: kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.chart.spec.chart}={.spec.chart.spec.version}{"\n"}{end}' | grep -c '^app-template=5.1.0$'
-    expect_exact: "79"
+    expect_exact: "66"
   - id: fleet-deployed-and-ready-on-5.1.0
     why: >-
       Do not stack the bump on a failing or half-applied release; the git-revert
       rollback target must be the revision actually deployed on every consumer.
     run: kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.chart.spec.chart}={.status.history[0].chartVersion}={.status.history[0].status}={.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | grep -c '^app-template=5.1.0=deployed=True$'
-    expect_exact: "79"
+    expect_exact: "66"
   - id: target-chart-5.2.1-published
-    why: "The target must still resolve from the OCI source the bjw-s HelmRepository uses; a yanked tag fails 79 upgrades."
+    why: "The target must still resolve from the OCI source the bjw-s HelmRepository uses; a yanked tag fails 66 upgrades."
     run: helm show chart oci://ghcr.io/bjw-s-labs/helm/app-template --version 5.2.1 | grep -E '^version:'
     expect_exact: "version: 5.2.1"
-  - id: repo-pins-80-files
+  - id: repo-pins-82-files
     why: >-
       §3's edits assume every app-template file has `chart: app-template`
-      immediately followed by `      version: 5.1.0` (79 live + the _template
-      scaffold). Run from the repo root.
+      immediately followed by `      version: 5.1.0`: 66 live + 15 files of apps
+      decommissioned 2026-10-04 (dirs kept, ks.yaml commented out) + the
+      _template scaffold = 82 (re-measured 2026-10-05; was 80). Deleting the
+      decommissioned dirs or adding an app moves it -> the §3 PASS counts are
+      wrong -> re-plan. Run from the repo root.
     run: >-
       grep -rh -A1 'chart: app-template' kubernetes/apps | grep -c '^      version: 5.1.0$'
-    expect_exact: "80"
+    expect_exact: "82"
   - id: openclaw-placeholders-unescaped
     why: >-
       Batch C escapes exactly two single-quoted placeholders. If they moved, were
@@ -108,7 +133,8 @@ premises:
     expect_exact: "1"
 status: vetted   # 2026-09-27 plan-reviewer: needs-fix (4 blocking) -> all applied -> re-check ready-for-go. NO operator GO recorded.
 review: ready-for-go@2026-09-27
-window: "nightly:2026-10-02"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); SD-11 candidate; GO-free only once SD-11 lands, else needs a GO
+amended: "2026-10-05 scope-neutral refresh -- premises 79/79/80 -> 66/66/82 (15 consumers decommissioned 2026-10-04 by ac7bf0e0 are now inert repo files; +2 new consumers splitfairy/the-ninth-banner render LABEL_ONLY, Recreate). Fleet render gate re-run: TOTALS LABEL_ONLY=67 GATE_PASS; inert 16 files repo-values render identical. Batch A sed unchanged (dry-test: 80 files). conflicts_with += flux-fleet-0.60.0, kube-prometheus-stack-91.9.0, iobroker-12.0.0 + 12 reciprocals; makemkv-v26.09.2 dead ref dropped. finding_refs +2."
+window: null   # was nightly:2026-10-02 (missed: premise fail 2026-10-02); coordinator reschedules. NOT the same night as flux-fleet-0.60.0 (nightly:2026-10-06)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
@@ -116,20 +142,48 @@ sops_refs:
 generated: "2026-09-27"
 ---
 
-# app-template fleet: bjw-s app-template chart 5.1.0 → 5.2.1 (79 consumers)
+# app-template fleet: bjw-s app-template chart 5.1.0 → 5.2.1 (66 live consumers)
 
 ## 1) Summary & why held
 
-79 HelmReleases pin `chart: app-template` `version: 5.1.0` (HelmRepository
-`flux-system/bjw-s`, `oci://ghcr.io/bjw-s-labs/helm`); an 80th file is the
-`my-software-development/_template` scaffold (not deployed). Target **5.2.1**.
-paperclip already moved on 2026-09-26 (`paperclip-chart-5.2.1`, executed:
-label-only, same pod) and is the canary for this plan.
+> **Refresh 2026-10-05 (scope-neutral).** The plan missed `nightly:2026-10-02`
+> on its premises (live 79 → 66, repo pins 80 → 82). Cause, measured: commit
+> `ac7bf0e0` (2026-10-04) decommissioned 16 apps by commenting out their
+> `ks.yaml`. 15 of them were app-template consumers (hermes-agent, scrypted,
+> actual-budget, omni-tools, 11 `my-software-showcase` apps). Their
+> HelmReleases are gone from the cluster, but their `helmrelease.yaml` files
+> stay in the repo, still pinned to 5.1.0. Two new consumers were also
+> deployed: `my-software-production/splitfairy` (b041a565, 2026-09-28) and
+> `my-software-production/the-ninth-banner` (e1eb17a4, 2026-10-02). So: live
+> 79 − 15 + 2 = 66, and repo 80 + 2 = 82. Re-measured on 2026-10-05:
+> - **Fleet render gate (§2 d1, live values):** `TOTALS LABEL_ONLY=67  FLAGS
+>   ESCAPED=1 LIVE=5.2.1=1 TPL=2`, `GATE_PASS`. Both new consumers read
+>   `LABEL_ONLY` with no flag. Each is a single replica with
+>   `strategy: Recreate` (splitfairy holds an RWO `longhorn-static` PVC), and
+>   neither rolls.
+> - **The 15 inert files + `_template`:** there are no live values, so each
+>   was rendered from its repo `spec.values` with both charts (helm template).
+>   All 16 are object-set-identical apart from the `helm.sh/chart` label.
+>   globalmobility differs only in PVC emission order; as sorted object sets
+>   it reads SAME_OBJECTS. None contains `{{` or `topologySpreadConstraints`.
+>   A cross-consumer control diff reads DIFF. The version sweep still reads
+>   these files (their 5.1.0 → 5.2.1 findings are open and last-seen
+>   2026-10-05), so Batch A keeps bumping them. Nothing reconciles them.
+> - The Batch A sed is unchanged. Its scratch-copy dry-test now gives 80 files
+>   (64 live + 15 inert + `_template`).
+
+66 live HelmReleases pin `chart: app-template` `version: 5.1.0`
+(HelmRepository `flux-system/bjw-s`, `oci://ghcr.io/bjw-s-labs/helm`). 16
+more repo files carry the same pin but are not deployed: the 15 apps
+decommissioned on 2026-10-04 and the `my-software-development/_template`
+scaffold. Target **5.2.1**. paperclip already moved on 2026-09-26
+(`paperclip-chart-5.2.1`, executed: label-only, same pod) and is the canary
+for this plan.
 
 **Why held:** `runbooks/auto-update-policy.yaml` rule `*app-template*`
 (`max: patch`) sends every app-template MINOR to the PLAN lane "with a rendered
 diff (helm template, old chart vs new, across all consumers) before it moves".
-This plan is that diff. It answers the 78 per-consumer `version` findings
+This plan is that diff. It answers the 80 per-consumer `version` findings
 (`<name>: chart 5.1.0 → 5.2.1 (minor)`, listed in `finding_refs`). absenty and
 andreamosteller each exist in two namespaces and share one finding.
 
@@ -158,7 +212,7 @@ review flags. Two self-checks make the classification trustworthy:
   release. The first run failed this on 45 HTTPRoutes (`apiVersion`: without the
   `group/version/Kind` capability strings, `classes/_route.tpl` picks
   `v1alpha2`). The script now passes those strings, and fidelity holds for all
-  79. So "no diff" means "no diff against what is deployed", not "no diff
+  79 (2026-09-27) and all 67 (2026-10-05 re-run). So "no diff" means "no diff against what is deployed", not "no diff
   between two wrong renders".
 - **Negative controls (2026-09-27, mutated 5.2.1 chart copy).** Injecting
   `topologySpreadConstraints` into `lib/pod/_spec.tpl` gives `POD_TEMPLATE` +
@@ -167,11 +221,14 @@ review flags. Two self-checks make the classification trustworthy:
   `RENDER_FAIL` + `GATE_FAIL`. `--compare-workloads` with a bumped generation
   gives `COMPARE_FAIL`, and with an empty baseline `COMPARE_FAIL empty baseline`.
 
-**Summary table (run 2026-09-27, all 80 app-template releases, kube v1.36.0):**
+**Summary table (first run 2026-09-27 over 80 releases; re-run 2026-10-05
+over all 67 live app-template releases, kube v1.36.0. The counts below are
+the 2026-10-05 ones):**
 
 | Class | Count | Consumers | Batch |
 |---|---|---|---|
-| LABEL_ONLY, no flag | 77 | every consumer except the three below | **A**: one commit, attended window (derives HUMAN-GATED, see Verdict) |
+| LABEL_ONLY, no flag | 64 | every live consumer except the three below (incl. new splitfairy, the-ninth-banner) | **A**: one commit, attended window (derives HUMAN-GATED, see Verdict) |
+| not deployed (repo-values render identical) | 16 files | 15 decommissioned 2026-10-04 + `_template` | **A**: file edit only, nothing reconciles |
 | LABEL_ONLY, `TPL` | 1 | `default/echo-server` | **B**: individual (reviewed below) |
 | RENDER_FAIL, `TPL` | 1 | `ai/openclaw` | **C**: individual; needs a values edit in the SAME commit |
 | LABEL_ONLY, `LIVE=5.2.1` | 1 | `ai/paperclip` | done 2026-09-26; Batch A's sed is a no-op on it |
@@ -184,7 +241,7 @@ review flags. Two self-checks make the classification trustworthy:
 Consequence: **there are no restarters.** The "group restarters by
 namespace/risk" batch is empty. A label-only helm upgrade does not bump any
 workload's `metadata.generation` or its pod-template hash. No pod rolls
-anywhere, including the four RWO-Longhorn singletons and the stateful ones
+anywhere, including the RWO-Longhorn singletons (e.g. the new splitfairy, `Recreate`) and the stateful ones
 (iobroker, penpot-db, home-assistant, zigbee2mqtt, mosquitto). The paperclip
 canary measured generation `8 → 8`, same pod UID.
 
@@ -214,12 +271,12 @@ canary measured generation `8 → 8`, same pod UID.
   but the HR goes `Ready=False`.
 
 **Verdict:** the hold was correct, because it caught a real render break
-(openclaw). The other 78 are label-only false positives. `risk: medium`
+(openclaw). The other 65 live consumers are label-only false positives. `risk: medium`
 (blast-radius weight), `capability_change: false`, `rollback_class:
 git-revert`, no reboot. **It derives HUMAN-GATED**
 (`maintenance-plan.py --json`), because `touches.shared: gateway/envoy` hits
-`SHARED_INFRA_FLOOR` in `runbooks/maintenance-plan.py`. That is correct: about
-47 HTTPRoutes get re-translated by Envoy Gateway. So all three batches run in
+`SHARED_INFRA_FLOOR` in `runbooks/maintenance-plan.py`. That is correct: 31
+HTTPRoutes (live, 2026-10-05) get re-translated by Envoy Gateway. So all three batches run in
 an attended window. The label-only render proof would otherwise make Batch A
 an unattended nightly candidate, but declaring the gateway truthfully rules
 that out. Whether a metadata-only route change should count against the floor
@@ -231,9 +288,9 @@ is an operator decision, not a planner's.
 cd /Users/mu/code/cberg-home-nextgen
 B=/private/tmp/claude-501/app-template-5.2.1; mkdir -p "$B"
 
-# a) premises (fleet count 79, all deployed+Ready on 5.1.0, target published, 80 repo pins, openclaw 2 / echo 1 `{{`)
+# a) premises (fleet count 66, all deployed+Ready on 5.1.0, target published, 82 repo pins, openclaw 2 / echo 1 `{{`)
 .venv/bin/python3 runbooks/plan-premises.py app-template-5.2.1
-# PASS: every premise passed. Any failure -> STOP (fleet changed since the 2026-09-27 render; re-run d) and re-plan).
+# PASS: every premise passed. Any failure -> STOP (fleet changed since the 2026-10-05 render; re-run d) and re-plan).
 
 # b) nothing else in flight: no other plan from conflicts_with in this window, Flux quiet
 flux get helmreleases -A | awk 'NR==1 || $5 != "True"'          # expect only the header line (column 5 = READY)
@@ -241,7 +298,7 @@ git log --oneline -3 -- kubernetes/apps/ai/openclaw/app/helmrelease.yaml
 
 # c) BASELINE: workload generations + pod UIDs (the no-roll comparand) and echo-server hostname
 .venv/bin/python3 runbooks/app-template-render-diff.py --snapshot-workloads "$B/wl-before.json"
-# PASS: "SNAPSHOT workloads=81 -> …". Measured 2026-09-27: 81 (80 on app-template-5.1.0 + paperclip on 5.2.1).
+# PASS: "SNAPSHOT workloads=68 -> …". Measured 2026-10-05: 68 (67 on app-template-5.1.0 = 65 Deployment + 2 StatefulSet, + paperclip on 5.2.1).
 #   An exit 1 / workloads=0 -> STOP (kubectl failed; §4 would compare against nothing).
 kubectl get httproute -n default echo-server -o jsonpath='{.spec.hostnames[0]}' > "$B/echo-host-before.txt"
 grep -c '^echo-server\.' "$B/echo-host-before.txt"                   # PASS: 1
@@ -253,16 +310,16 @@ rm -rf "$B/render"        # never reuse a pulled (or negative-control-mutated) c
 .venv/bin/python3 runbooks/app-template-render-diff.py --from 5.1.0 --to 5.2.1 --out "$B/render" \
   --escape ai/openclaw --expect LABEL_ONLY --allow-flag TPL --allow-flag ESCAPED --allow-flag LIVE=5.2.1 \
   | tee "$B/render-fleet.txt" | tail -2
-# PASS: "TOTALS LABEL_ONLY=80   FLAGS ESCAPED=1 LIVE=5.2.1=1 TPL=2" then "GATE_PASS" (measured 2026-09-27)
+# PASS: "TOTALS LABEL_ONLY=67   FLAGS ESCAPED=1 LIVE=5.2.1=1 TPL=2" then "GATE_PASS" (measured 2026-10-05; 80 on 2026-09-27)
 #   (= every consumer rendered, is LABEL_ONLY, and its 5.1.0 render equals the live manifest; a
 #   failed `helm get manifest` flags FIDELITY and fails closed).
 #   Any other class/flag (POD_TEMPLATE, OTHER, RENDER_FAIL, FIDELITY, TSC, SELECTOR, ADD, DEL) -> STOP, re-plan.
 #    d2) per-batch STRICT gates (each must print GATE_PASS) — Batch A's consumer list from the live HRs:
 kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}={.spec.chart.spec.chart}{"\n"}{end}' \
   | grep '=app-template$' | sed 's/=app-template$//' | grep -v -e '^ai/openclaw$' -e '^default/echo-server$' -e '^ai/paperclip$' \
-  | sort > "$B/batchA.hr"; wc -l < "$B/batchA.hr"                     # PASS: 77
+  | sort > "$B/batchA.hr"; wc -l < "$B/batchA.hr"                     # PASS: 64
 .venv/bin/python3 runbooks/app-template-render-diff.py --from 5.1.0 --to 5.2.1 --out "$B/render" \
-  --only-file "$B/batchA.hr" --expect LABEL_ONLY | tail -2            # PASS: TOTALS LABEL_ONLY=77 … GATE_PASS
+  --only-file "$B/batchA.hr" --expect LABEL_ONLY | tail -2            # PASS: TOTALS LABEL_ONLY=64 … GATE_PASS
 .venv/bin/python3 runbooks/app-template-render-diff.py --from 5.1.0 --to 5.2.1 --out "$B/render" \
   --only default/echo-server --expect LABEL_ONLY --allow-flag TPL | tail -1     # PASS: GATE_PASS
 .venv/bin/python3 runbooks/app-template-render-diff.py --from 5.1.0 --to 5.2.1 --out "$B/render" \
@@ -283,13 +340,15 @@ Each batch is ONE commit, followed by its own §4 gate before the next batch
 starts. Commit with `--only` and verify the subject every time, because the
 worktree is shared.
 
-**Batch A — 77 label-only consumers + the `_template` scaffold (one commit).**
+**Batch A — 64 live label-only consumers + 15 decommissioned (inert) files + the `_template` scaffold (one commit).**
 
-A.1 Edit. Dry-tested 2026-09-27 on a scratch copy of `kubernetes/` with BSD
-sed. The result was 78 files changed, each diff exactly
-`<       version: 5.1.0` / `>       version: 5.2.1`. paperclip was a no-op, and
+A.1 Edit. Re-dry-tested 2026-10-05 on a scratch copy of `kubernetes/` with
+BSD sed (first dry-test 2026-09-27: 78 files). The selection is 81 files, and
+80 changed. Each diff is exactly `<       version: 5.1.0` /
+`>       version: 5.2.1` (`80 <` / `80 >`). paperclip was a no-op, and
 openclaw and echo-server were untouched (`grep -A1` afterwards: `2 × 5.1.0`,
-`79 × 5.2.1`).
+`81 × 5.2.1`). The 15 decommissioned files are in the selection on purpose
+(see §1 refresh).
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 B=/private/tmp/claude-501/app-template-5.2.1
@@ -297,19 +356,19 @@ grep -rl 'chart: app-template' kubernetes/apps | grep -v -e '/ai/openclaw/' -e '
 while IFS= read -r f; do
   sed -i '' '/^      chart: app-template$/{n;s/^      version: 5\.1\.0$/      version: 5.2.1/;}' "$f"
 done < "$B/batchA.files"
-xargs git diff --stat -- < "$B/batchA.files" | tail -1                    # PASS: "78 files changed, 78 insertions(+), 78 deletions(-)"
-xargs git diff -- < "$B/batchA.files" | grep -E '^[-+] ' | sort | uniq -c   # PASS: exactly "78 -      version: 5.1.0" and "78 +      version: 5.2.1"
+xargs git diff --stat -- < "$B/batchA.files" | tail -1                    # PASS: "80 files changed, 80 insertions(+), 80 deletions(-)"
+xargs git diff -- < "$B/batchA.files" | grep -E '^[-+] ' | sort | uniq -c   # PASS: exactly "80 -      version: 5.1.0" and "80 +      version: 5.2.1"
 #   any extra -/+ line = a foreign hunk inside a batch file (another session) -> STOP: `--only` would commit it
 grep -rh -A1 'chart: app-template' kubernetes/apps | grep -c '^      version: 5.1.0$'   # PASS: 2 (openclaw, echo-server)
 ```
 A.2 Commit only those files. Use a unique message file, and verify the files
 and the subject before pushing:
 ```bash
-xargs git diff --name-only -- < "$B/batchA.files" > "$B/batchA.changed"; wc -l < "$B/batchA.changed"   # PASS: 78
-printf '%s\n\n%s\n' "chore(app-template): chart 5.1.0 -> 5.2.1, batch A (77 label-only consumers + _template)" \
+xargs git diff --name-only -- < "$B/batchA.files" > "$B/batchA.changed"; wc -l < "$B/batchA.changed"   # PASS: 80
+printf '%s\n\n%s\n' "chore(app-template): chart 5.1.0 -> 5.2.1, batch A (64 label-only consumers + 15 decommissioned + _template)" \
   "Plan app-template-5.2.1. Rendered diff = helm.sh/chart label only (runbooks/app-template-render-diff.py)." > "$B/msg-A.txt"
-xargs git commit --only -F "$B/msg-A.txt" -- < "$B/batchA.files"   # paths via xargs, never a zsh scalar; 80 short paths = one invocation
-git show --stat HEAD | tail -1          # PASS: 78 files changed
+xargs git commit --only -F "$B/msg-A.txt" -- < "$B/batchA.files"   # paths via xargs, never a zsh scalar; 81 short paths = one invocation
+git show --stat HEAD | tail -1          # PASS: 80 files changed
 git log -1 --format=%s                  # PASS: the subject above, verbatim (shared-worktree message-swap check)
 git push
 ```
@@ -355,16 +414,16 @@ follow-up commit.
 
 | after | HR app-template on 5.2.1 & deployed & Ready | on 5.1.0 | workload chart labels (from `--compare-workloads`) |
 |---|---|---|---|
-| A | 78 | 2 | `app-template-5.1.0=2 app-template-5.2.1=79` |
-| B | 79 | 1 | `app-template-5.1.0=1 app-template-5.2.1=80` |
-| C | 80 | 0 | `app-template-5.2.1=81` |
+| A | 65 | 2 | `app-template-5.1.0=2 app-template-5.2.1=66` |
+| B | 66 | 1 | `app-template-5.1.0=1 app-template-5.2.1=67` |
+| C | 67 | 0 | `app-template-5.2.1=68` |
 
 Floor. Poll until converged, for at most 20 minutes. This is not a passive
 sleep: re-read and act on the number each time.
 ```bash
 kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.chart.spec.chart}={.status.history[0].chartVersion}={.status.history[0].status}={.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' \
   | grep '^app-template=' | sort | uniq -c
-# PASS (after A): "78 app-template=5.2.1=deployed=True" and "2 app-template=5.1.0=deployed=True", nothing else.
+# PASS (after A): "65 app-template=5.2.1=deployed=True" and "2 app-template=5.1.0=deployed=True", nothing else.
 # FAIL looks like: "=5.2.1=failed=False" (helm upgrade error -> `kubectl describe hr` + §5), or a
 #   "=5.1.0=…=False" row, or a residual 5.1.0 count above the table after 20 min (not reconciled).
 ```
@@ -374,13 +433,13 @@ the live workloads carry the new chart label, and every workload's
 `metadata.generation` is unchanged. This is measured by
 ```bash
 .venv/bin/python3 runbooks/app-template-render-diff.py --compare-workloads "$B/wl-before.json" \
-  --expect-labels 'app-template-5.1.0=2 app-template-5.2.1=79'
-# after B: --expect-labels 'app-template-5.1.0=1 app-template-5.2.1=80'   after C: --expect-labels 'app-template-5.2.1=81'
+  --expect-labels 'app-template-5.1.0=2 app-template-5.2.1=66'
+# after B: --expect-labels 'app-template-5.1.0=1 app-template-5.2.1=67'   after C: --expect-labels 'app-template-5.2.1=68'
 ```
 and compared to the §2c baseline and the per-batch label counts in the table
 above. A wrong count prints `LABELS_MISMATCH want … got …` and `COMPARE_FAIL`
 (measured 2026-09-27 against the pre-change state). PASS prints the table's `CHART_LABELS` line
-followed by `SAME_GEN workloads=81 …`. It fails with `GEN_CHANGED <ns>/<kind>/<name> n -> n+1`
+followed by `SAME_GEN workloads=68 …`. It fails with `GEN_CHANGED <ns>/<kind>/<name> n -> n+1`
 (the chart changed a pod template, contradicting the render gate), or with
 `GONE`/`NEW`, and exits 1. A missing or empty baseline prints `COMPARE_FAIL
 empty baseline`. `POD_REPLACED_SAME_GEN` lines are informational: a pod
@@ -407,7 +466,7 @@ grep -cF "'{{MediaPath}}'" "$B/oc-cmd.txt"      # PASS: 1
 grep -cF '{{ "{{" }}' "$B/oc-cmd.txt"           # PASS: 0   (measured before: 0). 1+ = escape reached the pod literally
 ```
 This also reads unchanged if the chart never applied. Only the `SAME_GEN`
-reading together with `app-template-5.2.1=81` proves that the new chart
+reading together with `app-template-5.2.1=68` proves that the new chart
 rendered these exact bytes.
 
 **Prometheus gate (per batch):**
@@ -423,27 +482,27 @@ q 'count(kube_deployment_labels{label_helm_sh_chart="app-template-5.2.1"})'
 kill $PF 2>/dev/null
 ```
 CONTROL: metric flux_resource_info — first query. PASS after A reads
-`5.1.0=2 5.2.1=78`, after C `5.2.1=80`. It fails as a residual 5.1.0 count,
+`5.1.0=2 5.2.1=65`, after C `5.2.1=67`. It fails as a residual 5.1.0 count,
 or as `EMPTY` (flux-operator scrape broken, so the next reading is not
-trustworthy either). Measured 2026-09-27: `5.1.0=79 5.2.1=1`. The `revision`
+trustworthy either). Measured 2026-10-05: `5.1.0=66 5.2.1=1`. The `revision`
 label is the chart version (paperclip reads `revision=5.2.1`,
 `reason=UpgradeSucceeded`). Second query PASS: `=0` (no bjw-s HR not-Ready).
 
 CONTROL: metric kube_deployment_spec_replicas — third query is the non-empty
-control. PASS reads a number (183 measured 2026-09-27). `EMPTY` means the
+control. PASS reads a number (168 measured 2026-10-05). `EMPTY` means the
 kube-state-metrics scrape or the forward is broken, and the fourth reading is
-void. Fourth query PASS: `=0`, measured 2026-09-27 `0`. A positive number
+void. Fourth query PASS: `=0`, measured 2026-10-05 `0`. A positive number
 means a Deployment is short of available replicas. Name it with
 `kube_deployment_spec_replicas != kube_deployment_status_replicas_available`,
 and if it is a consumer, go to §5.
 
-CONTROL: metric kube_deployment_labels — fifth query. PASS reads 77 after A
-(all app-template Deployments except openclaw and echo-server), 78 after B and
-79 after C. There are 79 app-template Deployments in total. The two
+CONTROL: metric kube_deployment_labels — fifth query. PASS reads 64 after A
+(all app-template Deployments except openclaw and echo-server), 65 after B and
+66 after C. There are 66 app-template Deployments in total (live 2026-10-05: 65 on 5.1.0 + paperclip). The two
 StatefulSets are covered by `--compare-workloads` and the CronJob only by the
 §2d render gate, because ksm does not export their chart
 label (`kube_statefulset_labels{label_helm_sh_chart=~…}` reads EMPTY,
-measured). Measured before the change: 1, paperclip.
+measured). Measured before the change (2026-10-05): 1, paperclip.
 
 CONTROL: alertname FluxResourceNotReady — it must not be firing for any
 `kind="HelmRelease"` row of these releases 15 minutes after each batch. It is
@@ -466,13 +525,13 @@ batch reverts on its own:
 cd /Users/mu/code/cberg-home-nextgen
 B=/private/tmp/claude-501/app-template-5.2.1       # the §2c baseline lives here
 git revert --no-edit <sha of the failing batch's commit>     # Batch C: the WHOLE commit — bump AND escape together
-git show --stat HEAD | tail -1 && git log -1 --format=%s     # A: 78 files; B/C: 1 file; subject "Revert …"
+git show --stat HEAD | tail -1 && git log -1 --format=%s     # A: 80 files; B/C: 1 file; subject "Revert …"
 git push
 # confirm the cluster is back (for a Batch A revert expect the "before" row of the §4 table: 1× 5.2.1 (paperclip), rest 5.1.0):
 kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.chart.spec.chart}={.status.history[0].chartVersion}={.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | grep '^app-template=' | sort | uniq -c
 .venv/bin/python3 runbooks/app-template-render-diff.py --compare-workloads "$B/wl-before.json"   # SAME_GEN; CHART_LABELS back to the reverted state
 ```
-- Reverting Batch A is itself 77 label-only helm upgrades, the exact mirror of
+- Reverting Batch A is itself 64 label-only helm upgrades, the exact mirror of
   the forward move (the render proves symmetry). There are no pod rolls in
   either direction.
 - Many consumers carry `maxHistory: 1`, so `helm rollback` cannot reach 5.1.0.
@@ -491,7 +550,7 @@ kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.chart.spec.chart
 ## 6) Interference notes
 
 - **Blast radius is fleet-wide by design, and the render gate is what makes
-  that acceptable.** Flux re-renders all 77 Batch A releases in one reconcile,
+  that acceptable.** Flux re-renders all 64 live Batch A releases in one reconcile,
   and helm-controller runs them at its default concurrency (no `--concurrent`
   arg on `deployment/helm-controller`). Batches B and C are separated so the
   one real behaviour change (openclaw's escape) and the one intentional
@@ -502,21 +561,26 @@ kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.chart.spec.chart
   settles, never before it.
 - **`conflicts_with`**: `flux-reconciler-impersonation` (exclusive; same
   HelmReleases, controller identity), `helm-drift-detection` (spec change on
-  the same 79 HRs), and `flux-oci-chart-sources` (rewrites `spec.chart`) all
-  change how helm-controller treats these very objects. Also listed are four
+  the same 66 HRs), and `flux-oci-chart-sources` (rewrites `spec.chart`) all
+  change how helm-controller treats these very objects. Also listed are the
   plans that edit a file in this batch set (`nextcloud-mcp-0.198.0` → nextcloud-mcp,
   `absenty-drop-npm-runtime` → absenty, `float-tag-pinning` → makemkv,
   `penpot-cache-9.2` → penpot-cache, `redis-fleet-8.10.2` → 4 redis HRs that it
-  also rolls, `makemkv-v26.09.2`, `traccar-6.16.0`, `penpot-chart-1.10.0`), and
+  also rolls, `penpot-chart-1.10.0`, `teslamate-4.3`, `mariadb-28.1.1`,
+  `iobroker-12.0.0` → iobroker StatefulSet roll), and
   `chart-patches-coredns-reloader-blackbox`, whose Reloader/CoreDNS roll would
   read as `GEN_CHANGED` in §4. If any of those lands first, it does not
   break this plan, because §2d re-renders live values at execution time, but
-  it must not share the night. No `kube-prometheus-stack` plan is open
-  (`kube-prometheus-stack-91.4.1` executed). A new one must list this plan,
-  because §4 reads Prometheus. None of these plans lists this one back yet
-  (`--validate` does not check reciprocity), which is a follow-up for their
-  owners.
-- **HTTPRoutes (gateway/envoy):** about 45 routes change only
+  it must not share the night. **Refresh 2026-10-05:** `kube-prometheus-stack-91.9.0`
+  is now open and listed, because §4 reads Prometheus. `flux-fleet-0.60.0` is
+  listed because it rolls `flux-operator`, the exporter behind §4's
+  `flux_resource_info` control. It is scheduled `nightly:2026-10-06`, so do
+  NOT reschedule this plan onto that night. Twelve plans that already listed
+  this one (coredns, edot-collector, envoy-proxy-config, external-dns,
+  immich-ml, nextcloud-fleet, nocodb, paperclip-26.04, pgvector-fleet,
+  python-fleet, reloader, sure) are now carried back reciprocally. The dead
+  ref `makemkv-v26.09.2` (executed) was dropped.
+- **HTTPRoutes (gateway/envoy):** 31 routes (live 2026-10-05) change only
   `metadata.labels`. Envoy Gateway re-translates, but listeners, hostnames,
   backends and filters are byte-identical, and there is no route-status flap
   in the paperclip canary. Both gateways are declared because consumers sit on

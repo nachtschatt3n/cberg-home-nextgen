@@ -88,7 +88,9 @@ premises:
       §4 reads probe_success{probe_class="http"} from these Probe CRs; if renamed/removed the gate reads empty.
     run: kubectl get probe -n monitoring http-ingress-internal http-ingress-external http-vaultwarden -o name
     expect_matches: "(?s)http-ingress-internal.*http-ingress-external.*http-vaultwarden"
-status: draft
+status: superseded    # 2026-10-05: chart 1.48.2 published (Renovate #220/#221, held); re-targeted as
+                      # coredns-1.48.2 (adds the bootstrap helmfile pin). Never reviewed or executed.
+superseded_by: coredns-1.48.2
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -100,6 +102,9 @@ generated: "2026-10-01"
 ---
 
 # coredns chart 1.47.0 -> 1.48.1, drop the image.tag pin
+
+> **SUPERSEDED 2026-10-05 by `coredns-1.48.2`.** Do not execute this file. Its finding refs
+> (F-3893caaf, resolved) are history; the live refs are on the successor.
 
 ## 1. Summary & why held
 

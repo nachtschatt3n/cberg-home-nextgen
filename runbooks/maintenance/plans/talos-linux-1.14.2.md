@@ -92,6 +92,11 @@ conflicts_with:                       # exclusive: true already keeps everything
                                       # reads Prometheus (canary choice, etcd latency, alerts); a
                                       # Prometheus restart the same night blanks that evidence. Any
                                       # further kube-prometheus-stack plan must be added here too.
+  - k8s-1.36.5                        # reciprocity (2026-10-05, that plan's planner): `talosctl
+                                      # upgrade-k8s` patches every node's machine config (NO_REBOOT) and
+                                      # restarts all apiservers + kubelets; never the same night. If it
+                                      # runs FIRST, this plan's §2.2/§4 PASS lines must read v1.36.5,
+                                      # not v1.36.0 (k8s-1.36.5 §6).
 capability_change: true               # v1.14.2 changes node behaviour, not just versions (§1.2):
                                       # kernel CONFIG_BLK_WBT=y + CONFIG_BLK_WBT_MQ=y turns block
                                       # writeback throttling ON by default for the NVMe that etcd,

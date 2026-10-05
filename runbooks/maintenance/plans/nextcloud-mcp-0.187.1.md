@@ -61,7 +61,7 @@ conflicts_with:
                                       # this id). It quiesces the Nextcloud server and restarts
                                       # its Redis (sessions/file-locks); every §4 contents gate
                                       # here is a live call INTO that server. Different slots.
-  - kube-prometheus-stack-91.4.1      # ADDED 2026-09-22 (authoring rule 4): §2.5/§4.9 read the
+  # - kube-prometheus-stack-91.4.1 (RESOLVED 2026-10-05: executed + retired; dead ref removed per the dead-ref convention) # ADDED 2026-09-22 (authoring rule 4): §2.5/§4.9 read the
                                       # window's instrument (Prometheus `ALERTS`, kube-state
                                       # metrics); that plan restarts Prometheus + operator, and
                                       # an unscraped gate reads EMPTY on both sides. ONE-SIDED as
