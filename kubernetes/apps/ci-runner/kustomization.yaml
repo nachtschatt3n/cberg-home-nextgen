@@ -12,6 +12,8 @@ kind: Kustomization
 resources:
   - ./namespace.yaml
   - ./the-ninth-banner-tests/ks.yaml
-  # Enable both scale sets with a real SOPS-encrypted fine-grained PAT.
-  # - ./the-ninth-banner-runners/ks.yaml
-  # - ./the-ninth-banner-browser-runners/ks.yaml
+  # ARC scale sets (docs/sops/ninth-banner-actions-migration.md). Their
+  # github_token is ${GITHUB_TOKEN} substituted by the flux-system Kustomization;
+  # ci-runner itself still holds no cluster-secrets copy.
+  - ./the-ninth-banner-runners/ks.yaml
+  - ./the-ninth-banner-browser-runners/ks.yaml

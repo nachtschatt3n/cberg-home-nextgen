@@ -1,6 +1,6 @@
 # The Ninth Banner GitHub Actions on Kubernetes
 
-Status: **prepared, not enabled**. Three ARC runner scale sets replace every GitHub-hosted job after a repository-scoped fine-grained PAT is installed and the Flux Kustomizations are enabled. This runbook records the 2026-10-06 owner decision to run fork PRs on the cluster, including privileged Docker image builds.
+Status: **enabling (2026-10-06)**. Three ARC runner scale sets replace every GitHub-hosted job once Flux substitutes the existing cluster `GITHUB_TOKEN` into their secrets and the Flux Kustomizations are enabled. This runbook records the 2026-10-06 owner decision to run fork PRs on the cluster, including privileged Docker image builds.
 
 | Scale set | Namespace | Jobs | Capacity |
 |---|---|---|---|
@@ -12,12 +12,14 @@ All runner pods start behind `ci.cberg.home/thermal`; `arc-system/arc-thermal-ga
 
 ## Credential and enablement
 
-Create a **fine-grained PAT** scoped only to `nachtschatt3n/the-ninth-banner` with repository **Administration: read and write**. It is required to register repository runner scale sets; it is not injected into runner jobs. Put it in the `github_token` field of both SOPS secrets:
+Owner decision 2026-10-06: **reference** the GitHub token that is already in the cluster. Do not create, copy or decrypt any credential. The two ARC secrets are plain manifests with no value in git:
 
-- `kubernetes/apps/ci-runner/the-ninth-banner-runners/app/github-token.sops.yaml`
-- `kubernetes/apps/arc-build/the-ninth-banner-build-runners/app/github-token.sops.yaml`
+- `kubernetes/apps/ci-runner/the-ninth-banner-runners/app/github-token.yaml` (`the-ninth-banner-arc-github`, used by `ninth-banner-k8s` and `ninth-banner-browser-k8s`)
+- `kubernetes/apps/arc-build/the-ninth-banner-build-runners/app/github-token.yaml` (`the-ninth-banner-arc-build-github`, used by `ninth-banner-build-k8s`)
 
-The checked-in encrypted value is a placeholder. Never enable a scale set while it remains. Decrypt locally to verify the value, without printing it or committing plaintext. Then uncomment the three scale set `ks.yaml` entries in `kubernetes/apps/ci-runner/kustomization.yaml` and `kubernetes/apps/arc-build/kustomization.yaml`, commit and push the cluster branch. The ARC controllers, thermal gate, namespace and RBAC may reconcile first. Verify `flux get ks -A`, `kubectl get autoscalingrunnersets -A`, listener/controller pods in `arc-system`, and all three sets in GitHub repository Settings → Actions → Runners.
+Each contains `github_token: "${GITHUB_TOKEN}"`. The scale-set Flux Kustomizations live in `flux-system`, and `kubernetes/flux/cluster/ks.yaml` patches every child Kustomization with `postBuild.substituteFrom: cluster-secrets`, so Flux fills the value at apply time. Never set `kustomize.toolkit.fluxcd.io/substitute: disabled` on these app directories, and escape any future literal `${...}` in them as `$${...}`. The token is a **classic PAT**. To register repository scale sets it needs admin on `nachtschatt3n/the-ninth-banner` (classic `repo` scope). Rotating `GITHUB_TOKEN` rotates ARC too. A repo-scoped GitHub App (Administration read/write, Metadata read; keys `github_app_id`, `github_app_installation_id`, `github_app_private_key`) remains the least-privilege option. The materialized Secret exists in `ci-runner` and `arc-build`, and ARC copies it into `arc-system` for the listener. Runner pods set `automountServiceAccountToken: false` and cannot read it.
+
+To disable the cluster runners, comment the three scale-set entries in `kubernetes/apps/ci-runner/kustomization.yaml` and `kubernetes/apps/arc-build/kustomization.yaml`. Verify `flux get ks -A`, `kubectl get autoscalingrunnersets -A`, listener/controller pods in `arc-system`, and all three sets in GitHub repository Settings → Actions → Runners.
 
 ## Deployment test sequence
 
