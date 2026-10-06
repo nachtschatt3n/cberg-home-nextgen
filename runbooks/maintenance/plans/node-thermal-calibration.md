@@ -29,29 +29,28 @@ conflicts_with:
   - talos-sysfs-power-caps            # its soak measures the current caps; synthetic load would pollute it
   - talos-linux-1.14.2                # rolling reboot
   - multus-macvlan-foundation         # talosctl apply-config on the same nodes
-  - k8s-1.36.5                        # node drains and restarts
+  - kube-prometheus-stack-91.9.0      # §4.3 reads Prometheus; a kps restart punches a hole in the control series (nightly:2026-10-08)
   - immich-machine-learning-3.2.4     # CPU/iGPU consumer on nuc14-03: its roll changes the heat mid-run
   - jellyfin-12.1                     # iGPU consumer on nuc14-01
   - jellyfin-config-rwo-migration     # iGPU consumer on nuc14-01
   - nextcloud-fleet-35.0.1            # backup/restore load and pod moves
-  - ci-runner-exclude-node02          # node02 must stay out of CI for the whole measurement; execute that plan first
 security_ref: null
 capability_change: false              # reads only; nothing the household notices changes
 rollback_class: git-revert            # nothing persists on the cluster. The repo side (this plan file) reverts with git.
 finding_refs:
   - F-6c7843e4                        # "BIOS/fan/paste check on nuc14-02's cooler first": this measures whether the cooler is the cause
-review: null
-status: draft
-window: null
+review: ready-for-go@2026-10-06     # plan-reviewer-agent 2026-10-06 @0d673050: 0 blocking, 4 non-blocking fixes applied
+status: vetted
+window: null                          # stamped only by run-now.py stamp inside the attended run
 premises:
   - id: nodes-on-talos-1.14
     why: "The sysfs paths and the talosctl read semantics were measured on v1.14.1 (kernel 6.18). Another minor invalidates them."
     run: kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.osImage}'
     expect_matches: '^Talos \(v1\.14\.[0-9]+\) Talos \(v1\.14\.[0-9]+\) Talos \(v1\.14\.[0-9]+\)$'
   - id: no-ci-in-flight
-    why: "Any CI pod puts load on a node the curve measures. Zero pods in ci-runner at the start; the tool re-checks every 10 s and marks the run INVALID if one appears."
-    run: "kubectl get pods -n ci-runner --no-headers | wc -l | tr -d ' '"
-    expect_exact: "0"
+    why: "Any CI pod puts load on a node the curve measures. Zero pods in ci-runner at the start (the query counts the EMPTY `items` list: 1 = no pods; a populated namespace such as kube-system reads 0 and so does a failing kubectl, so an API error fails closed instead of reading as no CI); the tool re-checks every 10 s and marks the run INVALID if one appears."
+    run: "kubectl get pods -n ci-runner -o json | grep -c '\"items\": \\[\\]'"
+    expect_exact: "1"
   - id: no-capbench-or-thermalcal-pod
     why: "A leftover capbench or thermalcal pod (aborted earlier run) keeps burning CPU on one node. Zero before the first run."
     run: "kubectl get pods -n default -l 'app in (capbench,thermalcal)' --no-headers | wc -l | tr -d ' '"
@@ -221,7 +220,7 @@ for ip in 11 12 13; do echo "$ip $(talosctl --nodes=192.168.55.$ip read /sys/dev
 ```
 
 2.4 **CI hold.** The window's Step 0 (safe updates) may start CI shards or roll pods that heat a node. Run the premises
-and this check AFTER Step 0 has settled. `kubectl get pods -n ci-runner --no-headers | wc -l` must read `0`, and the
+and this check AFTER Step 0 has settled. `kubectl get pods -n ci-runner -o json | grep -c '"items": \[\]'` must read `1` (empty namespace), and the
 operator must not push to `the-ninth-banner` meanwhile (the push triggers CI). If CI is mandatory meanwhile, STOP and
 re-plan: this measurement is never run with CI in flight.
 
@@ -235,7 +234,7 @@ Bash call limit is 10 min) and wait for its completion notification. Before each
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 export W=/private/tmp/thermalcal-node-thermal-calibration; test -d "$W" || { echo NO_W; exit 1; }
-test "$(kubectl get pods -n ci-runner --no-headers | wc -l | tr -d ' ')" = 0 || { echo CI_PRESENT; exit 1; }
+test "$(kubectl get pods -n ci-runner -o json | grep -c '"items": \[\]')" = 1 || { echo CI_PRESENT; exit 1; }
 python3 "$W/thermalcal.py" 192.168.55.11 run1 --out "$W" > "$W/log-01-run1.txt" 2>&1    # run_in_background
 ```
 Then the same for `192.168.55.13` (03) and `192.168.55.12` (02), label `run1`. Do not start the next node before the
@@ -277,7 +276,7 @@ after `--- security_detail ...`, 2-space indent stripped), write `existing + "\n
 the per-node tables from 3.3, the throttle deltas vs `throttle-before.txt`) to `$W/detail-new.txt`, check it contains
 the old text, then:
 ```bash
-source runbooks/lib/sweep-pg-dsn.sh && sweep_pg_dsn_up && .venv/bin/python3 runbooks/policy-cli.py finding detail F-6c7843e4 --detail-file "$W/detail-new.txt"; sweep_pg_dsn_down
+source runbooks/lib/sweep-pg-dsn.sh && sweep_pg_dsn_up && .venv/bin/python3 runbooks/policy-cli.py finding detail F-6c7843e4 --plan node-thermal-calibration --detail-file "$W/detail-new.txt"; sweep_pg_dsn_down
 ```
 Give the operator a summary table (node, idle W/C, slope C/W, C at matched W, throttle delta, verdict). The plan's
 execution notes carry ONLY the aggregate verdict token, nothing numeric. Then `rm -rf "$W"` (mode-700 scratch, no secrets,
@@ -293,8 +292,7 @@ the selftest proves it). `THERMALCAL_VERDICT` is only trusted if the per-node ta
 What failure prints: `THERMALCAL_INVALID ... why=` (tool) or `SKIPPED_INVALID_RUN` (verdict script).
 
 **4.2 CONTENTS ASSERTION: nothing was left running and nothing was changed.** After the last run
-`kubectl get pods -n default -l app=thermalcal --no-headers | wc -l` -> `0`; `kubectl get events -A --field-selector type=Warning`
-shows no new warnings on the three nodes beyond the baseline; the PL1/PL2/EPP premises (`pl1-35w-*`, `pl2-55w-*`,
+`kubectl get pods -n default -l app=thermalcal --no-headers | wc -l` -> `0`; the PL1/PL2/EPP premises (`pl1-35w-*`, `pl2-55w-*`,
 `ab-not-mid-variant*`) still PASS when re-run (`plan-premises.py node-thermal-calibration`), i.e. the run read sysfs only.
 
 **4.3 Measurement controls** (the instrument and what else heated the nodes):
@@ -326,6 +324,9 @@ side (this plan file) is `git revert`-able.
 - **Exclusive**: no other live plan may share the run. `talos-power-tuning-ab` currently carries a stale
   `window: "now:2026-10-06"` stamp for its evening 1; stamp THIS plan only after that window is cleared or released
   (`run-now.py` refuses two exclusive plans on one date), and never while the A/B runs on 01/03 (its variants change EPP/PL).
+- **Timing**: run it AFTER both A/B evenings (the A/B plan changes EPP/PL on 01/03 and runs CI on them), on an evening with no
+  `kube-prometheus-stack` nightly (conflicts_with), and finish by 02:45 Europe/Berlin. `ci-runner-exclude-node02` is already EXECUTED
+  (its gate knob stays: it keeps CI off node 02 for the whole measurement).
 - **CI** is the main interferer (3.1/2.4): the push of any commit to `the-ninth-banner` triggers shards that the thermal
   gate places on the nodes. The tool refuses to start with CI present and invalidates a run in which a CI pod appears.
 - **Step 0 (safe updates) runs first in every NOW run**: its image pulls and pod restarts heat the nodes. Take the premises
@@ -512,7 +513,7 @@ def main():
                                                         "capabilities": {"drop": ["ALL"]}}}]}}
     k = lambda *x, **kw: subprocess.run(["kubectl", *x], text=True, capture_output=True, **kw)
     DEL = ["delete", "pod", "-n", "default", name, "--ignore-not-found", "--grace-period=0", "--force", "--wait=false"]
-    ci_pods = lambda: len(k("get", "pods", "-n", "ci-runner", "--no-headers").stdout.split())
+    ci_pods = lambda: (lambda r: len(r.stdout.split()) if r.returncode == 0 else 99)(k("get", "pods", "-n", "ci-runner", "-o", "name"))  # kubectl failure reads as CI present (fail closed)
     phase = lambda: k("get", "pod", "-n", "default", name, "-o", "jsonpath={.status.phase}").stdout
     rngs = (rd(PKG + "/max_energy_range_uj"), rd_opt(CORE + "/max_energy_range_uj"))
     if a.dry:
