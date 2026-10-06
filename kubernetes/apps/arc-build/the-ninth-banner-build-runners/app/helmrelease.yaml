@@ -44,6 +44,29 @@ spec:
       name: arc-build-controller
     containerMode:
       type: dind
+    # arc-system enforces PodSecurity restricted; the chart's default listener
+    # pod is rejected without this (same template as ci-runner's scale sets).
+    listenerTemplate:
+      metadata:
+        labels:
+          app.kubernetes.io/name: the-ninth-banner-arc-listener
+      spec:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: listener
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests: { cpu: 10m, memory: 32Mi }
+              limits: { cpu: 200m, memory: 128Mi }
     template:
       metadata:
         labels:

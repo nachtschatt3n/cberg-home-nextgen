@@ -115,7 +115,9 @@ spec:
           # registers runners with updates disabled).
           - name: runner-agent
             image: ghcr.io/actions/actions-runner:2.337.0@sha256:e5496277be5d09bc968b3d64911b74e219ac4a3f2edce956a3ecf9271bea1ef4
-            command: ["cp", "-a", "/home/runner/.", "/runner/"]
+            # Copy the entries, not "/home/runner/." itself: cp -a on "." tries to
+            # set times on the emptyDir mount root, which uid 1001 does not own.
+            command: ["sh", "-c", "find /home/runner -mindepth 1 -maxdepth 1 -exec cp -a {} /runner/ \\;"]
             securityContext: &csc
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true
