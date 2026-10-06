@@ -3,5 +3,6 @@ kind: Kustomization
 resources:
   - ./namespace.yaml
   - ./thermal-gate-rbac.yaml
-  # Enable with the real SOPS-encrypted GitHub PAT.
+  # Enable only after the owner has written the GitHub App secret
+  # (the-ninth-banner-build-runners/app/github-app.sops.yaml holds placeholders).
   # - ./the-ninth-banner-build-runners/ks.yaml

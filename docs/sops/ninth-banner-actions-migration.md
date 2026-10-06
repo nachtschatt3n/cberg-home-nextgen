@@ -1,6 +1,6 @@
 # The Ninth Banner GitHub Actions on Kubernetes
 
-Status: **prepared, not enabled**. Three ARC runner scale sets replace every GitHub-hosted job after a repository-scoped fine-grained PAT is installed and the Flux Kustomizations are enabled. This runbook records the 2026-10-06 owner decision to run fork PRs on the cluster, including privileged Docker image builds.
+Status: **prepared, not enabled**. Three ARC runner scale sets replace every GitHub-hosted job after the repository-scoped GitHub App credential is installed and the Flux Kustomizations are enabled. This runbook records the 2026-10-06 owner decision to run fork PRs on the cluster, including privileged Docker image builds.
 
 | Scale set | Namespace | Jobs | Capacity |
 |---|---|---|---|
@@ -12,12 +12,16 @@ All runner pods start behind `ci.cberg.home/thermal`; `arc-system/arc-thermal-ga
 
 ## Credential and enablement
 
-Create a **fine-grained PAT** scoped only to `nachtschatt3n/the-ninth-banner` with repository **Administration: read and write**. It is required to register repository runner scale sets; it is not injected into runner jobs. Put it in the `github_token` field of both SOPS secrets:
+The scale sets authenticate with a **GitHub App** (owner decision 2026-10-06), not a PAT. One App installation scoped to `nachtschatt3n/the-ninth-banner` serves all three scale sets. App settings: Repository permissions **Administration: read and write** (needed to register repository runner scale sets) and **Metadata: read**; webhook off; installed on the-ninth-banner only. The App ID is on the App's settings page, the installation ID is the number at the end of the installation URL (`.../settings/installations/<id>`), and the private key is the downloaded `.pem`. The credential is read only by the ARC controllers and listeners; it is not injected into runner jobs.
 
-- `kubernetes/apps/ci-runner/the-ninth-banner-runners/app/github-token.sops.yaml`
-- `kubernetes/apps/arc-build/the-ninth-banner-build-runners/app/github-token.sops.yaml`
+ARC reads `githubConfigSecret` from each scale set's own namespace, so the same three keys (`github_app_id`, `github_app_installation_id`, `github_app_private_key` as a full PEM `|` block) live in one SOPS file per namespace:
 
-The checked-in encrypted value is a placeholder. Never enable a scale set while it remains. Decrypt locally to verify the value, without printing it or committing plaintext. Then uncomment the three scale set `ks.yaml` entries in `kubernetes/apps/ci-runner/kustomization.yaml` and `kubernetes/apps/arc-build/kustomization.yaml`, commit and push the cluster branch. The ARC controllers, thermal gate, namespace and RBAC may reconcile first. Verify `flux get ks -A`, `kubectl get autoscalingrunnersets -A`, listener/controller pods in `arc-system`, and all three sets in GitHub repository Settings → Actions → Runners.
+- `kubernetes/apps/ci-runner/the-ninth-banner-runners/app/github-app.sops.yaml` (secret `the-ninth-banner-arc-github`, used by `ninth-banner-k8s` and `ninth-banner-browser-k8s`)
+- `kubernetes/apps/arc-build/the-ninth-banner-build-runners/app/github-app.sops.yaml` (secret `the-ninth-banner-arc-build-github`, used by `ninth-banner-build-k8s`)
+
+Edit both in place with `sops <file>` from the repo root (never via `/tmp`), and keep the values identical. If the key is rotated, update both files in one commit.
+
+The checked-in encrypted values are placeholders. Never enable a scale set while they remain. Decrypt locally to verify the values, without printing it or committing plaintext. Then uncomment the three scale set `ks.yaml` entries in `kubernetes/apps/ci-runner/kustomization.yaml` and `kubernetes/apps/arc-build/kustomization.yaml`, commit and push the cluster branch. The ARC controllers, thermal gate, namespace and RBAC may reconcile first. Verify `flux get ks -A`, `kubectl get autoscalingrunnersets -A`, listener/controller pods in `arc-system`, and all three sets in GitHub repository Settings → Actions → Runners.
 
 ## Deployment test sequence
 
