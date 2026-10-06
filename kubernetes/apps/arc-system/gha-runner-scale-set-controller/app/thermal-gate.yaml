@@ -21,6 +21,10 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: arc-thermal-gate
+      annotations:
+        # The script ConfigMap has no name hash: bump this on every script
+        # change so the running --loop process is replaced.
+        ci.cberg.home/script-rev: "2026-10-06-warm-idle"
     spec:
       serviceAccountName: arc-thermal-gate
       automountServiceAccountToken: true

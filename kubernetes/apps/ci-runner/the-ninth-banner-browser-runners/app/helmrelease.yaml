@@ -98,14 +98,20 @@ spec:
                       operator: In
                       values: ["k8s-nuc14-01", "k8s-nuc14-03"]
           podAntiAffinity:
-            # at most ONE runner per node (thermal: a runner is a cpu-lane-sized
-            # pod the gate cannot hold back)
-            requiredDuringSchedulingIgnoredDuringExecution:
-              - topologyKey: kubernetes.io/hostname
-                namespaceSelector: {}
-                labelSelector:
-                  matchLabels:
-                    app.kubernetes.io/name: the-ninth-banner-runner
+            # Owner 2026-10-06: no hard one-runner-per-node rule any more. Pods
+            # of all three pools may share a node; the per-node CI budget (6 CPU
+            # of CI requests on nuc14-01/03) is enforced by the thermal gate
+            # (arc-system/arc-thermal-gate, ninth-banner-admit.py), which pins
+            # each gated pod to the least-loaded open node. This preferred term
+            # only spreads pods the scheduler places itself (gate rollback).
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  topologyKey: kubernetes.io/hostname
+                  namespaceSelector: {}
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: the-ninth-banner-runner
         initContainers:
           # The runner agent comes from the official image; the job runs in
           # the game's pinned Playwright image (Node 24, npm, git, browsers in

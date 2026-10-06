@@ -33,9 +33,15 @@ spec:
       - k8s
       - linux
       - x64
-    minRunners: 0
-    # One runner per node (anti-affinity below) on nuc14-01/03 only.
-    maxRunners: 2
+    # Owner 2026-10-06: one warm idle runner so a job starts at once (a
+    # release fires ~5 jobs within a minute). An idle runner keeps its CPU
+    # request in the node's CI budget but frees its cpu-lane slot after the
+    # 300 s settle (ninth-banner-admit.py "warm idle"), so it never blocks
+    # test shards.
+    minRunners: 1
+    # nuc14-01/03 only; 4 x 1.6 CPU fit the two nodes' 6-CPU CI budgets next
+    # to the build pool (2 x 2 CPU).
+    maxRunners: 4
     controllerServiceAccount:
       namespace: arc-system
       name: arc-controller
@@ -100,13 +106,20 @@ spec:
                       operator: In
                       values: ["k8s-nuc14-01", "k8s-nuc14-03"]
           podAntiAffinity:
-            # At most one ARC runner per node across runner namespaces.
-            requiredDuringSchedulingIgnoredDuringExecution:
-              - topologyKey: kubernetes.io/hostname
-                namespaceSelector: {}
-                labelSelector:
-                  matchLabels:
-                    app.kubernetes.io/name: the-ninth-banner-runner
+            # Owner 2026-10-06: no hard one-runner-per-node rule any more. Pods
+            # of all three pools may share a node; the per-node CI budget (6 CPU
+            # of CI requests on nuc14-01/03) is enforced by the thermal gate
+            # (arc-system/arc-thermal-gate, ninth-banner-admit.py), which pins
+            # each gated pod to the least-loaded open node. This preferred term
+            # only spreads pods the scheduler places itself (gate rollback).
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  topologyKey: kubernetes.io/hostname
+                  namespaceSelector: {}
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: the-ninth-banner-runner
         initContainers:
           # The runner agent comes from the official image; the job runs in
           # the game's pinned Playwright image (Node 24, npm, git, browsers in
@@ -142,12 +155,13 @@ spec:
                 value: "4"
             securityContext: *csc
             resources:
-              # cpu-lane pod (the gate counts it as one), one per node. Owner
-              # 2026-10-06: up to 6 CPU (Vitest was CPU-bound at 2). The 2 CPU
-              # request (+ postgres 0.1) fits the gate's 6-CPU node budget and
-              # the ~7 CPU production leaves free on nuc14-01/03. Browser jobs
-              # use the separate GPU scale set.
-              requests: { cpu: "2", memory: 2Gi, ephemeral-storage: 2Gi }
+              # cpu-lane pod (the gate counts it as one). Owner 2026-10-06: up
+              # to 6 CPU (Vitest was CPU-bound at 2), bursts toward the limit
+              # accepted. Request 1.5 (+ postgres 0.1 = 1.6) is sized for the
+              # gate's 6-CPU node budget: 2 runners + 1 build pod (2.0) = 5.2
+              # per node, below the ~7.7 CPU production leaves free on
+              # nuc14-01/03. Browser jobs use the separate GPU scale set.
+              requests: { cpu: 1500m, memory: 2Gi, ephemeral-storage: 2Gi }
               limits: { cpu: "6", memory: 6Gi, ephemeral-storage: 16Gi }
             volumeMounts:
               - { name: runner, mountPath: /runner }

@@ -32,6 +32,17 @@ Contract (docs/sops/ci-runner.md, "Thermal gate"):
     pending pod's requests (kube-state-metrics + the CI pods themselves);
   - no CI pod was admitted or started there in the last SETTLE_SECONDS, so the
     previous pod's heat shows before another pod is added.
+* WARM IDLE ARC RUNNERS (since 2026-10-06, minRunners 1): an ARC runner pod
+  whose EphemeralRunner holds no GitHub job (status.jobId empty) and that was
+  released more than SETTLE_SECONDS ago is "warm idle". It still counts toward
+  the node's CI CPU budget, the capacity check and the first/second-pod
+  temperature tier, but NOT toward its lane's slots, so a permanently idle
+  warm runner never blocks a test shard. Once it takes a job it counts in full
+  again (the node's lane may then sit above its slot cap until a pod ends; no
+  new pod of that lane is admitted there meanwhile). Its job start bypasses the
+  temperature check that its admission passed earlier: accepted by the owner,
+  the node power caps are the backstop. Unknown job state (EphemeralRunner
+  list failed or missing) = busy (fail-closed).
 * BRAKE, PER NODE (since 2026-10-04 late evening): a node whose package
   temperature reached >= BRAKE_C (a 1-min max >= BRAKE_C) gets no NEW CI pod
   until BRAKE_MINUTES after that reading; the other nodes keep admitting under
@@ -64,9 +75,12 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NS = "ci-runner"
 NAMESPACES = ("ci-runner", "arc-build")
 # Shard pods AND the ARC GitHub Actions runner pods (docs/sops/ci-runner.md
-# §2c). Runner pods are never gated, so they are never in the queue; they are
-# only COUNTED (lane label ci.cberg.home/lane=cpu) toward their node's slots,
-# CI CPU budget and settle, so no shard is admitted on top of a busy runner.
+# §2c). ARC pods are created gated like shards and admitted by this gate (the
+# in-cluster arc-thermal-gate Deployment ticks every 10 s), lane from their
+# ci.cberg.home/lane label; once running they count toward their node's slots,
+# CI CPU budget and settle like a shard. This gate is the per-node CI budget
+# for ARC pods too (no pod anti-affinity rule since 2026-10-06). Warm idle
+# runners: see the module docstring.
 SELECTOR = "app.kubernetes.io/name in (the-ninth-banner-tests,the-ninth-banner-runner)"
 GATE = "ci.cberg.home/thermal"
 RELEASED_AT = "ci.cberg.home/released-at"
@@ -150,6 +164,9 @@ def kubectl(*args, stdin=None):
             selector = args[args.index("-l") + 1]
             path = f"/api/v1/namespaces/{namespace}/pods?" + urllib.parse.urlencode({"labelSelector": selector})
             return cluster_request(path).decode()
+        if args[:2] == ("get", "ephemeralrunners"):
+            namespace = args[args.index("-n") + 1]
+            return cluster_request(f"/apis/actions.github.com/v1alpha1/namespaces/{namespace}/ephemeralrunners").decode()
         if args[:2] == ("patch", "pod"):
             namespace = args[args.index("-n") + 1]
             name = args[args.index("-n") + 2]
@@ -254,13 +271,37 @@ def gated(p):
     return any(g.get("name") == GATE for g in p["spec"].get("schedulingGates") or [])
 
 
-def snapshot():
-    pods = []
+def runner_jobs(namespace):
+    """{EphemeralRunner name: holds a GitHub job} in namespace; None if unknown."""
+    try:
+        items = json.loads(kubectl("get", "ephemeralrunners", "-n", namespace, "-o", "json"))["items"]
+    except Exception as e:   # fail-closed: every runner counts as busy
+        log(f"ephemeralrunners in {namespace} unreadable, runners count as busy: {e}")
+        return None
+    return {r["metadata"]["name"]: bool((r.get("status") or {}).get("jobId")) for r in items}
+
+
+def warm_idle(p, jobs, now):
+    """An ARC runner pod with no GitHub job, released > SETTLE_SECONDS ago."""
+    owner = next((o["name"] for o in p["metadata"].get("ownerReferences") or []
+                  if o.get("kind") == "EphemeralRunner"), None)
+    if not owner or jobs is None or jobs.get(owner, True):
+        return False
+    t = (p["metadata"].get("annotations") or {}).get(RELEASED_AT) or p["status"].get("startTime")
+    return bool(t) and now - ts(t) >= SETTLE_SECONDS
+
+
+def snapshot(now=None):
+    now = time.time() if now is None else now
+    pods, jobs = [], {}
     for namespace in NAMESPACES:
-        pods.extend(json.loads(kubectl("get", "pods", "-n", namespace, "-l", SELECTOR, "-o", "json"))["items"])
+        items = json.loads(kubectl("get", "pods", "-n", namespace, "-l", SELECTOR, "-o", "json"))["items"]
+        pods.extend(items)
+        if any(o.get("kind") == "EphemeralRunner" for p in items for o in p["metadata"].get("ownerReferences") or []):
+            jobs[namespace] = runner_jobs(namespace)
     live = [p for p in pods if p["status"].get("phase") in ("Pending", "Running")
             and not p["metadata"].get("deletionTimestamp")]
-    count, last, queue, ci_req = {}, {}, [], {}
+    count, last, queue, ci_req, idle = {}, {}, [], {}, {}
     for p in live:
         if gated(p):
             queue.append(p)
@@ -269,7 +310,10 @@ def snapshot():
         if not node:
             continue   # an ungated pod the scheduler has not placed yet
         c = count.setdefault(node, {"browser": 0, "cpu": 0})
-        c[lane_of(p)] += 1
+        if warm_idle(p, jobs.get(p["metadata"].get("namespace", NS)), now):
+            idle[node] = idle.get(node, 0) + 1   # budget/capacity/tier yes, lane slot no
+        else:
+            c[lane_of(p)] += 1
         r, acc = pod_requests(p), ci_req.setdefault(node, {"cpu": 0.0, "memory": 0.0, "gpu": 0.0})
         for k in acc:
             acc[k] += r[k]
@@ -277,14 +321,14 @@ def snapshot():
         if t:
             last[node] = max(last.get(node, 0.0), ts(t))
     queue.sort(key=lambda p: (p["metadata"]["creationTimestamp"], p["metadata"]["name"]))
-    return count, last, queue, ci_req
+    return count, last, queue, ci_req, idle
 
 
 def global_hold(brake):
     return GLOBAL_BRAKE_NODES > 0 and len(brake) >= GLOBAL_BRAKE_NODES
 
 
-def closed_reason(node, lane, req, temps, count, last, now, free, ci_req, brake):
+def closed_reason(node, lane, req, temps, count, last, now, free, ci_req, brake, idle=None):
     avg2, max3 = temps[node]
     if node in EXCLUDE_NODES:
         return "excluded (GATE_EXCLUDE_NODES)"
@@ -294,7 +338,7 @@ def closed_reason(node, lane, req, temps, count, last, now, free, ci_req, brake)
     nb, nc = c["browser"], c["cpu"]
     if lane == "cpu":
         open_below, hot, tier = CPU_OPEN_BELOW_C, CPU_HOT_C, ", cpu lane"
-    elif nb + nc == 0:
+    elif nb + nc + (idle or {}).get(node, 0) == 0:   # a warm idle runner still counts here
         open_below, hot, tier = OPEN_BELOW_C, HOT_C, ""
     else:
         open_below, hot, tier = SECOND_OPEN_BELOW_C, SECOND_HOT_C, ", 2nd-pod limit"
@@ -350,7 +394,7 @@ def main():
         return 0   # another trigger instance is admitting right now
     try:
         if mode == "--release-all":
-            _, _, queue, _ = snapshot()
+            _, _, queue, _, _ = snapshot()
             for p in queue:
                 release(p, None)
                 log(f"ROLLBACK released {p['metadata']['name']} (unpinned)")
@@ -364,7 +408,7 @@ def main():
         except Exception as e:
             log(f"no temperature/capacity data, nothing admitted (fail-closed): {e}")
             temps = {}
-        count, last, queue, ci_req = snapshot()
+        count, last, queue, ci_req, idle = snapshot(now)
         if mode == "--status":
             probe = {"browser": {"cpu": 2.0, "memory": 6.0 * 2**30, "gpu": 1.0},
                      "cpu": {"cpu": 1.0, "memory": 1.0 * 2**30, "gpu": 0.0}}
@@ -372,10 +416,10 @@ def main():
                 c = count.get(n, {"browser": 0, "cpu": 0})
                 u = ci_req.get(n, {"cpu": 0.0})
                 state = "  ".join(f"{ln}: " + ("CLOSED " + r if r else "open") for ln in ("browser", "cpu")
-                                  for r in [closed_reason(n, ln, probe[ln], temps, count, last, now, free, ci_req, brake)])
+                                  for r in [closed_reason(n, ln, probe[ln], temps, count, last, now, free, ci_req, brake, idle)])
                 print(f"{n}  2m-avg {temps[n][0]:5.1f}C  3m-peak {temps[n][1]:5.1f}C  "
                       f"browser {c['browser']}/{MAX_PER_NODE} cpu {c['cpu']}/{CPU_MAX_OVERRIDE.get(n, MAX_CPU_PER_NODE)} "
-                      f"ci-cpu {u['cpu']:g}/{NODE_CPU_BUDGET:g}\n    {state}")
+                      f"warm-idle {idle.get(n, 0)} ci-cpu {u['cpu']:g}/{NODE_CPU_BUDGET:g}\n    {state}")
             for n, t in sorted(brake.items()):
                 print(f"BRAKE: {n} read >= {BRAKE_C:.0f}C; no admissions on {n} for {t - now:.0f}s more")
             if global_hold(brake):
@@ -400,11 +444,12 @@ def main():
                 break
             lane, req = lane_of(p), pod_requests(p)
             open_nodes = [n for n in temps if n not in used
-                          and not closed_reason(n, lane, req, temps, count, last, now, free, ci_req, brake)]
+                          and not closed_reason(n, lane, req, temps, count, last, now, free, ci_req, brake, idle)]
             if not open_nodes:
                 continue   # this lane is closed; a younger pod of the other lane may still fit
-            # fewest CI pods first, then the coolest
-            n = min(open_nodes, key=lambda n: (sum(count.get(n, {}).values()), temps[n][0]))
+            # fewest CI pods (warm idle runners included) first, then the coolest:
+            # this is what spreads ARC runners and shards over nuc14-01/03
+            n = min(open_nodes, key=lambda n: (sum(count.get(n, {}).values()) + idle.get(n, 0), temps[n][0]))
             try:
                 release(p, n)
             except Exception as e:

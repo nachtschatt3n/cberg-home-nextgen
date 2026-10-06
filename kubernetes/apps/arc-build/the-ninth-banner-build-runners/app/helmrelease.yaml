@@ -32,16 +32,21 @@ spec:
                 path: /spec/template/spec/initContainers/1/resources
                 value:
                   # dind runs BuildKit (the build itself): owner 2026-10-06
-                  # allows up to 6 CPU; the 2 CPU request (+1 runner) fits
-                  # the gate's 6-CPU node budget.
-                  requests: {cpu: "2", memory: 1Gi, ephemeral-storage: 4Gi}
+                  # allows up to 6 CPU (bursts accepted). Request 1.5 (+0.5
+                  # runner = 2.0 per build pod) is sized for the gate's 6-CPU
+                  # node budget: 1 build + 2 CPU runners (1.6) = 5.2 per node.
+                  requests: {cpu: 1500m, memory: 1Gi, ephemeral-storage: 4Gi}
                   limits: {cpu: "6", memory: 4Gi, ephemeral-storage: 16Gi}
   values:
     githubConfigUrl: https://github.com/nachtschatt3n/the-ninth-banner
     githubConfigSecret: the-ninth-banner-arc-build-github
     runnerScaleSetName: ninth-banner-build-k8s
-    minRunners: 0
-    maxRunners: 1
+    # Owner 2026-10-06: one warm idle build runner (release image builds start
+    # at once) and 2 in total (main + tag image build of a release overlap).
+    # Idle, it keeps its 2.0 CPU request in the node's CI budget but frees its
+    # browser-lane slot after the 300 s settle (ninth-banner-admit.py).
+    minRunners: 1
+    maxRunners: 2
     controllerServiceAccount:
       namespace: arc-system
       name: arc-build-controller
@@ -91,12 +96,20 @@ spec:
                       operator: In
                       values: ["k8s-nuc14-01", "k8s-nuc14-03"]
           podAntiAffinity:
-            requiredDuringSchedulingIgnoredDuringExecution:
-              - topologyKey: kubernetes.io/hostname
-                namespaceSelector: {}
-                labelSelector:
-                  matchLabels:
-                    app.kubernetes.io/name: the-ninth-banner-runner
+            # Owner 2026-10-06: no hard one-runner-per-node rule any more. Pods
+            # of all three pools may share a node; the per-node CI budget (6 CPU
+            # of CI requests on nuc14-01/03) is enforced by the thermal gate
+            # (arc-system/arc-thermal-gate, ninth-banner-admit.py), which pins
+            # each gated pod to the least-loaded open node. This preferred term
+            # only spreads pods the scheduler places itself (gate rollback).
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  topologyKey: kubernetes.io/hostname
+                  namespaceSelector: {}
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: the-ninth-banner-runner
         containers:
           - name: runner
             image: ghcr.io/actions/actions-runner:2.337.0@sha256:e5496277be5d09bc968b3d64911b74e219ac4a3f2edce956a3ecf9271bea1ef4
@@ -105,7 +118,8 @@ spec:
             # the ephemeral runner is recycled every ~10 s without taking a job.
             command: ["/home/runner/run.sh"]
             resources:
-              requests: { cpu: "1", memory: 2Gi, ephemeral-storage: 4Gi }
+              # agent + docker CLI only; the build runs in dind (above)
+              requests: { cpu: 500m, memory: 2Gi, ephemeral-storage: 4Gi }
               limits: { cpu: "2", memory: 6Gi, ephemeral-storage: 20Gi }
         volumes:
           - name: work

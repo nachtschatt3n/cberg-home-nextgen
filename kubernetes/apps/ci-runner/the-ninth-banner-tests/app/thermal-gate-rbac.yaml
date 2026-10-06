@@ -8,6 +8,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "patch"]
+  # read-only: which ARC runners hold a GitHub job (warm idle runners free
+  # their lane slot, ninth-banner-admit.py)
+  - apiGroups: ["actions.github.com"]
+    resources: ["ephemeralrunners"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

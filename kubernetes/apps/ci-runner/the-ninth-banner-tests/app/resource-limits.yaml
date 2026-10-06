@@ -9,6 +9,9 @@
 # i915: 2 browser pods per node running (6) + 6 queued. Production requests
 # leave 6.4-7.2 of 17 CPU and 2/3/3 GPU slots free per node (measured
 # 2026-10-04); PriorityClass ci-low never preempts, and production preempts CI.
+# 2026-10-06: +5 pods and their resources for the ARC runner pods that share
+# this namespace (ninth-banner-k8s max 4 at 1.6/6.5 CPU, ninth-banner-browser-k8s
+# max 1), so warm/busy runners never eat the 24 shard pods' room.
 # Rollback: docs/sops/ci-runner.md §11 Rollback Plan (Thermal gate / caps).
 apiVersion: v1
 kind: ResourceQuota
@@ -17,13 +20,13 @@ metadata:
   namespace: ci-runner
 spec:
   hard:
-    pods: "24"
-    requests.cpu: "48"
-    requests.memory: 144Gi
-    requests.ephemeral-storage: 192Gi
-    limits.cpu: "96"
-    limits.memory: 240Gi
-    limits.ephemeral-storage: 384Gi
+    pods: "29"
+    requests.cpu: "58"
+    requests.memory: 160Gi
+    requests.ephemeral-storage: 212Gi
+    limits.cpu: "128"
+    limits.memory: 280Gi
+    limits.ephemeral-storage: 480Gi
     services: "0"
     services.loadbalancers: "0"
     services.nodeports: "0"
@@ -31,7 +34,7 @@ spec:
     # Device-plugin resources: one shared iGPU slot per browser shard (at most
     # 2 running per node via the thermal gate, + queued), and NEVER the plugin's
     # all-device monitoring resources or the NPU, whatever a future template edit asks for.
-    requests.gpu.intel.com/i915: "12"
+    requests.gpu.intel.com/i915: "13"
     requests.gpu.intel.com/monitoring: "0"
     requests.gpu.intel.com/i915_monitoring: "0"
     requests.npu.intel.com/accel: "0"
