@@ -149,12 +149,12 @@ premises:
       cat kubernetes/apps/flux-system/flux-operator/app/helmrelease.yaml
       kubernetes/apps/flux-system/flux-operator/instance/helmrelease.yaml | grep -c '^      version: 0.57.0$'
     expect_exact: "2"
-status: vetted    # re-vetted 2026-10-05 after the 0.61.0 retarget review (was RESET to draft on 2026-10-03).
+status: awaiting-go    # nightly:2026-10-06: deferred - HUMAN-GATED, no operator GO on record; go_no_go issue refreshed in home-operation. re-vetted 2026-10-05 after the 0.61.0 retarget review (was RESET to draft on 2026-10-03).
                   # Prior history: plan-reviewer 2026-09-28 (F-2c849d1e) needs-fix -> fixed -> ready-for-go
                   # for the 0.60.0 target. The delta to re-review is section 1.2a only; every gate is unchanged
                   # in shape. HUMAN-GATED (autonomy_override); run before flux-reconciler-impersonation (10-11).
 review: ready-for-go@2026-10-05   # plan-reviewer re-review of the 0.61.0 retarget; sole blocker (4.6 hardcoded total) fixed same day
-window: "nightly:2026-10-06"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed (autonomy_override, Flux floor); before flux-reconciler-impersonation 10-11. KEPT on the 2026-10-03 retarget; the slot only runs if the delta re-review passes first (status is draft).
+window: "nightly:2026-10-07"   # moved from nightly:2026-10-06 (no GO); runs only on a recorded GO; still before flux-reconciler-impersonation (10-11). SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed (autonomy_override, Flux floor); before flux-reconciler-impersonation 10-11. KEPT on the 2026-10-03 retarget; the slot only runs if the delta re-review passes first (status is draft).
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/flux-upgrade.md

@@ -47,8 +47,9 @@ finding_refs:
   - F-6c7843e4                        # "BIOS/fan/paste check on nuc14-02's cooler first": this keeps CI heat off that node
                                       # until the physical fix; shared with talos-sysfs-power-caps / talos-power-tuning-ab
 review: ready-for-go@2026-10-05     # review fix applied per the reviewer's exact correction (nightly variant, §4.2/§6)
-status: vetted
-window: "nightly:2026-10-06"          # was PROPOSED nightly:2026-10-06 (03:30 Europe/Berlin = 01:30Z), i.e. after the
+status: blocked
+blocked_reason: "nightly:2026-10-06 pre-check STOP before any mutation: exclude-edit.py SOP anchors V/U (> Version: `2026.10.04` / > Last Updated: `2026-10-04`) match 0 - docs/sops/ci-runner.md was re-versioned to 2026.10.06 by 1efcba19 (talos-sysfs-power-caps 3.10, 01:19 CEST). Gate anchors A/B and SOP anchors R/H/T/B4/S4 still match 1. Fix: re-anchor V/U to the current header (and add a premise pinning the SOP header), re-review, re-schedule. Not fixed in-window by contract."
+window: null   # cleared on block (was nightly:2026-10-06)          # was PROPOSED nightly:2026-10-06 (03:30 Europe/Berlin = 01:30Z), i.e. after the
                                       # talos-sysfs-power-caps 24 h soak closes (>= 2026-10-05T23:17Z) and before the A/B.
                                       # Fallback (review-2 B1): nightly:2026-10-07. It can NOT join the A/B's NOW run (that plan is
                                       # exclusive and run-now checks all premises at preflight); the A/B evenings then shift a day.
