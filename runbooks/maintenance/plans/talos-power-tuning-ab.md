@@ -953,7 +953,7 @@ def paired(a, b):   # ratios a/b for shard keys present in both (a, b: {(suite, 
     return [a[k] / b[k] for k in a if k in b]
 base = {(s, i): t for s, i, n, t in shards("E")}
 labels = sorted(f.split("shards-", 1)[1][:-5] for f in glob.glob(f"{W}/shards-*.json"))
-labels = [L for L in labels if L not in ("E", "A1004")]
+labels = [L for L in labels if L not in ("E", "A1004", "before", "after")]
 valid, bad = {}, []
 for L in labels:
     s = shards(L); fo = foreign(L); stt = ld(f"{W}/stats-{L}.json"); idle = ld(f"{W}/stats-idle-{L}.json")
