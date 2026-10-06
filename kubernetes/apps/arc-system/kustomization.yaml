@@ -1,0 +1,14 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# actions-runner-controller (ARC) for the self-hosted GitHub Actions runners of
+# The Ninth Banner (runner pods live in ci-runner, docs/sops/ci-runner.md §2c).
+# DELIBERATELY no `namespace:` transformer and NO ../../flux/components/common:
+# the controller copies the GitHub App secret of each scale set into this
+# namespace for its listener, and nothing else in here needs cluster-secrets or
+# the SOPS age key. The child Flux Kustomization lives in flux-system and only
+# TARGETS arc-system (same pattern as ../ci-runner).
+resources:
+  - ./namespace.yaml
+  - ./gha-runner-scale-set-controller/ks.yaml

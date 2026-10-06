@@ -1,0 +1,23 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/monitoring.coreos.com/podmonitor_v1.json
+# Controller (gha_controller_*) and listener (gha_*) metrics, both on the
+# container port named `metrics` (:8080). Alerts:
+# kubernetes/apps/monitoring/kube-prometheus-stack/app/gha-runner-scale-set-alerts.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: arc
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - gha-rs-controller
+          - the-ninth-banner-arc-listener
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s

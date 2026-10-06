@@ -1,7 +1,7 @@
 # SOP: CI Runner — The Ninth Banner test suites as sharded Kubernetes Jobs
 
 > Description: How The Ninth Banner's test suites (unit/check, Playwright e2e, responsive, simulation sweeps) run as ephemeral, sharded, locked-down Kubernetes Jobs in the `ci-runner` namespace, triggered with one command from the Mac mini, and how results are collected.
-> Version: `2026.10.06`
+> Version: `2026.10.06.1`
 > Last Updated: `2026-10-06`
 > Owner: `homelab operator (cberg-home-nextgen)`
 
@@ -170,6 +170,39 @@ Not applied (pending owner approval): the owner's later "~98 °C" relaxation of 
 
 Rollback triggers (watch during any change to these thresholds): any node with `min_over_time(node_thermal_zone_temp{type="x86_pkg_temp"}[2m]) >= 98` (>= 98 °C for 2 min), or a production restart/OOM/eviction. Neither fired in the trial.
 
+
+## 2c) GitHub Actions runners (ARC, since 2026-10-06)
+
+Self-hosted runners for the private repo `nachtschatt3n/the-ninth-banner`, so its GitHub CI can move off GitHub-hosted runners over time (a failed billing payment stopped every hosted job on 2026-10-05). They run next to the shard Jobs in `ci-runner`.
+
+| Item | Value |
+|---|---|
+| Controller | `gha-runner-scale-set-controller` 0.15.0 in namespace **`arc-system`** (PSA restricted, no `common` component; Flux KS `flux-system/gha-runner-scale-set-controller`). `flags.watchSingleNamespace: ci-runner`: **no ClusterRole**; namespaced Roles in `arc-system` and `ci-runner` only (CRDs are cluster-scoped). Egress: DNS, kube-apiserver, `github.com`, `api.github.com`, `*.actions.githubusercontent.com`; ingress only from `monitoring` on :8080 |
+| Scale set | `gha-runner-scale-set` 0.15.0, HelmRelease `ci-runner/the-ninth-banner-runners`, Flux KS `flux-system/the-ninth-banner-runners` (**listed but commented out** in `kubernetes/apps/ci-runner/kustomization.yaml` until the owner has written the secret). Scale set name `ninth-banner-k8s`, repo-scoped (`githubConfigUrl` = the repo) |
+| runs-on labels | `ninth-banner-k8s` (the name, always matches) plus `self-hosted`, `ninth-banner`, `k8s`, `linux`, `x64`. Use `runs-on: [self-hosted, ninth-banner, k8s]`. Labels are registered only when the scale set is created; changing them means renaming `runnerScaleSetName` |
+| Ephemeral | ARC JIT runners: one job per pod, pod deleted after the job. `minRunners: 0`, `maxRunners: 2` |
+| Placement | required node affinity `k8s-nuc14-01`/`k8s-nuc14-03` (nuc14-02 excluded, same as `GATE_EXCLUDE_NODES`), required pod anti-affinity: **one runner per node**. `PriorityClass ci-low` |
+| Pod | init `runner-agent` (`ghcr.io/actions/actions-runner:2.337.0@sha256:…`) copies the runner agent into an emptyDir; container `runner` runs it in the game's pinned Playwright image (same digest as `job-template.yaml.tpl`: Node 24, npm, git, browsers in `/ms-playwright`). uid/gid 1001, non-root, all caps dropped, read-only root FS, no privileged/hostPath, `automountServiceAccountToken: false` on the chart's `ninth-banner-k8s-gha-rs-no-permission` SA (no RBAC). No Docker: `services:`/`container:` jobs and `docker build` do not work here |
+| Resources | runner requests 1 CPU / 2Gi / 2Gi disk, limits **2 CPU** / 6Gi / 16Gi; emptyDirs `runner` 12Gi, `home` 4Gi, `tmp` 4Gi. No GPU |
+| Thermal | Runner pods are **not gated** (the gate only ticks while a Mac trigger runs; a GitHub job must not wait for one). They carry `ci.cberg.home/lane: cpu` and `app.kubernetes.io/name: the-ninth-banner-runner`, which `ninth-banner-admit.py`'s `SELECTOR` includes: each running runner counts as a cpu-lane CI pod on its node (slots, 6-CPU budget, 300 s settle), so shards are not admitted on top of it. Heat per runner is bounded by the 2-CPU limit and one-per-node. **Browser (Playwright) jobs are NOT supported on these runners for now**: they would bypass the GPU lane and the temperature checks. Browser suites stay on `scripts/ninth-banner-test.sh` |
+| Egress (runner pods) | `the-ninth-banner-runners-egress` adds to the namespace lockdown: `github.com`, `api.github.com`, `codeload.github.com`, `*.actions.githubusercontent.com`, `productionresultssa0`..`19.blob.core.windows.net` (log/artifact upload; exact names, no wildcard), `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, `ghcr.io`, `pkg-containers.githubusercontent.com`, `registry.npmjs.org`. Not `nodejs.org`: skip `actions/setup-node` (Node 24 is in the image) |
+| Credential | GitHub App (fallback: fine-grained PAT), secret `ci-runner/the-ninth-banner-arc-github` (`github_app_id`, `github_app_installation_id`, `github_app_private_key`), file `kubernetes/apps/ci-runner/the-ninth-banner-runners/app/github-app.sops.yaml`, **owner-written**. App permissions: Repository → Administration **Read and write** (needed to register repo-level runners), Metadata read; installed on this one repo only; webhook off. The controller copies it into `arc-system` for the listener; runner pods only get a per-job JIT config |
+| Forks | Repo Settings → Actions → General → *Fork pull request workflows in private repositories*: keep **Run workflows from fork pull requests** OFF. Workflows from forks must never run on these runners |
+| Observability | PodMonitor `arc-system/arc` (controller `gha_controller_*`, listener `gha_*`). Rules `gha-runner-scale-set-alerts.yaml`: `ARCPodNotReady`/`ARCPodCrashLooping` (critical), `ARCPodRestarted`, `ARCRunnerScaleSetNotRegistered` (secret present, no listener 15m), `ARCRunnerFailing` (failed ephemeral runners 10m), `ARCRunnerOutdated`, `ARCRunnerJobsWaiting` (30m). Runner pods Pending > 30m also fire `CIRunnerPodStuckPending`. `CIRunnerThermalGateStalled` ignores `ninth-banner-k8s-*` pods. Logs: Elasticsearch `logs-generic-default`, `k8s.namespace.name` `ci-runner` / `arc-system` |
+| Upgrades | Known issue for the NEXT bump: ARC #4706 (0.14 -> 0.15 left old runner sets stuck Terminating); re-check the release notes before 0.15 -> 0.16. Controller + scale-set chart in lockstep (one commit; auto-update deny `*gha-runner-scale-set*`). Runner agent image must stay current: ARC disables self-update and GitHub stops assigning jobs to outdated runners (`ARCRunnerOutdated`) |
+
+Residual risk (security review 2026-10-06, W2): the App's Administration read-write on the repo is required for repo-level runners, but a leaked key could change repo settings or delete the repo. Mitigations: one repo only, webhook off, key only in SOPS + the controller/listener namespaces (no runner pod sees it), rotate by generating a new App key, `sops` edit, then revoke the old key. Egress to GHCR/api.github.com/npm/blob can still carry data out via attacker-owned accounts while those hosts are allowed. Register entry (operator runs it, an agent did not):
+```bash
+runbooks/policy-cli.py risk add AR-<next> --register-only register-only:posture --severity medium \
+  --description 'ci-runner ARC GitHub App: Administration RW on the-ninth-banner; runner egress to GitHub/GHCR/npm/Actions blob' \
+  --justification 'Owner-requested self-hosted runners 2026-10-06; App installed on one repo, webhook off, key never in runner pods, ephemeral non-root runners, no fork PR workflows, exact-name egress allow-list.' \
+  --expires 2027-01-01
+```
+
+Enable (owner): fill the secret with `sops`, uncomment `- ./the-ninth-banner-runners/ks.yaml` in `kubernetes/apps/ci-runner/kustomization.yaml`, commit both with `git commit --only`, push. Verify: `kubectl -n ci-runner get autoscalingrunnerset` shows the set, `kubectl -n arc-system get pods` shows `arc-controller-*` and `ninth-banner-k8s-*-listener` Running, and the repo's Settings → Actions → Runners lists `ninth-banner-k8s`.
+
+Disable: comment the line again and push (Flux prunes the scale set; the controller deregisters it). Remove ARC entirely: also `git revert` the commit that added `kubernetes/apps/arc-system/`, then `kubectl delete ns arc-system` (prune disabled) and the `actions.github.com` CRDs by hand.
+
 ---
 
 ## 3) Blueprints
@@ -234,7 +267,7 @@ kubectl logs -n ci-runner <pod> -c clone
 ## 6) Verification Tests
 
 1. Infra reconciled: `flux get ks -n flux-system the-ninth-banner-tests` is Ready, and `kubectl get resourcequota,limitrange,cnp,sa,cm,secret -n ci-runner` shows the objects.
-2. Namespace hygiene: `kubectl get secret -n ci-runner` lists **only** `the-ninth-banner-git-credential`, with no `cluster-secrets` and no `sops-age`.
+2. Namespace hygiene: `kubectl get secret -n ci-runner` lists `the-ninth-banner-git-credential` (plus the ARC secrets of §2c once enabled), with no `cluster-secrets` and no `sops-age`.
 3. `scripts/ninth-banner-test.sh main unit` exits 0, and `~/ci-results/<job>/summary.txt` shows `result=PASS`.
 4. `scripts/ninth-banner-test.sh main e2e 3` gets all 3 shards admitted (no `ci.cberg.home/thermal` gate left), never more than 2 CI pods per node (`kubectl get pods -o wide` while running), and a PASS summary, with `junit.xml` per shard.
 5. Egress lockdown (while a runner pod is alive): `kubectl exec -n ci-runner <pod> -c runner -- node -e "fetch('https://example.com').then(()=>console.log('OPEN')).catch(()=>console.log('BLOCKED'))"` prints `BLOCKED`.
@@ -288,8 +321,8 @@ kubectl -n kube-system exec ds/cilium -- cilium-dbg monitor --type drop
 
 ## 10) Security Check
 
-- `kubectl get secret -n ci-runner` shows exactly one Secret (the git credential).
-- `kubectl get rolebinding,role -n ci-runner` shows none (the thermal gate runs in the trigger on the Mac with the operator kubeconfig; it adds no in-cluster RBAC). The ServiceAccount has `automountServiceAccountToken: false`.
+- `kubectl get secret -n ci-runner` shows the git credential and, once ARC is enabled (§2c), `the-ninth-banner-arc-github` plus ARC's per-runner JIT secrets; never `cluster-secrets` or `sops-age`.
+- `kubectl get rolebinding,role -n ci-runner` shows only ARC's (§2c): `arc-controller-single-namespace-watch`, `ninth-banner-k8s-gha-rs-manager` and the listener Role, all bound to ServiceAccounts in `arc-system`. No ServiceAccount in `ci-runner` has a binding (the thermal gate runs on the Mac with the operator kubeconfig). Every pod has `automountServiceAccountToken: false`.
 - The CiliumNetworkPolicy `ci-runner-lockdown` exists with `endpointSelector: {}`.
 - **ACCEPTED RISK (owner, 2026-10-03; audit item W1):** the runner keeps the shared, account-wide `repo`-scoped GHCR PAT described below. The owner accepted the risk, mitigated by init-container-only mounting and the egress allow-list. Do not change the credential without a new owner decision. Re-evaluate when the PAT is rotated, or if the clone container ever runs anything besides `git fetch`. Register entry: see §10a.
 - **Credential choice (owner decision 2026-10-03: reuse an existing token):** the runner reuses the shared GHCR pull PAT (the same ciphertext as `ghcr-the-ninth-banner` / arag-web, copied, never decrypted). The first clone (2026-10-03) proved it can read a **private repo's contents**, so it is not read:packages-only: it carries `repo` scope (classic PAT, account-wide, write-capable). The mitigations are structural: it is mounted only into the `clone` init container, which runs nothing but `git fetch`, and npm install scripts and tests run in a container that never has it. Least privilege would still be a read-only **deploy key** on `the-ninth-banner` alone (no expiry, one repo, read-only). Switch when convenient. Do NOT substitute the Flux git token or the MCP `GITHUB_TOKEN`, which are account-wide too.
@@ -352,3 +385,4 @@ runbooks/policy-cli.py risk add AR-<next> \
 - `2026.10.04` (gate-stall alert): new `CIRunnerThermalGateStalled` (warning) closes that gap: gated pods + no pod scheduled in `ci-runner` for > 30 min (or no remaining pod has a scheduled time), `for: 5m`; promtool cases + 5 mutants in `runbooks/tests/test-ci-runner-gate-stalled-alert.py`; would not have fired once in the first day of gate data (max release gap 13.2 min).
 - `2026.10.06` (node exclusion): `GATE_EXCLUDE_NODES` (default `k8s-nuc14-02`) keeps CI off nuc14-02 in both lanes until its cooling is fixed (plan ci-runner-exclude-node02).
 - `2026.10.06` (power caps soak): `GATE_OPEN_BELOW_C` 85 -> 88 °C (browser lane, first pod only; HOT 93, second-pod, cpu-lane and brake limits unchanged). Evidence from the 35/55 W caps' 24 h soak: p95 51/55/55 °C, max 62/75/71 °C, 0 minutes >= 100 °C, throttles 88/1/14; Phase C CI max 62/70/71 °C. Plan talos-sysfs-power-caps §3.10.
+- `2026.10.06` (ARC runners): §2c: actions-runner-controller 0.15.0 (`arc-system`, single-namespace RBAC) + repo-scoped ephemeral scale set `ninth-banner-k8s` in `ci-runner` (max 2, nuc14-01/03, one per node, non-browser jobs only); admitter counts runner pods as cpu-lane CI pods; `CIRunnerThermalGateStalled` ignores runner pods; new `gha-runner-scale-set-alerts.yaml`. Scale set off until the owner writes the GitHub App secret.

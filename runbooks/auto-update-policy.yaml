@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.10.05"
+version: "2026.10.06"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -442,6 +442,16 @@ deny:
       version. This is a local binary — no reboot window, no maintenance plan."
   - match: "siderolabs/*"
     reason: "Talos node image — needs a rolling node-reboot maintenance window, not a git merge."
+  - match: "*gha-runner-scale-set*"
+    reason: >-
+      actions-runner-controller (ARC, added 2026-10-06, docs/sops/ci-runner.md
+      §2c). The controller chart (arc-system) and the scale-set chart (ci-runner)
+      MUST run the same version and are bumped together in one commit; an
+      unattended bump of only one of them can wedge the runner scale set, and a
+      chart bump can carry CRD changes. Planned window only. The runner AGENT
+      image (ghcr.io/actions/actions-runner) is NOT covered by this rule on
+      purpose: GitHub stops assigning jobs to outdated runners, so it must stay
+      current.
   - match: "*talos*"
     reason: "Talos/Kubernetes node-level component — reboot window required."
   - match: "*valkey*"

@@ -193,7 +193,8 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | my-software-production | Custom app production | 6 |
 | my-software-showcase | Portfolio showcase (containerized legacy client apps) | 15 |
 | security | Security monitoring (Wazuh, Falco) | 2 |
-| ci-runner | Ephemeral test Jobs (no cluster secrets, egress-locked) | 1 |
+| ci-runner | Ephemeral test Jobs + self-hosted GitHub Actions runners (no cluster secrets, egress-locked) | 2 |
+| arc-system | actions-runner-controller (single-namespace RBAC, watches ci-runner) | 1 |
 
 ---
 
@@ -207,6 +208,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Cilium | v1.20.2 | CNI / network |
 | Longhorn | v1.12.1 | Distributed storage |
 | cert-manager | v1.21.0 | TLS management |
+| actions-runner-controller | 0.15.0 | GitHub Actions runner scale sets (controller + scale-set chart in lockstep) |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.36.x | CLI |
 | talosctl | v1.14.1 | CLI (client) — ALIGNED to the cluster OS. Pinned in `.mise.toml` as `aqua:siderolabs/talos`; the pin tracks `talosVersion` in `talconfig.yaml`, not Renovate. Renovate PR #212 (retargeted to 1.14.1) was merged in `a6704ad6` as the last step of the 2026-09-27 node roll, so client and servers moved together (history: in September it had proposed 1.14.0 while the nodes were still on 1.13.x and was held, because a client ahead of the servers is not the same as up to date, F-9a58f400) |

@@ -41,6 +41,7 @@ resources:
   - ./splitfairy-alerts.yaml
   - ./the-ninth-banner-alerts.yaml
   - ./ci-runner-alerts.yaml
+  - ./gha-runner-scale-set-alerts.yaml
   - ./mosquitto-alerts.yaml
   - ./prometheus-httproute.yaml
   - ./alertmanager-httproute.yaml

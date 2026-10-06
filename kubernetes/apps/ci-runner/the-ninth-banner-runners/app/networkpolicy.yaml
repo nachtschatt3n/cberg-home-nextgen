@@ -1,0 +1,107 @@
+---
+# ADDITIONAL egress for the ARC runner pods only (Cilium allow rules are a
+# union; the namespace-wide ci-runner-lockdown in ../../the-ninth-banner-tests
+# still denies all ingress and everything not listed). A GitHub Actions runner
+# needs the Actions control plane, not just git:
+#   github.com, api.github.com, codeload.github.com   git + action tarballs
+#   *.actions.githubusercontent.com                   broker, pipelines, results
+#                                                     (live logs, artifacts, cache)
+#   productionresultssa0..19.blob.core.windows.net    signed-URL upload of job
+#                                                     logs + artifacts (Results).
+#                                                     EXACT names, no wildcard:
+#                                                     Azure storage account names
+#                                                     are first-come, so a pattern
+#                                                     would admit attacker-owned
+#                                                     accounts (security review
+#                                                     2026-10-06, W1)
+#   objects.githubusercontent.com,
+#   release-assets.githubusercontent.com              release downloads by actions
+#   ghcr.io, pkg-containers.githubusercontent.com     GHCR (pull)
+#   registry.npmjs.org                                npm ci
+# Not listed on purpose: nodejs.org / setup-node downloads (Node 24 is in the
+# image: skip actions/setup-node), the Playwright CDN (browsers are baked in),
+# any LAN or in-cluster destination.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: the-ninth-banner-runners-egress
+  namespace: ci-runner
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: the-ninth-banner-runner
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchName: github.com
+              - matchName: api.github.com
+              - matchName: codeload.github.com
+              - matchPattern: "*.actions.githubusercontent.com"
+              - matchName: productionresultssa0.blob.core.windows.net
+              - matchName: productionresultssa1.blob.core.windows.net
+              - matchName: productionresultssa2.blob.core.windows.net
+              - matchName: productionresultssa3.blob.core.windows.net
+              - matchName: productionresultssa4.blob.core.windows.net
+              - matchName: productionresultssa5.blob.core.windows.net
+              - matchName: productionresultssa6.blob.core.windows.net
+              - matchName: productionresultssa7.blob.core.windows.net
+              - matchName: productionresultssa8.blob.core.windows.net
+              - matchName: productionresultssa9.blob.core.windows.net
+              - matchName: productionresultssa10.blob.core.windows.net
+              - matchName: productionresultssa11.blob.core.windows.net
+              - matchName: productionresultssa12.blob.core.windows.net
+              - matchName: productionresultssa13.blob.core.windows.net
+              - matchName: productionresultssa14.blob.core.windows.net
+              - matchName: productionresultssa15.blob.core.windows.net
+              - matchName: productionresultssa16.blob.core.windows.net
+              - matchName: productionresultssa17.blob.core.windows.net
+              - matchName: productionresultssa18.blob.core.windows.net
+              - matchName: productionresultssa19.blob.core.windows.net
+              - matchName: objects.githubusercontent.com
+              - matchName: release-assets.githubusercontent.com
+              - matchName: ghcr.io
+              - matchName: pkg-containers.githubusercontent.com
+              - matchName: registry.npmjs.org
+              - matchPattern: "**.cluster.local"
+    - toFQDNs:
+        - matchName: github.com
+        - matchName: api.github.com
+        - matchName: codeload.github.com
+        - matchPattern: "*.actions.githubusercontent.com"
+        - matchName: productionresultssa0.blob.core.windows.net
+        - matchName: productionresultssa1.blob.core.windows.net
+        - matchName: productionresultssa2.blob.core.windows.net
+        - matchName: productionresultssa3.blob.core.windows.net
+        - matchName: productionresultssa4.blob.core.windows.net
+        - matchName: productionresultssa5.blob.core.windows.net
+        - matchName: productionresultssa6.blob.core.windows.net
+        - matchName: productionresultssa7.blob.core.windows.net
+        - matchName: productionresultssa8.blob.core.windows.net
+        - matchName: productionresultssa9.blob.core.windows.net
+        - matchName: productionresultssa10.blob.core.windows.net
+        - matchName: productionresultssa11.blob.core.windows.net
+        - matchName: productionresultssa12.blob.core.windows.net
+        - matchName: productionresultssa13.blob.core.windows.net
+        - matchName: productionresultssa14.blob.core.windows.net
+        - matchName: productionresultssa15.blob.core.windows.net
+        - matchName: productionresultssa16.blob.core.windows.net
+        - matchName: productionresultssa17.blob.core.windows.net
+        - matchName: productionresultssa18.blob.core.windows.net
+        - matchName: productionresultssa19.blob.core.windows.net
+        - matchName: objects.githubusercontent.com
+        - matchName: release-assets.githubusercontent.com
+        - matchName: ghcr.io
+        - matchName: pkg-containers.githubusercontent.com
+        - matchName: registry.npmjs.org
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

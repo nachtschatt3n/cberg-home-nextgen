@@ -1,0 +1,157 @@
+---
+# actions-runner-controller (ARC): self-hosted GitHub Actions runners for The
+# Ninth Banner (docs/sops/ci-runner.md §2c). Controller + listener run in
+# arc-system, the ephemeral runner pods in ci-runner.
+#
+# Runner pods in ci-runner are ALSO covered by ci-runner-alerts.yaml
+# (CIRunnerPodStuckPending: Pending > 30 min, e.g. both CI nodes full, image
+# pull failure). They are ephemeral (restartPolicy Never, one job each), so the
+# usual restart-count rules do not see a failing runner; ARC's own
+# gha_controller_failed_ephemeral_runners does (ARCRunnerFailing).
+#
+# Metric names: controller gha_controller_*, listener gha_* (PodMonitor
+# arc-system/arc). The PodMonitor's target label `namespace` (arc-system)
+# shadows the metrics' own `namespace` (ci-runner -> exported_namespace), so
+# the rules below select on the scale-set `name` only.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: gha-runner-scale-set-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - interval: 30s
+      name: arc.pods.health
+      rules:
+        - alert: ARCPodNotReady
+          annotations:
+            description: ARC pod {{ $labels.pod }} (controller or scale-set
+              listener) has been not ready for more than 5 minutes. Self-hosted
+              GitHub Actions jobs for The Ninth Banner are not being picked up.
+            summary: ARC pod {{ $labels.pod }} is not ready
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="arc-system", condition="true"}
+              unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+            ) == 0
+          for: 5m
+          labels:
+            category: ci-runner
+            component: arc
+            severity: critical
+        - alert: ARCPodCrashLooping
+          annotations:
+            description: ARC pod {{ $labels.pod }} has restarted {{ $value
+              | printf "%.0f" }} times in the last 15 minutes. A crash-looping
+              listener usually means the GitHub App credential
+              (ci-runner/the-ninth-banner-arc-github) is wrong or revoked, or
+              egress to api.github.com / *.actions.githubusercontent.com is
+              blocked.
+            summary: ARC pod {{ $labels.pod }} is crash looping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="arc-system"}[15m]) * 900 > 2
+          for: 5m
+          labels:
+            category: ci-runner
+            component: arc
+            severity: critical
+        - alert: ARCPodRestarted
+          annotations:
+            description: ARC pod {{ $labels.pod }} has restarted at least once in
+              the last 15 minutes. Monitor for repeated restarts.
+            summary: ARC pod {{ $labels.pod }} restarted
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="arc-system"}[15m]) > 0
+          for: 1m
+          labels:
+            category: ci-runner
+            component: arc
+            severity: warning
+    - interval: 1m
+      name: arc.runners
+      rules:
+        # Registration failure: the owner-written GitHub App secret exists (so
+        # the scale set is meant to be live) but no listener reports metrics.
+        # The listener is created only AFTER the controller has registered the
+        # scale set with GitHub, so a bad/revoked App key, a missing
+        # installation, or blocked egress all end here. Silent while the
+        # scale set is still switched off (no secret deployed).
+        - alert: ARCRunnerScaleSetNotRegistered
+          annotations:
+            description: The secret ci-runner/the-ninth-banner-arc-github exists
+              but the ninth-banner-k8s scale-set listener has exported no
+              metrics for 15 minutes. The scale set is not registered with
+              GitHub (bad App ID / installation ID / private key, App not
+              installed on the repo, missing Administration permission), or the
+              listener cannot reach GitHub. Check `kubectl -n arc-system logs
+              deploy/arc-controller` and `kubectl -n ci-runner get
+              autoscalingrunnerset`.
+            summary: ARC runner scale set ninth-banner-k8s is not registered
+          expr: |
+            count(kube_secret_info{namespace="ci-runner", secret="the-ninth-banner-arc-github"})
+            unless on()
+            count(gha_max_runners{name="ninth-banner-k8s"})
+          for: 15m
+          labels:
+            category: ci-runner
+            component: arc
+            severity: warning
+        # Ephemeral runner pods that fail to start or to register (image pull,
+        # runner agent crash, JIT config rejected) are retried by ARC and then
+        # marked Failed. This is the runner-side "crash looping" signal.
+        - alert: ARCRunnerFailing
+          annotations:
+            description: '{{ $value }} ephemeral runner(s) of scale set
+              {{ $labels.name }} are in a Failed state. Runner pods are failing
+              to start or to register with GitHub. Check `kubectl -n ci-runner
+              get ephemeralrunners` and the runner container logs (Elasticsearch:
+              k8s.namespace.name=ci-runner, k8s.container.name=runner).'
+            summary: ARC runners of {{ $labels.name }} are failing
+          expr: |
+            max by (name) (gha_controller_failed_ephemeral_runners{name="ninth-banner-k8s"}) > 0
+          for: 10m
+          labels:
+            category: ci-runner
+            component: arc
+            severity: warning
+        # ARC registers runners with self-update disabled; GitHub stops
+        # assigning jobs to a runner version that is too old. Bump the
+        # runner-agent image in the scale set's helmrelease.yaml.
+        - alert: ARCRunnerOutdated
+          annotations:
+            description: Scale set {{ $labels.name }} has {{ $value }} runner(s)
+              GitHub reports as outdated. Bump the actions-runner image
+              (runner-agent init container) in
+              kubernetes/apps/ci-runner/the-ninth-banner-runners/app/helmrelease.yaml.
+            summary: ARC runner version for {{ $labels.name }} is outdated
+          expr: |
+            max by (name) (gha_controller_outdated_ephemeral_runners{name="ninth-banner-k8s"}) > 0
+          for: 15m
+          labels:
+            category: ci-runner
+            component: arc
+            severity: warning
+        # Jobs assigned to the scale set but no runner busy with them for 30
+        # min: runner pods cannot be scheduled (both CI nodes occupied, quota)
+        # or never come up. Complements CIRunnerPodStuckPending.
+        - alert: ARCRunnerJobsWaiting
+          annotations:
+            description: '{{ $value }} job(s) assigned to scale set {{ $labels.name }}
+              have had no busy runner for 30 minutes. Check `kubectl -n ci-runner
+              get pods -l app.kubernetes.io/name=the-ninth-banner-runner -o wide`
+              (Pending? quota? node affinity nuc14-01/03 only).'
+            summary: GitHub Actions jobs are waiting for a self-hosted runner
+          expr: |
+            (
+              max by (name) (gha_assigned_jobs{name="ninth-banner-k8s"})
+              - max by (name) (gha_busy_runners{name="ninth-banner-k8s"})
+            ) > 0
+          for: 30m
+          labels:
+            category: ci-runner
+            component: arc
+            severity: warning

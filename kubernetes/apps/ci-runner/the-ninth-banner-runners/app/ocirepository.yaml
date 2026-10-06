@@ -1,0 +1,18 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/ocirepository-source-v1.json
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: gha-runner-scale-set
+spec:
+  interval: 1h
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    # Same version as the controller chart
+    # (kubernetes/apps/arc-system/gha-runner-scale-set-controller/app/ocirepository.yaml);
+    # bump both in one commit. Digest = immutable pin, re-derive on every bump.
+    tag: 0.15.0
+    digest: sha256:bdfdad17cf8e45ae064c73ed6764f0c75d4bf71a6e2912e6363a43d6dfc787de
+  url: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set

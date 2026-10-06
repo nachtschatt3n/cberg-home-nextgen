@@ -1,0 +1,46 @@
+---
+# arc-system lockdown: controller + listener pods.
+#  - ingress: only Prometheus (monitoring namespace) on the metrics port.
+#  - egress: cluster DNS, the Kubernetes API, and HTTPS to the GitHub Actions
+#    control plane (api.github.com for App tokens / scale-set registration,
+#    *.actions.githubusercontent.com for the broker long-poll and pipelines).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: arc-system-lockdown
+  namespace: arc-system
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEntities:
+        - kube-apiserver
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchName: github.com
+              - matchName: api.github.com
+              - matchPattern: "*.actions.githubusercontent.com"
+              - matchPattern: "**.cluster.local"
+    - toFQDNs:
+        - matchName: github.com
+        - matchName: api.github.com
+        - matchPattern: "*.actions.githubusercontent.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

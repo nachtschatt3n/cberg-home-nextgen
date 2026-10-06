@@ -1,0 +1,163 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+# ARC runner scale set for nachtschatt3n/the-ninth-banner (repo-scoped).
+# Ephemeral: one job per pod, the pod is deleted after its job (ARC JIT runners).
+# docs/sops/ci-runner.md §2c. Non-browser jobs only for now (see "Thermal").
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: the-ninth-banner-runners
+spec:
+  interval: 30m
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    githubConfigUrl: https://github.com/nachtschatt3n/the-ninth-banner
+    # Pre-defined secret (./github-app.sops.yaml), written by the owner.
+    githubConfigSecret: the-ninth-banner-arc-github
+    # The scale-set name is itself a runs-on label. Labels are registered with
+    # GitHub only when the scale set is CREATED: changing them later needs the
+    # scale set deleted and re-created (rename runnerScaleSetName).
+    runnerScaleSetName: ninth-banner-k8s
+    scaleSetLabels:
+      - self-hosted
+      - ninth-banner
+      - k8s
+      - linux
+      - x64
+    minRunners: 0
+    # One runner per node (anti-affinity below) on nuc14-01/03 only.
+    maxRunners: 2
+    controllerServiceAccount:
+      namespace: arc-system
+      name: arc-controller
+    listenerTemplate:
+      metadata:
+        labels:
+          # PodMonitor selector (arc-system/arc)
+          app.kubernetes.io/name: the-ninth-banner-arc-listener
+      spec:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: listener
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests: { cpu: 10m, memory: 32Mi }
+              limits: { cpu: 200m, memory: 128Mi }
+    template:
+      metadata:
+        labels:
+          # CiliumNetworkPolicy the-ninth-banner-runners-egress + anti-affinity
+          app.kubernetes.io/name: the-ninth-banner-runner
+          # THERMAL: scripts/ninth-banner-admit.py also lists these pods
+          # (its SELECTOR) and counts each as a cpu-lane CI pod on its node
+          # (per-node slots, the 6-CPU CI budget, the 300 s settle), so gated
+          # test shards are never admitted on top of a busy runner. Runner pods
+          # are NOT gated themselves: the gate only ticks while a Mac trigger
+          # runs, and a GitHub job must not wait for one.
+          ci.cberg.home/lane: cpu
+          ci.cberg.home/suite: gha-runner
+      spec:
+        # Negative priority, never preempts (cluster-scoped, from
+        # ../../the-ninth-banner-tests/app/priorityclass.yaml).
+        priorityClassName: ci-low
+        # The chart's <name>-no-permission ServiceAccount has no RBAC; also
+        # never mount its token. Runner pods have no Kubernetes API access.
+        automountServiceAccountToken: false
+        enableServiceLinks: false
+        securityContext:
+          # pwuser in the Playwright image = runner user in the actions-runner
+          # image = uid/gid 1001
+          runAsNonRoot: true
+          runAsUser: 1001
+          runAsGroup: 1001
+          fsGroup: 1001
+          seccompProfile:
+            type: RuntimeDefault
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    # Owner, 2026-10-06: the CI farm is nuc14-01 + nuc14-03.
+                    # nuc14-02 stays excluded (suspected cooler defect, plan
+                    # ci-runner-exclude-node02), same as GATE_EXCLUDE_NODES.
+                    - key: kubernetes.io/hostname
+                      operator: In
+                      values: ["k8s-nuc14-01", "k8s-nuc14-03"]
+          podAntiAffinity:
+            # at most ONE runner per node (thermal: a runner is a cpu-lane-sized
+            # pod the gate cannot hold back)
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: the-ninth-banner-runner
+        initContainers:
+          # The runner agent comes from the official image; the job runs in
+          # the game's pinned Playwright image (Node 24, npm, git, browsers in
+          # /ms-playwright), the same digest as job-template.yaml.tpl and the
+          # game's tests/e2e/runner.json. Keep both images current: GitHub
+          # stops assigning jobs to a runner version that is too old (ARC
+          # registers runners with updates disabled).
+          - name: runner-agent
+            image: ghcr.io/actions/actions-runner:2.337.0@sha256:e5496277be5d09bc968b3d64911b74e219ac4a3f2edce956a3ecf9271bea1ef4
+            command: ["cp", "-a", "/home/runner/.", "/runner/"]
+            securityContext: &csc
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests: { cpu: 100m, memory: 128Mi, ephemeral-storage: 256Mi }
+              limits: { cpu: 500m, memory: 256Mi, ephemeral-storage: 1Gi }
+            volumeMounts:
+              - { name: runner, mountPath: /runner }
+        containers:
+          - name: runner
+            image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+            command: ["/runner/run.sh"]
+            workingDir: /runner
+            env:
+              - name: HOME
+                value: /home/pwuser
+              # Node sees all host CPUs; keep libuv/V8 helper pools sane
+              - name: UV_THREADPOOL_SIZE
+                value: "4"
+            securityContext: *csc
+            resources:
+              # cpu-lane sized (the gate counts it as one): 2 CPU cap per pod,
+              # one pod per node. No GPU: browser/WebGL jobs stay on the
+              # thermal-gated shard Jobs (scripts/ninth-banner-test.sh).
+              requests: { cpu: "1", memory: 2Gi, ephemeral-storage: 2Gi }
+              limits: { cpu: "2", memory: 6Gi, ephemeral-storage: 16Gi }
+            volumeMounts:
+              - { name: runner, mountPath: /runner }
+              - { name: home, mountPath: /home/pwuser }
+              - { name: tmp, mountPath: /tmp }
+        volumes:
+          # runner agent + _work (checkout, node_modules, tool cache)
+          - name: runner
+            emptyDir: { sizeLimit: 12Gi }
+          # npm cache, git config
+          - name: home
+            emptyDir: { sizeLimit: 4Gi }
+          - name: tmp
+            emptyDir: { sizeLimit: 4Gi }

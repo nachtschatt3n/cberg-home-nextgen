@@ -60,7 +60,11 @@ from datetime import datetime, timezone
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NS = "ci-runner"
-SELECTOR = "app.kubernetes.io/name=the-ninth-banner-tests"
+# Shard pods AND the ARC GitHub Actions runner pods (docs/sops/ci-runner.md
+# §2c). Runner pods are never gated, so they are never in the queue; they are
+# only COUNTED (lane label ci.cberg.home/lane=cpu) toward their node's slots,
+# CI CPU budget and settle, so no shard is admitted on top of a busy runner.
+SELECTOR = "app.kubernetes.io/name in (the-ninth-banner-tests,the-ninth-banner-runner)"
 GATE = "ci.cberg.home/thermal"
 RELEASED_AT = "ci.cberg.home/released-at"
 OPEN_BELOW_C = float(os.environ.get("GATE_OPEN_BELOW_C", "88"))

@@ -34,8 +34,9 @@
 | my-software-development | 3 |
 | my-software-production | 6 |
 | my-software-showcase | 15 |
-| ci-runner | 1 |
-| **Total** | **127** |
+| ci-runner | 2 |
+| arc-system | 1 |
+| **Total** | **129** |
 
 ---
 
@@ -294,6 +295,13 @@ calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 | App | Purpose | Ingress |
 |-----|---------|---------|
 | the-ninth-banner-tests | Runs The Ninth Banner's test suites (`unit`, `e2e`, `nightly`, `responsive`, `release`, `sims`; they call the game's own `test:*:shard` scripts, see the suites table in the SOP §2) as **ephemeral indexed Jobs** sharded over the three nodes (`mcr.microsoft.com/playwright:v1.63.0-noble`, Node 24), offloading the Mac mini. Static infra only is GitOps (quota 6 pods / 12 CPU / 36Gi requested (6 shards), LimitRange, CiliumNetworkPolicy: ingress denied, egress only DNS + `github.com` + `registry.npmjs.org`, tokenless ServiceAccount, scripts ConfigMap, git credential). The namespace deliberately skips the `common` component, so it holds **no cluster-secrets and no sops-age**; its Flux Kustomization lives in `flux-system`. The git credential is mounted only into the clone init container. Trigger: `scripts/ninth-banner-test.sh <ref> <suite> [shards]`; results land in `~/ci-results/<job>/`. SOP: `docs/sops/ci-runner.md`. Added 2026-10-03. No Service exists and the quota forbids one. Best-effort CI (thermal gate since 2026-10-04: a shard starts only on a node below 85 °C, at most 2 CI pods per node, admission braked 10 min after any node reads >= 100 °C; 4 CPU each); GitHub CI is the release gate. Browser suites render WebGL on the node's Intel iGPU (one shared `gpu.intel.com/i915` slot per shard; about 10x faster and cooler than SwiftShader; `GPU=0` falls back). | None |
+| the-ninth-banner-runners | Self-hosted **GitHub Actions** runners for the private repo `nachtschatt3n/the-ninth-banner`: ARC runner scale set `ninth-banner-k8s` (labels `self-hosted`, `ninth-banner`, `k8s`), ephemeral (one job per pod), min 0 / max 2, one per node on nuc14-01/03, non-root, 1-2 CPU, no GPU, egress only GitHub/Actions/GHCR/npm. Non-browser jobs only for now (thermal gate). Off until the owner writes the GitHub App secret. SOP: `docs/sops/ci-runner.md` §2c. Added 2026-10-06. | None |
+
+### `arc-system`
+
+| App | Purpose | Ingress |
+|-----|---------|---------|
+| gha-runner-scale-set-controller | actions-runner-controller 0.15.0: manages the runner scale sets in `ci-runner` (`watchSingleNamespace`, no ClusterRole) and runs each scale set's listener pod. Egress only to the Kubernetes API and the GitHub Actions control plane. SOP: `docs/sops/ci-runner.md` §2c. Added 2026-10-06. | None |
 
 ### `my-software-showcase`
 

@@ -15,6 +15,7 @@ at least one case -- otherwise the suite could not see the bug it guards.
   - no gated-pods condition          -> idle namespace with an old release fires
   - gated sum without "> 0"          -> zero-valued reason series fires
   - for: 0m                          -> fires before the 5m hold
+  - runner pods not excluded         -> ARC runner pods mask a dead admitter
 
 Needs promtool (Prometheus 3.x): PATH, $PROMTOOL, or a mise install.
 Fails (does not skip) when promtool is missing.
@@ -122,6 +123,11 @@ TESTS = [
     # 7. queue drains: gated pods released at 40m -> stops firing
     case(queue(2, values=f"1x39 0x{SPAN - 40}") + [released("r0", 0), released("r40", 40)],
          [("38m", FIRING), ("45m", [])]),
+    # 8. admitter dead while ARC GitHub Actions runner pods (never gated) keep
+    #    getting scheduled -> runner pods must not count as a release, fires
+    case(queue(3) + [released("r0", 0)]
+         + [released(f"ninth-banner-k8s-abcde-runner-{m}", m) for m in (10, 25, 40)],
+         [("33m", []), ("37m", FIRING), ("60m", FIRING)]),
 ]
 
 LIVE = None  # filled in main()
@@ -132,19 +138,22 @@ def mutants(rule):
     no_branch = (
         '(sum by (namespace) (kube_pod_status_reason{namespace="ci-runner", reason="SchedulingGated"}) > 0)'
         ' and on (namespace)'
-        ' ((time() - max by (namespace) (kube_pod_status_scheduled_time{namespace="ci-runner"})) > 1800)'
+        ' ((time() - max by (namespace) (kube_pod_status_scheduled_time{namespace="ci-runner", pod!~"ninth-banner-k8s-.*"})) > 1800)'
     )
-    no_gate = '(time() - max by (namespace) (kube_pod_status_scheduled_time{namespace="ci-runner"})) > 1800'
+    no_gate = '(time() - max by (namespace) (kube_pod_status_scheduled_time{namespace="ci-runner", pod!~"ninth-banner-k8s-.*"})) > 1800'
     no_gt0 = e.replace('reason="SchedulingGated"}) > 0\n)', 'reason="SchedulingGated"})\n)', 1)
     assert no_gt0 != e, "mutant 'gated sum without > 0' did not apply"
     tight = e.replace("> 1800", "> 600")
     assert tight != e
+    runners_count = e.replace(', pod!~"ninth-banner-k8s-.*"', "")
+    assert runners_count != e, "mutant 'runner pods count as releases' did not apply"
     return {
         "no 'never scheduled' branch": dict(rule, expr=no_branch),
         "threshold 10 min": dict(rule, expr=tight),
         "no gated-pods condition": dict(rule, expr=no_gate),
         "gated sum without > 0": dict(rule, expr=no_gt0),
         "for: 0m": dict(rule, **{"for": "0m"}),
+        "runner pods count as releases": dict(rule, expr=runners_count),
     }
 
 

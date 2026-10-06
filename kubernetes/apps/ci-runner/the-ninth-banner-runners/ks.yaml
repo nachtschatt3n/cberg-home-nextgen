@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app the-ninth-banner-runners
+  # flux-system, NOT ci-runner: SOPS decryption happens here, and ci-runner
+  # must hold neither sops-age nor cluster-secrets (see ../kustomization.yaml).
+  namespace: flux-system
+spec:
+  targetNamespace: ci-runner
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  dependsOn:
+    # CRDs + controller service account (controllerServiceAccount below)
+    - name: gha-runner-scale-set-controller
+    # PriorityClass ci-low, namespace quota, lockdown CiliumNetworkPolicy
+    - name: the-ninth-banner-tests
+  path: ./kubernetes/apps/ci-runner/the-ninth-banner-runners/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  wait: false
+  interval: 30m
+  retryInterval: 1m
+  timeout: 5m
