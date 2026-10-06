@@ -46,14 +46,17 @@ spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
       terminationGracePeriodSeconds: 10
-      # THERMAL GATE: every shard pod is created gated (Pending, invisible to the
-      # scheduler, no node resources). scripts/ninth-banner-admit.py, ticked by
-      # every running trigger, pins it to a cool node with a free slot in the
-      # pod's lane (thresholds, caps and the >= 100 C brake: SOP §2b) and
-      # removes the gate.
-      # docs/sops/ci-runner.md "Thermal gate".
-      schedulingGates:
-        - name: ci.cberg.home/thermal
+      # Owner, 2026-10-06: the thermal gate is removed. nuc14-02 stays
+      # excluded (suspected cooler defect); the 35/55 W RAPL caps are the only
+      # heat limit.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: ["k8s-nuc14-02"]
       securityContext:
         # the Playwright image's own non-root user (pwuser, uid/gid 1001)
         runAsNonRoot: true

@@ -85,8 +85,6 @@ spec:
         priorityClassName: ci-low
         automountServiceAccountToken: false
         enableServiceLinks: false
-        schedulingGates:
-          - name: ci.cberg.home/thermal
         affinity:
           nodeAffinity:
             requiredDuringSchedulingIgnoredDuringExecution:

@@ -84,8 +84,6 @@ spec:
         # never mount its token. Runner pods have no Kubernetes API access.
         automountServiceAccountToken: false
         enableServiceLinks: false
-        schedulingGates:
-          - name: ci.cberg.home/thermal
         securityContext:
           # pwuser in the Playwright image = runner user in the actions-runner
           # image = uid/gid 1001
