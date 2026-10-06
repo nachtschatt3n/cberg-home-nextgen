@@ -48,7 +48,7 @@ finding_refs:
                                       # until the physical fix; shared with talos-sysfs-power-caps / talos-power-tuning-ab
 review: ready-for-go@2026-10-06     # re-review after the nightly:2026-10-06 STOP: regex header anchors (aef3a9da) + premise sop-header-shape fixed to the runner-safe form
 status: vetted                        # was blocked by nightly:2026-10-06 (ba18604d: literal SOP-header anchor vs 1efcba19); re-anchored aef3a9da, re-reviewed 2026-10-06
-window: "now:2026-10-06"   # NOW run before the A/B evening 1 (18:30 Berlin); was nightly:2026-10-06 (blocked)          # was PROPOSED nightly:2026-10-06 (03:30 Europe/Berlin = 01:30Z), i.e. after the
+window: null   # run-now.py stamp sets now:<date> at the NOW run (pre-setting it tripped the already-stamped guard 2026-10-06 05:12Z); target: before the A/B evening 1 (18:30 Berlin); was nightly:2026-10-06 (blocked)          # was PROPOSED nightly:2026-10-06 (03:30 Europe/Berlin = 01:30Z), i.e. after the
                                       # talos-sysfs-power-caps 24 h soak closes (>= 2026-10-05T23:17Z) and before the A/B.
                                       # Fallback (review-2 B1): nightly:2026-10-07. It can NOT join the A/B's NOW run (that plan is
                                       # exclusive and run-now checks all premises at preflight); the A/B evenings then shift a day.
