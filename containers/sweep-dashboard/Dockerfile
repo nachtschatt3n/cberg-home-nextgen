@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.27
 # sweep-dashboard — FastAPI + HTMX read-only view of the sweep-history
 # Postgres. Reads via the sweep_reader role; never writes.
 #
