@@ -47,7 +47,7 @@ finding_refs:
   - F-6c7843e4                        # "BIOS/fan/paste check on nuc14-02's cooler first": this keeps CI heat off that node
                                       # until the physical fix; shared with talos-sysfs-power-caps / talos-power-tuning-ab
 review: ready-for-go@2026-10-06     # re-review after the nightly:2026-10-06 STOP: regex header anchors (aef3a9da) + premise sop-header-shape fixed to the runner-safe form
-status: vetted                        # was blocked by nightly:2026-10-06 (ba18604d: literal SOP-header anchor vs 1efcba19); re-anchored aef3a9da, re-reviewed 2026-10-06
+status: executed                      # NOW run now:2026-10-06: f726f523 (gate GATE_EXCLUDE_NODES=k8s-nuc14-02) + SOP; §4.1 3/1/0/3/0 PASS; §4.2 e2e d3ae92f 3/3 PASS, pods 2x nuc14-01 + 1x nuc14-03, 0 on nuc14-02. File kept (not deleted) because talos-power-tuning-ab depends_on it; retire after the A/B.
 window: "now:2026-10-06"   # ON-DEMAND NOW run 2026-10-06 (run-now.py stamp; was None)
                                       # talos-sysfs-power-caps 24 h soak closes (>= 2026-10-05T23:17Z) and before the A/B.
                                       # Fallback (review-2 B1): nightly:2026-10-07. It can NOT join the A/B's NOW run (that plan is
