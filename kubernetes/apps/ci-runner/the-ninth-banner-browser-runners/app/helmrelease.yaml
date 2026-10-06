@@ -1,12 +1,10 @@
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
-# ARC runner scale set for nachtschatt3n/the-ninth-banner (repo-scoped).
-# Ephemeral: one job per pod, the pod is deleted after its job (ARC JIT runners).
-# docs/sops/ci-runner.md §2c. CPU checks and simulation jobs.
+# Ephemeral Intel iGPU runner for the game's browser suites.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: the-ninth-banner-runners
+  name: the-ninth-banner-browser-runners
 spec:
   interval: 30m
   chartRef:
@@ -21,12 +19,12 @@ spec:
       retries: 3
   values:
     githubConfigUrl: https://github.com/nachtschatt3n/the-ninth-banner
-    # Pre-defined SOPS secret with a repo-scoped fine-grained PAT.
+    # Shared SOPS secret in ci-runner with a repo-scoped fine-grained PAT.
     githubConfigSecret: the-ninth-banner-arc-github
     # The scale-set name is itself a runs-on label. Labels are registered with
     # GitHub only when the scale set is CREATED: changing them later needs the
     # scale set deleted and re-created (rename runnerScaleSetName).
-    runnerScaleSetName: ninth-banner-k8s
+    runnerScaleSetName: ninth-banner-browser-k8s
     scaleSetLabels:
       - self-hosted
       - ninth-banner
@@ -35,7 +33,7 @@ spec:
       - x64
     minRunners: 0
     # One runner per node (anti-affinity below) on nuc14-01/03 only.
-    maxRunners: 2
+    maxRunners: 1
     controllerServiceAccount:
       namespace: arc-system
       name: arc-controller
@@ -67,8 +65,8 @@ spec:
           # CiliumNetworkPolicy the-ninth-banner-runners-egress + anti-affinity
           app.kubernetes.io/name: the-ninth-banner-runner
           # All CI pods share the continuous thermal admission gate.
-          ci.cberg.home/lane: cpu
-          ci.cberg.home/suite: gha-runner
+          ci.cberg.home/lane: browser
+          ci.cberg.home/suite: gha-browser
       spec:
         # Negative priority, never preempts (cluster-scoped, from
         # ../../the-ninth-banner-tests/app/priorityclass.yaml).
@@ -100,7 +98,8 @@ spec:
                       operator: In
                       values: ["k8s-nuc14-01", "k8s-nuc14-03"]
           podAntiAffinity:
-            # At most one ARC runner per node across runner namespaces.
+            # at most ONE runner per node (thermal: a runner is a cpu-lane-sized
+            # pod the gate cannot hold back)
             requiredDuringSchedulingIgnoredDuringExecution:
               - topologyKey: kubernetes.io/hostname
                 namespaceSelector: {}
@@ -140,29 +139,12 @@ spec:
                 value: "4"
             securityContext: *csc
             resources:
-              # cpu-lane sized (the gate counts it as one): 2 CPU cap per pod,
-              # one pod per node. Browser jobs use the separate GPU scale set.
-              requests: { cpu: "1", memory: 2Gi, ephemeral-storage: 2Gi }
-              limits: { cpu: "2", memory: 6Gi, ephemeral-storage: 16Gi }
+              requests: { cpu: "2", memory: 6Gi, ephemeral-storage: 8Gi, gpu.intel.com/i915: "1" }
+              limits: { cpu: "4", memory: 10Gi, ephemeral-storage: 16Gi, gpu.intel.com/i915: "1" }
             volumeMounts:
               - { name: runner, mountPath: /runner }
               - { name: home, mountPath: /home/pwuser }
               - { name: tmp, mountPath: /tmp }
-          - name: postgres
-            image: postgres:16-alpine
-            env:
-              - { name: POSTGRES_PASSWORD, value: postgres }
-              - { name: PGDATA, value: /tmp/pgdata }
-            securityContext:
-              runAsNonRoot: true
-              runAsUser: 70
-              runAsGroup: 70
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop: ["ALL"]
-            resources:
-              requests: { cpu: 100m, memory: 128Mi }
-              limits: { cpu: 500m, memory: 512Mi }
         volumes:
           # runner agent + _work (checkout, node_modules, tool cache)
           - name: runner

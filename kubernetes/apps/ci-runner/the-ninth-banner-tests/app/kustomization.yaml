@@ -12,6 +12,7 @@ resources:
   - ./priorityclass.yaml
   - ./resource-limits.yaml
   - ./networkpolicy.yaml
+  - ./thermal-gate-rbac.yaml
 generatorOptions:
   disableNameSuffixHash: true   # the Job template references the name verbatim
   annotations:

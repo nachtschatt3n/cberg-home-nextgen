@@ -12,8 +12,6 @@ kind: Kustomization
 resources:
   - ./namespace.yaml
   - ./the-ninth-banner-tests/ks.yaml
-  # Self-hosted GitHub Actions runners (ARC scale set, docs/sops/ci-runner.md
-  # §2c). OFF until the owner has written the GitHub App secret
-  # (the-ninth-banner-runners/app/github-app.sops.yaml holds placeholders);
-  # uncomment in the same commit as that secret.
+  # Enable both scale sets with a real SOPS-encrypted fine-grained PAT.
   # - ./the-ninth-banner-runners/ks.yaml
+  # - ./the-ninth-banner-browser-runners/ks.yaml

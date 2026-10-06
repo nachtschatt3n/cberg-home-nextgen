@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: the-ninth-banner-arc-build-github
+  namespace: arc-build
+type: Opaque
+stringData:
+  github_token: ENC[AES256_GCM,data:9KuKxtv7Qe6V9Qray45TTwKb2obh9xMOBM7Nl/Y=,iv:d9YIyNIaaOYr1DVeOV/izukwohwy7zJh7FKqQhFaAGA=,tag:ZmtMaxWo1JmPesGKsxo4Fw==,type:str]
+sops:
+  age:
+    - enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA4SFZVK2VrMXJ2bDRIN3dX
+        dGcvVVFxVVZyU0JUMDlOeEI5bW82REtLY3d3CmI1by9IajFTd0ViQ25valRZc2pV
+        TXBPaWRjcU0xdDRHUzZ0N21oK0hZdnMKLS0tIDV0YWgwSFZMZ1VHNzAwRHcwc1FG
+        QjlEREdFKys2b0hVVi9hZnhrQWc4VmMKzVSyBdEqSRpovCaYLINT7GOxVDfnT5aE
+        Jlse8PG74rs5BU2g+uO9D6ZQZsTF8n6l9B8zo/Y6YzKLFBgJgZibkA==
+        -----END AGE ENCRYPTED FILE-----
+      recipient: age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6
+  encrypted_regex: ^(data|stringData)$
+  lastmodified: "2026-10-06T13:24:06Z"
+  mac: ENC[AES256_GCM,data:Cz9JKz6hBHfIEUDXe6c7FP7RCXuzAvxzN27lXprjnDVvySq2FfsdhwlV+SzHR9fc/cJ3Ru5+wCNb87XqCOlXd1gRgKLCGL6M+kdJ0t/BfzycjZdmaaCRdmzqE3mfSHnGwZig8nyPnaHSYi+uEO5NNxIaSqpintapiSQY+i1naro=,iv:sUPAtSu9zSiG4jHXesoes8cJaX2wH97b+9QXcBz8Aa4=,tag:dcqihJSfA5Gsuzh23vYCVA==,type:str]
+  mac_only_encrypted: true
+  version: 3.13.0
