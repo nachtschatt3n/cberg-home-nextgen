@@ -1,0 +1,116 @@
+---
+# Egress for the privileged, ephemeral Docker build runners. The default-deny
+# ingress keeps the runner private; Docker-in-Docker needs registries and the
+# Actions control plane, but no cluster or LAN destination.
+#   github.com, api.github.com, codeload.github.com   git + action tarballs
+#   *.actions.githubusercontent.com                   broker, pipelines, results
+#                                                     (live logs, artifacts, cache)
+#   productionresultssa0..19.blob.core.windows.net    signed-URL upload of job
+#                                                     logs + artifacts (Results).
+#                                                     EXACT names, no wildcard:
+#                                                     Azure storage account names
+#                                                     are first-come, so a pattern
+#                                                     would admit attacker-owned
+#                                                     accounts (security review
+#                                                     2026-10-06, W1)
+#   objects.githubusercontent.com,
+#   release-assets.githubusercontent.com              release downloads by actions
+#   ghcr.io, pkg-containers.githubusercontent.com     GHCR (pull)
+#   registry.npmjs.org                                npm ci
+# The build job installs Node 24 and the GitHub CLI; nodejs.org is allowed.
+# No LAN or in-cluster destination is allowed.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: arc-build-egress
+  namespace: arc-build
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: the-ninth-banner-runner
+  ingress:
+    - {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchName: github.com
+              - matchName: api.github.com
+              - matchName: codeload.github.com
+              - matchPattern: "*.actions.githubusercontent.com"
+              - matchName: productionresultssa0.blob.core.windows.net
+              - matchName: productionresultssa1.blob.core.windows.net
+              - matchName: productionresultssa2.blob.core.windows.net
+              - matchName: productionresultssa3.blob.core.windows.net
+              - matchName: productionresultssa4.blob.core.windows.net
+              - matchName: productionresultssa5.blob.core.windows.net
+              - matchName: productionresultssa6.blob.core.windows.net
+              - matchName: productionresultssa7.blob.core.windows.net
+              - matchName: productionresultssa8.blob.core.windows.net
+              - matchName: productionresultssa9.blob.core.windows.net
+              - matchName: productionresultssa10.blob.core.windows.net
+              - matchName: productionresultssa11.blob.core.windows.net
+              - matchName: productionresultssa12.blob.core.windows.net
+              - matchName: productionresultssa13.blob.core.windows.net
+              - matchName: productionresultssa14.blob.core.windows.net
+              - matchName: productionresultssa15.blob.core.windows.net
+              - matchName: productionresultssa16.blob.core.windows.net
+              - matchName: productionresultssa17.blob.core.windows.net
+              - matchName: productionresultssa18.blob.core.windows.net
+              - matchName: productionresultssa19.blob.core.windows.net
+              - matchName: objects.githubusercontent.com
+              - matchName: release-assets.githubusercontent.com
+              - matchName: ghcr.io
+              - matchName: pkg-containers.githubusercontent.com
+              - matchName: registry.npmjs.org
+              - matchName: nodejs.org
+              - matchName: registry-1.docker.io
+              - matchName: auth.docker.io
+              - matchName: production.cloudflare.docker.com
+              - matchPattern: "*.docker.io"
+    - toFQDNs:
+        - matchName: github.com
+        - matchName: api.github.com
+        - matchName: codeload.github.com
+        - matchPattern: "*.actions.githubusercontent.com"
+        - matchName: productionresultssa0.blob.core.windows.net
+        - matchName: productionresultssa1.blob.core.windows.net
+        - matchName: productionresultssa2.blob.core.windows.net
+        - matchName: productionresultssa3.blob.core.windows.net
+        - matchName: productionresultssa4.blob.core.windows.net
+        - matchName: productionresultssa5.blob.core.windows.net
+        - matchName: productionresultssa6.blob.core.windows.net
+        - matchName: productionresultssa7.blob.core.windows.net
+        - matchName: productionresultssa8.blob.core.windows.net
+        - matchName: productionresultssa9.blob.core.windows.net
+        - matchName: productionresultssa10.blob.core.windows.net
+        - matchName: productionresultssa11.blob.core.windows.net
+        - matchName: productionresultssa12.blob.core.windows.net
+        - matchName: productionresultssa13.blob.core.windows.net
+        - matchName: productionresultssa14.blob.core.windows.net
+        - matchName: productionresultssa15.blob.core.windows.net
+        - matchName: productionresultssa16.blob.core.windows.net
+        - matchName: productionresultssa17.blob.core.windows.net
+        - matchName: productionresultssa18.blob.core.windows.net
+        - matchName: productionresultssa19.blob.core.windows.net
+        - matchName: objects.githubusercontent.com
+        - matchName: release-assets.githubusercontent.com
+        - matchName: ghcr.io
+        - matchName: pkg-containers.githubusercontent.com
+        - matchName: registry.npmjs.org
+        - matchName: nodejs.org
+        - matchName: registry-1.docker.io
+        - matchName: auth.docker.io
+        - matchName: production.cloudflare.docker.com
+        - matchPattern: "*.docker.io"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

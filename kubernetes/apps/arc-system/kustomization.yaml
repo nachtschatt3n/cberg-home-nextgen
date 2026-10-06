@@ -12,3 +12,4 @@ kind: Kustomization
 resources:
   - ./namespace.yaml
   - ./gha-runner-scale-set-controller/ks.yaml
+  - ./gha-runner-scale-set-build-controller/ks.yaml

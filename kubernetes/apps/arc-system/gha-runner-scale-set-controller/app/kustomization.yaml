@@ -7,3 +7,12 @@ resources:
   - ./helmrelease.yaml
   - ./networkpolicy.yaml
   - ./podmonitor.yaml
+  - ./thermal-gate.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+configMapGenerator:
+  - name: arc-thermal-gate-script
+    files:
+      - ./scripts/ninth-banner-admit.py

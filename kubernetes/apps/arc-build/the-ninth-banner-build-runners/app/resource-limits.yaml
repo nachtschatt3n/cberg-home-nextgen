@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: arc-build-quota
+  namespace: arc-build
+spec:
+  hard:
+    pods: "4"
+    requests.cpu: "12"
+    requests.memory: 24Gi
+    limits.cpu: "20"
+    limits.memory: 40Gi
+    services: "0"
+    persistentvolumeclaims: "0"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: arc-build-defaults
+  namespace: arc-build
+spec:
+  limits:
+    - type: Container
+      default: { cpu: "1", memory: 1Gi, ephemeral-storage: 2Gi }
+      defaultRequest: { cpu: 100m, memory: 256Mi, ephemeral-storage: 256Mi }
+      max: { cpu: "4", memory: 10Gi, ephemeral-storage: 24Gi }

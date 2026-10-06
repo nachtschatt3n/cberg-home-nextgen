@@ -173,6 +173,8 @@ Rollback triggers (watch during any change to these thresholds): any node with `
 
 ## 2c) GitHub Actions runners (ARC, since 2026-10-06)
 
+**Migration update, 2026-10-06:** The three-pool implementation and rollout steps are in [ninth-banner-actions-migration.md](ninth-banner-actions-migration.md). The original single-pool design below is historical. The owner has since authorized fork PRs on all pools, including privileged Docker builds, and the repository now uses a fine-grained PAT rather than a GitHub App. All scale sets remain disabled until a real SOPS-encrypted PAT replaces the placeholders and deployment tests pass.
+
 Self-hosted runners for the private repo `nachtschatt3n/the-ninth-banner`, so its GitHub CI can move off GitHub-hosted runners over time (a failed billing payment stopped every hosted job on 2026-10-05). They run next to the shard Jobs in `ci-runner`.
 
 | Item | Value |

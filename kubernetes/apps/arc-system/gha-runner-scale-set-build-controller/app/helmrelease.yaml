@@ -1,0 +1,41 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: gha-runner-scale-set-build-controller
+spec:
+  interval: 30m
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set-controller
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    fullnameOverride: arc-build-controller
+    replicaCount: 1
+    serviceAccount:
+      create: true
+      name: arc-build-controller
+    flags:
+      logLevel: info
+      watchSingleNamespace: arc-build
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 65532
+      runAsGroup: 65532
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+    resources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { cpu: 500m, memory: 256Mi }

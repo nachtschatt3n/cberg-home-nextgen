@@ -1,0 +1,73 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: arc-thermal-gate
+  namespace: arc-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arc-thermal-gate
+  namespace: arc-system
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: arc-thermal-gate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: arc-thermal-gate
+    spec:
+      serviceAccountName: arc-thermal-gate
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gate
+          image: docker.io/library/python:3.14.8-alpine@sha256:8acac70227ce3b34da9453120c375cc5b66cd0b062d4dc6bc74286f81a3819e1
+          command: ["python3", "/app/ninth-banner-admit.py", "--loop"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          volumeMounts:
+            - { name: script, mountPath: /app, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: script
+          configMap:
+            name: arc-thermal-gate-script
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: arc-thermal-gate-prometheus
+  namespace: arc-system
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: arc-thermal-gate
+  egress:
+    - toServices:
+        - k8sService:
+            namespace: monitoring
+            serviceName: kube-prometheus-stack-prometheus
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
