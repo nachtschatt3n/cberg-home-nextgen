@@ -17,6 +17,11 @@
 #   release-assets.githubusercontent.com              release downloads by actions
 #   ghcr.io, pkg-containers.githubusercontent.com     GHCR (pull)
 #   registry.npmjs.org                                npm ci
+#   registry-1.docker.io, auth.docker.io,
+#   production.cloudflare.docker.com,
+#   production.cloudfront.docker.com                  Docker Hub pulls (blob CDN
+#                                                     redirects to either; the
+#                                                     buildx builder image)
 # The build job installs Node 24 and the GitHub CLI; nodejs.org is allowed.
 # No LAN or in-cluster destination is allowed.
 apiVersion: cilium.io/v2
@@ -74,6 +79,7 @@ spec:
               - matchName: registry-1.docker.io
               - matchName: auth.docker.io
               - matchName: production.cloudflare.docker.com
+              - matchName: production.cloudfront.docker.com
               - matchPattern: "*.docker.io"
     - toFQDNs:
         - matchName: github.com
@@ -109,6 +115,7 @@ spec:
         - matchName: registry-1.docker.io
         - matchName: auth.docker.io
         - matchName: production.cloudflare.docker.com
+        - matchName: production.cloudfront.docker.com
         - matchPattern: "*.docker.io"
       toPorts:
         - ports:
