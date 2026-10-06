@@ -170,6 +170,31 @@ def main() -> int:
     check("a healthy repo still scores this section clean",
           worst == sc.OK, f"got {worst!r}")
 
+    # --- Flux-substituted Secrets: exempt only when EVERY value is a ${VAR} ---
+    import tempfile
+    cases = {
+        "only ${VAR} values (ARC github-token.yaml shape) is exempt":
+            ('apiVersion: v1\nkind: Secret\nmetadata:\n  name: x\ntype: Opaque\n'
+             'stringData:\n  github_token: "${GITHUB_TOKEN}"\n', True),
+        "a literal value next to a ${VAR} is still a plaintext Secret":
+            ('kind: Secret\nstringData:\n  a: "${A}"\n  b: hunter2\n', False),
+        "a partial substitution (prefix + ${VAR}) is still a plaintext Secret":
+            ('kind: Secret\nstringData:\n  url: "https://u:${PW}@host"\n', False),
+        "a data: block (base64 literal) is still a plaintext Secret":
+            ('kind: Secret\ndata:\n  a: aHVudGVyMg==\nstringData:\n  b: "${B}"\n', False),
+        "a block scalar is still a plaintext Secret":
+            ('kind: Secret\nstringData:\n  cfg: |\n    ${A}\n', False),
+        "a second Secret document with a literal taints the file":
+            ('kind: Secret\nstringData:\n  a: "${A}"\n---\nkind: Secret\nstringData:\n  b: x\n', False),
+        "an empty stringData is not exempt":
+            ('kind: Secret\nstringData: {}\n', False),
+    }
+    with tempfile.TemporaryDirectory() as d:
+        for name, (body, want) in cases.items():
+            path = os.path.join(d, "s.yaml")
+            Path(path).write_text(body)
+            check(f"substitution rule: {name}", sc._flux_substitution_only(path) is want)
+
     # --- THE POINT OF A DENOMINATOR: nothing-scanned must not read clean ----
     b_worst, b_f, b_md, b_out = run_section(blind=True)
     blind_msgs = [m for _s, m, _meta in b_f._items if "BLIND" in m]

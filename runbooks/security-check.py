@@ -941,6 +941,39 @@ def section_header(n: int, title: str) -> None:
     cprint(C.BLUE, f"\n[{n}/{len(_SECTION_SLUGS)}] {title}")
 
 
+_FLUX_VAR_ONLY = re.compile(r"""^\s{2}[A-Za-z0-9_.-]+:\s*(["']?)\$\{[A-Za-z_][A-Za-z0-9_]*\}\1\s*$""")
+
+
+def _flux_substitution_only(path: str) -> bool:
+    """True if every `kind: Secret` document in `path` carries NO literal value:
+    no `data:` block, and a non-empty `stringData:` whose every entry is exactly
+    one Flux postBuild variable (`key: "${VAR}"`). Such a manifest holds no
+    secret material in git — Flux fills it from cluster-secrets at apply time
+    (e.g. the ARC `github-token.yaml` files, docs/sops/ci-runner.md §2c).
+
+    Deliberately narrow: any literal, any partial substitution (`pre-${VAR}`),
+    any block scalar, any `data:` key or an unreadable file returns False, so
+    the file is still reported as a plaintext Secret."""
+    try:
+        text = Path(path).read_text()
+    except OSError:
+        return False
+    docs = [d for d in re.split(r"^---\s*$", text, flags=re.M)
+            if re.search(r"^kind: Secret\s*$", d, re.M)]
+    if not docs:
+        return False
+    for doc in docs:
+        if re.search(r"^data:", doc, re.M):
+            return False
+        m = re.search(r"^stringData:\s*\n((?:[ \t].*\n?|\s*\n)*)", doc, re.M)
+        if not m:
+            return False
+        entries = [l for l in m.group(1).splitlines() if l.strip() and not l.lstrip().startswith("#")]
+        if not entries or not all(_FLUX_VAR_ONLY.match(l) for l in entries):
+            return False
+    return True
+
+
 def s1_sops_coverage() -> tuple[str, Findings, str]:
     section_header(1, "SOPS Encryption Coverage")
     f = Findings()
@@ -972,6 +1005,10 @@ def s1_sops_coverage() -> tuple[str, Findings, str]:
     # by design unencrypted and not deployed by any kustomization).
     fp_patterns = ["helmrelease.yaml", "ks.yaml", "token-secret.yaml", "/_template/", ".example.yaml"]
     real_unenc = [p for p in unenc if not any(fp in p for fp in fp_patterns)]
+    # Flux-substituted Secrets (every value is a whole `${VAR}`): no secret
+    # material in git, see _flux_substitution_only(). Still counted as plaintext
+    # in the denominator, reported as known false-positives.
+    real_unenc = [p for p in real_unenc if not _flux_substitution_only(p)]
     secret_scope = (f"{len(secret_manifests)} `kind: Secret` manifests scanned: "
                     f"{len(encrypted)} SOPS-encrypted, {len(unenc)} plaintext "
                     f"({len(unenc) - len(real_unenc)} known false-positive)")

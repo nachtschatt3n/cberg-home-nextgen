@@ -302,10 +302,11 @@ spec:
         # shards take 4-7 min. If the reason series vanished (KSM rename),
         # CIRunnerPodStuckPending fires for the gated pods instead, so the
         # pair is never blind together.
-        # ARC GitHub Actions runner pods (ninth-banner-k8s-*, §2c) are never
-        # gated and get scheduled whenever a GitHub job arrives, so they are
-        # excluded from "last release": a busy runner must not mask a dead
-        # admitter.
+        # ARC GitHub Actions runner pods (ninth-banner-k8s-*, §2c) ARE gated
+        # (released by the in-cluster arc-system/arc-thermal-gate), but a warm
+        # idle runner is released once and then sits for hours; they stay
+        # excluded from "last release" so the alert keys on shard releases
+        # only. Gated runner pods still count in the gated-pod term.
         # Tests: runbooks/tests/test-ci-runner-gate-stalled-alert.py.
         - alert: CIRunnerThermalGateStalled
           annotations:

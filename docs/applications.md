@@ -36,7 +36,8 @@
 | my-software-showcase | 15 |
 | ci-runner | 2 |
 | arc-system | 1 |
-| **Total** | **129** |
+| arc-build | 1 |
+| **Total** | **130** |
 
 ---
 
@@ -302,6 +303,12 @@ calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 | App | Purpose | Ingress |
 |-----|---------|---------|
 | gha-runner-scale-set-controller | actions-runner-controller 0.15.0: manages the runner scale sets in `ci-runner` (`watchSingleNamespace`, no ClusterRole) and runs each scale set's listener pod. Egress only to the Kubernetes API and the GitHub Actions control plane. SOP: `docs/sops/ci-runner.md` §2c. Added 2026-10-06. | None |
+
+### `arc-build`
+
+| App | Purpose | Ingress |
+|-----|---------|---------|
+| the-ninth-banner-build-runners | Privileged dind build runners for `nachtschatt3n/the-ninth-banner`: ARC scale set `ninth-banner-build-k8s` (min 1 / max 2), BuildKit in a dind sidecar, thermally gated on nuc14-01/03, `PriorityClass ci-low`, egress-locked. Separate namespace so the privileged pool stays apart from `ci-runner`. SOP: `docs/sops/ci-runner.md` §2c. Added 2026-10-06. | None |
 
 ### `my-software-showcase`
 
