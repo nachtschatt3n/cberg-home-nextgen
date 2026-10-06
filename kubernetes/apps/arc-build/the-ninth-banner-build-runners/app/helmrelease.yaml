@@ -31,8 +31,11 @@ spec:
               - op: add
                 path: /spec/template/spec/initContainers/1/resources
                 value:
-                  requests: {cpu: "1", memory: 1Gi, ephemeral-storage: 4Gi}
-                  limits: {cpu: "2", memory: 4Gi, ephemeral-storage: 16Gi}
+                  # dind runs BuildKit (the build itself): owner 2026-10-06
+                  # allows up to 6 CPU; the 2 CPU request (+1 runner) fits
+                  # the gate's 6-CPU node budget.
+                  requests: {cpu: "2", memory: 1Gi, ephemeral-storage: 4Gi}
+                  limits: {cpu: "6", memory: 4Gi, ephemeral-storage: 16Gi}
   values:
     githubConfigUrl: https://github.com/nachtschatt3n/the-ninth-banner
     githubConfigSecret: the-ninth-banner-arc-build-github

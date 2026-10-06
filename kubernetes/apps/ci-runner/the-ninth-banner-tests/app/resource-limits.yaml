@@ -53,5 +53,6 @@ spec:
         memory: 256Mi
         ephemeral-storage: 256Mi
       max:
-        cpu: "4"
+        # 6: ARC runner limit (owner 2026-10-06); test shards stay at 4 via the template
+        cpu: "6"
         memory: 10Gi

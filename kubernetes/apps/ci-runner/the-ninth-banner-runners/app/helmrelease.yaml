@@ -142,10 +142,13 @@ spec:
                 value: "4"
             securityContext: *csc
             resources:
-              # cpu-lane sized (the gate counts it as one): 2 CPU cap per pod,
-              # one pod per node. Browser jobs use the separate GPU scale set.
-              requests: { cpu: "1", memory: 2Gi, ephemeral-storage: 2Gi }
-              limits: { cpu: "2", memory: 6Gi, ephemeral-storage: 16Gi }
+              # cpu-lane pod (the gate counts it as one), one per node. Owner
+              # 2026-10-06: up to 6 CPU (Vitest was CPU-bound at 2). The 2 CPU
+              # request (+ postgres 0.1) fits the gate's 6-CPU node budget and
+              # the ~7 CPU production leaves free on nuc14-01/03. Browser jobs
+              # use the separate GPU scale set.
+              requests: { cpu: "2", memory: 2Gi, ephemeral-storage: 2Gi }
+              limits: { cpu: "6", memory: 6Gi, ephemeral-storage: 16Gi }
             volumeMounts:
               - { name: runner, mountPath: /runner }
               - { name: home, mountPath: /home/pwuser }

@@ -23,4 +23,5 @@ spec:
     - type: Container
       default: { cpu: "1", memory: 1Gi, ephemeral-storage: 2Gi }
       defaultRequest: { cpu: 100m, memory: 256Mi, ephemeral-storage: 256Mi }
-      max: { cpu: "4", memory: 10Gi, ephemeral-storage: 24Gi }
+      # cpu 6: dind/BuildKit limit (owner 2026-10-06)
+      max: { cpu: "6", memory: 10Gi, ephemeral-storage: 24Gi }
