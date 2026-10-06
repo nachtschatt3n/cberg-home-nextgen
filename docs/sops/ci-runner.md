@@ -1,7 +1,7 @@
 # SOP: CI Runner — The Ninth Banner test suites as sharded Kubernetes Jobs
 
-> Description: How The Ninth Banner's test suites (unit/check, Playwright e2e, responsive, simulation sweeps) run as ephemeral, sharded, locked-down Kubernetes Jobs in the `ci-runner` namespace, triggered with one command from the Mac mini, and how results are collected.
-> Version: `2026.10.06.1`
+> Description: How The Ninth Banner's test suites (unit/check, Playwright e2e, responsive, simulation sweeps) run as ephemeral, sharded, locked-down Kubernetes Jobs in the `ci-runner` namespace, triggered with one command from the Mac mini, and how results are collected; plus the self-hosted GitHub Actions runners (ARC, controller in `arc-system`, §2c).
+> Version: `2026.10.06`
 > Last Updated: `2026-10-06`
 > Owner: `homelab operator (cberg-home-nextgen)`
 
@@ -13,7 +13,7 @@ The Mac mini also hosts the shared Ollama runtime and many agent sessions. Paral
 
 **Status: best-effort.** GitHub Actions CI stays the release gate. The runner is capped for node temperature: 4 CPU per shard, and since 2026-10-04 a **live thermal gate** (§2b) decides where and when each shard starts (two lanes per node: browser shards at most 3 running (1 on nuc14-03, up to 2 on nuc14-01; nuc14-02 excluded via `GATE_EXCLUDE_NODES`), first pod only below 88 °C, second only below 78 °C; plus up to 2 sims/unit shards per node in the cpu lane below 88 °C; at most 6 CPU of CI requests per node; a node that reads >= 100 °C gets no new CI pod for 10 min, all admission held only while 2+ nodes are braked), and at that size a few CPU-timing e2e assertions can fail. A red shard here is a signal to re-check on GitHub CI, not a release blocker.
 
-- Scope: namespace `ci-runner`, Flux Kustomization `flux-system/the-ninth-banner-tests`, trigger `scripts/ninth-banner-test.sh`, private repo `nachtschatt3n/the-ninth-banner`.
+- Scope: namespace `ci-runner`, Flux Kustomizations `flux-system/the-ninth-banner-tests` and `flux-system/the-ninth-banner-runners` (ARC scale set, §2c; controller `flux-system/gha-runner-scale-set-controller` in `arc-system`), trigger `scripts/ninth-banner-test.sh`, private repo `nachtschatt3n/the-ninth-banner`.
 - Prerequisites: run from this repo on the Mac as `mu`, with the `mise` tool chain (kubeconfig) and `gh` authenticated as the repo owner (used only to resolve a ref to a full SHA).
 - Out of scope: GitHub Actions CI (it keeps running independently), deploying the app (see `docs/applications.md`).
 
