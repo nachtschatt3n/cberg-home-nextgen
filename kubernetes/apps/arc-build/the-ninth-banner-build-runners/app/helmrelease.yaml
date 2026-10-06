@@ -97,6 +97,10 @@ spec:
         containers:
           - name: runner
             image: ghcr.io/actions/actions-runner:2.337.0@sha256:e5496277be5d09bc968b3d64911b74e219ac4a3f2edce956a3ecf9271bea1ef4
+            # ARC does not inject the runner command when the template defines the
+            # runner container: without it the image default exits 0 at once and
+            # the ephemeral runner is recycled every ~10 s without taking a job.
+            command: ["/home/runner/run.sh"]
             resources:
               requests: { cpu: "1", memory: 2Gi, ephemeral-storage: 4Gi }
               limits: { cpu: "2", memory: 6Gi, ephemeral-storage: 20Gi }
