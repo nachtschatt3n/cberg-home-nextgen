@@ -1,0 +1,12 @@
+---
+# ARC githubConfigSecret for the build scale set(s). The value is NOT in git:
+# Flux postBuild substitution fills ${GITHUB_TOKEN} from flux-system/cluster-secrets
+# at apply time (owner decision 2026-10-06: reference the existing token, no copy).
+# Read only by the ARC controller/listener; runner pods have no API access.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: the-ninth-banner-arc-build-github
+type: Opaque
+stringData:
+  github_token: "${GITHUB_TOKEN}"
