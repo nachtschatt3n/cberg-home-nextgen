@@ -48,7 +48,8 @@ spec:
     listenerTemplate:
       metadata:
         labels:
-          # PodMonitor selector (arc-system/arc)
+          # NOT effective: ARC 0.15 overwrites app.kubernetes.io/name on the
+          # listener pod; PodMonitor arc-system/arc selects on the component label.
           app.kubernetes.io/name: the-ninth-banner-arc-listener
       spec:
         securityContext:

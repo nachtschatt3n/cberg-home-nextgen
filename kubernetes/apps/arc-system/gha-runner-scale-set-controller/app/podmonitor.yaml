@@ -10,13 +10,19 @@ metadata:
   labels:
     release: kube-prometheus-stack
 spec:
+  # Select on the component label: ARC 0.15 overwrites the listener pod's
+  # app.kubernetes.io/name with the scale-set name (ninth-banner-k8s, ...),
+  # so the listenerTemplate's `the-ninth-banner-arc-listener` never reached the
+  # pod and no listener was scraped (ARCRunnerScaleSetNotRegistered firing
+  # since 2026-10-06). Both controllers (CPU/browser + build) and all three
+  # listeners match; namespace = arc-system only (PodMonitor default).
   selector:
     matchExpressions:
-      - key: app.kubernetes.io/name
+      - key: app.kubernetes.io/component
         operator: In
         values:
-          - gha-rs-controller
-          - the-ninth-banner-arc-listener
+          - controller-manager
+          - runner-scale-set-listener
   podMetricsEndpoints:
     - port: metrics
       path: /metrics

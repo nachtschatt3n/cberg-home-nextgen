@@ -25,6 +25,15 @@ spec:
     flags:
       logLevel: info
       watchSingleNamespace: arc-build
+    # Without this block the chart passes --metrics-addr=0 and
+    # --listener-metrics-addr=0: neither the controller nor the build
+    # listener exposed metrics (ARCRunnerScaleSetNotRegistered, 2026-10-06).
+    # Scraped by PodMonitor arc-system/arc; ingress only from monitoring
+    # (arc-system-lockdown).
+    metrics:
+      controllerManagerAddr: ":8080"
+      listenerAddr: ":8080"
+      listenerEndpoint: /metrics
     podSecurityContext:
       runAsNonRoot: true
       runAsUser: 65532
