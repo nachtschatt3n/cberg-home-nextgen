@@ -92,6 +92,11 @@ MAX_CPU_PER_NODE = int(os.environ.get("GATE_MAX_CPU_PER_NODE", "2"))
 # per-node brake); it peaks at 96-100 C from production alone, so 1 sims pod.
 CPU_MAX_OVERRIDE = {k: int(v) for k, v in (x.split("=") for x in
                     os.environ.get("GATE_CPU_MAX_OVERRIDE", "k8s-nuc14-02=1").split(",") if "=" in x)}
+# Nodes that get NO CI pod in either lane (plan ci-runner-exclude-node02, 2026-10):
+# nuc14-02 hit 96 C ~4 s into an 18-thread load at 35/55 W and logged 64,970
+# package throttles in 7 days vs 741 / 56 on 01 / 03 (suspected cooler defect).
+# Comma-separated hostnames; GATE_EXCLUDE_NODES= (empty) excludes none.
+EXCLUDE_NODES = {n for n in os.environ.get("GATE_EXCLUDE_NODES", "k8s-nuc14-02").split(",") if n}
 # CI CPU requests per node (owner 2026-10-04: CI gets >= 6 CPU per node while
 # the node is below the thermal limits; production leaves 6.4-7.2 of 17 free)
 NODE_CPU_BUDGET = float(os.environ.get("GATE_NODE_CPU_BUDGET", "6"))
@@ -227,6 +232,8 @@ def global_hold(brake):
 
 def closed_reason(node, lane, req, temps, count, last, now, free, ci_req, brake):
     avg2, max3 = temps[node]
+    if node in EXCLUDE_NODES:
+        return "excluded (GATE_EXCLUDE_NODES)"
     if node in brake:
         return f"brake (read >= {BRAKE_C:.0f}C; {brake[node] - now:.0f}s more)"
     c = count.get(node, {"browser": 0, "cpu": 0})
