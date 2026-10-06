@@ -65,7 +65,7 @@ spec:
               repository: ghcr.io/alams154/music-assistant-skill
               # upstream only publishes :latest — pin the digest and bump manually
               # (MA server's Alexa provider and this skill API must stay in sync)
-              tag: latest@sha256:ad7ec55a51d9304032a74d8ae0fda43743bf64ae68afa49dd6949d9477726ccf
+              tag: latest@sha256:8e8bfc59af754e6892599b36e9d2ba154e2e4ddb4461118900764477d4adb70e
             env:
               # Public HTTPS host fronting MA's stream port (8097) via external
               # ingress + Cloudflare. The skill rewrites stream URLs to this
