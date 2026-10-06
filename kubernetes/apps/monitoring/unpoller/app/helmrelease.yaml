@@ -54,7 +54,7 @@ spec:
       # and from v5.2.8 an ADDITIVE InfluxDB tag `band` on uap_vaps/uap_radios (series keys
       # split once at rollout). No Prometheus metric change, no config-contract change.
       # Chart still 2.4.0.
-      tag: v5.2.8
+      tag: v5.2.11
 
     replicaCount: 1
 
