@@ -45,8 +45,12 @@ spec:
             capabilities:
               drop: ["ALL"]
           resources:
+            # 500m: each 10 s tick is a short burst (pod + EphemeralRunner
+            # lists in 2 namespaces, Prometheus queries); at 200m the
+            # warm-idle script was CFS-throttled ~75 % (CPUThrottlingHigh)
+            # while averaging 0.04 cores.
             requests: { cpu: 20m, memory: 64Mi }
-            limits: { cpu: 200m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 128Mi }
           volumeMounts:
             - { name: script, mountPath: /app, readOnly: true }
             - { name: tmp, mountPath: /tmp }
