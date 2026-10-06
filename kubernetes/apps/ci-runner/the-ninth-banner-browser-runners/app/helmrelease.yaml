@@ -19,8 +19,7 @@ spec:
       retries: 3
   values:
     githubConfigUrl: https://github.com/nachtschatt3n/the-ninth-banner
-    # Shared GitHub App SOPS secret in ci-runner
-    # (../the-ninth-banner-runners/app/github-app.sops.yaml), owner-written.
+    # Shared SOPS secret in ci-runner with a repo-scoped fine-grained PAT.
     githubConfigSecret: the-ninth-banner-arc-github
     # The scale-set name is itself a runs-on label. Labels are registered with
     # GitHub only when the scale set is CREATED: changing them later needs the
