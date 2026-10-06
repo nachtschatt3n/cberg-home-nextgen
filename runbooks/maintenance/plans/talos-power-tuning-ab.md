@@ -70,7 +70,7 @@ finding_refs:
                                       # EPP balance_power": this plan is that amendment, measured
 review: ready-for-go@2026-10-05     # 4th pass @5a27a9b8 (0 blocking)
 status: vetted
-window: null                          # PROPOSED: two on-demand NOW runs, 2026-10-06 and 2026-10-07, each 18:30 Europe/Berlin
+window: "now:2026-10-06"   # ON-DEMAND NOW run 2026-10-06 (run-now.py stamp; was None)
                                       # (16:30Z); evening 1 ends ~23:20, evening 2 ~22:30 Berlin; hard stop 01:45, everything done
                                       # by 02:45 (nightly 03:30). Stamped only by run-now.py stamp inside each run.
 premises:
