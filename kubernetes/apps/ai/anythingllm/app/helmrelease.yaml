@@ -98,7 +98,7 @@ spec:
 
     image:
       repository: mintplexlabs/anythingllm
-      tag: "1.16.2"
+      tag: "1.17.0"
       pullPolicy: IfNotPresent
 
     podSecurityContext:
