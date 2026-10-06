@@ -40,8 +40,8 @@ rollback_class: git-revert            # nothing persists on the cluster. The rep
 finding_refs:
   - F-6c7843e4                        # "BIOS/fan/paste check on nuc14-02's cooler first": this measures whether the cooler is the cause
 review: ready-for-go@2026-10-06     # plan-reviewer-agent 2026-10-06 @0d673050: 0 blocking, 4 non-blocking fixes applied
-status: vetted
-window: null                          # stamped only by run-now.py stamp inside the attended run
+status: executed                      # NOW run now:2026-10-06: THERMALCAL_VERDICT node02=HARDWARE-SUSPECT node03=WORKLOAD-EXPLAINED; controls PASS; numbers in F-6c7843e4 detail (DB)
+window: "now:2026-10-06"   # ON-DEMAND NOW run 2026-10-06 (run-now.py stamp; was None)
 premises:
   - id: nodes-on-talos-1.14
     why: "The sysfs paths and the talosctl read semantics were measured on v1.14.1 (kernel 6.18). Another minor invalidates them."
