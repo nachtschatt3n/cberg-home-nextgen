@@ -21,7 +21,7 @@ spec:
       retries: 3
   values:
     githubConfigUrl: https://github.com/nachtschatt3n/the-ninth-banner
-    # Pre-defined SOPS secret with a repo-scoped fine-grained PAT.
+    # Pre-defined GitHub App SOPS secret (./github-app.sops.yaml), owner-written.
     githubConfigSecret: the-ninth-banner-arc-github
     # The scale-set name is itself a runs-on label. Labels are registered with
     # GitHub only when the scale set is CREATED: changing them later needs the

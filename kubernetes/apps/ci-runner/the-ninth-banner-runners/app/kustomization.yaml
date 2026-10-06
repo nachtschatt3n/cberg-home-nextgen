@@ -5,7 +5,7 @@ kind: Kustomization
 # Self-hosted GitHub Actions runners (ARC runner scale set) for the private
 # repo nachtschatt3n/the-ninth-banner. docs/sops/ci-runner.md §2c.
 resources:
-  - ./github-token.sops.yaml
+  - ./github-app.sops.yaml
   - ./ocirepository.yaml
   - ./helmrelease.yaml
   - ./networkpolicy.yaml
