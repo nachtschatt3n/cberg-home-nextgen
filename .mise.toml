@@ -32,7 +32,7 @@ uv = "latest"
                                      # cannot tell this dev-tool pin from the node image and the tooling
                                      # mislabels it "needs a rolling node-reboot window" (F-9a58f400).
                                      # It needs neither a window nor a plan — it is a local binary.
-"aqua:aquasecurity/trivy" = "0.70.0"
+"aqua:aquasecurity/trivy" = "0.75.0"
 "aqua:yannh/kubeconform" = "0.8.0"
 # flate -- the Flux renderer/validator that flux-local's archived README points
 # at. Drives the SINGLE render gate (job `flate`, "Flate Render Gate") in
