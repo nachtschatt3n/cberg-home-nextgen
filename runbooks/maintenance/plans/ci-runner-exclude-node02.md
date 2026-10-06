@@ -3,7 +3,7 @@ plan_id: ci-runner-exclude-node02
 component: ci-runner
 pr: null                              # no Renovate PR: operator-requested CI policy change (chat 2026-10-05)
 kind: infra
-current: "CI thermal gate (scripts/ninth-banner-admit.py @4534a467) admits CI shards onto all 3 nodes; nuc14-02 limited only by temperature + 1 cpu-lane pod"
+current: "CI thermal gate (scripts/ninth-banner-admit.py @1efcba19) admits CI shards onto all 3 nodes; nuc14-02 limited only by temperature + 1 cpu-lane pod"
 target: "GATE_EXCLUDE_NODES (default k8s-nuc14-02): nuc14-02 takes no CI pod in either lane until its cooling is fixed"
 update_type: refactor
 risk: low                             # Mac-side admission script, no Flux object, no node/config change. The edit only
@@ -31,7 +31,7 @@ depends_on: []
 conflicts_with:
   - talos-sysfs-power-caps            # its SOAK step 3.10 edits the SAME file (GATE_OPEN_BELOW_C 85 -> 88). Different
                                       # lines (both edits are anchored and dry-tested independently), but serialize them so
-                                      # each one's premise reads the file the other left. It is awaiting-soak (now:2026-10-05).
+                                      # each one's premise reads the file the other left. It is executed (2026-10-06; its 3.10 edit landed in 1efcba19).
   - kube-prometheus-stack-91.9.0      # the gate and §4 read Prometheus: a kps restart mid-verification closes every node
                                       # (fail-closed) and the run reads as "stuck", not as "excluded".
   - flux-distribution-2.9.6           # Flux control-plane change (window null today): never the same night as this plan's
@@ -46,10 +46,9 @@ rollback_class: git-revert            # one commit; the file is read fresh on ev
 finding_refs:
   - F-6c7843e4                        # "BIOS/fan/paste check on nuc14-02's cooler first": this keeps CI heat off that node
                                       # until the physical fix; shared with talos-sysfs-power-caps / talos-power-tuning-ab
-review: ready-for-go@2026-10-05     # review fix applied per the reviewer's exact correction (nightly variant, §4.2/§6)
-status: blocked
-blocked_reason: "nightly:2026-10-06 pre-check STOP before any mutation: exclude-edit.py SOP anchors V/U (> Version: `2026.10.04` / > Last Updated: `2026-10-04`) match 0 - docs/sops/ci-runner.md was re-versioned to 2026.10.06 by 1efcba19 (talos-sysfs-power-caps 3.10, 01:19 CEST). Gate anchors A/B and SOP anchors R/H/T/B4/S4 still match 1. Fix: re-anchor V/U to the current header (and add a premise pinning the SOP header), re-review, re-schedule. Not fixed in-window by contract."
-window: null   # cleared on block (was nightly:2026-10-06)          # was PROPOSED nightly:2026-10-06 (03:30 Europe/Berlin = 01:30Z), i.e. after the
+review: ready-for-go@2026-10-06     # re-review after the nightly:2026-10-06 STOP: regex header anchors (aef3a9da) + premise sop-header-shape fixed to the runner-safe form
+status: vetted                        # was blocked by nightly:2026-10-06 (ba18604d: literal SOP-header anchor vs 1efcba19); re-anchored aef3a9da, re-reviewed 2026-10-06
+window: "now:2026-10-06"   # NOW run before the A/B evening 1 (18:30 Berlin); was nightly:2026-10-06 (blocked)          # was PROPOSED nightly:2026-10-06 (03:30 Europe/Berlin = 01:30Z), i.e. after the
                                       # talos-sysfs-power-caps 24 h soak closes (>= 2026-10-05T23:17Z) and before the A/B.
                                       # Fallback (review-2 B1): nightly:2026-10-07. It can NOT join the A/B's NOW run (that plan is
                                       # exclusive and run-now checks all premises at preflight); the A/B evenings then shift a day.
@@ -72,7 +71,7 @@ premises:
     expect_exact: "0"
   - id: sop-header-shape
     why: "exclude-edit.py rewrites the SOP's Version/Last Updated header by regex (any date) and asserts exactly one of each. The literal 2026.10.04 anchor STOPPED nightly:2026-10-06 after 1efcba19 re-versioned the SOP; this premise catches a header-shape change at preflight instead of at §3.1."
-    run: "grep -cE '^> (Version: `[0-9]{4}[.][0-9]{2}[.][0-9]{2}`|Last Updated: `[0-9]{4}-[0-9]{2}-[0-9]{2}`)$' docs/sops/ci-runner.md"
+    run: "grep -cE -e '^. Version: .[0-9]{4}[.][0-9]{2}[.][0-9]{2}.$' -e '^. Last Updated: .[0-9]{4}-[0-9]{2}-[0-9]{2}.$' docs/sops/ci-runner.md"
     expect_exact: "2"
   - id: node02-is-a-gate-node
     why: "The default value names the node by hostname; the gate keys every decision on the Prometheus nodename. If the hostname changed the exclusion would silently exclude nothing (the §4.1 gate would also catch it)."
@@ -136,7 +135,7 @@ python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$W/exclude-edi
 git log -1 --format='%h %ad %s' --date=iso -- scripts/ninth-banner-admit.py
 ```
 2.1 Premises: `.venv/bin/python3 runbooks/plan-premises.py ci-runner-exclude-node02 --require-premises` -> all PASS.
-2.2 The `git log` line above prints `4534a467 ...`. If a NEWER commit touched the gate, read its diff first. The
+2.2 The `git log` line above prints `1efcba19 ...` (GATE_OPEN_BELOW_C 85 -> 88; compatible, different line). If a NEWER commit touched the gate, read its diff first. The
 edit script still asserts the anchor shape, but a new knob may overlap this one (e.g. the power-caps 3.10
 `GATE_OPEN_BELOW_C` raise is compatible: different line).
 2.3 No CI run is half-admitted: `scripts/ninth-banner-admit.py --status | tail -n +1 | grep -c '^  tnb-'` prints the number
