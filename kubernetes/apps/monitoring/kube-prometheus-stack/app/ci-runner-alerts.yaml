@@ -227,9 +227,8 @@ spec:
           # timer starts - unschedulable, ImagePullBackOff, missing CM/Secret
           # and a hung clone all still fire. A missing reason series fails
           # toward firing. Tests: runbooks/tests/test-ci-runner-pending-alert.py.
-          # A DEAD admitter (no trigger running) leaves pods gated; gated pods
-          # count as Job active, so CIRunnerJobStarved misses it too. Covered
-          # by CIRunnerThermalGateStalled (below).
+          # The thermal gate was removed 2026-10-06 (SOP section 2b); the
+          # SchedulingGated exclusion is kept and costs nothing.
           expr: |
             (
               max by (namespace, pod) (kube_pod_status_phase{namespace="ci-runner", phase="Pending"}) == 1
@@ -283,59 +282,3 @@ spec:
             category: ci-runner
             component: the-ninth-banner-tests
             severity: info
-        # Closes the gap baaa2d7e opened: a thermal-gated pod is neither
-        # "stuck Pending" (CIRunnerPodStuckPending skips SchedulingGated) nor
-        # starved (it counts as Job-active). The admitter
-        # (scripts/ninth-banner-admit.py) is NOT a cluster workload: it runs on
-        # the Mac, ticked by every live ninth-banner-test.sh trigger, and
-        # exports no metric, so there is nothing to absent() on. Its liveness
-        # is observed through its effect instead: every release removes the
-        # gate and the scheduler binds the pod within seconds, which sets KSM
-        # kube_pod_status_scheduled_time. Newest scheduled_time in ci-runner =
-        # last release. Fires when gated pods exist and nothing was released
-        # for 30 min, or gated pods exist and NO ci-runner pod was ever
-        # scheduled (all earlier pods TTL-deleted: fails toward firing).
-        # N=30m from live data 2026-10-04 15:14-21:15 (361 gated minutes,
-        # queue up to 24): release gap p50 1.9 / p90 7.4 / p99 12.2 / max
-        # 13.2 min (brake 10 min + settle 5 min). Edge: GPU=0 CPU-mode browser
-        # shards (~34 min) filling every slot could approach it; GPU mode
-        # shards take 4-7 min. If the reason series vanished (KSM rename),
-        # CIRunnerPodStuckPending fires for the gated pods instead, so the
-        # pair is never blind together.
-        # ARC GitHub Actions runner pods (ninth-banner-k8s-*, §2c) ARE gated
-        # (released by the in-cluster arc-system/arc-thermal-gate), but a warm
-        # idle runner is released once and then sits for hours; they stay
-        # excluded from "last release" so the alert keys on shard releases
-        # only. Gated runner pods still count in the gated-pod term.
-        # Tests: runbooks/tests/test-ci-runner-gate-stalled-alert.py.
-        - alert: CIRunnerThermalGateStalled
-          annotations:
-            description: '{{ $value }} CI pod(s) in {{ $labels.namespace }} wait
-              behind the ci.cberg.home/thermal schedulingGate, and no CI pod has
-              been released (scheduled) for over 30 minutes. The admitter
-              (scripts/ninth-banner-admit.py, ticked only by a RUNNING
-              ninth-banner-test.sh on the Mac) is probably dead or wedged, or
-              the gate is held closed (brake / missing Prometheus data =
-              fail-closed). Check `scripts/ninth-banner-admit.py --status`;
-              without action the Jobs hit activeDeadlineSeconds untested.
-              docs/sops/ci-runner.md section 2b.'
-            summary: CI thermal gate has released no pod for 30 minutes
-          expr: |
-            (
-              sum by (namespace) (kube_pod_status_reason{namespace="ci-runner", reason="SchedulingGated"}) > 0
-            )
-            and on (namespace)
-            (
-              (time() - max by (namespace) (kube_pod_status_scheduled_time{namespace="ci-runner", pod!~"ninth-banner-k8s-.*"})) > 1800
-              or on (namespace)
-              (
-                sum by (namespace) (kube_pod_status_reason{namespace="ci-runner", reason="SchedulingGated"}) > 0
-                unless on (namespace)
-                max by (namespace) (kube_pod_status_scheduled_time{namespace="ci-runner", pod!~"ninth-banner-k8s-.*"})
-              )
-            )
-          for: 5m
-          labels:
-            category: ci-runner
-            component: the-ninth-banner-tests
-            severity: warning

@@ -1,10 +1,6 @@
-# Ceiling for the whole namespace. Since 2026-10-04 (evening) the THERMAL GATE
-# (scripts/ninth-banner-admit.py, docs/sops/ci-runner.md §2b) is the cap on
-# RUNNING pods: per node 2 browser-lane + 2 cpu-lane pods, <= 6 CPU of CI
-# requests, and the temperature limits, so at most 12 run. Gated (queued) pods
-# use no node resources but DO count here, so the quota has room for 12 running
-# + 12 queued (24 pods): with only 6, a full queue of one lane blocked the Job
-# controller from even creating the other lane's pods. Resources are sized for
+# Ceiling for the whole namespace. The THERMAL GATE (2026-10-04) was removed
+# 2026-10-06 (docs/sops/ci-runner.md §2b): this quota, node requests and the
+# 35/55 W RAPL caps are now the only limits on CI load. Resources are sized for
 # 24 browser-sized pods (2 CPU / 6Gi request; cpu-lane pods ask 1 CPU / 1Gi).
 # i915: 2 browser pods per node running (6) + 6 queued. Production requests
 # leave 6.4-7.2 of 17 CPU and 2/3/3 GPU slots free per node (measured
@@ -12,7 +8,7 @@
 # 2026-10-06: +5 pods and their resources for the ARC runner pods that share
 # this namespace (ninth-banner-k8s max 4 at 1.6/6.5 CPU, ninth-banner-browser-k8s
 # max 1), so warm/busy runners never eat the 24 shard pods' room.
-# Rollback: docs/sops/ci-runner.md §11 Rollback Plan (Thermal gate / caps).
+# Rollback: docs/sops/ci-runner.md §11 Rollback Plan.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -31,8 +27,8 @@ spec:
     services.loadbalancers: "0"
     services.nodeports: "0"
     persistentvolumeclaims: "0"
-    # Device-plugin resources: one shared iGPU slot per browser shard (at most
-    # 2 running per node via the thermal gate, + queued), and NEVER the plugin's
+    # Device-plugin resources: one shared iGPU slot per browser shard (bounded by the
+    # quota and the 5 iGPU slots per node), and NEVER the plugin's
     # all-device monitoring resources or the NPU, whatever a future template edit asks for.
     requests.gpu.intel.com/i915: "13"
     requests.gpu.intel.com/monitoring: "0"

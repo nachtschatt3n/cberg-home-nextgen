@@ -43,8 +43,7 @@ spec:
     runnerScaleSetName: ninth-banner-build-k8s
     # Owner 2026-10-06: one warm idle build runner (release image builds start
     # at once) and 2 in total (main + tag image build of a release overlap).
-    # Idle, it keeps its 2.0 CPU request in the node's CI budget but frees its
-    # browser-lane slot after the 300 s settle (ninth-banner-admit.py).
+    # Idle, it keeps its 2.0 CPU request on its node.
     minRunners: 1
     maxRunners: 2
     controllerServiceAccount:
@@ -95,11 +94,9 @@ spec:
                       values: ["k8s-nuc14-01", "k8s-nuc14-03"]
           podAntiAffinity:
             # Owner 2026-10-06: no hard one-runner-per-node rule any more. Pods
-            # of all three pools may share a node; the per-node CI budget (6 CPU
-            # of CI requests on nuc14-01/03) is enforced by the thermal gate
-            # (arc-system/arc-thermal-gate, ninth-banner-admit.py), which pins
-            # each gated pod to the least-loaded open node. This preferred term
-            # only spreads pods the scheduler places itself (gate rollback).
+            # of all three pools may share a node. The thermal gate was removed
+            # 2026-10-06, so the scheduler places every pod; this preferred
+            # term spreads them and the pool maxRunners bound the load.
             preferredDuringSchedulingIgnoredDuringExecution:
               - weight: 100
                 podAffinityTerm:

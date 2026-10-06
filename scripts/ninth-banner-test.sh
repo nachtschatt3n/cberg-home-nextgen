@@ -44,8 +44,7 @@ case "$suite" in
 esac
 [[ "$shards" =~ ^[1-9][0-9]?$ ]] || { echo "shards must be 1..99"; exit 2; }
 # Per-JOB parallelism: CPU/SwiftShader mode 2, GPU mode 3 (below). The
-# cluster-wide limit is the quota (6 shards) plus the thermal gate
-# (scripts/ninth-banner-admit.py: where and when each shard may start).
+# cluster-wide limit is the namespace quota (the thermal gate was removed 2026-10-06).
 # Best-effort CI, GitHub CI is the gate.
 parallelism=$(( shards < 2 ? shards : 2 ))   # CPU/SwiftShader mode
 workers="${WORKERS:-2}"   # 4 per 6-CPU shard starved Chromium (timing tests failed); see SOP
@@ -55,7 +54,7 @@ case "$suite" in e2e|nightly|responsive|release) gpu="${GPU:-1}" ;; *) gpu="${GP
 case "$suite" in e2e|responsive|release)
     [ "$gpu" = 1 ] || { echo "suite '$suite' is GPU-only: on 4 software-rendering CPUs it fails its timing budgets (docs/sops/ci-runner.md)"; exit 2; } ;;
 esac
-# Lanes (thermal gate, SOP §2b): sims/unit without a browser run in the cpu
+# Lanes (resource profile only, SOP §2b): sims/unit without a browser run in the cpu
 # lane with small resources (single-threaded Node: ~1 core, <= 0.61Gi measured
 # 2026-10-04) and their own per-node slots; everything else is the browser lane.
 case "$suite" in unit|sims) [ "$gpu" = 0 ] && lane=cpu || lane=browser ;; *) lane=browser ;; esac
@@ -80,7 +79,7 @@ else
     gpu_res=""; chromium_args=""
 fi
 # GPU shards run cool (peak 66-89 C vs 100-102 C on SwiftShader): 3 in parallel
-# per Job (owner decision 2026-10-03); node placement by the thermal gate.
+# per Job (owner decision 2026-10-03); node placement by the scheduler.
 # CPU mode stays at 2 per Job.
 if [ "$gpu" = 1 ]; then parallelism=$(( shards < 3 ? shards : 3 )); fi
 collect="${COLLECT:-1}"
@@ -114,20 +113,15 @@ sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" \
 k create -f "$dest/job.yaml" >/dev/null
 start=$(date +%s)
 echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  lane=$lane gpu=$gpu cpu=$cpu_req/$cpu_lim mem=$mem_req/$mem_lim"
-# THERMAL GATE: shard pods are admitted by the in-cluster controller. The
-# trigger observes the queue but must not race the controller's decisions.
 if [ "$collect" != 1 ]; then
-    # Fire and forget still has to stay until every shard is ADMITTED: a gated
-    # pod with no running trigger waits until another run's trigger admits it.
-    echo "COLLECT=0: waiting only until all $shards shard(s) are admitted by the thermal gate"
+    # Fire and forget: return once the Job controller has created every shard pod.
+    echo "COLLECT=0: waiting only until all $shards shard pod(s) exist"
     while :; do
-        ungated="$(k get pods -n "$NS" -l "batch.kubernetes.io/job-name=$job" \
-            -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.schedulingGates}{"\n"}{end}' 2>/dev/null \
-            | grep -vc 'ci.cberg.home/thermal' || true)"
-        [ "${ungated:-0}" -ge "$shards" ] && break
+        created="$(k get pods -n "$NS" -l "batch.kubernetes.io/job-name=$job" --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+        [ "${created:-0}" -ge "$shards" ] && break
         sleep 10
     done
-    echo "all shards admitted. Logs: kubectl logs -n $NS -l batch.kubernetes.io/job-name=$job -c runner --prefix"
+    echo "all shards created. Logs: kubectl logs -n $NS -l batch.kubernetes.io/job-name=$job -c runner --prefix"
     exit 0
 fi
 

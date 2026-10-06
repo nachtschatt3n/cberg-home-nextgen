@@ -35,9 +35,7 @@ spec:
       - x64
     # Owner 2026-10-06: one warm idle runner so a job starts at once (a
     # release fires ~5 jobs within a minute). An idle runner keeps its CPU
-    # request in the node's CI budget but frees its cpu-lane slot after the
-    # 300 s settle (ninth-banner-admit.py "warm idle"), so it never blocks
-    # test shards.
+    # request on its node.
     minRunners: 1
     # nuc14-01/03 only; 4 x 1.6 CPU fit the two nodes' 6-CPU CI budgets next
     # to the build pool (2 x 2 CPU).
@@ -73,7 +71,6 @@ spec:
         labels:
           # CiliumNetworkPolicy the-ninth-banner-runners-egress + anti-affinity
           app.kubernetes.io/name: the-ninth-banner-runner
-          # All CI pods share the continuous thermal admission gate.
           ci.cberg.home/lane: cpu
           ci.cberg.home/suite: gha-runner
       spec:
@@ -100,17 +97,15 @@ spec:
                 - matchExpressions:
                     # Owner, 2026-10-06: the CI farm is nuc14-01 + nuc14-03.
                     # nuc14-02 stays excluded (suspected cooler defect, plan
-                    # ci-runner-exclude-node02), same as GATE_EXCLUDE_NODES.
+                    # ci-runner-exclude-node02), the shard Job template excludes it too.
                     - key: kubernetes.io/hostname
                       operator: In
                       values: ["k8s-nuc14-01", "k8s-nuc14-03"]
           podAntiAffinity:
             # Owner 2026-10-06: no hard one-runner-per-node rule any more. Pods
-            # of all three pools may share a node; the per-node CI budget (6 CPU
-            # of CI requests on nuc14-01/03) is enforced by the thermal gate
-            # (arc-system/arc-thermal-gate, ninth-banner-admit.py), which pins
-            # each gated pod to the least-loaded open node. This preferred term
-            # only spreads pods the scheduler places itself (gate rollback).
+            # of all three pools may share a node. The thermal gate was removed
+            # 2026-10-06, so the scheduler places every pod; this preferred
+            # term spreads them and the pool maxRunners bound the load.
             preferredDuringSchedulingIgnoredDuringExecution:
               - weight: 100
                 podAffinityTerm:

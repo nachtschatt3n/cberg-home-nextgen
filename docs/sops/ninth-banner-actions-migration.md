@@ -8,7 +8,7 @@ Status: **enabling (2026-10-06)**. Three ARC runner scale sets replace every Git
 | `ninth-banner-browser-k8s` | `ci-runner` | art, responsive, nightly E2E | 0-1, Intel iGPU |
 | `ninth-banner-build-k8s` | `arc-build` | image, release | 0-1, privileged Docker-in-Docker |
 
-All runner pods start behind `ci.cberg.home/thermal`; `arc-system/arc-thermal-gate` admits them on nuc14-01/03 using Prometheus temperatures and node headroom. The build namespace has its own ARC controller and restricted egress. The Docker sidecar is privileged, so the runner's `GITHUB_TOKEN` and any public network endpoint available to a job are exposed to whatever code the job builds. That is why fork PR workflows stay off (see above). The earlier owner acceptance of fork code on these pools is superseded.
+Runner pods are placed by the scheduler on nuc14-01/03 only (node affinity); the thermal gate (`ci.cberg.home/thermal`) was removed 2026-10-06. The build namespace has its own ARC controller and restricted egress. The Docker sidecar is privileged, so the runner's `GITHUB_TOKEN` and any public network endpoint available to a job are exposed to whatever code the job builds. That is why fork PR workflows stay off (see above). The earlier owner acceptance of fork code on these pools is superseded.
 
 ## Credential and enablement
 
@@ -24,7 +24,7 @@ To disable the cluster runners, comment the three scale-set entries in `kubernet
 ## Deployment test sequence
 
 1. Validate Kustomize output for both controllers, the test infrastructure and all three scale sets. Validate the Helm chart's rendered `AutoscalingRunnerSet` Pod templates: CPU has Postgres, browser requests `gpu.intel.com/i915:1`, build has the pinned privileged Docker sidecar with resources, and all runner templates have `schedulingGates`.
-2. After Flux reports Ready, trigger a harmless `workflow_dispatch` on the game branch. Watch gated → admitted → running → removed for each pod. Confirm the thermal gate never admits on nuc14-02 and one build runner occupies at most one node.
+2. After Flux reports Ready, trigger a harmless `workflow_dispatch` on the game branch. Watch each pod go pending → running → removed. Confirm nothing lands on nuc14-02 and one build runner occupies at most one node.
 3. Run a branch push/PR check, a same-repo PR image build, the manual responsive and nightly Playwright jobs, a manual image build, and the release gate dry run. Inspect `gh run view <id> --log-failed` and the matching runner/listener pods. Confirm Postgres connection, GPU assertion, Docker build + smoke, GitHub CLI install, artifact upload, and GHCR permissions. Run a release only with the normal release approval and tag process. Fork-PR tests do not apply (private repo, fork workflows off).
 4. Confirm no job has `runs-on: ubuntu-latest`, no hosted runner minutes were used for these workflows, pods and JIT secrets are removed after each run, no production restarts/OOM/evictions occurred, and package temperatures remain under the existing `ci-runner` SOP thresholds. Check the ARC and CI alerts.
 

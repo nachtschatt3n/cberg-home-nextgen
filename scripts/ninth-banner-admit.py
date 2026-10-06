@@ -1,1 +1,0 @@
-../kubernetes/apps/arc-system/gha-runner-scale-set-controller/app/scripts/ninth-banner-admit.py

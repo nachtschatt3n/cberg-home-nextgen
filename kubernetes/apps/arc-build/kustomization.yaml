@@ -2,6 +2,5 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ./namespace.yaml
-  - ./thermal-gate-rbac.yaml
   # github_token = ${GITHUB_TOKEN} via Flux substitution (see runbook).
   - ./the-ninth-banner-build-runners/ks.yaml

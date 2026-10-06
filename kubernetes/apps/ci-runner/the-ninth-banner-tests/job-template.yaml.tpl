@@ -5,7 +5,7 @@
 #
 # Indexed Job: one pod per shard (JOB_COMPLETION_INDEX -> --shard=i+1/N),
 # at most __PARALLELISM__ (3 GPU / 2 CPU) at a time per Job; node placement is
-# decided by the thermal gate below (per node: browser lane + cpu lane slots). backoffLimitPerIndex 0 +
+# left to the scheduler (nuc14-02 excluded below). backoffLimitPerIndex 0 +
 # maxFailedIndexes N: a failing shard is NOT retried and does NOT stop the
 # others, so every shard reports.
 apiVersion: batch/v1
@@ -35,7 +35,7 @@ spec:
       labels:
         app.kubernetes.io/name: the-ninth-banner-tests
         ci.cberg.home/suite: __SUITE__
-        # browser | cpu: the thermal gate keeps separate per-node slots per lane
+        # browser | cpu (resource profile only; no admission gate since 2026-10-06)
         ci.cberg.home/lane: __LANE__
     spec:
       restartPolicy: Never
