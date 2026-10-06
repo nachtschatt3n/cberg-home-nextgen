@@ -70,6 +70,10 @@ premises:
     why: "git commit --only commits the whole working-tree file: another session's uncommitted hunk in either file would ride along under this plan's subject."
     run: "git status --porcelain scripts/ninth-banner-admit.py docs/sops/ci-runner.md | wc -l | tr -d ' '"
     expect_exact: "0"
+  - id: sop-header-shape
+    why: "exclude-edit.py rewrites the SOP's Version/Last Updated header by regex (any date) and asserts exactly one of each. The literal 2026.10.04 anchor STOPPED nightly:2026-10-06 after 1efcba19 re-versioned the SOP; this premise catches a header-shape change at preflight instead of at §3.1."
+    run: "grep -cE '^> (Version: `[0-9]{4}[.][0-9]{2}[.][0-9]{2}`|Last Updated: `[0-9]{4}-[0-9]{2}-[0-9]{2}`)$' docs/sops/ci-runner.md"
+    expect_exact: "2"
   - id: node02-is-a-gate-node
     why: "The default value names the node by hostname; the gate keys every decision on the Prometheus nodename. If the hostname changed the exclusion would silently exclude nothing (the §4.1 gate would also catch it)."
     run: "kubectl get node k8s-nuc14-02 -o jsonpath='{.metadata.name}'"
@@ -280,7 +284,7 @@ No forward-only parts.
 # exclude-edit.py <repo-root> <YYYY.MM.DD>  -- plan ci-runner-exclude-node02, section 3.1
 # Adds GATE_EXCLUDE_NODES (default k8s-nuc14-02) to the CI thermal gate + SOP rows.
 # Anchored replacements; refuses to run twice or on an unexpected file shape.
-import sys
+import re, sys
 root, ver = sys.argv[1], sys.argv[2]
 g = f"{root}/scripts/ninth-banner-admit.py"; t = open(g).read()
 A = "# CI CPU requests per node (owner 2026-10-04: CI gets >= 6 CPU per node while\n"
@@ -298,12 +302,13 @@ open(g, "w").write(t)
 s = f"{root}/docs/sops/ci-runner.md"; d = open(s).read()
 R = "| Brake (per node, since 2026-10-04 late evening) |"
 H = "- `2026.10.04` (gate-stall alert):"
-V = "> Version: `2026.10.04`\n"
-U = "> Last Updated: `2026-10-04`\n"
+# header anchors: any date (re-anchored 2026-10-06: a literal 2026.10.04 broke when 1efcba19 re-versioned the SOP)
+V = re.compile(r"^> Version: `\d{4}\.\d{2}\.\d{2}`$", re.M)
+U = re.compile(r"^> Last Updated: `\d{4}-\d{2}-\d{2}`$", re.M)
 B4 = "So nuc14-02/03 take 1 CI pod, nuc14-01 up to 2 (total 4)."
 S4 = "browser shards at most 4 running (1 each on nuc14-02/03, up to 2 on nuc14-01)"
 T = "| nuc14-02 never gets a CI pod | Expected: it peaks at 96-98 °C even without CI, so its 3-min peak is usually >= 93 °C (§2b) |"
-assert d.count(R) == 1 and d.count(H) == 1 and d.count(V) == 1 and d.count(T) == 1 and d.count(U) == 1 and d.count(B4) == 1 and d.count(S4) == 1 and "GATE_EXCLUDE_NODES" not in d, "SOP not in the expected shape"
+assert d.count(R) == 1 and d.count(H) == 1 and len(V.findall(d)) == 1 and d.count(T) == 1 and len(U.findall(d)) == 1 and d.count(B4) == 1 and d.count(S4) == 1 and "GATE_EXCLUDE_NODES" not in d, "SOP not in the expected shape"
 row = ("| Excluded nodes (plan ci-runner-exclude-node02) | `GATE_EXCLUDE_NODES` (default `k8s-nuc14-02`): an excluded node takes **no** CI pod in either lane "
        "(reason `excluded` in `--status`), checked before every other limit. nuc14-02 hit 96 °C ~4 s into an 18-thread load at 35/55 W and logged ~65k package "
        "throttles in 7 days (01: 741, 03: 56): suspected cooler defect. Remove it from the default once the cooler is repaired/replaced. "
@@ -312,8 +317,8 @@ row = ("| Excluded nodes (plan ci-runner-exclude-node02) | `GATE_EXCLUDE_NODES` 
 i = d.index(R); j = d.index("\n", i) + 1; d = d[:j] + row + d[j:]
 i = d.index(H); j = d.index("\n", i) + 1
 d = d[:j] + f"- `{ver}` (node exclusion): `GATE_EXCLUDE_NODES` (default `k8s-nuc14-02`) keeps CI off nuc14-02 in both lanes until its cooling is fixed (plan ci-runner-exclude-node02).\n" + d[j:]
-d = d.replace(V, f"> Version: `{ver}`\n")
-d = d.replace(U, f"> Last Updated: `{ver.replace('.', '-')}`\n")
+d = V.sub(f"> Version: `{ver}`", d)
+d = U.sub(f"> Last Updated: `{ver.replace('.', '-')}`", d)
 d = d.replace(T, "| nuc14-02 never gets a CI pod | Expected: it is in `GATE_EXCLUDE_NODES` (§2b, suspected cooler defect); `--status` shows `CLOSED excluded` for both lanes |")
 d = d.replace(B4, "So nuc14-03 takes 1 CI pod, nuc14-01 up to 2 (total 3 while nuc14-02 is in `GATE_EXCLUDE_NODES`; 4 without the exclusion).")
 d = d.replace(S4, "browser shards at most 3 running (1 on nuc14-03, up to 2 on nuc14-01; nuc14-02 excluded via `GATE_EXCLUDE_NODES`)")
