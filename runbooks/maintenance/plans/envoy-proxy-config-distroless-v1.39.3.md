@@ -1,82 +1,74 @@
 ---
-plan_id: envoy-proxy-config-distroless-v1.39.2
+plan_id: envoy-proxy-config-distroless-v1.39.3
 component: envoy-proxy-config
 also_covers:
   - docker.io/envoyproxy/envoy        # the Envoy DATA-PLANE image pinned in EnvoyProxy/network/envoy-proxy-config
+supersedes: envoy-proxy-config-distroless-v1.39.2   # same pin, same procedure, newer same-minor patch (§1)
 pr: null                              # no Renovate PR: the `distroless-v` prefix is not docker-versionable
-                                      # (see gatewayclass.yaml comment); surfaced by coverage.py, sweep
-                                      # cycle 5a150729-bc69-4faa-a62d-d99cf768d726
+                                      # (see gatewayclass.yaml comment); surfaced by coverage.py / version
+                                      # row F-4a6327dd, sweep cycle 288980ff-87f6-458a-b082-40d1f1d06d43
 kind: image
 current: "distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4"
-target: "distroless-v1.39.2@sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a"
+target: "distroless-v1.39.3@sha256:7369b033550a14997e5d698677b7b51f0210a80754f5d084c5caa1a78268267b"
 update_type: patch
-risk: medium                          # low PROBABILITY (v1.39.1...v1.39.2 = 8 commits, ZERO files under
-                                      # source/; one BoringSSL dependency bump + packaging + base image
-                                      # refresh) but total IMPACT: this image IS the only HTTP data plane;
-                                      # the bump rolls all 6 proxy pods of envoy-internal + envoy-external.
-est_duration_min: 45                  # §2 10 + §3 5 + rolls ~8 + §4 (10m metric wait + sweeps) ~15 + soak 7
+risk: medium                          # low PROBABILITY (v1.39.1...v1.39.3 = 17 commits, 2 files under
+                                      # source/, both in HTTP filters this cluster does not render, §2.3b;
+                                      # BoringSSL + brotli dependency bumps, packaging, base image) but total
+                                      # IMPACT: this image IS the only HTTP data plane; the bump rolls all
+                                      # 6 proxy pods of envoy-internal + envoy-external.
+est_duration_min: 50                  # §2 12 (+2 for §2.3b) + §3 5 + rolls ~8 + §4 (10m metric wait + sweeps) ~15 + soak 7 + slack 3
 needs_reboot: false
 exclusive: false
 touches:
   namespaces: [network]
   resources:
     - envoyproxy/network/envoy-proxy-config                      # spec.provider.kubernetes.envoyDeployment.container.image
-    - deployment/network/envoy-internal                          # ROLLS: envoy container 1.39.1 -> 1.39.2 (3 pods, surge-first)
-    - deployment/network/envoy-external                          # ROLLS: envoy container 1.39.1 -> 1.39.2 (3 pods, surge-first)
+    - deployment/network/envoy-internal                          # ROLLS: envoy container 1.39.1 -> 1.39.3 (3 pods, surge-first)
+    - deployment/network/envoy-external                          # ROLLS: envoy container 1.39.1 -> 1.39.3 (3 pods, surge-first)
     - kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml
   shared:
     - gateway/envoy                   # envoy-internal (.103) + envoy-external (.104) carry EVERY
-                                      # HTTPRoute (112 routes live 2026-10-03)
+                                      # HTTPRoute (95 routes / 80 host-VIP pairs live 2026-10-07)
     - public-edge                     # envoy-external is the internet-facing data plane
-    - authentik                       # 12 SecurityPolicies (forward-auth) are enforced inside Envoy
-    - monitoring                      # §4 reads Prometheus + blackbox probe_success (the instrument)
+    - authentik                       # 12 SecurityPolicies (extAuth forward-auth) are enforced inside Envoy
+    - monitoring                      # §2.7/§4.4 read Prometheus + blackbox probe_success (the instrument)
 depends_on: []
   # envoy-gateway-1.9.2 RESOLVED: executed + retired in 418faa1e; the controller is live on chart 1.9.2
-  # (re-measured 2026-10-05). The coupling it carried is now the premise `controller-is-1.9.2`:
-  # the data plane moves only on top of the CURRENT controller, which compiles 1.39.1 (same MINOR).
-conflicts_with:
-  - app-template-5.2.1                # declares gateway/envoy; rolls ~78 apps whose routes §4.3's
-                                      # per-host status diff reads -- an app roll mid-window fakes
-                                      # (or masks) a data-plane regression
-  - penpot-chart-1.10.0               # declares gateway/envoy-external; same §4.3 poisoning
-  - talos-linux-1.14.2                # node roll drains proxy pods; PDB minAvailable 2 has ONE
-                                      # disruption to give -- a drain and this roll would compete for it
-  - external-dns-1.23.0               # public-edge: reads Gateway envoy-external's target; a public
-                                      # DNS change mid-roll makes §4.3 external rows unattributable
+  # (re-measured 2026-10-07). The coupling is the premise `controller-is-1.9.2`.
+conflicts_with:                       # carried over unchanged from the superseded 1.39.2 plan (all ids
+                                      # re-checked as existing plan files 2026-10-07); reasons in §6
+  - app-template-5.2.1                # gateway/envoy; rolls ~78 apps whose routes §4.3 diffs
+  - penpot-chart-1.10.0               # gateway/envoy-external; same §4.3 poisoning
+  - talos-linux-1.14.2                # node drain competes for the single PDB disruption
+  - external-dns-1.23.0               # public-edge: reads Gateway envoy-external's target
   - coredns-1.48.2                    # cluster DNS under the §4 Prometheus/blackbox instrument path
-  - chart-patches-coredns-reloader-blackbox   # rolls prometheus-blackbox-exporter = the probe_success
-                                      # instrument §4.4 reads, and CoreDNS
-  - flux-fleet-0.60.0                 # upgrades kustomize-controller, which applies gatewayclass.yaml
-                                      # and carries the §5 revert path
+  - chart-patches-coredns-reloader-blackbox   # rolls blackbox-exporter = the probe_success instrument
+  - flux-fleet-0.60.0                 # upgrades kustomize-controller, which applies §3 and carries §5
   - flux-reconciler-impersonation     # exclusive; rewrites how kustomize-controller applies this
-  - kube-prometheus-stack-91.9.0      # §2.7/§4.4 read Prometheus + Alertmanager rules: the window's
-                                      # instrument is shared infra (review 2026-10-05)
-  - flux-distribution-2.9.6           # exclusive; upgrades the Flux controllers that apply §3 and carry
-                                      # the §5 revert path (review 2026-10-05)
+  - kube-prometheus-stack-91.9.0      # §2.7/§4.4 read Prometheus + Alertmanager: shared instrument
+  - flux-distribution-2.9.6           # exclusive; upgrades the Flux controllers that apply §3 / revert §5
   - flux-oci-chart-sources            # moves Flux sources; same §3/§5 apply-and-revert path
-capability_change: false              # same-behaviour patch: 0 source/ changes upstream, no new route,
-                                      # permission, API surface or exposure; the EnvoyProxy object only
-                                      # changes its image string.
-rollback_class: git-revert            # the old image is digest-pinned, still published, and cached on all
-                                      # 3 nodes (imagePullPolicy IfNotPresent); no CRD, no state, no
+capability_change: false              # same-behaviour patch: no new route, permission, API surface or
+                                      # exposure; the EnvoyProxy object only changes its image string.
+rollback_class: git-revert            # the old image is digest-pinned, still published (re-resolved
+                                      # 2026-10-07) and cached on all 3 nodes; no CRD, no state, no
                                       # migration. §5 is a one-line digest restore.
 autonomy_override: human-gated        # shared `gateway` derives HUMAN-GATED via SHARED_INFRA_FLOOR anyway;
                                       # attended window only.
-security_ref: F-61035b6e              # security driver; detail on the DB record only (review 2026-10-05)
-finding_refs: [F-4a6327dd, F-61035b6e]  # version row for this target + the planner-raised plan-section row
-review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (helpers across Bash calls, vacuous §4.3) -> fixed -> delta ready-for-go (zsh + bash verified)
-status: superseded
-superseded_by: envoy-proxy-config-distroless-v1.39.3   # sweep 288980ff: same pin/procedure, v1.39.3 is the newer security patch
-# was: status awaiting-go   # GO must ALSO record acceptance of departing from the *envoyproxy/envoy* deny-rule wording "never on its own" (or approve the reword first) -- §6
-window: null   # slot handed to envoy-proxy-config-distroless-v1.39.3 (needs review + GO). was: "sun-attended:2026-11-08"   # scheduled 2026-10-05: FIRST in the slot, before nocodb-2026.09.1 (45+45 = 90 of 180). Not 10-11 (external-dns, declared conflict), not 10-17 (coredns), 10-18/10-24/10-25 full or over budget, 11-01 exclusive talos
+security_ref: F-61035b6e              # security driver carried from the 1.39.2 plan; detail stays on the DB record
+finding_refs: [F-4a6327dd, F-61035b6e]  # version row (now titled ...-> distroless-v1.39.3) + the planner-raised
+                                      # plan-section row; both carried over from the superseded plan
+status: draft
+window: null                          # see §6: natural slot is the superseded plan's sun-attended:2026-11-08
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/envoy-gateway-upgrade.md
   - docs/sops/gateway-api-httproute.md
-generated: "2026-10-03"
+  - docs/sops/vulnerability-disclosure.md
+generated: "2026-10-07"
 premises:
   - id: controller-is-1.9.2
-    why: "The data plane moves only on top of the CURRENT controller (envoy-gateway-1.9.2 executed in 418faa1e; v1.9.2 compiles distroless-v1.39.1, same MINOR). Any other chart version means the controller moved since this plan was written; re-check §1 compatibility before proceeding."
+    why: "The data plane moves only on top of the CURRENT controller (EG v1.9.2 compiles distroless-v1.39.1, same MINOR as the target). Any other chart version means the controller moved since this plan was written; re-check §1 compatibility before proceeding."
     run: kubectl get helmrelease envoy-gateway -n network -o jsonpath='{.spec.chart.spec.version}'
     expect_exact: "1.9.2"
   - id: envoy-gateway-hr-ready
@@ -84,7 +76,7 @@ premises:
     run: kubectl get helmrelease envoy-gateway -n network -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
     expect_exact: "True"
   - id: repo-pin-is-1.39.1
-    why: "current: claims the 1.39.1 digest pin. If someone already moved it, §3.1's sed matches nothing and §5's restore target is wrong."
+    why: "current: claims the 1.39.1 digest pin. If someone already moved it (e.g. the superseded 1.39.2 plan ran), §3.1's sed matches nothing and §5's restore target is wrong."
     run: grep -o 'envoy:distroless-v[^ ]*' kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml
     expect_exact: "envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4"
   - id: live-envoyproxy-pin-is-1.39.1
@@ -103,14 +95,24 @@ premises:
     expect_matches: '^envoy-internal=3 envoy-external=3\s*$'
 ---
 
-# envoy-proxy-config: Envoy data plane distroless-v1.39.1 -> distroless-v1.39.2
+# envoy-proxy-config: Envoy data plane distroless-v1.39.1 -> distroless-v1.39.3
 
 ## 1. Summary & why held
+
+**Supersession decision: this plan SUPERSEDES `envoy-proxy-config-distroless-v1.39.2`.**
+That plan (awaiting GO, slotted `sun-attended:2026-11-08`) moves the same pin on the same
+procedure to a patch that is now one release behind. Executing it would leave the data
+plane on a patch upstream has already replaced with a security release, and would cost a
+second full 6-pod roll for 1.39.3 later. The retarget does not change the job: same
+image, same Envoy MINOR, same controller, same steps; only the digest and the upstream
+evidence change. The README's default for a same-kind drift is "keep the plan_id and
+refresh in place"; this file was written under a new id on the coordinator's instruction,
+so the old file and its five reciprocal refs MUST be updated in the same commit (§6).
 
 **What changes.** One line in `kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml`:
 the `EnvoyProxy/network/envoy-proxy-config` container image, digest-pinned, moves from
 `docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c1…` to
-`docker.io/envoyproxy/envoy:distroless-v1.39.2@sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a`.
+`docker.io/envoyproxy/envoy:distroless-v1.39.3@sha256:7369b033550a14997e5d698677b7b51f0210a80754f5d084c5caa1a78268267b`.
 The Envoy Gateway controller re-renders both proxy Deployments (`envoy-internal`,
 `envoy-external`) and they roll, 3 pods each. Nothing else moves: no chart, no CRD,
 no shutdown-manager sidecar, no k8s-gateway restart.
@@ -119,48 +121,57 @@ no shutdown-manager sidecar, no k8s-gateway restart.
 data-plane image is coupled to the controller and is the only HTTP data plane in the
 cluster.
 
-**Upstream evidence (Envoy v1.39.2, released 2026-10-01).**
-- `changelogs/1.39.2.yaml` at tag v1.39.2 has exactly two entries: one `bug_fixes` entry
-  for `area: tls` (a BoringSSL update), and one `removed_config_or_runtime` entry: "Removed
-  Debian bullseye (11) packaging". The GitHub release adds "Refreshed the Ubuntu build and
-  distroless Docker base images."
-- `compare/v1.39.1...v1.39.2`: 8 commits, 66 files, **0 files under `source/`**. The
-  only build-affecting change is the BoringSSL pin in `bazel/repository_locations.bzl`.
-  No Envoy behaviour, xDS API or config semantics change.
-- Upstream labels this a security release (4 Envoy lines patched the same day). Per
-  `docs/sops/vulnerability-disclosure.md` the advisory detail does not belong in this
-  file; it is recorded on F-61035b6e (`security_ref`, see the frontmatter).
+**Upstream evidence.**
+- v1.39.2 (released 2026-10-01; evidence in the superseded plan, re-read): `changelogs/1.39.2.yaml`
+  = one `area: tls` bug fix (BoringSSL update) + "Removed Debian bullseye (11) packaging";
+  0 files under `source/`.
+- v1.39.3 (released 2026-10-06T18:22Z): `changelogs/1.39.3.yaml` has two `bug_fixes`
+  entries, `area: api_key_auth` and `area: oauth2`, both crash fixes for a request with no
+  `:path` header; upstream labels the release a security release. `compare/v1.39.2...v1.39.3`:
+  9 commits, 56 files, exactly 2 under `source/`:
+  `source/extensions/filters/http/api_key_auth/api_key_auth.cc` and
+  `source/extensions/filters/http/oauth2/filter.cc`. The other commits are a bazel host
+  toolchain backport, `compat/openssl/**` fixes (the OpenSSL build variant; the distroless
+  image is the BoringSSL build), docs/inventories, python tooling, and **an unannounced
+  dependency bump: brotli `1.2.0` -> commit `42a2ed4`** (`bazel/repository_locations.bzl`,
+  "[v1.39] Update brotli to 42a2ed4 (#48031)", not mentioned in the changelog).
+- Cumulative `compare/v1.39.1...v1.39.3`: 17 commits, 108 files, the same 2 `source/` files.
+- Exposure (measured 2026-10-07, §2.3b): neither changed filter, and no compressor filter,
+  appears in the live listener config of either gateway (the 12 SecurityPolicies are all
+  `extAuth`, and `ext_authz` shows up as the positive control). So the 1.39.3 code delta is
+  off our request path today; per `docs/sops/vulnerability-disclosure.md` any further
+  advisory detail stays on the DB record (`security_ref`).
 
-**Registry facts (measured 2026-10-03, Docker Hub v2 API).**
-- `distroless-v1.39.2` is an OCI index, `sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a`.
-  It covers linux/amd64 (`sha256:bb26a0a1…`) and linux/arm64.
-- `distroless-v1.39.1` still resolves to `sha256:eb2c01c1…`. That is byte-equal to the
-  `imageID` of the `envoy` container in all 6 live proxy pods, so the rollback target
-  is published and node-cached.
+**Registry facts (measured 2026-10-07, Docker Hub v2 API).**
+- `distroless-v1.39.3` is an OCI index, `sha256:7369b033550a14997e5d698677b7b51f0210a80754f5d084c5caa1a78268267b`,
+  covering linux/amd64 (`sha256:1aa2c5ba…`) and linux/arm64 (`sha256:c5da325a…`).
+- `distroless-v1.39.1` still resolves to `sha256:eb2c01c1…`, byte-equal to the `imageID`
+  of the `envoy` container in all 6 live proxy pods, so the rollback target is published
+  and node-cached. `distroless-v1.39.4` and `distroless-v1.40.0` do not exist (404).
 
-**Compatibility with the controller: COMPATIBLE.**
-- Every EG tag compiles in `DefaultEnvoyProxyImage` (`api/v1alpha1/shared_types.go`).
-  At v1.9.1, at v1.9.2 and at the `release/v1.9` branch head on 2026-10-03, it is
-  `distroless-v1.39.1@sha256:eb2c01c1…`. No EG release ships 1.39.2 yet, and there is
-  no v1.9.3.
-- The EG compatibility matrix (gateway.envoyproxy.io/news/releases/matrix) lists
-  v1.9 ↔ `distroless-v1.39.x`. It states: "The Envoy Proxy column shows the supported
-  minor version. The exact image that a given Envoy Gateway patch release ships may be
-  a newer patch within that same minor version."
-- So 1.39.2 under EG 1.9.x is inside the supported matrix. The thing that would be
-  untested is a different Envoy MINOR (1.40), and that is not what this plan does.
+**Compatibility with the controller: COMPATIBLE (unchanged reasoning from the 1.39.2 plan).**
+- EG v1.9.2 and the `release/v1.9` branch head (re-read 2026-10-07) both compile
+  `DefaultEnvoyProxyImage = distroless-v1.39.1@sha256:eb2c01c1…`. The newest EG releases
+  are v1.9.2 / v1.8.5 (2026-09-28); there is no v1.9.3 that ships 1.39.3.
+- The EG compatibility matrix lists v1.9 <-> `distroless-v1.39.x` and states the shipped
+  image "may be a newer patch within that same minor version". 1.39.3 is inside it.
 
-**Repo correction (reported, not planned around).** The deny rule's reason says this pin
-moves "only in the SAME change as the gateway-helm chart bump … never on its own". That
-is stricter than upstream's stated contract. Read literally, a security-only Envoy patch
-inside the supported minor could never land until EG cuts a release. This plan follows
-upstream's matrix, and it keeps the rule's real intent through the premise
-`controller-is-1.9.2` (the controller is current first) and the attended window.
-Executing it therefore departs from the rule's literal "never on its own"; see §6. The rule text should say
-"MINOR moves only with the chart; same-minor patches may lead the compiled default".
+**Repo correction (carried over, still open).** The deny rule's reason says this pin moves
+"only in the SAME change as the gateway-helm chart bump … never on its own". That is
+stricter than upstream's matrix; executing this plan departs from its literal wording (§6).
+The rule text should say "MINOR moves only with the chart; same-minor patches may lead the
+compiled default".
 
-**Verdict.** This is a genuinely small patch, but it rolls every HTTP-serving pod, so
-it runs in an attended window and is human-gated. No reboot.
+**Latent finding surfaced while planning (not planned around).** `BackendTrafficPolicy
+network/envoy-compression` (Brotli + Gzip, targets both Gateways) is `Accepted=True`, yet
+the live listeners of both gateways contain **0** `envoy.filters.http.compressor`
+instances, and a 40-host probe with `Accept-Encoding: br` got no `content-encoding: br`
+anywhere. Gateway-level compression appears not to be in effect. That is a separate
+investigation, but it matters here: if it gets fixed before this window, the brotli bump
+lands on a live path, hence the §2.3b STOP-and-amend.
+
+**Verdict.** A small patch whose code delta is off our request path, but it rolls every
+HTTP-serving pod, so it runs in an attended window, human-gated. No reboot.
 
 ## 2. Pre-checks (read-only, ~10 min)
 
@@ -169,15 +180,15 @@ executed and was retired in 418faa1e; the premise `controller-is-1.9.2` re-check
 
 **Shell state does not survive between agent Bash calls.** §2.4 writes every helper
 (`envver`, `routes`, `policies`, `sweep`, `changed`, `q`, `alerts`, `pfprom`, `pfstop`)
-to `/tmp/envoy1392-win/fns.sh`. EVERY later block in §2.4–§5 starts with
-`. /tmp/envoy1392-win/fns.sh`, which also `cd`s into `/tmp/envoy1392-win`. `q()` and
+to `/tmp/envoy1393-win/fns.sh`. EVERY later block in §2.4–§5 starts with
+`. /tmp/envoy1393-win/fns.sh`, which also `cd`s into `/tmp/envoy1393-win`. `q()` and
 `alerts()` start their own Prometheus port-forward on :19090, or reuse a ready one, so no
 block depends on a port-forward that an earlier call started. Measured 2026-10-05:
 without the source line, `sweep > status.after` in a fresh shell prints
 "command not found", writes 0 lines, and an unguarded diff then reports 0 CHANGED. That
 is a vacuous PASS, so every after-file below is checked with `test -s` before it is read.
 
-2.1 Premises: `.venv/bin/python3 runbooks/plan-premises.py envoy-proxy-config-distroless-v1.39.2`.
+2.1 Premises: `.venv/bin/python3 runbooks/plan-premises.py envoy-proxy-config-distroless-v1.39.3`.
 Every premise must PASS.
 
 2.2 Flux, workloads and PDBs:
@@ -191,27 +202,57 @@ kubectl -n network get pods -l app.kubernetes.io/component=proxy -o wide    # 3 
 2.3 Upstream target is still what this plan pins. This is a network read, not a premise.
 ```bash
 T=$(curl -fsSL "https://auth.docker.io/token?service=registry.docker.io&scope=repository:envoyproxy/envoy:pull" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
-for t in distroless-v1.39.2 distroless-v1.39.1; do echo "$t $(curl -fsSI -H "Authorization: Bearer $T" -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' https://registry-1.docker.io/v2/envoyproxy/envoy/manifests/$t | grep -i docker-content-digest)"; done
-# must print (measured 2026-10-03):
-#   distroless-v1.39.2 docker-content-digest: sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a
+for t in distroless-v1.39.3 distroless-v1.39.1; do echo "$t $(curl -fsSI -H "Authorization: Bearer $T" -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' https://registry-1.docker.io/v2/envoyproxy/envoy/manifests/$t | grep -i docker-content-digest)"; done
+# must print (measured 2026-10-07 from the Docker Hub v2 API):
+#   distroless-v1.39.3 docker-content-digest: sha256:7369b033550a14997e5d698677b7b51f0210a80754f5d084c5caa1a78268267b
 #   distroless-v1.39.1 docker-content-digest: sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4
 curl -fsSL https://raw.githubusercontent.com/envoyproxy/gateway/v1.9.2/api/v1alpha1/shared_types.go | grep -o 'DefaultEnvoyProxyImage = "[^"]*"'
-# must name distroless-v1.39.1 (same Envoy MINOR 1.39). If a NEWER EG patch exists and compiles
-# 1.39.2+, prefer that chart bump and supersede this plan. If it names any 1.40.x, STOP: re-plan.
+# must name distroless-v1.39.1 (same Envoy MINOR 1.39). If a NEWER EG patch (v1.9.3+) exists and compiles
+# 1.39.3+, prefer that chart bump (it moves the pin in lockstep, per the deny rule) and supersede this plan. If it names any 1.40.x, STOP: re-plan.
 ```
-- FAIL shape: a different digest for 1.39.2 (the tag was re-pushed), or an empty line
+- FAIL shape: a different digest for 1.39.3 (the tag was re-pushed), or an empty line
   (tag gone or registry unreachable). Either is a STOP.
 
-2.4 Write the helper file once, then take the baseline Envoy build version on all 6
+2.3b **Which Envoy code paths does the upgrade actually reach?** The two `source/` files the
+1.39.2 -> 1.39.3 step changes are HTTP filters, and the one silent dependency bump is the
+brotli library (`bazel/repository_locations.bzl`: brotli `1.2.0` -> commit `42a2ed4`, not
+mentioned in `changelogs/1.39.3.yaml`). Count the filter instances in the LIVE listener
+config of one pod per gateway; `ext_authz` is the positive control (12 SecurityPolicies
+are all `extAuth`, so it must be non-zero, which proves the counter can see a filter).
+```bash
+mkdir -p /tmp/envoy1393-win
+for g in envoy-internal envoy-external; do
+  P=$(kubectl -n network get pods -l app.kubernetes.io/component=proxy,gateway.envoyproxy.io/owning-gateway-name=$g -o name | head -1)
+  kubectl -n network port-forward "$P" 19109:19000 >/dev/null 2>&1 & pf=$!; sleep 3
+  curl -s --max-time 15 "http://localhost:19109/config_dump?resource=dynamic_listeners" > /tmp/envoy1393-win/listeners.$g.json
+  kill $pf; wait $pf 2>/dev/null
+  python3 -c "
+import sys
+s=open('/tmp/envoy1393-win/listeners.$g.json').read()
+if len(s)<1000: sys.exit('GUARD: $g dump empty/short (%d bytes) -- instrument blind, STOP' % len(s))
+print('$g','ext_authz',s.count('envoy.filters.http.ext_authz'),'compressor',s.count('envoy.filters.http.compressor'),'oauth2',s.count('envoy.filters.http.oauth2'),'api_key_auth',s.count('envoy.filters.http.api_key_auth'))"
+done
+# measured 2026-10-07 04:3x:
+#   envoy-internal ext_authz 11 compressor 0 oauth2 0 api_key_auth 0
+#   envoy-external ext_authz 1 compressor 0 oauth2 0 api_key_auth 0
+```
+- PASS: `ext_authz` > 0 on both (control), and `compressor`, `oauth2`, `api_key_auth` all 0.
+  Then the code that 1.39.3 changes is not on our request path, and §4 needs no extra gate.
+- FAIL shape / STOP-and-amend: `ext_authz` 0 or a `GUARD:` line means the instrument is
+  blind. A non-zero `compressor` means Brotli compression went live since 2026-10-07 (see
+  §6 "latent finding"); the brotli dependency bump is then on every compressible response,
+  and this plan has no decode gate for it. STOP and amend §4 before running.
+
+2.4 Write the helper file once (`mkdir` first: §2.3b already writes into the dir), then take the baseline Envoy build version on all 6
 pods. The version is the input to the §4.1 CONTENTS assertion. The block below writes
 the file, so paste it exactly as written. It was dry-run on 2026-10-05 under both zsh
 and bash. The run wrote 9 functions, and `changed()` returned rc 0 / 1 / 2 / 2 / 2 on the
 inputs identical / one-row-000 / empty / short / key-mismatch.
 ```bash
-mkdir -p "${W:-/tmp/envoy1392-win}"
-cat > "${W:-/tmp/envoy1392-win}/fns.sh" <<'FNS'
-# envoy1392 window helpers. SOURCE at the top of EVERY later block:  . /tmp/envoy1392-win/fns.sh
-W="${W:-/tmp/envoy1392-win}"; cd "$W" || return 1
+mkdir -p "${W:-/tmp/envoy1393-win}"
+cat > "${W:-/tmp/envoy1393-win}/fns.sh" <<'FNS'
+# envoy1393 window helpers. SOURCE at the top of EVERY later block:  . /tmp/envoy1393-win/fns.sh
+W="${W:-/tmp/envoy1393-win}"; cd "$W" || return 1
 envver() { i=0; for p in $(kubectl -n network get pods -l app.kubernetes.io/component=proxy -o name); do
   port=$((19100+i)); i=$((i+1))
   kubectl -n network port-forward "$p" "$port":19000 >/dev/null 2>&1 & pf=$!; sleep 2
@@ -254,8 +295,8 @@ q() { pfprom || { echo PF_FAILED; return 2; }
 alerts() { pfprom || { echo PF_FAILED; return 2; }
   curl -s http://localhost:19090/api/v1/alerts | python3 -c 'import sys,json;print(sorted({a["labels"]["alertname"] for a in json.load(sys.stdin)["data"]["alerts"] if a["state"]=="firing" and a["labels"]["alertname"].startswith(("EnvoyGateway","IngressProbe"))}))'; }
 FNS
-echo "FNS_WRITTEN $(grep -c '() {' "${W:-/tmp/envoy1392-win}/fns.sh") functions"
-. /tmp/envoy1392-win/fns.sh
+echo "FNS_WRITTEN $(grep -c '() {' "${W:-/tmp/envoy1393-win}/fns.sh") functions"
+. /tmp/envoy1393-win/fns.sh
 envver | tee ver.before
 test -s ver.before && grep -c ' 1\.39\.1 LIVE$' ver.before    # must print 6 (2026-10-05 live: 6)
 ```
@@ -265,7 +306,7 @@ the pod's localhost:19000, port-forward reaches it, and all 6 pods read `1.39.1 
 
 2.5 Baseline route and policy acceptance. Write it to files; §4.2 diffs against them.
 ```bash
-. /tmp/envoy1392-win/fns.sh
+. /tmp/envoy1393-win/fns.sh
 routes > routes.before; policies > policies.before
 test -s routes.before && test -s policies.before && cat routes.before policies.before   # empty = STOP (kubectl/API failed)
 ```
@@ -274,10 +315,10 @@ Any non-True line already in the baseline must be noted and not blamed on this c
 2.6 **Behavioural baseline of BOTH gateways.** Record the per-hostname HTTP status
 through each VIP. Hostnames are pulled live into /tmp only and never committed. The
 row key is **host+VIP**, not the host alone. Today there are 80 host/VIP pairs
-(54 on .103 and 26 on .104, measured 2026-10-05) and 80 distinct hosts. A hostname that
+(54 on .103 and 26 on .104, measured 2026-10-05 and re-measured 2026-10-07: 95 HTTPRoutes, 80 pairs, same split) and 80 distinct hosts. A hostname that
 is later attached to both Gateways is then still two separate rows.
 ```bash
-. /tmp/envoy1392-win/fns.sh
+. /tmp/envoy1393-win/fns.sh
 kubectl get httproute -A -o json | python3 -c '
 import sys,json
 vip={"envoy-internal":"192.168.55.103","envoy-external":"192.168.55.104"};seen=set()
@@ -302,7 +343,7 @@ negative control returned 404 on both VIPs.
 2.7 Prometheus and alert baseline. `q()` and `alerts()` own the port-forward. `pfstop`
 kills the port-forward at the end, and §4.4 starts a fresh one.
 ```bash
-. /tmp/envoy1392-win/fns.sh
+. /tmp/envoy1393-win/fns.sh
 q 'count(up{namespace="network",job="network/envoy-gateway"}==1)'          # 6   (2026-10-05: 6)
 q 'sum(envoy_listener_manager_lds_update_rejected{namespace="network"})'   # 0   (2026-10-03: 0)
 q 'sum(envoy_cluster_manager_cds_update_rejected{namespace="network"})'    # 0   (2026-10-03: 0)
@@ -330,43 +371,43 @@ pfstop
 macOS (BSD sed + `.venv/bin/python3`). The resulting diff is the image line
 `-          image: docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c1…`
 replaced by
-`+          image: docker.io/envoyproxy/envoy:distroless-v1.39.2@sha256:dced08cf…`,
+`+          image: docker.io/envoyproxy/envoy:distroless-v1.39.3@sha256:7369b033…`,
 plus 5 comment lines above it. The file still parses as YAML.
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 F=kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml
-sed -i '' 's|envoyproxy/envoy:distroless-v1\.39\.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4$|envoyproxy/envoy:distroless-v1.39.2@sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a|' "$F"
+sed -i '' 's|envoyproxy/envoy:distroless-v1\.39\.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4$|envoyproxy/envoy:distroless-v1.39.3@sha256:7369b033550a14997e5d698677b7b51f0210a80754f5d084c5caa1a78268267b|' "$F"
 .venv/bin/python3 - "$F" <<'EOF'
 import sys
 p=sys.argv[1]; s=open(p).read()
-anchor="          image: docker.io/envoyproxy/envoy:distroless-v1.39.2@"
+anchor="          image: docker.io/envoyproxy/envoy:distroless-v1.39.3@"
 assert s.count(anchor)==1, "anchor not unique -- sed did not apply; STOP"
-note=("          # 2026-10 (plan envoy-proxy-config-distroless-v1.39.2): moved AHEAD of the\n"
-      "          # compiled default (EG v1.9.x compiles v1.39.1) to upstream's v1.39.2\n"
+note=("          # 2026-10 (plan envoy-proxy-config-distroless-v1.39.3): moved AHEAD of the\n"
+      "          # compiled default (EG v1.9.x compiles v1.39.1) to upstream's v1.39.3\n"
       "          # patch. Same Envoy MINOR, which the EG compatibility matrix declares\n"
       "          # supported (\"may be a newer patch within that same minor\").\n"
       "          # A MINOR move still travels only with the gateway-helm chart bump.\n")
 open(p,"w").write(s.replace(anchor, note+anchor))
 EOF
 git diff --stat "$F"                       # 1 file, 6 insertions(+), 1 deletion(-)
-grep -c 'distroless-v1.39.2@sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a' "$F"   # 1
+grep -c 'distroless-v1.39.3@sha256:7369b033550a14997e5d698677b7b51f0210a80754f5d084c5caa1a78268267b' "$F"   # 1
 .venv/bin/python3 -c "import yaml,sys;list(yaml.safe_load_all(open('$F')));print('YAML_OK')"   # bare python3 may lack PyYAML
 ```
 
 3.2 Commit with `--only` (shared worktree), verify, then push:
 ```bash
-cat > /tmp/envoy1392-msg.txt <<'EOF'
-feat(envoy-gateway): Envoy data plane distroless-v1.39.1 -> v1.39.2
+cat > /tmp/envoy1393-msg.txt <<'EOF'
+feat(envoy-gateway): Envoy data plane distroless-v1.39.1 -> v1.39.3
 
 Digest-pinned. Same Envoy minor as EG 1.9.x's compiled default (matrix:
 v1.9 <-> 1.39.x). Upstream diff: 0 source/ files, BoringSSL + packaging only.
 Rolls envoy-internal/-external (3+3 pods, surge-first).
-Plan: runbooks/maintenance/plans/envoy-proxy-config-distroless-v1.39.2.md
+Plan: runbooks/maintenance/plans/envoy-proxy-config-distroless-v1.39.3.md
 
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
 EOF
-git commit --only kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml -F /tmp/envoy1392-msg.txt
-git log -1 --format=%s    # must be "feat(envoy-gateway): Envoy data plane distroless-v1.39.1 -> v1.39.2"; amend if not
+git commit --only kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml -F /tmp/envoy1393-msg.txt
+git log -1 --format=%s    # must be "feat(envoy-gateway): Envoy data plane distroless-v1.39.1 -> v1.39.3"; amend if not
 git show --stat HEAD      # exactly gatewayclass.yaml
 git push
 ```
@@ -377,7 +418,7 @@ applied by Kustomization `network/envoy-gateway` and not by the chart.
 ```bash
 flux reconcile source git flux-system -n flux-system
 flux reconcile kustomization envoy-gateway -n network
-kubectl -n network get envoyproxy envoy-proxy-config -o jsonpath='{.spec.provider.kubernetes.envoyDeployment.container.image}{"\n"}'   # ...distroless-v1.39.2@sha256:dced08cf...
+kubectl -n network get envoyproxy envoy-proxy-config -o jsonpath='{.spec.provider.kubernetes.envoyDeployment.container.image}{"\n"}'   # ...distroless-v1.39.3@sha256:7369b033...
 ```
 
 3.4 Watch both data-plane rolls:
@@ -390,30 +431,30 @@ kubectl -n network rollout status deploy/envoy-external --timeout=600s
 
 ## 4. Verification
 
-4.1 **CONTENTS ASSERTION: every proxy pod runs the 1.39.2 binary and is LIVE.**
+4.1 **CONTENTS ASSERTION: every proxy pod runs the 1.39.3 binary and is LIVE.**
 ```bash
 kubectl -n network get pods -l app.kubernetes.io/component=proxy -o jsonpath='{range .items[*]}{range .status.containerStatuses[?(@.name=="envoy")]}{.imageID}{"\n"}{end}{end}' | sort | uniq -c
-#   expect: 6 x docker.io/envoyproxy/envoy@sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a
-. /tmp/envoy1392-win/fns.sh                          # helpers from §2.4; also cd's into the dir
+#   expect: 6 x docker.io/envoyproxy/envoy@sha256:7369b033550a14997e5d698677b7b51f0210a80754f5d084c5caa1a78268267b
+. /tmp/envoy1393-win/fns.sh                          # helpers from §2.4; also cd's into the dir
 envver | tee ver.after
 test -s ver.after || echo 'FAIL: ver.after empty -- instrument did not run'
 [ "$(wc -l < ver.after)" -eq 6 ] || echo 'FAIL: ver.after does not have 6 rows'
-grep -c ' 1\.39\.2 LIVE$' ver.after                   # must print 6
-grep -vc ' 1\.39\.2 LIVE$' ver.after                  # must print 0
+grep -c ' 1\.39\.3 LIVE$' ver.after                   # must print 6
+grep -vc ' 1\.39\.3 LIVE$' ver.after                  # must print 0
 kubectl -n network get pods -l app.kubernetes.io/component=proxy -o wide   # 3 per gateway, one per node
 ```
-- PASS: 6 lines `<pod> 1.39.2 LIVE`, 6 × the `dced08cf…` imageID, and each gateway
+- PASS: 6 lines `<pod> 1.39.3 LIVE`, 6 × the `7369b033…` imageID, and each gateway
   spread one pod per node.
 - FAIL shape: a `1.39.1` line means a pod was not re-rendered, or the roll is
   half-done. `UNREADABLE` means the admin endpoint is not answering. A state other than
   `LIVE` (`PRE_INITIALIZING`, `DRAINING`) means the pod has not reached config. Two
   pods of one gateway on the same node means the spread collapsed (seen 2026-09-07).
 - The gate can fail: `ver.before` reads `1.39.1` on these same pods (measured
-  2026-10-03), so the `1\.39\.2` grep returns 0 against the pre-state.
+  2026-10-03), so the `1\.39\.3` grep returns 0 against the pre-state.
 
 4.2 Route and policy acceptance must not regress. Diff against §2.5:
 ```bash
-. /tmp/envoy1392-win/fns.sh
+. /tmp/envoy1393-win/fns.sh
 routes > routes.after; policies > policies.after
 test -s routes.after && test -s policies.after && test -s routes.before && test -s policies.before \
   && diff routes.before routes.after && diff policies.before policies.after && echo ACCEPTANCE_UNCHANGED
@@ -427,7 +468,7 @@ test -s routes.after && test -s policies.after && test -s routes.before && test 
 4.3 **CONTENTS ASSERTION, behavioural probe of BOTH gateways.** Every hostname must
 still serve the same answer through its own VIP.
 ```bash
-. /tmp/envoy1392-win/fns.sh
+. /tmp/envoy1393-win/fns.sh
 sweep > status.after
 test -s status.after && echo AFTER_NONEMPTY                                   # absent = FAIL (sweep did not run)
 wc -l < status.before; wc -l < status.after                                   # must be EQUAL (~80)
@@ -439,7 +480,7 @@ changed status.before status.knownbad; echo "control rc=$?"                    #
 # or a host|VIP join that matches fewer rows than the baseline -- it never reads CHANGED off a partial join
 changed status.before status.after; echo "rc=$?"                              # rc 0 = clean, rc 1 = CHANGED rows, rc 2 = GUARD = FAIL
 ```
-- The pipeline was dry-run on 2026-10-05 against a live 80-row sweep. Identical input gave
+- The pipeline was dry-run on 2026-10-05 (for the superseded 1.39.2 plan; same helper, only the work dir renamed) against a live 80-row sweep. Identical input gave
   `CHECKED 80 rows, CHANGED 0` and rc 0. A copy with row 1 sed'ed to `000` gave
   exactly one `CHANGED … -> 000` and rc 1. Empty, short and key-mismatched inputs gave
   `GUARD:` and rc 2. If `control rc=1` does not print, the comparator is blind:
@@ -464,7 +505,7 @@ changed status.before status.after; echo "rc=$?"                              # 
 4.4 Prometheus gates. Wait 10 minutes after §3.4 so the 5m windows cover only the new
 pods. Source the helpers; `q()` starts its own port-forward.
 ```bash
-. /tmp/envoy1392-win/fns.sh
+. /tmp/envoy1393-win/fns.sh
 q 'count(up{namespace="network",job="network/envoy-gateway"}==1)'                               # 6
 q 'sum(envoy_listener_manager_lds_update_rejected{namespace="network"})'   # 0
 q 'count(envoy_listener_manager_lds_update_rejected{namespace="network"})' # 6 (non-vacuous: EMPTY cannot pass)
@@ -498,7 +539,7 @@ All 5 alert rules were verified to exist live on 2026-10-03, in PrometheusRules
 `envoy-gateway-alerts`, `gateway-availability-alerts` and `blackbox-exporter-alerts`.
 
 4.5 Soak: re-run 4.3 and 4.4 once more, 7 minutes later. Each block begins with
-`. /tmp/envoy1392-win/fns.sh`, so it is safe in a fresh shell, and `status.after` is
+`. /tmp/envoy1393-win/fns.sh`, so it is safe in a fresh shell, and `status.after` is
 overwritten and re-guarded. Then retire this plan file
 in the same commit series, per `README.md`.
 
@@ -512,7 +553,7 @@ every node (`imagePullPolicy: IfNotPresent`, 6 pods currently run it).
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 git revert --no-edit <sha-of-3.2>
-git log -1 --format=%s    # must be 'Revert "feat(envoy-gateway): Envoy data plane distroless-v1.39.1 -> v1.39.2"'
+git log -1 --format=%s    # must be 'Revert "feat(envoy-gateway): Envoy data plane distroless-v1.39.1 -> v1.39.3"'
 git show --stat HEAD      # exactly gatewayclass.yaml
 grep -o 'envoy:distroless-v[^ ]*' kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml
 #   must print envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4
@@ -527,16 +568,16 @@ with the reverse sed instead. Note (review 2026-10-05): the reverse sed restores
 image line; the 5 comment lines §3.1's python inserted stay behind and must be deleted by hand
 in the same commit (otherwise the file claims the pin moved ahead of the default).
 ```bash
-sed -i '' 's|envoyproxy/envoy:distroless-v1\.39\.2@sha256:dced08cf7c472e1a1d067f906878266078eeeb63c110b4961882c039a622853a$|envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4|' kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml
+sed -i '' 's|envoyproxy/envoy:distroless-v1\.39\.3@sha256:7369b033550a14997e5d698677b7b51f0210a80754f5d084c5caa1a78268267b$|envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4|' kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml
 ```
 Then commit it with `--only` as in §3.2.
 
 5.2 Confirm the cluster is back:
-- Re-run 4.1, starting with `. /tmp/envoy1392-win/fns.sh` and keeping the `test -s ver.after`
+- Re-run 4.1, starting with `. /tmp/envoy1393-win/fns.sh` and keeping the `test -s ver.after`
   and 6-row guards. Expect 6 × imageID `sha256:eb2c01c1…`. In the two greps, use
-  `1\.39\.1` in place of `1\.39\.2`: `grep -c ' 1\.39\.1 LIVE$' ver.after` must print 6.
+  `1\.39\.1` in place of `1\.39\.3`: `grep -c ' 1\.39\.1 LIVE$' ver.after` must print 6.
 - Re-run 4.2, 4.3 (including the `status.knownbad` control) and 4.4 against the SAME
-  `/tmp/envoy1392-win/*.before` baselines. Each block sources `fns.sh` first, and every
+  `/tmp/envoy1393-win/*.before` baselines. Each block sources `fns.sh` first, and every
   guard applies. They must pass.
 
 5.3 **Break-glass, if the data plane is dark and the revert cannot reach the cluster.**
@@ -560,12 +601,28 @@ undo is overwritten at the next reconcile. Follow it with 5.1 immediately.
   for this one change, or first approve a rule reword ("MINOR moves only with the chart;
   same-minor patches may lead the compiled default"). Without one of those, this is a
   NO-GO.
+- **Supersedes `envoy-proxy-config-distroless-v1.39.2`.** See §1. That file must go to
+  `status: superseded` + `superseded_by: envoy-proxy-config-distroless-v1.39.3` in the same
+  commit that lands this plan, and the five reciprocal `conflicts_with` refs
+  (app-template-5.2.1, chart-patches-coredns-reloader-blackbox, coredns-1.48.2,
+  external-dns-1.23.0, penpot-chart-1.10.0) renamed, or `--validate` raises them as DEAD-REF /
+  the old plan double-books the slot. Two plans moving the same pin must never both be open.
 - **Controller prerequisite is already met.** `envoy-gateway-1.9.2` executed and was
   retired in 418faa1e, and chart 1.9.2 is live (re-measured 2026-10-05). The premise
   `controller-is-1.9.2` keeps that coupling checked, so there is no `depends_on` and no
   fold option any more.
-- **Proposed slot:** `sun-attended:2026-10-11`, after `n8n-2.39.8` (52+45 of 180 min).
-  The fallback is `sat-attended:2026-11-14`. The window agent assigns the slot.
+- **Slot:** `window: null`; the window agent assigns it. The natural slot is the one the
+  superseded plan already held, `sun-attended:2026-11-08`, FIRST, before
+  `nocodb-2026.09.1` (est 50 + 45 = 95 of 180 min). The slot can move earlier only to an
+  attended window that holds none of the `conflicts_with` partners
+  (10-11 has `external-dns-1.23.0`, 10-17 `coredns-1.48.2`, 11-01 is exclusive Talos).
+- **nocodb-2026.09.1 overlap on `monitoring` (same 11-08 slot) is a read/read overlap, not
+  interference.** Both plans only READ Prometheus (nocodb's §4.5, this plan's §2.7/§4.4);
+  neither restarts or reconfigures it. The real coupling is the other way: nocodb restarts
+  an app that has an HTTPRoute, which would show as a `CHANGED` row in §4.3 here. So
+  serialize: this plan runs first and finishes its §4.5 soak before nocodb starts. Not
+  added to `conflicts_with`, because that would forbid the shared slot, which is fine when
+  serialized.
 - **Run it FIRST among the remaining plans**, right after Step 0 settles. §4.3
   diffs every hostname, so any app with an HTTPRoute restarted by another same-window plan becomes a `CHANGED` line here. `conflicts_with` covers
   the known ones.

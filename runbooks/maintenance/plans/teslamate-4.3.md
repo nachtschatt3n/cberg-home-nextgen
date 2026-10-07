@@ -56,7 +56,8 @@ conflicts_with:
                                       #   teslamate + teslamate-postgres; a same-slot roll would void §4.2-4.6.
                                       #   exclusive:true already keeps it out of the slot; named for the record.
 exclusive: false
-security_ref: F-7d7fb365              # AR-029 record on the 4.2.0 image ("already on newest tag"). A newer
+security_ref: F-daeedcd8              # open "newer upstream tag available, bump" row on the 4.2.0 image (sweep 288980ff review;
+                                      # was F-7d7fb365, the now-RESOLVED AR-029 "already on newest tag" record). A newer
                                       # tag now exists, so that acceptance's premise lapses and this bump is
                                       # its remedy. Its twin F-50167e66 (AR-029, 4.2.0, the no-upstream-fix
                                       # subset) is the same image's other record and is re-evaluated by the
@@ -72,7 +73,8 @@ rollback_class: git-revert            # nothing forward-only: 0 migrations (§1,
                                       # volumeHandle change, no on-disk state in the teslamate pod (emptyDir
                                       # /tmp only). If §4.3 finds an UNEXPECTED migration, §5.2 is the
                                       # restore procedure (Longhorn backup of teslamate-db taken 03:00 same night).
-finding_refs: []                      # `policy-cli.py finding list --grep teslamate` (2026-09-30) has NO row for
+finding_refs: [F-b9f72506]            # image 4.2.0 -> 4.3 version row (added by sweep 288980ff review). Before that,
+                                      # `policy-cli.py finding list --grep teslamate` (2026-09-30) had NO row for
                                       # the image 4.2.0 -> 4.3 bump (4.3.0 published 2026-09-29 14:34Z, after the
                                       # last sweep). F-8abf3da3 / F-65436d0a are the CHART 5.1.0->5.2.1 rows,
                                       # owned by app-template-5.2.1, not this plan.

@@ -70,7 +70,6 @@ conflicts_with:
   - python-fleet-3.14.8
   - unpoller-5.4.0
   - coredns-1.48.2
-  - anythingllm-1.17
   - grafana-13.2.7
   - external-dns-1.23.0
   # - envoy-gateway-1.9.2 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)

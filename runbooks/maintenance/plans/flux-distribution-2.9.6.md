@@ -71,7 +71,6 @@ conflicts_with:
   - coredns-1.48.2                    # 2026-10-05: coredns-1.48.1 superseded
   - talos-linux-1.14.2                # 2026-10-05 review: node roll + folded upgrade-k8s (exclusive covers it; named anyway)
   - talos-power-tuning-ab             # 2026-10-05 review: named for completeness
-  - anythingllm-1.17
   - grafana-13.2.7
   - external-dns-1.23.0
   - longhorn-1.13.0
