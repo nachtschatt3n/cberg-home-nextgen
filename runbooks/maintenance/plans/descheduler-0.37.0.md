@@ -90,8 +90,8 @@ premises:
     why: "§3's sed assumes exactly one `      version: 0.36.0` line in the HR file (run from the repo root)."
     run: "grep -c '^      version: 0.36.0$' kubernetes/apps/kube-system/descheduler/app/helmrelease.yaml"
     expect_exact: "1"
-status: vetted
-window: "nightly:2026-10-12"   # scheduled 2026-10-05 (operator "plan all and time them"): SD-10 pre-approved; alone (shares the monitoring surface with the 10-10 blackbox roll); kept off the A/B evenings (pod placement would confound the thermal comparison)
+status: awaiting-soak   # nightly:2026-10-07: the change LANDED via Step 0 (Renovate PR #272 auto-merged, ecb22f92; HR 0.37.0 Ready, health gate OK). §4.1 PASS 03:42 CEST (image v0.37.0 / schedule unchanged / suspend false; policy sha256 7824e53b...ce12 identical; can-i evict=yes delete=no pvc-list=yes; negative control no). §4.2 OWED: the CronJob schedule is UTC, so the first v0.37.0 run is 2026-10-07 04:00Z (06:00 CEST), after the window - sweep follow-up: run §4.2 on the first descheduler-<n> Job created after 2026-10-07T01:40Z, then retire this file (executed) or roll back per §5.
+window: ""   # cleared 2026-10-07: nothing left to execute in a window (was nightly:2026-10-12, scheduled 2026-10-05 (operator "plan all and time them"): SD-10 pre-approved; alone (shares the monitoring surface with the 10-10 blackbox roll); kept off the A/B evenings (pod placement would confound the thermal comparison)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
