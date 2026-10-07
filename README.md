@@ -482,7 +482,7 @@ quarterly.
 
 ## 📦 Applications
 
-~129 apps across 20 namespaces. Full inventory with per-app purpose, exposure
+~133 apps across 21 namespaces. Full inventory with per-app purpose, exposure
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 
@@ -504,9 +504,9 @@ matter-server · mosquitto · mqttx-web · music-assistant-server · n8n ·
 node-red · otbr · pallet-price-monitor · scrypted-nvr · solarfocus-scraper ·
 teslamate · traccar · trmnl-ha · zero-export-controller · zigbee2mqtt
 
-### 🗄️ Databases (`databases` — 11)
-influxdb · mariadb · memgraph · nocodb · pgadmin · phpmyadmin · postgresql ·
-redis · redisinsight · superset · sweep-history
+### 🗄️ Databases (`databases` — 12)
+influxdb · mariadb · memgraph · ninth-banner-feedback-db · nocodb · pgadmin ·
+phpmyadmin · postgresql · redis · redisinsight · superset · sweep-history
 
 ### 📊 Monitoring & Observability (`monitoring` — 14)
 docs-site · eck-operator · edot-collector · elasticsearch · grafana · headlamp ·
@@ -550,10 +550,17 @@ reloader · spegel
 - prod (6): absenty · andreamosteller · gas-price-monitor · rainbow-rescue · splitfairy · the-ninth-banner  
 - default (2): echo-server · homepage (the homepage app dashboard)
 
-### 🧪 CI runner (`ci-runner` — 2, `arc-system` — 1)
+### 🧪 CI runner (`ci-runner` — 3)
 - the-ninth-banner-tests: sharded Kubernetes Jobs for The Ninth Banner's test suites, triggered from the Mac (`scripts/ninth-banner-test.sh`, [SOP](docs/sops/ci-runner.md))
 - the-ninth-banner-runners: self-hosted GitHub Actions runners (ARC scale set `ninth-banner-k8s`, ephemeral, repo-scoped; [SOP §2c](docs/sops/ci-runner.md))
-- gha-runner-scale-set-controller (`arc-system`): actions-runner-controller for the scale set
+- the-ninth-banner-browser-runners: iGPU browser ARC scale set `ninth-banner-browser-k8s`
+
+### ⚙️ ARC controllers (`arc-system` — 2)
+- gha-runner-scale-set-controller: actions-runner-controller for the `ci-runner` scale sets
+- gha-runner-scale-set-build-controller: actions-runner-controller for the `arc-build` scale set
+
+### 🏗️ CI build runners (`arc-build` — 1)
+- the-ninth-banner-build-runners: privileged dind build runners (ARC scale set `ninth-banner-build-k8s`)
 
 ### 🏢 Showcase applications (`my-software-showcase` — 15)
 Legacy/customer-facing apps kept running for reference. All internal-only:

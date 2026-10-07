@@ -7,7 +7,7 @@
 
 ## Overview
 
-Home lab Kubernetes cluster running ~122 applications across 20 namespaces, managed via GitOps with
+Home lab Kubernetes cluster running ~133 applications across 21 namespaces, managed via GitOps with
 Flux on Talos Linux. Three-node hyper-converged architecture (all nodes serve as both control plane
 and worker). See `docs/applications.md` for the authoritative application count per namespace.
 
@@ -107,7 +107,7 @@ Bootstrap order (via `kubernetes/bootstrap/apps/helmfile.yaml`):
 |-------|-----------|-------|---------|-----------|
 | 1 | Cilium | `cilium/cilium` | 1.20.2 | kube-system | (bootstrap seed aligned to running v1.20.2; Flux HelmRelease also pins 1.20.2 — verified live 2026-09-23) |
 | 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.47.0 | kube-system | (image pinned to 1.14.7 in `helm-values.yaml` ahead of the chart's appVersion 1.14.6 — 1.47.0 is the newest chart published; drop the pin once a chart ships appVersion >= the pinned tag) |
-| 3 | cert-manager | `jetstack/cert-manager` | v1.21.0 | cert-manager |
+| 3 | cert-manager | `jetstack/cert-manager` | v1.21.2 | cert-manager |
 | 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.57.0 | flux-system |
 | 5 | Flux Instance | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-instance` | 0.57.0 | flux-system |
 
@@ -126,7 +126,7 @@ manages all subsequent deployments including upgrades to these components.
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS v1.14.7 (cluster-internal; image tag pinned ahead of the chart) + k8s-gateway (split-DNS for `*.domain`) |
 | Ingress | **Envoy Gateway only (migration completed 2026-09-07).** ingress-nginx is DELETED — zero `Ingress` objects, zero `IngressClass` objects, zero nginx controllers. All HTTP traffic rides 105 `HTTPRoute`s on `envoy-internal` `192.168.55.103` (internal) and `envoy-external` `192.168.55.104` (external, behind the cloudflared wildcard). k8s-gateway publishes DNS from HTTPRoutes. Routing model, conversion rules and the verification gate: `docs/sops/gateway-api-httproute.md`; version upgrades: `docs/sops/envoy-gateway-upgrade.md`. |
 | Storage | Longhorn v1.12.1 (distributed, replicated, with backup) |
-| Certificate Management | cert-manager v1.21.0 + Let's Encrypt |
+| Certificate Management | cert-manager v1.21.2 + Let's Encrypt |
 | Secrets | SOPS + age encryption |
 | Identity Provider | Authentik (forward-auth for apps with no user model; app-native OIDC or SAML for those that have one) |
 | Image Updates | Renovate (weekly) + Flux Image Automation |
@@ -177,7 +177,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 |-----------|---------|-----------|
 | ai | AI/ML services | 11 |
 | home-automation | Smart home integrations | 20 |
-| databases | Database backends | 11 |
+| databases | Database backends | 12 |
 | monitoring | Observability stack | 14 |
 | office | Productivity and document management | 11 |
 | media | Media servers | 5 |
@@ -193,8 +193,8 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | my-software-production | Custom app production | 6 |
 | my-software-showcase | Portfolio showcase (containerized legacy client apps) | 15 |
 | security | Security monitoring (Wazuh, Falco) | 2 |
-| ci-runner | Ephemeral test Jobs + self-hosted GitHub Actions runners (no cluster secrets, egress-locked) | 2 |
-| arc-system | actions-runner-controller (single-namespace RBAC, watches ci-runner) | 1 |
+| ci-runner | Ephemeral test Jobs + self-hosted GitHub Actions runners (no cluster secrets, egress-locked) | 3 |
+| arc-system | actions-runner-controller (single-namespace RBAC; one instance per runner namespace: ci-runner, arc-build) | 2 |
 | arc-build | Privileged dind build runners for the-ninth-banner (ARC scale set ninth-banner-build-k8s) | 1 |
 
 ---
@@ -208,7 +208,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Flux | v2.9.3 | GitOps operator |
 | Cilium | v1.20.2 | CNI / network |
 | Longhorn | v1.12.1 | Distributed storage |
-| cert-manager | v1.21.0 | TLS management |
+| cert-manager | v1.21.2 | TLS management |
 | actions-runner-controller | 0.15.0 | GitHub Actions runner scale sets (controller + scale-set chart in lockstep) |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.36.x | CLI |
