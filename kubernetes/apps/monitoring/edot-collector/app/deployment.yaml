@@ -37,7 +37,7 @@ spec:
         fsGroup: 10001
       containers:
         - name: edot-collector
-          image: otel/opentelemetry-collector-contrib:0.161.0
+          image: otel/opentelemetry-collector-contrib:0.162.0
           args:
             - --config=/config/otel.yml
           ports:
