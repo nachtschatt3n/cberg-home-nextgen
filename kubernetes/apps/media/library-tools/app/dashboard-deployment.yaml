@@ -25,7 +25,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: dashboard
-          image: python:3.14.7-slim
+          image: python:3.14.8-slim
           # pg8000 (pure-Python Postgres driver) is installed at start into the
           # /pylib emptyDir so dashboard.py can read the persisted audit runs in
           # sweep_history.media_audit_runs -- the runtime-pip house pattern
