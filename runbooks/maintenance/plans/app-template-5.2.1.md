@@ -131,7 +131,7 @@ premises:
       NOT escape it. Guard that it is still the only `{{` there.
     run: grep -c '{{' kubernetes/apps/default/echo-server/app/helmrelease.yaml
     expect_exact: "1"
-status: vetted   # 2026-09-27 plan-reviewer: needs-fix (4 blocking) -> all applied -> re-check ready-for-go. NO operator GO recorded.
+status: awaiting-go   # nightly:2026-10-09: deferred - SD-11 pre-approved but risk medium and the cron directive defers above low-risk; premises PASS 6/6; go_no_go refreshed in home-operation. (2026-09-27 plan-reviewer: needs-fix (4 blocking) -> all applied -> re-check ready-for-go.)
 review: ready-for-go@2026-09-27
 amended: "2026-10-05 scope-neutral refresh -- premises 79/79/80 -> 66/66/82 (15 consumers decommissioned 2026-10-04 by ac7bf0e0 are now inert repo files; +2 new consumers splitfairy/the-ninth-banner render LABEL_ONLY, Recreate). Fleet render gate re-run: TOTALS LABEL_ONLY=67 GATE_PASS; inert 16 files repo-values render identical. Batch A sed unchanged (dry-test: 80 files). conflicts_with += flux-fleet-0.60.0, kube-prometheus-stack-91.9.0, iobroker-12.0.0 + 12 reciprocals; makemkv-v26.09.2 dead ref dropped. finding_refs +2."
 window: "nightly:2026-10-09"   # scheduled 2026-10-05 (operator "plan all and time them"): SD-11 pre-approved; not 10-06 (flux-fleet blinds flux_resource_info), not 10-07 (between talos-power-tuning-ab A/B evenings)
