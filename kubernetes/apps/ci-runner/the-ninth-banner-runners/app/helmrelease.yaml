@@ -162,7 +162,7 @@ spec:
               - { name: home, mountPath: /home/pwuser }
               - { name: tmp, mountPath: /tmp }
           - name: postgres
-            image: postgres:16-alpine
+            image: postgres:18-alpine
             env:
               - { name: POSTGRES_PASSWORD, value: postgres }
               - { name: PGDATA, value: /tmp/pgdata }
