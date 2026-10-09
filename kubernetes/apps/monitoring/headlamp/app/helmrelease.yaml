@@ -54,7 +54,7 @@ spec:
       # Chart default is node:lts-alpine (floating). Pinned to the version the
       # cluster was running (digest-verified match to lts-alpine on 2026-08-17).
       # Bumped 2026-08-18 for security_ref F-1db8884d.
-      baseImage: node:24.19.0-alpine
+      baseImage: node:24.21.0-alpine
       configContent: |
         plugins:
           - name: flux
