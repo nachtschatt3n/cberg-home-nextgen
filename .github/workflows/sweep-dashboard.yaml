@@ -93,7 +93,7 @@ jobs:
           fi
 
       - name: Build (loaded locally so the smoke-tested image is what gets pushed)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: containers/sweep-dashboard/Dockerfile
