@@ -52,7 +52,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: intake
-              image: python:3.14.8-slim
+              image: python:3.14.7-slim
               command: ["python", "/app/intake.py"]
               env:
                 - name: INTAKE_APPLY          # kill switch: "0" = plan only

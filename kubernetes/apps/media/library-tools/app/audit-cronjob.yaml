@@ -55,7 +55,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: audit
-              image: python:3.14.8-slim
+              image: python:3.14.7-slim
               command: ["bash", "-c"]
               args:
                 - |
