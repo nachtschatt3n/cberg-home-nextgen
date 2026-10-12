@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.10.06"
+version: "2026.10.12"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -507,6 +507,29 @@ deny:
       rollout restart deploy/sure-worker`, then assert the sidekiq-cron set
       `cron_jobs:default` (NOT `cron_jobs`) has 11 members (SCARD). Remove this
       rule only when that restart+assert is automated in the apply path.
+  - match: "*home-assistant/home-assistant*"
+    reason: >-
+      HELD 2026-10-12 by operator decision. The operator runs many Home Assistant
+      integrations, and a release can change or remove any of them while the pod
+      stays Ready - the Step 0 health gate reads pod health, not whether each
+      integration still loads, so a bad bump looks green. Every HA bump therefore
+      goes through a window plan (runbooks/maintenance/plans/home-assistant-*.md)
+      that takes a backup first, checks the release notes for a recorder schema
+      migration (which makes a revert after start unsafe), and verifies each
+      integration against a baseline afterwards. Sequenced after the
+      opentelemetry-operator fix, so a monitoring gap cannot hide an HA
+      regression. REMOVE THIS RULE only when the operator wants HA back on the
+      unattended lane. security_ref: F-07517014
+  - match: "*opentelemetry-kube-stack*"
+    reason: >-
+      HELD 2026-10-12 (F-c01269d5). Chart 0.24.x ships a default-deny
+      NetworkPolicy for the operator whose egress cannot match node addresses
+      under Cilium, so the operator loses its API server and crash-loops; the
+      rollback then needs a Ready operator too, leaving the HelmRelease stuck in
+      RollbackFailed. Renovate keeps re-opening the bump, so the nightly would
+      re-poison itself. REMOVE THIS RULE only when a chart release is rendered
+      offline (helm template) and shown not to create that policy, or the policy
+      is disabled in values, and the bump goes through an attended window.
 # ── Hard blocks by Renovate manager ─────────────────────────────────────────
 # github-actions patch/minor are already auto-merged by Renovate itself
 # (packageRules in .github/renovate.json5); don't double-handle them here.
