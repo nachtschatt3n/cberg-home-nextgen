@@ -42,7 +42,7 @@ spec:
               repository: node
               # Pinned to the digest that was live on 2026-08-18 (node 22.23.2);
               # upstream rebuilds 22-bookworm/22.23.2-bookworm in place.
-              tag: 22.23.2-bookworm@sha256:0557ac14e0d45d02ed563067b82856ca5e7aa3437fa28d98d4350ea9c3d9494a
+              tag: 22.23.3-bookworm@sha256:0e5f906573693feaa1e21057ebdcfdb5bd5021f050b2dc7c9deceb629c7da2a8
             command:
               - bash
               - -lc
@@ -619,7 +619,7 @@ spec:
               repository: node
               # Pinned to the digest that was live on 2026-08-18 (node 22.23.2);
               # upstream rebuilds 22-bookworm/22.23.2-bookworm in place.
-              tag: 22.23.2-bookworm@sha256:0557ac14e0d45d02ed563067b82856ca5e7aa3437fa28d98d4350ea9c3d9494a
+              tag: 22.23.3-bookworm@sha256:0e5f906573693feaa1e21057ebdcfdb5bd5021f050b2dc7c9deceb629c7da2a8
               pullPolicy: IfNotPresent
 
             command:
