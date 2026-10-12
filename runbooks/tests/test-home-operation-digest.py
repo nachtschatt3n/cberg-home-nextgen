@@ -45,7 +45,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
         FAILURES.append(name)
 
 
-def load_hop(state_dir: Path):
+def load_hop(state_dir: Path, push_warnings: bool = True):
     if not shutil.which("sops"):
         return None, "sops binary not found"
     r = subprocess.run(["sops", "-d", "--extract", '["data"]["home-operation.py"]', str(CONFIGMAP)],
@@ -55,6 +55,7 @@ def load_hop(state_dir: Path):
     src = state_dir / "home_operation.py"
     src.write_text(r.stdout)
     os.environ["HOME_OP_STATE_DIR"] = str(state_dir)
+    os.environ["HOME_OP_PUSH_WARNINGS"] = "1" if push_warnings else "0"
     spec = importlib.util.spec_from_file_location("home_operation", src)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -153,6 +154,20 @@ def main() -> int:
         sent, res = tick(hop)
         check("critical: pushes at 02:00 Berlin, urgent, on its own",
               len(sent) == 1 and sent[0][1] is True and "REVERTED" in sent[0][0], str(sent))
+
+    # 2026-10-13: warning reminders are OFF by default; criticals still push.
+    with tempfile.TemporaryDirectory() as td:
+        hop, skip = load_hop(Path(td), push_warnings=False)
+        if hop is not None:
+            issue(hop, "n8n-2.39.8", component="n8n")
+            issue(hop, "rebuild:img0", action="ack", needs=0, title="REBUILD: img0")
+            at(hop, 2026, 10, 13, 10, 0)
+            sent, res = tick(hop)
+            check("default: warning reminders are not pushed at all", sent == [], str(sent))
+            issue(hop, "auto-update-revert-y", severity="critical", action="ack", needs=0,
+                  title="REVERTED: batch y")
+            sent, res = tick(hop)
+            check("default: a critical still pushes", len(sent) == 1 and sent[0][1] is True, str(sent))
 
     print(f"\n{'FAILED' if FAILURES else 'OK'}: {len(FAILURES)} failure(s)")
     return 1 if FAILURES else 0
