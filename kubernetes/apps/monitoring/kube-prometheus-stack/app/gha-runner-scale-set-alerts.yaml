@@ -4,7 +4,7 @@
 # arc-system, the ephemeral runner pods in ci-runner.
 #
 # Runner pods in ci-runner are ALSO covered by ci-runner-alerts.yaml
-# (CIRunnerPodStuckPending: Pending > 30 min, e.g. both CI nodes full, image
+# (CIRunnerPodStuckPending: Pending > 30 min, e.g. all three CI nodes full, image
 # pull failure). They are ephemeral (restartPolicy Never, one job each), so the
 # usual restart-count rules do not see a failing runner; ARC's own
 # gha_controller_failed_ephemeral_runners does (ARCRunnerFailing).
@@ -136,14 +136,15 @@ spec:
             component: arc
             severity: warning
         # Jobs assigned to the scale set but no runner busy with them for 30
-        # min: runner pods cannot be scheduled (both CI nodes occupied, quota)
+        # min: runner pods cannot be scheduled (all three nodes occupied, quota)
         # or never come up. Complements CIRunnerPodStuckPending.
         - alert: ARCRunnerJobsWaiting
           annotations:
             description: '{{ $value }} job(s) assigned to scale set {{ $labels.name }}
               have had no busy runner for 30 minutes. Check `kubectl -n ci-runner
               get pods -l app.kubernetes.io/name=the-ninth-banner-runner -o wide`
-              (Pending? quota? node affinity nuc14-01/03 only).'
+              (Pending? quota? no free CPU on any of the three nodes; nuc14-02
+              has the least headroom).'
             summary: GitHub Actions jobs are waiting for a self-hosted runner
           expr: |
             (

@@ -8,8 +8,10 @@
 # alert names (routing, silences and docs/sops/failed-job-alerting.md keep
 # working) with one narrow exclusion each.
 # KubeCPUQuotaOvercommit / KubeMemoryQuotaOvercommit stay stock: they compare
-# the SUM of hard quotas to allocatable (> 1.5x); ci-runner-quota is 12 CPU /
-# 36Gi (~0.24x / ~0.21x of 51 CPU / 174 GiB), nowhere near, so no override.
+# the SUM of hard quotas to allocatable (> 1.5x). 2026-10-12: ci-runner-quota
+# 62 CPU / 165Gi + arc-build-quota 12 CPU / 24Gi = ~1.45x CPU / ~1.09x memory
+# of 51 CPU / 174 GiB: just below 1.5x, so any further CI quota raise trips
+# KubeCPUQuotaOvercommit and needs an override here first.
 #
 # These are inline copies of the stock rules (chart 91.5.2): on every
 # kube-prometheus-stack minor/major bump, diff them against the chart's
