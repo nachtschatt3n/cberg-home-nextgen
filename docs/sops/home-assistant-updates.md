@@ -61,15 +61,30 @@ canary for boot-time package breakage.
 ```bash
 POD=$(mise exec -- kubectl get pods -n home-automation -l app.kubernetes.io/name=home-assistant \
   --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
-# No output = healthy:
-mise exec -- kubectl logs -n home-automation "$POD" -c app \
-  | grep -E "Unable to install package|Resource busy|os error 16|Setup failed for custom integration"
+# Read the log from the pod's startTime, NOT --since=15m (a relative window can
+# roll past the restart, or begin after the failures were logged):
+START=$(mise exec -- kubectl get pod -n home-automation "$POD" -o jsonpath='{.status.startTime}')
+mise exec -- kubectl logs -n home-automation "$POD" -c app --since-time="$START" > /tmp/ha-pod.log
+# CONTROL first: a log shorter than ~1000 lines was rotated past the restart or is empty,
+# and a clean grep on it proves nothing:
+wc -l < /tmp/ha-pod.log
+# No output = healthy (case-insensitive; the log carries ANSI colour codes, which do not
+# affect these patterns). Upstream shapes: "Setup failed for custom integration 'x'",
+# "Error setting up entry ... for x", "Migration handler not found for entry":
+grep -iE "Unable to install package|Resource busy|os error 16|Setup failed for|Error setting up|Migration handler not found" /tmp/ha-pod.log
 ```
+
+The pod log is the Home Assistant log. `hactl get error-log` is NOT: it is a small
+helper payload (`unavailable_entities` full list plus a few logbook-filtered
+`recent_errors`), so a clean read there says nothing about setup failures. When you
+need a pass/fail gate rather than a look, use the dry-tested form in
+`runbooks/maintenance/plans/home-assistant-2026.10.1.md` section 4.3 (size control plus
+a new-ERROR-signature diff against the pre-roll log).
 
 Then confirm the four canary config entries reach `loaded` (via
 `/api/config/config_entries/entry` with an HA token, or the ha-agent):
 `alexa_devices`, `dirigera_platform`, `dwd_weather`, `custom_conversation`.
-Also check `/api/error_log` for anything new.
+Also scan the pod log above for anything new (not `hactl get error-log`).
 
 ### Step 2 — certifi / site-packages hard rule (ALWAYS)
 
@@ -132,7 +147,7 @@ POST /api/services/todo/get_items?return_response
 ```
 
 Expect items returned, the `alexa_devices` config entry `loaded` (Step 1), and
-no `alexa` errors in `/api/error_log`.
+no `alexa` errors in the pod log (`--since-time` from the pod startTime, Step 1).
 
 Definitive round-trip test (verified working 2026-08-03) — the only check that
 proves the Amazon side rather than a local cache:
@@ -211,7 +226,7 @@ zigbee-agent only if `lastSeen` is genuinely stale.
 # Steps 1-4 only; total ~5 min
 POD=$(mise exec -- kubectl get pods -n home-automation -l app.kubernetes.io/name=home-assistant \
   --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
-mise exec -- kubectl logs -n home-automation "$POD" -c app | grep -cE "Unable to install|Setup failed" # 0
+mise exec -- kubectl logs -n home-automation "$POD" -c app --since-time="$START" | grep -ciE "Unable to install|Setup failed|Error setting up" # 0 (START = pod startTime, Step 1)
 mise exec -- kubectl logs -n home-automation "$POD" -c certifi-patch                                   # redirected OK
 # + config entries loaded, HmIP available, sustained-outage boolean off (Step 1/3)
 # + Alexa todo round-trip: add / count++ / remove by STORED summary (Step 4)
@@ -229,11 +244,13 @@ custom-code regression. Only mark the bump verified after both report clean.
 ### Test 1: no boot-time install failures
 
 ```bash
-mise exec -- kubectl logs -n home-automation "$POD" -c app \
-  | grep -cE "Unable to install package|Setup failed for custom integration"
+START=$(mise exec -- kubectl get pod -n home-automation "$POD" -o jsonpath='{.status.startTime}')
+mise exec -- kubectl logs -n home-automation "$POD" -c app --since-time="$START" \
+  | grep -ciE "Unable to install package|Setup failed for|Error setting up"
 ```
 
-Expected: `0`. If not, capture `/api/error_log`, see Troubleshooting.
+Expected: `0`, with a log of at least ~1000 lines (`| wc -l`, same command without the grep) so a
+rotated or empty log cannot read as clean. If not, capture the matching lines from the pod log, see Troubleshooting.
 
 ### Test 2: canary config entries loaded
 
@@ -262,7 +279,7 @@ a failure signal.
 | Symptom | Likely Cause | First Fix |
 |---------|--------------|-----------|
 | `Unable to install package …: Resource busy (os error 16)` | Something mounted over site-packages again | `docs/sops/home-assistant-certifi-ca-trust.md` HARD RULE — neutral-path pattern |
-| Canary entries `setup_retry`/`setup_error` but no install error | Integration-specific breakage (API change, credentials) | Check `/api/error_log` for that domain; treat per-integration |
+| Canary entries `setup_retry`/`setup_error` but no install error | Integration-specific breakage (API change, credentials) | Grep the pod log (`--since-time` from pod startTime) for that domain; treat per-integration |
 | HmIP unavailable > 15 min, self-heal not triggered | Automation disabled/broken by an update | Verify `automation.hmip_cloud_session_self_heal` is `on`; check its trace; reload entry `01JRZY6QRWHRW34RP7ZPASGKTS` manually only as last resort |
 | Custom sentences stop matching after bump | Core intent schema change | Compare against release notes; adjust `/config/custom_sentences/` |
 | `todo/remove_item` → HTTP 500 on an item you just added | Amazon normalized the summary to sentence case | `todo/get_items` first, remove by the stored summary or uid (Step 4) |
@@ -323,6 +340,15 @@ cd /Users/mu/code/cberg-home-nextgen
 git revert <bump-sha>
 git push   # Flux rolls HA back; then re-run Steps 1-4 of this SOP
 ```
+
+`git revert` restores only the image. A core bump can rewrite `/config/.storage`
+(config-entry migrations are forward-only) and `.HA_VERSION`; if any config entry
+`version`/`minor_version` moved, or an entry is `migration_error`, the revert is not
+enough and the restore path in the bump's maintenance plan applies (HA backup tar,
+which is encrypted and needs its key, or the Longhorn backup of
+`home-assistant-config`). To check that a fresh HA backup exists before a bump, use
+`find /config/backups -name '*.tar' -mmin -60 -size +1000000k | wc -l` inside the pod
+(BusyBox: `ls --time-style` is rejected and `ls | tail` hides the exit status).
 
 ---
 
