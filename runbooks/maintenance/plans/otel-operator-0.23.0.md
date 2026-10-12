@@ -201,7 +201,7 @@ finding_refs: [F-60ebcdb5]             # RE-VERIFIED 2026-10-03 (retarget): the 
                                        # F-a85e8943 (CRD ownership) is still deliberately NOT
                                        # claimed here — it is owned by prometheus-crd-ownership,
                                        # and double-claiming breaks the plan-or-page join.
-status: draft   # RESET 2026-10-03 by the 0.24.0 retarget (README: "a retarget/material amendment
+status: executed   # EXECUTED OUT-OF-BAND 2026-10-12 as a roll-forward, not via this plan: chart 0.24.3 live (commit 0e976cf5) with manager.featureGatesMap operator.networkpolicy=false after the operator's self-created default-deny NetworkPolicy deadlocked 0.24.x (F-97c88a5c, closed). HR Ready (release v70), collector generation == observed, operator Ready. Plan body predates that finding - do not run. WAS: draft, RESET 2026-10-03 by the 0.24.0 retarget (README: "a retarget/material amendment
                 # re-reviews"). HISTORY, preserved: drafted 2026-09-19 -> reviewer needs-fix ->
                 # fixed -> re-review ready-for-go@2026-09-28 -> vetted -> scheduled
                 # nightly:2026-10-03 -> 2026-10-03 nightly DEFERRED, status awaiting-go, with
