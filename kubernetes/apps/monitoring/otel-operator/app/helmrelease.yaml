@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: opentelemetry-kube-stack
-      version: 0.21.0
+      version: 0.24.3
       sourceRef:
         kind: HelmRepository
         name: opentelemetry
@@ -49,6 +49,10 @@ spec:
           enabled: true
           recreate: true
       manager:
+        # the operator creates its own default-deny NetworkPolicy at startup; its egress
+        # allows node IPs that Cilium never matches (host identity), so it loses the API
+        featureGatesMap:
+          operator.networkpolicy: false
         resources:
           requests:
             cpu: 50m
