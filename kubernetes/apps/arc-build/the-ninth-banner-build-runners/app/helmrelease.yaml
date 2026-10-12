@@ -33,7 +33,7 @@ spec:
                 value:
                   # dind runs BuildKit (the build itself): owner 2026-10-06
                   # allows up to 6 CPU (bursts accepted). Request 1.5 (+0.5
-                  # runner = 2.0 per build pod) is sized for the gate's 6-CPU
+                  # runner = 2.0 per build pod) is sized for the old 6-CPU
                   # node budget: 1 build + 2 CPU runners (1.6) = 5.2 per node.
                   requests: {cpu: 1500m, memory: 1Gi, ephemeral-storage: 4Gi}
                   limits: {cpu: "6", memory: 4Gi, ephemeral-storage: 16Gi}
@@ -42,10 +42,11 @@ spec:
     githubConfigSecret: the-ninth-banner-arc-build-github
     runnerScaleSetName: ninth-banner-build-k8s
     # Owner 2026-10-06: one warm idle build runner (release image builds start
-    # at once) and 2 in total (main + tag image build of a release overlap).
-    # Idle, it keeps its 2.0 CPU request on its node.
+    # at once). Max 3 since 2026-10-12 (was 2 on two nodes): one build pod
+    # per CI node now that nuc14-02 is back. Idle, it keeps its 2.0 CPU
+    # request on its node.
     minRunners: 1
-    maxRunners: 2
+    maxRunners: 3
     controllerServiceAccount:
       namespace: arc-system
       name: arc-build-controller
@@ -85,13 +86,10 @@ spec:
         automountServiceAccountToken: false
         enableServiceLinks: false
         affinity:
-          nodeAffinity:
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-                - matchExpressions:
-                    - key: kubernetes.io/hostname
-                      operator: In
-                      values: ["k8s-nuc14-01", "k8s-nuc14-03"]
+          # Owner, 2026-10-12: nuc14-02 is clean again (cooler cleaned, coolest
+          # node under the RAPL caps), so the node affinity that kept CI on
+          # nuc14-01/03 (plan ci-runner-exclude-node02) is gone: all three
+          # nodes take CI pods, the shard Job template too.
           podAntiAffinity:
             # Owner 2026-10-06: no hard one-runner-per-node rule any more. Pods
             # of all three pools may share a node. The thermal gate was removed

@@ -37,9 +37,11 @@ spec:
     # release fires ~5 jobs within a minute). An idle runner keeps its CPU
     # request on its node.
     minRunners: 1
-    # nuc14-01/03 only; 4 x 1.6 CPU fit the two nodes' 6-CPU CI budgets next
-    # to the build pool (2 x 2 CPU).
-    maxRunners: 4
+    # 2026-10-12: three CI nodes (nuc14-02 back), was 4 on two nodes. 6 x 1.6
+    # CPU = 2 runners per node next to one build pod (3 x 2.0 CPU): the same
+    # per-node load as before (5.2 CPU), spread by the preferred
+    # anti-affinity below; the 35/55 W RAPL caps are unchanged.
+    maxRunners: 6
     controllerServiceAccount:
       namespace: arc-system
       name: arc-controller
@@ -91,16 +93,10 @@ spec:
           seccompProfile:
             type: RuntimeDefault
         affinity:
-          nodeAffinity:
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-                - matchExpressions:
-                    # Owner, 2026-10-06: the CI farm is nuc14-01 + nuc14-03.
-                    # nuc14-02 stays excluded (suspected cooler defect, plan
-                    # ci-runner-exclude-node02), the shard Job template excludes it too.
-                    - key: kubernetes.io/hostname
-                      operator: In
-                      values: ["k8s-nuc14-01", "k8s-nuc14-03"]
+          # Owner, 2026-10-12: nuc14-02 is clean again (cooler cleaned, coolest
+          # node under the RAPL caps), so the node affinity that kept CI on
+          # nuc14-01/03 (plan ci-runner-exclude-node02) is gone: all three
+          # nodes take CI pods, the shard Job template too.
           podAntiAffinity:
             # Owner 2026-10-06: no hard one-runner-per-node rule any more. Pods
             # of all three pools may share a node. The thermal gate was removed
@@ -152,9 +148,11 @@ spec:
               # cpu-lane pod (the gate counts it as one). Owner 2026-10-06: up
               # to 6 CPU (Vitest was CPU-bound at 2), bursts toward the limit
               # accepted. Request 1.5 (+ postgres 0.1 = 1.6) is sized for the
-              # gate's 6-CPU node budget: 2 runners + 1 build pod (2.0) = 5.2
-              # per node, below the ~7.7 CPU production leaves free on
-              # nuc14-01/03. Browser jobs use the separate GPU scale set.
+              # old 6-CPU node budget: 2 runners + 1 build pod (2.0) = 5.2
+              # per node. Production leaves ~4.8 (nuc14-02) to ~8 CPU free per
+              # node (2026-10-12); the scheduler places against requests, so a
+              # full node just leaves a pod Pending (ci-low never preempts).
+              # Browser jobs use the separate GPU scale set.
               requests: { cpu: 1500m, memory: 2Gi, ephemeral-storage: 2Gi }
               limits: { cpu: "6", memory: 6Gi, ephemeral-storage: 16Gi }
             volumeMounts:

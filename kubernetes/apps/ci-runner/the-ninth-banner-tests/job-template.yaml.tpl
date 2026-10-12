@@ -5,7 +5,7 @@
 #
 # Indexed Job: one pod per shard (JOB_COMPLETION_INDEX -> --shard=i+1/N),
 # at most __PARALLELISM__ (3 GPU / 2 CPU) at a time per Job; node placement is
-# left to the scheduler (nuc14-02 excluded below). backoffLimitPerIndex 0 +
+# left to the scheduler (all three nodes since 2026-10-12). backoffLimitPerIndex 0 +
 # maxFailedIndexes N: a failing shard is NOT retried and does NOT stop the
 # others, so every shard reports.
 apiVersion: batch/v1
@@ -46,17 +46,9 @@ spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
       terminationGracePeriodSeconds: 10
-      # Owner, 2026-10-06: the thermal gate is removed. nuc14-02 stays
-      # excluded (suspected cooler defect); the 35/55 W RAPL caps are the only
-      # heat limit.
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: kubernetes.io/hostname
-                    operator: NotIn
-                    values: ["k8s-nuc14-02"]
+      # Owner, 2026-10-06: the thermal gate is removed; the 35/55 W RAPL caps
+      # are the only heat limit. Owner, 2026-10-12: nuc14-02 is clean again,
+      # its NotIn node affinity is gone, shards may land on any node.
       securityContext:
         # the Playwright image's own non-root user (pwuser, uid/gid 1001)
         runAsNonRoot: true

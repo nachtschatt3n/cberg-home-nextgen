@@ -32,7 +32,7 @@ spec:
       - linux
       - x64
     minRunners: 0
-    # One runner per node (anti-affinity below) on nuc14-01/03 only.
+    # One iGPU runner; any of the three nodes (nuc14-02 back since 2026-10-12).
     maxRunners: 1
     controllerServiceAccount:
       namespace: arc-system
@@ -84,16 +84,10 @@ spec:
           seccompProfile:
             type: RuntimeDefault
         affinity:
-          nodeAffinity:
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-                - matchExpressions:
-                    # Owner, 2026-10-06: the CI farm is nuc14-01 + nuc14-03.
-                    # nuc14-02 stays excluded (suspected cooler defect, plan
-                    # ci-runner-exclude-node02), the shard Job template excludes it too.
-                    - key: kubernetes.io/hostname
-                      operator: In
-                      values: ["k8s-nuc14-01", "k8s-nuc14-03"]
+          # Owner, 2026-10-12: nuc14-02 is clean again (cooler cleaned, coolest
+          # node under the RAPL caps), so the node affinity that kept CI on
+          # nuc14-01/03 (plan ci-runner-exclude-node02) is gone: all three
+          # nodes take CI pods, the shard Job template too.
           podAntiAffinity:
             # Owner 2026-10-06: no hard one-runner-per-node rule any more. Pods
             # of all three pools may share a node. The thermal gate was removed

@@ -8,6 +8,8 @@
 # 2026-10-06: +5 pods and their resources for the ARC runner pods that share
 # this namespace (ninth-banner-k8s max 4 at 1.6/6.5 CPU, ninth-banner-browser-k8s
 # max 1), so warm/busy runners never eat the 24 shard pods' room.
+# 2026-10-12: ninth-banner-k8s max 4 -> 6 (nuc14-02 back): +2 pods, +3.2 CPU /
+# +4.25Gi / +4Gi requests, +13 CPU / +13Gi / +36Gi limits.
 # Rollback: docs/sops/ci-runner.md §11 Rollback Plan.
 apiVersion: v1
 kind: ResourceQuota
@@ -16,13 +18,13 @@ metadata:
   namespace: ci-runner
 spec:
   hard:
-    pods: "29"
-    requests.cpu: "58"
-    requests.memory: 160Gi
-    requests.ephemeral-storage: 212Gi
-    limits.cpu: "128"
-    limits.memory: 280Gi
-    limits.ephemeral-storage: 480Gi
+    pods: "31"
+    requests.cpu: "62"
+    requests.memory: 165Gi
+    requests.ephemeral-storage: 216Gi
+    limits.cpu: "141"
+    limits.memory: 293Gi
+    limits.ephemeral-storage: 516Gi
     services: "0"
     services.loadbalancers: "0"
     services.nodeports: "0"
