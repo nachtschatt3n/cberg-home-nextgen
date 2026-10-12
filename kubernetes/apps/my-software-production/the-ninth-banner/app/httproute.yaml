@@ -5,7 +5,8 @@
 # decommissioned blueprint-first. What still protects the host:
 #   - /metrics is 404'd at the gateway (below);
 #   - POST /ai/generate, the only path reaching the SHARED Mac mini Ollama, has
-#     its own route with a tight edge rate limit (BackendTrafficPolicy below);
+#     its own route with an edge rate limit, per client IP plus a global cap
+#     (BackendTrafficPolicy below);
 #     the game falls back to offline text on 429.
 # Accepted exposure is recorded in sweep_history security_acceptances
 # (runbooks/policy-cli.py sec). Route pattern: docs/sops/gateway-api-httproute.md.
@@ -127,19 +128,40 @@ spec:
           name: the-ninth-banner
           port: 80
 ---
-# Edge rate limit protecting the shared Ollama host, on top of the app's own
-# per-client limit. Target is the HTTPRoute above, NOT a Gateway: only ONE
+# Edge rate limit protecting the shared Ollama host, on top of the proxy's own
+# limits (30/min, 400 per 6h, ai.yaml) and its one-request-at-a-time queue to
+# Ollama. Target is the HTTPRoute above, NOT a Gateway: only ONE
 # BackendTrafficPolicy may target a Gateway (envoy-compression owns that).
 #
 # mergeType StrategicMerge: without it a route-level BTP REPLACES the
 # gateway-level one for this route, silently dropping its compression and
 # timeout settings. With it, this rateLimit is merged into envoy-compression.
 #
-# Local rate limits are enforced PER ENVOY REPLICA. envoy-external runs 3
-# replicas, so 2/min each = at most ~6 req/min across the gateway (operator
-# decision 2026-10-02 when the host went public: Ollama runs NUM_PARALLEL=1
-# and is shared with the rest of the household's AI). Excess requests get a
-# 429 from Envoy; the game client falls back to offline text.
+# History: 2/min per replica, ONE bucket shared by every player (2026-10-02).
+# After-battle bursts of 3-9 requests made players hit 429 (17x in 7 days),
+# which can switch AI text off for a session. Owner approved raising it
+# 2026-10-12: per client ~20/min with room for the burst, global ~60/min.
+#
+# How it works (Envoy Gateway v1.9.2 Local limits; there is NO global
+# rate-limit service / Redis in this cluster, so Type Global is unavailable):
+#   - rules 0+1, sourceCIDR Distinct: one bucket PER CLIENT IP (v4 and v6).
+#     The client IP is the one envoy-external's ClientTrafficPolicy selects:
+#     XFF set by Cloudflare, trusted only from the pod CIDR (cloudflared), so
+#     clients cannot forge it (network/envoy-gateway/app/policies.yaml).
+#   - rule 2, methods POST (the route only matches POST): ONE shared bucket for
+#     everyone = the global cap. It must have a selector: a no-selector rule
+#     becomes Envoy's default bucket, which EG configures with
+#     always_consume_default_token_bucket=false, so requests that match a
+#     per-client descriptor would never count against it.
+#   A request is checked against every rule it matches; the strictest wins.
+#
+# Local limits are enforced PER ENVOY REPLICA and envoy-external runs 3;
+# cloudflared spreads requests over replicas (measured: 16/29/0 over 7 days).
+#   - per client: 10/min per replica. Covers the 3-9 burst within one
+#     replica's bucket; spread over 2-3 replicas that is ~20-30/min per client.
+#   - global: 20/min per replica = ~60/min across the gateway.
+# Token buckets refill in full each minute, so a full bucket is the burst.
+# Excess gets a 429 from Envoy; the game client falls back to offline text.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
@@ -155,6 +177,26 @@ spec:
     type: Local
     local:
       rules:
-        - limit:
-            requests: 2
+        # Per client, IPv4.
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: 0.0.0.0/0
+          limit:
+            requests: 10
+            unit: Minute
+        # Per client, IPv6.
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: ::/0
+          limit:
+            requests: 10
+            unit: Minute
+        # Global cap: one bucket shared by all clients.
+        - clientSelectors:
+            - methods:
+                - value: POST
+          limit:
+            requests: 20
             unit: Minute

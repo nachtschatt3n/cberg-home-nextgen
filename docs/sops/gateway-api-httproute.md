@@ -222,6 +222,18 @@ and compression. Expect status `Merged=True` ("Merged with policy
 network/envoy-compression") next to `Accepted=True`. Local rate limits are
 per Envoy replica (envoy-external runs 3), so divide the intended total.
 
+Per-client limits work with Local limits (EG >= 1.9 uses Envoy dynamic
+descriptors): a rule with `sourceCIDR: {type: Distinct, value: 0.0.0.0/0}`
+(plus a second one for `::/0`) gives each client IP its own bucket, keyed on
+the IP the gateway's ClientTrafficPolicy selects. To ALSO cap the total, add a
+shared rule WITH a selector (e.g. `methods: [{value: POST}]`); a rule with no
+`clientSelectors` becomes Envoy's default bucket, which EG sets to
+`always_consume_default_token_bucket: false`, so requests matching a
+per-client descriptor never count against it. A request is checked against
+every rule it matches and the strictest wins. Global (exact, cross-replica)
+limits need the EG rate-limit service + Redis, which this cluster does NOT
+run. Example: `the-ninth-banner-ai-generate`.
+
 ### 4.2 Timeouts — the silent tightening
 
 nginx's `proxy-read-timeout`/`proxy-send-timeout` default is **60s**. **Envoy's
@@ -1130,3 +1142,8 @@ Rollback cautions specific to this migration:
   replica. Inventory re-measured live: external 27 hostnames / 30
   routes, 112 routes total (the earlier "32" external count did not reproduce
   with the parentRef method; only the callback route was actually removed).
+- `2026.10.12`: `ninthbanner` `POST /ai/generate` limit raised (owner-approved)
+  from one shared 2/min-per-replica bucket to 10/min per client IP (Distinct
+  sourceCIDR, v4 + v6) plus a shared 20/min cap, both per envoy-external
+  replica (~60/min total). Documented the per-client + global-cap pattern and
+  the default-bucket gotcha under rule 10.
