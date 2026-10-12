@@ -38,6 +38,7 @@ depends_on: []
 conflicts_with:                       # carried over unchanged from the superseded 1.39.2 plan (all ids
                                       # re-checked as existing plan files 2026-10-07); reasons in §6
   - app-template-5.2.1                # gateway/envoy; rolls ~78 apps whose routes §4.3 diffs
+  - app-template-5.3.0                # gateway/envoy; successor of 5.2.1, rolls the same ~78 apps
   - penpot-chart-1.10.0               # gateway/envoy-external; same §4.3 poisoning
   - talos-linux-1.14.2                # node drain competes for the single PDB disruption
   - external-dns-1.23.0               # public-edge: reads Gateway envoy-external's target
@@ -45,7 +46,7 @@ conflicts_with:                       # carried over unchanged from the supersed
   - chart-patches-coredns-reloader-blackbox   # rolls blackbox-exporter = the probe_success instrument
   - flux-fleet-0.60.0                 # upgrades kustomize-controller, which applies §3 and carries §5
   - flux-reconciler-impersonation     # exclusive; rewrites how kustomize-controller applies this
-  - kube-prometheus-stack-91.9.0      # §2.7/§4.4 read Prometheus + Alertmanager: shared instrument
+  - kube-prometheus-stack-92.2.0      # §2.7/§4.4 read Prometheus + Alertmanager: shared instrument
   - flux-distribution-2.9.6           # exclusive; upgrades the Flux controllers that apply §3 / revert §5
   - flux-oci-chart-sources            # moves Flux sources; same §3/§5 apply-and-revert path
 capability_change: false              # same-behaviour patch: no new route, permission, API surface or
@@ -632,7 +633,7 @@ undo is overwritten at the next reconcile. Follow it with 5.1 immediately.
   - `talos-linux-1.14.2`: a node drain competes for the single PDB disruption;
   - `external-dns-1.23.0`: public-edge;
   - `coredns-1.48.2` and `chart-patches-coredns-reloader-blackbox`: the instrument path;
-  - `kube-prometheus-stack-91.9.0`: Prometheus/Alertmanager is the §2.7/§4.4 instrument;
+  - `kube-prometheus-stack-92.2.0`: Prometheus/Alertmanager is the §2.7/§4.4 instrument;
   - `flux-fleet-0.60.0`, `flux-reconciler-impersonation`, `flux-distribution-2.9.6` and
     `flux-oci-chart-sources`: the apply and revert path.
 - **Traffic during the roll.** Both proxy Deployments roll surge-first, one pod at a
