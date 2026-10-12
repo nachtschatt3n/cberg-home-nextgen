@@ -27,7 +27,7 @@ spec:
   values:
     image:
       repository: louislam/uptime-kuma
-      tag: 2.5.5-slim-rootless
+      tag: 2.5.6-slim-rootless
     env:
       - name: UPTIME_KUMA_DISABLE_FRAME_SAMEORIGIN
         value: "true"
