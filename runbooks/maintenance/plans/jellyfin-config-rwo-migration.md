@@ -217,7 +217,7 @@ mise exec -- kubectl get nodes.longhorn.io -n storage -o jsonpath='{range .items
 #   the newest REAL backup's URL (3.4 re-renders it with GATE_BACKUP).
 NEWEST=$(mise exec -- kubectl get backups.longhorn.io -n storage -l backup-volume=jellyfin-config --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')
 URL=$(mise exec -- kubectl get backups.longhorn.io -n storage "$NEWEST" -o jsonpath='{.status.url}')
-sed "s#__BACKUP_URL__#$URL#" "$S/restoretest.yaml.tmpl" > "$S/restoretest-dry.yaml"
+URL="$URL" python3 -c 'import os,sys;sys.stdout.write(sys.stdin.read().replace("__BACKUP_URL__",os.environ["URL"]))' < "$S/restoretest.yaml.tmpl" > "$S/restoretest-dry.yaml"
 for f in "$S"/restoretest-dry.yaml "$S"/jf-restoretest-job.yaml "$S"/jf-rwo-copy-job.yaml \
          kubernetes/apps/media/jellyfin/app/longhorn-volume-rwo.yaml \
          kubernetes/apps/media/jellyfin/app/config-pv-rwo.yaml kubernetes/apps/media/jellyfin/app/config-pvc-rwo.yaml; do
@@ -353,7 +353,7 @@ mise exec -- kubectl get volumes.longhorn.io -n storage jellyfin-config-rwo -o j
 ```bash
 URL=$(mise exec -- kubectl get backups.longhorn.io -n storage "$GATE_BACKUP" -o jsonpath='{.status.url}')
 test -n "$URL" || echo "STOP: backup has no .status.url"
-sed "s#__BACKUP_URL__#$URL#" "$S/restoretest.yaml.tmpl" > "$S/restoretest.yaml"
+URL="$URL" python3 -c 'import os,sys;sys.stdout.write(sys.stdin.read().replace("__BACKUP_URL__",os.environ["URL"]))' < "$S/restoretest.yaml.tmpl" > "$S/restoretest.yaml"
 mise exec -- kubectl apply -f "$S/restoretest.yaml"
 # poll every 60s up to 20 min until the restore finished:
 mise exec -- kubectl get volumes.longhorn.io -n storage jellyfin-config-restoretest -o jsonpath='{.status.restoreRequired} {.status.state} {.status.robustness}{"\n"}'

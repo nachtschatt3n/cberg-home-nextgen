@@ -206,6 +206,18 @@ owner-managed and not recorded here.
 4. Provide a new volume name (e.g., `restored-{original-name}`)
 5. Wait for restore to complete (volume appears in Volumes list)
 
+### Substituting a backup URL into a manifest
+
+A Longhorn `Backup` CR's `.status.url` contains `&` (query separators). In a
+`sed` replacement `&` expands to the whole match, so
+`sed "s#__BACKUP_URL__#$URL#"` silently writes a corrupted `fromBackup` that
+still looks plausible and fails later. Substitute with Python instead:
+
+```bash
+URL="$URL" python3 -c 'import os,sys;sys.stdout.write(sys.stdin.read().replace("__BACKUP_URL__",os.environ["URL"]))' < in.tmpl > out.yaml
+kubectl apply --dry-run=server -f out.yaml
+```
+
 ### Bind Restored Volume to Application
 
 Two cases, decided by whether the app's PV/PVC are git-tracked. Two facts drive
