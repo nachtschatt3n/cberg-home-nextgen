@@ -78,10 +78,12 @@
 #         CREATE TABLE IF NOT EXISTS + two indexes; cannot fail on existing
 #         data. Until this Job has run the earned lane reads "unverified" and
 #         stays OFF (fail-safe) — nothing depends on the table existing.
+#   v9a — image pgvector 0.8.6-pg16 -> 0.8.7-pg16 (digest re-pinned); no schema or
+#         bash change. Rename forces prune+recreate; bootstrap is idempotent.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v9  # v8->v9: component_autonomy table. Rename forces recreate (Job spec immutable).
+  name: sweep-history-init-v9a  # v9->v9a: pgvector 0.8.7 image only. Rename forces recreate (Job spec immutable).
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history
@@ -98,7 +100,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: bootstrap
-          image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+          image: pgvector/pgvector:0.8.7-pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
           command: ["bash", "/sql/bootstrap.sh"]
           env:
             # Service lives in this same namespace; short name resolves via
