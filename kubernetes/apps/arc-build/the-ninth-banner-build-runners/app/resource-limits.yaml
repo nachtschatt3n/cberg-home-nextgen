@@ -8,7 +8,9 @@ spec:
     pods: "4"
     requests.cpu: "12"
     requests.memory: 24Gi
-    limits.cpu: "20"
+    # 2026-10-12: 20 -> 24. ninth-banner-build-k8s maxRunners 3 (nuc14-02
+    # back) x 8 CPU limits per build pod (runner 2 + dind 6) = 24.
+    limits.cpu: "24"
     limits.memory: 40Gi
     services: "0"
     persistentvolumeclaims: "0"
