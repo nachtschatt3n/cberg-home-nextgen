@@ -54,7 +54,14 @@ spec:
       # and from v5.2.8 an ADDITIVE InfluxDB tag `band` on uap_vaps/uap_radios (series keys
       # split once at rollout). No Prometheus metric change, no config-contract change.
       # Chart still 2.4.0.
-      tag: v5.2.11
+      # 2026-10-12: v5.2.11 -> v5.5.0 image minor (plan unpoller-5.4.0; v5.2.11 had landed via
+      # Renovate first). Deltas: go deps incl. the config libs (golift cnfg 0.5.0 / cnfgfile
+      # 0.1.0 / BurntSushi toml 1.6.0), unifi lib v6.3.0 (JSON-encoded login body), and three
+      # additive exporters that are inert here (Protect air-quality: save_protect unset; U-LTE
+      # and UMBB/U5G-Max cellular: no such device). No metric rename or removal.
+      # Chart STILL 2.4.0 and this override STAYS: no published chart ships an appVersion
+      # >= v5.5.0.
+      tag: v5.5.0
 
     replicaCount: 1
 
