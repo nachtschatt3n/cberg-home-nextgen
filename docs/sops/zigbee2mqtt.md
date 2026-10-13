@@ -34,7 +34,7 @@ The rule is about the **pre-flight**, not about the flag. Once the pre-flight pl
 | Other routers | 3 mains-powered Philips Hue lights acting as routers: `0x0017880100f1ec0a` "Guest Room Spot 1", `0x001788010489b6d2` "Guest Room Spot 2", `0x0017880100de1a2e` "Tub Room Light" |
 | MQTT broker (in-cluster target) | `mqtt://mosquitto-internal.home-automation.svc.cluster.local:1883` |
 | MQTT broker (LAN clients) | `192.168.55.15:1883` (mosquitto-main LB) |
-| Backups | Longhorn `daily-backup-all-volumes` @ 03:00, retain 7 (per `kubernetes/apps/storage/longhorn/app/recurring-backup-job.yaml`) |
+| Backups | Longhorn `daily-backup-all-volumes` @ 23:00 UTC, retain 7 (per `kubernetes/apps/storage/longhorn/app/recurring-backup-job.yaml`) |
 
 ---
 

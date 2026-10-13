@@ -27,7 +27,7 @@ Longhorn v1.11.2 provides distributed block storage with replication across all 
 | Namespace | `storage` |
 | Default replicas | 2 |
 | Backup target | UNAS-CBERG (192.168.55.240) |
-| Backup schedule | Daily CronJob at 3:00 AM |
+| Backup schedule | Daily CronJob at 23:00 UTC (moved from 03:00 UTC 2026-10-13; clear of the 03:30 Berlin nightly window in both seasons) |
 | Storage classes | `longhorn` (dynamic), `longhorn-static` (manual) |
 | Default disk reserve | `storageReservedPercentageForDefaultDisk: 20` (was 30; lowered 2026-05-01 in `kubernetes/apps/storage/longhorn/app/helmrelease.yaml` to free scheduling headroom on nuc14-03 — see commit `a48ef1c2`). Changing the helm value only affects newly-discovered disks; existing disks need a per-node `kubectl -n storage patch nodes.longhorn.io <node> --type=merge -p '{"spec":{"disks":{"default-disk-...":{"storageReserved":<bytes>}}}}'`. |
 
@@ -366,8 +366,8 @@ commit that added this section):
    is a label on the *volume* (`recurring-job-group.longhorn.io/<group>` or
    `recurring-job.longhorn.io/<job-name>: enabled`), so a new volume inherits
    only what you or Longhorn's defaults put on it. Confirm the new volume is in
-   the `default` group (which buys trim 02:00, snapshot-cleanup 02:30 and backup
-   03:00), and either re-enrol it in, or delete, any per-volume job that named
+   the `default` group (which buys trim 22:00Z, snapshot-cleanup 22:30Z and backup
+   23:00Z), and either re-enrol it in, or delete, any per-volume job that named
    the old one. The first nightly backup of the new volume is unproven until it
    runs — until then your recovery floor is still the *old* volume's backup set,
    which survives in the backupstore even after the source volume is deleted:
@@ -459,13 +459,13 @@ filesystem-trim. They live in `kubernetes/apps/storage/longhorn/recurringjobs/`
 and apply to every volume in Longhorn's `default` group (which is every
 volume by default — no explicit `recurring-job-selector` annotation needed).
 
-Daily schedule (UTC):
+Daily schedule (UTC; moved 2026-10-13 from 02:00 / 02:30 / 03:00 so the jobs finish before the 03:30 Berlin nightly maintenance window in both CEST and CET — backup runtime is ~10 min):
 
 | Time  | Job                       | Effect |
 |-------|---------------------------|--------|
-| 02:00 | `global-filesystem-trim`  | `fstrim` inside every volume — releases freed-but-still-allocated blocks back to Longhorn |
-| 02:30 | `global-snapshot-cleanup` | Deletes user-created snapshots that aren't kept by `retain` rules — picks up orphans the per-backup auto-cleanup misses |
-| 03:00 | `daily-backup-all-volumes`| Backs up all volumes to the CIFS target (`192.168.55.240/backups`), `retain: 7` |
+| 22:00 | `global-filesystem-trim`  | `fstrim` inside every volume — releases freed-but-still-allocated blocks back to Longhorn |
+| 22:30 | `global-snapshot-cleanup` | Deletes user-created snapshots that aren't kept by `retain` rules — picks up orphans the per-backup auto-cleanup misses |
+| 23:00 | `daily-backup-all-volumes`| Backs up all volumes to the CIFS target (`192.168.55.240/backups`), `retain: 7` |
 
 #### A DETACHED volume gets NO recurring backup — `allow-recurring-job-while-volume-detached=false`
 
@@ -474,7 +474,7 @@ Daily schedule (UTC):
 allow-recurring-job-while-volume-detached -o jsonpath='{.value}'` → `false`,
 `status.applied: true`).
 
-**Consequence:** a volume that is **detached** at 03:00 is skipped by
+**Consequence:** a volume that is **detached** at 23:00Z is skipped by
 `daily-backup-all-volumes` entirely. It is not an error and nothing is logged
 against the volume — the job simply does not run for it, and its
 `status.lastBackupAt` **freezes at the last time it happened to be attached**.
@@ -573,7 +573,7 @@ kubectl get setting.longhorn.io -n storage auto-cleanup-recurring-job-backup-sna
 >   ~48 days. Fix: `prefer_ilm: false` so Data Stream Lifecycle governs
 >   deletion (see `kubernetes/apps/monitoring/elasticsearch/app/otel-ilm-job.yaml`).
 > - **`df` low BUT actualSize high** → data already deleted, blocks not
->   yet reclaimed. The 02:00 `global-filesystem-trim` fixes this nightly;
+>   yet reclaimed. The 22:00Z `global-filesystem-trim` fixes this nightly;
 >   for an immediate reclaim, trigger it via the Longhorn API:
 >   `POST /v1/volumes/<pv-name>?action=trimFilesystem` (port-forward
 >   `svc/longhorn-frontend:80`). In-pod `fstrim` fails — the workload

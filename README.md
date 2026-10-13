@@ -445,7 +445,7 @@ land on per-class StorageClasses defined **per app** (each app's own
 
 ### Backup
 
-Daily Longhorn snapshot + backup at 03:00 local via the
+Daily Longhorn snapshot + backup at 23:00 UTC (01:00 CEST) via the
 `storage/daily-backup-all-volumes` CronJob (owned by the Longhorn RecurringJob of
 the same name) — pushes to the CIFS backup target on
 the NAS. Retention is enforced by Longhorn's recurring-job policy. Verify last

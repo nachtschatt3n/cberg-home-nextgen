@@ -50,10 +50,17 @@ timezone: Europe/Berlin
 windows:
   - id: nightly
     day: daily
-    start: "03:30"            # after the 03:00 Longhorn backup kicks off its
-                              # snapshots, before the 04:00-anchored sweep and
-                              # frigate's 02:30 restart-window traffic; nobody
-                              # is using the services.
+    start: "03:30"            # Europe/Berlin local (= 01:30Z in summer/CEST,
+                              # 02:30Z in winter/CET; clocks change 2026-10-25).
+                              # Longhorn trim/snapshot-cleanup/backup crons are
+                              # UTC (no timeZone) and run 22:00/22:30/23:00Z
+                              # since 2026-10-13, so they are finished (~10 min
+                              # backup runtime) before this window in BOTH
+                              # seasons. They used to run 02:00/02:30/03:00Z,
+                              # which overlapped this window from 10-25. Window
+                              # also sits before the 04:00-anchored sweep and
+                              # after frigate's 02:30 Berlin restart; nobody is
+                              # using the services.
     duration_min: 90
     capacity_risk: 6
     allow_reboot: false

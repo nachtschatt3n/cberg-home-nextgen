@@ -274,7 +274,7 @@ kubectl annotate volume <name> -n storage \
 2. Restore from backup per `docs/sops/backup.md` §Restore.
 3. Rebind the PV/PVC if names changed.
 
-**Data loss:** between the last backup (daily 03:00) and the failure.
+**Data loss:** between the last backup (daily 23:00 UTC) and the failure.
 
 ### 4.6 NAS (UNAS-CBERG) failure
 

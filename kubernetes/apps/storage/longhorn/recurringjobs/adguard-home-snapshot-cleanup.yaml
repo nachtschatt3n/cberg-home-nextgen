@@ -7,7 +7,7 @@ metadata:
 spec:
   name: adguard-home-snapshot-cleanup
   task: snapshot-cleanup
-  cron: "30 2 * * *"  # Daily at 2:30 AM (after trim at 2 AM, before backup at 3 AM)
+  cron: "30 22 * * *"  # Daily 22:30 UTC (after trim at 22:00, before backup at 23:00)
   retain: 0
   concurrency: 1
   labels:

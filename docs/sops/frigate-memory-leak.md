@@ -69,7 +69,7 @@ N/A — no Authentik or app blueprints. The three files are:
 All changes are GitOps. Do not edit the CronJob or Deployment in-cluster.
 
 **To change the restart interval**, edit `schedule:` in `restart-cronjob.yaml`.
-Keep it clear of 03:00 (Longhorn backup) and 04:00 (sweep). If you tighten it
+Keep it clear of 23:00 UTC (Longhorn backup) and 04:00 (sweep). If you tighten it
 below daily, the leak rate has risen — record why, and re-check whether the
 budget assumptions in the alert comments still hold.
 

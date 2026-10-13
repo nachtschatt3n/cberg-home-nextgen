@@ -5,6 +5,7 @@ kind: Kustomization
 resources:
   - helmrelease.yaml
   - instance-manager-cpu-setting.yaml
+  - concurrency-settings.yaml
   - httproute.yaml
   - secret.sops.yaml
   - alertmanager-telegram-config.yaml

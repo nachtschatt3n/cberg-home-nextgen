@@ -273,7 +273,7 @@ premises:
       §2.6 names storage/daily-backup-all-volumes (NOT the stale backup-of-all-volumes). Schedule
       is UTC (no timeZone set). Missing object fails.
     run: kubectl get cronjob -n storage daily-backup-all-volumes -o jsonpath='{.metadata.name} {.spec.schedule} tz=[{.spec.timeZone}]'
-    expect_exact: daily-backup-all-volumes 0 3 * * * tz=[]
+    expect_exact: daily-backup-all-volumes 0 23 * * * tz=[]
   - id: pgadmin-selector
     why: >-
       §4.3 CONTENTS ASSERTION 1 writes through deploy/pgadmin (PVC pgadmin-data at
@@ -1084,8 +1084,8 @@ mise exec -- kubectl get jobs -n storage --sort-by=.status.startTime | grep dail
 mise exec -- python3 "$SCR/bk.py" "$SCR/lh-baseline.json"
 ```
 **PASS:** newest `daily-backup-all-volumes-*` Job `Complete` within 24h, and `VERDICT GO` (no
-attached volume NEVER-backed-up or > 48h). The CronJob is `0 3 * * *` with no `timeZone` =
-**03:00 UTC** (05:00 CEST until 2026-10-25, 04:00 CET after).
+attached volume NEVER-backed-up or > 48h). The CronJob is `0 23 * * *` (was `0 3 * * *` until 2026-10-13) with no `timeZone` =
+**23:00 UTC** (01:00 CEST until 2026-10-25, 00:00 CET after).
 
 **2.7 — Flux green.**
 
@@ -2422,8 +2422,8 @@ coordinator will propose **sun-attended:2026-11-01** for this plan (the window a
 - **This window's Step 0** runs FIRST (scheduler reserves 20 min), then Phase A's commit must
   already be pushed, then the freeze. Never skip Step 0 to buy time.
 - **The nightly 03:30 window** of the same day — its reconciles must have landed (§2.7).
-- **`storage/daily-backup-all-volumes` (03:00 UTC)** and the `*-filesystem-trim` /
-  `*-snapshot-cleanup` CronJobs (02:00/02:30 UTC) — a 09:00 window clears them; do not let this
+- **`storage/daily-backup-all-volumes` (23:00 UTC; 03:00 UTC before 2026-10-13)** and the `*-filesystem-trim` /
+  `*-snapshot-cleanup` CronJobs (22:00/22:30 UTC) — a 09:00 window clears them; do not let this
   plan slip into their path.
 - **The 04:00-anchored operation sweep** — finished before §2.0b; no ad-hoc sweep in-window.
 - **Any Longhorn engine/manager upgrade, StorageClass change, PVC delete**

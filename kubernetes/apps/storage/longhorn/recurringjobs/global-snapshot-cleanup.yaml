@@ -1,6 +1,7 @@
 ---
-# Global snapshot-cleanup — runs daily at 02:30 (after global-filesystem-trim
-# at 02:00, before daily-backup at 03:00). Applies to every volume in the
+# Global snapshot-cleanup — runs daily at 22:30 UTC (after global-filesystem-trim
+# at 22:00, before daily-backup at 23:00; all three moved off 02:00-03:00 UTC on
+# 2026-10-13 to clear the nightly maintenance window in both seasons). Applies to every volume in the
 # "default" group (which is all volumes by default), so each volume's
 # user-created snapshots get cleaned up regardless of whether the volume
 # has its own per-volume snapshot-cleanup RecurringJob.
@@ -17,7 +18,7 @@ metadata:
 spec:
   name: global-snapshot-cleanup
   task: snapshot-cleanup
-  cron: "30 2 * * *"
+  cron: "30 22 * * *"
   retain: 0
   concurrency: 2
   groups:

@@ -1,0 +1,37 @@
+---
+# Longhorn I/O concurrency caps — reduce the disk/etcd pressure that overlapping
+# backup, restore and replica-rebuild traffic puts on the Talos nodes (etcd
+# attribution investigation, operator decision 2026-10-13).
+#
+# WHY Setting CRs and not helmrelease.yaml `defaultSettings`: that block is INERT
+# (see the READ THIS FIRST header in helmrelease.yaml) and Longhorn only applies
+# chart default settings at first install anyway. The Setting CRs are the live
+# source of truth, so Flux owns these three directly, the same pattern as
+# instance-manager-cpu-setting.yaml. helmrelease.yaml carries the same numbers so
+# a future un-nesting stays a no-op.
+#
+# Previous live values: backup-concurrent-limit 5, restore-concurrent-limit 2,
+# concurrent-replica-rebuild-per-node-limit 8. Rollback = git revert (Flux
+# re-applies the old values).
+#
+# NOT changed: concurrent-volume-backup-restore-per-node-limit stays 5 (live).
+apiVersion: longhorn.io/v1beta2
+kind: Setting
+metadata:
+  name: backup-concurrent-limit
+  namespace: storage
+value: "2"
+---
+apiVersion: longhorn.io/v1beta2
+kind: Setting
+metadata:
+  name: restore-concurrent-limit
+  namespace: storage
+value: "1"
+---
+apiVersion: longhorn.io/v1beta2
+kind: Setting
+metadata:
+  name: concurrent-replica-rebuild-per-node-limit
+  namespace: storage
+value: "2"

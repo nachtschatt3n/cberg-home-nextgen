@@ -7,8 +7,12 @@ metadata:
 spec:
   # Backup task type
   task: backup
-  # Run at 3:00 AM daily (UTC)
-  cron: "0 3 * * *"
+  # Run at 23:00 UTC daily (= 01:00 CEST / 00:00 CET). Moved from 03:00 UTC on
+  # 2026-10-13 so trim (22:00Z), snapshot-cleanup (22:30Z) and this backup are all
+  # finished (~10 min runtime measured) before the nightly maintenance window
+  # (03:30 Europe/Berlin = 01:30Z CEST / 02:30Z CET) in BOTH seasons. Longhorn
+  # RecurringJobs are plain CronJobs with no timeZone => always UTC.
+  cron: "0 23 * * *"
   # Keep a week of daily backups (was 1). Motivated by the 2026-06-04 Z2M
   # database injection incident: with retain=1, a corruption that went
   # unnoticed for 24h would leave only the corrupted state as recovery.

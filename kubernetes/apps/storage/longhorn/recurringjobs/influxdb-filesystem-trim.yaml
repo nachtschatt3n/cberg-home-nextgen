@@ -7,7 +7,7 @@ metadata:
 spec:
   name: influxdb-filesystem-trim
   task: filesystem-trim
-  cron: "0 2 * * *"  # Daily at 2 AM (1 hour before backup)
+  cron: "0 22 * * *"  # Daily 22:00 UTC (30 min before snapshot-cleanup, 1 h before backup)
   retain: 0
   concurrency: 1
   labels:

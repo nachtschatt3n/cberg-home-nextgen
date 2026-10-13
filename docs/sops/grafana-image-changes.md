@@ -328,7 +328,7 @@ and both boots logged `migrations completed performed=0` with `grafana.db`
 byte-identical, so the round trip did not touch the schema.
 
 If the config store itself is ever damaged, the fallback is the `grafana-config`
-Longhorn backup (03:00 daily).
+Longhorn backup (23:00 UTC daily).
 
 ---
 

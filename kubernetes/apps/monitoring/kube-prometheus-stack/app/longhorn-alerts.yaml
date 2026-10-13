@@ -247,7 +247,8 @@ spec:
         #
         # Steady state is exactly ONE snapshot per volume, because
         # auto-cleanup-recurring-job-backup-snapshot removes the previous one
-        # about 2 minutes after the 03:00 backup takes the next.
+        # about 2 minutes after the 23:00Z backup takes the next (03:00Z until
+        # 2026-10-13; the rule is cadence-based, not clock-keyed).
         #
         # The window, not the threshold, is what makes this quiet. Replaying
         # 7d: 17 contiguous count>=2 episodes, of which 9 are under 20 minutes
@@ -328,7 +329,7 @@ spec:
         - alert: LonghornSnapshotMetricsAbsent
           expr: absent(longhorn_snapshot_actual_size_bytes)
           # 30m comfortably outlasts the nightly rebuild: all snapshots are
-          # replaced between 03:00 and 03:10Z and the fleet-wide series count
+          # replaced between 23:00 and 23:10Z (03:00-03:10Z before 2026-10-13) and the fleet-wide series count
           # never dropped below 93 in 7 days (max 102), so absence here is a
           # scrape failure or a metric rename, never normal operation.
           for: 30m

@@ -74,9 +74,12 @@ spec:
         backupCompressionMethod: lz4
         backupExecutionTimeout: 5
         defaultBackupBlockSize: 16
-        backupConcurrentLimit: 5
+        # 2026-10-13 etcd-protection: 5 -> 2 / 2 -> 1 / 8 -> 2 below. The block is INERT
+        # (see header) — the live values are set by Setting CRs in
+        # concurrency-settings.yaml; keep both in step so un-nesting stays a no-op.
+        backupConcurrentLimit: 2
         concurrentVolumeBackupRestorePerNodeLimit: 5
-        restoreConcurrentLimit: 2
+        restoreConcurrentLimit: 1
         failedBackupTTL: 1440
         fastReplicaRebuildEnabled: true
         engineReplicaTimeout: 8
@@ -85,7 +88,7 @@ spec:
         replicaDiskSoftAntiAffinity: true
         autoDeletePodWhenVolumeDetachedUnexpectedly: false
         replicaReplenishmentWaitInterval: 600
-        concurrentReplicaRebuildPerNodeLimit: 8
+        concurrentReplicaRebuildPerNodeLimit: 2
         systemManagedPodsImagePullPolicy: if-not-present
         allowVolumeCreationWithDegradedAvailability: true
         # REMOVED (Longhorn 1.12): mkfsExt4Parameters is no longer a setting.
@@ -175,7 +178,7 @@ spec:
         #    volume in the cluster. Only in a maintenance window, with all volumes
         #    healthy beforehand and verified healthy after.
         #
-        # Not planned: concurrentReplicaRebuildPerNodeLimit, engineReplicaTimeout,
+        # Not planned: engineReplicaTimeout,
         # replicaReplenishmentWaitInterval, concurrentVolumeBackupRestorePerNodeLimit,
         # allowRecurringJobWhileVolumeDetached, snapshotDataIntegrityImmediateCheck…
         # The live values are fine; git previously disagreed only by accident.

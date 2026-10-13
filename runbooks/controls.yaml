@@ -93,7 +93,7 @@ controls:
 
   - id: longhorn-backups
     kind: k8s-cronjob
-    what: "storage/backup-of-all-volumes @ 03:00 to the NAS backupstore"
+    what: "storage/backup-of-all-volumes @ 23:00 UTC (moved from 03:00 UTC 2026-10-13) to the NAS backupstore"
     cadence: daily
     watched_by:
       assertion: "backup"

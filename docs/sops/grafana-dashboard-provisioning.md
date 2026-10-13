@@ -564,7 +564,7 @@ within the same version instead —
 [`grafana-image-changes.md`](grafana-image-changes.md) §11.
 
 If the config store itself is damaged, the fallback is the `grafana-config`
-Longhorn backup (03:00 daily) — [`backup.md`](backup.md).
+Longhorn backup (23:00 UTC daily) — [`backup.md`](backup.md).
 
 ---
 

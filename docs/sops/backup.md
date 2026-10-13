@@ -20,7 +20,7 @@ before and after cluster changes.
 
 | Backup System | What | Schedule | Target |
 |--------------|------|---------|--------|
-| Longhorn volume backup | All PV data | Daily 3:00 AM | UNAS-CBERG NAS |
+| Longhorn volume backup | All PV data | Daily 23:00 UTC (was 03:00 UTC until 2026-10-13) | UNAS-CBERG NAS |
 | iCloud backup | iCloud Drive + Photos, one instance per Apple ID (2) | Continuous | UNAS-CBERG NAS (`backups/icloud-backup/<name>`) |
 
 Off-site copy (toward 3-2-1): the NAS backup is additionally uploaded off-site to cloud
@@ -123,7 +123,7 @@ If failed:
 
 ### Automated Backup CronJob
 
-A CronJob runs daily at 3:00 AM to back up all Longhorn volumes. It is
+A CronJob runs daily at 23:00 UTC (01:00 CEST / 00:00 CET; was 03:00 UTC until 2026-10-13) to back up all Longhorn volumes. It is
 `storage/daily-backup-all-volumes`, created and owned by the Longhorn
 RecurringJob of the same name (`kubectl get recurringjobs.longhorn.io -n storage`;
 source `kubernetes/apps/storage/longhorn/app/recurring-backup-job.yaml`, group
