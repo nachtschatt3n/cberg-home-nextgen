@@ -31,10 +31,10 @@ touches:
                                       # Gateway envoy-external are untouched; no
                                       # ServiceMonitor, so nothing here reads Prometheus.
 depends_on:
-  - n8n-2.39.8                        # ORDER: image 2.38.7 -> 2.41.7 FIRST, chart AFTER.
+  - n8n-2.39.8                        # ORDER: image 2.38.7 -> 2.42.7 FIRST, chart AFTER.
                                       # Why this order and not the reverse is §1.3. Enforced
                                       # twice: here (unmet depends_on => skipped) and by the
-                                      # premise image-is-2.41.7.
+                                      # premise image-is-2.42.7.
 conflicts_with:
   - n8n-2.39.8                        # NOT the same window either — see §1.3/§6. The chart
                                       # restart must land on an instance that has settled
@@ -61,20 +61,19 @@ finding_refs:                         # queried 2026-09-25 with SWEEP_PG_DSN up
   - F-8e5e5c66                        # "n8n: chart 2.0.1 -> 2.1.1 (minor)" — THIS plan.
                                       # NOT claimed: F-09588936 / F-1beea963 (image; owned by
                                       # n8n-2.39.8).
-amended: "2026-10-05 dependency n8n-2.39.8 retargeted 2.40.7 -> 2.41.7 (stable); every 2.40.7 token here (ordering-lock premise image-is-2.41.7, V-gates, rollback notes) moved to 2.41.7. abstract-server.ts / base-command.ts re-checked unchanged at 2.41.7 by the n8n planner; scope-neutral."
-status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (V7 absence gate, undeclared helm-drift conflict) -> fixed -> ready-for-go. Premise image-is-2.41.7 is the designed ordering lock: cannot run before n8n-2.39.8 executes (+24h, §2.2).
-review: ready-for-go@2026-09-28
+amended: "2026-10-13 dependency n8n-2.39.8 retargeted 2.41.7 -> 2.42.7 (stable; the 2.41.7 attempt was blocked at its channel gate). Every 2.41.7 token here (ordering-lock premise, V-gates, render gate, rollback notes) moved to 2.42.7. abstract-server.ts is blob-identical between 2.41.7 and 2.42.7; server.ts was verified only by its markAsReady line/sha; base-command.ts is NOT identical (blob 1a388c19 vs a3bd0a90: 2.42.7 adds a needsDb = true guard around the init/migrate block plus system-task helpers) but the ordering dbConnection.init -> server.init -> dbConnection.migrate is unchanged (the file differs only by a needsDb wrapper), so the probe analysis in §1.2/§1.3 is unchanged; scope-neutral. Earlier: 2026-10-05 2.40.7 -> 2.41.7."
+status: draft    # DOWNGRADED 2026-10-13 (coordinator): the 2026-09-28 review predates three retargets of n8n-2.39.8 and kept an unattended AUTO-NIGHT pre-approval alive. plan-reviewer 2026-10-13 verdict ready-for-go on content; re-stamp vetted after the wording fixes. Premise image-is-2.42.7 is the designed ordering lock (cannot run before n8n-2.39.8 executes +24h, §2.2).
 window: null   # CLEARED 2026-10-13: depends_on n8n-2.39.8, which has NOT executed (blocked at its 2.1 channel gate: stable moved to 2.42.7); re-place after n8n lands + >=24h settle. Was "nightly:2026-10-13". scheduled 2026-10-05 (operator "plan all and time them"): SD-10 pre-approved; depends_on n8n-2.39.8 (sun 10-11) + >=24h settle; ordering-lock premise refuses it before
 premises:
-  - id: image-is-2.41.7
+  - id: image-is-2.42.7
     why: >-
       Ordering guard. This plan is written to run AFTER n8n-2.39.8 has shipped
-      image 2.41.7 (§1.3). If the image is still 2.38.7 the dependency has not
+      image 2.42.7 (§1.3). If the image is still 2.38.7 the dependency has not
       executed — do not run. If it is something else, n8n-2.39.8 was re-targeted
       again: re-check §1.2 point 4 (readiness endpoint on that image) and update
       this premise before running.
     run: kubectl get deploy -n home-automation n8n -o jsonpath='{.spec.template.spec.containers[0].image}'
-    expect_exact: n8nio/n8n:2.41.7
+    expect_exact: n8nio/n8n:2.42.7
   - id: chart-still-2.0.1
     why: "The rendered diff in §1.2 is 2.0.1 -> 2.1.1; a different starting chart voids it."
     run: kubectl get helmrelease -n home-automation n8n -o jsonpath='{.spec.chart.spec.version}'
@@ -152,15 +151,15 @@ moves from 1.122.4 to **2.36.8**. That is the image a values file *without*
 `image.tag` would get. Our values pin `tag`, and the rendered image is
 `n8nio/n8n:2.38.7` under both charts today. **The one way this chart bump
 could hurt data** is if `image.tag` were ever lost from values. The chart
-would then silently deploy 2.36.8 onto a 2.41.7-migrated SQLite schema, an
+would then silently deploy 2.36.8 onto a 2.42.7-migrated SQLite schema, an
 unsupported downgrade. §3.3 therefore gates on the rendered image before
 commit.
 
 **Point 4: the new readiness endpoint works on our images.** In both
-n8n@2.38.7 and n8n@2.41.7, `abstract-server.ts` `setupHealthCheck()` answers
+n8n@2.38.7 and n8n@2.42.7, `abstract-server.ts` `setupHealthCheck()` answers
 `/healthz/readiness` with 200 only when `connected && migrated &&
 fullyReady`. `server.ts` calls `markAsReady()` at the end of init (line 121 at
-2.38.7, line 124 at 2.40.7, line 123 at 2.41.7 — re-read 2026-10-05). Live on 2.38.7 (2026-09-25, port-forward):
+2.38.7, line 124 at 2.40.7, line 123 at 2.41.7 and 2.42.7 — re-read 2026-10-13, blob-identical). Live on 2.38.7 (2026-09-25, port-forward):
 `healthz=200 readiness=200`.
 
 ### 1.3 Decision: separate plan, chart AFTER the image. Not folded, not before.
@@ -180,7 +179,7 @@ running migrations":
 
 - **The startupProbe buys nothing for n8n ≥ 2.38.** The chart's premise
   ("n8n only starts listening once … migrations are done") is false for our
-  versions. In `base-command.ts` at both 2.38.7 and 2.41.7 the order is
+  versions. In `base-command.ts` at both 2.38.7 and 2.42.7 (the 2.42.7 file differs only by a `needsDb` wrapper around the init/migrate block) the order is
   `dbConnection.init()` → `server.init()` (listen and `/healthz`) →
   `dbConnection.migrate()`. `/healthz` returns 200 *before* migrations start,
   so the startupProbe succeeds at once and hands over to the identical
@@ -206,14 +205,14 @@ running migrations":
 - The high-risk plan runs unchanged: its `chart-still-2.0.1` premise stays
   true and needs no edit.
 - The finding is severity `monitor` with no security driver, so waiting
-  until after the image plan (now sun-attended:2026-10-11) plus its >=24h
-  settle — earliest chart slot nightly:2026-10-13 — is free.
+  until after the image plan (unplaced since 2026-10-13, re-targeted at 2.42.7)
+  plus its >=24h settle is free.
 
 ## 2) Pre-checks
 
 ### 2.1 Premises (frontmatter)
 Run `runbooks/plan-premises.py` for this plan. All five must pass.
-`image-is-2.41.7` fails today by design: it is the ordering lock.
+`image-is-2.42.7` fails today by design: it is the ordering lock.
 
 ### 2.2 The dependency is executed and settled
 ```bash
@@ -223,7 +222,21 @@ kubectl get pods -n home-automation -l app.kubernetes.io/name=n8n \
 ```
 PASS: `executed`, and the pod has run ≥24 h since that window with restartCount
 unchanged. FAIL example: `status: draft` means stop. A startTime in the last
-24 h means the 2.41.7 instance has not settled, so stop.
+24 h means the 2.42.7 instance has not settled, so stop.
+
+**Placement rule (added 2026-10-13):** the premises cannot enforce pod age, so
+the 24 h settle is prose only. Place this plan **no earlier than the second
+nightly after n8n-2.39.8's Sunday window** (Sunday window -> Monday nightly ->
+Tuesday nightly), and still run the startTime check above.
+
+**Retarget and retirement notes (added 2026-10-13):**
+- If n8n-2.39.8 is retargeted again (e.g. 2.42.8 or later), the premise
+  `image-is-2.42.7` fails CLOSED (`got 'n8nio/n8n:<new>'`) and this plan must be
+  retargeted in the same pass; do not edit the premise to make it pass.
+- The window agent must keep n8n-2.39.8 as `status: executed` (not delete or
+  retire it) until this plan has executed, because `depends_on` and the §2.2
+  grep read that file; or drop `depends_on: [n8n-2.39.8]` (and the
+  `conflicts_with` entry) in the SAME retirement commit.
 
 ### 2.3 Baseline for §4 (capture now, on the running pod)
 ```bash
@@ -271,7 +284,7 @@ python3 -c "import yaml;d=yaml.safe_load(open('kubernetes/apps/home-automation/n
 helm template n8n "$S/n8n" -n home-automation -f "$S/v.yaml" | grep -E '^[[:space:]]+image: "n8nio/n8n:' ; \
 helm template n8n "$S/n8n" -n home-automation -f "$S/v.yaml" | grep -c 'path: /healthz/readiness'
 ```
-PASS: the first command prints exactly `image: "n8nio/n8n:2.41.7"`, and the
+PASS: the first command prints exactly `image: "n8nio/n8n:2.42.7"`, and the
 count is `1`.
 
 FAIL, with the ABORT reason:
@@ -283,16 +296,17 @@ Measured 2026-09-25 against today's values: `image: "n8nio/n8n:2.38.7"` and
 `1`. That confirms the gate reads the pinned tag, not `appVersion`.
 
 ### 3.4 Commit and push (shared worktree)
-Commit message (`/tmp/n8n-chart-msg.txt`):
-```
+Write the commit message first (nothing else creates this file), then commit:
+```bash
+cat > /tmp/n8n-chart-msg.txt <<'EOF'
 fix(n8n): chart 2.0.1 -> 2.1.1 (probes: startupProbe + /healthz/readiness)
 
-Image stays pinned at 2.41.7. Rendered diff vs our values: startupProbe added,
+Image stays pinned at 2.42.7. Rendered diff vs our values: startupProbe added,
 readiness /healthz -> /healthz/readiness, inert n8n-worker-config ConfigMap.
 
 Plan: runbooks/maintenance/plans/n8n-chart-2.1.1.md
-```
-```bash
+EOF
+head -1 /tmp/n8n-chart-msg.txt    # MUST print the fix(n8n): chart 2.0.1 -> 2.1.1 subject
 git commit --only kubernetes/apps/home-automation/n8n/app/helmrelease.yaml -F /tmp/n8n-chart-msg.txt
 git show --stat HEAD && git log -1 --format=%s    # MUST be this subject, 1 file; amend before push if not
 git push origin main
@@ -317,7 +331,7 @@ kubectl get hr -n home-automation n8n -o jsonpath='{.status.history[0].chartVers
 # V2 probes are the new ones  — FAIL prints /healthz and an empty startup value
 kubectl get deploy -n home-automation n8n -o jsonpath='{.spec.template.spec.containers[0].readinessProbe.httpGet.path} {.spec.template.spec.containers[0].startupProbe.failureThreshold}{"\n"}'   # /healthz/readiness 30
 # V3 image did NOT move       — FAIL prints n8nio/n8n:2.36.8 (chart default leaked => §5 immediately)
-kubectl get deploy -n home-automation n8n -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'  # n8nio/n8n:2.41.7
+kubectl get deploy -n home-automation n8n -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'  # n8nio/n8n:2.42.7
 # V4 the endpoint is really in the Service — FAIL prints false or nothing
 kubectl get endpointslice -n home-automation -l kubernetes.io/service-name=n8n -o jsonpath='{.items[*].endpoints[*].conditions.ready}{"\n"}'   # true
 ```
@@ -374,7 +388,7 @@ Confirm the cluster is back:
 - `kubectl get cm -n home-automation n8n-worker-config` returns `NotFound` (Helm prunes it).
 - V3, V5 and V6 pass again.
 
-**If V3 ever printed `2.36.8`** (image downgraded onto a 2.41.7 schema): do
+**If V3 ever printed `2.36.8`** (image downgraded onto a 2.42.7 schema): do
 the revert *immediately*. Then check n8n-2.39.8 §4.2's migration count. If
 2.36.8 booted and wrote anything, treat it as n8n-2.39.8 §5.2 (snapshot
 revert), not as a chart rollback. §3.3 exists so this cannot happen.
@@ -385,8 +399,9 @@ revert), not as a chart rollback. §3.3 exists so this cannot happen.
 - `depends_on: [n8n-2.39.8]` plus `conflicts_with: [n8n-2.39.8]`: this plan
   runs in a *later* window than the image upgrade. The earliest sensible slot
   is the first window ≥24 h after n8n-2.39.8 executes (it moved to
-  sun-attended:2026-10-11 on 2026-10-05, so the earliest chart slot is
-  nightly:2026-10-13).
+  sun-attended:2026-10-11 on 2026-10-05; since 2026-10-13 it is unplaced and
+  re-targeted at 2.42.7, so the chart slot is the first window ≥24 h after the
+  image plan actually executes, not a fixed date).
 - Risk low, `capability_change: false`, git-revert. It fits a Saturday or
   nightly slot. The execution class comes from `autonomy-policy.yaml`, not
   from this file.
