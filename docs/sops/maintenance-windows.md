@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.10.04`
-> Last Updated: `2026-10-04`
+> Version: `2026.10.13`
+> Last Updated: `2026-10-13`
 
 ## 1) Description
 
@@ -107,6 +107,23 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   and in `ops-retro.py` `window_metrics()`. Test:
   `runbooks/tests/test-window-liveness-now-absorbs-attended.py` (negative
   control: the same row without the token stays missed).
+- **A slot the operator deliberately lets go unrun is WAIVED, never faked
+  (operator decision 2026-10-13, vacation).** Record a `window_runs` row with
+  `outcome=waived` for the skipped slot's `--run-date`:
+  `window-run-record.py --slot nightly --outcome waived --trigger ad-hoc
+  --run-date YYYY-MM-DD --notes "<why>"`. The slot leaves
+  `window_runs_missing_count` and is counted in the separate
+  `window_runs_waived_count` (human report, `--liveness-metrics`, ops-retro
+  "Window slots waived"). A waiver is **not a run**: `completed_run_rows`
+  excludes it, it covers no other slot (not the nightly, not an `absorbs`
+  token), and ops-retro's `run` does not rise. Fail-closed: the recorder
+  refuses a waiver without a reason, without an explicit past `--run-date`,
+  with `--finalize`, with a `cron` trigger or with non-zero counters, and the
+  reader ignores one with blank notes or dated today/later; a real completed
+  row for the slot wins over a waiver. Code: `maintenance-plan.py:waived_slots()`
+  (+ `missing_window_runs(waived=)`), `ops-retro.py:window_metrics()`. Test:
+  `runbooks/tests/test-window-liveness-waived.py`. The MaintenanceWindowMissed
+  alert rules are unchanged: they read the (now waiver-aware) missing count.
 - **Plans:** `runbooks/maintenance/plans/<component>-<target>.md` — frontmatter
   (component, PR, current→target, risk, duration, `needs_reboot`, precise
   `touches`, `depends_on`, `conflicts_with`, status, window) + six body sections
@@ -828,6 +845,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.10.13 | 2026-10-13 | **Deliberate skips are WAIVED, not faked (operator decision, vacation).** New `window_runs` outcome `waived` (insert-only, reason in notes mandatory, past dates only, `ad-hoc` trigger): removes the occurrence from `window_runs_missing_count`, counted in the new `window_runs_waived_count`, never counted as a run and never covers another slot. `ops-retro.py` reports it on its own line. Test `runbooks/tests/test-window-liveness-waived.py`. |
 | 2026.10.04 | 2026-10-04 | **Two plan-authoring lessons (§7).** (a) DB-bounce gates bound each consumer at <=1 restart and build the tenant baseline from persistent-pool users only -- per-request PHP connections excluded (F-9ab5f80f; Rails liveness root cause fixed in `f515915c`). (b) Resuming a suspended HelmRelease re-renders chart CronJobs and undoes a manual CronJob suspend -- re-assert it after every in-plan HR resume (nextcloud-redis-hardening run). |
 | 2026.09.28 | 2026-09-28 | **Headless dispatcher auto-starts (operator: "fix the open points").** It died with every Mac reboot or iTerm restart, silently sending crons back to the busy console. Now a LaunchAgent (`com.cberg.headless-dispatcher`, user `mu`, KeepAlive) keeps iTerm running and an iTerm AutoLaunch script keeps a dispatcher session open inside it (files in `runbooks/launchd/`). osascript from launchd was rejected: it needs an Automation grant nobody can click after an unattended reboot. §7 gains install/check/uninstall. |
 | 2026.09.28 | 2026-09-28 | **An on-demand run covers an attended slot only by explicit `absorbs <slot>:<date>` (operator decision).** Liveness paged `sat-attended:2026-09-26` missed although the 09-26 NOW run (window_runs 48) declared it absorbed. A terminal, non-aborted `now`/ad-hoc row whose notes carry the token for its own Berlin date now covers that slot; no implicit coverage. Test `runbooks/tests/test-window-liveness-now-absorbs-attended.py`. |

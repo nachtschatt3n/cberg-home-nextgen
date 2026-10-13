@@ -41,6 +41,19 @@ under window_liveness.stuck once it is older than the window's duration_min
 plus a grace period, and it does NOT satisfy the per-occurrence liveness
 assertion -- "started" is not "ran".
 
+Waiving a slot (2026-10-13). When the operator DELIBERATELY lets a declared
+occurrence go unrun (vacation, a freeze), the slot pages as missed for a week
+and carries MaintenanceWindowsRepeatedlyMissed. Record the decision instead:
+
+  window-run-record.py --slot nightly --outcome waived --trigger ad-hoc \
+      --run-date 2026-10-10 --notes "why the operator waived it"
+
+A waiver is NOT a run: maintenance-plan.py takes the slot out of
+window_runs_missing_count, counts it in window_runs_waived_count, and it
+covers no other slot. Refused unless: --notes states a reason, --run-date is
+given and is strictly in the past (a waiver cannot pre-silence a window that
+has not had its chance), --trigger is ad-hoc, and --finalize is not used.
+
 Exit codes: 0 recorded; 2 no DSN (prints the exact row it WOULD have written,
 so a degraded environment is loud, never silent).
 """
@@ -58,7 +71,8 @@ _DATED_SLOT = re.compile(r"^(?P<id>.+):(?P<date>\d{4}-\d{2}-\d{2})$")
 # everything else is terminal and is what --finalize writes over it.
 TERMINAL_OUTCOMES = ("green", "revert", "partial", "idle", "aborted")
 RUNNING = "running"
-OUTCOMES = TERMINAL_OUTCOMES + (RUNNING,)
+WAIVED = "waived"   # insert-only: never a --finalize target (see validate_args)
+OUTCOMES = TERMINAL_OUTCOMES + (RUNNING, WAIVED)
 
 _FINALIZE_SELECT = ("SELECT id, started_at, outcome, finished_at, notes, trigger"
                     " FROM window_runs WHERE slot = %s AND run_date = %s")
@@ -82,8 +96,22 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def validate_args(a: argparse.Namespace) -> str | None:
-    """Pure: the argument combinations argparse cannot express. None = ok."""
+def validate_args(a: argparse.Namespace, today=None) -> str | None:
+    """Pure: the argument combinations argparse cannot express. None = ok.
+    today: ISO date for the waiver's past-only check (default: UTC today)."""
+    if a.outcome == WAIVED:
+        if a.finalize:
+            return "--outcome waived is insert-only; --finalize cannot produce a waiver"
+        if not (a.notes or "").strip():
+            return "--outcome waived needs --notes stating why the operator waived the slot"
+        if not a.run_date:
+            return "--outcome waived needs an explicit --run-date (the skipped slot's date)"
+        if a.run_date >= (today or datetime.now(timezone.utc).date().isoformat()):
+            return "--outcome waived needs a --run-date strictly in the past"
+        if a.trigger != "ad-hoc":
+            return "--outcome waived is an operator action: use --trigger ad-hoc"
+        if a.plans_executed or a.safe_updates:
+            return "--outcome waived did not run: --plans-executed/--safe-updates must be 0"
     if a.finalize and a.outcome == RUNNING:
         return "--finalize needs a terminal outcome; 'running' is the OPEN marker"
     if a.finished and not a.finalize:

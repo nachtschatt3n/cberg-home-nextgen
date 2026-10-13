@@ -672,6 +672,9 @@ def human(r, cfg):
     if wl.get("verified") and wl.get("window_runs_missing_count") is not None:
         L.append(f"\nwindow_runs_missing_count {wl['window_runs_missing_count']} "
                  f"(stuck {wl.get('window_runs_stuck_count', 0)}; "
+                 f"waived {wl.get('window_runs_waived_count') or 0}"
+                 f"{' ' + str(wl['waived']) if wl.get('waived') else ''} — waived = deliberately "
+                 f"not run, NOT counted as run; "
                  f"{wl.get('lookback_days')}-day lookback from {wl.get('lookback_floor')} — "
                  f"a miss older than that has AGED OUT of this figure; "
                  f"expose it with --liveness-metrics for a PrometheusRule)")
@@ -1063,15 +1066,20 @@ def retired_still_windowed(plans):
             if p.get("window") and p.get("status") in MISSED_EXEMPT_STATUSES]
 
 
-def missing_window_runs(expected, run_rows, covered=()):
+def missing_window_runs(expected, run_rows, covered=(), waived=()):
     """Pure logic, DB-free: expected (slot,date) pairs minus recorded ones.
 
     covered: extra (slot,date) pairs that count as run although no row for
     that slot exists — see nightly_covered_by_on_demand() and
-    attended_absorbed_by_on_demand()."""
+    attended_absorbed_by_on_demand().
+    waived: (slot,date) pairs the operator deliberately declared NOT to run —
+    see waived_slots(). They leave the missing list but are NOT run: they are
+    reported separately (window_runs_waived_count), never as coverage."""
     have = {(str(s), str(d)) for s, d in run_rows}
     have |= {(str(s), str(d)) for s, d in covered}
-    return [f"{s}:{d}" for s, d in expected if (s, d) not in have]
+    skip = {(str(s), str(d)) for s, d in waived}
+    return [f"{s}:{d}" for s, d in expected
+            if (s, d) not in have and (s, d) not in skip]
 
 
 # Operator decision 2026-09-26: a same-day on-demand run covers that day's
@@ -1095,7 +1103,8 @@ def missing_window_runs(expected, run_rows, covered=()):
 #     00:30 Berlin carries yesterday's run_date but covers today's nightly.
 NIGHTLY_SLOT = "nightly"
 COVERING_TRIGGER = "ad-hoc"
-NON_COVERING_OUTCOMES = ("aborted",)
+WAIVED_OUTCOME = "waived"
+NON_COVERING_OUTCOMES = ("aborted", WAIVED_OUTCOME)
 
 
 def _berlin_date(ts):
@@ -1165,6 +1174,32 @@ def attended_absorbed_by_on_demand(run_rows, on_demand_id="now", notes_index=6):
     return sorted(out)
 
 
+# Operator decision 2026-10-13 (vacation): a slot the operator DELIBERATELY let
+# go unrun is recorded as a `waived` row (slot + run_date of the skipped slot,
+# a mandatory reason in notes) instead of paging as missed for a week. It is
+# explicitly NOT a run: completed_run_rows() excludes it, it covers no other
+# slot (NON_COVERING_OUTCOMES), and the occurrence stays visible as
+# window_runs_waived_count. Fail-closed on every edge:
+#   * no notes (no stated reason)        -> ignored, the slot stays missing;
+#   * run_date today or later            -> ignored: a waiver is retrospective,
+#     it cannot pre-silence a window that has not yet had its chance to run;
+#   * a real completed row for the slot  -> the run wins, nothing is "waived".
+def waived_slots(run_rows, today=None, notes_index=6):
+    """Pure, DB-free: {(slot, run_date)} carrying a VALID waiver row.
+    row: (slot, run_date, started_at, finished_at, outcome, trigger, notes).
+    today: a date; rows dated today or later are ignored (None = no check)."""
+    out = set()
+    for r in run_rows:
+        if len(r) <= 4 or r[4] != WAIVED_OUTCOME:
+            continue
+        if len(r) <= notes_index or not str(r[notes_index] or "").strip():
+            continue
+        if today is not None and str(r[1]) >= today.isoformat():
+            continue
+        out.add((str(r[0]), str(r[1])))
+    return sorted(out)
+
+
 # A window whose row was opened (`--outcome running`, 2026-09-14 two-phase
 # recording) but never finalized. The window agent's close-out is the only
 # thing that writes finished_at, so a row still open this long after the
@@ -1189,8 +1224,10 @@ def completed_run_rows(run_rows):
     verified occurrence, the exact blind spot the two-phase recording exists
     to close. Terminal rows count whatever their finished_at (pre-2026-09-14
     rows all have one; a future terminal row without one is still terminal).
+    A `waived` row is excluded too: "deliberately not run" is not "ran".
     """
-    return [(str(r[0]), str(r[1])) for r in run_rows if not _is_open_run(r)]
+    return [(str(r[0]), str(r[1])) for r in run_rows
+            if not _is_open_run(r) and r[4] != WAIVED_OUTCOME]
 
 
 def _as_utc(ts):
@@ -1237,7 +1274,7 @@ def stuck_window_runs(windows, run_rows, now, grace_min=WINDOW_STUCK_GRACE_MIN,
 
 
 def liveness_figures(missing, stuck, verified, today,
-                     lookback_days=WINDOW_LIVENESS_LOOKBACK_DAYS) -> dict:
+                     lookback_days=WINDOW_LIVENESS_LOOKBACK_DAYS, waived=()) -> dict:
     """Pure: the liveness report WITH its machine-readable figures (F-2dabaddb).
 
     Before this the report carried only the lists, and a nightly that silently
@@ -1252,13 +1289,15 @@ def liveness_figures(missing, stuck, verified, today,
     prevent. The exposition (liveness_metrics_text) omits them the same way.
     """
     floor = (today - timedelta(days=lookback_days)).isoformat()
-    missing, stuck = list(missing), list(stuck)
+    missing, stuck, waived = list(missing), list(stuck), list(waived)
     return {
         "missing": missing,
         "stuck": stuck,
+        "waived": waived,
         "verified": bool(verified),
         "window_runs_missing_count": len(missing) if verified else None,
         "window_runs_stuck_count": len(stuck) if verified else None,
+        "window_runs_waived_count": len(waived) if verified else None,
         "lookback_days": int(lookback_days),
         "lookback_floor": floor,
         "ages_out": (f"a missed occurrence older than {lookback_days} days (before "
@@ -1280,6 +1319,9 @@ def liveness_metrics_text(report: dict) -> str:
                                            run exposes NO count, so absent()
                                            in the rule is the unverified arm
       window_runs_stuck_count              same rule
+      window_runs_waived_count             same rule — occurrences the operator
+                                           deliberately waived; they are NOT in
+                                           the missing count and NOT runs
     """
     L = [
         "# HELP window_runs_liveness_verified 1 when the window_runs ledger was read this run, 0 when it could not be (no DSN / DB unreachable). 0 is NOT all-clear.",
@@ -1299,12 +1341,17 @@ def liveness_metrics_text(report: dict) -> str:
             "# HELP window_runs_stuck_count window_runs rows opened (running) and never finalized past the window's duration plus grace.",
             "# TYPE window_runs_stuck_count gauge",
             f"window_runs_stuck_count {s}",
+            "# HELP window_runs_waived_count Declared occurrences in the lookback the operator deliberately waived (window_runs outcome=waived with a stated reason). Excluded from window_runs_missing_count; they did NOT run.",
+            "# TYPE window_runs_waived_count gauge",
+            f"window_runs_waived_count {int(report.get('window_runs_waived_count') or 0)}",
         ]
     return "\n".join(L) + "\n"
 
 
 def window_liveness_report(cfg, today, now=None):
-    """{"missing": [...], "stuck": [...], "verified": bool}.
+    """{"missing": [...], "stuck": [...], "verified": bool} (+ "waived": [...]
+    when verified — the occurrences the operator deliberately waived; the
+    unverified dict stays three-key).
 
     verified=False when the DB is unreachable — an unreadable ledger must
     render as NOT CHECKED, never as all-clear. `missing` and `verified` keep
@@ -1340,7 +1387,11 @@ def window_liveness_report(cfg, today, now=None):
     od_id = (od or {}).get("id", "now")
     covered = (nightly_covered_by_on_demand(rows, on_demand_id=od_id)
                + attended_absorbed_by_on_demand(rows, on_demand_id=od_id))
-    return {"missing": missing_window_runs(expected, completed_run_rows(rows), covered),
+    waived = waived_slots(rows, today=today)
+    before = missing_window_runs(expected, completed_run_rows(rows), covered)
+    missing = missing_window_runs(expected, completed_run_rows(rows), covered, waived)
+    return {"missing": missing,
+            "waived": [m for m in before if m not in set(missing)],
             "stuck": stuck_window_runs(cfg.get("windows", []), rows, now,
                                        on_demand=on_demand_slot(cfg)),
             "verified": True}
@@ -1352,7 +1403,8 @@ def window_liveness_figures(cfg, today, now=None) -> dict:
     lookback_days, lookback_floor, ages_out. This is what reconcile(), human()
     and --liveness-metrics consume; the three-key report stays as it was."""
     r = window_liveness_report(cfg, today, now=now)
-    return liveness_figures(r["missing"], r["stuck"], r["verified"], today)
+    return liveness_figures(r["missing"], r["stuck"], r["verified"], today,
+                            waived=r.get("waived") or ())
 
 
 def window_liveness(cfg, today):

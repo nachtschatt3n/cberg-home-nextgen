@@ -148,7 +148,7 @@ def main() -> int:
 
     print("  -- commissioning straw: the three-key report only (pre-fix liveness)")
     saved = mp.liveness_figures
-    mp.liveness_figures = (lambda missing, stuck, verified, today, lookback_days=7:
+    mp.liveness_figures = (lambda missing, stuck, verified, today, lookback_days=7, waived=():
                            {"missing": list(missing), "stuck": list(stuck), "verified": bool(verified)})
     try:
         under = scenarios()

@@ -190,24 +190,30 @@ def window_metrics(mp, cfg, run_rows, end_day, span):
     if run_rows is None:
         why = "window_runs unreadable (sweep_history Postgres)"
         return {k: U(why) for k in ("expected", "run", "missed", "missed_slots",
-                                    "outcomes", "safe_updates")}
+                                    "waived", "outcomes", "safe_updates")}
     expected = mp.expected_slots(cfg, end_day, lookback_days=PERIOD_DAYS)
     base = [r[:6] for r in run_rows]
     od = (mp.on_demand_slot(cfg) or {}).get("id", "now")
     covered = (mp.nightly_covered_by_on_demand(base, on_demand_id=od)
                # notes is column 7 of this query (after safe_updates)
                + mp.attended_absorbed_by_on_demand(run_rows, on_demand_id=od, notes_index=7))
-    missing = mp.missing_window_runs(expected, mp.completed_run_rows(base), covered)
+    # waived = deliberately not run (window-run-record --outcome waived): out of
+    # `missed`, and out of `run` too -- it is reported on its own line.
+    waived_set = mp.waived_slots(run_rows, today=end_day, notes_index=7)
+    before = mp.missing_window_runs(expected, mp.completed_run_rows(base), covered)
+    missing = mp.missing_window_runs(expected, mp.completed_run_rows(base), covered, waived_set)
+    waived = [m for m in before if m not in set(missing)]
     in_span = [r for r in run_rows if _in(r[2], span)]
     outcomes = Counter(str(r[4]) for r in in_span)
     su = [r[6] for r in in_span]
     src = "window_runs + maintenance-plan.py expected_slots/missing_window_runs"
     if not expected and cfg.get("windows"):
         exp_m = U(f"period predates the window_runs epoch {mp.WINDOW_LIVENESS_EPOCH}")
-        run_m = missed_m = slots_m = exp_m
+        run_m = missed_m = slots_m = waived_m = exp_m
     else:
         exp_m = M(len(expected), src)
-        run_m = M(len(expected) - len(missing), src)
+        run_m = M(len(expected) - len(missing) - len(waived), src)
+        waived_m = M(waived, src)
         missed_m = M(len(missing), src)
         slots_m = M(missing, src)
     if any(v is None for v in su):
@@ -217,7 +223,7 @@ def window_metrics(mp, cfg, run_rows, end_day, span):
     else:
         safe = M(sum(su), "window_runs.safe_updates")
     return {"expected": exp_m, "run": run_m, "missed": missed_m, "missed_slots": slots_m,
-            "outcomes": M(dict(outcomes), "window_runs.outcome (rows started in period, incl. ad-hoc/now)",
+            "waived": waived_m, "outcomes": M(dict(outcomes), "window_runs.outcome (rows started in period, incl. ad-hoc/now)",
                           runs=len(in_span)),
             "safe_updates": safe}
 
@@ -1049,6 +1055,7 @@ def render_md(r):
     rows = [
         ("Windows expected / run / missed", "windows", ("expected", "run", "missed")),
         ("Window missed slots", "windows", ("missed_slots",)),
+        ("Window slots waived (not run)", "windows", ("waived",)),
         ("Window outcomes", "windows", ("outcomes",)),
         ("Safe updates landed", "windows", ("safe_updates",)),
         ("Plan outcomes", "plans", ("outcomes",)),
