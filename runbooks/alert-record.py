@@ -276,7 +276,30 @@ def reconcile(dsn, dry: bool = False, firing: list[dict] | None = None) -> dict:
                            capture_output=True, text=True, timeout=60)
         if not dry:
             conn.commit()
-    return {"closed": closed, "still_firing": kept, "unparsed": unparsed, "dry_run": dry}
+    # Drift the other way: the finding is resolved but its reminder is not
+    # (the old best-effort close failed silently: F-f5763417 resolved Oct 1,
+    # its issue still open Oct 13). Close ALERT issues whose finding is not
+    # among the open ones.
+    orphans = []
+    r = subprocess.run(notify._HOME_OP_EXEC + ["--json", "list"],
+                       capture_output=True, text=True, timeout=60)
+    try:
+        issues = json.loads(r.stdout[r.stdout.index("{"):]).get("issues", [])
+    except ValueError:
+        issues = []
+    open_ids = set(kept) | set(unparsed)
+    for it in issues:
+        key, title = str(it.get("key", "")), str(it.get("title", ""))
+        if key.startswith("F-") and title.startswith("ALERT ") \
+                and key not in open_ids and key not in closed:
+            orphans.append(key)
+            if not dry:
+                subprocess.run(notify._HOME_OP_EXEC
+                               + ["resolve", "--issue", key, "--by", "cleared",
+                                  "--note", "finding already resolved (alert-record --reconcile)"],
+                               capture_output=True, text=True, timeout=60)
+    return {"closed": closed, "still_firing": kept, "unparsed": unparsed,
+            "orphan_issues_closed": orphans, "dry_run": dry}
 
 
 def main(argv=None) -> int:
