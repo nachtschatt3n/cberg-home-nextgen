@@ -31,7 +31,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: rescan
-              image: python:3.14.7-slim
+              image: python:3.14.8-slim
               command: ["python", "/app/rescan.py"]
               env:
                 - name: PLEX_URL
