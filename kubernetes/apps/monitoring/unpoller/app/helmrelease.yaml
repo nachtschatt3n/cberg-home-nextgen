@@ -61,7 +61,7 @@ spec:
       # and UMBB/U5G-Max cellular: no such device). No metric rename or removal.
       # Chart STILL 2.4.0 and this override STAYS: no published chart ships an appVersion
       # >= v5.5.0.
-      tag: v5.5.0
+      tag: v5.5.1
 
     replicaCount: 1
 
