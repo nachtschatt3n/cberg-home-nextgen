@@ -64,7 +64,7 @@ finding_refs:                         # queried 2026-09-25 with SWEEP_PG_DSN up
 amended: "2026-10-05 dependency n8n-2.39.8 retargeted 2.40.7 -> 2.41.7 (stable); every 2.40.7 token here (ordering-lock premise image-is-2.41.7, V-gates, rollback notes) moved to 2.41.7. abstract-server.ts / base-command.ts re-checked unchanged at 2.41.7 by the n8n planner; scope-neutral."
 status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (V7 absence gate, undeclared helm-drift conflict) -> fixed -> ready-for-go. Premise image-is-2.41.7 is the designed ordering lock: cannot run before n8n-2.39.8 executes (+24h, §2.2).
 review: ready-for-go@2026-09-28
-window: "nightly:2026-10-13"   # scheduled 2026-10-05 (operator "plan all and time them"): SD-10 pre-approved; depends_on n8n-2.39.8 (sun 10-11) + >=24h settle; ordering-lock premise refuses it before
+window: null   # CLEARED 2026-10-13: depends_on n8n-2.39.8, which has NOT executed (blocked at its 2.1 channel gate: stable moved to 2.42.7); re-place after n8n lands + >=24h settle. Was "nightly:2026-10-13". scheduled 2026-10-05 (operator "plan all and time them"): SD-10 pre-approved; depends_on n8n-2.39.8 (sun 10-11) + >=24h settle; ordering-lock premise refuses it before
 premises:
   - id: image-is-2.41.7
     why: >-
