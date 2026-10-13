@@ -18,13 +18,16 @@ spec:
     - alert: OpenClawPodNotReady
       annotations:
         description: OpenClaw pod {{ $labels.pod }} has been not ready for more than
-          5 minutes. The agent (chat, skills, morning briefing) is unavailable.
+          10 minutes. The agent (chat, skills, morning briefing) is unavailable.
         summary: OpenClaw pod {{ $labels.pod }} is not ready
       expr: |
         sum by (namespace, pod) (
           kube_pod_status_ready{namespace="ai", pod=~"openclaw-.*", pod!~"openclaw-probe-.*", condition="true"}
         ) == 0
-      for: 5m
+      # 10m, not 5m: a normal rollout takes ~6 min (Recreate + Longhorn RWO
+      # detach/Multi-Attach + startup), so 5m paged a critical on every deploy
+      # (2026-10-13 01:12 and 04:30). 10m still catches a real outage.
+      for: 10m
       labels:
         category: openclaw
         component: openclaw

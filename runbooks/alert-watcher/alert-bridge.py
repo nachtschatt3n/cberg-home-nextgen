@@ -79,6 +79,52 @@ async def _fanout():
 # dead-man's switch was arriving and being thrown away. Record it instead.
 _last_post = 0.0        # any webhook POST reached us
 _last_watchdog = 0.0    # the always-firing heartbeat specifically
+# ── reconcile: close alert findings whose alert stopped firing ───────────────
+# 2026-10-13: closing a finding on "resolved" used to depend on a live Claude
+# session handling this bridge's frame; when none did, a recovered critical
+# paged every 3h overnight. The bridge itself now runs
+# `alert-record.py --reconcile` (refuses unless Watchdog is in the read) on
+# every resolved frame (debounced) and every 30 min, with no session needed.
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_RECONCILE_CMD = ["/opt/homebrew/bin/mise", "exec", "-C", _REPO, "--",
+                  os.path.join(_REPO, ".venv/bin/python3"),
+                  os.path.join(_REPO, "runbooks/alert-record.py"), "--reconcile"]
+_RECONCILE_EVERY_S = int(os.environ.get("RECONCILE_EVERY_S", "1800"))
+_RECONCILE_DEBOUNCE_S = 120
+_reconcile_lock = threading.Lock()
+_reconcile_due = 0.0
+
+
+def _run_reconcile(reason: str) -> None:
+    import subprocess
+    if not _reconcile_lock.acquire(blocking=False):
+        return
+    try:
+        r = subprocess.run(_RECONCILE_CMD, capture_output=True, text=True, timeout=300)
+        out = (r.stdout or r.stderr).strip().replace("\n", " ")[-400:]
+        print(f"{_ts()} reconcile ({reason}) rc={r.returncode}: {out}", flush=True)
+    except Exception as e:
+        print(f"{_ts()} reconcile ({reason}) failed: {e}", flush=True)
+    finally:
+        _reconcile_lock.release()
+
+
+def _schedule_reconcile(reason: str) -> None:
+    """Debounce: Alertmanager sends resolves in bursts."""
+    global _reconcile_due
+    now = time.time()
+    if now < _reconcile_due:
+        return
+    _reconcile_due = now + _RECONCILE_DEBOUNCE_S
+    threading.Timer(_RECONCILE_DEBOUNCE_S, _run_reconcile, args=(reason,)).start()
+
+
+def _reconcile_loop() -> None:
+    while True:
+        time.sleep(_RECONCILE_EVERY_S)
+        _run_reconcile("periodic")
+
+
 _started = time.time()  # so a checker can tell "not yet" from "stopped arriving":
                         # Alertmanager re-sends Watchdog on repeat_interval (4h
                         # for the claude route), so a bridge younger than that
@@ -125,6 +171,8 @@ class _Webhook(BaseHTTPRequestHandler):
                 "ts": _ts(),
             }
             _loop.call_soon_threadsafe(_queue.put_nowait, evt)
+            if evt["status"] == "resolved":
+                _schedule_reconcile(f"resolved {evt['alertname']}")
 
     def do_GET(self):  # health probe
         now = time.time()
@@ -173,6 +221,7 @@ def _http_thread():
 
 async def _main():
     threading.Thread(target=_http_thread, daemon=True).start()
+    threading.Thread(target=_reconcile_loop, daemon=True).start()
     asyncio.create_task(_fanout())
     print(f"[{_ts()}] alert-bridge up: webhook http://0.0.0.0:{HTTP_PORT}/alertmanager "
           f"| ws ws://127.0.0.1:{WS_PORT}/", flush=True)

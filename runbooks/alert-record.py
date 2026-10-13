@@ -46,6 +46,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -186,10 +187,104 @@ def resolve(args, dsn) -> tuple[str, bool]:
     return fid, bool(rows) and p.returncode == 0
 
 
+# ── reconcile: close findings whose alert is no longer firing ───────────────
+# 2026-10-13: closing a finding on resolve depended on a live Claude session
+# handling the bridge's "resolved" frame. When none did, a recovered critical
+# (OpenClawPodNotReady after a deploy) kept paging every 3h through the night,
+# and 12 alert issues sat open. The alert bridge now runs this on every
+# resolved frame and every 30 min; it needs no session.
+
+_TITLE_RE = re.compile(r"^Alert (\S+) firing in (\S*?)(?: \[(.+)\])?$")
+
+
+def parse_title(title: str):
+    m = _TITLE_RE.match(title or "")
+    return (m.group(1), m.group(2), m.group(3)) if m else None
+
+
+def still_firing(alertname: str, key: str | None, firing: list[dict]) -> bool:
+    """`firing` = label dicts of the alerts firing now. No key -> any firing
+    alert of that name keeps it open; with a key, one of that alert's label
+    values must match it (KumaMonitorDown: one monitor resolving must not
+    close another's finding)."""
+    cands = [lbl for lbl in firing if lbl.get("alertname") == alertname]
+    if not cands:
+        return False
+    if not key:
+        return True
+    # Substring, case-insensitive: TargetDown [arag-scrape] fires with
+    # job="scrapeConfig/monitoring/arag-scrape". Over-matching only keeps a
+    # finding open, which is the safe direction.
+    k = key.lower()
+    return any(k in str(v).lower() for lbl in cands for v in lbl.values())
+
+
+def fetch_firing() -> list[dict]:
+    """Labels of every FIRING alert, from Prometheus. Raises unless the read
+    contains Watchdog: an empty or partial read must never mass-resolve."""
+    import urllib.request
+    port = _free_port()
+    pf = subprocess.Popen(
+        ["kubectl", "port-forward", "-n", "monitoring",
+         "svc/kube-prometheus-stack-prometheus", f"{port}:9090"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        preexec_fn=os.setsid if os.name != "nt" else None)
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            try:
+                socket.create_connection(("127.0.0.1", port), 0.3).close()
+                break
+            except OSError:
+                time.sleep(0.2)
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/v1/alerts",
+                                    timeout=20) as r:
+            alerts = json.loads(r.read())["data"]["alerts"]
+    finally:
+        _stop_pf(pf)
+    firing = [a["labels"] for a in alerts if a.get("state") == "firing"]
+    if not any(lbl.get("alertname") == "Watchdog" for lbl in firing):
+        raise RuntimeError("Watchdog not in the firing set -- refusing to reconcile "
+                           "on a read that cannot prove it is complete")
+    return firing
+
+
+def reconcile(dsn, dry: bool = False, firing: list[dict] | None = None) -> dict:
+    firing = fetch_firing() if firing is None else firing
+    import psycopg
+    closed, kept, unparsed = [], [], []
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute("""SELECT finding_id, title FROM sweep_findings
+                        WHERE section = %s AND resolved_at IS NULL""", (SECTION,))
+        for fid, title in cur.fetchall():
+            parsed = parse_title(title)
+            if not parsed:
+                unparsed.append(fid)
+                continue
+            alertname, _ns, key = parsed
+            if still_firing(alertname, key, firing):
+                kept.append(fid)
+                continue
+            closed.append(fid)
+            if dry:
+                continue
+            cur.execute("""UPDATE sweep_findings SET resolved_at = now(), status = 'resolved'
+                            WHERE finding_id = %s AND resolved_at IS NULL""", (fid,))
+            subprocess.run(notify._HOME_OP_EXEC
+                           + ["resolve", "--issue", fid, "--by", "cleared",
+                              "--note", "alert no longer firing (alert-record --reconcile)"],
+                           capture_output=True, text=True, timeout=60)
+        if not dry:
+            conn.commit()
+    return {"closed": closed, "still_firing": kept, "unparsed": unparsed, "dry_run": dry}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--alertname", required=True)
-    ap.add_argument("--namespace", required=True)
+    ap.add_argument("--alertname")
+    ap.add_argument("--namespace")
+    ap.add_argument("--reconcile", action="store_true",
+                    help="close every open alert finding whose alert is no longer firing")
     ap.add_argument("--instance-key", default=None,
                     help="discriminator when one alertname covers many subjects")
     ap.add_argument("--pod", default=None, help="for the record; NOT identity")
@@ -203,6 +298,20 @@ def main(argv=None) -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="print identity + payload, write nothing")
     args = ap.parse_args(argv)
+
+    if args.reconcile:
+        pf = None
+        try:
+            dsn, pf = _self_dsn()
+            print(json.dumps(reconcile(dsn, dry=args.dry_run)))
+            return 0
+        except Exception as e:
+            print(f"alert-record: reconcile failed: {e}", file=sys.stderr)
+            return 2
+        finally:
+            _stop_pf(pf)
+    if not (args.alertname and args.namespace):
+        ap.error("--alertname and --namespace are required (unless --reconcile)")
 
     title, fp, fid = identity(args.alertname, args.namespace, args.instance_key)
     if args.dry_run:
