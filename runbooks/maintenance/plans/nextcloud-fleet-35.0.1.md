@@ -78,6 +78,7 @@ touches:
 depends_on: []                                  # nextcloud-9.4.0 is SUPERSEDED by this plan (folded
                                                 # into Commit B 2026-10-05); it is no longer a dependent.
 conflicts_with:
+  - etcd-timeouts-5000-500           # reciprocal (2026-10-13): that plan names this one; etcd-timeouts restarts etcd on all 3 members (apiserver blips); never the same night as the office-wide nextcloud upgrade
   - bitnamilegacy-exit-nextcloud-db             # same helmrelease.yaml, same DB this plan migrates
                                                 # one-way; that plan's dump would capture a half-state.
   - nextcloud-mcp-0.198.0                       # its verification talks to this server; the §2.5

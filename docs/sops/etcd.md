@@ -47,9 +47,12 @@ F-e8bb3113, F-3602cfa9).
 
 ## 3) Blueprints
 
-N/A for etcd itself — it is Talos machine config, and machine-config changes are blocked
-until the multi-document config migration lands (`docs/sops/talos-upgrade.md` §14.2,
-F-59b12b2b).
+N/A for etcd itself — it is Talos machine config (`kubernetes/bootstrap/talos/patches/controller/cluster.yaml`
+`cluster.etcd.extraArgs`, applied by hand with `talosctl apply-config`). The multi-document config
+migration landed 2026-10-04 (`a7965251`, talhelper 3.1.17; `docs/sops/talos-upgrade.md` §14.2,
+F-59b12b2b closed), so `talhelper genconfig` renders v1.14 configs again and machine-config changes
+are no longer blocked. Note `apply-config` alone does not change running etcd args: the service must
+be restarted.
 
 The one GitOps artifact that exists to protect etcd is the Flux source `spec.ignore`
 (`b4ed1d63`), which cuts the per-commit artifact extraction volume on the shared disk:

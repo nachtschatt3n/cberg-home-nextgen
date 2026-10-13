@@ -130,9 +130,10 @@ backup_gate: "on-demand Longhorn backup of the jellyfin-config volume (holds jel
   plugin-removal step (§3 step 1). Triggered via cronjob/daily-backup-all-volumes (ns
   storage) — NOT `backup-of-all-volumes`, which does not exist. See §3 step 4 and §5."
 finding_refs: [F-fc5e2913, F-3a72570a]
-status: awaiting-go   # REVIEWED 2026-09-15 (c36388bc); RE-REVIEWED 2026-09-28 (F-2c849d1e): needs-fix (3 blocking: rollback order, plugin expectation, §4.6 gate) -> fixed -> ready-for-go
+status: superseded   # 2026-10-13: superseded by jellyfin-12.2.20261005 (12.2 GA 2026-10-05; TubeArchivistMetadata 1.5.0 for 12.x shipped; one forward migration instead of two). Was awaiting-go / review ready-for-go@2026-09-28; that review and GO do NOT transfer.
 review: ready-for-go@2026-09-28
-window: "sat-attended:2026-10-10"   # 2026-09-23: moved off 10-11 (flux-reconciler-impersonation is exclusive there; media-audit-durable-output left 10-10 by executing early). Earlier, 2026-09-15: moved off 10-04: reconciler RISK-CLASS STACKING — two backup-restore plans (frigate, jellyfin) in one slot leaves no rollback capacity; jellyfin has the heavier prerequisite list
+superseded_by: jellyfin-12.2.20261005
+window: null   # CLEARED 2026-10-13: superseded by jellyfin-12.2.20261005 (the sat-attended:2026-10-10 slot passed unrun). Was "sat-attended:2026-10-10".
 premises:
   - id: image-is-still-10.11.11
     why: >-

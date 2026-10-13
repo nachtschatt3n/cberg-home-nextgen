@@ -16,12 +16,22 @@ risk: high                            # Forward-only DB migration (10.11 -> 12.x
                                       # internet-facing media server; one repository plugin must be
                                       # removed first; legacy-auth switch-off and legacy-route
                                       # removal change client behaviour. Same basis as jellyfin-12.1.
-est_duration_min: 70                  # pre-checks+baselines 10 · backup_gate ~12 (the CronJob
+est_duration_min: 95                  # RE-ESTIMATED 2026-10-13 (plan-reviewer: 70 equalled the whole Sat
+                                      # schedulable budget). Happy path, EXCLUDING rollback:
+                                      # pre-checks+baselines+silence 15 · backup_gate ~12 (the CronJob
                                       # trigger backs up EVERY volume) · plugin uninstall 3 ·
-                                      # commit+reconcile+first-boot migration 15 · mandatory full
-                                      # scan ~5-15 (normal scan measured 2026-10-06: 1m45s; first
-                                      # 12.x scan is "significantly longer") · plugin 1.5.0 install
-                                      # + restart 5 · verification 15. Fits sat-attended (90).
+                                      # commit+reconcile+first-boot migration 20 (headroom: three NEW
+                                      # 12.2 migrations on top of the 10.11 -> 12 set) · mandatory full
+                                      # scan ~15 (normal scan measured 2026-10-06: 1m45s; first 12.x
+                                      # scan is "significantly longer") · plugin 1.5.0 install +
+                                      # restart (+ pod-delete fallback) 8 · verification 17 (adds the
+                                      # QSV init test, login, consumers) · remediation restore +
+                                      # cleanup 5 = 95. ROLLBACK BUDGET IS SEPARATE and NOT in the 95:
+                                      # ~30-45 min (Longhorn restore from backup + PV/PVC re-point +
+                                      # re-verify, §5). Plan for 95 + up to 45 = 140 worst case. Runs
+                                      # as an attended ad-hoc NOW run (not a scheduled slot), so there
+                                      # is no slot ceiling to fit; Step 0 (safe-update apply, ~20 min)
+                                      # runs FIRST by contract and is additional to the 95.
 needs_reboot: false
 touches:
   namespaces: [media, storage]        # storage: the backup_gate creates a Job from
@@ -57,18 +67,23 @@ conflicts_with:
                                       # backup_gate, premises and §5 name the OLD RWX volume
                                       # `jellyfin-config`: run THIS plan FIRST (before 10-25).
   - media-naming-p3                   # backup-restore stacking (inherited from jellyfin-12.1)
-  - n8n-2.39.8                        # backup-restore stacking (inherited)
+  - n8n-2.39.8                        # backup-restore stacking (inherited) AND NOW-run sequencing:
+                                      # the operator's n8n ad-hoc run must have finished (run record
+                                      # closed) before this one opens — never overlapping
   - paperless-db-13.0.2               # backup-restore stacking (inherited; that plan names jellyfin-12.1)
   - nextcloud-fleet-35.0.1            # names jellyfin-12.1 — carried over so the pair stays enforced
   - nocodb-2026.09.1                  # names jellyfin-12.1 — carried over
   - helm-drift-detection              # touches helmrelease/media/jellyfin + rolls intel-gpu-plugin
   - flux-oci-chart-sources            # mirrors the jellyfin chart source
   - flux-distribution-2.9.6           # names jellyfin-12.1 — carried over
-  - immich-machine-learning-3.2.4     # names jellyfin-12.1; igpu-i915 + media ns — carried over
   - talos-power-tuning-ab             # names jellyfin-12.1; igpu-i915 — carried over
   - talos-linux-1.14.2                # cluster-wide node roll incl. igpu-i915 + longhorn
   - longhorn-1.13.0                   # backup_gate + restore path run on the engine it replaces
-  - kube-prometheus-stack-91.9.0      # §4.7 reads Prometheus (window instrument = shared infra)
+  - kube-prometheus-stack-92.2.0      # §4.1 CONTROLs + §4.7 read Prometheus (window instrument = shared
+                                      # infra): never the same night as a kps bump
+  - coredns-1.48.2                    # cluster DNS bounce during the migration/verification would read
+                                      # as a Jellyfin or consumer failure (§4.6, §4.7)
+  - etcd-timeouts-5000-500            # control-plane change; do not stack with a backup-restore plan
 exclusive: false
 security_ref: F-3a72570a              # security finding on the CURRENT image — detail on the record
                                       # only. We bump, we never rebuild.
@@ -89,12 +104,16 @@ backup_gate: "on-demand Longhorn backup of volume jellyfin-config, triggered IN-
   NOT `backup-of-all-volumes`, which does not exist. Newest Completed at planning time:
   backup-db17f322e23e40e2 2026-10-06T03:01:59Z (does not satisfy the gate)."
 finding_refs: [F-fc5e2913, F-3a72570a]
-review: null
-status: draft
-window: null                          # Recommendation (§6): take over jellyfin-12.1's slot
-                                      # sat-attended:2026-10-10 once 12.1 is marked superseded and
-                                      # this plan is reviewed + GO'd; otherwise the next attended
-                                      # slot with capacity BEFORE sun-attended:2026-10-25.
+review: ready-for-go@2026-10-13   # plan-reviewer 2026-10-13 (2nd pass): ready-for-go, 0 blocking; vetted per operator choice "attended run now" (AskUserQuestion 2026-10-13)
+status: vetted
+window: null                          # Operator decision 2026-10-13: attended AD-HOC run NOW, after the
+                                      # n8n ad-hoc run finishes (sequential, never overlapping). Repo
+                                      # convention: `window:` stays null here; ONLY
+                                      # `runbooks/run-now.py stamp` writes the `now:<date>` ref, inside
+                                      # the NOW run after `run-now.py preflight` passes (plans/README.md
+                                      # "On-demand NOW refs"). Do not hand-write it. The earlier
+                                      # sat-attended:2026-10-10 recommendation is void (slot passed,
+                                      # jellyfin-12.1 never ran).
 premises:
   - id: image-is-still-10.11.11
     why: >-
@@ -151,23 +170,29 @@ generated: "2026-10-07"
 
 ## 0. Relationship to `jellyfin-12.1` and `jellyfin-config-rwo-migration` — read first
 
-**This plan SUPERSEDES `jellyfin-12.1`** (status awaiting-go, `sat-attended:2026-10-10`,
-review ready-for-go@2026-09-28). Reasons:
+**This plan SUPERSEDES `jellyfin-12.1`** (now marked `status: superseded`,
+`superseded_by: jellyfin-12.2.20261005`, window cleared 2026-10-13; its `sat-attended:2026-10-10`
+slot passed unrun). Reasons:
 
-- Executing 12.1 on 10-10 while 12.2 is GA would run the 10.11 -> 12.x forward migration,
-  and then a second forward migration (12.2's three new routines, §1.3) a few days later —
-  two backup-restore events on the same DB, for no benefit. Upstream supports 10.11.x -> 12.x
+- Executing 12.1 and then 12.2 would run the 10.11 -> 12.x forward migration, and then a
+  second forward migration (12.2's three new routines, §1.3) — two backup-restore events on
+  the same DB, for no benefit. Upstream supports 10.11.x -> 12.x
   direct ("intermediate upgrades are not required").
 - The one thing that made 12.1 a standing capability loss is GONE: TubeArchivistMetadata
   **v1.5.0.0 (targetAbi 12.0.0.0) shipped 2026-10-05** and upstream issue #96 is closed. The
   plugin is now uninstall-before / reinstall-after, not a judgement call.
 
-**Required follow-up the planner did NOT do (it writes one file only):** set `jellyfin-12.1`
-to `status: superseded` (note: "superseded by jellyfin-12.2.20261005") and clear its
-`window:`. Every plan that named `jellyfin-12.1` in `conflicts_with` is carried into THIS
-plan's `conflicts_with` (the scheduler reads the field in either direction), so no
-counterpart file needs editing for enforcement. Its GO does not transfer — the target,
-the plugin step and the migration set all changed, so this plan needs its own review + GO.
+**Supersession bookkeeping (done 2026-10-13):** `jellyfin-12.1` is `status: superseded`
+(`superseded_by: jellyfin-12.2.20261005`) with its `window:` cleared. Every plan that named
+`jellyfin-12.1` in `conflicts_with` is carried into THIS plan's `conflicts_with` (the scheduler
+reads the field in either direction), so no counterpart file needs editing for enforcement.
+12.1's GO does not transfer — the target, the plugin step and the migration set all changed,
+so this plan needs its own review + GO.
+
+**Scheduling (operator decision 2026-10-13): attended AD-HOC NOW run, executed after the n8n
+ad-hoc run has finished — sequentially, never overlapping** (both are backup-restore class and
+both hold the shared Longhorn backup path). Step 0 (safe-update apply) runs first by contract.
+`window:` stays null until `run-now.py stamp` writes the `now:` ref in-run.
 
 > Repo note: `runbooks/maintenance/plans/README.md` §"When the held target MOVES" says to
 > REFRESH a drifted plan in place (keep the plan_id) unless the job changed. 12.1 -> 12.2 is
@@ -469,7 +494,14 @@ runbooks/update-marker.sh add jellyfin media 4 "jellyfin 10.11.11->12.2"
    curl -s -H "$AUTH" http://localhost:8097/Plugins | python3 -c \
     "import sys,json;[print(p['Name'],p['Version'],p['Status']) for p in json.load(sys.stdin) if 'Tube' in p['Name']]"
    #   PASS: "TubeArchivist Metadata 1.5.0.0 Active". FAIL modes print 1.4.4.0, NotSupported,
-   #   Malfunctioned, or nothing. A failure here is NOT a rollback trigger on its own (core
+   #   Malfunctioned, or nothing. FALLBACK if it still prints 1.4.4.0/nothing/"Restart" pending
+   #   (/System/Restart is an in-process restart; in a container it can return 204 yet not
+   #   reload plugin assemblies): delete the pod instead — the PVC (plugins + config) survives
+   #   and the 12.2 image is already on the node, so this is a plain restart, not a re-migration:
+   #     kubectl delete pod -n media -l app.kubernetes.io/name=jellyfin
+   #     kubectl wait -n media --for=condition=Ready pod -l app.kubernetes.io/name=jellyfin --timeout=5m
+   #   then re-open the port-forward and re-run the /Plugins check. Do NOT edit the HelmRelease
+   #   for this. A failure here is NOT a rollback trigger on its own (core
    #   upgrade is fine; the plugin can be retried) — record it and tell the operator.
    kubectl exec -n media "$(kubectl get pods -n media -l app.kubernetes.io/name=jellyfin -o jsonpath='{.items[0].metadata.name}')" \
      -- sh -c 'ls -la /config/plugins/configurations/ | grep -i tubearchivist'
@@ -509,8 +541,8 @@ kubectl exec -n media "$POD" -- sh -c 'grep -io "<EnableLegacyAuthorization>[^<]
 #   expect false — proves the legacy-auth migration ran
 ```
 
-CONTROL: metric kube_deployment_status_replicas_available — `{namespace="media",deployment="jellyfin"}` must read 1 after the rollout (measured 1 on 2026-10-07); 0 = no serving pod.
-CONTROL: metric kube_pod_container_status_restarts_total — `{namespace="media",container="jellyfin"}` must not increase between `Startup complete` and the end of §4 (baseline 0); an increase = crash/liveness kill during scan.
+CONTROL: metric kube_deployment_status_replicas_available — PromQL `kube_deployment_status_replicas_available{namespace="media",deployment="jellyfin"}` must return one series reading 1 after the rollout (measured 1 on 2026-10-13, job kube-state-metrics); a value of 0 = no serving pod, and an EMPTY result = kube-state-metrics not scraping / wrong label (verified: the same query with a nonexistent deployment returns `[]`), so empty is a FAIL of the gate, never a pass.
+CONTROL: metric kube_pod_container_status_restarts_total — PromQL `kube_pod_container_status_restarts_total{namespace="media",container="jellyfin"}` must not increase between `Startup complete` and the end of §4 (baseline 0 measured 2026-10-13; the plugin-fallback pod delete in §3 step 7 starts a NEW pod whose counter restarts at 0 — compare per pod name). An increase = crash/liveness kill during scan; an empty result = unreadable, treat as FAIL. Query via `kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9091:9090` then `curl -s -G localhost:9091/api/v1/query --data-urlencode 'query=<PromQL>'`.
 
 ### 4.2 CONTENTS ASSERTION — the library survived
 
@@ -574,14 +606,23 @@ kubectl exec -n media "$POD" -- sh -c \
   '/usr/lib/jellyfin-ffmpeg/ffmpeg -hide_banner -loglevel error -init_hw_device vaapi=va:/dev/dri/renderD128 \
      -f lavfi -i testsrc=size=320x240:rate=5:duration=1 -vf format=nv12,hwupload \
      -c:v h264_vaapi -f null - && echo VAAPI_ENCODE_OK'
+# QSV init test — the CONFIGURED path is qsv, so VAAPI proof alone is insufficient (live-tested
+# 2026-10-13 on 10.11.11: prints QSV_ENCODE_OK, exit 0). qsv derives from the vaapi device:
+kubectl exec -n media "$POD" -- sh -c \
+  '/usr/lib/jellyfin-ffmpeg/ffmpeg -hide_banner -loglevel error -init_hw_device vaapi=va:/dev/dri/renderD128 \
+     -init_hw_device qsv=qs@va -f lavfi -i testsrc=size=320x240:rate=5:duration=1 \
+     -vf format=nv12,hwupload=extra_hw_frames=64 -c:v h264_qsv -f null - && echo QSV_ENCODE_OK'
 kubectl exec -n media "$POD" -- sh -c 'grep -io "<HardwareAccelerationType>[^<]*\|<EncoderPreset>[^<]*" /config/config/encoding.xml'
 ```
-PASS: >= 7, `VAAPI_ENCODE_OK` printed, and encoding.xml still reads
+PASS: >= 7, `VAAPI_ENCODE_OK` AND `QSV_ENCODE_OK` both printed (libva "info" lines on stderr are
+noise; gate on the OK token, not exit text — a broken qsv path prints an ffmpeg error such as
+"Encoder not found" / "Error initializing" / "Device creation failed" and no OK line; verified
+to FAIL by substituting a bogus encoder name), and encoding.xml still reads
 `<HardwareAccelerationType>qsv` + `<EncoderPreset>medium` — the live values measured
 2026-10-07 (NOTE: the server is configured for **qsv**, not vaapi, despite the VAAPI env vars;
 compare against the §2.2 capture, not against an assumption). The 12.2
 `FixNullEncoderPreset` / encoder-options migrations rewrite encoding.xml. FAIL: count 0,
-no OK line (ffmpeg error text), or acceleration type changed (e.g. `none`).
+either OK line missing (ffmpeg error text), or acceleration type changed (e.g. `none`).
 
 ### 4.5 The full scan actually ran
 
@@ -715,18 +756,23 @@ revert restores it). Clear silence + marker. Then tell the window agent that
 
 - **Supersession (§0)**: `jellyfin-12.1` must be marked superseded and lose its window before
   this plan is scheduled; `conflicts_with` lists it so the two can never share a slot.
-- **Window recommendation**: attended Saturday, human-gated (capability_change + backup-restore
-  => never unattended). Preferred: take over `sat-attended:2026-10-10` (sole occupant was
-  jellyfin-12.1; 70/90 min, risk 3/6) if review + GO land in time; else the next attended
-  slot with capacity **before** `sun-attended:2026-10-25` (rwo migration). If neither is
-  possible, the rwo migration must move after this plan, not before (or both plans get
-  re-derived).
-- **igpu-i915**: pod on k8s-nuc14-01 with immich-server + makemkv. `immich-machine-learning-3.2.4`
-  (nightly:2026-10-11) and `talos-power-tuning-ab` are in `conflicts_with`.
-- **backup-restore stacking**: n8n-2.39.8 (sun 10-11), paperless-db-13.0.2 (sat 10-24),
+- **Window (operator decision 2026-10-13)**: attended AD-HOC NOW run, human-gated
+  (capability_change + backup-restore => never unattended), run AFTER the n8n ad-hoc run
+  has finished (its run record closed) — sequential, never overlapping. Step 0 (safe-update
+  apply, ~20 min) runs first. Budget: 95 min happy path + up to 45 min rollback held in
+  reserve (§ frontmatter `est_duration_min`). No scheduled-slot ceiling applies; the
+  operator must be present for the whole run, including typing the Jellyfin admin password
+  for §4.3 (prerequisite: no SOPS secret holds it). `jellyfin-config-rwo-migration`
+  (sun-attended:2026-10-25) must still come AFTER this plan.
+- **igpu-i915**: pod on k8s-nuc14-01 with immich-server + makemkv. `talos-power-tuning-ab`
+  is in `conflicts_with`. (`immich-machine-learning-3.2.4` is no longer an open plan and was
+  dropped from `conflicts_with`; if the immich-ml plan is re-opened, re-add it.)
+- **backup-restore stacking**: n8n-2.39.8 (blocked at its channel gate; its ad-hoc run precedes this one), paperless-db-13.0.2 (sat 10-24),
   nextcloud-fleet-35.0.1 (sun 10-18), nocodb, media-naming-p3 — never in the same slot.
-- **Prometheus**: §4.7 reads `/api/v1/alerts`; `kube-prometheus-stack-91.9.0`
-  (nightly:2026-10-08) is listed.
+- **Prometheus**: §4.1 CONTROLs and §4.7 read Prometheus; `kube-prometheus-stack-92.2.0` is
+  listed (the old 91.9.0 entry was dropped — no such plan is open). Do not run on a night
+  that bumps kube-prometheus-stack. `coredns-1.48.2` (sat-attended:2026-10-17) and
+  `etcd-timeouts-5000-500` are listed as control-plane/DNS perturbers.
 - **The backup_gate Job backs up EVERY Longhorn volume** (~12 min, extra NAS/backup-target
   load); avoid a slot that also runs a Longhorn-heavy plan (longhorn-1.13.0 listed).
 - **No CIFS PVC action** anywhere in this plan; `cifs-jellyfin-media` is Tier-1.

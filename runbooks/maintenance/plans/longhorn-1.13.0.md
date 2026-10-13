@@ -45,6 +45,7 @@ touches:
                                       # SystemBackup; no CIFS StorageClass/PVC is touched
 depends_on: []
 conflicts_with:
+  - etcd-timeouts-5000-500           # reciprocal (2026-10-13): that plan names this one; etcd-timeouts lands sun 11-08; one risky change per window, gates read etcd health
   - talos-linux-1.14.2                # node roll restarts instance-managers + rebuilds replicas; never
                                       # pair with a storage-engine upgrade (same rule as 34abe2bb)
   # - talconfig-multidoc-migration (RESOLVED 2026-10-05: executed green now:2026-10-04 in a7965251 + retired 10bee773; dead ref removed per the dead-ref convention, sweep 481b9c1f / F-c688c50f)

@@ -106,6 +106,7 @@ depends_on: []                        # RESOLVED 2026-10-05 (F-c688c50f): satisf
                                       # (now:2026-10-04) in a7965251, retired 10bee773. Premise
                                       # multidoc-migration-applied-on-all-nodes is the live gate.
 conflicts_with:                       # exclusive: true already keeps everything out of the slot;
+  - etcd-timeouts-5000-500           # reciprocal (2026-10-13): that plan names this one; etcd-timeouts lands sun 11-08, 7 days after this roll; never the same night
                                       # these are the plans that ALSO mutate Talos machine config or
                                       # the same nodes and must never share a night with this roll.
   # - talconfig-multidoc-migration (RESOLVED 2026-10-05: executed green now:2026-10-04 in a7965251 + retired 10bee773; dead ref removed per the dead-ref convention, sweep 481b9c1f / F-c688c50f)
