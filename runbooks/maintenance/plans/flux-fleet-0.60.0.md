@@ -153,7 +153,7 @@ status: awaiting-go    # nightly:2026-10-06: deferred - HUMAN-GATED, no operator
                   # for the 0.60.0 target. The delta to re-review is section 1.2a only; every gate is unchanged
                   # in shape. HUMAN-GATED (autonomy_override); run before flux-reconciler-impersonation (10-11).
 review: ready-for-go@2026-10-05   # plan-reviewer re-review of the 0.61.0 retarget; sole blocker (4.6 hardcoded total) fixed same day
-window: "nightly:2026-10-07"   # moved from nightly:2026-10-06 (no GO); runs only on a recorded GO; still before flux-reconciler-impersonation (10-11). SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed (autonomy_override, Flux floor); before flux-reconciler-impersonation 10-11. KEPT on the 2026-10-03 retarget; the slot only runs if the delta re-review passes first (status is draft).
+window: "nightly:2026-10-14"   # RESCHEDULED 2026-10-13 (maintenance-window-agent, scheduling pass): old GO expired with nightly:2026-10-07. Earliest slot with no declared conflict (coredns 10-17, nextcloud 10-18, redis 10-25 are all later). Runs ONLY on a fresh operator GO recorded for this dated slot (autonomy_override: human-gated); alone in the slot, 35 of 70 min, risk 2 of 6. Before flux-distribution-2.9.6 and flux-reconciler-impersonation. Was nightly:2026-10-07.
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/flux-upgrade.md

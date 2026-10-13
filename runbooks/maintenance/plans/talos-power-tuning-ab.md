@@ -70,9 +70,7 @@ finding_refs:
                                       # EPP balance_power": this plan is that amendment, measured
 review: ready-for-go@2026-10-05     # 4th pass @5a27a9b8 (0 blocking)
 status: vetted
-window: "now:2026-10-06"   # ON-DEMAND NOW run 2026-10-06 (run-now.py stamp; was None)
-                                      # (16:30Z); evening 1 ends ~23:20, evening 2 ~22:30 Berlin; hard stop 01:45, everything done
-                                      # by 02:45 (nightly 03:30). Stamped only by run-now.py stamp inside each run.
+window: null   # CLEARED 2026-10-13 (maintenance-window-agent, scheduling pass): the now:2026-10-06 stamp is stale (that NOW run never happened). NOT re-stamped: two premises FAIL today, so run-now preflight would refuse it. (1) soak-24h-recorded / baseline-files-present: /private/tmp/powerab-talos-power-tuning-ab/ was emptied on 2026-10-11 (only r-* and src-* dirs left). (2) ci-runner-exclude-node02 executed (f726f523) but faa3ec55 then lifted the nuc14-02 exclusion, so the EXCLUDE_NODES premise and the plan's "one CI shard per node, 02 excluded" baseline no longer describe the cluster. Needs a re-plan (re-baseline) and a fresh review; then two attended NOW evenings (310 min each, exclusive), never beside talos-linux-1.14.2 (sun 11-01), k8s-1.36.5, nextcloud, jellyfin or the etcd change.
 premises:
   - id: nodes-on-talos-1.14
     why: "Every render and dry-run below was measured on v1.14.1 (kernel 6.18). Another minor invalidates the renders and the no-reboot verdict."
