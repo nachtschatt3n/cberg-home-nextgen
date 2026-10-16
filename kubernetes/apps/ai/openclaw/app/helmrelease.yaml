@@ -1385,6 +1385,31 @@ spec:
                   cfg.messages = cfg.messages || {};
                   cfg.messages.visibleReplies = 'automatic';
 
+                  // Voice in -> voice out, enforced in config (2026-10-16):
+                  // the operator's standing rule lived in USER.md and was
+                  // ignored 8 times in one drive, and the built-in tts tool
+                  // failed (no provider configured). auto 'inbound' speaks
+                  // every reply to a voice message via the local Qwen3-TTS
+                  // (tts-local wraps `say`'s synthesis: same pinned voice).
+                  cfg.messages.tts = {
+                    ...(cfg.messages.tts || {}),
+                    enabled: true,
+                    auto: 'inbound',
+                    mode: 'final',
+                    provider: 'tts-local-cli',
+                    timeoutMs: 120000,
+                    providers: {
+                      ...((cfg.messages.tts || {}).providers || {}),
+                      'tts-local-cli': {
+                        command: 'python3 /home/node/.openclaw/bin/tts-local',
+                        // '{{ "{{" }}' escape: app-template 5.3 templates every string (see whisper above)
+                        args: ['{{ "{{" }}OutputPath}}'],
+                        outputFormat: 'wav',
+                        timeoutMs: 120000,
+                      },
+                    },
+                  };
+
                   // Disable LLM provider plugins we don't use. Re-ratified on
                   // 2026-06-11: this block was committed 2026-05-26 (perf),
                   // reverted 2026-05-27 in git — but the live config retained
