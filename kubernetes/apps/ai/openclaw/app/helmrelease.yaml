@@ -1404,7 +1404,9 @@ spec:
                         command: 'python3 /home/node/.openclaw/bin/tts-local',
                         // '{{ "{{" }}' escape: app-template 5.3 templates every string (see whisper above)
                         args: ['{{ "{{" }}OutputPath}}'],
-                        outputFormat: 'wav',
+                        // opus: tts-local encodes it itself; OpenClaw only runs ffmpeg
+                        // from system dirs and the image has none (2026-10-16)
+                        outputFormat: 'opus',
                         timeoutMs: 120000,
                       },
                     },
