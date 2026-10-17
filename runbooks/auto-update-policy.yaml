@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.10.12"
+version: "2026.10.17"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -507,6 +507,22 @@ deny:
       rollout restart deploy/sure-worker`, then assert the sidekiq-cron set
       `cron_jobs:default` (NOT `cron_jobs`) has 11 members (SCARD). Remove this
       rule only when that restart+assert is automated in the apply path.
+  - match: "*ninth-banner-feedback-db*"
+    # The Renovate PR is keyed on the SHARED depName `pgvector/pgvector`, which
+    # this glob cannot see, so `paths` holds any PR that CHANGES the Job file;
+    # the direct-bump lane matches the component key itself.
+    paths:
+      - "kubernetes/apps/databases/ninth-banner-feedback-db/app/init-job.yaml"
+    reason: >-
+      HELD 2026-10-17 (nightly Step 0). The image lives in a one-shot Job whose
+      .spec.template is IMMUTABLE and which carries no force annotation, so a
+      bare tag bump makes the ninth-banner-feedback-db Kustomization fail to
+      apply. That is the failure plan ninth-banner-feedback-db-init-v1-0.8.7
+      documents (twice before). On 2026-10-17 PR #362 made exactly that change,
+      scored a safe patch, merged, and failed the post-apply health gate, which
+      reverted the whole 7-PR batch. The bump goes through that plan, which
+      renames the Job in the same commit. Remove this rule once the Job is
+      renamed per bump automatically or carries kustomize.toolkit.fluxcd.io/force.
   - match: "*home-assistant/home-assistant*"
     reason: >-
       HELD 2026-10-12 by operator decision. The operator runs many Home Assistant
