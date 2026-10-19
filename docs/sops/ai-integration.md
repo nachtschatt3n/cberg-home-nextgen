@@ -199,8 +199,7 @@ and no fallbacks. It now degrades to the local Ollama models instead:
 // ~/.openclaw/openclaw.json  (set declaratively by the init script in helmrelease.yaml)
 "agents": { "defaults": { "model": {
   "primary":   "openai/gpt-5.6-terra",              // Codex harness / ChatGPT OAuth
-  "fallbacks": ["ollama/gemma4:26b-mlx",                // quality tier, 131k ctx
-                "ollama/gemma4:e2b-mlx"]            // small/fast last resort
+  "fallbacks": ["ollama/gemma4:26b-mlx"]                // quality tier (e2b-mlx retired 2026-10-19)
 }}}
 ```
 
@@ -223,8 +222,8 @@ Schema facts (verified against the installed 2026.6.11 bundle, not guessed):
 - Changing `fallbacks` is **hot-reloaded** — no pod roll needed. Watch for
   `[reload] config hot reload applied (agents.defaults.model.fallbacks)`.
 - Only models that are BOTH in `models.providers.ollama.models[]` AND pulled on
-  the Mac mini are valid rungs. `gemma4:e2b` is **not** pulled (the host has
-  `gemma4:26b-mlx` and `gemma4:e2b-mlx`); a dead rung only burns a retry.
+  the Mac mini are valid rungs. `gemma4:e2b` / `gemma4:e2b-mlx` are retired
+  (operator removed all e2b use 2026-10-19); a dead rung only burns a retry.
 
 The init script sets `model.primary` unconditionally from `OPENCLAW_DEFAULT_MODEL`
 on every boot but never touched `fallbacks`, so the chain is now written there too
@@ -293,8 +292,8 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   HTTPRoute parented to `envoy-external`. "No Ingress" is no longer a
   meaningful guard — zero Ingress objects and no controller exist, so the
   Gateway parent is the only thing that decides internal vs. internet.
-- **Voice agent:** a dedicated small/fast `voice` agent runs on
-  `ollama/gemma4:e2b-mlx`. It is runtime-managed
+- **Voice agent:** a dedicated `voice` agent runs on
+  `ollama-native/gemma4:26b-mlx` (moved off e2b-mlx 2026-10-19). It is runtime-managed
   (`openclaw agents add voice …`) and persists in the PVC — the config-guard
   intentionally does not manage it.
 - **HA MCP:** the `homeassistant` MCP server entry

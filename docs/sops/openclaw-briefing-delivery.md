@@ -97,7 +97,7 @@ pipeline, because every other signal stays green.**
 The agent's global chain (`agents.defaults.model` in `openclaw.json`) is:
 
 ```
-openai/gpt-5.6-terra  →  ollama/gemma4:26b-mlx  →  ollama/gemma4:e2b-mlx
+openai/gpt-5.6-terra  →  ollama/gemma4:26b-mlx
 ```
 
 A cron job may carry a **per-job model override** (`payload.model`). When it does,

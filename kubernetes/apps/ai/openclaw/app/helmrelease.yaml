@@ -776,10 +776,9 @@ spec:
                   // (ollama/gemma4:26b-mlx).
                   //
                   // Only models present in models.providers.ollama.models[] AND
-                  // pulled on the Mac mini are valid rungs. gemma4:e2b is NOT pulled
-                  // (host has gemma4:26b-mlx, gemma4:e2b-mlx and the now-retired
-                  // GGUF gemma4:26b on disk) — do not add gemma4:e2b, a dead rung
-                  // just burns a retry. Do NOT re-add the GGUF gemma4:26b either:
+                  // pulled on the Mac mini are valid rungs. gemma4:e2b / e2b-mlx are
+                  // retired (operator removed all e2b use 2026-10-19) — do not add
+                  // them, a dead rung just burns a retry. Do NOT re-add the GGUF gemma4:26b either:
                   // it needs 27.1 GiB (256k ctx alloc, -np 2, q8_0 KV) against the
                   // MLX build's 18.7 GiB, and 45.8 of 48 GiB means any state where
                   // both are requested is guaranteed to OOM. See 2026-09-04.
@@ -787,7 +786,7 @@ spec:
                   // rate_limit is a cooldown-probeable reason, so the primary is
                   // re-probed automatically and traffic returns to codex on its own
                   // once quota resets. No manual revert needed.
-                  cfg.agents.defaults.model.fallbacks = ['ollama/gemma4:26b-mlx', 'ollama/gemma4:e2b-mlx'];
+                  cfg.agents.defaults.model.fallbacks = ['ollama/gemma4:26b-mlx'];
                   delete cfg.agents.defaults.agentRuntime;
                   if (chosenModel.startsWith('openai/')) {
                     cfg.agents.defaults.models = cfg.agents.defaults.models || {};
@@ -891,17 +890,6 @@ spec:
                       contextWindow: 65536,
                       maxTokens: 4096,
                     },
-                    {
-                      id: 'gemma4:e2b-mlx',
-                      name: 'Gemma 4 (e2B MLX, fast small)',
-                      reasoning: false,
-                      input: ['text'],
-                      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                      // Same host-tracking rule as above — OLLAMA_CONTEXT_LENGTH is
-                      // global, so this model gets the same ceiling.
-                      contextWindow: 65536,
-                      maxTokens: 4096,
-                    },
                   ];
                   // If OLLAMA_MODEL points at a model not in the static list,
                   // also include it so old config keeps working.
@@ -936,8 +924,6 @@ spec:
                     models: ollamaModels.map((m) => ({ ...m })),
                   };
                   cfg.agents.defaults.models = cfg.agents.defaults.models || {};
-                  cfg.agents.defaults.models['ollama-native/gemma4:e2b-mlx'] =
-                    cfg.agents.defaults.models['ollama-native/gemma4:e2b-mlx'] || {};
                   // Surface the ollama models in agents.defaults.models so
                   // they show up as "configured" alongside openai/gpt-5.5
                   // (openclaw models list / pickers honour this).

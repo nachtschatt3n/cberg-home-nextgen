@@ -5353,8 +5353,8 @@ log_section "Section 24a: Network Infrastructure Services"
         # Timeout is 300s, NOT 90s: since the model failover chain landed
         # (2026-08-18, agents.defaults.model.fallbacks) a codex-side outage
         # degrades to ollama/gemma4:26b on the Mac mini, and a COLD 26b can
-        # exceed the 120s LLM idle timeout before the chain moves to
-        # gemma4:e2b-mlx. At 90s this reported a false critical while the agent
+        # exceed the 120s LLM idle timeout before the chain moves on.
+        # At 90s this reported a false critical while the agent
         # was in fact answering.
         CANARY_OUT=$(kubectl exec -n ai "$OC_POD" -c app -- bash -lc \
             'openclaw agent -m "Reply with exactly this token and nothing else: CANARY7F3" --session-id healthcheck-canary --timeout 300 2>&1' 2>/dev/null | tail -4)
