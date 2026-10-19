@@ -45,7 +45,7 @@ spec:
   values:
     image:
       repository: ghcr.io/blakeblackshear/frigate
-      tag: 0.18.1
+      tag: 0.18.2
     # Every credential in config.yml is a {FRIGATE_*} placeholder resolved from
     # this Secret at start (frigate substitutes FRIGATE_* env vars into the
     # config). The rendered ConfigMap carries no secret value (F-31aac218).
