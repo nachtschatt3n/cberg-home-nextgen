@@ -14,6 +14,7 @@ Run from the repo venv (has websockets):  .venv/bin/python3 runbooks/alert-watch
 import asyncio
 import json
 import os
+import sys
 import threading
 import time
 from collections import deque
@@ -22,9 +23,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import websockets
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 WS_PORT = int(os.environ.get("WS_PORT", "8787"))
 HTTP_PORT = int(os.environ.get("HTTP_PORT", "8788"))
 REPLAY_SECS = int(os.environ.get("REPLAY_SECS", "300"))  # replay recent alerts on (re)connect
+
+# Push-into-console (2026-10-19): actionable alerts are typed into the ops console
+# pane (console_push.py) so the session spends zero tokens while the cluster is
+# quiet. CONSOLE_PUSH=0 disables; CONSOLE_PUSH_DRYRUN=1 logs the line instead.
+_pusher = None
+if os.environ.get("CONSOLE_PUSH", "1") != "0":
+    try:
+        import console_push
+        _pusher = console_push.Pusher(
+            dry_run=os.environ.get("CONSOLE_PUSH_DRYRUN") == "1",
+            critical_resolved=os.environ.get("CONSOLE_PUSH_CRITICAL_RESOLVED") == "1",
+            log=lambda m: print(f"{datetime.now(timezone.utc).strftime('%H:%M:%SZ')} {m}", flush=True))
+    except Exception as _e:  # the ws relay must never depend on this
+        print(f"console_push disabled: {type(_e).__name__}: {_e}", flush=True)
 
 _loop = asyncio.new_event_loop()
 _clients: set = set()
@@ -171,6 +188,11 @@ class _Webhook(BaseHTTPRequestHandler):
                 "ts": _ts(),
             }
             _loop.call_soon_threadsafe(_queue.put_nowait, evt)
+            if _pusher is not None:
+                try:
+                    _pusher.submit(evt)
+                except Exception as e:
+                    print(f"{_ts()} console_push submit failed: {e}", flush=True)
             if evt["status"] == "resolved":
                 _schedule_reconcile(f"resolved {evt['alertname']}")
 
@@ -222,6 +244,8 @@ def _http_thread():
 async def _main():
     threading.Thread(target=_http_thread, daemon=True).start()
     threading.Thread(target=_reconcile_loop, daemon=True).start()
+    if _pusher is not None:
+        threading.Thread(target=_pusher.run_forever, daemon=True).start()
     asyncio.create_task(_fanout())
     print(f"[{_ts()}] alert-bridge up: webhook http://0.0.0.0:{HTTP_PORT}/alertmanager "
           f"| ws ws://127.0.0.1:{WS_PORT}/", flush=True)

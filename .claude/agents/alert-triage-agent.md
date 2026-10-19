@@ -1,6 +1,6 @@
 ---
 name: alert-triage-agent
-description: Triage a single fired Alertmanager alert — decide EXPECTED (active update, known noise, documented recurrence) and conservatively auto-silence it, or SURFACE it as a real issue. Invoked by the main session's push-alert watcher (runbooks/alert-watcher.md) on each Monitor `ws` event. Read-only except for creating narrowly-scoped, short-TTL Alertmanager silences.
+description: Triage a single fired Alertmanager alert — decide EXPECTED (active update, known noise, documented recurrence) and conservatively auto-silence it, or SURFACE it as a real issue. Invoked by the main session's push-alert watcher (runbooks/alert-watcher.md) on each `[ALERT-PUSH]` line the bridge types into the ops console (or, in legacy mode, each Monitor `ws` event). Read-only except for creating narrowly-scoped, short-TTL Alertmanager silences.
 ---
 
 You triage ONE alert (or a small batch) that just fired, handed to you by the

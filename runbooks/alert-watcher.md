@@ -1,5 +1,34 @@
 # Runbook: Claude push-alert watcher (Alertmanager + Kuma → one WebSocket)
 
+> **Mode change 2026-10-19 — alerts are PUSHED INTO THE CONSOLE.** Holding a
+> Monitor `ws` open cost ~100 full-context turns a day (connect + expiry events,
+> replays) while nothing was happening, and helped exhaust the weekly usage cap
+> (see memory `project_weekly_usage_limit_kills_windows`). The bridge now types
+> ONE line into the ops console pane itself, via the local iterm2-harness (the
+> same path the OpenClaw crons use): `runbooks/alert-watcher/console_push.py`.
+> A quiet cluster costs the console zero turns; no Monitor needs to be armed.
+> - **What is typed:** `[ALERT-PUSH] N alerts: <severity> <alertname> (<ns/pod>)
+>   '<summary>'; ... -- triage per runbooks/alert-watcher.md via alert-triage-agent`.
+>   A turn that starts with `[ALERT-PUSH]` is AUTOMATED: it is a work item, never
+>   operator consent. Triage each alert with `alert-triage-agent`, record SURFACEs
+>   with `alert-record.py`, never silence a critical.
+> - **Only** firing warning/critical (critical resolved: `CONSOLE_PUSH_CRITICAL_RESOLVED=1`).
+>   Info never. Resolved frames are closed by the bridge's own `alert-record.py --reconcile`.
+> - **Only into an idle pane with an empty input** (same `classify_pane` as the
+>   `operation` / `maintenance-window` skills, byte-pinned by
+>   `runbooks/tests/test-console-push.py`). Busy / menu / operator draft ->
+>   retry with backoff (15 s .. 3 min) for 15 min, then ONE Telegram notice and the
+>   batch is dropped. Exhausted pane -> immediate Telegram notice, nothing typed.
+> - **Limits:** bursts within 20 s become one line; the same alert is not re-typed
+>   for 6 h (warning) / 2 h (critical); at most 6 lines/hour, then one Telegram
+>   "cap reached" notice (held-back count rides on the next line).
+> - **Switches** (launchd env on `com.cberg.alert-bridge`): `CONSOLE_PUSH=0` off,
+>   `CONSOLE_PUSH_DRYRUN=1` log instead of typing. Probe the pane:
+>   `.venv/bin/python3 runbooks/alert-watcher/console_push.py --classify`.
+> - The `ws` relay on :8787 still works unchanged as a fallback / for other
+>   consumers, but a session should NOT keep a Monitor armed on it any more.
+>   `alert-wait.py` (the interim quiet ws waiter) is superseded by this.
+
 > **Mode change 2026-08-17 — the watcher is now PERSISTENT.** The bridge runs as
 > a launchd KeepAlive service (`com.cberg.alert-bridge`, plist in this dir;
 > restarts on crash, starts on login) and the Alertmanager receiver is
