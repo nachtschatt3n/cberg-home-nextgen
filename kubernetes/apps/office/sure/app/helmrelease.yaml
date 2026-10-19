@@ -338,7 +338,7 @@ spec:
               name: sure-secret
               key: OPENAI_URI_BASE
         # Plain value (model name is not sensitive). Switched back to the
-        # larger gemma4:26b-mlx for the agentic assistant: gemma4:e2b-mlx was
+        # larger gemma4:26b-mlx for the agentic assistant: the small e2b model (since removed from the host) was
         # too small/weak for reliable multi-turn tool-use, so we go back to
         # the smarter 26b model on the same Ollama.
         - name: OPENAI_MODEL

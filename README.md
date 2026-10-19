@@ -482,7 +482,7 @@ quarterly.
 
 ## 📦 Applications
 
-~133 apps across 21 namespaces. Full inventory with per-app purpose, exposure
+~132 apps across 21 namespaces. Full inventory with per-app purpose, exposure
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 

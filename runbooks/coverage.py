@@ -145,7 +145,7 @@ HELD = {
 #     covered.
 # Verified 2026-08-15 against the running inventory of ghcr.io/nachtschatt3n/*.
 SELF_BUILT = {
-    "ai-sre", "ha-ai-harness", "sure", "sweep-dashboard", "arag-web",
+    "ai-sre", "sure", "sweep-dashboard", "arag-web",
     "opencode-project_name", "opencode-andreamosteller", "paperclip",
     # Added 2026-08-15 — all confirmed self-built (ghcr.io/nachtschatt3n/*) and
     # running, but absent from this set, so each had the same mis-routing bug:

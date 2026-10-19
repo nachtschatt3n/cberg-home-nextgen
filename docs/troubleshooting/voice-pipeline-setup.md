@@ -19,12 +19,14 @@ Version: 2026.07.12 · Status: **live** · Owner: Mathias + Claude session log
 > model `openclaw` (main agent) instead of a dedicated small ollama agent.
 >
 > Two pipelines exist; the Voice PE satellite uses **"Local + OpenClaw"**:
+> - **Note (2026-10-19):** `gemma4:e2b-mlx` was deleted from the Ollama host; every
+>   `gemma4:e2b-mlx` mention below is HISTORICAL. Voice now uses `gemma4:26b-mlx`.
 > - **Local + OpenClaw** (satellite default): fallback →
 >   `conversation.openclaw` (custom_conversation → gateway `/v1`, model
 >   `openclaw`). Local 0.3 s; fallback 20–40 s but with FULL skills (verified:
 >   pellet-storage skill answered with live probe data) + memory + ChatGPT.
 > - **Local + Voice LLM** (fast alternative, one satellite-select away):
->   fallback → `conversation.voice_gemma_e2b` (native Ollama gemma4:e2b-mlx,
+>   fallback → `conversation.voice_gemma_e2b` (native Ollama, now gemma4:26b-mlx -- e2b-mlx removed 2026-10-19; entity name is a cosmetic leftover,
 >   think:false, Assist tools). Local 0.26 s / fallback 2.3 s, no skills.
 >
 > The runtime-managed OpenClaw `voice` (gemma) agent and ha-mcp wiring stay:

@@ -256,7 +256,7 @@
       "title": "Beyond Zigbee",
       "items": [
         "Matter-server + OpenThread border router carry the Thread fabric",
-        "AI/voice via ha-ai-harness against the LAN Ollama host"
+        "Voice/AI via native Ollama subentries (gemma4:26b-mlx) on the LAN Ollama host"
       ]
     }
   ]

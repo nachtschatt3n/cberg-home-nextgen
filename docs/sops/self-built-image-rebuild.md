@@ -20,7 +20,7 @@ HelmRelease.
 
 This is a distinct workflow with traps that are not derivable from the cluster repo,
 because the fix lives in a *different* repo. It has recurred (absenty 2026-08-14,
-ha-ai-harness 2026-08-15) and will recur on every first-party image as its base drifts.
+ha-ai-harness 2026-08-15; that app was decommissioned 2026-10-19, examples kept as history) and will recur on every first-party image as its base drifts.
 
 - Scope: every `ghcr.io/nachtschatt3n/*` image referenced by a HelmRelease in
   `kubernetes/apps/**`. The REBUILD lane is decided on the **image repository**

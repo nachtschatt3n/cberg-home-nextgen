@@ -17,7 +17,7 @@
 | Namespace | App Count |
 |-----------|-----------|
 | ai | 11 |
-| home-automation | 20 |
+| home-automation | 19 |
 | databases | 12 |
 | monitoring | 14 |
 | office | 11 |
@@ -37,7 +37,7 @@
 | ci-runner | 3 |
 | arc-system | 2 |
 | arc-build | 1 |
-| **Total** | **133** |
+| **Total** | **132** |
 
 ---
 
