@@ -161,6 +161,48 @@ for name, err, want in [
 check("clean auth_required", analyse([photos_ok], NOW).get("icloud_auth_required"), 0)
 
 
+# 9. BASELINE (known-unfixable) semantics. Fingerprints, never names.
+fp = ns["fp"]
+lines = []
+for i in range(4):
+    lines += cycle(T0 + i * H6, batch(T0 + i * H6 + 5, ["/d/x.numbers"], 0, 1, [PKG_ERR]))
+m = analyse_drive([lines], NOW, frozenset({fp("/d/x.numbers")}))
+check("known items_failed still honest", m.get("icloud_drive_items_failed"), 1)
+check("known unexplained", m.get("icloud_drive_items_unexplained"), 0)
+check("known known_failed", m.get("icloud_drive_items_known_failed"), 1)
+check("known since resets to now", m.get("icloud_drive_failing_item_since_timestamp_seconds"), NOW)
+# NEGATIVE CONTROL: empty / non-matching baseline = everything stays unexplained.
+for label, k in (("empty", frozenset()), ("wrong-hash", frozenset({fp("/d/other")}))):
+    m = analyse_drive([lines], NOW, k)
+    check(f"{label} baseline unexplained", m.get("icloud_drive_items_unexplained"), 1)
+    check(f"{label} baseline since", m.get("icloud_drive_failing_item_since_timestamp_seconds"), T0 + 600)
+# NEGATIVE CONTROL: a baselined item must not mask a NEW one failing beside it.
+lines = []
+for i in range(4):
+    two = ["/d/x.numbers", "/d/new.json"] if i >= 2 else ["/d/x.numbers"]
+    bad = len(two)
+    lines += cycle(T0 + i * H6, batch(T0 + i * H6 + 5, two, 0, bad, [PKG_ERR]))
+m = analyse_drive([lines], NOW, frozenset({fp("/d/x.numbers")}))
+check("new beside known unexplained", m.get("icloud_drive_items_unexplained"), 1)
+check("new beside known since (only the new item's run)", m.get("icloud_drive_failing_item_since_timestamp_seconds"), T0 + 2 * H6 + 600)
+# Photos, same contract.
+ph = [L(T0, "sync.py", "Syncing photos..."),
+      L(T0 + 5, "photo_file_utils.py", "Failed to download /p/a.heic Service Unavailable", "ERROR"),
+      L(T0 + 6, "photo_file_utils.py", "Failed to download /p/b.heic Service Unavailable", "ERROR"),
+      L(T0 + 60, "sync.py", "Photos synced")]
+m = analyse([ph], NOW, frozenset({fp("/p/a.heic")}))
+check("photos failed", m.get("icloud_sync_items_failed"), 2)
+check("photos unexplained (b is new)", m.get("icloud_sync_items_unexplained"), 1)
+check("photos known", m.get("icloud_sync_items_known_failed"), 1)
+# The shipped baseline file must parse and carry only 12-hex fingerprints.
+import json, re as _re
+base = json.loads(yaml.safe_load(CM.read_text())["data"]["known_failures.json"])
+for acct, kinds in base.items():
+    for kind, hs in kinds.items():
+        for h in hs:
+            if not _re.fullmatch(r"[0-9a-f]{12}", h):
+                FAILURES.append(f"baseline {acct}/{kind}: {h!r} is not a 12-hex fingerprint")
+
 # ---------------------------------------------------------------- promtool
 def promtool():
     # A mise shim with no pinned version is on PATH on the Mac and dies with
@@ -184,9 +226,9 @@ PT = promtool()
 if not PT:
     FAILURES.append("promtool not found (PATH or mise ubi-prometheus-prometheus install)")
 else:
-    groups = [g for g in yaml.safe_load(RULES.read_text())["spec"]["groups"] if g["name"] == "icloud-backup.drive"]
-    if len(groups) != 1:
-        FAILURES.append("icloud-backup.drive group not found exactly once")
+    groups = [g for g in yaml.safe_load(RULES.read_text())["spec"]["groups"] if g["name"] in ("icloud-backup.drive", "icloud-backup.sync")]
+    if len(groups) != 2:
+        FAILURES.append("icloud-backup.drive / icloud-backup.sync groups not found exactly once each")
     G = 'job="icloud-sync-probe"'
     H = 3600
 
@@ -207,6 +249,8 @@ else:
         gauge(a, "icloud_drive_sync_last_success_timestamp_seconds", sawtooth(8 * H, STEPS)) for a in ("mu", "andrea")
     ] + [
         gauge(a, "icloud_drive_items_failed", f"0+0x{STEPS}") for a in ("mu", "andrea")
+    ] + [
+        gauge(a, "icloud_drive_items_unexplained", f"0+0x{STEPS}") for a in ("mu", "andrea")
     ] + [
         gauge(a, "icloud_drive_failing_item_since_timestamp_seconds", f"0+60x{STEPS}")
         for a in ("mu", "andrea")
@@ -243,12 +287,34 @@ else:
                 "interval": "1m",
                 "input_series": [gauge("mu", "icloud_drive_failing_item_since_timestamp_seconds", f"0+0x{STEPS}"),
                                  gauge("mu", "icloud_drive_items_failed", f"10+0x{STEPS}"),
+                                 gauge("mu", "icloud_drive_items_unexplained", f"10+0x{STEPS}"),
                                  gauge("andrea", "icloud_drive_failing_item_since_timestamp_seconds", f"0+0x{STEPS}"),
-                                 gauge("andrea", "icloud_drive_items_failed", f"0+0x{STEPS}")],
+                                 gauge("andrea", "icloud_drive_items_failed", f"0+0x{STEPS}"),
+                                 gauge("andrea", "icloud_drive_items_unexplained", f"0+0x{STEPS}")],
                 "alert_rule_test": [
                     {"eval_time": "23h", "alertname": "ICloudDrivePersistentDownloadFailures", "exp_alerts": []},
                     {"eval_time": "25h", "alertname": "ICloudDrivePersistentDownloadFailures",
                      "exp_alerts": [{"exp_labels": {"account": "mu", "severity": "info",
+                                                    "category": "backup", "component": "icloud-docker"}}]},
+                ],
+            },
+            {   # NEGATIVE CONTROL (baseline): failures present for 72h but ALL known ->
+                # unexplained 0 -> neither persistence alert fires. And the photo rule
+                # fires only for an UNEXPLAINED item.
+                "interval": "1m",
+                "input_series": [gauge("mu", "icloud_drive_failing_item_since_timestamp_seconds", f"0+0x{STEPS}"),
+                                 gauge("mu", "icloud_drive_items_failed", f"2+0x{STEPS}"),
+                                 gauge("mu", "icloud_drive_items_unexplained", f"0+0x{STEPS}"),
+                                 gauge("mu", "icloud_sync_failing_item_since_timestamp_seconds", f"0+0x{STEPS}"),
+                                 gauge("mu", "icloud_sync_items_failed", f"1+0x{STEPS}"),
+                                 gauge("mu", "icloud_sync_items_unexplained", f"0+0x{STEPS}"),
+                                 gauge("andrea", "icloud_sync_failing_item_since_timestamp_seconds", f"0+0x{STEPS}"),
+                                 gauge("andrea", "icloud_sync_items_failed", f"1+0x{STEPS}"),
+                                 gauge("andrea", "icloud_sync_items_unexplained", f"1+0x{STEPS}")],
+                "alert_rule_test": [
+                    {"eval_time": "30h", "alertname": "ICloudDrivePersistentDownloadFailures", "exp_alerts": []},
+                    {"eval_time": "30h", "alertname": "ICloudBackupPersistentDownloadFailures",
+                     "exp_alerts": [{"exp_labels": {"account": "andrea", "severity": "info",
                                                     "category": "backup", "component": "icloud-docker"}}]},
                 ],
             },

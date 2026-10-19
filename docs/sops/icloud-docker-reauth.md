@@ -1,8 +1,8 @@
 # SOP: iCloud Docker Re-authentication (2FA session recovery)
 
 > Description: Recover the Apple session of any `icloud-docker-*` instance (mandarons/icloud-drive) when it expires, including the modern-2FA flow that the bundled `icloud` CLI gets wrong, and the quota-exhaustion mitigation (stop the retry loop before re-auth).
-> Version: `2026.10.03`
-> Last Updated: `2026-10-03`
+> Version: `2026.10.19`
+> Last Updated: `2026-10-19`
 > Owner: `operator`
 
 ---
@@ -597,6 +597,32 @@ Expected: drive last-success age under `43200` s (12 h); `icloud_drive_items_fai
 `runbooks/tests/test-icloud-drive-probe.py` (synthetic logs + negative controls
 + `promtool test rules`).
 
+### Known-unfixable baseline (since 2026-10-19) — why the persistent-failure alerts stay quiet
+
+`ICloudBackupPersistentDownloadFailures` / `ICloudDrivePersistentDownloadFailures`
+fire on **unexplained** failing items only (`icloud_*_items_unexplained`). Items
+verified permanently unfixable from our side (Apple answers 5xx or `Unknown
+reason` for one asset, or an Apple package type icloud-docker cannot unpack) are
+listed by **fingerprint** in `known_failures.json` inside ConfigMap
+`icloud-sync-probe` and are reported as `icloud_*_items_known_failed`, not fired.
+`icloud_*_items_failed` stays the honest total, so nothing is hidden.
+
+- Fingerprint = first 12 hex of sha256 of the path the app logs (`fp()` in the
+  probe). Never put a file name in git. Get the fingerprints of what is failing
+  now by running `analyse`/`analyse_drive` from the ConfigMap over
+  `kubectl logs --timestamps --since=48h` and printing `fp(path)` only.
+- **Add an entry only** after confirming the item failed on every cycle for
+  >= 48h and is Apple-side. A new or rotating item is never baselined.
+- **Remove an entry** when the item is fixed at the source (delete a stray
+  `node_modules` tree from iCloud Drive, re-download/keep a package on the
+  device, re-upload the broken photo). Stale entries are harmless but hide that
+  item if it ever breaks again.
+- The detector still fails loudly: a missing/unreadable baseline file means an
+  EMPTY baseline (everything alerts); the sync-stalled, freshness and
+  newest-file-on-NAS alerts are unchanged and are what prove the backup works.
+- Pinned by `runbooks/tests/test-icloud-drive-probe.py` (known / empty /
+  wrong-hash / new-beside-known controls + promtool).
+
 ### Backstop — the file-recency alert (`ICloudBackupPhotosStale`, 14 days)
 
 `CronJob/icloud-backup-freshness` still walks the backup share hourly and
@@ -692,6 +718,8 @@ kubectl -n backup rollout status deploy/icloud-docker-$INSTANCE --timeout=120s
 ---
 
 ## Version History
+
+- `2026.10.19`: Known-unfixable baseline for the persistent-download-failure alerts (fingerprints in ConfigMap `icloud-sync-probe`); alerts now key on `icloud_*_items_unexplained`.
 
 - `2026.06.13`: Initial SOP. Documents the modern-2FA re-auth flow that bypasses
   the broken `icloud` 2SA CLI, the quota-exhaustion mitigation (stop loop +

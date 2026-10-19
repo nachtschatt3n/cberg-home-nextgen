@@ -72,6 +72,7 @@ data:
         substitution would blank them.
     """
 
+    import hashlib
     import json
     import os
     import re
@@ -90,6 +91,25 @@ data:
     PUSH_JOB = "icloud-sync-probe"
 
     SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
+    KNOWN_FILE = "/script/known_failures.json"
+
+
+    def fp(path):
+        """12-hex fingerprint of an item path. The baseline stores only these, so
+        the public repo never carries a file name."""
+        return hashlib.sha256(path.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+    def load_known(account, kind):
+        """Fingerprints of items an operator has verified are permanently
+        unfixable from our side (Apple answers 5xx / 'Unknown reason' / package
+        types). A missing or unreadable file means EMPTY baseline: every failure
+        stays unexplained (fail loud, never fail quiet)."""
+        try:
+            with open(KNOWN_FILE) as f:
+                return frozenset(json.load(f).get(account, {}).get(kind, []))
+        except (OSError, ValueError, AttributeError):
+            return frozenset()
 
     RE_SUCCESS = re.compile(r":: Photos synced")
     RE_CYCLE_START = re.compile(r":: Syncing photos\.\.\.")
@@ -128,7 +148,7 @@ data:
             return None
 
 
-    def analyse(containers, now):
+    def analyse(containers, now, known=frozenset()):
         """containers: list of line-lists, OLDEST container first.
 
         Returns a dict of metric -> value (a metric is omitted when the logs do not
@@ -173,25 +193,23 @@ data:
 
         if cycles:
             latest_failed = cycles[-1][1]
+            unknown = {p for p in latest_failed if fp(p) not in known}
             out["icloud_sync_items_failed"] = len(latest_failed)
-            since = now
-            for path in latest_failed:
-                start = cycles[-1][0]
-                for end_ts, fset in reversed(cycles):
-                    if path in fset:
-                        start = end_ts
-                    else:
-                        break
-                since = min(since, start)
-            out["icloud_sync_failing_item_since_timestamp_seconds"] = since
+            out["icloud_sync_items_unexplained"] = len(unknown)
+            out["icloud_sync_items_known_failed"] = len(latest_failed) - len(unknown)
+            out["icloud_sync_failing_item_since_timestamp_seconds"] = failing_since(
+                [(c[0], c[1]) for c in cycles], now, known)
         return out
 
 
-    def failing_since(cycles, now):
-        """Oldest start of an unbroken run of failed cycles among items failing in
-        the newest cycle; `now` when nothing identifiable is failing."""
+    def failing_since(cycles, now, known=frozenset()):
+        """Oldest start of an unbroken run of failed cycles among UNEXPLAINED items
+        (fingerprint not in the operator-verified baseline) failing in the newest
+        cycle; `now` when nothing unexplained and identifiable is failing."""
         since = now
         for path in cycles[-1][1]:
+            if fp(path) in known:
+                continue
             start = cycles[-1][0]
             for end_ts, fset in reversed(cycles):
                 if path in fset:
@@ -202,7 +220,7 @@ data:
         return since
 
 
-    def analyse_drive(containers, now):
+    def analyse_drive(containers, now, known=frozenset()):
         """Drive counterpart of analyse(); same contract (omit what the logs do
         not establish, never invent a success). See the module docstring."""
         last_success = None
@@ -257,9 +275,13 @@ data:
         if last_success is not None:
             out["icloud_drive_sync_last_success_timestamp_seconds"] = last_success
         if cycles:
-            out["icloud_drive_items_failed"] = cycles[-1][1]
+            latest_n, latest_paths = cycles[-1][1], cycles[-1][2]
+            known_n = sum(1 for p in latest_paths if fp(p) in known)
+            out["icloud_drive_items_failed"] = latest_n
+            out["icloud_drive_items_known_failed"] = min(known_n, latest_n)
+            out["icloud_drive_items_unexplained"] = max(latest_n - known_n, 0)
             out["icloud_drive_failing_item_since_timestamp_seconds"] = failing_since(
-                [(c[0], c[2]) for c in cycles], now)
+                [(c[0], c[2]) for c in cycles], now, known)
         return out
 
 
@@ -336,9 +358,10 @@ data:
             try:
                 now = int(time.time())
                 containers = collect(kube, account)
-                metrics = analyse(containers, now) if containers is not None else {}
+                metrics = (analyse(containers, now, load_known(account, "photos"))
+                           if containers is not None else {})
                 if containers is not None:
-                    metrics.update(analyse_drive(containers, now))
+                    metrics.update(analyse_drive(containers, now, load_known(account, "drive")))
                 if containers is not None and "icloud_sync_last_success_timestamp_seconds" not in metrics:
                     print(f"account={account} NO 'Photos synced' line in the last "
                           f"{LOG_WINDOW_SECONDS // 3600}h of logs; last success left to age")
@@ -358,3 +381,21 @@ data:
 
     if __name__ == "__main__":
         main()
+  # Baseline of items verified PERMANENTLY unfixable from our side (Apple-side:
+  # 5xx on one asset, 'Unknown reason', package types icloud-docker cannot
+  # unpack). Fingerprints only (sha256 prefix of the path, see fp() in the
+  # script); NEVER file names (public repo). Each entry failed on every one of
+  # the observed cycles (>= 48h). An item NOT listed here stays "unexplained"
+  # and alerts. Remove an entry when the item is fixed at the source; add one
+  # only after reading docs/sops/icloud-docker-reauth.md section 9.
+  known_failures.json: |
+    {
+      "mu": {
+        "photos": ["b1202ad3dbdc"],
+        "drive": ["e7a696c59830", "19c704356885"]
+      },
+      "andrea": {
+        "photos": [],
+        "drive": []
+      }
+    }

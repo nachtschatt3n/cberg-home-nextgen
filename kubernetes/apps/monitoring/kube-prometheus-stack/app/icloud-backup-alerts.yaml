@@ -350,9 +350,15 @@ spec:
               on one asset is Apple refusing that asset (often an item still
               processing or damaged in iCloud); check it in the Photos app.
               Nothing to fix in the cluster unless many items fail.
+              Only UNEXPLAINED items count: items whose fingerprint is in the
+              operator-verified baseline (known_failures.json in ConfigMap
+              icloud-sync-probe, see docs/sops/icloud-docker-reauth.md section 9)
+              are reported as icloud_*_items_known_failed and do not fire this.
+              A NEW item failing, or a baselined item that stops being
+              attributable, fires it as before.
           expr: |
             (time() - max by (account) (icloud_sync_failing_item_since_timestamp_seconds) > 60 * 60 * 24)
-              and on (account) max by (account) (icloud_sync_items_failed) > 0
+              and on (account) max by (account) (icloud_sync_items_unexplained) > 0
           for: 30m
           labels:
             category: backup
@@ -531,9 +537,15 @@ spec:
               `Unknown reason`. List them with the kubectl logs grep in
               docs/sops/icloud-docker-reauth.md section 9 (do not paste file
               names into findings, commits or alerts).
+              Only UNEXPLAINED items count: items whose fingerprint is in the
+              operator-verified baseline (known_failures.json in ConfigMap
+              icloud-sync-probe, see docs/sops/icloud-docker-reauth.md section 9)
+              are reported as icloud_*_items_known_failed and do not fire this.
+              A NEW item failing, or a baselined item that stops being
+              attributable, fires it as before.
           expr: |
             (time() - max by (account) (icloud_drive_failing_item_since_timestamp_seconds) > 60 * 60 * 24)
-              and on (account) max by (account) (icloud_drive_items_failed) > 0
+              and on (account) max by (account) (icloud_drive_items_unexplained) > 0
           for: 30m
           labels:
             category: backup
