@@ -38,7 +38,6 @@ the GGUF `gemma4:26b` unless its own owner has changed it.**
 | OpenClaw | ai | `gemma4:26b-mlx` | OpenAI `/v1` via `ollama-toolfix` | git ✅ | `kubernetes/apps/ai/openclaw/app/helmrelease.yaml` (env `OLLAMA_MODEL`, fallback rung, model catalog, memory-dreaming) **and** `skills-configmap.sops.yaml` (the model-switch skill) |
 | Next AI Draw.io | ai | `gemma4:26b-mlx` | Native Ollama `/api` | git ✅ | `kubernetes/apps/ai/next-ai-draw-io/app/helmrelease.yaml:37-40` |
 | **Sure** | **office** | `gemma4:26b-mlx` | OpenAI `/v1` | git ✅ | **TWO places:** `kubernetes/apps/office/sure/app/helmrelease.yaml` (`OPENAI_MODEL`, plain env — this one wins) **and** `secret.sops.yaml` (`OPENAI_MODEL`). Was absent from this table until 2026-09-04 despite being the largest single consumer. |
-| **ha-ai-harness** | **home-automation** | `gemma4:26b-mlx` (`DENSE_MODEL`) + `gemma4:e2b-mlx` (`EDGE_MODEL`, already MLX) | Native Ollama | git ✅ | `kubernetes/apps/home-automation/ha-ai-harness/app/helmrelease.yaml:38-41`. Was absent from this table until 2026-09-04. |
 | AFFiNE | office | `gemma4:26b-mlx` (6 scenarios) | OpenAI `/v1` | git ✅ | `kubernetes/apps/office/affine/app/configmap.yaml:58-65,71` |
 | Frigate NVR | home-automation | `gemma4:26b-mlx` — **vision**, 3 of 5 cameras have `genai.enabled: true` | OpenAI `/v1` | git ✅ | `configmap.sops.yaml` (`genai.model`, encrypted); host URL in `helmrelease.yaml:34` |
 | Open WebUI | ai | (human picks per chat) | Native Ollama | **DB ❌** | Not settable from the manifest. `ui.default_models`, the `model` table's `is_active`, and `ollama.api_configs[].model_ids` (per-connection allow-list) all live in `webui.db` and are PersistentConfig — env only seeds a fresh DB. The GGUF stays pickable until an admin hides it. |
@@ -149,7 +148,7 @@ finite host default would not save you — one HA call re-pins whatever it loads
 
 | Model | Consumers |
 |-------|-----------|
-| `gemma4:26b-mlx` | **Migrated:** AnythingLLM, OpenClaw, Next AI Draw.io, Sure, ha-ai-harness, AFFiNE, Frigate NVR, Paperless-ngx; **native (never on GGUF):** Splitfairy, The Ninth Banner |
+| `gemma4:26b-mlx` | **Migrated:** AnythingLLM, OpenClaw, Next AI Draw.io, Sure, AFFiNE, Frigate NVR, Paperless-ngx; **native (never on GGUF):** Splitfairy, The Ninth Banner |
 | `gemma4:26b` (GGUF — **retired 2026-09-05**) | **Nothing autonomous requests it any more.** Remaining human-initiated path only: Headlamp (per-browser localStorage). (LibreChat's `fetch: true` picker was the other one until LibreChat was decommissioned 2026-10-04.) **Never re-point a consumer at this tag:** it needs 27.1 GiB (256k ctx alloc, `-np 2`, q8_0 KV) against the MLX build's 18.7 GiB — 45.8 of 48 GiB, so any state where both are requested is guaranteed to OOM. |
 | `nomic-embed-text:latest` | AnythingLLM (embeddings), Nextcloud (context_chat RAG), AFFiNE (embeddings), Paperless-ngx (native AI RAG embeddings) |
 
@@ -159,5 +158,5 @@ finite host default would not save you — one HA call re-pins whatever it loads
 
 | Endpoint | Git-Managed Apps | UI/DB-Configured Apps | Total |
 |----------|------------------|-----------------------|-------|
-| Mac Mini :11434 | 9 (AnythingLLM, OpenClaw, Next AI Draw.io, **Sure**, **ha-ai-harness**, AFFiNE, Frigate NVR, Splitfairy, The Ninth Banner) | 6 (Paperless, Nextcloud, n8n, Home Assistant, Open WebUI, Headlamp) | 15 |
+| Mac Mini :11434 | 8 (AnythingLLM, OpenClaw, Next AI Draw.io, **Sure**, AFFiNE, Frigate NVR, Splitfairy, The Ninth Banner) | 6 (Paperless, Nextcloud, n8n, Home Assistant, Open WebUI, Headlamp) | 14 |
 | Cloud APIs | 1 (Paperclip) | 5 (HA x3, n8n x2) | 6 |

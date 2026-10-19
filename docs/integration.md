@@ -91,7 +91,6 @@ confirmed, so a claim can be re-checked rather than trusted.
 | nextcloud | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | NC UI: `integration_openai` + `context_chat` | 2026-09-04, `occ config:app:get` — all FOUR model keys |
 | n8n | (UI-configured) | `gemma4:26b-mlx` | `ollamaApi` credential holds only the base URL; the MODEL is a per-node parameter in the workflow JSON. One node in `ai-sysadmin-agent` (inactive). | 2026-09-05, `workflow_entity` queried **through the SQLite driver** — see the WAL note below |
 | n8n | Cloud | OpenAI, Anthropic (cloud models) | n8n UI: `openAiApi`, `anthropicApi` credentials | n/a — cloud only |
-| ha-ai-harness | `http://192.168.30.111:11434` | `gemma4:e2b-mlx` (edge) + `gemma4:26b-mlx` (dense) | `OLLAMA_URL`, `EDGE_MODEL`, `DENSE_MODEL` | 2026-09-04, live pod env |
 | home-assistant | `http://192.168.30.111:11434` | `gemma4:26b-mlx` (all integrations) | HA UI | 2026-09-05, ha-agent, confirmed with `/api/ps` snapshots |
 | splitfairy | `http://192.168.30.111:11434` | `gemma4:26b-mlx` (vision) | `OLLAMA_URL`, `OLLAMA_MODEL` | 2026-09-28, helmrelease env |
 | the-ninth-banner | `http://192.168.30.111:11434` | `gemma4:26b-mlx` | `AI_PROVIDER=ollama`, `OLLAMA_URL`, `OLLAMA_MODEL` | 2026-10-02, helmrelease env; in-cluster `POST /ai/generate` returned `source: ai` |

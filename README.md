@@ -498,8 +498,8 @@ next-ai-draw-io · oc8 · open-webui · openclaw · paperclip
 > **External Ollama** on Mac Mini M4 Pro (`192.168.30.111:11434`, gemma 4 +
 > Metal). Provides OpenAI-compatible endpoints to the cluster.
 
-### 🏠 Home Automation (`home-automation` — 20)
-esphome · frigate-nvr · ha-ai-harness · home-assistant · iobroker ·
+### 🏠 Home Automation (`home-automation` — 19)
+esphome · frigate-nvr · home-assistant · iobroker ·
 matter-server · mosquitto · mqttx-web · music-assistant-server · n8n ·
 node-red · otbr · pallet-price-monitor · scrypted-nvr · solarfocus-scraper ·
 teslamate · traccar · trmnl-ha · zero-export-controller · zigbee2mqtt
