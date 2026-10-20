@@ -11,6 +11,10 @@ kubectl data is unreadable -- an empty or failed read is never "plenty of CPU"):
                             exit 0 + "admit <par> <need> <free>" for the first
                             parallelism whose need fits, exit 10 + "queue <need>
                             <free>" (need of the smallest option) otherwise
+  submitter SHA             resolved submitter label + source ("<value> <env|branch|sha>"):
+                            env SUBMITTER, else the first remote branch of the Ninth
+                            Banner checkout (TNB_GAME_REPO, default
+                            /Users/mu/code/the-ninth-banner) containing SHA, else sha[:8]
   inflight SUBMITTER        name of a non-terminal sims Job labelled with this
                             submitter (empty output = none)
 
@@ -153,6 +157,39 @@ def job_in_flight(jobs_json, submitter):
     return ""
 
 
+def sanitize_label(v):
+    """Label value: [a-z0-9._-], alnum at both ends, <= 63 chars; '' if nothing is left."""
+    out = "".join(ch if (ch.isalnum() and ch.isascii()) or ch in "._-" else "-" for ch in (v or "").lower())
+    out = out[:63]
+    return out.strip("-_.")
+
+
+def resolve_submitter(sha, env=None, game_repo=None, run=subprocess.run):
+    """-> (value, source). Never the cberg repo's own branch (the trigger always
+    runs on main there, which would serialize every agent's sims)."""
+    env = os.environ if env is None else env
+    v = sanitize_label(env.get("SUBMITTER", ""))
+    if v:
+        return v, "env"
+    repo = game_repo or env.get("TNB_GAME_REPO", "/Users/mu/code/the-ninth-banner")
+    try:
+        out = run(["git", "-C", repo, "branch", "-r", "--contains", sha],
+                  capture_output=True, text=True, timeout=30)
+        if out.returncode == 0:
+            for line in out.stdout.splitlines():
+                b = line.strip()
+                if not b or "->" in b:      # HEAD pointer
+                    continue
+                if b.startswith("origin/"):
+                    b = b[len("origin/"):]
+                v = sanitize_label(b)
+                if v:
+                    return v, "branch"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return sanitize_label(sha[:8]) or "unknown", "sha"
+
+
 def kubectl_json(*args):
     cmd = shlex.split(os.environ.get("TNB_KUBECTL", "mise exec -- kubectl")) + list(args) + ["-o", "json"]
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -205,6 +242,10 @@ def main(argv):
             if m <= 0:
                 raise DataError("rendered pod spec has no CPU request")
             print(m)
+            return 0
+        if cmd == "submitter":
+            v, src = resolve_submitter(rest[0])
+            print(v, src)
             return 0
         if cmd == "inflight":
             print(job_in_flight(kubectl_json("get", "jobs", "-n", "ci-runner"), rest[0]))

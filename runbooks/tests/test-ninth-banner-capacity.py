@@ -109,6 +109,38 @@ jobs["items"].append(job("e", "sims", "x"))
 check("non-terminal sims job of same submitter blocks", A.job_in_flight(jobs, "x") == "e")
 check("other submitter unaffected", A.job_in_flight(jobs, "z") == "")
 
+# submitter resolution
+import types
+def fake_run(stdout, rc=0):
+    return lambda *a, **k: types.SimpleNamespace(returncode=rc, stdout=stdout, stderr="")
+sha = "0123456789abcdef"
+check("env SUBMITTER wins", A.resolve_submitter(sha, {"SUBMITTER": "Int-0412"}, run=fake_run("  origin/other\n")) == ("int-0412", "env"))
+check("branch from the game repo, HEAD pointer skipped, origin/ stripped",
+      A.resolve_submitter(sha, {}, run=fake_run("  origin/HEAD -> origin/main\n  origin/int-0412\n  origin/main\n")) == ("int-0412", "branch"))
+check("branch sanitized for a label", A.resolve_submitter(sha, {}, run=fake_run("  origin/Feat/My Lane!\n")) == ("feat-my-lane", "branch"))
+check("sanitize caps at 63 and trims ends", len(A.sanitize_label("a" * 80)) == 63 and A.sanitize_label("--x_-") == "x")
+check("no containing branch -> sha8", A.resolve_submitter(sha, {}, run=fake_run("")) == ("01234567", "sha"))
+check("git failure -> sha8 (no error, not empty)", A.resolve_submitter(sha, {}, run=fake_run("", rc=128)) == ("01234567", "sha"))
+def boom(*a, **k): raise OSError("no git")
+check("missing repo/git -> sha8", A.resolve_submitter(sha, {}, run=boom) == ("01234567", "sha"))
+check("empty env SUBMITTER is not 'set'", A.resolve_submitter(sha, {"SUBMITTER": " "}, run=fake_run("")) [1] == "sha")
+# real git: fabricated game repo; the cberg repo's own branch is never consulted
+import tempfile
+# scrub GIT_* (the pre-commit hook exports GIT_INDEX_FILE etc.; they would redirect the fixture repo)
+for _k in [k for k in os.environ if k.startswith("GIT_")]:
+    del os.environ[_k]
+with tempfile.TemporaryDirectory() as d:
+    g = lambda *c: subprocess.run(["git", "-C", d] + list(c), capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run(["git", "init", "-q", d], check=True)
+    g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x")
+    head = g("rev-parse", "HEAD")
+    g("update-ref", "refs/remotes/origin/lane-7", head)
+    check("real git: remote branch containing sha", A.resolve_submitter(head, {}, game_repo=d) == ("lane-7", "branch"))
+    check("real git: unknown sha -> sha8", A.resolve_submitter("f" * 40, {}, game_repo=d) == ("ffffffff", "sha"))
+src = open(SCRIPT.replace("capacity.py", "capacity.py")).read()
+check("cberg branch never used (no rev-parse --abbrev-ref in trigger)",
+      "--abbrev-ref" not in open(os.path.join(ROOT, "scripts", "ninth-banner-test.sh")).read())
+
 # CLI fails loud (exit 3, message) when kubectl is broken or returns junk
 for label, kc in (("kubectl failing", "false"), ("kubectl junk output", "echo not-json")):
     env = dict(os.environ, TNB_KUBECTL=kc)

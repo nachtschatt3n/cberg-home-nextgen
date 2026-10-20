@@ -22,7 +22,7 @@
 # (default 2); until then `queued: need X, free Y` every TNB_POLL s (60). Queue
 # time never counts against activeDeadlineSeconds (the Job does not exist yet).
 # TNB_QUEUE_TIMEOUT (default 14400 s) bounds the wait. sims: at most one
-# non-terminal sims Job per SUBMITTER (default: current git branch); parallelism
+# non-terminal sims Job per SUBMITTER (default: the Ninth Banner branch containing <sha>, else sha8; never this repo's branch); parallelism
 # 4 when it fits, else 2. Unreadable kubectl data fails loud (exit 3).
 # Exit status: 0 if every shard passed, 1 otherwise, 2 on usage errors, 3 on
 # admission failure (queue timeout / unreadable cluster data).
@@ -95,10 +95,7 @@ collect="${COLLECT:-1}"
 # parallelism 2) and was killed at 5400 s (DeadlineExceeded, 2026-10-20).
 case "$suite" in sims) deadline=10800 ;; *) deadline=5400 ;; esac
 
-# --- submitter label (one sims Job in flight per agent) ---
-submitter="${SUBMITTER:-$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)}"
-submitter="$(printf '%s' "$submitter" | tr 'A-Z' 'a-z' | sed -e 's|[^a-z0-9._-]|-|g' -e 's|^[^a-z0-9]*||' -e 's|[^a-z0-9]*$||' | cut -c1-63 | sed -e 's|[^a-z0-9]*$||')"
-[ -n "$submitter" ] && [ "$submitter" != head ] || submitter=unknown
+# --- submitter label (one sims Job in flight per agent) is resolved after the sha is known ---
 
 sha="$(gh api "repos/$GH_REPO/commits/$ref_in" --jq .sha)" || { echo "cannot resolve ref '$ref_in'"; exit 2; }
 
@@ -115,6 +112,8 @@ elif [ "$want_image" != "$tpl_image" ]; then
     echo "bump job-template.yaml.tpl first (docs/sops/ci-runner.md §4 step 5)"; exit 2
 fi
 
+read -r submitter submitter_src <<<"$(python3 "$REPO_ROOT/scripts/ninth-banner-capacity.py" submitter "$sha")" \
+    && [ -n "$submitter" ] || { echo "admission: cannot resolve the submitter"; exit 3; }
 # --- admission by free CPU (+ one sims Job per submitter), BEFORE creating the Job ---
 admit="$REPO_ROOT/scripts/ninth-banner-capacity.py"
 headroom="${TNB_HEADROOM_CPU:-2}"; poll="${TNB_POLL:-60}"; qtimeout="${TNB_QUEUE_TIMEOUT:-14400}"
@@ -186,7 +185,7 @@ sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" -
     "$TEMPLATE" > "$dest/job.yaml"
 k create -f "$dest/job.yaml" >/dev/null
 start=$(date +%s)
-echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  lane=$lane gpu=$gpu cpu=$cpu_req/$cpu_lim mem=$mem_req/$mem_lim  deadline=${deadline}s  queued=${queue_wait}s parallelism=$parallelism submitter=$submitter"
+echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  lane=$lane gpu=$gpu cpu=$cpu_req/$cpu_lim mem=$mem_req/$mem_lim  deadline=${deadline}s  queued=${queue_wait}s parallelism=$parallelism submitter=$submitter($submitter_src)"
 if [ "$collect" != 1 ]; then
     # Fire and forget: return once the Job controller has created every shard pod.
     echo "COLLECT=0: waiting only until all $shards shard pod(s) exist"
