@@ -1,0 +1,32 @@
+# Declarative Elasticsearch role for the Ninth Banner CI log reader (ECK file
+# roles, spec.auth.roles). Not sensitive, so a plain Secret (ECK requires a Secret).
+#
+# The license is Basic: document-level security (role `query`) is NOT available
+# (role creation is refused: "non-compliant for [field and document level
+# security]"). The per-document restriction is therefore a FILTERED DATA STREAM
+# ALIAS `ci-runner-logs` (created by elasticsearch-otel-ilm-bootstrap), and this
+# role grants privileges on that alias ONLY -- no privilege on logs-generic-default
+# itself, so the reader can only search through the filter.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: elasticsearch-ci-runner-roles
+  namespace: monitoring
+stringData:
+  roles.yml: ENC[AES256_GCM,data:Re/E4eWIo0+8We8okIOcX7RX+CpbyT+LqgFDXdXhY+nvjMKtbgfILAoOLDn1rzsSVM9nUKuA/avWrnp0Wkoahei/kvTJA0NbOdvN8uXRYPBJcpnNN9dabsDfYXzIxnKLQxjEi1wv/VxrQjOlIRW2nBkn0RdSHqessQoR0iuNP0080t8iyac=,iv:tZN57BYuAosG03BBrUgbMbXFAMCJJY5fWh9m3NmxO8g=,tag:Nf1ESvxMAqMWywYJBagG5A==,type:str]
+sops:
+  age:
+    - enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA0clB3TnZDTlhZd3Z6TTBJ
+        bEhsRnBCNERGWFgvZFpFSVBuYWMzK1hZZkEwCmxKOURUYUsxV1Q5cUF4U2VaWkhV
+        aERpbGMvYUtjTVFtUFJuWnB6TDVZblkKLS0tIC94ek5HU0hsRCtPWmh5U2RnRHpW
+        OWFXMzRnTDk3Skh2VEVrdktLMmgwamcKJb8tG4xEXttR1EI4QWfMQqHcjS2AJOka
+        3321r7MhCJ1ceAgcvPKpKF6AzYzf8cslx9tLsIG3/R4NxNLZeg5jVg==
+        -----END AGE ENCRYPTED FILE-----
+      recipient: age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6
+  encrypted_regex: ^(data|stringData)$
+  lastmodified: "2026-10-20T16:33:33Z"
+  mac: ENC[AES256_GCM,data:Kur9EMGWS4cTWFYJXaYuIDEMH2mLuVF0pXDg/nTM56+pj4nJ9l5vOvTN6pcOkSlRVqJ+8rsE3ZxOhRBijU1swdfRRWJPZB8vF65B0RWBvIhIrnC7cF+d0XKub3QKRQakwxXL1m9FZdk9hAdkvTWoBINpQ6PYnTMI0gumOIzh9Es=,iv:hxyCGXZl7hO+ZHfYIzm7PPw9E0AYXim64q92uC3J58g=,tag:ts0e3udQiabcgSzh8RRbBg==,type:str]
+  mac_only_encrypted: true
+  version: 3.13.3

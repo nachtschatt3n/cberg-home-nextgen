@@ -6,7 +6,7 @@ components:
 resources:
   - ./secret.sops.yaml
   - ./ci-runner-reader.sops.yaml
-  - ./ci-runner-roles.yaml
+  - ./ci-runner-roles.sops.yaml
   - ./elasticsearch.yaml
   - ./otel-ilm-configmap.yaml
   - ./otel-ilm-job.yaml
