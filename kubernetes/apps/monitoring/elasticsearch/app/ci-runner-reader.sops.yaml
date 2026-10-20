@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-runner-reader
+  namespace: monitoring
+type: kubernetes.io/basic-auth
+stringData:
+  username: ENC[AES256_GCM,data:CLNgUw9KjuBjULfAJRJWHA==,iv:ms8xZcD8WoX+1+nLSrViOH8DbsX9Wzb1RZ4jTp41paE=,tag:nBMYtkxyRH0JPuzFDHu43w==,type:str]
+  password: ENC[AES256_GCM,data:AZy1yDexVAq+yLx6yv3PobVzH8Iem0ERN2ZZBurlA03g5uccl/w43g==,iv:BB74DYmmFoSn0eZeclQxPBKwlmXEKFZQ7Yq48icVgQs=,tag:uLZaOKpQgsnro6DejPguCQ==,type:str]
+  roles: ENC[AES256_GCM,data:st46F6SyOWumODuFXp3UllU=,iv:jtRH2cGN/P75AtAZB5TknmSK2QZ8wpHQSZ2zGwymczk=,tag:cMj3DjvkygLuhIqJP6e11g==,type:str]
+sops:
+  age:
+    - enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA0ckxyT0htSkZWTkRvTlNk
+        aTRMcTByaG1FQ0dtWldxSDJUYTJuZXhwb2pvClhTSUxzaG91YUl4L1dMMGVZYlNi
+        dW9kM3czVGsvOVVFaUpuY1kxK3QxK2sKLS0tIFNVMWgydXlWYlpUdEhiUzBqQy9i
+        V2FTS09WNDkxbGdlRTV1Y1Z1Zk1mRkUKL8sInoEI/8tBfcNg0sfAKMwY+0xaT5hk
+        RJDo432huTCTEQt0xEr9NMRf4K94en1ESBYs7rLQnc5o+5Lv4cbPUA==
+        -----END AGE ENCRYPTED FILE-----
+      recipient: age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6
+  encrypted_regex: ^(data|stringData)$
+  lastmodified: "2026-10-20T15:55:56Z"
+  mac: ENC[AES256_GCM,data:KMDUaLmxveTMn+7lkhCKH1thgM6R7UPXMrJmJObdH9PAkL4wiaFI4ldO7eQ7T4iS50HaWlY+T2iIvy/i7mIuXYHzmzSPNc6m7qjt6rCVcRlb+/Mr4LRoowm+eruun7DETfG5JUbK5d48sRyg4YF0sWXBl/Pt1rRx+AsVZbH7hIM=,iv:DFIP8uEO35wsSiele6+1eXZF/mO9WfHNYCSrzAXSt3g=,tag:39H0zv55aF737+vUMUaBzw==,type:str]
+  mac_only_encrypted: true
+  version: 3.13.3

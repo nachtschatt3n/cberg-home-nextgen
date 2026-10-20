@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.10.04`
-> Last Updated: `2026-10-04`
+> Version: `2026.10.20`
+> Last Updated: `2026-10-20`
 > Owner: `Platform`
 
 ---
@@ -849,6 +849,35 @@ curl -k -u elastic:${ELASTIC_PASS} https://localhost:9200/logs-generic-default/_
 
 **Note:** edot-collector and similar minimal containers don't have `cat`, `curl`, or `wget`.
 Always use port-forward from your local machine for Elasticsearch access.
+
+### Recovering CI (ci-runner) pod logs and events after the Job TTL
+
+Pods of the Ninth Banner test farm (`tnb-*` in namespace `ci-runner`) are deleted by the Job TTL, and
+the Kubernetes event retention is about 1h. Both pod logs and k8s Events are shipped by the collector
+into `logs-generic-default`, so they stay readable for the 14d stream retention.
+
+Read-only access (least privilege):
+
+- Role `ci-runner-logs-ro` (`cluster: monitor`; `read` + `view_index_metadata` on the alias
+  `ci-runner-logs` only) is declared via ECK `spec.auth.roles`
+  (`kubernetes/apps/monitoring/elasticsearch/app/ci-runner-roles.yaml`); user `ci-runner-reader` via
+  `spec.auth.fileRealm` from the SOPS secret `ci-runner-reader` (same folder).
+- The Basic license has **no document-level security**, so the document filter lives on the **filtered
+  data-stream alias** `ci-runner-logs` (created by `elasticsearch-otel-ilm-bootstrap`): namespace
+  `ci-runner` AND pod name prefix `tnb-` for pod logs, OR Events whose `regarding` object is such a pod/Job.
+  The role has no privilege on `logs-generic-default`, so the filter cannot be bypassed.
+- If the alias is ever missing, rerun the bootstrap Job (it is idempotent).
+
+```bash
+# Logs of all shard pods of a run, sorted by time (pod, timestamp, line)
+scripts/ninth-banner-logs.sh tnb-sims-<sha>-<stamp> 2026-10-20T08:50:00Z 2026-10-20T10:30:00Z
+# k8s Events for the namespace (optional 4th arg: object-name prefix, default tnb-)
+scripts/ninth-banner-logs.sh --events ci-runner 2026-10-20T08:50:00Z 2026-10-20T10:30:00Z tnb-sims-<sha>
+```
+
+The script port-forwards `svc/elasticsearch-es-http`, reads the reader password from the cluster
+secret into an env var (never printed), pages with PIT + `search_after` (no 10k cap) and exits 3 with a
+control query (newest visible document) when the result is empty - a silent zero is not a pass.
 
 ### Kibana Access
 

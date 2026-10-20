@@ -5,6 +5,8 @@ components:
   - ../../../../flux/components/common
 resources:
   - ./secret.sops.yaml
+  - ./ci-runner-reader.sops.yaml
+  - ./ci-runner-roles.yaml
   - ./elasticsearch.yaml
   - ./otel-ilm-configmap.yaml
   - ./otel-ilm-job.yaml

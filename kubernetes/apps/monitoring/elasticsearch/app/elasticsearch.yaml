@@ -6,6 +6,11 @@ metadata:
   namespace: monitoring
 spec:
   version: 8.19.20
+  auth:
+    roles:
+      - secretName: elasticsearch-ci-runner-roles
+    fileRealm:
+      - secretName: ci-runner-reader
   http:
     tls:
       selfSignedCertificate:

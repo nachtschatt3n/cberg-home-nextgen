@@ -163,6 +163,22 @@ spec:
                 echo ""
               done
 
+              # Filtered data-stream alias for the read-only CI log reader role
+              # (ci-runner-logs-ro, see ci-runner-roles.yaml). Basic license has no
+              # DLS, so the filter lives on the alias: namespace ci-runner AND pod
+              # name prefix tnb- (pod logs), OR k8s Events regarding such an object.
+              # Idempotent; only if the stream exists.
+              status=$(curl -s -o /dev/null -w '%{http_code}' $CACERT $AUTH \
+                "$${ES_URL}/_data_stream/logs-generic-default")
+              if [ "$${status}" = "200" ]; then
+                echo "Applying filtered alias ci-runner-logs ..."
+                curl -sSf $CACERT $AUTH \
+                  -H 'Content-Type: application/json' \
+                  -X POST "$${ES_URL}/_aliases" \
+                  -d '{"actions":[{"add":{"index":"logs-generic-default","alias":"ci-runner-logs","filter":{"bool":{"should":[{"bool":{"filter":[{"term":{"resource.attributes.k8s.namespace.name":"ci-runner"}},{"prefix":{"resource.attributes.k8s.pod.name":"tnb-"}}]}},{"bool":{"filter":[{"term":{"body.structured.object.regarding.namespace":"ci-runner"}},{"prefix":{"body.structured.object.regarding.name":"tnb-"}}]}}],"minimum_should_match":1}}}}]}'
+                echo ""
+              fi
+
               echo "OTel ILM policies and DSL retention applied successfully."
       volumes:
         - name: config
