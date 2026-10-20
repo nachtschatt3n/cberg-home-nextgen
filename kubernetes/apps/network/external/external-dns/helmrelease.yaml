@@ -15,7 +15,7 @@ spec:
       # every owned record is deleted and its recreate rejected (2026-09-08,
       # aa79cf7a). --default-targets does NOT reach the gateway-httproute source
       # (v0.22.0 flag help) and is not the fix. Plan: external-dns-1.22.0.
-      version: 1.22.0
+      version: 1.23.0
       sourceRef:
         kind: HelmRepository
         name: external-dns
