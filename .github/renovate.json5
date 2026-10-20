@@ -431,6 +431,21 @@
       "addLabels": ["renovate/coupled-pin"]
     },
     {
+      // Playwright CI runner image (2026-10-20). The ninth-banner ARC runner pods
+      // run E2E on mcr.microsoft.com/playwright, whose /ms-playwright browser
+      // bundle must match the @playwright/test version pinned in the GAME repo's
+      // lockfile (e.g. 1.63.0 needs chromium_headless_shell-1243). A bump here
+      // without the matching lockfile bump breaks "E2E smoke (@ci)" with
+      // "Executable doesn't exist at /ms-playwright/...". Renovate opened this
+      // bump three times (#327, #349, #385); two were reverted, #385 broke CI.
+      // The image moves only together with the game repo's Playwright bump.
+      "description": ["Playwright runner image is coupled to the game repo's @playwright/test pin - no Renovate updates"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["mcr.microsoft.com/playwright"],
+      "matchFileNames": ["kubernetes/apps/ci-runner/**"],
+      "enabled": false
+    },
+    {
       // Private self-built ghcr packages Renovate cannot read (no read:packages
       // for the app) -> "Failed to look up docker package" on every run, which
       // the dashboard lists as a repo problem. They are released by their own

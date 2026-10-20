@@ -536,6 +536,14 @@ deny:
       opentelemetry-operator fix, so a monitoring gap cannot hide an HA
       regression. REMOVE THIS RULE only when the operator wants HA back on the
       unattended lane. security_ref: F-07517014
+  - match: "*mcr.microsoft.com/playwright*"
+    reason: >-
+      HELD 2026-10-20. The ninth-banner CI runner image ships a Playwright
+      browser bundle that must match the @playwright/test version pinned in the
+      game repo's lockfile. PR #385 (v1.63.0 to v1.64.1) merged nightly and broke
+      every "E2E smoke (@ci)" run (missing chromium_headless_shell build). The
+      image moves only together with the game repo's Playwright bump. Renovate
+      updates for it are also disabled in .github/renovate.json5.
   - match: "*opentelemetry-kube-stack*"
     reason: >-
       HELD 2026-10-12 (F-c01269d5). Chart 0.24.x ships a default-deny
