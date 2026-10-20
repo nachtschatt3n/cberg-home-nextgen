@@ -556,7 +556,7 @@ spec:
       # renovate: image=xperimental/nextcloud-exporter
       image:
         repository: xperimental/nextcloud-exporter
-        tag: 0.9.1
+        tag: 0.9.2
         pullPolicy: IfNotPresent
 
       service:
