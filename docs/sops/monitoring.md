@@ -865,7 +865,7 @@ Read-only access (least privilege):
 - The Basic license has **no document-level security**, so the document filter lives on the **filtered
   data-stream alias** `ci-runner-logs` (created by `elasticsearch-otel-ilm-bootstrap`): namespace
   `ci-runner` AND pod name prefix `tnb-` for pod logs, OR Events whose `regarding` object is such a pod/Job.
-  The role has no privilege on `logs-generic-default`, so the filter cannot be bypassed.
+  The role has no privilege on `logs-generic-default` or its backing indices, so search/count/scroll/aggs can only go through the filter. Known limit: alias filters are not applied to ID-based Get/Multi-get, so a reader who already knows a document `_id` plus its backing index could fetch it (accepted, low risk). The `monitor` cluster privilege exposes index names/mappings (metadata only).
 - If the alias is ever missing, rerun the bootstrap Job (it is idempotent).
 
 ```bash
