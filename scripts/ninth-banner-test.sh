@@ -83,6 +83,9 @@ fi
 # CPU mode stays at 2 per Job.
 if [ "$gpu" = 1 ]; then parallelism=$(( shards < 3 ? shards : 3 )); fi
 collect="${COLLECT:-1}"
+# Job deadline per suite: sims runs two rounds of ~50-65 min (4 shards,
+# parallelism 2) and was killed at 5400 s (DeadlineExceeded, 2026-10-20).
+case "$suite" in sims) deadline=10800 ;; *) deadline=5400 ;; esac
 
 sha="$(gh api "repos/$GH_REPO/commits/$ref_in" --jq .sha)" || { echo "cannot resolve ref '$ref_in'"; exit 2; }
 
@@ -103,7 +106,7 @@ dest="${RESULTS_DIR:-$HOME/ci-results}/$job"
 mkdir -p "$dest"
 
 sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" \
-    -e "s|__SHARDS__|$shards|g" -e "s|__PARALLELISM__|$parallelism|g" \
+    -e "s|__SHARDS__|$shards|g" -e "s|__PARALLELISM__|$parallelism|g" -e "s|__DEADLINE__|$deadline|g" \
     -e "s|__WORKERS__|$workers|g" -e "s|__COLLECT_WAIT__|$([ "$collect" = 1 ] && echo 900 || echo 0)|g" \
     -e "s|__CPU_REQ__|$cpu_req|g" -e "s|__CPU_LIM__|$cpu_lim|g" -e "s|__GPU_RES__|$gpu_res|g" \
     -e "s|__LANE__|$lane|g" -e "s|__MEM_REQ__|$mem_req|g" -e "s|__MEM_LIM__|$mem_lim|g" \
@@ -112,7 +115,7 @@ sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" \
     "$TEMPLATE" > "$dest/job.yaml"
 k create -f "$dest/job.yaml" >/dev/null
 start=$(date +%s)
-echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  lane=$lane gpu=$gpu cpu=$cpu_req/$cpu_lim mem=$mem_req/$mem_lim"
+echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  lane=$lane gpu=$gpu cpu=$cpu_req/$cpu_lim mem=$mem_req/$mem_lim  deadline=${deadline}s"
 if [ "$collect" != 1 ]; then
     # Fire and forget: return once the Job controller has created every shard pod.
     echo "COLLECT=0: waiting only until all $shards shard pod(s) exist"
@@ -127,6 +130,10 @@ fi
 
 pod_of() { k get pods -n "$NS" -l "batch.kubernetes.io/job-name=$job,batch.kubernetes.io/job-completion-index=$1" \
                -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true; }
+# ISO UTC timestamp for an epoch (BSD date on macOS, GNU date fallback)
+iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
+pod_names=(); pod_seen=()   # per shard: pod name, epoch first seen
+margin=300   # 5 min either side of the lookup window
 done_idx=()   # indexed array: bash 3.2 (macOS) has no associative arrays
 summary=()
 fails=0
@@ -156,6 +163,13 @@ while [ "${#done_idx[@]}" -lt "$shards" ]; do
             line="CI-RESULT suite=$suite shard=$((i + 1))/$shards result=FAIL rc=? (no pod: Job ended ${ended}; partial log, if any, in shard-$((i + 1)).log)"
             done_idx[$i]=1; summary+=("$line"); fails=$((fails + 1)); echo "  $line"
             continue
+        fi
+        if [ "${pod_names[$i]:-}" != "$pod" ]; then
+            # first sight of this shard's pod (or a replacement): print the
+            # recovery command now, with the latest possible end as the window
+            # end, so a pod removed by the TTL can still be read from Elastic
+            pod_names[$i]="$pod"; pod_seen[$i]=$(date +%s)
+            echo "  shard $((i + 1))/$shards logs: scripts/ninth-banner-logs.sh $pod $(iso $(( ${pod_seen[$i]} - margin ))) $(iso $(( start + deadline + margin )))"
         fi
         phase="$(k get pod -n "$NS" "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || echo Unknown)"
         logs="$(k logs -n "$NS" "$pod" -c runner 2>/dev/null || true)"
@@ -218,6 +232,11 @@ case "$suite" in e2e|nightly|responsive|release)
     fi ;;
 esac
 echo "----"
+end_ts=$(date +%s)
+for ((i = 0; i < shards; i++)); do
+    [ -n "${pod_names[$i]:-}" ] || continue
+    echo "logs shard $((i + 1))/$shards: scripts/ninth-banner-logs.sh ${pod_names[$i]} $(iso $(( ${pod_seen[$i]} - margin ))) $(iso $(( end_ts + margin )))"
+done
 if [ "$no_tests" = 1 ]; then
     echo "FAIL  $suite @ ${sha:0:12}: 0 tests executed (planned ${planned}; SPECS='${SPECS:-}' PROJECT='${PROJECT:-}'). A run that tests nothing is a failure: check the spec paths, or the shard logs for 'NO-TESTS'."
 elif [ "$fails" -eq 0 ]; then
@@ -245,7 +264,7 @@ if [ "$suite" = release ]; then
         echo "WARNING: could not post the commit status (gh api failed)"
     fi
 fi
-echo "the Job and its pods self-delete 10 min after the whole Job finishes (ttlSecondsAfterFinished=600)"
+echo "the Job and its pods self-delete 60 min after the whole Job finishes (ttlSecondsAfterFinished=3600; logs stay in Elastic via the scripts/ninth-banner-logs.sh lines above)"
 [ "$fails" -eq 0 ]
 }
 

@@ -25,11 +25,11 @@ spec:
   parallelism: __PARALLELISM__
   backoffLimitPerIndex: 0
   maxFailedIndexes: __SHARDS__
-  activeDeadlineSeconds: 5400
-  # 600 s (2026-10-04, was 3600): pods hold until the trigger has copied their
-  # results (/results/.collected, COLLECT_WAIT_SECONDS 900), so the TTL only
-  # starts after collection; 1 h kept ~40 finished pods on the dashboard.
-  ttlSecondsAfterFinished: 600
+  activeDeadlineSeconds: __DEADLINE__
+  # Deadline: 5400 s (sims 10800), set per suite by the trigger script.
+  # 3600 s (2026-10-20, was 600): a Job that ends by DeadlineExceeded or a
+  # lost trigger must leave its pods/logs readable for an hour.
+  ttlSecondsAfterFinished: 3600
   template:
     metadata:
       labels:
