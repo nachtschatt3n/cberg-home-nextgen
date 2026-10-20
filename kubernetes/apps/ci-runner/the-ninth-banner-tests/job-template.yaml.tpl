@@ -4,7 +4,7 @@
 # `kubectl create`s one Job per run. docs/sops/ci-runner.md
 #
 # Indexed Job: one pod per shard (JOB_COMPLETION_INDEX -> --shard=i+1/N),
-# at most __PARALLELISM__ (3 GPU / 2 CPU) at a time per Job; node placement is
+# at most __PARALLELISM__ (3 GPU / 2 CPU; sims 4 or 2 by free CPU) at a time per Job; node placement is
 # left to the scheduler (all three nodes since 2026-10-12). backoffLimitPerIndex 0 +
 # maxFailedIndexes N: a failing shard is NOT retried and does NOT stop the
 # others, so every shard reports.
@@ -17,6 +17,8 @@ metadata:
     app.kubernetes.io/name: the-ninth-banner-tests
     ci.cberg.home/suite: __SUITE__
     ci.cberg.home/lane: __LANE__
+    # one in-flight sims Job per submitter (admission, scripts/ninth-banner-capacity.py)
+    ci.cberg.home/submitter: "__SUBMITTER__"
   annotations:
     ci.cberg.home/ref: "__REF__"
 spec:

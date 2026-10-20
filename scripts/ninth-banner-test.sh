@@ -17,7 +17,15 @@
 # (space-separated spec files), PROJECT (e.g. chromium), CPU_REQ/CPU_LIM
 # (per-shard CPU, default 2/4 browser lane, 1/1.5 cpu lane = sims/unit
 # without GPU; never above 4, thermal cap).
-# Exit status: 0 if every shard passed, 1 otherwise, 2 on usage errors.
+# Admission (docs/sops/ci-runner.md): the Job is created only once the schedulable
+# nodes have free CPU >= parallel shards x pod CPU request + TNB_HEADROOM_CPU
+# (default 2); until then `queued: need X, free Y` every TNB_POLL s (60). Queue
+# time never counts against activeDeadlineSeconds (the Job does not exist yet).
+# TNB_QUEUE_TIMEOUT (default 14400 s) bounds the wait. sims: at most one
+# non-terminal sims Job per SUBMITTER (default: current git branch); parallelism
+# 4 when it fits, else 2. Unreadable kubectl data fails loud (exit 3).
+# Exit status: 0 if every shard passed, 1 otherwise, 2 on usage errors, 3 on
+# admission failure (queue timeout / unreadable cluster data).
 # Full procedure, security model and troubleshooting: docs/sops/ci-runner.md
 set -euo pipefail
 
@@ -31,7 +39,7 @@ TEMPLATE="$REPO_ROOT/kubernetes/apps/ci-runner/the-ninth-banner-tests/job-templa
 GH_REPO="nachtschatt3n/the-ninth-banner"
 NS="ci-runner"
 
-usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 k() { (cd "$REPO_ROOT" && mise exec -- kubectl "$@"); }
 
 [ $# -ge 2 ] || usage
@@ -87,6 +95,11 @@ collect="${COLLECT:-1}"
 # parallelism 2) and was killed at 5400 s (DeadlineExceeded, 2026-10-20).
 case "$suite" in sims) deadline=10800 ;; *) deadline=5400 ;; esac
 
+# --- submitter label (one sims Job in flight per agent) ---
+submitter="${SUBMITTER:-$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)}"
+submitter="$(printf '%s' "$submitter" | tr 'A-Z' 'a-z' | sed -e 's|[^a-z0-9._-]|-|g' -e 's|^[^a-z0-9]*||' -e 's|[^a-z0-9]*$||' | cut -c1-63 | sed -e 's|[^a-z0-9]*$||')"
+[ -n "$submitter" ] && [ "$submitter" != head ] || submitter=unknown
+
 sha="$(gh api "repos/$GH_REPO/commits/$ref_in" --jq .sha)" || { echo "cannot resolve ref '$ref_in'"; exit 2; }
 
 # Image lockstep: the game pins the runner image (tests/e2e/runner.json, its
@@ -101,11 +114,69 @@ elif [ "$want_image" != "$tpl_image" ]; then
     echo "                the runner template has  $tpl_image"
     echo "bump job-template.yaml.tpl first (docs/sops/ci-runner.md §4 step 5)"; exit 2
 fi
+
+# --- admission by free CPU (+ one sims Job per submitter), BEFORE creating the Job ---
+admit="$REPO_ROOT/scripts/ninth-banner-capacity.py"
+headroom="${TNB_HEADROOM_CPU:-2}"; poll="${TNB_POLL:-60}"; qtimeout="${TNB_QUEUE_TIMEOUT:-14400}"
+[[ "$headroom" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "TNB_HEADROOM_CPU must be a number of CPUs"; exit 2; }
+[[ "$poll" =~ ^[1-9][0-9]*$ && "$qtimeout" =~ ^[0-9]+$ ]] || { echo "TNB_POLL / TNB_QUEUE_TIMEOUT must be whole seconds"; exit 2; }
+probe="$(mktemp)"
+sed -e "s|__JOB_NAME__|tnb-probe|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" -e "s|__SUBMITTER__|$submitter|g" \
+    -e "s|__SHARDS__|$shards|g" -e "s|__PARALLELISM__|$parallelism|g" -e "s|__DEADLINE__|$deadline|g" \
+    -e "s|__WORKERS__|$workers|g" -e "s|__COLLECT_WAIT__|0|g" \
+    -e "s|__CPU_REQ__|$cpu_req|g" -e "s|__CPU_LIM__|$cpu_lim|g" -e "s|__GPU_RES__|$gpu_res|g" \
+    -e "s|__LANE__|$lane|g" -e "s|__MEM_REQ__|$mem_req|g" -e "s|__MEM_LIM__|$mem_lim|g" \
+    -e "s|__EPH_REQ__|$eph_req|g" -e "s|__EPH_LIM__|$eph_lim|g" \
+    -e "s|__CHROMIUM_ARGS__||g" -e "s|__SPECS__||g" -e "s|__PROJECT__||g" "$TEMPLATE" > "$probe"
+# the pod's CPU request comes from the rendered pod spec, never hardcoded
+req_m="$(python3 "$admit" podreq "$probe")" || { rm -f "$probe"; echo "admission: cannot read the pod CPU request from the rendered template"; exit 3; }
+rm -f "$probe"
+# sims: all shards at once (max 4) if it fits, else 2; others keep today's parallelism
+if [ "$suite" = sims ]; then
+    full=$(( shards < 4 ? shards : 4 )); half=$(( shards < 2 ? shards : 2 ))
+    par_list="$full"; [ "$half" -lt "$full" ] && par_list="$full $half"
+else
+    par_list="$parallelism"
+fi
+queue_start=$(date +%s)
+while :; do
+    msg=""
+    if [ "$suite" = sims ]; then
+        other="$(python3 "$admit" inflight "$submitter")" || { echo "admission: cannot read the Job list (fail loud, not admitting)"; exit 3; }
+        [ -z "$other" ] || msg="queued: submitter $submitter already has sims job $other in flight"
+    fi
+    if [ -z "$msg" ]; then
+        rc=0; verdict="$(python3 "$admit" decide --req "$req_m" --par "$par_list" --headroom "$headroom")" || rc=$?
+        if [ "$rc" -eq 0 ]; then
+            read -r _ chosen _ _ <<<"$verdict"
+            # Race-safety is BEST-EFFORT: two invocations in the same instant can
+            # both pass; re-checking the submitter right before create narrows
+            # the window to the kubectl round-trip.
+            if [ "$suite" = sims ]; then
+                other="$(python3 "$admit" inflight "$submitter")" || { echo "admission: cannot read the Job list (fail loud)"; exit 3; }
+                [ -z "$other" ] || msg="queued: submitter $submitter already has sims job $other in flight"
+            fi
+            if [ -z "$msg" ]; then parallelism="$chosen"; break; fi
+        elif [ "$rc" -eq 10 ]; then
+            read -r _ need_cpu free_cpu <<<"$verdict"; msg="queued: need $need_cpu, free $free_cpu"
+        else
+            echo "admission: cannot compute free CPU (rc=$rc); refusing to start (fail loud, never 'plenty of CPU')"; exit 3
+        fi
+    fi
+    waited=$(( $(date +%s) - queue_start ))
+    if [ "$waited" -ge "$qtimeout" ]; then
+        echo "$msg"; echo "QUEUE TIMEOUT after ${waited}s (TNB_QUEUE_TIMEOUT=${qtimeout}); no Job was created"; exit 3
+    fi
+    echo "$msg  (waited ${waited}s)"
+    sleep "$poll"
+done
+queue_wait=$(( $(date +%s) - queue_start ))
+
 job="tnb-${suite}$([ "$gpu" = 1 ] && echo -gpu)-${sha:0:7}-$(date +%m%d%H%M%S)"
 dest="${RESULTS_DIR:-$HOME/ci-results}/$job"
 mkdir -p "$dest"
 
-sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" \
+sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" -e "s|__SUBMITTER__|$submitter|g" \
     -e "s|__SHARDS__|$shards|g" -e "s|__PARALLELISM__|$parallelism|g" -e "s|__DEADLINE__|$deadline|g" \
     -e "s|__WORKERS__|$workers|g" -e "s|__COLLECT_WAIT__|$([ "$collect" = 1 ] && echo 900 || echo 0)|g" \
     -e "s|__CPU_REQ__|$cpu_req|g" -e "s|__CPU_LIM__|$cpu_lim|g" -e "s|__GPU_RES__|$gpu_res|g" \
@@ -115,7 +186,7 @@ sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" \
     "$TEMPLATE" > "$dest/job.yaml"
 k create -f "$dest/job.yaml" >/dev/null
 start=$(date +%s)
-echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  lane=$lane gpu=$gpu cpu=$cpu_req/$cpu_lim mem=$mem_req/$mem_lim  deadline=${deadline}s"
+echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  lane=$lane gpu=$gpu cpu=$cpu_req/$cpu_lim mem=$mem_req/$mem_lim  deadline=${deadline}s  queued=${queue_wait}s parallelism=$parallelism submitter=$submitter"
 if [ "$collect" != 1 ]; then
     # Fire and forget: return once the Job controller has created every shard pod.
     echo "COLLECT=0: waiting only until all $shards shard pod(s) exist"
