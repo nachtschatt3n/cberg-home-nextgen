@@ -130,12 +130,38 @@ pod_of() { k get pods -n "$NS" -l "batch.kubernetes.io/job-name=$job,batch.kuber
 done_idx=()   # indexed array: bash 3.2 (macOS) has no associative arrays
 summary=()
 fails=0
+# Job-level end state: "" while active, else the Failed/Complete reason, or
+# "Vanished" once the Job is gone (TTL / manual delete). A Job that ends by
+# DeadlineExceeded deletes its running pods and never starts the pending
+# indexes, so those shards can never report: without this check the loop
+# waited forever (2026-10-20, tnb-sims-43224f7).
+job_end() {
+    local out
+    if ! out="$(k get job -n "$NS" "$job" -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type}:{.reason} {end}' 2>&1)"; then
+        grep -q 'NotFound' <<<"$out" && echo Vanished   # other errors: transient, keep waiting
+        return 0
+    fi
+    out="$(grep -oE '(Failed|Complete):[A-Za-z]*' <<<"$out" | head -1 || true)"
+    [ -n "$out" ] && echo "${out#*:}"
+    return 0
+}
 while [ "${#done_idx[@]}" -lt "$shards" ]; do
+    ended="$(job_end)"
     for ((i = 0; i < shards; i++)); do
         [ -n "${done_idx[$i]:-}" ] && continue
-        pod="$(pod_of "$i")"; [ -n "$pod" ] || continue
+        pod="$(pod_of "$i")"
+        if [ -z "$pod" ]; then
+            # no pod and the Job has ended: this shard was killed or never started
+            [ -n "$ended" ] || continue
+            line="CI-RESULT suite=$suite shard=$((i + 1))/$shards result=FAIL rc=? (no pod: Job ended ${ended}; partial log, if any, in shard-$((i + 1)).log)"
+            done_idx[$i]=1; summary+=("$line"); fails=$((fails + 1)); echo "  $line"
+            continue
+        fi
         phase="$(k get pod -n "$NS" "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || echo Unknown)"
         logs="$(k logs -n "$NS" "$pod" -c runner 2>/dev/null || true)"
+        # keep the newest partial log, so a pod deleted mid-run (deadline,
+        # eviction, preemption) still leaves its output on this Mac
+        [ -n "$logs" ] && printf '%s\n' "$logs" > "$dest/shard-$((i + 1)).log"
         if grep -q '^CI-RESULTS-READY' <<<"$logs"; then
             printf '%s\n' "$logs" > "$dest/shard-$((i + 1)).log"
             k cp -c runner "$NS/$pod:/results" "$dest" >/dev/null 2>&1 || echo "  (copy of shard $((i + 1)) artifacts failed)"
