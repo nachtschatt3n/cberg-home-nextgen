@@ -124,18 +124,17 @@ else:
     flt = [{"term": {"body.structured.object.regarding.namespace": target}},
            {"prefix": {"body.structured.object.regarding.name": os.environ["EVENT_PREFIX"]}}, rng]
 
-pit = req("POST", f"/{ALIAS}/_pit?keep_alive=2m")["id"]
 total = 0
-search_after = None
+scroll_id = None
 try:
     while True:
-        body = {"size": 5000, "pit": {"id": pit, "keep_alive": "2m"},
-                "sort": [{"@timestamp": "asc"}, {"_shard_doc": "asc"}],
-                "query": {"bool": {"filter": flt}}, "track_total_hits": False}
-        if search_after:
-            body["search_after"] = search_after
-        r = req("POST", "/_search", body)
-        pit = r.get("pit_id", pit)
+        if scroll_id is None:
+            r = req("POST", f"/{ALIAS}/_search?scroll=2m", {
+                "size": 5000, "sort": [{"@timestamp": "asc"}],
+                "query": {"bool": {"filter": flt}}})
+        else:
+            r = req("POST", "/_search/scroll", {"scroll": "2m", "scroll_id": scroll_id})
+        scroll_id = r.get("_scroll_id", scroll_id)
         hits = r["hits"]["hits"]
         if not hits:
             break
@@ -155,12 +154,12 @@ try:
             total += 1
             if max_lines and total >= max_lines:
                 raise SystemExit(0)
-        search_after = hits[-1]["sort"]
 finally:
-    try:
-        req("DELETE", "/_pit", {"id": pit})
-    except SystemExit:
-        pass
+    if scroll_id:
+        try:
+            req("DELETE", "/_search/scroll", {"scroll_id": scroll_id})
+        except SystemExit:
+            pass
 
 if total == 0:
     print(f"FAIL: zero {mode} for '{target}' between {frm} and {to}. A silent zero is not a pass.",

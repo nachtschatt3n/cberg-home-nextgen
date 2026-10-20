@@ -876,7 +876,7 @@ scripts/ninth-banner-logs.sh --events ci-runner 2026-10-20T08:50:00Z 2026-10-20T
 ```
 
 The script port-forwards `svc/elasticsearch-es-http`, reads the reader password from the cluster
-secret into an env var (never printed), pages with PIT + `search_after` (no 10k cap) and exits 3 with a
+secret into an env var (never printed), pages with scroll (no 10k cap; PIT is not usable because it needs privileges on the backing indices) and exits 3 with a
 control query (newest visible document) when the result is empty - a silent zero is not a pass.
 
 ### Kibana Access
