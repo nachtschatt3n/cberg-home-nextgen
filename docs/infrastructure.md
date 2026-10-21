@@ -108,8 +108,8 @@ Bootstrap order (via `kubernetes/bootstrap/apps/helmfile.yaml`):
 | 1 | Cilium | `cilium/cilium` | 1.20.2 | kube-system | (bootstrap seed aligned to running v1.20.2; Flux HelmRelease also pins 1.20.2 — verified live 2026-09-23) |
 | 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.49.0 | kube-system | (chart appVersion 1.14.7 owns the image tag; the former `helm-values.yaml` pin was dropped 2026-10-21) |
 | 3 | cert-manager | `jetstack/cert-manager` | v1.21.2 | cert-manager |
-| 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.57.0 | flux-system |
-| 5 | Flux Instance | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-instance` | 0.57.0 | flux-system |
+| 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.61.0 | flux-system |
+| 5 | Flux Instance | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-instance` | 0.61.0 | flux-system |
 
 These are bootstrapped via Helmfile (not Flux) on initial cluster setup. After bootstrap, Flux
 manages all subsequent deployments including upgrades to these components.
@@ -131,7 +131,7 @@ manages all subsequent deployments including upgrades to these components.
 | Identity Provider | Authentik (forward-auth for apps with no user model; app-native OIDC or SAML for those that have one) |
 | Image Updates | Renovate (weekly) + Flux Image Automation |
 
-> **Note:** Flux distribution is v2.9.3 (flux-operator/flux-instance chart 0.57.0). The `flux` CLI tool (mise) is v2.9.0, matched to the running distribution. Controllers: source-controller v1.9.3, kustomize-controller v1.9.4, helm-controller v1.6.3, notification-controller v1.9.2, image-reflector-controller v1.2.3, image-automation-controller v1.2.3. The former v2.6+ CRD-incompatibility pin (at operator v0.14.0) was cleared by the 0.14.0→0.57.0 operator upgrade + Flux 2.7 image-API GA storage migration on 2026-08-11 — see `docs/sops/flux-upgrade.md`. For the image-automation half (why an `ImageUpdateAutomation` can run green for months while never pushing) see `docs/sops/flux-image-automation-push-auth.md`.
+> **Note:** Flux distribution is v2.9.3 (flux-operator/flux-instance chart 0.61.0). The `flux` CLI tool (mise) is v2.9.0, matched to the running distribution. Controllers: source-controller v1.9.3, kustomize-controller v1.9.4, helm-controller v1.6.3, notification-controller v1.9.2, image-reflector-controller v1.2.3, image-automation-controller v1.2.3. The former v2.6+ CRD-incompatibility pin (at operator v0.14.0) was cleared by the 0.14.0→0.57.0 operator upgrade + Flux 2.7 image-API GA storage migration on 2026-08-11 — see `docs/sops/flux-upgrade.md`. For the image-automation half (why an `ImageUpdateAutomation` can run green for months while never pushing) see `docs/sops/flux-image-automation-push-auth.md`.
 
 > **Note — bjw-s app-template at 5.1.0 cluster-wide (migrated 2026-08-18):** The long-standing 3.7.3 freeze is over — all ~70 app-template HelmReleases were bulk-migrated 3.7.3→5.1.0 on 2026-08-18 (values now carry explicit persistence suffix pins; chart is pulled from the `bjw-s-labs` OCI registry, `oci://ghcr.io/bjw-s-labs/helm`). Keep the chart version uniform cluster-wide: future majors go through the library-chart migration procedure in `docs/sops/application-update.md` §7b, never as per-app bumps.
 
