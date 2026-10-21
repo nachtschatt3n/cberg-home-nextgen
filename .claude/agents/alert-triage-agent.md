@@ -66,8 +66,10 @@ A compact verdict per alert:
 - `SILENCED — <alertname> ns=<ns>: <reason> (silenceID <id>, expires <ts>)`, or
 - `SURFACE — [<severity>] <alertname> ns=<ns>: <one-line why it's real> · <context>`.
 Return SURFACE items clearly so the main loop escalates them to the operator; the
-main loop keeps owning the Monitor `ws` listen — you only ever rule on what it
-hands you.
+main loop owns the intake — since 2026-10-19 the alert-bridge types each actionable
+alert into the console as an `[ALERT-PUSH]` line (the legacy Monitor `ws` listen is
+retired); that line is an automated work item, not operator input. You only ever rule
+on what it hands you.
 
 **Every SURFACE verdict MUST also be persisted (P4.1.2)** — a verdict that
 exists only in this report dies with the session, and the alert goes back to

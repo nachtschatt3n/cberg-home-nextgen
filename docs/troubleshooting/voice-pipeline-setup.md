@@ -43,7 +43,7 @@ Version: 2026.07.12 · Status: **live** · Owner: Mathias + Claude session log
 
 Goal: wake-word voice on the HA Voice PE satellite; common commands handled by
 HA's local intent engine (<2 s), free-form queries falling back to the OpenClaw
-`voice` agent on local Ollama (`gemma4:e2b-mlx`, Mac Mini). STT/TTS local.
+`voice` agent on local Ollama (`gemma4:26b-mlx`, Mac Mini; was e2b-mlx until 2026-10-19). STT/TTS local.
 
 ## Architecture
 
@@ -55,7 +55,7 @@ Voice PE (09c778) ── wake "Okay Nabu"
        Conv : custom_conversation → OpenClaw /v1  [pending]
        TTS  : tts.openai_tts_qwen3_voice → mlx-audio @ 192.168.30.111:8000
   └─ OpenClaw gateway (ai ns, :18789, token auth)
-       agent "voice" → ollama-native/gemma4:e2b-mlx (Mac Mini :11434)
+       agent "voice" → ollama-native/gemma4:26b-mlx (Mac Mini :11434)
        tools: homeassistant MCP (HA core MCP Server, SSE)
 ```
 
