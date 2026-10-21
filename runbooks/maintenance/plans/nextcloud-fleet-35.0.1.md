@@ -160,7 +160,7 @@ status: vetted                        # REFRESHED 2026-10-21 in place (plan_id k
                                       # review field is REMOVED — a fresh plan-reviewer pass is owed.
                                       # GO: §1.7 — a ONE-LINE operator re-confirm is required (bundled
                                       # with the go/no-go), the 2026-10-02 GO covered image-only only.
-window: null                          # CLEARED 2026-10-21: the 2026-10-18 slot passed unexecuted (live still 34.0.4) and the plan was refused; the window agent re-assigns.
+window: "now:2026-10-21"   # ON-DEMAND NOW run 2026-10-21 (run-now.py stamp; was None)
                                       # The executor must read the entrypoint log live in §3.4
                                       # and run §5.1/§5.2 inside the same slot.
 premises:
