@@ -38,7 +38,7 @@ spec:
     spec:
       containers:
       - name: mariadb
-        image: mariadb:12.3.3
+        image: mariadb:13.0.2
         imagePullPolicy: IfNotPresent
         # Charset PIN — do not drop. 2026-08-30: whole schema converted to
         # utf8mb4/utf8mb4_general_ci (all tables + DATABASE default) after a
@@ -58,7 +58,7 @@ spec:
         env:
         # The official image does NOT run mariadb-upgrade on a server-major
         # roll unless told to (docs/sops/mariadb-major-upgrade.md, failure
-        # mode 1, official-image variant). Without this the 12.3.3 binary
+        # mode 1, official-image variant). Without this the 13.0.2 binary
         # starts against an 11.8-marked datadir and the system tables are left
         # at the old layout — which does not fail loudly, it degrades later.
         # The entrypoint backs the system tables up INTO the datadir before
