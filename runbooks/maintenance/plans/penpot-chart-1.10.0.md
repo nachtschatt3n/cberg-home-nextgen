@@ -200,7 +200,7 @@ body. Read from primary sources:
 - **No new DB migration.** `backend/src/app/migrations.clj` is byte-identical
   between tags 2.18.0 and 2.18.1 (`diff` empty; 162 `:name "0...` entries in
   both). So the schema end state is still 162 with `0152` the only new step
-  over our 161 — §4.2 and §5 A are unchanged.
+  over our 161 AT 2.18.1 (superseded by the 2.18.3 retarget: 163 total, two new steps `0152-improve-uuid-...` and `0153-del-orphan-...`, see §1.C; the live DB already has an older, unrelated `0152-rename-...` step).
 - **Upstream compare 2.18.0...2.18.1** (18 commits, 52 files): the
   deploy-relevant ones are
   (a) `Dockerfile.backend` adds `jdk.management` to the jlink module list (so
