@@ -88,7 +88,7 @@ finding_refs: [F-15d4b6c4]            # `finding list --grep nocodb` 2026-10-01 
                                       # the next sweep emits one.
 review: ready-for-go@2026-10-01   # plan-reviewer-agent, sweep b23be87b
 status: awaiting-go   # 2026-10-02 nightly: go_no_go ingested (HUMAN-GATED: capability_change) — was: vetted
-window: "sat-attended:2026-11-21"   # MOVED 2026-10-13 (maintenance-window-agent, operator choice) from sun-attended:2026-11-08, which etcd-timeouts-5000-500 now holds (risk-class stacking). PROPOSED slot, operator has NOT confirmed it: the existing GO was scoped to 11-08 and does NOT transfer; re-ask and record a fresh GO for this dated slot. Sat 11-21 is the only attended slot with no plan and no declared conflict: 45 of 70 min, risk 2 of 6. Earlier slots: sat 10-17 coredns 35+45>70, sun 10-18 nextcloud, sat 10-24 paperless, sun 10-25 redis, sat 10-31 penpot, sun 11-01 talos, sat 11-07 helm-drift, sun 11-15 longhorn all conflict or are full; sat 11-14 external-dns 45+45>70.
+window: "now:2026-10-21"   # ON-DEMAND NOW run 2026-10-21 (run-now.py stamp; was 'sat-attended:2026-11-21')
 premises:
   - id: live-image-is-still-2026.09.0
     why: >-

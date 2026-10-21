@@ -54,7 +54,7 @@ rollback_class: git-revert            # no forward-only state: TXT registry form
 finding_refs: [F-7ef7af04]            # 2026-10-05 review: open version finding "external-dns: chart 1.22.0 -> 1.23.0"; earlier "zero open rows" note was wrong
 review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (finding_refs, unproven errors grep) -> fixed -> delta ready-for-go
 status: awaiting-go
-window: "sat-attended:2026-11-14"   # RESCHEDULED 2026-10-13 (maintenance-window-agent, scheduling pass): old GO expired with sun-attended:2026-10-11. HUMAN-GATED attended (docs/sops/external-dns.md section 1 Prerequisites: a change that can alter the record set is attended). Alone in the slot: 45 of 70 min, risk 2 of 6. Earlier slots are taken or conflict: sat 10-17 coredns, 10-24 paperless, 10-31 penpot (45+45 > 70), 11-07 helm-drift, sun 10-18 nextcloud (150+45 > 180), sun 10-25 full, sun 11-01 talos, sun 11-15 longhorn. Can be pulled forward as an attended NOW run. Was sun-attended:2026-10-11.
+window: "now:2026-10-21"   # ON-DEMAND NOW run 2026-10-21 (run-now.py stamp; was 'sat-attended:2026-11-14')
 sops_refs:
   - docs/sops/external-dns.md
   - docs/sops/application-update.md

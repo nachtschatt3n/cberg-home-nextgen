@@ -68,7 +68,7 @@ status: awaiting-go   # retarget 1.10.0 -> 1.11.1 is MATERIAL (SD-6): a FRESH op
                      # for 1.10.0). A retarget voids the old review AND the old GO: needs a fresh
                      # plan-reviewer pass, then a NEW operator GO (HUMAN-GATED, capability_change: true).
 review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (sole blocker: stale 10-02 GO not stopped) -> §2.0 GO-currency gate added by coordinator (same gate as n8n-2.39.8, tested STALE/CURRENT live)
-window: "sat-attended:2026-10-31"   # KEPT on the 2026-10-05 retarget (flux-fleet-0.60.0 precedent); the slot only runs if the re-review passes and a new GO is recorded first (status is draft). Originally SCHEDULED 2026-09-28 by maintenance-window-agent (moved off sun 10-25: shares monitoring+office with redis-fleet)
+window: "now:2026-10-21"   # ON-DEMAND NOW run 2026-10-21 (run-now.py stamp; was 'sat-attended:2026-10-31')
 premises:
   - id: live-backend-still-2.17.2
     why: "current: claims 2.17.2; if the backend already moved, the dump/baseline and rollback target are wrong."
