@@ -106,7 +106,7 @@ Bootstrap order (via `kubernetes/bootstrap/apps/helmfile.yaml`):
 | Order | Component | Chart | Version | Namespace |
 |-------|-----------|-------|---------|-----------|
 | 1 | Cilium | `cilium/cilium` | 1.20.2 | kube-system | (bootstrap seed aligned to running v1.20.2; Flux HelmRelease also pins 1.20.2 — verified live 2026-09-23) |
-| 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.47.0 | kube-system | (image pinned to 1.14.7 in `helm-values.yaml` ahead of the chart's appVersion 1.14.6 — 1.47.0 is the newest chart published; drop the pin once a chart ships appVersion >= the pinned tag) |
+| 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.49.0 | kube-system | (chart appVersion 1.14.7 owns the image tag; the former `helm-values.yaml` pin was dropped 2026-10-21) |
 | 3 | cert-manager | `jetstack/cert-manager` | v1.21.2 | cert-manager |
 | 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.57.0 | flux-system |
 | 5 | Flux Instance | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-instance` | 0.57.0 | flux-system |
@@ -123,7 +123,7 @@ manages all subsequent deployments including upgrades to these components.
 | OS | Talos Linux v1.14.1 (immutable, minimal, Kubernetes-focused; kernel 6.18.51-talos, Clang/ThinLTO; etcd 3.7.1). Rolled 2026-09-27 from v1.13.10, see `docs/sops/talos-upgrade.md` §14 |
 | Container Runtime | Containerd 2.3.5 + Spegel (distributed image caching) |
 | CNI | Cilium v1.20.2 (eBPF networking, load balancing, network policies) |
-| DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS v1.14.7 (cluster-internal; image tag pinned ahead of the chart) + k8s-gateway (split-DNS for `*.domain`) |
+| DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS v1.14.7 (cluster-internal; image tag owned by the chart) + k8s-gateway (split-DNS for `*.domain`) |
 | Ingress | **Envoy Gateway only (migration completed 2026-09-07).** ingress-nginx is DELETED — zero `Ingress` objects, zero `IngressClass` objects, zero nginx controllers. All HTTP traffic rides 105 `HTTPRoute`s on `envoy-internal` `192.168.55.103` (internal) and `envoy-external` `192.168.55.104` (external, behind the cloudflared wildcard). k8s-gateway publishes DNS from HTTPRoutes. Routing model, conversion rules and the verification gate: `docs/sops/gateway-api-httproute.md`; version upgrades: `docs/sops/envoy-gateway-upgrade.md`. |
 | Storage | Longhorn v1.12.1 (distributed, replicated, with backup) |
 | Certificate Management | cert-manager v1.21.2 + Let's Encrypt |

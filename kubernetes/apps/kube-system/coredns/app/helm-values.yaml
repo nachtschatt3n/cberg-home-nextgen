@@ -1,12 +1,6 @@
 ---
 fullnameOverride: coredns
 k8sAppLabelOverride: kube-dns
-# Chart 1.47.0 is the newest published chart and still ships appVersion 1.14.6,
-# so the image is pinned ahead of the chart's tested appVersion. Re-check on
-# every chart bump: once a chart ships >= this appVersion, drop this block and
-# let the chart own the tag again.
-image:
-  tag: "1.14.7"
 serviceAccount:
   create: true
 service:

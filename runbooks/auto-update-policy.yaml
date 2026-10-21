@@ -411,20 +411,14 @@ deny:
   - match: "*@openclaw/*"
     reason: "openclaw plugins (discord/codex) move in lockstep with the held host."
   - match: "*coredns*"
-    reason: "CLUSTER DNS, and currently image-tag-pinned AHEAD of the chart. On 2026-08-19
-      the image was pinned to 1.14.7 in helm-values.yaml because chart 1.47.0 is the newest
-      published and still ships appVersion 1.14.6. The chart templates
-      `.Values.image.tag | default .Chart.AppVersion`, so that pin now wins PERMANENTLY over
-      any future appVersion — a later chart bump would score a safe minor, land unattended at
-      Step 0, and quietly leave a NEWER CHART DRIVING AN OLDER IMAGE with none of the vetting.
-      This is the same shape coverage.py::_apply_lockstep guards (the unpoller v3-chart/v2-image
-      case), but that only fires when a sibling is HELD, and nothing here is — so it would not
-      catch this direction of drift. Forcing coredns into the PLAN lane is the guard.
-      Independently: 1.14.7 proved that a coredns PATCH number is not a patch RELEASE (it added
-      ACME TLS, topology-aware services, HTTP/2 forwarding, DoQ limits and changed the forward
-      connect-attempt default), so this component should never bump unattended regardless of
-      the pin. REMOVE THIS RULE when a chart ships appVersion >= the pinned tag AND the
-      image.tag override is dropped from helm-values.yaml — both, not either."
+    reason: "CLUSTER DNS - held in the PLAN lane on purpose. Chart 1.49.0 (appVersion 1.14.7) landed
+      2026-10-21 and the image.tag pin in helm-values.yaml was DROPPED, so the chart owns the tag
+      again (the original pin-ahead-of-chart hazard is gone). The rule stays because 1.14.7 proved
+      that a coredns PATCH number is not a patch RELEASE (it added ACME TLS, topology-aware
+      services, HTTP/2 forwarding, DoQ limits and changed the forward connect-attempt default),
+      and a DNS failure disables its own GitOps revert (source-controller resolves github.com
+      through CoreDNS), so this component should never bump unattended. Keep / narrow / remove
+      is an operator decision."
   # SPLIT 2026-09-13 (F-1128fcdf). First matching rule decides
   # (auto-update.py::policy_block), so this MORE SPECIFIC rule must stay ABOVE
   # the node-image glob below — `_match_anywhere` makes `siderolabs/*` swallow
