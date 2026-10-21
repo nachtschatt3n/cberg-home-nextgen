@@ -25,6 +25,6 @@
     <bugs>https://github.com/nachtschatt3n/cberg-home-nextgen/issues</bugs>
     <dependencies>
         <php min-version="8.1" max-version="8.5"/>
-        <nextcloud min-version="30" max-version="34"/>
+        <nextcloud min-version="30" max-version="35"/>
     </dependencies>
 </info>
