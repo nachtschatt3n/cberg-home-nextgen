@@ -61,7 +61,7 @@ capture the record set before and after (§4).
 |---------|-------|
 | Namespace | `network` |
 | Source of truth | `kubernetes/apps/network/external/external-dns/helmrelease.yaml` |
-| Chart / image | `external-dns` **1.22.0** / `registry.k8s.io/external-dns/external-dns:**v0.22.0**` — bumped 2026-09-15 (`0a316a51`), verified live 2026-09-22. This version reads the **GA** annotation prefix `external-dns.kubernetes.io/` **only**, with no fallback to the alpha key (§3); the live pod confirms `AnnotationPrefix:external-dns.kubernetes.io/`. Upstream latest is v0.23.0 — the next bump is subject to the same attended ritual |
+| Chart / image | `external-dns` **1.23.0** / `registry.k8s.io/external-dns/external-dns:**v0.23.0**` — bumped 2026-10-21 (plan `external-dns-1.23.0`; flag rename `e468c94e`, chart `415c5301`), verified live (27 CNAMEs verified = 27 source endpoints, zero changes submitted). Reads the **GA** annotation prefix `external-dns.kubernetes.io/` **only**, with no fallback to the alpha key (§3). Any next bump is subject to the same attended ritual |
 | Provider | `cloudflare`, `--cloudflare-proxied` |
 | Policy | **`sync`** — deletes records, and delete-then-creates on change |
 | Sources | `crd` (`DNSEndpoint`) + `gateway-httproute` |
@@ -185,7 +185,7 @@ annotation landed on the Gateway first (`fbcd93c2`), then the chart bumped
 upstream is already at v0.23.0, and the next bump earns the same attended
 treatment.
 
-### Pending: `--request-timeout` is deprecated — migrate to `--kube-api-request-timeout`
+### Done 2026-10-21 (`e468c94e`): `--request-timeout` migrated to `--kube-api-request-timeout`
 
 The HelmRelease still passes `--request-timeout=60s`. **That flag is
 deprecated upstream**, verified three independent ways on 2026-09-22:
