@@ -12,9 +12,9 @@ kind: chart                           # CHANGED 2026-10-05 (re-plan): chart+imag
                                       # ride in the same commit (§1.1). also_covers below waives
                                       # coverage.py's kind guard for both legs.
 current: "34.0.4 (chart 9.3.0)"
-target: "35.0.1 (chart 9.4.0)"        # PROSE ON PURPOSE: lib/plan_matching.py _ver_tokens() reads
+target: "35.0.2 (chart 9.4.1)"        # PROSE ON PURPOSE: lib/plan_matching.py _ver_tokens() reads
                                       # BOTH tokens, so this one plan covers the image finding
-                                      # (35.0.1) and the chart finding (9.4.0).
+                                      # (35.0.2) and the chart finding (9.4.1).
 also_covers:
   - nextcloud-notify-push             # same image, same tag, SAME commit (notify-push.yaml
                                       # lockstep comment). Machine-readable so coverage.py
@@ -29,9 +29,9 @@ risk: high                            # MAJOR on the household's primary file/ma
                                       # The last PATCH upgrade (2026-09-26) was already killed by
                                       # that probe mid-`occ upgrade`. Rollback is a DB restore +
                                       # Longhorn snapshot revert, not a git revert (§5.3).
-                                      # The chart leg (9.3.0 -> 9.4.0) adds NO risk: measured
+                                      # The chart leg (9.3.0 -> 9.4.1) adds NO risk: measured
                                       # metadata-labels-only render diff (§1.2).
-est_duration_min: 150                 # pre-checks + render-diff gate + verified dump + config tar
+est_duration_min: 160                 # REFRESH 2026-10-21: 150 -> 160 (+10: pre-drain now covers 11 apps, not 5). pre-checks + render-diff gate + verified dump + config tar
                                       # + snapshots ~35; Commit A (openclaw_mail compat, a plain
                                       # 34.0.4 restart via reloader) ~10; §3.2b app pre-drain on 34
                                       # incl. Mail mini-gate ~10; Commit B rollout, budgeted to the
@@ -43,16 +43,16 @@ needs_reboot: false
 touches:
   namespaces: [office]
   resources:
-    - helmrelease/nextcloud                     # chart.spec.version 9.3.0 -> 9.4.0 + image.tag +
+    - helmrelease/nextcloud                     # chart.spec.version 9.3.0 -> 9.4.1 + image.tag +
                                                 # worker sidecar tag (ONE commit, ONE helm upgrade);
                                                 # TEMPORARY upgrade.remediation.retries 3->0 and
                                                 # startupProbe.failureThreshold 10->50 (§3.3), both
-                                                # restored in §3.6 (chart stays 9.4.0).
+                                                # restored in §3.6 (chart stays 9.4.1).
     - deployment/nextcloud                      # rolled THREE times: Commit A (reloader, 34.0.4 ->
                                                 # 34.0.4), Commit B (Recreate, entrypoint rsync +
                                                 # occ upgrade 34 -> 35), §3.6 probe restore (35 -> 35).
-                                                # Chart 9.4.0 changes its metadata labels only.
-    - deployment/nextcloud-notify-push          # tag 34.0.4 -> 35.0.1 in Commit B
+                                                # Chart 9.4.1 changes its metadata labels only.
+    - deployment/nextcloud-notify-push          # tag 34.0.4 -> 35.0.2 in Commit B
     - configmap/nextcloud-openclaw-mail-app     # info.xml max-version 34 -> 35 (Commit A)
     - cronjob/nextcloud-cron                    # template image re-rendered + chart labels
     - deployment/nextcloud-metrics              # chart labels only (no pod-template change, no
@@ -78,11 +78,21 @@ touches:
 depends_on: []                                  # nextcloud-9.4.0 is SUPERSEDED by this plan (folded
                                                 # into Commit B 2026-10-05); it is no longer a dependent.
 conflicts_with:
+  # REFRESHED 2026-10-21 against the live plan set (maintenance-plan.py --validate DEAD-REF warnings fixed).
+  # Dropped as dead (plans executed/retired, dated): chart-patches-coredns-reloader-blackbox, reloader-2.2.18,
+  # coredns-1.48.1/-1.48.2 (coredns executed green in 3f34eb84 2026-10-21), kube-prometheus-stack-91.9.0 (-> 92.x
+  # below), app-template-5.2.1, sure-0.7.5, pgvector-fleet-0.8.7, talos-sysfs-power-caps, jellyfin-12.1 (superseded).
   - etcd-timeouts-5000-500           # reciprocal (2026-10-13): that plan names this one; etcd-timeouts restarts etcd on all 3 members (apiserver blips); never the same night as the office-wide nextcloud upgrade
   - bitnamilegacy-exit-nextcloud-db             # same helmrelease.yaml, same DB this plan migrates
                                                 # one-way; that plan's dump would capture a half-state.
   - nextcloud-mcp-0.198.0                       # its verification talks to this server; the §2.5
                                                 # silence here is office-wide.
+  - nextcloud-mcp-0.199.1                       # same (all three list this plan)
+  - nextcloud-mcp-0.200.2                       # same
+  - nextcloud-whiteboard-2.1.0                  # §3.2b `occ app:update --all` moves the whiteboard NC APP to 2.1.0; that
+                                                # plan rolls the whiteboard SERVER (server first is preferred, §6); both
+                                                # sit under the office-wide §2.5 silence. It lists this plan back.
+  - nextcloud-fleet-34.0.5                      # MUTUALLY EXCLUSIVE contingency on the same three pins (it lists this plan back)
   - redis-fleet-8.10.2                          # restarts nextcloud-redis and (by its own touches)
                                                 # deployment/nextcloud + notify-push — a restart
                                                 # of either during §3.4 is the §5.2 failure.
@@ -91,36 +101,35 @@ conflicts_with:
                                                 # nothing) and rolls statefulset/nextcloud-mariadb.
   - flux-reconciler-impersonation               # changes the identity office/nextcloud reconciles
                                                 # under; a reconcile failure mid-§3.4 leaves retries:0 set.
-  - chart-patches-coredns-reloader-blackbox     # reloader roll is Commit A's mechanism; a coredns roll in §3.4 breaks appstore downloads
-  - reloader-2.2.18                             # same reason: Commit A RELIES on a reloader roll (reciprocal)
-  - coredns-1.48.1                              # appstore downloads inside occ upgrade need DNS (superseded
-                                                # 2026-10-05 by coredns-1.48.2; kept until that file retires)
-  - coredns-1.48.2                              # same reason (reciprocal: it lists this plan)
   - flux-distribution-2.9.6                     # restarts all six Flux controllers mid-§3.4 => release stranded
                                                 # with retries: 0 (reciprocal; that plan is exclusive anyway)
   - flux-fleet-0.60.0                           # helm-controller restart mid-§3.4 strands the release pending-upgrade (retries: 0)
-  - helm-drift-detection                        # patches helmrelease/nextcloud; its no-upgrade gate collides with Commit B
-  - kube-prometheus-stack-91.9.0                # §4 gate 4 reads Prometheus; §2.5 silence lives in its
-                                                # Alertmanager (reciprocal: it lists this plan)
-  - app-template-5.2.1                          # rolls office workloads + ai/openclaw (consumer) under the office-wide silence
+  - helm-drift-detection                        # patches this HelmRelease; its no-upgrade gate collides with Commit B
+  - cilium-1.20.3                               # a CNI agent roll mid-§3.4 breaks the appstore downloads inside occ upgrade (new 2026-10-21)
+  - kube-prometheus-stack-92.2.0                # §4 gate 4 reads Prometheus; §2.5 silence lives in its Alertmanager
+  - kube-prometheus-stack-92.10.1               # same (any same-night kube-prometheus-stack bump)
   - penpot-chart-1.10.0                         # office namespace, hidden by the §2.5 office-wide silence
   - penpot-cache-9.2                            # office namespace, hidden by the §2.5 office-wide silence
   - paperless-db-13.0.2                         # office namespace, hidden by the §2.5 office-wide silence
-  - sure-0.7.5                                  # office namespace, hidden by the §2.5 office-wide silence
   - python-fleet-3.14.8                         # touches office workloads, hidden by the §2.5 office-wide silence
-  - pgvector-fleet-0.8.7                        # touches office workloads, hidden by the §2.5 office-wide silence
+  - python-fleet-3.15.0                         # same
+  - scan-inbox-validator-3.3.0                  # touches office workloads (new 2026-10-21)
+  - vaultwarden-1.37.4                          # office namespace, hidden by the §2.5 office-wide silence (new 2026-10-21)
   - talos-linux-1.14.2                          # node reboots (+ the k8s control-plane roll folded in from the
                                                 # superseded k8s-1.36.5); a drain/apiserver restart mid-§3.4 is §5.2
+  - talos-linux-1.14.4                          # same (new 2026-10-21)
   - longhorn-1.13.0                             # one-way storage engine move; §2.4 snapshots + §5.3 revert need a stable Longhorn
   # [rollback-class stacking (house rule 81fdd797: every backup-restore pair is
   #  declared; two in one slot leave no rollback capacity for either)]
-  # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
-  - jellyfin-12.1                               # backup-restore
+  - jellyfin-12.2.20261005                      # backup-restore
   - n8n-2.39.8                                  # backup-restore
   - nocodb-2026.09.1                            # backup-restore (reciprocal)
   - media-naming-p3                             # backup-restore
   - talos-power-tuning-ab                       # backup-restore
-  - talos-sysfs-power-caps                      # backup-restore
+  - home-assistant-2026.10.1                    # backup-restore (new 2026-10-21; it lists this plan)
+  - open-webui-0.12.2                           # backup-restore (new 2026-10-21)
+  - open-webui-0.12.3                           # backup-restore
+  - open-webui-17.0.0                           # backup-restore
 exclusive: false
 security_ref: F-c5e87023              # the 34.0.4 image security finding (detail in the DB only —
                                       # docs/sops/vulnerability-disclosure.md); this bump is its
@@ -135,20 +144,23 @@ rollback_class: backup-restore        # entrypoint refuses an older image on new
                                       # No backup_gate named => human-gated, which the deny rule
                                       # ("operator-supervised only") demands anyway.
 finding_refs: [F-7344f3ec, F-7bcfda63, F-38fecaa8, F-c5e87023]
-                                      # F-7344f3ec version/critical nextcloud image 34.0.4 -> 35.0.1
-                                      # F-7bcfda63 version/critical nextcloud-notify-push 34.0.4 -> 35.0.1
-                                      # F-38fecaa8 version/monitor nextcloud chart 9.3.0 -> 9.4.0
-                                      #   (moved here from the superseded nextcloud-9.4.0)
+                                      # F-7344f3ec version/critical nextcloud image 34.0.4 -> 35.0.2
+                                      # F-7bcfda63 version/critical nextcloud-notify-push 34.0.4 -> 35.0.2
+                                      # F-38fecaa8 version/monitor nextcloud chart 9.3.0 -> 9.4.1
+                                      #   (moved here from the superseded nextcloud-9.4.0; the chart is now 9.4.1 — see the 2026-10-21 refresh)
                                       # F-c5e87023 security/warning on the 34.0.4 image (remedied by the bump)
                                       # all four measured open (last_seen 2026-10-05) before claiming.
-review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (GO carry-over, conflicts) -> fixed -> delta ready-for-go. Needs the one-line operator re-confirm of the lockstep shape (§3.1 STOPs without it)
-status: awaiting-go                         # RE-PLANNED 2026-10-05: image-only -> chart 9.4.0 + image 35.0.1
+review: ready-for-go@2026-10-21   # plan-reviewer 2026-10-21 for chart 9.4.1 + image 35.0.2: ready-for-go, 0 blocking; premises 19/19 PASS; nonblocking: stale §6 prose, google_synchronization token follow-up, whiteboard-first ordering is prose only
+status: vetted                        # REFRESHED 2026-10-21 in place (plan_id kept, README "When the held target MOVES"): the pair moved
+                                      # 9.4.0/35.0.1 -> 9.4.1/35.0.2 (premise newest-published-chart-is-still-9.4.0 FAILED, run-now preflight refused it).
+                                      # Was awaiting-go; the 2026-10-02 GO and 2026-10-05 re-confirm ask are void, see §1.7.
+                                      # RE-PLANNED 2026-10-05: image-only -> chart 9.4.1 + image 35.0.2
                                       # lockstep (operator decision relayed by the coordinator). Was
                                       # awaiting-go/ready-for-go@2026-09-28 on the image-only shape; the
                                       # review field is REMOVED — a fresh plan-reviewer pass is owed.
                                       # GO: §1.7 — a ONE-LINE operator re-confirm is required (bundled
                                       # with the go/no-go), the 2026-10-02 GO covered image-only only.
-window: "sun-attended:2026-10-18"     # SCHEDULED 2026-09-28 by maintenance-window-agent; kept on re-plan.
+window: null                          # CLEARED 2026-10-21: the 2026-10-18 slot passed unexecuted (live still 34.0.4) and the plan was refused; the window agent re-assigns.
                                       # The executor must read the entrypoint log live in §3.4
                                       # and run §5.1/§5.2 inside the same slot.
 premises:
@@ -193,22 +205,22 @@ premises:
       flux-oci-chart-sources moved nextcloud to an OCI chartRef the field is gone.
     run: kubectl get helmrelease -n office nextcloud -o jsonpath='{.spec.chart.spec.sourceRef.kind}/{.spec.chart.spec.sourceRef.name}'
     expect_exact: "HelmRepository/nextcloud"
-  - id: lockstep-chart-9.4.0-carries-appversion-35.0.1
+  - id: lockstep-chart-9.4.1-carries-appversion-35.0.2
     why: >-
       THE LOCKSTEP PREMISE (replaces the retired "newest chart still carries a 34
       appVersion" premise, which FAILED on 2026-09-30 and triggered this re-plan). Chart
-      9.4.0 must still be published with appVersion 35.0.1 — the pairing Commit B applies.
+      9.4.1 must still be published with appVersion 35.0.2 — the pairing Commit B applies.
       Checked by exact version so it does not depend on what "newest" is.
-    run: "helm show chart nextcloud --repo https://nextcloud.github.io/helm --version 9.4.0 | grep -E '^appVersion'"
-    expect_exact: "appVersion: 35.0.1"
-  - id: newest-published-chart-is-still-9.4.0
+    run: "helm show chart nextcloud --repo https://nextcloud.github.io/helm --version 9.4.1 | grep -E '^appVersion'"
+    expect_exact: "appVersion: 35.0.2"
+  - id: newest-published-chart-is-still-9.4.1
     why: >-
       Operator rule: chart+image move to the NEWEST. If upstream publishes a newer chart
-      (e.g. 9.4.1 / appVersion 35.0.2) before the window, this premise FAILS and the plan
+      (e.g. 9.4.2 / a newer appVersion) before the window, this premise FAILS and the plan
       must be REFRESHED in place to that pair (README "When the held target MOVES") —
       never run a stale lockstep. Note `helm show chart` without --version = newest.
     run: "helm show chart nextcloud --repo https://nextcloud.github.io/helm | grep -E '^version'"
-    expect_exact: "version: 9.4.0"
+    expect_exact: "version: 9.4.1"
   - id: helmrelease-ready
     why: Starting a helm upgrade on an in-flight or failed one is how remediation thrash begins.
     run: kubectl get helmrelease -n office nextcloud -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
@@ -276,13 +288,13 @@ sops_refs:
   - docs/sops/maintenance-windows.md
   - docs/sops/verification-contents-not-shape.md
   - docs/sops/vulnerability-disclosure.md
-generated: "2026-10-05"               # re-planned (chart+image lockstep); first written 2026-09-28
+generated: "2026-10-21"               # refreshed to chart 9.4.1 + image 35.0.2 (re-planned 2026-10-05 for the lockstep; first written 2026-09-28)
 ---
 
-# nextcloud 34.0.4 -> 35.0.1 (MAJOR) + chart 9.3.0 -> 9.4.0 in LOCKSTEP, notify-push in lockstep — two commits
+# nextcloud 34.0.4 -> 35.0.2 (MAJOR) + chart 9.3.0 -> 9.4.1 in LOCKSTEP, notify-push in lockstep — two commits
 
 > **Re-planned 2026-10-05** (operator decision relayed by the coordinator): the
-> image-only shape is retired. Chart 9.4.0 (appVersion 35.0.1, published
+> image-only shape is retired. Chart 9.4.1 (appVersion 35.0.2, published
 > 2026-09-30) now rides in Commit B with the image. The former chart-only plan
 > `nextcloud-9.4.0` is `superseded` by this file. Review status reset to
 > `draft`; see §1.7 for whether the operator GO carries.
@@ -293,83 +305,116 @@ generated: "2026-10-05"               # re-planned (chart+image lockstep); first
 
 | Leg | From | To | Where |
 |---|---|---|---|
-| server image `image.tag` | 34.0.4 | **35.0.1** | `kubernetes/apps/office/nextcloud/app/helmrelease.yaml` line 35 |
-| worker sidecar image | `nextcloud:34.0.4` | `nextcloud:35.0.1` | same file line 234 |
-| notify-push image | `nextcloud:34.0.4` | `nextcloud:35.0.1` | `notify-push.yaml` line 40 |
+| server image `image.tag` | 34.0.4 | **35.0.2** | `kubernetes/apps/office/nextcloud/app/helmrelease.yaml` line 34 (35 after §3.3's retries line) |
+| worker sidecar image | `nextcloud:34.0.4` | `nextcloud:35.0.2` | same file line 234 |
+| notify-push image | `nextcloud:34.0.4` | `nextcloud:35.0.2` | `notify-push.yaml` line 40 |
 | `openclaw_mail` custom app compat | `max-version="34"` | `max-version="35"` | `openclaw-mail/info.xml` line 28 (**Commit A, separate**) |
-| chart `spec.chart.spec.version` | 9.3.0 | **9.4.0** | `helmrelease.yaml` line 11 (**Commit B, same commit as the image**) |
-| enabled appstore apps with a 34-compatible patch pending (`mail` 5.12.2->5.12.3, `calendar` 6.6.1->6.6.2, `contacts` 8.9.0->8.9.1, `google_synchronization` 4.3.1->4.3.2, `richdocuments` 11.1.1->11.1.2) | — | taken on **34.0.4** first | §3.2b pre-drain (`occ app:update --all`), so Mail's move is gated on its own |
-| mariadb (`bitnamilegacy/mariadb:latest`), `xperimental/nextcloud-exporter:0.9.1`, bundled subcharts | — | **unchanged** | identical in both chart tarballs; mariadb subchart not enabled here |
+| chart `spec.chart.spec.version` | 9.3.0 | **9.4.1** | `helmrelease.yaml` line 11 (**Commit B, same commit as the image**) |
+| enabled appstore apps with a 34-compatible release pending (re-measured 2026-10-21: `mail` 5.12.2->**5.12.5**, `calendar` 6.6.1->6.6.2, `contacts` 8.9.0->8.9.1, `google_synchronization` 4.3.1->4.3.2, `richdocuments` 11.1.1->11.1.2, `spreed` 24.0.5->24.0.6, `files_automatedtagging` 5.0.0->5.0.1, `context_chat` 5.4.0->5.5.0, `guests` 4.10.0->4.10.1, `notify_push` 1.4.1->1.4.2, `whiteboard` 2.0.0->2.1.0; plus disabled `agenda_bot` 1.7.0->1.7.1) | — | taken on **34.0.4** first | §3.2b pre-drain (`occ app:update --all`), so Mail's move is gated on its own |
+| mariadb (`bitnamilegacy/mariadb:latest`), `xperimental/nextcloud-exporter:0.9.1`, bundled subcharts | — | **unchanged** | identical in both chart tarballs; mariadb subchart not enabled here. The exporter 0.9.2 bump is the separate follow-on `nextcloud-9.4.1` (§6) |
 
 Why held: the `*nextcloud*` deny rule — *"chart+image must bump together and run
 occ migrations (Mail custom_app / stuck-maintenance trap) — operator-supervised
 only"* — and it is a MAJOR (coverage returns PLAN for any major).
 
-### 1.2 The chart moves 9.3.0 -> 9.4.0 in the same commit — measured metadata-only
+**Refresh 2026-10-21 (what changed vs the 2026-10-05 text).** Chart **9.4.1**
+(appVersion **35.0.2**, created upstream 2026-10-20/21) superseded 9.4.0 and the
+official image `nextcloud:35.0.2` is published (Docker Hub `tag_last_pushed`
+2026-10-21T07:51Z — i.e. HOURS old on the day of this refresh; see the cooling note in
+§1.2). `run-now.py preflight` refused the 9.4.0/35.0.1 draft on premise
+`newest-published-chart-is-still-9.4.0`. Per the operator rule (memory
+`feedback_nextcloud_app_updates_policy`: chart+image to the NEWEST in lockstep) the
+plan is retargeted IN PLACE (plan_id kept: nothing validates `plan_id` against
+`target:`, and the finding joins, window stamps and go/no-go issue key on it). Not
+re-planned from scratch: the live instance is unchanged since 2026-10-05
+(34.0.4, chart 9.3.0, 68 enabled / 9 disabled apps, HelmRelease Ready) so the major's
+mechanics, risk class and §2-§5 procedure stand; what moved is the version pair, the
+app-store map (§1.4: more 34-line patches to pre-drain, `context_chat` now has a stable 35 release)
+and the GO status (§1.7).
 
-Re-measured 2026-10-05 against `https://nextcloud.github.io/helm/index.yaml`:
-newest chart **9.4.0, appVersion 35.0.1** (created 2026-09-30T07:11Z); 9.3.0 is
-appVersion 34.0.4. Newest image tag on Docker Hub in the 35 line is **35.0.1**
-(no 35.0.2), amd64 digest unchanged since 2026-09-28
-(`sha256:fc04168b172e09d9b9bc7665476a77898634fe2833f0a320366fb9eb0db491db`).
-So 9.4.0 + 35.0.1 is the NEWEST lockstep pair, exactly the operator rule.
+### 1.2 The chart moves 9.3.0 -> 9.4.1 in the same commit — measured metadata-only
 
-- **Chart source diff** — `diff -ru` of the two release tarballs
-  (`github.com/nextcloud/helm/releases/download/nextcloud-9.{3,4}.0/nextcloud-9.{3,4}.0.tgz`)
-  is exactly `Chart.yaml` `appVersion: 34.0.4 -> 35.0.1` and `version: 9.3.0 -> 9.4.0`.
-  No template, `values.yaml` or values-schema change; subchart pins identical.
+Re-measured 2026-10-21 (helm repo index + Docker Hub): newest chart **9.4.1,
+appVersion 35.0.2**; 9.4.0 is appVersion 35.0.1; 9.3.0 is appVersion 34.0.4. Newest
+image tag in the 35 line is **35.0.2** (amd64 digest
+`sha256:74165e7aef7e764b36302a5e7231e22e2208b8d3d0674814fbf5d9e18a625335`, pushed
+2026-10-21T07:51Z); no 35.0.3 and no 36.x tag exists. So 9.4.1 + 35.0.2 is the NEWEST
+lockstep pair, exactly the operator rule. (35.0.1 was last rebuilt 2026-10-10; the
+digest recorded in the 2026-10-05 text, `fc04168b...`, is stale and no longer used.)
+
+- **9.4.1 vs 9.4.0 (the delta that failed the premise)** — `diff -r` of the two chart
+  tarballs (`helm pull nextcloud --version 9.4.0|9.4.1`, 2026-10-21): the `nextcloud/`
+  tree differs ONLY in `Chart.yaml` `appVersion: 35.0.1 -> 35.0.2` and
+  `version: 9.4.0 -> 9.4.1`. No template, `values.yaml` or schema change. (The bundled
+  `coredns` subtree is a different chart pulled by the other plans; ignore it.)
+- **Chart source diff 9.3.0 -> 9.4.1** — the same: `diff -rq` of
+  `nextcloud-9.{3.0,4.1}` prints exactly one line, `Chart.yaml differ`. Subchart pins identical.
 - **Rendered diff with OUR values** (`helm template` of `spec.values` from git HEAD,
-  2026-10-05): current values on 9.3.0 vs current values on 9.4.0 = **14 lines,
-  all metadata labels** (`helm.sh/chart`, `app.kubernetes.io/version`) on 7
-  objects: ConfigMap `nextcloud-config`, ConfigMap `nextcloud-phpconfig`, Service
-  `nextcloud`, Service `nextcloud-metrics`, Deployment `nextcloud`, Deployment
-  `nextcloud-metrics`, CronJob `nextcloud-cron`. Pod templates use
-  `nextcloud.selectorLabels` only, which carry neither label — **the chart leg
-  alone rolls nothing**. `.Chart.AppVersion` reaches the image only when
-  `image.tag` is empty (`_helpers.tpl` `nextcloud.image`); ours is pinned.
-- **The full Commit B render** (9.3.0 + current values vs 9.4.0 + Commit-B
-  values, dry-run on scratch copies 2026-10-05) differs in exactly: the 14 label
-  lines, 4 image lines (`docker.io/nextcloud:34.0.4 -> 35.0.1` on the main
-  container and the cron template, `nextcloud:34.0.4 -> 35.0.1` on the worker,
-  plus the notify-push manifest outside the chart) and `failureThreshold 10 -> 50`.
+  2026-10-21): current values on 9.3.0 vs current values on 9.4.1 = both renders
+  **1446 lines**, **14 added lines, all metadata labels** (`helm.sh/chart`,
+  `app.kubernetes.io/version`) on 7 objects: ConfigMap `nextcloud-config`, ConfigMap
+  `nextcloud-phpconfig`, Service `nextcloud`, Service `nextcloud-metrics`, Deployment
+  `nextcloud`, Deployment `nextcloud-metrics`, CronJob `nextcloud-cron`; non-label diff
+  lines = **0**. Pod templates use `nextcloud.selectorLabels` only (no version label) —
+  **the chart leg alone rolls nothing**. `.Chart.AppVersion` reaches the image only when
+  `image.tag` is empty; ours is pinned.
+- **The full Commit B render** (9.3.0 + current values vs 9.4.1 + values with the two
+  image tags set to 35.0.2, scratch copies, 2026-10-21) differs in exactly: the 14 label
+  lines and 3 image-pair lines (`docker.io/nextcloud:34.0.4 -> 35.0.2` on the main
+  container and the cron template, `nextcloud:34.0.4 -> 35.0.2` on the worker), plus
+  the notify-push manifest outside the chart and (§3.3) `failureThreshold 10 -> 50`.
   Nothing else. §2.0(e) re-measures this on the day.
-- **Consequence:** one helm upgrade, one pod roll (the one the image already
-  causes). The chart adds no migration, no probe, no new object, no removed
-  object. `helm history` APP VERSION will read 35.0.1 matching what runs (the
-  image-only shape would have left it reading 34.0.4).
+- **Consequence:** one helm upgrade, one pod roll (the one the image already causes).
+  `helm history` APP VERSION will read 35.0.2 matching what runs.
+- **Cooling note (honest risk):** 35.0.2 and Mail 5.12.5 are both < 2 days old at
+  refresh time. The standing rule is "always newest", and nothing in the diff is a
+  config/schema change, so this plan takes it; the cost of the freshness is that the
+  window can only learn of a bad 35.0.2 by running it. §2.0(a) therefore re-checks
+  the tag/digest on the day and §5.3 is the dump+snapshot path back. If the operator
+  prefers to let 35.0.2 age, the fallback is the same plan at 9.4.0/35.0.1 — but
+  that pair is no longer the newest and needs an explicit operator decision.
 
 The former premise `newest-published-chart-still-carries-a-34-appversion` (FAILED
-2026-09-30 — the trigger for this re-plan) is replaced by
-`lockstep-chart-9.4.0-carries-appversion-35.0.1` and
-`newest-published-chart-is-still-9.4.0` (the latter fails, correctly, the day a
-newer chart ships — refresh again, never run a stale pair).
+2026-09-30) was replaced on 2026-10-05 by `lockstep-chart-9.4.0-...` and
+`newest-published-chart-is-still-9.4.0`; the latter FAILED on 2026-10-21 (this refresh).
+Current names: `lockstep-chart-9.4.1-carries-appversion-35.0.2` and
+`newest-published-chart-is-still-9.4.1` (fails, correctly, the day a newer chart ships
+— refresh again, never run a stale pair).
 
 ### 1.3 Upstream evidence — Nextcloud 35 upgrade requirements
 
-`docs.nextcloud.com/.../release_notes/upgrade_to_35.html`, verbatim:
+`docs.nextcloud.com/.../release_notes/upgrade_to_35.html`, verbatim (unchanged by the
+35.0.2 patch release; re-read 2026-10-21 against the v35.0.2 tag):
 
-- *"PHP 8.2 is no longer supported."* — image 35.0.1 ships **PHP 8.5.11**
-  (`PHP_VERSION` in the image config, amd64 digest
-  `sha256:fc04168b172e09d9b9bc7665476a77898634fe2833f0a320366fb9eb0db491db`);
-  live pod already runs 8.5.11. **No PHP change.** Base `php:8.5-apache-trixie`.
+- *"PHP 8.2 is no longer supported."* — image 35.0.2 is built from
+  `php:8.5-apache-trixie` (`35/apache/Dockerfile`, `NEXTCLOUD_VERSION 35.0.2`);
+  live pod already runs PHP 8.5.x. **No PHP change.**
 - *"MariaDB 10.6 is out of support ... The minimum supported version of MariaDB
-  is now 10.11 LTS."* — live `nextcloud-mariadb-0` reports **11.8.2-MariaDB**.
+  is now 10.11 LTS."* — live `nextcloud-mariadb-0` reports **11.8.2-MariaDB**
+  (measured 2026-10-05; the StatefulSet is unchanged since — Running 24d).
   **Satisfied; no DB engine change.**
 - MySQL 9 MD5 note — not applicable (MariaDB).
-- Upgrade path: `entrypoint.sh` lines 189-195 (identical in the 34 and 35 image
-  dirs of `nextcloud/docker`) refuse to skip a major; 34.0.4 is the newest 34
-  patch, so 34 -> 35 is the one supported hop.
-- `config.sample.php` v34.0.4 vs v35.0.1: the only removed key is
-  `systemtags.managerFactory`, which we do not set. Every key in our
-  `custom.config.php` survives.
+- Upgrade path: `entrypoint.sh` lines 189-195 refuse to skip a major; 34.0.4 is
+  the live patch, so 34 -> 35 is the one supported hop (35.0.2 reports
+  `$OC_Version = [35, 0, 2, 2]`).
+- `config.sample.php` 34 vs 35: the only removed key is `systemtags.managerFactory`,
+  which we do not set (measured 2026-10-05 on 35.0.1; 35.0.2 is a patch release).
 - The worker sidecar loops `occ background-job:worker
   "OC\TaskProcessing\SynchronousBackgroundJob"`: both
   `lib/private/TaskProcessing/SynchronousBackgroundJob.php` and
-  `core/Command/Background/JobWorker.php` exist at v35.0.1 (HTTP 200).
+  `core/Command/Background/JobWorker.php` existed at v35.0.1 (2026-10-05). §2.0(a)'s
+  note owes a re-check on the 35.0.2 tag (HTTP 200 on both raw paths) — patch release,
+  low expectation, but the worker is OUR custom loop.
+- Release notes: the Nextcloud server repo CHANGELOG points to
+  `nextcloud.com/changelog`; GitHub release-notes API was rate-limited from this host on
+  2026-10-21, so the 35.0.1 -> 35.0.2 per-fix list was NOT read. Not a stop (patch
+  release, no migration step is documented for patch levels), but the executor should
+  skim `https://nextcloud.com/changelog/` for 35.0.2 during §2 and STOP on any
+  "manual step"/"requires" wording.
 
 ### 1.4 Why a MAJOR is dangerous HERE — the app-compatibility map (the real risk)
 
-`OC\Updater::doUpgrade()` at v35.0.1 (`lib/private/Updater.php` 253-265):
+`OC\Updater::doUpgrade()` at v35.0.x (`lib/private/Updater.php` 253-265):
 
 ```php
 $this->checkAppsRequirements();      // 373-377: incompatible non-shipped app -> disableApp($app, true)
@@ -385,50 +430,68 @@ So every enabled app whose installed `info.xml` says `max-version < 35` is
 **auto-disabled**, then — if the appstore has a 35-compatible release — **downloaded,
 migrated and re-enabled INSIDE `occ upgrade`**, i.e. inside the startup probe's
 window. Live `info.xml` (all 21 dirs under `custom_apps/`) + `occ app:list` (68
-enabled / 9 disabled) + appstore `platform/35.0.1` and `platform/34.0.4`,
-**re-measured 2026-10-05**:
+enabled / 9 disabled; structure unchanged since 2026-10-05) + appstore
+`platform/35.0.2` and `platform/34.0.4`, **re-measured 2026-10-21**:
 
-| App (enabled unless noted) | Installed / declared max | 34 patch pending (§3.2b) | 35.0.1 newest stable | Outcome in `occ upgrade` |
+| App (enabled unless noted) | Installed / declared max | 34-line release pending (§3.2b) | 35.0.2 newest stable | Outcome in `occ upgrade` |
 |---|---|---|---|---|
-| `spreed` (Talk) | 24.0.5 / 34 | — | **25.0.5** (major, ~203 MB dir) | auto-disable -> download -> re-enable |
+| `spreed` (Talk) | 24.0.5 / 34 | 24.0.6 | **25.0.6** (major, ~203 MB dir) | auto-disable -> download -> re-enable (24.0.6 is moot: replaced by 25.x) |
 | `richdocuments` (Office) | 11.1.1 / 34 | 11.1.2 | **12.0.1** (major) | same |
 | `assistant` | 3.5.0 / 34 | — | **4.0.0** (major) | same |
 | `integration_openai` | 4.5.2 / 34 | — | **5.0.0** (major) | same |
-| `files_automatedtagging` | 5.0.0 / 34 | — | **6.0.0** (major) | same |
-| `context_chat` | 5.4.0 / 34 | — | **none** (no stable 35 release) | **auto-disabled and STAYS disabled** |
+| `files_automatedtagging` | 5.0.0 / 34 | 5.0.1 | **6.0.1** (major) | same |
+| `context_chat` | 5.4.0 / 34 | 5.5.0 | **5.5.0** (stable 35 release now EXISTS; measured 2026-10-21, was NONE on 2026-10-05) | pre-drained on 34 (5.5.0 declares a range covering 34 and 35); stays enabled — if 5.5.0 does not apply on 34 it is auto-disabled and re-downloaded in `occ upgrade` (both PASS in §4 gate 3) |
 | `openclaw_mail` (OURS, ConfigMap) | 0.1.0 / **34** | — | not in appstore | would be **disabled** -> OpenClaw's draft-with-attachments route dies; worker's `app:enable` then fails every boot. **Fixed by Commit A.** |
-| `mail` | 5.12.2 / 35 | **5.12.3** | 5.12.3 | compatible; patch taken on 34 in §3.2b, then **unchanged** through `occ upgrade` |
+| `mail` | 5.12.2 / 35 | **5.12.5** | 5.12.5 | compatible; taken on 34 in §3.2b (three patches in one hop: 5.12.3, .4, .5), then **unchanged** through `occ upgrade` |
 | `calendar` | 6.6.1 / 35 | 6.6.2 | 6.6.2 | patch on 34, then unchanged |
 | `contacts` | 8.9.0 / 36 | 8.9.1 | 8.9.1 | patch on 34, then unchanged |
 | `google_synchronization` | 4.3.1 / 35 | 4.3.2 | 4.3.2 | patch on 34, then unchanged (check by NAME afterwards — the app that has been silently re-disabled before) |
-| `drawio` 4.3.9, `guests` 4.10.0, `integration_{overleaf 2.0.2,paperless 1.0.14,watsonx 1.3.0}`, `notify_push` 1.4.1, `richdocumentscode` 26.4.402, `whiteboard` 2.0.0 | max 35/36 | — | same | unchanged |
+| `guests` | 4.10.0 / 36 | 4.10.1 | 4.10.1 | patch on 34, then unchanged |
+| `notify_push` | 1.4.1 / 35 | 1.4.2 | 1.4.2 | patch on 34 (rewrites `custom_apps/notify_push/bin/...` which the notify-push Deployment execs — see the notify-push note below) |
+| `whiteboard` | 2.0.0 / 35 | 2.1.0 | 2.1.0 | patch on 34; app 2.1.0 pairs best with server v2.1.0 (plan `nextcloud-whiteboard-2.1.0`, §6) |
+| `drawio` 4.3.9, `integration_{overleaf 2.0.2,paperless 1.0.14,watsonx 1.3.0}`, `richdocumentscode` 26.4.402 | max 35 | — | same | unchanged |
 | `agenda_bot` (disabled) 1.7.0 / 34, `files_3dmodelviewer` (disabled) 0.0.18 / 35 | — | agenda_bot 1.7.1 | 1.7.1 / 0.0.18 | stay disabled (harmless in the update list) |
 
 Shipped (core) apps move with the image and are not listed. All 9 disabled apps
 (`admin_audit agenda_bot encryption files_3dmodelviewer files_external photos
 suspicious_login twofactor_nextcloud_notification user_ldap`) stay disabled.
 
-**Why §3.2b exists (new on re-plan).** `Updater::upgradeAppStoreApps()` at
-v35.0.1 (`lib/private/Updater.php` 397-411) calls
-`installer->isUpdateAvailable($app)` for EVERY enabled app and updates it if
-anything newer is compatible. Since 2026-09-28 `mail` 5.12.3 was published, so
-without a pre-drain the Mail app would ALSO be swapped inside `occ upgrade`,
-inside the probe window, entangled with the core migration — and a Mail
-breakage could not be attributed. Taking the five 34-compatible patches on
-34.0.4 FIRST (operator standing rule: app updates are always take-able) and
-gating Mail right there means `occ upgrade` touches Mail only through the core
-migration, and leaves only the six 35-only majors for the probe window.
+**notify_push note (new 2026-10-21).** The `nextcloud-notify-push` Deployment execs the
+binary shipped inside the notify_push APP (`custom_apps/notify_push/bin/x86_64/notify_push`,
+shared `nextcloud-config` volume). §3.2b therefore swaps the binary on disk under a
+running 1.4.1 process (Linux keeps the old inode, so the live process is unaffected);
+the Deployment is restarted by Commit B anyway (tag bump). Gate: §4 `notify_push:self-test`
+after Commit B must pass; if the 1.4.2 binary is the problem the self-test fails and
+the pod crash-loops with a readable error (rollback: §5.3(c) config snapshot).
 
+**Why §3.2b exists.** `Updater::upgradeAppStoreApps()` (`lib/private/Updater.php`
+397-411) calls `installer->isUpdateAvailable($app)` for EVERY enabled app and updates
+it if anything newer is compatible. Mail 5.12.3-5.12.5 are published, so without a
+pre-drain the Mail app would ALSO be swapped inside `occ upgrade`, inside the probe
+window, entangled with the core migration — and a Mail breakage could not be
+attributed. Taking the 34-compatible releases on 34.0.4 FIRST (operator standing rule:
+app updates are always take-able) and gating Mail right there means `occ upgrade`
+touches Mail only through the core migration, and leaves only the 35-only majors for
+the probe window.
+
+- **Mail 5.12.2 -> 5.12.5 content (upstream `CHANGELOG.md` v5.12.5, read 2026-10-21):**
+  bug fixes only, no migration announced in the changelog — DB query-builder hardening
+  (`bind tag ids as integers`, `expression builder for JOIN conditions`, subqueries for
+  recipient/tag search), `keep attachments when saving drafts to IMAP` (touches the
+  OpenClaw draft-with-attachments route: positive, and the reason the §3.2b/§4 Mail
+  gates exercise a draft), MS OAuth refresh-token rotation (we have no Microsoft
+  account; mailbox set is Gmail/iCloud/IMAP), `filters: require >=1 condition`. 5.12.5
+  was published 2026-10-20 (a day old): the Mail mini-gate is the control.
 - **Mail's code does not move during the major**, which is the good news for the
-  operator's hard gate: after §3.2b the risk to Mail is the core migration and
-  the maintenance flag, not a Mail migration. It is gated twice as a CONTENTS
-  assertion — after the pre-drain (§3.2b, on 34) and after the major (§4 gate 2).
-- **context_chat leaving the enabled set is accepted, not a regression**:
-  `occ app_api:app:list` shows **no ExApps** and `app_api:daemon:list` shows
-  **no daemon** — context_chat has no backend here and is functionally inert.
-  §4 expects `enabled_post == enabled_pre - {context_chat}` (plus context_chat
-  if upstream ships a stable 35 release before the window — then it is updated
-  instead; both are PASS).
+  operator's hard gate: after §3.2b the risk to Mail is the core migration and the
+  maintenance flag, not a Mail migration. It is gated twice as a CONTENTS assertion —
+  after the pre-drain (§3.2b, on 34) and after the major (§4 gate 2).
+- **context_chat**: `occ app_api:app:list` shows **no ExApps** and
+  `app_api:daemon:list` shows **no daemon** — context_chat has no backend here and is
+  functionally inert either way. As of 2026-10-21 it has a stable 35 release (5.5.0), so
+  the 2026-10-05 expectation "leaves the enabled set" is retired; §4 gate 3 accepts
+  both outcomes (still enabled, or in the disabled set with the reason read from
+  `nextcloud.log`).
 - App majors riding along are in-policy (operator standing rule: app updates are
   always take-able).
 
@@ -474,15 +537,20 @@ docker image version (...) and downgrading is not supported."*
 ### 1.7 Does the operator GO carry over? — NO: one-line re-confirm required
 
 The GO in the decision ledger (decided_at 2026-10-02T08:18:48Z, per the
-plan-reviewer's ledger read 2026-10-05) chose the **image-only** shape. What the
-re-plan changes:
+plan-reviewer's ledger read 2026-10-05) chose the **image-only** shape, and the
+2026-10-05 one-line re-confirm asked for the 9.4.0/35.0.1 pair. The 2026-10-18 slot
+passed without execution and the 2026-10-21 refresh moved the target to the 9.4.1/35.0.2
+pair, so **no GO of any earlier shape is valid for this file** (a GO is per target;
+`status` is back to `draft`). What the re-plan (2026-10-05) and the refresh (2026-10-21)
+change:
 
 | Change | Effect | Inside SD-6 (scope-reducing / patch-level)? |
 |---|---|---|
-| chart 9.3.0 -> 9.4.0 in Commit B | 14 metadata-label lines; no pod template, value, object, migration or capability change (§1.2). Rollback §5.3(d) restores 9.3.0 with the image. | No — it ADDS a leg |
-| §3.2b pre-drain of 5 app patches on 34, incl. **Mail 5.12.2 -> 5.12.3** | the same updates `occ upgrade` would apply anyway (Updater.php 397-411), moved earlier so Mail is gated on its own; covered by the §2.3 dump + §2.4 snapshot taken before it | No — it moves the operator's hard-gate app before the major |
+| chart 9.3.0 -> 9.4.1 in Commit B | 14 metadata-label lines; no pod template, value, object, migration or capability change (§1.2). Rollback §5.3(d) restores 9.3.0 with the image. | No — it ADDS a leg |
+| §3.2b pre-drain of the 34-compatible app releases (11 enabled apps as of 2026-10-21), incl. **Mail 5.12.2 -> 5.12.5** | the same updates `occ upgrade` would apply anyway (Updater.php 397-411), moved earlier so Mail is gated on its own; covered by the §2.3 dump + §2.4 snapshot taken before it | No — it moves the operator's hard-gate app before the major |
 | dump-to-Commit-B gap grows ~35-45 min (Commit A + §3.2b + mini-gate) | user writes in that gap are lost on a §5.3 restore (the dump is the floor) | No — widens the data-loss window |
-| app drift since the GO (spreed 25.0.5, richdocuments 12.0.1) | patch-level drift of apps already in the GO'd set | Yes |
+| app drift since the GO (spreed 25.0.6, richdocuments 12.0.1, context_chat now stays enabled, Mail 5.12.5) | patch-level drift of apps already in the GO'd set | Yes |
+| image 35.0.1 -> 35.0.2 and chart 9.4.0 -> 9.4.1 (refresh) | patch-level drift of the same major; chart delta = appVersion only (§1.2) | Yes |
 | est 130 -> 150 min | duration only | Yes |
 
 My planner judgement is that none of this adds a new data- or feature-loss
@@ -492,11 +560,12 @@ over, and a coordinator relay is not consent. **Required:** a one-line operator
 re-confirm, bundled into the window's go/no-go and NOT presented as a new
 data-loss decision:
 
-> "nextcloud: lockstep chart 9.4.0 + image 35.0.1, with an app pre-drain on 34
-> (Mail 5.12.2 -> 5.12.3 first, gated) — still GO?"
+> "nextcloud: lockstep chart 9.4.1 + image 35.0.2, with an app pre-drain on 34
+> (Mail 5.12.2 -> 5.12.5 first, gated) — GO?"
 
 Record the answer with `home-operation decide` against this plan_id at once. No
-§3 step runs before it.
+§3 step runs before it. Because `status` was reset to `draft`, this plan also needs a
+fresh plan-reviewer pass before the go/no-go is raised.
 
 ## 2) Pre-checks
 
@@ -521,9 +590,11 @@ ls /Users/mu/db-dumps/nextcloud-35.0.1-exec/                             # must 
 #     path answered TOOMANYREQUESTS (pull rate limit) on 2026-10-05, which this gate would
 #     have read as "tag missing". Negative control measured: tag 35.0.99 -> HTTP 404 ->
 #     curl -f exits non-zero -> the python prints a JSONDecodeError.
-curl -sf "https://hub.docker.com/v2/repositories/library/nextcloud/tags/35.0.1" \
+curl -sf "https://hub.docker.com/v2/repositories/library/nextcloud/tags/35.0.2" \
   | .venv/bin/python3 -c "import sys,json;d=json.load(sys.stdin);print([i['digest'] for i in d['images'] if i['architecture']=='amd64'])"
-#   EXPECT: ['sha256:fc04168b172e09d9b9bc7665476a77898634fe2833f0a320366fb9eb0db491db'] (re-measured 2026-10-05)
+#   EXPECT: ['sha256:74165e7aef7e764b36302a5e7231e22e2208b8d3d0674814fbf5d9e18a625335'] (measured 2026-10-21; tag pushed 2026-10-21T07:51Z, so a re-push before the window is plausible)
+#   ALSO (owed by §1.3): curl -s -o /dev/null -w '%{http_code}\n' on raw.githubusercontent.com/nextcloud/server/v35.0.2/lib/private/TaskProcessing/SynchronousBackgroundJob.php
+#   and .../core/Command/Background/JobWorker.php => EXPECT 200 and 200 (404 => the worker loop is gone: STOP).
 #   HOW IT FAILS: [] or a JSONDecodeError => tag missing/API failed: STOP. A DIFFERENT digest =>
 #   upstream rebuilt the tag (normal for the official image, e.g. PHP patch): re-check its
 #   PHP_VERSION is still 8.5.x before continuing; not a stop by itself.
@@ -538,7 +609,7 @@ kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -
 
 ```bash
 # (c) the app-compat map in §1.4 still holds (appstore drifts daily)
-curl -s https://apps.nextcloud.com/api/v1/platform/35.0.1/apps.json -o /Users/mu/db-dumps/nextcloud-35.0.1-exec/apps35.json
+curl -s https://apps.nextcloud.com/api/v1/platform/35.0.2/apps.json -o /Users/mu/db-dumps/nextcloud-35.0.1-exec/apps35.json
 .venv/bin/python3 - <<'PY'
 import json
 a = {x['id']: x for x in json.load(open('/Users/mu/db-dumps/nextcloud-35.0.1-exec/apps35.json'))}
@@ -548,13 +619,13 @@ for app in ['spreed','richdocuments','assistant','integration_openai','files_aut
     rs = [r['version'] for r in a.get(app, {}).get('releases', []) if not r['isNightly'] and '-' not in r['version']]
     print(f'{app:24s} {max(rs, key=lambda v: [int(p) for p in v.split(".")]) if rs else "NONE"}')
 PY
-#   EXPECT (2026-10-05): spreed 25.0.5, richdocuments 12.0.1, assistant 4.0.0, integration_openai 5.0.0,
-#   files_automatedtagging 6.0.0, context_chat NONE, mail 5.12.3, calendar 6.6.2, contacts 8.9.1,
-#   google_synchronization 4.3.2, notify_push 1.4.1, whiteboard 2.0.0, richdocumentscode 26.4.402, guests 4.10.0
+#   EXPECT (2026-10-21): spreed 25.0.6, richdocuments 12.0.1, assistant 4.0.0, integration_openai 5.0.0,
+#   files_automatedtagging 6.0.1, context_chat 5.5.0, mail 5.12.5, calendar 6.6.2, contacts 8.9.1,
+#   google_synchronization 4.3.2, notify_push 1.4.2, whiteboard 2.1.0, richdocumentscode 26.4.402, guests 4.10.1
 #   (patch drift on any of these is normal and fine; the gate is NONE vs a version)
 #   HOW IT FAILS: any of the 9 compatible apps printing NONE => it will be auto-disabled with no
 #   replacement: STOP, that is an operator decision. mail NONE => hard STOP (the operator's gate).
-#   context_chat now showing a stable version is FINE (it will be updated instead of disabled).
+#   context_chat NONE is also FINE (it would then be auto-disabled, as in the 2026-10-05 map).
 ```
 
 ```bash
@@ -564,14 +635,16 @@ kubectl exec -n office deploy/nextcloud -c nextcloud -- sh -c 'grep -o "<nextclo
 ```
 
 ```bash
-# (e) CHART RENDER-DIFF GATE — re-measure on the day that 9.3.0 -> 9.4.0 is still
+# (e) CHART RENDER-DIFF GATE — re-measure on the day that 9.3.0 -> 9.4.1 is still
 #     metadata-only against TODAY's values (§1.2). Tarballs from the GitHub release
 #     (helm --repo has failed on this Mac before with "no cached repo found").
 cd /Users/mu/db-dumps/nextcloud-35.0.1-exec && rm -rf c93 c94 && mkdir c93 c94
 curl -sfL https://github.com/nextcloud/helm/releases/download/nextcloud-9.3.0/nextcloud-9.3.0.tgz | tar xz -C c93
-curl -sfL https://github.com/nextcloud/helm/releases/download/nextcloud-9.4.0/nextcloud-9.4.0.tgz | tar xz -C c94
+curl -sfL https://github.com/nextcloud/helm/releases/download/nextcloud-9.4.1/nextcloud-9.4.1.tgz | tar xz -C c94
 grep -E '^(version|appVersion):' c94/nextcloud/Chart.yaml
-#   EXPECT: appVersion: 35.0.1 / version: 9.4.0   (empty => download failed: STOP)
+#   EXPECT: appVersion: 35.0.2 / version: 9.4.1   (empty => download failed: STOP; on 2026-10-21 the chart was
+#   obtained with `helm pull nextcloud --repo https://nextcloud.github.io/helm --version 9.4.1 --untar`,
+#   the GitHub-release URL below was not fetched — if curl 404s use that helm pull form)
 diff -rq c93/nextcloud c94/nextcloud
 #   EXPECT exactly: "Files c93/nextcloud/Chart.yaml and c94/nextcloud/Chart.yaml differ" (one line)
 cd /Users/mu/code/cberg-home-nextgen
@@ -584,12 +657,12 @@ for v in 93 94; do
 done
 wc -l /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-93.yaml /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-94.yaml
 diff /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-93.yaml /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-94.yaml \
-  | grep -E '^[<>]' | grep -vE '^[<>] +(helm\.sh/chart: nextcloud-9\.[34]\.0|app\.kubernetes\.io/version: "(34\.0\.4|35\.0\.1)")$' | wc -l
+  | grep -E '^[<>]' | grep -vE '^[<>] +(helm\.sh/chart: nextcloud-9\.(3\.0|4\.1)|app\.kubernetes\.io/version: "(34\.0\.4|35\.0\.2)")$' | wc -l
 diff /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-93.yaml /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-94.yaml | grep -c '^>'
-#   EXPECT (measured 2026-10-05): both renders 1446 lines (> 1000 is the floor); first count 0;
+#   EXPECT (measured 2026-10-05 for 9.4.0 and re-measured 2026-10-21 for 9.4.1): both renders 1446 lines (> 1000 is the floor); first count 0;
 #   second count 14 (7 objects x 2 labels).
 #   HOW IT FAILS: 0-line render / "RENDER .. FAILED" => the gate measured nothing: STOP.
-#   First count > 0 => 9.4.0 now renders a REAL difference with today's values: STOP, re-plan.
+#   First count > 0 => 9.4.1 now renders a REAL difference with today's values: STOP, re-plan.
 #   Second count 0 => both renders identical (same tarball twice): STOP.
 ```
 
@@ -688,7 +761,7 @@ done > /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-imap-pre.txt 2>&1
 cat /Users/mu/db-dumps/nextcloud-35.0.1-exec/mail-imap-pre.txt
 #   EXPECT: for EVERY account: sync exit=0, test exit=0, and "IMAP connection test passed".
 #   HOW IT FAILS: any account failing HERE is a PRE-EXISTING failure on 34.0.4 — resolve it
-#   or have the operator explicitly accept it BEFORE the GO; never attribute it to 35.0.1.
+#   or have the operator explicitly accept it BEFORE the GO; never attribute it to 35.0.2.
 ```
 
 **2.3 Pre-change DB dump — the restore point for §5.3.**
@@ -759,7 +832,7 @@ into a new volume (disaster-recovery SOP) — a conscious operator choice.
 **2.5 Silence + active-update marker** (application-update SOP; 4 h TTL). One block.
 
 ```bash
-runbooks/update-marker.sh add nextcloud office 4 "34.0.4->35.0.1 major (plan nextcloud-fleet-35.0.1)"
+runbooks/update-marker.sh add nextcloud office 4 "34.0.4->35.0.2 major (plan nextcloud-fleet-35.0.1)"
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 >/dev/null 2>&1 & PF=$!
 sleep 3
 curl -s -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/json' -d '{
@@ -767,7 +840,7 @@ curl -s -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/jso
   "startsAt":"'"$(.venv/bin/python3 -c "from datetime import *;print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")"'",
   "endsAt":"'"$(.venv/bin/python3 -c "from datetime import *;print((datetime.now(timezone.utc)+timedelta(hours=4)).strftime('%Y-%m-%dT%H:%M:%S.000Z'))")"'",
   "createdBy":"maintenance-window-agent",
-  "comment":"nextcloud 34.0.4->35.0.1 major (plan nextcloud-fleet-35.0.1). auto-expires 4h"}' \
+  "comment":"nextcloud 34.0.4->35.0.2 major (plan nextcloud-fleet-35.0.1). auto-expires 4h"}' \
   > /Users/mu/db-dumps/nextcloud-35.0.1-exec/silence.json
 .venv/bin/python3 -c "import json;print('silenceID', json.load(open('/Users/mu/db-dumps/nextcloud-35.0.1-exec/silence.json'))['silenceID'])"
 kill $PF 2>/dev/null
@@ -833,8 +906,9 @@ otherwise swap Mail inside `occ upgrade`).
 
 ```bash
 kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ app:update --showonly"
-#   EXPECT (2026-10-05): agenda_bot 1.7.1, richdocuments 11.1.2, calendar 6.6.2, google_synchronization 4.3.2,
-#   mail 5.12.3, contacts 8.9.1 (patch drift is fine). EMPTY => already drained: skip to the Mail gate.
+#   EXPECT (2026-10-21): agenda_bot 1.7.1, richdocuments 11.1.2, calendar 6.6.2, google_synchronization 4.3.2,
+#   mail 5.12.5, contacts 8.9.1, spreed 24.0.6, files_automatedtagging 5.0.1, context_chat 5.5.0, guests 4.10.1,
+#   notify_push 1.4.2, whiteboard 2.1.0 (patch drift is fine). EMPTY => already drained: skip to the Mail gate.
 kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ app:update --all" \
   > /Users/mu/db-dumps/nextcloud-35.0.1-exec/predrain.txt 2>&1; echo "app:update exit=$?"
 cat /Users/mu/db-dumps/nextcloud-35.0.1-exec/predrain.txt
@@ -852,7 +926,7 @@ assert set(pre['enabled']) == set(post['enabled']), ('ENABLED SET CHANGED on 34'
 for a in ('mail','calendar','contacts','google_synchronization','richdocuments','openclaw_mail'):
     print(a, pre['enabled'].get(a), '->', post['enabled'].get(a))
 PY2
-#   EXPECT: no AssertionError; mail 5.12.2 -> 5.12.3 (or newer 34-compatible), openclaw_mail 0.1.0 -> 0.1.0.
+#   EXPECT: no AssertionError; mail 5.12.2 -> 5.12.5 (or newer 34-compatible), openclaw_mail 0.1.0 -> 0.1.0.
 ```
 
 Then the **Mail mini-gate on 34** — the §2.2b instruments, written to `-predrain-`
@@ -909,9 +983,9 @@ kubectl -n office get jobs --sort-by=.metadata.creationTimestamp \
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 git fetch origin main && git merge --ff-only origin/main
-sed -i '' -E 's|^      version: 9\.3\.0$|      version: 9.4.0|' kubernetes/apps/office/nextcloud/app/helmrelease.yaml
-sed -i '' -E 's|^      tag: 34\.0\.4$|      tag: 35.0.1|' kubernetes/apps/office/nextcloud/app/helmrelease.yaml
-sed -i '' -E 's|^          image: nextcloud:34\.0\.4$|          image: nextcloud:35.0.1|' \
+sed -i '' -E 's|^      version: 9\.3\.0$|      version: 9.4.1|' kubernetes/apps/office/nextcloud/app/helmrelease.yaml
+sed -i '' -E 's|^      tag: 34\.0\.4$|      tag: 35.0.2|' kubernetes/apps/office/nextcloud/app/helmrelease.yaml
+sed -i '' -E 's|^          image: nextcloud:34\.0\.4$|          image: nextcloud:35.0.2|' \
   kubernetes/apps/office/nextcloud/app/helmrelease.yaml kubernetes/apps/office/nextcloud/app/notify-push.yaml
 .venv/bin/python3 - <<'PY'
 p = '/Users/mu/code/cberg-home-nextgen/kubernetes/apps/office/nextcloud/app/helmrelease.yaml'
@@ -937,36 +1011,36 @@ The diff dry-tested on scratch copies of git HEAD (2026-10-05, BSD sed + the
 python block above) is exactly:
 
 ```
-helmrelease.yaml  11c11     version: 9.3.0 -> version: 9.4.0
+helmrelease.yaml  11c11     version: 9.3.0 -> version: 9.4.1
 helmrelease.yaml  25c25,26  retries: 3  ->  retries: 0 # TEMPORARY ... + remediateLastFailure: false
-helmrelease.yaml  34c35     tag: 34.0.4 ->  tag: 35.0.1
-helmrelease.yaml  234c235   image: nextcloud:34.0.4 -> image: nextcloud:35.0.1
+helmrelease.yaml  34c35     tag: 34.0.4 ->  tag: 35.0.2
+helmrelease.yaml  234c235   image: nextcloud:34.0.4 -> image: nextcloud:35.0.2
 helmrelease.yaml  544c545   failureThreshold: 10 -> failureThreshold: 50 # TEMPORARY ...
-notify-push.yaml  40c40     image: nextcloud:34.0.4 -> image: nextcloud:35.0.1
+notify-push.yaml  40c40     image: nextcloud:34.0.4 -> image: nextcloud:35.0.2
 ```
 
 Gates (each bare number stated; the "expect 0" line exits 1 and that IS the pass):
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-grep -c '^      version: 9\.4\.0$'              kubernetes/apps/office/nextcloud/app/helmrelease.yaml   # 1
+grep -c '^      version: 9\.4\.1$'              kubernetes/apps/office/nextcloud/app/helmrelease.yaml   # 1
 grep -c '9\.3\.0'                              kubernetes/apps/office/nextcloud/app/helmrelease.yaml   # 0 (exits 1 = pass)
-grep -c '^      tag: 35\.0\.1$'                 kubernetes/apps/office/nextcloud/app/helmrelease.yaml   # 1
-grep -c '^          image: nextcloud:35\.0\.1$' kubernetes/apps/office/nextcloud/app/helmrelease.yaml   # 1
-grep -c '^          image: nextcloud:35\.0\.1$' kubernetes/apps/office/nextcloud/app/notify-push.yaml   # 1
+grep -c '^      tag: 35\.0\.2$'                 kubernetes/apps/office/nextcloud/app/helmrelease.yaml   # 1
+grep -c '^          image: nextcloud:35\.0\.2$' kubernetes/apps/office/nextcloud/app/helmrelease.yaml   # 1
+grep -c '^          image: nextcloud:35\.0\.2$' kubernetes/apps/office/nextcloud/app/notify-push.yaml   # 1
 grep -c 'failureThreshold: 50 '                kubernetes/apps/office/nextcloud/app/helmrelease.yaml   # 1
 grep -c 'retries: 0 '                          kubernetes/apps/office/nextcloud/app/helmrelease.yaml   # 1
 grep -c '34\.0\.4' kubernetes/apps/office/nextcloud/app/helmrelease.yaml kubernetes/apps/office/nextcloud/app/notify-push.yaml
 #   PASS: two lines each ending ":0"
 kubectl kustomize kubernetes/apps/office/nextcloud/app >/dev/null && echo RENDER-OK
-# The FULL Commit B render, chart 9.4.0 + the edited values, against §2.0(e)'s render-93.yaml:
+# The FULL Commit B render, chart 9.4.1 + the edited values, against §2.0(e)'s render-93.yaml:
 .venv/bin/python3 -c "
 import yaml;d=yaml.safe_load(open('kubernetes/apps/office/nextcloud/app/helmrelease.yaml'))
 yaml.safe_dump(d['spec']['values'],open('/Users/mu/db-dumps/nextcloud-35.0.1-exec/values-b.yaml','w'))"
 helm template nextcloud /Users/mu/db-dumps/nextcloud-35.0.1-exec/c94/nextcloud -n office \
   -f /Users/mu/db-dumps/nextcloud-35.0.1-exec/values-b.yaml > /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-94-b.yaml || echo "RENDER B FAILED"
 diff /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-93.yaml /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-94-b.yaml | grep -E '^[<>]' \
-  | grep -vE '^[<>] +(helm\.sh/chart: nextcloud-9\.[34]\.0|app\.kubernetes\.io/version: "(34\.0\.4|35\.0\.1)"|(image: (docker\.io/)?nextcloud:(34\.0\.4|35\.0\.1))|failureThreshold: (10|50))$' | wc -l
+  | grep -vE '^[<>] +(helm\.sh/chart: nextcloud-9\.(3\.0|4\.1)|app\.kubernetes\.io/version: "(34\.0\.4|35\.0\.2)"|(image: (docker\.io/)?nextcloud:(34\.0\.4|35\.0\.2))|failureThreshold: (10|50))$' | wc -l
 diff /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-93.yaml /Users/mu/db-dumps/nextcloud-35.0.1-exec/render-94-b.yaml | grep -c '^>'
 #   PASS (dry-run 2026-10-05): first count 0; second count 18 (14 labels + 3 image lines + 1 probe line).
 #   HOW IT FAILS: first count > 0 => Commit B renders something the plan did not plan: STOP, git checkout the two files.
@@ -978,8 +1052,8 @@ kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c '
   done' 2>/dev/null > /Users/mu/db-dumps/nextcloud-35.0.1-exec/rows-preB.txt
 cat /Users/mu/db-dumps/nextcloud-35.0.1-exec/rows-preB.txt        # EXPECT 11 lines, every count > 0; empty/0 => exec failed: re-run before committing
 printf '%s\n\n%s\n\n%s\n\nCo-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>\n' \
-  "feat(nextcloud): 34.0.4 -> 35.0.1 (major) + chart 9.3.0 -> 9.4.0 lockstep + notify-push (plan nextcloud-fleet-35.0.1)" \
-  "Chart 9.4.0 differs from 9.3.0 only in Chart.yaml appVersion 34.0.4 -> 35.0.1 (rendered: metadata labels only). TEMPORARY for this rollout: upgrade.remediation.retries 0 and startupProbe.failureThreshold 50 (26 min budget for occ upgrade + 5 app-major downloads); both restored in the follow-up commit." \
+  "feat(nextcloud): 34.0.4 -> 35.0.2 (major) + chart 9.3.0 -> 9.4.1 lockstep + notify-push (plan nextcloud-fleet-35.0.1)" \
+  "Chart 9.4.1 differs from 9.3.0 only in Chart.yaml appVersion 34.0.4 -> 35.0.2 (rendered: metadata labels only). TEMPORARY for this rollout: upgrade.remediation.retries 0 and startupProbe.failureThreshold 50 (26 min budget for occ upgrade + 5 app-major downloads); both restored in the follow-up commit." \
   "finding_refs: F-7344f3ec F-7bcfda63 F-38fecaa8 F-c5e87023" \
   > /Users/mu/db-dumps/nextcloud-35.0.1-exec/msg-b.txt
 git commit --only kubernetes/apps/office/nextcloud/app/helmrelease.yaml kubernetes/apps/office/nextcloud/app/notify-push.yaml \
@@ -1005,15 +1079,15 @@ kubectl -n office logs "$POD" -c nextcloud --timestamps --tail=60
 Re-issue every ~60 s (bounded reads; no `-f`, no `-w`). Expected shape:
 
 ```
-Initializing nextcloud 35.0.1.x ...
+Initializing nextcloud 35.0.2.x ...
 Upgrading nextcloud from 34.0.4.1 ...
 Initializing finished                       <- rsync done (budget ~5-8 min on this RWX volume)
 Turned on maintenance mode / Updating database schema / Updated database
 Disabled incompatible app: spreed | richdocuments | assistant | integration_openai |
-  files_automatedtagging | context_chat      <- EXPECTED (§1.4). openclaw_mail must NOT appear.
+  files_automatedtagging [| context_chat]      <- EXPECTED (§1.4; context_chat only if its 5.5.0 pre-drain did not take). openclaw_mail must NOT appear.
 Checking for update of app ... / Update app <x> from App Store  <- the 5 majors download here
 Update successful / Turned off maintenance mode
-The following apps have been disabled:       <- entrypoint's own diff; EXPECT exactly: context_chat
+The following apps have been disabled:       <- entrypoint's own diff; EXPECT empty, or exactly: context_chat
 ```
 
 HOW IT FAILS: `openclaw_mail` in a "disabled" line => Commit A did not reach the
@@ -1049,7 +1123,7 @@ PY
 grep -c 'TEMPORARY (plan nextcloud-fleet-35.0.1' kubernetes/apps/office/nextcloud/app/helmrelease.yaml   # EXPECT 0 (exits 1)
 git diff -- kubernetes/apps/office/nextcloud/app/helmrelease.yaml | grep -c '^[-+] '                     # EXPECT 5 (3 removed + 2 added)
 printf '%s\n\nCo-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>\n' \
-  "chore(nextcloud): restore remediation retries 3 + startupProbe 10 after the 35.0.1 rollout (plan nextcloud-fleet-35.0.1 §3.6)" \
+  "chore(nextcloud): restore remediation retries 3 + startupProbe 10 after the 35.0.2 rollout (plan nextcloud-fleet-35.0.1 §3.6)" \
   > /Users/mu/db-dumps/nextcloud-35.0.1-exec/msg-c.txt
 git commit --only kubernetes/apps/office/nextcloud/app/helmrelease.yaml -F /Users/mu/db-dumps/nextcloud-35.0.1-exec/msg-c.txt
 git show --stat HEAD && git log -1 --format=%s && git push origin main
@@ -1083,23 +1157,23 @@ Floor (shape — necessary, not sufficient):
 
 ```bash
 kubectl get helmrelease -n office nextcloud -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.history[0].chartVersion}{"\n"}'
-#   EXPECT: True 9.4.0
+#   EXPECT: True 9.4.1
 helm history nextcloud -n office --max 1
-#   EXPECT: deployed  nextcloud-9.4.0  35.0.1   (pre: nextcloud-9.3.0 34.0.4 — §2.3b)
+#   EXPECT: deployed  nextcloud-9.4.1  35.0.2   (pre: nextcloud-9.3.0 34.0.4 — §2.3b)
 kubectl get deploy -n office nextcloud -o jsonpath='{.metadata.labels.helm\.sh/chart} {.metadata.labels.app\.kubernetes\.io/version}{"\n"}'
-#   CONTENTS ASSERTION (chart leg): "nextcloud-9.4.0 35.0.1". FAIL shape "nextcloud-9.3.0 34.0.4"
+#   CONTENTS ASSERTION (chart leg): "nextcloud-9.4.1 35.0.2". FAIL shape "nextcloud-9.3.0 34.0.4"
 #   (measured live 2026-10-05, so the gate demonstrably reads the label) => chart leg not applied.
 kubectl -n office get pod -l app.kubernetes.io/name=nextcloud,app.kubernetes.io/component=app \
   -o jsonpath='{range .items[0].status.containerStatuses[*]}{.name}{" "}{.imageID}{" restarts="}{.restartCount}{"\n"}{end}'
-#   EXPECT: nextcloud + worker on a nextcloud@sha256 digest of 35.0.1 (compare with §2.0(a) or the index).
+#   EXPECT: nextcloud + worker on a nextcloud@sha256 digest of 35.0.2 (compare with §2.0(a) or the index).
 #   HOW IT FAILS: a 34.0.4 digest (sha256:20298c35... index) => the pod never rolled.
-kubectl -n office get pod -l app=nextcloud-notify-push -o jsonpath='{.items[0].status.containerStatuses[0].image}{"\n"}'   # nextcloud:35.0.1
+kubectl -n office get pod -l app=nextcloud-notify-push -o jsonpath='{.items[0].status.containerStatuses[0].image}{"\n"}'   # nextcloud:35.0.2
 kubectl -n office get cronjob nextcloud-cron -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}{" suspend="}{.spec.suspend}{"\n"}'
-#   EXPECT: docker.io/nextcloud:35.0.1 suspend=false
+#   EXPECT: docker.io/nextcloud:35.0.2 suspend=false
 kubectl -n office get jobs --sort-by=.metadata.creationTimestamp | grep nextcloud-cron | tail -2
 #   EXPECT: newest Job that STARTED after the rollout is Complete 1/1 (the 2026-06-06 failure = cron pods Error)
 kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ status --output=json"
-#   EXPECT: "versionstring":"35.0.1" "maintenance":false "needsDbUpgrade":false
+#   EXPECT: "versionstring":"35.0.2" "maintenance":false "needsDbUpgrade":false
 ```
 
 **1. CONTENTS ASSERTION: the database still holds the data** — same loop as
@@ -1130,7 +1204,7 @@ emptied table — `occ status` would never see it.
 kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ list mail" \
   | grep -cE '^ +mail:(mailbox:list|account:test|account:sync) '                        # EXPECT 3
 kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ app:list --output=json" \
-  | .venv/bin/python3 -c "import sys,json;print('mail', json.load(sys.stdin)['enabled'].get('mail'))"   # EXPECT the version §3.2b left (5.12.3 on 2026-10-05) — UNCHANGED by the major
+  | .venv/bin/python3 -c "import sys,json;print('mail', json.load(sys.stdin)['enabled'].get('mail'))"   # EXPECT the version §3.2b left (5.12.5 on 2026-10-21) — UNCHANGED by the major
 # (b) mailbox count per account, DB and occ, against the pre baseline
 kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c \
   'mariadb -uroot -p"$(cat $MARIADB_ROOT_PASSWORD_FILE)" -N -B nextcloud -e "select account_id, count(*) from oc_mail_mailboxes group by account_id order by account_id"' \
@@ -1198,8 +1272,8 @@ PY
 kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php occ app:update --showonly"
 ```
 
-PASS: `OK enabled 67 (pre 68) lost: ['context_chat']` (or 68 / `[]` if a stable
-context_chat 35 release shipped). HOW IT FAILS: any other lost app, or an app
+PASS: `OK enabled 68 (pre 68) lost: []` (context_chat 5.5.0 has a stable 35 release as of
+2026-10-21; `67 ... ['context_chat']` is also PASS and means it was auto-disabled instead). HOW IT FAILS: any other lost app, or an app
 still on its 34-line version (its download failed and it was re-enabled on old
 code — or not re-enabled). `openclaw_mail` missing => the draft route is down
 even though Nextcloud looks healthy; §5.1 step 4. Re-force-enable nothing
@@ -1219,11 +1293,11 @@ kill $PF 2>/dev/null
 ```
 
 CONTROL: metric nextcloud_up — must be `1` on the `nextcloud-metrics` job (measured present 2026-09-28, value 1).
-CONTROL: metric nextcloud_system_info — the `version` label must read `35.0.1.x`, value 1 (was `34.0.4.1`).
+CONTROL: metric nextcloud_system_info — the `version` label must read `35.0.2.x`, value 1 (was `34.0.4.1`).
 CONTROL: metric nextcloud_users_total — must equal `oc_users` in `rows-post.txt`.
 CONTROL: alertname LonghornBackupFailed — must be NOT firing for `nextcloud-config`/`nextcloud-mariadb` before §3.2 (the durable floor exists).
 
-PASS: `nextcloud_up` 1, `system_info` version `35.0.1.*`, users equal.
+PASS: `nextcloud_up` 1, `system_info` version `35.0.2.*`, users equal.
 The deliberately-wrong query (`job="does-not-exist"`) MUST print `[]` — that is
 the negative control proving an empty result is what "absent" looks like; if it
 prints data the query path is broken. HOW IT FAILS: version still `34.0.4.*`
@@ -1240,13 +1314,13 @@ kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -
 PASS: all lines green incl. *"push server is receiving redis messages"* and
 *"push server is running the same version as the app"* — a real write through
 redis to the rebuilt container. HOW IT FAILS: the version line red => notify-push
-did not roll onto 35.0.1.
+did not roll onto 35.0.2.
 
 **6. External path + logs.**
 
 ```bash
 curl -s "https://drive.<SECRET_DOMAIN>/status.php"     # substitute the real host by hand — not in this repo
-#   EXPECT: "maintenance":false,"versionstring":"35.0.1"
+#   EXPECT: "maintenance":false,"versionstring":"35.0.2"
 kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "tail -2000 /var/www/html/data/nextcloud.log" \
   | grep -ciE '"level":[34]'
 kubectl exec -n office deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "tail -2000 /var/www/html/data/nextcloud.log" \
@@ -1407,10 +1481,9 @@ forward or run §5.3.
 
 ## 6) Interference notes
 
-- **Slot:** `sun-attended` only (150 min against a schedulable budget of 180;
+- **Slot:** `sun-attended` only (160 min against a schedulable budget of 180;
   operator present for §3.4 and the browser checks). Never `nightly`/`sat-attended`
-  (90 min). Nothing else over ~30 min fits beside it on 2026-10-18; it is the only
-  plan in that slot today.
+  (90 min). Nothing else over ~20 min fits beside it; give it a Sunday slot of its own.
 - **Office-wide silence (§2.5)**: no other `office` plan in the same slot. The
   declared conflicts: `bitnamilegacy-exit-nextcloud-db`
   (same helmrelease.yaml / same DB), `nextcloud-mcp-0.198.0` (consumer),
@@ -1444,10 +1517,20 @@ forward or run §5.3.
 - **Three pod rolls**, not one: Commit A (reloader), Commit B (the upgrade + the
   chart), §3.6 (probe restore). Only Commit B migrates; the chart adds no roll of
   its own. §3.2b app updates do NOT roll the pod.
-- **Chart lockstep drift:** the moment a chart newer than 9.4.0 is published
-  (premise `newest-published-chart-is-still-9.4.0`), this plan must be refreshed
+- **Chart lockstep drift:** the moment a chart newer than 9.4.1 is published
+  (premise `newest-published-chart-is-still-9.4.1`), this plan must be refreshed
   in place again (keep the `plan_id`) to the newest chart+image pair — per
-  operator rule. Same if Docker Hub ships 35.0.2 with no chart: re-plan, do not
-  run a pair that is no longer the newest without an explicit decision.
+  operator rule. Same if Docker Hub ships a newer 35.x image tag with no chart yet: re-plan,
+  do not run a pair that is no longer the newest without an explicit decision.
+- **Sibling plans for this component (decided 2026-10-21, one plan per target):**
+  this file OWNS the chart 9.4.1 + image 35.0.2 target. `nextcloud-9.4.1` (draft) keeps
+  only the exporter 0.9.1 -> 0.9.2 leg and the chart close-out, `depends_on` this plan, and
+  its premises `live-chart-is-9.4.1` / `live-server-image-is-35.0.2` already match this pair
+  — it needs no edit. `nextcloud-fleet-34.0.5` stays the unwindowed `reference`
+  contingency (operator NO-GO on 35 only); it is mutually exclusive with this plan.
+  `nextcloud-9.4.0` stays `superseded`. `nextcloud-whiteboard-2.1.0` (server v2.1.0): run it
+  BEFORE this plan if possible so the whiteboard app 2.1.0 pulled in §3.2b finds its server;
+  the 2.1.0 server keeps the 2.0.0 protocol, so the reverse order is a degraded-save-hand-over
+  gap, not an outage — record it in the window report.
 - **Storage safety:** no PVC/PV delete, patch or recreate anywhere; the CIFS
   data PVC is untouched even in §5.3.
