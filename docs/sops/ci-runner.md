@@ -1,7 +1,7 @@
 # SOP: CI Runner — The Ninth Banner test suites as sharded Kubernetes Jobs
 
 > Description: How The Ninth Banner's test suites (unit/check, Playwright e2e, responsive, simulation sweeps) run as ephemeral, sharded, locked-down Kubernetes Jobs in the `ci-runner` namespace, triggered with one command from the Mac mini, and how results are collected; plus the self-hosted GitHub Actions runners (ARC, controller in `arc-system`, §2c).
-> Version: `2026.10.20.2`
+> Version: `2026.10.20`
 > Last Updated: `2026-10-20`
 > Owner: `homelab operator (cberg-home-nextgen)`
 

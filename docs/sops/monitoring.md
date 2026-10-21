@@ -860,7 +860,7 @@ Read-only access (least privilege):
 
 - Role `ci-runner-logs-ro` (`cluster: monitor`; `read` + `view_index_metadata` on the alias
   `ci-runner-logs` only) is declared via ECK `spec.auth.roles`
-  (`kubernetes/apps/monitoring/elasticsearch/app/ci-runner-roles.yaml`); user `ci-runner-reader` via
+  (`kubernetes/apps/monitoring/elasticsearch/app/ci-runner-roles.sops.yaml`); user `ci-runner-reader` via
   `spec.auth.fileRealm` from the SOPS secret `ci-runner-reader` (same folder).
 - The Basic license has **no document-level security**, so the document filter lives on the **filtered
   data-stream alias** `ci-runner-logs` (created by `elasticsearch-otel-ilm-bootstrap`): namespace
