@@ -1,7 +1,7 @@
 ---
 plan_id: coredns-1.48.2
 component: coredns
-pr: 220                               # Renovate #220 = HelmRelease 1.47.0 -> 1.48.2. Its twin #221 bumps the
+pr: 220                               # Renovate #220 = HelmRelease 1.47.0 -> 1.49.0. Its twin #221 bumps the
                                       # SAME chart in kubernetes/bootstrap/apps/helmfile.yaml. Both are
                                       # policy-held (`*coredns*` deny rule). They are NOT merged by this plan:
                                       # §3 makes one commit whose HelmRelease and helmfile hunks are
@@ -9,7 +9,7 @@ pr: 220                               # Renovate #220 = HelmRelease 1.47.0 -> 1.
                                       # the pin drop, so Renovate auto-closes both as already applied.
 kind: chart
 current: "chart 1.47.0 (appVersion 1.14.6) + helm-values image.tag pin 1.14.7"
-target: "1.48.2"                      # chart 1.48.2, appVersion 1.14.7 -> pin DROPPED, chart owns the tag again
+target: "1.49.0"                      # chart 1.49.0, appVersion 1.14.7 -> pin DROPPED, chart owns the tag again
 update_type: minor                    # chart minor (1.47 -> 1.48); image unchanged (1.14.7 -> 1.14.7)
 risk: medium                          # LOW probability: rendered diff = labels + checksum + four explicit
                                       # securityContext fields that equal the pods' effective state today
@@ -22,10 +22,10 @@ exclusive: false
 touches:
   namespaces: [kube-system]
   resources:
-    - helmrelease/kube-system/coredns                   # chart 1.47.0 -> 1.48.2
+    - helmrelease/kube-system/coredns                   # chart 1.47.0 -> 1.49.0
     - deployment/kube-system/coredns                    # 2 replicas, RollingUpdate maxUnavailable 1 / maxSurge 25%,
                                                         # lameduck 5s, required anti-affinity on control-plane nodes.
-                                                        # No PDB exists or is rendered (chart 1.48.2's new PDB is for
+                                                        # No PDB exists or is rendered (chart 1.49.0's new PDB is for
                                                         # the autoscaler only, which we do not enable).
     - configmap/kube-system/coredns                     # label only; Corefile must be byte-identical
     - configmap/kube-system/coredns-helm-values-<hash>  # values edit => new generated name; old one ORPHANED
@@ -43,24 +43,26 @@ conflicts_with:
   - flux-distribution-2.9.6           # 2026-10-05 review: exclusive, upgrades the Flux controllers = this plan's §5 revert path
   # Every open (non-terminal) plan whose execution or verification touches kube-system DNS, the
   # HR's apply/revert path, or the Prometheus/blackbox instrument §4 reads. Plan set re-read 2026-10-05.
-  - chart-patches-coredns-reloader-blackbox   # now blackbox-only (coredns carved out 2026-10-05), but it rolls
-                                              # prometheus-blackbox-exporter = the pod §2.1/§4 dnsmatrix execs
-                                              # into and the probe_success instrument. Never the same window.
   - talos-linux-1.14.2                # exclusive node roll; reschedules both CoreDNS pods
   - flux-reconciler-impersonation     # exclusive; changes how helm-controller applies this HR
   - flux-fleet-0.60.0                 # upgrades source/helm-controller = the §5 revert path
   - flux-oci-chart-sources            # moves HelmRepository sources incl. coredns, declares dns-internal
   - helm-drift-detection              # adds driftDetection to every HR incl. this one
-  - kube-prometheus-stack-91.9.0      # exclusive; restarts the Prometheus §4 reads (rule 4: same-night kps)
   - envoy-proxy-config-distroless-v1.39.2   # its §4 reads probe_success + resolves through CoreDNS; it lists coredns-1.48.1
   - external-dns-1.23.0               # DNS-plane change; its verification resolves names
-  - app-template-5.2.1                # rolls ~78 workloads whose readiness resolves through CoreDNS
   # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
   - penpot-chart-1.10.0               # its nginx resolver moves to cluster DNS; gate resolves via CoreDNS
   - redis-fleet-8.10.2                # consumers re-resolve on reconnect
   - nextcloud-fleet-35.0.1            # appstore downloads resolve through CoreDNS
   - edot-collector-0.162.0            # its ES exporters resolve through CoreDNS
-  - unpoller-5.4.0                    # its §4.6 InfluxDB write/read resolves through CoreDNS
+  - kube-prometheus-stack-92.2.0      # restarts the Prometheus/blackbox instrument §4 reads (replaces dead 91.9.0 ref, 2026-10-21)
+  - kube-prometheus-stack-92.10.1     # same surface as 92.2.0
+  - cilium-1.20.3                     # datapath roll reschedules/disturbs the CoreDNS pods
+  - talos-linux-1.14.4                # node roll reschedules both CoreDNS pods
+  - adguard-home-0.25.0               # DNS-plane workload; its verification resolves through CoreDNS
+  - edot-collector-0.163.1            # ES exporters resolve through CoreDNS
+  - envoy-proxy-config-distroless-v1.39.4   # its §4 reads probe_success + resolves through CoreDNS
+  - envoy-proxy-config-distroless-v1.40.0   # same
   # NOT listed, checked 2026-10-05: reloader-2.2.18 (kube-system, but no DNS surface; coredns carries no
   # reloader annotation), descheduler-0.37.0 (kube-system CronJob 04:00 - see §6), multus-macvlan-foundation
   # (status reference), oc8-install (superseded).
@@ -72,24 +74,31 @@ rollback_class: git-revert
 autonomy_override: human-gated        # `dns` is in SHARED_INFRA_FLOOR anyway; §5.3 break-glass needs a human
 security_ref: null
 finding_refs:
-  - F-7c2b93bc                        # coredns: chart 1.47.0 -> 1.48.2 (version finding, PLAN lane)
-  - F-d4a234b4                        # "coredns-1.48.1 targets a superseded chart; re-target to 1.48.2 and land
+  - F-7c2b93bc                        # coredns: chart 1.47.0 -> 1.49.0 (version finding, PLAN lane)
+  - F-d4a234b4                        # "coredns-1.48.1 targets a superseded chart; re-target to 1.49.0 and land
                                       # Renovate #220 + #221 together" - this plan is that re-target
                                       # (F-3893caaf, the old 1.47.1 row, is RESOLVED since 2026-10-01; not carried)
 premises:
-  # All read-only single commands. Values measured 2026-10-05.
+  # All read-only single commands. Values measured 2026-10-05; sa-bound premise added 2026-10-21.
   - id: coredns-image-pinned-1-14-7
     why: >-
-      §4 asserts the image does NOT change when the pin is dropped (chart 1.48.2 appVersion = 1.14.7).
+      §4 asserts the image does NOT change when the pin is dropped (chart 1.49.0 appVersion = 1.14.7).
       If the live image is not 1.14.7, that gate is wrong. Prints a different string and fails.
     run: kubectl get deploy -n kube-system coredns -o jsonpath='{.spec.template.spec.containers[0].image} {.spec.replicas} {.status.readyReplicas}'
     expect_exact: coredns/coredns:1.14.7 2 2
   - id: coredns-hr-chart
     why: >-
       HelmRelease must be Ready on 1.47.0; a failed/in-flight release, or a Renovate PR merged behind the
-      plan's back (1.48.2 already live), makes §3's anchor and the §5 rollback target wrong.
+      plan's back (1.49.0 already live), makes §3's anchor and the §5 rollback target wrong.
     run: kubectl get helmrelease -n kube-system coredns -o jsonpath='{.spec.chart.spec.version} {.status.lastAttemptedRevision} {.status.conditions[?(@.type=="Ready")].status}'
     expect_exact: 1.47.0 1.47.0 True
+  - id: coredns-own-serviceaccount
+    why: >-
+      1.49.0 flips the chart default serviceAccount.create to true. The change is a no-op ONLY because our
+      values already create/use the `coredns` SA and the ClusterRoleBinding targets it. If the binding still
+      pointed at `default` the roll would swap the pods' identity. Prints a different string and fails.
+    run: kubectl get clusterrolebinding coredns -o jsonpath='{.subjects[0].kind}/{.subjects[0].namespace}/{.subjects[0].name}'
+    expect_exact: ServiceAccount/kube-system/coredns
   - id: dns-probes-exist
     why: >-
       §4 reads probe_success{probe_class="http"} from these Probe CRs; if renamed/removed the gate reads empty.
@@ -101,30 +110,48 @@ premises:
       cannot run and every DNS gate reads empty.
     run: kubectl get deploy -n monitoring prometheus-blackbox-exporter -o jsonpath='{.status.readyReplicas}/{.spec.replicas}'
     expect_exact: 1/1
-review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: ready-for-go, 0 blocking; nonblocking fixes (test -s guard, 2-Running-pods precondition, flux-distribution-2.9.6 conflict) applied by coordinator
+review: ready-for-go@2026-10-21   # plan-reviewer 2026-10-21 for target 1.49.0: needs-fix, sole blocker = dead/missing conflicts_with refs; fixed by coordinator and re-verified (maintenance-plan.py reports no DEAD-REF for this plan); technical claims (render diff = labels+checksum, SA no-op, Corefile identical) verified against primary sources, premises 5/5 PASS
 status: vetted
-window: "sat-attended:2026-10-17"   # scheduled 2026-10-05 (operator "plan all and time them"): HUMAN-GATED -> operator GO; alone in the slot; after blackbox (nightly 10-10)
+window: null   # prior slot sat-attended:2026-10-17 lapsed unexecuted; window agent re-assigns
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
   - docs/sops/k8s-gateway-dns.md
   - docs/sops/monitoring.md
   - docs/sops/verification-contents-not-shape.md
-generated: "2026-10-05"
+generated: "2026-10-21"
 ---
 
-# coredns chart 1.47.0 -> 1.48.2, drop the image.tag pin (supersedes coredns-1.48.1)
+# coredns chart 1.47.0 -> 1.49.0, drop the image.tag pin (supersedes coredns-1.48.1)
 
 ## 1. Summary & why held
 
-**What changes:** the CoreDNS HelmRelease moves from chart 1.47.0 to 1.48.2. The
+**What changes:** the CoreDNS HelmRelease moves from chart 1.47.0 to 1.49.0. The
 `image.tag: "1.14.7"` override in `helm-values.yaml` is removed. The bootstrap helmfile's
-coredns pin moves 1.47.0 -> 1.48.2 in the same commit. CoreDNS keeps running
+coredns pin moves 1.47.0 -> 1.49.0 in the same commit. CoreDNS keeps running
 **coredns/coredns:1.14.7**. After this change the chart sets that tag, not our override.
 
 **Supersedes `coredns-1.48.1`** (draft, never reviewed or executed). Upstream published 1.48.2
-on 2026-10-01; Renovate opened #220 (HelmRelease) and #221 (bootstrap helmfile), both held by
-the `*coredns*` deny rule. Finding `F-d4a234b4` asked for this re-target.
+on 2026-10-01 and 1.49.0 later; Renovate #220 (HelmRelease) and #221 (bootstrap helmfile) now both
+propose 1.47.0 -> 1.49.0 and are held by the `*coredns*` deny rule. Finding `F-d4a234b4` asked for
+the re-target.
+
+**RE-RESOLVED 2026-10-21 (1.48.2 -> 1.49.0; plan_id kept per plans/README 'keep the plan_id').**
+run-now preflight refused the reviewed 1.48.2 target because 1.49.0 is published (upstream drift
+rule; `--operator-go` does not override). Evidence for the new target, chart pulled and rendered:
+- `helm show chart` 1.49.0: `appVersion: 1.14.7` (same as 1.48.2), so the pin drop is unchanged.
+- **1.48.2 -> 1.49.0 chart diff** is two files of substance: `values.yaml` flips
+  `serviceAccount.create` default `false` -> `true`, and README + a new chart unit test. artifacthub
+  note (kind: security): CoreDNS runs as its own ServiceAccount so the chart ClusterRole is no
+  longer bound to the namespace's `default` ServiceAccount (granted to every pod using it).
+- **Our values already set `serviceAccount.create: true`** (helm-values.yaml), and live matches:
+  Deployment `serviceAccountName: coredns`, ClusterRoleBinding `coredns` subject = SA
+  `kube-system/coredns`. So the new default is a NO-OP for us: `helm template` of 1.48.2 vs 1.49.0
+  with our values differs ONLY in the six `helm.sh/chart` labels and `checksum/config`
+  (Corefile identical). No Corefile/plugin change, no image change, no new kinds.
+- **Recommendation: 1.49.0.** It is the newest stable, costs the same single rolling restart, adds
+  nothing risky for our values, and landing 1.48.2 would leave #220/#221 open at 1.49.0 and the plan
+  immediately drifted again. (No CVE detail here; security context lives on the finding records.)
 
 **Why held:** the `*coredns*` deny rule in `runbooks/auto-update-policy.yaml` says "CLUSTER DNS,
 and currently image-tag-pinned AHEAD of the chart". On 2026-08-19 the image was pinned to 1.14.7
@@ -132,7 +159,7 @@ because chart 1.47.0 shipped appVersion 1.14.6. The chart template reads
 `.Values.image.tag | default .Chart.AppVersion`, so the pin would win over every later chart.
 
 **Upstream evidence (primary sources, re-read 2026-10-05):**
-- `helm show chart oci://ghcr.io/coredns/charts/coredns --version 1.48.2` → `version: 1.48.2`,
+- `helm show chart oci://ghcr.io/coredns/charts/coredns --version 1.49.0` → `version: 1.49.0`,
   `appVersion: 1.14.7` (1.47.0 → 1.14.6, 1.48.1 → 1.14.7). Flux's `HelmRepository/coredns` is
   `type: oci`, `oci://ghcr.io/coredns/charts`, so that is the artifact Flux pulls.
 - **1.48.1 → 1.48.2** (`coredns/helm` compare `coredns-1.48.1...coredns-1.48.2`, PR #276): 3 commits,
@@ -149,18 +176,18 @@ because chart 1.47.0 shipped appVersion 1.14.6. The chart template reads
   the image "has run as the distroless nonroot user, uid and gid 65532, since 1.11.0, with
   cap_net_bind_service on the binary so it binds port 53 … the image pins the numeric ids since
   coredns/coredns#8316, released in 1.14.7". Three further commits are autoscaler-only.
-- **The pin can be dropped.** 1.48.2's appVersion 1.14.7 equals the pinned tag.
+- **The pin can be dropped.** 1.49.0's appVersion 1.14.7 equals the pinned tag.
 
-**Rendered diff with OUR values** (`helm template` of 1.47.0+pin vs 1.48.2 without pin,
+**Rendered diff with OUR values** (`helm template` of 1.47.0+pin vs 1.49.0 without pin,
 `${SECRET_DOMAIN}` substituted, helm v3.22.0, 2026-10-05). Rendered kinds are identical in both
 (ClusterRole, ClusterRoleBinding, ConfigMap, Deployment, Service, ServiceAccount — no PDB).
 Only three kinds of change appear:
-- 6× `helm.sh/chart` labels (`coredns-1.47.0` → `coredns-1.48.2`).
+- 6× `helm.sh/chart` labels (`coredns-1.47.0` → `coredns-1.49.0`).
 - The pod `checksum/config`. It changes because the hashed ConfigMap carries the chart label;
   the Corefile is identical (sha256 of the rendered Corefile is the same in both renders).
 - The four securityContext lines above.
-Further: 1.48.2 with the pin and 1.48.2 without it render **byte-identically** (empty diff), and
-1.48.1 → 1.48.2 differs only in labels + checksum. Image line in the 1.48.2 render:
+Further: 1.49.0 with the pin and 1.49.0 without it render **byte-identically** (empty diff), and
+1.48.2 → 1.49.0 and 1.48.1 → 1.48.2 each differ only in labels + checksum. Image line in the 1.49.0 render:
 `coredns/coredns:1.14.7`.
 
 **Why those four lines change nothing at runtime** (measured 2026-10-01, re-confirmed 2026-10-05:
@@ -173,7 +200,7 @@ live pods show `runAsUser <none>` today and imageID unchanged):
 **Bootstrap helmfile (new vs the 1.48.1 plan):** `kubernetes/bootstrap/apps/helmfile.yaml`
 installs coredns from the SAME `helm-values.yaml`. If the pin is dropped while the helmfile stays
 on 1.47.0, a cluster re-bootstrap would render appVersion **1.14.6** — silently undoing the
-1.14.7 bump and its `max_connect_attempts` semantics. So the helmfile moves to 1.48.2 in the same
+1.14.7 bump and its `max_connect_attempts` semantics. So the helmfile moves to 1.49.0 in the same
 commit (that is exactly Renovate #221's hunk). It has no live effect.
 
 **Net effect:** one rolling restart of CoreDNS (2 replicas, `maxUnavailable: 1`, `lameduck 5s`,
@@ -280,8 +307,8 @@ blk = re.compile(r'^# Chart 1\.47\.[01] .*\n(?:#.*\n)*?image:\n  tag: "1\.14\.7"
 if len(blk.findall(v)) != 1: sys.exit("ABORT: pin block not found exactly once")
 v2 = blk.sub('', v)
 if re.search(r'^image:', v2, re.M) or '1.14.7"' in v2: sys.exit("ABORT: a pin survived")
-open(hr, 'w').write(pat.sub('      version: 1.48.2', s))
-open(boot, 'w').write(bpat.sub(r'\g<1>1.48.2', b))
+open(hr, 'w').write(pat.sub('      version: 1.49.0', s))
+open(boot, 'w').write(bpat.sub(r'\g<1>1.49.0', b))
 open(vals, 'w').write(v2)
 print("OK")
 EOF
@@ -298,10 +325,10 @@ helm-values.yaml:
 -  tag: "1.14.7"
 helmrelease.yaml:
 -      version: 1.47.0
-+      version: 1.48.2
++      version: 1.49.0
 helmfile.yaml (coredns release):
 -    version: 1.47.0
-+    version: 1.48.2
++    version: 1.49.0
 ```
 If the script prints `ABORT…`, stop. Do not improvise an edit: `git checkout -- "$F" "$V" "$B"`
 and investigate (a merged #220/#221 is the likely cause).
@@ -311,20 +338,20 @@ one line, `coredns/coredns:1.14.7` (dry-run output 2026-10-05). Any other tag me
 not doing what §1 says. STOP and `git checkout -- "$F" "$V" "$B"`.
 ```bash
 sed 's/\${SECRET_DOMAIN}/example.test/' "$V" > /private/tmp/coredns-1.48.2/vals.yaml
-helm template coredns oci://ghcr.io/coredns/charts/coredns --version 1.48.2 -n kube-system \
+helm template coredns oci://ghcr.io/coredns/charts/coredns --version 1.49.0 -n kube-system \
   -f /private/tmp/coredns-1.48.2/vals.yaml 2>/dev/null | grep -E '^[[:space:]]*image:' | tr -d ' "' | sed 's/^image://'
 ```
 
 Commit (shared worktree: `--only`, then verify subject and file list BEFORE push):
 ```bash
-git commit --only "$F" "$V" "$B" -m "feat(kube-system): coredns chart 1.47.0 -> 1.48.2, drop image pin (chart appVersion now 1.14.7); supersedes Renovate #220 #221" \
+git commit --only "$F" "$V" "$B" -m "feat(kube-system): coredns chart 1.47.0 -> 1.49.0, drop image pin (chart appVersion now 1.14.7); supersedes Renovate #220 #221" \
   -m "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 git log -1 --format=%s          # must be the subject above, else amend before push
 git show --stat HEAD            # exactly the three files
 git push
 ```
 Flux picks the change up through the push webhook. No manual reconcile. Do NOT merge or close
-#220/#221 by hand: once main carries 1.48.2, Renovate closes them on its next run. Watch the roll:
+#220/#221 by hand: once main carries 1.49.0, Renovate closes them on its next run. Watch the roll:
 ```bash
 kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide -w
 ```
@@ -337,8 +364,8 @@ within 10 min, check the webhook and `flux get sources git` before anything else
   ```bash
   kubectl get hr -n kube-system coredns -o jsonpath='{.spec.chart.spec.version} {.status.lastAttemptedRevision} {.status.conditions[?(@.type=="Ready")].status}'
   ```
-  → `1.48.2 1.48.2 True`. `helm history coredns -n kube-system --max 2` shows the new revision
-  `deployed` on `coredns-1.48.2` with APP VERSION 1.14.7. If any revision after it reads
+  → `1.49.0 1.49.0 True`. `helm history coredns -n kube-system --max 2` shows the new revision
+  `deployed` on `coredns-1.49.0` with APP VERSION 1.14.7. If any revision after it reads
   `rolled back`, helm's own remediation fired. FAIL.
 - **Pods and image:**
   ```bash
@@ -369,14 +396,14 @@ Finally: `kill $PF`.
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 SHA=$(git log -1 --format=%h -- kubernetes/apps/kube-system/coredns/app/helmrelease.yaml)
-git show --stat "$SHA"          # confirm it is the coredns 1.48.2 commit (3 files)
+git show --stat "$SHA"          # confirm it is the coredns 1.49.0 commit (3 files)
 git revert --no-edit "$SHA" && git log -1 --format=%s && git show --stat HEAD && git push
 ```
 What happens:
 - The HR returns to chart 1.47.0, the pin comes back, the helmfile returns to 1.47.0.
 - The old generated values ConfigMap still exists (`prune: false`).
 - The pods roll again.
-- Renovate will re-open its 1.48.2 PRs later; that is expected.
+- Renovate will re-open its 1.49.0 PRs later; that is expected.
 
 **5.2 Confirm the cluster is back:** re-run §4 against the pre-plan state:
 - HR `1.47.0 1.47.0 True`.
