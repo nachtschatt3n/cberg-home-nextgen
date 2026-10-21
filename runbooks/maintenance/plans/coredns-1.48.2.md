@@ -112,7 +112,7 @@ premises:
     expect_exact: 1/1
 review: ready-for-go@2026-10-21   # plan-reviewer 2026-10-21 for target 1.49.0: needs-fix, sole blocker = dead/missing conflicts_with refs; fixed by coordinator and re-verified (maintenance-plan.py reports no DEAD-REF for this plan); technical claims (render diff = labels+checksum, SA no-op, Corefile identical) verified against primary sources, premises 5/5 PASS
 status: vetted
-window: null   # prior slot sat-attended:2026-10-17 lapsed unexecuted; window agent re-assigns
+window: "now:2026-10-21"   # ON-DEMAND NOW run 2026-10-21 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
