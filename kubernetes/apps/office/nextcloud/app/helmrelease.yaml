@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: *app
-      version: 9.3.0
+      version: 9.4.1
       sourceRef:
         kind: HelmRepository
         name: nextcloud
@@ -22,7 +22,8 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 3
+      retries: 0                 # TEMPORARY (plan nextcloud-fleet-35.0.1 §3.3) - restore 3 in §3.6
+      remediateLastFailure: false
   uninstall:
     keepHistory: false
   # Values link: https://github.com/nextcloud/helm/blob/master/charts/nextcloud/values.yaml
@@ -31,7 +32,7 @@ spec:
       reloader.stakater.com/auto: "true"
     image:
       repository: nextcloud
-      tag: 34.0.4
+      tag: 35.0.2
       pullPolicy: IfNotPresent
     replicaCount: 1
     nextcloud:
@@ -231,7 +232,7 @@ spec:
             name: nextcloud-openclaw-mail-app
       extraSidecarContainers:
         - name: worker
-          image: nextcloud:34.0.4
+          image: nextcloud:35.0.2
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 33
@@ -541,7 +542,7 @@ spec:
       initialDelaySeconds: 60
       periodSeconds: 30
       timeoutSeconds: 5
-      failureThreshold: 10
+      failureThreshold: 50               # TEMPORARY (plan nextcloud-fleet-35.0.1 §3.3) - restore 10 in §3.6
       successThreshold: 1
 
     hpa:
