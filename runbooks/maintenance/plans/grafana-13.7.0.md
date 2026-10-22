@@ -44,7 +44,7 @@ rollback_class: git-revert            # holds IF gate 4.3 shows no migration; th
 finding_refs: [F-c01c08c6, F-fcb94b29]
 review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: needs-fix (missing kube-prometheus-stack-92.11.0 conflict) -> fixed; render/migrator/backup/gates verified; premises 10/10
 status: vetted
-window: null
+window: "now:2026-10-22"   # ON-DEMAND NOW run 2026-10-22 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/grafana-image-changes.md
