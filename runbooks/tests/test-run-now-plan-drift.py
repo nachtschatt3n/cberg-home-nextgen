@@ -117,6 +117,31 @@ def scenarios() -> dict:
     out["unmeasurable drift (None) => NEEDS-DECISION for every plan"] = (
         unm is not None and unm.startswith("NEEDS-DECISION") and "could NOT be measured" in unm)
 
+    # --- stable-channel head: a pre-release "newest" is not a re-target -------
+    # live 2026-10-22: n8n plan at stable head 2.44.5, beta 2.45.1 published
+    beta_row = dict(DRIFT_ROW, component="n8n", current="2.38.7", target="2.45.1",
+                    reason="plan exists: n8n-2.39.8 (vetted)", channel_head="2.44.5",
+                    drift=("n8n-2.39.8.md: plan targets 2.44.5, but 2.45.1 is now published; "
+                           "the plan is already at or ahead of the stable-channel head 2.44.5, "
+                           "so 2.45.1 is NOT a confirmed re-target"))
+    mb = rn.drift_by_plan({"plan_drift": [beta_row]})
+    out["channel head: plan AT the stable head => no refusal"] = (
+        rn.drift_refusal(plan("n8n-2.39.8", target="2.44.5"), mb) is None)
+    out["channel head: plan AHEAD of the stable head => no refusal"] = (
+        rn.drift_refusal(plan("n8n-2.39.8", target="2.44.6"), mb) is None)
+    behind = rn.drift_refusal(plan("n8n-2.39.8", target="2.42.7"), mb)
+    out["channel head: plan BEHIND the stable head => still NEEDS-DECISION"] = (
+        behind is not None and behind.startswith("NEEDS-DECISION") and "2.45.1" in behind)
+    nohead = dict(beta_row)
+    nohead.pop("channel_head")
+    out["channel head: no resolved head => the drift still blocks (fail closed)"] = (
+        rn.drift_refusal(plan("n8n-2.39.8", target="2.44.5"),
+                         rn.drift_by_plan({"plan_drift": [nohead]})) is not None)
+    out["channel head: unparseable plan target => the drift still blocks"] = (
+        rn.drift_refusal(plan("n8n-2.39.8", target="latest"), mb) is not None)
+    out["channel head: chart-style target parses its first version"] = (
+        rn.drift_refusal(plan("n8n-2.39.8", target="chart 2.44.5 (app 2.44.5)"), mb) is None)
+
     # --- preflight wiring ----------------------------------------------------
     r = pf(["nextcloud-mcp-0.187.1"], [plan("nextcloud-mcp-0.187.1")], lambda: m)
     rw = row(r, "nextcloud-mcp-0.187.1")

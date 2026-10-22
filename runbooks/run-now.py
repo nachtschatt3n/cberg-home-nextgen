@@ -185,6 +185,24 @@ def drift_by_plan(coverage_report) -> dict | None:
     return out
 
 
+_VERSION_RE = re.compile(r"\d+(?:\.\d+)+")
+
+
+def _version_tuple(text) -> tuple | None:
+    """First dotted version in `text` as an int tuple; None if there is none."""
+    m = _VERSION_RE.search(str(text or ""))
+    return tuple(int(p) for p in m.group(0).split(".")) if m else None
+
+
+def _at_or_past_channel_head(plan: dict, entry: dict) -> bool:
+    """True only when the drift row carries a resolved stable `channel_head`
+    and the plan's reviewed target is that head or newer. Missing or
+    unparseable data => False (the drift still blocks)."""
+    head = _version_tuple(entry.get("channel_head")) if entry.get("channel_head") else None
+    target = _version_tuple(plan.get("target"))
+    return bool(head and target and target >= head)
+
+
 def drift_refusal(plan: dict, drift_map) -> str | None:
     """The NEEDS-DECISION refusal for a plan whose target fell behind upstream
     since review; None when there is no drift for it.
@@ -196,6 +214,13 @@ def drift_refusal(plan: dict, drift_map) -> str | None:
                 "(coverage.py produced no report: is runbooks/version-check-current.md "
                 "present and fresh?) — fail closed; run the version check, then re-preflight")
     entries = drift_map.get(str(plan.get("plan_id")))
+    # A snapshot "newest" tag that is a pre-release is not a re-target: when
+    # coverage resolved the component's STABLE channel head (digest-confirmed,
+    # `channel_head`) and the plan already targets that head or newer, the
+    # reviewed plan still describes the newest STABLE build. Measured
+    # 2026-10-22: n8n plan at stable head 2.44.5 was refused because the beta
+    # 2.45.1 was published. Fail closed on anything unparseable.
+    entries = [e for e in (entries or []) if not _at_or_past_channel_head(plan, e)]
     if not entries:
         return None
     e = entries[0]
