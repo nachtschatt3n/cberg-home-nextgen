@@ -40,8 +40,14 @@ uv = "latest"
 # and the action ref there in lockstep. No `aqua:` pin is possible (aqua-registry
 # carries no home-operations/*), and `ubi:` is deprecated for removal in mise
 # 2027.1.0, so use the `github:` backend. Renovate does not read .mise.toml in
-# this repo -- bump by hand.
+# this repo's built-in mise manager does not resolve it, so the annotation below
+# feeds the `.mise.toml` customManager in .github/renovate.json5. (The aqua:
+# pins above ARE tracked natively by Renovate's mise manager.)
+# renovate: datasource=github-releases depName=home-operations/flate extractVersion=^v(?<version>.+)$
 "github:home-operations/flate" = "0.6.5"
+# renovate: datasource=crate depName=unifictl
 "cargo:unifictl" = "5.7.0"
+# renovate: datasource=crate depName=zigbeectl
 "cargo:zigbeectl" = "0.1.2"
+# renovate: datasource=github-releases depName=budimanjojo/talhelper extractVersion=^v(?<version>.+)$
 talhelper = "3.1.17"

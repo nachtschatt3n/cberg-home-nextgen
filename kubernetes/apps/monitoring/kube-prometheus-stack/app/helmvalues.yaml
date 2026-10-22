@@ -135,6 +135,10 @@ data:
       permissionInitContainer:
         image:
           registry: quay.io
+          # Rolling `latest` + sha digest: deliberately NOT annotated for Renovate.
+          # The nested-image customManager would compare the literal tag `latest`
+          # and never see the pinned sha, so it could neither detect nor bump this
+          # pin. The digest is refreshed by hand when the busybox base is audited.
           repository: prometheus/busybox
           tag: latest
           sha: f07fff1d7544464a1041fc2b6be79873a335a3af8f0b747b82fa630287968d4d

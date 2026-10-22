@@ -51,6 +51,13 @@ metadata:
 # routing, not maintainer intent, and verify fails CLOSED inside the
 # cluster-meta gate. Same reasoning as csi-driver-smb.yaml.
 #
+# VERSION MARKER (detect-only): the line below is read by the plex customManager
+# in .github/renovate.json5 (tags are helm-chart-X.Y.Z; verified with git ls-remote
+# 2026-10-22) and approved via the Dependency Dashboard only. Renovate rewrites
+# just this comment: the commit below must be re-derived by hand (see "To move
+# versions"), so keep both in lockstep.
+# renovate-pin: depName=plexinc/pms-docker chartVersion=1.9.0
+#
 # KNOWN COST: version tracking. The HelmRelease no longer carries `version:`,
 # so Renovate's flux manager loses the helm-datasource row it had; what it
 # emits for THIS file instead is a git-refs DIGEST bump to the default-branch
@@ -59,9 +66,9 @@ metadata:
 # digest-type updates (auto-update.py gate G1), so it cannot auto-merge, but it
 # is a WRONG PR that a planner or operator could act on: disable that path in
 # .github/renovate.json5 (same rule shape as csi-driver-smb). Upgrades are
-# MANUAL until a detector exists: do not read silence as "up to date". The
-# chart-version customManager does not match this file (upstream keeps ONE
-# unversioned chart directory, no /charts/vX.Y.Z to read; measured 0 matches).
+# MANUAL, but a version DETECTOR now exists (the renovate-pin marker above;
+# the csi-driver-smb path-based manager still matches 0 here because upstream
+# keeps ONE unversioned chart directory).
 #
 # To move versions: `git ls-remote https://github.com/plexinc/pms-docker
 # refs/tags/helm-chart-X.Y.Z`, put that commit here, confirm it is on master,

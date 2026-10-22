@@ -377,6 +377,25 @@
       "enabled": false
     },
     {
+      // plex chart marker (renovate-pin in plex.yaml) — detect-only, same shape as
+      // csi-driver-smb above: the PR can rewrite only the marker comment, never
+      // the commit pin, so it must be opened by hand from the dashboard.
+      "description": ["plex chart marker — dashboard-approval only"],
+      "matchDatasources": ["github-tags"],
+      "matchPackageNames": ["plexinc/pms-docker"],
+      "dependencyDashboardApproval": true,
+      "addLabels": ["renovate/coupled-pin"]
+    },
+    {
+      // .mise.toml pins that the built-in mise manager does not resolve are fed
+      // by the annotated customManager below. Stop the built-in manager from
+      // also emitting them (duplicate PRs) if it does.
+      "description": ["mise: github:/cargo:/talhelper pins owned by the customManager"],
+      "matchManagers": ["mise"],
+      "matchPackageNames": ["home-operations/flate", "unifictl", "zigbeectl", "talhelper", "budimanjojo/talhelper"],
+      "enabled": false
+    },
+    {
       // oc8 — same class of gap, different mechanism, so it needs a different fix.
       //
       // The customManager below cannot help it: oc8 carries no version string
@@ -522,6 +541,28 @@
       ],
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      // .mise.toml pins annotated `# renovate: datasource=… depName=… [extractVersion=…]`
+      // on the line above (flate, unifictl, zigbeectl, talhelper). The generic
+      // manager above only covers kubernetes/ and cannot carry extractVersion.
+      "customType": "regex",
+      "description": ["Annotated tool pins in .mise.toml"],
+      "managerFilePatterns": ["/(^|/)\\.mise\\.toml$/"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+extractVersion=(?<extractVersion>\\S+))?\\s*\\n[^\\n=]+=\\s*\"(?<currentValue>[^\"]+)\""
+      ]
+    },
+    {
+      // plex chart marker comment in the commit-pinned GitRepository (see plex.yaml).
+      "customType": "regex",
+      "description": ["plex helm chart version marker (tags helm-chart-X.Y.Z)"],
+      "managerFilePatterns": ["/(^|/)kubernetes/flux/meta/repositories/git/plex\\.yaml$/"],
+      "matchStrings": [
+        "#\\s*renovate-pin:\\s*depName=(?<depName>\\S+)\\s+chartVersion=(?<currentValue>\\S+)"
+      ],
+      "datasourceTemplate": "github-tags",
+      "extractVersionTemplate": "^helm-chart-(?<version>.+)$"
     }
   ]
 }
