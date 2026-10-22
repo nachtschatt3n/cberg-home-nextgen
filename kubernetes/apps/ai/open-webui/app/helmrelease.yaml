@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: open-webui
-      version: 16.6.0
+      version: 17.0.0
       sourceRef:
         kind: HelmRepository
         name: open-webui
@@ -22,7 +22,7 @@ spec:
     timeout: 15m
     cleanupOnFail: false
     remediation:
-      retries: 1
+      retries: 0
   uninstall:
     keepHistory: false
   # postRenderers REMOVED 2026-09-07 (Envoy phase 3). It patched a label
