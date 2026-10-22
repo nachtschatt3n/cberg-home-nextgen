@@ -71,7 +71,7 @@ finding_refs: [F-b9f72506]            # image 4.2.0 -> 4.3 version row (added by
                                       # owned by app-template-5.2.1, not this plan.
 review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: ready-for-go, 0 blocking (4.3.0 GA, no DB migrations, digest verified, rollback git-revert); premises 7/7
 status: vetted
-window: null
+window: "now:2026-10-22"   # ON-DEMAND NOW run 2026-10-22 (run-now.py stamp; was None)
 premises:
   - id: live-image-is-4.2.0
     why: >-

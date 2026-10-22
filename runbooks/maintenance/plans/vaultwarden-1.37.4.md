@@ -83,7 +83,7 @@ premises:
     run: kubectl get backups.longhorn.io -n storage -l backup-volume=vaultwarden-data -o jsonpath='{.items[*].status.state}'
     expect_contains: Completed
 status: vetted
-window: null                          # window agent decides; operator NOW request 2026-10-22, unattended-capable (sec 0)
+window: "now:2026-10-22"   # ON-DEMAND NOW run 2026-10-22 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md

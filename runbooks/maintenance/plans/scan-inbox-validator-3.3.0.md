@@ -102,7 +102,7 @@ finding_refs: [F-b40c9350, F-6b6c515a, F-888c3d22]   # first queried 2026-10-07 
                                          # one commit.
 review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: 3 rounds; schema v2->4, rollback seds, CA3 WARN-only, unattended stop rule, CA5/CA8 false-FAIL gates fixed by planner; premises 13/13
 status: vetted
-window: null                             # Planner note, not a claim: HUMAN-GATED
+window: "now:2026-10-22"   # ON-DEMAND NOW run 2026-10-22 (run-now.py stamp; was None)
                                          # (capability_change), attended, no reboot; sized
                                          # for a sat-attended slot (90 min: 60 of work +
                                          # 30 rollback budget). Operator may be away: the plan

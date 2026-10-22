@@ -64,7 +64,7 @@ finding_refs:
   - F-f3caadda                        # security: image-scan finding on v0.11.4 (security_ref above)
 review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: needs-fix with 0 blocking technical issues; 4 nonblocking fixes applied by planner (restart wait, positive control, revert both SHAs, conflict ref); migrations/rollback/gates verified; premises 6/6
 status: vetted
-window: null
+window: "now:2026-10-22"   # ON-DEMAND NOW run 2026-10-22 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md
