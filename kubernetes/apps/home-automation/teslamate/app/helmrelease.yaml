@@ -33,7 +33,7 @@ spec:
           main:
             image:
               repository: teslamate/teslamate
-              tag: "4.2.0"
+              tag: "4.3.0@sha256:516fc9f0a14369f541b1a70ff2f65dd9b57c2e01c1f533b6d43b375445404955"
             env:
               - name: TZ
                 value: "Europe/Berlin"
