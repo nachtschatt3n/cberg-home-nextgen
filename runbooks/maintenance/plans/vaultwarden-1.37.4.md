@@ -83,7 +83,7 @@ premises:
     run: kubectl get backups.longhorn.io -n storage -l backup-volume=vaultwarden-data -o jsonpath='{.items[*].status.state}'
     expect_contains: Completed
 status: vetted
-window: "now:2026-10-22"   # ON-DEMAND NOW run 2026-10-22 (run-now.py stamp; was None)
+window: null   # vaultwarden-1.37.4 ABORTED in on-demand run 2026-10-22 (pre-check 3.2: ciphers=0 vs plan PASS >=1); needs plan fix or operator call
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md
