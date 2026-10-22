@@ -59,7 +59,7 @@ spec:
         - operator: Exists
       containers:
         - name: loopback
-          image: alpine:3.24.2
+          image: alpine:3.24.3
           command: [sh, -c]
           args:
             - |
