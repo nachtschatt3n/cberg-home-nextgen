@@ -52,7 +52,7 @@ finding_refs:
   - F-3cdb3585                        # version: chart 16.6.0 -> 17.0.0
 review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: ready-for-go once open-webui-0.12.3 landed (render diff = chart/version labels only); fixes applied by planner
 status: vetted
-window: null
+window: "now:2026-10-22"   # ON-DEMAND NOW run 2026-10-22 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/verification-contents-not-shape.md
