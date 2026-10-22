@@ -301,6 +301,14 @@ deny:
       bumps stay on the stable line and remain safe to auto-merge. Minor+ is PLAN lane only,
       attended, after confirming npm dist-tag `stable` actually points at the target."
     max: patch
+  # Added 2026-10-22. Immich server releases carry forward-only DB migrations on the
+  # only copy of the database, and a plain git revert after the migration ran crash-loops
+  # the server (2026-10-12). Updates are PLAN lane only, behind the dump + scratch-restore
+  # proof in runbooks/maintenance/plans/immich-server-*.md. (PR #360 sat open without any
+  # deny rule; only coverage G3 and earned autonomy held it.)
+  - match: "*immich*"
+    reason: "Immich server applies forward-only DB migrations; revert after migration crash-loops.
+      Plan lane only: dump + scratch-restore proof first (immich-server plan)."
   # Added 2026-08-19 with the 0.301.5 -> 2026.08.0 execution. NocoDB left semver
   # for calver, so the classifier's tuple comparison reads a routine month hop
   # (2026.08.0 -> 2026.09.0) as major=equal / minor=greater, i.e. "minor" — which
