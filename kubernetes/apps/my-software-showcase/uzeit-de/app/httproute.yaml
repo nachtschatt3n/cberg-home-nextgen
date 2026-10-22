@@ -27,3 +27,62 @@ spec:
           kind: Service
           name: uzeit-de
           port: 80
+---
+# Callback route -- separate and MORE specific than `/` (longest match wins).
+# Authentik forward-auth gate added 2026-10-22 as a compensating control for the
+# EOL PHP runtime (security_ref: F-bf31b64f). Pattern: docs/sops/gateway-api-httproute.md
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: uzeit-de-authentik-outpost
+  namespace: my-software-showcase
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "uzeit-de.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /outpost.goauthentik.io }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-uzeit-de-forward-auth
+          namespace: kube-system
+          port: 9000
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: uzeit-de-forward-auth
+  namespace: my-software-showcase
+spec:
+  targetRefs:                    # app route ONLY, never the callback route
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: uzeit-de
+  extAuth:
+    failOpen: false              # outpost down => deny, never publish
+    headersToExtAuth:            # cookie is mandatory, see the phpmyadmin policy
+      - cookie
+      - accept
+      - user-agent
+    http:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-uzeit-de-forward-auth
+          namespace: kube-system
+          port: 9000
+      path: /outpost.goauthentik.io/auth/envoy
+      headersToBackend:
+        - Set-Cookie
+        - X-authentik-username
+        - X-authentik-groups
+        - X-authentik-email
+        - X-authentik-name
+        - X-authentik-uid
