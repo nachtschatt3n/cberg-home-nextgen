@@ -22,7 +22,7 @@ spec:
     timeout: 20m
     cleanupOnFail: true
     remediation:
-      retries: 3
+      retries: 0
   uninstall:
     keepHistory: false
   dependsOn:
@@ -74,7 +74,7 @@ spec:
             # renovate: image=ghcr.io/immich-app/immich-server
             image:
               repository: ghcr.io/immich-app/immich-server
-              tag: v3.3.3
+              tag: v3.3.5
               pullPolicy: IfNotPresent
             env:
               - name: TZ
