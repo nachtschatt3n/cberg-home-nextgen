@@ -37,7 +37,7 @@ spec:
               # Web UI stays OFF (app.web_ui unset => disabled, loopback-only).
               # KEEP IN SYNC with the other icloud-docker-* instance.
               # See docs/sops/icloud-docker-reauth.md.
-              tag: "2.1.0@sha256:c57e8248fefc55d490f090eb5edd08ff53045861e4b8f532403926b38af36ba9"
+              tag: "2.2.0@sha256:672ef76694381ec7c63543f231cd8e1244a003719acdc576e30e11a2c42a68b7"
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
