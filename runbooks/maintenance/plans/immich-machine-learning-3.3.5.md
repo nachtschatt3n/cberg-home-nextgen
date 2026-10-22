@@ -50,7 +50,7 @@ rollback_class: git-revert            # nothing forward-only: ML holds no DB, th
 finding_refs: [F-611ca4c7, F-6d0f4efc] # F-611ca4c7 = security finding (v3.3.3-openvino); F-6d0f4efc = version finding
                                       # for this image (immich-machine-learning v3.3.3-openvino -> newer, monitor)
 review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: needs-fix (PR #360 comment, conflicts, order) -> fixed; no DB; git-revert rollback; premises 5/5
-status: vetted
+status: executed
 window: "now:2026-10-22"   # ON-DEMAND NOW run 2026-10-22 (run-now.py stamp; was None)
 premises:
   - id: ml-image-is-still-v3.3.3-openvino
