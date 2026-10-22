@@ -11,6 +11,7 @@ resources:
   - pv-uzeit-de-fileadmin.yaml
   - pv-uzeit-de-uploads.yaml
   - httproute.yaml
+  - networkpolicy.yaml
 
 # Deliberately NOT listed above (see docs/sops/new-deployment-blueprint.md):
 #   longhorn-volume-uzeit-de-fileadmin.yaml

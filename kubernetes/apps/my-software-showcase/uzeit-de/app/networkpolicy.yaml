@@ -1,0 +1,28 @@
+---
+# Compensating control for the EOL PHP runtime (security_ref: F-bf31b64f).
+# Ingress only from the envoy-internal data-plane pods on the app port; every
+# other source (other namespaces, other pods) is denied. Egress is untouched.
+# Kubelet probes are node-local and exempt under Cilium. No ServiceMonitor
+# targets this app, so no monitoring allow is needed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: uzeit-de-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: uzeit-de
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: network
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: envoy-internal
+              gateway.envoyproxy.io/owning-gateway-namespace: network
+      ports:
+        - protocol: TCP
+          port: 80
