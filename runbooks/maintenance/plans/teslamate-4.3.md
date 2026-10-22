@@ -1,10 +1,7 @@
 ---
 plan_id: teslamate-4.3
 component: teslamate
-pr: null                              # no open Renovate PR (gh pr list --search teslamate: empty,
-                                      # 2026-09-30). Dispatched by maintenance-window nightly
-                                      # 2026-09-30 Step 0.5 from coverage.py (lane=PLAN).
-kind: image
+pr: 266                              # Renovate PR #266 teslamate/teslamate 4.2.0 -> 4.3.0 (OPEN, 2026-10-22)
 current: "4.2.0"                      # live 2026-09-30: pod teslamate-694c57c9b4-* imageID
                                       # docker.io/teslamate/teslamate@sha256:88f4b0eb20802e4dd8518b31045d2c19ce384bd5c85ae7289a921f5221ea2562
                                       # = Docker Hub digest of tags 4.2.0 AND 4.2 (same index).
@@ -41,20 +38,14 @@ touches:
                                       # grafana's TeslaMate datasource only READS the same DB.
 depends_on: []
 conflicts_with:
-  - app-template-5.2.1                # Batch A sed edits the SAME file (teslamate/app/helmrelease.yaml,
-                                      #   chart line) and upgrades the SAME HR. Its Batch A change is label-only
-                                      #   (rendered objects identical but the chart label), so IT does not roll
-                                      #   teslamate — but this plan DOES, and its §4 whole-fleet generation gate
-                                      #   would read our roll as GEN_CHANGED; two writers on one file/HR in one
-                                      #   night also make either §4 unattributable. Reciprocal entry added there.
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. helmrelease/teslamate
   - flux-reconciler-impersonation     # changes the identity helm-controller applies home-automation/ with
-  - flux-oci-chart-sources            # rewrites HR chart sources (bjw-s app-template) — same spec.chart block
-  - kube-prometheus-stack-91.9.0      # §4.5 reads kube-state-metrics through Prometheus (the window's
-                                      #   instrument). Executed 2026-09-26; kept so a re-run/revert serializes.
-  - talos-linux-1.14.2                # node roll (exclusive, sun-attended) reschedules every pod incl.
-                                      #   teslamate + teslamate-postgres; a same-slot roll would void §4.2-4.6.
-                                      #   exclusive:true already keeps it out of the slot; named for the record.
+  - flux-oci-chart-sources            # rewrites HR chart sources (bjw-s app-template) -- same spec.chart block
+  - kube-prometheus-stack-92.2.0      # 4.5 reads kube-state-metrics through Prometheus (the window's instrument)
+  - kube-prometheus-stack-92.10.1     #   same; any same-night kps bump voids the 4.5 reading
+  - talos-linux-1.14.2                # node roll (exclusive) reschedules teslamate + teslamate-postgres
+  - talos-linux-1.14.4                #   same; a same-slot roll would void 4.2-4.8
+  - home-assistant-2026.10.1          # HA is the MQTT consumer (4.8); an HA roll the same night makes entity-freshness unattributable
 exclusive: false
 security_ref: F-daeedcd8              # open "newer upstream tag available, bump" row on the 4.2.0 image (sweep 288980ff review;
                                       # was F-7d7fb365, the now-RESOLVED AR-029 "already on newest tag" record). A newer
@@ -78,8 +69,8 @@ finding_refs: [F-b9f72506]            # image 4.2.0 -> 4.3 version row (added by
                                       # the image 4.2.0 -> 4.3 bump (4.3.0 published 2026-09-29 14:34Z, after the
                                       # last sweep). F-8abf3da3 / F-65436d0a are the CHART 5.1.0->5.2.1 rows,
                                       # owned by app-template-5.2.1, not this plan.
-review: null
-status: draft
+review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: ready-for-go, 0 blocking (4.3.0 GA, no DB migrations, digest verified, rollback git-revert); premises 7/7
+status: vetted
 window: null
 premises:
   - id: live-image-is-4.2.0
@@ -132,7 +123,7 @@ sops_refs:
   - docs/sops/backup.md
   - docs/sops/longhorn.md
   - docs/sops/verification-contents-not-shape.md
-generated: "2026-09-30"
+generated: "2026-10-22"
 ---
 
 # teslamate image 4.2.0 -> 4.3.0 (held as float "4.3")
@@ -231,7 +222,8 @@ kubectl -n home-automation exec deploy/teslamate-postgres -- sh -c \
 ```
 FAIL here (psql error, empty file) -> STOP; the §4.3 gate would have no baseline.
 
-2.3 Tonight's Longhorn backup of `teslamate-db` exists (the 03:00
+2.3 Fast form (exit 0 = FRESH, non-zero = STOP; live 2026-10-22: 19.0h FRESH): `.venv/bin/python3 runbooks/longhorn-backup-age.py --max-hours 26 teslamate-db`.
+Longer form: tonight's Longhorn backup of `teslamate-db` exists (the 03:00
 `daily-backup-all-volumes` RecurringJob; last three measured Completed at
 03:03-03:05 on 09-27/28/29). Newest Backup CR must be Completed and < 26 h old:
 ```bash
@@ -265,6 +257,9 @@ runbooks/update-marker.sh add teslamate home-automation 2 "teslamate 4.2.0->4.3.
 (Alertmanager silence per SOP Step 1 with `namespace=home-automation`,
 `alertname=~Kube(Pod|Deployment).*`, TTL 2h — TeslaMate has no app-specific alerts.)
 
+2.7 Start the non-retained MQTT subscriber (the command is in 4.8; run it NOW,
+before the push in 3.2, then `sleep 1`).
+
 ## 3. Steps
 
 3.1 Edit the pin (dry-tested on a scratch copy with BSD sed on macOS; the
@@ -292,7 +287,7 @@ Held target was the float "4.3"; resolved by digest to the GA tag 4.3.0
 (index sha256:516fc9f0...) and pinned to tag+digest. No DB migrations
 between v4.2.0 and v4.3.0 (identical migration sets).
 
-Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 EOF
 git commit --only kubernetes/apps/home-automation/teslamate/app/helmrelease.yaml -F /tmp/teslamate-msg.txt
 git log -1 --format=%s        # must be the subject above; amend before push if not
@@ -432,6 +427,28 @@ Report in the morning summary; a failure here is §5.1.
 
 Then: clear marker (`runbooks/update-marker.sh clear teslamate`), expire the silence.
 
+**4.8 MQTT / Home Assistant feed resumes (contents, not shape).** Retained
+`teslamate/cars/1/*` topics survive the roll, so a plain subscribe PASSES on the
+old pod's leftovers and cannot fail. Use a subscriber that skips retained
+messages (`-R`), started BEFORE the push (in 2.7) so it catches the new pod's
+boot republish (mosquitto clears the retain flag when forwarding to live
+subscribers; checked live 2026-10-22: anonymous `mosquitto_sub` works in
+`deploy/mosquitto -c app`, 60+ topics under `teslamate/cars/1/`, a fresh `-R`
+subscribe with no publisher prints nothing = the negative control):
+```bash
+# 2.7 (before step 3.2 push):
+kubectl exec -n home-automation deploy/mosquitto -c app -- \
+  mosquitto_sub -h localhost -t 'teslamate/cars/1/+' -v -R -W 1500 > /tmp/tm-mqtt.log 2>/dev/null &
+# 4.8 (at T+10 min):
+wc -l < /tmp/tm-mqtt.log; grep -c -E '^teslamate/cars/1/(state|battery_level|display_name) ' /tmp/tm-mqtt.log
+```
+PASS: lines >= 10 and the grep >= 1 (boot republish reached the broker from the
+new pod). FAIL shape: 0 lines. A 0 here with 4.3/4.4/4.6 all PASS is a HOLD, not a
+rollback: leave 4.3.0 running, report "MQTT republish unseen" (the subscriber may
+have been started too late or the kubectl exec died); re-check at T+30 min. Roll
+back only if 4.6 also failed. HA-side freshness (tesla sensors `last_changed` after
+the next car event) is the next-sweep soak, as in `home-assistant-2026.10.1`.
+
 ## 5. Rollback
 
 **5.1 Normal rollback (git revert — nothing forward-only happened; §4.3 line 1 unchanged):**
@@ -463,13 +480,8 @@ expected per §1; means upstream shipped something the file-set diff did not sho
 
 ## 6. Interference notes
 
-- **Same HR file as `app-template-5.2.1`** (Batch A): its sed touches the chart
-  line, this plan the image line. Textually compatible. Its Batch A change is
-  label-only and does not roll teslamate, but this plan rolls it, and that
-  plan's §4 whole-fleet generation gate would print `GEN_CHANGED
-  home-automation/deployment/teslamate`; two upgrades of one HR in one night also
-  blur both plans' attribution. Never the same night; reciprocal
-  `conflicts_with` entry added to `app-template-5.2.1.md` (2026-10-01).
+- The chart is already app-template 5.3.0 (the former `app-template-5.2.1` plan
+  is done and removed from `conflicts_with` 2026-10-22).
 - **`talos-linux-1.14.2`** (exclusive, sun-attended, three node reboots) would
   reschedule teslamate and teslamate-postgres; never the same slot. Its
   `exclusive: true` enforces this; listed in `conflicts_with` for the record.
@@ -483,7 +495,7 @@ expected per §1; means upstream shipped something the file-set diff did not sho
   mosquitto-internal — identical to any pod restart; HA discovery is off. Do not
   pair with a mosquitto change the same night (none open today).
 - **Grafana** reads the same DB via datasource `TeslaMate`; no change there. The
-  §4.5 gate reads Prometheus — hence `kube-prometheus-stack-91.4.1` in
+  §4.5 gate reads Prometheus — hence `kube-prometheus-stack-92.2.0` / `92.10.1` in
   `conflicts_with`.
 - Human-gated because `capability_change: true` (new routes/settings actions);
   interruption is ~2 min of the LAN-only UI and a gap in position logging, which

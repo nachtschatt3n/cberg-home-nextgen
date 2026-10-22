@@ -27,14 +27,8 @@ touches:
     - credentials                     # household password manager: every family client loses sync for the roll gap
 depends_on: []
 conflicts_with:
-  - app-template-5.2.1                # Batch A edits THIS helmrelease.yaml (chart 5.1.0) and its §4 asserts vaultwarden keeps the
-                                      # SAME pod/generation — same night = merge conflict + a false GEN_CHANGED abort
-  - kube-prometheus-stack-91.9.0      # §4 reads Prometheus (shared instrument); kps lists every Prometheus reader
-  - coredns-1.48.2                    # its §4 gates on min_over_time(probe_success{probe_class="http"}) incl. http-vaultwarden;
-                                      # our Recreate gap would fail that gate and vice versa (a DNS fault fails ours)
-  - chart-patches-coredns-reloader-blackbox  # rolls the blackbox exporter that produces our CONTROL series, and its
-                                      # premise/§4 read probe http-vaultwarden
-  - nextcloud-fleet-35.0.1            # its §2.5 Alertmanager silence is office-wide -> would hide VaultwardenHttpProbe*
+  - kube-prometheus-stack-92.10.1     # sec 4 reads Prometheus (shared instrument); same-night kps bump invalidates the CONTROLs
+  - kube-prometheus-stack-92.2.0      # same reason (second open kps plan)
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. helmrelease/vaultwarden (same object)
   - flux-oci-chart-sources            # rewrites the bjw-s chart source block of this HR (same spec.chart block)
 exclusive: false
@@ -49,8 +43,8 @@ rollback_class: git-revert            # MEASURED from upstream code (§1.3c): th
                                       # boots on the migrated DB. Data fallback (§5.B/§5.C) is a named VACUUM copy + the
                                       # nightly Longhorn backup — it is a contingency, not the rollback path.
 finding_refs: [F-68aca77f]            # version finding "vaultwarden: image vaultwarden/server 1.37.3 → 1.37.4 (patch)"
-                                      # (F-11bb688f = the chart 5.2.1 leg, owned by app-template-5.2.1, NOT this plan)
-review: null
+                                      # (F-11bb688f = the separate chart leg, NOT this plan)
+review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: needs-fix (bookkeeping only: dead conflict ref, section 6 prose, backup-time window) -> fixed by planner; technical core verified (1.37.4 newest stable, additive migration with down.sql, prelogin gate can fail, backup fresh); premises 6/6
 premises:
   - id: live-image-is-1.37.3
     why: >-
@@ -88,10 +82,8 @@ premises:
       refuses python3, so FRESHNESS is the §2.6 longhorn-backup-age.py gate.
     run: kubectl get backups.longhorn.io -n storage -l backup-volume=vaultwarden-data -o jsonpath='{.items[*].status.state}'
     expect_contains: Completed
-status: draft
-window: null                          # planner recommendation (window agent decides): first attended slot without a declared
-                                      # conflict, e.g. sat-attended:2026-10-10 next to jellyfin-12.1 (disjoint ns/objects;
-                                      # git-revert class, so no backup-restore stacking) — or an operator NOW run (§1.4).
+status: vetted
+window: null                          # window agent decides; operator NOW request 2026-10-22, unattended-capable (sec 0)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md
@@ -100,6 +92,7 @@ sops_refs:
   - docs/sops/verification-contents-not-shape.md
   - docs/sops/vulnerability-disclosure.md
 generated: "2026-10-07"
+refreshed: "2026-10-22"   # operator NOW request; live=1.37.3, newest stable upstream=1.37.4 (re-verified, no newer release/prerelease)
 ---
 
 # vaultwarden: image 1.37.3 -> 1.37.4 (one additive SQLite migration; API/flag removals N/A to our config)
@@ -109,7 +102,7 @@ generated: "2026-10-07"
 `office/vaultwarden` is the household password manager: bjw-s app-template 5.1.0, one
 Deployment (`strategy: Recreate`), image `vaultwarden/server:1.37.3`, SQLite at
 `/data/db.sqlite3` on the RWO `longhorn-static` volume `vaultwarden-data` (10 Gi, 2 replicas,
-nightly Longhorn backup via `storage/daily-backup-all-volumes` @ 03:00). Exposed only on
+nightly Longhorn backup via `storage/daily-backup-all-volumes` @ 23:00 UTC). Exposed only on
 `envoy-internal` (HTTPRoute `office/vaultwarden`, `sectionName: https`), Homepage-registered,
 no Authentik in front (vaultwarden does its own auth). Blackbox probe `monitoring/http-vaultwarden`
 hits `/alive` through the full DNS -> Envoy -> route path. Renovate PR #242 is a one-line tag
@@ -165,18 +158,32 @@ e. `/vaultwarden backup` (built into the binary, `src/main.rs` @1.37.4) does
 ### 1.4 Security driver (detail NOT in this file)
 
 The upstream release is also flagged by upstream as security-relevant. Per
-`docs/sops/vulnerability-disclosure.md` the specifics stay off this public file. There is no
-security finding for it yet (`policy-cli.py finding list --grep vaultwarden` shows only the
-version rows and two AR-029 scanner rows, 2026-10-07). **Coordinator action:** record one with
-`policy-cli.py finding add` and set `security_ref:` here; it argues for the earliest attended
-slot or an operator NOW run rather than a far-out Sunday.
+`docs/sops/vulnerability-disclosure.md` the specifics stay off this public file; they live on the
+DB record referenced by `security_ref` (F-3ee3a4fa). `finding_refs` carries the version finding
+F-68aca77f (re-checked 2026-10-22 via `policy-cli.py finding list --grep vaultwarden`). The
+security driver argues for the earliest slot, hence the operator NOW run.
 
 ### 1.5 Verdict on the hold
 
 Mostly a false positive for *risk*: every upgrade note is N/A to our config, and the migration
 is additive and rollback-compatible. It is NOT a false positive for *autonomy*: the release
 removes client-facing behaviour (§1.2) on the household credential store, so it stays
-HUMAN-GATED (operator GO, attended — the operator also does the §4.6 real login).
+HUMAN-GATED (operator GO given 2026-10-22; the §4.6 real login is an operator follow-up).
+
+## 0) UNATTENDED RUN RULES (refresh 2026-10-22, operator away)
+
+Operator GO for this plan was given by the 2026-10-22 NOW request (capability_change stays
+`true` and honest; the GO substitutes for the attended gate). Newest stable upstream re-verified
+2026-10-22: `gh api repos/dani-garcia/vaultwarden/releases` -> 1.37.4 (prerelease=false) is the
+head; 1.37.3 is live. Stop-safe contract:
+- ABORT (change nothing, report) if ANY premise, 2.2, 2.3, 2.5 or 2.6 fails, or sec 3.2 shows `mig-before` != `0 0`.
+  Everything up to and including 3.2 is non-mutating for the app (3.2 only writes a VACUUM copy).
+- Section 4.6 (human login) is NOT a blocker unattended: run the credential-free gates 4.1-4.5 + CONTROLs;
+  leave 4.6 as a follow-up item for the operator. FAIL of 4.1-4.5 -> execute 5.A automatically.
+  A failed 4.4a/4.4b -> do NOT auto-restore (5.B is operator break-glass): scale nothing, report, leave 1.37.3
+  reverted via 5.A, and keep `$B` (contains an encrypted-vault copy, mode 700) until the operator returns.
+- Never print DB contents, tokens, or exported vault data; only counts and pass/fail strings.
+- Do not run 22:00-23:30 UTC (Longhorn trim/cleanup/backup, see sec 6). 5.B is operator-only break-glass: NEVER auto-run it. Security detail lives under `security_ref` only (no CVE ids here).
 
 ## 2) Pre-checks
 
@@ -339,7 +346,7 @@ curl -s -o /dev/null -w 'current %{http_code}\n' -m 10 -X POST "https://$H/ident
 # PASS: "legacy 404" and "current 200". FAIL modes: legacy 200 = old binary; current non-200 = login broken for every client.
 ```
 
-**4.6 Real login (operator, attended — the auth-class contents assertion):** in a private
+**4.6 Real login (operator follow-up, non-blocking unattended — the auth-class contents assertion):** in a private
 browser window open `https://<host>/` (Homepage → Office → Vaultwarden), log in with a real
 account incl. 2FA, open one item, confirm it decrypts; on one phone, pull-to-sync and confirm
 "Last sync" updates. FAIL: login error / spinner / empty vault. (The DB counts above cannot
@@ -355,7 +362,7 @@ CONTROL: alertname VaultwardenHttpProbeAbsent — not firing (guards the probe_s
 
 ```bash
 # 4.7 soak: re-read 4.2 + the probe_success CONTROL 30 min after the roll; and the next morning
-#     confirm the 03:00 Longhorn backup of vaultwarden-data is Completed:
+#     confirm the 23:00 UTC Longhorn backup of vaultwarden-data is Completed:
 .venv/bin/python3 runbooks/longhorn-backup-age.py vaultwarden-data --max-hours 26
 
 # 4.8 hygiene — ONLY after 4.1-4.7 pass and the soak is clean: delete the off-cluster DB copies.
@@ -424,27 +431,23 @@ is applied by hand, Flux owns only `pv.yaml` + `pvc.yaml`. Loses up to ~1 day of
 ## 6) Interference notes
 
 - **HUMAN-GATED by design** (`capability_change: true`): removed API routes, removed client
-  flags, newer web vault — user-visible. Needs an operator GO and an attended window; the
-  operator also performs §4.6. Do not set it `false` to reach SD-10/SD-11: feature loss is
+  flags, newer web vault — user-visible. Operator GO given 2026-10-22 (NOW request); runs
+  unattended per sec 0, the operator does sec 4.6 afterwards. Do not set it `false` to reach SD-10/SD-11: feature loss is
   exactly the case those exclude. Runs in ~30 min; no reboot; single pod.
-- **conflicts_with** carries: `app-template-5.2.1` (edits this very file and asserts this pod
-  does NOT roll — run these on different nights, either order; whichever lands second must
-  rebase its file edit), `kube-prometheus-stack-91.9.0` (our CONTROLs read Prometheus),
-  `coredns-1.48.2` and `chart-patches-coredns-reloader-blackbox` (both read/roll the
-  `http-vaultwarden` probe chain — our Recreate gap fails their gate, their DNS/exporter roll
-  fails ours), `nextcloud-fleet-35.0.1` (office-wide Alertmanager silence would hide
-  `VaultwardenHttpProbe*`), `helm-drift-detection` and `flux-oci-chart-sources` (both rewrite
-  this HelmRelease's spec). **Reciprocity is owed**: none of those plans lists
-  `vaultwarden-1.37.4` yet — the coordinator should add it on their side (`--validate` does not
-  check reciprocity).
+- **conflicts_with** carries: `kube-prometheus-stack-92.10.1` and `kube-prometheus-stack-92.2.0`
+  (our CONTROLs read Prometheus; a same-night kps bump invalidates the instrument),
+  `helm-drift-detection` and `flux-oci-chart-sources` (both rewrite this HelmRelease's spec).
+  **Reciprocity is owed**: none of those plans lists `vaultwarden-1.37.4` yet; the coordinator
+  should add it on their side (`--validate` does not check reciprocity).
 - `office` namespace co-tenants (sure, nextcloud, penpot, paperless, affine, mealie, …) are
   not touched: separate pods, PVCs and DBs; vaultwarden shares no database, cache or secret with
   them. Reloader watches `vaultwarden-secret`; this plan does not touch the Secret, so no
   second roll.
-- **Do not run inside 02:00-03:30 local**: global `filesystem-trim` (02:00), `snapshot-cleanup`
-  (02:30) and `daily-backup-all-volumes` (03:00) act on `vaultwarden-data`; a Longhorn backup
-  snapshot racing the migration is harmless for SQLite-in-WAL but muddies §5.C's restore point.
-  The attended day windows avoid this automatically.
+- **Do not run 22:00-23:30 UTC** (live Longhorn RecurringJobs, verified `kubectl get cronjob -n storage`):
+  `global-filesystem-trim` 22:00 UTC, `global-snapshot-cleanup` 22:30 UTC and
+  `daily-backup-all-volumes` `0 23 * * *` UTC (= 00:00/01:00 Berlin) act on `vaultwarden-data`.
+  A snapshot/backup racing the migration is harmless for SQLite but muddies the 5.C restore point.
+  Outside that band an unattended nightly runner (03:30 Berlin) is clear.
 - No shared infra is restarted. Envoy, CoreDNS, cert-manager, Longhorn engine: untouched.
 - The pre-upgrade restore point `/data/db_<UTC>.sqlite3` stays on the PVC (and therefore inside
   every later Longhorn backup). That is intended; it is the same data the live DB holds.

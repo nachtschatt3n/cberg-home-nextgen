@@ -10,7 +10,7 @@ also_covers: [paperless-ngx]             # SAME image, SAME commit. scan-inbox-v
                                          # row as unplanned and dispatch a second planner for
                                          # the identical bump (F-dc4066f9 / F-d71bc523 shape).
 pr: 308                                  # feat(container): update ghcr.io/paperless-ngx/
-                                         # paperless-ngx ( 3.2.1 → 3.3.0 ) — touches
+                                         # paperless-ngx ( 3.2.1 → 3.3.3 ) — touches
                                          # helmrelease.yaml + validator-deployment.yaml,
                                          # all 4 checks green (Flate Render Gate SUCCESS).
                                          # NOT merged by this plan: §3 commits the tag move
@@ -20,14 +20,14 @@ kind: image
 current: "3.2.1"                         # live-verified 2026-10-07: BOTH deployments run
                                          # ghcr.io/paperless-ngx/paperless-ngx:3.2.1;
                                          # paperless.version 3.2.1
-target: "3.3.0"                          # ghcr index digest sha256:6b94799bc769a063b3340cc5847402e626d4d91d29a295a8e747f8e9bead4207
+target: "3.3.3"                          # REFRESHED 2026-10-22 (was 3.3.0; plan_id/filename kept per README). ghcr index digest sha256:dba0242c1df1843643df4eb50ce5639f3a7900f414879088fd5bed8eaf2d456d == `latest` (read 2026-10-22), GitHub release v3.3.3 prerelease=false
                                          # == the digest ghcr `latest` resolves to
-                                         # (read 2026-10-07) -> stable channel
+                                         # (read 2026-10-22) -> stable channel
 update_type: minor
 risk: medium                             # Three ADDITIVE, reversible Django migrations
                                          # (CreateModel + 2 nullable AddField) on the only
                                          # copy of the document DB, plus a forced full
-                                         # tantivy index rebuild (SCHEMA_VERSION 2 -> 3) at
+                                         # tantivy index rebuild (SCHEMA_VERSION 2 -> 4 at 3.3.3; v3 was 3.3.0's barcodes field) at
                                          # container start. Same shape as paperless-ngx-3.2.0,
                                          # which executed green 2026-09-26 (a94d749e).
 est_duration_min: 60                     # 50 (the executed 3.2.0 plan's measured budget:
@@ -38,8 +38,8 @@ touches:
   namespaces: [office]
   resources:
     - helmrelease/paperless-ngx                  # values.image.tag + 3 temporary raises (§3.2)
-    - deployment/paperless-ngx                   # Recreate roll onto 3.3.0, then a 2nd roll (§3.8 restore)
-    - deployment/scan-inbox-validator            # image tag 3.2.1 -> 3.3.0 (Recreate)
+    - deployment/paperless-ngx                   # Recreate roll onto 3.3.3, then a 2nd roll (§3.8 restore)
+    - deployment/scan-inbox-validator            # image tag 3.2.1 -> 3.3.3 (Recreate)
     - kustomization/paperless-ngx                # namespace office (NOT flux-system)
     - pvc/paperless-data                         # tantivy index under data/index REBUILT in place
     - deployment/paperless-db                    # SCHEMA ONLY: documents 0027, paperless 0017+0018
@@ -55,7 +55,7 @@ depends_on: []
 conflicts_with:
   - paperless-db-13.0.2          # HARD. Scales deployment/paperless-ngx to 0, suspends this HR + KS,
                                  # one-way MariaDB datadir conversion of the SAME DB this plan migrates.
-  - kube-prometheus-stack-91.9.0 # §4 CONTROL reads Prometheus (restart counter, memory alert) —
+  - kube-prometheus-stack-92.10.1 # (was 91.9.0, plan retired) §4 CONTROL reads Prometheus (restart counter, memory alert) —
                                  # the window's instrument is shared infra (README rule).
   - redis-fleet-8.10.2           # restarts deployment/paperless-redis (celery broker + the #14189
                                  # mail-fetch cache lock) AND lists deployment/paperless-ngx; it would
@@ -69,13 +69,13 @@ conflicts_with:
                                  # remediation OFF on this HR for the duration of the roll.
   - flux-reconciler-impersonation  # re-wires every Kustomization's reconciler identity incl. office.
 exclusive: false
-security_ref: null                       # Version-currency driver; the brief carried no
+security_ref: F-888c3d22                     # Version-currency driver; the brief carried no
                                          # security evidence. Note only (ids, no detail):
                                          # the AR-029 rows F-e6b70b55 and F-46d1bfdc are
                                          # pinned to the :3.2.1 tag string and will lapse
                                          # / re-evaluate when the tag moves. Detail stays
                                          # on the finding records.
-capability_change: true                  # HONEST true. 3.3.0 ships new features and API
+capability_change: true                  # HONEST true. 3.3.3 ships new features and API
                                          # surface (#14276 stored barcode contents + a new
                                          # documents_documentbarcode model and API/search
                                          # field; #14067 separate embedding API key; #14202
@@ -89,25 +89,27 @@ rollback_class: git-revert               # Nothing forward-only: all three migra
                                          # Django-generated reverses (CreateModel ->
                                          # DeleteModel, AddField -> RemoveField), and the
                                          # index self-heals on downgrade (3.2.1's
-                                         # needs_rebuild() sees schema_version 3 != 2).
+                                         # needs_rebuild() sees schema_version 4 != 2).
                                          # The §3.1 logical dump is INSURANCE for one
                                          # anomaly only — a migration that half-applies on
                                          # MariaDB (non-transactional DDL) — see §5.3.
-finding_refs: [F-b40c9350, F-6b6c515a]   # queried 2026-10-07 with SWEEP_PG_DSN up:
+finding_refs: [F-b40c9350, F-6b6c515a, F-888c3d22]   # first queried 2026-10-07 (titles then read 3.3.0; PR #308 retargeted to 3.3.3 -- re-query before closing) with SWEEP_PG_DSN up:
                                          # F-b40c9350 "scan-inbox-validator: image
-                                         # ghcr.io/paperless-ngx/paperless-ngx 3.2.1 → 3.3.0
+                                         # ghcr.io/paperless-ngx/paperless-ngx 3.2.1 → 3.3.3
                                          # (minor)" (version, status new) and F-6b6c515a
-                                         # "paperless-ngx: image ... 3.2.1 → 3.3.0 (minor)"
+                                         # "paperless-ngx: image ... 3.2.1 → 3.3.3 (minor)"
                                          # (version, status new). Both are answered by this
                                          # one commit.
-review: null
-status: draft
+review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: 3 rounds; schema v2->4, rollback seds, CA3 WARN-only, unattended stop rule, CA5/CA8 false-FAIL gates fixed by planner; premises 13/13
+status: vetted
 window: null                             # Planner note, not a claim: HUMAN-GATED
                                          # (capability_change), attended, no reboot; sized
                                          # for a sat-attended slot (90 min: 60 of work +
-                                         # 30 rollback budget). NOT sat-attended:2026-10-24
-                                         # (holds paperless-db-13.0.2) and NOT the same
-                                         # night as kube-prometheus-stack-91.9.0.
+                                         # 30 rollback budget). Operator may be away: the plan
+                                         # carries an unattended stop rule (3.5: STILL_NOT_READY
+                                         # at 660 s -> run 5.2 unprompted). paperless-db-13.0.2
+                                         # already executed (DB on 13.0.2). NOT the same night
+                                         # as kube-prometheus-stack-92.10.1 / redis-fleet-8.10.2.
 premises:
   - id: app-pin-is-3.2.1
     why: "current: claims 3.2.1 for the app. If the cluster already moved, every baseline in section 2 is wrong."
@@ -153,10 +155,10 @@ premises:
     why: "The migrations write to the only copy of the document DB."
     run: "kubectl get volume -n storage paperless-db-data -o jsonpath='{.status.state} {.status.robustness}'"
     expect_exact: "attached healthy"
-  - id: db-still-on-12.3.3
-    why: "If paperless-db-13.0.2 has run, every DB baseline here predates a datadir conversion and must be re-taken; the dump procedure in 3.1 was written against 12.3.3."
+  - id: db-on-13.0.2
+    why: "paperless-db-13.0.2 EXECUTED 2026-10-21/22 (REFRESH). The dump in 3.1 uses mariadb-dump (verified present in the 13.0.2 pod 2026-10-22). If the DB is not on 13.0.2 the baselines here are from a different engine."
     run: "kubectl get deploy -n office paperless-db -o jsonpath='{.spec.template.spec.containers[0].image}'"
-    expect_exact: "mariadb:12.3.3"
+    expect_exact: "mariadb:13.0.2"
   - id: validator-is-up
     why: "The validator must be healthy BEFORE the bump, or a post-upgrade failure cannot be attributed to the new image."
     run: "kubectl get deploy -n office scan-inbox-validator -o jsonpath='{.status.readyReplicas}'"
@@ -167,12 +169,30 @@ sops_refs:
   - docs/sops/backup.md
   - docs/sops/longhorn.md
   - docs/sops/verification-contents-not-shape.md
-generated: "2026-10-07"
+generated: "2026-10-22"
 ---
 
-# paperless-ngx + scan-inbox-validator 3.2.1 -> 3.3.0 (both pins, one commit)
+# paperless-ngx + scan-inbox-validator 3.2.1 -> 3.3.3 (both pins, one commit)
 
 ## 1) Summary & why held
+
+> **REFRESH 2026-10-22 (target moved 3.3.0 -> 3.3.3; operator: run unattended, stop-safe).**
+> Delta 3.3.0 -> 3.3.3 (release notes v3.3.1/.2/.3 read): bug fixes only. NO new
+> Django migration (compare v3.3.0...v3.3.3 touches no `migrations/` path), no
+> env-var changes. **CORRECTION (reviewer, verified in raw `_schema.py`): SCHEMA_VERSION
+> IS bumped, 3 at v3.3.0 -> 4 at v3.3.3** (v4 = "root documents only": earlier indexes may hold
+> document versions under their own id, so they are rebuilt without them; #14422). Live sentinel
+> on 3.2.1 is `schema_version 2`, so 3.2.1 -> 3.3.3 is ONE rebuild (v2 -> v4); CA1 and the
+> rollback confirm text below assert 4 / 2. #14379 (retry an interrupted rebuild) leaves a
+> rebuild-in-progress marker file until a rebuild completes, so an interrupted rebuild is
+> retried at next boot. v3.3.2 is flagged by upstream as a security release (advisory ref in
+> `security_ref`, detail DB-only). v3.3.1 adds "retry an interrupted index rebuild".
+> So everything below that says 3.3.0-specific (migrations 0027/0017/0018, index rebuild,
+> admin login wrap) stays true for 3.2.1 -> 3.3.3. `paperless-db-13.0.2` has EXECUTED
+> (live `paperless-db` = mariadb:13.0.2): Pre-check 2.x must still re-verify DB health
+> and a fresh Longhorn backup (`runbooks/longhorn-backup-age.py`) AFTER that conversion.
+> Never touch the CIFS PVCs (consume/inbox/media). Unattended rule: any failed premise or
+> verification gate -> execute section 5 rollback, do not improvise.
 
 ### 1.1 What moves
 
@@ -222,7 +242,8 @@ start (s6 `init-migrations`), **before** the index check
 
 ```python
 # v3 - barcodes JSON field for stored barcode contents
-SCHEMA_VERSION: Final[int] = 3
+# v4 - root documents only (3.3.1+, #14422)
+SCHEMA_VERSION: Final[int] = 4   # v3.3.3 (was 3 at v3.3.0)
 ```
 
 Live sentinel 2026-10-07: `{"schema_version": 2, "language": "de",
@@ -235,7 +256,7 @@ and the chart's `startupProbe` is a `tcpSocket` on 8000 with a 150 s budget.
 order is `wipe_index` → `tantivy.Index(...)` → `_write_sentinels()` → the
 `add_document` loop → `commit`. Its `except BaseException` restores only the
 **in-memory** index pointer. So a rebuild that is killed partway (probe, OOM, node event) leaves a
-v3 sentinel over a partial index. The next boot then comes up Ready on it. §4 CA1
+v4 sentinel over a partial index (v3.3.1+ also leaves a rebuild marker that retries it). The next boot then comes up Ready on it. §4 CA1
 (index-side membership) is the gate for this. The sentinel alone is not.
 
 Measured budget (`docs/sops/paperless.md` §6a.4): the 3.1.3→3.2.1 rebuild was
@@ -248,12 +269,12 @@ that SOP with the three raises that executed cleanly on 2026-09-26.
 - #14276: barcode contents can be stored, listed and searched. This is **off by
   default**: `BarcodeConfig.barcode_store_values` = config row (NULL after 0018) →
   `settings.CONSUMER_STORE_BARCODE_VALUES` = `PAPERLESS_CONSUMER_STORE_BARCODE_VALUES`,
-  which is unset. So 3.3.0 changes nothing at ingest here. §4 CA7 asserts it.
+  which is unset. So 3.3.3 changes nothing at ingest here. §4 CA7 asserts it.
 - #14270: `admin.site.login = secure_admin_login(admin.site.login)`, and the route
   is anchored `^admin/`. The `/admin/` path is reachable on the **public edge**
   (HTTPRoute → `envoy-external`, no SecurityPolicy). Measured on 3.2.1:
   `GET /admin/login/` → **200**, which is Django's own password form and sidesteps
-  allauth MFA. After 3.3.0 an unauthenticated request should be redirected to the
+  allauth MFA. After 3.3.3 an unauthenticated request should be redirected to the
   allauth login instead. This tightens security. §4 CA8 asserts it.
 - #14356: ProcessedMail owner always follows the mail-rule owner.
 - #14343: `PAPERLESS_LOGROTATE_MAX_SIZE/_BACKUPS`, `PAPERLESS_EMAIL_PORT`,
@@ -299,11 +320,11 @@ TOKEN=$(curl -s --max-time 20 "https://ghcr.io/token?scope=repository:paperless-
   | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))")
 DIG=$(curl -s --max-time 20 -o /dev/null -D - -H "Authorization: Bearer $TOKEN" \
   -H "Accept: application/vnd.oci.image.index.v1+json" \
-  "https://ghcr.io/v2/paperless-ngx/paperless-ngx/manifests/3.3.0" \
+  "https://ghcr.io/v2/paperless-ngx/paperless-ngx/manifests/3.3.3" \
   | awk 'tolower($1)=="docker-content-digest:"{print $2}' | tr -d '\r')
 echo "digest=$DIG"
-case "$DIG" in sha256:*) ;; *) echo "ABORT: 3.3.0 has no resolvable digest"; exit 1;; esac
-# Measured 2026-10-07: 3.3.0 -> sha256:6b94799b… (200); 3.3.0-nope -> 404, empty -> ABORT.
+case "$DIG" in sha256:*) ;; *) echo "ABORT: 3.3.3 has no resolvable digest"; exit 1;; esac
+# Measured 2026-10-22: 3.3.3 -> sha256:dba0242c… (200); 3.3.0-nope -> 404, empty -> ABORT.
 
 # 2.4 consume/inbox backlog EMPTY (a wedged file would be misread as an upgrade failure)
 B=$(kubectl exec -n office deploy/scan-inbox-validator -- sh -c \
@@ -330,9 +351,13 @@ print('DOCS', len(db)); print('MISSING_FROM_INDEX', len(db - idx))
 for t in ['rechnung','versicherung','vertrag','januar']:
     print('HITS', t, len(b.search_ids(t, None, search_mode=SearchMode.TEXT)))
 c = AIConfig(); print('AI', c.ai_enabled, c.llm_backend, c.llm_model, c.llm_embedding_backend, c.llm_embedding_model)
-" | grep -E '^(VERSION|DOCS|MISSING_FROM_INDEX|HITS|AI) ' > "$ST/app-pre.txt"
+from paperless_ai.embedding import get_configured_model_name
+from paperless_ai.indexing import read_store
+with read_store() as s: print('MISMATCH', s.config_mismatch(get_configured_model_name(c)))
+" | grep -E '^(VERSION|DOCS|MISSING_FROM_INDEX|HITS|AI|MISMATCH) ' > "$ST/app-pre.txt"
 cat "$ST/app-pre.txt"
 grep -q '^VERSION 3.2.1$' "$ST/app-pre.txt"           || { echo "ABORT: baseline not taken on 3.2.1"; exit 1; }
+grep -q '^MISMATCH ' "$ST/app-pre.txt"                || { echo "ABORT: CA6 MISMATCH baseline missing"; exit 1; }
 grep -q '^MISSING_FROM_INDEX 0$' "$ST/app-pre.txt"    || { echo "ABORT: index already incomplete BEFORE the upgrade"; exit 1; }
 [ "$(grep -c '^HITS ' "$ST/app-pre.txt")" -eq 4 ]     || { echo "ABORT: hit baseline incomplete"; exit 1; }
 
@@ -355,7 +380,7 @@ writes an empty file. Every `grep -q`/`awk` limb above then exits 1, so an empty
 baseline cannot pass.
 
 ```bash
-runbooks/update-marker.sh add paperless-ngx office 2 "3.2.1->3.3.0 + migrations 0027/0017/0018 + index rebuild"
+runbooks/update-marker.sh add paperless-ngx office 2 "3.2.1->3.3.3 + migrations 0027/0017/0018 + index rebuild"
 ```
 
 ## 3) Steps
@@ -372,7 +397,7 @@ characters become `?`, which is how a Nextcloud rollback floor was destroyed on
 set -euo pipefail
 ST=/private/tmp/claude-501/scan-inbox-validator-3.3.0
 mkdir -p ~/backups/paperless-db && chmod 0700 ~/backups/paperless-db
-DUMP=~/backups/paperless-db/paperless-pre-3.3.0-$(date +%Y%m%d%H%M).sql
+DUMP=~/backups/paperless-db/paperless-pre-3.3.3-$(date +%Y%m%d%H%M).sql
 printf '%s\n' "$DUMP" > "$ST/dump-path"          # §5.3 reads THIS file, never $DUMP
 kubectl -n office exec deploy/paperless-db -- sh -c \
   'mariadb-dump --default-character-set=utf8mb4 --single-transaction --routines --events \
@@ -408,7 +433,7 @@ The raises match the executed `paperless-ngx-3.2.0` plan (§3.2 there; restored 
 
 | Deadline | Stock | For this roll | Why |
 |---|---|---|---|
-| kubelet `startupProbe` | 30 × 5 s = 150 s | **120 × 5 s = 600 s** | kills the container mid-rebuild → v3 sentinel over a partial index |
+| kubelet `startupProbe` | 30 × 5 s = 150 s | **120 × 5 s = 600 s** | kills the container mid-rebuild → v4 sentinel over a partial index (v3.3.1+ also leaves a rebuild marker that retries it) |
 | Helm `spec.timeout` | 5m (unset) | **20m** | Helm would fail the release under a long rebuild |
 | `upgrade.remediation` | retries 1 | **retries 0, remediateLastFailure false** | a Flux rollback mid-rebuild would roll 3.2.1 onto a half-migrated DB |
 
@@ -428,7 +453,7 @@ edits = [
  ("    image:\n      repository: ghcr.io/paperless-ngx/paperless-ngx\n      tag: \"3.2.1\"\n",
   "    probes:\n      startup:\n        spec:\n"
   "          failureThreshold: 120     # RESTORE to 30 in step 3.8\n"
-  "    image:\n      repository: ghcr.io/paperless-ngx/paperless-ngx\n      tag: \"3.3.0\"\n"),
+  "    image:\n      repository: ghcr.io/paperless-ngx/paperless-ngx\n      tag: \"3.3.3\"\n"),
 ]
 for old, new in edits:
     assert s.count(old) == 1, f"anchor not unique/found: {old[:50]!r}"
@@ -438,7 +463,7 @@ v = pathlib.Path("kubernetes/apps/office/paperless-ngx/app/validator-deployment.
 t = v.read_text()
 old = "          image: ghcr.io/paperless-ngx/paperless-ngx:3.2.1\n"
 assert t.count(old) == 1, "validator anchor not unique/found"
-v.write_text(t.replace(old, "          image: ghcr.io/paperless-ngx/paperless-ngx:3.3.0\n"))
+v.write_text(t.replace(old, "          image: ghcr.io/paperless-ngx/paperless-ngx:3.3.3\n"))
 print("FORWARD EDIT OK")
 PY
 ```
@@ -464,24 +489,24 @@ Dry-tested 2026-10-07 on a scratch copy of both files (macOS). The exact result:
      image:
        repository: ghcr.io/paperless-ngx/paperless-ngx
 -      tag: "3.2.1"
-+      tag: "3.3.0"
++      tag: "3.3.3"
 --- validator-deployment.yaml
 34c34
 <           image: ghcr.io/paperless-ngx/paperless-ngx:3.2.1
->           image: ghcr.io/paperless-ngx/paperless-ngx:3.3.0
+>           image: ghcr.io/paperless-ngx/paperless-ngx:3.3.3
 ```
 
 A second run aborts on the remediation anchor **before** writing anything, so the
 edit is not partially re-applied. Proof that the probe key reaches the container:
 `helm template gabe565/paperless-ngx --version 0.24.1` with the edited values
-renders `image: ghcr.io/paperless-ngx/paperless-ngx:3.3.0` and `startupProbe:
+renders `image: ghcr.io/paperless-ngx/paperless-ngx:3.3.3` and `startupProbe:
 failureThreshold: 120, periodSeconds: 5`. Liveness and readiness stay at
 3 × 10 s (rendered 2026-10-07).
 
 ### 3.3 Prove scope, then validate
 
 ```bash
-grep -n '3\.3\.0' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml \
+grep -n '3\.3\.3' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml \
                   kubernetes/apps/office/paperless-ngx/app/validator-deployment.yaml
 # expect EXACTLY two lines (helmrelease tag, validator image)
 grep -rn 'paperless-ngx:3\.2\.1\|tag: "3\.2\.1"' kubernetes/apps/office/paperless-ngx/ && { echo "STOP: a 3.2.1 pin survived"; exit 1; } || true
@@ -496,14 +521,14 @@ kubeconform -summary -exit-on-error -ignore-missing-schemas kubernetes/apps/offi
 ST=/private/tmp/claude-501/scan-inbox-validator-3.3.0
 MSG=$ST/msg-forward-$(date +%s).txt
 cat > "$MSG" <<'EOF'
-feat(container): update ghcr.io/paperless-ngx/paperless-ngx ( 3.2.1 -> 3.3.0 )
+feat(container): update ghcr.io/paperless-ngx/paperless-ngx ( 3.2.1 -> 3.3.3 )
 
 Moves the app (HelmRelease values) and scan-inbox-validator pins together
 (image parity, docs/sops/paperless.md). Supersedes Renovate PR #308.
 
-3.3.0 applies three additive Django migrations at startup (documents 0027
+3.3.3 applies three additive Django migrations at startup (documents 0027
 DocumentBarcode, paperless 0017/0018 nullable config columns) and bumps the
-tantivy SCHEMA_VERSION 2 -> 3, which rebuilds the full-text index before the
+tantivy SCHEMA_VERSION 2 -> 4, which rebuilds the full-text index before the
 webserver listens. Temporarily raised for this roll, restored in a follow-up:
 startup failureThreshold 30 -> 120, spec.timeout 20m, upgrade remediation off.
 
@@ -535,7 +560,7 @@ fts = re.findall(r'(?m)^          failureThreshold: ([0-9]+)', hr)
 assert len(tags) == 1 and len(fts) <= 1, (tags, fts)
 want, want_ft = tags[0], (int(fts[0]) if fts else 30)
 print("WANT tag=%s startup.failureThreshold=%d" % (want, want_ft))
-start = int(open(st + "/roll-start").read()); deadline = time.time() + 540
+start = int(open(st + "/roll-start").read()); deadline = time.time() + 660
 while time.time() < deadline:
     raw = subprocess.run(["kubectl","get","pods","-n","office","-l","app.kubernetes.io/name=paperless-ngx","-o","json"],
                          capture_output=True, text=True).stdout or '{"items":[]}'
@@ -562,7 +587,20 @@ kubectl logs -n office deploy/paperless-ngx -c paperless-ngx \
 The poll is the 3.2.0 plan's reviewed form. It waits for a pod whose **spec**
 matches the committed file, so the old Ready pod cannot satisfy it. If it prints
 `STILL_NOT_READY`, re-run the same block; it resumes from the files. Past 660 s
-total, go to §5. **Expected logs:** `Applying documents.0027_documentbarcode... OK`,
+total, go to §5.
+
+**UNATTENDED STOP RULE (operator away):** if the poll prints `STILL_NOT_READY` and
+`now - roll-start >= 660 s`, or `restarts` increments while not Ready, execute §5.2 (tag
+revert, budget kept) IMMEDIATELY without waiting for a person, then §5.1 only if the 3.3.3
+pod was ever Running, then the §3.5 poll on 3.2.1 and CA1 with the pre file. Any later FAIL
+in §4 that is not WARN/DEFERRED: same, roll back, record the reason in the close-out, stop.
+**WARN/DEFERRED gates (never roll back on these alone):** CA3 (needs scanner+operator), CA5
+`RAN 0` (mail lock, time), CA8 (no scripted status), the memory-alert CONTROL, and a
+Prometheus series not yet present for a pod < 5 min old. **Rollback-class FAILs:** floor
+(wrong image/not Ready), CA1, CA2, CA4, CA6 regression, CA7 only if it also shows
+BARCODE_ROWS > 0 (otherwise report, do not roll back), CA5 `ERRORS > 0`, restart counter > 0.
+
+**Expected logs:** `Applying documents.0027_documentbarcode... OK`,
 `Applying paperless.0017_... OK`, `Applying paperless.0018_... OK`, then
 `Search index schema version mismatch - rebuilding.`, then Ready. **Act, do not
 wait,** if `restarts` increments while not Ready. That is the probe killing the
@@ -605,15 +643,15 @@ git diff "$(cat "$ST/commit-forward.sha")^" -- kubernetes/apps/office/paperless-
 ```
 
 **GATE:** the diff against the pre-forward file shows **exactly one hunk:
-`-      tag: "3.2.1"` / `+      tag: "3.3.0"`**. This was dry-tested 2026-10-07 on
+`-      tag: "3.2.1"` / `+      tag: "3.3.3"`**. This was dry-tested 2026-10-07 on
 the scratch copy: forward then restore printed `33c33 < tag: "3.2.1" > tag:
-"3.3.0"` and nothing else. Any surviving `timeout:`, `retries: 0`,
+"3.3.3"` and nothing else. Any surviving `timeout:`, `retries: 0`,
 `remediateLastFailure` or `probes:` line means the restore is incomplete. Commit
 with `--only kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml`, check
 `git log -1 --format=%s` and `git show --stat HEAD`, then push. Subject:
-`fix(paperless-ngx): restore startup probe, helm timeout and upgrade remediation after 3.3.0 roll`.
+`fix(paperless-ngx): restore startup probe, helm timeout and upgrade remediation after 3.3.3 roll`.
 This changes the pod template, so a **second Recreate roll** follows. The index is
-already v3, so expect `Search index is up to date.` and a ~96 s start. Run
+already v4, so expect `Search index is up to date.` and a ~96 s start. Run
 `rm "$ST/roll-start"`, then the §3.5 poll again (it now wants threshold 30), then
 CA1 once more. Then confirm live:
 
@@ -631,11 +669,11 @@ Floor (necessary, not sufficient):
 kubectl get hr -n office paperless-ngx -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.history[0].chartVersion}{"\n"}'   # True 0.24.1
 kubectl get pods -n office -l 'app.kubernetes.io/name in (paperless-ngx,scan-inbox-validator)' \
   -o custom-columns='NAME:.metadata.name,IMAGE:.status.containerStatuses[0].image,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount'
-# BOTH running pods show ...:3.3.0 (SOP §6a.6 parity), READY true, RESTARTS 0.
+# BOTH running pods show ...:3.3.3 (SOP §6a.6 parity), READY true, RESTARTS 0.
 # Read the RUNNING pod's image (status), not rollout status — that green-lights the old generation.
 ```
 
-**CONTENTS ASSERTION 1: every document is in the rebuilt v3 index.** This is
+**CONTENTS ASSERTION 1: every document is in the rebuilt v4 index.** This is
 measured by the set difference between DB primary keys and the ids the **index**
 returns, compared to `$ST/app-pre.txt`.
 
@@ -668,8 +706,8 @@ a,b=load(st+"/app-pre.txt"),load(st+"/app-post.txt")
 ok=True
 def chk(c,m):
     global ok; print(("PASS " if c else "FAIL ")+m); ok&=c
-chk(b.get('VERSION')=='3.3.0', "version %s" % b.get('VERSION'))
-chk('"schema_version": 3' in b.get('SETTINGS',''), "sentinel v3")
+chk(b.get('VERSION')=='3.3.3', "version %s" % b.get('VERSION'))
+chk('"schema_version": 4' in b.get('SETTINGS',''), "sentinel v4 (3.3.3 SCHEMA_VERSION; a 3 would mean 3.3.0 code)")
 chk(b.get('MISSING_FROM_INDEX')=='0', "MISSING_FROM_INDEX %s" % b.get('MISSING_FROM_INDEX'))
 chk(int(b.get('DOCS',0)) >= int(a['DOCS']), "DOCS %s >= pre %s" % (b.get('DOCS'), a['DOCS']))
 for k in [k for k in a if k.startswith('HITS ')]:
@@ -680,7 +718,7 @@ PY
 ```
 
 PASS: every line `PASS`, exit 0. **What the guarded failure prints:** a rebuild
-killed after `_write_sentinels()` shows `VERSION 3.3.0`, sentinel v3 and `DOCS`
+killed after `_write_sentinels()` shows `VERSION 3.3.3`, sentinel v4 and `DOCS`
 unchanged, which are three green limbs, while `MISSING_FROM_INDEX` is large and
 `HITS … post=0`. That is exactly the shape the 3.2.0 review caught (§1.2(b)).
 `DOCS` is a database count and never touches the index. A missing
@@ -712,7 +750,7 @@ res=[("TABLES 75", g.get("TABLES")==["75"]),
      ("barcode table utf8mb4", (g.get("BARCODE_COLL") or [""])[0].startswith("utf8mb4")),
      ("BARCODE_ROWS 0 (store off)", g.get("BARCODE_ROWS")==["0"]),
      ("DOCROWS >= pre", int((g.get("DOCROWS") or ["0"])[0]) >= int(pre["DOCROWS"])),
-     ("CANARY == pre", g.get("CANARY")==[pre["CANARY"]]),
+     ("CANARY >= pre (mail may add rows; a drop = data loss)", int((g.get("CANARY") or ["0"])[0]) >= int(pre["CANARY"])),
      ("3 migrations recorded", len(mig)==3)]
 for m,c in res: print(("PASS " if c else "FAIL ")+m)
 raise SystemExit(0 if all(c for _,c in res) else 1)
@@ -725,7 +763,7 @@ errors, so `mariadb -e` aborts at that statement. The later rows never print and
 class) FAILs `NONUTF8MB4 0`. An empty `db-post.txt` FAILs every limb.
 
 **CONTENTS ASSERTION 3: the real consume path ingests AND indexes against schema
-v3.** This is an attended step. Scan a 2-3 page document on the ES-580W
+v3.** ATTENDED ONLY (see UNATTENDED note below). Scan a 2-3 page document on the ES-580W
 "paperless" preset (`docs/sops/paperless.md` §6.2). Do not re-feed a duplicate:
 `CONSUMER_DELETE_DUPLICATES=true` drops it silently. Do not use a near-blank page:
 under `OCR_MODE=force` it can ParseError and wedge the consumer.
@@ -745,11 +783,18 @@ print('SEARCHABLE', d.pk in get_backend().search_ids(d.title.split()[0], None, s
 PASS: a `moved -> consume` line, `NEWEST` added after the roll, `SEARCHABLE True`.
 This is the only gate that proves `add_or_update` writes against the v3 schema.
 An index that rejects writes reads `SEARCHABLE False`, and a dead validator shows
-no `moved` line. Fallback, only with no scanner access and strictly weaker:
-`documents.bulk_edit.reprocess([pk])` on the newest document, then the same
-`SEARCHABLE` check.
+no `moved` line.
 
-**CONTENTS ASSERTION 4: the validator's real code path works on 3.3.0.**
+**UNATTENDED: CA3 is WARN-ONLY / SKIPPED.** It needs the scanner and a person. When no
+operator is present, print `CA3 SKIPPED (unattended) - consume round-trip NOT proven` and
+carry that into the close-out; it neither passes nor fails the window and must never be
+reported green. Do NOT use `bulk_edit.reprocess([pk])` as a substitute: it re-OCRs and
+mutates a live document with no restore. The unattended substitutes are the read-only
+checks already in §4 (CA1 index membership incl. `MISSING_FROM_INDEX 0`, consumer logs
+showing no ERROR/Traceback since the roll, CA4 heartbeat). Operator completes CA3 on return;
+until then the close-out says 'consume write path unverified'.
+
+**CONTENTS ASSERTION 4: the validator's real code path works on 3.3.3.**
 pikepdf jumped 10.2.0 → 10.13.0. This exercises the exact calls the validator
 uses on a real PDF, not just an import, and checks the loop turns.
 
@@ -770,7 +815,7 @@ print('PIKEPDF', pikepdf.__version__, 'PY', sys.version.split()[0], 'PAGES', n, 
 ```
 
 PASS: `PAGES 1 REJECTS_BAD True HEARTBEAT ADVANCED` on a pod whose image is
-`:3.3.0` (floor). The two limbs guard different failures. `REJECTS_BAD True` is
+`:3.3.3` (floor). The two limbs guard different failures. `REJECTS_BAD True` is
 the validator's QC function: a pikepdf that opened garbage would pass broken
 scans to paperless. `PAGES 1` proves the happy path still counts pages. A loop
 that is Running but dead prints `FROZEN`; the liveness probe takes ~3 min to
@@ -794,11 +839,17 @@ for l in bad[:5]: print("  ", l[:200])
 PY
 ```
 
-PASS: `MAIL_CYCLES_RAN >= 1` **and** `ERRORS 0`. `MAIL_CYCLES_RAN` is the positive
-control on the same stream: `ERRORS 0` alone also reads 0 on a container that never
-ran a cycle. If `SKIPPED > 0` and `RAN 0`, the #14189 30-min cache lock is still
-held from the killed fetch, so re-run once the pod has been Ready > 35 min.
-`RAN 0` with `SKIPPED 0` is a FAIL.
+Outcomes (ONLY `ERRORS > 0` may trigger rollback):
+- `ERRORS > 0`: FAIL (rollback class).
+- `ERRORS 0` and `RAN >= 1`: PASS. `RAN` is the positive control on the same stream.
+- `ERRORS 0`, `RAN 0`, `SKIPPED > 0`: **WARN / DEFERRED**, not a failure. The #14189
+  30-min cache lock from the killed fetch is still held, and a fresh pod after the
+  Recreate roll (and after the §3.8 restore roll) shows exactly this. Record
+  `CA5 DEFERRED`, and re-check once the pod has been Ready > 35 min (a later run or the
+  operator, same block with `--since=45m`). Never roll back on it alone.
+- `ERRORS 0`, `RAN 0`, `SKIPPED 0`: **WARN / DEFERRED** if the pod has been Ready < 35 min
+  (cycle interval not yet elapsed); if Ready > 35 min it is a real stall: report it as
+  FAIL-REPORT (open a finding, do not auto-rollback; the app itself is healthy).
 
 **CONTENTS ASSERTION 6: the RAG store did not escalate to a full re-embed, and
 the AI row is intact.**
@@ -815,7 +866,9 @@ with read_store() as s: print('MISMATCH', s.config_mismatch(get_configured_model
 " | grep -E '^(AI|MISMATCH) '
 ```
 
-PASS: `MISMATCH False` and the `AI` line is byte-identical to the one in
+PASS: `MISMATCH` equals the `MISMATCH` line in `$ST/app-pre.txt` (expected `False` on
+3.2.1; if the baseline was already `True` that is pre-existing, not an upgrade FAIL; a
+`True` that was `False` before IS a FAIL) and the `AI` line is byte-identical to the one in
 `$ST/app-pre.txt`. A missing line counts as a FAIL.
 
 **CONTENTS ASSERTION 7: the barcode capability did NOT switch itself on.**
@@ -850,11 +903,15 @@ A `000` on both means the port-forward is dead, which is not a pass. This row
 documents a capability change. A 200 here is not an outage. It means #14270
 did not take effect, so report it.
 
+**CA8 is WARN-ONLY.** It has no scripted exit status: read the two printed lines.
+`ADMIN_LOGIN code=200`, or `000` on both lines (dead port-forward), print
+`CA8 WARN` into the close-out and NEVER trigger rollback. Only the operator decides.
+
 **CONTROL lines (the instruments these gates read):**
 
 ```
-CONTROL: metric kube_pod_container_status_restarts_total — for {namespace="office",container=~"paperless-ngx|validator"}: a series MUST exist for each CURRENT pod name (positive control: no series = FAIL, the instrument is blind) and every value MUST be 0 after the roll (a non-zero on paperless-ngx = the startupProbe killed the rebuild, the §1.2(b) trap). Measured present 2026-10-07: 1 series each, value 0.
-CONTROL: alertname ContainerMemoryLimitImminent — must NOT be firing for namespace office during/after the rebuild (working set > 97% of the 6Gi limit for 5m precedes an OOM-kill mid-rebuild). Rule: kubernetes/apps/monitoring/kube-prometheus-stack/app/container-memory-alerts.yaml.
+CONTROL: metric kube_pod_container_status_restarts_total — for {namespace="office",container=~"paperless-ngx|validator"}: a series MUST exist for each CURRENT pod name (positive control: no series for a pod Ready < 5 min = retry in 2 min, scrape lag; still none after 5 min = WARN instrument blind, fall back to the floor's RESTARTS column; never rollback on blindness alone) and every value MUST be 0 after the roll (a non-zero on paperless-ngx = the startupProbe killed the rebuild, the §1.2(b) trap). Measured present 2026-10-07: 1 series each, value 0.
+CONTROL (WARN-only, leading indicator; a real OOM shows as a restart): alertname ContainerMemoryLimitImminent — should NOT be firing for namespace office during/after the rebuild (working set > 97% of the 6Gi limit for 5m precedes an OOM-kill mid-rebuild). Rule: kubernetes/apps/monitoring/kube-prometheus-stack/app/container-memory-alerts.yaml.
 ```
 
 ```bash
@@ -876,10 +933,10 @@ kill $PF 2>/dev/null
 ## 5) Rollback
 
 `helm rollback` is **not** available (`maxHistory: 1`). Roll back forward through
-git. Order matters: **reverse the migrations while 3.3.0 code is still running**,
+git. Order matters: **reverse the migrations while 3.3.3 code is still running**,
 because 3.2.1 ships no 0027/0017/0018 files to reverse with.
 
-### 5.1 Reverse the migrations (only if the 3.3.0 pod is Running)
+### 5.1 Reverse the migrations (only if the 3.3.3 pod is Running)
 
 ```bash
 kubectl exec -n office deploy/paperless-db -- sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N -B -e "SELECT COUNT(*) FROM paperless.documents_documentbarcode;"'
@@ -891,18 +948,18 @@ kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- python3 /usr/src
 # expect [X] 0026, [ ] 0027, [X] 0016, [ ] 0017, [ ] 0018
 ```
 
-**If the 3.3.0 pod never reached Running**, skip 5.1. Leaving the migrations
+**If the 3.3.3 pod never reached Running**, skip 5.1. Leaving the migrations
 applied under 3.2.1 is safe, for these checked reasons. The two new config
 columns are `NULL`-able, so 3.2.1's INSERT/UPDATE (which do not name them)
 succeed. `documents_documentbarcode` has a DB-level FK to `documents_document`
 **without** `ON DELETE CASCADE`, because Django emulates CASCADE in Python.
 While that table is **empty** (CA2/§5.1 count), deleting a document is
 unaffected. Django ignores applied migrations it has no file for. Re-run 5.1 on
-the next 3.3.0 attempt.
+the next 3.3.3 attempt.
 
 ### 5.2 Revert the tags (keep the raised budget)
 
-`3.2.1` sees sentinel `schema_version 3 != 2` and **rebuilds the index back to
+`3.2.1` sees sentinel `schema_version 4 != 2` and **rebuilds the index back to
 v2** at startup. That uses the same sentinel-first ordering (3.2.1
 `_backend.py`), so the 600 s budget must still be in place. Do **not**
 `git revert` the forward commit; it would drop the budget. Edit the tags only:
@@ -912,14 +969,14 @@ cd /Users/mu/code/cberg-home-nextgen
 ST=/private/tmp/claude-501/scan-inbox-validator-3.3.0
 grep -q 'failureThreshold: 120' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml \
   || { echo "3.8 already restored: re-run the 3.2 python edit's three raises first (tag lines aside), then this block"; exit 1; }
-sed -i '' 's|^      tag: "3\.3\.0"$|      tag: "3.2.1"|' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml
-sed -i '' 's|^          image: ghcr\.io/paperless-ngx/paperless-ngx:3\.3\.0$|          image: ghcr.io/paperless-ngx/paperless-ngx:3.2.1|' \
+sed -i '' 's|^      tag: "3\.3\.3"$|      tag: "3.2.1"|' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml
+sed -i '' 's|^          image: ghcr\.io/paperless-ngx/paperless-ngx:3\.3\.3$|          image: ghcr.io/paperless-ngx/paperless-ngx:3.2.1|' \
   kubernetes/apps/office/paperless-ngx/app/validator-deployment.yaml
 [ "$(grep -c '^      tag: "3.2.1"$' kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml)" = 1 ] \
  && [ "$(grep -c 'paperless-ngx:3.2.1$' kubernetes/apps/office/paperless-ngx/app/validator-deployment.yaml)" = 1 ] \
  || { echo "ROLLBACK EDIT INCOMPLETE - not committing"; exit 1; }
 MSG=$ST/msg-rollback-$(date +%s).txt
-printf 'revert(paperless-ngx): app + scan-inbox-validator 3.3.0 -> 3.2.1 (rollback, startup budget kept raised)\n\nPlan: runbooks/maintenance/plans/scan-inbox-validator-3.3.0.md\n' > "$MSG"
+printf 'revert(paperless-ngx): app + scan-inbox-validator 3.3.3 -> 3.2.1 (rollback, startup budget kept raised)\n\nPlan: runbooks/maintenance/plans/scan-inbox-validator-3.3.0.md\n' > "$MSG"
 git commit --only kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml kubernetes/apps/office/paperless-ngx/app/validator-deployment.yaml -F "$MSG"
 git log -1 --format=%s && git show --stat HEAD && git push origin main
 rm -f "$ST/roll-start"; flux reconcile kustomization paperless-ngx -n office --with-source
@@ -974,15 +1031,15 @@ resort if the dump is unusable: the Longhorn backup of `paperless-db-data` that
   SOP rule (`paperless.md` §2, §6a.6), and PR #308 already moves both. A split
   would leave the validator on an image whose pikepdf the app no longer ships. That
   is harmless, but it is a divergence the SOP forbids for no gain.
-- **`paperless-db-13.0.2` (awaiting-go, sat-attended:2026-10-24) is a hard
-  exclusion.** It quiesces this app and converts the DB datadir one-way. Never the
+- **`paperless-db-13.0.2` has EXECUTED (live mariadb:13.0.2, refresh 2026-10-22); the
+  exclusion below is historical, kept until that plan file is retired.** It quiesces this app and converts the DB datadir one-way. Never the
   same slot. Ordering is free, but it is **better to run this plan first or well
   after**, not the night before. Its `still-on-12.3.3` premise and this plan's
-  `db-still-on-12.3.3` premise each re-check the other's precondition. That plan's
+  `db-on-13.0.2` premise each re-check the other's precondition. That plan's
   `conflicts_with` does not list this plan_id. `--validate` checks only that refs
   resolve, and the scheduler honours the field in either direction. Report the
   missing reciprocal ref as a repo correction; this plan does not edit it.
-- **`kube-prometheus-stack-91.9.0` (nightly:2026-10-08):** the CONTROL gates read
+- **`kube-prometheus-stack-92.10.1` (was 91.9.0, retired):** the CONTROL gates read
   Prometheus, so this is declared under `conflicts_with`.
 - **No Alertmanager silence, unlike 3.2.0.** The measured rebuild is 115 s
   (§6a.4), and the 600 s ceiling is under the live `for:` of
