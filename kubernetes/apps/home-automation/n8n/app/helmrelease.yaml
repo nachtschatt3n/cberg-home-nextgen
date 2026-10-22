@@ -21,8 +21,7 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 0
-      remediateLastFailure: false   # TEMP for plan n8n-2.39.8 (target 2.44.5) — restore retries: 3 after §4
+      retries: 3
   uninstall:
     keepHistory: false
   values:
