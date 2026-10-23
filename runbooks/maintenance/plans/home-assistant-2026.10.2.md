@@ -66,7 +66,7 @@ premises:
     run: >-
       kubectl get deploy mosquitto zigbee2mqtt -n home-automation -o jsonpath='{range .items[*]}{.metadata.name}={.status.readyReplicas} {end}'
     expect_exact: "mosquitto=1 zigbee2mqtt=1"
-status: vetted
+status: executed
 window: "now:2026-10-23"   # ON-DEMAND NOW run 2026-10-23 (run-now.py stamp; was None)
 review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: ready-for-go, 0 blocking; 2026.10.2 newest stable; premises 4/4
 sops_refs: [docs/sops/home-assistant-updates.md, docs/sops/application-update.md, docs/sops/longhorn-rwo-multi-attach.md, docs/sops/backup.md, docs/sops/verification-contents-not-shape.md]

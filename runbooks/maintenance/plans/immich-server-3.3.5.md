@@ -63,7 +63,7 @@ finding_refs: [F-6318cd5c, F-eff49af5]  # F-6318cd5c: security, fixable findings
                                         # ML findings (F-611ca4c7, F-6d0f4efc) belong to the sibling plan
                                         # immich-machine-learning-3.3.5, not here.
 review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: needs-fix with 0 blocking (ML-first ordering, helm remediation retries hazard, conflicts) -> fixed; v3.3.5 stable, single forward-only migration, dump+scratch-restore proof; premises 4/4
-status: vetted
+status: executed
 window: "now:2026-10-23"   # ON-DEMAND NOW run 2026-10-23 (run-now.py stamp; was None)
 premises:
   - id: server-image-is-v3.3.3

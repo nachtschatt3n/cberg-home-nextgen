@@ -79,8 +79,8 @@ premises:
     run: >-
       kubectl get volume home-assistant-config -n storage -o jsonpath='{.status.robustness}'
     expect_exact: "healthy"
-status: draft
-window: "sun-attended:2026-11-29"      # SCHEDULING DECISION FOR THE OPERATOR (section 1.1): the asked-for sun-attended:2026-10-18 shares the slot with nextcloud-fleet-35.0.1
+status: superseded
+window: null   # cleared 2026-10-23: superseded by PR #310 merge + home-assistant-2026.10.2 (executed)
                                       # (150 min, backup-restore) -> 235 min > 180 schedulable + RISK-CLASS STACKING. Every nearer weekend slot also fails: sat-attended
                                       # has 70 schedulable min (< this plan) and sun 10-25 (160 booked), 11-01 (talos, exclusive), 11-08 (nocodb, backup-restore),
                                       # 11-15 (longhorn, exclusive), 11-22 (flux-oci-chart-sources, conflicts_with) are taken. 11-29 is the first slot with nothing booked.
