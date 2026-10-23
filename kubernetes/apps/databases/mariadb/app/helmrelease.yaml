@@ -113,21 +113,3 @@ spec:
       type: ClusterIP
       ports:
         mysql: 3306
-    ingress:
-      enabled: true
-      ingressClassName: internal
-      annotations:
-        gethomepage.dev/enabled: "true"
-        gethomepage.dev/name: "MariaDB"
-        gethomepage.dev/description: "MariaDB is a community-developed, commercially supported, and open-source relational database"
-        gethomepage.dev/group: "Databases"
-        gethomepage.dev/icon: "mariadb.png"
-      labels:
-        gethomepage.dev/enabled: "true"
-
-      hostname: &host "mariadb.${SECRET_DOMAIN}"
-      hosts:
-        - *host
-      tls:
-        - hosts:
-            - *host
