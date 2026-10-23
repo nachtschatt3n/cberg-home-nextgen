@@ -314,10 +314,10 @@ calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 
 ### `my-software-showcase`
 
-Portfolio showcase of 15 containerized legacy client apps (11 decommissioned 2026-10-04; `haarfabrik`, `metaldyne`, `u-zeit` and `uzeit-de` remain active) (TYPO3 4.2/6.2, Rails, PHP era), all on bjw-s app-template 5.1.0, deployed 2026-08-18. Databases live on the shared `databases/mariadb` (legacy-compat `sql_mode=NO_ENGINE_SUBSTITUTION` + `init_connect SET NAMES utf8` persisted in its HR for these tenants). **No outbound integrations by design** (no SMTP/Sentry/Twilio etc. — see `kubernetes/apps/my-software-showcase/README.md`). Homepage group "Software Portfolio".
+Portfolio showcase of 15 containerized legacy client apps (11 decommissioned 2026-10-04 and `uzeit-de` on 2026-10-23; `haarfabrik`, `metaldyne` and `u-zeit` remain active) (TYPO3 4.2/6.2, Rails, PHP era), all on bjw-s app-template 5.1.0, deployed 2026-08-18. Databases live on the shared `databases/mariadb` (legacy-compat `sql_mode=NO_ENGINE_SUBSTITUTION` + `init_connect SET NAMES utf8` persisted in its HR for these tenants). **No outbound integrations by design** (no SMTP/Sentry/Twilio etc. — see `kubernetes/apps/my-software-showcase/README.md`). Homepage group "Software Portfolio".
 
 > **Observability gap on three apps in this namespace (2026-08-18, `F-a49c67c3`; `zuhause-betreut`, the fourth, was decommissioned 2026-10-04).**
-> `u-zeit`, `metaldyne` and `uzeit-de` run normally (1/1, no
+> `u-zeit` and `metaldyne` run normally (1/1, no
 > restarts) but ship **zero** documents to Elasticsearch. Their logs are written
 > to a file on an `emptyDir` instead of stdout, so they are never collected and
 > are destroyed on every pod restart. `RAILS_LOG_TO_STDOUT=1` is set on all of
@@ -341,7 +341,7 @@ Portfolio showcase of 15 containerized legacy client apps (11 decommissioned 202
 | see-edv-ibspm | **DECOMMISSIONED 2026-10-04** (operator; ks entry commented out, Flux-pruned; no persistent volume). IBSPM service management | None (decommissioned) |
 | stepbystepguide | **DECOMMISSIONED 2026-10-04** (operator; ks entry commented out, Flux-pruned; NAS backup taken 2026-10-04 ~03:00 UTC; Longhorn volume / Retain PV deleted 2026-10-04 after backup verification). Step-by-step guide | None (decommissioned) |
 | u-zeit | U-Zeit time management | Internal |
-| uzeit-de | Uzeit corporate website (TYPO3 6.2). Converted to an HTTPRoute on `envoy-internal` (2026-09-07). Its `nginx.ingress.kubernetes.io/proxy-body-size: 50m` has no route-level equivalent and was deliberately NOT carried across: Envoy streams request bodies uncapped unless a Gateway-scoped `ClientTrafficPolicy` sets a buffer, so this loosens the limit rather than breaking uploads. See `docs/sops/gateway-api-httproute.md` §4.2. | Internal |
+| uzeit-de | **DECOMMISSIONED 2026-10-23** (operator; ks entry commented out, Flux-pruned; PVs `uzeit-de-fileadmin` / `uzeit-de-uploads` kept `Retain` with Longhorn backups; database schema dumped to the Mac, not dropped). Former Uzeit TYPO3 6.2 showcase on EOL PHP. |
 | zuhause-betreut | **DECOMMISSIONED 2026-10-04** (operator; ks entry commented out, Flux-pruned; NAS backup taken 2026-10-04 ~03:00 UTC; Longhorn volume / Retain PV deleted 2026-10-04 after backup verification). Caretaker Management System ("Zuhause Betreut") — Rails app, `/health/{liveness,readiness,startup}` probes, Flux image automation on the `production-*` tag, 5Gi Longhorn RWO PVC (`strategy: Recreate`) | None (decommissioned) |
 
 ---

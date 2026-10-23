@@ -271,7 +271,6 @@ HTTP health probe.**
 
 | Image | Source repo | Scheme / rebuild tag | Rebuild workflow | Cluster pin | Mode | Why |
 |---|---|---|---|---|---|---|
-| uzeit-de | uzeit-de | S | scheduled-rebuild.yml | IUA `my-software-showcase` | **AUTO** | internal showcase, full probes, rollback |
 | haarfabrik-extranet, metaldyne-mini-erp, u-zeit | same names | P | ci.yml (schedule) | IUA showcase | **AUTO** | same; their bases are EOL Debian (jessie/stretch), so there is no OS upgrade, and a rebuild only refreshes what the archive mirror still serves |
 | gas-price-monitor | gas-price-monitor | S | scheduled-rebuild.yml | IUA `my-software-production/gas-price-monitor-image-updates` | **AUTO** | internet-facing, but has HTTP liveness/readiness + rollback |
 | splitfairy | splitfairy | releases `v<semver>` (a V-scheme weekly rebuild `v*-b<date>` is NOT selected) | release workflow | IUA `my-software-production/splitfairy-image-updates` | **AUTO (release tags only)** | internet-facing; HTTP startup/readiness on `/readyz` (SQLite) + rollback. Stateful SQLite app: operator chose AUTO for releases on 2026-09-28; keep schema migrations backward-compatible or drop the `$imagepolicy` marker to hold |
@@ -525,4 +524,4 @@ reconcile — never patch the Deployment directly (GitOps rule).
   holm-backend, ibgastro, inbewegung, kfa_medienarchiv, mangold-smarthomeadvisor, max-jung,
   ordiga, see-edv-ibspm, stepbystepguide, zuhause-betreut) from the first-party and
   deploy-mode tables; their source-repo scheduled workflows were disabled the same day.
-  Showcase apps still deployed: haarfabrik, metaldyne, u-zeit, uzeit-de.
+  Showcase apps still deployed: haarfabrik, metaldyne, u-zeit (uzeit-de decommissioned 2026-10-23).

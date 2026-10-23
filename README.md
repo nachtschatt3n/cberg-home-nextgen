@@ -490,6 +490,9 @@ which is the authoritative per-namespace count; this section is a category-level
 > actual-budget, omni-tools and 11 showcase apps (all but haarfabrik, metaldyne,
 > u-zeit, uzeit-de) are commented out of their namespace kustomizations. Their
 > directories stay in the repo, so the per-namespace counts below still include them.
+>
+> **Decommissioned 2026-10-23 (operator):** the showcase app uzeit-de (EOL PHP) is
+> commented out of its namespace kustomization; directory kept, volumes retained.
 
 ### 🤖 AI (`ai` — 11)
 ai-sre · anythingllm · gods-eye-view · hermes-agent · librechat · mcpo ·

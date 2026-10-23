@@ -225,7 +225,7 @@ def test_unparseable_kustomization_fails_toward_enabled():
 
 
 def test_live_repo():
-    """The real tree as of 2026-10-05: exactly the 16 ac7bf0e0 decommissions."""
+    """The real tree as of 2026-10-05: the 16 ac7bf0e0 decommissions plus uzeit-de (2026-10-23)."""
     d = disabled_names(REPO)
     expected = {
         "ai/hermes-agent", "ai/librechat", "home-automation/scrypted-nvr",
@@ -233,11 +233,11 @@ def test_live_repo():
     } | {f"my-software-showcase/{a}" for a in (
         "globalmobility", "holm-backend", "ibgastro", "inbewegung",
         "kfa-medienarchiv", "mangold-smarthomeadvisor", "max-jung", "ordiga",
-        "see-edv-ibspm", "stepbystepguide", "zuhause-betreut")}
+        "see-edv-ibspm", "stepbystepguide", "zuhause-betreut", "uzeit-de")}
     # Superset, not equality: a LATER decommission is legitimate. What must
     # never happen is an ACTIVE app being swept in.
     check(expected <= d, f"all 16 decommissioned dirs detected (missing {sorted(expected - d)})")
-    for active in ("haarfabrik", "metaldyne", "u-zeit", "uzeit-de"):
+    for active in ("haarfabrik", "metaldyne", "u-zeit"):
         check(f"my-software-showcase/{active}" not in d, f"active showcase app {active} stays in scope")
     for active in ("office/affine", "office/nextcloud", "home-automation/zigbee2mqtt",
                    "home-automation/home-assistant", "ai/openclaw"):
@@ -264,7 +264,7 @@ def test_check_all_versions_enumeration():
                   for p in raw),
           "check-all-versions: no raw workload from a decommissioned dir")
     every = hrs + [str(p) for p in raw]
-    for active in ("haarfabrik", "metaldyne", "u-zeit", "uzeit-de"):
+    for active in ("haarfabrik", "metaldyne", "u-zeit"):
         check(any(f"/my-software-showcase/{active}/" in p for p in every),
               f"check-all-versions: active showcase app {active} still enumerated")
 

@@ -71,7 +71,7 @@ resources:
   # - ./see-edv-ibspm-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   # - ./stepbystepguide-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./u-zeit-alerts.yaml
-  - ./uzeit-de-alerts.yaml
+  # - ./uzeit-de-alerts.yaml  # DISABLED 2026-10-23 (operator: uzeit-de decommissioned, volumes Retain + NAS backup, DB dumped)
   - ./slo-burn-rate-alerts.yaml
   # - ./scrypted-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./vaultwarden-alerts.yaml
