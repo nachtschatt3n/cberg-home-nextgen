@@ -41,12 +41,13 @@ touches:
 depends_on: []
 conflicts_with:
   - longhorn-1.13.0                   # 2026-10-05 longhorn review: reciprocity (new Longhorn volume + restore-proof on the engine it replaces)
-  - jellyfin-12.1                      # sat-attended:2026-10-10 — same helmrelease/jellyfin and
+  - jellyfin-12.2.20261005             # reciprocal (2026-10-23): same helmrelease/jellyfin and pvc/jellyfin-config; this plan runs BEFORE it
+  - jellyfin-12.1                      # SUPERSEDED (see jellyfin-12.2.20261005) — same helmrelease/jellyfin and
                                        # pvc/jellyfin-config; its backup_gate/restore steps name the
-                                       # OLD volume `jellyfin-config`. This plan is placed AFTER it
-                                       # (2026-10-25) so 12.1's reviewed plan stays valid. If the
-                                       # order is ever swapped, 12.1's backup_gate, premises and §5
-                                       # must be re-derived for jellyfin-config-rwo BEFORE it runs.
+                                       # OLD volume `jellyfin-config`. This plan now runs BEFORE
+                                       # jellyfin-12.2.20261005 (jellyfin-12.1 is superseded and will not run);
+                                       # that plan's backup_gate, premises and §5 are
+                                       # derived for the new volume jellyfin-config-rwo.
   - helm-drift-detection               # touches helmrelease/media/jellyfin
   - flux-oci-chart-sources             # mirrors the jellyfin chart source (touches helmrelease/jellyfin)
 capability_change: false              # same app, same image, same data; only the block device
@@ -71,7 +72,7 @@ restore_proof: "§3.4: restore the backup_gate backup into a SCRATCH Longhorn vo
   plus a non-zero BaseItems row count. A backup that exists is not a backup that restores;
   this proves the restore path end to end before the app is stopped."
 finding_refs: []
-status: awaiting-go   # plan-reviewer 2026-09-28: needs-fix (B1-B4) -> fixed -> re-review needs-fix (liveness wording) -> fixed -> ready-for-go. Longhorn/storage => outside SD-11 (floor), so it is GO-pending regardless of review.
+status: executed   # plan-reviewer 2026-09-28: needs-fix (B1-B4) -> fixed -> re-review needs-fix (liveness wording) -> fixed -> ready-for-go. Longhorn/storage => outside SD-11 (floor), so it is GO-pending regardless of review.
 review: ready-for-go@2026-09-28
 window: "now:2026-10-23"   # ON-DEMAND NOW run 2026-10-23 (run-now.py stamp; was None)
                                       # redis-fleet-8.10.2 (85m) + this (75m) = 160m <= 180m schedulable.
@@ -479,7 +480,7 @@ PASS = Job Complete, log shows `integrity ok` and `baseitems` > 0. FAIL
 backup chain for this volume does not restore; open a finding.
 
 **Schema note:** `BaseItems` is the 10.11 EF-Core table name, verified only
-against 10.11.11. This plan runs after `jellyfin-12.1`; once 12.1 has executed,
+against 10.11.11. This plan runs BEFORE `jellyfin-12.2.20261005` (`jellyfin-12.1` is superseded);
 re-check the table name on the live DB before the window (if it changed, pin the
 new name here — the gate is "the restored DB opens, passes integrity_check, and
 its main item table is non-empty", and `baseitems -1` means "table not found" =
@@ -669,7 +670,7 @@ mise exec -- kubectl port-forward -n media svc/jellyfin 8097:8096 >/dev/null 2>&
 
 ## 6. Interference notes
 
-- **jellyfin-12.1** (sat-attended:2026-10-10) touches the same HR and PVC, and its backup gate names the OLD volume `jellyfin-config`. This plan runs AFTER it; on the day, confirm 12.1 is `executed` and green (its DB migration then lives on the old volume and is what gets copied) and re-check the §3.4 schema note. If 12.1 is still pending, do not run both in one window; re-slot one.
+- **jellyfin-12.2.20261005** touches the same HR and PVC. This plan runs BEFORE it (jellyfin-12.1 is superseded and will not run); the upgrade plan's gates are derived for the new volume `jellyfin-config-rwo`. Do not run both in one window without serial settle and re-verification.
 - **redis-fleet-8.10.2** shares sun-attended:2026-10-25 and touches ns media (a redis leg), not Jellyfin or Longhorn volumes: independent; run this plan first or last, not interleaved with a media redis leg.
 - **igpu-i915**: the stop releases and the start re-requests one `gpu.intel.com/i915` slot; if another GPU plan is in the same slot, sequence them.
 - **library-tools CronJobs** (`media-metadata-coverage` hourly, `media-per-item-refresh` 6-hourly) read Jellyfin's API; during the ~30 min stop they log fetch errors and exit — tolerated, read-only. `media-intake-watcher` is held by its kill switch (3.5 → 3.8).
