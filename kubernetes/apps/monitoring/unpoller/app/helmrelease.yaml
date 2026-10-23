@@ -22,6 +22,20 @@ spec:
     remediation:
       strategy: rollback
       retries: 3
+  # F-0b274023: chart 2.4.0 exposes no value for the config secret's file mode,
+  # so the projection stayed at the 0644 default. 0400 (256) is readable by the
+  # container: the image's USER is 0 (root) and the secret files are root-owned,
+  # so the owner bits apply even with capabilities dropped.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Deployment
+              name: unpoller
+            patch: |
+              - op: add
+                path: /spec/template/spec/volumes/0/secret/defaultMode
+                value: 256
   valuesFrom:
     - kind: Secret
       name: unpoller-credentials
