@@ -73,7 +73,7 @@ restore_proof: "§3.4: restore the backup_gate backup into a SCRATCH Longhorn vo
 finding_refs: []
 status: awaiting-go   # plan-reviewer 2026-09-28: needs-fix (B1-B4) -> fixed -> re-review needs-fix (liveness wording) -> fixed -> ready-for-go. Longhorn/storage => outside SD-11 (floor), so it is GO-pending regardless of review.
 review: ready-for-go@2026-09-28
-window: "sun-attended:2026-10-25"     # after jellyfin-12.1 (sat 10-10) so that plan stays valid; co-tenant
+window: null  # UN-SLOTTED 2026-10-23: cilium-1.20.3 runs SOLO on sun-attended:2026-10-25; awaiting-go anyway; scheduler re-assigns. WAS "sun-attended:2026-10-25"     # after jellyfin-12.1 (sat 10-10) so that plan stays valid; co-tenant
                                       # redis-fleet-8.10.2 (85m) + this (75m) = 160m <= 180m schedulable.
 premises:
   - id: config-pvc-is-still-rwx-longhorn-static
