@@ -324,6 +324,12 @@ spec:
         repository: caddy
         tag: "2"
         pullPolicy: IfNotPresent
+      # wait-for-postgres init container. Chart default is the floating `pg15`
+      # tag; pin to the digest running on 2026-10-23 (F-aa4d1184), tag text kept.
+      postgres:
+        repository: pgvector/pgvector
+        tag: pg15@sha256:a947c45cdc5906a1bc951f20a8709e321256343ee0f251e4ae00b5e7def4e6da
+        pullPolicy: IfNotPresent
 
     oc8:
       # prod, NOT the chart default of dev -- dev enables UNAUTHENTICATED
