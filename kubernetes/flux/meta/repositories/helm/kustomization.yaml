@@ -7,7 +7,6 @@ resources:
   - ./cilium.yaml
   - ./external-dns.yaml
   - ./envoyproxy.yaml
-  - ./external-secrets.yaml
   - ./gabe565.yaml
   - ./grafana.yaml
   - ./headlamp.yaml
