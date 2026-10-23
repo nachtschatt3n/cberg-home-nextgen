@@ -51,7 +51,7 @@ finding_refs: [F-611ca4c7, F-6d0f4efc] # F-611ca4c7 = security finding (v3.3.3-o
                                       # for this image (immich-machine-learning v3.3.3-openvino -> newer, monitor)
 review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: needs-fix (PR #360 comment, conflicts, order) -> fixed; no DB; git-revert rollback; premises 5/5
 status: executed
-window: "now:2026-10-22"   # ON-DEMAND NOW run 2026-10-22 (run-now.py stamp; was None)
+window: null   # executed in now:2026-10-22 (on-demand); cleared by nightly 2026-10-23 (RETIRED PLAN STILL WINDOWED hygiene)
 premises:
   - id: ml-image-is-still-v3.3.3-openvino
     why: >-

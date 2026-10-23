@@ -67,7 +67,7 @@ premises:
       kubectl get deploy mosquitto zigbee2mqtt -n home-automation -o jsonpath='{range .items[*]}{.metadata.name}={.status.readyReplicas} {end}'
     expect_exact: "mosquitto=1 zigbee2mqtt=1"
 status: executed
-window: "now:2026-10-23"   # ON-DEMAND NOW run 2026-10-23 (run-now.py stamp; was None)
+window: null   # executed in now:2026-10-23 (on-demand); cleared by nightly 2026-10-23 (RETIRED PLAN STILL WINDOWED hygiene)
 review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: ready-for-go, 0 blocking; 2026.10.2 newest stable; premises 4/4
 sops_refs: [docs/sops/home-assistant-updates.md, docs/sops/application-update.md, docs/sops/longhorn-rwo-multi-attach.md, docs/sops/backup.md, docs/sops/verification-contents-not-shape.md]
 backup_gate: "Two independent backups before the merge. (1) A pre-change config tarball of /config/.storage + .HA_VERSION taken with kubectl exec, integrity-checked locally (section 2.3; PASS prints OK with every .storage JSON parsed, FAIL on a truncated stream). (2) The 03:00 Longhorn backup of home-assistant-config, PASS = `.venv/bin/python3 runbooks/longhorn-backup-age.py home-assistant-config --max-hours 26` prints FRESH (measured 2026-10-22: 19.4h FRESH; the same call with --max-hours 1 prints STALE). The built-in HA backup tar (/config/backups, daily ~05:00, encrypted) is a third copy but is NOT required unattended because the operator is away and `backup.create` cannot be called without a token-bearing call (section 2.2 explains the optional, token-authenticated path)."
