@@ -447,7 +447,9 @@ spec:
       image:
         registry: docker.io
         repository: bitnamilegacy/mariadb
-        tag: latest
+        # Tag text kept; digest = the build running on 2026-10-23 (F-d76865c3), so the
+        # floating tag can no longer change the DB image without a manifest edit.
+        tag: latest@sha256:bbd4e17f1ef8e035c74381c29c64627eaca2ca8612118f3caa5686c3ed8c7bbf
 
       ## Enable persistence using Persistent Volume Claims
       ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
