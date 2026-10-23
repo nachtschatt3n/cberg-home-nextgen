@@ -90,12 +90,17 @@ UPTIME_CSV = (
     ",_result,2,1468800,Living Room-AP-U7 Pro\n"    # 17d
     ",_result,3,600,Guest Room USW SW-8\n"          # 10m - genuinely rebooted
 )
+H = ",result,table,_value,_time,_measurement,name\n"
 DIPS_CSV = (
-    ",result,table,_time,name\n"
-    ",_result,0,2026-08-24T00:10:07.603891672Z,Basement-AP-U6+\n"
-    ",_result,1,2026-08-24T00:10:07.603891672Z,Hallway-AP-U6 Pro\n"
-    ",_result,2,2026-08-24T00:10:07.603891672Z,Living Room-AP-U7 Pro\n"
-    ",_result,3,2026-08-24T03:55:00.000000000Z,Guest Room USW SW-8\n"
+    H
+    + ",_result,0,3196800,2026-08-24T00:09:37Z,uap,Basement-AP-U6+\n"
+    + ",_result,0,12,2026-08-24T00:10:07Z,uap,Basement-AP-U6+\n"
+    + ",_result,1,3196800,2026-08-24T00:09:37Z,uap,Hallway-AP-U6 Pro\n"
+    + ",_result,1,12,2026-08-24T00:10:07Z,uap,Hallway-AP-U6 Pro\n"
+    + ",_result,2,1468800,2026-08-24T00:09:37Z,uap,Living Room-AP-U7 Pro\n"
+    + ",_result,2,12,2026-08-24T00:10:07Z,uap,Living Room-AP-U7 Pro\n"
+    + ",_result,3,90000,2026-08-24T03:50:00Z,usw,Guest Room USW SW-8\n"
+    + ",_result,3,120,2026-08-24T03:55:00Z,usw,Guest Room USW SW-8\n"
 )
 
 
@@ -108,17 +113,17 @@ def run(uptime_csv, dips_csv):
                 stable.add(r["name"])
         except ValueError:
             pass
-    raw = [r for r in table(dips_csv) if r.get("name")]
+    raw = ns["resets"]([r for r in table(dips_csv) if r.get("name")])
     data = [r for r in raw if r["name"] not in stable]
     return base, raw, data
 
 
 # The column ORDER differs between the two queries; parsing by header must not
 # care. This is the exact condition the positional version got wrong.
-check("header parser reads 'name' from a _time-first table",
-      [r["name"] for r in table(DIPS_CSV)],
-      ["Basement-AP-U6+", "Hallway-AP-U6 Pro", "Living Room-AP-U7 Pro",
-       "Guest Room USW SW-8"])
+check("header parser reads 'name' from a sample table",
+      sorted({r["name"] for r in table(DIPS_CSV)}),
+      ["Basement-AP-U6+", "Guest Room USW SW-8", "Hallway-AP-U6 Pro",
+       "Living Room-AP-U7 Pro"])
 check("header parser reads 'name' from a _value-first table",
       [r["name"] for r in table(UPTIME_CSV)][:2],
       ["Basement-AP-U6+", "Hallway-AP-U6 Pro"])

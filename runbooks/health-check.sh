@@ -1095,6 +1095,41 @@ es_curl_auth() {
     printf 'user = "%s"\n' "$v"
 }
 
+# es_probe_val PASSWORD URL DOTTED.PATH [JSON_BODY]
+# Prints the value at PATH in the ES JSON response, or the literal "unknown"
+# on ANY failure (timeout, refused, non-JSON, missing path). Never prints 0 for
+# a failure (F-737d8339: a hung curl then a `|| echo 0` fallback produced false
+# "ingestion stalled" majors). Uses python urllib with a hard SIGALRM watchdog
+# rather than curl: curl's --max-time does not bound the macOS trustd hang
+# (blocked in mach_msg inside SecureTransport), urllib uses OpenSSL. The
+# password travels in the environment, never on argv.
+es_probe_val() {
+    ES_PROBE_PW="$1" ES_PROBE_URL="$2" ES_PROBE_PATH="$3" ES_PROBE_BODY="${4:-}" \
+    python3 -c '
+import base64, json, os, signal, ssl, sys, urllib.request
+signal.alarm(25)
+try:
+    url = os.environ["ES_PROBE_URL"]
+    body = os.environ.get("ES_PROBE_BODY") or None
+    req = urllib.request.Request(url, data=body.encode() if body else None)
+    if body:
+        req.add_header("Content-Type", "application/json")
+    tok = base64.b64encode(("elastic:" + os.environ["ES_PROBE_PW"]).encode()).decode()
+    req.add_header("Authorization", "Basic " + tok)
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    d = json.load(urllib.request.urlopen(req, timeout=20, context=ctx))
+    for k in os.environ["ES_PROBE_PATH"].split("."):
+        d = d[k]
+    if isinstance(d, bool) or d is None:
+        raise ValueError
+    print(d)
+except BaseException:
+    print("unknown")
+' 2>/dev/null || echo unknown
+}
+
 es_init() {
     # Kill any leftover port-forward on our port
     lsof -ti:${ES_PORT} 2>/dev/null | xargs kill 2>/dev/null || true
@@ -3648,6 +3683,38 @@ def table(text):
             continue
         if hdr is not None:
             yield dict(zip(hdr, cells))
+
+def epoch(ts):
+    import calendar, time
+    return calendar.timegm(time.strptime(ts[:19], '%Y-%m-%dT%H:%M:%S'))
+
+def resets(rows):
+    # A reboot is a NON-ZERO uptime sample whose implied boot time is later
+    # than the previous non-zero sample's (the device booted after it).
+    # uptime==0 samples are unpoller scrape blips (F-36517bdb: 18 drops to 0
+    # recovering to ~2.7M s were counted as reboots) and are skipped, never
+    # used as the previous sample.
+    series = {}
+    for r in rows:
+        try:
+            series.setdefault((r.get('name'), r.get('_measurement')), []).append(
+                (epoch(r['_time']), float(r['_value']), r['_time']))
+        except (KeyError, ValueError):
+            pass
+    out = []
+    for (nm, _m), samples in sorted(series.items(), key=lambda kv: str(kv[0])):
+        samples.sort()
+        prev = None
+        for t, v, ts in samples:
+            if v <= 0:
+                continue
+            # Booted after the previous sample iff the implied boot time moved
+            # later: v < prev_uptime + elapsed (60 s tolerance). This covers
+            # the plain rule v < elapsed and a reset sampled long after boot.
+            if prev is not None and v < prev[1] + (t - prev[0]) - 60:
+                out.append({'name': nm, '_time': ts})
+            prev = (t, v)
+    return out
 "
         # Baseline uptimes are fetched WITHOUT the >24h Flux filter so that an
         # empty result is unambiguously a MEASUREMENT FAILURE (InfluxDB down,
@@ -3656,7 +3723,7 @@ def table(text):
         # first one would silently turn the guard off again.
         UPTIME_CSV=$(influx_query 'from(bucket:"default") |> range(start: -15m) |> filter(fn: (r) => (r._measurement == "uap" or r._measurement == "usw") and r._field == "uptime") |> last() |> keep(columns: ["name","_value"])' 2>/dev/null || true)
         export UPTIME_CSV
-        REBOOT_OUTPUT=$(influx_query 'from(bucket:"default") |> range(start: -24h) |> filter(fn: (r) => (r._measurement == "uap" or r._measurement == "usw") and r._field == "uptime") |> derivative(unit: 30s, nonNegative: false) |> filter(fn: (r) => r._value < -1000) |> keep(columns: ["name","_time"])' \
+        REBOOT_OUTPUT=$(influx_query 'from(bucket:"default") |> range(start: -24h) |> filter(fn: (r) => (r._measurement == "uap" or r._measurement == "usw") and r._field == "uptime") |> keep(columns: ["name","_measurement","_time","_value"])' \
         | python3 -c "
 ${INFLUX_BY_HEADER}
 import os
@@ -3668,7 +3735,7 @@ for r in base:
             stable.add(r['name'])
     except ValueError:
         pass
-raw = [r for r in table(sys.stdin.read()) if r.get('name')]
+raw = resets([r for r in table(sys.stdin.read()) if r.get('name')])
 data = [r for r in raw if r['name'] not in stable]
 dropped = len(raw) - len(data)
 if not base:
@@ -4971,7 +5038,18 @@ except Exception as e:
         # Check for camera crash loops in logs (skip cameras under maintenance)
         echo ""
         echo "=== Camera Crash Loops (recent logs) ==="
-        CRASH_CAMERAS=$(kubectl logs -n home-automation -l app.kubernetes.io/name=frigate --tail=500 2>&1 | grep "crashed unexpectedly" | sed 's/.*for //' | sed 's/\..*//' | sort | uniq -c | sort -rn)
+        # F-fe94e75c: this used `--tail=500`, which on a chatty Frigate covers
+        # minutes, not hours -- a camera crash-looping every ~1h falls out of the
+        # window and the detector false-clears while watchdog.<camera> crash lines
+        # still exist in the last 6h. Read a TIME window and key on the camera
+        # named by the watchdog.<camera> logger, so it re-emits for as long as
+        # crash lines exist in the window.
+        if FRIGATE_LOG_WINDOW=$(kubectl logs -n home-automation -l app.kubernetes.io/name=frigate --since=6h 2>/dev/null); then
+            CRASH_CAMERAS=$(printf '%s\n' "$FRIGATE_LOG_WINDOW" | sed -n 's/.*watchdog\.\([A-Za-z0-9_-][A-Za-z0-9_-]*\)[^A-Za-z0-9_-].*crashed unexpectedly.*/\1/p' | sort | uniq -c | sort -rn)
+        else
+            CRASH_CAMERAS=""
+            _record_unmeasured "frigate-crash-loops" "could not read Frigate logs for the 6h window (unknown, not clean)"
+        fi
         if [ -n "$CRASH_CAMERAS" ]; then
             echo "$CRASH_CAMERAS"
             # Filter out maintenance cameras
@@ -6231,8 +6309,11 @@ except: print('0')
         # port-forward 9201:9200` fails with "address already in use" and the
         # health probe reports "unknown" forever. Same preflight the 9202
         # enrichment block already uses. (Guard below still degrades safely.)
-        lsof -ti:9201 2>/dev/null | xargs kill 2>/dev/null || true
-        kubectl port-forward -n monitoring svc/elasticsearch-es-http 9201:9200 > /dev/null 2>&1 &
+        # F-737d8339: do NOT kill whatever holds a fixed port -- that could kill a
+        # concurrent sibling sweep's forward. Use a private free port instead,
+        # so there is nothing to free and nothing of anyone else's to kill.
+        ES_PROBE_PORT=$(python3 -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); print(s.getsockname()[1])" 2>/dev/null || echo 9201)
+        kubectl port-forward -n monitoring svc/elasticsearch-es-http ${ES_PROBE_PORT}:9200 > /dev/null 2>&1 &
         ES_PF_PID=$!
 
         # Poll for port-forward + ES readiness instead of a fixed sleep. A fixed
@@ -6243,7 +6324,7 @@ except: print('0')
         # probe up to ~20s; only trust the ingestion checks once ES answered.
         ES_STATUS="unknown"
         for _es_try in $(seq 1 20); do
-            ES_STATUS=$(curl -k -s -K <(es_curl_auth "$ES_PW_EARLY") "https://localhost:9201/_cluster/health" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "unknown")
+            ES_STATUS=$(es_probe_val "$ES_PW_EARLY" "https://localhost:${ES_PROBE_PORT}/_cluster/health" status)
             case "$ES_STATUS" in green|yellow|red) break ;; esac
             sleep 1
         done
@@ -6267,22 +6348,32 @@ except: print('0')
         if [ "$ES_STATUS" = "unknown" ]; then
             log_warning "ES health probe did not respond within timeout - skipping OTel ingestion measurement (measurement error, not a confirmed outage)"
         else
-        LOGS_COUNT=$(curl -k -s -K <(es_curl_auth "$ES_PW_EARLY") "https://localhost:9201/logs-generic-default/_count" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
+        LOGS_COUNT=$(es_probe_val "$ES_PW_EARLY" "https://localhost:${ES_PROBE_PORT}/logs-generic-default/_count" count)
         echo "logs-generic-default document count: $LOGS_COUNT"
         LOGS_COUNT_INT=$(echo "$LOGS_COUNT" | tr -cd '0-9' || echo "0")
-        [ -z "$LOGS_COUNT_INT" ] && LOGS_COUNT_INT=0
-        if [ "$LOGS_COUNT_INT" -eq 0 ]; then
+        if [ "$LOGS_COUNT" = "unknown" ] || [ -z "$LOGS_COUNT_INT" ]; then
+            _record_unmeasured "es-logs-count" "ES probe timed out or returned unparseable output (unknown, not 0)"
+            LOGS_COUNT_INT=-1
+        fi
+        if [ "$LOGS_COUNT_INT" -lt 0 ]; then
+            log_warning "logs-generic-default count unknown (probe failed) - skipped, not treated as zero"
+        elif [ "$LOGS_COUNT_INT" -eq 0 ]; then
             log_warning "No OTel log documents found in logs-generic-default"
             add_major_issue "OTel: no documents in logs-generic-default data stream"
         else
             log_success "OTel log documents present in logs-generic-default: $LOGS_COUNT_INT"
         fi
 
-        METRICS_COUNT=$(curl -k -s -K <(es_curl_auth "$ES_PW_EARLY") "https://localhost:9201/metrics-generic.otel-default/_count" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
+        METRICS_COUNT=$(es_probe_val "$ES_PW_EARLY" "https://localhost:${ES_PROBE_PORT}/metrics-generic.otel-default/_count" count)
         echo "metrics-generic.otel-default document count: $METRICS_COUNT"
         METRICS_COUNT_INT=$(echo "$METRICS_COUNT" | tr -cd '0-9' || echo "0")
-        [ -z "$METRICS_COUNT_INT" ] && METRICS_COUNT_INT=0
-        if [ "$METRICS_COUNT_INT" -eq 0 ]; then
+        if [ "$METRICS_COUNT" = "unknown" ] || [ -z "$METRICS_COUNT_INT" ]; then
+            _record_unmeasured "es-metrics-count" "ES probe timed out or returned unparseable output (unknown, not 0)"
+            METRICS_COUNT_INT=-1
+        fi
+        if [ "$METRICS_COUNT_INT" -lt 0 ]; then
+            log_warning "metrics-generic.otel-default count unknown (probe failed) - skipped, not treated as zero"
+        elif [ "$METRICS_COUNT_INT" -eq 0 ]; then
             log_warning "No OTel metric documents found in metrics-generic.otel-default"
             add_major_issue "OTel: no documents in metrics-generic.otel-default data stream"
         else
@@ -6290,20 +6381,17 @@ except: print('0')
         fi
 
         # ES metric ingestion verification: how many distinct metric names in last 5 minutes?
-        METRIC_NAMES=$(curl -k -s -K <(es_curl_auth "$ES_PW_EARLY") "https://localhost:9201/metrics-generic.otel-default/_search?size=0" \
-            -H 'Content-Type: application/json' \
-            -d '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}},"aggs":{"names":{"cardinality":{"field":"_metric_names_hash"}}}}' 2>/dev/null | \
-            python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    print(d.get('aggregations',{}).get('names',{}).get('value', 0))
-except: print(0)
-" 2>/dev/null || echo "0")
+        METRIC_NAMES=$(es_probe_val "$ES_PW_EARLY" "https://localhost:${ES_PROBE_PORT}/metrics-generic.otel-default/_search?size=0" aggregations.names.value \
+            '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}},"aggs":{"names":{"cardinality":{"field":"_metric_names_hash"}}}}')
         echo "Distinct metric names arriving (5m): $METRIC_NAMES"
         METRIC_NAMES_INT=$(echo "$METRIC_NAMES" | tr -cd '0-9' || echo "0")
-        [ -z "$METRIC_NAMES_INT" ] && METRIC_NAMES_INT=0
-        if [ "$METRIC_NAMES_INT" -lt 5 ]; then
+        if [ "$METRIC_NAMES" = "unknown" ] || [ -z "$METRIC_NAMES_INT" ]; then
+            _record_unmeasured "es-metric-names" "ES probe timed out or returned unparseable output (unknown, not 0)"
+            METRIC_NAMES_INT=-1
+        fi
+        if [ "$METRIC_NAMES_INT" -lt 0 ]; then
+            log_warning "metric-name cardinality unknown (probe failed) - skipped, not treated as zero"
+        elif [ "$METRIC_NAMES_INT" -lt 5 ]; then
             log_warning "Only $METRIC_NAMES_INT distinct metric names in last 5m (ingestion may be stalled)"
             add_minor_issue "ES metric ingestion appears stalled: $METRIC_NAMES_INT distinct names in 5m"
         else
@@ -6311,13 +6399,14 @@ except: print(0)
         fi
 
         # Recent ingestion check (last 5 minutes)
-        RECENT_LOGS=$(curl -k -s -K <(es_curl_auth "$ES_PW_EARLY") "https://localhost:9201/logs-generic-default/_count" \
-            -H 'Content-Type: application/json' \
-            -d '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}}}' 2>/dev/null | \
-            python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
+        RECENT_LOGS=$(es_probe_val "$ES_PW_EARLY" "https://localhost:${ES_PROBE_PORT}/logs-generic-default/_count" count \
+            '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}}}')
         echo "Logs ingested in last 5 minutes: $RECENT_LOGS"
         RECENT_LOGS_INT=$(echo "$RECENT_LOGS" | tr -cd '0-9' || echo "0")
-        [ -z "$RECENT_LOGS_INT" ] && RECENT_LOGS_INT=0
+        if [ "$RECENT_LOGS" = "unknown" ] || [ -z "$RECENT_LOGS_INT" ]; then
+            _record_unmeasured "es-recent-logs" "ES probe timed out or returned unparseable output (unknown, not 0)"
+            RECENT_LOGS_INT=-1
+        fi
         if [ "$RECENT_LOGS_INT" -eq 0 ] && [ "$EDOT_READY" = "$EDOT_DESIRED" ]; then
             log_warning "No OTel logs ingested in the last 5 minutes (edot-collector is up)"
             add_major_issue "OTel log ingestion stalled: 0 logs in last 5 minutes"
@@ -6360,7 +6449,7 @@ except: print(0)
         # As of 2026-08-18 the VERDICT honours that comment: the cluster-wide total no
         # longer raises an issue on its own; the per-namespace buckets do. See the
         # rationale block at the verdict itself.
-        ERROR_DATA=$(curl -k -K <(es_curl_auth "$ES_PASSWORD") -X GET "https://localhost:9200/${LOG_DS}/_search" -H 'Content-Type: application/json' -d '{
+        ERROR_DATA=$(curl -k -s --max-time 20 --connect-timeout 5 -K <(es_curl_auth "$ES_PASSWORD") -X GET "https://localhost:9200/${LOG_DS}/_search" -H 'Content-Type: application/json' -d '{
           "size": 0,
             "track_total_hits": true,
           "query": {
@@ -6384,7 +6473,11 @@ except: print(0)
               "terms": {"field": "resource.attributes.k8s.pod.name", "size": 10}
             }
           }
-        }' 2>/dev/null || echo '{"hits":{"total":{"value":0}}}')
+        }' 2>/dev/null || echo '')
+        case "$ERROR_DATA" in
+            *'"hits"'*) ;;
+            *) _record_unmeasured "es-error-logs" "ES query failed or timed out (unknown, not 0)" ;;
+        esac
 
         TOTAL_ERRORS=$(echo "$ERROR_DATA" | python3 -c "
 import sys, json
@@ -6488,7 +6581,7 @@ except:
 
         es_count() {
             # $1 = should-clause JSON array body, $2 = must_not-clause JSON array body
-            curl -k -K <(es_curl_auth "$ES_PASSWORD") -X GET "https://localhost:9200/${LOG_DS}/_search" \
+            curl -k -s --max-time 20 --connect-timeout 5 -K <(es_curl_auth "$ES_PASSWORD") -X GET "https://localhost:9200/${LOG_DS}/_search" \
               -H 'Content-Type: application/json' -d "{
               \"size\": 0,
               \"track_total_hits\": true,
