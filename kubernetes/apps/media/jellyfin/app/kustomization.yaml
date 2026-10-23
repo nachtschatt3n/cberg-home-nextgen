@@ -5,5 +5,7 @@ resources:
   - storageclass.yaml
   - config-pv.yaml
   - config-pvc.yaml
+  - config-pv-rwo.yaml
+  - config-pvc-rwo.yaml
   - helmrelease.yaml
   - httproute.yaml

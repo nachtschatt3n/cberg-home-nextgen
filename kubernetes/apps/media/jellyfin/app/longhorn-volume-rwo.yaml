@@ -1,0 +1,18 @@
+---
+# APPLY BY HAND: kubectl apply -f longhorn-volume-rwo.yaml  (see docs/sops/longhorn.md)
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: jellyfin-config-rwo
+  namespace: storage
+  labels:
+    recurring-job-group.longhorn.io/default: enabled   # nightly daily-backup-all-volumes
+spec:
+  size: "26843545600"   # 25Gi, same as the old volume
+  numberOfReplicas: 2   # the old volume's live CR has 2 (the old PV's "3" attribute is not what Longhorn uses)
+  staleReplicaTimeout: 30
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false
