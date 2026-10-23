@@ -3,7 +3,7 @@ plan_id: openclaw-2026.10.5
 component: openclaw
 status: blocked
 review: null
-window: null
+window: "2026-10-31 attended full day (confirmed)"
 findings: [F-79c6922e, F-39d3d443]     # openclaw + @openclaw/discord 2026.6.11 -> 2026.10.5
 kind: npm
 current: "2026.6.11"
@@ -11,7 +11,7 @@ target: "2026.10.5"
 recommended_target: "2026.10.6"   # see unblock_stages S0; switch `target` when S1 passes
 update_type: major
 risk: high
-est_duration_min: 90
+est_duration_min: 315      # whole day worst case incl. rehearsal and rollback; happy path ~210
 needs_reboot: false
 touches:
   namespaces: [ai]
@@ -24,12 +24,11 @@ touches:
 depends_on: []
 conflicts_with:
   - talos-linux-1.14.4                  # exclusive node roll evicts the pod mid-migration
-unblock_stages:                      # status stays blocked until S1-S3 pass; S4 = the go/no-go roll
+unblock_stages:                      # ONE attended day (Sat 2026-10-31); status stays blocked until the rehearsal passes (GO/NO-GO #1)
   - id: S0-assessment      # DONE 2026-10-23 (read-only + Mac offline trial), results in section 0b
-  - id: S1-git-prep        # init-script + node 24 base + policy ceiling, NOT yet rolled (no HelmRelease change reaches prod until S3 passes)
-  - id: S2-scratch-pod     # isolated pod, throwaway state, doctor --fix + one codex turn
-  - id: S3-state-rehearsal # Longhorn clone of openclaw-data, doctor --fix on the clone, network-isolated
-  - id: S4-attended-roll   # backup gate, quiet-cron window, GitOps roll, verification, rollback = git revert + PVC restore
+  - id: P-git-prep         # agents, before the day: change set prepared + reviewed, NOT pushed, policy/renovate lines ride with the roll
+  - id: R-rehearsal        # morning: ONE rehearsal on a cloned openclaw-data PVC (gateway boot, model turns, real SQLite migration, doctor --fix timing)
+  - id: A-attended-roll    # afternoon block: quiet crons, fresh snapshot/backup, GitOps roll, verification, hard rollback cutoff 13:30
 ---
 
 # openclaw 2026.6.11 -> 2026.10.5
@@ -135,50 +134,65 @@ base-image move**, or the checker will keep reporting the 24 line as unreachable
 - Repeated end-to-end on 10.6 / node 24.22.1: identical result (same single `ui` error).
 - NOT run: a gateway start, a model turn, Telegram, the real SQLite state migration (sessions, auth store, memory), cron, TTS, skills.
 
-### Stage list
-- **S1 git prep (no roll; ~1.5 h)**: in one reviewable commit prepared but held until S3 passes: both `node` tags ->
-  `24.22.1-bookworm@sha256:6449e19d8184d84062525b6a7524def03146c2cb04a7f08b076680d0e8e4240a`; `install_npm openclaw@2026.10.6`
-  and `@openclaw/discord@2026.10.6`; realign block gets the peer-link loop then `openclaw doctor --fix --non-interactive` (HOME set,
-  state mounted, fails the init loudly on non-zero); idempotent config fix `del channels.discord.ui` + `ownerAllowFrom` prefix + telegram
-  `defaultAccount` -> `vita` (operator decision D3); remove the dead dreaming `sed` block; `npm rebuild -g`; `upgrade.remediation`
-  retries 0 for this roll only (Flux otherwise rolls back before the init finishes: 7.1 lesson). Policy: `image_major_ceiling max_major: 24`
-  and renovate `allowedVersions "<25"` in the same commit (policy file reason text updated).
-- **S2 scratch pod (~2 h, section D below)**; **S3 state rehearsal on a clone (~1.5 h)**; **S4 attended roll (~2 h incl. verification)**.
-  Total about 7 h of work over 2 sessions plus one attended window; Telegram/Discord/cron cannot be fully proven before S4.
+### One-day attended plan (operator decisions 2026-10-23; replaces the old S1-S4 multi-session staging)
 
-### S2 scratch pod spec (do not run before the operator approves)
-- Own namespace-local name `openclaw-trial`, no HTTPRoute/Service, `replicas 1`, NetworkPolicy egress limited to DNS, npm registry,
-  OpenAI (for the turn) and the Ollama host; image `node:24.22.1-bookworm@sha256:6449e19d...`; `emptyDir` home with the SCRUBBED config
-  (secret in a throwaway Secret) and an empty workspace.
-- MUST NOT have: the production PVC (even read-only), `openclaw-secret` (bot tokens, ElevenLabs, gateway token), the Stakater/reloader
-  annotations, any cron, `channels.*.enabled: true`, `mcp` servers pointing at production data, the real `~/.codex/auth.json`
-  (a refresh-token copy can rotate and invalidate the production login; use a separate `codex login --device-auth` for the trial, operator in a browser).
-- Runs: `npm i -g` on node 24 (S1 recipe), `doctor --fix`, `doctor --lint` (Errors 0), `models list`, `openclaw agent --local` one turn each on
-  `openai/gpt-6-luna` and `openai/gpt-5.6-terra` for a throwaway agent, with and without `OPENCLAW_CODEX_APP_SERVER_BIN`; `npm rebuild -g` CLI smoke.
-- S3: Longhorn snapshot -> clone volume `openclaw-data-trial` (17 G, 11 G of it re-installable `lib`), mount only in the trial pod,
-  channels disabled and tokens blanked by init BEFORE start, egress to the model endpoints only; run `doctor --fix`, record exactly what
-  changed in `state/openclaw.sqlite` and `agents/*`, run `openclaw skills list`, `openclaw cron list`, one turn per agent id; then delete the clone.
+**Slot (D1):** Saturday **2026-10-31**, full day, assistant and briefing may be down all day, operator at computer and browser all day.
+Confirmed by the operator 2026-10-23; alternatives considered: Sat 2026-11-07 (one more week of 10.x release soak, 7 days of margin before any Talos work) or Sun 2026-11-01
+(rejected: the talos reboot window runs that day, so a failed roll would collide with it). Saturday gives a full
+rollback day before the Sunday talos reboot (`conflicts_with: talos-linux-1.14.4`). Re-check `npm view openclaw dist-tags` on Thursday; if `latest` moved, keep 10.6 unless it is a fix for our path.
 
-### S4 attended roll
-Preconditions: S1-S3 pass; `runbooks/longhorn-backup-age.py` shows openclaw-data backup under 24 h AND a fresh manual Longhorn snapshot taken
-immediately before; `codex login status` valid; no cron due for 30 min and no in-flight `say` (avoid 06:55-07:15 and 02:55-03:15, 03:55-04:15 Berlin;
-suggested slot: Saturday attended window midday); copy `openclaw.json` to `openclaw.json.bak-pre-10.6`. Roll by the single GitOps commit
-(`Recreate`, verify live pod digest/startTime, not rollout status). Verify: versions 10.6.x/10.6.x/node v24.22.1; `doctor --lint` Errors 0;
-canary token turn; each of the 9 agents answers (main first); Telegram RECEIVE test on both bot accounts + one group binding; Discord DM;
-`openclaw cron list` unchanged (4 ids); briefing `--dry-run` then the 08:45 real send with voice; one `say`; next 03:00 DREAMS.md update and diary
-text; heartbeat-state size and an hourly heartbeat that really edits; health-check.sh OpenClaw block.
-**Why a revert is unsafe by itself**: `doctor --fix` rewrites `openclaw.json` (backup `.bak` kept, but 6.11 cannot read `agents.entries`/`ownership`/top-level `tts`),
-copies credentials into agent SQLite, moves legacy auth-store/memory-core rows into `state/openclaw.sqlite`, and repairs session schema; 6.11 does not
-understand the new schema. Rollback therefore = `git revert` the roll commit AND restore the pre-roll Longhorn snapshot/backup of `openclaw-data`
-(scale to 0 / Recreate, restore volume, then reconcile). Anything written between roll and rollback (chat sessions, memory) is lost; keep the window short.
+**Before the day (agents, no operator, Thu-Fri 10-29/30; this is the old S1):** prepare the git change as ONE reviewable change set, reviewed by plan-reviewer-agent, NOT pushed
+and NOT reaching prod until the roll step. Contents: both `node` tags -> `24.22.1-bookworm@sha256:6449e19d8184d84062525b6a7524def03146c2cb04a7f08b076680d0e8e4240a`
+(app AND `install-openclaw` init container: the gateway runs under the app container's node); `install_npm openclaw@2026.10.6` + `@openclaw/discord@2026.10.6`;
+peer-link `ln -sfn` loop then `openclaw doctor --fix --non-interactive` (HOME set, state mounted, fails init loudly on non-zero); idempotent config fixes:
+`del channels.discord.ui`, Discord `commands.ownerAllowFrom` -> `discord:user:<id>`, Telegram `defaultAccount` -> `vita`, voice-agent model object with fallbacks (D3);
+remove the dead dreaming `sed` block; `npm rebuild -g`; `upgrade.remediation.retries: 0` / `remediateLastFailure: false` for THIS roll only (7.1 lesson: Flux otherwise
+rolls back before init finishes; revert in a follow-up commit after verification); `runbooks/auto-update-policy.yaml` `image_major_ceiling` `max_major: 24` (reason text updated) and Renovate
+`allowedVersions "<25"` in the SAME change set (these ship with the roll, not before; do not commit them early). Also prepare the rollback revert and a rollback script
+(scale 0, restore volume from the pre-roll snapshot, reconcile). Pre-day checks (agents): codex login valid, `longhorn-backup-age.py` fresh, free Longhorn capacity for a 17 G clone + snapshot,
+trial NetworkPolicy and Secret drafted.
 
-### Decisions for the operator
-D1 attended slot (Saturday/Sunday, not near a briefing or the sweep trigger); D2 accept ~7 h prep plus a 2 h window; D3 whether to fix the
-Telegram `defaultAccount`, Discord `ownerAllowFrom` and voice-agent fallbacks now or just warn; D4 move `@openclaw/discord` in the same roll (recommended: it must match the host, only a
-config key breaks) or disable discord for the first boot; D5 which agents get the answer test (recommend all 9, main + one per family member minimum) and who sends the
-Telegram receive test; D6 ok to do the device-login for the scratch pod; D7 accept loss of sessions since the snapshot on rollback; D8 keep `gpt-6-luna` as primary for the roll or pin
-to the known-good model for the first 24 h. Could still fail: the SQLite state migration on real data (untested), Workshop skills migration of the seeded skills, ABI of native npm addons,
-Telegram poller regression, `gpt-6-luna` rejected by the 10.6 plugin, init-time `doctor --fix` exceeding the Helm timeout on a 3 GB agent store.
+**Timeline (Europe/Berlin, 2026-10-31)**
+
+| Time | Step | Who | Operator active |
+|---|---|---|---|
+| 08:45-09:10 | Normal 08:45 briefing runs on production (untouched). Nothing starts until it has sent. | cron | - |
+| 09:15 | Preflight: codex status, cron list, backup age, `git status` clean for the change set. Take Longhorn snapshot of `openclaw-data`, create clone volume `openclaw-data-trial` (17 G) | agents | 5 min (confirm) |
+| 09:35 | Operator runs `codex login --device-auth` for the rehearsal pod in a browser (D6); separate login, NEVER a copy of production `auth.json` | operator | 5 min |
+| 09:40-10:40 | **Single rehearsal (old S2+S3 merged)** on the clone: pod `openclaw-trial`, node 24.22.1 image, clone PVC mounted, channels disabled and tokens blanked BEFORE start, egress limited to DNS, npm, OpenAI, Ollama, no HTTPRoute/Service, no cron, no reloader annotation, not the production PVC or `openclaw-secret`. Runs: the prepared init script verbatim; **`doctor --fix` wall-clock on the ~3 GB agent store (must be well under the Helm timeout, record it)**; real SQLite migration (diff row counts of `state/openclaw.sqlite` and `agents/*` before/after); `doctor --lint` Errors 0; **gateway boot** to ready; model turn on `openai/gpt-6-luna` and `openai/gpt-5.6-terra` (with/without `OPENCLAW_CODEX_APP_SERVER_BIN`); one answer turn per agent id (9); `openclaw skills list` (~27 seeded skills load, init re-seed not fighting Workshop migration); `openclaw cron list` byte-compare (4 ids); `npm rebuild -g` CLI smoke (codex, gemini, claude, opencode, playwright); `say` skill dry path | agents | 0 (stand-by) |
+| 10:40 | **GO/NO-GO #1**: agents present the rehearsal evidence. Any miss -> fix in git and re-run the failing slice, or abort the day (nothing in prod changed). Delete clone and trial pod. Plan status flips `blocked` -> `ready` ONLY here | operator | 10 min |
+| 10:50 | Quiet start: pause the 4 crons (briefing `0788b8a7`, dreaming `d55acccd`, sweep trigger `8163c139`, retro `e9ce4ac3` - Saturday, no retro due) via the cron CLI, wait for any in-flight `say`/turn to finish | agents | - |
+| 11:00 | Fresh pre-roll Longhorn snapshot AND backup of `openclaw-data`, copy `openclaw.json` -> `openclaw.json.bak-pre-10.6`, `codex login status`. **T0.** Rollback target = this snapshot (assistant quiet, so ~nothing lost) | agents | - |
+| 11:10-11:40 | **Roll (old S4)**: single GitOps push (change set above), Flux reconcile (`Recreate`). Verify live pod startTime/digest, not rollout status; `kubectl -n ai logs` init to completion | agents | - |
+| 11:40-12:40 | Verification (section 5, below): versions + node v24.22.1 on app AND init, `doctor --lint` Errors 0, canary, **answer test on all 9 agents (D5)**, cron list unchanged (re-enable the 4 crons only after the answer test passes), briefing `--dry-run`, one `say`, Discord DM, health-check.sh OpenClaw block, heartbeat edit works | agents | - |
+| 11:50 | **Telegram RECEIVE test (D5)**: operator sends a message to both bot accounts (`vita`, `jerry`) and one group binding; agents confirm replies; wedged-poller check | operator | 15 min |
+| 12:45 | **GO/NO-GO #2** (keep vs roll back). Everything green -> keep; revert `remediation` retries in a follow-up commit; resume crons if not yet | operator | 5 min |
+| **13:30** | **HARD ROLLBACK CUTOFF.** If verification is not fully green by 13:30 the roll is rolled back, no extensions and no "one more fix". | rule | - |
+| 13:30-14:30 | (only if triggered) Rollback: `git revert` roll commit + push, scale to 0, restore pre-roll volume, reconcile, verify 6.11 canary + crons, re-enable crons. Done by **14:30**. | agents | 10 min |
+| 14:30-end | Soak, stay at the computer through the afternoon; watch the poller and heartbeat | optional | - |
+
+Totals: wall-clock 09:15 -> ~12:45 on the happy path (about 3.5-4.5 h incl. slack), worst case rollback complete 14:30 (about 5.25 h). Operator active about 1.5 h
+(5 + 5 + 10 + 15 + 5 + decisions and D8) .
+
+**Making Sunday 2026-11-01 (talos reboot) safe**
+- Failed or doubtful day: rolled back by 14:30 Saturday, so Sunday sees plain 6.11 and the talos window proceeds as planned.
+- Successful day: the new version runs the Saturday night 03:00 dreaming and Sunday morning crons (first real runs of dreaming/diary and the 08:45 briefing with voice). Sunday morning checkpoint BEFORE the talos reboot starts:
+  `DREAMS.md` updated with real diary text, briefing sent and voiced, Telegram poller receiving, `cron list` sane. Any miss -> restore the Saturday 11:00 snapshot (loses only the night) and talos proceeds on 6.11; do not let the node roll evict the pod while the question is open.
+- Normal pod eviction by the node drain after a verified roll is just a restart on the migrated state (the init is idempotent); `conflicts_with` talos stays for the roll+rollback day only.
+- The nightly 03:30 unattended window must not touch openclaw: the safe-update policy keeps the `node`/openclaw pins on the deny/ceiling logic; confirm the policy file reason covers it before Saturday.
+
+### Operator choices: ALL DECIDED (confirmed 2026-10-23)
+- **Day:** Saturday 2026-10-31 (the 11-07 alternative is dropped).
+- **Hard rollback cutoff 13:30 stays**, no extensions.
+- **D8 = option B:** pin the known-good `openai/gpt-5.6-terra` as primary for the first 24 h after the roll; switch back to `gpt-6-luna` in its own separate commit afterwards. The prepared change set therefore defaults to terra (overlay and `OPENCLAW_CODEX_APP_SERVER_BIN` stay). The rehearsal still tests both models.
+
+### Accepted decisions (2026-10-23)
+D2 compressed to one day (git prep by agents beforehand; one rehearsal merging scratch pod and clone; roll the same afternoon block); D3 fix Telegram `defaultAccount`, Discord `ownerAllowFrom`,
+voice-agent fallbacks in the roll; D4 `@openclaw/discord` moves in the same roll; D5 answer test on all 9 agents and the operator sends the Telegram receive test; D6 operator does the codex device-login for the rehearsal;
+D8 pin terra for the first 24 h; D7 fresh snapshot/backup immediately before the roll and crons paused so rollback loses ~nothing (rollback = git revert + restore pre-roll volume).
+Could still fail (the rehearsal exists to catch these): SQLite state migration on real data, Workshop skills migration, native addon ABI, Telegram poller regression, luna id rejected by the 10.6 plugin, init-time `doctor --fix` exceeding the Helm timeout on a 3 GB store.
+
+Note: sections 1-7 are the generic reference written for 10.5. Where they differ from 0b (target 2026.10.6, `openclaw.json.bak-pre-10.6`, one-day timeline, hard cutoff 13:30, rehearsal-first), 0b governs.
 
 ## 1. Premises that can fail (re-check at window time)
 1. `npm view openclaw@2026.10.5 engines.node` still `>=24.16.0 <25 || >=26.1.0`
@@ -293,6 +307,6 @@ kubectl -n ai exec "$OC" -c app -- bash -lc 'cd ~/clawd && python3 scripts/morni
 Risk **high**: a 4-month, multi-step version jump plus a Node major-line change, a
 state migration on the PVC, and a plugin-resolution mechanism that already caused a
 crashloop once. Duration ~90 minutes including validation (about 30 for section 3,
-15 for the roll, 30 for verification, 15 slack). Needs an attended window, not the
+15 for the roll, 30 for verification, 15 slack). Needs an attended full day (see 0b), not the
 unattended nightly. No reboot; the household assistant is down for the roll (a few
 minutes) and for any rollback.

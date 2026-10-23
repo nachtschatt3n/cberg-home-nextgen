@@ -7,8 +7,8 @@ pr: null                              # Renovate does not read .mise.toml in thi
                                       # comment in the file); the drift came from the 2026-10-05 version check.
 kind: config                          # same kind the plan set uses for non-workload repo changes
                                       # (float-tag-pinning, helm-drift-detection)
-current: "flux 2.9.0, sops 3.13.0, age 1.3.1, task 3.46.4, kustomize 5.6.0, yq 4.50.1, jq 1.7.1, cloudflared 2026.9.1, trivy 0.70.0"
-target: "flux 2.9.3, sops 3.13.3, age 1.3.2, task 3.54.0, kustomize 5.8.2, yq 4.54.1, jq 1.8.2, cloudflared 2026.9.3, trivy 0.75.0"
+current: "sops 3.13.0, age 1.3.1, task 3.46.4, kustomize 5.6.0, yq 4.50.1, jq 1.7.1, cloudflared 2026.9.1, trivy 0.70.0"
+target: "sops 3.13.3, age 1.3.2, task 3.54.0, kustomize 5.8.2, yq 4.54.1, jq 1.8.2, cloudflared 2026.9.3, trivy 0.75.0"
 update_type: minor                    # patch/minor only; the three majors are listed out of scope in §1
 risk: low                             # local binaries, instant revert (old versions stay installed); the one
                                       # real hazard (a sweep scanner that silently reports zero) is gated in
@@ -25,13 +25,11 @@ touches:
     - "$TMPDIR/cberg-trivy-cve-cache-v4.json"          # moved aside (4.8) so the next sweep rescans on 0.75
   shared: [sweep-toolchain]           # the binaries every sweep, the ops console, the window agent's
                                       # Step 0 and every other plan's §2-§5 commands resolve through mise
-depends_on: []                        # flux CLI targets the LIVE distribution (2.9.3), so no dependency on
-                                      # flux-distribution-2.9.6; see §1 "flux CLI target"
+depends_on: []                        # flux CLI is NOT in this plan any more (pin already 2.9.6, 14ea2ee9, 2026-10-15)
 conflicts_with:
   - flux-distribution-2.9.6           # changes the distribution the flux CLI pin tracks; its gates use the
-                                      # flux CLI. Run either first, never both in one slot (premise
-                                      # flux-distribution-still-2.9.3 catches the order).
-  - flux-fleet-0.60.0                 # flux-operator chart roll; its §4 uses `flux` + `kubectl` reads
+                                      # flux CLI. Never both in one slot (this plan swaps the toolchain).
+  # flux-fleet-0.60.0 dropped 2026-10-23: executed 10-06, plan retired
   - k8s-1.36.5                        # drives `task talos:*` (task + yq in .taskfiles/talos) mid-plan
   - talos-linux-1.14.2                # same: task/yq/talhelper chain mid-plan
   - kube-prometheus-stack-91.9.0      # 4.9 CONTROL reads Prometheus (the window's instrument)
@@ -51,15 +49,8 @@ premises:
   - id: pins-still-current
     why: "Step 3.2 anchors on these nine exact lines. Fewer than 9 means someone moved a pin and the target list must be re-derived."
     run: >-
-      grep -cxF -e '"aqua:fluxcd/flux2" = "2.9.0"' -e '"aqua:getsops/sops" = "3.13.0"' -e '"aqua:FiloSottile/age" = "1.3.1"' -e '"aqua:go-task/task" = "3.46.4"' -e '"aqua:kubernetes-sigs/kustomize" = "5.6.0"' -e '"aqua:mikefarah/yq" = "4.50.1"' -e '"aqua:jqlang/jq" = "1.7.1"' -e '"aqua:cloudflare/cloudflared" = "2026.9.1"' -e '"aqua:aquasecurity/trivy" = "0.70.0"' .mise.toml
+      grep -cxF -e '"aqua:getsops/sops" = "3.13.0"' -e '"aqua:FiloSottile/age" = "1.3.1"' -e '"aqua:go-task/task" = "3.46.4"' -e '"aqua:kubernetes-sigs/kustomize" = "5.6.0"' -e '"aqua:mikefarah/yq" = "4.50.1"' -e '"aqua:jqlang/jq" = "1.7.1"' -e '"aqua:cloudflare/cloudflared" = "2026.9.1"' -e '"aqua:aquasecurity/trivy" = "0.70.0"' .mise.toml
     expect_exact: "9"
-  - id: flux-distribution-still-2.9.3
-    why: >-
-      The flux CLI target (2.9.3) is chosen to EQUAL the live distribution. If
-      flux-distribution-2.9.6 executed first, this fails: STOP and re-plan (refresh
-      this plan's flux target via the planner + review). No in-window retarget.
-    run: kubectl get fluxinstance -n flux-system flux -o jsonpath='{.status.lastAppliedRevision}'
-    expect_matches: '^v2\.9\.3@sha256:'
   - id: out-of-scope-pins-untouched
     why: "The majors (helm 3.22.0, helmfile 0.171.0, gum 0.17.0) must still be on their current lines; if someone migrated one, §1's scope list is stale."
     run: >-
@@ -87,7 +78,6 @@ match on 2026-10-05).
 
 | tool | current | target | notes read (upstream release / CHANGELOG) |
 |---|---|---|---|
-| flux CLI | 2.9.0 | **2.9.3** | Same patch line as the live distribution. v2.9.1 notes: "Fix a breaking change in the in-memory Kustomization build (Flux CLI)", a fix we want for `flux build`/`flux diff`. |
 | sops | 3.13.0 | 3.13.3 | Patch fixes only (INI double-encoding, completion scripts). Store format unchanged. |
 | age | 1.3.1 | 1.3.2 | Patch. |
 | task | 3.46.4 | 3.54.0 | Remote Taskfiles reached GA in 3.53 (opt-in by URL; ours are local `includes:`). 3.47 adds an interactive prompt for missing `requires:` vars, which does not trigger without a TTY. Neither `sources:`/`generates:` nor `method:` is used in our Taskfiles, so the 3.52/3.53 checksum changes do not apply. |
@@ -135,13 +125,7 @@ What I checked against upstream (tags v0.70.0..v0.75.0, CHANGELOG and source):
   - The same harness with one image's IDs blanked printed `VERDICT: FAIL`, so the gate in §4.3 can fail.
   - No counts or IDs are recorded here or anywhere in the repo, per `docs/sops/vulnerability-disclosure.md`.
 
-**flux CLI target: 2.9.3 now, not 2.9.6 later.**
-- The CLI should equal the live distribution. Today that is `v2.9.3` (FluxInstance `lastAppliedRevision`).
-- `flux-distribution-2.9.6` is `draft` and itself `depends_on: [flux-fleet-0.60.0]`, which is also draft. Gating this plan behind two un-reviewed medium-risk control-plane plans would hold the priority trivy fix hostage to them.
-- A 2.9.x CLI is compatible across the 2.9 patch line (same CRD API versions).
-- The CLI move to 2.9.6 is a one-line follow-up that belongs in flux-distribution-2.9.6's retire step (reported to the coordinator as a cross-plan note).
-- If that plan lands first, premise `flux-distribution-still-2.9.3` fails and the executor STOPS; this plan is re-planned (no in-window retarget).
-- The later CLI catch-up 2.9.3 -> 2.9.6 is OWNED by flux-distribution-2.9.6's retire step (the coordinator is adding it there); this plan does not do it.
+**flux CLI: removed from this plan (2026-10-23).** `.mise.toml` already pins `aqua:fluxcd/flux2` = 2.9.6 (`14ea2ee9`, Renovate #245, 2026-10-15); the verify-only step lives in `flux-distribution-2.9.6` §3.4.
 
 **Why held:** nothing auto-applies `.mise.toml`, and the version check cannot tell
 a sweep-critical scanner from a convenience CLI. The changes are low-risk, but
@@ -266,7 +250,7 @@ first leaves that gap at zero.
 ```bash
 S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
 cd /Users/mu/code/cberg-home-nextgen
-mise install aqua:fluxcd/flux2@2.9.3 aqua:getsops/sops@3.13.3 aqua:FiloSottile/age@1.3.2 \
+mise install aqua:getsops/sops@3.13.3 aqua:FiloSottile/age@1.3.2 \
   aqua:go-task/task@3.54.0 aqua:kubernetes-sigs/kustomize@5.8.2 aqua:mikefarah/yq@4.54.1 \
   aqua:jqlang/jq@1.8.2 aqua:cloudflare/cloudflared@2026.9.3 aqua:aquasecurity/trivy@0.75.0
 echo rc=$?                                   # non-zero: STOP (nothing changed yet; nothing to roll back)
@@ -282,7 +266,6 @@ F=.mise.toml python3 - <<'EOF'
 import os
 p = os.environ["F"]
 BUMPS = {  # tool: (current, target)
-    "aqua:fluxcd/flux2": ("2.9.0", "2.9.3"),
     "aqua:getsops/sops": ("3.13.0", "3.13.3"),
     "aqua:FiloSottile/age": ("1.3.1", "1.3.2"),
     "aqua:go-task/task": ("3.46.4", "3.54.0"),
@@ -305,8 +288,8 @@ python3 -c "import tomllib;tomllib.load(open('.mise.toml','rb'));print('toml ok'
 git diff --stat .mise.toml                   # 1 file, 9 insertions(+), 9 deletions(-)
 ```
 
-The expected diff (dry run, 2026-10-05) is these nine lines and nothing else:
-`cloudflared 2026.9.1->2026.9.3`, `age 1.3.1->1.3.2`, `flux2 2.9.0->2.9.3`,
+The expected diff (dry run, 2026-10-05; flux2 line since removed) is these lines and nothing else:
+`cloudflared 2026.9.1->2026.9.3`, `age 1.3.1->1.3.2`,
 `sops 3.13.0->3.13.3`, `task 3.46.4->3.54.0`, `jq 1.7.1->1.8.2`,
 `kustomize 5.6.0->5.8.2`, `yq 4.50.1->4.54.1`, `trivy 0.70.0->0.75.0`.
 
@@ -315,7 +298,7 @@ The expected diff (dry run, 2026-10-05) is these nine lines and nothing else:
 
 ```bash
 S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-home-nextgen   # re-set in EVERY block: shell state does not persist between agent Bash calls
-printf 'chore(tooling): bump Mac CLI pins (flux 2.9.3, sops 3.13.3, age 1.3.2, task 3.54.0, kustomize 5.8.2, yq 4.54.1, jq 1.8.2, cloudflared 2026.9.3, trivy 0.75.0)\n\nplan: cli-tool-pins\n' > "$S/msg.txt"
+printf 'chore(tooling): bump Mac CLI pins (sops 3.13.3, age 1.3.2, task 3.54.0, kustomize 5.8.2, yq 4.54.1, jq 1.8.2, cloudflared 2026.9.3, trivy 0.75.0)\n\nplan: cli-tool-pins\n' > "$S/msg.txt"
 git commit --only .mise.toml -F "$S/msg.txt"
 git log -1 --format=%s        # must be YOUR subject; amend before push if a concurrent commit swapped it
 git show --stat HEAD          # exactly .mise.toml
@@ -333,7 +316,7 @@ S=/private/tmp/claude-501/cli-tool-pins; mkdir -p "$S"; cd /Users/mu/code/cberg-
 mise ls --current | grep -E 'flux2|sops|age|task|kustomize|yq|jq|cloudflared|trivy'
 mise exec -- sh -c 'flux version --client; sops --version | head -1; age --version; task --version; kustomize version; yq --version; jq --version; cloudflared --version; trivy --version | head -1'
 ```
-PASS: `flux: v2.9.3`, `sops 3.13.3`, `v1.3.2`, `3.54.0`, `v5.8.2`, `v4.54.1`,
+PASS: `sops 3.13.3`, `v1.3.2`, `3.54.0`, `v5.8.2`, `v4.54.1`,
 `jq-1.8.2`, `2026.9.3`, `Version: 0.75.0`.
 
 4.2 **trivy positive and negative control** through the sweep's own parser. FAIL
@@ -434,7 +417,7 @@ for d in kubernetes/apps/ai/paperclip/app kubernetes/flux/meta kubernetes/apps/m
 diff "$S/kbuild-pre.txt" "$S/kbuild-post.txt" && echo RENDER-IDENTICAL
 mise exec -- yq '.talosVersion, .kubernetesVersion' kubernetes/bootstrap/talos/talconfig.yaml | diff "$S/yq-pre.txt" - && echo YQ-IDENTICAL
 mise exec -- flux get kustomizations -A --no-header | awk '{print $1, $5}' | sort | diff "$S/flux-ks-pre.txt" - && echo FLUX-READ-IDENTICAL
-mise exec -- flux version          # client v2.9.3 == distribution flux-v2.9.3
+mise exec -- flux version --client   # v2.9.6, untouched by this plan
 mise exec -- cloudflared tunnel --help >/dev/null; echo rc=$?          # 0
 ```
 A kustomize render difference is a STOP-and-read: release notes say "not expected
@@ -499,11 +482,7 @@ Prune the old versions only after one clean sweep cycle:
 - **Recommended slot:** an attended on-demand NOW run in daytime, outside 03:15-06:00
   and outside Mon 07:15-08:30 (retro), with the §2 `ps` check clean. A sat/sun
   attended window also works if the plan has the slot to itself. **Never as root.**
-- **flux-distribution-2.9.6 ordering:** either order works. If it runs first,
-  premise `flux-distribution-still-2.9.3` fails and this plan STOPS for a re-plan
-  (no in-window retarget). If this plan runs first, the CLI catch-up 2.9.3 -> 2.9.6
-  is owned by flux-distribution-2.9.6's retire step (being added there by the
-  coordinator); this plan does not touch it.
+- **flux-distribution-2.9.6 ordering:** either order works; the flux CLI pin is already 2.9.6 and not part of this plan.
 - **Concurrency window inside the plan:** between 3.2 and 3.3, the working-tree
   `.mise.toml` already carries the new pins. Because 3.1 pre-installed them, nobody hits
   "not installed". Sessions that resolve per call (`mise exec`, shims) pick up the new

@@ -182,8 +182,9 @@ finding_refs:
   # health-check-agent, named as residual risk in §7), F-59b12b2b (owned by
   # talconfig-multidoc-migration).
 review: ready-for-go@2026-10-06   # plan-reviewer 2026-10-05/06: three needs-fix rounds (Phase K clock, window-open source, roll-record glob) -> fixed -> narrow delta ready-for-go (6b0375a7). Open nonblocking: clear stale g310/pattern-ii files at §2.0; ${CRI:-0} in k0clock; (0a) never piped
-status: awaiting-go   # HUMAN-GATED (3 node reboots + upgrade-k8s): operator GO required; decide at the GO whether the ~30-min Phase K extension is pre-approved
-window: "sun-attended:2026-11-01"   # scheduled 2026-10-06: exclusive Sunday (180 declared / 210 priced; Phase K defers on price unless the extension is pre-approved); 2 weeks before longhorn-1.13.0 (11-15)
+status: superseded   # 2026-10-23: retargeted to talos-linux-1.14.4 (v1.14.3/v1.14.4 shipped on top); never executed
+superseded_by: talos-linux-1.14.4
+window: null   # moved to talos-linux-1.14.4 (sun-attended:2026-11-01) 2026-10-23
                                       # flux-reconciler-impersonation placeholder on 10-11 was released;
                                       # n8n-2.39.8 now holds sun-attended:2026-10-11. The coordinator will
                                       # PROPOSE sun-attended:2026-11-01 for this plan — not assigned here;

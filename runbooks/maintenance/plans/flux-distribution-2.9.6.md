@@ -40,43 +40,39 @@ touches:
   shared: [flux]                      # the reconcile engine and the git-revert path of EVERY other plan.
                                       # Not `monitoring`: the flux-operator pod (the flux_* exporter) does
                                       # NOT restart here (gate 4.4); gotk_* controller metrics are not scraped.
-                                      # The window's Prometheus instrument is covered by conflicts_with
-                                      # kube-prometheus-stack-91.9.0.
-depends_on: [flux-fleet-0.60.0]       # operator chart/image 0.57.0 -> 0.61.0 must be executed first (coordinator
-                                      # sequencing; flux-fleet gate 4.5 asserts the distribution is UNCHANGED, so
-                                      # the two can never share a commit or a slot).
+                                      # The window's Prometheus instrument: no kube-prometheus-stack plan is
+                                      # open as of 2026-10-23 - if one is filed, add it to conflicts_with.
+depends_on: []                        # flux-fleet-0.60.0 is EXECUTED and its plan retired: operator/instance chart
+                                      # 0.61.0 is live (re-measured 2026-10-23: deploy/flux-operator image v0.61.0,
+                                      # hr/flux-instance chartVersion 0.61.0 deployed) and soaked since 2026-10-06.
 conflicts_with:
-  - cli-tool-pins                     # 2026-10-05: exclusive; touches the flux CLI pin this plan's retire step moves
-  - flux-fleet-0.60.0                 # same control plane; it also gates "distribution unchanged" (4.5) and a
-                                      # same-slot run would make both plans' gates unattributable.
+  - cli-tool-pins                     # 2026-10-05: exclusive toolchain swap (flux CLI no longer in it; this plan's gates use the CLI)
   - flux-oci-chart-sources            # rewrites Flux chart sources: needs a stable source-controller under it.
   - helm-drift-detection              # changes HelmRelease behaviour fleet-wide; its premise
                                       # `flux-distribution-is-2.9` and its section 3.0.0 proof were measured on
                                       # kustomize/helm-controller of v2.9.3 and must be re-run after this lands.
   - flux-reconciler-impersonation     # swaps the identity kustomize/helm-controller apply under via FluxInstance
                                       # patches; its gates baseline the FluxInstance digest this plan changes.
-  - kube-prometheus-stack-91.9.0      # sections 2.d/4.3/4.5/4.6 read Prometheus (the window's instrument).
-  - ci-runner-exclude-node02          # proposed for nightly:2026-10-06; GitOps legs need a stable Flux.
+  # Dead refs dropped 2026-10-23 (plans retired/never written): flux-fleet-0.60.0 (executed), kube-prometheus-stack-91.9.0,
+  # ci-runner-exclude-node02, pgvector-fleet-0.8.7, python-fleet-3.14.8 (executed), unpoller-5.4.0, coredns-1.48.2,
+  # grafana-13.2.7, nextcloud-fleet-35.0.1, n8n-2.39.8 / paperless-db-13.0.2 / jellyfin-12.1 (executed or superseded).
   # Plans whose own apply/revert rides helm-controller/kustomize-controller and which an in-flight controller
   # roll would strand (helm-controller restart mid-upgrade leaves a release pending-upgrade; with retries: 0
-  # nothing recovers it). Same set flux-fleet-0.60.0 serializes against; this plan rolls MORE than that one.
+  # nothing recovers it). `exclusive: true` below covers any plan not named; every open plan is re-listed here.
   - redis-fleet-8.10.2
-  - nextcloud-fleet-35.0.1
-  - nextcloud-9.4.0
-  - n8n-2.39.8
+  - nextcloud-9.4.1
   - n8n-chart-2.1.1
-  - pgvector-fleet-0.8.7
-  - python-fleet-3.14.8
-  - unpoller-5.4.0
-  - coredns-1.48.2                    # 2026-10-05: coredns-1.48.1 superseded
-  - talos-linux-1.14.2                # 2026-10-05 review: node roll + folded upgrade-k8s (exclusive covers it; named anyway)
-  - talos-power-tuning-ab             # 2026-10-05 review: named for completeness
-  - grafana-13.2.7
+  - python-fleet-3.15.0
+  - talos-linux-1.14.4                # node roll + folded upgrade-k8s
+  - talos-power-tuning-ab
   - external-dns-1.23.0
   - longhorn-1.13.0
-  - jellyfin-12.1
-  - paperless-db-13.0.2
   - penpot-chart-1.10.0
+  - falco-9.2.1
+  - cilium-1.20.3
+  - descheduler-0.37.0
+  - vaultwarden-1.37.4
+  - nocodb-2026.09.1
 exclusive: true                       # Every co-scheduled plan relies on these six controllers to apply AND to
                                       # revert itself. conflicts_with cannot name plans not written yet; this
                                       # flag can. (Step 0 safe-update apply is not a plan: see section 6.)
@@ -102,14 +98,14 @@ finding_refs:                         # ownership claim: these register rows res
   - F-edd36ca7                        # image-automation-controller v1.2.3 image row
 premises:
   # Read-verb only. All run 2026-10-05 ~10:00 CEST. Expected values below are the values that must hold
-  # AT EXECUTION (after flux-fleet-0.60.0 executed); operator-is-0.61.0 therefore FAILS today, by design.
+  # Re-run 2026-10-23: all 7 PASS (operator-is-0.61.0 now holds: flux-fleet-0.60.0 executed 2026-10-06).
   - id: distribution-current
     why: The edit replaces v2.9.3; if the distribution already moved, this plan is stale (README "outlive its own work").
     run: kubectl get fluxinstance -n flux-system flux -o jsonpath='{.spec.distribution.version}'
     expect_exact: v2.9.3
   - id: operator-is-0.61.0
     why: >-
-      depends_on flux-fleet-0.60.0. If the operator is still v0.57.0 that plan has not executed and this one
+      flux-fleet-0.60.0 (now executed) put the operator on v0.61.0. If the operator is still v0.57.0 that plan has not executed and this one
       must not run (attribution of a regression to operator vs controllers would be impossible).
     run: kubectl get deploy -n flux-system flux-operator -o jsonpath='{.spec.template.spec.containers[0].image}'
     expect_exact: ghcr.io/controlplaneio-fluxcd/flux-operator:v0.61.0
@@ -149,9 +145,9 @@ premises:
     run: >-
       grep -c '^    version: v2\.9\.3$' kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml
     expect_exact: "1"
-status: draft
-review: null
-window: null   # 2026-10-05 schedule: proposed operator NOW evening 2026-10-09 18:30 (GO) after (a) flux-fleet-0.60.0 executed 10-06 + >=1 nightly Step 0 on operator v0.61.0, (b) premise operator-is-0.61.0 PASSES and a delta re-review records ready-for-go; fallback nightly:2026-10-14 with GO
+status: vetted
+review: ready-for-go@2026-10-23      # delta plan-reviewer 2026-10-23: ready-for-go
+window: "sat-attended:2026-10-24"   # stamped 2026-10-23 on delta review (exclusive; Sat 09:00 attended)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/flux-upgrade.md
@@ -189,11 +185,10 @@ waiting for them (`spec.wait: true`).
 | image-reflector-controller | v1.2.3 | v1.2.5 |
 | image-automation-controller | v1.2.3 | v1.2.5 |
 
-Out of scope: the operator/instance charts (flux-fleet-0.60.0, must run first) and the local
-`flux` CLI pin in `.mise.toml` (`"aqua:fluxcd/flux2" = "2.9.0"`): cli-tool-pins moves it to
-2.9.3 (today's cluster), and the 2.9.3 -> 2.9.6 CLI catch-up is owned by THIS plan's §3.4 retire
-step (ownership settled 2026-10-05 after both plans disclaimed it). The CLI stays usable against v2.9.6 controllers (same API versions; 2.9.x
-patch line), so it does not block this plan.
+Out of scope: the operator/instance charts (flux-fleet-0.60.0, executed 2026-10-06, plan retired) and the local
+`flux` CLI pin in `.mise.toml`, which is ALREADY `"aqua:fluxcd/flux2" = "2.9.6"` (Renovate #245, `14ea2ee9`,
+2026-10-15; `flux version --client` prints v2.9.6 on 2026-10-23). §3.4 therefore only VERIFIES it; cli-tool-pins no
+longer lists flux. The CLI is one patch AHEAD of the 2.9.3 controllers until this plan lands (same API versions; harmless).
 
 ### 1.2 Why it was held
 
@@ -298,15 +293,20 @@ Run from `/Users/mu/code/cberg-home-nextgen` in zsh. Any failure -> stop, do not
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-# a) premises (all 7 must PASS; operator-is-0.61.0 proves depends_on is met)
+# a) premises (all 7 must PASS; operator-is-0.61.0 proves the operator is on the post-flux-fleet release)
 .venv/bin/python3 runbooks/plan-premises.py flux-distribution-2.9.6
-grep -m1 '^status:' runbooks/maintenance/plans/flux-fleet-0.60.0.md 2>/dev/null || echo "flux-fleet plan retired (expected after it executed)"
 
 # b) Step 0 of THIS window has settled, nothing is mid-reconcile, no stranded release
 git fetch -q origin
 mise exec -- kubectl -n flux-system get gitrepository flux-system -o jsonpath='{.status.artifact.revision}{"\n"}'
 git rev-parse origin/main
 # PASS: the sha in the artifact revision equals origin/main (Step 0 commits, if any, are applied).
+# b2) Step-0 FALSE REVERT check (2026-10-23: the post-apply health gate auto-reverted six healthy PRs at 13:28:17 because
+#     concurrent commit traffic made Flux say "dependency revision not up to date"). Before starting, list bot/revert
+#     commits of the last 24 h and confirm none is a half-settled batch:
+git log --since='24 hours ago' --format='%h %an %s' | grep -E '^[0-9a-f]+ renovate\[bot\]|Revert "' ; echo "grep-exit=$?"
+# PASS: either no lines (grep-exit=1), or every Renovate merge has its Revert AND `flux get ks -A` / `flux get hr -A`
+# show no NotReady object. A Renovate merge WITHOUT its revert, or a Revert you cannot explain, = Step 0 is mid-flight: STOP.
 mise exec -- helm list -A --pending
 # PASS: header line only. A row = a release pending-install/upgrade/rollback; rolling helm-controller
 # under it would strand it. Wait for it to finish or stop.
@@ -337,7 +337,7 @@ mise exec -- kubectl get crd imageupdateautomations.image.toolkit.fluxcd.io -o j
   | python3 -c 'import sys,json; s=json.load(sys.stdin)["spec"]["versions"]; v=[x for x in s if x["storage"]][0]; print(repr(v["schema"]["openAPIV3Schema"]["properties"]["spec"]["properties"]["git"]["properties"]["push"]["properties"]["refspec"].get("pattern")))'
 # EXPECT: None   (negative control for gate 4.5: the pattern is absent on v2.9.3)
 mise exec -- helm -n flux-system history flux-instance --max 2 | tee helm-inst-before.txt
-# EXPECT (after flux-fleet-0.60.0): latest "deployed flux-instance-0.61.0". Write the revision number down.
+# EXPECT (measured 2026-10-23): latest "deployed flux-instance-0.61.0", revision 7. Write the revision number down (§4 expects before+1 = 8).
 cd /Users/mu/code/cberg-home-nextgen
 
 # d) Prometheus baseline (port-forward by PID, never kill %1)
@@ -422,7 +422,7 @@ source/kustomize-controller v1.9.6, helm-controller v1.6.5 (upstream Helm
 v4.2.4), notification-controller v1.9.4, image-reflector/automation v1.2.5.
 CRD served/storage versions unchanged; IUA refspec pattern added (unused here).
 
-Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 EOF
 git commit --only kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml -F /tmp/flux-dist/msg-core.txt
 git log -1 --format=%s          # MUST be the subject above (shared-worktree message swap guard); amend before push if not
@@ -485,7 +485,7 @@ docs(flux): infrastructure.md to distribution v2.9.6 controller versions
 No cluster effect; doubles as the post-roll end-to-end reconcile test
 (webhook -> source -> kustomize) for plan flux-distribution-2.9.6.
 
-Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 EOF
 git commit --only docs/infrastructure.md -F /tmp/flux-dist/msg-docs.txt
 git log -1 --format=%s && git show --stat HEAD
@@ -496,11 +496,11 @@ git push origin main
 
 ### 3.4 Retire
 
-After section 4 is fully green, first catch the local CLI up (attended, never as root, outside
-03:15-06:00): `mise install aqua:fluxcd/flux2@2.9.6` BEFORE editing `.mise.toml`, then change the
-one line `"aqua:fluxcd/flux2" = "2.9.3"` -> `"2.9.6"` and verify `mise exec -- flux version --client`
-prints 2.9.6 (commit with `git commit --only .mise.toml`). If cli-tool-pins has not run yet (pin
-still 2.9.0), leave the CLI to cli-tool-pins and note it. Then: delete this plan file in the next commit (README: plans are
+After section 4 is fully green, VERIFY (do not edit) the local CLI pin, which already moved in `14ea2ee9`
+(Renovate #245, 2026-10-15): `grep -c '"aqua:fluxcd/flux2" = "2.9.6"' .mise.toml` prints 1 and
+`mise exec -- flux version --client` prints `flux: v2.9.6`. A different value means the pin drifted: fix it with a
+separate commit (`git commit --only .mise.toml`, attended, never as root, outside 03:15-06:00), not inside this plan's
+cluster commit. Then: delete this plan file in the next commit (README: plans are
 transient). Do NOT hand-close the six finding_refs: they are sweep-owned security rows —
 let the next sweep resolve them and VERIFY that it did (`policy-cli.py finding show <F-id>`
 for each; any still open after the sweep is a finding, not something to close by hand).
@@ -640,7 +640,7 @@ mise exec -- flux -n default reconcile hr echo-server --force
 mise exec -- helm -n default history echo-server --max 2
 mise exec -- kubectl -n default get hr echo-server -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{" "}{.status.history[0].status}{"\n"}'
 ```
-PASS: a new helm revision (13 -> 14 as of 2026-10-05) "Upgrade complete", HR `True deployed`.
+PASS: a new helm revision (15 -> 16 as of 2026-10-23; echo-server was at 15 `deployed`, flux-instance at 7) "Upgrade complete", HR `True deployed`.
 FAIL looks like "Upgrade failed"/"Rollback to N" or Ready `False` — a Helm-library regression that
 every other HelmRelease will hit on its next real upgrade (i.e. the next window's Step 0): roll back.
 Do NOT use `flux-instance` for this test: a failed forced upgrade there remediates by rolling back
@@ -742,12 +742,12 @@ Pre-check 2.f proved that path is admissible (server-side dry run).
 - **Receiver gap:** notification-controller restarts; a GitHub push during the ~30 s gap is still
   picked up by the GitRepository 1-minute poll. No alerting impact (Alertmanager does not route via
   notification-controller here).
-- **Earliest slot / soak:** depends_on flux-fleet-0.60.0 (nightly:2026-10-06, needs GO). Leave at
-  least one full nightly Step 0 between the two (operator change soaks a day; a regression is then
-  attributable). Earliest sensible: an attended on-demand NOW run on 2026-10-07 evening, or
-  `nightly:2026-10-08` with an explicit GO and the operator reachable in the morning. sat 10-10
-  holds jellyfin-12.1 and sun 10-11 holds the exclusive flux-reconciler-impersonation placeholder,
-  so neither can take an exclusive plan as things stand.
+- **Slot / soak (refreshed 2026-10-23):** the dependency is met - flux-fleet-0.60.0 executed 2026-10-06 and the
+  operator has soaked on v0.61.0 for 17 days. Because the plan is `exclusive: true`, medium risk and rolls the whole
+  reconcile engine, it is **not a nightly candidate**: take an attended on-demand run, else `sat-attended`
+  2026-10-24 (70 min vs est 50) or `sun-attended` 2026-10-25 (180 min; also reboot-capable, so prefer Saturday and keep
+  Sunday free for talos-linux-1.14.4 if that is approved). `flux-reconciler-impersonation` is `blocked` today; when it
+  unblocks it runs AFTER this plan.
 - **flux-reconciler-impersonation:** its FluxInstance patch changes the same digest this plan
   changes; whichever runs second must re-baseline its digest premises (do not wave a digest
   mismatch through). Prefer this plan first (smaller, version-only).
@@ -762,5 +762,6 @@ Pre-check 2.f proved that path is admissible (server-side dry run).
   `docs/sops/new-deployment-blueprint.md` (not made by this plan).
 - **Orphans noticed, not touched:** 12 Kong CRDs labelled for a `monitoring/kubernetes-dashboard`
   HelmRelease that no longer exists.
-- **`.mise.toml` flux CLI 2.9.0** stays; owned by the cli-tool-pins plan. `docs/sops/flux-upgrade.md`
-  section 2 asks to keep it aligned; a 2.9.x patch skew is harmless for `flux get/reconcile`.
+- **`.mise.toml` flux CLI is already 2.9.6** (`14ea2ee9`); cli-tool-pins no longer lists flux. §3.4 verifies it.
+  `docs/sops/flux-upgrade.md` section 2 asks to keep CLI and distribution aligned; until this plan lands the CLI is one
+  patch ahead of the controllers, which is harmless for `flux get/reconcile`.
