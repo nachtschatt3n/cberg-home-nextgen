@@ -39,7 +39,7 @@ spec:
     # This is a YAML-formatted file.
 
     # -- Number of Jellyfin replicas to start. Should be left at 1.
-    replicaCount: 0
+    replicaCount: 1
 
     # -- Image pull secrets to authenticate with private repositories.
     # See: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
@@ -243,7 +243,7 @@ spec:
         # -- Custom annotations to be added to the PVC
         annotations: {}
         ## -- Use an existing PVC for this mount
-        existingClaim: 'jellyfin-config'
+        existingClaim: 'jellyfin-config-rwo'
         # storageClass not needed when using existingClaim
       media:
         # -- set to false to use emptyDir
