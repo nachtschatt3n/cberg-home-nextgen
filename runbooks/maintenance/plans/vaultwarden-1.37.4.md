@@ -83,7 +83,7 @@ premises:
     run: kubectl get backups.longhorn.io -n storage -l backup-volume=vaultwarden-data -o jsonpath='{.items[*].status.state}'
     expect_contains: Completed
 status: vetted
-window: null   # vaultwarden-1.37.4 ABORTED in on-demand run 2026-10-22 (pre-check 3.2: ciphers=0 vs plan PASS >=1); needs plan fix or operator call
+window: null   # vaultwarden-1.37.4 ABORTED in on-demand run 2026-10-22 (pre-check 3.2: ciphers=0 vs plan PASS >=1). RESOLVED 2026-10-23: operator confirmed the vault is intentionally empty until the Bitwarden migration; gate relaxed to users>=1 + migrations present
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md
@@ -246,7 +246,10 @@ kubectl -n office cp "$POD:$PRE" "$B/pre.sqlite3"
 sqlite3 "$B/pre.sqlite3" 'PRAGMA integrity_check;'                       # PASS: ok
 Q="select 'users',count(*) from users union all select 'ciphers',count(*) from ciphers union all select 'folders',count(*) from folders union all select 'attachments',count(*) from attachments union all select 'organizations',count(*) from organizations union all select 'users_organizations',count(*) from users_organizations union all select 'twofactor',count(*) from twofactor;"
 sqlite3 -separator ' ' "$B/pre.sqlite3" "$Q" | tee "$B/counts-before"
-# PASS: users >= 1 and ciphers >= 1 (an empty vault here means we are reading the wrong file — STOP)
+# PASS: users >= 1 AND the migration table has rows (we are reading the live DB). ciphers = 0 is EXPECTED today:
+# operator 2026-10-23 'not yet, I need to migrate from Bitwarden' - the vault is not populated yet, so an empty
+# ciphers table is NOT a wrong-file signal. Wrong file/fresh DB = users 0 OR no __diesel_schema_migrations rows: STOP.
+sqlite3 "$B/pre.sqlite3" "select count(*) from __diesel_schema_migrations;" | awk '$1>=1{print "MIGRATIONS_PRESENT"}'  # PASS: MIGRATIONS_PRESENT
 sqlite3 "$B/pre.sqlite3" "select count(*) from __diesel_schema_migrations where version='20260902120000'; select count(*) from pragma_table_info('users') where name='key_id';" | tr '\n' ' ' | tee "$B/mig-before"; echo
 # PASS: "0 0 "  (migration not yet applied; a "1 1" means something already ran 1.37.4 — STOP and investigate)
 ```
