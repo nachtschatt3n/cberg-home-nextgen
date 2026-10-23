@@ -6,4 +6,3 @@ resources:
   - ./servicemonitor.yaml
   - ./metrics-secret.sops.yaml
   - ./httproute.yaml
-  - ./authentik-outpost-ingress.yaml

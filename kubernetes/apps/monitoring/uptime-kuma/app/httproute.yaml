@@ -17,10 +17,10 @@
 #     Service (:3001) would look tidier and would REMOVE the app's
 #     authentication entirely. Do not.
 #
-# BACKEND IS THE REAL SERVICE IN kube-system, NOT the local
-# `uptime-kuma-authentik-outpost` Service. That local Service is an
-# ExternalName, and Envoy Gateway resolves backends through EndpointSlices —
-# an ExternalName has none, so a backendRef to it would never resolve.
+# BACKEND IS THE REAL SERVICE IN kube-system. A local ExternalName Service
+# (`uptime-kuma-authentik-outpost`, removed) never worked as a backendRef:
+# Envoy Gateway resolves backends through EndpointSlices and an ExternalName
+# has none.
 # Cross-namespace refs are authorised by ReferenceGrant
 # `uptime-kuma-outpost-access` in kube-system (already present).
 #
