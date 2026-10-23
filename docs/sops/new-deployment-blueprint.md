@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/gateway-api-httproute.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/log-volume-runaway.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.09.28`
-> Last Updated: `2026-09-28`
+> Version: `2026.10.23`
+> Last Updated: `2026-10-23`
 > Owner: `Platform`
 
 ---
@@ -1142,6 +1142,31 @@ key assertion separates them. Same shape as Gotcha #14 and
 a check that cannot distinguish *registered* from *absent* is not a
 registration check.
 
+### 16. Self-built image: scope the `ImageUpdateAutomation` with `policySelector`
+
+A per-app `ImageUpdateAutomation` in a namespace shared with other apps MUST set
+`spec.policySelector.matchLabels: {app.kubernetes.io/name: <app>}`. Unscoped, it
+observes sibling ImagePolicies and `health-check.sh` reports a false
+`SILENT-NO-PUSH` on another app's undeployed tag (`5b7d55a0`). Details and the
+verification command: `docs/sops/flux-image-automation-push-auth.md` §4; mode
+table: `docs/sops/self-built-image-rebuild.md`.
+
+### 17. A chart `command:` override bypasses the image ENTRYPOINT (and its env)
+
+If a chart sets a container `command:` (or `args` that replace the entrypoint,
+e.g. `bash -lc sidekiq`), the image's `ENTRYPOINT` script does NOT run, so
+anything it exported is silently gone: `LD_PRELOAD` (jemalloc), `MALLOC_*`,
+`PATH` additions, config rendering. Seen on sure (`69d2fcf0`): web mapped jemalloc,
+the sidekiq worker overrode `command` and ran on glibc malloc (370Mi -> 1Gi
+plateau). Rule: when a chart overrides `command:`, read the image's entrypoint
+script (`docker run --entrypoint cat <img> /path/to/entrypoint`) and re-supply
+every env var it exports through the chart's env values. Verify in the live pod,
+not the manifest: `kubectl exec <pod> -- grep -c jemalloc /proc/1/maps` (use the
+library your entrypoint preloads; 0 means the preload did not take effect) and
+`kubectl exec <pod> -- cat /proc/1/environ | tr '\0' '\n' | grep LD_PRELOAD`.
+Leave a comment in the values naming the finding so the next chart bump does not
+drop it.
+
 ---
 
 ## Troubleshooting
@@ -1292,6 +1317,8 @@ Rollback success criteria:
 ---
 
 ## Version History
+
+- `2026.10.23`: Known Gotchas #16 (ImageUpdateAutomation policySelector, F-f94fcbd2) and #17 (chart `command:` bypasses ENTRYPOINT env, F-49be67ca).
 
 | Version | Date | Change |
 |---------|------|--------|

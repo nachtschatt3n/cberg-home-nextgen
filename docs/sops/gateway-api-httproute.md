@@ -1,8 +1,8 @@
 # SOP: Gateway API / HTTPRoute Routing (Envoy Gateway)
 
 > Description: How HTTP ingress works in this cluster now that ingress-nginx is gone — writing, reviewing and debugging HTTPRoutes on the two Envoy Gateways, including forward-auth, backend TLS, timeouts and the verification gate that catches the failures which are invisible at apply time.
-> Version: `2026.10.02`
-> Last Updated: `2026-10-02`
+> Version: `2026.10.23`
+> Last Updated: `2026-10-23`
 > Owner: `homelab operator (cberg-home-nextgen)`
 
 ---
@@ -62,6 +62,15 @@ are not style preferences.
 - **Shape B — any other chart**: set the chart's own `ingress.enabled: false`
   and add a standalone `httproute.yaml` to the app directory plus its
   `kustomization.yaml`.
+  **Chart-default trap (librechat, 2026-09-07, `0564d32e` -> `9a3b4fa4`):** for
+  some charts `ingress.enabled: false` is NOT dead rollback residue, it is what
+  SUPPRESSES a chart default of `true`. Deleting it re-created a live Ingress 92
+  seconds later. Never remove an `ingress: enabled: false` block as "unused"
+  without checking the chart's default values (`helm show values <chart>`); when
+  in doubt keep it. And `kubectl kustomize` cannot see the problem: it renders
+  the HelmRelease CR, not the chart, so a chart-generated Ingress is invisible to
+  it by construction. Verify with `kubectl get ingress -A` (must be empty) or
+  `helm template` of the chart with the HelmRelease values.
 
 ---
 
@@ -682,11 +691,41 @@ spec:
 
 ---
 
+## Decommissioning a routing layer (audit and alerting surface)
+
+Replacing a routing layer (the ingress-nginx -> Envoy Gateway cutover, 2026-09-07)
+is not finished when traffic flows. Six checks went silently blind on cutover day
+because they were keyed on the old layer: nginx-metric PrometheusRules, the
+Ingress-keyed exposure model (`runbooks/lib/risk_model.py`), and the Ingress-keyed
+health and security checks (`runbooks/security-check.py`). Route authoring
+(this SOP) and the data-plane cutover (`envoy-gateway-upgrade.md`) do not cover
+that surface. Before the old controller is deleted:
+
+1. **Mandatory grep-list** over `kubernetes/`, `runbooks/`, `docs/`, `.claude/`;
+   every hit is migrated, or recorded as intentionally retired:
+   - `kind: Ingress`, `ingressClassName`, `IngressClass`, `networking.k8s.io/v1`
+   - the old controller's metric names (e.g. `nginx_ingress_controller_`), in
+     PrometheusRules, Grafana dashboards and SLO queries
+   - the old VIPs/IPs and old controller hostnames (DNS, firewall, `/etc/hosts`
+     on the Mac mini, which no repo audit sees)
+   - exposure/risk classification code keyed on Ingress objects
+2. **Control-query requirement.** For each migrated check, run it against the NEW
+   layer and show it returns a known-positive result (an existing external route
+   is listed, a metric series exists, an alert rule is `inactive` but with series
+   behind it). A check that returns zero is not proof until a deliberate control
+   shows it can return non-zero. Pair every alert group with an `absent()` guard.
+3. **Only then** delete the old controller, and re-run the sweep to confirm no
+   section went from findings to silent-zero.
+4. **Outposts and generators** that publish their own Ingress (see
+   `authentik.md` "Outpost-published Ingress") must be audited from the LIVE
+   object list, not a repo grep.
+
 ## 6) Verification Tests
 
 **This is the gate. Both real failures on 2026-09-07 were invisible at apply
 time and visible only in status.** "Flux reconciled" and "the object applied"
-prove nothing here.
+prove nothing here. Also confirm `kubectl get ingress -A` is empty after any
+Shape B conversion: `kubectl kustomize` cannot show a chart-generated Ingress.
 
 ### Test 1: route status — BOTH conditions
 
@@ -1077,6 +1116,8 @@ Rollback cautions specific to this migration:
 
 ## Version History
 
+- `2026.10.23`: Shape B chart-default trap (F-e2413e16) and new "Decommissioning
+  a routing layer" section with the grep-list and control-query rule (F-1fab021a).
 - `2026.09.15`: Rule 3 and the §8 external-dns diagnose expectation — Gateway
   `envoy-external` now carries BOTH external-dns target keys: the GA
   `external-dns.kubernetes.io/target` (added `fbcd93c2`, read by v0.22.0+) and the

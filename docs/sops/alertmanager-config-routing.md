@@ -1,8 +1,8 @@
 # SOP: AlertmanagerConfig Root-Route Isolation
 
 > Description: How the Prometheus Operator merges multiple `AlertmanagerConfig` CRs into one generated Alertmanager config, why an unscoped root route silently double-pages, and how to prove routing is correct from the generated config instead of trusting how a CR reads.
-> Version: `2026.09.05`
-> Last Updated: `2026-09-05`
+> Version: `2026.10.23`
+> Last Updated: `2026-10-23`
 > Owner: `platform`
 
 ---
@@ -154,6 +154,21 @@ it — never reason from the CRs in isolation.
 4. Commit only after the generated config confirms exactly one receiver per
    tested label combination (or the intended number, for genuinely parallel
    destinations like the Claude webhook mirror).
+
+### Telegram templates must branch on `.Status` (F-bb12ba79, `106e6ffd`)
+
+The Telegram receiver is configured with `sendResolved: true`, but the message
+template renders from the notification data, not the receiver setting. A template
+that ignores `.Status` renders a resolve notification identically to the firing
+one (same emoji, same title): on 2026-09-28 `ContainerMemoryLeakPredicted` looked
+like it "fired" twice, 15 minutes apart, when the second message was the resolve.
+Rule: the title line must branch on `.Status` (`{{ if eq .Status "resolved" }}`
+-> `RESOLVED: <alertname>` prefix, else the firing form), and the firing output
+must stay byte-identical. Before committing a template change, render BOTH
+variants with `amtool template render` in the live Alertmanager pod (firing and
+resolved sample data) and compare; a template that parses is not a template that
+distinguishes. Template lives in
+`kubernetes/apps/monitoring/kube-prometheus-stack/app/alertmanager-telegram-config.yaml`.
 
 ---
 
@@ -436,6 +451,7 @@ CR; reverting the git commit and letting Flux reconcile is sufficient.
 
 ## Version History
 
+- `2026.10.23`: Telegram template must branch on `.Status`; validate both variants with `amtool template render` (F-bb12ba79).
 - `2026.09.05`: Initial SOP. Closes `F-cdcf8c58`. Documents operator merge
   mechanics, the disjoint-matcher rule, and records that the 2026-09-03 fix
   (`3d43caaf`) narrowed but did not eliminate the duplicate — a residual

@@ -1,7 +1,7 @@
 # SOP: Application Version Update / Upgrade
 
-> Version: `2026.09.22`
-> Last Updated: `2026-09-22`
+> Version: `2026.10.23`
+> Last Updated: `2026-10-23`
 
 ## 1) Description
 
@@ -282,6 +282,19 @@ maintenance window's health gate reverts the batch — then hold the component
 with a deny rule in `runbooks/auto-update-policy.yaml` until a plan carries one
 of the two shapes above.
 
+### 7e) bjw-s app-template >= 5.3.0 tpl-renders every value string (F-06cb94c9, `d99e9b51`)
+
+From app-template 5.3.0 the chart passes value strings through Helm `tpl`
+globally. Any literal `{{ ... }}` in a HelmRelease value (openclaw's whisper
+command-line placeholders were the first hit) is now parsed as a template and
+either fails the render or is silently replaced. Escape literal braces as
+`{{ "{{" }}...}}` in the values. Before bumping the chart on ANY app-template
+consumer, grep the consumers' values for `{{` (`rg -n '\{\{' kubernetes/apps --glob '*helmrelease*.yaml'`),
+then verify with `helm template` against the new chart version that the rendered
+manifest contains the intended literal text (compare the rendered arg to the old
+render), not just that the render succeeds. Bash `${VAR}` escaping is a different
+rule (Flux postBuild, `$${VAR}`).
+
 ## 8) Diagnose Examples
 
 ```bash
@@ -330,6 +343,7 @@ flux reconcile helmrelease -n <ns> <app> --force
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.10.23 | 2026-10-23 | Added §7e: app-template >= 5.3.0 tpl-renders value strings; escape literal double-brace (F-06cb94c9 / `d99e9b51`). |
 | 2026.07.18 | 2026-07-18 | Initial — codifies the superset/openclaw upgrade lessons (silence, disable-rollback, immutable-selector, pending-upgrade recovery, revert). |
 | 2026.08.18 | 2026-08-18 | Added Step 0b — digest-pin drift: how to detect a pin that has fallen behind a rebuilt release tag, how to re-pin (multi-arch index digest), why a re-pin is not a version bump, and the before/after scan + `imageID` proof it actually moved. |
 | 2026.09.22 | 2026-09-22 | Added §7c (server-side-apply orphaned field, F-e931fd2d / `c6466091`) and §7d (root-required entrypoints vs non-root securityContext, F-8f61fe7d / `3d60ab9f` + `264b6064`) with matching Troubleshooting rows. |

@@ -1,8 +1,8 @@
 # SOP: Flux Image Automation Push Authentication
 
 > Description: Diagnose and remediate `ImageUpdateAutomation` objects that scan, resolve, and run on schedule but never push a commit, because their `sourceRef` GitRepository has no write-capable credential. Anonymous HTTPS read succeeds, so every other Flux signal stays green while image updates silently never happen.
-> Version: `2026.09.28`
-> Last Updated: `2026-09-28`
+> Version: `2026.10.23`
+> Last Updated: `2026-10-23`
 > Owner: `cberg-agent / cluster-ops`
 
 ---
@@ -339,6 +339,17 @@ fine-grained PAT, which the §10 remediation requires, is exactly what makes it 
 > credential-scope verification called for in §10 has been *performed*; its result and the
 > resulting rotation work are tracked on `security_ref: F-13845dda`, not here. Branch
 > protection on `main` remains open. Do not re-run steps 3–5 for that incident.
+
+**`policySelector` is mandatory on every per-app `ImageUpdateAutomation` in a
+shared namespace (`5b7d55a0`, F-f94fcbd2).** Without it the automation lists
+EVERY ImagePolicy in the namespace in `status.observedPolicies`, so a sibling
+app's undeployed tag makes `health-check.sh` report a false `SILENT-NO-PUSH` on
+an automation that has done nothing wrong. Set
+`spec.policySelector.matchLabels: {app.kubernetes.io/name: <app>}` (the label is
+stamped by the app Flux Kustomization's `commonMetadata`). Reference:
+`kubernetes/apps/my-software-production/the-ninth-banner/app/image-automation.yaml`.
+Verify: `kubectl get imageupdateautomation -A -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.observedPolicies}{"\n"}{end}'`
+lists only that app's policy.
 
 1. **Confirm the shape** (read-only) — §8 Diagnose Example 1.
 2. **Confirm which half is missing** (read-only): does the secret exist, and is the
@@ -764,6 +775,8 @@ are Helm/operator-owned and will be overwritten on the next reconcile.
 ---
 
 ## Version History
+
+- `2026.10.23`: per-app `ImageUpdateAutomation` MUST set `policySelector` (F-f94fcbd2); see §4.
 
 - `2026.09.28`: §3 settings block brought up to date with the live values: added the
   `instance.kustomize.patches` block that sets `spec.ignore` (`/*`, `!/kubernetes`) on the

@@ -3,8 +3,8 @@
 > Description: How to change the image (or any pod-spec field) of a Flux-managed
 > `batch/v1` Job whose `.spec.template` is immutable, using the `vN` rename
 > convention — and how to do it safely when the Job bootstraps a live database.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.10.23`
+> Last Updated: `2026-10-23`
 > Owner: `platform-sre`
 
 ---
@@ -556,12 +556,30 @@ runbooks/policy-cli.py slo list
 
 ## Version History
 
+- `2026.10.23`: unattended-lane trap for shared-depName Job bumps; `paths:` deny control (F-1a89da89).
 - `2026.08.18`: Initial — Job `.spec.template` immutability vs mutable CronJob
   `.spec.jobTemplate`, the silent-stall failure shape and its detection, the
   `vN` major/minor rename convention with mandatory `History:` entry, the
   live-database safety checklist (idempotency audit, hard-stop statements,
   widening-vs-narrowing `ALTER`, per-table `pg_dump`, row-count before/after),
   and the revert-only rollback path.
+
+## Unattended-lane trap: a shared-depName bump on a standalone Job (F-1a89da89, `23ebada2`)
+
+Renovate and the auto-updater key on the image `depName`. When a standalone Job
+(no CronJob, no `kustomize.toolkit.fluxcd.io/force` annotation) uses an image whose
+depName is shared with other workloads (e.g. `pgvector/pgvector`), a bare tag bump
+PR edits an immutable `.spec.template`: the owning Kustomization fails to apply,
+the post-apply health gate fails, and **the whole nightly Step 0 batch is
+auto-reverted** (2026-10-17: PR #362 reverted a 7-PR batch). The re-raised PR would
+repeat it every night. Control: a `paths:` deny rule in
+`runbooks/auto-update-policy.yaml` naming the Job file (a depName glob cannot see
+it; the direct-bump lane matches the component key), until the Job is renamed per
+bump (`vN`, section 4) or carries the force annotation. The bump then goes through
+a plan. Matrix and mechanics: `docs/sops/auto-update.md`. Check on every new
+standalone Job: `rg -n 'kind: Job' kubernetes/apps | rg -v CronJob`, then confirm
+each has either a rename convention in its `History:` comment or a policy `paths:`
+rule.
 
 ## DDL that a migration script cannot ship
 

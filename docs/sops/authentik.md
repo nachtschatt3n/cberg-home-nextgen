@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.10.02`
-> Last Updated: `2026-10-02`
+> Version: `2026.10.23`
+> Last Updated: `2026-10-23`
 > Owner: `Platform`
 
 ---
@@ -1469,6 +1469,36 @@ rm /tmp/configmap.yaml
 # 4. Remove the /outpost.goauthentik.io callback HTTPRoute and the ReferenceGrant
 # 5. Commit and push
 ```
+
+### Decommissioning forward-auth on an app that stays routed
+
+Removing only the forward-auth (the `SecurityPolicy` extAuth, outpost provider and
+callback route) while the app keeps a public route has one more mandatory step.
+Once the outpost is gone **nothing overwrites the `X-authentik-*` request
+headers any more**, so a client can send them itself. Any app that keys per-client
+limits or log users on `X-authentik-username` (the-ninth-banner `clientKey()`,
+fix `0b3b7af6`) becomes client-forgeable: a public client rotates the header to
+dodge limits and forges the `user` log field.
+
+On EVERY public route (main route and any callback/extra routes) of that app, add
+a `RequestHeaderModifier` filter on each rule:
+
+```yaml
+filters:
+  - type: RequestHeaderModifier
+    requestHeaderModifier:
+      remove:
+        - X-Authentik-Username
+        - X-Authentik-Groups
+        - X-Authentik-Email
+        - X-Authentik-Name
+        - X-Authentik-Uid
+```
+
+Verify against the live route (`kubectl get httproute -A -o yaml`, all five
+names present on every rule), then send a request with a forged header and
+confirm the app does not see it. Route-authoring rules:
+`docs/sops/gateway-api-httproute.md` (§4.3 forward-auth apps).
 
 ---
 
