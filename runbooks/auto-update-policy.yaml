@@ -18,7 +18,21 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.10.17"
+version: "2026.10.23"
+
+# ── Image major ceilings (added 2026-10-23, F-6a859080) ─────────────────────
+# Caps the MAJOR line the version checker may propose for ONE image in ONE
+# component. Scoped by (component = HelmRelease name, repository), so other
+# consumers of the same image keep tracking newer lines. Patches/minors inside
+# the ceiling are still reported normally. Read by check-all-versions.py
+# (get_latest_image_tag candidate filter); mirrored for Renovate by the
+# `node` allowedVersions rule scoped to kubernetes/apps/ai/openclaw/** in
+# .github/renovate.json5.
+image_major_ceiling:
+  - component: openclaw
+    repository: node
+    max_major: 22
+    reason: "openclaw npm package engines is node >=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0; node 26 is unsupported and broke the managed codex plugin in the earlier failed upgrade. Stay on the 22.x line (2026-10-23)."
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.

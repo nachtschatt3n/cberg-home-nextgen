@@ -1965,6 +1965,18 @@ class VersionChecker:
         has_build_suffix = bool(re.search(r'-[0-9a-f]+$', cls._VARIANT_RE.sub('', tag)))
         return tuple(nums[:4]) + (0 if has_build_suffix else 1,)
 
+    def _image_major_cap(self, component, repository):
+        """max_major from policy `image_major_ceiling` for (component, repo), else None."""
+        try:
+            pol = load_update_policy() or {}
+            for r in pol.get('image_major_ceiling') or []:
+                if (str(r.get('component', '')).lower() == str(component or '').lower()
+                        and str(r.get('repository', '')).lower() == str(repository or '').lower()):
+                    return int(r['max_major'])
+        except Exception:
+            pass
+        return None
+
     def _pick_latest_semver_tag(self, tags: list, current_tag: str = '',
                                 repository: str = '') -> Optional[str]:
         """Highest semver-shaped tag from `tags`, preferring current's major.
@@ -2008,6 +2020,13 @@ class VersionChecker:
             lts = [t for t in version_tags if self._is_ubuntu_lts(t)]
             if lts:
                 version_tags = lts
+        # Per-component major ceiling from auto-update-policy.yaml
+        # (`image_major_ceiling`): never propose a major line above it.
+        cap = getattr(self, '_major_cap', None)
+        if cap is not None:
+            capped = [t for t in version_tags if self._semver_tag_key(t)[0] <= cap]
+            if capped:
+                version_tags = capped
         version_tags.sort(key=self._semver_tag_key, reverse=True)
         # Prefer an update WITHIN the current major (an in-line bump is the
         # actionable next step when one exists, mirroring Renovate's
@@ -4295,7 +4314,11 @@ class VersionChecker:
                         result['images'].append(img_result)
                         continue
 
-                    latest_tag = self.get_latest_image_tag(img['repository'], img['tag'])
+                    self._major_cap = self._image_major_cap(hr['name'], img['repository'])
+                    try:
+                        latest_tag = self.get_latest_image_tag(img['repository'], img['tag'])
+                    finally:
+                        self._major_cap = None
 
                     # FAIL LOUDLY on a provable downgrade. If the resolver
                     # returned a tag that is OLDER than the running one (e.g.

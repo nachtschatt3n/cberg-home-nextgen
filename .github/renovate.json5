@@ -450,6 +450,18 @@
       "addLabels": ["renovate/coupled-pin"]
     },
     {
+      // OpenClaw init image stays on node 22.x (2026-10-23, F-6a859080). The
+      // openclaw npm package engines is >=22.22.3 <23 || >=24.15.0 <25 ||
+      // >=25.9.0, so node 26 is unsupported (broke the managed codex plugin in
+      // the earlier failed upgrade). Scoped by file: other node consumers keep
+      // tracking their own lines.
+      "description": ["OpenClaw init image: node 22.x only"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["node"],
+      "matchFileNames": ["kubernetes/apps/ai/openclaw/**"],
+      "allowedVersions": "<23"
+    },
+    {
       // Playwright CI runner image (2026-10-20). The ninth-banner ARC runner pods
       // run E2E on mcr.microsoft.com/playwright, whose /ms-playwright browser
       // bundle must match the @playwright/test version pinned in the GAME repo's
