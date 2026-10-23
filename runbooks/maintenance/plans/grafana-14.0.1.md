@@ -36,7 +36,7 @@ capability_change: false              # 14.0.0 adds values.schema.json validatio
 rollback_class: git-revert
 finding_refs: [F-c01c08c6]
 review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: needs-fix (conflict, security_ref, grep exit-status trap) -> fixed; render identical to 13.7.0; helm lint passes; runs only after grafana-13.7.0 landed
-status: vetted
+status: executed                    # nightly 2026-10-23 (SD-10, no GO), landed 2259f141; all section-4 gates PASS
 window: null
 sops_refs:
   - docs/sops/application-update.md
