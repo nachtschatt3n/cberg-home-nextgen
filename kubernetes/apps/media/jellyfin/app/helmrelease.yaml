@@ -24,8 +24,8 @@ spec:
     cleanupOnFail: true
     force: false
     remediation:
-      retries: 0
-      remediateLastFailure: false
+      retries: 1
+      remediateLastFailure: true
     timeout: 10m
   uninstall:
     keepHistory: false
