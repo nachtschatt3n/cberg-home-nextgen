@@ -117,7 +117,7 @@ finding_refs:
   - F-f1e564f2                        # "kube-prometheus-stack: chart 91.9.0 → 92.11.0 (major)", version, lane PLAN.
                                       # policy-cli.py finding list --grep kube-prom (2026-10-19) returns only this row.
 review: ready-for-go@2026-10-22   # plan-reviewer 2026-10-22: ready-for-go, 0 blocking; render diff = linux nodeSelector + certgen image; CRDs identical; premises 9/9, controls 8/8 with --prom-url
-status: vetted
+status: executed
 window: "now:2026-10-23"   # ON-DEMAND NOW run 2026-10-23 (run-now.py stamp; was None)
 premises:
   - id: hr-on-91.9.0
