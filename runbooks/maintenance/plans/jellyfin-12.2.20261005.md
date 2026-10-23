@@ -92,7 +92,7 @@ restore_proof: "No separate scratch-restore rehearsal in this plan. The restore 
 finding_refs: [F-fc5e2913, F-3a72570a]
 review: ready-for-go@2026-10-23   # plan-reviewer 2026-10-23 on the 12.3 rewrite: needs-fix (PW-1 zsh prompt, gate 4.7 alert baseline) -> both fixed and dry-tested under zsh; target/digest, no 12.2->12.3 migration, sed edits, objects, volume names verified; 7 pre-migration premises pass, 5 post-migration premises fail by design until jellyfin-config-rwo-migration has run. Still needs: migration executed, ha-agent check of the HA Jellyfin client pin, operator at the keyboard for PW-1, fresh GO
 status: vetted
-window: null                          # `runbooks/run-now.py stamp` / the window agent write this. Not hand-written.
+window: "now:2026-10-23"   # ON-DEMAND NOW run 2026-10-23 (run-now.py stamp; was None)
 premises:
   # Two groups. GROUP A must PASS before and after the migration. GROUP B (ids prefixed `post-migration-`) describes the
   # layout AFTER jellyfin-config-rwo-migration and is EXPECTED TO FAIL BY DESIGN until that plan has executed (same
