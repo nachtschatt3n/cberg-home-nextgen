@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.09.24`
-> Last Updated: `2026-09-24`
+> Version: `2026.10.23`
+> Last Updated: `2026-10-23`
 > Owner: `Platform`
 
 ---
@@ -322,6 +322,38 @@ spec:
 kubectl patch pvc {pvc-name} -n {namespace} \
   -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}}}}'
 ```
+
+**Per-disk provisioning ceiling (read this BEFORE requesting an expansion).** An
+expansion is REFUSED, not queued, when it would push a replica's disk past the
+schedulable ceiling, which is `storageMaximum - storageReserved` (about 880Gi per
+disk here), NOT free disk space. `storageScheduled` is the sum of the *requested*
+sizes of all replicas on that disk (thin provisioning is not credited). A volume
+with N replicas needs the extra size as headroom on EACH node holding a replica.
+On 2026-08-25 ignoring this cost three commits of thrash (`39b63d1b` 75 to 150Gi,
+`7797f878` to 120Gi, `85200c41` revert to 75Gi) and left the Immich thumbnail,
+faces and OCR queues paused. `storageReservedPercentageForDefaultDisk` (Overview)
+sets the reserve for new disks only.
+
+Headroom pre-flight (read-only; verified against the live cluster 2026-10-23):
+
+```bash
+kubectl -n storage get nodes.longhorn.io -o json | python3 -c '
+import sys, json
+GI = 1024**3
+for n in json.load(sys.stdin)["items"]:
+    spec = n["spec"].get("disks", {})
+    for d, st in (n.get("status", {}).get("diskStatus") or {}).items():
+        ceil = st.get("storageMaximum", 0) - spec.get(d, {}).get("storageReserved", 0)
+        sch = st.get("storageScheduled", 0)
+        name = n["metadata"]["name"]
+        print(f"{name:14} ceiling={ceil/GI:5.0f}Gi scheduled={sch/GI:5.0f}Gi headroom={(ceil-sch)/GI:5.0f}Gi")
+'
+```
+
+Proceed only if `headroom` on every node holding a replica of the volume is at
+least the size increase (`kubectl -n storage get replicas.longhorn.io -l longhornvolume=<vol> -o wide`
+names the nodes). If not, pick a smaller size or free scheduled space first; do
+not retry the patch hoping it is queued.
 
 ### Shrink a Volume — you cannot; migrate to a new, smaller one
 

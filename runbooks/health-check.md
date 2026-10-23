@@ -2190,6 +2190,30 @@ kill %1 2>/dev/null
 - **Warning**: App missing PrometheusRule but logs present
 - **Info**: App with logs but no dedicated alert rule (acceptable for system/infra pods)
 
+## 40. Shared API Credential Liveness
+
+**Objective**: Catch a shared API token that has silently stopped working. Pods stay Ready and nothing crashes; every call just returns 401 (c1b639ba, F-b5ac6c77). On 2026-09-14 one deleted Paperless token row broke openclaw, arag-web, mcpo and cluster-secrets at once and surfaced only when a human opened a document (re-mint precedent: `2165b484`, a deleted shared token that four consumers silently carried).
+**Success Criteria**: Every probed consumer reports `credential valid` (HTTP 200) and its in-pod token hash equals the live Secret's.
+
+`runbooks/health-check.sh` section "Shared API Credentials" runs the probe INSIDE each consumer pod, using the credential the pod actually holds (so a pod not yet rolled after a rotation is caught). Credentials checked (label, namespace, Secret/key):
+
+| Label | Namespace | Secret / key |
+|---|---|---|
+| Paperless (openclaw) | `ai` | `openclaw-secret` / `PAPERLESS_TOKEN` |
+| Paperless (mcpo) | `ai` | `mcpo-api-key` / `paperless-api-key` |
+| Paperless (arag-web) | `office` | `arag-web-secret` / `PAPERLESS_API_KEY` |
+
+n8n holds no Secret-backed credential in its pod env and is listed as "not probed". Two checks per consumer: **freshness** (sha256 prefix of the in-pod env value vs the live Secret; the value never leaves the pod) and **liveness** (an authenticated `GET /api/documents/?page_size=1`).
+
+**Thresholds:**
+- **Critical**: the API rejects the token (401/403). Message: "all consumers are broken until it is re-minted" (or, when the pod's value differs from the Secret, "pod holds a STALE value, roll the pod").
+- **Major**: freshness mismatch (pod credential differs from the Secret; pod not rolled after the Secret changed).
+- **Minor (inconclusive, not a pass)**: API unreachable from the pod, no `curl`/`python3` in the pod, probe produced no status, Secret unreadable, or an unexpected HTTP code. Treat as unverified, never as healthy.
+
+**Recovery**: for the Paperless token follow `docs/sops/paperless.md` section 6b (Paperless API token consumers, rotation checklist): re-mint, update the consumer Secrets, roll every consumer, re-run this check.
+
+---
+
 ---
 
 ## Onboarding New Applications
