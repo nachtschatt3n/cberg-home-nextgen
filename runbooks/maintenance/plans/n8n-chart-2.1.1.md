@@ -62,9 +62,9 @@ finding_refs:                         # queried 2026-09-25 with SWEEP_PG_DSN up
                                       # NOT claimed: F-09588936 / F-1beea963 (image; owned by
                                       # n8n-2.39.8).
 amended: "2026-10-22 dependency n8n-2.39.8 retargeted 2.42.7 -> 2.44.5; premise image-is-2.44.5 + all expected-image text/V-gates moved; readiness handler and markAsReady re-read at n8n@2.44.5 (point 4). 2026-10-13 dependency n8n-2.39.8 retargeted 2.41.7 -> 2.42.7 (stable; the 2.41.7 attempt was blocked at its channel gate). Every 2.41.7 token here (ordering-lock premise, V-gates, render gate, rollback notes) moved to 2.42.7. abstract-server.ts is blob-identical between 2.41.7 and 2.42.7; server.ts was verified only by its markAsReady line/sha; base-command.ts is NOT identical (blob 1a388c19 vs a3bd0a90: 2.44.5 adds a needsDb = true guard around the init/migrate block plus system-task helpers) but the ordering dbConnection.init -> server.init -> dbConnection.migrate is unchanged (the file differs only by a needsDb wrapper), so the probe analysis in §1.2/§1.3 is unchanged; scope-neutral. Earlier: 2026-10-05 2.40.7 -> 2.41.7."
-status: draft    # RESET 2026-10-22 (image dependency re-pointed 2.42.7 -> 2.44.5: premise image-is-2.44.5, text, V-gates; chart target stays 2.1.1; fresh review required). Prior: vetted; plan-reviewer 2026-10-13: ready-for-go on content (helm template diff vs live values, selector+Recreate intact, rollback real); wording fixes applied. Premise image-is-2.44.5 is the designed ordering lock: cannot run before n8n-2.39.8 executes +24h (§2.2).
-review: null  # stale-target (2026-10-22 re-point to image 2.44.5)
-window: null   # CLEARED 2026-10-13: depends_on n8n-2.39.8, which has NOT executed (blocked at its 2.1 channel gate: stable moved to 2.42.7); re-place after n8n lands + >=24h settle. Was "nightly:2026-10-13". scheduled 2026-10-05 (operator "plan all and time them"): SD-10 pre-approved; depends_on n8n-2.39.8 (sun 10-11) + >=24h settle; ordering-lock premise refuses it before
+status: vetted    # plan-reviewer 2026-10-23: ready-for-go, 0 blocking (premises 5/5, render diff 2.0.1 vs 2.1.1 verified)
+review: ready-for-go@2026-10-23
+window: nightly:2026-10-25   # image 2.44.5 up since 2026-10-22T08:11Z, >=24h settle met; keep out of flux-distribution / helm-drift / flux-oci windows
 premises:
   - id: image-is-2.44.5
     why: >-
