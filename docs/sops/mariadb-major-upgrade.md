@@ -1,8 +1,8 @@
 # SOP: MariaDB Major Upgrade (Bitnami chart)
 
 > Description: Taking a Bitnami-chart MariaDB across a server major (12 → 13 and onward) without leaving old-format system tables under a new binary, including the digest-pinning rule the free-tier catalog forces on us.
-> Version: `2026.10.05`
-> Last Updated: `2026-10-05`
+> Version: `2026.10.23`
+> Last Updated: `2026-10-23`
 > Owner: `cberg-agent / operator`
 
 ## Description
@@ -12,9 +12,11 @@ onward) without leaving old-format system tables under a new binary. Written
 after the `databases/mariadb` 12.2.2 → 13.0.1 upgrade on 2026-08-15, where two
 failure modes appeared that no amount of reading the chart would have predicted.
 
-Applies to every MariaDB in this cluster — `databases/mariadb`,
-`office/nextcloud`, `office/paperless-ngx` — all of which run the same Bitnami
-entrypoint and will hit both traps.
+Applies to the **Bitnami-chart** MariaDBs — `databases/mariadb` and
+`office/nextcloud` — which run the Bitnami entrypoint and will hit both traps.
+**`office/paperless-ngx` is NOT one of them**: `paperless-db` is a plain
+Deployment on the Docker Official `mariadb` image and has neither trap; use
+"Docker Official image path" below instead.
 
 ## Overview
 
@@ -97,6 +99,42 @@ N/A.
    it lags, run the upgrade by hand:
    `mariadb-upgrade --protocol=socket --skip-ssl -uroot -p'…'`
    Expect all 8 phases to complete.
+
+## Docker Official image path (paperless-db)
+
+`office/paperless-ngx` `paperless-db` (`db-deployment.yaml`, image `mariadb:<ver>`,
+no chart). Proven twice: 11.8.9 -> 12.3.3, then 12.3.3 -> 13.0.2 (executed
+2026-10-21, commit `a99794cc`). The Bitnami traps above do not apply; these do:
+
+1. **`MARIADB_AUTO_UPGRADE=1` must be in the Deployment env.** The official
+   entrypoint only runs `mariadb-upgrade` when it is set. With it set, the
+   upgrade runs automatically on the FIRST start of the new image, so there is
+   **no abort point after the image lands**: the datadir conversion is one-way.
+   Do not re-add it if present; check
+   `kubectl -n office get deploy paperless-db -o jsonpath='{.spec.template.spec.containers[0].env}'`.
+2. **Mandatory pre-bump dump with a fail-closed proof**, taken
+   `--default-character-set=utf8mb4`, run under `set -euo pipefail`: exit non-zero
+   on a missing `-- Dump completed` trailer, too few `CREATE TABLE`, an
+   implausibly small file, a 4-byte lead-byte scan whose **positive control**
+   fails, or a dump with zero 4-byte content. Chmod `0600` in a `0700` dir.
+3. **utf8mb4 4-byte content proof (canary).** Before the bump record per-table row
+   counts, the count of rows holding 4-byte characters (the canary; must be
+   greater than 0 or it cannot fail) and the non-utf8mb4 table count (must be 0).
+   After: counts identical, canary unchanged, non-utf8mb4 still 0. The server
+   args pin `utf8mb4`; losing them regresses to `OperationalError 1366`.
+4. **Quiesce the app** (scale `paperless-ngx` to 0; the HelmRelease reconcile does
+   NOT restore replicas, scale back explicitly) before rolling the DB.
+5. **Watch the conversion:** logs must show `Major version upgrade detected` and
+   phases 1-8. `MariaDB upgrade not required` on a first start of a new major
+   means the datadir was NOT converted: run
+   `mariadb-upgrade --protocol=socket --skip-ssl -uroot -p"$MARIADB_ROOT_PASSWORD"`
+   by hand (the TLS loopback reset also applies here).
+6. **Rollback is restore-from-dump** (or Longhorn backup), never a git revert:
+   a downgraded image refuses the converted datadir. Restore with
+   `--default-character-set=utf8mb4` on the way in as well.
+
+Plan files: `runbooks/maintenance/plans/paperless-db-13.0.2.md` holds the full
+step-by-step scripts (§3.2 dump proof, §3.3 baselines, §4 assertions).
 
 ## Examples
 

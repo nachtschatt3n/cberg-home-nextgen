@@ -98,7 +98,7 @@ finding_refs: [F-1c080cce]            # CORRECTED 2026-09-21 (was []). The sweep
                                       # This is a PLAN-lane critical: without the ref here the
                                       # plan-or-page join leaves it reading as unplanned and it
                                       # pages the operator after plan_sla_days.
-status: awaiting-go  # 2026-09-28 go_no_go ingested (data-loss decision) — was: vetted;                        # 2026-09-28 (F-2c849d1e): was vetted with no recorded review; review needs-fix (B1 mariadb-check green on failed exec, B2 log grep green on empty log, B3 restore liveness loop) -> fixed -> re-review ready-for-go.
+status: executed  # 2026-10-21 executed, commit a99794cc (docs b08ba359). Kept, not retired: other plans (bitnamilegacy-exit-nextcloud-db, etcd-timeouts-5000-500, cilium-1.20.3) still reference it. Was awaiting-go.
 review: ready-for-go@2026-09-28
                                       # WAS: VETTED 2026-09-21. An independent plan-reviewer
                                       # returned ready-for-go on the SECOND pass, after B1-B3
