@@ -12,7 +12,7 @@ kind: Kustomization
 resources:
   - ./namespace.yaml
   - ./the-ninth-banner-tests/ks.yaml
-  # ARC scale sets (docs/sops/ninth-banner-actions-migration.md). Their
+  # ARC scale sets (docs/sops/ci-runner.md §2d). Their
   # github_token is ${GITHUB_TOKEN} substituted by the flux-system Kustomization;
   # ci-runner itself still holds no cluster-secrets copy.
   - ./the-ninth-banner-runners/ks.yaml
