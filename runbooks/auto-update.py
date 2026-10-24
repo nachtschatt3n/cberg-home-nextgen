@@ -1244,22 +1244,58 @@ def affected_apps(number):
     return apps
 
 
-def post_apply_health(namespaces):
-    """Return (ok, problems[]). Checks Flux HR/Ks readiness + pod health in the
-    affected namespaces after reconcile."""
-    problems = []
-    # Flux kustomizations + helmreleases not Ready anywhere → hard fail
-    for kind in ("kustomization", "helmrelease"):
-        rc, out, _ = run(["flux", "get", kind, "-A", "--status-selector", "ready=false"], timeout=60)
-        if rc == 0:
-            for line in out.splitlines():
-                line = line.strip()
-                if not line or line.startswith("NAMESPACE") or "\tTrue\t" in line:
-                    continue
-                # any row printed by ready=false is a not-ready object
-                if line and not line.lower().startswith("no "):
-                    problems.append(f"flux {kind} not ready: {line.split()[0:2]}")
-    # Pods in affected namespaces
+# Settle window (F-6c3043f9, 2026-10-23): concurrent pushes to main by other
+# sessions make Flux Kustomizations read "dependency revision not up to date" /
+# ReconciliationFailed for a while. That is convergence lag, not regression, and
+# a single reading must never revert a batch.
+SETTLE_TIMEOUT_S = int(os.environ.get("AUTO_UPDATE_SETTLE_TIMEOUT", "600"))
+SETTLE_POLL_S = int(os.environ.get("AUTO_UPDATE_SETTLE_POLL", "30"))
+HARD_CONFIRM_POLLS = 3  # consecutive identical hard readings that may end the wait early
+_TRANSIENT_RE = re.compile(
+    r"dependency .*(revision|not ready)|not up to date|DependencyNotReady|"
+    r"ReconciliationFailed|ArtifactFailed|source.*not ready|context deadline|"
+    r"revision.*(differs|mismatch)|waiting for", re.I)
+_HARD_HR_REASONS = {"RetriesExceeded"}
+
+
+def _kubectl_json(args):
+    rc, out, _ = run(["kubectl"] + args + ["-o", "json"], timeout=90)
+    if rc != 0:
+        return None
+    try:
+        return json.loads(out or "{}").get("items", [])
+    except ValueError:
+        return None
+
+
+def collect_health(namespaces):
+    """One health reading -> (hard, soft, pending): dicts key -> text.
+    hard   = real-regression signals (crashloop pods, HR remediation exhausted)
+    soft   = Flux object not Ready (may be transient convergence lag)
+    pending= informational convergence lag (never a failure by itself)."""
+    hard, soft, pending = {}, {}, {}
+    for kind, res in (("kustomization", "kustomizations.kustomize.toolkit.fluxcd.io"),
+                      ("helmrelease", "helmreleases.helm.toolkit.fluxcd.io")):
+        items = _kubectl_json(["get", res, "-A"])
+        if items is None:
+            soft[f"flux:{kind}:unreadable"] = f"flux {kind} list unreadable"
+            continue
+        for it in items:
+            md = it.get("metadata", {})
+            key = f"{kind}:{md.get('namespace')}/{md.get('name')}"
+            conds = {c.get("type"): c for c in it.get("status", {}).get("conditions", []) or []}
+            rd = conds.get("Ready", {})
+            if rd.get("status") == "False":
+                reason, msg = rd.get("reason", ""), (rd.get("message") or "")[:200]
+                text = f"flux {kind} not ready: {md.get('namespace')}/{md.get('name')} [{reason}] {msg}"
+                if kind == "helmrelease" and reason in _HARD_HR_REASONS:
+                    hard[key] = text
+                else:
+                    soft[key] = text
+                    if _TRANSIENT_RE.search(f"{reason} {msg}"):
+                        pending[key] = text
+            elif conds.get("Reconciling", {}).get("status") == "True":
+                pending[key] = f"{key} reconciling"
     for ns in sorted(namespaces):
         rc, out, _ = run(["kubectl", "get", "pods", "-n", ns, "-o", "json"], timeout=45)
         if rc != 0:
@@ -1267,17 +1303,70 @@ def post_apply_health(namespaces):
         for p in json.loads(out or "{}").get("items", []):
             name = p["metadata"]["name"]
             st = p.get("status", {})
-            phase = st.get("phase", "")
             for cs in st.get("containerStatuses", []) or []:
                 w = (cs.get("state", {}).get("waiting") or {})
                 if w.get("reason") in {"CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerError"}:
-                    problems.append(f"{ns}/{name}: {w['reason']}")
+                    hard[f"pod:{ns}/{name}:{w['reason']}"] = f"{ns}/{name}: {w['reason']}"
                 restarts = cs.get("restartCount", 0)
                 if restarts >= 5 and not cs.get("ready", False):
-                    problems.append(f"{ns}/{name}: {restarts} restarts, not ready")
-            if phase in {"Failed"}:
-                problems.append(f"{ns}/{name}: phase={phase}")
-    return (len(problems) == 0), problems
+                    hard[f"pod:{ns}/{name}:restarts"] = f"{ns}/{name}: {restarts} restarts, not ready"
+            if st.get("phase") == "Failed":
+                hard[f"pod:{ns}/{name}:failed"] = f"{ns}/{name}: phase=Failed"
+    return hard, soft, pending
+
+
+def settle_health(namespaces, collect=None, sleep=time.sleep, now=time.monotonic,
+                  timeout=None, poll=None):
+    """Poll until healthy or the settle window ends. Return (ok, problems[]).
+
+    OK as soon as a reading is fully clean. NOT ok only when a failure PERSISTS:
+    the same hard signal on HARD_CONFIRM_POLLS consecutive readings, or any
+    not-ready Flux object / hard signal still present in the final reading AND
+    the previous one at timeout. A problem that clears on re-poll is transient."""
+    collect = collect or collect_health
+    timeout = SETTLE_TIMEOUT_S if timeout is None else timeout
+    poll = SETTLE_POLL_S if poll is None else poll
+    t0 = now()
+    prev_keys, hard_streak, n = set(), {}, 0
+    while True:
+        n += 1
+        hard, soft, pending = collect(namespaces)
+        keys = set(hard) | set(soft)
+        if not keys:
+            if n > 1:
+                log(f"  health settled clean after {n} reading(s)")
+            return True, []
+        hard_streak = {k: hard_streak.get(k, 0) + 1 for k in hard}
+        confirmed = [k for k, c in hard_streak.items() if c >= HARD_CONFIRM_POLLS]
+        if confirmed:
+            return False, [hard[k] for k in confirmed] + [hard[k] for k in hard if k not in confirmed] \
+                + list(soft.values())
+        cleared = prev_keys - keys
+        if cleared:
+            log(f"  {len(cleared)} problem(s) cleared on re-poll (transient)")
+        elapsed = now() - t0
+        if elapsed + poll > timeout:
+            persistent = keys & prev_keys
+            if not persistent:
+                # present only in the last reading: one reading is never enough
+                log("  last problems seen in a single reading only; one more poll before judging")
+                sleep(poll)
+                prev_keys = keys
+                h2, s2, _ = collect(namespaces)
+                persistent = keys & (set(h2) | set(s2))
+                hard, soft = h2, s2
+            if not persistent:
+                return True, []
+            msgs = [(hard.get(k) or soft.get(k)) for k in sorted(persistent) if hard.get(k) or soft.get(k)]
+            return False, msgs or [f"persistent: {sorted(persistent)}"]
+        log(f"  reading {n}: {len(keys)} not-ready/hard ({len(hard)} hard, {len(pending)} lagging) -- re-polling in {poll}s")
+        prev_keys = keys
+        sleep(poll)
+
+
+def post_apply_health(namespaces):
+    """Compat wrapper: the settling health gate. Returns (ok, problems[])."""
+    return settle_health(namespaces)
 
 
 def merge_pr(number):

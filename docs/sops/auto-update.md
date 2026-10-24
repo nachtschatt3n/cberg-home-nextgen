@@ -167,13 +167,25 @@ that SOP has the `vN`-rename fix and the detection command.
   Otherwise dry-run.
 - **Post-apply gate:** after the batch merges → `git pull` → `flux reconcile`
   the affected kustomizations → wait `AUTO_UPDATE_RECONCILE_WAIT` (default 150s)
-  → assert Flux HR/Ks Ready + no CrashLoop/ImagePull/high-restart pods in the
-  affected namespaces. On failure → `git revert` the batch, re-reconcile, emit a
+  → **settle** (see below) → assert Flux HR/Ks Ready + no CrashLoop/ImagePull/high-restart pods in the
+  affected namespaces. On a PERSISTENT failure → `git revert` the batch, re-reconcile, emit a
   **critical** finding, and route an `auto_update_revert` issue (keyed on the
   finding_id) to OpenClaw's `home-operation` skill for the operator — with
   `runbooks/lib/notify.py` as the fallback if the openclaw pod is down (see
   `docs/sops/maintenance-windows.md` for the contract). Exit codes: `0` ok,
   `2` applied-then-reverted, `1` error.
+- **Settle window (2026-10-23, F-6c3043f9):** the gate never judges a single
+  reading. It polls every `AUTO_UPDATE_SETTLE_POLL` (30s) for up to
+  `AUTO_UPDATE_SETTLE_TIMEOUT` (600s) and returns healthy on the first fully
+  clean reading. Flux objects that read not-Ready (including "dependency
+  revision not up to date" / `ReconciliationFailed`, which concurrent pushes to
+  `main` by other sessions produce) are treated as convergence lag and only fail
+  the gate if still not-Ready at the end of the window AND in the preceding
+  reading. Hard signals (CrashLoop/ImagePull pods, high-restart not-ready pods,
+  HelmRelease `RetriesExceeded`) fail after 3 consecutive identical readings
+  (about 60s), so a genuinely broken PR still reverts promptly. Implementation:
+  `collect_health()` / `settle_health()` in `runbooks/auto-update.py`; test
+  `runbooks/tests/test-auto-update-settle-gate.py`.
 - **Fail-safe:** if `auto-update-policy.yaml` is missing/unparseable, the engine
   **denies everything**.
 
@@ -285,6 +297,18 @@ AUTO_UPDATE_APPLY=1 .venv/bin/python3 runbooks/auto-update.py --apply
 ```
 
 → emits a **critical** `auto-update` finding; exit 2.
+
+### Example D: transient Flux lag during concurrent commits (no revert)
+
+```
+  reading 1: 3 not-ready/hard (0 hard, 3 lagging) -- re-polling in 30s
+  3 problem(s) cleared on re-poll (transient)
+  health settled clean after 3 reading(s)
+== applied 6 update(s), post-apply health OK ==
+```
+
+On 2026-10-23 the pre-settle gate read this state once and reverted six healthy
+merges (ledger rows were written as `reverted`; see the Version History entry).
 
 ## 6) Verification Tests
 
@@ -498,6 +522,7 @@ If failed:
 | `--apply` merges nothing for DAYS and EVERY PR is held `gate=ci` | Not the PRs — a **workflow-wide** render-gate failure (`Flate Render Gate`; historically `flux-local`). G4 needs the entire check rollup green, so one red workflow holds every Renovate PR at once and the whole PR lane is frozen; the direct-bump half (`coverage.py`) keeps shipping, so safe updates still appear to flow. Each individual hold reads as a legitimate "CI failing", which is why it ran 8 days unnoticed (F-00235e5c). | Diagnose the WORKFLOW, not the PR: `gh run list --workflow flux-local.yaml -L 10`. If the newest green run predates the holds, the fault is in `.github/workflows/flux-local.yaml` (or its pinned image) — rebasing, reopening or re-running the PRs changes nothing. |
 | A PR is held `gate=ci` on a check that is not a job in its workflow any more (the reason ends "stale check run on this head SHA") | The job was removed from `.github/workflows/*.yaml` (e.g. `Flux Local Test`, retired 2026-09-23) but GitHub keeps the check run it had already attached to the PR's head SHA, and nothing re-runs PR workflows when `main` changes. PR #219 carried `Flux Local Test=FAILURE` beside a green `Flate Render Gate` on the same SHA. | `gh pr close <n> && gh pr reopen <n>` (or tick Renovate's rebase box): the fresh `pull_request` run uses the current workflow and the stale check leaves the rollup; G4 clears next cycle. Do NOT teach G4 to ignore the name — that is a silent-green. |
 | Merge happened but no reconcile | `flux`/`kubectl` not on PATH in the sweep env | run under `sweep-run.py`/mise so tooling resolves |
+| Batch reverted but every problem line is a Flux `dependency ... revision` / `ReconciliationFailed` and pods are fine | Pre-2026-10-23 single-reading gate, or a failure that genuinely persisted 10 min | Check `git log` for concurrent pushes; if the objects are Ready now, the revert was false: re-run next window, and correct the `component_autonomy` rows (`reverted` rows reset earned autonomy for 90 days). Tune `AUTO_UPDATE_SETTLE_TIMEOUT` only with evidence. |
 | Batch reverted repeatedly | a bump genuinely breaks the app | add it to the deny-list until fixed upstream |
 | A version-only patch bump held with `gate=parse` | Title matches neither the spanned nor the bare shape (grouped PR, hand-authored `bump image to sha-…`, major rendered `to v2`) | Expected — it is genuinely unattributable. Do NOT widen the regex to make one PR pass; route it through a maintenance-window plan. |
 
@@ -565,6 +590,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.10.24 | 2026-10-24 | **Post-apply gate now SETTLES (F-6c3043f9).** 2026-10-23 13:28 a Step 0 batch of six safe merges was auto-reverted falsely: concurrent commits from other sessions made Flux Kustomizations transiently read "dependency revision not up to date" / `ReconciliationFailed`, and the single-reading gate counted that as regression. Now polls (30s, 10 min cap), treats lag that clears as healthy, requires persistence (or 3 consecutive hard readings) before reverting. Test `test-auto-update-settle-gate.py`. The six false `reverted` ledger rows (`component_autonomy`) are flagged for operator correction, not rewritten. |
 | 2026.10.23 | 2026-10-23 | **Deny matrix resynced to policy `2026.10.17` (F-d4cf16e9, F-02956e6f).** Test 2 listed 28 of 35 deny entries; added `*longhorn*`, `*immich*`, `*gha-runner-scale-set*`, `*ninth-banner-feedback-db*` (path-scoped), `*home-assistant/home-assistant*`, `*mcr.microsoft.com/playwright*`, `*opentelemetry-kube-stack*`; Test 2b script reports MISSING/STALE/WRONG all `none`. Cross-link: `immutable-job-image-bumps.md` (standalone-Job bump trap). |
 | 2026.09.27 | 2026-09-27 | **Fast lanes (throughput program item B, operator-approved).** New §2a: patch cooldown 48h -> 24h (minor stays 48h); a non-major bump remediating an open fixable CRITICAL/HIGH "newer upstream tag available" finding on the running tag bypasses the cooldown in BOTH lanes (finding id recorded, never CVE detail); an unverified-notes patch/minor is AUTO for a component with >= 3 green / 0 reverts in 90 days (`component_autonomy`, schema v9), a revert resetting it. Policy `2026.09.27`. Shared module `runbooks/lib/fast_lane.py`; test `test-fast-lane-earned-autonomy.py`. Also: redis notes resolve (`redis/redis`, `-alpine` stripped via `IMAGE_TAG_FLAVOUR_SUFFIXES`), and `*sure-redis*` held with a path-scoped rule (`paths:`, PR-lane `path_block`) — matrix now 29 globs (the pre-existing `*envoyproxy/envoy*` gap closed too). |
 | 2026.09.26 | 2026-09-26 | **Four false holds removed (planner findings, operator-approved).** (a) **G3 reads non-GitHub notes**: `library/alpine` (news posts, parsed from the multi-version slug `Alpine-3.21.8-…-3.24.2-released.html`) and `library/python` (the "What's New In Python X.Y" page of every minor a hop enters; for a patch hop the target minor's "Notable changes in X.Y.N" sections) — `check-all-versions.py` `DISTRO_RELEASE_NOTES` / `fetch_distro_release_notes()`. Both were "release notes unavailable" by construction and routed to a window as unverified. An unreadable source is still unresolved, never clean. (b) **G3s is scoped to the image's build context** (`IMAGE_BUILD_CONTEXTS`, seeded only from the upstream build workflow): `emqx/mqttx-web` → `web/`, so a migration in the Electron desktop tree no longer holds the web image; unlisted images keep the whole-repo scan. (c) **Policy `2026.09.26.1`**: `*affine*` → `*toeverything/affine*`, `*n8n*` → `*n8nio/n8n*`, and the `*authentik*` reason's mechanism corrected. (d) **app-template source link** points at `bjw-s-labs/helm-charts` `app-template-X.Y.Z` (`CHART_RELEASE_SOURCES`). Tests: `test-g3-distro-release-notes.py`, `test-g3s-build-context.py`, `test-auto-update-policy-narrowed-globs.py`, `test-chart-release-source-link.py`. |
