@@ -145,7 +145,7 @@ premises:
     run: >-
       grep -c '^    version: v2\.9\.3$' kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml
     expect_exact: "1"
-status: vetted
+status: awaiting-go   # 2026-10-24 sat-attended (cron, unattended): HUMAN-GATED, no recorded GO; go_no_go ingested, deferred — was: vetted
 review: ready-for-go@2026-10-23      # delta plan-reviewer 2026-10-23: ready-for-go
 window: "sat-attended:2026-10-24"   # stamped 2026-10-23 on delta review (exclusive; Sat 09:00 attended)
 sops_refs:
