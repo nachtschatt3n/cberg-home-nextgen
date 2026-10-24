@@ -55,7 +55,7 @@ spec:
           containers:
             - name: probe
               # Same digest-pinned image as monitoring/elasticsearch-obs-recovery.
-              image: docker.io/library/python:3.14.8-alpine@sha256:8acac70227ce3b34da9453120c375cc5b66cd0b062d4dc6bc74286f81a3819e1
+              image: docker.io/library/python:3.14.8-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
               imagePullPolicy: IfNotPresent
               command: ["python3", "-u", "/script/icloud_sync_probe.py"]
               env:
