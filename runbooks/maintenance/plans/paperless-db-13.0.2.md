@@ -98,7 +98,7 @@ finding_refs: [F-1c080cce]            # CORRECTED 2026-09-21 (was []). The sweep
                                       # This is a PLAN-lane critical: without the ref here the
                                       # plan-or-page join leaves it reading as unplanned and it
                                       # pages the operator after plan_sla_days.
-status: executed  # 2026-10-21 executed, commit a99794cc (docs b08ba359). Kept, not retired: other plans (bitnamilegacy-exit-nextcloud-db, etcd-timeouts-5000-500, cilium-1.20.3) still reference it. Was awaiting-go.
+status: executed  # 2026-10-21 executed, commit a99794cc (docs b08ba359). Kept, not retired: other plans (bitnamilegacy-exit-nextcloud-db, etcd-timeouts-5000-500, cilium-1.20.4) still reference it. Was awaiting-go.
 review: ready-for-go@2026-09-28
                                       # WAS: VETTED 2026-09-21. An independent plan-reviewer
                                       # returned ready-for-go on the SECOND pass, after B1-B3

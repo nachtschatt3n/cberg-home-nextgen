@@ -69,7 +69,7 @@ conflicts_with:
   - longhorn-1.13.0
   - penpot-chart-1.10.0
   - falco-9.2.1
-  - cilium-1.20.3
+  - cilium-1.20.4
   - descheduler-0.37.0
   - vaultwarden-1.37.4
   - nocodb-2026.09.1

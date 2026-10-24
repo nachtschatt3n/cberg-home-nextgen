@@ -83,7 +83,7 @@ conflicts_with:                   # HARD slot exclusions — the only field
                                   # elasticsearch-es-http.monitoring.svc through CoreDNS;
                                   # a DNS blip during §4 shows up as non-success outcomes
                                   # in §4.2(b), which carries revert authority.
-  - cilium-1.20.3                 # owns the LB VIP 192.168.55.18 (edot-collector-talos-kmsg)
+  - cilium-1.20.4                 # owns the LB VIP 192.168.55.18 (edot-collector-talos-kmsg)
                                   # that §4.3/§4.4 gate on, and the pod network every
                                   # producer uses.
   - talos-linux-1.14.2            # node drains evict this single replica (RWO queue PVC
@@ -331,7 +331,7 @@ The reasons are blast radius and failure mode:
 Housekeeping owed (not done by this planner, which writes only this file):
 - Set `edot-collector-0.162.0` to `status: superseded` (it is `blocked`). This
   plan no longer lists it in `conflicts_with`.
-- Plans that still name dead edot/otel ids (cilium-1.20.3 and talos-linux-1.14.4
+- Plans that still name dead edot/otel ids (cilium-1.20.4 and talos-linux-1.14.4
   name `otel-operator-0.25.0`; those should read `otel-operator-0.25.1` and
   `edot-collector-0.163.2`) are owed a reciprocal fix by their owners.
 

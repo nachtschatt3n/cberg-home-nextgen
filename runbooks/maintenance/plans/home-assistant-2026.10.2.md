@@ -28,7 +28,7 @@ conflicts_with:                         # every id below exists in runbooks/main
   - talos-linux-1.14.2                  # node reboots (HA is hostNetwork on nuc14-01; a drain mid-start strands the pod)
   - talos-linux-1.14.4
   - longhorn-1.13.0                     # storage engine under the volume HA's config + recorder DB live on
-  - cilium-1.20.3                       # CNI roll; hostNetwork pod still depends on the node datapath for the cluster-service backchannels (mosquitto, postgres)
+  - cilium-1.20.4                       # CNI roll; hostNetwork pod still depends on the node datapath for the cluster-service backchannels (mosquitto, postgres)
   - spegel-0.8.0                        # image-pull mirror: a half-rolled mirror can strand the new image pull on nuc14-01
   - kube-prometheus-stack-92.11.0       # section 4.7 reads Prometheus; the shared instrument must not be rolling
   - flux-distribution-2.9.6             # a Flux controller roll mid-reconcile makes the HR result unattributable
@@ -511,7 +511,7 @@ Cost of restore: automations triggered, helper values and recorder history writt
 - Whole-house impact during the Recreate gap (~5-10 min, longer on a cold pip cache): every automation and script is off;
   zigbee/matter/ESPHome hubs stay up and re-sync. Window is unattended-capable but do not combine with a node reboot.
 - Do not share the slot with `talos-linux-*` (node drain strands a hostNetwork pod), `longhorn-1.13.0` (single-attach
-  PVC), `cilium-1.20.3` or `spegel-0.8.0` (datapath / image pull), or a Flux controller roll.
+  PVC), `cilium-1.20.4` or `spegel-0.8.0` (datapath / image pull), or a Flux controller roll.
 - `kube-prometheus-stack-92.11.0` must not roll the same night (4.7 reads Prometheus); `edot-collector-0.163.1` drops
   Elasticsearch log shipping while it rolls (the 4.3 evidence here uses `kubectl logs`, unaffected).
 - The Ollama host (192.168.30.111) is shared infrastructure: the 4.4 conversation test makes two short requests; do not run it

@@ -40,7 +40,7 @@ conflicts_with:                       # pruned 2026-10-23: dropped kube-promethe
   - talos-linux-1.14.4                # same
   - home-assistant-2026.10.2          # HA restart flaps the otbr/thread integrations and the HA pod is the
                                       #   instrument for gate 4.5 (_meshcop browse) -- serialize
-  - cilium-1.20.3                     # Cilium owns FORWARD/nat chains on the same node; this pod adds its own
+  - cilium-1.20.4                     # Cilium owns FORWARD/nat chains on the same node; this pod adds its own
   - flux-oci-chart-sources            # rewrites this HR's chart source (bjw-s app-template)
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. helmrelease/otbr
   - flux-reconciler-impersonation     # changes the identity helm-controller applies home-automation/ with

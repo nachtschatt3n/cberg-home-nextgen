@@ -28,7 +28,7 @@ conflicts_with:
                                         # commits racing on helmrelease.yaml.
   - envoy-proxy-config-distroless-v1.39.4 # envoy restart carries auth.<domain>; confounds login/forward-auth gates
   - talos-linux-1.14.4                  # node roll evicts authentik pods mid-verification
-  - cilium-1.20.3                       # CNI restart drops websockets and pod traffic
+  - cilium-1.20.4                       # CNI restart drops websockets and pod traffic
   - k8s-1.36.5                          # control-plane/kubelet roll
   - etcd-timeouts-5000-500              # etcd must be quiet (pre-check); do not stack
   - flux-reconciler-impersonation       # changes how helm-controller applies this HR
@@ -43,7 +43,7 @@ finding_refs: []                      # none exists: finding list --grep outpost
                                       # (single-node outposts) and F-37acab13 (doc); neither covers worker recycling
 review: ready-for-go@2026-10-23      # delta plan-reviewer 2026-10-23: ready-for-go
 status: vetted
-window: "nightly:2026-10-27"          # NOT adjacent to cilium-1.20.3 (Sun 2026-10-25 attended); must land >= 2 nights before authentik-2026.8.5
+window: "nightly:2026-10-27"          # NOT adjacent to cilium-1.20.4 (Sun 2026-10-25 attended); must land >= 2 nights before authentik-2026.8.5
 premises:
   - id: recycle-evidence-in-logs
     why: "Read-only proxy for the 1000-request default (exec is refused by the premise runner): the server logs show gunicorn worker recycling in the last 6 h."

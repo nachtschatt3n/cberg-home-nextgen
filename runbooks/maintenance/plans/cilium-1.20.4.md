@@ -1,7 +1,7 @@
 ---
-plan_id: cilium-1.20.3
+plan_id: cilium-1.20.4
 component: cilium
-pr: 372                               # Renovate "fix(helm): update cilium ( 1.20.2 → 1.20.3 )",
+pr: 372                               # Renovate "fix(helm): update cilium ( 1.20.2 → 1.20.4 )",
                                       # branch renovate/cilium-1.20.x, head ec2e495c. Verified
                                       # 2026-10-16: OPEN, mergeable CLEAN, all 4 checks pass
                                       # (Flate Render Gate, Flux Local Diff hr+ks, Labeler).
@@ -11,10 +11,12 @@ current: "1.20.2"                     # LIVE, verified 2026-10-16: HR Ready, his
                                       # chartVersion 1.20.2 (helm revision 14, deployed
                                       # 2026-09-21); ds/cilium + deploy/cilium-operator on
                                       # v1.20.2 digests; cilium-dbg version 1.20.2 e0dc92bd.
-target: "1.20.3"                      # chart on helm.cilium.io (helm show chart: version +
-                                      # appVersion 1.20.3); GitHub release published
-                                      # 2026-10-15T15:26:34Z.
-update_type: patch                    # third patch on the 1.20 line we have run since
+target: "1.20.4"                      # chart on helm.cilium.io (helm show chart: version +
+                                      # appVersion 1.20.4); GitHub release v1.20.4 published
+                                      # 2026-10-23T14:51:39Z, non-prerelease. RETARGETED 2026-10-24 from
+                                      # 1.20.3 (v1.20.3 carries a Gateway API BackendTLSPolicy regression,
+                                      # fixed only in 1.20.4); we skip 1.20.3 entirely.
+update_type: patch                    # fourth patch (1.20.2 -> 1.20.4 skips 1.20.3) on the 1.20 line we have run since
                                       # 2026-08-03 (97989c9b). Not a minor traversal.
 risk: medium                          # Rated on the MEASURED change: rendered delta against
                                       # OUR values is two image digests (§1.3), identical in
@@ -45,7 +47,7 @@ touches:
     - helmrelease/cilium              # kube-system — the only LIVE pin
     - daemonset/cilium                # rolls on all 3 nodes; rolled ONE node at a time via updateStrategy OnDelete (§3.4); chart default is maxUnavailable 2
     - deployment/cilium-operator      # 1 replica; brief operator gap
-    - configmap/cilium-config         # renders byte-identical at 1.20.3 (§1.3); helm rewrites it
+    - configmap/cilium-config         # NOT byte-identical at 1.20.4: key envoy-xds-mode (live "ads") is no longer rendered (§1.3); helm rewrites it
     - kubernetes/apps/kube-system/cilium/app/helmrelease.yaml
     - kubernetes/bootstrap/apps/helmfile.yaml   # bootstrap/DR-only pin, inert at runtime
     - "13 LoadBalancer Services (VLAN 55 VIPs) announced via CiliumL2AnnouncementPolicy l2-policy"
@@ -68,12 +70,12 @@ conflicts_with:                       # Belt-and-braces: `exclusive: true` below
                                       # every plan out of this slot in BOTH directions. These are
                                       # the plans whose interaction with a CNI roll is specific
                                       # enough to name, re-read from each plan's frontmatter on
-                                      # 2026-10-16. NONE of them lists cilium-1.20.3 yet (it did
+                                      # 2026-10-16. NONE of them lists cilium-1.20.4 yet (it did
                                       # not exist) — reciprocity is owed on their side (§6).
                                       # (No kube-prometheus-stack plan file exists as of 2026-10-23; both former refs were dead
                                       # and are removed. Re-add one if a KPS bump is planned: §4.2 reads Prometheus.)
   - talos-linux-1.14.4                # node-roll plan (3 reboots, exclusive, sun-attended:2026-11-01): same CNI-on-all-3-nodes worst pairing.
-                                      # RECIPROCAL: talos-linux-1.14.4 now lists cilium-1.20.3 (2026-10-23). Cilium runs
+                                      # RECIPROCAL: talos-linux-1.14.4 now lists cilium-1.20.4 (2026-10-23). Cilium runs
                                       # sun-attended:2026-10-25 SOLO; the Talos roll must not share a night with it, and
                                       # its first reboot should follow a clean 10-25 run (agents restarted once already).
                                       # talos-linux-1.14.2 (superseded by 1.14.4) is no longer listed.
@@ -113,16 +115,16 @@ autonomy_override: human-gated        # LOAD-BEARING. Without it, capability_cha
                                       # attended slot + operator GO, and §4.10 is an operator
                                       # streaming check no cron can perform.
 finding_refs: [F-f0816905, F-1c0f5b1d, F-c879161b, F-a571f10d, F-cb6c175f]
-                                      # Re-queried 2026-10-23 (`policy-cli.py finding list --grep cilium`, DSN up):
-                                      #   F-f0816905  version  — "cilium: chart 1.20.2 -> 1.20.3 (patch)" (this change)
+                                      # Re-queried 2026-10-24, same set, F-f0816905 already titled 1.20.2 -> 1.20.4 (`policy-cli.py finding list --grep cilium`, DSN up):
+                                      #   F-f0816905  version  — "cilium: chart 1.20.2 -> 1.20.4 (patch)" (this change)
                                       #   F-c879161b  security — cilium agent v1.20.2 image, newer tag now exists (this plan's remedy)
                                       #   F-1c0f5b1d  security — operator-generic v1.20.2 image, newer tag now exists (same)
                                       # F-f835aded (health/monitor, SOP gap on ipBlock NetworkPolicy chart bumps) is context, NOT claimed.
-                                      # Original two, kept (accepted under AR-029, lapse once 1.20.3 lands):
+                                      # Original two, kept (accepted under AR-029, lapse once 1.20.4 lands):
                                       #   F-a571f10d  security — quay.io/cilium/cilium:v1.20.2 image
                                       #   F-cb6c175f  security — operator-generic:v1.20.2 image
                                       # Both currently [AR-029] "already newest"; that premise lapses
-                                      # now that v1.20.3 exists, and this plan moves both digests.
+                                      # now that v1.20.4 exists, and this plan moves both digests.
 premises:                             # Every run: was checked against plan-premises.py's allowlist
                                       # (kubectl get / helm show|history / git show|status / flux get,
                                       # plus grep|wc|awk) and every expected value MEASURED 2026-10-16.
@@ -158,10 +160,10 @@ premises:                             # Every run: was checked against plan-prem
     why: "2 = chart default (measured today). 1 = the optional §3.4 override was taken. Anything else means something outside this plan edited the DaemonSet and §6's blast-radius arithmetic is wrong."
     run: kubectl get ds -n kube-system cilium -o jsonpath='{.spec.updateStrategy.rollingUpdate.maxUnavailable}'
     expect_matches: "^[12]$"
-  - id: chart-1.20.3-is-published
+  - id: chart-1.20.4-is-published
     why: "Never bump to a version that is not there. A stale local repo cache fails this CLOSED; fix with `helm repo update cilium`, never by relaxing the premise."
-    run: helm show chart cilium/cilium --version 1.20.3 | grep '^version'
-    expect_exact: "version: 1.20.3"
+    run: helm show chart cilium/cilium --version 1.20.4 | grep '^version'
+    expect_exact: "version: 1.20.4"
   - id: rollback-revision-present
     why: "§5.3 rolls back by helm revision. The chart-1.20.2 revision must be in history (measured: revision 14)."
     run: helm history cilium -n kube-system | grep -c 'cilium-1.20.2'
@@ -183,7 +185,7 @@ premises:                             # Every run: was checked against plan-prem
     run: kubectl get cnp -A --no-headers | wc -l
     expect_matches: "^ *4$"
   - id: cnps-all-valid
-    why: "BASELINE for §4.7b. 1.20.3's operator adds CNP validation (nodeSelector case); all 4 must read VALID=True before so a post-upgrade False is attributable."
+    why: "BASELINE for §4.7b. The 1.20.3+ operator adds CNP validation (nodeSelector case); all 4 must read VALID=True before so a post-upgrade False is attributable."
     run: kubectl get cnp -A --no-headers | awk '$4!="True"' | wc -l
     expect_matches: "^ *0$"
   - id: k8s-netpol-count-is-5
@@ -191,16 +193,24 @@ premises:                             # Every run: was checked against plan-prem
     run: kubectl get netpol -A --no-headers | wc -l
     expect_matches: "^ *5$"
   - id: no-clrp-or-cidrgroup
-    why: "1.20.3 changes behaviour for empty-toPorts CiliumLocalRedirectPolicies (now rejected) and 0.0.0.0/0 CiliumCIDRGroups (now select traffic). §1.4 calls both vacuous because zero objects exist."
+    why: "1.20.3+ changes behaviour for empty-toPorts CiliumLocalRedirectPolicies (now rejected) and 0.0.0.0/0 CiliumCIDRGroups (now select traffic). §1.4 calls both vacuous because zero objects exist."
     run: kubectl get ciliumlocalredirectpolicies,ciliumcidrgroups -A --no-headers | wc -l
     expect_matches: "^ *0$"
+  - id: live-xds-mode-is-ads
+    why: "§1.3: chart 1.20.4 stops rendering envoy-xds-mode (live ads). This premise is the baseline; §4.3b asserts the key is gone AFTER and the agents are healthy. If it is already absent, someone changed the chart/values and §1.3 is stale."
+    run: kubectl get cm -n kube-system cilium-config -o jsonpath='xds=[{.data.envoy-xds-mode}]'
+    expect_exact: "xds=[ads]"
+  - id: no-cilium-envoyconfig-crds-or-objects
+    why: "1.20.4 changes CiliumEnvoyConfig service scoping and xDS restoration. Vacuous only while no Cilium CEC CRD exists (measured 0 on 2026-10-24; the Envoy CRDs present are all gateway.envoyproxy.io = Envoy Gateway)."
+    run: kubectl get crd -o name | awk '/envoyconfigs.cilium.io/' | wc -l
+    expect_matches: "^ *0$"
   - id: cilium-gateway-api-off
-    why: "Half of the 1.20.3 changelog is Cilium's own Gateway API / Envoy. Irrelevant only while enable-gateway-api is ABSENT from cilium-config (measured)."
+    why: "Part of the 1.20.3/1.20.4 changelog is Cilium's own Gateway API / Envoy (incl. the 1.20.3 BackendTLSPolicy regression that 1.20.4 fixes). Irrelevant only while enable-gateway-api is ABSENT from cilium-config (measured)."
     run: kubectl get cm -n kube-system cilium-config -o jsonpath='gw=[{.data.enable-gateway-api}]'
     expect_exact: "gw=[]"             # literal wrapper: the runner refuses empty output. Negative
                                       # control: the same form on a PRESENT key prints gw=[false].
   - id: repo-pin-still-1.20.2
-    why: "§3.2's fallback sed anchors on `version: 1.20.2`; if HEAD already says 1.20.3 the plan is executed or stale."
+    why: "§3.2's fallback sed anchors on `version: 1.20.2`; if HEAD already says 1.20.4 the plan is executed or stale."
     run: git show HEAD:kubernetes/apps/kube-system/cilium/app/helmrelease.yaml | grep '^      version'
     expect_exact: "version: 1.20.2"
   - id: bootstrap-pin-still-1.20.2
@@ -239,25 +249,25 @@ premises:                             # Every run: was checked against plan-prem
     why: "§4.9 relies on ci-runner-lockdown (endpointSelector {}) allowing DNS for github.com and denying anything else. Assert the allow-name is still in the policy."
     run: kubectl get cnp -n ci-runner ci-runner-lockdown -o jsonpath='{.spec.egress[0].toPorts[0].rules.dns[0].matchName}'
     expect_exact: "github.com"
-status: vetted
+status: draft
 window: "sun-attended:2026-10-25"    # SCHEDULED 2026-10-23 by the operator ("yes: schedule it for a Sunday when I am at the keyboard"). Must be ATTENDED and SOLO (§6): redis-fleet-8.10.2 and jellyfin-config-rwo-migration were moved off this slot. GO still needed from the operator at the keyboard.
                                       # Recommended: an on-demand NOW run, as cilium-1.20.2 did.
-review: ready-for-go@2026-10-23
+review: null
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
   - docs/sops/maintenance-windows.md
   - docs/sops/verification-contents-not-shape.md
-generated: "2026-10-22"                # refreshed 2026-10-22 (operator request): live re-verified 1.20.2, v1.20.3 still newest stable 1.20.x, PR #372 head now 3000e749 (4/4 checks pass); added the etcd gate + one-node-at-a-time OnDelete gated roll (§3.4); netpol baseline corrected 6->5 on 2026-10-23 (uzeit-de-ingress removed; measured live)
+generated: "2026-10-24"                # RETARGETED 1.20.3 -> 1.20.4 on 2026-10-24 (v1.20.4 published 2026-10-23); status reset to draft, review null (needs a fresh review). Earlier: refreshed 2026-10-22 (operator request): live re-verified 1.20.2, v1.20.4 still newest stable 1.20.x, PR #372 head now 3000e749 (4/4 checks pass); added the etcd gate + one-node-at-a-time OnDelete gated roll (§3.4); netpol baseline corrected 6->5 on 2026-10-23 (uzeit-de-ingress removed; measured live)
 ---
 
-# cilium chart 1.20.2 → 1.20.3 (CNI datapath — plan lane by standing rule)
+# cilium chart 1.20.2 → 1.20.4 (CNI datapath — plan lane by standing rule)
 
 ## 1) Summary & why held
 
 ### 1.1 What this is
 
-Third bugfix patch on the Cilium 1.20 line, which this cluster has run since
+Fourth bugfix patch on the Cilium 1.20 line (1.20.3 is skipped), which this cluster has run since
 2026-08-03 (`97989c9b`). The two previous patches went through this same shape
 of plan: `cilium-1.20.1` (`addfd9aa`, 2026-08-19) and `cilium-1.20.2`
 (`80395710`, executed 2026-09-21 in an attended on-demand NOW run; every §4 gate
@@ -276,7 +286,7 @@ every number **re-measured live on 2026-10-16**. Several had moved — see §1.5
 > Requires an attended slot, a plan that exercises a FRESH CNI ADD [...], and an
 > operator GO."
 
-Nothing in 1.20.3 is breaking; the hold is the standing rule. The rule's three
+Nothing in 1.20.4 is breaking; the hold is the standing rule. The rule's three
 requirements map to: attended slot + GO → `autonomy_override: human-gated` and
 §4.10; fresh CNI ADD → §4.8 (one canary pinned per node). I checked the rule's
 reason against the live cluster per authoring rule 8 and it is accurate: all
@@ -287,34 +297,71 @@ seven Flux controllers run on the pod network (`hostNetwork` unset, measured).
 Rendered both charts against **our** `app/helm-values.yaml` (1734 lines each):
 
 ```
-$ helm template cilium cilium/cilium --version 1.20.{2,3} -n kube-system \
+$ helm template cilium cilium/cilium --version 1.20.{2,4} -n kube-system \
     -f kubernetes/apps/kube-system/cilium/app/helm-values.yaml
-# 62 changed lines. Non-label delta, in full (the agent image repeats across the
+# 67 changed lines (re-measured 2026-10-24). Non-label delta, in full (the agent image repeats across the
 # DaemonSet's init containers, so it appears 7 times — same digest each time):
 -  image: "quay.io/cilium/cilium:v1.20.2@sha256:2939231d0d3e3ebddcd80fffa168b7ddcc78fdf0dc864d1c8c126ff523c54f01"
-+  image: "quay.io/cilium/cilium:v1.20.3@sha256:95cfa5c2427cc6b452c00908778d0566311f572589284af949d06a013db1a849"
++  image: "quay.io/cilium/cilium:v1.20.4@sha256:20fe92e4c86641233a450098c158d2d29085f3419931ab6bf681d2485dedf16e"
 -  image: "quay.io/cilium/operator-generic:v1.20.2@sha256:64d8798350e8569b8e7622563fed6e44dce2625f311e4651b774816516c744fc"
-+  image: "quay.io/cilium/operator-generic:v1.20.3@sha256:efdd8d89d6d8f63d21a065fa2f9e17614a2b3ac9371b221af9355f63829e2dbc"
++  image: "quay.io/cilium/operator-generic:v1.20.4@sha256:7a7a3489dc66ad67e420d285c8a8d2e169b0957ad15e120f593d27081bf38d82"
 ```
 
-Everything else is the `helm.sh/chart: cilium-1.20.x` label. **`cm/cilium-config`
-renders byte-identical.** The chart has no `crds/` dir (the operator manages CRDs
-at startup); no CRD schema change is listed for 1.20.3.
+plus the cilium-config checksum annotation (2 lines, a consequence of the next item),
+the `helm.sh/chart` label, and ONE CONFIGMAP KEY REMOVED (new vs the retired 1.20.3
+plan, which rendered byte-identical):
+
+```
+-  envoy-xds-mode: "ads"          # cm/cilium-config; live value is "ads"
+```
+
+**Why (read from the charts, `helm pull` 1.20.2 vs 1.20.4, `values.yaml`/README):** 1.20.2's
+README says `envoy.xdsMode` is "`ads` for new 1.20+ installations; none when
+`upgradeCompatibility` is set below 1.20"; 1.20.4's says "none" and "Cilium Agent
+defaults missing option to `split` to keep upgrades in the legacy mode". So after this
+upgrade the agents run xDS in `split` mode instead of `ads`. Blast radius on THIS cluster
+is nil: `envoy.enabled: false` (no cilium-envoy DaemonSet), `enable-envoy-config` is
+`false`, no `*envoyconfigs.cilium.io` CRD exists, and the `proxy_type="envoy"` L7 counters
+read 0. xDS only configures Cilium's own Envoy listeners, which we do not use (Envoy
+Gateway is a separate product). Decision: take the upstream default, do NOT pin
+`envoy.xdsMode: ads` in our values (a pin would be a permanent local override of a
+deliberate upstream rollback of the default). §2/§4.3b assert both sides. The chart has no
+`crds/` dir (the operator manages CRDs at startup); no CRD schema change is listed.
 
 Renovate PR #372 carries exactly the two pins needed (HelmRelease + bootstrap
 helmfile), one line each, and its CI is green.
 
 ### 1.4 Upstream content, read against THIS cluster
 
-Primary source: `CHANGELOG.md` at tag `v1.20.3` (145 commits over v1.20.2). No
-breaking changes, no action-required notes. What lands on our configuration
+Primary sources: GitHub release `v1.20.4` (published 2026-10-23T14:51:39Z, out-of-band
+security patch release on Go 1.26.10, all dependencies at latest patch) AND the v1.20.3
+changelog (1.20.2 -> 1.20.4 includes both). No breaking changes, no action-required notes.
+
+**Why 1.20.4 and not 1.20.3 (retarget, 2026-10-24):** 1.20.4's bugfix list contains
+*"Fix regression in Cilium 1.20.3 where the Gateway API implementation would incorrectly
+handle BackendTLSPolicy configurations, leading to high Cilium CPU usage and inability
+to forward traffic."* **Not applicable to us, verified live:** `enable-gateway-api` is absent
+from `cilium-config`; the only GatewayClass is `envoy` (`gateway.envoyproxy.io`); the one
+`BackendTLSPolicy` (`monitoring/kibana-backend-tls`) is served by Envoy Gateway, not
+Cilium; no Cilium CiliumEnvoyConfig CRD or object exists. So the regression could not
+have hit us either way; 1.20.4 is chosen because it is the newest patch, it is what Renovate
+PR #372 now carries, and it adds the fixes below.
+
+Also new in 1.20.4 and relevant to our configuration: *LB-IPAM sharing index not updated
+on service upsert when allocations are unchanged* (we run LB-IPAM with 13 pinned VIPs;
+the §4.4 table is the gate); *transient DNS SERVFAIL/REFUSED for pods querying
+immediately at startup* (Standalone DNS Proxy policy snapshots; we do not run the
+standalone DNS proxy, informational); *terminating backends evicted from BPF maps when
+trafficDistribution is enabled*; *Envoy xDS listener restoration/rejected-update fixes*
+(vacuous, Envoy not in use); and the unused `pebble` binary was removed from the agent image
+(clears scanner findings, see `security_ref`/finding records, detail not committed here). What lands on our configuration
 (`kubeProxyReplacement`, DSR + maglev, native routing, `bpf.masquerade`,
 `l2announcements`, `enable-l7-proxy: true`, `dnsproxy-enable-transparent-mode: true`):
 
 - *"Fix conntrack garbage collection deleting CT entries that the datapath
   reopened between the GC batch read and the delete, which could cascade into NAT
   mapping deletion and SNAT source-port reallocation for live connections."* — we
-  run BPF masquerade; this is the substantive reason to take the patch.
+  run BPF masquerade; this is the substantive reason to take the patch (shipped in 1.20.3, included in 1.20.4).
 - *"Fix restoration of terminating backends"*, *"Sockets are no longer destroyed
   when a Service backend is terminated unless they are still connected to that
   backend"*, *"Fix incorrect deletion of new endpoint during GC iteration"*,
@@ -331,18 +378,20 @@ breaking changes, no action-required notes. What lands on our configuration
   the agent being replaced — and the agent being replaced during THIS roll is
   1.20.2.** So this upgrade may itself show the bug once: pods in `ci-runner`,
   `arc-system`, `arc-build` may lose DNS for the seconds their node's agent
-  restarts. Subsequent restarts (on 1.20.3) are fixed. Impact: an in-flight CI job
+  restarts. Subsequent restarts (on 1.20.4) are fixed. (This fix shipped in 1.20.3 and is included in 1.20.4.) Impact: an in-flight CI job
   can fail and an ARC listener reconnects — interruption, not data loss.
 
 Upstream behaviour changes that **could** have mattered, each checked live and
 **vacuous here** (each is also a premise):
 
-| 1.20.3 change | Live state | Verdict |
+| 1.20.4 change | Live state | Verdict |
 |---|---|---|
 | Operator now rejects CNPs with a `nodeSelector` that would enforce nothing | none of the 4 CNPs uses `nodeSelector` | vacuous; §4.7b still asserts all 4 stay VALID |
 | CLRP with empty `redirectBackend.toPorts` now rejected | 0 CiliumLocalRedirectPolicies | vacuous |
 | CiliumCIDRGroup `0.0.0.0/0` now selects traffic (previously nothing) | 0 CiliumCIDRGroups; no CNP/netpol uses `0.0.0.0/0` | vacuous |
-| Gateway API / ExternalAuth / Envoy listener fixes; "update gateway api to v1.6.3" | `enable-gateway-api` ABSENT in `cilium-config`; the only GatewayClass is Envoy Gateway's; `proxy_type="envoy"` L7 counters all 0 | Cilium's Gateway API and L7 HTTP proxying are not in use; not a reason to take, not a risk |
+| Gateway API / ExternalAuth / Envoy listener fixes; BackendTLSPolicy regression fix; "update gateway api to v1.6.3" | `enable-gateway-api` ABSENT in `cilium-config`; the only GatewayClass is Envoy Gateway's; `proxy_type="envoy"` L7 counters all 0 | Cilium's Gateway API and L7 HTTP proxying are not in use; not a reason to take, not a risk |
+| CiliumEnvoyConfig now only redirects Services in its own namespace (1.20.4) | no CiliumEnvoyConfig CRD or object (premise `no-cilium-envoyconfig-crds-or-objects`) | vacuous |
+| `envoy-xds-mode` no longer rendered; agent defaults to split | `envoy.enabled: false`, `enable-envoy-config: false`; live key was `ads` | accepted, see §1.3; asserted in §4.3b |
 | Hubble cert-manager key fix | `hubble.enabled: false` | vacuous |
 | Azure / AlibabaCloud / dual-stack ENI fixes | bare-metal Talos, IPv4 native routing | vacuous |
 
@@ -362,7 +411,7 @@ Upstream behaviour changes that **could** have mattered, each checked live and
 
 The two image records are `F-a571f10d` (agent) and `F-cb6c175f`
 (operator-generic), both currently accepted under `[AR-029]` "already newest".
-With 1.20.3 published that premise no longer holds, and this plan moves both
+With 1.20.4 published that premise no longer holds, and this plan moves both
 digests. Detail stays on the finding records.
 
 ---
@@ -374,8 +423,8 @@ settled** (baselines taken before Step 0 make §4 diff against stale state).
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-helm repo update cilium >/dev/null   # premise chart-1.20.3-is-published reads the LOCAL cache
-.venv/bin/python3 runbooks/plan-premises.py cilium-1.20.3 --require-premises
+helm repo update cilium >/dev/null   # premise chart-1.20.4-is-published reads the LOCAL cache
+.venv/bin/python3 runbooks/plan-premises.py cilium-1.20.4 --require-premises
 #   PASS: every premise PASS, exit 0.
 #   A first FAIL naming only no-kustomization-in-flight / no-helmrelease-in-flight
 #   is Step 0 still settling: wait ~60s and re-run ONCE. Any other FAIL, or a
@@ -405,9 +454,9 @@ gh pr checks 372                                       # PASS: every line "pass"
 gh pr diff 372 --name-only                             # PASS: exactly the two files in §3.2
 gh pr diff 372 | grep -E '^[+-][^+-]'                  # PASS: exactly these 4 lines:
 #   -      version: 1.20.2
-#   +      version: 1.20.3
+#   +      version: 1.20.4
 #   -    version: 1.20.2
-#   +    version: 1.20.3
+#   +    version: 1.20.4
 #   FAIL: any other line (Renovate rebased new content in) — STOP and re-review.
 
 # e) LB table baseline (domain-free, VIPs only).
@@ -486,15 +535,15 @@ kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-
 # p) Pre-pull the new images at NODE level (containerd, host network - independent of the
 #    CNI), so a pod restart never waits on a registry pull while its node has no datapath.
 for ip in 192.168.55.11 192.168.55.12 192.168.55.13; do
-  talosctl -n $ip image pull quay.io/cilium/cilium:v1.20.3@sha256:95cfa5c2427cc6b452c00908778d0566311f572589284af949d06a013db1a849
-  talosctl -n $ip image pull quay.io/cilium/operator-generic:v1.20.3@sha256:efdd8d89d6d8f63d21a065fa2f9e17614a2b3ac9371b221af9355f63829e2dbc
+  talosctl -n $ip image pull quay.io/cilium/cilium:v1.20.4@sha256:20fe92e4c86641233a450098c158d2d29085f3419931ab6bf681d2485dedf16e
+  talosctl -n $ip image pull quay.io/cilium/operator-generic:v1.20.4@sha256:7a7a3489dc66ad67e420d285c8a8d2e169b0957ad15e120f593d27081bf38d82
 done
 for ip in 192.168.55.11 192.168.55.12 192.168.55.13; do
-  talosctl -n $ip image list | grep -c -E 'sha256:(95cfa5c2427cc6b4|efdd8d89d6d8f63d)'
+  talosctl -n $ip image list | grep -c -E 'sha256:(20fe92e4c8664123|7a7a3489dc66ad67)'
 done
 #   PASS: 3 lines, each >= 2 (agent + operator digests present on that node).
 #   FAIL: any 0/1 - STOP, the pull failed (registry/egress); do not start a CNI roll that must pull.
-#   (digests = the rendered 1.20.3 values from `helm template`, see 1.3; re-derive if #372's head changed.)
+#   (digests = the rendered 1.20.4 values from `helm template`, see 1.3; re-derive if #372's head changed.)
 ```
 
 ---
@@ -505,7 +554,7 @@ done
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-runbooks/update-marker.sh add cilium kube-system 2 "chart 1.20.2 -> 1.20.3 CNI patch"
+runbooks/update-marker.sh add cilium kube-system 2 "chart 1.20.2 -> 1.20.4 CNI patch"
 ```
 
 ### 3.2 Land the pins by merging Renovate PR #372
@@ -515,44 +564,45 @@ Same merge mode as `auto-update.py`. §2c already proved the diff.
 ```bash
 gh pr merge 372 --squash --delete-branch
 git fetch origin main && git merge --ff-only origin/main
-grep -n '^      version: 1.20.3$' kubernetes/apps/kube-system/cilium/app/helmrelease.yaml   # PASS: 1 line
-grep -c 'version: 1.20.3' kubernetes/bootstrap/apps/helmfile.yaml                           # PASS: 1
+grep -n '^      version: 1.20.4$' kubernetes/apps/kube-system/cilium/app/helmrelease.yaml   # PASS: 1 line
+grep -c 'version: 1.20.4' kubernetes/bootstrap/apps/helmfile.yaml                           # PASS: 1
 SHA=$(git log -1 --format=%H -- kubernetes/apps/kube-system/cilium/app/helmrelease.yaml)
 echo "$SHA" > /tmp/cilium-bump-sha.txt
 git show --stat "$SHA"     # PASS: exactly the two files, 1 insertion + 1 deletion each
-# GATE before 3.4b: the DaemonSet TEMPLATE must name the 1.20.3 agent digest (and still be OnDelete, so no pod moved)
+# GATE before 3.4b: the DaemonSet TEMPLATE must name the 1.20.4 agent digest (and still be OnDelete, so no pod moved)
 flux reconcile source git flux-system && flux reconcile hr cilium -n kube-system
 kubectl wait hr/cilium -n kube-system --for=condition=Ready --timeout=10m
-kubectl get hr -n kube-system cilium -o jsonpath='{.status.history[0].chartVersion}{"\n"}'   # PASS: 1.20.3 (FAIL: 1.20.2 - Flux has not applied the bump; do NOT start 3.4b)
-kubectl get ds -n kube-system cilium -o jsonpath='{.spec.template.spec.containers[?(@.name=="cilium-agent")].image}{"\n"}' | grep -c '95cfa5c2'   # PASS: 1 (0 = template still on 1.20.2: 3.4b'"'"'s image check would then be vacuous - STOP)
+kubectl get hr -n kube-system cilium -o jsonpath='{.status.history[0].chartVersion}{"\n"}'   # PASS: 1.20.4 (FAIL: 1.20.2 - Flux has not applied the bump; do NOT start 3.4b)
+kubectl get ds -n kube-system cilium -o jsonpath='{.spec.template.spec.containers[?(@.name=="cilium-agent")].image}{"\n"}' | grep -c '20fe92e4'   # PASS: 1 (0 = template still on 1.20.2: 3.4b'"'"'s image check would then be vacuous - STOP)
 kubectl get ds -n kube-system cilium -o jsonpath='{.spec.updateStrategy.type}{"\n"}'          # PASS: OnDelete
 kubectl get pods -n kube-system -l k8s-app=cilium --no-headers -o custom-columns=N:.metadata.name,S:.status.startTime | diff - /tmp/cilium-pod-start-before.txt && echo AGENTS-UNTOUCHED   # PASS: AGENTS-UNTOUCHED
 ```
 
 *Fallback, only if #372 was closed unmerged and HEAD still pins 1.20.2.* Both
 edits were dry-tested on scratch copies with BSD sed / python on 2026-10-16 and
-each changed exactly one line (`12c12 version: 1.20.2 → 1.20.3` and
-`21c21 version: 1.20.2 → 1.20.3`):
+each changed exactly one line (`12c12 version: 1.20.2 → 1.20.4` and
+`21c21 version: 1.20.2 → 1.20.4`):
 
 ```bash
-sed -i '' 's/^      version: 1\.20\.2$/      version: 1.20.3/' \
+sed -i '' 's/^      version: 1\.20\.2$/      version: 1.20.4/' \
   kubernetes/apps/kube-system/cilium/app/helmrelease.yaml
 .venv/bin/python3 - <<'PY'
 import re
 p = 'kubernetes/bootstrap/apps/helmfile.yaml'
 s = open(p).read()
 new = re.sub(r'(- name: cilium\n    namespace: kube-system\n    chart: cilium/cilium\n    version: )1\.20\.2',
-             r'\g<1>1.20.3', s)
+             r'\g<1>1.20.4', s)
 assert s != new, 'anchor did not match — STOP and inspect the file'
 open(p, 'w').write(new)
 PY
 cat > /tmp/cilium-msg.txt <<'EOF'
-feat(cilium): chart 1.20.2 -> 1.20.3 (CNI patch; plan cilium-1.20.3)
+feat(cilium): chart 1.20.2 -> 1.20.4 (CNI patch; plan cilium-1.20.4)
 
-Bugfix patch on the 1.20 line. Rendered delta against our values is two
-image digests (agent + operator-generic); cilium-config renders
-byte-identical. Carries the upstream conntrack-GC / SNAT fix and the
-L7-DNS shutdown fix for toFQDNs policies.
+Bugfix/security patch on the 1.20 line (skips 1.20.3). Rendered delta against
+our values is two image digests (agent + operator-generic) plus the
+envoy-xds-mode key dropping out of cilium-config (Envoy is not enabled
+here). Carries the conntrack-GC / SNAT fix, the L7-DNS shutdown fix for
+toFQDNs policies and the LB-IPAM sharing-index fix.
 EOF
 git commit --only kubernetes/apps/kube-system/cilium/app/helmrelease.yaml \
   kubernetes/bootstrap/apps/helmfile.yaml -F /tmp/cilium-msg.txt
@@ -577,9 +627,9 @@ DaemonSet never restarts a pod by itself, so the template change in #372 lands w
 zero agent restarts, and this runbook restarts one agent at a time with the etcd gate
 (2o) before and after each. Rendered with our values (`helm template ... -f
 helm-values.yaml`, 2026-10-22) the OnDelete flag changes exactly ONE line vs the plain
-1.20.3 render: `1010c1010  <     type: RollingUpdate  /  >     type: OnDelete`; and
-1.20.2 -> 1.20.3 changes only the chart label, the agent digest
-(`2939231d` -> `95cfa5c2`) and the operator digest (`64d87983` -> `efdd8d89`);
+1.20.4 render: `1010c1010  <     type: RollingUpdate  /  >     type: OnDelete`; and
+1.20.2 -> 1.20.4 changes only the chart label, the agent digest
+(`2939231d` -> `20fe92e4`) and the operator digest (`64d87983` -> `7a7a3489`);
 configmap/cilium-config renders identical.
 
 **Mandatory order: 3.1 -> 3.4a -> 3.2 -> 3.4b -> 3.4c -> 3.6.** (3.2 is above in the file.)
@@ -595,9 +645,9 @@ V=kubernetes/apps/kube-system/cilium/app/helm-values.yaml
 test "$(grep -c '^updateStrategy:' $V)" = 0 || { echo "STOP: updateStrategy already in $V (a duplicate top-level key is a YAML error or a silent override)"; exit 1; }
 printf 'updateStrategy:\n  type: OnDelete\n' >> $V
 tail -3 $V   # PASS: socketLB tail then the 2 new lines
-# PRE-PUSH GATE (can FAIL; do not commit before it passes): render the REAL values file + appended key against chart 1.20.3
+# PRE-PUSH GATE (can FAIL; do not commit before it passes): render the REAL values file + appended key against chart 1.20.4
 helm repo add cilium https://helm.cilium.io >/dev/null 2>&1; helm repo update cilium >/dev/null 2>&1
-helm template cilium cilium/cilium --version 1.20.3 -n kube-system -f $V > /tmp/cilium-od-render.yaml; echo "helm rc=$?"      # PASS: rc=0 (FAIL: YAML/schema error from the append)
+helm template cilium cilium/cilium --version 1.20.4 -n kube-system -f $V > /tmp/cilium-od-render.yaml; echo "helm rc=$?"      # PASS: rc=0 (FAIL: YAML/schema error from the append)
 test "$(grep -c 'type: OnDelete' /tmp/cilium-od-render.yaml)" = 1 || { echo 'STOP: OnDelete count != 1'; exit 1; }   # PASS: exactly 1 (0 = key not honoured; 2+ = duplicated)
 python3 - <<'PY'
 import yaml
@@ -607,7 +657,7 @@ yaml.safe_dump(d[0],open('/tmp/cilium-od-ds.yaml','w')); print('DS strategy:',d[
 PY
 kubectl apply --dry-run=server -f /tmp/cilium-od-ds.yaml                            # PASS: "configured (server dry run)"; FAIL: any validation Error. (The last-applied-configuration warning is expected noise.)
 kubeconform -summary -ignore-missing-schemas /tmp/cilium-od-ds.yaml                 # PASS: Invalid: 0, Errors: 0
-printf 'chore(cilium): updateStrategy OnDelete for a gated one-node-at-a-time roll (plan cilium-1.20.3)\n' > /tmp/cilium-od-msg.txt
+printf 'chore(cilium): updateStrategy OnDelete for a gated one-node-at-a-time roll (plan cilium-1.20.4)\n' > /tmp/cilium-od-msg.txt
 git commit --only kubernetes/apps/kube-system/cilium/app/helm-values.yaml -F /tmp/cilium-od-msg.txt
 git log -1 --format=%s ; git show --stat HEAD     # subject must be YOURS; exactly this one file
 git push origin main
@@ -620,7 +670,7 @@ kubectl get pods -n kube-system -l k8s-app=cilium --no-headers -o custom-columns
 )
 ```
 
-**What the appended key does (measured 2026-10-23, helm 3 against chart 1.20.3 with the real
+**What the appended key does (measured 2026-10-23, helm 3 against chart 1.20.4 with the real
 values file):** Helm DEEP-MERGES values maps, so the append does not replace the chart default
 block `{type: RollingUpdate, rollingUpdate: {maxUnavailable: 2}}` - it overrides only `type`.
 The rendered DaemonSet carries `type: OnDelete` with the leftover `rollingUpdate.maxUnavailable: 2`
@@ -632,7 +682,7 @@ revert). The gate above guards against a duplicate top-level key and a render/va
 
 **3.2** (above) merges #372 now. Expect: `cilium-operator` restarts (1 replica, brief
 operator gap: no new LB-IPAM allocations/identity GC for ~1 min, no datapath effect); the three
-agents DO NOT restart; `ds/cilium` template now names the 1.20.3 digest.
+agents DO NOT restart; `ds/cilium` template now names the 1.20.4 digest.
 
 **3.4b - per-node roll, followers first, etcd leader's node last:**
 
@@ -661,8 +711,8 @@ for ip in $ORDER; do
   kubectl -n kube-system delete pod -l k8s-app=cilium --field-selector spec.nodeName=$NODE --wait=true
   n=0
   until kubectl -n kube-system get pods -l k8s-app=cilium --field-selector spec.nodeName=$NODE \
-        -o jsonpath='{.items[0].status.containerStatuses[0].imageID} {.items[0].status.containerStatuses[0].ready}' | grep -q '95cfa5c2427cc6b4.* true'; do
-    n=$((n+1)); [ $n -gt 60 ] && { echo "STOP: $NODE agent not Ready on 1.20.3 after 5 min"; exit 1; }; sleep 5
+        -o jsonpath='{.items[0].status.containerStatuses[0].imageID} {.items[0].status.containerStatuses[0].ready}' | grep -q '20fe92e4c8664123.* true'; do
+    n=$((n+1)); [ $n -gt 60 ] && { echo "STOP: $NODE agent not Ready on 1.20.4 after 5 min"; exit 1; }; sleep 5
   done
   P=$(kubectl -n kube-system get pods -l k8s-app=cilium --field-selector spec.nodeName=$NODE -o name)
   kubectl -n kube-system exec $P -c cilium-agent -- cilium-dbg status --brief | grep -qx OK || { echo "STOP: $NODE cilium-dbg not OK"; exit 1; }
@@ -680,7 +730,7 @@ bash /tmp/cilium-roll.sh; echo "roll rc=$?"      # PASS: rc=0 and 3 nodes rolled
 ```
 
 The script derives `$HINT`/`$HEXT` itself (same two lookups as pre-check 2h) and needs `/tmp/cilium-etcd-gate.sh` and `/tmp/cilium-etcd-lc-before.txt` from §2o. A STOP leaves the cluster
-**mixed 1.20.2/1.20.3 and stable** (patch-level agent skew, same chart, OnDelete keeps
+**mixed 1.20.2/1.20.4 and stable** (patch-level agent skew, same chart, OnDelete keeps
 the rest untouched): do NOT continue and do NOT auto-rollback; hand to an operator
 (Rollback 5.2/5.3, and a stuck node: `kubectl -n kube-system delete pod` of the
 new agent once, then re-run the gate). The gates can FAIL: etcd gate prints GATE-FAIL
@@ -726,28 +776,28 @@ Every gate states its failure. A gate that cannot fail is not in this section.
 ```bash
 kubectl get hr -n kube-system cilium \
   -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.history[0].chartVersion}{"\n"}'
-#   PASS: True 1.20.3     FAIL: UpgradeFailed / still 1.20.2
+#   PASS: True 1.20.4     FAIL: UpgradeFailed / still 1.20.2
 kubectl -n kube-system get pods -l k8s-app=cilium \
   -o jsonpath='{range .items[*]}{.spec.nodeName} {.status.containerStatuses[0].imageID}{"\n"}{end}'
-#   PASS: 3 lines, each imageID ends sha256:95cfa5c2427cc6b4...
+#   PASS: 3 lines, each imageID ends sha256:20fe92e4c8664123...
 #   FAIL: any line on 2939231d... (an agent never rolled)
 kubectl -n kube-system get pods -l name=cilium-operator \
   -o jsonpath='{.items[*].status.containerStatuses[0].imageID}{"\n"}'
-#   PASS: contains sha256:efdd8d89d6d8f63d...
+#   PASS: contains sha256:7a7a3489dc66ad67...
 ```
 
-**4.2 — CONTENTS: every agent is scraped and reports 1.20.3; the FQDN proxy is
+**4.2 — CONTENTS: every agent is scraped and reports 1.20.4; the FQDN proxy is
 forwarding again.**
 
 ```
-CONTENTS ASSERTION: all 3 agents report version 1.20.3 and none 1.20.2 — measured
+CONTENTS ASSERTION: all 3 agents report version 1.20.4 and none 1.20.2 — measured
 by count(cilium_version{version=...}), compared to the measured baseline of exactly
 3 series at version="1.20.2" (2026-10-16).
 CONTENTS ASSERTION: the DNS proxy is forwarding real queries after the roll —
 measured by the increase of cilium_policy_l7_total{proxy_type="fqdn",rule="forwarded"}
 over 10 minutes that start AFTER the roll completes, compared to a floor of > 0
 (baseline: ~800k cumulative; CI pods query continuously).
-CONTROL: metric cilium_version — count by version; gate: ==3 at 1.20.3, empty at 1.20.2
+CONTROL: metric cilium_version — count by version; gate: ==3 at 1.20.4, empty at 1.20.2
 CONTROL: metric up — job="cilium-agent"; gate: count(up==1) == 3
 CONTROL: metric cilium_policy_l7_total — proxy_type="fqdn", rule="forwarded"; gate: increase > 0
 CONTROL: metric cilium_endpoint_state — gate: waiting-for-identity + regenerating + restoring == 0, ready > 0
@@ -758,7 +808,7 @@ kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:909
 sleep 3
 q() { curl -s --get http://localhost:9090/api/v1/query --data-urlencode "query=$1" \
   | .venv/bin/python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; print([x['value'][1] for x in r] or 'EMPTY')"; }
-q 'count(cilium_version{version="1.20.3"})'        # PASS: ['3']
+q 'count(cilium_version{version="1.20.4"})'        # PASS: ['3']
 q 'count(cilium_version{version="1.20.2"})'        # PASS: EMPTY
 q 'count(up{job="cilium-agent"} == 1)'             # PASS: ['3']
 # wait until >=10 min after §3.5 completed, then:
@@ -785,6 +835,17 @@ done
 #   PASS: 3x OK and Stopped(0) Degraded(0) on all three.
 #   FAIL: any non-OK, or Degraded(n>0) — the brief line can read OK while a module
 #   is degraded, which is why both are read.
+```
+
+**4.3b — The xDS-mode change landed as §1.3 says, and nothing depends on it.**
+
+```bash
+kubectl get cm -n kube-system cilium-config -o jsonpath='xds=[{.data.envoy-xds-mode}]{"\n"}'
+kubectl get ds -n kube-system -o name | grep -c -i envoy
+#   PASS: xds=[]  (key gone, == 1.20.4 chart behaviour) and 0 envoy DaemonSets.
+#   FAIL: xds=[ads] after the HR is on 1.20.4 (HR did not apply the new chart: re-read 4.1),
+#         or a cilium-envoy DaemonSet exists (someone enabled envoy: §1.3's blast-radius
+#         argument is void; STOP and re-review). Premise live-xds-mode-is-ads is the 'before'.
 ```
 
 **4.4 — LB table byte-identical; leases re-formed.**
@@ -833,7 +894,7 @@ for n in ci-runner arc-system arc-build; do kubectl get pods -n $n --no-headers;
 #   an ARC runner scaling up/down moves the count legitimately (every pod in those
 #   namespaces is policy-selected). A DROP with an UNCHANGED CI-pod count is a FAIL —
 #   agents that came up without policy print "Disabled" instead.
-# b) CNP validity under the 1.20.3 operator's new validation
+# b) CNP validity under the 1.20.4 operator's new validation
 kubectl get cnp -A --no-headers | awk '$4!="True"{print "INVALID: "$0}' ; kubectl get cnp -A --no-headers | wc -l
 #   PASS: no INVALID line, count 4.   FAIL: any INVALID line (the new operator
 #   rejected one of our policies — its pods are now unprotected or blocked).
@@ -958,7 +1019,7 @@ Confirm with §4.1 (expect 1.20.2 / `sha256:2939231d…` agent,
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen        # REQUIRED: helm is a mise shim pinned here
-flux suspend helmrelease cilium -n kube-system     # else helm-controller re-applies 1.20.3
+flux suspend helmrelease cilium -n kube-system     # else helm-controller re-applies 1.20.4
 helm history cilium -n kube-system
 REV=$(helm history cilium -n kube-system -o json | .venv/bin/python3 -c "
 import sys, json
@@ -983,13 +1044,13 @@ close-out.
 ### 5.3b Rollback DURING the gated roll (OnDelete still on)
 
 OnDelete means a `helm rollback`/revert changes the template but restarts nothing:
-the already-upgraded nodes stay on 1.20.3 until you delete their agent pod, one node at
+the already-upgraded nodes stay on 1.20.4 until you delete their agent pod, one node at
 a time, with `/tmp/cilium-etcd-gate.sh` before and after each (same loop as 3.4b with the
 image check pointed at `2939231d`). Un-upgraded nodes need nothing. Order: revert the
 #372 merge commit (and leave the OnDelete commit until the end), push, wait HR Ready,
 loop, then revert the OnDelete commit (3.4c). **Limb B caveat:** `helm rollback` to
 revision 14 also restores `RollingUpdate maxUnavailable: 2` (rev 14 never had OnDelete),
-so it restarts every 1.20.3 agent up to two at a time. Use it only for a datapath that is
+so it restarts every 1.20.4 agent up to two at a time. Use it only for a datapath that is
 already broken (nothing left to protect); for a mere regression use the git + node-by-node
 path above.
 
@@ -1003,15 +1064,15 @@ path above.
   is NOT applied until the datapath is back - use `helm rollback`, 5.3), CoreDNS (pods
   lose cluster DNS, and the FQDN L7-DNS proxy for ci-runner/arc namespaces), Prometheus
   (so 4.2 reads empty - judge by `cilium-dbg`, not Grafana), the AdGuard/k8s-gateway VIPs.
-- The 1.20.3 images are pre-pulled to the nodes (2p), so a rollback/restart does not wait on
+- The 1.20.4 images are pre-pulled to the nodes (2p), so a rollback/restart does not wait on
   the registry; the 1.20.2 images are still in each node's containerd cache (listed
   2026-10-22 on .11).
 
 ### 5.4 Cost
 
 Rollback is another full agent roll with the same per-node blips (and, rolling
-from 1.20.3 back to 1.20.2, the old shutdown-path DNS bug cannot fire because the
-agent shutting down is 1.20.3). Pull it for a real regression — crash-loop, a dark
+from 1.20.4 back to 1.20.2, the old shutdown-path DNS bug cannot fire because the
+agent shutting down is 1.20.4). Pull it for a real regression — crash-loop, a dark
 VIP, a failed §4 gate whose baseline passed — never for a transient blip seen
 during the roll.
 
@@ -1021,7 +1082,7 @@ during the roll.
 
 - **EXECUTION JUDGMENT (2026-10-22): NEEDS-OPERATOR (attended), not unattended.**
   The gated roll is stop-safe (any failed gate halts with the cluster mixed
-  1.20.2/1.20.3 and stable; OnDelete guarantees nothing else restarts), and the etcd gate
+  1.20.2/1.20.4 and stable; OnDelete guarantees nothing else restarts), and the etcd gate
   + pre-pull + `talosctl` access are CNI-independent. It is still not safe to run with
   the operator away because (a) no watchdog can *undo* a degraded datapath without
   judgment: the revert machinery (Flux) is itself on the pod network, so recovery is a
@@ -1034,7 +1095,7 @@ during the roll.
 - **SOLO + ATTENDED, both hard.** `exclusive: true` keeps every other plan out of
   the slot in both directions; `autonomy_override: human-gated` keeps it out of
   `nightly`. `conflicts_with` names the plans with a specific interaction (§
-  frontmatter). **Reciprocity owed:** none of those plans lists `cilium-1.20.3`
+  frontmatter). **Reciprocity owed:** none of those plans lists `cilium-1.20.4`
   (it did not exist). `exclusive` makes that non-blocking for scheduling, but the
   `talos-linux-1.14.4` owner should add the back-reference for the README §4
   convention (done 2026-10-23); no kube-prometheus-stack plan exists to owe one.
@@ -1052,6 +1113,11 @@ during the roll.
   `lbipam.cilium.io/ips`) but may move announcing node once (one gratuitous-ARP
   re-learn). New this time: CI pods under the four toFQDNs CNPs may lose DNS for
   the restart duration on their node (§1.4) — an in-flight CI job may fail.
+- **Retarget note (2026-10-24).** This plan was retargeted from 1.20.3 to 1.20.4 the day
+  before its slot. All reviewed fixes are kept (3.4a pre-push gate, 3.4b script, 3.2 digest
+  gate, 5.3b). `review` was reset to null: the new reviewer must re-check §1.3's xDS-mode
+  claim and the digests, not just the version strings. Other plans' `conflicts_with` entries
+  were renamed `cilium-1.20.3` -> `cilium-1.20.4` in the same commit.
 - **Step 0 ordering.** Take every §2 baseline after Step 0 settles.
 - **Monitoring is the instrument.** §4.2 reads Prometheus over the datapath being
   changed; a same-night kube-prometheus-stack / otel / edot change would make a

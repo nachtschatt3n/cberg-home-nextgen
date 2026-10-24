@@ -103,7 +103,7 @@ conflicts_with:                       # exclusive: true already keeps everything
                                       # that ALSO mutate Talos machine config / the same nodes / the window's
                                       # instrument and must never share a night with this roll (reciprocity, §6.3).
   # talos-linux-1.14.2 is now `status: superseded` (superseded_by this plan, 2026-10-23): terminal, not listed.
-  - cilium-1.20.3                     # RECIPROCAL (it already lists this plan). CNI agent roll on all 3 nodes, scheduled
+  - cilium-1.20.4                     # RECIPROCAL (it already lists this plan). CNI agent roll on all 3 nodes, scheduled
                                       # sun-attended:2026-10-25 SOLO/exclusive, a week before this roll. Two CNI/datapath
                                       # events on the same nodes in one night = no attributable cause. Never same slot.
   - edot-collector-0.163.2            # owns LB VIP edot-collector-talos-kmsg and the Talos kernel-log path read at §4;

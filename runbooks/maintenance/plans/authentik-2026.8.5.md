@@ -57,7 +57,7 @@ conflicts_with:
   - talos-linux-1.14.4                    # node roll evicts every authentik pod mid-verification (replaces retired 1.14.2)
   - envoy-proxy-config-distroless-v1.39.4 # restarts the envoy data plane that carries auth.<domain> and every
   - envoy-proxy-config-distroless-v1.40.0 # forward-auth ext-auth call; would also confound the §4 G7 client-IP probe
-  - cilium-1.20.3                         # CNI restart drops outpost websockets and pod traffic
+  - cilium-1.20.4                         # CNI restart drops outpost websockets and pod traffic
   - k8s-1.36.5                            # control-plane/kubelet roll
   - flux-reconciler-impersonation         # exclusive (blocked); changes how helm-controller applies this HR
   # No kube-prometheus-stack plan is open (92.x retired 2026-10-23); G4/G6 read Prometheus, so add one here if
@@ -544,7 +544,7 @@ PRs #364/#359 stay open (held by the deny rule) until a retry.
   pending commits in one window.
 - **Attended slot only** (SSO blast radius, a manual 13-outpost push, a real-browser
   login gate). Not `nightly`. No reboot; 45 min.
-- **talos-linux-1.14.4, cilium-1.20.3, k8s-1.36.5:** node roll, CNI restart and
+- **talos-linux-1.14.4, cilium-1.20.4, k8s-1.36.5:** node roll, CNI restart and
   control-plane roll all evict or sever authentik pods and outpost websockets.
   Declared; not the same slot.
 - **envoy-proxy-config-distroless-v1.39.4 / v1.40.0** (drafts): they restart the

@@ -45,7 +45,7 @@ depends_on: []
 conflicts_with:
   - flux-distribution-2.9.6           # replaces the Flux controllers this plan's ks dependsOn ordering + HR upgrades rely on
                                       # (stamped sat-attended:2026-10-24, exclusive).
-  - cilium-1.20.3                     # declares arc-system/ci-runner/arc-build: a CNI roll during the listener rebuild would make a
+  - cilium-1.20.4                     # declares arc-system/ci-runner/arc-build: a CNI roll during the listener rebuild would make a
                                       # broker-session failure indistinguishable from a policy/datapath failure.
   - talos-linux-1.14.4                # node roll restarts every ARC pod; attribution of §4 impossible.
   - talos-power-tuning-ab             # measures CI load on ci-runner; a listener gap skews its CI baseline.
@@ -338,7 +338,7 @@ Trigger: any of 4.1-4.6 fails and does not self-heal within 10 min, or a scale s
   ~06:00 and ~08:35 UTC.
 - **No node impact:** no reboot, no PVC, no change to runner resources/affinity, so the CI thermal/power plans
   (`talos-power-tuning-ab`, `ci-gate-primary-control-rework`) are conflicts only for attribution, not for safety.
-- **Reciprocity:** `cilium-1.20.3`, `talos-power-tuning-ab`, `ci-gate-primary-control-rework`, `flux-distribution-2.9.6` do
+- **Reciprocity:** `cilium-1.20.4`, `talos-power-tuning-ab`, `ci-gate-primary-control-rework`, `flux-distribution-2.9.6` do
   not list this plan; the window agent should add `gha-fleet-0.15.1` to their `conflicts_with` (validate checks refs, not
   reciprocity).
 - **Repo corrections (not done here, report only):**

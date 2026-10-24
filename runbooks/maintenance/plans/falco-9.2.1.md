@@ -38,7 +38,7 @@ conflicts_with:
                                       # confounds both plans' SIEM-volume gates (and section 4.4 here)
   - talos-linux-1.14.4                # exclusive node roll; restarts falco on every node mid-verification
   - talos-linux-1.14.2                # same (awaiting-go, superseded-by-1.14.4 pending)
-  - cilium-1.20.3                     # exclusive; CNI roll fires cilium init-container execs falco would record + its
+  - cilium-1.20.4                     # exclusive; CNI roll fires cilium init-container execs falco would record + its
                                       # canaries read ds/falco-log-rotate
   - kube-prometheus-stack-92.2.0      # exclusive; section 4.1 reads Prometheus (kube-state-metrics) + ALERTS
   - kube-prometheus-stack-92.10.1     # exclusive; same reason

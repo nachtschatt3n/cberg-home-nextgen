@@ -43,7 +43,7 @@ conflicts_with:                       # every id re-checked as an existing, non-
                                       # flux-fleet-0.60.0, kube-prometheus-stack-92.2.0.
   - authentik-2026.8.5                # reciprocal: names this plan; Authentik ext-auth path is exercised by §4
   - authentik-web-max-requests        # reciprocal: names this plan; same path
-  - cilium-1.20.3                     # reciprocal: names this plan; pod network under the data plane
+  - cilium-1.20.4                     # reciprocal: names this plan; pod network under the data plane
   - n8n-2.39.8                        # reciprocal: names this plan (status executed; kept for the reciprocity check)
   - envoy-proxy-config-distroless-v1.40.0   # SAME pin line (blocked); two plans moving one pin never share a window
   - penpot-chart-1.10.0               # gateway/envoy-external; restarts an app §4.3 diffs
@@ -679,7 +679,7 @@ the EnvoyProxy CR and overwrites the undo at the next reconcile. Follow with 5.1
 - **Chain bookkeeping is complete:** the -v1.39.2 file is `superseded`; the -v1.39.3 draft no
   longer exists. Reciprocal refs to this plan id (not edited here, this planner writes only
   this file): `envoy-proxy-config-distroless-v1.40.0` already names it; `authentik-2026.8.5`,
-  `talos-linux-1.14.4`, `cilium-1.20.3`, `authentik-web-max-requests`, `n8n-2.39.8` reference it too
+  `talos-linux-1.14.4`, `cilium-1.20.4`, `authentik-web-max-requests`, `n8n-2.39.8` reference it too
   (now also listed in this plan's `conflicts_with`).
   Two plans moving the same pin must never both be open: the 1.40.0 plan is `blocked`.
 - **Controller prerequisite is met** (chart 1.9.2 live 2026-10-23). The premise
