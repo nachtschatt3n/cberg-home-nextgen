@@ -131,7 +131,7 @@ review: ready-for-go@2026-09-28
                                       # with no look-first step and no abort point, on a database
                                       # with no second copy. The operator was shown all of this
                                       # and chose to proceed.
-window: "now:2026-10-21"   # ON-DEMAND NOW run 2026-10-21 (run-now.py stamp; was 'sat-attended:2026-10-24')
+window: null   # executed in now:2026-10-21 (on-demand); cleared by nightly 2026-10-24 (RETIRED PLAN STILL WINDOWED hygiene)
                                       # take it: 0 of 70 schedulable minutes used, and it holds
                                       # none of the six backup-restore plans this one now
                                       # conflicts with. Every earlier slot fails on one axis or

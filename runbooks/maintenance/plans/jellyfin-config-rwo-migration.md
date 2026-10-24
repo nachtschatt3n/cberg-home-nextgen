@@ -74,7 +74,7 @@ restore_proof: "§3.4: restore the backup_gate backup into a SCRATCH Longhorn vo
 finding_refs: []
 status: executed   # plan-reviewer 2026-09-28: needs-fix (B1-B4) -> fixed -> re-review needs-fix (liveness wording) -> fixed -> ready-for-go. Longhorn/storage => outside SD-11 (floor), so it is GO-pending regardless of review.
 review: ready-for-go@2026-09-28
-window: "now:2026-10-23"   # ON-DEMAND NOW run 2026-10-23 (run-now.py stamp; was None)
+window: null   # executed in now:2026-10-23 (on-demand); cleared by nightly 2026-10-24 (RETIRED PLAN STILL WINDOWED hygiene)
                                       # redis-fleet-8.10.2 (85m) + this (75m) = 160m <= 180m schedulable.
 premises:
   - id: config-pvc-is-still-rwx-longhorn-static
