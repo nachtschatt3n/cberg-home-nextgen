@@ -249,10 +249,10 @@ premises:                             # Every run: was checked against plan-prem
     why: "§4.9 relies on ci-runner-lockdown (endpointSelector {}) allowing DNS for github.com and denying anything else. Assert the allow-name is still in the policy."
     run: kubectl get cnp -n ci-runner ci-runner-lockdown -o jsonpath='{.spec.egress[0].toPorts[0].rules.dns[0].matchName}'
     expect_exact: "github.com"
-status: draft
+status: vetted
 window: "sun-attended:2026-10-25"    # SCHEDULED 2026-10-23 by the operator ("yes: schedule it for a Sunday when I am at the keyboard"). Must be ATTENDED and SOLO (§6): redis-fleet-8.10.2 and jellyfin-config-rwo-migration were moved off this slot. GO still needed from the operator at the keyboard.
                                       # Recommended: an on-demand NOW run, as cilium-1.20.2 did.
-review: null
+review: ready-for-go@2026-10-24   # plan-reviewer 2026-10-24: 0 blocking; digests, xDS removal and Envoy-unused claims verified
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
@@ -321,9 +321,10 @@ README says `envoy.xdsMode` is "`ads` for new 1.20+ installations; none when
 defaults missing option to `split` to keep upgrades in the legacy mode". So after this
 upgrade the agents run xDS in `split` mode instead of `ads`. Blast radius on THIS cluster
 is nil: `envoy.enabled: false` (no cilium-envoy DaemonSet), `enable-envoy-config` is
-`false`, no `*envoyconfigs.cilium.io` CRD exists, and the `proxy_type="envoy"` L7 counters
-read 0. xDS only configures Cilium's own Envoy listeners, which we do not use (Envoy
-Gateway is a separate product). Decision: take the upstream default, do NOT pin
+absent from cilium-config (off), no `*envoyconfigs.cilium.io` CRD exists, and the `proxy_type="envoy"` L7 counters
+read 0. xDS only configures Cilium's own Envoy listeners for CEC/Gateway API, which we do not use (the
+embedded Envoy only serves the DNS-proxy L7 redirects, which do not use xDS; Envoy Gateway is a
+separate product). Decision: take the upstream default, do NOT pin
 `envoy.xdsMode: ads` in our values (a pin would be a permanent local override of a
 deliberate upstream rollback of the default). §2/§4.3b assert both sides. The chart has no
 `crds/` dir (the operator manages CRDs at startup); no CRD schema change is listed.
@@ -391,7 +392,7 @@ Upstream behaviour changes that **could** have mattered, each checked live and
 | CiliumCIDRGroup `0.0.0.0/0` now selects traffic (previously nothing) | 0 CiliumCIDRGroups; no CNP/netpol uses `0.0.0.0/0` | vacuous |
 | Gateway API / ExternalAuth / Envoy listener fixes; BackendTLSPolicy regression fix; "update gateway api to v1.6.3" | `enable-gateway-api` ABSENT in `cilium-config`; the only GatewayClass is Envoy Gateway's; `proxy_type="envoy"` L7 counters all 0 | Cilium's Gateway API and L7 HTTP proxying are not in use; not a reason to take, not a risk |
 | CiliumEnvoyConfig now only redirects Services in its own namespace (1.20.4) | no CiliumEnvoyConfig CRD or object (premise `no-cilium-envoyconfig-crds-or-objects`) | vacuous |
-| `envoy-xds-mode` no longer rendered; agent defaults to split | `envoy.enabled: false`, `enable-envoy-config: false`; live key was `ads` | accepted, see §1.3; asserted in §4.3b |
+| `envoy-xds-mode` no longer rendered; agent defaults to split | `envoy.enabled: false`, `enable-envoy-config` absent from cilium-config (feature off; embedded Envoy only serves the DNS-proxy L7 redirects); live key was `ads` | accepted, see §1.3; asserted in §4.3b |
 | Hubble cert-manager key fix | `hubble.enabled: false` | vacuous |
 | Azure / AlibabaCloud / dual-stack ENI fixes | bare-metal Talos, IPv4 native routing | vacuous |
 
