@@ -1,26 +1,21 @@
 ---
 plan_id: redis-fleet-8.10.2
-component: redis                      # matches the held dep basename `redis` for every
-                                      # consumer; open-webui's app leg joins via the
-                                      # version pair (0.11.3 in current, 0.11.4 in target)
+component: redis                      # matches the held dep basename `redis` for every consumer
 pr: null                              # coverage.py needs_plan (direct-bump lane) — no Renovate PR
 kind: image
-current: "redis:8.10.1-alpine on 8 consumers (databases/redis, databases/superset-redis-official, download/tube-archivist-redis, media/immich-redis, office/nextcloud-redis, office/paperless-redis, office/sure-redis, ai/open-webui-redis) + ghcr.io/open-webui/open-webui 0.11.3"
-target: "redis:8.10.2-alpine on all 8 consumers + ghcr.io/open-webui/open-webui 0.11.4 (lockstep with its redis sidecar, one commit)"
+current: "redis:8.10.1-alpine on 8 consumers (databases/redis, databases/superset-redis-official, download/tube-archivist-redis, media/immich-redis, office/nextcloud-redis, office/paperless-redis, office/sure-redis, ai/open-webui-redis sidecar of chart open-webui 17.0.0)"
+target: "redis:8.10.2-alpine on all 8 consumers (open-webui app is NOT part of this plan any more: already v0.12.3 / chart 17.0.0)"
 update_type: patch
-risk: medium                          # Every redis leg alone is low (same-minor patch, RDB_VERSION 15
-                                      # unchanged, 6 upstream commits). Medium because of: (a) the
-                                      # open-webui app leg is a large feature release despite the patch
-                                      # number (§1.3); (b) nextcloud-redis logs every user out; (c) the
-                                      # sure-redis leg SILENTLY EMPTIES Sure's sidekiq-cron schedule unless
-                                      # sure-worker is restarted afterwards (§1.4) — a trap no health
-                                      # signal shows.
-est_duration_min: 85                  # pre-checks 10 · 8 legs × ~6 (edit/commit/push, reconcile, gates)
-                                      # · open-webui leg +5 (STS roll, UI check) · waits the gates can
-                                      # absorb (nextcloud-cron ≤5, immich poll ≤3, notify-push ≤3) · the
-                                      # attended paperless PDF + Nextcloud login · slack. RAISED from 70
-                                      # on review 2026-09-27: 70 was the entire sat-attended budget.
-                                      # Now fits sun-attended only (180); review suggested 2026-10-18.
+risk: medium                          # Every leg alone is low (same-minor patch, RDB_VERSION 15 unchanged, 6 upstream
+                                      # commits). Medium because: (a) nextcloud-redis now enforces a password and
+                                      # logs every user out; (b) the sure-redis leg SILENTLY EMPTIES Sure's
+                                      # sidekiq-cron schedule unless sure-worker is restarted afterwards (§1.4);
+                                      # (c) 8 restarts of shared session/broker stores in one slot.
+est_duration_min: 70                  # pre-checks 10 · 8 legs x ~5 · sure worker restart +3 · waits the gates absorb
+                                      # (nextcloud-cron <=5, immich poll <=3, notify-push <=3) · attended paperless
+                                      # PDF + Nextcloud login + open-webui chat. open-webui leg SHRANK (no app roll,
+                                      # no sqlite backup). 70 would be the whole sat-attended budget, so this plan
+                                      # takes a SUNDAY slot (180).
 needs_reboot: false
 touches:
   namespaces: [databases, download, media, office, ai]
@@ -34,16 +29,16 @@ touches:
     - pvc/tube-archivist-redis-data             # remounted, dump.rdb re-loaded; not modified
     - helmrelease/immich-redis                  # media
     - deployment/immich-redis
-    - deployment/nextcloud-redis                # office — plain manifest (nextcloud Kustomization)
-    - deployment/paperless-redis                # office — plain manifest (paperless-ngx Kustomization)
+    - deployment/nextcloud-redis                # office — plain manifest (nextcloud Kustomization), requirepass via secret/nextcloud-config
+    - secret/nextcloud-config                   # read-only reference (redis-password key); not modified
+    - deployment/paperless-redis                # office — plain manifest (paperless-ngx Kustomization), requirepass
     - helmrelease/sure-redis                    # office
     - deployment/sure-redis
     - deployment/sure-worker                    # office — ROLLOUT RESTART after the swap (§3 leg 6)
-    - helmrelease/open-webui                    # ai — sidecar tag + app tag, ONE commit
+    - helmrelease/open-webui                    # ai — ONLY the redis sidecar tag changes (chart 17.0.0, app v0.12.3 untouched)
     - deployment/open-webui-redis
-    - statefulset/open-webui                    # rolls to 0.11.4
-    - pvc/open-webui-20g                        # webui.db copied in-pod before the roll (§3 leg 3)
     # consumers that reconnect in-process and are NOT restarted (asserted in §4):
+    - statefulset/open-webui
     - deployment/superset-worker
     - deployment/superset-celerybeat
     - deployment/tube-archivist
@@ -57,62 +52,51 @@ touches:
                                         # remounted by their own pod.
 depends_on: []
 conflicts_with:
-  - nextcloud-mcp-0.198.0             # 2026-10-05 nextcloud-mcp review: reciprocity (nextcloud-redis restart)
-  - sure-0.7.5                        # 2026-10-05 sure review: reciprocity (rolls sure-redis)
-  # - nextcloud-redis-hardening (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
-    # draft, window:null. Edits the SAME file
-                                        # (office/nextcloud/app/redis-deployment.yaml: command,
-                                        # NetworkPolicy) and restarts the same redis. Two
-                                        # log-everyone-out changes in one slot also blur which one
-                                        # broke sessions/locks. Reciprocal entry NOT present in that
-                                        # file (planner writes only its own file) — one side suffices
-                                        # for the scheduler.
-  - helm-drift-detection                # its §4.1 asserts Helm revisions are IDENTICAL across all
-                                        # releases before/after; this plan upgrades 5 releases
-                                        # (redis, tube-archivist-redis, immich-redis, sure-redis,
-                                        # open-webui) and would fail that gate.
-  - flux-oci-chart-sources              # rolls statefulset/open-webui (+ its redis) by re-pointing
-                                        # the chart source; never two open-webui rolls in one slot.
-  - flux-reconciler-impersonation       # touches every namespace here and changes WHO applies
-                                        # the Kustomizations/HelmReleases this plan relies on.
-  - bitnamilegacy-exit-nextcloud-db     # blocked, window:null — quiesces Nextcloud; never stack a
-                                        # session-store restart on a DB cutover.
-  - paperless-db-13.0.2                 # vetted, sat-attended:2026-10-24 — restarts paperless-ngx
-                                        # and its DB; keep the celery-broker swap out of that slot.
-  - app-template-5.2.1                  # draft (concurrent, 2026-09-27). Rewrites the SAME 4 HR files
-                                        # (redis, tube-archivist-redis, immich-redis, sure-redis) and its
-                                        # §4 SAME_GEN gate reads GEN_CHANGED on this plan's rolls. It
-                                        # already lists this plan back. (review 2026-09-27, blocking #1)
-  - chart-patches-coredns-reloader-blackbox  # draft. A CoreDNS roll while consumers re-resolve
-                                        # their redis Service names would confound every reconnect
-                                        # gate in §4. Not reciprocal yet in that file.
-  - nextcloud-fleet-35.0.1              # draft. Restarts nextcloud (a v_cons consumer) and lists this plan.
-  - flux-fleet-0.60.0                   # draft. Flux controller upgrade under this plan's GitOps legs.
+  # Same consumers / same files (reciprocity added 2026-10-24 re-plan; each is listed back by these plans):
+  - nextcloud-9.4.1                     # vetted nightly:2026-10-28 — Nextcloud app roll; lists this plan. Must be settled BEFORE leg 8.
+  - nextcloud-whiteboard-2.1.2          # vetted nightly:2026-10-29 — Nextcloud whiteboard (uses nextcloud redis path); lists this plan.
+  - nextcloud-mcp-0.200.2               # blocked — lists this plan (nextcloud-redis restart)
+  - nextcloud-mcp-0.198.0               # blocked — reciprocity from 2026-10-05 review
+  # sure-0.7.5 dead ref removed 2026-10-24 (plan file no longer exists); a future sure-* plan that rolls sure-redis/sure-worker must serialize with leg 6.
+  - bitnamilegacy-exit-nextcloud-db     # blocked — quiesces Nextcloud; never stack a session-store restart on a DB cutover.
+  - bitnamilegacy-exit-nextcloud-redis  # nextcloud-redis rewrite; same file/restart
+  - paperless-db-13.0.2                 # vetted — restarts paperless-ngx and its DB; keep the celery-broker swap out of that slot.
+  - python-fleet-3.15.0                 # draft sat-attended:2026-11-14 — rolls ai/ + office/ app images that are redis consumers
+  - openclaw-2026.10.5                  # 2026-10-31 attended full day, namespace ai
+  # Platform serialisation (a roll of these confounds every reconnect gate in §4):
+  - helm-drift-detection                # its gate asserts Helm revisions are IDENTICAL across all releases; this plan upgrades 5 releases
+  - flux-oci-chart-sources              # re-points chart sources incl. open-webui / app-template releases
+  - flux-reconciler-impersonation       # changes WHO applies every Kustomization/HelmRelease this plan relies on
+  - flux-distribution-2.9.6             # Flux controllers upgrade under this plan's GitOps legs (awaiting-go, deferred from sat 2026-10-24)
+  - cilium-1.20.4                       # CNI roll (retargeted from 1.20.3 on 2026-10-24; draft) drops every client-server connection
+  - talos-linux-1.14.4                  # node reboots (sun 2026-11-01)
+  - coredns-1.48.1                      # a CoreDNS roll while consumers re-resolve their redis Service names confounds the reconnect gates
+  - longhorn-1.13.0                     # sun 2026-11-15 — two Longhorn PVCs are remounted here; never stack on a storage upgrade
+  - authentik-2026.8.5                  # SSO login for Nextcloud/Paperless/Immich/Sure/open-webui used by the attended checks
+  - authentik-web-max-requests          # same
+  - envoy-proxy-config-distroless-v1.40.0  # public edge roll hides app reachability gates
+  - envoy-proxy-config-distroless-v1.39.4  # same
+  - etcd-timeouts-5000-500              # control-plane timing change under 8 rolling Deployments
+  # Dropped 2026-10-24 as dead refs: flux-fleet-0.60.0, app-template-5.2.1, nextcloud-fleet-35.0.1,
+  # chart-patches-coredns-reloader-blackbox (plans no longer exist / executed); no open kube-prometheus-stack plan.
+  # If a kube-prometheus-stack-* plan reappears, add it (§4 reads Prometheus).
 exclusive: false
-security_ref: F-6cfc5079                # related: the open-webui image's accepted security finding
-                                        # (detail on the record). Whether 0.11.4 changes it is for the
-                                        # next sweep to MEASURE, not for this plan to claim.
-capability_change: true                 # open-webui 0.11.4 changes user-visible behaviour (link
-                                        # rendering, skill discovery, Integrations tab opt-in,
-                                        # removed bundled Python packages) — never unattended.
+security_ref: F-6cfc5079                # related: the open-webui image's accepted security finding (detail on the record).
+capability_change: false                # same-behaviour patch bump on all 8; nextcloud-redis auth/config is already live
+                                        # and unchanged by this plan; open-webui app not touched any more.
 autonomy_override: human-gated          # nextcloud-redis leg logs every user out (policy rule
                                         # *nextcloud-redis*: "ATTENDED low-traffic slot"); the
                                         # sure-worker restart needs a human reading §4 leg-6 gate.
 rollback_class: git-revert              # one commit per leg, each reverts cleanly: RDB/AOF format is
-                                        # unchanged (RDB_VERSION 15 in both tags) and open-webui adds no
-                                        # alembic migration (§1.3). Backups are taken anyway (backup_gate).
-backup_gate: "Completed Longhorn backup < 26h for open-webui-20g, tube-archivist-redis-data and the redis-data volume (§2 g); PLUS in-pod copies taken in §3 immediately before their leg: webui.db -> webui.db.pre-0.11.4 (sqlite online-backup API, size compared) and tube-archivist dump.rdb -> local scratch file (byte count compared)."
-finding_refs: [F-d2bb762b, F-8c50c463, F-625d3a3f, F-c637a09a, F-3fcdca7b, F-3a75c9aa, F-2e326f86, F-e8a41b1b, F-db500cce, F-31c19a7f]
-                                        # the 8 per-consumer redis image findings + open-webui
-                                        # 0.11.3 -> 0.11.4 (policy-cli finding list --grep redis /
-                                        # --grep open-webui, 2026-09-27). The app-template chart
-                                        # 5.1.0 -> 5.2.1 findings (F-94bbd7ee, F-b5e13899, F-2983fb7e,
-                                        # F-6d39efbe) are NOT answered here — separate held items.
-                                        # open-webui chart 16.6.0 (F-31c19a7f) IS answered by leg 3.
-status: vetted   # plan-reviewer 2026-09-27: needs-fix (3 blocking) -> fixed; 2026-09-28 (F-2c849d1e): needs-fix (unreachable restore pod, chart 16.6.0 lockstep) -> fixed -> re-review ready-for-go. HUMAN-GATED.
-review: ready-for-go@2026-09-28
-                # No operator GO recorded; awaiting vetting/scheduling + go/no-go.
-window: "sat-attended:2026-10-24"   # RE-SLOTTED 2026-10-23 from sun-attended:2026-10-25 so cilium-1.20.3 can run SOLO there. WAS: SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed: capability_change (open-webui leg), 85m > nightly budget; serialize before penpot-chart
+                                        # unchanged (RDB_VERSION 15 in both tags); no schema/app migration in this plan.
+backup_gate: "Completed Longhorn backup < 26h for tube-archivist-redis-data and the redis-data volume (§2 g); PLUS an in-pod/local copy of tube-archivist dump.rdb taken in §3 leg 4 immediately before that leg (byte count compared)."
+finding_refs: [F-d2bb762b, F-8c50c463, F-625d3a3f, F-c637a09a, F-3fcdca7b, F-3a75c9aa, F-2e326f86, F-e8a41b1b, F-db500cce]
+                                        # the 8 per-consumer redis image findings. F-31c19a7f (open-webui chart 16.6.0)
+                                        # is NO LONGER answered here: the chart is already 17.0.0 (live 2026-10-24).
+status: draft   # RE-PLANNED 2026-10-24 after sat-attended deferral (open-webui now v0.12.3 / chart 17.0.0; nextcloud-redis now requirepass). Prior review (ready-for-go@2026-09-28) is void.
+review: null
+                # No operator GO recorded; HUMAN-GATED.
+window: "sun-attended:2026-11-29"   # was sat-attended:2026-10-24 (deferred). Free Sunday: clear of cilium 10-25, talos 11-01, etcd/envoy 11-08, longhorn 11-15, flux-oci 11-22 and the Saturdays 10-31/11-07/11-14. sat budget (70) leaves no slack for 70 min.
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/verification-contents-not-shape.md
@@ -122,13 +106,15 @@ sops_refs:
   - docs/sops/immich.md
   - docs/sops/vulnerability-disclosure.md
 generated: "2026-09-27"
+replanned: "2026-10-24"
 premises:
-  # Read-verb only. Each was run 2026-09-27 and returned the expected value.
+  # Read-verb only. Each was run 2026-10-24 and returned the expected value.
   - id: databases-images-current
     why: >-
       `current:` claims 8.10.1-alpine on both databases redis Deployments. If the
       nightly lane or a hand edit moved either, that leg is a no-op and §3's sed
-      for it matches nothing — drop the leg, do not force it.
+      for it matches nothing — drop the leg, do not force it. A value of 8.10.2
+      means someone already did it.
     run: kubectl get deploy -n databases redis superset-redis-official -o jsonpath='{.items[*].spec.template.spec.containers[0].image}'
     expect_exact: redis:8.10.1-alpine redis:8.10.1-alpine
   - id: office-images-current
@@ -139,13 +125,17 @@ premises:
     why: Same, for immich-redis, tube-archivist-redis and the open-webui sidecar.
     run: kubectl get deploy -A -o jsonpath='{range .items[?(@.metadata.name=="immich-redis")]}{.spec.template.spec.containers[0].image}{" "}{end}{range .items[?(@.metadata.name=="tube-archivist-redis")]}{.spec.template.spec.containers[0].image}{" "}{end}{range .items[?(@.metadata.name=="open-webui-redis")]}{.spec.template.spec.containers[0].image}{end}'
     expect_exact: redis:8.10.1-alpine redis:8.10.1-alpine redis:8.10.1-alpine
-  - id: open-webui-app-current
+  - id: open-webui-app-already-current
     why: >-
-      The lockstep leg moves open-webui 0.11.3 -> 0.11.4. If the StatefulSet is
-      already elsewhere the §1.3 migration evidence (no alembic change between
-      exactly these tags) no longer applies — re-derive it.
+      The plan assumes open-webui is ALREADY on v0.12.3 / chart 17.0.0 and that only its
+      redis sidecar moves. If the StatefulSet is on anything else, leg 3 would also roll
+      the app and the §4 leg-3 "app not restarted" gate is wrong — re-plan.
     run: kubectl get sts -n ai open-webui -o jsonpath='{.spec.template.spec.containers[0].image}'
-    expect_exact: ghcr.io/open-webui/open-webui:0.11.3
+    expect_exact: ghcr.io/open-webui/open-webui:v0.12.3
+  - id: open-webui-chart-current
+    why: Leg 3 must not carry a chart bump; chart 17.0.0 is the live release.
+    run: kubectl get hr -n ai open-webui -o jsonpath='{.spec.chart.spec.version}'
+    expect_exact: 17.0.0
   - id: databases-redis-is-aof
     why: >-
       databases/redis is the canary BECAUSE it is the one AOF-persistent
@@ -156,20 +146,28 @@ premises:
   - id: tube-archivist-redis-default-config-on-pvc
     why: >-
       tube-archivist-redis runs the image's DEFAULT config (RDB snapshots, no
-      command override) with /data on a PVC — it is the only consumer whose
-      contents survive a restart and must be asserted after it (§4 leg 4). The
-      literal prefix keeps output non-empty; a command appearing after `cmd=`
-      means someone changed persistence.
+      command override) with /data on a PVC — the only consumer whose contents
+      survive a restart. The literal prefix keeps output non-empty; a command
+      appearing after `cmd=` means someone changed persistence.
     run: kubectl get deploy -n download tube-archivist-redis -o jsonpath='{"cmd="}{.spec.template.spec.containers[0].command}{" claim="}{.spec.template.spec.volumes[?(@.persistentVolumeClaim)].persistentVolumeClaim.claimName}'
     expect_exact: cmd= claim=tube-archivist-redis-data
-  - id: nextcloud-redis-non-persistent
+  - id: nextcloud-redis-requirepass-wrapper
     why: >-
-      The logout impact in §1 rests on this redis holding sessions with NO
-      persistence, and §4's nextcloud gate uses a password-less redis-cli. If
-      nextcloud-redis-hardening landed first, the command carries a wrapper and
-      the §4 commands need REDISCLI_AUTH — re-derive leg 8.
+      Nextcloud was upgraded to 35.0.2 / chart 9.4.1 on 2026-10-23 and nextcloud-redis now
+      starts through a wrapper that REFUSES to start without REDIS_PASSWORD and runs
+      `--requirepass`. The old plan asserted the plain `redis-server --save "" --appendonly no`
+      command; that premise is now false. This premise asserts the wrapper is still the
+      live one (the pattern appears only in the new command), so §4 leg 8 may rely on
+      REDISCLI_AUTH and on the NOAUTH control.
     run: kubectl get deploy -n office nextcloud-redis -o jsonpath='{.spec.template.spec.containers[0].command}'
-    expect_exact: '["redis-server","--save","","--appendonly","no"]'
+    expect_contains: 'exec redis-server --save'
+  - id: nextcloud-redis-auth-env-from-secret
+    why: >-
+      The password comes from secret/nextcloud-config key redis-password (both REDIS_PASSWORD
+      and REDISCLI_AUTH). The §4 leg-8 round trip and the NOAUTH control depend on this. Names
+      only; the secret value is never printed.
+    run: kubectl get deploy -n office nextcloud-redis -o jsonpath='{"secret="}{.spec.template.spec.containers[0].env[*].valueFrom.secretKeyRef.name}{" key="}{.spec.template.spec.containers[0].env[*].valueFrom.secretKeyRef.key}'
+    expect_exact: 'secret=nextcloud-config nextcloud-config key=redis-password redis-password'
   - id: sure-redis-non-persistent
     why: >-
       The sure-worker restart in §3 leg 6 is required precisely because this
@@ -184,114 +182,96 @@ premises:
       `uploads` volume is not double-attached.
     run: kubectl get deploy -n office sure-worker -o jsonpath='{.spec.strategy.rollingUpdate.maxSurge}'
     expect_exact: "0"
-  - id: open-webui-db-backed-up
-    why: >-
-      The open-webui leg rolls the app on its sqlite PVC. A Completed Longhorn
-      backup must exist (9 Completed on 2026-09-27); freshness is asserted in §2.
-    run: kubectl get backups.longhorn.io -n storage -o jsonpath='{.items[?(@.status.volumeName=="open-webui-20g")].status.state}'
-    expect_contains: Completed   # existence only; plan-premises.py refuses python3, so freshness is the §2 g longhorn-backup-age.py gate
   - id: tube-archivist-redis-backed-up
-    why: The one redis whose contents are persistent. Freshness asserted in §2.
+    why: The one redis whose contents are persistent. Freshness asserted in §2 g.
     run: kubectl get backups.longhorn.io -n storage -o jsonpath='{.items[?(@.status.volumeName=="tube-archivist-redis-data")].status.state}'
-    expect_contains: Completed   # existence only; plan-premises.py refuses python3, so freshness is the §2 g longhorn-backup-age.py gate
+    expect_contains: Completed   # existence only; freshness is the §2 g longhorn-backup-age.py gate
   - id: manifest-pins-current
     why: >-
       §3's seds are anchored on these exact literals; each file must hold exactly
       one line ENDING in 8.10.1-alpine (the open-webui comment line ends in
       "is", so it is not counted; its own sed handles it). A count of 0 means
       that leg's commit would be empty; 2 means a second pin the sed would also
-      rewrite. Order of grep's output lines is not asserted.
+      rewrite.
     run: grep -c "8\.10\.1-alpine$" kubernetes/apps/databases/redis/app/helmrelease.yaml kubernetes/apps/databases/superset/app/redis-deployment.yaml kubernetes/apps/download/tube-archivist/app/redis-helmrelease.yaml kubernetes/apps/media/immich/app/redis-helmrelease.yaml kubernetes/apps/office/nextcloud/app/redis-deployment.yaml kubernetes/apps/office/paperless-ngx/app/redis-deployment.yaml kubernetes/apps/office/sure/app/redis-helmrelease.yaml kubernetes/apps/ai/open-webui/app/helmrelease.yaml
     expect_matches: '(?s)^(?:\S+:1\n?){8}$'
 ---
 
-# redis fleet 8.10.1-alpine → 8.10.2-alpine (+ open-webui 0.11.3 → 0.11.4)
+# redis fleet 8.10.1-alpine → 8.10.2-alpine (8 consumers; re-planned 2026-10-24)
 
 ## 1. Summary & why held
 
+### 1.0 Re-plan delta (2026-10-24)
+
+The Saturday attended window of 2026-10-24 deferred this plan because two premises
+had moved. Both were re-measured live:
+
+1. **open-webui is already on `v0.12.3` (chart 17.0.0, Helm release v58)**, started
+   2026-10-22. The old lockstep (app 0.11.3 -> 0.11.4 + chart 16.5.0 -> 16.6.0) is
+   void; the app and chart legs, the sqlite pre-copy and the alembic-head
+   rollback branch are REMOVED. Leg 3 now changes only the chart-rendered redis
+   sidecar tag (`redis.image.tag`), with the app pod expected NOT to restart.
+   The image tag form is now `v0.12.3` (leading `v`).
+2. **nextcloud-redis now enforces a password** (Nextcloud 35.0.2 / chart 9.4.1,
+   2026-10-23; the manifest was already hardened by `5601933a`). Live: the
+   container command is an `sh -c` wrapper that exits if `REDIS_PASSWORD` is empty and
+   runs `redis-server --save "" --appendonly no --requirepass "$REDIS_PASSWORD"`; both
+   `REDIS_PASSWORD` and `REDISCLI_AUTH` come from `secret/nextcloud-config` key
+   `redis-password`; a NetworkPolicy admits only the Nextcloud app/cronjob pods and
+   `nextcloud-notify-push`; notify-push now reads `REDIS_URL`. The image swap does not
+   touch the secret, wrapper or policy, so the password path survives the roll by
+   construction; §4 leg 8 proves it (round trip with auth AND an unauthenticated
+   `NOAUTH` control).
+
+Also re-measured: **the target is still right.** `redis:8.10.2-alpine` is the newest
+tag (`8.10.3`, `8.11.0`, `8.12.0` -> 404; upstream `gh release list`: 8.10.2 is
+Latest, published 2026-09-17, the only newer patch after 8.10.1). The Docker Hub tag was
+RE-PUSHED on 2026-10-22T15:05Z (index digest now
+`sha256:0bf6577d7774e592b29d093e3ac9390eb91e13d72c21e506afce736de5e0eeb0`; the
+2026-09-27 digest was `3811...`): a rebuild of the same upstream release. §2 b re-checks
+cooldown and prints the digest so a later re-push is visible.
+
 ### 1.1 What moves
 
-Eight Docker Hub `redis` instances move `8.10.1-alpine → 8.10.2-alpine`, one
-commit per consumer, in blast-radius order (§3). The eighth, open-webui's
-chart-rendered websocket redis, moves in ONE commit with the open-webui app
-`0.11.3 → 0.11.4` and chart `16.5.0 → 16.6.0` (appVersion-only chart bump) because coverage.py lockstep-binds all three (image rows are held behind the chart row; the app image is
-PLAN, so the sidecar may not move unattended ahead of it — and vice versa).
-`affine-redis` is already on 8.10.2 (`e16ddbeb`, plan `affine-redis-8.10.2`,
-executed green 2026-09-26) and is the fleet's first in-cluster proof of the tag.
-
-Tags verified 2026-09-27:
-- `redis:8.10.2-alpine` exists on Docker Hub, index digest
-  `sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0`,
-  `last_updated 2026-09-24T21:05Z` (a re-push; upstream released 8.10.2 on
-  2026-09-17). `8.10.3-alpine` → 404.
-- `ghcr.io/open-webui/open-webui:0.11.4` → 200, index digest
-  `sha256:9591b13f13843c7721c2b8eaf7382846c81b3ffe126526d1888d1fed50c6a33f`,
-  GitHub release published 2026-09-21. `0.11.5` → 404.
-
-Both are past the G5 48 h cooldown today; §2 re-checks because a re-push
-resets it.
+Eight Docker Hub `redis` instances move `8.10.1-alpine -> 8.10.2-alpine`, one commit
+per consumer, in blast-radius order (§3). The eighth, open-webui's chart-rendered
+websocket redis, is a one-line values change in the open-webui HelmRelease. (Because it
+is the same HelmRelease, the Helm upgrade re-renders the open-webui StatefulSet from
+identical values, so no pod-template change is expected; §4 asserts it.)
+`affine-redis` is already on 8.10.2 (live, `office/affine-redis`) and is the fleet's
+in-cluster proof of the tag.
 
 ### 1.2 Why held — the redis legs
 
-Seven legs were held by **G3: "could not verify the release notes (unverified
-(release notes unavailable))"**. That is a resolver gap, not a signal:
-`IMAGE_RELEASE_NOTES_PROJECTS` in `runbooks/check-all-versions.py` has no entry
-for the Docker Hub official image `redis`, and the tag carries an `-alpine`
-flavour suffix, while upstream's GitHub release tag is bare `8.10.2` (same
-class as the `-openvino` gap already noted in that map). Read by hand from
-`redis/redis` releases (`gh release view 8.10.2 -R redis/redis`) and the tag
-compare `8.10.1...8.10.2`:
+Seven legs were held by **G3: "could not verify the release notes"**. That is a
+resolver gap, not a signal (`IMAGE_RELEASE_NOTES_PROJECTS` now maps `redis`; upstream
+tag is bare `8.10.2`, ours is `-alpine`). Read by hand from `redis/redis`
+(`gh release view 8.10.2 -R redis/redis`, update urgency SECURITY):
 
-- **6 commits.** Files touched: `acl.c`, `config.c`, `module.c`, `multi.c`,
-  `networking.c`, `script.c`, `server.c`, the vector-sets module, `redis.conf`
-  and tests. **No `rdb.c`, `aof.c` or `rdb.h` change; `RDB_VERSION` is `15` in
-  both tags** — so the AOF of databases/redis and the dump.rdb of
-  tube-archivist-redis load unchanged forward AND backward (the rollback
-  property this plan relies on).
-- `modules/modules.yaml` bumps the bundled RediSearch and TimeSeries modules
-  v8.10.0 → v8.10.1; RediSearch's index encoding version is 27 at both tags
-  (review 2026-09-27) and no instance here holds module data (tube-archivist
-  `FT._LIST` empty; the others run with the modules unused).
-- One new config option, `cluster-bus-port-protected-mode`, **"(default
-  `no`)"** per the notes — cluster mode only; no instance here runs cluster
-  mode. No default changes for a single-node server.
-- Other items are fixes in ACL/transaction handling, the cluster bus,
-  TimeSeries, RedisSearch and Vector Sets. Item-level detail stays upstream
-  (`docs/sops/vulnerability-disclosure.md`). None changes the RESP protocol or
-  a command's reply shape for the default user, which is all any consumer here
-  uses (two use `requirepass`, none define ACL users).
+- **6 commits** vs 8.10.1. No `rdb.c`, `aof.c` or `rdb.h` change; `RDB_VERSION` is `15`
+  in both tags, so the AOF of databases/redis and the dump.rdb of tube-archivist-redis
+  load unchanged forward AND backward (the rollback property this plan relies on).
+- Bundled RediSearch/TimeSeries modules v8.10.0 -> v8.10.1; no instance here holds
+  module data.
+- One new config option, `cluster-bus-port-protected-mode` (default `no`) — cluster
+  mode only; none of these run cluster mode. No default changes for a single-node server.
+- Security-class items are in ACL/transaction handling, the cluster bus and the modules;
+  item-level detail stays upstream (`docs/sops/vulnerability-disclosure.md`). None changes
+  the RESP protocol or a command's reply for the default user; three consumers use
+  `requirepass` (superset, paperless, nextcloud), none define ACL users.
 
-The eighth, **nextcloud-redis**, is held by its own deny rule
-(`*nextcloud-redis*`): *"any restart signs out every logged-in Nextcloud user
-and drops held locks … schedule an ATTENDED low-traffic slot"*. That reason is
-true and is honoured here (leg 8, last, attended, announced).
+The eighth, **nextcloud-redis**, is also held by its own deny rule (`*nextcloud-redis*`):
+*any restart signs out every logged-in Nextcloud user and drops held locks ... schedule
+an ATTENDED low-traffic slot*. Honoured here (leg 8, last, attended, announced).
 
-### 1.3 Why held — the open-webui app leg (and why it is not trivial)
+### 1.3 open-webui leg (reduced)
 
-`0.11.4` is a patch number on a large release (327 commits, 92 KB of notes).
-What matters for this deployment, checked against the live instance:
-
-- **Database:** `backend/open_webui/migrations/versions` holds the same 58
-  files at `v0.11.3` and `v0.11.4` (GitHub contents API, 2026-09-27); live
-  `alembic_version` is `d4c1a8e37b62`. No schema migration → the image revert
-  is a complete rollback. §4 asserts the alembic head is unchanged after start.
-- **"LangChain community removal … a tool or function importing it has to name
-  it in its own requirements"** and **"Undeclared package imports … nltk,
-  pymongo, the Google Drive client and the Gemini SDK, are no longer
-  installed"**. Live: 0 tools, 1 function (`n8n_pipe`) importing only `os`,
-  `pydantic`, `requests`, `time`, `typing` — unaffected.
-- **"Integrations tab is opt-in … hidden until an administrator turns on Direct
-  Integrations"**. Live: `direct.enable = false`, 0 of 3 users hold personal
-  tool/terminal servers; the admin tool server (mcpo) is unaffected — no visible
-  loss.
-- Slim-image changes do not apply (we run the standard image, sqlite, local
-  storage).
-- Redis-relevant: a revocation-list fallback ("where Redis cannot be reached, a
-  token is now accepted"), non-blocking sign-in rate limiting and a
-  `REDIS_TASK_TTL` for shared tasks — all make the app MORE tolerant of the
-  brief redis gap this leg causes.
-- User-visible changes (link-scheme rendering, skill discovery, per-field
-  settings saves) are why `capability_change: true`.
+Only the sidecar changes. The sidecar runs the image defaults (no `command`, no volume,
+RDB snapshots to the container filesystem) and holds 4 keys of websocket/pubsub state.
+Whether the open-webui app (v0.12.3) re-attaches in-process after a redis restart is NOT
+established from source here, so §4 leg 3 measures it (client count returns to the
+baseline) and gives the fallback (`kubectl rollout restart sts/open-webui -n ai`: image
+and DB unchanged, so safe, but it ends the user's sessions on that pod briefly).
 
 ### 1.4 The trap this plan exists to catch — Sure's cron schedule
 
@@ -318,18 +298,18 @@ Leg 6 therefore restarts `sure-worker` after the new redis is Ready, and §4
 asserts the schedule count comes back to 11. (Repo correction in §6: the
 unattended lane must never apply a sure-redis bump without that restart.)
 
-### 1.5 Consumer classification (measured 2026-09-27, `redis-cli info` in each pod)
+### 1.5 Consumer classification (re-measured 2026-10-24, `redis-cli info` in each pod; all on redis_version 8.10.1)
 
 | Leg | Instance | Persistence | Holds | Consumers (CLIENT LIST → pod) | Restart cost |
 |---|---|---|---|---|---|
-| 1 | databases/redis | **AOF on PVC** (`redis-data`) | nothing (empty AOF, 0 keys) | none (1 client = our own cli) | none — canary for the persisted-load path |
-| 2 | databases/superset-redis-official | none | celery broker + results (77 keys) | superset-worker, superset-celerybeat | in-flight celery results lost; worker reconnect in-process **measured** (worker started 08:22, redis restarted 08:49 on 2026-09-27, `inspect ping` → pong now) |
-| 3 | ai/open-webui-redis (+ app) | RDB defaults, **no volume** (container fs) | websocket/pubsub + locks (4 keys) | open-webui-0 | app rolls anyway (lockstep) |
-| 4 | download/tube-archivist-redis | **RDB on PVC** (`tube-archivist-redis-data`) | celery broker + **durable app state** (`ta:cookie`, no TTL) | tube-archivist (worker + beat) | none if dump.rdb reloads; beat uses DatabaseScheduler (schedule in DB, not redis) |
-| 5 | media/immich-redis | none | BullMQ queues (28 keys) | immich-server (19 blocking workers) | queued/active jobs dropped (whether Immich re-queues them is NOT verified from source here — the §4 gate is only that its workers re-attach; a half-done thumbnail/metadata job may need a manual "missing" re-run from the Immich admin Jobs page) |
+| 1 | databases/redis | **AOF on PVC** (`redis-data`) | nothing (0 keys, 1 client = our own cli, 2026-10-24) | none | none — canary for the persisted-load path |
+| 2 | databases/superset-redis-official | none | celery broker + results (1444 keys, `requirepass`) | superset-worker, superset-celerybeat | in-flight celery results lost; worker reconnect in-process **measured** (worker started 08:22, redis restarted 08:49 on 2026-09-27, `inspect ping` → pong now) |
+| 3 | ai/open-webui-redis (sidecar only) | RDB defaults, **no volume** (container fs) | websocket/pubsub + locks (4 keys) | open-webui-0 (5 connections) | brief pubsub gap; app NOT rolled (§1.3) |
+| 4 | download/tube-archivist-redis | **RDB on PVC** (`tube-archivist-redis-data`) | celery broker + **durable app state** (`ta:cookie`, no TTL; 65 keys) | tube-archivist (worker + beat) | none if dump.rdb reloads; beat uses DatabaseScheduler (schedule in DB, not redis) |
+| 5 | media/immich-redis | none | BullMQ queues (60 keys) | immich-server (19 blocking workers) | queued/active jobs dropped (whether Immich re-queues them is NOT verified from source here — the §4 gate is only that its workers re-attach; a half-done thumbnail/metadata job may need a manual "missing" re-run from the Immich admin Jobs page) |
 | 6 | office/sure-redis | none | sidekiq queues + **cron schedule** + Rails cache | sure-worker, sure-web | **cron schedule lost → worker restart required (§1.4)** |
-| 7 | office/paperless-redis | none | celery broker + channels layer | paperless-ngx | an in-flight consume task is lost → drain first (§2) |
-| 8 | office/nextcloud-redis | none | PHP sessions, file locks, distributed cache | nextcloud, nextcloud-notify-push, nextcloud-cron Jobs | **every logged-in user signed out**, held locks dropped |
+| 7 | office/paperless-redis | none (`requirepass`) | celery broker + channels layer | paperless-ngx | an in-flight consume task is lost → drain first (§2) |
+| 8 | office/nextcloud-redis | none, **`requirepass` from secret/nextcloud-config** | PHP sessions, file locks, distributed cache (682 keys) | nextcloud, nextcloud-notify-push, nextcloud-cron Jobs (NetworkPolicy-restricted) | **every logged-in user signed out**, held locks dropped |
 
 ## 2. Pre-checks
 
@@ -339,33 +319,26 @@ cd /Users/mu/code/cberg-home-nextgen
 # a) premises (read-only, fail closed)
 .venv/bin/python3 runbooks/plan-premises.py redis-fleet-8.10.2
 
-# b) G5 cooldown still satisfied for BOTH images (a re-push resets it). PASS
-#    prints AGE_OK twice; TOO_NEW or FETCH_FAILED on either line is a STOP.
+# b) G5 cooldown still satisfied (a re-push resets it). PASS prints AGE_OK;
+#    TOO_NEW or FETCH_FAILED is a STOP. The digest is printed so a re-push is visible.
 curl -s https://hub.docker.com/v2/repositories/library/redis/tags/8.10.2-alpine | python3 -c '
 import sys, json, datetime as d
 try: t = json.load(sys.stdin)["last_updated"]
 except Exception: print("FETCH_FAILED redis"); sys.exit(1)
 a = (d.datetime.now(d.timezone.utc) - d.datetime.fromisoformat(t.replace("Z","+00:00"))).total_seconds()/3600
 print(("AGE_OK" if a >= 48 else "TOO_NEW"), "redis", round(a,1), "h", t); sys.exit(0 if a >= 48 else 1)'
-gh release view v0.11.4 -R open-webui/open-webui --json publishedAt -q .publishedAt | python3 -c '
-import sys, datetime as d
-t = sys.stdin.read().strip()
-if not t: print("FETCH_FAILED open-webui"); sys.exit(1)
-a = (d.datetime.now(d.timezone.utc) - d.datetime.fromisoformat(t.replace("Z","+00:00"))).total_seconds()/3600
-print(("AGE_OK" if a >= 48 else "TOO_NEW"), "open-webui", round(a,1), "h", t); sys.exit(0 if a >= 48 else 1)'
-#    Expected: redis last_updated 2026-09-24T21:05:07Z, open-webui 2026-09-21T19:25:21Z.
-#    A DIFFERENT redis last_updated means the tag was re-pushed: re-read the notes.
+curl -s https://hub.docker.com/v2/repositories/library/redis/tags/8.10.2-alpine | python3 -c 'import sys,json;print("DIGEST", json.load(sys.stdin)["digest"])'
+#    Expected 2026-10-24: last_updated 2026-10-22T15:05Z, DIGEST sha256:0bf6577d...e0eeb0.
+#    A DIFFERENT last_updated/DIGEST means the tag was re-pushed again: re-read the notes
+#    and re-check the cooldown before proceeding. AGE_OK needs >= 48 h since last_updated.
 
 # c) targets resolvable, nothing newer superseding them.
 #    EXPECT EXACTLY: 8.10.2-alpine -> 200, 8.10.3-alpine -> 404
 for t in 8.10.2-alpine 8.10.3-alpine; do
   curl -s -o /dev/null -w "$t -> %{http_code}\n" https://hub.docker.com/v2/repositories/library/redis/tags/$t
 done
-TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:open-webui/open-webui:pull" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
-for t in 0.11.4 0.11.5; do   # EXPECT: 0.11.4 -> 200, 0.11.5 -> 404 (200 = refresh the plan)
-  curl -s -o /dev/null -w "$t -> %{http_code}\n" -H "Authorization: Bearer $TOKEN" \
-    -H "Accept: application/vnd.oci.image.index.v1+json" https://ghcr.io/v2/open-webui/open-webui/manifests/$t
-done
+#    FAILS as: 8.10.2-alpine -> 404 (tag withdrawn) or 8.10.3-alpine -> 200 (a newer patch
+#    exists: refresh this plan, do not apply a superseded target).
 
 # d) Flux sane, nothing in flight in these namespaces
 flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
@@ -373,21 +346,28 @@ flux get helmreleases -A   | awk 'NR==1 || $5 != "True"'
 #    PASS: header line only for both (or unrelated rows you have explained).
 
 # e) no other plan in this window touches these apps / asserts Helm revisions
-python3 runbooks/maintenance-plan.py --open | grep -iE 'redis|nextcloud|paperless|immich|superset|sure|tube|open-webui|helm-drift|flux-' || true
+python3 runbooks/maintenance-plan.py --open | grep -iE 'redis|nextcloud|paperless|immich|superset|sure|tube|open-webui|helm-drift|flux-|cilium|talos|authentik|coredns|longhorn|envoy' || true
+#    PASS: no other plan scheduled for this slot. Any hit scheduled for TODAY is a STOP (see conflicts_with).
 
 # f) BASELINE — record every number; §4 compares against them.
-#    (values measured 2026-09-27 in brackets)
+#    (values measured 2026-10-24 in brackets; auth'd instances authenticate via the
+#    REDISCLI_AUTH env var already present in their containers)
 for x in databases/redis databases/superset-redis-official download/tube-archivist-redis \
          media/immich-redis office/nextcloud-redis office/paperless-redis office/sure-redis ai/open-webui-redis; do
   ns=${x%/*}; d=${x#*/}
   echo "## $x $(kubectl exec -n $ns deploy/$d -- sh -c 'redis-cli info server | grep ^redis_version; redis-cli info clients | grep ^connected_clients; redis-cli info keyspace | grep ^db0' | tr '\r\n' '  ')"
 done
-#    [redis 1 client/0 keys · superset 14/77 · tube-archivist 12/50 · immich 81/28 ·
-#     nextcloud 13/95 · paperless 10/13 · sure 12/65 · open-webui-redis 4/4]
+#    [redis 1 client/no db0 · superset 15/1444 · tube-archivist 6/65 · immich 81/60 ·
+#     nextcloud 14/682 · paperless 10/13 · sure 13/639 · open-webui-redis 6/4]
+#    Client counts and key counts drift; they are floors-with-slack, not exact values.
 kubectl exec -n office deploy/sure-redis -- redis-cli scard cron_jobs:default          # [11]
 kubectl exec -n download deploy/tube-archivist-redis -- redis-cli exists ta:cookie     # [1]
 kubectl exec -n media deploy/immich-redis -- sh -c 'redis-cli client list | grep -c "cmd=bzpopmin"'   # [19]
-kubectl exec -n ai open-webui-0 -c open-webui -- python3 -c "import sqlite3;print(sqlite3.connect('file:/app/backend/data/webui.db?mode=ro',uri=True).execute('select version_num from alembic_version').fetchone()[0])"   # [d4c1a8e37b62]
+kubectl exec -n ai open-webui-0 -c open-webui -- python3 -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8080/api/version').read())"   # [{"version":"0.12.3",...}]
+kubectl get pod -n ai open-webui-0 -o jsonpath='{.status.startTime}{" restarts="}{.status.containerStatuses[0].restartCount}{"\n"}' | tee /tmp/redis-fleet-owui0   # [2026-10-22T21:15:33Z restarts=0] — §4 leg 3 compares
+kubectl exec -n ai deploy/open-webui-redis -- redis-cli client list | grep -c 'addr=10\.'   # [5] app-side connections, baseline for leg 3
+# nextcloud-redis: AUTH control BEFORE the roll (so the post-roll NOAUTH result is not first-time evidence)
+kubectl exec -n office deploy/nextcloud-redis -- sh -c 'env -u REDISCLI_AUTH redis-cli ping; redis-cli ping'   # [NOAUTH Authentication required. / PONG]
 
 # f2) CONSUMER BASELINE — the "not restarted" criterion of every leg compares against this file.
 T0=$(date -u +%s); echo "$T0" > /tmp/redis-fleet-T0; echo "T0=$T0"   # window start, used by the §4 restart control
@@ -414,10 +394,10 @@ cons_snap | tee "$BASE"; [ "$(wc -l < "$BASE" | tr -d ' ')" = 7 ] || { echo "BAS
 # g) backups fresh (< 26 h) — ground truth is the newest Completed Backup CR
 # Shared helper (F-a915dd47): counts the nightly Backup CR even when its status
 # never synced (status.volumeName empty), cross-checked against the BackupVolume.
-python3 runbooks/longhorn-backup-age.py open-webui-20g tube-archivist-redis-data \
+python3 runbooks/longhorn-backup-age.py tube-archivist-redis-data \
   $(kubectl get pvc -n databases redis-data -o jsonpath='{.spec.volumeName}') --max-hours 26 \
   || { echo "ABORT: a volume has no confirmed backup < 26h"; exit 1; }
-#    PASS: three FRESH lines. (Daily job: CronJob storage/daily-backup-all-volumes, 03:00.)
+#    PASS: two FRESH lines (open-webui-20g is no longer touched by this plan). (Daily job: CronJob storage/daily-backup-all-volumes, 03:00.)
 
 # h) drain checks — record; each is re-run immediately before its own leg.
 kubectl exec -n office deploy/paperless-ngx -c paperless-ngx -- celery --app paperless inspect active 2>&1 | tail -5
@@ -430,8 +410,8 @@ curl -s -G http://127.0.0.1:9090/api/v1/query --data-urlencode 'query=count(kube
 kill $PF 2>/dev/null
 ```
 
-Proceed only if (a) all premises PASS, (b) AGE_OK ×2, (c) 200/404 ×2,
-(d) clean, (g) FRESH ×3, (i) PROM_OK. For (h), proceed per leg when that leg's
+Proceed only if (a) all premises PASS, (b) AGE_OK, (c) 200/404, (d) clean,
+(f) the pre-roll NOAUTH/PONG pair, (g) FRESH ×2, (i) PROM_OK. For (h), proceed per leg when that leg's
 drain check is empty. **Announce** the Nextcloud sign-out before starting
 (the policy rule's attended-slot condition).
 
@@ -504,41 +484,26 @@ leg_commit
 wait_img databases deploy/superset-redis-official redis:8.10.2-alpine
 ```
 
-### Leg 3 — ai/open-webui: chart 16.5.0 → 16.6.0 + redis sidecar + app 0.11.3 → 0.11.4 (ONE commit)
+### Leg 3 — ai/open-webui: redis sidecar tag ONLY (chart 17.0.0 and app v0.12.3 untouched)
 
-Backup first (sqlite online-backup API, WAL-safe; 88 MB, PVC 16 GB free on
-2026-09-27):
-```bash
-kubectl exec -n ai open-webui-0 -c open-webui -- python3 -c "
-import sqlite3, os
-s = sqlite3.connect('/app/backend/data/webui.db'); d = sqlite3.connect('/app/backend/data/webui.db.pre-0.11.4')
-s.backup(d); d.close()
-print('SRC', os.path.getsize('/app/backend/data/webui.db'), 'COPY', os.path.getsize('/app/backend/data/webui.db.pre-0.11.4'))
-print('COPY_ALEMBIC', sqlite3.connect('/app/backend/data/webui.db.pre-0.11.4').execute('select version_num from alembic_version').fetchone()[0])"
-#   PASS: COPY > 0 and COPY_ALEMBIC d4c1a8e37b62. (COPY may be smaller than SRC — backup compacts.)
-```
-Edit (three substitutions, one file — the comment line keeps the file honest):
+No sqlite pre-copy and no alembic assertion are needed: the app image and DB are not
+touched. Edit (two substitutions, one file; the comment line keeps the file honest):
 ```bash
 sed -i '' -e 's/^\([[:space:]]*tag:[[:space:]]*\)8\.10\.1-alpine$/\18.10.2-alpine/' \
-          -e 's/^\([[:space:]]*tag:[[:space:]]*\)0\.11\.3$/\10.11.4/' \
-          -e 's/ 8\.10\.1-alpine is$/ 8.10.2-alpine is/' \
-          -e 's/^\([[:space:]]*version:[[:space:]]*\)16\.5\.0$/\116.6.0/' kubernetes/apps/ai/open-webui/app/helmrelease.yaml
-#   -      version: 16.5.0
-#   +      version: 16.6.0
+          -e 's/ 8\.10\.1-alpine is$/ 8.10.2-alpine is/' kubernetes/apps/ai/open-webui/app/helmrelease.yaml
 #   -      # only — no persistence, no ACL/auth, no modules. 8.10.1-alpine is
 #   +      # only — no persistence, no ACL/auth, no modules. 8.10.2-alpine is
 #   -          tag: 8.10.1-alpine
 #   +          tag: 8.10.2-alpine
-#   -      tag: 0.11.3
-#   +      tag: 0.11.4
+#   (dry-run on a scratch copy, BSD sed, 2026-10-24; `tag: v0.12.3` at the app image is NOT matched)
 LEG=3 FILE=kubernetes/apps/ai/open-webui/app/helmrelease.yaml
-SUBJ="chore(open-webui): chart 16.6.0 + app 0.11.4 + redis sidecar 8.10.2-alpine (plan redis-fleet-8.10.2 leg 3)"
+SUBJ="chore(open-webui): redis sidecar 8.10.1-alpine -> 8.10.2-alpine (plan redis-fleet-8.10.2 leg 3)"
 leg_commit
 wait_img ai deploy/open-webui-redis redis:8.10.2-alpine
-wait_img ai sts/open-webui ghcr.io/open-webui/open-webui:0.11.4
 ```
-(open-webui-redis is `RollingUpdate 25%` — a new pod may briefly coexist with
-the old; harmless for an ephemeral pubsub store with no volume.)
+(open-webui-redis is `RollingUpdate 25%` — a new pod may briefly coexist with the old;
+harmless for an ephemeral pubsub store with no volume.) The Helm release moves from
+revision 58 to 59.
 
 ### Leg 4 — download/tube-archivist-redis (persistent RDB)
 
@@ -611,7 +576,9 @@ wait_img office deploy/paperless-redis redis:8.10.2-alpine
 
 ### Leg 8 — office/nextcloud-redis (last; signs every user out)
 
-Announce first. Pick a moment right AFTER a `nextcloud-cron` Job completed
+Announce first. The password, wrapper and NetworkPolicy are NOT edited: only the image
+line changes, so `requirepass` is re-applied by the same wrapper from the same
+`secret/nextcloud-config` key (never print it). Pick a moment right AFTER a `nextcloud-cron` Job completed
 (schedule `*/5`), so the next tick lands on the new redis:
 ```bash
 kubectl get jobs -n office --sort-by=.metadata.creationTimestamp | grep nextcloud-cron | tail -2
@@ -699,22 +666,26 @@ FAILS as: `inspect ping` printing `Error: No nodes replied within time
 constraint` (0 pong), `exists` → 0 (worker not bound to this broker), clients
 1–2. Then `v_cons` → `CONSUMERS_UNCHANGED` (run it at the end of EVERY leg).
 
-**Leg 3 — open-webui.** `v_floor ai open-webui-redis; v_rt ai open-webui-redis`, then
+**Leg 3 — open-webui (sidecar only).** `v_floor ai open-webui-redis; v_rt ai open-webui-redis`, then
 ```bash
-kubectl port-forward -n ai svc/open-webui 18080:80 >/dev/null 2>&1 & PF=$!; sleep 5
-curl -s http://127.0.0.1:18080/api/version     # PASS: {"version":"0.11.4",...}  FAILS as 0.11.3 or no body
-curl -s http://127.0.0.1:18080/health          # PASS: {"status":true}
-kill $PF 2>/dev/null
-kubectl exec -n ai open-webui-0 -c open-webui -- python3 -c "import sqlite3;print(sqlite3.connect('file:/app/backend/data/webui.db?mode=ro',uri=True).execute('select version_num from alembic_version').fetchone()[0])"
-#   PASS: d4c1a8e37b62 (unchanged => no migration ran => the image revert is a full rollback).
-#   A different head means a migration DID run: rollback then REQUIRES the webui.db.pre-0.11.4 restore (§5).
-kubectl exec -n ai deploy/open-webui-redis -- sh -c 'redis-cli info clients | grep ^connected_clients; redis-cli --scan --pattern "open-webui:*" | wc -l'
-#   PASS: clients >= 3 [4] and >= 2 open-webui:* keys [4]. FAILS as clients 1 / 0 keys (app not on this redis).
+kubectl exec -n ai open-webui-0 -c open-webui -- python3 -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8080/api/version').read())"
+#   PASS: {"version":"0.12.3",...}. FAILS as a connection error / any other version (app rolled to something else).
+kubectl get pod -n ai open-webui-0 -o jsonpath='{.status.startTime}{" restarts="}{.status.containerStatuses[0].restartCount}{"\n"}' | diff - /tmp/redis-fleet-owui0 && echo OWUI_APP_UNCHANGED
+#   PASS: OWUI_APP_UNCHANGED (the HR upgrade re-rendered identical StatefulSet values). FAILS as a
+#   diff: the app pod was recreated — acceptable only if /api/version above still says 0.12.3
+#   (record it); a crash/restart-count increase is a FAIL.
+for i in $(seq 1 12); do
+  C=$(kubectl exec -n ai deploy/open-webui-redis -- redis-cli client list | grep -c 'addr=10\.')
+  echo "t=$((i*10))s app_connections=$C"; [ "$C" -ge 3 ] && { echo OWUI_REATTACHED; break; }; sleep 10
+done; [ "$C" -ge 3 ] || echo OWUI_NOT_REATTACHED
+#   PASS: OWUI_REATTACHED within 2 min (baseline 5 app connections; floor 3). FAILS as
+#   OWUI_NOT_REATTACHED / app_connections=0: the app did not reconnect in-process ->
+#   `kubectl rollout restart sts/open-webui -n ai` once (image/DB unchanged), re-run this loop;
+#   still failing -> §5 leg 3.
 ```
-CONTENTS ASSERTION: the app serves real data — attended: sign in, open an
-existing chat (its history renders), send one message to an Ollama model and
-receive a streamed reply (this rides the websocket → redis path). An empty chat
-list for an existing user is a FAIL.
+CONTENTS ASSERTION: the app serves real data over the websocket -> redis path — attended:
+sign in, open an existing chat (its history renders; an empty chat list for an existing
+user is a FAIL), send one message to an Ollama model and receive a streamed reply.
 
 **Leg 4 — tube-archivist.** `v_floor download tube-archivist-redis; v_rt download tube-archivist-redis`, then
 CONTENTS ASSERTION: the persisted state came back —
@@ -767,8 +738,19 @@ Attended: drop one test PDF into the consume path per `docs/sops/paperless.md`
 job round-trip through this broker. `inspect ping` alone does not prove a task
 is delivered.
 
-**Leg 8 — nextcloud.** `v_floor office nextcloud-redis; v_rt office nextcloud-redis`, then
+**Leg 8 — nextcloud.** `v_floor office nextcloud-redis; v_rt office nextcloud-redis`
+(`v_rt` authenticates through the container's `REDISCLI_AUTH`, so `ok` proves the
+password in the secret matches the one the server enforces), then the AUTH CONTROL pair:
 ```bash
+kubectl exec -n office deploy/nextcloud-redis -- sh -c 'env -u REDISCLI_AUTH redis-cli ping'
+#   PASS: "NOAUTH Authentication required." (the password requirement survived the swap).
+#   FAILS as PONG: the server came up unauthenticated (wrapper/args lost) — STOP, §5 leg 8.
+#   Positive control: the same command printed NOAUTH on the 8.10.1 pod in §2 f.
+kubectl exec -n office deploy/nextcloud-redis -- redis-cli ping    # PASS: PONG (auth'd). FAILS as NOAUTH: password mismatch with secret/nextcloud-config.
+kubectl logs -n office deploy/nextcloud-redis --tail=20 | grep -ci 'REDIS_PASSWORD is empty'   # PASS: 0. FAILS as >=1: wrapper refused to start (secret key missing).
+kubectl logs -n office deploy/nextcloud-notify-push --tail=50 | grep -ciE 'NOAUTH|WRONGPASS|AUTH failed|connection refused'   # PASS: 0 within 3 min of the swap (a transient reconnect line BEFORE the swap time is not counted)
+```
+then
 kubectl port-forward -n office svc/nextcloud 18082:8080 >/dev/null 2>&1 & PF=$!; sleep 5
 curl -s http://127.0.0.1:18082/status.php     # PASS: "installed":true,"maintenance":false
 kill $PF 2>/dev/null
@@ -778,7 +760,7 @@ CONTENTS ASSERTION: the first `nextcloud-cron` Job AFTER the swap completes
 and repopulates the cache — `kubectl get jobs -n office --sort-by=.metadata.creationTimestamp | grep nextcloud-cron | tail -1`
 must show a Job created after the swap with `1/1` COMPLETIONS, and
 `kubectl exec -n office deploy/nextcloud-redis -- redis-cli dbsize` then reads
-`>= 10` (baseline 95 incl. sessions; cron alone writes cache keys). FAILS as a
+`>= 10` (baseline 682 incl. sessions; cron alone writes cache keys). FAILS as a
 failed/erroring cron Job (cron.php takes file locks in this redis) or dbsize
 staying at 1. Attended: sign in to Nextcloud and open one file (exercises
 sessions + locking).
@@ -787,7 +769,7 @@ sessions + locking).
 
 - CONTROL: metric kube_pod_container_status_restarts_total — final gate over
   the WHOLE window (range = minutes since §2 f2's `T0`, not a fixed 30 m that
-  would miss legs 1–5 of an 85-minute run). The query is namespace-wide on
+  would miss legs 1–5 of an 70-minute run). The query is namespace-wide on
   purpose (fails toward caution): a RESTARTED row for a pod NOT in `touches`
   must be looked at and explained, not ignored — it is not this plan's
   failure only if it predates T0's first leg or is unrelated by its logs. PASS prints `NO_RESTARTS` or only
@@ -837,9 +819,8 @@ final controls clean.
 
 ## 5. Rollback
 
-Per leg, newest first. Nothing forward-only happens in any redis leg (format
-unchanged, §1.2); the open-webui leg is forward-only ONLY if §4 leg 3 showed a
-changed alembic head.
+Per leg, newest first. Nothing forward-only happens in any leg: the RDB/AOF format is
+unchanged (§1.2) and no app or schema is touched (open-webui leg is sidecar-only).
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
@@ -852,7 +833,7 @@ git log -1 --format=%s        # confirm it is YOUR revert subject
 git show --stat HEAD          # exactly that one file
 git push; rm -f "$MSG"
 # then, for that leg, e.g.: wait_img office deploy/sure-redis redis:8.10.1-alpine
-# (open-webui: wait_img ai deploy/open-webui-redis redis:8.10.1-alpine; wait_img ai sts/open-webui ghcr.io/open-webui/open-webui:0.11.3)
+# (open-webui: wait_img ai deploy/open-webui-redis redis:8.10.1-alpine)
 ```
 Then re-run that leg's §4 CONTENTS ASSERTION against the reverted pod — a
 rollback is done only when the consumer is back on it.
@@ -869,34 +850,24 @@ Leg-specific additions:
   §2 g Longhorn backup per `docs/sops/backup.md` "Restore from Backup"; the
   local copy from §3 leg 4 (`/tmp/ta-dump-*.rdb`) is the byte-exact pre-change
   snapshot to compare against.
-- **Leg 3 (open-webui):** if the alembic head is unchanged (expected), the
-  revert is complete. If it CHANGED, 0.11.3 may not start on the migrated DB,
-  so: suspend the open-webui HelmRelease (`flux suspend hr -n ai open-webui`),
-  `kubectl scale sts -n ai open-webui --replicas=0` (RWO volume must be
-  released — a second pod would hit Multi-Attach), restore through a
-  throw-away pod mounting `open-webui-20g` (same image, `sleep` command),
-  delete it, then push the revert and `flux resume hr -n ai open-webui` (the
-  revert's reconcile restores replicas 1 on 0.11.3). Restore command, run in
-  that throw-away pod —
-  (the StatefulSet is at 0 here, so `open-webui-0` does NOT exist — review 2026-09-28):
-  ```bash
-  kubectl run -n ai owui-restore --restart=Never --image=ghcr.io/open-webui/open-webui:0.11.4 --overrides='{"apiVersion":"v1","spec":{"containers":[{"name":"r","image":"ghcr.io/open-webui/open-webui:0.11.4","command":["sleep","3600"],"volumeMounts":[{"name":"d","mountPath":"/app/backend/data"}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"open-webui-20g"}}]}}'
-  kubectl wait -n ai pod/owui-restore --for=condition=Ready --timeout=300s
-  kubectl exec -n ai owui-restore -c r -- python3 -c "import sqlite3; s=sqlite3.connect('/app/backend/data/webui.db.pre-0.11.4'); d=sqlite3.connect('/app/backend/data/webui.db'); s.backup(d); d.close(); print('RESTORED')"
-  kubectl delete pod -n ai owui-restore --wait=true
-  ```
-  then, once `sts/open-webui` is back on 0.11.3 with 1 replica, assert
-  alembic head `d4c1a8e37b62` and `/api/version` 0.11.3. Chats written between
-  upgrade and restore are lost — say so to the users.
+- **Leg 3 (open-webui):** the revert is complete (sidecar has no volume and the app/DB were
+  never touched). After it, re-run the §4 leg-3 re-attach loop; if the app is stuck,
+  `kubectl rollout restart sts/open-webui -n ai`. No sqlite restore path exists or is needed.
+- **Leg 8 (nextcloud-redis, password path):** the revert swaps only the image line, so the wrapper,
+  `secret/nextcloud-config` and the NetworkPolicy are identical on both sides. After it, assert
+  the same three lines as §4 leg 8 (NOAUTH unauth'd, PONG auth'd, no "REDIS_PASSWORD is empty"). If
+  the server is up but `PONG` fails with NOAUTH while auth'd, the secret and the running server
+  disagree: `kubectl rollout restart deploy/nextcloud-redis -n office` (re-reads the secret), never
+  disable `requirepass`. Sessions/locks are lost either way (non-persistent); users sign in again.
+  Do not edit or print the secret in a rollback.
 - **Helm wedged `pending-upgrade`** on any app-template leg:
   `docs/sops/application-update.md` §11 (`helm rollback <rel> <rev> -n <ns> --wait=false`,
   then `flux reconcile helmrelease -n <ns> <rel> --force`). Revisions before the
-  plan (2026-09-27): redis 15, tube-archivist-redis 16, immich-redis 12,
-  sure-redis 14, open-webui 54.
+  plan (2026-10-24, chart app-template 5.3.0): redis 16, tube-archivist-redis 17,
+  immich-redis 13, sure-redis 15, open-webui 58 (chart 17.0.0).
 
-Cleanup after a successful window (not a rollback): leave
-`webui.db.pre-0.11.4` for 7 days, then remove it in-pod; delete the local
-`/tmp/ta-dump-*.rdb`.
+Cleanup after a successful window (not a rollback): delete the local
+`/tmp/ta-dump-*.rdb` and `/tmp/redis-fleet-*`.
 
 ## 6. Interference notes
 
@@ -904,17 +875,30 @@ Cleanup after a successful window (not a rollback): leave
   shared across apps (CLIENT LIST 2026-09-27). `databases/redis` has no
   clients at all — it is kept (and first) as the AOF canary.
 - **Nextcloud users are signed out** at leg 8 — announce; attended slot only.
-- **`conflicts_with`** is the full serialization set: the hardening plan (same
-  file, same restart), helm-drift-detection (Helm-revision gate), the two Flux
-  plans (roll open-webui / change the applier), and the two plans that quiesce
-  Nextcloud / Paperless. `kube-prometheus-stack-91.4.1` is `executed`, so no
-  Prometheus-bump conflict is needed today; if a new kube-prometheus-stack plan
+- **`conflicts_with`** was rebuilt 2026-10-24: Nextcloud-side plans (nextcloud-9.4.1,
+  whiteboard, mcp, the bitnamilegacy exits, paperless-db) are listed because they restart
+  consumers or the redis files; platform plans (cilium, talos, coredns, longhorn, flux,
+  envoy, authentik, etcd) because a CNI/node/edge/storage change confounds every reconnect
+  gate. Dead refs dropped (flux-fleet-0.60.0, app-template-5.2.1, nextcloud-fleet-35.0.1,
+  chart-patches-coredns-reloader-blackbox, kube-prometheus-stack-*). **Order:**
+  nextcloud-9.4.1 (nightly 10-28) and nextcloud-whiteboard-2.1.2 (nightly 10-29) are
+  expected to have executed by 11-29; if either slipped into this slot, serialize them
+  BEFORE leg 8, never in the same hour. If a new kube-prometheus-stack plan
   appears, add it here (§4 reads Prometheus).
+- **Window choice:** `sun-attended:2026-11-29`. Occupied attended slots: cilium sun 10-25,
+  openclaw sat 10-31, talos sun 11-01, otel-operator + helm-drift sat 11-07, etcd/envoy sun
+  11-08, python sat 11-14, longhorn sun 11-15, flux-oci sun 11-22. 11-29 is the next slot
+  with none of them; sat 11-21 is also free of plans but its 70-minute budget equals this
+  plan's estimate, leaving no slack for the attended checks. If the operator wants it
+  sooner, sat 11-21 works only with the nextcloud-cron/immich waits trimmed.
+- **Helm-drift:** helm-drift-detection (sat 11-07) will have executed before this slot; if it
+  adds a field to every HelmRelease, the sed edits here are unaffected (they touch only the
+  image-tag lines), but the Helm revision numbers in §5 will be higher — read them fresh.
 - **Not in scope, same HelmReleases:** app-template chart 5.1.0 → 5.2.1 for
   redis, tube-archivist-redis, immich-redis, sure-redis (F-94bbd7ee, F-b5e13899,
-  F-2983fb7e, F-6d39efbe). (open-webui chart 16.5.0 → 16.6.0, F-31c19a7f, IS in leg 3.)
+  F-2983fb7e, F-6d39efbe). (The open-webui chart is already 17.0.0; F-31c19a7f is not answered here.)
   Any plan for those touches these HelmReleases and must be serialized with
-  this one.
+  this one. (app-template is now 5.3.0 live; the 5.2.1 plan is gone.)
 - **No reboot, no storage-class or PVC operation** — two Longhorn PVCs are
   remounted by their own Recreate; storage-safety pre-flight N/A (no delete).
 - **Repo corrections found while planning (not made here — planner writes only
