@@ -49,9 +49,9 @@ finding_refs:                         # queried 2026-10-25 with SWEEP_PG_DSN up 
   - F-09588936                        # "n8n: image n8nio/n8n 2.44.5 -> 2.45.3 (minor)" — the version finding this
                                       # held group was raised from. Answered by the GA patch, NOT by 2.45.3.
                                       # NOT claimed: F-8e5e5c66 (chart; owned by n8n-chart-2.1.1).
-review: null
-status: draft
-window: null
+review: ready-for-go@2026-10-25   # plan-reviewer 2026-10-25 (needs-fix on bookkeeping only; fixed 5490d7fd, premises 5/5 PASS)
+status: vetted
+window: nightly:2026-11-05   # human-gated (capability_change): needs operator GO
 premises:
   - id: chart-plan-executed
     why: >-
