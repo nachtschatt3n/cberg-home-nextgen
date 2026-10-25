@@ -43,10 +43,7 @@ touches:
                                       # listener rebuild (queued jobs wait, nothing is lost).
 depends_on: []
 conflicts_with:
-  - flux-distribution-2.9.6           # replaces the Flux controllers this plan's ks dependsOn ordering + HR upgrades rely on
-                                      # (stamped sat-attended:2026-10-24, exclusive).
-  - cilium-1.20.4                     # declares arc-system/ci-runner/arc-build: a CNI roll during the listener rebuild would make a
-                                      # broker-session failure indistinguishable from a policy/datapath failure.
+  # 2026-10-25: dead refs flux-distribution-2.9.6 and cilium-1.20.4 (executed/retired) pruned.
   - talos-linux-1.14.4                # node roll restarts every ARC pod; attribution of §4 impossible.
   - talos-power-tuning-ab             # measures CI load on ci-runner; a listener gap skews its CI baseline.
   - ci-gate-primary-control-rework    # ci-runner CI-capacity work; same attribution reason.
@@ -59,7 +56,7 @@ capability_change: false              # same chart templates, same values, same 
                                       # route, permission, RBAC, API, label or exposure.
 rollback_class: git-revert            # nothing forward-only: no PVC, no DB, no stored CR uses the only CRD field whose validation
                                       # changed (measured 0/4 kinds, §1.2); a revert re-applies the 0.15.0 CRDs and images.
-finding_refs: [F-5602ee2a]            # `finding list --grep gha-runner` 2026-10-24: the AR-029 register row on the 0.15.0
+finding_refs: [F-5602ee2a, F-87d453b9, F-a2cff4a9, F-1fd1d6a0]            # `finding list --grep gha-runner` 2026-10-24: the AR-029 register row on the 0.15.0
                                       # CONTROLLER image (accepted as "already newest" — no longer true since 0.15.1 shipped
                                       # 2026-10-23). This bump is what moves it; whether the row clears is for the next sweep's
                                       # scan to MEASURE, not for this plan to claim. Detail stays on the record.
@@ -281,9 +278,10 @@ for l in ninth-banner-k8s-59fd7c9b-listener ninth-banner-browser-k8s-59fd7c9b-li
   echo "session=$(kubectl logs -n arc-system $l | grep -c -i 'Handling initial session statistics') scaler=$(kubectl logs -n arc-system $l | grep -c -i 'Calculated target runner count') errors=$(kubectl logs -n arc-system $l | grep -c -i 'level=ERROR')"
 done
 ```
-PASS per listener: img `…controller:0.15.1`, start > `$T0`, `session>=1`, `scaler>=1`, `errors=0`. Both strings verified in
-upstream 0.15.1 source (`cmd/ghalistener/scaler/scaler.go`; `actions/scaleset` v0.5.0 `listener/listener.go`, the version
-0.15.1's go.mod pins) and present in today's 0.15.0 listener log. Failure it guards against: a listener that is Running but
+PASS per listener: img `…controller:0.15.1`, start > `$T0`, `scaler>=1`, `errors=0`. `scaler` is the gate. The `session` count is
+informational only: 'Handling initial session statistics' is verified in upstream source (`actions/scaleset` v0.5.0
+`listener/listener.go`, the version 0.15.1's go.mod pins) but is NOT present in today's 0.15.0 listener log (rotated), so do not gate on it;
+'Calculated target runner count' is in `cmd/ghalistener/scaler/scaler.go` (0.15.1 source). Failure it guards against: a listener that is Running but
 cannot authenticate / reach the broker prints the token/session error at `level=ERROR` and never logs the session line.
 If the listener name differs (name is derived from the namespace hash, unchanged here), use
 `kubectl get autoscalinglistener -n arc-system`.
@@ -338,7 +336,7 @@ Trigger: any of 4.1-4.6 fails and does not self-heal within 10 min, or a scale s
   ~06:00 and ~08:35 UTC.
 - **No node impact:** no reboot, no PVC, no change to runner resources/affinity, so the CI thermal/power plans
   (`talos-power-tuning-ab`, `ci-gate-primary-control-rework`) are conflicts only for attribution, not for safety.
-- **Reciprocity:** `cilium-1.20.4`, `talos-power-tuning-ab`, `ci-gate-primary-control-rework`, `flux-distribution-2.9.6` do
+- **Reciprocity:** `talos-power-tuning-ab` and `ci-gate-primary-control-rework` do
   not list this plan; the window agent should add `gha-fleet-0.15.1` to their `conflicts_with` (validate checks refs, not
   reciprocity).
 - **Repo corrections (not done here, report only):**

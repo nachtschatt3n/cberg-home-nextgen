@@ -57,8 +57,6 @@ conflicts_with:
   - talos-linux-1.14.4                    # node roll evicts every authentik pod mid-verification (replaces retired 1.14.2)
   - envoy-proxy-config-distroless-v1.39.4 # restarts the envoy data plane that carries auth.<domain> and every
   - envoy-proxy-config-distroless-v1.40.0 # forward-auth ext-auth call; would also confound the §4 G7 client-IP probe
-  - cilium-1.20.4                         # CNI restart drops outpost websockets and pod traffic
-  - k8s-1.36.5                            # control-plane/kubelet roll
   - flux-reconciler-impersonation         # exclusive (blocked); changes how helm-controller applies this HR
   # No kube-prometheus-stack plan is open (92.x retired 2026-10-23); G4/G6 read Prometheus, so add one here if
   # a kube-prometheus-stack bump is ever planned for the same night.
@@ -165,12 +163,7 @@ conditions are met by §3, plus the operator decision below.
 
 ### THE GOTCHA: client-IP derivation changes (OPERATOR DECISION at the GO)
 
-Upstream behaviour change, public: 2026.8.4 (PR #26353, closing upstream issue #25811)
-changed `packages/ak-axum/src/extract/client_ip.rs` to take the leftmost
-`X-Forwarded-For` entry when the TCP peer is a trusted proxy (it was the rightmost
-untrusted one). **Re-verified 2026-10-23: identical on `version/2026.8.5` and on
-upstream `main`**, so it is permanent upstream behaviour; moving to 2026.8.5 does not
-avoid it and no later fix is pending.
+Client-IP derivation changed upstream (PR 26353); see F-7006f363. Re-verified 2026-10-23: identical on `version/2026.8.5` and upstream `main`, so moving to 2026.8.5 does not avoid it.
 
 What it means for this estate (consumers of the derived IP, how the gateway
 interacts with it, baseline readings, the probe command and its expected values) is
@@ -186,7 +179,7 @@ option: see F-7006f363.
 
 | | A. Upgrade, accept | B. Hold at 2026.8.3 | C. A plus a blueprint change |
 |---|---|---|---|
-| Action | chart + 2 init pins + 13 outposts to 2026.8.5 | nothing; plan stays `draft`; PR #364/#359 stay held | A, then a second reviewed blueprint commit adjusting the login-throttling policy (exact change on F-7006f363) |
+| Action | chart + 2 init pins + 13 outposts to 2026.8.5 | nothing; plan stays `draft`; PR #364/#359 stay held | a second reviewed blueprint commit (see F-7006f363) |
 | Follow-up | accepted risk (AR) for the behaviour: needle = the behaviour, not a version, `--expires` <= 180 d | needs an Envoy-side plan (not written); every future release has the same behaviour | AR plus the blueprint commit |
 | Reversibility | `git revert` of one commit (no migrations) | n/a | revert both commits |
 
@@ -263,7 +256,14 @@ Run from the repo root on the Mac mini (zsh). Every jsonpath is single-quoted.
    - `TOKCNT [('default-authenticator-static-setup', 10)]`
 
    A non-empty `notok` means STOP and fix it first (SOP "stuck in `error`").
-6. **Client-IP probe baseline** (the G7 probe from F-7006f363, run now). The
+6. **Outpost baseline on 8.3 (Q1/Q3).** Port-forward Prometheus (as in G6) and record
+   `count(count by (outpost_name)(authentik_outpost_connection{version="2026.8.3"} == 1))`
+   (Q1) and `count(authentik_outpost_connection == 0) or vector(0)` (Q3). Require
+   **Q1 = 14 and Q3 = 0**. After a CNI/node roll outposts reconnect only after a fixed
+   300 s wait (measured 2026-10-25: Q1 read 10 and Q3 non-zero right after the Cilium roll,
+   then 14/0 on re-measure). If not 14/0, wait up to 10 minutes and re-run; if still not
+   14/0, investigate (outpost pod logs) and STOP: do not start the roll on a degraded baseline.
+6b. **Client-IP probe baseline** (the G7 probe from F-7006f363, run now). The
    expected baseline reading is on the record. If it already reads like the
    post-upgrade value, something else changed the edge: STOP and investigate.
 7. **Pre-flight the new image's `settings.py`** (SOP §1):
@@ -544,9 +544,8 @@ PRs #364/#359 stay open (held by the deny rule) until a retry.
   pending commits in one window.
 - **Attended slot only** (SSO blast radius, a manual 13-outpost push, a real-browser
   login gate). Not `nightly`. No reboot; 45 min.
-- **talos-linux-1.14.4, cilium-1.20.4, k8s-1.36.5:** node roll, CNI restart and
-  control-plane roll all evict or sever authentik pods and outpost websockets.
-  Declared; not the same slot.
+- **talos-linux-1.14.4:** a node roll evicts or severs authentik pods and outpost
+  websockets. Declared; not the same slot.
 - **envoy-proxy-config-distroless-v1.39.4 / v1.40.0** (drafts): they restart the
   Envoy data plane that carries `auth.<domain>` and every forward-auth ext-auth
   call. Running either makes a login failure unattributable and confounds G7.
@@ -558,8 +557,6 @@ PRs #364/#359 stay open (held by the deny rule) until a retry.
   there would be ambiguous.
 - **Prometheus:** G4/G6 read it. No kube-prometheus-stack plan is open (92.x plans
   retired 2026-10-23); if one is ever planned, serialize it away from this slot.
-- **Wazuh / F-0eb481a8:** any plan that baselines authentik `client_ip` is affected by
-  the §1 change (see F-7006f363). None is open today.
 - **Repo corrections noted:** the `*authentik*` deny rule and SOP are consistent with
   this plan; the stale `project_authentik_outpost_upgrade` memory recommending bulk
   `o.save()` is superseded by SOP §2 (see §1).

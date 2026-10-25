@@ -43,7 +43,6 @@ conflicts_with:                       # every id re-checked as an existing, non-
                                       # flux-fleet-0.60.0, kube-prometheus-stack-92.2.0.
   - authentik-2026.8.5                # reciprocal: names this plan; Authentik ext-auth path is exercised by §4
   - authentik-web-max-requests        # reciprocal: names this plan; same path
-  - cilium-1.20.4                     # reciprocal: names this plan; pod network under the data plane
   - n8n-2.39.8                        # reciprocal: names this plan (status executed; kept for the reciprocity check)
   - envoy-proxy-config-distroless-v1.40.0   # SAME pin line (blocked); two plans moving one pin never share a window
   - penpot-chart-1.10.0               # gateway/envoy-external; restarts an app §4.3 diffs
@@ -51,7 +50,6 @@ conflicts_with:                       # every id re-checked as an existing, non-
   - talos-linux-1.14.4                # same
   - external-dns-1.23.0               # public-edge: reads Gateway envoy-external's target
   - flux-reconciler-impersonation     # exclusive; rewrites how kustomize-controller applies this
-  - flux-distribution-2.9.6           # exclusive; upgrades the Flux controllers that apply §3 / revert §5
   - flux-oci-chart-sources            # moves Flux sources; same §3/§5 apply-and-revert path
 capability_change: false              # same-behaviour patch: no new route, permission, API surface or
                                       # exposure; the EnvoyProxy object only changes its image string.
