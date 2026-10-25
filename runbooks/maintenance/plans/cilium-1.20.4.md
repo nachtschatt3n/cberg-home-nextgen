@@ -250,7 +250,7 @@ premises:                             # Every run: was checked against plan-prem
     run: kubectl get cnp -n ci-runner ci-runner-lockdown -o jsonpath='{.spec.egress[0].toPorts[0].rules.dns[0].matchName}'
     expect_exact: "github.com"
 status: vetted
-window: "sun-attended:2026-10-25"    # SCHEDULED 2026-10-23 by the operator ("yes: schedule it for a Sunday when I am at the keyboard"). Must be ATTENDED and SOLO (§6): redis-fleet-8.10.2 and jellyfin-config-rwo-migration were moved off this slot. GO still needed from the operator at the keyboard.
+window: "now:2026-10-25"   # ON-DEMAND NOW run 2026-10-25 (run-now.py stamp; was 'sun-attended:2026-10-25')
                                       # Recommended: an on-demand NOW run, as cilium-1.20.2 did.
 review: ready-for-go@2026-10-24   # plan-reviewer 2026-10-24: 0 blocking; digests, xDS removal and Envoy-unused claims verified
 sops_refs:
