@@ -143,6 +143,18 @@ pass the review, not to finish the file:
    two sessions committing in the same second can swap message files; amend
    before push if it is not.
 
+## Premise commands: what the runner accepts
+`runbooks/plan-premises.py` REFUSES (premise fails, `REFUSED:` line) any `run:` containing
+`;` `&&` `||` `&` backtick `$(` `>` (even in quotes), any `|` inside a quoted regex (the string is
+split on every `|`), any command outside the read allowlist (`gh`, `curl`, `python3`, `ls`, `find`,
+`kubectl exec|rollout|wait`, `helm template`, loops), any `-f/-w/--follow/--watch`, and a flag value
+placed before the verb (`kubectl -n ns get` is refused; write `kubectl get ... -n ns`). Empty output
+always fails; exactly one `expect_*`; `expect_matches` is Python `re` (`\s`, never `[[:space:]]`).
+Put `gh`/`curl`/loop/redirect checks in the §2 pre-check steps and keep each premise to ONE allowed
+read. Full rules, allowlist table and three good/bad examples:
+`runbooks/maintenance/plans/README.md` section "Premise commands: what the runner accepts".
+Before handing off, run `.venv/bin/python3 runbooks/plan-premises.py <plan_id> --require-premises`: no `REFUSED` line may remain.
+
 ## Boundaries
 - Cluster access is **read-only** (get/describe/logs, registry/release-notes
   fetch). The only file you write is the plan.

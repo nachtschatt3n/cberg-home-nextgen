@@ -287,6 +287,85 @@ generated: "2026-07-25"
 6. **Interference notes** — anything the window agent must know (shared infra it
    restarts, ordering constraints, why `conflicts_with` is set).
 
+## Premise commands: what the runner accepts
+
+`runbooks/plan-premises.py` runs every `premises[].run` through
+`command_is_readonly()` BEFORE executing it, and a refused premise FAILS
+(`REFUSED: ...`), exactly like a premise whose check came back wrong. On
+2026-10-25 three plans had premises that failed or never ran for this reason.
+Derived from the code, not guessed:
+
+**Refused anywhere in the string, even inside quotes** (substring test):
+`;` `&&` `||` `&` `` ` `` `$(` `>` `>>`. So also refused: `2>&1`, `2>/dev/null`,
+`select(.x > 1)` in jq, a URL with `&`, `sed 's/a;b/c/'`.
+
+**The string is split on every `|`, quoted or not.** A regex alternation
+`grep -E 'a|b'` is cut mid-quote and refused as unparseable. Use `grep -e a -e b`.
+
+**Every pipeline stage must start with an allowed command:**
+
+| Command | Allowed subcommand = FIRST non-dash token |
+|---|---|
+| `kubectl` | `get describe logs top version api-resources explain cluster-info auth` |
+| `flux` | `get check stats diff` |
+| `talosctl` | `get version read list df health dmesg` |
+| `helm` | `get list status show history` (NOT `template`) |
+| `git` | `log show status diff rev-parse ls-files` |
+| bare | `grep sed awk head tail wc cut sort uniq tr jq cat echo test true false` |
+
+Consequences: `gh`, `curl`, `python3`, `xargs`, `ls`, `find`, `date`, `printf`,
+`bash -c`, `for`/`while`/`if`, `kubectl exec|rollout|wait|port-forward|config`
+and `helm template` are all refused. Any stage containing `-f`, `-w`,
+`--follow` or `--watch` is refused (this includes `grep -f` and `kubectl get -f`).
+
+**Put the verb FIRST.** The subcommand is the first token not starting with `-`,
+so a flag VALUE in front of it is mistaken for the verb:
+`kubectl -n monitoring get ...` is refused (`kubectl 'monitoring'`); write
+`kubectl get deploy -n monitoring ...`. `--nodes=IP` (one token) is fine,
+`--nodes IP` before the verb is not.
+
+**Expect semantics.** Declare exactly ONE of `expect_exact` (equality after
+`.strip()` of the output), `expect_contains` (substring), `expect_matches`
+(Python `re.search` over the whole stripped output). Zero or two is a failure.
+- EMPTY output is always a failure (fail closed), so a premise cannot assert
+  "nothing matches" by printing nothing: use `grep -c ... ` (prints `0`) or
+  `wc -l` and `expect_exact: "0"`.
+- A non-zero exit WITH output is still evaluated; non-zero with empty output
+  fails. `bash -o pipefail` is on. Timeout 60s.
+- `expect_matches` is **Python `re`**: use `\s`, `\d`, `\S`. POSIX classes such
+  as `[[:space:]]` are NOT supported (no error: it silently becomes a plain
+  character set and matches the wrong thing). POSIX classes are fine inside the
+  `grep` of the `run:` itself, which is real grep.
+- Quote expected scalars in YAML (`"0"`, `"true"`): a bare `true` arrives as
+  `True`. Quote the whole `run:` value if it contains `: ` or a frontmatter
+  parse error hides the entire plan.
+
+**Where the refused checks go instead.** `gh`, `curl`, registry or upstream
+lookups, loops, file redirects and `kubectl exec` belong in the §2 pre-check
+steps (run by the executor, which may use them). The premise then keeps to a
+single allowed read of cluster or repo state, and the plan body states the
+UNBLOCK condition for anything that needed the network.
+
+Worked examples (all from 2026-10-25):
+
+1. Upstream release lookup. BAD: premise `run: gh release view v1.40.0 -R <org>/<repo>`
+   (`eg-release-compiles-1.40`; `gh` is not an allowed command). GOOD: drop the
+   premise, put the `gh release view` in the §2 pre-check with the expected
+   result, and keep a premise on what the cluster says, e.g.
+   `run: kubectl get helmrelease -n network envoy-gateway -o jsonpath='{.spec.chart.spec.version}'`
+   with `expect_exact: "<current>"`. The same applies to
+   `curl -s <registry url> | python3 -c ...` (`curl` and `python3` refused).
+2. Chained commands. BAD: `run: kubectl get node -o name; kubectl get pod -A -o name | wc -l`
+   (`;`). GOOD: one premise per observation, each a single pipeline:
+   `run: kubectl get pod -A -o name | wc -l`, `expect_matches: '^\d+$'`.
+3. POSIX class in a regex. BAD: `expect_matches: '^model[[:space:]]*: 170$'`.
+   GOOD: `expect_matches: '(?m)^model\s*: 170$'`, or keep the class in the
+   `run:` (`... | grep -c '^model[[:space:]]*: 170$'`) and assert
+   `expect_exact: "1"`.
+
+Check before handing off: `.venv/bin/python3 runbooks/plan-premises.py <plan_id> --require-premises`
+must print PASS with no `REFUSED` lines.
+
 ## Verification must assert CONTENTS, not SHAPE
 
 **The rule, and it generalises past the table below:**

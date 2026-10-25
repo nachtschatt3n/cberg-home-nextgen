@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.10.13`
-> Last Updated: `2026-10-13`
+> Version: `2026.10.25`
+> Last Updated: `2026-10-25`
 
 ## 1) Description
 
@@ -838,6 +838,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 - Agents: `.claude/agents/{upgrade-planner-agent,maintenance-window-agent}.md`
 - Sweep hook: `.claude/agents/daily-operation.md` rule 4d
 - Upstream of the pipeline: `docs/sops/auto-update.md`
+- Plan premise command rules (what `plan-premises.py` accepts or refuses): `runbooks/maintenance/plans/README.md` section "Premise commands: what the runner accepts"
 - Per-upgrade procedure the plans follow: `docs/sops/application-update.md`,
   `docs/sops/talos-upgrade.md`
 
@@ -845,6 +846,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.10.25 | 2026-10-25 | **Docs only.** Pointer to the planner-facing rules for premise commands (refused constructs, allowlist, `expect_*` semantics, worked examples); no runner behaviour changed. |
 | 2026.10.13 | 2026-10-13 | **Deliberate skips are WAIVED, not faked (operator decision, vacation).** New `window_runs` outcome `waived` (insert-only, reason in notes mandatory, past dates only, `ad-hoc` trigger): removes the occurrence from `window_runs_missing_count`, counted in the new `window_runs_waived_count`, never counted as a run and never covers another slot. `ops-retro.py` reports it on its own line. Test `runbooks/tests/test-window-liveness-waived.py`. |
 | 2026.10.04 | 2026-10-04 | **Two plan-authoring lessons (§7).** (a) DB-bounce gates bound each consumer at <=1 restart and build the tenant baseline from persistent-pool users only -- per-request PHP connections excluded (F-9ab5f80f; Rails liveness root cause fixed in `f515915c`). (b) Resuming a suspended HelmRelease re-renders chart CronJobs and undoes a manual CronJob suspend -- re-assert it after every in-plan HR resume (nextcloud-redis-hardening run). |
 | 2026.09.28 | 2026-09-28 | **Headless dispatcher auto-starts (operator: "fix the open points").** It died with every Mac reboot or iTerm restart, silently sending crons back to the busy console. Now a LaunchAgent (`com.cberg.headless-dispatcher`, user `mu`, KeepAlive) keeps iTerm running and an iTerm AutoLaunch script keeps a dispatcher session open inside it (files in `runbooks/launchd/`). osascript from launchd was rejected: it needs an Automation grant nobody can click after an unattended reboot. §7 gains install/check/uninstall. |

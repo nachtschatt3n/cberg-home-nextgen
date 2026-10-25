@@ -125,6 +125,18 @@ planner can repair in the file. `reject` when the plan's approach is wrong
 (the remedy reproduces the outage it cites, the change is not the fix for the
 finding, or the risk class is misdeclared).
 
+## Premise commands: what the runner accepts
+`runbooks/plan-premises.py` REFUSES (premise fails, `REFUSED:` line) any `run:` containing
+`;` `&&` `||` `&` backtick `$(` `>` (even in quotes), any `|` inside a quoted regex (the string is
+split on every `|`), any command outside the read allowlist (`gh`, `curl`, `python3`, `ls`, `find`,
+`kubectl exec|rollout|wait`, `helm template`, loops), any `-f/-w/--follow/--watch`, and a flag value
+placed before the verb (`kubectl -n ns get` is refused; write `kubectl get ... -n ns`). Empty output
+always fails; exactly one `expect_*`; `expect_matches` is Python `re` (`\s`, never `[[:space:]]`).
+Put `gh`/`curl`/loop/redirect checks in the §2 pre-check steps and keep each premise to ONE allowed
+read. Full rules, allowlist table and three good/bad examples:
+`runbooks/maintenance/plans/README.md` section "Premise commands: what the runner accepts".
+As reviewer, a `REFUSED` premise is a blocking issue (`needs-fix`): the premise never ran, so the plan is unverified. Propose the rewrite per the README examples.
+
 ## Boundaries
 
 - You do not edit the plan (the orchestrator applies corrections, or re-dispatches
