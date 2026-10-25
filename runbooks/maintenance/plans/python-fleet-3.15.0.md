@@ -81,8 +81,8 @@ premises:
   # The registry facts (target still trixie; past the 48 h minor cooldown) cannot be premises:
   # plan-premises.py allows only kubectl/flux/helm/git/text-filter stages. They are §2 gates
   # 2.1/2.2, each printing a STOP token on failure.
-review: null
-status: draft
+review: ready-for-go@2026-10-25   # plan-reviewer 2026-10-25 delta re-review: premises PASS, gates verified
+status: vetted
 window: "sat-attended:2026-11-14"   # cooldown (re-pushed tag) ends 2026-10-26T08:08Z, so any start before that prints YOUNG; 11-14 is clear of cilium 10-25, openclaw 10-31, talos 11-01, otel 11-07, envoy 11-08
 sops_refs:
   - docs/sops/application-update.md

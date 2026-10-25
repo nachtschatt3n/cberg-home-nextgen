@@ -94,8 +94,8 @@ backup_gate: "Completed Longhorn backup < 26h for tube-archivist-redis-data and 
 finding_refs: [F-d2bb762b, F-8c50c463, F-625d3a3f, F-c637a09a, F-3fcdca7b, F-3a75c9aa, F-2e326f86, F-e8a41b1b, F-db500cce]
                                         # the 8 per-consumer redis image findings. F-31c19a7f (open-webui chart 16.6.0)
                                         # is NO LONGER answered here: the chart is already 17.0.0 (live 2026-10-24).
-status: draft   # RE-PLANNED 2026-10-24 after sat-attended deferral (open-webui now v0.12.3 / chart 17.0.0; nextcloud-redis now requirepass). Prior review (ready-for-go@2026-09-28) is void.
-review: null
+status: vetted
+review: ready-for-go@2026-10-25   # plan-reviewer 2026-10-25 delta re-review: premises PASS, gates verified
                 # No operator GO recorded; HUMAN-GATED.
 window: "sun-attended:2026-11-29"   # was sat-attended:2026-10-24 (deferred). Free Sunday: clear of talos 11-01, etcd/envoy 11-08, longhorn 11-15, flux-oci 11-22 and the Saturdays 10-31/11-07/11-14. sat budget (70) leaves no slack for 70 min.
 sops_refs:

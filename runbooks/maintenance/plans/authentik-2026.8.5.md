@@ -71,9 +71,9 @@ finding_refs: [F-7006f363, F-2fb59c74, F-67fa2a51, F-dcbe773f, F-4bc24032, F-eb4
                                       # F-2fb59c74 = the version finding (retargets to 8.5 on the next sweep);
                                       # the others are image findings whose remedy is this bump. Detail on the records;
                                       # do not assume 8.5 clears every item (closure is measured by the next scan).
-review: null
-status: draft
-window: null
+review: ready-for-go@2026-10-25   # plan-reviewer 2026-10-25 delta re-review: premises PASS, gates verified
+status: vetted
+window: sat-attended:2026-11-21   # needs operator GO
 premises:
   - id: server-on-2026.8.3
     why: "`current:` claims the server Deployment runs :2026.8.3."

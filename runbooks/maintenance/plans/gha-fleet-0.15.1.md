@@ -50,7 +50,7 @@ conflicts_with:
   - helm-drift-detection              # changes how helm-controller treats every HelmRelease (incl. these five).
   - flux-reconciler-impersonation     # changes WHO applies the arc-system/ci-runner/arc-build Kustomizations.
 exclusive: false
-security_ref: null
+security_ref: F-1fd1d6a0
 capability_change: false              # same chart templates, same values, same runner pods; controller binary gains bug fixes only
                                       # (metrics-guard fix, rate-limit requeue, cleanup of never-used succeeded runners). No new
                                       # route, permission, RBAC, API, label or exposure.
@@ -60,9 +60,9 @@ finding_refs: [F-5602ee2a, F-87d453b9, F-a2cff4a9, F-1fd1d6a0]            # `fin
                                       # CONTROLLER image (accepted as "already newest" — no longer true since 0.15.1 shipped
                                       # 2026-10-23). This bump is what moves it; whether the row clears is for the next sweep's
                                       # scan to MEASURE, not for this plan to claim. Detail stays on the record.
-review: null
-status: draft
-window: null
+review: ready-for-go@2026-10-25   # plan-reviewer 2026-10-25 delta re-review: premises PASS, gates verified
+status: vetted
+window: nightly:2026-11-09   # AUTO-NIGHT class: no operator GO needed; Renovate PRs 414/415 are closed by the plan, never merged alone
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/ci-runner.md            # §2c "Upgrades": lockstep, one commit, re-derive digests
