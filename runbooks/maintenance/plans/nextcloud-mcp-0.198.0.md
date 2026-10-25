@@ -64,7 +64,8 @@ finding_refs: [F-9af9baf7, F-80459b23] # F-9af9baf7 = the version finding (title
                                       # F-80459b23 = the security finding. nextcloud-mcp-0.187.1 also lists
                                       # both but is `superseded` (terminal) since 2026-10-01.
 review: null
-status: blocked
+status: superseded
+superseded_by: nextcloud-mcp-0.201.2
 blocked_reason: "2026-10-05 review: §2.7 STOPs on every date until the operator picks §1.6 option A (wait for upstream fix; no upstream issue exists yet), B (0.195.4, revive 0.187.1 -- first scan 0.195.4 against F-80459b23) or C (recreate the two %-URI calendars). Not schedulable before that decision; then fresh review + fresh GO (capability change: +21 tools, 4 write)."
 window: null
 premises:

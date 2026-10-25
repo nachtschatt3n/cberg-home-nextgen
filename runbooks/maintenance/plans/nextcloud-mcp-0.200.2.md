@@ -53,7 +53,8 @@ rollback_class: git-revert            # no PVC, no volumes, no DATABASE_URL/TOKE
 finding_refs: [F-9af9baf7, F-80459b23] # F-9af9baf7 = version finding (title names 0.199.4 as of 2026-10-19; retargets on next
                                       # sweep). F-80459b23 = security finding. Carried from nextcloud-mcp-0.199.1 (superseded).
 review: null
-status: blocked                        # Coordinator: §2.7 STOP fires today (7A=2, 7B count=1 at v0.200.5 and master, measured
+status: superseded                        # Coordinator: §2.7 STOP fires today (7A=2, 7B count=1 at v0.200.5 and master, measured
+superseded_by: nextcloud-mcp-0.201.2
                                       # 2026-10-21). Not schedulable until the operator picks §1.6 A/B/C; recommend `blocked`
                                       # with that reason at review.
 window: null   # BLOCKED 2026-10-23 by operator decision: WAIT FOR UPSTREAM to fix the calendar-name regression (0.195.5, still in 0.200.5; literal % in 2 of 4 live calendars, the 200-event one reads empty after the bump). Unblock when an upstream release after 0.200.5 fixes calendar.py unquote(calendar_name) AND the plan section 2.7 gate passes live (7A/7B). Re-check on each sweep (version snapshot) and re-target the plan then.

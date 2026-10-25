@@ -55,7 +55,7 @@ conflicts_with:
   # Same consumers / same files (reciprocity added 2026-10-24 re-plan; each is listed back by these plans):
   - nextcloud-9.4.1                     # vetted nightly:2026-10-28 — Nextcloud app roll; lists this plan. Must be settled BEFORE leg 8.
   - nextcloud-whiteboard-2.1.2          # vetted nightly:2026-10-29 — Nextcloud whiteboard (uses nextcloud redis path); lists this plan.
-  - nextcloud-mcp-0.200.2               # blocked — lists this plan (nextcloud-redis restart)
+  - nextcloud-mcp-0.201.2               # blocked — lists this plan (nextcloud-redis restart)
   - nextcloud-mcp-0.198.0               # blocked — reciprocity from 2026-10-05 review
   # sure-0.7.5 dead ref removed 2026-10-24 (plan file no longer exists); a future sure-* plan that rolls sure-redis/sure-worker must serialize with leg 6.
   - bitnamilegacy-exit-nextcloud-db     # blocked — quiesces Nextcloud; never stack a session-store restart on a DB cutover.

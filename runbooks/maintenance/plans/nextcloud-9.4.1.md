@@ -34,7 +34,7 @@ conflicts_with:
   - helm-drift-detection                        # patches helmrelease/nextcloud
   - bitnamilegacy-exit-nextcloud-db             # same helmrelease.yaml (blocked; kept for safety)
   - nextcloud-whiteboard-2.1.2                  # same Kustomization office/nextcloud (whiteboard-proxy.yaml); one office change per night
-  - nextcloud-mcp-0.200.2                       # same office namespace, scrapes nothing of ours but a concurrent roll muddies
+  - nextcloud-mcp-0.201.2                       # same office namespace, scrapes nothing of ours but a concurrent roll muddies
                                                 # "what restarted"; low value, serialize anyway
   # No kube-prometheus-stack plan is open (92.x retired 2026-10-23). Section 4 reads Prometheus: if one is ever planned
   # for the same night, add it here and serialize.
@@ -305,7 +305,7 @@ not the cause: look at the server (`docs/sops/` nextcloud) and Mail/occ state.
   gate 3. Risk low, `capability_change: false`, `git-revert`: eligible for unattended nightly.
 - Prometheus is the verification instrument: no same-night `kube-prometheus-stack` bump (none is
   open today; add it to `conflicts_with` if one is planned).
-- Same `helmrelease.yaml` as `nextcloud-mcp-0.200.2`? No (that is the mcp Deployment), but both touch
+- Same `helmrelease.yaml` as `nextcloud-mcp-0.201.2`? No (that is the mcp Deployment), but both touch
   `office`; serialize to keep "what restarted" unambiguous.
 - No Longhorn, CIFS (`nextcloud-data` untouched), gateway, Authentik or DNS impact. Consumers of
   Nextcloud (openclaw mail/calendar skills, nextcloud-mcp, Homepage) are unaffected by an exporter roll.
