@@ -15,7 +15,7 @@ and worker). See `docs/applications.md` for the authoritative application count 
 |-----------|-------|
 | Kubernetes | v1.36.0 |
 | Talos Linux | v1.14.1 |
-| Flux | v2.9.3 |
+| Flux | v2.9.6 |
 | Nodes | 3 × Intel NUC14 Pro |
 | CNI | Cilium v1.20.2 |
 | Storage | Longhorn v1.12.1 |
@@ -131,7 +131,7 @@ manages all subsequent deployments including upgrades to these components.
 | Identity Provider | Authentik (forward-auth for apps with no user model; app-native OIDC or SAML for those that have one) |
 | Image Updates | Renovate (weekly) + Flux Image Automation |
 
-> **Note:** Flux distribution is v2.9.3 (flux-operator/flux-instance chart 0.61.0). The `flux` CLI tool (mise) is v2.9.0, matched to the running distribution. Controllers: source-controller v1.9.3, kustomize-controller v1.9.4, helm-controller v1.6.3, notification-controller v1.9.2, image-reflector-controller v1.2.3, image-automation-controller v1.2.3. The former v2.6+ CRD-incompatibility pin (at operator v0.14.0) was cleared by the 0.14.0→0.57.0 operator upgrade + Flux 2.7 image-API GA storage migration on 2026-08-11 — see `docs/sops/flux-upgrade.md`. For the image-automation half (why an `ImageUpdateAutomation` can run green for months while never pushing) see `docs/sops/flux-image-automation-push-auth.md`.
+> **Note:** Flux distribution is v2.9.6 (flux-operator/flux-instance chart 0.61.0). The `flux` CLI tool (mise) is v2.9.0, matched to the running distribution. Controllers: source-controller v1.9.6, kustomize-controller v1.9.6, helm-controller v1.6.5, notification-controller v1.9.4, image-reflector-controller v1.2.5, image-automation-controller v1.2.5. The former v2.6+ CRD-incompatibility pin (at operator v0.14.0) was cleared by the 0.14.0→0.57.0 operator upgrade + Flux 2.7 image-API GA storage migration on 2026-08-11 — see `docs/sops/flux-upgrade.md`. For the image-automation half (why an `ImageUpdateAutomation` can run green for months while never pushing) see `docs/sops/flux-image-automation-push-auth.md`.
 
 > **Note — bjw-s app-template at 5.1.0 cluster-wide (migrated 2026-08-18):** The long-standing 3.7.3 freeze is over — all ~70 app-template HelmReleases were bulk-migrated 3.7.3→5.1.0 on 2026-08-18 (values now carry explicit persistence suffix pins; chart is pulled from the `bjw-s-labs` OCI registry, `oci://ghcr.io/bjw-s-labs/helm`). Keep the chart version uniform cluster-wide: future majors go through the library-chart migration procedure in `docs/sops/application-update.md` §7b, never as per-app bumps.
 
@@ -205,7 +205,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 |------|---------|---------|
 | Kubernetes | v1.36.0 | Container orchestration |
 | Talos Linux | v1.14.1 | Cluster OS |
-| Flux | v2.9.3 | GitOps operator |
+| Flux | v2.9.6 | GitOps operator |
 | Cilium | v1.20.2 | CNI / network |
 | Longhorn | v1.12.1 | Distributed storage |
 | cert-manager | v1.21.2 | TLS management |
