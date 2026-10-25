@@ -68,9 +68,9 @@ sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md
   - docs/sops/longhorn-rwo-multi-attach.md
-review: null
-status: draft
-window: null
+review: ready-for-go@2026-10-25   # plan-reviewer 2026-10-25: 0 blocking, premises 6/6
+status: vetted
+window: nightly:2026-11-04   # human-gated: needs operator GO; not same night as wazuh (11-03) or kps #428
 generated: "2026-10-24"
 ---
 
