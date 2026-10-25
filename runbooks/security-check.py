@@ -5973,8 +5973,13 @@ def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
     lines = []
 
     # --- Slice 1: high-severity (level >= 12) --------------------------------
+    # `track_total_hits` is load-bearing on every count read in this section:
+    # without it OpenSearch stops counting at 10000 and reports a floor as the
+    # total. On 2026-10-15 the card read "10000" while the real 24h count was
+    # 11519 — a capped number looks exactly like a measured one.
     body = {
         "size": 0,
+        "track_total_hits": True,
         "query": {"bool": {"must": [
             {"range": {"@timestamp": {"gte": "now-24h"}}},
             {"range": {"rule.level": {"gte": 12}}},
@@ -6008,6 +6013,7 @@ def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
     # --- Slice 2: medium severity (level 7-11) by category -------------------
     body = {
         "size": 0,
+        "track_total_hits": True,
         "query": {"bool": {"must": [
             {"range": {"@timestamp": {"gte": "now-24h"}}},
             {"range": {"rule.level": {"gte": 7, "lt": 12}}},
@@ -6079,6 +6085,7 @@ def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
     def _k8s_container_alerts(min_level: int) -> int:
         d = wz.query({
             "size": 0,
+            "track_total_hits": True,
             "query": {"bool": {"must": [
                 {"range": {"@timestamp": {"gte": "now-24h"}}},
                 {"wildcard": {"location": "*containers*"}},

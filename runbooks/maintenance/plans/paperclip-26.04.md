@@ -1,8 +1,9 @@
 ---
 plan_id: paperclip-26.04
 component: paperclip                  # the `tools` SIDECAR of deploy/paperclip, not the app image
-pr: null                              # no Renovate PR; coverage.py reports it from the version
-                                      # snapshot (image:ubuntu, subsection helmrelease_image)
+pr: 286                               # Renovate PR #286 proposes `ubuntu 24.04 -> resolute` (floating
+                                      # codename tag, no digest). Do NOT merge it: this plan lands the
+                                      # same bump digest-pinned (float-tag policy); close #286 after.
 kind: image
 current: "24.04@sha256:d78ab76437b1afc5f01e223d6bf0172763f404bb166441328845adbef44518cb"
 target: "26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
@@ -27,7 +28,8 @@ conflicts_with:                       # none of these name a paperclip image, bu
                                       # re-renders every HelmRelease incl. helmrelease/paperclip or
                                       # snapshots workloads incl. deploy/paperclip; a same-night
                                       # paperclip roll would make their gates unattributable.
-  - app-template-5.2.1                # --compare-workloads baseline counts deploy/paperclip
+  - kube-prometheus-stack-92.11.0     # G6 reads Prometheus (shared instrument)
+  - paperclip-postgresql-18.6         # suspends/scales HelmRelease paperclip to 0: serialize
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. paperclip
   - flux-oci-chart-sources            # may rewrite paperclip's chart source (bjw-s app-template)
   - flux-reconciler-impersonation     # exclusive; changes the identity that applies ai/
@@ -74,9 +76,11 @@ sops_refs:
   - docs/sops/longhorn-rwo-multi-attach.md
   - docs/sops/vulnerability-disclosure.md
 review: null
-status: draft
+status: blocked
+unblock_condition: "a 26.04 (resolute) digest that scans at 0 HIGH/CRITICAL at go time; re-scan on each sweep; then re-pin that digest and re-review"
 window: null
 generated: "2026-09-29"
+refreshed: "2026-10-23"       # premises re-run PASS 5/5; dead conflict ref app-template-5.2.1 pruned
 ---
 
 # paperclip `tools` sidecar: ubuntu 24.04 -> 26.04 LTS
@@ -113,17 +117,20 @@ on 2026-08-19 the sidecar was bumped to 26.04 (`e9b70b73`) and then reverted to
 on finding **F-afa93406** (detail stays in the DB). Trigger (a) was "the 26.04
 base drops back to 0 HIGH".
 
-**Trigger (a) is now met — measured 2026-09-29** with trivy 0.70.0,
-`--platform linux/amd64 --severity HIGH,CRITICAL`:
+**Trigger (a) is NOT met as of 2026-10-23.** Re-scan with trivy 0.76.1,
+`--platform linux/amd64 --severity HIGH,CRITICAL` (reviewer measurement):
 
-| image | result |
+| image | HIGH/CRITICAL |
 |---|---|
-| `ubuntu@sha256:da6fc2be…c378a78` (26.04 = `resolute-20260912`, the target pin) | **0 HIGH / 0 CRITICAL** |
-| negative control: the 2026-08 26.04 digest `6df9e8dd…` that caused the hold | non-zero HIGH (reproduces F-afa93406's measurement, so the scanner is not blind) |
+| `ubuntu@sha256:da6fc2be...c378a78` (the pin in this plan) | 6 |
+| current Docker Hub `26.04`/`resolute` tag, `sha256:c098726d...fb944` (re-pushed, differs from da6fc2be) | 4 |
 
-26.04 is GA (Resolute Raccoon, April 2026; Docker Hub `26.04` → OCI index
-`sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78`,
-amd64 manifest present). Pinned by that index digest.
+An earlier 2026-09-29 reading of 0 on da6fc2be (trivy 0.70.0) is superseded by
+the newer scanner DB. The target digest is therefore chosen AT GO TIME: the plan
+may only proceed with a 26.04 digest that scans at 0, and every `da6fc2be`
+reference below must be replaced by that digest (re-review after re-pin). Status
+is `blocked` with the unblock condition in the frontmatter; re-scan each sweep.
+Renovate PR #286 (floating `resolute`, no digest) must NOT be merged.
 
 **LTS -> LTS breakage assessment for this script:**
 
@@ -163,6 +170,8 @@ T=$(mise which trivy)
 $T image --quiet --platform linux/amd64 --severity HIGH,CRITICAL --format json \
   ubuntu@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78 \
   | python3 -c "import sys,json;d=json.load(sys.stdin);n=sum(len(r.get('Vulnerabilities') or []) for r in d.get('Results',[]));print('TARGET_HIGH_CRIT', n);sys.exit(1 if n else 0)"
+# HARD STOP: on a non-zero count, STOP: do NOT edit, commit or push anything
+# (the Recreate only happens after the push, so stopping here is free); leave the plan blocked.
 # PASS: "TARGET_HIGH_CRIT 0", exit 0. FAIL: non-zero -> STOP, do not bump; the
 # F-afa93406 condition no longer holds. (Docker Hub anonymous pull limits can make
 # trivy error out — an error is NOT a pass; retry later or authenticate.)
@@ -243,6 +252,10 @@ git log -1 --format=%s     # must be the subject above; amend before push if not
 git show --stat HEAD       # exactly one file
 git push
 ```
+
+3.4 After the digest-pinned bump has landed and G1-G5 pass: close Renovate PR #286
+(floating `resolute`, no digest) with a comment pointing at the pinned commit.
+Never merge #286.
 
 3.3 Let the Flux webhook reconcile (no manual `flux reconcile`). Wait for the
 HelmRelease to report the new revision:
