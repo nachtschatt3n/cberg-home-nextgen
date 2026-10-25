@@ -106,22 +106,14 @@ depends_on: []                        # RESOLVED 2026-10-05 (F-c688c50f): satisf
                                       # (now:2026-10-04) in a7965251, retired 10bee773. Premise
                                       # multidoc-migration-applied-on-all-nodes is the live gate.
 conflicts_with:                       # exclusive: true already keeps everything out of the slot;
+  # 2026-10-25: pruned dead refs talos-sysfs-power-caps, kube-prometheus-stack-91.9.0, flux-fleet-0.60.0, nextcloud-fleet-35.0.1 (executed/retired)
   - etcd-timeouts-5000-500           # reciprocal (2026-10-13): that plan names this one; etcd-timeouts lands sun 11-08, 7 days after this roll; never the same night
                                       # these are the plans that ALSO mutate Talos machine config or
                                       # the same nodes and must never share a night with this roll.
   # - talconfig-multidoc-migration (RESOLVED 2026-10-05: executed green now:2026-10-04 in a7965251 + retired 10bee773; dead ref removed per the dead-ref convention, sweep 481b9c1f / F-c688c50f)
   - multus-macvlan-foundation         # reference/unwindowed; talosctl apply-config on the nodes
-  - talos-sysfs-power-caps            # reciprocity (added 2026-10-05 by that plan's planner): it writes a
-                                      # SysfsConfig (RAPL PL1/PL2, EPP, iGPU gt0 max) via apply-config; never
-                                      # the same night. If it executed BEFORE this roll, §4.1 re-checks its
-                                      # 21 keys after each reboot (the iGPU card index is boot-dependent).
   - talos-power-tuning-ab            # reciprocity (2026-10-05): live SysfsConfig A/B applies on 01/03 + final roll on all
                                       # 3 nodes; never the same night (a reboot voids a variant and re-reads the card index).
-  - kube-prometheus-stack-91.9.0       # reciprocity (2026-10-05): that plan (chart 91.5.2 -> 91.9.0,
-                                      # Prometheus restart) names this plan in its conflicts_with. §4
-                                      # reads Prometheus (canary choice, etcd latency, alerts); a
-                                      # Prometheus restart the same night blanks that evidence. Any
-                                      # further kube-prometheus-stack plan must be added here too.
   # - k8s-1.36.5 (REMOVED 2026-10-05: folded into this plan as Phase K and marked superseded_by
   #   talos-linux-1.14.2; a conflict with one's own folded scope is meaningless. If Phase K is
   #   DEFERRED and k8s-1.36.5 is re-activated, re-add it here — §3.K0 DEFER.)
@@ -130,13 +122,7 @@ conflicts_with:                       # exclusive: true already keeps everything
   - longhorn-1.13.0                   # Phase K: CSI plugin re-registration under every kubelet restart
                                       # must not overlap a Longhorn manager/engine/CSI move (and §6.3:
                                       # never roll nodes with a Longhorn upgrade in flight)
-  - flux-fleet-0.60.0                 # Phase K: Flux controllers restarting while apiservers roll would
-                                      # confound the §3.K6 Flux gate
   - flux-reconciler-impersonation     # same Flux surface (exclusive plan; blocked 2026-10-04)
-  - nextcloud-fleet-35.0.1            # reciprocity: it names k8s-1.36.5 (apiserver restarts break its
-                                      # §3.4 log/exec reads + helm-controller's upgrade watch); the folded
-                                      # scope inherits the relation. Its owner should retarget its line to
-                                      # talos-linux-1.14.2.
 capability_change: true               # v1.14.2 changes node behaviour, not just versions (§1.2):
                                       # kernel CONFIG_BLK_WBT=y + CONFIG_BLK_WBT_MQ=y turns block
                                       # writeback throttling ON by default for the NVMe that etcd,

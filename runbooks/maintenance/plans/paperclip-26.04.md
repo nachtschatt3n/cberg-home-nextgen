@@ -25,10 +25,10 @@ touches:
                                                # does not change.
 depends_on: []
 conflicts_with:                       # none of these name a paperclip image, but each either
+  # 2026-10-25: pruned dead refs kube-prometheus-stack-92.11.0 (executed/retired)
                                       # re-renders every HelmRelease incl. helmrelease/paperclip or
                                       # snapshots workloads incl. deploy/paperclip; a same-night
                                       # paperclip roll would make their gates unattributable.
-  - kube-prometheus-stack-92.11.0     # G6 reads Prometheus (shared instrument)
   - paperclip-postgresql-18.6         # suspends/scales HelmRelease paperclip to 0: serialize
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. paperclip
   - flux-oci-chart-sources            # may rewrite paperclip's chart source (bjw-s app-template)

@@ -68,6 +68,7 @@ touches:
                                   # NOT gateway/envoy: routing unchanged.
 depends_on: []
 conflicts_with:                   # HARD slot exclusions — the only field
+  # 2026-10-25: pruned dead refs cilium-1.20.4 (executed/retired)
                                   # window-scheduler.py honours (symmetric either way).
                                   # Re-pruned 2026-10-23: refs to plans that no longer exist
                                   # (otel-operator-0.24.4, kube-prometheus-stack-92.2.0,
@@ -83,9 +84,6 @@ conflicts_with:                   # HARD slot exclusions — the only field
                                   # elasticsearch-es-http.monitoring.svc through CoreDNS;
                                   # a DNS blip during §4 shows up as non-success outcomes
                                   # in §4.2(b), which carries revert authority.
-  - cilium-1.20.4                 # owns the LB VIP 192.168.55.18 (edot-collector-talos-kmsg)
-                                  # that §4.3/§4.4 gate on, and the pod network every
-                                  # producer uses.
   - talos-linux-1.14.2            # node drains evict this single replica (RWO queue PVC
   - talos-linux-1.14.4            # re-attaches elsewhere) and silence each node's kmsg feed
                                   # for its reboot — §4.1/§4.3/§4.4 would read the roll as

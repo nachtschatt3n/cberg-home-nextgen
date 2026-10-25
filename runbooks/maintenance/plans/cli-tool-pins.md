@@ -27,11 +27,11 @@ touches:
                                       # Step 0 and every other plan's §2-§5 commands resolve through mise
 depends_on: []                        # flux CLI is NOT in this plan any more (pin already 2.9.6, 14ea2ee9, 2026-10-15)
 conflicts_with:
+  # 2026-10-25: pruned dead refs kube-prometheus-stack-91.9.0 (executed/retired)
   # 2026-10-25: dead ref flux-distribution-2.9.6 (executed/retired) pruned.
   # flux-fleet-0.60.0 dropped 2026-10-23: executed 10-06, plan retired
   - k8s-1.36.5                        # drives `task talos:*` (task + yq in .taskfiles/talos) mid-plan
   - talos-linux-1.14.2                # same: task/yq/talhelper chain mid-plan
-  - kube-prometheus-stack-91.9.0      # 4.9 CONTROL reads Prometheus (the window's instrument)
 exclusive: true                       # swaps the toolchain under ANY other plan's running commands
                                       # (task, yq, jq, flux, sops are in most §2-§5 blocks), including plans
                                       # not written yet: nothing else may be in flight

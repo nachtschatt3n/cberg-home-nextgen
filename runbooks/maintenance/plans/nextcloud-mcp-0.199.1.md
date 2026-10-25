@@ -32,12 +32,7 @@ touches:
 depends_on: []                        # Flux `dependsOn: nextcloud` is ordering-only; no release note in range states
                                       # a minimum Nextcloud server version (0.199.0's oidc-2.5 note is OAuth-only).
 conflicts_with:
-  - app-template-5.2.1                # awaiting-go nightly:2026-10-09. Its Batch A sed edits THIS helmrelease.yaml
-                                      # (chart 5.1.0 -> 5.2.1, line 12) and re-renders this Deployment; a same-night
-                                      # run makes §4.2's roll unattributable. Its list names nextcloud-mcp-0.198.0;
-                                      # re-pointing that to this id is coordinator bookkeeping (§1.5).
-  - nextcloud-fleet-35.0.1            # sun-attended:2026-10-18. Nextcloud 34 -> 35 MAJOR; §4.5/§4.6 read CalDAV
-                                      # from that server. After it runs, premise 2 fails closed and this plan must be re-vetted.
+  # 2026-10-25: pruned dead refs app-template-5.2.1, nextcloud-fleet-35.0.1 (executed/retired)
   - redis-fleet-8.10.2                # sun-attended:2026-10-25. Restarts office/nextcloud-redis (logs every user out);
                                       # every §4 gate is a live call into Nextcloud.
   - bitnamilegacy-exit-nextcloud-db   # blocked/unwindowed; restarts deployment/nextcloud if it is revived.

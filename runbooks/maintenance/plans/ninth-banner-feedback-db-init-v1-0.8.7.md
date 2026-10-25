@@ -38,7 +38,7 @@ touches:
 depends_on: []                        # pgvector-fleet-0.8.7 is already EXECUTED (retired 41aa7b83); its end state is asserted by
                                       # premise shared-postgresql-on-0.8.7 instead of a dead ref.
 conflicts_with:
-  - flux-distribution-2.9.6           # same: Flux controllers replaced under the reconcile this plan relies on.
+  # 2026-10-25: pruned dead refs flux-distribution-2.9.6 (executed/retired)
   - flux-reconciler-impersonation     # changes WHO applies the databases Kustomizations (incl. ninth-banner-feedback-db);
                                       # a prune failing on RBAC would be indistinguishable from this plan failing.
 exclusive: false

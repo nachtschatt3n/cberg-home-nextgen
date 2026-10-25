@@ -48,13 +48,13 @@ touches:
                                        # storage extension), and this plan rolls them twice.
 depends_on: []
 conflicts_with:                        # ONLY this field is honoured by window-scheduler.py.
+  # 2026-10-25: pruned dead refs flux-distribution-2.9.6 (executed/retired)
   - edot-collector-0.163.2             # Daemon collectors export OTLP into edot-collector.monitoring.svc:4317 and
                                        # §4.4 proves this plan via docs landing in ES THROUGH edot - a same-night
                                        # edot roll makes both plans' ES gates unattributable. SEQUENCE: this plan
                                        # FIRST, edot in a SEPARATE later slot (operator 2026-10-23).
   - flux-oci-chart-sources             # edits the SAME helmrelease.yaml (spec.chart -> chartRef)
   - helm-drift-detection               # writes spec.driftDetection into this same HelmRelease
-  - flux-distribution-2.9.6            # changes helm-controller, whose remediation/rollback §5 depends on
   - talos-linux-1.14.2                 # node roll re-creates every collector pod; §4.4 per-node gate
   - talos-linux-1.14.4                 # cannot attribute a missing node (same reason)
   - home-assistant-2026.10.2           # its gates read the same log/metric path

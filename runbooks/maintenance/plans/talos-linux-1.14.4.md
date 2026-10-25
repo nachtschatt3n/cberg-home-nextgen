@@ -100,12 +100,10 @@ depends_on: []                        # nothing unexecuted must land first. talc
                                       # 2026-10-04 (a7965251); premise multidoc-migration-applied-on-all-nodes is
                                       # the live gate.
 conflicts_with:                       # exclusive: true already keeps everything out of the slot; these are the plans
+  # 2026-10-25: pruned dead refs cilium-1.20.4 (executed/retired)
                                       # that ALSO mutate Talos machine config / the same nodes / the window's
                                       # instrument and must never share a night with this roll (reciprocity, §6.3).
   # talos-linux-1.14.2 is now `status: superseded` (superseded_by this plan, 2026-10-23): terminal, not listed.
-  - cilium-1.20.4                     # RECIPROCAL (it already lists this plan). CNI agent roll on all 3 nodes, scheduled
-                                      # sun-attended:2026-10-25 SOLO/exclusive, a week before this roll. Two CNI/datapath
-                                      # events on the same nodes in one night = no attributable cause. Never same slot.
   - edot-collector-0.163.2            # owns LB VIP edot-collector-talos-kmsg and the Talos kernel-log path read at §4;
                                       # a collector roll mid-reboot blinds the instrument (F-e8bb3113).
   - otel-operator-0.25.1              # restarts the operator + collectors that ship the monitoring signals §4 reads, and

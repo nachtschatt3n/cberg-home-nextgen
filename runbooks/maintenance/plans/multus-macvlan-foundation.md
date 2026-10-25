@@ -31,19 +31,8 @@ touches:
   shared: [cni-adjacent]            # do NOT co-schedule with any Cilium/Talos plan
 depends_on: []                      # independent of the EG migration
 conflicts_with:                       # ADDED 2026-10-05 (F-c688c50f close-out): reciprocity -- both name us already
+  # 2026-10-25: pruned dead refs talos-sysfs-power-caps (executed/retired)
   - talos-linux-1.14.2                # the "next talos-* plan" the note below asks to re-point at; node-reboot roll
-  - talos-sysfs-power-caps            # SysfsConfig via talosctl apply-config on the same 3 nodes; awaiting-soak
-                                      # Earlier history: RESOLVED 2026-08-16: was [talos-v1.13.8], dropped
-                                      # because that work SHIPPED (all 3 nodes on v1.13.8, plan
-                                      # retired). An unresolvable conflicts_with is silently
-                                      # UNENFORCED — it reads as a guard while being none.
-                                      #
-                                      # The interference SURFACE survives the id: never
-                                      # co-schedule this with a Talos node-reboot roll. A rolling
-                                      # drain wipes the ephemeral partition and rebuilds ~50 of 65
-                                      # Longhorn replicas per node; stacking CNI-layer changes on
-                                      # that is how 2026-08-16 produced a 34-volume / 37-pod attach
-                                      # pile-up. Re-point at the next talos-* plan when written.
 status: reference                     # was 'scheduled' with window:null — a contradiction:
                                       # a plan that believes it is scheduled but names no slot
                                       # silently never runs. 'reference' is the honest state:

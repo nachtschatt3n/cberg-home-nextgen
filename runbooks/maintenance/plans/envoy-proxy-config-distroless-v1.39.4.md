@@ -38,6 +38,7 @@ depends_on: []
   # The controller coupling is a premise (`controller-is-1.9.2`), not a plan dependency:
   # envoy-gateway-1.9.2 executed and was retired in 418faa1e; chart 1.9.2 re-measured live 2026-10-13.
 conflicts_with:                       # every id re-checked as an existing, non-terminal plan file 2026-10-23;
+  # 2026-10-25: pruned dead refs penpot-chart-1.10.0, external-dns-1.23.0 (executed/retired)
                                       # reasons in §6. DROPPED 2026-10-23 (no such plan file any more):
                                       # jellyfin-12.2.20261005, open-webui-17.0.0, coredns-1.48.2,
                                       # flux-fleet-0.60.0, kube-prometheus-stack-92.2.0.
@@ -45,10 +46,8 @@ conflicts_with:                       # every id re-checked as an existing, non-
   - authentik-web-max-requests        # reciprocal: names this plan; same path
   - n8n-2.39.8                        # reciprocal: names this plan (status executed; kept for the reciprocity check)
   - envoy-proxy-config-distroless-v1.40.0   # SAME pin line (blocked); two plans moving one pin never share a window
-  - penpot-chart-1.10.0               # gateway/envoy-external; restarts an app §4.3 diffs
   - talos-linux-1.14.2                # node drain competes for the single PDB disruption
   - talos-linux-1.14.4                # same
-  - external-dns-1.23.0               # public-edge: reads Gateway envoy-external's target
   - flux-reconciler-impersonation     # exclusive; rewrites how kustomize-controller applies this
   - flux-oci-chart-sources            # moves Flux sources; same §3/§5 apply-and-revert path
 capability_change: false              # same-behaviour patch: no new route, permission, API surface or

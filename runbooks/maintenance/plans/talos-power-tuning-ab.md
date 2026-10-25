@@ -39,22 +39,19 @@ touches:
                                       # monitoring: every gate reads Prometheus (capstats) - the instrument.
                                       # ci-runner-thermal-gate: the A/B runs set GATE_SECOND_POD_NODES= and GATE_MAX_CPU_PER_NODE=1
                                       # for its own triggers (one shard per node), so NO other CI may run meanwhile.
-depends_on:                           # talos-sysfs-power-caps is NOT here on purpose (2026-10-05): run-now.py preflight refuses
+depends_on: []
+  # 2026-10-25: pruned dead refs ci-runner-exclude-node02 (executed/retired)
                                       # an unmet depends_on while that plan sits in awaiting-soak, i.e. even AFTER its soak was
                                       # captured, and a retired (deleted) plan becomes a DEAD-REF. The real gate is the premise
                                       # soak-24h-recorded (the soak JSON exists only after CAPSTATS_OK); the ordering is in
                                       # conflicts_with below.
-  - ci-runner-exclude-node02          # the A/B runs on 01/03 only; the exclusion keeps the gate from placing a shard on 02
 conflicts_with:
-  - talos-sysfs-power-caps            # never the same run: its soak (3.10 evidence) measures the config this plan changes
+  # 2026-10-25: pruned dead refs talos-sysfs-power-caps, kube-prometheus-stack-91.9.0, immich-machine-learning-3.2.4, nextcloud-fleet-35.0.1 (executed/retired)
   - talos-linux-1.14.2                # rolling reboot; a reboot mid-A/B voids the variant and re-reads the card index
   - multus-macvlan-foundation         # also talosctl apply-config on the same nodes
-  - kube-prometheus-stack-91.9.0      # every gate reads Prometheus; a kps restart punches a hole in a run's capstats
-  - immich-machine-learning-3.2.4     # iGPU + CPU consumer on nuc14-03: its roll during a run changes that run's load
   - jellyfin-12.1                     # iGPU consumer on nuc14-01 (same reason)
   - jellyfin-config-rwo-migration     # iGPU consumer on nuc14-01 (same reason)
   # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
-  - nextcloud-fleet-35.0.1            # reciprocity (review-3): it names this plan (backup-restore stacking)
   - k8s-1.36.5                        # reciprocity (review-3): it names this plan
   - helm-drift-detection              # its P2 rolls intel-gpu-plugin (re-registers gpu.intel.com/i915 on every node)
 security_ref: null

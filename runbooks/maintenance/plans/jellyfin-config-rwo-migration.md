@@ -40,8 +40,8 @@ touches:
                                        # plan is deliberately NOT eligible for unattended nights.
 depends_on: []
 conflicts_with:
+  # 2026-10-25: pruned dead refs jellyfin-12.2.20261005 (executed/retired)
   - longhorn-1.13.0                   # 2026-10-05 longhorn review: reciprocity (new Longhorn volume + restore-proof on the engine it replaces)
-  - jellyfin-12.2.20261005             # reciprocal (2026-10-23): same helmrelease/jellyfin and pvc/jellyfin-config; this plan runs BEFORE it
   - jellyfin-12.1                      # SUPERSEDED (see jellyfin-12.2.20261005) — same helmrelease/jellyfin and
                                        # pvc/jellyfin-config; its backup_gate/restore steps name the
                                        # OLD volume `jellyfin-config`. This plan now runs BEFORE

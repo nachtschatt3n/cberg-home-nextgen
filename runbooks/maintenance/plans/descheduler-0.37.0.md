@@ -38,7 +38,7 @@ touches:
     - monitoring                      # §4 reads Prometheus (kube-state-metrics job/cronjob series)
 depends_on: []
 conflicts_with:
-  - flux-fleet-0.60.0                 # upgrades helm-/source-controller = this plan's apply AND revert path
+  # 2026-10-25: pruned dead refs flux-fleet-0.60.0 (executed/retired)
   - flux-oci-chart-sources            # its stage 4 moves this chart's source (flux-system/descheduler) to OCI
   - helm-drift-detection              # rewrites how helm-controller treats every HelmRelease incl. this one
   - flux-reconciler-impersonation     # exclusive; rewrites how helm-controller applies this HR

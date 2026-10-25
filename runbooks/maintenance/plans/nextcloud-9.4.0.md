@@ -34,15 +34,10 @@ touches:
   shared: []                                    # no Gateway/HTTPRoute, cert-manager, cilium,
                                                 # coredns, Longhorn or CIFS operation. Bundled
                                                 # mariadb subchart is byte-identical (20.5.5 both).
-depends_on:
-  - nextcloud-fleet-35.0.1                      # the image 34.0.4 -> 35.0.1 MAJOR. This chart's
-                                                # appVersion IS 35.0.1; applying it while 34.0.4
-                                                # runs breaks the operator's lockstep rule, stamps a
-                                                # false app.kubernetes.io/version, and FAILS the fleet
-                                                # plan's `our-chart-pin-is-9.3.0` premise. See §1.3:
-                                                # the preferred path is to FOLD this line into the
-                                                # fleet plan's Commit B and supersede this file.
+depends_on: []
+  # 2026-10-25: pruned dead refs nextcloud-fleet-35.0.1 (executed/retired)
 conflicts_with:
+  # 2026-10-25: pruned dead refs flux-fleet-0.60.0 (executed/retired)
   # - nextcloud-redis-hardening (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
     # same helmrelease.yaml + same helm release; its §5
                                                 # restores helmrelease.yaml from a parent that would
@@ -53,7 +48,6 @@ conflicts_with:
                                                 # chartRef in this exact block; §3's sed + gates
                                                 # would read nothing.
   - helm-drift-detection                        # patches helmrelease/nextcloud.
-  - flux-fleet-0.60.0                           # helm-controller restart mid-upgrade.
   - flux-reconciler-impersonation               # changes the identity office/nextcloud reconciles
                                                 # under; a reconcile failure would be misattributed.
 exclusive: false

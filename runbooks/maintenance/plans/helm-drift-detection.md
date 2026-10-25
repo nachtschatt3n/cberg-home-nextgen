@@ -62,6 +62,7 @@ touches:
     # names which shared surface it would touch.
 depends_on: []
 conflicts_with:
+  # 2026-10-25: pruned dead refs flux-fleet-0.60.0, chart-patches-coredns-reloader-blackbox, app-template-5.2.1, penpot-chart-1.10.0 (executed/retired)
   # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
   # - grafana-13.2.6 (RESOLVED 2026-09-30: executed + retired in nightly:2026-09-30, a64bb61e; ref removed per the dead-ref convention)
   # - affine-redis-8.10.2 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # §4.1 revision-identity diff: that plan upgrades
@@ -75,25 +76,17 @@ conflicts_with:
                                       # main NOW run and are retired on execution, and a ref to a
                                       # deleted plan is a --validate DEAD-REF.
   # Added 2026-09-28 (P1 re-plan). Two reasons, both about the P1 gates' validity:
-  - flux-fleet-0.60.0                 # Flux operator/instance bump: a kustomize-controller or
-                                      # flux CLI change can change patch/null semantics, which is
-                                      # exactly what §3.0.0 steps 3/6 measure. Never the same
-                                      # window; after it lands, re-run the gates (premises pin
-                                      # kustomize-controller v1.9 / distribution 2.9). Reciprocal.
   - flux-oci-chart-sources            # rewrites chart sources on HelmReleases incl. kube-system/
                                       # authentik (a null-bearing HR) — a same-window HR spec
                                       # change invalidates values-gate snapshot B.
   - jellyfin-12.1                     # edits media/jellyfin HR values (null-bearing); same reason.
   # - uptime-kuma-2.5.5-slim-rootless (RESOLVED 2026-10-04: executed sat-attended:2026-10-03 + retired d60d14f7; dead ref removed per the dead-ref convention)
     # edits monitoring/uptime-kuma HR values (null-bearing). Reciprocal.
-  - chart-patches-coredns-reloader-blackbox   # edits prometheus-blackbox-exporter HR (null-bearing). Reciprocal.
   # Reciprocals of plans that already name this one (a HelmRelease change in the P1 run
   # breaks rev-gate/values-gate attribution, and P1 must be the day's LAST HR change):
-  - app-template-5.2.1
   # - librechat-2.0.14 (RESOLVED 2026-09-30: executed + retired in nightly:2026-09-30, c75c5c39; ref removed)
   # - mariadb-chart-27.3.0 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
   # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
-  - penpot-chart-1.10.0
   - redis-fleet-8.10.2
   # traccar-6.16.0 REMOVED 2026-09-29: executed green in nightly:2026-09-29 (3a943035), plan retired (1a40b257)
   - otel-operator-0.23.0              # reciprocal (it names this plan); HR bump -> attribution

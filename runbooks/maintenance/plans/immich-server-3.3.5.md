@@ -31,17 +31,12 @@ touches:
                                               # Recreate frees then re-claims the slot. §4 reads Prometheus.
 depends_on: []
 conflicts_with:
-  - kube-prometheus-stack-92.11.0     # same instrument (symmetric: that plan lists this one).
+  # 2026-10-25: pruned dead refs kube-prometheus-stack-92.11.0, kube-prometheus-stack-92.2.0, kube-prometheus-stack-92.10.1, jellyfin-12.2.20261005, node-feature-discovery-0.20.0, flux-fleet-0.60.0 (executed/retired)
   - redis-fleet-8.10.2                # rolls media/immich-redis AND deployment/immich-server; its gates and ours would
                                       # each read the other's Recreate as their own.
-  - kube-prometheus-stack-92.2.0      # §4 reads Prometheus (up{job="immich-server"}, ALERTS) — the instrument.
-  - kube-prometheus-stack-92.10.1     # same instrument.
-  - jellyfin-12.2.20261005            # i915 claimant on the SAME node (k8s-nuc14-01) and same namespace.
   - jellyfin-config-rwo-migration     # i915 claimant in media; two GPU Recreates in one window confound both gates.
-  - node-feature-discovery-0.20.0     # a dropped GPU label leaves a RESTARTED i915 pod Pending — our Recreate is exactly that.
   - helm-drift-detection              # rolls the intel-gpu-plugin DaemonSet (i915 re-register under our new pod) and
                                       # changes how helm-controller applies this HR.
-  - flux-fleet-0.60.0                 # upgrades helm-controller = this plan's apply AND rollback path.
   - flux-oci-chart-sources            # may move the bjw-s chart source under this HR mid-window.
   - talos-linux-1.14.2                # node roll (exclusive, reboots every node incl. nuc14-03 = immich-postgres).
   - talos-linux-1.14.4                # same.

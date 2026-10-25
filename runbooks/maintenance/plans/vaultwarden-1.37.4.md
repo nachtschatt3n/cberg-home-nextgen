@@ -27,8 +27,7 @@ touches:
     - credentials                     # household password manager: every family client loses sync for the roll gap
 depends_on: []
 conflicts_with:
-  - kube-prometheus-stack-92.10.1     # sec 4 reads Prometheus (shared instrument); same-night kps bump invalidates the CONTROLs
-  - kube-prometheus-stack-92.2.0      # same reason (second open kps plan)
+  # 2026-10-25: pruned dead refs kube-prometheus-stack-92.10.1, kube-prometheus-stack-92.2.0 (executed/retired)
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. helmrelease/vaultwarden (same object)
   - flux-oci-chart-sources            # rewrites the bjw-s chart source block of this HR (same spec.chart block)
 exclusive: false

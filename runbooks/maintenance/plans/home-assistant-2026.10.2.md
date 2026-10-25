@@ -25,21 +25,16 @@ touches:
     - monitoring                        # Prometheus is a secondary instrument (restartCount)
 depends_on: []                          # the previous plan's otel-operator gate is NOT carried over: it guarded a high-risk minor with a batch-revert concern; a patch needs no such reference point
 conflicts_with:                         # every id below exists in runbooks/maintenance/plans/ on 2026-10-22 (dead refs pruned: kube-prometheus-stack-92.2.0, app-template-5.x, otel-operator-0.23.0, edot-collector-0.162.0 file is blocked-but-present and kept out)
+  # 2026-10-25: pruned dead refs cilium-1.20.4, spegel-0.8.0, kube-prometheus-stack-92.11.0, flux-distribution-2.9.6, flux-fleet-0.60.0, edot-collector-0.163.1 (executed/retired)
   - talos-linux-1.14.2                  # node reboots (HA is hostNetwork on nuc14-01; a drain mid-start strands the pod)
   - talos-linux-1.14.4
   - longhorn-1.13.0                     # storage engine under the volume HA's config + recorder DB live on
-  - cilium-1.20.4                       # CNI roll; hostNetwork pod still depends on the node datapath for the cluster-service backchannels (mosquitto, postgres)
-  - spegel-0.8.0                        # image-pull mirror: a half-rolled mirror can strand the new image pull on nuc14-01
-  - kube-prometheus-stack-92.11.0       # section 4.7 reads Prometheus; the shared instrument must not be rolling
-  - flux-distribution-2.9.6             # a Flux controller roll mid-reconcile makes the HR result unattributable
-  - flux-fleet-0.60.0
   - flux-reconciler-impersonation       # rewires the helm-controller identity for this HelmRelease
   - helm-drift-detection                # adds spec.driftDetection to this HelmRelease
   - flux-oci-chart-sources              # rewrites the HelmRelease chart source block
   - otbr-0.4.0                          # Thread border router in the same namespace feeding Matter/Thread entities; keep regressions attributable
   - teslamate-4.4.0                      # home-automation sibling feeding HA entities
   - n8n-chart-2.1.1                     # home-automation sibling with HA webhooks
-  - edot-collector-0.163.1              # log shipper roll drops pod logs in Elasticsearch while the 4.3 evidence is collected
 exclusive: false
 security_ref: F-4a4ebf8a               # fixable-critical finding on the 2026.10.1 image; detail stays in the DB (CLAUDE.md "Information Security")
 capability_change: false               # patch release: bug fixes and dependency bumps only, no new integration/feature/permission that we adopt

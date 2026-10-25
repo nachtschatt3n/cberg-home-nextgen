@@ -35,24 +35,10 @@ depends_on: []
   # (re-measured 2026-10-05). The coupling it carried is now the premise `controller-is-1.9.2`:
   # the data plane moves only on top of the CURRENT controller, which compiles 1.39.1 (same MINOR).
 conflicts_with:
-  - app-template-5.2.1                # declares gateway/envoy; rolls ~78 apps whose routes §4.3's
-                                      # per-host status diff reads -- an app roll mid-window fakes
-                                      # (or masks) a data-plane regression
-  - penpot-chart-1.10.0               # declares gateway/envoy-external; same §4.3 poisoning
+  # 2026-10-25: pruned dead refs app-template-5.2.1, penpot-chart-1.10.0, external-dns-1.23.0, coredns-1.48.2, chart-patches-coredns-reloader-blackbox, flux-fleet-0.60.0, kube-prometheus-stack-91.9.0, flux-distribution-2.9.6 (executed/retired)
   - talos-linux-1.14.2                # node roll drains proxy pods; PDB minAvailable 2 has ONE
                                       # disruption to give -- a drain and this roll would compete for it
-  - external-dns-1.23.0               # public-edge: reads Gateway envoy-external's target; a public
-                                      # DNS change mid-roll makes §4.3 external rows unattributable
-  - coredns-1.48.2                    # cluster DNS under the §4 Prometheus/blackbox instrument path
-  - chart-patches-coredns-reloader-blackbox   # rolls prometheus-blackbox-exporter = the probe_success
-                                      # instrument §4.4 reads, and CoreDNS
-  - flux-fleet-0.60.0                 # upgrades kustomize-controller, which applies gatewayclass.yaml
-                                      # and carries the §5 revert path
   - flux-reconciler-impersonation     # exclusive; rewrites how kustomize-controller applies this
-  - kube-prometheus-stack-91.9.0      # §2.7/§4.4 read Prometheus + Alertmanager rules: the window's
-                                      # instrument is shared infra (review 2026-10-05)
-  - flux-distribution-2.9.6           # exclusive; upgrades the Flux controllers that apply §3 and carry
-                                      # the §5 revert path (review 2026-10-05)
   - flux-oci-chart-sources            # moves Flux sources; same §3/§5 apply-and-revert path
 capability_change: false              # same-behaviour patch: 0 source/ changes upstream, no new route,
                                       # permission, API surface or exposure; the EnvoyProxy object only

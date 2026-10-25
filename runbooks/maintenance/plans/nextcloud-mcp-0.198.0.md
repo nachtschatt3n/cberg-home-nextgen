@@ -35,21 +35,14 @@ touches:
 depends_on: []                        # Flux `dependsOn: nextcloud` is ordering-only; no release note in range states
                                       # a minimum Nextcloud server version.
 conflicts_with:
+  # 2026-10-25: pruned dead refs app-template-5.2.1, nextcloud-fleet-35.0.1, kube-prometheus-stack-91.9.0 (executed/retired)
   - redis-fleet-8.10.2                # 2026-10-05 review: restarts office/nextcloud-redis (logs every user out); every §4 gate here calls into Nextcloud
   # - nextcloud-mcp-0.187.1 (DROPPED 2026-10-05: `superseded` = terminal, so the entry binds nothing. If
   #   option B (§1.6) revives it, re-add it here AND reciprocally there -- the two must never share a slot.)
-  - app-template-5.2.1                # nightly:2026-10-02 -- its Batch A sed edits THIS helmrelease.yaml (chart
-                                      # 5.1.0 -> 5.2.1, line 12) and re-renders this Deployment; a same-night run
-                                      # makes §4.2's roll unattributable. Reciprocal entry re-pointed 2026-10-01.
   # - nextcloud-redis-hardening (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
     # nightly:2026-10-01 -- quiesces the Nextcloud server + restarts its Redis;
                                       # every §4 contents gate is a live call into that server. Reciprocal re-pointed.
-  - nextcloud-fleet-35.0.1            # sun-attended:2026-10-18 -- Nextcloud 34 -> 35 MAJOR; §4.5/§4.6 read CalDAV
-                                      # from that server. After it runs, premise 2 fails closed -> re-vet here.
   - bitnamilegacy-exit-nextcloud-db   # blocked/unwindowed; restarts deployment/nextcloud if revived -- same reason.
-  - kube-prometheus-stack-91.9.0      # draft 2026-10-05 -- restarts Prometheus, the instrument §2.5/§4.9/§4.10 read
-                                      # (rule 4: a same-night kps bump vs a Prometheus-reading verification).
-                                      # Reciprocal already present in that plan's conflicts_with.
 exclusive: false
 security_ref: F-80459b23              # re-read 2026-09-29: the record is about the 0.184.5 image and names a newer
                                       # upstream tag as the remedy -- it genuinely applies. Detail stays on the record.

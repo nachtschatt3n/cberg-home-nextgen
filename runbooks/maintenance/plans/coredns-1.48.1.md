@@ -32,31 +32,21 @@ touches:
     - monitoring                      # §4 reads Prometheus + blackbox (read-only; the instrument is shared)
 depends_on: []
 conflicts_with:
-  - chart-patches-coredns-reloader-blackbox   # its item C bumps THE SAME HelmRelease to 1.47.1 (pin kept);
-                                              # this plan supersedes that item. Never the same window.
-                                              # §3 tolerates either order (anchor accepts 1.47.0 or 1.47.1).
+  # 2026-10-25: pruned dead refs chart-patches-coredns-reloader-blackbox, flux-fleet-0.60.0, external-dns-1.23.0, app-template-5.2.1, penpot-chart-1.10.0, nextcloud-fleet-35.0.1, unpoller-5.4.0 (executed/retired)
   - talos-linux-1.14.2                # exclusive node roll; reschedules both CoreDNS pods and touches coredns
   # talconfig-multidoc-migration: EXECUTED now:2026-10-04 and retired (10bee773); dead ref removed 2026-10-05 (sweep 481b9c1f)
   - flux-reconciler-impersonation     # exclusive; changes how helm-controller applies this HR
-  - flux-fleet-0.60.0                 # upgrades source/helm-controller = the §5 revert path
   - flux-oci-chart-sources            # moves HelmRepository sources incl. coredns, declares dns-internal
   - helm-drift-detection              # adds driftDetection to every HR incl. this one
   # - envoy-gateway-1.9.2 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
     # declares shared dns; its gates resolve through CoreDNS
-  - external-dns-1.23.0               # DNS-plane change; its verification resolves names
-  - app-template-5.2.1                # rolls ~78 workloads whose readiness resolves through CoreDNS
   # - uptime-kuma-2.5.5-slim-rootless (RESOLVED 2026-10-04: executed sat-attended:2026-10-03 + retired d60d14f7; dead ref removed per the dead-ref convention)
     # its §4 reads Kuma monitors that resolve via CoreDNS
   # - mariadb-chart-27.3.0 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
   # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
     # tenants re-resolve the DB service on reconnect
-  - penpot-chart-1.10.0               # its nginx resolver moves to cluster DNS; gate resolves via CoreDNS
   - redis-fleet-8.10.2                # consumers re-resolve on reconnect
-  - nextcloud-fleet-35.0.1            # lists the sibling coredns plan for the same reason
   - edot-collector-0.162.0            # lists the sibling coredns plan (monitoring/DNS gates)
-  - unpoller-5.4.0                    # lists the sibling coredns plan
-                                      # No kube-prometheus-stack plan is open (91.4.1 executed). If one
-                                      # appears it MUST be added here: §4 reads Prometheus.
 capability_change: false              # same image coredns/coredns:1.14.7 (identical digest), byte-identical
                                       # Corefile; the new securityContext fields (runAsNonRoot, uid/gid 65532,
                                       # seccomp RuntimeDefault) equal what the pods already run as (image

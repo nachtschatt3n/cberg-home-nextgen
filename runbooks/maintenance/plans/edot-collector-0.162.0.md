@@ -68,6 +68,7 @@ touches:
                                   # backend is briefly unavailable.
 depends_on: []
 conflicts_with:                   # HARD slot exclusions (the only field
+  # 2026-10-25: pruned dead refs app-template-5.2.1, chart-patches-coredns-reloader-blackbox (executed/retired)
                                   # window-scheduler.py honours; it treats a
                                   # declaration in EITHER direction as symmetric).
   - otel-operator-0.23.0          # scheduled nightly:2026-10-03. It rolls
@@ -81,19 +82,6 @@ conflicts_with:                   # HARD slot exclusions (the only field
                                   # own regression. Its frontmatter carried the
                                   # reciprocal ref for 0.161.0 (removed on that plan's
                                   # retirement) — see §6 for the readability follow-up.
-  - app-template-5.2.1            # scheduled nightly:2026-10-02. Rolls ~78 workloads
-                                  # (incl. `monitoring`) in one reconcile: a mass pod
-                                  # roll perturbs exactly the log-record and
-                                  # metric-point volumes §4.1 gates on (the metric
-                                  # band is ±20% on a series that is flat to <1% only
-                                  # when nothing is churning), so a same-night run
-                                  # can false-fail this plan into a needless revert.
-  - chart-patches-coredns-reloader-blackbox  # rolls CoreDNS. All three ES exporters
-                                  # resolve elasticsearch-es-http.monitoring.svc
-                                  # through it; a DNS blip during §4 surfaces as
-                                  # non-success outcomes in §4.2(b), which carries
-                                  # revert authority. That plan already declares the
-                                  # same mechanism against uptime-kuma/mariadb/redis.
   - talos-linux-1.14.2            # ADDED 2026-10-01 (review b23be87b). A node roll
                                   # drains/reboots each node in turn: it evicts this
                                   # single replica (RWO queue PVC re-attaches on the

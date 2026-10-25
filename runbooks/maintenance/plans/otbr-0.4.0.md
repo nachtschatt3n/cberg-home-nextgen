@@ -35,16 +35,15 @@ touches:
     - monitoring                      # gate 4.8 reads kube-state-metrics through Prometheus
 depends_on: []
 conflicts_with:                       # pruned 2026-10-23: dropped kube-prometheus-stack-92.2.0 (no such plan)
+  # 2026-10-25: pruned dead refs cilium-1.20.4, flux-distribution-2.9.6 (executed/retired)
                                       # and home-assistant-2026.10.1 (superseded -> 2026.10.2)
   - talos-linux-1.14.2                # node roll reboots k8s-nuc14-03 (our pinned node) and flushes host netfilter
   - talos-linux-1.14.4                # same
   - home-assistant-2026.10.2          # HA restart flaps the otbr/thread integrations and the HA pod is the
                                       #   instrument for gate 4.5 (_meshcop browse) -- serialize
-  - cilium-1.20.4                     # Cilium owns FORWARD/nat chains on the same node; this pod adds its own
   - flux-oci-chart-sources            # rewrites this HR's chart source (bjw-s app-template)
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. helmrelease/otbr
   - flux-reconciler-impersonation     # changes the identity helm-controller applies home-automation/ with
-  - flux-distribution-2.9.6           # upgrades the Flux controllers that apply this HR and revert it
   - talos-power-tuning-ab             # node-level change on the same node set (power caps); keep attribution clean
   - multus-macvlan-foundation         # cni-adjacent work in home-automation that names otbr (stays hostNetwork)
 exclusive: false

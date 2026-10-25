@@ -34,16 +34,11 @@ touches:
                                       # authentik, no storage, no CNI, no monitoring change.
 depends_on: []
 conflicts_with:
+  # 2026-10-25: pruned dead refs cilium-1.20.4, kube-prometheus-stack-92.2.0, kube-prometheus-stack-92.10.1, flux-fleet-0.60.0, flux-distribution-2.9.6 (executed/retired)
   - wazuh-100404-ci-build-tuning      # reloads the Wazuh manager's falco rule family; a falco re-roll the same night
                                       # confounds both plans' SIEM-volume gates (and section 4.4 here)
   - talos-linux-1.14.4                # exclusive node roll; restarts falco on every node mid-verification
   - talos-linux-1.14.2                # same (awaiting-go, superseded-by-1.14.4 pending)
-  - cilium-1.20.4                     # exclusive; CNI roll fires cilium init-container execs falco would record + its
-                                      # canaries read ds/falco-log-rotate
-  - kube-prometheus-stack-92.2.0      # exclusive; section 4.1 reads Prometheus (kube-state-metrics) + ALERTS
-  - kube-prometheus-stack-92.10.1     # exclusive; same reason
-  - flux-fleet-0.60.0                 # swaps helm-controller, which performs this upgrade and the section 5 revert
-  - flux-distribution-2.9.6           # same helm-controller apply/revert path
   - flux-reconciler-impersonation     # blocked; changes how helm-controller applies every HR
   - flux-oci-chart-sources            # rewires chart sources incl. ns security (falco); confounds which chart applied
   - helm-drift-detection              # writes a field on every HelmRelease incl. falco

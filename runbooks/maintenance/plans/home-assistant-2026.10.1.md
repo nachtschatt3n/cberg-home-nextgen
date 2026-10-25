@@ -31,25 +31,18 @@ depends_on: []                          # DELIBERATELY empty. The otel-operator 
                                         # gate on the wrong object. The SOLE gate is premise otel-operator-helmrelease-ready (Ready=True); it prints
                                         # False today and this plan must not run until it prints True.
 conflicts_with:
+  # 2026-10-25: pruned dead refs kube-prometheus-stack-92.2.0, app-template-5.3.0, app-template-5.2.1, flux-distribution-2.9.6, flux-fleet-0.60.0, iobroker-12.0.0, pgvector-fleet-0.8.7, nextcloud-fleet-35.0.1 (executed/retired)
   - talos-linux-1.14.2                  # node reboots (HA is hostNetwork on nuc14-01; a drain mid-start strands the pod). Window 2026-11-01 today, but exclusive
   - longhorn-1.13.0                     # storage-engine minor on the volume HA's config + recorder DB live on; exclusive
   - k8s-1.36.5                          # control-plane roll (status superseded; listed so a revival cannot share the slot)
-  - kube-prometheus-stack-92.2.0        # section 4 reads Prometheus; the shared instrument must not be rolling
-  - app-template-5.3.0                  # re-renders home-automation/home-assistant (label-only consumer) -> a second Helm upgrade of the SAME release; Recreate means no pod roll but it muddies GEN_CHANGED attribution
-  - app-template-5.2.1                  # superseded by 5.3.0, same files
   - flux-reconciler-impersonation       # rewires the helm-controller identity for this HelmRelease
   - helm-drift-detection                # adds spec.driftDetection to this HelmRelease
   - flux-oci-chart-sources              # rewrites the HelmRelease chart source block
-  - flux-distribution-2.9.6             # a Flux controller roll mid-reconcile makes an HR result unattributable
-  - flux-fleet-0.60.0
   - otel-operator-0.23.0                # never in the SAME slot (its failure mode would pollute the log/metric reads); NOT a depends_on, see above
   - edot-collector-0.162.0              # log shipper; section 4's error-log scan uses the HA API, but the collector roll drops pod logs in Elasticsearch
-  - iobroker-12.0.0                     # home-automation sibling, scheduled nightly 2026-10-15; kept apart so a hub regression is attributable (it runs nightly 10-15, before this slot)
   - teslamate-4.4.0                      # home-automation sibling feeding HA entities (tesla integrations in section 1.4)
   - n8n-2.39.8                          # home-automation sibling with HA webhooks
   - n8n-chart-2.1.1
-  - pgvector-fleet-0.8.7                # touches home-automation postgres consumers read through HA?  kept conservative: shared namespace restarts
-  - nextcloud-fleet-35.0.1              # no resource overlap, but both are backup-restore class and human-verified; the scheduler flags RISK-CLASS STACKING + OVER-TIME when they share a slot (150 + 85 min > 180), hence the separate slot
 exclusive: false
 security_ref: F-b4372efb               # fixable-CVE finding on the 2026.9.4 image; detail stays in the DB (CLAUDE.md "Information Security"). 2026.10.1 is the newer upstream tag that finding waits for.
 capability_change: true                # monthly release adds integrations/frontend features and removes the legacy auth mode; behaviour changes by design

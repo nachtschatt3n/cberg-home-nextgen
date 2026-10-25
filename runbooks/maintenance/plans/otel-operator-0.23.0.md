@@ -107,6 +107,7 @@ depends_on:
                                        # first also removes the four Prometheus CRDs from this
                                        # plan's write set entirely. Full reasoning in §6.
 conflicts_with:                        # HARD slot exclusions — window-scheduler.py keys on
+  # 2026-10-25: pruned dead refs kube-prometheus-stack-91.9.0 (executed/retired)
                                        # this field ONLY; a shared:[monitoring] overlap is a
                                        # post-placement warning, and §6 prose schedules nothing.
   # RESOLVED 2026-09-20: prometheus-crd-ownership EXECUTED (1a551276) and retired (9d87171b) — there is no longer a plan to collide with, so this guard protected nothing. Removed per the dead-ref convention (F-6acb231c).
@@ -116,9 +117,6 @@ conflicts_with:                        # HARD slot exclusions — window-schedul
   # RESOLVED 2026-09-28: kube-prometheus-stack-91.4.1 executed (91.5.2, 2026-09-26) -- ref removed.
                                        # A FUTURE kube-prometheus-stack plan must be added here:
                                        # §4.6 of THIS plan reads Prometheus (shared instrument).
-  - kube-prometheus-stack-91.9.0       # ADDED 2026-10-05: that future plan (re-point of the
-                                       # executed 91.4.1 ref; reciprocal). Restarts the
-                                       # Prometheus §4.6 reads.
   - helm-drift-detection               # ADDED 2026-09-28 (review): its P1/P3 write spec.driftDetection
                                        # into every HelmRelease, including this plan's helmrelease.yaml.
   # - edot-collector-0.161.0 (RESOLVED 2026-09-26: executed + retired in now:2026-09-26; ref removed) # the daemon collectors export OTLP to

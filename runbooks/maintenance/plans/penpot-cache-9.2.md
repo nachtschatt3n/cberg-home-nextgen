@@ -28,7 +28,8 @@ touches:
     - deployment/penpot-exporter      # NOT edited; holds one client connection, reconnects
   shared: []                          # dedicated cache, no PVC, no route; not a shared redis
 depends_on: []
-conflicts_with: [kube-prometheus-stack-91.9.0, flux-reconciler-impersonation, penpot-chart-1.10.0]
+conflicts_with: [flux-reconciler-impersonation]
+  # 2026-10-25: pruned dead refs kube-prometheus-stack-91.9.0, penpot-chart-1.10.0 (executed/retired)
                                       # kube-prometheus-stack-91.9.0: §4 reads kube-state-metrics
                                       #   through Prometheus — the window's instrument.
                                       # flux-reconciler-impersonation: changes how kustomize/helm

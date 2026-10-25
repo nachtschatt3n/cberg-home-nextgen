@@ -21,12 +21,11 @@ touches:
     - "pod/tnb-* (ci-runner, transient verification run)"
   shared: [ci-runner-thermal-gate, node-power-thermal, igpu-i915, monitoring]
 depends_on:
+  # 2026-10-25: pruned dead refs ci-runner-exclude-node02 (executed/retired)
   - talos-power-tuning-ab             # the power cap is the new PRIMARY control: its final PL1/PL2/tau/EPP must be live and
                                       # committed before the temperature thresholds are retired.
-  - ci-runner-exclude-node02          # the rework keeps GATE_EXCLUDE_NODES; written against the post-exclusion file.
-conflicts_with:
-  - talos-sysfs-power-caps            # its 3.10 soak step edits GATE_OPEN_BELOW_C in the same file
-  - kube-prometheus-stack-91.9.0      # the gate and the verification read Prometheus
+conflicts_with: []
+  # 2026-10-25: pruned dead refs talos-sysfs-power-caps, kube-prometheus-stack-91.9.0 (executed/retired)
 security_ref: null
 capability_change: false              # no new feature/route/permission/API/exposure: same CI, different admission control.
 rollback_class: git-revert            # Mac-side script read fresh every tick: a revert is live on the next tick

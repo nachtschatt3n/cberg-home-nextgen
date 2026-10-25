@@ -37,6 +37,7 @@ touches:
     - monitoring                      # the gates' instrument (Prometheus is reached through the same apiserver VIP)
 depends_on: []
 conflicts_with:
+  # 2026-10-25: pruned dead refs kube-prometheus-stack-92.2.0, nocodb-2026.09.1, nextcloud-fleet-35.0.1, jellyfin-12.2.20261005 (executed/retired)
   - talos-linux-1.14.2                # exclusive node roll (11-01): reboots every node and restarts etcd three times; also
                                       # rewrites the same machine configs. Never the same night, and 11-08 is 7 days later on
                                       # purpose so the roll's own pre-gates (no unexplained leader change in 2 h) are not
@@ -46,16 +47,8 @@ conflicts_with:
   - multus-macvlan-foundation         # reference plan, also talosctl apply-config on the same nodes
   - longhorn-1.13.0                   # exclusive storage-engine upgrade (11-15): its gates also read etcd health; one risky
                                       # change per window
-  - kube-prometheus-stack-92.2.0      # authoring rule 4: every gate here reads Prometheus; a Prometheus restart the same
-                                      # night blanks the instrument. Any future kube-prometheus-stack plan must be added too.
-  - nocodb-2026.09.1                  # had the same sun-attended:2026-11-08 slot (45 min, backup-restore with 12 knex
-                                      # migrations). Operator rule: ONE risky change per window; and the house rollback-class
-                                      # stacking rule (two backup-restore plans in one slot leave no rollback capacity for
-                                      # either). RESOLVED 2026-10-13: this plan took 11-08, nocodb moved to sat-attended:2026-11-21.
-  - nextcloud-fleet-35.0.1            # backup-restore stacking rule (declared on both sides by every backup-restore plan)
   - n8n-2.39.8                        # backup-restore stacking rule
   - paperless-db-13.0.2               # backup-restore stacking rule
-  - jellyfin-12.2.20261005            # backup-restore stacking rule (supersedes jellyfin-12.1, which is being retired; 12.1 is no longer listed)
 exclusive: false                      # not exclusive: nothing structural forbids a no-risk co-tenant, but see nocodb above
 security_ref: null
 capability_change: true               # TRUE: node-loss failover goes from ~1-2 s to ~5-10 s (randomised election timeout 5-10 s),

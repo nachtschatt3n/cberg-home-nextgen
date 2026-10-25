@@ -45,6 +45,7 @@ touches:
                                       # SystemBackup; no CIFS StorageClass/PVC is touched
 depends_on: []
 conflicts_with:
+  # 2026-10-25: pruned dead refs flux-fleet-0.60.0, kube-prometheus-stack-91.9.0, flux-distribution-2.9.6, pgvector-fleet-0.8.7, nextcloud-fleet-35.0.1 (executed/retired)
   - etcd-timeouts-5000-500           # reciprocal (2026-10-13): that plan names this one; etcd-timeouts lands sun 11-08; one risky change per window, gates read etcd health
   - talos-linux-1.14.2                # node roll restarts instance-managers + rebuilds replicas; never
                                       # pair with a storage-engine upgrade (same rule as 34abe2bb)
@@ -55,15 +56,9 @@ conflicts_with:
   # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
     # its gates read Longhorn backup freshness; Phase B moves every
                                       # engine under it
-  - flux-fleet-0.60.0                 # Flux controllers are the instrument that judges the storm;
-                                      # changing them in the same slot makes §4.1 unreadable
   - flux-oci-chart-sources            # moves the longhorn HelmRepository source (shared storage/longhorn, flux)
   - flux-reconciler-impersonation     # Flux control-plane change; same reasoning as flux-fleet
   - bitnamilegacy-exit-nextcloud-db   # allocates a new Longhorn volume
-  - kube-prometheus-stack-91.9.0      # vetted nightly 10-08; restarts the Prometheus §4.3 reads (authoring rule 4)
-  - flux-distribution-2.9.6           # upgrades the Flux controllers that judge the storm (§4.1); same reasoning as flux-fleet
-  - pgvector-fleet-0.8.7              # rolls Postgres StatefulSets on Longhorn volumes; IO/attach churn would blur §4/Phase B attribution
-  - nextcloud-fleet-35.0.1            # rolls Nextcloud incl. the nextcloud-config RWX share-manager (§4.8) + occ migrations on Longhorn
 exclusive: true                       # the storm fans out to 35 dependents (+ transitive); any other
                                       # plan's Flux-Ready gate in the same slot reads false-red, and
                                       # a one-way storage change must not share attribution.
