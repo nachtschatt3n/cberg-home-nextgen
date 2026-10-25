@@ -62,13 +62,12 @@ conflicts_with:
   - bitnamilegacy-exit-nextcloud-redis  # nextcloud-redis rewrite; same file/restart
   - paperless-db-13.0.2                 # vetted — restarts paperless-ngx and its DB; keep the celery-broker swap out of that slot.
   - python-fleet-3.15.0                 # draft sat-attended:2026-11-14 — rolls ai/ + office/ app images that are redis consumers
+  - immich-server-3.3.5                 # reciprocity (2026-10-25): rolls immich-server, the BullMQ consumer of immich-redis (leg 5); never the same night
   - openclaw-2026.10.5                  # 2026-10-31 attended full day, namespace ai
   # Platform serialisation (a roll of these confounds every reconnect gate in §4):
   - helm-drift-detection                # its gate asserts Helm revisions are IDENTICAL across all releases; this plan upgrades 5 releases
   - flux-oci-chart-sources              # re-points chart sources incl. open-webui / app-template releases
   - flux-reconciler-impersonation       # changes WHO applies every Kustomization/HelmRelease this plan relies on
-  - flux-distribution-2.9.6             # Flux controllers upgrade under this plan's GitOps legs (awaiting-go, deferred from sat 2026-10-24)
-  - cilium-1.20.4                       # CNI roll (retargeted from 1.20.3 on 2026-10-24; draft) drops every client-server connection
   - talos-linux-1.14.4                  # node reboots (sun 2026-11-01)
   - coredns-1.48.1                      # a CoreDNS roll while consumers re-resolve their redis Service names confounds the reconnect gates
   - longhorn-1.13.0                     # sun 2026-11-15 — two Longhorn PVCs are remounted here; never stack on a storage upgrade
@@ -77,6 +76,8 @@ conflicts_with:
   - envoy-proxy-config-distroless-v1.40.0  # public edge roll hides app reachability gates
   - envoy-proxy-config-distroless-v1.39.4  # same
   - etcd-timeouts-5000-500              # control-plane timing change under 8 rolling Deployments
+  # Dropped 2026-10-25 as executed/retired (no longer open plans): flux-distribution-2.9.6, cilium-1.20.4. If another CNI or Flux-controller
+  # plan is filed, re-add it (a CNI roll drops every client-server connection; a controller roll confounds the GitOps legs).
   # Dropped 2026-10-24 as dead refs: flux-fleet-0.60.0, app-template-5.2.1, nextcloud-fleet-35.0.1,
   # chart-patches-coredns-reloader-blackbox (plans no longer exist / executed); no open kube-prometheus-stack plan.
   # If a kube-prometheus-stack-* plan reappears, add it (§4 reads Prometheus).
@@ -96,7 +97,7 @@ finding_refs: [F-d2bb762b, F-8c50c463, F-625d3a3f, F-c637a09a, F-3fcdca7b, F-3a7
 status: draft   # RE-PLANNED 2026-10-24 after sat-attended deferral (open-webui now v0.12.3 / chart 17.0.0; nextcloud-redis now requirepass). Prior review (ready-for-go@2026-09-28) is void.
 review: null
                 # No operator GO recorded; HUMAN-GATED.
-window: "sun-attended:2026-11-29"   # was sat-attended:2026-10-24 (deferred). Free Sunday: clear of cilium 10-25, talos 11-01, etcd/envoy 11-08, longhorn 11-15, flux-oci 11-22 and the Saturdays 10-31/11-07/11-14. sat budget (70) leaves no slack for 70 min.
+window: "sun-attended:2026-11-29"   # was sat-attended:2026-10-24 (deferred). Free Sunday: clear of talos 11-01, etcd/envoy 11-08, longhorn 11-15, flux-oci 11-22 and the Saturdays 10-31/11-07/11-14. sat budget (70) leaves no slack for 70 min.
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/verification-contents-not-shape.md
@@ -268,8 +269,11 @@ an ATTENDED low-traffic slot*. Honoured here (leg 8, last, attended, announced).
 
 Only the sidecar changes. The sidecar runs the image defaults (no `command`, no volume,
 RDB snapshots to the container filesystem) and holds 4 keys of websocket/pubsub state.
-Whether the open-webui app (v0.12.3) re-attaches in-process after a redis restart is NOT
-established from source here, so §4 leg 3 measures it (client count returns to the
+Upstream evidence for in-process re-attach (open-webui `v0.12.3`, `backend/open_webui/socket/main.py`, read 2026-10-25): the websocket
+manager is `socketio.AsyncRedisManager` (line 116), and `redis_event_listener()` (line ~1227) runs `pubsub.subscribe`/`listen()` inside a `while True` that
+catches every exception, logs `Redis event listener failed. Retrying.`, sleeps `REDIS_PUBSUB_RECONNECT_INTERVAL` and doubles it up to
+`REDIS_PUBSUB_MAX_RECONNECT_INTERVAL` (both imported at lines 49-50): a redis restart is designed to be survived, with exponential back-off. That is
+source reading, not a measurement on this cluster, so §4 leg 3 still measures it (client count returns to the
 baseline) and gives the fallback (`kubectl rollout restart sts/open-webui -n ai`: image
 and DB unchanged, so safe, but it ends the user's sessions on that pod briefly).
 
@@ -653,7 +657,7 @@ PASS: `aof_enabled:1`, `loading:0`, both statuses `ok`, and
 `err` status, or an empty dir (AOF not on the PVC any more). No consumer to
 check: CLIENT LIST showed none. The AOF is empty (0 keys), so this leg proves the
 AOF LOAD PATH and config survive, not data survival — leg 4 (tube-archivist,
-50 keys incl. a durable one) is the persisted-DATA proof.
+65 keys incl. a durable one) is the persisted-DATA proof.
 
 **Leg 2 — superset.** `v_floor databases superset-redis-official; v_rt databases superset-redis-official`, then
 CONTENTS ASSERTION: the celery worker reconnected in-process and re-declared its queue —
@@ -691,8 +695,8 @@ user is a FAIL), send one message to an Ollama model and receive a streamed repl
 CONTENTS ASSERTION: the persisted state came back —
 ```bash
 kubectl exec -n download deploy/tube-archivist-redis -- sh -c 'redis-cli exists ta:cookie; redis-cli dbsize; redis-cli info persistence | grep -E "^(loading|rdb_last_bgsave_status):"'
-#   PASS: exists=1, dbsize >= 40 [50], loading:0, rdb_last_bgsave_status:ok
-#   FAILS as exists=0 / dbsize a handful of fresh celery keys: dump.rdb was NOT loaded -> §5 leg-4 restore.
+#   PASS: exists=1, dbsize >= 55 [65 on the 2026-09-27/10-24 baseline, 66 on 2026-10-25], loading:0, rdb_last_bgsave_status:ok
+#   FAILS as exists=0 / dbsize a handful (~5-10) of fresh celery keys: dump.rdb was NOT loaded -> §5 leg-4 restore.
 kubectl exec -n download deploy/tube-archivist -- sh -c 'cd /app && celery -A task inspect ping 2>&1' | grep -c pong   # PASS: >= 1
 ```
 
@@ -747,14 +751,33 @@ kubectl exec -n office deploy/nextcloud-redis -- sh -c 'env -u REDISCLI_AUTH red
 #   FAILS as PONG: the server came up unauthenticated (wrapper/args lost) — STOP, §5 leg 8.
 #   Positive control: the same command printed NOAUTH on the 8.10.1 pod in §2 f.
 kubectl exec -n office deploy/nextcloud-redis -- redis-cli ping    # PASS: PONG (auth'd). FAILS as NOAUTH: password mismatch with secret/nextcloud-config.
-kubectl logs -n office deploy/nextcloud-redis --tail=20 | grep -ci 'REDIS_PASSWORD is empty'   # PASS: 0. FAILS as >=1: wrapper refused to start (secret key missing).
-kubectl logs -n office deploy/nextcloud-notify-push --tail=50 | grep -ciE 'NOAUTH|WRONGPASS|AUTH failed|connection refused'   # PASS: 0 within 3 min of the swap (a transient reconnect line BEFORE the swap time is not counted)
+#   (A wrapper that refused to start for an empty REDIS_PASSWORD leaves the pod CrashLooping, which wait_img/v_floor already
+#   fail on; the former separate log grep for it is dropped as redundant.)
 ```
-then
+Notify-push: the absence grep is paired with a POSITIVE signal. Its logs are normally silent (0 lines in 24 h, measured 2026-10-25), so a
+clean log alone proves nothing; the positive signal is that its pod IP is a connected client of the NEW redis. Run in ONE call (shell
+variables do not survive separate calls):
+```bash
+SINCE=$(kubectl get pod -n office -l app=nextcloud-redis -o jsonpath='{.items[0].status.startTime}')   # new redis pod start = swap time
+NPIP=$(kubectl get pod -n office -l app=nextcloud-notify-push -o jsonpath='{.items[0].status.podIP}')
+echo "since=$SINCE notify-push-ip=$NPIP"
+for i in $(seq 1 18); do
+  C=$(kubectl exec -n office deploy/nextcloud-redis -- redis-cli client list | grep -c "addr=$NPIP:")
+  echo "t=$((i*10))s notify_push_clients=$C"; [ "$C" -ge 1 ] && { echo NOTIFY_PUSH_CONNECTED; break; }; sleep 10
+done; [ "$C" -ge 1 ] || echo NOTIFY_PUSH_NOT_CONNECTED
+kubectl logs -n office deploy/nextcloud-notify-push --since-time="$SINCE" | grep -ciE 'NOAUTH|WRONGPASS|AUTH failed|connection refused'
+#   PASS: NOTIFY_PUSH_CONNECTED within 3 min AND the grep prints 0. FAILS as NOTIFY_PUSH_NOT_CONNECTED (never re-attached, or wrong
+#   password) or a non-zero grep. Control measured 2026-10-25 on the 8.10.1 redis: the notify-push pod IP appears in CLIENT LIST
+#   (1 connection), so the positive half can pass; only that half can fail on a silent log. If notify-push restarted itself on redis
+#   loss (expected, §3) its IP changed: the labelled lookup takes the NEW pod's IP.
+```
+Then the Nextcloud HTTP gate and notify-push readiness (own fence, one call):
+```bash
 kubectl port-forward -n office svc/nextcloud 18082:8080 >/dev/null 2>&1 & PF=$!; sleep 5
 curl -s http://127.0.0.1:18082/status.php     # PASS: "installed":true,"maintenance":false
 kill $PF 2>/dev/null
 kubectl get deploy -n office nextcloud-notify-push -o jsonpath='{.status.readyReplicas}{"\n"}'   # PASS: 1 within 3 min (it may restart itself once on redis loss — did so twice 2026-09-27; that is expected, a CrashLoop is not)
+#   FAILS as: status.php empty or "maintenance":true; readyReplicas empty (0 ready).
 ```
 CONTENTS ASSERTION: the first `nextcloud-cron` Job AFTER the swap completes
 and repopulates the cache — `kubectl get jobs -n office --sort-by=.metadata.creationTimestamp | grep nextcloud-cron | tail -1`
@@ -855,7 +878,7 @@ Leg-specific additions:
   `kubectl rollout restart sts/open-webui -n ai`. No sqlite restore path exists or is needed.
 - **Leg 8 (nextcloud-redis, password path):** the revert swaps only the image line, so the wrapper,
   `secret/nextcloud-config` and the NetworkPolicy are identical on both sides. After it, assert
-  the same three lines as §4 leg 8 (NOAUTH unauth'd, PONG auth'd, no "REDIS_PASSWORD is empty"). If
+  the same checks as §4 leg 8 (NOAUTH unauth'd, PONG auth'd, notify-push CONNECTED). If
   the server is up but `PONG` fails with NOAUTH while auth'd, the secret and the running server
   disagree: `kubectl rollout restart deploy/nextcloud-redis -n office` (re-reads the secret), never
   disable `requirepass`. Sessions/locks are lost either way (non-persistent); users sign in again.
@@ -877,16 +900,15 @@ Cleanup after a successful window (not a rollback): delete the local
 - **Nextcloud users are signed out** at leg 8 — announce; attended slot only.
 - **`conflicts_with`** was rebuilt 2026-10-24: Nextcloud-side plans (nextcloud-9.4.1,
   whiteboard, mcp, the bitnamilegacy exits, paperless-db) are listed because they restart
-  consumers or the redis files; platform plans (cilium, talos, coredns, longhorn, flux,
+  consumers or the redis files; platform plans (talos, coredns, longhorn, flux-oci/reconciler,
   envoy, authentik, etcd) because a CNI/node/edge/storage change confounds every reconnect
-  gate. Dead refs dropped (flux-fleet-0.60.0, app-template-5.2.1, nextcloud-fleet-35.0.1,
+  gate. Dead refs dropped (flux-distribution-2.9.6 and cilium-1.20.4, executed, 2026-10-25; flux-fleet-0.60.0, app-template-5.2.1, nextcloud-fleet-35.0.1,
   chart-patches-coredns-reloader-blackbox, kube-prometheus-stack-*). **Order:**
   nextcloud-9.4.1 (nightly 10-28) and nextcloud-whiteboard-2.1.2 (nightly 10-29) are
   expected to have executed by 11-29; if either slipped into this slot, serialize them
   BEFORE leg 8, never in the same hour. If a new kube-prometheus-stack plan
   appears, add it here (§4 reads Prometheus).
-- **Window choice:** `sun-attended:2026-11-29`. Occupied attended slots: cilium sun 10-25,
-  openclaw sat 10-31, talos sun 11-01, otel-operator + helm-drift sat 11-07, etcd/envoy sun
+- **Window choice:** `sun-attended:2026-11-29`. Occupied attended slots: openclaw sat 10-31, talos sun 11-01, otel-operator + helm-drift sat 11-07, etcd/envoy sun
   11-08, python sat 11-14, longhorn sun 11-15, flux-oci sun 11-22. 11-29 is the next slot
   with none of them; sat 11-21 is also free of plans but its 70-minute budget equals this
   plan's estimate, leaving no slack for the attended checks. If the operator wants it

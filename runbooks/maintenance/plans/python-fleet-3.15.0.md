@@ -6,13 +6,13 @@ component: python                     # image fleet keyed on the Docker Official
 also_covers: [openclaw-probe, mcpo, mealie-shopping-sync]
 pr: null                              # direct-bump lane (coverage.py needs_plan_groups) - no Renovate PR
 kind: image
-current: "python:3.14.8-slim on 3 PLAN-lane consumers (ai/openclaw-probe CronJob, ai/mcpo initContainer runtime-setup, office/mealie-shopping-sync CronJob); re-measured live + in git 2026-10-23"
+current: "python:3.14.x-slim (3.14.9 live and in git 2026-10-25, re-landed by #420; 3.14.8 accepted) on 3 PLAN-lane consumers (ai/openclaw-probe CronJob, ai/mcpo initContainer runtime-setup, office/mealie-shopping-sync CronJob)"
 target: "python:3.15.1-slim on the same 3 consumers (one commit)"
 update_type: minor                    # CPython feature release 3.14 -> 3.15 (NOT a patch); same Debian 13 trixie base
-risk: low                             # (refreshed 2026-10-23, baseline 3.14.8, target 3.15.1) all three are stdlib-only scripts or a build-only init (§1.3); the 3.15
+risk: low                             # (refreshed 2026-10-25, baseline 3.14.x, target 3.15.1) all three are stdlib-only scripts or a build-only init (§1.3); the 3.15
                                       # removals touch none of their imports (§1.2, dry-compiled §1.3); nothing
                                       # forward-only; every consumer is a short CronJob or an init that re-runs on
-                                      # every pod start. Residual risk = x.0 interpreter regressions (3.15.1 is the first bugfix release, 1 day old at refresh).
+                                      # every pod start. Residual risk = x.0 interpreter regressions (3.15.1 is the first bugfix release; its tag was re-pushed 2026-10-24T08:08Z).
 est_duration_min: 35                  # pre-checks 5 · edit/commit/push 3 · Flux apply ~2 · mcpo Recreate + init
                                       # ~2 (measured ~90 s to Ready) · wait for the next openclaw-probe tick (<=30
                                       # min; schedule so a :00/:30 tick falls inside) · gates 5
@@ -32,10 +32,12 @@ touches:
                                         # HTTPRoute, a PVC or an SSO path.
 depends_on: []
 conflicts_with:
-  # Refreshed 2026-10-23. Dropped (retired/executed): python-fleet-3.14.8 (executed, file retired - this plan IS its
+  # Refreshed 2026-10-25. Dropped (retired/executed): python-fleet-3.14.8 (executed, file retired - this plan IS its
   # successor), kube-prometheus-stack-92.2.0 (no kps plan is open now; if one is filed re-add it: §4 reads Prometheus and
   # §4.1 asserts Alertmanager POST 200, a same-night kps bump blinds both gates), flux-fleet-0.60.0 (executed 10-06).
-  - flux-distribution-2.9.6             # rolls the Flux controllers that apply this change (exclusive plan)
+  # flux-distribution-2.9.6 dropped 2026-10-25 (executed/retired - no longer an open plan).
+  - redis-fleet-8.10.2                  # reciprocity: it restarts redis for ai/ + office/ consumers in the same namespaces
+                                        # (sun-attended:2026-11-29, so no same-slot clash, but they must not share a night)
   - openclaw-2026.10.5                  # same Flux Kustomization ai/openclaw as cronjob/openclaw-probe; currently blocked
   - helm-drift-detection                # adds spec.driftDetection to every HR incl. helmrelease/mcpo
   - flux-oci-chart-sources              # rewrites HelmRelease chart sources (bjw-s app-template consumers incl. mcpo)
@@ -57,7 +59,7 @@ finding_refs: [F-8bac0223, F-691c4827, F-e716fd93, F-1e43e578, F-237bd599]   # r
                                         # deny-glob proposal. The old 3.14.7->3.14.8 rows (F-12279835, F-f78e1e01, F-959b2979)
                                         # are RESOLVED and dropped.
 premises:
-  # All read-only. Re-measured live 2026-10-23: all three PASS on 3.14.8-slim (python-fleet-3.14.8 executed 2026-10-13, 5c92657d).
+  # All read-only. Re-measured live 2026-10-25: all three PASS on 3.14.9-slim (3.14.8 also accepted).
   - id: probe-on-3.14.8
     why: >-
       `current:` claims the CronJob runs python:3.14.8-slim or 3.14.9-slim (3.14.9 was applied then auto-reverted by a
@@ -81,20 +83,20 @@ premises:
   # 2.1/2.2, each printing a STOP token on failure.
 review: null
 status: draft
-window: "sat-attended:2026-11-14"   # cooldown ends 2026-10-24T08:09Z so a 10-24 09:00 start would print YOUNG; 11-14 is clear of cilium 10-25, openclaw 10-31, talos 11-01, otel 11-07, envoy 11-08
+window: "sat-attended:2026-11-14"   # cooldown (re-pushed tag) ends 2026-10-26T08:08Z, so any start before that prints YOUNG; 11-14 is clear of cilium 10-25, openclaw 10-31, talos 11-01, otel 11-07, envoy 11-08
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
   - docs/sops/verification-contents-not-shape.md
 generated: "2026-10-13"
-refreshed: "2026-10-23"             # re-baselined on 3.14.8 (executed), target retargeted 3.15.0 -> 3.15.1, scope decided (§1.5)
+refreshed: "2026-10-25"             # review corrections 2026-10-25: 3.15.1-slim re-pushed (digest 533b0b2f...), 3.14.9 re-landed, gates hardened (§2.1-2.3)
 ---
 
-# python-fleet-3.15.0 - python:3.14.8-slim -> 3.15.1-slim on openclaw-probe, mcpo (init), mealie-shopping-sync
+# python-fleet-3.15.0 - python:3.14.x-slim -> 3.15.1-slim on openclaw-probe, mcpo (init), mealie-shopping-sync
 
 ## 1. Summary & why held
 
-One commit moves three inline `python:*-slim` pins from `3.14.8-slim` to
+One commit moves three inline `python:*-slim` pins from `3.14.x-slim` (3.14.9 live) to
 `3.15.1-slim`:
 
 | Consumer | Object | What python does there | File |
@@ -162,8 +164,10 @@ changes checked against each consumer:
   `uv` publishes only `py3-none` wheels (interpreter-independent, PyPI 0.13.0),
   and the binaries the init copies (`/usr/bin/node`, `/usr/local/bin/uv`,
   `/usr/local/bin/uvx`) live at the same paths. No CPython wheel is built.
-- **Base OS:** `3.15.1-slim` digest == `3.15.1-slim-trixie` digest (Docker Hub, re-measured
-  2026-10-23: both `sha256:08275f764e02...`, `last_updated` 2026-10-22T08:09Z). Same distribution as 3.14.8-slim, so
+- **Base OS:** `3.15.1-slim` digest == `3.15.1-slim-trixie` digest (Docker Hub, re-measured 2026-10-25 after the tag was
+  RE-PUSHED on 2026-10-24T08:08Z: both `sha256:533b0b2f9b5d46fd097091cf826f27902f1d6c3bca714b6dc74551356aa97a51`,
+  amd64 manifest `sha256:b23bb42e5298...`; the 2026-10-23 digest was `08275f76...`). Trivy reports the image as Debian 13.7, same as
+  3.14.9-slim. Same distribution as 3.14.x-slim, so
   the nodesource `nodistro` repo and apt flow are unchanged. (3.15 dropped the
   riscv64 platform from the manifest; we run amd64 only.)
 
@@ -175,15 +179,21 @@ changes checked against each consumer:
   (`datetime.now(timezone.utc).isoformat()`, `time.strftime(...gmtime())`,
   `"%g" % x`, the imports) was executed: clean, `sys.flags.utf8_mode == 1`.
   This is a beta, so the in-cluster gates in §4 remain the real proof.
-- Security side: Trivy (2026-10-13, on `3.15.1-slim`; NOT re-run on 3.15.1) showed the minor clears exactly the same
-  subset of `F-8bac0223`'s fixable rows as the 3.14 patch line - **no security gain from taking the minor over the
-  patch**. Same Debian base, so 3.15.1 is expected equal; detail is on the DB record, not here.
+- Security side: Trivy RE-RUN 2026-10-25 on the re-pushed digest `533b0b2f...` (`--severity HIGH,CRITICAL --ignore-unfixed`):
+  `python:3.15.1-slim` shows 0 OS-package and 4 bundled-Python-package rows, identical in count to `python:3.14.9-slim` (0 / 4)
+  - **no security gain from taking the minor over the patch**. Detail stays on the DB record (`F-8bac0223`), not here.
+- The earlier dry-compile (CPython 3.15.0b2, `-W error`) is from 2026-10-13 and STALE for the final build: `uv python list`
+  on 2026-10-25 still offers only 3.15.0b2 on macOS, so it could not be re-run against 3.15.1. It still covers the API surface
+  (3.15.1 is bugfix-only); the in-cluster gates in §4 are the proof.
 - Python 3.15.1 changelog (docs.python.org/3.15/whatsnew/changelog.html, read 2026-10-23): bugfix-only (interpreter/JIT/
   REPL crash fixes, no API removals, no default changes touching `urllib`/`json`/`ssl`/`datetime`/`time`). The beta
   dry-compile above therefore still stands for the API surface; the final-build proof is the in-cluster gates in §4.
 
-### 1.4 Baseline is 3.14.8 (executed); why 3.14.9 is NOT the baseline
+### 1.4 Baseline history: 3.14.8 executed, 3.14.9 reverted then re-landed
 
+- **Update 2026-10-25: 3.14.9 HAS RE-LANDED.** Renovate #420 (`b8b55656`) merged `3.14.8 -> 3.14.9` again after the false-positive
+  revert below; live and in git today all three members and all 14 siblings read `3.14.9-slim` (3 alpine consumers `3.14.9-alpine`).
+  Baseline is therefore 3.14.9 in practice; 3.14.8 stays accepted by the premises and seds in case of another revert.
 - `python-fleet-3.14.8` **executed 2026-10-13** (`5c92657d`, Renovate #342) and its plan file was retired
   (`649f99ee`). Live and in git on 2026-10-23: all three members and the 14 siblings read `python:3.14.8-slim`.
   This plan was written against 3.14.7 and is re-based here; its old "mutually exclusive with python-fleet-3.14.8"
@@ -200,28 +210,31 @@ changes checked against each consumer:
 - **Target retargeted 3.15.0 -> 3.15.1.** `python:3.15.1-slim` is on Docker Hub (`last_updated` 2026-10-22T08:09Z) and
   Renovate/coverage already track it (PR #354; coverage group id now `python-fleet-3.15.1`). The earlier draft said
   "if a 3.15.1 exists, STOP and retarget - an x.1 is strictly preferable": that condition is now true, so the plan is
-  retargeted rather than stopped. 48 h minor cooldown (policy `minimum_release_age_hours`) lapses **2026-10-24T08:09Z**,
-  i.e. the Saturday 09:00 attended window is the earliest compliant slot (§2.2 gates it).
+  retargeted rather than stopped. **The tag was re-pushed 2026-10-24T08:08Z** (digest now `533b0b2f...`), which restarts the 48 h minor
+  cooldown (policy `minimum_release_age_hours`): it lapses **2026-10-26T08:08Z** (§2.2 gates it, §2.1 prints the digest so a further
+  re-push is visible). The 2026-11-14 slot is far past it; a later re-push moves the date again, which is why §2.2 is re-run in-window.
 
 ### 1.5 Fleet scope - DECIDED: the three members only (canary), the other 14 follow
 
-The same `python:3.14.8-slim` string appears on 14 further consumers (ai/ollama-toolfix, download/tube-archivist-
-{image,nfo}-sync, 11 media/library-tools objects) plus 3 `3.14.8-alpine` consumers (different string, different base:
-untouched). **Decision: this plan edits ONLY openclaw-probe, mcpo init and mealie-shopping-sync**, because (a) they are the
+The same `python:3.14.x-slim` string appears on 14 further consumers (recounted in git 2026-10-25 with
+`grep -rIl 'python:3\.14\.[0-9]*-slim' kubernetes`: 17 files total minus these 3 = ai/ollama-toolfix, download/tube-archivist
+{image,metadata}-sync = 2, 11 media/library-tools objects = 14; a reviewer's count of 15 did not reproduce) plus 3 `3.14.x-alpine` consumers
+(backup/icloud-backup-freshness, kube-system/crash-ghost-reaper, monitoring/elasticsearch obs-recovery; different string, different
+base: untouched). **Decision: this plan edits ONLY openclaw-probe, mcpo init and mealie-shopping-sync**, because (a) they are the
 coverage group `python-fleet-3.15.1` this plan covers and have per-consumer §4 gates measured live; (b) they span the three
 distinct shapes (a probe that POSTs to Alertmanager, a pip/npm build init, an HTTP-to-HA sync), so they are a representative
-canary for the interpreter move; (c) the 14 are NFS/CIFS-mounted media tooling with no gate written, two files are owned by
+canary for the interpreter move; (c) the 14 siblings are mostly NFS/CIFS-mounted media tooling with no gate written, two files are owned by
 other plans, and changing 17 files in one commit makes a partial rollback (§5) coarse.
-**Follow-up:** after this plan passes AND soaks one full day (>= one nightly), the 14 `3.14.8-slim` consumers move to
+**Follow-up:** after this plan passes AND soaks one full day (>= one nightly), the 14 sibling `3.14.x-slim` consumers move to
 3.15.1-slim as a second step - by the direct-bump lane if the policy lets minors through, else as a second fleet plan
-(file it then; this plan does not pre-write it). The 14 stay on 3.14.8 meanwhile; mixed 3.14/3.15 across independent
+(file it then; this plan does not pre-write it). The 14 stay on 3.14.x meanwhile; mixed 3.14/3.15 across independent
 CronJobs is harmless (no shared state or wheels). F-8bac0223 therefore stays OPEN after this plan.
 
 ### 1.6 Slot - attended sat/sun, not nightly
 
 A 3.14 -> 3.15 move is a minor interpreter change on a Recreate-strategy tool server (mcpo, ~90 s outage for openclaw's
 MCP calls). The plan declares `autonomy_override: human-gated`: stamped **`sat-attended:2026-11-14`** (90 min vs est 35),
-or an attended on-demand run once the 48 h cooldown has lapsed (2026-10-24T08:09Z: an earlier Saturday start would print
+or an attended on-demand run once the 48 h cooldown has lapsed (2026-10-26T08:08Z: an earlier start would print
 YOUNG in §2.2). 11-14 is clear of cilium 10-25, openclaw 10-31, talos 11-01, otel 11-07 and envoy 11-08. Not `nightly`: the three gates in §4 need a human to
 read the openclaw-probe tick and the mcpo tool counts, and the 03:30 slot overlaps Step 0 safe-update churn that confounds
 attribution. Reboot not needed, so Saturday suffices.
@@ -244,20 +257,28 @@ PRE=$(grep -h -o '3\.14\.[89]-slim$' kubernetes/apps/ai/openclaw/app/openclaw-pr
 [ "$N" = 3 ] && echo "ok $N PRE=$PRE" || echo "STOP baseline-moved N=$N"
 #   PRE with two values (3.14.8,3.14.9,) = a partially re-landed fleet: still proceed, rollback is per-file (§5).
 
-# 2.1 target still Debian trixie (§1.2 risk claim). Prints trixie; DIFFERENT => STOP and re-plan.
-python3 -c "import json,urllib.request as u;g=lambda t: json.load(u.urlopen('https://hub.docker.com/v2/repositories/library/python/tags/'+t))['digest'];print('trixie' if g('3.15.1-slim')==g('3.15.1-slim-trixie') else 'DIFFERENT')"
+# 2.1 target still Debian trixie AND print the digest so a re-push is visible (§1.2: re-pushed 2026-10-24T08:08Z).
+#     Prints "trixie sha256:..." ; DIFFERENT => STOP and re-plan. Expected 2026-10-25: trixie sha256:533b0b2f9b5d46fd...
+#     A digest other than 533b0b2f... means the tag was re-pushed again: re-run 2.2 (cooldown restarts) and re-read §1.3.
+python3 -c "import json,urllib.request as u;g=lambda t: json.load(u.urlopen('https://hub.docker.com/v2/repositories/library/python/tags/'+t))['digest'];a=g('3.15.1-slim');print('trixie' if a==g('3.15.1-slim-trixie') else 'DIFFERENT',a)"
 
 # 2.2 past the 48 h MINOR cooldown (policy minimum_release_age_hours; patch-only override does not apply).
 #     last_updated only ever moves later on a rebuild, so this errs conservative. Prints AGED; YOUNG => STOP.
-#     Measured 2026-10-23: 3.15.1-slim last_updated 2026-10-22T08:09Z -> YOUNG until 2026-10-24T08:09Z, AGED after
-#     (so run this on/after Saturday 2026-10-24 09:00 Europe/Berlin = 07:00Z; today it prints YOUNG - by design).
+#     Measured 2026-10-25: 3.15.1-slim last_updated 2026-10-24T08:08:38Z -> YOUNG until 2026-10-26T08:08Z, AGED after
+#     (today it prints YOUNG - by design; the 2026-11-14 slot is far past it unless the tag is re-pushed again).
 python3 -c "import json,urllib.request as u,datetime as d;t=json.load(u.urlopen('https://hub.docker.com/v2/repositories/library/python/tags/3.15.1-slim'))['last_updated'];a=(d.datetime.now(d.timezone.utc)-d.datetime.fromisoformat(t.replace('Z','+00:00'))).total_seconds()/3600;print('AGED' if a>=48 else 'YOUNG')"
 
 # 2.3 no 3.15.2 yet? (if a 3.15.2-slim exists, STOP and retarget - a newer bugfix is strictly preferable; same
-#     retarget-in-place rule as 3.15.0 -> 3.15.1). Measured 2026-10-23: ok-no-3.15.2.
-python3 -c "import urllib.request as u
-try: u.urlopen('https://hub.docker.com/v2/repositories/library/python/tags/3.15.2-slim'); print('STOP-3.15.2-exists-retarget')
-except Exception: print('ok-no-3.15.2')"
+#     retarget-in-place rule as 3.15.0 -> 3.15.1). ABSENCE gate: only an HTTP 404 counts as "absent"; ANY other failure
+#     (DNS, timeout, 429, 5xx) prints FETCH_FAILED, which is also a STOP - the old try/except-Exception form printed
+#     ok on every failure and could not fail.
+#     Measured 2026-10-25: 3.15.2-slim -> ok-no-3.15.2 ; KNOWN-BAD CONTROL (a tag that exists, 3.15.1-slim) ->
+#     STOP-3.15.1-slim-exists-retarget ; unreachable network (https_proxy=http://127.0.0.1:9) -> FETCH_FAILED URLError.
+#     To run the control, replace both 3.15.2-slim occurrences with 3.15.1-slim and the printed tag accordingly.
+python3 -c "import urllib.request as u,urllib.error as e
+try: u.urlopen('https://hub.docker.com/v2/repositories/library/python/tags/3.15.2-slim',timeout=15); print('STOP-3.15.2-exists-retarget')
+except e.HTTPError as x: print('ok-no-3.15.2' if x.code==404 else 'FETCH_FAILED http %s'%x.code)
+except Exception as x: print('FETCH_FAILED',type(x).__name__)"
 
 # Flux owners healthy and on HEAD (all three Kustomizations live in the app namespace)
 flux get kustomizations -n ai openclaw
@@ -268,6 +289,9 @@ flux get helmreleases -n ai mcpo                                         # Ready
 # Baseline: last runs of both CronJobs succeeded (re-record in-window; 2026-10-13 was 02:00:05Z / 02:10:04Z)
 kubectl -n ai get cronjob openclaw-probe -o jsonpath='{.status.lastSuccessfulTime} {.status.lastScheduleTime}{"\n"}'
 kubectl -n office get cronjob mealie-shopping-sync -o jsonpath='{.status.lastSuccessfulTime} {.status.lastScheduleTime}{"\n"}'
+
+# NOTE: shell variables (N, PRE, PF, J, PUSH_TS) do NOT survive separate tool calls. Run each §2/§3/§4 block in ONE call,
+#       or re-derive: PRE/N via 2.0, PUSH_TS via `export PUSH_TS=<the UTC time printed after git push>`.
 
 # Baseline: the running init imageID (record it; it is the PRE-tag digest the §5 rollback returns to)
 kubectl -n ai get pod -l app.kubernetes.io/name=mcpo -o jsonpath='{.items[0].status.initContainerStatuses[0].imageID}{"\n"}'
@@ -282,7 +306,7 @@ done
 kill $PF 2>/dev/null
 ```
 
-STOP if any premise fails, 2.0-2.3 print a STOP/YOUNG/DIFFERENT token, any Flux
+STOP if any premise fails, 2.0-2.3 print a STOP/YOUNG/DIFFERENT/FETCH_FAILED token, any Flux
 object is not Ready, or a baseline server is non-200 (re-record first: §4.2
 compares against what you record HERE, not the 2026-10-13 numbers - the init
 pulls newest npm packages on every start).
@@ -293,7 +317,7 @@ pulls newest npm packages on every start).
 cd /Users/mu/code/cberg-home-nextgen
 git pull --rebase
 
-# 3.1 the two CronJobs (BSD sed; dry-tested 2026-10-23 on scratch copies of the 3.14.8 files)
+# 3.1 the two CronJobs (BSD sed; dry-tested 2026-10-25 on scratch copies of the live 3.14.9 files)
 sed -i '' 's|image: python:3\.14\.[89]-slim$|image: python:3.15.1-slim|' \
   kubernetes/apps/ai/openclaw/app/openclaw-probe.yaml \
   kubernetes/apps/office/mealie/app/shopping-sync-cronjob.yaml
@@ -307,21 +331,22 @@ git diff --stat -- kubernetes/apps/ai/openclaw/app/openclaw-probe.yaml \
   kubernetes/apps/ai/mcpo/app/helmrelease.yaml      # expect exactly 3 files, 3 insertions, 3 deletions
 ```
 
-Dry-test result (scratch copies, 2026-10-23; the three files differ from the 3.14.8 originals in exactly these lines):
+Dry-test result (scratch copies, 2026-10-25; the three files differ from the live 3.14.9 originals in exactly these lines):
 
 ```
-openclaw-probe.yaml        95c95  <  image: python:3.14.8-slim   >  image: python:3.15.1-slim
-shopping-sync-cronjob.yaml 48c48  <  image: python:3.14.8-slim   >  image: python:3.15.1-slim
-helmrelease.yaml (mcpo)    47c47  <  tag: 3.14.8-slim            >  tag: 3.15.1-slim
+openclaw-probe.yaml        95c95  <  image: python:3.14.9-slim   >  image: python:3.15.1-slim
+shopping-sync-cronjob.yaml 48c48  <  image: python:3.14.9-slim   >  image: python:3.15.1-slim
+helmrelease.yaml (mcpo)    47c47  <  tag: 3.14.9-slim            >  tag: 3.15.1-slim
 ```
 
-`shopping-sync-cronjob.yaml` still contains `3.14.8-slim` once afterwards, in
+`shopping-sync-cronjob.yaml` still contains `3.14.7-slim` once afterwards, in
 the comment on line 45 ("already runs elsewhere") - expected; leave it.
 
 ```bash
 # 3.3 write the message file FIRST, then commit ONLY these paths (shared worktree) and verify before pushing
-cat > /tmp/msg-python-fleet-315.txt <<'EOF'
-chore(deps): python 3.14.8-slim -> 3.15.1-slim on openclaw-probe, mcpo init, mealie-shopping-sync
+MSG=$(mktemp /tmp/msg-python-fleet-315.XXXXXX)   # unique file (shared worktree)
+cat > "$MSG" <<'EOF'
+chore(deps): python 3.14.x-slim -> 3.15.1-slim on openclaw-probe, mcpo init, mealie-shopping-sync
 
 Plan: runbooks/maintenance/plans/python-fleet-3.15.0.md (security_ref F-8bac0223)
 EOF
@@ -329,7 +354,7 @@ git commit --only \
   kubernetes/apps/ai/openclaw/app/openclaw-probe.yaml \
   kubernetes/apps/office/mealie/app/shopping-sync-cronjob.yaml \
   kubernetes/apps/ai/mcpo/app/helmrelease.yaml \
-  -F /tmp/msg-python-fleet-315.txt
+  -F "$MSG"
 git show --stat HEAD            # exactly the 3 files above
 git log -1 --format=%s          # must be the subject above; amend before push if not
 git push
@@ -480,14 +505,15 @@ probe POSTs `endsAt=now`); no manual Alertmanager action.
 
 ## 6. Interference notes
 
-- **Retired/dead refs (2026-10-23):** `python-fleet-3.14.8` (executed; this plan is its successor, §1.4),
+- **Retired/dead refs (2026-10-25):** `flux-distribution-2.9.6` (executed), `python-fleet-3.14.8` (executed; this plan is its successor, §1.4),
   `flux-fleet-0.60.0` (executed), `kube-prometheus-stack-92.2.0` (no kps plan is open; **if one is filed it must not
   share the night** - §4.1 asserts `POST 200` to Alertmanager and the CONTROL lines read Prometheus).
-- **Flux plans** (`flux-distribution-2.9.6` - exclusive -, `flux-oci-chart-sources`, `helm-drift-detection`)
+- **Flux plans** (`flux-oci-chart-sources`, `helm-drift-detection`)
   restart or rewrite the machinery that applies `helmrelease/mcpo`; serialize. `openclaw-2026.10.5` (blocked) shares the
   Flux Kustomization `ai/openclaw` with `cronjob/openclaw-probe`.
-- **Renovate 3.14.9 PRs** (auto-reverted 2026-10-23, §1.4) may re-open or re-land via Step 0; they are superseded by this plan and should be
-  closed after it lands (§1.4). A 3.14.9 re-landing is expected and fine: §2.0, the premises and the sed accept 3.14.8 or 3.14.9.
+- **Renovate 3.14.9** (auto-reverted 2026-10-23, RE-LANDED 2026-10-25 via #420, §1.4): done; further x.y.z patches may still land via Step 0 before the slot. Fine: §2.0, the premises and the sed accept 3.14.8 or 3.14.9.
+- **redis-fleet-8.10.2** (sun-attended:2026-11-29) restarts the redis behind ai/open-webui and office consumers; listed in
+  `conflicts_with` for reciprocity. Different slots, so no clash as scheduled; never share a night.
 - **ns ai neighbours:** other ai plans share the namespace only (no shared object, no shared Flux Kustomization); a
   same-window failure in `ai` is harder to attribute - prefer separate slots if the window is busy.
 - **mcpo consumers:** openclaw reaches mcpo through `mcporter-config`; the
