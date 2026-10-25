@@ -89,5 +89,3 @@ securityContext:
       - SYS_RESOURCE
 socketLB:
   hostNamespaceOnly: true
-updateStrategy:
-  type: OnDelete
