@@ -45,7 +45,7 @@ conflicts_with:
   - otel-operator-0.23.0                # never in the SAME slot (its failure mode would pollute the log/metric reads); NOT a depends_on, see above
   - edot-collector-0.162.0              # log shipper; section 4's error-log scan uses the HA API, but the collector roll drops pod logs in Elasticsearch
   - iobroker-12.0.0                     # home-automation sibling, scheduled nightly 2026-10-15; kept apart so a hub regression is attributable (it runs nightly 10-15, before this slot)
-  - teslamate-4.3                       # home-automation sibling feeding HA entities (tesla integrations in section 1.4)
+  - teslamate-4.4.0                      # home-automation sibling feeding HA entities (tesla integrations in section 1.4)
   - n8n-2.39.8                          # home-automation sibling with HA webhooks
   - n8n-chart-2.1.1
   - pgvector-fleet-0.8.7                # touches home-automation postgres consumers read through HA?  kept conservative: shared namespace restarts
