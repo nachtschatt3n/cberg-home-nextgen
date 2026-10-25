@@ -147,7 +147,7 @@ premises:
     expect_exact: "1"
 status: awaiting-go   # 2026-10-24 sat-attended (cron, unattended): HUMAN-GATED, no recorded GO; go_no_go ingested, deferred — was: vetted
 review: ready-for-go@2026-10-23      # delta plan-reviewer 2026-10-23: ready-for-go
-window: "sat-attended:2026-10-24"   # stamped 2026-10-23 on delta review (exclusive; Sat 09:00 attended)
+window: "now:2026-10-25"   # ON-DEMAND NOW run 2026-10-25 (run-now.py stamp; was 'sat-attended:2026-10-24')
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/flux-upgrade.md
