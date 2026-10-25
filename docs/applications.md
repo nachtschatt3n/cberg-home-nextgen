@@ -92,7 +92,7 @@
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
 | postgresql | PostgreSQL database (shared cluster DB) | None | Databases |
-| mariadb | MariaDB database (shared cluster DB). Server 13.0.1 on chart 27.0.1. The image is pinned **by digest** (Bitnami's free tier publishes no versioned tags) — the `image.tag` field is inert, so never read a version off it; see `docs/sops/mariadb-major-upgrade.md` before any major bump. | None | Databases |
+| mariadb | MariaDB database (shared cluster DB). Server 13.1.1 on chart 28.1.1. The image is pinned **by digest** (Bitnami's free tier publishes no versioned tags) — the `image.tag` field is inert, so never read a version off it; see `docs/sops/mariadb-major-upgrade.md` before any major bump. | None | Databases |
 | redis | Redis in-memory cache/queue | None | Databases |
 | influxdb | InfluxDB time-series database | Internal | Databases |
 | nocodb | NocoDB — open-source Airtable alternative | Internal | Databases |

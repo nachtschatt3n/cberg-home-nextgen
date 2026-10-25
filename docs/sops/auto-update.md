@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.10.23`
-> Last Updated: `2026-10-23`
+> Version: `2026.10.24`
+> Last Updated: `2026-10-24`
 
 ## 1) Description
 
