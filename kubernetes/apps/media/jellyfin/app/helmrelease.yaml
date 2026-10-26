@@ -150,14 +150,18 @@ spec:
         gpu.intel.com/i915: 1
 
     # Liveness grace raised to 20 x 30s = 10 min (2026-09-28). The old
-    # 10 x 30s killed the pod MID-SCAN: jellyfin-config is a Longhorn RWX
-    # volume served over NFS, SQLite WAL over NFS answers "database is
-    # locked" under scan load and /health stalls behind the DB. (A swap to
+    # 10 x 30s killed the pod MID-SCAN while config sat on the Longhorn RWX
+    # volume jellyfin-config (served over NFS): SQLite WAL over NFS answered
+    # "database is locked" under scan load and /health stalled behind the DB.
+    # Config is on the RWO volume jellyfin-config-rwo since 2026-10-23
+    # (plan jellyfin-config-rwo-migration, 51c158c2), which removes the NFS
+    # hop. The 10-min grace is RETAINED until that plan's day-7 check
+    # (~2026-10-30: zero "database is locked" lines and zero restarts since
+    # cutover) confirms RWO fixed the stalls; only then lower it. (A swap to
     # tcpSocket was tried in ceda2aa3 and REJECTED by the API server: Helm's
     # 3-way patch kept the live httpGet next to the new tcpSocket -> "may not
     # specify more than 1 handler type". Changing the handler type needs a
-    # replace, not a patch; raising the threshold does not.) Real fix: plan
-    # jellyfin-config-rwo-migration (RWO volume).
+    # replace, not a patch; raising the threshold does not.)
     livenessProbe:
       httpGet:
         path: /health

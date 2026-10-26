@@ -609,16 +609,18 @@ This Git repository contains the following directories:
 
 This repository uses [mise](https://mise.jdx.dev/) for unified development tool management. All required tools are defined in [`.mise.toml`](.mise.toml) and automatically installed and configured when you enter the project directory.
 
-**Managed Tools** (versions from [`.mise.toml`](.mise.toml)):
-- **Python 3.12** + **uv** - Automation scripts and fast package install
+**Managed Tools** (versions from [`.mise.toml`](.mise.toml) as of 2026-10-26; the file is authoritative):
+- **Python 3.12** + **uv** (latest) - Automation scripts and fast package install
 - **kubectl 1.36.0** - Kubernetes CLI
-- **flux 2.9.0** - GitOps toolkit CLI (cluster distribution is `flux-v2.9.3`)
-- **talosctl 1.14.1** + **talhelper 3.1.11** - Talos Linux management
-- **sops 3.13.0** + **age 1.3.1** - Secrets encryption
-- **helm 3.21.0** - Kubernetes package manager
+- **flux 2.9.6** - GitOps toolkit CLI (matched to the cluster distribution, `v2.9.6`)
+- **talosctl 1.14.1** + **talhelper 3.1.17** - Talos Linux management
+- **sops 3.13.3** + **age 1.3.2** - Secrets encryption
+- **helm 3.22.1** - Kubernetes package manager
 - **kustomize 5.6.0** - Kubernetes manifest customization
-- **helmfile 0.171.0**, **task 3.46.4**, **cloudflared 2026.3.0**, **gum 0.17.0**
-- **Additional utilities**: jq 1.7.1, yq 4.50.1, kubeconform
+- **helmfile 0.171.0**, **task 3.54.0**, **cloudflared 2026.10.3**, **gum 0.17.0**
+- **Validation & scanning**: kubeconform 0.8.0, flate 0.6.5 (Flux render gate), trivy 0.76.1
+- **Additional utilities**: jq 1.7.1, yq 4.54.1
+- **Homelab CLIs** (cargo): unifictl 5.7.0, zigbeectl 0.1.2
 - **terraform** - Cloudflare zone management (installed globally: `mise use -g terraform`)
 
 **Environment Variables:**

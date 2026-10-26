@@ -1,8 +1,8 @@
 # SOP: external-dns — public DNS publication (Cloudflare, `policy: sync`)
 
 > Description: How public DNS records for this cluster are created, changed and destroyed by external-dns, why `policy: sync` makes a failed *create* a total outage rather than a no-op, and the version/annotation traps that have taken public DNS down twice in two days.
-> Version: `2026.10.01`
-> Last Updated: `2026-10-01`
+> Version: `2026.10.26`
+> Last Updated: `2026-10-26`
 > Owner: `homelab-sre`
 
 ---
@@ -61,12 +61,12 @@ capture the record set before and after (§4).
 |---------|-------|
 | Namespace | `network` |
 | Source of truth | `kubernetes/apps/network/external/external-dns/helmrelease.yaml` |
-| Chart / image | `external-dns` **1.23.0** / `registry.k8s.io/external-dns/external-dns:**v0.23.0**` — bumped 2026-10-21 (plan `external-dns-1.23.0`; flag rename `e468c94e`, chart `415c5301`), verified live (27 CNAMEs verified = 27 source endpoints, zero changes submitted). Reads the **GA** annotation prefix `external-dns.kubernetes.io/` **only**, with no fallback to the alpha key (§3). Any next bump is subject to the same attended ritual |
+| Chart / image | `external-dns` **1.23.0** / `registry.k8s.io/external-dns/external-dns:**v0.23.0**` — bumped 2026-10-21 (flag rename `e468c94e`, chart `415c5301`; the executed plan was retired in `5dc0306c`, those two commits carry its evidence), verified live (27 CNAMEs verified = 27 source endpoints, zero changes submitted). Reads the **GA** annotation prefix `external-dns.kubernetes.io/` **only**, with no fallback to the alpha key (§3). Any next bump is subject to the same attended ritual |
 | Provider | `cloudflare`, `--cloudflare-proxied` |
 | Policy | **`sync`** — deletes records, and delete-then-creates on change |
 | Sources | `crd` (`DNSEndpoint`) + `gateway-httproute` |
 | Gateway allowlist | `--gateway-name=envoy-external`, `--gateway-namespace=network` (default-deny, one Gateway) |
-| Record target | `external-dns.kubernetes.io/target` (**GA key — this is the one the running v0.22.0 reads**) on the **Gateway** `envoy-external`. Its alpha twin `external-dns.alpha.kubernetes.io/target` is still present on the same Gateway with the same value and is retained deliberately as the rollback path to v0.21.x — do not delete it (§3) |
+| Record target | `external-dns.kubernetes.io/target` (**GA key — this is the one the running v0.23.0 reads**) on the **Gateway** `envoy-external`. Its alpha twin `external-dns.alpha.kubernetes.io/target` is still present on the same Gateway with the same value and is retained deliberately as the rollback path to v0.21.x — do not delete it (§3) |
 | Registry | TXT, `txtPrefix: k8s.`, `txtOwnerId: default` |
 | Domain filter | `${SECRET_DOMAIN}` |
 | Steady-state record count | 27 verified CNAMEs (healthy 24h floor: 27) — re-verified live 2026-10-01 (`external_dns_controller_verified_records{record_type="cname"}` = 27, `min_over_time(...[24h])` = 27, registry errors over 7 d = 0; was 25 on 2026-09-22). The count follows the number of `envoy-external` route hostnames + the cloudflared DNSEndpoint, so compare against a fresh measurement, not this constant |
@@ -187,32 +187,35 @@ treatment.
 
 ### Done 2026-10-21 (`e468c94e`): `--request-timeout` migrated to `--kube-api-request-timeout`
 
-The HelmRelease still passes `--request-timeout=60s`. **That flag is
-deprecated upstream**, verified three independent ways on 2026-09-22:
+The HelmRelease now passes `--kube-api-request-timeout=60s` (same value as
+before; re-verified live 2026-10-26: the Deployment args carry the new flag
+and the startup log has no deprecation warning). The rename landed in its own
+commit, `e468c94e`, ahead of the 1.23.0 chart bump (`415c5301`).
 
-1. Upstream source at the exact tag we run
+Why it was needed: the old `--request-timeout` flag is **deprecated
+upstream**, verified three independent ways on 2026-09-22:
+
+1. Upstream source at the tag we ran then
    (`pkg/apis/externaldns/types.go` @ `v0.22.0`) registers it as
    `[DEPRECATED: use --kube-api-request-timeout] Request timeout when calling
    Kubernetes APIs`, and warns when it is set away from its default.
 2. The upstream flags reference carries the same `[DEPRECATED: …]` text.
-3. **Our own pod logs it at startup**, because 60s ≠ the 30s default:
+3. **Our own pod logged it at startup**, because 60s ≠ the 30s default:
    `level=warning msg="--request-timeout is deprecated, use
    --kube-api-request-timeout instead"`.
 
-**It is not broken — it is forwarded.** The live pod reports
-`RequestTimeout:1m0s KubeAPIRequestTimeout:1m0s`, i.e. the deprecated flag
-still populates the new one, so behaviour today is correct and this is not
-urgent. Two cautions:
+It was never broken: the deprecated flag was forwarded to the new field (the
+pod reported `RequestTimeout:1m0s KubeAPIRequestTimeout:1m0s`), so behaviour
+did not change with the rename. Two cautions still apply:
 
 - **The flag is Kubernetes-API-scoped, not provider-scoped.** It does not bound
   Cloudflare API calls; do not reach for it to fix a provider-side hang.
-- **Do not bundle the rename with a version bump.** Under `policy: sync` a bump
-  is already an attended, revert-ready change (§4); adding a second variable
-  makes a failed run ambiguous. Swap the flag in its own commit *before* the
-  next bump, then confirm the warning is gone from the startup log.
+- **Do not bundle a flag change with a version bump.** Under `policy: sync` a
+  bump is already an attended, revert-ready change (§4); adding a second
+  variable makes a failed run ambiguous. Change flags in their own commit.
 
 ```bash
-# Confirm the warning is (still) there, and gone after the change
+# Confirm the deprecation warning stays gone (expected output: the echo line)
 mise exec -- kubectl logs -n network deploy/external-dns | head -5 | grep -i "request-timeout" \
   || echo "no deprecation warning — migration done"
 ```
@@ -623,6 +626,16 @@ v0.22+), then the tunnel (`docs/sops/cloudflare.md`).
 
 ## Version History
 
+- `2026.10.26`: Records the 2026-10-21 change that shipped without a version
+  bump (`2e9bed27`: §2 chart/image row to 1.23.0 / v0.23.0, §3 rename heading
+  marked done). This pass finishes it: the §3 rename body was still in the
+  present tense ("still passes `--request-timeout=60s`") and now states the
+  live `--kube-api-request-timeout=60s` (args and startup log re-verified
+  2026-10-26); the §2 row no longer cites the deleted plan
+  `external-dns-1.23.0` (retired in `5dc0306c`) and points at its commits
+  instead; the §2 Record-target row now names v0.23.0 as the running version.
+- `2026.10.01`: steady-state CNAME count 25 -> 27 (live 2026-10-01, 24h min 27)
+  in §2, §6 and the §9 alert table (`5deaf932`; entry backfilled 2026-10-26).
 - `2026.09.23`: §5 Example C carve-out — a well-formed out-of-band REGISTRY TXT
   (`k8s.cname-<host>`) for a hostname with a live envoy-external HTTPRoute is
   adopted, not reaped; only DATA records are reaped. Recorded because the

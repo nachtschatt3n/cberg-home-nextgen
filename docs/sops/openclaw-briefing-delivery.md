@@ -6,8 +6,8 @@
 > single-day miss for an ongoing outage. Covers the two stages that leave the
 > *weakest* evidence: the cron's model dispatch (stage 0) and the detached TTS
 > child (stage 4b).
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.10.26`
+> Last Updated: `2026-10-26`
 > Owner: `operator + openclaw-agent`
 
 ---
@@ -97,8 +97,11 @@ pipeline, because every other signal stays green.**
 The agent's global chain (`agents.defaults.model` in `openclaw.json`) is:
 
 ```
-openai/gpt-5.6-terra  →  ollama/gemma4:26b-mlx
+openai/gpt-6-luna  →  ollama/gemma4:26b-mlx
 ```
+
+(primary `openai/gpt-6-luna` since 2026-09-26, `4d90cfb1`; it was
+`openai/gpt-5.6-terra` when the incidents below were recorded.)
 
 A cron job may carry a **per-job model override** (`payload.model`). When it does,
 that model is used *instead of* the chain — the fallbacks are not consulted. So
@@ -450,3 +453,16 @@ Nothing to roll back for a transient miss — the next scheduled run supersedes 
 - Do **not** hand-craft a `voice sent` line into `briefing.log` to silence the
   warning: the log is the evidence the health check reads, and faking it hides the
   next real failure.
+
+---
+
+## Version History
+
+- `2026.10.26`: global chain example corrected to the live primary
+  `openai/gpt-6-luna` (was `openai/gpt-5.6-terra`; switched 2026-09-26 in
+  `4d90cfb1`, re-verified in the pod's `openclaw.json` 2026-10-26). The
+  2026-08-18/19 measurements and incident notes that name `gpt-5.6-terra` are
+  left as recorded. Also records the 2026-10-19 change that shipped without a
+  version bump (`ee06496d`): `ollama/gemma4:e2b-mlx` removed as the last rung of
+  the chain.
+- `2026.08.18`: earlier versions predate this history section; see `git log`.

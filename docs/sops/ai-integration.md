@@ -3,8 +3,8 @@
 > Standard Operating Procedures for AI/ML service integration and management.
 > Reference: `docs/integration.md` for endpoint reference table.
 > Description: Operating and integrating Ollama-based AI endpoints for cluster applications.
-> Version: `2026.10.04`
-> Last Updated: `2026-10-04`
+> Version: `2026.10.26`
+> Last Updated: `2026-10-26`
 > Owner: `Platform`
 
 ---
@@ -198,7 +198,7 @@ and no fallbacks. It now degrades to the local Ollama models instead:
 ```jsonc
 // ~/.openclaw/openclaw.json  (set declaratively by the init script in helmrelease.yaml)
 "agents": { "defaults": { "model": {
-  "primary":   "openai/gpt-5.6-terra",              // Codex harness / ChatGPT OAuth
+  "primary":   "openai/gpt-6-luna",                 // Codex harness / ChatGPT OAuth (since 2026-09-26, 4d90cfb1)
   "fallbacks": ["ollama/gemma4:26b-mlx"]                // quality tier (e2b-mlx retired 2026-10-19)
 }}}
 ```
@@ -258,8 +258,8 @@ Confirm a failover actually happened (rather than a silent total failure):
 ```bash
 kubectl -n ai logs "$OC" -c app --tail=400 | grep "model-fallback/decision"
 # healthy degrade looks like:
-#   decision=candidate_failed  requested=openai/gpt-5.6-terra reason=rate_limit next=ollama/gemma4:26b-mlx
-#   decision=candidate_succeeded requested=openai/gpt-5.6-terra candidate=ollama/gemma4:26b-mlx
+#   decision=candidate_failed  requested=openai/gpt-6-luna reason=rate_limit next=ollama/gemma4:26b-mlx
+#   decision=candidate_succeeded requested=openai/gpt-6-luna candidate=ollama/gemma4:26b-mlx
 # "next=none" means NO fallbacks are configured — the chain is missing.
 ```
 
@@ -692,3 +692,17 @@ git push
 
 Rollback validation:
 - Re-run the `Verification Tests` section.
+
+---
+
+## Version History
+
+- `2026.10.26`: OpenClaw failover-chain example: `primary` corrected from
+  `openai/gpt-5.6-terra` to the live `openai/gpt-6-luna` (switched 2026-09-26 in
+  `4d90cfb1`; re-verified in the pod's `openclaw.json` 2026-10-26), also in the
+  `model-fallback/decision` log example. `gpt-5.6-terra` stays overlaid and
+  allowlisted as a one-command `--model` fallback. Also records the 2026-10-19
+  change that shipped without a version bump (`ee06496d`): `gemma4:e2b-mlx`
+  removed from the fallback chain (now `ollama/gemma4:26b-mlx` only) and the
+  `voice` agent moved to `ollama-native/gemma4:26b-mlx`.
+- `2026.10.04`: earlier versions predate this history section; see `git log`.

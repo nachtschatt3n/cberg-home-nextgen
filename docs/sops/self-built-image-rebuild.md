@@ -3,8 +3,8 @@
 > Description: How to clear CVEs on container images we build ourselves, where there is
 > no upstream version to bump to and remediation is a **rebuild in the source repo**
 > followed by a GitOps tag bump — not a version bump.
-> Version: `2026.10.04`
-> Last Updated: `2026-10-04`
+> Version: `2026.10.26`
+> Last Updated: `2026-10-26`
 > Owner: `homelab-operator`
 
 ---
@@ -525,3 +525,7 @@ reconcile — never patch the Deployment directly (GitOps rule).
   ordiga, see-edv-ibspm, stepbystepguide, zuhause-betreut) from the first-party and
   deploy-mode tables; their source-repo scheduled workflows were disabled the same day.
   Showcase apps still deployed: haarfabrik, metaldyne, u-zeit (uzeit-de decommissioned 2026-10-23).
+- `2026.10.26`: version bump only, recording two content changes that shipped without one:
+  `763ee34c` (2026-10-19) noted that the ha-ai-harness app behind the base-drift examples was
+  decommissioned 2026-10-19 (examples kept as history); `14d9a225` (2026-10-23) removed
+  `uzeit-de` from the deploy-mode table and the showcase list (decommissioned 2026-10-23).
