@@ -1528,8 +1528,9 @@ frigate_crash_scan() {
 # [now-10min-HOURS, now-10min] / window length, from Frigate's own
 # /api/<camera>/recordings. This is the behaviour probe the log scans lack:
 # the Reolink main-stream record path dropped every ~87 s ("CSeq expected, 0
-# received", logged at INFO) and lost 13-19% of every day while fps>0 and the
-# crash scan stayed clean. Only cameras with record enabled and continuous
+# received", ERROR on the ffmpeg.<camera>.record logger -- not a watchdog
+# "crashed unexpectedly" line, so the crash scan never counts it) and lost
+# 13-19% of every day while fps>0 and the crash scan stayed clean. Only cameras with record enabled and continuous
 # retention > 0 are scored (motion-only retention deletes quiet segments by
 # design, so a gap there is not loss). Output / exit:
 #   0  measured; stdout = "CAM<TAB>PCT" per scored camera, then
