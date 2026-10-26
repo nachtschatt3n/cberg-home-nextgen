@@ -37,6 +37,9 @@ EVENT_PREFIX="${4:-tnb-}"
 
 KUBECTL=(mise exec -- kubectl)
 
+# unset first: a variable the CALLER exported stays exported after reassignment,
+# which would put the reader password back into every child's environment.
+unset ES_USER ES_PASS
 ES_USER="$("${KUBECTL[@]}" -n monitoring get secret ci-runner-reader -o jsonpath='{.data.username}' | base64 -d)"
 ES_PASS="$("${KUBECTL[@]}" -n monitoring get secret ci-runner-reader -o jsonpath='{.data.password}' | base64 -d)"
 [ -n "$ES_USER" ] && [ -n "$ES_PASS" ] || { echo "FAIL: reader credentials missing in secret monitoring/ci-runner-reader" >&2; exit 1; }
@@ -56,6 +59,7 @@ trap cleanup EXIT INT TERM
 export ES_CA="$WORK/ca.crt"
 
 PORT="${ES_LOCAL_PORT:-$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')}"
+[[ "$PORT" =~ ^[0-9]+$ ]] || { echo "FAIL: ES_LOCAL_PORT must be a port number" >&2; exit 2; }
 "${KUBECTL[@]}" -n monitoring port-forward svc/elasticsearch-es-http "${PORT}:9200" >"$WORK/pf.log" 2>&1 &
 PF_PID=$!
 PF_UP=0
