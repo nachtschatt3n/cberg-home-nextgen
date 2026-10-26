@@ -279,7 +279,17 @@ spec:
       #
       # ROLLBACK: pure manifest revert to
       # sha-40b0038febc9566d3301a332f77d0da7958c644e — no schema to unwind.
-      tag: "sha-1a9ff4a775edc959d7513b09ff2dcaeda8ca0e3b"
+      #
+      # --- 2026-10-26 bump: sha-1a9ff4a7 -> sha-fd987ce2 -------------------
+      # Trading 212 fix (upstream #4140): trades booked in instrument currency
+      # with exchange_rate from walletImpact, GBX->GBP, side-based direction.
+      # Unblocks the child-account sync that has failed since 2026-07-05
+      # (Money::ConversionError in Balance::SyncCache). Contracts: detection
+      # skips excluded entries. No schema change.
+      #
+      # ROLLBACK: pure manifest revert to
+      # sha-1a9ff4a775edc959d7513b09ff2dcaeda8ca0e3b — no schema to unwind.
+      tag: "sha-fd987ce229b8fe1853c22d0482a30f83bbc04a3d"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
