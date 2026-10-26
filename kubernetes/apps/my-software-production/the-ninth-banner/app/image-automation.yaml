@@ -46,9 +46,9 @@ metadata:
 spec:
   # Own automation, scoped to this app's directory (same shape as
   # splitfairy-image-updates). absenty-image-updates covers the whole
-  # namespace path but is SUSPENDED and must stay so; if it is ever
-  # unsuspended, both write the same value from the same ImagePolicy, so the
-  # overlap is idempotent.
+  # namespace path but is SUSPENDED and must stay so; it is also scoped by
+  # policySelector to absenty's ImagePolicy, so it never writes this app's
+  # `$imagepolicy` marker.
   # Observe ONLY this app's ImagePolicy. Without a selector the automation
   # lists every ImagePolicy in the namespace (absenty, splitfairy, ...) in
   # status.observedPolicies, and health-check.sh's SILENT-NO-PUSH check then

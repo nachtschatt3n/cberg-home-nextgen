@@ -45,6 +45,14 @@ spec:
   # Separate from absenty-image-updates on purpose: that one is SUSPENDED for
   # the dependabot drain and must stay so; this one's update.path is scoped to
   # this app's directory only.
+  # Observe ONLY this app's ImagePolicy (mandatory in a shared namespace:
+  # docs/sops/flux-image-automation-push-auth.md §4). Unscoped, it lists every
+  # ImagePolicy in my-software-production and health-check.sh's SILENT-NO-PUSH
+  # check flags a sibling's undeployed tag here. The label is stamped by the
+  # gas-price-monitor Flux Kustomization's commonMetadata.
+  policySelector:
+    matchLabels:
+      app.kubernetes.io/name: gas-price-monitor
   interval: 30m
   sourceRef:
     kind: GitRepository

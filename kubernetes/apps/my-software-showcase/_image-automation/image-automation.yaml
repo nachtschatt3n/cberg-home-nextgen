@@ -444,9 +444,22 @@ spec:
   # my-software-showcase is on the allowlist of the
   # flux-imageupdateautomation-sourceref ValidatingAdmissionPolicy
   # (kubernetes/apps/flux-system/flux-guardrails). Setters strategy bounds the
-  # write to the 15 `$imagepolicy`-marked tag lines under update.path.
+  # write to the `$imagepolicy`-marked tag lines (3 active apps since
+  # 2026-10-23) under update.path.
   # NOTE: a SUSPENDED ImageUpdateAutomation still reports READY=True; check
   # `.spec.suspend` directly. To hold ONE app, remove its `$imagepolicy` marker.
+  #
+  # DELIBERATELY MULTI-APP: this one automation serves every showcase app
+  # (haarfabrik, metaldyne, u-zeit), so the per-app selector of
+  # docs/sops/flux-image-automation-push-auth.md §4 does not apply. Instead it
+  # selects the policies THIS file defines: they all carry the
+  # `app.kubernetes.io/name: showcase-image-automation` label stamped by the
+  # showcase-image-automation Flux Kustomization's commonMetadata. An
+  # ImagePolicy another Kustomization adds to the namespace is therefore NOT
+  # observed (and its markers not written) until it is defined here.
+  policySelector:
+    matchLabels:
+      app.kubernetes.io/name: showcase-image-automation
   interval: 30m
   sourceRef:
     kind: GitRepository

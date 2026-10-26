@@ -59,6 +59,14 @@ spec:
   #      so a PR build can no longer wear a tag this policy would select.
   # NOTE: a SUSPENDED ImageUpdateAutomation still reports READY=True. Check
   # `.spec.suspend` directly; do not infer state from the Ready condition.
+  # Observe ONLY absenty's ImagePolicy (docs/sops/flux-image-automation-push-auth.md
+  # §4). It is the only ImagePolicy in my-software-development today, but
+  # update.path below is the WHOLE namespace directory, so without the selector
+  # any app added here later would be observed and written by this automation.
+  # The label is stamped by the absenty Flux Kustomization's commonMetadata.
+  policySelector:
+    matchLabels:
+      app.kubernetes.io/name: absenty
   interval: 30m
   sourceRef:
     kind: GitRepository

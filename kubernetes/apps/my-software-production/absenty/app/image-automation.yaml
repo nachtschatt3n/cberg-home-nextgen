@@ -59,6 +59,16 @@ spec:
   #      so a PR build can no longer wear a tag this policy would select.
   # NOTE: a SUSPENDED ImageUpdateAutomation still reports READY=True. Check
   # `.spec.suspend` directly; do not infer state from the Ready condition.
+  # Observe ONLY absenty's ImagePolicy (mandatory in a shared namespace:
+  # docs/sops/flux-image-automation-push-auth.md §4). update.path below is the
+  # WHOLE namespace directory, so this selector is also what keeps this
+  # automation, once unsuspended, from applying the-ninth-banner / splitfairy /
+  # gas-price-monitor policies to their markers: with Setters, only markers
+  # naming a selected policy are rewritten. The label is stamped by the absenty
+  # Flux Kustomization's commonMetadata.
+  policySelector:
+    matchLabels:
+      app.kubernetes.io/name: absenty
   interval: 30m
   sourceRef:
     kind: GitRepository
