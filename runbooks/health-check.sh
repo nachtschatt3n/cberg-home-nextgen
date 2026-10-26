@@ -1523,6 +1523,23 @@ frigate_crash_scan() {
     return 0
 }
 
+# oom_severity_class EVENTS LASTSTATE LASTSTATE_24H UNMEASURED_24H  (F-e8348288)
+# lastState survives for a pod's whole life, so one OOM kept the section
+# CRITICAL for days after the pod was stable (trmnl-ha: killed 10-25, 482Mi of
+# 1Gi, still critical 31 h later). critical = a fresh OOM (event within ~1h, or
+# lastState finished within 24h) OR any lastState whose 24h window could not be
+# measured (fail closed); minor = only an older lastState; clean = none.
+oom_severity_class() {
+    local ev="$1" ls="$2" ls24="$3" unm="$4"
+    if [ "$ev" -gt 0 ] || [ "$ls24" -gt 0 ] || { [ "$ls" -gt 0 ] && [ "$unm" -eq 1 ]; }; then
+        echo critical
+    elif [ "$ls" -gt 0 ]; then
+        echo minor
+    else
+        echo clean
+    fi
+}
+
 # frigate_coverage_scan PORT [HOURS] [MIN_PCT]  (2026-10-26)
 # Recording COVERAGE per camera: seconds of recorded segments in the window
 # [now-10min-HOURS, now-10min] / window length, from Frigate's own
@@ -2421,11 +2438,18 @@ try:
             if when >= cutoff:
                 n += 1
 except Exception:
-    pass
+    n = 'ERR'
 print(n)
-" 2>/dev/null || echo "0")
-    OOM_LASTSTATE_24H=$(echo "$OOM_LASTSTATE_24H" | tail -1 | tr -cd '0-9'); [ -z "$OOM_LASTSTATE_24H" ] && OOM_LASTSTATE_24H=0
-    OOM_LASTSTATE_24H=$((10#$OOM_LASTSTATE_24H))
+" 2>/dev/null || echo "ERR")
+    # An unreadable pod list must not read as "0 OOMs in 24h": the severity
+    # branch below keys on this number, so ERR keeps the old (critical) rating.
+    OOM_LASTSTATE_24H=$(echo "$OOM_LASTSTATE_24H" | tail -1 | tr -d '[:space:]')
+    OOM_24H_UNMEASURED=0
+    case "$OOM_LASTSTATE_24H" in
+        ''|*[!0-9]*) OOM_24H_UNMEASURED=1; OOM_LASTSTATE_24H=0
+            _record_unmeasured "oom-laststate-24h" "pod list unreadable for the 24h OOMKilled window (unknown, not clean)" ;;
+        *) OOM_LASTSTATE_24H=$((10#$OOM_LASTSTATE_24H)) ;;
+    esac
     echo "OOM kills (OOMKilled lastState finished within 24h): $OOM_LASTSTATE_24H"
 
     EVICTED_COUNT=$(safe_count "kubectl get events -A --field-selector reason=Evicted 2>/dev/null | grep -v 'NAMESPACE' | wc -l" "evicted-count")
@@ -2443,12 +2467,18 @@ print(n)
         log_success "No warning events"
     fi
 
-    if [ "$OOM_COUNT" -gt 0 ] || [ "$OOM_LASTSTATE" -gt 0 ]; then
-        log_critical "OOM kills detected: $OOM_COUNT event(s), $OOM_LASTSTATE pod(s) with OOMKilled lastState"
-        add_critical_issue "OOM kills detected: $OOM_COUNT event(s), $OOM_LASTSTATE pod(s) with OOMKilled lastState"
-    else
-        log_success "No OOM kills (events=0, lastState=0, lastState within 24h=$OOM_LASTSTATE_24H)"
-    fi
+    # Severity (2026-10-26, F-e8348288): see oom_severity_class. An older
+    # lastState alone is still reported -- as minor, with the count, never dropped.
+    case "$(oom_severity_class "$OOM_COUNT" "$OOM_LASTSTATE" "$OOM_LASTSTATE_24H" "$OOM_24H_UNMEASURED")" in
+    critical)
+        log_critical "OOM kills detected: $OOM_COUNT event(s), $OOM_LASTSTATE pod(s) with OOMKilled lastState ($OOM_LASTSTATE_24H within 24h)"
+        add_critical_issue "OOM kills detected: $OOM_COUNT event(s), $OOM_LASTSTATE pod(s) with OOMKilled lastState ($OOM_LASTSTATE_24H within 24h)" ;;
+    minor)
+        log_warning "Older OOM kill still in pod lastState: $OOM_LASTSTATE pod(s), none within 24h"
+        add_minor_issue "Older OOM kill (>24h) still recorded in pod lastState: $OOM_LASTSTATE pod(s); no OOM in the last 24h" ;;
+    *)
+        log_success "No OOM kills (events=0, lastState=0, lastState within 24h=$OOM_LASTSTATE_24H)" ;;
+    esac
 
     if [ "$EVICTED_COUNT" -gt 0 ]; then
         log_critical "Pod evictions detected: $EVICTED_COUNT"
