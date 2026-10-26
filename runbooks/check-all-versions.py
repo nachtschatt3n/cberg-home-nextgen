@@ -92,6 +92,12 @@ _DEGRADED = DegradationLog(
     printer=lambda msg: print(f"{Colors.YELLOW}{msg}{Colors.RESET}"),
 )
 
+# image_major_ceiling: the policy file it is read from, and the sentinel for
+# "the ceiling could not be determined" (distinct from None = no ceiling).
+# An unknown ceiling yields NO candidate (fail-closed), never an uncapped one.
+_POLICY_PATH = Path(__file__).resolve().parent / "auto-update-policy.yaml"
+_CAP_UNKNOWN = object()
+
 # "not resolved yet" sentinel — distinct from None, which is a RESOLVED
 # "there is no token" and must not trigger another `gh auth token` shell-out.
 _UNSET = object()
@@ -1966,15 +1972,43 @@ class VersionChecker:
         return tuple(nums[:4]) + (0 if has_build_suffix else 1,)
 
     def _image_major_cap(self, component, repository):
-        """max_major from policy `image_major_ceiling` for (component, repo), else None."""
+        """max_major from policy `image_major_ceiling` for (component, repo),
+        None when no rule matches, or _CAP_UNKNOWN when the ceiling cannot be
+        determined.
+
+        FAIL CLOSED (2026-10-26): this used to swallow every exception and
+        return None, i.e. an unreadable policy file or a malformed rule
+        silently REMOVED the cap and the capped component was offered the
+        forbidden major again. The policy is read directly (not through
+        coverage.load_policy, which itself turns a YAML parse error into an
+        empty policy). An unreadable policy is a broad outage -- every
+        component's ceiling is unknown -- so it is recorded section-wide; a
+        malformed MATCHING rule is recorded for that component only."""
         try:
-            pol = load_update_policy() or {}
-            for r in pol.get('image_major_ceiling') or []:
-                if (str(r.get('component', '')).lower() == str(component or '').lower()
-                        and str(r.get('repository', '')).lower() == str(repository or '').lower()):
+            pol = yaml.safe_load(_POLICY_PATH.read_text()) or {}
+            if not isinstance(pol, dict):
+                raise ValueError(f"top level is {type(pol).__name__}, not a mapping")
+            rules = pol.get('image_major_ceiling') or []
+            if not isinstance(rules, list):
+                raise ValueError(f"image_major_ceiling is {type(rules).__name__}, not a list")
+        except Exception as e:
+            _DEGRADED.record('image_major_ceiling', _POLICY_PATH.name,
+                             f"policy unreadable ({type(e).__name__}: {e}); no image "
+                             f"candidate proposed (fail-closed)")
+            return _CAP_UNKNOWN
+        for r in rules:
+            if not isinstance(r, dict):
+                continue
+            if (str(r.get('component', '')).lower() == str(component or '').lower()
+                    and str(r.get('repository', '')).lower() == str(repository or '').lower()):
+                try:
                     return int(r['max_major'])
-        except Exception:
-            pass
+                except Exception as e:
+                    _DEGRADED.record('image_major_ceiling', _POLICY_PATH.name,
+                                     f"malformed max_major for {component}/{repository} "
+                                     f"({type(e).__name__}: {e}); no candidate (fail-closed)",
+                                     component=component_key('image', repository))
+                    return _CAP_UNKNOWN
         return None
 
     def _pick_latest_semver_tag(self, tags: list, current_tag: str = '',
@@ -2022,11 +2056,23 @@ class VersionChecker:
                 version_tags = lts
         # Per-component major ceiling from auto-update-policy.yaml
         # (`image_major_ceiling`): never propose a major line above it.
+        # FAIL CLOSED (2026-10-26): an unknown ceiling, or a capped component
+        # with no tag at/under its ceiling, yields NO candidate and a recorded
+        # degradation -- never the uncapped list. The old fallback offered the
+        # forbidden major exactly when the tag listing was truncated.
         cap = getattr(self, '_major_cap', None)
+        if cap is _CAP_UNKNOWN:
+            return None
         if cap is not None:
             capped = [t for t in version_tags if self._semver_tag_key(t)[0] <= cap]
-            if capped:
-                version_tags = capped
+            if not capped:
+                _DEGRADED.record('image_major_ceiling', f"tags <= major {cap}",
+                                 f"{repository or '?'}: no tag at or under the ceiling "
+                                 f"(newest seen {max(version_tags, key=self._semver_tag_key)}); "
+                                 f"no candidate (fail-closed)",
+                                 component=component_key('image', repository) if repository else None)
+                return None
+            version_tags = capped
         version_tags.sort(key=self._semver_tag_key, reverse=True)
         # Prefer an update WITHIN the current major (an in-line bump is the
         # actionable next step when one exists, mirroring Renovate's

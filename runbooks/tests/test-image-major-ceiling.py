@@ -40,8 +40,49 @@ check("26.12.0 candidate is held; 22.x patch is proposed",
       v._pick_latest_semver_tag(tags, cur, "node"))
 check("capped, exhausted 22 line yields no 26 (current head stays)",
       v._pick_latest_semver_tag(["22.23.3-bookworm", "26.12.0-bookworm"], cur, "node") == "22.23.3-bookworm")
+
+# FAIL CLOSED (2026-10-26): no tag under the ceiling -> no candidate + degradation,
+# never the uncapped list (the old fallback offered the forbidden major).
+deg = _real_deg = cav._DEGRADED
+n_before = len(deg.reasons) + len(deg.uncovered)
+got = v._pick_latest_semver_tag(["26.12.0-bookworm", "24.22.1-bookworm"], cur, "node")
+check("capped, NO tag under ceiling -> None (not the uncapped 26)", got is None, got)
+check("...and the gap is recorded as a degradation",
+      len(deg.reasons) + len(deg.uncovered) > n_before, (deg.reasons, deg.uncovered))
 v._major_cap = None
 check("uncapped consumer still sees the 26 line",
       v._pick_latest_semver_tag(["22.23.3-bookworm", "26.12.0-bookworm"], "22.23.3-bookworm", "node") == "26.12.0-bookworm")
+
+# Policy unreadable / malformed -> ceiling UNKNOWN -> no candidate + recorded error.
+import tempfile
+real_path = cav._POLICY_PATH
+with tempfile.TemporaryDirectory() as td:
+    tdp = Path(td)
+    cases = {
+        "missing policy file": tdp / "absent.yaml",
+        "unparseable YAML": tdp / "bad.yaml",
+        "malformed max_major on the matching rule": tdp / "malformed.yaml",
+    }
+    (tdp / "bad.yaml").write_text("image_major_ceiling: [\n  - {component: openclaw\n")
+    (tdp / "malformed.yaml").write_text(
+        "image_major_ceiling:\n  - component: openclaw\n    repository: node\n    max_major: twenty-two\n")
+    for label, p in cases.items():
+        cav._POLICY_PATH = p
+        deg = cav._DEGRADED = type(deg)("version", printer=lambda m: None)  # fresh log per case
+        n_before = 0
+        c = v._image_major_cap("openclaw", "node")
+        check(f"{label} -> cap UNKNOWN (not None = uncapped)", c is cav._CAP_UNKNOWN, c)
+        check(f"{label} -> error recorded",
+              len(deg.reasons) + len(deg.uncovered) > n_before, (deg.reasons, deg.uncovered))
+        v._major_cap = c
+        got = v._pick_latest_semver_tag(tags, cur, "node")
+        v._major_cap = None
+        check(f"{label} -> no candidate proposed", got is None, got)
+    # a malformed rule for ANOTHER component must not blind this one's lookup
+    cav._POLICY_PATH = tdp / "malformed.yaml"
+    check("malformed rule elsewhere leaves unrelated component uncapped",
+          v._image_major_cap("other-app", "node") is None)
+cav._POLICY_PATH = real_path
+cav._DEGRADED = _real_deg
 print("FAILED %s" % fails if fails else "ALL PASS")
 sys.exit(1 if fails else 0)

@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.10.24`
-> Last Updated: `2026-10-24`
+> Version: `2026.10.26`
+> Last Updated: `2026-10-26`
 
 ## 1) Description
 
@@ -173,19 +173,63 @@ that SOP has the `vN`-rename fix and the detection command.
   finding_id) to OpenClaw's `home-operation` skill for the operator — with
   `runbooks/lib/notify.py` as the fallback if the openclaw pod is down (see
   `docs/sops/maintenance-windows.md` for the contract). Exit codes: `0` ok,
-  `2` applied-then-reverted, `1` error.
-- **Settle window (2026-10-23, F-6c3043f9):** the gate never judges a single
-  reading. It polls every `AUTO_UPDATE_SETTLE_POLL` (30s) for up to
-  `AUTO_UPDATE_SETTLE_TIMEOUT` (600s) and returns healthy on the first fully
-  clean reading. Flux objects that read not-Ready (including "dependency
-  revision not up to date" / `ReconciliationFailed`, which concurrent pushes to
-  `main` by other sessions produce) are treated as convergence lag and only fail
-  the gate if still not-Ready at the end of the window AND in the preceding
-  reading. Hard signals (CrashLoop/ImagePull pods, high-restart not-ready pods,
-  HelmRelease `RetriesExceeded`) fail after 3 consecutive identical readings
-  (about 60s), so a genuinely broken PR still reverts promptly. Implementation:
-  `collect_health()` / `settle_health()` in `runbooks/auto-update.py`; test
-  `runbooks/tests/test-auto-update-settle-gate.py`.
+  `2` applied-then-reverted, `3` gate failed and at least one merge could NOT
+  be reverted (named under `LEFT MERGED` in the log, the finding and the
+  issue -- revert it by hand), `1` error / nothing merged.
+- **Pre-apply baseline + fail-closed apply (2026-10-26):** before ANY merge the
+  script (a) reads each safe PR's changed-file list -- a PR whose list is
+  unreadable is NOT merged (its gate scope would be unknown) -- and (b) takes a
+  baseline reading: Flux objects already not-Ready / not settled cluster-wide,
+  pods already unhealthy in the affected namespaces, and every container's
+  `restartCount`. An unreadable baseline merges NOTHING. Pre-existing problems
+  are excluded from the verdict and reported (`preexisting` in `--json`). Any
+  exception after the first merge is treated as a failed gate: the batch is
+  reverted (newest first; a sha `gh` did not return is resolved from the
+  `(#N)` subject on `origin/main`), and anything that cannot be reverted --
+  including a revert that could not be pushed -- is reported as LEFT MERGED
+  with its reason (exit `3`), never silently kept.
+- **Settle window (2026-10-23, F-6c3043f9; hardened 2026-10-26):** the gate
+  never judges a single reading. It polls every `AUTO_UPDATE_SETTLE_POLL` (30s)
+  for up to `AUTO_UPDATE_SETTLE_TIMEOUT` (600s).
+  - **Settled = 2 CONSECUTIVE clean readings** (`CLEAN_READINGS_REQUIRED`). One
+    clean reading is not enough: a container killed by its liveness probe or
+    crashing 20-60 s after start reads Running + not-ready with
+    `restartCount < 5`, and the pre-2026-10-26 gate called that clean.
+  - **A reading is clean only if**, after excluding the pre-apply baseline: no
+    in-scope pod is not-ready (pods in phase `Succeeded` and terminating pods
+    are ignored), no container's `restartCount` rose versus the baseline (a
+    pod created by the rollout has baseline 0), no Flux object is
+    `Ready=False` or `Ready=Unknown`, no HelmRelease is `Reconciling=True`,
+    and every list (`kubectl get pods` per namespace, Flux Kustomizations and
+    HelmReleases) was readable and parsed. An unreadable list or a reading
+    that raises is a not-clean key, never "healthy".
+  - **Hard signals** fail after 3 consecutive identical readings (about 60s):
+    CrashLoop/ImagePull/CreateContainer* waiting containers (init containers
+    included), `phase=Failed`, >= 5 restarts and not ready, and HelmRelease
+    remediation exhaustion read from the **`Stalled`** condition with reason
+    `RetriesExceeded` or `MissingRollbackTarget`. In helm-controller v2
+    (installed v1.6.5) those reasons are set by `conditions.MarkStalled` in
+    `internal/reconcile/atomic_release.go`; the `Ready` condition then carries
+    `UpgradeFailed` / `RollbackSucceeded`, so the old check of the Ready
+    reason for `RetriesExceeded` could never fire.
+  - **Soft (not-clean) keys fail only when they PERSIST**: present in two
+    consecutive readings once the window is over. Flux convergence lag
+    ("dependency revision not up to date" / `ReconciliationFailed`, produced by
+    concurrent pushes to `main` from other sessions) clears on re-poll and
+    does NOT revert -- the 2026-10-23 incident behaviour is preserved. A
+    `restartCount` rise never clears, so it reverts at window end.
+  - **After the window**, up to 3 grace readings (`SETTLE_GRACE_POLLS`) may
+    confirm either verdict. If neither 2 clean readings nor a persistent key
+    appears (a flapping state), the gate **fails closed**: "health did not
+    settle".
+  - **Pre-existing exclusion:** Flux keys are cluster-wide, so objects already
+    failing before the apply would otherwise revert every batch. They are
+    excluded by exact key (an HR that was `Ready=False` and escalates to
+    `Stalled` is a NEW key and still reverts) and pods unhealthy pre-apply are
+    excluded as a whole object; all of them are reported.
+  Implementation: `capture_baseline()` / `collect_health()` / `settle_health()`
+  / `revert_batch()` / `_revert_and_alert()` in `runbooks/auto-update.py`;
+  test `runbooks/tests/test-auto-update-settle-gate.py`.
 - **Fail-safe:** if `auto-update-policy.yaml` is missing/unparseable, the engine
   **denies everything**.
 
@@ -301,9 +345,10 @@ AUTO_UPDATE_APPLY=1 .venv/bin/python3 runbooks/auto-update.py --apply
 ### Example D: transient Flux lag during concurrent commits (no revert)
 
 ```
-  reading 1: 3 not-ready/hard (0 hard, 3 lagging) -- re-polling in 30s
+  reading 1: 3 not clean (0 hard, 3 lagging) -- re-polling in 30s
   3 problem(s) cleared on re-poll (transient)
-  health settled clean after 3 reading(s)
+  reading 2: clean (1/2) -- confirming in 30s
+  health settled clean: 2 consecutive clean readings (reading 3)
 == applied 6 update(s), post-apply health OK ==
 ```
 
@@ -590,6 +635,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.10.26 | 2026-10-26 | **Settle gate hardened (review of 40d1ae7f).** (1) One clean reading no longer settles: 2 consecutive clean readings are required, and a reading is not clean while an in-scope pod is not-ready or a container's `restartCount` rose versus a PRE-APPLY baseline, or a HelmRelease is `Reconciling=True` / any Flux object `Ready=Unknown` -- a liveness-killed or late-crashing container used to read "settled clean" and the bad batch stayed. (2) HR remediation exhaustion is read from `Stalled`/`RetriesExceeded` (and `MissingRollbackTarget`), verified in helm-controller v1.6.5 source; the old check looked for it on `Ready` and could never fire. (3) An unreadable pod list is a not-clean key, no longer silently healthy. (4) Bad JSON / any exception after merging no longer aborts with the batch merged: it is reverted, or each unrevertable merge is reported as LEFT MERGED (new exit `3`). (5) A pre-apply baseline excludes (and reports) objects already failing cluster-wide; an unreadable baseline or changed-file list merges nothing. The 2026-10-23 transient-lag behaviour is unchanged. Also `check-all-versions.py`: an `image_major_ceiling` that leaves no candidate, or an unreadable policy / malformed matching rule, now yields NO candidate plus a recorded degradation instead of silently dropping the cap (`test-image-major-ceiling.py`). |
 | 2026.10.24 | 2026-10-24 | **Post-apply gate now SETTLES (F-6c3043f9).** 2026-10-23 13:28 a Step 0 batch of six safe merges was auto-reverted falsely: concurrent commits from other sessions made Flux Kustomizations transiently read "dependency revision not up to date" / `ReconciliationFailed`, and the single-reading gate counted that as regression. Now polls (30s, 10 min cap), treats lag that clears as healthy, requires persistence (or 3 consecutive hard readings) before reverting. Test `test-auto-update-settle-gate.py`. The six false `reverted` ledger rows (`component_autonomy`) are flagged for operator correction, not rewritten. |
 | 2026.10.23 | 2026-10-23 | **Deny matrix resynced to policy `2026.10.17` (F-d4cf16e9, F-02956e6f).** Test 2 listed 28 of 35 deny entries; added `*longhorn*`, `*immich*`, `*gha-runner-scale-set*`, `*ninth-banner-feedback-db*` (path-scoped), `*home-assistant/home-assistant*`, `*mcr.microsoft.com/playwright*`, `*opentelemetry-kube-stack*`; Test 2b script reports MISSING/STALE/WRONG all `none`. Cross-link: `immutable-job-image-bumps.md` (standalone-Job bump trap). |
 | 2026.09.27 | 2026-09-27 | **Fast lanes (throughput program item B, operator-approved).** New §2a: patch cooldown 48h -> 24h (minor stays 48h); a non-major bump remediating an open fixable CRITICAL/HIGH "newer upstream tag available" finding on the running tag bypasses the cooldown in BOTH lanes (finding id recorded, never CVE detail); an unverified-notes patch/minor is AUTO for a component with >= 3 green / 0 reverts in 90 days (`component_autonomy`, schema v9), a revert resetting it. Policy `2026.09.27`. Shared module `runbooks/lib/fast_lane.py`; test `test-fast-lane-earned-autonomy.py`. Also: redis notes resolve (`redis/redis`, `-alpine` stripped via `IMAGE_TAG_FLAVOUR_SUFFIXES`), and `*sure-redis*` held with a path-scoped rule (`paths:`, PR-lane `path_block`) — matrix now 29 globs (the pre-existing `*envoyproxy/envoy*` gap closed too). |

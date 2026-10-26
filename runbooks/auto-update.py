@@ -1233,14 +1233,25 @@ def classify(pr, policy, checker):
 
 # ── apply: merge, reconcile, health-gate, revert ─────────────────────────────
 def affected_apps(number):
-    """namespaces/apps touched by a PR, from kubernetes/apps/<ns>/<app>/ paths."""
+    """namespaces/apps touched by a PR, from kubernetes/apps/<ns>/<app>/ paths.
+
+    Returns None when the PR's file list cannot be read (gh failure or bad
+    JSON). The caller must NOT merge such a PR: its health-gate scope is
+    unknown, and an unscoped gate would read "healthy" for pods it never
+    looked at (fail closed, 2026-10-26). An empty set is a legitimate answer
+    (a PR touching nothing under kubernetes/apps/)."""
     rc, out, _ = run(["gh", "pr", "view", str(number), "--json", "files"], timeout=45)
+    if rc != 0:
+        return None
+    try:
+        files = (json.loads(out or "{}") or {}).get("files", []) or []
+    except (ValueError, AttributeError):
+        return None
     apps = set()
-    if rc == 0:
-        for f in json.loads(out or "{}").get("files", []):
-            parts = Path(f["path"]).parts
-            if len(parts) >= 4 and parts[0] == "kubernetes" and parts[1] == "apps":
-                apps.add((parts[2], parts[3]))
+    for f in files:
+        parts = Path(str((f or {}).get("path", ""))).parts
+        if len(parts) >= 4 and parts[0] == "kubernetes" and parts[1] == "apps":
+            apps.add((parts[2], parts[3]))
     return apps
 
 
@@ -1248,32 +1259,72 @@ def affected_apps(number):
 # sessions make Flux Kustomizations read "dependency revision not up to date" /
 # ReconciliationFailed for a while. That is convergence lag, not regression, and
 # a single reading must never revert a batch.
+#
+# Hardened 2026-10-26: one clean reading is no longer "settled". A container
+# killed by its liveness probe, or crashing 20-60 s after start, reads Running +
+# not-ready with restartCount < 5 -- no hard signal -- and the old gate called
+# that clean on the first such reading, so the bad batch stayed. Now:
+#   * CLEAN_READINGS_REQUIRED consecutive clean readings are needed;
+#   * a reading is not clean while any in-scope pod is not-ready, or any
+#     container's restartCount rose versus the PRE-APPLY baseline;
+#   * a HelmRelease that is Reconciling=True or Ready=Unknown (and any Flux
+#     object at Ready=Unknown) is "not yet settled", never clean;
+#   * HelmRelease remediation exhaustion is read from the Stalled condition
+#     (helm-controller v2: Stalled/RetriesExceeded; Ready then carries
+#     UpgradeFailed / RollbackSucceeded, which the old Ready-reason check
+#     never matched);
+#   * an unreadable pod list / Flux list / reading is a failure key, not
+#     "healthy";
+#   * Flux keys are cluster-wide, so objects ALREADY failing before the apply
+#     are excluded from the verdict (and reported).
 SETTLE_TIMEOUT_S = int(os.environ.get("AUTO_UPDATE_SETTLE_TIMEOUT", "600"))
 SETTLE_POLL_S = int(os.environ.get("AUTO_UPDATE_SETTLE_POLL", "30"))
 HARD_CONFIRM_POLLS = 3  # consecutive identical hard readings that may end the wait early
+CLEAN_READINGS_REQUIRED = 2  # consecutive fully clean readings before "settled"
+SETTLE_GRACE_POLLS = 3  # extra readings after the window, only to confirm a verdict
 _TRANSIENT_RE = re.compile(
     r"dependency .*(revision|not ready)|not up to date|DependencyNotReady|"
     r"ReconciliationFailed|ArtifactFailed|source.*not ready|context deadline|"
     r"revision.*(differs|mismatch)|waiting for", re.I)
-_HARD_HR_REASONS = {"RetriesExceeded"}
+# helm-controller v1.6.x (API v2) marks remediation exhaustion on the STALLED
+# condition: conditions.MarkStalled(obj, "RetriesExceeded", ...) and
+# MarkStalled(obj, "MissingRollbackTarget", ...) in
+# internal/reconcile/atomic_release.go. Verified against v1.6.5 source and the
+# live CRD objects 2026-10-26.
+_HARD_HR_STALLED_REASONS = {"RetriesExceeded", "MissingRollbackTarget"}
+_POD_HARD_WAITING = {"CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull",
+                     "CreateContainerError", "CreateContainerConfigError"}
 
 
 def _kubectl_json(args):
+    """items[] of a kubectl list, or None when unreadable (rc!=0 / bad JSON)."""
     rc, out, _ = run(["kubectl"] + args + ["-o", "json"], timeout=90)
     if rc != 0:
         return None
     try:
-        return json.loads(out or "{}").get("items", [])
-    except ValueError:
+        items = (json.loads(out or "{}") or {}).get("items", [])
+    except (ValueError, AttributeError):
         return None
+    return items if isinstance(items, list) else None
 
 
-def collect_health(namespaces):
-    """One health reading -> (hard, soft, pending): dicts key -> text.
-    hard   = real-regression signals (crashloop pods, HR remediation exhausted)
-    soft   = Flux object not Ready (may be transient convergence lag)
-    pending= informational convergence lag (never a failure by itself)."""
-    hard, soft, pending = {}, {}, {}
+def _pod_obj(key):
+    """'pod:ns/name:reason' -> 'pod:ns/name'; None for non-pod keys."""
+    return key.rsplit(":", 1)[0] if key.startswith("pod:") and key.count(":") >= 2 else None
+
+
+def _read_health(namespaces, restart_base=None):
+    """One raw reading -> (hard, soft, pending, restarts).
+
+    hard     = real-regression signals (crashloop/pull-error pods, Failed pods,
+               high-restart not-ready pods, HR Stalled/RetriesExceeded)
+    soft     = not clean yet: Flux object not Ready / not settled, pod
+               not-ready, restartCount risen since the baseline, or any list
+               unreadable (may be transient; fails only if it persists)
+    pending  = informational convergence lag (a subset of soft keys)
+    restarts = {(ns, pod, container): restartCount} -- the baseline input.
+    restart_base None = baseline capture (no "restarted" keys)."""
+    hard, soft, pending, restarts = {}, {}, {}, {}
     for kind, res in (("kustomization", "kustomizations.kustomize.toolkit.fluxcd.io"),
                       ("helmrelease", "helmreleases.helm.toolkit.fluxcd.io")):
         items = _kubectl_json(["get", res, "-A"])
@@ -1281,105 +1332,234 @@ def collect_health(namespaces):
             soft[f"flux:{kind}:unreadable"] = f"flux {kind} list unreadable"
             continue
         for it in items:
-            md = it.get("metadata", {})
-            key = f"{kind}:{md.get('namespace')}/{md.get('name')}"
-            conds = {c.get("type"): c for c in it.get("status", {}).get("conditions", []) or []}
-            rd = conds.get("Ready", {})
+            md = it.get("metadata", {}) or {}
+            ref = f"{md.get('namespace')}/{md.get('name')}"
+            key = f"{kind}:{ref}"
+            if (it.get("spec") or {}).get("suspend"):
+                continue  # suspended: conditions are stale by design
+            conds = {c.get("type"): c for c in (it.get("status", {}) or {}).get("conditions", []) or []}
+            stalled = conds.get("Stalled") or {}
+            if (kind == "helmrelease" and stalled.get("status") == "True"
+                    and stalled.get("reason") in _HARD_HR_STALLED_REASONS):
+                hard[f"{key}:stalled"] = (f"flux helmrelease stalled: {ref} [{stalled.get('reason')}] "
+                                          f"{(stalled.get('message') or '')[:200]}")
+            rd = conds.get("Ready") or {}
             if rd.get("status") == "False":
                 reason, msg = rd.get("reason", ""), (rd.get("message") or "")[:200]
-                text = f"flux {kind} not ready: {md.get('namespace')}/{md.get('name')} [{reason}] {msg}"
-                if kind == "helmrelease" and reason in _HARD_HR_REASONS:
-                    hard[key] = text
-                else:
-                    soft[key] = text
-                    if _TRANSIENT_RE.search(f"{reason} {msg}"):
-                        pending[key] = text
-            elif conds.get("Reconciling", {}).get("status") == "True":
+                soft[key] = f"flux {kind} not ready: {ref} [{reason}] {msg}"
+                if _TRANSIENT_RE.search(f"{reason} {msg}"):
+                    pending[key] = soft[key]
+            elif rd.get("status") == "Unknown" or (
+                    kind == "helmrelease" and (conds.get("Reconciling") or {}).get("status") == "True"):
+                why = "Ready=Unknown" if rd.get("status") == "Unknown" else "Reconciling=True"
+                soft[f"{key}:settling"] = pending[f"{key}:settling"] = \
+                    f"flux {kind} not settled yet: {ref} ({why}) {(rd.get('message') or '')[:120]}"
+            elif (conds.get("Reconciling") or {}).get("status") == "True":
                 pending[key] = f"{key} reconciling"
     for ns in sorted(namespaces):
-        rc, out, _ = run(["kubectl", "get", "pods", "-n", ns, "-o", "json"], timeout=45)
-        if rc != 0:
+        items = _kubectl_json(["get", "pods", "-n", ns])
+        if items is None:
+            soft[f"pods:{ns}:unreadable"] = f"pods in namespace {ns} unreadable"
             continue
-        for p in json.loads(out or "{}").get("items", []):
-            name = p["metadata"]["name"]
-            st = p.get("status", {})
-            for cs in st.get("containerStatuses", []) or []:
-                w = (cs.get("state", {}).get("waiting") or {})
-                if w.get("reason") in {"CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerError"}:
-                    hard[f"pod:{ns}/{name}:{w['reason']}"] = f"{ns}/{name}: {w['reason']}"
-                restarts = cs.get("restartCount", 0)
-                if restarts >= 5 and not cs.get("ready", False):
-                    hard[f"pod:{ns}/{name}:restarts"] = f"{ns}/{name}: {restarts} restarts, not ready"
-            if st.get("phase") == "Failed":
-                hard[f"pod:{ns}/{name}:failed"] = f"{ns}/{name}: phase=Failed"
+        for p in items:
+            md = p.get("metadata", {}) or {}
+            name = md.get("name")
+            if md.get("deletionTimestamp"):
+                continue  # an old replica terminating is not the new state
+            st = p.get("status", {}) or {}
+            phase = st.get("phase")
+            if phase == "Succeeded":
+                continue  # completed Job pod
+            pk = f"pod:{ns}/{name}"
+            if phase == "Failed":
+                hard[f"{pk}:failed"] = f"{ns}/{name}: phase=Failed"
+                continue
+            for cs in (st.get("initContainerStatuses") or []) + (st.get("containerStatuses") or []):
+                w = ((cs.get("state") or {}).get("waiting") or {})
+                if w.get("reason") in _POD_HARD_WAITING:
+                    hard[f"{pk}:{w['reason']}"] = f"{ns}/{name}: {w['reason']}"
+            for cs in st.get("containerStatuses") or []:
+                cname = cs.get("name")
+                try:
+                    rcount = int(cs.get("restartCount", 0) or 0)
+                except (TypeError, ValueError):
+                    rcount = 0
+                restarts[(ns, name, cname)] = rcount
+                if rcount >= 5 and not cs.get("ready", False):
+                    hard[f"{pk}:restarts"] = f"{ns}/{name}: {rcount} restarts, not ready"
+                if restart_base is not None:
+                    base = restart_base.get((ns, name, cname), 0)
+                    if rcount > base:
+                        soft[f"{pk}:restarted"] = (f"{ns}/{name}[{cname}]: restartCount "
+                                                   f"{base}->{rcount} since the pre-apply baseline")
+            ready = {c.get("type"): c.get("status") for c in st.get("conditions") or []}.get("Ready")
+            if ready != "True":
+                soft[f"{pk}:notready"] = f"{ns}/{name}: not ready (phase={phase})"
+    return hard, soft, pending, restarts
+
+
+def collect_health(namespaces, baseline=None):
+    """One health reading -> (hard, soft, pending): dicts key -> text."""
+    # No baseline -> no restart comparison is possible (None), rather than
+    # treating every historical restart as new. main() always passes one.
+    restart_base = baseline.get("restarts", {}) if baseline is not None else None
+    hard, soft, pending, _ = _read_health(namespaces, restart_base)
     return hard, soft, pending
 
 
-def settle_health(namespaces, collect=None, sleep=time.sleep, now=time.monotonic,
-                  timeout=None, poll=None):
-    """Poll until healthy or the settle window ends. Return (ok, problems[]).
+def capture_baseline(namespaces, reader=None):
+    """PRE-APPLY reading. Returns {keys, pods, restarts, report, unreadable}.
 
-    OK as soon as a reading is fully clean. NOT ok only when a failure PERSISTS:
-    the same hard signal on HARD_CONFIRM_POLLS consecutive readings, or any
-    not-ready Flux object / hard signal still present in the final reading AND
-    the previous one at timeout. A problem that clears on re-poll is transient."""
-    collect = collect or collect_health
+    keys    = failure/not-settled keys present before any merge (excluded from
+              the gate's verdict, reported instead)
+    pods    = pod objects already unhealthy (all their keys are excluded)
+    unreadable = non-empty means the baseline is unusable -> do not merge."""
+    reader = reader or _read_health
+    try:
+        hard, soft, _, restarts = reader(namespaces, None)
+    except Exception as e:  # noqa: BLE001 -- any failure here = unusable baseline
+        return {"keys": set(), "pods": set(), "restarts": {}, "report": {},
+                "unreadable": [f"baseline reading failed: {type(e).__name__}: {e}"]}
+    allk = {**soft, **hard}
+    unreadable = [v for k, v in allk.items() if k.endswith(":unreadable")]
+    keys = {k for k in allk if not k.endswith(":unreadable")}
+    return {"keys": keys, "pods": {_pod_obj(k) for k in keys if _pod_obj(k)},
+            "restarts": restarts, "report": {k: allk[k] for k in sorted(keys)},
+            "unreadable": unreadable}
+
+
+def settle_health(namespaces, collect=None, sleep=time.sleep, now=time.monotonic,
+                  timeout=None, poll=None, baseline=None):
+    """Poll until settled or the window ends. Return (ok, problems[], info{}).
+
+    OK only after CLEAN_READINGS_REQUIRED consecutive fully clean readings
+    (pre-existing failures from `baseline` excluded). NOT ok when a failure
+    PERSISTS: the same hard signal on HARD_CONFIRM_POLLS consecutive readings,
+    or any not-clean key present in two consecutive readings once the window
+    is over. A problem that clears on re-poll is transient (the 2026-10-23
+    concurrent-push incident). After the window, up to SETTLE_GRACE_POLLS more
+    readings may confirm either verdict; if neither is reached the gate FAILS
+    CLOSED ("did not settle"). A reading that raises is a failure key."""
+    if collect is None:
+        def collect(ns):
+            return collect_health(ns, baseline)
     timeout = SETTLE_TIMEOUT_S if timeout is None else timeout
     poll = SETTLE_POLL_S if poll is None else poll
+    base_keys = set((baseline or {}).get("keys", ()))
+    base_pods = set((baseline or {}).get("pods", ()))
+    preexisting = {}
+
+    def _split(d):
+        out = {}
+        for k, v in d.items():
+            if k in base_keys or (_pod_obj(k) and _pod_obj(k) in base_pods):
+                preexisting[k] = v
+            else:
+                out[k] = v
+        return out
+
+    def _reading():
+        try:
+            h, s_, p = collect(namespaces)
+        except Exception as e:  # noqa: BLE001 -- fail closed: unreadable, not healthy
+            msg = f"health reading failed: {type(e).__name__}: {e}"
+            log(f"  !! {msg}")
+            return {}, {"gate:reading-failed": msg}, {}
+        return _split(h or {}), _split(s_ or {}), p or {}
+
+    def _info(n):
+        if preexisting:
+            log(f"  ({len(preexisting)} pre-existing problem(s) excluded from the verdict, "
+                f"present before the apply)")
+        return {"readings": n, "preexisting": sorted(set(preexisting.values()))}
+
     t0 = now()
-    prev_keys, hard_streak, n = set(), {}, 0
+    prev_keys, hard_streak, n = None, {}, 0
+    clean_streak, past_deadline, grace = 0, False, 0
     while True:
         n += 1
-        hard, soft, pending = collect(namespaces)
+        hard, soft, pending = _reading()
         keys = set(hard) | set(soft)
         if not keys:
-            if n > 1:
-                log(f"  health settled clean after {n} reading(s)")
-            return True, []
-        hard_streak = {k: hard_streak.get(k, 0) + 1 for k in hard}
-        confirmed = [k for k, c in hard_streak.items() if c >= HARD_CONFIRM_POLLS]
-        if confirmed:
-            return False, [hard[k] for k in confirmed] + [hard[k] for k in hard if k not in confirmed] \
-                + list(soft.values())
-        cleared = prev_keys - keys
-        if cleared:
-            log(f"  {len(cleared)} problem(s) cleared on re-poll (transient)")
-        elapsed = now() - t0
-        if elapsed + poll > timeout:
-            persistent = keys & prev_keys
-            if not persistent:
-                # present only in the last reading: one reading is never enough
-                log("  last problems seen in a single reading only; one more poll before judging")
-                sleep(poll)
-                prev_keys = keys
-                h2, s2, _ = collect(namespaces)
-                persistent = keys & (set(h2) | set(s2))
-                hard, soft = h2, s2
-            if not persistent:
-                return True, []
-            msgs = [(hard.get(k) or soft.get(k)) for k in sorted(persistent) if hard.get(k) or soft.get(k)]
-            return False, msgs or [f"persistent: {sorted(persistent)}"]
-        log(f"  reading {n}: {len(keys)} not-ready/hard ({len(hard)} hard, {len(pending)} lagging) -- re-polling in {poll}s")
+            clean_streak += 1
+            hard_streak = {}
+            if clean_streak >= CLEAN_READINGS_REQUIRED:
+                log(f"  health settled clean: {clean_streak} consecutive clean readings "
+                    f"(reading {n})")
+                return True, [], _info(n)
+        else:
+            clean_streak = 0
+            hard_streak = {k: hard_streak.get(k, 0) + 1 for k in hard}
+            confirmed = [k for k, c in hard_streak.items() if c >= HARD_CONFIRM_POLLS]
+            if confirmed:
+                return False, ([hard[k] for k in confirmed]
+                               + [hard[k] for k in hard if k not in confirmed]
+                               + list(soft.values())), _info(n)
+            if prev_keys:
+                cleared = prev_keys - keys
+                if cleared:
+                    log(f"  {len(cleared)} problem(s) cleared on re-poll (transient)")
+        if past_deadline or now() - t0 + poll > timeout:
+            persistent = keys & (prev_keys or set())
+            if persistent:
+                msgs = [(hard.get(k) or soft.get(k)) for k in sorted(persistent)]
+                return False, msgs, _info(n)
+            if past_deadline:
+                grace += 1
+            else:
+                past_deadline = True
+                log("  settle window over; confirming the verdict "
+                    f"(up to {SETTLE_GRACE_POLLS} more reading(s))")
+            if grace >= SETTLE_GRACE_POLLS:
+                msgs = [f"health did not settle: no {CLEAN_READINGS_REQUIRED} consecutive clean "
+                        f"readings within the window + {SETTLE_GRACE_POLLS} grace reading(s) "
+                        f"(fail-closed)"]
+                return False, msgs + [(hard.get(k) or soft.get(k)) for k in sorted(keys)], _info(n)
+        if keys:
+            log(f"  reading {n}: {len(keys)} not clean ({len(hard)} hard, "
+                f"{len(pending)} lagging) -- re-polling in {poll}s")
+        else:
+            log(f"  reading {n}: clean ({clean_streak}/{CLEAN_READINGS_REQUIRED}) -- "
+                f"confirming in {poll}s")
         prev_keys = keys
         sleep(poll)
 
 
-def post_apply_health(namespaces):
-    """Compat wrapper: the settling health gate. Returns (ok, problems[])."""
-    return settle_health(namespaces)
+def post_apply_health(namespaces, baseline=None):
+    """Compat wrapper: the settling health gate. Returns (ok, problems[], info{})."""
+    return settle_health(namespaces, baseline=baseline)
 
 
 def merge_pr(number):
     rc, out, err = run(["gh", "pr", "merge", str(number), "--squash", "--delete-branch"], timeout=120)
     if rc != 0:
         return None, err.strip()
-    # resolve the squash commit for potential revert
+    # resolve the squash commit for potential revert. From here on the PR IS
+    # merged: nothing may raise (a raise would orphan the merge unreverted).
     time.sleep(3)
     rc2, out2, _ = run(["gh", "pr", "view", str(number), "--json", "mergeCommit"], timeout=45)
     sha = None
     if rc2 == 0:
-        sha = (json.loads(out2 or "{}").get("mergeCommit") or {}).get("oid")
+        try:
+            sha = ((json.loads(out2 or "{}") or {}).get("mergeCommit") or {}).get("oid")
+        except (ValueError, AttributeError):
+            sha = None
     return sha or "unknown", None
+
+
+def _resolve_merge_sha(number):
+    """Fallback for a merge whose sha `gh` did not return: the squash commit on
+    origin/main whose subject ends in '(#N)'. None if not found."""
+    run(["git", "-C", str(REPO_ROOT), "fetch", "origin", "main"], timeout=90)
+    rc, out, _ = run(["git", "-C", str(REPO_ROOT), "log", "origin/main", "-n", "200",
+                      "--format=%H %s"], timeout=30)
+    if rc != 0:
+        return None
+    for line in out.splitlines():
+        sha, _, subj = line.partition(" ")
+        if subj.rstrip().endswith(f"(#{number})"):
+            return sha
+    return None
 
 
 def git_sync():
@@ -1393,19 +1573,41 @@ def reconcile(apps):
         run(["flux", "reconcile", "kustomization", app, "-n", ns, "--with-source"], timeout=180)
 
 
-def revert_batch(shas):
-    reverted = []
-    for sha in shas:
-        if not sha or sha == "unknown":
-            continue
-        rc, _, err = run(["git", "-C", str(REPO_ROOT), "revert", "--no-edit", sha], timeout=60)
-        if rc == 0:
-            reverted.append(sha)
-        else:
-            log(f"  !! revert of {sha[:8]} failed: {err.strip()}")
+def revert_batch(merged):
+    """Revert every merged PR (newest first). Returns (reverted_shas, failed)
+    where failed = [{number, sha, reason}] -- every merge that is NOT reverted
+    on origin/main, with the reason. Never raises."""
+    reverted, failed = [], []
+    try:
+        git_sync()
+    except Exception as e:  # noqa: BLE001
+        log(f"  !! git sync before revert failed: {e}")
+    for c in reversed(list(merged)):
+        num, sha = c.get("number"), c.get("merge_sha")
+        try:
+            if not sha or sha == "unknown":
+                sha = _resolve_merge_sha(num)
+                if sha:
+                    c["merge_sha"] = sha
+            if not sha:
+                failed.append({"number": num, "sha": None, "reason": "merge sha unknown"})
+                continue
+            rc, _, err = run(["git", "-C", str(REPO_ROOT), "revert", "--no-edit", sha], timeout=60)
+            if rc == 0:
+                reverted.append(sha)
+            else:
+                log(f"  !! revert of {sha[:8]} failed: {err.strip()}")
+                failed.append({"number": num, "sha": sha, "reason": f"git revert: {err.strip()[:200]}"})
+        except Exception as e:  # noqa: BLE001
+            failed.append({"number": num, "sha": sha, "reason": f"{type(e).__name__}: {e}"})
     if reverted:
-        run(["git", "-C", str(REPO_ROOT), "push", "origin", "main"], timeout=120)
-    return reverted
+        rc, _, err = run(["git", "-C", str(REPO_ROOT), "push", "origin", "main"], timeout=120)
+        if rc != 0:
+            log(f"  !! push of {len(reverted)} revert commit(s) FAILED: {err.strip()}")
+            failed += [{"number": None, "sha": s_, "reason": f"revert not pushed: {err.strip()[:200]}"}
+                       for s_ in reverted]
+            reverted = []
+    return reverted, failed
 
 
 def record_autonomy(merged, outcome):
@@ -1516,86 +1718,89 @@ def main(argv=None):
             emit_json(result)
         return 0
 
-    merged, all_apps = [], set()
+    # Scope + PRE-APPLY baseline BEFORE any merge (2026-10-26). A PR whose
+    # changed-file list is unreadable has an unknown gate scope and is not
+    # merged; an unreadable baseline means the gate cannot work, so nothing is
+    # merged at all (fail closed).
+    plan, apps_by_pr = [], {}  # apps kept OUT of the PR dicts: `safe` is JSON-emitted
     for c in safe:
-        sha, err = merge_pr(c["number"])
-        if err:
-            log(f"  !! merge #{c['number']} failed: {err}")
+        apps = affected_apps(c["number"])
+        if apps is None:
+            log(f"  !! #{c['number']} {c['dep']}: changed-file list unreadable -- NOT merging "
+                f"(health-gate scope unknown)")
+            result.setdefault("skipped", []).append(
+                {"number": c["number"], "dep": c["dep"], "reason": "changed-file list unreadable"})
             continue
-        c["merge_sha"] = sha
-        merged.append(c)
-        all_apps |= affected_apps(c["number"])
-        log(f"  ✔ merged #{c['number']} {c['dep']} → {c['new']} ({str(sha)[:8]})")
-    result["merged"] = [{"number": c["number"], "dep": c["dep"], "new": c["new"],
-                         "sha": c.get("merge_sha"), "fast_lane": c.get("fast_lane", "normal"),
-                         "security_ref": c.get("security_ref")} for c in merged]
-
-    if not merged:
-        log("== no PRs merged (all merge attempts failed) ==")
+        apps_by_pr[c["number"]] = apps
+        plan.append(c)
+    if not plan:
+        log("== no PR with a readable gate scope; nothing merged ==")
         if args.json:
             emit_json(result)
         return 1
-
-    log(f"\n-- syncing local main + reconciling {len(all_apps)} affected app(s) --")
-    git_sync()
-    reconcile(all_apps)
-    log(f"-- waiting {RECONCILE_WAIT_S}s for rollout, then health gate --")
-    time.sleep(RECONCILE_WAIT_S)
-    ok, problems = post_apply_health({ns for ns, _ in all_apps})
-    result["health"] = {"ok": ok, "problems": problems}
-
-    w = _writer()
-    if not ok:
-        log("\n!! POST-APPLY HEALTH GATE FAILED — reverting the batch:")
-        for p in problems:
-            log(f"     - {p}")
-        reverted = revert_batch([c.get("merge_sha") for c in merged])
-        result["reverted"] = reverted
-        # B.4: a revert RESETS earned autonomy to zero. The batch is reverted as
-        # a whole and the culprit is not isolated, so EVERY merged component gets
-        # a `reverted` row — the conservative direction (an innocent component
-        # re-earns; a guilty one never skates).
-        result["autonomy_records"] = record_autonomy(merged, "reverted")
-        reconcile(all_apps)  # push cluster back to reverted state
-        title = f"Auto-update reverted: {len(reverted)} merge(s) regressed the cluster"
-        # Emit the sweep finding first so we can key the OpenClaw issue on its
-        # finding_id. Stable across cycles, but fingerprint-DERIVED: it is
-        # re-derived if the identity function changes, so a long-lived issue key
-        # can go stale (see docs/sops/sweep-findings-lifecycle.md §4.1b).
-        fid = None
-        if w:
-            with w:
-                fid = w.emit("critical", title,
-                             action="Investigate the reverted bumps; they are back on the deny path until fixed",
-                             subsection="auto-update",
-                             metadata={"reverted": reverted, "problems": problems[:20],
-                                       "merged": [f"#{c['number']} {c['dep']}→{c['new']}" for c in merged]})
-        # Route to OpenClaw (owner of the open-issue + reminder lifecycle);
-        # notify.py is only the fallback when the openclaw pod is unreachable.
-        merged_line = ", ".join(f"{c['dep']}→{c['new']}" for c in merged)
-        try:
-            sys.path.insert(0, str(SCRIPT_DIR / "lib"))
-            from notify import ingest_or_notify  # type: ignore
-            route = ingest_or_notify(
-                {"key": fid or f"auto-update-revert-{merged[0]['number']}",
-                 "kind": "auto_update_revert", "source": "auto-update",
-                 "severity": "critical", "action": "ack",
-                 "title": title, "component": merged_line,
-                 "detail": "reverted after post-apply health failure: " + "; ".join(problems[:6])},
-                fallback_text=("⛔ *Auto-update reverted* — a merged bump regressed the cluster:\n"
-                               + merged_line + "\nProblems: " + "; ".join(problems[:4])
-                               + "\nBatch reverted; cluster restored. Needs a look."),
-                urgent=True)
-            log(f"  operator issue routed via: {route}")
-        except Exception as e:
-            log(f"  (operator notify failed: {e})")
-        log("\n== ALERT: batch auto-reverted; cluster restored to pre-merge state ==")
+    scope_ns = {ns for c in plan for ns, _ in apps_by_pr[c["number"]]}
+    baseline = capture_baseline(scope_ns)
+    if baseline["unreadable"]:
+        log("!! PRE-APPLY BASELINE UNREADABLE -- not merging anything (the health gate "
+            "could not tell a regression from a pre-existing failure):")
+        for u in baseline["unreadable"]:
+            log(f"     - {u}")
+        result["baseline_error"] = baseline["unreadable"]
         if args.json:
             emit_json(result)
-        return 2
+        return 1
+    result["preexisting"] = list(baseline["report"].values())
+    if baseline["keys"]:
+        log(f"-- {len(baseline['keys'])} problem(s) already present BEFORE the apply "
+            f"(excluded from the gate, reported):")
+        for t in list(baseline["report"].values())[:20]:
+            log(f"     - {t}")
+
+    merged, all_apps = [], set()
+    try:
+        for c in plan:
+            sha, err = merge_pr(c["number"])
+            if err:
+                log(f"  !! merge #{c['number']} failed: {err}")
+                continue
+            c["merge_sha"] = sha
+            merged.append(c)
+            all_apps |= apps_by_pr[c["number"]]
+            log(f"  ✔ merged #{c['number']} {c['dep']} → {c['new']} ({str(sha)[:8]})")
+        result["merged"] = [{"number": c["number"], "dep": c["dep"], "new": c["new"],
+                             "sha": c.get("merge_sha"), "fast_lane": c.get("fast_lane", "normal"),
+                             "security_ref": c.get("security_ref")} for c in merged]
+
+        if not merged:
+            log("== no PRs merged (all merge attempts failed) ==")
+            if args.json:
+                emit_json(result)
+            return 1
+
+        log(f"\n-- syncing local main + reconciling {len(all_apps)} affected app(s) --")
+        git_sync()
+        reconcile(all_apps)
+        log(f"-- waiting {RECONCILE_WAIT_S}s for rollout, then health gate --")
+        time.sleep(RECONCILE_WAIT_S)
+        ok, problems, info = post_apply_health({ns for ns, _ in all_apps}, baseline=baseline)
+        result["health"] = {"ok": ok, "problems": problems,
+                            "readings": info.get("readings"),
+                            "preexisting": info.get("preexisting", [])}
+    except Exception as e:  # noqa: BLE001 -- FAIL CLOSED on any post-merge exception
+        if not merged:
+            raise
+        ok = False
+        problems = [f"auto-update raised after merging {len(merged)} PR(s): "
+                    f"{type(e).__name__}: {e} -- health unverified, reverting (fail-closed)"]
+        log(f"\n!! {problems[0]}")
+        result["health"] = {"ok": False, "problems": problems, "exception": f"{type(e).__name__}: {e}"}
+
+    if not ok:
+        return _revert_and_alert(merged, all_apps, problems, result, args)
 
     log(f"\n== applied {len(merged)} update(s), post-apply health OK ==")
     result["autonomy_records"] = record_autonomy(merged, "green")
+    w = _writer()
     if w:
         with w:
             w.emit("clean", f"Auto-update merged {len(merged)} safe update(s), cluster healthy",
@@ -1604,6 +1809,94 @@ def main(argv=None):
     if args.json:
         emit_json(result)
     return 0
+
+
+def _revert_and_alert(merged, all_apps, problems, result, args):
+    """Gate failed (or the run raised after merging): revert the batch and
+    alert. Every step is guarded -- this is the fail-closed path and must not
+    itself abort. Returns 2 when the whole batch is reverted, 3 when any merge
+    is LEFT on main (named, with the reason, in the log, finding and issue)."""
+    log("\n!! POST-APPLY HEALTH GATE FAILED — reverting the batch:")
+    for p in problems:
+        log(f"     - {p}")
+    try:
+        reverted, failed = revert_batch(merged)
+    except Exception as e:  # noqa: BLE001 -- revert_batch never raises; belt and braces
+        reverted, failed = [], [{"number": c.get("number"), "sha": c.get("merge_sha"),
+                                 "reason": f"revert_batch raised {type(e).__name__}: {e}"} for c in merged]
+    result["reverted"] = reverted
+    result["left_merged"] = failed
+    if failed:
+        log("\n!! LEFT MERGED — these merges could NOT be reverted; the cluster is NOT "
+            "restored and an operator must act:")
+        for f in failed:
+            log(f"     - #{f.get('number')} {str(f.get('sha') or '?')[:8]}: {f['reason']}")
+    # B.4: a revert RESETS earned autonomy to zero. The batch is reverted as
+    # a whole and the culprit is not isolated, so EVERY merged component gets
+    # a `reverted` row — the conservative direction (an innocent component
+    # re-earns; a guilty one never skates).
+    try:
+        result["autonomy_records"] = record_autonomy(merged, "reverted")
+    except Exception as e:  # noqa: BLE001
+        log(f"  !! autonomy records failed: {e}")
+    try:
+        reconcile(all_apps)  # push cluster back to reverted state
+    except Exception as e:  # noqa: BLE001
+        log(f"  !! reconcile after revert failed: {e}")
+    if failed:
+        title = (f"Auto-update gate FAILED and {len(failed)} merge(s) could NOT be reverted "
+                 f"({len(reverted)} reverted)")
+    else:
+        title = f"Auto-update reverted: {len(reverted)} merge(s) regressed the cluster"
+    # Emit the sweep finding first so we can key the OpenClaw issue on its
+    # finding_id. Stable across cycles, but fingerprint-DERIVED: it is
+    # re-derived if the identity function changes, so a long-lived issue key
+    # can go stale (see docs/sops/sweep-findings-lifecycle.md §4.1b).
+    fid = None
+    try:
+        w = _writer()
+        if w:
+            with w:
+                fid = w.emit("critical", title,
+                             action=("Revert the LEFT-MERGED commits by hand, then investigate"
+                                     if failed else
+                                     "Investigate the reverted bumps; they are back on the deny path until fixed"),
+                             subsection="auto-update",
+                             metadata={"reverted": reverted, "left_merged": failed,
+                                       "problems": problems[:20],
+                                       "merged": [f"#{c['number']} {c['dep']}→{c['new']}" for c in merged]})
+    except Exception as e:  # noqa: BLE001
+        log(f"  !! finding emit failed: {e}")
+    # Route to OpenClaw (owner of the open-issue + reminder lifecycle);
+    # notify.py is only the fallback when the openclaw pod is unreachable.
+    merged_line = ", ".join(f"{c['dep']}→{c['new']}" for c in merged)
+    left_line = "; ".join(f"#{f.get('number')} {f['reason']}" for f in failed)
+    try:
+        sys.path.insert(0, str(SCRIPT_DIR / "lib"))
+        from notify import ingest_or_notify  # type: ignore
+        route = ingest_or_notify(
+            {"key": fid or f"auto-update-revert-{merged[0]['number']}",
+             "kind": "auto_update_revert", "source": "auto-update",
+             "severity": "critical", "action": "ack",
+             "title": title, "component": merged_line,
+             "detail": ("reverted after post-apply health failure: " + "; ".join(problems[:6])
+                        + (f" | LEFT MERGED: {left_line}" if failed else ""))},
+            fallback_text=(("⛔ *Auto-update gate failed — batch NOT fully reverted*:\n" if failed
+                            else "⛔ *Auto-update reverted* — a merged bump regressed the cluster:\n")
+                           + merged_line + "\nProblems: " + "; ".join(problems[:4])
+                           + (f"\nLEFT MERGED: {left_line}" if failed
+                              else "\nBatch reverted; cluster restored. Needs a look.")),
+            urgent=True)
+        log(f"  operator issue routed via: {route}")
+    except Exception as e:
+        log(f"  (operator notify failed: {e})")
+    if failed:
+        log("\n== ALERT: gate failed; batch NOT fully reverted -- see LEFT MERGED above ==")
+    else:
+        log("\n== ALERT: batch auto-reverted; cluster restored to pre-merge state ==")
+    if args.json:
+        emit_json(result)
+    return 3 if failed else 2
 
 
 if __name__ == "__main__":
