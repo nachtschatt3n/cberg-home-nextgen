@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.10.23"
+version: "2026.10.26"
 
 # ── Image major ceilings (added 2026-10-23, F-6a859080) ─────────────────────
 # Caps the MAJOR line the version checker may propose for ONE image in ONE
@@ -268,6 +268,23 @@ deny:
       kernel >= 6.5). Read-only ConfigMap config cannot be auto-migrated, so an
       unattended bump starts Frigate in safe mode with zero cameras while every probe
       stays green. Patch bumps stay on the line and auto-merge; minor+ is PLAN lane."
+    max: patch
+  # Added 2026-10-26 (sweep a1721200, plan-reviewer on tube-archivist-0.6.0).
+  # Tube Archivist is a 0.x project: its MINOR is the breaking axis. PR #432
+  # (v0.5.12 -> v0.6.0) is OPEN and nothing here or in coverage.py names this
+  # image, so it classifies as a plain minor and could merge UNATTENDED at Step 0
+  # of a window. The v0.6.0 line drops nginx and validates the Host header, so
+  # a kubelet probe that sends the pod IP gets HTTP 400 and the app crash-loops
+  # behind a bare tag bump. The fix is a plan (runbooks/maintenance/plans/
+  # tube-archivist-0.6.0.md): probe Host header, artwork sync, ordering after
+  # the Elasticsearch 9 plan. `max: patch` keeps 0.5.x patches flowing. The
+  # Elasticsearch image is a different repo and is NOT matched here.
+  - match: "*bbilly1/tubearchivist*"
+    reason: "0.x project: v0.6.0 removes nginx and enforces ALLOWED_HOSTS, so the
+      kubelet probe (Host = pod IP) gets HTTP 400 and the pod crash-loops on a bare
+      tag bump while the manifest still looks valid. Needs the probe Host header and
+      artwork-sync changes of plan tube-archivist-0.6.0, after the Elasticsearch
+      plan. Patch bumps on 0.5.x stay AUTO; minor+ is PLAN lane."
     max: patch
   - match: "*mariadb*"
     reason: "A DB-engine bump is never unattended-safe. The bitnami entrypoint ALWAYS
