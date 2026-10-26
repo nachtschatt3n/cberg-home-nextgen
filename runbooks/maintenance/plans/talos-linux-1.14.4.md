@@ -100,6 +100,9 @@ depends_on: []                        # nothing unexecuted must land first. talc
                                       # 2026-10-04 (a7965251); premise multidoc-migration-applied-on-all-nodes is
                                       # the live gate.
 conflicts_with:                       # exclusive: true already keeps everything out of the slot; these are the plans
+  - tube-archivist-elasticsearch-9.5.5   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
+  - frigate-reolink-go2rtc-flv   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
+  - grafana-14.1.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # 2026-10-25: pruned dead refs cilium-1.20.4 (executed/retired)
                                       # that ALSO mutate Talos machine config / the same nodes / the window's
                                       # instrument and must never share a night with this roll (reciprocity, §6.3).

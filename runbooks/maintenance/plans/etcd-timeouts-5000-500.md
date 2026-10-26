@@ -37,6 +37,7 @@ touches:
     - monitoring                      # the gates' instrument (Prometheus is reached through the same apiserver VIP)
 depends_on: []
 conflicts_with:
+  - envoy-proxy-config-distroless-v1.39.4   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # 2026-10-25: pruned dead refs kube-prometheus-stack-92.2.0, nocodb-2026.09.1, nextcloud-fleet-35.0.1, jellyfin-12.2.20261005 (executed/retired)
   - talos-linux-1.14.2                # exclusive node roll (11-01): reboots every node and restarts etcd three times; also
                                       # rewrites the same machine configs. Never the same night, and 11-08 is 7 days later on

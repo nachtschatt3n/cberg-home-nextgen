@@ -31,6 +31,7 @@ touches:
     - monitoring                      # §4 reads Prometheus (kube-state-metrics series)
 depends_on: []
 conflicts_with:                       # every id below exists in runbooks/maintenance/plans/ on 2026-10-25
+  - grafana-14.1.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   - longhorn-1.13.0                     # shares the storage layer teslamate-db rides on; never the same night
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. helmrelease/teslamate (same object)
   - flux-oci-chart-sources            # rewrites the bjw-s chart source block of every app-template HR incl. this one

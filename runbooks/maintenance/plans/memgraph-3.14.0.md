@@ -21,7 +21,7 @@ conflicts_with: [longhorn-1.13.0, flux-oci-chart-sources]
                                       #   storage-engine upgrade (that plan is also exclusive: true).
                                       # flux-oci-chart-sources: moves the bjw-s app-template source this HR renders from;
                                       #   a chart-source swap in the same window would confound §4.
-                                      # kube-prometheus-stack: no plan file exists, but Renovate PR #428 (92.11.0 -> 92.13.1)
+                                      # kube-prometheus-stack: no plan file exists, but Renovate PR #428 (92.11.1 -> 92.13.1)
                                       #   is OPEN and, if Step 0 auto-applies it the same night, it restarts Prometheus
                                       #   and perturbs the instrument §4.5 reads (a plan_id cannot be named here without a
                                       #   DEAD-REF, so premise kps-chart-unchanged fails the plan if it already landed;
@@ -61,9 +61,9 @@ premises:
     run: kubectl get volumes.longhorn.io -n storage pvc-2455ee11-6ed4-4d6d-bc5e-f98ec7701b5b -o jsonpath='{.status.state}/{.status.robustness}'
     expect_exact: attached/healthy
   - id: kps-chart-unchanged
-    why: "§4.5 reads Prometheus. Renovate PR #428 (kube-prometheus-stack 92.11.0 -> 92.13.1) is open; if it has landed (live chart != 92.11.0) the instrument was restarted/changed and §4.5 baselines are void. Fails by design then: re-run after the stack settles."
+    why: "§4.5 reads Prometheus. Renovate PR #428 (kube-prometheus-stack 92.11.1 -> 92.13.1) is open; if it has landed (live chart != 92.11.1) the instrument was restarted/changed and §4.5 baselines are void. Fails by design then: re-run after the stack settles."
     run: kubectl get helmrelease -n monitoring kube-prometheus-stack -o jsonpath='{.spec.chart.spec.version}'
-    expect_exact: "92.11.0"
+    expect_exact: "92.11.1"
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md
@@ -310,7 +310,7 @@ The graph has not changed since April, so the §2.3 backup `$BK` holds exactly t
   "Lab unchanged" assertion relies on it.
 - **conflicts_with:** `longhorn-1.13.0` (volume re-attach during a storage-engine upgrade) and
   `flux-oci-chart-sources` (changes the chart source this HR renders from).
-- **kube-prometheus-stack (shared instrument for §4.5):** Renovate PR #428 (92.11.0 -> 92.13.1) is open and
+- **kube-prometheus-stack (shared instrument for §4.5):** Renovate PR #428 (92.11.1 -> 92.13.1) is open and
   has no plan file, so it cannot be a `conflicts_with` id. If Step 0 applies it before this plan runs,
   premise `kps-chart-unchanged` FAILS (expected) and §4.5 must wait until Prometheus has been up 15 min
   on the new chart, or be taken the next night. Never run §4.5 while the stack is mid-roll.

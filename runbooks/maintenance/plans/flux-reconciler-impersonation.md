@@ -41,6 +41,9 @@ touches:
                                       # reads Prometheus and Alertmanager.
 depends_on: []
 conflicts_with:                       # exclusive: true already keeps the slot empty;
+  - envoy-proxy-config-distroless-v1.39.4   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
+  - tube-archivist-0.6.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
+  - tube-archivist-elasticsearch-9.5.5   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # 2026-10-25: pruned dead refs flux-fleet-0.60.0, kube-prometheus-stack-91.9.0 (executed/retired)
   - flux-oci-chart-sources            # these name WHY. Rewrites Flux sources.
   - helm-drift-detection              # changes HelmRelease behaviour cluster-wide.

@@ -48,6 +48,7 @@ touches:
                                        # storage extension), and this plan rolls them twice.
 depends_on: []
 conflicts_with:                        # ONLY this field is honoured by window-scheduler.py.
+  - grafana-14.1.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # 2026-10-25: pruned dead refs flux-distribution-2.9.6 (executed/retired)
   - edot-collector-0.163.2             # Daemon collectors export OTLP into edot-collector.monitoring.svc:4317 and
                                        # §4.4 proves this plan via docs landing in ES THROUGH edot - a same-night

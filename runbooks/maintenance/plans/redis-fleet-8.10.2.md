@@ -52,6 +52,8 @@ touches:
                                         # remounted by their own pod.
 depends_on: []
 conflicts_with:
+  - tube-archivist-0.6.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
+  - tube-archivist-elasticsearch-9.5.5   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # Same consumers / same files (reciprocity added 2026-10-24 re-plan; each is listed back by these plans):
   - nextcloud-9.4.1                     # vetted nightly:2026-10-28 — Nextcloud app roll; lists this plan. Must be settled BEFORE leg 8.
   - nextcloud-whiteboard-2.1.2          # vetted nightly:2026-10-29 — Nextcloud whiteboard (uses nextcloud redis path); lists this plan.

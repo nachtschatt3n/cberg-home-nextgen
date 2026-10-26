@@ -62,6 +62,10 @@ touches:
     # names which shared surface it would touch.
 depends_on: []
 conflicts_with:
+  - tube-archivist-0.6.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
+  - tube-archivist-elasticsearch-9.5.5   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
+  - frigate-reolink-go2rtc-flv   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
+  - grafana-14.1.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # 2026-10-25: pruned dead refs flux-fleet-0.60.0, chart-patches-coredns-reloader-blackbox, app-template-5.2.1, penpot-chart-1.10.0 (executed/retired)
   # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
   # - grafana-13.2.6 (RESOLVED 2026-09-30: executed + retired in nightly:2026-09-30, a64bb61e; ref removed per the dead-ref convention)

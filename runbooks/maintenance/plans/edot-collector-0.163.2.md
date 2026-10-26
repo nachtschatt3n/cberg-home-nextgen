@@ -68,6 +68,7 @@ touches:
                                   # NOT gateway/envoy: routing unchanged.
 depends_on: []
 conflicts_with:                   # HARD slot exclusions — the only field
+  - grafana-14.1.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # 2026-10-25: pruned dead refs cilium-1.20.4 (executed/retired)
                                   # window-scheduler.py honours (symmetric either way).
                                   # Re-pruned 2026-10-23: refs to plans that no longer exist

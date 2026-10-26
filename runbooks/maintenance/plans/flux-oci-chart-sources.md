@@ -46,7 +46,7 @@ touches:
     - "fluxinstance/flux spec.kustomize.patches (Stage 10 — emptyDir sizeLimit)"
   shared: [flux-sources, cni-adjacent, cert-manager, storage/longhorn, dns-internal, monitoring]
 depends_on: []
-conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, otel-operator-0.23.0, jellyfin-12.1, paperless-db-13.0.2, longhorn-1.13.0]   # grafana-13.2.7 added 2026-10-01 (rolls deployment/grafana); grafana-13.2.6 removed 2026-09-30: executed + retired in nightly:2026-09-30 (a64bb61e)
+conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, otel-operator-0.23.0, jellyfin-12.1, paperless-db-13.0.2, longhorn-1.13.0, envoy-proxy-config-distroless-v1.39.4, tube-archivist-0.6.0, frigate-reolink-go2rtc-flv, grafana-14.1.0]   # grafana-13.2.7 added 2026-10-01 (rolls deployment/grafana); grafana-13.2.6 removed 2026-09-30: executed + retired in nightly:2026-09-30 (a64bb61e)
   # 2026-10-25: pruned dead refs nextcloud-fleet-35.0.1, penpot-chart-1.10.0, app-template-5.2.1, chart-patches-coredns-reloader-blackbox, flux-fleet-0.60.0, grafana-13.2.7 (executed/retired)
   # RESOLVED 2026-10-04: uptime-kuma-2.5.5-slim-rootless (d60d14f7) + mariadb-chart-27.3.0 (418faa1e) executed + retired -- dead refs removed; mariadb-28.1.1 added as the reciprocal successor
   # RESOLVED 2026-10-06: mariadb-28.1.1 executed green now:2026-10-05, plan retired in 5af1e51f -- ref removed

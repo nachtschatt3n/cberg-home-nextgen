@@ -45,6 +45,8 @@ touches:
                                       # SystemBackup; no CIFS StorageClass/PVC is touched
 depends_on: []
 conflicts_with:
+  - tube-archivist-elasticsearch-9.5.5   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
+  - grafana-14.1.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # 2026-10-25: pruned dead refs flux-fleet-0.60.0, kube-prometheus-stack-91.9.0, flux-distribution-2.9.6, pgvector-fleet-0.8.7, nextcloud-fleet-35.0.1 (executed/retired)
   - etcd-timeouts-5000-500           # reciprocal (2026-10-13): that plan names this one; etcd-timeouts lands sun 11-08; one risky change per window, gates read etcd health
   - talos-linux-1.14.2                # node roll restarts instance-managers + rebuilds replicas; never
