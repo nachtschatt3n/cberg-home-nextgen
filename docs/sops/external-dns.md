@@ -181,9 +181,11 @@ Step 0 of an unattended nightly 03:30 window with nobody watching.
 
 **That move has since been made, attended and in the correct order**: the GA
 annotation landed on the Gateway first (`fbcd93c2`), then the chart bumped
-1.21.1 → 1.22.0 / image v0.21.0 → v0.22.0 (`0a316a51`). The deny rule stays —
-upstream is already at v0.23.0, and the next bump earns the same attended
-treatment.
+1.21.1 → 1.22.0 / image v0.21.0 → v0.22.0 (`0a316a51`). The following bump,
+chart 1.22.0 → 1.23.0 / image v0.22.0 → v0.23.0 (`415c5301`, 2026-10-21, after
+the flag rename `e468c94e`), also went through a plan rather than the
+auto-updater, and v0.23.0 is what runs now (§2). The deny rule stays: the next
+bump past v0.23.0 earns the same attended treatment.
 
 ### Done 2026-10-21 (`e468c94e`): `--request-timeout` migrated to `--kube-api-request-timeout`
 
@@ -293,7 +295,7 @@ mise exec -- kubectl -n network logs -l app.kubernetes.io/name=external-dns --ta
 
 > This is the pattern **as actually executed** on 2026-09-15 for
 > v0.21.0 → v0.22.0: `fbcd93c2` (Gateway GA key) then `0a316a51` (chart +
-> image). Reuse it verbatim for the next bump — upstream is at v0.23.0.
+> image). Reuse its shape for the next bump past the running v0.23.0.
 > The annotation-key half is specific to the v0.22.0 GA-prefix switch; the
 > **two-commit, Gateway-first, verify-live-in-between shape** is the general
 > rule, because `policy: sync` deletes before it creates.
@@ -626,6 +628,7 @@ v0.22+), then the tunnel (`docs/sops/cloudflare.md`).
 
 ## Version History
 
+- `2026.10.26` (second pass): §3 version-trap aftermath and §5 Example B no longer say "upstream is already at v0.23.0" as if v0.23.0 were still ahead of us; both now state that v0.23.0 is the running version (chart 1.23.0, `415c5301`, after the flag rename `e468c94e`) and that the attended ritual applies to the next bump past it.
 - `2026.10.26`: Records the 2026-10-21 change that shipped without a version
   bump (`2e9bed27`: §2 chart/image row to 1.23.0 / v0.23.0, §3 rename heading
   marked done). This pass finishes it: the §3 rename body was still in the
