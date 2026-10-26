@@ -231,7 +231,9 @@ check("every namespace finding appends ${NS_ATTR}", all(ln.rstrip().endswith('${
       "\n".join(lines))
 check("every namespace finding anchors `ns` + `error-log-volume`",
       all("\\`$NS_NAME\\` (\\`error-log-volume\\`)" in ln for ln in lines), "\n".join(lines))
-m = re.search(r'ERROR_DATA=\$\(curl .*?\}\' 2>/dev/null', SRC, re.S)
+# The control query moved from curl to es_http (2026-10-26: curl's --max-time
+# does not bound the macOS trustd hang); the query body itself is unchanged.
+m = re.search(r'ERROR_DATA=\$\(es_http .*?\}\' 30 ', SRC, re.S)
 q = m.group(0) if m else ""
 check("Section 34 wildcard control query still present", bool(q))
 check("control query NOT narrowed: *error*/*fatal* should, *noerror* must_not, now-24h, no ns filter",

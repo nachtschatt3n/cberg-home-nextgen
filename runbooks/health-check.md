@@ -778,6 +778,15 @@ killall kubectl
 
 **AI Analysis**: Aggregate metrics, identify hardware issues, check for temperature anomalies, flag high client counts or interference.
 
+**Script: UniFi reboots (last 24h, InfluxDB/UnPoller).** Reset detection runs
+server-side in Flux (skip `uptime<=0` blips, implied boot time = whole-second
+epoch − uptime, reset iff it moves later by > 60 s; parity-checked against the
+`resets()` reference on 30 days of data). The raw 24h series is no longer
+pulled. `influx_query` carries `--max-time 60 --fail`. If the 24h read fails,
+returns a Flux error table, or has zero rows while the 15-min baseline has
+rows, the check reports `WINDOW-UNMEASURED` (unmeasured + minor issue), never
+"None detected". Test: `runbooks/tests/test-health-check-unifi-reboot-window.sh`.
+
 ---
 
 ## 19. Network Connectivity (Kubernetes)
@@ -1113,8 +1122,12 @@ fi
 
 # Check Frigate logs for camera connection errors
 echo ""
-echo "=== Camera Connection Errors (last 500 log lines) ==="
-kubectl logs -n home-automation -l app.kubernetes.io/name=frigate --tail=500 2>&1 | grep "crashed unexpectedly" | sed 's/.*for //' | sed 's/\..*//' | sort | uniq -c | sort -rn
+echo "=== Camera Crash Loops (last 6h) ==="
+# --tail=-1 is REQUIRED: with a label selector (-l) kubectl defaults --tail to
+# 10, so `--since=6h` alone reads at most 10 lines (10 vs 17,378 measured
+# 2026-10-26). The script's frigate_crash_scan reports "No resources found" or
+# an empty window as UNMEASURED, never as "No crash loops detected".
+kubectl logs -n home-automation -l app.kubernetes.io/name=frigate --since=6h --tail=-1 2>/dev/null | sed -n 's/.*watchdog\.\([A-Za-z0-9_-][A-Za-z0-9_-]*\)[^A-Za-z0-9_-].*crashed unexpectedly.*/\1/p' | sort | uniq -c | sort -rn
 
 # Check for RTSP connection timeouts
 echo ""
@@ -1549,6 +1562,13 @@ kubectl get pods -n monitoring -l app=edot-collector
 kubectl get daemonset -n monitoring -l app.kubernetes.io/managed-by=opentelemetry-operator
 
 # 2. Port-forward to Elasticsearch
+# (The SCRIPT never uses a fixed port and never `lsof | kill`s one: every ES and
+#  Prometheus forward binds a private ephemeral port, so it cannot kill a
+#  concurrent sibling sweep's forward. Every script ES call goes through
+#  es_http / es_probe_val -- python urllib + a SIGALRM watchdog -- because
+#  curl's --max-time does not bound the macOS trustd hang. A failed error-log
+#  query prints "unknown (UNMEASURED)", never 0. The manual commands below are
+#  for interactive use only.)
 kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 &
 PF_PID=$!
 sleep 3

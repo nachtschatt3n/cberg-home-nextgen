@@ -3836,6 +3836,7 @@ def s5_authentik_logins(es: ElasticPortForward) -> tuple[str, Findings, str]:
 
     body = {
         "size": 50,
+        "track_total_hits": True,  # hits.total read below; caps at 10000 without it
         "query": {"bool": {"must": [
             {"term": {"resource.attributes.k8s.namespace.name": "kube-system"}},
             {"bool": {"should": [
@@ -3889,6 +3890,7 @@ def s5_authentik_logins(es: ElasticPortForward) -> tuple[str, Findings, str]:
     # Cross-app auth failure detection (401/403 across all namespaces)
     auth_body = {
         "size": 0,
+        "track_total_hits": True,  # hits.total read below; caps at 10000 without it
         "query": {"bool": {
             "should": [
                 # NOT a bare "401": as a substring it matches any number containing
@@ -4013,6 +4015,7 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
 
     body = {
         "size": 50,
+        "track_total_hits": True,  # hits.total read below; caps at 10000 without it
         "query": {"bool": {"must": [
             {"term": {"resource.attributes.k8s.namespace.name": "network"}},
             # ANCHOR TO THE REQUEST SURFACE (2026-09-08, F-78ef4a34).
@@ -4235,6 +4238,7 @@ def s6a_error_rate_spikes(es: ElasticPortForward) -> tuple[str, Findings, str]:
 
     body = {
         "size": 0,
+        "track_total_hits": True,  # hits.total read below; caps at 10000 without it
         "query": {"bool": {
             # Bracketed level tokens — `*[ERROR]*` not `*ERROR*` — so we don't
             # false-match coredns "NOERROR" DNS responses etc. body.text is a
@@ -6110,8 +6114,11 @@ def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
     # on `rule.description` — a phrase query on a keyword field returns 0 by
     # construction and reads as "does not reproduce". A dropping agent makes
     # every other slice of this section a floor for that node; say which node.
+    # track_total_hits: flood_total below is read from hits.total, which caps
+    # at 10000 without it (same load-bearing rule as Slice 1).
     body = {
         "size": 0,
+        "track_total_hits": True,
         "query": {"bool": {"must": [
             {"range": {"@timestamp": {"gte": "now-24h"}}},
             {"term": {"rule.groups": "agent_flooding"}},

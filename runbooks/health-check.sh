@@ -1130,10 +1130,51 @@ except BaseException:
 ' 2>/dev/null || echo unknown
 }
 
+# es_http PASSWORD URL [JSON_BODY] [TIMEOUT_S]
+# Prints the raw ES JSON response body and returns 0, or prints NOTHING and
+# returns non-zero on ANY failure (timeout, refused, HTTP error, non-JSON).
+# Same bounded mechanism as es_probe_val (python urllib + a hard SIGALRM
+# watchdog, password in the environment): curl's --max-time does NOT bound the
+# macOS trustd hang, so no ES call in this script may go through curl. A body
+# turns the request into a POST (ES _search accepts POST). TIMEOUT_S defaults
+# to 25 (the socket timeout is 5 s below it, floor 1).
+es_http() {
+    ES_HTTP_PW="$1" ES_HTTP_URL="$2" ES_HTTP_BODY="${3:-}" ES_HTTP_TIMEOUT="${4:-25}" \
+    python3 -c '
+import base64, json, os, signal, ssl, sys, urllib.request
+t = int(os.environ.get("ES_HTTP_TIMEOUT") or 25)
+signal.alarm(t)
+try:
+    body = os.environ.get("ES_HTTP_BODY") or None
+    req = urllib.request.Request(os.environ["ES_HTTP_URL"], data=body.encode() if body else None)
+    if body:
+        req.add_header("Content-Type", "application/json")
+    tok = base64.b64encode(("elastic:" + os.environ["ES_HTTP_PW"]).encode()).decode()
+    req.add_header("Authorization", "Basic " + tok)
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    raw = urllib.request.urlopen(req, timeout=max(1, t - 5), context=ctx).read().decode()
+    json.loads(raw)
+except BaseException:
+    sys.exit(1)
+signal.alarm(0)
+sys.stdout.write(raw)
+' 2>/dev/null
+}
+
+# _hc_free_port FALLBACK -- an ephemeral localhost port nobody holds. Every
+# port-forward in this script binds a PRIVATE port instead of a fixed one, so
+# there is never anything to "free" first: the old `lsof -ti:<port> | xargs
+# kill` preflight killed whatever held the fixed port -- including a
+# concurrent sibling sweep's live forward (F-737d8339 class).
+_hc_free_port() {
+    python3 -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); print(s.getsockname()[1])" 2>/dev/null || echo "$1"
+}
+
 es_init() {
-    # Kill any leftover port-forward on our port
-    lsof -ti:${ES_PORT} 2>/dev/null | xargs kill 2>/dev/null || true
-    sleep 0.3
+    # Private port: nothing to free, nothing of anyone else's to kill.
+    ES_PORT=$(_hc_free_port "$ES_PORT")
 
     # Get password
     ES_PASSWORD_SHARED=$(kubectl get secret elasticsearch-es-elastic-user -n monitoring \
@@ -1148,10 +1189,9 @@ es_init() {
         >/dev/null 2>&1 &
     ES_PF_PID=$!
 
-    # Wait for port to open (max 10 attempts)
+    # Wait for port to open (max 10 attempts, each hard-bounded at 4 s)
     for i in $(seq 1 10); do
-        if curl -k -s -m 2 -K <(es_curl_auth "$ES_PASSWORD_SHARED") \
-            "https://localhost:${ES_PORT}/" >/dev/null 2>&1; then
+        if es_http "$ES_PASSWORD_SHARED" "https://localhost:${ES_PORT}/" "" 4 >/dev/null; then
             ES_AVAILABLE="true"
             echo "  ES enrichment: connected on port ${ES_PORT}"
             return
@@ -1167,18 +1207,16 @@ es_query() {
         echo ""
         return 1
     fi
-    curl -k -s -m 15 -K <(es_curl_auth "$ES_PASSWORD_SHARED") \
-        -X POST "https://localhost:${ES_PORT}/logs-generic-default/_search" \
-        -H 'Content-Type: application/json' \
-        -d "$query_body" 2>/dev/null || { echo ""; return 1; }
+    es_http "$ES_PASSWORD_SHARED" "https://localhost:${ES_PORT}/logs-generic-default/_search" \
+        "$query_body" 20 || { echo ""; return 1; }
 }
 
 es_cleanup() {
+    # Only OUR forward -- never whatever else holds a port.
     if [ -n "$ES_PF_PID" ]; then
         kill "$ES_PF_PID" 2>/dev/null || true
         wait "$ES_PF_PID" 2>/dev/null || true
     fi
-    lsof -ti:${ES_PORT} 2>/dev/null | xargs kill 2>/dev/null || true
 }
 
 # ── Prometheus enrichment helpers ─────────────────────────────────────────────
@@ -1188,8 +1226,8 @@ PROM_PF_PID=""
 PROM_PORT=9094
 
 prom_init() {
-    lsof -ti:${PROM_PORT} 2>/dev/null | xargs kill 2>/dev/null || true
-    sleep 0.3
+    # Private port: nothing to free, nothing of anyone else's to kill.
+    PROM_PORT=$(_hc_free_port "$PROM_PORT")
 
     kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus \
         ${PROM_PORT}:9090 >/dev/null 2>&1 &
@@ -1219,11 +1257,11 @@ prom_query() {
 }
 
 prom_cleanup() {
+    # Only OUR forward -- never whatever else holds a port.
     if [ -n "$PROM_PF_PID" ]; then
         kill "$PROM_PF_PID" 2>/dev/null || true
         wait "$PROM_PF_PID" 2>/dev/null || true
     fi
-    lsof -ti:${PROM_PORT} 2>/dev/null | xargs kill 2>/dev/null || true
 }
 # prom_query_at PROMQL TS — instant query at a fixed evaluation time (unix s).
 # prom_query_range PROMQL START END STEP — range query. Both print the raw
@@ -1431,15 +1469,16 @@ ns_error_attribution() {
             \"must_not\": [{\"wildcard\": {\"body.text\": {\"value\": \"*noerror*\", \"case_insensitive\": true}}}],
             \"filter\": [{\"range\": {\"@timestamp\": {\"gte\": \"$gte\", \"lt\": \"$lt\"}}},
                        {\"term\": {\"resource.attributes.k8s.namespace.name\": \"$ns\"}}]"
-    curl -k -s -m 20 -K <(es_curl_auth "$pw") -X POST "https://localhost:${port}/logs-generic-default/_search" \
-        -H 'Content-Type: application/json' -d "{\"size\": 0, \"query\": {\"bool\": {$filter}},
+    # es_http, not curl: curl's -m does not bound the macOS trustd hang.
+    es_http "$pw" "https://localhost:${port}/logs-generic-default/_search" \
+        "{\"size\": 0, \"query\": {\"bool\": {$filter}},
         \"aggs\": {\"per10m\": {\"date_histogram\": {\"field\": \"@timestamp\", \"fixed_interval\": \"10m\", \"min_doc_count\": 1}}}}" \
-        > "$tmp/hist.json" 2>/dev/null
-    curl -k -s -m 20 -K <(es_curl_auth "$pw") -X POST "https://localhost:${port}/logs-generic-default/_search" \
-        -H 'Content-Type: application/json' -d "{\"size\": 200, \"_source\": [\"body.text\"],
+        25 > "$tmp/hist.json"
+    es_http "$pw" "https://localhost:${port}/logs-generic-default/_search" \
+        "{\"size\": 200, \"_source\": [\"body.text\"],
         \"query\": {\"function_score\": {\"query\": {\"bool\": {$filter}},
         \"random_score\": {\"seed\": 20260926, \"field\": \"_seq_no\"}, \"boost_mode\": \"replace\"}}}" \
-        > "$tmp/sample.json" 2>/dev/null
+        25 > "$tmp/sample.json"
     ns_attr_render "$tmp/hist.json" "$tmp/sample.json" "${6:-0}"
     rm -rf "$tmp"
 }
@@ -1450,6 +1489,39 @@ _all_cleanup() {
     prom_cleanup
 }
 trap _all_cleanup EXIT
+
+# frigate_crash_scan [SINCE]  (F-fe94e75c + 2026-10-26 follow-up)
+# Reads the Frigate log TIME window and counts watchdog.<camera> "crashed
+# unexpectedly" lines per camera. Output / exit:
+#   0  measured; stdout = `uniq -c` lines "COUNT CAMERA" (empty = no crashes)
+#   2  UNMEASURED; stdout = "UNMEASURED<TAB>reason"
+# `--tail=-1` is LOAD-BEARING: with a label selector kubectl defaults --tail
+# to 10, so `--since=6h` alone read at most 10 lines (measured 2026-10-26: 10
+# vs 17,378 lines for the same window) -- a 6h window that was really ~1 min.
+# "No resources found" (selector matched no pod) exits 0 with empty stdout,
+# and an empty 6h window from a running Frigate is not a clean read either:
+# both are UNMEASURED, never "No crash loops detected".
+frigate_crash_scan() {
+    local since="${1:-6h}" err out rc why
+    err=$(mktemp 2>/dev/null) || { printf 'UNMEASURED\t%s\n' "mktemp failed"; return 2; }
+    out=$(kubectl logs -n home-automation -l app.kubernetes.io/name=frigate --since="$since" --tail=-1 2>"$err")
+    rc=$?
+    why=""
+    if [ "$rc" -ne 0 ]; then
+        why="kubectl logs exited $rc: $(grep -v '^Defaulted container' "$err" | head -1)"
+    elif grep -q 'No resources found' "$err"; then
+        why="no pod matched app.kubernetes.io/name=frigate in home-automation"
+    elif [ -z "$out" ]; then
+        why="Frigate logs returned 0 lines for the ${since} window"
+    fi
+    rm -f "$err"
+    if [ -n "$why" ]; then
+        printf 'UNMEASURED\t%s\n' "$why"
+        return 2
+    fi
+    printf '%s\n' "$out" | sed -n 's/.*watchdog\.\([A-Za-z0-9_-][A-Za-z0-9_-]*\)[^A-Za-z0-9_-].*crashed unexpectedly.*/\1/p' | sort | uniq -c | sort -rn
+    return 0
+}
 
 # ---------------------------------------------------------------------------
 # Zigbee availability via retained zigbee2mqtt/+/availability (F-cd07827d)
@@ -3562,7 +3634,10 @@ for o in offline:
     sleep 2
 
     influx_query() {
-        curl -s --connect-timeout 5 \
+        # --max-time: an unbounded read could hang the section; --fail: an HTTP
+        # 4xx/5xx (bad Flux, auth) exits non-zero with NO body, so callers that
+        # check $? see a failed read rather than parsing an error JSON as data.
+        curl -s --fail --connect-timeout 5 --max-time 60 \
             -K <(printf 'header = "Authorization: Token %s"\n' "$INFLUX_TOKEN") \
             -H "Content-Type: application/vnd.flux" \
             "http://localhost:${INFLUX_PORT}/api/v2/query?org=${INFLUX_ORG}" \
@@ -3689,6 +3764,10 @@ def epoch(ts):
     return calendar.timegm(time.strptime(ts[:19], '%Y-%m-%dT%H:%M:%S'))
 
 def resets(rows):
+    # REFERENCE MODEL of the reset rule. The live path runs this exact rule
+    # server-side in Flux (REBOOT_RESETS_CSV below) so the raw 24h series never
+    # crosses the wire; keep the two in lockstep. The rule's semantics are
+    # pinned by runbooks/tests/test-unifi-reboot-{zero-blips,guard}.py.
     # A reboot is a NON-ZERO uptime sample whose implied boot time is later
     # than the previous non-zero sample's (the device booted after it).
     # uptime==0 samples are unpoller scrape blips (F-36517bdb: 18 drops to 0
@@ -3723,10 +3802,36 @@ def resets(rows):
         # first one would silently turn the guard off again.
         UPTIME_CSV=$(influx_query 'from(bucket:"default") |> range(start: -15m) |> filter(fn: (r) => (r._measurement == "uap" or r._measurement == "usw") and r._field == "uptime") |> last() |> keep(columns: ["name","_value"])' 2>/dev/null || true)
         export UPTIME_CSV
-        REBOOT_OUTPUT=$(influx_query 'from(bucket:"default") |> range(start: -24h) |> filter(fn: (r) => (r._measurement == "uap" or r._measurement == "usw") and r._field == "uptime") |> keep(columns: ["name","_measurement","_time","_value"])' \
-        | python3 -c "
-${INFLUX_BY_HEADER}
-import os
+        # Reset detection runs SERVER-SIDE (F-ba96c827 follow-up). Pulling the raw
+        # 24h series (~720 points x 10 devices, more at a faster scrape) through
+        # a curl with no --max-time meant a slow/truncated/failed read produced
+        # resets([]) -> "None detected" while the 15-min baseline worked. The
+        # Flux below is the resets() rule above, verbatim: skip uptime<=0 blips,
+        # per (name, _measurement) series in time order, implied boot time
+        # = whole-second epoch - uptime, reset iff it moved later by > 60 s.
+        # Parity-checked against resets() on 30 days of live data (2026-10-26):
+        # 218/218 identical events. (Sub-second timestamps MUST be truncated:
+        # with ns precision 5 of the UDM's daily ~60.0003 s steps flipped.)
+        REBOOT_FLUX_SERIES='from(bucket:"default") |> range(start: -24h) |> filter(fn: (r) => (r._measurement == "uap" or r._measurement == "usw") and r._field == "uptime") |> filter(fn: (r) => r._value > 0) |> group(columns: ["name","_measurement"])'
+        # Window-coverage control: one row per device that has >0 uptime samples
+        # in the 24h window. Zero rows while the baseline has rows = the 24h
+        # read did not happen -> UNMEASURED, never "None detected".
+        REBOOT_COUNTS_CSV=$(influx_query "${REBOOT_FLUX_SERIES} |> count() |> keep(columns: [\"name\",\"_measurement\",\"_value\"])")
+        REBOOT_COUNTS_RC=$?
+        REBOOT_RESETS_CSV=$(influx_query "${REBOOT_FLUX_SERIES} |> sort(columns: [\"_time\"]) |> map(fn: (r) => ({r with _value: float(v: int(v: r._time) / 1000000000) - float(v: r._value)})) |> difference() |> filter(fn: (r) => r._value > 60.0) |> keep(columns: [\"name\",\"_measurement\",\"_time\"])")
+        REBOOT_RESETS_RC=$?
+        export REBOOT_COUNTS_CSV REBOOT_COUNTS_RC REBOOT_RESETS_CSV REBOOT_RESETS_RC
+        UNIFI_REBOOT_VERDICT_PY="import os
+def window_read(csv_var, rc_var):
+    # (rows, error) -- a non-zero curl exit (HTTP error, timeout, refused) or
+    # a Flux in-band error table (header ',error,reference') is a FAILED read.
+    text = os.environ.get(csv_var, '')
+    if os.environ.get(rc_var, '1') != '0':
+        return [], 'query failed (curl exit ' + os.environ.get(rc_var, '?') + ')'
+    for l in text.replace('\r', '').split('\n'):
+        if l.strip().startswith(',error,'):
+            return [], 'InfluxDB returned an error table'
+    return [r for r in table(text) if r.get('name')], None
 base = [r for r in table(os.environ.get('UPTIME_CSV', '')) if r.get('name')]
 stable = set()
 for r in base:
@@ -3735,27 +3840,46 @@ for r in base:
             stable.add(r['name'])
     except ValueError:
         pass
-raw = resets([r for r in table(sys.stdin.read()) if r.get('name')])
+counts, cerr = window_read('REBOOT_COUNTS_CSV', 'REBOOT_COUNTS_RC')
+raw, rerr = window_read('REBOOT_RESETS_CSV', 'REBOOT_RESETS_RC')
 data = [r for r in raw if r['name'] not in stable]
 dropped = len(raw) - len(data)
 if not base:
     print('  BASELINE-UNAVAILABLE: InfluxDB returned no current uptimes, so the')
-    print('  ' + str(len(raw)) + ' uptime dip(s) in the window could NOT be cross-checked')
-elif not data:
-    print('None detected')
+    print('  ' + (str(len(raw)) if rerr is None else 'unknown number of') + ' uptime reset(s) in the window could NOT be cross-checked')
+elif cerr or rerr or not counts:
+    why = cerr or rerr or 'the 24h uptime window returned ZERO rows while the 15-min baseline has ' + str(len(base))
+    print('  WINDOW-UNMEASURED: ' + why + ' -- reboots in the last 24h are unknown, not none')
 else:
-    for r in data:
-        nm = r['name']
-        ts = r.get('_time', '?')
-        print('  ' + nm + ' rebooted around ' + ts)
-    print('Total reboots: ' + str(len(data)))
-if dropped:
-    print('  (' + str(dropped) + ' uptime-dip candidate(s) ignored: device uptime already exceeds 24h -> scrape gap, not a reboot)')
-")
+    if not data:
+        print('None detected (' + str(len(counts)) + ' device series covered in the 24h window)')
+    else:
+        for r in data:
+            nm = r['name']
+            ts = r.get('_time', '?')
+            print('  ' + nm + ' rebooted around ' + ts)
+        print('Total reboots: ' + str(len(data)))
+    if dropped:
+        print('  (' + str(dropped) + ' uptime-dip candidate(s) ignored: device uptime already exceeds 24h -> scrape gap, not a reboot)')
+"
+        REBOOT_OUTPUT=$(python3 -c "${INFLUX_BY_HEADER}
+${UNIFI_REBOOT_VERDICT_PY}" 2>&1)
         echo "$REBOOT_OUTPUT"
         if echo "$REBOOT_OUTPUT" | grep -q "BASELINE-UNAVAILABLE"; then
             log_warning "UniFi reboot detection did not run - no current uptimes from InfluxDB"
             add_minor_issue "UniFi reboot check could not run (InfluxDB uptime baseline empty) - reboots unverified this cycle"
+            UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
+        elif echo "$REBOOT_OUTPUT" | grep -q "WINDOW-UNMEASURED"; then
+            log_warning "UniFi reboot detection did not run - the 24h uptime window read failed or came back empty"
+            _record_unmeasured "unifi-reboots-24h" "$(echo "$REBOOT_OUTPUT" | sed -n 's/.*WINDOW-UNMEASURED: //p' | head -1)"
+            add_minor_issue "UniFi reboot check could not run (24h InfluxDB uptime window read failed/empty while the baseline works) - reboots unverified this cycle"
+            UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
+        elif ! echo "$REBOOT_OUTPUT" | grep -qE "None detected|rebooted around"; then
+            # The verdict script itself died (traceback, missing python) -- that
+            # is not "no reboots" either.
+            log_warning "UniFi reboot verdict produced no verdict line"
+            _record_unmeasured "unifi-reboots-24h" "reboot verdict script produced no verdict"
+            add_minor_issue "UniFi reboot check produced no verdict - reboots unverified this cycle"
             UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
         else
             REBOOT_COUNT=$(echo "$REBOOT_OUTPUT" | grep -c "rebooted around" || true)
@@ -5044,13 +5168,20 @@ except Exception as e:
         # still exist in the last 6h. Read a TIME window and key on the camera
         # named by the watchdog.<camera> logger, so it re-emits for as long as
         # crash lines exist in the window.
-        if FRIGATE_LOG_WINDOW=$(kubectl logs -n home-automation -l app.kubernetes.io/name=frigate --since=6h 2>/dev/null); then
-            CRASH_CAMERAS=$(printf '%s\n' "$FRIGATE_LOG_WINDOW" | sed -n 's/.*watchdog\.\([A-Za-z0-9_-][A-Za-z0-9_-]*\)[^A-Za-z0-9_-].*crashed unexpectedly.*/\1/p' | sort | uniq -c | sort -rn)
-        else
+        # The read + parse live in frigate_crash_scan (tested by
+        # runbooks/tests/test-health-check-frigate-crash-window.sh): --tail=-1
+        # is required with -l, and no-pod / empty window is UNMEASURED.
+        FRIGATE_CRASH_UNMEASURED=0
+        CRASH_CAMERAS=$(frigate_crash_scan 6h)
+        if [ $? -ne 0 ]; then
+            FRIGATE_CRASH_UNMEASURED=1
+            _record_unmeasured "frigate-crash-loops" "$(printf '%s' "$CRASH_CAMERAS" | sed -n 's/^UNMEASURED.//p' | head -1) (unknown, not clean)"
+            echo "  UNMEASURED: $(printf '%s' "$CRASH_CAMERAS" | sed -n 's/^UNMEASURED.//p' | head -1)"
             CRASH_CAMERAS=""
-            _record_unmeasured "frigate-crash-loops" "could not read Frigate logs for the 6h window (unknown, not clean)"
         fi
-        if [ -n "$CRASH_CAMERAS" ]; then
+        if [ "$FRIGATE_CRASH_UNMEASURED" -eq 1 ]; then
+            :
+        elif [ -n "$CRASH_CAMERAS" ]; then
             echo "$CRASH_CAMERAS"
             # Filter out maintenance cameras
             CRASH_NAMES=$(echo "$CRASH_CAMERAS" | awk '{print $2}')
@@ -6428,7 +6559,11 @@ except: print('0')
         log_warning "Cannot retrieve Elasticsearch password"
         add_major_issue "Elasticsearch password not accessible"
     else
-        kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 > /dev/null 2>&1 &
+        # Private port (not a fixed 9200): a concurrent sibling sweep or a
+        # leaked forward holding 9200 made this forward fail to bind, and every
+        # query below then talked to whatever answered on 9200.
+        ES_LOG_PORT=$(_hc_free_port 9200)
+        kubectl port-forward -n monitoring svc/elasticsearch-es-http ${ES_LOG_PORT}:9200 > /dev/null 2>&1 &
         PF_PID=$!
         sleep 3
 
@@ -6449,7 +6584,9 @@ except: print('0')
         # As of 2026-08-18 the VERDICT honours that comment: the cluster-wide total no
         # longer raises an issue on its own; the per-namespace buckets do. See the
         # rationale block at the verdict itself.
-        ERROR_DATA=$(curl -k -s --max-time 20 --connect-timeout 5 -K <(es_curl_auth "$ES_PASSWORD") -X GET "https://localhost:9200/${LOG_DS}/_search" -H 'Content-Type: application/json' -d '{
+        # es_http (python urllib + SIGALRM), NOT curl: curl's --max-time does not
+        # bound the macOS trustd hang. On any failure it prints nothing.
+        ERROR_DATA=$(es_http "$ES_PASSWORD" "https://localhost:${ES_LOG_PORT}/${LOG_DS}/_search" '{
           "size": 0,
             "track_total_hits": true,
           "query": {
@@ -6473,25 +6610,33 @@ except: print('0')
               "terms": {"field": "resource.attributes.k8s.pod.name", "size": 10}
             }
           }
-        }' 2>/dev/null || echo '')
-        case "$ERROR_DATA" in
-            *'"hits"'*) ;;
-            *) _record_unmeasured "es-error-logs" "ES query failed or timed out (unknown, not 0)" ;;
-        esac
+        }' 30 || echo '')
 
-        TOTAL_ERRORS=$(echo "$ERROR_DATA" | python3 -c "
+        # A failed/timed-out query is UNKNOWN, never 0: the old `except: print('0')`
+        # turned a dead forward into "Total error-level logs in last 24h: 0".
+        TOTAL_ERRORS=$(printf '%s' "$ERROR_DATA" | python3 -c "
 import sys, json
 try:
-    data = json.load(sys.stdin)
-    print(data['hits']['total']['value'])
-except:
-    print('0')
-" || echo "0")
-
-        echo "Total error-level logs in last 24h: $TOTAL_ERRORS"
+    v = json.load(sys.stdin)['hits']['total']['value']
+    if isinstance(v, bool) or not isinstance(v, int):
+        raise ValueError
+    print(v)
+except Exception:
+    print('unknown')
+" 2>/dev/null || echo "unknown")
+        case "$TOTAL_ERRORS" in
+            ''|*[!0-9]*)
+                TOTAL_ERRORS="unknown"
+                _record_unmeasured "es-error-logs" "ES error-log query failed or timed out (unknown, not 0)"
+                echo "Total error-level logs in last 24h: unknown (UNMEASURED - ES query failed or timed out)"
+                ;;
+            *)
+                echo "Total error-level logs in last 24h: $TOTAL_ERRORS"
+                ;;
+        esac
         echo ""
 
-        if [ "$TOTAL_ERRORS" -gt 0 ] && [ "$TOTAL_ERRORS" != "0" ]; then
+        if [ "$TOTAL_ERRORS" != "unknown" ] && [ "$TOTAL_ERRORS" -gt 0 ]; then
             echo "Top 5 namespaces with errors:"
             echo "$ERROR_DATA" | python3 -c "
 import sys, json
@@ -6581,8 +6726,8 @@ except:
 
         es_count() {
             # $1 = should-clause JSON array body, $2 = must_not-clause JSON array body
-            curl -k -s --max-time 20 --connect-timeout 5 -K <(es_curl_auth "$ES_PASSWORD") -X GET "https://localhost:9200/${LOG_DS}/_search" \
-              -H 'Content-Type: application/json' -d "{
+            # es_http, not curl (trustd hang); empty output on failure -> ERR.
+            es_http "$ES_PASSWORD" "https://localhost:${ES_LOG_PORT}/${LOG_DS}/_search" "{
               \"size\": 0,
               \"track_total_hits\": true,
               \"query\": {
@@ -6593,7 +6738,7 @@ except:
                   \"filter\": [{\"range\": {\"@timestamp\": {\"gte\": \"now-24h\"}}}]
                 }
               }
-            }" 2>/dev/null | python3 -c "
+            }" 30 | python3 -c "
 import sys, json
 try:
     print(json.load(sys.stdin)['hits']['total']['value'])
@@ -6642,6 +6787,8 @@ except Exception:
         kill $PF_PID 2>/dev/null || true
         wait $PF_PID 2>/dev/null || true
 
+        # TOTAL_ERRORS may be "unknown"; the _INT form is only READ inside the
+        # HAS_NS_AGG=1 branch below, which a failed query can never reach.
         TOTAL_ERRORS_INT=$(echo "$TOTAL_ERRORS" | tr -cd '0-9' || echo "0")
         [ -z "$TOTAL_ERRORS_INT" ] && TOTAL_ERRORS_INT=0
         FATAL_TEXT_INT=$(echo "$FATAL_TEXT_COUNT" | tr -cd '0-9' || echo "0")
@@ -6776,6 +6923,10 @@ except Exception:
     print(0)
 " 2>/dev/null || echo 0)
 
+        # The per-namespace shares divide by TOTAL_ERRORS_INT: an unknown total
+        # must not reach them as a fabricated 0 denominator.
+        [ "$TOTAL_ERRORS" = "unknown" ] && HAS_NS_AGG=0
+
         if [ "$HAS_NS_AGG" != "1" ]; then
             log_warning "Elasticsearch error-count query failed - the log-volume assertion did NOT run"
             add_major_issue "Elasticsearch log-volume assertion did not run (query failure) - per-namespace error-volume coverage is blind for this cycle"
@@ -6809,7 +6960,7 @@ except Exception:
                 # Attribution (F-ee2f51a2): only for namespaces that will be
                 # flagged (>= the 40,000 floor below). Appended to the finding;
                 # it never changes the count, the share or the tier. Uses the
-                # shared ES session -- this section's own 9200 forward is
+                # shared ES session -- this section's own private forward is
                 # already closed by the time the verdict runs.
                 NS_ATTR=""
                 if [ "$NS_HITS" -ge 40000 ]; then
