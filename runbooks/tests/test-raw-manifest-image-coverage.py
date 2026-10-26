@@ -42,6 +42,14 @@ spec = importlib.util.spec_from_file_location(
 cav = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cav)
 
+# Hermetic (2026-10-26): VersionChecker.__init__ probes `gh --version` and
+# `gh auth status` with a 5 s timeout and records a section-wide degradation
+# when that fails. These tests assert "NO degradation" from the raw-manifest
+# walk, so a slow or logged-out gh made them fail for reasons that have
+# nothing to do with manifests (failed under load during a sweep, blocking an
+# unrelated commit). GitHub reachability has its own coverage; stub it here.
+cav.VersionChecker._check_gh_available = lambda self: True
+
 PASS = FAIL = 0
 
 
