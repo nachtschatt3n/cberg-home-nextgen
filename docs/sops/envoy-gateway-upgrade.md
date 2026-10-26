@@ -1,8 +1,8 @@
 # SOP: Envoy Gateway upgrade (chart + Gateway API CRD channel)
 
 > Description: Upgrading Envoy Gateway in this cluster — the `gateway-helm` chart, the Gateway API CRD channel it drags with it, and the k8s-gateway restart gate that must pass twice before the bump is considered done.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.10.26`
+> Last Updated: `2026-10-26`
 > Owner: `cberg-agent / operator`
 
 ## Description
@@ -84,6 +84,23 @@ Twice, because **the failure is latent**: CRDs coexist happily with a *running*
 k8s-gateway pod and only bite when a pod *starts* with them present. One clean
 restart can be luck. Then let it soak and re-check — the next real test is the
 next node reboot or eviction.
+
+**Header-only re-vendor exception (2026-10-26).** When `revendor.sh <version>`
+prints `content UNCHANGED (header-only diff)` for both vendored files and the
+bundle-version is unchanged, the restart-twice gate is replaced by three checks:
+
+1. The CRD fingerprint (name, `bundle-version` annotation and `metadata.generation`
+   of all Gateway API and Envoy Gateway CRDs) is identical before and after, with a
+   forced-change control that must print a diff.
+2. The k8s-gateway pod names, startTimes and restartCounts are identical before and
+   after (3 rows, `test -s` guarded, with a forced-change control).
+3. `probe_success{probe_class="dns"}` is 1 with a non-zero count.
+
+A k8s-gateway log grep for sync errors is informational only: weeks-old pods never
+re-run startup sync, so it cannot see the failure. The exception is valid because the
+failure bites only when a pod starts with new CRDs present. Any CRD generation change
+or any k8s-gateway restart reverts to the full restart-twice gate above. First use:
+plan `envoy-proxy-config-distroless-v1.39.4` (chart 1.9.3 with the Envoy 1.39.5 pin).
 
 Also assert **non-regression**, not just success: both Envoy proxy Deployments
 serving, every previously-`Accepted` HTTPRoute still `Accepted` (compare against

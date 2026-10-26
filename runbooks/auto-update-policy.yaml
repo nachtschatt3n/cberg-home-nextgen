@@ -212,7 +212,11 @@ deny:
       output diff against the pinned chart plus the restart gate in
       docs/sops/k8s-gateway-dns.md. Never unattended.
   - match: "*envoy-gateway*"
-    reason: "Catch-all for Envoy Gateway artifacts (image/chart aliases) — same hold as gateway-helm."
+    reason: "Catch-all for Envoy Gateway artifacts (image/chart aliases) — same hold as gateway-helm.
+      A chart patch whose revendor.sh diff is header-only (CRD content unchanged) uses
+      CRD-identity + k8s-gateway pod-age comparison + the DNS probe instead of the
+      k8s-gateway restart gate (docs/sops/envoy-gateway-upgrade.md, Verification Tests);
+      any CRD content change keeps the full restart-twice gate."
   # Added 2026-09-22 with the Renovate rule that makes this tag comparable
   # (F-58dbe939). Before it, no PR could exist for this image (docker versioning
   # rejected the `distroless-v` prefix); after it, an operator-approved PR is an
@@ -225,7 +229,8 @@ deny:
       controller: every Envoy Gateway release compiles in the Envoy it was tested with,
       so this pin moves only in the SAME change as the gateway-helm chart bump, to that
       release's DefaultEnvoyProxyImage — never on its own, never unattended. Same hold
-      as gateway-helm; PLAN lane with the restart gate in docs/sops/k8s-gateway-dns.md."
+      as gateway-helm; PLAN lane with the restart gate in docs/sops/k8s-gateway-dns.md,
+      unless the CRD re-vendor is header-only (see the *envoy-gateway* rule)."
   # Added 2026-09-08 after an ATTENDED image pin (v0.21.0 -> v0.22.0 under chart
   # 1.21.1) took public DNS down for 94s and was reverted (aa79cf7a). Chart
   # 1.22.x will ship appVersion 0.22.0 and would classify as a safe MINOR — i.e.
