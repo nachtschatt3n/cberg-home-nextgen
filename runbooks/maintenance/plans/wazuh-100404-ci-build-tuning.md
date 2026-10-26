@@ -30,11 +30,10 @@ touches:
 depends_on: []
 conflicts_with:
   - talos-linux-1.14.4                # node roll restarts the manager, agents and Falco - confounds every §4 gate
+                                      # (falco-9.2.1 dropped 2026-10-26: landed via Renovate PR #423, plan retired)
                                       # (talos-linux-1.14.2 is superseded by it; the old kube-prometheus-stack-91.9.0
                                       # entry was dropped 2026-10-23: no kube-prometheus-stack plan is open - if one is
                                       # filed, re-add it, because §4 CONTROL reads Prometheus alert state)
-  - falco-9.2.1                       # Falco chart roll in ns security (HelmRelease falco): restarts the Falco daemonset
-                                      # whose events feed 100404 and confounds the §4.3 soak; same ns, same SIEM path
   - flux-oci-chart-sources            # touches ns security (falco chart source); a falco re-roll mid-replay confounds
   - flux-reconciler-impersonation     # rewrites how kustomize-controller applies ns security (this plan's apply+revert path)
 capability_change: false              # detection TUNING: two narrowly-scoped child rules demote two benign build
@@ -478,7 +477,7 @@ do NOT `kubectl edit` the ConfigMap — Flux would revert it, and the git histor
   buffer and resend; UniFi remote syslog over UDP does not — a few UniFi lines in the restart window can be lost.
   Acceptable for nightly; avoid running it while an incident is being investigated in Wazuh.
 - **conflicts_with:** `talos-linux-1.14.4` (node roll restarts manager, agents and Falco; 1.14.2 is superseded),
-  `falco-9.2.1` (Falco chart roll in ns `security`; confounds the §4.3 soak), `flux-oci-chart-sources`
+  `flux-oci-chart-sources`
   (moves the Falco chart source in ns `security`), `flux-reconciler-impersonation` (changes how ns `security` is
   applied; currently `blocked`). No `kube-prometheus-stack` plan is open as of 2026-10-23; if one is filed, add it
   (§4.1 CONTROL reads Prometheus). **Reciprocity is NOT yet declared on those plans** — this planner may write only its own file;
