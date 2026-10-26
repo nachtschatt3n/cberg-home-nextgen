@@ -10,7 +10,7 @@ _... managed with Talos, Flux, and GitHub Actions_ 🤖
 
 [![Talos](https://img.shields.io/badge/Talos-v1.14.1-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.36.0-blue?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)&nbsp;&nbsp;
-[![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.9.3-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
+[![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.9.6-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
 [![Renovate](https://img.shields.io/badge/Renovate-enabled-brightgreen?style=for-the-badge&logo=renovatebot&logoColor=white)](https://github.com/renovatebot/renovate)&nbsp;&nbsp;
 [![SOPS](https://img.shields.io/badge/SOPS-age-2C3E50?style=for-the-badge&logo=probot&logoColor=white)](https://github.com/getsops/sops)
 
@@ -34,15 +34,15 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 
 - **Operating System**: [Talos Linux v1.14.1](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration (kernel 6.18.51, Clang/ThinLTO build)
 - **Container Runtime**: [Containerd 2.2.6](https://containerd.io/) with [Spegel](https://github.com/spegel-org/spegel) for distributed container image caching
-- **Networking**: [Cilium v1.19.4](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
+- **Networking**: [Cilium v1.20.4](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
 - **Storage**: [Longhorn v1.12.1](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
 - **Ingress / Routing**: [Envoy Gateway](https://gateway.envoyproxy.io/) (Gateway API) — two Gateways, `envoy-internal` (192.168.55.103) and `envoy-external` (192.168.55.104), in namespace `network`. All HTTP(S) traffic is carried by `HTTPRoute`s. ingress-nginx was removed on 2026-09-07; there are no `Ingress` or `IngressClass` objects in the cluster
 - **Identity**: [Authentik](https://goauthentik.io/) is the cluster IdP — forward-auth for internal apps, SAML SSO for Wazuh, OIDC for selected apps. Blueprints are managed as code in `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` (see `docs/sops/authentik.md`).
 - **Security / SIEM**: [Wazuh 4.14.5](https://wazuh.com/) (single-node Manager + Indexer + Dashboard) ingests Talos node logs, K8s container logs, UniFi CEF syslog, and [Falco](https://falco.org/) runtime syscall events. Custom decoders for UniFi and ingress-nginx (cf_connecting_ip correlation; the nginx decoder set is retained for historical log analysis — the controller itself was removed 2026-09-07).
 - **DNS & Security**: [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) provides network-wide ad blocking and recursive DNS resolution
-- **GitOps**: [Flux v2.9.3](https://github.com/fluxcd/flux2) (distribution) monitors this repository and keeps the cluster in sync
+- **GitOps**: [Flux v2.9.6](https://github.com/fluxcd/flux2) (distribution) monitors this repository and keeps the cluster in sync
 - **Secrets Management**: [SOPS](https://github.com/getsops/sops) with [age encryption](https://github.com/FiloSottile/age) for storing secrets in Git
-- **Certificate Management**: [cert-manager v1.21.0](https://github.com/cert-manager/cert-manager) with Let's Encrypt for automated TLS certificates
+- **Certificate Management**: [cert-manager v1.21.3](https://github.com/cert-manager/cert-manager) with Let's Encrypt for automated TLS certificates
 
 ### GitOps Workflow
 

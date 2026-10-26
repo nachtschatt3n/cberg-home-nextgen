@@ -17,7 +17,7 @@ and worker). See `docs/applications.md` for the authoritative application count 
 | Talos Linux | v1.14.1 |
 | Flux | v2.9.6 |
 | Nodes | 3 × Intel NUC14 Pro |
-| CNI | Cilium v1.20.2 |
+| CNI | Cilium v1.20.4 |
 | Storage | Longhorn v1.12.1 |
 | GitOps | Flux (Helm Operator) |
 | Secrets | SOPS + age encryption |
@@ -105,9 +105,9 @@ Bootstrap order (via `kubernetes/bootstrap/apps/helmfile.yaml`):
 
 | Order | Component | Chart | Version | Namespace |
 |-------|-----------|-------|---------|-----------|
-| 1 | Cilium | `cilium/cilium` | 1.20.2 | kube-system | (bootstrap seed aligned to running v1.20.2; Flux HelmRelease also pins 1.20.2 — verified live 2026-09-23) |
+| 1 | Cilium | `cilium/cilium` | 1.20.4 | kube-system | (bootstrap seed and Flux HelmRelease both pin 1.20.4 — upgraded 2026-10-25, verified live 2026-10-26) |
 | 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.49.0 | kube-system | (chart appVersion 1.14.7 owns the image tag; the former `helm-values.yaml` pin was dropped 2026-10-21) |
-| 3 | cert-manager | `jetstack/cert-manager` | v1.21.2 | cert-manager |
+| 3 | cert-manager | `jetstack/cert-manager` | v1.21.3 | cert-manager |
 | 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.61.0 | flux-system |
 | 5 | Flux Instance | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-instance` | 0.61.0 | flux-system |
 
@@ -122,11 +122,11 @@ manages all subsequent deployments including upgrades to these components.
 |-----------|---------|
 | OS | Talos Linux v1.14.1 (immutable, minimal, Kubernetes-focused; kernel 6.18.51-talos, Clang/ThinLTO; etcd 3.7.1). Rolled 2026-09-27 from v1.13.10, see `docs/sops/talos-upgrade.md` §14 |
 | Container Runtime | Containerd 2.3.5 + Spegel (distributed image caching) |
-| CNI | Cilium v1.20.2 (eBPF networking, load balancing, network policies) |
+| CNI | Cilium v1.20.4 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS v1.14.7 (cluster-internal; image tag owned by the chart) + k8s-gateway (split-DNS for `*.domain`) |
 | Ingress | **Envoy Gateway only (migration completed 2026-09-07).** ingress-nginx is DELETED — zero `Ingress` objects, zero `IngressClass` objects, zero nginx controllers. All HTTP traffic rides 105 `HTTPRoute`s on `envoy-internal` `192.168.55.103` (internal) and `envoy-external` `192.168.55.104` (external, behind the cloudflared wildcard). k8s-gateway publishes DNS from HTTPRoutes. Routing model, conversion rules and the verification gate: `docs/sops/gateway-api-httproute.md`; version upgrades: `docs/sops/envoy-gateway-upgrade.md`. |
 | Storage | Longhorn v1.12.1 (distributed, replicated, with backup) |
-| Certificate Management | cert-manager v1.21.2 + Let's Encrypt |
+| Certificate Management | cert-manager v1.21.3 + Let's Encrypt |
 | Secrets | SOPS + age encryption |
 | Identity Provider | Authentik (forward-auth for apps with no user model; app-native OIDC or SAML for those that have one) |
 | Image Updates | Renovate (weekly) + Flux Image Automation |
@@ -206,9 +206,9 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Kubernetes | v1.36.0 | Container orchestration |
 | Talos Linux | v1.14.1 | Cluster OS |
 | Flux | v2.9.6 | GitOps operator |
-| Cilium | v1.20.2 | CNI / network |
+| Cilium | v1.20.4 | CNI / network |
 | Longhorn | v1.12.1 | Distributed storage |
-| cert-manager | v1.21.2 | TLS management |
+| cert-manager | v1.21.3 | TLS management |
 | actions-runner-controller | 0.15.0 | GitHub Actions runner scale sets (controller + scale-set chart in lockstep) |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.36.x | CLI |
