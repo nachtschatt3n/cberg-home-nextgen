@@ -1523,6 +1523,67 @@ frigate_crash_scan() {
     return 0
 }
 
+# frigate_coverage_scan PORT [HOURS] [MIN_PCT]  (2026-10-26)
+# Recording COVERAGE per camera: seconds of recorded segments in the window
+# [now-10min-HOURS, now-10min] / window length, from Frigate's own
+# /api/<camera>/recordings. This is the behaviour probe the log scans lack:
+# the Reolink main-stream record path dropped every ~87 s ("CSeq expected, 0
+# received", logged at INFO) and lost 13-19% of every day while fps>0 and the
+# crash scan stayed clean. Only cameras with record enabled and continuous
+# retention > 0 are scored (motion-only retention deletes quiet segments by
+# design, so a gap there is not loss). Output / exit:
+#   0  measured; stdout = "CAM<TAB>PCT" per scored camera, then
+#      "LOW<TAB>cam,cam" when any camera is below MIN_PCT (default 90)
+#   2  UNMEASURED; stdout = "UNMEASURED<TAB>reason"
+frigate_coverage_scan() {
+    local port="$1" hours="${2:-6}" minpct="${3:-90}" tmp before after cams cam rc
+    tmp=$(mktemp -d 2>/dev/null) || { printf 'UNMEASURED\t%s\n' "mktemp failed"; return 2; }
+    before=$(( $(date +%s) - 600 )); after=$(( before - hours * 3600 ))
+    if ! curl -sf --max-time 10 "http://127.0.0.1:${port}/api/config" -o "$tmp/config.json"; then
+        rm -rf "$tmp"; printf 'UNMEASURED\t%s\n' "Frigate /api/config unreadable on port ${port}"; return 2
+    fi
+    cams=$(python3 -c '
+import json, sys
+c = json.load(open(sys.argv[1]))["cameras"]
+print(" ".join(n for n, v in c.items() if v.get("enabled", True)
+               and v.get("record", {}).get("enabled")
+               and float((v["record"].get("continuous") or {}).get("days") or 0) > 0))
+' "$tmp/config.json" 2>/dev/null)
+    if [ -z "$cams" ]; then
+        rm -rf "$tmp"; printf 'UNMEASURED\t%s\n' "no camera with continuous recording in /api/config"; return 2
+    fi
+    # $(...) word-splits in bash AND zsh; a bare unquoted $cams does not in zsh.
+    for cam in $(printf '%s' "$cams"); do
+        if ! curl -sf --max-time 30 "http://127.0.0.1:${port}/api/${cam}/recordings?after=${after}&before=${before}" -o "$tmp/rec.${cam}.json"; then
+            rm -rf "$tmp"; printf 'UNMEASURED\t%s\n' "recordings for ${cam} unreadable"; return 2
+        fi
+    done
+    python3 - "$tmp" "$after" "$before" "$minpct" "$cams" <<'PY'
+import json, sys
+tmp, after, before, minpct = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4])
+low = []
+try:
+    for cam in sys.argv[5].split():
+        segs = json.load(open(f"{tmp}/rec.{cam}.json"))
+        if not isinstance(segs, list):
+            raise ValueError(f"{cam}: recordings is not a list")
+        covered = sum(max(0.0, min(float(s["end_time"]), before) - max(float(s["start_time"]), after))
+                      for s in segs)
+        pct = min(100.0, 100.0 * covered / (before - after))
+        print(f"{cam}\t{pct:.1f}")
+        if pct < minpct:
+            low.append(cam)
+except Exception as e:
+    print(f"UNMEASURED\tcannot parse recordings ({type(e).__name__}: {e})")
+    sys.exit(2)
+if low:
+    print("LOW\t" + ",".join(low))
+PY
+    rc=$?
+    rm -rf "$tmp"
+    return "$rc"
+}
+
 # ---------------------------------------------------------------------------
 # Zigbee availability via retained zigbee2mqtt/+/availability (F-cd07827d)
 #
@@ -5067,11 +5128,24 @@ log_section "Section 22b: Frigate NVR & Camera Health"
 
         # Check camera streaming status via Frigate API
         echo "=== Camera Streaming Status (Frigate API) ==="
-        kubectl port-forward -n home-automation svc/frigate 5000:5000 > /dev/null 2>&1 &
+        # Private port (2026-10-26): on this Mac 127.0.0.1:5000 is the AirPlay
+        # receiver (ControlCenter), so the old fixed 5000:5000 forward failed to
+        # bind, curl got AirPlay's 403, the parse printed SUMMARY:0/0 and NO
+        # branch below fired -- the camera check had been measuring nothing.
+        FRIGATE_PORT=$(_hc_free_port 25000)
+        kubectl port-forward -n home-automation svc/frigate "${FRIGATE_PORT}:5000" > /dev/null 2>&1 &
         PF_PID=$!
-        sleep 3
-
-        CAMERA_STATS=$(curl -s http://localhost:5000/api/stats 2>/dev/null || echo "{}")
+        CAMERA_STATS=""
+        for _i in 1 2 3 4 5 6 7 8 9 10; do
+            CAMERA_STATS=$(curl -sf --max-time 5 "http://127.0.0.1:${FRIGATE_PORT}/api/stats" 2>/dev/null) && break
+            CAMERA_STATS=""
+            sleep 1
+        done
+        if ! printf '%s' "$CAMERA_STATS" | python3 -c 'import sys, json; assert json.load(sys.stdin)["cameras"]' 2>/dev/null; then
+            _record_unmeasured "frigate-cameras" "Frigate /api/stats unreadable via port-forward ${FRIGATE_PORT} (unknown, not clean)"
+            echo "  UNMEASURED: Frigate /api/stats unreadable via port-forward ${FRIGATE_PORT}"
+            CAMERA_STATS="{}"
+        fi
 
         CAMERA_RESULTS=$(echo "$CAMERA_STATS" | python3 -c "
 import sys, json
@@ -5138,6 +5212,34 @@ except Exception as e:
         elif [ "$TOTAL_CAMERAS" -gt 0 ]; then
             log_critical "All $TOTAL_CAMERAS cameras are down"
             add_critical_issue "All Frigate cameras are down (0/$TOTAL_CAMERAS streaming)"
+        fi
+
+        # Recording coverage over 6h (frigate_coverage_scan, tested by
+        # runbooks/tests/test-health-check-frigate-coverage.sh). fps>0 does not
+        # mean the record path keeps up: the Reolinks streamed at full fps
+        # while losing 13-19% of their recordings.
+        echo ""
+        echo "=== Recording Coverage (6h, continuous retention) ==="
+        COVERAGE=$(frigate_coverage_scan "$FRIGATE_PORT" 6 90)
+        if [ $? -ne 0 ]; then
+            _record_unmeasured "frigate-recording-coverage" "$(printf '%s' "$COVERAGE" | sed -n 's/^UNMEASURED.//p' | head -1) (unknown, not clean)"
+            echo "  UNMEASURED: $(printf '%s' "$COVERAGE" | sed -n 's/^UNMEASURED.//p' | head -1)"
+        else
+            printf '%s\n' "$COVERAGE" | grep -v '^LOW' | awk -F'\t' '{printf "  %s: %s%%\n", $1, $2}'
+            COVERAGE_LOW_REAL=""
+            for cam in $(printf '%s\n' "$COVERAGE" | sed -n 's/^LOW.//p' | tr ',' ' '); do
+                if echo "$CAMERA_MAINTENANCE" | grep -qw "$cam"; then
+                    log_info "Camera recording gap (maintenance, skipped): $cam"
+                else
+                    COVERAGE_LOW_REAL="${COVERAGE_LOW_REAL:+$COVERAGE_LOW_REAL,}$cam"
+                fi
+            done
+            if [ -n "$COVERAGE_LOW_REAL" ]; then
+                log_warning "Frigate recording coverage below 90% over 6h: $COVERAGE_LOW_REAL"
+                add_minor_issue "Frigate recording coverage below 90% over 6h: $COVERAGE_LOW_REAL"
+            else
+                log_success "Frigate recording coverage >= 90% over 6h on every recording camera"
+            fi
         fi
 
         kill $PF_PID 2>/dev/null || true
