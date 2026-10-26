@@ -214,9 +214,9 @@ spec:
               about a minute). Likely unschedulable, ImagePullBackOff on the
               Playwright image, a missing ConfigMap/Secret, or a hung clone
               init container. Test results are not affected - the runner is.
-              Thermal-gated pods (SchedulingGated) are NOT counted - the
-              30 min start when the gate releases the pod, so this is a pod
-              the scheduler/kubelet could not start after admission.
+              Pods are only created after the submit script's capacity
+              admission, so this is a pod the scheduler/kubelet could not
+              start despite admission.
             summary: CI runner pod stuck Pending
           # Since 2026-10-04 shard pods are created behind the thermal gate
           # (schedulingGates: ci.cberg.home/thermal, docs/sops/ci-runner.md) and

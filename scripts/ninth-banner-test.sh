@@ -17,9 +17,12 @@
 # (space-separated spec files), PROJECT (e.g. chromium), CPU_REQ/CPU_LIM
 # (per-shard CPU, default 2/4 browser lane, 1/1.5 cpu lane = sims/unit
 # without GPU; never above 4, thermal cap).
-# Admission (docs/sops/ci-runner.md): the Job is created only once the schedulable
-# nodes have free CPU >= parallel shards x pod CPU request + TNB_HEADROOM_CPU
-# (default 2); until then `queued: need X, free Y` every TNB_POLL s (60). Queue
+# Admission (docs/sops/ci-runner.md): the Job is created only once all parallel
+# shard pods first-fit, one at a time, into the schedulable nodes' free CPU
+# AND memory, each node keeping TNB_HEADROOM_CPU (default 2) and TNB_HEADROOM_MEM
+# (default 2Gi) free, and the ci-runner ResourceQuota still has room
+# (scripts/ninth-banner-capacity.py decide); until then `queued: need X, free Y
+# (reason)` every TNB_POLL s (60). Queue
 # time never counts against activeDeadlineSeconds (the Job does not exist yet).
 # TNB_QUEUE_TIMEOUT (default 14400 s) bounds the wait. sims: at most one
 # non-terminal sims Job per SUBMITTER (default: the Ninth Banner branch containing <sha>, else sha8; never this repo's branch); parallelism
@@ -114,7 +117,7 @@ fi
 
 read -r submitter submitter_src <<<"$(python3 "$REPO_ROOT/scripts/ninth-banner-capacity.py" submitter "$sha")" \
     && [ -n "$submitter" ] || { echo "admission: cannot resolve the submitter"; exit 3; }
-# --- admission by free CPU (+ one sims Job per submitter), BEFORE creating the Job ---
+# --- admission by per-node CPU+memory fit and quota (+ one sims Job per submitter), BEFORE creating the Job ---
 admit="$REPO_ROOT/scripts/ninth-banner-capacity.py"
 headroom="${TNB_HEADROOM_CPU:-2}"; poll="${TNB_POLL:-60}"; qtimeout="${TNB_QUEUE_TIMEOUT:-14400}"
 [[ "$headroom" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "TNB_HEADROOM_CPU must be a number of CPUs"; exit 2; }
@@ -159,7 +162,7 @@ while :; do
         elif [ "$rc" -eq 10 ]; then
             read -r _ need_cpu free_cpu <<<"$verdict"; msg="queued: need $need_cpu, free $free_cpu"
         else
-            echo "admission: cannot compute free CPU (rc=$rc); refusing to start (fail loud, never 'plenty of CPU')"; exit 3
+            echo "admission: cannot compute node capacity / quota (rc=$rc); refusing to start (fail loud, never 'plenty of room')"; exit 3
         fi
     fi
     waited=$(( $(date +%s) - queue_start ))
