@@ -106,6 +106,30 @@
       "matchUpdateTypes": ["minor", "patch"]
     },
     {
+      // flate lockstep: the `.mise.toml` pin (customManager, datasource
+      // github-releases) and `home-operations/flate/action@vX` in
+      // .github/workflows/flux-local.yaml (github-actions manager, datasource
+      // github-tags) must move together -- the action IS the render gate, so a
+      // lone action bump changes the gate under every other PR while the local
+      // CLI stays behind. Measured with `renovate --dry-run=extract` 44.133.0
+      // (2026-10-26): both deps carry packageName AND depName
+      // `home-operations/flate` (the action's `/action` subpath is not part of
+      // either), so one name matches both. (The built-in mise manager's own
+      // `github:home-operations/flate` entry matches too but stays disabled by
+      // the "owned by the customManager" rule.) MUST stay below the
+      // github-actions automerge rule above: later rules win, and this one takes
+      // the action back out of branch automerge with ignoreTests, so the group
+      // lands as a PR that has to pass the Flate Render Gate it changes.
+      "description": ["flate: .mise.toml pin + flux-local.yaml action ref in one PR, no untested automerge"],
+      "matchPackageNames": ["home-operations/flate"],
+      "groupName": "flate",
+      "automerge": false,
+      "ignoreTests": false,
+      "group": {
+        "commitMessageTopic": "{{{groupName}}} group"
+      }
+    },
+    {
       "description": ["Flux Operator Group"],
       "groupName": "Flux Operator",
       "matchPackageNames": ["/flux-operator/", "/flux-instance/"],
