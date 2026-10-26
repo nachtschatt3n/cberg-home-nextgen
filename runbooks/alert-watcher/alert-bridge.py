@@ -246,6 +246,10 @@ async def _main():
     threading.Thread(target=_reconcile_loop, daemon=True).start()
     if _pusher is not None:
         threading.Thread(target=_pusher.run_forever, daemon=True).start()
+        # Prove the Telegram fallback works (it silently did not, 2026-10): one
+        # silent message per start (rate-limited across crash-loops), OK/ERROR logged.
+        threading.Thread(target=console_push.startup_selftest, args=(_pusher.log,),
+                         daemon=True).start()
     asyncio.create_task(_fanout())
     print(f"[{_ts()}] alert-bridge up: webhook http://0.0.0.0:{HTTP_PORT}/alertmanager "
           f"| ws ws://127.0.0.1:{WS_PORT}/", flush=True)

@@ -16,12 +16,34 @@
 >   Info never. Resolved frames are closed by the bridge's own `alert-record.py --reconcile`.
 > - **Only into an idle pane with an empty input** (same `classify_pane` as the
 >   `operation` / `maintenance-window` skills, byte-pinned by
->   `runbooks/tests/test-console-push.py`). Busy / menu / operator draft ->
->   retry with backoff (15 s .. 3 min) for 15 min, then ONE Telegram notice and the
->   batch is dropped. Exhausted pane -> immediate Telegram notice, nothing typed.
+>   `runbooks/tests/test-console-push.py`). Busy / menu / operator draft /
+>   `exhausted-unclear` (exhaustion text only in the transcript) -> retry with
+>   backoff (15 s .. 3 min) for 15 min, then ONE Telegram notice. Exhausted
+>   idle/draft/busy pane -> immediate Telegram notice, nothing typed.
+> - **Enter guard:** after typing, the bridge re-reads the input box (joining its
+>   soft-wrapped rows) and presses Enter only if it holds EXACTLY the typed line.
+>   If the operator started typing in between, Enter is NOT pressed, an `ERROR`
+>   is logged, the text is left in the input, and the batch is retried (the pane
+>   now reads as a draft, so it ends in the Telegram notice).
+> - **Nothing is dropped silently:** a batch leaves the queue only when it was
+>   typed or the Telegram notice was CONFIRMED sent. A failed notice (`notify()`
+>   returns False) keeps the batch pending, logs `ERROR ... KEPT pending`, and is
+>   retried every 3 min. The dedupe table records an alert on DELIVERY, never on
+>   queue. `grep ERROR ~/.claude/logs/alert-bridge.log` is the check.
+> - **Telegram token under launchd:** `runbooks/lib/notify.py` resolves `sops` by
+>   absolute path when it is not on PATH (`mise which sops` in the repo, then the
+>   newest mise install) and defaults `SOPS_AGE_KEY_FILE` to the repo's `age.key`.
+>   The plist sets PATH + `SOPS_AGE_KEY_FILE`; it never carries the token. Each
+>   bridge start sends ONE silent test notice and logs
+>   `console_push startup notification OK` or `ERROR ... FAILED` (rate-limited to
+>   one per 6 h across KeepAlive respawns; stamp
+>   `~/.claude/logs/alert-bridge.startup-notify`, delete it to force a test).
+>   Before 2026-10-26 the token was never found under launchd and 41 batches were
+>   dropped while the log said "gave up".
 > - **Limits:** bursts within 20 s become one line; the same alert is not re-typed
 >   for 6 h (warning) / 2 h (critical); at most 6 lines/hour, then one Telegram
->   "cap reached" notice (held-back count rides on the next line).
+>   "cap reached" notice NAMING the held alerts. Held alerts stay queued and are
+>   typed (with their held-back count) once the hour rolls over.
 > - **Switches** (launchd env on `com.cberg.alert-bridge`): `CONSOLE_PUSH=0` off,
 >   `CONSOLE_PUSH_DRYRUN=1` log instead of typing. Probe the pane:
 >   `.venv/bin/python3 runbooks/alert-watcher/console_push.py --classify`.

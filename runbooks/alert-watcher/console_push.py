@@ -10,10 +10,16 @@ idle with an empty input. A quiet cluster therefore costs the console zero turns
 Safety rules (each pinned by runbooks/tests/test-console-push.py):
   * only firing warning/critical (critical resolved is opt-in); never info
   * never types into busy / menu / exhausted panes or over an operator draft
+  * Enter only after re-reading the input and finding EXACTLY the typed line
+    (the operator may have started typing between classify and Enter)
   * pane identity: cwd must be the operations repo, exactly one match
   * not deliverable -> retry with backoff; after DEADLINE_S ONE Telegram notice
-  * burst coalescing, per-alert dedupe, per-hour line cap (overflow is counted
-    into the next line, never silently dropped)
+    (exhausted-unclear is retried like busy: it can be plain transcript text)
+  * a batch leaves the queue ONLY when it was typed or the Telegram notice was
+    confirmed sent; a failed notice keeps it pending + logs ERROR, then retries
+  * burst coalescing, per-alert dedupe (recorded on DELIVERY, not on queue),
+    per-hour line cap (held alerts stay pending, are named in the cap notice and
+    ride on the next line -- never silently dropped)
   * alert text is data: control chars stripped, length capped
 
 The pane classifier below is copied byte-for-byte from the `operation` /
@@ -216,8 +222,47 @@ def wanted(evt, critical_resolved=False):
     return False
 
 
+def _squash(s):
+    return re.sub(r"\s+", "", (s or "").replace("\xa0", " "))
+
+
+def pane_input_text(screen_text):
+    """Pure: the FULL text in the input box, joining the soft-wrapped
+    continuation lines under the prompt line (a ~450-char alert line spans
+    several rows of a 77-col pane), or None when no input prompt is visible.
+    Compare with _squash(): the wrap points' whitespace is not recoverable."""
+    lines = _pane_lines(screen_text)
+    i = _pane_input_index(lines)
+    if i is None:
+        return None
+    m = PANE_INPUT_RE.match(lines[i])
+    parts = [(m.group(1) or "") if m else ""]
+    for ln in lines[i + 1:]:
+        s = ln.strip()
+        if not s or s[0] in "─━═╰╭":
+            break
+        parts.append(s.strip("│|").strip())
+    return " ".join(p.strip() for p in parts).strip()
+
+
+def _where(e):
+    return "/".join(x for x in (e.get("namespace"), e.get("pod") or e.get("instance")) if x)
+
+
+def _names(items, cap=600):
+    """Pure: 'warning FooDown (ns/pod); ...' for notices and log lines."""
+    out = []
+    for e in items:
+        txt = f"{e.get('severity')} {_clean(e.get('alertname'), 60)}"
+        if _where(e):
+            txt += f" ({_clean(_where(e), 50)})"
+        out.append(txt)
+    return "; ".join(out)[:cap]
+
+
 def build_line(items, suppressed=0):
-    """Pure: ONE single-line prompt for a batch of events."""
+    """Pure: ONE single-line prompt for a batch of events. `suppressed` = how
+    many of `items` were held back by the hourly cap (they are IN the line)."""
     parts = []
     for e in items:
         where = "/".join(x for x in (e.get("namespace"), e.get("pod") or e.get("instance")) if x)
@@ -230,7 +275,7 @@ def build_line(items, suppressed=0):
         parts.append(txt[:MAX_PER_ALERT])
     head = f"{PREFIX} {len(items)} alert{'s' if len(items) != 1 else ''}"
     if suppressed:
-        head += f" (+{suppressed} more held back by the hourly cap)"
+        head += f" ({suppressed} of them held back by the hourly cap)"
     line = f"{head}: " + "; ".join(parts)
     tail = f" -- {INSTRUCTION}"
     if len(line) + len(tail) > MAX_LINE:
@@ -298,6 +343,53 @@ def default_notify(text):
     return notify(text, urgent=False)
 
 
+INPUT_CONFIRM_POLLS = 8        # x INPUT_CONFIRM_STEP_S: wait for the typed text to render
+INPUT_CONFIRM_STEP_S = 0.4
+NOTIFY_RETRY_S = BACKOFF_S[-1]  # a failed Telegram notice is retried this often
+STARTUP_NOTIFY_STAMP = Path(os.environ.get(
+    "ALERT_PUSH_STARTUP_STAMP", str(Path.home() / ".claude" / "logs" / "alert-bridge.startup-notify")))
+STARTUP_NOTIFY_MIN_GAP_S = float(os.environ.get("ALERT_PUSH_STARTUP_NOTIFY_GAP_S", str(6 * 3600)))
+
+
+def startup_selftest(log, notify=None, stamp=None, min_gap_s=None, now=time.time):
+    """Prove at bridge start that the Telegram fallback can actually deliver.
+
+    Until 2026-10-26 nothing ever exercised it: under launchd there was no token
+    and no `sops` on PATH, so all 41 give-ups in alert-bridge.log were silently
+    dropped. Sends ONE silent message and logs OK / ERROR (never the token). A
+    KeepAlive crash-loop must not page the phone per respawn, so a successful
+    send is stamped and the next one waits min_gap_s; an unsent stamp (failure)
+    never suppresses the retry. Returns 'ok' | 'failed' | 'skipped'."""
+    notify = notify or default_notify
+    stamp = Path(stamp or STARTUP_NOTIFY_STAMP)
+    gap = STARTUP_NOTIFY_MIN_GAP_S if min_gap_s is None else min_gap_s
+    try:
+        last = float(stamp.read_text().strip())
+    except Exception:  # noqa: BLE001
+        last = 0.0
+    if now() - last < gap:
+        log(f"console_push startup notification skipped: last successful one "
+            f"{int(now() - last)}s ago (< {int(gap)}s)")
+        return "skipped"
+    try:
+        ok = bool(notify(f"alert-bridge started on {os.uname().nodename} (pid {os.getpid()}): "
+                         f"Telegram fallback path for console alert pushes verified."))
+    except Exception as e:  # noqa: BLE001
+        log(f"ERROR console_push startup notification raised {type(e).__name__}: {e}")
+        ok = False
+    if not ok:
+        log("ERROR console_push startup notification FAILED -- the Telegram fallback is "
+            "BROKEN; undeliverable alert batches will stay pending (see notify: lines above)")
+        return "failed"
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(f"{now():.0f}\n")
+    except Exception as e:  # noqa: BLE001
+        log(f"console_push startup stamp not written: {e}")
+    log("console_push startup notification OK (Telegram fallback verified)")
+    return "ok"
+
+
 class Pusher:
     def __init__(self, harness=None, notify=None, clock=time.monotonic, sleep=time.sleep,
                  dry_run=False, critical_resolved=False, log=print):
@@ -308,18 +400,19 @@ class Pusher:
         self.lock = threading.Lock()
         self.pending = []          # events waiting to be typed
         self.first_seen = None     # clock() of oldest pending event
-        self.seen = {}             # key -> last accepted clock()
+        self.seen = {}             # key -> clock() of its last DELIVERY (typed / notified)
         self.sent_at = []          # clock() of each typed line (hour cap)
-        self.suppressed = 0
+        self.suppressed = 0        # how many of the pending were held by the hourly cap
         self.typed = []            # lines actually typed (test + audit)
         self.attempt = 0
         self.next_try = 0.0
-        self.notified = False
         self.cap_notified = False
 
     # -- ingest ---------------------------------------------------------------
     def submit(self, evt):
-        """Thread-safe; returns True if the event was queued."""
+        """Thread-safe; returns True if the event was queued. Dedupe is against
+        DELIVERED alerts (self.seen) and the pending queue -- queueing alone
+        records nothing, so an alert that is never delivered is never muted."""
         if not wanted(evt, self.critical_resolved):
             return False
         now, key = self.clock(), alert_key(evt)
@@ -328,16 +421,59 @@ class Pusher:
                 last = self.seen.get(key)
                 if last is not None and now - last < DEDUPE_S.get(evt["severity"], 6 * 3600):
                     return False
-                self.seen[key] = now
             if any(alert_key(p) == key and p.get("status") == evt.get("status")
                    for p in self.pending):
                 return False
             if not self.pending:
-                self.first_seen, self.attempt, self.next_try, self.notified = now, 0, now + COALESCE_S, False
+                self.first_seen, self.attempt, self.next_try = now, 0, now + COALESCE_S
             self.pending.append(evt)
             return True
 
     # -- delivery -------------------------------------------------------------
+    def _notify_ok(self, text):
+        """notify() reports failure by RETURNING False (runbooks/lib/notify.py never
+        raises); both that and an exception count as NOT delivered."""
+        try:
+            ok = bool(self.notify(text))
+        except Exception as e:  # noqa: BLE001
+            self.log(f"ERROR console_push notify raised {type(e).__name__}: {e}")
+            return False
+        if not ok:
+            self.log("ERROR console_push Telegram notify FAILED (returned False)")
+        return ok
+
+    def _delivered(self, batch, now):
+        """Drop `batch` from the queue and record it for dedupe -- only ever
+        called after the line was typed or the Telegram notice confirmed sent."""
+        with self.lock:
+            for e in batch:
+                if e.get("status") == "firing":
+                    self.seen[alert_key(e)] = now
+            horizon = max(DEDUPE_S.values())
+            self.seen = {k: t for k, t in self.seen.items() if now - t < horizon}
+            self.pending = self.pending[len(batch):]
+            self.suppressed = 0
+            self.first_seen = now if self.pending else None
+            self.attempt, self.next_try = 0, now + COALESCE_S
+
+    def _confirm_input(self, sid, line):
+        """Re-read the pane until its input box holds EXACTLY `line` (then True,
+        and the caller presses Enter at once), or until something else shows up
+        in it / it never settles (False: Enter must NOT be pressed)."""
+        want = _squash(line)
+        got = None
+        for _ in range(INPUT_CONFIRM_POLLS):
+            self.sleep(INPUT_CONFIRM_STEP_S)
+            got = _squash(pane_input_text(self.h.screen(sid)) or "")
+            if got == want:
+                return True
+            if not want.startswith(got):
+                break           # foreign text in the input: the operator is typing
+        self.log(f"ERROR console_push Enter NOT pressed: the input line no longer matches "
+                 f"the typed alert line (operator typing, or the pane changed); the typed "
+                 f"text is left in the input for the operator. input={got[:80]!r}")
+        return False
+
     def tick(self):
         """Advance the state machine once. Returns a short status string."""
         now = self.clock()
@@ -347,16 +483,19 @@ class Pusher:
             batch = list(self.pending)
         self.sent_at = [t for t in self.sent_at if now - t < 3600]
         if len(self.sent_at) >= MAX_LINES_PER_HOUR:
-            with self.lock:
-                self.suppressed += len(batch)
-                self.pending = self.pending[len(batch):]
+            # Held, NOT dropped: the batch stays pending and is typed (with its
+            # held-back count) once the hour rolls over.
+            self.suppressed = len(batch)
             if not self.cap_notified:
-                self.cap_notified = True
-                try:
-                    self.notify(f"alert-bridge hourly console cap ({MAX_LINES_PER_HOUR}) reached; "
-                                f"further alerts this hour are NOT typed into the console")
-                except Exception as e:  # noqa: BLE001
-                    self.log(f"console_push notify failed: {e}")
+                if self._notify_ok(
+                        f"alert-bridge hourly console cap ({MAX_LINES_PER_HOUR}) reached; "
+                        f"{len(batch)} alert(s) HELD, typed into the console when the cap "
+                        f"clears: {_names(batch)}"):
+                    self.cap_notified = True
+                else:
+                    self.log(f"ERROR console_push cap notice not delivered; "
+                             f"{len(batch)} alert(s) held: {_names(batch)}")
+            self.next_try = now + (60 if self.cap_notified else NOTIFY_RETRY_S)
             return "capped"
         self.cap_notified = False
         sid, why = resolve_console(self.h)
@@ -370,28 +509,28 @@ class Pusher:
             except Exception as e:  # noqa: BLE001
                 why = f"screen read failed: {type(e).__name__}: {e}"
         if state == "idle":
-            line = build_line(batch, self.suppressed)
+            # once the cap engaged, everything that queued up behind it was held
+            line = build_line(batch, len(batch) if self.suppressed else 0)
             if self.dry_run:
                 self.log(f"[console_push dry-run] would type: {line}")
             else:
                 try:
                     self.h.send_text(sid, line)
-                    self.sleep(0.4)
-                    self.h.send_key(sid, "enter")
+                    if self._confirm_input(sid, line):
+                        self.h.send_key(sid, "enter")
+                    else:
+                        state, why = "aborted", "input changed before Enter"
                 except Exception as e:  # noqa: BLE001
                     why = f"send failed: {type(e).__name__}: {e}"
                     state = None
             if state == "idle":
                 self.typed.append(line)
                 self.sent_at.append(now)
-                with self.lock:
-                    self.pending = self.pending[len(batch):]
-                    self.suppressed = 0
-                    self.first_seen = now if self.pending else None
-                    self.attempt, self.next_try = 0, now + COALESCE_S
+                self._delivered(batch, now)
                 return "typed"
-        if state in ("exhausted-idle", "exhausted-draft", "exhausted-busy", "exhausted-unclear"):
+        if state in ("exhausted-idle", "exhausted-draft", "exhausted-busy"):
             return self._give_up(batch, now, f"pane state {state}")
+        # busy / menu / draft / exhausted-unclear / aborted / error: retry until the deadline
         if now - (self.first_seen or now) >= DEADLINE_S:
             return self._give_up(batch, now, why or f"pane not idle for {int(DEADLINE_S)}s (state {state})")
         delay = BACKOFF_S[min(self.attempt, len(BACKOFF_S) - 1)]
@@ -400,18 +539,19 @@ class Pusher:
         return f"retry:{state or 'error'}"
 
     def _give_up(self, batch, now, why):
-        text = (f"alert-bridge could not type {len(batch)} alert(s) into the ops console "
-                f"({why}): " + "; ".join(
-                    f"{e.get('severity')} {e.get('alertname')}" for e in batch)[:600])
-        try:
-            self.notify(text)
-        except Exception as e:  # noqa: BLE001
-            self.log(f"console_push notify failed: {e}")
-        with self.lock:
-            self.pending = self.pending[len(batch):]
-            self.first_seen = None
-            self.attempt = 0
-        self.log(f"console_push gave up: {why}")
+        held = f" ({self.suppressed} held by the hourly cap)" if self.suppressed else ""
+        text = (f"alert-bridge could not type {len(batch)} alert(s){held} into the ops console "
+                f"({why}): " + _names(batch))
+        if not self._notify_ok(text):
+            # NOT dropped: keep the batch, say so loudly, try again (the pane may
+            # also become idle meanwhile and take the line).
+            self.next_try = now + NOTIFY_RETRY_S
+            self.log(f"ERROR console_push could NOT deliver {len(batch)} alert(s) -- console "
+                     f"({why}) and Telegram both failed; KEPT pending, retry in "
+                     f"{int(NOTIFY_RETRY_S)}s: {_names(batch)}")
+            return "notify-failed"
+        self._delivered(batch, now)
+        self.log(f"console_push gave up: {why} (Telegram notice sent)")
         return "notified"
 
     def run_forever(self, interval=5.0):

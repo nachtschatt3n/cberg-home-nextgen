@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -40,14 +41,70 @@ _AMCFG = REPO_ROOT / "kubernetes/apps/monitoring/kube-prometheus-stack/app/alert
 _DEFAULT_CHAT = "-1003112342088"  # home-operation channel (already in the AM config)
 
 
+_MISE_CANDIDATES = ("/opt/homebrew/bin/mise", str(Path.home() / ".local/bin/mise"),
+                    "/usr/local/bin/mise")
+_SOPS_INSTALLS = Path.home() / ".local/share/mise/installs/aqua-getsops-sops"
+
+
+def _sops_bin():
+    """Absolute path to a sops binary, or None.
+
+    Unattended callers (the launchd alert-bridge) run with launchd's bare PATH,
+    which has no mise dirs: `sops` was never found there and every Telegram
+    fallback was silently skipped (41 dropped batches, 2026-10). Order:
+    $SOPS_BIN, PATH, `mise which sops` run IN the repo (honours the .mise.toml
+    pin), then the newest mise-installed sops."""
+    b = os.environ.get("SOPS_BIN")
+    if b and os.access(b, os.X_OK):
+        return b
+    b = shutil.which("sops")
+    if b:
+        return b
+    for mise in [shutil.which("mise"), *_MISE_CANDIDATES]:
+        if not mise or not os.access(mise, os.X_OK):
+            continue
+        try:
+            r = subprocess.run([mise, "which", "sops"], cwd=str(REPO_ROOT),
+                               capture_output=True, text=True, timeout=20)
+            p = (r.stdout.strip().splitlines() or [""])[-1] if r.returncode == 0 else ""
+            if p and os.access(p, os.X_OK):
+                return p
+        except Exception:
+            pass
+        break
+    def _ver(p):
+        return tuple(int(x) if x.isdigit() else 0 for x in p.parent.name.split("."))
+    cands = [p for p in _SOPS_INSTALLS.glob("*/sops")
+             if not p.parent.is_symlink() and os.access(p, os.X_OK)]
+    return str(max(cands, key=_ver)) if cands else None
+
+
+def _sops_env():
+    """Point sops at the repo's age key (as .envrc / .mise.toml do) when the
+    caller's environment does not already say where it is."""
+    env = dict(os.environ)
+    key = REPO_ROOT / "age.key"
+    if not env.get("SOPS_AGE_KEY_FILE") and key.is_file():
+        env["SOPS_AGE_KEY_FILE"] = str(key)
+    return env
+
+
 def _bot_token():
+    """The bot token, or None (reason on stderr — the token itself never is)."""
     tok = os.environ.get("TELEGRAM_BOT_TOKEN")
     if tok:
         return tok.strip()
+    sops = _sops_bin()
+    if not sops:
+        print("notify: sops binary not found (PATH, mise) — cannot decrypt the bot token",
+              file=sys.stderr)
+        return None
     try:
-        out = subprocess.run(["sops", "-d", str(_SECRET)], capture_output=True,
-                             text=True, timeout=30)
+        out = subprocess.run([sops, "-d", str(_SECRET)], capture_output=True,
+                             text=True, timeout=30, env=_sops_env())
         if out.returncode != 0:
+            print(f"notify: sops -d failed rc={out.returncode}: "
+                  f"{(out.stderr or '').strip()[-200:]}", file=sys.stderr)
             return None
         import yaml
         d = yaml.safe_load(out.stdout) or {}
@@ -58,8 +115,10 @@ def _bot_token():
         if "bot-token" in data:
             import base64
             return base64.b64decode(data["bot-token"]).decode().strip()
-    except Exception:
+    except Exception as e:
+        print(f"notify: reading the bot token failed ({type(e).__name__})", file=sys.stderr)
         return None
+    print("notify: decrypted secret has no bot-token key", file=sys.stderr)
     return None
 
 

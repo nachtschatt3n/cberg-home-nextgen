@@ -19,6 +19,12 @@
   <dict>
     <key>WS_PORT</key><string>8787</string>
     <key>HTTP_PORT</key><string>8788</string>
+    <!-- launchd's default PATH is /usr/bin:/bin:/usr/sbin:/sbin: no mise, no sops,
+         so the Telegram fallback never found its token (2026-10-26).
+         runbooks/lib/notify.py resolves sops by absolute path via `mise which`;
+         the token itself is decrypted at runtime and is NEVER put in this file. -->
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>SOPS_AGE_KEY_FILE</key><string>/Users/mu/code/cberg-home-nextgen/age.key</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
