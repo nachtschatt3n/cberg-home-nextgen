@@ -10,7 +10,9 @@
 #
 # Uses the read-only user ci-runner-reader (role ci-runner-logs-ro) through the
 # filtered alias ci-runner-logs; see docs/sops/monitoring.md. The password is read
-# from the cluster secret into an env var and is never printed.
+# from the cluster secret into an UNEXPORTED shell variable and handed only to the
+# python3 reader's environment, never to the long-running kubectl port-forward
+# (or any other child); it is never printed or put on a command line.
 # Env: ES_LOCAL_PORT (default: a free port), MAX_LINES (default: unlimited).
 set -euo pipefail
 
@@ -38,7 +40,8 @@ KUBECTL=(mise exec -- kubectl)
 ES_USER="$("${KUBECTL[@]}" -n monitoring get secret ci-runner-reader -o jsonpath='{.data.username}' | base64 -d)"
 ES_PASS="$("${KUBECTL[@]}" -n monitoring get secret ci-runner-reader -o jsonpath='{.data.password}' | base64 -d)"
 [ -n "$ES_USER" ] && [ -n "$ES_PASS" ] || { echo "FAIL: reader credentials missing in secret monitoring/ci-runner-reader" >&2; exit 1; }
-export ES_USER ES_PASS
+# Deliberately NOT exported: an exported ES_PASS would sit in the environment of
+# the port-forward below for its whole lifetime (readable via ps eww / procfs).
 
 WORK="$(mktemp -d)"
 PF_PID=""
@@ -55,15 +58,23 @@ export ES_CA="$WORK/ca.crt"
 PORT="${ES_LOCAL_PORT:-$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')}"
 "${KUBECTL[@]}" -n monitoring port-forward svc/elasticsearch-es-http "${PORT}:9200" >"$WORK/pf.log" 2>&1 &
 PF_PID=$!
+PF_UP=0
 for _ in $(seq 1 30); do
-    if python3 -c "import socket,sys; socket.create_connection(('127.0.0.1',$PORT),1)" 2>/dev/null; then break; fi
+    if python3 -c "import socket,sys; socket.create_connection(('127.0.0.1',$PORT),1)" 2>/dev/null; then PF_UP=1; break; fi
     kill -0 "$PF_PID" 2>/dev/null || { echo "FAIL: port-forward died: $(cat "$WORK/pf.log")" >&2; exit 1; }
     sleep 1
 done
+if [ "$PF_UP" != 1 ]; then
+    echo "FAIL: port-forward to monitoring/svc/elasticsearch-es-http did not accept connections on 127.0.0.1:${PORT} within 30 s" >&2
+    echo "      port-forward log: $(cat "$WORK/pf.log" 2>/dev/null)" >&2
+    exit 1
+fi
 export ES_URL="https://127.0.0.1:${PORT}"
 export MODE TARGET FROM TO EVENT_PREFIX MAX_LINES="${MAX_LINES:-0}"
 
-python3 -I - <<'PY'
+# Credentials go to this one process only (command-prefix assignment: in its
+# environment, not on its command line, not exported to the shell).
+ES_USER="$ES_USER" ES_PASS="$ES_PASS" python3 -I - <<'PY'
 import base64, datetime as dt, json, os, ssl, sys, urllib.request
 
 URL = os.environ["ES_URL"]
