@@ -277,8 +277,10 @@ deny:
   # a kubelet probe that sends the pod IP gets HTTP 400 and the app crash-loops
   # behind a bare tag bump. The fix is a plan (runbooks/maintenance/plans/
   # tube-archivist-0.6.0.md): probe Host header, artwork sync, ordering after
-  # the Elasticsearch 9 plan. `max: patch` keeps 0.5.x patches flowing. The
-  # Elasticsearch image is a different repo and is NOT matched here.
+  # the Elasticsearch 9 plan. `max: patch` keeps 0.5.x patches flowing. The glob
+  # also matches bbilly1/tubearchivist-es (verified with auto-update.policy_block:
+  # patch allowed, minor and major blocked), which is harmless: its 9.x major is
+  # a plan anyway and later ES minors belong in the plan lane too.
   - match: "*bbilly1/tubearchivist*"
     reason: "0.x project: v0.6.0 removes nginx and enforces ALLOWED_HOSTS, so the
       kubelet probe (Host = pod IP) gets HTTP 400 and the pod crash-loops on a bare
