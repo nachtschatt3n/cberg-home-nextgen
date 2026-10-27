@@ -36,7 +36,7 @@ conflicts_with:
   # successor), kube-prometheus-stack-92.2.0 (no kps plan is open now; if one is filed re-add it: §4 reads Prometheus and
   # §4.1 asserts Alertmanager POST 200, a same-night kps bump blinds both gates), flux-fleet-0.60.0 (executed 10-06).
   # flux-distribution-2.9.6 dropped 2026-10-25 (executed/retired - no longer an open plan).
-  - redis-fleet-8.10.2                  # reciprocity: it restarts redis for ai/ + office/ consumers in the same namespaces
+  - redis-fleet-8.10.3                  # reciprocity: it restarts redis for office/ consumers (retargeted 2026-10-27; ai/ sidecar left that plan)
                                         # (sun-attended:2026-11-29, so no same-slot clash, but they must not share a night)
   - openclaw-2026.10.5                  # same Flux Kustomization ai/openclaw as cronjob/openclaw-probe; currently blocked
   - helm-drift-detection                # adds spec.driftDetection to every HR incl. helmrelease/mcpo
@@ -82,8 +82,10 @@ premises:
   # plan-premises.py allows only kubectl/flux/helm/git/text-filter stages. They are §2 gates
   # 2.1/2.2, each printing a STOP token on failure.
 review: ready-for-go@2026-10-25   # plan-reviewer 2026-10-25 delta re-review: premises PASS, gates verified
-status: vetted
-window: "sat-attended:2026-11-14"   # cooldown (re-pushed tag) ends 2026-10-26T08:08Z, so any start before that prints YOUNG; 11-14 is clear of cilium 10-25, openclaw 10-31, talos 11-01, otel 11-07, envoy 11-08
+status: superseded                    # 2026-10-27 (sweep 3f978ad9): superseded by python-fleet-3.15.2 - python:3.15.2-slim published
+                                      # 2026-10-27T02:15Z, which trips this plan's own §2.3 "newer bugfix -> STOP and retarget"
+superseded_by: python-fleet-3.15.2
+window: null                          # was sat-attended:2026-11-14; the slot is carried by python-fleet-3.15.2
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
@@ -91,6 +93,8 @@ sops_refs:
 generated: "2026-10-13"
 refreshed: "2026-10-25"             # review corrections 2026-10-25: 3.15.1-slim re-pushed (digest 533b0b2f...), 3.14.9 re-landed, gates hardened (§2.1-2.3)
 ---
+
+> **SUPERSEDED 2026-10-27 by [`python-fleet-3.15.2`](python-fleet-3.15.2.md)** (target 3.15.2-slim). Do not execute this file.
 
 # python-fleet-3.15.0 - python:3.14.x-slim -> 3.15.1-slim on openclaw-probe, mcpo (init), mealie-shopping-sync
 

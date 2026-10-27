@@ -91,7 +91,7 @@ conflicts_with:
   # - librechat-2.0.14 (RESOLVED 2026-09-30: executed + retired in nightly:2026-09-30, c75c5c39; ref removed)
   # - mariadb-chart-27.3.0 (RESOLVED 2026-10-04: executed + retired 418faa1e (now:2026-10-03); dead ref removed per the dead-ref convention)
   # - mariadb-28.1.1  # RESOLVED 2026-10-06: executed green now:2026-10-05, plan retired in 5af1e51f
-  - redis-fleet-8.10.2
+  - redis-fleet-8.10.3                # retargeted 2026-10-27 (8.10.2 superseded); upgrades immich-redis + sure-redis HRs
   # traccar-6.16.0 REMOVED 2026-09-29: executed green in nightly:2026-09-29 (3a943035), plan retired (1a40b257)
   - otel-operator-0.23.0              # reciprocal (it names this plan); HR bump -> attribution
 security_ref: null

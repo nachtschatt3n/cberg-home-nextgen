@@ -48,7 +48,8 @@ depends_on: []                        # Runs FIRST under tube-archivist v0.5.12 
 conflicts_with:
   - tube-archivist-0.6.0              # LATER NIGHT, never the same window: §4.4 restarts the TA app and would confound that
                                       # plan's §4 (and its own two Recreate rolls would confound this plan's §4.4)
-  - redis-fleet-8.10.2                # also restarts deployment/tube-archivist and gates on it (§6)
+  # redis-fleet-8.10.2 SUPERSEDED 2026-10-27 by redis-fleet-8.10.3, which no longer touches tube-archivist
+  # (tube-archivist-redis now moves via Step 0 direct-bump); §6 prose about its 11-29 TA restart is stale.
   - longhorn-1.13.0                   # exclusive; storage engine one-way upgrade — this plan's backup Job + scratch volume + a
                                       # freshly 9.x-upgraded volume must not meet it inside 24 h either way (§6)
   - flux-reconciler-impersonation     # exclusive; uses helmrelease/tube-archivist-elasticsearch as its canary

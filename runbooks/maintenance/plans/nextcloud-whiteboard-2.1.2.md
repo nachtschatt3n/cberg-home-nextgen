@@ -23,9 +23,9 @@ conflicts_with:
   - nextcloud-9.4.1                    # exporter bump: same Kustomization office/nextcloud (its commit edits helmrelease.yaml, so
                                         # helm-controller upgrades the nextcloud release) and the same Prometheus reads; one change per
                                         # night keeps "what restarted" unambiguous. Reciprocal entry added there 2026-10-23.
-  - redis-fleet-8.10.2                 # restarts nextcloud + nextcloud-redis (sat-attended:2026-10-24): the §2.2b/§4.3 `occ` execs
+  - redis-fleet-8.10.3                 # (retargeted 2026-10-27 from superseded 8.10.2) restarts nextcloud + nextcloud-redis (sat-attended:2026-10-24): the §2.2b/§4.3 `occ` execs
                                         # into deploy/nextcloud would hit a restarting pod (false STOP / false FAIL)
-  - nextcloud-mcp-0.201.2              # same office namespace; separate Deployment, serialize to keep §4 attributable
+  - nextcloud-mcp-0.202.1              # same office namespace; separate Deployment, serialize to keep §4 attributable
   # Removed 2026-10-23 (no such plan exists any more): nextcloud-fleet-35.0.1 (executed, file retired),
   # kube-prometheus-stack-92.10.1 and -92.2.0 (retired). §2.4/§4.5 read Prometheus: if a kube-prometheus-stack
   # bump is ever planned for the same night, add it here.
@@ -346,7 +346,7 @@ behaviour today.
 - **`nextcloud-fleet-35.0.1`: executed 2026-10-23, no longer a constraint.** Its
   app-update pass already moved the NC app to 2.1.0 (§1.3); this plan completes the pair.
 - **`nextcloud-9.4.1` (exporter), `redis-fleet-8.10.2` (sat-attended:2026-10-24),
-  `nextcloud-mcp-0.201.2`:** declared in `conflicts_with`; never the same night.
+  `nextcloud-mcp-0.202.1`:** declared in `conflicts_with`; never the same night.
   The exporter commit edits `helmrelease.yaml` in the same Kustomization, so helm-controller
   runs a nextcloud helm upgrade that would blur this plan's §4 reads; redis-fleet restarts
   the pod the §2.2b/§4.3 `occ` execs target.

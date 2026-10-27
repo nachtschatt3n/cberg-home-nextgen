@@ -42,7 +42,8 @@ depends_on:
 conflicts_with:
   - tube-archivist-elasticsearch-9.5.5  # and NOT the same window: same namespace, same app pod restarts; §4 must be
                                       # attributable to one change. Run on a later night than the ES plan.
-  - redis-fleet-8.10.2                # restarts download/tube-archivist-redis and deployment/tube-archivist (its leg list);
+  # redis-fleet-8.10.2 SUPERSEDED 2026-10-27 by redis-fleet-8.10.3, which no longer touches tube-archivist
+  # (tube-archivist-redis now moves via Step 0 direct-bump). Former note: restarted download/tube-archivist-redis + deployment/tube-archivist;
                                       # two causes for one TA restart make §4 unattributable. Reciprocity owed in that plan.
   - flux-reconciler-impersonation     # uses kustomization/tube-archivist + its HelmReleases as the canary; changing WHO
                                       # applies them in the same window as a content change makes a failure unattributable.

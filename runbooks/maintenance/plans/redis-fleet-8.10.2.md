@@ -96,10 +96,12 @@ backup_gate: "Completed Longhorn backup < 26h for tube-archivist-redis-data and 
 finding_refs: [F-d2bb762b, F-8c50c463, F-625d3a3f, F-c637a09a, F-3fcdca7b, F-3a75c9aa, F-2e326f86, F-e8a41b1b, F-db500cce]
                                         # the 8 per-consumer redis image findings. F-31c19a7f (open-webui chart 16.6.0)
                                         # is NO LONGER answered here: the chart is already 17.0.0 (live 2026-10-24).
-status: vetted
+status: superseded                      # 2026-10-27 (sweep 3f978ad9): redis 8.10.3 published 2026-10-26 (trips §2 c
+                                        # "8.10.3 -> 200 = refresh"); scope also shrank 8 -> 3 (other consumers now Step-0 lane).
+superseded_by: redis-fleet-8.10.3
 review: ready-for-go@2026-10-25   # plan-reviewer 2026-10-25 delta re-review: premises PASS, gates verified
                 # No operator GO recorded; HUMAN-GATED.
-window: "sun-attended:2026-11-29"   # was sat-attended:2026-10-24 (deferred). Free Sunday: clear of talos 11-01, etcd/envoy 11-08, longhorn 11-15, flux-oci 11-22 and the Saturdays 10-31/11-07/11-14. sat budget (70) leaves no slack for 70 min.
+window: null                            # was sun-attended:2026-11-29; the slot is carried by redis-fleet-8.10.3
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/verification-contents-not-shape.md
@@ -199,6 +201,8 @@ premises:
     run: grep -c "8\.10\.1-alpine$" kubernetes/apps/databases/redis/app/helmrelease.yaml kubernetes/apps/databases/superset/app/redis-deployment.yaml kubernetes/apps/download/tube-archivist/app/redis-helmrelease.yaml kubernetes/apps/media/immich/app/redis-helmrelease.yaml kubernetes/apps/office/nextcloud/app/redis-deployment.yaml kubernetes/apps/office/paperless-ngx/app/redis-deployment.yaml kubernetes/apps/office/sure/app/redis-helmrelease.yaml kubernetes/apps/ai/open-webui/app/helmrelease.yaml
     expect_matches: '(?s)^(?:\S+:1\n?){8}$'
 ---
+
+> **SUPERSEDED 2026-10-27 by [`redis-fleet-8.10.3`](redis-fleet-8.10.3.md)** (target 8.10.3-alpine, 3 held consumers). Do not execute this file.
 
 # redis fleet 8.10.1-alpine → 8.10.2-alpine (8 consumers; re-planned 2026-10-24)
 

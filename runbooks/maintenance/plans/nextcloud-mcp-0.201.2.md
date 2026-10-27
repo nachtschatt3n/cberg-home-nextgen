@@ -33,7 +33,7 @@ depends_on: []                        # Flux `dependsOn: nextcloud` is ordering-
 conflicts_with:
   - nextcloud-9.4.1                   # vetted nightly:2026-10-28; chart/exporter leg of Nextcloud, restarts deployment/nextcloud.
   - nextcloud-whiteboard-2.1.2        # vetted nightly:2026-10-29; same office namespace, lists nextcloud-mcp-0.200.2 today.
-  - redis-fleet-8.10.2                # draft sun-attended:2026-11-29; restarts office/nextcloud-redis (all sessions drop).
+  - redis-fleet-8.10.3                # (retargeted 2026-10-27 from superseded 8.10.2) draft sun-attended:2026-11-29; restarts office/nextcloud-redis (all sessions drop).
   - bitnamilegacy-exit-nextcloud-db   # blocked/unwindowed; quiesces Nextcloud if revived.
   - nextcloud-mcp-0.200.2             # SUPERSEDED BY THIS PLAN (§1.5): same component, same HR line. Drop once that file is
                                       # set `superseded`.
@@ -51,9 +51,7 @@ rollback_class: git-revert            # no PVC, no volumes, no DATABASE_URL/TOKE
 finding_refs: [F-9af9baf7, F-80459b23] # F-9af9baf7 = version finding (title names 0.201.2 as of 2026-10-25). F-80459b23 =
                                       # security finding. Carried from nextcloud-mcp-0.200.2 (superseded by this plan).
 review: null
-status: blocked                         # Planner: §2.7 STOP fires today (7A=2 live, 7B count=1 at v0.201.2 and master, measured
-                                      # 2026-10-25). The operator decision of 2026-10-23 ("wait for upstream", §1.6 A) is NOT
-                                      # satisfied by 0.201.2 -> recommend `blocked` at review with the same unblock condition.
+status: superseded                    # 2026-10-27 superseded by nextcloud-mcp-0.202.1 (Renovate #258 retargeted; blocker still holds).
 window: null                          # BLOCKED 2026-10-25 (operator decision 2026-10-23: wait for upstream). Unblock condition (carried from 0.200.2): an upstream tag whose calendar.py no longer
                                       # does `unquote(calendar_name)` in _get_calendar_url AND §2.7 passes live.
 premises:
