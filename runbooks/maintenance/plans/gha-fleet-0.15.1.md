@@ -44,9 +44,9 @@ touches:
 depends_on: []
 conflicts_with:
   # 2026-10-25: dead refs flux-distribution-2.9.6 and cilium-1.20.4 (executed/retired) pruned.
+  # 2026-10-27: ci-gate-primary-control-rework (superseded, reviewer reject) pruned.
   - talos-linux-1.14.4                # node roll restarts every ARC pod; attribution of §4 impossible.
   - talos-power-tuning-ab             # measures CI load on ci-runner; a listener gap skews its CI baseline.
-  - ci-gate-primary-control-rework    # ci-runner CI-capacity work; same attribution reason.
   - helm-drift-detection              # changes how helm-controller treats every HelmRelease (incl. these five).
   - flux-reconciler-impersonation     # changes WHO applies the arc-system/ci-runner/arc-build Kustomizations.
 exclusive: false

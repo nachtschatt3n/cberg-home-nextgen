@@ -33,7 +33,7 @@ finding_refs:
   - F-6c7843e4                        # FOLLOWS FROM it (talos-power-tuning-ab may close it with its commit; then this ref
                                       # points at a resolved row - re-file a ci-runner finding when this leaves backlog)
 review: null
-status: draft                         # BACKLOG: no window until talos-power-tuning-ab has executed and its numbers exist
+status: superseded                    # 2026-10-27 plan-reviewer REJECT: target (ninth-banner-admit.py thermal gate) deleted in c4f748c5/090f551d (2026-10-06); nuc14-02 exclusion lifted faa3ec55; admission is now ninth-banner-capacity.py. A temperature backstop, if wanted, is a NEW plan against that script.
 window: null
 premises:
   - id: power-tuning-decided

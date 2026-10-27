@@ -668,7 +668,6 @@ on-demand ceiling. `needs_reboot: false`, so NOW runs may carry it. A single lon
   is vetted and the scheduler proposes nightly:2026-10-06, i.e. 03:30, BEFORE evening 1, which is fine). jellyfin-12.1
   sat 10-10, jellyfin-config-rwo-migration sun 10-25, helm-drift-detection sat 11-07. The refs keep the scheduler from
   putting any of them into an A/B run. Reciprocity owed by those authors.
-- **ci-gate-primary-control-rework** (backlog) depends on this plan's committed winner.
 - **Per-node exception for nuc14-02:** not possible with the current patch layout (fact 7). If 02 fails its watch,
   the clean fix is moving the 18 EPP keys from the global patch into the three per-node patches (a follow-up plan),
   or the BIOS/cooler fix. Until then git and 02 differ, recorded in the plan and the finding.
