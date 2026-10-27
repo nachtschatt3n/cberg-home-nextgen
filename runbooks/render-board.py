@@ -463,21 +463,35 @@ def collect(cur, cycle_id: str | None) -> dict:
     return out
 
 
-def windows() -> dict:
-    """Next window + warnings via the reconciler (source of truth)."""
+def _windows_from(d: dict) -> dict:
+    nxt = (d.get("next_windows") or [None])[0]
+    if isinstance(nxt, dict):
+        nxt = nxt.get("slot") or nxt
+    return {"next": nxt, "warnings": d.get("warnings", []),
+            "status_counts": d.get("plan_status")}
+
+
+def windows(plan_json: str | None = None) -> dict:
+    """Next window + warnings via the reconciler (source of truth).
+
+    plan_json: the `maintenance-plan.py --json` output the sweep already
+    produced in rule 4d. Re-running the reconciler here costs >120s on the
+    current plan set (2026-10-27: section 5 rendered "reconciler unavailable"
+    on a timeout while the same data sat in a file), so prefer the file.
+    """
+    if plan_json:
+        try:
+            return _windows_from(json.loads(Path(plan_json).read_text()))
+        except Exception as e:  # noqa: BLE001 — the board must render regardless
+            return {"error": f"reconciler output unreadable ({plan_json}): {e}"}
     try:
         r = subprocess.run(
             # --skip-coverage: the board reads only next/warnings/status here;
             # the needs-a-plan dispatch list comes from rule 4d0's coverage run
             [sys.executable, str(REPO / "runbooks" / "maintenance-plan.py"), "--json",
              "--skip-coverage"],
-            capture_output=True, text=True, timeout=120)
-        d = json.loads(r.stdout)
-        nxt = (d.get("next_windows") or [None])[0]
-        if isinstance(nxt, dict):
-            nxt = nxt.get("slot") or nxt
-        return {"next": nxt, "warnings": d.get("warnings", []),
-                "status_counts": d.get("plan_status")}
+            capture_output=True, text=True, timeout=300)
+        return _windows_from(json.loads(r.stdout))
     except Exception as e:  # noqa: BLE001 — the board must render regardless
         return {"error": f"reconciler unavailable: {e}"}
 
@@ -659,6 +673,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cycle", default=None)
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--plan-json", default=None,
+                    help="maintenance-plan.py --json output already produced by "
+                         "the sweep (rule 4d); avoids a second slow reconciler run")
     args = ap.parse_args(argv)
 
     dsn = _dsn()
@@ -669,7 +686,7 @@ def main(argv=None) -> int:
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         data = collect(cur, args.cycle)
         data["ar_expiry"] = collect_ar_expiry(cur)
-    w = windows()
+    w = windows(args.plan_json)
     if args.json:
         print(json.dumps({"board": data, "windows": w}, indent=2, default=str))
     else:

@@ -142,7 +142,9 @@ sections that did not report.
      decisions reach the operator's phone (fallback: `runbooks/lib/notify.py`).
 
 4. **Render the board — never hand-write it:**
-   `python3 runbooks/render-board.py` (add `--cycle <id>` for this run).
+   `python3 runbooks/render-board.py --cycle <id> --plan-json <4d maintenance-plan.py --json file>`.
+   Pass `--plan-json`: without it the renderer re-runs the reconciler, which
+   now exceeds its timeout and leaves section 5 as "reconciler unavailable".
    The board IS the deliverable, in the operator's defined order:
    tier board → **numbered action list** (every item numbered, categorized
    `section/kind`, one-line description, rated CRITICAL/HIGH/MEDIUM/LOW by

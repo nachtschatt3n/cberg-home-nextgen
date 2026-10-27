@@ -168,11 +168,20 @@ else:
             import time
             connected = False
             for _ in range(15):
-                r = subprocess.run(
-                    ["curl", "-k", "-s", "-m", "2", "-K", "-",
-                     "https://127.0.0.1:19277/"],
-                    input=auth_cfg, capture_output=True, text=True,
-                )
+                # Python-side timeout too: macOS /usr/bin/curl has been seen
+                # ignoring -m with its socket in CLOSE_WAIT behind a dying
+                # port-forward, which wedged this test -- and the pre-commit
+                # hook holding .git/index.lock -- for 10+ min (2026-10-27).
+                try:
+                    r = subprocess.run(
+                        ["curl", "-k", "-s", "-m", "2", "-K", "-",
+                         "https://127.0.0.1:19277/"],
+                        input=auth_cfg, capture_output=True, text=True,
+                        timeout=5,
+                    )
+                except subprocess.TimeoutExpired:
+                    time.sleep(0.5)
+                    continue
                 if r.returncode == 0:
                     connected = True
                     break
@@ -181,13 +190,17 @@ else:
                 print("  SKIP  ES unreachable via port-forward -- live check not exercised")
             else:
                 body = bodies["Top Error Producers (7d)"]
-                r = subprocess.run(
-                    ["curl", "-k", "-s", "-m", "20", "-K", "-",
-                     "-X", "POST", "https://127.0.0.1:19277/logs-generic-default/_search",
-                     "-H", "Content-Type: application/json", "-d", body],
-                    input=auth_cfg, capture_output=True, text=True,
-                )
-                d = json.loads(r.stdout)
+                try:
+                    r = subprocess.run(
+                        ["curl", "-k", "-s", "-m", "20", "-K", "-",
+                         "-X", "POST", "https://127.0.0.1:19277/logs-generic-default/_search",
+                         "-H", "Content-Type: application/json", "-d", body],
+                        input=auth_cfg, capture_output=True, text=True,
+                        timeout=30,
+                    )
+                    d = json.loads(r.stdout)
+                except subprocess.TimeoutExpired:
+                    d = {"error": "curl exceeded 30s despite -m 20"}
                 check("live cluster: the fixed query returns a hits.total (no parse error)",
                       "error" in d, False)
                 total = d.get("hits", {}).get("total", {}).get("value")
