@@ -42,7 +42,11 @@ finding_refs: []                      # none exists: finding list --grep outpost
                                       # (single-node outposts) and F-37acab13 (doc); neither covers worker recycling
 review: ready-for-go@2026-10-23      # delta plan-reviewer 2026-10-23: ready-for-go
 status: vetted
-window: "nightly:2026-10-30"          # must land >= 2 nights before authentik-2026.8.5
+window: "nightly:2026-10-31"          # must land >= 2 nights before authentik-2026.8.5
+                                      # re-stamped from nightly:2026-10-30: pre-check STOP (abort 1/2) on 1 etcd leader
+                                      # change at 02:36Z, THIRD night inside Step 0 merges. Gate aged out 03:38Z, outpost
+                                      # gate dipped until 03:43Z; 20-min plan no longer fit before the 04:00Z window end.
+                                      # Nothing else changed; all other pre-checks + premises PASS. See F-98043e32.
                                       # re-stamped from nightly:2026-10-27: pre-check STOP (abort 1/2) on 2 etcd leader
                                       # changes in the last 1h (02:42/02:47Z, during that night's Step 0 roll); nothing changed.
                                       # re-stamped from nightly:2026-10-28: SAME pre-check STOP (abort 1/2 of that window) on
