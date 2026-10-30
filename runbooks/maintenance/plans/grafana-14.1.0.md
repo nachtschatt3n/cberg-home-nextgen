@@ -49,8 +49,8 @@ backup_gate: "2.5: a Longhorn Backup CR for volume grafana-config in state Compl
 finding_refs: [F-482f421e]        # F-482f421e security warning, newer tag exists (open; VERIFIED via policy-cli finding list 2026-10-30).
                                   # HISTORICAL, deliberately not listed: F-c01c08c6 "grafana: chart 14.0.1 -> 14.2.0 (minor)" (version,
                                   # PLAN lane) is status resolved in the DB since 2026-10-30; this plan answered it, it needs no ownership claim.
-review: null                      # material change (target, risk class, rollback class, gates): needs a fresh plan-review
-status: draft
+review: ready-for-go@2026-10-30   # plan-reviewer 2026-10-30 (two rounds): needs-fix twice on small items (pre-flight GF_LOG_MODE, soak reminder source), both fixed and re-verified; HUMAN-GATED, window null until the operator GO
+status: vetted                    # human-gated; window null until the operator GO
 window: null                      # suggested: nightly:2026-11-03 with operator GO (section 6); the window agent assigns it
 sops_refs:
   - docs/sops/application-update.md
@@ -280,6 +280,9 @@ echo "BASE_PROMDS=$(kubectl get --raw "$P?query=count%28grafana_plugin_build_inf
 #     The pods copy the live container's hardening (uid/gid 472, readOnlyRootFilesystem, drop ALL, RuntimeDefault seccomp,
 #     writable emptyDirs only at /tmp, /var/lib/grafana, /var/lib/grafana-search) so a read-only-fs plugin-installer failure
 #     would reproduce; the guard env var is set exactly as in the live HelmRelease.
+#     GF_LOG_MODE=console is REQUIRED: Grafana's default [log] mode is "console file" and the file path sits on the read-only
+#     root, which logs a non-fatal "read-only file system" line on both pods and would fail the zero-count PASS rule below.
+#     The live pod avoids it only because its ini sets mode=console. Derived from v13.3.0 source (defaults.ini, log.go), not rehearsed.
 S=${TMPDIR:-/tmp}
 cat > "$S/grafana-preflight.sh" <<'EOF2'
 #!/usr/bin/env bash
@@ -290,6 +293,7 @@ PF=
 cleanup() {  # runs on ANY exit, incl. failure: no preflight pod or port-forward may outlive this script
   [ -n "$PF" ] && kill "$PF" 2>/dev/null
   kubectl delete pod -n monitoring -l app.kubernetes.io/component=grafana-preflight --ignore-not-found --wait=false >/dev/null 2>&1
+  rm -f "$S"/grafana-preflight-*.json   # these hold the throwaway admin password
 }
 trap cleanup EXIT
 for TAG in 13.2.4 13.3.0; do
@@ -300,7 +304,7 @@ n,tag,pw=sys.argv[1:4]
 print(json.dumps({"spec":{
  "securityContext":{"runAsUser":472,"runAsGroup":472,"runAsNonRoot":True,"fsGroup":472},
  "containers":[{"name":n,"image":"docker.io/grafana/grafana:%s-distroless"%tag,
-  "env":[{"name":"GF_PLUGINS_PREINSTALL_DISABLED","value":"true"},{"name":"GF_SECURITY_ADMIN_PASSWORD","value":pw},
+  "env":[{"name":"GF_PLUGINS_PREINSTALL_DISABLED","value":"true"},{"name":"GF_LOG_MODE","value":"console"},{"name":"GF_SECURITY_ADMIN_PASSWORD","value":pw},
          {"name":"GF_PATHS_DATA","value":"/var/lib/grafana"},{"name":"GF_UNIFIED_STORAGE_INDEX_PATH","value":"/var/lib/grafana-search"}],
   "ports":[{"containerPort":3000}],
   "readinessProbe":{"httpGet":{"path":"/api/health","port":3000},"periodSeconds":5,"failureThreshold":30},
@@ -554,8 +558,15 @@ plugin/unified-storage cleanup runs; 13.3.0 enables automatic deleted-resource c
 
 **Owner of the soak re-run and the snapshot deletion** (this is not optional, an unowned soak is a skipped soak): the window agent,
 at the end of its Step 4 for this plan, files a home-operation reminder due `T+2h` (same pattern as the soak reminder in
-`frigate-reolink-go2rtc-flv.md`: `home-operation ingest --json` with source `maintenance`, resolved by
-`home-operation resolve` after the re-run passes), naming the exact command line and the snapshot to delete. If no agent session is
+`frigate-reolink-go2rtc-flv.md`), naming the exact command line and the snapshot to delete. The `source` is `plan-soak`,
+deliberately NOT `maintenance`: the window close-out runs `home-operation reconcile --source maintenance --open '<plan ids>'`
+and would close a `maintenance` reminder whose key is not in that list (docs/sops/maintenance-windows.md), leaving the soak unowned.
+File it at the end of Step 4:
+```
+kubectl -n ai exec deploy/openclaw -c app -- /home/node/.openclaw/bin/home-operation ingest --json '{"key":"grafana-14-2-0-soak","kind":"window_warning","source":"plan-soak","severity":"warning","action":"ack","component":"grafana","plan_path":"runbooks/maintenance/plans/grafana-14.1.0.md","title":"grafana 14.2.0: re-run the section-4 soak at T+2h, then delete snapshot grafana-pre-14-2-0","detail":"Re-run the section-4 script in expect mode (2h after the roll), then delete the Longhorn snapshot within 7 days."}'
+# after the soak re-run passes and the snapshot is deleted:
+kubectl -n ai exec deploy/openclaw -c app -- /home/node/.openclaw/bin/home-operation resolve --issue grafana-14-2-0-soak --by executed --note "<sha>"
+``` If no agent session is
 available the operator owns it, prompted by that reminder. The plan is not retired until the reminder is resolved;
 the snapshot must not outlive the reminder by more than 7 days (it pins Longhorn space).
 
