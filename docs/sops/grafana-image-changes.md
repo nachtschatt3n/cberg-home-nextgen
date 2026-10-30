@@ -1,8 +1,8 @@
 # SOP: Grafana Image Changes — the datasource pre-flight gate
 
 > Description: How to change the Grafana container image (tag, variant, or chart-driven bump) without silently breaking datasources, and why "the pod started and the UI loads" is not evidence that it worked.
-> Version: `2026.09.15`
-> Last Updated: `2026-09-15`
+> Version: `2026.10.30`
+> Last Updated: `2026-10-30`
 > Owner: `homelab-sre`
 
 ---
@@ -55,6 +55,13 @@ this SOP exists as a gate rather than a checklist item.
    Once a newer minor has booted against `grafana-config`, rolling the *version*
    back is a downgrade across a completed migration. Rollback is therefore a
    variant/tag change within the same version, never a chart revert.
+   Measured from upstream source 2026-10-30: v13.3.0 registers three additive sqlite
+   migrations beyond 13.2.4 (a managed-folder variable-actions migration, an alert-rule
+   folder-fullpath collation fix for mysql/postgres only, and a missing-series-eval
+   expansion) plus a `resource_blob_upload_chunk` table, and bundles `cloudwatch` and
+   `canvas` as external plugins (core CloudWatch removed, so the datasource-plugin
+   count should not change). Do not re-analyse the next minor from scratch: diff its
+   `migrations.go` and `resource_mig.go` against the running version.
 
 ---
 
@@ -346,6 +353,7 @@ Longhorn backup (23:00 UTC daily).
 
 | Version | Date | Change |
 |---------|------|--------|
+| `2026.10.30` | 2026-10-30 | Measured the 13.2.4 -> 13.3.0 migrations and bundled-plugin set from upstream source (fact 3). |
 | `2026.09.15` | 2026-09-15 | Doc-check currency fix: "Current variant" row now names the live chart/image (13.2.4 / 13.2.1-distroless) and the Version History rows for `2026.09.06` and `2026.09.14` that the header versions implied were backfilled. |
 | `2026.09.14` | 2026-09-14 | `GF_PLUGINS_PREINSTALL_DISABLED` is required on distroless too, not only `-slim`: on a complete read-only-rootfs image the background auto-update kills a newer bundled backend and cannot write the replacement (measured 2026-09-12, five backends). Reworded the blueprint comment and §7 (`9363455a`). |
 | `2026.09.06` | 2026-09-06 | Chart default became `-distroless` (13.0.x): no shell, no `wget`, no `ls`. Every `kubectl exec ... -- sh` form rewritten to an API/port-forward form; "Current variant" row updated. |

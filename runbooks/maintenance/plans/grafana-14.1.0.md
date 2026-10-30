@@ -46,9 +46,9 @@ capability_change: true           # Grafana 13.2.4 -> 13.3.0 is an application M
                                   # resources by default") => never unattended without an operator GO. Previously false at 14.1.0.
 rollback_class: backup-restore    # the sqlite schema is migrated forward on first boot; a pin revert may not boot on it
 backup_gate: "2.5: a Longhorn Backup CR for volume grafana-config in state Completed, created less than 6 hours before the roll, PLUS a named pre-change Longhorn snapshot (grafana-pre-14-2-0) listed on the volume. Both must PASS before the pin is edited. Freshness proof only - NOT a restore proof; acceptable because the plan is human-gated and section 5 states what a total DB loss costs (2 users, 1 service account, 0 annotations, 0 alert rules measured 2026-10-30)."
-finding_refs: [F-c01c08c6, F-482f421e]   # F-c01c08c6 "grafana: chart 14.0.1 -> 14.2.0 (minor)" (version, PLAN lane; status resolved
-                                  # in the DB 2026-10-30 by the re-stamp commit but this plan still answers it);
-                                  # F-482f421e security warning, newer tag exists. Both VERIFIED via policy-cli finding list.
+finding_refs: [F-482f421e]        # F-482f421e security warning, newer tag exists (open; VERIFIED via policy-cli finding list 2026-10-30).
+                                  # HISTORICAL, deliberately not listed: F-c01c08c6 "grafana: chart 14.0.1 -> 14.2.0 (minor)" (version,
+                                  # PLAN lane) is status resolved in the DB since 2026-10-30; this plan answered it, it needs no ownership claim.
 review: null                      # material change (target, risk class, rollback class, gates): needs a fresh plan-review
 status: draft
 window: null                      # suggested: nightly:2026-11-03 with operator GO (section 6); the window agent assigns it
@@ -129,18 +129,25 @@ history[0] chart **14.0.1**, appVersion 13.2.4, Ready, last deployed 2026-10-23T
   (`max: patch`) exists for: the SOP (`grafana-image-changes.md` fact 3) and the HelmRelease header state that Grafana 13
   migrates the sqlite schema on boot and the migration is forward-only.
 - **Grafana 13.3.0 release notes** (`grafana/grafana` v13.3.0, read 2026-10-30): a large feature release with a Security
-  section listing ten fixes (detail intentionally not copied here; see `security_ref`), Alerting import/auto-sync rework
+  section (detail intentionally not copied here; see `security_ref` F-482f421e), Alerting import/auto-sync rework
   (we run `handleGrafanaManagedAlerts: false`, 0 alert rules), Git Sync/provisioning work (unused), `Dashboards: Make the
   auto grid to be default`, `Unified storage: Enable automatic cleanup of deleted resources by default`, `Canvas: load the
   standalone plugin by default`, a **Breaking changes** entry limited to renaming the plugins-marketplace config section
   (`marketplace` -> `plugins_marketplace`; we set no such section), and plugin-dev API changes (irrelevant).
-  **Not stated anywhere in the notes: whether 13.3.0 performs schema migrations.** I could not measure it from here (no
-  container runtime, and starting 13.3.0 against the live PVC is the change itself). The plan therefore assumes it DOES
-  and builds the gates and rollback for that, instead of arguing it away.
+  **The release notes do not say whether 13.3.0 migrates the schema; the SOURCE does, and it does.** Checked 2026-10-30 by
+  fetching `pkg/services/sqlstore/migrations/migrations.go` at both tags (`gh api repos/grafana/grafana/contents/...?ref=v13.2.4|v13.3.0`):
+  the three registration names `AddManagedFolderVariableActionsMigration`, `CollateBinAlertRuleFolderFullpath` and
+  `ExpandAlertRuleMissingSeriesEvalsToResolve` appear **0 times at v13.2.4 and 3 times at v13.3.0**. Per the plan review's reading
+  of the same diff: `CollateBinAlertRuleFolderFullpath` is mysql/postgres only (a no-op on our sqlite), the other two run on sqlite,
+  and the unified-storage side adds a `resource_blob_upload_chunk` table (resource-migrator expected to perform >= 2). So the first
+  13.3.0 boot WILL perform sqlite migrations (`migrator performed>0`): the rollback class (backup-restore) is not a precaution but a
+  consequence, and the verification expects a non-zero count rather than `performed=0`.
 - **Plugin trap.** The pod restarts once either way. `GF_PLUGINS_PREINSTALL_DISABLED: "true"` is in the 14.2.0 render and live
-  today, and `[plugins] preinstall_auto_update = false` is in the live ConfigMap. What is NEW with an app minor: 13.3.0 may
-  ship a different bundled datasource set than 13.2.4 (the 13.2.0 jump took the count from 2 to 13 bundled entries, PR
-  #129593), so "18 datasource plugins" is no longer a trustworthy fixed bar. Section 2.8 therefore measures the candidate
+  today, and `[plugins] preinstall_auto_update = false` is in the live ConfigMap. What is NEW with an app minor: the bundled plugin
+  set can change (the 13.2.0 jump took the count from 2 to 13 bundled entries, PR #129593). Per the plan review, 13.3.0 adds
+  bundled EXTERNAL plugins `cloudwatch` and `canvas` and removes the core CloudWatch implementation, so the datasource count is
+  expected to STAY 18 (cloudwatch moves from core to bundled-external); I did not verify that against the image, hence the
+  pre-flight and the "== pre-flight" gate rather than a hard-coded expectation. Section 2.8 therefore measures the candidate
   image OFF the live PVC against a 13.2.4 control and section 4 compares to that measurement.
 - Restart side effects to expect (unchanged from the original plan): `download-dashboards` re-fetches the TeslaMate (+ flux, k8s,
   nginx) dashboards from unpinned `master`; the pod re-reads `secret/elasticsearch-es-elastic-user` (F-03d0843d).
@@ -221,7 +228,11 @@ spec:
   volume: grafana-config
   createSnapshot: true
 YAML
-kubectl get snapshots.longhorn.io -n storage grafana-pre-14-2-0 -o jsonpath='{.status.readyToUse} {.status.creationTime}{"\n"}'   # expect: true <timestamp>
+for i in $(seq 1 30); do   # readyToUse flips asynchronously; poll up to 150 s, never read it once
+  r=$(kubectl get snapshots.longhorn.io -n storage grafana-pre-14-2-0 -o jsonpath='{.status.readyToUse}'); [ "$r" = true ] && break; sleep 5
+done
+kubectl get snapshots.longhorn.io -n storage grafana-pre-14-2-0 -o jsonpath='{.status.readyToUse} {.status.creationTime}{"\n"}'
+# PASS = "true <timestamp>". Anything else after the loop = SNAPSHOT_NOT_READY: STOP, do not edit the pin.
 # (Caveat: the Snapshot manifest's fields (spec.volume, spec.createSnapshot) were checked against the live CRD schema
 #  (snapshots.longhorn.io v1beta2) but NOT applied during planning - read-only session.
 #  If the apply is rejected, take the snapshot from the Longhorn UI (Volume grafana-config -> Take Snapshot, name it
@@ -262,24 +273,67 @@ echo "BASE_PROMDS=$(kubectl get --raw "$P?query=count%28grafana_plugin_build_inf
 # STOP and fix that first - do not roll on top of it, the verification would "pass" against a broken baseline.
 
 # 2.8 PRE-FLIGHT the candidate image OFF the live PVC (docs/sops/grafana-image-changes.md section 8 B, distroless form).
-#     A throwaway pod mounts NO grafana-config, so what it reports is exactly what the IMAGE ships. Run a 13.2.4 CONTROL
-#     first: it must report the same number as the live baseline (proves the method counts what the live pod counts).
+#     A throwaway pod mounts NO grafana-config, so what it reports is exactly what the IMAGE ships. A 13.2.4 CONTROL runs first:
+#     it must report the live baseline number (proves the method counts what the live pod counts).
+#     NOT REHEARSED IN PLANNING: it needs a cluster mutation (kubectl run) and the planning session is read-only. What WAS
+#     checked: `bash -n` on the script below, the overrides JSON parsed with json.loads, and `kubectl run --dry-run=client`.
+#     The pods copy the live container's hardening (uid/gid 472, readOnlyRootFilesystem, drop ALL, RuntimeDefault seccomp,
+#     writable emptyDirs only at /tmp, /var/lib/grafana, /var/lib/grafana-search) so a read-only-fs plugin-installer failure
+#     would reproduce; the guard env var is set exactly as in the live HelmRelease.
+S=${TMPDIR:-/tmp}
+cat > "$S/grafana-preflight.sh" <<'EOF2'
+#!/usr/bin/env bash
+set -u
+S=${S:-${TMPDIR:-/tmp}}
 ADMINPW=$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')
+PF=
+cleanup() {  # runs on ANY exit, incl. failure: no preflight pod or port-forward may outlive this script
+  [ -n "$PF" ] && kill "$PF" 2>/dev/null
+  kubectl delete pod -n monitoring -l app.kubernetes.io/component=grafana-preflight --ignore-not-found --wait=false >/dev/null 2>&1
+}
+trap cleanup EXIT
 for TAG in 13.2.4 13.3.0; do
-  kubectl run grafana-preflight-${TAG//./-} -n monitoring --image=docker.io/grafana/grafana:${TAG}-distroless --restart=Never \
-    --env=GF_PLUGINS_PREINSTALL_DISABLED=true --env=GF_SECURITY_ADMIN_PASSWORD="$ADMINPW" --port=3000
-  kubectl wait pod/grafana-preflight-${TAG//./-} -n monitoring --for=condition=Ready --timeout=180s
-  kubectl port-forward -n monitoring pod/grafana-preflight-${TAG//./-} 33002:3000 >/dev/null 2>&1 &
-  PF=$!; sleep 5
-  echo "PREFLIGHT $TAG datasource plugins: $(curl -s -u admin:"$ADMINPW" 'http://127.0.0.1:33002/api/plugins?embedded=0&type=datasource' | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))')"
-  kill $PF; wait $PF 2>/dev/null
-  kubectl delete pod grafana-preflight-${TAG//./-} -n monitoring --wait=true
+  N=grafana-preflight-${TAG//./-}
+  python3 - "$N" "$TAG" "$ADMINPW" > "$S/$N.json" <<'PY'
+import json,sys
+n,tag,pw=sys.argv[1:4]
+print(json.dumps({"spec":{
+ "securityContext":{"runAsUser":472,"runAsGroup":472,"runAsNonRoot":True,"fsGroup":472},
+ "containers":[{"name":n,"image":"docker.io/grafana/grafana:%s-distroless"%tag,
+  "env":[{"name":"GF_PLUGINS_PREINSTALL_DISABLED","value":"true"},{"name":"GF_SECURITY_ADMIN_PASSWORD","value":pw},
+         {"name":"GF_PATHS_DATA","value":"/var/lib/grafana"},{"name":"GF_UNIFIED_STORAGE_INDEX_PATH","value":"/var/lib/grafana-search"}],
+  "ports":[{"containerPort":3000}],
+  "readinessProbe":{"httpGet":{"path":"/api/health","port":3000},"periodSeconds":5,"failureThreshold":30},
+  "securityContext":{"readOnlyRootFilesystem":True,"allowPrivilegeEscalation":False,"privileged":False,
+                     "capabilities":{"drop":["ALL"]},"seccompProfile":{"type":"RuntimeDefault"}},
+  "volumeMounts":[{"name":"tmp","mountPath":"/tmp"},{"name":"data","mountPath":"/var/lib/grafana"},{"name":"search","mountPath":"/var/lib/grafana-search"}]}],
+ "volumes":[{"name":"tmp","emptyDir":{}},{"name":"data","emptyDir":{}},{"name":"search","emptyDir":{}}]}}))
+PY
+  kubectl run "$N" -n monitoring --image="docker.io/grafana/grafana:${TAG}-distroless" --restart=Never \
+    --labels=app.kubernetes.io/component=grafana-preflight --overrides="$(cat "$S/$N.json")" || exit 1
+  # A fresh DB runs ~730 sqlite + unified-storage migrations BEFORE it listens: the container is "started" long before it
+  # answers. Wait for the readiness probe, then POLL /api/health (up to 120 s) - never count plugins before it returns 200.
+  kubectl wait pod/"$N" -n monitoring --for=condition=Ready --timeout=180s || { kubectl logs "$N" -n monitoring --tail=30; echo "PREFLIGHT_NOT_READY $TAG (pod never Ready) - infrastructure failure, NOT a plugin verdict"; exit 1; }
+  kubectl port-forward -n monitoring pod/"$N" 33002:3000 >/dev/null 2>&1 &
+  PF=$!
+  code=000
+  for i in $(seq 1 60); do
+    code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:33002/api/health); [ "$code" = 200 ] && break; sleep 2
+  done
+  [ "$code" = 200 ] || { kubectl logs "$N" -n monitoring --tail=30; echo "PREFLIGHT_NOT_READY $TAG (/api/health=$code after 120 s) - NOT a plugin verdict, do not read this as 0 plugins"; exit 1; }
+  n=$(curl -s -u admin:"$ADMINPW" 'http://127.0.0.1:33002/api/plugins?embedded=0&type=datasource' | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))')
+  ro=$(kubectl logs "$N" -n monitoring | grep -i -c -e 'read-only file system' -e 'unlinkat')
+  echo "PREFLIGHT $TAG datasource plugins: $n   read-only-fs/unlinkat log lines: $ro"
+  kill "$PF" 2>/dev/null; PF=
+  kubectl delete pod "$N" -n monitoring --wait=true
 done
-# PASS = the 13.2.4 control equals BASE_PLUGINS (18) AND the 13.3.0 number is >= 18. Record the 13.3.0 number as PREFLIGHT_PLUGINS:
-# section 4 requires the live pod to match it exactly. A 13.3.0 number BELOW 18 = it ships fewer datasource backends: STOP.
-# (The preflight loop was NOT executed during planning - read-only session; it follows SOP section 8 B.)
-# (The pods carry label run=..., not app.kubernetes.io/name=grafana, so they cannot be picked up by any grafana selector;
-#  they run unprivileged with a throwaway admin password that is never stored.)
+EOF2
+bash -n "$S/grafana-preflight.sh" && S="$S" bash "$S/grafana-preflight.sh"
+# PASS = the 13.2.4 control line equals BASE_PLUGINS (18) AND the 13.3.0 line is >= 18 AND both "read-only-fs/unlinkat" counts are 0.
+# Record the 13.3.0 number as PREFLIGHT_PLUGINS (section 4 requires it, and the live pod to match it exactly). A 13.3.0 number BELOW 18 =
+# it ships fewer datasource backends: STOP. A line PREFLIGHT_NOT_READY is an infrastructure failure, not a verdict: re-run once, then STOP.
+# The pods carry label app.kubernetes.io/component=grafana-preflight (not app.kubernetes.io/name=grafana), so no grafana selector, probe or
+# ServiceMonitor can pick them up; they use a throwaway admin password that is never stored; the trap deletes them on any exit.
 
 # 2.9 Rehearse the gate script on the CURRENT state. FIRST save it: run the `cat > "$S/grafana-verify.sh"` heredoc from
 #     section 4 now (it is only a file write). Then, with the 2.7 baselines:
@@ -309,13 +363,13 @@ and the outage is ~1-3 min. Expect a longer first boot than a patch (schema migr
        # 2026-11-xx: chart 14.2.0 - Grafana 13.2.4 -> 13.3.0 (APPLICATION minor: sqlite schema migrates forward on first
        # boot; rollback class backup-restore, NOT git-revert). Values/templates identical to 14.1.0; render diff under OUR
        # values = chart label + app version label + image tag. Pre-change Longhorn snapshot grafana-pre-14-2-0 + backup.
-       # Plan: grafana-14.1.0 (id kept, target moved). PR #374. Findings: F-c01c08c6, F-482f421e.
+       # Plan: grafana-14.1.0 (id kept, target moved). PR #374. Finding: F-482f421e (F-c01c08c6 historical).
    ```
    (Replace `xx`.) Run `git diff`; confirm only the version line and these comment lines changed.
 3. Commit, VERIFY THE SUBJECT, push (shared worktree: `--only` with explicit path; never `git add -A`):
    ```bash
    git commit --only kubernetes/apps/monitoring/grafana/app/helmrelease.yaml \
-     -m "chore(grafana): chart 14.0.1 -> 14.2.0 (Grafana 13.2.4 -> 13.3.0, forward-only sqlite migration) [plan grafana-14.1.0, PR #374, findings F-c01c08c6 F-482f421e]"
+     -m "chore(grafana): chart 14.0.1 -> 14.2.0 (Grafana 13.2.4 -> 13.3.0, forward-only sqlite migration) [plan grafana-14.1.0, PR #374, finding F-482f421e]"
    git log -1 --format=%s     # must be exactly the line above; if another session's message landed, amend BEFORE pushing
    git show --stat HEAD       # exactly one file: the helmrelease.yaml
    git push
@@ -356,6 +410,7 @@ fail=0
 ok()  { echo "PASS  $1"; }
 bad() { echo "FAIL  $1"; fail=1; }
 : "${EXPECT_CHART:?}" "${EXPECT_APP:?}" "${MIGRATIONS:?none|expect}" "${BASE_PLUGINS:?}" "${BASE_DASH:?}" "${BASE_PROMDS:?}"
+[ "$MIGRATIONS" = expect ] && : "${PREFLIGHT_PLUGINS:?run 2.8 first and pass its 13.3.0 number}"
 
 # V1 release, image and pod identity (grafana_build_info alone cannot tell old pod from new when the app is unchanged;
 # on THIS bump the app does change, so /api/health + image tag discriminate, and the chart label covers the rest)
@@ -381,13 +436,16 @@ kubectl get cm grafana -n monitoring -o jsonpath='{.data.grafana\.ini}' | grep -
 L=$(kubectl logs -n monitoring deploy/grafana -c grafana)
 nz=$(printf '%s\n' "$L" | grep -c 'migrations completed.*performed=[1-9]')
 z=$(printf '%s\n' "$L" | grep -c 'migrations completed.*performed=0')
-tot=$(printf '%s\n' "$L" | grep -c 'migrations completed')
+tot=$(printf '%s\n' "$L" | grep -c 'migrations completed.*performed=')   # the 4 migrator lines; the "Unified storage migrations completed successfully" line has no performed= and is checked separately
 errm=$(printf '%s\n' "$L" | grep -i -c -e 'level=error.*migrat' -e 'migrat.*level=error' -e 'migration failed')
 if [ "$MIGRATIONS" = none ]; then
   { [ "$nz" = 0 ] && [ "$z" -ge 4 ]; } && ok "migrations: performed=0 x$z, nonzero x$nz" || bad "migrations: performed=0 x$z, nonzero x$nz (need 0 and >=4)"
 else
-  echo "INFO  migrations on this boot: lines=$tot performed=0 x$z performed>0 x$nz  (RECORD these numbers in the window report)"
-  { [ "$tot" -ge 4 ] && [ "$errm" = 0 ]; } && ok "migrations ran to completion on all migrators, no migration errors" || bad "migrations incomplete or errored: lines=$tot errors=$errm"
+  rm=$(printf '%s\n' "$L" | grep 'logger=resource-migrator' | grep -c 'migrations completed.*performed=\([2-9]\|[1-9][0-9]\)')
+  echo "INFO  migrations on this boot: migrator lines=$tot performed=0 x$z performed>0 x$nz resource-migrator>=2 x$rm  (RECORD these numbers in the window report)"
+  # v13.3.0 registers new sqlite migrations (source-verified, section 1): a boot with NO nonzero migrator line is the OLD pod or a
+  # different binary, so this gate FAILS on it (rehearsed against the old pod: see section 4).
+  { [ "$tot" -ge 4 ] && [ "$nz" -ge 1 ] && [ "$errm" = 0 ]; } && ok "migrations: all $tot migrators completed, $nz performed work, no migration errors" || bad "migrations: lines=$tot nonzero=$nz errors=$errm (need lines>=4, nonzero>=1, errors=0)"
 fi
 printf '%s\n' "$L" | grep -q 'Unified storage migrations completed successfully' && ok "unified storage migrations completed" || bad "no 'Unified storage migrations completed successfully' line"
 ro=$(printf '%s\n' "$L" | grep -i -c -e 'read-only file system' -e 'unlinkat')
@@ -442,8 +500,8 @@ Rehearsal 2026-10-30 against the LIVE pre-change state (read-only): `EXPECT_CHAR
 `ALL GATES PASS`. With the post-change expectations (`EXPECT_CHART=14.2.0 EXPECT_APP=13.3.0 MIGRATIONS=expect`) against the
 still-old pod it printed exactly the identity FAILs (`HR chart/Ready`, `image`, `pod chart label`, `/api/health version`,
 `grafana_build_info`), so the gates that prove "this is the new pod running the new app" can fail. The migration gate in
-`expect` mode cannot be rehearsed pre-change (the old pod's log shows `performed=0 x4`, which it accepts as completion);
-it is meaningful only through the identity gates plus the `INFO` line below, and that limitation is stated, not hidden.
+`expect` mode now FAILS against the old pod (its log shows `performed=0 x4`, no nonzero line: `FAIL migrations: lines=4 nonzero=0`),
+which is what makes it a gate; it can only pass on a boot that actually migrated.
 Bugs found earlier and kept fixed: `grep -v 'performed=0'` reads 1 on a healthy pod (Grafana also prints `Unified storage
 migrations completed successfully`), so the `none` gate counts `performed=[1-9]` (must be 0) AND `performed=0` (must be >= 4).
 
@@ -464,7 +522,7 @@ What each gate guards against, and what its failure prints:
 | `/api/health` version == `13.3.0` and `grafana_build_info` == exactly `13.3.0` | old binary still serving; stale old-pod series | `FAIL /api/health version '13.2.4' want 13.3.0` |
 | containers == 3 named, 3/3 ready, restartCount `0 0 0` | the new `sc-repositories` sidecar appearing; crash-looping on the migrated DB | `FAIL container set changed` / `FAIL restartCount '0 1 0'` |
 | `GF_PLUGINS_PREINSTALL_DISABLED=true` env + ini `preinstall_auto_update = false` | the guard lost - recreates the 2026-09-12 outage on the NEXT restart | `FAIL GF_PLUGINS_PREINSTALL_DISABLED=''` |
-| log: >= 4 `migrations completed` lines, no migration errors, `Unified storage migrations completed successfully`; `INFO` prints performed counts | schema migration failing half-way / not finishing | `FAIL migrations incomplete or errored: lines=2 errors=1` |
+| log (`expect` mode): >= 4 migrator lines, at least ONE with `performed>0`, no migration errors, plus the separate `Unified storage migrations completed successfully` line; `INFO` prints the counts | schema migration failing half-way / not finishing / the old binary | `FAIL migrations: lines=4 nonzero=0 errors=0 (need lines>=4, nonzero>=1, errors=0)` |
 | log: no `read-only file system` / `unlinkat` (case-insensitive) | the background installer killing bundled backends | `FAIL plugin-installer read-only-fs errors x3` |
 | API `/api/plugins?type=datasource` count >= baseline AND == PREFLIGHT_PLUGINS (the 13.3.0 image measured off-PVC) | stripped/killed bundled backends; **13 is the measured 2026-09-12 signature** | `FAIL datasource plugins = '13' (baseline 18, preflight 18 ...)` |
 | 6 datasource `/health` == `OK` + alertmanager proxy `cluster` key + `/api/ds/query` numeric (`from`/`to` mandatory, else a healthy Grafana returns empty) | dead plugin, bad ES secret (401 after restart), unreachable DB | `FAIL datasource TeslaMate health='ERROR'` |
@@ -487,12 +545,19 @@ No alertname control: the repo carries no Grafana-specific PrometheusRule, and a
 cannot fail on the property under change.
 
 **PASS** = script prints `ALL GATES PASS` (exit 0) AND the `INFO migrations on this boot:` line is recorded in the window
-report (performed counts are the only direct evidence of whether 13.3.0 migrated the schema; it also settles the open question
-in section 1 for the next planner).
+report (expected from section 1: migrator `performed>0`, resource-migrator `performed>=2`; any deviation from that expectation is
+worth a line in the report even when the gates pass).
 
 **Soak:** re-run the script once more >= 2 h after the roll (a quiet pod can pass at t+5 min and fail when the first scheduled
 plugin/unified-storage cleanup runs; 13.3.0 enables automatic deleted-resource cleanup by default). Only then delete snapshot
 `grafana-pre-14-2-0`.
+
+**Owner of the soak re-run and the snapshot deletion** (this is not optional, an unowned soak is a skipped soak): the window agent,
+at the end of its Step 4 for this plan, files a home-operation reminder due `T+2h` (same pattern as the soak reminder in
+`frigate-reolink-go2rtc-flv.md`: `home-operation ingest --json` with source `maintenance`, resolved by
+`home-operation resolve` after the re-run passes), naming the exact command line and the snapshot to delete. If no agent session is
+available the operator owns it, prompted by that reminder. The plan is not retired until the reminder is resolved;
+the snapshot must not outlive the reminder by more than 7 days (it pins Longhorn space).
 
 ## 5) Rollback
 
@@ -501,7 +566,7 @@ not support downgrading across a schema migration, and whether 13.2.4 will boot 
 (not measurable from here). So the rollback is a ladder; stop at the first rung that passes section 4 with
 `EXPECT_CHART=14.0.1 EXPECT_APP=13.2.4 MIGRATIONS=none`:
 
-**Rung 1 - revert the pin (always first, cheap, and the only rung if no migration happened).**
+**Rung 1 - revert the pin (always first, cheap; it restores the chart, not necessarily the data).**
 ```bash
 git revert --no-edit <bump-commit-sha>
 git log -1 --format=%s        # confirm the revert subject is yours before pushing
@@ -510,20 +575,28 @@ git push
 kubectl rollout status deployment/grafana -n monitoring --timeout=300s
 ```
 Then run the section 4 script with `EXPECT_CHART=14.0.1 EXPECT_APP=13.2.4 MIGRATIONS=none` (the revert is a SECOND restart: the
-preinstall guard and datasource gates apply to it exactly as to the forward roll). If the INFO line from the forward roll showed
-`performed>0 x0` (no migration ran), this rung is a complete rollback and the plan ends here. If the pod boots and every gate
-passes, 13.2.4 tolerated the migrated schema; note it in the report but treat the DB as "newer than the app" and re-plan the
-upgrade rather than leaving it half-way.
+preinstall guard and datasource gates apply to it exactly as to the forward roll). A migration DID run on the forward roll (the
+forward gate required it), so the database is "newer than the app". If the old pod boots and every gate passes, 13.2.4 tolerated
+the migrated schema: record it, but do not call the rollback done silently - re-plan the upgrade rather than leaving it half-way.
+If it does not boot (crash-loop, schema error in `kubectl logs --previous`), continue to Rung 2.
+**Unattended nightly:** Rungs 2 and 3 need the Longhorn UI and operator judgement. In an unattended run the agent stops after
+Rung 1, leaves the pod as it is, and escalates through the window's `blocked` / `reverted` notification (`urgent` events in
+`runbooks/maintenance-windows.yaml`) - it must not improvise Rung 2/3.
 
 **Rung 2 - 13.2.4 crash-loops on the migrated DB (look for a schema/migration error in `kubectl logs ... --previous`).**
 Restore the PRE-CHANGE data under the pinned old app. Grafana's state is tiny (2 users, 1 service account, 0 annotations, 0 alert
 rules) and everything else is provisioned from git, so this rung is a controlled DB reset, not a data-recovery emergency:
-1. Keep the pin reverted (rung 1 commit pushed). Scale to zero without fighting Flux: `flux suspend helmrelease grafana -n monitoring`
-   then `kubectl scale deployment/grafana -n monitoring --replicas=0`; wait for the pod to terminate and the Longhorn volume to detach.
+1. Keep the pin reverted (rung 1 commit pushed and reconciled). Scale to zero: `kubectl scale deployment/grafana -n monitoring --replicas=0`;
+   wait for the pod to terminate and the Longhorn volume to detach. Do NOT `flux suspend`: HelmRelease `driftDetection` is unset on
+   `grafana` (live `spec.driftDetection` empty; 0 of the 115 HelmReleases set it, 2026-10-30), so Flux does not revert a manual
+   replica count. (If `helm-drift-detection` has landed since, re-check this: with drift detection on, suspend the HelmRelease first.)
 2. Revert the volume to the pre-change snapshot in place: Longhorn UI (port-forward `svc/longhorn-frontend` in ns `storage`) ->
    Volume `grafana-config` -> attach in Maintenance mode -> Snapshots -> `grafana-pre-14-2-0` -> Revert -> detach.
    (Longhorn requires the maintenance-mode attach for a snapshot revert; this UI procedure was NOT rehearsed in planning.)
-3. `flux resume helmrelease grafana -n monitoring` (Flux scales it back to 1 from git) and re-run section 4 with the 14.0.1/13.2.4 values.
+3. Bring it back explicitly - nothing else will: the revert already reconciled, so there is no spec change, no Helm upgrade, and
+   replicas would stay 0. `kubectl scale deployment/grafana -n monitoring --replicas=1`, then
+   `kubectl rollout status deployment/grafana -n monitoring --timeout=420s` and confirm 1/1 available with 3/3 containers ready
+   (`kubectl get pods -n monitoring -l app.kubernetes.io/name=grafana`) BEFORE re-running section 4 with the 14.0.1 / 13.2.4 values.
 
 **Rung 3 - the snapshot is unusable (it lives on the same volume's replicas).** Restore the newest Completed Backup CR of
 `grafana-config` (the 2.5 gate proved one < 6 h old exists) by the repo-correct path in `docs/sops/backup.md` "Restore from Backup /
@@ -580,6 +653,9 @@ migration). Per `docs/sops/grafana-image-changes.md` section 4 step 7 do not deb
   clear days so a failed Grafana gate cannot spill into the node roll's soak.
 - **`longhorn-1.13.0` (sun-attended:2026-11-15), `helm-drift-detection` (sat 11-07), `flux-oci-chart-sources` (sun 11-22)** - each touches
   the Longhorn volume or the HelmRelease object itself; declared so a rollout cause stays singular.
+- **`talos-power-tuning-ab`** (vetted, `exclusive: true`, touches monitoring, 310 min attended x2) has `window: null` and its own
+  premises failing; it is NOT scheduled, so it does not constrain nightly:2026-11-03. If it is ever scheduled, its exclusivity already
+  keeps this plan out of that slot (the scheduler refuses an occupied exclusive slot in both directions); no extra `conflicts_with` needed.
 - **Old plan `grafana-chart-13.2.3`** is `status: superseded` (since 2026-09-14), two majors behind; untouched, nothing depends on it.
 - **Could this be AUTO-class? No (changed from the 14.1.0 answer).** `capability_change: true` and `rollback_class: backup-restore`
   derive HUMAN-GATED; even with a `backup_gate` the capability flag alone blocks unattended execution. A future 13.3.x PATCH
