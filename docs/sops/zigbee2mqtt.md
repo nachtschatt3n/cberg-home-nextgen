@@ -1,8 +1,8 @@
 # SOP: Zigbee2MQTT operations
 
 > Description: Lifecycle operations for the Zigbee2MQTT (Z2M) deployment and its mesh — opening/closing `permit_join`, removing devices safely, recovering from interview failures on CC2652-class router firmware, backup/restore, and post-incident smoke testing.
-> Version: `2026.09.22`
-> Last Updated: `2026-09-22`
+> Version: `2026.10.30`
+> Last Updated: `2026-10-30`
 > Owner: `cberg-home-ops`
 
 ---
@@ -252,6 +252,16 @@ mosquitto_pub -h 192.168.55.15 -t zigbee2mqtt/bridge/request/device/rename \
 ```
 
 > **Historical note:** the IEEE/model above (`0x00124b0031dffd19` / `SLZB-06P7`) are the **2026-06-04 worked example**, kept because they show a real, complete injected row. **That record no longer exists** — it was force-removed on 2026-08-08 (§8 Diagnose Example 2) after the same physical unit rejoined under a zeroed IEEE. Always substitute the IEEE and model of the device you are actually fixing.
+
+### 4d-bis) SLZB device HTTP API: read-only endpoints only (2026-10-26)
+
+Probing an SLZB unit read-only is safe on `/ha_info`, `/ha_sensors`, `/metrics` and
+`/api2?action=5` (the log). **Never guess other `/api2?action=N` values**: on
+2026-10-30 an undocumented `action=6` returned `ok` and rebooted the Thread radio
+(boot log: `Reboot reason: PANIC`). The documented reboot is `action=4&cmd=3`, and it
+is a mutation, so it belongs in the §4f ladder, not in a diagnosis. A raw Spinel
+read over TCP 6638 (property get) is also read-only, but a silent reply is a radio
+verdict, not a network one.
 
 ### 4e) GitOps for HelmRelease changes
 

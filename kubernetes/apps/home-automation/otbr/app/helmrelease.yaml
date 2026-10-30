@@ -34,7 +34,13 @@ spec:
         # Ethernet-attached SLZB-06P7 (192.168.33.238, 0.8ms / 0.5ms jitter
         # from k8s-nuc14-03). If NETWORK_DEVICE ever moves to a WiFi unit,
         # scale back to 0 instead.
-        replicas: 1
+        # 2026-10-30: scaled to 0. The radio's CC2652P7 stopped answering Spinel
+        # (otbr-agent exits at spinel_driver.cpp:87, 619 restarts since ~10-28)
+        # and a full radio reboot did not recover it. HA has no Matter devices and
+        # the Thread mesh runs on the other border routers, so nothing is lost.
+        # Back to 1 only once the radio answers (recovery ladder:
+        # runbooks/maintenance/plans/otbr-thread-rcp-recovery.md).
+        replicas: 0
         pod:
           hostNetwork: true
           dnsPolicy: ClusterFirstWithHostNet
