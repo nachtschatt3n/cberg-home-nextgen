@@ -1,65 +1,71 @@
 ---
-plan_id: grafana-14.1.0
+plan_id: grafana-14.1.0           # KEPT on purpose although target moved to 14.2.0: the id is an identifier, not an assertion
+                                  # (README "When the held target MOVES"); other plans' conflicts_with, the finding join and
+                                  # any go/no-go issue resolve by it. `target:` below is authoritative.
 component: grafana
-pr: null                          # NO Renovate PR exists for 14.1.0 (chart published 2026-10-26T09:49Z, hours
-                                  # before this plan; `gh pr list --search grafana` = none open, 2026-10-26).
-                                  # If Renovate opens one before the window, close it and take the hand-edit
-                                  # below (the *grafana* deny rule holds a minor in the PLAN lane anyway).
+pr: 374                           # Renovate PR #374 (branch renovate/grafana-14.x) now proposes 14.0.1 -> 14.2.0; its diff is
+                                  # exactly the one `version:` line. The plan hand-edits that SAME line and Renovate autocloses it.
 kind: chart
-current: "14.0.1"                 # MEASURED 2026-10-26: HR spec 14.0.1, history[0] 14.0.1 / app 13.2.4, Ready
-target: "14.1.0"
-update_type: minor
-risk: low
-est_duration_min: 20
+current: "14.0.1"                 # MEASURED 2026-10-30: HR spec 14.0.1, history[0] 14.0.1 / app 13.2.4, Ready, pod age 7d20h, 0 restarts
+target: "14.2.0"                  # RETARGETED 2026-10-30 from 14.1.0 (see section 1: 14.2.0 moves the APP 13.2.4 -> 13.3.0)
+update_type: minor                # chart minor AND Grafana application minor
+risk: medium
+est_duration_min: 40
 needs_reboot: false
 touches:
-  namespaces: [monitoring]
-  resources:                      # every object below verified to EXIST live 2026-10-26
-    - helmrelease/grafana         # git edit: spec.chart.spec.version 14.0.1 -> 14.1.0
-    - deployment/grafana          # ROLLS ONCE (Recreate): pod-template label helm.sh/chart changes; image unchanged
-    - pvc/grafana-config          # sqlite; RWO longhorn-static; mounted, NOT migrated (appVersion unchanged)
-    - configmap/grafana           # re-rendered; content-identical except helm.sh/chart label
+  namespaces: [monitoring, storage]
+  resources:                      # every object below verified to EXIST live 2026-10-30
+    - helmrelease/grafana         # git edit: spec.chart.spec.version 14.0.1 -> 14.2.0
+    - deployment/grafana          # ROLLS ONCE (Recreate): image 13.2.4-distroless -> 13.3.0-distroless
+    - pvc/grafana-config          # sqlite; RWO longhorn-static. MIGRATED FORWARD by 13.3.0 on first boot (rollback class)
+    - volume.longhorn.io/grafana-config   # ns storage: snapshot + backup taken BEFORE the roll; restore path in section 5
+    - configmap/grafana           # re-rendered; content-identical except labels (values.yaml identical 14.1.0 -> 14.2.0)
     - servicemonitor/grafana      # label only; Prometheus must re-find the new pod
-    - clusterrole/grafana-clusterrole   # label only (rules gated on a sidecar we do not enable)
+    - clusterrole/grafana-clusterrole   # label only
     - clusterrolebinding/grafana-clusterrolebinding   # label only
-  shared: []                      # tenant of ns monitoring, not infrastructure: no gateway/cni/dns/db is restarted.
-                                  # It READS shared infra in verification (Prometheus, Elasticsearch, InfluxDB,
-                                  # the TeslaMate and pellets Postgres) but perturbs none of it.
+  shared: []                      # tenant of ns monitoring, not infrastructure. It READS shared infra in verification
+                                  # (Prometheus, Elasticsearch, InfluxDB, the TeslaMate and pellets Postgres) and
+                                  # snapshots one Longhorn volume, but restarts none of it.
 depends_on: []
 conflicts_with:                   # ONLY this field is honoured by the scheduler. Reasons, strongest first:
   - talos-linux-1.14.4            # node roll evicts grafana mid-gate; also exclusive:true on sun-attended:2026-11-01
   - teslamate-4.4.0               # HARD: every grafana start re-fetches the 11 TeslaMate dashboards from UNPINNED
-                                  # teslamate master (init container download-dashboards), and that plan's section
-                                  # 4.5 reads Grafana as its instrument while the TeslaMate DB schema is mid-migration
-  - longhorn-1.13.0               # grafana-config is a Longhorn volume; replica/instance-manager churn during the roll
+                                  # teslamate master, and that plan's section 4.5 reads Grafana as its instrument while
+                                  # the TeslaMate DB schema is mid-migration
+  - longhorn-1.13.0               # grafana-config is a Longhorn volume; this plan snapshots/backs it up and may restore it
   - helm-drift-detection          # edits spec of EVERY HelmRelease incl. helmrelease/grafana: same object, attribution
   - flux-oci-chart-sources        # rewrites the chart source of HelmReleases incl. grafana (it also rolls deployment/grafana)
   - otel-operator-0.25.1          # SOFT (attribution hygiene, no technical coupling found): both gate on ns monitoring
   - edot-collector-0.163.2        # signals; keep a failed gate attributable to ONE change. Neither plan reads Grafana.
+  - edot-collector-0.164.0        # (draft, added 2026-10-30; it already lists this plan)
 exclusive: false
-security_ref: null                # not security-driven (open image findings on 13.2.4 are AR-029 accepted rows and
-                                  # this bump does not change the image, so it cannot move them)
-capability_change: false          # same Grafana binary (13.2.4), same config; the only functional addition is an
-                                  # OPT-IN Git Sync sidecar that is OFF by default and which we do not enable
-rollback_class: git-revert        # appVersion identical both sides -> no sqlite migration crossed (section 5 proves it)
-finding_refs: [F-c01c08c6]        # VERIFIED 2026-10-26 via `policy-cli.py finding list --grep grafana`:
-                                  # "grafana: chart 14.0.1 -> 14.1.0 (minor)", section version, PLAN lane
-review: ready-for-go@2026-10-26   # plan-reviewer 2026-10-26: needs-fix on 2 small items (pod name in 2.6, unproven V3 absence gate), both fixed + re-run live by the planner; reviewer: "ready-for-go once fixed"
-status: vetted
-window: null                      # suggested: nightly:2026-10-29 (see section 6); the window agent assigns it
+security_ref: F-482f421e          # open warning "grafana/grafana:13.2.4-distroless ... newer upstream tag available". Detail stays
+                                  # in the DB. 13.3.0 is the newest upstream tag, so this bump is the available remediation.
+capability_change: true           # Grafana 13.2.4 -> 13.3.0 is an application MINOR: user-visible default changes (release notes:
+                                  # "Make the auto grid to be default", "Unified storage: Enable automatic cleanup of deleted
+                                  # resources by default") => never unattended without an operator GO. Previously false at 14.1.0.
+rollback_class: backup-restore    # the sqlite schema is migrated forward on first boot; a pin revert may not boot on it
+backup_gate: "2.5: a Longhorn Backup CR for volume grafana-config in state Completed, created less than 6 hours before the roll, PLUS a named pre-change Longhorn snapshot (grafana-pre-14-2-0) listed on the volume. Both must PASS before the pin is edited. Freshness proof only - NOT a restore proof; acceptable because the plan is human-gated and section 5 states what a total DB loss costs (2 users, 1 service account, 0 annotations, 0 alert rules measured 2026-10-30)."
+finding_refs: [F-c01c08c6, F-482f421e]   # F-c01c08c6 "grafana: chart 14.0.1 -> 14.2.0 (minor)" (version, PLAN lane; status resolved
+                                  # in the DB 2026-10-30 by the re-stamp commit but this plan still answers it);
+                                  # F-482f421e security warning, newer tag exists. Both VERIFIED via policy-cli finding list.
+review: null                      # material change (target, risk class, rollback class, gates): needs a fresh plan-review
+status: draft
+window: null                      # suggested: nightly:2026-11-03 with operator GO (section 6); the window agent assigns it
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/grafana-image-changes.md
+  - docs/sops/backup.md
   - docs/sops/monitoring.md
   - docs/sops/verification-contents-not-shape.md
-generated: "2026-10-26"
+generated: "2026-10-30"
 premises:
   - id: live-chart-is-14.0.1
-    why: "`current:` claims 14.0.1. If the HR already moved (manual bump, Step 0 direct-bump, another plan), the diff and rollback baseline below are stale."
+    why: "`current:` claims 14.0.1. If the HR already moved (manual bump, another plan), the diff and rollback baseline below are stale."
     run: kubectl get helmrelease grafana -n monitoring -o jsonpath='{.spec.chart.spec.version}'
     expect_exact: "14.0.1"
   - id: live-image-is-13.2.4-distroless
-    why: "The whole git-revert argument rests on the RUNNING app being 13.2.4 with no image.tag override. A different live tag voids the appVersion analysis."
+    why: "The migration analysis assumes the RUNNING app is 13.2.4 with no image.tag override. A different live tag voids the app-delta analysis (e.g. someone already took 13.3.0)."
     run: kubectl get deploy grafana -n monitoring -o jsonpath='{.spec.template.spec.containers[?(@.name=="grafana")].image}'
     expect_exact: "docker.io/grafana/grafana:13.2.4-distroless"
   - id: helmrelease-ready
@@ -67,7 +73,7 @@ premises:
     run: kubectl get helmrelease grafana -n monitoring -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
     expect_exact: "True"
   - id: no-image-tag-pin-in-values
-    why: "The image follows .Chart.AppVersion only while values carry no `image:` key; a pin added since would decouple the binary from the chart and void the claim."
+    why: "The image follows .Chart.AppVersion only while values carry no `image:` key; a pin added since would decouple the binary from the chart."
     run: grep -c '^    image:' kubernetes/apps/monitoring/grafana/app/helmrelease.yaml
     expect_exact: "0"
   - id: preinstall-guard-live
@@ -75,88 +81,87 @@ premises:
     run: kubectl get deploy grafana -n monitoring -o jsonpath='{.spec.template.spec.containers[?(@.name=="grafana")].env[?(@.name=="GF_PLUGINS_PREINSTALL_DISABLED")].value}'
     expect_exact: "true"
   - id: repo-cache-sees-target
-    why: "`helm show chart ... --version 14.1.0` fails on a stale local index and is indistinguishable from the chart not existing. The local cache lacked 14.1.0 until `helm repo update grafana-community` (2026-10-26). Refresh first if this fails."
-    run: helm show chart grafana-community/grafana --version 14.1.0 | grep '^version:'
-    expect_exact: "version: 14.1.0"
-  - id: target-chart-appversion-unchanged
-    why: "THE central claim. If 14.1.0 is ever repackaged with a different appVersion, this plan is void and must be re-triaged as appVersion-moving (backup-restore rollback class)."
-    run: helm show chart grafana-community/grafana --version 14.1.0 | grep '^appVersion:'
-    expect_exact: "appVersion: 13.2.4"
+    why: "`helm show chart ... --version 14.2.0` fails on a stale local index and is indistinguishable from the chart not existing. Refresh with `helm repo update grafana-community` if this fails."
+    run: helm show chart grafana-community/grafana --version 14.2.0 | grep '^version:'
+    expect_exact: "version: 14.2.0"
+  - id: target-chart-appversion-is-13.3.0
+    why: "THE central fact of the retarget. If 14.2.0 is ever repackaged with a different appVersion, the app-delta analysis (13.2.4 -> 13.3.0, forward-only migration, backup-restore class) is void and the plan must be re-triaged."
+    run: helm show chart grafana-community/grafana --version 14.2.0 | grep '^appVersion:'
+    expect_exact: "appVersion: 13.3.0"
   - id: container-set-baseline
-    why: "Verification asserts the pod keeps exactly these three containers (i.e. the new sc-repositories sidecar stays off). Baseline must hold before the change."
+    why: "Verification asserts the pod keeps exactly these three containers (the new sc-repositories sidecar stays off). Baseline must hold before the change."
     run: kubectl get pod -n monitoring -l app.kubernetes.io/name=grafana -o jsonpath='{.items[*].spec.containers[*].name}'
     expect_exact: "grafana-sc-dashboard grafana-sc-datasources grafana"
+  - id: grafana-volume-healthy
+    why: "The backup gate and the section 5 restore both assume the Longhorn volume is attached and healthy (2 replicas)."
+    run: kubectl get volume grafana-config -n storage -o jsonpath='{.status.state} {.status.robustness}'
+    expect_exact: "attached healthy"
 ---
 
-# grafana: chart 14.0.1 -> 14.1.0 (minor, appVersion 13.2.4 unchanged)
+# grafana: chart 14.0.1 -> 14.2.0 (Grafana 13.2.4 -> 13.3.0, application minor)
 
 ## 1) Summary & why held
 
-**What changes.** Helm chart `grafana` (grafana-community repo, the one the in-cluster
-HelmRepository `flux-system/grafana` points at) 14.0.1 -> 14.1.0. **The Grafana application
-version does NOT change: appVersion is 13.2.4 on both sides**, the rendered image is
-`docker.io/grafana/grafana:13.2.4-distroless` on both sides, and `app.kubernetes.io/version`
-stays `13.2.4`.
+**RETARGET 2026-10-30 (was: chart 14.1.0).** The nightly:2026-10-29 run stopped at pre-check 2.3 because Renovate PR
+#374 (`renovate/grafana-14.x`, same number that carried 13.7.0 -> 14.0.1) now proposes **14.0.1 -> 14.2.0**. The original
+plan assumed no grafana PR existed and was written when 14.1.0 was newest. Re-assessed from scratch below; the
+conclusion flipped: **the old low-risk / git-revert verdict does NOT carry over**, because 14.2.0 moves the app.
 
-**Why it was held.** `runbooks/auto-update-policy.yaml` rule `*grafana*` (`max: patch`) routes every
-chart MINOR to the PLAN lane because a chart minor *can* carry the app across forward-only sqlite
-migrations (grafana-config PVC), turning the rollback from `git revert` into restore-from-backup.
-That is a hazard about appVersion. Measured here, it does not apply to this hop.
+**(1) What is live now (measured 2026-10-30).** Unchanged since the original plan: HelmRelease `grafana` spec and
+history[0] chart **14.0.1**, appVersion 13.2.4, Ready, last deployed 2026-10-23T01:38Z; one pod
+`grafana-5fb7f595c9-6x2bm` 3/3, 0 restarts, age 7d20h; image `docker.io/grafana/grafana:13.2.4-distroless`.
+`git log` of the grafana app folder: newest commit is still 2259f141 (the 14.0.1 bump). Nothing else changed.
 
-**Evidence (all measured 2026-10-26, nothing assumed):**
+**(2) 14.2.0 vs 14.1.0.** Chart repo index (`https://grafana-community.github.io/helm-charts`):
+```
+14.2.0   appVersion 13.3.0   created 2026-10-27T15:49Z   <- Renovate PR #374 / this plan
+14.1.0   appVersion 13.2.4   created 2026-10-26T09:49Z   <- previous target (opt-in Git Sync sidecar only)
+14.0.1   appVersion 13.2.4   created 2026-10-16          <- live
+```
+- Chart source diff 14.1.0 -> 14.2.0: **`Chart.yaml` only** (`appVersion: 13.3.0`). `values.yaml`, templates, RBAC: byte-identical.
+  Upstream release note for grafana-14.2.0: *"[grafana] Update docker.io/grafana/grafana Docker tag to v13.3.0 (#939)"*.
+- Render diff against OUR live `spec.values` (`helm template`, chart 14.1.0 vs 14.2.0): `helm.sh/chart` label,
+  `app.kubernetes.io/version` label (13.2.4 -> 13.3.0) and **one image line**
+  `grafana:13.2.4-distroless` -> `grafana:13.3.0-distroless` (`13.3.0-distroless` exists on Docker Hub, pushed 2026-10-27).
+  Env, volumes, containers, sidecar versions, selectors, ConfigMap data: unchanged. The new `sc-repositories` sidecar stays
+  off (default `false`, we do not set it) - container set stays 3.
+- So 14.2.0 = the whole of 14.1.0 **plus a Grafana application minor**. That is exactly the hazard the `*grafana*` deny rule
+  (`max: patch`) exists for: the SOP (`grafana-image-changes.md` fact 3) and the HelmRelease header state that Grafana 13
+  migrates the sqlite schema on boot and the migration is forward-only.
+- **Grafana 13.3.0 release notes** (`grafana/grafana` v13.3.0, read 2026-10-30): a large feature release with a Security
+  section listing ten fixes (detail intentionally not copied here; see `security_ref`), Alerting import/auto-sync rework
+  (we run `handleGrafanaManagedAlerts: false`, 0 alert rules), Git Sync/provisioning work (unused), `Dashboards: Make the
+  auto grid to be default`, `Unified storage: Enable automatic cleanup of deleted resources by default`, `Canvas: load the
+  standalone plugin by default`, a **Breaking changes** entry limited to renaming the plugins-marketplace config section
+  (`marketplace` -> `plugins_marketplace`; we set no such section), and plugin-dev API changes (irrelevant).
+  **Not stated anywhere in the notes: whether 13.3.0 performs schema migrations.** I could not measure it from here (no
+  container runtime, and starting 13.3.0 against the live PVC is the change itself). The plan therefore assumes it DOES
+  and builds the gates and rollback for that, instead of arguing it away.
+- **Plugin trap.** The pod restarts once either way. `GF_PLUGINS_PREINSTALL_DISABLED: "true"` is in the 14.2.0 render and live
+  today, and `[plugins] preinstall_auto_update = false` is in the live ConfigMap. What is NEW with an app minor: 13.3.0 may
+  ship a different bundled datasource set than 13.2.4 (the 13.2.0 jump took the count from 2 to 13 bundled entries, PR
+  #129593), so "18 datasource plugins" is no longer a trustworthy fixed bar. Section 2.8 therefore measures the candidate
+  image OFF the live PVC against a 13.2.4 control and section 4 compares to that measurement.
+- Restart side effects to expect (unchanged from the original plan): `download-dashboards` re-fetches the TeslaMate (+ flux, k8s,
+  nginx) dashboards from unpinned `master`; the pod re-reads `secret/elasticsearch-es-elastic-user` (F-03d0843d).
 
-1. Chart repo `index.yaml` (`https://grafana-community.github.io/helm-charts`):
-   ```
-   14.1.0   appVersion 13.2.4   created 2026-10-26T09:49Z   <- target (hours old)
-   14.0.1   appVersion 13.2.4   created 2026-10-16           <- live
-   14.0.0   appVersion 13.2.4   created 2026-10-15
-   13.7.0   appVersion 13.2.4   created 2026-10-15
-   ```
-   and `helm show chart grafana-community/grafana --version {14.0.1,14.1.0}` both print `appVersion: 13.2.4`.
-2. Upstream release notes for `grafana-14.1.0` (grafana-community/helm-charts, the ONLY entry):
-   *"[grafana] Add sidecar to provision Git Sync repositories (PR #932)"*. The v14.0.x major
-   (values-schema change) is already live (commit 2259f141) and healthy; 14.1.0 is a minor on top of it.
-3. Full source diff of the unpacked charts 14.0.1 vs 14.1.0: new `templates/configmap-repository-sync.yaml`,
-   new `files/repository-sync.py`, new `sc-repositories` container + volumes in `_pod.tpl`, extra
-   RBAC `or` terms, a `checksum/repository-sync` annotation, README, `values.yaml` +
-   `values.schema.json`. **Every new template is gated on `sidecar.repositories.enabled`, whose chart
-   default is `false`** (`values.yaml` line 1625) and which our HelmRelease does not set.
-4. **Render diff against OUR real `spec.values`** (`helm template` of both charts fed the live values
-   block): the two renders differ in exactly **one kind of line** - `helm.sh/chart: grafana-14.0.1` ->
-   `grafana-14.1.0` on 14 labelled objects. No annotation, env, image, volume, container, RBAC rule,
-   ConfigMap data or selector changes. `Deployment.spec.selector.matchLabels` is unchanged, so no
-   immutable-selector delete/recreate. The `GF_PLUGINS_PREINSTALL_DISABLED: "true"` env and
-   `[plugins] preinstall_auto_update = false` are present in the 14.1.0 render.
-5. Live sqlite state: the running pod (age 3d8h, same appVersion 13.2.4) logged
-   `migrations completed performed=0` on all four migrators (730/35/55/4 skipped) at its last start.
-   A start on an unchanged appVersion performs no migration; this hop starts the same binary against
-   the same PVC.
+**(3) Retarget decision: 14.2.0 is the right target; 14.1.0 is dropped, not held.**
+- 14.1.0 delivers nothing we use (an opt-in sidecar) and would cost an extra restart, an extra gate run and an extra
+  window; it also does not touch the open security finding.
+- Holding PR #374 to land 14.1.0 first would need a Renovate `allowedVersions` cap (a config change in `.github/renovate.json5`)
+  and then a second plan for 14.2.0 anyway.
+- 13.2.4 is already the newest 13.2.x and the open finding F-482f421e says a newer upstream tag exists: 13.3.0 is it.
+  Taking the app forward is the point, and it is why the class changed.
 
-**The one thing that is NOT a no-op: the pod WILL restart.** The `helm.sh/chart` label sits in the
-pod template (render line 646), so the Deployment rolls once (strategy `Recreate`: old pod gone and
-PVC released before the new one starts; ~1-2 min Grafana unavailable, grafana.<domain> returns 5xx
-meanwhile). This is the previously-hit trap: on 2026-09-12 a single restart killed the bundled
-postgres/influxdb/loki/jaeger/mssql datasource backends and left every TeslaMate and Pellets panel
-returning "Plugin not registered" for 2.5 days (the plugin background-installer unlinking
-bundled backends on a read-only root filesystem). The guard `GF_PLUGINS_PREINSTALL_DISABLED=true`
-(helmrelease.yaml, env block) now closes it; **this plan therefore treats the restart as the real
-change under test and makes section 4 prove the guard held**, rather than trusting it.
+**Verdict.** `risk: medium` (was low), `capability_change: true` (was false), `rollback_class: backup-restore` (was
+git-revert), no reboot, ~40 min. Execution class derives to HUMAN-GATED: needs an attended-or-nightly slot WITH an explicit
+operator GO. It cannot be AUTO-NIGHT or SD-10 pre-approved.
 
-Two restart side effects to expect and not misread as regressions:
-- the `download-dashboards` init container re-fetches the 11 TeslaMate dashboards (+ flux/k8s/nginx) from
-  `raw.githubusercontent.com` **unpinned master** on every start, so dashboard JSON can differ from what
-  ran before; compare COUNTS and datasource wiring, not bytes;
-- the pod re-reads `secret/elasticsearch-es-elastic-user` (finding F-03d0843d: Grafana only picks up a
-  rotated ES password on restart) - if that secret rotated since the last start, the Elasticsearch
-  datasource gate below is where it would show.
-
-**Verdict.** `risk: low`, `rollback_class: git-revert`, `capability_change: false`, no reboot. The hold was
-appropriate (the policy forced this measurement) and the check comes back negative: a "false-positive
-hold" in the sense that the hazard named in the deny rule is absent. Whether it may run AUTO-NIGHT is in
-section 6.
-
-Not verified from here: the 14.1.0 `files/repository-sync.py` was read only to confirm it is mounted solely
-under the disabled sidecar; it is not exercised by this plan.
+**Data at stake if the sqlite DB is lost (measured via API 2026-10-30):** 2 users, 1 service account, 0 annotations, 0 public
+dashboards, 0 library elements, 0 alert rules. All 72 dashboards, all 7 datasources and the Authentik SSO config come from git
+or the sidecar. So the worst-case rollback (fresh DB) costs the service account and its token(s), the two user records
+(re-created on next SSO login) and per-user preferences/stars. Record the service account's NAME in 2.9 so its consumer can be
+re-issued if that case is ever hit.
 
 ## 2) Pre-checks
 
@@ -166,42 +171,66 @@ Then, in order (do not start Step 3 unless each prints the stated result):
 ```bash
 # 2.1 Refresh the local helm index (premise repo-cache-sees-target depends on it) and confirm the target.
 helm repo update grafana-community
-helm show chart grafana-community/grafana --version 14.1.0 | grep -E '^(version|appVersion):'
-# expect exactly: appVersion: 13.2.4 / version: 14.1.0   (anything else: STOP, plan is void)
+helm show chart grafana-community/grafana --version 14.2.0 | grep -E '^(version|appVersion):'
+# expect exactly: appVersion: 13.3.0 / version: 14.2.0   (anything else: STOP, plan is void)
 
-# 2.2 Chart age gate (repo convention: no <48h-old chart unattended). 14.1.0 was created 2026-10-26T09:49Z.
+# 2.2 Newer target? If upstream shipped a chart NEWER than 14.2.0, this plan is DRIFTED: STOP and refresh, do not roll a stale target.
 python3 - <<'PY'
-import datetime as d
-t=d.datetime(2026,10,26,9,49,tzinfo=d.timezone.utc); age=(d.datetime.now(d.timezone.utc)-t).total_seconds()/3600
-print("chart age h:",round(age,1)); print("AGE_OK" if age>=48 else "AGE_TOO_YOUNG - defer to a later night")
+import subprocess,json
+out=subprocess.check_output(["helm","search","repo","grafana-community/grafana","--versions","-o","json"],text=True)
+v=[x["version"] for x in json.loads(out)][:3]; print("newest charts:",v)
+print("TARGET_IS_NEWEST" if v[0]=="14.2.0" else "NEWER_CHART_EXISTS - STOP, refresh the plan (or consciously stay on 14.2.0 and say why)")
 PY
 
-# 2.3 No Renovate PR for grafana is open that would race the hand-edit.
+# 2.3 Renovate PR handling (this is the check that STOPped nightly:2026-10-29, now corrected). PR #374 exists ON PURPOSE.
 gh pr list --state open --json number,title --jq '.[]|select(.title|test("grafana";"i"))|[.number,.title]|@tsv'
-# expect: no output. If a PR for 14.1.0 exists, close it (comment: superseded by plan grafana-14.1.0) before Step 3.
+# PASS = no output, OR exactly one line: 374<TAB>feat(helm): update grafana ( 14.0.1 → 14.2.0 )
+# STOP = any other grafana PR, or #374 proposing a target other than 14.2.0 (retargeted again: refresh the plan first).
+# #374's diff is exactly the one `version:` line (checked 2026-10-30). Step 3 hand-edits that same line plus a history
+# comment; Renovate autocloses #374 once main carries 14.2.0 (what it did for 14.0.1, commit 2259f141). Do NOT merge #374
+# AND hand-edit. Do NOT close #374 first (Renovate would reopen it against the next push).
 
 # 2.4 Release is Ready, no in-flight reconcile, pod healthy with zero restarts.
 flux get helmrelease grafana -n monitoring
 kubectl get pods -n monitoring -l app.kubernetes.io/name=grafana
-kubectl get pod -n monitoring -l app.kubernetes.io/name=grafana -o jsonpath='{.items[0].status.containerStatuses[*].restartCount}{"\n"}'
+kubectl get pod -n monitoring -l app.kubernetes.io/name=grafana -o jsonpath='{.items[0].status.containerStatuses[*].restartCount}{"\n"}'   # 0 0 0
 
-# 2.5 Safety net: grafana-config has a backup < 26 h old (rollback needs none, the PVC is untouched; this is the
-#     belt for the unexpected). Live 2026-10-26: lastBackupAt 2026-10-25T23:04:53Z.
-kubectl get volume grafana-config -n storage -o jsonpath='{.status.lastBackupAt}{"\n"}'
+# 2.5 BACKUP GATE (rollback class backup-restore). The nightly Longhorn job runs 23:00 (cluster time) so a 03:30 window sees
+#     a backup ~4.5 h old; on any other slot take a fresh one first (docs/sops/backup.md "Manual Backup": single-volume backup
+#     from the Longhorn UI, or `kubectl create job --from=cronjob/daily-backup-all-volumes ...` which backs up ALL volumes - heavy).
+kubectl get backups.longhorn.io -n storage -l backup-volume=grafana-config --sort-by=.metadata.creationTimestamp \
+  -o custom-columns=NAME:.metadata.name,STATE:.status.state,CREATED:.metadata.creationTimestamp | tail -3
 python3 - <<'PY'
-import subprocess,datetime as d
-s=subprocess.check_output(["kubectl","get","volume","grafana-config","-n","storage","-o","jsonpath={.status.lastBackupAt}"],text=True).strip()
-age=(d.datetime.now(d.timezone.utc)-d.datetime.fromisoformat(s.replace("Z","+00:00"))).total_seconds()/3600
-print("BACKUP_OK" if age<26 else "BACKUP_STALE %.1fh"%age)
+import subprocess,json,datetime as d
+o=json.loads(subprocess.check_output(["kubectl","get","backups.longhorn.io","-n","storage","-l","backup-volume=grafana-config","-o","json"],text=True))
+ok=[b for b in o["items"] if b.get("status",{}).get("state")=="Completed"]
+ok.sort(key=lambda b:b["metadata"]["creationTimestamp"])
+if not ok: print("BACKUP_NONE"); raise SystemExit
+t=d.datetime.fromisoformat(ok[-1]["metadata"]["creationTimestamp"].replace("Z","+00:00"))
+age=(d.datetime.now(d.timezone.utc)-t).total_seconds()/3600
+print("newest Completed backup:",ok[-1]["metadata"]["name"],"age %.1f h"%age); print("BACKUP_OK" if age<6 else "BACKUP_TOO_OLD - take a fresh backup, re-run")
 PY
+# Snapshot half of the gate: create a NAMED pre-change snapshot and see it listed (Longhorn Snapshot CR; one apply, executor-owned).
+cat <<'YAML' | kubectl apply -f -
+apiVersion: longhorn.io/v1beta2
+kind: Snapshot
+metadata:
+  name: grafana-pre-14-2-0
+  namespace: storage
+spec:
+  volume: grafana-config
+  createSnapshot: true
+YAML
+kubectl get snapshots.longhorn.io -n storage grafana-pre-14-2-0 -o jsonpath='{.status.readyToUse} {.status.creationTime}{"\n"}'   # expect: true <timestamp>
+# (Caveat: the Snapshot manifest's fields (spec.volume, spec.createSnapshot) were checked against the live CRD schema
+#  (snapshots.longhorn.io v1beta2) but NOT applied during planning - read-only session.
+#  If the apply is rejected, take the snapshot from the Longhorn UI (Volume grafana-config -> Take Snapshot, name it
+#  grafana-pre-14-2-0) and treat the UI listing as the gate.)
 
-# 2.6 Same-night interference: Prometheus is this window's instrument. kube-prometheus-stack (PR #428,
-#     92.11.1 -> 92.13.1) is AUTO-lane, so Step 0 of THIS window may apply it BEFORE this plan runs.
-#     HONEST SCOPE: this settle check is mostly a TIMING mitigation - it cannot prevent kps from landing earlier in the
-#     same window. The REAL control is that the 2.7 baselines are taken AFTER Step 0 (so a kps-driven change to the
-#     dashboard count or the Prometheus pod cannot be mistaken for a Grafana regression).
-kubectl get helmrelease kube-prometheus-stack -n monitoring -o jsonpath='{.status.history[0].chartVersion} {.status.history[0].status} {.status.history[0].lastDeployed}{"\n"}{.status.history[1].chartVersion}{"\n"}'
-kubectl get pod prometheus-kube-prometheus-stack-0 -n monitoring -o jsonpath='{.status.containerStatuses[*].ready} startTime={.status.startTime}{"\n"}'
+# 2.6 Same-night interference: Prometheus is this window's instrument. kube-prometheus-stack (PR #428-class bumps) is AUTO-lane,
+#     so Step 0 of THIS window may apply one BEFORE this plan runs. HONEST SCOPE: this settle check is mostly a TIMING mitigation;
+#     the REAL control is that the 2.7 baselines are taken AFTER Step 0 (a kps-driven change to the dashboard count or the
+#     Prometheus pod cannot then be mistaken for a Grafana regression).
 python3 - <<'PY'
 import subprocess,json,datetime as d
 def k(*a): return subprocess.check_output(["kubectl",*a],text=True)
@@ -214,120 +243,153 @@ ok=(h["status"]=="deployed") and age>30 and allready
 print("kps",h["chartVersion"],h["status"],"deployed %.0f min ago"%age,"| prometheus containers ready:",allready)
 print("KPS_SETTLED" if ok else "KPS_NOT_SETTLED - wait 30 min after lastDeployed or defer one night")
 PY
-# PASS rule (computable): prints KPS_SETTLED = history[0].status deployed AND lastDeployed older than 30 min (a kps that was
-# not touched tonight passes by age alone) AND every container of pod prometheus-kube-prometheus-stack-0 ready. A real
-# StatefulSet/Prometheus CR name here is `prometheus-kube-prometheus-stack` / `kube-prometheus-stack` (verified live 2026-10-26;
-# a wrong pod name makes `kubectl get pod` exit non-zero and the script raise, i.e. the check fails closed, not open).
-# Live example 2026-10-26: 92.11.1 deployed 02:33Z, previous 92.11.0, pod containers true true -> KPS_SETTLED once > 30 min old.
-# kps ALSO moves the dashboard count (it ships grafana_dashboard ConfigMaps via the sidecar): baselines below are mandatory.
+# PASS = KPS_SETTLED (history[0].status deployed AND lastDeployed > 30 min ago AND every container of
+# pod prometheus-kube-prometheus-stack-0 ready; an untouched kps passes by age alone). A wrong pod name makes kubectl exit
+# non-zero and the script raise: fails closed. Live 2026-10-30 not re-measured here beyond the 2026-10-26 rehearsal of this block.
 
-# 2.7 BASELINES - taken AFTER Step 0 of this window, never carried over from an earlier day (record all three; section 4 compares against them, hard-coded numbers below are 2026-10-26 values).
+# 2.7 BASELINES - taken AFTER Step 0 of this window, never carried over from an earlier day (record all three).
 U=$(kubectl get secret grafana-admin-secret -n monitoring -o jsonpath='{.data.admin-user}' | base64 -d)
 PW=$(kubectl get secret grafana-admin-secret -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d)
 kubectl port-forward -n monitoring svc/grafana 33001:80 >/dev/null 2>&1 &
 PF=$!; sleep 5
 echo "BASE_PLUGINS=$(curl -s -u "$U:$PW" 'http://127.0.0.1:33001/api/plugins?embedded=0&type=datasource' | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))')"   # 2026-10-26: 18
 echo "BASE_DASH=$(curl -s -u "$U:$PW" 'http://127.0.0.1:33001/api/search?type=dash-db&limit=1000' | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))')"       # 2026-10-26: 72
+curl -s -u "$U:$PW" 'http://127.0.0.1:33001/api/serviceaccounts/search?perpage=100' | python3 -c 'import sys,json; print("SERVICE_ACCOUNTS:",[s["name"] for s in json.load(sys.stdin)["serviceAccounts"]])'   # 2.9 record
 kill $PF; wait $PF 2>/dev/null
 P=/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query
 echo "BASE_PROMDS=$(kubectl get --raw "$P?query=count%28grafana_plugin_build_info%7Bplugin_type%3D%22datasource%22%7D%29" | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["result"][0]["value"][1])')"   # 2026-10-26: 13
 # GATE: BASE_PLUGINS must be 18. If it is already lower, Grafana is ALREADY degraded (the 09-12 signature is 13):
 # STOP and fix that first - do not roll on top of it, the verification would "pass" against a broken baseline.
-# Also confirm the Authentik SSO button is the baseline: the verification script asserts it.
 
-# 2.8 Rehearse the gate script on the CURRENT state. FIRST save it: run the `cat > "$S/grafana-verify.sh"` heredoc from
+# 2.8 PRE-FLIGHT the candidate image OFF the live PVC (docs/sops/grafana-image-changes.md section 8 B, distroless form).
+#     A throwaway pod mounts NO grafana-config, so what it reports is exactly what the IMAGE ships. Run a 13.2.4 CONTROL
+#     first: it must report the same number as the live baseline (proves the method counts what the live pod counts).
+ADMINPW=$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')
+for TAG in 13.2.4 13.3.0; do
+  kubectl run grafana-preflight-${TAG//./-} -n monitoring --image=docker.io/grafana/grafana:${TAG}-distroless --restart=Never \
+    --env=GF_PLUGINS_PREINSTALL_DISABLED=true --env=GF_SECURITY_ADMIN_PASSWORD="$ADMINPW" --port=3000
+  kubectl wait pod/grafana-preflight-${TAG//./-} -n monitoring --for=condition=Ready --timeout=180s
+  kubectl port-forward -n monitoring pod/grafana-preflight-${TAG//./-} 33002:3000 >/dev/null 2>&1 &
+  PF=$!; sleep 5
+  echo "PREFLIGHT $TAG datasource plugins: $(curl -s -u admin:"$ADMINPW" 'http://127.0.0.1:33002/api/plugins?embedded=0&type=datasource' | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))')"
+  kill $PF; wait $PF 2>/dev/null
+  kubectl delete pod grafana-preflight-${TAG//./-} -n monitoring --wait=true
+done
+# PASS = the 13.2.4 control equals BASE_PLUGINS (18) AND the 13.3.0 number is >= 18. Record the 13.3.0 number as PREFLIGHT_PLUGINS:
+# section 4 requires the live pod to match it exactly. A 13.3.0 number BELOW 18 = it ships fewer datasource backends: STOP.
+# (The preflight loop was NOT executed during planning - read-only session; it follows SOP section 8 B.)
+# (The pods carry label run=..., not app.kubernetes.io/name=grafana, so they cannot be picked up by any grafana selector;
+#  they run unprivileged with a throwaway admin password that is never stored.)
+
+# 2.9 Rehearse the gate script on the CURRENT state. FIRST save it: run the `cat > "$S/grafana-verify.sh"` heredoc from
 #     section 4 now (it is only a file write). Then, with the 2.7 baselines:
-#       EXPECT_CHART=14.0.1 BASE_PLUGINS=.. BASE_DASH=.. BASE_PROMDS=.. bash "$S/grafana-verify.sh"
+#       EXPECT_CHART=14.0.1 EXPECT_APP=13.2.4 MIGRATIONS=none BASE_PLUGINS=.. BASE_DASH=.. BASE_PROMDS=.. bash "$S/grafana-verify.sh"
 #     It must print ALL GATES PASS. If not, the pre-state is already degraded - STOP, do not edit anything.
 ```
 
 ## 3) Steps (GitOps)
 
-No alert silence needed: no Grafana-specific alert rule exists in the repo (`grep -rn "alert:.*[Gg]rafana" kubernetes`
-= none) and the outage is ~1-2 min; `KubeDeploymentReplicasMismatch`-class alerts fire after 15 min.
+An alert silence is not needed: no Grafana-specific alert rule exists in the repo (`grep -rn "alert:.*[Gg]rafana" kubernetes` = none)
+and the outage is ~1-3 min. Expect a longer first boot than a patch (schema migration + 4 migrators + init-container dashboard fetch).
 
-1. Edit the chart pin in `kubernetes/apps/monitoring/grafana/app/helmrelease.yaml`. Dry-tested on a scratch
-   copy on macOS (BSD sed); the resulting diff is exactly:
+1. Edit the chart pin in `kubernetes/apps/monitoring/grafana/app/helmrelease.yaml`. Dry-tested on a scratch copy on macOS (BSD sed)
+   with the new target; the resulting diff is exactly:
    ```
    11c11
    <       version: 14.0.1
    ---
-   >       version: 14.1.0
+   >       version: 14.2.0
    ```
    ```bash
-   sed -i '' 's/^\(      version: \)14\.0\.1$/\114.1.0/' kubernetes/apps/monitoring/grafana/app/helmrelease.yaml
+   sed -i '' 's/^\(      version: \)14\.0\.1$/\114.2.0/' kubernetes/apps/monitoring/grafana/app/helmrelease.yaml
    git diff --stat kubernetes/apps/monitoring/grafana/app/helmrelease.yaml    # expect: 1 file, 1 insertion, 1 deletion
    ```
-2. With the Edit tool, add this line to the dated history block, directly above `    deploymentStrategy:` (do not delete any prior history, it is evidence for the next planner):
+2. With the Edit tool, add this to the dated history block, directly above `    deploymentStrategy:` (keep all prior history):
    ```
-       # 2026-10-xx: chart 14.1.0 - appVersion UNCHANGED at 13.2.4 (index + `helm show chart` + rendered
-       # app.kubernetes.io/version), render diff vs 14.0.1 under OUR values = helm.sh/chart label only.
-       # Adds an opt-in Git Sync sidecar (sidecar.repositories.enabled, default false) that we do NOT enable.
-       # The pod still restarts once (label is in the pod template): re-run the datasource gate after.
-       # Plan: grafana-14.1.0. Finding: F-c01c08c6.
+       # 2026-11-xx: chart 14.2.0 - Grafana 13.2.4 -> 13.3.0 (APPLICATION minor: sqlite schema migrates forward on first
+       # boot; rollback class backup-restore, NOT git-revert). Values/templates identical to 14.1.0; render diff under OUR
+       # values = chart label + app version label + image tag. Pre-change Longhorn snapshot grafana-pre-14-2-0 + backup.
+       # Plan: grafana-14.1.0 (id kept, target moved). PR #374. Findings: F-c01c08c6, F-482f421e.
    ```
-   (Replace `xx` with the real day.) Then run `git diff` and confirm only the version line and these comment lines changed.
+   (Replace `xx`.) Run `git diff`; confirm only the version line and these comment lines changed.
 3. Commit, VERIFY THE SUBJECT, push (shared worktree: `--only` with explicit path; never `git add -A`):
    ```bash
    git commit --only kubernetes/apps/monitoring/grafana/app/helmrelease.yaml \
-     -m "chore(grafana): chart 14.0.1 -> 14.1.0 (appVersion 13.2.4 unchanged; opt-in Git Sync sidecar left off) [plan grafana-14.1.0, finding F-c01c08c6]"
-   git log -1 --format=%s     # the subject must be exactly the line above; if another session's message landed, amend BEFORE pushing
+     -m "chore(grafana): chart 14.0.1 -> 14.2.0 (Grafana 13.2.4 -> 13.3.0, forward-only sqlite migration) [plan grafana-14.1.0, PR #374, findings F-c01c08c6 F-482f421e]"
+   git log -1 --format=%s     # must be exactly the line above; if another session's message landed, amend BEFORE pushing
    git show --stat HEAD       # exactly one file: the helmrelease.yaml
    git push
    ```
    (Run the commit in a shell where `SWEEP_PG_DSN` is NOT sourced - it breaks the pre-commit gate.)
-4. Let the push webhook reconcile Flux. Confirm the HelmRelease values/chart landed before concluding anything:
+4. Let the push webhook reconcile Flux, then confirm the pin landed before concluding anything:
    ```bash
-   kubectl get helmrelease grafana -n monitoring -o jsonpath='{.spec.chart.spec.version}{"\n"}'   # expect 14.1.0
+   kubectl get helmrelease grafana -n monitoring -o jsonpath='{.spec.chart.spec.version}{"\n"}'   # expect 14.2.0
    ```
    If it still shows 14.0.1 after 10 min (webhook slow, HelmRepository index interval), and only then:
    `flux reconcile helmrelease grafana -n monitoring --with-source`.
-5. Watch the single `Recreate` roll (single replica, RWO PVC):
+5. Watch the single `Recreate` roll (single replica, RWO PVC) and the first-boot log:
    ```bash
-   kubectl rollout status deployment/grafana -n monitoring --timeout=300s
+   kubectl rollout status deployment/grafana -n monitoring --timeout=420s
    kubectl get pods -n monitoring -l app.kubernetes.io/name=grafana     # NEW pod name, 3/3, restarts 0
    ```
-   `rollout status` can green-light the old generation (docs: feedback rollout-status-old-generation): section 4
-   independently asserts the new pod via chart version in HR history, `grafana_build_info` and pod age.
+   `rollout status` can green-light the old generation: section 4 independently asserts the new pod via image tag,
+   `/api/health` version and the pod's `helm.sh/chart` label.
 6. **Wait 90 s after the pod is Ready** (Prometheus scrape interval) before running section 4.
+7. After a green section 4, confirm Renovate closed #374 (it should, within its next run): `gh pr view 374 --json state --jq .state`
+   -> `CLOSED`. If it is still OPEN with title 14.2.0 after the next Renovate run, close it with a comment pointing at the bump commit.
+   Delete snapshot `grafana-pre-14-2-0` only after the soak below (it is the fastest rollback).
 
 ## 4) Verification
 
-Floor (shape): HR Ready at 14.1.0, pod 3/3 on the new generation. The CONTENTS gates are what matter and
-are all in one script so none can be skipped. Save and run it (it needs `kubectl`, `curl`, `python3`; it
-port-forwards `svc/grafana` to 33001 itself and exits non-zero on any FAIL):
+Floor (shape): HR Ready at 14.2.0, pod 3/3 on the new generation. The CONTENTS gates are what matter and are all in one
+script so none can be skipped. Save and run it (needs `kubectl`, `curl`, `python3`; it port-forwards `svc/grafana` to 33001
+itself and exits non-zero on any FAIL):
 
 ```bash
 S=${TMPDIR:-/tmp}; cat > "$S/grafana-verify.sh" <<'EOF'
 #!/usr/bin/env bash
-# usage: EXPECT_CHART=14.1.0 BASE_PLUGINS=18 BASE_DASH=72 BASE_PROMDS=13 bash verify.sh
+# usage (post-change):
+#   EXPECT_CHART=14.2.0 EXPECT_APP=13.3.0 MIGRATIONS=expect BASE_PLUGINS=18 BASE_DASH=72 BASE_PROMDS=13 PREFLIGHT_PLUGINS=<2.8> bash grafana-verify.sh
+# usage (rehearsal on the CURRENT state):
+#   EXPECT_CHART=14.0.1 EXPECT_APP=13.2.4 MIGRATIONS=none BASE_PLUGINS=18 BASE_DASH=72 BASE_PROMDS=13 bash grafana-verify.sh
 fail=0
 ok()  { echo "PASS  $1"; }
 bad() { echo "FAIL  $1"; fail=1; }
-: "${EXPECT_CHART:?}" "${BASE_PLUGINS:?}" "${BASE_DASH:?}" "${BASE_PROMDS:?}"
+: "${EXPECT_CHART:?}" "${EXPECT_APP:?}" "${MIGRATIONS:?none|expect}" "${BASE_PLUGINS:?}" "${BASE_DASH:?}" "${BASE_PROMDS:?}"
 
-# V1 release + image identity
+# V1 release, image and pod identity (grafana_build_info alone cannot tell old pod from new when the app is unchanged;
+# on THIS bump the app does change, so /api/health + image tag discriminate, and the chart label covers the rest)
 c=$(kubectl get helmrelease grafana -n monitoring -o jsonpath='{.status.history[0].chartVersion} {.status.conditions[?(@.type=="Ready")].status}')
 [ "$c" = "$EXPECT_CHART True" ] && ok "HR chart/Ready: $c" || bad "HR chart/Ready: got '$c' want '$EXPECT_CHART True'"
 img=$(kubectl get deploy grafana -n monitoring -o jsonpath='{.spec.template.spec.containers[?(@.name=="grafana")].image}')
-[ "$img" = "docker.io/grafana/grafana:13.2.4-distroless" ] && ok "image $img" || bad "image drifted: $img"
-names=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=grafana -o jsonpath='{.items[*].spec.containers[*].name}')
-[ "$names" = "grafana-sc-dashboard grafana-sc-datasources grafana" ] && ok "containers: $names (no sc-repositories sidecar)" || bad "container set changed: '$names'"
+[ "$img" = "docker.io/grafana/grafana:$EXPECT_APP-distroless" ] && ok "image $img" || bad "image is '$img' want docker.io/grafana/grafana:$EXPECT_APP-distroless"
 lbl=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=grafana -o jsonpath='{.items[*].metadata.labels.helm\.sh/chart}')
 [ "$lbl" = "grafana-$EXPECT_CHART" ] && ok "pod chart label $lbl (the measured pod is the new generation)" || bad "pod chart label '$lbl' want grafana-$EXPECT_CHART (old pod still serving, or two pods)"
+names=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=grafana -o jsonpath='{.items[*].spec.containers[*].name}')
+[ "$names" = "grafana-sc-dashboard grafana-sc-datasources grafana" ] && ok "containers: $names (no sc-repositories sidecar)" || bad "container set changed: '$names'"
 rdy=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=grafana -o jsonpath='{.items[*].status.containerStatuses[*].ready}')
 [ "$rdy" = "true true true" ] && ok "3/3 ready" || bad "readiness: '$rdy'"
+rc=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=grafana -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}')
+case "$rc" in "0 0 0") ok "restartCount 0 0 0";; *) bad "restartCount '$rc' (crash-looping or restarted after roll)";; esac
 
-# V2 the load-bearing preinstall guard survived chart+render
+# V2 the load-bearing preinstall guard survived chart+render+app change
 pv=$(kubectl get deploy grafana -n monitoring -o jsonpath='{.spec.template.spec.containers[?(@.name=="grafana")].env[?(@.name=="GF_PLUGINS_PREINSTALL_DISABLED")].value}')
 [ "$pv" = "true" ] && ok "GF_PLUGINS_PREINSTALL_DISABLED=true" || bad "GF_PLUGINS_PREINSTALL_DISABLED='$pv'"
 kubectl get cm grafana -n monitoring -o jsonpath='{.data.grafana\.ini}' | grep -q '^preinstall_auto_update = false' && ok "ini preinstall_auto_update=false" || bad "ini preinstall_auto_update missing"
 
-# V3 no schema migration performed, no plugin-killer messages (log must be NON-empty: 4 migrators print performed=0)
+# V3 migrations + plugin-installer errors (log must be NON-empty: every migrator prints one 'migrations completed' line)
 L=$(kubectl logs -n monitoring deploy/grafana -c grafana)
 nz=$(printf '%s\n' "$L" | grep -c 'migrations completed.*performed=[1-9]')
 z=$(printf '%s\n' "$L" | grep -c 'migrations completed.*performed=0')
-{ [ "$nz" = 0 ] && [ "$z" -ge 4 ]; } && ok "migrations: performed=0 x$z, nonzero x$nz" || bad "migrations: performed=0 x$z, nonzero x$nz (need 0 and >=4)"
+tot=$(printf '%s\n' "$L" | grep -c 'migrations completed')
+errm=$(printf '%s\n' "$L" | grep -i -c -e 'level=error.*migrat' -e 'migrat.*level=error' -e 'migration failed')
+if [ "$MIGRATIONS" = none ]; then
+  { [ "$nz" = 0 ] && [ "$z" -ge 4 ]; } && ok "migrations: performed=0 x$z, nonzero x$nz" || bad "migrations: performed=0 x$z, nonzero x$nz (need 0 and >=4)"
+else
+  echo "INFO  migrations on this boot: lines=$tot performed=0 x$z performed>0 x$nz  (RECORD these numbers in the window report)"
+  { [ "$tot" -ge 4 ] && [ "$errm" = 0 ]; } && ok "migrations ran to completion on all migrators, no migration errors" || bad "migrations incomplete or errored: lines=$tot errors=$errm"
+fi
+printf '%s\n' "$L" | grep -q 'Unified storage migrations completed successfully' && ok "unified storage migrations completed" || bad "no 'Unified storage migrations completed successfully' line"
 ro=$(printf '%s\n' "$L" | grep -i -c -e 'read-only file system' -e 'unlinkat')
 [ "$ro" = 0 ] && ok "no read-only-fs plugin-installer errors" || bad "plugin-installer read-only-fs errors x$ro"
 
@@ -337,8 +399,11 @@ PW=$(kubectl get secret grafana-admin-secret -n monitoring -o jsonpath='{.data.a
 kubectl port-forward -n monitoring svc/grafana 33001:80 >/dev/null 2>&1 &
 PF=$!; sleep 5
 A="http://127.0.0.1:33001"
+hv=$(curl -s -u "$U:$PW" "$A/api/health" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("version"))' 2>/dev/null)
+[ "$hv" = "$EXPECT_APP" ] && ok "/api/health version $hv" || bad "/api/health version '$hv' want $EXPECT_APP"
 np=$(curl -s -u "$U:$PW" "$A/api/plugins?embedded=0&type=datasource" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' 2>/dev/null)
-[ "$np" = "$BASE_PLUGINS" ] && ok "datasource plugins = $np" || bad "datasource plugins = '$np' want $BASE_PLUGINS (13 = the 2026-09-12 preinstall-killer signature)"
+if [ "$MIGRATIONS" = none ]; then want_ok=$([ "$np" = "$BASE_PLUGINS" ] && echo y); else want_ok=$([ -n "$np" ] && [ "$np" -ge "$BASE_PLUGINS" ] 2>/dev/null && { [ -z "$PREFLIGHT_PLUGINS" ] || [ "$np" = "$PREFLIGHT_PLUGINS" ]; } && echo y); fi
+[ "$want_ok" = y ] && ok "datasource plugins = $np (baseline $BASE_PLUGINS, preflight ${PREFLIGHT_PLUGINS:-n/a})" || bad "datasource plugins = '$np' (baseline $BASE_PLUGINS, preflight ${PREFLIGHT_PLUGINS:-n/a}; 13 = the 2026-09-12 preinstall-killer signature)"
 for uid in prometheus elasticsearch influxdb unpoller-influxdb pellets TeslaMate; do
   s=$(curl -s -u "$U:$PW" -X POST "$A/api/datasources/uid/$uid/health" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("status"))' 2>/dev/null)
   [ "$s" = "OK" ] && ok "datasource $uid health OK" || bad "datasource $uid health='$s'"
@@ -357,131 +422,166 @@ ob=$(curl -s -u "$U:$PW" "$A/api/frontend/settings" | python3 -c 'import sys,jso
 [ "$ob" = "Authentik" ] && ok "Authentik SSO button present" || bad "Authentik SSO oauth block: '$ob'"
 kill $PF 2>/dev/null; wait $PF 2>/dev/null
 
-# V5 Prometheus sees the new pod (scrape interval lag: caller waits >=75 s after pod Ready)
+# V5 Prometheus sees the new pod (scrape interval lag: caller waits >=90 s after pod Ready)
 P=/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query
 pq() { kubectl get --raw "$P?query=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$1")" | python3 -c 'import sys,json; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "EMPTY")'; }
 u=$(pq 'up{job="grafana"}'); [ "$u" = "1" ] && ok "up{job=grafana}=1" || bad "up{job=grafana}='$u'"
 bv=$(kubectl get --raw "$P?query=grafana_build_info" | python3 -c 'import sys,json; r=json.load(sys.stdin)["data"]["result"]; print(",".join(sorted(x["metric"]["version"] for x in r)))')
-[ "$bv" = "13.2.4" ] && ok "grafana_build_info version=$bv" || bad "grafana_build_info versions='$bv'"
-pm=$(pq 'count(grafana_plugin_build_info{plugin_type="datasource"})'); [ "$pm" = "$BASE_PROMDS" ] && ok "datasource plugins in metrics=$pm" || bad "datasource plugins in metrics='$pm' want $BASE_PROMDS"
+[ "$bv" = "$EXPECT_APP" ] && ok "grafana_build_info version=$bv (single series = old pod's series gone)" || bad "grafana_build_info versions='$bv' want exactly $EXPECT_APP"
+pm=$(pq 'count(grafana_plugin_build_info{plugin_type="datasource"})')
+if [ "$MIGRATIONS" = none ]; then [ "$pm" = "$BASE_PROMDS" ] && ok "datasource plugins in metrics=$pm" || bad "datasource plugins in metrics='$pm' want $BASE_PROMDS"
+else case "$pm" in ''|EMPTY|*[!0-9]*) bad "datasource plugins in metrics='$pm'";; *) [ "$pm" -ge "$BASE_PROMDS" ] && ok "datasource plugins in metrics=$pm (>= $BASE_PROMDS)" || bad "datasource plugins in metrics=$pm below baseline $BASE_PROMDS";; esac; fi
 sd=$(pq 'grafana_stat_totals_dashboard'); [ "$sd" = "$BASE_DASH" ] && ok "grafana_stat_totals_dashboard=$sd" || bad "grafana_stat_totals_dashboard='$sd' want $BASE_DASH"
 echo; [ $fail = 0 ] && echo "ALL GATES PASS" || echo "GATE FAILURE - see FAIL lines (rollback per section 5)"
 exit $fail
 EOF
-EXPECT_CHART=14.1.0 BASE_PLUGINS=<from 2.7> BASE_DASH=<from 2.7> BASE_PROMDS=<from 2.7> bash "$S/grafana-verify.sh"
+EXPECT_CHART=14.2.0 EXPECT_APP=13.3.0 MIGRATIONS=expect BASE_PLUGINS=<2.7> BASE_DASH=<2.7> BASE_PROMDS=<2.7> PREFLIGHT_PLUGINS=<2.8> bash "$S/grafana-verify.sh"
 ```
 
-The script was rehearsed 2026-10-26 against the LIVE pre-change state with `EXPECT_CHART=14.0.1`
-(`ALL GATES PASS`) and with deliberately wrong expectations
-(`EXPECT_CHART=14.1.0 BASE_PLUGINS=19`) where it printed exactly the two expected `FAIL` lines
-and exited 1 - so the gates are known to be able to fail. One bug found and fixed in rehearsal:
-`grep -v 'performed=0'` over the migration log reads 1, not 0, on a healthy pod, because Grafana
-prints `Unified storage migrations completed successfully` (no `performed=`); the gate therefore counts
-`performed=[1-9]` (must be 0) AND `performed=0` (must be >= 4, so an empty log cannot pass).
+Rehearsal 2026-10-30 against the LIVE pre-change state (read-only): `EXPECT_CHART=14.0.1 EXPECT_APP=13.2.4 MIGRATIONS=none` printed
+`ALL GATES PASS`. With the post-change expectations (`EXPECT_CHART=14.2.0 EXPECT_APP=13.3.0 MIGRATIONS=expect`) against the
+still-old pod it printed exactly the identity FAILs (`HR chart/Ready`, `image`, `pod chart label`, `/api/health version`,
+`grafana_build_info`), so the gates that prove "this is the new pod running the new app" can fail. The migration gate in
+`expect` mode cannot be rehearsed pre-change (the old pod's log shows `performed=0 x4`, which it accepts as completion);
+it is meaningful only through the identity gates plus the `INFO` line below, and that limitation is stated, not hidden.
+Bugs found earlier and kept fixed: `grep -v 'performed=0'` reads 1 on a healthy pod (Grafana also prints `Unified storage
+migrations completed successfully`), so the `none` gate counts `performed=[1-9]` (must be 0) AND `performed=0` (must be >= 4).
 
-Negative control for the absence gate (log must be able to print non-zero through the IDENTICAL command). Replayed
-2026-10-26 on a synthetic line modelled on the quoted 2026-09-12 failure; the same pipeline over a clean line prints 0:
+Negative control for the absence gate (the log must be able to print non-zero through the IDENTICAL command; replayed
+2026-10-26 on a synthetic line modelled on the quoted 2026-09-12 failure, same pipeline over a clean line prints 0):
 ```bash
 printf 'logger=plugin.backgroundinstaller level=error msg="unlinkat /usr/share/grafana/data/plugins-bundled/postgres: read-only file system"\n' | grep -i -c -e 'read-only file system' -e 'unlinkat'   # prints 1
 printf 'logger=settings level=info msg="ok"\n' | grep -i -c -e 'read-only file system' -e 'unlinkat'                                                  # prints 0
 ```
-(Also note the `grep -c` over a captured `$L` variable in the script is the same grep; an empty `$L` would be caught by the
-`performed=0 >= 4` gate, so an unreadable log cannot make this gate pass vacuously.)
 
 What each gate guards against, and what its failure prints:
 
 | Gate | Failure it guards against | Failure output |
 |---|---|---|
-| HR `chartVersion Ready` = `14.1.0 True` | Flux still on 14.0.1 / remediation rolled back | `FAIL HR chart/Ready: got '14.0.1 True'` |
-| image `13.2.4-distroless` | tag drift - the premise of the git-revert class | `FAIL image drifted: ...` |
-| pod label `helm.sh/chart` == `grafana-$EXPECT_CHART` | measuring the OLD pod (`grafana_build_info` reads 13.2.4 on both generations, so only this and HR history discriminate) | `FAIL pod chart label 'grafana-14.0.1' want grafana-14.1.0` |
-| containers == 3 named | the new `sc-repositories` sidecar appearing (feature switched on by accident) | `FAIL container set changed` |
-| `GF_PLUGINS_PREINSTALL_DISABLED=true` env + ini `preinstall_auto_update = false` | chart render dropping/renaming the guard - recreates the 2026-09-12 outage on the NEXT restart | `FAIL GF_PLUGINS_PREINSTALL_DISABLED=''` |
-| log: `performed=[1-9]` count 0, `performed=0` count >= 4 | any sqlite migration (rollback class would silently become backup-restore) | `FAIL migrations: ... nonzero x1` |
+| HR `chartVersion Ready` = `14.2.0 True` | Flux still on 14.0.1 / remediation rolled back | `FAIL HR chart/Ready: got '14.0.1 True'` |
+| image `13.3.0-distroless` | tag drift / wrong generation | `FAIL image is '...13.2.4-distroless' want ...13.3.0-distroless` |
+| pod label `helm.sh/chart` == `grafana-14.2.0` (all matching pods) | measuring the OLD pod, or two pods | `FAIL pod chart label 'grafana-14.0.1' want grafana-14.2.0` |
+| `/api/health` version == `13.3.0` and `grafana_build_info` == exactly `13.3.0` | old binary still serving; stale old-pod series | `FAIL /api/health version '13.2.4' want 13.3.0` |
+| containers == 3 named, 3/3 ready, restartCount `0 0 0` | the new `sc-repositories` sidecar appearing; crash-looping on the migrated DB | `FAIL container set changed` / `FAIL restartCount '0 1 0'` |
+| `GF_PLUGINS_PREINSTALL_DISABLED=true` env + ini `preinstall_auto_update = false` | the guard lost - recreates the 2026-09-12 outage on the NEXT restart | `FAIL GF_PLUGINS_PREINSTALL_DISABLED=''` |
+| log: >= 4 `migrations completed` lines, no migration errors, `Unified storage migrations completed successfully`; `INFO` prints performed counts | schema migration failing half-way / not finishing | `FAIL migrations incomplete or errored: lines=2 errors=1` |
 | log: no `read-only file system` / `unlinkat` (case-insensitive) | the background installer killing bundled backends | `FAIL plugin-installer read-only-fs errors x3` |
-| API `/api/plugins?type=datasource` count == baseline (18) | stripped/killed bundled backends; **13 is the measured 2026-09-12 signature** | `FAIL datasource plugins = '13' want 18` |
+| API `/api/plugins?type=datasource` count >= baseline AND == PREFLIGHT_PLUGINS (the 13.3.0 image measured off-PVC) | stripped/killed bundled backends; **13 is the measured 2026-09-12 signature** | `FAIL datasource plugins = '13' (baseline 18, preflight 18 ...)` |
 | 6 datasource `/health` == `OK` + alertmanager proxy `cluster` key + `/api/ds/query` numeric (`from`/`to` mandatory, else a healthy Grafana returns empty) | dead plugin, bad ES secret (401 after restart), unreachable DB | `FAIL datasource TeslaMate health='ERROR'` |
 | dashboards == baseline (72 on 2026-10-26) | `download-dashboards` init writing 0-byte files on a GitHub fetch failure; sidecar provisioning broken | `FAIL dashboards = '55' want 72` |
-| 7 datasource UIDs exact set | provisioning (`deleteDatasources` + `datasources.yaml`) regression | `FAIL datasource set: ...` |
-| `/api/frontend/settings` oauth name `Authentik` | SSO wiring (F-5a894d0e) lost in the re-render | `FAIL Authentik SSO oauth block: 'None'` |
-| Prometheus `up{job="grafana"}` == 1, `grafana_build_info` version `13.2.4`, datasource-plugin series == baseline (13), `grafana_stat_totals_dashboard` == baseline | ServiceMonitor label/selector lost the target; stale old-pod series | `FAIL up{job=grafana}='EMPTY'` |
+| 7 datasource UIDs exact set | provisioning regression | `FAIL datasource set: ...` |
+| `/api/frontend/settings` oauth name `Authentik` | SSO wiring (F-5a894d0e) lost; 13.3.0 changed OAuth handling | `FAIL Authentik SSO oauth block: 'None'` |
+| Prometheus `up{job="grafana"}` == 1, datasource-plugin series >= baseline, `grafana_stat_totals_dashboard` == baseline | ServiceMonitor lost the target; provisioning count drift | `FAIL up{job=grafana}='EMPTY'` |
 
-CONTENTS ASSERTION: the bundled datasource backends and the provisioned datasources survived the restart -
-measured by `/api/plugins?embedded=0&type=datasource` count and six `/api/datasources/uid/<uid>/health` calls plus a real
-`/api/ds/query` (not a connection test), compared to the section 2.7 baseline (18 plugins, 7 datasources, 72 dashboards on 2026-10-26).
+CONTENTS ASSERTION: the bundled datasource backends and the provisioned datasources survived the app upgrade and restart -
+measured by `/api/plugins?embedded=0&type=datasource` count (compared with the off-PVC pre-flight of the 13.3.0 image, 2.8), six
+`/api/datasources/uid/<uid>/health` calls and a real `/api/ds/query`, against the 2.7 baselines (18 plugins, 7 datasources, 72 dashboards
+on 2026-10-26).
 
-CONTROL: metric up - `up{job="grafana"}` must be 1 on the new pod (verified live 2026-10-26: 1)
-CONTROL: metric grafana_build_info - `version` label must be exactly `13.2.4` (verified live: `release-13.2.4#patched`, version 13.2.4)
-CONTROL: metric grafana_plugin_build_info - `count(...{plugin_type="datasource"})` must equal the section 2.7 baseline (live 2026-10-26: 13)
-CONTROL: metric grafana_stat_totals_dashboard - must equal the section 2.7 dashboard baseline (live: 72)
+CONTROL: metric up - `up{job="grafana"}` must be 1 on the new pod (live: 1)
+CONTROL: metric grafana_build_info - `version` label must be exactly `13.3.0` after the roll (live now: `13.2.4`; the gate can fail today)
+CONTROL: metric grafana_plugin_build_info - `count(...{plugin_type="datasource"})` must be >= the 2.7 baseline (live 2026-10-26: 13)
+CONTROL: metric grafana_stat_totals_dashboard - must equal the 2.7 dashboard baseline (live: 72)
 
-No alertname control: the repo carries no Grafana-specific PrometheusRule, and asserting a generic alert here would be a
-gate that cannot fail on the property under change.
+No alertname control: the repo carries no Grafana-specific PrometheusRule, and asserting a generic alert would be a gate that
+cannot fail on the property under change.
 
-**PASS** = script prints `ALL GATES PASS` (exit 0). Additionally open the UI once as a human-equivalent check
-only if attended: `/login` shows the Authentik button (asserted by the script already) - no manual step is required.
+**PASS** = script prints `ALL GATES PASS` (exit 0) AND the `INFO migrations on this boot:` line is recorded in the window
+report (performed counts are the only direct evidence of whether 13.3.0 migrated the schema; it also settles the open question
+in section 1 for the next planner).
+
+**Soak:** re-run the script once more >= 2 h after the roll (a quiet pod can pass at t+5 min and fail when the first scheduled
+plugin/unified-storage cleanup runs; 13.3.0 enables automatic deleted-resource cleanup by default). Only then delete snapshot
+`grafana-pre-14-2-0`.
 
 ## 5) Rollback
 
-Everything this plan changes is the chart pin (+ a comment). No sqlite migration is crossed in either direction
-(appVersion 13.2.4 -> 13.2.4; the `performed=0` gate proves it from the running pod), no PVC content is rewritten, no
-CRD is installed (the chart has none), so a plain revert is a complete rollback.
+**Rollback class is backup-restore, not git-revert.** The chart pin is trivially revertible; the DATABASE may not be. Grafana does
+not support downgrading across a schema migration, and whether 13.2.4 will boot on a 13.3.0-migrated `grafana.db` is unknown
+(not measurable from here). So the rollback is a ladder; stop at the first rung that passes section 4 with
+`EXPECT_CHART=14.0.1 EXPECT_APP=13.2.4 MIGRATIONS=none`:
 
+**Rung 1 - revert the pin (always first, cheap, and the only rung if no migration happened).**
 ```bash
 git revert --no-edit <bump-commit-sha>
 git log -1 --format=%s        # confirm the revert subject is yours before pushing
 git push
-# if webhook slow after 10 min: flux reconcile helmrelease grafana -n monitoring --with-source
+# webhook slow after 10 min: flux reconcile helmrelease grafana -n monitoring --with-source
 kubectl rollout status deployment/grafana -n monitoring --timeout=300s
 ```
-Confirm back: `kubectl get helmrelease grafana -n monitoring -o jsonpath='{.status.history[0].chartVersion}'` = `14.0.1`,
-then re-run the section 4 script with `EXPECT_CHART=14.0.1` and the same baselines. **The revert is a SECOND pod restart**:
-the preinstall guard and datasource gates apply to it exactly as to the forward roll, so do not skip the re-run.
+Then run the section 4 script with `EXPECT_CHART=14.0.1 EXPECT_APP=13.2.4 MIGRATIONS=none` (the revert is a SECOND restart: the
+preinstall guard and datasource gates apply to it exactly as to the forward roll). If the INFO line from the forward roll showed
+`performed>0 x0` (no migration ran), this rung is a complete rollback and the plan ends here. If the pod boots and every gate
+passes, 13.2.4 tolerated the migrated schema; note it in the report but treat the DB as "newer than the app" and re-plan the
+upgrade rather than leaving it half-way.
 
-Trigger rollback on any `FAIL` that persists after one further 2-minute settle (scrape lag, init-container fetch). Per
-`docs/sops/grafana-image-changes.md` section 4 step 7 do not debug in place: monitoring is the instrument you would debug with.
+**Rung 2 - 13.2.4 crash-loops on the migrated DB (look for a schema/migration error in `kubectl logs ... --previous`).**
+Restore the PRE-CHANGE data under the pinned old app. Grafana's state is tiny (2 users, 1 service account, 0 annotations, 0 alert
+rules) and everything else is provisioned from git, so this rung is a controlled DB reset, not a data-recovery emergency:
+1. Keep the pin reverted (rung 1 commit pushed). Scale to zero without fighting Flux: `flux suspend helmrelease grafana -n monitoring`
+   then `kubectl scale deployment/grafana -n monitoring --replicas=0`; wait for the pod to terminate and the Longhorn volume to detach.
+2. Revert the volume to the pre-change snapshot in place: Longhorn UI (port-forward `svc/longhorn-frontend` in ns `storage`) ->
+   Volume `grafana-config` -> attach in Maintenance mode -> Snapshots -> `grafana-pre-14-2-0` -> Revert -> detach.
+   (Longhorn requires the maintenance-mode attach for a snapshot revert; this UI procedure was NOT rehearsed in planning.)
+3. `flux resume helmrelease grafana -n monitoring` (Flux scales it back to 1 from git) and re-run section 4 with the 14.0.1/13.2.4 values.
 
-If, against the evidence, the PVC itself is damaged (Grafana fails to open `grafana.db`, or dashboards/users vanish):
-restore Longhorn volume `grafana-config` (namespace `storage`) from its latest backup per `docs/sops/backup.md`
-(backup job `storage/daily-backup-all-volumes`; `lastBackupAt` recorded in 2.5). Not expected: no write path to the DB
-differs from a plain restart on the same binary.
+**Rung 3 - the snapshot is unusable (it lives on the same volume's replicas).** Restore the newest Completed Backup CR of
+`grafana-config` (the 2.5 gate proved one < 6 h old exists) by the repo-correct path in `docs/sops/backup.md` "Restore from Backup /
+Bind Restored Volume to Application" (restore to a NEW volume name, then repoint the git-tracked PV/PVC; the same-name alternative
+deletes the on-cluster replicas first and is the last resort). Total-loss fallback: delete the PVC contents and let Grafana
+re-initialise; consequences measured above (service account + its token(s) re-issued; 2 users re-created on next SSO login).
+The SERVICE_ACCOUNTS list printed in 2.7 names what to re-issue.
+
+Trigger rollback on any `FAIL` that persists after one further 3-minute settle (scrape lag, init-container fetch, first-boot
+migration). Per `docs/sops/grafana-image-changes.md` section 4 step 7 do not debug in place: monitoring is what you debug with.
 
 ## 6) Interference notes
 
-- **No shared infra is restarted.** Grafana is a tenant of `monitoring`. kube-prometheus-stack runs `grafana.enabled: false`,
-  so this HelmRelease is the only owner; nothing else reconciles Grafana.
-- **kube-prometheus-stack PR #428 (92.11.1 -> 92.13.1)** - parked by the 48h gate (opened 2026-10-24T22:02Z; the 48h gate counts
-  UPSTREAM release age, which I did not measure, so "eligible from the 2026-10-27 nightly" is approximate). It is auto-lane, so it cannot be named in `conflicts_with` (there is
-  no plan file; a ref to a non-plan is a DEAD-REF). It matters twice: Prometheus rolling makes the section 4 Prometheus
-  gates unreadable/unattributable, and kps ships `grafana_dashboard` ConfigMaps that the Grafana sidecar loads, so it can
-  move the dashboard count. Handled by pre-check 2.6 (timing mitigation only: Step 0 of the same window can still apply kps before this plan
-  runs) and, as the real control, by taking BASELINES at execution time AFTER Step 0 (2.7). Suggested placement tends
-  to keep a night between them (kps approx. nightly:2026-10-27, this plan nightly:2026-10-29) but that is not guaranteed.
-- **`teslamate-4.4.0` (nightly:2026-11-06, schema migration, its section 4.5 reads Grafana)** - hard conflict, see frontmatter:
-  a Grafana restart re-pulls unpinned TeslaMate master dashboards, which may already target 4.4.0 while the DB is on 4.3.0.
-  Never the same night; this plan runs first (it is earlier).
-- **`otel-operator-0.25.1` (sat-attended:2026-11-07) / `edot-collector-0.163.2` (nightly:2026-11-10)** - checked, NO technical
-  coupling: neither reads Grafana (grep of both plans = 0 hits), Grafana's Elasticsearch datasource reads ES not the collector,
-  and a Grafana roll does not touch the OTLP path. Listed in `conflicts_with` as attribution hygiene only; at the suggested date they
-  are 9 and 12 days apart, so it costs nothing. If a reviewer prefers fewer declared conflicts, these two are the removable ones.
-- **`talos-linux-1.14.4` (sun-attended:2026-11-01, exclusive)** - the slot is exclusive anyway; the earlier nightly:2026-10-29 also
-  leaves two clear days, so a failed Grafana gate cannot spill into the node roll.
+- **Window (answer to the reschedule):** suggested **`nightly:2026-11-03`** with an operator GO recorded before the night
+  (execution class is HUMAN-GATED now; the nightly default mode is operator-go-no-go). Why that night: it is after the
+  Sunday 2026-11-01 Talos roll (`talos-linux-1.14.4`, exclusive) with one full day for the cluster to settle (nightly:2026-11-02
+  is the first night after a 3-node reboot, so it is skipped), it shares the night only with `wazuh-100404-ci-build-tuning`
+  (low, 25 min, ns security; capacity 6: 2 + 1), and it is three nights before `nightly:2026-11-06` `teslamate-4.4.0` which must
+  not share a night or sit right behind a Grafana minor. Fallbacks, in order: `nightly:2026-11-05` (n8n-fleet, low;
+  teslamate is next night: tighter), `sat-attended:2026-11-14` (python-fleet only; the day before `longhorn-1.13.0`
+  `sun-attended:2026-11-15`, a day of soak). Avoid: 11-01 (exclusive Talos), 11-04 (memgraph, harmless but
+  stacks restarts in the data tier), 11-06 (teslamate, hard conflict), 11-07 (otel-operator + helm-drift-detection), 11-08
+  (etcd-timeouts, 110 min).
+- **Why the nightly STOPped on 2026-10-29, and why it will not again.** The stop was the plan's OWN pre-check 2.3
+  ("no grafana PR open"), not the auto-updater: Renovate had by then opened #374 for 14.2.0. 2.3 now accepts exactly the
+  PR that proposes this plan's target and stops only for a DIFFERENT target.
+- **How PR #374 and the `*grafana*` deny rule (`max: patch`) interact with this plan.**
+  (a) Step 0 (`auto-update.py --apply`) only merges the SAFE subset; a chart minor is held by the rule, so #374 is never
+  auto-merged and cannot race the hand-edit. Correct for 14.2.0: it moves the app.
+  (b) `coverage.py` matches a plan file BEFORE it consults deny rules: the plan with `target: 14.2.0` covers the held 14.0.1 -> 14.2.0
+  item (it stops re-dispatching planners). If Renovate retargets again (a 14.3.0 minor) the plan reads DRIFTED and must be
+  refreshed (README), which pre-check 2.2 also catches at run time.
+  (c) Once 14.2.0 is live, a later chart PATCH (14.2.x) is inside `max: patch` and WILL auto-apply at Step 0 under the normal gates
+  - acceptable only because app patches on 13.3.x keep the schema; the rule's reasoning is unchanged. I recommend NOT narrowing
+  the rule: this retarget is a live example of the hazard it names (a "minor chart" PR that is really an app minor).
+  (d) Because the class is HUMAN-GATED, no AUTO-NIGHT/SD-10 path exists for this plan, so no gate here can silently skip it and
+  the rule cannot cause a repeat STOP; the only run-time stop conditions are the explicit ones in section 2.
+  (e) After the bump lands, Renovate autocloses #374 (step 7); the hand-edit and the PR carry the identical `version:` line so
+  there is no merge conflict to resolve.
+- **No shared infra is restarted.** Grafana is a tenant of `monitoring`; kube-prometheus-stack runs `grafana.enabled: false`.
+  It snapshots one Longhorn volume (`grafana-config`), which is why `longhorn-1.13.0` is a declared conflict.
+- **kube-prometheus-stack (PR #428-class bumps).** Auto-lane, so it cannot be named in `conflicts_with` (no plan file). It matters
+  twice: Prometheus rolling makes the Prometheus gates unattributable, and kps ships `grafana_dashboard` ConfigMaps the Grafana
+  sidecar loads, so it can move the dashboard count. Mitigation: 2.6 (timing only - Step 0 of the same window can still apply it
+  first) and, as the real control, baselines taken AFTER Step 0 (2.7). The 48h gate counts upstream release age, so any statement
+  about when a given kps PR becomes eligible is approximate.
+- **`teslamate-4.4.0` (nightly:2026-11-06, schema migration, its section 4.5 reads Grafana)** - hard conflict: a Grafana restart
+  re-pulls unpinned TeslaMate master dashboards, which may already target 4.4.0 while the DB is on 4.3.0. This plan runs first.
+- **`otel-operator-0.25.1` / `edot-collector-0.163.2` / `edot-collector-0.164.0`** - checked, NO technical coupling: none reads
+  Grafana (grep = 0 hits for the first two; 0.164.0 is a draft that already names this plan), Grafana's Elasticsearch datasource
+  reads ES, not the collector. Declared as attribution hygiene only; at the suggested date they are 4-7 days away. They are the
+  removable entries if a reviewer prefers fewer declared conflicts.
+- **`talos-linux-1.14.4` (sun-attended:2026-11-01, exclusive)** - the slot is exclusive anyway; nightly:2026-11-03 also leaves two
+  clear days so a failed Grafana gate cannot spill into the node roll's soak.
 - **`longhorn-1.13.0` (sun-attended:2026-11-15), `helm-drift-detection` (sat 11-07), `flux-oci-chart-sources` (sun 11-22)** - each touches
-  the Longhorn volume or the HelmRelease object itself; declared as conflicts so a rollout cause stays singular.
-- **Old plan `grafana-chart-13.2.3` is SUPERSEDED**: its frontmatter says `status: superseded` (2026-09-14: the deny rule was
-  narrowed to `max: patch` and the patch lane took over). Its `target: 13.2.4` / `current: 13.2.1` are two majors behind live
-  14.0.1, it carries `finding_refs: [F-cce839da]`, and nothing in this plan depends on it. The file itself is retire-on-sight
-  (git has it) - left untouched here because this planner may only write its own file. Its useful methodology (datasource gate,
-  appVersion premise, cache-staleness gotcha) is reused above.
-- **Window placement.** Suggested `nightly:2026-10-29` (earliest night where the chart is >= 48 h old: 14.1.0 was published
-  2026-10-26 09:49Z, so nightly:2026-10-28 03:30 is only ~42 h). 20 min, risk weight 1, fits the 90-min nightly
-  (capacity_risk 6) with the existing 10-29 load (nextcloud-whiteboard, low, 15 min). Fallback: sat-attended:2026-10-31.
-- **Could this be AUTO-class?** Yes, by the derivation in `runbooks/autonomy-policy.yaml`: `capability_change: false` +
-  `rollback_class: git-revert` + `needs_reboot: false` + empty `shared` + `risk: low` = AUTO-NIGHT, and with a
-  `review: ready-for-go@<date>` from the plan-reviewer it meets the SD-10 pre-approval (nightly, no operator GO, premises
-  re-checked at runtime). Two honest caveats: (a) the `*grafana*` deny rule (`max: patch`) will keep every future minor in the
-  PLAN lane even though the hazard it names (appVersion) is mechanically checkable - narrowing it to "held only if the target
-  chart's appVersion differs from the live one" is an operator decision, not mine, and would need a premise-style gate in the
-  auto-updater; (b) the section 4 script needs `kubectl port-forward` and the admin secret, so an unattended run depends on the
-  window agent executing it, not merely reading Flux status.
+  the Longhorn volume or the HelmRelease object itself; declared so a rollout cause stays singular.
+- **Old plan `grafana-chart-13.2.3`** is `status: superseded` (since 2026-09-14), two majors behind; untouched, nothing depends on it.
+- **Could this be AUTO-class? No (changed from the 14.1.0 answer).** `capability_change: true` and `rollback_class: backup-restore`
+  derive HUMAN-GATED; even with a `backup_gate` the capability flag alone blocks unattended execution. A future 13.3.x PATCH
+  chart (appVersion patch, git-revert class, `capability_change: false`) would be eligible again.
 - **No node reboot.** Single replica, `Recreate`, RWO PVC already handled; no change to that config.
