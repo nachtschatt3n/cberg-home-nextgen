@@ -788,6 +788,16 @@ spec:
                   // once quota resets. No manual revert needed.
                   cfg.agents.defaults.model.fallbacks = ['ollama/gemma4:26b-mlx'];
                   delete cfg.agents.defaults.agentRuntime;
+                  // MEMORY EMBEDDINGS (2026-10-31): the default provider (openai) sends the
+                  // Codex ChatGPT-login token to api.openai.com/v1/embeddings, which rejects
+                  // it (401 invalid_authentication; the token has no API scopes). It only
+                  // worked for hours after a re-login, so the index went stale for weeks.
+                  // Use the local nomic-embed-text on the Ollama host instead: no key, no cost.
+                  cfg.agents.defaults.memorySearch = Object.assign({}, cfg.agents.defaults.memorySearch, {
+                    provider: 'ollama',
+                    model: 'nomic-embed-text:latest',
+                    remote: { baseUrl: 'http://ollama-toolfix.ai.svc.cluster.local' },
+                  });
                   if (chosenModel.startsWith('openai/')) {
                     cfg.agents.defaults.models = cfg.agents.defaults.models || {};
                     cfg.agents.defaults.models[chosenModel] = cfg.agents.defaults.models[chosenModel] || {};
