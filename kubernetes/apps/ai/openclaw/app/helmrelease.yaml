@@ -1790,6 +1790,12 @@ spec:
                 # passthrough so any direct `codex` invocations that don't
                 # go through the shim still behave sensibly.
                 if [ -f /home/node/.codex/config.toml ]; then
+                  # Drop the ChatGPT-connector plugins codex enables by itself
+                  # (google-calendar, github @openai-curated). They are never
+                  # connected here; Juno found "Google Calendar" among her tools,
+                  # tried it instead of the gcal CLI and told the family the
+                  # calendar was down (2026-10-31). Calendar = gcal via bash.
+                  sed -i '/^\[plugins\."[^"]*@openai-curated"\]/,/^[[:space:]]*$/d' /home/node/.codex/config.toml
                   if ! grep -q '\[sandbox_workspace_write\]' /home/node/.codex/config.toml; then
                     {
                       printf '\n[sandbox_workspace_write]\n'
