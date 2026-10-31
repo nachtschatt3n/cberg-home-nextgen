@@ -90,6 +90,14 @@ spec:
         # blocks stay identical.
         - name: AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS
           value: "10.69.0.0/16"
+        # Worker recycle: upstream default 1000 (+0-50) recycled each gunicorn
+        # worker every ~1 h on the busy replica; every recycle closes the outpost
+        # websockets and each outpost waits a fixed 300 s to reconnect. 10000
+        # (+0-1000) ~ 10 h. Server only (the worker Deployment is celery).
+        - name: AUTHENTIK_WEB__MAX_REQUESTS
+          value: "10000"
+        - name: AUTHENTIK_WEB__MAX_REQUESTS_JITTER
+          value: "1000"
         # Outgoing mail (recovery links, email-OTP) via the operator's existing
         # GMX account (the one paperless-ngx fetches from). GMX only accepts
         # its own address as sender, so FROM carries that address. Creds live
