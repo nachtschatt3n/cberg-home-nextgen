@@ -617,7 +617,7 @@ This repository uses [mise](https://mise.jdx.dev/) for unified development tool 
 - **sops 3.13.3** + **age 1.3.2** - Secrets encryption
 - **helm 3.22.1** - Kubernetes package manager
 - **kustomize 5.6.0** - Kubernetes manifest customization
-- **helmfile 0.171.0**, **task 3.54.0**, **cloudflared 2026.10.3**, **gum 0.17.0**
+- **helmfile 0.171.0**, **task 3.54.0**, **cloudflared 2026.10.7**, **gum 0.17.0**
 - **Validation & scanning**: kubeconform 0.8.0, flate 0.6.5 (Flux render gate), trivy 0.76.1
 - **Additional utilities**: jq 1.7.1, yq 4.54.1
 - **Homelab CLIs** (cargo): unifictl 5.7.0, zigbeectl 0.1.2

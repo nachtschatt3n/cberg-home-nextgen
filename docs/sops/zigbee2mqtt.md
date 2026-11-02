@@ -1,8 +1,8 @@
 # SOP: Zigbee2MQTT operations
 
 > Description: Lifecycle operations for the Zigbee2MQTT (Z2M) deployment and its mesh — opening/closing `permit_join`, removing devices safely, recovering from interview failures on CC2652-class router firmware, backup/restore, and post-incident smoke testing.
-> Version: `2026.10.30`
-> Last Updated: `2026-10-30`
+> Version: `2026.11.02`
+> Last Updated: `2026-11-02`
 > Owner: `cberg-home-ops`
 
 ---
@@ -187,7 +187,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: edit
-      image: ghcr.io/koenkk/zigbee2mqtt:2.11.0
+      image: ghcr.io/koenkk/zigbee2mqtt:2.14.3
       command: ["sh","-c","sleep 600"]
       volumeMounts: [{ name: data, mountPath: /data }]
       securityContext: { runAsUser: 0 }

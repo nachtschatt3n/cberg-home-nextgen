@@ -1,8 +1,8 @@
 # SOP: Falco Runtime-Security Rule Exception Tuning
 
 > Description: How to add a scoped, benign-workload exception to a built-in Falco rule when a legitimate container trips a runtime-security alert (typically a Critical "Drop and execute new binary in container" → Wazuh level-12), without blinding the rule globally.
-> Version: `2026.09.20`
-> Last Updated: `2026-09-20`
+> Version: `2026.11.02`
+> Last Updated: `2026-11-02`
 > Owner: `security / cluster-ops`
 
 ---
@@ -38,7 +38,7 @@ takes minutes.
 |---------|-------|
 | Namespace | `security` |
 | Source of truth | `kubernetes/apps/security/falco/app/helmrelease.yaml` |
-| Chart | `falco` (falcosecurity HelmRepository), version `9.1.0` |
+| Chart | `falco` (falcosecurity HelmRepository), version `9.2.2` |
 | Deploy shape | DaemonSet, one pod per node (3 nodes incl. control planes) |
 | Driver | `modern_ebpf` (CO-RE eBPF, no kmod) |
 | Rule mechanism | `values.customRules.<file>.yaml` with `override.condition: append` (rules) / `replace` (macros) |

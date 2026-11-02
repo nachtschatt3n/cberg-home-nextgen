@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.10.23`
-> Last Updated: `2026-10-23`
+> Version: `2026.11.02`
+> Last Updated: `2026-11-02`
 > Owner: `Platform`
 
 ---
@@ -363,6 +363,18 @@ browser and PWA restarts. Three settings make that true, all in blueprints:
   dev tools shows an Expires date ~1 year out, not "Session". Existing sessions
   keep their old browser-session cookie until the next login.
 - Rollback: revert the commit, or set `session_duration: seconds=0`.
+
+### Server worker recycle: `AUTHENTIK_WEB__MAX_REQUESTS` (2026-10-31)
+
+The server Deployment sets `AUTHENTIK_WEB__MAX_REQUESTS=10000` and
+`AUTHENTIK_WEB__MAX_REQUESTS_JITTER=1000` (commit `67952fdd`, plan
+`authentik-web-max-requests`). Upstream's default of 1000 (+0-50) recycled each
+gunicorn worker about hourly on the busy replica; every recycle closes the outpost
+websockets and each outpost then waits a fixed 300 s to reconnect, which showed up
+as short forward-auth gaps. 10000 (+0-1000) is roughly 10 h. It applies to the
+**server only** (the worker Deployment runs celery). If forward-auth gaps return,
+check the worker restart cadence in the server logs before touching this value;
+lowering it brings the hourly gaps back.
 
 ### Email, recovery and MFA (phase 1 + phase 2, 2026-09-26)
 
