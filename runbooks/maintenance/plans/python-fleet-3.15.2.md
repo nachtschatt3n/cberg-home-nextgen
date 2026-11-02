@@ -86,7 +86,8 @@ premises:
     expect_matches: '^python:3\.14\.[0-9]+-slim$'
   # The registry facts (target still trixie; past the 48 h minor cooldown; no newer bugfix) are §2 gates
   # 2.1-2.3, each printing a STOP token on failure - they need curl/python network reads, kept out of premises.
-status: draft                           # needs a fresh plan-review before vetting; review stays null. 2026-11-02: revised after an
+review: ready-for-go@2026-11-02          # plan-reviewer 2026-11-02: ready-for-go, 0 blocking; nits applied (PY_SHA capture, pushed=0 + imageID digest gate, severity wording); HUMAN-GATED, fresh operator GO on this plan_id
+status: vetted                          # was draft. 2026-11-02: revised after an
                                         # independent review (needs-fix) - baseline 3.14.10, re-pushed 3.15.2 digest, dead
                                         # conflicts_with ref, finding_refs; the earlier GO does NOT carry over (§1.7).
 window: "sat-attended:2026-11-14"       # suggestion only (the window agent assigns it). 35 of the 70 schedulable min (90 - 20 Step 0
@@ -437,6 +438,7 @@ git commit --only \
   -F "$MSG"
 git show --stat HEAD            # exactly the 3 files above
 git log -1 --format=%s          # must be the subject above; amend before push if not
+export PY_SHA=$(git rev-parse HEAD)   # the commit section 5 reverts
 git push
 export PUSH_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ```
@@ -536,10 +538,11 @@ js=[j for j in json.load(sys.stdin)['items']
 js.sort(key=lambda j:j['metadata']['creationTimestamp']); print(js[-1]['metadata']['name'] if js else 'NONE')")
 kubectl -n office get job "$J" -o jsonpath='{.status.succeeded}{"\n"}'                          # 1
 kubectl -n office logs job/"$J" | grep -ciE '^home assistant list holds [0-9]+ item'             # 1
-kubectl -n office logs job/"$J" | grep -iE '^done: pushed=[0-9]+ already-synced=[1-9][0-9]* '   # one line
+kubectl -n office logs job/"$J" | grep -iE '^done: pushed=0 already-synced=[1-9][0-9]* '   # one line
+kubectl -n office get pod -l job-name="$J" -o jsonpath='{.items[0].status.containerStatuses[0].imageID}{"\n"}'   # must end @sha256:8c13a3f37a6a5b71498228e902c4b9f51c1f7900d49fabf71f9a650c6120e0d0 (the pre-change pod shows a different digest)
 ```
 
-PASS = succeeded `1`, the HA read line is present, and `already-synced` is non-zero.
+PASS = succeeded `1`, the HA read line is present, `pushed=0` (a duplicate push would fail the regex) and `already-synced` is non-zero, and the pod imageID is the pinned index digest.
 
 Failure shapes:
 
@@ -587,14 +590,14 @@ Rollback is a revert:
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-git revert --no-edit <sha-of-3.3>
+git revert --no-edit "$PY_SHA"
 git show --stat HEAD            # the same 3 files, tags back to the PRE tag(s) recorded in §2.0 (whichever 3.14.N §2.0 printed as PRE, 3.14.10 on 2026-11-02)
 git log -1 --format=%s          # Revert "chore(deps): python 3.14.x-slim -> 3.15.2-slim ..."
 git push
 ```
 
 If only one member fails, a partial rollback is acceptable and preferable. Restore just that file's line with
-`git checkout <sha-of-3.3>~1 -- <file>`, commit it with `--only <file>`, and leave the others on 3.15.
+`git checkout "$PY_SHA"~1 -- <file>`, commit it with `--only <file>`, and leave the others on 3.15.
 
 **Confirm the cluster is back:**
 
@@ -651,5 +654,5 @@ probe POSTs `endsAt=now`). No manual Alertmanager action is needed.
   4. The mcpo init installs nodesource `node_20.x`, which is past upstream EOL. That needs a separate plan.
   5. `coverage.py` fleet group id drops the tag variant (`F-a9351f4e`): the alpine trio and 15 slim siblings read
      as covered by this plan (§1.5).
-  6. Stale image-security rows `F-8bac0223` (3.14.7-slim) and `F-f266fdf3` (3.14.8-slim, critical severity) describe
+  6. Stale image-security rows `F-8bac0223` (3.14.7-slim) and `F-f266fdf3` (3.14.8-slim) describe
      tags nothing runs; they should be reconciled by the sweep, not worked from this plan.
