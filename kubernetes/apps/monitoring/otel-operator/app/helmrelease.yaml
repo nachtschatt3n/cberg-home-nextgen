@@ -64,6 +64,9 @@ spec:
       daemon:
         enabled: true
         mode: daemonset
+        args:
+          # collector 0.161+ turns k8s_attributes legacy semconv OFF (beta gate); keep container.image.tag
+          feature-gates: "-processor.k8sattributes.DontEmitV0K8sConventions"
         tolerations:
           - effect: NoSchedule
             operator: Exists
