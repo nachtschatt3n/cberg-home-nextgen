@@ -88,7 +88,7 @@ finding_refs:
   # acceptances for what upstream has not fixed and are unaffected by the bump.
 review: ready-for-go@2026-11-02   # plan-reviewer 2026-11-02 (two rounds): needs-fix on the rollback (Helm remediation re-armed, HEAD-relative reverts), fixed and re-verified from both start states; HUMAN-GATED, attended on-demand NOW run after an operator GO
 status: vetted                    # human-gated; window null (on-demand NOW run, ~45 min + 15 min rollback budget)
-window: null                          # the window agent assigns it. RECOMMENDATION (section 6): an operator-triggered attended NOW run
+window: "now:2026-11-02"   # ON-DEMAND NOW run 2026-11-02 (run-now.py stamp; was None)
                                       # (home-operation run), STARTED BEFORE ~23:30 local on 2026-11-02 while kps PR #428 is still cooling;
                                       # otherwise sat-attended:2026-11-07,
                                       # which fits only if helm-drift-detection moves (60 + 45 > 70 schedulable minutes). Not nightly.
