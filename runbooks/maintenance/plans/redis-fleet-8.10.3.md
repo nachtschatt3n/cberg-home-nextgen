@@ -102,7 +102,7 @@ finding_refs: [F-d2bb762b, F-8c50c463, F-d40c9c12, F-e8a41b1b, F-625d3a3f, F-c63
 status: vetted                    # human-gated; window null until the operator GO (suggested sun-attended:2026-11-29, 80 of 180 min)
 review: ready-for-go@2026-11-02   # plan-reviewer 2026-11-02: needs-fix (fleet scope split, orphaned GO, stale digest, unfailable slot grep), rewritten to 9 consumers, delta re-review ready-for-go; HUMAN-GATED: a fresh operator GO on this plan_id is required (no earlier GO carries over)
                                         # leg 3 (affine) is new. Needs a fresh plan-reviewer pass.
-window: null                            # SUGGESTION: "sun-attended:2026-11-29" (alternative sat-attended:2026-11-28 does NOT fit: 80 min > 70).
+window: "sun-attended:2026-11-29"      # OPERATOR GO 2026-11-02 (chat: do all of this now). Was SUGGESTION: "sun-attended:2026-11-29" (alternative sat-attended:2026-11-28 does NOT fit: 80 min > 70).
                                         # Do NOT use 11-07/08/14/15/21/22 (each holds a conflicts_with plan). Re-stamp after review.
 sops_refs:
   - docs/sops/application-update.md

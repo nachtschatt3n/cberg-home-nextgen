@@ -119,7 +119,7 @@ status: vetted   # 2026-09-28 P1 RE-PLANNED (§1.5, §3.0.0): child patch is now
                       # spec.values, so chart defaults return. P1 is NOT spec-only for null-bearing values
                       # (7 HRs carry nulls). [Superseded 2026-09-28: the chosen fix is the JSON6902 child
                       # patch (§1.5); the nulls stay as they are.]
-window: "sat-attended:2026-11-07"   # SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed: P1 only, as the LAST/only plan of an attended window (plan section 7)
+window: "sat-attended:2026-11-28"   # MOVED 2026-11-02 from sat-attended:2026-11-07 (conflicts_with otel-operator-0.26.1, which the operator slotted there). Originally SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed: P1 only, as the LAST/only plan of an attended window (plan section 7)
                                       # set status back to `vetted`; after P1 and after P2 set
                                       # `awaiting-soak` (run-now.py refuses it, so no NOW run
                                       # can collapse a soak; flip to `vetted` when it ends)
