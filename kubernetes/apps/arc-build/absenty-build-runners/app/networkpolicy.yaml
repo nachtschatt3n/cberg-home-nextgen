@@ -73,6 +73,7 @@ spec:
               - matchPattern: "*.rubygems.org"
               - matchName: deb.debian.org
               - matchName: security.debian.org
+              - matchPattern: "**.cluster.local"
     - toFQDNs:
         - matchName: github.com
         - matchName: api.github.com

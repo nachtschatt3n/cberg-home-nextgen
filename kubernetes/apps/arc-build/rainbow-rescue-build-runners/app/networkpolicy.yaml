@@ -66,6 +66,7 @@ spec:
               - matchName: production.cloudfront.docker.com
               - matchPattern: "*.docker.io"
               - matchName: dl-cdn.alpinelinux.org
+              - matchPattern: "**.cluster.local"
     - toFQDNs:
         - matchName: github.com
         - matchName: api.github.com
