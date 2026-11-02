@@ -69,8 +69,8 @@ conflicts_with:
   - vaultwarden-1.37.4                  # vetted — office namespace, shared monitoring; both read Prometheus after a restart
   - openclaw-2026.10.5                  # blocked — namespace ai (leg 4 restarts the open-webui redis pod)
   # Platform serialisation (a roll of these confounds every reconnect gate in §4):
-  - helm-drift-detection                # sat-attended:2026-11-07 — asserts Helm revisions IDENTICAL across releases; this plan upgrades 6 releases
-  - flux-oci-chart-sources              # sun-attended:2026-11-22 — re-points app-template + open-webui chart sources
+  - helm-drift-detection                # sat-attended:2026-11-28 — asserts Helm revisions IDENTICAL across releases; this plan upgrades 6 releases
+  - flux-oci-chart-sources              # sun-attended:2026-12-13 — re-points app-template + open-webui chart sources
   - flux-reconciler-impersonation       # blocked — changes WHO applies the Kustomizations/HelmReleases this plan relies on
   - talos-linux-1.14.5                  # node reboots (successor of talos-linux-1.14.4, which its own header supersedes)
   - longhorn-1.13.0                     # sun-attended:2026-11-15 — two Longhorn PVCs are remounted here; never stack on a storage upgrade

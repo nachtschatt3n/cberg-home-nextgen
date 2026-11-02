@@ -41,10 +41,8 @@ conflicts_with:
   - talos-linux-1.14.5   # reciprocal, 2026-11-02 sweep 2ad957af
   - envoy-proxy-config-distroless-v1.39.4   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # 2026-10-25: pruned dead refs kube-prometheus-stack-92.2.0, nocodb-2026.09.1, nextcloud-fleet-35.0.1, jellyfin-12.2.20261005 (executed/retired)
-  - talos-linux-1.14.2                # exclusive node roll (11-01): reboots every node and restarts etcd three times; also
-                                      # rewrites the same machine configs. Never the same night, and 11-08 is 7 days later on
-                                      # purpose so the roll's own pre-gates (no unexplained leader change in 2 h) are not
-                                      # confounded. NEEDS the reciprocal entry in that plan.
+  - talos-linux-1.14.2                # history only: that node roll ran 11-01 and is superseded by talos-linux-1.14.5 (listed
+                                      # above, sun 11-22, AFTER this plan). Kept so the pairing stays visible in the record.
   - talos-power-tuning-ab             # talosctl apply-config on the same 3 nodes (live SysfsConfig A/B); a config apply from
                                       # two plans in one slot makes "the config on the node" ambiguous
   - multus-macvlan-foundation         # reference plan, also talosctl apply-config on the same nodes
@@ -816,7 +814,7 @@ replica on them), so it is a last resort and needs the operator's explicit go.
 
 ## 6. Interference notes
 
-- **Window choice (PENDING OPERATOR DECISION; `window: null`).** Options:
+- **Window choice (DECIDED: `sun-attended:2026-11-08`, operator 2026-10-13, re-confirmed 2026-11-02; the options below are the historical analysis, kept for the record).** Options:
   1. **Attended ad-hoc run on a CI-idle period (RECOMMENDED by the plan reviewer and the planner).** An
      on-demand run has 480 min of capacity (est 110), brings the tolerance in BEFORE the 11-01
      `talos-linux-1.14.2` roll (which restarts etcd three times and is where the thin 1 s margin
