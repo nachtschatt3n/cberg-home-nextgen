@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.11.03"
+version: "2026.11.04"
 
 # ── Image major ceilings (added 2026-10-23, F-6a859080) ─────────────────────
 # Caps the MAJOR line the version checker may propose for ONE image in ONE
@@ -506,6 +506,17 @@ deny:
       version. This is a local binary — no reboot window, no maintenance plan."
   - match: "siderolabs/*"
     reason: "Talos node image — needs a rolling node-reboot maintenance window, not a git merge."
+  # Added 2026-11-02 (F-39ab2c30). The flux CLI pin in .mise.toml is a LOCAL binary that
+  # must match the cluster's Flux distribution (docs/sops/flux-upgrade.md), exactly like
+  # the talosctl pin above. Renovate #448 merged 2.10.0 against a cluster on v2.9.6; the CLI
+  # was reverted to the distribution and this rule stops the next patch/minor PR from
+  # re-applying it. No other glob matches this depName.
+  - match: "aqua:fluxcd/flux2"
+    reason: "flux CLI pin - tracks the CLUSTER's Flux distribution (distribution.version in
+      kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml, currently v2.9.6), so it
+      must never move AHEAD of the controllers. It FOLLOWS a distribution upgrade (a flux-fleet
+      plan); it does not authorise one. Merge only after the cluster is on the new version. This
+      is a local binary - no reboot window, no maintenance plan."
   - match: "*gha-runner-scale-set*"
     reason: >-
       actions-runner-controller (ARC, added 2026-10-06, docs/sops/ci-runner.md

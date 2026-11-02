@@ -1,6 +1,6 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.11.02`
+> Version: `2026.11.02.1`
 > Last Updated: `2026-11-02`
 
 ## 1) Description
@@ -471,6 +471,7 @@ cannot catch the WIDENING of. As of `2026.10.17` that is all 35 deny entries (th
 | `*@openclaw/*` | held at every update_type |
 | `*coredns*` | held at every update_type |
 | `aqua:siderolabs/talos` | held at every update_type — the talosctl CLI pin in `.mise.toml` FOLLOWS a node upgrade and must never move ahead of the cluster; listed ABOVE `siderolabs/*` because first match wins and `_match_anywhere` would otherwise attach the node-image reason to a local binary (split 2026-09-13, F-1128fcdf; matrix row added 2026-09-15 — Test 2b had been failing on it) |
+| `aqua:fluxcd/flux2` | held at every update_type (added 2026-11-02, F-39ab2c30, policy `2026.11.04`) — the flux CLI pin in `.mise.toml` FOLLOWS the cluster's Flux distribution and must never move ahead of it (same shape as the talosctl row); Renovate #448 had put it a minor ahead of v2.9.6 |
 | `siderolabs/*` | held at every update_type |
 | `*talos*` | held at every update_type |
 | `*valkey*` | held at every update_type (INTERIM, added 2026-09-21) — the only upstream tag above the pin is a PRE-RELEASE: a floating 2-component tag digest-identical to an `-rc1`, with no GA above the pin. Withdraw the rule when a real GA publishes, or it freezes valkey on a genuine future release. It also has to reach the DIRECT-BUMP lane, which resolves a deny rule by the component key first and then by each image repository the item names (`denied_for_item`) — the component key alone did not match this glob |
@@ -642,6 +643,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.11.02.1 | 2026-11-02 | **`aqua:fluxcd/flux2` deny rule (policy `2026.11.04`, F-39ab2c30).** The flux CLI pin had been auto-merged to 2.10.0 (#448) against a cluster on distribution v2.9.6, contradicting `docs/sops/flux-upgrade.md` (CLI/distribution match). Pin reverted to 2.9.6; the rule keeps the next Renovate PR from re-applying it until the distribution moves. Matrix row added. Regression: `runbooks/tests/test-auto-update-policy-flux-cli-pin.py`. |
 | 2026.11.02 | 2026-11-02 | **`*immich-redis*` deny rule added above `*immich*` (policy `2026.11.03`).** First match wins, so the redis sidecar was held under the Immich SERVER's migration reason, which is false for a non-persistent queue store. Same verdict (held at every update_type), its own reason; matrix row added, order is load-bearing like the `nextcloud-*` trio. Regression: `runbooks/tests/test-auto-update-policy-immich-redis-order.py`. |
 | 2026.10.26 | 2026-10-26 | **Settle gate hardened (review of 40d1ae7f).** (1) One clean reading no longer settles: 2 consecutive clean readings are required, and a reading is not clean while an in-scope pod is not-ready or a container's `restartCount` rose versus a PRE-APPLY baseline, or a HelmRelease is `Reconciling=True` / any Flux object `Ready=Unknown` -- a liveness-killed or late-crashing container used to read "settled clean" and the bad batch stayed. (2) HR remediation exhaustion is read from `Stalled`/`RetriesExceeded` (and `MissingRollbackTarget`), verified in helm-controller v1.6.5 source; the old check looked for it on `Ready` and could never fire. (3) An unreadable pod list is a not-clean key, no longer silently healthy. (4) Bad JSON / any exception after merging no longer aborts with the batch merged: it is reverted, or each unrevertable merge is reported as LEFT MERGED (new exit `3`). (5) A pre-apply baseline excludes (and reports) objects already failing cluster-wide; an unreadable baseline or changed-file list merges nothing. The 2026-10-23 transient-lag behaviour is unchanged. Also `check-all-versions.py`: an `image_major_ceiling` that leaves no candidate, or an unreadable policy / malformed matching rule, now yields NO candidate plus a recorded degradation instead of silently dropping the cap (`test-image-major-ceiling.py`). |
 | 2026.10.24 | 2026-10-24 | **Post-apply gate now SETTLES (F-6c3043f9).** 2026-10-23 13:28 a Step 0 batch of six safe merges was auto-reverted falsely: concurrent commits from other sessions made Flux Kustomizations transiently read "dependency revision not up to date" / `ReconciliationFailed`, and the single-reading gate counted that as regression. Now polls (30s, 10 min cap), treats lag that clears as healthy, requires persistence (or 3 consecutive hard readings) before reverting. Test `test-auto-update-settle-gate.py`. The six false `reverted` ledger rows (`component_autonomy`) are flagged for operator correction, not rewritten. |

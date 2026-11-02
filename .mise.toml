@@ -16,7 +16,12 @@ uv = "latest"
 "aqua:charmbracelet/gum" = "0.17.0"
 "aqua:cloudflare/cloudflared" = "2026.10.7"
 "aqua:FiloSottile/age" = "1.3.2"
-"aqua:fluxcd/flux2" = "2.10.0"
+"aqua:fluxcd/flux2" = "2.9.6"       # CLI pin — track the CLUSTER distribution (distribution.version in
+                                     # kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml),
+                                     # not Renovate (docs/sops/flux-upgrade.md: CLI/distribution match).
+                                     # Renovate #448 moved it to 2.10.0 while the cluster runs v2.9.6, a minor
+                                     # AHEAD of the distribution (F-39ab2c30). Reverted; nothing in the repo
+                                     # needs 2.10. It FOLLOWS the distribution upgrade (flux-fleet plans).
 "aqua:getsops/sops" = "3.13.3"
 "aqua:go-task/task" = "3.54.0"
 "aqua:helm/helm" = "3.22.1"
