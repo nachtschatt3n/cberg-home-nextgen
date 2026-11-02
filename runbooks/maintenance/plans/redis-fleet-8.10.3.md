@@ -99,8 +99,8 @@ finding_refs: [F-d2bb762b, F-8c50c463, F-d40c9c12, F-e8a41b1b, F-625d3a3f, F-c63
                                         # redis, superset-redis-official, affine-redis, open-webui, tube-archivist-redis,
                                         # immich-redis, sure-redis, paperless-redis, nextcloud-redis -> 8.10.3-alpine.
                                         # Related, NOT closed by this plan: F-8792dba3 (coverage.py lockstep scope), see §6.
-status: draft
-review: null                            # the 2026-10-25 ready-for-go belonged to the 8.10.2 plan; target and scope both changed, and
+status: vetted                    # human-gated; window null until the operator GO (suggested sun-attended:2026-11-29, 80 of 180 min)
+review: ready-for-go@2026-11-02   # plan-reviewer 2026-11-02: needs-fix (fleet scope split, orphaned GO, stale digest, unfailable slot grep), rewritten to 9 consumers, delta re-review ready-for-go; HUMAN-GATED: a fresh operator GO on this plan_id is required (no earlier GO carries over)
                                         # leg 3 (affine) is new. Needs a fresh plan-reviewer pass.
 window: null                            # SUGGESTION: "sun-attended:2026-11-29" (alternative sat-attended:2026-11-28 does NOT fit: 80 min > 70).
                                         # Do NOT use 11-07/08/14/15/21/22 (each holds a conflicts_with plan). Re-stamp after review.
@@ -918,8 +918,9 @@ CONTENTS ASSERTION (loosened to what was measured; the old `dbsize >= 10` had no
 sessions and ~50 misc cache/rate-limit/notify-push keys; how many of those one cron tick alone
 rewrites was NOT measured (it needs a restart to observe). So the gate asserts only what can be
 shown to come from live Nextcloud traffic, in three steps:
-1. The first `nextcloud-cron` Job created after `$SINCE` completes: `kubectl get jobs -n office
-   --sort-by=.metadata.creationTimestamp | grep nextcloud-cron | tail -1` shows `1/1` COMPLETIONS
+1. The first `nextcloud-cron` Job created after `$SINCE` completes (compare its `.metadata.creationTimestamp` to `$SINCE`,
+   not just the newest line, or the previous Job's `1/1` passes for the wrong reason):
+   `kubectl get jobs -n office --sort-by=.metadata.creationTimestamp | grep nextcloud-cron | tail -1` shows `1/1` COMPLETIONS
    (cron.php takes its file locks in this redis; a failed Job is the failure).
 2. Then `kubectl exec -n office deploy/nextcloud-redis -- redis-cli dbsize` reads `>= 1`. A new
    server starts at 0, so 0 after a completed cron Job + the notify-push client means Nextcloud is not
@@ -954,7 +955,8 @@ for p in json.load(sys.stdin)["items"]:
     for c in p["status"].get("containerStatuses", []): print(c["imageID"])'
   done | sort | uniq -c | tee /tmp/redis-fleet3-fleet.txt
   if [ "$(wc -l < /tmp/redis-fleet3-fleet.txt | tr -d ' ')" = 1 ] && grep -q "^ *9 docker.io/library/redis@sha256:" /tmp/redis-fleet3-fleet.txt; then echo FLEET_IMAGE_UNIFORM; else echo FLEET_IMAGE_SPLIT; fi
-  grep -q "$(cat /tmp/redis-fleet3-index)" /tmp/redis-fleet3-fleet.txt && echo FLEET_MATCHES_PRECHECK_INDEX || echo FLEET_INDEX_DIFFERS_FROM_PRECHECK
+  # guard: a missing/empty index file would make `grep -q ""` always match (reviewer reproduced it in zsh)
+  if [ -s /tmp/redis-fleet3-index ] && grep -q "$(cat /tmp/redis-fleet3-index)" /tmp/redis-fleet3-fleet.txt; then echo FLEET_MATCHES_PRECHECK_INDEX; else echo FLEET_INDEX_DIFFERS_OR_UNRECORDED; fi
 }
 ```
 
