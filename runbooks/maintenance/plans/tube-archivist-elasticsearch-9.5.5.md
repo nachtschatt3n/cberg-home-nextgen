@@ -46,10 +46,12 @@ depends_on: []                        # Runs FIRST under tube-archivist v0.5.12 
                                       # majors 8..9, §1.2). tube-archivist-0.6.0 declares
                                       # depends_on: [tube-archivist-elasticsearch-9.5.5] and runs on a LATER NIGHT.
 conflicts_with:
+  - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af
   - tube-archivist-0.6.0              # LATER NIGHT, never the same window: §4.4 restarts the TA app and would confound that
                                       # plan's §4 (and its own two Recreate rolls would confound this plan's §4.4)
-  # redis-fleet-8.10.2 SUPERSEDED 2026-10-27 by redis-fleet-8.10.3, which no longer touches tube-archivist
-  # (tube-archivist-redis now moves via Step 0 direct-bump); §6 prose about its 11-29 TA restart is stale.
+  # redis-fleet-8.10.2 SUPERSEDED by redis-fleet-8.10.3 (draft; scope restored to all 9 consumers on 2026-11-02): it DOES
+  # restart tube-archivist-redis and deployment/tube-archivist (leg 4), suggested sun-attended:2026-11-29. The §6 prose below
+  # naming redis-fleet-8.10.2 refers to the same restart; redis-fleet-8.10.3 is the live plan id.
   - longhorn-1.13.0                   # exclusive; storage engine one-way upgrade — this plan's backup Job + scratch volume + a
                                       # freshly 9.x-upgraded volume must not meet it inside 24 h either way (§6)
   - flux-reconciler-impersonation     # exclusive; uses helmrelease/tube-archivist-elasticsearch as its canary
@@ -835,7 +837,7 @@ silence and marker, and set this plan `status: blocked` with the failure log.
   the slot is 23 h before the Longhorn roll on 2026-11-15), 2026-11-21 (authentik, 45 min:
   45 + 65 > 70). **Recommended: `sat-attended:2026-11-28`** (free, 13 days after the Longhorn
   roll, 27 days after the Talos roll), then `tube-archivist-0.6.0` on `sat-attended:2026-12-05`.
-  Note `redis-fleet-8.10.2` is on 2026-11-29: it restarts the TA app the day after this
+  Note `redis-fleet-8.10.3` (supersedes 8.10.2) is suggested for 2026-11-29: it restarts the TA app the day after this
   plan, so keep the 11-28 observation (§4.5) finished before the window closes and do not
   read that restart as an ES effect. `window` is left null because the plan is `draft`
   (the scheduler refuses non-vetted plans); the coordinator stamps it after review.
@@ -846,7 +848,7 @@ silence and marker, and set this plan `status: blocked` with the failure log.
 - **tube-archivist-0.6.0** also warns: v0.6.0 deletes existing ES snapshots if snapshots are
   disabled, which would remove this plan's `pre-es9-*` snapshot, so leave snapshots enabled
   until both plans have soaked.
-- **`redis-fleet-8.10.2`** (vetted, `sun-attended:2026-11-29`). It restarts
+- **`redis-fleet-8.10.3`** (draft, supersedes 8.10.2; suggested `sun-attended:2026-11-29`). It restarts
   `deployment/tube-archivist` and gates on it, so it is listed in `conflicts_with`.
   That plan should list this one reciprocally (`--validate` does not check reciprocity).
 - **`longhorn-1.13.0`** (exclusive, `sun-attended:2026-11-15`), **`talos-linux-1.14.4`**

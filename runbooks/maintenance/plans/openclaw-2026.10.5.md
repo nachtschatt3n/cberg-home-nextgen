@@ -23,6 +23,7 @@ touches:
   shared: [ai]
 depends_on: []
 conflicts_with:
+  - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af
   - talos-linux-1.14.4                  # exclusive node roll evicts the pod mid-migration
 unblock_stages:                      # ONE attended day (Sat 2026-10-31); status stays blocked until the rehearsal passes (GO/NO-GO #1)
   - id: S0-assessment      # DONE 2026-10-23 (read-only + Mac offline trial), results in section 0b

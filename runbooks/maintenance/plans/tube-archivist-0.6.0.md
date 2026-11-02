@@ -40,10 +40,11 @@ depends_on:
                                       # agreed order keeps the two plans attributable (§6). Enforced by the scheduler
                                       # (unmet depends_on) and by the §2.1 gate that requires ES 9.5.5 to be live.
 conflicts_with:
+  - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af
   - tube-archivist-elasticsearch-9.5.5  # and NOT the same window: same namespace, same app pod restarts; §4 must be
                                       # attributable to one change. Run on a later night than the ES plan.
-  # redis-fleet-8.10.2 SUPERSEDED 2026-10-27 by redis-fleet-8.10.3, which no longer touches tube-archivist
-  # (tube-archivist-redis now moves via Step 0 direct-bump). Former note: restarted download/tube-archivist-redis + deployment/tube-archivist;
+  # redis-fleet-8.10.2 SUPERSEDED by redis-fleet-8.10.3 (draft; scope restored to all 9 consumers on 2026-11-02): it DOES
+  # restart tube-archivist-redis and deployment/tube-archivist (leg 4), suggested sun-attended:2026-11-29. Former note: restarted download/tube-archivist-redis + deployment/tube-archivist;
                                       # two causes for one TA restart make §4 unattributable. Reciprocity owed in that plan.
   - flux-reconciler-impersonation     # uses kustomization/tube-archivist + its HelmReleases as the canary; changing WHO
                                       # applies them in the same window as a content change makes a failure unattributable.
@@ -797,7 +798,7 @@ Clean up when done: `rm -rf /tmp/ta-060` (scratch scripts and env file; none hol
   restarts this app, and this plan's two Recreate rolls would confound the ES plan's checks (both plans declare each other in
   `conflicts_with`; this one also `depends_on` the ES plan). Both are HUMAN-GATED. sat-attended budget is 70 min (90 - 20
   Step 0): the ES plan (65) needs a Saturday alone, this plan (60) likewise. **Recommended: ES on `sat-attended:2026-11-28`,
-  this plan on `sat-attended:2026-12-05`** (after `redis-fleet-8.10.2` on 2026-11-29 has restarted this app, so its restart is not
+  this plan on `sat-attended:2026-12-05`** (after `redis-fleet-8.10.3` (supersedes 8.10.2) on 2026-11-29 has restarted this app, so its restart is not
   mixed into §4). Avoid the night after the Talos roll (`nightly:2026-11-02`) and any slot within 24 h of a Longhorn or Talos roll;
   2026-11-14 is also out (python-fleet 35 min + 60 > 70, and 23 h before the Longhorn roll). `window` stays null while `draft`.
   This plan's rollback stays a free git revert on ES 9: v0.5.12 also accepts ES 9, and §1.5 holds there too. The §4.3 baseline is
@@ -811,7 +812,7 @@ Clean up when done: `rm -rf /tmp/ta-060` (scratch scripts and env file; none hol
 - **Prometheus is the §4 instrument:** `kube-prometheus-stack` PR #428 (92.11.1 -> 92.13.1) is OPEN, parked by the 48 h age gate,
   and Step 0 of the window can apply it right before §4. §4 refuses to read from a Prometheus younger than 20 minutes
   (`PROMETHEUS_TOO_YOUNG_WAIT_OR_MOVE`): wait for it to settle or move this plan. (92.11.1 landed as `d997b0fa`.)
-- **redis-fleet-8.10.2** restarts `tube-archivist-redis` and this deployment (its leg 4 restarts `deployment/tube-archivist`);
+- **redis-fleet-8.10.3** (supersedes 8.10.2) restarts `tube-archivist-redis` and this deployment (its leg 4 restarts `deployment/tube-archivist`);
   **flux-reconciler-impersonation** uses tube-archivist as its canary; **media-naming-p3** renames on the shared media
   surface; **helm-drift-detection** asserts identical Helm revisions; **flux-oci-chart-sources** re-points the chart sources;
   **envoy-proxy-config-distroless-v1.39.4** perturbs the public path §4.6 reads. All in `conflicts_with`; reciprocity in those

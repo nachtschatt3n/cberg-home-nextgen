@@ -37,6 +37,7 @@ touches:
     - monitoring                      # the gates' instrument (Prometheus is reached through the same apiserver VIP)
 depends_on: []
 conflicts_with:
+  - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af
   - talos-linux-1.14.5   # reciprocal, 2026-11-02 sweep 2ad957af
   - envoy-proxy-config-distroless-v1.39.4   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # 2026-10-25: pruned dead refs kube-prometheus-stack-92.2.0, nocodb-2026.09.1, nextcloud-fleet-35.0.1, jellyfin-12.2.20261005 (executed/retired)

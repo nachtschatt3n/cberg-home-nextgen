@@ -52,6 +52,7 @@ depends_on:
                                           # have PASSED before this plan's GO. Not a hard technical dependency, a
                                           # blast-radius/attribution ordering (two authentik rolls, one cause each).
 conflicts_with:
+  - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af
   - authentik-web-max-requests            # also here: same file, never two pending commits in one window
   - etcd-timeouts-5000-500                # etcd must be quiet during the roll; do not stack
   - talos-linux-1.14.4                    # node roll evicts every authentik pod mid-verification (replaces retired 1.14.2)

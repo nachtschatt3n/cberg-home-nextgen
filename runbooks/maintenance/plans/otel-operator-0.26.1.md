@@ -58,6 +58,7 @@ touches:
                                        # storage extension), and this plan rolls the collectors twice.
 depends_on: []
 conflicts_with:                        # ONLY this field is honoured by window-scheduler.py.
+  - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af
   - otel-operator-0.25.1               # SAME HelmRelease, SAME PR #351. Superseded by this plan. Listed so
                                        # the two can never share a slot while 0.25.1 is still un-retired.
   - helm-drift-detection               # writes spec.driftDetection into this same HelmRelease

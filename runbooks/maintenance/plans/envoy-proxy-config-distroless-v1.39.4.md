@@ -52,6 +52,7 @@ depends_on: []
   # The controller coupling is a premise (`controller-is-1.9.2`), not a plan dependency:
   # envoy-gateway-1.9.2 executed and was retired in 418faa1e; chart 1.9.2 re-measured live 2026-10-13.
 conflicts_with:                       # every id re-checked as an existing, non-terminal plan file 2026-10-23;
+  - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af
   # 2026-10-25: pruned dead refs penpot-chart-1.10.0, external-dns-1.23.0 (executed/retired)
                                       # reasons in §6. DROPPED 2026-10-23 (no such plan file any more):
                                       # jellyfin-12.2.20261005, open-webui-17.0.0, coredns-1.48.2,
