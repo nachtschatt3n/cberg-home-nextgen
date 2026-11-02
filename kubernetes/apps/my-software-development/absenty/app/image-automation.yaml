@@ -45,13 +45,12 @@ metadata:
   name: absenty-image-updates
   namespace: my-software-development
 spec:
-  # SUSPENDED 2026-09-20 for the dependabot drain. Merging the queued PRs into the
-  # `production` branch publishes a new image per merge, and an UNSUSPENDED automation
-  # would roll the live Deployment ~10-40 min after each one, unattended, on an
-  # internet-facing app. Suspending makes the drain a deliberate single roll at the end
-  # instead of one per PR. REVERT THIS (delete the `suspend: true` line) once the queue
-  # is drained and the resulting image has been verified.
-  suspend: true
+  # RE-ENABLED 2026-11-03 (operator-approved), DEV ONLY. The dependabot-drain
+  # suspension of 2026-09-20 no longer applies to development: no mandatory
+  # manual step sits between a new `development-*` tag and the dev Deployment
+  # (db:prepare runs in the container command), and the policy below can only
+  # select `development-<ts>` tags, newest build first. The production automation
+  # in my-software-production stays SUSPENDED; see the note there.
   # UNSUSPENDED 2026-08-15, after both reasons it was suspended were removed:
   #   1. the ImagePolicy above now selects by build time, not by hex-sha sort;
   #   2. the upstream ci.yml is now the only publisher, it branch-prefixes

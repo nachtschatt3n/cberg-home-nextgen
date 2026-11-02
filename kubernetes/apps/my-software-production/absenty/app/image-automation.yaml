@@ -52,6 +52,10 @@ spec:
   # instead of one per PR. REVERT THIS (delete the `suspend: true` line) once the queue
   # is drained and the resulting image has been verified.
   suspend: true
+  # REVISIT ~2026-11-10 (operator, 2026-11-03): production stays suspended for one
+  # stable week after the dev automation was re-enabled and the new ARC-runner
+  # builds proved out. Until then production rolls are manual tag bumps in the
+  # HelmRelease. Dev's automation (my-software-development) is already active.
   # UNSUSPENDED 2026-08-15, after both reasons it was suspended were removed:
   #   1. the ImagePolicy above now selects by build time, not by hex-sha sort;
   #   2. the upstream ci.yml is now the only publisher, it branch-prefixes
