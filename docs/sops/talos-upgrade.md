@@ -1,8 +1,8 @@
 # SOP: Talos Linux Upgrade with Performance Tuning
 
 > Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. Section 14 records the `v1.13.10 → v1.14.1` roll (2026-09-27) and its lessons; section 15 is the post-roll verification and expected-transient list. **Current cluster state: Talos v1.14.1 + Kubernetes v1.36.0 (kernel 6.18.51-talos, Clang/ThinLTO; containerd 2.3.5; etcd 3.7.1) — rolled 2026-09-27.**
-> Version: `2026.10.04`
-> Last Updated: `2026-10-04`
+> Version: `2026.11.02`
+> Last Updated: `2026-11-02`
 > Owner: `homelab-ops`
 
 > **Cluster state (2026-09-27):** All three nodes (`k8s-nuc14-01/02/03`) are running Talos `v1.14.1` + Kubernetes `v1.36.0` (kernel `6.18.51-talos`, containerd `2.3.5`, etcd `3.7.1` / storage `3.7.0`). **History: `talhelper genconfig` could not render v1.14 configs for this cluster from 2026-09-27 until the multi-document config migration landed 2026-10-04 (plan `talconfig-multidoc-migration`, talhelper 3.1.17, §14.2).** Performance sweep (BBR, conntrack, kubelet reservations, RPS mask, hugepages), intelgpu/udev patches, and Longhorn v2 OS prerequisites are all wired in. See §13 for the full two-stage traversal record and lessons learned.
@@ -1569,7 +1569,7 @@ mise exec -- flux get helmreleases -A   | awk 'NR==1 || $5 != "True"'
 # 6. Longhorn: all healthy, replica total == pre-roll baseline, AND volumes attached on every node (§9 iSCSI trap)
 mise exec -- kubectl get volumes -n storage -o custom-columns='NODE:.status.currentNodeID' --no-headers | sort | uniq -c
 # 7. DaemonSets: desired == ready everywhere
-mise exec -- kubectl get ds -A | awk 'NR==1 || $4 != $6'
+mise exec -- kubectl get ds -A | awk 'NR==1 || $3 != $5'   # DESIRED vs READY. With -A the columns are NAMESPACE NAME DESIRED CURRENT READY UP-TO-DATE; the old $4 != $6 compared CURRENT with UP-TO-DATE and missed a not-Ready pod (verified 2026-11-02)
 # 8. device plugins re-registered on every node (i915=5, npu accel=1)
 mise exec -- kubectl get nodes -o custom-columns='N:.metadata.name,GPU:.status.allocatable.gpu\.intel\.com/i915,NPU:.status.allocatable.npu\.intel\.com/accel'
 # 9. workload isolation NOT silently enabled: securityprofileconfig=0 AND positive control >= 1 on every node

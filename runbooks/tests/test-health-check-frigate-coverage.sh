@@ -111,4 +111,8 @@ check "no scored camera exit 2" "$rc" "2"
 check "caller no longer forwards a fixed 5000" "$(grep -c 'svc/frigate 5000:5000' "$HC")" "0"
 check "caller uses a private port" "$(grep -c 'svc/frigate "${FRIGATE_PORT}:5000"' "$HC")" "1"
 
+# 8. The 24h view (F-3a4d51a9) is wired: the 6h scan alone forgot a 6-12 h outage once its window rolled.
+check "caller runs a 24h scan at 75%" "$(grep -c 'frigate_coverage_scan "\$FRIGATE_PORT" 24 75' "$HC")" "1"
+check "24h unreadable is recorded UNMEASURED" "$(grep -c '_record_unmeasured "frigate-recording-coverage-24h"' "$HC")" "1"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

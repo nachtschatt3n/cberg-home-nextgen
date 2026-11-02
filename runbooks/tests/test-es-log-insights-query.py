@@ -204,9 +204,12 @@ else:
                 check("live cluster: the fixed query returns a hits.total (no parse error)",
                       "error" in d, False)
                 total = d.get("hits", {}).get("total", {}).get("value")
+                # Bound raised 1M -> 10M on 2026-11-02: a real Frigate error flood (one dead camera in
+                # an ffmpeg crash loop, ~240k/day) pushed a CORRECT 7d total to 1.6M and blocked commits.
+                # The bug this guards (a should-branch over-count) returns tens of millions.
                 check("live cluster: total is a plausible 7d error count, not a "
                       "should-branch over-count in the tens of millions",
-                      isinstance(total, int) and total < 1_000_000, True)
+                      isinstance(total, int) and total < 10_000_000, True)
         finally:
             pf.terminate()
             try:

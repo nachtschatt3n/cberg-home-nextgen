@@ -5273,6 +5273,35 @@ except Exception as e:
             fi
         fi
 
+        # 24h view (2026-11-02, F-3a4d51a9): after the 11-01 AP reboot four cameras lost
+        # 6-12 h of recordings and the 6h scan above had already rolled past the outage
+        # (it auto-closed its finding while 24h coverage read 44-71%). 75% is below the
+        # Reolinks' known steady-state loss (77-83% over 24h) and above a camera that
+        # lost about six hours, so it flags real multi-hour outages, not that known loss.
+        echo ""
+        echo "=== Recording Coverage (24h, continuous retention) ==="
+        COVERAGE24=$(frigate_coverage_scan "$FRIGATE_PORT" 24 75)
+        if [ $? -ne 0 ]; then
+            _record_unmeasured "frigate-recording-coverage-24h" "$(printf '%s' "$COVERAGE24" | sed -n 's/^UNMEASURED.//p' | head -1) (unknown, not clean)"
+            echo "  UNMEASURED: $(printf '%s' "$COVERAGE24" | sed -n 's/^UNMEASURED.//p' | head -1)"
+        else
+            printf '%s\n' "$COVERAGE24" | grep -v '^LOW' | awk -F'\t' '{printf "  %s: %s%%\n", $1, $2}'
+            COVERAGE24_LOW_REAL=""
+            for cam in $(printf '%s\n' "$COVERAGE24" | sed -n 's/^LOW.//p' | tr ',' ' '); do
+                if echo "$CAMERA_MAINTENANCE" | grep -qw "$cam"; then
+                    log_info "Camera recording gap 24h (maintenance, skipped): $cam"
+                else
+                    COVERAGE24_LOW_REAL="${COVERAGE24_LOW_REAL:+$COVERAGE24_LOW_REAL,}$cam"
+                fi
+            done
+            if [ -n "$COVERAGE24_LOW_REAL" ]; then
+                log_warning "Frigate recording coverage below 75% over 24h (a multi-hour outage): $COVERAGE24_LOW_REAL"
+                add_major_issue "Frigate recording coverage below 75% over 24h (a multi-hour outage): $COVERAGE24_LOW_REAL"
+            else
+                log_success "Frigate recording coverage >= 75% over 24h on every recording camera"
+            fi
+        fi
+
         kill $PF_PID 2>/dev/null || true
         wait $PF_PID 2>/dev/null || true
 
