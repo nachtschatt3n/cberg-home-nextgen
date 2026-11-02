@@ -89,16 +89,24 @@ spec:
               #  value: "false"
 
             probes:
-              # Check controller health without depending on admin UI port (can be disabled)
+              # tcpSocket on the admin port (8081), NOT an exec probe. The previous
+              # `iobroker status` exec probe spawned node from the container upper
+              # layer every 10-30s and tripped Falco rule 100404 ~11.5k times/day
+              # (security_ref: F-2804f72b). 8081 is the only listener bound to
+              # 0.0.0.0 (verified live; states/objects 9000/9001 are loopback-only,
+              # so the kubelet cannot reach them). TRADE-OFF: this only proves the
+              # admin adapter is accepting connections, not that js-controller
+              # reports "is running" (adapters are children of the controller, so a
+              # dead controller drops 8081 too). If the admin adapter is ever
+              # disabled these probes will fail; re-point them at another
+              # 0.0.0.0 listener then. Timings are unchanged from the exec probes;
+              # the startup probe still allows 60 x 15s = 15min for a slow first boot.
               liveness:
                 enabled: true
                 custom: true
                 spec:
-                  exec:
-                    command:
-                      - sh
-                      - -c
-                      - iobroker status | grep -q "is running"
+                  tcpSocket:
+                    port: 8081
                   initialDelaySeconds: 60
                   periodSeconds: 30
                   timeoutSeconds: 5
@@ -108,11 +116,8 @@ spec:
                 enabled: true
                 custom: true
                 spec:
-                  exec:
-                    command:
-                      - sh
-                      - -c
-                      - iobroker status | grep -q "is running"
+                  tcpSocket:
+                    port: 8081
                   initialDelaySeconds: 30
                   periodSeconds: 10
                   timeoutSeconds: 5
@@ -122,11 +127,8 @@ spec:
                 enabled: true
                 custom: true
                 spec:
-                  exec:
-                    command:
-                      - sh
-                      - -c
-                      - iobroker status | grep -q "is running"
+                  tcpSocket:
+                    port: 8081
                   initialDelaySeconds: 0
                   periodSeconds: 15
                   timeoutSeconds: 5
