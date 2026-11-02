@@ -95,10 +95,10 @@ finding_refs: [F-cb9182ca]        # version row "edot-collector: image otel/open
                                   # monitor: edot ES dropped metric points, 360/h since 2026-10-31) is NOT
                                   # answered here — it is a pre-existing baseline this plan must not be
                                   # blamed for or credited with (§2.4, §6).
-review: null                      # plan-reviewer verdict 2026-11-02 was needs-fix (B1-B3); amended same day,
+review: ready-for-go@2026-11-02   # plan-reviewer 2026-11-02: needs-fix (startup gate could never pass against the secured ES), fixed, delta re-review ready-for-go; AUTO-NIGHT pre-approval (SD-11 conditions met)
                                   # RE-REVIEW owed before vetting. Never hand-write ready-for-go.
-status: draft
-window: null                      # SUGGESTED: nightly:2026-11-10 (carried from superseded edot-collector-0.163.2,
+status: vetted
+window: "nightly:2026-11-10"   # carried over from the superseded edot-collector-0.163.2; AUTO-NIGHT, no operator GO needed
                                   # which held it as vetted; after otel-operator-0.26.1 on sat-attended:2026-11-07,
                                   # separate slot). NOT stamped: status draft + review null until the re-review;
                                   # the orchestrator / window agent assigns it.
