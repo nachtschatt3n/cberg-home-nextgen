@@ -111,7 +111,7 @@ touches:
     - talos-machineconfig             # node OS + kernel 6.18.51 -> 6.18.58 (block WBT newly ON; on-demand module
                                       # loading newly ON, §1.2); Phase K patches the live machine config (image
                                       # fields, NO_REBOOT)
-depends_on: [etcd-timeouts-5000-500]  # operator decision 2026-11-02: etcd-timeouts-5000-500 (sun-attended:2026-11-08) lands FIRST, then
+depends_on: [etcd-timeouts-5000-500, longhorn-1.13.0]  # operator decision 2026-11-02: etcd-timeouts-5000-500 (sun-attended:2026-11-08) lands FIRST, then
                                       # longhorn-1.13.0 (11-15), then this roll. Otherwise nothing unexecuted must land first. talconfig-multidoc-migration executed
                                       # 2026-10-04 (a7965251); premise multidoc-migration-applied-on-all-nodes is the
                                       # live gate.
@@ -165,7 +165,7 @@ conflicts_with:                       # exclusive: true already keeps everything
   # every §4 gate. The hold is ENFORCED: deny rule "*kube-prometheus-stack*" in runbooks/auto-update-policy.yaml
   # (commit 3139010e, 2026-11-02) keeps PR #428 out of every Step 0; it EXPIRES/is revisited by 2026-11-30 and must
   # stay until §5.4 has ended (§6.3). Reciprocity owed by: talos-power-tuning-ab (still names only
-  # talos-linux-1.14.2), flux-fleet-0.62.0 / flux-oci-chart-sources (name no talos plan); etcd-timeouts-5000-500
+  # talos-linux-1.14.2), flux-fleet-0.62.0 (names no talos plan; flux-oci-chart-sources now names -1.14.5); etcd-timeouts-5000-500
   # already names -1.14.5.
 capability_change: true               # node BEHAVIOUR changes, not just versions (§1.2): kernel CONFIG_BLK_WBT on the NVMe
                                       # etcd/Longhorn/images share (1.14.2); kubelet CPU/memory-manager state files Talos
@@ -202,9 +202,9 @@ finding_refs:
   # kube-controller`. NOT claimed (owned elsewhere, context only): F-27a3f024 / F-6938f5a1 / F-96358dac / F-f5879ed8
   # (etcd churn tracking), F-98043e32 (authentik-web-max-requests deferrals on the etcd premise), F-3602cfa9
   # (unexplained 09-24 stall, residual risk §7), F-7b842e62 (rebuild-limit monitor), F-43f0266f (nuc14-02 igc NIC).
-review: null
-status: draft
-window: null                          # the window agent assigns -- the slot is the OPERATOR'S call (§6.2). sun-attended:
+review: ready-for-go@2026-11-02       # plan-reviewer 2026-11-02: needs-fix (stale slot/order prose, depends_on) -> fixed (23bbcdd3) -> delta re-review needs-fix on depends_on listing only etcd-timeouts -> fixed -> ready-for-go. HUMAN-GATED: operator GO on the dated slot, premises re-run after etcd-timeouts and longhorn-1.13.0 land
+status: vetted
+window: "sun-attended:2026-11-22"   # OPERATOR-CHOSEN 2026-11-02 (chat: etcd-timeouts first, then Talos on a later Sunday; §6.2). History: sun-attended:
                                       # 2026-11-01 was MISSED (1.14.4 never ran; it is superseded, window cleared).
                                       # Recommendation only: sun-attended:2026-11-22 (operator ordering 2026-11-02:
                                       # etcd-timeouts-5000-500 on 11-08, longhorn-1.13.0 on 11-15, then this roll; 11-22 is
@@ -1482,7 +1482,7 @@ git --no-pager diff runbooks/auto-update-policy.yaml
 **Expected diff (dry-tested 2026-10-31 on a scratch copy; the hunk header drifts as the file grows — it was line 453 on
 10-01, 476 on 10-31 and ~503 on 2026-11-02 — so assert ONLY the one `-`/`+` pair, never the `@@` numbers):**
 ```diff
-@@ -503,7 +503,7 @@
+@@ -500,7 +500,7 @@
    # reader to discount a reason that is load-bearing on the OTHER rule.
    - match: "aqua:siderolabs/talos"
      reason: "talosctl CLI pin — tracks the CLUSTER version (talosVersion in
@@ -2831,7 +2831,7 @@ waived: it must pass at the GO **and again at window start (§2)**; **fresh chur
 this plan then drains a node under it (§3.10 pattern (ii) history).
 
 **Slot (operator decision 2026-11-02; `window` stays `null` until the GO): `sun-attended:2026-11-22`.** Order:
-`etcd-timeouts-5000-500` (11-08, GO recorded) -> `longhorn-1.13.0` (11-15, GO recorded) -> this roll. Preconditions:
+`etcd-timeouts-5000-500` (11-08; GO of 10-19 is scoped 'run now', a GO on the dated slot is still owed per its own note) -> `longhorn-1.13.0` (11-15, GO recorded) -> this roll. Preconditions:
 `etcd-timeouts-5000-500` executed (its no-reboot verdict was measured on etcd 3.7.1 and must be re-measured on 3.7.3
 after this roll); `longhorn-1.13.0` executed with >= 2 green nightly backups and the §2 baselines re-read after it.
 Because the Longhorn rebuild time R at replica limit 2 is unmeasured and may exceed the 25-minute finish-today cutoff
@@ -2872,7 +2872,7 @@ Frontmatter scan 2026-10-31 (re-checked 2026-11-02 for the five plans added to `
 NON-terminal plans list `talos-linux-1.14.4` (some also or only `-1.14.2`) in `conflicts_with`; each owner should
 retarget the line to `talos-linux-1.14.5` in its next edit (not edited from here; `exclusive: true` already keeps
 them out of this slot). **Added 2026-11-02:** `otel-operator-0.26.1` and `edot-collector-0.164.0` already name
-`-1.14.5`; `flux-fleet-0.62.1` names only `-1.14.2`; `flux-fleet-0.62.0` and `flux-oci-chart-sources` name no Talos
+`-1.14.5`; `flux-fleet-0.62.1` names only `-1.14.2`; `flux-fleet-0.62.0` names no Talos
 plan at all — each should add `talos-linux-1.14.5`:
 `authentik-2026.8.5`, `authentik-web-max-requests`, `edot-collector-0.163.2`, `edot-collector-0.164.0`,
 `envoy-proxy-config-distroless-v1.39.4`/`-v1.40.0`/`-v1.40.2`, `frigate-reolink-go2rtc-flv`,
@@ -3097,5 +3097,5 @@ id") is itself stale since 2026-10-04 and should follow the premise above (repor
    `$4 != $6`; (c) `runbooks/auto-update-policy.yaml` now carries the time-boxed `*kube-prometheus-stack*` deny rule (3139010e,
    2026-11-02, revisit by 2026-11-30), which enforces the "no Prometheus change in the roll window" rule (§6.3); it
    must be extended if this roll slips past 11-29.
-14. **`talos-power-tuning-ab` / `flux-fleet-0.62.x` / `flux-oci-chart-sources`** (`etcd-timeouts-5000-500` already names -1.14.5) do not name
+14. **`talos-power-tuning-ab` / `flux-fleet-0.62.x`** (`etcd-timeouts-5000-500` already names -1.14.5) do not name
    `talos-linux-1.14.5` in their `conflicts_with` (§6.3b) — reciprocity owed by their owners.
