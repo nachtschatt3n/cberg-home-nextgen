@@ -34,6 +34,23 @@ spec:
   hostnames:
     - "immich.${SECRET_DOMAIN}"
   rules:
+    # Compensating control (security_ref: F-6368968f, F-d371c89e): reject request
+    # bodies that declare a Brotli Content-Encoding before they reach the app.
+    # The app never legitimately receives one. A header match adds precedence over
+    # the plain "/" rule below, so this wins for everything except the more
+    # specific /push prefix. Remove when the security_ref findings close.
+    - matches:
+        - path: { type: PathPrefix, value: / }
+          headers:
+            - type: RegularExpression
+              name: Content-Encoding
+              value: "(?i)(^|[ ,])br([ ,;]|$)"
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: immich-server-reject-br-body
     - matches:
         - path: { type: PathPrefix, value: / }
       backendRefs:
@@ -48,3 +65,16 @@ spec:
         # failing partway.
         request: 3600s
         backendRequest: 3600s
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: immich-server-reject-br-body
+  namespace: media
+spec:
+  directResponse:
+    statusCode: 415
+    contentType: text/plain
+    body:
+      type: Inline
+      inline: "unsupported content-encoding\n"
