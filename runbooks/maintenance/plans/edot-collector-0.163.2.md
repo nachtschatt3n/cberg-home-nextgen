@@ -112,9 +112,17 @@ finding_refs: [F-cb9182ca]        # version row "edot-collector: image
                                   # (minor)", open/unchanged 2026-10-19
                                   # (`finding list --all --grep 0.163`). F-76387378 (ES
                                   # dropped metric points, monitor) is NOT answered here.
-review: ready-for-go@2026-10-23
-status: vetted
-window: "nightly:2026-11-10"       # after otel-operator-0.25.1 (sat-attended:2026-11-07), separate slot
+review: null                      # was ready-for-go@2026-10-23; a superseded plan carries no verdict
+status: superseded                # 2026-11-02: PR #324 was RE-TARGETED by Renovate 0.163.2 -> 0.164.0
+                                  # (2026-10-27); this plan's §2.2 gate (title must read 0.163.2) STOPs, and
+                                  # its §4.0 / §3 step 4 gate `Connected to Elasticsearch` >= 3 can NEVER pass
+                                  # on a healthy collector (the exporter's version probe is unauthenticated and
+                                  # gets 401 from our ES; plan-reviewer + local reproduction 2026-11-02). DO NOT
+                                  # RUN. The live plan is edot-collector-0.164.0. Never executed.
+superseded_by: edot-collector-0.164.0
+window: null                      # was "nightly:2026-11-10" (after otel-operator-0.25.1 on sat-attended:2026-11-07,
+                                  # separate slot); the slot is carried by edot-collector-0.164.0 as a SUGGESTED
+                                  # window (draft, review null until re-review)
 premises:
   # Re-checked at EXECUTION time. All four RUN on 2026-10-19 while writing this plan.
   - id: image-is-still-0.161.0
@@ -163,6 +171,13 @@ generated: "2026-10-19"
 ---
 
 # edot-collector: image 0.161.0 → 0.163.2 (0.x release-line move, two minors)
+
+> **SUPERSEDED 2026-11-02 by `edot-collector-0.164.0` — DO NOT RUN.** Renovate re-targeted PR #324 to
+> 0.164.0, so §2.2's title gate STOPs. Independently, the `Connected to Elasticsearch` gate in §3 step 4
+> and §4.0 can never pass on a healthy collector: the exporter's version probe (`es_version.go`) sends
+> no credentials, our ECK ES answers 401, and the healthy start logs three `failed to fetch
+> Elasticsearch info ... status 401` warnings and zero `Connected` lines. The body below is kept
+> unedited for history only; the corrected startup gate is `edot-collector-0.164.0` §1.3b / §4.0.
 
 ## 1) Summary & why held
 

@@ -80,8 +80,12 @@ finding_refs: [F-61e4d5b6, F-e918a007] # VERIFIED 2026-10-17 via `policy-cli.py 
                                        # superseded otel-operator-0.24.4 plan - landing 0.25.1 answers it.
                                        # No finding exists for 0.25.1 itself.
 review: ready-for-go@2026-10-23
-status: vetted
-window: "sat-attended:2026-11-07"      # attended slot only; assigned 2026-10-23 (coordinator), runs BEFORE edot-collector-0.163.2
+status: superseded                     # 2026-11-02 superseded by otel-operator-0.26.1: Renovate re-targeted PR #351 from 0.25.1 to
+                                       # 0.26.1 (updatedAt 2026-10-29), so merging #351 now lands 0.26.1 and this plan's Step B
+                                       # would STOP at its 2(c) diff check after burning the slot. Was: vetted, review
+                                       # ready-for-go@2026-10-23, window sat-attended:2026-11-07. That review and GO do NOT transfer.
+superseded_by: otel-operator-0.26.1
+window: null                           # CLEARED 2026-11-02 (was "sat-attended:2026-11-07"); the slot goes to otel-operator-0.26.1
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md

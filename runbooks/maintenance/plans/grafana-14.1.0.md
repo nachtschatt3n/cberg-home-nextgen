@@ -35,7 +35,7 @@ conflicts_with:                   # ONLY this field is honoured by the scheduler
   - longhorn-1.13.0               # grafana-config is a Longhorn volume; this plan snapshots/backs it up and may restore it
   - helm-drift-detection          # edits spec of EVERY HelmRelease incl. helmrelease/grafana: same object, attribution
   - flux-oci-chart-sources        # rewrites the chart source of HelmReleases incl. grafana (it also rolls deployment/grafana)
-  - otel-operator-0.25.1          # SOFT (attribution hygiene, no technical coupling found): both gate on ns monitoring
+  - otel-operator-0.26.1          # SOFT (attribution hygiene, no technical coupling found): both gate on ns monitoring
   - edot-collector-0.163.2        # signals; keep a failed gate attributable to ONE change. Neither plan reads Grafana.
   - edot-collector-0.164.0        # (draft, added 2026-10-30; it already lists this plan)
 exclusive: false

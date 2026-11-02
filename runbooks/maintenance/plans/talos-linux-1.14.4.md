@@ -163,9 +163,10 @@ finding_refs:
   # tracking CI load — etcd-timeouts-5000-500), F-3602cfa9 (unexplained 09-24 stall, residual risk §7),
   # F-7b842e62 (rebuild-limit monitor; the operator set 2 on 10-13), F-c8f51398 (sporadic kubelet probe
   # timeouts on nuc14-01 — a pre-existing baseline item for §4.4, not caused by this plan).
-review: ready-for-go@2026-10-23
-status: vetted
-window: "sun-attended:2026-11-01"   # handed over 2026-10-23 from superseded talos-linux-1.14.2 (exclusive, solo, reboot-capable Sunday)
+review: ready-for-go@2026-10-23   # historical: this review and the 2026-10-23 operator GO covered v1.14.4 ONLY; both LAPSED with the supersede -- talos-linux-1.14.5 needs a fresh review + a fresh GO
+status: superseded   # 2026-11-02: retargeted to talos-linux-1.14.5 (v1.14.5 shipped 2026-10-26, so this plan's premise newest-stable-talos-is-v1.14.4 fails); never executed
+superseded_by: talos-linux-1.14.5
+window: null   # CLEARED 2026-11-02: sun-attended:2026-11-01 was MISSED (nothing ran). Do not re-stamp; the successor's slot is the operator's call (recommended sun-attended:2026-11-08).
 premises:
   # All read-only, single pipelines. Upstream reads use `kubectl get --raw` against a public host with
   # --kubeconfig=/dev/null and a dummy bearer (--token=none): kubectl is the only HTTP client plan-premises.py

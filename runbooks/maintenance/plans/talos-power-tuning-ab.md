@@ -46,6 +46,7 @@ depends_on: []
                                       # soak-24h-recorded (the soak JSON exists only after CAPSTATS_OK); the ordering is in
                                       # conflicts_with below.
 conflicts_with:
+  - talos-linux-1.14.5   # reciprocal, 2026-11-02 sweep 2ad957af
   # 2026-10-25: pruned dead refs talos-sysfs-power-caps, kube-prometheus-stack-91.9.0, immich-machine-learning-3.2.4, nextcloud-fleet-35.0.1 (executed/retired)
   - talos-linux-1.14.2                # rolling reboot; a reboot mid-A/B voids the variant and re-reads the card index
   - multus-macvlan-foundation         # also talosctl apply-config on the same nodes
