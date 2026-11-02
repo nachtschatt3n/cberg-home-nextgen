@@ -5,6 +5,7 @@ metadata:
   name: mealie-shopping-sync
   namespace: office
 spec:
+  suspend: true
   # Every 5 minutes. Mealie can fire a `shoppingListUpdated` event, but it is
   # delivered through Apprise as a plain message with no payload, so a receiver
   # would still have to fetch the list -- all the moving parts of a webhook for
