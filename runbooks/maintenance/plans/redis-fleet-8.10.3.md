@@ -1072,9 +1072,9 @@ Cleanup after a successful window (not a rollback): `rm -f /tmp/ta-dump-*.rdb /t
   plan HUMAN-GATED and in an attended slot.
 - **Window.** Suggestion `sun-attended:2026-11-29` (80 min against the 180-min schedulable Sunday
   budget); alternative `sat-attended:2026-11-28` does NOT fit (70-min budget). Do not use 11-07, 11-08,
-  11-14, 11-15, 11-21, 11-22: each holds a plan in `conflicts_with` (helm-drift/otel-operator-0.25.1,
+  11-14, 11-15, 11-21, 11-22: each holds a plan in `conflicts_with` (helm-drift/otel-operator-0.26.1,
   etcd, python-fleet, longhorn, authentik, flux-oci-chart-sources). §2 e reads the scheduler and fails
-  loudly if the slot is shared. The `window:` stamp is intentionally null until the re-review.
+  loudly if the slot is shared. The `window:` stamp was set at the operator GO (2026-11-02).
 - **Same-night Prometheus consumers.** §4 reads Prometheus: a same-night `kube-prometheus-stack` bump
   (auto lane, no plan file, so it cannot be named in `conflicts_with`) would confound the controls.
   Check Step 0's applied list before leg 1 (§2 e note).

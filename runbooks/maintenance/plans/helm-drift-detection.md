@@ -94,6 +94,7 @@ conflicts_with:
   - redis-fleet-8.10.3                # retargeted 2026-10-27 (8.10.2 superseded); upgrades immich-redis + sure-redis HRs
   # traccar-6.16.0 REMOVED 2026-09-29: executed green in nightly:2026-09-29 (3a943035), plan retired (1a40b257)
   - otel-operator-0.23.0              # reciprocal (it names this plan); HR bump -> attribution
+  - otel-operator-0.26.1              # same HelmRelease family; reciprocal added 2026-11-02 (plan-reviewer)
 security_ref: null
 capability_change: false              # no user-visible behaviour changes; Flux reconciles the
                                       # same manifests, it merely starts to notice edits

@@ -66,8 +66,8 @@ conflicts_with:                        # ONLY this field is honoured by window-s
   - edot-collector-0.163.2             # Daemon collectors export OTLP into edot-collector.monitoring.svc:4317,
   - edot-collector-0.164.0             # and §4.4 proves this plan by docs landing in ES THROUGH edot. A
                                        # same-night edot roll makes both plans' ES gates unattributable.
-                                       # 0.164.0 is the draft that retargets 0.163.2. Its reciprocal names
-                                       # otel-operator-0.25.1 and must be repointed to this plan.
+                                       # 0.164.0 is the draft that retargets 0.163.2. Its reciprocal already
+                                       # names this plan (checked 2026-11-02).
   - talos-linux-1.14.5                 # exclusive draft that SUPERSEDES 1.14.4 (node roll re-creates every
                                        # collector pod; §4.4 per-node gate cannot attribute a missing node)
   - talos-linux-1.14.4                 # MISSED sun-attended:2026-11-01, superseded by the 1.14.5 draft. Keep until
@@ -102,11 +102,10 @@ finding_refs: [F-60ebcdb5, F-61e4d5b6, F-3b519d4a]
                                        # operator.networkpolicy feature gate in a plan". Carried from 0.25.1.
                                        # F-3b519d4a (plan): close superseded PR #356 (0.24.6). Answered in §3.5.
                                        # F-e918a007 (carried by 0.25.1) no longer lists as open.
-review: null
-status: draft
-window: null                           # the window agent assigns it (see §6 "Scheduling"). SUGGESTED, not assigned:
-                                       # sat-attended:2026-11-07 SOLO (55 of 70 min; move helm-drift-detection out),
-                                       # fallback sat-attended:2026-11-28 solo. Needs a fresh GO first (see the header).
+review: ready-for-go@2026-11-02       # plan-reviewer 2026-11-02: ready-for-go, 0 blocking, premises 8/8; stale scheduling prose fixed in the same edit. HUMAN-GATED: fresh operator GO on this plan_id (the 0.25.1 GO does not carry over)
+status: vetted
+window: "sat-attended:2026-11-07"      # OPERATOR GO 2026-11-02: SOLO (55 of 70 min). helm-drift-detection was moved to
+                                       # sat-attended:2026-11-28 the same day; fallback sat-attended:2026-12-05 solo.
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
@@ -150,13 +149,12 @@ premises:
 
 # otel-operator — opentelemetry-kube-stack 0.24.3 → 0.26.1
 
-**Supersedes `otel-operator-0.25.1`** (vetted 2026-10-23 and scheduled in
-sat-attended:2026-11-07; **do not run it**). Renovate re-targeted PR #351 from
+**Supersedes `otel-operator-0.25.1`** (vetted 2026-10-23; now `status: superseded`, **do not run it**). Renovate re-targeted PR #351 from
 0.25.1 to **0.26.1** (PR updated 2026-10-29). Merging #351 now lands 0.26.1, so
 0.25.1's Step B would install a chart its analysis never covered. Its §2(c) PR-diff
-check would STOP it, but only after the slot is spent. The window agent must mark
-0.25.1 `status: superseded` / `superseded_by: otel-operator-0.26.1` and give its
-slot to this plan (see §6).
+check would STOP it, but only after the slot is spent. 0.25.1 is marked
+`status: superseded` / `superseded_by: otel-operator-0.26.1` (done 2026-11-02) and this
+plan holds its slot (see §6).
 
 **Retarget, not chain.** Chaining would mean hand-writing a `version: 0.25.1` commit
 (no PR exists for it any more), verifying it, then merging #351 in a second
@@ -487,7 +485,7 @@ No manual `flux reconcile`: the push webhook drives the source. Only if
 ```bash
 kubectl -n monitoring rollout status deploy/otel-operator-opentelemetry-operator --timeout=5m
 kubectl -n monitoring rollout status daemonset/otel-operator-daemon-collector --timeout=10m
-ROLLOUT_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo "ROLLOUT_TS=$ROLLOUT_TS"
+ROLLOUT_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo "ROLLOUT_TS=$ROLLOUT_TS"   # rollout status can return before the operator rewrites the DaemonSet: if section 4.1 shows any pod still on 0.159.0, re-stamp ROLLOUT_TS after all three show 0.162.0
 flux get hr otel-operator -n monitoring
 ```
 Expect `Ready True` and `Helm upgrade succeeded … 0.26.1`. While §3.4 runs, run
@@ -744,31 +742,28 @@ upgrade and rollback waits on a CR that only a Ready operator can settle.
 - **Attended slot only** (`autonomy_override: human-gated`): sat-attended or
   sun-attended. No reboot is needed, and the plan does not need to be exclusive.
 - **Scheduling (addresses the sat-attended:2026-11-07 warnings).** That slot
-  currently holds `helm-drift-detection` (60 min) + `otel-operator-0.25.1` (55 min) =
-  115 min against a 70-min schedulable budget (90 − 20 Step-0). The two also
-  conflict, since both write this HelmRelease. Neither fits beside the other in any
-  Saturday. Options, in order of preference:
-  1. **Give 11-07 to this plan SOLO** (55/70) and move `helm-drift-detection`
-     (60/70; its own frontmatter wants to be the LAST/only plan of an attended
-     window) to **sat-attended:2026-11-28**, which has no plans as of 2026-10-31.
-     This keeps the operator-chosen order "otel-operator before edot"
-     (edot-collector-0.163.2 is on nightly:2026-11-10).
-  2. Otherwise put this plan on **sat-attended:2026-11-28 solo**. The edot plan
-     then runs first. That is acceptable (§1.3.3: OTLP needs no ordering), but edot's
+  held `helm-drift-detection` (60 min) + `otel-operator-0.25.1` (55 min) =
+  115 min against a 70-min schedulable budget (90 − 20 Step-0) until 2026-11-02,
+  when 0.25.1 was superseded and `helm-drift-detection` moved to 11-28. The slot is
+  now free of conflicting plans. Options, in order of preference:
+  1. **Give 11-07 to this plan SOLO** (55/70). `helm-drift-detection` (60/70; its
+     own frontmatter wants to be the LAST/only plan of an attended window) is
+     already on **sat-attended:2026-11-28**. This keeps the operator-chosen order
+     "otel-operator before edot" (edot-collector-0.163.2 is on nightly:2026-11-10).
+  2. Otherwise put this plan on **sat-attended:2026-12-05 solo** (11-28 now holds
+     helm-drift-detection, a conflict). The edot plan then runs first. That is acceptable (§1.3.3: OTLP needs no ordering), but edot's
      "after otel-operator" comment becomes stale.
   - Not 11-14 (python-fleet 35 + 55 = 90 > 70) and not 11-21 (authentik 45 + 55 =
-    100 > 70). sun-attended:2026-11-29 (redis-fleet 45 + 55 = 100/180) also fits,
-    but redis-fleet's §4 reads Prometheus too. Prefer a Saturday.
+    100 > 70). sun-attended:2026-11-29 does NOT work:
+    redis-fleet-8.10.3 (80 min) is slotted there and is in this plan's conflicts_with.
+    Prefer a Saturday.
   - Optional shrink: Step A (§3.2) is a values-only, same-binary change. A window
     agent may land it in an earlier slot as its own unit, which leaves ~40 min for the
     attended run. Only do this if §3.2's PASS/FAILS gate is run there too.
-- **Retire the superseded plan in the same edit that windows this one:**
-  `otel-operator-0.25.1` → `status: superseded`, `superseded_by: otel-operator-0.26.1`,
-  `window: null`. Repoint the reciprocal `conflicts_with` entries naming
-  `otel-operator-0.25.1` in edot-collector-0.163.2, edot-collector-0.164.0,
-  talos-linux-1.14.4 and grafana-14.1.0 to `otel-operator-0.26.1`. Otherwise those
-  plans protect against a plan that will never run. (A planner may write only its
-  own file, so this is left to the window agent / sweep.)
+- **Superseded plan retired (done 2026-11-02):** `otel-operator-0.25.1` is
+  `status: superseded`, `superseded_by: otel-operator-0.26.1`, `window: null`, and the
+  reciprocal `conflicts_with` entries in edot-collector-0.164.0, talos-linux-1.14.5 and
+  grafana-14.1.0 already name `otel-operator-0.26.1`.
 - **edot-collector-0.163.2 / 0.164.0: separate slots, either order.** Both gate on
   ES ingestion through the same edot hop. Note that the 0.162 elasticsearch-exporter
   breaking changes (`flush`/`num_workers` removed, profiles to 9.6 data streams)
