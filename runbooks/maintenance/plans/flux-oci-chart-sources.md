@@ -7,58 +7,65 @@ pr: null                              # No Renovate PR exists or can exist: this
                                       # understands; it has no opinion about which KIND of
                                       # source holds the chart.
 kind: infra
-current: "30 HTTP HelmRepository chart sources + 10 type:oci HelmRepository + 1 OCIRepository + 2 GitRepository — recounted 2026-09-11 after 4dfc3e32 (pajikos deleted) and 001ab0ad (csi-driver-smb moved to a commit-pinned GitRepository). Stage 1 is 5-of-6 executed (7c048735): five orphans deleted, leaving external-secrets deliberately HELD by the operator; a further orphan (GitRepository k8s-self-ai-ops) was measured the same day (F-c73cd510)"
-target: "every referenced chart with an immutable OCI source migrated to OCIRepository pinned by tag AND digest; unreferenced sources deleted; the rest explicitly parked with a named reason — delivered in 11 stages, each independently abandonable"
+current: "28 HTTP HelmRepository chart sources (all 28 referenced by a HelmRelease) + 9 type:oci HelmRepository + 4 OCIRepository (ONE is this plan's: network/k8s-gateway; three are the ARC runner charts from the gha-fleet work) + 4 GitRepository (flux-system, csi-driver-smb, oc8, plex) — re-measured live 2026-11-03. Stage 1 is COMPLETE (the last orphan, external-secrets, was deleted by 67216b3b / F-fb2cc8a2 on 2026-10-23); stage 2 executed by another route (GitRepository); plex moved to a GitRepository (102ec800). Cluster and Flux CLI are v2.9.6."
+target: "every referenced chart with an immutable OCI source migrated to OCIRepository pinned by tag AND digest; the rest explicitly parked with a named reason — delivered in 11 stages, each independently abandonable. The sun-attended:2026-12-13 slot carries STAGE 3 ONLY (six no-roll releases), and only after operator decision D1 (section 1.0) is recorded."
 update_type: refactor
 risk: high                            # NOT from any single stage. Two drivers, both
                                       # measured, both in §1: (a) the migration ROLLS the
-                                      # workload — 22 releases / 38 workloads carry a
-                                      # chart-version-derived pod-template label, and the
-                                      # set includes the CNI DaemonSet, the CSI driver for
-                                      # all 19 CIFS classes, longhorn-manager, the
-                                      # cert-manager webhook and the SSO server; (b) every
-                                      # stage edits the Kustomization that gates delivery
-                                      # for the whole cluster. Per-stage risk is in the
-                                      # stage table — stages 0, 1, 3 and 4 are genuinely low.
-est_duration_min: 30                  # PER STAGE, not for the programme. The stage table in
-                                      # §3.1 carries each stage's own figure; the whole
-                                      # thing is ~6h of work across many windows and must
-                                      # never be scheduled as one unit. Same convention as
-                                      # float-tag-pinning.
+                                      # workload — 12 in-scope releases / 21 workloads carry a
+                                      # chart-version-derived pod-template label (re-measured
+                                      # 2026-11-03), and the set includes the CNI DaemonSet,
+                                      # longhorn-manager, the cert-manager webhook and the SSO
+                                      # server; (b) every stage edits the Kustomization that
+                                      # gates delivery for the whole cluster. Per-stage risk is
+                                      # in the stage table — stages 0, 1, 3 and 4 are genuinely
+                                      # low. The 12-13 slice (stage 3) is low risk and no-roll.
+est_duration_min: 90                  # RE-SCOPED 2026-11-03 from 30 (per stage) to the figure for
+                                      # the ONE slice this window carries: Stage 3 = six releases
+                                      # x 15 min (intel x3, node-feature-discovery, paperless-ngx,
+                                      # falco). Later stages are separate slices with their own
+                                      # figures in §3.1 and need their own window; the whole
+                                      # programme (~6h) must never be scheduled as one unit.
 needs_reboot: false                   # No node reboot anywhere in this plan. But see §6:
                                       # a Talos roll RESTARTS source-controller, which is
                                       # the event this plan exists to survive, so it must
                                       # not share a window with one.
 touches:
-  namespaces: [flux-system, kube-system, cert-manager, storage, network, monitoring, media, office, databases, ai, home-automation, security, default]
+  namespaces: [flux-system, kube-system, cert-manager, storage, network, monitoring, office, ai, security]
+  # Namespaces of the stages that are executable (3, 4, 5, 6, 10). Stage 7's ten HTTP-only charts
+  # (databases, media, home-automation, default, office) and unpoller (monitoring, stage 8) are
+  # PARKED; whichever slice un-parks them adds its own namespaces in its own plan revision.
   resources:
     - "kustomization/cluster-meta (spec.wait:true — EVERY stage removes members from the gate that blocks cluster-apps)"
-    - "helmrepository/* in flux-system (36 HTTP objects: up to 30 replaced, 6 deleted)"
+    - "helmrepository/* in flux-system (28 HTTP objects: 17 replaced by stages 3-6, 1 blocked (unpoller), 10 parked (stage 7))"
     - "ocirepository/* (NEW, one per migrated app, in the app's own namespace)"
-    - "helmrelease/* (up to 32 releases switch spec.chart.spec -> spec.chartRef)"
-    - "daemonset/csi-smb-node + deployment/csi-smb-controller (ROLL — backs all 19 CIFS StorageClasses, 21 Bound PVCs)"
-    - "daemonset/cilium + deployment/cilium-operator (ROLL)"
-    - "daemonset/longhorn-manager + deployment/longhorn-{ui,driver-deployer} (ROLL — 94 volumes)"
-    - "deployment/cert-manager{,-webhook,-cainjector} (ROLL — webhook gap = Certificate admission failures)"
-    - "deployment/authentik-{server,worker} + statefulset/authentik-postgresql (ROLL — SSO)"
-    - "statefulset/nextcloud-mariadb, statefulset/open-webui, deployment/grafana, daemonset/otel-operator-daemon-collector (ROLL)"
-    - "runbooks/check-all-versions.py + runbooks/coverage.py (Stage 0 — chartRef blindness)"
+    - "helmrelease/* (up to 19 releases switch spec.chart.spec -> spec.chartRef across stages 3-6; stage 3 = 6 of them)"
+    - "helmrelease/kube-system/intel-device-plugin-{operator,gpu,npu}, helmrelease/kube-system/node-feature-discovery, helmrelease/office/paperless-ngx, helmrelease/security/falco (STAGE 3 — the 12-13 slice; no workload rolls)"
+    - "daemonset/cilium + deployment/cilium-operator (stage 6, ROLL)"
+    - "daemonset/longhorn-manager + deployment/longhorn-{ui,driver-deployer} (stage 6, ROLL — 79 volumes)"
+    - "deployment/cert-manager{,-webhook,-cainjector} (stage 6, ROLL — webhook gap = Certificate admission failures)"
+    - "deployment/authentik-{server,worker} + statefulset/authentik-postgresql (stage 5, ROLL — SSO)"
+    - "deployment/grafana, deployment+statefulset/open-webui, deployment/anythingllm, deployment/nextcloud, deployment/otel-operator + daemonset/otel-operator-daemon-collector (stage 5, ROLL)"
+    - "runbooks/check-all-versions.py + runbooks/coverage.py (Stage 0 — chartRef blindness; DONE 97c3e913)"
     - "fluxinstance/flux spec.kustomize.patches (Stage 10 — emptyDir sizeLimit)"
-  shared: [flux-sources, cni-adjacent, cert-manager, storage/longhorn, dns-internal, monitoring]
+  shared: [flux-sources, cni-adjacent, cert-manager, storage/longhorn, monitoring, authentik, public-dns]
 depends_on: []
-conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, otel-operator-0.23.0, jellyfin-12.1, paperless-db-13.0.2, longhorn-1.13.0, envoy-proxy-config-distroless-v1.39.4, tube-archivist-0.6.0, frigate-reolink-go2rtc-flv, grafana-14.1.0, talos-linux-1.14.5, otel-operator-0.26.1, redis-fleet-8.10.3]   # grafana-13.2.7 added 2026-10-01 (rolls deployment/grafana); grafana-13.2.6 removed 2026-09-30: executed + retired in nightly:2026-09-30 (a64bb61e)
-  # 2026-10-25: pruned dead refs nextcloud-fleet-35.0.1, penpot-chart-1.10.0, app-template-5.2.1, chart-patches-coredns-reloader-blackbox, flux-fleet-0.60.0, grafana-13.2.7 (executed/retired)
-  # RESOLVED 2026-10-04: uptime-kuma-2.5.5-slim-rootless (d60d14f7) + mariadb-chart-27.3.0 (418faa1e) executed + retired -- dead refs removed; mariadb-28.1.1 added as the reciprocal successor
-  # RESOLVED 2026-10-06: mariadb-28.1.1 executed green now:2026-10-05, plan retired in 5af1e51f -- ref removed
-  # talos-1.14.1/1.14.0 retired 2026-09-27 (dead refs removed). impersonation + drift-detection edit every HelmRelease;
-  # otel/nextcloud/jellyfin/penpot edit the same helmrelease.yaml a stage switches to chartRef (review 2026-09-28).
-  # flux-fleet-0.60.0: restarts flux-operator (sole flux_* exporter) and moves the flux-operator/flux-instance HRs; source-controller is NOT expected to roll (builder/ssa unchanged v0.57.0..v0.60.0; flux-fleet gate 4.4 checks it).
+conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, flux-fleet-0.62.0, flux-fleet-0.62.1, etcd-timeouts-5000-500, talos-linux-1.14.5, longhorn-1.13.0, authentik-2026.8.5, grafana-14.1.0, otel-operator-0.26.1, edot-collector-0.164.0, descheduler-0.37.0, anythingllm-1.19, jellyfin-3.7.0, tube-archivist-0.6.0, frigate-reolink-go2rtc-flv, envoy-proxy-config-distroless-v1.39.4, redis-fleet-8.10.3]   # RE-PLANNED 2026-11-03 against every open plan's frontmatter
+  # 2026-11-03: dropped dead refs otel-operator-0.23.0 (executed out-of-band 0e976cf5), jellyfin-12.1 (superseded by the 12.2 plan, itself later superseded), paperless-db-13.0.2 (executed a99794cc).
+  # 2026-11-03: ADDED flux-fleet-0.62.0/0.62.1 (draft: flux-operator + flux-instance HRs and fluxinstance/flux, which Stage 10 patches; each lists this plan),
+  #   etcd-timeouts-5000-500 (touches flux-system and perturbs the apiserver every Flux apply talks to; sun 11-08), authentik-2026.8.5 (sat 11-21; stage 5 switches authentik's chart source),
+  #   descheduler-0.37.0 / anythingllm-1.19 / jellyfin-3.7.0 (same HelmReleases as stage 4 / 5 / 7), edot-collector-0.164.0 (monitoring: the instrument our verification reads).
+  # Window ordering around sun-attended:2026-12-13 (all measured 2026-11-03): talos-linux-1.14.5 sun 11-22 (restarts source-controller; three weeks earlier, so a cold cache is long gone),
+  #   redis-fleet-8.10.3 sun 11-29, helm-drift-detection sat 11-28 (P1 warn: adds spec.driftDetection to every HelmRelease, so stage 3's helmrelease.yaml edits must be rebased on it),
+  #   envoy-proxy-config-distroless-v1.39.4 sun 12-06 (a week earlier; its own gateway restart gate must be finished and green before this plan starts), longhorn-1.13.0 sun 11-15.
+  #   The same-night kube-prometheus-stack bump rule: none is windowed on 12-13 today; if one is slotted, move it — stage 3 verification reads Prometheus for the node-feature and gpu series.
+  # About twenty other plans list this plan reciprocally only because it edits HelmReleases; none shares a surface with the stage that runs on 12-13 and they are not repeated here.
 security_ref: null                     # F-0e310ef2 (plan-section, not security) RESOLVED 102ec800; no security finding drives this plan
 capability_change: true                # Stage 9 gives Flux chart-provenance ENFORCEMENT it
                                        # does not have today (spec.verify fails CLOSED), and
                                        # Stage 10 adds an eviction limit (emptyDir sizeLimit).
-                                       # Stage 1 is already executed (7c048735). Stages 0-8
-                                       # alone would be false.
+                                       # Stage 3 alone (the 12-13 slice) is same-behaviour; the
+                                       # programme as a whole is not, so this stays true.
 rollback_class: git-revert
 finding_refs: [F-0e310ef2, F-764e4fc3]   # both RESOLVED (102ec800 / 2026-09-20); kept as provenance -- no open driver
 premises:
@@ -66,14 +73,26 @@ premises:
     why: "The whole plan exists because cluster-meta wait:true blocks cluster-apps; if that changed, the risk model changed."
     run: kubectl get kustomization cluster-meta -n flux-system -o jsonpath='{.spec.wait}'
     expect_exact: "true"
-  - id: http-helmrepos-29
-    why: "Scope is 29 HTTP HelmRepositories (28 referenced + external-secrets HELD). A different count means sources moved since 2026-09-28."
+  - id: http-helmrepos-28
+    why: "Scope is 28 HTTP HelmRepositories, all referenced (external-secrets was deleted by 67216b3b). Fewer means a stage ran outside this plan; more means a new HTTP source appeared."
     run: kubectl get helmrepository -A -o jsonpath='{range .items[*]}{.spec.type}{"\n"}{end}' | grep -c '^$'
-    expect_exact: "29"
-  - id: one-ocirepository
-    why: "Only k8s-gateway is migrated; another OCIRepository means a stage ran outside this plan."
-    run: kubectl get ocirepository -A --no-headers | wc -l
-    expect_exact: "1"
+    expect_exact: "28"
+  - id: oci-helmrepos-9
+    why: "The legacy type:oci HelmRepositories are out of scope; a tenth means someone chose the type:oci fallback of §1.4 for a stage."
+    run: kubectl get helmrepository -A -o jsonpath='{range .items[*]}{.spec.type}{"\n"}{end}' | grep -c '^oci$'
+    expect_exact: "9"
+  - id: ocirepository-exact-set
+    why: "Exactly four OCIRepositories exist: k8s-gateway (this plan's one migration) plus three ARC runner charts (gha-fleet, NOT this plan). Any other name means a stage ran outside this plan; a missing one means a source was lost."
+    run: kubectl get ocirepository -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{" "}{end}'
+    expect_exact: "arc-build/gha-runner-scale-set arc-system/gha-runner-scale-set-controller ci-runner/gha-runner-scale-set network/k8s-gateway"
+  - id: gitrepository-exact-set
+    why: "The GitRepository chart sources are csi-driver-smb (stage 2, done), plex (done) and oc8, plus flux-system itself; a fifth means a stage-7 chart moved outside this plan."
+    run: kubectl get gitrepository -A -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}'
+    expect_exact: "csi-driver-smb flux-system oc8 plex"
+  - id: stage3-releases-still-http
+    why: "Stage 3 migrates exactly six releases whose sourceRef is intel (3), node-feature-discovery, gabe565 or falcosecurity. Fewer than six means part of the slice already ran."
+    run: kubectl get helmrelease -A -o jsonpath='{range .items[*]}{.spec.chart.spec.sourceRef.name}{"\n"}{end}' | grep -c -x -e intel -e node-feature-discovery -e gabe565 -e falcosecurity
+    expect_exact: "6"
   - id: chartref-roll-still-observed
     why: "§1.4's roll prediction rests on the build-metadata chart label."
     run: kubectl get deploy k8s-gateway -n network -o jsonpath='{.spec.template.metadata.labels.helm\.sh/chart}'
@@ -82,26 +101,22 @@ premises:
     why: "Stage 8 is blocked only while the pin predates the OCI registry's first tag (2.5.0)."
     run: kubectl get helmrelease -n monitoring -o jsonpath='{range .items[*]}{.spec.chart.spec.chart}={.spec.chart.spec.version}{"\n"}{end}' | grep '^unpoller='
     expect_exact: "unpoller=2.4.0"
-status: vetted    # plan-reviewer 2026-09-28 (F-2c849d1e): needs-fix (B1-B9) -> fixed -> re-review ready-for-go as a staged programme. Stages 3-7 HOLD on the G3 fail-open (item 3) and stages 4/6-longhorn on the charts-mirror trust decision -- both fail-closed prerequisites, not review defects.
-review: ready-for-go@2026-09-28
-window: "sun-attended:2026-12-13"   # MOVED 2026-11-02 from sun-attended:2026-11-22 (talos-linux-1.14.5 takes that Sunday; they conflict) to the first free Sunday after envoy 12-06. Scheduled 2026-10-05 (operator "plan all and time them"): HUMAN-GATED (autonomy_override, capability change) -> operator GO; conflicts with ~12 plans, so it gets a Sunday nobody else uses
-                                       # (1) it is a staged programme — which stage runs when
-                                       #     is an operator judgement, not a scheduler's;
-                                       # (2) no slot currently fits. Measured 2026-09-11:
-                                       #     sat-attended:2026-09-12 has 15 of 90 min and 1 of
-                                       #     6 risk-points left (and already carries an
-                                       #     unrelieved monitoring-namespace interference
-                                       #     warning); sun-attended:2026-09-27 is at 140/150
-                                       #     for the Talos roll, which this plan must not
-                                       #     share anyway. The first honest candidate is
-                                       #     sat-attended:2026-09-19 (45/90, load 1/6) for
-                                       #     stages 0+1 together (~45 min, both low risk);
-                                       # (3) stages 2, 5 and 6 roll CSI / SSO / CNI / storage,
-                                       #     so they want an attended slot each, not a shared
-                                       #     one.
-autonomy_override: human-gated         # Staged programme; est_duration_min is per stage; the
-                                       # riskiest stages roll the CNI and the CSI driver.
-                                       # The scheduler must not treat this as one unit.
+  - id: flux-distribution-v2.9.6
+    why: "§3.7 (spec.verify) and §3.8 (source-controller emptyDir) were measured against Flux v2.9.6; a different distribution means source-controller changed and those claims need re-measuring."
+    run: kubectl get fluxinstance flux -n flux-system -o jsonpath='{.spec.distribution.version}'
+    expect_exact: "v2.9.6"
+  - id: source-controller-emptydirs-unbounded
+    why: "Stage 10 exists because both emptyDir volumes have no sizeLimit; once a limit is set this stage is done and must not be re-run."
+    run: kubectl get deploy source-controller -n flux-system -o jsonpath='{.spec.template.spec.volumes[*].emptyDir}'
+    expect_exact: "{} {}"
+status: draft     # RE-PLANNED 2026-11-03 after the premise check failed (http-helmrepos 29->28, ocirepository 1->4). Substance changed (§1.0): the earlier review 'ready-for-go@2026-09-28' is CLEARED and a plan-reviewer must re-review before this is vetted. Was vetted.
+review: null      # was ready-for-go@2026-09-28; cleared 2026-11-03 (the plan was materially amended)
+window: "sun-attended:2026-12-13"   # UNCHANGED. Scheduled 2026-10-05 (operator "plan all and time them"); MOVED 2026-11-02 from sun-attended:2026-11-22 (talos-linux-1.14.5 takes that Sunday). Re-checked 2026-11-03 against every open plan: no hard conflict forces a move.
+                                       # HUMAN-GATED (autonomy_override, capability change) -> operator GO. This slot carries STAGE 3 ONLY and only after decision D1 (§1.0) is
+                                       # recorded in this file; with D1 open the window agent must report NO-GO for this plan, not run a subset.
+autonomy_override: human-gated         # Staged programme; est_duration_min is per slice; the
+                                       # riskiest stages roll the CNI and storage. The scheduler
+                                       # must not treat this as one unit.
 sops_refs:
   - docs/sops/flux-chart-source-pinning.md
   - docs/sops/application-update.md
@@ -116,11 +131,46 @@ sops_refs:
   - docs/sops/flux-upgrade.md
   - docs/sops/flux-dependency-revision-gate.md
 generated: "2026-09-11"
+replanned: "2026-11-03"
 ---
 
 # Migrate HTTP chart sources to OCIRepository + HelmRelease.chartRef
 
 ## 1. Summary & why held
+
+### 1.0 Re-plan record, 2026-11-03 — READ THIS FIRST (it overrides anything below that disagrees)
+
+**Why this section exists.** The premise check failed on two of its (then) five
+premises and a plan whose premises do not hold must not execute. Both failures
+were benign and neither means a stage of this plan ran:
+
+| premise | was | live 2026-11-03 | cause |
+|---|---|---|---|
+| HTTP HelmRepository count | 29 | **28** | `external-secrets`, the one orphan the operator had HELD, was deleted by `67216b3b` (sweep finding F-fb2cc8a2: no HelmRelease or chartRef consumed it, no ExternalSecret CRDs). **Stage 1 is therefore 6 of 6 done.** The "HELD, do not delete" text below is historical: there is nothing left to hold or delete. |
+| OCIRepository count | 1 | **4** | three ARC runner charts (`arc-build`, `arc-system`, `ci-runner`; commit `a03a8616`, now in the gha-fleet plan) were added in exactly the shape §3.2 prescribes — `ref.tag` AND `ref.digest`, app-local file. They are not this plan's work; the premise now pins the exact set of four names instead of a bare count. |
+
+**What else moved since 2026-09-28 (all measured live 2026-11-03, none of it assumed):**
+
+- Cluster and CLI are Flux **v2.9.6** (source-controller `v1.9.6`, helm-controller `v1.6.5`); the text below said 2.9.0 / 2.9.3. flux-operator and flux-instance charts are `0.61.0`; `flux-fleet-0.62.0` / `0.62.1` are drafts that touch the same two HelmReleases and `fluxinstance/flux` (both now in `conflicts_with`).
+- **Every pinned chart version moved**: the §7 appendix now carries the live pins and re-verified presence. Reading a stale version from the old table would have failed Step 3's pull — and the recipe never hard-codes one (`VER` is read from the live HelmRelease).
+- Census: `HelmChart` objects **109** (was 122), source-controller `/data` **38.4 MB**, **18** CIFS StorageClasses / **21** Bound CIFS PVCs (was 19 / 21), **79** Longhorn volumes, 75 attached and healthy (was 94). 16 apps were decommissioned on 2026-10-04 (`ac7bf0e0`).
+- **Roll scope re-measured** with the §1.4 method (pod-template label or annotation carrying the chart version) over every Deployment, StatefulSet and DaemonSet owned by a HelmRelease: 23 releases / 34 workloads cluster-wide; **12 in-scope HTTP releases / 21 workloads** (cilium 2, cert-manager 3, longhorn 3, authentik 2, open-webui 3, otel-operator 2, nextcloud 1, grafana 1, anythingllm 1, eck-operator 1, jellyfin 1, unpoller 1). Charts with **no** key — the stage 3 and stage 4 sets (intel x3, node-feature-discovery, paperless-ngx, falco, descheduler, external-dns, headlamp, metrics-server) and the other stage-7 charts — still migrate without a restart. `csi-driver-smb` and `plex` are now GitRepository-sourced and out of the HTTP population.
+- Stage 10 inputs unchanged: `FluxInstance.spec.kustomize.patches` still holds exactly one GitRepository `ignore` patch (append, do not replace) and both emptyDirs still have no `sizeLimit` (now a premise).
+
+**Defects found in the old text while re-measuring** (each fixed where it occurs below):
+
+1. §2(3) `ls /data/helmchart | wc -l` printed `1` — the cache is `helmchart/flux-system/<ns>-<release>/`, so it counted the namespace directory, not artifacts. A gate that reads 1 whether the cache holds 1 or 200 artifacts cannot fail. Now `find … -type f`.
+2. §3.2 Step 4 ran `mise exec -- helm …`, which fails in agent shells ("couldn't exec process"), and a failed render left **both** render files empty, so `diff` reported *identical* — a gate that passes when both sides are empty. Now plain `helm` (mise-pinned 3.22.1, asserted) plus a non-empty-render assertion. Demonstrated 2026-11-03 on falco: deployed tarball sha256 `b8a1aa98…` is **byte-identical** to the OCI layer; both renders 736 lines; `diff` empty; the OCI manifest digest (`helm pull` "Digest:") equals the registry's `docker-content-digest` `08cd4fd5…`.
+3. §4.1 `coverage.py --json | … d.get('items') …` prints `[]` whether Stage 0 worked or not (the JSON has no `items` key; it has `lanes`/`needs_plan`). Replaced by a check of the generated version snapshot, which does change.
+4. §3.3 item 3 / §4.1: the `grep -c 'release notes unavailable…'` gate counts a *string*, so rewording the message would "pass" without closing anything. See D1 for what actually matters and a gate that can fail.
+
+**Decisions the operator must record in this file before the dependent stage runs** (none is a window action; if they are not recorded the window agent reports NO-GO, it does not improvise):
+
+- **D1 — G3 (breaking-change scan) for chart bumps. Blocks stages 3-7.** Measured today with the resolver `auto-update.py` actually uses (`_owner_repo` + `fetch_release_notes`, target version of each live release): release notes resolve for `cilium`, `cert-manager` and `node-feature-discovery` and **do not resolve** for `falco`, `intel-device-plugins-*`, `paperless-ngx`, `authentik`, `grafana`, `nextcloud`, `open-webui`, `opentelemetry-kube-stack` or `anythingllm` — *before* any migration. The OCI-path dep strings give the same owner/repo for the three that resolve; for the others they give different guesses (`falco`, `authentik` and `k8s-gateway` were fetched with the OCI string and also do not resolve; the rest are measured per component by Step 0b). The one provably wrong repo is k8s-gateway's, whose derived `k8s-gateway/charts` does not exist (it is deny-held, so harmless) — which also means the 2026-09-11 note that the derivation was "fixed" is true only for some paths. So, contrary to the 2026-09-11 text, the migration does **not** by itself remove G3 coverage from Stage 3's components; G3 on chart deps is *already* mostly unverified and falls open (documented asymmetry in `docs/sops/auto-update.md`). Options: **(a)** accept a per-component **non-regression** gate (new Step 0b below: the component must resolve after the move if and only if it resolved before) and treat the pre-existing fail-open as a separate change — *recommended*; **(b)** require G3 to refuse on an unresolved lookup first (changes what is auto-mergeable; its own plan + tests); **(c)** keep stages 3-7 held. Until one is recorded, stages 3-7 do not run.
+- **D2 — charts-mirror trust. Blocks stage 4 and the longhorn half of stage 6.** `docs/sops/flux-chart-source-pinning.md` §4.1 rung 4: a third-party mirror (`ghcr.io/home-operations/charts-mirror`) changes the trust root and is "never a cleanup step of a plan". All five charts (`descheduler`, `external-dns`, `headlamp`, `metrics-server`, `longhorn`) are present in it at the live pins (§7), but none moves until the operator writes "charts-mirror accepted for <chart>" here.
+- **D3 — accept the roll. Blocks stages 5 and 6** (stage 2's variant of this is moot). Stages 5/6 restart authentik, cilium, cert-manager, longhorn-manager and the rest for a source refactor (§1.4 item 3). The alternative (`type: oci` HelmRepository: no roll, no `verify`, stays in the `cluster-meta` gate) loses stage 9. Decide per stage.
+
+**What the 2026-12-13 window runs.** Stage 3 only: `intel-device-plugin-operator`, `intel-device-plugin-gpu`, `intel-device-plugin-npu`, `node-feature-discovery`, `paperless-ngx`, `falco` — six releases, one commit each, ~15 min each, **no workload roll expected** (re-confirmed above), preconditioned on **D1**. Everything else in §3.1 is a later slice with its own window and, where a decision is listed, its own recorded decision. It does not run unattended and does not share the slot with anything on the `conflicts_with` list.
 
 ### 1.1 What happened, and what it proved about the shape of our source layer
 
@@ -149,7 +199,7 @@ was being written, so it is deliberately not claimed here — but the rule it
 established is §1.5(a) and every stage below obeys it. Vulnerability and exposure
 detail stays on those records.
 
-### 1.2 The measured inventory (re-verify before executing; 2026-09-11 figures)
+### 1.2 The measured inventory (re-verify before executing; 2026-09-11 figures — the 2026-11-03 re-measure is in §1.0 and the table at the end of this subsection)
 
 | | count | note |
 |---|---|---|
@@ -160,6 +210,8 @@ detail stays on those records.
 | HTTP, referenced by **nothing** | **1** | stage 1 — five deleted (`7c048735`); `external-secrets` HELD, not a worklist item |
 | `OCIRepository` | 1 | `network/k8s-gateway`, tag **and** digest pinned |
 | cached `HelmChart` artifacts in the emptyDir | **122** | the blast radius of one source-controller restart |
+
+**Re-measured live 2026-11-03** (supersedes the column above): `HelmRepository` 37 = **28 HTTP** (all referenced by a HelmRelease: 0 orphans) + 9 `type: oci`; `OCIRepository` 4 (k8s-gateway + 3 ARC runner charts); `GitRepository` 4 (`flux-system`, `csi-driver-smb`, `oc8`, `plex`); 109 `HelmChart` objects; `/data` 38.4 MB. The 28 HTTP repositories by stage: 3 → `intel`, `node-feature-discovery`, `gabe565`, `falcosecurity`; 4 → `descheduler`, `external-dns`, `headlamp`, `metrics-server`; 5 → `authentik`, `grafana`, `nextcloud`, `open-webui`, `opentelemetry`, `mintplex-labs`; 6 → `cilium`, `jetstack`, `longhorn`; 7 → `apache-superset`, `blakeblackshear`, `dirsigler`, `elastic`, `influxdata`, `jameswynn`, `jellyfin`, `penpot`, `rm3l`, `sure`; 8 → `unpoller`.
 
 Five of the six — `backube`, `democratic-csi`, `guerzon`, `piraeus`,
 `rook-ceph` — were deleted in `7c048735` (2026-09-11). **One remains and is NOT
@@ -369,7 +421,7 @@ git status --porcelain; git log --oneline -3
 # (3) The cache we are one restart away from losing is still intact.
 kubectl -n flux-system get pod -l app=source-controller \
   -o custom-columns='NAME:.metadata.name,RESTARTS:.status.containerStatuses[*].restartCount,START:.status.startTime'
-kubectl -n flux-system exec deploy/source-controller -- /bin/sh -c 'du -sh /data; ls /data/helmchart | wc -l'
+kubectl -n flux-system exec deploy/source-controller -- /bin/sh -c 'du -sh /data; find /data/helmchart -type f | wc -l'   # expect ~38 MB and ~218 files (109 HelmCharts x tarball + index); 0 or 1 files = cold cache, ABORT
 
 # (4) Longhorn + CIFS baseline (required for stages 2 and 6; harmless elsewhere).
 kubectl get volumes -n storage -o json | python3 -c "import sys,json;v=json.load(sys.stdin)['items'];print('volumes',len(v),'attached',sum(1 for x in v if x['status'].get('state')=='attached'),'healthy',sum(1 for x in v if x['status'].get('robustness')=='healthy'))"
@@ -379,6 +431,11 @@ kubectl get pvc -A -o json | python3 -c "import sys,json;p=json.load(sys.stdin)[
 #     §Step 1). The roll in §1.4 WILL fire pod/not-ready alerts; silence them
 #     deliberately rather than explaining them afterwards.
 runbooks/update-marker.sh add <component> <ns> 2 "chart source -> OCIRepository"
+
+# (5b) Tooling is the pinned one, and Flux is the version this plan was measured on.
+helm version --short            # expect v3.22.1 (mise pin). Use plain `helm`, NOT `mise exec -- helm`
+                                #   (fails in agent shells and then yields EMPTY renders, see §1.0 defect 2)
+flux version | head -1          # expect: flux: v2.9.6  (flux-fleet / Talos plans may legitimately move it: re-run the premises)
 
 # (6) ABORT the stage if any of these hold:
 #   - any Kustomization or HelmRelease not Ready
@@ -399,17 +456,17 @@ source inventory this table is derived from is in §7.
 
 | # | Stage | components | min | risk | rolls? | buys |
 |---|---|---|---|---|---|---|
-| 0 | **Teach the version/update pipeline about `chartRef`** — **3 of 4 items DONE `97c3e913`; item 3's G3 fail-open still OPEN, and Stage 0 has not yet survived a sweep, so the §4.1 gate on stages 2-7 HOLDS** | tooling only | 30 → ~10 left | low | no | stops the migration from blinding `coverage.py` and fail-open-ing G3 |
-| 1 | ~~Delete the 6 unreferenced HelmRepositories~~ **5 of 6 DONE 2026-09-11 (`7c048735`)** — `backube`, `democratic-csi`, `guerzon`, `piraeus`, `rook-ceph` deleted (45 → 40 live). **`external-secrets` is deliberately HELD by the operator — do NOT delete it, and do not re-run this row against it.** | — | 0 | — | no | executed: five third-party URLs out of the `cluster-meta` gate. **Do not execute this row.** |
+| 0 | **Teach the version/update pipeline about `chartRef`** — **3 of 4 items DONE `97c3e913`, and the snapshot has carried `k8s-gateway` with chart `3.7.2` through 7+ sweeps since (re-verified 2026-11-03: `version-check-current.md` row populated, 3 git-sourced charts in the "unresolved" table, k8s-gateway not among them). Item 3's G3 fail-open is a pre-existing property, now framed as operator decision D1 (§1.0).** | tooling only | ~10 left | low | no | stops the migration from blinding `coverage.py` and the version snapshot |
+| 1 | ~~Delete the 6 unreferenced HelmRepositories~~ **6 of 6 DONE** — five on 2026-09-11 (`7c048735`), and `external-secrets` (the one the operator had held) on 2026-10-23 (`67216b3b`, F-fb2cc8a2). There are no unreferenced HTTP sources left. | — | 0 | — | no | executed: six third-party URLs out of the `cluster-meta` gate. **Do not execute this row.** |
 | 2 | ~~`csi-driver-smb` → charts-mirror OCI~~ **DONE 2026-09-11 via a DIFFERENT route — see §3.4** | csi-driver-smb | 0 | — | **no roll occurred** | executed as a GitRepository pinned to commit `59dce96e` (the v1.20.3 cut), NOT charts-mirror. **Do not execute this row.** |
-| 3 | **No-roll, upstream-native OCI** | intel (3 releases), node-feature-discovery, gabe565/paperless-ngx, falcosecurity/falco | 15 ea | low | **no** | 6 releases off HTTP with zero workload impact — build confidence here |
-| 4 | **No-roll, charts-mirror — BLOCKED on an operator trust decision** (docs/sops/flux-chart-source-pinning.md §4.1 rung 4: a third-party mirror is never a cleanup step of a plan) | descheduler, external-dns, headlamp, metrics-server | 15 ea | low-med | **no** | only after the operator records the charts-mirror trust decision in this plan |
-| 5 | **Rolling, upstream-native OCI, app tier** | authentik, grafana, nextcloud, open-webui, opentelemetry, mintplex-labs | 25 ea | medium | yes | the apps where a restart is tolerable but not free |
-| 6 | **Rolling, cluster-critical — ONE PER WINDOW** | cilium, jetstack/cert-manager, longhorn (charts-mirror — BLOCKED on the same operator trust decision as stage 4) | 30 ea | **high** | yes | the sources whose failure blocks recovery |
-| 7 | **The 11 charts with no OCI anywhere — mirror track** | ~~plex~~ (DONE 102ec800, Shape D GitRepository), then apache-superset, blakeblackshear, dirsigler, elastic, influxdata, jameswynn, jellyfin, penpot, rm3l, sure | decision + 20 ea | medium | some | the long tail; needs §3.6 decided first |
-| 8 | **`unpoller` — blocked, coupled to a chart upgrade** | unpoller | — | — | — | own plan; see §3.5 |
+| 3 | **No-roll, upstream-native OCI — THE 2026-12-13 SLICE. Needs decision D1.** | intel (3 releases), node-feature-discovery, gabe565/paperless-ngx, falcosecurity/falco | 15 ea (90 total) | low | **no** (re-confirmed 2026-11-03) | 6 releases off HTTP with zero workload impact — build confidence here |
+| 4 | **No-roll, charts-mirror — BLOCKED on operator decision D2** (docs/sops/flux-chart-source-pinning.md §4.1 rung 4: a third-party mirror is never a cleanup step of a plan) | descheduler, external-dns, headlamp, metrics-server | 15 ea | low-med | **no** | only after the operator records the charts-mirror trust decision in this plan |
+| 5 | **Rolling, upstream-native OCI, app tier — needs D1 and D3** | authentik, grafana, nextcloud, open-webui, opentelemetry, mintplex-labs | 25 ea | medium | yes | the apps where a restart is tolerable but not free |
+| 6 | **Rolling, cluster-critical — ONE PER WINDOW — needs D1 and D3** | cilium, jetstack/cert-manager, longhorn (charts-mirror — BLOCKED on D2; and `longhorn-1.13.0` is windowed `sun-attended:2026-11-15`, so re-read the live longhorn pin before planning this) | 30 ea | **high** | yes | the sources whose failure blocks recovery |
+| 7 | **The 10 remaining charts with no OCI anywhere — mirror track (PARKED; its own plan revision adds its namespaces)** | ~~plex~~ (DONE 102ec800, Shape D GitRepository), then apache-superset, blakeblackshear, dirsigler, elastic, influxdata, jameswynn, jellyfin, penpot, rm3l, sure (three of them — `rm3l`, `jameswynn`, `blakeblackshear` — also carry open LOW sweep postures about being hosted under a personal GitHub account: F-ac4ec44e, F-04817ce7, F-1e7d8813; not claimed by this plan) | decision + 20 ea | medium | some | the long tail; needs §3.6 decided first |
+| 8 | **`unpoller` — blocked, coupled to a chart upgrade** | unpoller | — | — | — | own plan; see §3.5 (re-verified 2026-11-03: live pin still 2.4.0, OCI `2.4.0` still 404, `2.5.0` present) |
 | 9 | **`spec.verify` — pilot, then per registry** | signed registries only | 30 pilot | medium | no | the capability gain from §1.3 |
-| 10 | **`source-controller` emptyDir `sizeLimit`** | flux-system | 15 | low | yes (source-controller) | caps an unbounded emptyDir on a 69%-full node disk; answers the other half of `F-764e4fc3` |
+| 10 | **`source-controller` emptyDir `sizeLimit`** | flux-system | 15 | low | yes (source-controller) | caps an unbounded emptyDir; answers the other half of `F-764e4fc3`. Re-read `fluxinstance/flux` first: `flux-fleet-0.62.x` and `flux-reconciler-impersonation` also edit it |
 
 **Stage 1 coordination note:** other sessions were editing `k8s-gateway` and
 `pajikos` manifests on 2026-09-11 (`43a3b3e4`, `0c77bbb0`, `5a7baeb5`,
@@ -423,11 +480,56 @@ rollback must be able to name exactly one thing.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-export NS=<namespace> REL=<helmrelease> CHART=<chart-name> VER=<pinned-version>
+export NS=<namespace> REL=<helmrelease> CHART=<chart-name>
+export VER=$(kubectl get helmrelease $REL -n $NS -o jsonpath='{.spec.chart.spec.version}')   # READ the live pin; never type it. Another plan may have moved it since this was written
+test -n "$VER" || { echo "ABORT: $NS/$REL has no spec.chart.spec.version (already on chartRef?)"; exit 1; }
 export S=/Users/mu/.claude/jobs/flux-oci/$NS-$REL   # scratch; NOT /tmp. FIXED path: every agent Bash call is a
 mkdir -p "$S"                                       # new shell ($$ changes, vars vanish) -- re-run these 3 lines at the top of EVERY step
 REPO=<helmrepository-name>; APPDIR=kubernetes/apps/$NS/.../$REL; OCI_PATH=<from §7>
 ```
+
+**Step 0b — G3 non-regression (before any edit).** Moving a chart to an OCI path
+changes the dependency string the update pipeline sees. The component must keep
+at least the release-note coverage it has today (decision D1, §1.0). Write the
+probe once per stage and run it per component:
+
+```bash
+cat > "$S/g3nr.py" <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("au", "runbooks/auto-update.py")
+au = importlib.util.module_from_spec(spec); sys.modules["au"] = au; spec.loader.exec_module(au)
+ck = au._load_version_checker()
+def probe(dep, tag):
+    orr = au._owner_repo(ck, dep)
+    if not orr:
+        return "no-owner-repo", None
+    for t in (tag, "v" + tag.lstrip("v"), tag.lstrip("v")):
+        try:
+            n = ck.fetch_release_notes(orr[0], orr[1], t)
+        except Exception:
+            n = None
+        if n and n.get("body"):
+            return "resolved", orr
+    return "unresolved", orr
+a = probe(os.environ["HTTP_DEP"], os.environ["VER"])
+b = probe(os.environ["OCI_DEP"], os.environ["VER"])
+print("HTTP-era:", a, "| OCI:", b)
+if a[0] == "resolved" and b[0] != "resolved":
+    print("G3-REGRESSION: release notes resolved before the move and not after"); sys.exit(1)
+print("G3-NON-REGRESSION")
+PY
+HTTP_DEP=$CHART OCI_DEP=$OCI_PATH python3 "$S/g3nr.py" 2>&1 | grep -v 'mise WARN'
+```
+
+(`OCI_PATH` is the `<registry>/<path>` form from §7 with no `oci://`.) PASS is the
+line `G3-NON-REGRESSION`. Measured 2026-11-03 — pass: `falco` (unresolved before and
+after), `node-feature-discovery` (resolved before and after); **known-bad that must
+print `G3-REGRESSION` and exit 1**: `HTTP_DEP=cilium OCI_DEP=ghcr.io/k8s-gateway/charts/k8s-gateway VER=1.20.4`.
+Run it with the script as a **file** (above); the same code fed through
+`python3 - <<EOF` printed nothing at all, and a silent probe reads as a pass.
+A `G3-REGRESSION` is fixed by adding the real repo to the notes map
+(`IMAGE_RELEASE_NOTES_PROJECTS` / `CHART_RELEASE_SOURCES` in
+`runbooks/check-all-versions.py`) in the SAME commit as the migration, then re-run.
 
 **Step 1 — baseline the workload (before any edit).** Save it; §4.2 diffs against it.
 
@@ -469,7 +571,7 @@ shasum -a 256 "$S/deployed.tgz"; ls -l "$S/deployed.tgz"
 **Step 3 — fetch the candidate OCI chart and record the digest you will pin.**
 
 ```bash
-mise exec -- helm pull "oci://$OCI_PATH" --version "$VER" -d "$S" 2>&1 | tee "$S/pull.txt"
+helm pull "oci://$OCI_PATH" --version "$VER" -d "$S" 2>&1 | tee "$S/pull.txt"
 shasum -a 256 "$S/$CHART-$VER.tgz"; ls -l "$S/$CHART-$VER.tgz"
 
 # ref.digest is the MANIFEST digest = helm pull's "Digest:" line (verified equal to
@@ -485,17 +587,22 @@ repackage is common and usually benign. What matters is step 4.
 **Step 4 — MANDATORY GATE: render both charts against the LIVE values and diff.**
 
 ```bash
-mise exec -- helm -n $NS get values $REL --all -o yaml > "$S/live-values.yaml"
+helm -n $NS get values $REL --all -o yaml > "$S/live-values.yaml"
+test "$(wc -l < "$S/live-values.yaml")" -gt 3 || { echo "ABORT: empty live values"; exit 1; }
 mkdir -p "$S/old" "$S/new"
 tar xzf "$S/deployed.tgz"    -C "$S/old"
 tar xzf "$S/$CHART-$VER.tgz" -C "$S/new"
 KV=$(kubectl version -o json | python3 -c 'import sys,json;v=json.load(sys.stdin)["serverVersion"];print(v["major"]+"."+v["minor"])')
 for w in old new; do
-  mise exec -- helm template $REL "$S/$w/$CHART" -n $NS -f "$S/live-values.yaml" \
-    --kube-version "$KV" > "$S/render-$w.yaml"
+  helm template $REL "$S/$w/$CHART" -n $NS -f "$S/live-values.yaml" \
+    --kube-version "$KV" > "$S/render-$w.yaml" 2> "$S/render-$w.err"
+  # GATE-CAN-FAIL: two EMPTY renders diff as identical. Both must be real manifests.
+  test "$(wc -l < "$S/render-$w.yaml")" -gt 50 || { echo "ABORT: $w render empty/short -> $(head -3 "$S/render-$w.err")"; exit 1; }
 done
 diff -u "$S/render-old.yaml" "$S/render-new.yaml" | tee "$S/render.diff"
 ```
+
+(2026-11-03 dry run, falco 9.2.2: deployed and OCI tarballs byte-identical, both renders 736 lines, `render.diff` empty. The known-bad: with `helm` missing from PATH both renders are 0 lines and the `-gt 50` assertion aborts.)
 
 **Gate:** `render.diff` must be **empty**, or contain only differences you can
 name and justify in the commit message (`Chart.yaml` maintainers, a stray dev file
@@ -568,7 +675,7 @@ git rm kubernetes/flux/meta/repositories/helm/$REPO.yaml
 
 ```bash
 task kubeconform
-grep -n "$CHART\|$REL" runbooks/auto-update-policy.yaml    # deny globs must still match the new dep name
+grep -n "$CHART\|$REL" runbooks/auto-update-policy.yaml    # deny globs must still match the new dep name (none of the stage 3 set has a deny rule today: they stay auto-updatable, which is why Step 0b matters)
 git commit --only $APPDIR/ocirepository.yaml $APPDIR/kustomization.yaml \
   $APPDIR/helmrelease.yaml kubernetes/flux/meta/repositories/helm/$REPO.yaml \
   kubernetes/flux/meta/repositories/helm/kustomization.yaml -F "$S/msg.txt"
@@ -582,12 +689,13 @@ pinned `ref.digest`, and **which workloads are expected to roll**.
 
 ### 3.3 Stage 0 — teach the pipeline about `chartRef` (do this first)
 
-> **STATUS 2026-09-11: items 1, 2 and 4 are DONE in `97c3e913`; item 3 is
-> PARTIALLY done and its fail-open half is still OPEN.** Stage 0 has not yet
-> survived a sweep, so the §4.1 gate on stages 2-7 still stands. Do not read
-> three ticked boxes as Stage 0 complete — item 3's fail-open is the half that
-> silently removes breaking-change scanning, which is the risk this stage was
-> created to prevent.
+> **STATUS 2026-11-03: items 1, 2 and 4 are DONE in `97c3e913` and have survived
+> weeks of sweeps** (the version snapshot carries `k8s-gateway` with chart 3.7.2;
+> `runbooks/tests/test-helmrelease-chartref-shape.py` passes 39/39). **Item 3's
+> fail-open is a pre-existing property of G3, not something this plan creates** —
+> measured in §1.0 D1: most chart dependencies already resolve no release notes
+> today. It is therefore an operator decision (D1), not a Stage 0 task, and the
+> old text's claim that the derivation was "fixed" holds only for some OCI paths.
 
 Repo-only; no cluster change. Three edits plus a ground-truth test:
 
@@ -617,7 +725,7 @@ Repo-only; no cluster change. Three edits plus a ground-truth test:
    `docs/sops/audit-script-correctness.md`, a check validated only on synthetic
    input is not validated.
 
-**Do not start Stage 2 until Stage 0 has survived one sweep** — proof in §4.1.
+**Stage 0 is satisfied for starting stage 3** (it has survived sweeps — proof in §4.1); stages 3-7 additionally wait for decision D1.
 
 ### 3.4 Stage 2 — `csi-driver-smb` ✅ EXECUTED 2026-09-11, by a different route
 
@@ -708,7 +816,7 @@ indistinguishable from an absent one over anonymous pulls, so treat each as
 |---|---|---|---|
 | **Upstream's own OCI registry** | **none** — Renovate tracks the tag, upstream carries publishing | highest: the chart's canonical distribution point | **always first choice** — it is what stages 3, 5 and 6 use |
 | **Contribute the chart to `home-operations/charts-mirror`** | **none per version** after the PR lands — the community runs the sync, artifacts are cosign-signed and Renovate-tracked. **But:** its README prunes a chart **6 months after upstream ships OCI** and says it is our responsibility to move to the official source, so this adds a **recurring re-check**, not a permanent home | maintained community project rather than one person's Pages site | **second choice** and the right answer for most of the 11; one upstream PR per chart |
-| **`flux mirror` into `ghcr.io/nachtschatt3n`** | **yes, bounded**: one config file + one scheduled runner (GitHub Action cron or a CronJob) + a GHCR push credential. New upstream versions are picked up automatically by a `version:` semver range — **no per-version push** — but a failing mirror job becomes a new way for a pinned version to be missing | we control the registry; nothing signed upstream to carry over, so we would sign our own | **third choice**, and the right one for `plex` if upstream stays HTTP-only. **Explicitly NOT a fork — it is an automated re-publish, there is nothing to hand-merge.** Note it is v0.x (`flux plugin install mirror` works on our v2.9.3; not installed today) |
+| **`flux mirror` into `ghcr.io/nachtschatt3n`** | **yes, bounded**: one config file + one scheduled runner (GitHub Action cron or a CronJob) + a GHCR push credential. New upstream versions are picked up automatically by a `version:` semver range — **no per-version push** — but a failing mirror job becomes a new way for a pinned version to be missing | we control the registry; nothing signed upstream to carry over, so we would sign our own | **third choice**, and the right one for `plex` if upstream stays HTTP-only. **Explicitly NOT a fork — it is an automated re-publish, there is nothing to hand-merge.** Note it is v0.x (`flux plugin install mirror` works on our v2.9.6; not installed today) |
 
 What none of these is: **vendoring the chart into this repo.** The operator
 rejected that on maintenance-burden grounds and it stays rejected — it is the one
@@ -744,7 +852,7 @@ curl -s -H "Authorization: Bearer $TOK" "https://ghcr.io/v2/<path>/referrers/sha
 ```
 
 **Pilot first, on something expendable.** It is **unverified** whether Flux
-2.9.0's `verify.provider: cosign` accepts the newer
+2.9.6's `verify.provider: cosign` accepts the newer
 `application/vnd.dev.sigstore.bundle.v0.3+json` layout, and that layout covers 5
 of the 6 charts-mirror charts plus falco. So: enable `verify` on **one** low-stakes
 signed component (`falcosecurity` or `descheduler`), confirm the source still
@@ -758,9 +866,10 @@ elsewhere.
 
 Measured, so the recommendation is evidence-led and the answer is **no PVC**:
 
-- `/data` holds **41.8 MB / 328 files** (helmchart 19.1 MB, helmrepository
-  16.0 MB, gitrepository 6.8 MB, ocirepository 16 KB) after 5 days and **0
-  restarts**. A PVC would be ~24× oversized for it.
+- `/data` held **41.8 MB / 328 files** (helmchart 19.1 MB, helmrepository
+  16.0 MB, gitrepository 6.8 MB, ocirepository 16 KB) after 5 days and 0
+  restarts (2026-09-11); **38.4 MB / 218 helmchart files, 0 restarts since the
+  pod started 2026-10-25** (2026-11-03). A PVC would be ~24× oversized for it.
 - `deploy/source-controller` is already `replicas: 1` + `strategy: Recreate` in
   the vendored upstream manifest, so the `longhorn-rwo-multi-attach` trap does
   not apply — but an RWO Longhorn volume **pins the pod's reschedule** to a node
@@ -774,7 +883,7 @@ Measured, so the recommendation is evidence-led and the answer is **no PVC**:
   speaking-PV-name rule in `docs/sops/longhorn.md`). The option exists and is
   still the wrong one here.
 - **The real defect is that both emptyDirs have no `sizeLimit`** while `/data`
-  sits on the node root filesystem already at **69% (638 of 930 GB)**. Cap it via
+  sits on the node root filesystem (69% full when measured 2026-09-11 — re-measure with `talosctl df` before quoting a figure). Cap it via
   `FluxInstance.spec.kustomize.patches` (currently holds one GitRepository `ignore` patch — APPEND, do not replace): `sizeLimit: 2Gi` on
   `data`, something small on `tmp`.
 - **And the honest correction to a claim made today:** an OCIRepository's stored
@@ -803,15 +912,21 @@ cache**. Every assertion below is written to exclude that.
 > empty.
 
 ```bash
-python3 runbooks/check-all-versions.py                        # or the sweep's rule 4c dry-run
-grep -n '| `k8s-gateway`' runbooks/version-check-current.md   # chart cell must read 3.7.2, not '-'
-python3 runbooks/coverage.py --json | python3 -c "import sys,json;d=json.load(sys.stdin);print([i for i in d.get('items',[]) if i.get('component')=='k8s-gateway'])"
-python3 runbooks/maintenance-plan.py --validate && echo VALIDATE_OK
-# Item 3 (G3 fail-open) — the half that HOLDS stages 3-7. Today this prints 1 → HOLD.
-grep -c 'release notes unavailable — relied on CI + policy' runbooks/auto-update.py   # must be 0 (or the operator records an explicit waiver here) before any of stages 3-7
+python3 runbooks/check-all-versions.py 2>&1 | grep -v 'mise WARN' | tail -3          # regenerates runbooks/version-check-current.md
+grep -n '| `k8s-gateway`' runbooks/version-check-current.md                           # chart cell must read 3.7.2, not '-'  (live 2026-11-03: "| `k8s-gateway` | `network` | 3.7.2 ✅ |")
+# Unresolved-sources table: the migrated component must NOT be in it, and the 3 git-sourced charts MUST be (positive control: proves the table was read).
+sed -n '/Unresolved chart sources/,/^### Upstream freshness/p' runbooks/version-check-current.md | grep -c -e '`k8s-gateway`'                       # must print 0
+sed -n '/Unresolved chart sources/,/^### Upstream freshness/p' runbooks/version-check-current.md | grep -c -e '`plex`' -e '`oc8`' -e '`csi-driver-smb`'  # must print 3 (a 0 here means the section moved and the line above proves nothing)
+.venv/bin/python3 runbooks/maintenance-plan.py --validate && echo VALIDATE_OK
+.venv/bin/python3 runbooks/tests/test-helmrelease-chartref-shape.py | tail -1         # expect "39 passed, 0 failed"
 ```
 
-A still-empty chart cell means Stage 0 did not work and **stages 2-7 must not
+The G3 question formerly gated here with a `grep -c 'release notes unavailable…'`
+on `auto-update.py` (a gate on a *string*: rewording the message would pass it
+without closing anything) is now decision **D1** in §1.0 plus the per-component
+Step 0b probe, whose failure mode was demonstrated.
+
+A still-empty chart cell, or the migrated component appearing in the unresolved table, means Stage 0 did not work and **stages 3-7 must not
 start** — each would delete a component from the update pipeline.
 
 ### 4.2 Stages 2-7, per component — three assertions, all required
@@ -868,8 +983,8 @@ kubectl -n $NS get events --field-selector type=Warning --sort-by=.lastTimestamp
 
 ```bash
 flux get kustomizations -A | awk 'NR==1 || $5 != "True"'     # cluster-meta AND cluster-apps
-kubectl get helmrepository -A --no-headers | wc -l           # falls by exactly what the stage removed
-kubectl get ocirepository  -A --no-headers | wc -l           # rises by exactly what the stage added
+kubectl get helmrepository -A --no-headers | wc -l           # live baseline 37 (28 HTTP + 9 oci): falls by exactly what the stage removed (stage 3: 4 repos -> 33)
+kubectl get ocirepository  -A --no-headers | wc -l           # live baseline 4: rises by exactly what the stage added (stage 3: 6 releases -> 10; intel's three releases may share one OCIRepository per chart, so count names, not releases)
 ```
 
 And the one that actually proves the point of the whole plan — run it **once**,
@@ -957,20 +1072,23 @@ emptyDir.
 - **At most one component per window in Stage 6**, and never `cilium` +
   `longhorn` together: CNI churn plus storage-control-plane churn in one window is
   how a recoverable mistake becomes an unrecoverable one.
-- **Capacity reality at the time of writing (2026-09-11).**
-  `sat-attended:2026-09-12`: 75/90 min, risk-load 5/6 — 15 min and 1 risk-point
-  of slack (it was over-capacity earlier today and was relieved only by retiring a
-  scrypted plan), so nothing from this plan fits.
-  `sat-attended:2026-09-19`: 45/90, load 1/6 — **fits stages 0+1 together**
-  (~45 min, both low risk, no workload impact).
-  `sat-attended:2026-09-26`: 45/90, load 2/6 — candidate for Stage 3.
-  `sun-attended:2026-09-27`: 140/150 for `talos-1.14.0` — excluded by
-  `conflicts_with`. `sat-attended:2026-10-03`: 40/90, load 2/6 — first plausible
-  slot for Stage 2. `nightly` is unattended and must never take a stage of this
-  plan: `autonomy_override: human-gated`, and §1.4 means every stage restarts
-  something.
+- **Slot reality at the time of the re-plan (2026-11-03, from `maintenance-plan.py --open`).**
+  `sun-attended:2026-12-13` currently holds only this plan (schedulable budget
+  `200 - 20 = 180` min; the 90-min Stage 3 slice fits with room for the 20-min
+  Step 0 reserve and a hold-back). The neighbours that matter, in time order:
+  `sun-attended:2026-11-15` `longhorn-1.13.0` (storage control plane — finished
+  and green three weeks before), `sun-attended:2026-11-22` `talos-linux-1.14.5`
+  (restarts source-controller; three weeks earlier, cold cache long gone),
+  `sat-attended:2026-11-28` `helm-drift-detection` (P1 adds `spec.driftDetection`
+  to every HelmRelease — **rebase** the six Stage 3 `helmrelease.yaml` edits on
+  that commit; re-run Step 0 of §3.2 so the baseline is taken after it),
+  `sun-attended:2026-11-29` `redis-fleet-8.10.3`, `sun-attended:2026-12-06`
+  `envoy-proxy-config-distroless-v1.39.4` (gateway restart gate; must be green).
+  `nightly` is unattended and must never take a stage of this plan:
+  `autonomy_override: human-gated`, and every rolling stage restarts something.
+  No hard conflict forces the window to move.
 - **Concurrent sessions.** Four commits touched this area on 2026-09-11
-  (`43a3b3e4`, `0c77bbb0`, `5a7baeb5`, `4dfc3e32`). Re-read
+  (`43a3b3e4`, `0c77bbb0`, `5a7baeb5`, `4dfc3e32`); three more since (`67216b3b` external-secrets, `a03a8616` ARC OCIRepositories, `102ec800` plex GitRepository). Re-read
   `kubernetes/flux/meta/repositories/helm/` and the `k8s-gateway` app folder
   before Stage 1, and adjust rather than reverting anyone's work. Commit with
   `git commit --only <explicit paths>`; verify with `git show --stat HEAD`.
@@ -987,38 +1105,45 @@ stale digest in a plan is worse than no digest.
 
 ### Upstream-native OCI (13 repos) — first choice, no mirror needed
 
-| HelmRepository | OCI path | pinned version present | signed | rolls? | stage |
+Re-probed 2026-11-03 (anonymous registry `HEAD` on the manifest of the version
+each live HelmRelease pins). A "signed" column was **not** re-probed and is
+carried from 2026-09-11 for orientation only; re-check at Stage 9. Versions
+move before the window: `VER` is read from the live HelmRelease in §3.2.
+
+| HelmRepository | OCI path | live pin — present in OCI? | signed (2026-09-11) | rolls? | stage |
 |---|---|---|---|---|---|
-| `authentik` | `ghcr.io/goauthentik/helm-charts/authentik` | 2026.8.1 ✓ | no | yes | 5 |
-| `cilium` | `quay.io/cilium/charts/cilium` | 1.20.1 ✓ | yes (referrers) | yes | 6 |
-| `falcosecurity` | `ghcr.io/falcosecurity/charts/falco` | 9.1.0 ✓ | yes (bundle v0.3) | no | 3 |
-| `gabe565` | `ghcr.io/gabe565/charts/paperless-ngx` | 0.24.1 ✓ | no | no | 3 |
-| `grafana` | `ghcr.io/grafana-community/helm-charts/grafana` | 13.2.6 ✓ (re-verify the live pin at execution) | no | yes | 5 |
-| `intel` | `ghcr.io/intel/helm-charts/intel-device-plugins-{operator,gpu,npu}` | 0.36.0 ✓ (all 3) | no | no | 3 |
-| `jetstack` | `quay.io/jetstack/charts/cert-manager` | `v1.21.1` and `1.21.1` ✓ | yes (legacy `.sig`) | yes | 6 |
-| `mintplex-labs` | `ghcr.io/mintplex-labs/helm-charts/anythingllm` | 1.0.0 ✓ | no | yes | 5 |
-| `nextcloud` | `ghcr.io/nextcloud/helm/nextcloud` | 9.2.6 ✓ | no | yes | 5 |
-| `node-feature-discovery` | `registry.k8s.io/nfd/charts/node-feature-discovery` | 0.19.0 ✓ | yes (legacy `.sig`) | no | 3 |
-| `open-webui` | `ghcr.io/open-webui/helm-charts/open-webui` | 16.5.0 ✓ | no | yes | 5 |
-| `opentelemetry` | `ghcr.io/open-telemetry/opentelemetry-helm-charts/opentelemetry-kube-stack` | 0.20.6 ✓ | no | yes | 5 |
-| `unpoller` | `ghcr.io/unpoller/helm-chart/unpoller` | **2.4.0 ABSENT** (2.5.0-2.8.0 only) | yes (legacy `.sig`) | yes | **8 — blocked** |
+| `authentik` | `ghcr.io/goauthentik/helm-charts/authentik` | 2026.8.3 yes (2026.8.5 also present; `authentik-2026.8.5` is windowed 11-21) | no | yes | 5 |
+| `cilium` | `quay.io/cilium/charts/cilium` | 1.20.4 yes | yes (referrers) | yes | 6 |
+| `falcosecurity` | `ghcr.io/falcosecurity/charts/falco` | 9.2.2 yes | yes (bundle v0.3) | no | 3 |
+| `gabe565` | `ghcr.io/gabe565/charts/paperless-ngx` | 0.24.1 yes | no | no | 3 |
+| `grafana` | `ghcr.io/grafana-community/helm-charts/grafana` | 14.0.1 yes (`grafana-14.1.0` pending) | no | yes | 5 |
+| `intel` | `ghcr.io/intel/helm-charts/intel-device-plugins-{operator,gpu,npu}` | 0.37.1 yes (all 3) | no | no | 3 |
+| `jetstack` | `quay.io/jetstack/charts/cert-manager` | `v1.21.3` and `1.21.3` both yes | yes (legacy `.sig`) | yes | 6 |
+| `mintplex-labs` | `ghcr.io/mintplex-labs/helm-charts/anythingllm` | 1.0.0 yes | no | yes | 5 |
+| `nextcloud` | `ghcr.io/nextcloud/helm/nextcloud` | 9.4.1 yes | no | yes | 5 |
+| `node-feature-discovery` | `registry.k8s.io/nfd/charts/node-feature-discovery` | 0.20.1 yes | yes (legacy `.sig`) | no | 3 |
+| `open-webui` | `ghcr.io/open-webui/helm-charts/open-webui` | 17.0.0 yes | no | yes | 5 |
+| `opentelemetry` | `ghcr.io/open-telemetry/opentelemetry-helm-charts/opentelemetry-kube-stack` | 0.24.3 yes (`otel-operator-0.26.1` windowed 11-07) | no | yes | 5 |
+| `unpoller` | `ghcr.io/unpoller/helm-chart/unpoller` | **2.4.0 ABSENT (404)**, 2.5.0 present | yes (legacy `.sig`) | yes | **8 — blocked** |
 
 **Two traps in this table.** `grafana`: the obvious path
 `ghcr.io/grafana/helm-charts/grafana` **exists but is stale** — 138 tags ending at
 9.4.5/10.5.x, no 12.x or 13.x. Pinning it would silently move us three major
 chart versions backwards. Use `grafana-community`, which matches the HTTP repo we
 already use. `jetstack`: both `v1.21.1` and `1.21.1` resolve — pin the form the
-HelmRelease already uses (`v1.21.1`) so the render diff stays empty.
+HelmRelease already uses (`v1.21.3` today) so the render diff stays empty.
 
-### `charts-mirror` only (6 repos) — all cosign-signed, all pinned versions present
+### `charts-mirror` only (5 repos remain in scope) — all cosign-signed (2026-09-11), pinned versions present 2026-11-03
 
-`oci://ghcr.io/home-operations/charts-mirror/<chart>`: `csi-driver-smb` 1.20.3
-(stage 2) · `descheduler` 0.36.0 · `external-dns` 1.21.1 · `headlamp` 0.45.0 ·
-`metrics-server` 3.14.0 (stage 4) · `longhorn` 1.12.1 (stage 6).
+`oci://ghcr.io/home-operations/charts-mirror/<chart>`: `descheduler` 0.37.0 ·
+`external-dns` 1.23.0 · `headlamp` 0.46.0 · `metrics-server` 3.14.0 (stage 4) ·
+`longhorn` 1.12.1 (stage 6) — each present at the live pin. (`csi-driver-smb` is
+moot: stage 2 went to a commit-pinned GitRepository.)
 
-**BLOCKED on an operator trust decision (review 2026-09-28):** docs/sops/flux-chart-source-pinning.md
-§4.1 rung 4 (2026-09-22, postdates this plan) says a third-party mirror is a different trust decision and
-never a cleanup step of a plan. None of these six moves to charts-mirror until the operator records it here.
+**BLOCKED on operator decision D2 (§1.0):** docs/sops/flux-chart-source-pinning.md
+§4.1 rung 4 says a third-party mirror is a different trust decision and never a
+cleanup step of a plan. None of these five moves to charts-mirror until the
+operator records "charts-mirror accepted for <chart>" in this file.
 
 Two things to carry forward: the mirror **prunes a chart 6 months after upstream
 ships OCI**, so these six need a recurring upstream re-check (fold it into the
@@ -1027,11 +1152,11 @@ sweep rather than remembering it). And `headlamp`'s apparent upstream OCI
 anonymous pull denied, and the maintainers intend `registry.k8s.io` instead — so
 charts-mirror is the correct source for it today, not the ghcr path.
 
-### No OCI anywhere (11 repos) — stage 7, mirror decision required
+### No OCI anywhere (10 repos remain after plex) — stage 7, PARKED, mirror decision required
 
 `apache-superset` · `blakeblackshear` (frigate) · `dirsigler` (uptime-kuma) ·
 `elastic` (eck-operator) · `influxdata` · `jameswynn` (homepage) · `jellyfin` ·
-`penpot` · **`plex`** · `rm3l` (adguard-home) · `sure`.
+`penpot` · `rm3l` (adguard-home) · `sure`. (`plex` is DONE.)
 
 `plex` WAS the priority of the eleven (DONE 102ec800, Shape D GitRepository); like `csi-driver-smb` it tracks a **mutable
 git branch** (`raw.githubusercontent.com/plexinc/pms-docker/gh-pages`). `elastic`
@@ -1040,9 +1165,13 @@ is worth a note because it looks migratable and is not:
 (it resolves as an OCI image index, whereas every real Helm chart probed returned
 config mediaType `application/vnd.cncf.helm.config.v1+json`).
 
-### Unreferenced (1 repo) — HELD, do not delete
+### Unreferenced (0 repos)
 
-`external-secrets` — HELD by the operator, do not delete.
+None remain. `external-secrets` — the one the operator had HELD — was deleted
+on 2026-10-23 by `67216b3b` (F-fb2cc8a2: no consumer, no ExternalSecret CRDs).
+Flagged for the operator in the re-plan report because this plan had recorded a
+"do not delete" and another session did it; nothing broke (all Flux objects
+Ready after).
 
 Already deleted in `7c048735`: `backube` (its `volsync` chart *is* in
 charts-mirror, if it is ever wanted again) · `democratic-csi` · `guerzon` ·
@@ -1053,7 +1182,7 @@ charts-mirror, if it is ever wanted again) · `democratic-csi` · `guerzon` ·
 - **No signature was *validated*.** Only the presence of a signature artifact at
   the expected location was checked; no `cosign verify` ran (cosign is not
   installed locally).
-- **Whether Flux 2.9.3 accepts the sigstore-bundle-v0.3 layout** — untested, and
+- **Whether Flux 2.9.6 accepts the sigstore-bundle-v0.3 layout** — untested, and
   it gates 6 of the signed candidates. Hence the pilot in §3.7.
 - **`registry.k8s.io` cannot be tag-enumerated anonymously** (`tags/list` returns
   an empty array for every path). NFD 0.19.0 was instead confirmed positively by
