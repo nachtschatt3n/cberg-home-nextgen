@@ -229,6 +229,10 @@ These are the mistakes this SOP exists to prevent. Read them before starting.
    convention in `docs/sops/maintenance-windows.md`, and file a follow-up plan for any
    survivor.
 
+### Hosted-budget outages: ARC build pools (2026-11-02)
+
+GitHub-hosted Actions budget exhaustion (2026-10-12 .. 2026-10-31) blocked every rebuild. `absenty` and `rainbow-rescue` now build and push on in-cluster ARC runners (`absenty-build-k8s`, `rainbow-rescue-build-k8s` in `arc-build`, 0 idle pods); their tests/scan/keepalive stay hosted and the scheduled rebuild no longer waits for them. Pools, labels, "runner stuck/queued" troubleshooting and rollback: `docs/sops/ci-runner.md` §2e. If a rebuild is blocked by the budget message, dispatch the workflow by hand (it runs on the pool). The other self-built repos still use hosted runners.
+
 ### Weekly rebuild + deploy mode (program item F, 2026-09-27)
 
 Every self-built image has a **weekly scheduled rebuild** in its source repo:

@@ -36,8 +36,8 @@
 | my-software-showcase | 15 |
 | ci-runner | 3 |
 | arc-system | 2 |
-| arc-build | 1 |
-| **Total** | **132** |
+| arc-build | 3 |
+| **Total** | **134** |
 
 ---
 
@@ -311,6 +311,8 @@ calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 | App | Purpose | Ingress |
 |-----|---------|---------|
 | the-ninth-banner-build-runners | Privileged dind build runners for `nachtschatt3n/the-ninth-banner`: ARC scale set `ninth-banner-build-k8s` (min 1 / max 3), BuildKit in a dind sidecar, on any of the three nodes (since 2026-10-12), `PriorityClass ci-low`, egress-locked. Separate namespace so the privileged pool stays apart from `ci-runner`. SOP: `docs/sops/ci-runner.md` §2c. Added 2026-10-06. | None |
+| absenty-build-runners | Privileged dind image-build runners for `nachtschatt3n/Absenty` (private): ARC scale set `absenty-build-k8s` (min 0 / max 1, no idle pod), `PriorityClass ci-low`, egress-locked (npm, rubygems, Debian apt, Docker Hub, ghcr). Runs only the image build/push jobs so hosted-Actions budget exhaustion cannot block rebuilds. Chart source shared with the ninth-banner pool. SOP: `docs/sops/ci-runner.md` §2e. Added 2026-11-02. | None |
+| rainbow-rescue-build-runners | Same for `nachtschatt3n/rainbow-rescue-party-hunt` (private): scale set `rainbow-rescue-build-k8s` (min 0 / max 1), egress adds Alpine apk. SOP: `docs/sops/ci-runner.md` §2e. Added 2026-11-02. | None |
 
 ### `my-software-showcase`
 

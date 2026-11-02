@@ -1,8 +1,8 @@
 # SOP: CI Runner — The Ninth Banner test suites as sharded Kubernetes Jobs
 
 > Description: How The Ninth Banner's test suites (unit/check, Playwright e2e, responsive, simulation sweeps) run as ephemeral, sharded, locked-down Kubernetes Jobs in the `ci-runner` namespace, triggered with one command from the Mac mini, and how results are collected; plus the self-hosted GitHub Actions runners (ARC, controller in `arc-system`, §2c).
-> Version: `2026.10.26`
-> Last Updated: `2026-10-26`
+> Version: `2026.11.02`
+> Last Updated: `2026-11-02`
 > Owner: `homelab operator (cberg-home-nextgen)`
 
 ---
@@ -231,6 +231,53 @@ The build namespace has its own ARC controller and restricted egress. The Docker
 Disable: comment the scale-set entries in `kubernetes/apps/ci-runner/kustomization.yaml` and `kubernetes/apps/arc-build/kustomization.yaml`, reconcile after active jobs finish; verify with `flux get ks -A`, `kubectl get autoscalingrunnersets -A` and GitHub Settings → Actions → Runners. Keep a scale set disabled if any credential, scheduling or first-run check fails. The Mac-triggered Kubernetes test Jobs stay available throughout.
 
 
+## 2e) Image-build pools for Absenty and rainbow-rescue (since 2026-11-02)
+
+Hosted Actions budget exhaustion (2026-10-12 .. 2026-10-31: jobs fail in 3-4 s with *"job was not started because an Actions budget is preventing further use"*) stopped every rebuild of our self-built images. The image-build jobs of two more **private** repos now run on in-cluster ARC pools, so a budget outage no longer blocks a rebuild. Never do this for a public repo.
+
+| Item | Absenty | rainbow-rescue |
+|---|---|---|
+| Repo (`githubConfigUrl`) | `nachtschatt3n/Absenty` | `nachtschatt3n/rainbow-rescue-party-hunt` |
+| `runs-on` label (= scale-set name) | `absenty-build-k8s` | `rainbow-rescue-build-k8s` |
+| Flux KS / HelmRelease | `absenty-build-runners` | `rainbow-rescue-build-runners` |
+| Manifests | `kubernetes/apps/arc-build/absenty-build-runners/` | `kubernetes/apps/arc-build/rainbow-rescue-build-runners/` |
+| Secret | `absenty-arc-build-github` | `rainbow-rescue-arc-build-github` |
+| Egress policy | `absenty-build-egress` | `rainbow-rescue-build-egress` |
+| Jobs on the pool | `build_pr`, `build_and_push`, `scheduled_rebuild` in `ci.yml` | `build` in `build-image.yml`, `rebuild` in `scheduled-rebuild.yml` |
+| Stays on `ubuntu-latest` | `test`, `scheduled_test`, `scan_image`, `keepalive` | nothing |
+
+Shape (both): ARC `gha-runner-scale-set` 0.15.0 in `arc-build`, dind container mode, `PriorityClass ci-low`, **`minRunners: 0`, `maxRunners: 1`** (operator 2026-11-02: no idle pods, thermally stable NUCs; a job cold-starts in about a minute and the pod is deleted when it ends). Same caps as `ninth-banner-build-k8s` (runner 0.5/2 CPU, 2/6Gi; dind 1.5/6 CPU, 1/4Gi). The chart source is the shared `arc-build/gha-runner-scale-set` OCIRepository owned by `the-ninth-banner-build-runners` (the new Kustomizations `dependsOn` it), so the 0.15.x chart bump stays one lockstep edit. The controller `arc-build-controller` (watches `arc-build`) serves all three build pools. `arc-build-quota` was raised to pods 6, limits 40 CPU / 50Gi for the two extra pods; the *requests* quotas are unchanged on purpose (`KubeCPUQuotaOvercommit` sums them).
+
+Credential: the same cluster `GITHUB_TOKEN` classic PAT (Flux substitution into each pool's Secret); it needs `repo` and repository **admin** on the repo to register a repo-level scale set (checked 2026-11-02 against the registration-token API for both repos; nothing printed). Image pushes inside the jobs use the per-job `GITHUB_TOKEN` (`packages: write`), not the PAT.
+
+Egress (`CiliumNetworkPolicy`, FQDN allow-list, DNS names not listed are refused): the same GitHub/Actions/Results-blob/GHCR/Docker Hub set as `arc-build-egress`, plus Absenty: `registry.npmjs.org`, `rubygems.org` + `*.rubygems.org`, `deb.debian.org` and `security.debian.org` (ports 80 and 443); rainbow-rescue: `dl-cdn.alpinelinux.org` (80/443). A new package host in a Dockerfile means a new line in that pool's `networkpolicy.yaml` (both the DNS rule list and the `toFQDNs` list).
+
+Behaviour to know:
+
+- **Scheduled rebuild no longer waits for a hosted test job.** Absenty's weekly rebuild runs `scheduled_test` (hosted, reported) beside `scheduled_rebuild` (ARC, publishes) instead of `test` -> build. The rebuild only refreshes the base and apt layers of code that already passed `test` on push; nothing deploys automatically (Absenty image automation is suspended, rainbow-rescue is pinned by tag). A red `scheduled_test` is a signal to look at before the manual tag bump, not a publish gate.
+- **Push builds still `needs: test`** (a hosted job). During a hosted-budget outage use the manual path: `gh workflow run ci.yml -R nachtschatt3n/Absenty --ref production` (workflow_dispatch builds and publishes BOTH branches; tag shape unchanged). 
+- Pull-request builds (`build_pr`) of Absenty run untrusted-by-default PR code (dependabot included) in the privileged dind pod. Same-repo PRs only; keep *Run workflows from fork pull requests* OFF on the repo.
+
+Two traps found while proving the pools (2026-11-02), both specific to this egress-locked dind setup:
+
+- **Do not use `cache-from/cache-to type=gha` on these pools.** The GHA cache import/export stalled `docker buildx build` indefinitely (the image itself was already pushed; the step never finished). rainbow-rescue dropped it (seconds-long build); Absenty's `build_pr` dropped it; Absenty's `build_and_push` uses `type=registry` cache on ghcr, which works (4 min). The ninth-banner pool avoids buildx entirely for the same reason.
+- **Search-domain REFUSED breaks musl.** Containers in the dind bridge inherit the pod's `ndots:5` search domains; Cilium answers a non-allowed name with REFUSED and musl (alpine `apk`, busybox) fails with "temporary error" / "bad address". Each pool's DNS rules therefore allow `**.cluster.local` (kube-dns answers NXDOMAIN; no `toFQDNs` rule matches it). Keep it when editing a policy; `arc-build-egress` (ninth-banner) does not have it and only works because its builds resolve through glibc.
+
+Alerts: `ARCRunnerFailing`, `ARCRunnerOutdated`, `ARCRunnerJobsWaiting` cover the new scale-set names; `ARCBuildRunnerScaleSetNotRegistered` watches the two new secrets. Idle state is 0 runner pods and 2 listener pods in `arc-system`.
+
+Troubleshooting (runner stuck / queued):
+
+| Symptom | Cause / fix |
+|---|---|
+| Job sits *Queued* ("Waiting for a runner to pick up this job") | 1. Listener up? `kubectl -n arc-system get pods | grep -E 'absenty-build|rainbow-rescue-build'` (name ends `-listener`). 2. Scale set registered? `kubectl -n arc-build get autoscalingrunnerset`; repo Settings -> Actions -> Runners lists it. 3. `runs-on` spelled exactly as the scale-set name. 4. `kubectl -n arc-build get ephemeralrunners,pods`: a runner pod `Pending` means quota (`kubectl -n arc-build describe resourcequota arc-build-quota`) or no node room (`ci-low` never preempts); `maxRunners: 1` also means two jobs of one repo run one after the other |
+| Listener not Running / `ARCBuildRunnerScaleSetNotRegistered` | `kubectl -n arc-system logs deploy/arc-build-controller`: 401/403/404 = the cluster `GITHUB_TOKEN` lost `repo` + admin on that repo (or the repo was renamed); fix the token, not the manifest |
+| Runner pod exits at once, recycled every ~10 s | The `runner` container needs `command: ["/home/runner/run.sh"]` (already set); check it survived an edit |
+| `docker pull` / `apt` / `gem` / `npm` / `apk` hangs or `Temporary failure in name resolution` | Egress policy: the host is missing in `networkpolicy.yaml` (DNS rule list AND `toFQDNs`); for `apk`/busybox also check `**.cluster.local` is in the DNS list |
+| `docker buildx build` step never finishes though the image is already in ghcr | `type=gha` cache in the workflow (see traps above); remove it or use `type=registry` |
+| Hosted `test` red with the "Actions budget" message | Budget outage: use the workflow_dispatch path above |
+
+Rollback: in each repo set the `runs-on:` lines of the pool jobs back to `ubuntu-latest` (Absenty: `build_pr`, `build_and_push`, `scheduled_rebuild`; rainbow-rescue: `build`, `rebuild`) on `development` and `production` (Absenty) / `main` (rainbow-rescue). The pools can stay idle at no cost; to remove them delete the two entries from `kubernetes/apps/arc-build/kustomization.yaml` and push (Flux prunes the scale sets; the namespace is `prune: disabled`) and, if wanted, return `arc-build-quota` to pods 4 / limits 24 CPU / 40Gi.
+
 ---
 
 ## 3) Blueprints
@@ -399,6 +446,7 @@ runbooks/policy-cli.py risk add AR-<next> \
 
 ## Version History
 
+- `2026.11.02`: §2e, Absenty and rainbow-rescue image-build pools in `arc-build` (`absenty-build-k8s`, `rainbow-rescue-build-k8s`, min 0 / max 1, own egress policies), troubleshooting and rollback; `arc-build-quota` pods 6, limits 40 CPU / 50Gi (F-bb3cec3d).
 - `2026.10.26`: removed stale thermal-gate text from §2 (Per shard: `4 CPU (thermal cap)` is now described as a per-pod heat limit, with both lanes' requests/limits from `scripts/ninth-banner-test.sh`; Quota: no more `12 running (gate cap) + 12 gated` / `per-node placement is the thermal gate's`, admission and placement now attributed to the admission check (per-node fit of CPU and memory) and the scheduler), §2a GPU-per-node cap and §10 RBAC note. No behaviour change.
 - `2026.10.26` (second pass, admission by per-node fit): §2 Admission row rewritten for `2d728da4` (`scripts/ninth-banner-capacity.py` first-fits each shard per node on free CPU AND memory, keeps `TNB_HEADROOM_CPU` (default 2 CPU, now per node) and `TNB_HEADROOM_MEM` (default 2Gi) free per node, checks the `ci-runner` ResourceQuota for pods/cpu/memory and exits 3 when the quota is unreadable; `podreq` prints `<cpu_m>,<mem_bytes>`), including what it does not cover (`limits.*` quotas, GPU slots, ephemeral storage, Pending pods not yet bound); §2/§2a/§2b cross-references, §7 `queued:` and `FAIL` rows updated to match. Leftover thermal-gate text removed: §6 step 4 ("never more than 2 CI pods per node"), §7 `CIRunnerThermalGateStalled` (deleted in `090f551d`; absent from `kubernetes/`) and "after the thermal gate released the pod", §11 gate-era rollback bullets (replaced by the admission-check revert and a pointer to the gate-removal commits). No behaviour change.
 - `2026.10.23`: removed stale thermal-gate / nuc14-02-exclusion text (§2 Job shape, §2a parallelism, §2b banner; F-b771ff8e), described the 2026-10-20 free-CPU admission and sims parallelism 4/2, recorded the Playwright image as manual-only with its three digest locations and the §4 step 5 procedure (F-02956e6f), and merged `ninth-banner-actions-migration.md` into new §2d with repo capacity values (F-39f96948, F-96e0f538, F-014d5531).

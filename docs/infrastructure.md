@@ -195,7 +195,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | security | Security monitoring (Wazuh, Falco) | 2 |
 | ci-runner | Ephemeral test Jobs + self-hosted GitHub Actions runners (no cluster secrets, egress-locked) | 3 |
 | arc-system | actions-runner-controller (single-namespace RBAC; one instance per runner namespace: ci-runner, arc-build) | 2 |
-| arc-build | Privileged dind build runners for the-ninth-banner (ARC scale set ninth-banner-build-k8s) | 1 |
+| arc-build | Privileged dind build runners (ARC scale sets ninth-banner-build-k8s, absenty-build-k8s, rainbow-rescue-build-k8s) | 3 |
 
 ---
 
