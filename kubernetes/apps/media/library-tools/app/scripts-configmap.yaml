@@ -1589,8 +1589,11 @@ data:
 
     def jellyfin_items(jf_url, key):
         # Jellyfin: query Items recursively, including Movies + Series at top level.
+        # CollapseBoxSetItems=false: Jellyfin 12.3 defaults to collapsing movies into box-set
+        # shells, which made this report 418 items at 89% instead of the real 551 at 100% (F-cb3e957b).
         url = (f"{jf_url}/Items?Recursive=true"
                f"&IncludeItemTypes=Movie,Series"
+               f"&CollapseBoxSetItems=false"
                f"&Fields=Overview,ImageTags,BackdropImageTags"
                f"&Limit=10000")
         data = http_get_json(url, headers={"Authorization": f'MediaBrowser Token="{key}"'})
@@ -1805,6 +1808,7 @@ data:
         """Yield (item_id, missing_fields) for items missing overview/art/backdrop."""
         url = (f"{jf_url}/Items?Recursive=true"
                f"&IncludeItemTypes=Movie,Series"
+               f"&CollapseBoxSetItems=false"
                f"&Fields=Overview,ImageTags,BackdropImageTags"
                f"&Limit=10000")
         data = get_json(url, headers={"Authorization": f'MediaBrowser Token="{key}"'})
