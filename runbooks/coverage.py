@@ -3074,6 +3074,44 @@ def _member_security(e, sec_rows) -> list:
     return sorted(set(why))
 
 
+def _tag_variant(v) -> str:
+    """The base-image VARIANT of a tag (`alpine`, `slim`, `bookworm`), else "".
+
+    `_dedupe_tag` keeps only the version core, so `3.15.2-alpine` and
+    `3.15.2-slim` are the same key there -- right for de-duplicating one bump
+    seen twice, wrong for GROUPING: they are different images with different
+    consumers and different plans (F-a9351f4e). A pre-release marker is not a
+    variant."""
+    s = _TRUNC.sub("", str(v or "").strip()).lstrip("vV")
+    if _PRERELEASE_TAG.search(s):
+        return ""
+    m = re.match(r"\d+(?:\.\d+)*[-_.]?([A-Za-z]+)", s)
+    return m.group(1).lower() if m else ""
+
+
+def _plan_fits_group(p, members) -> bool:
+    """False when a live plan, matched on id/keys/version, visibly does NOT cover
+    this group (F-a9351f4e). Two independent disqualifiers:
+
+      * VARIANT: the plan's `target` names a tag but not the members' variant
+        (`python:3.15.2-slim` does not cover `3.15.2-alpine` consumers);
+      * ENUMERATION: a plan that declares `also_covers` has said exactly which
+        components it moves, so it covers only members it names. A plan with NO
+        `also_covers` stays fleet-wide (redis-fleet), as before.
+
+    A plan with an empty target cannot be variant-checked and is not penalised."""
+    ptgt = str(p.get("target") or "").lower()
+    variants = {_tag_variant(m.get("target")) for m in members} - {""}
+    if ptgt and any(v not in ptgt for v in variants):
+        return False
+    named = set(p.get("keys") or ()) | set(p.get("also_keys") or ())
+    if p.get("also_keys"):
+        for m in members:
+            if not (_name_keys(m.get("component")) & named):
+                return False
+    return True
+
+
 def _group_plan(members, slug, plans):
     """plan_id of a LIVE plan that already covers this group, else None.
 
@@ -3092,9 +3130,12 @@ def _group_plan(members, slug, plans):
             bases.add(_norm_repo(r).rsplit("/", 1)[-1])
         vers.add(_dedupe_tag(m.get("target")).replace("-pre", ""))
     for p in live:
-        if p.get("plan_id") == slug or str(p.get("file", "")).rsplit(".md", 1)[0] == slug:
+        if ((p.get("plan_id") == slug or str(p.get("file", "")).rsplit(".md", 1)[0] == slug)
+                and _plan_fits_group(p, members)):
             return p.get("plan_id")
     for p in live:
+        if not _plan_fits_group(p, members):
+            continue
         ptgt = str(p.get("target") or "")
         pkeys = set(p.get("keys") or ()) | set(p.get("also_keys") or ())
         if (pkeys & (member_keys | bases)) and any(v and v in ptgt for v in vers):
@@ -3133,6 +3174,7 @@ def group_needs_plan(needs_plan, plans, sec_rows=None) -> list:
                 union(i, j)
             elif (a.get("kind") == b.get("kind") == "image"                   # G1
                   and _dedupe_tag(a.get("target")) == _dedupe_tag(b.get("target"))
+                  and _tag_variant(a.get("target")) == _tag_variant(b.get("target"))
                   and {_norm_repo(r) for r in _item_repos(a)}
                   & {_norm_repo(r) for r in _item_repos(b)}):
                 union(i, j)
@@ -3144,6 +3186,16 @@ def group_needs_plan(needs_plan, plans, sec_rows=None) -> list:
     buckets: dict = {}
     for i in range(len(rows)):
         buckets.setdefault(find(i), []).append(rows[i])
+    # Image-fleet variants per plain fleet id (image basename + version core): more than one
+    # means the plain id would name two different groups (F-a9351f4e).
+    fleet_variants: dict = {}
+    for members in buckets.values():
+        shared = set.intersection(*[{_norm_repo(r) for r in _item_repos(m)} for m in members])
+        if len(members) > 1 and shared and all(m.get("kind") == "image" for m in members):
+            key = _slug("{}-fleet-{}".format(
+                sorted(shared)[0].rsplit("/", 1)[-1],
+                _dedupe_tag(members[0].get("target")).replace("-pre", "")))
+            fleet_variants.setdefault(key, set()).add(_tag_variant(members[0].get("target")))
     groups = []
     for members in buckets.values():
         first = members[0]
@@ -3164,6 +3216,23 @@ def group_needs_plan(needs_plan, plans, sec_rows=None) -> list:
                 gkind, slug = "component", _slug(f"{first.get('component')}-{core}")
         sec = sorted({w for m in members for w in _member_security(m, sec_rows)})
         plan = _group_plan(members, slug, plans)
+        variants = {_tag_variant(m.get("target")) for m in members}
+        if gkind == "image-fleet" and len(variants) == 1 and variants != {""}:
+            # The group id IS the plan file name (plan_id == filename), so an id
+            # equal to a live plan that does not cover this group would have the
+            # planner OVERWRITE that plan (F-a9351f4e). Qualify with the variant
+            # when the plain id is ambiguous: several variants of the same
+            # (image, version) are pending, or a live plan already owns the plain
+            # id. An unambiguous fleet keeps the plain id (redis-fleet-8.10.3).
+            variant = next(iter(variants))
+            owners = {p.get("plan_id") for p in plans or ()
+                      if p.get("status") not in DEAD_PLAN_STATUSES
+                      and (p.get("plan_id") == slug
+                           or str(p.get("file", "")).rsplit(".md", 1)[0] == slug)}
+            ambiguous = len(fleet_variants.get(slug, ())) > 1
+            if ambiguous or (owners and plan not in owners):
+                slug = f"{slug}-{variant}"
+                plan = _group_plan(members, slug, plans)
         groups.append({
             "group_id": slug,
             "group_kind": gkind,
