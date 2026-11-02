@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.11.02"
+version: "2026.11.03"
 
 # ── Image major ceilings (added 2026-10-23, F-6a859080) ─────────────────────
 # Caps the MAJOR line the version checker may propose for ONE image in ONE
@@ -349,6 +349,20 @@ deny:
       bumps stay on the stable line and remain safe to auto-merge. Minor+ is PLAN lane only,
       attended, after confirming npm dist-tag `stable` actually points at the target."
     max: patch
+  # MUST stay above "*immich*": first match wins, and the glob below would
+  # otherwise attach the Immich SERVER's forward-only-DB-migration reason to the
+  # redis sidecar. immich-redis is a plain app-template HelmRelease running
+  # `redis-server --save "" --appendonly no` with no volume: it has no database,
+  # no migrations and no rollback hazard. A false reason is what gets a real hold
+  # overridden (same lesson as *nextcloud-redis* below). The hold itself stays:
+  # the redis image is one lockstep fleet (redis-fleet plan) and a roll drops the
+  # BullMQ queue, so it is a PLAN item, never unattended. Verdict is IDENTICAL to
+  # `*immich*` (held at every update_type); only the reason changes.
+  - match: "*immich-redis*"
+    reason: "non-persistent BullMQ job-queue store (no volume, --save \"\" --appendonly no): a roll
+      drops queued Immich jobs, and the redis image moves as ONE lockstep fleet through the
+      redis-fleet window plan. Not coupled to the Immich server's DB migrations - that is the
+      `*immich*` rule's reason and it does not apply here. Plan lane only, never unattended."
   # Added 2026-10-22. Immich server releases carry forward-only DB migrations on the
   # only copy of the database, and a plain git revert after the migration ran crash-loops
   # the server (2026-10-12). Updates are PLAN lane only, behind the dump + scratch-restore
