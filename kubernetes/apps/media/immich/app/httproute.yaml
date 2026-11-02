@@ -44,7 +44,8 @@ spec:
           headers:
             - type: RegularExpression
               name: Content-Encoding
-              value: "(?i)(^|[ ,])br([ ,;]|$)"
+              # Envoy full-matches the whole header value, hence the wildcards.
+              value: "(?i)(.*[ ,])?br([ ,;].*)?"
       filters:
         - type: ExtensionRef
           extensionRef:
