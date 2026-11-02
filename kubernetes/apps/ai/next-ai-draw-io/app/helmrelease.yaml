@@ -36,6 +36,10 @@ spec:
                 value: "ollama"
               - name: AI_MODEL
                 value: "gemma4:26b-mlx"
+              # gemma4 is a thinking model: without this its reasoning streams into the chat text
+              # as pseudo-XML and it never calls the diagram tool, so nothing reaches the canvas.
+              - name: OLLAMA_ENABLE_THINKING
+                value: "true"
               - name: OLLAMA_BASE_URL
                 value: "http://192.168.30.111:11434/api"
             probes:
