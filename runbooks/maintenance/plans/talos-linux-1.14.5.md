@@ -909,13 +909,16 @@ spread = max(v["raft"] for v in m.values()) - min(v["raft"] for v in m.values())
 lag = max(v["raft"] - v["applied"] for v in m.values()) if m else -1
 print(f"raft index spread {spread}, max raft-applied lag {lag}")
 if spread > 50 or lag > 50: fail.append(f"not converged: spread {spread} / apply lag {lag} (> 50)")
+# zsh does not word-split an unquoted scalar, so `rolled $ROLLED` hands over ONE argv element "ip1 ip2":
+# split the arguments ourselves so a space-separated list works from bash and zsh alike (2026-11-02 review).
+IPS = " ".join(sys.argv[2:]).split()
 if len(sys.argv) > 1 and sys.argv[1] == "defragged":
-    for ip in sys.argv[2:]:
+    for ip in IPS:
         r = m.get(ip)
         if not r or r["use"] / r["db"] < 0.8: fail.append(f"{ip} not defragged: in-use {r and round(100*r['use']/r['db'])}% of DB SIZE (< 80%)")
 if len(sys.argv) > 1 and sys.argv[1] == "rolled":
     for ip, r in m.items():
-        want = "3.7.3" if ip in sys.argv[2:] else "3.7.1"
+        want = "3.7.3" if ip in IPS else "3.7.1"
         if r["proto"] != want: fail.append(f"{ip} PROTOCOL {r['proto']} != {want} ({'rolled' if want == '3.7.3' else 'NOT yet rolled'})")
         if r["stor"] != "3.7.0": fail.append(f"{ip} STORAGE {r['stor']} != 3.7.0")
 for f in fail: print("  FAIL:", f)
@@ -1758,6 +1761,8 @@ grep -ciE 'elected leader|lost leader|leader changed' "$SCR/etcd-$S1-<node-name>
 # etcd BINARY really moved on THIS member (and only on the nodes rolled so far): PROTOCOL = server version
 ROLLED="<space-separated IPs of every node rolled so far, this one included, e.g. 192.168.55.12>"
 mise exec -- python3 "$SCR/etcdstat.py" rolled $ROLLED | tee "$SCR/etcdver-<node-name>.txt"
+# (zsh passes the unquoted $ROLLED as ONE argument; etcdstat.py splits its own arguments, so a space-separated list is safe in bash and zsh.
+#  Control: under zsh, `ROLLED="ipA ipB"` must expect 3.7.3 on BOTH, i.e. identical to `rolled ipA ipB`.)
 ```
 **PASS, all of:** node `Ready`, not `SchedulingDisabled`, `Tag: v1.14.5`; **`etcdstat.py rolled $ROLLED`
 `VERDICT PASS`: the member just rolled reads `PROTOCOL 3.7.3` and every not-yet-rolled member still `3.7.1`,
