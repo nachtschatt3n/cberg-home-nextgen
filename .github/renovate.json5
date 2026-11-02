@@ -186,11 +186,21 @@
       // Renovate update after 09-12. The `stable` channel is an npm dist-tag
       // (npm `n8n`; image tags mirror npm versions), so the version lookup
       // reads npm. The image reference being bumped is unchanged.
+      //
+      // 2026-11-02 (F-629a2f82): the npm datasource attaches each version's tarball
+      // sha512 integrity as the release DIGEST, and Renovate copies it into the
+      // update verbatim. The flux manager's replacement template is
+      // `{{newValue}}{{#if newDigest}}@{{newDigest}}{{/if}}`, so PR #252
+      // (2.44.5 -> 2.45.7) rewrote the tag to `2.45.7@sha512-<integrity>`, an
+      // invalid image reference that cannot be pulled. `pinDigests: false` does
+      // NOT help (verified by local dry-run): once the datasource is overridden
+      // to npm, Renovate skips the digest stage that honours it. So the channel
+      // pointer is read from the `n8n-stable` custom datasource below, which
+      // returns exactly one release (the `stable` dist-tag) and no digest.
       "matchDatasources": ["docker"],
       "matchPackageNames": ["n8nio/n8n"],
-      "overrideDatasource": "npm",
-      "overridePackageName": "n8n",
-      "followTag": "stable"
+      "overrideDatasource": "custom.n8n-stable",
+      "sourceUrl": "https://github.com/n8n-io/n8n"
     },
     {
       "matchDatasources": ["docker"],
@@ -518,6 +528,15 @@
       "enabled": false
     }
   ],
+  // The `stable` npm dist-tag of n8n as a single-release datasource (see the n8nio/n8n
+  // packageRule). The dist-tags endpoint is tiny, unlike the full packument.
+  "customDatasources": {
+    "n8n-stable": {
+      "defaultRegistryUrlTemplate": "https://registry.npmjs.org/-/package/n8n/dist-tags",
+      "format": "json",
+      "transformTemplates": ["{\"releases\": [{\"version\": stable}]}"]
+    }
+  },
   "customManagers": [
     {
       "customType": "regex",

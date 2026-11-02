@@ -423,12 +423,18 @@ Two properties to hold on to:
 
 **The durable fix for a channel problem is Renovate-side, not policy-side.**
 Where upstream publishes a real dist-tag, pin Renovate to the channel pointer
-instead of the highest semver — `followTag: "stable"` in `.github/renovate.json5`
-(added for `n8nio/n8n` 2026-09-12, `12de99ef`). Renovate then proposes only what
-upstream has actually promoted, so the beta stops being re-proposed every time
-the pre-release line advances. It does NOT replace the `max:` deny rule:
-`followTag` trusts upstream to keep the pointer honest, the policy rule does not,
-so the two stay layered as defence in depth. Components without a usable
+instead of the highest semver (`n8nio/n8n`: first `followTag: "stable"`, 2026-09-12,
+`12de99ef`; then an npm datasource override; since 2026-11-02 the `n8n-stable`
+custom datasource in `.github/renovate.json5`, which returns only the `stable`
+dist-tag). Renovate then proposes only what upstream has actually promoted, so the
+beta stops being re-proposed every time the pre-release line advances. **Do not
+use `overrideDatasource: npm` for an image**: the npm datasource attaches the
+tarball sha512 integrity as the release digest and the flux manager appends it to
+the tag (`2.45.7@sha512-...`, an invalid reference; PR #252, F-629a2f82);
+`pinDigests: false` does not prevent it. Regression:
+`runbooks/tests/test-renovate-n8n-no-npm-digest.py`. It does NOT replace the
+`max:` deny rule: the channel pointer trusts upstream to keep it honest, the
+policy rule does not, so the two stay layered as defence in depth. Components without a usable
 dist-tag stay on `CHANNEL_RULES` membership (see
 `docs/sops/maintenance-windows.md` §Coverage guarantee).
 
