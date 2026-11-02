@@ -5,13 +5,20 @@ metadata:
   namespace: arc-build
 spec:
   hard:
-    pods: "4"
+    # 2026-11-02: pods 4 -> 6, limits 24/40 -> 40/50. Adds absenty-build-k8s and
+    # rainbow-rescue-build-k8s (max 1 runner each, minRunners 0, same pod caps:
+    # runner 2 + dind 6 CPU limit, 6 + 4 Gi): 3 + 1 + 1 = 5 pods worst case, +1 slack for a
+    # terminating pod overlapping its replacement.
+    # requests.* are DELIBERATELY unchanged: worst case 3x2 + 2x2 = 10 CPU,
+    # 5x3 = 15 Gi fit under 12 / 24Gi, and KubeCPUQuotaOvercommit sums the
+    # requests quota (see ci-runner-alerts.yaml), so it must not move.
+    pods: "6"
     requests.cpu: "12"
     requests.memory: 24Gi
     # 2026-10-12: 20 -> 24. ninth-banner-build-k8s maxRunners 3 (nuc14-02
     # back) x 8 CPU limits per build pod (runner 2 + dind 6) = 24.
-    limits.cpu: "24"
-    limits.memory: 40Gi
+    limits.cpu: "40"
+    limits.memory: 50Gi
     services: "0"
     persistentvolumeclaims: "0"
 ---

@@ -1,0 +1,114 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: absenty-build-runners
+spec:
+  interval: 30m
+  # Chart source is the SHARED arc-build/gha-runner-scale-set OCIRepository owned
+  # by the-ninth-banner-build-runners (one chart pin for every arc-build pool, so a
+  # chart bump stays a single lockstep edit). The Flux Kustomization dependsOn it.
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  # ARC 0.15.0 generates the dind sidecar without resources. Cap its CPU,
+  # memory, and scratch space so it remains inside the CI thermal budget.
+  # Same values as the-ninth-banner-build-k8s (operator: same caps, ci-low).
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              group: actions.github.com
+              version: v1alpha1
+              kind: AutoscalingRunnerSet
+              name: absenty-build-k8s
+            patch: |-
+              - op: replace
+                path: /spec/template/spec/initContainers/1/image
+                value: docker.io/library/docker:29.1.3-dind@sha256:173f284a4299164772a90f52b373e73e087583c0963f1334c9995f190ef6f3f5
+              - op: add
+                path: /spec/template/spec/initContainers/1/resources
+                value:
+                  requests: {cpu: 1500m, memory: 1Gi, ephemeral-storage: 4Gi}
+                  limits: {cpu: "6", memory: 4Gi, ephemeral-storage: 16Gi}
+  values:
+    githubConfigUrl: https://github.com/nachtschatt3n/Absenty
+    githubConfigSecret: absenty-arc-build-github
+    runnerScaleSetName: absenty-build-k8s
+    # Operator 2026-11-02: NO idle pods (thermally stable NUCs). The pool scales
+    # 0 -> 1 when a job is queued and back to 0 when it ends; image builds here
+    # are weekly / per-push, so a cold start (~1 min) is the accepted cost.
+    minRunners: 0
+    maxRunners: 1
+    controllerServiceAccount:
+      namespace: arc-system
+      name: arc-build-controller
+    containerMode:
+      type: dind
+    # arc-system enforces PodSecurity restricted; the chart's default listener
+    # pod is rejected without this (same template as the other scale sets).
+    listenerTemplate:
+      metadata:
+        labels:
+          app.kubernetes.io/name: absenty-build-arc-listener
+      spec:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: listener
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests: { cpu: 10m, memory: 32Mi }
+              limits: { cpu: 200m, memory: 128Mi }
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/name: absenty-build-runner
+          ci.cberg.home/lane: image-build
+          ci.cberg.home/suite: gha-build
+      spec:
+        priorityClassName: ci-low
+        automountServiceAccountToken: false
+        enableServiceLinks: false
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  topologyKey: kubernetes.io/hostname
+                  namespaceSelector: {}
+                  labelSelector:
+                    matchExpressions:
+                      - key: app.kubernetes.io/name
+                        operator: In
+                        values:
+                          - the-ninth-banner-runner
+                          - absenty-build-runner
+        containers:
+          - name: runner
+            image: ghcr.io/actions/actions-runner:2.338.2@sha256:759a1d94a15b05941aba5196974ff43fe15b4cbba29b694b35cbc32a1166b232
+            # ARC does not inject the runner command when the template defines the
+            # runner container: without it the image default exits 0 at once and
+            # the ephemeral runner is recycled every ~10 s without taking a job.
+            command: ["/home/runner/run.sh"]
+            resources:
+              # agent + docker CLI only; the build runs in dind (above)
+              requests: { cpu: 500m, memory: 2Gi, ephemeral-storage: 4Gi }
+              limits: { cpu: "2", memory: 6Gi, ephemeral-storage: 20Gi }
+        volumes:
+          - name: work
+            emptyDir: { sizeLimit: 12Gi }
