@@ -482,7 +482,7 @@ quarterly.
 
 ## 📦 Applications
 
-~132 apps across 21 namespaces. Full inventory with per-app purpose, exposure
+~134 apps across 21 namespaces. Full inventory with per-app purpose, exposure
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 
@@ -560,10 +560,12 @@ reloader · spegel
 
 ### ⚙️ ARC controllers (`arc-system` — 2)
 - gha-runner-scale-set-controller: actions-runner-controller for the `ci-runner` scale sets
-- gha-runner-scale-set-build-controller: actions-runner-controller for the `arc-build` scale set
+- gha-runner-scale-set-build-controller: actions-runner-controller for the `arc-build` scale sets
 
-### 🏗️ CI build runners (`arc-build` — 1)
+### 🏗️ CI build runners (`arc-build` — 3)
 - the-ninth-banner-build-runners: privileged dind build runners (ARC scale set `ninth-banner-build-k8s`)
+- absenty-build-runners: image-build runners for a private repo (ARC scale set `absenty-build-k8s`, no idle pod)
+- rainbow-rescue-build-runners: image-build runners for a private repo (ARC scale set `rainbow-rescue-build-k8s`, no idle pod)
 
 ### 🏢 Showcase applications (`my-software-showcase` — 15)
 Legacy/customer-facing apps kept running for reference. All internal-only:
