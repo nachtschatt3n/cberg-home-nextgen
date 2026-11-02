@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.10.26"
+version: "2026.11.02"
 
 # ── Image major ceilings (added 2026-10-23, F-6a859080) ─────────────────────
 # Caps the MAJOR line the version checker may propose for ONE image in ONE
@@ -293,6 +293,16 @@ deny:
       artwork-sync changes of plan tube-archivist-0.6.0, after the Elasticsearch
       plan. Patch bumps on 0.5.x stay AUTO; minor+ is PLAN lane."
     max: patch
+  # TIME-BOXED HOLD, added 2026-11-02 (sweep 2ad957af; review of the talos-linux-1.14.5, otel-operator-0.26.1,
+  # mealie-3.30.0, grafana-14.1.0 and edot-collector-0.164.0 plans). Renovate PR #428 (kube-prometheus-stack
+  # 92.11.1 -> 92.17.0) clears its 48 h minor cooldown on 2026-11-02 ~23:30 and would land unattended at the next
+  # nightly Step 0. Every one of those plans reads Prometheus for its verification gates and records baselines
+  # before the roll, so a Prometheus restart mid-run blinds them. REMOVE THIS RULE (or narrow it to max: patch)
+  # after the Talos 1.14.5 roll has completed; revisit no later than 2026-11-30. Plans are not affected.
+  - match: "*kube-prometheus-stack*"
+    reason: "TIME-BOXED HOLD until the Talos roll (revisit by 2026-11-30): the Prometheus stack is the shared
+      verification instrument of the pending maintenance plans; an unattended Step 0 bump would restart it
+      mid-run and blind their gates. Apply it deliberately, in its own slot, when no plan is mid-flight."
   - match: "*mariadb*"
     reason: "A DB-engine bump is never unattended-safe. The bitnami entrypoint ALWAYS
       skips mariadb-upgrade (libmariadb.sh calls the nonexistent
