@@ -29,8 +29,7 @@ spec:
     timeout: 15m
     cleanupOnFail: true
     remediation:
-      retries: 0
-      remediateLastFailure: false
+      retries: 3
   uninstall:
     keepHistory: false
   values:
