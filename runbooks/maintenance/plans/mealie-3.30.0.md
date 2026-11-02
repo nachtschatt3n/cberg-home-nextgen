@@ -37,8 +37,10 @@ touches:
 depends_on: []
 conflicts_with:
   # Same Flux Kustomization office/mealie and the same file as section 3.3: never two pending commits on it in one window.
-  - python-fleet-3.15.2               # bumps the image of cronjob/mealie-shopping-sync (sat-attended:2026-11-14). RECIPROCAL ENTRY OWED
-                                      # in that plan (the scheduler honours the field in either direction; --validate does not check reciprocity).
+  - python-fleet-3.15.2               # bumps the image of cronjob/mealie-shopping-sync (sat-attended:2026-11-14). Reciprocal entry
+                                      # already present in that plan (checked 2026-11-02).
+  - authentik-2026.8.5                # the 4.4 login depends on Authentik; an Authentik roll in the same window confounds it (the plan
+                                      # file is marked executed but still present; the ref is kept so a re-opened Authentik plan is paired).
   # The section 4.4 login rides envoy-external + Authentik; a data-plane or identity change in the same window confounds it.
   - envoy-proxy-config-distroless-v1.39.4
   - envoy-proxy-config-distroless-v1.40.0
@@ -51,13 +53,14 @@ conflicts_with:
   - talos-linux-1.14.5                # exclusive 3-node reboot roll
   # Rollback-class stacking: two backup-restore rollbacks in one slot leave neither a rollback budget (office, same class).
   - bitnamilegacy-exit-nextcloud-db
-  # Same-night kube-prometheus-stack bump would blind the section 4 gates: NONE is open (no kps plan in the directory,
-  # 2026-11-02). If one is filed, add it here AND list this plan there.
+  # Same-night kube-prometheus-stack bump would blind the section 4 gates. No kps PLAN exists (2026-11-02), but Renovate PR #428
+  # (92.11.1 -> 92.17.0) is open and clears its cooldown about 23:30 local on 2026-11-02 - see 2.1 and section 6. If a kps plan is
+  # filed, add it here AND list this plan there.
   # redis-fleet-8.10.3 (sun-attended:2026-11-29, office) does not touch Mealie; not listed, but do not stack it in the same
   # slot if the operator wants a clean attribution for the first post-bump login.
 exclusive: false
 security_ref: F-c0bd7eb7              # the driver. Detail stays on the finding record (vulnerability-disclosure.md); block below.
-# runbooks/policy-cli.py finding ref F-c0bd7eb7  -- paste the printed block here when vetting; it is not reproduced in this draft.
+# Finding record (detail DB-only): runbooks/policy-cli.py finding show F-c0bd7eb7. Nothing from it is reproduced in this file.
 capability_change: true               # HONEST, not "to be safe": the release adds user-visible behaviour on a family-facing app
                                       # (metric/imperial unit conversion, structured recipe times with a one-time rewrite of the stored
                                       # time text, simplified shopping-list entry, per-step durations, week-wide meal-plan entries,
@@ -85,8 +88,9 @@ finding_refs:
   # acceptances for what upstream has not fixed and are unaffected by the bump.
 review: null
 status: draft
-window: null                          # the window agent assigns it. RECOMMENDATION (section 6): an operator-triggered NOW run
-                                      # (home-operation run) as soon as the operator can be present; otherwise sat-attended:2026-11-07,
+window: null                          # the window agent assigns it. RECOMMENDATION (section 6): an operator-triggered attended NOW run
+                                      # (home-operation run), STARTED BEFORE ~23:30 local on 2026-11-02 while kps PR #428 is still cooling;
+                                      # otherwise sat-attended:2026-11-07,
                                       # which fits only if helm-drift-detection moves (60 + 45 > 70 schedulable minutes). Not nightly.
 premises:
   - id: live-image-is-v3.28.0
@@ -187,20 +191,20 @@ note counted two new Alembic files; the real number between the two tags is **ni
 `mealie/alembic/versions` at v3.28.0 vs v3.30.0; head moves `3527efeeec34` -> `071e03b4f851`). Migrations make the rollback a
 database operation, not an image revert (1.4), and one of them rewrites stored recipe data (1.3).
 
-**Why it cannot wait for a quiet quarter.** It is the security remedy for sweep finding **F-c0bd7eb7** (a contextual CRITICAL on
-this image; detail is on the finding record, not here - `runbooks/policy-cli.py finding show F-c0bd7eb7`). Operator rule: we bump
+**Why it cannot wait for a quiet quarter.** It is the security remedy for sweep finding **F-c0bd7eb7** (detail is on the finding
+record, not here - `runbooks/policy-cli.py finding show F-c0bd7eb7`). Operator rule: we bump
 third-party images, we never rebuild them, so the bump is the only remedy available.
 
 ### 1.1 Why the target is v3.30.0 and not v3.29.0 (measured 2026-11-02)
 
 The same `trivy image --scanners vuln --severity CRITICAL --ignore-unfixed` run was applied to v3.28.0 (the **positive control**: it
-reproduced the finding's own fixable-critical count exactly, so the method sees what the sweep sees), v3.29.0 and v3.30.0, and each
-result was intersected with the CISA known-exploited feed (the tier the finding is rated on). **v3.30.0 is the lowest tag that
+agreed with the finding record, so the method sees what the sweep sees), v3.29.0 and v3.30.0, and each result was intersected with
+the CISA known-exploited feed. **v3.30.0 is the lowest tag that
 satisfies the finding's remediation condition; v3.29.0 does not** - the fix arrives with the python base-image refresh that only the
 v3.30.0 build contains (the release also bumps `authlib` to 1.9.x, PRs #8792/#8796). So v3.29.0 is not a useful stop: it costs five of
 the nine migrations and fixes nothing that pages. Per-package detail stays on the finding record.
 
-Section 4.7 therefore asserts that the finding's exploited-rated tier no longer applies to the running tag - it deliberately does NOT
+Section 4.7 therefore asserts that the finding's driver no longer applies to the running tag - it deliberately does NOT
 require an empty scan. Do not "improve" that into a stricter gate: whatever remains is governed by the existing AR-029 acceptance.
 
 ### 1.2 The nine revisions, one by one (read from the v3.30.0 files)
@@ -255,8 +259,9 @@ No "BREAKING CHANGE" heading exists in either release. What the notes and source
 `mealie/db/init_db.py::main()` (identical logic at v3.28.0, lines 115-119) compares the DB's Alembic heads with the scripts in
 the image and, when they differ, calls `command.upgrade(cfg, "head")` unguarded. v3.28.0 has no script for
 `071e03b4f851`, so it raises `Can't locate revision` and the container exits: CrashLoopBackOff, and Flux's own rollback cannot
-help (`maxHistory: 1`, and the DB is what is wrong). A revert is therefore **revert + one DB step**, or, if the migration never
-committed, revert alone (section 5.1 decides which by reading the head).
+help (`maxHistory: 1`, and the DB is what is wrong). A rollback is therefore a **tag-only commit + one DB step**, or, if the migration
+never committed, the tag-only commit alone (section 5.1 decides which by reading the head). Section 5.0 explains why it is NOT a plain
+`git revert`: that would also drop the window guards at the worst moment.
 
 ### 1.5 Repo corrections found while planning (state in the report, do not silently plan around)
 
@@ -297,9 +302,17 @@ kubectl get pods -n office -l app.kubernetes.io/name=mealie
 kubectl get pods -n office -l app=mealie-pg
 .venv/bin/python3 runbooks/maintenance-plan.py --open | grep -E 'python-fleet|helm-drift|flux-oci|envoy-proxy|etcd-timeouts|longhorn|talos'
 gh release list -R mealie-recipes/mealie --limit 3 --json tagName,isPrerelease -q '.[]|"\(.tagName) pre=\(.isPrerelease)"'
+gh pr list --state open --search "kube-prometheus-stack" --json number,title,createdAt -q '.[]|"#\(.number) \(.title) \(.createdAt)"'
+kubectl get helmrelease -n monitoring kube-prometheus-stack -o jsonpath='{.status.history[0].chartVersion}{" deployed "}{.status.history[0].lastDeployed}{"\n"}'
 ```
 **PASS:** both flux lists print only the header; mealie and mealie-pg `1/1 Running`, restarts 0; the `--open` grep shows none of those
 plans stamped for TODAY's window (a stamp for another date is fine); the newest non-pre-release tag is `v3.30.0`.
+**The kube-prometheus-stack check:** PR #428 (92.11.1 -> 92.17.0) was open on 2026-11-02 and, per the coordinator, clears its 48 h cooldown
+about 23:30 local that day (the coordinator is adding a time-boxed deny-rule hold in `runbooks/auto-update-policy.yaml`; that file is not
+edited by this plan). **PASS:** the HelmRelease still reports chart `92.11.1` with a `lastDeployed` older than today, so the Prometheus
+and Alertmanager that section 4.6 reads are not mid-roll. **STOP / reschedule** if the chart version has moved, `lastDeployed` is within the
+last hour, or the Step-0 safe-update batch in this very window is bumping `kube-prometheus-stack` - 4.6 reads the instrument being replaced
+and a pass proves nothing. Starting this plan before 23:30 local on 2026-11-02 avoids the overlap entirely.
 **If a `v3.30.1` (or newer 3.30.x) exists: STOP.** Re-read its notes, retarget by refreshing this plan in place (README "When the
 held target MOVES"); do not bump to a tag whose notes this plan never read.
 
@@ -441,16 +454,16 @@ DUMP="$DUMP_DIR/mealie-pre-v3.30.0-$(date +%Y%m%d_%H%M%S).dump"; echo "$DUMP"
 # 1. stream the dump out (the same mechanism produced a 782605-byte archive in the 2026-11-02 dry run)
 kubectl exec -n office deploy/mealie-pg -- pg_dump -U mealie -d mealie -Fc > "$DUMP"
 ls -l "$DUMP"; cp "$W/baseline.txt" "$DUMP.counts.txt"
-[ "$(stat -f %z "$DUMP")" -ge 500000 ] && echo SIZE_OK || echo SIZE_TOO_SMALL
+SIZE=$(stat -f %z "$DUMP"); echo "size=$SIZE"
 # 2. put a copy in the pod and prove both copies are byte-identical
 kubectl exec -i -n office deploy/mealie-pg -- sh -c 'cat > /tmp/mealie-pre-v3.30.0.dump' < "$DUMP"
-echo "local=$(shasum -a 256 "$DUMP" | cut -d' ' -f1)"
-echo "pod  =$(kubectl exec -n office deploy/mealie-pg -- sha256sum /tmp/mealie-pre-v3.30.0.dump | cut -d' ' -f1)"
+LOCAL_SHA=$(shasum -a 256 "$DUMP" | cut -d' ' -f1)
+POD_SHA=$(kubectl exec -n office deploy/mealie-pg -- sha256sum /tmp/mealie-pre-v3.30.0.dump | cut -d' ' -f1)
+echo "local=$LOCAL_SHA"; echo "pod  =$POD_SHA"
 # 3. list the archive IN THE POD (pg 18 pg_restore reads a pg 18 archive; the Mac's 16.14 cannot)
 N=$(kubectl exec -n office deploy/mealie-pg -- pg_restore -l /tmp/mealie-pre-v3.30.0.dump | grep -c 'TABLE DATA'); echo "table_data=$N"
-[ "${N:-0}" -ge 65 ] && echo TABLE_DATA_OK || echo TABLE_DATA_TOO_FEW
 # 4. RESTORE PROOF into a scratch database, diff counts, drop it
-kubectl exec -n office deploy/mealie-pg -- sh -c 'createdb -U mealie mealie_restoretest && pg_restore -U mealie -d mealie_restoretest --no-owner --exit-on-error /tmp/mealie-pre-v3.30.0.dump'; echo "restore_exit=$?"
+kubectl exec -n office deploy/mealie-pg -- sh -c 'createdb -U mealie mealie_restoretest && pg_restore -U mealie -d mealie_restoretest --no-owner --exit-on-error /tmp/mealie-pre-v3.30.0.dump'; RESTORE_EXIT=$?; echo "restore_exit=$RESTORE_EXIT"
 for DB in mealie mealie_restoretest; do
   echo "== $DB"; kubectl exec -n office deploy/mealie-pg -- psql -U mealie -d $DB -At \
     -c "select 'alembic_head='||version_num from alembic_version" -c "select 'recipes='||count(*) from recipes" \
@@ -458,16 +471,21 @@ for DB in mealie mealie_restoretest; do
     -c "select 'mealplans='||count(*) from group_meal_plans" -c "select 'ha_synced_rows='||count(*) from shopping_list_item_extras where key_name='ha_synced'" \
     -c "select 'tables='||count(*) from information_schema.tables where table_schema='public'" | tee "$W/proof-$DB.txt"
 done
-diff "$W/proof-mealie.txt" "$W/proof-mealie_restoretest.txt" && echo RESTORE_PROOF_IDENTICAL
+diff -q "$W/proof-mealie.txt" "$W/proof-mealie_restoretest.txt"; DIFF_EXIT=$?; echo "diff_exit=$DIFF_EXIT"
 kubectl exec -n office deploy/mealie-pg -- dropdb -U mealie --force mealie_restoretest
-kubectl exec -n office deploy/mealie-pg -- psql -U mealie -d mealie -At -c "select 'scratch_dbs_left='||count(*) from pg_database where datname='mealie_restoretest'"
+LEFT=$(kubectl exec -n office deploy/mealie-pg -- psql -U mealie -d mealie -At -c "select count(*) from pg_database where datname='mealie_restoretest'"); echo "scratch_dbs_left=$LEFT"
+# 5. THE GATE - one fail-closed line. Nothing below this block runs on a NO-GO; do not push.
+[ "${SIZE:-0}" -ge 500000 ] && [ -n "$LOCAL_SHA" ] && [ "$LOCAL_SHA" = "$POD_SHA" ] && [ "${N:-0}" -ge 65 ] \
+  && [ "$RESTORE_EXIT" = 0 ] && [ "$DIFF_EXIT" = 0 ] && [ "$LEFT" = 0 ] \
+  && echo BACKUP_GATE_PASS || { echo "NO-GO: backup gate failed - do not edit, commit or push"; exit 1; }
 ```
-**PASS - all of:** (1) `SIZE_OK` (782605 bytes on 2026-11-02; under 500000 is a NO-GO); (2) the two sha256 lines are equal;
-(3) `TABLE_DATA_OK` (the database has 69 tables; the check FAILS CLOSED - a PostgreSQL version mismatch or a truncated archive
-prints 0 and `TABLE_DATA_TOO_FEW`); (4) `restore_exit=0` AND `RESTORE_PROOF_IDENTICAL` (`--exit-on-error` turns any restore error into
-a non-zero exit, and the diff independently fails on an empty or partial scratch DB); (5) `scratch_dbs_left=0`. **Any failure: NO-GO.** Do not push; the dump is the only
-exact rollback (5.2 B) and an unproven dump is a hope, not a gate. The dump holds password hashes and API tokens: it stays
-under `~/backups/mealie` (mode 600 via `umask`) and is never copied into the repo.
+**PASS:** the last line printed is `BACKUP_GATE_PASS`. It is the conjunction of: size >= 500000 bytes (782605 on 2026-11-02); the two
+sha256 values equal and non-empty; `table_data` >= 65 (the database has 69 tables, so the floor leaves room for drift but a PostgreSQL
+version mismatch or a truncated archive prints 0 and fails); `restore_exit=0` (`--exit-on-error` turns any restore error into a non-zero
+exit); `diff_exit=0` (the scratch restore matches the live counts - independently fails on an empty or partial scratch DB); and
+`scratch_dbs_left=0`. **Any other outcome prints `NO-GO` and exits: do not push.** The dump is the only exact rollback (5.2 B) and an
+unproven dump is a hope, not a gate. The dump holds password hashes and API tokens: it stays under `~/backups/mealie` (mode 600 via
+`umask`) and is never copied into the repo.
 
 **3.3 Suspend the shopping-sync CronJob in git** (so a broken `extras` round-trip cannot push 209 duplicate items to the
 household's Alexa list before 4.3 has proved the read path). File:
@@ -537,6 +555,15 @@ git show --stat HEAD          # MUST list exactly those two files
 C1=$(git rev-parse HEAD); echo "C1=$C1"
 git push origin main
 T0=$(date +%s); echo "T0=$T0"
+# State file: the rollback may run in a FRESH shell, and HEAD is shared-worktree state (another session may have committed since).
+cat > "$HOME/backups/mealie/mealie-3.30.0.state.env" <<EOF
+W=$W
+DUMP=$DUMP
+H=$H
+C1=$C1
+T0=$T0
+EOF
+cat "$HOME/backups/mealie/mealie-3.30.0.state.env"
 ```
 If `git log -1 --format=%s` shows a foreign subject, `git commit --amend -F "$W/msg1.txt"` BEFORE pushing (the message files swap, not
 the content). The commit message carries no CVE ids, counts or exploitability notes (vulnerability-disclosure.md).
@@ -578,8 +605,9 @@ EOF
 git commit --only kubernetes/apps/office/mealie/app/helmrelease.yaml kubernetes/apps/office/mealie/app/shopping-sync-cronjob.yaml -F "$W/msg2.txt"
 git log -1 --format=%s; git show --stat HEAD; C2=$(git rev-parse HEAD)
 git push origin main
+T2=$(date +%s); printf 'C2=%s\nT2=%s\n' "$C2" "$T2" >> "$HOME/backups/mealie/mealie-3.30.0.state.env"; echo "C2=$C2 T2=$T2"
 ```
-Then run 4.3 step "first sync" and 4.6 (settle). Close the Renovate PR: `gh pr close 384 --comment "landed directly on main
+Then run the 4.3 "first sync" step (it keys on `T2`) and 4.6 (settle). Close the Renovate PR: `gh pr close 384 --comment "landed directly on main
 with window guards (mealie-3.30.0 plan)"` (Renovate would otherwise close it on its next run; either is fine).
 
 ## 4) Verification
@@ -668,14 +696,23 @@ diff "$W/sync-before.txt" "$W/sync-after.txt" && echo SYNC_READ_PATH_IDENTICAL
 CronJob suspended, keep the new pod if everything else is healthy, and decide with the operator whether to patch `sync.py` for the new
 contract (a separate change) or roll back (section 5).
 
-After step 3.8 has been pushed and Flux has applied it, prove the first real run:
+After step 3.8 has been pushed and Flux has applied it, prove the first real run. The Job must have been CREATED AFTER the 3.8 push
+(`T2`): the CronJob keeps one successful Job for an hour, so selecting "the latest mealie-shopping-sync Job" can read a stale pre-suspend one.
 
 ```bash
 kubectl get cronjob -n office mealie-shopping-sync -o jsonpath='suspend={.spec.suspend}{"\n"}'
-# wait for the next */5 tick, then:
-J=$(kubectl get jobs -n office --sort-by=.status.startTime -o name | grep mealie-shopping-sync | tail -1); echo "$J"
-kubectl wait --for=condition=complete "$J" -n office --timeout=7m
-kubectl logs -n office "$J" | tail -3
+J=""
+for i in $(seq 1 45); do
+  J=$(kubectl get jobs -n office -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.metadata.creationTimestamp}{"\n"}{end}' | python3 -I -c "
+import sys,datetime as d
+t2=d.datetime.fromtimestamp(float(sys.argv[1]),d.timezone.utc)
+c=[n for n,ts in (l.split() for l in sys.stdin) if n.startswith('mealie-shopping-sync') and d.datetime.fromisoformat(ts.replace('Z','+00:00'))>t2]
+print(sorted(c)[-1] if c else '')" "$T2")
+  [ -n "$J" ] && break; sleep 10
+done
+[ -n "$J" ] || { echo "NO-GO: no sync Job was created after the unsuspend push (7.5 min)"; exit 1; }
+echo "job=$J"; kubectl wait --for=condition=complete "job/$J" -n office --timeout=7m
+kubectl logs -n office "job/$J" | tail -3
 ```
 **PASS:** `suspend=<none>` or `false`; the Job is `Complete`; the log ends `done: pushed=0 already-synced=209 excluded=0 lists=1`
 (`pushed` must be 0 unless `sync-before.txt` showed `would_push` > 0; `lists=1`). **Guards against:** a sync that "succeeds" while reading nothing
@@ -701,6 +738,9 @@ OAuth client`) or a changed scope/redirect.
 
 Human half - **the operator, not the agent**:
 
+0. **Log out of Mealie first** (and use a private window if the operator's browser keeps the old session): the one-year persistent
+   cookie from `OIDC_REMEMBER_ME` keeps the operator signed in across the Recreate, which hides the *Login with Authentik* button and
+   produces no `oauth/callback` line - a "pass" that tested nothing.
 1. Open `https://<mealie host>`, click *Login with Authentik*, complete the flow as a `mealie-users` member (one of the two existing users).
    **PASS:** lands on the Mealie home page, signed in; the recipe list is non-empty.
 2. In the browser devtools, Application -> Cookies: `mealie.access_token` expires about **one year** out (Max-Age near 31536000), not
@@ -713,9 +753,11 @@ kubectl logs -n office deploy/mealie -c main --since=15m | grep -E 'oauth/callba
 kubectl logs -n office deploy/mealie -c main --since=15m | grep -ciE 'OIDC.*(not present|missing|failed|error|refus)|Traceback' || true
 kubectl exec -n office deploy/mealie-pg -- psql -U mealie -d mealie -At -c "select 'users='||count(*) from users" -c "select 'users_oidc='||count(*) from users where auth_method='OIDC'"
 ```
-**PASS:** the `GET /api/auth/oauth/callback?code=...` line ends `200 OK` (the route returns the token JSON; a 401 is a rejected
-login, a 500 a library failure); the error grep prints **0** (it is case-insensitive and matches the upstream
-`[OIDC] Required claims not present in ID token or userinfo endpoint` wording); `users=2` and `users_oidc=1` (an existing account was
+**PASS (the gate):** the `GET /api/auth/oauth/callback?code=...` line EXISTS and ends `200 OK` (the route returns the token JSON; a 401 is a
+rejected login, a 500 a library failure; no line at all means step 0 was skipped - repeat the login). The error grep is **secondary
+corroboration**, not the gate: it should print **0** and is case-insensitive over `OIDC.*(not present|missing|failed|error|refus)`, which
+covers `[OIDC] Required claims not present in ID token or userinfo endpoint`; note the upstream `[OIDC] No claims in the id_token` wording is
+logged at a different level and may not match - the callback `200` is what counts. `users=2` and `users_oidc=1` (an existing account was
 matched; a third user would mean the claim mapping changed and auto-provisioned a duplicate).
 **If the callback is 401/500 or the claims error appears:** this is the authlib bump or the `email_verified` handling. Do **not**
 reach for `HTTP_ALLOW_LIST` or loosen `OIDC_REQUIRES_EMAIL_VERIFICATION`; go to section 5.
@@ -762,7 +804,7 @@ line 1. These queries were run against the live instrument on 2026-11-02 (rules 
 
 ### 4.7 The security outcome (the reason for the window)
 
-> **CONTENTS ASSERTION:** the property that rates F-c0bd7eb7 critical no longer holds for the image that is now running - measured by
+> **CONTENTS ASSERTION:** the property F-c0bd7eb7 rests on no longer holds for the image that is now running - measured by
 > scanning the running tag and intersecting the result with the CISA known-exploited feed (empty is the PASS), with an injected-ID
 > control proving the check can fail.
 
@@ -797,31 +839,67 @@ hand-close the finding (agent-authored closes are not trusted, `finding close` i
 kubectl exec -n office deploy/mealie-pg -- psql -U mealie -d mealie -At -c "select 'alembic_head='||version_num from alembic_version"
 ```
 
-**5.1 Head is still `3527efeeec34`** (the migration never committed, e.g. a failure before or during it): a plain revert suffices.
+**5.0 Load the state; never revert by HEAD.** The rollback may run in a fresh shell, and in this shared worktree HEAD can be another
+session's commit. C1 (and C2, if 3.8 ran) are in the state file written at 3.5/3.8:
 
 ```bash
-git revert --no-edit HEAD            # if only step 3.5 was pushed; if 3.8 was pushed too: git revert --no-edit HEAD HEAD~1
-git show --stat HEAD                 # exactly helmrelease.yaml (+ shopping-sync-cronjob.yaml)
-git push origin main
+cd /Users/mu/code/cberg-home-nextgen
+. "$HOME/backups/mealie/mealie-3.30.0.state.env"; echo "W=$W DUMP=$DUMP C1=$C1 C2=${C2:-none}"
+git show --stat "$C1" | head -12           # must be YOUR step-3.5 commit: helmrelease.yaml + shopping-sync-cronjob.yaml
 ```
-The revert restores tag v3.28.0, `retries: 3` and the unsuspended CronJob in one step. Confirm per 5.4.
+**Do not `git revert` C1/C2 in a post-migration rollback.** A revert of C1 also restores `retries: 3`, `remediateLastFailure` removed and the
+CronJob unsuspended - in the one moment the v3.28.0 pod is guaranteed to crash-loop. Helm's `--wait` would then hit the HelmRelease's 15
+minute timeout and **roll back to the v3.30.0 release** onto a half-restored database, re-running the migrations. The guards stay until
+5.4 passes. The rollback commit (**R1**) therefore changes the tag ONLY, and re-applies any guard that 3.8 had already released:
 
-**5.2 Head moved (`27621d27c7e1` through `071e03b4f851`, or anything not `3527efeeec34`): revert + a DB step. Pick ONE.**
+```bash
+HR=kubernetes/apps/office/mealie/app/helmrelease.yaml; CJ=kubernetes/apps/office/mealie/app/shopping-sync-cronjob.yaml
+sed -i '' 's/^\(              tag: \)v3\.30\.0$/\1v3.28.0/' "$HR"
+grep -q '^      remediateLastFailure: false$' "$HR" || sed -i '' '/^  upgrade:/,/^  uninstall:/ s/^      retries: 3$/      retries: 0\
+      remediateLastFailure: false/' "$HR"
+grep -q '^  suspend: true$' "$CJ" || sed -i '' '/^spec:$/a\
+  suspend: true
+' "$CJ"
+git --no-pager diff -U0 -- kubernetes/apps/office/mealie/app/
+```
+**Expected, dry-tested on scratch copies from BOTH start states (guards still present after 3.5; guards released after 3.8):** the
+resulting files equal the original files plus the two guards, tag `v3.28.0` - i.e. against the PRE-WINDOW files the diff is exactly the
+two guard hunks of 3.3/3.4 and nothing else. (If 3.8 never ran, the diff against HEAD is just the one tag line.)
+
+```bash
+printf 'fix(mealie): roll back image to v3.28.0 (guards kept until the database is verified)\n\nTag only. retries 0 / remediateLastFailure false / suspend stay in place until the\npre-upgrade dump is restored and verified; released in a separate later commit.\n\nPlan: runbooks/maintenance/plans/mealie-3.30.0.md\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_012bXdxrZGGHNy5e4RnF6seD\n' > "$W/msg-r1.txt"
+git commit --only "$HR" "$CJ" -F "$W/msg-r1.txt"
+git log -1 --format=%s; git show --stat HEAD     # subject is yours; exactly those two files (the cronjob file may be absent if nothing changed in it)
+git push origin main
+R1=$(git rev-parse HEAD); echo "R1=$R1" | tee -a "$HOME/backups/mealie/mealie-3.30.0.state.env"; date +%H:%M
+```
+**Time budget: 15 minutes.** Pushing R1 starts a Helm upgrade with the HelmRelease's 15 minute timeout. With the guard in place, running over
+is harmless (no automatic rollback; the HelmRelease is simply marked failed and is re-driven by 5.5 or `flux reconcile hr mealie -n office`),
+but finishing the DB step and the pod delete inside 15 minutes lets that same upgrade complete Ready on its own.
+
+**5.1 Head is still `3527efeeec34`** (the migration never committed, e.g. a failure before or during it): R1 alone is the rollback. Push
+it as above; v3.28.0 comes up against the unchanged schema. Go to 5.4, then 5.5.
+
+```bash
+kubectl exec -n office deploy/mealie-pg -- psql -U mealie -d mealie -At -c "select 'alembic_head='||version_num from alembic_version"
+```
+
+**5.2 Head moved (`27621d27c7e1` through `071e03b4f851`, or anything not `3527efeeec34`): R1 + a DB step. Pick ONE.**
 
 *Option B - exact restore from the 3.2 dump (AUTHORITATIVE; loses anything written after the dump, which is minutes of an attended window).*
 
 ```bash
-# 1. stop the new pod by reverting the manifest (Recreate removes v3.30.0; v3.28.0 will then crash-loop on the unknown head - expected)
-git revert --no-edit HEAD            # or HEAD HEAD~1 if 3.8 was pushed
-git show --stat HEAD && git push origin main
-kubectl get pods -n office -l app.kubernetes.io/name=mealie     # wait until the new pod is Error/CrashLoopBackOff, i.e. holds no sessions
+# 1. push R1 (above): Recreate removes v3.30.0; v3.28.0 will crash-loop on the unknown head - expected. Wait until the new pod is
+#    Error/CrashLoopBackOff, i.e. holds no sessions.
+kubectl get pods -n office -l app.kubernetes.io/name=mealie
 # 2. make sure the dump is in the pod (the pod's /tmp copy survives unless mealie-pg restarted)
 kubectl exec -n office deploy/mealie-pg -- ls -l /tmp/mealie-pre-v3.30.0.dump \
   || kubectl exec -i -n office deploy/mealie-pg -- sh -c 'cat > /tmp/mealie-pre-v3.30.0.dump' < "$DUMP"
-echo "pod  =$(kubectl exec -n office deploy/mealie-pg -- sha256sum /tmp/mealie-pre-v3.30.0.dump | cut -d' ' -f1)"
-echo "local=$(shasum -a 256 "$DUMP" | cut -d' ' -f1)"          # must be equal
+POD_SHA=$(kubectl exec -n office deploy/mealie-pg -- sha256sum /tmp/mealie-pre-v3.30.0.dump | cut -d' ' -f1)
+LOCAL_SHA=$(shasum -a 256 "$DUMP" | cut -d' ' -f1); echo "pod=$POD_SHA local=$LOCAL_SHA"
+[ -n "$POD_SHA" ] && [ "$POD_SHA" = "$LOCAL_SHA" ] || { echo "STOP: dump copy mismatch - re-upload before restoring"; exit 1; }
 # 3. rebuild the database from the dump (drops EVERYTHING, including the new table, columns and enum value - that is the point)
-kubectl exec -n office deploy/mealie-pg -- sh -c 'dropdb -U mealie --force mealie && createdb -U mealie mealie && pg_restore -U mealie -d mealie --no-owner --exit-on-error /tmp/mealie-pre-v3.30.0.dump'
+kubectl exec -n office deploy/mealie-pg -- sh -c 'dropdb -U mealie --force mealie && createdb -U mealie mealie && pg_restore -U mealie -d mealie --no-owner --exit-on-error /tmp/mealie-pre-v3.30.0.dump'; echo "restore_exit=$?"
 # 4. verify against the 3.2 sidecar
 kubectl exec -n office deploy/mealie-pg -- psql -U mealie -d mealie -At \
   -c "select 'alembic_head='||version_num from alembic_version" -c "select 'recipes='||count(*) from recipes" \
@@ -832,7 +910,7 @@ kubectl exec -n office deploy/mealie-pg -- psql -U mealie -d mealie -At \
 kubectl delete pod -n office -l app.kubernetes.io/name=mealie
 kubectl rollout status deploy/mealie -n office --timeout=10m
 ```
-**Expected step 4:** `alembic_head=3527efeeec34`, `recipes`/`users`/`total_text` equal to `$DUMP.counts.txt`, `tables=69`,
+**Expected step 4:** `restore_exit=0`, `alembic_head=3527efeeec34`, `recipes`/`users`/`total_text` equal to `$DUMP.counts.txt`, `tables=69`,
 `enum_authmethod=MEALIE,LDAP,OIDC`. `dropdb --force` is deliberate: it terminates the crash-looping pod's reconnect attempts, which would
 otherwise make a plain `dropdb` race. **Why not `pg_restore --clean`:** it drops only objects present in the dump, so the new
 `ai_prompt_overrides` table (which has a foreign key to `ai_provider_settings`) would block the drop of its parent and the new columns
@@ -848,12 +926,12 @@ from mealie.db.init_db import ALEMBIC_DIR
 command.downgrade(Config(str(ALEMBIC_DIR / 'alembic.ini')), '3527efeeec34')"
 ```
 Cost, stated up front: `27621d27c7e1`'s downgrade rewrites time text in ENGLISH (`PT32H` -> `1 day 8 hours`, German texts -> English), the enum value
-`REVERSE_PROXY` stays, and `3697d65c5f92`/`071e03b4f851` have no downgrade. After it, revert the manifest as in B step 1 and delete the pod.
+`REVERSE_PROXY` stays, and `3697d65c5f92`/`071e03b4f851` have no downgrade. After it, push R1 as in 5.0 (same guards, same 15 minute budget) and delete the pod.
 If this fails or leaves the head anywhere other than `3527efeeec34`, fall back to Option B (the dump is unaffected).
 
-**5.3 After any rollback** keep the CronJob unsuspended only once v3.28.0 is serving and 5.4 passes (a sync against a crash-looping app is
-harmless - it fails closed - but a sync during the restore window reads a half-built DB). A re-attempt needs a FRESH 3.2 dump and the
-sidecar re-taken; do not reuse the old dump after the rolled-back DB has taken new writes.
+**5.3 Order of release.** The CronJob stays suspended and the HelmRelease stays guarded until v3.28.0 is serving and 5.4 passes (a sync
+against a crash-looping app fails closed, but one during the restore window would read a half-built DB). Only then run 5.5. A re-attempt
+needs a FRESH 3.2 dump and sidecar; do not reuse the old dump after the rolled-back DB has taken new writes.
 
 **5.4 Confirm the cluster is back, by the cluster and not by `git log`:**
 
@@ -862,30 +940,45 @@ kubectl get deploy -n office mealie -o jsonpath='{.spec.template.spec.containers
 kubectl exec -n office deploy/mealie -c main -- python3 -c "
 import json,urllib.request; print(json.load(urllib.request.urlopen('http://127.0.0.1:9000/api/app/about')).get('version'))"   # v3.28.0
 kubectl exec -n office deploy/mealie-pg -- psql -U mealie -d mealie -At -c "select version_num from alembic_version"          # 3527efeeec34
-kubectl get cronjob -n office mealie-shopping-sync -o jsonpath='suspend={.spec.suspend}{"\n"}'                            # not true
+kubectl get cronjob -n office mealie-shopping-sync -o jsonpath='suspend={.spec.suspend}{"\n"}'                            # still true (guard held)
 ```
-plus the 4.4 browser login (the old build must still log in), the 4.3 sync read path, and `runbooks/update-marker.sh clear mealie`.
-Record the failure on the plan (`status: blocked`) with the first error line; do not re-attempt in the same window.
+plus the 4.4 browser login with step 0 (log out first; the old build must still log in), and the 4.3 sync read path (`python3 -I "$W/synccheck.py"`
+as in 4.3: `ha_synced=209 would_push=0`).
+
+**5.5 Release the guards (ONLY after 5.4 passes).** Run the 3.8 seds verbatim (they are tag-independent: they restore `retries: 3`, drop
+`remediateLastFailure` and delete `suspend: true`), then commit with a rollback subject, by path, and push:
+
+```bash
+# (the two seds from 3.8)
+printf 'chore(mealie): release rollback guards after v3.28.0 restore verified\n\nPlan: runbooks/maintenance/plans/mealie-3.30.0.md\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_012bXdxrZGGHNy5e4RnF6seD\n' > "$W/msg-r2.txt"
+git commit --only kubernetes/apps/office/mealie/app/helmrelease.yaml kubernetes/apps/office/mealie/app/shopping-sync-cronjob.yaml -F "$W/msg-r2.txt"
+git log -1 --format=%s; git show --stat HEAD; git push origin main
+flux reconcile hr mealie -n office            # re-drives the HelmRelease if the 15 minute upgrade window was exceeded
+kubectl get helmrelease -n office mealie -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'      # True
+runbooks/update-marker.sh clear mealie
+```
+The end state is byte-identical to the pre-window files at tag v3.28.0. Record the failure on the plan (`status: blocked`) with the first
+error line; do not re-attempt in the same window.
 
 ## 6) Interference notes
 
-- **Window recommendation (the finding is a live critical: do not queue it behind routine work).** Class derives HUMAN-GATED
+- **Window recommendation (security-driven: do not queue it behind routine work).** Class derives HUMAN-GATED
   (`capability_change: true`), so **the nightly window is out** and an operator must be present for 4.4 (a real login cannot be
   automated; there is no service-account login to Authentik). In order of preference:
   1. **An on-demand NOW run** (`home-operation run`, `on_demand: now`, 480 min ceiling, serial, attended) the day the operator can sit
-     through 45 minutes. Nothing else is stamped for it. Plans needing a stamp use `run-now.py stamp`, never a hand-written `now:` ref.
+     through 45 minutes (plus 15 for a rollback), started before ~23:30 local on 2026-11-02 while PR #428 is still cooling. Nothing else is stamped for it. Plans needing a stamp use `run-now.py stamp`, never a hand-written `now:` ref.
   2. **`sat-attended:2026-11-07`** (the soonest attended slot): holds `helm-drift-detection` (60 min, medium) and the slot's schedulable
      budget is 70 min (90 - 20 Step-0 reserve), so both do not fit (60 + 45). Moving `helm-drift-detection` to a later Saturday is an
      **operator decision**; its conflicts_with already pairs it with other plans, and it rewrites THIS HelmRelease, so sharing a slot
      with it would also confound attribution. Not stamped by this plan.
   3. Not recommended: `sun-attended:2026-11-08` (`etcd-timeouts-5000-500`, restarts etcd on every control-plane node, backup-restore class
      stacking, and the Talos plan's recommended slot) and `sat-attended:2026-11-14` (`python-fleet-3.15.2` edits the same Flux
-     Kustomization and CronJob file). Waiting for 11-14 means two more weeks on an open critical finding.
+     Kustomization and CronJob file). Waiting for 11-14 means two more weeks with the finding open.
 - **Operator decision - exposure while waiting.** If no slot is available within the week, the compensating controls in scope are
   dropping the `envoy-external` parent from `httproute/mealie` (keeping `envoy-internal`) or leaving it as accepted under AR-007. Rebuilding or
   patching the image is out of scope (operator rule). This plan does not choose; it only says the choice exists.
 - **Single-slot rollback budget.** `rollback_class: backup-restore` plans are never stacked in one slot (see `conflicts_with`). Option B
-  costs ~15 minutes; the slot must have it.
+  costs ~15 minutes (also the HelmRelease timeout that the 5.0 budget is measured against); the slot must have it.
 - **Outage:** 1-3 minutes, hard, internet-facing (Recreate on an RWO volume; the startup probe allows 10 minutes for the migration, the
   HelmRelease 15). Expect a handful of 502/503 from `envoy-external` and `MealiePodNotReady` pending (it fires only after `for: 5m`).
 - **Expected noise, not regressions:** `MealiePodRestarted` (`for: 1m`) can flag once; the marker from 3.1 covers it. The CronJob is suspended
@@ -893,10 +986,12 @@ Record the failure on the plan (`status: blocked`) with the first error line; do
   (the `HOST_IP` default change, 1.3) - not a fault.
 - **The `HTTP_ALLOW_LIST` / `REVERSE_PROXY_AUTH_*` / `HOST_IP` temptation.** If anything looks wrong, release notes and issues will
   suggest env vars. Do not set any of them unless a gate has PROVEN the need; each one widens an SSRF or authentication surface on a public host.
-- **Shared instrument:** section 4 reads Prometheus. A same-night `kube-prometheus-stack` bump would blind 4.6; none is open, and the
-  field above must be updated if one is filed.
-- **Reciprocity owed:** `python-fleet-3.15.2` must list `mealie-3.30.0` in its own `conflicts_with` (this plan lists it; the validator does
-  not check the other direction). I may not edit another plan from this dispatch; the window agent or the sweep should.
+- **Shared instrument and Renovate PR #428.** Section 4.6 reads Prometheus. kube-prometheus-stack PR #428 (92.11.1 -> 92.17.0) is open and,
+  per the coordinator, clears its 48 h cooldown about 23:30 local on 2026-11-02, after which the Step-0 safe-update batch of any window could
+  apply it. The coordinator is adding a time-boxed deny-rule hold in `runbooks/auto-update-policy.yaml` (not part of this plan). Run this
+  plan BEFORE that point or after the chart bump has settled, never in the same window; 2.1 checks the HelmRelease and says STOP. No kps
+  PLAN exists, so `conflicts_with` cannot carry it - add it on both sides if one is filed.
+- **Reciprocity:** `python-fleet-3.15.2` already lists `mealie-3.30.0` (checked 2026-11-02).
 - **This plan closes nothing by itself.** F-c0bd7eb7 resolves when the sweep re-scans the running image (4.7); F-9848e326 when the version
   row disappears from the next snapshot; F-655a9c6c is only half answered (homepage is a different component).
 
@@ -912,4 +1007,4 @@ Record the failure on the plan (`status: blocked`) with the first error line; do
 | 3.8 release guards, first real sync tick, settle, scan | 6 |
 | **Total** | **45** |
 
-Rollback adds ~15 min (revert, dump restore, pod restart, re-verify incl. a login).
+Rollback adds ~15 min (tag-only commit, dump restore, pod restart, re-verify incl. a login), then a separate guard-release commit.
