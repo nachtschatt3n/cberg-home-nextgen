@@ -104,7 +104,7 @@ finding_refs: [F-60ebcdb5, F-61e4d5b6, F-3b519d4a]
                                        # F-e918a007 (carried by 0.25.1) no longer lists as open.
 review: ready-for-go@2026-11-02       # plan-reviewer 2026-11-02: ready-for-go, 0 blocking, premises 8/8; stale scheduling prose fixed in the same edit. HUMAN-GATED: fresh operator GO on this plan_id (the 0.25.1 GO does not carry over)
 status: vetted
-window: "sat-attended:2026-11-07"      # OPERATOR GO 2026-11-02: SOLO (55 of 70 min). helm-drift-detection was moved to
+window: "now:2026-11-03"   # ON-DEMAND NOW run 2026-11-03 (run-now.py stamp; was 'sat-attended:2026-11-07')
                                        # sat-attended:2026-11-28 the same day; fallback sat-attended:2026-12-05 solo.
 sops_refs:
   - docs/sops/application-update.md
