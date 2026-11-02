@@ -30,8 +30,9 @@ risk: high                            # a rolling reboot of all three control-pl
                                       # replica 2, the only HTTP data plane, a measured history of drain-driven survivor
                                       # fsync stalls + elections (talos-upgrade.md §14.3, F-2cb2dbc9), an etcd binary move
                                       # 3.7.1 -> 3.7.3 (§1.2), and elevated background election churn (F-27a3f024: 3 in
-                                      # 24h / 49 in 7d on 2026-10-31; F-6938f5a1: 6 in 24h on 10-26; STILL ACTIVE 2026-11-02:
-                                      # 24h increase reads 6.002 -> premise etcd-elections-24h-below-6 FAILS, see its note).
+                                      # 24h / 49 in 7d on 2026-10-31; F-6938f5a1: 6 in 24h on 10-26; churn on 11-01/11-02:
+                                      # the 24h increase read 6.002 earlier on 2026-11-02 and 2.0 at 20:30Z (the 11-01 elections
+                                      # aged out): premise etcd-elections-24h-below-6 PASSES; re-read at the GO and at window start).
 est_duration_min: 180                 # = the sun-attended SCHEDULABLE CAP (200 - 20 Step-0), NOT the full scope. Pricing
                                       # carried unchanged from talos-linux-1.14.4 §7 (nothing in v1.14.5 changes a node's
                                       # roll mechanics; rebuild limit still 2, re-read 2026-10-31). OS roll 165 (if rebuild
@@ -110,7 +111,8 @@ touches:
     - talos-machineconfig             # node OS + kernel 6.18.51 -> 6.18.58 (block WBT newly ON; on-demand module
                                       # loading newly ON, §1.2); Phase K patches the live machine config (image
                                       # fields, NO_REBOOT)
-depends_on: []                        # nothing unexecuted must land first. talconfig-multidoc-migration executed
+depends_on: [etcd-timeouts-5000-500]  # operator decision 2026-11-02: etcd-timeouts-5000-500 (sun-attended:2026-11-08) lands FIRST, then
+                                      # longhorn-1.13.0 (11-15), then this roll. Otherwise nothing unexecuted must land first. talconfig-multidoc-migration executed
                                       # 2026-10-04 (a7965251); premise multidoc-migration-applied-on-all-nodes is the
                                       # live gate.
 conflicts_with:                       # exclusive: true already keeps everything out of the slot. These are (a) the
@@ -123,8 +125,9 @@ conflicts_with:                       # exclusive: true already keeps everything
                                       # 6.18.58 (§6.3c). It still names only talos-linux-1.14.2.
   - etcd-timeouts-5000-500            # sun 11-08; restarts etcd x3 + apply-config on the same nodes; its no-reboot
                                       # verdict was measured on etcd 3.7.1 (this roll moves 3.7.3). It is ALSO the likely
-                                      # remedy for the election churn that blocks this roll's premise (§2.3): so order is a
-                                      # genuine operator decision, not a default (§6.2). Names only talos-linux-1.14.2 back.
+                                      # remedy for the election churn behind this roll's premise (§2.3). ORDER DECIDED
+                                      # (operator, 2026-11-02): etcd-timeouts FIRST (see depends_on), this roll after.
+                                      # It names talos-linux-1.14.5 back (and the superseded 1.14.2).
   - longhorn-1.13.0                   # sun 11-15: never roll nodes with a Longhorn engine/manager/CSI move in flight
   - multus-macvlan-foundation         # reference/unwindowed; talosctl apply-config on the nodes
   - flux-reconciler-impersonation     # same Flux surface (blocked)
@@ -134,7 +137,8 @@ conflicts_with:                       # exclusive: true already keeps everything
   - otel-operator-0.26.1              # its successor draft (names 1.14.2/1.14.4/1.14.5 back); same reason
   - flux-fleet-0.62.0                 # restarts the six Flux controllers; the freeze + ImageUpdateAutomation suspend/resume
   - flux-fleet-0.62.1                 # (§2.0b) and a main-pushing Flux bump cannot share a slot (names only 1.14.2 back)
-  - flux-oci-chart-sources            # staged Flux source-controller/chart-source programme, sun-attended:2026-11-22; the
+  - flux-oci-chart-sources            # staged Flux source-controller/chart-source programme, moved to sun-attended:2026-12-13
+                                      # on 2026-11-02 (11-22 now belongs to this roll); the
                                       # freeze-sha gate reads origin/main and Flux must be quiet (names no talos plan back)
   - envoy-proxy-config-distroless-v1.39.4  # DECISION (2026-10-23): never the same night; rolls all 6 envoy pods and
                                       # competes for the PDB disruption budget the drains use; §4.4 gates on the VIPs
@@ -158,10 +162,11 @@ conflicts_with:                       # exclusive: true already keeps everything
   - helm-drift-detection              # its P2 rolls intel-gpu-plugin (re-registers i915 on every node)
   # No kube-prometheus-stack PLAN file exists (2026-11-02), but Renovate PR #428 (kube-prometheus-stack 92.11.1 ->
   # 92.17.0, MERGEABLE) is open: if a plan or a Step-0 auto-apply lands it the same day, a Prometheus restart blanks
-  # every §4 gate. It is NOT on runbooks/auto-update-policy.yaml's deny list (measured 2026-11-02: no kube-prometheus
-  # rule exists), so "must not land in Step 0 / the preceding nightly" is currently UNENFORCED -> time-boxed hold
-  # recommended to the coordinator (§6.3). Reciprocity owed by: etcd-timeouts-5000-500 and talos-power-tuning-ab
-  # (still name only talos-linux-1.14.2), flux-fleet-0.62.0 / flux-oci-chart-sources (name no talos plan).
+  # every §4 gate. The hold is ENFORCED: deny rule "*kube-prometheus-stack*" in runbooks/auto-update-policy.yaml
+  # (commit 3139010e, 2026-11-02) keeps PR #428 out of every Step 0; it EXPIRES/is revisited by 2026-11-30 and must
+  # stay until §5.4 has ended (§6.3). Reciprocity owed by: talos-power-tuning-ab (still names only
+  # talos-linux-1.14.2), flux-fleet-0.62.0 / flux-oci-chart-sources (name no talos plan); etcd-timeouts-5000-500
+  # already names -1.14.5.
 capability_change: true               # node BEHAVIOUR changes, not just versions (§1.2): kernel CONFIG_BLK_WBT on the NVMe
                                       # etcd/Longhorn/images share (1.14.2); kubelet CPU/memory-manager state files Talos
                                       # judges invalid are deleted before kubelet starts (1.14.2); KubePrism LB recovery
@@ -201,11 +206,12 @@ review: null
 status: draft
 window: null                          # the window agent assigns -- the slot is the OPERATOR'S call (§6.2). sun-attended:
                                       # 2026-11-01 was MISSED (1.14.4 never ran; it is superseded, window cleared).
-                                      # Recommendation only: sun-attended:2026-11-08 (earliest reboot-capable Sunday; 7-day
-                                      # gap before longhorn-1.13.0 on 11-15) -- which requires etcd-timeouts-5000-500 to move
-                                      # OFF 11-08 (best 11-22). Needs, before Phase A: plan-reviewer ready-for-go on THIS
-                                      # file, a FRESH operator GO (the 10-23 GO covered 1.14.4 only), and the premise
-                                      # etcd-elections-24h-below-6 passing (it FAILS 2026-11-02: 6.002).
+                                      # Recommendation only: sun-attended:2026-11-22 (operator ordering 2026-11-02:
+                                      # etcd-timeouts-5000-500 on 11-08, longhorn-1.13.0 on 11-15, then this roll; 11-22 is
+                                      # free). Needs, before Phase A: plan-reviewer ready-for-go on THIS file, a FRESH
+                                      # operator GO (the 10-23 GO covered 1.14.4 only), longhorn-1.13.0 executed with >= 2
+                                      # green nightly backups, and the premise etcd-elections-24h-below-6 passing at the GO
+                                      # and again at window start (it reads 2.0 on 2026-11-02 20:30Z).
 premises:
   # All read-only, single pipelines. Upstream reads use `kubectl get --raw` against a public host with
   # --kubeconfig=/dev/null and a dummy bearer (--token=none): kubectl is the only HTTP client plan-premises.py
@@ -229,12 +235,10 @@ premises:
       Read 5.0 on 2026-10-17 (7d: 56, F-f5879ed8 CI-load churn) — PASSING BY ONE then; F-27a3f024 reads 3 in 24h /
       49 in 7d on 2026-10-31, and F-6938f5a1 recorded 6 in 24h on 10-26 — still the premise most likely to
       block the day. Regex dry-tested: "5.0017" and "0" pass; "6" and "12.3" fail.
-      THIS PREMISE FAILS LIVE ON 2026-11-02 (reads 6.002) AND THAT IS CORRECT: churn since 10-26 continues (changes at
-      11-01 11:46 (+3), 13:46 (+1), 11-02 03:46 (+1), 04:46 (+1); the 3h window reads 0, so the 24h figure may decay
-      below 6 by ~11-08 if nothing new happens). It must NOT be weakened, widened or skipped. It must PASS at the
-      operator's GO AND AGAIN at window start (§2.0 re-runs it); FRESH churn in between = NO ROLL that day -- the
-      contingency is etcd-timeouts-5000-500 (the likely remedy for the churn); swapping its order with this roll is an
-      OPERATOR decision (§6.2), never the window agent's.
+      It read 6.002 on the morning of 2026-11-02 and 2.0 at 20:30Z (the 11-01 elections aged out of the 24h window), so
+      it PASSES today. It stays a HARD gate: it must PASS at the operator's GO AND AGAIN at window start (§2 re-runs
+      it); fresh churn in between = NO ROLL that day. Order versus etcd-timeouts-5000-500 is decided (operator,
+      2026-11-02): etcd-timeouts goes first (depends_on). Never weaken, widen or skip this premise.
     run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=max(increase(etcd_server_leader_changes_seen_total%5B24h%5D))'
     expect_matches: '"value":\[[0-9.]+,"[0-5](\.[0-9]+)?"\]'
   - id: factory-publishes-schematic-v1.14.5
@@ -411,8 +415,8 @@ generated: "2026-11-02"
 > **2026-11-02 — review fixes (plan-reviewer verdict needs-fix, findings re-verified live).** (a) `talos-linux-1.14.4`
 > is now `status: superseded`; its GO of 2026-10-23 covered 1.14.4 ONLY and LAPSED with the supersede, and its
 > `sun-attended:2026-11-01` slot was missed: **a FRESH operator GO for THIS plan is required** (§6.2). (b) Premise
-> `etcd-elections-24h-below-6` **FAILS live (6.002) and is deliberately left failing** — it must pass at the GO and again
-> at window start; fresh churn = no roll (§2.3, §6.2). (c) etcd's `PROTOCOL` column is the **server version**: 3.7.1 on
+> `etcd-elections-24h-below-6` read 6.002 that morning and 2.0 at 20:30Z (**PASSES**; it stays a hard gate) — it must pass
+> at the GO and again at window start; fresh churn = no roll (§2.3, §6.2). (c) etcd's `PROTOCOL` column is the **server version**: 3.7.1 on
 > all three today, 3.7.3 after a correct roll (STORAGE stays 3.7.0) — §2.3/§4.4 #2 corrected, **CONTENTS ASSERTION 6**
 > written (§4.3) and a per-node version check added to §3.10. (d) The DaemonSet gate compared CURRENT with UP-TO-DATE;
 > it now compares DESIRED with READY (§4.4 #8). (e) Node-pinned workloads (frigate@02, matter-server+otbr@03) and an
@@ -635,10 +639,10 @@ P='/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/
 ```
 **PASS:** every premise passes (incl. `multidoc-migration-applied-on-all-nodes` = 3). Any
 failure = NO-GO for today; do not "fix" a premise in-window. **`etcd-elections-24h-below-6` is the
-standing blocker (it reads 6.002 on 2026-11-02):** it is run AGAIN here, at window start, on top of
+churn gate (it read 2.0 on 2026-11-02 20:30Z, passing; 6.002 that morning):** it is run AGAIN here, at window start, on top of
 the pass the operator needed for the GO. Passing at the GO and failing now (fresh churn) = NO ROLL
-today — not a waiver, not a re-run-until-green, not a wider window; the contingency and its
-ordering decision are the operator's (§6.2).
+today — not a waiver, not a re-run-until-green, not a wider window; the contingency is
+the operator's (§6.2).
 
 **2.2b — A newer 1.14.x patch? (replaces the retired premise `newest-stable-talos-is-v1.14.5`;
 F-56452df7.)** Runs once, right after the premises.
@@ -1021,7 +1025,7 @@ print(f"{node}: read-after-write {'matches' if ok else 'DID NOT match'} ({nonce}
 print("VERDICT", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)
 PY
-ls "$SCR"/*.py | wc -l                      # MUST print 10
+ls "$SCR"/{lh_gate,bk,alerts,notready,nodegate,etcdgate,etcdstat,probe,hwmon,cifsproof}.py | wc -l   # MUST print 10 (the ten written above; a retried Sunday's leftover winopen.py/k0clock.py no longer inflates it)
 ```
 
 **Controls for the new/changed helpers (run once; dry-run 2026-10-01):**
@@ -1031,6 +1035,13 @@ ls "$SCR"/*.py | wc -l                      # MUST print 10
   by an `rpc error` → `FAIL: 2 consecutive samples without a common healthy leader`. In-window:
   build the bumped-term copy of the canary's first probe log with the same 3-line python edit
   and confirm FAIL before trusting the canary's PASS.
+  **Timeout calibration (N6):** `probe.py`'s and `etcdgate.py`'s thresholds were calibrated on etcd's 1 s election
+  timeout; if `etcd-timeouts-5000-500` has landed first (it is ordered first, `depends_on`) the election timeout is now
+  5-10 s. A graceful `talosctl upgrade` stop transfers leadership before the member goes down, so no false FAIL is
+  expected from the longer timeout; but re-derive the numbers on the FIRST node (the canary is not the leader — the
+  leader rolls last): the canary's probe log must show a common healthy leader on every sample, and a leaderless sample
+  longer than the new timeout is read against the new value, not the 1 s one. If the canary's log contradicts a
+  threshold, STOP and re-derive before the second node rather than editing a gate mid-roll.
 - `hwmon.py` — `compare` against a baseline file with one chip renamed must print `VERDICT FAIL`
   (`gone [...] new [...]`). *2026-10-01 baseline: `i2c_0_0_0050:3, i2c_0_0_0052:3,
   nvme_nvme0:9, platform_coretemp_0:45, thermal_thermal_zone1:9`.*
@@ -1221,8 +1232,8 @@ mise exec -- kubectl get --raw "$P/query?query=max(increase(etcd_server_leader_c
 **PASS:** 3 members, no `LEARNER`, empty `ERRORS`, converged `RAFT INDEX`, `PROTOCOL 3.7.1`
 on all three (the `PROTOCOL` column is the etcd **server** version — verified live 2026-11-02 against
 `etcd_server_version`; `STORAGE 3.7.0` is the schema and does not move); alarm list empty; 24h
-leader-change increase **< 6** (≥ 6 with no reboots = etcd already unstable: NO-GO; **it read 6.002
-on 2026-11-02 — this gate is the standing blocker, §2 intro and §6.2**). Pre-roll version proof:
+leader-change increase **< 6** (≥ 6 with no reboots = etcd already unstable: NO-GO; **it read 2.0 on
+2026-11-02 20:30Z (6.002 that morning) — this is the churn gate, §2 intro and §6.2**). Pre-roll version proof:
 `mise exec -- python3 "$SCR/etcdstat.py" rolled` (no IPs) must print `VERDICT PASS` (3.7.1 x3 / 3.7.0). *(2026-10-01 03:40Z: 3.7.1/3.7.0, DB 445–462 MB, IN USE 148 MB =
 32–33 %, leader `73a201c6…` = k8s-nuc14-03, term 81; 24h increase 0, 7d 16 — the 7d figure
 contains the 2026-09-27 roll.)* Read IN USE % here: it decides §3.8.0.
@@ -1400,6 +1411,18 @@ file is the contract, §3.10c compares against it)*; one frigate pod `Running 1/
 03; `recent=` ≥ 1 (Frigate is recording — *50 = the `head` cap on 2026-11-02*). The two pods being `Recreate`,
 nodeSelector-pinned and single-replica means a drain of their node leaves them `Pending` until that node is uncordoned.
 
+**2.12c — Pre-roll CIFS write-leg proof on all three (still un-rolled) nodes (~1 minute each).** The dry-run in §2.0
+admits the manifest but never exercised the WRITE leg; run it once per node BEFORE the roll so the canary's CA7 has a
+known-good control on the same share (§4.3 CONTENTS ASSERTION 7; one transient pod per node, pods only are deleted):
+
+```bash
+for n in k8s-nuc14-01 k8s-nuc14-02 k8s-nuc14-03; do mise exec -- python3 "$SCR/cifsproof.py" "$n" | tee "$SCR/cifsproof-pre-$n.txt"; done
+```
+**PASS:** three `VERDICT PASS` lines (`read-after-write matches`). Fails on: a pod not `Succeeded` in 120 s (the helper prints
+the `FailedMount` events), output other than `[nonce, GONE]`. A FAIL here on a node that has NOT been rebooted is a
+pre-existing share/PodSecurity defect: fix or understand it before the GO is acted on — otherwise the canary's CA7 would
+read as a regression the roll did not cause.
+
 ## 3) Steps
 
 ### Phase A — PREP, BEFORE the window opens (~30 min, zero workload/config effect)
@@ -1456,9 +1479,10 @@ file, the context lines differ but the `-`/`+` pair must be exactly this one. **
 sed -i '' -e 's|kubernetes/bootstrap/talos/talconfig.yaml, currently v1\.14\.1), so it must|kubernetes/bootstrap/talos/talconfig.yaml, currently v1.14.5), so it must|' runbooks/auto-update-policy.yaml
 git --no-pager diff runbooks/auto-update-policy.yaml
 ```
-**Expected diff (dry-tested 2026-10-31 on a scratch copy; the hunk moved from line 453 to 476 since 10-01):**
+**Expected diff (dry-tested 2026-10-31 on a scratch copy; the hunk header drifts as the file grows — it was line 453 on
+10-01, 476 on 10-31 and ~503 on 2026-11-02 — so assert ONLY the one `-`/`+` pair, never the `@@` numbers):**
 ```diff
-@@ -476,7 +476,7 @@
+@@ -503,7 +503,7 @@
    # reader to discount a reason that is load-bearing on the OTHER rule.
    - match: "aqua:siderolabs/talos"
      reason: "talosctl CLI pin — tracks the CLUSTER version (talosVersion in
@@ -1466,6 +1490,13 @@ git --no-pager diff runbooks/auto-update-policy.yaml
 +      kubernetes/bootstrap/talos/talconfig.yaml, currently v1.14.5), so it must
        never move AHEAD of the nodes. It FOLLOWS a node upgrade; it does not
 ```
+
+**Assert:** `git --no-pager diff --stat runbooks/auto-update-policy.yaml` must read exactly **1 insertion(+), 1 deletion(-)**.
+Anything else (another hunk, a larger count) = STOP: another session may have uncommitted edits to this shared file
+(it also carries the time-boxed `*kube-prometheus-stack*` deny rule, §6.3) — let that session land its hunk first and
+re-run, and commit with `git commit --only runbooks/auto-update-policy.yaml`. The policy file's header asks for its
+`version:` key to be bumped on every change: AFTER the 1/1 assertion above passes, bump `version:` to the day's date
+(`YYYY.MM.DD`) in the same commit; the final staged diff is then `2 insertions(+), 2 deletions(-)`.
 
 **3.4 — Target still the head.**
 
@@ -1607,7 +1638,9 @@ machine config references a v1.36.6 image until §3.K5. **Survives Phase B's reb
 unused `kube-apiserver:v1.34.0` pulled 2026-01-05 is still present — Talos upgrades preserve
 EPHEMERAL and kubelet image GC has not pruned unused images here. If the images are nevertheless
 gone at §3.K5, upgrade-k8s simply pulls them (+~4 min), so this step is an optimisation, never a
-gate on Phase K.
+gate on Phase K. *Upstream siderolabs/talos issue #14784: `talosctl image pull` into the CRI namespace drops layers
+when containerd's `discard_unpacked_layers=false` and the image was served by Spegel; harmless for correctness here,
+because a missing layer is simply fetched by upgrade-k8s at §3.K5 (the pre-pull is only an optimisation).*
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
@@ -1678,8 +1711,8 @@ snapshot, no roll (§5.4). A member not healthy after 5 min: `talosctl -n <ip> s
 restart` on that member only; still bad = NO-GO. Skip this section (and its 7 min) if every
 member is ≥ 50 % at §2.3 — note the reading.
 
-**3.8a — Pre-roll etcd snapshot** (talos-upgrade.md Step 0.4, mandatory; defence in depth —
-this hop does not move etcd, §5).
+**3.8a — Pre-roll etcd snapshot** (talos-upgrade.md Step 0.4, mandatory; defence in depth for
+the etcd 3.7.1 -> 3.7.3 move, §1.2/§5).
 
 ```bash
 LEADER_IP=<current leader ip>
@@ -2388,8 +2421,11 @@ PV/PVC/Volume/Replica.
 > **PASS:** `VERDICT PASS` (`read-after-write matches`). **Fails on:** the pod not reaching `Succeeded` in 120 s (a
 > broken share shows as `ContainerCreating` + a `FailedMount` event, which the helper prints), output other than
 > `[nonce, GONE]`. Not exercised for writing in planning (read-only session; §2.0 notes) — the dry-run admits it on all
-> three nodes; the first real run is the canary. A leftover `cifs-proof-*` pod after a FAIL:
-> `kubectl delete pod -n office cifs-proof-<NN>-<n>` (pods only).
+> three nodes; §2.12c runs the write leg once per node BEFORE the roll as the known-good control. A leftover `cifs-proof-*`
+> pod after a FAIL: `kubectl delete pod -n office cifs-proof-<NN>-<n>` (pods only).
+> **A CA7 FAIL on the canary is "re-run once and read the `FailedMount` events" FIRST** (the helper prints them): a
+> transient mount race right after boot clears on the re-run; only a second FAIL with a `FailedMount` that names the SMB
+> share, on a node whose §2.12c pre-roll proof PASSED, is a roll defect and a canary STOP/rollback trigger (§5).
 
 ### 4.4 — Whole-cluster verification (end of window; talos-upgrade.md §15.1)
 
@@ -2778,7 +2814,7 @@ names this plan in `conflicts_with` (named back here 2026-10-05); the migration 
 it is unwindowed so the scheduler is safe today, but its owner should add `talos-linux-1.14.5`
 in its next edit.
 
-### 6.2 — Slot, GO, and the standing blocker
+### 6.2 — Slot, GO, and the churn gate
 
 This plan needs a whole `sun-attended` window alone (`exclusive: true`): every pod is evicted and
 rescheduled three times; any other change verified in the same window has two candidate causes.
@@ -2789,26 +2825,24 @@ rescheduled three times; any other change verified in the same window has two ca
 **Before ANY window, all three of:** (1) a plan-reviewer `ready-for-go` on THIS file; (2) a **FRESH operator GO**
 — the GO of 2026-10-23 covered `talos-linux-1.14.4` only and lapsed with the supersede; this file inherits nothing
 (§3.7b and every node-touching step stay locked until it is recorded); (3) premise `etcd-elections-24h-below-6`
-**passing** — it FAILS live on 2026-11-02 (24h increase **6.002**; changes at 11-01 11:46 (+3), 13:46 (+1), 11-02
-03:46 (+1), 04:46 (+1); the 3h window reads 0, so the 24h figure may fall under 6 by ~11-08 if nothing new
-happens). Not weakened, not waived: it must pass at the GO **and again at window start (§2)**; **fresh churn in
-between = no roll that day.** It is a real gate: ≥ 6 leader changes/24h with no reboot is etcd already unstable, and
+**passing** — it read 6.002 on the morning of 2026-11-02 (changes at 11-01 11:46 (+3), 13:46 (+1), 11-02 03:46 (+1),
+04:46 (+1)) and **2.0 at 20:30Z** (those elections aged out of the 24h window): PASSING today. Not weakened, not
+waived: it must pass at the GO **and again at window start (§2)**; **fresh churn in between = no roll that day.** It is a real gate: ≥ 6 leader changes/24h with no reboot is etcd already unstable, and
 this plan then drains a node under it (§3.10 pattern (ii) history).
 
-**Recommended slot (the operator's call; `window` stays `null`): `sun-attended:2026-11-08`** — the earliest
-reboot-capable Sunday, with a 7-day gap before `longhorn-1.13.0` (11-15, a one-way storage-engine move that must
-never overlap a node roll). That slot is currently held by `etcd-timeouts-5000-500` (vetted, `sun-attended:2026-11-08`,
-110 min, not exclusive, names only `talos-linux-1.14.2` back), which conflicts with this plan, so using 11-08
-means moving it — the reviewer's best candidate is **11-22** (currently `flux-oci-chart-sources`, 30 min per stage;
-`maintenance-plan.py --open` at assignment). Later Sundays: 11-15 longhorn-1.13.0, 11-22 flux-oci-chart-sources,
-11-29 redis-fleet-8.10.3.
+**Slot (operator decision 2026-11-02; `window` stays `null` until the GO): `sun-attended:2026-11-22`.** Order:
+`etcd-timeouts-5000-500` (11-08, GO recorded) -> `longhorn-1.13.0` (11-15, GO recorded) -> this roll. Preconditions:
+`etcd-timeouts-5000-500` executed (its no-reboot verdict was measured on etcd 3.7.1 and must be re-measured on 3.7.3
+after this roll); `longhorn-1.13.0` executed with >= 2 green nightly backups and the §2 baselines re-read after it.
+Because the Longhorn rebuild time R at replica limit 2 is unmeasured and may exceed the 25-minute finish-today cutoff
+(§3.11), keep **11-29 free as the continuation Sunday**: `redis-fleet-8.10.3` was assigned 11-29 and conflicts with this
+plan, so the coordinator must move it if the canary stops the roll. Other Sundays (re-read `maintenance-plan.py --open`
+2026-11-02): 11-08 etcd-timeouts-5000-500, 11-15 longhorn-1.13.0, 11-29 redis-fleet-8.10.3, 12-06 envoy, 12-13
+flux-oci-chart-sources; `helm-drift-detection` holds sat-attended:2026-11-28.
 
-**The ordering decision this surfaces (operator, not the window agent):** `etcd-timeouts-5000-500` is the likely
-remedy for the very churn that blocks this roll's premise, and the old preference here was "this roll BEFORE
-etcd-timeouts" (its no-reboot verdict was measured on etcd 3.7.1 and must be re-measured on 3.7.3 either way). If the
-premise keeps failing, the two choices are: (a) keep the order and wait for the churn to decay (nothing rolls until it
-passes), or (b) swap — run `etcd-timeouts-5000-500` first, then re-measure its verdict after this roll's etcd
-3.7.3. Neither is chosen here. Also unchanged: this roll BEFORE `longhorn-1.13.0`.
+**Ordering decision (made):** `etcd-timeouts-5000-500` is the likely remedy for the election churn and goes first
+(`depends_on`); this roll comes after both it and `longhorn-1.13.0`. The old preference "this roll BEFORE etcd-timeouts"
+is withdrawn.
 
 ### 6.3 — Things that must not run concurrently
 
@@ -2826,12 +2860,11 @@ passes), or (b) swap — run `etcd-timeouts-5000-500` first, then re-measure its
   Run `docs/sops/home-assistant-updates.md`'s post-restart checklist afterwards.
 - **Any kube-prometheus-stack change** — §4 reads Prometheus (see `conflicts_with` note). Renovate PR
   #428 is **kube-prometheus-stack 92.11.1 → 92.17.0** (re-read 2026-11-02, `renovate/kube-prometheus-stack-92.x`,
-  MERGEABLE; it was 92.16.1 on 10-31). It **is not on `runbooks/auto-update-policy.yaml`'s deny list** (measured
-  2026-11-02: no kube-prometheus rule exists), so a sentence saying it "must not land in Step 0" is UNENFORCED: the
-  nightly 03:30 window and this window's own Step 0 can merge it. **Recommendation to the coordinator (not done
-  here): a time-boxed hold** — a deny rule with an expiry (or an equivalent hold on the PR) covering the nightly runs
-  of the day before the roll, the roll morning's Step 0 and the window itself, lifted after §5.4; if the roll slips,
-  the hold slips with it. A Prometheus restart mid-roll blanks every §4 gate and is not recoverable by this plan.
+  MERGEABLE; it was 92.16.1 on 10-31). A deny rule `*kube-prometheus-stack*` is live in
+  `runbooks/auto-update-policy.yaml` (commit `3139010e`, 2026-11-02, revisit by 2026-11-30); it holds PR #428 out of
+  every Step 0 and MUST stay until §5.4 has ended. If the roll slips past 11-29 the rule expires first: extend it in
+  the same commit that moves this plan. A Prometheus restart mid-roll blanks every §4 gate and is not recoverable by
+  this plan.
 
 ### 6.3b — Reciprocity: plans that still name the superseded Talos plans
 
@@ -2846,8 +2879,10 @@ plan at all — each should add `talos-linux-1.14.5`:
 `gha-fleet-0.15.1`, `grafana-14.1.0`, `icloud-drive-fleet-2.3.0`, `jellyfin-3.7.0`, `openclaw-2026.10.5`,
 `otbr-0.4.0`, `otbr-thread-rcp-recovery`, `otel-operator-0.25.1`, `plex-1.43.5.11079`, `redis-fleet-8.10.3`,
 `tube-archivist-elasticsearch-9.5.5`, `wazuh-100404-ci-build-tuning`; naming only `-1.14.2`:
-`etcd-timeouts-5000-500`, `longhorn-1.13.0`, `multus-macvlan-foundation`, `cli-tool-pins`,
-`talos-power-tuning-ab`.
+`longhorn-1.13.0` (retargeted to `-1.14.5` in the same change set as this edit), `multus-macvlan-foundation`,
+`cli-tool-pins`, `talos-power-tuning-ab`. `etcd-timeouts-5000-500` already names `-1.14.5` (and the superseded `-1.14.2`).
+`authentik-2026.8.5` (`sat-attended:2026-11-21`, the day before this roll) names only the superseded
+`talos-linux-1.14.4`; exclusivity of this plan's Sunday still keeps them apart.
 
 ### 6.3c — `talos-power-tuning-ab` (same nodes, same machine config)
 
@@ -2893,7 +2928,7 @@ RAPL/EPP/iGPU sysfs keys. Interaction with this roll:
 | `talos-machineconfig` / kernel | 6.18.58 + WBT on the shared NVMe | etcd, Longhorn, image pulls — measured by §3.10b/§4.4 #9/§4.6 |
 | `igpu-i915` / NPU | device plugins re-register per node | Frigate, Jellyfin, Plex, Immich, NPU workloads |
 | `security` DaemonSets | falco (`modern_ebpf` vs 6.18.58), wazuh-agent, otel daemon restart per node | per-node telemetry gap |
-| `authentik` | server/worker/13 outposts reschedule | SSO, one silent re-login per app |
+| `authentik` | server/worker/13 outposts reschedule. Accepted: `authentik-2026.8.5` (sat-attended:2026-11-21) is the day before this roll, so a freshly upgraded authentik has its outposts evicted by the next morning's roll — considered and accepted (the upgrade is verified on the Saturday; the roll's own §4 re-verifies SSO) | SSO, one silent re-login per app |
 | `storage/longhorn` | instance-manager restart + replica rebuild ×3 | every stateful app |
 | `cni/cilium`, `coredns`, `cert-manager` | pods restart/reschedule per node | pod networking/DNS/webhooks, briefly |
 | `monitoring` | Prometheus loses samples while its node drains (§3.9a covers etcd) | §4 waits 15 min before judging |
@@ -2911,9 +2946,9 @@ objects into an SSA inventory); it does not raise the plan's risk, and its rollb
 sun-attended only.
 
 **Residual risks the operator should weigh at the GO:**
-- **The election churn is live and the premise that guards it currently FAILS** (24h increase 6.002 on 2026-11-02,
-  §6.2). Rolling into it is the scenario §3.10 pattern (ii) exists for; the plan's answer is not to start, not to
-  gate harder in-window.
+- **The election churn is recent and the premise that guards it must pass at the GO and at window start** (24h
+  increase 6.002 that morning, 2.0 at 20:30Z on 2026-11-02, §6.2). Rolling into churn is the scenario §3.10 pattern
+  (ii) exists for; the plan's answer is not to start, not to gate harder in-window.
 - **Node-pinned workloads have no failover**: frigate (02) records nothing and matter-server (03) serves nothing
   from their node's drain until it is back (§3.10c, §6.4). Accepted by design, observable, not mitigated.
 - **Executing a patch behind**: §2.2b defaults to v1.14.5 even if a newer 1.14.x ships before the window.
@@ -3055,11 +3090,12 @@ id") is itself stale since 2026-10-04 and should follow the premise above (repor
    `newest-stable-talos-is-v1.14.5` was exactly that defect and is replaced by `talos-v1.14.5-installable` +
    §2.2b. The POLICY change (upgrade-planner-agent.md: write "newest release" premises against the minor line, newer-patch
    detection as an in-window SD-6 step) is the operator's to approve; this plan only applies it to itself.
-13. **Repo corrections owed (reported, not edited here):** (a) `docs/sops/etcd.md:235` says "same PROTOCOL on all" as
-   the convergence expectation — false mid-way through a patch roll (3.7.1 and 3.7.3 coexist by design) and a
-   mixed result is exactly what `etcdstat.py rolled` asserts; (b) the SOP
+13. **Repo corrections owed (reported, not edited here):** (a) `docs/sops/etcd.md:235` said "same PROTOCOL on all" as
+   the convergence expectation — false mid-way through a patch roll (3.7.1 and 3.7.3 coexist by design; a mixed
+   result is exactly what `etcdstat.py rolled` asserts); corrected 2026-11-02 in the same change set as this edit; (b) the SOP
    `docs/sops/talos-upgrade.md:1572` awk is already corrected (DESIRED vs READY) — check any other runbook that copied
-   `$4 != $6`; (c) `runbooks/auto-update-policy.yaml` has no kube-prometheus-stack rule, so the "no Prometheus change in
-   the roll window" rule exists only in plan prose (§6.3).
-14. **`etcd-timeouts-5000-500` / `talos-power-tuning-ab` / `flux-fleet-0.62.x` / `flux-oci-chart-sources`** do not name
+   `$4 != $6`; (c) `runbooks/auto-update-policy.yaml` now carries the time-boxed `*kube-prometheus-stack*` deny rule (3139010e,
+   2026-11-02, revisit by 2026-11-30), which enforces the "no Prometheus change in the roll window" rule (§6.3); it
+   must be extended if this roll slips past 11-29.
+14. **`talos-power-tuning-ab` / `flux-fleet-0.62.x` / `flux-oci-chart-sources`** (`etcd-timeouts-5000-500` already names -1.14.5) do not name
    `talos-linux-1.14.5` in their `conflicts_with` (§6.3b) — reciprocity owed by their owners.

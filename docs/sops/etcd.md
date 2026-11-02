@@ -232,7 +232,7 @@ mise exec -- talosctl -n 192.168.55.11,192.168.55.12,192.168.55.13 etcd status
 ```
 
 Expected: 3 rows, one LEADER value, LEARNER `false`, empty ERRORS, identical RAFT INDEX
-(± 50), same PROTOCOL on all. If failed: §7.
+(± 50), same PROTOCOL on all, except mid-patch-roll (3.7.1 and 3.7.3 coexist by design; PROTOCOL is the etcd server version). If failed: §7.
 
 ### Test 3: negative control for the latency gate
 

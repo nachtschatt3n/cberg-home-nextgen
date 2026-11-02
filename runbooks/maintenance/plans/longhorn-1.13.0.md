@@ -50,7 +50,7 @@ conflicts_with:
   - grafana-14.1.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # 2026-10-25: pruned dead refs flux-fleet-0.60.0, kube-prometheus-stack-91.9.0, flux-distribution-2.9.6, pgvector-fleet-0.8.7, nextcloud-fleet-35.0.1 (executed/retired)
   - etcd-timeouts-5000-500           # reciprocal (2026-10-13): that plan names this one; etcd-timeouts lands sun 11-08; one risky change per window, gates read etcd health
-  - talos-linux-1.14.2                # node roll restarts instance-managers + rebuilds replicas; never
+  - talos-linux-1.14.5                # node roll restarts instance-managers + rebuilds replicas; never
                                       # pair with a storage-engine upgrade (same rule as 34abe2bb)
   # - talconfig-multidoc-migration (RESOLVED 2026-10-05: executed green now:2026-10-04 in a7965251 + retired 10bee773; dead ref removed per the dead-ref convention, sweep 481b9c1f / F-c688c50f)
   - jellyfin-config-rwo-migration     # allocates a NEW Longhorn volume + restore-proof on the engine
@@ -123,7 +123,7 @@ premises:
     expect_exact: "0"
 review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (no premises, CSI findings, inert gates) -> fixed -> delta ready-for-go
 status: awaiting-go   # HUMAN-GATED, one-way storage-engine minor: operator GO required
-window: "sun-attended:2026-11-15"   # scheduled 2026-10-05: exclusive Sunday, 70 of 180; two weeks after talos-linux-1.14.2 (proposed 11-01), after kps-91.9.0 (10-08)
+window: "sun-attended:2026-11-15"   # scheduled 2026-10-05: exclusive Sunday, 70 of 180; one week after etcd-timeouts-5000-500 (11-08) and one week BEFORE talos-linux-1.14.5 (11-22, operator ordering 2026-11-02; supersedes the 1.14.2 ordering), after kps-91.9.0 (10-08)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/longhorn.md
@@ -569,10 +569,11 @@ Forward-fix, do NOT revert the version:
 - **Window choice.** HUMAN-GATED (one-way + capability_change + storage floor).
   Recommended: **`sun-attended:2026-11-15`, exclusive** (70 of 180 min; the
   slot is free as of 2026-10-05). Keep it >= 2 days apart from
-  `talos-linux-1.14.2` (proposed `sun-attended:2026-11-01`) — 11-15 gives a
-  two-week soak of the 1.12.1 line under the new Talos before the engine
-  changes, or, if Talos slips past 11-15, the new engine gets >= 2 nightly
-  backup cycles before the node roll. A `sat-attended` slot also fits the
+  `talos-linux-1.14.5` (`sun-attended:2026-11-22`, operator ordering
+  2026-11-02: etcd-timeouts 11-08, this plan 11-15, then the Talos roll) —
+  the new engine gets a week and >= 2 green nightly backup cycles before the
+  node roll, which is a precondition of the Talos plan; if Talos slips, the
+  gap only grows. A `sat-attended` slot also fits the
   budget but runs into the following Sunday's attended work with no soak day;
   `nightly` (03:30) does NOT fit —
   it overlaps the 03:00 `daily-backup-all-volumes` run whose concurrency-2
@@ -583,14 +584,14 @@ Forward-fix, do NOT revert the version:
   `conflicts_with` should list `longhorn-1.13.0` back. Measured 2026-10-05:
   `mariadb-28.1.1`, `flux-fleet-0.60.0`, `flux-distribution-2.9.6`,
   `pgvector-fleet-0.8.7` and `nextcloud-fleet-35.0.1` already name it;
-  `talos-linux-1.14.2` and `kube-prometheus-stack-91.9.0` are `exclusive: true`,
+  `talos-linux-1.14.5` (successor of the retired 1.14.2) and `kube-prometheus-stack-91.9.0` are `exclusive: true`,
   so slot separation holds in both directions; `jellyfin-config-rwo-migration`,
   `flux-oci-chart-sources`, `flux-reconciler-impersonation` and
   `bitnamilegacy-exit-nextcloud-db` should add it.
 - **Ordering preference (not a hard dep):** run BEFORE
   `jellyfin-config-rwo-migration` so its new volume is born on the 1.13.0
   engine and the RWX share-manager (F-23a73fba) retires on the new line; and
-  NOT the day before `talos-linux-1.14.2` — the node roll restarts every
+  NOT the day before `talos-linux-1.14.5` (11-22, a week after this plan) — the node roll restarts every
   instance-manager, and a fresh engine line should soak >= 2 nightly backup
   cycles first.
 - **Prometheus is shared instrument.** §4.3 reads it.

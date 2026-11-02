@@ -104,6 +104,10 @@ review: ready-for-go@2026-11-02   # plan-reviewer 2026-11-02: needs-fix (fleet s
                                         # leg 3 (affine) is new. Needs a fresh plan-reviewer pass.
 window: "sun-attended:2026-11-29"      # OPERATOR GO 2026-11-02 (chat: do all of this now). Was SUGGESTION: "sun-attended:2026-11-29" (alternative sat-attended:2026-11-28 does NOT fit: 80 min > 70).
                                         # Do NOT use 11-07/08/14/15/21/22 (each holds a conflicts_with plan). Re-stamp after review.
+                                        # NOTE 2026-11-02: sun-attended:2026-11-29 is the RESERVED CONTINUATION slot for
+                                        # talos-linux-1.14.5 (this plan names it in conflicts_with) if that roll's canary stops
+                                        # part-rolled on 11-22 (Longhorn rebuild time at limit 2 unmeasured). If so, THIS plan
+                                        # must be moved to the next free Sunday by the coordinator.
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/verification-contents-not-shape.md
