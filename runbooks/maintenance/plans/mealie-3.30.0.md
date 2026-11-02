@@ -86,8 +86,8 @@ finding_refs:
   # Context, NOT claimed: F-655a9c6c ("Held-by-engine bumps with no plan": homepage and mealie v3.29.0) is a multi-component plan
   # finding; this plan answers only its mealie half and must not be recorded as closing it. F-99cd628f / F-6cd9118b are AR-029
   # acceptances for what upstream has not fixed and are unaffected by the bump.
-review: null
-status: draft
+review: ready-for-go@2026-11-02   # plan-reviewer 2026-11-02 (two rounds): needs-fix on the rollback (Helm remediation re-armed, HEAD-relative reverts), fixed and re-verified from both start states; HUMAN-GATED, attended on-demand NOW run after an operator GO
+status: vetted                    # human-gated; window null (on-demand NOW run, ~45 min + 15 min rollback budget)
 window: null                          # the window agent assigns it. RECOMMENDATION (section 6): an operator-triggered attended NOW run
                                       # (home-operation run), STARTED BEFORE ~23:30 local on 2026-11-02 while kps PR #428 is still cooling;
                                       # otherwise sat-attended:2026-11-07,
@@ -308,11 +308,11 @@ kubectl get helmrelease -n monitoring kube-prometheus-stack -o jsonpath='{.statu
 **PASS:** both flux lists print only the header; mealie and mealie-pg `1/1 Running`, restarts 0; the `--open` grep shows none of those
 plans stamped for TODAY's window (a stamp for another date is fine); the newest non-pre-release tag is `v3.30.0`.
 **The kube-prometheus-stack check:** PR #428 (92.11.1 -> 92.17.0) was open on 2026-11-02 and, per the coordinator, clears its 48 h cooldown
-about 23:30 local that day (the coordinator is adding a time-boxed deny-rule hold in `runbooks/auto-update-policy.yaml`; that file is not
-edited by this plan). **PASS:** the HelmRelease still reports chart `92.11.1` with a `lastDeployed` older than today, so the Prometheus
+about 23:30 local that day. A time-boxed deny-rule hold on `kube-prometheus-stack` is in `runbooks/auto-update-policy.yaml` since commit
+`3139010e` (2026-11-02; revisit by 2026-11-30), so Step 0 will not bump it; that file is not edited by this plan). **PASS:** the HelmRelease still reports chart `92.11.1` with a `lastDeployed` older than today, so the Prometheus
 and Alertmanager that section 4.6 reads are not mid-roll. **STOP / reschedule** if the chart version has moved, `lastDeployed` is within the
 last hour, or the Step-0 safe-update batch in this very window is bumping `kube-prometheus-stack` - 4.6 reads the instrument being replaced
-and a pass proves nothing. Starting this plan before 23:30 local on 2026-11-02 avoids the overlap entirely.
+and a pass proves nothing. With the hold in place the overlap cannot happen from Step 0; the check still guards against a hand-applied or un-held bump.
 **If a `v3.30.1` (or newer 3.30.x) exists: STOP.** Re-read its notes, retarget by refreshing this plan in place (README "When the
 held target MOVES"); do not bump to a tag whose notes this plan never read.
 
@@ -552,6 +552,7 @@ EOF
 git commit --only kubernetes/apps/office/mealie/app/helmrelease.yaml kubernetes/apps/office/mealie/app/shopping-sync-cronjob.yaml -F "$W/msg1.txt"
 git log -1 --format=%s        # MUST be the subject above, not another session's
 git show --stat HEAD          # MUST list exactly those two files
+# capture ONLY after the subject/stat check above passes; if you amend or re-commit, re-run this line
 C1=$(git rev-parse HEAD); echo "C1=$C1"
 git push origin main
 T0=$(date +%s); echo "T0=$T0"
@@ -603,7 +604,8 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_012bXdxrZGGHNy5e4RnF6seD
 EOF
 git commit --only kubernetes/apps/office/mealie/app/helmrelease.yaml kubernetes/apps/office/mealie/app/shopping-sync-cronjob.yaml -F "$W/msg2.txt"
-git log -1 --format=%s; git show --stat HEAD; C2=$(git rev-parse HEAD)
+git log -1 --format=%s; git show --stat HEAD   # must be this commit, not another session's; re-capture C2 after any amend
+C2=$(git rev-parse HEAD)
 git push origin main
 T2=$(date +%s); printf 'C2=%s\nT2=%s\n' "$C2" "$T2" >> "$HOME/backups/mealie/mealie-3.30.0.state.env"; echo "C2=$C2 T2=$T2"
 ```
