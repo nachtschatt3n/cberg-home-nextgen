@@ -67,8 +67,10 @@ finding_refs:
                                       # remedy and does not remove the CI cause. Close only after the post-window soak (4.6).
   - F-27a3f024                        # "etcd leader changes: 23 in 24h" (the sweep's measurement of the same event)
 review: ready-for-go@2026-10-13   # plan-reviewer 2026-10-13 (2nd pass): ready-for-go, 0 blocking; vetted at operator request (AskUserQuestion 2026-10-13)
-status: vetted
-window: "sun-attended:2026-11-08"   # OPERATOR-CHOSEN 2026-10-13 (AskUserQuestion). nocodb-2026.09.1 moved off this slot (risk-class stacking). 110 of 180 min; runs BEFORE talos-linux-1.14.5 (11-22) on purpose (operator ordering 2026-11-02), 7 days before longhorn-1.13.0 (11-15). HUMAN-GATED: needs a fresh operator GO recorded for this dated slot.
+status: blocked
+blocked_reason: "2026-11-03 NOW run: step 3.4 `talosctl service etcd restart` is refused by Talos 1.14.1 (service etcd does not support restart via API), so apply-config alone never changes the running process. Aborted after .11 apply, config rolled back, 0 elections. Plan needs a revised restart mechanism (likely a rolling node reboot via docs/sops/talos-upgrade.md in an allow_reboot slot) and re-review."
+window: null
+old_window: "sun-attended:2026-11-08"   # OPERATOR-CHOSEN 2026-10-13 (AskUserQuestion). nocodb-2026.09.1 moved off this slot (risk-class stacking). 110 of 180 min; runs BEFORE talos-linux-1.14.5 (11-22) on purpose (operator ordering 2026-11-02), 7 days before longhorn-1.13.0 (11-15). HUMAN-GATED: needs a fresh operator GO recorded for this dated slot.
 premises:
   - id: nodes-on-talos-1.14
     why: "All dry-runs and the apply-config no-reboot verdict were measured on v1.14.1 (etcd 3.7.1 service, args computed in the Talos etcd service PreFunc). A different minor invalidates the verdict in section 1.2."
