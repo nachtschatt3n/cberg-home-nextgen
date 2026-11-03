@@ -114,7 +114,7 @@ if [ "$rc" -eq 0 ]; then
             cmds=("npx tsx tools/sim.ts --n 30 --check"
                   "npx tsx tools/gen-sweep.ts --n 2000"
                   "npx tsx tools/autoplay.ts --n 10 --check"
-                  "npx tsx tools/ending-hunt.ts --n 4")
+                  "npx tsx tools/ending-hunt.ts --n 8")
             mkdir -p reports
             for i in "${!cmds[@]}"; do
                 [ $(( i % N )) -eq "$IDX" ] || continue
