@@ -111,11 +111,6 @@ conflicts_with:                       # exclusive: true already keeps everything
                                       # a collector roll mid-reboot blinds the instrument (F-e8bb3113).
   - otel-operator-0.25.1              # restarts the operator + collectors that ship the monitoring signals §4 reads, and
                                       # ships a NetworkPolicy; same-night = un-attributable blind spots.
-  - envoy-proxy-config-distroless-v1.39.4  # DECISION (2026-10-23): EXCLUSIVE, never the same night. Rolls all 6
-                                      # envoy-internal/external pods (surge-first, PDB-bound) across the nodes this plan
-                                      # drains, and §4.4 gates on the Envoy VIPs; a drain competes for the same PDB
-                                      # disruption budget and a VIP failure would have two causes. Its own frontmatter
-                                      # still names talos-linux-1.14.2: its owner must retarget that ref to this plan.
   - etcd-timeouts-5000-500            # sun 11-08, 7 days after this roll; restarts etcd x3 + apply-config on the same
                                       # nodes; its no-reboot verdict was measured on etcd 3.7.1 (this roll moves 3.7.2)
   - talos-power-tuning-ab             # live SysfsConfig A/B via apply-config on 01/03 (window null, needs re-baseline);

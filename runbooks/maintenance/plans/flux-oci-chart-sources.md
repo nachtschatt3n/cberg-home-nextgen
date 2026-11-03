@@ -50,7 +50,7 @@ touches:
     - "fluxinstance/flux spec.kustomize.patches (Stage 10 — emptyDir sizeLimit)"
   shared: [flux-sources, cni-adjacent, cert-manager, storage/longhorn, monitoring, authentik, public-dns]
 depends_on: []
-conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, flux-fleet-0.62.0, flux-fleet-0.62.1, etcd-timeouts-5000-500, talos-linux-1.14.5, longhorn-1.13.0, authentik-2026.8.5, grafana-14.1.0, edot-collector-0.164.0, descheduler-0.37.0, anythingllm-1.19, jellyfin-3.7.0, tube-archivist-0.6.0, frigate-reolink-go2rtc-flv, envoy-proxy-config-distroless-v1.39.4, redis-fleet-8.10.3]   # RE-PLANNED 2026-11-03 against every open plan's frontmatter
+conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, etcd-timeouts-5000-500, talos-linux-1.14.5, longhorn-1.13.0, grafana-14.1.0, edot-collector-0.164.0, descheduler-0.37.0, anythingllm-1.19, tube-archivist-0.6.0, frigate-reolink-go2rtc-flv, redis-fleet-8.10.3]   # RE-PLANNED 2026-11-03 against every open plan's frontmatter
   # 2026-11-03: dropped dead refs otel-operator-0.23.0 (executed out-of-band 0e976cf5), jellyfin-12.1 (superseded by the 12.2 plan, itself later superseded), paperless-db-13.0.2 (executed a99794cc).
   # 2026-11-03: ADDED flux-fleet-0.62.0/0.62.1 (draft: flux-operator + flux-instance HRs and fluxinstance/flux, which Stage 10 patches; each lists this plan),
   #   etcd-timeouts-5000-500 (touches flux-system and perturbs the apiserver every Flux apply talks to; sun 11-08), authentik-2026.8.5 (sat 11-21; stage 5 switches authentik's chart source),

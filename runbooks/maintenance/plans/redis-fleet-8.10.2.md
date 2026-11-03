@@ -73,10 +73,8 @@ conflicts_with:
   - talos-linux-1.14.4                  # node reboots (sun 2026-11-01)
   - coredns-1.48.1                      # a CoreDNS roll while consumers re-resolve their redis Service names confounds the reconnect gates
   - longhorn-1.13.0                     # sun 2026-11-15 — two Longhorn PVCs are remounted here; never stack on a storage upgrade
-  - authentik-2026.8.5                  # SSO login for Nextcloud/Paperless/Immich/Sure/open-webui used by the attended checks
   - authentik-web-max-requests          # same
   - envoy-proxy-config-distroless-v1.40.0  # public edge roll hides app reachability gates
-  - envoy-proxy-config-distroless-v1.39.4  # same
   - etcd-timeouts-5000-500              # control-plane timing change under 8 rolling Deployments
   # Dropped 2026-10-25 as executed/retired (no longer open plans): flux-distribution-2.9.6, cilium-1.20.4. If another CNI or Flux-controller
   # plan is filed, re-add it (a CNI roll drops every client-server connection; a controller roll confounds the GitOps legs).

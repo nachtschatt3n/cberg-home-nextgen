@@ -49,7 +49,6 @@ conflicts_with:
   - openclaw-2026.10.5                  # same Flux Kustomization ai/openclaw as cronjob/openclaw-probe; currently blocked
   - helm-drift-detection                # adds spec.driftDetection to every HR incl. helmrelease/mcpo (sat-attended:2026-11-07)
   - flux-oci-chart-sources              # rewrites HelmRelease chart sources (bjw-s app-template consumers incl. mcpo)
-  - plex-1.43.5.11079                   # reciprocity (2026-11-03): same sat-attended:2026-11-14 slot suggestion, 70 of 70 min
 exclusive: false
 autonomy_override: human-gated        # RESTRICTS only (carried from the 2026-10-23 review): a minor interpreter move is
                                       # an attended window item, not nightly - see §1.6.

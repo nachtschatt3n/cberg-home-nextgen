@@ -74,10 +74,8 @@ conflicts_with:
   - flux-reconciler-impersonation       # blocked — changes WHO applies the Kustomizations/HelmReleases this plan relies on
   - talos-linux-1.14.5                  # node reboots (successor of talos-linux-1.14.4, which its own header supersedes)
   - longhorn-1.13.0                     # sun-attended:2026-11-15 — two Longhorn PVCs are remounted here; never stack on a storage upgrade
-  - authentik-2026.8.5                  # sat-attended:2026-11-21 — SSO for the attended Nextcloud/Paperless/Immich/open-webui checks
   - envoy-proxy-config-distroless-v1.40.0  # public edge roll hides app reachability gates
   - envoy-proxy-config-distroless-v1.40.2  # same
-  - envoy-proxy-config-distroless-v1.39.4  # same
   - etcd-timeouts-5000-500              # sun-attended:2026-11-08 — control-plane timing change under nine rolling Deployments
   # The window's instrument (§4 reads Prometheus; a Grafana/operator/collector roll in the same slot confounds the controls):
   - grafana-14.1.0                      # vetted — monitoring; the controls read Prometheus, Grafana is the operator's second instrument
