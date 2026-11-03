@@ -1,6 +1,6 @@
 ---
 plan_id: gha-fleet-0.15.1
-component: actions-runner-controller   # chart family: gha-runner-scale-set-controller (x2 HelmReleases) + gha-runner-scale-set (x3 HelmReleases)
+component: actions-runner-controller   # chart family: gha-runner-scale-set-controller (x2 HelmReleases) + gha-runner-scale-set (x5 HelmReleases; was x3 until 2026-11-02)
 pr: 415                               # Renovate "update ...gha-runner-scale-set-controller ( 0.15.0 → 0.15.1 )" (1 file:
                                       # arc-system/gha-runner-scale-set-controller/app/ocirepository.yaml). The OTHER half is
                                       # PR 414 "update ...gha-runner-scale-set ( 0.15.0 → 0.15.1 )" (2 files: ci-runner + arc-build
@@ -15,28 +15,32 @@ target: "0.15.1"                      # controller chart sha256:c2497a6dedaaa723
 update_type: patch
 risk: low                             # templates byte-identical (diff -r: only Chart.yaml + CRD validation on an unused field,
                                       # §1.2); controller tolerates same-minor skew (§1.3); no PVC/state; rollback = git revert.
-est_duration_min: 30                  # pre-checks 5 · edit/commit/push 3 · Flux apply (controller ks wait:true, then runner ks)
-                                      # ~8 · verification 10 · soak 4
+est_duration_min: 35                  # pre-checks 6 · edit/commit/push 3 · Flux apply (controller ks wait:true, then runner ks)
+                                      # ~10 (5 listeners rebuilt) · verification 12 · soak 4
 needs_reboot: false
 touches:
   namespaces: [arc-system, ci-runner, arc-build]
   resources:                          # every object verified to EXIST live 2026-10-24 (kubectl get)
     - ocirepository/gha-runner-scale-set-controller   # arc-system — EDITED (tag+digest); chart source of BOTH controller HRs
     - ocirepository/gha-runner-scale-set              # ci-runner — EDITED; chart source of the-ninth-banner-runners + -browser-runners
-    - ocirepository/gha-runner-scale-set              # arc-build — EDITED; chart source of the-ninth-banner-build-runners
+    - ocirepository/gha-runner-scale-set              # arc-build — EDITED; chart source of the-ninth-banner-build-runners AND absenty-build-runners AND rainbow-rescue-build-runners
     - helmrelease/gha-runner-scale-set-controller     # arc-system → deployment/arc-controller rolls
     - helmrelease/gha-runner-scale-set-build-controller   # arc-system → deployment/arc-build-controller rolls
     - helmrelease/the-ninth-banner-runners            # ci-runner → autoscalingrunnerset/ninth-banner-k8s (labels only)
     - helmrelease/the-ninth-banner-browser-runners    # ci-runner → autoscalingrunnerset/ninth-banner-browser-k8s (labels only)
     - helmrelease/the-ninth-banner-build-runners      # arc-build → autoscalingrunnerset/ninth-banner-build-k8s (labels only)
+    - helmrelease/absenty-build-runners               # arc-build → autoscalingrunnerset/absenty-build-k8s (labels only; NOT edited, rides the arc-build source; added 2026-11-02)
+    - helmrelease/rainbow-rescue-build-runners        # arc-build → autoscalingrunnerset/rainbow-rescue-build-k8s (labels only; NOT edited, same; added 2026-11-02)
     - autoscalinglistener/ninth-banner-k8s-59fd7c9b-listener          # arc-system — deleted + re-created by the controller
     - autoscalinglistener/ninth-banner-browser-k8s-59fd7c9b-listener  # arc-system — deleted + re-created
     - autoscalinglistener/ninth-banner-build-k8s-7b4779b7-listener    # arc-system — deleted + re-created
+    - autoscalinglistener/absenty-build-k8s-f5698648-listener         # arc-system — deleted + re-created
+    - autoscalinglistener/rainbow-rescue-build-k8s-6dd676d8-listener  # arc-system — deleted + re-created
     - crd/autoscalingrunnersets.actions.github.com    # cluster-scoped, CreateReplace by both controller HRs
     - crd/autoscalinglisteners.actions.github.com
     - crd/ephemeralrunnersets.actions.github.com
     - crd/ephemeralrunners.actions.github.com
-  shared: [monitoring, ci-runner, crds/actions.github.com, github-actions/the-ninth-banner]
+  shared: [monitoring, ci-runner, arc-build, crds/actions.github.com, github-actions/the-ninth-banner, github-actions/absenty, github-actions/rainbow-rescue]
                                       # monitoring = §4 reads Prometheus (PodMonitor arc-system/arc, ARC* alerts).
                                       # ci-runner = the CI node-capacity surface other ci-runner plans also declare.
                                       # github-actions = the private game repo's self-hosted job queue pauses ~1-2 min per
@@ -45,9 +49,11 @@ depends_on: []
 conflicts_with:
   # 2026-10-25: dead refs flux-distribution-2.9.6 and cilium-1.20.4 (executed/retired) pruned.
   # 2026-10-27: ci-gate-primary-control-rework (superseded, reviewer reject) pruned.
-  - talos-linux-1.14.4                # node roll restarts every ARC pod; attribution of §4 impossible.
+  - talos-linux-1.14.5                # node roll restarts every ARC pod; attribution of §4 impossible. (2026-11-03: replaced superseded talos-linux-1.14.4.)
   - talos-power-tuning-ab             # measures CI load on ci-runner; a listener gap skews its CI baseline.
-  - helm-drift-detection              # changes how helm-controller treats every HelmRelease (incl. these five).
+  - helm-drift-detection              # changes how helm-controller treats every HelmRelease (incl. these seven).
+  - the-fleet-0.15.1                  # 2026-11-03: a second draft carrying the SAME three-file edit (it says retire this plan once it is vetted); only ONE of the two may execute.
+  - absenty-build-runners-0.15.1      # draft: verification-only for the Absenty pool, rides this commit; folded into this plan's gates (4.1-4.6 now cover it). Execute as one unit or retire.
   - flux-reconciler-impersonation     # changes WHO applies the arc-system/ci-runner/arc-build Kustomizations.
 exclusive: false
 security_ref: F-1fd1d6a0
@@ -60,7 +66,7 @@ finding_refs: [F-5602ee2a, F-87d453b9, F-a2cff4a9, F-1fd1d6a0]            # `fin
                                       # CONTROLLER image (accepted as "already newest" — no longer true since 0.15.1 shipped
                                       # 2026-10-23). This bump is what moves it; whether the row clears is for the next sweep's
                                       # scan to MEASURE, not for this plan to claim. Detail stays on the record.
-review: ready-for-go@2026-10-25   # plan-reviewer 2026-10-25 delta re-review: premises PASS, gates verified
+review: ready-for-go@2026-11-03     # plan-reviewer 2026-11-03 re-review of the 5-scale-set edit: premises 5/5, counts/names/gates verified live
 status: vetted
 window: nightly:2026-11-09   # AUTO-NIGHT class: no operator GO needed; Renovate PRs 414/415 are closed by the plan, never merged alone
 sops_refs:
@@ -71,7 +77,7 @@ sops_refs:
   - docs/sops/vulnerability-disclosure.md
 generated: "2026-10-24"
 premises:
-  # Read-verb only. Each run live 2026-10-24 ~02:00Z and returned exactly the expected value.
+  # Read-verb only. Each run live and returned exactly the expected value (re-run 2026-11-03 after the fleet grew from 3 to 5 scale sets).
   - id: controller-source-on-0150
     why: >-
       current: claims the controller chart source is pinned to 0.15.0 at the known digest. If someone already bumped it, the
@@ -86,16 +92,16 @@ premises:
     expect_exact: "arc-build=0.15.0 ci-runner=0.15.0"
   - id: scale-sets-running-on-0150
     why: >-
-      The three AutoscalingRunnerSets carry version label 0.15.0 and are Running. The controller DELETES an ARS whose version
+      The FIVE AutoscalingRunnerSets (3 in arc-build: absenty, ninth-banner-build, rainbow-rescue; 2 in ci-runner: browser, ninth-banner-k8s) carry version label 0.15.0 and are Running. The controller DELETES an ARS whose version
       label is a different MINOR than its build (IsVersionAllowed, §1.3); same-minor is the safety argument of this plan, so
       the starting label must be 0.15.x, and a set already Pending/Outdated must be fixed before, not during, the bump.
     run: kubectl get autoscalingrunnerset -A -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.labels.app\.kubernetes\.io/version}/{.status.phase} {end}'
-    expect_exact: "ninth-banner-build-k8s=0.15.0/Running ninth-banner-browser-k8s=0.15.0/Running ninth-banner-k8s=0.15.0/Running"
+    expect_exact: "absenty-build-k8s=0.15.0/Running ninth-banner-build-k8s=0.15.0/Running rainbow-rescue-build-k8s=0.15.0/Running ninth-banner-browser-k8s=0.15.0/Running ninth-banner-k8s=0.15.0/Running"
   - id: arc-helmreleases-ready
     why: >-
-      All five ARC HelmReleases Ready before the change; an already-failing HR would mask (or be blamed on) this upgrade.
+      All seven ARC HelmReleases (5 scale-set + 2 controller) Ready before the change; an already-failing HR would mask (or be blamed on) this upgrade.
     run: kubectl get hr -A -o jsonpath='{range .items[?(@.spec.chartRef.name=="gha-runner-scale-set")]}{.metadata.name}={.status.conditions[?(@.type=="Ready")].status} {end}{range .items[?(@.spec.chartRef.name=="gha-runner-scale-set-controller")]}{.metadata.name}={.status.conditions[?(@.type=="Ready")].status} {end}'
-    expect_exact: "the-ninth-banner-build-runners=True the-ninth-banner-browser-runners=True the-ninth-banner-runners=True gha-runner-scale-set-build-controller=True gha-runner-scale-set-controller=True"
+    expect_exact: "absenty-build-runners=True rainbow-rescue-build-runners=True the-ninth-banner-build-runners=True the-ninth-banner-browser-runners=True the-ninth-banner-runners=True gha-runner-scale-set-build-controller=True gha-runner-scale-set-controller=True"
   - id: crds-on-controller-gen-0220
     why: >-
       Baseline for the §4 CRD contents assertion: the live CRDs are the 0.15.0 ones (controller-gen v0.22.0). 0.15.1 ships
@@ -110,13 +116,13 @@ premises:
 
 ### 1.1 What changes
 
-ARC is two charts wired to **three** OCIRepository sources. All three move together:
+ARC is two charts wired to **three** OCIRepository sources feeding **seven** HelmReleases (5 scale sets + 2 controllers). All three sources move together. (Until 2026-11-02 there were three scale sets; commits `116ac5df`, `4a0d8d1d`, `502c6bef` added the Absenty and rainbow-rescue image-build pools in `arc-build`, which share the existing arc-build source, so **no additional file is edited**, only more objects re-render.)
 
 | Source (edited) | Chart | HelmReleases it feeds |
 |---|---|---|
 | `arc-system/gha-runner-scale-set-controller` | gha-runner-scale-set-controller | `arc-system/gha-runner-scale-set-controller` (watches `ci-runner`) **and** `arc-system/gha-runner-scale-set-build-controller` (watches `arc-build`, `chartRef` to the same source) |
 | `ci-runner/gha-runner-scale-set` | gha-runner-scale-set | `ci-runner/the-ninth-banner-runners`, `ci-runner/the-ninth-banner-browser-runners` (no source of its own; it shares this one) |
-| `arc-build/gha-runner-scale-set` | gha-runner-scale-set | `arc-build/the-ninth-banner-build-runners` |
+| `arc-build/gha-runner-scale-set` | gha-runner-scale-set | `arc-build/the-ninth-banner-build-runners`, `arc-build/absenty-build-runners`, `arc-build/rainbow-rescue-build-runners` (the latter two have no source of their own; `chartRef` is the shared one, measured live 2026-11-03) |
 
 The dispatch named two members (both controllers). Answer to "do the scale-set charts move in lockstep": **yes, and there are two
 scale-set sources, not one** — `ci-runner` and `arc-build`. Renovate split them across PR 415 (controller) and PR 414 (both
@@ -153,8 +159,8 @@ lags) — see §6. **Verdict: low-risk patch; the hold was correct policy but ne
 ### 1.4 Expected runtime effect (from the same controller source)
 - `arc-controller` and `arc-build-controller` Deployments roll (new image `gha-runner-scale-set-controller:0.15.1`).
 - The listener spec embeds the controller image and the ARS labels, so `listenerSpecChanged` / label inequality fires and
-  each of the 3 AutoscalingListeners is deleted and re-created (pods keep their names; new `app.kubernetes.io/version=0.15.1`).
-  Self-hosted jobs are not picked up for ~1-2 min per pool; GitHub keeps them queued.
+  each of the 5 AutoscalingListeners is deleted and re-created (pods keep their names; new `app.kubernetes.io/version=0.15.1`).
+  Self-hosted jobs are not picked up for ~1-2 min per pool (Absenty and rainbow-rescue are `minRunners: 0`, so they hold no warm pod; a job queued in the gap cold-starts afterwards); GitHub keeps them queued.
 - EphemeralRunnerSets: only labels/annotations differ (runner spec unchanged), which takes the metadata-patch branch, not
   `ephemeralRunnerSetActionableSpecChanged` — **running and idle runner pods are not recycled**; a job in flight finishes.
 - ARC #4706 (old runner sets stuck Terminating, 0.14 → 0.15) does not apply: no ARS is deleted on a same-minor bump.
@@ -163,7 +169,7 @@ lags) — see §6. **Verdict: low-risk patch; the hold was correct policy but ne
 
 Run from the repo root on the Mac (zsh). All read-only.
 
-1. Premises: `.venv/bin/python3 runbooks/plan-premises.py gha-fleet-0.15.1` — all 5 PASS, else stop.
+1. Premises: `.venv/bin/python3 runbooks/plan-premises.py gha-fleet-0.15.1` — all 5 PASS, else stop. Also confirm the sibling drafts are not about to run the same edit: `ls runbooks/maintenance/plans/ | grep -E 'the-fleet-0.15.1|absenty-build-runners-0.15.1'`; if `the-fleet-0.15.1` is vetted for the same night, execute exactly ONE of the two (the commit is identical).
 2. Both PRs still open and unchanged (target digests as in the frontmatter):
    ```bash
    gh pr view 415 --json state,files -q '.state' ; gh pr view 414 --json state -q '.state'   # OPEN OPEN
@@ -173,18 +179,19 @@ Run from the repo root on the Mac (zsh). All read-only.
    (GHCR tags are mutable), stop and re-derive: `helm pull oci://ghcr.io/actions/actions-runner-controller-charts/<chart> --version 0.15.1` prints `Digest:`.
 3. No job mid-run you would rather not race (soft; in-flight jobs survive, §1.4):
    ```bash
-   gh api 'repos/nachtschatt3n/the-ninth-banner/actions/runs?status=in_progress' -q '.total_count'
+   for r in the-ninth-banner Absenty rainbow-rescue-party-hunt; do echo "$r in_progress=$(gh api "repos/nachtschatt3n/$r/actions/runs?status=in_progress" -q '.total_count')"; done
    ```
+   Scheduled-rebuild overlap: the first scheduled rebuilds on the new Absenty / rainbow-rescue pools fire Mon 2026-11-09 05:00Z. The nightly window starts 03:30 Europe/Berlin (= 02:30Z in November), so a 35 min run ends ~03:10Z, leaving ~110 min of margin; even the window's single retry (`retry_after_min` 135 → 04:45Z) finishes the listener rebuilds only just ahead of it. If any `in_progress` count is non-zero, or the commit has not been pushed by 04:15Z, do NOT push: defer to the next night (a listener gap would delay or cold-start the first rebuild on a brand-new pool, which has no history to compare against).
 4. Baseline (record the output in the window log):
    ```bash
    kubectl get pods -n arc-system -o wide
    kubectl get autoscalinglistener -n arc-system -o custom-columns='NAME:.metadata.name,IMG:.spec.image'
    gh api repos/nachtschatt3n/the-ninth-banner/actions/runners -q '.runners[] | [.name,.status] | @tsv'
    ```
-   Expected 2026-10-24: 2 controllers + 3 listeners Running, listeners on `…controller:0.15.0`, 2 runners `online`
-   (`ninth-banner-k8s-runner-*`, `ninth-banner-build-k8s-runner-*`, i.e. the two `minRunners: 1` warm runners).
+   Expected 2026-11-03: 2 controllers + 5 listeners Running (`kubectl get pods -n arc-system`), listeners on `…controller:0.15.0`. Warm runners: `ninth-banner-k8s` and `ninth-banner-build-k8s` are `minRunners: 1` (online); `absenty-build-k8s` and `rainbow-rescue-build-k8s` are `minRunners: 0` / `maxRunners: 1` and hold no pod when idle, so the `actions/runners` list of THOSE two repos is empty by design, not a fault.
+   Transient wart seen once on 2026-11-03 (reviewer re-read later the same day: all build/browser Kustomizations Ready=True), NOT caused by this plan; check and record whichever state you find: `kubectl get ks -n flux-system absenty-build-runners rainbow-rescue-build-runners` read `Ready=False DependencyNotReady` ('the-ninth-banner-build-runners is not ready') although that dependency and both HelmReleases read Ready=True and the KSs last applied revision `f3d07b7e`. Record it in the window log; it does not block the bump (the chart version reaches the HRs through the shared OCIRepository, not through these KSs) but do not read it as a regression afterwards.
 5. No ARC alert already firing (Prometheus port-forward as in §4.6). Nothing to back up: ARC holds no PVC and no DB; all state
-   is the five HelmReleases + CRs, re-created from git.
+   is the seven HelmReleases + CRs, re-created from git.
 
 ## 3. Steps (GitOps, one commit)
 
@@ -231,7 +238,7 @@ Run from the repo root on the Mac (zsh). All read-only.
    Flux ordering is enforced by the existing Kustomization `dependsOn` (no manual sequencing): `the-ninth-banner-runners`
    waits for `gha-runner-scale-set-controller` (`wait: true`), `the-ninth-banner-browser-runners` waits for
    `the-ninth-banner-runners`, `the-ninth-banner-build-runners` waits for `gha-runner-scale-set-build-controller`, which waits
-   for `gha-runner-scale-set-controller`. Do NOT `flux reconcile` unless the source has not picked up the commit after 10 min
+   for `gha-runner-scale-set-controller`; `absenty-build-runners` and `rainbow-rescue-build-runners` wait for both `gha-runner-scale-set-build-controller` and `the-ninth-banner-build-runners` (`dependsOn` in their `ks.yaml`). Do NOT `flux reconcile` unless the source has not picked up the commit after 10 min
    (`flux get ks gha-runner-scale-set-controller` revision still old) — then one `flux reconcile source git flux-system`.
 5. After §4 passes, close the superseded Renovate PRs:
    `gh pr close 415 -c "Superseded by $(git rev-parse --short HEAD) (lockstep commit, plan gha-fleet-0.15.1)"` and the same
@@ -239,14 +246,14 @@ Run from the repo root on the Mac (zsh). All read-only.
 
 ## 4. Verification
 
-Wait for all five HRs to settle (typically < 8 min), then run every gate. Each one was checked to be able to fail: on the
+Wait for all seven HRs to settle (typically < 10 min), then run every gate. Each one was checked to be able to fail: on the
 pre-change cluster gates 4.1-4.5 read the OLD values today (live 2026-10-24), i.e. they FAIL until the upgrade lands.
 
 **4.1 HelmReleases on the new chart, Ready** (fails today: reads `0.15.0+…`):
 ```bash
-kubectl get hr -A -o jsonpath='{range .items[?(@.spec.chartRef.kind=="OCIRepository")]}{.metadata.namespace}/{.metadata.name}={.status.history[0].chartVersion}/{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | grep -E 'gha-runner|ninth-banner-(build-|browser-)?runners'
+kubectl get hr -A -o jsonpath='{range .items[?(@.spec.chartRef.kind=="OCIRepository")]}{.metadata.namespace}/{.metadata.name}={.status.history[0].chartVersion}/{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | grep -E 'gha-runner|ninth-banner-(build-|browser-)?runners|absenty-build-runners|rainbow-rescue-build-runners'
 ```
-PASS: 5 lines, controllers `0.15.1+c2497a6dedaa/True`, scale sets `0.15.1+2ae7e43db610/True`.
+PASS: 7 lines, controllers `0.15.1+c2497a6dedaa/True`, all five scale sets `0.15.1+2ae7e43db610/True`. Fewer than 7 lines means the grep or a HelmRelease is missing: the count is part of the gate.
 
 **4.2 CRDs actually replaced** — CONTENTS ASSERTION: the cluster serves the 0.15.1 CRD schema, measured by
 ```bash
@@ -262,23 +269,23 @@ kubectl get pods -n arc-system -l app.kubernetes.io/component=controller-manager
 PASS: exactly 2 pods (`arc-controller-*`, `arc-build-controller-*`), image `…controller:0.15.1`, START > `$T0`, READY true,
 RESTARTS 0. (Do not trust `rollout status`: it can green-light the old generation.)
 
-**4.4 Scale sets kept, re-labelled, Running** — CONTENTS ASSERTION: all three scale sets still exist (none deleted by the
+**4.4 Scale sets kept, re-labelled, Running** — CONTENTS ASSERTION: all five scale sets still exist (none deleted by the
 version check, §1.3) and carry the new version, measured by
 ```bash
 kubectl get autoscalingrunnerset -A -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.labels.app\.kubernetes\.io/version}/{.status.phase} {end}'
 ```
-PASS exactly: `ninth-banner-build-k8s=0.15.1/Running ninth-banner-browser-k8s=0.15.1/Running ninth-banner-k8s=0.15.1/Running`.
+PASS exactly: `absenty-build-k8s=0.15.1/Running ninth-banner-build-k8s=0.15.1/Running rainbow-rescue-build-k8s=0.15.1/Running ninth-banner-browser-k8s=0.15.1/Running ninth-banner-k8s=0.15.1/Running`.
 A missing name = the controller deleted it → Rollback (§5).
 
 **4.5 Listeners rebuilt and holding a broker session** — CONTENTS ASSERTION: each listener re-registered with GitHub and is
 consuming the job queue, measured from its own log (the pod is new, so its whole log is post-`$T0`):
 ```bash
-for l in ninth-banner-k8s-59fd7c9b-listener ninth-banner-browser-k8s-59fd7c9b-listener ninth-banner-build-k8s-7b4779b7-listener; do
+for l in ninth-banner-k8s-59fd7c9b-listener ninth-banner-browser-k8s-59fd7c9b-listener ninth-banner-build-k8s-7b4779b7-listener absenty-build-k8s-f5698648-listener rainbow-rescue-build-k8s-6dd676d8-listener; do
   echo "== $l img=$(kubectl get autoscalinglistener -n arc-system $l -o jsonpath='{.spec.image}') start=$(kubectl get pod -n arc-system $l -o jsonpath='{.status.startTime}')"
   echo "session=$(kubectl logs -n arc-system $l | grep -c -i 'Handling initial session statistics') scaler=$(kubectl logs -n arc-system $l | grep -c -i 'Calculated target runner count') errors=$(kubectl logs -n arc-system $l | grep -c -i 'level=ERROR')"
 done
 ```
-PASS per listener: img `…controller:0.15.1`, start > `$T0`, `scaler>=1`, `errors=0`. `scaler` is the gate. The `session` count is
+PASS per listener (all FIVE): img `…controller:0.15.1`, start > `$T0`, `scaler>=1`, `errors=0`. `scaler` is the gate. The `session` count is
 informational only: 'Handling initial session statistics' is verified in upstream source (`actions/scaleset` v0.5.0
 `listener/listener.go`, the version 0.15.1's go.mod pins) but is NOT present in today's 0.15.0 listener log (rotated), so do not gate on it;
 'Calculated target runner count' is in `cmd/ghalistener/scaler/scaler.go` (0.15.1 source). Failure it guards against: a listener that is Running but
@@ -295,19 +302,20 @@ curl -s --data-urlencode 'query=count by (name) (gha_min_runners)' http://localh
 curl -s 'http://localhost:19090/api/v1/alerts' | python3 -c "import sys,json; a=[x['labels']['alertname'] for x in json.load(sys.stdin)['data']['alerts'] if x['labels']['alertname'].startswith('ARC') and x['state']=='firing']; print('ARC_FIRING', a or 'NONE')"
 kill $PF 2>/dev/null
 ```
-CONTROL: metric up — `count(up{namespace="arc-system"} == 1)` = 5 (2 controllers + 3 listeners; measured 5 on 2026-10-24). `EMPTY` or <5 = scrape lost.
-CONTROL: metric gha_controller_running_listeners — all three listener names present with max value 1.
-CONTROL: metric gha_min_runners — exported by the listeners; 3 series (one per scale set), measured 3 on 2026-10-24.
+CONTROL: metric up — `count(up{namespace="arc-system"} == 1)` = 7 (2 controllers + 5 listeners; measured 7 live 2026-11-03, it was 5 before the two new pools). `EMPTY` or <7 = scrape lost.
+CONTROL: metric gha_controller_running_listeners — all five listener names present with max value 1 (measured live 2026-11-03).
+CONTROL: metric gha_min_runners — exported by the listeners; 5 series (one per scale set; the printed `SCALESETS` must be 5), measured 5 live 2026-11-03.
 CONTROL: alertname ARCRunnerScaleSetNotRegistered — not firing 15 min after `$T0` (fires if a scale set has its secret but no listener for 15m).
 CONTROL: alertname ARCPodCrashLooping — not firing.
 CONTROL: alertname ARCPodNotReady — not firing.
 Run the alert line once ~15 min after `$T0` (the NotRegistered rule has `for: 15m`); `ARC_FIRING NONE` = PASS.
 
-**4.7 Soak (morning report, not a window blocker):** the next real CI run of the game repo ran on the self-hosted pools:
+**4.7 Soak (morning report, not a window blocker):** the next real CI run of the game repo ran on the self-hosted pools (and, when it fires, the first scheduled rebuild on the Absenty / rainbow-rescue pools, Mon 2026-11-09 05:00Z, not before):
 `gh api 'repos/nachtschatt3n/the-ninth-banner/actions/runs?per_page=1' -q '.workflow_runs[0].id'` then
 `gh api repos/nachtschatt3n/the-ninth-banner/actions/runs/<id>/jobs -q '.jobs[] | [.name,.runner_name,.conclusion] | @tsv'` —
 `runner_name` must start with `ninth-banner-` and no job may sit `queued` > 30 min (`ARCRunnerJobsWaiting` would fire).
 A job failing on its own test merits is not a regression of this plan (recent CI runs already fail on the game's own tests).
+For the two new pools: `gh api repos/nachtschatt3n/Absenty/actions/runs?per_page=1` / `.../rainbow-rescue-party-hunt/actions/runs?per_page=1` then the same `/jobs` query; the pool jobs (`scheduled_rebuild`, `build`/`rebuild`) must show `runner_name` starting `absenty-build-k8s-` / `rainbow-rescue-build-k8s-`. These pools were proven only on 2026-11-02, so a failure there is first compared with `docs/sops/ci-runner.md` section 2e traps (egress, search domains) before blaming the chart bump.
 
 ## 5. Rollback
 
@@ -316,26 +324,27 @@ Trigger: any of 4.1-4.6 fails and does not self-heal within 10 min, or a scale s
 1. `git revert --no-edit <sha-of-§3.4-commit>`; `git log -1 --format=%s` (must read `Revert "fix(arc): …"`); `git push`.
    This restores tag 0.15.0 + the 0.15.0 digests on all three sources (and the SOP cells). Flux re-applies in the same
    `dependsOn` order; CreateReplace re-applies the 0.15.0 CRDs (it only drops the extra validation, no stored object uses it).
-   Same-minor skew is tolerated in this direction too.
+   Same-minor skew is tolerated in this direction too. The revert also covers the Absenty and rainbow-rescue pools (they follow the shared arc-build source, nothing of their own was edited).
 2. If an HR is stuck `pending-upgrade` / `upgrade retries exhausted`: per `docs/sops/application-update.md` §11, clear it with
-   `flux suspend hr -n <ns> <name>` + `flux resume hr -n <ns> <name>` (the HR names are the five in `touches`).
+   `flux suspend hr -n <ns> <name>` + `flux resume hr -n <ns> <name>` (the HR names are the seven in `touches`).
 3. **If a scale set was deleted (4.4)**: the revert alone re-creates it — the ARS is a chart object of its HelmRelease and the
    controller re-registers it with GitHub on create (`createRunnerScaleSet`). Runs-on labels are registered at create time from
    the unchanged `scaleSetLabels`/`runnerScaleSetName`, so they come back identical. If the HR reads Ready but the ARS is
    absent, force a re-render once: `flux reconcile hr -n <ns> <name> --force`.
-4. Confirm back: re-run 4.1/4.3/4.4/4.5 expecting `0.15.0` values (`…controller:0.15.0`, label `0.15.0`, CRD annotation
-   `v0.22.0`), 4.6 all CONTROL lines green, and `gh api repos/nachtschatt3n/the-ninth-banner/actions/runners` lists the
-   warm runners `online`. Re-open nothing: Renovate re-opens 414/415 by itself on its next run.
+4. Confirm back: re-run 4.1/4.3/4.4/4.5 expecting `0.15.0` values (`…controller:0.15.0`, label `0.15.0` on all five sets, CRD annotation
+   `v0.22.0`), 4.6 all CONTROL lines green (7 up, 5 listeners, 5 scale sets), and `gh api repos/nachtschatt3n/the-ninth-banner/actions/runners` lists the
+   warm runners `online` (Absenty / rainbow-rescue show none when idle, by design). Re-open nothing: Renovate re-opens 414/415 by itself on its next run.
 
 ## 6. Interference notes
 
 - **Shared surfaces:** cluster-scoped `actions.github.com` CRDs (only ARC uses them); Prometheus is the §4 instrument — no
   kube-prometheus-stack plan is open today; if one is filed for the same night, add it to `conflicts_with` (and vice versa).
-- **CI impact:** each listener rebuild pauses job pickup for its pool ~1-2 min; jobs queue at GitHub and are not lost. Runner
-  pods (incl. a job in flight) are not recycled (§1.4). The nightly 03:30 slot is quiet: the game's CI runs observed at
-  ~06:00 and ~08:35 UTC.
+- **CI impact:** each of the FIVE listener rebuilds pauses job pickup for its pool ~1-2 min (three repos: the-ninth-banner x3 pools, Absenty, rainbow-rescue-party-hunt); jobs queue at GitHub and are not lost. Runner
+  pods (incl. a job in flight) are not recycled (§1.4). The nightly 03:30 Berlin slot (02:30Z) is quiet: the game's CI runs observed at
+  ~06:00 and ~08:35 UTC. Overlap check for Mon 2026-11-09: the first scheduled rebuilds on the new pools start 05:00Z (~2.5 h after window start). Nothing from this plan should still be running then if the run starts on time; pre-check 3 defers the push if it would not finish before ~04:45Z.
 - **No node impact:** no reboot, no PVC, no change to runner resources/affinity, so the CI thermal/power plans
   (`talos-power-tuning-ab`, `ci-gate-primary-control-rework`) are conflicts only for attribution, not for safety.
+- **Sibling plans (2026-11-03):** `the-fleet-0.15.1` (draft) carries the identical three-file commit and declares this plan its retire target; `absenty-build-runners-0.15.1` (draft) is verification-only for one of the new pools and `depends_on` this plan. Only one of {this plan, `the-fleet-0.15.1`} may execute; the window agent must retire the other before sequencing. Neither sibling is edited here.
 - **Reciprocity:** `talos-power-tuning-ab` and `ci-gate-primary-control-rework` do
   not list this plan; the window agent should add `gha-fleet-0.15.1` to their `conflicts_with` (validate checks refs, not
   reciprocity).
