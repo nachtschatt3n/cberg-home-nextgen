@@ -118,8 +118,8 @@ premises:
     why: "Stage 10 exists because both emptyDir volumes have no sizeLimit; once a limit is set this stage is done and must not be re-run."
     run: kubectl get deploy source-controller -n flux-system -o jsonpath='{.spec.template.spec.volumes[*].emptyDir}'
     expect_exact: "{} {}"
-status: draft     # RE-PLANNED 2026-11-03 after the premise check failed (http-helmrepos 29->28, ocirepository 1->4). Substance changed (§1.0): the earlier review 'ready-for-go@2026-09-28' is CLEARED and a plan-reviewer must re-review before this is vetted. Was vetted.
-review: null      # was ready-for-go@2026-09-28; cleared 2026-11-03 (the plan was materially amended)
+status: vetted    # plan-reviewer 2026-11-03: ready-for-go at the delta re-review (2419784a) after needs-fix at 499b11d8 and 2fb71523; premises 12/12. HUMAN-GATED: needs a fresh operator GO naming the falco and node-feature-discovery restarts (§1.00).
+review: ready-for-go@2026-11-03   # Stage 3 slice only (sun-attended:2026-12-13); stages 4-7 stay unslotted and gated by D1/D2/D3
 window: "sun-attended:2026-12-13"   # UNCHANGED. Scheduled 2026-10-05 (operator "plan all and time them"); MOVED 2026-11-02 from sun-attended:2026-11-22 (talos-linux-1.14.5 takes that Sunday). Re-checked 2026-11-03 against every open plan: no hard conflict forces a move.
                                        # HUMAN-GATED (autonomy_override, capability change) -> operator GO (the GO text is in §1.00 and includes the falco and NFD restarts). This slot carries
                                        # STAGE 3 ONLY. Each release proceeds iff its Step 0b prints G3-NON-REGRESSION; D1 is a separate policy question, not a prerequisite.
@@ -1151,7 +1151,7 @@ diff <(grep '^VOL' "$S/reverted.txt" | grep -v '^VOL pod' | sed -E 's/ gen [0-9]
      <(grep '^VOL' "$S/baseline.txt" | grep -v '^VOL pod' | sed -E 's/ gen [0-9]+//') && echo VOL-TEMPLATE-BACK-TO-BASELINE
 ```
 
-(Dry-run 2026-11-03 against live falco: both lines print. **Known-bad:** a baseline whose `checksum/config` prefix is replaced by the predicted post-move value (`sed 's/2bd4ff4b/135ba72d/'`) makes the second `diff` non-empty and `VOL-TEMPLATE-BACK-TO-BASELINE` is not printed — i.e. a falco still on the moved template is caught. The `VOL pod` lines are excluded on purpose: a rolled DaemonSet has new pod names and `creationTimestamp`s after the revert.)
+If `VOL-TEMPLATE-BACK-TO-BASELINE` is absent right after the push, the HelmRelease may simply not have reconciled yet: re-run once it shows the reverted revision, for up to about 10 minutes; persistent absence means STOP. (Dry-run 2026-11-03 against live falco: both lines print. **Known-bad:** a baseline whose `checksum/config` prefix is replaced by the predicted post-move value (`sed 's/2bd4ff4b/135ba72d/'`) makes the second `diff` non-empty and `VOL-TEMPLATE-BACK-TO-BASELINE` is not printed — i.e. a falco still on the moved template is caught. The `VOL pod` lines are excluded on purpose: a rolled DaemonSet has new pod names and `creationTimestamp`s after the revert.)
 
 Three revert-specific facts, so they are not mistaken for failure:
 
@@ -1168,7 +1168,7 @@ Three revert-specific facts, so they are not mistaken for failure:
    were referenced by nothing. If something broke after Stage 1 the cause is
    elsewhere; re-adding the sources will not fix it.
 
-4. **Stage 3 specifics (two rolls each for falco and node-feature-discovery).** Forward = one restart, revert = a second restart of each (the pod-template checksum annotations return to the old values). The four other releases revert with no restart. **Intel revert order is newest first: npu (commit 3), then gpu, then the operator.** The npu revert brings `intel.yaml` back; reverting the operator or gpu commit alone, while `intel.yaml` is still deleted, would point that HelmRelease at a HelmRepository that no longer exists. Commits 1 and 2 never deleted it. After a falco revert, repeat the §4.2 falco sink read (`FALCO-SINK-OK` with a cutoff after the revert settled); after an NFD revert, repeat the `nodesnap.sh` diff.
+4. **Stage 3 specifics (two rolls each for falco and node-feature-discovery).** Forward = one restart, revert = a second restart of each (the pod-template checksum annotations return to the old values). The four other releases revert with no restart. **Intel revert order is newest first: npu (commit 3), then gpu, then the operator.** The npu revert brings `intel.yaml` back; reverting the operator or gpu commit alone, while `intel.yaml` is still deleted, would point that HelmRelease at a HelmRepository that no longer exists. Commits 1 and 2 never deleted it. After a falco or NFD revert, first repeat the §4.2 `observedGeneration`/`numberReady` readiness one-liner for the reverted workload. After a falco revert, repeat the §4.2 falco sink read (`FALCO-SINK-OK` with a cutoff after the revert settled); after an NFD revert, repeat the `nodesnap.sh` diff.
 
 For Stage 0 the rollback is the same `git revert`, confirmed by the version
 snapshot regaining its pre-change row count. For Stage 10 it removes the
@@ -1216,7 +1216,7 @@ emptyDir.
   (restarts source-controller; three weeks earlier, cold cache long gone),
   `sat-attended:2026-11-28` `helm-drift-detection` (P1 adds `spec.driftDetection`
   to every HelmRelease — **rebase** the six Stage 3 `helmrelease.yaml` edits on
-  that commit; re-run Step 0 of §3.2 so the baseline is taken after it),
+  that commit; re-run Step 1 (`collect.sh`) so the baseline is taken after it),
   `sun-attended:2026-11-29` `redis-fleet-8.10.3`, `sun-attended:2026-12-06`
   `envoy-proxy-config-distroless-v1.39.4` (gateway restart gate; must be green).
   `nightly` is unattended and must never take a stage of this plan:
