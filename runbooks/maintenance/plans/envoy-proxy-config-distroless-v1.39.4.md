@@ -38,6 +38,8 @@ touches:
     - helmrelease/network/envoy-gateway                          # chart gateway-helm 1.9.2 -> 1.9.3 (helm-controller upgrade)
     - deployment/network/envoy-gateway                           # CONTROLLER ROLLS: gateway:v1.9.2 -> v1.9.3 (3 replicas, leader election; lease 5b9825d2.gateway.envoyproxy.io)
     - kustomization/network/envoy-gateway-crds                   # vendored CRD files get a provenance-header-only change; cluster CRD content UNCHANGED (verified 2026-10-26)
+    - httproutefilter/media/immich-server-reject-br-body   # READ-ONLY gate (§2.8/§4.6): the edge Content-Encoding br -> 415 compensating control on envoy-external; must survive the roll
+    - httproute/media/immich-server                         # READ-ONLY gate (same)
     - kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml
     - kubernetes/apps/network/envoy-gateway/app/helmrelease.yaml
     - kubernetes/apps/network/envoy-gateway/crds/gateway-api-standard.yaml   # header line 2 only
@@ -51,7 +53,7 @@ touches:
 depends_on: []
   # The controller coupling is a premise (`controller-is-1.9.2`), not a plan dependency:
   # envoy-gateway-1.9.2 executed and was retired in 418faa1e; chart 1.9.2 re-measured live 2026-10-13.
-conflicts_with:                       # every id re-checked as an existing, non-terminal plan file 2026-10-23;
+conflicts_with:                       # ids re-checked as existing, non-terminal plan files 2026-11-03 (talos 1.14.2/1.14.4 are superseded -> 1.14.5);
   - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af
   # 2026-10-25: pruned dead refs penpot-chart-1.10.0, external-dns-1.23.0 (executed/retired)
                                       # reasons in §6. DROPPED 2026-10-23 (no such plan file any more):
@@ -61,8 +63,7 @@ conflicts_with:                       # every id re-checked as an existing, non-
   - authentik-web-max-requests        # reciprocal: names this plan; same path
   - n8n-2.39.8                        # reciprocal: names this plan (status executed; kept for the reciprocity check)
   - envoy-proxy-config-distroless-v1.40.0   # SAME pin line (blocked); two plans moving one pin never share a window
-  - talos-linux-1.14.2                # node drain competes for the single PDB disruption
-  - talos-linux-1.14.4                # same
+  - talos-linux-1.14.5                # node drain competes for the single PDB disruption (reciprocal; replaces the superseded 1.14.2/1.14.4)
   - flux-reconciler-impersonation     # exclusive; rewrites how kustomize-controller applies this
   - flux-oci-chart-sources            # moves Flux sources; same §3/§5 apply-and-revert path
   - etcd-timeouts-5000-500            # ADDED 2026-10-26 (both plans hold sun-attended:2026-11-08). It restarts etcd on all 3
@@ -146,8 +147,8 @@ premises:
 
 **MATERIAL CHANGE 2026-10-26: the Envoy Gateway chart `gateway-helm` 1.9.2 -> 1.9.3 is
 merged into this plan. The operator GO recorded on 2026-10-23 covered the data-plane pin
-ONLY, so it does NOT cover this scope: this plan is `draft` with `review: null` until a
-plan-reviewer re-reviews it, and the GO must be RE-CONFIRMED after that review.**
+ONLY, so it does NOT cover this scope: this plan was re-reviewed (2026-10-26; delta for the br gate 2026-11-03),
+and the GO must be RE-CONFIRMED on the new scope.**
 Why merged rather than a second plan (evidence, all measured 2026-10-26):
 - EG chart **1.9.3 was published 2026-10-26T09:58Z** (finding `F-c63ead4d`, no Renovate PR)
   and its compiled `DefaultEnvoyProxyImage` is
@@ -307,7 +308,7 @@ port-forward returned nothing, the `UNREADABLE` guard exists for exactly that):*
   `sha256:192fc9bdadb6d2462e8cf7bd702ce3dd9648f3310c6038787448a1f509b7cd9f`, HTTP 200
   (controller, shutdown-manager sidecar and certgen image); `gateway:v1.9.2` still
   resolves (`sha256:9d67017c…`), the rollback target. `distroless-v1.39.5` re-resolved to
-  `9d84a586…` the same day. Envoy upstream's newest is now v1.40.1 (a MINOR move: the
+  `9d84a586…` the same day. Envoy upstream's newest is now v1.40.2 (a MINOR move: the
   separate, still-blocked `envoy-proxy-config-distroless-v1.40.0` plan, whose pinned
   target is therefore itself stale).
 
@@ -321,6 +322,34 @@ correct as written.
 network/envoy-compression` is Accepted=True yet every pod still renders **0**
 compressor filters (re-measured 2026-10-13). If that is fixed before this window, the
 1.39.3-delta brotli bump (carried in this target) lands on a live path, hence the §2.3b STOP-and-amend.
+
+**Pin decision 1.39.5 vs 1.39.6 (recorded 2026-11-03).** Envoy `v1.39.6` was published
+2026-10-27 (`distroless-v1.39.6` = `sha256:1cac8b3a2f72d5a0918f54d7b49e68aae0b0ba325c2d50c8a9a3fff7a4d1f994`,
+HTTP 200). Its release note is a single item: the `distroless` base image refreshed to
+pick up a patched `ca-certificates` package (the 1.39.5 image still ships the unpatched
+trust bundle). No Envoy source change. Cooldown is NOT the obstacle: the `patch` cooldown in
+`runbooks/auto-update-policy.yaml` is 24 h and 1.39.6 is a week old. The obstacle is the
+deny rule `*envoyproxy/envoy*`: the pin moves only in the SAME change as the chart bump, to
+that release's `DefaultEnvoyProxyImage`, and gateway `v1.9.3` compiles in 1.39.5, not 1.39.6.
+**Decision: this plan stays on chart 1.9.3 + `distroless-v1.39.5`** (lockstep preserved, every
+digest, helper name and gate in this file already measured against it). 1.39.6 is NOT silently
+skipped:
+- Trust-store exposure is limited here: Envoy's upstream TLS in this cluster is cluster-internal
+  (in-cluster services); detail and exposure stay on `security_ref` F-61035b6e (DB only).
+- Re-check at T-1 day (§2.3): if Envoy Gateway `v1.9.4` exists and its `DefaultEnvoyProxyImage`
+  is 1.39.6, RE-PLAN onto chart 1.9.4 + 1.39.6 (swap the two digests; the plan is otherwise
+  identical). If `v1.9.4` does not exist, the operator chooses at the GO between (a) shipping
+  1.9.3/1.39.5 as written, or (b) a one-off documented departure from the lockstep rule
+  (pin 1.39.6 on chart 1.9.3: change the two digests in §3.1, the §5 restore line and the
+  §2.3/§4.1 expectations, and add a `DefaultEnvoyProxyImage` note to the commit message).
+  Default if no instruction: (a).
+
+**Envoy Gateway v1.10.0 dependency for the 1.40 line (recorded 2026-11-03).** The separate,
+blocked `envoy-proxy-config-distroless-v1.40.2` draft (another session's; not edited here)
+needs an EG release that compiles in Envoy 1.40.x: that is `v1.10.0`, currently only
+`v1.10.0-rc.1` (2026-10-30). It stays blocked until v1.10.0 is GA, and it would then be a
+MINOR chart move (Gateway API channel / CRD questions, the k8s-gateway restart-twice gate),
+not a continuation of this plan. This plan must run first and finish before it.
 
 **Verdict.** Two small same-minor patches in one change. The data plane's only code
 touching our request path is a race fix on a filter we use; the controller patch carries
@@ -367,7 +396,7 @@ for t in distroless-v1.39.5 distroless-v1.39.1; do echo "$t $(curl -fsSI -H "Aut
 #   distroless-v1.39.5 docker-content-digest: sha256:9d84a586119a27b50437dbb01eccd4722832741539b1ed53c8e9d6da6067a6e0
 #   distroless-v1.39.1 docker-content-digest: sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4
 gh release list -R envoyproxy/gateway -L 4          # newest v1.9.x must still be v1.9.3 (v1.8.6 also listed: ignore, other minor)
-gh release list -R envoyproxy/envoy -L 4            # newest 1.39.x must still be v1.39.5 (v1.40.x may also be listed: ignore, minor move)
+gh release list -R envoyproxy/envoy -L 12           # newest 1.39.x must be v1.39.6 (recorded 2026-11-03, see §1 Pin decision); v1.39.7+ = STOP, re-plan. v1.40.x: ignore, minor move
 # the controller image (also the shutdown-manager sidecar and the certgen hook image) must be pullable BEFORE the commit:
 T=$(curl -fsSL "https://auth.docker.io/token?service=registry.docker.io&scope=repository:envoyproxy/gateway:pull" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
 for t in v1.9.3 v1.9.2; do echo "gateway:$t $(curl -fsSI -H "Authorization: Bearer $T" -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' https://registry-1.docker.io/v2/envoyproxy/gateway/manifests/$t | grep -i -e '^HTTP' -e docker-content-digest | tr -d '\r' | tr '\n' ' ')"; done
@@ -382,8 +411,9 @@ gh api 'repos/envoyproxy/gateway/contents/api/v1alpha1/shared_types.go?ref=v1.9.
   registry unreachable); `gateway:v1.9.3` not HTTP 200 (a failed pull would wedge the
   controller roll, the certgen hook and every proxy's sidecar); the `DefaultEnvoyProxyImage`
   line not equal to this plan's pin (the lockstep claim in §1 is then false: re-plan).
-  If an EG v1.9.4+ exists, or a v1.39.6, this plan is stale: re-plan rather than ship a
-  known-superseded patch.
+  If an EG v1.9.4+ exists, or an Envoy newer than v1.39.6, this plan is stale: re-plan
+  rather than ship a known-superseded patch. v1.39.6 is KNOWN and RECORDED (decision
+  2026-11-03, §1 "Pin decision 1.39.5 vs 1.39.6"): it does not trip this STOP.
 
 2.3b **Exposure re-check: which changed code paths are live?** Uses `filtmap` from §2.4
 (write §2.4 first, then run this). It parses each pod's `/config_dump` STRUCTURALLY
@@ -600,14 +630,37 @@ rules are LOADED (`IngressProbeFailing`, `EnvoyGatewayPodNotReady`, `EnvoyGatewa
 not STOP on them, and do not blame them on this change. `PF_FAILED`, `QUERY_FAILED` or
 `EMPTY` from any `q` line is a STOP, never a pass.
 
+2.8 **Baseline: the edge Content-Encoding `br` reject (compensating control for
+F-6368968f / F-d371c89e) answers 415 BEFORE the roll.** Since f18c34f0 (the Nextcloud rule
+was removed) the only such control is `HTTPRouteFilter media/immich-server-reject-br-body`,
+attached to the `immich-server` HTTPRoute on `envoy-external` (directResponse 415). It is
+rendered into Envoy's route config by the controller, so BOTH the controller roll and the
+proxy roll can lose it silently while every 2xx/3xx probe stays green. Read-only probe:
+```bash
+. /tmp/envoy1395-win/fns.sh
+kubectl -n media get httproutefilter immich-server-reject-br-body -o jsonpath='{.spec.directResponse.statusCode}{"\n"}'   # 415
+H=$(kubectl -n media get httproute immich-server -o jsonpath='{.spec.hostnames[0]}')
+test -n "$H" || { echo "GUARD: no immich hostname"; return 1 2>/dev/null || exit 1; }
+brcheck() { code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 --resolve "$H:443:192.168.55.104" -H "Content-Encoding: $1" "https://$H/api/server/ping" </dev/null); echo "$1 $code"; }
+brcheck br ; brcheck gzip ; brcheck 'gzip, br'
+#   MUST print:  br 415   /   gzip <not 415 and not 000>   /   gzip, br 415
+#   (br is rejected, gzip passes through to the app, the list form still matches the regex). 000 = TLS/listener
+#   failure, not a pass. The `gzip` line is the negative control: a filter that 415s everything would make `br 415` vacuous.
+brcheck br | tee br415.before
+```
+STOP if `br` is not 415 on the pre-state (the control is already broken: fix that first,
+do not start a roll that will be blamed for it) or if `gzip` is 415. The host is read from the
+live route; do not paste it into any commit or report.
+
 **STOP** if any of these fails:
 - a premise fails;
-- §2.3 shows a different digest, `gateway:v1.9.3` not HTTP 200, a compiled default other than this plan's pin, an EG v1.9.4+, or an Envoy v1.39.6+;
+- §2.3 shows a different digest, `gateway:v1.9.3` not HTTP 200, a compiled default other than this plan's pin, an EG v1.9.4+, or an Envoy newer than v1.39.6 (v1.39.6 itself is the recorded, accepted state: §1 "Pin decision");
 - `endstate 1.39.1 v1.9.2` is not `END_STATE_OK`, `crd.before` is not 18 rows, `btpninth` is not `BTP_NINTH_OK` on the pre-state, or `kgw.before` (§2.2) is empty or not 3 rows;
 - a proxy Deployment is below 3/3, or a PDB allows 0 disruptions;
 - `ver.before` or `filt.before` has an `UNREADABLE` line that the baseline tolerance rule (§2.3b) does not cover, or `FILT_ROWS_OK` is missing;
 - §2.3b shows a non-zero `compressor`;
 - the negative control does not print 404 twice;
+- §2.8 does not print `br 415` / `gzip` (not 415) / `gzip, br 415` on the pre-state;
 - an `EnvoyGateway*` or `IngressProbe*` alert is firing;
 - any `test -s` guard prints nothing, or `BASELINE_ROWS_OK` is missing;
 - any `q` prints `PF_FAILED`, `QUERY_FAILED` or `EMPTY`.
@@ -897,7 +950,30 @@ Also at the end of the soak, `endstate 1.39.5 v1.9.3` (§4.0) once more, and
 ```bash
 kubectl -n network get pods -l app.kubernetes.io/name=gateway-helm -o jsonpath='{range .items[*]}{.metadata.name} {.status.containerStatuses[0].restartCount}{"\n"}{end}'   # 3 pods, all 0
 ```
+Also re-run the §4.6 `br`/`gzip` probes at the end of the soak.
 Then retire this plan file per `README.md` (separate commit).
+
+4.6 **CONTENTS ASSERTION: the edge `br` -> 415 reject survived the roll** (§2.8 baseline;
+run once after the §3.4 poll and again at the end of the soak, §4.5). This is the only
+gate that proves the controller re-rendered the `immich-server-reject-br-body` direct
+response into the NEW proxies; the 4.3 sweep sends no Content-Encoding header and cannot see it.
+```bash
+. /tmp/envoy1395-win/fns.sh
+kubectl -n media get httproutefilter immich-server-reject-br-body -o jsonpath='{.spec.directResponse.statusCode}{"\n"}'   # 415
+kubectl -n media get httproute immich-server -o jsonpath='{range .status.parents[*].conditions[*]}{.type}={.status} {end}{"\n"}'   # Accepted=True ResolvedRefs=True
+H=$(kubectl -n media get httproute immich-server -o jsonpath='{.spec.hostnames[0]}'); test -n "$H" || { echo "GUARD: no immich hostname"; return 1 2>/dev/null || exit 1; }
+brcheck() { code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 --resolve "$H:443:192.168.55.104" -H "Content-Encoding: $1" "https://$H/api/server/ping" </dev/null); echo "$1 $code"; }
+brcheck br ; brcheck gzip ; brcheck 'gzip, br'
+```
+- PASS: `br 415`, `gzip` neither 415 nor 000, `gzip, br 415`, Accepted/ResolvedRefs True.
+- FAIL: `br` returns anything but 415 (the filter or its route match was lost: the compensating
+  control is OFF on the internet-facing gateway; treat as a rollback trigger, §5, unless a
+  re-probe after 60 s shows 415: the route may still be re-rendering); `gzip` 415 (the match
+  widened). Do NOT mark the plan done while this is red. The gate can fail: §2.8 shows the
+  negative control (`gzip`) and the pre-state must read `br 415`.
+- If the immich route no longer carries the filter (the compensating control was retired
+  under its security_ref before the window), the premise of this gate is gone: record that and
+  skip §2.8/§4.6 consciously, do not improvise.
 
 ## 5. Rollback
 
@@ -948,6 +1024,7 @@ is then the thing to revert so the cluster and git agree again.
   over the proxy pods' volumes back to `0`.
 - Re-run 4.1 with `1\.39\.1` in place of `1\.39\.5` (6 × imageID `sha256:eb2c01c1…`,
   `grep -c ' 1\.39\.1 LIVE$' ver.after` = 6), keeping the `test -s` and 6-row guards.
+- Re-run 4.6 (`br 415`): the compensating control must also hold after the revert.
 - Re-run 4.0b (`CRD_SET_IDENTICAL`), 4.1b, 4.2 (including `BTP_NINTH_UNCHANGED`), 4.3 (including the `status.knownbad` control) and 4.4 against the
   SAME `/tmp/envoy1395-win/*.before` baselines. They must pass.
 
@@ -968,7 +1045,7 @@ the EnvoyProxy CR and overwrites the undo at the next reconcile. Follow with 5.1
 - **MATERIAL CHANGE TO A PLAN THAT ALREADY HAD A GO (2026-10-26).** The operator GO of
   2026-10-23 was given for the data-plane pin only. This revision adds the chart
   `gateway-helm` 1.9.3 and a controller roll, so that GO does not carry over: after the
-  plan-reviewer re-reviews this file (`review: null`, `status: draft` until then), the
+  plan-reviewer re-reviewed this file (2026-10-26, delta re-review; 2026-11-03 delta for the br gate), the
   GO must be asked for AGAIN on the new scope (chart + controller + data plane in one
   commit, possible double proxy roll, 70 min). Do not run it, and do not let the window
   agent treat the old GO record as covering it.
@@ -985,22 +1062,11 @@ the EnvoyProxy CR and overwrites the undo at the next reconcile. Follow with 5.1
   it, or someone ran it), the proxies have already rolled once on the new sidecar: the
   premise fails, and the plan reduces to the data-plane pin line only. Re-plan, do not
   force it. Keep Renovate's chart PR (when one appears) unmerged until this plan runs.
-- **Slot: `window: null`, the operator chooses.** `etcd-timeouts-5000-500` (vetted) holds
-  `sun-attended:2026-11-08` (110 min) and the two plans are mutual `conflicts_with`. In any
-  case `sun-attended` is 200 min minus the 20-min Step-0 reserve = 180 usable, and 110 + 70 =
-  180 leaves ZERO slack for a 45-min rollback. It also matters operationally: etcd restarts
-  one control-plane node at a time while this change replaces the EG controller (leader
-  election and helm-controller both need the apiserver); stacking them would confound both
-  gates. Options (the operator's call; this plan does not pick):
-  1. `sun-attended:2026-12-06`: the earliest conflict-free slot per the 2026-10-26 re-review
-     (empty, first after Step 0). 70 of 180 usable min; the safe default.
-  2. `sat-attended:2026-11-28`: fits only with ZERO slack (sat-attended is 90 min, 70 usable,
-     plan is 70) — a failed gate has no rollback budget in the slot. Not recommended.
-  3. Keep `sun-attended:2026-11-08` (the 2026-10-23 choice) and MOVE `etcd-timeouts-5000-500`
-     to another Sunday, then drop the `conflicts_with` pair's date overlap. Needs that plan's
-     owner to agree.
-  Do not stamp a `window:` here by hand; the window agent / scheduler assigns it after the
-  GO. Earlier attended slots are unavailable: 11-01 is the exclusive Talos roll.
+- **Slot: `sun-attended:2026-12-06` (operator-chosen 2026-11-02).** No other plan holds that day
+  (re-checked 2026-11-03: redis-fleet-8.10.3 is 11-29, flux-oci-chart-sources 12-13).
+  `sun-attended` is 200 min minus the 20-min Step-0 reserve = 180 usable; this plan is 70, leaving
+  110 min of slack for a 45-min rollback. The earlier 11-08 slot collided with
+  `etcd-timeouts-5000-500` (mutual `conflicts_with`, 180 of 180 min) and is not used.
 - **Any app-restarting plan sharing the slot** (`nocodb-2026.09.1` was named here before; that
   plan file no longer exists): read/read overlap on `monitoring` only, but an app with an
   HTTPRoute restarting would show as a `CHANGED` row in §4.3, so serialize: this plan runs
@@ -1015,7 +1081,7 @@ the EnvoyProxy CR and overwrites the undo at the next reconcile. Follow with 5.1
   `authentik-2026.8.5`, `authentik-web-max-requests` (same Authentik forward-auth path),
   `talos-linux-1.14.4` (node drain vs the single PDB disruption), `envoy-proxy-config-distroless-v1.40.0`
   (same pin line, blocked). ONE-WAY the other direction (they name this plan; this plan does not
-  name them; optional, decide at the vet): `redis-fleet-8.10.2`, `tube-archivist-0.6.0` (touches
+  name them; optional, decide at the vet): `tube-archivist-0.6.0` (`redis-fleet-8.10.2` is superseded; 8.10.3 is reciprocal) (touches
   `gateway/envoy-external`; an app restart there would be a `CHANGED` row in §4.3).
   If a coredns or `kube-prometheus-stack` plan is opened for the same window, serialize it
   (§2.7/§4.4 read Prometheus/blackbox; cluster DNS is on the instrument path) and add it to
