@@ -635,7 +635,15 @@ def _in_context(path, ctx):
 # does not depend on naming.
 _STRUCTURAL_PATH_RE = re.compile(
     r"(?:^|/)(?:migrations?|migrate|alembic/versions|db/migrate|prisma/migrations|"
-    r"database/migrations|schema/migrations|flyway|liquibase)/.+$", re.IGNORECASE)
+    r"database/migrations|schema/migrations|flyway|liquibase)/.+$"
+    # Liquibase-style changelog FILES that are not under a migrations dir
+    # (F-c1e4d0aa, 2026-11-03: traccar ships `schema/changelog-6.17.0.xml`
+    # adding a table, and was rated safe). Needs a version digit after
+    # `changelog` and a data-format extension, so CHANGELOG.md / changelog.txt
+    # prose never matches.
+    r"|(?:^|/)(?:db[-_]?)?changelog[-_.]?v?\d[^/]*\.(?:xml|ya?ml|json|sql)$"
+    r"|(?:^|/)(?:db|database|liquibase|schema)/[^/]*changelog[^/]*\.(?:xml|ya?ml|sql)$",
+    re.IGNORECASE)
 _STRUCTURAL_CONST_RE = re.compile(
     r"^\+(?!\+\+).*?\b_?(?:[A-Z0-9]+_)*(?:SCHEMA|INDEX|DB|DATABASE|MIGRATION|STORAGE)"
     r"_(?:VERSION|REVISION)\b\s*(?::[^=\n]{0,40})?=(?!=)", re.MULTILINE)
