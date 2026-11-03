@@ -62,8 +62,8 @@ finding_refs:
                                       # F-e8a41b1b (open-webui redis sidecar 8.10.1 -> 8.10.3) is owned by redis-fleet-8.10.3, NOT claimed here.
                                       # No version finding for the IMAGE v0.12.5 -> 0.13.0 exists yet (policy-cli finding list --grep open-webui,
                                       # 2026-11-03); add its id here once the sweep files it.
-review: null
-status: draft
+review: ready-for-go@2026-11-03   # plan-reviewer 2026-11-03: needs-fix (restore pod spawned 2 containers, restore_proof missing), fixed, delta re-review ready-for-go; HUMAN-GATED, soak a few days / prefer v0.13.1, window null until operator GO
+status: vetted
 window: null
 sops_refs:
   - docs/sops/application-update.md
