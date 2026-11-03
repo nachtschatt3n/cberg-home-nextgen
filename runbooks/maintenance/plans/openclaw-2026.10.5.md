@@ -11,6 +11,8 @@ target: "2026.10.5"
 recommended_target: "2026.10.6"   # see unblock_stages S0; switch `target` when S1 passes
 update_type: major
 risk: high
+capability_change: true       # major: new model ids, plugin set and state migrations change user-visible behaviour
+rollback_class: backup-restore   # forward SQLite state migration on openclaw-data: rollback = PVC snapshot restore, not a git revert
 est_duration_min: 315      # whole day worst case incl. rehearsal and rollback; happy path ~210
 needs_reboot: false
 touches:

@@ -761,6 +761,13 @@ TERM must have grown by at most the real node events in between (not by 20 per e
 did not climb under a CI burst; if it did climb, the CI-side fix in F-f5879ed8 (cap CI CPU on the
 control-plane nodes) is the next action and this plan did not fix the cause.
 
+Second soak signal (measured 2026-11-03, before the roll): 30 leader changes in 24h and 154 in 7
+days, and every burst of Cilium `cilium-l2announce` lease-lock timeouts / `Cannot update CEP`
+errors on the health board lined up with a leader change (23:42, 00:17, 03:32, 04:52Z). Those
+Cilium errors are a symptom, so do NOT noise-suppress them. One day after the roll expect
+`increase(etcd_server_leader_changes_seen_total[24h])` <= 1 and the board's Cilium error count near
+zero; if the leader still flips, the cause is not the timeout and this plan did not fix it.
+
 ## 5. Rollback
 
 **Nature of the rollback.** The timeouts are process arguments, not stored in the WAL or DB:
