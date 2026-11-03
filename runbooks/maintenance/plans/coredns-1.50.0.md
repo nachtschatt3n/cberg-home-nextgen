@@ -115,8 +115,8 @@ premises:
       every DNS gate reads empty.
     run: kubectl get deploy -n monitoring prometheus-blackbox-exporter -o jsonpath='{.status.readyReplicas}/{.spec.replicas}'
     expect_exact: "1/1"
-review: null
-status: draft
+review: ready-for-go@2026-11-03   # plan-reviewer 2026-11-03: ready-for-go; operator GO recorded for a NOW run 2026-11-03
+status: vetted
 window: null                          # RECOMMENDED sat-attended:2026-11-07 (09:00 Berlin, 35 of 70 usable min): human-gated and its section 4/5.3 need an operator, so NOT the
                                       # unattended nightly; flux-fleet-0.62.1 takes nightly:2026-11-07. NOT stamped.
                                       # (earlier draft said nightly:2026-11-07, which collided: flux-fleet-0.62.1 is a declared conflicts_with
