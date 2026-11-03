@@ -447,9 +447,9 @@ spec:
       image:
         registry: docker.io
         repository: bitnamilegacy/mariadb
-        # Tag text kept; digest = the build running on 2026-10-23 (F-d76865c3), so the
-        # floating tag can no longer change the DB image without a manifest edit.
-        tag: latest@sha256:bbd4e17f1ef8e035c74381c29c64627eaca2ca8612118f3caa5686c3ed8c7bbf
+        # Pinned to the 11.8 LTS patch line (F-96bf2bcd): 11.8.3 is the newest 11.8.x
+        # in the legacy repo; 12.0.x is a non-LTS major jump, deliberately not taken.
+        tag: 11.8.3@sha256:ada2a782b0bdd7885bda684af7fb1fdaa57929c35e639f7cbbf3f724a1735a31
 
       ## Enable persistence using Persistent Volume Claims
       ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
