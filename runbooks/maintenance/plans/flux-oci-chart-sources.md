@@ -12,9 +12,9 @@ target: "every referenced chart with an immutable OCI source migrated to OCIRepo
 update_type: refactor
 risk: high                            # NOT from any single stage. Two drivers, both
                                       # measured, both in §1: (a) the migration ROLLS the
-                                      # workload — 12 in-scope releases / 21 workloads carry a
-                                      # chart-version-derived pod-template label (re-measured
-                                      # 2026-11-03), and the set includes the CNI DaemonSet,
+                                      # workload — 9 releases / 17 workloads in stages 3-6 restart
+                                      # (re-measured 2026-11-03 with the build-metadata method,
+                                      # §1.0), and the set includes the CNI DaemonSet,
                                       # longhorn-manager, the cert-manager webhook and the SSO
                                       # server; (b) every stage edits the Kustomization that
                                       # gates delivery for the whole cluster. Per-stage risk is
@@ -50,7 +50,7 @@ touches:
     - "fluxinstance/flux spec.kustomize.patches (Stage 10 — emptyDir sizeLimit)"
   shared: [flux-sources, cni-adjacent, cert-manager, storage/longhorn, monitoring, authentik, public-dns]
 depends_on: []
-conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, flux-fleet-0.62.0, flux-fleet-0.62.1, etcd-timeouts-5000-500, talos-linux-1.14.5, longhorn-1.13.0, authentik-2026.8.5, grafana-14.1.0, otel-operator-0.26.1, edot-collector-0.164.0, descheduler-0.37.0, anythingllm-1.19, jellyfin-3.7.0, tube-archivist-0.6.0, frigate-reolink-go2rtc-flv, envoy-proxy-config-distroless-v1.39.4, redis-fleet-8.10.3]   # RE-PLANNED 2026-11-03 against every open plan's frontmatter
+conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, flux-fleet-0.62.0, flux-fleet-0.62.1, etcd-timeouts-5000-500, talos-linux-1.14.5, longhorn-1.13.0, authentik-2026.8.5, grafana-14.1.0, edot-collector-0.164.0, descheduler-0.37.0, anythingllm-1.19, jellyfin-3.7.0, tube-archivist-0.6.0, frigate-reolink-go2rtc-flv, envoy-proxy-config-distroless-v1.39.4, redis-fleet-8.10.3]   # RE-PLANNED 2026-11-03 against every open plan's frontmatter
   # 2026-11-03: dropped dead refs otel-operator-0.23.0 (executed out-of-band 0e976cf5), jellyfin-12.1 (superseded by the 12.2 plan, itself later superseded), paperless-db-13.0.2 (executed a99794cc).
   # 2026-11-03: ADDED flux-fleet-0.62.0/0.62.1 (draft: flux-operator + flux-instance HRs and fluxinstance/flux, which Stage 10 patches; each lists this plan),
   #   etcd-timeouts-5000-500 (touches flux-system and perturbs the apiserver every Flux apply talks to; sun 11-08), authentik-2026.8.5 (sat 11-21; stage 5 switches authentik's chart source),
@@ -59,6 +59,7 @@ conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, flux-fleet
   #   redis-fleet-8.10.3 sun 11-29, helm-drift-detection sat 11-28 (P1 warn: adds spec.driftDetection to every HelmRelease, so stage 3's helmrelease.yaml edits must be rebased on it),
   #   envoy-proxy-config-distroless-v1.39.4 sun 12-06 (a week earlier; its own gateway restart gate must be finished and green before this plan starts), longhorn-1.13.0 sun 11-15.
   #   The same-night kube-prometheus-stack bump rule: none is windowed on 12-13 today; if one is slotted, move it — stage 3 verification reads Prometheus for the node-feature and gpu series.
+  # 2026-11-03: REMOVED otel-operator-0.26.1 (plan retired cdf1cf53; the chart bump landed in 5aa609d5, live pin 0.26.1) -- dead ref. The same dead ref was removed from five sibling plans' conflicts_with.
   # About twenty other plans list this plan reciprocally only because it edits HelmReleases; none shares a surface with the stage that runs on 12-13 and they are not repeated here.
 security_ref: null                     # F-0e310ef2 (plan-section, not security) RESOLVED 102ec800; no security finding drives this plan
 capability_change: true                # Stage 9 gives Flux chart-provenance ENFORCEMENT it
@@ -105,6 +106,14 @@ premises:
     why: "§3.7 (spec.verify) and §3.8 (source-controller emptyDir) were measured against Flux v2.9.6; a different distribution means source-controller changed and those claims need re-measuring."
     run: kubectl get fluxinstance flux -n flux-system -o jsonpath='{.spec.distribution.version}'
     expect_exact: "v2.9.6"
+  - id: falco-checksum-config-prefix
+    why: "Section 1.00's falco figures (the predicted checksum change and the 34/34/3/3/3 baseline) were measured against this pod-template checksum; a different prefix means the falco release changed (a Step 0 chart bump?) and the restart prediction must be re-derived."
+    run: kubectl get ds falco -n security -o jsonpath='{.spec.template.metadata.annotations.checksum/config}'
+    expect_matches: "^2bd4ff4b"
+  - id: nfd-worker-checksum-config-prefix
+    why: "Same for node-feature-discovery: the worker DaemonSet's pod-template checksum/config prefix measured 2026-11-03."
+    run: kubectl get ds node-feature-discovery-worker -n kube-system -o jsonpath='{.spec.template.metadata.annotations.checksum/config}'
+    expect_matches: "^c66cab76"
   - id: source-controller-emptydirs-unbounded
     why: "Stage 10 exists because both emptyDir volumes have no sizeLimit; once a limit is set this stage is done and must not be re-run."
     run: kubectl get deploy source-controller -n flux-system -o jsonpath='{.spec.template.spec.volumes[*].emptyDir}'
@@ -145,11 +154,28 @@ replanned: "2026-11-03"
 | order | release (ns) | files in the commit (`git commit --only` list, exact) | restarts? | extra gate |
 |---|---|---|---|---|
 | 1 | `intel-device-plugin-operator` (kube-system) | `kubernetes/apps/kube-system/intel-device-plugin/app/{ocirepository.yaml (new),kustomization.yaml,helmrelease.yaml}` | no | operator Deployment pod name + `creationTimestamp` unchanged |
-| 2 | `intel-device-plugin-gpu` (kube-system) | `…/intel-device-plugin/gpu/{ocirepository.yaml (new),kustomization.yaml,helmrelease.yaml}` | no | DaemonSet `intel-gpu-plugin-intel-gpu-plugin` pods unchanged + node snapshot identical |
-| 3 | `intel-device-plugin-npu` (kube-system) | `…/intel-device-plugin/vpu/{ocirepository.yaml (new),helmrelease.yaml}` **and** `kubernetes/flux/meta/repositories/helm/{intel.yaml (deleted),kustomization.yaml}`. **`vpu/` has NO `kustomization.yaml`** (Flux auto-generates one, so it picks up the new file by itself): do not name a kustomization path here, `git commit --only` fails on a path that does not exist | no | DaemonSet `intel-npu-plugin-intel-npu-plugin` pods unchanged + node snapshot identical |
+| 2 | `intel-device-plugin-gpu` (kube-system) | `kubernetes/apps/kube-system/intel-device-plugin/gpu/{ocirepository.yaml (new),kustomization.yaml,helmrelease.yaml}` | no | DaemonSet `intel-gpu-plugin-intel-gpu-plugin` pods unchanged + node snapshot identical |
+| 3 | `intel-device-plugin-npu` (kube-system) | `kubernetes/apps/kube-system/intel-device-plugin/vpu/{ocirepository.yaml (new),helmrelease.yaml}` **and** `kubernetes/flux/meta/repositories/helm/{intel.yaml (deleted),kustomization.yaml}`. **`vpu/` has NO `kustomization.yaml`** (Flux auto-generates one, so it picks up the new file by itself): do not name a kustomization path here, `git commit --only` fails on a path that does not exist | no | DaemonSet `intel-npu-plugin-intel-npu-plugin` pods unchanged + node snapshot identical |
 | 4 | `node-feature-discovery` (kube-system) | `kubernetes/apps/kube-system/node-feature-discovery/app/{ocirepository.yaml (new),kustomization.yaml,helmrelease.yaml}` + `kubernetes/flux/meta/repositories/helm/{node-feature-discovery.yaml (deleted),kustomization.yaml}` | **YES: worker DaemonSet (3 pods) + master Deployment** | §4.2 NFD row |
 | 5 | `paperless-ngx` (office) | `kubernetes/apps/office/paperless-ngx/app/{ocirepository.yaml (new),kustomization.yaml,helmrelease.yaml}` + `kubernetes/flux/meta/repositories/helm/{gabe565.yaml (deleted),kustomization.yaml}` | no | pod name + `creationTimestamp` identical; HTTPRoute serves real content |
 | 6 | `falco` (security) | `kubernetes/apps/security/falco/app/{ocirepository.yaml (new),kustomization.yaml,helmrelease.yaml}` + `kubernetes/flux/meta/repositories/helm/{falcosecurity.yaml (deleted),kustomization.yaml}` | **YES: DaemonSet `falco`, 3 pods, `maxUnavailable: 1`** | §4.2 falco row |
+
+**Literal per-release environment** (paste before each release's §3.2 steps; `CHART` is the chart name Step 3 pulls, `OCINAME` the OCIRepository name, `WL` empty unless stated):
+
+```bash
+# 1 operator
+export NS=kube-system REL=intel-device-plugin-operator CHART=intel-device-plugins-operator OCINAME=intel-device-plugins-operator REPO=intel OCI_PATH=ghcr.io/intel/helm-charts/intel-device-plugins-operator APPDIR=kubernetes/apps/kube-system/intel-device-plugin/app WL=
+# 2 gpu
+export NS=kube-system REL=intel-device-plugin-gpu CHART=intel-device-plugins-gpu OCINAME=intel-device-plugins-gpu REPO=intel OCI_PATH=ghcr.io/intel/helm-charts/intel-device-plugins-gpu APPDIR=kubernetes/apps/kube-system/intel-device-plugin/gpu WL="ds/intel-gpu-plugin-intel-gpu-plugin"
+# 3 npu
+export NS=kube-system REL=intel-device-plugin-npu CHART=intel-device-plugins-npu OCINAME=intel-device-plugins-npu REPO=intel OCI_PATH=ghcr.io/intel/helm-charts/intel-device-plugins-npu APPDIR=kubernetes/apps/kube-system/intel-device-plugin/vpu WL="ds/intel-npu-plugin-intel-npu-plugin"
+# 4 node-feature-discovery
+export NS=kube-system REL=node-feature-discovery CHART=node-feature-discovery OCINAME=node-feature-discovery REPO=node-feature-discovery OCI_PATH=registry.k8s.io/nfd/charts/node-feature-discovery APPDIR=kubernetes/apps/kube-system/node-feature-discovery/app WL=
+# 5 paperless-ngx
+export NS=office REL=paperless-ngx CHART=paperless-ngx OCINAME=paperless-ngx REPO=gabe565 OCI_PATH=ghcr.io/gabe565/charts/paperless-ngx APPDIR=kubernetes/apps/office/paperless-ngx/app WL=
+# 6 falco
+export NS=security REL=falco CHART=falco OCINAME=falco REPO=falcosecurity OCI_PATH=ghcr.io/falcosecurity/charts/falco APPDIR=kubernetes/apps/security/falco/app WL=
+```
 
 **Do NOT delete `intel.yaml` in commits 1 and 2.** Three HelmReleases (`intel-device-plugin-{operator,gpu,npu}`) use `HelmRepository/intel`; deleting it after the first would leave the other two without a source, inside the `cluster-meta` gate. Only commit 3 (the last Intel release) deletes it, and only after the Step 5 deletion gate reads 0.
 
@@ -527,7 +553,7 @@ mkdir -p "$S"                                       # new shell ($$ changes, var
 export T=/Users/mu/.claude/jobs/flux-oci/tools       # §8 scripts, installed once per window
 export WL=                                            # set ONLY for operator-created workloads: gpu WL="ds/intel-gpu-plugin-intel-gpu-plugin", npu WL="ds/intel-npu-plugin-intel-npu-plugin"
 REPO=<helmrepository-name>; OCI_PATH=<from §7>; OCINAME=<ocirepository name = chart name>
-# APPDIR: the real directories of the six Stage 3 releases are the table in §1.00; later stages read it from the release's ks.yaml
+export APPDIR=<literal directory from §1.00 (one block of literal env lines per Stage 3 release); later stages read it from the release's ks.yaml>
 ```
 
 **Step 0b — G3 non-regression (before any edit).** Moving a chart to an OCI path
@@ -681,7 +707,7 @@ annotations — a labels-only check missed falco and node-feature-discovery):
 D12=$(sed 's/^sha256://' "$S/digest.txt" | cut -c1-12)
 rm -rf "$S/newmeta"; cp -R "$S/new" "$S/newmeta"
 sed -E "s/^version:[[:space:]]*.*/version: $VER+$D12/" "$S/new/$CHART/Chart.yaml" > "$S/Chart.meta.yaml" && cp "$S/Chart.meta.yaml" "$S/newmeta/$CHART/Chart.yaml"
-grep -n '^version:' "$S/newmeta/$CHART/Chart.yaml"          # expect e.g.  6:version: 0.37.1+211a2aa5b9b1   (BSD sed: [[:space:]], not \s)
+grep -q "^version: $VER+$D12$" "$S/newmeta/$CHART/Chart.yaml" || { echo "ABORT: the Chart.yaml version rewrite did not apply (a silent sed no-op would make rollpred print a false 'none')"; exit 1; }   # BSD sed: [[:space:]], not \s
 helm template $REL "$S/newmeta/$CHART" -n $NS -f "$S/live-values.yaml" --kube-version "$KV" > "$S/render-newmeta.yaml" 2> "$S/render-newmeta.err"
 python3 "$T/rollpred.py" "$S/render-old.yaml" "$S/render-newmeta.yaml"
 ```
@@ -738,8 +764,9 @@ the HelmRelease to `chartRef`, adds `ocirepository.yaml` to the app's `kustomiza
 #     Exact match (the old `grep -rn "name: $REPO"` can never pass: `name: intel` matches intel-device-plugin-*,
 #     and `name: node-feature-discovery` matches the HelmRelease's own metadata.name and a dependsOn).
 kubectl get helmrelease -A -o jsonpath='{..sourceRef.name}' | tr ' ' '\n' | grep -c -x "$REPO"
-#     measured 2026-11-03: intel 3, node-feature-discovery 1, gabe565 1, falcosecurity 1. A 0 means the
-#     release already moved or the command is broken: ABORT.
+#     measured 2026-11-03: intel 3, node-feature-discovery 1, gabe565 1, falcosecurity 1. For the three Intel commits the live
+#     count is 3 before commit 1, 2 before commit 2 and 1 before commit 3 (read it AFTER the previous commit has reconciled and its
+#     HelmRelease is Ready). Any other number, or 0, means a release already moved or the command is broken: ABORT.
 python3 "$T/srcrefs.py" "$REPO"                                   # same count from the working tree + the files
 # (b) write the manifests. Pass the 6th argument (the HelmRepository file) ONLY on the LAST release that uses $REPO:
 #     for Intel that is npu (commit 3), NEVER the operator or gpu commits. migrate.py itself refuses to delete a
@@ -1020,7 +1047,10 @@ start** — each would delete a component from the update pipeline.
 > report `revision = sha256:<manifest digest>` with NO `<tag>@` prefix, so the literal
 > `<VER>@<digest>` compare of the first draft false-failed every component.)
 
+**Before any HelmRelease assertion, the OCIRepository must be `Ready=True`** (this is the first in-cluster use of `registry.k8s.io` as an OCIRepository, for node-feature-discovery; a source that cannot fetch leaves the HelmRelease stuck with the OLD pods kept running, which `git revert` fixes):
+
 ```bash
+kubectl -n $NS wait --for=condition=Ready ocirepository/$OCINAME --timeout=5m          # must print "... condition met"; a timeout = STOP, inspect `describe`, revert if the registry path is wrong
 REV=$(kubectl -n $NS get ocirepository $OCINAME -o jsonpath='{.status.artifact.revision}')
 test "$REV" = "$(cat "$S/digest.txt")" && echo REVISION-IS-PINNED-DIGEST      # must print it; known-bad: compare to "$VER@$(cat "$S/digest.txt")" -> never equal
 kubectl -n $NS get ocirepository $OCINAME -o jsonpath='{.status.artifact.lastUpdateTime}{"\n"}'
@@ -1065,8 +1095,8 @@ kubectl -n $NS get events --field-selector type=Warning --sort-by=.lastTimestamp
 | `gabe565` (paperless-ngx) | **No restart expected, so assert exactly that**: the pod name and `creationTimestamp` captured in the baseline (`VOL pod …` line) are IDENTICAL after (`NO-ROLL-CONFIRMED`), the HelmRelease is Ready on the new revision, **and** the HTTPRoute serves real content: `H=$(kubectl get httproute paperless-ngx -n office -o jsonpath='{.spec.hostnames[0]}')`, `curl -sS -o "$S/pl.html" -w '%{http_code} %{size_download}\n' "https://$H/accounts/login/"` prints `200` and more than 2000 bytes, and `grep -c -i paperless "$S/pl.html"` is at least 1. Dry-run: live login page = `200 6889`, 2 matches; **known-bad** `https://$H/definitely-not-here/` = `302 0`, 0 matches. (The earlier consume-directory round trip created a document, contradicted "count equal", and tested nothing a non-restarting release could have broken.) |
 | `plex`, `jellyfin` | Library item **counts** match the pre-roll baseline (counts only — never titles, in any committed artifact). |
 | `intel` (operator, gpu, npu) | **No restart**: `bash "$T/nodesnap.sh" | diff - "$S/nodes-before.txt"` is empty (12 rows: per node `intel.feature.node.kubernetes.io/gpu` and `/npu` labels plus `gpu.intel.com/i915` and `npu.intel.com/accel` capacity; 2026-11-03 baseline: all `true`, `i915=5`, `accel=1` on all 3 nodes) **and** the DaemonSet pods are unchanged (`intel-gpu-plugin-intel-gpu-plugin` / `intel-npu-plugin-intel-npu-plugin` `VOL pod` lines identical; the operator's controller-manager pod identical). `nodesnap.sh` exits 1 unless it sees exactly 12 rows (an empty capacity map is the silent failure). |
-| `node-feature-discovery` | **Restarts (worker DaemonSet 3/3, master Deployment 1/1).** `kubectl rollout status` can green-light the OLD generation: assert `status.observedGeneration == metadata.generation` and `numberReady == desiredNumberScheduled == updatedNumberScheduled` on the worker, and the master's `updatedReplicas == readyReplicas == 1`; **then** `bash "$T/nodesnap.sh" | diff - "$S/nodes-before.txt"` must be EMPTY — the same 12 rows, with before/after values pasted into the commit/GO record. This is the gate that matters: the Intel device plugins are scheduled by the NFD-published `intel.feature…/gpu|npu` labels, so a label lost during the NFD roll would evict the plugin pods and drop `gpu.intel.com/i915` for the seven GPU consumers. If the snapshot differs, STOP and revert (§5). |
-| `falcosecurity` | **Restarts (DaemonSet `falco`, 3 pods, `maxUnavailable: 1`, so a per-node detection gap while each pod restarts).** (1) `numberReady == updatedNumberScheduled == desiredNumberScheduled == 3` and `observedGeneration == generation`; every `falco` pod `2/2` Ready with a `creationTimestamp` after the commit. (2) **Sink read-back with a positive control from BEFORE the roll.** falco emits continuously (≈2-3 alerts per node per minute), so the real stream is the trigger: `CUT=$(python3 -c "import datetime;print((datetime.datetime.utcnow()-datetime.timedelta(minutes=10)).strftime('%Y-%m-%dT%H:%M:%S'))")` then `kubectl exec -n security wazuh-manager-master-0 -- tail -n 20000 /var/ossec/logs/alerts/alerts.json | python3 "$T/falco_sink.py" "$CUT"` must print `FALCO-SINK-OK` (alerts from all 3 agents) **before the commit** — if it does not, the sink read is broken and the post-roll read proves nothing: ABORT. (3) After the DaemonSet settles, record `ROLLDONE=$(date -u +%Y-%m-%dT%H:%M:%S)` and repeat the same read with cutoff `$ROLLDONE`, polling for up to 10 minutes (Wazuh lags a few minutes): it must print `FALCO-SINK-OK` — all three nodes producing falco alerts AFTER the roll. **Known-bad** (run 2026-11-03): cutoff `2099-01-01T00:00:00` prints `FALCO-SINK-FAIL` and exits 1. Also: no `[error]` lines (`docs/sops/falco.md` Test 1). |
+| `node-feature-discovery` | **Restarts (worker DaemonSet 3/3, master Deployment 1/1).** `kubectl rollout status` can green-light the OLD generation: assert, copy-paste, the worker `kubectl get ds node-feature-discovery-worker -n kube-system -o jsonpath='{.status.observedGeneration} {.metadata.generation} {.status.numberReady} {.status.updatedNumberScheduled} {.status.desiredNumberScheduled}'` (live `5 5 3 3 3`) and the master `kubectl get deploy node-feature-discovery-master -n kube-system -o jsonpath='{.status.observedGeneration} {.metadata.generation} {.status.readyReplicas} {.status.updatedReplicas} {.spec.replicas}'` (live `5 5 1 1 1`) — first two equal, remaining three equal the expected count; **then** `bash "$T/nodesnap.sh" | diff - "$S/nodes-before.txt"` must be EMPTY — the same 12 rows, with before/after values pasted into the commit/GO record. This is the gate that matters: the Intel device plugins are scheduled by the NFD-published `intel.feature…/gpu|npu` labels, so a label lost during the NFD roll would evict the plugin pods and drop `gpu.intel.com/i915` for the seven GPU consumers. If the snapshot differs, re-run it every 30 s for up to 5 minutes (labels are re-published after the master settles) and declare a regression only if the difference persists past that bounded poll; then STOP and revert (§5). |
+| `falcosecurity` | **Restarts (DaemonSet `falco`, 3 pods, `maxUnavailable: 1`, so a per-node detection gap while each pod restarts).** (1) readiness, copy-paste: `kubectl get ds falco -n security -o jsonpath='{.status.observedGeneration} {.metadata.generation} {.status.numberReady} {.status.updatedNumberScheduled} {.status.desiredNumberScheduled}'` — live baseline `34 34 3 3 3`; PASS = the first two numbers equal each other and the last three equal 3 (after the move the generation numbers rise by one, so compare, do not hard-code); every `falco` pod `2/2` Ready with a `creationTimestamp` after the commit. (2) **Sink read-back with a positive control from BEFORE the roll.** falco emits continuously (≈2-3 alerts per node per minute), so the real stream is the trigger: `CUT=$(python3 -c "import datetime;print((datetime.datetime.utcnow()-datetime.timedelta(minutes=10)).strftime('%Y-%m-%dT%H:%M:%S'))")` then `kubectl exec -n security wazuh-manager-master-0 -- tail -n 20000 /var/ossec/logs/alerts/alerts.json | python3 "$T/falco_sink.py" "$CUT"` must print `FALCO-SINK-OK` (alerts from all 3 agents) **before the commit** — if it does not, the sink read is broken and the post-roll read proves nothing: ABORT. (3) After the DaemonSet settles, record `ROLLDONE=$(date -u +%Y-%m-%dT%H:%M:%S)` and repeat the same read with cutoff `$ROLLDONE`, polling for up to 10 minutes (Wazuh lags a few minutes): it must print `FALCO-SINK-OK` — all three nodes producing falco alerts AFTER the roll. **Known-bad** (run 2026-11-03): cutoff `2099-01-01T00:00:00` prints `FALCO-SINK-FAIL` and exits 1. **Do not run the sink read within ~15 minutes either side of 00:00 UTC:** `alerts.json` rotates at UTC midnight, so a read straddling it sees only the new file. Informational only, NOT a gate (the sink read is the gate): no `[error]` lines in the falco pod logs (`docs/sops/falco.md` Test 1). |
 | everything else | The app's own HTTPRoute returns its real content (non-empty, not an error page) on the path a user would use. |
 
 ### 4.3 Whole-plan assertion, at the end of every stage
@@ -1109,8 +1139,19 @@ Then **confirm the cluster is actually back** — do not assume:
 kubectl -n flux-system get helmrepository $REPO -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'   # True
 kubectl -n flux-system get helmchart $NS-$REL -o jsonpath='{.status.artifact.revision}{"\n"}'                         # re-created
 kubectl -n $NS get helmrelease $REL -o json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['status'].get('lastAttemptedRevision'), [(h['version'],h['chartVersion'],h['status']) for h in d['status']['history']])"
-bash "$S/collect.sh" | diff - "$S/baseline.txt"   # images/replicas/containers back to baseline
+export NS REL WL
+bash "$S/collect.sh" > "$S/reverted.txt" || { echo "ABORT: post-revert collect failed"; exit 1; }
+# Compare ONLY what a revert must restore. The full collect.sh output can never diff clean: it carries the HR revision,
+# the Helm history (which GAINS entries on a revert) and the HelmChart line. Pod names/timestamps and generations also
+# legitimately differ for the releases that restarted.
+diff <(grep '^SPEC' "$S/reverted.txt") <(grep '^SPEC' "$S/baseline.txt") && echo SPEC-BACK-TO-BASELINE        # all six releases: must print it
+# falco and node-feature-discovery additionally: the workload VOL lines minus generation and minus the pod lines.
+# The checksum/* annotations must be the BASELINE values again, i.e. the pod template is the pre-move one.
+diff <(grep '^VOL' "$S/reverted.txt" | grep -v '^VOL pod' | sed -E 's/ gen [0-9]+//') \
+     <(grep '^VOL' "$S/baseline.txt" | grep -v '^VOL pod' | sed -E 's/ gen [0-9]+//') && echo VOL-TEMPLATE-BACK-TO-BASELINE
 ```
+
+(Dry-run 2026-11-03 against live falco: both lines print. **Known-bad:** a baseline whose `checksum/config` prefix is replaced by the predicted post-move value (`sed 's/2bd4ff4b/135ba72d/'`) makes the second `diff` non-empty and `VOL-TEMPLATE-BACK-TO-BASELINE` is not printed — i.e. a falco still on the moved template is caught. The `VOL pod` lines are excluded on purpose: a rolled DaemonSet has new pod names and `creationTimestamp`s after the revert.)
 
 Three revert-specific facts, so they are not mistaken for failure:
 
@@ -1127,7 +1168,7 @@ Three revert-specific facts, so they are not mistaken for failure:
    were referenced by nothing. If something broke after Stage 1 the cause is
    elsewhere; re-adding the sources will not fix it.
 
-4. **Stage 3 specifics (two rolls each for falco and node-feature-discovery).** Forward = one restart, revert = a second restart of each (the pod-template checksum annotations return to the old values). The four other releases revert with no restart. After reverting the **last Intel commit** (npu), `intel.yaml` returns with it — and with the first two Intel reverts it was never deleted. After a falco revert, repeat the §4.2 falco sink read (`FALCO-SINK-OK` with a cutoff after the revert settled); after an NFD revert, repeat the `nodesnap.sh` diff.
+4. **Stage 3 specifics (two rolls each for falco and node-feature-discovery).** Forward = one restart, revert = a second restart of each (the pod-template checksum annotations return to the old values). The four other releases revert with no restart. **Intel revert order is newest first: npu (commit 3), then gpu, then the operator.** The npu revert brings `intel.yaml` back; reverting the operator or gpu commit alone, while `intel.yaml` is still deleted, would point that HelmRelease at a HelmRepository that no longer exists. Commits 1 and 2 never deleted it. After a falco revert, repeat the §4.2 falco sink read (`FALCO-SINK-OK` with a cutoff after the revert settled); after an NFD revert, repeat the `nodesnap.sh` diff.
 
 For Stage 0 the rollback is the same `git revert`, confirmed by the version
 snapshot regaining its pre-change row count. For Stage 10 it removes the
@@ -1159,15 +1200,16 @@ emptyDir.
   (otherwise each migration silently deletes a component from the update
   pipeline). Stage 1 may share Stage 0's window — it is subtraction only. Stage 2
   before 3-7 only because blast radius should be retired while attention is high;
-  if that feels wrong on the day, run Stage 3 first as a rehearsal — it is the one
-  stage with no workload impact at all. Stage 9 only after a soak. Stage 10 last,
+  if that feels wrong on the day, run Stage 3 first as a rehearsal — it is the LOWEST-impact stage,
+  not an impact-free one: falco and node-feature-discovery restart once on the forward move
+  and once on a rollback (§1.00); only the first three Intel commits are zero-impact. Stage 9 only after a soak. Stage 10 last,
   alone.
 - **At most one component per window in Stage 6**, and never `cilium` +
   `longhorn` together: CNI churn plus storage-control-plane churn in one window is
   how a recoverable mistake becomes an unrecoverable one.
 - **Slot reality at the time of the re-plan (2026-11-03, from `maintenance-plan.py --open`).**
   `sun-attended:2026-12-13` currently holds only this plan (schedulable budget
-  `200 - 20 = 180` min; the 90-min Stage 3 slice fits with room for the 20-min
+  `200 - 20 = 180` min; the 100-min Stage 3 slice fits with room for the 20-min
   Step 0 reserve and a hold-back). The neighbours that matter, in time order:
   `sun-attended:2026-11-15` `longhorn-1.13.0` (storage control plane — finished
   and green three weeks before), `sun-attended:2026-11-22` `talos-linux-1.14.5`
@@ -1347,7 +1389,7 @@ sys.exit(0)
 EOT
 ```
 
-`migrate.py` — writes `ocirepository.yaml`, switches the HelmRelease to `chartRef`, adds the kustomization entry if a `kustomization.yaml` exists, and (6th argument) deletes the HelmRepository file and its line, **but refuses (and writes nothing) while any other HelmRelease in `kubernetes/apps/` still uses that repository**. Atomic: every assertion runs before the first write. Known-bad (run 2026-11-03): the gpu migration with `intel.yaml` as 6th argument while the operator and npu releases still use it prints `REFUSING to delete HelmRepository/intel: still used by [...]` and leaves the tree unchanged; an app dir with no `chart.spec` block raises `no spec.chart.spec block found`.
+`migrate.py` — writes `ocirepository.yaml`, switches the HelmRelease to `chartRef`, adds the kustomization entry if a `kustomization.yaml` exists, and (6th argument) deletes the HelmRepository file and its line, **but refuses (and writes nothing) while any other HelmRelease in `kubernetes/apps/` still uses that repository**. Atomic: every assertion runs before the first write. Known-bad (run 2026-11-03): the gpu migration with `intel.yaml` as 6th argument while the operator and npu releases still use it prints `REFUSING to delete HelmRepository/intel: still used by [...]` and leaves the tree unchanged; an app dir with no `chart.spec` block raises `no spec.chart.spec block found`. The `chart.spec` replacement removes only the 6-space-indented lines under `spec:` and keeps any comment indented less than that (re-tested on all six releases 2026-11-03: falco's 4-line `timeout: 15m` comment survives; the first version's `\s*#.*` alternative ate it).
 
 **`$T/migrate.py`**
 
@@ -1380,7 +1422,7 @@ spec:
 """)
 hr = os.path.join(appdir, "helmrelease.yaml")
 t = open(hr).read()
-new, n = re.subn(r"(?m)^  chart:\n    spec:\n(?:(?:      .*|\s*#.*)\n)+",
+new, n = re.subn(r"(?m)^  chart:\n    spec:\n(?:      .*\n)+",
                  f"  chartRef:\n    kind: OCIRepository\n    name: {name}\n", t, count=1)
 assert n == 1, "no spec.chart.spec block found in " + hr
 ks = os.path.join(appdir, "kustomization.yaml")

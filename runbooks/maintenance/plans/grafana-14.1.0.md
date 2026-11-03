@@ -36,7 +36,7 @@ conflicts_with:                   # ONLY this field is honoured by the scheduler
   - longhorn-1.13.0               # grafana-config is a Longhorn volume; this plan snapshots/backs it up and may restore it
   - helm-drift-detection          # edits spec of EVERY HelmRelease incl. helmrelease/grafana: same object, attribution
   - flux-oci-chart-sources        # rewrites the chart source of HelmReleases incl. grafana (it also rolls deployment/grafana)
-  - otel-operator-0.26.1          # SOFT (attribution hygiene, no technical coupling found): both gate on ns monitoring
+  # REMOVED 2026-11-03 (plan retired cdf1cf53, chart live via 5aa609d5; dead ref) - otel-operator-0.26.1          # SOFT (attribution hygiene, no technical coupling found): both gate on ns monitoring
   - edot-collector-0.163.2        # signals; keep a failed gate attributable to ONE change. Neither plan reads Grafana.
   - edot-collector-0.164.0        # (draft, added 2026-10-30; it already lists this plan)
 exclusive: false
@@ -663,7 +663,7 @@ migration). Per `docs/sops/grafana-image-changes.md` section 4 step 7 do not deb
   removable entries if a reviewer prefers fewer declared conflicts.
 - **`talos-linux-1.14.4` (sun-attended:2026-11-01, exclusive)** - the slot is exclusive anyway; nightly:2026-11-03 also leaves two
   clear days so a failed Grafana gate cannot spill into the node roll's soak.
-- **`longhorn-1.13.0` (sun-attended:2026-11-15), `helm-drift-detection` (sat 11-07), `flux-oci-chart-sources` (sun 11-22)** - each touches
+- **`longhorn-1.13.0` (sun-attended:2026-11-15), `helm-drift-detection` (sat 11-28), `flux-oci-chart-sources` (sun 12-13)** - each touches
   the Longhorn volume or the HelmRelease object itself; declared so a rollout cause stays singular.
 - **`talos-power-tuning-ab`** (vetted, `exclusive: true`, touches monitoring, 310 min attended x2) has `window: null` and its own
   premises failing; it is NOT scheduled, so it does not constrain nightly:2026-11-03. If it is ever scheduled, its exclusivity already

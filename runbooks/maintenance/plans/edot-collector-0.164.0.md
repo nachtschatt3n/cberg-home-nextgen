@@ -56,7 +56,7 @@ conflicts_with:                   # HARD slot exclusions — the only field wind
   - edot-collector-0.163.2        # SAME deployment, SAME PR #324 (retargeted to 0.164.0). Now
                                   # `status: superseded` (2026-11-02, superseded_by this plan) — terminal, kept
                                   # in the list only until the orchestrator prunes the reciprocal refs.
-  - otel-operator-0.26.1          # draft, HUMAN-GATED; supersedes otel-operator-0.25.1. Its daemon collectors
+  # REMOVED 2026-11-03 (plan retired cdf1cf53, chart live via 5aa609d5; dead ref) - otel-operator-0.26.1          # draft, HUMAN-GATED; supersedes otel-operator-0.25.1. Its daemon collectors
                                   # EXPORT into edot-collector.monitoring.svc:4317 and its §4.4 proves itself
                                   # via docs landing in ES THROUGH this collector. OPERATOR RULE 2026-10-23:
                                   # SEPARATE slot, otel-operator FIRST (suggested sat-attended:2026-11-07 SOLO).

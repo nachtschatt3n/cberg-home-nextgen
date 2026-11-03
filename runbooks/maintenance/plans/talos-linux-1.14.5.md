@@ -134,7 +134,7 @@ conflicts_with:                       # exclusive: true already keeps everything
   - edot-collector-0.163.2            # owns the Talos kernel-log path read at §4 (F-e8bb3113)
   - edot-collector-0.164.0            # its successor draft; same reason
   - otel-operator-0.25.1              # restarts the collectors that ship §4's monitoring signals
-  - otel-operator-0.26.1              # its successor draft (names 1.14.2/1.14.4/1.14.5 back); same reason
+  # REMOVED 2026-11-03 (plan retired cdf1cf53, chart live via 5aa609d5; dead ref) - otel-operator-0.26.1              # its successor draft (names 1.14.2/1.14.4/1.14.5 back); same reason
   - flux-fleet-0.62.0                 # restarts the six Flux controllers; the freeze + ImageUpdateAutomation suspend/resume
   - flux-fleet-0.62.1                 # (§2.0b) and a main-pushing Flux bump cannot share a slot (names only 1.14.2 back)
   - flux-oci-chart-sources            # staged Flux source-controller/chart-source programme, moved to sun-attended:2026-12-13
