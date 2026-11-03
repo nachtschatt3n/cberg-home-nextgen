@@ -66,6 +66,9 @@ conflicts_with:                       # ids re-checked as existing, non-terminal
   - talos-linux-1.14.5                # node drain competes for the single PDB disruption (reciprocal; replaces the superseded 1.14.2/1.14.4)
   - flux-reconciler-impersonation     # exclusive; rewrites how kustomize-controller applies this
   - flux-oci-chart-sources            # moves Flux sources; same §3/§5 apply-and-revert path
+  - coredns-1.50.0                    # reciprocal (2026-11-03 review): its §4 reads probe_success and resolves through CoreDNS
+  - envoy-proxy-config-distroless-v1.40.2   # SAME pin line as v1.40.0 (draft); two plans moving one pin never share a window
+  - flux-fleet-0.62.1                 # a flux-operator roll can stall the Flux apply/revert path used by §3/§5
   - etcd-timeouts-5000-500            # ADDED 2026-10-26 (both plans hold sun-attended:2026-11-08). It restarts etcd on all 3
                                       # control-plane nodes one at a time (quorum 2/3); the EG controller roll needs the apiserver
                                       # for its leader-election lease and helm-controller's upgrade needs it too. Capacity:
@@ -719,6 +722,7 @@ EOF2
 git commit --only kubernetes/apps/network/envoy-gateway/app/helmrelease.yaml kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml kubernetes/apps/network/envoy-gateway/crds/gateway-api-standard.yaml kubernetes/apps/network/envoy-gateway/crds/envoy-gateway.yaml -F /tmp/envoy1395-msg.txt
 git log -1 --format=%s    # must be "feat(envoy-gateway): chart 1.9.2 -> 1.9.3 + data plane distroless-v1.39.1 -> v1.39.5"; amend if not
 git show --stat HEAD      # exactly those 4 files
+mkdir -p /tmp/envoy1395-win; echo "COMMIT_SHA=$(git rev-parse HEAD)" >> /tmp/envoy1395-win/state.env   # 5.1 reverts exactly this sha
 git push
 ```
 
@@ -983,10 +987,21 @@ change (so the Gateway-API admission-policy trap in `docs/sops/envoy-gateway-upg
 image is digest-pinned, published and cached on every node; `gateway:v1.9.2` is still
 published (§2.3, HTTP 200 on 2026-10-26) and the 3 nodes ran it until this change.
 
+5.0 UNATTENDED ROLLBACK TRIGGER (2026-11-03: used when the operator is not present; also the default when attended
+and nobody objects). No judgment call, run 5.1 AUTOMATICALLY if ANY of these holds:
+- `END_STATE_FAIL`, or the end-state poll has not reached the target after 30 min from the push;
+- the br probe (§2.8/§4.6) reads anything but `br 415` on TWO consecutive probes 60 s apart, or the `gzip` control reads 415 (filter lost or over-broad);
+- any verification gate in §4 is red twice in a row 60 s apart;
+- a node, Gateway or HTTPRoute Programmed/Accepted condition is False after 10 min.
+If the revert's own end-state (`endstate 1.39.1 v1.9.2` poll) or the br probe is still red 30 min after the revert push, STOP and
+report loudly (home-operation finding, kind=finding, critical) - do not loop. The sha is recorded in §3.2 as `COMMIT_SHA`
+(`save COMMIT_SHA $(git rev-parse HEAD)` before the push); 5.1 reverts exactly that sha, never HEAD.
+
 5.1 Revert and push (~2 min plus the controller roll and the proxy roll(s)):
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-git revert --no-edit <sha-of-3.2>
+[ -f /tmp/envoy1395-win/state.env ] && . /tmp/envoy1395-win/state.env
+git revert --no-edit "$COMMIT_SHA"   # saved in §3.2 before the push; if empty, git log -3 --format='%h %s' -- kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml
 git log -1 --format=%s    # must be 'Revert "feat(envoy-gateway): chart 1.9.2 -> 1.9.3 + data plane distroless-v1.39.1 -> v1.39.5"'
 git show --stat HEAD      # exactly the 4 files of §3.2
 grep -o 'envoy:distroless-v[^ ]*' kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml
