@@ -91,7 +91,7 @@ finding_refs: [F-4b7ecd9c, F-170214c3]   # F-170214c3 = probes ignored by the ch
                                       # F-ba0fe5d7 (plex chart source UNRESOLVED) is a different job.
 review: ready-for-go@2026-11-03   # reviewer: needs-fix on 2 mechanical items (COMMIT_SHA, PUSH_TS order), both fixed 2026-11-03
 status: vetted
-window: null                          # RECOMMENDED sat-attended:2026-11-14 (09:00 Berlin, 90 min, 70 usable; this plan
+window: "now:2026-11-03"   # ON-DEMAND NOW run 2026-11-03 (run-now.py stamp; was None)
                                       # is 35, alone in the slot). Not stamped: the scheduler / operator GO assigns it (HUMAN-GATED).
 premises:
   - id: sts-image-is-current
