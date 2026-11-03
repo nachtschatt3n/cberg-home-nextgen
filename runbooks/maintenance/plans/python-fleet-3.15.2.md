@@ -34,7 +34,7 @@ touches:
                                         # HTTPRoute, a PVC or an SSO path.
 depends_on: []
 conflicts_with:
-  - mealie-3.30.0   # reciprocal, 2026-11-02 sweep 2ad957af (both edit the mealie Kustomization / office surface)
+  # 2026-11-03: dropped `mealie-3.30.0` (plan retired/never existed; DEAD-REF in maintenance-plan.py --validate)
   # Carried from python-fleet-3.15.0; re-checked 2026-11-02 against runbooks/maintenance/plans/ (the four entries
   # below all exist and are non-terminal: redis-fleet-8.10.3 draft, openclaw-2026.10.5 blocked, helm-drift-detection
   # vetted, flux-oci-chart-sources vetted).

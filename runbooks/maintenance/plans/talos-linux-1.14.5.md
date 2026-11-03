@@ -157,7 +157,7 @@ conflicts_with:                       # exclusive: true already keeps everything
   - otbr-0.4.0                        # reciprocal (host-netfilter on k8s-nuc14-03)
   - otbr-thread-rcp-recovery          # reciprocal (host-netfilter on k8s-nuc14-03)
   - redis-fleet-8.10.3                # reciprocal (sun-attended:2026-11-29)
-  - wazuh-100404-ci-build-tuning      # reciprocal
+  # 2026-11-03: dropped `wazuh-100404-ci-build-tuning` (plan retired/never existed; DEAD-REF in maintenance-plan.py --validate)
   - cli-tool-pins                     # touches .mise.toml (the talosctl pin §3.12 moves); names talos-linux-1.14.2
   - helm-drift-detection              # its P2 rolls intel-gpu-plugin (re-registers i915 on every node)
   # No kube-prometheus-stack PLAN file exists (2026-11-02), but Renovate PR #428 (kube-prometheus-stack 92.11.1 ->

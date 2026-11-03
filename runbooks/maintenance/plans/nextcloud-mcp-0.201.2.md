@@ -31,8 +31,8 @@ touches:
 depends_on: []                        # Flux `dependsOn: nextcloud` is ordering-only; no note in 0.185..0.201.2 states a
                                       # minimum Nextcloud server version (0.201.0's Deck >= 1.18 check is per-call, Deck absent).
 conflicts_with:
-  - nextcloud-9.4.1                   # vetted nightly:2026-10-28; chart/exporter leg of Nextcloud, restarts deployment/nextcloud.
-  - nextcloud-whiteboard-2.1.2        # vetted nightly:2026-10-29; same office namespace, lists nextcloud-mcp-0.200.2 today.
+  # 2026-11-03: dropped `nextcloud-9.4.1` (plan retired/never existed; DEAD-REF in maintenance-plan.py --validate)
+  # 2026-11-03: dropped `nextcloud-whiteboard-2.1.2` (plan retired/never existed; DEAD-REF in maintenance-plan.py --validate)
   - redis-fleet-8.10.3                # (retargeted 2026-10-27 from superseded 8.10.2) draft sun-attended:2026-11-29; restarts office/nextcloud-redis (all sessions drop).
   - bitnamilegacy-exit-nextcloud-db   # blocked/unwindowed; quiesces Nextcloud if revived.
   - nextcloud-mcp-0.200.2             # SUPERSEDED BY THIS PLAN (§1.5): same component, same HR line. Drop once that file is

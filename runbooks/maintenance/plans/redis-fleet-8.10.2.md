@@ -55,8 +55,8 @@ conflicts_with:
   - tube-archivist-0.6.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   - tube-archivist-elasticsearch-9.5.5   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # Same consumers / same files (reciprocity added 2026-10-24 re-plan; each is listed back by these plans):
-  - nextcloud-9.4.1                     # vetted nightly:2026-10-28 — Nextcloud app roll; lists this plan. Must be settled BEFORE leg 8.
-  - nextcloud-whiteboard-2.1.2          # vetted nightly:2026-10-29 — Nextcloud whiteboard (uses nextcloud redis path); lists this plan.
+  # 2026-11-03: dropped `nextcloud-9.4.1` (plan retired/never existed; DEAD-REF in maintenance-plan.py --validate)
+  # 2026-11-03: dropped `nextcloud-whiteboard-2.1.2` (plan retired/never existed; DEAD-REF in maintenance-plan.py --validate)
   - nextcloud-mcp-0.201.2               # blocked — lists this plan (nextcloud-redis restart)
   - nextcloud-mcp-0.198.0               # blocked — reciprocity from 2026-10-05 review
   # sure-0.7.5 dead ref removed 2026-10-24 (plan file no longer exists); a future sure-* plan that rolls sure-redis/sure-worker must serialize with leg 6.
