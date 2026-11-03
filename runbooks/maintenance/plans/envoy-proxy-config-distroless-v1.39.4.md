@@ -95,7 +95,7 @@ review: ready-for-go@2026-10-26   # plan-reviewer 2026-10-26 delta re-review aft
                                       # must re-review; only the sweep writes a new `ready-for-go@` line.
 status: vetted                       # re-reviewed 2026-10-26; HUMAN-GATED; window null until the operator picks one of the three section-6 options
                                       # scope is NOT carried over: it must be RE-CONFIRMED after re-review (§1, §6).
-window: "sun-attended:2026-12-06"   # OPERATOR-CHOSEN 2026-11-02 (chat: Envoy 12-06). Was OPEN until the operator picked one (§6 lists the options). The 2026-10-23 slot sun-attended:2026-11-08 is
+window: "now:2026-11-03"   # ON-DEMAND NOW run 2026-11-03 (run-now.py stamp; was 'sun-attended:2026-12-06')
                                       # contradicted by the mutual conflicts_with with etcd-timeouts-5000-500 (vetted, same slot, 180 of 180 min).
 sops_refs:
   - docs/sops/application-update.md
