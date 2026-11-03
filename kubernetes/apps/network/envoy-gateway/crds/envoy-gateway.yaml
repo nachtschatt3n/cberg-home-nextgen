@@ -1,5 +1,5 @@
 # VENDORED — do not hand-edit. Regenerate with ./revendor.sh.
-# Source: oci://docker.io/envoyproxy/gateway-crds-helm:1.9.2
+# Source: oci://docker.io/envoyproxy/gateway-crds-helm:1.9.3
 #   values: crds.envoyGateway.enabled=true
 ---
 # Source: gateway-crds-helm/templates/generated/gateway.envoyproxy.io_backends.yaml

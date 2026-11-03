@@ -82,7 +82,7 @@ spec:
           # extractor, see the F-41f0d855 report), so until a regex-versioning
           # packageRule exists this moves by hand, with the chart. Mutually
           # exclusive with imageRepository -- never set both.
-          image: docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4
+          image: docker.io/envoyproxy/envoy:distroless-v1.39.5@sha256:9d84a586119a27b50437dbb01eccd4722832741539b1ed53c8e9d6da6067a6e0
           resources:
             requests:
               cpu: 100m
