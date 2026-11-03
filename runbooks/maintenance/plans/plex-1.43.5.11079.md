@@ -89,8 +89,8 @@ finding_refs: [F-4b7ecd9c, F-170214c3]   # F-170214c3 = probes ignored by the ch
                                       # 1.43.5.11079-b3b13e506 (patch)" - queried 2026-10-28 with
                                       # SWEEP_PG_DSN up (`finding list --grep plex` and `--grep pms-docker`).
                                       # F-ba0fe5d7 (plex chart source UNRESOLVED) is a different job.
-review: null
-status: draft
+review: ready-for-go@2026-11-03   # reviewer: needs-fix on 2 mechanical items (COMMIT_SHA, PUSH_TS order), both fixed 2026-11-03
+status: vetted
 window: null                          # RECOMMENDED sat-attended:2026-11-14 (09:00 Berlin, 90 min, 70 usable; this plan
                                       # is 35, alone in the slot). Not stamped: the scheduler / operator GO assigns it (HUMAN-GATED).
 premises:
@@ -332,7 +332,7 @@ broken: STOP (that is also G6/G7's baseline).
 as COUNTS only, never titles):
 
 ```bash
-# Library section item counts. Negative control: a bad token prints sectionN=MISSING.
+# Library section item counts. Negative control: a bad token prints NO section line at all (measured 2026-11-03: empty list); the `wc -l` = 3 check below is what fails closed.
 . /tmp/plex-11079-win/fns.sh
 cat > /tmp/plex-11079-win/counts.sh <<'EOF'
 #!/bin/zsh
@@ -462,17 +462,24 @@ fix(plex): bump plexinc/pms-docker 1.43.5.11029 -> 1.43.5.11079 (plan plex-1.43.
 Patch build on the 1.43.5 line. Release notes read from plex.tv downloads API.
 Pre-change DB copy taken in-pod (backup gate) before push.
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 EOF
 git commit --only kubernetes/apps/media/plex/app/helmrelease.yaml -F /tmp/plex-11079-msg.txt
 git log -1 --format=%s
 git show --stat HEAD
-git push
 ```
 
 PASS = the subject is the one above (amend before push if not) and
 `git show --stat` lists only `kubernetes/apps/media/plex/app/helmrelease.yaml`.
-Record it: `. /tmp/plex-11079-win/fns.sh; save PUSH_TS $(date -u +%s)`. Flux webhook delivers; no manual reconcile
+Then record BOTH values BEFORE the push (Flux can start the new pod the moment the push lands,
+and G1 compares startTime against PUSH_TS; the rollback in 5.1 reverts exactly this sha, never HEAD):
+
+```bash
+. /tmp/plex-11079-win/fns.sh; save COMMIT_SHA $(git rev-parse HEAD); save PUSH_TS $(date -u +%s)
+git push
+```
+
+Flux webhook delivers; no manual reconcile
 unless the HR has not picked up the new values within 10 min, in which case
 `flux reconcile helmrelease plex -n media --with-source` once.
 
@@ -611,7 +618,9 @@ Trigger: any of G1-G9 FAIL, or a G7 auth regression (immediate).
 5.1 Revert the image:
 
 ```bash
-git revert --no-edit <the §3.3 commit sha>
+. /tmp/plex-11079-win/fns.sh; . /tmp/plex-11079-win/state.env   # COMMIT_SHA from 3.3
+test -n "$COMMIT_SHA" || { echo "NO COMMIT_SHA: find the plex commit with git log --format='%h %s' -5 -- kubernetes/apps/media/plex/app/helmrelease.yaml"; exit 1; }
+git revert --no-edit "$COMMIT_SHA"
 git log -1 --format=%s          # confirm it is YOUR revert
 git show --stat HEAD            # only helmrelease.yaml
 git push
