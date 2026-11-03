@@ -8,6 +8,8 @@ data:
   sync_images.py: |
     import os
     import sys
+    import json
+    import http.cookiejar
     import urllib.request
     import urllib.error
 
@@ -17,14 +19,33 @@ data:
     # cache filename suffix -> destination filename in the channel directory
     # Jellyfin/Kodi conventions: folder.jpg = poster, backdrop.jpg = fanart
     MAPPING = {
-        "_thumb.jpg":  "folder.jpg",
-        "_tvart.jpg":  "backdrop.jpg",
-        "_banner.jpg": "banner.jpg",
+        "thumb":  "folder.jpg",
+        "tvart":  "backdrop.jpg",
+        "banner": "banner.jpg",
     }
+
+    # Tube Archivist >= 0.6.0 serves artwork itself (nginx removed) at
+    # /media/thumb/channel/<id>/<art>.jpg and requires a session login.
+    OPENER = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+    )
+
+    def login():
+        creds = {}
+        for field, var in (("username", "TA_USERNAME"), ("password", "TA_PASSWORD")):
+            creds[field] = os.environ[var]
+        body = json.dumps(creds).encode()
+        req = urllib.request.Request(
+            f"{TA_URL}/api/user/login/", data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with OPENER.open(req, timeout=30) as r:
+            if r.status not in (200, 204):
+                raise RuntimeError(f"login failed: HTTP {r.status}")
 
     def fetch(url, dest):
         try:
-            with urllib.request.urlopen(url, timeout=30) as r:
+            with OPENER.open(url, timeout=30) as r:
                 if r.status != 200:
                     return False
                 with open(dest, "wb") as f:
@@ -43,6 +64,7 @@ data:
             print(f"YOUTUBE_ROOT {YOUTUBE_ROOT} not mounted")
             sys.exit(1)
 
+        login()
         copied = skipped = missing_src = 0
         for entry in sorted(os.listdir(YOUTUBE_ROOT)):
             ch_dir = os.path.join(YOUTUBE_ROOT, entry)
@@ -53,7 +75,7 @@ data:
                 if os.path.exists(dst):
                     skipped += 1
                     continue
-                src_url = f"{TA_URL}/cache/channels/{entry}{src_suffix}"
+                src_url = f"{TA_URL}/media/thumb/channel/{entry}/{src_suffix}.jpg"
                 if fetch(src_url, dst):
                     print(f"  {entry}: + {dst_name}")
                     copied += 1

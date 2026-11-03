@@ -24,6 +24,16 @@ spec:
               env:
                 - name: TA_URL
                   value: "http://tube-archivist:8000"
+                - name: TA_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: tube-archivist-secrets
+                      key: TUBE_ARCHIVIST_USERNAME
+                - name: TA_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: tube-archivist-secrets
+                      key: TUBE_ARCHIVIST_PASSWORD
                 - name: YOUTUBE_ROOT
                   value: "/youtube"
               volumeMounts:
