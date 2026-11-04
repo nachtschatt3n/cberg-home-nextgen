@@ -49,7 +49,7 @@ rollback_class: git-revert            # no PVC, no DB; 0/4 CRD kinds store the o
 security_ref: F-1fd1d6a0                # controller image finding; detail lives on the finding, not here
 finding_refs: [F-5602ee2a, F-87d453b9, F-a2cff4a9, F-1fd1d6a0]   # copied from gha-fleet-0.15.1 (same component, same target); not re-queried, SWEEP_PG_DSN not up in this session
 review: ready-for-go@2026-11-03   # plan-reviewer 2026-11-03: needs-fix (bookkeeping only), fixed, delta re-review ready-for-go. status stays draft: gha-fleet-0.15.1 is being re-edited by another session to cover 5 scale sets; ONE of the two must own the edit before either is vetted
-status: draft
+status: superseded   # 2026-11-04 (operator-approved): superseded by gha-fleet-0.15.1, which now covers all five ARC scale sets (reviewed ready-for-go 2026-11-03, 44643085). Same three-file edit; never executed.
 window: null
 sops_refs:
   - docs/sops/application-update.md

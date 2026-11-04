@@ -26,7 +26,7 @@ capability_change: false           # same templates, same values; no new route, 
 rollback_class: git-revert         # nothing forward-only: no PVC/DB; revert of the gha-fleet commit restores 0.15.0
 finding_refs: []                   # no sweep finding for this member (`finding list --grep absenty-build` is a coverage hold, not a finding)
 review: null
-status: draft
+status: superseded   # 2026-11-04 (operator-approved): folded into gha-fleet-0.15.1, whose gates 4.1-4.6 cover the Absenty pool; never executed.
 window: null
 sops_refs:
   - docs/sops/application-update.md
