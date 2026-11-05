@@ -61,7 +61,7 @@ spec:
             privileged: true
       containers:
         - name: wazuh-indexer
-          image: wazuh/wazuh-indexer:4.14.9
+          image: wazuh/wazuh-indexer:4.14.10
           resources:
             requests:
               cpu: 1000m
