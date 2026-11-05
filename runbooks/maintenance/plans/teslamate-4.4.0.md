@@ -81,7 +81,7 @@ premises:
     run: kubectl get backups.longhorn.io -n storage -l backup-volume=teslamate-db -o jsonpath='{.items[*].status.state}'
     expect_contains: Completed
 status: vetted
-window: nightly:2026-11-06   # human-gated (capability_change): needs operator GO; car parked/asleep
+window: "now:2026-11-06"   # ON-DEMAND NOW run 2026-11-06 (run-now.py stamp; was 'nightly:2026-11-06')
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md
@@ -172,13 +172,30 @@ gh pr diff 266 | grep -c '^+.*4.4.0@sha256:c85b3d447502683ed7bf12fb478e0dae9a985
 ```
 FAIL shape: a re-based PR pointing at a different digest prints 0 on the last line.
 
-2.3 Car not mid-drive/mid-charge (a Recreate during a drive splits it into two drives):
+2.3 Car not mid-drive/mid-charge (a Recreate during a drive splits it into two drives). The retained MQTT
+topic alone is NOT a sufficient gate: it persists after the logger stops (2026-11-05 NOW run skipped on a
+retained `charging`). Cross-check the topic against teslamate's own DB; the DB is the authority, the topic is
+corroboration, and the topic's `since` timestamp (and the age of the newest position) distinguishes stale from live:
 ```bash
 P=$(kubectl -n home-automation get pod -l app.kubernetes.io/name=mosquitto -o name | head -1)
-kubectl -n home-automation exec $P -c app -- timeout 4 mosquitto_sub -h localhost -t 'teslamate/cars/1/state' -v -C 1
+kubectl -n home-automation exec $P -c app -- timeout 4 mosquitto_sub -h localhost -t 'teslamate/cars/1/state' -t 'teslamate/cars/1/since' -v -C 2
+kubectl -n home-automation exec deploy/teslamate-postgres -- sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "
+select '"'"'open_charges='"'"'||count(*) from charging_processes where end_date is null and id=(select max(id) from charging_processes);
+select '"'"'open_drives='"'"'||count(*) from drives where end_date is null and id=(select max(id) from drives);
+select '"'"'orphans_old_ok='"'"'||count(*) from (select 1 from charging_processes where end_date is null and id<>(select max(id) from charging_processes) union all select 1 from drives where end_date is null and id<>(select max(id) from drives)) o;
+select '"'"'last_state='"'"'||state||'"'"' since '"'"'||start_date from states where end_date is null order by id desc limit 1;
+select '"'"'newest_position_age_s='"'"'||round(extract(epoch from now()-max(date))) from positions;"'
 ```
-PASS: `asleep`, `online`, `suspended` or `offline`. If `driving` or `charging` → wait or defer
-(a split charge is cosmetic; operator may accept it — interruption is fine, data loss is not).
+Only the NEWEST charge/drive row can be live: the DB carries 6 long-orphaned `end_date IS NULL` rows
+(charges 38, 398; drives 397, 1072, 1073, 1132 - all 2025-12 .. 2026-10, measured 2026-11-06, unrelated to the car's
+current state), so a plain `count(*) where end_date is null` would FAIL forever; `orphans_old_ok` is informational.
+PASS (all): `open_charges=0` AND `open_drives=0` AND `last_state` is `asleep|online|offline` (not `driving`/`charging`)
+AND, if the topic says `driving`/`charging`, the DB must AGREE before it counts as live: a topic of
+`charging` with `open_charges=0` and a `since` older than the newest closed charge is STALE (record the
+evidence, proceed). FAIL (stop, no change): `open_charges>=1` or `open_drives>=1`, or `last_state` driving/charging,
+or `newest_position_age_s < 120` while the topic is not asleep/offline (live logging). Controls: the DB
+lines are real queries against live tables (a missing table or empty result is a FAIL of the gate itself).
+If really live: do not wait; defer (a split charge is cosmetic; operator may accept it - interruption is fine, data loss is not).
 
 2.4 Baselines (record the numbers in the window log; §4 diffs against them):
 ```bash
