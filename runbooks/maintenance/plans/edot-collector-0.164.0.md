@@ -100,8 +100,7 @@ review: ready-for-go@2026-11-06                      # refreshed in place 2026-1
                                   # window); the 2026-11-02 ready-for-go stamp is removed - a plan-reviewer
                                   # re-review stamps it. Never hand-write ready-for-go.
 status: vetted
-window: null                      # the executing window agent assigns it (supersedes the earlier
-                                  # nightly:2026-11-10 pre-approval).
+window: "now:2026-11-06"   # ON-DEMAND NOW run 2026-11-06 (run-now.py stamp; was None)
 premises:
   # Re-checked at EXECUTION time. All four RUN on 2026-10-29 while writing this plan.
   - id: image-is-still-0.161.0

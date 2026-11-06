@@ -97,7 +97,7 @@ review: ready-for-go@2026-11-06                            # REFRESHED 2026-11-0
 status: vetted                           # 2026-11-06: refreshed in place after a NOW-window pre-check STOP (tag re-pushed 2026-11-05, §1.2); HUMAN-GATED
                                         # independent review (needs-fix) - baseline 3.14.10, re-pushed 3.15.2 digest, dead
                                         # conflicts_with ref, finding_refs; the earlier GO does NOT carry over (§1.7).
-window: null                            # the window agent assigns it; operator asked for an attended NOW run 2026-11-06 (needs a fresh GO, §1.7)
+window: "now:2026-11-06"   # ON-DEMAND NOW run 2026-11-06 (run-now.py stamp; was None)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
