@@ -77,7 +77,7 @@ finding_refs: [F-5602ee2a, F-87d453b9, F-a2cff4a9, F-1fd1d6a0]            # `fin
                                       # scan to MEASURE, not for this plan to claim. Detail stays on the record.
 review: ready-for-go@2026-11-03     # plan-reviewer 2026-11-03 re-review of the 5-scale-set edit: premises 5/5, counts/names/gates verified live
 status: vetted
-window: nightly:2026-11-09   # AUTO-NIGHT class: no operator GO needed; Renovate PRs 414/415 are closed by the plan, never merged alone
+window: "now:2026-11-06"   # ON-DEMAND NOW run 2026-11-06 (run-now.py stamp; was 'nightly:2026-11-09')
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/ci-runner.md            # §2c "Upgrades": lockstep, one commit, re-derive digests

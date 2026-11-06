@@ -125,7 +125,7 @@ premises:
     expect_exact: "0 4 * * * tz="
 review: ready-for-go@2026-11-06   # sweep 471de4f9 plan-reviewer: 0 blocking; nonblocking runnability polish for the window agent: q() lives only in §2.3 (define it in §4 fresh shell), replace `get pods -w` with a bounded poll, make §2.2 ABORT stop (`|| { echo ABORT; false; }`) + assert 2 lines in pods.pre, scope §4 rate controls to new pods
 status: vetted   # HUMAN-GATED (cluster DNS): operator GO required; never nightly
-window: null                          # RECOMMENDED sat-attended:2026-11-07 (09:00 Berlin = 08:00Z, 35 of 70 usable min),
+window: "now:2026-11-06"   # ON-DEMAND NOW run 2026-11-06 (run-now.py stamp; was None)
                                       # or an on-demand NOW run with operator GO as 1.50.0 was. NOT nightly: human-gated
                                       # (SD-11 floor dns/coredns/flux + §5.3 needs a human). NOT stamped.
 sops_refs:

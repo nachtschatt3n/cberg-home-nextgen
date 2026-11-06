@@ -90,7 +90,7 @@ review: ready-for-go@2026-11-02          # plan-reviewer 2026-11-02: ready-for-g
 status: vetted                          # was draft. 2026-11-02: revised after an
                                         # independent review (needs-fix) - baseline 3.14.10, re-pushed 3.15.2 digest, dead
                                         # conflicts_with ref, finding_refs; the earlier GO does NOT carry over (§1.7).
-window: "sat-attended:2026-11-14"       # suggestion only (the window agent assigns it). 35 of the 70 schedulable min (90 - 20 Step 0
+window: "now:2026-11-06"   # ON-DEMAND NOW run 2026-11-06 (run-now.py stamp; was 'sat-attended:2026-11-14')
                                         # reserve), alone in the slot (re-grepped `^window:` 2026-11-02; every other plan naming
                                         # 2026-11-14 does so in prose with window null or superseded). Cooldown on 3.15.2-slim:
                                         # last_updated 2026-11-02T05:08:22Z -> lapses 2026-11-04T05:08Z, far before the slot.
