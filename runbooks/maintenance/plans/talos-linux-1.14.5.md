@@ -144,7 +144,7 @@ conflicts_with:                       # exclusive: true already keeps everything
   - frigate-reolink-go2rtc-flv        # reciprocal (igpu-i915)
   - grafana-14.1.0                    # reciprocal (monitoring)
   - authentik-web-max-requests        # reciprocal; its premise is "no etcd leader change in 1h" (F-98043e32)
-  - gha-fleet-0.15.1                  # reciprocal (ci-runner load drives etcd churn, F-f5879ed8)
+  # 2026-11-06: removed gha-fleet-0.15.1 - plan executed and retired (288a915fe); DEAD-REF in maintenance-plan.py --validate.
   - icloud-drive-fleet-2.3.0          # reciprocal
   - openclaw-2026.10.5                # reciprocal
   - otbr-0.4.0                        # reciprocal (host-netfilter on k8s-nuc14-03)
