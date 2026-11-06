@@ -87,10 +87,10 @@ premises:
   # The registry facts (target still trixie; past the 48 h minor cooldown; no newer bugfix) are §2 gates
   # 2.1-2.3, each printing a STOP token on failure - they need curl/python network reads, kept out of premises.
 review: ready-for-go@2026-11-02          # plan-reviewer 2026-11-02: ready-for-go, 0 blocking; nits applied (PY_SHA capture, pushed=0 + imageID digest gate, severity wording); HUMAN-GATED, fresh operator GO on this plan_id
-status: vetted                          # was draft. 2026-11-02: revised after an
+status: blocked   # 2026-11-06 NOW window: pre-check 2.1/2.2 STOP - 3.15.2-slim tag re-pushed 2026-11-05 (live index digest differs from the recorded one) and the 48h minor cooldown lapses ~2026-11-07T14:10Z. Needs digest/facts re-measure + re-review (section 1.7).
                                         # independent review (needs-fix) - baseline 3.14.10, re-pushed 3.15.2 digest, dead
                                         # conflicts_with ref, finding_refs; the earlier GO does NOT carry over (§1.7).
-window: "now:2026-11-06"   # ON-DEMAND NOW run 2026-11-06 (run-now.py stamp; was 'sat-attended:2026-11-14')
+window: null
                                         # reserve), alone in the slot (re-grepped `^window:` 2026-11-02; every other plan naming
                                         # 2026-11-14 does so in prose with window null or superseded). Cooldown on 3.15.2-slim:
                                         # last_updated 2026-11-02T05:08:22Z -> lapses 2026-11-04T05:08Z, far before the slot.
