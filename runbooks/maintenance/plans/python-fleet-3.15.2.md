@@ -8,7 +8,7 @@ also_covers: [openclaw-probe, mcpo, mealie-shopping-sync]
 pr: null                              # direct-bump lane (coverage.py needs_plan_groups group python-fleet-3.15.2) - no Renovate PR
 kind: image
 current: "python:3.14.x-slim (3.14.10 live and in git 2026-11-02, Renovate #442 / 72308883 of 2026-10-28; any 3.14.N accepted) on 3 PLAN-lane consumers (ai/openclaw-probe CronJob, ai/mcpo initContainer runtime-setup, office/mealie-shopping-sync CronJob)"
-target: "python:3.15.2-slim (recorded index digest sha256:8c13a3f37a6a5b71498228e902c4b9f51c1f7900d49fabf71f9a650c6120e0d0, §2.1) on the same 3 consumers (one commit)"
+target: "python:3.15.2-slim, PINNED tag@digest by the index digest measured at run time (2026-11-06 measurement: sha256:e97b88e416c3c01eb427b21fd8cd3ebf006e6ee38afcfcc3cae1c54ee2ab0a75, tag re-pushed 2026-11-05T14:10Z; §2.1 re-measures, §3 pins) on the same 3 consumers (one commit)"
 update_type: minor                    # CPython feature release 3.14 -> 3.15 (NOT a patch); same Debian 13 trixie base
 risk: low                             # all three are stdlib-only scripts or a build-only init (§1.3); the 3.15 removals
                                       # touch none of their imports (§1.2); nothing forward-only; every consumer is a short
@@ -42,13 +42,18 @@ conflicts_with:
   # nextcloud-9.4.0 exists and it is superseded (folded into nextcloud-fleet-35.0.1). Its stated purpose (an
   # office-wide silence hiding a failing mealie-shopping-sync) is covered by the §6 Alertmanager note; no live plan
   # replaces it. The open nextcloud-mcp-* plans are blocked/window null and touch no shared silence.
-  # No kube-prometheus-stack plan is open (no kps-bump file in the plan dir, 2026-11-02); if one is filed, add it:
+  # No kube-prometheus-stack plan is open (re-checked 2026-11-06: no kps/kube-prometheus file in the plan dir); if one is filed, add it:
   # §4 reads Prometheus and §4.1 asserts Alertmanager POST 200, a same-night kps bump blinds both gates.
   - redis-fleet-8.10.3                  # reciprocity: restarts redis for office/ consumers (sun-attended:2026-11-29). Successor of
                                         # redis-fleet-8.10.2 (superseded concurrently 2026-10-27, same sweep); lists this plan back.
   - openclaw-2026.10.5                  # same Flux Kustomization ai/openclaw as cronjob/openclaw-probe; currently blocked
   - helm-drift-detection                # adds spec.driftDetection to every HR incl. helmrelease/mcpo (sat-attended:2026-11-07)
   - flux-oci-chart-sources              # rewrites HelmRelease chart sources (bjw-s app-template consumers incl. mcpo)
+  # Added 2026-11-06 after re-reading every non-terminal plan's frontmatter:
+  - python-fleet-3.15.2-alpine          # same interpreter move; depends_on THIS plan (soak ordering); never the same commit/window
+  - open-webui-0.13.0                   # ns ai; lists this plan back; rolling mcpo (open-webui's MCP proxy) and open-webui together confounds both gates
+  - home-assistant-2026.11.0            # §4.3's mealie-shopping-sync gate reads/writes the HA shopping list; an HA restart/upgrade in the same slot fails or blinds it
+  - longhorn-1.13.0                     # restarts deployment/mealie (office) as its attach probe; mealie-shopping-sync reads mealie, so §4.3 would read a restarting mealie
 exclusive: false
 autonomy_override: human-gated        # RESTRICTS only (carried from the 2026-10-23 review): a minor interpreter move is
                                       # an attended window item, not nightly - see §1.6.
@@ -84,21 +89,20 @@ premises:
     why: "Third member of the coverage group."
     run: kubectl get cronjob mealie-shopping-sync -n office -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}'
     expect_matches: '^python:3\.14\.[0-9]+-slim$'
-  # The registry facts (target still trixie; past the 48 h minor cooldown; no newer bugfix) are §2 gates
-  # 2.1-2.3, each printing a STOP token on failure - they need curl/python network reads, kept out of premises.
-review: ready-for-go@2026-11-02          # plan-reviewer 2026-11-02: ready-for-go, 0 blocking; nits applied (PY_SHA capture, pushed=0 + imageID digest gate, severity wording); HUMAN-GATED, fresh operator GO on this plan_id
-status: blocked   # 2026-11-06 NOW window: pre-check 2.1/2.2 STOP - 3.15.2-slim tag re-pushed 2026-11-05 (live index digest differs from the recorded one) and the 48h minor cooldown lapses ~2026-11-07T14:10Z. Needs digest/facts re-measure + re-review (section 1.7).
+  # Re-measured live 2026-11-06 12:0xZ: all three PASS on 3.14.10-slim (Recreate still the mcpo strategy).
+  # The registry facts (target still trixie; digest measured at run time; past the 48 h minor cooldown; no newer bugfix)
+  # are §2 gates 2.1-2.3, each printing a STOP token on failure - they need curl/python network reads, kept out of premises.
+review: ready-for-go@2026-11-06                            # REFRESHED 2026-11-06 (digest re-push, run-time digest pin in §2.1/§3, conflicts_with widened): the 2026-11-02
+                                        # ready-for-go no longer covers the edited §2.1/§3/§4 - needs a fresh plan-reviewer pass + operator GO (§1.7).
+status: vetted                           # 2026-11-06: refreshed in place after a NOW-window pre-check STOP (tag re-pushed 2026-11-05, §1.2); HUMAN-GATED
                                         # independent review (needs-fix) - baseline 3.14.10, re-pushed 3.15.2 digest, dead
                                         # conflicts_with ref, finding_refs; the earlier GO does NOT carry over (§1.7).
-window: null
-                                        # reserve), alone in the slot (re-grepped `^window:` 2026-11-02; every other plan naming
-                                        # 2026-11-14 does so in prose with window null or superseded). Cooldown on 3.15.2-slim:
-                                        # last_updated 2026-11-02T05:08:22Z -> lapses 2026-11-04T05:08Z, far before the slot.
+window: null                            # the window agent assigns it; operator asked for an attended NOW run 2026-11-06 (needs a fresh GO, §1.7)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
   - docs/sops/verification-contents-not-shape.md
-generated: "2026-10-27"                 # revised 2026-11-02 (review needs-fix); frontmatter keys unchanged
+generated: "2026-10-27"                 # revised 2026-11-02 (review needs-fix); refreshed in place 2026-11-06 (digest re-push); frontmatter keys unchanged
 ---
 
 # python-fleet-3.15.2 - python:3.14.x-slim -> 3.15.2-slim on openclaw-probe, mcpo (init), mealie-shopping-sync
@@ -190,39 +194,43 @@ defaults. The entries that touch these consumers' code paths:
   is the gate**: if pip's TLS broke, the init would exit non-zero.
 - The other security fixes (`http.cookiejar`, `tarfile.tar_filter`) are in modules none of the scripts import.
   pip uses tarfile only for sdists, and `uv` ships as a `py3-none` wheel.
+- **Release-notes re-read 2026-11-06** (changelog "Python 3.15.2 final", dated 2026-10-25; the page is long and was read for the Security, Build and Library
+  parts only - the C-API tail was truncated): bugfix-only; no API removals, no changed defaults, nothing touching `urllib.request`, `json`, `time`, `datetime`, `os`, `sys`
+  as used by the three scripts. Verdict: no breaking change versus these consumers. This is a read of upstream notes, not a run of the scripts on 3.15 (§4 is that proof).
 - gh-106045 (venv path discovery) does not apply, because the init uses no venv. The asyncio, zstd,
   free-threaded and REPL fixes also do not apply.
 
-**Image facts (RE-MEASURED 2026-11-02 against the Docker Hub API and Trivy; the 2026-10-27 values are superseded):**
+**Image facts (RE-MEASURED 2026-11-06 ~12:00Z against Docker Hub API AND the registry-1.docker.io manifest HEAD; earlier values are superseded):**
 
-- **The tag was re-pushed after this plan was first written.** On 2026-10-27 `3.15.2-slim` pointed at index digest
-  `sha256:197f6622a70b...` (amd64 `7ce16513bf93...`). Docker hub now shows the amd64 platform manifest re-pushed
-  2026-10-28T05:06Z and the index re-pushed 2026-11-02T05:08Z (a `riscv64` entry was added). The Trivy / Debian /
-  pip facts the first draft quoted were measured on the OLD digest and are re-done below.
-- `3.15.2-slim` digest == `3.15.2-slim-trixie` digest ==
-  `sha256:8c13a3f37a6a5b71498228e902c4b9f51c1f7900d49fabf71f9a650c6120e0d0` (**the recorded digest, `REC` in §2.1**)
-- amd64 manifest: `sha256:3053ea19f29305df68292b41291d621e0cbc9c1c826822c631713891ea0b64e9`
-- `last_updated`: `2026-11-02T05:08:22Z` -> the 48 h minor cooldown (§2.2) lapses **2026-11-04T05:08Z**. (The amd64
-  content itself has been stable since 2026-10-28T05:06Z, but the gate and the auto-updater read `last_updated`,
-  so this plan follows the tag.) Any further re-push restarts the clock again.
-- `3.15.3-slim`: HTTP 404 (re-measured 2026-11-02), so 3.15.2 is newest.
-- Trivy 0.76.1 (mise pin) on the new digest reports Debian **13.7**, the same base as `3.14.10-slim`
-  (digest `sha256:3cabfd7d7aaf...`, scanned side by side: identical OS-package and lang-package result). So the
-  nodesource `nodistro` apt flow is unchanged.
-- pip **26.2.2** is still bundled at `/usr/local/lib/python3.15/site-packages` (Trivy package list on the new digest).
+- **The tag was re-pushed AGAIN.** History of `3.15.2-slim`: 2026-10-27 index `sha256:197f6622a70b...`; 2026-11-02 index `sha256:8c13a3f37a6a...`;
+  **2026-11-05T14:10:33Z index `sha256:e97b88e416c3c01eb427b21fd8cd3ebf006e6ee38afcfcc3cae1c54ee2ab0a75`** (the current one; Docker Hub and a registry-1 HEAD with the OCI index Accept
+  header agree). On 2026-11-05 the amd64/arm/386/s390x platform manifests were rebuilt at ~11:07Z and ppc64le at 14:06Z (riscv64 untouched since 11-02), i.e. a Debian-base
+  refresh republished under the same tag. The `3.14.10-slim` tag was re-pushed the same day (index `sha256:af8a5aa14780...`, 2026-11-05T14:09Z) - the LIVE 3.14.10 pods
+  run the older digest; irrelevant to this plan except that §2.0 is tag-based, not digest-based.
+- `3.15.2-slim` digest == `3.15.2-slim-trixie` digest == `sha256:e97b88e416c3c01eb427b21fd8cd3ebf006e6ee38afcfcc3cae1c54ee2ab0a75` (**the 2026-11-06 measurement; it is a
+  snapshot, not an authority - §2.1 re-measures it and §3 pins whatever is measured then**).
+- amd64 manifest (the cluster nodes are amd64): `sha256:fd2aef5e0d8438208de9fe154ab5b331a2428fc0c9838d41611e611fd7a80d85`, pushed 2026-11-05T11:06:58Z.
+- `last_updated` `2026-11-05T14:10:33Z` -> the 48 h minor cooldown (§2.2) lapses **2026-11-07T14:10Z**. At measurement time (2026-11-06 12:00Z) the tag was ~22 h old.
+  **Re-push cadence is the risk:** three re-pushes in 10 days. A tag-only pin would let the next re-push change what runs on the next pod start with no git change, so
+  §3 now pins `tag@digest`, taking the digest from a measurement made immediately before the edit (§2.1/§3.0). If the tag is re-pushed between the §2.1 measurement and the
+  edit, §3.0 prints STOP and the plan restarts from §2.1.
+- `3.15.3-slim`: HTTP 404 (re-measured 2026-11-06), and docs.python.org/3.15 changelog has no 3.15.3 section ("Python next" only), so 3.15.2 is newest.
+- **Facts carried from 2026-11-02 and NOT re-measured on the new digest** (Trivy 0.76.1 result "same as 3.14.10-slim, Debian 13.7", bundled pip 26.2.2): the
+  base was refreshed on 2026-11-05, so treat them as stale. They gated nothing (the run-time gates in §4 do); re-run `trivy image` on the pinned digest in-window if the
+  reviewer wants a fresh number. Counts stay on the DB record regardless.
 
 ### 1.3 Evidence gathered (dry tests)
 
-- **Security side:** a Trivy 0.76.1 scan of the CURRENT `python:3.15.2-slim` digest `8c13a3f3...` (2026-11-02) shows
-  the same result as `python:3.14.10-slim` scanned in the same run, so taking the minor brings **no security gain**
+- **Security side:** a Trivy 0.76.1 scan of `python:3.15.2-slim` on the then-current digest `8c13a3f3...` (2026-11-02, superseded; not re-run on the 2026-11-05 digest) showed
+  the same result as `python:3.14.10-slim` scanned in the same run, so taking the minor brought **no security gain**
   for the image scan. Counts and detail stay on the DB record (`F-2abb920e`, the AR-029 row for 3.14.10-slim),
   not here (docs/sops/vulnerability-disclosure.md).
 - **Script compatibility:** the 3.15.0 plan's dry-compile of both scripts was under CPython 3.15.0b2 with
   `-W error`, plus execution of every stdlib call they make. It still covers the API surface, because 3.15.1
   and 3.15.2 are bugfix-only. It was not re-run against a final build, because uv on macOS still lacks one.
   The in-cluster gates in §4 are the proof.
-- **sed dry test (2026-11-02, BSD sed on macOS):** run on scratch copies of the live 3.14.10 files with the widened
-  `3\.14\.[0-9]*` patterns, the edits change exactly these lines and nothing else (§3).
+- **sed dry test (2026-11-06, BSD sed on macOS):** run on scratch copies of the live 3.14.10 files with the widened
+  `3\.14\.[0-9]*` patterns and the `@${DIG}` suffix, the edits change exactly these lines and nothing else (§3).
 
 ### 1.4 History and baseline
 
@@ -280,13 +288,18 @@ linked to this plan; the current image row is F-2abb920e (AR-029 accepted).
 
 ### 1.6 Slot: attended Saturday, not nightly
 
+**Refreshed 2026-11-06:** the operator asked to run this in an attended NOW window instead of waiting for the slot below. That is a
+window-agent / operator decision; this plan stays `window: null`. The 48 h minor cooldown (§2.2) is the only gate that a NOW run cannot
+pass on its own: it lapses 2026-11-07T14:10Z, so a NOW run is valid only if the operator's GO text explicitly waives it (record it in the window
+log). Every other gate is unchanged. The original suggestion follows.
+
 The suggested slot is **`sat-attended:2026-11-14`**: 35 min of the **70 schedulable minutes** (90 min window minus
 the 20 min Step 0 reserve; `runbooks/maintenance-windows.yaml`), alone in the slot - re-grepped
 `^window:` across `runbooks/maintenance/plans/` on 2026-11-02, no other plan holds it (the tube-archivist plans
 mention 11-14 only in prose to say why they avoid it - 35 + 65 and 35 + 60 both exceed 70 - and
 `redis-fleet-8.10.3` names it as the reciprocal `conflicts_with` entry). The cooldown
-(§1.2, §2.2) lapses 2026-11-04T05:08Z, ten days before the slot, unless the tag is re-pushed again; §2.1/§2.2
-catch that on the day.
+(§1.2, §2.2) now lapses 2026-11-07T14:10Z (the tag was re-pushed again 2026-11-05T14:10Z), seven days before the slot, unless it is
+re-pushed once more; §2.1/§2.2 catch that on the day.
 
 Not `nightly`: the §4 gates need a human to read the openclaw-probe tick and the mcpo tool counts, and the
 03:30 slot overlaps Step 0 safe-update churn. No reboot is needed.
@@ -295,6 +308,10 @@ Not `nightly`: the §4 gates need a human to read the openclaw-probe tick and th
 been re-pushed once (§1.2) - which is why §2.1 pins the digest.
 
 ### 1.7 Approval status: the earlier GO does not carry over
+
+**Update 2026-11-06:** the 2026-11-02 `ready-for-go` review no longer covers this file (frontmatter `review: null`): §2.1 and §3 changed from "compare against a recorded
+digest" to "measure at run time and pin tag@digest", and §4 gates read the measured digest. It needs a fresh plan-reviewer pass. The operator asked on 2026-11-06 to execute
+it NOW after that review; the GO must be a fresh `home-operation decide` on `python-fleet-3.15.2` and must state whether it waives the §2.2 cooldown for a NOW run.
 
 The operator GO recorded for `python-fleet-3.15.0` (target `python:3.15.1-slim`, review
 `ready-for-go@2026-10-25`) does **not** apply to this plan. That plan is `superseded`; its target tag no longer
@@ -323,27 +340,33 @@ PRE=$(grep -h -o -E '3\.14\.[0-9]+-slim$' kubernetes/apps/ai/openclaw/app/opencl
 #   Measured 2026-11-02 on the live files, run under bash (real /usr/bin/grep) AND zsh (grep shell function): ok 3 PRE=3.14.10-slim,
 #   (The 2026-10-27 draft's `[89]` form read "STOP baseline-moved N=0" on these same files.)
 
-# 2.1 target still Debian trixie AND still the digest this plan was measured on (REC, recorded 2026-11-02).
-#     Prints "ok-trixie-digest-matches sha256:..." => proceed.
-#     Prints "STOP-DIGEST-CHANGED sha256:<new>"    => the tag was RE-PUSHED since the plan was measured (it already was
-#       once, 2026-10-27 -> 2026-11-02): STOP; re-run 2.2 (cooldown restarts), re-run the §1.2 Trivy / Debian / pip
-#       facts on the new digest, put the new digest into REC here and in §1.2, and have the plan re-reviewed.
-#     Prints "STOP-NOT-TRIXIE ..." if slim and slim-trixie diverge (slim moved to a newer Debian).
-#     Equality of slim vs slim-trixie alone cannot catch a re-push (both tags move together) - hence the REC compare.
-#     Measured 2026-11-02: ok-trixie-digest-matches sha256:8c13a3f37a6a5b71498228e902c4b9f51c1f7900d49fabf71f9a650c6120e0d0
-#     Known-bad control (REC set to the superseded 2026-10-27 digest sha256:197f6622a70b...): prints STOP-DIGEST-CHANGED.
-REC=sha256:8c13a3f37a6a5b71498228e902c4b9f51c1f7900d49fabf71f9a650c6120e0d0
-REC=$REC python3 -c "import json,os,urllib.request as u;g=lambda t: json.load(u.urlopen('https://hub.docker.com/v2/repositories/library/python/tags/'+t,timeout=20))['digest'];a=g('3.15.2-slim');b=g('3.15.2-slim-trixie');r=os.environ['REC'];print('STOP-NOT-TRIXIE' if a!=b else ('ok-trixie-digest-matches' if a==r else 'STOP-DIGEST-CHANGED'),a)"
+# 2.1 MEASURE the digest to pin (run-time measurement; the plan carries no authoritative digest).
+#     The tag has been re-pushed three times (10-27, 11-02, 11-05T14:10Z), so the digest is measured HERE and again at §3.0 immediately
+#     before the edit; the edit pins whatever §3.0 measures. Do not paste a digest from this document.
+#     Prints "ok-trixie sha256:<64hex> pushed=<UTC> age_h=<n>" => record DIG=<that digest> (export it; shell vars do not survive separate calls).
+#     Prints "STOP-NOT-TRIXIE ..."  if slim and slim-trixie diverge (slim moved to a newer Debian).
+#     Prints "STOP-BAD-DIGEST ..."  if the API returned no sha256 digest (empty/odd reply is a STOP, never a pass).
+#     Prints "STOP-FRESH-PUSH ..."  if the tag was pushed less than 3 h ago: the maintainers often republish platform manifests in waves
+#       (11-05 saw 11:07Z then 14:06-14:10Z); wait for the wave to finish and re-run. (3 h is a judgement threshold, not a registry rule.)
+#     2026-11-06 12:0xZ measurement: ok-trixie sha256:e97b88e416c3c01eb427b21fd8cd3ebf006e6ee38afcfcc3cae1c54ee2ab0a75 pushed=2026-11-05T14:10:33Z age_h=21.9
+#     (cross-checked with a registry-1.docker.io manifest HEAD: same digest). Known-bad control: 3.15.2-slim vs a deliberately wrong second tag
+#     (3.15.1-slim-trixie) prints STOP-NOT-TRIXIE.
+python3 -c "import json,re,urllib.request as u,datetime as d
+g=lambda t: json.load(u.urlopen('https://hub.docker.com/v2/repositories/library/python/tags/'+t,timeout=20))
+a=g('3.15.2-slim');b=g('3.15.2-slim-trixie')
+x=a.get('digest') or ''
+age=(d.datetime.now(d.timezone.utc)-d.datetime.fromisoformat(a['last_updated'].replace('Z','+00:00'))).total_seconds()/3600
+print('STOP-BAD-DIGEST',repr(x)) if not re.fullmatch(r'sha256:[0-9a-f]{64}',x) else print('STOP-NOT-TRIXIE',x,b.get('digest')) if x!=b.get('digest') else print('STOP-FRESH-PUSH',a['last_updated'],round(age,1)) if age<3 else print('ok-trixie',x,'pushed='+a['last_updated'],'age_h=%.1f'%age)"
 
 # 2.2 past the 48 h MINOR cooldown (policy minimum_release_age_hours). Prints AGED; YOUNG => STOP.
-#     Measured 2026-11-02: last_updated 2026-11-02T05:08:22Z -> YOUNG until 2026-11-04T05:08Z (by design today;
-#     the 2026-11-14 slot is far past it unless the tag is re-pushed again - `last_updated` moved from
-#     2026-10-27T02:15Z when the index was re-pushed, which is why this gate reads it live, not from the plan).
+#     Measured 2026-11-06 12:0xZ: last_updated 2026-11-05T14:10:33Z -> YOUNG until 2026-11-07T14:10Z. For an operator-approved NOW run, YOUNG is a
+#     STOP unless the operator's GO text explicitly waives the 48 h cooldown (record the quote in the window log); then proceed, with §2.1's
+#     digest pin as the compensating control. It is read live because `last_updated` moved on every re-push (10-27, 11-02, 11-05).
 python3 -c "import json,urllib.request as u,datetime as d;t=json.load(u.urlopen('https://hub.docker.com/v2/repositories/library/python/tags/3.15.2-slim'))['last_updated'];a=(d.datetime.now(d.timezone.utc)-d.datetime.fromisoformat(t.replace('Z','+00:00'))).total_seconds()/3600;print('AGED' if a>=48 else 'YOUNG')"
 
 # 2.3 no 3.15.3 yet? (if 3.15.3-slim exists, STOP and retarget - same carry-forward as 3.15.1 -> 3.15.2).
 #     ABSENCE gate: only HTTP 404 counts as absent; any other failure prints FETCH_FAILED (also a STOP).
-#     Measured 2026-11-02: 3.15.3-slim -> HTTP 404 (ok-no-3.15.3). KNOWN-BAD CONTROL: substitute 3.15.2-slim
+#     Measured 2026-11-02 and 2026-11-06: 3.15.3-slim -> HTTP 404 (ok-no-3.15.3). KNOWN-BAD CONTROL: substitute 3.15.2-slim
 #     (exists) -> STOP-...-exists-retarget; the same form was shown on 2026-10-25 to print FETCH_FAILED URLError
 #     with https_proxy=http://127.0.0.1:9.
 python3 -c "import urllib.request as u,urllib.error as e
@@ -356,8 +379,8 @@ flux get kustomizations -n ai openclaw
 flux get kustomizations -n ai mcpo
 flux get kustomizations -n office mealie
 flux get helmreleases -n ai mcpo                                         # Ready True
-#   Re-checked 2026-11-02: kustomizations ai/openclaw, ai/mcpo, office/mealie all READY True at
-#   refs/heads/main@sha1:4fee010d; helmrelease ai/mcpo READY True (app-template 5.3.0). A False/Unknown here is a STOP.
+#   Last full check 2026-11-02: kustomizations ai/openclaw, ai/mcpo, office/mealie READY True; helmrelease ai/mcpo READY True
+#   (app-template 5.3.0). Not re-run on 2026-11-06 (the pre-check run that STOPped never reached it). A False/Unknown here is a STOP.
 
 # Baseline: last runs of both CronJobs succeeded (re-record in-window)
 kubectl -n ai get cronjob openclaw-probe -o jsonpath='{.status.lastSuccessfulTime} {.status.lastScheduleTime}{"\n"}'
@@ -383,7 +406,7 @@ kill $PF 2>/dev/null
 STOP in any of these cases:
 
 - any premise fails;
-- 2.0-2.3 print any `STOP...` token (`STOP baseline-moved`, `STOP-DIGEST-CHANGED`, `STOP-NOT-TRIXIE`, `STOP-3.15.3-exists-retarget`), `YOUNG` or `FETCH_FAILED`;
+- 2.0-2.3 print any `STOP...` token (`STOP baseline-moved`, `STOP-BAD-DIGEST`, `STOP-FRESH-PUSH`, `STOP-NOT-TRIXIE`, `STOP-3.15.3-exists-retarget`), `YOUNG` (unless the GO waives the cooldown, §2.2) or `FETCH_FAILED`;
 - any Flux object is not Ready;
 - a baseline server is non-200.
 
@@ -396,29 +419,47 @@ packages on every start.
 cd /Users/mu/code/cberg-home-nextgen
 git pull --rebase
 
-# 3.1 the two CronJobs (BSD sed; dry-tested 2026-11-02 on scratch copies of the live 3.14.10 files; any 3.14.N matches)
-sed -i '' 's|image: python:3\.14\.[0-9]*-slim$|image: python:3.15.2-slim|' \
-  kubernetes/apps/ai/openclaw/app/openclaw-probe.yaml \
-  kubernetes/apps/office/mealie/app/shopping-sync-cronjob.yaml
+# 3.0 RE-MEASURE the digest NOW (same call as the edit below; shell vars do not survive calls) and require it to equal the §2.1 value.
+#     Export the §2.1 value first:  export DIG_21=sha256:<the digest §2.1 printed>
+#     Prints "DIG=sha256:..." and continues, or "STOP-DIGEST-MOVED-SINCE-2.1 ..." (tag re-pushed between §2.1 and now => restart from §2.1).
+DIG=$(python3 -c "import json,re,urllib.request as u;x=json.load(u.urlopen('https://hub.docker.com/v2/repositories/library/python/tags/3.15.2-slim',timeout=20)).get('digest') or '';print(x if re.fullmatch(r'sha256:[0-9a-f]{64}',x) else 'BAD')")
+if [ "$DIG" != BAD ] && [ "$DIG" = "$DIG_21" ]; then
+  echo "DIG=$DIG"
 
-# 3.2 the mcpo initContainer tag (the app container tag git-44ce6d0 is NOT touched; it has no '-slim')
-sed -i '' 's|^\([[:space:]]*tag:[[:space:]]*\)3\.14\.[0-9]*-slim$|\13.15.2-slim|' \
-  kubernetes/apps/ai/mcpo/app/helmrelease.yaml
+  # 3.1 the two CronJobs (BSD sed; dry-tested 2026-11-06 on scratch copies of the live 3.14.10 files; any 3.14.N matches).
+  #     Pins python:3.15.2-slim@<index digest measured in 3.0>. Double-quoted so ${DIG} expands; the anchor $ is escaped.
+  sed -i '' "s|image: python:3\.14\.[0-9]*-slim\$|image: python:3.15.2-slim@${DIG}|" \
+    kubernetes/apps/ai/openclaw/app/openclaw-probe.yaml \
+    kubernetes/apps/office/mealie/app/shopping-sync-cronjob.yaml
+
+  # 3.2 the mcpo initContainer tag (the app container tag git-44ce6d0 is NOT touched; it has no '-slim'). Same pin: tag: 3.15.2-slim@<digest>
+  #     (the repo already uses `tag: X@sha256:...` in app-template values, e.g. databases/phpmyadmin, databases/memgraph).
+  sed -i '' "s|^\([[:space:]]*tag:[[:space:]]*\)3\.14\.[0-9]*-slim\$|\13.15.2-slim@${DIG}|" \
+    kubernetes/apps/ai/mcpo/app/helmrelease.yaml
+
+  # pin landed in all three? each line must read :1
+  grep -c "3.15.2-slim@$DIG" kubernetes/apps/ai/openclaw/app/openclaw-probe.yaml kubernetes/apps/office/mealie/app/shopping-sync-cronjob.yaml kubernetes/apps/ai/mcpo/app/helmrelease.yaml
+else
+  echo "STOP-DIGEST-MOVED-SINCE-2.1 now=$DIG at-2.1=${DIG_21:-unset}   (tag re-pushed between 2.1 and now, or DIG_21 not exported: do NOT edit; restart from 2.1)"
+fi
+#   If STOP printed, nothing was edited; stop here. Otherwise the three grep counts must each be :1 (a :0 means a sed did not match:
+#   STOP and `git checkout -- <the three files>`).
 
 git diff --stat -- kubernetes/apps/ai/openclaw/app/openclaw-probe.yaml \
   kubernetes/apps/office/mealie/app/shopping-sync-cronjob.yaml \
   kubernetes/apps/ai/mcpo/app/helmrelease.yaml      # expect exactly 3 files, 3 insertions, 3 deletions
 ```
 
-Dry-test result (scratch copies, 2026-11-02, BSD sed; `diff -r` of the three scratch files against the originals
-shows exactly 6 changed lines, 3 each side). Each of the three files differs from the live 3.14.10 original
-in exactly this one line:
+Dry-test result (scratch copies, 2026-11-06, BSD sed, DIG set to the 2026-11-06 measurement; `diff` of each scratch file against the
+original shows exactly one changed line per file, 6 lines total). Each of the three files differs from the live 3.14.10 original in exactly this one line:
 
 ```
-openclaw-probe.yaml        95c95  <  image: python:3.14.10-slim  >  image: python:3.15.2-slim
-shopping-sync-cronjob.yaml 48c48  <  image: python:3.14.10-slim  >  image: python:3.15.2-slim
-helmrelease.yaml (mcpo)    47c47  <  tag: 3.14.10-slim           >  tag: 3.15.2-slim
+openclaw-probe.yaml        95c95  <  image: python:3.14.10-slim  >  image: python:3.15.2-slim@sha256:e97b88e4...ab0a75
+shopping-sync-cronjob.yaml 48c48  <  image: python:3.14.10-slim  >  image: python:3.15.2-slim@sha256:e97b88e4...ab0a75
+helmrelease.yaml (mcpo)    47c47  <  tag: 3.14.10-slim           >  tag: 3.15.2-slim@sha256:e97b88e4...ab0a75
 ```
+
+The in-block `grep -c` prints `:1` for each file when the pin landed.
 
 Afterwards, `shopping-sync-cronjob.yaml` still contains `3.14.7-slim` once, in a comment ("already runs
 elsewhere"). That is expected: leave it.
@@ -427,7 +468,7 @@ elsewhere"). That is expected: leave it.
 # 3.3 write the message file FIRST, then commit ONLY these paths (shared worktree) and verify before pushing
 MSG=$(mktemp /tmp/msg-python-fleet-3152.XXXXXX)   # unique file (shared worktree)
 cat > "$MSG" <<'EOF'
-chore(deps): python 3.14.x-slim -> 3.15.2-slim on openclaw-probe, mcpo init, mealie-shopping-sync
+chore(deps): python 3.14.x-slim -> 3.15.2-slim (digest-pinned) on openclaw-probe, mcpo init, mealie-shopping-sync
 
 Plan: runbooks/maintenance/plans/python-fleet-3.15.2.md (security_ref F-2abb920e)
 EOF
@@ -441,6 +482,7 @@ git log -1 --format=%s          # must be the subject above; amend before push i
 export PY_SHA=$(git rev-parse HEAD)   # the commit section 5 reverts
 git push
 export PUSH_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+# §4 gates need the pinned digest too: export DIG=<the digest §3.0 printed>  (re-derive: `git show HEAD | grep -o 'sha256:[0-9a-f]\{64\}' | sort -u`; must print exactly one line)
 ```
 
 Flux applies on the push webhook. Do not reconcile manually (SOP default). If nothing has applied after 10
@@ -456,9 +498,9 @@ it from the environment.
 **4.0 Applied (floor).** Each live spec carries the new tag:
 
 ```bash
-kubectl -n ai get cronjob openclaw-probe -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}{"\n"}'          # python:3.15.2-slim
-kubectl -n office get cronjob mealie-shopping-sync -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}{"\n"}' # python:3.15.2-slim
-kubectl -n ai get deploy mcpo -o jsonpath='{.spec.template.spec.initContainers[0].image}{"\n"}'                                    # python:3.15.2-slim
+kubectl -n ai get cronjob openclaw-probe -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}{"\n"}'          # python:3.15.2-slim@$DIG
+kubectl -n office get cronjob mealie-shopping-sync -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}{"\n"}' # python:3.15.2-slim@$DIG
+kubectl -n ai get deploy mcpo -o jsonpath='{.spec.template.spec.initContainers[0].image}{"\n"}'                                    # python:3.15.2-slim@$DIG
 ```
 
 This gate fails, printing the old `3.14.x-slim`, if Flux has not applied yet. Wait or escalate. Do not judge
@@ -479,12 +521,12 @@ js=[j for j in json.load(sys.stdin)['items']
 js.sort(key=lambda j:j['metadata']['creationTimestamp']); print(js[-1]['metadata']['name'] if js else 'NONE')")
 echo "$J"                                                                   # NONE => tick not reached yet; wait
 kubectl -n ai get job "$J" -o jsonpath='{.status.succeeded}{"\n"}'           # 1
-kubectl -n ai get pod -l job-name="$J" -o jsonpath='{.items[0].status.containerStatuses[0].image}{"\n"}'   # python:3.15.2-slim
+kubectl -n ai get pod -l job-name="$J" -o jsonpath='{.items[0].status.containerStatuses[0].imageID}{"\n"}'   # must end @$DIG (the pre-change 3.14 pod shows a different digest)
 kubectl -n ai logs job/"$J" | grep -ciE '^local_tts_ok=true$'               # 1
 kubectl -n ai logs job/"$J" | grep -ciE '^alertmanager POST 200 '           # 2
 ```
 
-PASS = succeeded `1`, image `3.15.2-slim`, `local_tts_ok=True` count 1, `POST 200` count 2.
+PASS = succeeded `1`, imageID ends with `$DIG`, `local_tts_ok=True` count 1, `POST 200` count 2.
 
 Failure shapes:
 
@@ -500,7 +542,8 @@ before blaming the image.
 
 ```bash
 kubectl -n ai get pod -l app.kubernetes.io/name=mcpo -o jsonpath='{.items[0].status.startTime} {.items[0].status.initContainerStatuses[0].image} {.items[0].status.initContainerStatuses[0].state.terminated.exitCode}{"\n"}'
-# startTime AFTER PUSH_TS; image python:3.15.2-slim; exitCode 0
+# startTime AFTER PUSH_TS; image python:3.15.2-slim@$DIG (spec image; the status image field drops the digest, so also check imageID below); exitCode 0
+kubectl -n ai get pod -l app.kubernetes.io/name=mcpo -o jsonpath='{.items[0].status.initContainerStatuses[0].imageID}{"\n"}'   # must end @$DIG
 kubectl -n ai wait --for=condition=Ready pod -l app.kubernetes.io/name=mcpo --timeout=600s
 kubectl -n ai logs -l app.kubernetes.io/name=mcpo -c runtime-setup --tail=40 | grep -ciE 'Runtime setup complete'   # 1
 kubectl -n ai port-forward svc/mcpo 18000:8000 >/dev/null 2>&1 & PF=$!; sleep 3
@@ -539,7 +582,7 @@ js.sort(key=lambda j:j['metadata']['creationTimestamp']); print(js[-1]['metadata
 kubectl -n office get job "$J" -o jsonpath='{.status.succeeded}{"\n"}'                          # 1
 kubectl -n office logs job/"$J" | grep -ciE '^home assistant list holds [0-9]+ item'             # 1
 kubectl -n office logs job/"$J" | grep -iE '^done: pushed=0 already-synced=[1-9][0-9]* '   # one line
-kubectl -n office get pod -l job-name="$J" -o jsonpath='{.items[0].status.containerStatuses[0].imageID}{"\n"}'   # must end @sha256:8c13a3f37a6a5b71498228e902c4b9f51c1f7900d49fabf71f9a650c6120e0d0 (the pre-change pod shows a different digest)
+kubectl -n office get pod -l job-name="$J" -o jsonpath='{.items[0].status.containerStatuses[0].imageID}{"\n"}'   # must end @$DIG, the digest §3.0 measured (the pre-change 3.14 pod shows a different digest)
 ```
 
 PASS = succeeded `1`, the HA read line is present, `pushed=0` (a duplicate push would fail the regex) and `already-synced` is non-zero, and the pod imageID is the pinned index digest.

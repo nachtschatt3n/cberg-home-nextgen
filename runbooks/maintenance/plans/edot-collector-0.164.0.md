@@ -60,6 +60,7 @@ conflicts_with:                   # HARD slot exclusions — the only field wind
                                   # EXPORT into edot-collector.monitoring.svc:4317 and its §4.4 proves itself
                                   # via docs landing in ES THROUGH this collector. OPERATOR RULE 2026-10-23:
                                   # SEPARATE slot, otel-operator FIRST (suggested sat-attended:2026-11-07 SOLO).
+  - otel-operator-0.27.0          # live plan for the same HelmRelease (vetted, window null); keep out of this night (reviewer 2026-11-06)
   - otel-operator-0.25.1          # the plan 0.26.1 supersedes (still vetted at sat-attended:2026-11-07 until the
                                   # orchestrator retires it) — keep until then; same reason.
   - talos-linux-1.14.5            # draft, EXCLUSIVE, supersedes talos-linux-1.14.4: node drains evict this
@@ -95,13 +96,12 @@ finding_refs: [F-cb9182ca]        # version row "edot-collector: image otel/open
                                   # monitor: edot ES dropped metric points, 360/h since 2026-10-31) is NOT
                                   # answered here — it is a pre-existing baseline this plan must not be
                                   # blamed for or credited with (§2.4, §6).
-review: ready-for-go@2026-11-02   # plan-reviewer 2026-11-02: needs-fix (startup gate could never pass against the secured ES), fixed, delta re-review ready-for-go; AUTO-NIGHT pre-approval (SD-11 conditions met)
-                                  # RE-REVIEW owed before vetting. Never hand-write ready-for-go.
+review: ready-for-go@2026-11-06                      # refreshed in place 2026-11-06 (operator asked to execute in the attended NOW
+                                  # window); the 2026-11-02 ready-for-go stamp is removed - a plan-reviewer
+                                  # re-review stamps it. Never hand-write ready-for-go.
 status: vetted
-window: "nightly:2026-11-10"   # carried over from the superseded edot-collector-0.163.2; AUTO-NIGHT, no operator GO needed
-                                  # which held it as vetted; after otel-operator-0.26.1 on sat-attended:2026-11-07,
-                                  # separate slot). NOT stamped: status draft + review null until the re-review;
-                                  # the orchestrator / window agent assigns it.
+window: null                      # the executing window agent assigns it (supersedes the earlier
+                                  # nightly:2026-11-10 pre-approval).
 premises:
   # Re-checked at EXECUTION time. All four RUN on 2026-10-29 while writing this plan.
   - id: image-is-still-0.161.0
@@ -124,10 +124,14 @@ premises:
   - id: config-is-the-one-validated-on-0.164.0
     why: >-
       §1.3's evidence (the live otel.yml validates on the 0.164.0 binary) holds only for the config
-      committed in 42979120. If the configmap moved, that evidence is stale; §2.3 still runs either
-      way. Prints the newer short sha if it moved.
+      committed in 429791200b7e (2026-09-28, the last commit touching configmap.yaml). If the configmap
+      moved, that evidence is stale; §2.3 still runs either way. Prints the newer short sha if it moved.
+      CORRECTED 2026-11-06: the old expect_exact "42979120" (8 chars) failed because git now abbreviates
+      %h to 9 chars (`429791200`); same commit, abbreviation-length drift (`git rev-parse 429791200` =
+      429791200b7eabd0bf94586a60e41aa7de8eb347), NOT a config change. The regex is a prefix match so
+      further abbreviation growth cannot flip it, while a different sha still fails.
     run: git log -1 --format=%h -- kubernetes/apps/monitoring/edot-collector/app/configmap.yaml
-    expect_exact: "42979120"
+    expect_matches: "^42979120"
   - id: kmsg-heartbeat-daemonset-ready-on-all-nodes
     why: >-
       §4.4's per-node gate depends on one heartbeat pod per node writing a kmsg line when it starts.
@@ -141,7 +145,7 @@ sops_refs:
   - docs/sops/verification-contents-not-shape.md
   - docs/sops/longhorn-rwo-multi-attach.md           # why strategy Recreate is load-bearing
   - docs/troubleshooting/node-reboot-observability.md  # kmsg-sender stall + the url-toggle recovery in §5.3
-generated: "2026-11-02"            # amended after plan-reviewer needs-fix (2026-11-02); original 2026-10-29
+generated: "2026-11-06"            # refreshed in place 2026-11-06 (premise 3 corrected + re-measured); amended 2026-11-02 after plan-reviewer needs-fix; original 2026-10-29
 ---
 
 # edot-collector: image 0.161.0 → 0.164.0 (0.x release-line move, three minors)
@@ -295,6 +299,40 @@ The live 0.161.0 pod's log (14,188 lines, 25 days old) holds 0 `Everything is re
 which is why the baseline above comes from a fresh start and why the new pod's log must be captured
 immediately after the roll (§3 step 4). Not rehearsed in-cluster: a planner creates no cluster object.
 
+### 1.3c Re-measured 2026-11-06 (refresh in place, operator asked to execute in the attended NOW window)
+
+- **Premise 3 failure root cause: abbreviation drift, not a config change.** The premise printed
+  `429791200` (9 chars) against an expected 8-char `42979120`. `git rev-parse 429791200` =
+  `429791200b7eabd0bf94586a60e41aa7de8eb347` (2026-09-28, "clear 0.161.0 config deprecations"), the
+  same commit as before, and it predates the 10-29/11-02 validations. Premise now `expect_matches ^42979120`.
+- **Live config == git config.** `configmap/edot-collector-config` `otel.yml` (19,505 bytes, sha256
+  `063d47a846f28ea7f3ba87d868961555bf7059038721888eb71c488676b96a5d`) differs from the git
+  `configmap.yaml` value in exactly three lines (217/253/289): `$${env:ES_PASSWORD}` in git vs
+  `${env:ES_PASSWORD}` live, the Flux postBuild `$$` unescape. Nothing else.
+- **Validation on the real 0.164.0 binary** (official darwin_arm64 release, `otelcol-contrib version
+  0.164.0`) of that live file: positive `validate exit=0`, empty output; `num_consumers: notanint`
+  exit 1 (`failed to get config: cannot unmarshal`); `IsMapp` exit 1 (`processors::transform/strip-k8s-
+  managedfields: unable to parse OTTL statement ... undefined function "IsMapp"`). Startup rehearsal
+  against live ES (port-forward, dummy password): `ready_lines=1 fatal_lines=0 es_info_401=3
+  es_info_connected=0 es_info_other=0` STARTUP_OK; notanint start exit 1 STARTUP_FAIL; empty log
+  STARTUP_FAIL. Identical to 11-02. The in-cluster dry pod (§2.3(b)) was NOT run (a planner creates no
+  cluster object); the window agent runs it.
+- **Target:** Docker Hub `0.164.0` list digest still
+  `sha256:340c9ca6a36617084c6661bdc4f0fe92b7cda5a805d61673ec8db375fddc522b`; tags `0.164.1`, `0.164.2`,
+  `0.165.0` all HTTP 404; releases-repo latest is still `v0.164.0` (2026-10-26). No newer image exists.
+- **PR #324:** OPEN, MERGEABLE, title `... ( 0.161.0 → 0.164.0 )`, all 4 checks SUCCESS (last run
+  2026-10-27), branch `renovate/otel-opentelemetry-collector-contrib-0.x`.
+- **Live:** deployment image `:0.161.0`, pod `edot-collector-7dbd97b8d8-vzdzj` (start 2026-10-08),
+  imageID `...@sha256:fd328de2552466ad78385e1b1289c3f2402b1c45f265b252aab1955b42845ac1` (= §5.1
+  rollback digest, unchanged). ES `8.19.20 green`, kmsg-heartbeat 3/3, PVC `edot-collector-queue` Bound.
+  No commits in 3 days touching kube-prometheus-stack / otel-operator / elasticsearch / eck-operator /
+  edot-collector.
+- **Baselines now (15m):** log records 24,395; metric points 1,908,104 (MP_BASE for §4.1);
+  `docs.processed` success 829,360, no non-success outcome; `dropping cumulative temporality` 360/1h
+  (DROP_BASE unchanged, F-76387378 pre-existing).
+- **Release notes 0.161 -> 0.164 vs this config:** no new releases since the §1.2 reading (0.164.0 is
+  still the newest); §1.2 conclusions stand unchanged.
+
 ### 1.4 Why `risk: medium` despite a clean changelog
 
 Blast radius and failure mode: **one replica**, the only OTLP path into Elasticsearch for every
@@ -335,7 +373,7 @@ Run in order. Any failure stops the plan; do not go on to §3.
 cd /Users/mu/code/cberg-home-nextgen
 # 2.1 — premises (re-run mechanically)
 .venv/bin/python3 runbooks/plan-premises.py edot-collector-0.164.0
-# PASS: all four premises PASS.
+# PASS: all four premises PASS (premise 3 is a prefix regex since 2026-11-06 - see 1.3c).
 # If ONLY image-is-still-0.161.0 fails and prints ...:0.164.0 -> Step 0 already merged #324:
 # skip §3 steps 2-4, do §3 step 5 + all of §4 as post-hoc verification.
 
@@ -512,6 +550,32 @@ kubectl get --raw "${P}?query=sum(increase(otelcol_exporter_sent_log_records_tot
 kubectl get --raw "${P}?query=sum(increase(otelcol_exporter_sent_metric_points_total[15m]))"; echo
 kubectl get --raw "${P}?query=sum%20by%20(outcome)%20(increase(%7B__name__%3D%22otelcol.elasticsearch.docs.processed_total%22%7D%5B15m%5D))"; echo
 # Record the metric-points value as MP_BASE for §4.1.
+
+# 2.4b — PRE-ROLL ES CONTROL (content-based, run BEFORE §3; the pipeline fails silently).
+# Proves, in Elasticsearch itself, that documents are landing NOW through the 0.161.0 pod, so §4.3's
+# post-roll counts have a measured "before". `_count` over the last 10 minutes on both data streams plus
+# the per-node kmsg sources.
+ES_PW=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
+kubectl port-forward -n monitoring svc/elasticsearch-es-http 19211:9200 >/dev/null 2>&1 & PF=$!
+sleep 4
+for DS in logs-generic-default metrics-generic.otel-default; do
+  echo -n "PRE $DS last10m="
+  curl -k -s -u "elastic:$ES_PW" -H 'Content-Type: application/json' -X POST "https://localhost:19211/$DS/_count" \
+    -d '{"query":{"range":{"@timestamp":{"gte":"now-10m"}}}}' \
+    | python3 -c "import sys,json;c=json.load(sys.stdin).get('count');print(c,'PRE_OK' if isinstance(c,int) and c>0 else 'PRE_FAIL')"
+done
+curl -k -s -u "elastic:$ES_PW" -H 'Content-Type: application/json' "https://localhost:19211/logs-generic-default/_search" \
+  -d '{"size":0,"query":{"bool":{"filter":[{"term":{"attributes.log_source":"talos-kernel"}},{"range":{"@timestamp":{"gte":"now-1h"}}}]}},"aggs":{"ip":{"terms":{"field":"attributes.net.peer.ip","size":5}}}}' \
+  | python3 -c "import sys,json;b={x['key']:x['doc_count'] for x in json.load(sys.stdin)['aggregations']['ip']['buckets']};print('PRE kmsg 1h',b,'PRE_KMSG_OK' if all(b.get(n,0)>0 for n in ('192.168.55.11','192.168.55.12','192.168.55.13')) else 'PRE_KMSG_FAIL')"
+echo -n "PRE negative control (future window, MUST be 0): "
+curl -k -s -u "elastic:$ES_PW" -H 'Content-Type: application/json' -X POST "https://localhost:19211/logs-generic-default/_count" \
+  -d '{"query":{"range":{"@timestamp":{"gte":"now+1h"}}}}' | python3 -c "import sys,json;print(json.load(sys.stdin).get('count'))"
+kill $PF 2>/dev/null
+# PASS: both streams PRE_OK (count > 0) and PRE_KMSG_OK and the control prints 0. Record the counts.
+# FAILS AS: PRE_FAIL / count 0 / KeyError / 401 (ES unreachable or ingestion ALREADY dead) -> STOP, do not
+#   roll: a post-roll failure would be misattributed. The future-window control proves the range query
+#   discriminates (0 vs the positive counts). This is the "before" half; §4.3 is the "after" half and
+#   additionally requires docs newer than the new pod's Ready timestamp.
 
 # 2.5 — pre-state is clean
 kubectl get pods -n monitoring -l app=edot-collector -o wide
