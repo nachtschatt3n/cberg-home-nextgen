@@ -35,7 +35,7 @@ conflicts_with:
                                         # (its inventory pins the chart version this plan changes).
   - helm-drift-detection                # sat-attended:2026-11-28 - asserts Helm revisions identical across releases; this plan makes
                                         # open-webui revisions N+1 (and N+2 in §3.5).
-  - python-fleet-3.15.2                 # sat-attended:2026-11-14 - rolls ai/mcpo (open-webui's MCP proxy) in the same namespace; a mcpo
+  # 2026-11-06: removed python-fleet-3.15.2 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
                                         # restart during §4 confounds the tool-path checks.
   - openclaw-2026.10.5                  # blocked - namespace ai roll; listed so an unblock cannot co-schedule.
   - longhorn-1.13.0                     # sun-attended:2026-11-15 - open-webui-20g is the volume we copy and may restore from.

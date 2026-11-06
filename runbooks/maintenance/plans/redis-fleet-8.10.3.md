@@ -65,7 +65,7 @@ conflicts_with:
   - nextcloud-mcp-0.203.0               # blocked — every gate calls into Nextcloud; lists nextcloud-redis restart
   - nextcloud-mcp-0.204.0               # blocked — successor chain of 0.203.0, same
   - bitnamilegacy-exit-nextcloud-db     # blocked — quiesces Nextcloud; never stack a session-store restart on a DB cutover
-  - python-fleet-3.15.2                 # sat-attended:2026-11-14 — rolls ai/ + office/ app images that are redis consumers
+  # 2026-11-06: removed python-fleet-3.15.2 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
   - vaultwarden-1.37.4                  # vetted — office namespace, shared monitoring; both read Prometheus after a restart
   - openclaw-2026.10.5                  # blocked — namespace ai (leg 4 restarts the open-webui redis pod)
   # Platform serialisation (a roll of these confounds every reconnect gate in §4):

@@ -47,7 +47,7 @@ touches:
 depends_on: []
 conflicts_with:                        # ONLY this field is honoured by window-scheduler.py. Built from every open
                                        # plan's frontmatter on 2026-11-06.
-  - edot-collector-0.164.0             # nightly:2026-11-10. Daemon collectors export OTLP into
+  # 2026-11-06: removed edot-collector-0.164.0 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
                                        # edot-collector.monitoring.svc:4317 and §4.4 proves THIS plan by docs landing
                                        # in ES through edot; a same-night edot roll makes both ES gates unattributable.
   - helm-drift-detection               # writes spec.driftDetection into this same HelmRelease (sat-attended:2026-11-28)

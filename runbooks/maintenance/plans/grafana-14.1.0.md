@@ -38,7 +38,7 @@ conflicts_with:                   # ONLY this field is honoured by the scheduler
   - flux-oci-chart-sources        # rewrites the chart source of HelmReleases incl. grafana (it also rolls deployment/grafana)
   # REMOVED 2026-11-03 (plan retired cdf1cf53, chart live via 5aa609d5; dead ref) - otel-operator-0.26.1          # SOFT (attribution hygiene, no technical coupling found): both gate on ns monitoring
   - edot-collector-0.163.2        # signals; keep a failed gate attributable to ONE change. Neither plan reads Grafana.
-  - edot-collector-0.164.0        # (draft, added 2026-10-30; it already lists this plan)
+  # 2026-11-06: removed edot-collector-0.164.0 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
 exclusive: false
 security_ref: F-482f421e          # open warning "grafana/grafana:13.2.4-distroless ... newer upstream tag available". Detail stays
                                   # in the DB. 13.3.0 is the newest upstream tag, so this bump is the available remediation.

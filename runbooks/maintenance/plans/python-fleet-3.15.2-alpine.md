@@ -17,14 +17,14 @@ touches:
     - cronjob/crash-ghost-reaper          # kube-system - Flux Kustomization kube-system/crash-ghost-reaper; the node-loss ghost-pod reaper (DRY_RUN=false, deletes pods)
     - cronjob/elasticsearch-obs-recovery  # monitoring - Flux Kustomization monitoring/elasticsearch; only this CronJob changes, statefulset elasticsearch-es-default NOT rolled
   shared: [monitoring]                    # elasticsearch-obs-recovery is the ES self-heal job and icloud-sync-probe pushes to the Pushgateway; both are the window's instruments (§4 reads them). No gateway, DNS, CNI, storage or Authentik surface.
-depends_on: [python-fleet-3.15.2]         # soak ordering: the slim canary (openclaw-probe, mcpo init, mealie sync) goes first (§1.4); soft, a failed canary STOPs this plan
+depends_on: []                            # 2026-11-06: python-fleet-3.15.2 (the slim canary: openclaw-probe, mcpo init, mealie sync) EXECUTED green in the NOW run and was retired; soak at least one nightly (from 2026-11-07) before running this plan (§1.4); a canary regression STOPs it
 conflicts_with:
   # Re-read every non-terminal plan frontmatter 2026-11-03.
-  - python-fleet-3.15.2                   # different slot, AFTER the canary (not a deadlock with depends_on); same interpreter move, same Flux commit stream; keep rollout cause singular (reciprocal entry is NOT in that plan: see §6)
+  # 2026-11-06: removed python-fleet-3.15.2 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
   - icloud-drive-fleet-2.3.0              # rolls the icloud-docker pods whose logs icloud-sync-probe reads; a roll mid-gate reads as a sync outage
   - talos-linux-1.14.5                    # node reboot: CronJob ticks missed, gates in §4 would read stale
   - grafana-14.1.0                        # reads Prometheus in monitoring, same instrument as §4.4; window noise
-  - edot-collector-0.164.0                # ES/otel ingestion restarts in monitoring blind the obs-recovery log read
+  # 2026-11-06: removed edot-collector-0.164.0 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
   - tube-archivist-elasticsearch-9.5.5    # ES-family plan in the same instrument family; serialize
 exclusive: false
 autonomy_override: human-gated            # RESTRICTS only: a minor interpreter move is an attended-window item (same call as python-fleet-3.15.2)

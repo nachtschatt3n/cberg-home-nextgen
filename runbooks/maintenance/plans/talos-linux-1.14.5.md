@@ -132,7 +132,7 @@ conflicts_with:                       # exclusive: true already keeps everything
   - multus-macvlan-foundation         # reference/unwindowed; talosctl apply-config on the nodes
   - flux-reconciler-impersonation     # same Flux surface (blocked)
   - edot-collector-0.163.2            # owns the Talos kernel-log path read at §4 (F-e8bb3113)
-  - edot-collector-0.164.0            # its successor draft; same reason
+  # 2026-11-06: removed edot-collector-0.164.0 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
   - otel-operator-0.25.1              # restarts the collectors that ship §4's monitoring signals
   # REMOVED 2026-11-03 (plan retired cdf1cf53, chart live via 5aa609d5; dead ref) - otel-operator-0.26.1              # its successor draft (names 1.14.2/1.14.4/1.14.5 back); same reason
   - flux-oci-chart-sources            # staged Flux source-controller/chart-source programme, moved to sun-attended:2026-12-13
