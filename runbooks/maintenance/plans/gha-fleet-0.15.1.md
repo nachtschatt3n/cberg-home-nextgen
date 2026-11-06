@@ -8,6 +8,15 @@ pr: 415                               # Renovate "update ...gha-runner-scale-set
                                       # lands ONE direct commit with all three files (SOP ci-runner §2c: lockstep, one commit) and
                                       # then closes both PRs as superseded (§3.5). Do NOT merge either PR on its own.
 kind: chart
+also_covers:   # added 2026-11-06 (sweep 471de4f9): coverage.py did not match the 7 ARC HelmReleases to this plan
+               # (component is the family name), so it re-dispatched planners for the-fleet/absenty/rainbow-rescue/build-controller
+  - gha-runner-scale-set-controller
+  - gha-runner-scale-set-build-controller
+  - the-ninth-banner-runners
+  - the-ninth-banner-browser-runners
+  - the-ninth-banner-build-runners
+  - absenty-build-runners
+  - rainbow-rescue-build-runners
 current: "0.15.0 (controller chart sha256:20a36921…, scale-set chart sha256:bdfdad17…; controller image ghcr.io/actions/gha-runner-scale-set-controller:0.15.0)"
 target: "0.15.1"                      # controller chart sha256:c2497a6dedaaa723322abfe9ea2f5a81b9b8fbb90b38e45d7835b6c7629a3aae,
                                       # scale-set chart sha256:2ae7e43db61047aa3c4182e73c8f58ace35e796fa07d41b64fb3c39e81e1f365

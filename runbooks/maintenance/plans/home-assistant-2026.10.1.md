@@ -40,7 +40,7 @@ conflicts_with:
   - flux-oci-chart-sources              # rewrites the HelmRelease chart source block
   - otel-operator-0.23.0                # never in the SAME slot (its failure mode would pollute the log/metric reads); NOT a depends_on, see above
   - edot-collector-0.162.0              # log shipper; section 4's error-log scan uses the HA API, but the collector roll drops pod logs in Elasticsearch
-  - teslamate-4.4.0                      # home-automation sibling feeding HA entities (tesla integrations in section 1.4)
+  # - teslamate-4.4.0  # DROPPED 2026-11-06: plan executed + retired (0d3b5c89e, landing 7072b3be3); was: home-automation sibling feeding HA entities (tesla integrations in section 1.4)
   - n8n-2.39.8                          # home-automation sibling with HA webhooks
   - n8n-chart-2.1.1
 exclusive: false

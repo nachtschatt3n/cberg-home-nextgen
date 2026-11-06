@@ -30,7 +30,7 @@ depends_on: []
 conflicts_with:                   # ONLY this field is honoured by the scheduler. Reasons, strongest first:
   - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af
   - talos-linux-1.14.4            # node roll evicts grafana mid-gate; also exclusive:true on sun-attended:2026-11-01
-  - teslamate-4.4.0               # HARD: every grafana start re-fetches the 11 TeslaMate dashboards from UNPINNED
+  # - teslamate-4.4.0  # DROPPED 2026-11-06: plan executed + retired (0d3b5c89e, landing 7072b3be3); was: HARD: every grafana start re-fetches the 11 TeslaMate dashboards from UNPINNED
                                   # teslamate master, and that plan's section 4.5 reads Grafana as its instrument while
                                   # the TeslaMate DB schema is mid-migration
   - longhorn-1.13.0               # grafana-config is a Longhorn volume; this plan snapshots/backs it up and may restore it

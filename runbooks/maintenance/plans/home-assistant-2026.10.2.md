@@ -33,7 +33,7 @@ conflicts_with:                         # every id below exists in runbooks/main
   - helm-drift-detection                # adds spec.driftDetection to this HelmRelease
   - flux-oci-chart-sources              # rewrites the HelmRelease chart source block
   - otbr-0.4.0                          # Thread border router in the same namespace feeding Matter/Thread entities; keep regressions attributable
-  - teslamate-4.4.0                      # home-automation sibling feeding HA entities
+  # - teslamate-4.4.0  # DROPPED 2026-11-06: plan executed + retired (0d3b5c89e, landing 7072b3be3); was: home-automation sibling feeding HA entities
   - n8n-chart-2.1.1                     # home-automation sibling with HA webhooks
 exclusive: false
 security_ref: F-4a4ebf8a               # fixable-critical finding on the 2026.10.1 image; detail stays in the DB (CLAUDE.md "Information Security")

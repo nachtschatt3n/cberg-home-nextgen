@@ -107,7 +107,7 @@ autonomy_override: human-gated        # RESTRICTS only. P0 executed. P1 is a ded
                                       # file cannot be one AUTO-NIGHT unit, so the scheduler
                                       # must not treat it as one.
 finding_refs: []
-review: ready-for-go@2026-09-28   # plan-reviewer: needs-fix (render-gate false-FAIL on self-growing
+review: ready-for-go@2026-11-06   # 2026-11-06 sweep 471de4f9 re-review: ready-for-go for P1 (warn) ONLY; all P1 gates re-proven fail-on-bad/pass-on-good live; nonblocking: stale counts (live 117 HR / 132 children), dead conflicts refs, P2/P3 gates need fail-closed wrapper. Prior: 2026-09-28   # plan-reviewer: needs-fix (render-gate false-FAIL on self-growing
                       # ConfigMap cluster-settings + 9 non-blocking) -> fixed -> READY-FOR-GO same day.
 status: vetted   # 2026-09-28 P1 RE-PLANNED (§1.5, §3.0.0): child patch is now JSON6902 op:add (proven to keep all
                       # 18 null leaves on the 7 null-bearing HRs), with pre-commit parent/render gates and a
