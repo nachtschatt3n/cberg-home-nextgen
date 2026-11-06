@@ -31,7 +31,7 @@ spec:
       reloader.stakater.com/auto: "true"
     image:
       repository: nextcloud
-      tag: 35.0.2@sha256:e0b1a2af52c82c07b7a0e8e59878bd8769e704447734d5d238a836982f51b9c8
+      tag: 35.0.2@sha256:d88929dc8386420b8963f86cabb667fdaf733eef9dcf8fc98e226801a32c023c
       pullPolicy: IfNotPresent
     replicaCount: 1
     nextcloud:
@@ -231,7 +231,7 @@ spec:
             name: nextcloud-openclaw-mail-app
       extraSidecarContainers:
         - name: worker
-          image: nextcloud:35.0.2@sha256:e0b1a2af52c82c07b7a0e8e59878bd8769e704447734d5d238a836982f51b9c8
+          image: nextcloud:35.0.2@sha256:d88929dc8386420b8963f86cabb667fdaf733eef9dcf8fc98e226801a32c023c
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 33
