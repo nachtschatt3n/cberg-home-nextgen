@@ -60,7 +60,7 @@ finding_refs:                         # queried 2026-11-06 with SWEEP_PG_DSN up 
   - F-c42da5d5                        # version: wazuh-indexer 4.14.9 -> 4.14.10
   - F-7044093c                        # version: wazuh-dashboard 4.14.9 -> 4.14.10
   - F-a138b984                        # version: wazuh-agent 4.14.9 -> 4.14.10
-                                      # NOT claimed: F-045b617d (AR-029, no upstream fix), AR-023 root/privileged rows.
+                                      # NOT claimed: F-045b617d, AR-023 rows (dispositions on the DB records).
 review: null
 status: draft
 window: null
