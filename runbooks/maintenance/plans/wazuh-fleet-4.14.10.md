@@ -61,8 +61,8 @@ finding_refs:                         # queried 2026-11-06 with SWEEP_PG_DSN up 
   - F-7044093c                        # version: wazuh-dashboard 4.14.9 -> 4.14.10
   - F-a138b984                        # version: wazuh-agent 4.14.9 -> 4.14.10
                                       # NOT claimed: F-045b617d, AR-023 rows (dispositions on the DB records).
-review: null
-status: draft
+review: ready-for-go@2026-11-06   # plan-reviewer 2026-11-06: premises 9/9; 2 blocking gate defects (4.5 presence gate, 4.4 baseline) fixed same day; reviewer stated ready-for-go after those
+status: vetted   # attended window only: risk medium is not preapproved
 window: null
 sops_refs:
   - docs/sops/application-update.md
@@ -177,8 +177,7 @@ collection depends on.
 Our agent `<localfile>` tails `/host/var/log/containers/*.log`. **Every one of
 those entries is a symlink** to `/var/log/pods/<ns>_<pod>_<uid>/<c>/0.log`. The
 symlink resolves through the agent's `/var/log` hostPath mount. This path
-produces the envoy-access-log rules (`1007xx`), about 186 of the last 6 h of
-alerts.
+produces the envoy-access-log rules (`1007xx`), 228 alerts in the last 24 h.
 
 PR #39649 replaces the plain `wfopen()` with `w_fopen_vetted_follow()`. The PR
 body says it walks the path one component at a time and accepts:
@@ -319,9 +318,10 @@ sed -i '' 's|image: wazuh/wazuh-indexer:4\.14\.9$|image: wazuh/wazuh-indexer:4.1
   kubernetes/apps/security/wazuh/app/wazuh-indexer-statefulset.yaml
 git diff kubernetes/apps/security/wazuh/app/wazuh-indexer-statefulset.yaml
 #   64c64  <  image: wazuh/wazuh-indexer:4.14.9   >  image: wazuh/wazuh-indexer:4.14.10
-printf 'fix(wazuh): indexer 4.14.9 -> 4.14.10 (plan wazuh-fleet-4.14.10, stage A/3, PR #491)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/wz-a.msg
+printf 'fix(wazuh): indexer 4.14.9 -> 4.14.10 (plan wazuh-fleet-4.14.10, stage A/3, PR #491)\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_012bXdxrZGGHNy5e4RnF6seD\n' > /tmp/wz-a.msg
 git commit --only kubernetes/apps/security/wazuh/app/wazuh-indexer-statefulset.yaml -F /tmp/wz-a.msg
 git log -1 --format=%s ; git show --stat HEAD | tail -3
+git pull --rebase --autostash
 git push
 SHA_A=$(git rev-parse HEAD)
 kubectl rollout status sts/wazuh-indexer -n security --timeout=10m
@@ -336,9 +336,10 @@ sed -i '' 's|image: wazuh/wazuh-manager:4\.14\.9$|image: wazuh/wazuh-manager:4.1
   kubernetes/apps/security/wazuh/app/wazuh-manager-statefulset.yaml
 git diff kubernetes/apps/security/wazuh/app/wazuh-manager-statefulset.yaml
 #   91c91  <  image: wazuh/wazuh-manager:4.14.9   >  image: wazuh/wazuh-manager:4.14.10
-printf 'fix(wazuh): manager 4.14.9 -> 4.14.10 (plan wazuh-fleet-4.14.10, stage B/3, PR #491)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/wz-b.msg
+printf 'fix(wazuh): manager 4.14.9 -> 4.14.10 (plan wazuh-fleet-4.14.10, stage B/3, PR #491)\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_012bXdxrZGGHNy5e4RnF6seD\n' > /tmp/wz-b.msg
 git commit --only kubernetes/apps/security/wazuh/app/wazuh-manager-statefulset.yaml -F /tmp/wz-b.msg
 git log -1 --format=%s ; git show --stat HEAD | tail -3
+git pull --rebase --autostash
 git push
 SHA_B=$(git rev-parse HEAD)
 kubectl rollout status sts/wazuh-manager-master -n security --timeout=10m
@@ -356,9 +357,10 @@ sed -i '' 's|image: wazuh/wazuh-agent:4\.14\.9$|image: wazuh/wazuh-agent:4.14.10
 git diff kubernetes/apps/security/wazuh/app/wazuh-dashboard-deployment.yaml kubernetes/apps/security/wazuh/app/wazuh-agents-daemonset.yaml
 #   19c19  <  image: wazuh/wazuh-dashboard:4.14.9  >  image: wazuh/wazuh-dashboard:4.14.10
 #   41c41  <  image: wazuh/wazuh-agent:4.14.9      >  image: wazuh/wazuh-agent:4.14.10
-printf 'fix(wazuh): dashboard + agent 4.14.9 -> 4.14.10 (plan wazuh-fleet-4.14.10, stage C/3, closes PR #491)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/wz-c.msg
+printf 'fix(wazuh): dashboard + agent 4.14.9 -> 4.14.10 (plan wazuh-fleet-4.14.10, stage C/3, closes PR #491)\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_012bXdxrZGGHNy5e4RnF6seD\n' > /tmp/wz-c.msg
 git commit --only kubernetes/apps/security/wazuh/app/wazuh-dashboard-deployment.yaml kubernetes/apps/security/wazuh/app/wazuh-agents-daemonset.yaml -F /tmp/wz-c.msg
 git log -1 --format=%s ; git show --stat HEAD | tail -4
+git pull --rebase --autostash
 git push
 SHA_C=$(git rev-parse HEAD)
 kubectl rollout status deploy/wazuh-dashboard -n security --timeout=10m
@@ -463,18 +465,19 @@ curl -s -k -u \"\$U\" -H 'Content-Type: application/json' 'https://wazuh-indexer
           \"ctr\":{\"filter\":{\"prefix\":{\"location\":\"/host/var/log/containers/\"}}}}}'" \
 | python3 -c "import sys,json; a=json.load(sys.stdin)['aggregations']; print('START', sorted(b['key'] for b in a['start']['a']['buckets'])); print('FALCO', a['falco']['doc_count']); print('CONTAINERLOG', a['ctr']['doc_count'])"
 ```
-PASS within 20 min of `T_C`:
+PASS within 30 min of `T_C`:
 - `START ['k8s-nuc14-01', 'k8s-nuc14-02', 'k8s-nuc14-03']`;
 - `FALCO` ≥ 1;
 - `CONTAINERLOG` ≥ 1.
 
-Baselines measured 2026-11-06 over 6 h: falco.log 176 alerts and container
-logs 186 alerts (about 30/h each). Zero of either in 20 min is about 10× below
-the floor. Rule 503 fires once per agent start, and its last occurrence was
+Baselines measured 2026-11-06 over 24 h: falco.log 679 alerts (about 28/h) and
+container logs 228 alerts (about 9.5/h, bursty, mostly envoy-external). Zero
+FALCO in 30 min is far below the floor. `CONTAINERLOG 0` alone is only a FAIL if
+§4.5 `PODLOG_FDS` is also 0; otherwise re-check after another 15 min. Rule 503 fires once per agent start, and its last occurrence was
 2026-10-16, the previous agent roll. A missing node name means that agent did
 not re-register, or its events never reached the indexer. `FALCO 0` means the
 falco.log feed or the `unifi-decoder` Falco rules (1004xx) are broken.
-`CONTAINERLOG 0` is the §1.3 regression.
+`CONTAINERLOG 0` together with `PODLOG_FDS` 0 is the §1.3 regression.
 CONTROL: alertname WazuhAgentDaemonSetNotReady — not firing 10 min after the
 DaemonSet rollout completes.
 
@@ -485,16 +488,20 @@ for p in $(kubectl get pods -n security -l app=wazuh-agent -o name); do
   echo "== $p"
   kubectl exec -n security "${p#pod/}" -- sh -c '/var/ossec/bin/wazuh-control info | grep WAZUH_VERSION;
     echo REJECT=$(grep -c "(1103)" /var/ossec/logs/ossec.log);
-    echo CTRFILES=$(grep -c "host/var/log/containers/" /var/ossec/logs/ossec.log)'
+    P=$(pidof wazuh-logcollector); echo PODLOG_FDS=$(ls -l /proc/$P/fd | grep -c "/var/log/pods/");
+    echo FALCO_FD=$(ls -l /proc/$P/fd | grep -c falco.log)'
 done
 ```
-PASS on each of the 3 pods: `WAZUH_VERSION="v4.14.10"`, `REJECT=0` and
-`CTRFILES` > 0. The agent's `ossec.log` is on the container overlay, so it
-starts empty at pod start and the count covers only the new version. FAIL
+PASS on each of the 3 pods: `WAZUH_VERSION="v4.14.10"`, `PODLOG_FDS` > 0,
+`FALCO_FD` = 1 and `REJECT=0`. PODLOG_FDS is the presence gate: logcollector holds
+an open descriptor per tailed container log (measured on 4.14.9, 2026-11-06:
+PODLOG_FDS=187, FALCO_FD=1), and vetting that refuses the symlinks leaves it
+at 0. Do not use a grep count of `host/var/log/containers/` lines: they are INFO
+events for NEW files only and read 0 on a quiet node. The agent's `ossec.log`
+is on the container overlay, so it starts empty at pod start. FAIL
 reads `REJECT=N` with lines like
 `(1103): Could not open file '/host/var/log/containers/...' due to [(1)-(Operation not permitted)]`.
-That is the new vetting refusing our symlinks, and §4.4 `CONTAINERLOG` will
-also read 0. Baseline on 4.14.9 (2026-11-06): `REJECT=0`.
+That is the new vetting refusing our symlinks, and PODLOG_FDS will read 0. Baseline on 4.14.9 (2026-11-06): `REJECT=0`, `PODLOG_FDS=187`, `FALCO_FD=1`.
 
 ### 4.6 Stage C: dashboard serves and reaches the indexer
 
@@ -579,9 +586,9 @@ backup are lost; the window agent must not run this unattended.
   `kube-prometheus-stack` plan is open on 2026-11-06. If one is added for the
   same night, it must be added to `conflicts_with` on both sides.
 - **Execution class.** `capability_change: false`, `rollback_class: git-revert`,
-  no reboot, and no SD-11 floor token in `touches.shared`. Once reviewed, it
-  is eligible for the unattended `nightly` window (55 ≤ 70 min schedulable),
-  except for §5.3, which always stops for the operator.
+  no reboot, and no SD-11 floor token in `touches.shared`. The derived class is
+  AUTO-NIGHT but NOT preapproved (risk medium), so run it in an attended window.
+  §5.3 always stops for the operator.
 - **Reciprocity owed.** `flux-oci-chart-sources` does not yet list this plan in
   its `conflicts_with`. The planner did not edit it (single-file rule), so the
   sweep or window agent must add the reciprocal entry.

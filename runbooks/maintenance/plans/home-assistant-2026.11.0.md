@@ -68,9 +68,9 @@ premises:
     run: >-
       kubectl get deploy mosquitto zigbee2mqtt -n home-automation -o jsonpath='{range .items[*]}{.metadata.name}={.status.readyReplicas} {end}'
     expect_exact: "mosquitto=1 zigbee2mqtt=1"
-status: draft
+status: vetted   # 2026-11-06 plan-reviewer needs-fix (1 blocking: 4.3 pattern control) -> reviewer's 3 corrections applied same day
 window: null
-review: null
+review: ready-for-go@2026-11-06   # plan-reviewer 2026-11-06: premises 5/5, claims verified vs upstream source + live pod; sole blocking item (4.3 absence-gate pattern control) fixed, plus 2 nonblocking edits; reviewer stated ready-for-go after that fix
 sops_refs: [docs/sops/home-assistant-updates.md, docs/sops/application-update.md, docs/sops/longhorn-rwo-multi-attach.md, docs/sops/longhorn.md, docs/sops/backup.md, docs/sops/verification-contents-not-shape.md, docs/sops/home-assistant-certifi-ca-trust.md]
 backup_gate: "Three restore sources, the first two are gates. (1) A pre-change tarball of /config/.storage + .HA_VERSION + custom_components/hacs taken with kubectl exec and integrity-checked locally (2.3; PASS prints OK with every JSON .storage file parsed, the hacs entry and custom_components/hacs/manifest.json present; a truncated stream raises EOFError, dry-tested 2026-11-06 on a 100 kB truncation). This is the restore source for 5.2 because it is the ONLY copy of the HACS integration code core deletes. (2) The 23:00 Longhorn backup of home-assistant-config, PASS = `.venv/bin/python3 runbooks/longhorn-backup-age.py home-assistant-config --max-hours 26` prints FRESH (measured 2026-11-06 03:2x: 3.4h FRESH; the same call with --max-hours 1 prints STALE). (3) HA's built-in daily backup tar in /config/backups (advisory)."
 restore_proof: "The restore in 5.2 is a file-level overwrite of .storage + custom_components/hacs from the 2.3 tarball into the quiesced PVC. Proof before the roll: the tarball is opened, every JSON registry parsed, and the hacs config entry + 108 hacs registry rows + 21 /hacsfiles dashboard resources counted from it (2.3, gate script dry-run 2026-11-06 printed `OK entries 2380 config_entries 218`). The recorder DB needs no restore: SCHEMA_VERSION is 53 at both 2026.10.2 and 2026.11.0 (measured from db_schema.py at each tag 2026-11-06; re-checked in 2.1). DECISION FOR THE OPERATOR: a scratch-volume Longhorn restore drill is NOT part of this plan; if a full volume restore within 30 days is required before a restore-class HA roll, run the recipe in `git show 655b59be^:runbooks/maintenance/plans/home-assistant-2026.10.1.md` section 2.4 the day before."
@@ -326,6 +326,7 @@ kubectl rollout status deploy/home-assistant -n home-automation --timeout=15m
 kubectl get pod -l app.kubernetes.io/name=home-assistant -n home-automation -o jsonpath='{.items[0].spec.containers[0].image}{" "}{.items[0].status.startTime}{" "}{.items[0].status.containerStatuses[0].imageID}{"\n"}'
 # PASS: image ...:2026.11.0, startTime newer than $MERGE_AT, imageID digest DIFFERENT from $S/digest-pre.txt.
 # FAIL: image 2026.10.2 (rollout status green-lights the OLD generation), same digest, or ImagePullBackOff.
+# If the image still reads 2026.10.2 right after the merge, Flux has not reconciled yet: wait (flux get hr home-assistant -n home-automation), then re-check. Only a persistent mismatch after 5 min is a FAIL.
 ```
 
 4. One restart by construction. Do NOT restart again; per-integration `reload` only with the operator's say-so
@@ -400,6 +401,8 @@ device, 1.1): it counts toward the 20, it is not a FAIL on its own.
 kubectl logs deploy/home-assistant -c app -n home-automation --since-time="$POD_START" | sed $'s/\x1b\\[[0-9;]*m//g' > $S/halog-post.log
 wc -l < $S/halog-post.log      # CONTROL: >= 1000
 grep -ciE 'unable to install|setup failed|error setting up|migration handler not found' $S/halog-post.log
+echo "ERROR (MainThread) [homeassistant.setup] Setup failed for custom integration 'x': boom" | grep -ciE 'unable to install|setup failed|error setting up|migration handler not found'
+# CONTROL: the echo line above must print 1 (proves the pattern matches HA's real text); the real-log grep before it must print 0. A control count of 0 voids the gate.
 grep -iE 'is now part of Home Assistant|took over the existing installation|removed what the previous installation|moved [0-9]+ dashboard resource' $S/halog-post.log | cut -c1-220
 sed $'s/\x1b\\[[0-9;]*m//g' $S/halog-pre.log | grep -E ' (ERROR|CRITICAL) ' | sed -E 's/^[0-9-]+ [0-9:.]+ //' | cut -c1-90 | sort -u > $S/sig-pre.txt
 grep -E ' (ERROR|CRITICAL) ' $S/halog-post.log | sed -E 's/^[0-9-]+ [0-9:.]+ //' | cut -c1-90 | sort -u > $S/sig-post.txt
@@ -716,6 +719,7 @@ kubectl exec ha-restore -n home-automation -- sh -c 'cd /config && tar czf /tmp/
 kubectl delete pod ha-restore -n home-automation
 git revert --no-edit <merge-sha-of-PR-487> && git log -1 --format=%s && git push      # both tag lines back to 2026.10.2
 flux resume hr home-assistant -n home-automation      # helm upgrade restores replicas=1 at 2026.10.2
+kubectl get deploy home-assistant -n home-automation -o jsonpath='{.spec.replicas}{"\n"}'   # must print 1; if 0: kubectl scale deploy/home-assistant --replicas=1 -n home-automation
 kubectl rollout status deploy/home-assistant -n home-automation --timeout=15m
 ```
 

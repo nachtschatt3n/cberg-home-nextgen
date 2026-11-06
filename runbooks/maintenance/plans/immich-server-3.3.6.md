@@ -72,8 +72,8 @@ restore_proof: "§3.2: the §3.1 dump is restored into a SCRATCH database immich
 finding_refs: [F-eff49af5, F-6d0f4efc]  # F-eff49af5: version, "immich-server: image ... v3.3.5 -> v3.3.6 (patch)".
                                         # F-6d0f4efc: version, "immich-machine-learning: image ... v3.3.5-openvino" (-> v3.3.6-openvino).
                                         # Queried 2026-11-06 (`policy-cli.py finding list --grep immich`).
-review: null
-status: draft
+review: ready-for-go@2026-11-06   # plan-reviewer 2026-11-06: premises 8/8, 0 blocking; dump gate re-run read-only
+status: vetted
 window: null
 premises:
   - id: server-image-is-v3.3.5
@@ -267,7 +267,7 @@ mkdir -p "$HOME/immich-backups/pre-3.3.6" && chmod 700 "$HOME/immich-backups"
 D="$HOME/immich-backups/pre-3.3.6/immich.sql.gz"
 kubectl exec -n media deploy/immich-postgres -- sh -c \
   'pg_dump --clean --if-exists -U "$POSTGRES_USER" -d "$POSTGRES_DB" | gzip -1' > "$D" \
-  || { echo "DUMP FAILED"; exit 1; }
+  || { echo "DUMP FAILED"; return 1 2>/dev/null || false; }
 gzip -t "$D" && echo GZIP_OK
 stat -f %z "$D"                                                                 # >= 300000000
 gunzip -c "$D" | tail -5 | grep -c -- '-- PostgreSQL database dump complete'    # 1
