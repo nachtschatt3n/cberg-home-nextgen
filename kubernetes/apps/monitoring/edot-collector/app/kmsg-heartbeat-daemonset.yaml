@@ -49,6 +49,8 @@ spec:
       labels:
         app.kubernetes.io/name: kmsg-heartbeat
         app.kubernetes.io/part-of: edot-collector
+      annotations:
+        cberg.dev/kmsg-heartbeat-kick: "2026-11-06T1233"
     spec:
       # Every node ships kmsg, control-plane included.
       tolerations:
