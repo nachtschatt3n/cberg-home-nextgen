@@ -176,8 +176,8 @@ ORT is **rebuilt from source** with a new flag, so an OpenVINO execution-provide
 
 **Security reference F-7424ba26.** This plan carries `security_ref: F-7424ba26`. Whether this
 landing affects that finding, and its disposition, are recorded on the sweep_findings row only
-(docs/sops/vulnerability-disclosure.md). Do not close it with this plan's SHAs; the next sweep
-scan decides.
+(docs/sops/vulnerability-disclosure.md). Its status follows the next sweep scan, not this
+plan's SHAs.
 
 Context: Immich here is a read-only iCloud-library viewer; `/data` (CIFS `cifs-immich-cache`)
 is fully derived, originals are on a `ro` mount (`cifs-immich-icloud-backup`). **No PVC is
@@ -521,8 +521,8 @@ kubectl get pod -n media -l app.kubernetes.io/instance=immich-server -o jsonpath
 4.9 Post-window: the next sweep re-rates F-eff49af5 / F-6d0f4efc (and the AR-accepted image
 findings) against v3.3.6; close the version findings with
 `policy-cli.py finding close <id> --commit <sha>` only if the sweep agrees.
-**F-7424ba26 (security_ref):** do not close it with this plan's SHAs; the sweep's next scan of
-v3.3.6 decides (detail on the DB record).
+**F-7424ba26 (security_ref):** status follows the sweep's next scan of v3.3.6, not this plan's
+SHAs (detail on the DB record).
 
 ## 5. Rollback
 
