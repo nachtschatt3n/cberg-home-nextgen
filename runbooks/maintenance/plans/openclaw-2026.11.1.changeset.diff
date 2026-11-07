@@ -27,7 +27,7 @@ diff --color -ruN a/.github/renovate.json5 b/.github/renovate.json5
        // Playwright CI runner image (2026-10-20). The ninth-banner ARC runner pods
 diff --color -ruN a/kubernetes/apps/ai/openclaw/app/helmrelease.yaml b/kubernetes/apps/ai/openclaw/app/helmrelease.yaml
 --- a/kubernetes/apps/ai/openclaw/app/helmrelease.yaml	2026-11-07 23:18:59
-+++ b/kubernetes/apps/ai/openclaw/app/helmrelease.yaml	2026-11-08 00:18:45
++++ b/kubernetes/apps/ai/openclaw/app/helmrelease.yaml	2026-11-08 00:47:52
 @@ -19,10 +19,16 @@
      remediation:
        retries: 3
@@ -217,7 +217,7 @@ diff --color -ruN a/kubernetes/apps/ai/openclaw/app/helmrelease.yaml b/kubernete
  
                    // Enable the coding-agent skill — all binaries (claude,
                    // codex, opencode, pi) are present; just needs config
-@@ -1519,10 +1571,131 @@
+@@ -1519,10 +1571,132 @@
  
                    delete cfg.model;
  
@@ -306,7 +306,8 @@ diff --color -ruN a/kubernetes/apps/ai/openclaw/app/helmrelease.yaml b/kubernete
 +                # (FATAL); discord and duckduckgo failures only warn.
 +                for spec in codex:@openclaw/codex discord:@openclaw/discord duckduckgo:@openclaw/duckduckgo-plugin; do
 +                  pid="$${spec%%:*}"; pkg="$${spec#*:}"
-+                  if openclaw plugins inspect "$pid" --runtime --json 2>/dev/null | grep -q '"reason": "trusted-official"'; then
++                  INSPECT=$(openclaw plugins inspect "$pid" --runtime --json 2>/dev/null || true)
++                  if printf '%s' "$INSPECT" | grep -q '"reason": "trusted-official"'; then
 +                    echo "plugin $pid already trusted-official, skipping install"
 +                    continue
 +                  fi
@@ -349,7 +350,7 @@ diff --color -ruN a/kubernetes/apps/ai/openclaw/app/helmrelease.yaml b/kubernete
                  # AUTH GUARD (2026-08-01): agents/main ONLY — see the guard at
                  # the init-container seeding site. Other agents rely on OAuth
                  # read-through to main; never create their auth-profiles.json.
-@@ -1843,6 +2016,11 @@
+@@ -1843,6 +2017,11 @@
                # Node configuration
                - name: NODE_ENV
                  value: "production"
@@ -361,7 +362,7 @@ diff --color -ruN a/kubernetes/apps/ai/openclaw/app/helmrelease.yaml b/kubernete
  
                # Gateway port
                - name: GATEWAY_PORT
-@@ -1926,6 +2104,17 @@
+@@ -1926,6 +2105,17 @@
                    secretKeyRef:
                      name: openclaw-secret
                      key: HA_TOKEN
@@ -379,7 +380,7 @@ diff --color -ruN a/kubernetes/apps/ai/openclaw/app/helmrelease.yaml b/kubernete
                # GitHub token for mise and git operations
                - name: GITHUB_TOKEN
                  valueFrom:
-@@ -1968,7 +2157,7 @@
+@@ -1968,7 +2158,7 @@
                    initialDelaySeconds: 10
                    periodSeconds: 10
                    timeoutSeconds: 5
@@ -388,7 +389,7 @@ diff --color -ruN a/kubernetes/apps/ai/openclaw/app/helmrelease.yaml b/kubernete
  
              resources:
                requests:
-@@ -1995,7 +2184,7 @@
+@@ -1995,7 +2185,7 @@
                  # steady state has grown to ~2.3GiB (it was 1.1-1.3GiB when
                  # 4Gi was chosen in June), and a transcription adds ~850MiB on
                  # top -> 4Gi would leave under 1GiB of headroom.
@@ -397,7 +398,7 @@ diff --color -ruN a/kubernetes/apps/ai/openclaw/app/helmrelease.yaml b/kubernete
                  memory: 5Gi
  
              securityContext:
-@@ -2082,6 +2271,8 @@
+@@ -2082,6 +2272,8 @@
          advancedMounts:
            openclaw:
              app:

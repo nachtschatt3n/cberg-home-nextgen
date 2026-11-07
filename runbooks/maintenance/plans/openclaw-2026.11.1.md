@@ -4,8 +4,8 @@ supersedes: openclaw-2026.10.5   # same upgrade, retargeted 2026-11-07 (10.5/10.
 component: openclaw
 status: blocked
 review: null
-window: "2026-11-07 attended full day (operator: all of them, the full openclaw day); live roll only on the coordinator go-live message"
-findings: [F-79c6922e, F-39d3d443]     # openclaw + @openclaw/discord 2026.6.11 -> 2026.10.5
+window: "attended full day, only on the coordinator go-live message (operator 2026-11-07: all of them, the full openclaw day); not while etcd-timeouts-5000-500 runs"
+findings: [F-79c6922e, F-39d3d443]     # openclaw + @openclaw/discord 2026.6.11 -> 2026.11.1
 kind: npm
 current: "2026.6.11"
 target: "2026.11.1"   # npm latest 2026-11-07; re-check dist-tags at run time
@@ -26,18 +26,49 @@ touches:
 depends_on: []
 conflicts_with:
   - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af
-  - talos-linux-1.14.4                  # exclusive node roll evicts the pod mid-migration
-unblock_stages:                      # ONE attended day (Sat 2026-10-31); status stays blocked until the rehearsal passes (GO/NO-GO #1)
-  - id: S0-assessment      # DONE 2026-10-23 (read-only + Mac offline trial), results in section 0b
-  - id: P-git-prep         # agents, before the day: change set prepared + reviewed, NOT pushed, policy/renovate lines ride with the roll
-  - id: R-rehearsal        # morning: ONE rehearsal on a cloned openclaw-data PVC (gateway boot, model turns, real SQLite migration, doctor --fix timing)
-  - id: A-attended-roll    # afternoon block: quiet crons, fresh snapshot/backup, GitOps roll, verification, hard rollback cutoff 13:30
+  - talos-linux-1.14.5                  # exclusive node roll evicts the pod mid-migration (reciprocal, vetted)
+  - etcd-timeouts-5000-500              # sun-attended 2026-11-08: restarts etcd on all control-plane nodes; must not overlap the openclaw roll (add the reciprocal line there)
+unblock_stages:                      # ONE attended day; rehearsal DONE 2026-11-07 on three cloned volumes (section R.6/R.7); next: reviewer verdict, then coordinator go-live
+  - id: R-rehearsal        # DONE: gateway boot, doctor migration, per-agent auth, turns on gpt-6.1-terra fallbackUsed=False, crons, whisper, skills
+  - id: P-review           # plan-reviewer-agent verdict (section G is the governing text)
+  - id: A-attended-roll    # G.1 preconditions -> G.2 backup -> G.3 roll -> G.4 gates -> G.5 rollback if any gate fails
+backup_gate: "G.2: Longhorn Snapshot pre-openclaw-1111 readyToUse=true AND the manual backup job completes with longhorn-backup-age.py clawd-bot-data --max-hours 1 exit 0 AND the config+workspace tarball lists files AND openclaw.json.bak-pre-11.1 exists in the pod. All four must PASS before the push."
+restore_proof: "R.1/R.7: the same backup family (backup-92bafe79c04542f2, 2026-11-06) was restored into three scratch volumes in ~9 min each and booted on 2026.11.1; the snapshot-revert path is G.5 step 3 (Longhorn snapshot CR creation verified on a scratch volume, readyToUse=true in seconds)."
+premises:
+  - id: live-image-still-node-22
+    why: "current: and the rollback target assume the live pod still runs the node 22 / 2026.6.11 image; if the Deployment already moved, the baseline is wrong."
+    run: kubectl get deploy -n ai openclaw -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_contains: node:22.
+  - id: manifest-pin-still-6.11.1
+    why: "The change set is a diff against this exact helmrelease; a changed pin means the diff no longer applies."
+    run: grep -c 'install_npm openclaw@2026.6.11' /Users/mu/code/cberg-home-nextgen/kubernetes/apps/ai/openclaw/app/helmrelease.yaml
+    expect_exact: "1"
+  - id: helmrelease-last-commit-unchanged
+    why: "Another agent edits OpenClaw files; a newer helmrelease commit than the one the diff was made against must be re-read before the roll (git apply --3way may still pass)."
+    run: git log -1 --format=%h -- kubernetes/apps/ai/openclaw/app/helmrelease.yaml
+    expect_exact: 1cbf86998
+  - id: strategy-is-recreate
+    why: "RWO Longhorn PVC + replicas 1: RollingUpdate would Multi-Attach-deadlock; the roll relies on Recreate."
+    run: kubectl get deploy -n ai openclaw -o jsonpath='{.spec.strategy.type}'
+    expect_exact: Recreate
+  - id: data-volume-healthy
+    why: "The rollback is a snapshot revert on this volume; a degraded volume turns it into a data risk."
+    run: kubectl get volume -n storage clawd-bot-data -o jsonpath='{.status.robustness}'
+    expect_exact: healthy
+  - id: anthropic-secret-key-present
+    why: "The change set references Secret anthropic-api-key (not optional); a missing Secret fails the pod at start."
+    run: kubectl get secret -n ai anthropic-api-key -o jsonpath='{.data}'
+    expect_contains: ANTHROPIC_API_KEY
+  - id: openclaw-kustomization-ready
+    why: "A Kustomization already failing would make a post-roll failure unattributable."
+    run: flux get kustomization openclaw -n ai
+    expect_contains: "True"
 ---
 
 # openclaw 2026.6.11 -> 2026.11.1
 
 > Sections 0a-7 below were written for 10.5/10.6 and are kept as reference; where they differ, section R (this
-> retarget, 2026-11-07) governs. `review` stays null: NOT ready for go (blocker R.2).
+> retarget, 2026-11-07) governs. `review` is set only by the plan-reviewer outcome; R.2 blockers are resolved in R.6/R.7.
 
 ## G. Governing execution plan (2026-11-08; supersedes the timeline in 0b)
 
@@ -52,15 +83,17 @@ cd /Users/mu/code/cberg-home-nextgen
 OC=$(kubectl -n ai get pod -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}')
 kubectl -n ai exec "$OC" -c app -- codex login status                 # must say Logged in using ChatGPT (the auth import reuses this file)
 kubectl -n ai exec "$OC" -c app -- openclaw cron list                 # NO job due in the next 45 min; avoid 06:55-07:15 and 08:40-09:00 Berlin; 8163c139 sweep trigger not due
+N_CRON=$(kubectl -n ai exec "$OC" -c app -- bash -lc 'openclaw cron list | grep -a -c "^[0-9a-f]\{8\}-"'); echo "N_CRON=$N_CRON"   # record it: G.4 compares to it (32 on 2026-11-08; the Maintenance Window job cd659ac2 already shows status err before the roll, a baseline, not a regression)
 kubectl -n ai exec "$OC" -c app -- bash -lc 'ls -t ~/clawd/.tmp/say/ 2>/dev/null | head -1; pgrep -af "[s]ay|tts" || echo no-inflight-say'
 npm view openclaw dist-tags --json                                    # latest must still be 2026.11.1; if it moved, stop and re-plan
 git status --short kubernetes/apps/ai/openclaw runbooks/auto-update-policy.yaml .github/renovate.json5   # clean
 git -c rebase.autoStash=true pull --rebase origin main
 git apply --check runbooks/maintenance/plans/openclaw-2026.11.1.changeset.diff
 ```
-The operator is using the live assistant (Telegram group sessions): confirm with the coordinator that this is the agreed quiet window. Never roll during a due cron or an in-flight `say` (07:01 incident).
+The operator is using the live assistant (Telegram group sessions): confirm with the coordinator that this is the agreed quiet window. Never roll during a due cron or an in-flight `say` (07:01 incident). `etcd-timeouts-5000-500` (sun-attended 2026-11-08) must be finished first; `open-webui-0.13.0` and `anythingllm-1.19` also touch namespace `ai`: do not run them in the same window.
 
 ### G.2 Backup (rollback depends on these; do not skip)
+The snapshot is taken with the pod live, so it is crash-consistent (SQLite WAL replays), not quiesced. **Loss window:** anything written after the snapshot (sessions, Telegram state, cron runs) is lost on a snapshot-revert rollback, so take the snapshot as late as possible: right before the push, after G.1 passes.
 ```bash
 # 1. Longhorn snapshot of the live volume (CR form verified on the rehearsal clone: readyToUse=true in seconds)
 kubectl apply -f - <<'EOF'
@@ -70,12 +103,13 @@ metadata: {name: pre-openclaw-1111, namespace: storage}
 spec: {volume: clawd-bot-data, createSnapshot: true}
 EOF
 kubectl -n storage get snapshots.longhorn.io pre-openclaw-1111 -o jsonpath='{.status.readyToUse}{"\n"}'   # must print true
-# 2. Off-volume copy (Longhorn backup): fresh Completed backup newer than the snapshot
+# 2. Off-volume copy (Longhorn backup): wait for the manual job, then require a backup < 1 h old (exit code gates it)
 kubectl create job --from=cronjob/daily-backup-all-volumes manual-backup-openclaw-1111 -n storage
-python3 runbooks/longhorn-backup-age.py                                  # clawd-bot-data backup age < 1h before proceeding
+kubectl -n storage wait --for=condition=complete job/manual-backup-openclaw-1111 --timeout=45m && python3 runbooks/longhorn-backup-age.py clawd-bot-data --max-hours 1 || { echo "BACKUP GATE FAILED: stop"; exit 1; }
 # 3. Tarball of config + workspace to the Mac (outside the repo)
 mkdir -p ~/Backups/openclaw-pre-11.1 && kubectl -n ai exec "$OC" -c app -- tar czf - -C /home/node .openclaw/openclaw.json clawd clawd-juno-andrea clawd-vita-mathias clawd-vita-andrea clawd-vita-margaret clawd-vita-cora clawd-jerry-mathias clawd-jerry-andrea clawd-voice --exclude=node_modules > ~/Backups/openclaw-pre-11.1/openclaw-config-workspaces.tgz && tar tzf ~/Backups/openclaw-pre-11.1/openclaw-config-workspaces.tgz | head -3
-kubectl -n ai exec "$OC" -c app -- cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak-pre-11.1
+kubectl -n ai exec "$OC" -c app -- cp /home/node/.openclaw/openclaw.json /home/node/.openclaw/openclaw.json.bak-pre-11.1   # absolute paths: no remote shell here, a ~ would expand on the Mac
+kubectl -n ai exec "$OC" -c app -- ls -l /home/node/.openclaw/openclaw.json.bak-pre-11.1
 ```
 
 ### G.3 Roll (GitOps, one commit)
@@ -90,38 +124,60 @@ git show --stat HEAD && git log -1 --format=%s && git push
 Then watch (no manual reconcile needed; the webhook applies it): `kubectl -n ai get pod -l app.kubernetes.io/instance=openclaw -w`; init ~5 min; app container boot before the port opens ~20-25 min on first boot (doctor passes ~2.5 min each, plugin installs ~1.5 min, per-agent auth import ~1.5 min x 8); `kubectl -n ai logs deploy/openclaw -c app -f` shows `doctor --fix pass`, `openai auth imported for agent ...`. The Deployment is `Recreate`: the old pod stops first. Verify the live pod `startTime` and image digest changed (`kubectl -n ai get pod -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].status.startTime} {.items[0].spec.containers[0].image}'`), not just rollout status.
 **Expected downtime of the assistant: 25-35 minutes** (old pod stopped -> gateway listening); budget 60. Hard rollback cutoff: gateway not listening and `doctor`/boot not progressing 45 min after the push.
 
-### G.4 Verification gates (every one can fail; all must pass)
+### G.4 Verification gates (one `set -e` block; every line is an assertion and aborts on failure; all must pass)
 ```bash
+set -euo pipefail
 OC=$(kubectl -n ai get pod -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}')
 X() { kubectl -n ai exec "$OC" -c app -- bash -lc "$1"; }
-X 'node -v; openclaw --version; jq -r .version ~/.openclaw/lib/node_modules/openclaw/package.json'      # v24.22.2 / 2026.11.1
-X 'for p in codex duckduckgo; do openclaw plugins inspect $p --runtime --json | jq -r "[.plugin.id,.plugin.status,.plugin.trust.reason,.plugin.version]|@tsv"; done'   # loaded trusted-official 2026.11.1 (discord: loaded, record-missing is expected)
-kubectl -n ai logs "$OC" -c app | grep -a -c 'ERR_MODULE_NOT_FOUND\|Cannot find package'                 # must be 0
-X 'openclaw config validate && openclaw doctor --lint --severity-min error | jq ".findings|length"'      # valid; 0 errors (the splitfairy MCP schema check needs the live URL: expect pass in prod)
-X 'openclaw models status | grep -a "Default\|openai via codex"'                                        # Default openai/gpt-6.1-terra; effective=profiles
-# live turn on the primary, FALLBACK MUST NOT BE USED
-X 'openclaw agent -m "Reply with exactly this token: CANARY7F3" --session-id hc-1111 --timeout 150 --json' | python3 -c "import sys,json;t=sys.stdin.read();d=json.loads(t[t.find('{'):]);m=d['result']['meta'];print(d['result']['payloads'][0]['text'],m['agentMeta']['provider']+'/'+m['agentMeta']['model'],m['executionTrace']['fallbackUsed']);assert m['agentMeta']['model']=='gpt-6.1-terra' and m['executionTrace']['fallbackUsed'] is False"
+JQ_TURN="import sys,json;t=sys.stdin.read();d=json.loads(t[t.find('{'):]);m=d['result']['meta'];assert m['agentMeta']['model']=='gpt-6.1-terra' and m['executionTrace']['fallbackUsed'] is False, (m['agentMeta'].get('model'),m['executionTrace'].get('fallbackUsed'));print(d['result']['payloads'][0]['text'][:60])"
+[ "$(X 'node -v')" = "v24.22.2" ]
+[ "$(X "jq -r .version ~/.openclaw/lib/node_modules/openclaw/package.json")" = "2026.11.1" ]
+[ "$(kubectl -n ai get deploy openclaw -o jsonpath='{.spec.strategy.type}')" = "Recreate" ]
+# plugins: positive assertion paired with the absence gate (an empty/rotated log alone proves nothing)
+[ "$(X 'openclaw plugins inspect codex --runtime --json' | jq -r '[.plugin.status,.plugin.trust.reason,.plugin.version]|@tsv')" = $'loaded\ttrusted-official\t2026.11.1' ]
+[ "$(X 'openclaw plugins inspect duckduckgo --runtime --json' | jq -r '.plugin.status')" = "loaded" ]
+[ "$(X 'openclaw plugins inspect discord --runtime --json' | jq -r '.plugin.status')" = "loaded" ]   # trust record-missing is expected (global install)
+[ "$(kubectl -n ai logs "$OC" -c app | grep -a -c 'ERR_MODULE_NOT_FOUND\|Cannot find package' || true)" = "0" ]
+X 'openclaw config validate' | grep -q 'Config valid'
+[ "$(X 'openclaw doctor --lint' | python3 -c "import sys,json;print(sum(1 for l in sys.stdin if l.startswith('{') for f in json.loads(l)['findings'] if f['severity']=='error'))")" = "0" ]   # Errors: 0 (the splitfairy MCP check needs the live URL: it must pass in prod)
+X 'openclaw models status' | grep -a 'Default' | grep -q 'openai/gpt-6.1-terra'
+X 'openclaw models status' | grep -a 'Fallbacks' | grep -q 'ollama/gemma4:26b-mlx'
+! X 'openclaw models status' | grep -a 'Fallbacks' | grep -qi anthropic            # no anthropic model in the chain
+# live turn on the primary, fallback must not be used (assert inside JQ_TURN)
+X 'openclaw agent -m "Reply with exactly this token: CANARY7F3" --session-id hc-1111 --timeout 150 --json' | python3 -c "$JQ_TURN" | grep -q CANARY7F3
 # tool turn
-X 'openclaw agent -m "Use your shell tool to run: echo TOOLOK-\$((6*7)) and reply with only the tool output." --session-id hc-tool --timeout 200 --json' | grep -a -c TOOLOK-42
-# answer test on EVERY agent id on the primary (voice is ollama-native by design); each must show gpt-6.1-terra, fallbackUsed False
-for a in main juno-andrea vita-mathias vita-andrea vita-margaret vita-cora jerry-mathias jerry-andrea; do X "openclaw agent --agent $a -m 'Reply with exactly: OK-$a' --session-id ans-$a --timeout 120 --json" | python3 -c "import sys,json;t=sys.stdin.read();d=json.loads(t[t.find('{'):]);m=d['result']['meta'];print('$a',m['agentMeta']['model'],m['executionTrace']['fallbackUsed'])"; done
-X 'openclaw cron list | grep -a -c "^[0-9a-f]\{8\}-"; openclaw cron list | grep -a "0788b8a7\|d55acccd\|8163c139\|e9ce4ac3" | cut -c1-110'   # 41 (or the pre-roll count); the 4 ids present, next-run sane
-X 'home-operation list | head -3; cd ~/clawd && python3 scripts/morning_briefing.py --dry-run | head -12'  # CLI works; briefing builds in English
-X 'python3 -c "import json;m=json.load(open(\"/home/node/.openclaw/openclaw.json\"))[\"tools\"][\"media\"];print(len(m[\"models\"]),m[\"models\"][0][\"command\"],m[\"models\"][0][\"args\"][:3])"'   # 1 env [OMP_NUM_THREADS=4, MKL_NUM_THREADS=4, whisper]
-X 'grep -a -c "Skipping invalid skill" ~/.openclaw/logs/*.log 2>/dev/null | tail -1; openclaw skills list 2>/dev/null | grep -a -c .'   # 0 invalid
-# ANTHROPIC key present in the pod and equal to the Secret (compare hashes; NEVER print the value)
+X 'openclaw agent -m "Use your shell tool to run: echo TOOLOK-\$((6*7)) and reply with only the tool output." --session-id hc-tool --timeout 200 --json' | grep -a -q 'TOOLOK-42'
+# answer test on EVERY openai agent (voice is ollama-native by design): primary model, fallbackUsed False
+for a in main juno-andrea vita-mathias vita-andrea vita-margaret vita-cora jerry-mathias jerry-andrea; do
+  X "openclaw agent --agent $a -m 'Reply with exactly: OK-$a' --session-id ans-$a --timeout 120 --json" | python3 -c "$JQ_TURN" | grep -q "OK-$a"
+done
+# cron store intact: same job count as recorded in G.1, the four named ids present
+[ "$(X 'openclaw cron list | grep -a -c "^[0-9a-f]\{8\}-"')" = "$N_CRON" ]
+for id in 0788b8a7 d55acccd 8163c139 e9ce4ac3; do X "openclaw cron list | grep -a -q '^$id'"; done
+X 'home-operation list' | grep -q .
+X 'cd ~/clawd && python3 scripts/morning_briefing.py --dry-run' | grep -a -q 'Good morning'
+# whisper: exactly one audio model entry, env form, 4 threads
+[ "$(X "python3 -c \"import json;m=json.load(open('/home/node/.openclaw/openclaw.json'))['tools']['media']['models'];print(len(m),m[0]['command'],m[0]['args'][0])\"")" = "1 env OMP_NUM_THREADS=4" ]
+# skills: none skipped
+[ "$(X 'openclaw skills list 2>&1 | grep -a -c "description is required" || true')" = "0" ]
+# ANTHROPIC key in the pod equals the Secret (hash compare, value never printed)
 LIVE=$(kubectl -n ai get secret anthropic-api-key -o jsonpath='{.data.ANTHROPIC_API_KEY}' | base64 -d | shasum -a 256 | cut -c1-12)
-POD=$(X 'printf %s "$ANTHROPIC_API_KEY" | sha256sum | cut -c1-12'); [ -n "$POD" ] && [ "$LIVE" = "$POD" ] && echo anthropic-env-OK || echo anthropic-env-MISMATCH
-X 'openclaw models status | grep -a -i "anthropic" | cut -c1-120'   # provider detected via env; Default and Fallbacks lines must be unchanged (no anthropic model)
+POD=$(X 'printf %s "$ANTHROPIC_API_KEY" | sha256sum | cut -c1-12'); [ -n "$POD" ] && [ "$LIVE" = "$POD" ]
+X 'openclaw models status' | grep -a -q 'anthropic .*source=env: ANTHROPIC_API_KEY'
+# no agent silently fell back since the roll
+[ "$(kubectl -n ai logs "$OC" -c app | grep -a -c 'No route-compatible authentication source' || true)" = "0" ]
+echo ALL-AUTOMATED-GATES-PASS
 ```
 Plus the human/channel gates (substitute for what cannot be rehearsed with blanked tokens): **Telegram RECEIVE probe** (operator or a family member sends a message to each bot account `vita`, `jerry` and one group binding; the agent replies, `grep -a "telegram" ` log shows inbound; a wedged poller sends but never receives, `kill 1` recovers), Discord DM, one `say` voice note (local Qwen3-TTS or the ElevenLabs fallback), `runbooks/health-check.sh` OpenClaw block (plugin skew ALIGNED, canary, skill-bin presence), health of the next 08:45 briefing (first real voice send after the roll; Sunday-morning checkpoint) and the 03:00 dreaming run (`DREAMS.md` gets real diary text).
 Not rehearsable and therefore watched after the roll: real Telegram/Discord traffic, the 08:45 briefing with voice, dreaming narrative timeout (the old `NARRATIVE_TIMEOUT_MS` sed no longer matches; the narrative now uses the agent timeout), whisper on a real voice note, the "reply session initialization conflicted" loop (our `session-accessor-*.js` patch targets `.js`; 11.x ships `.mjs`, so the block is a logged WARN no-op: verify upstream fix by watching for the loop).
 
-### G.5 Rollback (decide by the cutoff in G.3 or any failed gate)
-1. `git revert <roll commit>` + push (restores node 22, 2026.6.11, the old caps, and `upgrade.timeout`/remediation). Flux applies; the Deployment is `Recreate`.
-2. The 11.x doctor has migrated the state (agent DB v1 -> v27, config shape, auth store), which 2026.6.11 cannot read. So ALSO restore the volume: `kubectl -n ai scale deploy/openclaw --replicas=0` and `flux suspend kustomization openclaw -n ai` first; then revert `clawd-bot-data` to snapshot `pre-openclaw-1111` (Longhorn UI: `kubectl -n storage port-forward svc/longhorn-frontend 8080:80`, Volume -> attach in maintenance mode -> Snapshots -> Revert -> detach), `flux resume kustomization openclaw -n ai`, `kubectl -n ai scale deploy/openclaw --replicas=1` (or let Flux). Fallback if the snapshot is unusable: restore the Longhorn backup taken in G.2 into a new volume and rebind per `docs/sops/backup.md` (Case B: PV `volumeHandle` is immutable, via GitOps).
-3. Restore `openclaw.json` from `openclaw.json.bak-pre-11.1` and the tarball if the volume revert is not used; if helm is stuck in `pending-upgrade`: `helm rollback openclaw <last-deployed> --wait=false`, then reconcile.
-4. Verify 2026.6.11: canary turn (`gpt-6.1-terra` needs the 6.11 overlay + `OPENCLAW_CODEX_APP_SERVER_BIN`, both preserved by the revert), cron list, Telegram receive.
+### G.5 Rollback (decide by the cutoff in G.3 or any failed gate). ORDER MATTERS: freeze Flux and stop the pod BEFORE anything else, otherwise Flux boots 2026.6.11 on the already-migrated state.
+1. `flux suspend kustomization openclaw -n ai` then `kubectl -n ai scale deploy/openclaw --replicas=0`; wait until no openclaw pod exists.
+2. Restore the data: revert volume `clawd-bot-data` to snapshot `pre-openclaw-1111` (Longhorn UI: `kubectl -n storage port-forward svc/longhorn-frontend 8080:80`; Volume -> attach in maintenance mode -> Snapshots -> Revert -> detach). **Everything written since that snapshot (sessions, Telegram state, cron runs) is lost** (this is the loss window G.2 names). If the snapshot is unusable, restore the Longhorn backup taken in G.2 into a new volume and rebind per `docs/sops/backup.md` (Case B: the PV `volumeHandle` is immutable, via GitOps).
+3. `git revert <roll commit>` and push (restores node 22, 2026.6.11, `max_major` 22, `<23`, the 15m helm timeout and remediation).
+4. `flux resume kustomization openclaw -n ai`; Flux scales to 1 and boots 2026.6.11 on the restored data. If helm is stuck in `pending-upgrade`: `helm rollback openclaw <last-deployed> --wait=false`, then reconcile.
+5. Restore `openclaw.json` from `openclaw.json.bak-pre-11.1` (or the tarball) only if the volume revert was not used.
+6. Verify 2026.6.11: canary turn (`gpt-6.1-terra` needs the 6.11 overlay + `OPENCLAW_CODEX_APP_SERVER_BIN`, both preserved by the revert), `openclaw cron list` count == `N_CRON`, Telegram receive.
 Expected rollback duration 20-30 min (snapshot revert + 6.11 boot, which re-runs the old init).
 
 ### G.6 Follow-ups after a verified roll (separate commits)
@@ -129,7 +185,7 @@ Revert `upgrade.timeout`/`remediation` to 15m / retries 3 and the startup probe 
 
 ## R. Retarget and cloned-PVC rehearsal result, 2026-11-07 (openclaw-agent)
 
-**Verdict (updated after the bisect, R.6): the doctor blocker is ROOT-CAUSED and has a verified fix; the plan is still not ready-for-go (open items in R.6). Do not roll.**
+**Verdict (R.1-R.7, historical): the doctor blocker was root-caused and fixed, and every rehearsable gate passed on a cloned PVC. The governing text is Section G; the live roll happens only on the coordinator go-live message after the reviewer verdict.**
 
 Operator direction applied: newest stable of everything, old node-22 and 9.x exclusions ignored. Targets: openclaw
 2026.11.1 (`latest`), `@openclaw/codex` + `@openclaw/discord` 2026.11.1 (peer `>=2026.11.1`), `@openai/codex` unpinned
