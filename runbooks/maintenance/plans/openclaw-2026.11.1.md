@@ -41,7 +41,7 @@ unblock_stages:                      # ONE attended day (Sat 2026-10-31); status
 
 ## R. Retarget and cloned-PVC rehearsal result, 2026-11-07 (openclaw-agent)
 
-**Verdict: BLOCKED at `openclaw doctor --fix` on 2026.11.1. Reproduced on two independent clones. Do not roll.**
+**Verdict (updated after the bisect, R.6): the doctor blocker is ROOT-CAUSED and has a verified fix; the plan is still not ready-for-go (open items in R.6). Do not roll.**
 
 Operator direction applied: newest stable of everything, old node-22 and 9.x exclusions ignored. Targets: openclaw
 2026.11.1 (`latest`), `@openclaw/codex` + `@openclaw/discord` 2026.11.1 (peer `>=2026.11.1`), `@openai/codex` unpinned
@@ -109,6 +109,31 @@ Note for the earlier hold (commit for F-6a859080): `runbooks/auto-update-policy.
 (`allowedVersions "<23"`, scoped to `kubernetes/apps/ai/openclaw/**`) mirrors it.
 **Both must be raised to 24 (`max_major: 24`, `"<25"`) in the same commit as the
 base-image move**, or the checker will keep reporting the 24 line as unreachable.
+
+### R.6 Bisect result (2026-11-07, later): root cause of R.2.3 found and fixed in rehearsal
+
+**Root cause:** the PVC config has `tools.web.search.provider: "duckduckgo"` (added 2026-11-07, 8f51d787e). In 2026.11.1 the DuckDuckGo
+provider is NOT in the host package any more; it is the external package **`@openclaw/duckduckgo-plugin`** (2026.11.1, peer `>=2026.11.1`).
+With it absent doctor's plugin-migration step cannot read the legacy-shaped config and aborts the whole run with the generic
+"Plugin migration source config changed or could not be read". Bisect (scrubbed config, fresh empty state, 8 variants): removing
+`plugins.entries`, channels, `mcp`, `skills` or `tools.media/deny` did NOT help; removing `tools` fixed it; within it only `tools.web`
+(or just `tools.web.search.provider`) fixed it. Installing the package into the managed store (raw npm + peer link) also fixed it.
+Second, independent doctor refusal: one live session's Codex binding sidecar ("current plugin state changed at session-key:main:...");
+parking the refused `*.codex-app-server.json` (not `.migrated`) in `~/.openclaw/doctor-held` lets the remaining steps run.
+
+**End-to-end on a third clone (node 24.22.2, openclaw 2026.11.1), with the prepared change set:**
+- init + app boot sequence: doctor pass 1 refused (sidecar), pass 2 completed; `openclaw config validate` = valid; `agents.entries` (9 agents) + `agents.ownership: explicit`; `tts`, `memory`, `talk` top-level keys created; `channels.discord.ui` gone.
+- **ERR_MODULE_NOT_FOUND re-test: not reproduced.** Gateway started, loaded `codex` from `~/.openclaw/npm/projects/openclaw-codex-*/node_modules/@openclaw/codex` (0 `ERR_MODULE_NOT_FOUND`/`Cannot find package` hits in the gateway log), `/codex` command registered, 19 plugins incl. discord, duckduckgo, telegram, memory-core.
+- NEW: raw `npm install` into the managed store leaves `@openclaw/codex` at trust `provenance-invalid` (doctor: "Plugin codex is unavailable: not a bundled or verified official installation") and capability consent pending. `openclaw plugins install @openclaw/<pkg>@<ver> --force --accept-capabilities` (needs a valid config, so AFTER doctor) sets `trusted-official`, relocates the plugin under `npm/projects/` and links the peer itself. Added to the change set for codex, discord, duckduckgo-plugin.
+- `openclaw cron list`: 41 jobs retained, incl. `0788b8a7`, `d55acccd`, `8163c139`, `e9ce4ac3`. Caution: a gateway started on a clone RUNS the cloned crons; it was stopped within minutes, credentials were blanked and the cloned `~/.codex/auth.json` was removed first (never use it: refresh-token rotation could invalidate production).
+- NEW, must fix before the roll: 8 workspace skills are skipped as "description is required": `fax`, `gcal`, `mealie`, `mealplan`, `shoplist` (main workspace) and `gcal`, `mealie`, `mealplan` (juno-andrea). Add a YAML frontmatter `description:` to those `skill-*.md` seeds in the SOPS skills configmap.
+- NEW warnings: `AuthProfileMigrationRequiredError` for agent main (auth store legacy credential migration; needs the codex login present and a doctor pass with it), TOOLS.md -> AGENTS.md migration would exceed `bootstrapMaxChars` 20000 (24377 chars) for main (raise `agents.entries.main.bootstrapMaxChars`), heartbeat instructions still in HEARTBEAT.md, MCP server splitfairy schema check (needs the real URL/token).
+
+**NOT tested (needs the operator's codex device login on a trial pod, so stopped here):** live turn on `openai/gpt-6.1-terra` with fallbackUsed=false, Telegram send and receive probe, `home-operation` CLI, briefing dry-run, `say`, whisper (doctor migrates `tools.media.audio` to capability-tagged `tools.media.models`; the guard still writes the legacy `audio` shape every boot and must be made to preserve the `env OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 whisper` form: the change set sets that form in the guard and adds `OMP_NUM_THREADS/MKL_NUM_THREADS=2` container env, but the post-migration shape is unverified), node 26 vs 24 A/B.
+
+**Prepared change set (unpushed, 199-line diff, applies cleanly to HEAD):** node 24.22.2 digest-pinned (both containers); `openclaw@2026.11.1`, `@openclaw/discord@2026.11.1`; realign installs + peer links for codex, discord, duckduckgo-plugin; root `chmod 755 /home/node; chmod 1777 /tmp`; `tmp` emptyDir mounted into init; list<->entries bridge in the config guard; `channels.discord.ui` removal; `doctor --fix` loop (4 passes, parks refused sidecars, fails loud) + `config validate`; `plugins install --force --accept-capabilities` for the 3 plugins; whisper `env` thread cap + OMP/MKL container env. Still to add in the same commit: policy `max_major` 24 and Renovate `<25`; skills frontmatter fix; `bootstrapMaxChars`.
+
+**Retest/next:** rerun the clone rehearsal with the operator present for the codex login (turn, Telegram receive, home-operation), then plan-review, then the attended roll. Upstream issue text is drafted in the scratchpad (not posted).
 
 ## 0a. Re-measurement 2026-11-07 (openclaw-agent): 2026.11.1 is NOT viable on node 22
 
