@@ -39,8 +39,6 @@ conflicts_with:                       # pruned 2026-10-23: dropped kube-promethe
                                       # and home-assistant-2026.10.1 (superseded -> 2026.10.2)
   - talos-linux-1.14.2                # node roll reboots k8s-nuc14-03 (our pinned node) and flushes host netfilter
   - talos-linux-1.14.4                # same
-  - home-assistant-2026.10.2          # HA restart flaps the otbr/thread integrations and the HA pod is the
-                                      #   instrument for gate 4.5 (_meshcop browse) -- serialize
   - flux-oci-chart-sources            # rewrites this HR's chart source (bjw-s app-template)
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. helmrelease/otbr
   - flux-reconciler-impersonation     # changes the identity helm-controller applies home-automation/ with
@@ -342,8 +340,9 @@ Thread network key.
 - **Node-scoped, privileged, hostNetwork.** The pod rewrites `k8s-nuc14-03`'s iptables on start and stop. Do
   not co-run with anything that rolls that node or touches host networking (Talos, Cilium,
   `multus-macvlan-foundation`). `matter-server` (hostNetwork, same node) shares 5353 and is not restarted.
-- **HA.** Do not share a slot with `home-assistant-2026.10.2`: its restart flaps the otbr/thread integrations
-  and gate 4.5 uses the HA pod as its instrument.
+- **HA.** Any Home Assistant restart flaps the otbr/thread integrations and gate 4.5 uses the HA pod as its
+  instrument, so do not share a slot with a Home Assistant roll (the former `home-assistant-2026.10.2` plan
+  is retired; the rule still holds for the next HA plan).
 - **Same HR, other writers.** `flux-oci-chart-sources`, `helm-drift-detection`, `flux-reconciler-impersonation`
   touch `helmrelease/otbr` or its applier: separate windows so a failure is attributable. Reciprocal
   `conflicts_with` entries are not yet on those plans (this revision may only write this file).

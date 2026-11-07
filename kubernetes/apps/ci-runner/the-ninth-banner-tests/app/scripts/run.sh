@@ -110,17 +110,13 @@ if [ "$rc" -eq 0 ]; then
             fi
             ;;
         sims)
-            # the CI nightly sweeps, distributed round-robin over the shards
-            cmds=("npx tsx tools/sim.ts --n 30 --check"
-                  "npx tsx tools/gen-sweep.ts --n 2000"
-                  "npx tsx tools/autoplay.ts --n 10 --check"
-                  "npx tsx tools/ending-hunt.ts --n 4")
+            # the game's planner (tools/sims-shard.ts, decision 410): one shard of N
             mkdir -p reports
-            for i in "${!cmds[@]}"; do
-                [ $(( i % N )) -eq "$IDX" ] || continue
-                log "run: ${cmds[$i]}"
-                bash -c "${cmds[$i]}" || rc=1
-            done
+            if has_script sims:shard; then
+                npm run sims:shard -- "$SHARD" "$N"; rc=$?
+            else
+                log "this ref predates the sims planner (sims:shard script); not supported by the runner"; rc=2
+            fi
             ;;
         *)
             log "unknown SUITE '${SUITE}' (unit|e2e|nightly|responsive|release|sims)"; rc=2

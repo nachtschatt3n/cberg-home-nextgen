@@ -252,6 +252,7 @@ class DegradationClassificationTest(unittest.TestCase):
         _mod.run_lines = lambda *a, **k: []          # no gh PR lookup
         _mod._newer_upstream_tag_exists = lambda img: True   # no registry lookup
         _mod.DEGRADED._reasons = []
+        _mod.DEGRADED._uncovered = {}
 
     def tearDown(self):
         for k, v in self._old_creds.items():
@@ -266,6 +267,7 @@ class DegradationClassificationTest(unittest.TestCase):
         else:
             os.environ["TMPDIR"] = self._old_tmpdir
         _mod.DEGRADED._reasons = []
+        _mod.DEGRADED._uncovered = {}
         self.tmp.cleanup()
 
     def _run_section(self, images, failing=()):
@@ -281,7 +283,11 @@ class DegradationClassificationTest(unittest.TestCase):
         return _mod.s4_cve_check()
 
     def _reasons(self):
-        return [r for r in _mod.DEGRADED._reasons if "trivy" in r.lower()]
+        # A transient single-image failure is now recorded PER COMPONENT
+        # (scoped veto: that image's rows held, rest of the section closes)
+        # rather than section-wide; either form arms a veto.
+        allr = list(_mod.DEGRADED._reasons) + list(_mod.DEGRADED._uncovered.values())
+        return [r for r in allr if "trivy" in r.lower()]
 
     def test_private_registry_image_does_not_arm_the_veto(self):
         priv = _mod._PRIVATE_REGISTRY_PREFIX + "own-app:1.2.3"
@@ -319,6 +325,7 @@ class DegradationClassificationTest(unittest.TestCase):
         self.assertEqual(json.loads(self.cache_path.read_text())["scanned"], ["a:1"])
         # Second run: a new image appears. It must be scanned, not skipped.
         _mod.DEGRADED._reasons = []
+        _mod.DEGRADED._uncovered = {}
         self._run_section(["a:1", "b:2"])
         cache = json.loads(self.cache_path.read_text())
         self.assertEqual(cache["scanned"], ["a:1", "b:2"])

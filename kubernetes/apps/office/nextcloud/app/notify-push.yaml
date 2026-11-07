@@ -37,7 +37,7 @@ spec:
           # Letting it drift behind the server is not just a compatibility
           # problem — it was the sole driver of a security finding closed on
           # 2026-07-31. Detail stays on the finding record, not here.
-          image: nextcloud:35.0.2@sha256:3f05f4d5eded9d3d029e617926500645cca6344710364737a374088f6811095a
+          image: nextcloud:35.0.2@sha256:e0b1a2af52c82c07b7a0e8e59878bd8769e704447734d5d238a836982f51b9c8
           command:
             - /var/www/html/custom_apps/notify_push/bin/x86_64/notify_push
             - /var/www/html/config/config.php

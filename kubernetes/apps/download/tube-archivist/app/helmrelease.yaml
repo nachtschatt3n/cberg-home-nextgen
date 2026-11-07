@@ -37,11 +37,13 @@ spec:
           app:
             image:
               repository: bbilly1/tubearchivist
-              tag: v0.5.12
+              tag: v0.6.0
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
-              TA_HOST: "https://tube-archivist.${SECRET_DOMAIN}"
+              # v0.6.0 enforces ALLOWED_HOSTS from TA_HOST (hostnames only): add the
+              # in-cluster service name for the image-sync CronJob.
+              TA_HOST: "https://tube-archivist.${SECRET_DOMAIN} http://tube-archivist"
               TA_USERNAME:
                 valueFrom:
                   secretKeyRef:
@@ -87,7 +89,8 @@ spec:
                         import sys
                         import urllib.request
 
-                        urllib.request.urlopen("http://127.0.0.1:8000/", timeout=5).read(1)
+                        req = urllib.request.Request("http://127.0.0.1:8000/", headers={"Host": "localhost"})
+                        urllib.request.urlopen(req, timeout=5).read(1)
                         needle = b"celery -A task.celery worker"
                         for pid in os.listdir("/proc"):
                             if not pid.isdigit():
@@ -111,6 +114,10 @@ spec:
                   httpGet:
                     path: /
                     port: 8000
+                    # v0.6.0 rejects the kubelet's pod-IP Host header (400)
+                    httpHeaders:
+                      - name: Host
+                        value: localhost
                   initialDelaySeconds: 60
                   periodSeconds: 10
                   timeoutSeconds: 5
@@ -122,6 +129,10 @@ spec:
                   httpGet:
                     path: /
                     port: 8000
+                    # v0.6.0 rejects the kubelet's pod-IP Host header (400)
+                    httpHeaders:
+                      - name: Host
+                        value: localhost
                   failureThreshold: 30
                   periodSeconds: 10
 

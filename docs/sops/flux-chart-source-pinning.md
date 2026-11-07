@@ -1,8 +1,8 @@
 # SOP: Flux Chart Sources — trust and pinning
 
 > Description: Which Flux source kind to use for a Helm chart (OCIRepository + chartRef, `type: oci` HelmRepository, HTTP HelmRepository, GitRepository), what actually pins the bytes in each shape, why `spec.verify` is currently omitted, and how version tracking works — or does not — per shape.
-> Version: `2026.09.22`
-> Last Updated: `2026-09-22`
+> Version: `2026.11.03`
+> Last Updated: `2026-11-03`
 > Owner: `Platform`
 
 ---
@@ -179,7 +179,9 @@ tier at a time.
 
 ### 4.2 Before switching a source: prove it is a SOURCE change, not a CONTENT change
 
-Both 2026-09-11 migrations did this and it is the reason they were roll-free:
+Both 2026-09-11 migrations did this and it is the reason they were roll-free
+(but see the CORRECTION below: byte-identical content is **not** the same as
+"no restart" for a Shape A / `chartRef` move):
 
 ```bash
 # what the live release was built from
@@ -190,6 +192,21 @@ helm template <rel> <old-source-chart> -f <values> > /tmp/old.yaml
 helm template <rel> <new-source-chart> -f <values> > /tmp/new.yaml
 diff /tmp/old.yaml /tmp/new.yaml && echo IDENTICAL-RENDER
 ```
+
+**CORRECTION (2026-11-03, plan-reviewer on `flux-oci-chart-sources`): Shape A
+is not a workload no-op even when the bytes and the render are identical.**
+Under `chartRef` helm-controller records the chart version as
+`<VER>+<first 12 hex of the digest>`, so `helm.sh/chart` gains a `_<digest12>`
+suffix everywhere it is templated. Any workload whose pod template carries that
+label, **or a `checksum/*` annotation computed from a ConfigMap/Secret that embeds
+it** (measured: falco, node-feature-discovery, authentik), restarts once. A
+labels-only check misses the second kind. Predict it before the move by
+re-rendering with the build-metadata version and diffing every workload's
+`template:` block — `rollpred.py` in
+`runbooks/maintenance/plans/flux-oci-chart-sources.md` §8 — and put the restart
+list in the commit message and the operator GO. Shape D (`GitRepository`) did not
+roll in the csi-driver-smb and plex moves because the chart version string did not
+change.
 
 A repackaged tarball (different tar metadata, different digest, same files)
 is **not** identical bytes — the GitHub Pages mirror of `csi-driver-smb` and
@@ -309,10 +326,10 @@ helm history <app> -n <ns> | tail -3
 ```
 
 Expected:
-- `sourceRef` names the new source; the artifact digest matches the one you proved byte-identical in §4.2; no new Helm revision unless values changed
+- `sourceRef` names the new source; the artifact digest matches the one you proved byte-identical in §4.2; Shape D: no new Helm revision unless values changed. **Shape A (`chartRef`): exactly ONE new Helm revision whose chart version is `<VER>+<digest12>`, and the workloads restart exactly as the §4.2 build-metadata prediction said — no more, no fewer.**
 
 If failed:
-- a new revision with a changed pod template means the bytes were NOT identical — compare `helm get manifest` across the two revisions before deciding whether to keep it
+- Shape D: a new revision with a changed pod template means the bytes were NOT identical — compare `helm get manifest` across the two revisions before deciding whether to keep it. Shape A: a restart that the build-metadata prediction did NOT list (or a prediction that listed none and a pod restarted) means the prediction missed something — compare the two revisions' pod templates and stop
 
 ### Test 3: version tooling still sees the chart
 
@@ -412,7 +429,10 @@ Expected:
 ## 11) Rollback Plan
 
 A source change is a git revert: the HelmRelease returns to its previous
-source and, if §4.2 held, the workload does not roll.
+source. For Shape D, and for Shape A releases the §4.2 prediction listed as
+no-restart, the workload does not roll. **For a Shape A release that restarted on
+the way in, the revert is a SECOND restart** (the checksum annotations and the
+chart label return to their old values): budget it.
 
 ```bash
 git revert <source-commit> && git push
@@ -439,3 +459,4 @@ Shape A/D instead.
 ## Version History
 
 - `2026.09.22`: Initial SOP (F-438afc79). Census from the live cluster; digest re-derivation verified against GHCR; Renovate behaviour taken from the 2026-09-22 customManager commit, not assumed.
+- `2026.11.03`: Shape A (`chartRef`) is NOT a workload no-op even when the render is identical: build-metadata chart version changes the `helm.sh/chart` label and every `checksum/*` annotation derived from it (falco, node-feature-discovery, authentik restart). §4.2 correction, Test 2 expectation and §11 rollback (a second restart) updated; predictor in `flux-oci-chart-sources.md` §8. Found by the plan-reviewer on that plan.

@@ -31,7 +31,7 @@ spec:
       reloader.stakater.com/auto: "true"
     image:
       repository: nextcloud
-      tag: 35.0.2@sha256:3f05f4d5eded9d3d029e617926500645cca6344710364737a374088f6811095a
+      tag: 35.0.2@sha256:e0b1a2af52c82c07b7a0e8e59878bd8769e704447734d5d238a836982f51b9c8
       pullPolicy: IfNotPresent
     replicaCount: 1
     nextcloud:
@@ -231,7 +231,7 @@ spec:
             name: nextcloud-openclaw-mail-app
       extraSidecarContainers:
         - name: worker
-          image: nextcloud:35.0.2@sha256:3f05f4d5eded9d3d029e617926500645cca6344710364737a374088f6811095a
+          image: nextcloud:35.0.2@sha256:e0b1a2af52c82c07b7a0e8e59878bd8769e704447734d5d238a836982f51b9c8
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 33
@@ -447,9 +447,9 @@ spec:
       image:
         registry: docker.io
         repository: bitnamilegacy/mariadb
-        # Tag text kept; digest = the build running on 2026-10-23 (F-d76865c3), so the
-        # floating tag can no longer change the DB image without a manifest edit.
-        tag: latest@sha256:bbd4e17f1ef8e035c74381c29c64627eaca2ca8612118f3caa5686c3ed8c7bbf
+        # Pinned to the 11.8 LTS patch line (F-96bf2bcd): 11.8.3 is the newest 11.8.x
+        # in the legacy repo; 12.0.x is a non-LTS major jump, deliberately not taken.
+        tag: 11.8.3@sha256:ada2a782b0bdd7885bda684af7fb1fdaa57929c35e639f7cbbf3f724a1735a31
 
       ## Enable persistence using Persistent Volume Claims
       ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/

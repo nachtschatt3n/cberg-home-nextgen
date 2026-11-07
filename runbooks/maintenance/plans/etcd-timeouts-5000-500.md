@@ -39,8 +39,6 @@ depends_on: []
 conflicts_with:
   - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af
   - talos-linux-1.14.5   # reciprocal, 2026-11-02 sweep 2ad957af
-  - envoy-proxy-config-distroless-v1.39.4   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
-  # 2026-10-25: pruned dead refs kube-prometheus-stack-92.2.0, nocodb-2026.09.1, nextcloud-fleet-35.0.1, jellyfin-12.2.20261005 (executed/retired)
   - talos-linux-1.14.2                # history only: that node roll ran 11-01 and is superseded by talos-linux-1.14.5 (listed
                                       # above, sun 11-22, AFTER this plan). Kept so the pairing stays visible in the record.
   - talos-power-tuning-ab             # talosctl apply-config on the same 3 nodes (live SysfsConfig A/B); a config apply from
@@ -67,8 +65,10 @@ finding_refs:
                                       # remedy and does not remove the CI cause. Close only after the post-window soak (4.6).
   - F-27a3f024                        # "etcd leader changes: 23 in 24h" (the sweep's measurement of the same event)
 review: ready-for-go@2026-10-13   # plan-reviewer 2026-10-13 (2nd pass): ready-for-go, 0 blocking; vetted at operator request (AskUserQuestion 2026-10-13)
-status: vetted
-window: "sun-attended:2026-11-08"   # OPERATOR-CHOSEN 2026-10-13 (AskUserQuestion). nocodb-2026.09.1 moved off this slot (risk-class stacking). 110 of 180 min; runs BEFORE talos-linux-1.14.5 (11-22) on purpose (operator ordering 2026-11-02), 7 days before longhorn-1.13.0 (11-15). HUMAN-GATED: needs a fresh operator GO recorded for this dated slot.
+status: blocked
+blocked_reason: "2026-11-03 NOW run: step 3.4 `talosctl service etcd restart` is refused by Talos 1.14.1 (service etcd does not support restart via API), so apply-config alone never changes the running process. Aborted after .11 apply, config rolled back, 0 elections. Plan needs a revised restart mechanism (likely a rolling node reboot via docs/sops/talos-upgrade.md in an allow_reboot slot) and re-review."
+window: null
+old_window: "sun-attended:2026-11-08"   # OPERATOR-CHOSEN 2026-10-13 (AskUserQuestion). nocodb-2026.09.1 moved off this slot (risk-class stacking). 110 of 180 min; runs BEFORE talos-linux-1.14.5 (11-22) on purpose (operator ordering 2026-11-02), 7 days before longhorn-1.13.0 (11-15). HUMAN-GATED: needs a fresh operator GO recorded for this dated slot.
 premises:
   - id: nodes-on-talos-1.14
     why: "All dry-runs and the apply-config no-reboot verdict were measured on v1.14.1 (etcd 3.7.1 service, args computed in the Talos etcd service PreFunc). A different minor invalidates the verdict in section 1.2."
@@ -361,25 +361,44 @@ For an ad-hoc run outside a window, confirm no auto-update batch is in flight.
 python3 "$W/etcdstat.py" snap "$W/term-before.json"          # converged, records RAFT TERM + leader
 python3 "$W/promgate.py" --lookback 1h --hl-window 2h        # the SOP pre-start gate
 kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=max(increase(etcd_server_leader_changes_seen_total%5B24h%5D))' | python3 -c "import sys,json;print('max leader changes seen in 24h:', json.load(sys.stdin)['data']['result'][0]['value'][1])"
-# CI-idle gate: count ALL non-terminal pods in both CI namespaces (runner pods AND shard/job pods such as
-# tnb-responsive-gpu-* in ci-runner; the earlier name regex -runner-[a-z0-9]{5} undercounted: it matched 2 of 5 Running)
-CI_ACTIVE=$(for ns in ci-runner arc-build; do kubectl get pods -n $ns --field-selector=status.phase!=Succeeded,status.phase!=Failed --no-headers; done | wc -l | tr -d ' ')
-echo "CI pods Running/Pending: $CI_ACTIVE"; test "$CI_ACTIVE" = 0 && echo "CI-IDLE: PASS" || echo "CI-BUSY: FAIL ($CI_ACTIVE)"
+# CI-idle gate: BUSY = (a) an EphemeralRunner that has accepted a workflow job (status.jobWorkflowRef set), or
+# (b) a non-terminal pod in the CI namespaces that is NOT an ARC runner pod (shard/job pods such as tnb-sims-*).
+# Idle warm runners (scale-set minRunners, always present) are deliberately NOT counted: "0 CI pods" can never pass.
+# Fails CLOSED: any kubectl error or unexpected output is CI-BUSY, never a silent 0.
+CI_ACTIVE=$(python3 - <<'PY'
+import json, subprocess, sys
+def k(*a):
+    r = subprocess.run(["kubectl", *a, "-o", "json"], capture_output=True, text=True)
+    if r.returncode: print("ERR", r.stderr.strip(), file=sys.stderr); print("ERR"); sys.exit(0)
+    return json.loads(r.stdout)["items"]
+busy = 0
+for ns in ("ci-runner", "arc-build"):
+    for r in k("get", "ephemeralrunner", "-n", ns):
+        if (r.get("status") or {}).get("jobWorkflowRef"): busy += 1
+    for p in k("get", "pods", "-n", ns):
+        if p["status"].get("phase") in ("Succeeded", "Failed"): continue
+        if "actions-ephemeral-runner" in (p["metadata"].get("labels") or {}): continue
+        busy += 1
+print(busy)
+PY
+)
+echo "Running CI jobs/job pods (idle warm runners ignored): $CI_ACTIVE"
+test "$CI_ACTIVE" = 0 && echo "CI-IDLE: PASS" || echo "CI-BUSY: FAIL ($CI_ACTIVE)"
 ```
 
-Negative control (measured live 2026-10-13, the gate FAILS on real data): the same command printed
-`CI pods Running/Pending: 3` and `CI-BUSY: FAIL (3)` (ci-runner: one runner pod Running, one in
-`Init:0/1`; arc-build: one runner Running; Completed shard pods are correctly not counted). The
-phase filter drops Succeeded/Failed pods, so a finished burst reads 0. A kubectl error (missing
-namespace, API down) prints to stderr and the count falls to 0, so also run
-`kubectl get ns ci-runner arc-build` once and require both to exist (a missing namespace is a FAIL).
+Negative control (measured live 2026-11-03, the gate FAILS on real data): it printed
+`Running CI jobs/job pods (idle warm runners ignored): 5` and `CI-BUSY: FAIL (5)` (3 runners with a job
+assigned, 1 Pending runner not counted, 2 non-runner shard pods Running; Completed/Error shard pods are
+not counted). The earlier form (`0` non-terminal pods) could never pass: the scale sets keep warm
+`minRunners` pods Running at all times, so it FAILed even on a quiet cluster (the PASS branch is unmeasured
+until a quiet period). The gate fails closed: a kubectl error prints `ERR`, which is not `0`.
 Idle is a period of quiet, not an instant: require three consecutive `CI-IDLE: PASS` readings 5 min
 apart, because CI jobs start in bursts.
 
 **PASS (all):** `etcdstat` PASS; `promgate` PASS (worst 5m-p99 fsync and commit under 50 ms
 over 1 h, one leader, kustomize-controller under 5 MB/s); the 24 h leader-change maximum is
 below 6 (see the acknowledgement step below: expected to be FALSE right after a CI day); **`CI-IDLE: PASS`**
-(0 non-terminal pods in `ci-runner` and `arc-build`; CI is the churn driver - a build burst during the
+(no EphemeralRunner with a job assigned and no non-runner job pod in `ci-runner`/`arc-build`; idle warm runners are ignored; CI is the churn driver - a build burst during the
 window confounds every gate and is itself a load on the disks being restarted).
 
 **Operator acknowledgement step (mandatory, asked explicitly in the go/no-go, not assumed).** Measured
@@ -761,6 +780,13 @@ TERM must have grown by at most the real node events in between (not by 20 per e
 did not climb under a CI burst; if it did climb, the CI-side fix in F-f5879ed8 (cap CI CPU on the
 control-plane nodes) is the next action and this plan did not fix the cause.
 
+Second soak signal (measured 2026-11-03, before the roll): 30 leader changes in 24h and 154 in 7
+days, and every burst of Cilium `cilium-l2announce` lease-lock timeouts / `Cannot update CEP`
+errors on the health board lined up with a leader change (23:42, 00:17, 03:32, 04:52Z). Those
+Cilium errors are a symptom, so do NOT noise-suppress them. One day after the roll expect
+`increase(etcd_server_leader_changes_seen_total[24h])` <= 1 and the board's Cilium error count near
+zero; if the leader still flips, the cause is not the timeout and this plan did not fix it.
+
 ## 5. Rollback
 
 **Nature of the rollback.** The timeouts are process arguments, not stored in the WAL or DB:
@@ -841,7 +867,7 @@ replica on them), so it is a last resort and needs the operator's explicit go.
   that interval is retried, not counted as a pass. The same-night `kube-prometheus-stack` bump is
   forbidden (conflicts_with).
 - **CI is both the cause and the confounder.** ARC runner pods (`arc-build`, `ci-runner`) are the
-  load that produced the churn. 2.2 requires `CI-IDLE: PASS` (0 non-terminal pods in both CI namespaces, three readings) at the start; a CI burst
+  load that produced the churn. 2.2 requires `CI-IDLE: PASS` (no running CI job/workflow pods, idle warm runners ignored, three readings) at the start; a CI burst
   mid-window makes every gate unreadable and is a reason to pause, not to proceed.
 - **Flux / commit load.** The ImageUpdateAutomation suspend and the origin/main freeze exist
   because commit bursts drive etcd disk writes. Only the rows that were not already suspended are

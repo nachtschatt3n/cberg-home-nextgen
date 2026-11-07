@@ -4,16 +4,18 @@
 > or Talos rolling reboot that recreates the HA pod. Institutionalizes the
 > 2026-08-02 certifi/EBUSY incident, the recurring HmIP cloud-session wedge, and
 > the custom-code regression surface that core version bumps can silently break.
-> Version: `2026.08.24`
-> Last Updated: `2026-08-24`
+> Version: `2026.11.07`
+> Last Updated: `2026-11-07`
 > Owner: `sre`
 
 ---
 
 ## 1) Description
 
-Home Assistant re-installs HACS custom-integration requirements with pip/uv on
-**every boot**. That makes each restart — planned image bump, Talos rolling
+Home Assistant re-installs custom-integration requirements with pip/uv on
+**every boot**. (Since 2026.11.0 HACS no longer exists as a custom component: core
+replaced it with the built-in **Marketplace**, see Step 7. The custom integrations
+it installed are unchanged and still reinstall their requirements at boot.) That makes each restart — planned image bump, Talos rolling
 reboot, or crash — a fresh chance for boot-time breakage that a green pod status
 does NOT catch (`1/1 Running` with four integrations failed is a real, observed
 state). This SOP is the checklist to run after any event that recreates the HA
@@ -31,12 +33,13 @@ pod, plus the extra regression list for **core version bumps**.
 
 | Check | Canary | Failure mode it catches |
 |-------|--------|-------------------------|
-| 1. Boot requirements install | HACS integrations `alexa_devices`, `dirigera_platform`, `dwd_weather`, `custom_conversation` | pip/uv failures at boot (e.g. certifi EBUSY 2026-08-02) — all four fail setup on every boot |
+| 1. Boot requirements install | custom integrations `alexa_devices`, `dirigera_platform`, `dwd_weather`, `custom_conversation` | pip/uv failures at boot (e.g. certifi EBUSY 2026-08-02) — all four fail setup on every boot |
 | 2. certifi/site-packages rule | init `certifi-patch` log + no site-packages mounts | Mount over `site-packages` blocking runtime pip upgrades |
 | 3. HmIP cloud session | `homematicip_cloud` entities available ≤ 15 min post-boot | HA restart wedges the eQ-3 cloud session (HA core bug #155194) |
-| 4. Alexa shopping/to-do sync | `todo/get_items` + add/remove round-trip on the two `alexa_devices` todo entities | HACS `alexa_devices` silently not syncing after a boot-time requirements failure |
+| 4. Alexa shopping/to-do sync | `todo/get_items` + add/remove round-trip on the two `alexa_devices` todo entities | custom `alexa_devices` silently not syncing after a boot-time requirements failure |
 | 5. Custom-code regression (version bumps) | custom_sentences, packages, scripts, prompts, automations, dashboards | Core schema/behaviour changes silently disabling local customizations |
 | 6. Z2M `unavailable` triage | Z2M logs + database `lastSeen` | Misreading a sleeping battery device as dead (July 2026 valve lesson) |
+| 7. Marketplace (HACS replacement, 2026.11.0+) | exactly 1 `marketplace` config entry, 0 `hacs`, 21 dashboard resources under `/local/community` serving JS | Half-finished HACS takeover, dashboard cards 404 after the `/hacsfiles` to `/local/community` rewrite |
 
 ---
 
@@ -55,7 +58,7 @@ version bumps.
 
 ### Step 1 — boot requirements install (ALWAYS)
 
-HACS custom integrations pip-install their requirements at boot; they are the
+Custom integrations pip-install their requirements at boot; they are the
 canary for boot-time package breakage.
 
 ```bash
@@ -124,7 +127,7 @@ Within ~15 min of boot, verify (template API or ha-agent):
 
 ### Step 4 — Alexa shopping / to-do list sync (ALWAYS)
 
-`alexa_devices` is a HACS component and is one of the Step 1 canaries — it has
+`alexa_devices` is a custom component and is one of the Step 1 canaries — it has
 broken at boot before (certifi / requirements failures). A loaded config entry
 alone does not prove the lists still sync. It exposes **two** todo entities per
 Amazon account:
@@ -215,6 +218,27 @@ dead — sleepy end devices check in rarely. Before concluding hardware failure:
 check Z2M `/data/log/` and the Z2M `database.db` `lastSeen` for the device
 (July 2026 valve lesson). Escalate to `docs/sops/zigbee2mqtt.md` /
 zigbee-agent only if `lastSeen` is genuinely stale.
+
+### Step 7 — Marketplace takeover (2026.11.0 and later)
+
+Since 2026.11.0 core migrates HACS into the built-in Marketplace on first boot
+(forward-only): the `hacs` config entry becomes `marketplace`, its entity and
+device registry rows are re-platformed, `custom_components/hacs` and
+`.storage/hacs.*` are deleted, and dashboard resources move from `/hacsfiles` to
+`/local/community`. The first live run (2026-11-06) adopted 108 entities, 54
+devices and 21 dashboard resources. Check after every restart that it held:
+
+- config entries: exactly 1 `marketplace`, 0 `hacs`
+- no entity-registry rows left on platform `hacs`
+- every dashboard resource URL is under `/local/community` and serves JavaScript
+- `.storage/marketplace.repositories` exists and `custom_components/hacs` is gone
+- the `update.hacs_update` entity is gone (expected, not a loss)
+
+One manual step: the first use of the Marketplace UI shows a risk notice an admin
+must accept (Settings > Marketplace) before install or update works. Core does not
+accept it for you. The migration bumped a few other config entries forward-only
+(matter, mcp_server, met, openai_conversation, overkiz), so a git revert alone does
+not roll the version back: restore the pre-change `/config` backup (Section 11).
 
 ---
 
@@ -362,6 +386,9 @@ which is encrypted and needs its key, or the Longhorn backup of
 ---
 
 ## Version History
+
+- `2026.11.07`: HACS is gone as of 2026.11.0 (core Marketplace takeover). Added
+  Step 7 and Overview row 7; reworded the HACS references in Steps 1 and 4.
 
 - `2026.08.03`: Added Step 4 — Alexa shopping/to-do list sync verification
   (two-entity `-SHOPPING_ITEM` / `-TASK` distinction, the "`_2` is not a

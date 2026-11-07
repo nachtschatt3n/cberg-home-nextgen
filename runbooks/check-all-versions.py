@@ -2011,6 +2011,43 @@ class VersionChecker:
                     return _CAP_UNKNOWN
         return None
 
+    # repository -> npm package whose `stable` dist-tag is the release channel
+    # pointer (image tags mirror npm versions). Same source as renovate.json5's
+    # `n8n-stable` datasource.
+    _STABLE_CHANNEL_NPM = {'n8nio/n8n': 'n8n'}
+    _stable_channel_cache: Dict[str, Any] = {}
+
+    def _stable_channel_ceiling(self, repository):
+        """4-tuple version key of the project's `stable` channel for repos in
+        _STABLE_CHANNEL_NPM, None when the repo has no channel rule, or
+        _CAP_UNKNOWN when the pointer cannot be read (recorded, fail-closed)."""
+        repo = str(repository or '').split('://')[-1].lower()
+        for pfx in ('docker.io/', 'index.docker.io/', 'registry-1.docker.io/'):
+            if repo.startswith(pfx):
+                repo = repo[len(pfx):]
+        repo = repo.split(':')[0]
+        pkg = self._STABLE_CHANNEL_NPM.get(repo)
+        if not pkg:
+            return None
+        cache = type(self)._stable_channel_cache
+        if pkg in cache:
+            return cache[pkg]
+        try:
+            r = requests.get(f"https://registry.npmjs.org/-/package/{pkg}/dist-tags", timeout=15)
+            r.raise_for_status()
+            stable = str(r.json().get('stable') or '')
+            key = self._semver_tag_key(stable)
+            if not stable or key[:3] == (0, 0, 0):
+                raise ValueError(f"unusable stable pointer {stable!r}")
+            out = key[:4]
+        except Exception as e:
+            _DEGRADED.record(f"image {repo}", 'npm dist-tags',
+                             f"{type(e).__name__}: {e}; stable channel unknown, no candidate (fail-closed)",
+                             component=component_key('image', repository))
+            return _CAP_UNKNOWN
+        cache[pkg] = out
+        return out
+
     def _pick_latest_semver_tag(self, tags: list, current_tag: str = '',
                                 repository: str = '') -> Optional[str]:
         """Highest semver-shaped tag from `tags`, preferring current's major.
@@ -2034,6 +2071,43 @@ class VersionChecker:
         stable_tags = [t for t in version_tags if not self._is_prerelease_tag(t)]
         if stable_tags:
             version_tags = stable_tags
+        # Unreleased minor-line shorthand (2026-11-03, valkey `9.2`): a bare
+        # `X.Y` tag whose line has ONLY pre-release `X.Y.Z-rc...` tags and no GA
+        # `X.Y.Z` tag is a pre-GA build, not a release (valkey/valkey `9.2`
+        # was pushed ahead of any 9.2.0; 9.2.0 does not exist, 9.2.0-rc1 does).
+        # Evidence-based on purpose: a repo that only ever publishes `X.Y`
+        # (no pre-release tag for the line) is untouched.
+        _pre_lines, _ga_lines = set(), set()
+        for _t in tags:
+            if not _t:
+                continue
+            _k = self._semver_tag_key(_t)
+            if self._is_prerelease_tag(_t) and _k[:3] != (0, 0, 0):
+                _pre_lines.add(_k[:2])
+        _nm = lambda _t: self._VARIANT_RE.sub('', self._canonical_tag(_t)).lstrip('vV').split('-', 1)[0]
+        for _t in version_tags:
+            if _nm(_t).count('.') >= 2:
+                _ga_lines.add(self._semver_tag_key(_t)[:2])
+        if _pre_lines:
+            _kept = [t for t in version_tags
+                     if not (_nm(t).count('.') == 1
+                             and self._semver_tag_key(t)[:2] in _pre_lines
+                             and self._semver_tag_key(t)[:2] not in _ga_lines)]
+            if _kept:
+                version_tags = _kept
+        # Release-CHANNEL ceiling (2026-11-03, n8n): the image publishes its
+        # beta/next channel under ordinary-looking semver tags on the NEXT
+        # minor, so no tag string can tell 2.46.4 (beta) from 2.45.7 (stable).
+        # The project's own `stable` pointer is the truth (Renovate reads the
+        # same one). Fail closed: unknown pointer -> no candidate.
+        _chan = self._stable_channel_ceiling(repository)
+        if _chan is _CAP_UNKNOWN:
+            return None
+        if _chan is not None:
+            _under = [t for t in version_tags if self._semver_tag_key(t)[:4] <= _chan]
+            if not _under:
+                return None
+            version_tags = _under
         # Stay on the SAME build variant as the current pin. Crossing variants
         # (alpine → debian) is a rebase of the base image, not an upgrade, and
         # must never be proposed as one. If we're on a variant, only same-variant

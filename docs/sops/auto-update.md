@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.11.02.1`
-> Last Updated: `2026-11-02`
+> Version: `2026.11.03`
+> Last Updated: `2026-11-03`
 
 ## 1) Description
 
@@ -645,6 +645,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.11.03 | 2026-11-03 | Header format fix (F-2dfecfb2): the SOP header must be plain `YYYY.MM.DD` (doc-check section 7); the `.1` revision suffix of the entry below is folded into this date. No behaviour change. |
 | 2026.11.02.1 | 2026-11-02 | **`aqua:fluxcd/flux2` deny rule (policy `2026.11.04`, F-39ab2c30).** The flux CLI pin had been auto-merged to 2.10.0 (#448) against a cluster on distribution v2.9.6, contradicting `docs/sops/flux-upgrade.md` (CLI/distribution match). Pin reverted to 2.9.6; the rule keeps the next Renovate PR from re-applying it until the distribution moves. Matrix row added. Regression: `runbooks/tests/test-auto-update-policy-flux-cli-pin.py`. |
 | 2026.11.02 | 2026-11-02 | **`*immich-redis*` deny rule added above `*immich*` (policy `2026.11.03`).** First match wins, so the redis sidecar was held under the Immich SERVER's migration reason, which is false for a non-persistent queue store. Same verdict (held at every update_type), its own reason; matrix row added, order is load-bearing like the `nextcloud-*` trio. Regression: `runbooks/tests/test-auto-update-policy-immich-redis-order.py`. |
 | 2026.10.26 | 2026-10-26 | **Settle gate hardened (review of 40d1ae7f).** (1) One clean reading no longer settles: 2 consecutive clean readings are required, and a reading is not clean while an in-scope pod is not-ready or a container's `restartCount` rose versus a PRE-APPLY baseline, or a HelmRelease is `Reconciling=True` / any Flux object `Ready=Unknown` -- a liveness-killed or late-crashing container used to read "settled clean" and the bad batch stayed. (2) HR remediation exhaustion is read from `Stalled`/`RetriesExceeded` (and `MissingRollbackTarget`), verified in helm-controller v1.6.5 source; the old check looked for it on `Ready` and could never fire. (3) An unreadable pod list is a not-clean key, no longer silently healthy. (4) Bad JSON / any exception after merging no longer aborts with the batch merged: it is reverted, or each unrevertable merge is reported as LEFT MERGED (new exit `3`). (5) A pre-apply baseline excludes (and reports) objects already failing cluster-wide; an unreadable baseline or changed-file list merges nothing. The 2026-10-23 transient-lag behaviour is unchanged. Also `check-all-versions.py`: an `image_major_ceiling` that leaves no candidate, or an unreadable policy / malformed matching rule, now yields NO candidate plus a recorded degradation instead of silently dropping the cap (`test-image-major-ceiling.py`). |

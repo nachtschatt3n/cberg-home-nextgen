@@ -8,22 +8,22 @@ pr: null                              # No Renovate PR exists or can exist: this
                                       # source holds the chart.
 kind: infra
 current: "28 HTTP HelmRepository chart sources (all 28 referenced by a HelmRelease) + 9 type:oci HelmRepository + 4 OCIRepository (ONE is this plan's: network/k8s-gateway; three are the ARC runner charts from the gha-fleet work) + 4 GitRepository (flux-system, csi-driver-smb, oc8, plex) — re-measured live 2026-11-03. Stage 1 is COMPLETE (the last orphan, external-secrets, was deleted by 67216b3b / F-fb2cc8a2 on 2026-10-23); stage 2 executed by another route (GitRepository); plex moved to a GitRepository (102ec800). Cluster and Flux CLI are v2.9.6."
-target: "every referenced chart with an immutable OCI source migrated to OCIRepository pinned by tag AND digest; the rest explicitly parked with a named reason — delivered in 11 stages, each independently abandonable. The sun-attended:2026-12-13 slot carries STAGE 3 ONLY (six no-roll releases), and only after operator decision D1 (section 1.0) is recorded."
+target: "every referenced chart with an immutable OCI source migrated to OCIRepository pinned by tag AND digest; the rest explicitly parked with a named reason — delivered in 11 stages, each independently abandonable. The sun-attended:2026-12-13 slot carries STAGE 3 ONLY (six releases: four restart nothing, falco and node-feature-discovery each restart once), proceeding per release when Step 0b prints G3-NON-REGRESSION and the operator GO in section 1.00 is recorded."
 update_type: refactor
 risk: high                            # NOT from any single stage. Two drivers, both
                                       # measured, both in §1: (a) the migration ROLLS the
-                                      # workload — 12 in-scope releases / 21 workloads carry a
-                                      # chart-version-derived pod-template label (re-measured
-                                      # 2026-11-03), and the set includes the CNI DaemonSet,
+                                      # workload — 9 releases / 17 workloads in stages 3-6 restart
+                                      # (re-measured 2026-11-03 with the build-metadata method,
+                                      # §1.0), and the set includes the CNI DaemonSet,
                                       # longhorn-manager, the cert-manager webhook and the SSO
                                       # server; (b) every stage edits the Kustomization that
                                       # gates delivery for the whole cluster. Per-stage risk is
                                       # in the stage table — stages 0, 1, 3 and 4 are genuinely
-                                      # low. The 12-13 slice (stage 3) is low risk and no-roll.
-est_duration_min: 90                  # RE-SCOPED 2026-11-03 from 30 (per stage) to the figure for
-                                      # the ONE slice this window carries: Stage 3 = six releases
-                                      # x 15 min (intel x3, node-feature-discovery, paperless-ngx,
-                                      # falco). Later stages are separate slices with their own
+                                      # low. The 12-13 slice (stage 3) is low risk; two of its six releases (falco, node-feature-discovery) restart once.
+est_duration_min: 100                 # RE-SCOPED 2026-11-03 from 30 (per stage) to the figure for
+                                      # the ONE slice this window carries: Stage 3 = intel x3,
+                                      # paperless-ngx ~10 min each, node-feature-discovery and falco
+                                      # ~20 each (post-roll gates), + 20 overhead (section 1.00). Later stages are separate slices with their own
                                       # figures in §3.1 and need their own window; the whole
                                       # programme (~6h) must never be scheduled as one unit.
 needs_reboot: false                   # No node reboot anywhere in this plan. But see §6:
@@ -40,7 +40,7 @@ touches:
     - "helmrepository/* in flux-system (28 HTTP objects: 17 replaced by stages 3-6, 1 blocked (unpoller), 10 parked (stage 7))"
     - "ocirepository/* (NEW, one per migrated app, in the app's own namespace)"
     - "helmrelease/* (up to 19 releases switch spec.chart.spec -> spec.chartRef across stages 3-6; stage 3 = 6 of them)"
-    - "helmrelease/kube-system/intel-device-plugin-{operator,gpu,npu}, helmrelease/kube-system/node-feature-discovery, helmrelease/office/paperless-ngx, helmrelease/security/falco (STAGE 3 — the 12-13 slice; no workload rolls)"
+    - "helmrelease/kube-system/intel-device-plugin-{operator,gpu,npu}, helmrelease/kube-system/node-feature-discovery, helmrelease/office/paperless-ngx, helmrelease/security/falco (STAGE 3 — the 12-13 slice; ONLY falco (daemonset, 3 pods) and node-feature-discovery (worker daemonset + master deployment) restart, once each)"
     - "daemonset/cilium + deployment/cilium-operator (stage 6, ROLL)"
     - "daemonset/longhorn-manager + deployment/longhorn-{ui,driver-deployer} (stage 6, ROLL — 79 volumes)"
     - "deployment/cert-manager{,-webhook,-cainjector} (stage 6, ROLL — webhook gap = Certificate admission failures)"
@@ -50,7 +50,7 @@ touches:
     - "fluxinstance/flux spec.kustomize.patches (Stage 10 — emptyDir sizeLimit)"
   shared: [flux-sources, cni-adjacent, cert-manager, storage/longhorn, monitoring, authentik, public-dns]
 depends_on: []
-conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, flux-fleet-0.62.0, flux-fleet-0.62.1, etcd-timeouts-5000-500, talos-linux-1.14.5, longhorn-1.13.0, authentik-2026.8.5, grafana-14.1.0, otel-operator-0.26.1, edot-collector-0.164.0, descheduler-0.37.0, anythingllm-1.19, jellyfin-3.7.0, tube-archivist-0.6.0, frigate-reolink-go2rtc-flv, envoy-proxy-config-distroless-v1.39.4, redis-fleet-8.10.3]   # RE-PLANNED 2026-11-03 against every open plan's frontmatter
+conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, etcd-timeouts-5000-500, talos-linux-1.14.5, longhorn-1.13.0, grafana-14.1.0, descheduler-0.37.0, anythingllm-1.19, tube-archivist-0.6.0, frigate-reolink-go2rtc-flv, redis-fleet-8.10.3]   # RE-PLANNED 2026-11-03 against every open plan's frontmatter; 2026-11-06: edot-collector-0.164.0 removed (executed, retired)
   # 2026-11-03: dropped dead refs otel-operator-0.23.0 (executed out-of-band 0e976cf5), jellyfin-12.1 (superseded by the 12.2 plan, itself later superseded), paperless-db-13.0.2 (executed a99794cc).
   # 2026-11-03: ADDED flux-fleet-0.62.0/0.62.1 (draft: flux-operator + flux-instance HRs and fluxinstance/flux, which Stage 10 patches; each lists this plan),
   #   etcd-timeouts-5000-500 (touches flux-system and perturbs the apiserver every Flux apply talks to; sun 11-08), authentik-2026.8.5 (sat 11-21; stage 5 switches authentik's chart source),
@@ -59,6 +59,7 @@ conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, flux-fleet
   #   redis-fleet-8.10.3 sun 11-29, helm-drift-detection sat 11-28 (P1 warn: adds spec.driftDetection to every HelmRelease, so stage 3's helmrelease.yaml edits must be rebased on it),
   #   envoy-proxy-config-distroless-v1.39.4 sun 12-06 (a week earlier; its own gateway restart gate must be finished and green before this plan starts), longhorn-1.13.0 sun 11-15.
   #   The same-night kube-prometheus-stack bump rule: none is windowed on 12-13 today; if one is slotted, move it — stage 3 verification reads Prometheus for the node-feature and gpu series.
+  # 2026-11-03: REMOVED otel-operator-0.26.1 (plan retired cdf1cf53; the chart bump landed in 5aa609d5, live pin 0.26.1) -- dead ref. The same dead ref was removed from five sibling plans' conflicts_with.
   # About twenty other plans list this plan reciprocally only because it edits HelmReleases; none shares a surface with the stage that runs on 12-13 and they are not repeated here.
 security_ref: null                     # F-0e310ef2 (plan-section, not security) RESOLVED 102ec800; no security finding drives this plan
 capability_change: true                # Stage 9 gives Flux chart-provenance ENFORCEMENT it
@@ -105,15 +106,23 @@ premises:
     why: "§3.7 (spec.verify) and §3.8 (source-controller emptyDir) were measured against Flux v2.9.6; a different distribution means source-controller changed and those claims need re-measuring."
     run: kubectl get fluxinstance flux -n flux-system -o jsonpath='{.spec.distribution.version}'
     expect_exact: "v2.9.6"
+  - id: falco-checksum-config-prefix
+    why: "Section 1.00's falco figures (the predicted checksum change and the 34/34/3/3/3 baseline) were measured against this pod-template checksum; a different prefix means the falco release changed (a Step 0 chart bump?) and the restart prediction must be re-derived."
+    run: kubectl get ds falco -n security -o jsonpath='{.spec.template.metadata.annotations.checksum/config}'
+    expect_matches: "^2bd4ff4b"
+  - id: nfd-worker-checksum-config-prefix
+    why: "Same for node-feature-discovery: the worker DaemonSet's pod-template checksum/config prefix measured 2026-11-03."
+    run: kubectl get ds node-feature-discovery-worker -n kube-system -o jsonpath='{.spec.template.metadata.annotations.checksum/config}'
+    expect_matches: "^c66cab76"
   - id: source-controller-emptydirs-unbounded
     why: "Stage 10 exists because both emptyDir volumes have no sizeLimit; once a limit is set this stage is done and must not be re-run."
     run: kubectl get deploy source-controller -n flux-system -o jsonpath='{.spec.template.spec.volumes[*].emptyDir}'
     expect_exact: "{} {}"
-status: draft     # RE-PLANNED 2026-11-03 after the premise check failed (http-helmrepos 29->28, ocirepository 1->4). Substance changed (§1.0): the earlier review 'ready-for-go@2026-09-28' is CLEARED and a plan-reviewer must re-review before this is vetted. Was vetted.
-review: null      # was ready-for-go@2026-09-28; cleared 2026-11-03 (the plan was materially amended)
+status: vetted    # plan-reviewer 2026-11-03: ready-for-go at the delta re-review (2419784a) after needs-fix at 499b11d8 and 2fb71523; premises 12/12. HUMAN-GATED: needs a fresh operator GO naming the falco and node-feature-discovery restarts (§1.00).
+review: ready-for-go@2026-11-03   # Stage 3 slice only (sun-attended:2026-12-13); stages 4-7 stay unslotted and gated by D1/D2/D3
 window: "sun-attended:2026-12-13"   # UNCHANGED. Scheduled 2026-10-05 (operator "plan all and time them"); MOVED 2026-11-02 from sun-attended:2026-11-22 (talos-linux-1.14.5 takes that Sunday). Re-checked 2026-11-03 against every open plan: no hard conflict forces a move.
-                                       # HUMAN-GATED (autonomy_override, capability change) -> operator GO. This slot carries STAGE 3 ONLY and only after decision D1 (§1.0) is
-                                       # recorded in this file; with D1 open the window agent must report NO-GO for this plan, not run a subset.
+                                       # HUMAN-GATED (autonomy_override, capability change) -> operator GO (the GO text is in §1.00 and includes the falco and NFD restarts). This slot carries
+                                       # STAGE 3 ONLY. Each release proceeds iff its Step 0b prints G3-NON-REGRESSION; D1 is a separate policy question, not a prerequisite.
 autonomy_override: human-gated         # Staged programme; est_duration_min is per slice; the
                                        # riskiest stages roll the CNI and storage. The scheduler
                                        # must not treat this as one unit.
@@ -138,7 +147,55 @@ replanned: "2026-11-03"
 
 ## 1. Summary & why held
 
-### 1.0 Re-plan record, 2026-11-03 — READ THIS FIRST (it overrides anything below that disagrees)
+### 1.00 Stage 3 execution brief — the 2026-12-13 window (read this first, then §3.2 for step detail)
+
+**What it does.** Moves six Flux chart sources from an HTTP `HelmRepository` to a digest-pinned `OCIRepository` + `chartRef` (one commit per release). **Four of the six restart nothing; TWO restart workloads** — this corrects the earlier "no workload roll" claim, which was wrong (plan-reviewer, 2026-11-03):
+
+| order | release (ns) | files in the commit (`git commit --only` list, exact) | restarts? | extra gate |
+|---|---|---|---|---|
+| 1 | `intel-device-plugin-operator` (kube-system) | `kubernetes/apps/kube-system/intel-device-plugin/app/{ocirepository.yaml (new),kustomization.yaml,helmrelease.yaml}` | no | operator Deployment pod name + `creationTimestamp` unchanged |
+| 2 | `intel-device-plugin-gpu` (kube-system) | `kubernetes/apps/kube-system/intel-device-plugin/gpu/{ocirepository.yaml (new),kustomization.yaml,helmrelease.yaml}` | no | DaemonSet `intel-gpu-plugin-intel-gpu-plugin` pods unchanged + node snapshot identical |
+| 3 | `intel-device-plugin-npu` (kube-system) | `kubernetes/apps/kube-system/intel-device-plugin/vpu/{ocirepository.yaml (new),helmrelease.yaml}` **and** `kubernetes/flux/meta/repositories/helm/{intel.yaml (deleted),kustomization.yaml}`. **`vpu/` has NO `kustomization.yaml`** (Flux auto-generates one, so it picks up the new file by itself): do not name a kustomization path here, `git commit --only` fails on a path that does not exist | no | DaemonSet `intel-npu-plugin-intel-npu-plugin` pods unchanged + node snapshot identical |
+| 4 | `node-feature-discovery` (kube-system) | `kubernetes/apps/kube-system/node-feature-discovery/app/{ocirepository.yaml (new),kustomization.yaml,helmrelease.yaml}` + `kubernetes/flux/meta/repositories/helm/{node-feature-discovery.yaml (deleted),kustomization.yaml}` | **YES: worker DaemonSet (3 pods) + master Deployment** | §4.2 NFD row |
+| 5 | `paperless-ngx` (office) | `kubernetes/apps/office/paperless-ngx/app/{ocirepository.yaml (new),kustomization.yaml,helmrelease.yaml}` + `kubernetes/flux/meta/repositories/helm/{gabe565.yaml (deleted),kustomization.yaml}` | no | pod name + `creationTimestamp` identical; HTTPRoute serves real content |
+| 6 | `falco` (security) | `kubernetes/apps/security/falco/app/{ocirepository.yaml (new),kustomization.yaml,helmrelease.yaml}` + `kubernetes/flux/meta/repositories/helm/{falcosecurity.yaml (deleted),kustomization.yaml}` | **YES: DaemonSet `falco`, 3 pods, `maxUnavailable: 1`** | §4.2 falco row |
+
+**Literal per-release environment** (paste before each release's §3.2 steps; `CHART` is the chart name Step 3 pulls, `OCINAME` the OCIRepository name, `WL` empty unless stated):
+
+```bash
+# 1 operator
+export NS=kube-system REL=intel-device-plugin-operator CHART=intel-device-plugins-operator OCINAME=intel-device-plugins-operator REPO=intel OCI_PATH=ghcr.io/intel/helm-charts/intel-device-plugins-operator APPDIR=kubernetes/apps/kube-system/intel-device-plugin/app WL=
+# 2 gpu
+export NS=kube-system REL=intel-device-plugin-gpu CHART=intel-device-plugins-gpu OCINAME=intel-device-plugins-gpu REPO=intel OCI_PATH=ghcr.io/intel/helm-charts/intel-device-plugins-gpu APPDIR=kubernetes/apps/kube-system/intel-device-plugin/gpu WL="ds/intel-gpu-plugin-intel-gpu-plugin"
+# 3 npu
+export NS=kube-system REL=intel-device-plugin-npu CHART=intel-device-plugins-npu OCINAME=intel-device-plugins-npu REPO=intel OCI_PATH=ghcr.io/intel/helm-charts/intel-device-plugins-npu APPDIR=kubernetes/apps/kube-system/intel-device-plugin/vpu WL="ds/intel-npu-plugin-intel-npu-plugin"
+# 4 node-feature-discovery
+export NS=kube-system REL=node-feature-discovery CHART=node-feature-discovery OCINAME=node-feature-discovery REPO=node-feature-discovery OCI_PATH=registry.k8s.io/nfd/charts/node-feature-discovery APPDIR=kubernetes/apps/kube-system/node-feature-discovery/app WL=
+# 5 paperless-ngx
+export NS=office REL=paperless-ngx CHART=paperless-ngx OCINAME=paperless-ngx REPO=gabe565 OCI_PATH=ghcr.io/gabe565/charts/paperless-ngx APPDIR=kubernetes/apps/office/paperless-ngx/app WL=
+# 6 falco
+export NS=security REL=falco CHART=falco OCINAME=falco REPO=falcosecurity OCI_PATH=ghcr.io/falcosecurity/charts/falco APPDIR=kubernetes/apps/security/falco/app WL=
+```
+
+**Do NOT delete `intel.yaml` in commits 1 and 2.** Three HelmReleases (`intel-device-plugin-{operator,gpu,npu}`) use `HelmRepository/intel`; deleting it after the first would leave the other two without a source, inside the `cluster-meta` gate. Only commit 3 (the last Intel release) deletes it, and only after the Step 5 deletion gate reads 0.
+
+**Why two restart (measured 2026-11-03, reviewer-confirmed).** Under `chartRef`, helm-controller records the chart version as `<VER>+<first 12 hex of the pinned digest>`. falco's and NFD's ConfigMap templates embed the `helm.sh/chart` label, so their rendered ConfigMap changes and the pod-template annotations `checksum/config` (falco also `checksum/rules`) change with it; the old-render checksums equal the live annotations exactly (falco `2bd4ff4b…`, verified against the live DaemonSet). The first-draft predictor only looked for `helm.sh/chart` in pod-template *labels* and was blind to it. The replacement predictor (§3.2 Step 4, script in §8) re-renders with the build-metadata version and diffs every workload's `template:` block: falco prints two `WILL ROLL` lines, NFD two (worker DaemonSet, master Deployment) plus an informational hook-Job line, paperless-ngx and all three Intel releases print `ROLL-PREDICTION: none`.
+
+**Operator GO text (this is the acceptance D3 did not cover; record it with `home-operation decide`):** *"GO flux-oci-chart-sources Stage 3 in sun-attended:2026-12-13: six chart-source moves. I accept one restart of falco (3 pods, one node at a time, a per-node detection gap while its pod restarts) and one restart of node-feature-discovery (worker DaemonSet + master Deployment) on the forward move, and one more of each on a rollback. No other workload restarts."*
+
+**Budget and order.** Order as in the table: operator, gpu, npu, node-feature-discovery, paperless-ngx, falco (NFD's and falco's post-roll checks run last because they are the slow ones). `est_duration_min: 100` = 6 × ~10 min edits/commits (Intel and paperless ~10, NFD and falco ~20 including their post-roll gates) + 20 min fixed overhead. This is on top of the window's own 20-min Step 0 reserve; the slot has 180 schedulable minutes.
+
+**Window-agent rules.**
+1. **Step 0 (the safe-update apply) runs first in every window, including this one.** Re-run §2's pre-checks AFTER it: Step 0 can bump a chart this plan is about to migrate.
+2. **Re-read the live `VER` of every release** (§3.2 reads it from the HelmRelease; never type one) and re-derive each digest from the registry at execution time. The pins in §7 are 2026-11-03 figures.
+3. **Step 0b (G3 non-regression) is the gate that replaced "D1 open means NO-GO".** Stage 3 proceeds for a release iff Step 0b prints `G3-NON-REGRESSION` for it. Measured 2026-11-03: falco, the three Intel releases and paperless-ngx are unresolved before AND after; node-feature-discovery resolves before and after. D1 remains an open *policy* question (should G3 refuse on an unresolved lookup?) but is not a prerequisite of Stage 3. **D2 does not apply**: all four registries are upstream-native (`ghcr.io/intel`, `ghcr.io/gabe565`, `ghcr.io/falcosecurity`, `registry.k8s.io/nfd`). **D3 (§1.0) is for stages 5-6**; Stage 3's acceptance is the GO text above.
+4. **`helm-drift-detection` runs `sat-attended:2026-11-28` (P1: adds `spec.driftDetection` to every HelmRelease).** After rebasing onto it, re-run Step 1 (`collect.sh`) and take the baseline AFTER that commit; a baseline from before it makes Assertion 2's `gen` comparison meaningless. If its P2/P3 have run, also confirm `kubectl get helmrelease falco -n security -o jsonpath='{.spec.driftDetection}'` before the falco commit and say so in the commit.
+5. **No `kube-prometheus-stack` bump may be windowed on 12-13** (the falco/NFD gates read Prometheus-adjacent state through Wazuh and node objects, but the monitoring namespace must be quiet). `maintenance-plan.py --open` today shows none.
+6. Install the tools once per window: run the §8 heredocs into `$T`.
+
+**Dry-run record (2026-11-03, read-only).** Tarballs: `falco`, `paperless-ngx` and `intel-device-plugin-{gpu,npu}` byte-identical to the deployed HTTP artifacts; `intel-device-plugin-operator` and `node-feature-discovery` are repackages (different tar bytes) whose renders are nevertheless identical apart from the predicted build-metadata effects. All six `helm pull` digests equal the registries' `docker-content-digest`.
+
+### 1.0 Re-plan record, 2026-11-03 (it overrides anything BELOW §1.00 that disagrees; §1.00 overrides this)
 
 **Why this section exists.** The premise check failed on two of its (then) five
 premises and a plan whose premises do not hold must not execute. Both failures
@@ -154,7 +211,7 @@ were benign and neither means a stage of this plan ran:
 - Cluster and CLI are Flux **v2.9.6** (source-controller `v1.9.6`, helm-controller `v1.6.5`); the text below said 2.9.0 / 2.9.3. flux-operator and flux-instance charts are `0.61.0`; `flux-fleet-0.62.0` / `0.62.1` are drafts that touch the same two HelmReleases and `fluxinstance/flux` (both now in `conflicts_with`).
 - **Every pinned chart version moved**: the §7 appendix now carries the live pins and re-verified presence. Reading a stale version from the old table would have failed Step 3's pull — and the recipe never hard-codes one (`VER` is read from the live HelmRelease).
 - Census: `HelmChart` objects **109** (was 122), source-controller `/data` **38.4 MB**, **18** CIFS StorageClasses / **21** Bound CIFS PVCs (was 19 / 21), **79** Longhorn volumes, 75 attached and healthy (was 94). 16 apps were decommissioned on 2026-10-04 (`ac7bf0e0`).
-- **Roll scope re-measured** with the §1.4 method (pod-template label or annotation carrying the chart version) over every Deployment, StatefulSet and DaemonSet owned by a HelmRelease: 23 releases / 34 workloads cluster-wide; **12 in-scope HTTP releases / 21 workloads** (cilium 2, cert-manager 3, longhorn 3, authentik 2, open-webui 3, otel-operator 2, nextcloud 1, grafana 1, anythingllm 1, eck-operator 1, jellyfin 1, unpoller 1). Charts with **no** key — the stage 3 and stage 4 sets (intel x3, node-feature-discovery, paperless-ngx, falco, descheduler, external-dns, headlamp, metrics-server) and the other stage-7 charts — still migrate without a restart. `csi-driver-smb` and `plex` are now GitRepository-sourced and out of the HTTP population.
+- **Roll scope re-measured with the build-metadata method (the label-only method of §1.4 was blind to checksum annotations).** For every in-scope release with an OCI chart, `helm template` of the deployed chart vs the OCI chart with its version rewritten to `<VER>+<digest12>` (exactly what helm-controller does under `chartRef`), diffing each workload's `template:` block (`rollpred.py`, §8). Results, live pins of 2026-11-03: **restarts**: falco (DaemonSet), node-feature-discovery (worker DaemonSet + master Deployment) [stage 3]; authentik (server + worker, label AND `checksum/secret`), grafana, open-webui (StatefulSet + redis Deployment), anythingllm [stage 5]; cilium (DaemonSet + operator), cert-manager (3 Deployments), longhorn (manager DaemonSet + ui + driver-deployer) [stage 6]. **No restart**: intel-device-plugin-{operator,gpu,npu}, paperless-ngx [stage 3]; external-dns, headlamp, metrics-server, descheduler (CronJob template annotation only: the next scheduled run uses it, no pod is replaced) [stage 4]; nextcloud and otel-operator [stage 5; both changed since 2026-09-11, when the old census listed them as rolling]. 9 rolling releases / 17 workloads in stages 3-6. **Not re-measured:** stage 7 (ten charts) and `unpoller` have no OCI chart to render against; their rows keep the 2026-09-11 label-only figures and are explicitly unverified for checksum annotations.
 - Stage 10 inputs unchanged: `FluxInstance.spec.kustomize.patches` still holds exactly one GitRepository `ignore` patch (append, do not replace) and both emptyDirs still have no `sizeLimit` (now a premise).
 
 **Defects found in the old text while re-measuring** (each fixed where it occurs below):
@@ -163,14 +220,20 @@ were benign and neither means a stage of this plan ran:
 2. §3.2 Step 4 ran `mise exec -- helm …`, which fails in agent shells ("couldn't exec process"), and a failed render left **both** render files empty, so `diff` reported *identical* — a gate that passes when both sides are empty. Now plain `helm` (mise-pinned 3.22.1, asserted) plus a non-empty-render assertion. Demonstrated 2026-11-03 on falco: deployed tarball sha256 `b8a1aa98…` is **byte-identical** to the OCI layer; both renders 736 lines; `diff` empty; the OCI manifest digest (`helm pull` "Digest:") equals the registry's `docker-content-digest` `08cd4fd5…`.
 3. §4.1 `coverage.py --json | … d.get('items') …` prints `[]` whether Stage 0 worked or not (the JSON has no `items` key; it has `lanes`/`needs_plan`). Replaced by a check of the generated version snapshot, which does change.
 4. §3.3 item 3 / §4.1: the `grep -c 'release notes unavailable…'` gate counts a *string*, so rewording the message would "pass" without closing anything. See D1 for what actually matters and a gate that can fail.
+5. **Review 2026-11-03 (plan-reviewer, `needs-fix`).** The "no workload roll" claim for falco and node-feature-discovery was false (see §1.00); the Step 4 predictor looked only at pod-template *labels*. Replaced by the build-metadata re-render + `template:` diff, demonstrated on falco (prints the checksum change) and on paperless-ngx (prints `none`).
+6. `collect.sh` could not baseline `intel-device-plugin-gpu` / `-npu`: their DaemonSets are created by the operator's `GpuDevicePlugin` / `NpuDevicePlugin` CRs and carry no `helm.toolkit.fluxcd.io/name` label, so it printed `ABORT: 0 workloads` yet exited 0 (the `sys.exit(1)` sat inside a pipeline whose last command was `tee`) and Assertion 2 then compared two empty files. Now: explicit `WL` list, nonzero exit on an empty baseline, and a caller that checks it. The `-gt 50` render-length floor false-aborted on real renders of 23 (gpu) and 17 (npu) lines; it is now "at least one `^kind:` document, same count old and new".
+7. Step 5's deletion gate `grep -rn "name: $REPO" … must be empty` can never pass for `intel` (substring of `intel-device-plugin-*`) or `node-feature-discovery` (the HelmRelease's own `metadata.name` and a `dependsOn`). Now an exact-match count with a positive control (`intel` must read 3 before the first Intel commit).
+8. Assertion 1 compared `status.artifact.revision` with `<VER>@<digest>`; with `ref.digest` pinned the live OCIRepositories (k8s-gateway, the ARC pair) report `revision = sha256:<manifest digest>` with no tag prefix, so the literal compare false-fails every component. Now compared with `$S/digest.txt`.
+9. `$APPDIR` was a placeholder, `intel-device-plugin/vpu` has no `kustomization.yaml`, and `git commit --only` on a new untracked file needs `git add -N` first. All six real file lists are in §1.00.
+
 
 **Decisions the operator must record in this file before the dependent stage runs** (none is a window action; if they are not recorded the window agent reports NO-GO, it does not improvise):
 
-- **D1 — G3 (breaking-change scan) for chart bumps. Blocks stages 3-7.** Measured today with the resolver `auto-update.py` actually uses (`_owner_repo` + `fetch_release_notes`, target version of each live release): release notes resolve for `cilium`, `cert-manager` and `node-feature-discovery` and **do not resolve** for `falco`, `intel-device-plugins-*`, `paperless-ngx`, `authentik`, `grafana`, `nextcloud`, `open-webui`, `opentelemetry-kube-stack` or `anythingllm` — *before* any migration. The OCI-path dep strings give the same owner/repo for the three that resolve; for the others they give different guesses (`falco`, `authentik` and `k8s-gateway` were fetched with the OCI string and also do not resolve; the rest are measured per component by Step 0b). The one provably wrong repo is k8s-gateway's, whose derived `k8s-gateway/charts` does not exist (it is deny-held, so harmless) — which also means the 2026-09-11 note that the derivation was "fixed" is true only for some paths. So, contrary to the 2026-09-11 text, the migration does **not** by itself remove G3 coverage from Stage 3's components; G3 on chart deps is *already* mostly unverified and falls open (documented asymmetry in `docs/sops/auto-update.md`). Options: **(a)** accept a per-component **non-regression** gate (new Step 0b below: the component must resolve after the move if and only if it resolved before) and treat the pre-existing fail-open as a separate change — *recommended*; **(b)** require G3 to refuse on an unresolved lookup first (changes what is auto-mergeable; its own plan + tests); **(c)** keep stages 3-7 held. Until one is recorded, stages 3-7 do not run.
-- **D2 — charts-mirror trust. Blocks stage 4 and the longhorn half of stage 6.** `docs/sops/flux-chart-source-pinning.md` §4.1 rung 4: a third-party mirror (`ghcr.io/home-operations/charts-mirror`) changes the trust root and is "never a cleanup step of a plan". All five charts (`descheduler`, `external-dns`, `headlamp`, `metrics-server`, `longhorn`) are present in it at the live pins (§7), but none moves until the operator writes "charts-mirror accepted for <chart>" here.
-- **D3 — accept the roll. Blocks stages 5 and 6** (stage 2's variant of this is moot). Stages 5/6 restart authentik, cilium, cert-manager, longhorn-manager and the rest for a source refactor (§1.4 item 3). The alternative (`type: oci` HelmRepository: no roll, no `verify`, stays in the `cluster-meta` gate) loses stage 9. Decide per stage.
+- **D1 — G3 (breaking-change scan) for chart bumps. A policy question; does NOT block Stage 3.** Measured today with the resolver `auto-update.py` actually uses (`_owner_repo` + `fetch_release_notes`, target version of each live release): release notes resolve for `cilium`, `cert-manager` and `node-feature-discovery` and **do not resolve** for `falco`, `intel-device-plugins-*`, `paperless-ngx`, `authentik`, `grafana`, `nextcloud`, `open-webui`, `opentelemetry-kube-stack` or `anythingllm` — *before* any migration; G3 falls open on an unresolved lookup (documented asymmetry in `docs/sops/auto-update.md`). So the migration does not by itself remove G3 coverage, and the per-release **Step 0b non-regression gate** (can fail: known-bad `cilium` + the k8s-gateway path prints `G3-REGRESSION`) is what Stage 3 needs. The open question is whether G3 should *refuse* on an unresolved lookup (changes what is auto-mergeable; its own plan and tests). It need not gate stages 5-7 either, provided Step 0b passes for each release; if the operator prefers to close the fail-open first, that is option (b).
+- **D2 — charts-mirror trust. Blocks stage 4 and the longhorn half of stage 6; irrelevant to Stage 3** (all four Stage 3 registries are upstream-native). `docs/sops/flux-chart-source-pinning.md` §4.1 rung 4: a third-party mirror (`ghcr.io/home-operations/charts-mirror`) changes the trust root and is "never a cleanup step of a plan". All five charts (`descheduler`, `external-dns`, `headlamp`, `metrics-server`, `longhorn`) are present in it at the live pins (§7), but none moves until the operator writes "charts-mirror accepted for <chart>" here.
+- **D3 — accept the roll. For STAGES 5 AND 6 ONLY** (authentik, grafana, open-webui, anythingllm; cilium, cert-manager, longhorn: §1.0 census). Stage 3's own restarts (falco, node-feature-discovery) are accepted by the one-line GO text in §1.00, not by D3. The alternative for stages 5/6 (`type: oci` HelmRepository: no roll, no `verify`, stays in the `cluster-meta` gate) loses stage 9. Decide per stage.
 
-**What the 2026-12-13 window runs.** Stage 3 only: `intel-device-plugin-operator`, `intel-device-plugin-gpu`, `intel-device-plugin-npu`, `node-feature-discovery`, `paperless-ngx`, `falco` — six releases, one commit each, ~15 min each, **no workload roll expected** (re-confirmed above), preconditioned on **D1**. Everything else in §3.1 is a later slice with its own window and, where a decision is listed, its own recorded decision. It does not run unattended and does not share the slot with anything on the `conflicts_with` list.
+**What the 2026-12-13 window runs.** Stage 3 only, exactly as §1.00: six releases, one commit each, two of them (falco, node-feature-discovery) restart once; each proceeds when its Step 0b prints `G3-NON-REGRESSION` and the operator GO text is recorded. Everything else in §3.1 is a later slice with its own window and, where a decision is listed, its own recorded decision. It does not run unattended and does not share the slot with anything on the `conflicts_with` list.
 
 ### 1.1 What happened, and what it proved about the shape of our source layer
 
@@ -252,6 +315,8 @@ registry, never blanket (§3.7).
 
 ### 1.4 THE GOTCHA THAT SHAPES THIS PLAN: chartRef is **not** a workload no-op
 
+> **2026-11-03 correction:** the census below used a label-only method and under-counts. `chartRef` also changes every `checksum/*` pod-template annotation computed from a ConfigMap or Secret that embeds the chart label (falco, node-feature-discovery, authentik). The re-measured scope and the correct method are in §1.0; the Step 4 predictor in §3.2 implements it.
+
 Measured on the one component already migrated, and it contradicts the
 assumption the migration was designed around.
 
@@ -293,9 +358,9 @@ carry such a key. Inside this plan's scope that includes:
 - `office/nextcloud` (`StatefulSet/nextcloud-mariadb`), `ai/open-webui` (+ redis), `ai/anythingllm`, `monitoring/{grafana,unpoller,eck-operator,otel-operator,prometheus-*}`, `media/{plex,jellyfin}`
 
 And — usefully — the components whose pod templates carry **no** such key, which
-therefore migrate with **no restart at all**: `external-dns`, `metrics-server`,
-`descheduler`, `node-feature-discovery`, `intel-device-plugin-*`, `headlamp`,
-`falco`, `frigate`, `superset`, `influxdb`, `penpot`, `paperless-ngx`, `sure`,
+therefore migrate with **no restart at all** (2026-11-03: `falco` and `node-feature-discovery` were removed from this list — they restart via `checksum/*` annotations, §1.00): `external-dns`, `metrics-server`,
+`descheduler`, `intel-device-plugin-*`, `headlamp`,
+`frigate`, `superset`, `influxdb`, `penpot`, `paperless-ngx`, `sure`,
 `uptime-kuma`, `adguard-home`, `homepage`. That split is what the stage order in
 §3.1 is built on.
 
@@ -459,10 +524,10 @@ source inventory this table is derived from is in §7.
 | 0 | **Teach the version/update pipeline about `chartRef`** — **3 of 4 items DONE `97c3e913`, and the snapshot has carried `k8s-gateway` with chart `3.7.2` through 7+ sweeps since (re-verified 2026-11-03: `version-check-current.md` row populated, 3 git-sourced charts in the "unresolved" table, k8s-gateway not among them). Item 3's G3 fail-open is a pre-existing property, now framed as operator decision D1 (§1.0).** | tooling only | ~10 left | low | no | stops the migration from blinding `coverage.py` and the version snapshot |
 | 1 | ~~Delete the 6 unreferenced HelmRepositories~~ **6 of 6 DONE** — five on 2026-09-11 (`7c048735`), and `external-secrets` (the one the operator had held) on 2026-10-23 (`67216b3b`, F-fb2cc8a2). There are no unreferenced HTTP sources left. | — | 0 | — | no | executed: six third-party URLs out of the `cluster-meta` gate. **Do not execute this row.** |
 | 2 | ~~`csi-driver-smb` → charts-mirror OCI~~ **DONE 2026-09-11 via a DIFFERENT route — see §3.4** | csi-driver-smb | 0 | — | **no roll occurred** | executed as a GitRepository pinned to commit `59dce96e` (the v1.20.3 cut), NOT charts-mirror. **Do not execute this row.** |
-| 3 | **No-roll, upstream-native OCI — THE 2026-12-13 SLICE. Needs decision D1.** | intel (3 releases), node-feature-discovery, gabe565/paperless-ngx, falcosecurity/falco | 15 ea (90 total) | low | **no** (re-confirmed 2026-11-03) | 6 releases off HTTP with zero workload impact — build confidence here |
+| 3 | **Upstream-native OCI — THE 2026-12-13 SLICE (§1.00): four releases restart nothing, falco and node-feature-discovery restart once each.** | intel (3 releases), node-feature-discovery, gabe565/paperless-ngx, falcosecurity/falco | 10-20 ea (100 total) | low | **falco + NFD only** (build-metadata method, 2026-11-03) | 6 releases off HTTP; the first three Intel commits are a zero-impact rehearsal |
 | 4 | **No-roll, charts-mirror — BLOCKED on operator decision D2** (docs/sops/flux-chart-source-pinning.md §4.1 rung 4: a third-party mirror is never a cleanup step of a plan) | descheduler, external-dns, headlamp, metrics-server | 15 ea | low-med | **no** | only after the operator records the charts-mirror trust decision in this plan |
-| 5 | **Rolling, upstream-native OCI, app tier — needs D1 and D3** | authentik, grafana, nextcloud, open-webui, opentelemetry, mintplex-labs | 25 ea | medium | yes | the apps where a restart is tolerable but not free |
-| 6 | **Rolling, cluster-critical — ONE PER WINDOW — needs D1 and D3** | cilium, jetstack/cert-manager, longhorn (charts-mirror — BLOCKED on D2; and `longhorn-1.13.0` is windowed `sun-attended:2026-11-15`, so re-read the live longhorn pin before planning this) | 30 ea | **high** | yes | the sources whose failure blocks recovery |
+| 5 | **Rolling, upstream-native OCI, app tier — needs D3 + Step 0b per release (measured 2026-11-03: authentik, grafana, open-webui, anythingllm restart; nextcloud and otel-operator do NOT)** | authentik, grafana, nextcloud, open-webui, opentelemetry, mintplex-labs | 25 ea | medium | yes | the apps where a restart is tolerable but not free |
+| 6 | **Rolling, cluster-critical — ONE PER WINDOW — needs D3 + Step 0b per release** | cilium, jetstack/cert-manager, longhorn (charts-mirror — BLOCKED on D2; and `longhorn-1.13.0` is windowed `sun-attended:2026-11-15`, so re-read the live longhorn pin before planning this) | 30 ea | **high** | yes | the sources whose failure blocks recovery |
 | 7 | **The 10 remaining charts with no OCI anywhere — mirror track (PARKED; its own plan revision adds its namespaces)** | ~~plex~~ (DONE 102ec800, Shape D GitRepository), then apache-superset, blakeblackshear, dirsigler, elastic, influxdata, jameswynn, jellyfin, penpot, rm3l, sure (three of them — `rm3l`, `jameswynn`, `blakeblackshear` — also carry open LOW sweep postures about being hosted under a personal GitHub account: F-ac4ec44e, F-04817ce7, F-1e7d8813; not claimed by this plan) | decision + 20 ea | medium | some | the long tail; needs §3.6 decided first |
 | 8 | **`unpoller` — blocked, coupled to a chart upgrade** | unpoller | — | — | — | own plan; see §3.5 (re-verified 2026-11-03: live pin still 2.4.0, OCI `2.4.0` still 404, `2.5.0` present) |
 | 9 | **`spec.verify` — pilot, then per registry** | signed registries only | 30 pilot | medium | no | the capability gain from §1.3 |
@@ -485,7 +550,10 @@ export VER=$(kubectl get helmrelease $REL -n $NS -o jsonpath='{.spec.chart.spec.
 test -n "$VER" || { echo "ABORT: $NS/$REL has no spec.chart.spec.version (already on chartRef?)"; exit 1; }
 export S=/Users/mu/.claude/jobs/flux-oci/$NS-$REL   # scratch; NOT /tmp. FIXED path: every agent Bash call is a
 mkdir -p "$S"                                       # new shell ($$ changes, vars vanish) -- re-run these 3 lines at the top of EVERY step
-REPO=<helmrepository-name>; APPDIR=kubernetes/apps/$NS/.../$REL; OCI_PATH=<from §7>
+export T=/Users/mu/.claude/jobs/flux-oci/tools       # §8 scripts, installed once per window
+export WL=                                            # set ONLY for operator-created workloads: gpu WL="ds/intel-gpu-plugin-intel-gpu-plugin", npu WL="ds/intel-npu-plugin-intel-npu-plugin"
+REPO=<helmrepository-name>; OCI_PATH=<from §7>; OCINAME=<ocirepository name = chart name>
+export APPDIR=<literal directory from §1.00 (one block of literal env lines per Stage 3 release); later stages read it from the release's ks.yaml>
 ```
 
 **Step 0b — G3 non-regression (before any edit).** Moving a chart to an OCI path
@@ -518,11 +586,11 @@ if a[0] == "resolved" and b[0] != "resolved":
     print("G3-REGRESSION: release notes resolved before the move and not after"); sys.exit(1)
 print("G3-NON-REGRESSION")
 PY
-HTTP_DEP=$CHART OCI_DEP=$OCI_PATH python3 "$S/g3nr.py" 2>&1 | grep -v 'mise WARN'
+HTTP_DEP=$CHART OCI_DEP=$OCI_PATH python3 "$S/g3nr.py" 2>&1 | grep -c '^G3-NON-REGRESSION$'     # THE GATE: must print 1 (a bare pipe into grep would mask the script's exit 1; a regression prints 0)
 ```
 
 (`OCI_PATH` is the `<registry>/<path>` form from §7 with no `oci://`.) PASS is the
-line `G3-NON-REGRESSION`. Measured 2026-11-03 — pass: `falco` (unresolved before and
+count `1` printed above (the line `G3-NON-REGRESSION` exists exactly once). Measured 2026-11-03 — pass: `falco` (unresolved before and
 after), `node-feature-discovery` (resolved before and after); **known-bad that must
 print `G3-REGRESSION` and exit 1**: `HTTP_DEP=cilium OCI_DEP=ghcr.io/k8s-gateway/charts/k8s-gateway VER=1.20.4`.
 Run it with the script as a **file** (above); the same code fed through
@@ -535,26 +603,44 @@ A `G3-REGRESSION` is fixed by adding the real repo to the notes map
 
 ```bash
 cat > "$S/collect.sh" <<'EOS'
-kubectl -n $NS get helmrelease $REL -o json | python3 -c "import sys,json;d=json.load(sys.stdin);print('HR revision',d['status'].get('lastAttemptedRevision'));print('history',[(h['version'],h['chartVersion'],h['status']) for h in d['status'].get('history',[])])"
-kubectl -n $NS get deploy,sts,ds -l helm.toolkit.fluxcd.io/name=$REL -o json | python3 -c "
-import sys,json,subprocess
-items=json.load(sys.stdin)['items']
-if not items and '$REL' not in ('descheduler',):
-    print('ABORT: 0 workloads for helm.toolkit.fluxcd.io/name=$REL'); sys.exit(1)
+set -euo pipefail
+W=$(mktemp)
+# env: NS REL  and optionally WL="ds/<name> ..." for releases whose workloads are created by an operator CR
+kubectl -n "$NS" get helmrelease "$REL" -o json | python3 -c "import sys,json;d=json.load(sys.stdin);print('HR revision',d['status'].get('lastAttemptedRevision'));print('history',[(h['version'],h['chartVersion'],h['status']) for h in d['status'].get('history',[])])"
+if [ -n "${WL:-}" ]; then
+  kubectl -n "$NS" get $WL -o json > "$W"
+else
+  kubectl -n "$NS" get deploy,sts,ds -l "helm.toolkit.fluxcd.io/name=$REL" -o json > "$W"
+fi
+python3 - "$W" <<'PY'
+import sys, json, os, subprocess
+d = json.load(open(sys.argv[1]))
+items = d['items'] if d.get('kind') == 'List' else [d]
+if not items:
+    print('ABORT: 0 workloads for', os.environ['NS'], os.environ['REL'], os.environ.get('WL', '(label helm.toolkit.fluxcd.io/name)')); sys.exit(1)
 for i in items:
-    m=i['metadata']; t=i['spec']['template']
+    m = i['metadata']; t = i['spec']['template']
     print('SPEC', i['kind'], m['name'], 'replicas', i['spec'].get('replicas'),
           'containers', sorted((c['name'], c['image']) for c in t['spec']['containers']))
     print('VOL', i['kind'], m['name'], 'gen', m['generation'],
-          'chartlabel', (t['metadata'].get('labels') or {}).get('helm.sh/chart'))
-    sel=','.join(f'{k}={v}' for k,v in i['spec']['selector']['matchLabels'].items())
-    for p in json.loads(subprocess.check_output(['kubectl','-n','$NS','get','pods','-l',sel,'-o','json']))['items']:
+          'chartlabel', (t['metadata'].get('labels') or {}).get('helm.sh/chart'),
+          'checksums', sorted((k, v[:8]) for k, v in (t['metadata'].get('annotations') or {}).items() if k.startswith('checksum/')))
+    sel = ','.join(f'{k}={v}' for k, v in i['spec']['selector']['matchLabels'].items())
+    for p in json.loads(subprocess.check_output(['kubectl', '-n', os.environ['NS'], 'get', 'pods', '-l', sel, '-o', 'json']))['items']:
         print('VOL pod', p['metadata']['name'], p['metadata']['creationTimestamp'],
-              [c['restartCount'] for c in p['status'].get('containerStatuses',[])])"
-kubectl -n flux-system get helmchart $NS-$REL -o jsonpath='{.status.artifact.revision} {.status.artifact.digest}{"\n"}'
+              [c['restartCount'] for c in p['status'].get('containerStatuses', [])])
+PY
+rm -f "$W"
+kubectl -n flux-system get helmchart "$NS-$REL" -o jsonpath='{.status.artifact.revision} {.status.artifact.digest}{"\n"}'
 EOS
-bash "$S/collect.sh" | tee "$S/baseline.txt"
+export NS REL WL
+bash "$S/collect.sh" > "$S/baseline.txt" || { echo "ABORT: baseline failed (0 workloads or unreadable)"; exit 1; }
+test "$(grep -c '^SPEC' "$S/baseline.txt")" -gt 0 || { echo "ABORT: baseline has no SPEC lines"; exit 1; }
+cat "$S/baseline.txt"
+bash "$T/nodesnap.sh" > "$S/nodes-before.txt" || { echo "ABORT: node snapshot"; exit 1; }   # Intel + NFD releases only (also falco's neighbours: harmless elsewhere)
 ```
+
+Dry-run 2026-11-03: falco and the Intel operator baseline via the HelmRelease label (`SPEC`/`VOL` lines, `checksum/*` now captured); the gpu release baselines via `WL`; **known-bad**: gpu *without* `WL` prints `ABORT: 0 workloads …` and exits 1 (it used to exit 0 with an empty baseline).
 
 **Step 2 — copy the tarball that is ACTUALLY DEPLOYED out of the cache.** Do not
 re-download from the HTTP index: the index may already serve a different artifact
@@ -596,13 +682,15 @@ KV=$(kubectl version -o json | python3 -c 'import sys,json;v=json.load(sys.stdin
 for w in old new; do
   helm template $REL "$S/$w/$CHART" -n $NS -f "$S/live-values.yaml" \
     --kube-version "$KV" > "$S/render-$w.yaml" 2> "$S/render-$w.err"
-  # GATE-CAN-FAIL: two EMPTY renders diff as identical. Both must be real manifests.
-  test "$(wc -l < "$S/render-$w.yaml")" -gt 50 || { echo "ABORT: $w render empty/short -> $(head -3 "$S/render-$w.err")"; exit 1; }
+  # GATE-CAN-FAIL: two EMPTY renders diff as identical. Both must contain manifest documents (the real
+  # renders are as short as 17 lines for npu and 23 for gpu, so a line-count floor false-aborts: count documents).
+  grep -q '^kind:' "$S/render-$w.yaml" || { echo "ABORT: $w render has no manifest documents -> $(head -3 "$S/render-$w.err")"; exit 1; }
 done
+test "$(grep -c '^kind:' "$S/render-old.yaml")" = "$(grep -c '^kind:' "$S/render-new.yaml")" || { echo "ABORT: object count differs old vs new"; exit 1; }
 diff -u "$S/render-old.yaml" "$S/render-new.yaml" | tee "$S/render.diff"
 ```
 
-(2026-11-03 dry run, falco 9.2.2: deployed and OCI tarballs byte-identical, both renders 736 lines, `render.diff` empty. The known-bad: with `helm` missing from PATH both renders are 0 lines and the `-gt 50` assertion aborts.)
+(2026-11-03 dry run, falco 9.2.2: deployed and OCI tarballs byte-identical, both renders 736 lines, `render.diff` empty. The known-bad: with `helm` missing from PATH both renders are 0 lines and the `^kind:` assertion aborts. `helm` on PATH works in agent shells; `mise exec -- helm` failed in one sandboxed shell here, which is environment-specific: just require `helm version --short` to print the pinned v3.22.1.)
 
 **Gate:** `render.diff` must be **empty**, or contain only differences you can
 name and justify in the commit message (`Chart.yaml` maintainers, a stray dev file
@@ -610,18 +698,28 @@ the `.helmignore` misses). **Any rendered-object difference — an image, an RBA
 rule, a probe, a resource limit, a NetworkPolicy — aborts this component.** It is
 then a chart *change* wearing a source change's clothes, and needs its own plan.
 
-Then predict the roll, so verification knows what to expect:
+Then predict the roll the way helm-controller will cause it. Under `chartRef` the
+chart version becomes `<VER>+<first 12 hex of the pinned digest>`; re-render with
+that version and diff every workload's whole pod template (labels AND `checksum/*`
+annotations — a labels-only check missed falco and node-feature-discovery):
 
 ```bash
-python3 - "$S/render-new.yaml" <<'PY'
-import sys, yaml
-for d in yaml.safe_load_all(open(sys.argv[1])):
-    if not d or d.get("kind") not in ("Deployment","StatefulSet","DaemonSet"): continue
-    l = ((d["spec"]["template"]["metadata"] or {}).get("labels") or {})
-    if "helm.sh/chart" in l:
-        print("WILL ROLL:", d["kind"], d["metadata"]["name"], l["helm.sh/chart"])
-PY
+D12=$(sed 's/^sha256://' "$S/digest.txt" | cut -c1-12)
+rm -rf "$S/newmeta"; cp -R "$S/new" "$S/newmeta"
+sed -E "s/^version:[[:space:]]*.*/version: $VER+$D12/" "$S/new/$CHART/Chart.yaml" > "$S/Chart.meta.yaml" && cp "$S/Chart.meta.yaml" "$S/newmeta/$CHART/Chart.yaml"
+grep -q "^version: $VER+$D12$" "$S/newmeta/$CHART/Chart.yaml" || { echo "ABORT: the Chart.yaml version rewrite did not apply (a silent sed no-op would make rollpred print a false 'none')"; exit 1; }   # BSD sed: [[:space:]], not \s
+helm template $REL "$S/newmeta/$CHART" -n $NS -f "$S/live-values.yaml" --kube-version "$KV" > "$S/render-newmeta.yaml" 2> "$S/render-newmeta.err"
+python3 "$T/rollpred.py" "$S/render-old.yaml" "$S/render-newmeta.yaml"
 ```
+
+Read the output as the restart list for the commit message and for Assertion 2.
+Every release must end with the line `ROLL-PREDICTION:`; no such line means the tool
+broke, not that nothing rolls. Dry-run 2026-11-03 (live pins): **falco** prints two
+`WILL ROLL: DaemonSet/falco …checksum/config` / `…checksum/rules` lines (the known-bad
+demonstration of the old predictor's blindness: it printed nothing for falco);
+**node-feature-discovery** prints `WILL ROLL: DaemonSet/node-feature-discovery-worker`
+and `Deployment/node-feature-discovery-master` (+ an informational hook-Job line);
+**paperless-ngx** and the three **Intel** releases print only `ROLL-PREDICTION: none`.
 
 **Step 5 — write the manifests.** `ocirepository.yaml` goes in the **app's own
 folder**, not in `kubernetes/flux/meta`. That is the second half of the fix: a
@@ -657,18 +755,24 @@ spec:
   url: oci://<registry>/<path>
 ```
 
-Then, in the same commit:
+Then, in the same commit — `migrate.py` (§8) writes exactly the manifest above, switches
+the HelmRelease to `chartRef`, adds `ocirepository.yaml` to the app's `kustomization.yaml`
+(or notes that there is none: `intel-device-plugin/vpu`), and optionally deletes the HTTP source:
 
 ```bash
-# add to the app kustomization, BEFORE the helmrelease entry (as in 43a3b3e4):
-#   resources: [./ocirepository.yaml, ./helmrelease.yaml, ...]
-# switch the HelmRelease:
-#   -  chart: {spec: {chart: ..., version: ..., sourceRef: {kind: HelmRepository, ...}}}
-#   +  chartRef: {kind: OCIRepository, name: <chart>}
-# delete the HTTP source ONLY if nothing else references it:
-grep -rn "name: $REPO" kubernetes/ | grep -v 'meta/repositories'       # must be empty
-git rm kubernetes/flux/meta/repositories/helm/$REPO.yaml
-#   and remove its line from kubernetes/flux/meta/repositories/helm/kustomization.yaml
+# (a) positive control BEFORE the first edit, live: HelmReleases whose chart sourceRef is $REPO.
+#     Exact match (the old `grep -rn "name: $REPO"` can never pass: `name: intel` matches intel-device-plugin-*,
+#     and `name: node-feature-discovery` matches the HelmRelease's own metadata.name and a dependsOn).
+kubectl get helmrelease -A -o jsonpath='{..sourceRef.name}' | tr ' ' '\n' | grep -c -x "$REPO"
+#     measured 2026-11-03: intel 3, node-feature-discovery 1, gabe565 1, falcosecurity 1. For the three Intel commits the live
+#     count is 3 before commit 1, 2 before commit 2 and 1 before commit 3 (read it AFTER the previous commit has reconciled and its
+#     HelmRelease is Ready). Any other number, or 0, means a release already moved or the command is broken: ABORT.
+python3 "$T/srcrefs.py" "$REPO"                                   # same count from the working tree + the files
+# (b) write the manifests. Pass the 6th argument (the HelmRepository file) ONLY on the LAST release that uses $REPO:
+#     for Intel that is npu (commit 3), NEVER the operator or gpu commits. migrate.py itself refuses to delete a
+#     repository another HelmRelease still uses (that refusal is the deletion gate, demonstrated in §8).
+python3 "$T/migrate.py" "$APPDIR" "$OCINAME" "$OCI_PATH" "$VER" "$(cat "$S/digest.txt")" [kubernetes/flux/meta/repositories/helm/$REPO.yaml]
+python3 "$T/srcrefs.py" "$REPO"                                   # after the LAST release: 0
 ```
 
 **Step 6 — validate, then commit (shared-worktree rules).**
@@ -676,10 +780,14 @@ git rm kubernetes/flux/meta/repositories/helm/$REPO.yaml
 ```bash
 task kubeconform
 grep -n "$CHART\|$REL" runbooks/auto-update-policy.yaml    # deny globs must still match the new dep name (none of the stage 3 set has a deny rule today: they stay auto-updatable, which is why Step 0b matters)
-git commit --only $APPDIR/ocirepository.yaml $APPDIR/kustomization.yaml \
-  $APPDIR/helmrelease.yaml kubernetes/flux/meta/repositories/helm/$REPO.yaml \
-  kubernetes/flux/meta/repositories/helm/kustomization.yaml -F "$S/msg.txt"
-git show --stat HEAD        # every file here must be yours
+git add -N $APPDIR/ocirepository.yaml          # --only cannot name an untracked file without intent-to-add
+# The exact --only list per release is the table in §1.00. Shape (Intel operator/gpu, which do NOT delete the repo):
+#   git commit --only $APPDIR/ocirepository.yaml $APPDIR/kustomization.yaml $APPDIR/helmrelease.yaml -F "$S/msg.txt"
+# last-user releases add the two meta paths:
+#   ... kubernetes/flux/meta/repositories/helm/$REPO.yaml kubernetes/flux/meta/repositories/helm/kustomization.yaml
+# npu: NO kustomization path (the directory has none):
+#   git commit --only $APPDIR/ocirepository.yaml $APPDIR/helmrelease.yaml kubernetes/flux/meta/repositories/helm/intel.yaml kubernetes/flux/meta/repositories/helm/kustomization.yaml -F "$S/msg.txt"
+git log -1 --format=%s; git show --stat HEAD        # the subject must be YOURS and every file yours
 git push
 ```
 
@@ -932,30 +1040,41 @@ start** — each would delete a component from the update pipeline.
 ### 4.2 Stages 2-7, per component — three assertions, all required
 
 > **CONTENTS ASSERTION 1 (fresh artifact, not stale cache):** the new
-> OCIRepository's `status.artifact.revision` equals `<VER>@<the digest we pinned>`
+> OCIRepository's `status.artifact.revision` equals the manifest digest we pinned
 > **and** its `status.artifact.lastUpdateTime` is **after** the push commit's
-> timestamp — measured below, compared to the commit time. A `Ready` whose
-> artifact predates the commit is the cache answering.
+> timestamp. A `Ready` whose artifact predates the commit is the cache answering.
+> (With `ref.digest` pinned the live OCIRepositories — k8s-gateway and the ARC pair —
+> report `revision = sha256:<manifest digest>` with NO `<tag>@` prefix, so the literal
+> `<VER>@<digest>` compare of the first draft false-failed every component.)
+
+**Before any HelmRelease assertion, the OCIRepository must be `Ready=True`** (this is the first in-cluster use of `registry.k8s.io` as an OCIRepository, for node-feature-discovery; a source that cannot fetch leaves the HelmRelease stuck with the OLD pods kept running, which `git revert` fixes):
 
 ```bash
-kubectl -n $NS get ocirepository $CHART -o json | python3 -c "
-import sys,json;d=json.load(sys.stdin)['status']['artifact']
-print('revision',d['revision']);print('lastUpdateTime',d['lastUpdateTime'])"
-git log -1 --format=%cI HEAD
+kubectl -n $NS wait --for=condition=Ready ocirepository/$OCINAME --timeout=5m          # must print "... condition met"; a timeout = STOP, inspect `describe`, revert if the registry path is wrong
+REV=$(kubectl -n $NS get ocirepository $OCINAME -o jsonpath='{.status.artifact.revision}')
+test "$REV" = "$(cat "$S/digest.txt")" && echo REVISION-IS-PINNED-DIGEST      # must print it; known-bad: compare to "$VER@$(cat "$S/digest.txt")" -> never equal
+kubectl -n $NS get ocirepository $OCINAME -o jsonpath='{.status.artifact.lastUpdateTime}{"\n"}'
+git log -1 --format=%cI HEAD                                                   # lastUpdateTime must be later
 ```
 
-> **CONTENTS ASSERTION 2 (workload no-op modulo the chart label):** exactly **one**
-> new Helm revision; every Deployment/StatefulSet/DaemonSet keeps the same images,
-> replica counts and container set; `generation` advances by at most 1; the only
-> pod-template difference is `helm.sh/chart` gaining `_<digest>`; replacement pods
-> reach Ready with **0 restarts** — measured by re-running Step 1's collector and
-> diffing against `$S/baseline.txt`.
+> **CONTENTS ASSERTION 2 (workload change equals the PREDICTED change, nothing else):**
+> exactly **one** new Helm revision whose `chartVersion` is `<VER>+<digest12>`; every
+> Deployment/StatefulSet/DaemonSet keeps the same images, replica counts and container
+> set (`SPEC` lines identical); and the `VOL` lines differ **only** as Step 4's
+> `rollpred.py` predicted. **No-roll releases** (paperless-ngx, the three Intel
+> releases): the `VOL` lines — generation, pod names, `creationTimestamp`, restart
+> counts — are IDENTICAL. **Rolling releases** (falco, node-feature-discovery, and the
+> later-stage ones): generation +1, `checksum/*` / `helm.sh/chart` change, new pods Ready with 0
+> restarts, each pod's `creationTimestamp` after the commit.
 
 ```bash
+export NS REL WL
 test "$(grep -c '^SPEC' "$S/baseline.txt")" -gt 0 || { echo "ABORT: empty baseline"; exit 1; }
-diff <(bash "$S/collect.sh" | grep '^SPEC') <(grep '^SPEC' "$S/baseline.txt") && echo SPEC-IDENTICAL   # must print SPEC-IDENTICAL
-diff <(bash "$S/collect.sh" | grep '^VOL') <(grep '^VOL' "$S/baseline.txt")   # EXPECTED non-empty: gen +1, chartlabel gains _<digest>, new pod names, restarts all 0
-# Known-bad demo (run once, Stage 3 first component): sed 's/:[^:)]*)/:bogus)/' "$S/baseline.txt" > "$S/bad.txt";
+bash "$S/collect.sh" > "$S/after.txt" || { echo "ABORT: after-collect failed"; exit 1; }
+diff <(grep '^SPEC' "$S/after.txt") <(grep '^SPEC' "$S/baseline.txt") && echo SPEC-IDENTICAL   # must print SPEC-IDENTICAL
+# NO-ROLL release: must print NO-ROLL-CONFIRMED.   ROLLING release: the diff is EXPECTED non-empty; read it against rollpred.py's output.
+diff <(grep '^VOL' "$S/after.txt") <(grep '^VOL' "$S/baseline.txt") && echo NO-ROLL-CONFIRMED
+# Known-bad demo (run once): sed 's/:[^:)]*)/:bogus)/' "$S/baseline.txt" > "$S/bad.txt";
 # diff <(grep '^SPEC' "$S/bad.txt") <(grep '^SPEC' "$S/baseline.txt") must be NON-empty.
 kubectl -n $NS get events --field-selector type=Warning --sort-by=.lastTimestamp | tail -20
 ```
@@ -973,10 +1092,11 @@ kubectl -n $NS get events --field-selector type=Warning --sort-by=.lastTimestamp
 | `grafana`, `opentelemetry`, `unpoller`, `elastic` | **The series still arrive**: scrape target `up == 1` *and* a representative series non-empty over a window starting **after** the roll; for log-emitting components a **non-zero document floor** in Elasticsearch, not just a ceiling. |
 | `external-dns` | A record it owns still resolves publicly **and** internal names still resolve through the internal resolver. Counts, not names. (Log-absence is NOT a PASS criterion — it was never shown to match a known-bad case.) |
 | `nextcloud` | `occ status` plus a file listing returning a non-zero count — its MariaDB StatefulSet rolls. |
-| `gabe565` (paperless-ngx) | A document count equal to the pre-change count **and** one consume-directory round trip. |
+| `gabe565` (paperless-ngx) | **No restart expected, so assert exactly that**: the pod name and `creationTimestamp` captured in the baseline (`VOL pod …` line) are IDENTICAL after (`NO-ROLL-CONFIRMED`), the HelmRelease is Ready on the new revision, **and** the HTTPRoute serves real content: `H=$(kubectl get httproute paperless-ngx -n office -o jsonpath='{.spec.hostnames[0]}')`, `curl -sS -o "$S/pl.html" -w '%{http_code} %{size_download}\n' "https://$H/accounts/login/"` prints `200` and more than 2000 bytes, and `grep -c -i paperless "$S/pl.html"` is at least 1. Dry-run: live login page = `200 6889`, 2 matches; **known-bad** `https://$H/definitely-not-here/` = `302 0`, 0 matches. (The earlier consume-directory round trip created a document, contradicted "count equal", and tested nothing a non-restarting release could have broken.) |
 | `plex`, `jellyfin` | Library item **counts** match the pre-roll baseline (counts only — never titles, in any committed artifact). |
-| `intel`, `node-feature-discovery` | The node labels / device-plugin capacity they publish are still present on all 3 nodes (`kubectl get node -o json` → `status.capacity` for the `gpu.intel.com/*` resources) — an empty capacity map is the silent failure. |
-| `falcosecurity` | A deliberate benign trigger produces a rule event in the expected sink. |
+| `intel` (operator, gpu, npu) | **No restart**: `bash "$T/nodesnap.sh" | diff - "$S/nodes-before.txt"` is empty (12 rows: per node `intel.feature.node.kubernetes.io/gpu` and `/npu` labels plus `gpu.intel.com/i915` and `npu.intel.com/accel` capacity; 2026-11-03 baseline: all `true`, `i915=5`, `accel=1` on all 3 nodes) **and** the DaemonSet pods are unchanged (`intel-gpu-plugin-intel-gpu-plugin` / `intel-npu-plugin-intel-npu-plugin` `VOL pod` lines identical; the operator's controller-manager pod identical). `nodesnap.sh` exits 1 unless it sees exactly 12 rows (an empty capacity map is the silent failure). |
+| `node-feature-discovery` | **Restarts (worker DaemonSet 3/3, master Deployment 1/1).** `kubectl rollout status` can green-light the OLD generation: assert, copy-paste, the worker `kubectl get ds node-feature-discovery-worker -n kube-system -o jsonpath='{.status.observedGeneration} {.metadata.generation} {.status.numberReady} {.status.updatedNumberScheduled} {.status.desiredNumberScheduled}'` (live `5 5 3 3 3`) and the master `kubectl get deploy node-feature-discovery-master -n kube-system -o jsonpath='{.status.observedGeneration} {.metadata.generation} {.status.readyReplicas} {.status.updatedReplicas} {.spec.replicas}'` (live `5 5 1 1 1`) — first two equal, remaining three equal the expected count; **then** `bash "$T/nodesnap.sh" | diff - "$S/nodes-before.txt"` must be EMPTY — the same 12 rows, with before/after values pasted into the commit/GO record. This is the gate that matters: the Intel device plugins are scheduled by the NFD-published `intel.feature…/gpu|npu` labels, so a label lost during the NFD roll would evict the plugin pods and drop `gpu.intel.com/i915` for the seven GPU consumers. If the snapshot differs, re-run it every 30 s for up to 5 minutes (labels are re-published after the master settles) and declare a regression only if the difference persists past that bounded poll; then STOP and revert (§5). |
+| `falcosecurity` | **Restarts (DaemonSet `falco`, 3 pods, `maxUnavailable: 1`, so a per-node detection gap while each pod restarts).** (1) readiness, copy-paste: `kubectl get ds falco -n security -o jsonpath='{.status.observedGeneration} {.metadata.generation} {.status.numberReady} {.status.updatedNumberScheduled} {.status.desiredNumberScheduled}'` — live baseline `34 34 3 3 3`; PASS = the first two numbers equal each other and the last three equal 3 (after the move the generation numbers rise by one, so compare, do not hard-code); every `falco` pod `2/2` Ready with a `creationTimestamp` after the commit. (2) **Sink read-back with a positive control from BEFORE the roll.** falco emits continuously (≈2-3 alerts per node per minute), so the real stream is the trigger: `CUT=$(python3 -c "import datetime;print((datetime.datetime.utcnow()-datetime.timedelta(minutes=10)).strftime('%Y-%m-%dT%H:%M:%S'))")` then `kubectl exec -n security wazuh-manager-master-0 -- tail -n 20000 /var/ossec/logs/alerts/alerts.json | python3 "$T/falco_sink.py" "$CUT"` must print `FALCO-SINK-OK` (alerts from all 3 agents) **before the commit** — if it does not, the sink read is broken and the post-roll read proves nothing: ABORT. (3) After the DaemonSet settles, record `ROLLDONE=$(date -u +%Y-%m-%dT%H:%M:%S)` and repeat the same read with cutoff `$ROLLDONE`, polling for up to 10 minutes (Wazuh lags a few minutes): it must print `FALCO-SINK-OK` — all three nodes producing falco alerts AFTER the roll. **Known-bad** (run 2026-11-03): cutoff `2099-01-01T00:00:00` prints `FALCO-SINK-FAIL` and exits 1. **Do not run the sink read within ~15 minutes either side of 00:00 UTC:** `alerts.json` rotates at UTC midnight, so a read straddling it sees only the new file. Informational only, NOT a gate (the sink read is the gate): no `[error]` lines in the falco pod logs (`docs/sops/falco.md` Test 1). |
 | everything else | The app's own HTTPRoute returns its real content (non-empty, not an error page) on the path a user would use. |
 
 ### 4.3 Whole-plan assertion, at the end of every stage
@@ -1019,8 +1139,19 @@ Then **confirm the cluster is actually back** — do not assume:
 kubectl -n flux-system get helmrepository $REPO -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'   # True
 kubectl -n flux-system get helmchart $NS-$REL -o jsonpath='{.status.artifact.revision}{"\n"}'                         # re-created
 kubectl -n $NS get helmrelease $REL -o json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['status'].get('lastAttemptedRevision'), [(h['version'],h['chartVersion'],h['status']) for h in d['status']['history']])"
-bash "$S/collect.sh" | diff - "$S/baseline.txt"   # images/replicas/containers back to baseline
+export NS REL WL
+bash "$S/collect.sh" > "$S/reverted.txt" || { echo "ABORT: post-revert collect failed"; exit 1; }
+# Compare ONLY what a revert must restore. The full collect.sh output can never diff clean: it carries the HR revision,
+# the Helm history (which GAINS entries on a revert) and the HelmChart line. Pod names/timestamps and generations also
+# legitimately differ for the releases that restarted.
+diff <(grep '^SPEC' "$S/reverted.txt") <(grep '^SPEC' "$S/baseline.txt") && echo SPEC-BACK-TO-BASELINE        # all six releases: must print it
+# falco and node-feature-discovery additionally: the workload VOL lines minus generation and minus the pod lines.
+# The checksum/* annotations must be the BASELINE values again, i.e. the pod template is the pre-move one.
+diff <(grep '^VOL' "$S/reverted.txt" | grep -v '^VOL pod' | sed -E 's/ gen [0-9]+//') \
+     <(grep '^VOL' "$S/baseline.txt" | grep -v '^VOL pod' | sed -E 's/ gen [0-9]+//') && echo VOL-TEMPLATE-BACK-TO-BASELINE
 ```
+
+If `VOL-TEMPLATE-BACK-TO-BASELINE` is absent right after the push, the HelmRelease may simply not have reconciled yet: re-run once it shows the reverted revision, for up to about 10 minutes; persistent absence means STOP. (Dry-run 2026-11-03 against live falco: both lines print. **Known-bad:** a baseline whose `checksum/config` prefix is replaced by the predicted post-move value (`sed 's/2bd4ff4b/135ba72d/'`) makes the second `diff` non-empty and `VOL-TEMPLATE-BACK-TO-BASELINE` is not printed — i.e. a falco still on the moved template is caught. The `VOL pod` lines are excluded on purpose: a rolled DaemonSet has new pod names and `creationTimestamp`s after the revert.)
 
 Three revert-specific facts, so they are not mistaken for failure:
 
@@ -1036,6 +1167,8 @@ Three revert-specific facts, so they are not mistaken for failure:
 3. **Stage 1 (the 6 deletions) reverts cleanly but pointlessly** — the objects
    were referenced by nothing. If something broke after Stage 1 the cause is
    elsewhere; re-adding the sources will not fix it.
+
+4. **Stage 3 specifics (two rolls each for falco and node-feature-discovery).** Forward = one restart, revert = a second restart of each (the pod-template checksum annotations return to the old values). The four other releases revert with no restart. **Intel revert order is newest first: npu (commit 3), then gpu, then the operator.** The npu revert brings `intel.yaml` back; reverting the operator or gpu commit alone, while `intel.yaml` is still deleted, would point that HelmRelease at a HelmRepository that no longer exists. Commits 1 and 2 never deleted it. After a falco or NFD revert, first repeat the §4.2 `observedGeneration`/`numberReady` readiness one-liner for the reverted workload. After a falco revert, repeat the §4.2 falco sink read (`FALCO-SINK-OK` with a cutoff after the revert settled); after an NFD revert, repeat the `nodesnap.sh` diff.
 
 For Stage 0 the rollback is the same `git revert`, confirmed by the version
 snapshot regaining its pre-change row count. For Stage 10 it removes the
@@ -1062,26 +1195,28 @@ emptyDir.
   unrelieved interference warning on `sat-attended:2026-09-12` between
   `edot-collector-0.160.0` and `grafana-orphan-dashboard-uid` — do not add a
   monitoring stage to a slot that already holds two monitoring plans.
+- **Stage 3 window rules (2026-11-03 review).** Step 0 (the safe-update apply) runs first in every window — re-run §2 after it; re-read the live `VER` of each release; no `kube-prometheus-stack` bump may be windowed on 12-13; after `helm-drift-detection` P1 (sat 11-28) rebase the six edits and take the §3.2 Step 1 baseline AFTER it, because it adds `spec.driftDetection` to every HelmRelease and changes `generation` bookkeeping.
 - **Ordering is fixed by dependency, not preference.** Stage 0 before any of 2-7
   (otherwise each migration silently deletes a component from the update
   pipeline). Stage 1 may share Stage 0's window — it is subtraction only. Stage 2
   before 3-7 only because blast radius should be retired while attention is high;
-  if that feels wrong on the day, run Stage 3 first as a rehearsal — it is the one
-  stage with no workload impact at all. Stage 9 only after a soak. Stage 10 last,
+  if that feels wrong on the day, run Stage 3 first as a rehearsal — it is the LOWEST-impact stage,
+  not an impact-free one: falco and node-feature-discovery restart once on the forward move
+  and once on a rollback (§1.00); only the first three Intel commits are zero-impact. Stage 9 only after a soak. Stage 10 last,
   alone.
 - **At most one component per window in Stage 6**, and never `cilium` +
   `longhorn` together: CNI churn plus storage-control-plane churn in one window is
   how a recoverable mistake becomes an unrecoverable one.
 - **Slot reality at the time of the re-plan (2026-11-03, from `maintenance-plan.py --open`).**
   `sun-attended:2026-12-13` currently holds only this plan (schedulable budget
-  `200 - 20 = 180` min; the 90-min Stage 3 slice fits with room for the 20-min
+  `200 - 20 = 180` min; the 100-min Stage 3 slice fits with room for the 20-min
   Step 0 reserve and a hold-back). The neighbours that matter, in time order:
   `sun-attended:2026-11-15` `longhorn-1.13.0` (storage control plane — finished
   and green three weeks before), `sun-attended:2026-11-22` `talos-linux-1.14.5`
   (restarts source-controller; three weeks earlier, cold cache long gone),
   `sat-attended:2026-11-28` `helm-drift-detection` (P1 adds `spec.driftDetection`
   to every HelmRelease — **rebase** the six Stage 3 `helmrelease.yaml` edits on
-  that commit; re-run Step 0 of §3.2 so the baseline is taken after it),
+  that commit; re-run Step 1 (`collect.sh`) so the baseline is taken after it),
   `sun-attended:2026-11-29` `redis-fleet-8.10.3`, `sun-attended:2026-12-06`
   `envoy-proxy-config-distroless-v1.39.4` (gateway restart gate; must be green).
   `nightly` is unattended and must never take a stage of this plan:
@@ -1112,18 +1247,18 @@ move before the window: `VER` is read from the live HelmRelease in §3.2.
 
 | HelmRepository | OCI path | live pin — present in OCI? | signed (2026-09-11) | rolls? | stage |
 |---|---|---|---|---|---|
-| `authentik` | `ghcr.io/goauthentik/helm-charts/authentik` | 2026.8.3 yes (2026.8.5 also present; `authentik-2026.8.5` is windowed 11-21) | no | yes | 5 |
+| `authentik` | `ghcr.io/goauthentik/helm-charts/authentik` | 2026.8.3 yes (2026.8.5 also present; `authentik-2026.8.5` is windowed 11-21) | no | yes (label AND `checksum/secret`) | 5 |
 | `cilium` | `quay.io/cilium/charts/cilium` | 1.20.4 yes | yes (referrers) | yes | 6 |
-| `falcosecurity` | `ghcr.io/falcosecurity/charts/falco` | 9.2.2 yes | yes (bundle v0.3) | no | 3 |
+| `falcosecurity` | `ghcr.io/falcosecurity/charts/falco` | 9.2.2 yes | yes (bundle v0.3) | **yes (DaemonSet, checksum annotations)** | 3 |
 | `gabe565` | `ghcr.io/gabe565/charts/paperless-ngx` | 0.24.1 yes | no | no | 3 |
 | `grafana` | `ghcr.io/grafana-community/helm-charts/grafana` | 14.0.1 yes (`grafana-14.1.0` pending) | no | yes | 5 |
 | `intel` | `ghcr.io/intel/helm-charts/intel-device-plugins-{operator,gpu,npu}` | 0.37.1 yes (all 3) | no | no | 3 |
 | `jetstack` | `quay.io/jetstack/charts/cert-manager` | `v1.21.3` and `1.21.3` both yes | yes (legacy `.sig`) | yes | 6 |
 | `mintplex-labs` | `ghcr.io/mintplex-labs/helm-charts/anythingllm` | 1.0.0 yes | no | yes | 5 |
-| `nextcloud` | `ghcr.io/nextcloud/helm/nextcloud` | 9.4.1 yes | no | yes | 5 |
-| `node-feature-discovery` | `registry.k8s.io/nfd/charts/node-feature-discovery` | 0.20.1 yes | yes (legacy `.sig`) | no | 3 |
+| `nextcloud` | `ghcr.io/nextcloud/helm/nextcloud` | 9.4.1 yes | no | **no** (re-measured; was listed as rolling) | 5 |
+| `node-feature-discovery` | `registry.k8s.io/nfd/charts/node-feature-discovery` | 0.20.1 yes | yes (legacy `.sig`) | **yes (worker DaemonSet + master Deployment)** | 3 |
 | `open-webui` | `ghcr.io/open-webui/helm-charts/open-webui` | 17.0.0 yes | no | yes | 5 |
-| `opentelemetry` | `ghcr.io/open-telemetry/opentelemetry-helm-charts/opentelemetry-kube-stack` | 0.24.3 yes (`otel-operator-0.26.1` windowed 11-07) | no | yes | 5 |
+| `opentelemetry` | `ghcr.io/open-telemetry/opentelemetry-helm-charts/opentelemetry-kube-stack` | 0.26.1 yes (the live pin moved from 0.24.3 on 2026-11-03 via `5aa609d5`; presence of 0.26.1 confirmed by the Step 3 pull in the census run) | no | **no** (re-measured; was listed as rolling) | 5 |
 | `unpoller` | `ghcr.io/unpoller/helm-chart/unpoller` | **2.4.0 ABSENT (404)**, 2.5.0 present | yes (legacy `.sig`) | yes | **8 — blocked** |
 
 **Two traps in this table.** `grafana`: the obvious path
@@ -1194,3 +1329,217 @@ charts-mirror, if it is ever wanted again) · `democratic-csi` · `guerzon` ·
   committing to a mirror.
 - **`flux mirror` is v0.x** and not installed here; its behaviour is documented,
   not exercised.
+
+## 8. Appendix B — Stage 3 tool scripts (each dry-run 2026-11-03; known-bad result stated)
+
+Install once per window. `$T` is a fixed path (every agent Bash call is a new shell):
+
+```bash
+export T=/Users/mu/.claude/jobs/flux-oci/tools; mkdir -p "$T"
+```
+
+`rollpred.py` — the roll predictor (Step 4). Known-bad: falco prints two `WILL ROLL` lines; an empty render prints `ABORT: empty render` and exits 2; paperless-ngx / Intel print `ROLL-PREDICTION: none`. A tool that prints nothing at all is broken, not clean: the last line is mandatory.
+
+**`$T/rollpred.py`**
+
+```bash
+cat > "$T/rollpred.py" <<'EOT'
+import sys, yaml
+WL = ("Deployment", "StatefulSet", "DaemonSet")
+def load(p):
+    out = {}
+    for d in yaml.safe_load_all(open(p)):
+        if d and "kind" in d:
+            out[(d["kind"], d["metadata"].get("name"))] = d
+    return out
+def diff(a, b, path=""):
+    if type(a) != type(b):
+        yield path, a, b; return
+    if isinstance(a, dict):
+        for k in sorted(set(a) | set(b)):
+            yield from diff(a.get(k), b.get(k), path + "/" + str(k))
+    elif isinstance(a, list):
+        if len(a) != len(b):
+            yield path, a, b; return
+        for i, (x, y) in enumerate(zip(a, b)):
+            yield from diff(x, y, path + "[%d]" % i)
+    elif a != b:
+        yield path, a, b
+old, new = load(sys.argv[1]), load(sys.argv[2])
+if not old or not new:
+    print("ABORT: empty render"); sys.exit(2)
+n = 0
+for key in sorted(set(old) | set(new)):
+    if key not in old or key not in new:
+        print("OBJECT-SET-CHANGED", key); n += 1; continue
+    if key[0] in WL:
+        for p, x, y in diff(old[key]["spec"]["template"], new[key]["spec"]["template"]):
+            print("WILL ROLL: %s/%s template%s: %s -> %s" % (key[0], key[1], p, str(x)[:60], str(y)[:60])); n += 1
+    elif key[0] in ("Job", "CronJob"):
+        t = lambda o: (o["spec"].get("jobTemplate") or {}).get("spec", o["spec"]).get("template")
+        for p, x, y in diff(t(old[key]), t(new[key])):
+            print("HOOK/JOB-TEMPLATE-CHANGED (no running pod is replaced): %s/%s template%s" % (key[0], key[1], p))
+    elif key[0] not in ("ConfigMap", "Secret", "ServiceAccount", "Service", "ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding") and "spec" in old[key]:
+        # custom resource consumed by an operator: spec change could roll what the operator owns
+        for p, x, y in diff(old[key].get("spec"), new[key].get("spec")):
+            print("CR-SPEC-CHANGED: %s/%s spec%s" % (key[0], key[1], p)); n += 1
+rolls = n
+print("ROLL-PREDICTION: %s" % ("none" if n == 0 else "see lines above"))
+sys.exit(0)
+EOT
+```
+
+`migrate.py` — writes `ocirepository.yaml`, switches the HelmRelease to `chartRef`, adds the kustomization entry if a `kustomization.yaml` exists, and (6th argument) deletes the HelmRepository file and its line, **but refuses (and writes nothing) while any other HelmRelease in `kubernetes/apps/` still uses that repository**. Atomic: every assertion runs before the first write. Known-bad (run 2026-11-03): the gpu migration with `intel.yaml` as 6th argument while the operator and npu releases still use it prints `REFUSING to delete HelmRepository/intel: still used by [...]` and leaves the tree unchanged; an app dir with no `chart.spec` block raises `no spec.chart.spec block found`. The `chart.spec` replacement removes only the 6-space-indented lines under `spec:` and keeps any comment indented less than that (re-tested on all six releases 2026-11-03: falco's 4-line `timeout: 15m` comment survives; the first version's `\s*#.*` alternative ate it).
+
+**`$T/migrate.py`**
+
+```bash
+cat > "$T/migrate.py" <<'EOT'
+import os, re, sys
+# usage: python3 migrate.py <appdir> <ocirepo-name> <oci-url-without-scheme> <tag> <digest> [<helmrepo-file-to-delete>]
+appdir, name, url, tag, digest = sys.argv[1:6]
+drop = sys.argv[6] if len(sys.argv) > 6 else None
+assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest), "digest must be the manifest digest"
+ocirepo_text = (f"""---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/ocirepository-source-v1.json
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: {name}
+# Replaces the HTTP HelmRepository for this chart (chart index = one mutable third-party URL inside
+# cluster-meta's wait gate; spec.verify exists only on OCIRepository). Plan:
+# runbooks/maintenance/plans/flux-oci-chart-sources.md. THE DIGEST IS THE TRUST ANCHOR: change tag AND
+# digest together, re-derived from the registry, never one alone.
+spec:
+  interval: 1h
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    tag: "{tag}"
+    digest: {digest}
+  url: oci://{url}
+""")
+hr = os.path.join(appdir, "helmrelease.yaml")
+t = open(hr).read()
+new, n = re.subn(r"(?m)^  chart:\n    spec:\n(?:      .*\n)+",
+                 f"  chartRef:\n    kind: OCIRepository\n    name: {name}\n", t, count=1)
+assert n == 1, "no spec.chart.spec block found in " + hr
+ks = os.path.join(appdir, "kustomization.yaml")
+ks_new = None
+if os.path.exists(ks):
+    k = open(ks).read()
+    ks_new, n = re.subn(r"(?m)^(  - )((?:\./)?)helmrelease\.yaml$", r"\1\2ocirepository.yaml\n\1\2helmrelease.yaml", k, count=1)
+    assert n == 1, "no helmrelease.yaml entry in " + ks
+else:
+    print("NOTE: no kustomization.yaml in", appdir, "- Flux auto-includes ocirepository.yaml")
+mk_new = None
+if drop:
+    import glob, yaml
+    repo = os.path.splitext(os.path.basename(drop))[0]
+    others = []
+    for f in glob.glob("kubernetes/apps/**/*.yaml", recursive=True):
+        if os.path.abspath(f) == os.path.abspath(hr):
+            continue
+        try:
+            docs = list(yaml.safe_load_all(open(f)))
+        except Exception:
+            continue
+        for d in docs:
+            if isinstance(d, dict) and d.get("kind") == "HelmRelease":
+                sr = (((d.get("spec") or {}).get("chart") or {}).get("spec") or {}).get("sourceRef") or {}
+                if sr.get("kind") == "HelmRepository" and sr.get("name") == repo:
+                    others.append(f)
+    assert not others, "REFUSING to delete HelmRepository/%s: still used by %s" % (repo, others)
+    mk = "kubernetes/flux/meta/repositories/helm/kustomization.yaml"
+    k = open(mk).read()
+    mk_new = re.sub(r"(?m)^  - (?:\./)?" + re.escape(os.path.basename(drop)) + r"\n", "", k)
+    assert mk_new != k, "entry not found in " + mk
+# nothing has been written yet: every assert above fires before the first write
+open(os.path.join(appdir, "ocirepository.yaml"), "w").write(ocirepo_text)
+open(hr, "w").write(new)
+if ks_new: open(ks, "w").write(ks_new)
+if drop:
+    os.remove(drop); open(mk, "w").write(mk_new)
+EOT
+```
+
+`srcrefs.py` — how many HelmReleases in the WORKING TREE still use a HelmRepository (the deletion gate, Step 5). Measured baseline: `intel` 3, `node-feature-discovery` 1, `gabe565` 1, `falcosecurity` 1; after the migrations 0.
+
+**`$T/srcrefs.py`**
+
+```bash
+cat > "$T/srcrefs.py" <<'EOT'
+import sys, glob, yaml
+# usage: python3 srcrefs.py <HelmRepository name>  -> prints how many HelmReleases in the WORKING TREE still use it as chart.spec.sourceRef
+repo = sys.argv[1]
+n, files = 0, []
+for f in glob.glob("kubernetes/apps/**/*.yaml", recursive=True):
+    try:
+        docs = list(yaml.safe_load_all(open(f)))
+    except Exception:
+        continue
+    for d in docs:
+        if isinstance(d, dict) and d.get("kind") == "HelmRelease":
+            s = (((d.get("spec") or {}).get("chart") or {}).get("spec") or {}).get("sourceRef") or {}
+            if s.get("kind") == "HelmRepository" and s.get("name") == repo:
+                n += 1; files.append(f)
+print(n, *files)
+EOT
+```
+
+`nodesnap.sh` — NFD/Intel gate: 12 rows (3 nodes x 2 labels + 2 capacities). Exits 1 unless exactly 12 rows. Known-bad: a tampered baseline (`i915=5` -> `i915=0`) makes `diff` non-empty.
+
+**`$T/nodesnap.sh`**
+
+```bash
+cat > "$T/nodesnap.sh" <<'EOT'
+kubectl get node -o json | python3 -c "
+import sys, json
+rows = []
+for n in json.load(sys.stdin)['items']:
+    nm = n['metadata']['name']
+    for k, v in n['metadata']['labels'].items():
+        if k in ('intel.feature.node.kubernetes.io/gpu', 'intel.feature.node.kubernetes.io/npu'):
+            rows.append(f'{nm} label {k}={v}')
+    for k, v in n['status']['capacity'].items():
+        if k in ('gpu.intel.com/i915', 'npu.intel.com/accel'):
+            rows.append(f'{nm} capacity {k}={v}')
+print('\n'.join(sorted(rows)))
+if len(rows) != 12:
+    print('SNAPSHOT-FAIL: expected 12 rows (3 nodes x 2 labels + 2 capacities), got', len(rows), file=sys.stderr); sys.exit(1)
+"
+EOT
+```
+
+`falco_sink.py` — reads Wazuh's `alerts.json` and requires a falco-decoded alert from ALL THREE agents after a cutoff. Measured 2026-11-03: falco emits continuously (about 2-3 alerts per node per minute, so no deliberate trigger is needed and none is allowed to substitute for the real stream). Known-bad: cutoff `2099-01-01T00:00:00` prints `FALCO-SINK-FAIL` and exits 1; cutoff 10 minutes ago printed `FALCO-SINK-OK` with 20/24/24 alerts per node.
+
+**`$T/falco_sink.py`**
+
+```bash
+cat > "$T/falco_sink.py" <<'EOT'
+import sys, json, datetime
+# usage: kubectl exec ... tail -n N alerts.json | python3 falco_sink.py <cutoff-ISO-UTC e.g. 2026-11-03T01:00:00>
+cut = datetime.datetime.fromisoformat(sys.argv[1]).replace(tzinfo=datetime.timezone.utc)
+agents = {}
+total = 0
+for line in sys.stdin:
+    try:
+        d = json.loads(line)
+    except ValueError:
+        continue
+    if not str(d.get("location", "")).endswith("/falco.log"):
+        continue
+    ts = datetime.datetime.strptime(d["timestamp"][:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+    total += 1
+    if ts >= cut:
+        a = d.get("agent", {}).get("name", "?")
+        agents[a] = agents.get(a, 0) + 1
+print("falco alerts since", sys.argv[1], "per agent:", json.dumps(agents, sort_keys=True), "(falco alerts scanned:", total, ")")
+if len(agents) < 3:
+    print("FALCO-SINK-FAIL: fewer than 3 agents delivered a falco alert after the cutoff"); sys.exit(1)
+print("FALCO-SINK-OK")
+EOT
+```
+
+`collect.sh` is defined inline in §3.2 Step 1 (it must be re-created per component because it reads `$NS`, `$REL`, `$WL`).

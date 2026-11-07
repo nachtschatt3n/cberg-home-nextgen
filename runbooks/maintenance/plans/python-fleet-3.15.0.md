@@ -41,7 +41,7 @@ conflicts_with:
   - openclaw-2026.10.5                  # same Flux Kustomization ai/openclaw as cronjob/openclaw-probe; currently blocked
   - helm-drift-detection                # adds spec.driftDetection to every HR incl. helmrelease/mcpo
   - flux-oci-chart-sources              # rewrites HelmRelease chart sources (bjw-s app-template consumers incl. mcpo)
-  - nextcloud-9.4.1                     # ns office; an office-wide silence would hide a failing mealie-shopping-sync
+  # 2026-11-03: dropped `nextcloud-9.4.1` (plan retired/never existed; DEAD-REF in maintenance-plan.py --validate)
                                         # (KubeJobFailed). Replaces the dead nextcloud-fleet-35.0.1 ref; the
                                         # nextcloud-fleet-34.0.5 file it briefly pointed at was removed 2026-10-23
 exclusive: false

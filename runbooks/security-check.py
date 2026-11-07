@@ -3785,9 +3785,17 @@ def s4_cve_check() -> tuple[str, Findings, str]:
             # that raised a process timeout; DegradationLog dedupes, and a
             # non-zero rc — the registry-error path — raises nothing at all, so
             # this is the only record for it.)
-            DEGRADED.record(_scope(), "trivy image scan",
-                            f"{len(other)} public/running image(s) still unscannable "
-                            f"after retry — CVE status unknown for them")
+            # Attribute the gap PER IMAGE (component=...), like the private
+            # branch above: a single never-scannable image (e.g. a bare
+            # busybox) otherwise vetoed auto-close for the WHOLE security
+            # section for weeks. DegradationLog.apply() reverts to the
+            # section-wide veto by itself past MAX_SCOPED_COMPONENTS / the
+            # uncovered-fraction floor, so a real registry outage still vetoes.
+            for img in other:
+                DEGRADED.record(_scope(), "trivy image scan",
+                                f"{img.split('@')[0]} still unscannable after "
+                                f"retry — CVE status unknown for it",
+                                component=component_key("image", img))
 
     # AR-029 ("HIGH CVEs") is now applied PRECISELY above by fix-availability
     # (no-upstream-fix → accepted, fixable → surfaced regardless of severity),

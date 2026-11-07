@@ -66,8 +66,8 @@ backup_gate: "per node, before its FIRST forward apply: (1) $W/r-A0/kubernetes-k
 finding_refs:
   - F-6c7843e4                        # "decide PL2 40-45 W and/or shorter PL1 tau via a reviewed plan amendment ... CI +35 % from
                                       # EPP balance_power": this plan is that amendment, measured
-review: ready-for-go@2026-10-05     # 4th pass @5a27a9b8 (0 blocking)
-status: vetted
+review: null   # lapsed: 2026-11-06 sweep 471de4f9 plan-reviewer NEEDS-FIX (3 premises FAIL; ninth-banner-admit gate deleted 090f551dd so isolation + gate-hash check are vacuous; baselines gone; CI shard method changed d03d71317; must re-baseline AFTER talos-linux-1.14.5). Re-plan required.
+status: draft   # demoted 2026-11-06 (review lapsed + needs-fix)
 window: null   # CLEARED 2026-10-13 (maintenance-window-agent, scheduling pass): the now:2026-10-06 stamp is stale (that NOW run never happened). NOT re-stamped: two premises FAIL today, so run-now preflight would refuse it. (1) soak-24h-recorded / baseline-files-present: /private/tmp/powerab-talos-power-tuning-ab/ was emptied on 2026-10-11 (only r-* and src-* dirs left). (2) ci-runner-exclude-node02 executed (f726f523) but faa3ec55 then lifted the nuc14-02 exclusion, so the EXCLUDE_NODES premise and the plan's "one CI shard per node, 02 excluded" baseline no longer describe the cluster. Needs a re-plan (re-baseline) and a fresh review; then two attended NOW evenings (310 min each, exclusive), never beside talos-linux-1.14.2 (sun 11-01), k8s-1.36.5, nextcloud, jellyfin or the etcd change.
 premises:
   - id: nodes-on-talos-1.14

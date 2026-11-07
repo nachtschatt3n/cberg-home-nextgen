@@ -92,8 +92,6 @@ conflicts_with:                   # HARD slot exclusions — the only field
   - longhorn-1.13.0               # the bbolt queue is an RWO Longhorn volume; a Longhorn
                                   # engine/manager roll during the Recreate detach/attach
                                   # is exactly the Multi-Attach / attach-stall surface.
-  - home-assistant-2026.10.2      # pod logs in ES drop while the collector rolls; its
-                                  # gates read the same log path.
 exclusive: false
 security_ref: null                # no open security finding on the 0.161.0 image
                                   # (`finding list --all --grep collector-contrib`,

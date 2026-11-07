@@ -23,10 +23,6 @@ touches:
     - monitoring          # section 4 reads outpost metrics / alert state
 depends_on: []                        # runs BEFORE authentik-2026.8.5, which declares depends_on on this plan
 conflicts_with:
-  - authentik-2026.8.5                  # same HelmRelease + same Deployment roll. SERIALIZED, this plan FIRST (nightly),
-                                        # the bump on a later attended slot after the soak (section 1); never two
-                                        # commits racing on helmrelease.yaml.
-  - envoy-proxy-config-distroless-v1.39.4 # envoy restart carries auth.<domain>; confounds login/forward-auth gates
   - talos-linux-1.14.4                  # node roll evicts authentik pods mid-verification
   - k8s-1.36.5                          # control-plane/kubelet roll
   - etcd-timeouts-5000-500              # etcd must be quiet (pre-check); do not stack

@@ -53,8 +53,6 @@ conflicts_with:
   - helm-drift-detection              # its gate asserts identical Helm revisions; this plan creates two new revisions of
                                       # helmrelease/tube-archivist and edits a configmap in the same kustomization.
   - flux-oci-chart-sources            # re-points the app-template chart sources this HelmRelease renders from.
-  - envoy-proxy-config-distroless-v1.39.4   # §4.6 reads the public path through envoy-external; a proxy roll in the same
-                                      # window makes a 5xx there unattributable.
 exclusive: false
 security_ref: null                    # not security-driven
 capability_change: false              # same app, same features in use, same exposure and auth settings (no env change, the route is

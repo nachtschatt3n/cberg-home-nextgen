@@ -358,6 +358,42 @@ spec:
         visited:
           url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/visited.json
           datasource: TeslaMate
+        battery-health:
+          url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/battery-health.json
+          datasource: TeslaMate
+        charge-level:
+          url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/charge-level.json
+          datasource: TeslaMate
+        database-info:
+          url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/database-info.json
+          datasource: TeslaMate
+        drive-stats:
+          url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/drive-stats.json
+          datasource: TeslaMate
+        mileage:
+          url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/mileage.json
+          datasource: TeslaMate
+        projected-range:
+          url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/projected-range.json
+          datasource: TeslaMate
+        temperatures:
+          url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/temperatures.json
+          datasource: TeslaMate
+        timeline:
+          url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/timeline.json
+          datasource: TeslaMate
+        trip:
+          url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/trip.json
+          datasource: TeslaMate
+        charge-details:
+          url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/internal/charge-details.json
+          datasource: TeslaMate
+        drive-details:
+          url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/internal/drive-details.json
+          datasource: TeslaMate
+        home:
+          url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/internal/home.json
+          datasource: TeslaMate
     sidecar:
       dashboards:
         enabled: true

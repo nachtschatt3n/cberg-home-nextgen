@@ -132,32 +132,25 @@ conflicts_with:                       # exclusive: true already keeps everything
   - multus-macvlan-foundation         # reference/unwindowed; talosctl apply-config on the nodes
   - flux-reconciler-impersonation     # same Flux surface (blocked)
   - edot-collector-0.163.2            # owns the Talos kernel-log path read at §4 (F-e8bb3113)
-  - edot-collector-0.164.0            # its successor draft; same reason
+  # 2026-11-06: removed edot-collector-0.164.0 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
   - otel-operator-0.25.1              # restarts the collectors that ship §4's monitoring signals
-  - otel-operator-0.26.1              # its successor draft (names 1.14.2/1.14.4/1.14.5 back); same reason
-  - flux-fleet-0.62.0                 # restarts the six Flux controllers; the freeze + ImageUpdateAutomation suspend/resume
-  - flux-fleet-0.62.1                 # (§2.0b) and a main-pushing Flux bump cannot share a slot (names only 1.14.2 back)
+  # REMOVED 2026-11-03 (plan retired cdf1cf53, chart live via 5aa609d5; dead ref) - otel-operator-0.26.1              # its successor draft (names 1.14.2/1.14.4/1.14.5 back); same reason
   - flux-oci-chart-sources            # staged Flux source-controller/chart-source programme, moved to sun-attended:2026-12-13
                                       # on 2026-11-02 (11-22 now belongs to this roll); the
                                       # freeze-sha gate reads origin/main and Flux must be quiet (names no talos plan back)
-  - envoy-proxy-config-distroless-v1.39.4  # DECISION (2026-10-23): never the same night; rolls all 6 envoy pods and
-                                      # competes for the PDB disruption budget the drains use; §4.4 gates on the VIPs
   - envoy-proxy-config-distroless-v1.40.0  # same surface (blocked)
   - envoy-proxy-config-distroless-v1.40.2  # same surface (blocked)
   - tube-archivist-elasticsearch-9.5.5     # reciprocal (Longhorn)
   - frigate-reolink-go2rtc-flv        # reciprocal (igpu-i915)
   - grafana-14.1.0                    # reciprocal (monitoring)
-  - authentik-2026.8.5                # reciprocal (authentik)
   - authentik-web-max-requests        # reciprocal; its premise is "no etcd leader change in 1h" (F-98043e32)
-  - gha-fleet-0.15.1                  # reciprocal (ci-runner load drives etcd churn, F-f5879ed8)
+  # 2026-11-06: removed gha-fleet-0.15.1 - plan executed and retired (288a915fe); DEAD-REF in maintenance-plan.py --validate.
   - icloud-drive-fleet-2.3.0          # reciprocal
-  - jellyfin-3.7.0                    # reciprocal (igpu-i915)
-  - plex-1.43.5.11079                 # reciprocal (igpu-i915)
   - openclaw-2026.10.5                # reciprocal
   - otbr-0.4.0                        # reciprocal (host-netfilter on k8s-nuc14-03)
   - otbr-thread-rcp-recovery          # reciprocal (host-netfilter on k8s-nuc14-03)
   - redis-fleet-8.10.3                # reciprocal (sun-attended:2026-11-29)
-  - wazuh-100404-ci-build-tuning      # reciprocal
+  # 2026-11-03: dropped `wazuh-100404-ci-build-tuning` (plan retired/never existed; DEAD-REF in maintenance-plan.py --validate)
   - cli-tool-pins                     # touches .mise.toml (the talosctl pin §3.12 moves); names talos-linux-1.14.2
   - helm-drift-detection              # its P2 rolls intel-gpu-plugin (re-registers i915 on every node)
   # No kube-prometheus-stack PLAN file exists (2026-11-02), but Renovate PR #428 (kube-prometheus-stack 92.11.1 ->

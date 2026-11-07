@@ -36,7 +36,6 @@ depends_on: []
   # plan-premises.py allows no network read command, so it could not run).
 conflicts_with:                       # pruned 2026-10-25: only plans that still exist and are not executed/superseded
   - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af
-  - envoy-proxy-config-distroless-v1.39.4   # SAME pin line (file name kept; it now targets distroless-v1.39.5)
   - talos-linux-1.14.4                # node drain competes for the single PDB disruption
   - flux-reconciler-impersonation     # rewrites how kustomize-controller applies this
   - flux-oci-chart-sources            # moves Flux sources; same §3/§5 apply-and-revert path

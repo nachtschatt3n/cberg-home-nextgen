@@ -637,68 +637,8 @@ data:
         <group>falco,homelab,</group>
       </rule>
 
-      <!-- Suppress Falco "Drop and execute new binary in container" when
-           triggered by the paperclip ai-tools sidecar. paperclip is an
-           AI agent platform whose `tools` container is a uid=0 ubuntu
-           sidecar that runs apt-get + dpkg + update-alternatives during
-           bootstrap to install language/tool dependencies on the fly.
-           Each apt/dpkg invocation modifies binaries under /usr/bin/*
-           AFTER the container has started, which Falco's "drop+exec
-           new binary" rule (parent rule 100404, Critical) treats as
-           potential compromise. Volume on 2026-05-12 was 1,461/24h on
-           k8s-nuc14-03 (100% of the entire high-sev bucket); AR-009
-           documents the privileged tools sidecar as expected.
 
-           Match shape: pcre2 on the `output` string, anchoring on
-           k8smeta_pod_name=paperclip- AND container_image_repository=
-           docker.io/library/ubuntu. Specific enough that no
-           false-silence happens — paperclip is the only ubuntu-based
-           workload in the cluster, and the `paperclip-` pod-name
-           prefix doesn't collide with anything else. -->
-      <rule id="100413" level="0">
-        <if_sid>100404</if_sid>
-        <field name="output" type="pcre2">k8smeta_pod_name=paperclip-.*container_image_repository=docker\.io/library/ubuntu</field>
-        <description>Falco: ignore paperclip ai-tools sidecar apt/dpkg postinst (AR-009, expected)</description>
-        <group>falco,homelab,suppress,</group>
-      </rule>
 
-      <!-- Suppress Falco "Drop and execute new binary in container" when
-           triggered by the Nextcloud Collabora Online (richdocumentscode)
-           AppImage extraction. The richdocumentscode app ships a bundled
-           Collabora CODE AppImage that cannot mount FUSE in-pod, so it
-           extracts to /tmp/appimage_extracted_<rand>/ and executes its
-           binaries (cpio, coolwsd, coolforkit-ns, coolmount) from there
-           on every pod start and on first office-document open.
-           Triggered by parent rule 100404 (Critical, level 12). Volume
-           on 2026-05-13: 3 events on k8s-nuc14-02 after node-wide reboot
-           at 15:06; recurs on every Nextcloud pod restart. Image is the
-           official docker.io/nextcloud:33.0.0. -->
-      <rule id="100414" level="0">
-        <if_sid>100404</if_sid>
-        <field name="output" type="pcre2">k8smeta_pod_name=nextcloud-.*proc_exepath=/tmp/appimage_extracted_</field>
-        <description>Falco: ignore Nextcloud Collabora CODE AppImage extraction (cpio/coolwsd/coolforkit-ns/coolmount, expected)</description>
-        <group>falco,homelab,suppress,</group>
-      </rule>
-
-      <!-- Suppress Falco "Drop and execute new binary in container" for the
-           ESPHome firmware build. ESPHome downloads the ESP-IDF toolchain into
-           the container at RUNTIME (into /root/.cache/esphome/idf/tools/), so
-           every compiler binary is by definition not part of the base image and
-           trips rule 100404. Volume on 2026-08-14: 62 level-12 events in an
-           82-second burst on k8s-nuc14-01 — xtensa-esp-elf-/riscv32-esp-elf
-           --version x24 each, cmake x6, ninja x4, esp32ulp-elf-as x4 — all
-           `--version` capability probes at the start of one build, parent
-           `python`, cwd /config/.esphome/build/. No shell, no network tooling,
-           no persistence artifact, nothing touching credentials.
-           SCOPED DELIBERATELY to image AND exepath: suppressing by pod name or
-           namespace alone would blind a genuine drop-and-execute in the very
-           same pod, which is exactly the attack this rule exists to catch. -->
-      <rule id="100415" level="0">
-        <if_sid>100404</if_sid>
-        <field name="output" type="pcre2">container_image_repository=ghcr\.io/esphome/esphome.*proc_exepath=/root/\.cache/esphome/</field>
-        <description>Falco: ignore ESPHome ESP-IDF toolchain execution during firmware build (runtime-downloaded compilers, expected)</description>
-        <group>falco,homelab,suppress,</group>
-      </rule>
 
       <rule id="100401" level="3">
         <if_sid>100400</if_sid>
@@ -723,5 +663,74 @@ data:
         <field name="priority" type="pcre2">^(Critical|Alert|Emergency)$</field>
         <description>Falco $(priority): $(rule)</description>
         <group>falco,homelab,attack,</group>
+      </rule>
+      <!-- ── Children of 100404 MUST be defined AFTER 100404 (below). ──────────
+           analysisd resolves <if_sid> only against rules ALREADY loaded; a child
+           placed above its parent is dropped with "WARNING (7617): Signature ID
+           '100404' was not found and will be ignored in the 'if_sid' option" and
+           is INERT. 100413/100414/100415 sat above 100404 from their creation
+           until 2026-10 and never fired (ESPHome bursts kept alerting at level 12
+           on 2026-08-26/27). 100413 (paperclip blanket) was deleted rather than
+           moved: F-6dc08159 forbids a blanket suppression of that container.
+           ───────────────────────────────────────────────────────────────────── -->
+      <!-- Suppress Falco "Drop and execute new binary in container" when
+           triggered by the Nextcloud Collabora Online (richdocumentscode)
+           AppImage extraction. The richdocumentscode app ships a bundled
+           Collabora CODE AppImage that cannot mount FUSE in-pod, so it
+           extracts to /tmp/appimage_extracted_<rand>/ and executes its
+           binaries (cpio, coolwsd, coolforkit-ns, coolmount) from there
+           on every pod start and on first office-document open.
+           Triggered by parent rule 100404 (Critical, level 12). Volume
+           on 2026-05-13: 3 events on k8s-nuc14-02 after node-wide reboot
+           at 15:06; recurs on every Nextcloud pod restart. Image is the
+           official docker.io/nextcloud:33.0.0. -->
+      <rule id="100414" level="0">
+        <if_sid>100404</if_sid>
+        <field name="output" type="pcre2">k8smeta_pod_name=nextcloud-.*proc_exepath=/tmp/appimage_extracted_</field>
+        <description>Falco: ignore Nextcloud Collabora CODE AppImage extraction (cpio/coolwsd/coolforkit-ns/coolmount, expected)</description>
+        <group>falco,homelab,suppress,</group>
+      </rule>
+      <!-- Suppress Falco "Drop and execute new binary in container" for the
+           ESPHome firmware build. ESPHome downloads the ESP-IDF toolchain into
+           the container at RUNTIME (into /root/.cache/esphome/idf/tools/), so
+           every compiler binary is by definition not part of the base image and
+           trips rule 100404. Volume on 2026-08-14: 62 level-12 events in an
+           82-second burst on k8s-nuc14-01 — xtensa-esp-elf-/riscv32-esp-elf
+           --version x24 each, cmake x6, ninja x4, esp32ulp-elf-as x4 — all
+           `--version` capability probes at the start of one build, parent
+           `python`, cwd /config/.esphome/build/. No shell, no network tooling,
+           no persistence artifact, nothing touching credentials.
+           SCOPED DELIBERATELY to image AND exepath: suppressing by pod name or
+           namespace alone would blind a genuine drop-and-execute in the very
+           same pod, which is exactly the attack this rule exists to catch. -->
+      <rule id="100415" level="0">
+        <if_sid>100404</if_sid>
+        <field name="output" type="pcre2">container_image_repository=ghcr\.io/esphome/esphome.*proc_exepath=/root/\.cache/esphome/</field>
+        <description>Falco: ignore ESPHome ESP-IDF toolchain execution during firmware build (runtime-downloaded compilers, expected)</description>
+        <group>falco,homelab,suppress,</group>
+      </rule>
+      <!-- CI image builds on the ARC dind/BuildKit runners (arc-build,
+           ci-runner; warm runners since 2026-10-06). Containers started by the
+           runner's inner dockerd/buildkitd are INVISIBLE to the CRI, so Falco
+           reports k8smeta_pod_name/ns/image as <NA> and namespace scoping is
+           impossible; scope instead on (a) proc_sname=docker-init (session
+           leader is the Docker init shim (docker-init) — only the dind daemons run it here),
+           (b) all-<NA> k8s metadata, and (c) an EXACT exepath per build tool.
+           DEMOTED to level 3, not 0: the event stays in wazuh-alerts for audit,
+           it just leaves the level>=12 critical bucket. Any OTHER binary dropped
+           and executed inside a dind build container still alerts at 12.
+           Evidence: F-1ce8300f / F-2804f72b (22 hits 2026-10-06, all these two
+           shapes; 0 matches in the other 114k retained 100404 events). -->
+      <rule id="100416" level="3">
+        <if_sid>100404</if_sid>
+        <field name="output" type="pcre2">proc_sname=docker-init .*proc_exepath=/tmp/qemu-check\d+/check parent=buildkitd .*k8smeta_pod_name=\WNA\W k8smeta_ns_name=\WNA\W .*container_image_repository=\WNA\W</field>
+        <description>Falco (CI build, demoted): buildkitd QEMU/binfmt probe /tmp/qemu-check*/check in a dind container</description>
+        <group>falco,homelab,ci_build,</group>
+      </rule>
+      <rule id="100417" level="3">
+        <if_sid>100404</if_sid>
+        <field name="output" type="pcre2">proc_sname=docker-init .*proc_exepath=/app/node_modules/(?:esbuild|@esbuild/linux-[a-z0-9]+)/bin/esbuild .*k8smeta_pod_name=\WNA\W k8smeta_ns_name=\WNA\W container_id=buildkit/\w+ .*container_image_repository=\WNA\W</field>
+        <description>Falco (CI build, demoted): esbuild platform binary run inside a BuildKit RUN step</description>
+        <group>falco,homelab,ci_build,</group>
       </rule>
     </group>

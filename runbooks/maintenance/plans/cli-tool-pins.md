@@ -60,7 +60,7 @@ sops_refs:
   - docs/sops/vulnerability-disclosure.md
   - docs/sops/audit-script-correctness.md
 review: ready-for-go@2026-10-05   # plan-reviewer 2026-10-05: needs-fix (sole blocker §4.2 busybox Results-key control) -> fixed per the reviewer's exact correction (rc==0 + version + tally None), dry-tested on 0.70
-status: vetted
+status: superseded   # 2026-11-06 sweep 471de4f9 plan-reviewer: REJECT. 6/8 targets already landed via Renovate (sops 201d84186, age db10b1ae3, task 222517be8, yq b3f649c17, trivy 58416a707..007037488, cloudflared 07bf6bc78); premise pins-still-current unpassable since c0cd22f9e (8 patterns vs expect 9). Remainder (jq 1.7.1->1.8.2, kustomize 5.6.0->5.8.3) needs a narrow successor plan; never executed
 window: null   # 2026-10-05 schedule: operator NOW run (daytime, attended, exclusive) on 2026-10-08, BEFORE flux-distribution-2.9.6 (its premise flux-distribution-still-2.9.3); stamp via run-now.py at run time
 generated: "2026-10-05"
 ---

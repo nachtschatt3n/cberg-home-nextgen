@@ -65,7 +65,7 @@ conflicts_with:
   - nextcloud-mcp-0.203.0               # blocked — every gate calls into Nextcloud; lists nextcloud-redis restart
   - nextcloud-mcp-0.204.0               # blocked — successor chain of 0.203.0, same
   - bitnamilegacy-exit-nextcloud-db     # blocked — quiesces Nextcloud; never stack a session-store restart on a DB cutover
-  - python-fleet-3.15.2                 # sat-attended:2026-11-14 — rolls ai/ + office/ app images that are redis consumers
+  # 2026-11-06: removed python-fleet-3.15.2 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
   - vaultwarden-1.37.4                  # vetted — office namespace, shared monitoring; both read Prometheus after a restart
   - openclaw-2026.10.5                  # blocked — namespace ai (leg 4 restarts the open-webui redis pod)
   # Platform serialisation (a roll of these confounds every reconnect gate in §4):
@@ -74,14 +74,12 @@ conflicts_with:
   - flux-reconciler-impersonation       # blocked — changes WHO applies the Kustomizations/HelmReleases this plan relies on
   - talos-linux-1.14.5                  # node reboots (successor of talos-linux-1.14.4, which its own header supersedes)
   - longhorn-1.13.0                     # sun-attended:2026-11-15 — two Longhorn PVCs are remounted here; never stack on a storage upgrade
-  - authentik-2026.8.5                  # sat-attended:2026-11-21 — SSO for the attended Nextcloud/Paperless/Immich/open-webui checks
   - envoy-proxy-config-distroless-v1.40.0  # public edge roll hides app reachability gates
   - envoy-proxy-config-distroless-v1.40.2  # same
-  - envoy-proxy-config-distroless-v1.39.4  # same
   - etcd-timeouts-5000-500              # sun-attended:2026-11-08 — control-plane timing change under nine rolling Deployments
   # The window's instrument (§4 reads Prometheus; a Grafana/operator/collector roll in the same slot confounds the controls):
   - grafana-14.1.0                      # vetted — monitoring; the controls read Prometheus, Grafana is the operator's second instrument
-  - otel-operator-0.26.1                # draft — monitoring; §4 reads Prometheus too
+  # REMOVED 2026-11-03 (plan retired cdf1cf53, chart live via 5aa609d5; dead ref) - otel-operator-0.26.1                # draft — monitoring; §4 reads Prometheus too
   # No kube-prometheus-stack-* plan is open (it rides the auto lane). If one is filed, or Step 0 lands a kube-prometheus-stack
   # bump the same night, add/serialize it: §4 reads Prometheus.
   # Dropped as dead refs (2026-11-02): authentik-web-max-requests (status executed), nextcloud-9.4.1 and nextcloud-whiteboard-2.1.2 (executed 2026-10-29, no plan file),

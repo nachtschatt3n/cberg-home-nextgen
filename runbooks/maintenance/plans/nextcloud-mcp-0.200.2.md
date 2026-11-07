@@ -35,7 +35,7 @@ conflicts_with:
   # - nextcloud-fleet-35.0.1 (DONE 2026-10-22: server live 35.0.2; no plan file remains) was: awaiting-go (window sun-attended:2026-10-18 passed, live server still 34.0.4). Nextcloud
                                       # MAJOR; every §4 contents gate is a live call into that server; premise
                                       # nextcloud-server-still-34 fails closed once it lands -> re-vet this plan.
-  - nextcloud-9.4.1                   # draft; chart/exporter leg of the Nextcloud move, restarts deployment/nextcloud.
+  # 2026-11-03: dropped `nextcloud-9.4.1` (plan retired/never existed; DEAD-REF in maintenance-plan.py --validate)
   - redis-fleet-8.10.2                # vetted sun-attended:2026-10-25; restarts office/nextcloud-redis (all sessions drop).
   - bitnamilegacy-exit-nextcloud-db   # blocked/unwindowed; quiesces Nextcloud if revived.
   - nextcloud-mcp-0.199.1             # SUPERSEDED BY THIS PLAN (§1.5): same component, same HR line. Drop once that file is

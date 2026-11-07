@@ -94,7 +94,7 @@ conflicts_with:
   - redis-fleet-8.10.3                # retargeted 2026-10-27 (8.10.2 superseded); upgrades immich-redis + sure-redis HRs
   # traccar-6.16.0 REMOVED 2026-09-29: executed green in nightly:2026-09-29 (3a943035), plan retired (1a40b257)
   - otel-operator-0.23.0              # reciprocal (it names this plan); HR bump -> attribution
-  - otel-operator-0.26.1              # same HelmRelease family; reciprocal added 2026-11-02 (plan-reviewer)
+  # REMOVED 2026-11-03 (plan retired cdf1cf53, chart live via 5aa609d5; dead ref) - otel-operator-0.26.1              # same HelmRelease family; reciprocal added 2026-11-02 (plan-reviewer)
 security_ref: null
 capability_change: false              # no user-visible behaviour changes; Flux reconciles the
                                       # same manifests, it merely starts to notice edits
@@ -107,7 +107,7 @@ autonomy_override: human-gated        # RESTRICTS only. P0 executed. P1 is a ded
                                       # file cannot be one AUTO-NIGHT unit, so the scheduler
                                       # must not treat it as one.
 finding_refs: []
-review: ready-for-go@2026-09-28   # plan-reviewer: needs-fix (render-gate false-FAIL on self-growing
+review: ready-for-go@2026-11-06   # 2026-11-06 sweep 471de4f9 re-review: ready-for-go for P1 (warn) ONLY; all P1 gates re-proven fail-on-bad/pass-on-good live; nonblocking: stale counts (live 117 HR / 132 children), dead conflicts refs, P2/P3 gates need fail-closed wrapper. Prior: 2026-09-28   # plan-reviewer: needs-fix (render-gate false-FAIL on self-growing
                       # ConfigMap cluster-settings + 9 non-blocking) -> fixed -> READY-FOR-GO same day.
 status: vetted   # 2026-09-28 P1 RE-PLANNED (§1.5, §3.0.0): child patch is now JSON6902 op:add (proven to keep all
                       # 18 null leaves on the 7 null-bearing HRs), with pre-commit parent/render gates and a

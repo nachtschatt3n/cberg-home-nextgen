@@ -5,7 +5,7 @@
 #   scripts/ninth-banner-test.sh <ref> <unit|e2e|nightly|responsive|release|sims> [shards]
 #
 #   ref     commit sha (short ok), branch or tag of nachtschatt3n/the-ninth-banner
-#   shards  default: e2e/nightly/responsive/release 3, sims 4, unit 1 (forced)
+#   shards  default: e2e/nightly/responsive/release 3, sims 6, unit 1 (forced)
 #
 # release: when every shard has reported, posts the commit status
 # "E2E (GPU, k8s)" on the game repo with gh (the pods hold no token).
@@ -50,7 +50,7 @@ ref_in="$1"; suite="$2"; shards="${3:-}"
 case "$suite" in
     unit) shards=1 ;;
     e2e|nightly|responsive|release) shards="${shards:-3}" ;;
-    sims) shards="${shards:-4}" ;;
+    sims) shards="${shards:-6}" ;;
     *) echo "unknown suite '$suite'"; usage ;;
 esac
 [[ "$shards" =~ ^[1-9][0-9]?$ ]] || { echo "shards must be 1..99"; exit 2; }
@@ -133,9 +133,9 @@ sed -e "s|__JOB_NAME__|tnb-probe|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite
 # the pod's CPU request comes from the rendered pod spec, never hardcoded
 req_m="$(python3 "$admit" podreq "$probe")" || { rm -f "$probe"; echo "admission: cannot read the pod CPU request from the rendered template"; exit 3; }
 rm -f "$probe"
-# sims: all shards at once (max 4) if it fits, else 2; others keep today's parallelism
+# sims: all shards at once (max 6) if it fits, else 2; others keep today's parallelism
 if [ "$suite" = sims ]; then
-    full=$(( shards < 4 ? shards : 4 )); half=$(( shards < 2 ? shards : 2 ))
+    full=$(( shards < 6 ? shards : 6 )); half=$(( shards < 2 ? shards : 2 ))
     par_list="$full"; [ "$half" -lt "$full" ] && par_list="$full $half"
 else
     par_list="$parallelism"

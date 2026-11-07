@@ -37,24 +37,6 @@ spec:
   hostnames:
     - "drive.${SECRET_DOMAIN}"
   rules:
-    # Compensating control (security_ref: F-6368968f, F-d371c89e): reject request
-    # bodies that declare a Brotli Content-Encoding before they reach the app.
-    # The app never legitimately receives one. A header match adds precedence over
-    # the plain "/" rule below, so this wins for everything except the more
-    # specific /push prefix. Remove when the security_ref findings close.
-    - matches:
-        - path: { type: PathPrefix, value: / }
-          headers:
-            - type: RegularExpression
-              name: Content-Encoding
-              # Envoy full-matches the whole header value, hence the wildcards.
-              value: "(?i)(.*[ ,])?br([ ,;].*)?"
-      filters:
-        - type: ExtensionRef
-          extensionRef:
-            group: gateway.envoyproxy.io
-            kind: HTTPRouteFilter
-            name: nextcloud-reject-br-body
     # /push FIRST for readability, though Gateway API resolves by longest
     # match regardless of order. This was a SEPARATE Ingress
     # (nextcloud-notify-push) sharing the same hostname.
@@ -109,16 +91,3 @@ spec:
 #   websocket-services       -> Envoy passes HTTP/1.1 Upgrade natively.
 #   force-ssl-redirect       -> the cluster-wide httproute-https-redirect
 #   ssl-redirect                already 301s every host on the http listener.
----
-apiVersion: gateway.envoyproxy.io/v1alpha1
-kind: HTTPRouteFilter
-metadata:
-  name: nextcloud-reject-br-body
-  namespace: office
-spec:
-  directResponse:
-    statusCode: 415
-    contentType: text/plain
-    body:
-      type: Inline
-      inline: "unsupported content-encoding\n"

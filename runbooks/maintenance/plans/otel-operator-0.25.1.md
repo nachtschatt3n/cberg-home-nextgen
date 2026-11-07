@@ -58,7 +58,6 @@ conflicts_with:                        # ONLY this field is honoured by window-s
   - helm-drift-detection               # writes spec.driftDetection into this same HelmRelease
   - talos-linux-1.14.2                 # node roll re-creates every collector pod; §4.4 per-node gate
   - talos-linux-1.14.4                 # cannot attribute a missing node (same reason)
-  - home-assistant-2026.10.2           # its gates read the same log/metric path
 exclusive: false
 security_ref: null                     # not security-driven. Side effect: the collector image moves off
                                        # collector-k8s 0.159.0, the subject of AR-accepted F-369edfe8 -
