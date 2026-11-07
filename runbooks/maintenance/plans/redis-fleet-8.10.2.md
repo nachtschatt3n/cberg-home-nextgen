@@ -65,7 +65,7 @@ conflicts_with:
   - paperless-db-13.0.2                 # vetted — restarts paperless-ngx and its DB; keep the celery-broker swap out of that slot.
   - python-fleet-3.15.0                 # draft sat-attended:2026-11-14 — rolls ai/ + office/ app images that are redis consumers
   - immich-server-3.3.5                 # reciprocity (2026-10-25): rolls immich-server, the BullMQ consumer of immich-redis (leg 5); never the same night
-  - openclaw-2026.10.5                  # 2026-10-31 attended full day, namespace ai
+  - openclaw-2026.11.1                  # 2026-10-31 attended full day, namespace ai
   # Platform serialisation (a roll of these confounds every reconnect gate in §4):
   - helm-drift-detection                # its gate asserts Helm revisions are IDENTICAL across all releases; this plan upgrades 5 releases
   - flux-oci-chart-sources              # re-points chart sources incl. open-webui / app-template releases

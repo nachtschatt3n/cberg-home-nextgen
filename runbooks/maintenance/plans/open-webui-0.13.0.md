@@ -37,7 +37,7 @@ conflicts_with:
                                         # open-webui revisions N+1 (and N+2 in §3.5).
   # 2026-11-06: removed python-fleet-3.15.2 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
                                         # restart during §4 confounds the tool-path checks.
-  - openclaw-2026.10.5                  # blocked - namespace ai roll; listed so an unblock cannot co-schedule.
+  - openclaw-2026.11.1                  # blocked - namespace ai roll; listed so an unblock cannot co-schedule.
   - longhorn-1.13.0                     # sun-attended:2026-11-15 - open-webui-20g is the volume we copy and may restore from.
   - talos-linux-1.14.5                  # sun-attended:2026-11-22 - node drains/reboots would confound the single-replica pod gates.
   - flux-reconciler-impersonation       # blocked - changes WHO applies the HelmRelease this plan relies on.

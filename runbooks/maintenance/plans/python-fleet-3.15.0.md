@@ -38,7 +38,7 @@ conflicts_with:
   # flux-distribution-2.9.6 dropped 2026-10-25 (executed/retired - no longer an open plan).
   - redis-fleet-8.10.3                  # reciprocity: it restarts redis for office/ consumers (retargeted 2026-10-27; ai/ sidecar left that plan)
                                         # (sun-attended:2026-11-29, so no same-slot clash, but they must not share a night)
-  - openclaw-2026.10.5                  # same Flux Kustomization ai/openclaw as cronjob/openclaw-probe; currently blocked
+  - openclaw-2026.11.1                  # same Flux Kustomization ai/openclaw as cronjob/openclaw-probe; currently blocked
   - helm-drift-detection                # adds spec.driftDetection to every HR incl. helmrelease/mcpo
   - flux-oci-chart-sources              # rewrites HelmRelease chart sources (bjw-s app-template consumers incl. mcpo)
   # 2026-11-03: dropped `nextcloud-9.4.1` (plan retired/never existed; DEAD-REF in maintenance-plan.py --validate)
@@ -513,7 +513,7 @@ probe POSTs `endsAt=now`); no manual Alertmanager action.
   `flux-fleet-0.60.0` (executed), `kube-prometheus-stack-92.2.0` (no kps plan is open; **if one is filed it must not
   share the night** - §4.1 asserts `POST 200` to Alertmanager and the CONTROL lines read Prometheus).
 - **Flux plans** (`flux-oci-chart-sources`, `helm-drift-detection`)
-  restart or rewrite the machinery that applies `helmrelease/mcpo`; serialize. `openclaw-2026.10.5` (blocked) shares the
+  restart or rewrite the machinery that applies `helmrelease/mcpo`; serialize. `openclaw-2026.11.1` (blocked) shares the
   Flux Kustomization `ai/openclaw` with `cronjob/openclaw-probe`.
 - **Renovate 3.14.9** (auto-reverted 2026-10-23, RE-LANDED 2026-10-25 via #420, §1.4): done; further x.y.z patches may still land via Step 0 before the slot. Fine: §2.0, the premises and the sed accept 3.14.8 or 3.14.9.
 - **redis-fleet-8.10.2** (sun-attended:2026-11-29) restarts the redis behind ai/open-webui and office consumers; listed in

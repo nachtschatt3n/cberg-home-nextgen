@@ -1,14 +1,14 @@
 ---
-plan_id: openclaw-2026.10.5
+plan_id: openclaw-2026.11.1
+supersedes: openclaw-2026.10.5   # same upgrade, retargeted 2026-11-07 (10.5/10.6 -> newest stable 11.1)
 component: openclaw
 status: blocked
 review: null
-window: "2026-10-31 attended full day (confirmed)"
+window: "2026-11-07 attended full day (operator: all of them, the full openclaw day); live roll only on the coordinator go-live message"
 findings: [F-79c6922e, F-39d3d443]     # openclaw + @openclaw/discord 2026.6.11 -> 2026.10.5
 kind: npm
 current: "2026.6.11"
-target: "2026.10.5"
-recommended_target: "2026.10.6"   # see unblock_stages S0; switch `target` when S1 passes
+target: "2026.11.1"   # npm latest 2026-11-07; re-check dist-tags at run time
 update_type: major
 risk: high
 capability_change: true       # major: new model ids, plugin set and state migrations change user-visible behaviour
@@ -34,7 +34,60 @@ unblock_stages:                      # ONE attended day (Sat 2026-10-31); status
   - id: A-attended-roll    # afternoon block: quiet crons, fresh snapshot/backup, GitOps roll, verification, hard rollback cutoff 13:30
 ---
 
-# openclaw 2026.6.11 -> 2026.10.5
+# openclaw 2026.6.11 -> 2026.11.1
+
+> Sections 0a-7 below were written for 10.5/10.6 and are kept as reference; where they differ, section R (this
+> retarget, 2026-11-07) governs. `review` stays null: NOT ready for go (blocker R.2).
+
+## R. Retarget and cloned-PVC rehearsal result, 2026-11-07 (openclaw-agent)
+
+**Verdict: BLOCKED at `openclaw doctor --fix` on 2026.11.1. Reproduced on two independent clones. Do not roll.**
+
+Operator direction applied: newest stable of everything, old node-22 and 9.x exclusions ignored. Targets: openclaw
+2026.11.1 (`latest`), `@openclaw/codex` + `@openclaw/discord` 2026.11.1 (peer `>=2026.11.1`), `@openai/codex` unpinned
+(init installs newest), node 24.22.2-bookworm digest-pinned (`sha256:8fa96264...`; 24.22.1 tag was rebuilt in place to a
+different digest). Node 26 was NOT compared: the rehearsal never got past doctor, so no node A/B can be measured yet.
+engines for 11.1: `>=24.16.0 <25 || >=26.1.0`.
+
+**Rehearsal setup (scratch objects, all labelled `purpose=openclaw-rehearsal-2026-11-07`, production untouched):**
+Longhorn Volume `openclaw-trial-data` and `openclaw-trial2-data` (storage ns) restored from backup `backup-92bafe79c04542f2`
+(2026-11-06 23:08Z, ~9 min restore), PV/PVC of the same names in `ai`, Secret `openclaw-trial-secret` (every credential blanked),
+Deployments `openclaw-trial` / `openclaw-trial2` (scaled to 0). Pod spec rendered with `helm template` from the modified
+HelmRelease so the init script ran verbatim; app container held on `sleep infinity` and the boot steps run by hand.
+
+**R.1 Measured, passing**
+- Init (node 24.22.2) installs cleanly: `openclaw --version` 2026.11.1; managed plugins `@openclaw/codex` and `@openclaw/discord`
+  both 2026.11.1; the peer symlink loop creates `.../@openclaw/codex/node_modules/openclaw`. Old `ERR_MODULE_NOT_FOUND`: NOT
+  reproduced at install/doctor time (the plugin path never crashed). It is untested at gateway boot and on a model turn
+  because those are behind R.2.
+- Agent DB schema migration v1 -> v27 for all 9 agents ran in the first doctor pass (pre-migration `.bak` copies written per db).
+- Doctor wall-clock 1m20s to 2m40s per pass on the ~28 GB store (well under the 15m Helm timeout), but it needs several passes.
+
+**R.2 Blocking defects (each measured; fixes in R.3 are required but NOT sufficient)**
+1. `/tmp` (emptyDir, fsGroup) is mode 2777 and `/home/node` (PVC root) is 2775: doctor refuses ("temp workspace ancestor /tmp has
+   group/world-writable mode 2777 without sticky protection", "SQLite staging ancestor must not allow another user to replace
+   its child: /home/node"). `TMPDIR` is ignored (preferred dir is hard-coded `/tmp/openclaw`). Fixed in the modified init:
+   `chmod 755 /home/node; chmod 1777 /tmp` as root, plus the `tmp` emptyDir also mounted into the init container. Verified: `/tmp` drwxrwsrwt afterwards.
+2. `channels.discord.ui: {}` (on the PVC config) is rejected by the 11.x discord schema and makes doctor treat the config as
+   "unavailable"; delete the key before doctor. (Same residual error as the 10.x offline trial.)
+3. **Unresolved blocker.** With 1 and 2 fixed, `doctor --fix --non-interactive` still exits 1 with "Plugin migration source
+   config changed or could not be read; rerun Doctor" and never performs the `agents.list -> agents.entries` migration
+   (`doctor --lint` keeps reporting `agents.list moved to keyed agents.entries`). Reruns (x5), `--force --yes`, and
+   `openclaw update repair --yes --no-restart` (6 min; reports "Plugin duckduckgo data/settings upgrade is unfinished") all fail identically.
+   Also tried: moving the one refused Codex binding sidecar aside (a doctor step "plugin-doctor-state" refused it as
+   "current plugin state changed"; other 21 sidecars migrated fine), hand-converting `agents.list` to `agents.entries`
+   (doctor then asks for "explicit surface owners" and still fails the same way), and removing the duckduckgo web_search entry.
+   Doctor's own config read reports "Config unavailable" at start-up, i.e. the plugin migration cannot read the legacy-shaped config.
+   The 2026-10-23 Mac trial on 10.5/10.6 completed this migration, so 11.1 (or the real, larger PVC state) behaves differently.
+4. The app-container config guard (init node script in the HelmRelease) is written against `cfg.agents.list` (managed agent
+   set, bindings, splitfairy deny-list). After a successful doctor migration it must read/write `agents.entries` plus the
+   explicit `agents.ownership` surface owners. This rewrite cannot be validated until R.2.3 is solved.
+
+**R.3 Change set prepared (NOT pushed; diff at the scratchpad, 89 lines):** both node tags to the 24.22.2 digest, `install_npm openclaw@2026.11.1` + `@openclaw/discord@2026.11.1`, peer-link loop after the managed realign, root `chmod` of `/home/node` and `/tmp` at init start, `tmp` mounted into init. Still to add once R.2.3 is solved: delete `channels.discord.ui`, `openclaw doctor --fix --non-interactive` (loop until clean, fail loud) between the config guard and `exec openclaw gateway`, entries-aware config guard, `runbooks/auto-update-policy.yaml` `max_major` 22 -> 24 and `.github/renovate.json5` `allowedVersions` `<23` -> `<25` (or removed) in the SAME commit.
+
+**R.4 Gates the final plan must carry (unchanged ask):** live turn on `openai/gpt-6.1-terra` with fallbackUsed=false; `cron list` identical (4 ids); Telegram send AND received-message probe; home-operation CLI; `doctor` Errors 0; managed `@openclaw/codex` loads with no ERR_MODULE_NOT_FOUND at gateway boot; wizard check. None of these ran (blocked before gateway boot). A codex device-login for the trial (never copy production auth.json) is also still outstanding.
+
+**R.5 Next steps / retest trigger:** (a) file an upstream issue with the support bundle the repair wrote (`~/.openclaw/logs/support/openclaw-diagnostics-*.zip` on the trial2 volume); (b) retest on each new `latest` (2026.11.5-beta.1 exists; do not take it unless it becomes `latest`) with the same clone procedure; (c) if still failing, bisect state: restore a clone, strip `plugins.entries` stale ids and unset non-essential channels/plugins until doctor reads the config; (d) rollback class unchanged: this stays an attended-day, snapshot-restore plan. Scratch objects remain for the retest: volumes `openclaw-trial-data`, `openclaw-trial2-data`, Secret `openclaw-trial-secret`, Deployments scaled to 0; remove with `kubectl -n ai delete deploy openclaw-trial openclaw-trial2; kubectl -n ai delete pvc openclaw-trial-data openclaw-trial2-data; kubectl delete pv openclaw-trial-data openclaw-trial2-data; kubectl -n storage delete volume openclaw-trial-data openclaw-trial2-data; kubectl -n ai delete secret openclaw-trial-secret`.
 
 ## 0. Verdict: BLOCKED (not viable on the current node 22 base)
 

@@ -512,7 +512,7 @@ rebind means editing the claim.
   `ENABLE_BUILT_IN_LLM` is not set, and §4.2's `api_llm=ollama` would catch it
   if it took over.
 - **Same namespace:** `python-fleet-3.15.0`, `redis-fleet-8.10.2`,
-  `openclaw-2026.10.5` and `paperclip-26.04` touch other `ai` workloads. None
+  `openclaw-2026.11.1` and `paperclip-26.04` touch other `ai` workloads. None
   of them shares a resource with this plan. The silence is pod-scoped.
 - **Ordering:** run after the 03:00 Longhorn backup (§2.3 gates this). There
   are no `depends_on`.
