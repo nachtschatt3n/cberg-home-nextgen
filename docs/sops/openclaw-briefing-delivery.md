@@ -458,6 +458,10 @@ Nothing to roll back for a transient miss — the next scheduled run supersedes 
 
 ## Version History
 
+- `2026.11.07`: see also `docs/sops/openclaw-config.md` (seeded config guards) and
+  `docs/sops/operation-sweep-cron.md` (OpenClaw-triggered sweep recovery). The
+  primary model is now `openai/gpt-6.1-terra` (`1cbf86998`); the chain examples
+  above that name `gpt-6-luna` are as recorded on their dates.
 - `2026.10.26`: global chain example corrected to the live primary
   `openai/gpt-6-luna` (was `openai/gpt-5.6-terra`; switched 2026-09-26 in
   `4d90cfb1`, re-verified in the pod's `openclaw.json` 2026-10-26). The

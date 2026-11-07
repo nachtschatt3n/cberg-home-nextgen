@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.10.25`
-> Last Updated: `2026-10-25`
+> Version: `2026.11.07`
+> Last Updated: `2026-11-07`
 
 ## 1) Description
 
@@ -531,7 +531,7 @@ count, diff, round-trip or served-bytes check **is** a reject. See
 | Cron `error`, exit 14 `the dispatcher REFUSED run=...` / `no STARTED/REFUSED marker` | a job of the same kind is still running (e.g. a long sweep), or the dispatcher pane is wedged | look at the `ai-server-cron` pane and `~/Library/Logs/cberg-headless/`; a refused duplicate needs no action, a wedged pane: ctrl-c and restart the dispatcher (running jobs keep going) |
 | Window cron `error`, exit 8 `console is not at the prompt (state 'busy' or 'menu')` | the ops pane was mid-turn, had background agents in flight, or had a menu open at fire time; nothing was typed (F-b8c6b6d6) | by design. The retry cron at start+`retry_after_min` re-fires once the pane is idle; if the occurrence stays lost, run it by hand as an ad-hoc stand-in. Check with `maintenance-window classify` |
 | Window **retry** cron `error`, exit 8 (or 4) `retry 'nightly': today's occurrence (nightly, <date>) is LOST ...` | the scheduled run and its one retry both found the console not at the prompt (busy / background agents / menu, or exhausted and not auto-clearable); nothing was typed and nothing will re-fire it today | by design since 2026-09-26: this is the same-day page. Check `maintenance-window classify`. Once the console is idle, run the nightly by hand as an ad-hoc stand-in. A completed, non-aborted on-demand (`now`/ad-hoc) run the same Berlin day also counts as covering the nightly (§1) |
-| Window cron `error`, exit 12 `NO new window_runs row appeared within 300s` | the prompt was accepted but the agent never opened its running row (slow start, or a pane that swallows input) | `maintenance-window status`; if the agent is running, it may simply have been slow (row after 5 min) — confirm the row now exists; otherwise treat as lost and let the retry cron / an ad-hoc run cover it |
+| Window cron `error`, exit 12 `NO new window_runs row appeared within <N>s` (N = 480 since 2026-11-07, was 300) | the prompt was accepted but the agent never opened its running row (slow start, or a pane that swallows input). On 2026-11-07 a 300s budget raised this falsely: the row landed at 330s and the window ran green (F-b8c6b6d6 / F-8eea4d9e follow-up) | `maintenance-window status` and `window_runs` (`select id, slot, started_at, outcome from window_runs order by id desc limit 5`); if the row now exists the run was merely slow, nothing is lost and the retry cron no-ops; if there is still no row and the headless log is empty or ended early, treat as lost and let the retry cron / an ad-hoc run cover it |
 | Cron log shows `CONSOLE_AUTO_CLEARED` | the ops pane was at context exhaustion and idle; the cron discarded its conversation context (transcript kept) and proceeded (F-7d9b201b, operator-approved) | expected. If it recurs nightly, a long session is being left in the ops pane — end such sessions with `/clear` |
 | `home-operation run --issue X` exits 8 / `MAINTENANCE_WINDOW_HANDOFF_FAILED: ... mid-turn` | the ops console was not at the prompt (mid-turn, background agents in flight, or a menu open); `run-now` never sends into (or /clears) it | nothing is left behind: the say-so is undone (approvals it newly recorded withdrawn → open go/no-go, event `sayso-approval-reverted`; an existing GO it re-scoped gets its original window back, event `rescope-reverted`; the JSON `reverted` list names each). Re-run `home-operation run --issue X` when the console is idle |
 | `home-operation run --issue X` exits 10 / `... on-demand NOW run(s) already OPEN (... run_date <d> started_at <ts>)` | a `window_runs` row slot `now`, outcome `running`, not finished, exists — WHATEVER its run_date. A NOW run is still in progress, often waiting at an operator question (it looks idle on screen); an evening run waiting overnight is dated yesterday (UTC), so the guard deliberately has no date filter | by design: answer or finish that run in the console. The say-so was undone as for exit 8. Exit 7 = the ledger could not be read (fail closed, same undo). A row stuck open from a crashed/abandoned run blocks every NOW run until it is finalized — use the run_date the refusal names: `window-run-record.py --finalize --slot now --run-date <d> --outcome aborted --trigger ad-hoc` |
@@ -701,11 +701,26 @@ Enter still submits, so typing `/clear` would append to and SUBMIT a stale draft
 for `operation restart` (see the `operation` skill).
 
 **Completion poll.** A `--trigger cron` `run`/`retry` does not report success
-on delivery: it polls `window_runs` for (slot, today) for up to 300s
-(`--confirm-timeout`, clamped at 540 under the cron's 600s timeout) for the
-agent's first-action `running` row. A row that existed before the send does not
-count. Say-so runs (`home-operation run --window`, 180s subprocess timeout) do
-not poll. Measured 2026-09-15..25: the row lands 0:24–4:10 after the fire.
+on delivery: it polls `window_runs` for (slot, today) for up to **480s**
+(`--confirm-timeout`, clamped at 540) for the agent's first-action `running`
+row. A row that existed before the send does not count. Say-so runs
+(`home-operation run --window`, 180s subprocess timeout) do not poll.
+
+Budget arithmetic: the cron job's own timeout is 600s and the headless
+dispatch (resolve + typing + the up-to-45s `HEADLESS_STARTED` confirm) runs
+BEFORE the poll starts, so the poll must stay under roughly 540s. 480s leaves
+margin on both sides.
+
+Measured latency (fire to `running` row, `window_runs.started_at` against the
+headless log start, 40 cron runs 2026-10-01..11-07): typically 12–35s through
+2026-10-23, 40–190s from 2026-10-28, and **330s on the 2026-11-07 nightly**
+(also 188s sun-attended 11-01, 165s sat-attended 10-31, 123s sat-attended
+11-07). The window agent starts slower as its startup context grows. The old
+300s budget therefore produced a FALSE exit 12 on 2026-11-07 (the row appeared
+at 330s and the window ran green). Raised to 480s on 2026-11-07. The check still
+fails when no row ever appears: a window whose agent never opens its row is
+still reported, 3 minutes later than before. If the measured latency approaches
+400s again, investigate the agent's startup cost rather than raising the budget.
 
 | Exit | Meaning (maintenance-window) |
 |---|---|
@@ -846,6 +861,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.11.07 | 2026-11-07 | **Running-row poll budget 300s -> 480s** (`maintenance-window.py`, `_confirm_timeout`), with the measured latency table and budget arithmetic in §Completion poll; the nightly of 2026-11-07 raised exit 12 although the window ran (row at +330s). The ops-sweep recovery SOP is `docs/sops/operation-sweep-cron.md`. |
 | 2026.10.25 | 2026-10-25 | **Docs only.** Pointer to the planner-facing rules for premise commands (refused constructs, allowlist, `expect_*` semantics, worked examples); no runner behaviour changed. |
 | 2026.10.13 | 2026-10-13 | **Deliberate skips are WAIVED, not faked (operator decision, vacation).** New `window_runs` outcome `waived` (insert-only, reason in notes mandatory, past dates only, `ad-hoc` trigger): removes the occurrence from `window_runs_missing_count`, counted in the new `window_runs_waived_count`, never counted as a run and never covers another slot. `ops-retro.py` reports it on its own line. Test `runbooks/tests/test-window-liveness-waived.py`. |
 | 2026.10.04 | 2026-10-04 | **Two plan-authoring lessons (§7).** (a) DB-bounce gates bound each consumer at <=1 restart and build the tenant baseline from persistent-pool users only -- per-request PHP connections excluded (F-9ab5f80f; Rails liveness root cause fixed in `f515915c`). (b) Resuming a suspended HelmRelease re-renders chart CronJobs and undoes a manual CronJob suspend -- re-assert it after every in-plan HR resume (nextcloud-redis-hardening run). |

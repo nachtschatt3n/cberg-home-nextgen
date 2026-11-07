@@ -347,8 +347,17 @@ def test_maintenance_window(mw):
             waited = clock["t"] - t0
             check("mw run cron idle, row never appears: exit 12", code == 12 and mw.FAIL_TOKEN in out,
                   f"{code} {out[-300:]}")
-            check("mw ...poll is bounded: <= 300s + one poll step, under the 600s job timeout",
-                  300 <= waited <= 300 + mw.CONFIRM_POLL_S, f"waited {waited}s")
+            check("mw ...poll is bounded: <= 480s + one poll step, under the 600s job timeout",
+                  480 <= waited <= 480 + mw.CONFIRM_POLL_S, f"waited {waited}s")
+
+            # 2026-11-07: the running row landed 330s after the fire; a 300s budget
+            # raised a FALSE exit 12 while the window ran green. A row at ~345s
+            # (23 polls of 15s) must now PASS.
+            con.set(S["idle"])
+            ledger.update(counts=[0] * 23 + [1], rc=0, reads=0)
+            code, out = run_main(mw.main, ["run", "--window", "nightly", "--trigger", "cron"])
+            check("mw run cron idle, row at ~345s (slow start): exit 0, not a false exit 12",
+                  code == 0 and "completion verified" in out, f"{code} {out[-300:]}")
 
             con.set(S["idle"])
             ledger.update(counts=[1], rc=0, reads=0)

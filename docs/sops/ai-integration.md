@@ -3,8 +3,8 @@
 > Standard Operating Procedures for AI/ML service integration and management.
 > Reference: `docs/integration.md` for endpoint reference table.
 > Description: Operating and integrating Ollama-based AI endpoints for cluster applications.
-> Version: `2026.10.26`
-> Last Updated: `2026-10-26`
+> Version: `2026.11.07`
+> Last Updated: `2026-11-07`
 > Owner: `Platform`
 
 ---
@@ -198,7 +198,7 @@ and no fallbacks. It now degrades to the local Ollama models instead:
 ```jsonc
 // ~/.openclaw/openclaw.json  (set declaratively by the init script in helmrelease.yaml)
 "agents": { "defaults": { "model": {
-  "primary":   "openai/gpt-6-luna",                 // Codex harness / ChatGPT OAuth (since 2026-09-26, 4d90cfb1)
+  "primary":   "openai/gpt-6.1-terra",              // Codex harness / ChatGPT OAuth (since 2026-11-07, 1cbf86998; gpt-6-luna before)
   "fallbacks": ["ollama/gemma4:26b-mlx"]                // quality tier (e2b-mlx retired 2026-10-19)
 }}}
 ```
@@ -258,8 +258,8 @@ Confirm a failover actually happened (rather than a silent total failure):
 ```bash
 kubectl -n ai logs "$OC" -c app --tail=400 | grep "model-fallback/decision"
 # healthy degrade looks like:
-#   decision=candidate_failed  requested=openai/gpt-6-luna reason=rate_limit next=ollama/gemma4:26b-mlx
-#   decision=candidate_succeeded requested=openai/gpt-6-luna candidate=ollama/gemma4:26b-mlx
+#   decision=candidate_failed  requested=openai/gpt-6.1-terra reason=rate_limit next=ollama/gemma4:26b-mlx
+#   decision=candidate_succeeded requested=openai/gpt-6.1-terra candidate=ollama/gemma4:26b-mlx
 # "next=none" means NO fallbacks are configured — the chain is missing.
 ```
 
@@ -697,6 +697,10 @@ Rollback validation:
 
 ## Version History
 
+- `2026.11.07`: OpenClaw primary model now `openai/gpt-6.1-terra` (`1cbf86998`).
+  Seeded-config guards (web search, memory embeddings, codex plugin strip) are
+  documented in `docs/sops/openclaw-config.md`; recovery of a failed
+  OpenClaw-triggered sweep in `docs/sops/operation-sweep-cron.md`.
 - `2026.10.26`: OpenClaw failover-chain example: `primary` corrected from
   `openai/gpt-5.6-terra` to the live `openai/gpt-6-luna` (switched 2026-09-26 in
   `4d90cfb1`; re-verified in the pod's `openclaw.json` 2026-10-26), also in the
