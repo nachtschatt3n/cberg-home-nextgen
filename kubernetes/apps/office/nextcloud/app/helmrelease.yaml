@@ -449,7 +449,7 @@ spec:
         repository: bitnamilegacy/mariadb
         # Pinned to the 11.8 LTS patch line (F-96bf2bcd): 11.8.3 is the newest 11.8.x
         # in the legacy repo; 12.0.x is a non-LTS major jump, deliberately not taken.
-        tag: 11.8.3@sha256:ada2a782b0bdd7885bda684af7fb1fdaa57929c35e639f7cbbf3f724a1735a31
+        tag: 12.0.2@sha256:888cdaae3cb996c4d28f7916106511de553545929957dd1d35221112df631e19
 
       ## Enable persistence using Persistent Volume Claims
       ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
