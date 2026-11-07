@@ -833,8 +833,11 @@ spec:
                   // allowlisted too, so `openclaw agent --model
                   // openai/gpt-5.6-terra` stays a one-command fallback after the
                   // primary moved to gpt-6-luna.
-                  const overlayIds = new Set(['gpt-5.6-terra']);
-                  if (/^openai\/gpt-(5\.6|6)-/.test(chosenModel)) {
+                  // 2026-11-07: GPT-6.1 (terra/sol) appeared in the ChatGPT model
+                  // picker; the regex now accepts the `6.1` dot, and gpt-6-luna is
+                  // always overlaid too so it stays a one-command fallback.
+                  const overlayIds = new Set(['gpt-5.6-terra', 'gpt-6-luna']);
+                  if (/^openai\/gpt-(5\.6|6(\.1)?)-/.test(chosenModel)) {
                     overlayIds.add(chosenModel.slice('openai/'.length));
                   }
                   cfg.models = cfg.models || {};
@@ -1875,7 +1878,11 @@ spec:
               # Terra stays overlaid + allowlisted as the manual fallback.
               # The heartbeat is unaffected: it pins its own model (ollama).
               - name: OPENCLAW_DEFAULT_MODEL
-                value: "openai/gpt-6-luna"
+                # 2026-11-07: gpt-6-luna -> gpt-6.1-terra (operator ask). Verified live in-pod
+                # before this commit: `codex exec -m gpt-6.1-terra` served, a real openclaw
+                # turn returned PONG with fallbackUsed=false, and a tool turn (shell echo)
+                # ran correctly. gpt-6-luna stays overlaid + allowlisted as the manual fallback.
+                value: "openai/gpt-6.1-terra"
               # The @openclaw/codex plugin spawns its VENDORED codex for the
               # app-server (0.139.0 in the pinned 2026.6.11 plugin), and
               # OpenAI's backend gates GPT-5.6 on codex >= ~0.145: "The
