@@ -13,7 +13,7 @@ update_type: major
 risk: high
 capability_change: true       # major: new model ids, plugin set and state migrations change user-visible behaviour
 rollback_class: backup-restore   # forward SQLite state migration on openclaw-data: rollback = PVC snapshot restore, not a git revert
-est_duration_min: 315      # whole day worst case incl. rehearsal and rollback; happy path ~210
+est_duration_min: 150      # attended roll incl. backup, ~30 min boot, verification and rollback budget; happy path ~100 (rehearsal already done on clones 2026-11-07)
 needs_reboot: false
 touches:
   namespaces: [ai]
@@ -38,6 +38,94 @@ unblock_stages:                      # ONE attended day (Sat 2026-10-31); status
 
 > Sections 0a-7 below were written for 10.5/10.6 and are kept as reference; where they differ, section R (this
 > retarget, 2026-11-07) governs. `review` stays null: NOT ready for go (blocker R.2).
+
+## G. Governing execution plan (2026-11-08; supersedes the timeline in 0b)
+
+**Status:** rehearsed end-to-end on a cloned PVC (R.6/R.7 results). Vetting stamps are set only by the plan-reviewer outcome (see frontmatter `review`).
+**Operator authorisation:** chat 2026-11-07, "All of them we do the full openclaw day"; coordinator sends the go-live message; execute via the maintenance-window path. The operator is NOT needed for a browser step IF the production codex login is still valid (`codex login status` in the live pod before the roll).
+**Change set:** `runbooks/maintenance/plans/openclaw-2026.11.1.changeset.diff` (3 files: helmrelease, `runbooks/auto-update-policy.yaml` `max_major` 22 -> 24, `.github/renovate.json5` `allowedVersions` `<23` -> `<25`; one commit). It is a unified diff against the helmrelease as of commit `6cd501125`; apply with `git apply --3way runbooks/maintenance/plans/openclaw-2026.11.1.changeset.diff` and re-read the helmrelease diff if `git log -3 -- kubernetes/apps/ai/openclaw/app/helmrelease.yaml` shows newer commits than `1cbf86998`.
+Contents: node 24.22.2-bookworm digest-pinned (app + init); openclaw / `@openclaw/discord` 2026.11.1; raw install + peer links for codex, discord, duckduckgo-plugin in the init; root `chmod 755 /home/node; chmod 1777 /tmp` (+ `tmp` mounted in init); config guard bridges `agents.list` <-> `agents.entries`, writes whisper into `tools.media.models` (env form, 4 threads) without duplicates, deletes `channels.discord.ui`, raises `bootstrapMaxChars` 40000 / total 80000; skill frontmatter repair; `doctor --fix` loop (4 passes, parks refused Codex sidecars in `~/.openclaw/doctor-held`, fails loud); `plugins install` (trusted-official) for codex / discord / duckduckgo; per-agent openai auth import; container env `OMP_NUM_THREADS`/`MKL_NUM_THREADS`=4, `resources.limits.cpu` 4, `ANTHROPIC_API_KEY` from Secret `anthropic-api-key` (not optional; provider detection only, primary stays `openai/gpt-6.1-terra`, no anthropic model in fallbacks); Reloader annotation lists `anthropic-api-key`; `upgrade.timeout` 40m, `remediation.retries: 0`, `remediateLastFailure: false`, startup probe `failureThreshold` 180 (30 min).
+
+### G.1 Preconditions (all must hold; abort otherwise)
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+OC=$(kubectl -n ai get pod -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}')
+kubectl -n ai exec "$OC" -c app -- codex login status                 # must say Logged in using ChatGPT (the auth import reuses this file)
+kubectl -n ai exec "$OC" -c app -- openclaw cron list                 # NO job due in the next 45 min; avoid 06:55-07:15 and 08:40-09:00 Berlin; 8163c139 sweep trigger not due
+kubectl -n ai exec "$OC" -c app -- bash -lc 'ls -t ~/clawd/.tmp/say/ 2>/dev/null | head -1; pgrep -af "[s]ay|tts" || echo no-inflight-say'
+npm view openclaw dist-tags --json                                    # latest must still be 2026.11.1; if it moved, stop and re-plan
+git status --short kubernetes/apps/ai/openclaw runbooks/auto-update-policy.yaml .github/renovate.json5   # clean
+git -c rebase.autoStash=true pull --rebase origin main
+git apply --check runbooks/maintenance/plans/openclaw-2026.11.1.changeset.diff
+```
+The operator is using the live assistant (Telegram group sessions): confirm with the coordinator that this is the agreed quiet window. Never roll during a due cron or an in-flight `say` (07:01 incident).
+
+### G.2 Backup (rollback depends on these; do not skip)
+```bash
+# 1. Longhorn snapshot of the live volume (CR form verified on the rehearsal clone: readyToUse=true in seconds)
+kubectl apply -f - <<'EOF'
+apiVersion: longhorn.io/v1beta2
+kind: Snapshot
+metadata: {name: pre-openclaw-1111, namespace: storage}
+spec: {volume: clawd-bot-data, createSnapshot: true}
+EOF
+kubectl -n storage get snapshots.longhorn.io pre-openclaw-1111 -o jsonpath='{.status.readyToUse}{"\n"}'   # must print true
+# 2. Off-volume copy (Longhorn backup): fresh Completed backup newer than the snapshot
+kubectl create job --from=cronjob/daily-backup-all-volumes manual-backup-openclaw-1111 -n storage
+python3 runbooks/longhorn-backup-age.py                                  # clawd-bot-data backup age < 1h before proceeding
+# 3. Tarball of config + workspace to the Mac (outside the repo)
+mkdir -p ~/Backups/openclaw-pre-11.1 && kubectl -n ai exec "$OC" -c app -- tar czf - -C /home/node .openclaw/openclaw.json clawd clawd-juno-andrea clawd-vita-mathias clawd-vita-andrea clawd-vita-margaret clawd-vita-cora clawd-jerry-mathias clawd-jerry-andrea clawd-voice --exclude=node_modules > ~/Backups/openclaw-pre-11.1/openclaw-config-workspaces.tgz && tar tzf ~/Backups/openclaw-pre-11.1/openclaw-config-workspaces.tgz | head -3
+kubectl -n ai exec "$OC" -c app -- cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak-pre-11.1
+```
+
+### G.3 Roll (GitOps, one commit)
+```bash
+git apply --3way runbooks/maintenance/plans/openclaw-2026.11.1.changeset.diff
+git diff --stat                                                           # exactly: renovate.json5, helmrelease.yaml, auto-update-policy.yaml
+git add .github/renovate.json5 kubernetes/apps/ai/openclaw/app/helmrelease.yaml runbooks/auto-update-policy.yaml   # explicit paths, never -A
+printf 'feat(openclaw): 2026.6.11 -> 2026.11.1 on node 24 (plan openclaw-2026.11.1)\n\n...\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_012bXdxrZGGHNy5e4RnF6seD\n' > "$MSG"   # write BEFORE the hook gate
+git commit --only .github/renovate.json5 kubernetes/apps/ai/openclaw/app/helmrelease.yaml runbooks/auto-update-policy.yaml -F "$MSG"
+git show --stat HEAD && git log -1 --format=%s && git push
+```
+Then watch (no manual reconcile needed; the webhook applies it): `kubectl -n ai get pod -l app.kubernetes.io/instance=openclaw -w`; init ~5 min; app container boot before the port opens ~20-25 min on first boot (doctor passes ~2.5 min each, plugin installs ~1.5 min, per-agent auth import ~1.5 min x 8); `kubectl -n ai logs deploy/openclaw -c app -f` shows `doctor --fix pass`, `openai auth imported for agent ...`. The Deployment is `Recreate`: the old pod stops first. Verify the live pod `startTime` and image digest changed (`kubectl -n ai get pod -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].status.startTime} {.items[0].spec.containers[0].image}'`), not just rollout status.
+**Expected downtime of the assistant: 25-35 minutes** (old pod stopped -> gateway listening); budget 60. Hard rollback cutoff: gateway not listening and `doctor`/boot not progressing 45 min after the push.
+
+### G.4 Verification gates (every one can fail; all must pass)
+```bash
+OC=$(kubectl -n ai get pod -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}')
+X() { kubectl -n ai exec "$OC" -c app -- bash -lc "$1"; }
+X 'node -v; openclaw --version; jq -r .version ~/.openclaw/lib/node_modules/openclaw/package.json'      # v24.22.2 / 2026.11.1
+X 'for p in codex duckduckgo; do openclaw plugins inspect $p --runtime --json | jq -r "[.plugin.id,.plugin.status,.plugin.trust.reason,.plugin.version]|@tsv"; done'   # loaded trusted-official 2026.11.1 (discord: loaded, record-missing is expected)
+kubectl -n ai logs "$OC" -c app | grep -a -c 'ERR_MODULE_NOT_FOUND\|Cannot find package'                 # must be 0
+X 'openclaw config validate && openclaw doctor --lint --severity-min error | jq ".findings|length"'      # valid; 0 errors (the splitfairy MCP schema check needs the live URL: expect pass in prod)
+X 'openclaw models status | grep -a "Default\|openai via codex"'                                        # Default openai/gpt-6.1-terra; effective=profiles
+# live turn on the primary, FALLBACK MUST NOT BE USED
+X 'openclaw agent -m "Reply with exactly this token: CANARY7F3" --session-id hc-1111 --timeout 150 --json' | python3 -c "import sys,json;t=sys.stdin.read();d=json.loads(t[t.find('{'):]);m=d['result']['meta'];print(d['result']['payloads'][0]['text'],m['agentMeta']['provider']+'/'+m['agentMeta']['model'],m['executionTrace']['fallbackUsed']);assert m['agentMeta']['model']=='gpt-6.1-terra' and m['executionTrace']['fallbackUsed'] is False"
+# tool turn
+X 'openclaw agent -m "Use your shell tool to run: echo TOOLOK-\$((6*7)) and reply with only the tool output." --session-id hc-tool --timeout 200 --json' | grep -a -c TOOLOK-42
+# answer test on EVERY agent id on the primary (voice is ollama-native by design); each must show gpt-6.1-terra, fallbackUsed False
+for a in main juno-andrea vita-mathias vita-andrea vita-margaret vita-cora jerry-mathias jerry-andrea; do X "openclaw agent --agent $a -m 'Reply with exactly: OK-$a' --session-id ans-$a --timeout 120 --json" | python3 -c "import sys,json;t=sys.stdin.read();d=json.loads(t[t.find('{'):]);m=d['result']['meta'];print('$a',m['agentMeta']['model'],m['executionTrace']['fallbackUsed'])"; done
+X 'openclaw cron list | grep -a -c "^[0-9a-f]\{8\}-"; openclaw cron list | grep -a "0788b8a7\|d55acccd\|8163c139\|e9ce4ac3" | cut -c1-110'   # 41 (or the pre-roll count); the 4 ids present, next-run sane
+X 'home-operation list | head -3; cd ~/clawd && python3 scripts/morning_briefing.py --dry-run | head -12'  # CLI works; briefing builds in English
+X 'python3 -c "import json;m=json.load(open(\"/home/node/.openclaw/openclaw.json\"))[\"tools\"][\"media\"];print(len(m[\"models\"]),m[\"models\"][0][\"command\"],m[\"models\"][0][\"args\"][:3])"'   # 1 env [OMP_NUM_THREADS=4, MKL_NUM_THREADS=4, whisper]
+X 'grep -a -c "Skipping invalid skill" ~/.openclaw/logs/*.log 2>/dev/null | tail -1; openclaw skills list 2>/dev/null | grep -a -c .'   # 0 invalid
+# ANTHROPIC key present in the pod and equal to the Secret (compare hashes; NEVER print the value)
+LIVE=$(kubectl -n ai get secret anthropic-api-key -o jsonpath='{.data.ANTHROPIC_API_KEY}' | base64 -d | shasum -a 256 | cut -c1-12)
+POD=$(X 'printf %s "$ANTHROPIC_API_KEY" | sha256sum | cut -c1-12'); [ -n "$POD" ] && [ "$LIVE" = "$POD" ] && echo anthropic-env-OK || echo anthropic-env-MISMATCH
+X 'openclaw models status | grep -a -i "anthropic" | cut -c1-120'   # provider detected via env; Default and Fallbacks lines must be unchanged (no anthropic model)
+```
+Plus the human/channel gates (substitute for what cannot be rehearsed with blanked tokens): **Telegram RECEIVE probe** (operator or a family member sends a message to each bot account `vita`, `jerry` and one group binding; the agent replies, `grep -a "telegram" ` log shows inbound; a wedged poller sends but never receives, `kill 1` recovers), Discord DM, one `say` voice note (local Qwen3-TTS or the ElevenLabs fallback), `runbooks/health-check.sh` OpenClaw block (plugin skew ALIGNED, canary, skill-bin presence), health of the next 08:45 briefing (first real voice send after the roll; Sunday-morning checkpoint) and the 03:00 dreaming run (`DREAMS.md` gets real diary text).
+Not rehearsable and therefore watched after the roll: real Telegram/Discord traffic, the 08:45 briefing with voice, dreaming narrative timeout (the old `NARRATIVE_TIMEOUT_MS` sed no longer matches; the narrative now uses the agent timeout), whisper on a real voice note, the "reply session initialization conflicted" loop (our `session-accessor-*.js` patch targets `.js`; 11.x ships `.mjs`, so the block is a logged WARN no-op: verify upstream fix by watching for the loop).
+
+### G.5 Rollback (decide by the cutoff in G.3 or any failed gate)
+1. `git revert <roll commit>` + push (restores node 22, 2026.6.11, the old caps, and `upgrade.timeout`/remediation). Flux applies; the Deployment is `Recreate`.
+2. The 11.x doctor has migrated the state (agent DB v1 -> v27, config shape, auth store), which 2026.6.11 cannot read. So ALSO restore the volume: `kubectl -n ai scale deploy/openclaw --replicas=0` and `flux suspend kustomization openclaw -n ai` first; then revert `clawd-bot-data` to snapshot `pre-openclaw-1111` (Longhorn UI: `kubectl -n storage port-forward svc/longhorn-frontend 8080:80`, Volume -> attach in maintenance mode -> Snapshots -> Revert -> detach), `flux resume kustomization openclaw -n ai`, `kubectl -n ai scale deploy/openclaw --replicas=1` (or let Flux). Fallback if the snapshot is unusable: restore the Longhorn backup taken in G.2 into a new volume and rebind per `docs/sops/backup.md` (Case B: PV `volumeHandle` is immutable, via GitOps).
+3. Restore `openclaw.json` from `openclaw.json.bak-pre-11.1` and the tarball if the volume revert is not used; if helm is stuck in `pending-upgrade`: `helm rollback openclaw <last-deployed> --wait=false`, then reconcile.
+4. Verify 2026.6.11: canary turn (`gpt-6.1-terra` needs the 6.11 overlay + `OPENCLAW_CODEX_APP_SERVER_BIN`, both preserved by the revert), cron list, Telegram receive.
+Expected rollback duration 20-30 min (snapshot revert + 6.11 boot, which re-runs the old init).
+
+### G.6 Follow-ups after a verified roll (separate commits)
+Revert `upgrade.timeout`/`remediation` to 15m / retries 3 and the startup probe to 30; remove the dead dreaming `sed` and `session-accessor` patch blocks once the 11.x behaviour is confirmed; move `OPENCLAW_CODEX_APP_SERVER_BIN` and the openai model overlay out only after a separate rehearsal (they are kept, unchanged, in this roll); schedule a node 26 rehearsal before raising the Renovate cap past 24; close F-79c6922e / F-39d3d443 and refresh AR-075 / AR-076.
 
 ## R. Retarget and cloned-PVC rehearsal result, 2026-11-07 (openclaw-agent)
 
@@ -87,7 +175,30 @@ HelmRelease so the init script ran verbatim; app container held on `sleep infini
 
 **R.4 Gates the final plan must carry (unchanged ask):** live turn on `openai/gpt-6.1-terra` with fallbackUsed=false; `cron list` identical (4 ids); Telegram send AND received-message probe; home-operation CLI; `doctor` Errors 0; managed `@openclaw/codex` loads with no ERR_MODULE_NOT_FOUND at gateway boot; wizard check. None of these ran (blocked before gateway boot). A codex device-login for the trial (never copy production auth.json) is also still outstanding.
 
-**R.5 Next steps / retest trigger:** (a) file an upstream issue with the support bundle the repair wrote (`~/.openclaw/logs/support/openclaw-diagnostics-*.zip` on the trial2 volume); (b) retest on each new `latest` (2026.11.5-beta.1 exists; do not take it unless it becomes `latest`) with the same clone procedure; (c) if still failing, bisect state: restore a clone, strip `plugins.entries` stale ids and unset non-essential channels/plugins until doctor reads the config; (d) rollback class unchanged: this stays an attended-day, snapshot-restore plan. Scratch objects remain for the retest: volumes `openclaw-trial-data`, `openclaw-trial2-data`, Secret `openclaw-trial-secret`, Deployments scaled to 0; remove with `kubectl -n ai delete deploy openclaw-trial openclaw-trial2; kubectl -n ai delete pvc openclaw-trial-data openclaw-trial2-data; kubectl delete pv openclaw-trial-data openclaw-trial2-data; kubectl -n storage delete volume openclaw-trial-data openclaw-trial2-data; kubectl -n ai delete secret openclaw-trial-secret`.
+**R.5 Next steps / retest trigger:** (a) file an upstream issue with the support bundle the repair wrote (`~/.openclaw/logs/support/openclaw-diagnostics-*.zip` on the trial2 volume); (b) retest on each new `latest` (2026.11.5-beta.1 exists; do not take it unless it becomes `latest`) with the same clone procedure; (c) if still failing, bisect state: restore a clone, strip `plugins.entries` stale ids and unset non-essential channels/plugins until doctor reads the config; (d) rollback class unchanged: this stays an attended-day, snapshot-restore plan. Scratch objects remain for the retest: volumes `openclaw-trial-data`, `openclaw-trial2-data`, Secret `openclaw-trial-secret`, Deployments scaled to 0; remove with `kubectl -n ai delete deploy openclaw-trial openclaw-trial2 openclaw-trial3; kubectl -n ai delete pvc openclaw-trial-data openclaw-trial2-data openclaw-trial3-data; kubectl delete pv openclaw-trial-data openclaw-trial2-data openclaw-trial3-data; kubectl -n storage delete volume openclaw-trial-data openclaw-trial2-data openclaw-trial3-data; kubectl -n ai delete secret openclaw-trial-secret anthropic-trial-dummy`.
+
+### R.7 Full gate results on the third clone (2026-11-07/08; trial3, node 24.22.2, cpu limit 4, gateway with `OPENCLAW_SKIP_CRON/CHANNELS/GMAIL_WATCHER=1`, `cron.enabled=false`, blanked tokens, own codex login, nothing sent to real users)
+
+| Gate | Result |
+|---|---|
+| `doctor --fix` with the login present | exit 0; auth-profile store imported to SQLite, legacy file archived |
+| `@openclaw/codex` load / ERR_MODULE_NOT_FOUND | `loaded`, `trusted-official` after `plugins install`; 0 hits in 4 gateway logs. **Old blocker not reproduced.** |
+| Live turn, primary | **`openai/gpt-6.1-terra`, `fallbackUsed=False`** (after the per-agent auth import below); tool turn: 1 `exec` call, 0 failures, output `TOOLOK-42` |
+| Answer test, 8 openai agents | all 8 `openai/gpt-6.1-terra` fallbackUsed False; `voice` stays `ollama-native/gemma4:26b-mlx` by design |
+| `openclaw cron list` | 41 jobs, `0788b8a7`, `d55acccd`, `8163c139`, `e9ce4ac3` present |
+| `home-operation list` / `--help` | works; briefing `--dry-run` builds English text (blanked upstreams print their expected fetch notes) |
+| whisper `env` form after doctor | survives, but the legacy guard appended one duplicate `tools.media.models` entry per boot (4 after 3 boots); fixed (guard writes `tools.media.models`, replaces its audio entry): 1 entry after 3 boots |
+| whisper timing, 175 s real .ogg, cpu limit 4 | 4 threads 56 s / 48 s, 2 threads 57 s, uncapped 43 s: **no measurable speed difference at limit 4** (whisper `tiny` is ~3.5x realtime either way). The cpu limit/threads change protects the gateway from starvation; it is not a speed-up. The 2-CPU run was ~60 s per transcription as well. |
+| skills `description:` | 8 skills (`fax`, `gcal`, `mealie`, `mealplan`, `shoplist` main; `gcal`, `mealie`, `mealplan` juno-andrea) are PVC-only (not in the SOPS configmap), so the fix is an idempotent init step adding frontmatter from the first heading; 0 "Skipping invalid skill" afterwards |
+| TOOLS.md -> AGENTS.md | doctor merges once (AGENTS.md 24551 bytes, unchanged over 3 later boots); the init re-seeds TOOLS.md every boot, so the warning "still stores local tool notes in TOOLS.md" persists (warning only); `bootstrapMaxChars` raised to 40000 / total 80000 so the merged file is not truncated at 20000 |
+| `ANTHROPIC_API_KEY` (dummy value in the trial only) | `openclaw models status`: providers `anthropic`, `anthropic-openai`, `claude-cli` detected via env; `Default` still `openai/gpt-6.1-terra`, `Fallbacks` still `ollama/gemma4:26b-mlx`; doctor unaffected; in-pod env hash equals the expected hash. Note `claude-cli` also picks the key up. |
+| `doctor --lint` | 0 errors except the splitfairy MCP schema check (blanked URL in the trial; expect pass in prod); warnings: heartbeat in HEARTBEAT.md, plaintext secret fields, LAN bind, TOOLS.md |
+| Boot time | init ~5 min; app container to "boot sequence done" ~9 min on a migrated state (doctor loop + plugin check + 8 x `auth list`); first boot on an unmigrated clone: 2 doctor passes ~2.5 min each, plus ~12 min of per-agent auth import |
+
+**Defects found by this rehearsal and fixed in the change set:** /tmp and /home/node permissions; `channels.discord.ui`; doctor sidecar refusal; duckduckgo external plugin; raw-npm plugins "provenance-invalid" (use `plugins install`); `plugins install --force` is NOT idempotent for discord on a 2nd boot (skip when trusted-official, warn otherwise; discord then runs from the init's global install with trust `record-missing`, loaded); skills frontmatter; duplicate whisper models; `bootstrapMaxChars`; helm 15m timeout / 3 retries / startup probe 5 min would roll the release back mid-migration; and **per-agent openai auth**: 2026.11.1 has no read-through from `main`. Without the import only `main` reaches openai; the other 7 agents silently answer from the local gemma fallback (`fallbackUsed=True`, reason "No route-compatible authentication source is configured for openai"). `agents.defaults.authInheritance.agentId: main` did NOT fix it. `models auth login` imports `~/.codex/auth.json` without a browser, `models auth activate` verifies it but pins the agent to `openai/gpt-6-astra@profile` (so the pin is unset), ~86 s per agent, the gateway must be stopped. The change set automates this in the app container before `exec openclaw gateway`.
+
+**Scratch objects (cleanup in R.5):** now also `openclaw-trial3-data` volume/PV/PVC, Deployment `openclaw-trial3`, Secrets `openclaw-trial-secret` and `anthropic-trial-dummy`.
+
 
 ## 0. Verdict: BLOCKED (not viable on the current node 22 base)
 
