@@ -43,7 +43,7 @@ wires a consumer.
 
 | Namespace | Workload | How it reads the key | Status |
 |-----------|----------|----------------------|--------|
-| `ai` | OpenClaw | not wired yet (`ANTHROPIC_API_KEY` env from `secretKeyRef`) | pending |
+| `ai` | OpenClaw | `ANTHROPIC_API_KEY` env from `secretKeyRef` (app container) + Reloader `secret.reloader.stakater.com/reload` lists `anthropic-api-key`; provider detection only, primary stays openai, no anthropic model in fallbacks | wired in the 2026.11.1 roll (`runbooks/maintenance/plans/openclaw-2026.11.1.md`), pending: live after that roll |
 | `ai` | Open WebUI | not wired yet (needs an Anthropic connection configured) | pending |
 | `my-software-development` | `opencode-andreamosteller` | not wired yet; its own `opencode-andreamosteller-secrets` still carries an EMPTY `ANTHROPIC_API_KEY` | pending |
 | `home-automation` | `pellet-price-monitor` | its own `secret.sops.yaml` carries an EMPTY `ANTHROPIC_API_KEY`; not shared | not using the shared copy |
