@@ -2,8 +2,8 @@
 plan_id: openclaw-2026.11.1
 supersedes: openclaw-2026.10.5   # same upgrade, retargeted 2026-11-07 (10.5/10.6 -> newest stable 11.1)
 component: openclaw
-status: blocked
-review: null
+status: vetted                    # plan-reviewer 2026-11-08: ready-for-go at cf1a0f714 (needs-fix at 3c65aa70d -> fixes d83dc59fc -> one gate edit cf1a0f714). HUMAN-GATED: runs only on the coordinator go-live message after the operator GO "All of them we do the full openclaw day" (2026-11-07).
+review: ready-for-go@2026-11-08
 window: "attended full day, only on the coordinator go-live message (operator 2026-11-07: all of them, the full openclaw day); not while etcd-timeouts-5000-500 runs"
 findings: [F-79c6922e, F-39d3d443]     # openclaw + @openclaw/discord 2026.6.11 -> 2026.11.1
 kind: npm
