@@ -124,7 +124,7 @@ git show --stat HEAD && git log -1 --format=%s && git push
 Then watch (no manual reconcile needed; the webhook applies it): `kubectl -n ai get pod -l app.kubernetes.io/instance=openclaw -w`; init ~5 min; app container boot before the port opens ~20-25 min on first boot (doctor passes ~2.5 min each, plugin installs ~1.5 min, per-agent auth import ~1.5 min x 8); `kubectl -n ai logs deploy/openclaw -c app -f` shows `doctor --fix pass`, `openai auth imported for agent ...`. The Deployment is `Recreate`: the old pod stops first. Verify the live pod `startTime` and image digest changed (`kubectl -n ai get pod -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].status.startTime} {.items[0].spec.containers[0].image}'`), not just rollout status.
 **Expected downtime of the assistant: 25-35 minutes** (old pod stopped -> gateway listening); budget 60. Hard rollback cutoff: gateway not listening and `doctor`/boot not progressing 45 min after the push.
 
-### G.4 Verification gates (one `set -e` block; every line is an assertion and aborts on failure; all must pass)
+### G.4 Verification gates (one `set -e` block; every line is an assertion and aborts on failure; all must pass; save it as a script file and run it with `bash`, so a failure does not close the operator's interactive shell)
 ```bash
 set -euo pipefail
 OC=$(kubectl -n ai get pod -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}')
@@ -142,7 +142,7 @@ X 'openclaw config validate' | grep -q 'Config valid'
 [ "$(X 'openclaw doctor --lint' | python3 -c "import sys,json;print(sum(1 for l in sys.stdin if l.startswith('{') for f in json.loads(l)['findings'] if f['severity']=='error'))")" = "0" ]   # Errors: 0 (the splitfairy MCP check needs the live URL: it must pass in prod)
 X 'openclaw models status' | grep -a 'Default' | grep -q 'openai/gpt-6.1-terra'
 X 'openclaw models status' | grep -a 'Fallbacks' | grep -q 'ollama/gemma4:26b-mlx'
-! X 'openclaw models status' | grep -a 'Fallbacks' | grep -qi anthropic            # no anthropic model in the chain
+if X 'openclaw models status' | grep -a 'Fallbacks' | grep -qi anthropic; then echo "GATE FAIL: anthropic model in fallback chain"; false; fi   # (a '!'-negated pipeline is exempt from set -e: do not use it)
 # live turn on the primary, fallback must not be used (assert inside JQ_TURN)
 X 'openclaw agent -m "Reply with exactly this token: CANARY7F3" --session-id hc-1111 --timeout 150 --json' | python3 -c "$JQ_TURN" | grep -q CANARY7F3
 # tool turn
@@ -158,7 +158,8 @@ X 'home-operation list' | grep -q .
 X 'cd ~/clawd && python3 scripts/morning_briefing.py --dry-run' | grep -a -q 'Good morning'
 # whisper: exactly one audio model entry, env form, 4 threads
 [ "$(X "python3 -c \"import json;m=json.load(open('/home/node/.openclaw/openclaw.json'))['tools']['media']['models'];print(len(m),m[0]['command'],m[0]['args'][0])\"")" = "1 env OMP_NUM_THREADS=4" ]
-# skills: none skipped
+# skills: none skipped, and a repaired one now carries its description (positive check)
+[ "$(X "head -4 ~/clawd/skills/gcal/SKILL.md | grep -c '^description:'")" = "1" ]
 [ "$(X 'openclaw skills list 2>&1 | grep -a -c "description is required" || true')" = "0" ]
 # ANTHROPIC key in the pod equals the Secret (hash compare, value never printed)
 LIVE=$(kubectl -n ai get secret anthropic-api-key -o jsonpath='{.data.ANTHROPIC_API_KEY}' | base64 -d | shasum -a 256 | cut -c1-12)
