@@ -45,7 +45,7 @@ premises:
     run: kubectl get cronjob elasticsearch-obs-recovery -n monitoring -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}'
     expect_matches: '^docker\.io/library/python:3\.14\.\d+-alpine@sha256:[0-9a-f]{64}$'
 review: ready-for-go@2026-11-03   # plan-reviewer 2026-11-03: needs-fix (4.1 zsh word-split loop), fixed, delta re-review ready-for-go; HUMAN-GATED, window null, after the python-fleet-3.15.2 canary
-status: vetted
+status: awaiting-go                 # go_no_go ingested by sat-attended:2026-11-07 (HUMAN-GATED, unattended run)
 window: null
 sops_refs:
   - docs/sops/application-update.md

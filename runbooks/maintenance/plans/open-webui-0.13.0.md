@@ -63,7 +63,7 @@ finding_refs:
                                       # No version finding for the IMAGE v0.12.5 -> 0.13.0 exists yet (policy-cli finding list --grep open-webui,
                                       # 2026-11-03); add its id here once the sweep files it.
 review: ready-for-go@2026-11-03   # plan-reviewer 2026-11-03: needs-fix (restore pod spawned 2 containers, restore_proof missing), fixed, delta re-review ready-for-go; HUMAN-GATED, soak a few days / prefer v0.13.1, window null until operator GO
-status: vetted
+status: awaiting-go                 # go_no_go ingested by sat-attended:2026-11-07 (HUMAN-GATED, unattended run)
 window: null
 sops_refs:
   - docs/sops/application-update.md
