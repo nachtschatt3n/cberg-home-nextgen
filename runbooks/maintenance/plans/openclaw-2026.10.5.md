@@ -57,6 +57,21 @@ Note for the earlier hold (commit for F-6a859080): `runbooks/auto-update-policy.
 **Both must be raised to 24 (`max_major: 24`, `"<25"`) in the same commit as the
 base-image move**, or the checker will keep reporting the 24 line as unreachable.
 
+## 0a. Re-measurement 2026-11-07 (openclaw-agent): 2026.11.1 is NOT viable on node 22
+
+- npm dist-tags: `latest` 2026.11.1, `extended-stable` 2026.9.36, `beta` 2026.11.5-beta.1.
+- Node engines (registry): 2026.11.1 and 11.5-beta.1 `>=24.16.0 <25 || >=26.1.0`; extended-stable 9.36 `>=24.22.1 <25 || >=26.12.1`.
+  Node 22 is excluded from EVERY version from 2026.9.3 on. The last node-22-capable release is **2026.9.2** (`>=22.22.3 <23`);
+  2026.9.10 to 9.32 were never published, and 2026.9.3 to 9.9 already require 24.16. So there is no node-22 path to anything newer than 9.2.
+- `@openclaw/codex` and `@openclaw/discord` 2026.11.1 exist and pin `peerDependencies.openclaw >=2026.11.1` (lockstep with the host, as with 10.6).
+- Consequence: the node major (22 -> 24.22.1+) is a hard prerequisite of ANY openclaw move. It does not ride Renovate PR #279 (that PR is now
+  headlamp-only, `node 24.19.0 -> 24.22.2` alpine; the openclaw node rule is file-scoped `allowedVersions "<23"`, e058e79c6, so the finding
+  F-0f5cc025 split was already done). The openclaw node move ships inside the one-day roll below, with `image_major_ceiling max_major: 24` and
+  Renovate `"<25"` in the same change set. Retarget recommendation: **2026.11.1** (npm `latest`) instead of 10.6, node 24.22.1, same one-day structure.
+- Offline Mac trial of 11.1 on node 24.22.1 (scrubbed live config): `openclaw --version` OK; `doctor --lint` reports the same single known
+  error (`agents.list moved to keyed agents.entries`). `doctor --fix` in the scratch HOME did NOT complete (state DB admission/plugin-receipt
+  errors in a bare scratch home): INCONCLUSIVE, not evidence for or against. The rehearsal on a cloned PVC remains the gate.
+
 ## 0b. Unblock plan (2026-10-23, openclaw-agent; assessment DONE, stages S1-S4 pending)
 
 ### Target decision: **2026.10.6** (not 10.5, not the extended-stable 9.33)
