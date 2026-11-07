@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: anthropic-api-key
+stringData:
+  ANTHROPIC_API_KEY: ENC[AES256_GCM,data:8QYWaEqR1qyR1ysp3+IMVFvCO7JMkDbyxH8OyNrRy/ZkjpQEva0/6Rb4Y+fRVLzYQ6Vv866rFhNtxNCSTp/H1mIALeRp4Oc5R9yAxgNvfUVqrUOOjJpg+Ezrcqta3ogH/KDMMJPoXPlhgg==,iv:ARvEwEHhxMvvSWLNAipZy0RTV1JFpkYoiVjkYHwWA9A=,tag:yQfU7QJrzhbpqmeg/7aVZw==,type:str]
+sops:
+  age:
+    - enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBucVhWNFJ3WGhZSzdXLzZl
+        V2tIOEN0d2VyMkljZ0tXMTUyWjhPczZGVHdjCldaSXRsM3JKQjZrbUZST2wyZmFG
+        NmpMbzA5MVBWS3RhcjJlZytoRGpvaDQKLS0tIEkwTHRsb0poYlM4NVF6WjlOYzNj
+        QWM4KzJmK0VEakNYQ3UwM2ZwWHRmeHcKYo465nxp7wu3uXO2Y5aaKCvXufTx+xvV
+        ZNRrzQjBHaeJGILe5SMJ+VULRFKl1dKzHrymQ6SNyPlg0/rtKPz8jg==
+        -----END AGE ENCRYPTED FILE-----
+      recipient: age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6
+  encrypted_regex: ^(data|stringData)$
+  lastmodified: "2026-11-07T22:37:19Z"
+  mac: ENC[AES256_GCM,data:msWm5evLu1c6yVwS6mTpUiqNDn/n5zJ74vEq7mf3lHuYbe7sgoQOQmwHSzVaLs887qOkCwq/QJaJz5F5Vf7hjTVUm3oQJB01rPemq5LLxJIETa+1/fXxFAlbx0Owcoe5WknjqATY/0xTNgKR5ECLmeYojQBYhz/xBBtjfdZKVNo=,iv:CCyPOT9HeJC9sJPVkoVnIyoVFxt0qMXgfHQq9kr+VfQ=,tag:bDNowhNYjFylwcWAFiYjxQ==,type:str]
+  mac_only_encrypted: true
+  version: 3.13.3

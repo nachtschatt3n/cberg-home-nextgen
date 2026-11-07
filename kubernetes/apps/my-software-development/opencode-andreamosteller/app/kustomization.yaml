@@ -5,6 +5,7 @@ kind: Kustomization
 resources:
   - ./secrets.sops.yaml
   - ./ghcr-secret.sops.yaml
+  - ./anthropic-api-key.sops.yaml
   - ./helmrelease.yaml
   - ./storageclass.yaml
   - ./pvc.yaml

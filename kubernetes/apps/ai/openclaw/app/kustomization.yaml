@@ -4,6 +4,7 @@ kind: Kustomization
 namespace: ai
 resources:
   - ./secret.sops.yaml
+  - ./anthropic-api-key.sops.yaml
   - ./pvc.yaml
   - ./mcporter-config.yaml
   - ./skills-configmap.sops.yaml
