@@ -667,6 +667,7 @@ mise exec -- kubectl port-forward -n media svc/jellyfin 8097:8096 >/dev/null 2>&
 - **R2 (after commit B — a §4 gate failed):** one revert commit covering B then A (`git revert --no-commit <B> <A> && git commit -F <msg>`), push. Jellyfin returns to `jellyfin-config` exactly as it was at the stop. Loses only state written to the new volume since cutover (watch progress).
 - **R3 (old volume damaged — should be impossible, it is only ever mounted readOnly):** restore `GATE_BACKUP` per `docs/sops/backup.md` "Restore from Backup" into `restored-jellyfin-config` and bind it via git; 3.4 already proved this backup restores.
 - **Retention:** the old Volume/PV/PVC `jellyfin-config` stay, unmounted, for **14 days** after a green §4.6 next-morning check. Deleting them is a SEPARATE, operator-approved follow-up plan — never part of this one (storage-safety rule: no storage delete without an explicit go/no-go).
+- **Retired 2026-11-08:** the old Volume/PV/PVC `jellyfin-config` (RWX) were deleted on explicit operator confirmation in the ops console (permanent, no restore intended). The last backup of the old volume (`backup-7887f148...`, 2026-10-23) stays in the backup target. R3 above no longer applies; the live volume is `jellyfin-config-rwo`.
 
 ## 6. Interference notes
 
