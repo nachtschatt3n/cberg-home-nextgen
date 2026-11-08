@@ -227,7 +227,9 @@ spec:
                 mkdir -p "$BIN_DIR"
                 ln -sf /usr/bin/git "$BIN_DIR/git"
                 ln -sf /usr/bin/python3 "$BIN_DIR/python3"
-                rm -f "$BIN_DIR/gh" "$BIN_DIR/jq" "$BIN_DIR/ffmpeg" "$BIN_DIR/ffprobe"
+                # jq/ffmpeg/ffprobe stay on the volume: their installers below skip the
+                # download when present, so a GitHub outage no longer blocks boot.
+                rm -f "$BIN_DIR/gh"
                 # Symlink the runtime-extras bins (tmux/rg + poppler PDF
                 # tools) into BIN_DIR so PATH resolves them at runtime.
                 for bin in rg tmux pdftoppm pdftotext pdfinfo pdftocairo; do
@@ -288,7 +290,9 @@ spec:
                 rm -rf /home/node/.openclaw/lib/node_modules/goplaces
                 GOPLACES_VER="0.4.2"
                 GOPLACES_TMP=$(mktemp -d)
-                if curl -fsSL --retry 3 --retry-delay 5 \
+                if [ -x "$BIN_DIR/goplaces" ] && [ -f "$BIN_DIR/.goplaces-$${GOPLACES_VER}" ]; then
+                  echo "goplaces $${GOPLACES_VER} already present; skipping download"
+                elif curl -fsSL --retry 3 --retry-delay 5 \
                      "https://github.com/openclaw/goplaces/releases/download/v$${GOPLACES_VER}/goplaces_$${GOPLACES_VER}_linux_amd64.tar.gz" \
                      -o "$${GOPLACES_TMP}/goplaces.tar.gz"; then
                   tar -xzf "$${GOPLACES_TMP}/goplaces.tar.gz" -C "$${GOPLACES_TMP}"
@@ -296,6 +300,7 @@ spec:
                     rm -f "$BIN_DIR/goplaces"
                     cp "$${GOPLACES_TMP}/goplaces" "$BIN_DIR/goplaces"
                     chmod +x "$BIN_DIR/goplaces"
+                    touch "$BIN_DIR/.goplaces-$${GOPLACES_VER}"
                     echo "goplaces (real Places-API CLI) installed"
                   else
                     echo "WARN: goplaces binary not found in extracted tarball"
@@ -309,7 +314,9 @@ spec:
                 # GitHub release downloads occasionally TLS-flake on the
                 # redirect leg; retry a few times before giving up.
                 jq_ok=0
+                if [ -x "$BIN_DIR/jq" ]; then jq_ok=1; echo "jq already present; skipping download"; fi
                 for attempt in 1 2 3 4 5; do
+                  [ "$jq_ok" = "1" ] && break
                   if curl -fsSL --retry 3 --retry-delay 5 --retry-connrefused \
                        "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" \
                        -o "$BIN_DIR/jq" 2>/dev/null; then
