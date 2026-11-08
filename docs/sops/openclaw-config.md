@@ -4,7 +4,7 @@
 > working on a login-only (ChatGPT/Codex OAuth) setup, why each exists, how to
 > prove each one is live, and how to restore it. Also records the provider-disable
 > block and the harmless `plugins.entries.*` "not installed" warnings.
-> Version: `2026.11.08b`
+> Version: `2026.11.08`
 > Last Updated: `2026-11-08`
 > Owner: `operator + openclaw-agent`
 

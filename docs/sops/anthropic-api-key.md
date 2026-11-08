@@ -1,8 +1,8 @@
 # SOP: Anthropic API key — two copies, rotate both
 
 > Description: The shared Anthropic API key lives as two SOPS-encrypted Secrets, one per namespace, because Kubernetes Secrets are namespaced and this cluster has no replicator. This SOP records where the copies are, who consumes them, and how to rotate or revoke the key without leaving a stale copy or a stale pod behind.
-> Version: `2026.11.07`
-> Last Updated: `2026-11-07`
+> Version: `2026.11.08`
+> Last Updated: `2026-11-08`
 > Owner: `Platform`
 
 ---
@@ -43,7 +43,7 @@ wires a consumer.
 
 | Namespace | Workload | How it reads the key | Status |
 |-----------|----------|----------------------|--------|
-| `ai` | OpenClaw | `ANTHROPIC_API_KEY` env from `secretKeyRef` (app container) + Reloader `secret.reloader.stakater.com/reload` lists `anthropic-api-key`; provider detection only, primary stays openai, no anthropic model in fallbacks | wired and live since the 2026.11.1 roll on 2026-11-08 (commit `610534c0b`); in-pod env hash equals the Secret hash; `openclaw models status` detects `anthropic`, `anthropic-openai` and `claude-cli` via env; since 2026-11-08 `anthropic/claude-sonnet-5-5` is the primary model of 8 agents (usage below) | wired, in use |
+| `ai` | OpenClaw | `ANTHROPIC_API_KEY` env from `secretKeyRef` (app container) + Reloader `secret.reloader.stakater.com/reload` lists `anthropic-api-key`; primary model since 2026-11-08 is `anthropic/claude-sonnet-5-5` with fallbacks `openai/gpt-6.1-terra` then local gemma | wired and live since the 2026.11.1 roll on 2026-11-08 (commit `610534c0b`); in-pod env hash equals the Secret hash; `openclaw models status` detects `anthropic`, `anthropic-openai` and `claude-cli` via env; since 2026-11-08 `anthropic/claude-sonnet-5-5` is the primary model of 8 agents (usage below) | wired, in use |
 | `ai` | Open WebUI | not wired yet (needs an Anthropic connection configured) | pending |
 | `my-software-development` | `opencode-andreamosteller` | not wired yet; its own `opencode-andreamosteller-secrets` still carries an EMPTY `ANTHROPIC_API_KEY` | pending |
 | `home-automation` | `pellet-price-monitor` | its own `secret.sops.yaml` carries an EMPTY `ANTHROPIC_API_KEY`; not shared | not using the shared copy |
@@ -243,4 +243,5 @@ is already revoked, mint another one: there is no restore of a revoked key.
 
 ## Version History
 
+- `2026.11.08`: OpenClaw wired (env from the shared Secret) and Sonnet 5.5 made the primary model; usage and cost section added.
 - `2026.11.07`: Initial SOP. Two copies chosen on purpose (operator decision); rotation script added.
