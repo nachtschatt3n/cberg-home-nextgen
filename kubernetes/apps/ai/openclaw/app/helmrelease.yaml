@@ -19,18 +19,32 @@ spec:
     remediation:
       retries: 3
   upgrade:
-    # 2026.11.1 roll (2026-11-07): first boot runs init (~5 min) + doctor migration
-    # passes (~2.5 min each, up to 4) + plugin installs before the gateway opens its
-    # port. A 15m helm wait with 3 remediation retries rolls the release back mid-
-    # migration (the 7.1 lesson). REVERT timeout/remediation in a follow-up commit
-    # once the roll is verified.
-    timeout: 40m
+    # Pod start = init (~5 min: npm/apt toolchain) + app boot (doctor pass, plugin
+    # checks, per-agent auth checks, gateway ~9 min) ~ 14 min. The one-time 2026.11.1
+    # first-boot state migration (up to ~25 min) is DONE, so the temporary 40m/no-
+    # remediation values of the roll are replaced by 30m / 3 retries. The Deployment
+    # progress deadline (10 min default) is raised in the postRenderer below because
+    # helm's wait otherwise reports "stalled" while a healthy pod is still booting.
+    timeout: 30m
     cleanupOnFail: false
     remediation:
-      retries: 0
-      remediateLastFailure: false
+      retries: 3
   uninstall:
     keepHistory: false
+  # Raise the Deployment progress deadline (10 min default) so helm's wait does not
+  # report "stalled resources" while a healthy pod is still in its ~14 min boot
+  # (measured during the 2026.11.1 roll: HelmRelease Failed at 10 min, pod Ready at
+  # 24). Target is the Deployment by name; it exists in every render of this release.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Deployment
+              name: openclaw
+            patch: |
+              - op: add
+                path: /spec/progressDeadlineSeconds
+                value: 1800
   values:
     controllers:
       openclaw:
@@ -814,7 +828,12 @@ spec:
                   // rate_limit is a cooldown-probeable reason, so the primary is
                   // re-probed automatically and traffic returns to codex on its own
                   // once quota resets. No manual revert needed.
-                  cfg.agents.defaults.model.fallbacks = ['ollama/gemma4:26b-mlx'];
+                  // 2026-11-08: with an Anthropic primary the first rung is Terra (Codex
+                  // login, no per-token cost), then the local model. Each rung is a
+                  // separate provider, so an Anthropic outage/credit exhaustion fails over.
+                  cfg.agents.defaults.model.fallbacks = chosenModel.startsWith('anthropic/')
+                    ? ['openai/gpt-6.1-terra', 'ollama/gemma4:26b-mlx']
+                    : ['ollama/gemma4:26b-mlx'];
                   delete cfg.agents.defaults.agentRuntime;
                   // WEB SEARCH (2026-11-01): web_search had NO provider ("disabled or no
                   // provider is available") since at least 26 Oct, so the Black Friday price
@@ -833,13 +852,18 @@ spec:
                     model: 'nomic-embed-text:latest',
                     remote: { baseUrl: 'http://ollama-toolfix.ai.svc.cluster.local' },
                   });
+                  // the chosen primary (any provider) is always allowlisted; openai refs
+                  // additionally run on the codex harness (set just below)
+                  cfg.agents.defaults.models = cfg.agents.defaults.models || {};
+                  cfg.agents.defaults.models[chosenModel] = cfg.agents.defaults.models[chosenModel] || {};
                   if (chosenModel.startsWith('openai/')) {
-                    cfg.agents.defaults.models = cfg.agents.defaults.models || {};
-                    cfg.agents.defaults.models[chosenModel] = cfg.agents.defaults.models[chosenModel] || {};
                     cfg.agents.defaults.models[chosenModel].agentRuntime = { id: 'codex' };
                     // Keep gpt-5.5 allowlisted as a manual fallback path
                     // (openclaw agent --model openai/gpt-5.5) while the
                     // primary is a 5.6-family model.
+                    cfg.agents.defaults.models['openai/gpt-5.5'] = cfg.agents.defaults.models['openai/gpt-5.5'] || {};
+                    cfg.agents.defaults.models['openai/gpt-5.5'].agentRuntime = { id: 'codex' };
+                  } else {
                     cfg.agents.defaults.models['openai/gpt-5.5'] = cfg.agents.defaults.models['openai/gpt-5.5'] || {};
                     cfg.agents.defaults.models['openai/gpt-5.5'].agentRuntime = { id: 'codex' };
                   }
@@ -864,7 +888,7 @@ spec:
                   // 2026-11-07: GPT-6.1 (terra/sol) appeared in the ChatGPT model
                   // picker; the regex now accepts the `6.1` dot, and gpt-6-luna is
                   // always overlaid too so it stays a one-command fallback.
-                  const overlayIds = new Set(['gpt-5.6-terra', 'gpt-6-luna']);
+                  const overlayIds = new Set(['gpt-5.6-terra', 'gpt-6-luna', 'gpt-6.1-terra']);
                   if (/^openai\/gpt-(5\.6|6(\.1)?)-/.test(chosenModel)) {
                     overlayIds.add(chosenModel.slice('openai/'.length));
                   }
@@ -1482,23 +1506,35 @@ spec:
                   // mid-handshake). List mirrors the live config exactly;
                   // note 'kimi' is the registered id (directory is
                   // kimi-coding).
+                  // 'anthropic' is NOT disabled any more (2026-11-08: it is the primary
+                  // provider). The 18 ids that are external plugins in openclaw >= 2026.11 and
+                  // not installed (arcee, cerebras, chutes, cloudflare-ai-gateway, deepinfra,
+                  // deepseek, fireworks, groq, kilocode, kimi, moonshot, qianfan, qwen, stepfun,
+                  // tencent, venice, vercel-ai-gateway, zai) were dropped from this list and
+                  // are deleted from the live plugins.entries below: they only produced
+                  // "plugin not installed" warnings on every command (verified on the live pod:
+                  // 0 warnings and doctor errors 0 after pruning).
                   const disabledProviders = [
-                    'alibaba', 'anthropic', 'arcee', 'byteplus', 'cerebras',
-                    'chutes', 'cloudflare-ai-gateway', 'copilot-proxy',
-                    'deepinfra', 'deepseek', 'fal', 'fireworks',
-                    'github-copilot', 'google', 'groq', 'huggingface',
-                    'kilocode', 'kimi', 'litellm', 'lmstudio',
-                    'microsoft-foundry', 'minimax', 'mistral', 'moonshot',
+                    'alibaba', 'byteplus', 'copilot-proxy',
+                    'fal', 'github-copilot', 'google', 'huggingface',
+                    'litellm', 'lmstudio', 'microsoft-foundry', 'minimax', 'mistral',
                     'nvidia', 'opencode', 'opencode-go', 'openrouter',
-                    'qianfan', 'qwen', 'sglang', 'stepfun', 'synthetic',
-                    'tencent', 'together', 'venice', 'vercel-ai-gateway',
-                    'vllm', 'volcengine', 'vydra', 'xai', 'xiaomi', 'zai',
+                    'sglang', 'synthetic', 'together',
+                    'vllm', 'volcengine', 'vydra', 'xai', 'xiaomi',
                   ];
                   cfg.plugins = cfg.plugins || {};
                   cfg.plugins.entries = cfg.plugins.entries || {};
                   for (const id of disabledProviders) {
                     cfg.plugins.entries[id] = cfg.plugins.entries[id] || {};
                     cfg.plugins.entries[id].enabled = false;
+                  }
+                  // the spread-merge keeps keys from earlier boots: enable anthropic explicitly
+                  // and drop the stale not-installed entries
+                  cfg.plugins.entries.anthropic = Object.assign({}, cfg.plugins.entries.anthropic, { enabled: true });
+                  for (const id of ['arcee', 'cerebras', 'chutes', 'cloudflare-ai-gateway', 'deepinfra',
+                    'deepseek', 'fireworks', 'groq', 'kilocode', 'kimi', 'moonshot', 'qianfan', 'qwen',
+                    'stepfun', 'tencent', 'venice', 'vercel-ai-gateway', 'zai']) {
+                    delete cfg.plugins.entries[id];
                   }
 
                   // Turn off the in-process npm update check (also re-ratified
@@ -2057,11 +2093,15 @@ spec:
               # Terra stays overlaid + allowlisted as the manual fallback.
               # The heartbeat is unaffected: it pins its own model (ollama).
               - name: OPENCLAW_DEFAULT_MODEL
-                # 2026-11-07: gpt-6-luna -> gpt-6.1-terra (operator ask). Verified live in-pod
-                # before this commit: `codex exec -m gpt-6.1-terra` served, a real openclaw
-                # turn returned PONG with fallbackUsed=false, and a tool turn (shell echo)
-                # ran correctly. gpt-6-luna stays overlaid + allowlisted as the manual fallback.
-                value: "openai/gpt-6.1-terra"
+                # 2026-11-08: primary -> Anthropic Claude Sonnet 5.5 (operator decision,
+                # shared API key via ANTHROPIC_API_KEY below). Verified live in-pod before
+                # this commit: bundled `anthropic` plugin (enabled below), catalog knows
+                # claude-sonnet-5-5 (1M context), plain/tool/long turns returned
+                # winnerProvider=anthropic with fallbackUsed=false. The chain is seeded
+                # in the config guard: openai/gpt-6.1-terra first, then the local model.
+                # Terra and Luna stay overlaid + allowlisted as manual options.
+                # (history: gpt-6-luna -> gpt-6.1-terra 2026-11-07, gpt-6.1-terra kept as fallback)
+                value: "anthropic/claude-sonnet-5-5"
               # The @openclaw/codex plugin spawns its VENDORED codex for the
               # app-server (0.139.0 in the pinned 2026.6.11 plugin), and
               # OpenAI's backend gates GPT-5.6 on codex >= ~0.145: "The
@@ -2158,7 +2198,7 @@ spec:
                   initialDelaySeconds: 10
                   periodSeconds: 10
                   timeoutSeconds: 5
-                  failureThreshold: 180
+                  failureThreshold: 90   # 15 min after the initial delay; a boot is ~9 min (was 30 = 5 min, too short once doctor + auth checks run before the port opens)
 
             resources:
               requests:
