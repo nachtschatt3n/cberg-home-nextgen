@@ -7972,7 +7972,7 @@ fi' sh "$tokenv" "$urlspec" "$path" 2>/dev/null | sed -n 's/^STATUS:\(.*\)$/\1/p
 #   isolatedSession true            -> fresh session per tick (~290k -> ~24k)
 #   lightContext    true            -> skip workspace bootstrap files
 #   every           1h              -> documented default for OAuth auth
-#   skipWhenBusy    true            -> defer rather than stack turns
+#   skipWhenBusy    (retired)       -> removed by the 2026.11.1 doctor migration; not checked
 
 log_section "OpenClaw Heartbeat Config"
 
@@ -7997,7 +7997,7 @@ drift = []
 model = str(hb.get('model') or '')
 if not model.startswith('ollama/'):
     drift.append('model=' + (model or 'unset') + ' (expected ollama/*; GPT spend returns)')
-for key in ('isolatedSession', 'lightContext', 'skipWhenBusy'):
+for key in ('isolatedSession', 'lightContext'):  # skipWhenBusy retired in 2026.11.1 (doctor removes it); do not check
     if hb.get(key) is not True:
         drift.append(key + '=' + repr(hb.get(key)) + ' (expected True)')
 if str(hb.get('every') or '') != '1h':
