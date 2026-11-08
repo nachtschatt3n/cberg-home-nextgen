@@ -535,6 +535,17 @@
       "description": ["bitnamilegacy mariadb: archived registry, no real updates"],
       "matchPackageNames": ["docker.io/bitnamilegacy/mariadb", "bitnamilegacy/mariadb"],
       "enabled": false
+    },
+    {
+      // 2026-11-09: the ninth-banner runner postgres sidecar mirrors production, the shared
+      // databases/postgresql server, which is PG16. Hold the major (and only the major) at 16
+      // until that server moves; digest refreshes within 16 still flow. The sweep-dashboard
+      // workflow service container is a different file and is not affected.
+      "description": ["ninth-banner runner postgres sidecar: stay on PG16 until the shared server moves"],
+      "matchFileNames": ["kubernetes/apps/ci-runner/the-ninth-banner-runners/app/helmrelease.yaml"],
+      "matchPackageNames": ["postgres", "docker.io/library/postgres"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     }
   ],
   // The `stable` npm dist-tag of n8n as a single-release datasource (see the n8nio/n8n
