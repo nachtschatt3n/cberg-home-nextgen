@@ -12,7 +12,7 @@
 All Cloudflare zone settings are managed as code using Terraform. The state is stored as a Kubernetes Secret in the `flux-system` namespace — no third-party backends, accessible from any machine on the LAN with a kubeconfig.
 
 - Scope: Cloudflare zone settings, bot management
-- Prerequisites: SOPS age key at `~/.config/sops/age/keys.txt`, kubeconfig at repo root, `terraform` via mise
+- Prerequisites: SOPS age key via `SOPS_AGE_KEY_FILE` (repo-root `age.key`, set in `.envrc` / `.mise.toml`), kubeconfig at repo root, `terraform` via mise
 - Out of scope: DNS records (owned by external-dns via Flux — **do not add `cloudflare_record` resources here**), page rules, workers
 
 ---
@@ -183,7 +183,7 @@ resource "cloudflare_bot_management" "main" {
 
 ```bash
 cd terraform/cloudflare
-./tf plan -detailed-exitcode -out=/dev/null
+./tf plan -detailed-exitcode   # no -out=/dev/null: it exits correctly but prints a misleading "Saved the plan to /dev/null"
 echo "Exit: $?"
 ```
 
@@ -199,7 +199,12 @@ If failed (exit 2):
 ```bash
 CF_TOKEN=$(mise exec -- sops -d kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml \
   | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['api-token'])")
-ZONE_ID="$(./tf output -raw zone_id 2>/dev/null || echo '92f555b8d4791a24e9fd38c669fa24e5')"
+# The wrapper derives the zone id at runtime (no Terraform output exists); do the same, never hard-code it.
+DOMAIN=$(mise exec -- sops -d kubernetes/flux/components/common/cluster-secrets.sops.yaml \
+  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['SECRET_DOMAIN'])")
+ZONE_ID=$(curl -sf "https://api.cloudflare.com/client/v4/zones?name=$DOMAIN" -H "Authorization: Bearer $CF_TOKEN" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['id'])")
+[ -n "$ZONE_ID" ] || { echo 'FAIL: zone id empty'; exit 1; }   # fail loudly; never echo the value
 
 for setting in ssl min_tls_version always_use_https; do
   val=$(curl -sf "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/settings/$setting" \
@@ -283,7 +288,7 @@ If kubeconfig missing:
 
 ```bash
 cd terraform/cloudflare
-./tf plan -detailed-exitcode -out=/dev/null 2>&1
+./tf plan -detailed-exitcode 2>&1
 # Exit 0 = healthy ✅   exit 2 = drift 🔴   exit 1 = error ⚠️
 ```
 

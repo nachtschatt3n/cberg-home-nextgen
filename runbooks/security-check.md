@@ -1433,11 +1433,11 @@ curl -I https://[DOMAIN]/.well-known/security.txt
 
 Detects configuration drift between the Terraform-managed Cloudflare zone settings and the current live state.
 
-**Prerequisites:** `terraform` binary installed locally, Kubernetes backend accessible (`~/.kube/config`), SOPS age key at `~/.config/sops/age/keys.txt`.
+**Prerequisites:** `terraform` binary installed locally, Kubernetes backend accessible (`~/.kube/config`), SOPS age key via `SOPS_AGE_KEY_FILE` (repo-root `age.key`, set in `.envrc` and `.mise.toml`).
 
 ```bash
 cd terraform/cloudflare
-./tf plan -detailed-exitcode -out=/dev/null 2>&1
+./tf plan -detailed-exitcode 2>&1
 # Exit 0 = no drift ✅   exit 2 = drift detected 🔴   exit 1 = error ⚠️
 ```
 
