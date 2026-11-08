@@ -43,7 +43,7 @@ wires a consumer.
 
 | Namespace | Workload | How it reads the key | Status |
 |-----------|----------|----------------------|--------|
-| `ai` | OpenClaw | `ANTHROPIC_API_KEY` env from `secretKeyRef` (app container) + Reloader `secret.reloader.stakater.com/reload` lists `anthropic-api-key`; provider detection only, primary stays openai, no anthropic model in fallbacks | wired and live since the 2026.11.1 roll on 2026-11-08 (commit `610534c0b`); in-pod env hash equals the Secret hash; `openclaw models status` detects `anthropic`, `anthropic-openai` and `claude-cli` via env | wired |
+| `ai` | OpenClaw | `ANTHROPIC_API_KEY` env from `secretKeyRef` (app container) + Reloader `secret.reloader.stakater.com/reload` lists `anthropic-api-key`; provider detection only, primary stays openai, no anthropic model in fallbacks | wired and live since the 2026.11.1 roll on 2026-11-08 (commit `610534c0b`); in-pod env hash equals the Secret hash; `openclaw models status` detects `anthropic`, `anthropic-openai` and `claude-cli` via env; since 2026-11-08 `anthropic/claude-sonnet-5-5` is the primary model of 8 agents (usage below) | wired, in use |
 | `ai` | Open WebUI | not wired yet (needs an Anthropic connection configured) | pending |
 | `my-software-development` | `opencode-andreamosteller` | not wired yet; its own `opencode-andreamosteller-secrets` still carries an EMPTY `ANTHROPIC_API_KEY` | pending |
 | `home-automation` | `pellet-price-monitor` | its own `secret.sops.yaml` carries an EMPTY `ANTHROPIC_API_KEY`; not shared | not using the shared copy |
@@ -152,6 +152,15 @@ If failed:
 Follow `docs/sops/secret-rotation.md` Test 2 and 3 for every row of the consumer
 table (pod start time later than the Secret's change; in-pod value hash equals the
 live Secret hash).
+
+### Usage and cost (OpenClaw, since 2026-11-08)
+
+OpenClaw reads the key from the `ANTHROPIC_API_KEY` env var only (no auth profile). Cost is reported per
+turn in `openclaw agent --json` (`result.meta.agentMeta.usage.cost.total`). Measured on the live pod: a cold first
+turn writes ~44k prompt tokens to the cache (~USD 0.11), a warm repeat turn costs ~USD 0.005, a tool turn on the large
+main session ~USD 0.05. The 5-minute cache means each new burst after idle pays the write again. Rough budget: the
+cron turns that inherit the primary (about 4-5 per day) plus family chat gives about USD 4-10 per day; the console
+credit balance is the real limit, and when it is exhausted turns fail over to Terra automatically.
 
 ### Test 3: the new key works
 

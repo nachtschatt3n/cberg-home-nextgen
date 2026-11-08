@@ -3,8 +3,8 @@
 > Standard Operating Procedures for AI/ML service integration and management.
 > Reference: `docs/integration.md` for endpoint reference table.
 > Description: Operating and integrating Ollama-based AI endpoints for cluster applications.
-> Version: `2026.11.07`
-> Last Updated: `2026-11-07`
+> Version: `2026.11.08`
+> Last Updated: `2026-11-08`
 > Owner: `Platform`
 
 ---
@@ -190,16 +190,17 @@ kubectl get pods -n ai -l app.kubernetes.io/name=openclaw
 
 #### Model failover chain (added 2026-08-18)
 
-The primary model runs through the **Codex harness on ChatGPT OAuth**, which has
-two independent ways to fail — both of which took *every* turn down (chat,
+Until 2026-11-08 the primary model ran through the **Codex harness on ChatGPT OAuth**, which has
+two independent ways to fail (that path is now the FIRST fallback rung, and Anthropic API errors, rate limits or exhausted credit fail over to it) — both of which took *every* turn down (chat,
 skills, cron dispatch) while `agents.defaults.model` carried a bare `primary`
 and no fallbacks. It now degrades to the local Ollama models instead:
 
 ```jsonc
 // ~/.openclaw/openclaw.json  (set declaratively by the init script in helmrelease.yaml)
 "agents": { "defaults": { "model": {
-  "primary":   "openai/gpt-6.1-terra",              // Codex harness / ChatGPT OAuth (since 2026-11-07, 1cbf86998; gpt-6-luna before)
-  "fallbacks": ["ollama/gemma4:26b-mlx"]                // quality tier (e2b-mlx retired 2026-10-19)
+  "primary":   "anthropic/claude-sonnet-5-5",       // Anthropic API key (ANTHROPIC_API_KEY env), embedded runtime; since 2026-11-08 (operator decision), openai/gpt-6.1-terra before
+  "fallbacks": ["openai/gpt-6.1-terra",              // Codex harness / ChatGPT OAuth, no per-token cost
+                "ollama/gemma4:26b-mlx"]                // quality tier (e2b-mlx retired 2026-10-19)
 }}}
 ```
 
@@ -697,6 +698,7 @@ Rollback validation:
 
 ## Version History
 
+- `2026.11.08`: OpenClaw primary is `anthropic/claude-sonnet-5-5` (shared `anthropic-api-key`, plugin `anthropic` enabled, key detected from env, no auth profile), fallbacks `openai/gpt-6.1-terra` then `ollama/gemma4:26b-mlx`; terra, luna and gpt-5.5 stay overlaid + allowlisted for manual `--model` use. Agents on the primary: main, juno-andrea, vita-*, jerry-* (8); `voice` stays on `ollama-native`. Heartbeats and dreaming pin the local model. Details and the 2026.11 runtime rows: `docs/sops/openclaw-config.md`.
 - `2026.11.07`: OpenClaw primary model now `openai/gpt-6.1-terra` (`1cbf86998`).
   Seeded-config guards (web search, memory embeddings, codex plugin strip) are
   documented in `docs/sops/openclaw-config.md`; recovery of a failed
