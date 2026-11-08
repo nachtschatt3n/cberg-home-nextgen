@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.11.04"
+version: "2026.11.07"
 
 # ── Image major ceilings (added 2026-10-23, F-6a859080) ─────────────────────
 # Caps the MAJOR line the version checker may propose for ONE image in ONE
@@ -31,8 +31,8 @@ version: "2026.11.04"
 image_major_ceiling:
   - component: openclaw
     repository: node
-    max_major: 22
-    reason: "openclaw npm package engines is node >=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0; node 26 is unsupported and broke the managed codex plugin in the earlier failed upgrade. Stay on the 22.x line (2026-10-23)."
+    max_major: 24
+    reason: "openclaw 2026.11.1 engines is node >=24.16.0 <25 || >=26.1.0 (node 22 is excluded from 2026.9.3 on). Rehearsed and rolled on node 24.22.x (2026-11-07); a node 26 move needs its own cloned-PVC rehearsal first."
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.

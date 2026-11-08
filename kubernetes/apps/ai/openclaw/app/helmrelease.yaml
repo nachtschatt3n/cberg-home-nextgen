@@ -19,10 +19,16 @@ spec:
     remediation:
       retries: 3
   upgrade:
-    timeout: 15m
+    # 2026.11.1 roll (2026-11-07): first boot runs init (~5 min) + doctor migration
+    # passes (~2.5 min each, up to 4) + plugin installs before the gateway opens its
+    # port. A 15m helm wait with 3 remediation retries rolls the release back mid-
+    # migration (the 7.1 lesson). REVERT timeout/remediation in a follow-up commit
+    # once the roll is verified.
+    timeout: 40m
     cleanupOnFail: false
     remediation:
-      retries: 3
+      retries: 0
+      remediateLastFailure: false
   uninstall:
     keepHistory: false
   values:
@@ -35,7 +41,7 @@ spec:
         strategy: Recreate
         pod:
           annotations:
-            secret.reloader.stakater.com/reload: openclaw-secret
+            secret.reloader.stakater.com/reload: openclaw-secret,anthropic-api-key
             configmap.reloader.stakater.com/reload: openclaw-mcp-servers,openclaw-skills
           securityContext:
             fsGroup: 1000
@@ -45,14 +51,24 @@ spec:
           install-openclaw:
             image:
               repository: node
-              # Pinned to the digest that was live on 2026-08-18 (node 22.23.2);
-              # upstream rebuilds 22-bookworm/22.23.2-bookworm in place.
-              tag: 22.23.4-bookworm@sha256:63538dfe497cc29dfafdda25ada09b46db68a3f4cc205abf1f5d6bf0913f3384
+              # openclaw 2026.11.1 engines: node >=24.16.0 <25 || >=26.1.0. Node 24 LTS line
+              # (NOT 26: the earlier managed-codex failure was on 26). Digest-pinned
+              # because upstream rebuilds 24.x-bookworm tags in place (2026-11-07).
+              tag: 24.22.2-bookworm@sha256:8fa96264f302f58bbb13aa7339c541547b56975766ce956c875da149452a3e40
             command:
               - bash
               - -lc
               - |
                 set -euo pipefail
+
+                # openclaw >= 2026.11 refuses to run doctor/SQLite migrations when an
+                # ancestor of its state or temp dir is group/world-writable without the
+                # sticky bit. fsGroup 1000 makes the PVC root /home/node 2775 and the
+                # /tmp emptyDir 2777; this init runs as root AFTER the volumes are set up
+                # and BEFORE the app container, so normalise both on every boot (2026-11-07,
+                # measured on the cloned-PVC rehearsal).
+                chmod 755 /home/node
+                chmod 1777 /tmp
 
                 # Migrate .clawdbot -> .openclaw if needed
                 if [ -d "/home/node/.clawdbot" ] && [ ! -L "/home/node/.clawdbot" ]; then
@@ -396,7 +412,7 @@ spec:
                 # are all published in lockstep at 2026.6.11 (@openclaw/discord
                 # 2026.6.11 declares peerDependencies openclaw>=2026.6.11) and the
                 # host bundles the matching plugin-sdk. Keep all three on the same version.
-                install_npm openclaw@2026.6.11
+                install_npm openclaw@2026.11.1
 
                 # PATCH (2026-08-24): key-order-independent reply-session revision.
                 # Upstream 2026.6.11 computes the session-init conflict revision as
@@ -461,7 +477,7 @@ spec:
                 # match the openclaw host above — the host's plugin-API
                 # contract requires the plugin built against the same version
                 # range. Move it together with openclaw (both at 2026.6.11).
-                install_npm @openclaw/discord@2026.6.11
+                install_npm @openclaw/discord@2026.11.1
 
                 # Realign openclaw's MANAGED plugin store (~/.openclaw/npm) with
                 # the running host version. That store is provisioned once at first
@@ -477,9 +493,20 @@ spec:
                   OC_VER=$(node -p "require('/home/node/.openclaw/lib/node_modules/openclaw/package.json').version" 2>/dev/null)
                   if [ -n "$OC_VER" ]; then
                     echo "Realigning managed @openclaw plugins to host $OC_VER..."
-                    if ! ( cd /home/node/.openclaw/npm && npm install --no-audit --no-fund --save "@openclaw/codex@$OC_VER" "@openclaw/discord@$OC_VER" ); then
+                    if ! ( cd /home/node/.openclaw/npm && npm install --no-audit --no-fund --save "@openclaw/codex@$OC_VER" "@openclaw/discord@$OC_VER" "@openclaw/duckduckgo-plugin@$OC_VER" ); then
                       echo "WARN: managed plugin realign failed (continuing)"
                     fi
+                    # Host peer link (2026-11-07). Managed-store plugins resolve the host
+                    # `openclaw` package through <plugin>/node_modules/openclaw -> host root
+                    # (upstream #78185). A raw `npm install` above strips it, so recreate it
+                    # idempotently on every boot, AFTER the install and BEFORE the chown.
+                    # `openclaw doctor --fix` (app command) repairs it too; this is belt and braces.
+                    for pkg in @openclaw/codex @openclaw/discord @openclaw/duckduckgo-plugin; do
+                      d=/home/node/.openclaw/npm/node_modules/$pkg
+                      [ -d "$d" ] || continue
+                      mkdir -p "$d/node_modules"
+                      ln -sfn /home/node/.openclaw/lib/node_modules/openclaw "$d/node_modules/openclaw"
+                    done
                     chown -R node:node /home/node/.openclaw/npm 2>/dev/null || true
                   fi
                 fi
@@ -622,9 +649,10 @@ spec:
           app:
             image:
               repository: node
-              # Pinned to the digest that was live on 2026-08-18 (node 22.23.2);
-              # upstream rebuilds 22-bookworm/22.23.2-bookworm in place.
-              tag: 22.23.4-bookworm@sha256:63538dfe497cc29dfafdda25ada09b46db68a3f4cc205abf1f5d6bf0913f3384
+              # openclaw 2026.11.1 engines: node >=24.16.0 <25 || >=26.1.0. Node 24 LTS line
+              # (NOT 26: the earlier managed-codex failure was on 26). Digest-pinned
+              # because upstream rebuilds 24.x-bookworm tags in place (2026-11-07).
+              tag: 24.22.2-bookworm@sha256:8fa96264f302f58bbb13aa7339c541547b56975766ce956c875da149452a3e40
               pullPolicy: IfNotPresent
 
             command:
@@ -1051,6 +1079,17 @@ spec:
                         '--disable-blink-features=AutomationControlled'],
                     });
                   }
+                  // openclaw >= 2026.11: `openclaw doctor --fix` (run below, every boot)
+                  // migrates agents.list -> keyed agents.entries + agents.ownership
+                  // "explicit". This guard still reasons in list form, so present the
+                  // migrated config as a list here and fold it back before writing.
+                  const hadEntries = !!(cfg.agents.entries && !cfg.agents.list);
+                  if (hadEntries) {
+                    cfg.agents.list = Object.keys(cfg.agents.entries).map(
+                      (id) => Object.assign({ id: id }, cfg.agents.entries[id]));
+                    const mainEntry = cfg.agents.list.find((a) => a.id === 'main');
+                    if (mainEntry) mainEntry.default = true;
+                  }
                   cfg.agents.list = cfg.agents.list || [{ id: 'main' }];
                   const famById = {};
                   cfg.agents.list.forEach((a) => { famById[a.id] = a; });
@@ -1306,27 +1345,40 @@ spec:
                   cfg.tools.media = cfg.tools.media || {};
                   // Bound parallel transcodes; each whisper run is ~850MiB.
                   cfg.tools.media.concurrency = 1;
-                  cfg.tools.media.audio = {
-                    ...(cfg.tools.media.audio || {}),
+                  // openclaw >= 2026.11: per-capability media models live in the
+                  // capability-tagged top-level tools.media.models[] (doctor migrates
+                  // tools.media.audio.models there ONCE and would append a duplicate every
+                  // boot if this guard kept writing the legacy shape; measured: 4 copies
+                  // after 3 boots). Write the new shape, replace our audio entry, keep
+                  // entries of other capabilities, and leave audio.models unset.
+                  const whisperEntry = {
+                    type: 'cli',
+                    // Thread cap (whisper finding, 2026-11-07): torch/OpenMP otherwise spawns
+                    // one thread per host core and starves the gateway. `env` form is the
+                    // one live on the PVC; the OMP/MKL container env below is the second layer.
+                    command: 'env',
+                    capabilities: ['audio'],
+                    timeoutSeconds: 300,
+                    // Keep BOTH --output_format txt and --output_dir:
+                    // resolveWhisperOutputPath() needs the pair to read the
+                    // .txt sidecar, else it falls back to timestamped stdout.
+                    args: [
+                      'OMP_NUM_THREADS=4', 'MKL_NUM_THREADS=4', 'whisper',
+                      '--model', 'tiny',
+                      '--output_format', 'txt',
+                      '--output_dir', '{{ "{{" }}OutputDir}}',
+                      '--verbose', 'False',
+                      '{{ "{{" }}MediaPath}}',
+                    ],
+                  };
+                  cfg.tools.media.audio = Object.assign({}, cfg.tools.media.audio, {
                     enabled: true,
                     timeoutSeconds: 300,
-                    models: [{
-                      type: 'cli',
-                      command: 'whisper',
-                      capabilities: ['audio'],
-                      timeoutSeconds: 300,
-                      // Keep BOTH --output_format txt and --output_dir:
-                      // resolveWhisperOutputPath() needs the pair to read the
-                      // .txt sidecar, else it falls back to timestamped stdout.
-                      args: [
-                        '--model', 'tiny',
-                        '--output_format', 'txt',
-                        '--output_dir', '{{ "{{" }}OutputDir}}',
-                        '--verbose', 'False',
-                        '{{ "{{" }}MediaPath}}',
-                      ],
-                    }],
-                  };
+                  });
+                  delete cfg.tools.media.audio.models;
+                  cfg.tools.media.models = (cfg.tools.media.models || [])
+                    .filter((e) => !(e && Array.isArray(e.capabilities) && e.capabilities.includes('audio')))
+                    .concat([whisperEntry]);
 
                   // Enable the coding-agent skill — all binaries (claude,
                   // codex, opencode, pi) are present; just needs config
@@ -1519,9 +1571,131 @@ spec:
 
                   delete cfg.model;
 
+                  // fold the list view back into agents.entries (see above); explicit
+                  // ownership replaces the legacy `default` marker.
+                  if (hadEntries) {
+                    const entries = {};
+                    cfg.agents.list.forEach((a) => {
+                      const e = Object.assign({}, a);
+                      delete e.id; delete e.default;
+                      entries[a.id] = e;
+                    });
+                    cfg.agents.entries = entries;
+                    delete cfg.agents.list;
+                  }
+                  // openclaw >= 2026.11 folds TOOLS.md into AGENTS.md (24.5 KB here) and
+                  // truncates each bootstrap file at 20000 chars by default: raise the cap
+                  // so the family/skills guidance is not silently cut (rehearsal 2026-11-07).
+                  cfg.agents.defaults = cfg.agents.defaults || {};
+                  cfg.agents.defaults.bootstrapMaxChars = Math.max(cfg.agents.defaults.bootstrapMaxChars || 0, 40000);
+                  cfg.agents.defaults.bootstrapTotalMaxChars = Math.max(cfg.agents.defaults.bootstrapTotalMaxChars || 0, 80000);
+                  // 2026.11 discord schema rejects an empty `ui` object and doctor
+                  // then treats the whole config as unavailable (rehearsal 2026-11-07).
+                  if (cfg.channels && cfg.channels.discord) delete cfg.channels.discord.ui;
+
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
                 NODE
                 chown 1000:1000 "$CONFIG_PATH"
+
+                # Workspace skills without a frontmatter `description:` are skipped by
+                # openclaw >= 2026.11 ("description is required"). Agent-authored/PVC-only
+                # skills (fax, gcal, mealie, mealplan, shoplist, ...) have none: add a
+                # minimal block derived from the first heading. Idempotent, additive.
+                python3 - <<'SKILLFM'
+                import glob, os, re
+                for f in glob.glob("/home/node/clawd*/skills/*/SKILL.md"):
+                    try:
+                        src = open(f, encoding="utf-8").read()
+                    except OSError:
+                        continue
+                    if src.startswith("---") and re.search(r"(?m)^description:", src.split("---", 2)[1] if src.count("---") >= 2 else ""):
+                        continue
+                    name = os.path.basename(os.path.dirname(f))
+                    m = re.search(r"(?m)^#\s+(.+)$", src)
+                    desc = (m.group(1) if m else name).strip().replace('"', "'")[:180]
+                    body = src
+                    if src.startswith("---") and src.count("---") >= 2:
+                        head, rest = src.split("---", 2)[1], src.split("---", 2)[2]
+                        new = "---\n" + head.strip("\n") + '\ndescription: "' + desc + '"\n---' + rest
+                    else:
+                        new = "---\nname: " + name + '\ndescription: "' + desc + '"\n---\n' + body
+                    open(f, "w", encoding="utf-8").write(new)
+                    print("skill frontmatter added:", f)
+                SKILLFM
+                chown -R 1000:1000 /home/node/clawd*/skills 2>/dev/null || true
+
+                # State + config migrations (openclaw >= 2026.11). Idempotent; up to 4
+                # passes because a pass can end "rerun Doctor" after migrating part of
+                # the state. Fails the pod LOUDLY rather than starting a gateway on a
+                # half-migrated store.
+                export HOME=/home/node
+                for pass in 1 2 3 4; do
+                  if openclaw doctor --fix --non-interactive; then break; fi
+                  if [ "$pass" = "4" ]; then echo "FATAL: openclaw doctor --fix did not complete in 4 passes"; exit 1; fi
+                  echo "doctor --fix pass $pass incomplete, retrying"
+                  # Doctor refuses ("Left Codex binding sidecar in place because current
+                  # plugin state changed") when a live session's legacy sidecar conflicts
+                  # with plugin state it migrated from an older sidecar of the same session
+                  # key. Park what is left (kept, not deleted: the session just starts a new
+                  # Codex thread) so the remaining migration steps can run.
+                  mkdir -p /home/node/.openclaw/doctor-held
+                  find /home/node/.openclaw/agents -name '*.codex-app-server.json' -not -name '*.migrated' \
+                    -exec mv -v {} /home/node/.openclaw/doctor-held/ \; 2>/dev/null || true
+                done
+                openclaw config validate || { echo "FATAL: config invalid after doctor"; exit 1; }
+
+                # Official plugin install records provenance ("trusted-official") and
+                # consent; a raw `npm install` into the managed store leaves them
+                # "provenance-invalid" and codex is then reported unavailable by doctor.
+                # Needs a VALID config, hence after the doctor loop. --force = idempotent.
+                OC_VER=$(node -p "require('/home/node/.openclaw/lib/node_modules/openclaw/package.json').version")
+                # Skip packages already recorded "trusted-official": re-running
+                # `plugins install --force` on an installed plugin fails for discord
+                # ("no authoritative package-owner metadata", measured on the 2nd boot of
+                # the rehearsal pod) and would crashloop every restart. codex is required
+                # (FATAL); discord and duckduckgo failures only warn.
+                for spec in codex:@openclaw/codex discord:@openclaw/discord duckduckgo:@openclaw/duckduckgo-plugin; do
+                  pid="$${spec%%:*}"; pkg="$${spec#*:}"
+                  INSPECT=$(openclaw plugins inspect "$pid" --runtime --json 2>/dev/null || true)
+                  if printf '%s' "$INSPECT" | grep -q '"reason": "trusted-official"'; then
+                    echo "plugin $pid already trusted-official, skipping install"
+                    continue
+                  fi
+                  if ! openclaw plugins install "$pkg@$OC_VER" --force --accept-capabilities; then
+                    if [ "$pid" = "codex" ]; then echo "FATAL: plugins install $pkg@$OC_VER failed"; exit 1; fi
+                    echo "WARN: plugins install $pkg@$OC_VER failed (continuing)"
+                  fi
+                done
+
+                # openclaw >= 2026.11 keeps ONE openai OAuth profile PER AGENT (the 6.x
+                # "read-through to main" is gone; measured: without this only `main`
+                # reaches openai, the other 7 silently fall back to the local model).
+                # `models auth login` imports the existing ~/.codex/auth.json (no browser
+                # while that login is valid), then waits at a confirm prompt, so it is
+                # killed after 45 s; `activate` verifies the sign-in but also pins the
+                # agent to openai/gpt-6-astra, so that pin is unset again. Needs the
+                # gateway STOPPED (exclusive state), which is exactly now: this runs before
+                # `exec openclaw gateway`. Agents with their own non-openai model (voice)
+                # are skipped. Only runs for agents that have no openai profile yet.
+                export HOME=/home/node
+                OC_AGENTS=$(node -e "const e=JSON.parse(require('fs').readFileSync('/home/node/.openclaw/openclaw.json','utf8')).agents.entries;console.log(Object.keys(e).filter((k)=>!e[k].model||String(e[k].model).startsWith('openai/')).sort((a,b)=>(a==='main'?-1:b==='main'?1:0)).join(' '))")
+                OC_PROFILE=""
+                for a in $OC_AGENTS; do
+                  if openclaw models auth list --agent "$a" 2>/dev/null | grep -q 'openai:account-'; then continue; fi
+                  if [ -f /home/node/.codex/auth.json ]; then
+                    timeout -s KILL 45 script -qfc "openclaw models auth login --provider openai --device-code --agent $a" /dev/null </dev/null >/dev/null 2>&1 || true
+                    [ -n "$OC_PROFILE" ] || OC_PROFILE=$(openclaw models auth list --agent main 2>/dev/null | grep -o 'openai:account-[0-9a-f-]*' | head -1) || true
+                    if [ -n "$OC_PROFILE" ]; then
+                      script -qfc "openclaw models auth activate $OC_PROFILE --agent $a" /dev/null </dev/null >/dev/null 2>&1 || true
+                      openclaw config unset "agents.entries.$a.model" >/dev/null 2>&1 || true
+                      echo "openai auth imported for agent $a"
+                    else
+                      echo "WARN: no openai profile after login for agent $a (codex login valid?)"
+                    fi
+                  else
+                    echo "WARN: /home/node/.codex/auth.json missing, skipping openai auth import for $a"
+                  fi
+                done
 
                 # AUTH GUARD (2026-08-01): agents/main ONLY — see the guard at
                 # the init-container seeding site. Other agents rely on OAuth
@@ -1843,6 +2017,11 @@ spec:
               # Node configuration
               - name: NODE_ENV
                 value: "production"
+              # Cap BLAS/OpenMP threads for the whisper CLI the gateway spawns (survives restarts).
+              - name: OMP_NUM_THREADS
+                value: "4"
+              - name: MKL_NUM_THREADS
+                value: "4"
 
               # Gateway port
               - name: GATEWAY_PORT
@@ -1926,6 +2105,17 @@ spec:
                   secretKeyRef:
                     name: openclaw-secret
                     key: HA_TOKEN
+              # Shared Anthropic API key (operator-approved 2026-11-08, OpenClaw only; see
+              # docs/sops/anthropic-api-key.md). The Secret exists in this namespace and is
+              # listed in kustomization.yaml, so the ref is intentionally NOT optional: a
+              # missing Secret should fail the pod loudly, not silently run keyless.
+              # Provider detection only: primary stays openai/gpt-6.1-terra and no anthropic
+              # model is in the fallback chain.
+              - name: ANTHROPIC_API_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: anthropic-api-key
+                    key: ANTHROPIC_API_KEY
               # GitHub token for mise and git operations
               - name: GITHUB_TOKEN
                 valueFrom:
@@ -1968,7 +2158,7 @@ spec:
                   initialDelaySeconds: 10
                   periodSeconds: 10
                   timeoutSeconds: 5
-                  failureThreshold: 30
+                  failureThreshold: 180
 
             resources:
               requests:
@@ -1995,7 +2185,7 @@ spec:
                 # steady state has grown to ~2.3GiB (it was 1.1-1.3GiB when
                 # 4Gi was chosen in June), and a transcription adds ~850MiB on
                 # top -> 4Gi would leave under 1GiB of headroom.
-                cpu: 2
+                cpu: 4
                 memory: 5Gi
 
             securityContext:
@@ -2082,6 +2272,8 @@ spec:
         advancedMounts:
           openclaw:
             app:
+              - path: /tmp
+            install-openclaw:
               - path: /tmp
 
       # Memory-backed /dev/shm so headless chromium (@playwright/mcp) doesn't
