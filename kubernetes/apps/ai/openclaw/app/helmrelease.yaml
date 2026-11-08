@@ -1406,6 +1406,10 @@ spec:
                   // entries of other capabilities, and leave audio.models unset.
                   const whisperEntry = {
                     type: 'cli',
+                    // Model sizing (measured in-pod 2026-11-08): tiny peak 846MiB,
+                    // small peak ~1.97GiB RSS (35s for a 25s note), turbo 8+GiB (never
+                    // run it here: it OOMKilled the container). The memory limit below
+                    // is sized for small + the ~2.3GiB gateway.
                     // Thread cap (whisper finding, 2026-11-07): torch/OpenMP otherwise spawns
                     // one thread per host core and starves the gateway. `env` form is the
                     // one live on the PVC; the OMP/MKL container env below is the second layer.
@@ -1417,7 +1421,11 @@ spec:
                     // .txt sidecar, else it falls back to timestamped stdout.
                     args: [
                       'OMP_NUM_THREADS=4', 'MKL_NUM_THREADS=4', 'whisper',
-                      '--model', 'tiny',
+                      '--model', 'small',
+                      // Vocabulary bias: `tiny` turned "GMX-Entwurf"/"Vetsak"/"Paperless"
+                      // into "Gertscheintwurf"/"Werte"/"Paper" (2026-11-08). small + this
+                      // prompt transcribed the same 25s German note correctly.
+                      '--initial_prompt', 'Gespräch mit Juno, dem Familienassistenten: GMX-Entwurf, Vetsak, Paperless, Mealie, Nextcloud, Home Assistant, Alexa, Einkaufsliste, Rechnung, Telegram.',
                       '--output_format', 'txt',
                       '--output_dir', '{{ "{{" }}OutputDir}}',
                       '--verbose', 'False',
@@ -2242,7 +2250,7 @@ spec:
                 # steady-state is ~500m (492m at review time), so 100m let
                 # the scheduler over-commit the node against us.
                 cpu: 500m
-                memory: 1200Mi
+                memory: 2500Mi   # steady state ~2.4GiB (was 1200Mi)
               limits:
                 # Bumped 2Gi -> 4Gi on 2026-06-06 after an OOMKill (exit
                 # 137) wedged the Telegram dispatcher mid-reply. We crawl
@@ -2251,14 +2259,16 @@ spec:
                 #
                 # 2026-08-18: briefly 10Gi as a band-aid during the
                 # whisper-turbo OOMKill crashloop; that cause is now fixed at
-                # source (tools.media.audio pins whisper to `tiny`, measured
+                # source (tools.media.audio pins whisper (now `small`), measured
                 # 846MiB peak vs turbo's 8.36GiB), so the band-aid is removed.
                 # Settling at 5Gi rather than the old 4Gi because the measured
                 # steady state has grown to ~2.3GiB (it was 1.1-1.3GiB when
                 # 4Gi was chosen in June), and a transcription adds ~850MiB on
                 # top -> 4Gi would leave under 1GiB of headroom.
                 cpu: 4
-                memory: 5Gi
+                # 8Gi (was 5Gi): boot peaks ~4.1GiB (doctor/init) and whisper `small`
+                # adds ~2GiB next to the ~2.4GiB steady gateway (Prometheus, 2026-11-08).
+                memory: 8Gi
 
             securityContext:
               runAsNonRoot: true
