@@ -23,7 +23,7 @@ if leftovers from a previous run exist (fail loud, never pile up). Teardown
 runs in `finally`. Blast radius of any failure: the scratch copies only.
 
 Usage:
-  runbooks/backup-restore-proof.py                        # defaults: postgresql-data-5g
+  runbooks/backup-restore-proof.py --image postgres:16.15-alpine   # default volume: postgresql-data-5g (--image is required)
   runbooks/backup-restore-proof.py --volume superset-pg18-data \\
       --image postgres:18.6-alpine --keep           # keep scratch for inspection
 
@@ -77,6 +77,19 @@ def kubectl_json(args, timeout=60):
     return json.loads(out)
 
 
+def size_quantity(spec_size) -> str:
+    """Longhorn Volume spec.size (bytes, string or int) -> k8s quantity in Ki."""
+    n = int(spec_size)
+    if n <= 0 or n % 1024:
+        raise ValueError(f"unusable volume size {spec_size!r}")
+    return f"{n // 1024}Ki"
+
+
+def source_size_quantity(volume: str) -> str:
+    v = kubectl_json(["-n", "storage", "get", "volumes.longhorn.io", volume])
+    return size_quantity(v["spec"]["size"])
+
+
 def newest_backup(volume: str):
     d = kubectl_json(["-n", "storage", "get", "backups.longhorn.io"])
     # Match status.volumeName OR, when status never synced (nightly CRs can sit
@@ -99,7 +112,12 @@ def newest_backup(volume: str):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--volume", default="postgresql-data-5g")
-    ap.add_argument("--image", default="pgvector/pgvector:0.8.6-pg16")
+    # REQUIRED (2026-11-08): the old default (pgvector 0.8.6-pg16) was two releases
+    # stale, so an omitted flag would "prove" a restore on a binary nothing runs.
+    # Pass the exact image (with @sha256 digest) the proof is meant to vouch for.
+    ap.add_argument("--image", required=True,
+                    help="image the scratch pod boots on the restored volume, "
+                         "e.g. pgvector/pgvector:0.8.7-pg16@sha256:<digest>")
     ap.add_argument("--pgdata", default="/var/lib/postgresql/data/pgdata")
     ap.add_argument("--superuser", default=None,
                     help="superuser role to smoke-test as. Default: try "
@@ -129,6 +147,14 @@ def main() -> int:
     if not bk:
         print(f"PRECONDITION: no Completed backup for volume {a.volume!r} "
               f"(exact match) — nothing to prove", file=sys.stderr)
+        return 2
+    # Size the scratch PV/PVC from the SOURCE volume (was a hardcoded 5Gi, wrong
+    # for the 20Gi sources). Longhorn spec.size is bytes; express it in Ki so the
+    # quantity is exact. Falls back to refusing, not guessing.
+    try:
+        size = source_size_quantity(a.volume)
+    except Exception as e:  # noqa: BLE001
+        print(f"PRECONDITION: cannot read source volume size: {e}", file=sys.stderr)
         return 2
     url = bk["status"].get("url")
     when = bk["status"].get("snapshotCreatedAt")
@@ -167,7 +193,7 @@ def main() -> int:
         # 2. PV + PVC + pod
         pv = {"apiVersion": "v1", "kind": "PersistentVolume",
               "metadata": {"name": scratch, "labels": {"restore-proof": "true"}},
-              "spec": {"capacity": {"storage": "5Gi"},
+              "spec": {"capacity": {"storage": size},
                        "accessModes": ["ReadWriteOnce"],
                        "persistentVolumeReclaimPolicy": "Retain",
                        "storageClassName": "longhorn-static",
@@ -179,7 +205,7 @@ def main() -> int:
                "spec": {"accessModes": ["ReadWriteOnce"],
                         "storageClassName": "longhorn-static",
                         "volumeName": scratch,
-                        "resources": {"requests": {"storage": "5Gi"}}}}
+                        "resources": {"requests": {"storage": size}}}}
         pod = {"apiVersion": "v1", "kind": "Pod",
                "metadata": {"name": scratch, "namespace": ns,
                             "labels": {"restore-proof": "true"}},

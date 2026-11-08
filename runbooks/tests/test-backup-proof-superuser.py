@@ -96,6 +96,24 @@ check("the optional table smoke still uses the discovered role, not a literal",
       '"psql", "-U", role, "-d", db' in src,
       "a second hardcoded role would resurrect the bug in the table check")
 
+# ── 5. (2026-11-08) scratch PV/PVC sized from the SOURCE volume; --image required ──
+import importlib.util
+_spec = importlib.util.spec_from_file_location("bproof", SRC)
+_m = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_m)
+check("20Gi source -> exact 20971520Ki quantity", _m.size_quantity("21474836480") == "20971520Ki",
+      f"got {_m.size_quantity('21474836480')}")
+check("5Gi source -> 5242880Ki", _m.size_quantity(5368709120) == "5242880Ki")
+try:
+    _m.size_quantity("0"); _bad = False
+except ValueError:
+    _bad = True
+check("a zero/garbage size is REFUSED, not guessed", _bad)
+check("no hardcoded 5Gi capacity remains", '"5Gi"' not in src,
+      "the PV/PVC must follow the source volume (3 of 5 postgres sources are 20Gi)")
+check("--image is required (no stale default)",
+      re.search(r'"--image",\s*required=True', src) is not None and "0.8.6-pg16\")" not in src)
+
 if fails:
     print(f"\n{len(fails)} FAILURE(S): {fails}")
     sys.exit(1)

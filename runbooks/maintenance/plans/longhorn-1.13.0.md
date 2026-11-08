@@ -47,6 +47,7 @@ depends_on: []
 conflicts_with:
   # Re-derived 2026-11-06 from every open plan's frontmatter (rule 4). Dead refs to plans no longer in
   # plans/ removed; executed jellyfin-config-rwo-migration dropped (executed now:2026-10-23).
+  - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
   - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af (sun-attended:2026-11-29)
   - tube-archivist-elasticsearch-9.5.5   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   - grafana-14.1.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)

@@ -82,7 +82,8 @@ premises:
       refuses python3, so FRESHNESS is the §2.6 longhorn-backup-age.py gate.
     run: kubectl get backups.longhorn.io -n storage -l backup-volume=vaultwarden-data -o jsonpath='{.items[*].status.state}'
     expect_contains: Completed
-status: vetted
+status: superseded            # 2026-11-08: Renovate #242 re-targeted 1.37.4 -> 1.37.5; never executed (aborted 2026-10-22). Replaced by vaultwarden-1.37.5
+superseded_by: vaultwarden-1.37.5
 window: null   # vaultwarden-1.37.4 ABORTED in on-demand run 2026-10-22 (pre-check 3.2: ciphers=0 vs plan PASS >=1). RESOLVED 2026-10-23: operator confirmed the vault is intentionally empty until the Bitwarden migration; gate relaxed to users>=1 + migrations present
 sops_refs:
   - docs/sops/application-update.md

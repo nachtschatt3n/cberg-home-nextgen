@@ -62,6 +62,8 @@ touches:
     # names which shared surface it would touch.
 depends_on: []
 conflicts_with:
+  - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
+  - vaultwarden-1.37.5   # reciprocal, added 2026-11-08 (adds spec.driftDetection to helmrelease/vaultwarden)
   - tube-archivist-0.6.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   - tube-archivist-elasticsearch-9.5.5   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   - frigate-reolink-go2rtc-flv   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)

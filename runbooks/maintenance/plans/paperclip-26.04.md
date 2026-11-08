@@ -29,6 +29,7 @@ conflicts_with:                       # none of these name a paperclip image, bu
                                       # re-renders every HelmRelease incl. helmrelease/paperclip or
                                       # snapshots workloads incl. deploy/paperclip; a same-night
                                       # paperclip roll would make their gates unattributable.
+  - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
   - paperclip-postgresql-18.6         # suspends/scales HelmRelease paperclip to 0: serialize
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. paperclip
   - flux-oci-chart-sources            # may rewrite paperclip's chart source (bjw-s app-template)

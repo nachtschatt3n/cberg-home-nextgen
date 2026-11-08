@@ -652,13 +652,6 @@ spec:
                 chown -R 1000:1000 /home/node/.openclaw
                 # Fix ownership of backward-compat symlink created during migration
                 chown -h 1000:1000 /home/node/.clawdbot 2>/dev/null || true
-            env:
-              # GitHub token for mise and git operations during init
-              - name: GITHUB_TOKEN
-                valueFrom:
-                  secretKeyRef:
-                    name: openclaw-secret
-                    key: GITHUB_TOKEN
             securityContext:
               runAsUser: 0
               runAsGroup: 0
@@ -888,6 +881,15 @@ spec:
                     cfg.agents.defaults.models['openai/gpt-5.5'] = cfg.agents.defaults.models['openai/gpt-5.5'] || {};
                     cfg.agents.defaults.models['openai/gpt-5.5'].agentRuntime = { id: 'codex' };
                   }
+                  // Anthropic prompt cache: 1-hour TTL (the longest Anthropic offers; the
+                  // other tier is 5 min) for the primary. Telegram chats pause 25-300 min
+                  // with a ~130k-token prefix; with 5 min every pause re-wrote it at
+                  // 1.25x, with 1h pauses under 60 min are 0.1x reads (measured 2026-11-08).
+                  cfg.agents.defaults.models['anthropic/claude-sonnet-5-5'] =
+                    Object.assign({}, cfg.agents.defaults.models['anthropic/claude-sonnet-5-5']);
+                  cfg.agents.defaults.models['anthropic/claude-sonnet-5-5'].params =
+                    Object.assign({}, cfg.agents.defaults.models['anthropic/claude-sonnet-5-5'].params,
+                      { cacheRetention: 'long' });
                   // GPT-5.6 family (GA 2026-07-09) is missing from the pinned
                   // @openclaw/codex 2026.6.11 plugin's openai catalog (stops at
                   // gpt-5.5), so a 5.6 ref FailoverErrors at request time. Fix
@@ -2200,12 +2202,6 @@ spec:
                   secretKeyRef:
                     name: anthropic-api-key
                     key: ANTHROPIC_API_KEY
-              # GitHub token for mise and git operations
-              - name: GITHUB_TOKEN
-                valueFrom:
-                  secretKeyRef:
-                    name: openclaw-secret
-                    key: GITHUB_TOKEN
             envFrom:
               - secretRef:
                   name: openclaw-secret

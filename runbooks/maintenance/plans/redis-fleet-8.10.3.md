@@ -60,13 +60,14 @@ touches:
 depends_on: []
 conflicts_with:
   # Same consumers / same files (reciprocity must be added on their side, see the §6 hand-off list):
+  - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
   - tube-archivist-0.6.0                # restarts deployment/tube-archivist, the consumer of leg 5; its gates call into it
   - tube-archivist-elasticsearch-9.5.5  # same app, same namespace; never stack on a broker swap
   - nextcloud-mcp-0.203.0               # blocked — every gate calls into Nextcloud; lists nextcloud-redis restart
   - nextcloud-mcp-0.204.0               # blocked — successor chain of 0.203.0, same
   - bitnamilegacy-exit-nextcloud-db     # blocked — quiesces Nextcloud; never stack a session-store restart on a DB cutover
   # 2026-11-06: removed python-fleet-3.15.2 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
-  - vaultwarden-1.37.4                  # vetted — office namespace, shared monitoring; both read Prometheus after a restart
+  - vaultwarden-1.37.5                  # vetted — office namespace, shared monitoring; both read Prometheus after a restart
   - openclaw-2026.11.1                  # blocked — namespace ai (leg 4 restarts the open-webui redis pod)
   # Platform serialisation (a roll of these confounds every reconnect gate in §4):
   - helm-drift-detection                # sat-attended:2026-11-28 — asserts Helm revisions IDENTICAL across releases; this plan upgrades 6 releases

@@ -46,7 +46,7 @@ spec:
           mise-install:
             image:
               repository: debian
-              tag: 13.7-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a  # digest-pinned 2026-09-26 to the Debian 13.7-slim index digest (float-tag policy); re-pin deliberately
+              tag: 13.7-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2  # digest-pinned 2026-09-26 to the Debian 13.7-slim index digest (float-tag policy); re-pin deliberately
             command:
               - /bin/sh
               - -c
@@ -409,7 +409,7 @@ spec:
               # digest-pinned (float-tag policy). HELD on 24.04 LTS deliberately;
               # rationale + re-evaluation triggers live on the finding record.
               # security_ref: F-afa93406
-              tag: "24.04@sha256:d78ab76437b1afc5f01e223d6bf0172763f404bb166441328845adbef44518cb"
+              tag: "24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852"
             command:
               - /bin/bash
               - -c
