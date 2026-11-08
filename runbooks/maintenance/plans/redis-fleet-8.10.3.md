@@ -60,6 +60,7 @@ touches:
 depends_on: []
 conflicts_with:
   # Same consumers / same files (reciprocity must be added on their side, see the §6 hand-off list):
+  - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
   - tube-archivist-0.6.0                # restarts deployment/tube-archivist, the consumer of leg 5; its gates call into it
   - tube-archivist-elasticsearch-9.5.5  # same app, same namespace; never stack on a broker swap
   - nextcloud-mcp-0.203.0               # blocked — every gate calls into Nextcloud; lists nextcloud-redis restart

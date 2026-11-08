@@ -46,6 +46,7 @@ conflicts_with:
   # controllers, sources, drift), kube-system pod placement/node rolls, or the Prometheus/blackbox instrument section 4 reads.
   # Plan set re-read 2026-11-08 via `maintenance-plan.py --open` + frontmatter scan of every plan mentioning cilium or
   # kube-prometheus-stack.
+  - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
   - talos-linux-1.14.5                # exclusive node roll (3 reboots); reschedules both CoreDNS pods (lists `coredns` in shared)
   - etcd-timeouts-5000-500            # control-plane service restarts; CoreDNS's kubernetes plugin watches the apiserver
   - flux-reconciler-impersonation     # exclusive; changes how helm-controller applies this HR

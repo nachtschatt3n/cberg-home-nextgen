@@ -323,27 +323,25 @@ the operator**; do not rehearse.
 
 ```bash
 set -o pipefail
-# (a) newest Completed Longhorn Backup CR for n8n-config, with age
-kubectl get backups.longhorn.io -n storage -o json | python3 -c '
-import sys,json,datetime
-d=json.load(sys.stdin)["items"]
-c=[b for b in d if b.get("status",{}).get("state")=="Completed" and b.get("status",{}).get("url") and (b["status"].get("volumeName")=="n8n-config" or (not b["status"].get("volumeName") and b["metadata"].get("labels",{}).get("backup-volume")=="n8n-config"))]
-b=max(c,key=lambda x:x["status"].get("snapshotCreatedAt") or x["metadata"]["creationTimestamp"]) if c else None
-if not b: print("FAIL no Completed backup"); sys.exit(1)
-t=datetime.datetime.strptime(b["status"]["snapshotCreatedAt"],"%Y-%m-%dT%H:%M:%SZ")
-age=(datetime.datetime.utcnow()-t).total_seconds()/3600
-print(b["metadata"]["name"],b["status"]["snapshotCreatedAt"],"age_h=%.1f"%age,"PASS" if age<26 else "FAIL")'
-
-# (b) Mac-side copy of the DB (outside the repo; holds encrypted credentials AND the key => mode 700)
+# (b0) where the Mac-side evidence goes (outside the repo; holds encrypted credentials AND the key => mode 700)
 B=$HOME/n8n-backups/pre-2.46.6-$(date +%Y%m%d-%H%M); mkdir -p "$B" && chmod 700 "$B"
+# (a) newest CONFIRMED Longhorn backup of n8n-config, age gate via the shared helper (never an inline status.volumeName filter:
+#     the nightly Backup CR can sit Completed with status.volumeName='' for hours). Exit 0 = FRESH, 1 = STALE/NONE, 2 = lookup error.
+.venv/bin/python3 runbooks/longhorn-backup-age.py n8n-config --max-hours 26 | tee "$B/longhorn-backup"
+grep -q ' FRESH ' "$B/longhorn-backup" || { echo "STOP: newest n8n-config backup is not FRESH (<=26h)"; exit 1; }
+# (b) Mac-side copy of the DB
 kubectl exec -n home-automation deploy/n8n -- tar cf - -C /home/node/.n8n database.sqlite database.sqlite-wal database.sqlite-shm config > "$B/n8n.tar"
 ls -l "$B/n8n.tar"; tar tf "$B/n8n.tar" | wc -l
 mkdir "$B/x" && tar xf "$B/n8n.tar" -C "$B/x"
 sqlite3 "$B/x/database.sqlite" "PRAGMA integrity_check; select count(*) from workflow_entity; select count(*) from migrations; select name from migrations order by id desc limit 1;"
 echo "BACKUP_DIR=$B"
 ```
-PASS (measured 2026-11-08 against the live pod): (a) `... age_h=<26 PASS`
-(`backup-3bb4f8ecc7d14b4c` was 12 h old); (b) tar size `531846656` (gate
+PASS (measured 2026-11-08 against the live pod): (a) the helper prints
+`n8n-config 20.2h FRESH via backup-cr backup=backup-3bb4f8ecc7d14b4c at=2026-11-08T00:25:16Z`
+and exit 0 (the line is recorded in `$B/longhorn-backup` for §5 Path B). Negative
+controls, run live: a wrong volume name (`n8n-confg`) prints `ERROR: no Longhorn
+volume named 'n8n-confg'` and exits 2; `--max-hours 0.1` prints `... STALE ...` and
+exits 1; either leaves the `grep ' FRESH '` gate failing, so the block stops; (b) tar size `531846656` (gate
 >= 500000000; a truncated stream is a few KB), `4` entries, and sqlite3 prints
 `ok`, `15`, `302`, `AddTimeoutSecondsToScheduler1791542683581`. The sqlite3
 check is the real gate: a corrupt or half-streamed copy cannot print `ok` + 15
@@ -370,13 +368,12 @@ scaffolding itself as "fix the scratch step", not as a verdict on the upgrade).
 cd /Users/mu/code/cberg-home-nextgen
 RP=n8n-rp-$(date +%m%d%H%M); NS=home-automation
 IMG=n8nio/n8n:2.46.6@sha256:8602f5dfacbe2c931eeafd010de0e68182310e9f309921e780ab69182e92b3ae
-URL=$(kubectl get backups.longhorn.io -n storage -o json | python3 -c '
-import sys,json
-d=json.load(sys.stdin)["items"]
-c=[b for b in d if b.get("status",{}).get("state")=="Completed" and b.get("status",{}).get("url") and (b["status"].get("volumeName")=="n8n-config" or (not b["status"].get("volumeName") and b["metadata"].get("labels",{}).get("backup-volume")=="n8n-config"))]
-b=max(c,key=lambda x:x["status"].get("snapshotCreatedAt") or x["metadata"]["creationTimestamp"])
-print(b["status"]["url"])')
-test -n "$URL" || { echo "FAIL: no backup url"; false; }
+# newest CONFIRMED backup via the shared helper (same freshness bound as 2.5a), then its restore URL
+BK=$(.venv/bin/python3 runbooks/longhorn-backup-age.py n8n-config --max-hours 26 --json | python3 -c 'import sys,json; r=json.load(sys.stdin)[0]; print(r["backup"] if r["verdict"]=="FRESH" else "")')
+test -n "$BK" || { echo "FAIL: no FRESH backup of n8n-config"; exit 1; }
+URL=$(kubectl get backups.longhorn.io "$BK" -n storage -o jsonpath='{.status.url}')
+test -n "$URL" || { echo "FAIL: backup $BK has no url yet (unsynced CR): wait and retry"; exit 1; }
+echo "restoring from $BK"
 
 # 1 scratch volume FROM the backup
 kubectl apply -f - <<EOF
