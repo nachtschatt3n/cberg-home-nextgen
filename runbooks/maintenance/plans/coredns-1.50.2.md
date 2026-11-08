@@ -49,6 +49,7 @@ conflicts_with:
   - talos-linux-1.14.5                # exclusive node roll (3 reboots); reschedules both CoreDNS pods (lists `coredns` in shared)
   - etcd-timeouts-5000-500            # control-plane service restarts; CoreDNS's kubernetes plugin watches the apiserver
   - flux-reconciler-impersonation     # exclusive; changes how helm-controller applies this HR
+  - vaultwarden-1.37.5                # reciprocal: gates on the same http-vaultwarden probe; Recreate gap during a DNS roll would blame the wrong plan
   - flux-oci-chart-sources            # moves HelmRepository sources (incl. the coredns OCI source) and re-applies kube-system HRs
   - helm-drift-detection              # adds driftDetection to every HR incl. this one
   - longhorn-1.13.0                   # exclusive; lists `flux` in shared (its reconcile storm shares the revert path)

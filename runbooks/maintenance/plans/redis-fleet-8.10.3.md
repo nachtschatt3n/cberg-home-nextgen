@@ -66,7 +66,7 @@ conflicts_with:
   - nextcloud-mcp-0.204.0               # blocked — successor chain of 0.203.0, same
   - bitnamilegacy-exit-nextcloud-db     # blocked — quiesces Nextcloud; never stack a session-store restart on a DB cutover
   # 2026-11-06: removed python-fleet-3.15.2 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
-  - vaultwarden-1.37.4                  # vetted — office namespace, shared monitoring; both read Prometheus after a restart
+  - vaultwarden-1.37.5                  # vetted — office namespace, shared monitoring; both read Prometheus after a restart
   - openclaw-2026.11.1                  # blocked — namespace ai (leg 4 restarts the open-webui redis pod)
   # Platform serialisation (a roll of these confounds every reconnect gate in §4):
   - helm-drift-detection                # sat-attended:2026-11-28 — asserts Helm revisions IDENTICAL across releases; this plan upgrades 6 releases
