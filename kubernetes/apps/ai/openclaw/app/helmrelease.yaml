@@ -1205,6 +1205,14 @@ spec:
                   const vitaTok = (process.env.TELEGRAM_VITA_BOT_TOKEN || '').trim();
                   const jerryTok = (process.env.TELEGRAM_JERRY_BOT_TOKEN || '').trim();
                   if (vitaTok || jerryTok) cfg.channels.telegram.defaultAccount = 'default';
+                  // Name the default account explicitly too (doctor: defaultAccount
+                  // "default" must match a configured account). Empty entry: the
+                  // top-level botToken keeps serving it.
+                  if (vitaTok || jerryTok) {
+                    cfg.channels.telegram.accounts = cfg.channels.telegram.accounts || {};
+                    cfg.channels.telegram.accounts.default =
+                      Object.assign({}, cfg.channels.telegram.accounts.default);
+                  }
                   const specB = [];
                   if (vitaTok) {
                     cfg.channels.telegram.accounts = cfg.channels.telegram.accounts || {};
@@ -1317,7 +1325,7 @@ spec:
                           },
                           // Command-owner allowlist: who can run /vc, /admin, etc.
                           // resolveDiscordOwnerAllowFrom reads guilds.<id>.users.
-                          users: ['discord:201513928621162507'],
+                          users: ['discord:user:201513928621162507'],
                         },
                       },
                       // Required nested schemas — empty objects accept all
@@ -1803,6 +1811,15 @@ spec:
                   mkdir -p /home/node/.openclaw/browser-profiles
                   echo "Installed read-only skill CLIs: $(ls /etc/openclaw-skills/*.py 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
                 fi
+
+                # Chromium keeps SingletonLock/Cookie/Socket in the profile on the
+                # PVC. They name the pod hostname, which changes on every
+                # rollout, so the browser then refuses to start ("profile lock
+                # names another hostname") until they are removed. No chromium
+                # can be running this early in boot, so the locks are stale.
+                rm -f /home/node/.openclaw/browser/*/user-data/SingletonLock \
+                      /home/node/.openclaw/browser/*/user-data/SingletonCookie \
+                      /home/node/.openclaw/browser/*/user-data/SingletonSocket
 
                 # 4. Materialize workspace SKILL.md files so the OpenClaw
                 #    skill-workshop plugin discovers them on agent start.
