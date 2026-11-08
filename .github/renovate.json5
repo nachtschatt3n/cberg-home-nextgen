@@ -526,6 +526,15 @@
         "kubernetes/apps/my-software-production/the-ninth-banner/app/helmrelease.yaml"
       ],
       "enabled": false
+    },
+    {
+      // 2026-11-08: bitnamilegacy is an archived registry (frozen 2025-08-23), so no update from
+      // it is a real update (the 12.0.2 bump is a same-day rebuild of the frozen base, MariaDB 12.0
+      // is EOL and not on the Nextcloud 35 supported list). Leave via plan
+      // bitnamilegacy-exit-nextcloud-db (official mariadb image), not by bumping.
+      "description": ["bitnamilegacy mariadb: archived registry, no real updates"],
+      "matchPackageNames": ["docker.io/bitnamilegacy/mariadb", "bitnamilegacy/mariadb"],
+      "enabled": false
     }
   ],
   // The `stable` npm dist-tag of n8n as a single-release datasource (see the n8nio/n8n
