@@ -167,7 +167,7 @@ spec:
               - { name: home, mountPath: /home/pwuser }
               - { name: tmp, mountPath: /tmp }
           - name: postgres
-            image: postgres:16-alpine@sha256:23e88eb049fd5d54894d70100df61d38a49ed97909263f79d4ff4c30a5d5fca2
+            image: postgres:16-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139
             env:
               - { name: POSTGRES_PASSWORD, value: postgres }
               - { name: PGDATA, value: /tmp/pgdata }
