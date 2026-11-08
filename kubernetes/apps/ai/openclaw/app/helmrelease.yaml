@@ -840,6 +840,11 @@ spec:
                   // check could never search and failed or reported nothing. DuckDuckGo needs
                   // no API key; key-free providers are never auto-selected, so name it.
                   cfg.tools = cfg.tools || {};
+                  // Code Mode (2026.11.1) is auto-on for Claude: the model then sees only
+                  // exec(title, code)+wait and must call tools from JavaScript, which breaks
+                  // the bash/process/session_status steering (first calls failed 2026-11-08).
+                  // Off = the direct tool surface the whole steering bundle is written for.
+                  cfg.tools.codeMode = false;
                   cfg.tools.web = cfg.tools.web || {};
                   cfg.tools.web.search = Object.assign({}, cfg.tools.web.search, { provider: 'duckduckgo' });
                   // MEMORY EMBEDDINGS (2026-10-31): the default provider (openai) sends the
