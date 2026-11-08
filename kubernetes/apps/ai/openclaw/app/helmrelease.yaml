@@ -1413,14 +1413,18 @@ spec:
                     // Thread cap (whisper finding, 2026-11-07): torch/OpenMP otherwise spawns
                     // one thread per host core and starves the gateway. `env` form is the
                     // one live on the PVC; the OMP/MKL container env below is the second layer.
-                    command: 'env',
+                    // MUST be the bare `whisper` binary: 2026.11.1 picks the transcript-file
+                    // reader from the command's basename, so the old `env … whisper` wrapper
+                    // made it read STDOUT instead and every voice note arrived as just
+                    // "Detected language: German" (2026-11-08). OMP/MKL threads come from the
+                    // container env (OMP_NUM_THREADS=4 / MKL_NUM_THREADS=4).
+                    command: 'whisper',
                     capabilities: ['audio'],
                     timeoutSeconds: 300,
                     // Keep BOTH --output_format txt and --output_dir:
                     // resolveWhisperOutputPath() needs the pair to read the
                     // .txt sidecar, else it falls back to timestamped stdout.
                     args: [
-                      'OMP_NUM_THREADS=4', 'MKL_NUM_THREADS=4', 'whisper',
                       '--model', 'small',
                       // Vocabulary bias: `tiny` turned "GMX-Entwurf"/"Vetsak"/"Paperless"
                       // into "Gertscheintwurf"/"Werte"/"Paper" (2026-11-08). small + this
