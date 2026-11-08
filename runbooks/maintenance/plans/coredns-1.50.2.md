@@ -125,8 +125,8 @@ premises:
     run: kubectl get cronjob descheduler -n kube-system -o jsonpath='{.spec.schedule} tz={.spec.timeZone}'
     expect_exact: "0 4 * * * tz="
 review: ready-for-go@2026-11-08   # plan-reviewer 2026-11-08: ready-for-go, no blocking issues; premises 9/9 live; recommended slot sat-attended 2026-11-14 or 2026-11-21 (alone/last)
-status: vetted   # HUMAN-GATED (cluster DNS): operator GO required; never nightly
-window: null
+status: awaiting-go   # HUMAN-GATED (cluster DNS): GO at the window; never nightly; scheduled by operator 2026-11-08
+window: sat-attended:2026-11-21   # reviewer: alone or last in its slot; 11-14 carries open-webui + python-fleet-alpine
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md

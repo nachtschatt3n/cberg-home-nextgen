@@ -46,7 +46,7 @@ premises:
     expect_matches: '^docker\.io/library/python:3\.14\.\d+-alpine@sha256:[0-9a-f]{64}$'
 review: ready-for-go@2026-11-03   # plan-reviewer 2026-11-03: needs-fix (4.1 zsh word-split loop), fixed, delta re-review ready-for-go; HUMAN-GATED, window null, after the python-fleet-3.15.2 canary
 status: awaiting-go                 # go_no_go ingested by sat-attended:2026-11-07 (HUMAN-GATED, unattended run)
-window: null
+window: sat-attended:2026-11-14   # operator 2026-11-08: "plan windows for the ones open"; attended; slim canary soaked since 11-07
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
