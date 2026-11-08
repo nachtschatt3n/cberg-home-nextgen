@@ -417,9 +417,9 @@ RECORD THE RESULTS HERE (edit this table when each proof is run; the window agen
 
 | volume | image digest used | backup name / snapshot time | result (exit, RESTORE PROVEN line) | date |
 |---|---|---|---|---|
-| affine `pvc-27866fc8-...` (20Gi) | pgvector `0dd3149a06e4` | NOT YET RUN | | |
-| sure `pvc-bd4b4e52-...` (20Gi) | pgvector `0dd3149a06e4` | NOT YET RUN | | |
-| superset `superset-pg18-data` (20Gi) | postgres alpine `123b17998cca` | NOT YET RUN | | |
+| affine `pvc-27866fc8-...` (20Gi) | pgvector `7b822b0aac60` (CURRENT live digest; window proves `0dd3149a06e4`) | backup-0646733ade284dc2 (2026-11-08T23:06:14Z) | exit 0, PROVEN: 4 databases as superuser 'affine', affine.users=1 rows | 2026-11-09 |
+| sure `pvc-bd4b4e52-...` (20Gi) | pgvector `7b822b0aac60` (CURRENT live digest; window proves `0dd3149a06e4`) | backup-c47849c4b21d4989 (2026-11-08T23:08:22Z) | exit 0, PROVEN: 4 databases as superuser 'sure', sure.users=1 rows | 2026-11-09 |
+| superset `superset-pg18-data` (20Gi) | postgres alpine `d3e1620b530c` (CURRENT live digest; window proves `123b17998cca`) | backup-8216553292024639 (2026-11-08T23:09:04Z) | exit 0, PROVEN: 4 databases as superuser 'superset', superset.ab_user=2 rows | 2026-11-09 |
 
 **2.5b IN-WINDOW proofs: the two 5Gi sources** (shared, paperclip; ~5 minutes each), same rule.
 
