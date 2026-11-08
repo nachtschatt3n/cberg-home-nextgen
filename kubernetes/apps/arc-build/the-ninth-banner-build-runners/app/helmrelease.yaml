@@ -46,7 +46,11 @@ spec:
     # per CI node now that nuc14-02 is back. Idle, it keeps its 2.0 CPU
     # request on its node.
     minRunners: 1
-    maxRunners: 3
+    # 2026-11-08: 3 -> 2 (etcd leader churn under CI bursts, F-f5879ed8 /
+    # F-6938f5a1 / F-d5134047): dind builds are the heaviest runner pods
+    # (up to 6 CPU, GB-scale image writes). 2 is the pre-10-12 value; a third
+    # concurrent build just queues. Baseline: docs/sops/ci-runner.md 7).
+    maxRunners: 2
     controllerServiceAccount:
       namespace: arc-system
       name: arc-build-controller

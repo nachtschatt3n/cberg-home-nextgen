@@ -41,7 +41,14 @@ spec:
     # CPU = 2 runners per node next to one build pod (3 x 2.0 CPU): the same
     # per-node load as before (5.2 CPU), spread by the preferred
     # anti-affinity below; the 35/55 W RAPL caps are unchanged.
-    maxRunners: 6
+    # 2026-11-08: 6 -> 4 (F-f5879ed8, F-6938f5a1, F-d5134047). The 2026-10-12
+    # raise to 6 coincided with etcd leader churn: over 7d, 8% of 30m buckets
+    # had >= 5 runner pods and held 47% of the leader elections. 4 is the
+    # pre-10-12 value (known-good: 2 CPU runners + 1 build pod, 2 nodes) and
+    # still lets a release's ~5 jobs run 4-wide plus one queued. A cap only
+    # serialises jobs, it cannot deadlock the queue. Baseline + PromQL:
+    # docs/sops/ci-runner.md 7) etcd leader-change row.
+    maxRunners: 4
     controllerServiceAccount:
       namespace: arc-system
       name: arc-controller
