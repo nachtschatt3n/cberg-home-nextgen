@@ -4,8 +4,8 @@
 > working on a login-only (ChatGPT/Codex OAuth) setup, why each exists, how to
 > prove each one is live, and how to restore it. Also records the provider-disable
 > block and the harmless `plugins.entries.*` "not installed" warnings.
-> Version: `2026.11.07`
-> Last Updated: `2026-11-07`
+> Version: `2026.11.08`
+> Last Updated: `2026-11-08`
 > Owner: `operator + openclaw-agent`
 
 ---
@@ -126,6 +126,14 @@ kubectl -n ai exec "$OC" -c app -- openclaw agent -m "Reply with exactly this to
 | memory index empty / Ollama unreachable | `nomic-embed-text` missing on the Mac mini, or `ollama-toolfix` down | pull the model via ollama-agent; check the Service |
 | agent claims "calendar is down" while using a connector | `@openai-curated` stanzas returned in `config.toml` | the boot `sed` did not run or codex re-created them; roll the pod after fixing the script |
 | 18 `plugins.entries.<id>: plugin not installed` lines on every `openclaw` command | the provider-disable block lists providers that are external plugins in this OpenClaw version (arcee, cerebras, chutes, cloudflare-ai-gateway, deepinfra, deepseek, fireworks, groq, ... zai) and are not installed | cosmetic. Those plugins cannot load, so the disable entry is redundant for them. Clean it up together with an OpenClaw version bump, by pruning those ids from `disabledProviders` AND deleting the stale keys from the live `plugins.entries` (spread-merge keeps old keys). Verify with `openclaw doctor` before and after. Also expect one `plugins.entries.discord: duplicate plugin id` line (config-selected plugin overrides the global one; intended) |
+| Only `main` reaches openai; the other agents answer from the local fallback (`fallbackUsed=True`, "No route-compatible authentication source is configured for openai") | OpenClaw >= 2026.11 keeps one openai OAuth profile PER AGENT (no read-through from `main`) | the boot sequence imports `~/.codex/auth.json` into every agent (`models auth login` then `models auth activate`, then unsets the `openai/gpt-6-astra@profile` pin that activate writes); needs the gateway stopped and a valid codex login. Manual: `openclaw models auth login --provider openai --device-code --agent <id>` under a TTY (`script -qfc`), then activate and `openclaw config unset agents.entries.<id>.model` |
+| `doctor --fix` exits 1 "Plugin migration source config changed or could not be read" | a configured provider moved out of the host package (web search `duckduckgo` is `@openclaw/duckduckgo-plugin` in 2026.11) so doctor cannot read the legacy-shaped config | install the plugin before doctor (init does) and re-run; the boot runs doctor up to 4 passes and parks a refused Codex sidecar in `~/.openclaw/doctor-held` |
+| doctor refuses "temp workspace ancestor /tmp has group/world-writable mode 2777" | fsGroup makes the `/tmp` emptyDir 2777 and `/home/node` 2775 | init runs `chmod 1777 /tmp; chmod 755 /home/node` as root every boot |
+| `codex` reported "not a bundled or verified official installation" (`provenance-invalid`) | plugin installed by raw `npm install` into the managed store | `openclaw plugins install @openclaw/codex@<ver> --force --accept-capabilities` (needs a valid config); the boot skips plugins already `trusted-official` because re-running it for discord fails ("no authoritative package-owner metadata"); discord runs from the global install with trust `record-missing`, which is expected |
+| `tools.media.models` grows a duplicate whisper entry per boot | a guard still writing the legacy `tools.media.audio.models` shape | the guard writes `tools.media.models` (one entry, `env OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 whisper ...`) and leaves `audio.models` unset |
+| "Skipping invalid skill ... description is required" | workspace `SKILL.md` without frontmatter `description:` | the boot adds a minimal frontmatter block from the first heading (idempotent) |
+| `cron list` shows 9 more jobs than before | 2026.11 declares one `heartbeat:<agent>` job per agent (every 1h); the original 32 jobs are unchanged | expected count is 41 after the 2026.11.1 roll |
+| HelmRelease `Failed ... stalled resources: Deployment Failed` while the pod is still booting | the Deployment progress deadline (10 min) is shorter than the first-boot migration; `upgrade.remediation.retries: 0` means no rollback | wait for the pod to become Ready, then `flux reconcile hr openclaw -n ai --force` |
 
 ## 8) Diagnose Examples
 
@@ -176,6 +184,7 @@ broken default behaviour described in section 2.
 
 ## Version History
 
+- `2026.11.08`: OpenClaw 2026.11.1 on node 24.22.2 (plan `openclaw-2026.11.1`): per-agent openai auth import, plugin install/trust, doctor loop, whisper `tools.media.models`, skills frontmatter repair, `ANTHROPIC_API_KEY` env (provider detection only), troubleshooting rows above.
 - `2026.11.07`: created (closes the SOP-gap findings for web search, codex
   plugin strip and memory embeddings); records the cosmetic provider-entry
   warnings.
