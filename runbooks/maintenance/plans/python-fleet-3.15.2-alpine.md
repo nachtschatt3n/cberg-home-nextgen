@@ -23,7 +23,7 @@ conflicts_with:
   # 2026-11-06: removed python-fleet-3.15.2 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
   - icloud-drive-fleet-2.3.0              # rolls the icloud-docker pods whose logs icloud-sync-probe reads; a roll mid-gate reads as a sync outage
   - talos-linux-1.14.5                    # node reboot: CronJob ticks missed, gates in §4 would read stale
-  - grafana-14.1.0                        # reads Prometheus in monitoring, same instrument as §4.4; window noise
+  - grafana-chart-14.4.0                        # reads Prometheus in monitoring, same instrument as §4.4; window noise
   # 2026-11-06: removed edot-collector-0.164.0 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
   - tube-archivist-elasticsearch-9.5.5    # ES-family plan in the same instrument family; serialize
 exclusive: false
@@ -319,7 +319,7 @@ failed window it re-fires on the next recovery run (Alertmanager dedups); no man
   monitoring); `depends_on` orders it after the canary. Add the reciprocal `conflicts_with` there if the scheduler
   requires symmetry (not edited here).
 - **Shared instruments (`touches.shared: [monitoring]`)**: obs-recovery IS the ES self-heal and the probe feeds
-  the Pushgateway; a same-night `kube-prometheus-stack`, `grafana-14.1.0`, `edot-collector-0.164.0` or ES-family
+  the Pushgateway; a same-night `kube-prometheus-stack`, `grafana-chart-14.4.0`, `edot-collector-0.164.0` or ES-family
   plan in monitoring would blind or confuse 4.2/4.3. None of the first is open; the others are listed in
   `conflicts_with`.
 - **icloud-drive-fleet-2.3.0**: rolling the icloud-docker pods changes what the probe reads (restart counters, missing

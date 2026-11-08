@@ -43,7 +43,7 @@ conflicts_with:
   - flux-reconciler-impersonation       # blocked - changes WHO applies the HelmRelease this plan relies on.
   - envoy-proxy-config-distroless-v1.40.0  # blocked - rolls the proxies §4.6 reads the app through.
   - envoy-proxy-config-distroless-v1.40.2  # blocked - same.
-  - grafana-14.1.0                      # vetted - monitoring; Grafana is the operator's second instrument for the §4.3 controls.
+  - grafana-chart-14.4.0                      # vetted - monitoring; Grafana is the operator's second instrument for the §4.3 controls.
   # No kube-prometheus-stack-* plan is open (it rides the auto lane). If Step 0 lands a kube-prometheus-stack bump the same night,
   # serialise it: §4.3 reads Prometheus.
 exclusive: false

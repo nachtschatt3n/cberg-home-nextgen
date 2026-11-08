@@ -79,7 +79,7 @@ conflicts_with:
   - envoy-proxy-config-distroless-v1.40.2  # same
   - etcd-timeouts-5000-500              # sun-attended:2026-11-08 — control-plane timing change under nine rolling Deployments
   # The window's instrument (§4 reads Prometheus; a Grafana/operator/collector roll in the same slot confounds the controls):
-  - grafana-14.1.0                      # vetted — monitoring; the controls read Prometheus, Grafana is the operator's second instrument
+  - grafana-chart-14.4.0                      # vetted — monitoring; the controls read Prometheus, Grafana is the operator's second instrument
   # REMOVED 2026-11-03 (plan retired cdf1cf53, chart live via 5aa609d5; dead ref) - otel-operator-0.26.1                # draft — monitoring; §4 reads Prometheus too
   # No kube-prometheus-stack-* plan is open (it rides the auto lane). If one is filed, or Step 0 lands a kube-prometheus-stack
   # bump the same night, add/serialize it: §4 reads Prometheus.

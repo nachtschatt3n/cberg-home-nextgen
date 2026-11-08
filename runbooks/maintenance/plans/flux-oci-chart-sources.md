@@ -50,7 +50,7 @@ touches:
     - "fluxinstance/flux spec.kustomize.patches (Stage 10 — emptyDir sizeLimit)"
   shared: [flux-sources, cni-adjacent, cert-manager, storage/longhorn, monitoring, authentik, public-dns]
 depends_on: []
-conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, etcd-timeouts-5000-500, talos-linux-1.14.5, longhorn-1.13.0, grafana-14.1.0, descheduler-0.37.0, anythingllm-1.19, tube-archivist-0.6.0, frigate-reolink-go2rtc-flv, redis-fleet-8.10.3, vaultwarden-1.37.5, postgres-digest-refresh-2026-11]   # RE-PLANNED 2026-11-03 against every open plan's frontmatter; 2026-11-06: edot-collector-0.164.0 removed (executed, retired)
+conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, etcd-timeouts-5000-500, talos-linux-1.14.5, longhorn-1.13.0, grafana-chart-14.4.0, descheduler-0.37.0, anythingllm-1.19, tube-archivist-0.6.0, frigate-reolink-go2rtc-flv, redis-fleet-8.10.3, vaultwarden-1.37.5, postgres-digest-refresh-2026-11]   # RE-PLANNED 2026-11-03 against every open plan's frontmatter; 2026-11-06: edot-collector-0.164.0 removed (executed, retired)
   # 2026-11-03: dropped dead refs otel-operator-0.23.0 (executed out-of-band 0e976cf5), jellyfin-12.1 (superseded by the 12.2 plan, itself later superseded), paperless-db-13.0.2 (executed a99794cc).
   # 2026-11-03: ADDED flux-fleet-0.62.0/0.62.1 (draft: flux-operator + flux-instance HRs and fluxinstance/flux, which Stage 10 patches; each lists this plan),
   #   etcd-timeouts-5000-500 (touches flux-system and perturbs the apiserver every Flux apply talks to; sun 11-08), authentik-2026.8.5 (sat 11-21; stage 5 switches authentik's chart source),
@@ -1251,7 +1251,7 @@ move before the window: `VER` is read from the live HelmRelease in §3.2.
 | `cilium` | `quay.io/cilium/charts/cilium` | 1.20.4 yes | yes (referrers) | yes | 6 |
 | `falcosecurity` | `ghcr.io/falcosecurity/charts/falco` | 9.2.2 yes | yes (bundle v0.3) | **yes (DaemonSet, checksum annotations)** | 3 |
 | `gabe565` | `ghcr.io/gabe565/charts/paperless-ngx` | 0.24.1 yes | no | no | 3 |
-| `grafana` | `ghcr.io/grafana-community/helm-charts/grafana` | 14.0.1 yes (`grafana-14.1.0` pending) | no | yes | 5 |
+| `grafana` | `ghcr.io/grafana-community/helm-charts/grafana` | 14.0.1 yes (`grafana-chart-14.4.0` pending) | no | yes | 5 |
 | `intel` | `ghcr.io/intel/helm-charts/intel-device-plugins-{operator,gpu,npu}` | 0.37.1 yes (all 3) | no | no | 3 |
 | `jetstack` | `quay.io/jetstack/charts/cert-manager` | `v1.21.3` and `1.21.3` both yes | yes (legacy `.sig`) | yes | 6 |
 | `mintplex-labs` | `ghcr.io/mintplex-labs/helm-charts/anythingllm` | 1.0.0 yes | no | yes | 5 |

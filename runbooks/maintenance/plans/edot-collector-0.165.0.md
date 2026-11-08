@@ -59,7 +59,7 @@ conflicts_with:                   # HARD slot exclusions — the only field wind
                                   # and silence each node's kmsg feed for its reboot — section 4.3/4.4 would misattribute.
   - longhorn-1.13.0               # EXCLUSIVE: the bbolt queue is an RWO Longhorn volume; an engine/manager roll during
                                   # the Recreate detach/attach is the Multi-Attach surface.
-  - grafana-14.1.0                # monitoring-namespace attribution: keep a failed gate attributable to ONE change.
+  - grafana-chart-14.4.0                # monitoring-namespace attribution: keep a failed gate attributable to ONE change.
   - flux-oci-chart-sources        # re-sources every HelmRelease incl. kube-prometheus-stack and otel-operator
                                   # (monitoring); section 4 reads Prometheus — authoring rule 4 (shared instrument).
   - flux-reconciler-impersonation # EXCLUSIVE: changes the service account every Flux controller reconciles as, in

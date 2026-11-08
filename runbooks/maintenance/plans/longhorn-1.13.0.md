@@ -50,7 +50,7 @@ conflicts_with:
   - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
   - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af (sun-attended:2026-11-29)
   - tube-archivist-elasticsearch-9.5.5   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
-  - grafana-14.1.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
+  - grafana-chart-14.4.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   - etcd-timeouts-5000-500           # reciprocal; that plan is status: blocked, window null (2026-11-06). NOT a
                                       # dependency of this plan: both read etcd/control-plane health, so never the
                                       # same slot; either order is fine
@@ -754,7 +754,7 @@ Forward-fix, do NOT revert the version:
   (current 1.12.2; 1.12.2 -> 1.13.0 is still one minor) and re-review.
 - **Reciprocity** (this plan writes only its own file). Measured 2026-11-06,
   plans in `conflicts_with` that already name `longhorn-1.13.0` back:
-  `redis-fleet-8.10.3`, `tube-archivist-elasticsearch-9.5.5`, `grafana-14.1.0`,
+  `redis-fleet-8.10.3`, `tube-archivist-elasticsearch-9.5.5`, `grafana-chart-14.4.0`,
   `etcd-timeouts-5000-500`, `talos-linux-1.14.5`, `flux-oci-chart-sources`,
   `anythingllm-1.19`, `edot-collector-0.164.0`, `icloud-drive-fleet-2.3.0`,
   `open-webui-0.13.0`. Owed (should add it): `otbr-thread-rcp-recovery`,

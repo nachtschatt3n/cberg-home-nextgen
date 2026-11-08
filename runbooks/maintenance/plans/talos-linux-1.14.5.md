@@ -143,7 +143,7 @@ conflicts_with:                       # exclusive: true already keeps everything
   - envoy-proxy-config-distroless-v1.40.2  # same surface (blocked)
   - tube-archivist-elasticsearch-9.5.5     # reciprocal (Longhorn)
   - frigate-reolink-go2rtc-flv        # reciprocal (igpu-i915)
-  - grafana-14.1.0                    # reciprocal (monitoring)
+  - grafana-chart-14.4.0                    # reciprocal (monitoring)
   - authentik-web-max-requests        # reciprocal; its premise is "no etcd leader change in 1h" (F-98043e32)
   # 2026-11-06: removed gha-fleet-0.15.1 - plan executed and retired (288a915fe); DEAD-REF in maintenance-plan.py --validate.
   - icloud-drive-fleet-2.3.0          # reciprocal
@@ -2870,7 +2870,7 @@ them out of this slot). **Added 2026-11-02:** `otel-operator-0.26.1` and `edot-c
 plan at all — each should add `talos-linux-1.14.5`:
 `authentik-2026.8.5`, `authentik-web-max-requests`, `edot-collector-0.163.2`, `edot-collector-0.164.0`,
 `envoy-proxy-config-distroless-v1.39.4`/`-v1.40.0`/`-v1.40.2`, `frigate-reolink-go2rtc-flv`,
-`gha-fleet-0.15.1`, `grafana-14.1.0`, `icloud-drive-fleet-2.3.0`, `jellyfin-3.7.0`, `openclaw-2026.11.1`,
+`gha-fleet-0.15.1`, `grafana-chart-14.4.0`, `icloud-drive-fleet-2.3.0`, `jellyfin-3.7.0`, `openclaw-2026.11.1`,
 `otbr-0.4.0`, `otbr-thread-rcp-recovery`, `otel-operator-0.25.1`, `plex-1.43.5.11079`, `redis-fleet-8.10.3`,
 `tube-archivist-elasticsearch-9.5.5`, `wazuh-100404-ci-build-tuning`; naming only `-1.14.2`:
 `longhorn-1.13.0` (retargeted to `-1.14.5` in the same change set as this edit), `multus-macvlan-foundation`,

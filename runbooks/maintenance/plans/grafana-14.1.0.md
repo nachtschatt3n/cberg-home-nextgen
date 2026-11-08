@@ -48,11 +48,13 @@ capability_change: true           # Grafana 13.2.4 -> 13.3.0 is an application M
                                   # resources by default") => never unattended without an operator GO. Previously false at 14.1.0.
 rollback_class: backup-restore    # the sqlite schema is migrated forward on first boot; a pin revert may not boot on it
 backup_gate: "2.5: a Longhorn Backup CR for volume grafana-config in state Completed, created less than 6 hours before the roll, PLUS a named pre-change Longhorn snapshot (grafana-pre-14-2-0) listed on the volume. Both must PASS before the pin is edited. Freshness proof only - NOT a restore proof; acceptable because the plan is human-gated and section 5 states what a total DB loss costs (2 users, 1 service account, 0 annotations, 0 alert rules measured 2026-10-30)."
-finding_refs: [F-482f421e]        # F-482f421e security warning, newer tag exists (open; VERIFIED via policy-cli finding list 2026-10-30).
+finding_refs: []                  # MOVED 2026-11-09 to grafana-chart-14.4.0 (F-c01c08c6, F-482f421e); the ownership claim lives on the live plan only
+#was: finding_refs: [F-482f421e]        # F-482f421e security warning, newer tag exists (open; VERIFIED via policy-cli finding list 2026-10-30).
                                   # HISTORICAL, deliberately not listed: F-c01c08c6 "grafana: chart 14.0.1 -> 14.2.0 (minor)" (version,
                                   # PLAN lane) is status resolved in the DB since 2026-10-30; this plan answered it, it needs no ownership claim.
 review: ready-for-go@2026-10-30   # plan-reviewer 2026-10-30 (two rounds): needs-fix twice on small items (pre-flight GF_LOG_MODE, soak reminder source), both fixed and re-verified; HUMAN-GATED, window null until the operator GO
-status: vetted                    # human-gated; window null until the operator GO
+status: superseded                # SUPERSEDED 2026-11-09: Renovate PR #374 retargeted again (14.2.0 -> 14.4.0); replaced by grafana-chart-14.4.0 (new id, operator request). Never executed; window was null.
+superseded_by: grafana-chart-14.4.0
 window: null                      # suggested: nightly:2026-11-03 with operator GO (section 6); the window agent assigns it
 sops_refs:
   - docs/sops/application-update.md
