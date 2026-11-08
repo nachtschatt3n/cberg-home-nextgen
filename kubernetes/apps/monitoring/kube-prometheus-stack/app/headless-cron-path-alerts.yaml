@@ -1,0 +1,121 @@
+---
+# Mac-side cron path liveness (2026-11-08). The OpenClaw crons (maintenance
+# windows, version snapshot, retro) reach the Mac through the iterm2-harness
+# HTTP API (:6770) and a `headless-dispatcher` iTerm pane. On 2026-11-08 the
+# 02:30Z nightly and the 08:00Z Sunday window both failed HEADLESS_UNAVAILABLE
+# after the dispatcher pane had been gone ~14 h and nothing alerted.
+#
+# Source: runbooks/launchd/headless-health-exporter.py on the Mac mini (:9103),
+# scraped by ScrapeConfig headless-cron-path (job label
+# scrapeConfig/monitoring/headless-cron-path -- the operator-generated name, see
+# macos-apps-alerts.yaml). 1 = healthy for every cberg_* gauge.
+# Every group has an absent() guard so a rule can never go inert silently.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: headless-cron-path-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: headless-cron-path.health
+      interval: 30s
+      rules:
+        - alert: HeadlessDispatcherDown
+          expr: cberg_headless_dispatcher_up == 0
+          for: 10m
+          labels:
+            severity: warning
+            category: macos
+            component: headless-dispatcher
+          annotations:
+            summary: "Headless dispatcher pane is gone on the Mac mini"
+            description: >-
+              No `runbooks/headless-dispatcher.py` process with a tty has existed
+              for 10+ minutes. Unattended crons (nightly window, sat/sun windows,
+              sweep, retro, version snapshot) fail with HEADLESS_UNAVAILABLE or
+              fall back to the busy console. Check
+              ~/Library/Logs/cberg-headless-keeper.log; the iTerm-side keeper
+              (launchd com.cberg.iterm-dispatcher-keeper) should reopen it within
+              ~1 min. Runbook: docs/sops/maintenance-windows.md section 7.
+        - alert: ItermHarnessDown
+          expr: cberg_iterm2_harness_up == 0
+          for: 10m
+          labels:
+            severity: critical
+            category: macos
+            component: iterm2-harness
+          annotations:
+            summary: "iterm2-harness (:6770) is not answering on the Mac mini"
+            description: >-
+              GET /api/v1/health on the harness failed for 10+ minutes. The
+              OpenClaw pod cannot reach ANY Mac session, so every cron that
+              drives the Mac fails. Check iTerm is running and the
+              com.cberg.iterm2-harness LaunchAgent / AutoLaunch copy
+              (docs/sops/maintenance-windows.md section 7).
+        - alert: ItermDispatcherKeeperDown
+          expr: cberg_iterm_dispatcher_keeper_up == 0
+          for: 15m
+          labels:
+            severity: warning
+            category: macos
+            component: headless-dispatcher
+          annotations:
+            summary: "The dispatcher keeper is not running (nothing will reopen the dispatcher)"
+            description: >-
+              The iTerm-side keeper that restarts the dispatcher holds no lock.
+              The dispatcher may be fine right now, but the next time it exits it
+              stays down (this is how 2026-11-07 18:05Z became a 14 h outage).
+              Check launchctl print gui/501/com.cberg.iterm-dispatcher-keeper
+              and ~/Library/Logs/cberg-headless-keeper.log. A hang with no log
+              output usually means macOS is waiting for the Automation consent
+              dialog ("python3 wants access to control iTerm") to be answered.
+        - alert: ItermNotRunning
+          expr: cberg_iterm_running == 0
+          for: 10m
+          labels:
+            severity: warning
+            category: macos
+            component: iterm
+          annotations:
+            summary: "iTerm2 is not running on the Mac mini"
+            description: >-
+              The dispatcher, harness and ops console all live inside iTerm.
+              launchd com.cberg.headless-dispatcher should relaunch it within
+              30 s; it has been down 10+ minutes (no GUI login session?).
+    - name: headless-cron-path.inert-guard
+      interval: 30s
+      rules:
+        - alert: HeadlessCronPathExporterDown
+          expr: up{job="scrapeConfig/monitoring/headless-cron-path"} == 0
+          for: 10m
+          labels:
+            severity: warning
+            category: macos
+            component: headless-dispatcher
+          annotations:
+            summary: "Mac-mini cron-path exporter (:9103) is unreachable"
+            description: >-
+              Prometheus cannot scrape 192.168.30.111:9103 for 10+ minutes: the
+              Mac is offline/asleep, or LaunchAgent
+              com.cberg.headless-health-exporter died. The dispatcher/harness
+              alerts are BLIND meanwhile, and the harness is probably
+              unreachable from the cluster too.
+        # No series at all = the ScrapeConfig/exporter was never wired or was
+        # removed; every rule above is inert in that state.
+        - alert: HeadlessCronPathMetricsAbsent
+          expr: absent(cberg_headless_dispatcher_up)
+          for: 15m
+          labels:
+            severity: warning
+            category: macos
+            component: headless-dispatcher
+          annotations:
+            summary: "Cron-path metrics are absent from Prometheus"
+            description: >-
+              cberg_headless_dispatcher_up has no series. The ScrapeConfig
+              headless-cron-path or the exporter is missing; every
+              HeadlessDispatcher*/ItermHarness* alert is inert.

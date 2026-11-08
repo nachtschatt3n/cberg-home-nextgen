@@ -47,6 +47,7 @@ resources:
   - ./alertmanager-httproute.yaml
   - ./memgraph-alerts.yaml
   - ./macos-apps-alerts.yaml
+  - ./headless-cron-path-alerts.yaml
   - ./macos-scrapeconfigs.yaml
   - ./superset-alerts.yaml
   - ./sure-alerts.yaml

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Supervises the iterm2-harness HTTP API (:6770) the OpenClaw cron path
+       uses to reach the Mac (2026-11-08). The AutoLaunch copy only starts with
+       iTerm and is never restarted (it was hand-restarted on 11-06). While
+       any copy answers /api/v1/health this job idles; when none does, it
+       starts one, and launchd restarts it if it dies.
+       Machine-specific paths. Install: docs/sops/maintenance-windows.md s.7 -->
+  <key>Label</key><string>com.cberg.iterm2-harness</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/mu/code/cberg-home-nextgen/runbooks/launchd/run-iterm-api-script.sh</string>
+    <string>/opt/homebrew/opt/iterm2-harness/iterm2-harness.py</string>
+    <string>--while-healthy</string>
+    <string>http://127.0.0.1:6770/api/v1/health</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>20</integer>
+  <key>StandardOutPath</key><string>/Users/mu/Library/Logs/cberg-iterm2-harness.log</string>
+  <key>StandardErrorPath</key><string>/Users/mu/Library/Logs/cberg-iterm2-harness.log</string>
+</dict>
+</plist>

@@ -19,8 +19,11 @@ start-headless-dispatcher.command. After a spawn it waits SPAWN_GRACE_S before
 judging again (never a window storm), doubling up to BACKOFF_MAX_S while
 spawns keep failing.
 
-Install: symlink into ~/.config/iterm2/AppSupport/Scripts/AutoLaunch/
-(docs/sops/maintenance-windows.md section 7).
+Supervision (2026-11-08): run by the LaunchAgent com.cberg.iterm-dispatcher-keeper
+(KeepAlive) via run-iterm-api-script.sh, NOT by iTerm AutoLaunch -- AutoLaunch
+only fires when iTerm starts and never restarts a dead script. If iTerm quits,
+the API connection drops, this process exits and launchd restarts it once iTerm
+is back. Install: docs/sops/maintenance-windows.md section 7.
 """
 import asyncio
 import fcntl
@@ -41,9 +44,15 @@ BACKOFF_MAX_S = 900
 
 
 def log(msg):
-    with open(LOG, "a") as f:
-        f.write(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                + f" iterm-keeper: {msg}\n")
+    # Never let a log failure kill the keeper: on 2026-11-03 a full disk made
+    # the open()/write() raise OSError, which ended the script silently and
+    # left the dispatcher unsupervised for 5 days. Losing a log line is fine.
+    try:
+        with open(LOG, "a") as f:
+            f.write(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    + f" iterm-keeper: {msg}\n")
+    except OSError:
+        pass
 
 
 async def dispatcher_session(app):

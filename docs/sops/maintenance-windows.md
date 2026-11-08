@@ -595,7 +595,9 @@ refuses to start without a tty. Two halves, both running as the login user
 | Piece | Runs as | Job |
 |---|---|---|
 | `runbooks/launchd/com.cberg.headless-dispatcher.plist` → `headless-dispatcher-keeper.sh` | LaunchAgent, `gui/<uid>`, Aqua, `RunAtLoad` + `KeepAlive` | keeps **iTerm** running (`open -g -a iTerm` at login and within 30 s after iTerm quits/crashes) and logs dispatcher up/down transitions |
-| `runbooks/launchd/iterm2-headless-dispatcher-keeper.py` | iTerm2 **AutoLaunch** API script (symlinked), started by iTerm on every iTerm start | every 30 s: no session whose commandLine contains `headless-dispatcher` → open a new window running `start-headless-dispatcher.command`; single-instance lock; grace/backoff so it never storms windows |
+| `runbooks/launchd/iterm2-headless-dispatcher-keeper.py` via LaunchAgent `com.cberg.iterm-dispatcher-keeper` (`run-iterm-api-script.sh`) | iTerm API script, supervised by launchd `KeepAlive` (2026-11-08; was an iTerm AutoLaunch symlink) | every 30 s: no session whose commandLine contains `headless-dispatcher` → open a new window running `start-headless-dispatcher.command`; single-instance lock; grace/backoff so it never storms windows; log writes can no longer kill it |
+| `runbooks/launchd/com.cberg.iterm2-harness.plist` | LaunchAgent, same wrapper, `--while-healthy` | supervises the **iterm2-harness** HTTP API (:6770) the pod uses; idles while any copy answers `/api/v1/health`, takes over when none does |
+| `runbooks/launchd/headless-health-exporter.py` via `com.cberg.headless-health-exporter` | LaunchAgent on `:9103` | Prometheus gauges `cberg_headless_dispatcher_up`, `cberg_iterm2_harness_up`, `cberg_iterm_running`, `cberg_iterm_dispatcher_keeper_up`; scraped by ScrapeConfig `headless-cron-path`; alerts in `kubernetes/apps/monitoring/kube-prometheus-stack/app/headless-cron-path-alerts.yaml` (`HeadlessDispatcherDown` 10m, `ItermHarnessDown` 10m critical, `ItermDispatcherKeeperDown` 15m, `ItermNotRunning`, exporter-down + `absent()` guards) |
 | `runbooks/launchd/start-headless-dispatcher.command` | the new window's program (`zsh -il`, so mise `python3` and `claude` resolve as in the operator's panes) | titles the tab `ai-server-cron`, `exec python3 runbooks/headless-dispatcher.py`; the window ends with the dispatcher |
 
 Why not osascript from launchd: creating an iTerm window via Apple Events
@@ -614,26 +616,47 @@ those before `cp`. It also runs whatever is in the live checkout at login
 ```bash
 # INSTALL (once, on the Mac, as mu -- never sudo)
 cd ~/code/cberg-home-nextgen
-ln -sf "$PWD/runbooks/launchd/iterm2-headless-dispatcher-keeper.py" \
-  ~/.config/iterm2/AppSupport/Scripts/AutoLaunch/headless-dispatcher-keeper.py
-osascript -e 'tell application "iTerm2" to launch API script named "headless-dispatcher-keeper"'  # or restart iTerm
-cp runbooks/launchd/com.cberg.headless-dispatcher.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cberg.headless-dispatcher.plist
+cp runbooks/launchd/com.cberg.headless-dispatcher.plist \
+   runbooks/launchd/com.cberg.headless-health-exporter.plist \
+   runbooks/launchd/com.cberg.iterm-dispatcher-keeper.plist \
+   runbooks/launchd/com.cberg.iterm2-harness.plist ~/Library/LaunchAgents/
+# retire the AutoLaunch copy of the keeper (launchd owns it now; a second copy
+# would just exit on the lock every 20 s)
+rm -f ~/.config/iterm2/AppSupport/Scripts/AutoLaunch/headless-dispatcher-keeper.py \
+      ~/Library/Application\ Support/iTerm2/Scripts/AutoLaunch/headless-dispatcher-keeper.py
+for j in headless-dispatcher headless-health-exporter iterm-dispatcher-keeper iterm2-harness; do
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cberg.$j.plist
+done
+# FIRST START ONLY: macOS shows "python3 wants access to control iTerm" (Automation
+# consent; the iTerm API fetches its cookie via AppleScript). Click Allow ONCE. Until
+# then the two iTerm-API jobs hang silently with no log output. The grant is keyed on
+# the iterm2env python binary path, so it must be repeated if iTerm upgrades its
+# Python runtime (ItermDispatcherKeeperDown / ItermHarnessDown then fire).
 
 # CHECK
 bash runbooks/launchd/headless-dispatcher-keeper.sh --check     # exit 0 = dispatcher running
-launchctl print gui/$(id -u)/com.cberg.headless-dispatcher | grep -E 'state|pid|runs'
+curl -s localhost:9103/metrics | grep -v '^#'                    # all four gauges = 1
+launchctl print gui/$(id -u)/com.cberg.iterm-dispatcher-keeper | grep -E 'state|pid|runs'
 tail ~/Library/Logs/cberg-headless-keeper.log
 
 # UNINSTALL (back to starting it by hand)
-launchctl bootout gui/$(id -u)/com.cberg.headless-dispatcher
-rm ~/Library/LaunchAgents/com.cberg.headless-dispatcher.plist
-rm ~/.config/iterm2/AppSupport/Scripts/AutoLaunch/headless-dispatcher-keeper.py
-pkill -f 'AutoLaunch/headless-dispatcher-keeper.py'   # the running iTerm-side keeper
+for j in headless-health-exporter iterm-dispatcher-keeper iterm2-harness headless-dispatcher; do
+  launchctl bootout gui/$(id -u)/com.cberg.$j; rm ~/Library/LaunchAgents/com.cberg.$j.plist
+done
 ```
 
-To stop the dispatcher on purpose, stop the iTerm-side keeper first (last line
-above), else it reopens the window within 30 s. With the LaunchAgent loaded,
+**Why AutoLaunch was replaced (2026-11-08 incident).** AutoLaunch starts a script
+only when iTerm itself starts, and never restarts it. iTerm had been running since
+July, so the keeper installed on 09-28 was never AutoLaunch-started; the copy
+started by hand died on the 11-03 disk-full event (its `log()` raised `OSError`,
+ending the script silently). On 11-07 18:05Z the dispatcher itself exited, nothing
+reopened it, and the 02:30Z nightly and 08:00Z Sunday window both failed
+`HEADLESS_UNAVAILABLE`. The harness AutoLaunch copy had the same weakness (hand
+restarted 11-06). Fixes: launchd `KeepAlive` supervision of both, a log that
+cannot kill the keeper, and the Prometheus alerts above.
+
+To stop the dispatcher on purpose, `launchctl bootout gui/$(id -u)/com.cberg.iterm-dispatcher-keeper`
+first, else it reopens the window within 30 s. With the LaunchAgent loaded,
 quitting iTerm is undone within 30 s too -- `launchctl bootout` it first.
 
 **Manual start / check** (fallback when the keepers are not installed; the

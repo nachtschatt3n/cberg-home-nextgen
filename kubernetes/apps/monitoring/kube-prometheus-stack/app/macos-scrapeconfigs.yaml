@@ -40,3 +40,20 @@ spec:
         - "192.168.30.111:9102"
       labels:
         instance: mac-mini
+---
+# Mac-side cron path health (dispatcher pane, iterm2-harness, iTerm keeper).
+# Exporter: runbooks/launchd/headless-health-exporter.py (LaunchAgent
+# com.cberg.headless-health-exporter). Rules: headless-cron-path-alerts.yaml.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: headless-cron-path
+  namespace: monitoring
+spec:
+  scrapeInterval: 60s
+  metricsPath: /metrics
+  staticConfigs:
+    - targets:
+        - "192.168.30.111:9103"
+      labels:
+        instance: mac-mini

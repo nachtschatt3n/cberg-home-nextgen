@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Prometheus exporter :9103 for the Mac-side cron path (dispatcher pane,
+       iterm2-harness, iTerm, iTerm keeper), 2026-11-08. Scraped by the
+       `headless-cron-path` ScrapeConfig. Machine-specific paths.
+       Install: docs/sops/maintenance-windows.md s.7 -->
+  <key>Label</key><string>com.cberg.headless-health-exporter</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/mu/code/cberg-home-nextgen/runbooks/launchd/headless-health-exporter.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/mu/Library/Logs/cberg-headless-exporter.log</string>
+  <key>StandardErrorPath</key><string>/Users/mu/Library/Logs/cberg-headless-exporter.log</string>
+</dict>
+</plist>

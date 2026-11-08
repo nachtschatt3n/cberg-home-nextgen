@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Supervises the iTerm-side dispatcher keeper (2026-11-08). Replaces the
+       iTerm AutoLaunch symlink, which only fires at iTerm start and never
+       restarts a dead script. Runs as the login user (gui domain, never root).
+       Machine-specific paths. Install: docs/sops/maintenance-windows.md s.7 -->
+  <key>Label</key><string>com.cberg.iterm-dispatcher-keeper</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/mu/code/cberg-home-nextgen/runbooks/launchd/run-iterm-api-script.sh</string>
+    <string>/Users/mu/code/cberg-home-nextgen/runbooks/launchd/iterm2-headless-dispatcher-keeper.py</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/mu/code/cberg-home-nextgen</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>OPERATION_REPO</key><string>/Users/mu/code/cberg-home-nextgen</string>
+  </dict>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>20</integer>
+  <key>StandardOutPath</key><string>/Users/mu/Library/Logs/cberg-headless-keeper.log</string>
+  <key>StandardErrorPath</key><string>/Users/mu/Library/Logs/cberg-headless-keeper.log</string>
+</dict>
+</plist>
