@@ -50,8 +50,9 @@ finding_refs:                         # queried 2026-10-25 with SWEEP_PG_DSN up 
                                       # held group was raised from. Answered by the GA patch, NOT by 2.45.3.
                                       # NOT claimed: F-8e5e5c66 (chart; owned by n8n-chart-2.1.1).
 review: ready-for-go@2026-10-25   # plan-reviewer 2026-10-25 (needs-fix on bookkeeping only; fixed 5490d7fd, premises 5/5 PASS)
-status: vetted
-window: nightly:2026-11-05   # human-gated (capability_change): needs operator GO
+status: superseded   # 2026-11-08: superseded by n8n-fleet-2.46.6. NEVER executed: the 2026-11-06 NOW run aborted at preflight because Docker/npm `stable` moved 2.44.6 -> 2.46.6. The ready-for-go review and any GO do NOT transfer.
+superseded_by: n8n-fleet-2.46.6
+window: null   # was nightly:2026-11-05 (missed, no GO)
 premises:
   - id: chart-plan-executed
     why: >-

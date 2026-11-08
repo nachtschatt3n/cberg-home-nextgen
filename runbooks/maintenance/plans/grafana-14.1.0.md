@@ -627,8 +627,7 @@ migration). Per `docs/sops/grafana-image-changes.md` section 4 step 7 do not deb
   Sunday 2026-11-01 Talos roll (`talos-linux-1.14.4`, exclusive) with one full day for the cluster to settle (nightly:2026-11-02
   is the first night after a 3-node reboot, so it is skipped), it shares the night only with `wazuh-100404-ci-build-tuning`
   (low, 25 min, ns security; capacity 6: 2 + 1), and it is three nights before `nightly:2026-11-06` `teslamate-4.4.0` which must
-  not share a night or sit right behind a Grafana minor. Fallbacks, in order: `nightly:2026-11-05` (n8n-fleet, low;
-  teslamate is next night: tighter), `sat-attended:2026-11-14` (python-fleet only; the day before `longhorn-1.13.0`
+  not share a night or sit right behind a Grafana minor. Fallbacks, in order: `sat-attended:2026-11-14` (python-fleet only; the day before `longhorn-1.13.0`
   `sun-attended:2026-11-15`, a day of soak). Avoid: 11-01 (exclusive Talos), 11-04 (memgraph, harmless but
   stacks restarts in the data tier), 11-06 (teslamate, hard conflict), 11-07 (otel-operator + helm-drift-detection), 11-08
   (etcd-timeouts, 110 min).
