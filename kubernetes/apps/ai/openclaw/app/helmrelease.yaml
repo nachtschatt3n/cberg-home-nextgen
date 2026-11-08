@@ -685,6 +685,18 @@ spec:
                 STATE_DIR="/home/node/.openclaw"
 
                 mkdir -p "$STATE_DIR" /home/node/clawd /home/node/.ssh
+
+                # 2026.11.1 resolves ffmpeg/ffprobe ONLY from trusted system dirs
+                # (/usr/bin, /usr/local/bin, /snap/bin ...); our static build lives
+                # on the volume, so TTS/voice notes died with "ffmpeg not found in
+                # trusted system directories". /snap/bin is a trusted dir that is
+                # absent from the image: mount an emptyDir there and link the tools.
+                if [ -d /snap/bin ] && [ -w /snap/bin ]; then
+                  ln -sf "$STATE_DIR/bin/ffmpeg" /snap/bin/ffmpeg
+                  ln -sf "$STATE_DIR/bin/ffprobe" /snap/bin/ffprobe
+                else
+                  echo "WARN: /snap/bin not writable - voice replies will lack ffmpeg"
+                fi
                 SHELL_PATH="/home/node/.openclaw/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                 for f in .bashrc .profile .bash_logout; do
                   if [ ! -f "/home/node/$f" ] && [ -f "/etc/skel/$f" ]; then
@@ -2331,6 +2343,16 @@ spec:
 
       # Memory-backed /dev/shm so headless chromium (@playwright/mcp) doesn't
       # crash on the container default 64M shared-memory segment.
+      # emptyDir over a TRUSTED system dir so ffmpeg/ffprobe (volume-hosted
+      # static build) resolve for OpenClaw's trusted-bin lookup; see the
+      # symlink step at the top of the app script.
+      trusted-bin:
+        type: emptyDir
+        advancedMounts:
+          openclaw:
+            app:
+              - path: /snap/bin
+
       dshm:
         type: emptyDir
         medium: Memory
