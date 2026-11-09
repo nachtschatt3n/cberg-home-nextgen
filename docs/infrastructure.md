@@ -106,7 +106,7 @@ Bootstrap order (via `kubernetes/bootstrap/apps/helmfile.yaml`):
 | Order | Component | Chart | Version | Namespace |
 |-------|-----------|-------|---------|-----------|
 | 1 | Cilium | `cilium/cilium` | 1.20.4 | kube-system | (bootstrap seed and Flux HelmRelease both pin 1.20.4 — upgraded 2026-10-25, verified live 2026-10-26) |
-| 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.50.1 | kube-system | (chart appVersion 1.14.7 owns the image tag; the former `helm-values.yaml` pin was dropped 2026-10-21) |
+| 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.50.2 | kube-system | (chart appVersion 1.14.7 owns the image tag; the former `helm-values.yaml` pin was dropped 2026-10-21) |
 | 3 | cert-manager | `jetstack/cert-manager` | v1.21.3 | cert-manager |
 | 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.62.1 | flux-system |
 | 5 | Flux Instance | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-instance` | 0.62.1 | flux-system |
