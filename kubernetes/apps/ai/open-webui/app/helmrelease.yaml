@@ -22,7 +22,7 @@ spec:
     timeout: 15m
     cleanupOnFail: false
     remediation:
-      retries: 0
+      retries: 1
   uninstall:
     keepHistory: false
   # postRenderers REMOVED 2026-09-07 (Envoy phase 3). It patched a label
