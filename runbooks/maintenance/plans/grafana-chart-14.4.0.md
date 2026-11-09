@@ -33,7 +33,6 @@ conflicts_with:                   # ONLY this field is honoured by the scheduler
   - redis-fleet-8.10.3            # reciprocal (their controls read Prometheus; Grafana is the operator's second instrument)
   - helm-drift-detection          # edits spec of EVERY HelmRelease incl. helmrelease/grafana: same object, attribution
   - flux-oci-chart-sources        # rewrites the chart source of HelmReleases incl. grafana (it also rolls deployment/grafana)
-  - edot-collector-0.165.0        # monitoring-namespace attribution: keep a failed gate attributable to ONE change
   - kube-prometheus-stack-92.22.0 # draft plan (2026-11-09): restarts Prometheus/Alertmanager (this plan's instrument) and ships the sidecar dashboard ConfigMaps this plan gates on
   - envoy-gateway-1.10.0          # DRAFT, untracked at planning time so its own file could NOT be given the reciprocal ref (whoever commits it must add
                                   # grafana-chart-14.4.0). Restarts the gateways that serve grafana's HTTPRoute and the DNS gate; blurs the SSO check
