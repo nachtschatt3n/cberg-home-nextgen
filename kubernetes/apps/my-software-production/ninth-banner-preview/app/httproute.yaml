@@ -5,12 +5,9 @@
 # except the outpost callback is gated. Shape copied from
 # kubernetes/apps/ai/gods-eye-view/app/httproute.yaml.
 #
-# FIRST-TIME PROTECTION, TWO COMMITS (docs/sops/authentik.md Step 3):
-#   step 1 (this state): SecurityPolicy + callback route + ReferenceGrant, and
-#     the app route answers 503 from a directResponse filter: no live backend.
-#   step 2 (after SecurityPolicy Accepted=True and >= 90 s): replace the 503
-#     filter below with the backendRef to Service ninth-banner-preview:80 and
-#     add ./helmrelease.yaml to the kustomization.
+# FIRST-TIME PROTECTION was done in two commits (docs/sops/authentik.md
+# Step 3): 4b617eb9 put the gate live with a 503 placeholder; the backend
+# followed after SecurityPolicy Accepted=True and well over 90 s.
 #
 # No external-dns target annotation here: external-dns reads it from the
 # envoy-external Gateway (new-deployment-blueprint Gotcha #11).
@@ -41,26 +38,11 @@ spec:
   rules:
     - matches:
         - path: { type: PathPrefix, value: / }
-      # STEP 1 placeholder: no backend until the policy is attached.
-      filters:
-        - type: ExtensionRef
-          extensionRef:
-            group: gateway.envoyproxy.io
-            kind: HTTPRouteFilter
-            name: ninth-banner-preview-not-yet
----
-apiVersion: gateway.envoyproxy.io/v1alpha1
-kind: HTTPRouteFilter
-metadata:
-  name: ninth-banner-preview-not-yet
-  namespace: my-software-production
-spec:
-  directResponse:
-    statusCode: 503
-    contentType: text/plain
-    body:
-      type: Inline
-      inline: "preview not deployed yet\n"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ninth-banner-preview
+          port: 80
 ---
 # Callback route: separate and MORE specific than `/` (longest match wins),
 # and NEVER gated, or the login flow can never complete.

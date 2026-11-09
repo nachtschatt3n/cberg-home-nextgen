@@ -7,6 +7,5 @@ kind: Kustomization
 # No AI proxy (AI_PROVIDER stays offline: template text) and no feedback DB
 # (the intake answers 503, the client keeps the report).
 resources:
+  - ./helmrelease.yaml
   - ./httproute.yaml
-  # ./helmrelease.yaml is NOT listed yet: it waits for the pinned poc3d image
-  # tag (rollout step 2, see the header of helmrelease.yaml).

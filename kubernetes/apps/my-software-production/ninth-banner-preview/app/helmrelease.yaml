@@ -2,16 +2,10 @@
 ---
 # The Ninth Banner 3D preview: the poc3d branch, one PINNED image tag.
 #
-# NOT YET IN ./kustomization.yaml (rollout step 2). To go live, in ONE commit:
-#   1. set image.tag below to the coordinator-supplied `sha-<40-char commit>`
-#      (built by the game's publish.yml "Image" workflow from a push of the
-#      poc3d commit to a merge-* branch; it must exist in GHCR first:
-#      `crane digest ghcr.io/nachtschatt3n/the-ninth-banner:sha-<commit>`);
-#   2. add `- ./helmrelease.yaml` to ./kustomization.yaml;
-#   3. in ./httproute.yaml swap the 503 `filters:` block of the app route for
-#      backendRefs: [{group: "", kind: Service, name: ninth-banner-preview, port: 80}]
-#      and delete the HTTPRouteFilter ninth-banner-preview-not-yet.
-# Later tag updates are step 1 only.
+# Tag updates: set image.tag below to the coordinator-supplied
+# `sha-<40-char commit>@sha256:<digest>` (built by the game's publish.yml
+# "Image" workflow from a push of the poc3d commit to a merge-* branch; check
+# it exists in GHCR first, e.g. gh api .../packages/container/the-ninth-banner/versions).
 #
 # NO image automation, on purpose: no ImageRepository/ImagePolicy and no
 # `$imagepolicy` marker, so neither Flux nor the production automation
@@ -53,8 +47,9 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/the-ninth-banner
-              # Pinned poc3d build. Format sha-<full 40-char commit sha>.
-              tag: sha-SET-POC3D-COMMIT
+              # Pinned poc3d build (sha-<full 40-char commit sha>) + its digest.
+              # poc3d d5a87732, Image run on merge-poc3d-preview, 2026-11-09.
+              tag: sha-d5a877327a862ea657cbcf9503e06b6c23e263ae@sha256:36e2296da8a8b34ab7422b357220cee8841645d5a03e1c766f3d97a76feda909
               pullPolicy: IfNotPresent
             env:
               - name: PORT
