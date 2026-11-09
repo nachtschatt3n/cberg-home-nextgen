@@ -4,7 +4,7 @@
 # `kubectl create`s one Job per run. docs/sops/ci-runner.md
 #
 # Indexed Job: one pod per shard (JOB_COMPLETION_INDEX -> --shard=i+1/N),
-# at most __PARALLELISM__ (3 GPU / 2 CPU; sims 4 or 2 by free CPU) at a time per Job; node placement is
+# at most __PARALLELISM__ (3 GPU / 2 CPU; sims 6, 3 or 2 by free CPU) at a time per Job; node placement is
 # left to the scheduler (all three nodes since 2026-10-12). backoffLimitPerIndex 0 +
 # maxFailedIndexes N: a failing shard is NOT retried and does NOT stop the
 # others, so every shard reports.
@@ -28,7 +28,12 @@ spec:
   backoffLimitPerIndex: 0
   maxFailedIndexes: __SHARDS__
   activeDeadlineSeconds: __DEADLINE__
-  # Deadline: 5400 s (sims 10800), set per suite by the trigger script.
+  # Job deadline: 5400 s (sims 28800 = 8 h), set per suite by the trigger
+  # script. It counts from the JOB's start, so with parallelism < shards a
+  # queued shard that starts late was killed early (sims, 2026-11-07/08: 6
+  # shards at parallelism 2, shards started at ~2 h hit the old 3 h deadline).
+  # The real per-shard limit is the POD deadline below (__POD_DEADLINE__,
+  # sims 9000 s = 2.5 h), which counts from each pod's own start.
   # 3600 s (2026-10-20, was 600): a Job that ends by DeadlineExceeded or a
   # lost trigger must leave its pods/logs readable for an hour.
   ttlSecondsAfterFinished: 3600
@@ -41,6 +46,10 @@ spec:
         ci.cberg.home/lane: __LANE__
     spec:
       restartPolicy: Never
+      # Per-shard time limit, counted from THIS pod's start (clone included),
+      # so a shard that waited in the Job's queue gets its full budget. One
+      # sims shard takes 1-1.7 h (measured 2026-11-08).
+      activeDeadlineSeconds: __POD_DEADLINE__
       serviceAccountName: the-ninth-banner-tests
       # Negative priority, never preempts: CI pods are evicted first under node
       # pressure and can never displace a production pod to get scheduled.

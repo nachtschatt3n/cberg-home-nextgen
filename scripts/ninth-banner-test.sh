@@ -26,7 +26,9 @@
 # time never counts against activeDeadlineSeconds (the Job does not exist yet).
 # TNB_QUEUE_TIMEOUT (default 14400 s) bounds the wait. sims: at most one
 # non-terminal sims Job per SUBMITTER (default: the Ninth Banner branch containing <sha>, else sha8; never this repo's branch); parallelism
-# 4 when it fits, else 2. Unreadable kubectl data fails loud (exit 3).
+# 6 (all shards) when it fits, else 3, else 2. Unreadable kubectl data fails loud (exit 3).
+# Deadlines: per POD (each shard's own budget, from its own start) and per
+# JOB (outer bound for the whole run incl. shards waiting for a slot).
 # Exit status: 0 if every shard passed, 1 otherwise, 2 on usage errors, 3 on
 # admission failure (queue timeout / unreadable cluster data).
 # Full procedure, security model and troubleshooting: docs/sops/ci-runner.md
@@ -94,9 +96,13 @@ fi
 # CPU mode stays at 2 per Job.
 if [ "$gpu" = 1 ]; then parallelism=$(( shards < 3 ? shards : 3 )); fi
 collect="${COLLECT:-1}"
-# Job deadline per suite: sims runs two rounds of ~50-65 min (4 shards,
-# parallelism 2) and was killed at 5400 s (DeadlineExceeded, 2026-10-20).
-case "$suite" in sims) deadline=10800 ;; *) deadline=5400 ;; esac
+# Deadlines per suite. pod_deadline is each shard pod's own limit and counts
+# from that pod's start; deadline is the Job's and counts from the Job's start,
+# so it must cover every round when parallelism < shards. sims: one shard takes
+# 1-1.7 h; at parallelism 2, 6 shards are 3 rounds (~5.1 h). The old Job-only
+# 10800 s killed the third round (DeadlineExceeded, 2026-11-07/08,
+# tnb-sims-5be66e4 and two more). Other suites keep 5400 s for both.
+case "$suite" in sims) deadline=28800; pod_deadline=9000 ;; *) deadline=5400; pod_deadline=5400 ;; esac
 
 # --- submitter label (one sims Job in flight per agent) is resolved after the sha is known ---
 
@@ -124,7 +130,7 @@ headroom="${TNB_HEADROOM_CPU:-2}"; poll="${TNB_POLL:-60}"; qtimeout="${TNB_QUEUE
 [[ "$poll" =~ ^[1-9][0-9]*$ && "$qtimeout" =~ ^[0-9]+$ ]] || { echo "TNB_POLL / TNB_QUEUE_TIMEOUT must be whole seconds"; exit 2; }
 probe="$(mktemp)"
 sed -e "s|__JOB_NAME__|tnb-probe|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" -e "s|__SUBMITTER__|$submitter|g" \
-    -e "s|__SHARDS__|$shards|g" -e "s|__PARALLELISM__|$parallelism|g" -e "s|__DEADLINE__|$deadline|g" \
+    -e "s|__SHARDS__|$shards|g" -e "s|__PARALLELISM__|$parallelism|g" -e "s|__DEADLINE__|$deadline|g" -e "s|__POD_DEADLINE__|$pod_deadline|g" \
     -e "s|__WORKERS__|$workers|g" -e "s|__COLLECT_WAIT__|0|g" \
     -e "s|__CPU_REQ__|$cpu_req|g" -e "s|__CPU_LIM__|$cpu_lim|g" -e "s|__GPU_RES__|$gpu_res|g" \
     -e "s|__LANE__|$lane|g" -e "s|__MEM_REQ__|$mem_req|g" -e "s|__MEM_LIM__|$mem_lim|g" \
@@ -135,8 +141,11 @@ req_m="$(python3 "$admit" podreq "$probe")" || { rm -f "$probe"; echo "admission
 rm -f "$probe"
 # sims: all shards at once (max 6) if it fits, else 2; others keep today's parallelism
 if [ "$suite" = sims ]; then
-    full=$(( shards < 6 ? shards : 6 )); half=$(( shards < 2 ? shards : 2 ))
-    par_list="$full"; [ "$half" -lt "$full" ] && par_list="$full $half"
+    # 6 / 3 / 2: 3 still runs 6 shards in two rounds, for half the CPU of 6
+    full=$(( shards < 6 ? shards : 6 )); mid=$(( full / 2 )); half=$(( shards < 2 ? shards : 2 ))
+    par_list="$full"
+    [ "$mid" -gt "$half" ] && [ "$mid" -lt "$full" ] && par_list="$par_list $mid"
+    [ "$half" -lt "$full" ] && par_list="$par_list $half"
 else
     par_list="$parallelism"
 fi
@@ -179,7 +188,7 @@ dest="${RESULTS_DIR:-$HOME/ci-results}/$job"
 mkdir -p "$dest"
 
 sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" -e "s|__SUBMITTER__|$submitter|g" \
-    -e "s|__SHARDS__|$shards|g" -e "s|__PARALLELISM__|$parallelism|g" -e "s|__DEADLINE__|$deadline|g" \
+    -e "s|__SHARDS__|$shards|g" -e "s|__PARALLELISM__|$parallelism|g" -e "s|__DEADLINE__|$deadline|g" -e "s|__POD_DEADLINE__|$pod_deadline|g" \
     -e "s|__WORKERS__|$workers|g" -e "s|__COLLECT_WAIT__|$([ "$collect" = 1 ] && echo 900 || echo 0)|g" \
     -e "s|__CPU_REQ__|$cpu_req|g" -e "s|__CPU_LIM__|$cpu_lim|g" -e "s|__GPU_RES__|$gpu_res|g" \
     -e "s|__LANE__|$lane|g" -e "s|__MEM_REQ__|$mem_req|g" -e "s|__MEM_LIM__|$mem_lim|g" \
@@ -188,7 +197,7 @@ sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" -
     "$TEMPLATE" > "$dest/job.yaml"
 k create -f "$dest/job.yaml" >/dev/null
 start=$(date +%s)
-echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  lane=$lane gpu=$gpu cpu=$cpu_req/$cpu_lim mem=$mem_req/$mem_lim  deadline=${deadline}s  queued=${queue_wait}s parallelism=$parallelism submitter=$submitter($submitter_src)"
+echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  lane=$lane gpu=$gpu cpu=$cpu_req/$cpu_lim mem=$mem_req/$mem_lim  deadline=${deadline}s pod_deadline=${pod_deadline}s  queued=${queue_wait}s parallelism=$parallelism submitter=$submitter($submitter_src)"
 if [ "$collect" != 1 ]; then
     # Fire and forget: return once the Job controller has created every shard pod.
     echo "COLLECT=0: waiting only until all $shards shard pod(s) exist"
@@ -257,7 +266,7 @@ while [ "${#done_idx[@]}" -lt "$shards" ]; do
         elif [ "$phase" = Failed ] || [ "$phase" = Succeeded ]; then
             # died before staging results (clone/init failure, OOM, deadline)
             { k logs -n "$NS" "$pod" -c clone 2>&1; printf '%s\n' "$logs"; } > "$dest/shard-$((i + 1)).log"
-            reason="$(k get pod -n "$NS" "$pod" -o jsonpath='{.status.initContainerStatuses[0].state.terminated.reason} {.status.containerStatuses[0].state.terminated.reason}' 2>/dev/null)"
+            reason="$(k get pod -n "$NS" "$pod" -o jsonpath='{.status.reason} {.status.initContainerStatuses[0].state.terminated.reason} {.status.containerStatuses[0].state.terminated.reason}' 2>/dev/null)"
             line="CI-RESULT suite=$suite shard=$((i + 1))/$shards result=FAIL rc=? (pod $phase before results: ${reason:-unknown}; see shard-$((i + 1)).log)"
         else
             continue
