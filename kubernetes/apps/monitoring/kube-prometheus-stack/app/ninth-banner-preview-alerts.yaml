@@ -1,0 +1,59 @@
+---
+# The Ninth Banner 3D preview (my-software-production/ninth-banner-preview).
+# pod=~"ninth-banner-preview-.*" never matches the production pods
+# (the-ninth-banner-*), and the production rules' "the-ninth-banner-.*"
+# never matches these.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: ninth-banner-preview-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - interval: 30s
+      name: ninth-banner-preview.pods.health
+      rules:
+        - alert: NinthBannerPreviewPodNotReady
+          annotations:
+            description: The Ninth Banner 3D preview pod {{ $labels.pod }} has been
+              not ready for more than 5 minutes. The owner-only poc3d preview is
+              unavailable.
+            summary: The Ninth Banner preview pod {{ $labels.pod }} is not ready
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="my-software-production", pod=~"ninth-banner-preview-.*", condition="true"}
+              unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+            ) == 0
+          for: 5m
+          labels:
+            category: my-software-production
+            component: ninth-banner-preview
+            severity: critical
+        - alert: NinthBannerPreviewPodCrashLooping
+          annotations:
+            description: The Ninth Banner 3D preview pod {{ $labels.pod }} has
+              restarted {{ $value | printf "%.0f" }} times in the last 15 minutes.
+            summary: The Ninth Banner preview pod {{ $labels.pod }} is crash looping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="my-software-production", pod=~"ninth-banner-preview-.*"}[15m]) * 900 > 2
+          for: 5m
+          labels:
+            category: my-software-production
+            component: ninth-banner-preview
+            severity: critical
+        - alert: NinthBannerPreviewPodRestarted
+          annotations:
+            description: The Ninth Banner 3D preview pod {{ $labels.pod }} has
+              restarted at least once in the last 15 minutes.
+            summary: The Ninth Banner preview pod {{ $labels.pod }} restarted
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="my-software-production", pod=~"ninth-banner-preview-.*"}[15m]) > 0
+          for: 1m
+          labels:
+            category: my-software-production
+            component: ninth-banner-preview
+            severity: warning

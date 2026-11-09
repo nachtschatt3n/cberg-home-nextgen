@@ -1,8 +1,8 @@
 # SOP: Gateway API / HTTPRoute Routing (Envoy Gateway)
 
 > Description: How HTTP ingress works in this cluster now that ingress-nginx is gone — writing, reviewing and debugging HTTPRoutes on the two Envoy Gateways, including forward-auth, backend TLS, timeouts and the verification gate that catches the failures which are invisible at apply time.
-> Version: `2026.10.23`
-> Last Updated: `2026-10-23`
+> Version: `2026.11.09`
+> Last Updated: `2026-11-09`
 > Owner: `homelab operator (cberg-home-nextgen)`
 
 ---
@@ -993,7 +993,7 @@ Expected:
 #    ungated route (token-auth in-app, for the Mac-mini scraper), so `/api` there
 #    answers 401/404/503 and NOT 302. A 302 on `/api` would be the regression.
 for h in homepage headlamp nocodb phpmyadmin esphome frigate solarfocus \
-         alertmanager prometheus longhorn arag godseye; do
+         alertmanager prometheus longhorn arag godseye ninthbanner-preview; do
   printf '%s ' "$h"
   curl -s -o /dev/null -w '%{http_code}\n' https://$h.${SECRET_DOMAIN}/
 done
@@ -1004,7 +1004,7 @@ done
 #     a fresh one per request. Churn => `headersToExtAuth` is missing `cookie`
 #     and the app answers 400 to real browsers.
 for h in homepage headlamp nocodb phpmyadmin esphome frigate solarfocus \
-         alertmanager prometheus longhorn arag godseye; do
+         alertmanager prometheus longhorn arag godseye ninthbanner-preview; do
   c=$(curl -s -D - -o /dev/null https://$h.${SECRET_DOMAIN}/ \
         | awk 'tolower($1)=="set-cookie:"{print $2; exit}')
   c2=$(curl -s -D - -o /dev/null -H "Cookie: ${c%%;*}" https://$h.${SECRET_DOMAIN}/ \
@@ -1188,3 +1188,5 @@ Rollback cautions specific to this migration:
   sourceCIDR, v4 + v6) plus a shared 20/min cap, both per envoy-external
   replica (~60/min total). Documented the per-client + global-cap pattern and
   the default-bucket gotcha under rule 10.
+- `2026.11.09`: Add `ninthbanner-preview` (my-software-production/ninth-banner-preview,
+  envoy-external, authentik Admins only) to the §10 forward-auth host loops.

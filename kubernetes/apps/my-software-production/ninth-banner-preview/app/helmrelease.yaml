@@ -1,0 +1,135 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+---
+# The Ninth Banner 3D preview: the poc3d branch, one PINNED image tag.
+#
+# NOT YET IN ./kustomization.yaml (rollout step 2). To go live, in ONE commit:
+#   1. set image.tag below to the coordinator-supplied `sha-<40-char commit>`
+#      (built by the game's publish.yml "Image" workflow from a push of the
+#      poc3d commit to a merge-* branch; it must exist in GHCR first:
+#      `crane digest ghcr.io/nachtschatt3n/the-ninth-banner:sha-<commit>`);
+#   2. add `- ./helmrelease.yaml` to ./kustomization.yaml;
+#   3. in ./httproute.yaml swap the 503 `filters:` block of the app route for
+#      backendRefs: [{group: "", kind: Service, name: ninth-banner-preview, port: 80}]
+#      and delete the HTTPRouteFilter ninth-banner-preview-not-yet.
+# Later tag updates are step 1 only.
+#
+# NO image automation, on purpose: no ImageRepository/ImagePolicy and no
+# `$imagepolicy` marker, so neither Flux nor the production automation
+# (../../the-ninth-banner/app/image-automation.yaml, scoped to that directory
+# and ImagePolicy) ever changes this tag.
+#
+# The board3d flag is off only on the production hostname (apps/web/src/game/
+# board3/board3d.ts on poc3d), so `?board3d=1` works on this host. Both poc3d
+# pages (poc3d/, poc3d/lod/) are Vite build inputs and the models live in
+# apps/web/public/poc3d, so the stock image build ships them: no build flag.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ninth-banner-preview
+  namespace: my-software-production
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 5.3.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      ninth-banner-preview:
+        replicas: 1
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/the-ninth-banner
+              # Pinned poc3d build. Format sha-<full 40-char commit sha>.
+              tag: sha-SET-POC3D-COMMIT
+              pullPolicy: IfNotPresent
+            env:
+              - name: PORT
+                value: "8080"
+              - name: HOST
+                value: "0.0.0.0"
+              - name: TZ
+                value: Europe/Berlin
+              # No AI proxy for the PoC: the image default AI_PROVIDER=offline
+              # keeps the shared Mac mini Ollama host out of it entirely.
+              - name: AI_PROVIDER
+                value: offline
+            probes:
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8080
+                  periodSeconds: 5
+                  timeoutSeconds: 5
+                  failureThreshold: 30
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8080
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8080
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 25m
+                memory: 96Mi
+              limits:
+                cpu: 500m
+                memory: 256Mi
+    defaultPodOptions:
+      automountServiceAccountToken: false
+      # Private GHCR package: the production app's pull secret, same namespace.
+      imagePullSecrets:
+        - name: ghcr-the-ninth-banner
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+    service:
+      app:
+        controller: ninth-banner-preview
+        ports:
+          http:
+            port: 80
+            targetPort: 8080
+    persistence:
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp

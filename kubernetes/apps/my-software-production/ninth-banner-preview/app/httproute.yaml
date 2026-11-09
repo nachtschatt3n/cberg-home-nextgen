@@ -1,0 +1,127 @@
+---
+# The Ninth Banner 3D preview on envoy-EXTERNAL, entirely behind Authentik
+# forward-auth (authentik Admins only, blueprint key
+# ninth-banner-preview-blueprint.yaml in kube-system/authentik). Every path
+# except the outpost callback is gated. Shape copied from
+# kubernetes/apps/ai/gods-eye-view/app/httproute.yaml.
+#
+# FIRST-TIME PROTECTION, TWO COMMITS (docs/sops/authentik.md Step 3):
+#   step 1 (this state): SecurityPolicy + callback route + ReferenceGrant, and
+#     the app route answers 503 from a directResponse filter: no live backend.
+#   step 2 (after SecurityPolicy Accepted=True and >= 90 s): replace the 503
+#     filter below with the backendRef to Service ninth-banner-preview:80 and
+#     add ./helmrelease.yaml to the kustomization.
+#
+# No external-dns target annotation here: external-dns reads it from the
+# envoy-external Gateway (new-deployment-blueprint Gotcha #11).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ninth-banner-preview
+  namespace: my-software-production
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "The Ninth Banner (3D preview)"
+    gethomepage.dev/description: "Owner-only preview of the poc3d branch (?board3d=1, /poc3d/lod/)"
+    gethomepage.dev/group: "Software Development"
+    gethomepage.dev/icon: "mdi-cube-outline"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/name=ninth-banner-preview"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      # https only; the http listener is the cluster-wide https-redirect route
+      sectionName: https
+  hostnames:
+    - "ninthbanner-preview.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      # STEP 1 placeholder: no backend until the policy is attached.
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: ninth-banner-preview-not-yet
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: ninth-banner-preview-not-yet
+  namespace: my-software-production
+spec:
+  directResponse:
+    statusCode: 503
+    contentType: text/plain
+    body:
+      type: Inline
+      inline: "preview not deployed yet\n"
+---
+# Callback route: separate and MORE specific than `/` (longest match wins),
+# and NEVER gated, or the login flow can never complete.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ninth-banner-preview-authentik-outpost
+  namespace: my-software-production
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "ninthbanner-preview.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /outpost.goauthentik.io }
+      backendRefs:
+        # Real cross-namespace Service, authorised by ReferenceGrant
+        # kube-system/ninth-banner-preview-outpost-access
+        # (kubernetes/apps/kube-system/authentik/app/referencegrants.yaml).
+        - group: ""
+          kind: Service
+          name: ak-outpost-ninth-banner-preview-forward-auth
+          namespace: kube-system
+          port: 9000
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: ninth-banner-preview-forward-auth
+  namespace: my-software-production
+spec:
+  targetRefs:                    # app route ONLY, never the callback route
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: ninth-banner-preview
+  extAuth:
+    failOpen: false              # outpost down => deny, never publish
+    # MANDATORY: without cookie the outpost never sees the session (HTTP 400
+    # loop). x-forwarded-for/-proto deliberately NOT forwarded
+    # (docs/sops/gateway-api-httproute.md §4.3).
+    headersToExtAuth:
+      - cookie
+      - accept
+      - user-agent
+    http:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-ninth-banner-preview-forward-auth
+          namespace: kube-system
+          port: 9000
+      path: /outpost.goauthentik.io/auth/envoy   # /auth/nginx 500s here
+      headersToBackend:
+        - Set-Cookie
+        - X-authentik-username
+        - X-authentik-groups
+        - X-authentik-email
+        - X-authentik-name
+        - X-authentik-uid

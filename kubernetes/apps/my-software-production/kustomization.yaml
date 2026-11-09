@@ -9,6 +9,7 @@ resources:
   - ./absenty/ks.yaml
   - ./andreamosteller/ks.yaml
   - ./gas-price-monitor/ks.yaml
+  - ./ninth-banner-preview/ks.yaml
   - ./rainbow-rescue/ks.yaml
   - ./splitfairy/ks.yaml
   - ./the-ninth-banner/ks.yaml
