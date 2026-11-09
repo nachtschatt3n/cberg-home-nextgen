@@ -48,8 +48,8 @@ spec:
             image:
               repository: ghcr.io/nachtschatt3n/the-ninth-banner
               # Pinned poc3d build (sha-<full 40-char commit sha>) + its digest.
-              # poc3d a36dab76, Image run 42586664692, 2026-11-09.
-              tag: sha-a36dab76709ed0ec53a9f4c6917433c3049dfc43@sha256:9fdfba03bd39a012ea3a57eba9c2dbaa679d3e1430d76bd1d3e3f4aff846f6a5
+              # poc3d 442b1b93, Image run 42592468473, 2026-11-09.
+              tag: sha-442b1b93da4bfc1cba0cccb5bbd28449696afba9@sha256:354e6639e5f969e81eef5231f03a13c658e146720cf5d8aecced7fe315321a0a
               pullPolicy: IfNotPresent
             env:
               - name: PORT
