@@ -64,7 +64,7 @@ finding_refs:
                                       # 2026-11-03); add its id here once the sweep files it.
 review: ready-for-go@2026-11-03   # plan-reviewer 2026-11-03: needs-fix (restore pod spawned 2 containers, restore_proof missing), fixed, delta re-review ready-for-go; HUMAN-GATED, soak a few days / prefer v0.13.1, window null until operator GO
 status: awaiting-go                 # go_no_go ingested by sat-attended:2026-11-07 (HUMAN-GATED, unattended run)
-window: sat-attended:2026-11-14   # operator 2026-11-08: "plan windows for the ones open"; attended, GO at the window
+window: "now:2026-11-09"   # ON-DEMAND NOW run 2026-11-09 (run-now.py stamp; was 'sat-attended:2026-11-14')
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md
