@@ -67,7 +67,6 @@ conflicts_with:
   - anythingllm-1.19                  # reciprocal: re-attaches a Longhorn volume
   # 2026-11-06: removed edot-collector-0.164.0 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
   - icloud-drive-fleet-2.3.0          # reciprocal: Recreate detaches/re-attaches two Longhorn volumes
-  - open-webui-0.13.0                 # reciprocal: copies/may restore a Longhorn volume
 exclusive: true                       # the storm fans out to 25 dependents (+ transitive); any other
                                       # plan's Flux-Ready gate in the same slot reads false-red, and
                                       # a one-way storage change must not share attribution.
