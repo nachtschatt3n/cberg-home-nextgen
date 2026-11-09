@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: grafana
-      version: 14.0.1
+      version: 14.4.0
       sourceRef:
         kind: HelmRepository
         name: grafana
@@ -73,6 +73,10 @@ spec:
     # Plan: grafana-13.0.0 (plan id; it SHIPPED 13.0.1 — the id was kept stable
     # because the operator decision record binds to it). Retired 2026-09-06.
     # Findings F-8c1f6717, F-de4d92cd.
+    # 2026-11-10: chart 14.4.0 - Grafana 13.2.4 -> 13.3.0 (APPLICATION minor: sqlite schema migrates forward on first
+    # boot; rollback class backup-restore, NOT git-revert). Sidecars 2.14.1 -> 2.14.3. Chart 14.4.0 drops helm.sh/chart from the
+    # POD template (verify identity via the Deployment label / pod-template-hash, not a pod label). Pre-change Longhorn
+    # snapshot grafana-pre-14-4-0 + backup. Plan: grafana-chart-14.4.0. PR #374. Findings: F-c01c08c6, F-482f421e.
     deploymentStrategy:
       type: Recreate
     admin:
