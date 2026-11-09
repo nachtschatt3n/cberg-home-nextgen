@@ -629,6 +629,15 @@ deny:
       re-poison itself. REMOVE THIS RULE only when a chart release is rendered
       offline (helm template) and shown not to create that policy, or the policy
       is disabled in values, and the bump goes through an attended window.
+  - match: "otel/opentelemetry-collector-contrib"
+    reason: >-
+      HELD 2026-11-09. PR #500 (0.164.0 to 0.165.0) passed every auto-update gate
+      and merged in the unattended lane, but edot-collector crash-looped: the new
+      collector rejects the exporter `mapping:` blocks (invalid keys `mode`,
+      `elasticsearch/logs`). The health gate auto-reverted it (653590d81). The bump
+      must ship only together with the config change that deletes those blocks, i.e.
+      through plan edot-collector-0.165.0 in an attended window. REMOVE THIS RULE
+      once that plan has executed and the config no longer carries `mapping:`.
 # ── Hard blocks by Renovate manager ─────────────────────────────────────────
 # github-actions patch/minor are already auto-merged by Renovate itself
 # (packageRules in .github/renovate.json5); don't double-handle them here.
