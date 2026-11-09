@@ -31,8 +31,6 @@ conflicts_with:
   - redis-fleet-8.10.3                # reciprocal (2026-11-02 sweep): it lists vaultwarden-1.37.4 -> needs vaultwarden-1.37.5 on its side (§6)
   - helm-drift-detection              # adds spec.driftDetection to every HR incl. helmrelease/vaultwarden (same object)
   - flux-oci-chart-sources            # rewrites the bjw-s chart source block of this HR (same spec.chart block)
-  - coredns-1.50.2                    # its gate reads probe http-vaultwarden; this plan's gate reads the same probe -> confounded, and a
-                                      # DNS roll during our Recreate gap would blame the wrong plan
 exclusive: false
 security_ref: F-3ee3a4fa              # Trivy "newer tag available" row; upstream app-level fixes tracked on F-e5e30871 (§1.4)
 capability_change: true               # NOT a same-behaviour bump: upstream (cumulative 1.37.4+1.37.5) removes API routes (legacy

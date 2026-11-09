@@ -63,7 +63,6 @@ conflicts_with:                   # Built 2026-11-09 from every non-superseded p
   - longhorn-1.13.0               # EXCLUSIVE storage engine: Prometheus/Alertmanager volumes re-attach
   - edot-collector-0.165.0
   - grafana-chart-14.4.0
-  - coredns-1.50.2
   - helm-drift-detection
   - flux-oci-chart-sources        # re-sources every HelmRelease incl. this one
   - flux-reconciler-impersonation
