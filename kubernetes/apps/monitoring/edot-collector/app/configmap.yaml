@@ -252,8 +252,6 @@ data:
           # outage into permanent loss: retries were exhausted and the records
           # dropped. The queue's byte budget is the real bound now.
           max_retries: 0
-        mapping:
-          mode: otel
       elasticsearch/metrics:
         endpoints:
           - https://elasticsearch-es-http.monitoring.svc:9200
@@ -288,8 +286,6 @@ data:
           # outage into permanent loss: retries were exhausted and the records
           # dropped. The queue's byte budget is the real bound now.
           max_retries: 0
-        mapping:
-          mode: otel
       elasticsearch/traces:
         endpoints:
           - https://elasticsearch-es-http.monitoring.svc:9200
@@ -324,8 +320,6 @@ data:
           # outage into permanent loss: retries were exhausted and the records
           # dropped. The queue's byte budget is the real bound now.
           max_retries: 0
-        mapping:
-          mode: otel
       # Tier 2d: expose the kmsg hardware-error count to Prometheus (scraped via
       # the hwmetrics ServiceMonitor endpoint) so a PrometheusRule can alert.
       prometheus/hwerrors:
