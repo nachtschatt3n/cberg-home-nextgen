@@ -34,8 +34,8 @@ Usage:
 Output, one line per volume:
   <volume> <age>h FRESH|STALE|NONE via <source> backup=<name> at=<ts>
 Exit: 0 all FRESH, 1 any STALE/NONE, 2 kubectl/lookup error (fails CLOSED).
-Premise form:  run: python3 runbooks/longhorn-backup-age.py <vol> --max-hours 26
-               expect_contains: " FRESH "
+Pre-check form: run this in the plan's section 2 pre-checks and expect " FRESH " per volume.
+               NOT a premise: plan-premises.py refuses python3 ("REFUSED: 'python3' is not an allowed read command").
 """
 from __future__ import annotations
 
