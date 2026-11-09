@@ -61,7 +61,6 @@ conflicts_with:                   # Built 2026-11-09 from every non-superseded p
                                   # field in BOTH directions (window-scheduler.py:313-323), so the other plans need no edit.
   - talos-linux-1.14.5            # EXCLUSIVE node roll: evicts Prometheus (F-e8bb3113) and blinds its own gates
   - longhorn-1.13.0               # EXCLUSIVE storage engine: Prometheus/Alertmanager volumes re-attach
-  - grafana-chart-14.4.0
   - helm-drift-detection
   - flux-oci-chart-sources        # re-sources every HelmRelease incl. this one
   - flux-reconciler-impersonation
@@ -83,7 +82,6 @@ conflicts_with:                   # Built 2026-11-09 from every non-superseded p
   - nextcloud-mcp-0.203.0
   - nextcloud-mcp-0.204.0
   - nextcloud-mcp-0.206.0
-  - grafana-chart-14.4.0          # names 12-12 as an attended fallback; Grafana queries the instrument this plan restarts
   - anythingllm-1.19
   - bitnamilegacy-exit-nextcloud-db
 exclusive: true                   # "its own slot" is the whole point of the policy hold: no other change may be in flight,
