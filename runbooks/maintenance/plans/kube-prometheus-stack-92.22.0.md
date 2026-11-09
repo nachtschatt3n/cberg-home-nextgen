@@ -74,7 +74,6 @@ conflicts_with:                   # Built 2026-11-09 from every non-superseded p
   - descheduler-0.37.0
   - postgres-digest-refresh-2026-11
   - redis-fleet-8.10.3
-  - n8n-fleet-2.46.6
   - vaultwarden-1.37.5
   - tube-archivist-0.6.0
   - tube-archivist-elasticsearch-9.5.5
