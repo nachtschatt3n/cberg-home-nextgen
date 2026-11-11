@@ -28,12 +28,16 @@ spec:
   backoffLimitPerIndex: 0
   maxFailedIndexes: __SHARDS__
   activeDeadlineSeconds: __DEADLINE__
-  # Job deadline: 5400 s (sims 28800 = 8 h), set per suite by the trigger
-  # script. It counts from the JOB's start, so with parallelism < shards a
-  # queued shard that starts late was killed early (sims, 2026-11-07/08: 6
-  # shards at parallelism 2, shards started at ~2 h hit the old 3 h deadline).
-  # The real per-shard limit is the POD deadline below (__POD_DEADLINE__,
-  # sims 9000 s = 2.5 h), which counts from each pod's own start.
+  # Job deadline, set per suite by the trigger script. It counts from the
+  # JOB's start, so it has to cover every round when parallelism < shards
+  # (sims, 2026-11-07/08: 6 shards at parallelism 2, shards that started at
+  # ~2 h hit the old 3 h deadline). sims (2026-11-11): rounds x (pod deadline
+  # + 300 s), rounds = ceil(shards / parallelism); 6 shards: 12900 s at
+  # parallelism 6, 25800 s at 3, 38700 s at 2 (a fixed 28800 s before, which
+  # three rounds of 12600 s do not fit). Other suites: 5400 s.
+  # The real per-shard limit is the POD deadline below (__POD_DEADLINE__ s
+  # here; sims 12600 s = 3.5 h, others 5400 s), which counts from each pod's
+  # own start.
   # 3600 s (2026-10-20, was 600): a Job that ends by DeadlineExceeded or a
   # lost trigger must leave its pods/logs readable for an hour.
   ttlSecondsAfterFinished: 3600
@@ -47,8 +51,11 @@ spec:
     spec:
       restartPolicy: Never
       # Per-shard time limit, counted from THIS pod's start (clone included),
-      # so a shard that waited in the Job's queue gets its full budget. One
-      # sims shard takes 1-1.7 h (measured 2026-11-08).
+      # so a shard that waited in the Job's queue gets its full budget. sims:
+      # 12600 s since 2026-11-11 (9000 s killed shards that needed up to
+      # 9,496 s; 1-1.7 h per shard when measured 2026-11-08). A pod killed here
+      # stays as Failed/DeadlineExceeded and prints no result line of its own:
+      # the collector writes the shard's `rc=? (lost: pod deadline: ...)` line.
       activeDeadlineSeconds: __POD_DEADLINE__
       serviceAccountName: the-ninth-banner-tests
       # Negative priority, never preempts: CI pods are evicted first under node

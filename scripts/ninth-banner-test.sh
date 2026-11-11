@@ -3,9 +3,13 @@
 # cluster (namespace ci-runner) and collect the results on this Mac.
 #
 #   scripts/ninth-banner-test.sh <ref> <unit|e2e|nightly|responsive|release|sims> [shards]
+#   scripts/ninth-banner-test.sh --collect <job>
 #
 #   ref     commit sha (short ok), branch or tag of nachtschatt3n/the-ninth-banner
 #   shards  default: e2e/nightly/responsive/release 3, sims 6, unit 1 (forced)
+#   --collect <job>  re-attach the collector to a Job that was submitted from
+#           this Mac and whose collector stopped: reads <results>/<job>/job.yaml,
+#           creates nothing, never posts the release commit status
 #
 # release: when every shard has reported, posts the commit status
 # "E2E (GPU, k8s)" on the game repo with gh (the pods hold no token).
@@ -16,7 +20,11 @@
 # for e2e/nightly/responsive, 0 for unit/sims), SPECS
 # (space-separated spec files), PROJECT (e.g. chromium), CPU_REQ/CPU_LIM
 # (per-shard CPU, default 2/4 browser lane, 1/1.5 cpu lane = sims/unit
-# without GPU; never above 4, thermal cap).
+# without GPU; never above 4, thermal cap), TNB_POD_DEADLINE (one shard's own
+# time limit in seconds; default sims 12600, else 5400), DRY_RUN=1 (render the
+# Job for every parallelism the admission may pick and print its deadlines;
+# nothing is created).
+# ---
 # Admission (docs/sops/ci-runner.md): the Job is created only once all parallel
 # shard pods first-fit, one at a time, into the schedulable nodes' free CPU
 # AND memory, each node keeping TNB_HEADROOM_CPU (default 2) and TNB_HEADROOM_MEM
@@ -28,7 +36,13 @@
 # non-terminal sims Job per SUBMITTER (default: the Ninth Banner branch containing <sha>, else sha8; never this repo's branch); parallelism
 # 6 (all shards) when it fits, else 3, else 2. Unreadable kubectl data fails loud (exit 3).
 # Deadlines: per POD (each shard's own budget, from its own start) and per
-# JOB (outer bound for the whole run incl. shards waiting for a slot).
+# JOB (outer bound for the whole run incl. shards waiting for a slot; for sims
+# it follows the parallelism: rounds x (pod deadline + 300 s)).
+# Results: <results>/<job>/summary.txt holds exactly one `CI-RESULT ...
+# shard=i/N ...` line per shard, in shard order, written in one step when the
+# collector ends (also when a signal stops it). `result=PASS` and
+# `result=FAIL rc=<number>` come from the shard itself. A shard that could not
+# report is `result=FAIL rc=? (lost: <kind>: <what happened, what to do>)`.
 # Exit status: 0 if every shard passed, 1 otherwise, 2 on usage errors, 3 on
 # admission failure (queue timeout / unreadable cluster data).
 # Full procedure, security model and troubleshooting: docs/sops/ci-runner.md
@@ -44,10 +58,30 @@ TEMPLATE="$REPO_ROOT/kubernetes/apps/ci-runner/the-ninth-banner-tests/job-templa
 GH_REPO="nachtschatt3n/the-ninth-banner"
 NS="ci-runner"
 
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
-k() { (cd "$REPO_ROOT" && mise exec -- kubectl "$@"); }
+usage() { sed -n '2,/^# ---$/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 2; }
+# kubectl comes from the repo's pinned tools. TNB_KUBECTL (a command line, split
+# on blanks) replaces it, as in scripts/ninth-banner-capacity.py: the tests in
+# runbooks/tests/ put a fake there.
+read -r -a KUBECTL <<<"${TNB_KUBECTL:-mise exec -- kubectl}"
+k() { (cd "$REPO_ROOT" && "${KUBECTL[@]}" "$@"); }
+poll_s="${TNB_COLLECT_POLL:-10}"   # seconds between two looks of the collector
+[[ "$poll_s" =~ ^[0-9]+$ ]] || { echo "TNB_COLLECT_POLL must be whole seconds"; exit 2; }
+attached=0
+# Output that survives a closed stdout (the session that started the script is
+# gone): from the moment the Job exists, the script goes on without output and
+# still writes summary.txt. bash 3.2 keeps the text of a failed write in its
+# buffer and flushes it into the next redirected file, so stdout goes to
+# /dev/null for good first.
+trap '' PIPE
+say() {
+    echo "$@" 2>/dev/null && return 0
+    exec >/dev/null 2>&1
+    echo
+    return 0
+}
 
-[ $# -ge 2 ] || usage
+# ---- submit: everything up to `kubectl create` (not used by --collect) ----
+submit() {
 ref_in="$1"; suite="$2"; shards="${3:-}"
 case "$suite" in
     unit) shards=1 ;;
@@ -83,6 +117,7 @@ fi
 [[ "$workers" =~ ^[1-8]$ ]] || { echo "WORKERS must be 1..8"; exit 2; }
 [[ "${SPECS:-}" =~ ^[A-Za-z0-9._/@\ -]*$ ]] || { echo "SPECS: spec paths only"; exit 2; }
 [[ "${PROJECT:-}" =~ ^[A-Za-z0-9_-]*$ ]] || { echo "PROJECT: a project name only"; exit 2; }
+[[ "${DRY_RUN:-0}" =~ ^[01]$ ]] || { echo "DRY_RUN must be 0 or 1"; exit 2; }
 if [ "$gpu" = 1 ]; then
     gpu_res=', gpu.intel.com/i915: "1"'
     # verified 2026-10-03: ANGLE on GL/EGL renders on "Mesa Intel Arc Graphics
@@ -96,13 +131,32 @@ fi
 # CPU mode stays at 2 per Job.
 if [ "$gpu" = 1 ]; then parallelism=$(( shards < 3 ? shards : 3 )); fi
 collect="${COLLECT:-1}"
-# Deadlines per suite. pod_deadline is each shard pod's own limit and counts
-# from that pod's start; deadline is the Job's and counts from the Job's start,
-# so it must cover every round when parallelism < shards. sims: one shard takes
-# 1-1.7 h; at parallelism 2, 6 shards are 3 rounds (~5.1 h). The old Job-only
-# 10800 s killed the third round (DeadlineExceeded, 2026-11-07/08,
-# tnb-sims-5be66e4 and two more). Other suites keep 5400 s for both.
-case "$suite" in sims) deadline=28800; pod_deadline=9000 ;; *) deadline=5400; pod_deadline=5400 ;; esac
+# Deadlines. pod_deadline is each shard pod's own limit and counts from that
+# pod's start; deadline is the Job's and counts from the Job's start, so it
+# must cover every round when parallelism < shards.
+# sims: 12600 s per shard since 2026-11-11 (9000 s killed shards that needed up
+# to 9,496 s). The Job deadline follows the parallelism the admission picks:
+# rounds x (pod_deadline + 300 s), rounds = ceil(shards / parallelism). With
+# every shard inside its pod deadline the last shard ends within that many
+# rounds, so the Job deadline never cuts a shard that is still inside its own
+# budget; the 300 s per round cover the time between one pod ending and the
+# next one starting. 6 shards: 12900 s at parallelism 6, 25800 s at 3, 38700 s
+# at 2 (the fixed 28800 s of 2026-11-09 did not cover three rounds of 12600 s;
+# the Job-only 10800 s before that killed the third round, 2026-11-07/08).
+# Other suites keep 5400 s for both.
+case "$suite" in sims) pod_deadline=12600 ;; *) pod_deadline=5400 ;; esac
+pod_deadline="${TNB_POD_DEADLINE:-$pod_deadline}"
+[[ "$pod_deadline" =~ ^[1-9][0-9]{1,4}$ ]] || { echo "TNB_POD_DEADLINE must be whole seconds, 10..99999"; exit 2; }
+set_job_deadline() {   # from $parallelism: call again once the admission has picked it
+    rounds=$(( (shards + parallelism - 1) / parallelism ))
+    if [ "$suite" = sims ]; then
+        deadline=$(( rounds * (pod_deadline + 300) ))
+    else
+        deadline=5400
+        [ "$pod_deadline" -le "$deadline" ] || deadline="$pod_deadline"
+    fi
+}
+set_job_deadline
 
 # --- submitter label (one sims Job in flight per agent) is resolved after the sha is known ---
 
@@ -149,6 +203,30 @@ if [ "$suite" = sims ]; then
 else
     par_list="$parallelism"
 fi
+# The Job exactly as it is (or, DRY_RUN, would be) created: <job name> <out file>
+render() {
+    sed -e "s|__JOB_NAME__|$1|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" -e "s|__SUBMITTER__|$submitter|g" \
+        -e "s|__SHARDS__|$shards|g" -e "s|__PARALLELISM__|$parallelism|g" -e "s|__DEADLINE__|$deadline|g" -e "s|__POD_DEADLINE__|$pod_deadline|g" \
+        -e "s|__WORKERS__|$workers|g" -e "s|__COLLECT_WAIT__|$([ "$collect" = 1 ] && echo 900 || echo 0)|g" \
+        -e "s|__CPU_REQ__|$cpu_req|g" -e "s|__CPU_LIM__|$cpu_lim|g" -e "s|__GPU_RES__|$gpu_res|g" \
+        -e "s|__LANE__|$lane|g" -e "s|__MEM_REQ__|$mem_req|g" -e "s|__MEM_LIM__|$mem_lim|g" \
+        -e "s|__EPH_REQ__|$eph_req|g" -e "s|__EPH_LIM__|$eph_lim|g" \
+        -e "s|__CHROMIUM_ARGS__|$chromium_args|g" -e "s|__SPECS__|${SPECS:-}|g" -e "s|__PROJECT__|${PROJECT:-}|g" \
+        "$TEMPLATE" > "$2"
+}
+if [ "${DRY_RUN:-0}" = 1 ]; then
+    # No cluster call up to here, and none below: the Job is only rendered.
+    dry="$(mktemp -d)"
+    for parallelism in $par_list; do
+        set_job_deadline
+        out="$dry/job-parallel-$parallelism.yaml"
+        render "tnb-${suite}$([ "$gpu" = 1 ] && echo -gpu)-${sha:0:7}-dryrun" "$out"
+        echo "dry render: suite $suite  shards $shards  parallel $parallelism = $rounds round(s)  deadline=${deadline}s pod_deadline=${pod_deadline}s  -> $out"
+        grep -n '^ *activeDeadlineSeconds: ' "$out" | sed 's/^/    line /'
+    done
+    echo "DRY_RUN=1: no Job was created"
+    exit 0
+fi
 queue_start=$(date +%s)
 while :; do
     msg=""
@@ -182,22 +260,16 @@ while :; do
     sleep "$poll"
 done
 queue_wait=$(( $(date +%s) - queue_start ))
+set_job_deadline   # the Job's deadline for the parallelism the admission picked
 
 job="tnb-${suite}$([ "$gpu" = 1 ] && echo -gpu)-${sha:0:7}-$(date +%m%d%H%M%S)"
 dest="${RESULTS_DIR:-$HOME/ci-results}/$job"
 mkdir -p "$dest"
 
-sed -e "s|__JOB_NAME__|$job|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite|g" -e "s|__SUBMITTER__|$submitter|g" \
-    -e "s|__SHARDS__|$shards|g" -e "s|__PARALLELISM__|$parallelism|g" -e "s|__DEADLINE__|$deadline|g" -e "s|__POD_DEADLINE__|$pod_deadline|g" \
-    -e "s|__WORKERS__|$workers|g" -e "s|__COLLECT_WAIT__|$([ "$collect" = 1 ] && echo 900 || echo 0)|g" \
-    -e "s|__CPU_REQ__|$cpu_req|g" -e "s|__CPU_LIM__|$cpu_lim|g" -e "s|__GPU_RES__|$gpu_res|g" \
-    -e "s|__LANE__|$lane|g" -e "s|__MEM_REQ__|$mem_req|g" -e "s|__MEM_LIM__|$mem_lim|g" \
-    -e "s|__EPH_REQ__|$eph_req|g" -e "s|__EPH_LIM__|$eph_lim|g" \
-    -e "s|__CHROMIUM_ARGS__|$chromium_args|g" -e "s|__SPECS__|${SPECS:-}|g" -e "s|__PROJECT__|${PROJECT:-}|g" \
-    "$TEMPLATE" > "$dest/job.yaml"
+render "$job" "$dest/job.yaml"
 k create -f "$dest/job.yaml" >/dev/null
 start=$(date +%s)
-echo "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism)  lane=$lane gpu=$gpu cpu=$cpu_req/$cpu_lim mem=$mem_req/$mem_lim  deadline=${deadline}s pod_deadline=${pod_deadline}s  queued=${queue_wait}s parallelism=$parallelism submitter=$submitter($submitter_src)"
+say "job $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel $parallelism = $rounds round(s))  lane=$lane gpu=$gpu cpu=$cpu_req/$cpu_lim mem=$mem_req/$mem_lim  deadline=${deadline}s pod_deadline=${pod_deadline}s  queued=${queue_wait}s parallelism=$parallelism submitter=$submitter($submitter_src)"
 if [ "$collect" != 1 ]; then
     # Fire and forget: return once the Job controller has created every shard pod.
     echo "COLLECT=0: waiting only until all $shards shard pod(s) exist"
@@ -209,78 +281,283 @@ if [ "$collect" != 1 ]; then
     echo "all shards created. Logs: kubectl logs -n $NS -l batch.kubernetes.io/job-name=$job -c runner --prefix"
     exit 0
 fi
+}
 
-pod_of() { k get pods -n "$NS" -l "batch.kubernetes.io/job-name=$job,batch.kubernetes.io/job-completion-index=$1" \
-               -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true; }
+# ---- --collect <job>: everything the collector needs is in the rendered Job ----
+attach() {
+job="$1"
+[[ "$job" =~ ^tnb-[a-z0-9-]+$ ]] || { echo "--collect: '$job' is not a job name (tnb-...)"; exit 2; }
+dest="${RESULTS_DIR:-$HOME/ci-results}/$job"
+[ -s "$dest/job.yaml" ] || { echo "--collect: no $dest/job.yaml (was the Job submitted from this Mac?)"; exit 2; }
+suite="$(awk '/^    ci\.cberg\.home\/suite: /{print $2; exit}' "$dest/job.yaml")"
+sha="$(awk -F'"' '/^    ci\.cberg\.home\/ref: /{print $2; exit}' "$dest/job.yaml")"
+shards="$(awk '/^  completions: /{print $2; exit}' "$dest/job.yaml")"
+parallelism="$(awk '/^  parallelism: /{print $2; exit}' "$dest/job.yaml")"
+deadline="$(awk '/^  activeDeadlineSeconds: /{print $2; exit}' "$dest/job.yaml")"
+pod_deadline="$(awk '/^      activeDeadlineSeconds: /{print $2; exit}' "$dest/job.yaml")"
+pod_deadline="${pod_deadline:-$deadline}"   # Jobs from before 2026-11-09 have no pod deadline
+[[ "$suite" =~ ^(unit|e2e|nightly|responsive|release|sims)$ && "$shards" =~ ^[1-9][0-9]?$ \
+    && "$deadline" =~ ^[1-9][0-9]*$ && "$pod_deadline" =~ ^[1-9][0-9]*$ ]] \
+    || { echo "--collect: cannot read suite, shards and deadlines from $dest/job.yaml"; exit 2; }
+# the Job's start, to within seconds: job.yaml is written right before `kubectl create`
+start="$(python3 -c 'import os, sys; print(int(os.path.getmtime(sys.argv[1])))' "$dest/job.yaml")"
+attached=1
+say "collect $NS/$job  commit ${sha:0:12}  suite $suite  shards $shards (parallel ${parallelism:-?})  deadline=${deadline}s pod_deadline=${pod_deadline}s  submitted $(( $(date +%s) - start ))s ago"
+}
+
+if [ "${1:-}" = "--collect" ]; then
+    [ $# -eq 2 ] || usage
+    attach "$2"
+else
+    [ $# -ge 2 ] || usage
+    submit "$@"
+fi
+
+# ---- collector ----
 # ISO UTC timestamp for an epoch (BSD date on macOS, GNU date fallback)
 iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
-pod_names=(); pod_seen=()   # per shard: pod name, epoch first seen
+ttl=3600     # ttlSecondsAfterFinished in the job template
 margin=300   # 5 min either side of the lookup window
-done_idx=()   # indexed array: bash 3.2 (macOS) has no associative arrays
-summary=()
-fails=0
-# Job-level end state: "" while active, else the Failed/Complete reason, or
-# "Vanished" once the Job is gone (TTL / manual delete). A Job that ends by
+# Per shard, index = shard - 1 (indexed arrays: bash 3.2 on macOS has no associative ones)
+pod_names=(); pod_seen=()                   # pod name, epoch first seen
+last_phase=(); last_node=(); last_wait=()   # what the last look saw of that pod
+gone_rounds=(); term_rounds=()              # looks without the pod / at a dead pod without results
+done_idx=(); lines=(); ndone=0; fails=0; lostn=0
+summary_written=0
+
+# One collector per Job: two would copy and count the same shards.
+if [ -f "$dest/collector.pid" ]; then
+    other_pid="$(cat "$dest/collector.pid" 2>/dev/null || true)"
+    other_cmd=""
+    if [[ "$other_pid" =~ ^[0-9]+$ ]]; then other_cmd="$(ps -p "$other_pid" -o command= 2>/dev/null || true)"; fi
+    case "$other_cmd" in *ninth-banner-test*)
+        say "a collector for $job is still running (pid $other_pid): not starting a second one"; exit 2 ;;
+    esac
+fi
+echo $$ > "$dest/collector.pid"
+
+# Exactly one line per shard: the first one recorded stays.
+record() {   # <index> <line>
+    [ -z "${done_idx[$1]:-}" ] || return 0
+    done_idx[$1]=1; lines[$1]="$2"; ndone=$((ndone + 1))
+    grep -q 'result=PASS' <<<"$2" || fails=$((fails + 1))
+    say "  $2"
+}
+# A shard that could not report. `rc=?` is the contract with the caller: its
+# wait tool counts result=PASS, takes result=FAIL rc=<number> as a real red and
+# everything else as lost. The line also ends the shard's own log on this Mac.
+lost() {   # <index> <kind> <what happened and what to do>
+    [ -z "${done_idx[$1]:-}" ] || return 0
+    local n=$(( $1 + 1 )) detail="$3" f line
+    detail="${detail//rc=/rc }"; detail="${detail//result=/result }"   # free text never reads as a verdict
+    line="CI-RESULT suite=$suite shard=$n/$shards result=FAIL rc=? (lost: $2: $detail; partial log, if any, in shard-$n.log)"
+    f="$dest/shard-$n.log"
+    if [ -f "$f" ]; then   # a re-attached collector replaces the earlier lost line
+        grep -v '^CI-RESULT .* rc=? (lost: ' "$f" > "$f.tmp" || true
+        mv -f "$f.tmp" "$f"
+    fi
+    printf '%s\n' "$line" >> "$f"
+    lostn=$((lostn + 1))
+    record "$1" "$line"
+}
+# In one step (tmp + mv): the caller's wait tool reads summary.txt as soon as it is not empty.
+write_summary() {
+    local i
+    for ((i = 0; i < shards; i++)); do
+        [ -n "${lines[$i]:-}" ] || lost "$i" "collector error" "no result was recorded for this shard: rerun it"
+    done
+    for ((i = 0; i < shards; i++)); do printf '%s\n' "${lines[$i]}"; done > "$dest/summary.txt.tmp"
+    mv -f "$dest/summary.txt.tmp" "$dest/summary.txt"
+    summary_written=1
+}
+# The collector ends early (signal, error): every shard still gets its line.
+# No kubectl in here; `--collect` reads the cluster again.
+on_exit() {
+    local rc="$1" i
+    trap - EXIT
+    set +e
+    rm -f "$dest/collector.pid" "$dest/collector.err"
+    [ "$summary_written" = 1 ] && exit "$rc"
+    for ((i = 0; i < shards; i++)); do
+        lost "$i" "collector stopped" "the collector on this Mac ended (exit code $rc) before this shard reported; the Job may still be running: scripts/ninth-banner-test.sh --collect $job"
+    done
+    write_summary
+    say "collector stopped (exit code $rc): $dest/summary.txt has a line for every shard; re-attach with scripts/ninth-banner-test.sh --collect $job"
+    exit "$rc"
+}
+trap 'on_exit $?' EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+
+# Job state: active | unreadable | Vanished (deleted by hand or by its TTL) |
+# Complete[:reason] | Failed:<reason>. FailureTarget (set first, while the Job
+# controller still removes the pods) counts as Failed. A Job that ends by
 # DeadlineExceeded deletes its running pods and never starts the pending
-# indexes, so those shards can never report: without this check the loop
-# waited forever (2026-10-20, tnb-sims-43224f7).
-job_end() {
+# indexes, so those shards can never report: without this the loop waited
+# forever (2026-10-20, tnb-sims-43224f7).
+re_failed=' (Failed|FailureTarget):([A-Za-z]*)'
+re_complete=' Complete:([A-Za-z]*)'
+job_state() {
     local out
-    if ! out="$(k get job -n "$NS" "$job" -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type}:{.reason} {end}' 2>&1)"; then
-        grep -q 'NotFound' <<<"$out" && echo Vanished   # other errors: transient, keep waiting
+    # stderr apart: a warning of the tool wrapper must not read as a condition
+    if ! out="$(k get job -n "$NS" "$job" -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type}:{.reason} {end}' 2>"$dest/collector.err")"; then
+        if grep -q 'NotFound' "$dest/collector.err" 2>/dev/null; then echo Vanished; else echo unreadable; fi
         return 0
     fi
-    out="$(grep -oE '(Failed|Complete):[A-Za-z]*' <<<"$out" | head -1 || true)"
-    [ -n "$out" ] && echo "${out#*:}"
-    return 0
+    if [[ " $out" =~ $re_failed ]]; then echo "Failed:${BASH_REMATCH[2]}"
+    elif [[ " $out" =~ $re_complete ]]; then echo "Complete${BASH_REMATCH[1]:+:${BASH_REMATCH[1]}}"
+    else echo active; fi
 }
-while [ "${#done_idx[@]}" -lt "$shards" ]; do
-    ended="$(job_end)"
+# All pods of the Job in one read, one line per pod. A read that fails means
+# "not readable in this look" (pods_ok=0), never "no pod".
+pod_fields='{range .items[*]}{.metadata.labels.batch\.kubernetes\.io/job-completion-index}{"|"}{.metadata.name}{"|"}{.status.phase}{"|"}{.status.reason}{"|"}{.spec.nodeName}{"|"}{.status.conditions[?(@.type=="PodScheduled")].reason}{"|"}{.status.initContainerStatuses[0].state.waiting.reason}{"|"}{.status.initContainerStatuses[0].state.terminated.exitCode}{"|"}{.status.containerStatuses[0].state.waiting.reason}{"|"}{.status.containerStatuses[0].state.terminated.reason}{"|"}{.status.containerStatuses[0].state.terminated.exitCode}{"|"}{.status.message}{"\n"}{end}'
+read_pods() {
+    local out idx name phase reason node sched iwait iexit cwait cterm cexit message
+    p_name=(); p_phase=(); p_reason=(); p_node=(); p_wait=(); p_iexit=(); p_cterm=(); p_cexit=(); p_message=()
+    pods_ok=0
+    out="$(k get pods -n "$NS" -l "batch.kubernetes.io/job-name=$job" -o jsonpath="$pod_fields" 2>/dev/null)" || return 0
+    pods_ok=1
+    while IFS='|' read -r idx name phase reason node sched iwait iexit cwait cterm cexit message; do
+        [[ "$idx" =~ ^[0-9]+$ ]] && [ "$idx" -lt "$shards" ] || continue
+        p_name[$idx]="$name"; p_phase[$idx]="$phase"; p_reason[$idx]="$reason"; p_node[$idx]="$node"
+        p_iexit[$idx]="$iexit"; p_cterm[$idx]="$cterm"; p_cexit[$idx]="$cexit"; p_message[$idx]="$message"
+        # what a pod that is not running waits for: a node, or its image / clone step
+        if [ -z "$node" ]; then p_wait[$idx]="${sched:-not scheduled}"; else p_wait[$idx]="${iwait:-$cwait}"; fi
+    done <<<"$out"
+}
+# No pod for this shard in a pod list that was read.
+no_pod() {   # <index>
+    local i="$1" seen="${pod_names[$1]:-}" was=""
+    if [ -n "$seen" ]; then
+        was="pod $seen (last seen ${last_phase[$i]:-?}${last_node[$i]:+ on ${last_node[$i]}}${last_wait[$i]:+, ${last_wait[$i]}})"
+    fi
+    case "$jstate" in
+        unreadable) ;;   # the Job could not be read in this look: decide nothing
+        Vanished)
+            lost "$i" "job gone" "the Job no longer exists (deleted by hand, or by its 60 min TTL after it ended) before this shard reported; ${was:-no pod of this shard was seen}: rerun" ;;
+        Failed:DeadlineExceeded)
+            if [ -z "$seen" ]; then
+                lost "$i" "never started" "the Job hit its deadline of ${deadline}s before a slot was free for this shard (parallel ${parallelism:-?}), no pod was created: rerun"
+            elif [ "${last_phase[$i]:-}" = Pending ] && [ -z "${last_node[$i]:-}" ]; then
+                lost "$i" "never scheduled" "$was found no node until the Job hit its deadline of ${deadline}s: check free CPU and memory on the nodes and the ci-runner quota, then rerun"
+            elif [ "${last_phase[$i]:-}" = Pending ]; then
+                lost "$i" "never started" "$was was still starting when the Job hit its deadline of ${deadline}s: rerun"
+            else
+                lost "$i" "job deadline" "the Job hit its deadline of ${deadline}s and removed $was; the shard started too late in the Job to finish: rerun"
+            fi ;;
+        *)
+            # active, Complete, or Failed for another reason (FailedIndexes: a
+            # shard failed, the others go on). No pod yet: the shard waits for a
+            # slot. A pod that was there and is gone was deleted; three looks,
+            # so a pod list that is behind for a moment loses nothing.
+            if [ -n "$seen" ]; then
+                gone_rounds[$i]=$(( ${gone_rounds[$i]:-0} + 1 ))
+                [ "${gone_rounds[$i]}" -ge 3 ] || return 0
+                lost "$i" "pod gone" "$was was deleted before its result was read (node drain, eviction or a delete by hand; Job: $jstate): rerun"
+            elif [ "$jstate" != active ]; then
+                lost "$i" "pod gone" "the Job ended ($jstate) and no pod of this shard exists (deleted before this collector saw it): rerun"
+            fi ;;
+    esac
+}
+# The pod is Failed or Succeeded and staged no results.
+dead_pod() {   # <index>
+    local i="$1" n=$(( $1 + 1 )) where
+    local phase="${p_phase[$1]:-}" reason="${p_reason[$1]:-}" iexit="${p_iexit[$1]:-}" cterm="${p_cterm[$1]:-}" cexit="${p_cexit[$1]:-}" message="${p_message[$1]:-}"
+    where="pod ${p_name[$i]}${p_node[$i]:+ on ${p_node[$i]}}"
+    if [ "$reason" = DeadlineExceeded ] && [ "$iexit" = 0 ] && [ -z "${p_wait[$i]:-}" ]; then
+        # the clone step ended well and the runner waits for nothing: the tests ran
+        lost "$i" "pod deadline" "$where ran past pod_deadline=${pod_deadline}s and was killed: the shard needs a longer pod deadline (TNB_POD_DEADLINE) or less work"
+    elif [ "$reason" = DeadlineExceeded ]; then
+        lost "$i" "pod deadline" "$where was killed at pod_deadline=${pod_deadline}s before its tests started (${p_wait[$i]:-clone step}): see the clone output in shard-$n.log"
+    elif [ -n "$iexit" ] && [ "$iexit" != 0 ]; then
+        lost "$i" "clone failed" "the clone step of $where ended with exit code $iexit (git fetch or npm ci): its output is at the top of shard-$n.log"
+    elif [ "$cterm" = OOMKilled ]; then
+        lost "$i" "out of memory" "the runner of $where was OOMKilled at its memory limit: fewer WORKERS, or a higher limit in the job template"
+    elif [ "$reason" = Evicted ]; then
+        lost "$i" "evicted" "$where was evicted by its node (${message:0:160}): rerun"
+    else
+        lost "$i" "pod died" "$where ended $phase${reason:+, $reason}${cterm:+, runner $cterm}${cexit:+ with exit code $cexit} without a result line: see shard-$n.log"
+    fi
+}
+
+if [ "$attached" = 1 ]; then
+    # results an earlier collector already brought home
     for ((i = 0; i < shards; i++)); do
-        [ -n "${done_idx[$i]:-}" ] && continue
-        pod="$(pod_of "$i")"
+        f="$dest/shard-$((i + 1)).log"
+        if [ -f "$f" ] && grep -q '^CI-RESULTS-READY' "$f"; then
+            line="$(grep '^CI-RESULT ' "$f" | grep -v ' rc=? (' | tail -1 || true)"
+            if [ -n "$line" ]; then record "$i" "$line"; fi
+        fi
+    done
+fi
+while [ "$ndone" -lt "$shards" ]; do
+    jstate="$(job_state)"
+    read_pods
+    for ((i = 0; i < shards; i++)); do
+        [ -z "${done_idx[$i]:-}" ] || continue
+        [ "$pods_ok" = 1 ] || continue   # the pod list could not be read: decide nothing in this look
+        n=$((i + 1)); pod="${p_name[$i]:-}"
         if [ -z "$pod" ]; then
-            # no pod and the Job has ended: this shard was killed or never started
-            [ -n "$ended" ] || continue
-            line="CI-RESULT suite=$suite shard=$((i + 1))/$shards result=FAIL rc=? (no pod: Job ended ${ended}; partial log, if any, in shard-$((i + 1)).log)"
-            done_idx[$i]=1; summary+=("$line"); fails=$((fails + 1)); echo "  $line"
+            no_pod "$i"
             continue
         fi
+        gone_rounds[$i]=0
         if [ "${pod_names[$i]:-}" != "$pod" ]; then
             # first sight of this shard's pod (or a replacement): print the
             # recovery command now, with the latest possible end as the window
             # end, so a pod removed by the TTL can still be read from Elastic
             pod_names[$i]="$pod"; pod_seen[$i]=$(date +%s)
-            echo "  shard $((i + 1))/$shards logs: scripts/ninth-banner-logs.sh $pod $(iso $(( ${pod_seen[$i]} - margin ))) $(iso $(( start + deadline + margin )))"
+            # re-attached: the pod may be as old as the Job
+            [ "$attached" != 1 ] || pod_seen[$i]=$start
+            say "  shard $n/$shards logs: scripts/ninth-banner-logs.sh $pod $(iso $(( ${pod_seen[$i]} - margin ))) $(iso $(( start + deadline + margin )))"
         fi
-        phase="$(k get pod -n "$NS" "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || echo Unknown)"
-        logs="$(k logs -n "$NS" "$pod" -c runner 2>/dev/null || true)"
+        phase="${p_phase[$i]:-}"
+        last_phase[$i]="$phase"; last_node[$i]="${p_node[$i]:-}"; last_wait[$i]="${p_wait[$i]:-}"
+        # Pending: waits for a node (no pod deadline runs yet) or for its image
+        # and clone step (the pod deadline runs)
+        [ "$phase" != Pending ] || continue
+        logs_rc=0; logs="$(k logs -n "$NS" "$pod" -c runner 2>/dev/null)" || logs_rc=$?
         # keep the newest partial log, so a pod deleted mid-run (deadline,
         # eviction, preemption) still leaves its output on this Mac
-        [ -n "$logs" ] && printf '%s\n' "$logs" > "$dest/shard-$((i + 1)).log"
+        if [ -n "$logs" ]; then printf '%s\n' "$logs" > "$dest/shard-$n.log"; fi
         if grep -q '^CI-RESULTS-READY' <<<"$logs"; then
-            printf '%s\n' "$logs" > "$dest/shard-$((i + 1)).log"
-            k cp -c runner "$NS/$pod:/results" "$dest" >/dev/null 2>&1 || echo "  (copy of shard $((i + 1)) artifacts failed)"
+            k cp -c runner "$NS/$pod:/results" "$dest" >/dev/null 2>&1 || say "  (copy of shard $n artifacts failed)"
             k exec -n "$NS" "$pod" -c runner -- touch /results/.collected >/dev/null 2>&1 || true
-            line="$(grep '^CI-RESULT ' <<<"$logs" | tail -1)"
-        elif [ "$phase" = Failed ] || [ "$phase" = Succeeded ]; then
-            # died before staging results (clone/init failure, OOM, deadline)
-            { k logs -n "$NS" "$pod" -c clone 2>&1; printf '%s\n' "$logs"; } > "$dest/shard-$((i + 1)).log"
-            reason="$(k get pod -n "$NS" "$pod" -o jsonpath='{.status.reason} {.status.initContainerStatuses[0].state.terminated.reason} {.status.containerStatuses[0].state.terminated.reason}' 2>/dev/null)"
-            line="CI-RESULT suite=$suite shard=$((i + 1))/$shards result=FAIL rc=? (pod $phase before results: ${reason:-unknown}; see shard-$((i + 1)).log)"
-        else
+            line="$(grep '^CI-RESULT ' <<<"$logs" | tail -1 || true)"
+            if [ -n "$line" ]; then
+                record "$i" "$line"
+            else
+                lost "$i" "no result line" "pod $pod staged its results without a CI-RESULT line: see shard-$n.log and shard-$n/exit-code"
+            fi
             continue
         fi
-        done_idx[$i]=1
-        summary+=("$line")
-        grep -q 'result=PASS' <<<"$line" || fails=$((fails + 1))
-        echo "  $line"
+        case "$phase" in Failed|Succeeded) ;; *) continue ;; esac
+        # dead before staging results (clone failure, OOM, pod deadline, eviction).
+        # A log read that failed is not "no results": look again, twice, first.
+        term_rounds[$i]=$(( ${term_rounds[$i]:-0} + 1 ))
+        if [ "$logs_rc" -ne 0 ] && [ "${term_rounds[$i]}" -lt 3 ]; then continue; fi
+        if [ -z "$logs" ] && [ -f "$dest/shard-$n.log" ]; then logs="$(cat "$dest/shard-$n.log")"; fi
+        { k logs -n "$NS" "$pod" -c clone 2>&1 || true; printf '%s\n' "$logs"; } > "$dest/shard-$n.log"
+        dead_pod "$i"
     done
-    [ "${#done_idx[@]}" -lt "$shards" ] && sleep 10
+    [ "$ndone" -lt "$shards" ] || break
+    if [ "$(date +%s)" -gt $(( start + deadline + ttl + 900 )) ]; then
+        # Past the Job's latest end plus its TTL nothing is left that could report.
+        for ((i = 0; i < shards; i++)); do
+            if [ "$pods_ok" != 1 ] || [ "$jstate" = unreadable ]; then
+                lost "$i" "cluster unreadable" "kubectl could not read the Job or its pods, and the Job's latest end (deadline ${deadline}s) plus its 60 min TTL have passed: the pod's output is in Elastic (scripts/ninth-banner-logs.sh), rerun"
+            else
+                lost "$i" "no end state" "the Job's latest end (deadline ${deadline}s) plus its 60 min TTL have passed and the shard's pod (${pod_names[$i]:-none seen}) neither reported nor ended: look at the Job by hand, rerun"
+            fi
+        done
+        break
+    fi
+    sleep "$poll_s"
 done
 
 elapsed=$(( $(date +%s) - start ))
-printf '%s\n' "${summary[@]}" > "$dest/summary.txt"
+write_summary
 
 # Counts from every shard's junit.xml (a test-list split never runs a test twice)
 # and the plan from the game's shard-*.json. Line 1: "<executed> <planned>".
@@ -313,40 +590,42 @@ case "$suite" in e2e|nightly|responsive|release)
         no_tests=1; fails=$((fails + 1))
     fi ;;
 esac
-echo "----"
+say "----"
 end_ts=$(date +%s)
 for ((i = 0; i < shards; i++)); do
     [ -n "${pod_names[$i]:-}" ] || continue
-    echo "logs shard $((i + 1))/$shards: scripts/ninth-banner-logs.sh ${pod_names[$i]} $(iso $(( ${pod_seen[$i]} - margin ))) $(iso $(( end_ts + margin )))"
+    say "logs shard $((i + 1))/$shards: scripts/ninth-banner-logs.sh ${pod_names[$i]} $(iso $(( ${pod_seen[$i]} - margin ))) $(iso $(( end_ts + margin )))"
 done
 if [ "$no_tests" = 1 ]; then
-    echo "FAIL  $suite @ ${sha:0:12}: 0 tests executed (planned ${planned}; SPECS='${SPECS:-}' PROJECT='${PROJECT:-}'). A run that tests nothing is a failure: check the spec paths, or the shard logs for 'NO-TESTS'."
+    say "FAIL  $suite @ ${sha:0:12}: 0 tests executed (planned ${planned}; SPECS='${SPECS:-}' PROJECT='${PROJECT:-}'). A run that tests nothing is a failure: check the spec paths, or the shard logs for 'NO-TESTS'."
 elif [ "$fails" -eq 0 ]; then
-    echo "PASS  $suite @ ${sha:0:12}: $shards/$shards shards passed in ${elapsed}s"
+    say "PASS  $suite @ ${sha:0:12}: $shards/$shards shards passed in ${elapsed}s"
 else
-    echo "FAIL  $suite @ ${sha:0:12}: $fails/$shards shards failed (${elapsed}s)"
+    say "FAIL  $suite @ ${sha:0:12}: $fails/$shards shards failed, $lostn of them lost (rc=?: no verdict on the code) (${elapsed}s)"
 fi
-echo "tests: $counts (executed $executed of $planned planned)"
+say "tests: $counts (executed $executed of $planned planned)"
 if [[ "$executed" =~ ^[0-9]+$ ]] && [[ "$planned" =~ ^[0-9]+$ ]] && [ "$executed" -lt "$planned" ]; then
-    echo "WARNING: TEST-COUNT-MISMATCH: $((planned - executed)) planned tests never ran (dropped from the --test-list match; docs/sops/ci-runner.md)"
+    say "WARNING: TEST-COUNT-MISMATCH: $((planned - executed)) planned tests never ran (dropped from the --test-list match; docs/sops/ci-runner.md)"
 fi
-echo "artifacts: $dest  (shard-N/: junit.xml, playwright-report/, test-results/ traces, blob-report/; release: per part in shard-N/{release,responsive}/)"
+say "artifacts: $dest  (shard-N/: junit.xml, playwright-report/, test-results/ traces, blob-report/; release: per part in shard-N/{release,responsive}/)"
 if ls "$dest"/shard-*/blob-report/*.zip "$dest"/shard-*/*/blob-report/*.zip >/dev/null 2>&1; then
-    echo "merged report (from a checkout of the game at ${sha:0:12}): npm run test:merge-reports -- \"$dest\" --out \"$dest/report\""
+    say "merged report (from a checkout of the game at ${sha:0:12}): npm run test:merge-reports -- \"$dest\" --out \"$dest/report\""
 fi
 
 
-if [ "$suite" = release ]; then
+if [ "$suite" = release ] && [ "$attached" = 1 ]; then
+    say "commit status 'E2E (GPU, k8s)' NOT posted: a re-attached collector never posts it (run the release suite again for the gate)"
+elif [ "$suite" = release ]; then
     # Only for a complete run: every shard reported above, or we never got here.
     if [ "$fails" -eq 0 ]; then state=success; else state=failure; fi
     desc="$counts; $shards GPU shards in ${elapsed}s"
     if gh api "repos/$GH_REPO/statuses/$sha" -f state="$state" -f context="E2E (GPU, k8s)" -f description="${desc:0:140}" >/dev/null; then
-        echo "posted commit status 'E2E (GPU, k8s)' = $state on ${sha:0:12}: $desc"
+        say "posted commit status 'E2E (GPU, k8s)' = $state on ${sha:0:12}: $desc"
     else
-        echo "WARNING: could not post the commit status (gh api failed)"
+        say "WARNING: could not post the commit status (gh api failed)"
     fi
 fi
-echo "the Job and its pods self-delete 60 min after the whole Job finishes (ttlSecondsAfterFinished=3600; logs stay in Elastic via the scripts/ninth-banner-logs.sh lines above)"
+say "the Job and its pods self-delete 60 min after the whole Job finishes (ttlSecondsAfterFinished=3600; logs stay in Elastic via the scripts/ninth-banner-logs.sh lines above)"
 [ "$fails" -eq 0 ]
 }
 
