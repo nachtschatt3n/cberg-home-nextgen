@@ -7,8 +7,12 @@ a job.yaml rendered from the real job template. Pins:
 - summary.txt holds exactly one `CI-RESULT ... shard=i/N` line per shard, in
   shard order, for every way a shard can end: its own PASS / FAIL rc=<n>, pod
   killed at its deadline, clone failed, out of memory, evicted, Job deadline
-  (was running, was starting, never scheduled, never started), Job gone, pod
-  gone, collector stopped, cluster unreadable;
+  (was running, was starting, never scheduled, never started, found over by a
+  collector that came later), Job gone, pod gone, collector stopped, cluster
+  unreadable;
+- a shard the Job's deadline removed says how long it had: with (nearly) its
+  whole pod deadline the advice is a longer deadline, not a rerun; a collector
+  that came after the deadline never says that no pod was created;
 - a lost shard is `result=FAIL rc=?` and nothing in its line reads as a
   verdict (the caller's wait tool counts result=PASS, takes result=FAIL
   rc=<number> as a real red and everything else as lost);
@@ -115,9 +119,11 @@ RENDER = {
 }
 
 
-def pod(idx, name, phase, reason="", node="", sched="", iwait="", iexit="", cwait="", cterm="", cexit="", message=""):
+def pod(idx, name, phase, reason="", node="", sched="", iwait="", iexit="", cwait="", cterm="", cexit="", message="",
+        started=""):
     """One line of the collector's pod read (the fields of pod_fields in the script)."""
-    return "|".join([str(idx), name, phase, reason, node, sched, iwait, str(iexit), cwait, cterm, str(cexit), message])
+    return "|".join([str(idx), name, phase, reason, node, sched, iwait, str(iexit), cwait, cterm, str(cexit), started,
+                     message])
 
 
 def result(suite, n, of, verdict="PASS", rc=0):
@@ -150,6 +156,11 @@ class Farm:
             f.write(job_yaml)
         t = time.time() - age
         os.utime(os.path.join(self.dest, "job.yaml"), (t, t))
+        self.start = int(os.path.getmtime(os.path.join(self.dest, "job.yaml")))   # as the collector reads it
+
+    def at(self, seconds):
+        """The cluster's timestamp for a pod that started that long after the Job."""
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.start + seconds))
 
     def pod_name(self, idx):
         return "%s-%d-%s" % (self.job, idx, "abcdefgh"[idx % 8] * 5)
@@ -338,7 +349,7 @@ def c_job_deadline(bash, tag, job_yaml):
     with tempfile.TemporaryDirectory() as tmp:
         farm = Farm(tmp, 6, job_yaml=job_yaml)   # the script's own dry render: parallel 3, 25800 s
         n = farm.pod_name
-        pods = [pod(0, n(0), "Running", node="k8s-nuc14-01", iexit=0),
+        pods = [pod(0, n(0), "Running", node="k8s-nuc14-01", iexit=0, started=farm.at(20000)),   # waited long for a node
                 pod(1, n(1), "Pending", sched="Unschedulable"),
                 pod(2, n(2), "Pending", node="k8s-nuc14-02", cwait="PodInitializing")]
         farm.look(1, "", pods)
@@ -356,9 +367,80 @@ def c_job_deadline(bash, tag, job_yaml):
         check(tag + "job deadline: the running shard's pod and node are named, its log kept",
               bool(lines) and "last seen Running on k8s-nuc14-01" in lines[0] and ends_with_its_line(farm, lines, 1)
               and "cut by the Job" in (farm.read("shard-1.log") or ""))
+        check(tag + "job deadline: a shard that started late says how long it had, and to rerun",
+              bool(lines) and "did not start until 20000s into the Job, so it had 5800s instead of pod_deadline=12600s: rerun;"
+              in lines[0] and "TNB_POD_DEADLINE" not in lines[0])
         check(tag + "job deadline: never scheduled says where to look",
               bool(lines) and "Unschedulable" in lines[1] and "ci-runner quota" in lines[1])
+        check(tag + "job deadline: a shard without a slot: no pod of it was seen",
+              bool(lines) and all("before a slot was free for this shard (parallel 3), no pod of it was seen: rerun;" in line
+                                  for line in lines[3:]))
         check(tag + "job deadline: three looks", farm.looks() == 3 and farm.leftovers() == [])
+
+
+def c2_job_deadline_full_time(bash, tag):
+    """A suite whose Job and pod deadline are the same: the Job's fires first and removes the pod
+    (2026-11-11, tnb-unit-6a1c032-1111133959: started 1 s into the Job, needed more than 5400 s)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        farm = Farm(tmp, 3, suite="unit", parallelism=3, deadline=5400, pod_deadline=5400, job="tnb-unit-0123456-1111133959")
+        n = farm.pod_name
+        pods = [pod(0, n(0), "Running", node="k8s-nuc14-01", iexit=0, started=farm.at(1)),
+                pod(1, n(1), "Running", node="k8s-nuc14-02", iexit=0),                        # no start time in the read
+                pod(2, n(2), "Running", node="k8s-nuc14-03", iexit=0, started=farm.at(-2))]   # cluster clock behind the Mac's
+        farm.look(1, "", pods)
+        farm.look(2, "Failed:DeadlineExceeded ", [])
+        for i in range(3):
+            farm.logs(i, "unit output of shard %d, cut by the Job\n" % (i + 1))
+        r = farm.collect(bash)
+        lines = farm.summary()
+        check(tag + "full time: one line per shard, all lost as job deadline; exit 1",
+              shape_ok(farm, lines) and verdicts(lines or []) == (0, 0, 3) and kinds(lines) == ["job deadline"] * 3
+              and r.returncode == 1)
+        check(tag + "full time: the shard had its whole pod deadline: a longer deadline, not a rerun",
+              bool(lines) and "had started 1s into the Job, so it had 5399s (pod_deadline=5400s) and did not finish" in lines[0]
+              and "a rerun gets little or no more time: it needs a longer deadline (TNB_POD_DEADLINE) or less work;" in lines[0]
+              and "started too late" not in lines[0] and ": rerun;" not in lines[0])
+        check(tag + "full time: a start time that cannot be read is said, both ways out named",
+              bool(lines) and "when the shard started is not known: rerun; if it had run from the Job's start" in lines[1]
+              and "TNB_POD_DEADLINE" in lines[1])
+        check(tag + "full time: a pod start before the Job's (clock skew) counts as the Job's start",
+              bool(lines) and "had started 0s into the Job, so it had 5400s (pod_deadline=5400s)" in lines[2])
+        check(tag + "full time: each shard's log is kept and ends with its line",
+              all(ends_with_its_line(farm, lines, s) and "cut by the Job" in (farm.read("shard-%d.log" % s) or "")
+                  for s in (1, 2, 3)) and farm.leftovers() == [])
+
+
+def c3_after_job_deadline(bash, tag):
+    """A collector that attaches after the Job's deadline finds no pod: it must not say that none was created
+    (2026-11-11: said 'never started ... no pod was created' of a shard that had run for 90 min)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        farm = Farm(tmp, 3, suite="unit", parallelism=2, deadline=5400, pod_deadline=5400, age=5460,
+                    job="tnb-unit-0123456-1111133959")
+        stopped = ("CI-RESULT suite=unit shard=%d/3 result=FAIL rc=? (lost: collector stopped: the collector on this Mac "
+                   "ended (exit code 143) before this shard reported; partial log, if any, in shard-%d.log)\n")
+        with open(os.path.join(farm.dest, "shard-1.log"), "w") as f:     # an earlier collector saw this shard run
+            f.write("unit output of shard 1, up to the earlier collector's last look\n" + stopped % (1, 1))
+        with open(os.path.join(farm.dest, "shard-2.log"), "w") as f:     # ... and saw nothing of this one
+            f.write(stopped % (2, 2))
+        farm.look(1, "Failed:DeadlineExceeded ", [])
+        r = farm.collect(bash)
+        lines = farm.summary()
+        check(tag + "after the deadline: one line per shard, all lost as job deadline; exit 1",
+              shape_ok(farm, lines) and verdicts(lines or []) == (0, 0, 3) and kinds(lines) == ["job deadline"] * 3
+              and r.returncode == 1)
+        check(tag + "after the deadline: never 'no pod was created', never 'never started'",
+              bool(lines) and not any("no pod was created" in line or "never started" in line or "no pod of it was seen" in line
+                                      for line in lines))
+        check(tag + "after the deadline: a shard with saved output had run",
+              bool(lines) and "the shard had run (an earlier collector saved its output)" in lines[0]
+              and "TNB_POD_DEADLINE" in lines[0])
+        check(tag + "after the deadline: without saved output it says what it cannot tell",
+              bool(lines) and all("cannot tell a shard that was removed at the deadline from one that never got a slot (parallel 2)"
+                                  in line and "TNB_POD_DEADLINE" in line for line in lines[1:]))
+        check(tag + "after the deadline: the saved output stays, each log ends with the new line only",
+              "up to the earlier collector's last look" in (farm.read("shard-1.log") or "")
+              and all(ends_with_its_line(farm, lines, s) for s in (1, 2, 3)))
+        check(tag + "after the deadline: decided at the first look", farm.looks() == 1 and farm.leftovers() == [])
 
 
 def d_job_gone(bash, tag):
@@ -666,6 +748,8 @@ for bash in bashes:
         c_job_deadline(bash, tag, job_yaml)
     else:
         check(tag + "job deadline: needs the dry render", False)
+    c2_job_deadline_full_time(bash, tag)
+    c3_after_job_deadline(bash, tag)
     d_job_gone(bash, tag)
     e_transient_reads(bash, tag)
     f_pod_gone(bash, tag)

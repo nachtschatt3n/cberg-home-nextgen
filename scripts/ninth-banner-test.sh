@@ -316,11 +316,19 @@ fi
 # ---- collector ----
 # ISO UTC timestamp for an epoch (BSD date on macOS, GNU date fallback)
 iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
+# Epoch for a cluster timestamp (2026-11-11T14:03:17Z); empty when it is not one
+re_ts='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+epoch() {
+    [[ "$1" =~ $re_ts ]] || return 0
+    date -j -u -f %Y-%m-%dT%H:%M:%SZ "$1" +%s 2>/dev/null || date -u -d "$1" +%s 2>/dev/null || true
+}
 ttl=3600     # ttlSecondsAfterFinished in the job template
 margin=300   # 5 min either side of the lookup window
 # Per shard, index = shard - 1 (indexed arrays: bash 3.2 on macOS has no associative ones)
 pod_names=(); pod_seen=()                   # pod name, epoch first seen
 last_phase=(); last_node=(); last_wait=()   # what the last look saw of that pod
+last_started=()                             # the pod's own start time (cluster timestamp)
+saw_active=0                                # 1 once this collector has seen the Job before its end
 gone_rounds=(); term_rounds=()              # looks without the pod / at a dead pod without results
 done_idx=(); lines=(); ndone=0; fails=0; lostn=0
 summary_written=0
@@ -411,24 +419,24 @@ job_state() {
 }
 # All pods of the Job in one read, one line per pod. A read that fails means
 # "not readable in this look" (pods_ok=0), never "no pod".
-pod_fields='{range .items[*]}{.metadata.labels.batch\.kubernetes\.io/job-completion-index}{"|"}{.metadata.name}{"|"}{.status.phase}{"|"}{.status.reason}{"|"}{.spec.nodeName}{"|"}{.status.conditions[?(@.type=="PodScheduled")].reason}{"|"}{.status.initContainerStatuses[0].state.waiting.reason}{"|"}{.status.initContainerStatuses[0].state.terminated.exitCode}{"|"}{.status.containerStatuses[0].state.waiting.reason}{"|"}{.status.containerStatuses[0].state.terminated.reason}{"|"}{.status.containerStatuses[0].state.terminated.exitCode}{"|"}{.status.message}{"\n"}{end}'
+pod_fields='{range .items[*]}{.metadata.labels.batch\.kubernetes\.io/job-completion-index}{"|"}{.metadata.name}{"|"}{.status.phase}{"|"}{.status.reason}{"|"}{.spec.nodeName}{"|"}{.status.conditions[?(@.type=="PodScheduled")].reason}{"|"}{.status.initContainerStatuses[0].state.waiting.reason}{"|"}{.status.initContainerStatuses[0].state.terminated.exitCode}{"|"}{.status.containerStatuses[0].state.waiting.reason}{"|"}{.status.containerStatuses[0].state.terminated.reason}{"|"}{.status.containerStatuses[0].state.terminated.exitCode}{"|"}{.status.startTime}{"|"}{.status.message}{"\n"}{end}'
 read_pods() {
-    local out idx name phase reason node sched iwait iexit cwait cterm cexit message
-    p_name=(); p_phase=(); p_reason=(); p_node=(); p_wait=(); p_iexit=(); p_cterm=(); p_cexit=(); p_message=()
+    local out idx name phase reason node sched iwait iexit cwait cterm cexit started message
+    p_name=(); p_phase=(); p_reason=(); p_node=(); p_wait=(); p_iexit=(); p_cterm=(); p_cexit=(); p_started=(); p_message=()
     pods_ok=0
     out="$(k get pods -n "$NS" -l "batch.kubernetes.io/job-name=$job" -o jsonpath="$pod_fields" 2>/dev/null)" || return 0
     pods_ok=1
-    while IFS='|' read -r idx name phase reason node sched iwait iexit cwait cterm cexit message; do
+    while IFS='|' read -r idx name phase reason node sched iwait iexit cwait cterm cexit started message; do
         [[ "$idx" =~ ^[0-9]+$ ]] && [ "$idx" -lt "$shards" ] || continue
         p_name[$idx]="$name"; p_phase[$idx]="$phase"; p_reason[$idx]="$reason"; p_node[$idx]="$node"
-        p_iexit[$idx]="$iexit"; p_cterm[$idx]="$cterm"; p_cexit[$idx]="$cexit"; p_message[$idx]="$message"
+        p_iexit[$idx]="$iexit"; p_cterm[$idx]="$cterm"; p_cexit[$idx]="$cexit"; p_started[$idx]="$started"; p_message[$idx]="$message"
         # what a pod that is not running waits for: a node, or its image / clone step
         if [ -z "$node" ]; then p_wait[$idx]="${sched:-not scheduled}"; else p_wait[$idx]="${iwait:-$cwait}"; fi
     done <<<"$out"
 }
 # No pod for this shard in a pod list that was read.
 no_pod() {   # <index>
-    local i="$1" seen="${pod_names[$1]:-}" was=""
+    local i="$1" n=$(( $1 + 1 )) seen="${pod_names[$1]:-}" was="" late had
     if [ -n "$seen" ]; then
         was="pod $seen (last seen ${last_phase[$i]:-?}${last_node[$i]:+ on ${last_node[$i]}}${last_wait[$i]:+, ${last_wait[$i]}})"
     fi
@@ -437,14 +445,37 @@ no_pod() {   # <index>
         Vanished)
             lost "$i" "job gone" "the Job no longer exists (deleted by hand, or by its 60 min TTL after it ended) before this shard reported; ${was:-no pod of this shard was seen}: rerun" ;;
         Failed:DeadlineExceeded)
-            if [ -z "$seen" ]; then
-                lost "$i" "never started" "the Job hit its deadline of ${deadline}s before a slot was free for this shard (parallel ${parallelism:-?}), no pod was created: rerun"
+            # The Job removes the pods it still has at its deadline and starts no more.
+            if [ -z "$seen" ] && [ "$saw_active" != 1 ]; then
+                # this collector came after the deadline: what it finds is no pod, not "no pod ever"
+                if grep -qv '^CI-RESULT .* rc=? (lost: ' "$dest/shard-$n.log" 2>/dev/null; then
+                    lost "$i" "job deadline" "the Job hit its deadline of ${deadline}s and no pod of this shard is left; the shard had run (an earlier collector saved its output) and this collector came too late to see how it ended: rerun; if that log shows it ran for most of the Job, give it a longer deadline (TNB_POD_DEADLINE) first"
+                else
+                    lost "$i" "job deadline" "the Job hit its deadline of ${deadline}s and no pod of this shard is left; this collector came after that and cannot tell a shard that was removed at the deadline from one that never got a slot (parallel ${parallelism:-?}): rerun; if it is lost the same way again, give it a longer deadline (TNB_POD_DEADLINE)"
+                fi
+            elif [ -z "$seen" ]; then
+                lost "$i" "never started" "the Job hit its deadline of ${deadline}s before a slot was free for this shard (parallel ${parallelism:-?}), no pod of it was seen: rerun"
             elif [ "${last_phase[$i]:-}" = Pending ] && [ -z "${last_node[$i]:-}" ]; then
                 lost "$i" "never scheduled" "$was found no node until the Job hit its deadline of ${deadline}s: check free CPU and memory on the nodes and the ci-runner quota, then rerun"
             elif [ "${last_phase[$i]:-}" = Pending ]; then
                 lost "$i" "never started" "$was was still starting when the Job hit its deadline of ${deadline}s: rerun"
             else
-                lost "$i" "job deadline" "the Job hit its deadline of ${deadline}s and removed $was; the shard started too late in the Job to finish: rerun"
+                # Was running. How long it had says what helps: a shard that had
+                # (nearly) its whole pod deadline gains nothing from a rerun
+                # (2026-11-11, tnb-unit-6a1c032: its pod was there from the Job's first
+                # seconds, and the line said "started too late ... rerun").
+                late="$(epoch "${last_started[$i]:-}")"
+                if [[ "$late" =~ ^[0-9]+$ ]]; then
+                    late=$(( late - start )); [ "$late" -ge 0 ] || late=0
+                    had=$(( deadline - late )); [ "$had" -ge 0 ] || had=0
+                    if [ $(( had * 10 )) -ge $(( pod_deadline * 9 )) ]; then
+                        lost "$i" "job deadline" "the Job hit its deadline of ${deadline}s and removed $was; the shard had started ${late}s into the Job, so it had ${had}s (pod_deadline=${pod_deadline}s) and did not finish: a rerun gets little or no more time: it needs a longer deadline (TNB_POD_DEADLINE) or less work"
+                    else
+                        lost "$i" "job deadline" "the Job hit its deadline of ${deadline}s and removed $was; the shard did not start until ${late}s into the Job, so it had ${had}s instead of pod_deadline=${pod_deadline}s: rerun"
+                    fi
+                else
+                    lost "$i" "job deadline" "the Job hit its deadline of ${deadline}s and removed $was; when the shard started is not known: rerun; if it had run from the Job's start, it needs a longer deadline (TNB_POD_DEADLINE) or less work"
+                fi
             fi ;;
         *)
             # active, Complete, or Failed for another reason (FailedIndexes: a
@@ -494,6 +525,7 @@ fi
 while [ "$ndone" -lt "$shards" ]; do
     jstate="$(job_state)"
     read_pods
+    if [ "$jstate" = active ] && [ "$pods_ok" = 1 ]; then saw_active=1; fi
     for ((i = 0; i < shards; i++)); do
         [ -z "${done_idx[$i]:-}" ] || continue
         [ "$pods_ok" = 1 ] || continue   # the pod list could not be read: decide nothing in this look
@@ -514,6 +546,7 @@ while [ "$ndone" -lt "$shards" ]; do
         fi
         phase="${p_phase[$i]:-}"
         last_phase[$i]="$phase"; last_node[$i]="${p_node[$i]:-}"; last_wait[$i]="${p_wait[$i]:-}"
+        [ -z "${p_started[$i]:-}" ] || last_started[$i]="${p_started[$i]}"
         # Pending: waits for a node (no pod deadline runs yet) or for its image
         # and clone step (the pod deadline runs)
         [ "$phase" != Pending ] || continue
