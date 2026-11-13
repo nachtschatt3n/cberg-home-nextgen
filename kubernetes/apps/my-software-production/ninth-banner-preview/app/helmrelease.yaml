@@ -1,5 +1,3 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
----
 # The Ninth Banner preview: the art line (v0.6.x releases, 3D battlefield),
 # shown here before the live game moves to it.
 #
@@ -47,7 +45,7 @@ spec:
               repository: ghcr.io/nachtschatt3n/the-ninth-banner
               # Written by Flux image automation (ImagePolicy ninth-banner-preview,
               # '>=0.6.0'). Last manual pin: poc3d 20140161 with its digest, 2026-11-10.
-              tag: sha-201401610688815ec063e1dc0b469c8d224a77ee@sha256:dce33b9463d78a3ab86cb7b3822974b6a88ac83ca6ea1ac67ea3fdba790beb7a # {"$imagepolicy": "my-software-production:ninth-banner-preview:tag"}
+              tag: v0.6.0 # {"$imagepolicy": "my-software-production:ninth-banner-preview:tag"}
               pullPolicy: IfNotPresent
             env:
               - name: PORT
