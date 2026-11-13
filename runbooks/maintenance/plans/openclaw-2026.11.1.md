@@ -4,7 +4,7 @@ supersedes: openclaw-2026.10.5   # same upgrade, retargeted 2026-11-07 (10.5/10.
 component: openclaw
 status: executed                    # EXECUTED 2026-11-08 00:36Z push (610534c0b), pod Ready 01:01Z (~24 min downtime), automated gates green 01:10Z, supervised; operator GO relayed via the coordinator ("yes go"). File kept: other plans reference this id in conflicts_with.
 review: ready-for-go@2026-11-08
-window: "attended full day, only on the coordinator go-live message (operator 2026-11-07: all of them, the full openclaw day); not while etcd-timeouts-5000-500 runs"
+window: null   # CLEARED 2026-11-13 (nightly, RETIRED PLAN STILL WINDOWED): executed 2026-11-08. Was: "attended full day, only on the coordinator go-live message (operator 2026-11-07: all of them, the full openclaw day); not while etcd-timeouts-5000-500 runs"
 findings: [F-79c6922e, F-39d3d443]     # openclaw + @openclaw/discord 2026.6.11 -> 2026.11.1
 kind: npm
 current: "2026.6.11"
