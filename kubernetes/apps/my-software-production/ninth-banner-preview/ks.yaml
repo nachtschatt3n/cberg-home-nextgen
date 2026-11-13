@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
 ---
-# Owner-only preview of The Ninth Banner's poc3d branch (3D PoC: ?board3d=1
-# and /poc3d/lod/). Behind Authentik forward-auth (authentik Admins only).
+# Owner-only preview of The Ninth Banner: the art line's preview (v0.6.x).
+# Behind Authentik forward-auth (authentik Admins only).
 # Named ninth-banner-preview, NOT the-ninth-banner-preview: the production
 # alerts and selectors match pod=~"the-ninth-banner-.*".
 apiVersion: kustomize.toolkit.fluxcd.io/v1

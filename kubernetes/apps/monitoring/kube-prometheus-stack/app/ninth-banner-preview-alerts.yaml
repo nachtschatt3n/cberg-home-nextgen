@@ -20,8 +20,8 @@ spec:
         - alert: NinthBannerPreviewPodNotReady
           annotations:
             description: The Ninth Banner 3D preview pod {{ $labels.pod }} has been
-              not ready for more than 5 minutes. The owner-only poc3d preview is
-              unavailable.
+              not ready for more than 5 minutes. The art line's preview (v0.6.x),
+              owner-only, is unavailable.
             summary: The Ninth Banner preview pod {{ $labels.pod }} is not ready
           expr: |
             sum by (namespace, pod) (
@@ -57,3 +57,17 @@ spec:
             category: my-software-production
             component: ninth-banner-preview
             severity: warning
+        - alert: NinthBannerPreviewDown
+          annotations:
+            description: The Ninth Banner preview deployment has had no available
+              replica for 5 minutes. A rollout leaves it without a pod for about
+              35 seconds (the old pod stops before the new one starts); the 5
+              minutes cover that, so a normal rollout does not fire this.
+            summary: The Ninth Banner preview is down
+          expr: |
+            kube_deployment_status_replicas_available{namespace="my-software-production", deployment="ninth-banner-preview"} == 0
+          for: 5m
+          labels:
+            category: my-software-production
+            component: ninth-banner-preview
+            severity: critical
