@@ -9,3 +9,6 @@ kind: Kustomization
 resources:
   - ./helmrelease.yaml
   - ./httproute.yaml
+  # ImagePolicy + ImageUpdateAutomation only; the ImageRepository is the live
+  # game's (../../the-ninth-banner/app/image-automation.yaml).
+  - ./image-automation.yaml

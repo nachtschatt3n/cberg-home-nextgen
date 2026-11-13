@@ -1,21 +1,19 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
 ---
-# The Ninth Banner 3D preview: the poc3d branch, one PINNED image tag.
+# The Ninth Banner preview: the art line (v0.6.x releases, 3D battlefield),
+# shown here before the live game moves to it.
 #
-# Tag updates: set image.tag below to the coordinator-supplied
-# `sha-<40-char commit>@sha256:<digest>` (built by the game's publish.yml
-# "Image" workflow from a push of the poc3d commit to a merge-* branch; check
-# it exists in GHCR first, e.g. gh api .../packages/container/the-ninth-banner/versions).
+# Tag updates: AUTOMATIC since 2026-11-13. image.tag below carries an
+# `$imagepolicy` marker for ImagePolicy `ninth-banner-preview` (range
+# '>=0.6.0', ./image-automation.yaml), so every `v0.6.x`+ release tag of the
+# game is written here by ninth-banner-preview-image-updates. The live game's
+# policy is capped at '<0.6.0' and its automation is scoped to its own
+# directory, so neither app deploys a tag of the other line.
 #
-# NO image automation, on purpose: no ImageRepository/ImagePolicy and no
-# `$imagepolicy` marker, so neither Flux nor the production automation
-# (../../the-ninth-banner/app/image-automation.yaml, scoped to that directory
-# and ImagePolicy) ever changes this tag.
-#
-# The board3d flag is off only on the production hostname (apps/web/src/game/
-# board3/board3d.ts on poc3d), so `?board3d=1` works on this host. Both poc3d
-# pages (poc3d/, poc3d/lod/) are Vite build inputs and the models live in
-# apps/web/public/poc3d, so the stock image build ships them: no build flag.
+# A pin by commit between two tags (a fix shown before it is tagged): set
+# image.tag to the coordinator-supplied `sha-<40-char commit>@sha256:<digest>`
+# AND remove the marker comment in the same commit; put the marker back to
+# follow tags again.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -47,9 +45,9 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/the-ninth-banner
-              # Pinned poc3d build (sha-<full 40-char commit sha>) + its digest.
-              # poc3d 20140161, Image run 42815884133, 2026-11-10.
-              tag: sha-201401610688815ec063e1dc0b469c8d224a77ee@sha256:dce33b9463d78a3ab86cb7b3822974b6a88ac83ca6ea1ac67ea3fdba790beb7a
+              # Written by Flux image automation (ImagePolicy ninth-banner-preview,
+              # '>=0.6.0'). Last manual pin: poc3d 20140161 with its digest, 2026-11-10.
+              tag: sha-201401610688815ec063e1dc0b469c8d224a77ee@sha256:dce33b9463d78a3ab86cb7b3822974b6a88ac83ca6ea1ac67ea3fdba790beb7a # {"$imagepolicy": "my-software-production:ninth-banner-preview:tag"}
               pullPolicy: IfNotPresent
             env:
               - name: PORT

@@ -3,8 +3,8 @@
 > Description: How to clear CVEs on container images we build ourselves, where there is
 > no upstream version to bump to and remediation is a **rebuild in the source repo**
 > followed by a GitOps tag bump — not a version bump.
-> Version: `2026.11.11`
-> Last Updated: `2026-11-11`
+> Version: `2026.11.13`
+> Last Updated: `2026-11-13`
 > Owner: `homelab-operator`
 
 ---
@@ -278,7 +278,7 @@ HTTP health probe.**
 | haarfabrik-extranet, metaldyne-mini-erp, u-zeit | same names | P | ci.yml (schedule) | IUA showcase | **AUTO** | same; their bases are EOL Debian (jessie/stretch), so there is no OS upgrade, and a rebuild only refreshes what the archive mirror still serves |
 | gas-price-monitor | gas-price-monitor | S | scheduled-rebuild.yml | IUA `my-software-production/gas-price-monitor-image-updates` | **AUTO** | internet-facing, but has HTTP liveness/readiness + rollback |
 | splitfairy | splitfairy | releases `v<semver>` (a V-scheme weekly rebuild `v*-b<date>` is NOT selected) | release workflow | IUA `my-software-production/splitfairy-image-updates` | **AUTO (release tags only)** | internet-facing; HTTP startup/readiness on `/readyz` (SQLite) + rollback. Stateful SQLite app: operator chose AUTO for releases on 2026-09-28; keep schema migrations backward-compatible or drop the `$imagepolicy` marker to hold |
-| the-ninth-banner | the-ninth-banner (private) | releases `v<semver>` (`sha-<full sha>` on every main push; a `vX.Y.Z` git tag promotes the tested image). Two release lines since 2026-11-11: tags below `0.6.0` are the live game's, tags from `0.6.0` on (the art line) are the preview's | Image workflow (release) | Live game: IUA `my-software-production/the-ninth-banner-image-updates`, ImagePolicy range `>=0.1.0 <0.6.0` (the cap is lifted by a later change, when the live game moves to the art line). `ninth-banner-preview` (same image): manual `sha-<commit>` tag with digest until the first `v0.6.0` tag exists, then its own ImagePolicy `>=0.6.0` on the same ImageRepository (prepared, not applied as of 2026-11-11) | **AUTO (release tags only)** for the live game; MANUAL for the preview until its policy is applied | internet-facing, public (no auth, AI path edge-rate-limited); HTTP startup/readiness on `/healthz` + rollback. Stateless, so a rollback has no migration hazard. Private package: ImageRepository scans with `ghcr-the-ninth-banner` |
+| the-ninth-banner | the-ninth-banner (private) | releases `v<semver>` (`sha-<full sha>` on every main push; a `vX.Y.Z` git tag promotes the tested image). Two release lines since 2026-11-11: tags below `0.6.0` are the live game's, tags from `0.6.0` on (the art line) are the preview's | Image workflow (release) | Live game: IUA `my-software-production/the-ninth-banner-image-updates`, ImagePolicy range `>=0.1.0 <0.6.0` (the cap is lifted by a later change, when the live game moves to the art line). `ninth-banner-preview` (same image): IUA `my-software-production/ninth-banner-preview-image-updates`, its own ImagePolicy `ninth-banner-preview` range `>=0.6.0` on the same ImageRepository (applied 2026-11-13 with the first `v0.6.0` tag; before that a manual `sha-<commit>` tag with digest) | **AUTO (release tags only)** for both; the preview can be pinned by commit between two tags by removing its `$imagepolicy` marker | internet-facing, public (no auth, AI path edge-rate-limited); HTTP startup/readiness on `/healthz` + rollback. Stateless, so a rollback has no migration hazard. Private package: ImageRepository scans with `ghcr-the-ninth-banner` |
 | absenty | Absenty | P (matrix: production + development) | ci.yml (schedule) | IUA prod (**suspended**, dependabot drain) / IUA dev (active) | AUTO (prod held) | keep prod suspended until the drain completes |
 | andreamosteller (prod + dev) | the site repo | S (both branches) | scheduled-rebuild.yml | manual sha tag | MANUAL | internet-facing, startup probe only |
 | rainbow-rescue | rainbow-rescue-party-hunt | V | scheduled-rebuild.yml | manual `0.1.3` | MANUAL | internet-facing, no probes |
@@ -537,3 +537,6 @@ reconcile — never patch the Deployment directly (GitOps rule).
   range is capped at `>=0.1.0 <0.6.0`; `ninth-banner-preview` runs the same image, pinned by
   commit until the first `v0.6.0` tag and then on its own policy `>=0.6.0` (prepared, not
   applied).
+- `2026.11.13`: `the-ninth-banner` row of the deploy-mode table: the preview's own policy
+  `>=0.6.0` is applied (ImagePolicy `ninth-banner-preview` on the shared ImageRepository, IUA
+  `ninth-banner-preview-image-updates`); the preview is AUTO on release tags from `v0.6.0` on.

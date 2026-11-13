@@ -1,0 +1,78 @@
+---
+# Flux image automation for ninth-banner-preview (the art line, v0.6.x).
+# Mode table: docs/sops/self-built-image-rebuild.md "Weekly rebuild + deploy mode".
+#
+# The preview runs the live game's image, so it has NO ImageRepository of its
+# own: the ImagePolicy below reads the live game's ImageRepository
+# `the-ninth-banner` (same namespace, ../../the-ninth-banner/app/
+# image-automation.yaml), one scan for both apps.
+#
+# Two release lines, two policies, no overlap:
+#   live game  ImagePolicy `the-ninth-banner`      range '>=0.1.0 <0.6.0'
+#   preview    ImagePolicy `ninth-banner-preview`  range '>=0.6.0'
+# Same tag filter as the live game: exactly `v<major>.<minor>.<patch>`, so
+# `sha-*` builds and pre-releases are never deployed by it. The ^...$ anchors
+# are load-bearing: Flux matches filterTags unanchored.
+#
+# A pin by commit between two tags: remove the `$imagepolicy` marker from the
+# tag line in helmrelease.yaml in the same commit that sets the pin, and put
+# it back to follow tags again.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: ninth-banner-preview
+  namespace: my-software-production
+spec:
+  imageRepositoryRef:
+    name: the-ninth-banner
+  filterTags:
+    pattern: '^v(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$'
+    extract: '$version'
+  policy:
+    semver:
+      range: '>=0.6.0'
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: ninth-banner-preview-image-updates
+  namespace: my-software-production
+spec:
+  # Own automation, scoped to this app's directory and (policySelector) to
+  # this app's ImagePolicy, the same shape as the-ninth-banner-image-updates.
+  # The label comes from the Flux Kustomization's commonMetadata. It never
+  # writes the live game's marker, and the live game's automation never
+  # writes this one.
+  policySelector:
+    matchLabels:
+      app.kubernetes.io/name: ninth-banner-preview
+  interval: 30m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcdbot@users.noreply.github.com
+        name: fluxcdbot
+      messageTemplate: |
+        chore(ninth-banner-preview): update container image (release)
+
+        Automation name: {{ .AutomationObject }}
+
+        Objects updated:
+        {{ range $resource, $changes := .Changed.Objects -}}
+        - {{ $resource.Kind }} {{ $resource.Name }}
+        {{- range $_, $change := $changes }}
+          {{ $change.OldValue }} -> {{ $change.NewValue }}
+        {{ end -}}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    strategy: Setters
+    path: "./kubernetes/apps/my-software-production/ninth-banner-preview"
