@@ -5,18 +5,8 @@ kind: Kustomization
 resources:
   - helmrelease.yaml
   - secret.sops.yaml
-  # PersistentVolumes are cluster-scoped, so Flux's targetNamespace
-  # cannot corrupt them. The PVCs themselves come from the chart's
-  # persistence block (storageClass: longhorn-static + volumeName).
-  - pv-uzeit-de-fileadmin.yaml
-  - pv-uzeit-de-uploads.yaml
   - httproute.yaml
   - networkpolicy.yaml
 
-# Deliberately NOT listed above (see docs/sops/new-deployment-blueprint.md):
-#   longhorn-volume-uzeit-de-fileadmin.yaml
-#   longhorn-volume-uzeit-de-uploads.yaml
-# Flux applies `targetNamespace: my-software-showcase` to every resource in
-# this build, which would silently override `namespace: storage` on the
-# longhorn.io/v1beta2 Volume and create a duplicate Longhorn does not manage.
-# The operator applies those once by hand before the first reconcile.
+# PVs and Longhorn Volume CRs for uzeit-de-{fileadmin,uploads} were retired 2026-11-14
+# (operator GO); data lives on only as Longhorn backups on the NAS backup target.
