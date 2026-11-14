@@ -48,7 +48,7 @@ jobs:
       # clean tree: "0 passed / 182 skipped", exit 0 -- a gate that renders
       # nothing at all.
       - name: Setup flate
-        uses: home-operations/flate/action@v0.6.5
+        uses: home-operations/flate/action@v0.7.3
         with:
           base: ""
 
