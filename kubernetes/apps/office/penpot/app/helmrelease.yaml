@@ -154,10 +154,15 @@ spec:
       resources:
         requests:
           cpu: 100m
-          memory: 256Mi
-        limits:
-          cpu: 500m
           memory: 512Mi
+        limits:
+          # 512Mi -> 1Gi on 2026-11-14. The exporter (headless browser rendering
+          # for PDF/PNG export) was OOMKilled 16 times in 31h at 512Mi, flagged
+          # by ContainerMemoryNearLimit. Unlike the frontend, this one really
+          # was killed: render spikes exceed the old limit, so the limit is the
+          # fix, not a leak. Request raised to 512Mi to match steady-state use.
+          cpu: 500m
+          memory: 1Gi
 
     # Persistence for assets — the existing CIFS RWX claim with the design
     # file blobs (hash-prefixed dirs under /opt/data/assets).
