@@ -61,6 +61,7 @@ conflicts_with:
   - longhorn-1.13.0                    # engine upgrade under all five volumes; the restore proofs also need a quiet backup target
   - talos-linux-1.14.5                 # node roll; all five databases run on k8s-nuc14-02
   - etcd-timeouts-5000-500             # blocked - control-plane timing change
+  - nocodb-2026.10.1                   # 15 one-way knex migrations into the shared postgresql server; a restart mid-migration leaves a held lock
   - helm-drift-detection               # asserts Helm revisions are identical across releases; this plan upgrades affine-pg and sure-pg
   - flux-oci-chart-sources             # re-points the app-template chart source used by affine-pg and sure-pg
   - flux-reconciler-impersonation      # blocked - changes who applies these Kustomizations

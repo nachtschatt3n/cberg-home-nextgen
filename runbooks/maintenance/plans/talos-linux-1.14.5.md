@@ -119,6 +119,7 @@ conflicts_with:                       # exclusive: true already keeps everything
                                       # predecessor's list, carried, and (b) every NON-terminal plan that names
                                       # talos-linux-1.14.4 (or -1.14.2) in its own conflicts_with (frontmatter scan
                                       # 2026-10-31) — their owners must retarget that ref to THIS plan (§6.3b).
+  - mac-tooling-pins-2026-11          # reciprocal, added 2026-11-14 (plan-reviewer): both edit .mise.toml (this plan's talosctl pin, step 3.12)
   - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
   - talos-power-tuning-ab             # live SysfsConfig A/B via apply-config on 01/03 (window null, needs re-baseline);
                                       # a reboot mid-A/B voids a variant and re-reads the iGPU card index. Its baselines
