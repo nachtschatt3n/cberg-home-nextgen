@@ -48,7 +48,15 @@ spec:
     # still lets a release's ~5 jobs run 4-wide plus one queued. A cap only
     # serialises jobs, it cannot deadlock the queue. Baseline + PromQL:
     # docs/sops/ci-runner.md 7) etcd leader-change row.
-    maxRunners: 4
+    # 2026-11-14: 4 -> 8, owner's decision (the owner set the cap and lifts
+    # it). The cap did not lower the churn: leader changes per 24 h were
+    # 9-27 on every day since 2026-11-08 (baseline 12-14, target <= 3), 7 d
+    # 119-124 (was 65-68), while the pool sat at 4 of 4 for 32% of the time.
+    # 8 x 1.6 CPU = 12.8 CPU of requests; a runner that fits on no node
+    # stays Pending (ci-low never preempts). Watch + way back:
+    # docs/sops/ci-runner.md 7) etcd leader-change row. Rollback: git revert
+    # this commit.
+    maxRunners: 8
     controllerServiceAccount:
       namespace: arc-system
       name: arc-controller

@@ -10,6 +10,15 @@
 # max 1), so warm/busy runners never eat the 24 shard pods' room.
 # 2026-10-12: ninth-banner-k8s max 4 -> 6 (nuc14-02 back): +2 pods, +3.2 CPU /
 # +4.25Gi / +4Gi requests, +13 CPU / +13Gi / +36Gi limits.
+# 2026-11-14: ninth-banner-k8s max 8 (owner's decision; 4 since 2026-11-08, 6
+# before): +2 pods over the max-6 sizing (24 shard pods + 8 runners + 1 browser
+# runner = 33), +4352Mi / +4608Mi requests (memory / ephemeral-storage; a
+# runner pod asks 2176Mi / 2304Mi), +13 CPU / +13Gi / +36Gi limits.
+# requests.cpu stays 62 ON PURPOSE: +3.2 CPU would lift the sum of CPU quotas
+# from 1.45x to 1.51x of allocatable and fire KubeCPUQuotaOvercommit (> 1.5x,
+# monitoring/.../ci-runner-alerts.yaml). 62 holds 8 runners (12.8) + the
+# browser runner (2) + 23.6 shard pods at 2 CPU, far more than the nodes can
+# place (about 23 CPU free for CI in total).
 # Rollback: docs/sops/ci-runner.md §11 Rollback Plan.
 apiVersion: v1
 kind: ResourceQuota
@@ -18,13 +27,13 @@ metadata:
   namespace: ci-runner
 spec:
   hard:
-    pods: "31"
+    pods: "33"
     requests.cpu: "62"
-    requests.memory: 165Gi
-    requests.ephemeral-storage: 216Gi
-    limits.cpu: "141"
-    limits.memory: 293Gi
-    limits.ephemeral-storage: 516Gi
+    requests.memory: 173312Mi # 165Gi + 2 x 2176Mi
+    requests.ephemeral-storage: 225792Mi # 216Gi + 2 x 2304Mi
+    limits.cpu: "154"
+    limits.memory: 306Gi
+    limits.ephemeral-storage: 552Gi
     services: "0"
     services.loadbalancers: "0"
     services.nodeports: "0"
