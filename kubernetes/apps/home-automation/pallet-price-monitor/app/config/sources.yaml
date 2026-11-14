@@ -69,7 +69,10 @@ sources:
   # --- v1: BORKENKÄFER -----------------------------------------------------
   hessen_forst:     { enabled: true,  cadence: weekly,    authority: 4 }
   fva_bw_kaefer:    { enabled: true,  cadence: weekly,    authority: 5 }
-  nrw_borkenkaefer: { enabled: true,  cadence: weekly,    authority: 4 }
+  # nrw_borkenkaefer — DISABLED 2026-11-14 (operator decision). borkenkaefer.nrw.de
+  # times out on every run since 2026-10-26; a bark-beetle indicator, not a price.
+  # Its rows age out of the 30-day severity average on their own.
+  nrw_borkenkaefer: { enabled: false, cadence: weekly,    authority: 4 }
 
   # --- v1: STEP-CHANGE EVENTS ---------------------------------------------
   # toll_collect — DEAD. The mauttarif page restructured; the canonical URL
