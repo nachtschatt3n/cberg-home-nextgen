@@ -12,9 +12,7 @@ locals {
   }
   mathiasuhl_a_records = {
     apex_216 = { name = "@", content = "216.239.32.21" }
-    apex_37  = { name = "@", content = "37.202.4.23" }
     www_216  = { name = "www", content = "216.239.32.21" }
-    www_37   = { name = "www", content = "37.202.4.23" }
   }
   mathiasuhl_extra = {
     for r in jsondecode(var.mathiasuhl_extra_records) :
