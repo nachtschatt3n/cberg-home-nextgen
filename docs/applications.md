@@ -29,7 +29,7 @@
 | network | 5 |
 | default | 2 |
 | flux-system | 2 |
-| backup | 3 |
+| backup | 5 |
 | security | 2 |
 | my-software-development | 3 |
 | my-software-production | 7 |
@@ -263,6 +263,8 @@
 | icloud-backup-freshness | Hourly CronJob (`23 * * * *`) that walks the iCloud backup share read-only and pushes the newest photo file's mtime per Apple ID to Pushgateway (`icloud_backup_newest_file_timestamp_seconds{account}`), alerting via `ICloudBackupPhotosStale` (14-day backstop only since 2026-09-28: the mtime is the photo's capture date, so it measured photo-taking, not the backup). The same app also runs `CronJob/icloud-sync-probe` (every 10 min, Role pods+pods/log get in `backup`), which reads the icloud-docker pod logs and feeds the primary sync-health alerts `ICloudBackupSyncStalled` / `ICloudBackupAuthRequired` / `ICloudBackupPersistentDownloadFailures`, and since 2026-10-03 the iCloud Drive equivalents `ICloudDriveSyncStalled` / `ICloudDrivePersistentDownloadFailures`. Added 2026-09-20 after both `icloud-docker` instances wedged **alive** and the outage went unnoticed for 14 days (F-21d7e2ec) — it watches the OUTPUT on the NAS, because every in-band signal (pod Running 1/1, 0 restarts, no probes, no ServiceMonitor) read healthy throughout. Second, read-only consumer of the `cifs-immich-icloud-backup` StorageClass, whose `subdir` is the `icloud-backup` parent, so one mount sees both accounts. | None | — |
 | icloud-docker-andrea | Apple iCloud Drive + Photos sync for the second household Apple ID. Same `main` build digest pin as `icloud-docker-mu` — **bump both together** or the un-bumped one silently loses the iOS 26.4+ 2FA push. Data on `cifs-icloud-docker-andrea` (`icloud-backup/andrea`), session PVC on dynamic `longhorn`. | None | — |
 | icloud-docker-mu | Apple iCloud Drive sync. Image pinned to a `main` build digest (not a release tag) to get icloudpy 0.9.0's iOS 26.4+ 2FA push trigger — deliberate exception, see `docs/sops/icloud-docker-reauth.md`. | None | — |
+| offsite-backup | Off-site restic backup of NAS data and Longhorn volumes to a hosted storage box. CronJobs `offsite-backup-apps` (00:30 UTC), `offsite-backup-core` (00:40 UTC, upload rate-limited), `offsite-backup-prune` (weekly), `offsite-backup-check` (weekly). Sources mounted read-only; write key is append-only, prune key separate. Source paths and credentials exist only in SOPS Secrets and Flux postBuild variables. See `docs/sops/backup.md` ("Off-site Backup"). | None | — |
+| hetzner-credentials | Terraform-managed hosted storage box for the off-site backup plus SOPS-encrypted access secrets. No workload. | None | — |
 
 The two `icloud-docker` instances are one per Apple ID; they share nothing but
 the `csi-driver-smb` credential and the image digest. Coverage of non-Drive/Photos iCloud data (contacts,

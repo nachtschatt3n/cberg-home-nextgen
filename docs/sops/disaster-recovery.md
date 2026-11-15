@@ -75,7 +75,7 @@ Most recovery procedures depend on these being current. Audit them quarterly.
 | Talos `talosconfig` (auth to Talos API) | `kubernetes/bootstrap/talos/clusterconfig/` (git) | Cannot `talosctl` against nodes — but git has it |
 | Cluster kubeconfig | Generated from talosconfig; not committed | Regenerate via `talosctl kubeconfig` |
 | Longhorn CIFS backup target connectivity | `UNAS-CBERG/backups/longhorn` | No backups created or restored |
-| NAS offsite backup | Owner-managed (external) — the NAS backup is additionally uploaded off-site to cloud storage (operator-attested 2026-09-14; not cluster-verifiable: upload monitoring, retention, which shares it covers, and a restore test are not yet established) | NAS loss = catastrophic for media until the cloud copy is restore-proven; cluster data still on Longhorn replicas |
+| NAS offsite backup | Restic to a hosted storage box (tiers `core` and `apps`, CronJobs in namespace `backup`, monitored, append-only write key, 7 daily/4 weekly/12 monthly) — see `docs/sops/backup.md` "Off-site Backup". Media library and other large trees are deliberately not covered yet; the older vendor cloud upload stays as an unverified second copy during the parallel run | NAS loss: covered data restorable from restic (apps-tier restore drill passed 2026-11-15, core drill pending seed); uncovered trees rely on the vendor upload |
 | UniFi controller backup file (`.unf`) | UniFi controller UI → Settings → System → Backup; auto-saved to NAS | Network rules rebuild from `CLAUDE.md` topology spec |
 | Cloudflare account 2FA recovery codes | Offsite | Account takeover risk; see AR-020 |
 | GitHub account 2FA + SSH key backups | Offsite | Cannot push fixes mid-incident |

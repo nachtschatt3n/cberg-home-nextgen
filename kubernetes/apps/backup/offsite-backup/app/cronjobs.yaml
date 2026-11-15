@@ -23,6 +23,7 @@ spec:
             app: offsite-backup-apps
         spec:
           restartPolicy: Never
+          automountServiceAccountToken: false
           # root: ssh needs a passwd entry for its uid and the image has none
           # for 1000. Capabilities are dropped; sources are mounted read-only.
           securityContext:
@@ -153,6 +154,7 @@ spec:
             app: offsite-backup-core
         spec:
           restartPolicy: Never
+          automountServiceAccountToken: false
           # root: ssh needs a passwd entry for its uid and the image has none
           # for 1000. Capabilities are dropped; sources are mounted read-only.
           securityContext:
@@ -290,6 +292,7 @@ spec:
             app: offsite-backup-prune
         spec:
           restartPolicy: Never
+          automountServiceAccountToken: false
           # root: ssh needs a passwd entry for its uid and the image has none
           # for 1000. Capabilities are dropped; sources are mounted read-only.
           securityContext:
@@ -409,6 +412,7 @@ spec:
             app: offsite-backup-check
         spec:
           restartPolicy: Never
+          automountServiceAccountToken: false
           # root: ssh needs a passwd entry for its uid and the image has none
           # for 1000. Capabilities are dropped; sources are mounted read-only.
           securityContext:

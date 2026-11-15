@@ -188,7 +188,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | network | Gateway API data plane (Envoy), DNS, networking | 5 |
 | default | Dashboard (Homepage) + utilities | 2 |
 | flux-system | Flux GitOps operator + admission guardrails | 2 |
-| backup | External backup integrations | 3 |
+| backup | External backup integrations + off-site restic backup | 5 |
 | my-software-development | Custom app development | 3 |
 | my-software-production | Custom app production | 7 |
 | my-software-showcase | Portfolio showcase (containerized legacy client apps) | 15 |
