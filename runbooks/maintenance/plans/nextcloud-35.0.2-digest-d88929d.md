@@ -32,7 +32,7 @@ conflicts_with:
   - postgres-digest-refresh-2026-11    # shares namespace office restarts and the Longhorn backup surface; never stack two office restarts
   - nextcloud-12.0.2                   # draft by another session (MariaDB sidecar 11.8.3 -> 12.0.2); Part B converts the datadir under this app
   - bitnamilegacy-exit-nextcloud-db    # blocked; edits the SAME helmrelease and replaces the DB under this app
-  - kube-prometheus-stack-92.22.0      # section 4 G8 reads Prometheus: a same-night Prometheus restart makes the instrument unreliable
+  - kube-prometheus-stack-93.3.0      # retargeted 2026-11-16 from retired 92.22.0 (plan itself is superseded)
   - longhorn-1.13.0                    # storage engine bump under nextcloud-config / nextcloud-mariadb: backups + attach semantics move
   - talos-linux-1.14.5                 # node reboots under the pod; also the Sunday reboot-capable window
   - envoy-gateway-1.10.0               # the edge gates (status.php, /login) read through envoy-external

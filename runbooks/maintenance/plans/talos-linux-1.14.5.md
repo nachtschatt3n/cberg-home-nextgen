@@ -144,7 +144,7 @@ conflicts_with:                       # exclusive: true already keeps everything
   - envoy-proxy-config-distroless-v1.40.2  # same surface (blocked)
   - tube-archivist-elasticsearch-9.5.5     # reciprocal (Longhorn)
   - frigate-reolink-go2rtc-flv        # reciprocal (igpu-i915)
-  - grafana-chart-14.4.0                    # reciprocal (monitoring)
+  # - grafana-chart-14.4.0  (dead ref: plan retired; removed 2026-11-16 by plan review)                    # reciprocal (monitoring)
   - authentik-web-max-requests        # reciprocal; its premise is "no etcd leader change in 1h" (F-98043e32)
   # 2026-11-06: removed gha-fleet-0.15.1 - plan executed and retired (288a915fe); DEAD-REF in maintenance-plan.py --validate.
   - icloud-drive-fleet-2.3.0          # reciprocal

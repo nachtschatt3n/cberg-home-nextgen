@@ -67,7 +67,7 @@ conflicts_with:
   - flux-reconciler-impersonation      # blocked - changes who applies these Kustomizations
   # The window's instrument (section 4 reads Prometheus): grafana. A same-night kube-prometheus-stack bump (open PRs #428, #501) and the
   # nocodb #426 calver bump (migrations into the shared server) have no plan file, so they are NOT listable - the window agent must keep them out of this slot by hand.
-  - grafana-chart-14.4.0                     # vetted - restarts Grafana (a client of db pellets) and the dashboards the operator watches
+  # - grafana-chart-14.4.0  (dead ref: plan retired; removed 2026-11-16 by plan review)                     # vetted - restarts Grafana (a client of db pellets) and the dashboards the operator watches
 exclusive: false
 security_ref: F-ae6a4cbf               # accepted-risk register entries for these two images (detail stays in the DB)
 capability_change: false               # same PostgreSQL minor, same pgvector tag: behaviour identical, only the image base layers are rebuilt

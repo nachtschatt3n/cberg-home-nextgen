@@ -50,7 +50,7 @@ conflicts_with:
   - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
   - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af (sun-attended:2026-11-29)
   - tube-archivist-elasticsearch-9.5.5   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
-  - grafana-chart-14.4.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
+  # - grafana-chart-14.4.0  (dead ref: plan retired; removed 2026-11-16 by plan review)   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   - etcd-timeouts-5000-500           # reciprocal; that plan is status: blocked, window null (2026-11-06). NOT a
                                       # dependency of this plan: both read etcd/control-plane health, so never the
                                       # same slot; either order is fine
