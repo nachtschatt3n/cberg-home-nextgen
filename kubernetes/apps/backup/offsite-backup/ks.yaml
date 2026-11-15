@@ -1,0 +1,31 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
+# Secrets live in their own Kustomization: the app Kustomization reads one of
+# them (offsite-backup-sources) through postBuild.substituteFrom, so it must
+# exist before the app renders.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app offsite-backup-secrets
+  namespace: &namespace backup
+  labels:
+    # No cluster-wide envsubst over key material.
+    substitution.flux.home.arpa/disabled: "true"
+spec:
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  interval: 30m
+  path: ./kubernetes/apps/backup/offsite-backup/secrets
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  targetNamespace: *namespace
+  timeout: 5m
+  wait: true

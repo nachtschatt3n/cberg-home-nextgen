@@ -9,3 +9,4 @@ resources:
   - ./icloud-backup-freshness/ks.yaml
   - ./icloud-docker-andrea/ks.yaml
   - ./icloud-docker-mu/ks.yaml
+  - ./offsite-backup/ks.yaml
