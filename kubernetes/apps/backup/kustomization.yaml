@@ -5,6 +5,7 @@ namespace: backup
 components: 
   - ../../flux/components/common
 resources:
+  - ./hetzner-credentials/ks.yaml
   - ./icloud-backup-freshness/ks.yaml
   - ./icloud-docker-andrea/ks.yaml
   - ./icloud-docker-mu/ks.yaml
