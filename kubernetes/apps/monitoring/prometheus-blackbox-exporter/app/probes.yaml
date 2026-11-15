@@ -123,3 +123,27 @@ spec:
       labels:
         probe_class: http
         probe_component: vaultwarden
+---
+# Legacy static andreamosteller.com site (internal/test hostname for now).
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: http-andreamosteller-legacy
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  interval: 30s
+  scrapeTimeout: 15s
+  module: http_2xx_ingress
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://legacy-andreamosteller.${SECRET_DOMAIN}/healthz
+      labels:
+        probe_class: http
+        probe_component: andreamosteller-legacy

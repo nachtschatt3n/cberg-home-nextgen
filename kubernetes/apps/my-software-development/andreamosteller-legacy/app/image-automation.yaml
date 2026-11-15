@@ -1,0 +1,70 @@
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: andreamosteller-legacy
+  namespace: my-software-development
+spec:
+  # Public GHCR package: no secretRef needed.
+  image: ghcr.io/nachtschatt3n/andreamosteller-site
+  interval: 10m
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: andreamosteller-legacy
+  namespace: my-software-development
+spec:
+  imageRepositoryRef:
+    name: andreamosteller-legacy
+  # BETA: follows the moving `latest` tag (built from main) by DIGEST, so every
+  # main build rolls out to the beta without touching the live site.
+  filterTags:
+    pattern: '^latest$'
+  digestReflectionPolicy: Always
+  policy:
+    alphabetical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: andreamosteller-legacy-image-updates
+  namespace: my-software-development
+spec:
+  # Own automation scoped to this app's directory and ImagePolicy (mandatory in
+  # a shared namespace: docs/sops/flux-image-automation-push-auth.md section 4).
+  # The label is stamped by the Flux Kustomization's commonMetadata.
+  policySelector:
+    matchLabels:
+      app.kubernetes.io/name: andreamosteller-legacy
+  interval: 30m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcdbot@users.noreply.github.com
+        name: fluxcdbot
+      messageTemplate: |
+        chore(andreamosteller-legacy): update container image (beta)
+
+        Automation name: {{ .AutomationObject }}
+
+        Objects updated:
+        {{ range $resource, $changes := .Changed.Objects -}}
+        - {{ $resource.Kind }} {{ $resource.Name }}
+        {{- range $_, $change := $changes }}
+          {{ $change.OldValue }} -> {{ $change.NewValue }}
+        {{ end -}}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    strategy: Setters
+    path: "./kubernetes/apps/my-software-development/andreamosteller-legacy"

@@ -8,6 +8,7 @@ components:
 resources:
   - ./absenty/ks.yaml
   - ./andreamosteller/ks.yaml
+  - ./andreamosteller-legacy/ks.yaml
   - ./opencode-andreamosteller/ks.yaml
 # PSA = baseline (cluster default). Inline Namespace resource was silently
 # ignored by kustomize — to lift to restricted, add a patches: block

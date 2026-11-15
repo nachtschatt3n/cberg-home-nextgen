@@ -8,6 +8,7 @@ components:
 resources:
   - ./absenty/ks.yaml
   - ./andreamosteller/ks.yaml
+  - ./andreamosteller-legacy/ks.yaml
   - ./gas-price-monitor/ks.yaml
   - ./ninth-banner-preview/ks.yaml
   - ./rainbow-rescue/ks.yaml

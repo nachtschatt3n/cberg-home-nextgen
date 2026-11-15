@@ -1,0 +1,71 @@
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: andreamosteller-legacy
+  namespace: my-software-production
+spec:
+  # Public GHCR package: no secretRef needed.
+  image: ghcr.io/nachtschatt3n/andreamosteller-site
+  interval: 10m
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: andreamosteller-legacy
+  namespace: my-software-production
+spec:
+  imageRepositoryRef:
+    name: andreamosteller-legacy
+  # AUTO on RELEASE TAGS ONLY (same model as splitfairy). The ^...$ anchors are
+  # load-bearing: Flux matches filterTags unanchored. Main builds (`latest`,
+  # `sha-*`) are never deployed to the live site.
+  filterTags:
+    pattern: '^v?(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$'
+    extract: '$version'
+  policy:
+    semver:
+      range: '>=0.1.0'
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: andreamosteller-legacy-image-updates
+  namespace: my-software-production
+spec:
+  # Own automation scoped to this app's directory and ImagePolicy (mandatory in
+  # a shared namespace: docs/sops/flux-image-automation-push-auth.md section 4).
+  # The label is stamped by the Flux Kustomization's commonMetadata.
+  policySelector:
+    matchLabels:
+      app.kubernetes.io/name: andreamosteller-legacy
+  interval: 30m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcdbot@users.noreply.github.com
+        name: fluxcdbot
+      messageTemplate: |
+        chore(andreamosteller-legacy): update container image (release)
+
+        Automation name: {{ .AutomationObject }}
+
+        Objects updated:
+        {{ range $resource, $changes := .Changed.Objects -}}
+        - {{ $resource.Kind }} {{ $resource.Name }}
+        {{- range $_, $change := $changes }}
+          {{ $change.OldValue }} -> {{ $change.NewValue }}
+        {{ end -}}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    strategy: Setters
+    path: "./kubernetes/apps/my-software-production/andreamosteller-legacy"

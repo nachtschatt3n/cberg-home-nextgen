@@ -1,0 +1,54 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: andreamosteller-legacy-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - interval: 30s
+      name: andreamosteller-legacy.pods.health
+      rules:
+        - alert: AndreamostellerLegacyPodNotReady
+          annotations:
+            description: AndreamostellerLegacy pod {{ $labels.pod }} has been not ready for
+              more than 5 minutes. The live legacy static site is down.
+            summary: AndreamostellerLegacy pod {{ $labels.pod }} is not ready
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="my-software-production", pod=~"andreamosteller-legacy-.*", condition="true"}
+              unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+            ) == 0
+          for: 5m
+          labels:
+            category: my-software-production
+            component: andreamosteller-legacy
+            severity: critical
+        - alert: AndreamostellerLegacyPodCrashLooping
+          annotations:
+            description: AndreamostellerLegacy pod {{ $labels.pod }} has restarted {{ $value | printf
+              "%.0f" }} times in the last 15 minutes.
+            summary: AndreamostellerLegacy pod {{ $labels.pod }} is crash looping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="my-software-production", pod=~"andreamosteller-legacy-.*"}[15m]) * 900 > 2
+          for: 5m
+          labels:
+            category: my-software-production
+            component: andreamosteller-legacy
+            severity: critical
+        - alert: AndreamostellerLegacyPodRestarted
+          annotations:
+            description: AndreamostellerLegacy pod {{ $labels.pod }} has restarted at least
+              once in the last 15 minutes. Monitor for repeated restarts.
+            summary: AndreamostellerLegacy pod {{ $labels.pod }} restarted
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="my-software-production", pod=~"andreamosteller-legacy-.*"}[15m]) > 0
+          for: 1m
+          labels:
+            category: my-software-production
+            component: andreamosteller-legacy
+            severity: warning
