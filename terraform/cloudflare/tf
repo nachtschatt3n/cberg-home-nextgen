@@ -22,6 +22,11 @@ export TF_VAR_andreamosteller_domain=$(
   "$SOPS" -d "$REPO_ROOT/kubernetes/flux/components/common/cluster-secrets.sops.yaml" \
   | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['SECRET_DOMAIN_ANDREAMOSTELLER'])")
 
+_cs() { "$SOPS" -d "$REPO_ROOT/kubernetes/flux/components/common/cluster-secrets.sops.yaml" \
+  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData'].get('$1',''))"; }
+export TF_VAR_mathiasuhl_domain=$(_cs SECRET_DOMAIN_MATHIASUHL)
+export TF_VAR_mathiasuhl_extra_records=$(_cs SECRET_MATHIASUHL_EXTRA_RECORDS)
+
 export KUBECONFIG="$REPO_ROOT/kubeconfig"
 export KUBE_CONFIG_PATH="$REPO_ROOT/kubeconfig"
 TF=$(command -v terraform 2>/dev/null \

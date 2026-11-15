@@ -350,6 +350,12 @@ To revert to Cloudflare defaults (if a setting was never managed before):
 
 ---
 
+### Mail zone (mathiasuhl)
+
+`mathiasuhl_zone.tf`: zone plus carried-over A (apex, www; two origins) and Google MX records, all DNS-only. Domain in `SECRET_DOMAIN_MATHIASUHL`. Further records (DKIM, DMARC, TXT) go into the JSON list in `SECRET_MATHIASUHL_EXTRA_RECORDS` (`sops set` on cluster-secrets), names relative to the zone; no .tf change needed. MX content has no trailing dot (Cloudflare strips it). Before any nameserver switch, export the full record list from the current DNS provider and compare.
+
+---
+
 ## Version History
 
 - `2026.05.06`: Initial SOP — Terraform Kubernetes-backend workflow, 5 managed settings applied
