@@ -1,0 +1,85 @@
+---
+# Off-site backup alerts. Metrics come from the Pushgateway
+# (job=offsite-backup, labels tier=core|apps, kind=backup|prune|check), pushed
+# only on SUCCESS: a dead or failing job therefore shows up as an ageing
+# timestamp, never as a frozen healthy value.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: offsite-backup-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: offsite-backup
+      interval: 60s
+      rules:
+        - alert: OffsiteBackupStale
+          expr: |
+            time() - max by (tier) (offsite_backup_last_success_timestamp_seconds{job="offsite-backup", kind="backup"}) > 36 * 3600
+          for: 10m
+          labels:
+            severity: critical
+            category: backup
+            component: offsite-backup
+          annotations:
+            summary: "Off-site backup tier {{ $labels.tier }} has no success for over 36h"
+            description: "The nightly off-site backup for tier {{ $labels.tier }} last succeeded {{ $value | humanizeDuration }} ago. Check the offsite-backup-{{ $labels.tier }} Job logs in namespace backup."
+        - alert: OffsiteBackupMaintenanceStale
+          expr: |
+            time() - max by (tier, kind) (offsite_backup_last_success_timestamp_seconds{job="offsite-backup", kind=~"prune|check"}) > 9 * 86400
+          for: 10m
+          labels:
+            severity: warning
+            category: backup
+            component: offsite-backup
+          annotations:
+            summary: "Off-site {{ $labels.kind }} for tier {{ $labels.tier }} has not succeeded for over 9 days"
+            description: "Weekly {{ $labels.kind }} for tier {{ $labels.tier }} last succeeded {{ $value | humanizeDuration }} ago."
+        - alert: OffsiteBackupJobFailed
+          # A Job of any off-site CronJob ran and the latest schedule has no
+          # success yet, while nothing is running. Self-clearing on the next
+          # success (a lingering failed Job object does not keep it firing).
+          expr: |
+            (
+              kube_cronjob_status_last_schedule_time{namespace="backup", cronjob=~"offsite-backup-.*"}
+              - on (namespace, cronjob) kube_cronjob_status_last_successful_time{namespace="backup", cronjob=~"offsite-backup-.*"}
+              > 0
+            )
+            and on (namespace, cronjob) (kube_cronjob_status_active{namespace="backup", cronjob=~"offsite-backup-.*"} == 0)
+          for: 5m
+          labels:
+            severity: critical
+            category: backup
+            component: offsite-backup
+          annotations:
+            summary: "Off-site backup CronJob {{ $labels.cronjob }} failed"
+            description: "The most recent run of CronJob {{ $labels.cronjob }} did not succeed. Check the Job logs in namespace backup."
+        - alert: OffsiteBackupNeverSucceeded
+          # absent() guard: a job that never ran (or whose metrics never
+          # arrived) must not read as healthy. 36h covers the first seed.
+          expr: |
+            absent(offsite_backup_last_success_timestamp_seconds{job="offsite-backup", kind="backup", tier="core"})
+            or absent(offsite_backup_last_success_timestamp_seconds{job="offsite-backup", kind="backup", tier="apps"})
+          for: 36h
+          labels:
+            severity: critical
+            category: backup
+            component: offsite-backup
+          annotations:
+            summary: "Off-site backup has never reported a success for at least one tier"
+            description: "No offsite_backup_last_success_timestamp_seconds{kind=backup} series for tier core or apps. The seed run did not finish or the Pushgateway lost the metrics."
+        - alert: OffsiteBackupCheckMissing
+          expr: |
+            absent(offsite_backup_last_success_timestamp_seconds{job="offsite-backup", kind="check"})
+          for: 10d
+          labels:
+            severity: warning
+            category: backup
+            component: offsite-backup
+          annotations:
+            summary: "Off-site backup integrity check has never reported a success"
+            description: "The weekly restic check job has not pushed a success metric."

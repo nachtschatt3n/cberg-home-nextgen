@@ -1,0 +1,505 @@
+---
+# Nightly tier-apps backup (00:30 UTC, after the 23:00 Longhorn backups). Append-only key.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: offsite-backup-apps
+  namespace: backup
+spec:
+  schedule: "30 0 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 604800
+      activeDeadlineSeconds: 86400
+      template:
+        metadata:
+          labels:
+            app: offsite-backup-apps
+        spec:
+          restartPolicy: Never
+          # root: ssh needs a passwd entry for its uid and the image has none
+          # for 1000. Capabilities are dropped; sources are mounted read-only.
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: restic
+              image: docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - /scripts/run.sh
+                - backup
+                - apps
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: SFTP_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: SFTP_HOST
+                - name: SFTP_PORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: SFTP_PORT
+                - name: SFTP_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: SFTP_USER
+                - name: RESTIC_PASSWORD_APPS
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: RESTIC_PASSWORD_APPS
+                - name: LIMIT_UPLOAD
+                  value: "40000"
+                - name: KEY_NAME
+                  value: SSH_KEY_APPS
+                - name: GOMEMLIMIT
+                  value: 400MiB
+                - name: HOME
+                  value: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: "2"
+                  memory: 512Mi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: ssh
+                  mountPath: /secrets/ssh
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+                - name: sources
+                  mountPath: /sources
+                  readOnly: true
+                - name: src-4
+                  mountPath: /src/4
+                  readOnly: true
+                - name: src-5
+                  mountPath: /src/5
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: offsite-backup-script
+            - name: ssh
+              secret:
+                secretName: offsite-backup-write
+                defaultMode: 292
+                items:
+                  - key: SSH_KEY_APPS
+                    path: SSH_KEY_APPS
+                  - key: KNOWN_HOSTS
+                    path: KNOWN_HOSTS
+            - name: tmp
+              emptyDir:
+                sizeLimit: 10Gi
+            - name: sources
+              secret:
+                secretName: offsite-backup-sources
+                items:
+                  - key: FILES_APPS
+                    path: FILES_APPS
+            - name: src-4
+              persistentVolumeClaim:
+                claimName: backup-src-4
+                readOnly: true
+            - name: src-5
+              persistentVolumeClaim:
+                claimName: backup-src-5
+                readOnly: true
+---
+# Nightly tier-core backup (00:40 UTC). Append-only key. Also used for the one-off seed via kubectl create job --from.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: offsite-backup-core
+  namespace: backup
+spec:
+  schedule: "40 0 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 604800
+      activeDeadlineSeconds: 172800
+      template:
+        metadata:
+          labels:
+            app: offsite-backup-core
+        spec:
+          restartPolicy: Never
+          # root: ssh needs a passwd entry for its uid and the image has none
+          # for 1000. Capabilities are dropped; sources are mounted read-only.
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: restic
+              image: docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - /scripts/run.sh
+                - backup
+                - core
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: SFTP_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: SFTP_HOST
+                - name: SFTP_PORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: SFTP_PORT
+                - name: SFTP_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: SFTP_USER
+                - name: RESTIC_PASSWORD_CORE
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: RESTIC_PASSWORD_CORE
+                - name: LIMIT_UPLOAD
+                  value: "40000"
+                - name: KEY_NAME
+                  value: SSH_KEY
+                - name: GOMEMLIMIT
+                  value: 3500MiB
+                - name: HOME
+                  value: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 1Gi
+                limits:
+                  cpu: "2"
+                  memory: 4Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: ssh
+                  mountPath: /secrets/ssh
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+                - name: sources
+                  mountPath: /sources
+                  readOnly: true
+                - name: src-1
+                  mountPath: /src/1
+                  readOnly: true
+                - name: src-2
+                  mountPath: /src/2
+                  readOnly: true
+                - name: src-3
+                  mountPath: /src/3
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: offsite-backup-script
+            - name: ssh
+              secret:
+                secretName: offsite-backup-write
+                defaultMode: 292
+                items:
+                  - key: SSH_KEY
+                    path: SSH_KEY
+                  - key: KNOWN_HOSTS
+                    path: KNOWN_HOSTS
+            - name: tmp
+              emptyDir:
+                sizeLimit: 10Gi
+            - name: sources
+              secret:
+                secretName: offsite-backup-sources
+                items:
+                  - key: FILES_CORE
+                    path: FILES_CORE
+            - name: src-1
+              persistentVolumeClaim:
+                claimName: backup-src-1
+                readOnly: true
+            - name: src-2
+              persistentVolumeClaim:
+                claimName: backup-src-2
+                readOnly: true
+            - name: src-3
+              persistentVolumeClaim:
+                claimName: backup-src-3
+                readOnly: true
+---
+# Weekly retention (Sunday 04:30 UTC): forget --prune, keep 7 daily / 4 weekly / 12 monthly. Uses the admin (non-append-only) key, the ONLY place it is used.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: offsite-backup-prune
+  namespace: backup
+spec:
+  schedule: "30 4 * * 0"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 604800
+      activeDeadlineSeconds: 43200
+      template:
+        metadata:
+          labels:
+            app: offsite-backup-prune
+        spec:
+          restartPolicy: Never
+          # root: ssh needs a passwd entry for its uid and the image has none
+          # for 1000. Capabilities are dropped; sources are mounted read-only.
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: restic
+              image: docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - /scripts/run.sh
+                - prune
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: SFTP_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-prune
+                      key: SFTP_HOST
+                - name: SFTP_PORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-prune
+                      key: SFTP_PORT
+                - name: SFTP_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-prune
+                      key: SFTP_USER
+                - name: RESTIC_PASSWORD_CORE
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: RESTIC_PASSWORD_CORE
+                - name: REPO_CORE
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-prune
+                      key: REPO_CORE
+                - name: RESTIC_PASSWORD_APPS
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: RESTIC_PASSWORD_APPS
+                - name: REPO_APPS
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-prune
+                      key: REPO_APPS
+                - name: KEY_NAME
+                  value: SSH_KEY
+                - name: GOMEMLIMIT
+                  value: 3500MiB
+                - name: HOME
+                  value: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 512Mi
+                limits:
+                  cpu: "2"
+                  memory: 4Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: ssh
+                  mountPath: /secrets/ssh
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: scripts
+              configMap:
+                name: offsite-backup-script
+            - name: ssh
+              secret:
+                secretName: offsite-backup-prune
+                defaultMode: 292
+                items:
+                  - key: SSH_KEY
+                    path: SSH_KEY
+                  - key: KNOWN_HOSTS
+                    path: KNOWN_HOSTS
+            - name: tmp
+              emptyDir:
+                sizeLimit: 10Gi
+---
+# Weekly integrity check (Wednesday 04:30 UTC): restic check with a 5% data read sample, both tiers.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: offsite-backup-check
+  namespace: backup
+spec:
+  schedule: "30 4 * * 3"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 604800
+      activeDeadlineSeconds: 43200
+      template:
+        metadata:
+          labels:
+            app: offsite-backup-check
+        spec:
+          restartPolicy: Never
+          # root: ssh needs a passwd entry for its uid and the image has none
+          # for 1000. Capabilities are dropped; sources are mounted read-only.
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: restic
+              image: docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - /scripts/run.sh
+                - check
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: SFTP_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-prune
+                      key: SFTP_HOST
+                - name: SFTP_PORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-prune
+                      key: SFTP_PORT
+                - name: SFTP_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-prune
+                      key: SFTP_USER
+                - name: RESTIC_PASSWORD_CORE
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: RESTIC_PASSWORD_CORE
+                - name: REPO_CORE
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-prune
+                      key: REPO_CORE
+                - name: RESTIC_PASSWORD_APPS
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: RESTIC_PASSWORD_APPS
+                - name: REPO_APPS
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-prune
+                      key: REPO_APPS
+                - name: KEY_NAME
+                  value: SSH_KEY
+                - name: GOMEMLIMIT
+                  value: 3500MiB
+                - name: HOME
+                  value: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 512Mi
+                limits:
+                  cpu: "2"
+                  memory: 4Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: ssh
+                  mountPath: /secrets/ssh
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: scripts
+              configMap:
+                name: offsite-backup-script
+            - name: ssh
+              secret:
+                secretName: offsite-backup-prune
+                defaultMode: 292
+                items:
+                  - key: SSH_KEY
+                    path: SSH_KEY
+                  - key: KNOWN_HOSTS
+                    path: KNOWN_HOSTS
+            - name: tmp
+              emptyDir:
+                sizeLimit: 10Gi

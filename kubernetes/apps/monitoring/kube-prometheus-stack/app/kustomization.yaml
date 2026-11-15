@@ -19,6 +19,7 @@ resources:
   - ./docs-site-alerts.yaml
   - ./absenty-alerts.yaml
   - ./icloud-backup-alerts.yaml
+  - ./offsite-backup-alerts.yaml
   - ./immich-alerts.yaml
   - ./openclaw-alerts.yaml
   # - ./librechat-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)

@@ -1,0 +1,70 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-1
+  namespace: backup
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: offsite-backup-src
+  volumeName: backup-src-1
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-2
+  namespace: backup
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: offsite-backup-src
+  volumeName: backup-src-2
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-3
+  namespace: backup
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: offsite-backup-src
+  volumeName: backup-src-3
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-4
+  namespace: backup
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: offsite-backup-src
+  volumeName: backup-src-4
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-5
+  namespace: backup
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: offsite-backup-src
+  volumeName: backup-src-5
