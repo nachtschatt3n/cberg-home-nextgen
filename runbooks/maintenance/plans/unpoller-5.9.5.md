@@ -56,7 +56,7 @@ finding_refs: [F-464c9d8b]            # F-464c9d8b = open version-lane row "unpo
                                       # F-e4755b2b is cited via security_ref, not claimed as owned.
 review: ready-for-go@2026-11-16      # plan-reviewer 2nd pass 2026-11-16: ready-for-go, 0 blocking (1st pass needs-fix: 429/Influx/ERROR gates misfired; all three replayed live on 48h pod log and verified). Etcd must be quiet before the nightly slot (general window gate).
 status: vetted
-window: null                          # the window agent assigns it. Suggested: nightly (image graduated, alone; clear of
+window: "now:2026-11-16"   # ON-DEMAND NOW run 2026-11-16 (run-now.py stamp; was None)
                                       # kube-prometheus-stack-93.3.0). Operator GO not required by class (capability_change false,
                                       # git-revert, low risk); the reviewer decides whether SD-10 applies.
 premises:

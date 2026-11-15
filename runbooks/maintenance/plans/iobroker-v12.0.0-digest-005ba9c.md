@@ -41,7 +41,7 @@ finding_refs: [F-87b87b41, F-c630e5e6]    # queried 2026-11-14 (`policy-cli.py f
                                           # iobroker-0 execs, not answered by an image bump.
 review: ready-for-go@2026-11-16      # plan-reviewer 2nd pass 2026-11-16: ready-for-go, 0 blocking (1st pass needs-fix: G7 grepped stdout; now reads iobroker.current.log with baseline, verified live). Advisory: read G7 as a printed count not exit status (grep -c exits 1 on 0); G7 alone cannot prove a clean boot, G3/G4 cover startup.
 status: vetted
-window: null
+window: "now:2026-11-16"   # ON-DEMAND NOW run 2026-11-16 (run-now.py stamp; was None)
 premises:
   - id: sts-runs-old-digest
     why: "current and every baseline below were captured against this pin. If it already moved, this plan is stale."
