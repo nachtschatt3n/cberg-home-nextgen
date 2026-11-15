@@ -1,0 +1,18 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/cert-manager.io/certificate_v1.json
+# Staging twin of certificate-andreamosteller.yaml. Proves the DNS-01 path
+# (token scope on the second zone, zone active) against the Let's Encrypt
+# staging CA before the production order. Not referenced by any Gateway.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: andreamosteller-legacy-staging
+spec:
+  secretName: andreamosteller-legacy-staging-tls
+  issuerRef:
+    name: letsencrypt-staging
+    kind: ClusterIssuer
+  commonName: "${SECRET_DOMAIN_ANDREAMOSTELLER}"
+  dnsNames:
+    - "${SECRET_DOMAIN_ANDREAMOSTELLER}"
+    - "www.${SECRET_DOMAIN_ANDREAMOSTELLER}"

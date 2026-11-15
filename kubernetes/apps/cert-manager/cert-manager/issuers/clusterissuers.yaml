@@ -18,6 +18,10 @@ spec:
         selector:
           dnsZones:
             - "${SECRET_DOMAIN}"
+            # Second zone (legacy site). The shared Cloudflare token must also
+            # carry Zone:Read + DNS:Edit on this zone or DNS-01 fails with
+            # "zone not found" (docs/sops/cloudflare.md, secondary zone).
+            - "${SECRET_DOMAIN_ANDREAMOSTELLER}"
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/cert-manager.io/clusterissuer_v1.json
 apiVersion: cert-manager.io/v1
@@ -38,3 +42,7 @@ spec:
         selector:
           dnsZones:
             - "${SECRET_DOMAIN}"
+            # Second zone (legacy site). The shared Cloudflare token must also
+            # carry Zone:Read + DNS:Edit on this zone or DNS-01 fails with
+            # "zone not found" (docs/sops/cloudflare.md, secondary zone).
+            - "${SECRET_DOMAIN_ANDREAMOSTELLER}"

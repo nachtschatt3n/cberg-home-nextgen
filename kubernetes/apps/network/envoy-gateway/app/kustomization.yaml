@@ -5,6 +5,7 @@ kind: Kustomization
 resources:
   - ./helmrelease.yaml
   - ./certificate.yaml
+  - ./certificate-andreamosteller-staging.yaml
   - ./gatewayclass.yaml
   - ./gateways.yaml
   - ./policies.yaml
