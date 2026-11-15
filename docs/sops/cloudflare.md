@@ -13,7 +13,7 @@ All Cloudflare zone settings are managed as code using Terraform. The state is s
 
 - Scope: Cloudflare zone settings, bot management
 - Prerequisites: SOPS age key via `SOPS_AGE_KEY_FILE` (repo-root `age.key`, set in `.envrc` / `.mise.toml`), kubeconfig at repo root, `terraform` via mise
-- Out of scope: DNS records (owned by external-dns via Flux — **do not add `cloudflare_record` resources here**), page rules, workers
+- Out of scope: DNS records (owned by external-dns via Flux — **do not add `cloudflare_record` resources here**), page rules, workers. Sole exception: the secondary zone in `andreamosteller_zone.tf` (two static DNS-only A records until the tunnel cutover)
 
 ---
 
@@ -344,6 +344,13 @@ To revert to Cloudflare defaults (if a setting was never managed before):
 
 ---
 
+## Secondary zone (andreamosteller)
+
+`andreamosteller_zone.tf` creates a second zone (free plan, account taken from the primary zone) plus apex and `www` A records (DNS only, TTL 300) pointing at the current host. The domain name is secret: it lives only in `cluster-secrets.sops.yaml` as `SECRET_DOMAIN_ANDREAMOSTELLER`, exported by `./tf` as `TF_VAR_andreamosteller_domain` (sensitive). The same key is available to Flux `postBuild` substitution as `${SECRET_DOMAIN_ANDREAMOSTELLER}` for later cert/tunnel/external-dns work. Nameservers: `./tf state show cloudflare_zone.andreamosteller`.
+
+---
+
 ## Version History
 
 - `2026.05.06`: Initial SOP — Terraform Kubernetes-backend workflow, 5 managed settings applied
+- `2026.11.15`: Added secondary zone + DNS-only records (secret domain via SOPS)
