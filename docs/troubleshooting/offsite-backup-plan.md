@@ -14,21 +14,20 @@ Provider name, hostname and account stay in SOPS only (public repo).
 - Tool: restic, run as CronJobs in the cluster. The NAS cannot run it.
 - Target: a hosted SFTP storage box, 5 TB tier, budget ceiling 20 EUR/month.
 - Scope now: the irreplaceable set below. Grow the box later for more.
-- Deferred, not now: the `emulation` folder (about 1.1 TiB), both Time Machine
-  bundles (about 1.8 TiB), the media library (about 3.7 TB), media downloads,
-  camera recordings.
+- Deferred, not now: about 6.6 TB of larger, lower-priority trees (the media
+  library among them). The list is in the encrypted Secret's notes.
+- Folder structure is private: source paths, include/exclude lists, repository
+  paths and the target host go in SOPS only. Plaintext manifests may carry
+  nothing more specific than what the repo already publishes; PV sources are
+  injected by Flux substitution from an encrypted Secret.
 
 ## Scope (measured 2026-11-15)
 
-| Source (NAS share / folder) | Size |
-|---|---|
-| `backups/backupstore` (Longhorn backup store, covers all cluster PVs) | 522 GiB |
-| `backups/icloud-backup` | 342 GiB |
-| `backups/backup`, `backups/k8s`, `backups/teslamate` | 194 GiB |
-| `backups/` laptop backup folder | 219 GiB |
-| `nextcloud`, `paperless_ngx` | about 53 GB |
-| `penpot`, `opencode` | under 1 GB |
-| Total | about 1.3 TiB |
+About 1.3 TiB in total: the Longhorn backup store (covers all cluster PVs),
+the phone-cloud backups, other backup folders, and the document and app-data
+shares. The exact source list (shares, folders, include/exclude paths) is NOT
+kept in this file or in any plaintext manifest: it lives only in the
+SOPS-encrypted backup Secret (operator rule, 2026-11-15).
 
 ## Design
 
@@ -59,7 +58,7 @@ Provider name, hostname and account stay in SOPS only (public repo).
 2. GitOps: namespace, `ro` PVs, Secret, CronJobs, alert rules.
 3. Prove append-only access and prune from the second key on a throwaway repo.
 4. Seed core data (about 10 hours at the measured uplink), then small app data.
-5. Restore drill: one Longhorn volume backup, one document set, one iCloud folder.
+5. Restore drill: one Longhorn volume backup, one document set, one personal-data folder.
 6. Run in parallel with the old upload for 2 to 4 weeks; cancel the old one only
    after a clean drill.
 7. Move the procedure into `docs/sops/backup.md` and the disaster-recovery SOP,
@@ -67,9 +66,8 @@ Provider name, hostname and account stay in SOPS only (public repo).
 
 ## Open points
 
-- restic memory on the iCloud and Longhorn trees is unmeasured; start at a
-  2 to 4 GiB limit and measure during the seed.
+- restic memory on the largest trees is unmeasured; start at a 2 to 4 GiB limit
+  and measure during the seed.
 - The old upload has checksum verification off and no retention visible on the
   NAS; do not treat it as a verified copy during the parallel run.
-- Time Machine bundles and the laptop folder had no off-site copy before this plan;
-  only the laptop folder is added now.
+- Some deferred trees have no off-site copy at all today.
