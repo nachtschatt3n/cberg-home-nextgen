@@ -346,7 +346,11 @@ To revert to Cloudflare defaults (if a setting was never managed before):
 
 ## Secondary zone (andreamosteller)
 
-`andreamosteller_zone.tf` creates a second zone (free plan, account taken from the primary zone) plus apex and `www` A records (DNS only, TTL 300) pointing at the current host. The domain name is secret: it lives only in `cluster-secrets.sops.yaml` as `SECRET_DOMAIN_ANDREAMOSTELLER`, exported by `./tf` as `TF_VAR_andreamosteller_domain` (sensitive). The same key is available to Flux `postBuild` substitution as `${SECRET_DOMAIN_ANDREAMOSTELLER}` for later cert/tunnel/external-dns work. Nameservers: `./tf state show cloudflare_zone.andreamosteller`.
+`andreamosteller_zone.tf` creates a second zone (free plan, account taken from the primary zone) and nothing else. The domain name is secret: it lives only in `cluster-secrets.sops.yaml` as `SECRET_DOMAIN_ANDREAMOSTELLER`, exported by `./tf` as `TF_VAR_andreamosteller_domain` (sensitive); Flux `postBuild` substitution exposes it as `${SECRET_DOMAIN_ANDREAMOSTELLER}`. Nameservers: `./tf state show cloudflare_zone.andreamosteller`.
+
+Records (after the cutover): apex and `www` are proxied CNAMEs to the tunnel, created by external-dns from `DNSEndpoint/cloudflared-andreamosteller` (`kubernetes/apps/network/external/cloudflared/dnsendpoint.yaml`); external-dns `domainFilters` carries the second zone. The legacy HTTPRoutes (`andreamosteller-legacy-public`, `-www-redirect`) opt out of external-dns via the `controller: ignore` annotation so only the DNSEndpoint produces records. Certificates: `andreamosteller-legacy-{staging,production}` in `network` (DNS-01, both ClusterIssuers list the zone), served as an SNI-selected second `certificateRef` on the `envoy-external` https listener.
+
+**Token prerequisite.** The Cloudflare API tokens used by cert-manager (`cert-manager-secret`) and external-dns (`external-dns-secret`) are scoped to the primary zone. Each needs `Zone:Zone:Read` and `Zone:DNS:Edit` on this zone too, or DNS-01 fails with "Found no Zones for domain" and external-dns never sees the zone.
 
 ---
 
@@ -360,3 +364,4 @@ To revert to Cloudflare defaults (if a setting was never managed before):
 
 - `2026.05.06`: Initial SOP — Terraform Kubernetes-backend workflow, 5 managed settings applied
 - `2026.11.15`: Added secondary zone + DNS-only records (secret domain via SOPS)
+- `2026.11.15` (cutover): static A records removed; apex/www CNAMEs to the tunnel via external-dns DNSEndpoint

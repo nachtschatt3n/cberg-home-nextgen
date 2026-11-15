@@ -82,7 +82,7 @@ spec:
     registry: txt
     txtPrefix: k8s.
     txtOwnerId: default
-    domainFilters: ["${SECRET_DOMAIN}"]
+    domainFilters: ["${SECRET_DOMAIN}", "${SECRET_DOMAIN_ANDREAMOSTELLER}"]
     podAnnotations:
       secret.reloader.stakater.com/reload: external-dns-secret
     serviceMonitor:

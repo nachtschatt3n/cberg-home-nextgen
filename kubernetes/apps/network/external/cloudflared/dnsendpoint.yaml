@@ -9,3 +9,21 @@ spec:
     - dnsName: "external.${SECRET_DOMAIN}"
       recordType: CNAME
       targets: ["${SECRET_CLOUDFLARE_TUNNEL_ID}.cfargotunnel.com"]
+---
+# Custom domain of the legacy site. Apex is a CNAME (flattened by Cloudflare);
+# external-dns applies --cloudflare-proxied. Pointed straight at the tunnel,
+# not at the main zone's `external` name, so the record does not depend on a
+# cross-zone proxied hop. The HTTPRoutes for these hosts opt out of
+# external-dns so only this endpoint produces the records.
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: cloudflared-andreamosteller
+spec:
+  endpoints:
+    - dnsName: "${SECRET_DOMAIN_ANDREAMOSTELLER}"
+      recordType: CNAME
+      targets: ["${SECRET_CLOUDFLARE_TUNNEL_ID}.cfargotunnel.com"]
+    - dnsName: "www.${SECRET_DOMAIN_ANDREAMOSTELLER}"
+      recordType: CNAME
+      targets: ["${SECRET_CLOUDFLARE_TUNNEL_ID}.cfargotunnel.com"]

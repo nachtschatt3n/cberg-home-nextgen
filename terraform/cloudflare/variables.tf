@@ -15,12 +15,6 @@ variable "andreamosteller_domain" {
   sensitive = true
 }
 
-variable "andreamosteller_origin_ip" {
-  type        = string
-  description = "Current origin (mittwald) until cutover to the tunnel"
-  default     = "37.202.4.23"
-}
-
 # Second secondary zone (live mail). Name is secret, see SECRET_DOMAIN_MATHIASUHL.
 variable "mathiasuhl_domain" {
   type      = string
