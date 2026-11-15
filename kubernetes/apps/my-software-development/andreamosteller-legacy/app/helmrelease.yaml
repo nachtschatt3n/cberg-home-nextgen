@@ -33,7 +33,7 @@ spec:
               repository: ghcr.io/nachtschatt3n/andreamosteller-site
               # Tracks the `latest` build; the digest is bumped by ./image-automation.yaml.
               tag: latest # {"$imagepolicy": "my-software-development:andreamosteller-legacy:tag"}
-              digest: sha256:bd066707ffe7e038f1615339956852ffa04336e35eb1ca3451d719f597608abe # {"$imagepolicy": "my-software-development:andreamosteller-legacy:digest"}
+              digest: sha256:77c67add0b36474c2631136525fac34ed097d61c35020a8326678d1e0c7ef6fd # {"$imagepolicy": "my-software-development:andreamosteller-legacy:digest"}
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
