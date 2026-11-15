@@ -1,0 +1,61 @@
+# Custom (public) domain of the legacy site. Apex is canonical, www 301s to it.
+# The internal/test hostname stays on the app-template route in helmrelease.yaml.
+#
+# Standalone manifests because app-template 5.3.0 route filters cannot express
+# RequestRedirect. kubeconform reports the `${SECRET_DOMAIN_ANDREAMOSTELLER}`
+# hostnames as pattern failures before Flux substitution: same known false
+# positive as every other standalone HTTPRoute in this repo.
+#
+# Both routes opt out of external-dns. For the gateway-httproute source it
+# would publish a CNAME to the main zone's tunnel name (target annotation on
+# the envoy-external Gateway); the custom domain gets its tunnel CNAME from a
+# DNSEndpoint instead, created in the DNS cutover commit. The GA and alpha
+# annotation prefixes are both set, as on the Gateway.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: andreamosteller-legacy-public
+  annotations:
+    external-dns.alpha.kubernetes.io/controller: ignore
+    external-dns.kubernetes.io/controller: ignore
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "${SECRET_DOMAIN_ANDREAMOSTELLER}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: andreamosteller-legacy
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: andreamosteller-legacy-www-redirect
+  annotations:
+    external-dns.alpha.kubernetes.io/controller: ignore
+    external-dns.kubernetes.io/controller: ignore
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "www.${SECRET_DOMAIN_ANDREAMOSTELLER}"
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            hostname: "${SECRET_DOMAIN_ANDREAMOSTELLER}"
+            statusCode: 301
