@@ -6,6 +6,7 @@ resources:
   - ./helmrelease.yaml
   - ./certificate.yaml
   - ./certificate-andreamosteller-staging.yaml
+  - ./certificate-andreamosteller.yaml
   - ./gatewayclass.yaml
   - ./gateways.yaml
   - ./policies.yaml

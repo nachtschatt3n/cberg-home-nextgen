@@ -1,0 +1,18 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/cert-manager.io/certificate_v1.json
+# Apex + www of the second zone, issued into `network` because Gateway API
+# certificateRefs are namespace-local. Served by envoy-external as an extra
+# certificateRef on the https listener (SNI-selected); see gateways.yaml.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: andreamosteller-legacy-production
+spec:
+  secretName: andreamosteller-legacy-production-tls
+  issuerRef:
+    name: letsencrypt-production
+    kind: ClusterIssuer
+  commonName: "${SECRET_DOMAIN_ANDREAMOSTELLER}"
+  dnsNames:
+    - "${SECRET_DOMAIN_ANDREAMOSTELLER}"
+    - "www.${SECRET_DOMAIN_ANDREAMOSTELLER}"
