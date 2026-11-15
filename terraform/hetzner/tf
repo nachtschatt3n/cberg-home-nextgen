@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Wrapper: reads the API token from the SOPS secret, state lives in the cluster
+# (Secret flux-system/tfstate-default-hetzner-tfstate), like terraform/cloudflare.
+set -euo pipefail
+cd "$(dirname "$0")"
+REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+SOPS=$(command -v sops 2>/dev/null || echo "$HOME/.local/share/mise/shims/sops")
+export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$REPO_ROOT/age.key}"
+export TF_VAR_hcloud_token=$(
+  "$SOPS" -d "$REPO_ROOT/kubernetes/apps/backup/hetzner-credentials/app/secret.sops.yaml" \
+  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['HETZNER_API_TOKEN'])")
+export TF_VAR_admin_pubkey="${TF_VAR_admin_pubkey:-$(cat "${ADMIN_PUBKEY_FILE:?set ADMIN_PUBKEY_FILE}")}"
+export KUBECONFIG="$REPO_ROOT/kubeconfig"
+export KUBE_CONFIG_PATH="$REPO_ROOT/kubeconfig"
+TF=$(command -v terraform 2>/dev/null || command -v ~/.local/share/mise/shims/terraform)
+exec "$TF" "$@"
