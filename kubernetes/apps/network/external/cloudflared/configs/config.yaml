@@ -25,4 +25,15 @@ ingress:
     service: https://envoy-external.network.svc.cluster.local:443
     originRequest:
       originServerName: "${SECRET_DOMAIN}"
+  # Custom domain of the legacy site: apex + www to the same origin. The cert
+  # (apex + www SANs) is selected by SNI on the https listener, so the origin
+  # server name is the apex for both.
+  - hostname: "${SECRET_DOMAIN_ANDREAMOSTELLER}"
+    service: https://envoy-external.network.svc.cluster.local:443
+    originRequest:
+      originServerName: "${SECRET_DOMAIN_ANDREAMOSTELLER}"
+  - hostname: "www.${SECRET_DOMAIN_ANDREAMOSTELLER}"
+    service: https://envoy-external.network.svc.cluster.local:443
+    originRequest:
+      originServerName: "${SECRET_DOMAIN_ANDREAMOSTELLER}"
   - service: http_status:404

@@ -84,3 +84,10 @@ spec:
         certificateRefs:
           - kind: Secret
             name: "${SECRET_DOMAIN/./-}-production-tls"
+          # Custom domain of the legacy site (apex + www). Envoy selects the
+          # certificate by SNI, so the wildcard above keeps serving everything
+          # else. A separate listener with a hostname is not possible here: the
+          # Gateway schema pattern-checks `hostname`, which cannot hold a Flux
+          # variable at kubeconform time. Roll back by removing this one ref.
+          - kind: Secret
+            name: andreamosteller-legacy-production-tls
