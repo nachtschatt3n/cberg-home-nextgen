@@ -75,7 +75,11 @@ spec:
       # and UMBB/U5G-Max cellular: no such device). No metric rename or removal.
       # Chart STILL 2.4.0 and this override STAYS: no published chart ships an appVersion
       # >= v5.5.0.
-      tag: v5.5.1
+      # 2026-11-16: v5.5.1 -> v5.9.5 image minor (plan unpoller-5.9.5, PR #260). Chart STILL 2.4.0 and this
+      # override STAYS (no published chart ships appVersion >= v5.5). Deltas: station-count and
+      # temperature/storage LABEL fixes (v5.6.0/.2/.3), per-WAN series (v5.7.0), one extra best-effort
+      # console-system API call per poll (v5.9.0), rogueap last_seen (v5.9.4), PDU/UNAS/cellular inert.
+      tag: v5.9.5
 
     replicaCount: 1
 
