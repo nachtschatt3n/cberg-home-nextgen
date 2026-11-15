@@ -295,7 +295,7 @@ kubectl annotate volume <name> -n storage \
 
 **Recovery — option A: NAS hardware OK, just a config/share rebuild**
 1. Rebuild SMB shares with the same paths.
-2. Restore each share from offsite backup.
+2. Restore each share from the off-site restic backup (tier `core` / `apps`, see `docs/sops/backup.md` "Off-site Backup"; repo passwords, SSH keys and the host are in the operator password manager). Shares not covered by it (media library and other deferred large trees) have no off-site copy beyond the NAS vendor upload.
 3. Restart pods that mount CIFS:
    ```bash
    kubectl rollout restart deployment -n <ns> <app>
@@ -304,7 +304,7 @@ kubectl annotate volume <name> -n storage \
 **Recovery — option B: total NAS replacement**
 1. Provision new NAS (same hostname/IP `UNAS-CBERG` @ `192.168.55.240` on
    k8s-network VLAN 55 if possible — saves manifest changes).
-2. Restore shares from offsite backup of the NAS itself (owner-managed; a cloud copy exists per the 2026-09-14 attestation — its share coverage and restore path are not yet drill-tested).
+2. Restore shares from the off-site restic backup (`docs/sops/backup.md` "Off-site Backup": restic over SSH, no cluster or NAS needed; the repo password and SSH keys must come from the operator password manager, copies also live in the `offsite-backup-*` Secrets). Retention 7 daily / 4 weekly / 12 monthly; the Longhorn backup store is inside tier `core`. The older vendor cloud upload remains a second, unverified copy during the parallel run.
 3. Point CIFS PVs back at the new NAS. If hostname/IP changed, search/replace
    the StorageClass + PV manifests under `kubernetes/apps/kube-system/csi-driver-smb/`.
 

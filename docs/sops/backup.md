@@ -371,6 +371,106 @@ mechanism.
 
 ---
 
+## Off-site Backup (restic, hosted storage box)
+
+Since 2026-11-15. Replaces the NAS built-in cloud upload as the verified,
+monitored off-site copy. Manifests: `kubernetes/apps/backup/offsite-backup/`
+(`secrets/` and `app/` are separate Flux Kustomizations), alerts:
+`kubernetes/apps/monitoring/kube-prometheus-stack/app/offsite-backup-alerts.yaml`.
+
+**Privacy rule (public repo):** hosts, accounts, share names, folder lists and
+repository paths exist ONLY inside the SOPS Secrets `offsite-backup-write`,
+`offsite-backup-prune` and `offsite-backup-sources`. Plaintext manifests use
+neutral names (`backup-src-1..5`, `offsite-backup-{core,apps,prune,check}`);
+PV sources are Flux postBuild variables read from `offsite-backup-sources`.
+
+**Coverage (categories only):**
+
+| Tier | Repository | Contents |
+|---|---|---|
+| `core` | 1 restic repo | Longhorn backup store (all cluster PV data), phone-cloud backups, other backup folders, document and app-data shares |
+| `apps` | 1 restic repo | Small application data shares |
+
+Deliberately NOT covered yet (operator decision 2026-11-15): the media library
+and other large lower-priority trees (list kept in the encrypted Secret notes).
+Mounting a whole share and using an include list is intended; excluded trees
+are never read. Sources are mounted read-only (`ro`), PVs are `Retain`.
+
+**Jobs (namespace `backup`, UTC):**
+
+| CronJob | Schedule | Key | What |
+|---|---|---|---|
+| `offsite-backup-apps` | 00:30 daily | append-only | restic backup, tier apps |
+| `offsite-backup-core` | 00:40 daily | append-only | restic backup, tier core, upload limited to 40000 KiB/s |
+| `offsite-backup-prune` | Sun 04:30 | admin | `forget --prune`, keep 7 daily / 4 weekly / 12 monthly, both tiers |
+| `offsite-backup-check` | Wed 04:30 | admin | `check --read-data-subset=5%`, both tiers |
+
+Longhorn backups run at 23:00 UTC and the nightly maintenance window at 02:30
+UTC; `concurrencyPolicy: Forbid` everywhere. Snapshots use a fixed host
+(`offsite`) so retention groups correctly across pods.
+
+**Ransomware protection.** Nightly jobs use SSH keys locked on the box to the
+forced command `rclone serve restic --stdio --append-only <repo-dir>` (one key
+and one directory per tier, so the key can neither read other directories nor
+delete data). Proven 2026-11-15 on a throwaway repo: with the append-only key,
+`forget --prune` and snapshot removal return HTTP 403 and all data remains
+(`check --read-data` clean); with the admin key prune works. Only the weekly
+prune/check jobs hold the admin key. The provider's own snapshots are the
+second safeguard. NOTE: restic itself appends `serve restic --stdio` to the
+`rclone.program` command, so the program string must end at `user@host` (append
+key) or at `user@host rclone` (admin key, repo `rclone:<dir>`).
+
+**Metrics and alerts.** Each successful run pushes to the Pushgateway
+(`job=offsite-backup`, labels `tier=core|apps`, `kind=backup|prune|check`):
+`offsite_backup_last_success_timestamp_seconds`, `_duration_seconds`,
+`_bytes_added`, `_files_processed`, `_snapshots`, `_read_errors` (prune also
+`_repo_bytes`). Nothing is pushed on failure, so staleness is visible.
+Alerts: `OffsiteBackupStale` (>36h), `OffsiteBackupJobFailed`,
+`OffsiteBackupNeverSucceeded` (absent guard), `OffsiteBackupMaintenanceStale`,
+`OffsiteBackupCheckMissing`.
+
+**Operations:**
+
+```bash
+# Seed or run now (one-off Job from the CronJob; apps first, then core)
+kubectl create job -n backup offsite-run-apps --from=cronjob/offsite-backup-apps
+kubectl logs -n backup job/offsite-run-apps -f
+# Last runs
+kubectl get cronjob,job -n backup | grep offsite
+```
+
+First run of each job initialises its repository if missing (idempotent).
+Restic exit code 3 (some files unreadable) still records the snapshot but fails
+the job on purpose.
+
+**Restore (works with the cluster and NAS both gone).** Needed: the two repo
+passwords, the SSH key for each tier (or the admin key) and the host key line,
+plus the storage-box host and account. These live in the Secrets above and MUST
+also be kept in the operator password manager.
+
+```bash
+# On any machine with restic >= 0.17 and ssh
+restic -o rclone.program="ssh -p <port> -i <keyfile> -o UserKnownHostsFile=<known_hosts> \
+  -o StrictHostKeyChecking=yes <user>@<host>" -r rclone: snapshots
+restic ... -r rclone: restore latest --host offsite --tag <core|apps> \
+  --target /restore --include <path-in-snapshot>
+```
+
+Restored files keep content and mtimes; ownership is the mount's uid/gid 1000
+(sources are mounted with fixed ownership), so re-apply ownership on the target.
+The Longhorn backup store is inside tier `core`: restore it to the NAS path of
+the backup target, then restore volumes through Longhorn as usual.
+
+**Restore drill record.** 2026-11-15 tier apps: 12 random files restored from
+the latest snapshot to a scratch emptyDir and compared by sha256, 12/12 equal.
+Tier core drill: see the follow-up below (run after the seed finishes).
+Repeat the drill after any change to sources, and at least quarterly.
+
+**Memory.** Peak RSS during the core seed is recorded in the CronJob limits
+(`offsite-backup-core`: 4Gi limit, `GOMEMLIMIT=3500MiB`).
+
+---
+
 ## Pre-Upgrade Backup Procedure
 
 Before any significant cluster upgrade (Longhorn, Kubernetes, Talos):
