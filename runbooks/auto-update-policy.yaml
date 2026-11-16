@@ -371,6 +371,13 @@ deny:
   - match: "*immich*"
     reason: "Immich server applies forward-only DB migrations; revert after migration crash-loops.
       Plan lane only: dump + scratch-restore proof first (immich-server plan)."
+  # Added 2026-11-16. The Samsung Family Hub fridge runs Chrome 108 and Mealie's frontend
+  # already needed a gateway polyfill once (toSorted, Chrome 110; upstream declined a fix,
+  # mealie-recipes/mealie#9178). An unattended bump can blank the fridge. Plan lane only:
+  # run runbooks/mealie-chrome108-scan.py against the target first. SOP: mealie-family-hub-compat.md.
+  - match: "*mealie*"
+    reason: "Family Hub (Chrome 108) compat: scan the target frontend with
+      runbooks/mealie-chrome108-scan.py before any bump (docs/sops/mealie-family-hub-compat.md)."
   # Added 2026-08-19 with the 0.301.5 -> 2026.08.0 execution. NocoDB left semver
   # for calver, so the classifier's tuple comparison reads a routine month hop
   # (2026.08.0 -> 2026.09.0) as major=equal / minor=greater, i.e. "minor" — which
