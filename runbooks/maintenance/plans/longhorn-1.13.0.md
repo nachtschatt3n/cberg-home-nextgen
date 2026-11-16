@@ -1,18 +1,21 @@
 ---
 plan_id: longhorn-1.13.0
 component: longhorn
-pr: null                              # no Renovate PR exists (gh pr list --search longhorn: none open);
-                                      # the bump reaches us via coverage.py's direct-bump lane and is
-                                      # HELD by the `*longhorn*` max: patch deny rule (8201c9dc).
+pr: 274                               # CORRECTED 2026-11-16: Renovate PR #274 "update longhorn ( 1.12.1 -> 1.13.0 )"
+                                      # (branch renovate/longhorn-1.x, opened 2026-10-06) IS open; the old "no PR"
+                                      # note was wrong. HELD by the `*longhorn*` max: patch deny rule (8201c9dc).
+                                      # Separately PR #509 (1.12.1 -> 1.12.2, PATCH, GA 2026-11-09) is open,
+                                      # CI green, MERGEABLE and AUTO-eligible -- see §1 "Moving base".
 kind: chart
 current: "1.12.1"
 target: "1.13.0"
 update_type: minor
-risk: high                            # storage engine under all 79 volumes (75 attached + 4 detached, live 2026-11-06); the upgrade is ONE-WAY
-                                      # (upstream downgrade prevention, §5); 25 Kustomizations (live 2026-11-06; 35 on 10-05)
+risk: high                            # storage engine under all 76 volumes (74 attached + 2 detached, live 2026-11-16); the upgrade is ONE-WAY
+                                      # (upstream downgrade prevention, §5); 24 Kustomizations (live 2026-11-16; 25 on 11-06, 35 on 10-05)
                                       # dependsOn storage/longhorn -> cluster-wide Flux amber for
                                       # 5-15 min (docs/sops/longhorn.md "Chart Upgrade Storm").
-est_duration_min: 70                  # pre-checks 15 + Phase A (chart, storm settle, verify) 30 +
+est_duration_min: 100                 # 2026-11-16: +30 for the §2.8 etcd-quiet gate's re-check allowance (T+30 max).
+                                      # pre-checks 15 + Phase A (chart, storm settle, verify) 30 +
                                       # Phase B (engine drain, async) 25. Phase B is SEPARABLE: if it
                                       # has not started by T+45 min, stop after Phase A (manager
                                       # 1.13.0 + engines 1.12.1 is a supported state) and re-window B.
@@ -33,16 +36,21 @@ touches:
     - "crd/instancemanagerupgradecontrols.longhorn.io, instancemanagerupgrades.longhorn.io, snapshotgroups.longhorn.io"   # NEW CRDs
     - "clusterrole+clusterrolebinding/longhorn-csi-role, longhorn-csi-secret-role; role+rolebinding/longhorn-csi-role; serviceaccount/longhorn-csi-service-account"   # NEW RBAC
     - setting/concurrent-automatic-engine-upgrade-per-node-limit   # Phase B: 0 -> 1 -> 0 (CR op, not in git)
-    - "volume/* (79 on 2026-11-06, all v1: 75 attached + 4 detached; Phase B live-upgrades the attached ones and RE-POINTS the detached ones, 34abe2bb)"
+    - "volume/* (76 on 2026-11-16, all v1: 74 attached + 2 detached; Phase B live-upgrades the attached ones and RE-POINTS the detached ones, 34abe2bb)"
     - "systembackup/pre-1-13-0-<date>  (created in pre-check §2.6)"
     - "deployment/mealie (ns office) — restarted once in §4.4 as the attach/IO probe"
   shared:
     - storage/longhorn                # every stateful app in the cluster rides it
-    - flux                            # 25 Kustomizations (live 2026-11-06) dependsOn storage/longhorn -> storm
+    - flux                            # 24 Kustomizations (live 2026-11-16) dependsOn storage/longhorn -> storm
     - monitoring                      # §4 reads Prometheus; longhorn-backend is a scrape target
                                       # whose reachability a chart default already broke once (3c73a7b0)
     - cifs/backups                    # the BackupTarget (NAS //…/backups) is written by the §2.6
-                                      # SystemBackup; no CIFS StorageClass/PVC is touched
+                                      # SystemBackup; no CIFS StorageClass/PVC is touched. The same share
+                                      # is READ (ro) by the off-site restic jobs in ns backup (PV backup-src-1);
+                                      # no Longhorn volume is involved -- §2.7, §6
+    - etcd                            # NOT perturbed by design, but the storm + manager roll is an API-server/
+                                      # etcd write burst on a control plane with open leader churn (F-8bfd22b9);
+                                      # hard etcd-quiet gate §2.8
 depends_on: []
 conflicts_with:
   # Re-derived 2026-11-06 from every open plan's frontmatter (rule 4). Dead refs to plans no longer in
@@ -56,17 +64,21 @@ conflicts_with:
                                       # same slot; either order is fine
   - talos-linux-1.14.5                # node roll restarts instance-managers + rebuilds replicas; never
                                       # pair with a storage-engine upgrade (same rule as 34abe2bb); it
-                                      # depends_on THIS plan (sun-attended:2026-11-22)
+                                      # depends_on THIS plan. Still holds sun-attended:2026-11-22 on 2026-11-16 although
+                                      # superseded by 1.14.6 -> its window must go to null (operator/window agent)
+  - talos-linux-1.14.6                # supersedes 1.14.5 (draft, window null); depends_on THIS plan; same reason
+  - kube-prometheus-stack-93.3.0      # draft; restarts Prometheus = this plan's §2.5/§4.3 instrument (rule 4)
   - flux-oci-chart-sources            # moves the longhorn HelmRepository source (shared storage/longhorn, flux)
   - flux-reconciler-impersonation     # Flux control-plane change (status blocked); same storm reasoning
   - bitnamilegacy-exit-nextcloud-db   # allocates a new Longhorn volume (status blocked)
   - otbr-thread-rcp-recovery          # scales otbr 0 -> 1, which ATTACHES otbr-data (pvc-da17b5c6-…), one of
-                                      # the 4 ruled detached volumes in §2.2a; the census and Phase B
+                                      # the 2 ruled detached volumes in §2.2a; the census and Phase B
                                       # re-point would change underneath this plan
   - otbr-0.4.0                        # Recreate roll of the same pod/volume; same reason
   - anythingllm-1.19                  # reciprocal: re-attaches a Longhorn volume
   # 2026-11-06: removed edot-collector-0.164.0 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
-  - icloud-drive-fleet-2.3.0          # reciprocal: Recreate detaches/re-attaches two Longhorn volumes
+  - icloud-drive-fleet-2.3.0          # reciprocal: Recreate detaches/re-attaches two Longhorn volumes, incl.
+                                      # icloud-docker-andrea-session (pvc-f6ec0213-…), ruled detached in §2.2a
 exclusive: true                       # the storm fans out to 25 dependents (+ transitive); any other
                                       # plan's Flux-Ready gate in the same slot reads false-red, and
                                       # a one-way storage change must not share attribution.
@@ -93,6 +105,9 @@ finding_refs:
   - F-e5ceb782                        # livenessprobe v2.19.0 -> v2.20.0 (clears in Phase A)
 premises:
   # All read-only single pipelines. Values measured live 2026-10-05; all 7 re-run PASS 2026-11-06 (revision for sweep 471de4f9 NEEDS-FIX).
+  # 2026-11-16 RE-RULE (window sun-attended:2026-11-15 deferred: detached-set premise FAILED): detached set and
+  # robustness set re-measured and turned into SUBSET matches (see their `why`); two etcd-quiet premises added
+  # (F-8bfd22b9). The other 5 re-run PASS 2026-11-16 unchanged.
   - id: longhorn-hr-chart-1-12-1-ready
     why: >-
       §3 A1's sed anchors on "1.12.1" and §5 case 1 reverts to it. A failed/in-flight release, or 1.13.0
@@ -126,25 +141,53 @@ premises:
       against 0; a non-zero baseline means the pin is already broken and §4.3 cannot attribute.
     run: kubectl get networkpolicy -n storage -o name | wc -l | tr -d ' '
     expect_exact: "0"
-  - id: longhorn-detached-set-is-the-ruled-four
+  - id: longhorn-detached-set-within-ruled
     why: >-
-      §2.2a asks the operator for one ruling per DETACHED volume (rollback floor? backup older than
-      detach accepted? Phase B engine re-point accepted?). The rulings are only valid for exactly this
-      set. A fifth detached volume (an app crashed and released its PVC), or one of the four re-attached
-      (otbr scaled back to 1), or one retired, prints a different list and fails -> re-measure and
-      re-rule. Measured 2026-11-06.
+      §2.2a asks the operator for one ruling per DETACHED volume (backup older than detach accepted?
+      Phase B engine re-point accepted?). Re-ruled 2026-11-16 for the two volumes detached today:
+      otbr-data (pvc-da17b5c6-…) and icloud-docker-andrea-session (pvc-f6ec0213-…). The 11-06 set of four
+      lost jellyfin-config (retired 78d21f8c2) and uzeit-de-fileadmin/-uploads (retired 5eb27f52a), which
+      is what failed the old exact-match premise on 2026-11-15. Now a SUBSET match: a ruled volume that
+      RE-ATTACHES (otbr scaled up, andrea re-authed and un-suspended) drops out of the list and still
+      passes -- correctly, because an attached volume is then gated by the attached/healthy census and the
+      nightly backup instead of a ruling. Any UNRULED name (an app released its PVC) fails. Known-bad
+      controls (dry-tested with Python re): the 11-06 four-name string fails; "pvc-da17… pvc-f6ec…
+      nextcloud-config" fails; empty output (both re-attached) fails by the runner's empty rule -> re-measure.
+      Live 2026-11-16 prints "pvc-da17b5c6-0d8c-42cf-9a25-bc444ac9a71d pvc-f6ec0213-4b00-49d9-93b4-954d5fee1d31" (PASS).
     run: kubectl get volumes.longhorn.io -n storage -o jsonpath='{range .items[?(@.status.state=="detached")]}{.metadata.name}{" "}{end}'
-    expect_exact: jellyfin-config pvc-da17b5c6-0d8c-42cf-9a25-bc444ac9a71d uzeit-de-fileadmin uzeit-de-uploads
+    expect_matches: '^(pvc-da17b5c6-0d8c-42cf-9a25-bc444ac9a71d)?\s?(pvc-f6ec0213-4b00-49d9-93b4-954d5fee1d31)?$'
   - id: longhorn-state-robustness-set
     why: >-
       "Avoid upgrading when volumes are in the Faulted status" (upstream). The only state/robustness
-      pairs allowed are attached/healthy and detached/unknown; a degraded or faulted volume adds a token
-      (e.g. attached/degraded) and fails. Measured 2026-11-06.
+      pairs allowed are attached/healthy and (optionally, only while a ruled volume is detached)
+      detached/unknown; a degraded, faulted or attached/unknown volume adds a token and fails (dry-tested:
+      "attached/degraded attached/healthy detached/unknown" and "attached/healthy attached/unknown
+      detached/unknown" both fail; "detached/unknown" alone fails). Live 2026-11-16: "attached/healthy
+      detached/unknown" (PASS).
     run: kubectl get volumes.longhorn.io -n storage -o jsonpath='{range .items[*]}{.status.state}/{.status.robustness}{"\n"}{end}' | sort -u | tr '\n' ' '
-    expect_exact: attached/healthy detached/unknown
-review: ready-for-go@2026-11-06   # sweep 471de4f9: needs-fix (4 blockers: detached-volume census, backup timing, one-hot robustness gate, unpassable §4.6/4.7) -> planner fixed -> delta re-review ready-for-go (each changed gate shown failing on known-bad, passing live)
-status: vetted   # 2026-11-06 re-vetted; HUMAN-GATED: operator GO + 4 detached-volume rulings (§2.2a) + 1.12.2 hold/retarget decision required
-window: "sun-attended:2026-11-15"   # scheduled 2026-10-05: exclusive Sunday, 70 of 180; one week BEFORE talos-linux-1.14.5 (11-22, operator ordering 2026-11-02, which depends_on this plan). etcd-timeouts-5000-500 (was 11-08) is blocked/unwindowed since; this plan never depended on it, so the 11-15 slot stays viable
+    expect_matches: '^attached/healthy( detached/unknown)?$'
+  - id: etcd-all-members-have-leader
+    why: >-
+      Hard etcd-quiet gate, part 1 (F-8bfd22b9: ~41-43 leader elections/24h, live 2026-11-16). The chart
+      storm (24 Kustomizations), the manager DaemonSet roll and the CSI re-create are an API-server write
+      burst; starting it on a control plane without a leader on every member risks a stalled webhook/lease
+      mid-roll of a ONE-WAY change. Counts members reporting etcd_server_has_leader==1 via the API-server
+      proxy to Prometheus; fails on "2"/"1", and on an empty result (scrape lost). Live 2026-11-16: "3".
+    run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count(etcd_server_has_leader%3D%3D1)'
+    expect_matches: '"value":\[[0-9.]+,"3"\]'
+  - id: etcd-no-election-last-1h
+    why: >-
+      Hard etcd-quiet gate, part 2. Zero leader changes on EVERY member in the last hour. Measured live
+      2026-11-16 ~00:00Z: max 1h increase = 3.03 -> this premise FAILS right now (that is the live
+      known-bad control); a flat counter returns exactly "0" (measured on the 2m range the same minute).
+      An empty result ("result":[] -- e.g. etcd scrape gone) fails too. Feasibility: over the 24h to
+      2026-11-16 the 1h-lookback read 0 in 54 of 144 ten-minute samples (~37%), quiet hours cluster
+      outside CI bursts. Re-checked by hand right before the A2 push (§2.8).
+    run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=max(increase(etcd_server_leader_changes_seen_total%5B1h%5D))'
+    expect_matches: '"result":\[\{"metric":\{\},"value":\[[0-9.]+,"0"\]\}\]'
+review: null   # NEEDS RE-REVIEW after the 2026-11-16 re-rule (detached set 4 -> 2 with a new member andrea-session, subset-match premises, new etcd-quiet hard gate §2.8 + 2 premises, 2.0 check rewritten because v1.12.2 GA now sorts first, baselines 79/75/4 -> 76/74/2, pr 274). History: ready-for-go@2026-11-06 (sweep 471de4f9 needs-fix -> fixed -> delta re-review)
+status: vetted   # kept as is on 2026-11-16 (operator instruction); HUMAN-GATED: operator GO + 2 detached-volume rulings (§2.2a) + 1.12.2 hold/retarget decision (PR #509 is open and AUTO-eligible) required. Not executable until review is ready-for-go again
+window: "sun-attended:2026-11-22"   # OPERATOR DECISION 2026-11-16: missed sun-attended:2026-11-15 (window agent deferred on the failed detached-set premise). Exclusive Sunday, 100 of 180. talos-linux-1.14.5 still holds this date and MUST be set to window: null (it is superseded by talos-linux-1.14.6, which depends_on this plan and cannot run first anyway)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/longhorn.md
@@ -183,7 +226,7 @@ Three facts make it a planned change and not a false positive:
    > to Longhorn v1.13.0."
    Live: server `v1.36.0` on all three nodes; chart `kubeVersion: '>=1.34.0-0'`.
    **Met.** The other breaking item (legacy V2 linked-clone volumes) does not
-   apply: `v2-data-engine=false`, 79/79 volumes `dataEngine=v1` (re-measured 2026-11-06; 80 on 2026-10-05, 94 on 2026-10-01).
+   apply: `v2-data-engine=false`, 76/76 volumes `dataEngine=v1` (re-measured 2026-11-16; 79 on 2026-11-06, 80 on 2026-10-05, 94 on 2026-10-01).
 3. **Architecture moves inside a minor** (measured by `helm template` of both
    charts with OUR `spec.values`, `--kube-version 1.36.0`): 47 -> 58 objects.
    New: `Deployment longhorn-global-manager` (3 replicas, runs the cluster-wide
@@ -209,12 +252,16 @@ separate plan — do NOT flip it here.
 release notes' "live upgrade only from v1.12.2" caveat is about **V2** volumes
 only (none here). Do not wait for v1.12.2.
 
-**Moving base: v1.12.2 is in release candidacy** (`v1.12.2-rc4` published
-2026-11-05, rc1..rc4 since 2026-10-15; `gh api repos/longhorn/longhorn/releases`,
-2026-11-06). A GA 1.12.2 is a PATCH, and the `*longhorn*` rule is `max: patch`,
-so it is AUTO-eligible: once its cooldown lapses it can land UNATTENDED at a
-`nightly` Step 0 before 11-15 (manager roll + the 25-Kustomization storm, engines
-staying on v1.12.1 because the drain limit is 0). If that happens this plan's
+**Moving base: v1.12.2 is GA** (published 2026-11-09T07:02Z; Renovate PR #509
+"update longhorn ( 1.12.1 → 1.12.2 )" opened 2026-11-10, `type/patch`, all four
+checks SUCCESS incl. `Flate Render Gate`, MERGEABLE — `gh pr view 509`,
+2026-11-16). The live HelmRelease is nevertheless still 1.12.1 on 2026-11-16,
+seven nights after the 48 h cooldown lapsed; WHY Step 0 has not taken it is not
+established by this re-rule (no 1.12.2 hold exists in
+`runbooks/auto-update-policy.yaml`; the `*longhorn*` rule is still `max: patch`).
+Treat it as able to land UNATTENDED at any `nightly` Step 0 before 11-22
+(manager roll + the 24-Kustomization storm, engines staying on v1.12.1 because
+the drain limit is 0). If that happens this plan's
 premises `longhorn-hr-chart-1-12-1-ready` and `longhorn-settings-pre-state` FAIL
 (they read 1.12.2 / v1.12.2) — that is the intended stop, not a bug. Two paths,
 operator's choice:
@@ -262,7 +309,7 @@ those sidecars. `runbooks/policy-cli.py finding show <id>`.
 Convention: `docs/sops/vulnerability-disclosure.md`.
 
 **Freshness caveat.** 1.13.0 was published 2026-09-29 (still the newest
-stable release on 2026-11-06; no 1.13.1 release or rc — only `v1.13.1-dev-*` dev tags). Enforced as pre-check §2.0 — not as a premise, because
+1.13.x on 2026-11-16 — the only GA tag after it is v1.12.2 on the old line; no 1.13.1 release or rc). Enforced as pre-check §2.0 — not as a premise, because
 the only premise-legal read (`helm show chart` from the local repo cache)
 cannot fail on a newer release until someone runs `helm repo update`, which
 is not a read.
@@ -271,15 +318,31 @@ is not a read.
 
 Run from the repo root on the Mac mini (zsh). The frontmatter `premises:`
 (`plan-premises.py longhorn-1.13.0`) cover the HR/setting/server/backup-target/
-NetworkPolicy pre-state plus the detached-volume set and the state/robustness set; 2.1-2.5 re-read the same facts with context.
+NetworkPolicy pre-state, the detached-volume set, the state/robustness set and
+the etcd-quiet gate (2026-11-16); 2.1-2.5 and 2.8 re-read the same facts with context.
+
+**Re-rule 2026-11-16 (why this section changed).** The 2026-11-15 window was
+deferred because premise `longhorn-detached-set-is-the-ruled-four` failed. Live
+re-measure 2026-11-16 (`kubectl get volumes.longhorn.io -n storage`): **76 volumes,
+74 attached/healthy + 2 detached/unknown, all v1 on engine v1.12.1, 0 with
+`spec.image != currentImage`.** Drift from 11-06: `jellyfin-config` retired
+(78d21f8c2), `uzeit-de-fileadmin` + `uzeit-de-uploads` retired (5eb27f52a, operator
+GO 2026-11-14) — 79 -> 76; and a NEW detached volume, `pvc-f6ec0213-…`
+(`backup/icloud-docker-andrea-session`), detached 2026-11-15T14:29Z because the
+operator suspended HelmRelease `backup/icloud-docker-andrea` and it is scaled 0/0
+pending the 2FA re-auth (F-bc57b80a, F-1e5dda44) — 75 -> 74 attached. (The window
+agent on 11-15 saw "1 detached" because the andrea detach happened after its run.)
+Detached premise is now a subset match over the two ruled volumes.
 
 2.0 **1.13.0 is still the newest 1.13.x** (upstream, not the local cache).
 ```bash
-gh api repos/longhorn/longhorn/releases --jq '[.[]|select(.prerelease|not)|.tag_name][0:3]|join(" ")'
-# PASS: first token is v1.13.0 (2026-11-06: "v1.13.0 v1.12.1 v1.11.3"). If it prints v1.13.1 (or later
-# 1.13.x): STOP, retarget THIS plan in place (keep the plan_id; README "When the held target MOVES")
-# and re-review. If a GA v1.12.2 appears AND §2.1 reads 1.12.2: the base moved — follow the
-# retarget path in §1 "Moving base" (STOP and re-review; do not run the 1.12.1-anchored steps).
+gh api repos/longhorn/longhorn/releases --jq '[.[]|select(.prerelease|not)|.tag_name|select(startswith("v1.13."))]|join(" ")'
+# PASS: exactly "v1.13.0" (2026-11-16: "v1.13.0"). Rewritten 2026-11-16: the old form read the first
+# GA tag overall, which is now v1.12.2 (GA 11-09, newest by date) -> it would have FAILED on a
+# correct target. If it prints v1.13.1 (or later 1.13.x) first: STOP, retarget THIS plan in place
+# (keep the plan_id; README "When the held target MOVES") and re-review. If §2.1 reads 1.12.2
+# (PR #509 auto-landed): the base moved — follow the retarget path in §1 "Moving base" (STOP and
+# re-review; do not run the 1.12.1-anchored steps). Empty output = FAIL.
 # Also read the Release-Known-Issues wiki entry for v1.13.0:
 # https://github.com/longhorn/longhorn/wiki/Release-Known-Issues — a known data-path issue = STOP.
 # An error/empty print (gh unauthenticated, rate-limited) is a FAIL, not a pass.
@@ -295,59 +358,61 @@ kubectl -n storage get settings.longhorn.io current-longhorn-version default-eng
 # PASS: v1.12.1 / longhorn-engine:v1.12.1 / false / 0
 ```
 
-2.2 **Volume census: every ATTACHED volume healthy, the DETACHED set exactly the
-four ruled in 2.2a, none faulted/degraded, none V2** (upstream: "Avoid upgrading
-when volumes are in the Faulted status"). Live 2026-11-06 is NOT one uniform
-line: 75 attached + 4 detached. A detached Longhorn volume reads robustness
-`unknown` (no running engine to judge; all four on 2026-11-06), so "unknown" is
-legitimate ONLY on the named detached four.
+2.2 **Volume census: every ATTACHED volume healthy, the DETACHED set a subset of
+the two ruled in 2.2a, none faulted/degraded, none V2** (upstream: "Avoid upgrading
+when volumes are in the Faulted status"). Live 2026-11-16 is NOT one uniform
+line: 74 attached + 2 detached. A detached Longhorn volume reads robustness
+`unknown` (no running engine to judge; both on 2026-11-16), so "unknown" is
+legitimate ONLY on the ruled detached volumes.
 ```bash
 kubectl -n storage get volumes.longhorn.io -o jsonpath='{range .items[*]}{.spec.dataEngine} {.status.state} {.status.robustness} {.status.currentImage}{"\n"}{end}' | sort | uniq -c
-# PASS: exactly these two lines (2026-11-06):
-#   75 v1 attached healthy docker.io/longhornio/longhorn-engine:v1.12.1
-#    4 v1 detached unknown docker.io/longhornio/longhorn-engine:v1.12.1
-# The attached count may differ from 75 only if volumes were added/retired since 11-06 (then the
-# new number is $ATTACHED). FAILS (STOP + triage) on: any third line — "attached degraded",
-# "attached faulted", "attached unknown", a v2 line, or an engine other than v1.12.1.
+# PASS: these two lines (2026-11-16):
+#   74 v1 attached healthy docker.io/longhornio/longhorn-engine:v1.12.1
+#    2 v1 detached unknown docker.io/longhornio/longhorn-engine:v1.12.1
+# The detached line may read 1 (or vanish) if a ruled volume re-attached (otbr scaled up, andrea
+# un-suspended); the attached count then rises by the same amount. FAILS (STOP + triage) on: any
+# third line — "attached degraded", "attached faulted", "attached unknown", a v2 line, or an engine
+# other than v1.12.1.
 CENSUS=$(kubectl -n storage get volumes.longhorn.io -o name | grep -c .)
 ATTACHED=$(kubectl -n storage get volumes.longhorn.io -o jsonpath='{range .items[?(@.status.state=="attached")]}{.metadata.name}{"\n"}{end}' | grep -c .)
-echo "CENSUS=$CENSUS ATTACHED=$ATTACHED"
-# PASS: CENSUS == ATTACHED + 4  (2026-11-06: CENSUS=79 ATTACHED=75). $CENSUS (all volumes) and
-# $ATTACHED (attached only) are DIFFERENT numbers from here on; §2.4/§4 say which one they use.
+DETACHED=$(kubectl -n storage get volumes.longhorn.io -o jsonpath='{range .items[?(@.status.state=="detached")]}{.metadata.name}{"\n"}{end}' | grep -c .)
+echo "CENSUS=$CENSUS ATTACHED=$ATTACHED DETACHED=$DETACHED"
+# PASS: CENSUS == ATTACHED + DETACHED and DETACHED <= 2  (2026-11-16: CENSUS=76 ATTACHED=74 DETACHED=2).
+# A third state (attaching/detaching/creating) makes the sum not add up -> wait 5 min, re-run; still
+# off -> STOP. $CENSUS, $ATTACHED and $DETACHED are used by §2.4/§2.5/§4 from here on.
 kubectl -n storage get volumes.longhorn.io -o jsonpath='{range .items[?(@.status.state=="detached")]}{.metadata.name}{" "}{end}'; echo
-# PASS, exactly: jellyfin-config pvc-da17b5c6-0d8c-42cf-9a25-bc444ac9a71d uzeit-de-fileadmin uzeit-de-uploads
-# (also the premise longhorn-detached-set-is-the-ruled-four). A fifth name = a workload released its
-# volume since 11-06 -> STOP, find out why, and get a 2.2a ruling for it; a missing name = it was
-# re-attached or retired -> drop its ruling, re-measure CENSUS/ATTACHED.
+# PASS: only names from {pvc-da17b5c6-0d8c-42cf-9a25-bc444ac9a71d, pvc-f6ec0213-4b00-49d9-93b4-954d5fee1d31}
+# (2026-11-16: both; also the premise longhorn-detached-set-within-ruled). Any OTHER name = a workload
+# released its volume since 11-16 -> STOP, find out why, and get a 2.2a ruling for it.
 kubectl -n storage get volumes.longhorn.io -o jsonpath='{range .items[?(@.status.state=="attached")]}{.metadata.name} {.status.robustness}{"\n"}{end}' | grep -vc ' healthy$'
-# PASS: 0 (2026-11-06: 0). Prints the number of attached volumes that are not healthy.
+# PASS: 0 (2026-11-16: 0). Prints the number of attached volumes that are not healthy.
 ```
 
-2.2a **Operator rulings for the four detached volumes — required, one per
-volume, recorded in the window's GO record BEFORE Phase A starts and hard-gating
-B2.** Why they matter here: (a) Phase B does NOT skip detached volumes — 34abe2bb
-measured that the automatic engine upgrade re-points a detached volume's
-`spec.image` directly (two sanctioned rollback floors moved without ever being
-attached; only an explicit per-volume pin would exclude one); (b) a detached
-volume is never backed up (`allow-recurring-job-while-volume-detached=false`,
-live 2026-11-06), so its newest backup predates its detach (§2.4b reads
-`OLDER-THAN-DETACH` for all four today).
+2.2a **Operator rulings for the detached volumes — required, one per volume
+still detached at GO time, recorded in the window's GO record BEFORE Phase A
+starts and hard-gating B2.** Why they matter here: (a) Phase B does NOT skip
+detached volumes — 34abe2bb measured that the automatic engine upgrade re-points
+a detached volume's `spec.image` directly (only an explicit per-volume pin would
+exclude one); (b) a detached volume is never backed up
+(`allow-recurring-job-while-volume-detached=false`, live 2026-11-16), so its
+newest backup predates its detach (§2.4b reads `OLDER-THAN-DETACH` for both today).
+The 2026-11-06 rulings asked for `jellyfin-config`, `uzeit-de-fileadmin` and
+`uzeit-de-uploads` are VOID — those volumes no longer exist (retired 78d21f8c2 and
+5eb27f52a). Re-ruled set, measured 2026-11-16:
 
-| Volume | Consumer / why detached | Detached since (`lastPodRefAt`) | Newest backup | Ruling asked |
+| Volume | Consumer / why detached | Detached since (`lastPodRefAt`) | Newest backup (Completed Backup CR) | Ruling asked |
 |---|---|---|---|---|
-| `jellyfin-config` | `media/jellyfin-config` (RWX, longhorn-static). Orphan since the executed `jellyfin-config-rwo-migration` (now:2026-10-23) cut Jellyfin over to `jellyfin-config-rwo`; tracked as **F-013d6eca** (snapshot chain not pruned). Last mounted read-only by the copy Job `jf-rwo-copy`. That plan's 14-day retention ran from the 10-24 green check (~11-07); deleting it is a separate operator-approved storage plan, never this one. | 2026-10-23T12:53Z | 2026-10-23T12:27Z (26 min before the read-only copy; no writes after it by that plan's design) | **Is it still a rollback floor?** If YES: accept the Phase B engine re-point (restore-from-backup, the floor's real recovery path, does not depend on the engine version). If NO: either accept the same, or retire it in its own storage-safety plan BEFORE this window (then it leaves the set and the premise must be re-measured). |
-| `pvc-da17b5c6-0d8c-42cf-9a25-bc444ac9a71d` | `home-automation/otbr-data` (dynamic `longhorn`). otbr scaled to `replicas: 0` in git 2026-10-30 (RCP stopped answering Spinel); waits on `otbr-thread-rcp-recovery` (draft). | 2026-10-30T22:02Z | 2026-10-29T23:03Z (~23 h before detach, while otbr-agent was crash-looping) | Accept the ~23 h backup gap (the Thread dataset is also held in HA `thread.datasets`) and the engine re-point; and keep both otbr plans out of this slot (`conflicts_with`). |
-| `uzeit-de-fileadmin` | No PV/PVC any more: uzeit-de decommissioned in 14d9a2259 (2026-10-23, "volumes Retain + NAS backup, DB dumped"); the Longhorn volumes were kept deliberately. | 2026-10-23T11:05Z | 2026-10-22T23:03Z (~12 h before detach) | Accept the ~12 h gap + engine re-point, or retire in a separate storage-safety plan first. |
-| `uzeit-de-uploads` | Same as above. | 2026-10-23T11:05Z | 2026-10-22T23:03Z | Same as above. |
+| `pvc-da17b5c6-0d8c-42cf-9a25-bc444ac9a71d` | `home-automation/otbr-data` (dynamic `longhorn`). otbr scaled to `replicas: 0` in git 2026-10-30 (RCP stopped answering Spinel); waits on `otbr-thread-rcp-recovery` (draft). Unchanged since 11-06. | 2026-10-30T22:02:39Z | 2026-10-29T23:03:03Z (`backup-9a33d6613f894baa`, ~23 h before detach, while otbr-agent was crash-looping) | Accept the ~23 h backup gap (the Thread dataset is also held in HA `thread.datasets`) and the engine re-point; keep both otbr plans out of this slot (`conflicts_with`). |
+| `pvc-f6ec0213-4b00-49d9-93b4-954d5fee1d31` | `backup/icloud-docker-andrea-session` (1Gi RWO, dynamic `longhorn`; iCloud session/cookie state of the andrea sync container). NEW 2026-11-16. Deployment `backup/icloud-docker-andrea` is 0/0 and its HelmRelease is `suspend: true` live (git says `replicas: 1`, no suspend — an out-of-band operator hold, F-bc57b80a) pending the Apple 2FA re-auth (F-1e5dda44). | 2026-11-15T14:29:39Z | 2026-11-14T23:05:28Z (`backup-0d0dccd0b54a4725`, ~15.4 h before detach) | Accept the ~15 h gap (content is re-creatable: a fresh 2FA re-auth rewrites the session) and the engine re-point. Alternative: re-auth + un-suspend BEFORE the window — it then re-attaches, drops out of the detached set (premise still passes) and needs no ruling. Do NOT re-auth DURING the window (it would attach mid-Phase B). |
 
-Obtain all four rulings at GO time (one question batch). Hard gate: a volume
-without a recorded ruling = do not start B2 (Phase B is what moves a detached
-volume's engine; the Phase A manager roll does not touch a detached volume's
-data).
+Obtain the rulings for whichever of the two are still detached at GO time (one
+question batch). Hard gate: a detached volume without a recorded ruling = do not
+start B2 (Phase B is what moves a detached volume's engine; the Phase A manager
+roll does not touch a detached volume's data).
 
 2.3 **No failed BackingImage** (upstream manual check).
 ```bash
-kubectl -n storage get backingimages.longhorn.io --no-headers 2>/dev/null | wc -l   # expect 0 (none in use; 0 on 2026-11-06)
+kubectl -n storage get backingimages.longhorn.io --no-headers 2>/dev/null | wc -l   # expect 0 (none in use; 0 on 2026-11-16)
 ```
 
 2.4 **Backups fresh** (upstream prerequisite: "Always back up volumes before
@@ -361,12 +426,12 @@ slack; a missed 23:00Z run makes every line ~33 h STALE):
 ```bash
 .venv/bin/python3 runbooks/longhorn-backup-age.py $(kubectl -n storage get volumes.longhorn.io -o jsonpath='{range .items[?(@.status.state=="attached")]}{.metadata.name}{" "}{end}') --max-hours 14 > /tmp/lh-pre-backup.txt; echo rc=$?
 echo "FRESH=$(grep -c ' FRESH ' /tmp/lh-pre-backup.txt) other=$(grep -vc ' FRESH ' /tmp/lh-pre-backup.txt)"
-# PASS: rc=0 and FRESH == $ATTACHED, other=0. Measured 2026-11-06 02:13Z: rc=0, FRESH=75 other=0
-# (newest 3.2 h). The helper exits 1 on any STALE/NONE and 2 on a lookup error; an EMPTY volume
+# PASS: rc=0 and FRESH == $ATTACHED, other=0. Measured 2026-11-16 ~00:00Z: rc=0, FRESH=74 other=0
+# (2026-11-06: 75). The helper exits 1 on any STALE/NONE and 2 on a lookup error; an EMPTY volume
 # list (jsonpath matched nothing) is an argparse error, rc=2 — measured, fails closed.
 # KNOWN-BAD control (why the set is split): the same command over ALL volumes
-# (`-o jsonpath='{.items[*].metadata.name}'`) reads rc=1 with the 4 detached STALE (171-339 h)
-# on 2026-11-06, so the pre-2026-11-06 form of this check could never pass.
+# (`-o jsonpath='{.items[*].metadata.name}'`) reads rc=1 with the detached volumes STALE (otbr-data
+# ~409 h on 2026-11-16), so an all-volume form of this check can never pass.
 kubectl -n storage get backuptarget default -o jsonpath='{.status.available}{"\n"}'   # PASS: true
 ```
 
@@ -374,7 +439,8 @@ kubectl -n storage get backuptarget default -o jsonpath='{.status.available}{"\n
 detach? (zsh, BSD-safe; ISO-8601 Z timestamps compare lexically.)
 ```bash
 .venv/bin/python3 runbooks/longhorn-backup-age.py $(kubectl -n storage get volumes.longhorn.io -o jsonpath='{range .items[?(@.status.state=="detached")]}{.metadata.name}{" "}{end}') --max-hours 2400 >/dev/null; echo detached-confirmed-rc=$?
-# PASS: rc=0 — each detached volume HAS a confirmed Completed backup (2026-11-06: rc=0). rc=1 = NONE -> STOP.
+# PASS: rc=0 — each detached volume HAS a confirmed Completed backup (2026-11-16: rc=0, both via
+# backup-cr: otbr-data 2026-10-29T23:03:03Z, andrea-session 2026-11-14T23:05:28Z). rc=1 = NONE -> STOP.
 kubectl -n storage get volumes.longhorn.io -o jsonpath='{range .items[?(@.status.state=="detached")]}{.metadata.name} {.status.lastBackupAt} {.status.kubernetesStatus.lastPodRefAt}{"\n"}{end}' | python3 -c 'import sys
 for l in sys.stdin:
     f = l.split() + ["", ""]
@@ -382,7 +448,7 @@ for l in sys.stdin:
     v = "COVERS-DETACH" if (b and d and b >= d) else "OLDER-THAN-DETACH"
     print(n, v, "backup=" + (b or "NONE"), "detach=" + (d or "NONE"))'
 # PASS per volume: COVERS-DETACH, OR OLDER-THAN-DETACH with that volume's 2.2a ruling recorded.
-# 2026-11-06 reads OLDER-THAN-DETACH for all four (backup/detach pairs as in the 2.2a table), so
+# 2026-11-16 reads OLDER-THAN-DETACH for both (backup/detach pairs as in the 2.2a table), so
 # without the rulings this check FAILS today. A missing timestamp prints NONE and fails closed.
 ```
 
@@ -396,11 +462,12 @@ kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 19090:90
 for q in 'count(up{job="longhorn-backend"}==1)' 'count(longhorn_volume_robustness{state="healthy"}==1)' 'count(longhorn_volume_robustness{state="unknown"}==1)' 'count(longhorn_volume_robustness{state=~"degraded|faulted"}==1) or vector(0)' 'count(longhorn_volume_robustness==1)' 'count(longhorn_instance_manager_cpu_usage_millicpu)'; do
   echo "$q => $(curl -s --data-urlencode "query=$q" http://localhost:19090/api/v1/query | python3 -c 'import sys,json;r=json.load(sys.stdin)["data"]["result"];print(r[0]["value"][1] if r else "EMPTY")')"; done
 kill $PF 2>/dev/null
-# PASS, in order: 3 / $ATTACHED / 4 / 0 / $CENSUS / 3
-# Measured 2026-11-06 02:2xZ:  3 / 75 / 4 / 0 / 79 / 3. "EMPTY" on any line = STOP (the
-# degraded|faulted line carries `or vector(0)` so a healthy fleet reads 0, not EMPTY).
-# The unknown=4 line is the live CONTROL that the healthy count can fail: the 4 detached volumes
-# drop out of it (75, not 79) while the unfiltered count still reads 79.
+# PASS, in order: 3 / $ATTACHED / $DETACHED / 0 / $CENSUS / 3
+# Measured 2026-11-16 ~00:00Z: 3 / 74 / 2 / 0 / 76 / 3 (2026-11-06: 3 / 75 / 4 / 0 / 79 / 3).
+# "EMPTY" on any line = STOP (the degraded|faulted line carries `or vector(0)` so a healthy fleet
+# reads 0, not EMPTY). If $DETACHED is 0 the unknown line reads EMPTY — the one legitimate EMPTY.
+# The unknown=$DETACHED line is the live CONTROL that the healthy count can fail: the detached
+# volumes drop out of it (74, not 76) while the unfiltered count still reads 76.
 kubectl -n storage get networkpolicy -o name | wc -l    # PASS: 0
 ```
 
@@ -426,12 +493,59 @@ kubectl -n storage get systembackups.longhorn.io pre-1-13-0-$D -o jsonpath='{.st
 ```
 
 2.7 **No in-flight storage work.** No `otbr-thread-rcp-recovery` / `otbr-0.4.0`
-(would attach a ruled detached volume), `talos-*`, or engine drain in progress
-(`exclusive: true` keeps them out of the slot, but confirm):
-`kubectl -n storage get volumes.longhorn.io -o jsonpath='{range .items[*]}{.status.currentImage}{" "}{.spec.image}{"\n"}{end}' | awk '$1!=$2' | wc -l` -> `0` (2026-11-06: 0).
+(would attach a ruled detached volume), no andrea re-auth/un-suspend, `talos-*`,
+or engine drain in progress (`exclusive: true` keeps them out of the slot, but confirm):
+`kubectl -n storage get volumes.longhorn.io -o jsonpath='{range .items[*]}{.status.currentImage}{" "}{.spec.image}{"\n"}{end}' | awk '$1!=$2' | wc -l` -> `0` (2026-11-16: 0).
 Not running 22:00-00:00 UTC (= 23:00-01:00 CET): trim 22:00Z,
-snapshot-cleanup 22:30Z, backup 23:00Z (`kubectl -n storage get cronjob`
-verified 2026-11-06). The sun-attended slot (08:00-11:20Z in CET) is clear of all three.
+snapshot-cleanup 22:30Z, backup 23:00Z (all 11 storage CronJobs on those three
+schedules, `kubectl -n storage get cronjob` verified 2026-11-16). The
+sun-attended slot (08:00-11:20Z in CET) is clear of all three.
+
+**Off-site restic jobs (namespace `backup`) — NOT an interference, observe only.**
+Checked 2026-11-16: the off-site jobs (`offsite-seed-core` Running since
+~2026-11-15T22:10Z, `offsite-seed-apps` Complete; CronJobs `offsite-backup-apps`
+00:30Z, `offsite-backup-core` 00:40Z daily, `offsite-backup-check` Wed 04:30Z,
+`offsite-backup-prune` Sun 04:30Z) mount ONLY PVCs `backup-src-1..5`, which are
+`smb.csi.k8s.io` PVs onto NAS shares (`backups`, `nextcloud`, `paperless_ngx`,
+`penpot`, `opencode`), `readOnly: true`, reclaim `Retain`. **No Longhorn volume
+is read, attached or snapshotted by them**, so they cannot change the census,
+the detached set or Phase B. Two real, minor overlaps: (1) `backup-src-1` is the
+same NAS `backups` share that holds the Longhorn BackupTarget — a restic read
+concurrent with the §2.6 SystemBackup write can capture a half-written
+SystemBackup in that night's off-site snapshot (harmless: the next nightly run
+captures the complete one; the on-NAS copy is what §5 restores from);
+(2) NAS/node I/O + up to 2 CPU on one node. Pre-check:
+```bash
+kubectl -n backup get jobs -o custom-columns=N:.metadata.name,ACTIVE:.status.active,DONE:.status.succeeded --no-headers
+# Informational. An offsite-* Job still ACTIVE at window start: proceed, do NOT delete or suspend
+# it, and expect §2.6 to take a little longer. Never touch the backup-src-* PVCs: their PVs mount
+# whole NAS shares (no subdir) -- storage-safety rule 1 applies verbatim to any delete.
+```
+
+2.8 **HARD etcd-quiet gate (F-8bfd22b9: ~41-43 leader elections/24h, live
+2026-11-16).** Added 2026-11-16 on operator instruction. A one-way storage-engine
+change must not start its API-server write burst (24-Kustomization storm, manager
+DaemonSet roll, CSI re-create, admission-webhook endpoint churn) on a flapping
+control plane. Read through the API-server proxy (no port-forward):
+```bash
+P='/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query='
+for q in 'count(etcd_server_has_leader%3D%3D1)' 'max(increase(etcd_server_leader_changes_seen_total%5B1h%5D))' 'max(increase(etcd_server_leader_changes_seen_total%5B6h%5D))' 'max(increase(etcd_server_leader_changes_seen_total%5B24h%5D))'; do
+  echo "$q => $(kubectl get --raw "$P$q" | python3 -c 'import sys,json;r=json.load(sys.stdin)["data"]["result"];print(r[0]["value"][1] if r else "EMPTY")')"; done
+# HARD PASS (both): has_leader count = 3, AND the 1h increase = 0 (exactly "0").
+# Informational (record in the window report, not a gate): 6h and 24h.
+# Measured 2026-11-16 ~00:00Z: 3 / 3.03 / 24.0 / 43.0 -> the 1h gate FAILS right now (live known-bad).
+# Over the 24 h to 2026-11-16 the 1h lookback read 0 in 54 of 144 ten-minute samples (~37%).
+# EMPTY on any line = FAIL (etcd scrape lost; cannot judge).
+```
+On FAIL: re-check every 15 min until **T+30 min**; still failing -> do NOT start
+Phase A, end the window, re-window (no partial start). **Re-run the 1h line
+immediately before the A2 `git push`** — the gate must hold at the moment the
+storm starts, not only at T+0. During Phase A/B, a leader change is not by itself
+an abort, but ≥ 2 changes during Phase B -> stop the drain (B4) and finish in a
+later slot. Background: F-8bfd22b9 ties the churn to CI-runner CPU saturation on
+nuc14-02/03 after the 2026-11-14 ARC `maxRunners` 4 -> 8 raise; whether to revert
+that (or pause CI for the window) is the operator's decision on that finding,
+not this plan's — but a quiet CI on Sunday morning is what makes this gate passable.
 
 ## 3) Steps
 
@@ -457,7 +571,7 @@ git push
 ```
 
 A3. **Push nothing else until §4.1 converges** — every commit re-arms the
-`dependsOn` revision gate for 25 Kustomizations (live 2026-11-06) (docs/sops/longhorn.md "Chart
+`dependsOn` revision gate for 24 Kustomizations (live 2026-11-16) (docs/sops/longhorn.md "Chart
 Upgrade Storm"). Expect 5-15 min of cluster-wide Flux amber; do NOT roll back
 on dependents' messages. Judge only `storage/longhorn` and revision
 convergence (§4.1).
@@ -471,7 +585,7 @@ and only Helm's wait expired: operator-present, run
 
 ### Phase B — live engine drain v1.12.1 -> v1.13.0 (CR operation)
 
-Start only if §4.1-§4.6 all PASS and the clock is <= T+45 min; otherwise end
+Start only if §4.1-§4.6 all PASS and the clock is <= T+45 min (T = the moment the §2.8 etcd gate passed, not the window start); otherwise end
 the window after Phase A and re-window Phase B as its own slot.
 
 B1. Confirm the new engine image is the default and deployed:
@@ -488,11 +602,13 @@ B3. Watch progress (async; each live upgrade is a brief per-volume IO pause):
 ```bash
 kubectl -n storage get volumes.longhorn.io -o jsonpath='{range .items[*]}{.status.currentImage} {.status.robustness}{"\n"}{end}' | sort | uniq -c
 ```
-The 4 ruled detached volumes print robustness `unknown` throughout — expected;
-per 34abe2bb they are re-pointed to v1.13.0 without being attached.
+The ruled detached volumes ($DETACHED, 2 on 2026-11-16) print robustness
+`unknown` throughout — expected; per 34abe2bb they are re-pointed to v1.13.0
+without being attached.
 Abort criteria (go to §5 Phase B): any volume `faulted`; > 2 volumes
-`degraded` for > 10 min; any `unknown` count above the detached 4 (an attached
-volume lost its engine); any app pod with IO errors on its PVC.
+`degraded` for > 10 min; any `unknown` count above $DETACHED (an attached
+volume lost its engine); any app pod with IO errors on its PVC; ≥ 2 etcd
+leader changes since B2 (re-run the 2.8 1h line).
 B4. When every volume reports `v1.13.0` (or at the window's end, whichever
 first), **always** return the limit to 0:
 ```bash
@@ -558,8 +674,8 @@ layer (wait <= 10 min after §4.1, then diagnose
 ```bash
 kubectl -n storage get networkpolicy -o name | wc -l   # PASS: 0 (a non-zero count is the 1.12.1 trap again)
 # then re-run the 2.5 Prometheus block >= 5 min after 4.1 passes
-# PASS, in order: 3 / $ATTACHED / 4 / 0 / $CENSUS / >=3
-#   (2026-11-06 baseline 3 / 75 / 4 / 0 / 79 / 3; IM count is 6 while old+new IMs coexist before
+# PASS, in order: 3 / $ATTACHED / $DETACHED / 0 / $CENSUS / >=3
+#   (2026-11-16 baseline 3 / 74 / 2 / 0 / 76 / 3; IM count is 6 while old+new IMs coexist before
 #   Phase B — also PASS). Run it again after Phase B: same PASS.
 ```
 CONTROL: metric up — `up{job="longhorn-backend"}` must be 1 on all 3 manager
@@ -568,12 +684,12 @@ NetworkPolicies present).
 CONTROL: metric longhorn_volume_robustness — the gate is
 `count(longhorn_volume_robustness{state="healthy"}==1) == $ATTACHED`. NOT
 `count(longhorn_volume_robustness==1) == $CENSUS`: the metric is one-hot over
-`state` (4 series per volume, exactly one ==1; `count by (state)` reads 79 for
+`state` (4 series per volume, exactly one ==1; `count by (state)` read 79 for
 each of healthy/degraded/faulted/unknown on 2026-11-06), so the unfiltered
 count is the volume count and reads $CENSUS even with every volume degraded —
 it is kept only as the exporter-completeness line. Known-bad reading that
-proves the filtered gate can fail: `{state="unknown"}` reads **4** live (the
-detached set) and those 4 are absent from the healthy count (75, not 79); a
+proves the filtered gate can fail: `{state="unknown"}` reads **2** live
+2026-11-16 (the detached set) and those 2 are absent from the healthy count (74, not 76); a
 volume going degraded/faulted after the roll moves the same way — healthy
 drops below $ATTACHED and the `degraded|faulted` line goes above 0. An empty
 result prints `EMPTY` and fails (the series is emitted by the manager, so a
@@ -632,7 +748,7 @@ kill $PF 2>/dev/null
   echo "FRESH=$(grep -c ' FRESH ' /tmp/lh-post-backup.txt) other=$(grep -vc ' FRESH ' /tmp/lh-post-backup.txt)"
   # PASS: rc=0, FRESH == $ATTACHED, other=0. FAILS: a 1.13.0 backup regression leaves the pre-window
   # 23:00Z backups (~33 h old by then) -> STALE, rc=1. Known-bad form: over ALL volumes this reads
-  # rc=1 because of the 4 detached (measured 2026-11-06) — do not "fix" it that way.
+  # rc=1 because of the detached volumes (measured 2026-11-06 and 2026-11-16) — do not "fix" it that way.
   ```
   CONTROL: alertname LonghornBackupFailed — not firing
   (`(longhorn_backup_state == 4) unless on(volume) (longhorn_backup_state == 3)`).
@@ -646,11 +762,11 @@ kill $PF 2>/dev/null
 kubectl -n storage get volumes.longhorn.io -o jsonpath='{range .items[*]}{.status.state} {.status.robustness} {.status.currentImage}{"\n"}{end}' | sort | uniq -c
 # PASS: exactly two lines (attached gate + detached expectation, 34abe2bb):
 #   <$ATTACHED> attached healthy docker.io/longhornio/longhorn-engine:v1.13.0
-#   4 detached unknown docker.io/longhornio/longhorn-engine:v1.13.0
+#   <$DETACHED> detached unknown docker.io/longhornio/longhorn-engine:v1.13.0   (2 on 2026-11-16)
 # FAILS on: any attached line still on v1.12.1 (drain incomplete -> finish next slot), any
-# attached degraded/faulted/unknown line, or a detached count other than 4. A detached volume
+# attached degraded/faulted/unknown line, or a detached count other than $DETACHED. A detached volume
 # left on v1.12.1 (if Longhorn did not re-point it this time) is a NAMED residual, acceptable
-# only for one of the 4 ruled volumes: it keeps the v1.12.1 EngineImage at refCount > 0 and
+# only for one of the ruled volumes (§2.2a): it keeps the v1.12.1 EngineImage at refCount > 0 and
 # F-3bc71aff partially open — record the name on the finding.
 kubectl -n storage get instancemanagers.longhorn.io -o custom-columns=IMG:.spec.image,ST:.status.currentState --no-headers | sort | uniq -c
 # PASS (may take minutes after the last volume): 3 x instance-manager:v1.13.0 running, 0 x v1.12.1
@@ -659,9 +775,9 @@ kubectl -n storage get engineimages.longhorn.io -o custom-columns=IMG:.spec.imag
 ```
 
 4.8 **Share-managers (F-23a73fba) — observe, do not force.** Two RWX
-volumes have a share-manager pod (live 2026-11-06): `nextcloud-config` and
-`oc8-sessions`. (`jellyfin-config`'s share-manager is gone — the volume has
-been detached since the executed RWX->RWO migration, 2026-10-23.)
+volumes have a share-manager pod (live 2026-11-16, both still :v1.12.1):
+`nextcloud-config` and `oc8-sessions`. (`jellyfin-config` was retired in
+78d21f8c2.)
 ```bash
 kubectl -n storage get pod -l longhorn.io/component=share-manager -o jsonpath='{range .items[*]}{.metadata.name} {.spec.containers[0].image}{"\n"}{end}'
 # Expect 2 lines (share-manager-nextcloud-config, share-manager-oc8-sessions); each still
@@ -721,32 +837,42 @@ Forward-fix, do NOT revert the version:
 ## 6) Interference notes
 
 - **Exclusive slot.** A Longhorn manager roll takes down the admission webhook
-  (served by longhorn-manager :9502) for the DaemonSet roll and fans out to 25
-  Kustomizations that `dependsOn: storage/longhorn` (measured live 2026-11-06;
+  (served by longhorn-manager :9502) for the DaemonSet roll and fans out to 24
+  Kustomizations that `dependsOn: storage/longhorn` (measured live 2026-11-16;
   the SOP says 36). Any other plan's "Flux Ready" gate in the same slot reads
   false-red, and every extra commit re-arms the storm. Hence `exclusive: true`
   on top of `conflicts_with`.
-- **Window choice.** HUMAN-GATED (one-way + capability_change + storage floor).
-  Recommended: **`sun-attended:2026-11-15`, exclusive** (70 of 180 min).
-  `talos-linux-1.14.5` (`sun-attended:2026-11-22`, vetted) `depends_on` this
-  plan (operator ordering 2026-11-02), so 11-15 gives the new engine a week and
-  >= 2 green nightly backup cycles before the node roll; if Talos slips, the
-  gap only grows. If THIS plan slips past 11-15 it pushes the Talos roll with
-  it. `etcd-timeouts-5000-500` was meant to land 11-08 first; it is now
-  `status: blocked`, `window: null` (2026-11-06). This plan never depended on
-  it (`depends_on: []`) — the two only must not share a slot — so the 11-15
-  slot stays viable whether or not etcd-timeouts runs before it. A
+- **Window choice (re-set 2026-11-16, operator decision).** HUMAN-GATED
+  (one-way + capability_change + storage floor). **`sun-attended:2026-11-22`,
+  exclusive** (100 of 180 min). The original `sun-attended:2026-11-15` was missed:
+  the window agent deferred it on the failed detached-set premise (re-ruled in
+  §2.2/2.2a). **Calendar conflict to clear (not edited by this plan):**
+  `talos-linux-1.14.5` (vetted) still holds `sun-attended:2026-11-22`
+  (`maintenance-plan.py --open`, 2026-11-16). It is superseded by
+  `talos-linux-1.14.6` (draft, window null), and both `depends_on` THIS plan, so
+  neither can run on or before 11-22 anyway; `talos-linux-1.14.5`'s window must
+  be set to `null` by the operator/window agent, otherwise two exclusive plans
+  sit on one date. The Talos roll then follows on a LATER Sunday (>= 11-29) —
+  keep at least one week and >= 2 green nightly backup cycles on the new engine
+  before the node roll. Note `redis-fleet-8.10.3` holds 11-29 and conflicts with
+  this plan; that is a Talos-scheduling question, not this plan's.
+  `etcd-timeouts-5000-500` is still `status: blocked`, `window: null`; this
+  plan never depended on it (`depends_on: []`), but its subject (etcd churn,
+  F-8bfd22b9) is now this plan's hard gate §2.8 — if the gate keeps failing on
+  Sunday mornings, the fix for F-8bfd22b9 becomes the de-facto prerequisite. A
   `sat-attended` slot also fits the budget but runs into the following
   Sunday's attended work with no soak day. `nightly` (03:30 CET = 02:30Z) does
   not collide with the backup chain any more (trim 22:00Z, snapshot-cleanup
-  22:30Z, backup 23:00Z, verified `kubectl -n storage get cronjob` 2026-11-06)
+  22:30Z, backup 23:00Z, verified `kubectl -n storage get cronjob` 2026-11-16)
   but is unattended — not allowed for a one-way, human-gated storage change.
   Never 22:00-00:00 UTC.
-- **Moving base — Longhorn 1.12.2 at nightly Step 0.** `v1.12.2-rc4` was
-  published 2026-11-05. The `*longhorn*` rule is `max: patch`, so a GA 1.12.2
-  is AUTO-eligible and can land unattended at any `nightly` Step 0 between now
-  and 11-15 — a manager roll plus the 25-Kustomization storm with nobody
-  present, and this plan's two state premises fail on the window morning.
+- **Moving base — Longhorn 1.12.2 at nightly Step 0.** v1.12.2 went GA
+  2026-11-09; Renovate PR #509 is open, CI green, MERGEABLE (2026-11-16) and the
+  `*longhorn*` rule is `max: patch`, so it is AUTO-eligible and can land
+  unattended at any `nightly` Step 0 before 11-22 — a manager roll plus the
+  24-Kustomization storm with nobody present, and this plan's two state
+  premises fail on the window morning. (It has not landed in the 7 nights since
+  the cooldown lapsed; the reason was not established here — do not rely on it.)
   Recommendation to the operator (policy edit, not made by the planner): make
   `*longhorn*` a full time-boxed hold until this plan executes, then restore
   `max: patch`. If 1.12.2 is allowed to land, retarget per §1 "Moving base"
@@ -759,21 +885,44 @@ Forward-fix, do NOT revert the version:
   `open-webui-0.13.0`. Owed (should add it): `otbr-thread-rcp-recovery`,
   `otbr-0.4.0`, `flux-reconciler-impersonation`, `bitnamilegacy-exit-nextcloud-db`
   (the last two are blocked; `exclusive: true` here keeps the slot clean anyway).
-- **Detached-volume plans.** `otbr-thread-rcp-recovery` / `otbr-0.4.0` would
-  scale otbr 0 -> 1 and attach `otbr-data` (one of the four ruled detached
-  volumes); a retirement plan for `jellyfin-config` (F-013d6eca) or the two
-  `uzeit-de-*` volumes would remove one. Either changes the §2.2 set and fails
-  the premise `longhorn-detached-set-is-the-ruled-four`: run them on another
-  day; before this plan is fine (re-measure + re-rule), never in the slot.
-- **Prometheus is shared instrument.** §2.5/§4.3 read it. No
-  kube-prometheus-stack plan is open (2026-11-06) and the `*kube-prometheus-stack*`
-  deny rule holds every bump until the Talos roll, so Step 0 cannot restart
-  Prometheus in this window. If a kps change is ever placed the same day, this
-  plan moves and §2.5's baseline is re-measured after it lands.
+  2026-11-16: added `talos-linux-1.14.6` and `kube-prometheus-stack-93.3.0`
+  here; both already name this plan back. Many other drafts name this plan
+  (postgres-fleet-18.7-*, n8n-2.47.7, nextcloud-*, immich-*, nocodb, otel-operator,
+  mac-tooling-pins) — not repeated here, `exclusive: true` covers them.
+- **Detached-volume plans / actions.** `otbr-thread-rcp-recovery` / `otbr-0.4.0`
+  would scale otbr 0 -> 1 and attach `otbr-data`; an andrea 2FA re-auth +
+  HelmRelease un-suspend (or `icloud-drive-fleet-2.3.0`) would attach
+  `icloud-docker-andrea-session`. BEFORE the window that is fine — the volume
+  leaves the detached set and the subset premise still passes; DURING the slot
+  it is not (it would attach mid-roll / mid-drain). A NEW detached volume
+  (any other app releasing its PVC before 11-22) fails the premise
+  `longhorn-detached-set-within-ruled` -> re-measure + re-rule.
+- **Off-site restic backup (ns `backup`) — no interference with Longhorn.**
+  Verified 2026-11-16 (§2.7): the seed/backup Jobs mount only `backup-src-1..5`,
+  SMB PVs onto NAS shares, read-only; no Longhorn PV. Only overlap: `backup-src-1`
+  is the NAS `backups` share that also holds the Longhorn BackupTarget, so the
+  §2.6 SystemBackup write may be read half-written by a concurrent restic run
+  (harmless, self-heals next night), plus NAS I/O and ≤ 2 CPU on one node. The
+  daily off-site CronJobs run 00:30Z/00:40Z and `offsite-backup-prune` Sun
+  04:30Z — all before the 08:00Z start. Do not suspend/delete them for this plan.
+- **Prometheus is shared instrument.** §2.5/§4.3/§2.8 read it.
+  `kube-prometheus-stack-93.3.0` is now an open draft (window null; it
+  `depends_on` talos-linux-1.14.5, so it cannot precede this plan) and is in
+  `conflicts_with`; the `*kube-prometheus-stack*` deny rule holds every bump
+  until the Talos roll, so Step 0 cannot restart Prometheus in this window. If a
+  kps change is ever placed the same day, this plan moves and §2.5's baseline is
+  re-measured after it lands.
+- **etcd (F-8bfd22b9).** Not touched by this plan, but measured flapping
+  (~43 elections/24h, max 8-10/h under CI load). §2.8 is a hard start gate and a
+  Phase B abort criterion. A concurrent CI burst on nuc14-02/03 is the most
+  likely cause of a gate failure on the morning.
 - **Storage safety.** No PVC/PV is deleted or created by this plan. No CIFS
   StorageClass is touched; the BackupTarget (CIFS) is only written to by the
   SystemBackup (2.6). The `mealie` restart in 4.4 is the only app pod this
-  plan restarts deliberately.
+  plan restarts deliberately (re-verified 2026-11-16: `office/mealie`
+  Deployment `Recreate`, PVC `mealie-data` on `longhorn-static`). The
+  `backup-src-*` SMB PVs mount whole NAS shares with no subdir: storage-safety
+  rule 1 applies verbatim to any delete of them; this plan never touches them.
 - **Not in this plan (deliberate):** adopting `restrictInternalTraffic` /
   `metricsScrapeSources`; turning off `csi.allowControllerSecretAccess` (safe
   later — no StorageClass carries `csi.storage.k8s.io/provisioner-secret-*`,
@@ -786,4 +935,10 @@ Forward-fix, do NOT revert the version:
    section should mention the one-way downgrade prevention and the separate
    engine-drain step (`concurrent-automatic-engine-upgrade-per-node-limit` is 0
    by design here).
-2. Same SOP says 36 `dependsOn` Kustomizations; live count is 25 (2026-11-06; 35 on 2026-10-05).
+2. Same SOP says 36 `dependsOn` Kustomizations; live count is 24 (2026-11-16; 25 on 2026-11-06, 35 on 2026-10-05).
+3. (2026-11-16) `talos-linux-1.14.5` is `status: vetted` with a window although
+   `talos-linux-1.14.6` declares `supersedes: talos-linux-1.14.5`; the superseded
+   plan should go to `status: superseded`, `window: null`.
+4. (2026-11-16) `backup/icloud-docker-andrea` HelmRelease is `suspend: true` and
+   the Deployment 0/0 LIVE while git has `replicas: 1` and no suspend (F-bc57b80a)
+   — an out-of-band hold that is invisible to the repo.
