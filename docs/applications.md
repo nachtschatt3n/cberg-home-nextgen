@@ -29,7 +29,7 @@
 | network | 5 |
 | default | 2 |
 | flux-system | 2 |
-| backup | 5 |
+| backup | 6 |
 | security | 2 |
 | my-software-development | 3 |
 | my-software-production | 7 |
@@ -264,6 +264,7 @@
 | icloud-docker-andrea | Apple iCloud Drive + Photos sync for the second household Apple ID. Same `main` build digest pin as `icloud-docker-mu` — **bump both together** or the un-bumped one silently loses the iOS 26.4+ 2FA push. Data on `cifs-icloud-docker-andrea` (`icloud-backup/andrea`), session PVC on dynamic `longhorn`. | None | — |
 | icloud-docker-mu | Apple iCloud Drive sync. Image pinned to a `main` build digest (not a release tag) to get icloudpy 0.9.0's iOS 26.4+ 2FA push trigger — deliberate exception, see `docs/sops/icloud-docker-reauth.md`. | None | — |
 | offsite-backup | Off-site restic backup of NAS data and Longhorn volumes to a hosted storage box. CronJobs `offsite-backup-apps` (00:30 UTC), `offsite-backup-core` (00:40 UTC, upload rate-limited), `offsite-backup-prune` (weekly), `offsite-backup-check` (weekly), `offsite-backup-contents` (Mon 06:00 UTC, read-only contents exporter feeding the Grafana dashboard `Off-site backup`). Sources mounted read-only; write key is append-only, prune key separate. Source paths and credentials exist only in SOPS Secrets and Flux postBuild variables. See `docs/sops/backup.md` ("Off-site Backup"). | None | — |
+| github-mirror | Monthly CronJob (`0 2 1 * *` UTC) mirroring every GitHub repository of the owner account (private and forks included) as bare clones plus issue/PR/wiki/release metadata to the NAS backups share (`cifs-github-mirror`), using the upstream `python-github-backup` image pinned by digest. Never prunes. Token is a SOPS placeholder until the operator pastes a fine-grained read-only PAT; the job fails loudly until then. Verified per run (git fsck, API count), alerts `GithubMirror*`. Included in the off-site core backup. See `docs/sops/backup.md` ("GitHub Mirror"). | None | — |
 | hetzner-credentials | Terraform-managed hosted storage box for the off-site backup plus SOPS-encrypted access secrets. No workload. | None | — |
 
 The two `icloud-docker` instances are one per Apple ID; they share nothing but

@@ -6,6 +6,7 @@ components:
   - ../../flux/components/common
 resources:
   - ./hetzner-credentials/ks.yaml
+  - ./github-mirror/ks.yaml
   - ./icloud-backup-freshness/ks.yaml
   - ./icloud-docker-andrea/ks.yaml
   - ./icloud-docker-mu/ks.yaml

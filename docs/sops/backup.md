@@ -381,20 +381,41 @@ monitored off-site copy. Manifests: `kubernetes/apps/backup/offsite-backup/`
 **Privacy rule (public repo):** hosts, accounts, share names, folder lists and
 repository paths exist ONLY inside the SOPS Secrets `offsite-backup-write`,
 `offsite-backup-prune` and `offsite-backup-sources`. Plaintext manifests use
-neutral names (`backup-src-1..5`, `offsite-backup-{core,apps,prune,check}`);
+neutral names (`backup-src-1..9`, `offsite-backup-{core,apps,prune,check}`);
 PV sources are Flux postBuild variables read from `offsite-backup-sources`.
 
 **Coverage (categories only):**
 
 | Tier | Repository | Contents |
 |---|---|---|
-| `core` | 1 restic repo | Longhorn backup store (all cluster PV data), phone-cloud backups, other backup folders, document and app-data shares |
+| `core` | 1 restic repo | Longhorn backup store (all cluster PV data), phone-cloud backups, other backup folders, document and app-data shares, the two Mac Time Machine sparsebundle images (since 2026-11-16), the monthly GitHub mirror directory (see "GitHub Mirror"), and the small curated media trees: music, books, audiobooks, archive (since 2026-11-16) |
 | `apps` | 1 restic repo | Small application data shares |
 
-Deliberately NOT covered yet (operator decision 2026-11-15): the media library
-and other large lower-priority trees (list kept in the encrypted Secret notes).
+Deliberately NOT covered (operator decisions 2026-11-15/16): the bulk media
+library (movies, TV, downloads, transcode scratch, derived photo cache) and
+other large lower-priority trees (list kept in the encrypted Secret notes).
 Mounting a whole share and using an include list is intended; excluded trees
 are never read. Sources are mounted read-only (`ro`), PVs are `Retain`.
+The media share is not mounted whole: `backup-src-6..9` are four read-only PVs
+whose SMB source is a SUBPATH of that share (one per included tree), so the
+excluded trees are not even visible to the job. Their share paths live in
+`offsite-backup-sources` as `OFFSITE_SRC_6..9`; no PV uses subdir `/`.
+
+**First run after the 2026-11-16 extension.** The Time Machine images add
+about 1.9 TiB, so the first nightly core run uploads roughly 2 TiB (about 15 h
+at the 40000 KiB/s cap). Job limits cover it: `activeDeadlineSeconds` 172800
+(48 h), `backoffLimit: 0`, and `concurrencyPolicy: Forbid` simply skips the
+overlapping night if a run exceeds 24 h (it never kills or stacks runs).
+`OffsiteBackupStale` is therefore per tier: apps 36 h, core 60 h (the gap
+between two successes can reach ~40 h once, and 60 h also tolerates one skipped
+night). Later runs only upload changed bands (minutes to a few GB).
+
+**Crash-consistency caveat.** Sparsebundles are live-written band files
+(Time Machine on the Macs writes them during the nightly read). The copy is
+crash-consistent at best: a band set read mid-backup can be internally torn.
+Restore means attaching the restored bundle and letting macOS verify/repair
+it; older restic snapshots (daily/weekly/monthly retention) are the fallback
+if the newest one will not mount.
 
 **Jobs (namespace `backup`, UTC):**
 
@@ -426,7 +447,7 @@ key) or at `user@host rclone` (admin key, repo `rclone:<dir>`).
 `offsite_backup_last_success_timestamp_seconds`, `_duration_seconds`,
 `_bytes_added`, `_files_processed`, `_snapshots`, `_read_errors` (prune also
 `_repo_bytes`). Nothing is pushed on failure, so staleness is visible.
-Alerts: `OffsiteBackupStale` (>36h), `OffsiteBackupJobFailed`,
+Alerts: `OffsiteBackupStale` (apps >36h, core >60h), `OffsiteBackupJobFailed`,
 `OffsiteBackupNeverSucceeded` (absent guard), `OffsiteBackupMaintenanceStale`,
 `OffsiteBackupCheckMissing`, `OffsiteBackupContentsStale` (>9d).
 
@@ -504,6 +525,110 @@ Repeat the drill after any change to sources, and at least quarterly.
 509 MB restore, 652 MB `check --read-data-subset=1%`.
 
 ---
+
+## GitHub Mirror (monthly, bare mirrors plus metadata)
+
+Since 2026-11-16. A second, independent copy of every GitHub repository of the
+owner account, so a deleted repo, a compromised account or a GitHub outage does
+not lose source history. Manifests: `kubernetes/apps/backup/github-mirror/`
+(own Flux Kustomization), alerts:
+`kubernetes/apps/monitoring/kube-prometheus-stack/app/github-mirror-alerts.yaml`,
+dashboard panels: the `Off-site backup` dashboard (last row).
+
+**What runs.** CronJob `github-mirror` (namespace `backup`, `0 2 1 * *` UTC,
+`concurrencyPolicy: Forbid`, `activeDeadlineSeconds` 4h, `backoffLimit: 0`).
+Image: the upstream `ghcr.io/josegonzalez/python-github-backup` image (alpine,
+git, git-lfs), pinned by tag AND index digest; we never build it. Bump it like
+any other image (Renovate/version-check). Options: bare mirrors
+(`--repositories --bare --lfs`), `--private --fork`, wikis, issues (+comments,
+events), pull requests (+comments, reviews, commits, details), labels,
+milestones, releases. Not `--all`: that adds hooks (needs admin), security
+advisories and discussions (need extra permissions) which a read-only PAT
+cannot read, and an unreadable endpoint would fail the whole run. Release
+assets, gists and starred repositories are not mirrored. Owner only, no orgs.
+
+**NEVER prunes.** `--no-prune` on every fetch and no delete anywhere in the
+scripts: a repository deleted or force-pushed away upstream stays in the
+mirror. `verify.py` only counts such leftovers (`github_mirror_retained_repos`).
+
+**Destination.** StorageClass `cifs-github-mirror` (source: the NAS backups
+share, `subdir: github-mirror`, `Retain`, never `/`), PVC `github-mirror-data`
+(dynamic; the CSI driver creates the directory on first provisioning).
+Layout: `repositories/<name>/repository` (bare clone), `repositories/<name>/wiki`,
+`repositories/<name>/{issues,pulls,...}` JSON. The nightly off-site core backup
+includes the directory, so GitHub history also reaches the storage box.
+
+**Token (operator action).** Secret `github-mirror-token`, key `GITHUB_TOKEN`
+(SOPS, `kubernetes/apps/backup/github-mirror/app/secret.sops.yaml`). It ships
+with a PLACEHOLDER value; the job refuses to run until it is a real fine-grained
+PAT (`github_pat_...`) and exits non-zero with a clear FATAL message.
+
+1. GitHub, Settings, Developer settings, Fine-grained tokens: new token,
+   resource owner = the account, All repositories, repository permissions
+   READ-ONLY: Contents, Metadata, Issues, Pull requests, Wiki (nothing else).
+   Choose an expiry and put a reminder in the calendar; an expired token fails
+   the job loudly (`GithubMirrorJobFailed`).
+2. `sops kubernetes/apps/backup/github-mirror/app/secret.sops.yaml`, replace the
+   value, save, commit and push (never paste the token anywhere else).
+3. First run: `kubectl create job -n backup github-mirror-first --from=cronjob/github-mirror`
+   and `kubectl logs -n backup job/github-mirror-first -f`. Expect
+   `OK: github mirror complete` and a pushed-metrics line.
+
+**Integrity checks per run (`verify.py`).** Lists the owner's repositories via
+the API (private and forks included) and requires, for each, a bare clone that
+passes `git fsck --connectivity-only` (wiki clone too). A repository the API
+reports with size 0 may lack a clone (empty repo). The run fails if any
+repository is missing or corrupt, if the API list cannot be fetched, or if
+`github-backup` itself exits non-zero. The tool stores the authenticated clone
+URL as the git remote; `verify.py` rewrites it to the token-free URL and fails
+the run if a token is still present in any git config, because the mirror is
+itself backed up off-site.
+
+**Metrics and alerts** (Pushgateway `job=github-mirror`):
+`github_mirror_last_success_timestamp_seconds` (only on a fully clean run),
+`github_mirror_repos`, `github_mirror_bytes`, `github_mirror_failed_repos`,
+`github_mirror_retained_repos`, `github_mirror_duration_seconds`. Alerts:
+`GithubMirrorStale` (>35 d, warning), `GithubMirrorFailed`
+(`failed_repos > 0`, critical), `GithubMirrorJobFailed` (CronJob ran without a
+success, covers placeholder/expired token; critical), `GithubMirrorNeverSucceeded`
+(absent guard, 3 d, warning; fires after deploy until the first run). Confirm
+the rules loaded: `curl -s localhost:9090/api/v1/rules` via a Prometheus
+port-forward and look for group `github-mirror`.
+
+**Restore.**
+
+```bash
+# 1. Recover a repository: clone from the bare mirror (works offline from the NAS
+#    copy or from a restic restore of the github-mirror directory)
+git clone <mirror>/repositories/<name>/repository /tmp/restore-<name>
+# 2. Push everything (all branches and tags) into a NEW empty repository
+cd /tmp/restore-<name> && git push --mirror <new-remote-url>
+# 3. LFS objects (if the repo used LFS): git lfs push --all <new-remote-url>
+# 4. Issues / pull requests / releases are JSON under
+#    repositories/<name>/issues, pulls, releases: re-import is MANUAL (GitHub has
+#    no import API for them); use the JSON as the reference or script the
+#    re-creation with the GitHub API.
+# 5. Wiki: git push --mirror to <new-remote-url with .wiki.git> from repositories/<name>/wiki
+```
+
+**Monthly fire-drill (5 minutes, after the 1st).** Pick a random repository
+and prove the mirror is usable, not just present:
+
+```bash
+R=$(ls <mirror>/repositories | shuf -n1)
+git clone <mirror>/repositories/$R/repository /tmp/drill-$R
+git -C /tmp/drill-$R fsck --full && git -C /tmp/drill-$R log --oneline | head -3
+rm -rf /tmp/drill-$R
+```
+
+Also compare `github_mirror_repos` on the dashboard with the repository count
+shown on the GitHub profile (empty repositories are the only legitimate gap).
+
+**Rollback.** `git revert` the commit that added `github-mirror/`; Flux prunes
+the CronJob, ConfigMap, PVC and StorageClass objects. The StorageClass is
+`Retain`, so the mirrored data on the NAS stays untouched. Remove the
+`/src/1/github-mirror` include path only if the directory is also removed
+(a missing include path makes restic report a read error).
 
 ## Pre-Upgrade Backup Procedure
 

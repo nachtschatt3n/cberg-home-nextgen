@@ -1,0 +1,85 @@
+---
+# GitHub mirror alerts. Metrics come from the Pushgateway (job=github-mirror),
+# pushed by CronJob/github-mirror (namespace backup, monthly). The success
+# timestamp is pushed ONLY when the whole run passed, so a dead or failing job
+# shows up as an ageing timestamp, never as a frozen healthy value. A run that
+# aborts before pushing anything (placeholder token) is caught by the CronJob
+# state rule, not by the pushed metrics.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: github-mirror-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: github-mirror
+      interval: 60s
+      rules:
+        - alert: GithubMirrorStale
+          # Monthly schedule (1st): 35d leaves 4 days of slack after a missed run.
+          expr: |
+            time() - max(github_mirror_last_success_timestamp_seconds{job="github-mirror"}) > 35 * 86400
+          for: 1h
+          labels:
+            severity: warning
+            category: backup
+            component: github-mirror
+          annotations:
+            summary: "GitHub mirror has no successful run for over 35 days"
+            description: "The monthly github-mirror CronJob last succeeded {{ $value | humanizeDuration }} ago. Check the Job logs in namespace backup."
+        - alert: GithubMirrorFailed
+          # Failed repositories (missing clone or failed git fsck) or a failed
+          # github-backup run. Clears on the next fully successful run.
+          expr: |
+            max(github_mirror_failed_repos{job="github-mirror"}) > 0
+          for: 5m
+          labels:
+            severity: critical
+            category: backup
+            component: github-mirror
+          annotations:
+            summary: "GitHub mirror reported {{ $value }} failed repositories or a failed run"
+            description: "The last github-mirror run reported failures (missing bare clone, git fsck error, API count mismatch or github-backup error). Check the Job logs in namespace backup; nothing is pruned, so the previous mirror state is intact."
+        - alert: GithubMirrorJobFailed
+          # The CronJob ran and has no success since, while nothing is running:
+          # covers aborts that push no metrics (placeholder/expired token).
+          expr: |
+            (
+              (
+                kube_cronjob_status_last_schedule_time{namespace="backup", cronjob="github-mirror"}
+                - on (namespace, cronjob) kube_cronjob_status_last_successful_time{namespace="backup", cronjob="github-mirror"}
+                > 0
+              )
+              or
+              (
+                kube_cronjob_status_last_schedule_time{namespace="backup", cronjob="github-mirror"}
+                unless on (namespace, cronjob) kube_cronjob_status_last_successful_time{namespace="backup", cronjob="github-mirror"}
+              )
+            )
+            and on (namespace, cronjob) (kube_cronjob_status_active{namespace="backup", cronjob="github-mirror"} == 0)
+          for: 5m
+          labels:
+            severity: critical
+            category: backup
+            component: github-mirror
+          annotations:
+            summary: "GitHub mirror CronJob failed"
+            description: "The most recent github-mirror run did not succeed. If the log says the token is the placeholder or expired, paste a fine-grained read-only PAT into the SOPS secret github-mirror-token."
+        - alert: GithubMirrorNeverSucceeded
+          # absent() guard: a job that never ran (or whose metrics never arrived)
+          # must not read as healthy. 3d covers the manual first run after the
+          # token is provided.
+          expr: |
+            absent(github_mirror_last_success_timestamp_seconds{job="github-mirror"})
+          for: 3d
+          labels:
+            severity: warning
+            category: backup
+            component: github-mirror
+          annotations:
+            summary: "GitHub mirror has never reported a success"
+            description: "No github_mirror_last_success_timestamp_seconds series. The token is probably still the placeholder, the first run has not been triggered, or the Pushgateway lost the metrics."

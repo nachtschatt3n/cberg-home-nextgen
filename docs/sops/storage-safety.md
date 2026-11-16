@@ -96,8 +96,8 @@ If the brief is ambiguous (e.g. "clean up the test resources"), enumerate what e
 ### Hard Rule 3 — Dangerous StorageClasses on this cluster
 
 **Every CIFS StorageClass on this cluster is `reclaimPolicy: Retain` (19/19,
-verified live 2026-08-26; 18 live since `cifs-scrypted-media` was pruned with
-scrypted-nvr on 2026-10-04).** This table used to record 17 of them as `Delete`,
+verified live 2026-08-26; 18 live after `cifs-scrypted-media` was pruned with
+scrypted-nvr on 2026-10-04, 19 with `cifs-github-mirror` added 2026-11-16; Tier 3).** This table used to record 17 of them as `Delete`,
 which had stopped being true. That is not a harmless over-warning: a table wrong
 on most of its rows teaches operators to discount it, and it hides real change —
 if someone flipped a class to `Delete`, the table would have looked identical.
@@ -145,6 +145,7 @@ constrained:**
 |---|---|---|---|
 | `cifs-icloud-docker-andrea` | `//192.168.55.240/backups` | `icloud-backup/andrea` | Retain |
 | `cifs-icloud-docker-mu` | `//192.168.55.240/backups` | `icloud-backup/mu` | Retain |
+| `cifs-github-mirror` | `//192.168.55.240/backups` | `github-mirror` | Retain |
 | `cifs-immich-icloud-backup` | `//192.168.55.240/backups` | `icloud-backup` | Retain |
 | `cifs-opencode-andreamosteller` | `//192.168.55.240/opencode` | `/andrea-opencode` | Retain |
 | `cifs-penpot-assets` | `//192.168.55.240/penpot` | `assets` | Retain |

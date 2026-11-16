@@ -33,7 +33,7 @@ data:
           "id": 1,
           "type": "stat",
           "title": "Core backup: last success age",
-          "description": "Time since the last successful backup run. Green under 36h, amber to 48h, red beyond (alert at 36h).",
+          "description": "Time since the last successful backup run. Green under 48h, amber to 60h, red beyond (alert at 60h; widened because the first run after adding the Time Machine images uploads ~1.9 TiB).",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -69,11 +69,11 @@ data:
                   },
                   {
                     "color": "#e3a008",
-                    "value": 129600
+                    "value": 172800
                   },
                   {
                     "color": "#d64545",
-                    "value": 172800
+                    "value": 216000
                   }
                 ]
               },
@@ -1393,6 +1393,258 @@ data:
               ],
               "values": false
             }
+          }
+        },
+        {
+          "id": 20,
+          "type": "stat",
+          "title": "GitHub mirror: last success age",
+          "description": "Time since the last fully successful monthly GitHub mirror run. Green under 32d, amber to 35d, red beyond (alert GithubMirrorStale at 35d).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 40,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "time() - max(github_mirror_last_success_timestamp_seconds{job=\"github-mirror\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#2e9e6a",
+                    "value": null
+                  },
+                  {
+                    "color": "#e3a008",
+                    "value": 2764800
+                  },
+                  {
+                    "color": "#d64545",
+                    "value": 3024000
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "never succeeded"
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 21,
+          "type": "stat",
+          "title": "GitHub mirror: repositories",
+          "description": "Repositories with a verified bare clone in the latest run.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 40,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(github_mirror_repos{job=\"github-mirror\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#3b82c4",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "no data"
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 22,
+          "type": "stat",
+          "title": "GitHub mirror: failed repositories",
+          "description": "Repositories with a missing clone or failed git fsck (plus 1 if the github-backup run itself failed). Anything above 0 fires GithubMirrorFailed.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 40,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(github_mirror_failed_repos{job=\"github-mirror\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#2e9e6a",
+                    "value": null
+                  },
+                  {
+                    "color": "#d64545",
+                    "value": 1
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "no data"
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 23,
+          "type": "stat",
+          "title": "GitHub mirror: size on NAS",
+          "description": "Total bytes of the mirror directory (bare repos plus metadata JSON). Repositories deleted upstream are retained, so this only grows.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 40,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(github_mirror_bytes{job=\"github-mirror\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#3b82c4",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "no data"
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
           }
         }
       ],

@@ -1,0 +1,97 @@
+---
+# Monthly GitHub mirror (1st of the month, 02:00 UTC): python-github-backup
+# writes BARE mirrors + issue/PR/wiki/release metadata for one owner to the NAS
+# backups share; verify.py then fsck-checks every clone and compares the count
+# with the API. NEVER prunes. Metrics go to the Pushgateway (job=github-mirror).
+# The off-site restic core tier picks the directory up nightly.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: github-mirror
+  namespace: backup
+spec:
+  schedule: "0 2 1 * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 2592000
+      activeDeadlineSeconds: 14400
+      template:
+        metadata:
+          labels:
+            app: github-mirror
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: github-backup
+              # Upstream image (published by the project on release tags), pinned
+              # by tag AND index digest. Alpine + git + git-lfs; we never build it.
+              image: ghcr.io/josegonzalez/python-github-backup:0.68.0@sha256:d29c2686be901d72ccacce76c2674e486dc2626ad94b962958351f1f046b7388
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - /scripts/mirror.sh
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: GITHUB_OWNER
+                  value: nachtschatt3n
+                - name: OUT_DIR
+                  value: /backup
+                - name: TOKEN_FILE
+                  value: /secrets/token/GITHUB_TOKEN
+                - name: PUSHGATEWAY
+                  value: http://prometheus-pushgateway.monitoring:9091
+                - name: HOME
+                  value: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: token
+                  mountPath: /secrets/token
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+                - name: data
+                  mountPath: /backup
+          volumes:
+            - name: scripts
+              configMap:
+                name: github-mirror-scripts
+            - name: token
+              secret:
+                secretName: github-mirror-token
+                defaultMode: 288
+                items:
+                  - key: GITHUB_TOKEN
+                    path: GITHUB_TOKEN
+            - name: tmp
+              emptyDir:
+                sizeLimit: 2Gi
+            - name: data
+              persistentVolumeClaim:
+                claimName: github-mirror-data
