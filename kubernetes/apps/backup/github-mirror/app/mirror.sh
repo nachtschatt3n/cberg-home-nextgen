@@ -23,7 +23,7 @@ if [ -r "$TOKEN_FILE" ]; then
     TOKEN=$(tr -d ' \r\n\t' <"$TOKEN_FILE")
 fi
 case "$TOKEN" in
-    github_pat_*) ;;
+    github_pat_*|ghp_*) ;;
     *)
         echo "FATAL: GITHUB_TOKEN in secret github-mirror-token is empty or still the placeholder."
         echo "FATAL: create a fine-grained read-only PAT (all repositories; Contents, Metadata,"
