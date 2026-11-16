@@ -68,6 +68,12 @@ spec:
           # express it. EG's Backend can, via tls.insecureSkipVerify, matching
           # what the nginx Ingress did with proxy-ssl-verify: off.
           enableBackend: true
+          # Lua EnvoyExtensionPolicy is OFF by default in EG 1.9 (an EEP with a
+          # lua filter is marked Invalid and its route answers 500). Needed by
+          # the HTML polyfill injector on the mealie-test route (Family Hub
+          # fridge, Chrome 108). Enabling the feature changes no existing route:
+          # no other EnvoyExtensionPolicy exists in the cluster.
+          enableLua: true
         logging:
           level:
             default: info
