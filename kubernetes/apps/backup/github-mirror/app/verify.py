@@ -15,6 +15,7 @@ Exit 0 = all good, 1 = any failure.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -64,6 +65,30 @@ def fsck(path):
     return None
 
 
+CRED_URL = re.compile(r"://[^/@\s]+:[^@\s]+@")
+
+
+def scrub_all(repos_dir):
+    """Unconditional pass over EVERY clone on disk (also repos no longer in the
+    API list), run before any API call so an API failure cannot leave a token
+    in a config. Returns the list of clones whose config still holds one."""
+    bad = []
+    if not os.path.isdir(repos_dir):
+        return bad
+    for name in sorted(os.listdir(repos_dir)):
+        for sub in ("repository", "wiki"):
+            path = os.path.join(repos_dir, name, sub)
+            cfg = os.path.join(path, "config")
+            if not os.path.isfile(cfg):
+                continue
+            url = "https://github.com/OWNER/%s.git" % name
+            if sub == "wiki":
+                url = url.replace(".git", ".wiki.git")
+            if scrub_remote(path, url):
+                bad.append(name + "/" + sub)
+    return bad
+
+
 def scrub_remote(path, url):
     """python-github-backup stores the authenticated clone URL (with the PAT) as
     the remote. The mirror is itself backed up off-site, so rewrite it to the
@@ -74,7 +99,7 @@ def scrub_remote(path, url):
     try:
         with open(cfg) as fh:
             text = fh.read()
-        if "github_pat_" in text or "oauth2:" in text:
+        if CRED_URL.search(text) or "github_pat_" in text or "ghp_" in text:
             return "token still present in git config"
     except OSError as exc:
         return "cannot read git config: %s" % exc
@@ -103,6 +128,10 @@ def main():
     ap.add_argument("--api", default="https://api.github.com")
     ap.add_argument("--repos-json", help="test hook: read the repo list from this file")
     args = ap.parse_args()
+
+    scrub_bad = scrub_all(os.path.join(args.out, "repositories"))
+    for item in scrub_bad:
+        print("FAILED: token still present in git config: %s" % item)
 
     token = ""
     if args.token_file and os.path.exists(args.token_file):
@@ -164,6 +193,7 @@ def main():
     print("repos api=%d ok=%d empty=%d failed=%d retained=%d" % (
         expected_count, ok, empty, len(failed), len(retained)))
 
+    failed.extend(scrub_bad)
     success = args.backup_rc == 0 and not failed
     now = int(time.time())
     lines = [

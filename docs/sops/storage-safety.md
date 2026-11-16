@@ -95,9 +95,9 @@ If the brief is ambiguous (e.g. "clean up the test resources"), enumerate what e
 
 ### Hard Rule 3 — Dangerous StorageClasses on this cluster
 
-**Every CIFS StorageClass on this cluster is `reclaimPolicy: Retain` (19/19,
+**Every CIFS StorageClass on this cluster is `reclaimPolicy: Retain` (19/19
 verified live 2026-08-26; 18 live after `cifs-scrypted-media` was pruned with
-scrypted-nvr on 2026-10-04, 19 with `cifs-github-mirror` added 2026-11-16; Tier 3).** This table used to record 17 of them as `Delete`,
+scrypted-nvr on 2026-10-04, 19 in the repo with `cifs-github-mirror` added 2026-11-16, Tier 3, Retain by manifest).** This table used to record 17 of them as `Delete`,
 which had stopped being true. That is not a harmless over-warning: a table wrong
 on most of its rows teaches operators to discount it, and it hides real change —
 if someone flipped a class to `Delete`, the table would have looked identical.
