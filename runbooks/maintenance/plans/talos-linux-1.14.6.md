@@ -66,7 +66,7 @@ touches:
 depends_on:
 - longhorn-1.13.0
 conflicts_with:
-  - talos-linux-1.14.5                # superseded sibling; edits the same talosVersion line.
+- talos-linux-1.14.5                # superseded sibling; edits the same talosVersion line.
 - coredns-1.50.5
 - envoy-gateway-1.10.0
 - envoy-proxy-config-distroless-v1.40.0
@@ -104,10 +104,10 @@ capability_change: true
 rollback_class: git-revert
 security_ref: F-f3f2af15
 finding_refs:
-  - F-27a3f024   # etcd churn (open; the real blocker)
-  - F-33873912   # etcd churn
-  - F-94f3d2b3   # churn linked to CI-runner CPU saturation on nuc14-01/02 (cause is not ours)
-  - F-8bfd22b9   # CI maxRunners saturating nodes
+- F-27a3f024   # etcd churn (open; the real blocker)
+- F-33873912   # etcd churn
+- F-94f3d2b3   # churn linked to CI-runner CPU saturation on nuc14-01/02 (cause is not ours)
+- F-8bfd22b9   # CI maxRunners saturating nodes
 - F-912f4778
 - F-f3f2af15
 - F-c0de81ca
