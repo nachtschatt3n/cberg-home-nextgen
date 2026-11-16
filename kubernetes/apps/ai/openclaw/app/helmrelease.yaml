@@ -837,11 +837,12 @@ spec:
                   // rate_limit is a cooldown-probeable reason, so the primary is
                   // re-probed automatically and traffic returns to codex on its own
                   // once quota resets. No manual revert needed.
-                  // 2026-11-08: with an Anthropic primary the first rung is Terra (Codex
-                  // login, no per-token cost), then the local model. Each rung is a
-                  // separate provider, so an Anthropic outage/credit exhaustion fails over.
+                  // 2026-11-16: Codex/ChatGPT login RETIRED (operator decision; no more
+                  // device-code re-logins). With an Anthropic primary the chain is Haiku
+                  // (covers a Sonnet-only overload/rate limit) then the local model, which
+                  // is what answers if the whole Anthropic key is down or out of credit.
                   cfg.agents.defaults.model.fallbacks = chosenModel.startsWith('anthropic/')
-                    ? ['openai/gpt-6.1-terra', 'ollama/gemma4:26b-mlx']
+                    ? ['anthropic/claude-haiku-5-5', 'ollama/gemma4:26b-mlx']
                     : ['ollama/gemma4:26b-mlx'];
                   delete cfg.agents.defaults.agentRuntime;
                   // WEB SEARCH (2026-11-01): web_search had NO provider ("disabled or no
@@ -881,6 +882,8 @@ spec:
                     cfg.agents.defaults.models['openai/gpt-5.5'] = cfg.agents.defaults.models['openai/gpt-5.5'] || {};
                     cfg.agents.defaults.models['openai/gpt-5.5'].agentRuntime = { id: 'codex' };
                   }
+                  cfg.agents.defaults.models['anthropic/claude-haiku-5-5'] =
+                    Object.assign({}, cfg.agents.defaults.models['anthropic/claude-haiku-5-5']);
                   // Anthropic prompt cache: 1-hour TTL (the longest Anthropic offers; the
                   // other tier is 5 min) for the primary. Telegram chats pause 25-300 min
                   // with a ~130k-token prefix; with 5 min every pause re-wrote it at
@@ -2144,9 +2147,9 @@ spec:
                 # this commit: bundled `anthropic` plugin (enabled below), catalog knows
                 # claude-sonnet-5-5 (1M context), plain/tool/long turns returned
                 # winnerProvider=anthropic with fallbackUsed=false. The chain is seeded
-                # in the config guard: openai/gpt-6.1-terra first, then the local model.
-                # Terra and Luna stay overlaid + allowlisted as manual options.
-                # (history: gpt-6-luna -> gpt-6.1-terra 2026-11-07, gpt-6.1-terra kept as fallback)
+                # in the config guard: Haiku 5.5 first, then the local model (the Codex
+                # login was retired 2026-11-16; Terra/Luna stay overlaid + allowlisted only
+                # as manual options and need a fresh `codex login` if ever wanted again).
                 value: "anthropic/claude-sonnet-5-5"
               # The @openclaw/codex plugin spawns its VENDORED codex for the
               # app-server (0.139.0 in the pinned 2026.6.11 plugin), and
