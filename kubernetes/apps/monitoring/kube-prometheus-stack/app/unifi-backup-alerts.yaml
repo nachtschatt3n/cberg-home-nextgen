@@ -1,0 +1,83 @@
+---
+# UniFi controller backup alerts. Metrics come from the Pushgateway
+# (job=unifi-backup), pushed by CronJob/unifi-backup (namespace backup, weekly,
+# Monday 05:15 UTC). The success timestamp is pushed ONLY by a fully clean run
+# (copy valid AND newest gateway autobackup <= 9 days old), so a failing job is an
+# ageing timestamp, never a frozen healthy value. Every group is paired with an
+# absent() guard so a rule that matches no series cannot sit silently inactive.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: unifi-backup-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: unifi-backup
+      interval: 60s
+      rules:
+        - alert: UnifiBackupStale
+          # Weekly schedule: 9d = one missed run plus slack. Also fires when the
+          # gateway itself stopped producing autobackups (job then fails).
+          expr: |
+            time() - max(unifi_backup_last_success_timestamp{job="unifi-backup"}) > 9 * 86400
+          for: 1h
+          labels:
+            severity: warning
+            category: backup
+            component: unifi-backup
+          annotations:
+            summary: "UniFi controller backup has no successful copy for over 9 days"
+            description: "The weekly unifi-backup CronJob last succeeded {{ $value | humanizeDuration }} ago. Check the Job logs in namespace backup."
+        - alert: UnifiBackupRunFailed
+          # Last pushed run reported failure (login/role/pin/validation/source age).
+          expr: |
+            min(unifi_backup_last_run_ok{job="unifi-backup"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+            category: backup
+            component: unifi-backup
+          annotations:
+            summary: "UniFi controller backup run failed"
+            description: "The last unifi-backup run failed (placeholder credentials, 403 role too weak, 429 rate limit, TLS pin mismatch, invalid file, or the gateway autobackup older than 9 days). Read the Job logs in namespace backup; the previous copies are intact."
+        - alert: UnifiBackupJobFailed
+          # Covers aborts that push no metrics (Pushgateway down, pod never ran).
+          expr: |
+            (
+              (
+                kube_cronjob_status_last_schedule_time{namespace="backup", cronjob="unifi-backup"}
+                - on (namespace, cronjob) kube_cronjob_status_last_successful_time{namespace="backup", cronjob="unifi-backup"}
+                > 0
+              )
+              or
+              (
+                kube_cronjob_status_last_schedule_time{namespace="backup", cronjob="unifi-backup"}
+                unless on (namespace, cronjob) kube_cronjob_status_last_successful_time{namespace="backup", cronjob="unifi-backup"}
+              )
+            )
+            and on (namespace, cronjob) (kube_cronjob_status_active{namespace="backup", cronjob="unifi-backup"} == 0)
+          for: 5m
+          labels:
+            severity: critical
+            category: backup
+            component: unifi-backup
+          annotations:
+            summary: "UniFi backup CronJob failed"
+            description: "The most recent unifi-backup Job did not succeed. If the log says the credentials are the placeholder, paste the real values into the SOPS secret unifi-backup-credentials."
+        - alert: UnifiBackupNeverSucceeded
+          # absent() guard: 10d covers the manual first run after the operator
+          # pastes the credentials (placeholder state alerts via the rules above).
+          expr: |
+            absent(unifi_backup_last_success_timestamp{job="unifi-backup"})
+          for: 10d
+          labels:
+            severity: warning
+            category: backup
+            component: unifi-backup
+          annotations:
+            summary: "UniFi controller backup has never reported a success"
+            description: "No unifi_backup_last_success_timestamp series. Credentials are probably still the placeholder, no run has happened, or the Pushgateway lost the metrics."

@@ -388,7 +388,7 @@ PV sources are Flux postBuild variables read from `offsite-backup-sources`.
 
 | Tier | Repository | Contents |
 |---|---|---|
-| `core` | 1 restic repo | Longhorn backup store (all cluster PV data), phone-cloud backups, other backup folders, document and app-data shares, the two Mac Time Machine sparsebundle images (since 2026-11-16), the monthly GitHub mirror directory (see "GitHub Mirror"), and the small curated media trees: music, books, audiobooks, archive (since 2026-11-16) |
+| `core` | 1 restic repo | Longhorn backup store (all cluster PV data), phone-cloud backups, other backup folders, document and app-data shares, the two Mac Time Machine sparsebundle images (since 2026-11-16), the monthly GitHub mirror directory (see "GitHub Mirror"), the weekly UniFi autobackup copies (see "UniFi Controller Backup"), and the small curated media trees: music, books, audiobooks, archive (since 2026-11-16) |
 | `apps` | 1 restic repo | Small application data shares |
 
 Deliberately NOT covered (operator decisions 2026-11-15/16): the bulk media
@@ -629,6 +629,85 @@ the CronJob, ConfigMap, PVC and StorageClass objects. The StorageClass is
 `Retain`, so the mirrored data on the NAS stays untouched. Remove the
 `/src/1/github-mirror` include path only if the directory is also removed
 (a missing include path makes restic report a read error).
+
+## UniFi Controller Backup (weekly copy of the gateway autobackup)
+
+Since 2026-11-16. The UniFi OS gateway writes its `.unf` autobackups to its own
+disk only; nothing copied them off. CronJob `unifi-backup` (namespace `backup`,
+`15 5 * * 1` UTC, `concurrencyPolicy: Forbid`) copies the newest one to the NAS
+backups share, directory `unifi` (StorageClass `cifs-unifi-backup`, `Retain`,
+never `/`; the SMB CSI driver creates the directory when the PVC provisions).
+The nightly off-site core job includes `/src/1/unifi` (read-only mount of the
+backups share; restic keeps the history, the NAS keeps the newest 8 files).
+Manifests: `kubernetes/apps/backup/unifi-backup/`, alerts
+`kubernetes/apps/monitoring/kube-prometheus-stack/app/unifi-backup-alerts.yaml`.
+No overlap with the off-site jobs (00:30/00:40 UTC), prune (Sun 04:30) or check
+(Wed 04:30).
+
+**API flow (stdlib Python, `backup.py`).** ONE `POST /api/auth/login` per run
+(rate-limited endpoint: a 429 is terminal, never retried; see
+`docs/sops/unifi-controller-rate-limit.md`), then with the session cookie and
+CSRF header `POST /proxy/network/api/s/default/cmd/backup {"cmd":"list-backups"}`
+and `GET /proxy/network/dl/autobackup/<file>.unf`. unifictl does not implement
+backup listing, so these endpoints come from the UniFi Network application API,
+not from a local source; they are verified against a stub only until the first
+real run (see Residual risks below).
+
+**Account role (feasibility, important).** `list-backups` is a POST command
+(`cmd/backup`). The UniFi Network application rejects command POSTs for
+read-only/Viewer roles, so a Viewer-only account is expected to get HTTP 403 and
+the job then fails loudly with a message saying so. This was NOT verified against
+the live controller (no login was attempted: rate limit). Least privilege that
+should work: a dedicated local-only account with the Network application role
+Limited Admin (or Admin) without Super Admin, remote access disabled. If the
+first run logs a 403 on list-backups, raise the role one step and retry; do not
+use the personal admin account.
+
+**TLS.** The gateway certificate is self-signed. Chain verification is off and the
+leaf certificate is pinned by SHA-256 fingerprint (`UNIFI_CERT_SHA256`), checked on
+every connection before credentials are sent. A renewed certificate makes the job
+fail with "TLS pin mismatch" until the pin is updated. Fingerprint:
+
+```bash
+openssl s_client -connect 192.168.30.1:443 </dev/null 2>/dev/null \
+  | openssl x509 -noout -fingerprint -sha256 | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f'
+```
+
+**Operator action: paste the credentials** (secret `unifi-backup-credentials`;
+ships as `REPLACE_ME` placeholders, the job fails loudly until replaced):
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+mise exec -- sops kubernetes/apps/backup/unifi-backup/app/secret.sops.yaml
+# replace UNIFI_USER, UNIFI_PASSWORD, UNIFI_CERT_SHA256, save, then commit + push
+```
+
+First run after Flux applies the change (single login, do not repeat on error):
+`kubectl create job -n backup unifi-backup-first --from=cronjob/unifi-backup`
+then `kubectl logs -n backup job/unifi-backup-first`.
+
+**Validation per run.** File size above 100 KB; not an HTML/JSON error page; a
+plain zip header, or AES-block-aligned high-entropy content (a `.unf` is an
+encrypted zip, so the header check is structural, not a decrypt); size equals the
+size listed by the gateway; written to `.tmp-<name>` and renamed; newest 8 `.unf`
+kept. The newest autobackup on the gateway older than 9 days is a failure too
+(copy is still stored).
+
+**Metrics and alerts** (Pushgateway `job=unifi-backup`):
+`unifi_backup_last_success_timestamp` (only on a fully clean run),
+`unifi_backup_file_bytes`, `unifi_backup_last_run_ok`,
+`unifi_backup_source_age_seconds`. Alerts: `UnifiBackupStale` (>9d),
+`UnifiBackupRunFailed`, `UnifiBackupJobFailed` (CronJob state), and the
+`UnifiBackupNeverSucceeded` absent() guard.
+
+**Restore.** Copy the newest `.unf` from the NAS (`backups/unifi`) or from a restic
+restore of `/src/1/unifi`, then UniFi OS Settings, System, Restore. See
+`docs/sops/disaster-recovery.md` section 4.10.
+
+**Rollback.** `git revert` the commit that added `unifi-backup/`; Flux prunes the
+CronJob, ConfigMap, PVC and StorageClass. The StorageClass is `Retain`, so the NAS
+data stays. Remove the `/src/1/unifi` include only if the directory is also
+removed (a missing include path makes restic report a read error).
 
 ## Pre-Upgrade Backup Procedure
 

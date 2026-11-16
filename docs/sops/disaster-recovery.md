@@ -76,7 +76,7 @@ Most recovery procedures depend on these being current. Audit them quarterly.
 | Cluster kubeconfig | Generated from talosconfig; not committed | Regenerate via `talosctl kubeconfig` |
 | Longhorn CIFS backup target connectivity | `UNAS-CBERG/backups/longhorn` | No backups created or restored |
 | NAS offsite backup | Restic to a hosted storage box (tiers `core` and `apps`, CronJobs in namespace `backup`, monitored, append-only write key, 7 daily/4 weekly/12 monthly) — see `docs/sops/backup.md` "Off-site Backup". Media library and other large trees are deliberately not covered yet; the older vendor cloud upload stays as an unverified second copy during the parallel run | NAS loss: covered data restorable from restic (apps-tier restore drill passed 2026-11-15, core drill pending seed); uncovered trees rely on the vendor upload |
-| UniFi controller backup file (`.unf`) | UniFi controller UI → Settings → System → Backup; auto-saved to NAS | Network rules rebuild from `CLAUDE.md` topology spec |
+| UniFi controller backup file (`.unf`) | Autobackups live ONLY on the gateway disk. The weekly CronJob `backup/unifi-backup` copies the newest one to the NAS (`backups/unifi`, newest 8 kept) and the nightly off-site core job carries it off-site (see `docs/sops/backup.md` "UniFi Controller Backup") | If the gateway is lost with its disk: restore the newest `.unf` from the NAS or restic; without one, network rules rebuild from `CLAUDE.md` topology spec |
 | Cloudflare account 2FA recovery codes | Offsite | Account takeover risk; see AR-020 |
 | GitHub account 2FA + SSH key backups | Offsite | Cannot push fixes mid-incident |
 
@@ -398,10 +398,14 @@ Full workflow: `docs/sops/authentik.md`.
 - `unifictl local device list` shows devices but no config.
 
 **Recovery — auto-backup exists:**
-- UniFi controller auto-saves `.unf` files to `Settings → System → Backups`.
-  Restore the most recent.
-- If the controller has `Backup to NAS` enabled, the file is also on
-  `UNAS-CBERG/unifi-backups/`.
+- The gateway auto-saves `.unf` files to its own disk only
+  (`Settings → System → Backups`). Restore the most recent if the gateway still
+  has them.
+- The controller does NOT write to the NAS by itself. The weekly CronJob
+  `backup/unifi-backup` copies the newest autobackup to
+  `UNAS-CBERG/backups/unifi/` (newest 8 kept), and the nightly off-site core
+  restic job carries that directory off-site. If the gateway disk is gone,
+  restore from there (or from restic) via Settings → System → Restore.
 
 **Recovery — no backup, full rebuild:**
 - Rebuild VLAN/firewall/wifi config from the topology spec in `CLAUDE.md`
