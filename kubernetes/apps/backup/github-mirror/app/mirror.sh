@@ -33,6 +33,10 @@ case "$TOKEN" in
         exit 1
         ;;
 esac
+case "$TOKEN" in
+    github_pat_*) TOKEN_FLAG=--token-fine ;;
+    *) TOKEN_FLAG=--token ;;
+esac
 unset TOKEN
 
 mkdir -p "$OUT"
@@ -40,7 +44,7 @@ start=$(date +%s)
 
 rc=0
 github-backup "$OWNER" \
-    --token-fine "file://$TOKEN_FILE" \
+    "$TOKEN_FLAG" "file://$TOKEN_FILE" \
     --output-directory "$OUT" \
     --private --fork \
     --repositories --bare --lfs --no-prune --wikis \
