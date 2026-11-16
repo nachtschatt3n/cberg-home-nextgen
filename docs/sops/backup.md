@@ -23,11 +23,11 @@ before and after cluster changes.
 | Longhorn volume backup | All PV data | Daily 23:00 UTC (was 03:00 UTC until 2026-10-13) | UNAS-CBERG NAS |
 | iCloud backup | iCloud Drive + Photos, one instance per Apple ID (2) | Continuous | UNAS-CBERG NAS (`backups/icloud-backup/<name>`) |
 
-Off-site copy (toward 3-2-1): the NAS backup is additionally uploaded off-site to cloud
-storage — operator-attested 2026-09-14. Nothing in-cluster observes that upload,
-so treat it as owner-managed: monitoring/alerting on failure, retention, which
-shares it covers, and a restore test from the cloud copy are NOT yet
-established. Re-confirm at the quarterly DR audit
+Off-site copy (3-2-1): since 2026-11-15 the NAS backup is uploaded off-site by
+restic to a hosted storage box (section "Off-site Backup (restic, hosted storage
+box)" below), with alerts on staleness and failure and a recorded restore drill.
+This replaced the NAS built-in cloud upload. Still open: retention policy review
+and a quarterly re-drill. Re-confirm at the quarterly DR audit
 (`docs/sops/disaster-recovery.md`, "Critical prerequisites" table), where the SOPS age key's off-site custody
 is recorded as well.
 
@@ -191,8 +191,8 @@ Configure in Longhorn UI → Settings → Backup Retention:
 | Delete old backup job interval | 24h |
 
 Or configure per-volume in the volume settings. The 7-daily figure covers the
-on-site Longhorn store only; the off-site cloud copy's retention is
-owner-managed and not recorded here.
+on-site Longhorn store only; the off-site restic repos keep 7 daily / 4 weekly /
+12 monthly (weekly `offsite-backup-prune`).
 
 ---
 
@@ -463,11 +463,28 @@ the backup target, then restore volumes through Longhorn as usual.
 
 **Restore drill record.** 2026-11-15 tier apps: 12 random files restored from
 the latest snapshot to a scratch emptyDir and compared by sha256, 12/12 equal.
-Tier core drill: see the follow-up below (run after the seed finishes).
+2026-11-16 tier core (snapshot `691077a4`, 1.27 TiB, first full seed): one-off Job
+`offsite-restore-drill-core` in namespace `backup` with the append-only key,
+`--limit-download 25000` (KiB/s), 2Gi memory limit, read-only source PVCs for
+comparison. Restored 3 representative subtrees (Longhorn `system-backups`, one
+small Longhorn volume dir, one document-share folder): 327 files / 62 MiB in 12 s,
+sha256 against the live source 327/327 equal, 0 mismatches. Peak memory (cgroup
+`memory.peak`) 509 MB for restore. Then `restic check --read-data-subset=1%
+--no-lock` read 705 packs in 8 min 37 s at the 25 MB/s cap, no errors, peak
+memory 652 MB. etcd leader-change counters unchanged across the drill (89/89/93,
+`has_leader` 1 on all members). The job needs `CHOWN FOWNER DAC_OVERRIDE FSETID`
+added back on top of `drop: ALL` for restore (lchown otherwise fails, restic
+exits non-zero); read-only `check` needs no capabilities.
+Gotcha: a seed run that ends without releasing its repo lock blocks any
+exclusive-lock command (`check`, `prune`) until the lock goes stale (30 min
+without refresh); `--no-lock` is acceptable for a read-only drill check. The
+non-fatal "additional files found in the repo" note after the seed is cleaned by
+the first weekly prune.
 Repeat the drill after any change to sources, and at least quarterly.
 
-**Memory.** Peak RSS during the core seed is recorded in the CronJob limits
-(`offsite-backup-core`: 4Gi limit, `GOMEMLIMIT=3500MiB`).
+**Memory.** The core backup job runs with a 4Gi limit and `GOMEMLIMIT=3500MiB`
+(the seed's own peak was not captured). Measured peaks in the 2026-11-16 drill:
+509 MB restore, 652 MB `check --read-data-subset=1%`.
 
 ---
 
