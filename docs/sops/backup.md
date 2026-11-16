@@ -404,6 +404,7 @@ are never read. Sources are mounted read-only (`ro`), PVs are `Retain`.
 | `offsite-backup-core` | 00:40 daily | append-only | restic backup, tier core, upload limited to 40000 KiB/s |
 | `offsite-backup-prune` | Sun 04:30 | admin | `forget --prune`, keep 7 daily / 4 weekly / 12 monthly, both tiers |
 | `offsite-backup-check` | Wed 04:30 | admin | `check --read-data-subset=5%`, both tiers |
+| `offsite-backup-contents` | Mon 06:00 | append-only (read) | read-only contents exporter, see "Dashboard and contents view" |
 
 Longhorn backups run at 23:00 UTC and the nightly maintenance window at 02:30
 UTC; `concurrencyPolicy: Forbid` everywhere. Snapshots use a fixed host
@@ -428,6 +429,22 @@ key) or at `user@host rclone` (admin key, repo `rclone:<dir>`).
 Alerts: `OffsiteBackupStale` (>36h), `OffsiteBackupJobFailed`,
 `OffsiteBackupNeverSucceeded` (absent guard), `OffsiteBackupMaintenanceStale`,
 `OffsiteBackupCheckMissing`.
+
+**Dashboard and contents view.** Grafana dashboard `Off-site backup` (uid
+`offsite-backup`, folder Backup, sidecar ConfigMap `offsite-backup-dashboard` in
+`app/grafana-dashboard.yaml`): last-success age per tier and kind (prune/check
+show "not run yet" until their first weekly run), firing `OffsiteBackup*`
+alerts, read errors (must be 0), size added, snapshots, duration, files, repo
+size, and the contents view. The contents view comes from the weekly CronJob
+`offsite-backup-contents` (`app/contents.sh`): it uses the existing append-only
+keys read-only (`--no-lock`, `--limit-download 20000`, 2Gi limit, no new
+secrets, never the admin key), lists the latest snapshot per tier once and
+pushes `offsite_backup_snapshot_info`, `_snapshot_time_seconds`,
+`_snapshot_bytes` and `offsite_backup_path_bytes{tier,path}` (first 3 path
+components, capped at 40 series plus `(other)`) with `kind=contents`. Run it
+on demand with `kubectl create job -n backup x --from=cronjob/offsite-backup-contents`
+(about 70 s). Alert `OffsiteBackupContentsStale` (>9d). Path names exist only
+as metric labels in the cluster, never in git.
 
 **Operations:**
 

@@ -1,0 +1,1405 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: offsite-backup-dashboard
+  namespace: backup
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Backup
+    # Prevent Flux postBuild var substitution from mangling any ${...} tokens in JSON.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  offsite-backup.json: |
+    {
+      "uid": "offsite-backup",
+      "title": "Off-site backup",
+      "tags": [
+        "backup",
+        "offsite"
+      ],
+      "schemaVersion": 41,
+      "version": 1,
+      "refresh": "5m",
+      "time": {
+        "from": "now-14d",
+        "to": "now"
+      },
+      "timezone": "browser",
+      "editable": false,
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Core backup: last success age",
+          "description": "Time since the last successful backup run. Green under 36h, amber to 48h, red beyond (alert at 36h).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 4,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "time() - max(offsite_backup_last_success_timestamp_seconds{job=\"offsite-backup\",kind=\"backup\",tier=\"core\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#2e9e6a",
+                    "value": null
+                  },
+                  {
+                    "color": "#e3a008",
+                    "value": 129600
+                  },
+                  {
+                    "color": "#d64545",
+                    "value": 172800
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "no data"
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Apps backup: last success age",
+          "description": "Time since the last successful backup run. Green under 36h, amber to 48h, red beyond (alert at 36h).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 4,
+            "y": 0,
+            "w": 4,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "time() - max(offsite_backup_last_success_timestamp_seconds{job=\"offsite-backup\",kind=\"backup\",tier=\"apps\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#2e9e6a",
+                    "value": null
+                  },
+                  {
+                    "color": "#e3a008",
+                    "value": 129600
+                  },
+                  {
+                    "color": "#d64545",
+                    "value": 172800
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "no data"
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Core prune: last success age",
+          "description": "Time since the last successful prune run. Weekly job; green under 8d, amber to 9d, red beyond (alert at 9d).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 0,
+            "w": 4,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "time() - max(offsite_backup_last_success_timestamp_seconds{job=\"offsite-backup\",kind=\"prune\",tier=\"core\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#2e9e6a",
+                    "value": null
+                  },
+                  {
+                    "color": "#e3a008",
+                    "value": 691200
+                  },
+                  {
+                    "color": "#d64545",
+                    "value": 777600
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "not run yet"
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Apps prune: last success age",
+          "description": "Time since the last successful prune run. Weekly job; green under 8d, amber to 9d, red beyond (alert at 9d).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 0,
+            "w": 4,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "time() - max(offsite_backup_last_success_timestamp_seconds{job=\"offsite-backup\",kind=\"prune\",tier=\"apps\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#2e9e6a",
+                    "value": null
+                  },
+                  {
+                    "color": "#e3a008",
+                    "value": 691200
+                  },
+                  {
+                    "color": "#d64545",
+                    "value": 777600
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "not run yet"
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Core check: last success age",
+          "description": "Time since the last successful check run. Weekly job; green under 8d, amber to 9d, red beyond (alert at 9d).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 0,
+            "w": 4,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "time() - max(offsite_backup_last_success_timestamp_seconds{job=\"offsite-backup\",kind=\"check\",tier=\"core\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#2e9e6a",
+                    "value": null
+                  },
+                  {
+                    "color": "#e3a008",
+                    "value": 691200
+                  },
+                  {
+                    "color": "#d64545",
+                    "value": 777600
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "not run yet"
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Apps check: last success age",
+          "description": "Time since the last successful check run. Weekly job; green under 8d, amber to 9d, red beyond (alert at 9d).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 20,
+            "y": 0,
+            "w": 4,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "time() - max(offsite_backup_last_success_timestamp_seconds{job=\"offsite-backup\",kind=\"check\",tier=\"apps\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#2e9e6a",
+                    "value": null
+                  },
+                  {
+                    "color": "#e3a008",
+                    "value": 691200
+                  },
+                  {
+                    "color": "#d64545",
+                    "value": 777600
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "not run yet"
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "Firing off-site alerts",
+          "description": "Count of OffsiteBackup* alerts currently firing.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 4,
+            "w": 4,
+            "h": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "count(ALERTS{alertname=~\"OffsiteBackup.*\",alertstate=\"firing\"}) or vector(0)",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#2e9e6a",
+                    "value": null
+                  },
+                  {
+                    "color": "#d64545",
+                    "value": 1
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 8,
+          "type": "table",
+          "title": "Off-site alerts (firing / pending)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 4,
+            "y": 4,
+            "w": 8,
+            "h": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "ALERTS{alertname=~\"OffsiteBackup.*\",alertstate=~\"firing|pending\"}",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "No off-site alerts firing"
+            },
+            "overrides": []
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "Value": true,
+                  "__name__": true,
+                  "container": true,
+                  "endpoint": true,
+                  "instance": true,
+                  "job": true,
+                  "namespace": true,
+                  "pod": true,
+                  "service": true,
+                  "prometheus": true,
+                  "alertgroup": true
+                },
+                "indexByName": {
+                  "alertname": 0,
+                  "alertstate": 1,
+                  "severity": 2
+                }
+              }
+            }
+          ],
+          "options": {
+            "showHeader": true
+          }
+        },
+        {
+          "id": 9,
+          "type": "stat",
+          "title": "Read errors: core",
+          "description": "Files restic could not read in the last backup. Must be 0.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 4,
+            "w": 3,
+            "h": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(offsite_backup_read_errors{job=\"offsite-backup\",kind=\"backup\",tier=\"core\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#2e9e6a",
+                    "value": null
+                  },
+                  {
+                    "color": "#d64545",
+                    "value": 1
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "no data",
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 10,
+          "type": "stat",
+          "title": "Read errors: apps",
+          "description": "Must be 0.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 15,
+            "y": 4,
+            "w": 3,
+            "h": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(offsite_backup_read_errors{job=\"offsite-backup\",kind=\"backup\",tier=\"apps\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#2e9e6a",
+                    "value": null
+                  },
+                  {
+                    "color": "#d64545",
+                    "value": 1
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "no data",
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 11,
+          "type": "stat",
+          "title": "Repo size on box: core",
+          "description": "Raw repository size, measured by the weekly prune job.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 4,
+            "w": 3,
+            "h": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(offsite_backup_repo_bytes{job=\"offsite-backup\",kind=\"prune\",tier=\"core\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#3b82c4",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "not run yet (weekly prune, Sunday)",
+              "decimals": 1
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 12,
+          "type": "stat",
+          "title": "Repo size on box: apps",
+          "description": "Raw repository size, measured by the weekly prune job.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 21,
+            "y": 4,
+            "w": 3,
+            "h": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(offsite_backup_repo_bytes{job=\"offsite-backup\",kind=\"prune\",tier=\"apps\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#3b82c4",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "not run yet (weekly prune, Sunday)",
+              "decimals": 1
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "Size added per run",
+          "description": "New data written to the repository by each nightly backup (after dedup).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 9,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (tier) (offsite_backup_bytes_added{job=\"offsite-backup\",kind=\"backup\"})",
+              "refId": "A",
+              "legendFormat": "{{tier}}",
+              "instant": false,
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "drawStyle": "bars",
+                "lineWidth": 2,
+                "fillOpacity": 40,
+                "showPoints": "always",
+                "pointSize": 6,
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "core"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#3b82c4"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "apps"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#c4743b"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "Snapshots kept",
+          "description": "Snapshot count per tier after the latest backup (retention 7 daily / 4 weekly / 12 monthly).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 9,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (tier) (offsite_backup_snapshots{job=\"offsite-backup\",kind=\"backup\"})",
+              "refId": "A",
+              "legendFormat": "{{tier}}",
+              "instant": false,
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "showPoints": "always",
+                "pointSize": 6,
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "core"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#3b82c4"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "apps"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#c4743b"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "Backup duration",
+          "description": "Wall-clock time of the latest nightly backup per tier.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 17,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (tier) (offsite_backup_duration_seconds{job=\"offsite-backup\",kind=\"backup\"})",
+              "refId": "A",
+              "legendFormat": "{{tier}}",
+              "instant": false,
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "showPoints": "always",
+                "pointSize": 6,
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "core"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#3b82c4"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "apps"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#c4743b"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 16,
+          "type": "timeseries",
+          "title": "Files processed",
+          "description": "Files scanned by the latest backup per tier.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 17,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (tier) (offsite_backup_files_processed{job=\"offsite-backup\",kind=\"backup\"})",
+              "refId": "A",
+              "legendFormat": "{{tier}}",
+              "instant": false,
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "showPoints": "always",
+                "pointSize": 6,
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "core"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#3b82c4"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "apps"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#c4743b"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 17,
+          "type": "table",
+          "title": "Latest snapshot per tier",
+          "description": "Weekly contents job (read-only). Size is the logical (restored) size.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 25,
+            "w": 24,
+            "h": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (tier, snapshot_id, host, snapshot_time, paths) (offsite_backup_snapshot_info{job=\"offsite-backup\"})",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (tier) (offsite_backup_snapshot_bytes{job=\"offsite-backup\"})",
+              "refId": "B",
+              "legendFormat": "",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "contents job has not run yet"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Size"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  }
+                ]
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "joinByField",
+              "options": {
+                "byField": "tier",
+                "mode": "outer"
+              }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "Time 1": true,
+                  "Time 2": true,
+                  "Value #A": true
+                },
+                "renameByName": {
+                  "tier": "Tier",
+                  "snapshot_time": "Snapshot time (UTC)",
+                  "host": "Host",
+                  "snapshot_id": "Snapshot",
+                  "paths": "Source paths",
+                  "Value #B": "Size"
+                },
+                "indexByName": {
+                  "tier": 0,
+                  "snapshot_time": 1,
+                  "host": 2,
+                  "paths": 3,
+                  "snapshot_id": 4,
+                  "Value #B": 5
+                }
+              }
+            }
+          ],
+          "options": {
+            "showHeader": true
+          }
+        },
+        {
+          "id": 18,
+          "type": "bargauge",
+          "title": "What is in the backup: core (size per top-level path)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 30,
+            "w": 12,
+            "h": 10
+          },
+          "description": "Logical size per top-level path in the latest snapshot (weekly contents job). Largest first, capped at 40 series.",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sort_desc(max by (path) (offsite_backup_path_bytes{job=\"offsite-backup\",tier=\"core\"}))",
+              "refId": "A",
+              "legendFormat": "{{path}}",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "min": 0,
+              "noValue": "contents job has not run yet",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "#3b82c4"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#3b82c4",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "basic",
+            "showUnfilled": true,
+            "valueMode": "color",
+            "namePlacement": "left",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          }
+        },
+        {
+          "id": 19,
+          "type": "bargauge",
+          "title": "What is in the backup: apps (size per top-level path)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 30,
+            "w": 12,
+            "h": 10
+          },
+          "description": "Logical size per top-level path in the latest snapshot (weekly contents job). Largest first, capped at 40 series.",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sort_desc(max by (path) (offsite_backup_path_bytes{job=\"offsite-backup\",tier=\"apps\"}))",
+              "refId": "A",
+              "legendFormat": "{{path}}",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "min": 0,
+              "noValue": "contents job has not run yet",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "#3b82c4"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "#3b82c4",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "basic",
+            "showUnfilled": true,
+            "valueMode": "color",
+            "namePlacement": "left",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          }
+        }
+      ],
+      "templating": {
+        "list": []
+      },
+      "annotations": {
+        "list": []
+      }
+    }

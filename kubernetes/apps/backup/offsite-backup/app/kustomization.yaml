@@ -6,6 +6,7 @@ resources:
   - ./pv.yaml
   - ./pvc.yaml
   - ./cronjobs.yaml
+  - ./grafana-dashboard.yaml
 configMapGenerator:
   - name: offsite-backup-script
     files:

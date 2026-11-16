@@ -83,3 +83,17 @@ spec:
           annotations:
             summary: "Off-site backup integrity check has never reported a success"
             description: "The weekly restic check job has not pushed a success metric."
+        - alert: OffsiteBackupContentsStale
+          # Weekly read-only "what is in the backup" exporter (Monday 06:00 UTC).
+          # The absent() branch covers a job that never reported.
+          expr: |
+            (time() - max by (tier) (offsite_backup_contents_last_success_timestamp_seconds{job="offsite-backup", kind="contents"}) > 9 * 86400)
+            or absent(offsite_backup_contents_last_success_timestamp_seconds{job="offsite-backup", kind="contents"})
+          for: 1h
+          labels:
+            severity: warning
+            category: backup
+            component: offsite-backup
+          annotations:
+            summary: "Off-site backup contents view is stale or missing"
+            description: "The weekly offsite-backup-contents job has not pushed a success for over 9 days, so the dashboard's contents panels are out of date."
