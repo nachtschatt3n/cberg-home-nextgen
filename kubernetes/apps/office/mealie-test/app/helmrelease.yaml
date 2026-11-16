@@ -36,7 +36,7 @@ spec:
           main:
             image:
               repository: ghcr.io/mealie-recipes/mealie
-              tag: v3.28.0
+              tag: v3.30.0
             env:
               TZ: ${TIMEZONE}
               BASE_URL: https://mealie-test.${SECRET_DOMAIN}
