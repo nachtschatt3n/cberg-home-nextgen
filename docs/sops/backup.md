@@ -428,7 +428,7 @@ key) or at `user@host rclone` (admin key, repo `rclone:<dir>`).
 `_repo_bytes`). Nothing is pushed on failure, so staleness is visible.
 Alerts: `OffsiteBackupStale` (>36h), `OffsiteBackupJobFailed`,
 `OffsiteBackupNeverSucceeded` (absent guard), `OffsiteBackupMaintenanceStale`,
-`OffsiteBackupCheckMissing`.
+`OffsiteBackupCheckMissing`, `OffsiteBackupContentsStale` (>9d).
 
 **Dashboard and contents view.** Grafana dashboard `Off-site backup` (uid
 `offsite-backup`, folder Backup, sidecar ConfigMap `offsite-backup-dashboard` in
