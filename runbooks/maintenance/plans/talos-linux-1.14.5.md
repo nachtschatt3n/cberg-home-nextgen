@@ -198,7 +198,7 @@ finding_refs:
   # (etcd churn tracking), F-98043e32 (authentik-web-max-requests deferrals on the etcd premise), F-3602cfa9
   # (unexplained 09-24 stall, residual risk §7), F-7b842e62 (rebuild-limit monitor), F-43f0266f (nuc14-02 igc NIC).
 review: ready-for-go@2026-11-02       # plan-reviewer 2026-11-02: needs-fix (stale slot/order prose, depends_on) -> fixed (23bbcdd3) -> delta re-review needs-fix on depends_on listing only etcd-timeouts -> fixed -> ready-for-go. HUMAN-GATED: operator GO on the dated slot, premises re-run after etcd-timeouts and longhorn-1.13.0 land
-status: vetted
+status: superseded  # by talos-linux-1.14.6 (2026-11-16)
 window: null   # 2026-11-16: slot released to longhorn-1.13.0 (operator chose a new Longhorn date; superseded by talos-linux-1.14.6, which depends on longhorn-1.13.0). Was: sun-attended:2026-11-22, OPERATOR-CHOSEN 2026-11-02 (chat: etcd-timeouts first, then Talos on a later Sunday; §6.2). History: sun-attended:
                                       # 2026-11-01 was MISSED (1.14.4 never ran; it is superseded, window cleared).
                                       # Recommendation only: sun-attended:2026-11-22 (operator ordering 2026-11-02:
