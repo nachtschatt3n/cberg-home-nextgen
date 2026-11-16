@@ -208,3 +208,171 @@ spec:
     nodeStageSecretRef:
       name: csi-driver-smb
       namespace: kube-system
+---
+# Read-only static SMB source for the off-site backup (neutral name; the real
+# share comes from the encrypted offsite-backup-sources Secret via Flux
+# postBuild substitution). Retain: deleting this PV/PVC never touches NAS data
+# (docs/sops/storage-safety.md).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: backup-src-6
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: offsite-backup-src
+  mountOptions:
+    - nosharesock
+    - multichannel
+    - max_channels=4
+    - vers=3.1.1
+    - ro
+    - dir_mode=0555
+    - file_mode=0444
+    - uid=1000
+    - gid=1000
+    - noperm
+    - noatime
+    - rsize=1048576
+    - wsize=1048576
+    - cache=loose
+    - actimeo=30
+    - serverino
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: true
+    volumeHandle: offsite-backup-src-6
+    volumeAttributes:
+      source: "//${NAS_HOSTNAME}/${OFFSITE_SRC_6}"
+    nodeStageSecretRef:
+      name: csi-driver-smb
+      namespace: kube-system
+---
+# Read-only static SMB source for the off-site backup (neutral name; the real
+# share comes from the encrypted offsite-backup-sources Secret via Flux
+# postBuild substitution). Retain: deleting this PV/PVC never touches NAS data
+# (docs/sops/storage-safety.md).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: backup-src-7
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: offsite-backup-src
+  mountOptions:
+    - nosharesock
+    - multichannel
+    - max_channels=4
+    - vers=3.1.1
+    - ro
+    - dir_mode=0555
+    - file_mode=0444
+    - uid=1000
+    - gid=1000
+    - noperm
+    - noatime
+    - rsize=1048576
+    - wsize=1048576
+    - cache=loose
+    - actimeo=30
+    - serverino
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: true
+    volumeHandle: offsite-backup-src-7
+    volumeAttributes:
+      source: "//${NAS_HOSTNAME}/${OFFSITE_SRC_7}"
+    nodeStageSecretRef:
+      name: csi-driver-smb
+      namespace: kube-system
+---
+# Read-only static SMB source for the off-site backup (neutral name; the real
+# share comes from the encrypted offsite-backup-sources Secret via Flux
+# postBuild substitution). Retain: deleting this PV/PVC never touches NAS data
+# (docs/sops/storage-safety.md).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: backup-src-8
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: offsite-backup-src
+  mountOptions:
+    - nosharesock
+    - multichannel
+    - max_channels=4
+    - vers=3.1.1
+    - ro
+    - dir_mode=0555
+    - file_mode=0444
+    - uid=1000
+    - gid=1000
+    - noperm
+    - noatime
+    - rsize=1048576
+    - wsize=1048576
+    - cache=loose
+    - actimeo=30
+    - serverino
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: true
+    volumeHandle: offsite-backup-src-8
+    volumeAttributes:
+      source: "//${NAS_HOSTNAME}/${OFFSITE_SRC_8}"
+    nodeStageSecretRef:
+      name: csi-driver-smb
+      namespace: kube-system
+---
+# Read-only static SMB source for the off-site backup (neutral name; the real
+# share comes from the encrypted offsite-backup-sources Secret via Flux
+# postBuild substitution). Retain: deleting this PV/PVC never touches NAS data
+# (docs/sops/storage-safety.md).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: backup-src-9
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: offsite-backup-src
+  mountOptions:
+    - nosharesock
+    - multichannel
+    - max_channels=4
+    - vers=3.1.1
+    - ro
+    - dir_mode=0555
+    - file_mode=0444
+    - uid=1000
+    - gid=1000
+    - noperm
+    - noatime
+    - rsize=1048576
+    - wsize=1048576
+    - cache=loose
+    - actimeo=30
+    - serverino
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: true
+    volumeHandle: offsite-backup-src-9
+    volumeAttributes:
+      source: "//${NAS_HOSTNAME}/${OFFSITE_SRC_9}"
+    nodeStageSecretRef:
+      name: csi-driver-smb
+      namespace: kube-system

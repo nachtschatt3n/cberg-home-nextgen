@@ -18,15 +18,23 @@ spec:
       interval: 60s
       rules:
         - alert: OffsiteBackupStale
+          # Per-tier threshold. The core tier carries the multi-TiB Time Machine
+          # sparsebundles: the FIRST run after they were added to the include list
+          # uploads ~1.9 TiB (about 15h at the 40 MB/s cap), so the gap between two
+          # successes can reach ~40h once. 60h also tolerates one skipped night
+          # (concurrencyPolicy Forbid skips the next schedule while a run is active).
+          # Steady-state runs are incremental and finish in minutes.
           expr: |
-            time() - max by (tier) (offsite_backup_last_success_timestamp_seconds{job="offsite-backup", kind="backup"}) > 36 * 3600
+            (time() - max by (tier) (offsite_backup_last_success_timestamp_seconds{job="offsite-backup", kind="backup", tier="apps"}) > 36 * 3600)
+            or
+            (time() - max by (tier) (offsite_backup_last_success_timestamp_seconds{job="offsite-backup", kind="backup", tier="core"}) > 60 * 3600)
           for: 10m
           labels:
             severity: critical
             category: backup
             component: offsite-backup
           annotations:
-            summary: "Off-site backup tier {{ $labels.tier }} has no success for over 36h"
+            summary: "Off-site backup tier {{ $labels.tier }} has no success within its window (apps 36h, core 60h)"
             description: "The nightly off-site backup for tier {{ $labels.tier }} last succeeded {{ $value | humanizeDuration }} ago. Check the offsite-backup-{{ $labels.tier }} Job logs in namespace backup."
         - alert: OffsiteBackupMaintenanceStale
           expr: |

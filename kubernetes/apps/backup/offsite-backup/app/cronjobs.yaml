@@ -233,6 +233,18 @@ spec:
                 - name: src-3
                   mountPath: /src/3
                   readOnly: true
+                - name: src-6
+                  mountPath: /src/6
+                  readOnly: true
+                - name: src-7
+                  mountPath: /src/7
+                  readOnly: true
+                - name: src-8
+                  mountPath: /src/8
+                  readOnly: true
+                - name: src-9
+                  mountPath: /src/9
+                  readOnly: true
           volumes:
             - name: scripts
               configMap:
@@ -266,6 +278,22 @@ spec:
             - name: src-3
               persistentVolumeClaim:
                 claimName: backup-src-3
+                readOnly: true
+            - name: src-6
+              persistentVolumeClaim:
+                claimName: backup-src-6
+                readOnly: true
+            - name: src-7
+              persistentVolumeClaim:
+                claimName: backup-src-7
+                readOnly: true
+            - name: src-8
+              persistentVolumeClaim:
+                claimName: backup-src-8
+                readOnly: true
+            - name: src-9
+              persistentVolumeClaim:
+                claimName: backup-src-9
                 readOnly: true
 ---
 # Weekly retention (Sunday 04:30 UTC): forget --prune, keep 7 daily / 4 weekly / 12 monthly. Uses the admin (non-append-only) key, the ONLY place it is used.
