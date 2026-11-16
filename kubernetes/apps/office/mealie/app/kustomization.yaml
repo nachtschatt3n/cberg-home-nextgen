@@ -14,6 +14,7 @@ resources:
   - ./shopping-sync-configmap.yaml
   - ./shopping-sync-cronjob.yaml
   - ./httproute.yaml
+  - ./envoyextensionpolicy.yaml
   # pg-longhorn-volume.yaml and longhorn-volume.yaml are deliberately NOT
   # listed: this Kustomization's targetNamespace (office) would override their
   # `namespace: storage` and create broken duplicates Longhorn ignores.
