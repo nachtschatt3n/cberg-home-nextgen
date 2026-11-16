@@ -240,6 +240,45 @@ spec:
               maintenance window — do not wait for it to reach the ceiling, where allocations fail
               silently instead of producing a clean OOMKill.
 
+        - alert: ContainerOOMKilled
+          # Added 2026-11-16 after office/paperless-ngx was OOMKilled mid-import
+          # (6Gi limit, ocrmypdf force-OCR of a 5-page PDF on 5 concurrent
+          # pages) and NOTHING fired: the threshold rules above need 5-15m of
+          # sustained pressure, and a spike-and-kill lasts seconds. A single
+          # OOMKill is not a crash loop either, so KubePodCrashLooping stays
+          # silent. The restart wipes /tmp and the in-flight work, so every
+          # kill is worth a look.
+          #
+          # last_terminated_reason alone is NOT enough -- it stays at
+          # "OOMKilled" until the next termination, i.e. it would fire for days
+          # after one kill. Pairing it with a restart increase in the last 10m
+          # makes it an EVENT: active for ~10m per kill. Backtest over the
+          # preceding 14d (5m steps): office/paperless-ngx 2 steps (the
+          # 2026-11-16 17:29Z kill) and office/penpot-exporter 29 steps across
+          # 11-13..11-14 (real, repeated OOMs) -- nothing else, so it is quiet
+          # enough to run cluster-wide. Reason "Unknown" (node reboot) does not
+          # match, which is correct: paperless's two 2026-11-12 restarts were
+          # node reboots, not OOMs.
+          expr: |
+            (
+              increase(kube_pod_container_status_restarts_total[10m]) > 0
+            )
+            and on(namespace,pod,container)
+            (
+              kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+            )
+          labels:
+            severity: warning
+            category: capacity
+            component: container
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.container }} was OOMKilled"
+            description: >-
+              Container {{ $labels.container }} in pod {{ $labels.pod }} restarted within the last
+              10 minutes and its last termination reason is OOMKilled. A single kill is not a crash
+              loop, so KubePodCrashLooping will not fire for it. Find what spiked (per-request or
+              per-document work scaling with input size is the usual cause) before raising the limit.
+
         # The absence guard for the three rules above. Each of them is a JOIN:
         # container_memory_* from cAdvisor (kubelet) against
         # kube_pod_container_resource_limits from kube-state-metrics, and the
@@ -257,6 +296,7 @@ spec:
             or absent(container_memory_working_set_bytes{container!="",container!="POD"})
             or absent(kube_pod_container_resource_limits{resource="memory"})
             or absent(container_start_time_seconds{container!="",container!="POD"})
+            or absent(kube_pod_container_status_restarts_total)
           for: 15m
           labels:
             severity: warning
@@ -269,7 +309,8 @@ spec:
               container_memory_working_set_bytes / container_start_time_seconds, or kube-state-metrics
               kube_pod_container_resource_limits) has not been scraped for 15 minutes. While it is
               missing, ContainerMemoryNearLimit, ContainerMemoryLimitImminent and
-              ContainerMemoryLeakPredicted return no data and cannot fire. Treat this as loss of
+              ContainerMemoryLeakPredicted (and ContainerOOMKilled, via kube-state-metrics
+              kube_pod_container_status_restarts_total) return no data and cannot fire. Treat this as loss of
               signal, not as proof that memory is fine. Check the kubelet/cAdvisor and
               kube-state-metrics scrape targets.
 

@@ -49,6 +49,21 @@ spec:
       # page upside-down (garbled OCR) while 12.41 rotated. Lower to 7 so
       # near-threshold pages get straightened. (ROTATE_PAGES defaults to true.)
       PAPERLESS_OCR_ROTATE_PAGES_THRESHOLD: 7
+      # Bound per-document OCR parallelism (2026-11-16 OOMKill). THREADS_PER_WORKER
+      # is passed straight to ocrmypdf as `jobs` (paperless/parsers/tesseract.py).
+      # Unset, it defaults to floor(cpu_count / TASK_WORKERS) = 18 on a NUC14 node,
+      # so ocrmypdf rasterizes + OCRs up to 18 pages AT ONCE. Under OCR_MODE=force
+      # every page is rasterized, and each page pipeline costs ~1-2 GiB: 1-page
+      # payslips peaked 1.8-2.8 GiB, a 5-page one ("Starting processing with 5
+      # workers concurrently") blew through 6Gi. Peak memory therefore scaled with
+      # PAGE COUNT, so no fixed limit was ever safe. With jobs=2 the peak is
+      # bounded at ~baseline + 2 pages regardless of document length; the cost is
+      # wall-clock time on long docs, not memory. TASK_WORKERS pinned at its
+      # default (1) because THREADS_PER_WORKER is per worker: total in-flight
+      # pages = TASK_WORKERS x THREADS_PER_WORKER. Raise either ONLY together
+      # with the memory limit below. See docs/sops/paperless.md.
+      PAPERLESS_TASK_WORKERS: 1
+      PAPERLESS_THREADS_PER_WORKER: 2
       # Reduce logging conflicts
       PAPERLESS_LOGROTATE_MAX_SIZE: "1048576"
       PAPERLESS_LOGROTATE_MAX_BACKUPS: "2"
@@ -172,13 +187,18 @@ spec:
     resources:
       requests:
         cpu: 1000m
-        memory: 2Gi
+        memory: 3Gi
       # 3Gi OOM-killed paperless when OCR_MODE=force re-OCRs a multi-page doc:
       # ocrmypdf rasterizes+OCRs all pages concurrently (e.g. "processing 12
-      # pages concurrently"), spiking memory. force mode makes this the norm for
-      # any multi-page PDF, so the limit must accommodate it.
+      # pages concurrently"), spiking memory. 6Gi then OOM-killed it too on
+      # 2026-11-16 (5-page payslip, 5 concurrent pages) -- raising the limit
+      # alone never bounds a page-count-proportional peak. The real fix is
+      # PAPERLESS_THREADS_PER_WORKER=2 above (bounded ~0.75 GiB baseline +
+      # 2 x <=2 GiB per page, i.e. <~5 GiB); 8Gi keeps >=3 GiB of margin over
+      # that for an unusually heavy page. Request raised to 3Gi so the scheduler
+      # reserves the normal per-document peak (1.8-2.8 GiB observed).
       limits:
-        memory: 6Gi
+        memory: 8Gi
     # Pinned 2026-08-24 (docs/sops/paperless.md §7): with these unset, a
     # fresh `kubectl exec` ignored the image's internal `gosu paperless`
     # drop and defaulted to root. A root exec that touches the Tantivy

@@ -1,8 +1,8 @@
 # SOP: Paperless-ngx Document Management
 
 > Description: Operating standard for paperless-ngx and its full ingestion pipeline — Epson ES-580W scanner → SMB inbox → validator → consume, email ingestion, native AI (LLM suggestions + RAG), OCR tuning, and library curation.
-> Version: `2026.11.02`
-> Last Updated: `2026-11-02`
+> Version: `2026.11.16`
+> Last Updated: `2026-11-16`
 > Owner: `paperless-agent` (global, `~/.claude/agents/paperless-agent.md`)
 
 ---
@@ -38,12 +38,26 @@ metadata curation.
 | Source of truth | `kubernetes/apps/office/paperless-ngx/app/` + this SOP + `paperless-agent` |
 | Chart / image | gabe565 `paperless-ngx` · app image `3.4.1`. The `scan-inbox-validator` Deployment **reuses the same tag** (it wants only the image's python3 + pikepdf runtime, and overrides the entrypoint) — bump `helmrelease.yaml` and `validator-deployment.yaml` in the SAME commit, or the validator silently keeps running a retired image. |
 | Route | HTTPRoute `paperless.${SECRET_DOMAIN}` -> Gateway `envoy-external` (`httproute.yaml`); no Ingress object exists |
-| **Memory limit** | **6Gi** (do NOT lower — `OCR_MODE=force` OOMs at 3Gi) |
+| **Memory limit** | **8Gi** limit / 3Gi request, **paired with `PAPERLESS_THREADS_PER_WORKER=2`** (`TASK_WORKERS=1`). Do NOT lower the limit and do NOT unset/raise the thread cap without raising the limit — see "OCR parallelism cap" below. |
 | DB / cache | `paperless-db` Deployment + Service — Docker Official `mariadb:13.0.2` (rolling line, community support ends 2026-12-31; was 12.3.3 LTS until 2026-10-21) on the `longhorn-static` volume `paperless-db-data` (2 replicas; Volume CR hand-applied, charset `utf8mb4`/`utf8mb4_general_ci` — the §6a invariant, enforced by the `--character-set-server` args in `db-deployment.yaml`). Bundled MariaDB subchart retired 2026-08-19; its rollback volume `paperless-mariadb` was **deleted 2026-08-30** (`aa825d8f`) — there is no rollback floor, the live DB is the only copy. Cache: standalone `paperless-redis` Deployment (official `redis:8.10.1-alpine`, no PVC; the old `paperless-redis` PV is likewise gone) |
 | CIFS shares | `//<NAS>/paperless_ngx` → `consume`, `media`, `export`, `log`, `inbox` — StorageClasses `cifs-paperless-*`, **reclaim=Retain** |
 | Scanner | Epson ES-580W `192.168.32.201` (IoT VLAN), duplex sheet-feed; SMB destination in panel **Presets** |
 | Mail | document mailbox @ `imap.gmx.net:993` (SSL); MailRule id 1 |
 | Native AI | `ai_enabled=True` · LLM suggestions `ollama`/`gemma4:26b-mlx`/`http://192.168.30.111:11434` (timeout 45s) · embeddings (RAG) `ollama`/`nomic-embed-text:latest`/same endpoint. **DB-stored** (`paperless.models.ApplicationConfiguration`), not GitOps — see §4a. paperless-gpt/paperless-ai retired 2026-08-24. |
+
+**OCR parallelism cap (rule, since 2026-11-16).** `PAPERLESS_THREADS_PER_WORKER`
+is handed to ocrmypdf as `jobs`; unset, it defaults to `floor(cpu_count /
+TASK_WORKERS)` = **18** on a NUC14 node, so ocrmypdf rasterizes and OCRs up to
+18 pages *at once*. Under `OCR_MODE=force` every page is rasterized and each
+page pipeline costs ~1-2 GiB, so the per-document peak scaled with **page
+count** — no fixed limit was ever safe (3Gi OOMed in 2026-07, 6Gi OOMed on
+2026-11-16 on a 5-page born-digital payslip running "5 workers
+concurrently"; 1-page payslips peaked 1.8-2.8 GiB). Capping `jobs` at 2 bounds
+the peak at ~baseline (0.75 GiB) + 2 pages regardless of length; long docs get
+slower, not bigger. In-flight pages = `TASK_WORKERS x THREADS_PER_WORKER`:
+raise either only together with the limit. An OOMKill now fires
+`ContainerOOMKilled` (cluster-wide rule in
+`monitoring/kube-prometheus-stack/app/container-memory-alerts.yaml`).
 
 Key OCR/consumer env (`paperless-ngx` helmrelease): `OCR_LANGUAGE=deu+eng`,
 `OCR_MODE=force`, `OCR_ROTATE_PAGES_THRESHOLD=7`, `CONSUMER_BARCODE_SCANNER=ZXING`,
@@ -262,7 +276,9 @@ process_mail_accounts.delay()
    documents, separator page discarded.
 4. Email: forward an invoice → within 10 min a new document appears; INBOX
    unprocessed-PDF count returns to 0.
-5. Large-doc OCR: a 12+ page PDF consumes without OOM (pod restart count stays 0).
+5. Large-doc OCR: a 12+ page PDF consumes without OOM (pod restart count stays 0)
+   and the log shows `Starting processing with 2 workers concurrently` (the
+   thread cap is live; a number > 2 means the env did not land).
 6. Image parity: the app and the validator must run the SAME tag —
    `kubectl -n office get deploy paperless-ngx scan-inbox-validator -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.template.spec.containers[0].image}{"\n"}{end}'`.
    A mismatch means an upgrade bumped the HelmRelease and left the validator behind.
@@ -377,7 +393,7 @@ rotated into openclaw's SOPS secret (commit `b44fc170`).
 | Every mail cycle throws `OperationalError (1366, "Incorrect string value: '\xF0...'")` on `paperless_mail_processedmail.subject` | a table (or the whole schema) is utf8mb3 — cannot store 4-byte UTF-8 (emoji in a mail subject); happened 2026-08-30 after the DB replatform restored utf8mb3 | convert to utf8mb4 (see §6a charset invariant); dump the DB first; verify the `db-deployment.yaml` charset args are utf8mb4 |
 | Mail consume `PermissionError /tmp/paperless/paperless-mail-*` | `process_mail_accounts` was run from a **root** shell (root-owned temp) | queue via `.delay()` or let the beat run; never trigger from a root exec |
 | Mail re-run says "No new documents" but INBOX has unread PDFs | UIDs are in the `ProcessedMail` table (even `FAILED`) | delete the `FAILED` rows to reprocess |
-| paperless CrashLoopBackOff, exit 137 OOMKilled | `OCR_MODE=force` re-OCRs a multi-page doc's pages concurrently > mem limit | keep limit **6Gi**; pull the wedging file out of `/consume` via the validator pod to recover |
+| paperless CrashLoopBackOff / single restart, exit 137 OOMKilled (`ContainerOOMKilled` alert) | `OCR_MODE=force` re-OCRs a multi-page doc's pages concurrently > mem limit; concurrency = `THREADS_PER_WORKER` (default 18 if unset) | check the last `Starting processing with N workers` line before the kill: N > 2 → the thread cap is missing, restore `PAPERLESS_THREADS_PER_WORKER=2`; N <= 2 → a single page is abnormally heavy, inspect that file. Never "fix" by raising the limit alone. Pull a wedging file out of `/consume` via the validator pod to recover |
 | Doc OCR'd badly (garbled/decorative fonts, thermal receipt, rotated) | no automated vision-OCR fallback anymore (paperless-gpt retired 2026-08-24) | manual review — operator + Claude Code reads the page image directly and transcribes into `Document.content`; see §4a |
 | Doc partly garbled (upside-down pages) | ocrmypdf OSD confidence too low to rotate | rotate-both-tesseract (Example C) |
 | validator CrashLoopBackOff | liveness probe used `pgrep` (absent in image) | heartbeat-file probe (already in `validator-deployment.yaml`) |
@@ -492,3 +508,4 @@ AI titles on German docs; foreign-language invoices scoring low on a German dict
 | `2026.09.14` | 2026-09-14 | Full system + data-quality review. Corrected two stale facts: the `helmrelease.yaml` `mariadb.enabled: false` comment still claimed the charset was pinned `utf8mb3` with "utf8mb4 is a separate migration" (that migration landed 2026-08-30, `9cb10b76`), and the §2 / `docs/applications.md` DB image was `mariadb:11.8.9` (live and git are `12.3.3` since 2026-09-06, `ecaaa439`). Verified the 2026-09-04 open issue is **resolved**: a live `/api/documents/{id}/suggestions/` call against `gemma4:26b-mlx` returns cleanly, no GPU-OOM panic. Data fix: the 7 non-split Food docs from the 2026-08-23 batch (919/920/925/926/931/933/934) had never received the treatment the 147 split recipes got — all 7 still carried raw-timestamp titles and lacked `Recipe`+protein tags, and 3 (919/931/933) had the lot-code date misparse (`2010-04-03`/`2014-12-01`/`1996-03-02`). Titles for 919/920 recovered by manual page-image review (decorative title font OCRs to nothing — the documented fallback). Note: the AI date *suggestion* still reproduces the same footer lot-code misparse, so never accept it blind on meal-kit recipe cards. |
 | `2026.09.26` | 2026-09-26 | paperless-ngx 3.1.3 -> 3.2.1 (search index schema v1 -> v2 rebuild at startup): add §6a item 4 with the measured rebuild budget (`READY_AFTER` 115 s for 977 docs vs a 150 s stock startup budget) and the index-membership check. |
 | `2026.10.26` | 2026-10-26 | §2 cache: `paperless-redis` image `redis:8.10.0-alpine` -> `8.10.1-alpine` (matches `app/redis-deployment.yaml` and the live Deployment). Also records the 2026-10-22 change that shipped without a version bump (`b08ba359`, plan `paperless-db-13.0.2`): §2 DB row `paperless-db` image `mariadb:12.3.3` -> `13.0.2` (rolling line, community support ends 2026-12-31). |
+| `2026.11.16` | 2026-11-16 | 6Gi OOMKill during a sequential payslip import (5-page doc, ocrmypdf "5 workers concurrently" under force mode). Root cause: `THREADS_PER_WORKER` unset defaults to cpu_count (18), so per-doc peak scaled with page count. Fix: `PAPERLESS_THREADS_PER_WORKER=2` + `TASK_WORKERS=1` explicit, limit 6Gi -> 8Gi, request 2Gi -> 3Gi; new cluster-wide `ContainerOOMKilled` alert. Added the "OCR parallelism cap" rule to §2 and updated the OOM troubleshooting row + verification test 5. |
