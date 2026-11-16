@@ -10,5 +10,8 @@ configMapGenerator:
   - name: offsite-backup-script
     files:
       - run.sh=script.sh
+  - name: offsite-backup-contents-script
+    files:
+      - contents.sh
 generatorOptions:
   disableNameSuffixHash: true
