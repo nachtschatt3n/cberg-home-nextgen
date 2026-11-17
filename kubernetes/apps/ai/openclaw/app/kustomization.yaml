@@ -5,6 +5,7 @@ namespace: ai
 resources:
   - ./secret.sops.yaml
   - ./anthropic-api-key.sops.yaml
+  - ./household-secret.sops.yaml
   - ./pvc.yaml
   - ./mcporter-config.yaml
   - ./skills-configmap.sops.yaml

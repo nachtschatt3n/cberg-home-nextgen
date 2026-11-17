@@ -55,7 +55,7 @@ spec:
         strategy: Recreate
         pod:
           annotations:
-            secret.reloader.stakater.com/reload: openclaw-secret,anthropic-api-key
+            secret.reloader.stakater.com/reload: openclaw-secret,anthropic-api-key,openclaw-household-secret
             configmap.reloader.stakater.com/reload: openclaw-mcp-servers,openclaw-skills
           securityContext:
             fsGroup: 1000
@@ -1669,6 +1669,34 @@ spec:
                     a.tools.deny = Array.from(new Set(cur.concat(sfDeny)));
                   });
 
+                  // ── family-mcp (2026-11-17): scoped FAMILY tools, household ONLY ──
+                  // One stdio binary, three servers. Each uses its own narrowly scoped
+                  // credential from /etc/openclaw-household (never the pod-wide personal
+                  // secrets; it scrubs them from its env). Missing creds -> tools answer
+                  // "not configured yet", the gateway still starts.
+                  const famMcp = {
+                    familycal: ['list_events', 'get_event', 'create_event', 'update_event', 'delete_event'],
+                    meals: ['get_meal_plan', 'search_recipes', 'get_recipe', 'add_meal_plan_entry', 'remove_meal_plan_entry'],
+                    familykb: ['list_pages', 'read_page', 'search'],
+                  };
+                  const famMcpTools = [];
+                  Object.keys(famMcp).forEach((g) => {
+                    cfg.mcp.servers[g] = { command: '/home/node/.openclaw/bin/family-mcp', args: [g],
+                      env: { FAMILY_MCP_SECRETS: '/etc/openclaw-household' } };
+                    famMcpTools.push(g + '__*');
+                    famMcp[g].forEach((t) => famMcpTools.push(g + '__' + t));
+                  });
+                  (cfg.agents.list || []).forEach((a) => {
+                    if (!a || !a.id) return;
+                    a.tools = a.tools || {};
+                    if (a.id === 'household') {
+                      a.tools.allow = Array.from(new Set((a.tools.allow || []).concat(famMcpTools)));
+                    } else {
+                      const cur = Array.isArray(a.tools.deny) ? a.tools.deny : [];
+                      a.tools.deny = Array.from(new Set(cur.concat(famMcpTools)));
+                    }
+                  });
+
                   delete cfg.model;
 
                   // fold the list view back into agents.entries (see above); explicit
@@ -2418,4 +2446,14 @@ spec:
           openclaw:
             app:
               - path: /etc/openclaw-skills
+                readOnly: true
+
+      household-creds:
+        type: secret
+        name: openclaw-household-secret
+        defaultMode: 0444
+        advancedMounts:
+          openclaw:
+            app:
+              - path: /etc/openclaw-household
                 readOnly: true
