@@ -1,0 +1,43 @@
+---
+# Talos Image Factory schematic behind every `talosImageURL` in talconfig.yaml.
+#
+# Recorded in git so the node image is reproducible without the Image Factory's
+# memory. POSTing exactly this document to https://factory.talos.dev/schematics
+# returns the ID below (verified 2026-11-17). Read by humans only: talhelper
+# does not consume this file; talconfig.yaml carries the resulting ID.
+#
+#   schematic ID: 43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3
+#
+# Reproduce / re-create after the factory forgets it:
+#   curl -s -X POST --data-binary @schematic.yaml https://factory.talos.dev/schematics
+#   (the key order below is part of the hash; do not reformat)
+#
+# Cross-check against a live node (extensions and kernel cmdline):
+#   talosctl -n <node-ip> get extensions
+#   talosctl -n <node-ip> read /proc/cmdline
+#
+# Bump procedure when the extension set changes: docs/sops/talos-upgrade.md.
+customization:
+  extraKernelArgs:
+    - i915.enable_guc=3
+    - apparmor=0
+    - init_on_alloc=0
+    - init_on_free=0
+    - intel_iommu=on
+    - iommu=pt
+    - mitigations=off
+    - security=none
+    - sysctl.kernel.kexec_load_disabled=1
+    - talos.auditd.disabled=1
+    - hugepages=1024
+  systemExtensions:
+    officialExtensions:
+      - siderolabs/i915
+      - siderolabs/intel-ice-firmware
+      - siderolabs/intel-npu
+      - siderolabs/intel-ucode
+      - siderolabs/iscsi-tools
+      - siderolabs/mei
+      - siderolabs/thunderbolt
+      - siderolabs/util-linux-tools
+      - siderolabs/v4l-uvc-drivers

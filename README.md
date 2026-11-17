@@ -457,6 +457,8 @@ operational workflow: [`docs/sops/backup.md`](docs/sops/backup.md).
 ## 🚑 Disaster Recovery
 
 Full procedures live in [`docs/sops/disaster-recovery.md`](docs/sops/disaster-recovery.md).
+For losing everything at once (cluster, NAS and Mac mini), the ordered rebuild is
+[`docs/sops/total-loss-recovery.md`](docs/sops/total-loss-recovery.md).
 The SOP tiers scenarios by recovery effort and lists, for each, the detection,
 blast radius, ordered recovery steps, and verification. Quick map:
 

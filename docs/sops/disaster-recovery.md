@@ -3,8 +3,8 @@
 > Description: Recovery procedures for cluster, node, storage, and external-
 > dependency failures. Complements `docs/sops/backup.md` (preventive workflow)
 > with the *when-something-broke* response runbook.
-> Version: `2026.09.24`
-> Last Updated: `2026-09-24`
+> Version: `2026.11.17`
+> Last Updated: `2026-11-17`
 > Owner: `Platform`
 
 ---
@@ -28,6 +28,10 @@ table-truncate). That's handled per-app via Longhorn snapshot + restore from
 `docs/sops/backup.md`.
 
 ---
+
+> **Everything gone at once (house, cluster, NAS, Mac mini)?** Use
+> `docs/sops/total-loss-recovery.md`: it is the ordered end-to-end rebuild from the
+> off-site restic repo and the offline secrets. This SOP covers single failures.
 
 ## 2) Overview — recovery tier matrix
 
@@ -72,7 +76,8 @@ Most recovery procedures depend on these being current. Audit them quarterly.
 | Item | Where | Failure mode if missing |
 |---|---|---|
 | SOPS age key (`age.key`, public id `age1nw624...`) | Offline + offsite — an off-site copy is held in the operator's external, hosted password manager — not the in-cluster vaultwarden (operator-attested 2026-09-14; not cluster-verifiable, re-confirm at the quarterly audit and after any key rotation) | Cannot decrypt any `*.sops.yaml`; every cluster secret must rotate (§4.4) |
-| Talos `talosconfig` (auth to Talos API) | `kubernetes/bootstrap/talos/clusterconfig/` (git) | Cannot `talosctl` against nodes — but git has it |
+| Talos `talosconfig` (auth to Talos API) | NOT in git: `clusterconfig/` is gitignored (it holds machine secrets). Regenerated from `talsecret.sops.yaml` + `talconfig.yaml` by `task talos:generate-config` (`talhelper genconfig`); reproduced byte-identical with the identical Talos CA on 2026-11-17. Needs the age key | Cannot `talosctl` against nodes until regenerated; without the age key it cannot be regenerated |
+| Talos image schematic (extensions, kernel args) | `kubernetes/bootstrap/talos/schematic.yaml` (git, since 2026-11-17); its ID is the `talosImageURL` in `talconfig.yaml` | Without it the node image cannot be rebuilt if the Image Factory forgets the ID |
 | Cluster kubeconfig | Generated from talosconfig; not committed | Regenerate via `talosctl kubeconfig` |
 | Longhorn CIFS backup target connectivity | `UNAS-CBERG/backups` (Longhorn writes its `backupstore/` directory there) | No backups created or restored |
 | NAS offsite backup | Restic to a hosted storage box (tiers `core` and `apps`, CronJobs in namespace `backup`, monitored, append-only write key, 7 daily/4 weekly/12 monthly) — see `docs/sops/backup.md` "Off-site Backup". Media library and other large trees are deliberately not covered yet; the older vendor cloud upload stays as an unverified second copy during the parallel run | NAS loss: covered data restorable from restic (apps-tier restore drill passed 2026-11-15, core drill pending seed); uncovered trees rely on the vendor upload |
@@ -170,19 +175,18 @@ least 1 node of hardware.
    kubectl get nodes      # all 3 Ready
    ```
 
-3. **Bootstrap SOPS age secret into the cluster:**
-   ```bash
-   kubectl create namespace flux-system
-   kubectl create secret generic sops-age -n flux-system \
-     --from-file=age.agekey=age.key
-   ```
-   Without this, Flux can decrypt nothing.
+3. **Bootstrap SOPS age secret, namespaces and Flux:** the repo task does this
+   (`task bootstrap:apps` runs `kubernetes/bootstrap/apps/resources/prepare.sh`:
+   Prometheus CRDs, a namespace per `kubernetes/apps/*`, `cluster-settings`,
+   then the SOPS Secrets `cluster-secrets` and `sops-age` from
+   `kubernetes/flux/components/common/`, followed by `helmfile apply`: Cilium,
+   CoreDNS, cert-manager, flux-operator, flux-instance). Without `sops-age`
+   Flux can decrypt nothing. Steps 1 to 4 for a total loss, with the full
+   ordering, are in `docs/sops/total-loss-recovery.md`.
 
-4. **Apply Cilium and Flux bootstrap:**
-   The `kubernetes/bootstrap/` tree contains the minimum Cilium + Flux install.
-   Follow the upstream [onedr0p/cluster-template bootstrap
-   docs](https://github.com/onedr0p/cluster-template) — they're more current
-   than this SOP can stay.
+4. **Apply Cilium and Flux:** done by the helmfile of step 3
+   (`kubernetes/bootstrap/apps/helmfile.yaml`); nodes stay NotReady until Cilium
+   is installed because the Talos config sets `cniConfig: none`.
 
 5. **Let Flux reconcile everything:**
    ```bash

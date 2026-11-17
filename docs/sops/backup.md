@@ -501,6 +501,9 @@ Restored files keep content and mtimes; ownership is the mount's uid/gid 1000
 The Longhorn backup store is inside tier `core`: restore it to the NAS path of
 the backup target, then restore volumes with `runbooks/longhorn-bulk-restore.py` (`docs/sops/longhorn.md` "Total-loss Longhorn restore").
 
+Full ordered rebuild from this repository after a total loss, including
+credential custody, restore order and the realistic recovery time: `docs/sops/total-loss-recovery.md`.
+
 **Restore drill record.** 2026-11-15 tier apps: 12 random files restored from
 the latest snapshot to a scratch emptyDir and compared by sha256, 12/12 equal.
 2026-11-16 tier core (snapshot `691077a4`, 1.27 TiB, first full seed): one-off Job
