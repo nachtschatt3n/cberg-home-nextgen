@@ -1,0 +1,76 @@
+---
+# Flux image automation for ninth-banner-5 (the v0.5 line on its own address).
+# Mode table: docs/sops/self-built-image-rebuild.md "Weekly rebuild + deploy mode".
+#
+# No ImageRepository of its own: the ImagePolicy below reads the main game's
+# ImageRepository `the-ninth-banner` (same namespace), one scan for all apps.
+#
+# PINNED TO THE v0.5 LINE: range '>=0.5.0 <0.6.0' over exactly
+# `v<major>.<minor>.<patch>` tags. v0.5.6+ is rolled out here; v0.6.x and
+# later never are, whatever the main address does at the switch. `sha-*`
+# builds and pre-releases are never selected. The ^...$ anchors are
+# load-bearing: Flux matches filterTags unanchored.
+#
+# Policies on this ImageRepository:
+#   the-ninth-banner      '>=0.1.0 <0.6.0'  (main address; lifted at the switch)
+#   ninth-banner-preview  '>=0.6.0'
+#   ninth-banner-5        '>=0.5.0 <0.6.0'  (this one; never lifted)
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: ninth-banner-5
+  namespace: my-software-production
+spec:
+  imageRepositoryRef:
+    name: the-ninth-banner
+  filterTags:
+    pattern: '^v(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$'
+    extract: '$version'
+  policy:
+    semver:
+      range: '>=0.5.0 <0.6.0'
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: ninth-banner-5-image-updates
+  namespace: my-software-production
+spec:
+  # Own automation, scoped to this app's directory and (policySelector) to
+  # this app's ImagePolicy, the same shape as the-ninth-banner-image-updates.
+  # The label comes from the Flux Kustomization's commonMetadata. It never
+  # writes the live game's marker, and the live game's automation never
+  # writes this one.
+  policySelector:
+    matchLabels:
+      app.kubernetes.io/name: ninth-banner-5
+  interval: 30m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcdbot@users.noreply.github.com
+        name: fluxcdbot
+      messageTemplate: |
+        chore(ninth-banner-5): update container image (release)
+
+        Automation name: {{ .AutomationObject }}
+
+        Objects updated:
+        {{ range $resource, $changes := .Changed.Objects -}}
+        - {{ $resource.Kind }} {{ $resource.Name }}
+        {{- range $_, $change := $changes }}
+          {{ $change.OldValue }} -> {{ $change.NewValue }}
+        {{ end -}}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    strategy: Setters
+    path: "./kubernetes/apps/my-software-production/ninth-banner-5"

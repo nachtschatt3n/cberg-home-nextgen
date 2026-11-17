@@ -1,0 +1,87 @@
+---
+# The Ninth Banner v0.5 line on its own address (my-software-production/
+# ninth-banner-5). pod=~"ninth-banner-5-.*" never matches the main game's pods
+# (the-ninth-banner-*) or the preview's (ninth-banner-preview-*), and their
+# rules never match these. App metrics use job="ninth-banner-5".
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: ninth-banner-5-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - interval: 30s
+      name: ninth-banner-5.pods.health
+      rules:
+        - alert: NinthBanner5PodNotReady
+          annotations:
+            description: The Ninth Banner v0.5 (-5 address) pod {{ $labels.pod }} has been
+              not ready for more than 5 minutes. The public v0.5-line address is
+              unavailable.
+            summary: The Ninth Banner v0.5 pod {{ $labels.pod }} is not ready
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="my-software-production", pod=~"ninth-banner-5-.*", condition="true"}
+              unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+            ) == 0
+          for: 5m
+          labels:
+            category: my-software-production
+            component: ninth-banner-5
+            severity: critical
+        - alert: NinthBanner5PodCrashLooping
+          annotations:
+            description: The Ninth Banner v0.5 (-5 address) pod {{ $labels.pod }} has
+              restarted {{ $value | printf "%.0f" }} times in the last 15 minutes.
+            summary: The Ninth Banner v0.5 pod {{ $labels.pod }} is crash looping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="my-software-production", pod=~"ninth-banner-5-.*"}[15m]) * 900 > 2
+          for: 5m
+          labels:
+            category: my-software-production
+            component: ninth-banner-5
+            severity: critical
+        - alert: NinthBanner5PodRestarted
+          annotations:
+            description: The Ninth Banner v0.5 (-5 address) pod {{ $labels.pod }} has
+              restarted at least once in the last 15 minutes.
+            summary: The Ninth Banner v0.5 pod {{ $labels.pod }} restarted
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="my-software-production", pod=~"ninth-banner-5-.*"}[15m]) > 0
+          for: 1m
+          labels:
+            category: my-software-production
+            component: ninth-banner-5
+            severity: warning
+        - alert: NinthBanner5Down
+          annotations:
+            description: The Ninth Banner v0.5 (-5) deployment has had no available
+              replica for 5 minutes. A rollout leaves it without a pod for about
+              35 seconds (the old pod stops before the new one starts); the 5
+              minutes cover that, so a normal rollout does not fire this.
+            summary: The Ninth Banner v0.5 address is down
+          expr: |
+            kube_deployment_status_replicas_available{namespace="my-software-production", deployment="ninth-banner-5"} == 0
+          for: 5m
+          labels:
+            category: my-software-production
+            component: ninth-banner-5
+            severity: critical
+        - alert: NinthBanner5FeedbackStoreDown
+          annotations:
+            description: The ninth-banner-5 feedback/analytics store (shared
+              postgresql, database ninth_banner_5_feedback) has been unreachable
+              for 15 minutes. Feedback intake answers 503 (the client keeps the
+              reports) and play statistics are not recorded.
+            summary: The Ninth Banner v0.5 feedback store is down
+          expr: |
+            feedback_store_up{namespace="my-software-production", job="ninth-banner-5"} == 0
+          for: 15m
+          labels:
+            category: my-software-production
+            component: ninth-banner-5
+            severity: warning

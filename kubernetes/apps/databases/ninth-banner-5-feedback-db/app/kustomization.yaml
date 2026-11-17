@@ -1,0 +1,17 @@
+---
+# Database + login role for ninth-banner-5 (the v0.5 line on its own address,
+# my-software-production/ninth-banner-5) on the shared postgresql. Same shape
+# as ../../ninth-banner-feedback-db, but a SEPARATE role and database
+# (ninth_banner_5_feedback): the -5 instance never writes the main game's
+# feedback/analytics tables, and its retention/size pruning only ever touches
+# its own rows. Separate Flux app so the main game's init Job is not re-run.
+#
+# secret.sops.yaml: NINTH_BANNER_5_FEEDBACK_PASSWORD MUST equal the password
+# inside FEEDBACK_DATABASE_URL in
+# my-software-production/ninth-banner-5/app/feedback-secret.sops.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - secret.sops.yaml
+  - bootstrap-configmap.yaml
+  - init-job.yaml

@@ -589,12 +589,14 @@ deny:
       rollout restart deploy/sure-worker`, then assert the sidekiq-cron set
       `cron_jobs:default` (NOT `cron_jobs`) has 11 members (SCARD). Remove this
       rule only when that restart+assert is automated in the apply path.
-  - match: "*ninth-banner-feedback-db*"
+  - match: "*ninth-banner*feedback-db*"
     # The Renovate PR is keyed on the SHARED depName `pgvector/pgvector`, which
     # this glob cannot see, so `paths` holds any PR that CHANGES the Job file;
     # the direct-bump lane matches the component key itself.
+    # Covers ninth-banner-5-feedback-db too (same immutable-Job shape, 2026-11-17).
     paths:
       - "kubernetes/apps/databases/ninth-banner-feedback-db/app/init-job.yaml"
+      - "kubernetes/apps/databases/ninth-banner-5-feedback-db/app/init-job.yaml"
     reason: >-
       HELD 2026-10-17 (nightly Step 0). The image lives in a one-shot Job whose
       .spec.template is IMMUTABLE and which carries no force annotation, so a

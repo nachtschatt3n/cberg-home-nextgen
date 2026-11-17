@@ -1,0 +1,172 @@
+---
+# ninth-banner-5: The Ninth Banner's v0.5 line on its own address, on
+# envoy-EXTERNAL, PUBLIC like the main game (same owner decision 2026-10-02:
+# the game is meant to be shared; the -5 address added 2026-11-17 so players
+# can keep the old game after the main address moves to v0.6). Same shape as
+# ../../the-ninth-banner/app/httproute.yaml:
+#   - /metrics is 404'd at the gateway;
+#   - X-authentik-* headers are stripped (the app's clientKey() trusts them);
+#   - POST /ai/generate (the only path to the SHARED Mac mini Ollama) has its
+#     own route and its OWN edge rate limit (BackendTrafficPolicy below).
+# DNS: external-dns takes the target from the envoy-external Gateway; the
+# cloudflared wildcard ingress and the wildcard cert already cover the host.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ninth-banner-5
+  namespace: my-software-production
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "The Ninth Banner (v0.5)"
+    gethomepage.dev/description: "The v0.5 line of the browser tactics RPG, on its own address"
+    gethomepage.dev/group: "Software Development"
+    gethomepage.dev/icon: "mdi-flag-variant"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/name=ninth-banner-5"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      # https only. The http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "ninthbanner-5.${SECRET_DOMAIN}"
+  rules:
+    # Prometheus metrics are for the in-cluster ServiceMonitor only (it scrapes
+    # the Service directly). Never serve them through the public gateway.
+    - matches:
+        - path: { type: PathPrefix, value: /metrics }
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: ninth-banner-5-not-found
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      # No forward-auth any more, so nothing overwrites the X-authentik-*
+      # headers: strip them, or a client could set X-authentik-username and
+      # rotate it to dodge the app's per-client limits (clientKey() trusts it)
+      # and forge the `user` log field.
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - X-Authentik-Username
+              - X-Authentik-Groups
+              - X-Authentik-Email
+              - X-Authentik-Name
+              - X-Authentik-Uid
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ninth-banner-5
+          port: 80
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: ninth-banner-5-not-found
+  namespace: my-software-production
+spec:
+  directResponse:
+    statusCode: 404
+    contentType: text/plain
+    body:
+      type: Inline
+      inline: "not found\n"
+---
+# POST /ai/generate ONLY -- the one path that reaches the SHARED Mac mini
+# Ollama host. Its own route so the BackendTrafficPolicy below rate-limits
+# exactly this. An Exact path match outranks the PathPrefix "/" above for the
+# same hostname (Gateway API precedence); a non-POST falls through to the main
+# route and gets the app's own 404. Public like the rest of the host.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ninth-banner-5-ai-generate
+  namespace: my-software-production
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "ninthbanner-5.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: Exact, value: /ai/generate }
+          method: POST
+      # The proxy waits up to 120s for Ollama; the gateway-wide 60s would cut a
+      # slow generation off first. Rule timeouts win over the BTP timeout.
+      # (Cloudflare's own proxied-request ceiling is ~100s; the client falls
+      # back to offline content on any failure.)
+      timeouts:
+        request: 125s
+      # Same header strip as the main route (see there).
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - X-Authentik-Username
+              - X-Authentik-Groups
+              - X-Authentik-Email
+              - X-Authentik-Name
+              - X-Authentik-Uid
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ninth-banner-5
+          port: 80
+---
+# Edge rate limit for this instance's POST /ai/generate, the same mechanism
+# as the main game's (see the long comment in
+# ../../the-ninth-banner/app/httproute.yaml: Local limits, per envoy-external
+# replica, 3 replicas, StrategicMerge into envoy-compression). Per client the
+# same 10/min per replica; the global cap is HALF the main game's (10/min per
+# replica, ~30/min across the gateway), since this is the fallback address and
+# both instances share one Ollama model. 429 -> the client uses offline text.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: ninth-banner-5-ai-generate
+  namespace: my-software-production
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: ninth-banner-5-ai-generate
+  mergeType: StrategicMerge
+  rateLimit:
+    type: Local
+    local:
+      rules:
+        # Per client, IPv4.
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: 0.0.0.0/0
+          limit:
+            requests: 10
+            unit: Minute
+        # Per client, IPv6.
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: ::/0
+          limit:
+            requests: 10
+            unit: Minute
+        # Global cap: one bucket shared by all clients.
+        - clientSelectors:
+            - methods:
+                - value: POST
+          limit:
+            requests: 10
+            unit: Minute

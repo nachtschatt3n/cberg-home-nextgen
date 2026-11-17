@@ -1,0 +1,18 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# No PVC. Pull secret ghcr-the-ninth-banner is the main game's (same
+# namespace, ../../the-ninth-banner/app). Feedback + play statistics go to the
+# -5 instance's OWN database ninth_banner_5_feedback on the shared postgresql
+# (databases/ninth-banner-5-feedback-db), never the main game's.
+resources:
+  # Operator-written SOPS secret: FEEDBACK_DATABASE_URL + FEEDBACK_ADMIN_TOKEN.
+  # The DSN password MUST equal NINTH_BANNER_5_FEEDBACK_PASSWORD in
+  # databases/ninth-banner-5-feedback-db/app/secret.sops.yaml.
+  - ./feedback-secret.sops.yaml
+  - ./helmrelease.yaml
+  - ./httproute.yaml
+  # ImagePolicy + ImageUpdateAutomation only; the ImageRepository is the main
+  # game's (../../the-ninth-banner/app/image-automation.yaml).
+  - ./image-automation.yaml

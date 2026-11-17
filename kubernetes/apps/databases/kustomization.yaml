@@ -8,6 +8,7 @@ resources:
   - ./postgresql/ks.yaml
   - ./sweep-history/ks.yaml
   - ./ninth-banner-feedback-db/ks.yaml
+  - ./ninth-banner-5-feedback-db/ks.yaml
   - ./nocodb/ks.yaml
   - ./mariadb/ks.yaml
   - ./redis/ks.yaml

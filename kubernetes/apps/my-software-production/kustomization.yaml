@@ -10,6 +10,7 @@ resources:
   - ./andreamosteller/ks.yaml
   - ./andreamosteller-legacy/ks.yaml
   - ./gas-price-monitor/ks.yaml
+  - ./ninth-banner-5/ks.yaml
   - ./ninth-banner-preview/ks.yaml
   - ./rainbow-rescue/ks.yaml
   - ./splitfairy/ks.yaml

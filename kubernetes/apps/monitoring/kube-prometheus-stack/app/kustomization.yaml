@@ -46,6 +46,7 @@ resources:
   - ./andreamosteller-legacy-alerts.yaml
   - ./the-ninth-banner-alerts.yaml
   - ./ninth-banner-preview-alerts.yaml
+  - ./ninth-banner-5-alerts.yaml
   - ./ci-runner-alerts.yaml
   - ./gha-runner-scale-set-alerts.yaml
   - ./mosquitto-alerts.yaml

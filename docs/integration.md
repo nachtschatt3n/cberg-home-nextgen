@@ -94,6 +94,7 @@ confirmed, so a claim can be re-checked rather than trusted.
 | home-assistant | `http://192.168.30.111:11434` | `gemma4:26b-mlx` (all integrations) | HA UI | 2026-09-05, ha-agent, confirmed with `/api/ps` snapshots |
 | splitfairy | `http://192.168.30.111:11434` | `gemma4:26b-mlx` (vision) | `OLLAMA_URL`, `OLLAMA_MODEL` | 2026-09-28, helmrelease env |
 | the-ninth-banner | `http://192.168.30.111:11434` | `gemma4:26b-mlx` | `AI_PROVIDER=ollama`, `OLLAMA_URL`, `OLLAMA_MODEL` | 2026-10-02, helmrelease env; in-cluster `POST /ai/generate` returned `source: ai` |
+| ninth-banner-5 | `http://192.168.30.111:11434` | `gemma4:26b-mlx` | `AI_PROVIDER=ollama`, `OLLAMA_URL`, `OLLAMA_MODEL` | 2026-11-17, helmrelease env (copy of the-ninth-banner) |
 | headlamp | `http://192.168.30.111:11434` | `gemma4:26b-mlx` | Headlamp UI: AI Assistant plugin | NOT VERIFIABLE — per-browser localStorage, no server-side config |
 | paperclip | Cloud | OpenAI API (cloud) | `OPENAI_API_KEY` in SOPS secret | n/a — cloud only |
 

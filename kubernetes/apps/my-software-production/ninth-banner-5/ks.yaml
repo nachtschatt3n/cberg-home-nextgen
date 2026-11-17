@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
+---
+# The Ninth Banner's v0.5 line on its own public address (ninthbanner-5),
+# so players can keep the old game after the main address moves to v0.6.
+# Named ninth-banner-5, NOT the-ninth-banner-5: the production alerts and
+# selectors match pod=~"the-ninth-banner-.*".
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app ninth-banner-5
+  namespace: flux-system
+spec:
+  targetNamespace: my-software-production
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  dependsOn:
+    - name: ninth-banner-5-feedback-db
+      namespace: databases
+  path: ./kubernetes/apps/my-software-production/ninth-banner-5/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  wait: false
+  interval: 30m
+  retryInterval: 1m
+  timeout: 5m
