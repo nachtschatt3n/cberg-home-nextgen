@@ -30,12 +30,8 @@ spec:
   values:
     controllers:
       dashcast:
-        # PARKED at 0 until HA_TOKEN is filled in secret.sops.yaml (it holds a
-        # placeholder). dashcast refuses to start without a token, and a
-        # placeholder would hit HA with an invalid bearer token on startup
-        # (failed-login notification / ip_ban counter). Set to 1 in the same
-        # commit that replaces the placeholder.
-        replicas: 0
+        # HA_TOKEN = dedicated non-admin HA user (set 2026-11-17, 6c000c524).
+        replicas: 1
         annotations:
           reloader.stakater.com/auto: "true"
         containers:
