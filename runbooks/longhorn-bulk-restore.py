@@ -11,8 +11,9 @@ Safe by default:
   * DRY-RUN unless --apply is given; the plan table is printed either way.
   * Read-only against everything except `Volume` CRs it creates (and, with
     --create-pv, PVs). It never deletes anything unless --force is given, and
-    --force only ever deletes a DETACHED Longhorn Volume whose exact name it is
-    about to restore onto, and only with --yes.
+    --force only ever deletes a DETACHED Longhorn Volume carrying this tool's
+    bulk-restore=true label whose exact name it is about to restore onto, only
+    with --yes and a restoretest-/scratch- prefix.
   * Refuses to touch an existing volume of the same name.
   * Backups whose newest completed backup is older than --max-age-days are
     treated as retired volumes (STALE) and skipped unless --include-stale.
@@ -220,7 +221,10 @@ def restore_one(r, a):
         if a.force:
             existing = sh(["kubectl", "-n", NS, "get", "volumes.longhorn.io", name, "-o", "json"])
             if existing[0] == 0:
-                state = json.loads(existing[1]).get("status", {}).get("state")
+                ev = json.loads(existing[1])
+                if ev.get("metadata", {}).get("labels", {}).get(RESTORE_LABEL) != "true":
+                    return "FAILED", 0, "--force refused: existing volume was not created by this tool (no bulk-restore=true label)"
+                state = ev.get("status", {}).get("state")
                 if state != "detached":
                     return "FAILED", 0, f"--force refused: existing volume is {state}, not detached"
                 if not a.yes:
@@ -278,9 +282,10 @@ def main():
     ap.add_argument("--yes", action="store_true")
     a = ap.parse_args()
 
-    if a.force and not a.name_prefix:
-        log("NOTE: --force without --name-prefix would delete a PRODUCTION-named volume. "
-            "Refusing; use it only with a scratch --name-prefix (or delete by hand per the SOP).")
+    if a.force and not a.name_prefix.startswith(("restoretest-", "scratch-")):
+        log("NOTE: --force is only allowed with --name-prefix restoretest- or scratch- "
+            "(it deletes the existing same-name volume, and only if this tool created it). "
+            "Delete production-named volumes by hand per the SOP.")
         return 2
 
     rows, gaps = discover(a)

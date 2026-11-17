@@ -727,7 +727,7 @@ NAS); skipping the 62 GiB Elasticsearch volume saves about 25 min.
 
 Safety properties of the tool: dry-run unless `--apply`; refuses a volume that
 already exists; `--force` (delete a detached same-name volume first, needs
-`--yes`) is only permitted together with a scratch `--name-prefix`;
+`--yes`) is only permitted with a `restoretest-` or `scratch-` `--name-prefix` and only deletes volumes carrying this tool's `bulk-restore=true` label;
 `--create-pv` sets `Retain` and never `Delete`; exit code non-zero on any
 failure. Scratch restore recipe (what the 2026-11-17 proof did):
 `--name-prefix restoretest- --create-pv --apply`, mount read-only in a
