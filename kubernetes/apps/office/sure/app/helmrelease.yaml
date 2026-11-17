@@ -295,7 +295,23 @@ spec:
       # if a cursor repeats. Image verified to contain both changes before bump.
       # ROLLBACK: pure manifest revert to
       # sha-fd987ce229b8fe1853c22d0482a30f83bbc04a3d — no schema to unwind.
-      tag: "sha-059a41d1bbbdb3dc44e5005fbba0add9d3f3ab7f"
+      # --- 2026-11-17 bump: sha-059a41d1 -> sha-f6c524c1 -------------------
+      # Full upstream sync (upstream main as of 2026-11, ~989 commits) merged
+      # into the fork, keeping Contracts, the loan fields (contract_term,
+      # rate_lock_expires_on) and the fork's AI-enrichment fixes. Upstream's
+      # Wise rework (#4166/#4839) replaces the fork's Wise paging fix.
+      # 89 new migrations (407 -> 496 rows in schema_migrations), incl. the
+      # provider-identifier encryption (#4336, then run
+      # `bin/rails 'security:backfill_encryption[100,false]'`) and
+      # 20260927200000 reset_kinds_of_pending_transfer_matches.
+      # Rehearsed on copies of production first (parity + screenshots).
+      # ROLLBACK: NOT a pure manifest revert (schema changes). Suspend the HR,
+      # scale web+worker to 0, restore
+      # ~/code/sure-backups/2026-11-17-deploy/sure.dump into a fresh `sure`
+      # DB (pg_restore --no-owner), FLUSHALL sure-redis, then revert this
+      # manifest to sha-059a41d1bbbdb3dc44e5005fbba0add9d3f3ab7f and restore
+      # the RuleRun override in initializer-configmap.yaml (git history).
+      tag: "sha-f6c524c1d935ed54de9962286b914904a525265b"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
