@@ -97,7 +97,7 @@ If the brief is ambiguous (e.g. "clean up the test resources"), enumerate what e
 
 **Every CIFS StorageClass on this cluster is `reclaimPolicy: Retain` (19/19
 verified live 2026-08-26; 18 live after `cifs-scrypted-media` was pruned with
-scrypted-nvr on 2026-10-04, 20 in the repo with `cifs-github-mirror` and `cifs-unifi-backup` added 2026-11-16, Tier 3, Retain by manifest).** This table used to record 17 of them as `Delete`,
+scrypted-nvr on 2026-10-04, 21 in the repo with `cifs-github-mirror` and `cifs-unifi-backup` added 2026-11-16 and `cifs-db-dumps` 2026-11-17, Tier 3, Retain by manifest).** This table used to record 17 of them as `Delete`,
 which had stopped being true. That is not a harmless over-warning: a table wrong
 on most of its rows teaches operators to discount it, and it hides real change —
 if someone flipped a class to `Delete`, the table would have looked identical.
@@ -147,6 +147,7 @@ constrained:**
 | `cifs-icloud-docker-mu` | `//192.168.55.240/backups` | `icloud-backup/mu` | Retain |
 | `cifs-github-mirror` | `//192.168.55.240/backups` | `github-mirror` | Retain |
 | `cifs-unifi-backup` | `//192.168.55.240/backups` | `unifi` | Retain |
+| `cifs-db-dumps` | `//192.168.55.240/backups` | `db-dumps` | Retain |
 | `cifs-immich-icloud-backup` | `//192.168.55.240/backups` | `icloud-backup` | Retain |
 | `cifs-opencode-andreamosteller` | `//192.168.55.240/opencode` | `/andrea-opencode` | Retain |
 | `cifs-penpot-assets` | `//192.168.55.240/penpot` | `assets` | Retain |

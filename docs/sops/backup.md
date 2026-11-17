@@ -3,8 +3,8 @@
 > Standard Operating Procedures for cluster backup management.
 > Covers Longhorn volume backups and external backup integrations.
 > Description: Running, validating, and restoring Longhorn/iCloud backup workflows.
-> Version: `2026.09.28`
-> Last Updated: `2026-09-28`
+> Version: `2026.11.17`
+> Last Updated: `2026-11-17`
 > Owner: `Platform`
 
 ---
@@ -709,6 +709,108 @@ CronJob, ConfigMap, PVC and StorageClass. The StorageClass is `Retain`, so the N
 data stays. Remove the `/src/1/unifi` include only if the directory is also
 removed (a missing include path makes restic report a read error).
 
+## Database Dumps (nightly logical dumps, 14 instances)
+
+Since 2026-11-17. Longhorn volume backups are the only other copy of the
+databases, and a corrupted volume is backed up as a corrupted volume. CronJobs
+`db-dump-<instance>` (one per instance, namespace = the database's own, because a
+Secret can only be referenced from its namespace) write logical dumps to the NAS
+backups share, directory `db-dumps/<instance>/` (StorageClass `cifs-db-dumps`,
+`Retain`, never `/`; one PVC `db-dumps` per namespace, mounted read-write only by
+these Jobs). The nightly off-site core job includes `/src/1/db-dumps`, so restic
+keeps the long history; the NAS keeps 7 daily + 4 weekly (Sunday) per database.
+Manifests: `kubernetes/apps/backup/db-dumps/` (Flux Kustomizations
+`db-dumps-common` and `db-dumps-<namespace>`), alerts
+`kubernetes/apps/monitoring/kube-prometheus-stack/app/db-dumps-alerts.yaml`.
+
+| Instance (service) | Namespace | Engine | Dumped how | Credentials |
+|---|---|---|---|---|
+| postgresql (shared fleet) | databases | Postgres 16 (pgvector) | pg_dump -Fc per database + globals | instance superuser Secret |
+| superset-pg18 | databases | Postgres 18 | same | superuser Secret |
+| mariadb | databases | MariaDB 13.1 | mariadb-dump per database + `--system=users` | root Secret (7 databases, several users) |
+| paperclip-postgresql | ai | Postgres 18 | same | superuser |
+| teslamate-postgres, traccar-postgres | home-automation | Postgres 18 | same | superuser |
+| authentik-pg | kube-system | Postgres 18 | same | superuser |
+| immich-postgres | media | Postgres 14 (vectorchord) | same, pg 18 client | superuser |
+| affine-pg, sure-pg | office | Postgres 16 (pgvector) | same | superuser |
+| mealie-pg, penpot-db | office | Postgres 18 | same | superuser |
+| nextcloud-mariadb | office | MariaDB 11.8 | mariadb-dump per database | app user (ALL on its own database) |
+| paperless-db | office | MariaDB 13.0 | mariadb-dump per database | app user (ALL on its own database) |
+
+Schedule: one job every 3 minutes from 21:15 UTC (finished before 22:00), so
+nothing overlaps the Longhorn backups (23:00), the off-site jobs (00:30/00:40),
+prune (Sun 04:30), check (Wed 04:30) or unifi (Mon 05:15) and the nightly dump set
+is inside the same night's off-site run. `concurrencyPolicy: Forbid`,
+`nice -n 19`, 500m CPU / 512Mi limits, one database at a time. Pod layout: init
+container `dump` (the engine image, `/scripts/db-dump.sh`) then container
+`report` (python, pushes metrics, fails the Job when the dump failed).
+
+**Integrity rules** (all in `base/db-dump.sh`): dump to `.tmp.*`, validate
+(`pg_restore --list`; `gzip -t` plus the `Dump completed` marker for MariaDB),
+rename, write the `.sha256` sidecar last (a file without sidecar is not a backup
+and is ignored by rotation and metrics). A new dump smaller than 50 percent of the
+previous good one is quarantined as `<ts>.suspect`, the run FAILS and nothing is
+pruned. Pruning happens only after the new dump of that database is good. Postgres
+instances also get `_globals` (roles incl. password hashes; MariaDB `mariadb`
+gets `_users`). Dumps contain the data in clear text: treat the NAS share and the
+off-site repository (encrypted) accordingly.
+
+**Metrics and alerts** (Pushgateway `job=db-dumps`, group `dbinstance`):
+`db_dump_last_success_timestamp_seconds` and `db_dump_size_bytes` (derived from the
+newest good dump ON DISK, per `database`), `db_dump_last_run_ok`,
+`db_dump_duration_seconds`, `db_dump_instance_last_run_ok`,
+`db_dump_instance_run_timestamp_seconds`. Alerts: `DbDumpStale` (>36h per
+database, critical), `DbDumpRunFailed`, `DbDumpInstanceFailed`, `DbDumpJobFailed`,
+`DbDumpInstanceMissing` (count < 14 or absent; update the number when an instance
+is added). A dropped database keeps its directory and will go stale: remove
+`db-dumps/<instance>/<database>` on the NAS to retire it.
+
+**Adding an instance.** Copy an existing `cronjob-*.yaml` in the namespace
+directory (or add the namespace directory plus a `db-dumps-<ns>` entry in `ks.yaml`),
+reference the existing Secret with `secretKeyRef`, pick a schedule 3 minutes
+after the last one, and bump the count in `DbDumpInstanceMissing`. Flux postBuild
+substitution is disabled on the script ConfigMap (the script uses shell `${var}`).
+
+**Manual run** (one at a time, off-hours, check `etcd_server_leader_changes_seen_total`
+is flat first): `kubectl create job -n <ns> db-dump-<instance>-m1 --from=cronjob/db-dump-<instance>`,
+then `kubectl logs -n <ns> job/db-dump-<instance>-m1 -c dump`.
+
+### Restore (always into a SCRATCH instance first)
+
+```bash
+# Locate: the NAS share backups/db-dumps/<instance>/<database>/<UTC ts>.daily.dump
+# (or a restic restore of /src/1/db-dumps). Verify the sidecar first:
+cd <dir> && sha256sum -c <file>.sha256
+
+# Postgres (use a client of the same or newer major than the dump)
+psql -U postgres -c 'create database <name>'
+pg_restore -U postgres -d <name> --no-owner --exit-on-error <file>.dump   # --clean --if-exists to overwrite
+zcat <ts>.daily.sql.gz | psql -U postgres        # _globals: roles first, then databases
+
+# MariaDB (the dump contains CREATE DATABASE + USE)
+zcat <ts>.daily.sql.gz | mariadb -uroot
+zcat <ts>.daily.sql.gz | mariadb -uroot          # _users: users and grants (databases/mariadb)
+```
+
+For a real recovery stop the app first, restore into a fresh database (extensions
+such as pgvector or vectorchord must exist in the target image), compare row
+counts, then repoint or rename. Scratch pattern used for the proof: a pod with the
+engine image, `emptyDir` data, `listen_addresses=localhost` / `--bind-address=127.0.0.1`,
+the namespace's `db-dumps` PVC mounted `readOnly: true`, deleted afterwards.
+
+### Restore proof (2026-11-17)
+
+| Dump | Scratch target | Result |
+|---|---|---|
+| teslamate (Postgres 18, 92 MB dump, 665 MB database) | postgres:18.6-alpine, emptyDir | `pg_restore --exit-on-error` clean; sha256 OK; row counts identical to the live source: cars 1, drives 1828, charging_processes 391, positions 4887989; globals file contains the role |
+| paperless (MariaDB 13.0, 44 MB) | mariadb:13.0.2, emptyDir | sha256 OK, import rc 0; counts identical: documents_document 1241, correspondent 189, tag 51, documenttype 13 |
+
+Scratch pods deleted afterwards; no production database was written to.
+
+**Rollback.** `git revert` the db-dumps commits; Flux prunes the CronJobs,
+ConfigMaps and PVCs. The StorageClass is `Retain`, so the NAS data stays. Remove the
+`/src/1/db-dumps` include only if the directory is also removed.
+
 ## Pre-Upgrade Backup Procedure
 
 Before any significant cluster upgrade (Longhorn, Kubernetes, Talos):
@@ -915,6 +1017,9 @@ Rollback validation:
 
 ## Version History
 
+- `2026.11.17`: Database Dumps section: nightly logical dumps (pg_dump -Fc +
+  globals, mariadb-dump) of 14 instances to the NAS `db-dumps` directory, carried
+  off-site by the core job; restore commands and a scratch-restore proof.
 - `2026.09.15`: CronJob name corrected everywhere — the object is
   `storage/daily-backup-all-volumes` (owned by the Longhorn RecurringJob of the
   same name); `backup-of-all-volumes` never existed and returned `NotFound` from
