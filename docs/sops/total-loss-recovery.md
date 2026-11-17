@@ -701,8 +701,9 @@ The verification checklist above is the health check; add `runbooks/health-check
 
 Security: the restic credentials are materialised only in a
 mode-700 temp directory, removed afterwards; never paste values; the repository
-is public, so nothing in this SOP names hosts, accounts or paths beyond what
-`docs/sops/storage-safety.md` already publishes. Do not use the admin key for a
+is public, so this SOP names no hosts, accounts, keys or domains. It does
+describe the backup directory layout and sizes, which is organisational detail
+rather than a credential; share names match `docs/sops/storage-safety.md`. Do not use the admin key for a
 restore. After the event rotate every credential that was copied to a
 workstation.
 
