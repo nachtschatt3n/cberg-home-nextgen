@@ -8,5 +8,8 @@ configMapGenerator:
     files:
       - db-dump.sh
       - report.py
+# The script uses shell ${var} syntax; Flux postBuild envsubst must not touch it.
 generatorOptions:
   disableNameSuffixHash: true
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
