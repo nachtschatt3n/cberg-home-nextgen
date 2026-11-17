@@ -57,7 +57,7 @@ postgres)
 mariadb)
     export MYSQL_PWD="$DB_PASSWORD"
     EXT=sql.gz
-    MYSQL_ARGS="--host=$DB_HOST --port=$DB_PORT --user=$DB_USER --skip-ssl --connect-timeout=15"
+    MYSQL_ARGS="--host=$DB_HOST --port=$DB_PORT --user=$DB_USER --skip-ssl"
     ;;
 *)
     log "FATAL unknown ENGINE=$ENGINE"
@@ -171,7 +171,7 @@ list_databases() {
         ;;
     mariadb)
         # shellcheck disable=SC2086
-        mariadb $MYSQL_ARGS -N -B -e 'SHOW DATABASES' | grep -v -x -e information_schema -e performance_schema -e sys -e mysql
+        mariadb $MYSQL_ARGS --connect-timeout=15 -N -B -e 'SHOW DATABASES' | grep -v -x -e information_schema -e performance_schema -e sys -e mysql
         ;;
     esac
 }
