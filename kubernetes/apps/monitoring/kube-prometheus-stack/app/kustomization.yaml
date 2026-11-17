@@ -51,6 +51,7 @@ resources:
   - ./ci-runner-alerts.yaml
   - ./gha-runner-scale-set-alerts.yaml
   - ./mosquitto-alerts.yaml
+  - ./dashcast-alerts.yaml
   - ./prometheus-httproute.yaml
   - ./alertmanager-httproute.yaml
   - ./memgraph-alerts.yaml
