@@ -176,7 +176,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Namespace | Purpose | App Count |
 |-----------|---------|-----------|
 | ai | AI/ML services | 11 |
-| home-automation | Smart home integrations | 19 |
+| home-automation | Smart home integrations | 20 |
 | databases | Database backends | 13 |
 | monitoring | Observability stack | 14 |
 | office | Productivity and document management | 11 |
