@@ -92,6 +92,9 @@ STEP_SCRIPTS = {
     "security": ["python3", str(SCRIPT_DIR / "security-check.py")],
     "health":   ["python3", str(SCRIPT_DIR / "health-check.py")],
     "slo":      ["python3", str(SCRIPT_DIR / "slo-check.py")],
+    # backup coverage drift (section "infra"; step name == section so the
+    # section-keyed auto-close and reconcile logic apply unchanged)
+    "infra":    ["python3", str(SCRIPT_DIR / "backup-coverage-check.py")],
 }
 
 STEP_GROUPS = {
@@ -99,9 +102,9 @@ STEP_GROUPS = {
     # from health/security/version/slo. Otherwise doc-check fires a stale
     # "health-check-current.md is 12 days old" finding for one cycle until
     # the next sweep catches the just-refreshed timestamp.
-    "all":   ["version", "security", "health", "slo", "doc"],
+    "all":   ["version", "security", "health", "slo", "infra", "doc"],
     "light": ["version", "doc"],
-    "heavy": ["security", "health"],
+    "heavy": ["security", "health", "infra"],
 }
 
 
@@ -1357,7 +1360,7 @@ def main(argv: list[str] | None = None) -> int:
             # marks real problems fixed.
             #
             # Derive the set from what wrote findings under THIS cycle_id.
-            RECONCILE_CANDIDATES = ["doc", "version", "security", "health", "slo", "media"]
+            RECONCILE_CANDIDATES = ["doc", "version", "security", "health", "slo", "infra", "media"]
             if args.ran:
                 # Explicit declaration from the orchestrator. Authoritative: it is
                 # the only thing that can distinguish "ran and found nothing" from

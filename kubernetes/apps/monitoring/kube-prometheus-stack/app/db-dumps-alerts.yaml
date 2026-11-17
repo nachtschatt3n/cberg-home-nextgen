@@ -6,7 +6,8 @@
 # run is an ageing timestamp, never a frozen healthy value. Every group is paired
 # with an absent()/count guard so a rule that matches no series cannot sit
 # silently inactive. When an instance is added or removed, update the expected
-# count (14) in DbDumpInstanceMissing and docs/sops/backup.md.
+# is no longer needed: DbDumpInstanceMissing derives the expected count from the
+# number of db-dump-* CronJobs in the cluster (kube_cronjob_info).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -72,15 +73,21 @@ spec:
             summary: "A db-dump Job failed ({{ $labels.namespace }}/{{ $labels.job_name }})"
             description: "Job {{ $labels.job_name }} in {{ $labels.namespace }} has failed pods. Check the dump init container and the report container logs."
         - alert: DbDumpInstanceMissing
-          # absent()/count guard: fewer than the 14 expected instances report.
-          # 36h of grace for the first rollout (jobs run once a day).
+          # absent()/count guard: fewer instances report than db-dump-* CronJobs
+          # exist. The expected number is DERIVED from the cluster (kube-state-
+          # metrics), not hard-coded, so adding an instance needs no edit here.
+          # The scalar() guard: if kube_cronjob_info vanished, scalar() is NaN and the
+          # comparison is false, so the absent() branch and the coverage check in
+          # the sweep (runbooks/backup-coverage-check.py) still catch it.
+          # 36h of grace for a new instance (jobs run once a day).
           expr: |
-            count(db_dump_instance_last_run_ok{job="db-dumps"}) < 14 or absent(db_dump_instance_last_run_ok{job="db-dumps"})
+            count(db_dump_instance_last_run_ok{job="db-dumps"}) < scalar(count(kube_cronjob_info{cronjob=~"db-dump-.+"}))
+            or absent(db_dump_instance_last_run_ok{job="db-dumps"})
           for: 36h
           labels:
             severity: warning
             category: backup
             component: db-dumps
           annotations:
-            summary: "Fewer than 14 database instances report a dump run"
-            description: "Expected 14 db-dump instances in the Pushgateway; {{ $value }} reporting. A CronJob never ran, the Pushgateway lost its metrics, or an instance was added without updating this rule."
+            summary: "Fewer database instances report a dump run than db-dump CronJobs exist"
+            description: "{{ $value }} instances report in the Pushgateway, fewer than the db-dump CronJobs in the cluster. A CronJob never ran or the Pushgateway lost its metrics."

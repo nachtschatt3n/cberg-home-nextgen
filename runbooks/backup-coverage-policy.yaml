@@ -1,0 +1,53 @@
+# Backup coverage policy: what is DELIBERATELY not backed up, and why.
+# Read by runbooks/backup-coverage-check.py (sweep step "backup").
+#
+# Public repo: only neutral identifiers here (StorageClass names, Longhorn
+# volume names, namespace/workload names). Share names and paths exist only in
+# the SOPS Secret offsite-backup-sources, which the check decrypts in memory.
+#
+# Anything that exists in the cluster but is neither covered nor listed below
+# becomes a finding. A listed entry that no longer matches anything is also
+# reported (stale exclusion), so this file cannot rot silently.
+# Last reviewed: 2026-11-17.
+
+longhorn:
+  # A volume must have a Completed Backup newer than these (hours). Detached
+  # volumes are not snapshotted nightly, so they get a longer leash.
+  max_age_hours_attached: 26
+  max_age_hours_detached: 192
+  # Volumes excluded from Longhorn backup on purpose. Currently none: even the
+  # Prometheus and Elasticsearch data volumes are in the default recurring
+  # group. Add { volume: <name>, reason: <why> } here only after removing the
+  # volume from the recurring group in git.
+  excluded: []
+
+cifs:
+  # Cluster SMB PersistentVolumes whose data path is NOT (fully) in the
+  # off-site include list. Keyed by StorageClass (the class names are in
+  # docs/sops/storage-safety.md). A class whose tree only PARTLY overlaps an
+  # include (curated sub-folders of a bulk share) still needs an entry.
+  excluded:
+    - storageclass: cifs-jellyfin-media
+      reason: Bulk media library (share root), operator decision 2026-11-15/16; only the curated music/books/audiobooks/archive sub-trees are included
+    - storageclass: cifs-plex-media
+      reason: Bulk media library (share root), same share and decision as the Jellyfin class
+    - storageclass: cifs-jdownloader-media
+      reason: Downloads are deliberately not backed up (backup.md, Deliberately NOT covered)
+    - storageclass: cifs-makemkv-media
+      reason: Transcode scratch, deliberately not backed up (backup.md, Deliberately NOT covered)
+    - storageclass: cifs-immich-cache
+      reason: Derived photo cache, deliberately not backed up and fully regenerable (backup.md)
+    - storageclass: cifs-tube-archivist-media
+      reason: Large lower-priority tree; deliberately not backed up (backup.md, Deliberately NOT covered). Specific rationale lives in the encrypted Secret notes; operator to confirm
+    - storageclass: cifs-frigate-media
+      reason: Large lower-priority tree (camera recordings); deliberately not backed up (backup.md, Deliberately NOT covered). Operator to confirm
+
+databases:
+  # Datastore workloads (<namespace>/<workload>) that do NOT need a db-dump
+  # CronJob, with the reason. SQL engines (Postgres family, MariaDB/MySQL) get
+  # a db-dump-<workload> CronJob by default; the rest are listed here.
+  excluded:
+    - workload: databases/influxdb-influxdb2
+      reason: Time-series store, not SQL; covered by the nightly Longhorn volume backup only
+    - workload: databases/memgraph
+      reason: Graph store, rebuildable, Longhorn volume backup only
