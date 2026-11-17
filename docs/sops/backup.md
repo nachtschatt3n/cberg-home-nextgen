@@ -529,6 +529,53 @@ Repeat the drill after any change to sources, and at least quarterly.
 (the seed's own peak was not captured). Measured peaks in the 2026-11-16 drill:
 509 MB restore, 652 MB `check --read-data-subset=1%`.
 
+## Continuous assurance (since 2026-11-17)
+
+Goal: "the backup keeps working" is proven automatically and decay is caught
+early. Everything here is additive and read-only toward the backup system:
+manifests in `kubernetes/apps/backup/offsite-assurance/` (Flux Kustomization
+`offsite-assurance`), alerts in
+`kubernetes/apps/monitoring/kube-prometheus-stack/app/offsite-assure-alerts.yaml`,
+sweep check `runbooks/backup-coverage-check.py` (step `infra`). All jobs use the
+existing append-only keys with `--no-lock` and a download cap; none uses the admin key.
+
+| Check | What it proves | Schedule (UTC) | Metric / alert / finding | When it fires |
+|---|---|---|---|---|
+| Source canary | The latest core snapshot holds a FRESH file from three trees an existing job rewrites on a cadence (nightly DB dumps 36 h, UniFi copy 10 d, GitHub mirror 35 d). Catches an empty mount, wrong subdir or unmounted source behind a green backup. A canary file is deliberately NOT written into the sources: they are read-only mounts, and the media-class shares are not ours to litter. | daily 13:15, CronJob `offsite-assure` | `offsite_assure_canary_{ok,files,age_seconds,fresh_dirs}`; `OffsiteBackupCanaryFailed` (critical), `OffsiteBackupCanaryDirsMissing` (fresh dump directories fewer than db-dump CronJobs, derived from the cluster) | Check the NAS mount, the include list, and the job that writes that tree |
+| Shrink detector | Latest snapshot files/bytes versus the previous one per tier; below 85 percent is suspect | same job | `offsite_assure_{files,bytes}_ratio`; `OffsiteBackupSourceShrunk` (warning) | A deliberate prune is fine once; otherwise look for an empty source |
+| Checker liveness | The checks themselves keep running | same | `offsite_assure_last_success_timestamp_seconds`; `OffsiteAssureStale` (2 d, absent-guarded), `OffsiteAssureJobFailed` | `kubectl logs -n backup job/<offsite-assure job>` |
+| Quota headroom | Repo raw-data bytes (both tiers) stay under 85 percent of the 5 TB box (bx21 per the Terraform state; the quota is a documented constant in the alert) | same job (`restic stats --mode raw-data`) | `offsite_assure_repo_bytes`; `OffsiteRepoQuotaHigh` (warning) | Prune harder, drop a source, or resize the box and edit the constant |
+| Monthly restore proof | Random per-source sample of the latest core and apps snapshots restored with `restic restore --verify`, unchanged files byte-compared to the live source, newest UniFi `.unf` restored and structurally checked | 2nd of month 15:00, CronJob `offsite-restore-proof`, 25 MB/s cap, 2Gi | `offsite_restore_proof_*` (job `offsite-restore-proof`); `OffsiteRestoreProofFailed` (critical), `OffsiteRestoreProofStale` (no success in 40 d, absent branch gated on the CronJob age so the first month does not page) | Job logs; a mismatch means a bad snapshot or a changed source: run the restore by hand (section "Restore") |
+| Coverage drift | Every Longhorn volume has a confirmed backup newer than policy (26 h attached, 8 d detached); every SMB PV path is in the off-site include list or its StorageClass is excluded with a reason; every SQL datastore workload has a `db-dump-<workload>` CronJob; stale exclusions and orphan dump jobs are findings | every sweep (section `infra`, producer `backup-assurance`) | Findings titled `Backup coverage: ...`; a check that could not measure is its own finding, never a pass | Add the path to the include list (SOPS) or an exclusion with a reason in `runbooks/backup-coverage-policy.yaml` |
+| Fire-drill ledger | Last full drill under 100 days; each UNVERIFIED credential row (total-loss-recovery 3.1) verified within 365 days | every sweep | Findings titled `Backup fire drill: ...` | Do the quarterly drill (total-loss-recovery 15.2) and edit `runbooks/backup-fire-drill-ledger.yaml` |
+
+`DbDumpInstanceMissing` no longer carries a hard-coded instance count: the
+expectation is `count(kube_cronjob_info{cronjob=~"db-dump-.+"})`.
+
+**Never a silent zero.** Every audit refuses an empty denominator, the canary
+and shrink checks fail the job when a snapshot cannot be measured, the coverage
+matcher is proven by a bogus-path control on every run, and each alert group
+has an `absent()` or liveness partner (see `docs/sops/audit-script-correctness.md`).
+
+**Run on demand.** `kubectl create job -n backup x --from=cronjob/offsite-assure`
+(about 1 minute) or `--from=cronjob/offsite-restore-proof` (reads the storage
+box: not while a big seed upload is running). Coverage: `python3 runbooks/backup-coverage-check.py --no-write`.
+Exit 0 clean, 1 findings, 2 could not measure.
+
+**Verified 2026-11-17.** First live `offsite-assure` run: core snapshot 14 of 14 db-dump
+directories fresh, UniFi canary 1 file, GitHub-mirror canary 2218 files, shrink ratios
+read; the first run exposed a duplicate-TYPE push rejection which was fixed (commit
+`fix(backup): offsite-assure pushes one TYPE line...`). The coverage check found one
+real item: a detached Longhorn volume whose last backup is older than 8 days. Negative
+tests: an empty policy makes the check list every excluded class and datastore; a
+stale exclusion is reported; an unmeasurable kubectl yields exit 2.
+
+**Open (not built):** restoring the newest dump of one rotating database into a
+throwaway engine with a row-count check (the 2026-11-17 manual proof above remains the
+only evidence); per-source path-level shrink (only tier-level today); alerting on
+GitHub-mirror token expiry and UniFi account health (the mirror and UniFi jobs
+already alert on their own failure, which is how an expired token shows up).
+
 ---
 
 ## GitHub Mirror (monthly, bare mirrors plus metadata)
@@ -768,14 +815,13 @@ newest good dump ON DISK, per `database`), `db_dump_last_run_ok`,
 `db_dump_duration_seconds`, `db_dump_instance_last_run_ok`,
 `db_dump_instance_run_timestamp_seconds`. Alerts: `DbDumpStale` (>36h per
 database, critical), `DbDumpRunFailed`, `DbDumpInstanceFailed`, `DbDumpJobFailed`,
-`DbDumpInstanceMissing` (count < 14 or absent; update the number when an instance
-is added). A dropped database keeps its directory and will go stale: remove
+`DbDumpInstanceMissing` (fewer reporting instances than db-dump CronJobs, derived from the cluster, or absent). A dropped database keeps its directory and will go stale: remove
 `db-dumps/<instance>/<database>` on the NAS to retire it.
 
 **Adding an instance.** Copy an existing `cronjob-*.yaml` in the namespace
 directory (or add the namespace directory plus a `db-dumps-<ns>` entry in `ks.yaml`),
 reference the existing Secret with `secretKeyRef`, pick a schedule 3 minutes
-after the last one, and bump the count in `DbDumpInstanceMissing`. Flux postBuild
+after the last one (no alert edit needed: the expected count is derived; the sweep's coverage check flags a datastore without a dump job). Flux postBuild
 substitution is disabled on the script ConfigMap (the script uses shell `${var}`).
 
 **Manual run** (one at a time, off-hours, check `etcd_server_leader_changes_seen_total`

@@ -78,6 +78,25 @@ spec:
           annotations:
             summary: "Off-site continuous-assurance check has not succeeded for over 2 days (or never)"
             description: "offsite_assure_last_success_timestamp_seconds is old or absent for a tier. Check CronJob offsite-assure in namespace backup. A failing canary also fails the Job, so this alert may fire together with OffsiteBackupCanaryFailed."
+        - alert: OffsiteRepoQuotaHigh
+          # Storage-box headroom. The box is a bx21 (5 TB, decimal, from the
+          # Terraform state in the offsite-backup-tfstate-copy Secret), so 85 percent
+          # is 4.25e12 bytes. The quota is a documented CONSTANT here: change
+          # it (and docs/sops/backup.md, Continuous assurance) if the box is
+          # resized. Usage = raw-data bytes of both repos from offsite-assure
+          # (snapshots stored by the provider on top are not counted). If the
+          # series is missing OffsiteAssureStale fires, so this rule cannot sit
+          # silent behind a dead exporter.
+          expr: |
+            sum(offsite_assure_repo_bytes{job="offsite-assure"}) > 0.85 * 5e12
+          for: 1h
+          labels:
+            severity: warning
+            category: backup
+            component: offsite-assure
+          annotations:
+            summary: "Off-site storage box is above 85 percent of its 5 TB quota"
+            description: "Both restic repos hold {{ $value | humanize1024 }}B. Prune more aggressively, drop a source, or upgrade the box before backups start failing with a full disk."
         - alert: OffsiteAssureJobFailed
           # Same self-clearing CronJob-state pattern as OffsiteBackupJobFailed,
           # for the assurance jobs (offsite-assure, offsite-restore-proof).

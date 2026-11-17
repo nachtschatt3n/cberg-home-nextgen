@@ -1,0 +1,27 @@
+# Backup fire-drill ledger. Read by runbooks/backup-coverage-check.py (sweep
+# step "infra"), which opens findings when
+#   * the last FULL drill (docs/sops/total-loss-recovery.md section 15.2) is
+#     older than 100 days, or none is recorded, and
+#   * a credential-inventory row (total-loss-recovery.md section 3.1) that is
+#     UNVERIFIED has no verification date, or one older than 365 days.
+# Record a drill by adding an entry under `drills` and setting `last_full_drill`;
+# record a row verification by writing the date next to its row number.
+# Dates are YYYY-MM-DD. Public repo: no names, hosts or secrets here.
+last_full_drill: null        # never performed as of 2026-11-17 (section 16: no end-to-end rebuild yet)
+drills: []                   # - {date: 2026-12-15, kind: full, notes: "..."}
+max_drill_age_days: 100
+max_verification_age_days: 365
+# Section 3.1 row numbers that are UNVERIFIED (operator to confirm) and the date
+# each was last confirmed. null = never confirmed.
+credential_rows:
+  1: null    # SOPS age key, vault copy still decrypts
+  2: null    # storage-box host/keys, independent copy
+  3: null    # restic repository passwords, independent copy
+  4: null    # storage-box provider account recovery
+  8: null    # GitHub account recovery
+  10: null   # registrar and DNS provider account recovery
+  14: null   # UniFi gateway / SSO account recovery
+  15: null   # NAS admin login
+  17: null   # Apple ID credentials for the iCloud instances
+  18: null   # password manager emergency kit
+  19: null   # Mac-mini-only secrets

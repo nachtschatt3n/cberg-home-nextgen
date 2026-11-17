@@ -314,6 +314,49 @@ def audit_databases(policy: dict) -> tuple[list[dict], list[str]]:
     return findings, [f"databases: {len(sql)} SQL + {len(other)} other datastores, {len(dumps)} db-dump CronJobs, {missing} missing"]
 
 
+# ------------------------------------------------------------ fire drills --------
+
+def audit_drills(policy: dict) -> tuple[list[dict], list[str]]:
+    """Fire-drill ledger: last full drill and credential-row verification dates."""
+    from datetime import date
+    ledger_path = SCRIPT_DIR / "backup-fire-drill-ledger.yaml"
+    if not ledger_path.is_file():
+        raise NotMeasured("runbooks/backup-fire-drill-ledger.yaml is missing")
+    led = load_yaml(ledger_path)
+    if "credential_rows" not in led or "last_full_drill" not in led:
+        raise NotMeasured("ledger lacks last_full_drill / credential_rows keys")
+    today = date.today()
+    findings: list[dict] = []
+
+    def age(d) -> int | None:
+        if d is None:
+            return None
+        if isinstance(d, str):
+            d = date.fromisoformat(d)
+        return (today - d).days
+
+    max_drill = int(led.get("max_drill_age_days", 100))
+    a = age(led["last_full_drill"])
+    if a is None:
+        findings.append({"sev": "warning", "sub": "fire-drill",
+                         "title": "Backup fire drill: no full drill has ever been recorded",
+                         "action": "Run the quarterly drill (docs/sops/total-loss-recovery.md section 15.2) and record it in runbooks/backup-fire-drill-ledger.yaml."})
+    elif a > max_drill:
+        findings.append({"sev": "warning", "sub": "fire-drill",
+                         "title": f"Backup fire drill: last full drill is older than {max_drill} days",
+                         "action": f"Last full drill {a} days ago. Run section 15.2 of docs/sops/total-loss-recovery.md and update the ledger."})
+    max_ver = int(led.get("max_verification_age_days", 365))
+    stale = [r for r, d in sorted(led["credential_rows"].items())
+             if (age(d) is None) or age(d) > max_ver]
+    if stale:
+        findings.append({"sev": "warning", "sub": "fire-drill",
+                         "title": "Backup fire drill: credential-inventory rows are unverified or older than 365 days",
+                         "action": f"Section 3.1 row(s) {', '.join(str(r) for r in stale)} have no verification date within {max_ver} days. "
+                                   "Confirm them at the quarterly drill and write the date into runbooks/backup-fire-drill-ledger.yaml."})
+    return findings, [f"fire-drill: last full drill {led['last_full_drill'] or 'never'}, "
+                      f"{len(led['credential_rows'])} tracked credential rows, {len(stale)} unverified/stale"]
+
+
 # ---------------------------------------------------------------- main ----------
 
 def main(argv: list[str] | None = None) -> int:
@@ -325,7 +368,7 @@ def main(argv: list[str] | None = None) -> int:
     policy = load_yaml(Path(a.policy))
     all_findings: list[dict] = []
     not_measured: list[str] = []
-    for label, fn in (("longhorn", audit_longhorn), ("cifs", audit_cifs), ("databases", audit_databases)):
+    for label, fn in (("longhorn", audit_longhorn), ("cifs", audit_cifs), ("databases", audit_databases), ("drills", audit_drills)):
         try:
             f, notes = fn(policy)
             all_findings += f

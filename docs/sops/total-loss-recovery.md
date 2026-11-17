@@ -616,10 +616,11 @@ backups. Manual monthly proof (about 30 minutes, no cluster writes):
    probe, run monthly for one volume).
 6. Row 1 test of section 3 (age key from the password manager only).
 
-**Not built:** a scheduled CronJob that performs the restic restore proof
-automatically; the 2026-11-16 drill was a one-off Job whose manifest is not
-kept in git. Building that CronJob (read-only key, 2Gi limit, `CHOWN FOWNER
-DAC_OVERRIDE FSETID` added) is the recommended next step.
+**Built 2026-11-17:** CronJob `offsite-restore-proof` (2nd of the month 15:00 UTC)
+automates steps 1-2 and the UniFi `.unf` structural check with metrics and alerts;
+daily `offsite-assure` adds a source canary, shrink detector and quota headroom
+(`docs/sops/backup.md`, Continuous assurance). **Still manual:** steps 3-6, and the
+database-dump scratch restore (step 4) is not yet part of the CronJob.
 
 ### 15.2 Quarterly (full)
 
@@ -646,8 +647,14 @@ recovery; NAS admin login; Apple ID credentials; password manager emergency kit;
 which Macs the Time Machine images belong to; Windows desktop backup; Mac mini
 non-git state; real `.unf` present in `backups/unifi`.
 
-Open gaps: client borg-on-cluster (not built); automated restic restore-proof
-CronJob (not built); `restic` not pinned in `.mise.toml`; uncapped restore
+Closed 2026-11-17: automated restic restore-proof CronJob (file sample plus UniFi
+structure; database restore part still open); backup-coverage drift check in the
+sweep; source canary and shrink detector; quota-headroom alert; fire-drill and
+credential-verification ledger (`runbooks/backup-fire-drill-ledger.yaml`, findings
+until the first drill is recorded).
+
+Open gaps: client borg-on-cluster (not built); automated database-dump scratch
+restore (not built); `restic` not pinned in `.mise.toml`; uncapped restore
 throughput unmeasured; Cloudflare Terraform state has no off-site copy;
 no end-to-end timed rebuild has ever been performed.
 

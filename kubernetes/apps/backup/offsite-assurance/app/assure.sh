@@ -78,6 +78,18 @@ do_tier() {
         echo "offsite_assure_snapshot_age_seconds $((now - snap_ts))"
     } >/tmp/m.prom
 
+    # Repo size for the quota-headroom alert (raw-data = what the box stores).
+    # Index metadata only; fails closed on an empty or non-numeric answer.
+    repo_bytes=$(rr stats --mode raw-data --json | jq -r '.total_size')
+    case "$repo_bytes" in
+        ''|*[!0-9]*) echo "FATAL: could not read repo size for tier=$tier"; return 1 ;;
+    esac
+    echo "repo raw-data bytes tier=$tier: $repo_bytes"
+    {
+        echo "# TYPE offsite_assure_repo_bytes gauge"
+        echo "offsite_assure_repo_bytes $repo_bytes"
+    } >>/tmp/m.prom
+
     if [ "$tier" = core ] && [ -n "$CANARIES" ]; then
         # TYPE lines exactly once per metric (the Pushgateway rejects duplicates).
         for m in ok files age_seconds max_age_seconds fresh_dirs; do
