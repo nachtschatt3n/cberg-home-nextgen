@@ -79,7 +79,10 @@ do_tier() {
     } >/tmp/m.prom
 
     if [ "$tier" = core ] && [ -n "$CANARIES" ]; then
-        # Full snapshot id (restic ls needs the id or a unique prefix; 8 chars is unique).
+        # TYPE lines exactly once per metric (the Pushgateway rejects duplicates).
+        for m in ok files age_seconds max_age_seconds fresh_dirs; do
+            echo "# TYPE offsite_assure_canary_$m gauge" >>/tmp/m.prom
+        done
         for entry in $CANARIES; do
             name=${entry%%=*}
             rest=${entry#*=}
@@ -101,15 +104,10 @@ do_tier() {
             if [ "$cn" -gt 0 ] && [ "$cage" -le "$maxage" ]; then cok=1; else cok=0; fi
             echo "canary $name: files=$cn newest_age_at_snapshot=${cage}s max=${maxage}s fresh_dirs=$cfresh ok=$cok"
             {
-                echo "# TYPE offsite_assure_canary_ok gauge"
                 echo "offsite_assure_canary_ok{canary=\"$name\"} $cok"
-                echo "# TYPE offsite_assure_canary_files gauge"
                 echo "offsite_assure_canary_files{canary=\"$name\"} $cn"
-                echo "# TYPE offsite_assure_canary_age_seconds gauge"
                 echo "offsite_assure_canary_age_seconds{canary=\"$name\"} $cage"
-                echo "# TYPE offsite_assure_canary_max_age_seconds gauge"
                 echo "offsite_assure_canary_max_age_seconds{canary=\"$name\"} $maxage"
-                echo "# TYPE offsite_assure_canary_fresh_dirs gauge"
                 echo "offsite_assure_canary_fresh_dirs{canary=\"$name\"} $cfresh"
             } >>/tmp/m.prom
             if [ "$cok" -ne 1 ]; then
@@ -121,7 +119,12 @@ do_tier() {
 
     echo "# TYPE offsite_assure_last_success_timestamp_seconds gauge" >>/tmp/m.prom
     echo "offsite_assure_last_success_timestamp_seconds $(date +%s)" >>/tmp/m.prom
-    wget -q -O - -T 60 --post-file /tmp/m.prom "$PUSH/tier/$tier"
+    # A failed push must fail the tier: the caller runs us inside `if !`, where
+    # set -e is off, so the status has to be checked explicitly.
+    wget -q -O - -T 60 --post-file /tmp/m.prom "$PUSH/tier/$tier" || {
+        echo "FATAL: pushgateway rejected the metrics for tier=$tier"
+        return 1
+    }
     echo "pushed assurance metrics tier=$tier"
 }
 
