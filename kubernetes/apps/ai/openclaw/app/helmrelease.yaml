@@ -1186,6 +1186,20 @@ spec:
                       workspace: '/home/node/clawd-jerry-andrea',
                       agentDir: '/home/node/.openclaw/agents/jerry-andrea/agent',
                       tools: { deny: ['sessions_spawn'] }, subagents: { allowAgents: [] } },
+                    // Household agent (2026-11-17): shared voice fallback for unknown /
+                    // multiple speakers (HA model `openclaw/household`). Locked down: no
+                    // shell, no fs outside its workspace, no session reach -> cannot use
+                    // the pod-wide personal credentials or read other agents' memory.
+                    { id: 'household', name: 'Haushalt', identity: { name: 'Haushalt' },
+                      workspace: '/home/node/clawd-household',
+                      agentDir: '/home/node/.openclaw/agents/household/agent',
+                      skills: [],
+                      heartbeat: { every: '0m' },
+                      tools: { deny: ['exec', 'process', 'read', 'write', 'edit', 'apply_patch', 'browser',
+                                      'sessions_spawn', 'sessions_send', 'sessions_history', 'sessions_list',
+                                      'splitfairy__*'],
+                               fs: { workspaceOnly: true } },
+                      subagents: { allowAgents: [] } },
                   ];
                   famManaged.forEach((spec) => {
                     const cur = famById[spec.id];
@@ -1954,6 +1968,7 @@ spec:
                 seed_workspace_file /etc/openclaw-skills/workspace-reporting-jerry.md /home/node/clawd-jerry-mathias/REPORTING.md "binding reporting methodology"
                 seed_workspace_file /etc/openclaw-skills/workspace-reporting-jerry.md /home/node/clawd-jerry-andrea/REPORTING.md  "binding reporting methodology"
                 seed_family_ws /home/node/clawd-jerry-andrea  workspace-soul-jerry.md workspace-identity-jerry.md workspace-agents-jerry.md       workspace-user-jerry-andrea.md  "sure paperless pdf nextcloud-mail tgtable"
+                seed_family_ws /home/node/clawd-household     workspace-soul-household.md workspace-identity-household.md workspace-agents-household.md workspace-user-household.md ""
 
                 # 6. Codex CLI sandbox tuning.
                 #
