@@ -680,8 +680,8 @@ provisioner creates a NEW EMPTY volume. Restore first, then let the apps start.
 
 ```bash
 # 0. If the backupstore is gone from the NAS: restic-restore the Longhorn
-#    backupstore directory of the `backups` share first (tier core, see backup.md).
-#    Confirm the directory with `restic ls` before restoring; it is not verified here.
+#    `backupstore/` directory of the `backups` share first (tier core, see backup.md;
+#    Longhorn's fixed layout under the share root; confirm with `restic ls`).
 
 # 1. Bootstrap cluster + Flux + SOPS key (docs/sops/disaster-recovery.md), let
 #    Longhorn come up, then hold the rest of the apps until volumes exist:

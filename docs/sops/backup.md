@@ -57,7 +57,7 @@ Source-of-truth manifests:
 1. Verify scheduled backups and recent job health.
 2. Trigger manual backup when needed (e.g., pre-upgrade).
 3. Validate volume backup timestamps.
-4. Use restore workflow and rebind PV/PVC if recovery is required.
+4. Use restore workflow and rebind PV/PVC if recovery is required. For a total loss or many volumes use `runbooks/longhorn-bulk-restore.py` (`docs/sops/longhorn.md` "Total-loss Longhorn restore").
 
 ---
 
@@ -199,6 +199,8 @@ on-site Longhorn store only; the off-site restic repos keep 7 daily / 4 weekly /
 ## Restore from Backup
 
 ### Restore a Volume via Longhorn UI
+
+(Many volumes or a total loss: `runbooks/longhorn-bulk-restore.py`, see `docs/sops/longhorn.md` "Total-loss Longhorn restore".)
 
 1. Open Longhorn UI: `kubectl port-forward -n storage svc/longhorn-frontend 8080:80`
 2. Navigate to **Backup**
@@ -497,7 +499,7 @@ restic ... -r rclone: restore latest --host offsite --tag <core|apps> \
 Restored files keep content and mtimes; ownership is the mount's uid/gid 1000
 (sources are mounted with fixed ownership), so re-apply ownership on the target.
 The Longhorn backup store is inside tier `core`: restore it to the NAS path of
-the backup target, then restore volumes through Longhorn as usual.
+the backup target, then restore volumes with `runbooks/longhorn-bulk-restore.py` (`docs/sops/longhorn.md` "Total-loss Longhorn restore").
 
 **Restore drill record.** 2026-11-15 tier apps: 12 random files restored from
 the latest snapshot to a scratch emptyDir and compared by sha256, 12/12 equal.
@@ -937,13 +939,13 @@ kubectl logs -n storage -l app=longhorn-manager --tail=50 | grep -i backup
 ### Volume Not Backing Up
 
 Common causes:
-- Backup target not configured (check Longhorn → Settings → Backup Target)
+- Backup target not configured (check the `BackupTarget/default` CR, declared in `kubernetes/apps/storage/longhorn/app/backup-target.yaml`)
 - NAS unreachable (verify `ping 192.168.55.240`)
 - Volume in degraded state (check `kubectl get volumes -n storage`)
 
 ```bash
 # Check backup target setting in Longhorn
-kubectl get setting backup-target -n storage -o jsonpath='{.value}'
+kubectl get backuptargets.longhorn.io -n storage default -o jsonpath='{.spec.backupTargetURL}{" "}{.status.available}'
 
 # Test NAS connectivity from cluster pod
 kubectl run test-pod --rm -it --image=alpine -- ping 192.168.55.240
@@ -977,7 +979,7 @@ If unclear:
 
 ```bash
 kubectl get volume {volume-name} -n storage -o yaml | rg "lastBackup|robustness|state"
-kubectl get setting backup-target -n storage -o jsonpath='{.value}'
+kubectl get backuptargets.longhorn.io -n storage default -o jsonpath='{.spec.backupTargetURL}{" "}{.status.available}'
 ```
 
 Expected:
