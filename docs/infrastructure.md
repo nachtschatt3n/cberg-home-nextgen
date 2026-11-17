@@ -204,7 +204,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Kubernetes | v1.36.0 | Container orchestration |
-| Talos Linux | v1.14.1 | Cluster OS |
+| Talos Linux | v1.14.1 | Cluster OS (installer schematic recorded in `kubernetes/bootstrap/talos/schematic.yaml`; rebuild: `docs/sops/total-loss-recovery.md`) |
 | Flux | v2.9.6 | GitOps operator |
 | Cilium | v1.20.4 | CNI / network |
 | Longhorn | v1.12.1 | Distributed storage |
