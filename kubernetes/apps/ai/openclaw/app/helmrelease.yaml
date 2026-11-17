@@ -1676,7 +1676,7 @@ spec:
                   // "not configured yet", the gateway still starts.
                   const famMcp = {
                     familycal: ['list_events', 'get_event', 'create_event', 'update_event', 'delete_event'],
-                    meals: ['get_meal_plan', 'search_recipes', 'get_recipe', 'add_meal_plan_entry', 'remove_meal_plan_entry'],
+                    meals: ['get_meal_plan', 'search_recipes', 'get_recipe', 'add_meal_plan_entry'],
                     familykb: ['list_pages', 'read_page', 'search'],
                   };
                   const famMcpTools = [];
