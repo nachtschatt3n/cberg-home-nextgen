@@ -45,7 +45,7 @@ spec:
               repository: ghcr.io/nachtschatt3n/the-ninth-banner
               # v0.5.x release tags only; updated by the ImageUpdateAutomation
               # in ./image-automation.yaml (policy '>=0.5.0 <0.6.0').
-              tag: v0.5.5 # {"$imagepolicy": "my-software-production:ninth-banner-5:tag"}
+              tag: v0.5.6 # {"$imagepolicy": "my-software-production:ninth-banner-5:tag"}
               pullPolicy: IfNotPresent
             env:
               - name: PORT
