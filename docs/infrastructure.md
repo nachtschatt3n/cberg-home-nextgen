@@ -177,7 +177,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 |-----------|---------|-----------|
 | ai | AI/ML services | 11 |
 | home-automation | Smart home integrations | 19 |
-| databases | Database backends | 12 |
+| databases | Database backends | 13 |
 | monitoring | Observability stack | 14 |
 | office | Productivity and document management | 11 |
 | media | Media servers | 5 |
@@ -188,9 +188,9 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | network | Gateway API data plane (Envoy), DNS, networking | 5 |
 | default | Dashboard (Homepage) + utilities | 2 |
 | flux-system | Flux GitOps operator + admission guardrails | 2 |
-| backup | External backup integrations, off-site restic backup, GitHub mirror | 6 |
-| my-software-development | Custom app development | 3 |
-| my-software-production | Custom app production | 7 |
+| backup | External backup integrations, off-site restic backup, GitHub mirror | 8 |
+| my-software-development | Custom app development | 4 |
+| my-software-production | Custom app production | 9 |
 | my-software-showcase | Portfolio showcase (containerized legacy client apps) | 15 |
 | security | Security monitoring (Wazuh, Falco) | 2 |
 | ci-runner | Ephemeral test Jobs + self-hosted GitHub Actions runners (no cluster secrets, egress-locked) | 3 |

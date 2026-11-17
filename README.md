@@ -482,7 +482,7 @@ quarterly.
 
 ## 📦 Applications
 
-~134 apps across 21 namespaces. Full inventory with per-app purpose, exposure
+~144 apps across 21 namespaces. Full inventory with per-app purpose, exposure
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 
@@ -507,8 +507,9 @@ matter-server · mosquitto · mqttx-web · music-assistant-server · n8n ·
 node-red · otbr · pallet-price-monitor · scrypted-nvr · solarfocus-scraper ·
 teslamate · traccar · trmnl-ha · zero-export-controller · zigbee2mqtt
 
-### 🗄️ Databases (`databases` — 12)
-influxdb · mariadb · memgraph · ninth-banner-feedback-db · nocodb · pgadmin ·
+### 🗄️ Databases (`databases` — 13)
+influxdb · mariadb · memgraph · ninth-banner-5-feedback-db · ninth-banner-feedback-db ·
+nocodb · oc8-db · pgadmin ·
 phpmyadmin · postgresql · redis · redisinsight · superset · sweep-history
 
 ### 📊 Monitoring & Observability (`monitoring` — 14)
@@ -550,7 +551,7 @@ reloader · spegel
 
 ### 🛠️ Custom applications (`my-software-development`, `my-software-production`, `my-software-showcase`, `default`)
 - dev (3): absenty · andreamosteller · opencode-andreamosteller  
-- prod (6): absenty · andreamosteller · gas-price-monitor · rainbow-rescue · splitfairy · the-ninth-banner  
+- prod (9): absenty · andreamosteller · andreamosteller-legacy · gas-price-monitor · ninth-banner-5 · ninth-banner-preview · rainbow-rescue · splitfairy · the-ninth-banner  
 - default (2): echo-server · homepage (the homepage app dashboard)
 
 ### 🧪 CI runner (`ci-runner` — 3)
