@@ -1,0 +1,29 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
+# Continuous-assurance jobs for the off-site backup (read-only, additive).
+# Separate from offsite-backup so the backup jobs themselves are never touched.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app offsite-assurance
+  namespace: &namespace backup
+  labels:
+    # Scripts and manifests use bare shell variables only; no envsubst wanted.
+    substitution.flux.home.arpa/disabled: "true"
+spec:
+  dependsOn:
+    - name: offsite-backup-secrets
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  interval: 30m
+  retryInterval: 1m
+  path: ./kubernetes/apps/backup/offsite-assurance/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  targetNamespace: *namespace
+  timeout: 5m
+  wait: false

@@ -13,3 +13,4 @@ resources:
   - ./unifi-backup/ks.yaml
   - ./db-dumps/ks.yaml
   - ./offsite-backup/ks.yaml
+  - ./offsite-assurance/ks.yaml

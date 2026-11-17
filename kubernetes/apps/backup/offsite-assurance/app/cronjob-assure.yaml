@@ -1,0 +1,122 @@
+---
+# Daily source-canary + shrink detector (13:15 UTC, clear of Longhorn 23:00,
+# db-dumps 21:15-22:00, off-site jobs 00:30/00:40, window 02:30/03:30, prune
+# Sun 04:30, check Wed 04:30, unifi Mon 05:15, contents Mon 06:00). READ-ONLY:
+# append-only keys, restic --no-lock --limit-download, metadata listings only.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: offsite-assure
+  namespace: backup
+spec:
+  schedule: "15 13 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 604800
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: offsite-assure
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          # root: ssh needs a passwd entry for its uid and the image has none
+          # for 1000. Capabilities are dropped; nothing is mounted writable
+          # except the scratch emptyDir.
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: restic
+              image: docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - /scripts/assure.sh
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: SFTP_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: SFTP_HOST
+                - name: SFTP_PORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: SFTP_PORT
+                - name: SFTP_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: SFTP_USER
+                - name: RESTIC_PASSWORD_CORE
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: RESTIC_PASSWORD_CORE
+                - name: RESTIC_PASSWORD_APPS
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: RESTIC_PASSWORD_APPS
+                - name: LIMIT_DOWNLOAD
+                  value: "20000"
+                # name=path-in-snapshot=max-age-seconds (core tier). Trees that
+                # an existing job rewrites on a known cadence: nightly DB dumps
+                # (36h), weekly UniFi autobackup copy (10d), monthly GitHub
+                # mirror (35d). Age is measured at snapshot time.
+                - name: CANARIES
+                  value: "db-dumps=/src/1/db-dumps=129600 unifi=/src/1/unifi=864000 github-mirror=/src/1/github-mirror=3024000"
+                - name: GOMEMLIMIT
+                  value: 800MiB
+                - name: HOME
+                  value: /tmp
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+                  ephemeral-storage: 2Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: ssh
+                  mountPath: /secrets/ssh
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: scripts
+              configMap:
+                name: offsite-assure-script
+            - name: ssh
+              secret:
+                secretName: offsite-backup-write
+                defaultMode: 292
+                items:
+                  - key: SSH_KEY
+                    path: SSH_KEY
+                  - key: SSH_KEY_APPS
+                    path: SSH_KEY_APPS
+                  - key: KNOWN_HOSTS
+                    path: KNOWN_HOSTS
+            - name: tmp
+              emptyDir:
+                sizeLimit: 1Gi

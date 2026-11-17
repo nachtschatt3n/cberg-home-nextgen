@@ -20,6 +20,7 @@ resources:
   - ./absenty-alerts.yaml
   - ./icloud-backup-alerts.yaml
   - ./offsite-backup-alerts.yaml
+  - ./offsite-assure-alerts.yaml
   - ./github-mirror-alerts.yaml
   - ./unifi-backup-alerts.yaml
   - ./db-dumps-alerts.yaml

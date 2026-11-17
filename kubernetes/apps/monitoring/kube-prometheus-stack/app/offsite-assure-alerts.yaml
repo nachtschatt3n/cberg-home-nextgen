@@ -1,0 +1,98 @@
+---
+# Continuous assurance for the off-site backup: source canary, shrink detector,
+# freshness of the checker itself. Metrics come from the daily read-only
+# offsite-assure CronJob (Pushgateway job=offsite-assure, label tier=core|apps).
+# Every group is paired with an absent() guard: a rule that matches no series
+# sits inactive forever and looks like health.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: offsite-assure-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: offsite-assure
+      interval: 60s
+      rules:
+        - alert: OffsiteBackupCanaryFailed
+          # The latest snapshot holds no file (or only a stale one) from a tree
+          # that an existing job rewrites on a known cadence: empty or wrong
+          # mount, wrong subdir, unmounted source. A backup of an empty
+          # directory is otherwise green.
+          expr: |
+            offsite_assure_canary_ok{job="offsite-assure"} == 0
+          for: 10m
+          labels:
+            severity: critical
+            category: backup
+            component: offsite-assure
+          annotations:
+            summary: "Off-site backup canary {{ $labels.canary }} failed: source empty or stale in the latest snapshot"
+            description: "The latest core snapshot has no fresh file for canary {{ $labels.canary }}. Check the NAS mount of the backup source, the include list, and the job that writes the canary tree (docs/sops/backup.md, Continuous assurance)."
+        - alert: OffsiteBackupCanaryDirsMissing
+          # DB-dump canary: every db-dump CronJob must have a fresh dump
+          # directory in the snapshot. The expected number is derived from the
+          # cluster (count of db-dump-* CronJobs), never a hard-coded constant.
+          expr: |
+            offsite_assure_canary_fresh_dirs{job="offsite-assure", canary="db-dumps"}
+              < scalar(count(kube_cronjob_info{cronjob=~"db-dump-.+"}))
+          for: 10m
+          labels:
+            severity: warning
+            category: backup
+            component: offsite-assure
+          annotations:
+            summary: "Fewer db-dump directories are fresh in the off-site snapshot than db-dump CronJobs exist"
+            description: "{{ $value }} fresh dump directories in the latest core snapshot versus the number of db-dump CronJobs. A new instance may be missing from the include list, or a dump stopped."
+        - alert: OffsiteBackupSourceShrunk
+          # Latest snapshot versus the previous one, per tier. 15 percent covers
+          # normal churn; a dropped mount shows as ~100 percent.
+          expr: |
+            (offsite_assure_files_ratio{job="offsite-assure"} < 0.85)
+            or
+            (offsite_assure_bytes_ratio{job="offsite-assure"} < 0.85)
+          for: 10m
+          labels:
+            severity: warning
+            category: backup
+            component: offsite-assure
+          annotations:
+            summary: "Off-site tier {{ $labels.tier }}: latest snapshot is more than 15 percent smaller than the previous one"
+            description: "Ratio {{ $value }} (files or bytes, latest vs previous). If a source was deliberately pruned, ignore once; otherwise a mount may be empty."
+        - alert: OffsiteAssureStale
+          # The checker itself must keep running (daily 13:15 UTC). absent()
+          # covers never-ran and lost-metrics.
+          expr: |
+            (time() - max by (tier) (offsite_assure_last_success_timestamp_seconds{job="offsite-assure"}) > 2 * 86400)
+            or absent(offsite_assure_last_success_timestamp_seconds{job="offsite-assure", tier="core"})
+            or absent(offsite_assure_last_success_timestamp_seconds{job="offsite-assure", tier="apps"})
+          for: 1h
+          labels:
+            severity: warning
+            category: backup
+            component: offsite-assure
+          annotations:
+            summary: "Off-site continuous-assurance check has not succeeded for over 2 days (or never)"
+            description: "offsite_assure_last_success_timestamp_seconds is old or absent for a tier. Check CronJob offsite-assure in namespace backup. A failing canary also fails the Job, so this alert may fire together with OffsiteBackupCanaryFailed."
+        - alert: OffsiteAssureJobFailed
+          # Same self-clearing CronJob-state pattern as OffsiteBackupJobFailed,
+          # for the assurance jobs (offsite-assure, offsite-restore-proof).
+          expr: |
+            (
+              kube_cronjob_status_last_schedule_time{namespace="backup", cronjob=~"offsite-assure|offsite-restore-proof"}
+              - on (namespace, cronjob) kube_cronjob_status_last_successful_time{namespace="backup", cronjob=~"offsite-assure|offsite-restore-proof"}
+              > 0
+            )
+            and on (namespace, cronjob) (kube_cronjob_status_active{namespace="backup", cronjob=~"offsite-assure|offsite-restore-proof"} == 0)
+          for: 5m
+          labels:
+            severity: critical
+            category: backup
+            component: offsite-assure
+          annotations:
+            summary: "Backup assurance CronJob {{ $labels.cronjob }} failed"
+            description: "The most recent run of {{ $labels.cronjob }} did not succeed (a failed canary or restore proof fails the Job on purpose). Check the Job logs in namespace backup."
