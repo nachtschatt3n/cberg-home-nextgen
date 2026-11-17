@@ -289,7 +289,13 @@ spec:
       #
       # ROLLBACK: pure manifest revert to
       # sha-1a9ff4a775edc959d7513b09ff2dcaeda8ca0e3b — no schema to unwind.
-      tag: "sha-fd987ce229b8fe1853c22d0482a30f83bbc04a3d"
+      # --- 2026-11-17 bump: sha-fd987ce2 -> sha-059a41d1 -------------------
+      # Wise activities paging: send `nextCursor` (Wise ignored `cursor` and
+      # returned page 1 forever, so the first sync looped ~30 min). Also stops
+      # if a cursor repeats. Image verified to contain both changes before bump.
+      # ROLLBACK: pure manifest revert to
+      # sha-fd987ce229b8fe1853c22d0482a30f83bbc04a3d — no schema to unwind.
+      tag: "sha-059a41d1bbbdb3dc44e5005fbba0add9d3f3ab7f"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
