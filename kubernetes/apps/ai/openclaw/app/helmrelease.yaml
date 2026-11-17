@@ -730,7 +730,7 @@ spec:
                       mode: 'local',
                       bind: 'lan',
                       port: 18789,
-                      trustedProxies: ['10.69.0.0/16', '192.168.55.8/29', '127.0.0.1', '::1'],
+                      trustedProxies: ['10.69.0.0/16', '127.0.0.1', '::1'],
                       controlUi: { allowedOrigins: ['https://openclaw.' + (process.env.OPENCLAW_DOMAIN || 'example.com')] },
                     },
                     agents: {
@@ -776,7 +776,7 @@ spec:
                   cfg.gateway.mode = cfg.gateway.mode || 'local';
                   cfg.gateway.bind = cfg.gateway.bind || 'lan';
                   cfg.gateway.port = cfg.gateway.port || 18789;
-                  cfg.gateway.trustedProxies = ['10.69.0.0/16', '192.168.55.8/29', '127.0.0.1', '::1'];
+                  cfg.gateway.trustedProxies = ['10.69.0.0/16', '127.0.0.1', '::1'];
                   cfg.gateway.controlUi = cfg.gateway.controlUi || {};
                   cfg.gateway.controlUi.allowedOrigins = ['https://openclaw.' + process.env.OPENCLAW_DOMAIN];
 
