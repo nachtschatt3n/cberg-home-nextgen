@@ -1194,8 +1194,8 @@ spec:
                       workspace: '/home/node/clawd-household',
                       agentDir: '/home/node/.openclaw/agents/household/agent',
                       skills: [],
-                      heartbeat: { every: '0m' },
-                      tools: { deny: ['exec', 'process', 'read', 'write', 'edit', 'apply_patch', 'browser',
+                      tools: { allow: ['web_search', 'web_fetch', 'tool_search', 'tool_describe'],
+                               deny: ['exec', 'process', 'read', 'write', 'edit', 'apply_patch', 'browser',
                                       'sessions_spawn', 'sessions_send', 'sessions_history', 'sessions_list',
                                       'splitfairy__*'],
                                fs: { workspaceOnly: true } },
@@ -1215,6 +1215,10 @@ spec:
                       if (spec.subagents) cur.subagents = spec.subagents;
                     }
                   });
+                  // A per-agent heartbeat switches ALL other agents to explicit-only
+                  // heartbeats (2026-11-17 regression: every other heartbeat vanished).
+                  // Never set one for household; strip the one c16363504 wrote.
+                  if (famById['household']) delete famById['household'].heartbeat;
                   // Bindings: managed peers first, unmanaged preserved, fallback last.
                   const famBindings = [];
                   if (idMathias) famBindings.push({ agentId: 'main',
