@@ -1,0 +1,199 @@
+---
+# Monthly automated restore proof (2nd of the month, 15:00 UTC: clear of the
+# github mirror on the 1st 02:00, Longhorn 23:00, db-dumps 21:15-22:00, off-site
+# jobs 00:30/00:40, windows 02:30/03:30, prune/check 04:30, unifi/contents Mon
+# morning, and offsite-assure 13:15). Restores a random per-source sample from the
+# latest core and apps snapshots into an emptyDir with restic restore --verify,
+# diffs unchanged files against the read-only live sources, and structurally
+# checks the newest UniFi autobackup. Append-only keys only; download capped.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: offsite-restore-proof
+  namespace: backup
+spec:
+  schedule: "0 15 2 * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 604800
+      activeDeadlineSeconds: 10800
+      template:
+        metadata:
+          labels:
+            app: offsite-restore-proof
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          # root: ssh needs a passwd entry for its uid and the image has none
+          # for 1000. Capabilities are dropped; nothing is mounted writable
+          # except the scratch emptyDir.
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: restic
+              image: docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - /scripts/restore-proof.sh
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                # restore re-applies ownership: CHOWN FOWNER DAC_OVERRIDE FSETID
+                # on top of drop ALL (same as the 2026-11-16 drill, docs/sops/backup.md).
+                capabilities:
+                  drop: ["ALL"]
+                  add: ["CHOWN", "FOWNER", "DAC_OVERRIDE", "FSETID"]
+              env:
+                - name: SFTP_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: SFTP_HOST
+                - name: SFTP_PORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: SFTP_PORT
+                - name: SFTP_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: SFTP_USER
+                - name: RESTIC_PASSWORD_CORE
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: RESTIC_PASSWORD_CORE
+                - name: RESTIC_PASSWORD_APPS
+                  valueFrom:
+                    secretKeyRef:
+                      name: offsite-backup-write
+                      key: RESTIC_PASSWORD_APPS
+                # 25 MB/s cap, like the 2026-11-16 drill
+                - name: LIMIT_DOWNLOAD
+                  value: "25000"
+                - name: SAMPLE_PER_MOUNT
+                  value: "6"
+                - name: GOMEMLIMIT
+                  value: 1800MiB
+                - name: HOME
+                  value: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 2Gi
+                  ephemeral-storage: 4Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: ssh
+                  mountPath: /secrets/ssh
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+                - name: restore
+                  mountPath: /restore
+                - name: restore-unf
+                  mountPath: /restore-unf
+                - name: src-1
+                  mountPath: /src/1
+                  readOnly: true
+                - name: src-2
+                  mountPath: /src/2
+                  readOnly: true
+                - name: src-3
+                  mountPath: /src/3
+                  readOnly: true
+                - name: src-4
+                  mountPath: /src/4
+                  readOnly: true
+                - name: src-5
+                  mountPath: /src/5
+                  readOnly: true
+                - name: src-6
+                  mountPath: /src/6
+                  readOnly: true
+                - name: src-7
+                  mountPath: /src/7
+                  readOnly: true
+                - name: src-8
+                  mountPath: /src/8
+                  readOnly: true
+                - name: src-9
+                  mountPath: /src/9
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: offsite-restore-proof-script
+            - name: ssh
+              secret:
+                secretName: offsite-backup-write
+                defaultMode: 292
+                items:
+                  - key: SSH_KEY
+                    path: SSH_KEY
+                  - key: SSH_KEY_APPS
+                    path: SSH_KEY_APPS
+                  - key: KNOWN_HOSTS
+                    path: KNOWN_HOSTS
+            - name: tmp
+              emptyDir:
+                sizeLimit: 3Gi
+            - name: restore
+              emptyDir:
+                sizeLimit: 2Gi
+            - name: restore-unf
+              emptyDir:
+                sizeLimit: 256Mi
+            - name: src-1
+              persistentVolumeClaim:
+                claimName: backup-src-1
+                readOnly: true
+            - name: src-2
+              persistentVolumeClaim:
+                claimName: backup-src-2
+                readOnly: true
+            - name: src-3
+              persistentVolumeClaim:
+                claimName: backup-src-3
+                readOnly: true
+            - name: src-4
+              persistentVolumeClaim:
+                claimName: backup-src-4
+                readOnly: true
+            - name: src-5
+              persistentVolumeClaim:
+                claimName: backup-src-5
+                readOnly: true
+            - name: src-6
+              persistentVolumeClaim:
+                claimName: backup-src-6
+                readOnly: true
+            - name: src-7
+              persistentVolumeClaim:
+                claimName: backup-src-7
+                readOnly: true
+            - name: src-8
+              persistentVolumeClaim:
+                claimName: backup-src-8
+                readOnly: true
+            - name: src-9
+              persistentVolumeClaim:
+                claimName: backup-src-9
+                readOnly: true
+

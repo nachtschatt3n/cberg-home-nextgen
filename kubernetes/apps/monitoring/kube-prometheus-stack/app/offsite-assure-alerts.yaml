@@ -96,3 +96,39 @@ spec:
           annotations:
             summary: "Backup assurance CronJob {{ $labels.cronjob }} failed"
             description: "The most recent run of {{ $labels.cronjob }} did not succeed (a failed canary or restore proof fails the Job on purpose). Check the Job logs in namespace backup."
+    - name: offsite-restore-proof
+      interval: 60s
+      rules:
+        - alert: OffsiteRestoreProofFailed
+          # Monthly restore proof (2nd of the month, 15:00 UTC). A mismatch,
+          # a missing restored file, an empty source mount, too few comparable
+          # files or a structurally bad UniFi backup sets last_run_ok to 0.
+          expr: |
+            offsite_restore_proof_last_run_ok{job="offsite-restore-proof"} == 0
+          for: 10m
+          labels:
+            severity: critical
+            category: backup
+            component: offsite-restore-proof
+          annotations:
+            summary: "Monthly off-site restore proof failed for tier {{ $labels.tier }}"
+            description: "The restore proof for tier {{ $labels.tier }} did not verify (restic restore --verify, live-source diff or UniFi structural check). Read the offsite-restore-proof Job logs in namespace backup; docs/sops/backup.md, Continuous assurance."
+        - alert: OffsiteRestoreProofStale
+          # No successful proof in 40 days (monthly job, so one missed run is
+          # tolerated). The second branch is the absent() guard: it fires only
+          # once the CronJob itself is older than 40 days, so the first month
+          # after rollout (no run yet) does not page.
+          expr: |
+            (time() - max by (tier) (offsite_restore_proof_last_success_timestamp_seconds{job="offsite-restore-proof"}) > 40 * 86400)
+            or on () (
+              absent(offsite_restore_proof_last_success_timestamp_seconds{job="offsite-restore-proof"})
+              and on () (max(time() - kube_cronjob_created{namespace="backup", cronjob="offsite-restore-proof"}) > 40 * 86400)
+            )
+          for: 1h
+          labels:
+            severity: warning
+            category: backup
+            component: offsite-restore-proof
+          annotations:
+            summary: "No successful off-site restore proof in 40 days (or never)"
+            description: "offsite_restore_proof_last_success_timestamp_seconds is older than 40 days or has never been reported. Check CronJob offsite-restore-proof in namespace backup."
