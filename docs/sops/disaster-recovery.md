@@ -192,9 +192,16 @@ least 1 node of hardware.
    Wait 15–45 min for first-time reconcile. Watch `flux logs -A --tail=50`
    for errors.
 
-6. **Restore Longhorn volumes from CIFS backup:**
-   Per `docs/sops/backup.md` "Restore" procedure. The CIFS backup target
-   contains the most recent daily-3am snapshot of every PV.
+6. **Restore Longhorn volumes from the CIFS backup target:**
+   Do this BEFORE the apps start (suspend `cluster-apps` after Longhorn is
+   Ready), otherwise dynamic PVCs create new empty volumes. The backup target
+   is declared in git (`backup-target.yaml`), so Flux recreates it; then run
+   `runbooks/longhorn-bulk-restore.py` (dry-run first, `--parallel 1`). Exact
+   command sequence, exclusions and measured throughput (about 2 h for all 76
+   volumes) are in `docs/sops/longhorn.md` "Total-loss Longhorn restore". If
+   the NAS backupstore itself is gone, restic-restore it first (tier `core`).
+   The nightly backup runs at 23:00 UTC; the newest backup per volume is the
+   restore point.
 
 7. **Recreate ad-hoc secrets that are NOT in git:**
    Anything stored only in cluster Secrets (without an encrypted source in
@@ -295,7 +302,7 @@ kubectl annotate volume <name> -n storage \
 
 **Recovery — option A: NAS hardware OK, just a config/share rebuild**
 1. Rebuild SMB shares with the same paths.
-2. Restore each share from the off-site restic backup (tier `core` / `apps`, see `docs/sops/backup.md` "Off-site Backup"; repo passwords, SSH keys and the host are in the operator password manager). Shares not covered by it (media library and other deferred large trees) have no off-site copy beyond the NAS vendor upload.
+2. Restore each share from the off-site restic backup (tier `core` / `apps`, see `docs/sops/backup.md` "Off-site Backup"; the Longhorn backupstore is in `core`, then re-sync the target and restore volumes per `docs/sops/longhorn.md` "Total-loss Longhorn restore"; repo passwords, SSH keys and the host are in the operator password manager). Shares not covered by it (media library and other deferred large trees) have no off-site copy beyond the NAS vendor upload.
 3. Restart pods that mount CIFS:
    ```bash
    kubectl rollout restart deployment -n <ns> <app>

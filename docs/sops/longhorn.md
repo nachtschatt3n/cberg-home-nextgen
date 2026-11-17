@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.10.23`
-> Last Updated: `2026-10-23`
+> Version: `2026.11.17`
+> Last Updated: `2026-11-17`
 > Owner: `Platform`
 
 ---
@@ -632,10 +632,119 @@ kubectl exec -n storage deploy/longhorn-manager -- \
 
 ### Restore a Volume from Backup
 
+One or a few volumes: scripted, same-name or scratch-prefixed, see
+"Total-loss Longhorn restore" below (`runbooks/longhorn-bulk-restore.py`).
+By hand:
+
 1. Open Longhorn UI
 2. Navigate to Backup
 3. Select backup → Restore → provide new volume name
 4. After restore, create PV and PVC pointing to the restored volume
+
+### Backup target and recurring group are declared in git
+
+- `kubernetes/apps/storage/longhorn/app/backup-target.yaml` adopts the
+  Longhorn-created `BackupTarget/default` (URL host from `${NAS_HOSTNAME}`,
+  `credentialSecret: longhorn-backup-credentials` from
+  `backup-credentials.sops.yaml`, `pollInterval: 5m0s`). Flux owns only those
+  three fields, so Longhorn's own writes to `spec.syncRequestedAt` do not drift.
+  It carries `kustomize.toolkit.fluxcd.io/prune: disabled` on purpose: deleting
+  the CR drops every BackupVolume/Backup CR (NAS data survives, the cluster
+  forgets it). Adoption was verified a no-op with a server-side dry-run
+  against the live object (identical spec and status) before the commit.
+- The recurring group lives in `app/recurring-backup-job.yaml`
+  (`daily-backup-all-volumes`, group `default`, 23:00 UTC, retain 7,
+  concurrency 2); trim and snapshot-cleanup jobs are in `recurringjobs/`.
+  Live values were compared to git on 2026-11-17: identical.
+- Backup gaps (2026-11-17): all 76 live volumes have a Completed backup. Two
+  detached volumes lag (`allowRecurringJobWhileVolumeDetached: false`, so a
+  detached volume is skipped by the nightly job): `otbr-data` (18 days) and
+  `icloud-docker-andrea-session` (2 days). Retired volumes (about 42
+  BackupVolumes older than a month) and one empty BackupVolume
+  (`superset-postgresql-data`) remain in the store; the restore tool skips
+  them as STALE/NOBACKUP.
+
+### Total-loss Longhorn restore
+
+Scenario: cluster rebuilt (or Longhorn state gone), NAS backupstore intact or
+restored from the off-site restic `core` tier (`docs/sops/backup.md`
+"Off-site Backup"; broader context `docs/sops/disaster-recovery.md`).
+Tool: `runbooks/longhorn-bulk-restore.py` (dry-run by default). It recreates
+each Longhorn Volume under its ORIGINAL name from the newest Completed backup,
+so the speaking-name rule (Volume == PV == PVC) makes the normal Flux apply
+bind to the restored data with no manifest change.
+
+Order matters. A PVC that Flux applies before its volume exists is `Pending`
+for static volumes (harmless) but for dynamic `pvc-<uuid>` volumes the
+provisioner creates a NEW EMPTY volume. Restore first, then let the apps start.
+
+```bash
+# 0. If the backupstore is gone from the NAS: restic-restore the Longhorn
+#    backupstore directory of the `backups` share first (tier core, see backup.md).
+#    Confirm the directory with `restic ls` before restoring; it is not verified here.
+
+# 1. Bootstrap cluster + Flux + SOPS key (docs/sops/disaster-recovery.md), let
+#    Longhorn come up, then hold the rest of the apps until volumes exist:
+mise exec -- flux get kustomization -n storage longhorn            # Ready
+mise exec -- flux suspend kustomization cluster-apps -n flux-system # hold other apps
+
+# 2. backup-target.yaml (in git) re-creates the target; force a sync and wait for CRs
+mise exec -- kubectl -n storage get backuptargets.longhorn.io default \
+  -o jsonpath='{.status.available}{"\n"}'                           # true
+mise exec -- kubectl -n storage get backupvolumes.longhorn.io --no-headers | wc -l   # ~125
+
+# 3. Plan (read-only). Review PLAN / STALE / NOBACKUP, pick exclusions.
+mise exec -- ./runbooks/longhorn-bulk-restore.py
+
+# 4. Restore, critical state first, ONE at a time (etcd-sensitive, and Longhorn
+#    serialises restores anyway: restore-concurrent-limit=1). --create-pv also
+#    creates the PV; dynamic pvc-<uuid> PVs are pre-bound to their old PVC.
+mise exec -- ./runbooks/longhorn-bulk-restore.py --apply --create-pv --parallel 1 \
+  --only 'authentik-pg-data' --only 'postgresql-data-5g' --only 'mariadb-data-5g' \
+  --only 'vaultwarden-data' --only 'home-assistant-config' --only 'paperless-*'
+mise exec -- ./runbooks/longhorn-bulk-restore.py --apply --create-pv --parallel 1 \
+  --exclude 'prometheus-tsdb' --exclude 'pvc-528f68b3-*'       # rest; existing are refused
+
+# 5. Verify, then release the apps
+mise exec -- kubectl -n storage get volumes.longhorn.io --no-headers | grep -vc healthy
+mise exec -- flux resume kustomization cluster-apps -n flux-system
+mise exec -- kubectl get pvc -A | grep -v Bound                      # none Pending/Lost
+```
+
+What to exclude (candidates only, the operator decides): rebuildable or
+derived data, which restores last or never: `prometheus-tsdb`,
+`elasticsearch-data` (the `pvc-528f68b3-*` volume, 62 GiB, the largest),
+`immich-ml-cache`, `tube-archivist-cache-2g`, `ai-sre-cache`,
+`edot-collector-queue`, `*-redis*`. Do NOT exclude `*-session` volumes
+(iCloud sessions need interactive 2FA to recreate).
+
+Time estimate (measured 2026-11-17, scratch restores under a `restoretest-`
+prefix while the off-site core upload was reading the NAS): 415 MB in 25 s and
+4.16 GB in 100 s, i.e. about 40 MB/s sustained plus about 10 s attach/detach
+overhead per volume. The 76 live volumes' newest backups total 271 GiB, so a
+full restore is roughly 2 h sequential (about 3 h with 76 x overhead and slower
+NAS); skipping the 62 GiB Elasticsearch volume saves about 25 min.
+
+Safety properties of the tool: dry-run unless `--apply`; refuses a volume that
+already exists; `--force` (delete a detached same-name volume first, needs
+`--yes`) is only permitted together with a scratch `--name-prefix`;
+`--create-pv` sets `Retain` and never `Delete`; exit code non-zero on any
+failure. Scratch restore recipe (what the 2026-11-17 proof did):
+`--name-prefix restoretest- --create-pv --apply`, mount read-only in a
+throwaway pod via a `restoretest-*` PVC, compare, then delete the pod, PVC, PV
+and `restoretest-*` Longhorn Volume only (check the name prefix and the
+`bulk-restore=true` label before every delete).
+
+Proof record (2026-11-17, three scratch restores, production untouched):
+`zigbee2mqtt-data` 37 files, 34 identical by path/size/mtime to the live
+volume, 3 changed since the snapshot (expected), `database.db` parses, 0 live
+paths missing; `esphome-config` 72,178 files identical by path/size/mtime,
+150-file sha256 sample identical, 1 file changed since; `grafana-config`
+`grafana.db` `integrity_check` ok (96 tables, 81 dashboards), `--force`
+re-restore over a `restoretest-` volume exercised. etcd leader changes moved
++2 per member over the 35-minute proof (121/124/126 to 123/126/128), a
+single change after each of the two larger restores, so restore one volume
+at a time and watch `etcd_server_leader_changes_seen_total`.
 
 ---
 
