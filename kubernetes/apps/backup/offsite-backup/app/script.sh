@@ -66,7 +66,7 @@ do_backup() {
     start=$(date +%s)
     rc=0
     RESTIC_PROGRESS_FPS=0.05 r backup --json --host offsite --tag "$tier" \
-        --limit-upload "$LIMIT_UPLOAD" --files-from "$FILES" >/tmp/backup.json || rc=$?
+        --limit-upload "$LIMIT_UPLOAD" --exclude '*.sparsebundle/lock' --files-from "$FILES" >/tmp/backup.json || rc=$?
     jq -c 'select(.message_type=="summary")' /tmp/backup.json >/tmp/summary.json || true
     errs=$(jq -c 'select(.message_type=="error")' /tmp/backup.json | wc -l)
     echo "restic exit=$rc read_errors=$errs"
