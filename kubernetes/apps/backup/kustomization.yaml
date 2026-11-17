@@ -11,4 +11,5 @@ resources:
   - ./icloud-docker-andrea/ks.yaml
   - ./icloud-docker-mu/ks.yaml
   - ./unifi-backup/ks.yaml
+  - ./db-dumps/ks.yaml
   - ./offsite-backup/ks.yaml

@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+  - ./cronjob-affine-pg.yaml
+  - ./cronjob-mealie-pg.yaml
+  - ./cronjob-penpot-db.yaml
+  - ./cronjob-sure-pg.yaml
+  - ./cronjob-nextcloud-mariadb.yaml
+  - ./cronjob-paperless-db.yaml

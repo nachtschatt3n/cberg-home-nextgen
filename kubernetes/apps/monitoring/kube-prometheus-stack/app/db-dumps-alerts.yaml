@@ -1,0 +1,86 @@
+---
+# Nightly logical database dump alerts. Metrics come from the Pushgateway
+# (job=db-dumps, one group per instance: dbinstance=<name>), pushed by the
+# db-dump-<instance> CronJobs (21:15-21:54 UTC, 14 instances). The success
+# timestamp and size are derived from the newest GOOD dump ON DISK, so a failing
+# run is an ageing timestamp, never a frozen healthy value. Every group is paired
+# with an absent()/count guard so a rule that matches no series cannot sit
+# silently inactive. When an instance is added or removed, update the expected
+# count (14) in DbDumpInstanceMissing and docs/sops/backup.md.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: db-dumps-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: db-dumps
+      interval: 60s
+      rules:
+        - alert: DbDumpStale
+          # Daily schedule: 36h = one missed run plus slack. Per database.
+          expr: |
+            time() - db_dump_last_success_timestamp_seconds{job="db-dumps"} > 36 * 3600
+          for: 30m
+          labels:
+            severity: critical
+            category: backup
+            component: db-dumps
+          annotations:
+            summary: "No good database dump for {{ $labels.dbinstance }}/{{ $labels.database }} in over 36 hours"
+            description: "The newest valid dump of {{ $labels.database }} on instance {{ $labels.dbinstance }} is {{ $value | humanizeDuration }} old. Read the db-dump-{{ $labels.dbinstance }} Job logs (container dump) in the database namespace. A dropped database must have its directory removed from the NAS db-dumps share to retire this alert."
+        - alert: DbDumpRunFailed
+          # Last pushed run reported failure for one database (dump error,
+          # validation failure, or new dump suspiciously smaller than the last).
+          expr: |
+            db_dump_last_run_ok{job="db-dumps"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            category: backup
+            component: db-dumps
+          annotations:
+            summary: "Database dump failed for {{ $labels.dbinstance }}/{{ $labels.database }}"
+            description: "The last db-dump run failed for {{ $labels.database }} on {{ $labels.dbinstance }}. Previous good dumps are intact and were not pruned. A *.suspect file next to them means the new dump was smaller than half of the previous one."
+        - alert: DbDumpInstanceFailed
+          # Covers failures that never reach a per-database result: login
+          # refused, host unreachable, no databases listed.
+          expr: |
+            db_dump_instance_last_run_ok{job="db-dumps"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            category: backup
+            component: db-dumps
+          annotations:
+            summary: "Database dump run failed for instance {{ $labels.dbinstance }}"
+            description: "The last db-dump run for {{ $labels.dbinstance }} reported failure (authentication, connectivity or an empty database list). Read the Job logs."
+        - alert: DbDumpJobFailed
+          # Covers aborts that push no metrics (Pushgateway down, pod never ran).
+          expr: |
+            kube_job_status_failed{job_name=~"db-dump-.*"} > 0
+          for: 5m
+          labels:
+            severity: warning
+            category: backup
+            component: db-dumps
+          annotations:
+            summary: "A db-dump Job failed ({{ $labels.namespace }}/{{ $labels.job_name }})"
+            description: "Job {{ $labels.job_name }} in {{ $labels.namespace }} has failed pods. Check the dump init container and the report container logs."
+        - alert: DbDumpInstanceMissing
+          # absent()/count guard: fewer than the 14 expected instances report.
+          # 36h of grace for the first rollout (jobs run once a day).
+          expr: |
+            count(db_dump_instance_last_run_ok{job="db-dumps"}) < 14 or absent(db_dump_instance_last_run_ok{job="db-dumps"})
+          for: 36h
+          labels:
+            severity: warning
+            category: backup
+            component: db-dumps
+          annotations:
+            summary: "Fewer than 14 database instances report a dump run"
+            description: "Expected 14 db-dump instances in the Pushgateway; {{ $value }} reporting. A CronJob never ran, the Pushgateway lost its metrics, or an instance was added without updating this rule."

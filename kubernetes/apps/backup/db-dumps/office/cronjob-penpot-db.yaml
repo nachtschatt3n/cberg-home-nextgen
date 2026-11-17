@@ -1,0 +1,125 @@
+---
+# Nightly logical dump of office/penpot-db (pg_dump -Fc per database + pg_dumpall --globals-only) to the NAS backups
+# share, subdir db-dumps/penpot-db. Stagger: one job every 3 minutes from 21:15 UTC,
+# all finished before the Longhorn backups (23:00) and the off-site core job
+# (00:40 UTC), which carries db-dumps off-site. Retention 7 daily + 4 weekly. The
+# init container dumps; the report container pushes metrics (job=db-dumps,
+# dbinstance=penpot-db) and fails the Job when the dump failed. See docs/sops/backup.md.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-dump-penpot-db
+spec:
+  schedule: "45 21 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 604800
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: db-dump-penpot-db
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: dump
+              image: docker.io/library/postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "/scripts/db-dump.sh"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: ENGINE
+                  value: postgres
+                - name: INSTANCE
+                  value: penpot-db
+                - name: DB_HOST
+                  value: penpot-db
+                - name: DB_PORT
+                  value: "5432"
+                - name: HOME
+                  value: /tmp
+                - name: DB_USER
+                  value: penpot
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: penpot-secret
+                      key: PENPOT_POSTGRESQL_PASSWORD
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+                - name: work
+                  mountPath: /work
+                - name: dumps
+                  mountPath: /dumps
+          containers:
+            - name: report
+              image: docker.io/library/python:3.15.2-alpine@sha256:a0f2e268f2ce8f3709611a90054ec6a8ae31f6251f5896b8648b9bb99835e30a
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/scripts/report.py"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: INSTANCE
+                  value: penpot-db
+                - name: PUSHGATEWAY
+                  value: http://prometheus-pushgateway.monitoring:9091
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: db-dumps-scripts
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
+            - name: work
+              emptyDir:
+                sizeLimit: 16Mi
+            - name: dumps
+              persistentVolumeClaim:
+                claimName: db-dumps

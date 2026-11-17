@@ -1,0 +1,21 @@
+---
+# One claim per namespace (a Secret can only be referenced from its own
+# namespace, so the dump Jobs run next to their database). All claims bind to the
+# same Retain class / NAS directory; every Job writes only below
+# /dumps/<instance>/.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-dumps
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+    volume.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+  labels:
+    csi-driver-smb: "cifs-share"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: cifs-db-dumps
