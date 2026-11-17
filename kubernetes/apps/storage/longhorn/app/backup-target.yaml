@@ -1,0 +1,30 @@
+---
+# yaml-language-server: $schema=https://kube-schemas.pages.dev/longhorn.io/backuptarget_v1beta2.json
+# The Longhorn 1.12 backup target. Before 1.12 this was the `backup-target`,
+# `backup-target-credential-secret` and `backupstore-poll-interval` Settings;
+# they are now fields of this CR (see the REMOVED note in helmrelease.yaml).
+#
+# Longhorn creates `default` itself on first start, so this manifest ADOPTS it:
+# Flux applies server-side and owns only the three fields below. Longhorn's
+# controller keeps writing `spec.syncRequestedAt` (not owned by Flux, so no
+# conflict and no drift). Verified a no-op against the live object 2026-11-17
+# (docs/sops/longhorn.md "Total-loss Longhorn restore").
+#
+# DO NOT remove this file without the prune guard: the annotation below makes
+# Flux skip deletion, because deleting the BackupTarget drops every
+# BackupVolume/Backup CR (the data on the NAS stays, but the cluster forgets it).
+#
+# The host comes from the cluster-secrets substitution like every other CIFS
+# consumer (storageclass.yaml files); the credentials are the SOPS secret
+# backup-credentials.sops.yaml (keys CIFS_USERNAME / CIFS_PASSWORD).
+apiVersion: longhorn.io/v1beta2
+kind: BackupTarget
+metadata:
+  name: default
+  namespace: storage
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  backupTargetURL: "cifs://${NAS_HOSTNAME}/backups?cifsOptions=soft,cache=loose,retrans=5,actimeo=10,closetimeo=10,echo_interval=60,nosharesock"
+  credentialSecret: longhorn-backup-credentials
+  pollInterval: 5m0s

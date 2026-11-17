@@ -11,3 +11,4 @@ resources:
   - alertmanager-telegram-config.yaml
   - backup-credentials.sops.yaml
   - recurring-backup-job.yaml
+  - backup-target.yaml
