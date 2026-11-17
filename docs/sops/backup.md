@@ -565,8 +565,10 @@ includes the directory, so GitHub history also reaches the storage box.
 
 **Token (operator action).** Secret `github-mirror-token`, key `GITHUB_TOKEN`
 (SOPS, `kubernetes/apps/backup/github-mirror/app/secret.sops.yaml`). It ships
-with a PLACEHOLDER value; the job refuses to run until it is a real fine-grained
-PAT (`github_pat_...`) and exits non-zero with a clear FATAL message.
+with a PLACEHOLDER value; the job refuses to run until it is a real token
+(fine-grained `github_pat_...` or classic `ghp_...`) and exits non-zero with a clear
+FATAL message. Since 2026-11-16 it holds the cluster-wide classic PAT by operator
+choice (write scope; a fine-grained read-only token would be safer).
 
 1. GitHub, Settings, Developer settings, Fine-grained tokens: new token,
    resource owner = the account, All repositories, repository permissions
