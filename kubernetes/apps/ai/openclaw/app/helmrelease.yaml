@@ -2556,7 +2556,10 @@ spec:
                 cpu: 4
                 # 8Gi (was 5Gi): boot peaks ~4.1GiB (doctor/init) and whisper `small`
                 # adds ~2GiB next to the ~2.4GiB steady gateway (Prometheus, 2026-11-08).
-                memory: 8Gi
+                # 12Gi since 2026-11-18 after an OOMKill at 8Gi (gateway working set
+                # grew 3.4 -> 7.8 GiB over ~80 min of HA voice turns; growth under
+                # investigation).
+                memory: 12Gi
 
             securityContext:
               runAsNonRoot: true
