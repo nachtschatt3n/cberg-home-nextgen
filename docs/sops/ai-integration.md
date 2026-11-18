@@ -308,6 +308,21 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   HA `custom_conversation` 1.7.0 cannot send custom headers;
   `channels.modelByChannel` never matches the HTTP path (`webchat` is not a
   deliverable channel).
+  **Live token streaming (2026-11-18):** the voice agents' primary is
+  `anthropic-voice/claude-haiku-5-5`, a provider alias on the same
+  `api.anthropic.com` + `ANTHROPIC_API_KEY` env. Upstream `@openclaw/ai`
+  buffers every Claude 5-family reply until `message_stop` (refusal
+  contract), so Assist got each answer in one burst. The init script's
+  idempotent `VOICE-STREAM PATCH` turns that buffer into a pass-through ONLY
+  for provider `anthropic-voice` + `claude-haiku-5-5` (both transport files;
+  logs `voice-stream patch: N file(s) patched` on boot, or a WARN and boots
+  unpatched if upstream changed). Every `anthropic/*` ref, incl. Telegram's
+  Sonnet primary and Haiku fallback rung, stays buffered. Accepted tradeoffs
+  for voice: a refused reply may be partly spoken; the alias gets no
+  implicit Anthropic beta headers and no server-side tool clearing.
+  Rollback: remove the patch block and set `famVoiceModel.primary` back to
+  `anthropic/claude-haiku-5-5` (one pod roll; npm reinstall restores the
+  pristine files).
   **Heartbeats are explicitly enrolled per agent** because of these twins:
   every agent gets `heartbeat: {}` (= defaults, 1h) and the twins get
   `every: "0m"`. Otherwise a twin would run main's stateful `HEARTBEAT.md`

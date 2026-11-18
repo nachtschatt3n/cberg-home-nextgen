@@ -546,6 +546,52 @@ spec:
                   sed -i 's/NARRATIVE_TIMEOUT_MS *= *6e4/NARRATIVE_TIMEOUT_MS = 42e4/' "$f"
                 done
 
+                # VOICE-STREAM PATCH (2026-11-18, operator-approved). @openclaw/ai holds
+                # EVERY event of a Claude 5-family reply (Haiku 5.5, Sonnet/Opus 5,
+                # Fable/Mythos 5) in a deferred buffer until message_stop, so a
+                # terminal "refusal" can discard the text ("refusal contract"). That
+                # made HA Assist receive the whole answer in one burst (measured:
+                # direct API first text 0.58 s, via OpenClaw 2.9-3.3 s, all deltas in
+                # one ms). For provider `anthropic-voice` + claude-haiku-5-5 ONLY, the
+                # buffer becomes a pass-through (events forwarded live; flush/discard
+                # no-ops; still truthy so the "ended before message_stop" truncation
+                # check stays active). Refusal tradeoff accepted for voice: a refused
+                # reply may already be partly spoken. Every other model/provider,
+                # including anthropic/* used by Telegram, is untouched.
+                # Fail-safe: idempotent marker; if the target line is missing after an
+                # upgrade, or a patched file fails `node --check`, it logs WARN and the
+                # original file is kept/restored. Never fails the boot.
+                # Rollback: delete this block and set famVoiceModel.primary back to
+                # anthropic/claude-haiku-5-5 (the npm reinstall restores pristine files).
+                OC_AI_DIST=/home/node/.openclaw/lib/node_modules/openclaw/node_modules/@openclaw/ai/dist
+                node - "$OC_AI_DIST" <<'VOICESTREAM' || echo "WARN: voice-stream patch errored; booting unpatched"
+                const fs = require('fs'), path = require('path'), cp = require('child_process');
+                const dir = process.argv[2];
+                const NEEDLE = 'const refusalBuffer = usesClaudeStreamingRefusalContract(model) ? createDeferredEventBuffer(stream) : void 0;';
+                const MARK = '/*oc-voice-stream*/';
+                const REPL = 'const refusalBuffer = usesClaudeStreamingRefusalContract(model) ? (' + MARK +
+                  '(String(model.provider || "").toLowerCase() === "anthropic-voice" && ' +
+                  '/(^|[-/])claude-haiku-5-5($|[^a-z0-9])/.test(String(model.id || ""))) ' +
+                  '? { push: (e) => stream.push(e), flush() {}, discard() {} } ' +
+                  ': createDeferredEventBuffer(stream)) : void 0;';
+                let patched = 0, already = 0;
+                try {
+                  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')) : [];
+                  for (const f of files) {
+                    const p = path.join(dir, f);
+                    const src = fs.readFileSync(p, 'utf8');
+                    if (src.includes(MARK)) { already++; continue; }
+                    if (!src.includes(NEEDLE)) continue;
+                    const out = src.split(NEEDLE).join(REPL);
+                    fs.writeFileSync(p, out);
+                    try { cp.execFileSync(process.execPath, ['--check', p], { stdio: 'pipe' }); patched++; }
+                    catch (e) { fs.writeFileSync(p, src); console.log('WARN: voice-stream patch broke ' + f + ', restored original'); }
+                  }
+                } catch (e) { console.log('WARN: voice-stream patch failed: ' + e.message); }
+                if (patched + already === 0) console.log('WARN: voice-stream patch target not found in ' + dir + ' (upstream changed?) - Haiku voice stays buffered');
+                else console.log('voice-stream patch: ' + patched + ' file(s) patched, ' + already + ' already patched');
+                VOICESTREAM
+
                 export PIP_ROOT_USER_ACTION=ignore
                 install_pip obsidian-cli
                 # himalaya was installed for the early IMAP-direct mail
@@ -1053,6 +1099,28 @@ spec:
                     cfg.agents.defaults.models[ref] = cfg.agents.defaults.models[ref] || {};
                   }
 
+                  // VOICE PROVIDER ALIAS (2026-11-18): `anthropic-voice` = the same
+                  // Anthropic API + the same ANTHROPIC_API_KEY env (no new secret), used
+                  // ONLY by the HA voice agents (famVoiceModel below). It exists so the
+                  // "voice-stream" startup patch can stream Haiku 5.5 tokens live for
+                  // this provider while every `anthropic/*` ref (Telegram's Sonnet
+                  // primary AND its Haiku fallback rung) keeps the upstream
+                  // refusal-contract buffering. Known side effects of a non-`anthropic`
+                  // provider id (accepted for voice): no implicit Anthropic beta
+                  // headers, no server-side tool clearing. Model limits mirror the
+                  // bundled anthropic manifest entry for claude-haiku-5-5 (2026.11.1).
+                  cfg.models.providers['anthropic-voice'] = {
+                    baseUrl: 'https://api.anthropic.com',
+                    apiKey: '$${ANTHROPIC_API_KEY}',
+                    api: 'anthropic-messages',
+                    models: [{ id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5 (voice)',
+                      reasoning: true, input: ['text', 'image'],
+                      contextWindow: 1000000, maxTokens: 128000,
+                      cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 } }],
+                  };
+                  cfg.agents.defaults.models['anthropic-voice/claude-haiku-5-5'] =
+                    Object.assign({}, cfg.agents.defaults.models['anthropic-voice/claude-haiku-5-5']);
+
                   // The codex CLI backend is registered automatically by
                   // the bundled openai plugin (see extensions/openai/
                   // cli-backend.js — registers id "codex-cli"). Models
@@ -1160,7 +1228,9 @@ spec:
                   // (precedence 3) is scoped to the voice agents ONLY; the shared
                   // agents.defaults.models['anthropic/claude-haiku-5-5'] entry is left
                   // alone so Telegram's Haiku fallback rung keeps the global 'low'.
-                  const famVoiceModel = { primary: 'anthropic/claude-haiku-5-5',
+                  // Primary is the `anthropic-voice` alias (live token streaming, see the
+                  // voice-stream patch); the fallbacks stay on the buffered `anthropic/*`.
+                  const famVoiceModel = { primary: 'anthropic-voice/claude-haiku-5-5',
                     fallbacks: ['anthropic/claude-sonnet-5-5', 'ollama/gemma4:26b-mlx'] };
                   const famManaged = [
                     { id: 'juno-andrea', name: 'Juno (Andrea)',
