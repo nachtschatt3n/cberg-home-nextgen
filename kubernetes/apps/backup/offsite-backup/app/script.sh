@@ -131,6 +131,8 @@ do_check() {
     tier="$1"
     select_tier "$tier" || return 1
     start=$(date +%s)
+    # Clear stale locks only (restic never removes a live one), as prune does.
+    r unlock || return 1
     r check --read-data-subset=5% || return 1
     end=$(date +%s)
     {
