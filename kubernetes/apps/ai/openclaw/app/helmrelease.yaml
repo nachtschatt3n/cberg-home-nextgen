@@ -553,14 +553,26 @@ spec:
                 # made HA Assist receive the whole answer in one burst (measured:
                 # direct API first text 0.58 s, via OpenClaw 2.9-3.3 s, all deltas in
                 # one ms). For provider `anthropic-voice` + claude-haiku-5-5 ONLY, the
-                # buffer becomes a pass-through (events forwarded live; flush/discard
-                # no-ops; still truthy so the "ended before message_stop" truncation
-                # check stays active). Refusal tradeoff accepted for voice: a refused
-                # reply may already be partly spoken. Every other model/provider,
-                # including anthropic/* used by Telegram, is untouched.
-                # Fail-safe: idempotent marker; if the target line is missing after an
-                # upgrade, or a patched file fails `node --check`, it logs WARN and the
-                # original file is kept/restored. Never fails the boot.
+                # buffer is replaced by a per-MESSAGE "narration gate" (v2, 2026-11-18,
+                # operator-approved): events before any text pass live; from the first
+                # text event on, events are held until the message either
+                #  - starts a tool call (toolcall_*): held TEXT events are DROPPED, the
+                #    message's text blocks are blanked in place (indices stay stable;
+                #    empty assistant text is skipped on history replay), held non-text
+                #    events are released and the tool call streams on; later text in
+                #    that message is dropped too -> pre-tool narration is never spoken
+                #    and never stored; or
+                #  - ends without a tool call (flush): everything is released in order
+                #    (= upstream's proven buffered path, one burst per message).
+                # Tradeoffs accepted for voice: no filler, each answer message arrives
+                # in one burst at its end; a refused reply is discarded as upstream.
+                # The object stays truthy, so the "ended before message_stop" check
+                # stays active. Every other model/provider, including anthropic/* used
+                # by Telegram, keeps the pristine upstream buffer.
+                # Fail-safe: idempotent marker; if the target line (or the `output`
+                # declaration it needs) is missing after an upgrade, or a patched file
+                # fails `node --check`, it logs WARN and the original file is
+                # kept/restored. Never fails the boot.
                 # Rollback: delete this block and set famVoiceModel.primary back to
                 # anthropic/claude-haiku-5-5 (the npm reinstall restores pristine files).
                 OC_AI_DIST=/home/node/.openclaw/lib/node_modules/openclaw/node_modules/@openclaw/ai/dist
@@ -568,11 +580,21 @@ spec:
                 const fs = require('fs'), path = require('path'), cp = require('child_process');
                 const dir = process.argv[2];
                 const NEEDLE = 'const refusalBuffer = usesClaudeStreamingRefusalContract(model) ? createDeferredEventBuffer(stream) : void 0;';
-                const MARK = '/*oc-voice-stream*/';
+                const MARK = '/*oc-voice-stream-v2*/';
+                const GATE = '((sink, out) => { let held = [], tool = false; ' +
+                  'const isText = (e) => String((e && e.type) || "").startsWith("text_"); ' +
+                  'const blank = () => { for (const b of (out && out.content) || []) if (b && b.type === "text") b.text = ""; }; ' +
+                  'return { push(e) { const t = String((e && e.type) || ""); ' +
+                  'if (tool) { if (!isText(e)) sink.push(e); return; } ' +
+                  'if (t.startsWith("toolcall_")) { tool = true; blank(); ' +
+                  'for (const x of held) if (!isText(x)) sink.push(x); held = []; sink.push(e); return; } ' +
+                  'if (held.length || isText(e)) { held.push(e); return; } sink.push(e); }, ' +
+                  'flush() { if (tool) blank(); for (const x of held) sink.push(x); held = []; }, ' +
+                  'discard() { held = []; } }; })(stream, output)';
                 const REPL = 'const refusalBuffer = usesClaudeStreamingRefusalContract(model) ? (' + MARK +
                   '(String(model.provider || "").toLowerCase() === "anthropic-voice" && ' +
                   '/(^|[-/])claude-haiku-5-5($|[^a-z0-9])/.test(String(model.id || ""))) ' +
-                  '? { push: (e) => stream.push(e), flush() {}, discard() {} } ' +
+                  '? ' + GATE + ' ' +
                   ': createDeferredEventBuffer(stream)) : void 0;';
                 let patched = 0, already = 0;
                 try {
@@ -582,6 +604,10 @@ spec:
                     const src = fs.readFileSync(p, 'utf8');
                     if (src.includes(MARK)) { already++; continue; }
                     if (!src.includes(NEEDLE)) continue;
+                    // the gate closes over `output`: require its declaration right before the target
+                    const at = src.indexOf(NEEDLE);
+                    if (!/const output = createAssistantOutput\(/.test(src.slice(Math.max(0, at - 400), at))) {
+                      console.log('WARN: voice-stream patch: no `output` in scope in ' + f + ', left unpatched'); continue; }
                     const out = src.split(NEEDLE).join(REPL);
                     fs.writeFileSync(p, out);
                     try { cp.execFileSync(process.execPath, ['--check', p], { stdio: 'pipe' }); patched++; }

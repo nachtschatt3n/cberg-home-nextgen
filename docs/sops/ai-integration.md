@@ -312,14 +312,21 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   `anthropic-voice/claude-haiku-5-5`, a provider alias on the same
   `api.anthropic.com` + `ANTHROPIC_API_KEY` env. Upstream `@openclaw/ai`
   buffers every Claude 5-family reply until `message_stop` (refusal
-  contract), so Assist got each answer in one burst. The init script's
-  idempotent `VOICE-STREAM PATCH` turns that buffer into a pass-through ONLY
-  for provider `anthropic-voice` + `claude-haiku-5-5` (both transport files;
-  logs `voice-stream patch: N file(s) patched` on boot, or a WARN and boots
-  unpatched if upstream changed). Every `anthropic/*` ref, incl. Telegram's
-  Sonnet primary and Haiku fallback rung, stays buffered. Accepted tradeoffs
-  for voice: a refused reply may be partly spoken; the alias gets no
-  implicit Anthropic beta headers and no server-side tool clearing.
+  contract). The init script's idempotent `VOICE-STREAM PATCH` (v2, marker
+  `oc-voice-stream-v2`) replaces that buffer ONLY for provider
+  `anthropic-voice` + `claude-haiku-5-5` with a per-message "narration gate":
+  text in a model message is held until the message either starts a tool
+  call (held text is dropped and blanked in the stored message, so Haiku's
+  pre-tool narration is never spoken or kept) or ends (released in one
+  burst). Both transport files; boot log (init container
+  `install-openclaw`): `voice-stream patch: N file(s) patched`, or a WARN and
+  an unpatched boot if upstream changed. Every `anthropic/*` ref, incl.
+  Telegram's Sonnet primary and Haiku fallback rung, keeps the upstream
+  buffer. Accepted tradeoffs for voice: no spoken filler, each answer
+  message arrives in one burst at its end, the alias gets no implicit
+  Anthropic beta headers and no server-side tool clearing. VOICE MODE v5.1
+  lives in the PVC AGENTS.md files (PVC-owned; the `workspace-agents*.md`
+  configmap keys are first-boot copies of the same block).
   Rollback: remove the patch block and set `famVoiceModel.primary` back to
   `anthropic/claude-haiku-5-5` (one pod roll; npm reinstall restores the
   pristine files).
