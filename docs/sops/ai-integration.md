@@ -337,19 +337,25 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   those two messages too (1/2/3 s back-off). Boot log (init container
   `install-openclaw`): `startup-retry patch: 1 file(s) patched`.
   Rollback: delete the block (one pod roll).
-  **voice-handoff (2026-11-18):** VOICE MODE v5.4 tells `voice-mathias` /
-  `voice-andrea` to hand long requests (calendar writes, mail or booking
-  work, more than about two lookups) to the `voice-handoff` skill (skills
-  configmap) and answer at once "I'll take care of it". A detached worker
-  runs `openclaw agent --agent main|juno-andrea --session-key
-  agent:<id>:explicit:voice-handoff --deliver --reply-channel telegram
-  --reply-to $TELEGRAM_ID_<PERSON>`, turns the reply into 1-3 spoken
-  sentences (Haiku, no thinking) and POSTs `{"person","message"}` to
+  **voice-handoff v2 (2026-11-18):** VOICE MODE v5.4.2 (first bullet) tells
+  `voice-mathias` / `voice-andrea` to hand long requests (mail, bookings,
+  travel, calendar changes, more than about two lookups) off instead of
+  doing them: `voice-handoff start` records a one-time id (3 h) and prints
+  the person's Telegram DM session key (`agent:main|juno-andrea:telegram:
+  direct:<id>`) plus a ready-made message; the twin sends it with its
+  `sessions_send` tool (`timeoutSeconds: 0`) and answers at once "...and get
+  back to you on Telegram". The full agent does the task in that Telegram
+  conversation, delivers the result with its `message` tool, then runs
+  `voice-handoff report --id <id>`, which POSTs `{"person","message"}` to
   `$HASS_URL/api/webhook/$HA_VOICE_WEBHOOK_ID` (key in `openclaw-secret`,
-  SOPS). Home Assistant decides whether to speak (person home and alone in
-  the room, 07:00-22:30). Household never hands off. State/log per run:
-  `~/clawd/state/voice-handoff/`; `voice-handoff --status` lists the last
-  runs. HA's custom_conversation `max_tokens` must be well above 300: it is a
+  SOPS) only for a valid unused id, so normal Telegram chats can never
+  trigger a spoken report. Home Assistant decides whether to speak (person
+  home and alone in the room, 07:00-22:30). The twins may `sessions_send`
+  only to their person's agent (`tools.agentToAgent.send`). Household never
+  hands off. Why not `openclaw agent` from the script: OpenClaw refuses
+  gateway `agent`/send RPCs from an agent's exec (`OPENCLAW_SHELL=exec`,
+  "would lose inter-session attribution"); never strip that marker.
+  State: `~/clawd/state/voice-handoff/<id>.json`; `voice-handoff status`. HA's custom_conversation `max_tokens` must be well above 300: it is a
   per-model-call cap, and 300 truncates tool calls ("Provider completed
   stream with an incomplete tool call").
   **Post-restart check (always):** `openclaw/household` answers HTTP 200, the

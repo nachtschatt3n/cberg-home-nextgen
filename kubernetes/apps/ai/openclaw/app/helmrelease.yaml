@@ -1347,12 +1347,17 @@ spec:
                       workspace: '/home/node/clawd',
                       agentDir: '/home/node/.openclaw/agents/voice-mathias/agent',
                       model: famVoiceModel, thinkingDefault: 'off',
+                      // voice-handoff (2026-11-18): the twin may sessions_send ONLY to its
+                      // person's full agent (default visibility "all" + agentToAgent on would
+                      // otherwise let it reach every agent). Deny lists are unioned in below.
+                      tools: { agentToAgent: { send: ['main'] } },
                       subagents: { allowAgents: ['vita-mathias', 'jerry-mathias', 'vita-margaret', 'vita-cora'],
                                    requireAgentId: true } },
                     { id: 'voice-andrea', name: 'Juno Voice (Andrea)', identity: { name: 'Juno' },
                       workspace: '/home/node/clawd-juno-andrea',
                       agentDir: '/home/node/.openclaw/agents/voice-andrea/agent',
                       model: famVoiceModel, thinkingDefault: 'off',
+                      tools: { agentToAgent: { send: ['juno-andrea'] } },
                       subagents: { allowAgents: ['vita-andrea', 'jerry-andrea', 'vita-margaret', 'vita-cora'],
                                    requireAgentId: true } },
                     { id: 'household', name: 'Haushalt', identity: { name: 'Haushalt' },
