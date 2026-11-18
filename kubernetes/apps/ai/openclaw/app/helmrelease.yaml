@@ -1868,6 +1868,12 @@ spec:
                   // substitution. Companion skill: skill-splitfairy.md in
                   // openclaw-skills.
                   cfg.mcp = cfg.mcp || {};
+                  // Session MCP runtimes are per SESSION and never evicted by default
+                  // (sessionIdleTtlMs unset = 0 = keep until gateway shutdown). HA voice
+                  // opens a new session per request, so household leaked one family-mcp
+                  // set (~430 MB RSS) per spoken turn until the 8Gi OOMKill (2026-11-18).
+                  // Evict after 5 min idle; active leases are never evicted.
+                  cfg.mcp.sessionIdleTtlMs = 300000;
                   cfg.mcp.servers = cfg.mcp.servers || {};
                   cfg.mcp.servers.splitfairy = {
                     ...(cfg.mcp.servers.splitfairy || {}),
