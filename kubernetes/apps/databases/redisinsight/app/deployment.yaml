@@ -33,7 +33,7 @@ spec:
           mountPath: /data
       containers:
       - name: redisinsight
-        image: redis/redisinsight:3.8.0
+        image: redis/redisinsight:3.10.1
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5540
