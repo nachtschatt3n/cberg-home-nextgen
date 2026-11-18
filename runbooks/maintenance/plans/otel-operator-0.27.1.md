@@ -61,7 +61,7 @@ finding_refs: [F-e918a007]             # RE-VERIFIED 2026-11-16 07:00Z (`policy-
                                        # NOT referenced, on purpose: F-51ed9a3a (AR-124, collector-k8s 0.162.0 CVEs: the image does
                                        # not move), F-76387378 (edot ES drops, a baseline in 4.4), and the RESOLVED F-60ebcdb5
                                        # (0.26.1 -> 0.27.0, already deployed rev 73), F-c01269d5, F-97c88a5c, F-61e4d5b6.
-status: vetted
+status: draft   # 2026-11-18 sweep fa131284: demoted -- was vetted with no recorded review; plan-review needs-fix: PR #513 retargeted to 0.27.2 (b4a62281), re-issue as otel-operator-0.27.2
 superseded_by: null
 window: null
 sops_refs:

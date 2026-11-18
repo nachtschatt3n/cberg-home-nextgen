@@ -58,7 +58,8 @@ rollback_class: git-revert            # no forward-only step: 0 files under serv
                                       # v1.18.0..v1.19.0 (full git diff, §1); §4.2 FAILS if the migration
                                       # count moves, and the §3.2 tarball covers that case (§5.2).
 review: null
-status: draft
+status: superseded   # 2026-11-18 sweep fa131284: 1.19.0 landed via PR #446; next target planned as anythingllm-1.20
+superseded_by: anythingllm-1.20
 window: null
 premises:
   # All five run green 2026-10-27 while writing (plan-premises.py anythingllm-1.19 --require-premises).

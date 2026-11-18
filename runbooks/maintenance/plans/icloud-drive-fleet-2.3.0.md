@@ -127,7 +127,8 @@ sops_refs:
   - docs/sops/longhorn-rwo-multi-attach.md
   - docs/sops/verification-contents-not-shape.md
 review: null
-status: draft
+status: superseded   # 2026-11-18 sweep fa131284 plan-review: already applied by Step 0 via PR #445 / 741125667 on 2026-10-27 (live imageID = target digest); finding_refs all resolved
+superseded_by: null
 window: null                            # recommend: the first nightly AFTER the operator's andrea re-auth (premise
                                         # andrea-not-auth-blocked) and not the night kps #428 or probe PR #354 lands. See §6.
 generated: "2026-10-27"

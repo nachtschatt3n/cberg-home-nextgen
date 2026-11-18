@@ -185,8 +185,8 @@ premises:
       outside CI bursts. Re-checked by hand right before the A2 push (§2.8).
     run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=max(increase(etcd_server_leader_changes_seen_total%5B1h%5D))'
     expect_matches: '"result":\[\{"metric":\{\},"value":\[[0-9.]+,"0"\]\}\]'
-review: null   # NEEDS RE-REVIEW after the 2026-11-16 re-rule (detached set 4 -> 2 with a new member andrea-session, subset-match premises, new etcd-quiet hard gate §2.8 + 2 premises, 2.0 check rewritten because v1.12.2 GA now sorts first, baselines 79/75/4 -> 76/74/2, pr 274). History: ready-for-go@2026-11-06 (sweep 471de4f9 needs-fix -> fixed -> delta re-review)
-status: vetted   # kept as is on 2026-11-16 (operator instruction); HUMAN-GATED: operator GO + 2 detached-volume rulings (§2.2a) + 1.12.2 hold/retarget decision (PR #509 is open and AUTO-eligible) required. Not executable until review is ready-for-go again
+review: ready-for-go@2026-11-18   # sweep fa131284: full review needs-fix (A3 read a Helm-deleted Job) -> fixed (FailedUpgradePreCheck event read) -> delta re-review ready-for-go. History: ready-for-go@2026-11-06, re-rule 2026-11-16
+status: vetted   # kept as is on 2026-11-16 (operator instruction); HUMAN-GATED: operator GO + 2 detached-volume rulings (§2.2a) required (1.12.2 PR #509 is already held by auto-update's release-notes breaking-change gate, 2026-11-18 dry-run; it is superseded by 1.13.0). Review ready-for-go@2026-11-18
 window: "sun-attended:2026-11-22"   # OPERATOR DECISION 2026-11-16: missed sun-attended:2026-11-15 (window agent deferred on the failed detached-set premise). Exclusive Sunday, 100 of 180. talos-linux-1.14.5 still holds this date and MUST be set to window: null (it is superseded by talos-linux-1.14.6, which depends_on this plan and cannot run first anyway)
 sops_refs:
   - docs/sops/application-update.md
@@ -195,7 +195,7 @@ sops_refs:
   - docs/sops/backup.md
   - docs/sops/flux-dependency-revision-gate.md
   - docs/sops/verification-contents-not-shape.md
-generated: "2026-10-01"
+generated: "2026-11-18"   # re-dated at the 2026-11-18 review (was 2026-10-01)
 ---
 
 # Longhorn 1.12.1 -> 1.13.0 (chart + manager, then live engine drain)
@@ -578,7 +578,12 @@ convergence (§4.1).
 
 If the HelmRelease reports a failed upgrade with `pre-upgrade hooks failed`:
 the upgrade did NOT happen (pre-upgrade checker refused it) -> read
-`kubectl -n storage logs job/longhorn-pre-upgrade` and go to §5 case 1. If it
+`kubectl -n storage get events --field-selector reason=FailedUpgradePreCheck`
+plus `kubectl -n storage get hr longhorn -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'`
+(the pre-upgrade Job carries `helm.sh/hook-delete-policy: hook-succeeded,before-hook-creation,hook-failed`,
+so Helm DELETES it on failure and `logs job/longhorn-pre-upgrade` returns NotFound -- review 2026-11-18;
+read the event within ~1h, events expire),
+confirm §4.2 `current-longhorn-version` still reads v1.12.1, and go to §5 case 1. If it
 failed on `timeout` while §4.2 shows all new pods Ready, the upgrade applied
 and only Helm's wait expired: operator-present, run
 `flux reconcile hr longhorn -n storage --force` once to re-record it.
