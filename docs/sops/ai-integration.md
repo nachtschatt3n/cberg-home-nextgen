@@ -358,6 +358,26 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   State: `~/clawd/state/voice-handoff/<id>.json`; `voice-handoff status`. HA's custom_conversation `max_tokens` must be well above 300: it is a
   per-model-call cap, and 300 truncates tool calls ("Provider completed
   stream with an incomplete tool call").
+  **familyha (2026-11-18):** household controls the house through a fourth
+  family-mcp server, `familyha` (tools `familyha__list_entities`, `get_state`,
+  `control`, `list_items`, `camera_snapshot`, `calendar_events`). It REUSES
+  OpenClaw's existing HA token (`HASS_TOKEN`, an owner/admin user; captured
+  inside family-mcp before its env scrub, never returned), so all protection
+  is enforced in code (`FamilyHA` in family-mcp.py): an HTTP method+path
+  allow-list, a (domain, service) allow-list with per-field validators, and
+  entity lists. Allowed: lights, blinds (device_class blind/shade/shutter/
+  curtain; open/close/stop only, so HA's window-safety automations apply),
+  media players + Music Assistant play_media, the two shared shopping lists,
+  timers, 7 room thermostats (5-28 C), scenes, household calendars (read),
+  cameras (read + snapshot to the agent only + show on a display via the
+  three `esphome.*_home_show_camera` actions), and automation trigger/turn_on/
+  turn_off except a pattern deny list (safety, water/valve/leak/irrigation,
+  vacation/away/alarm/alert, heater/pellet/dust fan, watchdogs/guards, voice,
+  ...; trigger always keeps the automation's conditions). Denied: locks,
+  alarm, garage/gate/door covers, camera control, valves, sirens, switches,
+  scripts, homeassistant/config/restart and everything not listed; the kids'
+  room cameras are hidden. Household has no messaging tool, so snapshots
+  cannot leave the conversation.
   **Post-restart check (always):** `openclaw/household` answers HTTP 200, the
   gateway log `/tmp/openclaw/openclaw-<date>.log` has no "agent database
   remains degraded" and no `AgentDatabaseAdmissionError`, and both

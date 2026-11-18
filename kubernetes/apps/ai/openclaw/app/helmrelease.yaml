@@ -1867,6 +1867,10 @@ spec:
                     familycal: ['list_events', 'get_event', 'create_event', 'update_event', 'delete_event'],
                     meals: ['get_meal_plan', 'search_recipes', 'get_recipe', 'add_meal_plan_entry'],
                     familykb: ['list_pages', 'read_page', 'search'],
+                    // familyha (2026-11-18): Home Assistant house control for household,
+                    // reusing the existing HA token (owner/admin) behind allow-lists that are
+                    // enforced inside family-mcp (FamilyHA), not in the prompt.
+                    familyha: ['list_entities', 'get_state', 'control', 'list_items', 'camera_snapshot', 'calendar_events'],
                   };
                   const famMcpTools = [];
                   Object.keys(famMcp).forEach((g) => {
