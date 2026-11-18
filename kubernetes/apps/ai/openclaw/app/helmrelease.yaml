@@ -1874,8 +1874,13 @@ spec:
                   };
                   const famMcpTools = [];
                   Object.keys(famMcp).forEach((g) => {
+                    // familyha reuses the existing HA credential: the gateway starts MCP servers
+                    // with ONLY the env listed here, so pass HASS_URL/HASS_TOKEN as `$${VAR}`
+                    // references (expanded by OpenClaw at load, like splitfairy's token; the value
+                    // never lands in git or openclaw.json). Only familyha gets them.
                     cfg.mcp.servers[g] = { command: '/home/node/.openclaw/bin/family-mcp', args: [g],
-                      env: { FAMILY_MCP_SECRETS: '/etc/openclaw-household' } };
+                      env: Object.assign({ FAMILY_MCP_SECRETS: '/etc/openclaw-household' },
+                        g === 'familyha' ? { HASS_URL: '$${HASS_URL}', HASS_TOKEN: '$${HASS_TOKEN}' } : {}) };
                     famMcpTools.push(g + '__*');
                     famMcp[g].forEach((t) => famMcpTools.push(g + '__' + t));
                   });
