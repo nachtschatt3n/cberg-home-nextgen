@@ -30,7 +30,7 @@ spec:
           init-config:
             image:
               repository: public.ecr.aws/docker/library/eclipse-mosquitto
-              tag: 2.0.22
+              tag: 2.0.23
             command: ["/bin/sh", "-c"]
             args:
               - |
@@ -41,7 +41,7 @@ spec:
           app:
             image:
               repository: public.ecr.aws/docker/library/eclipse-mosquitto
-              tag: 2.0.22
+              tag: 2.0.23
             # Replace the default TCP probes with `exec` probes using
             # `mosquitto_sub`. The default tcp-socket :1883 probe opens a TCP
             # connection without sending CONNECT, which mosquitto logs as
