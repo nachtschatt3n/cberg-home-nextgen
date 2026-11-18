@@ -51,7 +51,7 @@ capability_change: false              # same app, same env, same ports/routes. U
 rollback_class: git-revert            # stateless container: no schema, no PVC write by the skill (it mounts only
                                       # /cache emptyDir + /data of the MA server). Old digest stays pullable.
 review: ready-for-go@2026-11-15      # plan-reviewer 2nd pass 2026-11-15: ready-for-go, 0 blocking (1st pass needs-fix: stale MA server digest + conflicts_with, both fixed + verified live). Attended window preferred (voice test 4.6).
-status: vetted
+status: awaiting-go
 window: null
 premises:
   - id: live-skill-digest-is-old

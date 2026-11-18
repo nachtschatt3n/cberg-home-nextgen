@@ -100,7 +100,7 @@ premises:
     run: kubectl get storageclass cifs-plex-media -o jsonpath='{.reclaimPolicy}'
     expect_exact: Retain
 review: ready-for-go@2026-11-16      # plan-reviewer 2nd pass 2026-11-16: ready-for-go, 0 blocking (1st pass needs-fix: dead kps ref + placeholder FILES line; both fixed, path lists diffed identical, BSD sed dry-run on all 15). Advisory: 3.1 count guard only prints; make it an if-gate.
-status: vetted
+status: awaiting-go
 window: null                          # suggestion only (window agent assigns): sat-attended:2026-11-21 or sat-attended:2026-12-05 (prefer 12-05 if etcd still flaps), alone in the slot, see §1.6
 sops_refs:
   - docs/sops/application-update.md

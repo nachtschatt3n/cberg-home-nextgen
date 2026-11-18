@@ -79,7 +79,7 @@ finding_refs: [F-54e86f6d]            # version: "immich-server: image ghcr.io/i
                                       # plan supersedes its target with v3.4.1. Queried 2026-11-13 (`policy-cli.py finding list --grep
                                       # immich`). F-f7fa90d3 (immich-machine-learning) belongs to the sibling plan, not here.
 review: ready-for-go@2026-11-16
-status: vetted
+status: awaiting-go
 window: null
 premises:
   - id: server-image-is-v3.3.6

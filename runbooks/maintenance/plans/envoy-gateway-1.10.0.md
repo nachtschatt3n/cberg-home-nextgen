@@ -83,7 +83,7 @@ finding_refs:
                                       # (F-10b4fee2, data-plane 1.40.2 row, is already RESOLVED. F-88de0e3b was the OLDER 1.9.0 -> 1.9.2 doc row,
                                       # resolved 2026-11-14 in 3fbded01; it exists but is not this change's finding, so it is not referenced.)
 review: ready-for-go@2026-11-15      # plan-reviewer 2nd pass 2026-11-15: ready-for-go, 0 blocking (1st pass needs-fix, all 3 blockers fixed + verified live)
-status: vetted
+status: awaiting-go
 window: null
 sops_refs:
   - docs/sops/application-update.md

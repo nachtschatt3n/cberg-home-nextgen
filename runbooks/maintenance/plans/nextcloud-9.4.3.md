@@ -68,7 +68,7 @@ rollback_class: backup-restore        # entrypoint refuses an older image on new
                                       # No backup_gate named => HUMAN-GATED, which is what the deny rule asks for
 finding_refs: [F-45b00114, F-e39c0b2c, F-4a9d6631]   # version findings: chart (re-queried 2026-11-16: now titled 9.4.1 -> 9.4.4, status unchanged), nextcloud image, notify-push image
 review: ready-for-go@2026-11-16
-status: vetted
+status: awaiting-go
 window: null                          # requested: sun-attended, or an operator-triggered NOW run. Not nightly, not sat-attended (duration)
 sops_refs:
   - docs/sops/application-update.md
