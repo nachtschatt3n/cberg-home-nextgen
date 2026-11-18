@@ -312,8 +312,8 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   `anthropic-voice/claude-haiku-5-5`, a provider alias on the same
   `api.anthropic.com` + `ANTHROPIC_API_KEY` env. Upstream `@openclaw/ai`
   buffers every Claude 5-family reply until `message_stop` (refusal
-  contract). The init script's idempotent `VOICE-STREAM PATCH` (v2, marker
-  `oc-voice-stream-v2`) replaces that buffer ONLY for provider
+  contract). The init script's idempotent `VOICE-STREAM PATCH` (v3 since 2026-11-18, marker
+  `oc-voice-stream-v3`) replaces that buffer ONLY for provider
   `anthropic-voice` + `claude-haiku-5-5` with a per-message "narration gate":
   text in a model message is held until the message either starts a tool
   call (held text is dropped and blanked in the stored message, so Haiku's
@@ -327,6 +327,28 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   Anthropic beta headers and no server-side tool clearing. VOICE MODE v5.2
   lives in the PVC AGENTS.md files (PVC-owned; the `workspace-agents*.md`
   configmap keys are first-boot copies of the same block).
+  **Narration scrub (gate v3, marker `oc-voice-stream-v3`, 2026-11-18):** the
+  gate only drops PRE-TOOL text; a final message can still open with meta
+  narration (household: "The NPR stream is playing ..., and the user asked
+  for "another one", which I read as another joke. I'll give a joke instead
+  ...\n\nHere's another one: ..."). On flush (no tool call) v3 drops LEADING
+  sentences that talk about "the user"/"der Nutzer", "voice mode", "I read
+  that as", "I'll answer in ..." plus an "I'll ..." plan sentence right after
+  one; at least one sentence is always kept and mid-answer text is never
+  touched. `output.content` and the held `text_delta`/`text_end` are
+  rewritten together. Same model scope as v2 (all three HA voice agents,
+  never Telegram). VOICE MODE v5.5 adds the matching prompt rules (no
+  third-person narration; device/media state only if read this turn, and a
+  media player is "playing" only when its state is `playing`; no sensor
+  timestamps unless asked). Household also gets "chat follow-ups need no
+  tools".
+  **Grill (2026-11-18):** `ha grill` (ha.py) returns one interpreted summary:
+  Otto Wilde G32 -> BLE -> ESPHome ESP32 display bridge (`g32_display_bt_*`)
+  -> Wi-Fi -> HA; `yard_otto_wilde_bbq_*` is only the Shelly plug; gas left =
+  NET (`sensor.gas_bottle_gas_remaining` / `_fill`), the GasBuddy value on the
+  grill is GROSS (minus `input_number.gas_bottle_tare`); probe 1500 =
+  unplugged. `ha find grill|bbq|esp32|gas...` matches the G32/gas entities and
+  hints at `ha grill`. Juno's AGENTS.md routing bullet carries the same map.
   **Startup-retry patch (2026-11-18):** at gateway start the first agent to
   publish its model runtime while a plugin/config publication lands can fail
   with "prepared model runtime publication was superseded" / "owner is stale
@@ -381,7 +403,7 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   **Post-restart check (always):** `openclaw/household` answers HTTP 200, the
   gateway log `/tmp/openclaw/openclaw-<date>.log` has no "agent database
   remains degraded" and no `AgentDatabaseAdmissionError`, and both
-  `oc-voice-stream-v2` and `oc-startup-retry` markers are present.
+  `oc-voice-stream-v3` and `oc-startup-retry` markers are present.
   Rollback: remove the patch block and set `famVoiceModel.primary` back to
   `anthropic/claude-haiku-5-5` (one pod roll; npm reinstall restores the
   pristine files).

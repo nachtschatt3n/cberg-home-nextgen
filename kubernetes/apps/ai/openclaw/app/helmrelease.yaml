@@ -564,6 +564,17 @@ spec:
                 #    and never stored; or
                 #  - ends without a tool call (flush): everything is released in order
                 #    (= upstream's proven buffered path, one burst per message).
+                #    v3 (2026-11-18, operator-approved): before release, LEADING
+                #    meta-narration sentences of the final answer are dropped
+                #    (third person about "the user"/"der Nutzer", "voice mode",
+                #    "I read that as", "I'll answer in ..." plus an "I'll ..." plan
+                #    sentence right after one). Seen on household: "The NPR stream
+                #    is playing ..., and the user asked for "another one", which I
+                #    read as another joke. I'll give a joke instead ...\n\nHere's
+                #    another one: ..." -> only "Here's another one: ..." is spoken.
+                #    Only leading sentences, at least one sentence always kept;
+                #    output.content and the held text_delta/text_end are rewritten
+                #    together so stream, transcript and history agree.
                 # Tradeoffs accepted for voice: no filler, each answer message arrives
                 # in one burst at its end; a refused reply is discarded as upstream.
                 # The object stays truthy, so the "ended before message_stop" check
@@ -580,16 +591,42 @@ spec:
                 const fs = require('fs'), path = require('path'), cp = require('child_process');
                 const dir = process.argv[2];
                 const NEEDLE = 'const refusalBuffer = usesClaudeStreamingRefusalContract(model) ? createDeferredEventBuffer(stream) : void 0;';
-                const MARK = '/*oc-voice-stream-v2*/';
-                const GATE = '((sink, out) => { let held = [], tool = false; ' +
+                const MARK = '/*oc-voice-stream-v3*/';
+                // v3 narration scrub: a real function, embedded via toString() (no escaping).
+                function ocScrubNarration(s) {
+                  if (typeof s !== 'string' || !s) return s;
+                  const META = /\b(the user\b(?! (manual|guide|interface|account|name|profile))|user (asked|wants|said|is asking|meant)|der (nutzer|benutzer)\b|die (nutzerin|benutzerin)\b|voice[- ]mode|i (read|took|interpret(ed)?) (this|that|it) as|which i (read|took|interpret(ed)?) as|i('ll| will) (answer|reply|respond) in)/i;
+                  const PLAN = /^(so )?(i('ll| will| am going to|'m going to)|ich (werde|antworte|gebe))\b/i;
+                  const parts = s.match(/[^.!?\n]+(?:[.!?]+["'\u201d\u201c)]*|\n+|$)\s*/g);
+                  if (!parts) return s;
+                  let i = 0, dropped = false;
+                  while (i < parts.length - 1) {
+                    const p = parts[i].trim();
+                    if (!p) { i++; continue; }
+                    if (META.test(p) || (dropped && PLAN.test(p))) { dropped = true; i++; continue; }
+                    break;
+                  }
+                  if (!dropped) return s;
+                  const rest = parts.slice(i).join('').replace(/^\s+/, '');
+                  return rest.trim() ? rest : s;
+                }
+                const GATE = '((sink, out) => { const scrubText = ' + ocScrubNarration.toString() + '; ' +
+                  'let held = [], tool = false; ' +
                   'const isText = (e) => String((e && e.type) || "").startsWith("text_"); ' +
                   'const blank = () => { for (const b of (out && out.content) || []) if (b && b.type === "text") b.text = ""; }; ' +
+                  'const scrub = () => { const ch = new Map(); ((out && out.content) || []).forEach((b, i) => { ' +
+                  'if (b && b.type === "text" && typeof b.text === "string") { const n = scrubText(b.text); ' +
+                  'if (n !== b.text) { b.text = n; ch.set(i, n); } } }); if (!ch.size) return; const done = new Set(); ' +
+                  'held = held.filter((e) => { if (!e || !ch.has(e.contentIndex)) return true; const t = String(e.type || ""); ' +
+                  'if (t === "text_delta") { if (done.has(e.contentIndex)) return false; done.add(e.contentIndex); ' +
+                  'e.delta = ch.get(e.contentIndex); return true; } if (t === "text_end") e.content = ch.get(e.contentIndex); ' +
+                  'return true; }); }; ' +
                   'return { push(e) { const t = String((e && e.type) || ""); ' +
                   'if (tool) { if (!isText(e)) sink.push(e); return; } ' +
                   'if (t.startsWith("toolcall_")) { tool = true; blank(); ' +
                   'for (const x of held) if (!isText(x)) sink.push(x); held = []; sink.push(e); return; } ' +
                   'if (held.length || isText(e)) { held.push(e); return; } sink.push(e); }, ' +
-                  'flush() { if (tool) blank(); for (const x of held) sink.push(x); held = []; }, ' +
+                  'flush() { if (tool) blank(); else { try { scrub(); } catch (_) {} } for (const x of held) sink.push(x); held = []; }, ' +
                   'discard() { held = []; } }; })(stream, output)';
                 const REPL = 'const refusalBuffer = usesClaudeStreamingRefusalContract(model) ? (' + MARK +
                   '(String(model.provider || "").toLowerCase() === "anthropic-voice" && ' +
@@ -601,8 +638,11 @@ spec:
                   const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')) : [];
                   for (const f of files) {
                     const p = path.join(dir, f);
-                    const src = fs.readFileSync(p, 'utf8');
-                    if (src.includes(MARK)) { already++; continue; }
+                    const orig = fs.readFileSync(p, 'utf8');
+                    if (orig.includes(MARK)) { already++; continue; }
+                    // npm normally restores pristine files each boot; if a v2-patched line
+                    // survived, revert it to the upstream line first so v3 can apply.
+                    const src = orig.replace(/const refusalBuffer = usesClaudeStreamingRefusalContract\(model\) \? \(\/\*oc-voice-stream-v2\*\/[^\n]*?: createDeferredEventBuffer\(stream\)\) : void 0;/g, NEEDLE);
                     if (!src.includes(NEEDLE)) continue;
                     // the gate closes over `output`: require its declaration right before the target
                     const at = src.indexOf(NEEDLE);
@@ -611,7 +651,7 @@ spec:
                     const out = src.split(NEEDLE).join(REPL);
                     fs.writeFileSync(p, out);
                     try { cp.execFileSync(process.execPath, ['--check', p], { stdio: 'pipe' }); patched++; }
-                    catch (e) { fs.writeFileSync(p, src); console.log('WARN: voice-stream patch broke ' + f + ', restored original'); }
+                    catch (e) { fs.writeFileSync(p, orig); console.log('WARN: voice-stream patch broke ' + f + ', restored original'); }
                   }
                 } catch (e) { console.log('WARN: voice-stream patch failed: ' + e.message); }
                 if (patched + already === 0) console.log('WARN: voice-stream patch target not found in ' + dir + ' (upstream changed?) - Haiku voice stays buffered');
