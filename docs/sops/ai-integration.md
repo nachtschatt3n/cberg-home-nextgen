@@ -324,9 +324,23 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   Telegram's Sonnet primary and Haiku fallback rung, keeps the upstream
   buffer. Accepted tradeoffs for voice: no spoken filler, each answer
   message arrives in one burst at its end, the alias gets no implicit
-  Anthropic beta headers and no server-side tool clearing. VOICE MODE v5.1
+  Anthropic beta headers and no server-side tool clearing. VOICE MODE v5.2
   lives in the PVC AGENTS.md files (PVC-owned; the `workspace-agents*.md`
   configmap keys are first-boot copies of the same block).
+  **Startup-retry patch (2026-11-18):** at gateway start the first agent to
+  publish its model runtime while a plugin/config publication lands can fail
+  with "prepared model runtime publication was superseded" / "owner is stale
+  after config publication"; upstream retries only its own
+  `AgentDatabaseStartupSupersededError`, so that agent stayed "agent database
+  remains degraded" (household -> every HA household request HTTP 500). The
+  init script's `STARTUP-RETRY PATCH` (marker `oc-startup-retry`) retries
+  those two messages too (1/2/3 s back-off). Boot log (init container
+  `install-openclaw`): `startup-retry patch: 1 file(s) patched`.
+  Rollback: delete the block (one pod roll).
+  **Post-restart check (always):** `openclaw/household` answers HTTP 200, the
+  gateway log `/tmp/openclaw/openclaw-<date>.log` has no "agent database
+  remains degraded" and no `AgentDatabaseAdmissionError`, and both
+  `oc-voice-stream-v2` and `oc-startup-retry` markers are present.
   Rollback: remove the patch block and set `famVoiceModel.primary` back to
   `anthropic/claude-haiku-5-5` (one pod roll; npm reinstall restores the
   pristine files).

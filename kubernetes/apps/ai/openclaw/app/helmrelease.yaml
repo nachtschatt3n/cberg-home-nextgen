@@ -618,6 +618,47 @@ spec:
                 else console.log('voice-stream patch: ' + patched + ' file(s) patched, ' + already + ' already patched');
                 VOICESTREAM
 
+                # STARTUP-RETRY PATCH (2026-11-18, operator-approved). At gateway start each
+                # agent database is admitted in the background; the publication step
+                # retries (STARTUP_PUBLICATION_ATTEMPTS=4) ONLY on
+                # AgentDatabaseStartupSupersededError. When a plugin/config publication
+                # lands mid-startup, the model-runtime layer instead throws
+                # "prepared model runtime publication was superseded ..." or
+                # "prepared model runtime owner is stale after config publication"; the
+                # agent that publishes first (household: no skills, smallest workspace)
+                # is then left "agent database remains degraded" until the next restart
+                # (every HA household request -> HTTP 500; seen 2x on 2026-11-18). This
+                # makes the loop retry those two transient messages too, with a short
+                # 1/2/3 s back-off. Nothing else changes; the upstream retry log line
+                # ("startup preparation was superseded; retrying") still fires.
+                # Fail-safe like the voice-stream patch: idempotent marker; target
+                # missing -> WARN and boot unpatched; a file failing `node --check` is
+                # restored. Rollback: delete this block (npm reinstall restores files).
+                node - /home/node/.openclaw/lib/node_modules/openclaw/dist <<'STARTUPRETRY' || echo "WARN: startup-retry patch errored; booting unpatched"
+                const fs = require('fs'), path = require('path'), cp = require('child_process');
+                const dir = process.argv[2];
+                const NEEDLE = 'if (!(error instanceof AgentDatabaseStartupSupersededError) || attempt >= STARTUP_PUBLICATION_ATTEMPTS) throw error;';
+                const MARK = '/*oc-startup-retry*/';
+                const TRANSIENT = '/prepared model runtime (publication was superseded|owner is stale after config publication)/.test(String((error && error.message) || ""))';
+                const REPL = 'if (!(error instanceof AgentDatabaseStartupSupersededError || ' + MARK + TRANSIENT + ') || attempt >= STARTUP_PUBLICATION_ATTEMPTS) throw error; ' +
+                  'if (!(error instanceof AgentDatabaseStartupSupersededError)) await new Promise((r) => setTimeout(r, 1000 * attempt));';
+                let patched = 0, already = 0;
+                try {
+                  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /^agent-database-startup-.*\.mjs$/.test(f)) : [];
+                  for (const f of files) {
+                    const p = path.join(dir, f);
+                    const src = fs.readFileSync(p, 'utf8');
+                    if (src.includes(MARK)) { already++; continue; }
+                    if (!src.includes(NEEDLE)) continue;
+                    fs.writeFileSync(p, src.split(NEEDLE).join(REPL));
+                    try { cp.execFileSync(process.execPath, ['--check', p], { stdio: 'pipe' }); patched++; }
+                    catch (e) { fs.writeFileSync(p, src); console.log('WARN: startup-retry patch broke ' + f + ', restored original'); }
+                  }
+                } catch (e) { console.log('WARN: startup-retry patch failed: ' + e.message); }
+                if (patched + already === 0) console.log('WARN: startup-retry patch target not found in ' + dir + ' (upstream changed?) - startup admission unpatched');
+                else console.log('startup-retry patch: ' + patched + ' file(s) patched, ' + already + ' already patched');
+                STARTUPRETRY
+
                 export PIP_ROOT_USER_ACTION=ignore
                 install_pip obsidian-cli
                 # himalaya was installed for the early IMAP-direct mail
