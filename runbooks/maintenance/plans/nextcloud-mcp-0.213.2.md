@@ -59,7 +59,7 @@ capability_change: true               # vs LIVE 0.184.5: +25 tools registering h
 rollback_class: git-revert            # no PVC, no volumes, no DATABASE_URL/TOKEN_STORAGE_DB (premises). Executed as an inverse
                                       # tag edit (section 5). Caveat: anything a consumer writes through the new WRITE tools
                                       # stays in Nextcloud after a rollback (household data, not written by this plan).
-finding_refs: [F-80459b23, F-9af9baf7] # `finding list --grep nextcloud-mcp` 2026-11-18: F-80459b23 (security, critical) and
+finding_refs: [F-80459b23, F-9af9baf7] # `finding list --grep nextcloud-mcp` 2026-11-18: F-80459b23 (security_ref) and
                                       # F-9af9baf7 (version; title still reads "0.184.5 → 0.212.0", script-owned, will re-key)
                                       # plus F-f02df447 (AR-029 accepted residual, not owned by a plan).
 review: null
