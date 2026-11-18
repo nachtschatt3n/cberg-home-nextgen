@@ -1155,6 +1155,13 @@ spec:
                     allowAgents: ['vita-mathias', 'jerry-mathias', 'vita-margaret', 'vita-cora'],
                     requireAgentId: true,
                   };
+                  // HA voice profile: Haiku first; Sonnet covers a Haiku-only overload,
+                  // the local model a dead Anthropic key. Per-agent thinkingDefault 'off'
+                  // (precedence 3) is scoped to the voice agents ONLY; the shared
+                  // agents.defaults.models['anthropic/claude-haiku-5-5'] entry is left
+                  // alone so Telegram's Haiku fallback rung keeps the global 'low'.
+                  const famVoiceModel = { primary: 'anthropic/claude-haiku-5-5',
+                    fallbacks: ['anthropic/claude-sonnet-5-5', 'ollama/gemma4:26b-mlx'] };
                   const famManaged = [
                     { id: 'juno-andrea', name: 'Juno (Andrea)',
                       identity: { name: 'Juno' },
@@ -1190,9 +1197,32 @@ spec:
                     // multiple speakers (HA model `openclaw/household`). Locked down: no
                     // shell, no fs outside its workspace, no session reach -> cannot use
                     // the pod-wide personal credentials or read other agents' memory.
+                    // HA voice agents (2026-11-18): HTTP-only twins of the two Junos for
+                    // Home Assistant Assist (HA model `openclaw/voice-mathias` /
+                    // `openclaw/voice-andrea`). SAME workspace as the person's Juno, so
+                    // AGENTS.md (VOICE MODE), MEMORY.md, memory/ and skills are shared; own
+                    // agentDir/sessions. Haiku 5.5 with thinking OFF for Assist latency.
+                    // They have NO bindings, so Telegram/Discord still route to main /
+                    // juno-andrea on Sonnet, unchanged. Heartbeat is forced off below:
+                    // a twin on main's workspace would otherwise run main's stateful
+                    // HEARTBEAT.md a second time every hour.
+                    { id: 'voice-mathias', name: 'Juno Voice (Mathias)', identity: { name: 'Juno' },
+                      workspace: '/home/node/clawd',
+                      agentDir: '/home/node/.openclaw/agents/voice-mathias/agent',
+                      model: famVoiceModel, thinkingDefault: 'off',
+                      subagents: { allowAgents: ['vita-mathias', 'jerry-mathias', 'vita-margaret', 'vita-cora'],
+                                   requireAgentId: true } },
+                    { id: 'voice-andrea', name: 'Juno Voice (Andrea)', identity: { name: 'Juno' },
+                      workspace: '/home/node/clawd-juno-andrea',
+                      agentDir: '/home/node/.openclaw/agents/voice-andrea/agent',
+                      model: famVoiceModel, thinkingDefault: 'off',
+                      subagents: { allowAgents: ['vita-andrea', 'jerry-andrea', 'vita-margaret', 'vita-cora'],
+                                   requireAgentId: true } },
                     { id: 'household', name: 'Haushalt', identity: { name: 'Haushalt' },
                       workspace: '/home/node/clawd-household',
                       agentDir: '/home/node/.openclaw/agents/household/agent',
+                      // HA-voice only (no bindings): same Haiku/no-thinking profile.
+                      model: famVoiceModel, thinkingDefault: 'off',
                       skills: [],
                       tools: { allow: ['web_search', 'web_fetch', 'tool_search', 'tool_describe'],
                                deny: ['exec', 'process', 'read', 'write', 'edit', 'apply_patch', 'browser',
@@ -1213,12 +1243,28 @@ spec:
                       cur.identity = Object.assign({}, cur.identity, spec.identity);
                       if (spec.tools) cur.tools = spec.tools;
                       if (spec.subagents) cur.subagents = spec.subagents;
+                      if (spec.model) cur.model = spec.model;
+                      if (spec.thinkingDefault) cur.thinkingDefault = spec.thinkingDefault;
                     }
                   });
-                  // A per-agent heartbeat switches ALL other agents to explicit-only
-                  // heartbeats (2026-11-17 regression: every other heartbeat vanished).
-                  // Never set one for household; strip the one c16363504 wrote.
-                  if (famById['household']) delete famById['household'].heartbeat;
+                  // HEARTBEATS — explicit per-agent enrollment (2026-11-18).
+                  // resolveHeartbeatAgentIds (dist/heartbeat-config-*.js): as soon as ANY
+                  // agent has a `heartbeat` block, ONLY agents with a block run heartbeats
+                  // (the 2026-11-17 regression when only household had one). The voice
+                  // twins must NOT heartbeat (they share main's / juno-andrea's stateful
+                  // HEARTBEAT.md), so every agent now gets a block: `{}` merges onto
+                  // agents.defaults.heartbeat (identical 1h cadence as before), the twins
+                  // get every:'0m' (job declared disabled). Existing per-agent blocks are
+                  // kept, except household's stale one from c16363504 (reset to `{}`).
+                  // Simulated against 2026.11.1 before rollout: the 10 pre-existing agents
+                  // resolve to 3600000 ms exactly as before. Any agent added later
+                  // (`openclaw agents add`) gets a heartbeat only after the next boot.
+                  const famHbOff = new Set(['voice-mathias', 'voice-andrea']);
+                  cfg.agents.list.forEach((a) => {
+                    if (!a || !a.id) return;
+                    if (famHbOff.has(a.id)) a.heartbeat = { every: '0m' };
+                    else if (a.id === 'household' || !a.heartbeat) a.heartbeat = {};
+                  });
                   // Bindings: managed peers first, unmanaged preserved, fallback last.
                   const famBindings = [];
                   if (idMathias) famBindings.push({ agentId: 'main',
@@ -1650,14 +1696,15 @@ spec:
                     // and Juno (Andrea) = `juno-andrea`. Codex app-server
                     // projection honours codex.agents (all agents run on the
                     // codex harness); non-empty list required.
-                    codex: { agents: ['main', 'juno-andrea'] },
+                    codex: { agents: ['main', 'juno-andrea', 'voice-mathias', 'voice-andrea'] },
                   };
                   // Second guard for non-codex (embedded) runs: every OTHER
                   // agent in agents.list denies the splitfairy MCP tools
                   // (documented server glob `splitfairy__*` + explicit names).
                   // UNION with existing deny entries (e.g. sessions_spawn) —
                   // never removes anything; covers unmanaged agents (voice).
-                  const sfAllowed = new Set(['main', 'juno-andrea']);
+                  // voice-* are the HA twins of the two Junos: same tool reach.
+                  const sfAllowed = new Set(['main', 'juno-andrea', 'voice-mathias', 'voice-andrea']);
                   const sfDeny = ['splitfairy__*'].concat(
                     ['list_trips', 'get_trip', 'create_trip', 'update_trip',
                      'delete_trip', 'save_item', 'delete_item', 'add_expense',

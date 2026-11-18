@@ -293,7 +293,28 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   HTTPRoute parented to `envoy-external`. "No Ingress" is no longer a
   meaningful guard — zero Ingress objects and no controller exist, so the
   Gateway parent is the only thing that decides internal vs. internet.
-- **Voice agent:** a dedicated `voice` agent runs on
+- **HA voice agents (2026-11-18):** Assist uses `openclaw/voice-mathias`,
+  `openclaw/voice-andrea` and `openclaw/household`. The two `voice-*` agents
+  are HTTP-only twins of `main` / `juno-andrea`: **same workspace** (AGENTS.md
+  VOICE MODE, MEMORY.md, memory/, skills shared), own agentDir/sessions,
+  **no bindings**. All three run `anthropic/claude-haiku-5-5` with per-agent
+  `thinkingDefault: "off"` (fallbacks Sonnet 5.5, then local gemma), set by the
+  config-guard `famManaged` block. Telegram/Discord stay on `main` /
+  `juno-andrea` (Sonnet 5.5, global thinking `low`); the shared
+  `agents.defaults.models['anthropic/claude-haiku-5-5']` entry is deliberately
+  untouched so Telegram's Haiku fallback rung keeps thinking on.
+  Why not a per-request override: the gateway only takes a backend model via
+  the `x-openclaw-model` header (the `model` body field selects an agent), and
+  HA `custom_conversation` 1.7.0 cannot send custom headers;
+  `channels.modelByChannel` never matches the HTTP path (`webchat` is not a
+  deliverable channel).
+  **Heartbeats are explicitly enrolled per agent** because of these twins:
+  every agent gets `heartbeat: {}` (= defaults, 1h) and the twins get
+  `every: "0m"`. Otherwise a twin would run main's stateful `HEARTBEAT.md`
+  (hb-record watermark) a second time every hour. Since any per-agent block
+  switches OpenClaw to explicit-only enrollment, an agent added at runtime
+  only gets a heartbeat after the next boot.
+- **Voice agent (legacy):** a dedicated `voice` agent runs on
   `ollama-native/gemma4:26b-mlx` (moved off e2b-mlx 2026-10-19). It is runtime-managed
   (`openclaw agents add voice …`) and persists in the PVC — the config-guard
   intentionally does not manage it.
