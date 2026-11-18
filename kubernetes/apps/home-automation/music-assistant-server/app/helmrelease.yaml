@@ -57,7 +57,9 @@ spec:
                 cpu: 100m
                 memory: 128Mi
               limits:
-                memory: 1Gi
+                # 2026-11-18: OOMKilled twice at 1Gi (Sendspin to 3 Shows +
+                # Chromecast bridge + library browsing) — raised to 2Gi
+                memory: 2Gi
           # NOTE: former standalone alexa-api sidecar (:3000) removed 2026-07-12 —
           # upstream folded the API into the skill container (mounted at /ma).
           alexa-skill:
