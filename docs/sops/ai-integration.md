@@ -337,6 +337,21 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   those two messages too (1/2/3 s back-off). Boot log (init container
   `install-openclaw`): `startup-retry patch: 1 file(s) patched`.
   Rollback: delete the block (one pod roll).
+  **voice-handoff (2026-11-18):** VOICE MODE v5.4 tells `voice-mathias` /
+  `voice-andrea` to hand long requests (calendar writes, mail or booking
+  work, more than about two lookups) to the `voice-handoff` skill (skills
+  configmap) and answer at once "I'll take care of it". A detached worker
+  runs `openclaw agent --agent main|juno-andrea --session-key
+  agent:<id>:explicit:voice-handoff --deliver --reply-channel telegram
+  --reply-to $TELEGRAM_ID_<PERSON>`, turns the reply into 1-3 spoken
+  sentences (Haiku, no thinking) and POSTs `{"person","message"}` to
+  `$HASS_URL/api/webhook/$HA_VOICE_WEBHOOK_ID` (key in `openclaw-secret`,
+  SOPS). Home Assistant decides whether to speak (person home and alone in
+  the room, 07:00-22:30). Household never hands off. State/log per run:
+  `~/clawd/state/voice-handoff/`; `voice-handoff --status` lists the last
+  runs. HA's custom_conversation `max_tokens` must be well above 300: it is a
+  per-model-call cap, and 300 truncates tool calls ("Provider completed
+  stream with an incomplete tool call").
   **Post-restart check (always):** `openclaw/household` answers HTTP 200, the
   gateway log `/tmp/openclaw/openclaw-<date>.log` has no "agent database
   remains degraded" and no `AgentDatabaseAdmissionError`, and both
