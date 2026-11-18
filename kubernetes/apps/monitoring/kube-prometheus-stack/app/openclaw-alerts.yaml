@@ -57,3 +57,24 @@ spec:
         category: openclaw
         component: openclaw
         severity: warning
+  - interval: 30s
+    name: openclaw.memory
+    rules:
+    # The household agent leaked one family-mcp server set per HA voice
+    # session until the 8Gi OOMKill on 2026-11-18. Warn before the limit.
+    - alert: OpenClawMemoryNearLimit
+      annotations:
+        description: Check for leaked family-mcp processes (one set per household
+          voice session; mcp.sessionIdleTtlMs should evict them) before raising
+          the limit.
+        summary: OpenClaw at {{ $value | humanizePercentage }} of its memory limit
+      expr: |
+        max by (pod) (container_memory_working_set_bytes{namespace="ai",pod=~"openclaw-.*",container="app"})
+        /
+        max by (pod) (kube_pod_container_resource_limits{namespace="ai",pod=~"openclaw-.*",container="app",resource="memory"})
+        > 0.85
+      for: 10m
+      labels:
+        category: openclaw
+        component: openclaw
+        severity: warning
