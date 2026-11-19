@@ -1,15 +1,17 @@
 ---
 plan_id: immich-server-3.4.1
 component: immich-server
-pr: 531                               # Renovate "update immich monorepo ( v3.3.6 -> v3.4.1 )", OPEN + MERGEABLE 2026-11-13, CI green
-                                      # (Flate Render Gate, Flux Local Diff x2). The PR moves BOTH tags (server + ML) in ONE commit:
-                                      # do NOT merge it - this plan lands the server tag as its own direct commit (see §1 "Sibling").
+pr: 531                               # Renovate "update ghcr.io/immich-app/immich-server ( v3.3.6 -> v3.4.2 )", OPEN 2026-11-19. Since the ML
+                                      # tag went live at v3.4.1-openvino the PR moves the SERVER tag only. Still do NOT merge it: this plan
+                                      # lands the tag as its own commit WITH the retries 3 -> 0 guard (see §6). Retargeted 2026-11-19 from
+                                      # v3.4.1 (plan_id kept: the go/no-go issue and the security finding key on it).
 kind: image
 current: "v3.3.6"                     # live 2026-11-13: deploy/immich-server ghcr.io/immich-app/immich-server:v3.3.6, pod imageID
                                       # @sha256:e1981983b1c13f6024b57d72e7ecae3342eed1581201ab09fb248932d86c593a (== ghcr index
                                       # digest of v3.3.6, HEAD 2026-11-13), node k8s-nuc14-01.
-target: "v3.4.1"                      # ghcr index digest sha256:7c489add298fc2f92cda4c777de6462aa206877e04087b815f62c7664af0b53b
-                                      # (HEAD manifests/v3.4.1, 2026-11-13). v3.4.0 published 2026-11-10T18:31Z, v3.4.1 2026-11-11T18:27Z.
+target: "v3.4.2"                      # ghcr index digest sha256:fc880c1bf665b4aab1e74c15e56ab871225989cd546536e6b77e771869af06bd
+                                      # (HEAD manifests/v3.4.2, 2026-11-19). v3.4.2 published 2026-11-18T20:14Z, GitHub `Latest`, not a
+                                      # prerelease/draft. (Previous target v3.4.1 = sha256:7c489add..., 2026-11-11.)
 update_type: minor
 risk: medium                          # three forward-only schema migrations on the only copy of the immich DB (an older server refuses
                                       # the newer schema, proven here 2026-10-12, a844cf8d) + a FEATURE minor two days old on a publicly
@@ -35,23 +37,19 @@ touches:
                                               # i915: the pod requests+limits gpu.intel.com/i915: 1 on k8s-nuc14-01; Recreate frees then
                                               # re-claims the slot. monitoring: §4 reads Prometheus. envoy-external + authentik: §4.8/§4.9
                                               # read the app through the public Gateway and perform a real OIDC login (nothing is changed there).
-depends_on: []                        # Sibling immich-machine-learning-3.4.1 is ORDERED BEFORE this plan by preference (ML first, then
-                                      # server, two separate commits) but is deliberately NOT listed: window-scheduler.py skips a plan
-                                      # until every depends_on id is `executed`, and the two halves are not technically coupled
-                                      # (measured, §1 "Sibling"). A hard ref would block this plan whenever the ML plan is blocked.
+depends_on: []                        # The ML half is already live (deploy/immich-machine-learning = v3.4.1-openvino, 2026-11-19) and has
+                                      # no plan file any more; the two halves are not technically coupled (measured, §1 "ML compatibility").
 conflicts_with:
-  # Sibling immich-machine-learning-3.4.1 is deliberately NOT here either: same window is the PREFERRED shape.
+  # 2026-11-19 retarget: removed talos-linux-1.14.5 and icloud-drive-fleet-2.3.0 (both status superseded, no longer schedulable);
+  # all other entries re-checked against the plan set and still present (statuses: vetted/draft/awaiting-go). No nextcloud entry.
   - redis-fleet-8.10.3                # rolls media/immich-redis (BullMQ store) AND restarts immich-server; its gates and ours would
                                       # each read the other's Recreate/queue drop as their own.
   - helm-drift-detection              # rolls the intel-gpu-plugin DaemonSet (i915 re-register under our new pod) and changes how
                                       # helm-controller applies this HR while we rely on upgrade.remediation.retries: 0.
   - flux-oci-chart-sources            # may move the app-template chart source under this HR mid-window.
-  - talos-linux-1.14.5                # node roll (exclusive): reboots nuc14-01 (server) and nuc14-03 (immich-postgres).
-  - talos-linux-1.14.6                # node roll (exclusive, supersedes 1.14.5 draft): same reboot interference.
+  - talos-linux-1.14.6                # node roll (exclusive, supersedes 1.14.5): reboots nuc14-01 (server) and nuc14-03 (immich-postgres).
   - talos-power-tuning-ab             # changes the nuc14 thermal/power envelope; immich-server's cpu:4 cap is a thermal bound.
   - longhorn-1.13.0                   # storage engine bump (exclusive) under immich-pg-data while we dump/restore/migrate it.
-  - icloud-drive-fleet-2.3.0          # writes the icloud-backup tree immich reads (ro); a mass re-download triggers library-scan
-                                      # jobs that drift the §2.5 / §3.2 / §4.3 count comparisons.
   - frigate-reolink-go2rtc-flv        # shared igpu-i915; its Recreate can land on nuc14-01 and contend for a slot under §4.10.
   - kube-prometheus-stack-93.3.0     # draft, exclusive, window null: restarts Prometheus, which this plan's gates read (retargeted 2026-11-16 from retired 92.22.0)
   - envoy-gateway-1.10.0              # §4.8/§4.9 read through envoy-external; a data-plane roll would be read as our failure.
@@ -73,13 +71,14 @@ rollback_class: backup-restore        # forward-only for Immich: server/src/repo
                                       # and v3.4.1) throws 'Migration "<name>" was already applied to this database but is not in this
                                       # version of Immich ... Downgrades are not supported.' when kysely reports a previously executed
                                       # migration as missing. v3.3.6 on a DB holding the 3 new kysely_migrations rows cannot start.
-backup_gate: "§3.1 fresh plain-SQL pg_dump of database immich taken from deploy/immich-postgres AFTER the pre-checks and BEFORE the tag edit is pushed, streamed to $HOME/immich-backups/pre-3.4.1/immich.sql.gz on the Mac under set -o pipefail. PASS = gzip -t ok AND size >= 300000000 bytes (Immich's own gzip of the same DB is 413,952,373 B on 2026-11-13; the 2026-10-22 gzip -1 dump was 458,994,958 B) AND the stream ends with '-- PostgreSQL database dump complete' AND the 'COPY public.' block count equals the live public BASE TABLE count (72 on 2026-11-13) AND the dump's newest kysely_migrations row is 1792213725597-AddAssetFaceAssetState. Secondary layers: Immich's own 02:00 nightly dump of today under /data/backups (v3.3.6 name), and the 23:00Z Longhorn backup of pvc-34a7dcaa-1069-415b-8abb-84da7acf914e (immich-pg-data) FRESH < 26h."
+backup_gate: "§3.1 fresh plain-SQL pg_dump of database immich taken from deploy/immich-postgres AFTER the pre-checks and BEFORE the tag edit is pushed, streamed to $HOME/immich-backups/pre-3.4.2/immich.sql.gz on the Mac under set -o pipefail. PASS = gzip -t ok AND size >= 300000000 bytes (Immich's own gzip of the same DB is ~414 MB (413,952,373 B on 2026-11-13); the 2026-10-22 gzip -1 dump was 458,994,958 B) AND the stream ends with '-- PostgreSQL database dump complete' AND the 'COPY public.' block count equals the live public BASE TABLE count (72 on 2026-11-13) AND the dump's newest kysely_migrations row is 1792213725597-AddAssetFaceAssetState. Secondary layers: Immich's own 02:00 nightly dump of today under /data/backups (v3.3.6 name), and the 23:00Z Longhorn backup of pvc-34a7dcaa-1069-415b-8abb-84da7acf914e (immich-pg-data) FRESH < 26h."
 restore_proof: "§3.2: the §3.1 dump is restored into a SCRATCH database immich_restoretest on the same immich-postgres instance (psql -v ON_ERROR_STOP=1, Immich's documented search_path rewrite) and, BEFORE the tag edit is pushed, count(*) of asset, asset_face, person, \"user\", album and library in immich_restoretest must equal the §2.5 live counts, the public BASE TABLE count must be 72, the newest kysely_migrations row must be 1792213725597-AddAssetFaceAssetState, and pg_extension must list vchord and vector. Any mismatch or a psql error = STOP, do not push. The scratch DB is dropped at the end of §3.2 by its exact name (never DROP DATABASE immich here)."
-finding_refs: [F-54e86f6d]            # version: "immich-server: image ghcr.io/immich-app/immich-server v3.3.6 -> v3.4.0 (minor)" - this
-                                      # plan supersedes its target with v3.4.1. Queried 2026-11-13 (`policy-cli.py finding list --grep
+finding_refs: [F-54e86f6d, F-9f05768d] # F-54e86f6d version: "immich-server: image ghcr.io/immich-app/immich-server v3.3.6 -> v3.4.0 (minor)" - this
+                                      # plan supersedes its target with v3.4.2. F-9f05768d = the critical security finding (still open
+                                      # 2026-11-19, newer upstream tag exists). Queried 2026-11-13, re-queried 2026-11-19 (`policy-cli.py finding list --grep
                                       # immich`). F-f7fa90d3 (immich-machine-learning) belongs to the sibling plan, not here.
-review: ready-for-go@2026-11-16
-status: awaiting-go
+review: null                      # retargeted 3.4.1 -> 3.4.2 on 2026-11-19: the 2026-11-16 ready-for-go verdict covered 3.4.1; a fresh plan-reviewer sets it
+status: draft                         # was awaiting-go; the go/no-go given for 3.4.1 does not carry to 3.4.2 (README: retarget re-reviews)
 window: null
 premises:
   - id: server-image-is-v3.3.6
@@ -134,9 +133,10 @@ sops_refs:
   - docs/sops/verification-contents-not-shape.md
   - docs/sops/vulnerability-disclosure.md
 generated: "2026-11-13"
+retargeted: "2026-11-19"
 ---
 
-# immich-server v3.3.6 -> v3.4.1
+# immich-server v3.3.6 -> v3.4.2
 
 ## 1. Summary & why held
 
@@ -166,7 +166,29 @@ this version of Immich ... Downgrades are not supported.`). That happened here o
 (`a844cf8d`). Hence `rollback_class: backup-restore`, with a fresh dump and a scratch-restore
 proof before the push.
 
-**Upstream evidence** (GitHub releases `immich-app/immich`; v3.4.1 is `Latest`, not a prerelease):
+**Retarget 2026-11-19 (v3.4.1 -> v3.4.2).** v3.4.2 (published 2026-11-18T20:14Z, GitHub `Latest`,
+`isPrerelease=false`, `isDraft=false`; ghcr index digest above) is an 11-commit patch on top of v3.4.1
+(`gh api repos/immich-app/immich/compare/v3.4.1...v3.4.2`). **It adds no migration**: the tree object of
+`server/src/schema/migrations` is byte-identical at both tags (git tree sha `cbb7ef7e...`, 105 files, newest
+`1792568637987-AddAssetOwnerIdUpdateIdIndex`), and `database.repository.ts`, `constants.ts`,
+`machine-learning.repository.ts` and `immich_ml/schemas.py` have identical blob SHAs. The migration risk
+is therefore EXACTLY that of 3.4.1: three forward-only, additive migrations. Server-side code changes are
+two files: `server/src/utils/media.ts` (drop `range=pc` on vaapi, #33262 - touches the i915 transcode
+path used here, hence §4.10b) and `server/src/repositories/telemetry.repository.ts` (#33450, below).
+Other changes: web fixes (CSP hash for external styles #33275, slideshow, combobox, filename alignment),
+integrity-report downloads fix, FUTO Backups module 1.18.1 / restic 0.19.1-futo.2 bump (#33448; the
+backups feature still defaults off). Release headline: "Some more bug fixes and a new FUTO Backups
+version in this one!"
+
+**Exporter bind address changed again in v3.4.2** (#33450 / #33457 "fix: prometheus exporter listening").
+v3.4.1 bound `host: '0.0.0.0'`; v3.4.2 binds `host` from `IMMICH_HOST`, defaulting to `'::'`
+(`const { telemetry, host = '::' } = new ConfigRepository().getEnv()`). Live, `IMMICH_HOST` is NOT set on
+the Deployment and the pod's current listeners (ports 8081/8082/2283) are already `[::]` sockets in
+`/proc/net/tcp6` with `bindv6only=0`, serving IPv4 scrapes (`up{job="immich-server"}` = 1 on both
+endpoints 2026-11-19), so a `::` bind is expected to keep working over the IPv4-only Service
+(`ipFamilies: [IPv4]`). That is a prediction, not a proof - §4.6 stays the hard gate.
+
+**Upstream evidence** (GitHub releases `immich-app/immich`; v3.4.2 is `Latest`, not a prerelease; the v3.4.0/v3.4.1 notes below still apply to the 3.3.6 -> 3.4.2 jump):
 - `v3.4.0` (2026-11-10): "This release adds workflow improvements, JPEG XL support, tags on mobile
   (finally?!), a plethora of security fixes and other improvements and bug fixes." The notes carry a
   Security section; it is not reproduced here.
@@ -175,7 +197,7 @@ proof before the push.
   on all interfaces" - "Regression of #32759 which changed the default value from `0.0.0.0` to
   `localhost`". **v3.4.0 would have cut both scrape endpoints of this deployment**; v3.4.1 source
   reads `new PrometheusExporter({ port, host: '0.0.0.0' })` (`telemetry.repository.ts@v3.4.1`).
-  This is why the target is v3.4.1 and why §4.6 is a hard gate, not a formality.
+  v3.4.1 fixed that; v3.4.2 changes the bind again (above). This is why §4.6 is a hard gate, not a formality.
 
 **Behaviour changes that matter for THIS deployment** (each read in upstream source/PR, each with a gate):
 
@@ -205,23 +227,24 @@ proof before the push.
    `cpu: "4"` limit bounds it; do not touch that limit (thermal bound on nuc14-01).
 7. **Removed API field**: `password` on `PUT/PATCH /users/me` (#32623). Nothing in this repo calls it.
 
-Server version requirements did not move: `server/src/constants.ts` differs between the tags only
+Server version requirements did not move: `server/src/constants.ts` differs between v3.3.6 and v3.4.1 only
 by the webauthn exclude path, a JPEG XL constant and an API tag description - the vector-extension
 version ranges are untouched, and live extensions are `vchord 0.4.3`, `vector 0.8.1`.
 
-**Sibling `immich-machine-learning-3.4.1` (same Renovate PR #531) - ORDERED, not lockstep.**
-- Not technically coupled for this hop: `server/src/repositories/machine-learning.repository.ts`
-  and `machine-learning/immich_ml/schemas.py` have identical git blob SHAs at v3.3.6 and v3.4.1
-  (the wire contract is unchanged), and `immich_ml/main.py` differs by one log line. A v3.4.1
-  server against a v3.3.6 ML, or the reverse, is the same request/response shape.
-- **Order: ML first, then server, in two separate commits** (same window preferred; adjacent
-  nights are fine). ML is stateless and `git revert`-able, so the reversible half goes first and
-  the one-way half last.
-- **Never merge PR #531 itself.** It moves both tags in one commit; reverting that commit later
-  for an ML problem would also drag the server tag back onto the migrated DB (the 2026-10-12
-  crash-loop). Renovate closes the PR on its own once both pins read v3.4.1.
-- Hence: sibling is in neither `depends_on` (a hard, `executed`-gated dependency that is not true)
-  nor `conflicts_with` (sharing a window is the preferred shape).
+**ML compatibility (`immich-machine-learning`, live `v3.4.1-openvino`).**
+- No ML move is required by this plan. The server-to-ML wire contract is unchanged across v3.3.6, v3.4.1
+  and v3.4.2: `server/src/repositories/machine-learning.repository.ts` (blob `7c52778e...`) and
+  `machine-learning/immich_ml/schemas.py` (blob `2364d7cc...`) are identical at v3.4.1 and v3.4.2; the
+  only ML-tree change in 3.4.2 is the `pyproject.toml` version string and `uv.lock`. A v3.4.2 server with
+  the live v3.4.1 ML (and, per the earlier measurement, v3.3.6 ML) is the same request/response shape.
+- Equal server/ML versions are upstream's recommendation, not something this plan could prove is enforced;
+  the evidence here is the identical wire-contract files above, and the live pairing server v3.3.6 + ML
+  v3.4.1 has been running since the ML bump. One patch of skew (server 3.4.2, ML 3.4.1) is acceptable; §4.11
+  and a smart-search/face job in the UI after the roll are the observable checks if in doubt.
+- `ghcr.io/immich-app/immich-machine-learning:v3.4.2-openvino` is NOT published yet (registry HEAD 404
+  2026-11-19; `v3.4.2` and `v3.4.2-cuda` exist), so ML cannot be moved in lockstep today even if wanted.
+  Renovate will propose it separately; that ML bump is stateless and plan-lane-free.
+- Never merge PR #531 as-is: it would land the tag without the `retries: 0` guard (§6).
 
 ## 2. Pre-checks
 
@@ -254,33 +277,39 @@ kubectl exec -n media deploy/immich-postgres -- sh -c 'psql -U "$POSTGRES_USER" 
   -c "select count(*) from information_schema.tables where table_schema=\$\$public\$\$ and table_type=\$\$BASE TABLE\$\$" \
   -c "select name from kysely_migrations order by name desc limit 1"' | tee /tmp/immich-baseline.txt
 ```
-Measured 2026-11-13: `79269 60959 2381 2 0 2` / `72` / `1792213725597-AddAssetFaceAssetState`.
+Measured 2026-11-19: `79280 60960 2381 2 0 2` / `72` / `1792213725597-AddAssetFaceAssetState` (kysely_migrations count 101; 2026-11-13 read `79269 60959`, assets drift upward).
 
 2.6 Checks the premise runner cannot express. ANY failure = STOP, do not push:
 ```bash
 # (a) DB still at the v3.3.6 head: third line of /tmp/immich-baseline.txt must read
 #     1792213725597-AddAssetFaceAssetState. A 17925... name = a v3.4 server already ran; plan is stale.
 # (b) today's Immich nightly dump exists (absence also means the job queue is unhealthy):
-kubectl exec -n media deploy/immich-server -c main -- ls /data/backups | grep -c "immich-db-backup-$(TZ=Europe/Berlin date +%Y%m%d)T020000-v3.3.6"   # 1 (measured 1 on 2026-11-13); 0 = STOP
+kubectl exec -n media deploy/immich-server -c main -- ls /data/backups | grep -c "immich-db-backup-$(TZ=Europe/Berlin date +%Y%m%d)T020000-v3.3.6"   # 1 (measured 1 on 2026-11-13; 2026-11-19 nightly present); 0 = STOP
 # (c) Longhorn backup of the immich-pg-data volume under 26h:
 .venv/bin/python3 runbooks/longhorn-backup-age.py pvc-34a7dcaa-1069-415b-8abb-84da7acf914e --max-hours 26   # must contain FRESH (2026-11-13: "3.6h FRESH via backup-cr")
 # (d) target still the published tag and the digest this plan recorded:
-gh release view v3.4.1 -R immich-app/immich --json isPrerelease,tagName   # isPrerelease false
+gh release view v3.4.2 -R immich-app/immich --json isPrerelease,isDraft,tagName   # isPrerelease false, isDraft false
 gh release list -R immich-app/immich -L 5                                  # a newer v3.4.x = note it, do NOT retarget in the window
 # (e) open regressions against the target (judgement call for the operator, not an automatic stop):
-gh issue list -R immich-app/immich --search 'v3.4.1 in:title,body created:>2026-11-11 sort:reactions-+1-desc' -L 15
+gh issue list -R immich-app/immich --search 'v3.4.2 in:title,body created:>2026-11-18 sort:reactions-+1-desc' -L 15
 ```
 
-2.7 Sibling state (informational): `kubectl get deploy immich-machine-learning -n media -o jsonpath='{.spec.template.spec.containers[0].image}'`.
-`...:v3.4.1-openvino` = the preferred order was kept. `...:v3.3.6-openvino` = allowed (§1), say so in the window log.
+2.7 ML state (informational): `kubectl get deploy immich-machine-learning -n media -o jsonpath='{.spec.template.spec.containers[0].image}'`.
+Live 2026-11-19: `...:v3.4.1-openvino`. `v3.4.1-openvino` or `v3.4.2-openvino` = fine; `v3.3.6-openvino` = also allowed (§1 "ML compatibility"), say so in the window log.
+Also confirm the pinned digest is still what this plan recorded (a re-pushed tag would invalidate §4.1):
+```bash
+T=$(curl -s "https://ghcr.io/token?scope=repository:immich-app/immich-server:pull" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+curl -sI -H "Authorization: Bearer $T" -H "Accept: application/vnd.oci.image.index.v1+json" https://ghcr.io/v2/immich-app/immich-server/manifests/v3.4.2 | grep -i docker-content-digest
+# must read sha256:fc880c1bf665b4aab1e74c15e56ab871225989cd546536e6b77e771869af06bd (v3.4.1 reads 7c489add...: control, proves the grep prints a per-tag value)
+```
 
 ## 3. Steps
 
 ### 3.1 Fresh pre-upgrade dump to the Mac (backup_gate)
 ```bash
 set -o pipefail
-mkdir -p "$HOME/immich-backups/pre-3.4.1" && chmod 700 "$HOME/immich-backups"
-D="$HOME/immich-backups/pre-3.4.1/immich.sql.gz"
+mkdir -p "$HOME/immich-backups/pre-3.4.2" && chmod 700 "$HOME/immich-backups"
+D="$HOME/immich-backups/pre-3.4.2/immich.sql.gz"
 kubectl exec -n media deploy/immich-postgres -- sh -c \
   'pg_dump --clean --if-exists -U "$POSTGRES_USER" -d "$POSTGRES_DB" | gzip -1' > "$D" \
   || { echo "DUMP FAILED"; exit 1; }
@@ -299,16 +328,16 @@ Second copy for the §5.2 fallback - today's Immich nightly dump, read through t
 ```bash
 set -o pipefail
 N="immich-db-backup-$(TZ=Europe/Berlin date +%Y%m%d)T020000-v3.3.6-pg14.19.sql.gz"
-kubectl exec -n media deploy/immich-server -c main -- cat "/data/backups/$N" > "$HOME/immich-backups/pre-3.4.1/nightly.sql.gz" \
+kubectl exec -n media deploy/immich-server -c main -- cat "/data/backups/$N" > "$HOME/immich-backups/pre-3.4.2/nightly.sql.gz" \
   || echo "NIGHTLY COPY FAILED"
-gzip -t "$HOME/immich-backups/pre-3.4.1/nightly.sql.gz" && stat -f %z "$HOME/immich-backups/pre-3.4.1/nightly.sql.gz"   # ~413 MB (413,952,373 B on 2026-11-13)
+gzip -t "$HOME/immich-backups/pre-3.4.2/nightly.sql.gz" && stat -f %z "$HOME/immich-backups/pre-3.4.2/nightly.sql.gz"   # ~413 MB (413,952,373 B on 2026-11-13)
 ```
 A failed nightly copy is a note, not a stop (the fresh dump above is the gate; this is the spare).
 
 ### 3.2 Restore proof into a SCRATCH database (restore_proof)
 ```bash
 set -o pipefail
-D="$HOME/immich-backups/pre-3.4.1/immich.sql.gz"
+D="$HOME/immich-backups/pre-3.4.2/immich.sql.gz"
 kubectl exec -n media deploy/immich-postgres -- sh -c \
   'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE immich_restoretest OWNER \"$POSTGRES_USER\""'
 gunzip -c "$D" \
@@ -340,20 +369,20 @@ kubectl exec -n media deploy/immich-postgres -- sh -c \
 ### 3.3 The GitOps change
 Dry-tested on a scratch copy of the file (BSD sed, macOS, 2026-11-13); each sed matches exactly one line:
 ```bash
-sed -i '' 's|^\([[:space:]]*tag: \)v3\.3\.6$|\1v3.4.1|' kubernetes/apps/media/immich/app/helmrelease.yaml
+sed -i '' 's|^\([[:space:]]*tag: \)v3\.3\.6$|\1v3.4.2|' kubernetes/apps/media/immich/app/helmrelease.yaml
 # Helm-remediation guard (§6): same commit, upgrade block only.
 sed -i '' '/^  upgrade:/,/^  uninstall:/ s/^\([[:space:]]*retries: \)3$/\10/' kubernetes/apps/media/immich/app/helmrelease.yaml
 git diff --stat -- kubernetes/apps/media/immich/app/helmrelease.yaml
 git diff -- kubernetes/apps/media/immich/app/helmrelease.yaml | grep -c '^[-+] '   # 4 (two lines out, two in)
 ```
 Diff from the dry run: `25c25 <       retries: 3 --- >       retries: 0` and
-`77c77 <               tag: v3.3.6 --- >               tag: v3.4.1`. Any other changed line = stop, `git checkout` the file.
-(The ML file's tag is `v3.3.6-openvino` / `v3.4.1-openvino` and is not matched - that line belongs to the sibling plan.)
+`77c77 <               tag: v3.3.6 --- >               tag: v3.4.2`. Any other changed line = stop, `git checkout` the file.
+(The ML file's tag reads `v3.4.1-openvino` already and is not matched by this sed - ML is not part of this plan.)
 
 Commit and push (shared worktree - `--only`, then check the subject is yours):
 ```bash
 git commit --only kubernetes/apps/media/immich/app/helmrelease.yaml \
-  -m "feat(immich): immich-server v3.3.6 -> v3.4.1 (plan immich-server-3.4.1)"
+  -m "feat(immich): immich-server v3.3.6 -> v3.4.2 (plan immich-server-3.4.1)"
 git log -1 --format=%s     # must be the subject above; amend before push if not
 git show --stat HEAD       # exactly one file
 OLDPOD=$(kubectl get pod -n media -l app.kubernetes.io/instance=immich-server -o jsonpath='{.items[0].metadata.name}')
@@ -368,7 +397,7 @@ server runs the three migrations at startup.
 sed -i '' '/^  upgrade:/,/^  uninstall:/ s/^\([[:space:]]*retries: \)0$/\13/' kubernetes/apps/media/immich/app/helmrelease.yaml
 git diff -- kubernetes/apps/media/immich/app/helmrelease.yaml | grep -c '^[-+] '   # 2
 git commit --only kubernetes/apps/media/immich/app/helmrelease.yaml \
-  -m "chore(immich): restore upgrade remediation retries 0 -> 3 after immich-server v3.4.1 verified (plan immich-server-3.4.1)"
+  -m "chore(immich): restore upgrade remediation retries 0 -> 3 after immich-server v3.4.2 verified (plan immich-server-3.4.1)"
 git log -1 --format=%s && git show --stat HEAD
 git push
 ```
@@ -385,7 +414,7 @@ PUSH_TS=$(date -u +%s)  # take this IMMEDIATELY after `git push` returns
 ```
 Then poll the imageID until it changes, bounded (do NOT trust `rollout status`, which green-lights the old generation):
 ```bash
-NEW=7c489add298fc2f92cda4c777de6462aa206877e04087b815f62c7664af0b53b
+NEW=fc880c1bf665b4aab1e74c15e56ab871225989cd546536e6b77e771869af06bd
 for i in $(seq 1 40); do   # 40 x 15 s = 10 min cap
   ID=$(kubectl get pod -n media -l app.kubernetes.io/instance=immich-server \
     -o jsonpath='{.items[*].status.containerStatuses[?(@.name=="main")].imageID}')
@@ -421,7 +450,7 @@ query; PASS = `person`, `user`, `album`, `library` equal the baseline (`2381 2 0
 assess before anything else: an `asset` drop after this bump points at §1 item 5 (symlink crawl)
 and is NOT fixed by a DB restore alone.
 
-4.4 API answers as v3.4.1:
+4.4 API answers as v3.4.2:
 ```bash
 kubectl port-forward -n media svc/immich-server 22830:2283 >/dev/null 2>&1 & PF=$!; sleep 3
 curl -s localhost:22830/api/server/version; echo
@@ -431,7 +460,7 @@ curl -s -w '\nHTTP %{http_code}\n' -X POST -H 'content-type: application/json' -
 curl -sI localhost:22830/ | grep -i content-security-policy
 kill $PF 2>/dev/null
 ```
-PASS = version contains `"major":3,"minor":4,"patch":1` (pre-state `"minor":3,"patch":6`) and ping is `{"res":"pong"}`.
+PASS = version contains `"major":3,"minor":4,"patch":2` (pre-state `"minor":3,"patch":6`) and ping is `{"res":"pong"}`.
 
 4.5 New capabilities stay OFF (same output as 4.4):
 - `features` contains `"backups":false` and still contains `"oauth":true` and `"passwordLogin":true`.
@@ -442,7 +471,7 @@ PASS = version contains `"major":3,"minor":4,"patch":1` (pre-state `"minor":3,"p
   old image (the v3.3.6 pre-state returns `404`); `2xx` = passkeys are enabled, which nobody decided;
   a `400` with a DIFFERENT message (e.g. a DTO validation error on the empty body) means the request
   never reached the disabled-check, so it proves nothing about the flag - stop and read
-  `server/src/services/passkey.service.ts@v3.4.1`, do not call it a pass.
+  `server/src/services/passkey.service.ts@v3.4.2`, do not call it a pass.
 - the CSP header line is recorded in the window log (informational; no CSP header was returned on
   `HEAD /` at v3.3.6 on 2026-11-13).
 
@@ -477,7 +506,7 @@ prints `0` - a non-zero count is a startup failure even if the alerts never reac
 4.8 Public route still serves the app (through Cloudflare + `envoy-external`, hostname read from the route so it is not written here):
 ```bash
 H=$(kubectl get httproute immich-server -n media -o jsonpath='{.spec.hostnames[0]}')
-curl -s "https://$H/api/server/version"; echo      # "major":3,"minor":4,"patch":1
+curl -s "https://$H/api/server/version"; echo      # "major":3,"minor":4,"patch":2
 curl -s -o /dev/null -w '%{http_code}\n' "https://$H/"   # 200
 ```
 
@@ -500,6 +529,13 @@ kubectl exec -n media deploy/immich-server -c main -- sh -c 'touch /libraries/x;
 ```
 PASS = `touch` fails with `Read-only file system` and the listing contains `renderD128`.
 
+4.10b VAAPI transcode flag change (#33262 drops `range=pc` on vaapi; i915 path used here). Informational,
+not a rollback trigger: with hardware transcoding enabled in the admin settings, trigger one short video
+transcode (or open a video that needs it) and read `kubectl logs -n media "$NEWPOD" -c main --since=10m | grep -ciE 'vaapi.*(error|fail)|ffmpeg.*(error|exited with code [1-9])'`.
+Can fail: a non-zero count right after the transcode means the new filter chain is rejected by the iGPU;
+a 0 only counts if the transcode actually ran (control: the same grep over the log must also show the job
+line, `grep -ciE 'transcod'` >= 1). If transcoding is disabled in settings this check is skipped and says so.
+
 4.11 No migration/DB errors in the server log since start (case-insensitive). The read is the
 WHOLE log of the new pod (no `--since`): migrations run at container start, so a time window anchored
 at verification time could exclude them. This is an ABSENCE
@@ -521,13 +557,14 @@ pod, log not yet flushed, or a crashed container with no current log) makes the 
 meaningless - re-read after 60 s, and if still empty use `--previous` and treat it as a FAIL.
 
 4.12 Next morning (not a window gate): `/data/backups` holds a dump named
-`immich-db-backup-<date>T020000-v3.4.1-pg14.19.sql.gz` of roughly the previous size (413 MB) -
-proves the pigz path (§1 item 6) produces a dump. Then close `F-54e86f6d` with
-`runbooks/policy-cli.py finding close F-54e86f6d --commit $BUMP` once the sweep agrees.
+`immich-db-backup-<date>T020000-v3.4.2-pg14.19.sql.gz` of roughly the previous size (413 MB) -
+proves the pigz path (§1 item 6) produces a dump. Then close `F-54e86f6d` (version) and, once the sweep
+re-scans the new tag and agrees, `F-9f05768d` (security) with
+`runbooks/policy-cli.py finding close <id> --commit $BUMP`.
 
 ## 5. Rollback
 
-**Decision first.** If v3.4.1 boots and serves (4.1-4.4 pass) but something else is off (OIDC,
+**Decision first.** If v3.4.2 boots and serves (4.1-4.4 pass) but something else is off (OIDC,
 CSP, a UI regression), **prefer roll-forward or leave it and report** - a DB restore costs ~20 min,
 loses the job output since the dump, and upstream ships patch releases within days. Restore only
 if the server cannot serve on the migrated DB, or data is missing (4.3).
@@ -545,7 +582,7 @@ kubectl get pods -n media -l app.kubernetes.io/instance=immich-server   # none
 5.2 Replace database `immich` from the §3.1 dump (the one §3.2 proved restorable):
 ```bash
 set -o pipefail
-D="$HOME/immich-backups/pre-3.4.1/immich.sql.gz"
+D="$HOME/immich-backups/pre-3.4.2/immich.sql.gz"
 kubectl exec -n media deploy/immich-postgres -- sh -c \
   'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE \"$POSTGRES_DB\" WITH (FORCE)" -c "CREATE DATABASE \"$POSTGRES_DB\" OWNER \"$POSTGRES_USER\""'
 gunzip -c "$D" \
@@ -556,10 +593,10 @@ gunzip -c "$D" \
 Then re-run the 2.5 query: PASS = identical to `/tmp/immich-baseline.txt` (72 tables, newest
 migration back to `1792213725597-AddAssetFaceAssetState`).
 Fallbacks if the Mac dump is unusable, in this order:
-- `$HOME/immich-backups/pre-3.4.1/nightly.sql.gz`, the copy of today's Immich nightly dump taken
+- `$HOME/immich-backups/pre-3.4.2/nightly.sql.gz`, the copy of today's Immich nightly dump taken
   in §3.1 (same restore pipe, `D` pointed at it). It is copied off BEFORE the push on purpose:
   `/data/backups` is only mounted in the server pod, which 5.1 scales to zero.
-  **Never** restore a dump whose name carries `-v3.4.1-`: it holds the migrated schema.
+  **Never** restore a dump whose name carries `-v3.4.1-` or `-v3.4.2-`: it holds the migrated schema.
 - the Longhorn backup of `pvc-34a7dcaa-1069-415b-8abb-84da7acf914e` per `docs/sops/backup.md`
   (restore to a NEW volume; never delete `immich-pg-data`).
 
@@ -576,23 +613,23 @@ kubectl get deploy immich-server -n media -o jsonpath='{.spec.replicas}'   # 1; 
 
 5.4 Confirm back: image `...immich-server:v3.3.6`, imageID `sha256:e1981983...593a`,
 `/api/server/version` = `"minor":3,"patch":6`, 4.11 grep = `0`, 4.6 both `up` series `1`, 4.7
-alerts quiet, HR Ready. The ML Deployment is not touched by any of this and may stay on
+alerts quiet, HR Ready. The ML Deployment is not touched by any of this and stays on
 v3.4.1-openvino (§1: unchanged wire contract).
 
 Data-loss bound: only DB writes between §3.1 and the restore (face/job results and any album or
 share edits made in that interval, on a read-only viewer of the iCloud library; job output is
 regenerable by re-queuing). Originals sit on a `ro` mount and are never at risk. No PVC or PV is
 created, deleted or patched at any point, and nothing is removed from either CIFS share
-(`docs/sops/storage-safety.md`); directories a v3.4.1 server may have created under `/data` are
+(`docs/sops/storage-safety.md`); directories a v3.4.2 server may have created under `/data` are
 left in place.
 
-Cleanup (any time later): `rm -rf "$HOME/immich-backups/pre-3.4.1"` once the plan is executed and soaked 7 days.
+Cleanup (any time later): `rm -rf "$HOME/immich-backups/pre-3.4.2"` once the plan is executed and soaked 7 days.
 
 ## 6. Interference notes
 
 - **Helm remediation hazard (2026-10-12 shape).** `helmrelease.yaml` sets
   `upgrade.remediation.retries: 3` (live, premise `hr-upgrade-retries-is-3`) with the helm-controller
-  default strategy `rollback`. A v3.4.1 startup that fails or times out (20m) would make Helm roll
+  default strategy `rollback`. A v3.4.2 startup that fails or times out (20m) would make Helm roll
   the Deployment back to v3.3.6 ON THE ALREADY-MIGRATED DB, where it crash-loops and the HR flaps.
   §3.3 sets `retries: 0` in the same commit so a failed upgrade stays failed with the new pod
   visible; §3.4 restores `3` after §4 passes. If the upgrade fails: do not let Flux retry;
@@ -600,8 +637,8 @@ Cleanup (any time later): `rm -rf "$HOME/immich-backups/pre-3.4.1"` once the pla
 - **Step 0 must not touch immich.** The `*immich*` deny rule holds it; an auto-revertable batch
   containing an immich bump is the exact 2026-10-12 failure (finding `F-2efa3b1f`). If Step 0
   somehow applied it, premise `server-image-is-v3.3.6` fails and this plan is stale.
-- **Sibling `immich-machine-learning-3.4.1`:** ordered ML first, then server; two commits; same
-  window preferred; no `depends_on`, no `conflicts_with`; PR #531 is never merged (§1).
+- **ML:** already at v3.4.1-openvino live; no ML plan exists and none is required (§1 "ML compatibility").
+  A later ML 3.4.2 bump is independent. PR #531 is never merged as-is (§1).
 - **Human-gated by construction:** `capability_change: true` + `rollback_class: backup-restore`.
   §4.9 needs a browser and an Authentik login, so this is not a 03:30 unattended plan.
 - **i915 / nuc14-01:** Recreate frees and re-claims a `gpu.intel.com/i915` slot on k8s-nuc14-01
@@ -627,12 +664,10 @@ Cleanup (any time later): `rm -rf "$HOME/immich-backups/pre-3.4.1"` once the pla
   `immich-postgres-still-pg14`), a different image line, Deployment, PVC and namespace. No conflict
   declared, deliberately. (The bookworm plan's Authentik restart would break a §4.9 OIDC login if
   run at the same moment; the window agent sequences that by time, not by a conflict.)
-- **Reciprocity (re-read 2026-11-16):** `envoy-gateway-1.10.0`, `kube-prometheus-stack-93.3.0` and
-  `n8n-2.47.7` already list `immich-server-3.4.1` in their `conflicts_with`.
-  `immich-machine-learning-3.4.1` names this plan as its ordered successor (its `depends_on` comment
-  and §6) and deliberately does NOT list it in `conflicts_with` - same window is the preferred shape.
-  **Gap:** `coredns-1.50.5` does not list this plan back (0 mentions of `immich` in its file), nor
-  do redis-fleet-8.10.3, helm-drift-detection, flux-oci-chart-sources, talos-linux-1.14.5,
-  talos-power-tuning-ab, longhorn-1.13.0, icloud-drive-fleet-2.3.0 or frigate-reolink-go2rtc-flv
-  as far as this plan was written against. `window-scheduler.py` honours a one-sided declaration
-  (`81fdd797`), so the serialisation holds from this side; add the back-references at vetting.
+- **Reciprocity (re-read 2026-11-19):** `envoy-gateway-1.10.0`, `kube-prometheus-stack-93.3.0`, `n8n-2.47.7`
+  and `talos-linux-1.14.6` already name `immich-server-3.4.1` (the plan_id, unchanged). Their entries
+  for `immich-machine-learning-3.4.1` point at a plan that no longer exists; that is for their owners at
+  vetting. **Gap:** `coredns-1.50.5`, redis-fleet-8.10.3, helm-drift-detection, flux-oci-chart-sources,
+  talos-power-tuning-ab, longhorn-1.13.0 and frigate-reolink-go2rtc-flv do not list this plan back;
+  `window-scheduler.py` honours a one-sided declaration (`81fdd797`), so serialisation holds from this
+  side. Removed from our list as superseded: `talos-linux-1.14.5`, `icloud-drive-fleet-2.3.0`.
