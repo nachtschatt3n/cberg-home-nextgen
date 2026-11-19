@@ -8,7 +8,9 @@ pr: 426                               # Renovate PR #426 "update nocodb/nocodb (
 kind: image
 current: "2026.09.1"                  # measured live 2026-11-09: deploy/nocodb image nocodb/nocodb:2026.09.1,
                                       # digest sha256:27d2fd14670db892ac721849d4f071edce47e386a1e74c921a0162644b9c213d,
-                                      # git pin tag: 2026.09.1, /api/v1/version currentVersion 2026.09.1, 0 restarts
+                                      # git pin tag: 2026.09.1, /api/v1/version currentVersion 2026.09.1; restartCount 0 on 2026-11-09, RE-MEASURED 2026-11-19: 2
+                                      # (last terminated exitCode 255 / reason Unknown at 2026-11-12T13:30:50Z, a platform-side kill, not a crash
+                                      # loop; pod up since 2026-11-12T13:34Z). Pre-existing: 4.1's restartCount gate reads the NEW pod only
 target: "2026.10.1"                   # Docker Hub tag_last_pushed 2026-10-29T11:02:50Z (digest sha256:8c2dd068...cd6ae);
                                       # GitHub release 2026.10.1 "Bug Fix Release" published 2026-10-29T11:19:16Z.
                                       # 2026.10.0 (2026-10-23) was the feature release; 2026.10.1 is the first
@@ -42,7 +44,7 @@ conflicts_with:
                                       # reciprocal entry there.
   # [platform events that drop the pod-to-postgres connection or confound the reconnect gates]
   - longhorn-1.13.0
-  - talos-linux-1.14.5
+  - talos-linux-1.14.6                # sun-attended, exclusive (supersedes 1.14.5, which is the superseded sibling on the same line)
   - coredns-1.50.5                    # nocodb reaches postgresql.databases.svc by DNS name
   - etcd-timeouts-5000-500
   # [same HelmRelease / same namespace / same instrument]
@@ -57,7 +59,6 @@ conflicts_with:
   - n8n-2.47.7
   - nextcloud-12.0.2
   - media-naming-p3
-  - tube-archivist-elasticsearch-9.5.5
   - bitnamilegacy-exit-nextcloud-db
   - talos-power-tuning-ab
 exclusive: false
@@ -75,12 +76,13 @@ backup_gate: "pg_dump of the nocodb database (name resolved from the live NC_DB 
   the six named metadata tables present exactly once, and the pg_dump completion marker. THEN restored into a throwaway pod and
   the restored copy compared to the live baseline (counts, three knex ledgers name-for-name, user-data rows). A fresh Longhorn
   backup of postgresql-data-5g (runbooks/longhorn-backup-age.py --max-hours 24) is the disaster fallback."
+restore_proof: "§2i: the §2g pre-dump is restored into a SCRATCH pod (nocodb-restore-proof, emptyDir, same pgvector image as the live server, no live PVC or DB touched) with psql ON_ERROR_STOP, the scratch public schema must read 0 tables BEFORE the restore (positive control), and AFTER it compare.py restore mode must match the live §2h baseline exactly (186 public + 2 user-data = 188 base tables, the three knex ledgers name-for-name, user-data row counts) BEFORE the tag edit is pushed; any mismatch or psql error = STOP. The scratch pod is then deleted and the count of restore-proof=nocodb pods must read 0."
 finding_refs: [F-ca5c5597, F-3568c697] # `finding list --grep nocodb` 2026-11-09: F-ca5c5597 (version lane, "nocodb/nocodb 2026.09.1 -> 2026.10.1 (minor)")
                                       # and F-3568c697 (security lane, this image). F-24edea5f / F-655a9c6c matched the
                                       # grep but are generic plan-lane rows, not this component.
 review: null
 status: draft
-window: null                          # recommended, not assigned: sat-attended:2026-12-12 (see section 6)
+window: null                          # recommended, not assigned: sat-attended:2026-12-05 (see section 6)
 premises:
   # Read-verb only, one allowed read each. Measured 2026-11-09 against the live cluster.
   - id: live-image-is-still-2026.09.1
@@ -863,13 +865,11 @@ database in the shared instance (measured 2026-11-09: `nocodb`, `oc8`, `pellets`
 - **Downtime:** about 1-3 min (Recreate plus the migration boot). The two HTTPRoutes, the SecurityPolicy, the Homepage tile
   and the Authentik outpost are untouched.
 - **Window, recommended but not assigned (`window: null`, human-gated, `capability_change: true`):** attended slot required (4.6 is a
-  human step; not `nightly`, Step 0's unattended lane cannot do 4.6). Re-derived 2026-11-14 from `maintenance-plan.py --open`: the
-  EXECUTABLE set is helm-drift-detection (sat-attended:2026-11-28, declared conflict), longhorn-1.13.0 (sun 11-15), talos-linux-1.14.5
-  (sun 11-22), redis-fleet-8.10.3 (sun 11-29), flux-oci-chart-sources (sun 12-13) and postgres-digest-refresh-2026-11 (sun 12-20).
-  No Saturday is occupied except 11-28. Candidates: `sat-attended:2026-12-05` (6 days after redis, 8 days before the shared-server
-  restart: a bad migration is rolled back and settled first) or `sat-attended:2026-12-12` (eve of flux-oci-chart-sources, a declared
-  conflict, so less preferred). Avoid 11-21 (eve of the talos roll), 11-28 (helm-drift) and 12-19 (eve of the restart). The operator
-  assigns the slot; this file does not.
+  human step; not `nightly`, Step 0's unattended lane cannot do 4.6). **Suggested: `sat-attended:2026-12-05`** (re-derived 2026-11-19
+  at plan review): 6 days after redis-fleet-8.10.3 (sun 11-29), 15 days before postgres-digest-refresh-2026-11 (sun 12-20), so a bad
+  migration is rolled back and settled first. Not 11-28 (helm-drift-detection, declared conflict), not 12-19 (eve of the shared-server
+  restart), not 12-12 (eve of flux-oci-chart-sources). Never the same night as `postgres-digest-refresh-2026-11` or
+  `kube-prometheus-stack-93.3.0` (4.5 reads that Prometheus). The operator assigns the slot; this file does not.
 - **One-way boundary:** after 4.6 passes and the window closes, the pre-dump is the only way back. Keep
   `~/backups/nocodb/pre-2026.10.1/` (dump, `pre/`, `capture.sh`, `compare.py`) at least until the next nightly Longhorn
   backup after sign-off (the nightly job `daily-backup-all-volumes` runs 23:00 UTC).

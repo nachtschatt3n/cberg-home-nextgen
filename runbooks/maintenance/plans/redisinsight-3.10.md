@@ -37,9 +37,13 @@ conflicts_with:                       # checked 2026-11-18 against every non-ter
                                       # CONTENTS ASSERTION connects to; a rolling backend reads as a 3.10 regression
   - longhorn-1.13.0                   # exclusive storage-engine move; the PVC must stay attached during the roll
   - talos-linux-1.14.6                # node roll (reboot) evicts the pod mid-gate
+  # redis-fleet-8.10.3 is scheduled sun-attended:2026-11-29 (re-read 2026-11-19): do NOT run this plan on 2026-11-29 or the night before/after;
+  #   suggest sat-attended:2026-12-05 or later so the three backends 4.3 connects to have settled for a week.
 exclusive: false
-security_ref: F-75f8ab9a              # security row on the CURRENT image (detail in DB only: policy-cli finding show F-75f8ab9a).
-                                      # It is ACCEPTED under AR-029 "already on the newest upstream tag" -- that premise became false
+security_ref: F-3a0917b0              # the OPEN security row on the CURRENT image (status new, critical lane, `finding list --grep redisinsight --all`
+                                      # 2026-11-19; detail in DB only: policy-cli finding show F-3a0917b0). Its title says a newer upstream tag exists, so this
+                                      # bump is its remedy. The older row F-75f8ab9a (accepted under AR-029) is NOT the open one.
+                                      # F-75f8ab9a was ACCEPTED under AR-029 "already on the newest upstream tag" -- that premise became false
                                       # on 2026-11-17 when 3.10.0 shipped. This bump is the remediation we perform (bump, never rebuild).
                                       # Whether 3.10.0 clears the count is measured by the next security sweep, not asserted here.
 capability_change: false              # FACT: no new route, listener, permission, Secret or exposure; rendered delta is one image tag.
@@ -48,7 +52,8 @@ capability_change: false              # FACT: no new route, listener, permission
                                       # not change what the server can reach or who can reach it. Stricter TLS verification is a
                                       # behaviour change only for TLS connections, of which there are zero (1.2). Reviewer may contest.
 rollback_class: git-revert            # 3.8.0 boots against the migrated sqlite (1.3); the pre-change db copy (3.1) is the belt.
-finding_refs: [F-75f8ab9a]            # the only sweep finding for this component (finding list --grep redisinsight, 2026-11-18).
+finding_refs: [F-3a0917b0, F-9533cf69, F-75f8ab9a]   # re-queried 2026-11-19 (finding list --grep redisinsight --all): F-3a0917b0 security (open),
+                                      # F-9533cf69 version lane (now reads 3.8.0 -> 3.10.1, see conflicts note + section 2.3), F-75f8ab9a accepted AR-029 row.
                                       # Script-owned: re-evaluated by security-check on the next sweep after the pin moves.
 review: null
 status: draft
@@ -187,6 +192,9 @@ A different digest = upstream re-pushed the tag: stop and re-review. `None` = ta
 gh release list -R redis/RedisInsight -L 3
 ```
 PASS: newest line is `3.10.0`.
+NOTE 2026-11-19: Docker Hub already carries `3.10.1` (pushed 2026-11-18T12:57Z, digest `sha256:7aea9c96...`, the floating `3.10`/`latest` now point at it) although
+GitHub has no 3.10.1 release yet, so this check still passes. The fixed tag `3.10.0` stays valid and vetted; the window agent or reviewer decides whether to
+retarget to 3.10.1 (re-derive digest, migrations diff, section 1.3) before executing. Do not bump to a floating tag.
 
 2.4 Still no TLS/SSH connection saved (the 1.2 "not applicable" depends on it):
 ```bash
@@ -204,6 +212,12 @@ Measured 2026-11-18: `CONNECT_OK=3/6` — `open-webui-redis.ai…`, `redis.datab
 `paperless-ngx-redis-master.office`, `langfuse-redis.ai`) are **stale saved connections to
 services that no longer exist** (`kubectl get svc` NotFound) and return 424 on 3.8.0 too —
 pre-existing, not a regression, not in scope (operator may delete them in the UI later).
+
+2.5b Baseline the boot-line count (§4.2 compares against it; positive evidence that the NEW process booted on the migrated db):
+```bash
+kubectl exec -n databases deploy/redisinsight -c redisinsight -- sh -c 'cat /data/logs/redisinsight-2*.log* | grep -c "boostrap | Server is running on"'
+```
+Measured 2026-11-19: `2` (two prior boots, 2026-11-12). Record the number as BOOTS_BEFORE.
 
 2.6 Longhorn backup fresh (< 26h):
 ```bash
@@ -271,13 +285,19 @@ PASS: exactly ONE line, ending `@sha256:f00fdc1de63baad22ad2c3eeceede2bcf8859db0
 FAIL looks like: the 3.8.0 digest `sha256:b5e19ee2…` (old generation still serving), two lines
 (roll in progress), or `false`.
 
-4.2 App reports the new version and boots cleanly:
+4.2 App reports the new version and boots cleanly (POSITIVE gates first, absence counts second):
 ```bash
 kubectl exec -n databases deploy/redisinsight -c redisinsight -- node -e 'fetch("http://localhost:5540/api/info").then(r=>r.json()).then(j=>console.log("appVersion="+j.appVersion+" buildType="+j.buildType))'
+kubectl exec -n databases deploy/redisinsight -c redisinsight -- sh -c 'cat /data/logs/redisinsight-2*.log* | grep -c "boostrap | Server is running on"'
+kubectl exec -n databases deploy/redisinsight -c redisinsight -- sh -c 'cat /data/logs/redisinsight-2*.log* | grep -i -c -e QueryFailedError -e SQLITE_ -e migration'
 kubectl exec -n databases deploy/redisinsight -c redisinsight -- sh -c 'cat /data/logs/redisinsight-errors-*.log* | grep -i -c -e QueryFailedError -e SQLITE_ -e migration'
-kubectl logs -n databases deploy/redisinsight -c redisinsight | grep -i -c -e QueryFailedError -e SQLITE_ -e migration -e error
 ```
-PASS: `appVersion=3.10.0 buildType=DOCKER_ON_PREMISE`, and both counts `0`.
+PASS (all): line 1 prints `appVersion=3.10.0 buildType=DOCKER_ON_PREMISE`; line 2 equals BOOTS_BEFORE + 1 from §2.5b (the new process logged
+`Nest application successfully started` / `Server is running on` against the migrated sqlite: TypeORM runs pending migrations before the Nest app starts, so
+this line only appears if the migrations completed); lines 3 and 4 print `0`.
+FAIL: `appVersion=3.8.0` or an empty/errored line 1 (old pod or no response); line 2 equal to BOOTS_BEFORE (no new boot recorded: old pod, or the new one
+died before listening; a failed migration aborts bootstrap so the line never appears); a non-zero line 3/4 (`QueryFailedError`/`SQLITE_*`). Lines 3/4 alone are
+never sufficient: a missing log file or a crashed process also prints 0, which is why line 2 is the gate that can fail while they read 0.
 Why these files: the app's container stdout carries only `Running docker-entry.sh`
 (measured — a stdout grep alone reads 0 whatever happens); RedisInsight writes its own log to
 `/data/logs/redisinsight-<date>.log.0` and ERROR-level lines to
@@ -285,8 +305,7 @@ Why these files: the app's container stdout carries only `Running docker-entry.s
 2026-11-18: migration/sqlite count `0`; the errors file does hold 24 lines from
 `DatabaseClientFactory`/`IoredisRedisConnectionStrategy` — those are the three stale
 connections (§2.5) being probed and are expected to grow after §4.3; do not count them.
-FAIL looks like `appVersion=3.8.0` (old pod) or a non-zero count — a failed TypeORM migration
-logs `QueryFailedError`/`SQLITE_*`; a bootstrap crash prints to stdout and also surfaces as
+A failed TypeORM migration logs `QueryFailedError`/`SQLITE_*`; a bootstrap crash prints to stdout and also surfaces as
 restarts in 4.5.
 
 4.3 **CONTENTS ASSERTION: the saved connection set survived the schema migration and the

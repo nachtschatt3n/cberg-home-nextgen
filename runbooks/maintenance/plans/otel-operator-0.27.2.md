@@ -1,15 +1,15 @@
 ---
-plan_id: otel-operator-0.27.1
+plan_id: otel-operator-0.27.2
 component: otel-operator               # HelmRelease monitoring/otel-operator; CHART is the umbrella
                                        # opentelemetry-kube-stack (subcharts otel-crds, prometheus-crds,
                                        # opentelemetry-operator 0.128.0, kube-state-metrics, node-exporter)
-pr: 513                                # "fix(helm): update opentelemetry-kube-stack ( 0.27.0 → 0.27.1 )", one-line diff to
-                                       # helmrelease.yaml; CI green (Flate Render Gate, Flux Local Diff hr+ks), checked 2026-11-16
+pr: 513                                # "fix(helm): update opentelemetry-kube-stack ( 0.27.0 → 0.27.2 )", one-line diff to
+                                       # helmrelease.yaml; CI green (Flate Render Gate, Flux Local Diff hr+ks), re-checked 2026-11-19 (mergeable UNKNOWN is Renovate's state)
 kind: chart
 current: "0.27.0"                      # MEASURED 2026-11-16: HR spec 0.27.0, helm revision 73 deployed (2026-11-07)
-target: "0.27.1"
+target: "0.27.2"
 update_type: patch
-risk: low                              # measured: the 0.27.0 vs 0.27.1 render with OUR live values is identical apart from
+risk: low                              # measured: the 0.27.0 vs 0.27.2 render with OUR live values is identical apart from
                                        # random cert material and the helm.sh/chart label (section 1.2). appVersion stays 0.162.0, so
                                        # operator AND collector binaries do not move. The one live effect is a 3-pod DaemonSet
                                        # roll, because the chart label is copied onto the collector pods.
@@ -19,7 +19,7 @@ touches:
   namespaces: [monitoring]
   resources:                           # every object verified to EXIST live 2026-11-16
     - helmrelease/otel-operator                         # git edit: chart version only (PR 513)
-    - opentelemetrycollector/otel-operator-daemon       # label helm.sh/chart 0.27.0 -> 0.27.1; spec unchanged
+    - opentelemetrycollector/otel-operator-daemon       # label helm.sh/chart 0.27.0 -> 0.27.2; spec unchanged
     - daemonset/otel-operator-daemon-collector          # ROLLS ONCE (pod label change): maxSurge 0 / maxUnavailable 1
     - secret/otel-operator-opentelemetry-operator-controller-manager-service-cert  # pre-upgrade hook regenerates it
     - mutatingwebhookconfiguration/otel-operator-opentelemetry-operator-mutation      # caBundle
@@ -37,7 +37,6 @@ conflicts_with:                        # ONLY this field is honoured by window-s
                                        # metric controls unattributable
   - talos-linux-1.14.6                 # the roll of record (supersedes 1.14.5): re-creates every collector pod; 4.4 per-node gate
                                        # cannot attribute a node; also monitoring is in its touches.shared
-  - talos-linux-1.14.5                 # same roll, previous target (vetted, still holds sun-attended:2026-11-22 until superseded)
   - longhorn-1.13.0                    # storage-engine move re-attaches the ES / Prometheus volumes this plan reads in section 4
   - helm-drift-detection               # writes spec.driftDetection into every HelmRelease incl. this one
   - flux-oci-chart-sources             # rewrites spec.chart -> chartRef in this same helmrelease.yaml
@@ -54,14 +53,14 @@ rollback_class: git-revert             # nothing forward-only: no CRD, schema or
 autonomy_override: human-gated         # the deny rule `*opentelemetry-kube-stack*` (auto-update-policy.yaml) requires "an
                                        # attended window"; its offline-render condition is re-proven in 3.1
 finding_refs: [F-e918a007]             # RE-VERIFIED 2026-11-16 07:00Z (`policy-cli.py finding list --grep otel --all`, `finding show`):
-                                       # F-e918a007 (version, "otel-operator: chart 0.27.0 -> 0.27.1 (patch)", status unchanged, open,
+                                       # F-e918a007 (version, "otel-operator: chart 0.27.0 -> 0.27.2 (patch)", status unchanged, open,
                                        # first_seen 2026-11-15; the id was RESOLVED on 2026-11-14 and re-opened for this bump, so an
                                        # earlier read of "resolved" is the stale one). Also reads as F-e918a007 for the earlier
                                        # 0.24.3 -> 0.24.4 bump (resolved 2026-10-15): the id is per-component, not per-version.
                                        # NOT referenced, on purpose: F-51ed9a3a (AR-124, collector-k8s 0.162.0 CVEs: the image does
                                        # not move), F-76387378 (edot ES drops, a baseline in 4.4), and the RESOLVED F-60ebcdb5
                                        # (0.26.1 -> 0.27.0, already deployed rev 73), F-c01269d5, F-97c88a5c, F-61e4d5b6.
-status: draft   # 2026-11-18 sweep fa131284: demoted -- was vetted with no recorded review; plan-review needs-fix: PR #513 retargeted to 0.27.2 (b4a62281), re-issue as otel-operator-0.27.2
+status: draft   # 2026-11-19: re-issued from otel-operator-0.27.1 (PR #513 retargeted to 0.27.2, b4a62281). Render delta, release notes and gate re-measured for 0.27.2; review: null until a fresh plan-reviewer runs
 superseded_by: null
 window: null
 sops_refs:
@@ -88,7 +87,7 @@ premises:
     run: kubectl get helmrelease otel-operator -n monitoring -o jsonpath='{.spec.values.opentelemetry-operator.manager.featureGatesMap}'
     expect_contains: '"operator.networkpolicy":false'
   - id: operator-image-0.162.0
-    why: "1.2 proves the 0.27.1 render keeps appVersion 0.162.0; the 'no binary moves' claim only holds from 0.162.0."
+    why: "1.2 proves the 0.27.2 render keeps appVersion 0.162.0; the 'no binary moves' claim only holds from 0.162.0."
     run: kubectl get deploy otel-operator-opentelemetry-operator -n monitoring -o jsonpath='{.spec.template.spec.containers[0].image}'
     expect_exact: "ghcr.io/open-telemetry/opentelemetry-operator/opentelemetry-operator:0.162.0"
   - id: collector-image-0.162.0
@@ -101,7 +100,7 @@ premises:
     expect_exact: "otel-operator-daemon-collector-networkpolicy"
 ---
 
-# otel-operator — opentelemetry-kube-stack 0.27.0 → 0.27.1
+# otel-operator — opentelemetry-kube-stack 0.27.0 → 0.27.2
 
 ## 1) Summary & why held
 
@@ -109,13 +108,15 @@ premises:
 
 Two independent holds, neither a technical objection to this release:
 
-1. **Release notes unavailable.** Renovate's PR body links the wrong release: its
-   "Release Notes" section points at `opentelemetry-demo-0.27.1` (a different chart in the
-   same repo, "fix grafana dashboards") because the tag numbers collide. The auto-updater therefore
-   could not verify anything and routed it here. **This is a repo/Renovate defect, not a property of the
-   release.** The real notes were read for this plan (upstream tag `opentelemetry-kube-stack-0.27.1`):
-   > "[opentelemetry-kube-stack] Render opAMPBridge.podSecurityContext by @henriquesantanati in #2552"
-   That is the entire change list.
+1. **Release notes unavailable to the auto-updater.** Renovate's PR body links release notes for a different chart in the
+   same repo (tag numbers collide across charts in `open-telemetry/opentelemetry-helm-charts`), so the auto-updater
+   could not verify anything and routed it here. **This is a repo/Renovate defect, not a property of the release.**
+   The real notes were read for this plan (GitHub release `opentelemetry-kube-stack-0.27.2`, published 2026-11-17T20:19Z; the
+   0.27.1 release, 2026-11-10, is cumulative inside it). The ONLY kube-stack entries between 0.27.0 and 0.27.2 are:
+   > 0.27.1: "[opentelemetry-kube-stack] Render opAMPBridge.podSecurityContext by @henriquesantanati in #2552"
+   > 0.27.2: "fix(opentelemetry-kube-stack): Respect namespaceOverride in all kube-stack templates by @wonderslug in #2554"
+   (the other 0.27.2 notes, a demo load-generator fix, a chart-releaser action bump and a `opentelemetry-collector`
+   chart preset change, belong to other charts in the repo and do not ship in this chart).
 2. **Deny rule `*opentelemetry-kube-stack*`** (HELD 2026-10-12, F-c01269d5) requires that a chart bump go
    through an attended window. Its offline-render condition is met by the gate pin in values (0e976cf5)
    and re-proven in 3.1.
@@ -123,15 +124,16 @@ Two independent holds, neither a technical objection to this release:
 ### 1.2 Measured render delta (with our live values), 2026-11-16
 
 `helm pull` of both charts, then `helm template ... -f <spec.values from HEAD> --include-crds`:
-both render 21 034 lines. After removing the random cert material (`caBundle`, `tls.crt`, `tls.key`,
-`ca.crt`) and the `helm.sh/chart` label, the diff is **empty**. The chart-source diff is exactly two
-files:
+both render 21 034 lines (re-measured 2026-11-19 for 0.27.2). After removing the random cert material (`caBundle`, `tls.crt`,
+`tls.key`, `ca.crt`) and the `helm.sh/chart` label, the diff is **empty (0 lines)**. The chart-source diff is exactly six
+files, all template-only:
 
-- `Chart.yaml`: `version: 0.27.0` → `0.27.1` (appVersion stays `0.162.0`, subchart `opentelemetry-operator`
-  stays `0.128.0`).
-- `templates/bridge.yaml`: adds `podSecurityContext: {{ toYaml $.Values.opAMPBridge.podSecurityContext }}`
-  to the OpAMPBridge spec. **No OpAMPBridge is rendered** with our values and none exists live
-  (`kubectl get opampbridge -A` → "No resources found").
+- `Chart.yaml`: `version: 0.27.0` -> `0.27.2` (appVersion stays `0.162.0`, subchart `opentelemetry-operator` stays `0.128.0`).
+- `templates/bridge.yaml`: adds `podSecurityContext` (0.27.1) and an explicit `namespace:` on the OpAMPBridge. **No OpAMPBridge is
+  rendered** with our values and none exists live (`kubectl get opampbridge -A` -> "No resources found").
+- `templates/NOTES.txt`, `clusterrole.yaml`, `hooks.yaml`, `instrumentation.yaml`: `.Release.Namespace` ->
+  `include "opentelemetry-kube-stack.namespace"` (0.27.2, honours `namespaceOverride`). We set no `namespaceOverride`, the
+  helper falls back to the release namespace, and the render is byte-identical (the empty diff above is the proof).
 
 Rendered images: operator `:0.162.0`, `--collector-image=otel/opentelemetry-collector-k8s:0.162.0`,
 `--feature-gates=-operator.networkpolicy` count 1. All identical to what is live.
@@ -163,7 +165,7 @@ flapping (~12 leader changes that day). Every apply step below is a Flux apply t
 
 ```bash
 # (a) premises
-.venv/bin/python3 runbooks/plan-premises.py otel-operator-0.27.1
+.venv/bin/python3 runbooks/plan-premises.py otel-operator-0.27.2
 # PASS: all 7 premises OK. Any FAIL = stop; do not "fix" a premise to proceed.
 
 # (b) Flux + helm not mid-flight
@@ -176,7 +178,7 @@ gh pr view 513 --json state,files,statusCheckRollup \
   -q '.state, [.files[].path], [.statusCheckRollup[]|.name+"="+.conclusion]'
 gh pr diff 513 | grep '^[-+] '
 # PASS: OPEN; files == [kubernetes/apps/monitoring/otel-operator/app/helmrelease.yaml]; all checks SUCCESS;
-# diff exactly `-      version: 0.27.0` / `+      version: 0.27.1`.
+# diff exactly `-      version: 0.27.0` / `+      version: 0.27.2`.
 # FAILS AS: a different version line (Renovate re-targeted, as it did for #351 and #324) -> STOP, plan is stale.
 
 # (d) baselines (record in the run log)
@@ -194,10 +196,10 @@ kubectl get netpol -A -o name | wc -l
 
 ```bash
 REPO=/Users/mu/code/cberg-home-nextgen
-G=$(mktemp -d /tmp/otel-0271-gate.XXXXXX)
+G=$(mktemp -d /tmp/otel-0272-gate.XXXXXX)
 cd "$G" || exit 1
 helm pull opentelemetry-kube-stack --repo https://open-telemetry.github.io/opentelemetry-helm-charts \
-  --version 0.27.1 --untar --untardir c || { echo "GATE FAIL: pull"; exit 1; }
+  --version 0.27.2 --untar --untardir c || { echo "GATE FAIL: pull"; exit 1; }
 python3 -c "
 import yaml
 d=[x for x in yaml.safe_load_all(open('$REPO/kubernetes/apps/monitoring/otel-operator/app/helmrelease.yaml')) if x and x.get('kind')=='HelmRelease'][0]
@@ -217,7 +219,7 @@ if [ "$GATE" = 1 ] && [ "$IMG" = 1 ] && [ "$COLIMG" = 1 ] && [ "$CARGS" = "-proc
 cd "$REPO"
 ```
 
-Measured 2026-11-16 against the 0.27.1 chart: `gate_arg=1 operator_img=1 collector_img=1`, and the diff
+Measured 2026-11-16 against the 0.27.2 chart: `gate_arg=1 operator_img=1 collector_img=1`, and the diff
 against the 0.27.0 render is empty (1.2). **FAILS AS:** `gate_arg=0` — the pin was lost or the subchart
 renamed `featureGatesMap` (STOP). `operator_img=0` / `collector_img=0` — the chart moved under the same version
 or someone pinned images; the 0.162.0 analysis no longer holds (STOP, re-plan). `collector_gate` empty — the
@@ -234,9 +236,9 @@ cd /Users/mu/code/cberg-home-nextgen
 gh pr merge 513 --squash --delete-branch
 git pull --ff-only
 git log -1 --format='%h %s'          # must be the #513 squash
-grep -n 'version: 0.27.1' kubernetes/apps/monitoring/otel-operator/app/helmrelease.yaml    # MUST match 1 line
+grep -n 'version: 0.27.2' kubernetes/apps/monitoring/otel-operator/app/helmrelease.yaml    # MUST match 1 line
 grep -n 'DontEmitV0K8sConventions' kubernetes/apps/monitoring/otel-operator/app/helmrelease.yaml   # args pin survived
-W="$HOME/.cache/otel-0271"; mkdir -p "$W"; chmod 700 "$W"
+W="$HOME/.cache/otel-0272"; mkdir -p "$W"; chmod 700 "$W"
 MERGE_SHA=$(git rev-parse HEAD); echo "$MERGE_SHA" | tee "$W/merge-sha.txt"      # shell state does not survive between Bash calls: 5.1 reads this file
 ```
 
@@ -248,38 +250,38 @@ No manual `flux reconcile`: the push webhook drives the source. Only if
 
 `rollout status` can return at once on the OLD generation (Flux has not reconciled yet; see 4.1), so a timestamp taken
 after it can predate the roll, and every ES window that starts at it would then count pre-roll documents. The stamp is
-therefore taken only inside a loop that proves the NEW generation is live: HelmRelease history says `0.27.1/deployed`
-AND all three collector pods carry the `0.27.1` chart label AND are Ready.
+therefore taken only inside a loop that proves the NEW generation is live: HelmRelease history says `0.27.2/deployed`
+AND all three collector pods carry the `0.27.2` chart label AND are Ready.
 
 ```bash
-W="$HOME/.cache/otel-0271"; mkdir -p "$W"
+W="$HOME/.cache/otel-0272"; mkdir -p "$W"
 rm -f "$W/rollout-ts.txt"      # never inherit a stamp from an earlier run
 OK=no
 for i in $(seq 1 60); do
   HR=$(kubectl get hr otel-operator -n monitoring -o jsonpath='{.status.history[0].chartVersion}/{.status.history[0].status}')
   NEW=$(kubectl -n monitoring get pods -l app.kubernetes.io/component=opentelemetry-collector \
     -o jsonpath='{range .items[*]}{.metadata.labels.helm\.sh/chart}{" "}{.status.containerStatuses[0].ready}{"\n"}{end}' \
-    | grep -c '^opentelemetry-kube-stack-0.27.1 true$')
+    | grep -c '^opentelemetry-kube-stack-0.27.2 true$')
   echo "poll $i: hr=$HR new-generation-ready=$NEW/3"
-  if [ "$HR" = "0.27.1/deployed" ] && [ "$NEW" = "3" ]; then OK=yes; break; fi
+  if [ "$HR" = "0.27.2/deployed" ] && [ "$NEW" = "3" ]; then OK=yes; break; fi
   sleep 30
 done
 if [ "$OK" = yes ]; then
-  date -u +%Y-%m-%dT%H:%M:%SZ | tee "$W/rollout-ts.txt"          # ROLLOUT_TS: the LAST collector pod just became Ready on 0.27.1
+  date -u +%Y-%m-%dT%H:%M:%SZ | tee "$W/rollout-ts.txt"          # ROLLOUT_TS: the LAST collector pod just became Ready on 0.27.2
 else
   rm -f "$W/rollout-ts.txt"; echo "ROLL NOT COMPLETE after 30 min: NO ROLLOUT_TS written; go to 5.3 diagnostics"
 fi
 flux get hr otel-operator -n monitoring
 ```
 
-**PASS:** the loop ends with `hr=0.27.1/deployed new-generation-ready=3/3` and writes `rollout-ts.txt`. **FAILS AS:** 60 polls
+**PASS:** the loop ends with `hr=0.27.2/deployed new-generation-ready=3/3` and writes `rollout-ts.txt`. **FAILS AS:** 60 polls
 without the pair (prints `ROLL NOT COMPLETE`, deletes the stamp file, so 4.2 and 4.4 refuse to run: they `exit 1` on a
 missing file). Dry-tested read-only against the live 0.27.0 cluster 2026-11-16: the pod read printed
 `new-generation-ready=3` for the label `0.27.0` (the positive control: the jsonpath and the grep both work) and `0` for
-`0.27.1`, so before the roll the loop cannot succeed. Later steps read the stamp with
-`ROLLOUT_TS=$(cat "$HOME/.cache/otel-0271/rollout-ts.txt")` (shell state does not persist between calls).
+`0.27.2`, so before the roll the loop cannot succeed. Later steps read the stamp with
+`ROLLOUT_TS=$(cat "$HOME/.cache/otel-0272/rollout-ts.txt")` (shell state does not persist between calls).
 
-Expect `Ready True`, `Helm upgrade succeeded ... 0.27.1`. Run the 4.3 netpol check once **immediately** (do
+Expect `Ready True`, `Helm upgrade succeeded ... 0.27.2`. Run the 4.3 netpol check once **immediately** (do
 not wait for the HR timeout): an `opentelemetry-operator` policy appearing means go to 5.3 now.
 
 ## 4) Verification
@@ -293,13 +295,13 @@ kubectl get opentelemetrycollector otel-operator-daemon -n monitoring \
   -o jsonpath='ver={.status.version} scale={.status.scale.statusReplicas}'; echo
 ```
 
-PASS: `0.27.1/deployed ready=True`; `ver=0.162.0 scale=3/3`. FAILS AS: `0.27.0/deployed` (the upgrade did not
+PASS: `0.27.2/deployed ready=True`; `ver=0.162.0 scale=3/3`. FAILS AS: `0.27.0/deployed` (the upgrade did not
 land; 3.2 grep line passed but Flux has not reconciled) or `UpgradeFailed`/`RollbackFailed` (go to 5.3).
 
 ### 4.1 CONTENTS ASSERTION — the roll happened, nothing else moved
 
 ```
-CONTENTS ASSERTION: every RUNNING collector pod carries label helm.sh/chart=opentelemetry-kube-stack-0.27.1
+CONTENTS ASSERTION: every RUNNING collector pod carries label helm.sh/chart=opentelemetry-kube-stack-0.27.2
   (proves the 3-pod roll took the new generation), is still collector-k8s:0.162.0 with the
   DontEmitV0K8sConventions arg, and the RUNNING operator pod is unchanged (same pod name and start time as
   2(d)), image 0.162.0, with --feature-gates=-operator.networkpolicy. Measured on live pods, not the template.
@@ -318,7 +320,7 @@ kubectl get --raw "${P}?query=kube_deployment_status_replicas_available%7Bnamesp
   | python3 -c "import sys,json;r=json.load(sys.stdin)['data']['result'];print('avail=',[x['value'][1] for x in r] or 'EMPTY')"
 ```
 
-PASS: three collector pods on nuc14-01/02/03, each `CHART=opentelemetry-kube-stack-0.27.1`,
+PASS: three collector pods on nuc14-01/02/03, each `CHART=opentelemetry-kube-stack-0.27.2`,
 `...collector-k8s:0.162.0`, R=0. DaemonSet args contain `--feature-gates=-processor.k8sattributes.DontEmitV0K8sConventions`.
 One operator pod, START equals the 2(d) baseline, image `...:0.162.0`, ready `true`; the grep prints
 `"--feature-gates=-operator.networkpolicy"`. `avail= ['1']`.
@@ -339,7 +341,7 @@ for p in $(kubectl -n monitoring get pods -l app.kubernetes.io/component=opentel
     "$(kubectl -n monitoring logs "$p" | grep -ci 'container.image.tag is configured but will NOT be emitted')" \
     "$(kubectl -n monitoring logs "$p" | grep -ci 'container.image.tag is being renamed')"
 done
-ROLLOUT_TS=$(cat "$HOME/.cache/otel-0271/rollout-ts.txt") || exit 1; [ -n "$ROLLOUT_TS" ] || { echo "no ROLLOUT_TS: 3.3 did not complete"; exit 1; }
+ROLLOUT_TS=$(cat "$HOME/.cache/otel-0272/rollout-ts.txt") || exit 1; [ -n "$ROLLOUT_TS" ] || { echo "no ROLLOUT_TS: 3.3 did not complete"; exit 1; }
 echo "ROLLOUT_TS=$ROLLOUT_TS"
 ES_PW=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
 kubectl port-forward -n monitoring svc/elasticsearch-es-http 19200:9200 >/dev/null 2>&1 & PF=$!
@@ -375,7 +377,7 @@ missing (count 4, `np=[]`) is a WARN, not a rollback (telemetry is unaffected; i
 
 ### 4.4 CONTENTS ASSERTION — telemetry flows from every node (load-bearing)
 
-Run **>= 10 min after ROLLOUT_TS** (the stamp is taken when the LAST collector pod became Ready on 0.27.1, so the window holds only post-roll documents).
+Run **>= 10 min after ROLLOUT_TS** (the stamp is taken when the LAST collector pod became Ready on 0.27.2, so the window holds only post-roll documents).
 
 ```
 CONTENTS ASSERTION: pod-log documents from ALL THREE nodes land in Elasticsearch in a window starting at
@@ -384,7 +386,7 @@ CONTROL: kube_daemonset_status_number_ready otel-operator-daemon-collector must 
 CONTROL: alertname OtelDaemonCollectorDown must NOT be firing
 ```
 ```bash
-ROLLOUT_TS=$(cat "$HOME/.cache/otel-0271/rollout-ts.txt") || exit 1; [ -n "$ROLLOUT_TS" ] || { echo "no ROLLOUT_TS: 3.3 did not complete"; exit 1; }
+ROLLOUT_TS=$(cat "$HOME/.cache/otel-0272/rollout-ts.txt") || exit 1; [ -n "$ROLLOUT_TS" ] || { echo "no ROLLOUT_TS: 3.3 did not complete"; exit 1; }
 echo "ROLLOUT_TS=$ROLLOUT_TS (now $(date -u +%H:%M:%SZ); must be >= 10 min later)"
 ES_PW=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
 kubectl port-forward -n monitoring svc/elasticsearch-es-http 19200:9200 >/dev/null 2>&1 & PF=$!
@@ -416,7 +418,7 @@ do not read it as a regression from this plan. Compare against the pre-window al
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-MERGE_SHA=$(cat "$HOME/.cache/otel-0271/merge-sha.txt"); [ -n "$MERGE_SHA" ] || { echo "no merge sha recorded: find the #513 squash with git log --oneline -5 -- kubernetes/apps/monitoring/otel-operator"; exit 1; }
+MERGE_SHA=$(cat "$HOME/.cache/otel-0272/merge-sha.txt"); [ -n "$MERGE_SHA" ] || { echo "no merge sha recorded: find the #513 squash with git log --oneline -5 -- kubernetes/apps/monitoring/otel-operator"; exit 1; }
 git revert --no-edit "$MERGE_SHA"
 git log -1 --format=%s     # confirm the subject is THIS revert (shared worktree)
 git show --stat HEAD       # only helmrelease.yaml
@@ -435,7 +437,7 @@ kubectl -n monitoring get pods -l app.kubernetes.io/component=opentelemetry-coll
   -o 'custom-columns=N:.metadata.name,IMG:.status.containerStatuses[0].image,CHART:.metadata.labels.helm\.sh/chart'            # 0.162.0, chart 0.27.0
 kubectl -n monitoring get ds otel-operator-daemon-collector -o jsonpath='{.status.numberReady}/{.status.desiredNumberScheduled}'; echo  # 3/3
 ```
-Then re-run 4.3 and 4.4 with a fresh stamp: repeat the 3.3 loop with `0.27.0` in the two places it names `0.27.1` (the `HR` test and the label grep) (the stamp file is overwritten).
+Then re-run 4.3 and 4.4 with a fresh stamp: repeat the 3.3 loop with `0.27.0` in the two places it names `0.27.2` (the `HR` test and the label grep) (the stamp file is overwritten).
 
 ### 5.3 The RollbackFailed trap — if the operator is NOT Ready
 

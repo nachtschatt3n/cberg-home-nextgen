@@ -28,7 +28,10 @@ touches:
     - deployment/penpot-exporter      # NOT edited; holds one client connection, reconnects
   shared: []                          # dedicated cache, no PVC, no route; not a shared redis
 depends_on: []
-conflicts_with: [flux-reconciler-impersonation]
+conflicts_with: [flux-reconciler-impersonation, penpot-cache-9.1.4]
+  # penpot-cache-9.1.4 (added 2026-11-19, reciprocal): same file, same tag line. Once 9.1.4 lands, this plan's baseline
+  #   and rollback target are 9.1.4, not 9.1.2 (premises live-image-still-9.1.2 / manifest-pin-still-9.1.2 must be re-pointed
+  #   before any unblock).
   # 2026-10-25: pruned dead refs kube-prometheus-stack-91.9.0, penpot-chart-1.10.0 (executed/retired)
                                       # kube-prometheus-stack-91.9.0: §4 reads kube-state-metrics
                                       #   through Prometheus — the window's instrument.

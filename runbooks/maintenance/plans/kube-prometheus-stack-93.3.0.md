@@ -57,12 +57,12 @@ depends_on:
                                   # talos-linux-1.14.5 (vetted, target behind upstream; set superseded when 1.14.6 is vetted) and
                                   # is the roll of record: PR #248 and F-912f4778 both read v1.14.1 -> v1.14.6.
 conflicts_with:                   # Built 2026-11-14 from every non-terminal plan file whose touches name `monitoring` or whose
-  - otel-operator-0.27.1
+  - otel-operator-0.27.2
+  - penpot-cache-9.1.4            # 4.x CONTROLs read kube-state-metrics through this Prometheus (reciprocal, added 2026-11-19)
   - unpoller-5.9.5
   - music-assistant-skill-b1ef33a
                                   # body reads Prometheus (authoring rule 4). The scheduler reads this field in both directions.
   - talos-linux-1.14.6            # EXCLUSIVE node roll (the plan of record): evicts Prometheus and reads it for its own gates
-  - talos-linux-1.14.5            # same roll, previous target; stays until it is marked superseded
   - longhorn-1.13.0               # EXCLUSIVE storage engine move: the two volumes above re-attach
   - talos-power-tuning-ab
   - etcd-timeouts-5000-500

@@ -391,7 +391,8 @@ deny:
       one-way knex schema migrations into the shared postgresql instance on boot.
       Upstream documents no downgrade, so rollback is restore-from-dump only.
       Never unattended: needs the mandatory pre-dump + operator acceptance gate
-      from runbooks/maintenance/plans/nocodb-calver.md."
+      from the per-bump plan runbooks/maintenance/plans/nocodb-<target>.md
+      (the generic nocodb-calver.md no longer exists)."
     max: patch
   # MUST stay above "*nextcloud*": first match wins, and the glob below would
   # otherwise swallow nextcloud-mcp and justify holding it with the Nextcloud

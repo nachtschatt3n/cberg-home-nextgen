@@ -92,7 +92,7 @@ conflicts_with:
 - nocodb-2026.10.1
 - otbr-0.4.0
 - otbr-thread-rcp-recovery
-- otel-operator-0.27.1
+- otel-operator-0.27.2
 - postgres-digest-refresh-2026-11
 - postgres-fleet-18.7-alpine
 - postgres-fleet-18.7-bookworm

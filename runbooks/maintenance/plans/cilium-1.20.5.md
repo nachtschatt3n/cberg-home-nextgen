@@ -68,7 +68,7 @@ conflicts_with:                       # Belt-and-braces: `exclusive: true` alrea
   - flux-oci-chart-sources            # cni-adjacent; changes chart sourcing incl. this HR (sun-attended:2026-12-13)
   - flux-reconciler-impersonation     # Flux is the rollback machinery (§5); exclusive on its own side
   - kube-prometheus-stack-93.3.0      # §4.2's instrument (README rule: same-night KPS bump must be listed)
-  - otel-operator-0.27.1              # monitoring collectors; precedent declared otel <-> cilium both ways
+  - otel-operator-0.27.2              # monitoring collectors; precedent declared otel <-> cilium both ways
   - envoy-gateway-1.10.0              # §4.5 gates on the Envoy VIPs; same-night Envoy change = un-attributable
   - envoy-proxy-config-distroless-v1.40.2
   - coredns-1.50.5                    # DNS rides this datapath; §4.9 FQDN canary resolves through coredns
@@ -1068,7 +1068,7 @@ transient blip during the roll.
   already in the outgoing agent, so this is shorter than on the 1.20.2 → 1.20.4 roll).
 - **Step 0 ordering.** Take every §2 baseline after Step 0 settles.
 - **Monitoring is the instrument.** §4.2 reads Prometheus over the datapath being changed,
-  which is why `kube-prometheus-stack-93.3.0` and `otel-operator-0.27.1` are in
+  which is why `kube-prometheus-stack-93.3.0` and `otel-operator-0.27.2` are in
   `conflicts_with`.
 - **Upstream pre-flight DaemonSet deliberately not used**: it would be a second Helm release
   outside Flux. The node-level pre-pull (§2p) covers its value.

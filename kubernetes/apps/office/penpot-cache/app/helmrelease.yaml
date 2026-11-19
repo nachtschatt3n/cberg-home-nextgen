@@ -1,11 +1,12 @@
 ---
 # Standalone Valkey (cache only) for Penpot — re-platformed off the deprecated
 # Bitnami chart onto the official `valkey/valkey` image via bjw-s app-template.
-# Cache only: no persistence, no auth (penpot uses redis://penpot-cache-primary:6379/0).
+# Cache only: no persistence, no auth (penpot uses redis://penpot-cache:6379/0).
 #
-# Service name MUST stay `penpot-cache-primary` — the penpot chart's init
-# container and redis host both reference penpot-cache-primary:6379. The
-# `primary` service identifier renders to `<release>-primary` = penpot-cache-primary.
+# Service is `penpot-cache` (verified live 2026-11-19; there is no `-primary` object). The
+# app-template service identifier `primary` is the only service and takes the release name.
+# Penpot's HelmRelease config.redis.host and its wait-for-redis init container point at
+# penpot-cache:6379: keep that name stable.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
