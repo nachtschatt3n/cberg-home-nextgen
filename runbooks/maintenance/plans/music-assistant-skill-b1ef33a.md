@@ -51,8 +51,11 @@ capability_change: false              # same app, same env, same ports/routes. U
 rollback_class: git-revert            # stateless container: no schema, no PVC write by the skill (it mounts only
                                       # /cache emptyDir + /data of the MA server). Old digest stays pullable.
 review: ready-for-go@2026-11-15      # plan-reviewer 2nd pass 2026-11-15: ready-for-go, 0 blocking (1st pass needs-fix: stale MA server digest + conflicts_with, both fixed + verified live). Attended window preferred (voice test 4.6).
-status: awaiting-go
-window: null
+status: executed                      # landed abab22eeb (PR #224 squash) in nightly 2026-11-19, unattended (SD-11)
+window: nightly-2026-11-19
+executed_notes: >-
+  4.1 4.2 4.4 4.5 PASS; 4.3 HTTPRoutes Accepted=True + LAN-side intents 200, OFF-NETWORK curl PENDING operator;
+  4.6 end-to-end voice check PENDING operator morning check. Keep section 5 ready until both are done.
 premises:
   - id: live-skill-digest-is-old
     why: "`current:` and the rollback target claim ad7ec55. If the live sidecar already moved, the baseline is wrong."
