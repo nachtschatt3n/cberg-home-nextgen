@@ -164,7 +164,11 @@ spec:
           # Guard for the guard: if the metric vanishes entirely (collector down,
           # connector renamed, ServiceMonitor broken) the per-node rules go
           # quiet with it and we go blind without any signal.
-          expr: absent(talos_kernel_kmsg_lines_total)
+          # Instant absent() was wrong here: the exporter sends sample timestamps and quiet
+          # nodes write only the hourly heartbeat, so the series is routinely older than
+          # the 5m instant lookback and the rule fired while the pipeline was healthy
+          # (2026-11-19). 3h matches TalosKernelLogsMissingFromNode (hourly heartbeat).
+          expr: absent_over_time(talos_kernel_kmsg_lines_total[3h])
           for: 15m
           labels:
             severity: warning
