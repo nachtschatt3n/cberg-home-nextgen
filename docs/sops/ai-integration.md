@@ -382,7 +382,7 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   stream with an incomplete tool call").
   **familyha (2026-11-18):** household controls the house through a fourth
   family-mcp server, `familyha` (tools `familyha__list_entities`, `get_state`,
-  `control`, `list_items`, `camera_snapshot`, `calendar_events`). It REUSES
+  `control`, `list_items`, `camera_snapshot`, `calendar_events`, `weather`). It REUSES
   OpenClaw's existing HA token (`HASS_TOKEN`, an owner/admin user; captured
   inside family-mcp before its env scrub, never returned), so all protection
   is enforced in code (`FamilyHA` in family-mcp.py): an HTTP method+path
@@ -407,6 +407,37 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   Rollback: remove the patch block and set `famVoiceModel.primary` back to
   `anthropic/claude-haiku-5-5` (one pod roll; npm reinstall restores the
   pristine files).
+  **Voice latency v5.6 (2026-11-20):** VOICE MODE gains (1) HOUSE COMMANDS:
+  Juno twins act with ONE `ha call` (exact forms in the bullet and in the
+  home-assistant skill's "Voice" section, no `--json`) and NEVER verify with
+  `ha state` / `sleep`; household acts with one `familyha__control` and never
+  re-reads; (2) FRAGMENTS: a 1-2 word input with no request gets only "Hm?" /
+  "Ja?" (an empty reply was not used: OpenClaw treats empty assistant output
+  as a failover case); (3) household LOOKUPS name the exact `dispatch_action`
+  ids + args (`familycal__list_events`, `meals__get_meal_plan`,
+  `familyha__weather`, `familyha__list_entities`, `familyha__control`) so it
+  skips tool_search/tool_describe. Tool Search itself can only be switched
+  globally (`tools.toolSearch`, no per-agent key in 2026.11.1), so it stays on.
+  `familyha__weather` is new: read-only `weather.forecast_home` state + the
+  `weather.get_forecasts` (daily) response. The AGENTS.md files are PVC-owned,
+  so the same edits were also applied in-pod (`.bak-pre-v56-latency-*`), and
+  main's AGENTS.md lost a stale duplicate of the doctor's TOOLS.md migration
+  (it was 42.3K > `bootstrapMaxChars` 40K, i.e. truncated). Cause of the
+  duplicate: init re-seeds TOOLS.md every boot and `doctor --fix` inserts a
+  new copy whenever workspace-tools.md changed; recheck after edits to it.
+  **LATENCY-DEBUG (TIME-BOXED, enabled 2026-11-20, REVERT on/after
+  2026-11-21):** to explain the ~2.9 s prep gap (tool-catalog -> first model
+  request), the ~3.4 s pre-session gap and plugin-reload stalls, the app
+  container sets `OPENCLAW_DIAGNOSTICS=reply.profiler,ingress.timing,
+  plugin.load-profile,timeline`, `OPENCLAW_DIAGNOSTICS_TIMELINE_PATH=
+  /home/node/.openclaw/diag/latency-timeline.jsonl` and
+  `OPENCLAW_DIAGNOSTICS_EVENT_LOOP=1`, and the init container lowers the
+  embedded-run prep-stage WARN thresholds (10 s/5 s -> 1 s/0.5 s), so slow
+  runs log `[trace:embedded-run] prep stages: ... stages=...` as WARN. All
+  timing-only (stage names, ms, session UUIDs, plugin ids; no prompts or
+  secrets). Revert: delete every block tagged `LATENCY-DEBUG` in
+  helmrelease.yaml (3 env vars, the init sed block, the diag mkdir), push,
+  then `rm -rf /home/node/.openclaw/diag` in-pod.
   **Heartbeats are explicitly enrolled per agent** because of these twins:
   every agent gets `heartbeat: {}` (= defaults, 1h) and the twins get
   `every: "0m"`. Otherwise a twin would run main's stateful `HEARTBEAT.md`

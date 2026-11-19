@@ -663,6 +663,29 @@ spec:
                 else console.log('startup-retry patch: ' + patched + ' file(s) patched, ' + already + ' already patched');
                 STARTUPRETRY
 
+                # LATENCY-DEBUG (2026-11-20, TIME-BOXED ~1 day, operator-approved item E).
+                # The embedded runner already times its prep stages (workspace-sandbox,
+                # skills, tool-catalog, bootstrap-context, system-prompt, prompt-build,
+                # stream-setup, ...) but only prints the summary at `trace` level or when
+                # a run is slower than 10 s total / 5 s per stage. Lower those to 1 s /
+                # 0.5 s so every slow voice prep logs ONE WARN line
+                # "[trace:embedded-run] prep stages: runId=.. sessionId=.. stages=..."
+                # (stage names + ms only: no prompt, no message text, no secrets).
+                # Goal: explain the ~2.9 s gap between tool-catalog and the first model
+                # request. Pairs with OPENCLAW_DIAGNOSTICS* on the app container.
+                # REVERT: delete this block AND the LATENCY-DEBUG env block (grep
+                # LATENCY-DEBUG); the next boot's npm reinstall restores the file.
+                for f in /home/node/.openclaw/lib/node_modules/openclaw/dist/attempt-system-prompt-prepare-*.mjs; do
+                  [ -f "$f" ] || continue
+                  sed -i -e 's/EMBEDDED_RUN_STAGE_WARN_TOTAL_MS = 1e4;/EMBEDDED_RUN_STAGE_WARN_TOTAL_MS = 1e3;/' \
+                         -e 's/EMBEDDED_RUN_STAGE_WARN_STAGE_MS = 5e3;/EMBEDDED_RUN_STAGE_WARN_STAGE_MS = 5e2;/' "$f"
+                  if grep -q 'EMBEDDED_RUN_STAGE_WARN_TOTAL_MS = 1e3;' "$f"; then
+                    echo "latency-debug patch: prep-stage warn thresholds lowered in $(basename "$f")"
+                  else
+                    echo "WARN: latency-debug patch target not found in $(basename "$f") (upstream changed?)"
+                  fi
+                done
+
                 export PIP_ROOT_USER_ACTION=ignore
                 install_pip obsidian-cli
                 # himalaya was installed for the early IMAP-direct mail
@@ -1880,7 +1903,8 @@ spec:
                     // familyha (2026-11-18): Home Assistant house control for household,
                     // reusing the existing HA token (owner/admin) behind allow-lists that are
                     // enforced inside family-mcp (FamilyHA), not in the prompt.
-                    familyha: ['list_entities', 'get_state', 'control', 'list_items', 'camera_snapshot', 'calendar_events'],
+                    // weather (2026-11-20): read-only current + daily forecast for household voice.
+                    familyha: ['list_entities', 'get_state', 'control', 'list_items', 'camera_snapshot', 'calendar_events', 'weather'],
                   };
                   const famMcpTools = [];
                   Object.keys(famMcp).forEach((g) => {
@@ -2335,6 +2359,9 @@ spec:
                 fi
 
                 echo "Starting OpenClaw Gateway..."
+                # LATENCY-DEBUG (2026-11-20, time-boxed): target dir of
+                # OPENCLAW_DIAGNOSTICS_TIMELINE_PATH. Revert with the env block.
+                mkdir -p /home/node/.openclaw/diag
                 mkdir -p /home/node/clawd
                 cd /home/node/clawd
                 exec /home/node/.openclaw/bin/openclaw gateway --port 18789 --verbose
@@ -2425,6 +2452,22 @@ spec:
               # be off for runGatewayUpdateCheck to short-circuit before its
               # npm-registry probe. Re-ratified 2026-06-11.
               - name: OPENCLAW_NO_AUTO_UPDATE
+                value: "1"
+              # LATENCY-DEBUG (2026-11-20, TIME-BOXED ~1 day, operator-approved item E).
+              # Timing-only diagnostics flags (no prompts, message text or secrets):
+              #  reply.profiler      reply-dispatch stages >=500 ms (pre-run/session gap)
+              #  ingress.timing      session load, model selection, model catalog timings
+              #  plugin.load-profile per-plugin module load timings (plugin reload stall)
+              #  timeline            JSONL span/event-loop artifact on the PVC
+              # Includes session keys (UUIDs) and plugin ids, nothing else identifying.
+              # REVERT after the measurement day: delete these three env vars, the
+              # LATENCY-DEBUG init-container block and the diag mkdir (grep
+              # LATENCY-DEBUG), then rm -rf /home/node/.openclaw/diag.
+              - name: OPENCLAW_DIAGNOSTICS
+                value: "reply.profiler,ingress.timing,plugin.load-profile,timeline"
+              - name: OPENCLAW_DIAGNOSTICS_TIMELINE_PATH
+                value: "/home/node/.openclaw/diag/latency-timeline.jsonl"
+              - name: OPENCLAW_DIAGNOSTICS_EVENT_LOOP
                 value: "1"
               # Mac ops console pane label for the operation /
               # maintenance-window skills; must match runbooks/window-crons.py
