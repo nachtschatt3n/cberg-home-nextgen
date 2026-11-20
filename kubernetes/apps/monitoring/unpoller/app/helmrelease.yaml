@@ -79,7 +79,7 @@ spec:
       # override STAYS (no published chart ships appVersion >= v5.5). Deltas: station-count and
       # temperature/storage LABEL fixes (v5.6.0/.2/.3), per-WAN series (v5.7.0), one extra best-effort
       # console-system API call per poll (v5.9.0), rogueap last_seen (v5.9.4), PDU/UNAS/cellular inert.
-      tag: v5.9.5
+      tag: v5.9.6
 
     replicaCount: 1
 
