@@ -92,7 +92,7 @@ spec:
                 limits:
                   cpu: "1"
                   memory: 1Gi
-                  ephemeral-storage: 2Gi
+                  ephemeral-storage: 4Gi
               volumeMounts:
                 - name: scripts
                   mountPath: /scripts
@@ -119,4 +119,4 @@ spec:
                     path: KNOWN_HOSTS
             - name: tmp
               emptyDir:
-                sizeLimit: 1Gi
+                sizeLimit: 3Gi
