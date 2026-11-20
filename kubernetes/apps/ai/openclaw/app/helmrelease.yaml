@@ -536,9 +536,20 @@ spec:
                 #    is playing ..., and the user asked for "another one", which I
                 #    read as another joke. I'll give a joke instead ...\n\nHere's
                 #    another one: ..." -> only "Here's another one: ..." is spoken.
-                #    Only leading sentences, at least one sentence always kept;
-                #    output.content and the held text_delta/text_end are rewritten
-                #    together so stream, transcript and history agree.
+                #    v4 (2026-11-20, operator-approved): v3 stopped at the first
+                #    unrecognised sentence, so "English, since the question is in
+                #    English. This is a voice-mode turn (Home Assistant), so I answer
+                #    directly in plain spoken sentences. ..." was spoken in full. Now
+                #    (a) self-talk about language choice, voice mode, tools or
+                #    instructions (STRONG) is dropped WHEREVER it appears; (b) third-
+                #    person narration in the first 3 sentences cuts everything before
+                #    it; (c) the v3 leading meta/plan run is dropped after that; (d) if
+                #    nothing else is left, a neutral "Sorry, I didn't catch that." /
+                #    "Das habe ich nicht verstanden." is spoken instead of the meta.
+                #    Unchanged answers pass byte-identical. Test cases: docs/sops/ai-
+                #    integration.md (narration scrub). output.content and the held
+                #    text_delta/text_end are rewritten together so stream, transcript
+                #    and history agree.
                 # Tradeoffs accepted for voice: no filler, each answer message arrives
                 # in one burst at its end; a refused reply is discarded as upstream.
                 # The object stays truthy, so the "ended before message_stop" check
@@ -555,24 +566,52 @@ spec:
                 const fs = require('fs'), path = require('path'), cp = require('child_process');
                 const dir = process.argv[2];
                 const NEEDLE = 'const refusalBuffer = usesClaudeStreamingRefusalContract(model) ? createDeferredEventBuffer(stream) : void 0;';
-                const MARK = '/*oc-voice-stream-v3*/';
-                // v3 narration scrub: a real function, embedded via toString() (no escaping).
+                const MARK = '/*oc-voice-stream-v4*/';
+                // v4 narration scrub: a real function, embedded via toString() (no escaping).
                 function ocScrubNarration(s) {
                   if (typeof s !== 'string' || !s) return s;
-                  const META = /\b(the user\b(?! (manual|guide|interface|account|name|profile))|user (asked|wants|said|is asking|meant)|der (nutzer|benutzer)\b|die (nutzerin|benutzerin)\b|voice[- ]mode|i (read|took|interpret(ed)?) (this|that|it) as|which i (read|took|interpret(ed)?) as|i('ll| will) (answer|reply|respond) in)/i;
+                  // STRONG: self-talk about language choice, voice mode, tools or instructions.
+                  // Never legit in a spoken answer, so the sentence is dropped wherever it appears.
+                  const STRONG = /\b(voice[- ]?mode|sprachmodus|(home assistant|voice|spoken|speech) (turn|request|context)\b|plain spoken|spoken sentences|plain sentences|(i('ll| will| should| must)?|ich) (answer|reply|respond|antworte) (directly|briefly|in (english|german|deutsch|englisch)|auf (deutsch|englisch))|(answering|replying|responding) (directly|briefly|in (english|german|deutsch|englisch))|(question|frage|anfrage) ((is|ist|was|war) )?(in|auf) (english|german|deutsch|englisch)|(in|auf) (english|german|deutsch|englisch),? (since|because|as|weil|da|denn)\b|(my|meine[nr]?) (instructions|rules|guidelines|anweisungen|regeln)\b|system ?prompt|per (the|my) (instructions|rules)|laut (meinen|den) (anweisungen|regeln)|no (tool|tool call|lookup) (is )?(needed|required|necessary)|tool[- ]?calls?\b|dispatch_action|tool_describe|tool_search|i (do not have|don't have|have no|lack)( a| any)? (?!the\b)[a-z_-]+ tools?\b|i (do not have|don't have|have no) (a |any )?tools?\b|i('ll| will| need to| must| should)? (use|call) (the |a |my )?[a-z_-]+ tool\b|(using|calling) the [a-z_-]+ tool\b|keeping (it|this|the answer) (short|brief|concise))/i;
+                  // A sentence that opens with the chosen language: "English, since ...", "Deutsch, weil ...".
+                  const LANGLEAD = /^(english|german|deutsch|englisch)\b\s*[,.:;\u2014-]\s*(since|because|as|weil|da|denn|the|die|der)\b/i;
+                  // LEAD: third-person / interpretation narration; dropped only in the opening.
+                  const LEAD = /\b(the user\b(?! (manual|guide|interface|account|name|profile))|user (asked|wants|said|is asking|meant)|der (nutzer|benutzer)\b|die (nutzerin|benutzerin)\b|i (read|took|interpret(ed)?) (this|that|it) as|which i (read|took|interpret(ed)?) as|i('ll| will) (answer|reply|respond) (in|with)\b)/i;
                   const PLAN = /^(so )?(i('ll| will| am going to|'m going to)|ich (werde|antworte|gebe))\b/i;
                   const parts = s.match(/[^.!?\n]+(?:[.!?]+["'\u201d\u201c)]*|\n+|$)\s*/g);
                   if (!parts) return s;
-                  let i = 0, dropped = false;
-                  while (i < parts.length - 1) {
+                  const strong = (p) => STRONG.test(p) || LANGLEAD.test(p);
+                  const meta = (p) => strong(p) || LEAD.test(p);
+                  // 1) opening window: third-person narration in the first 3 sentences makes everything
+                  //    before it preamble too ("Okay. The user wants ..."): cut through the last one.
+                  //    (STRONG sentences are removed one by one below, so they never cut legit text.)
+                  let cut = -1, seen = 0;
+                  for (let k = 0; k < parts.length && seen < 3; k++) {
+                    const p = parts[k].trim();
+                    if (!p) continue;
+                    seen++;
+                    if (LEAD.test(p)) cut = k;
+                  }
+                  let i = cut + 1, dropped = cut >= 0;
+                  // 2) v3 behaviour: keep dropping leading meta / plan sentences after the cut
+                  while (i < parts.length) {
                     const p = parts[i].trim();
                     if (!p) { i++; continue; }
-                    if (META.test(p) || (dropped && PLAN.test(p))) { dropped = true; i++; continue; }
+                    if (meta(p) || (dropped && PLAN.test(p))) { dropped = true; i++; continue; }
                     break;
                   }
+                  // 3) strong self-talk later in the answer is dropped too
+                  const kept = parts.slice(i).filter((x) => {
+                    const p = x.trim();
+                    if (p && strong(p)) { dropped = true; return false; }
+                    return true;
+                  });
                   if (!dropped) return s;
-                  const rest = parts.slice(i).join('').replace(/^\s+/, '');
-                  return rest.trim() ? rest : s;
+                  const rest = kept.join('').trim();
+                  if (rest) return rest;
+                  // 4) nothing but meta: never speak it; a short neutral line in the answer's language
+                  return /\b(deutsch|englisch|weil|frage|nutzer|antworte|ich|ist|nicht|und)\b/i.test(s)
+                    ? 'Das habe ich nicht verstanden.' : "Sorry, I didn't catch that.";
                 }
                 const GATE = '((sink, out) => { const scrubText = ' + ocScrubNarration.toString() + '; ' +
                   'let held = [], tool = false; ' +
@@ -604,9 +643,10 @@ spec:
                     const p = path.join(dir, f);
                     const orig = fs.readFileSync(p, 'utf8');
                     if (orig.includes(MARK)) { already++; continue; }
-                    // npm normally restores pristine files each boot; if a v2-patched line
-                    // survived, revert it to the upstream line first so v3 can apply.
-                    const src = orig.replace(/const refusalBuffer = usesClaudeStreamingRefusalContract\(model\) \? \(\/\*oc-voice-stream-v2\*\/[^\n]*?: createDeferredEventBuffer\(stream\)\) : void 0;/g, NEEDLE);
+                    // npm normally restores pristine files each boot; if a v2/v3-patched line
+                    // survived, revert it to the upstream line first so v4 can apply (v3+
+                    // embeds a multi-line function, hence [\s\S] instead of [^\n]).
+                    const src = orig.replace(/const refusalBuffer = usesClaudeStreamingRefusalContract\(model\) \? \(\/\*oc-voice-stream-v[23]\*\/[\s\S]*?: createDeferredEventBuffer\(stream\)\) : void 0;/g, NEEDLE);
                     if (!src.includes(NEEDLE)) continue;
                     // the gate closes over `output`: require its declaration right before the target
                     const at = src.indexOf(NEEDLE);

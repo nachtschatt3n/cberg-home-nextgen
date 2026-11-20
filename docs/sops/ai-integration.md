@@ -312,8 +312,8 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   `anthropic-voice/claude-haiku-5-5`, a provider alias on the same
   `api.anthropic.com` + `ANTHROPIC_API_KEY` env. Upstream `@openclaw/ai`
   buffers every Claude 5-family reply until `message_stop` (refusal
-  contract). The init script's idempotent `VOICE-STREAM PATCH` (v3 since 2026-11-18, marker
-  `oc-voice-stream-v3`) replaces that buffer ONLY for provider
+  contract). The init script's idempotent `VOICE-STREAM PATCH` (v4 since 2026-11-20, marker
+  `oc-voice-stream-v4`) replaces that buffer ONLY for provider
   `anthropic-voice` + `claude-haiku-5-5` with a per-message "narration gate":
   text in a model message is held until the message either starts a tool
   call (held text is dropped and blanked in the stored message, so Haiku's
@@ -342,6 +342,25 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   media player is "playing" only when its state is `playing`; no sensor
   timestamps unless asked). Household also gets "chat follow-ups need no
   tools".
+  **Narration scrub v4 (marker `oc-voice-stream-v4`, 2026-11-20):** v3
+  stopped at the first unrecognised sentence, so voice-andrea's "English,
+  since the question is in English. This is a voice-mode turn (Home
+  Assistant), so I answer directly in plain spoken sentences. ..." was
+  spoken in full. v4 (same gate, same streaming, only the scrub function
+  changed): (a) STRONG self-talk about language choice, voice mode, tools or
+  instructions ("question is in English", "Deutsch, weil ...", "voice-mode",
+  "plain spoken", "I answer directly", "per my instructions", "tool call",
+  "I don't have a timer tool", ...) is dropped WHEREVER it appears; (b)
+  third-person narration ("the user ...", "I read that as") in the first 3
+  sentences cuts everything before it; (c) the v3 leading meta/plan run is
+  dropped after that; (d) if nothing else is left, "Sorry, I didn't catch
+  that." / "Das habe ich nicht verstanden." is spoken instead (never empty:
+  empty output triggers failover). Answers without meta pass byte-identical.
+  Offline suite (27 cases: 13 leak/meta incl. the kitchen leak, 14 legit
+  incl. "user manual", "English muffins", "In English it is called ...",
+  recipe "instructions on the box", the TIMERS reply) passes 27/27; v3 passed
+  15/27 (all legit + the v3 household case). The init revert regex now
+  rewinds a surviving v2 OR v3 line (multi-line) before applying v4.
   **Grill (2026-11-18):** `ha grill` (ha.py) returns one interpreted summary:
   Otto Wilde G32 -> BLE -> ESPHome ESP32 display bridge (`g32_display_bt_*`)
   -> Wi-Fi -> HA; `yard_otto_wilde_bbq_*` is only the Shelly plug; gas left =
@@ -403,7 +422,7 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   **Post-restart check (always):** `openclaw/household` answers HTTP 200, the
   gateway log `/tmp/openclaw/openclaw-<date>.log` has no "agent database
   remains degraded" and no `AgentDatabaseAdmissionError`, and both
-  `oc-voice-stream-v3` and `oc-startup-retry` markers are present.
+  `oc-voice-stream-v4` and `oc-startup-retry` markers are present.
   Rollback: remove the patch block and set `famVoiceModel.primary` back to
   `anthropic/claude-haiku-5-5` (one pod roll; npm reinstall restores the
   pristine files).
@@ -425,6 +444,23 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   (it was 42.3K > `bootstrapMaxChars` 40K, i.e. truncated). Cause of the
   duplicate: init re-seeds TOOLS.md every boot and `doctor --fix` inserts a
   new copy whenever workspace-tools.md changed; recheck after edits to it.
+  **TIMERS v5.7 (2026-11-20):** kitchen "Set timer 15 minutes." / "Set second
+  timer for 2 minutes." missed HA's strict local timer grammar (no "for"),
+  fell through to voice-andrea, which had no timer tool, created one-shot
+  `automations` (cron) jobs instead and said "Your 15-minute timer is set".
+  The jobs fired, but a scheduled `announce` to an HTTP voice session has no
+  channel (`delivery.channel=last` unresolved, `cron runs` still says
+  "delivered"), so nothing was ever heard. Fixes: HA custom sentences now
+  match those phrasings locally (ha-agent lane), and VOICE MODE v5.7 (all
+  three voice AGENTS.md, PVC + `workspace-agents*.md` first-boot keys,
+  `.bak-pre-v57-20261120` in-pod) adds a TIMERS bullet + reminder line: no
+  device-timer tool, never say a timer is set, never schedule a job/cron/
+  reminder as a substitute, answer only with the phrase to say ("Say: set a
+  timer for fifteen minutes." / "Sag: Timer fünfzehn Minuten."). Household
+  may still start/read existing HA `timer.*` helpers by name via familyha.
+  main/voice-mathias AGENTS.md is now ~37.1K of the 40K `bootstrapMaxChars`.
+  A real device timer from OpenClaw would need the satellite's device_id
+  (custom_conversation `llm_hass_api` client tools; HA lane, not done).
   **LATENCY-DEBUG (TIME-BOXED, enabled 2026-11-20, REVERT on/after
   2026-11-21):** to explain the ~2.9 s prep gap (tool-catalog -> first model
   request), the ~3.4 s pre-session gap and plugin-reload stalls, the app
