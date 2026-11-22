@@ -7,4 +7,5 @@ resources:
   - ./storageclass.yaml
   - ./pvc.yaml
   - ./configmap.sops.yaml
+  - ./timeout-patch-configmap.yaml
   - ./secret.sops.yaml

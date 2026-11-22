@@ -93,6 +93,14 @@ spec:
         globalMounts:
           - path: /config/config.yaml
             subPath: config.yaml
+      timeout-patch:
+        enabled: true
+        type: configMap
+        name: icloud-docker-mu-timeout-patch
+        globalMounts:
+          - path: /app/sitecustomize.py
+            subPath: sitecustomize.py
+            readOnly: true
       data:
         enabled: true
         existingClaim: icloud-docker-mu-data

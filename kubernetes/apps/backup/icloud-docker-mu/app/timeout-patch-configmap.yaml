@@ -1,0 +1,38 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: icloud-docker-mu-timeout-patch
+  namespace: backup
+data:
+  sitecustomize.py: |
+    """Enforce a default HTTP timeout for requests.Session calls without timeout=.
+
+    mandarons/icloud-drive 2.3.0 sets photos.request_timeout on asset downloads,
+    but icloudpy's CloudKit album-enumeration POSTs (icloudpy/services/photos.py)
+    and ICloudPySession.request() omit timeout=, leaving requests at timeout=None
+    (blocking forever on a half-open TCP socket). sync.py already catches
+    requests.exceptions.RequestException and retries cleanly on the next cycle.
+    """
+
+    import functools
+    import os
+
+    try:
+        import requests
+
+        _CONNECT_TIMEOUT = float(os.environ.get("ICLOUD_CONNECT_TIMEOUT", "30"))
+        _READ_TIMEOUT = float(os.environ.get("ICLOUD_READ_TIMEOUT", "120"))
+        _DEFAULT_TIMEOUT = (_CONNECT_TIMEOUT, _READ_TIMEOUT)
+
+        _orig_request = requests.Session.request
+
+        @functools.wraps(_orig_request)
+        def _request_with_default_timeout(self, method, url, *args, **kwargs):
+            if len(args) < 7 and kwargs.get("timeout") is None:
+                kwargs["timeout"] = _DEFAULT_TIMEOUT
+            return _orig_request(self, method, url, *args, **kwargs)
+
+        requests.Session.request = _request_with_default_timeout
+    except Exception:
+        pass

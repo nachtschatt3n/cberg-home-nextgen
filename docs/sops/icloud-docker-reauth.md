@@ -1,8 +1,8 @@
 # SOP: iCloud Docker Re-authentication (2FA session recovery)
 
 > Description: Recover the Apple session of any `icloud-docker-*` instance (mandarons/icloud-drive) when it expires, including the modern-2FA flow that the bundled `icloud` CLI gets wrong, and the quota-exhaustion mitigation (stop the retry loop before re-auth).
-> Version: `2026.10.19`
-> Last Updated: `2026-10-19`
+> Version: `2026.11.23`
+> Last Updated: `2026-11-23`
 > Owner: `operator`
 
 ---
@@ -410,6 +410,7 @@ If failed:
 | 421 on `validate` then `409 ... signin/init` **right after a successful re-auth**; CloudKit `no auth method found` | `termsUpdateNeeded: true`: Apple won't issue `X-APPLE-WEBAUTH-TOKEN` until updated iCloud terms are accepted | Step 4b probe; owner accepts the terms at icloud.com; do NOT patch icloudpy |
 | `WARNING ... drive > remove_obsolete remove_obsolete is not found` (or `photos > remove_obsolete ...`) at startup although the config sets `remove_obsolete: false` | Cosmetic upstream log: 2.x `config_parser.get_{drive,photos}_remove_obsolete` reads exactly `drive.remove_obsolete` / `photos.remove_obsolete` with default False and logs "is not found" for ANY falsy value, including an explicit `false` | None. Deletion only runs when the value is truthy (`sync.py` / `drive_sync_directory.py` / `sync_photos.py`), and a missing key defaults to False. Keep `remove_obsolete: false` explicit |
 | After a restart on 2.x the first Drive cycle is long (mu measured ~2 h on 2026-10-03 vs ~31 min on the old build) with long silent stretches; Photos does not run until Drive finishes | Drive walks the tree folder-by-folder (collect + download per directory; existence checks are debug-level only), and on the first 2.x cycle it re-downloaded and unpacked the package bundles the old build could not unpack (~1 GB for mu) | Wait. Judge progress by pod network counters (`grep eth0 /proc/net/dev` inside the app container), not log lines; `ICloudBackupSyncStalled` (6 h) is the real alarm |
+| Both pods freeze mid-cycle right after `Syncing All Photos` (`Running 1/1`, 0 restarts, zero new log lines, `ESTABLISHED` TCP socket to Apple `:443` with 0 queues) | Upstream `icloudpy` omits `timeout=` on CloudKit album-enumeration `POST`s (`icloudpy/services/photos.py:43,:328`) and `ICloudPySession.request()`, so a half-open TCP socket hangs `requests` forever | Rollout restart the deployment to unblock; durable mitigation is `timeout-patch-configmap.yaml` mounted at `/app/sitecustomize.py`, which sets a `(30, 120)` default timeout on `requests.Session.request` so `sync.py`'s `RequestException` handler catches stalls and retries |
 
 ---
 
@@ -718,6 +719,8 @@ kubectl -n backup rollout status deploy/icloud-docker-$INSTANCE --timeout=120s
 ---
 
 ## Version History
+
+- `2026.11.23`: Documented the timeout-less `icloudpy` CloudKit album-enumeration `POST` wedge (both pods hung simultaneously on half-open `:443` sockets on 2026-11-20) and added the `/app/sitecustomize.py` ConfigMap default-timeout mitigation (`timeout-patch-configmap.yaml`).
 
 - `2026.10.19`: Known-unfixable baseline for the persistent-download-failure alerts (fingerprints in ConfigMap `icloud-sync-probe`); alerts now key on `icloud_*_items_unexplained`.
 

@@ -8,4 +8,5 @@ resources:
   - ./pvc.yaml
   - ./pvc-session.yaml
   - ./configmap.sops.yaml
+  - ./timeout-patch-configmap.yaml
   - ./secret.sops.yaml
