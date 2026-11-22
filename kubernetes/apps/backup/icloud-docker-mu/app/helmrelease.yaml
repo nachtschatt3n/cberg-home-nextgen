@@ -27,6 +27,8 @@ spec:
     controllers:
       main:
         strategy: Recreate
+        annotations:
+          configmap.reloader.stakater.com/reload: icloud-docker-mu-timeout-patch
         containers:
           app:
             image:
@@ -44,6 +46,8 @@ spec:
               PUID: 1000
               PGID: 1000
               ENV_CONFIG_FILE_PATH: /config/config.yaml
+              ICLOUD_CONNECT_TIMEOUT: "30"
+              ICLOUD_READ_TIMEOUT: "120"
               ENV_ICLOUD_PASSWORD:
                 valueFrom:
                   secretKeyRef:

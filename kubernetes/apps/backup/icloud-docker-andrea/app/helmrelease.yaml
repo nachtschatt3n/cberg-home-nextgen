@@ -27,6 +27,8 @@ spec:
     controllers:
       main:
         strategy: Recreate
+        annotations:
+          configmap.reloader.stakater.com/reload: icloud-docker-andrea-timeout-patch
         # Trusted session established 2026-08-08 (interactive 2FA re-auth).
         #
         # If this instance ever needs a fresh re-auth, set this back to 0 FIRST:
@@ -53,6 +55,8 @@ spec:
               PUID: 1000
               PGID: 1000
               ENV_CONFIG_FILE_PATH: /config/config.yaml
+              ICLOUD_CONNECT_TIMEOUT: "30"
+              ICLOUD_READ_TIMEOUT: "120"
               ENV_ICLOUD_PASSWORD:
                 valueFrom:
                   secretKeyRef:

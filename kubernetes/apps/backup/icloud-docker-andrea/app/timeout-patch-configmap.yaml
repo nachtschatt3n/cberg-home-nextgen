@@ -17,6 +17,7 @@ data:
 
     import functools
     import os
+    import sys
 
     try:
         import requests
@@ -34,5 +35,12 @@ data:
             return _orig_request(self, method, url, *args, **kwargs)
 
         requests.Session.request = _request_with_default_timeout
-    except Exception:
-        pass
+        print(
+            f"sitecustomize: requests default timeout active (connect={_CONNECT_TIMEOUT}s, read={_READ_TIMEOUT}s)",
+            file=sys.stderr,
+        )
+    except Exception as exc:
+        print(
+            f"sitecustomize: failed to install requests timeout patch: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
