@@ -311,7 +311,7 @@ spec:
       # DB (pg_restore --no-owner), FLUSHALL sure-redis, then revert this
       # manifest to sha-059a41d1bbbdb3dc44e5005fbba0add9d3f3ab7f and restore
       # the RuleRun override in initializer-configmap.yaml (git history).
-      tag: "sha-f6c524c1d935ed54de9962286b914904a525265b"
+      tag: "sha-08fb6bdb9066121533650f6b8f2f776bc813b032"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
