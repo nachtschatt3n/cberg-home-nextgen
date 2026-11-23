@@ -3,7 +3,9 @@
 # agents. Official image from jo-inc (the project behind @askjo/camofox-browser,
 # the OpenClaw plugin). Reached ONLY in-cluster by OpenClaw:
 #   http://camofox-browser.ai.svc.cluster.local:9377   (NetworkPolicy-gated)
-# Profiles/cookies persist on the PVC at /home/camofox/.camofox.
+# Profiles/cookies persist on the PVC at /root/.camofox (the published image runs
+# as root with HOME=/root; /home/camofox/.camofox is the non-root variant's path and
+# was NOT what the app wrote to — measured 2026-11-23, profiles were ephemeral).
 # Crash telemetry to a third-party worker is disabled on purpose.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -56,6 +58,10 @@ spec:
                 value: "600000"
               - name: MAX_OLD_SPACE_SIZE
                 value: "384"
+              # Default 1500 MB restarted the browser MID-RUN (rss 1992 MB with 3 tabs
+              # open, 2026-11-23) and dropped live sessions; keep it below the pod limit.
+              - name: BROWSER_RSS_RESTART_THRESHOLD_MB
+                value: "2600"
             # CAMOFOX_API_KEY + optional PROXY_HOST/PORT/USERNAME/PASSWORD
             envFrom:
               - secretRef:
@@ -94,9 +100,9 @@ spec:
             resources:
               requests:
                 cpu: 100m
-                memory: 768Mi
+                memory: 1Gi
               limits:
-                memory: 2Gi
+                memory: 3584Mi
             securityContext:
               allowPrivilegeEscalation: false
               capabilities:
@@ -116,7 +122,7 @@ spec:
         advancedMounts:
           camofox-browser:
             app:
-              - path: /home/camofox/.camofox
+              - path: /root/.camofox
       # Firefox needs a roomy /dev/shm
       shm:
         type: emptyDir
