@@ -1769,6 +1769,11 @@ spec:
                   cfg.plugins.entries['memory-core'].config.dreaming = cfg.plugins.entries['memory-core'].config.dreaming || {};
                   cfg.plugins.entries['memory-core'].config.dreaming.enabled = true;
                   cfg.plugins.entries['memory-core'].config.dreaming.model = 'ollama/gemma4:26b-mlx';
+                  // The REM narrative run asks for a model override; without this the
+                  // plugin is "not trusted for fallback provider/model override" and
+                  // every night logs a failed narrative + fallback (2026-11-22).
+                  cfg.plugins.entries['memory-core'].subagent = cfg.plugins.entries['memory-core'].subagent || {};
+                  cfg.plugins.entries['memory-core'].subagent.allowModelOverride = true;
 
                   // Reply delivery mode — keep heartbeats from swallowing
                   // user DMs. When unset, codex-backed runtimes default to
@@ -2067,34 +2072,19 @@ spec:
                   fi
                 done
 
-                # openclaw >= 2026.11 keeps ONE openai OAuth profile PER AGENT (the 6.x
-                # "read-through to main" is gone; measured: without this only `main`
-                # reaches openai, the other 7 silently fall back to the local model).
-                # `models auth login` imports the existing ~/.codex/auth.json (no browser
-                # while that login is valid), then waits at a confirm prompt, so it is
-                # killed after 45 s; `activate` verifies the sign-in but also pins the
-                # agent to openai/gpt-6-astra, so that pin is unset again. Needs the
-                # gateway STOPPED (exclusive state), which is exactly now: this runs before
-                # `exec openclaw gateway`. Agents with their own non-openai model (voice)
-                # are skipped. Only runs for agents that have no openai profile yet.
+                # OpenAI/Codex login RETIRED 2026-11-16 (agents run on the Anthropic key,
+                # fallbacks Haiku -> gemma). The old per-agent import loop is gone; it
+                # re-created the stale "Codex import" profile whose OAuth refresh failed
+                # ~72x/3d ("Failed to fence every historical OAuth refresh peer").
+                # Idempotent cleanup instead: log every leftover openai profile out of
+                # every agent. Needs the gateway STOPPED (exclusive state) = right now.
                 export HOME=/home/node
-                OC_AGENTS=$(node -e "const e=JSON.parse(require('fs').readFileSync('/home/node/.openclaw/openclaw.json','utf8')).agents.entries;console.log(Object.keys(e).filter((k)=>!e[k].model||String(e[k].model).startsWith('openai/')).sort((a,b)=>(a==='main'?-1:b==='main'?1:0)).join(' '))")
-                OC_PROFILE=""
-                for a in $OC_AGENTS; do
-                  if openclaw models auth list --agent "$a" 2>/dev/null | grep -q 'openai:account-'; then continue; fi
-                  if [ -f /home/node/.codex/auth.json ]; then
-                    timeout -s KILL 45 script -qfc "openclaw models auth login --provider openai --device-code --agent $a" /dev/null </dev/null >/dev/null 2>&1 || true
-                    [ -n "$OC_PROFILE" ] || OC_PROFILE=$(openclaw models auth list --agent main 2>/dev/null | grep -o 'openai:account-[0-9a-f-]*' | head -1) || true
-                    if [ -n "$OC_PROFILE" ]; then
-                      script -qfc "openclaw models auth activate $OC_PROFILE --agent $a" /dev/null </dev/null >/dev/null 2>&1 || true
-                      openclaw config unset "agents.entries.$a.model" >/dev/null 2>&1 || true
-                      echo "openai auth imported for agent $a"
-                    else
-                      echo "WARN: no openai profile after login for agent $a (codex login valid?)"
-                    fi
-                  else
-                    echo "WARN: /home/node/.codex/auth.json missing, skipping openai auth import for $a"
-                  fi
+                for a in $(node -e "console.log(Object.keys(JSON.parse(require('fs').readFileSync('/home/node/.openclaw/openclaw.json','utf8')).agents.entries).join(' '))"); do
+                  for pid in $(openclaw models auth list --agent "$a" 2>/dev/null | grep -o 'openai:account-[0-9a-f-]*' | sort -u); do
+                    openclaw models auth logout "$pid" --agent "$a" --yes >/dev/null 2>&1 \
+                      && echo "removed stale openai profile $pid for agent $a" \
+                      || echo "WARN: could not remove $pid for agent $a"
+                  done
                 done
 
                 # AUTH GUARD (2026-08-01): agents/main ONLY — see the guard at
