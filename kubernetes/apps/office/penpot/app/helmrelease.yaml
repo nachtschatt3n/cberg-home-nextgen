@@ -109,6 +109,10 @@ spec:
     # Backend service configuration
     backend:
       replicaCount: 1
+      # Pinned past the chart's appVersion (2.19.1): 2.19.3 is the upstream patch
+      # release. Drop this override once a chart bump carries 2.19.3 or later.
+      image:
+        tag: 2.19.3
       service:
         type: ClusterIP
         port: 6060
@@ -123,6 +127,10 @@ spec:
     # Frontend service configuration
     frontend:
       replicaCount: 1
+      # Pinned past the chart's appVersion (2.19.1): 2.19.3 is the upstream patch
+      # release. Drop this override once a chart bump carries 2.19.3 or later.
+      image:
+        tag: 2.19.3
       service:
         type: ClusterIP
         port: 8080
@@ -148,6 +156,10 @@ spec:
     # Exporter service configuration
     exporter:
       replicaCount: 1
+      # Pinned past the chart's appVersion (2.19.1): 2.19.3 is the upstream patch
+      # release. Drop this override once a chart bump carries 2.19.3 or later.
+      image:
+        tag: 2.19.3
       service:
         type: ClusterIP
         port: 6061
