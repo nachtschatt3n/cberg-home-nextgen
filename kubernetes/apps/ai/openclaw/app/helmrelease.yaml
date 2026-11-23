@@ -2072,6 +2072,19 @@ spec:
                   fi
                 done
 
+                # camofox-browser (anti-detect browser, 2026-11-23): the plugin only talks
+                # to the REMOTE server (autoStart=false); the API/access key arrives via the
+                # CAMOFOX_API_KEY / CAMOFOX_ACCESS_KEY env vars from openclaw-secret, never
+                # via openclaw.json. Install once (skip if present), then (re)apply config.
+                if ! openclaw plugins inspect camofox-browser --runtime --json >/dev/null 2>&1; then
+                  openclaw plugins install @askjo/camofox-browser --force --accept-capabilities \
+                    || echo "WARN: plugins install @askjo/camofox-browser failed (continuing)"
+                fi
+                if openclaw plugins inspect camofox-browser --runtime --json >/dev/null 2>&1; then
+                  openclaw config set plugins.entries.camofox-browser.enabled true --strict-json || true
+                  openclaw config set plugins.entries.camofox-browser.config '{"autoStart":false,"url":"http://camofox-browser.ai.svc.cluster.local:9377","maxSessions":5,"maxTabsPerSession":5,"sessionTimeoutMs":600000,"crashReportEnabled":false}' --strict-json || echo "WARN: camofox config set failed"
+                fi
+
                 # OpenAI/Codex login RETIRED 2026-11-16 (agents run on the Anthropic key,
                 # fallbacks Haiku -> gemma). The old per-agent import loop is gone; it
                 # re-created the stale "Codex import" profile whose OAuth refresh failed
