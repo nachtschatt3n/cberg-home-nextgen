@@ -1,0 +1,17 @@
+# Applied BY HAND once (Flux cannot own it: targetNamespace would override
+# namespace: storage). See docs/sops/longhorn.md.
+---
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: camofox-browser-data
+  namespace: storage
+spec:
+  size: "2147483648"  # 2Gi
+  numberOfReplicas: 2
+  staleReplicaTimeout: 30
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false

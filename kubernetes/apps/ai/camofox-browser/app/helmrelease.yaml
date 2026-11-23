@@ -1,0 +1,128 @@
+---
+# camofox-browser — anti-detect (Camoufox / Firefox) browser server for AI
+# agents. Official image from jo-inc (the project behind @askjo/camofox-browser,
+# the OpenClaw plugin). Reached ONLY in-cluster by OpenClaw:
+#   http://camofox-browser.ai.svc.cluster.local:9377   (NetworkPolicy-gated)
+# Profiles/cookies persist on the PVC at /home/camofox/.camofox.
+# Crash telemetry to a third-party worker is disabled on purpose.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: camofox-browser
+  namespace: ai
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 5.3.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      camofox-browser:
+        replicas: 1
+        strategy: Recreate
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: ghcr.io/jo-inc/camofox-browser
+              tag: 1.19.0
+              pullPolicy: IfNotPresent
+            env:
+              - name: TZ
+                value: "Europe/Berlin"
+              - name: CAMOFOX_PORT
+                value: "9377"
+              - name: CAMOFOX_CRASH_REPORT_ENABLED
+                value: "false"
+              - name: MAX_SESSIONS
+                value: "5"
+              - name: MAX_TABS_PER_SESSION
+                value: "10"
+              - name: SESSION_TIMEOUT_MS
+                value: "600000"
+              - name: MAX_OLD_SPACE_SIZE
+                value: "384"
+            # CAMOFOX_API_KEY + optional PROXY_HOST/PORT/USERNAME/PASSWORD
+            envFrom:
+              - secretRef:
+                  name: camofox-browser
+            probes:
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health
+                    port: 9377
+                  periodSeconds: 5
+                  timeoutSeconds: 5
+                  failureThreshold: 36
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health
+                    port: 9377
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health
+                    port: 9377
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 100m
+                memory: 768Mi
+              limits:
+                memory: 2Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+        pod:
+          securityContext:
+            fsGroup: 0
+    service:
+      app:
+        controller: camofox-browser
+        ports:
+          http:
+            port: 9377
+    persistence:
+      data:
+        existingClaim: camofox-browser-data
+        advancedMounts:
+          camofox-browser:
+            app:
+              - path: /home/camofox/.camofox
+      # Firefox needs a roomy /dev/shm
+      shm:
+        type: emptyDir
+        medium: Memory
+        sizeLimit: 1Gi
+        advancedMounts:
+          camofox-browser:
+            app:
+              - path: /dev/shm

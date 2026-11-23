@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: camofox-browser-data
+  namespace: ai
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn-static
+  volumeName: camofox-browser-data
+  resources:
+    requests:
+      storage: 2Gi
