@@ -77,8 +77,8 @@ finding_refs: [F-54e86f6d, F-9f05768d] # F-54e86f6d version: "immich-server: ima
                                       # plan supersedes its target with v3.4.2. F-9f05768d = the critical security finding (still open
                                       # 2026-11-19, newer upstream tag exists). Queried 2026-11-13, re-queried 2026-11-19 (`policy-cli.py finding list --grep
                                       # immich`). F-f7fa90d3 (immich-machine-learning) belongs to the sibling plan, not here.
-review: null                      # retargeted 3.4.1 -> 3.4.2 on 2026-11-19: the 2026-11-16 ready-for-go verdict covered 3.4.1; a fresh plan-reviewer sets it
-status: draft                         # was awaiting-go; the go/no-go given for 3.4.1 does not carry to 3.4.2 (README: retarget re-reviews)
+review: ready-for-go@2026-11-19         # plan-reviewer verdict for the v3.4.2 retarget (digest fc880c1b...); 2026-11-23: §4.6 up query pinned to pod=$NEWPOD per reviewer hardening
+status: vetted
 window: null
 premises:
   - id: server-image-is-v3.3.6
@@ -480,7 +480,7 @@ CONTROL: metric up - `up{job="immich-server"}` returns two series (endpoints `me
 `metrics-ms`), both `1`, with a sample timestamp after the new pod became Ready (measured
 2026-11-13: two series, both 1). A localhost-bound exporter reads `0` on both.
 ```bash
-kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=up%7Bjob%3D%22immich-server%22%7D'
+kubectl get --raw "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=up%7Bjob%3D%22immich-server%22%2Cpod%3D%22$NEWPOD%22%7D"   # pinned to the NEW pod: an old-pod series cannot satisfy the gate
 ```
 CONTROL: metric immich_users_total - CONTENTS ASSERTION: the series carried by the NEW pod name
 reads `2`, the `"user"` count of the 2.5 baseline (measured 2026-11-13: `2`, label
