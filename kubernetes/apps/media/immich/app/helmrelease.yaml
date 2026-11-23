@@ -116,6 +116,13 @@ spec:
                 value: "8081"
               - name: IMMICH_MICROSERVICES_METRICS_PORT
                 value: "8082"
+              # v3.4.2 defaults the telemetry host to "::". The OpenTelemetry
+              # PrometheusExporter builds its base URL as `http://::PORT/`, which is not
+              # a valid URL, so `new URL(req.url, base)` throws and EVERY request gets
+              # HTTP 400 (exporters on :8081/:8082 dead, TargetDown). A concrete IPv4
+              # host gives a valid base URL (this is the v3.4.1 behaviour).
+              - name: IMMICH_HOST
+                value: 0.0.0.0
             resources:
               requests:
                 cpu: 200m
