@@ -1,4 +1,5 @@
-# Only OpenClaw may reach the browser API (9377). Everything else ingress-wise
+# Only OpenClaw may reach the browser API (9377); only the internal Envoy
+# Gateway proxies may reach noVNC (6080). Everything else ingress-wise
 # is denied; egress is left open (the browser must reach the internet).
 ---
 apiVersion: networking.k8s.io/v1
@@ -20,3 +21,15 @@ spec:
       ports:
         - protocol: TCP
           port: 9377
+    # noVNC via HTTPRoute (envoy-internal data plane, ns network). 9377 stays closed.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: network
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+              gateway.envoyproxy.io/owning-gateway-name: envoy-internal
+      ports:
+        - protocol: TCP
+          port: 6080

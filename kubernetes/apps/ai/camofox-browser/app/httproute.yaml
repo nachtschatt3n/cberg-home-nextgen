@@ -1,0 +1,103 @@
+# camofox-browser noVNC (6080 ONLY) on envoy-INTERNAL, behind Authentik
+# forward-auth (admins) with the x11vnc password as second factor. The API on
+# 9377 is deliberately NOT routed. Pattern: docs/sops/gateway-api-httproute.md
+# §4.3, shape copied from ai/gods-eye-view.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: camofox-browser
+  namespace: ai
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Camofox Browser"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "firefox.png"
+    gethomepage.dev/description: "Anti-detect browser (VNC login)"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/name=camofox-browser"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "camofox.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: camofox-browser
+          port: 6080
+      # noVNC is a long-lived websocket: the gateway-wide 60s would sever it
+      # (gateway SOP §4.2).
+      timeouts:
+        request: 3600s
+        backendRequest: 3600s
+---
+# Callback route — separate and MORE specific than `/` (longest match wins), and
+# NEVER gated, or the login flow can never complete.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: camofox-browser-authentik-outpost
+  namespace: ai
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "camofox.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /outpost.goauthentik.io }
+      backendRefs:
+        # Authorised by ReferenceGrant kube-system/camofox-browser-outpost-access
+        # (kubernetes/apps/kube-system/authentik/app/referencegrants.yaml).
+        - group: ""
+          kind: Service
+          name: ak-outpost-camofox-browser-forward-auth
+          namespace: kube-system
+          port: 9000
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: camofox-browser-forward-auth
+  namespace: ai
+spec:
+  targetRefs:                    # app route ONLY — never the callback route
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: camofox-browser
+  extAuth:
+    failOpen: false              # outpost down => deny, never publish
+    # cookie is MANDATORY (without it every check is anonymous and browsers get
+    # `oauth state does not match` 400s); x-forwarded-* deliberately NOT
+    # forwarded — see the full rationale in office/arag-web/app/httproute.yaml.
+    headersToExtAuth:
+      - cookie
+      - accept
+      - user-agent
+    http:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-camofox-browser-forward-auth
+          namespace: kube-system
+          port: 9000
+      path: /outpost.goauthentik.io/auth/envoy
+      headersToBackend:
+        - Set-Cookie
+        - X-authentik-username
+        - X-authentik-groups
+        - X-authentik-email
+        - X-authentik-name
+        - X-authentik-uid

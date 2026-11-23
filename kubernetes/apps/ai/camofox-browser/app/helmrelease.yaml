@@ -58,8 +58,9 @@ spec:
                 value: "600000"
               - name: MAX_OLD_SPACE_SIZE
                 value: "384"
-              # Interactive logins via noVNC (VNC_PASSWORD from the Secret). Not
-              # published by any route/NetworkPolicy rule: reach it with
+              # Interactive logins via noVNC (VNC_PASSWORD from the Secret). Published
+              # on envoy-internal behind Authentik (httproute.yaml); NetworkPolicy
+              # admits only the internal Envoy proxies on 6080. Fallback:
               #   kubectl -n ai port-forward svc/camofox-browser 6080:6080
               - name: ENABLE_VNC
                 value: "1"
