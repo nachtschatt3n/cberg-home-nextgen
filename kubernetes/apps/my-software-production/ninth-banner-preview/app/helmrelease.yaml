@@ -45,7 +45,7 @@ spec:
               repository: ghcr.io/nachtschatt3n/the-ninth-banner
               # Written by Flux image automation (ImagePolicy ninth-banner-preview,
               # '>=0.6.0'). Last manual pin: poc3d 20140161 with its digest, 2026-11-10.
-              tag: v0.6.4 # {"$imagepolicy": "my-software-production:ninth-banner-preview:tag"}
+              tag: v0.6.5 # {"$imagepolicy": "my-software-production:ninth-banner-preview:tag"}
               pullPolicy: IfNotPresent
             env:
               - name: PORT
