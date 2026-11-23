@@ -312,8 +312,8 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   `anthropic-voice/claude-haiku-5-5`, a provider alias on the same
   `api.anthropic.com` + `ANTHROPIC_API_KEY` env. Upstream `@openclaw/ai`
   buffers every Claude 5-family reply until `message_stop` (refusal
-  contract). The init script's idempotent `VOICE-STREAM PATCH` (v4 since 2026-11-20, marker
-  `oc-voice-stream-v4`) replaces that buffer ONLY for provider
+  contract). The init script's idempotent `VOICE-STREAM PATCH` (v5 since 2026-11-23, marker
+  `oc-voice-stream-v5`) replaces that buffer ONLY for provider
   `anthropic-voice` + `claude-haiku-5-5` with a per-message "narration gate":
   text in a model message is held until the message either starts a tool
   call (held text is dropped and blanked in the stored message, so Haiku's
@@ -422,7 +422,7 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   **Post-restart check (always):** `openclaw/household` answers HTTP 200, the
   gateway log `/tmp/openclaw/openclaw-<date>.log` has no "agent database
   remains degraded" and no `AgentDatabaseAdmissionError`, and both
-  `oc-voice-stream-v4` and `oc-startup-retry` markers are present.
+  `oc-voice-stream-v5` and `oc-startup-retry` markers are present.
   Rollback: remove the patch block and set `famVoiceModel.primary` back to
   `anthropic/claude-haiku-5-5` (one pod roll; npm reinstall restores the
   pristine files).
@@ -461,6 +461,31 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   main/voice-mathias AGENTS.md is now ~37.1K of the 40K `bootstrapMaxChars`.
   A real device timer from OpenClaw would need the satellite's device_id
   (custom_conversation `llm_hass_api` client tools; HA lane, not done).
+  **Listen loop fix: VOICE MODE v5.8 + scrub v5 (2026-11-23):** a TV false
+  wake on the TECHO5 Shows ("Scharfe Schere.", "We don't hold it in
+  shred.") got the v5.6 FRAGMENTS reply "Hm?" / "Ja?". HA core's
+  `ChatLog.continue_conversation` returns True whenever the last assistant
+  message ends in `?` / `;` / U+037E / U+FF1F, and custom_conversation passes
+  that through, so the satellite reopened the mic, heard more TV and looped
+  for about 6 minutes (living room, then kitchen). OpenClaw never sets the
+  flag itself. Two layers now prevent it:
+  (1) VOICE MODE v5.8 (all three voice AGENTS.md on the PVC, in-pod backups
+  `.bak-pre-v58-*`, plus the `workspace-agents*.md` first-boot keys):
+  fragment, garbled or not-for-me input gets only "Hm." (no question mark);
+  STOP ("stop", "Stopp", "halt", "Hey Jarvis, stop") gets only "Okay.";
+  COOKING STEPS are never recited from memory (an invented "Schritt 2 ..."
+  was seen) and only "Sag: nächster Schritt." / "Say: next step." is given,
+  because the Show's HA automations handle recipe steps.
+  (2) scrub v5 (marker `oc-voice-stream-v5`), a hard guarantee: a reply of
+  3 words or fewer that ends in `?` `;` U+037E U+FF1F U+FF1B gets the mark
+  replaced by "." ("Hm?" -> "Hm.", "Wie bitte?" -> "Wie bitte."). Longer
+  clarifying questions ("Welches Gericht meinst du?") keep the "?" and still
+  reopen the mic on purpose. LEAD also catches "The request is ..." / "Die
+  Anfrage ist ..." narration ("The request is to show ingredients, but
+  there is no clear recipe in context."). Offline suite: 22/22 (v5 cases,
+  legit questions, v4 regressions). The revert regex now rewinds a v2/v3/v4
+  line. Rollback: AGENTS.md from the backups; scrub back to v4 = revert the
+  commit (one pod roll).
   **LATENCY-DEBUG (TIME-BOXED, enabled 2026-11-20, REVERT on/after
   2026-11-21):** to explain the ~2.9 s prep gap (tool-catalog -> first model
   request), the ~3.4 s pre-session gap and plugin-reload stalls, the app

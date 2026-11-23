@@ -550,6 +550,16 @@ spec:
                 #    integration.md (narration scrub). output.content and the held
                 #    text_delta/text_end are rewritten together so stream, transcript
                 #    and history agree.
+                #    v5 (2026-11-23, operator-approved): HA core's ChatLog.
+                #    continue_conversation reopens the satellite mic whenever the
+                #    reply ends in "?" / ";" / U+037E / U+FF1F, so a TV false wake
+                #    answered "Hm?" looped for minutes. (e) a SHORT reply (<= 3 words,
+                #    covers "Hm?" / "Ja?" / "Hae?" / "Wie bitte?") ending in one of
+                #    those marks (or U+FF1B) gets the mark(s) replaced by "." - longer
+                #    clarifying questions are untouched and still keep the mic open;
+                #    (f) LEAD also catches "The request is ..." / "Die Anfrage ist
+                #    ..." narration ("The request is to show ingredients, but there is
+                #    no clear recipe in context. ...").
                 # Tradeoffs accepted for voice: no filler, each answer message arrives
                 # in one burst at its end; a refused reply is discarded as upstream.
                 # The object stays truthy, so the "ended before message_stop" check
@@ -566,9 +576,20 @@ spec:
                 const fs = require('fs'), path = require('path'), cp = require('child_process');
                 const dir = process.argv[2];
                 const NEEDLE = 'const refusalBuffer = usesClaudeStreamingRefusalContract(model) ? createDeferredEventBuffer(stream) : void 0;';
-                const MARK = '/*oc-voice-stream-v4*/';
-                // v4 narration scrub: a real function, embedded via toString() (no escaping).
-                function ocScrubNarration(s) {
+                const MARK = '/*oc-voice-stream-v5*/';
+                // v5 narration scrub + short-question tail guard: a real function, embedded via
+                // toString() (no escaping), so it must stay self-contained.
+                function ocScrubNarration(s0) {
+                  // v5 (e): a short reply ending in a question mark must not reopen the HA mic.
+                  const tail = (t) => {
+                    if (typeof t !== 'string') return t;
+                    const m = t.match(/^([\s\S]*?)[?;;？；]+\s*$/);
+                    if (!m) return t;
+                    const body = m[1].trim();
+                    const words = body.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+                    return words <= 3 ? body.replace(/[.!,:\s]+$/, '') + '.' : t;
+                  };
+                  const core = (s) => {
                   if (typeof s !== 'string' || !s) return s;
                   // STRONG: self-talk about language choice, voice mode, tools or instructions.
                   // Never legit in a spoken answer, so the sentence is dropped wherever it appears.
@@ -576,7 +597,7 @@ spec:
                   // A sentence that opens with the chosen language: "English, since ...", "Deutsch, weil ...".
                   const LANGLEAD = /^(english|german|deutsch|englisch)\b\s*[,.:;\u2014-]\s*(since|because|as|weil|da|denn|the|die|der)\b/i;
                   // LEAD: third-person / interpretation narration; dropped only in the opening.
-                  const LEAD = /\b(the user\b(?! (manual|guide|interface|account|name|profile))|user (asked|wants|said|is asking|meant)|der (nutzer|benutzer)\b|die (nutzerin|benutzerin)\b|i (read|took|interpret(ed)?) (this|that|it) as|which i (read|took|interpret(ed)?) as|i('ll| will) (answer|reply|respond) (in|with)\b)/i;
+                  const LEAD = /\b(the user\b(?! (manual|guide|interface|account|name|profile))|user (asked|wants|said|is asking|meant)|(the|this) (request|query|input) (is|was|asks|seems|looks|sounds)\b|die (anfrage|eingabe) (ist|war|scheint)\b|der (nutzer|benutzer)\b|die (nutzerin|benutzerin)\b|i (read|took|interpret(ed)?) (this|that|it) as|which i (read|took|interpret(ed)?) as|i('ll| will) (answer|reply|respond) (in|with)\b)/i;
                   const PLAN = /^(so )?(i('ll| will| am going to|'m going to)|ich (werde|antworte|gebe))\b/i;
                   const parts = s.match(/[^.!?\n]+(?:[.!?]+["'\u201d\u201c)]*|\n+|$)\s*/g);
                   if (!parts) return s;
@@ -612,6 +633,8 @@ spec:
                   // 4) nothing but meta: never speak it; a short neutral line in the answer's language
                   return /\b(deutsch|englisch|weil|frage|nutzer|antworte|ich|ist|nicht|und)\b/i.test(s)
                     ? 'Das habe ich nicht verstanden.' : "Sorry, I didn't catch that.";
+                  };
+                  return tail(core(s0));
                 }
                 const GATE = '((sink, out) => { const scrubText = ' + ocScrubNarration.toString() + '; ' +
                   'let held = [], tool = false; ' +
@@ -644,9 +667,9 @@ spec:
                     const orig = fs.readFileSync(p, 'utf8');
                     if (orig.includes(MARK)) { already++; continue; }
                     // npm normally restores pristine files each boot; if a v2/v3-patched line
-                    // survived, revert it to the upstream line first so v4 can apply (v3+
+                    // survived, revert it to the upstream line first so v5 can apply (v3+
                     // embeds a multi-line function, hence [\s\S] instead of [^\n]).
-                    const src = orig.replace(/const refusalBuffer = usesClaudeStreamingRefusalContract\(model\) \? \(\/\*oc-voice-stream-v[23]\*\/[\s\S]*?: createDeferredEventBuffer\(stream\)\) : void 0;/g, NEEDLE);
+                    const src = orig.replace(/const refusalBuffer = usesClaudeStreamingRefusalContract\(model\) \? \(\/\*oc-voice-stream-v[234]\*\/[\s\S]*?: createDeferredEventBuffer\(stream\)\) : void 0;/g, NEEDLE);
                     if (!src.includes(NEEDLE)) continue;
                     // the gate closes over `output`: require its declaration right before the target
                     const at = src.indexOf(NEEDLE);
