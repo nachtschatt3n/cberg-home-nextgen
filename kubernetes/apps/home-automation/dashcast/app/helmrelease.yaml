@@ -38,7 +38,7 @@ spec:
           app:
             image:
               repository: ghcr.io/huskerminion/techo5-dashcast
-              tag: v1.6.49@sha256:2c04e24babd9f0663e499a6004443e65a1481797bf7eaedb2cda87c885ed90d0
+              tag: v1.6.51@sha256:df8041d546b0b18d94799188cebffbf1ba539265e67e95963fe7124c3a16011b
             env:
               TZ: "Europe/Berlin"
               LISTEN: ":9555"
