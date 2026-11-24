@@ -100,7 +100,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: bootstrap
-          image: pgvector/pgvector:0.8.7-pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+          image: pgvector/pgvector:0.8.7-pg16@sha256:484e838076e04939d27d3e176e91c86eea96236126023be8d3059761122e579f
           command: ["bash", "/sql/bootstrap.sh"]
           env:
             # Service lives in this same namespace; short name resolves via
