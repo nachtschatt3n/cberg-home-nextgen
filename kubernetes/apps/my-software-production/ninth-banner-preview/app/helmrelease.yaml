@@ -58,6 +58,30 @@ spec:
               # keeps the shared Mac mini Ollama host out of it entirely.
               - name: AI_PROVIDER
                 value: offline
+              # Player feedback + play statistics (one pool): its own database
+              # on the shared postgresql (databases/ninth-banner-preview-feedback-db).
+              # The app creates its own tables. Secret: ./feedback-secret.sops.yaml.
+              - name: FEEDBACK_DATABASE_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: ninth-banner-preview-feedback
+                    key: FEEDBACK_DATABASE_URL
+              - name: FEEDBACK_ADMIN_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: ninth-banner-preview-feedback
+                    key: FEEDBACK_ADMIN_TOKEN
+              # Store cap on the SHARED 5Gi postgresql volume (preview: small).
+              - name: FEEDBACK_MAX_MB
+                value: "128"
+              - name: FEEDBACK_RETENTION_DAYS
+                value: "180"
+              # Closed beta, every player consented: privacy floors stay OFF
+              # until an open release (owner's rule), so no graphics class is
+              # hidden from the battle-performance stats however few players
+              # it has. Set "5" before any open release.
+              - name: ANALYTICS_PERF_MIN_PLAYERS
+                value: "1"
             probes:
               startup:
                 enabled: true
