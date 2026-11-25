@@ -13,7 +13,6 @@ resources:
   - ./resource-limits.yaml
   - ./networkpolicy.yaml
   - ./storageclass.yaml
-  - ./pvc.yaml
 generatorOptions:
   disableNameSuffixHash: true   # the Job template references the name verbatim
   annotations:
