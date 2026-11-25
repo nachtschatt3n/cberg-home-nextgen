@@ -1,0 +1,62 @@
+---
+# Ingress allow-list for the edot-collector. Selecting the pod makes Cilium
+# default-deny ALL ingress to it, so every legitimate path is listed explicitly:
+#   - OTLP 4317/4318, self-metrics 8888, hwerrors metrics 8889, health 13133:
+#     anything inside the cluster (pods, Envoy data plane for the OTLP HTTPRoute,
+#     Prometheus scrape, kubelet probes = host entity).
+#   - Node-sourced UDP (host / remote-node entities): Talos kmsg 5171 and Talos
+#     service logs 5173. Also 5174/5175, because a sender reaching the LB IP can
+#     be SNATed to a node IP when the backend sits on another node.
+#   - Off-cluster senders by address: UDM gateway -> 5174, UNAS -> 5175.
+# NOT allowed: ordinary pods on 5173-5175 (the point of this policy: a
+# compromised workload must not be able to inject Talos/UniFi/UNAS log lines).
+# Egress is untouched. SOP: docs/sops/log-forwarding.md
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: edot-collector-ingress
+  namespace: monitoring
+spec:
+  endpointSelector:
+    matchLabels:
+      app: edot-collector
+  ingress:
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP
+            - port: "4318"
+              protocol: TCP
+            - port: "8888"
+              protocol: TCP
+            - port: "8889"
+              protocol: TCP
+            - port: "13133"
+              protocol: TCP
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "5171"
+              protocol: UDP
+            - port: "5173"
+              protocol: UDP
+            - port: "5174"
+              protocol: UDP
+            - port: "5175"
+              protocol: UDP
+    - fromCIDR:
+        - 192.168.30.1/32
+      toPorts:
+        - ports:
+            - port: "5174"
+              protocol: UDP
+    - fromCIDR:
+        - 192.168.55.240/32
+      toPorts:
+        - ports:
+            - port: "5175"
+              protocol: UDP

@@ -12,3 +12,4 @@ resources:
   - ./kmsg-heartbeat-daemonset.yaml
   - ./servicemonitor.yaml
   - ./httproute.yaml
+  - ./networkpolicy-syslog.yaml
