@@ -56,6 +56,9 @@
 # TNB_QUEUE_TIMEOUT (default 14400 s) bounds the wait. sims: at most one
 # non-terminal sims Job per SUBMITTER (default: the Ninth Banner branch containing <sha>, else sha8; never this repo's branch); parallelism
 # 6 (all shards) when it fits, else 3, else 2. Unreadable kubectl data fails loud (exit 3).
+# clipgate/sims: while the Job runs, the collector re-runs the admission for the
+# extra pods every TNB_GROW_POLL s (60) and raises spec.parallelism when room
+# frees (cap 12 / 6; only grows; `parallelism A -> B (room freed)`).
 # Deadlines: per POD (each shard's own budget, from its own start) and per
 # JOB (outer bound for the whole run incl. shards waiting for a slot; for sims
 # it follows the parallelism: rounds x (pod deadline + 300 s)).
@@ -632,6 +635,60 @@ nas_result() {   # <index> -> 0 when a line was recorded
     return 0
 }
 
+# ---- grow parallelism as room frees (clipgate and sims) ----
+# Every TNB_GROW_POLL s (60) while the Job is active, some shards still wait
+# for a slot and none of its pods waits for a node: the admission
+# (ninth-banner-capacity.py decide: per-node first-fit + quota) for the extra
+# pods of every larger parallelism up to the suite cap (clipgate 12, sims 6);
+# the largest that fits is patched into the Job's spec.parallelism. Only ever
+# grows; the Job deadline stays. Unreadable data: no change.
+grow_s="${TNB_GROW_POLL:-60}"
+[[ "$grow_s" =~ ^[0-9]+$ ]] || { echo "TNB_GROW_POLL must be whole seconds"; exit 2; }
+case "$suite" in clipgate) grow_cap=12 ;; sims) grow_cap=6 ;; *) grow_cap=0 ;; esac
+[ "$shards" -ge "$grow_cap" ] || grow_cap="$shards"
+grow_last=$(date +%s); grow_req=""; grow_note=""
+grow_skip() {   # <why>: said once per reason, not every minute
+    [ "$grow_note" = "$1" ] || say "  parallelism unchanged: $1"
+    grow_note="$1"
+}
+grow() {
+    local now cur waiting=0 i target deltas="" verdict rc delta new
+    [ "$grow_cap" -gt 1 ] || return 0
+    now=$(date +%s)
+    [ $(( now - grow_last )) -ge "$grow_s" ] || return 0
+    grow_last=$now
+    [ "$jstate" = active ] && [ "$pods_ok" = 1 ] || return 0
+    for ((i = 0; i < shards; i++)); do
+        [ -z "${done_idx[$i]:-}" ] || continue
+        if [ -z "${p_name[$i]:-}" ]; then waiting=$((waiting + 1))
+        elif [ "${p_phase[$i]:-}" = Pending ] && [ -z "${p_node[$i]:-}" ]; then
+            grow_skip "a pod of this Job still waits for a node"; return 0
+        fi
+    done
+    [ "$waiting" -gt 0 ] || return 0
+    cur="$(k get job -n "$NS" "$job" -o 'jsonpath={.spec.parallelism}' 2>/dev/null)" || cur=""
+    [[ "$cur" =~ ^[0-9]+$ ]] || { grow_skip "cannot read the Job's parallelism"; return 0; }
+    if [ -z "$grow_req" ]; then
+        grow_req="$(python3 "$REPO_ROOT/scripts/ninth-banner-capacity.py" podreq "$dest/job.yaml" 2>/dev/null)" || grow_req=""
+        [ -n "$grow_req" ] || { grow_skip "cannot read the pod request from job.yaml"; return 0; }
+    fi
+    target=$(( cur + waiting )); [ "$target" -le "$grow_cap" ] || target="$grow_cap"
+    while [ "$target" -gt "$cur" ]; do deltas="$deltas $(( target - cur ))"; target=$((target - 1)); done
+    [ -n "$deltas" ] || return 0
+    rc=0; verdict="$(python3 "$REPO_ROOT/scripts/ninth-banner-capacity.py" decide --req "$grow_req" --par "${deltas# }" \
+        --headroom "${TNB_HEADROOM_CPU:-2}" 2>/dev/null)" || rc=$?
+    if [ "$rc" -eq 10 ]; then grow_note=""; return 0; fi
+    [ "$rc" -eq 0 ] || { grow_skip "cannot read node capacity / quota (rc=$rc)"; return 0; }
+    read -r _ delta _ _ <<<"$verdict"
+    [[ "$delta" =~ ^[0-9]+$ ]] && [ "$delta" -gt 0 ] || { grow_skip "unreadable admission answer"; return 0; }
+    new=$(( cur + delta ))
+    if k patch job -n "$NS" "$job" --type=merge -p "{\"spec\":{\"parallelism\":$new}}" >/dev/null 2>&1; then
+        say "  parallelism $cur -> $new (room freed)"; parallelism="$new"; grow_note=""
+    else
+        grow_skip "kubectl patch of the Job's parallelism failed"
+    fi
+}
+
 if [ "$attached" = 1 ]; then
     # results an earlier collector already brought home
     for ((i = 0; i < shards; i++)); do
@@ -707,6 +764,7 @@ while [ "$ndone" -lt "$shards" ]; do
         dead_pod "$i"
     done
     [ "$ndone" -lt "$shards" ] || break
+    grow
     if [ "$(date +%s)" -gt $(( start + deadline + ttl + 900 )) ]; then
         # Past the Job's latest end plus its TTL nothing is left that could report.
         for ((i = 0; i < shards; i++)); do

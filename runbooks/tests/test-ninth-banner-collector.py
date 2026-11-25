@@ -23,6 +23,7 @@ a job.yaml rendered from the real job template. Pins:
   DRY_RUN=1 without one kubectl call.
 Runs under every bash found (/bin/bash 3.2 on macOS is the production one).
 """
+import json
 import os
 import re
 import shutil
@@ -73,7 +74,30 @@ def state(kind, n):
 def fail(msg):
     sys.stderr.write(msg + "\n")
     sys.exit(1)
-if a[:2] == ["get", "job"]:
+def cluster_json(kind):
+    # the admission's reads (scripts/ninth-banner-capacity.py): nodes.N, allpods.N, quota.N
+    s = state(kind, look())
+    if s is None or s == "ERROR":
+        fail("Unable to connect to the server: dial tcp: i/o timeout")
+    sys.stdout.write(s)
+if a[:2] == ["get", "job"] and any("spec.parallelism" in x for x in a):
+    try:
+        sys.stdout.write(open(os.path.join(d, "parallelism")).read().strip())
+    except OSError:
+        fail("Unable to connect to the server: dial tcp: i/o timeout")
+elif a[:2] == ["get", "nodes"]:
+    cluster_json("nodes")
+elif a[:2] == ["get", "pods"] and "-A" in a:
+    cluster_json("allpods")
+elif a[:2] == ["get", "resourcequota"]:
+    cluster_json("quota")
+elif a[:2] == ["patch", "job"]:
+    import json
+    p = json.loads(a[a.index("-p") + 1])["spec"]["parallelism"]
+    if os.path.exists(os.path.join(d, "patch-fails")):
+        fail("Error from server (Forbidden): jobs.batch is forbidden")
+    open(os.path.join(d, "parallelism"), "w").write(str(p))
+elif a[:2] == ["get", "job"]:
     n = look() + 1
     open(os.path.join(d, "look"), "w").write(str(n))
     s = state("job", n)
@@ -185,15 +209,16 @@ class Farm:
         shutil.rmtree(self.kube)
         os.makedirs(self.kube)
 
-    def env(self, poll="0"):
+    def env(self, poll="0", grow="100000"):
         return dict(os.environ, RESULTS_DIR=self.results, FAKE_KUBE_DIR=self.kube, TNB_COLLECT_POLL=poll,
-                    TNB_KUBECTL="%s -S %s" % (sys.executable, self.fake), TNB_NAS_MAC_DIR=self.nas)
+                    TNB_KUBECTL="%s -S %s" % (sys.executable, self.fake), TNB_NAS_MAC_DIR=self.nas,
+                    TNB_GROW_POLL=grow)
 
     def cmd(self, bash):
         return [bash, SCRIPT, "--collect", self.job]
 
-    def collect(self, bash, poll="0"):
-        return subprocess.run(self.cmd(bash), env=self.env(poll), capture_output=True, text=True, timeout=180)
+    def collect(self, bash, poll="0", grow="100000"):
+        return subprocess.run(self.cmd(bash), env=self.env(poll, grow), capture_output=True, text=True, timeout=180)
 
     def nas_results(self, shard, rc=0, files=("junit.xml",)):
         """What run.sh leaves on the NAS for a shard that ran to its end (NAS_OUT=1)."""
@@ -208,6 +233,36 @@ class Farm:
 
     def has(self, shard, name):
         return os.path.isfile(os.path.join(self.dest, "shard-%d" % shard, name))
+
+    def cluster(self, n, nodes_free_cpu, quota_pods=(0, 33), pods_bound=True):
+        """From look n on, what the admission reads: one 8-CPU/32Gi node per entry of nodes_free_cpu
+        (CPU in cores still free), and the ci-runner quota (pods used, hard)."""
+        nodes, allpods = [], []
+        for k, free in enumerate(nodes_free_cpu):
+            name = "k8s-nuc14-0%d" % (k + 1)
+            nodes.append({"metadata": {"name": name}, "spec": {},
+                          "status": {"allocatable": {"cpu": "8", "memory": "32Gi"},
+                                     "conditions": [{"type": "Ready", "status": "True"}]}})
+            allpods.append({"metadata": {"name": "other-%d" % k},
+                            "spec": {"nodeName": name, "containers": [{"resources": {"requests": {
+                                "cpu": "%dm" % int((8 - free) * 1000), "memory": "4Gi"}}}]},
+                            "status": {"phase": "Running"}})
+        quota = {"items": [{"metadata": {"name": "ci-runner"}, "status": {
+            "hard": {"pods": str(quota_pods[1]), "requests.cpu": "62", "requests.memory": "173Gi"},
+            "used": {"pods": str(quota_pods[0]), "requests.cpu": "1", "requests.memory": "1Gi"}}}]}
+        for kind, doc in (("nodes", {"items": nodes}), ("allpods", {"items": allpods}), ("quota", quota)):
+            with open(os.path.join(self.kube, "%s.%d" % (kind, n)), "w") as f:
+                f.write(json.dumps(doc))
+
+    def parallelism(self, value=None):
+        f = os.path.join(self.kube, "parallelism")
+        if value is not None:
+            with open(f, "w") as fh:
+                fh.write(str(value))
+        try:
+            return int(open(f).read())
+        except (OSError, ValueError):
+            return None
 
     def read(self, name):
         try:
@@ -808,6 +863,106 @@ def m_nas_fallback(bash, tag):
               and not farm.has(1, "junit.xml"))
 
 
+def n_grow(bash, tag):
+    """clipgate/sims: the collector raises the Job's parallelism when room frees; never lowers it."""
+    clip = "tnb-clipgate-0123456-1125120000"
+    running = lambda farm, i: pod(i, farm.pod_name(i), "Running", node="k8s-nuc14-01", iexit=0)
+    finished = lambda farm, i: pod(i, farm.pod_name(i), "Succeeded", node="k8s-nuc14-01", iexit=0, cterm="Completed", cexit=0)
+    with tempfile.TemporaryDirectory() as tmp:
+        farm = Farm(tmp, 6, suite="clipgate", parallelism=2, deadline=17100, pod_deadline=5400, job=clip)
+        farm.parallelism(2)
+        farm.look(1, "", [running(farm, 0), running(farm, 1)])
+        farm.cluster(1, [2.5, 2.5, 2.5])                 # 0.5 CPU each after the 2 CPU headroom: no room
+        farm.cluster(2, [4, 2.5, 2.5])                   # room for 2 more 1-CPU pods
+        farm.look(3, "", [running(farm, i) for i in range(4)])
+        farm.cluster(3, [6, 2.5, 2.5])                   # room for 4: only 2 shards still wait
+        farm.look(4, "", [running(farm, i) for i in range(6)])
+        farm.cluster(4, [2.5, 2.5, 2.5])                 # tight again: nothing is lowered
+        farm.look(5, "SuccessCriteriaMet:CompletionsReached Complete:CompletionsReached ",
+                  [finished(farm, i) for i in range(6)])
+        for i in range(6):
+            farm.logs(i, result("clipgate", i + 1, 6), n=5)
+        r = farm.collect(bash, grow="0")
+        patches = [c for c in farm.calls() if c.startswith("patch job")]
+        check(tag + "grow: 2 -> 4 when room for two frees, 4 -> 6 (the shards left) later",
+              "parallelism 2 -> 4 (room freed)" in r.stdout and "parallelism 4 -> 6 (room freed)" in r.stdout
+              and len(patches) == 2 and farm.parallelism() == 6)
+        check(tag + "grow: the run itself is unchanged; exit 0",
+              kinds(farm.summary()) == ["PASS"] * 6 and r.returncode == 0 and farm.looks() == 5)
+    with tempfile.TemporaryDirectory() as tmp:
+        # quota: room on the nodes, but the namespace has room for one pod only
+        farm = Farm(tmp, 4, suite="sims", parallelism=2, deadline=25800)
+        farm.parallelism(2)
+        farm.look(1, "", [running(farm, 0), running(farm, 1)])
+        farm.cluster(1, [8, 8, 8], quota_pods=(32, 33))
+        farm.look(2, "SuccessCriteriaMet:CompletionsReached Complete:CompletionsReached ",
+                  [finished(farm, i) for i in range(4)])
+        for i in range(4):
+            farm.logs(i, result("sims", i + 1, 4), n=2)
+        r = farm.collect(bash, grow="0")
+        check(tag + "grow sims: the quota allows one more pod: 2 -> 3",
+              "parallelism 2 -> 3 (room freed)" in r.stdout and farm.parallelism() == 3)
+    with tempfile.TemporaryDirectory() as tmp:
+        # never lowers: someone set 8 by hand, above the cap of 6
+        farm = Farm(tmp, 10, suite="sims", parallelism=2, deadline=25800)
+        farm.parallelism(8)
+        farm.look(1, "", [running(farm, i) for i in range(8)])
+        farm.cluster(1, [8, 8, 8])
+        farm.look(2, "SuccessCriteriaMet:CompletionsReached Complete:CompletionsReached ",
+                  [finished(farm, i) for i in range(10)])
+        for i in range(10):
+            farm.logs(i, result("sims", i + 1, 10), n=2)
+        r = farm.collect(bash, grow="0")
+        check(tag + "grow: never lowers a parallelism above the cap",
+              farm.parallelism() == 8 and not any(c.startswith("patch") for c in farm.calls()))
+    with tempfile.TemporaryDirectory() as tmp:
+        # a pod of the Job waits for a node: adding more would only queue them (quota starvation)
+        farm = Farm(tmp, 4, suite="clipgate", parallelism=2, deadline=11100, pod_deadline=5400, job=clip)
+        farm.parallelism(2)
+        farm.look(1, "", [running(farm, 0), pod(1, farm.pod_name(1), "Pending", sched="Unschedulable")])
+        farm.cluster(1, [8, 8, 8])
+        farm.look(2, "SuccessCriteriaMet:CompletionsReached Complete:CompletionsReached ",
+                  [finished(farm, i) for i in range(4)])
+        for i in range(4):
+            farm.logs(i, result("clipgate", i + 1, 4), n=2)
+        r = farm.collect(bash, grow="0")
+        check(tag + "grow: skipped while a pod of the Job waits for a node",
+              farm.parallelism() == 2 and "waits for a node" in r.stdout
+              and not any(c.startswith(("patch", "get nodes")) for c in farm.calls()))
+    for what, setup, said in (
+            ("the node list", lambda farm: farm.cluster(1, [8, 8, 8]) or os.remove(os.path.join(farm.kube, "nodes.1")),
+             "cannot read node capacity / quota"),
+            ("the quota", lambda farm: farm.cluster(1, [8, 8, 8]) or open(os.path.join(farm.kube, "quota.1"), "w").write("ERROR"),
+             "cannot read node capacity / quota"),
+            ("the Job's parallelism", lambda farm: farm.cluster(1, [8, 8, 8]) or os.remove(os.path.join(farm.kube, "parallelism")),
+             "cannot read the Job's parallelism")):
+        with tempfile.TemporaryDirectory() as tmp:
+            farm = Farm(tmp, 4, suite="clipgate", parallelism=2, deadline=11100, pod_deadline=5400, job=clip)
+            farm.parallelism(2)
+            farm.look(1, "", [running(farm, 0), running(farm, 1)])
+            setup(farm)
+            farm.look(3, "SuccessCriteriaMet:CompletionsReached Complete:CompletionsReached ",
+                      [finished(farm, i) for i in range(4)])
+            for i in range(4):
+                farm.logs(i, result("clipgate", i + 1, 4), n=3)
+            r = farm.collect(bash, grow="0")
+            check(tag + "grow: unreadable %s changes nothing, said once" % what,
+                  not any(c.startswith("patch") for c in farm.calls()) and r.stdout.count(said) == 1
+                  and kinds(farm.summary()) == ["PASS"] * 4)
+    with tempfile.TemporaryDirectory() as tmp:
+        # unit is never grown (one pod per shard is the plan), whatever the room
+        farm = Farm(tmp, 2, suite="unit", parallelism=1, deadline=5400, pod_deadline=5400, job="tnb-unit-0123456-1125120000")
+        farm.parallelism(1)
+        farm.look(1, "", [running(farm, 0)])
+        farm.cluster(1, [8, 8, 8])
+        farm.look(2, "SuccessCriteriaMet:CompletionsReached Complete:CompletionsReached ",
+                  [finished(farm, i) for i in range(2)])
+        for i in range(2):
+            farm.logs(i, result("unit", i + 1, 2), n=2)
+        farm.collect(bash, grow="0")
+        check(tag + "grow: unit is left alone", not any(c.startswith(("patch", "get nodes")) for c in farm.calls()))
+
+
 bashes = []
 for candidate in ("/bin/bash", "/opt/homebrew/bin/bash", "/usr/local/bin/bash", shutil.which("bash")):
     if candidate and os.path.exists(candidate) and os.path.realpath(candidate) not in [os.path.realpath(b) for b in bashes]:
@@ -839,6 +994,7 @@ for bash in bashes:
     i_closed_stdout(bash, tag)
     j_give_up(bash, tag)
     m_nas_fallback(bash, tag)
+    n_grow(bash, tag)
 
 print("%d failure(s)" % len(fails))
 sys.exit(1 if fails else 0)
