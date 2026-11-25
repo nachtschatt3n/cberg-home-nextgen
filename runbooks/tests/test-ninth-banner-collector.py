@@ -96,6 +96,10 @@ elif a[0] == "logs":
 elif a[0] == "cp":
     if os.path.exists(os.path.join(d, "cp-fails")):
         fail("error: cannot exec into a container in a completed pod")
+    # what kubectl cp of /results brings: <dest>/shard-N/ (N from the pod name <job>-<index>-<suffix>)
+    idx = int(a[3].split(":")[0].rsplit("-", 2)[1])
+    os.makedirs(os.path.join(a[4], "shard-%d" % (idx + 1)), exist_ok=True)
+    open(os.path.join(a[4], "shard-%d" % (idx + 1), "from-pod"), "w").write("pod\n")
 elif a[0] == "exec":
     pass
 else:
@@ -136,8 +140,9 @@ class Farm:
     """A results folder with a rendered job.yaml, and the saved cluster states of one scenario."""
 
     def __init__(self, tmp, shards, suite="sims", parallelism=2, deadline=38700, pod_deadline=12600, age=60,
-                 job="tnb-sims-0123456-1111091057", job_yaml=None):
+                 job="tnb-sims-0123456-1111091057", job_yaml=None, nas_out=0):
         self.tmp, self.job, self.suite, self.shards = tmp, job, suite, shards
+        self.nas = os.path.join(tmp, "nas")       # TNB_NAS_MAC_DIR: <nas>/farm/<job>/shard-N/results
         self.results = os.path.join(tmp, "results")
         self.dest = os.path.join(self.results, job)
         self.kube = os.path.join(tmp, "kube")
@@ -149,7 +154,7 @@ class Farm:
         if job_yaml is None:
             job_yaml = open(TEMPLATE).read()
             values = dict(RENDER, JOB_NAME=job, SUITE=suite, SHARDS=shards, PARALLELISM=parallelism,
-                          DEADLINE=deadline, POD_DEADLINE=pod_deadline)
+                          DEADLINE=deadline, POD_DEADLINE=pod_deadline, NAS_OUT=nas_out)
             for key, value in values.items():
                 job_yaml = job_yaml.replace("__%s__" % key, str(value))
         with open(os.path.join(self.dest, "job.yaml"), "w") as f:
@@ -182,13 +187,27 @@ class Farm:
 
     def env(self, poll="0"):
         return dict(os.environ, RESULTS_DIR=self.results, FAKE_KUBE_DIR=self.kube, TNB_COLLECT_POLL=poll,
-                    TNB_KUBECTL="%s -S %s" % (sys.executable, self.fake))
+                    TNB_KUBECTL="%s -S %s" % (sys.executable, self.fake), TNB_NAS_MAC_DIR=self.nas)
 
     def cmd(self, bash):
         return [bash, SCRIPT, "--collect", self.job]
 
     def collect(self, bash, poll="0"):
         return subprocess.run(self.cmd(bash), env=self.env(poll), capture_output=True, text=True, timeout=180)
+
+    def nas_results(self, shard, rc=0, files=("junit.xml",)):
+        """What run.sh leaves on the NAS for a shard that ran to its end (NAS_OUT=1)."""
+        d = os.path.join(self.nas, "farm", self.job, "shard-%d" % shard, "results")
+        os.makedirs(d)
+        with open(os.path.join(d, "exit-code"), "w") as f:
+            f.write("%d\n" % rc)
+        for name in files:
+            os.makedirs(os.path.dirname(os.path.join(d, name)), exist_ok=True)
+            with open(os.path.join(d, name), "w") as f:
+                f.write("nas copy of shard %d\n" % shard)
+
+    def has(self, shard, name):
+        return os.path.isfile(os.path.join(self.dest, "shard-%d" % shard, name))
 
     def read(self, name):
         try:
@@ -730,6 +749,65 @@ def l_dry_render(bash, tag):
     return rendered
 
 
+def m_nas_fallback(bash, tag):
+    """NAS_OUT=1: a shard whose pod is gone, or whose ended pod cannot be copied from, takes the NAS copy."""
+    clip = "tnb-clipgate-0123456-1125094913"
+    # the Job is gone (TTL): shards 1 and 2 ran to their end and left their results on the NAS, shard 3 did not
+    with tempfile.TemporaryDirectory() as tmp:
+        farm = Farm(tmp, 3, suite="clipgate", parallelism=3, deadline=5700, pod_deadline=5400, job=clip, nas_out=1)
+        farm.nas_results(1, 0, files=("gate-fist.log", "pics/test-results/a.png"))
+        farm.nas_results(2, 1, files=("gate-fist.log",))
+        farm.look(1, "NOTFOUND", [])
+        r = farm.collect(bash)
+        lines = farm.summary()
+        check(tag + "nas: one line per shard; PASS and the real red from the NAS exit codes, shard 3 lost; exit 1",
+              shape_ok(farm, lines) and kinds(lines) == ["PASS", "RED", "job gone"] and r.returncode == 1)
+        check(tag + "nas: the lines say where the verdict came from",
+              bool(lines) and "rc=0 nas=ok (from the NAS copy" in lines[0] and "result=FAIL rc=1 nas=ok" in lines[1])
+        check(tag + "nas: artifacts in shard-N/, pictures under pics/shard-N/, the shard log ends with the line",
+              farm.has(1, "gate-fist.log") and farm.has(1, "exit-code") and farm.has(2, "gate-fist.log")
+              and os.path.isfile(os.path.join(farm.dest, "pics", "shard-1", "test-results", "a.png"))
+              and not os.path.exists(os.path.join(farm.dest, "shard-3"))
+              and (farm.read("shard-1.log") or "").rstrip("\n").split("\n")[-1] == (lines or [""])[0])
+        check(tag + "nas: nothing left behind", farm.leftovers() == []
+              and not any(n.endswith(".nas.tmp") for n in os.listdir(farm.dest)))
+    # the pods ended (after the 900 s hold): the log is readable, kubectl cp is not
+    with tempfile.TemporaryDirectory() as tmp:
+        farm = Farm(tmp, 2, suite="clipgate", parallelism=2, deadline=5700, pod_deadline=5400, job=clip, nas_out=1)
+        n = farm.pod_name
+        done = [pod(i, n(i), "Succeeded", node="k8s-nuc14-01", iexit=0, cterm="Completed", cexit=0) for i in range(2)]
+        farm.look(1, "SuccessCriteriaMet:CompletionsReached Complete:CompletionsReached ", done)
+        open(os.path.join(farm.kube, "cp-fails"), "w").close()
+        for i in range(2):
+            farm.logs(i, result("clipgate", i + 1, 2))
+        farm.nas_results(1, 0)
+        r = farm.collect(bash)
+        lines = farm.summary()
+        check(tag + "nas cp failed: both verdicts from the logs; exit 0",
+              shape_ok(farm, lines) and kinds(lines) == ["PASS", "PASS"] and r.returncode == 0)
+        check(tag + "nas cp failed: shard 1 from the NAS, shard 2 (no NAS copy) says so",
+              farm.has(1, "junit.xml") and "shard 1 artifacts: taken from the NAS copy" in r.stdout
+              and "copy of shard 2 artifacts failed; no NAS copy at" in r.stdout)
+    # re-attached after an earlier collector saved the log but no artifacts
+    with tempfile.TemporaryDirectory() as tmp:
+        farm = Farm(tmp, 1, suite="clipgate", parallelism=1, deadline=5700, pod_deadline=5400, job=clip, nas_out=1)
+        with open(os.path.join(farm.dest, "shard-1.log"), "w") as f:
+            f.write(result("clipgate", 1, 1))
+        farm.nas_results(1, 0)
+        farm.look(1, "NOTFOUND", [])
+        r = farm.collect(bash)
+        check(tag + "nas re-attach: the verdict from the saved log, the artifacts from the NAS",
+              kinds(farm.summary()) == ["PASS"] and farm.has(1, "junit.xml") and r.returncode == 0)
+    # a Job without NAS_OUT=1 never reads the NAS folder
+    with tempfile.TemporaryDirectory() as tmp:
+        farm = Farm(tmp, 1, suite="clipgate", parallelism=1, deadline=5700, pod_deadline=5400, job=clip, nas_out=0)
+        farm.nas_results(1, 0)
+        farm.look(1, "NOTFOUND", [])
+        farm.collect(bash)
+        check(tag + "nas: a Job without NAS_OUT=1 ignores the folder", kinds(farm.summary()) == ["job gone"]
+              and not farm.has(1, "junit.xml"))
+
+
 bashes = []
 for candidate in ("/bin/bash", "/opt/homebrew/bin/bash", "/usr/local/bin/bash", shutil.which("bash")):
     if candidate and os.path.exists(candidate) and os.path.realpath(candidate) not in [os.path.realpath(b) for b in bashes]:
@@ -760,6 +838,7 @@ for bash in bashes:
     h_stopped_and_reattached(bash, tag, signal.SIGTERM, 143)
     i_closed_stdout(bash, tag)
     j_give_up(bash, tag)
+    m_nas_fallback(bash, tag)
 
 print("%d failure(s)" % len(fails))
 sys.exit(1 if fails else 0)

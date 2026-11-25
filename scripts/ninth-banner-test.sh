@@ -43,6 +43,8 @@
 # 0 for unit/sims) mounts /nas/shared read-only; NAS_OUT=1 also mounts
 # /nas/farm/<job> read-write (only then is a farm folder created) and copies each shard's results to /nas/farm/<job>/shard-N/results,
 # which the Mac reads at TNB_NAS_MAC_DIR (default ~/nas-ai/ninth-banner)/farm/<job>/.
+# The collector takes a shard's artifacts (and, with no pod left, its verdict
+# from exit-code) from there when its pod is gone or `kubectl cp` fails.
 # ---
 # Admission (docs/sops/ci-runner.md): the Job is created only once all parallel
 # shard pods first-fit, one at a time, into the schedulable nodes' free CPU
@@ -585,13 +587,61 @@ dead_pod() {   # <index>
     fi
 }
 
+# ---- NAS fallback (NAS_OUT=1 Jobs): the shard's own copy of its results ----
+# run.sh copies /results/shard-N to /nas/farm/<job>/shard-N/results (atomic
+# rename) before it prints its CI-RESULT line. When the pod is gone, or ended
+# and `kubectl cp` cannot exec into it any more (a collector that came after
+# the 900 s hold, 2026-11-25 tnb-clipgate-dc5a9b5: 5 of 6 shard folders
+# missing), the Mac's NAS mount still has them.
+nas_on=0
+if grep -A1 '^            - name: NAS_OUT$' "$dest/job.yaml" 2>/dev/null | grep -q 'value: "1"'; then nas_on=1; fi
+nas_dir="${TNB_NAS_MAC_DIR:-$HOME/nas-ai/ninth-banner}/farm/$job"
+has_artifacts() {   # <shard number>: the shard's folder on this Mac holds something
+    [ -n "$(ls -A "$dest/shard-$1" 2>/dev/null)" ]
+}
+nas_copy() {   # <shard number> -> 0 when the NAS copy is now in <dest>/shard-N
+    local n="$1" src tmp
+    [ "$nas_on" = 1 ] || return 1
+    src="$nas_dir/shard-$n/results"
+    [ -d "$src" ] || return 1
+    tmp="$dest/shard-$n.nas.tmp"
+    rm -rf "$tmp"
+    if ! cp -R "$src" "$tmp" 2>/dev/null; then rm -rf "$tmp"; say "  (copy of shard $n artifacts from the NAS failed: $src)"; return 1; fi
+    rm -rf "$dest/shard-$n"; mv "$tmp" "$dest/shard-$n"
+    if [ -d "$dest/shard-$n/pics" ]; then
+        mkdir -p "$dest/pics"; rm -rf "$dest/pics/shard-$n"; mv "$dest/shard-$n/pics" "$dest/pics/shard-$n"
+    fi
+    say "  shard $n artifacts: taken from the NAS copy ($src)"
+    return 0
+}
+# A shard with no pod left: its verdict from the NAS copy's exit-code, if there is one.
+nas_result() {   # <index> -> 0 when a line was recorded
+    local i="$1" n=$(( $1 + 1 )) rc line verdict
+    [ "$nas_on" = 1 ] && [ -f "$nas_dir/shard-$n/results/exit-code" ] || return 1
+    rc="$(tr -d ' \n' < "$nas_dir/shard-$n/results/exit-code" 2>/dev/null || true)"
+    [[ "$rc" =~ ^[0-9]+$ ]] || return 1
+    has_artifacts "$n" || nas_copy "$n" || return 1
+    if [ "$rc" = 0 ]; then verdict=PASS; else verdict=FAIL; fi
+    line="CI-RESULT suite=$suite shard=$n/$shards result=$verdict rc=$rc nas=ok (from the NAS copy: no pod of this shard was left to read)"
+    if [ -f "$dest/shard-$n.log" ]; then
+        grep -v '^CI-RESULT .* rc=? (lost: ' "$dest/shard-$n.log" > "$dest/shard-$n.log.tmp" || true
+        mv -f "$dest/shard-$n.log.tmp" "$dest/shard-$n.log"
+    fi
+    printf '%s\n' "$line" >> "$dest/shard-$n.log"
+    record "$i" "$line"
+    return 0
+}
+
 if [ "$attached" = 1 ]; then
     # results an earlier collector already brought home
     for ((i = 0; i < shards; i++)); do
         f="$dest/shard-$((i + 1)).log"
         if [ -f "$f" ] && grep -q '^CI-RESULTS-READY' "$f"; then
             line="$(grep '^CI-RESULT ' "$f" | grep -v ' rc=? (' | tail -1 || true)"
-            if [ -n "$line" ]; then record "$i" "$line"; fi
+            if [ -n "$line" ]; then
+                record "$i" "$line"
+                has_artifacts "$((i + 1))" || nas_copy "$((i + 1))" || true
+            fi
         fi
     done
 fi
@@ -604,6 +654,8 @@ while [ "$ndone" -lt "$shards" ]; do
         [ "$pods_ok" = 1 ] || continue   # the pod list could not be read: decide nothing in this look
         n=$((i + 1)); pod="${p_name[$i]:-}"
         if [ -z "$pod" ]; then
+            # a shard that ran to its end left its results (and exit code) on the NAS
+            if [ "$jstate" != unreadable ] && nas_result "$i"; then continue; fi
             no_pod "$i"
             continue
         fi
@@ -628,7 +680,10 @@ while [ "$ndone" -lt "$shards" ]; do
         # eviction, preemption) still leaves its output on this Mac
         if [ -n "$logs" ]; then printf '%s\n' "$logs" > "$dest/shard-$n.log"; fi
         if grep -q '^CI-RESULTS-READY' <<<"$logs"; then
-            k cp -c runner "$NS/$pod:/results" "$dest" >/dev/null 2>&1 || say "  (copy of shard $n artifacts failed)"
+            # an ended pod cannot be exec'd into: then the NAS copy (NAS_OUT=1), if there is one
+            if ! k cp -c runner "$NS/$pod:/results" "$dest" >/dev/null 2>&1 || ! has_artifacts "$n"; then
+                nas_copy "$n" || say "  (copy of shard $n artifacts failed$([ "$nas_on" = 1 ] && echo "; no NAS copy at $nas_dir/shard-$n/results"))"
+            fi
             # pictures (PICS / PICS_ENV): all shards' under <job>/pics/shard-N/
             if [ -d "$dest/shard-$n/pics" ]; then
                 mkdir -p "$dest/pics"; rm -rf "$dest/pics/shard-$n"; mv "$dest/shard-$n/pics" "$dest/pics/shard-$n"
