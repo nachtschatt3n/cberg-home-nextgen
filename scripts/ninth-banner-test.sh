@@ -154,8 +154,9 @@ case "$suite" in unit|sims) [ "$gpu" = 0 ] && lane=cpu || lane=browser ;;
     *) lane=browser ;; esac
 if [ "$lane" = cpu ]; then
     cpu_req="${CPU_REQ:-1}"; cpu_lim="${CPU_LIM:-1.5}"; mem_req=1Gi; mem_lim=3Gi; eph_req=2Gi; eph_lim=8Gi
-    # unit only: 4Gi (owner 2026-11-25; 3Gi was OOMKilled in the game's checks)
-    [ "$suite" = unit ] && mem_lim=4Gi
+    # unit only (owner 2026-11-25): 4Gi (3Gi was OOMKilled in the game's checks)
+    # and a 2 CPU limit (at 1.5 vitest alone took 5294 s of the 5400 s deadline)
+    if [ "$suite" = unit ]; then mem_lim=4Gi; cpu_lim="${CPU_LIM:-2}"; fi
 else
     cpu_req="${CPU_REQ:-2}"; cpu_lim="${CPU_LIM:-4}"; mem_req=6Gi; mem_lim=10Gi; eph_req=8Gi; eph_lim=16Gi
 fi
