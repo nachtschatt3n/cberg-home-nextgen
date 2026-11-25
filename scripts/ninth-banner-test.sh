@@ -692,7 +692,7 @@ elif [ "$fails" -eq 0 ]; then
 else
     say "FAIL  $suite @ ${sha:0:12}: $fails/$shards shards failed, $lostn of them lost (rc=?: no verdict on the code) (${elapsed}s)"
 fi
-say "tests: $counts (executed $executed of $planned planned)"
+[ "$suite" = clipgate ] || say "tests: $counts (executed $executed of $planned planned)"
 if [[ "$executed" =~ ^[0-9]+$ ]] && [[ "$planned" =~ ^[0-9]+$ ]] && [ "$executed" -lt "$planned" ]; then
     say "WARNING: TEST-COUNT-MISMATCH: $((planned - executed)) planned tests never ran (dropped from the --test-list match; docs/sops/ci-runner.md)"
 fi
