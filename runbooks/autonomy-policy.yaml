@@ -59,7 +59,7 @@
 # HUMAN-GATED. KILL SWITCH: empty the `classes:` map (or delete this file)
 # => every plan derives HUMAN-GATED.
 # Changes here are code-reviewed; bump `version`.
-version: "2026.09.28"
+version: "2026.11.25"
 
 first_runs_supervised: 2
 
@@ -143,5 +143,34 @@ interruption_tolerant:
   rollback_classes: [git-revert, backup-restore]   # backup-restore needs restore_proof
   forbid_shared: []                                # widens the in-code SD-11 floor only
   windows: [nightly]
+
+# ── PLAN REFINEMENT (operator direction 2026-11-25) ───────────────────────────
+# runbooks/plan-refine.py runs at the START of every window and keeps open
+# plans fresh. It may repair MECHANICAL staleness (patch retarget on the same
+# line, dead conflicts_with refs) and, only when every change that run was
+# mechanical AND the plan's premises PASS, EXTEND a ready-for-go review that is
+# about to lapse (`review_refined`, read by maintenance-plan.py::
+# effective_review). It never writes `review:` — only a reviewer's verdict first
+# marks a plan ready-for-go. The extension is bounded: it stops counting once
+# the last FULL review is review_hard_cap_days old, which forces a real
+# plan-reviewer pass. Anything non-mechanical => `needs_replan:` (no
+# pre-approval) + a planner queue entry. KILL SWITCH: delete this block and
+# `plan-refine.py` falls back to the in-code defaults, so to disable extension
+# set review_hard_cap_days: 0.
+refine:
+  review_hard_cap_days: 60     # max age of the last FULL review an extension may ride
+  extend_lead_days: 7          # extend when the effective review is within N days of lapsing
+  retarget: patch-only         # documentation: minor/major drift always goes to a planner
+
+# ── GENERATED PLANS (plan-generate.py, 2026-11-25) ───────────────────────────
+# Template plans for the mechanical classes are written as `status: draft` and
+# never mark themselves ready-for-go. `plan-generate.py review` acts as a
+# DETERMINISTIC reviewer, but ONLY for a template version listed here — i.e.
+# after the operator has had the template itself reviewed — and only while the
+# plan still equals a fresh re-generation from its recorded inputs. Empty
+# (the default) means nothing self-approves and plan-reviewer-agent reviews
+# every generated draft as before.   e.g. reviewed_templates: ["stateless@1"]
+generated_plans:
+  reviewed_templates: []
 
 default: human-gated

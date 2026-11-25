@@ -290,7 +290,9 @@ def reconcile(cfg, today, decisions=_FETCH_DECISIONS):
         # (interruption-tolerant nightly); one function so the scheduler,
         # autonomy-record.py eligible and this report can never disagree.
         cls, why, pre, pre_why = effective_class(p, autonomy, today, cfg)
+        _wk, _wk_why = weekend_class(p)
         exec_classes.append({"plan_id": p.get("plan_id"), "class": cls,
+                             "weekend_attended": _wk and not pre, "weekend_why": _wk_why,
                              "reason": why, "window": p.get("window"),
                              # SD-10: runs in `preapproved_windows` with no GO
                              "preapproved": pre, "preapproval": pre_why})
@@ -592,6 +594,12 @@ def reconcile(cfg, today, decisions=_FETCH_DECISIONS):
         "retired_windowed": [{"plan_id": p.get("plan_id"), "status": p.get("status"),
                               "window": p.get("window")} for p in retired],
         "warnings": warnings,
+        # plan-refine.py flagged these (`needs_replan:`): they are NOT
+        # pre-approved and wait for a planner (sweep rule 2b / window Step 0b).
+        "needs_replan": [{"plan_id": p.get("plan_id"), "status": p.get("status"),
+                          "reason": str(p.get("needs_replan"))[:200]}
+                         for p in plans
+                         if p.get("needs_replan") and p.get("status") not in TERMINAL_PLAN_STATUSES],
         "plan_status": {s: sum(1 for p in plans if p.get("status") == s)
                         for s in ["draft", "vetted", "scheduled", "awaiting-go", "executed", "blocked", "superseded"]},
     }
@@ -864,6 +872,16 @@ def validate_plans(cfg, plans=None) -> list[str]:
         if pl.get("review") is not None and parse_review(pl.get("review")) is None:
             errs.append(f"{pid}: review {pl.get('review')!r} is not <verdict>@<YYYY-MM-DD> "
                         f"(e.g. ready-for-go@2026-09-27)")
+        # plan-refine extension fields must be coherent or they silently mean nothing
+        for _f in ("review_refined", "review_refined_base"):
+            if pl.get(_f) is not None:
+                try:
+                    _dt.date.fromisoformat(str(pl.get(_f)))
+                except ValueError:
+                    errs.append(f"{pid}: {_f} {pl.get(_f)!r} is not YYYY-MM-DD")
+        if pl.get("review_refined") is not None and parse_review(pl.get("review")) is None:
+            errs.append(f"{pid}: review_refined without a recorded `review:` — "
+                        f"only a reviewer's verdict marks a plan ready-for-go")
         # a plan that claims a slot must name a real, dated, weekday-consistent one
         if st in ("scheduled", "awaiting-go"):
             if not w:
@@ -1733,6 +1751,48 @@ def parse_review(value):
         return None
 
 
+def effective_review(plan: dict, policy: dict | None = None, today: date | None = None):
+    """(verdict, date) the pre-approval rules should read, or None.
+
+    The reviewer's `review: <verdict>@<date>` is the ONLY thing that first
+    marks a plan ready-for-go. plan-refine.py may EXTEND it when a plan was
+    refreshed by MECHANICAL repairs only (patch retarget, dead-ref prune) and
+    its premises PASS: it records `review_refined: <date>` plus
+    `review_refined_base: <the review date it extends>`. The extension counts
+    only while (a) the base still equals the plan's current review date (a
+    fresh full review resets it, a hand-edited review drops it) and (b) the
+    last FULL review is at most `refine.review_hard_cap_days` old (default 60)
+    — so a plan can never ride refinements forever without a real re-review.
+    """
+    rv = parse_review(plan.get("review"))
+    if rv is None:
+        return None
+    ref, base = plan.get("review_refined"), plan.get("review_refined_base")
+    if ref is None or base is None:
+        return rv
+    try:
+        ref_d = date.fromisoformat(str(ref))
+        base_d = date.fromisoformat(str(base))
+    except ValueError:
+        return rv
+    if base_d != rv[1]:
+        return rv
+    _cap = ((policy or {}).get("refine") or {}).get("review_hard_cap_days")
+    cap = 60 if _cap is None else int(_cap)   # 0 is a real value: extensions off
+    t = today or date.today()
+    if (t - base_d).days > cap or ref_d < rv[1]:
+        return rv
+    return rv[0], ref_d
+
+
+def replan_blocked(plan: dict) -> str | None:
+    """Reason string when plan-refine flagged the plan `needs_replan`."""
+    v = plan.get("needs_replan")
+    if v in (None, False, ""):
+        return None
+    return f"needs_replan flagged by plan-refine ({str(v)[:80]}) — a planner must re-plan it"
+
+
 def preapproval(plan: dict, policy: dict | None, klass: str,
                 today: date | None = None) -> tuple[bool, list[str]]:
     """(pre_approved, reasons). reasons lists every UNMET condition when not
@@ -1765,9 +1825,12 @@ def preapproval(plan: dict, policy: dict | None, klass: str,
     statuses = [str(x) for x in (spec.get("statuses") or ["vetted", "scheduled", "awaiting-go"])]
     if status not in statuses:
         missing.append(f"status {status or 'none'} (needs {'|'.join(statuses)})")
-    rv = parse_review(plan.get("review"))
+    rv = effective_review(plan, policy, today)
     want = str(spec.get("require_review") or "ready-for-go")
     max_age = int(spec.get("max_review_age_days") or 30)
+    _rb = replan_blocked(plan)
+    if _rb:
+        missing.append(_rb)
     if rv is None:
         missing.append(f"no recorded review (needs `review: {want}@YYYY-MM-DD`)")
     else:
@@ -1873,9 +1936,12 @@ def sd11_eligibility(plan: dict, policy: dict | None, today: date | None = None,
     statuses = [str(x) for x in (spec.get("statuses") or ["vetted", "scheduled", "awaiting-go"])]
     if status not in statuses:
         missing.append(f"status {status or 'none'} (needs {'|'.join(statuses)})")
-    rv = parse_review(plan.get("review"))
+    rv = effective_review(plan, policy, today)
     want = str(spec.get("require_review") or "ready-for-go")
     max_age = int(spec.get("max_review_age_days") or 30)
+    _rb = replan_blocked(plan)
+    if _rb:
+        missing.append(_rb)
     if rv is None:
         missing.append(f"no recorded review (needs `review: {want}@YYYY-MM-DD`)")
     else:
@@ -1922,6 +1988,27 @@ def effective_class(plan: dict, policy: dict | None, today: date | None = None,
     sd_class = ("AUTO-BACKUP-GATED" if plan.get("rollback_class") == "backup-restore"
                 else "AUTO-NIGHT")
     return sd_class, "SD-11 interruption-tolerant (policy interruption_tolerant)", True, s_why
+
+
+# Cluster-core plans stay HANDS-ON in the weekend attended windows (operator,
+# 2026-11-25): reboots, the storage engine, CNI, cluster DNS, the gateway data
+# plane, flux itself, etcd/apiserver and Talos. This is the SD-11 floor plus the
+# gateway tokens (an ingress outage is fine at night for SD-11, but Envoy
+# Gateway is still "cluster-core" for scheduling purposes: attended, GO-gated).
+WEEKEND_TOKENS = tuple(SD11_FLOOR) + ("gateway", "envoy", "kubernetes", "k8s")
+
+
+def weekend_class(plan: dict) -> tuple[bool, list[str]]:
+    """(weekend_attended, reasons). Pure. A weekend-class plan is auto-slotted
+    into the next attended window once VETTED (window-scheduler.py) but is
+    still HUMAN-GATED: placement is clerical, the GO is not."""
+    why = []
+    if plan.get("needs_reboot") is True:
+        why.append("needs_reboot")
+    hit = sorted(shared_tokens((plan.get("touches") or {}).get("shared")) & set(WEEKEND_TOKENS))
+    if hit:
+        why.append("cluster-core shared: " + ",".join(hit))
+    return bool(why), why
 
 
 def sd11_windows(policy) -> list[str]:

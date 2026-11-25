@@ -229,7 +229,7 @@ def check_premises_subprocess(plan_id, timeout=PREMISES_TIMEOUT_S) -> tuple[bool
 
 def assign(plans, cfg, classes, graduated, today, horizon_days=21,
            premises_check=check_premises_subprocess, preapproved=None,
-           preapproved_windows=("nightly",)):
+           preapproved_windows=("nightly",), weekend=None):
     """Pure planner. Returns (assignments, skipped).
 
     `graduated` maps category -> bool. `classes` maps plan_id -> execution class.
@@ -269,7 +269,15 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21,
         # its pre-approved windows; admitting that is the operator decision
         # the AUTO-BACKUP-GATED note in the docstring asked for (SD-11,
         # 2026-09-28). The backup gate still has to PASS at runtime.
-        if klass not in SCHEDULABLE_CLASSES and pid not in (preapproved or ()):
+        # WEEKEND-ATTENDED (2026-11-25): a vetted cluster-core plan (reboot,
+        # storage engine, cni, dns, flux, etcd, talos, gateway) is PLACED into
+        # the next attended window automatically — placement is clerical, the
+        # operator GO at that window is not. Never nightly.
+        is_wk = pid in (weekend or ()) and pid not in (preapproved or ())
+        if plan.get("needs_replan"):
+            skip(plan, f"needs_replan flagged by plan-refine ({str(plan.get('needs_replan'))[:60]})")
+            continue
+        if klass not in SCHEDULABLE_CLASSES and pid not in (preapproved or ()) and not is_wk:
             skip(plan, f"class {klass} is not auto-schedulable")
             continue
         if status not in SCHEDULABLE_STATUSES:
@@ -293,7 +301,7 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21,
             continue
 
         is_pre = pid in (preapproved or ())
-        want_attended = not (is_pre or graduated.get(
+        want_attended = is_wk or not (is_pre or graduated.get(
             f"{plan.get('kind')}/{klass}", False))
         dur = int(plan.get("est_duration_min") or 0)
         conflicts = set(plan.get("conflicts_with") or [])
@@ -353,7 +361,9 @@ def assign(plans, cfg, classes, graduated, today, horizon_days=21,
         assignments.append({
             "plan_id": pid, "slot": placed["slot"], "class": klass,
             "category": f"{plan.get('kind')}/{klass}",
-            "reason": ("earning supervised runs — category not yet graduated"
+            "reason": ("weekend-attended: cluster-core plan auto-slotted, operator GO still required at the window"
+                       if is_wk else
+                       "earning supervised runs — category not yet graduated"
                        if want_attended else
                        ("pre-approved (SD-10 low-risk or SD-11 interruption-tolerant, reviewed ready-for-go) — "
                         "runs in the nightly window without a GO")
@@ -414,9 +424,11 @@ def main() -> int:
         verified = True
 
     preapproved = {pid for pid, e in eff.items() if e[2]}
+    weekend = {p.get("plan_id") for p in plans if mp.weekend_class(p)[0]}
     assignments, skipped = assign(plans, cfg, classes, graduated, today,
                                   args.horizon_days, preapproved=preapproved,
-                                  preapproved_windows=mp.preapproved_windows(policy))
+                                  preapproved_windows=mp.preapproved_windows(policy),
+                                  weekend=weekend)
 
     out = {"today": today.isoformat(), "track_record_verified": verified,
            "threshold": threshold, "graduated": graduated,
