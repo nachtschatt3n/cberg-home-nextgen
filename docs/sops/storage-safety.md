@@ -97,7 +97,7 @@ If the brief is ambiguous (e.g. "clean up the test resources"), enumerate what e
 
 **Every CIFS StorageClass on this cluster is `reclaimPolicy: Retain` (19/19
 verified live 2026-08-26; 18 live after `cifs-scrypted-media` was pruned with
-scrypted-nvr on 2026-10-04, 21 in the repo with `cifs-github-mirror` and `cifs-unifi-backup` added 2026-11-16 and `cifs-db-dumps` 2026-11-17, Tier 3, Retain by manifest).** This table used to record 17 of them as `Delete`,
+scrypted-nvr on 2026-10-04, 21 in the repo with `cifs-github-mirror` and `cifs-unifi-backup` added 2026-11-16 and `cifs-db-dumps` 2026-11-17, 22 with `cifs-ninth-banner` 2026-11-25 (22 live, verified 2026-11-25), Tier 3, Retain by manifest).** This table used to record 17 of them as `Delete`,
 which had stopped being true. That is not a harmless over-warning: a table wrong
 on most of its rows teaches operators to discount it, and it hides real change —
 if someone flipped a class to `Delete`, the table would have looked identical.
@@ -151,7 +151,9 @@ constrained:**
 | `cifs-immich-icloud-backup` | `//192.168.55.240/backups` | `icloud-backup` | Retain |
 | `cifs-opencode-andreamosteller` | `//192.168.55.240/opencode` | `/andrea-opencode` | Retain |
 | `cifs-penpot-assets` | `//192.168.55.240/penpot` | `assets` | Retain |
-| `cifs-ninth-banner` (added 2026-11-25; ci-runner farm workspace, login `kube-system/csi-driver-smb`) | `//${NAS_HOSTNAME}/documents` | `/mac-mini-ai/ninth-banner` | Retain |
+| `cifs-ninth-banner` | `//192.168.55.240/documents` | `/mac-mini-ai/ninth-banner` | Retain |
+
+`cifs-ninth-banner` (added 2026-11-25) is the Ninth Banner test farm's workspace in `ci-runner` (docs/sops/ci-runner.md §2f); its pods see only `shared/` (read-only) and their own `farm/<job>/` through subPaths; login `kube-system/csi-driver-smb`, not copied into `ci-runner`.
 
 `cifs-immich-icloud-backup` is mounted `ro` by BOTH of its consumers, so
 neither can write or delete the iCloud originals — iCloud stays source of

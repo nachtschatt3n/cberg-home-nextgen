@@ -363,7 +363,7 @@ kubectl logs -n ci-runner <pod> -c clone
 
 ## 6) Verification Tests
 
-1. Infra reconciled: `flux get ks -n flux-system the-ninth-banner-tests` is Ready, and `kubectl get resourcequota,limitrange,cnp,sa,cm,secret -n ci-runner` shows the objects.
+1. Infra reconciled: `flux get ks -n flux-system the-ninth-banner-tests` is Ready, and `kubectl get resourcequota,limitrange,cnp,sa,cm,secret,pvc -n ci-runner` shows the objects.
 2. Namespace hygiene: `kubectl get secret -n ci-runner` lists `the-ninth-banner-git-credential` (plus the ARC secrets of §2c once enabled), with no `cluster-secrets` and no `sops-age`.
 3. `scripts/ninth-banner-test.sh main unit` exits 0, and `~/ci-results/<job>/summary.txt` shows `result=PASS`.
 4. `scripts/ninth-banner-test.sh main e2e 3` creates its Job once 3 shards fit (start line `queued=<s>s parallelism=3 ...`, preceded by `queued: need X, free Y (<reason>)` lines while they do not), gets all 3 shards Running with no `schedulingGates` (`kubectl get pods -n ci-runner -o wide` while running; there is no per-node CI pod cap any more, placement is the scheduler's against the requests), and a PASS summary, with `junit.xml` per shard.
@@ -371,6 +371,7 @@ kubectl logs -n ci-runner <pod> -c clone
 6. No-tests guard (since 2026-10-03): `SPECS="tests/e2e/smoke.spec.ts" scripts/ninth-banner-test.sh main e2e 1` prints `PASS` and `tests: N passed ... (executed N of N planned)` with N > 0; `SPECS="tests/e2e/does-not-exist.spec.ts" scripts/ninth-banner-test.sh main e2e 1` must exit 1 with `FAIL`. A browser suite that executed 0 tests is never green.
 7. Collector and deadlines without a cluster (since 2026-11-11): `python3 runbooks/tests/test-ninth-banner-collector.py` prints `0 failure(s)`. It runs the script against a stub `kubectl` under every bash on the Mac (3.2 and 5): a normal Job, pods killed at the pod deadline, the Job's own deadline, a Job that is gone, a pod that is gone, unreadable `kubectl` answers, a stopped and re-attached collector, a closed terminal, and the dry render's deadlines.
 8. Pod deadline on the cluster, without a sims Job: `TNB_POD_DEADLINE=150 scripts/ninth-banner-test.sh <sha> unit` exits 1 after about 3 min with `result=FAIL rc=? (lost: pod deadline: ...)` in `summary.txt` and at the end of `shard-1.log`.
+9. NAS workspace (§2f, since 2026-11-25): `kubectl get pvc -n ci-runner the-ninth-banner-nas` is `Bound` on `cifs-ninth-banner`; `NAS_OUT=1 CLIP_ARGS="--rigs <figure> --only stand_idle --hands fist" scripts/ninth-banner-test.sh <ref with the gate> clipgate 1` prints `PASS` with `nas=ok` in its `CI-RESULT`, and `~/nas-ai/ninth-banner/farm/<job>/shard-1/results/` holds `gate-fist.log` with no `.results.tmp.*` left (proven 2026-11-25, `tnb-clipgate-dc5a9b5-1125100613`).
 
 ---
 
@@ -457,8 +458,9 @@ runbooks/policy-cli.py risk add AR-<next> \
 - **Thermal gate**: removed 2026-10-06 and not a live rollback target. The gate-era rollback bullets (per-node brake, cpu lane / quota 24, gate thresholds via `GATE_*`, `scripts/ninth-banner-admit.py --release-all`) were dropped 2026-10-26 because the script, controller and alert they acted on no longer exist. Re-adding the gate means reverting the two removal commits (`090f551d`, then `453265d8`; see §2b) as a planned change, not as an incident rollback.
 
 - **`ninth-banner-k8s` max 8 (2026-11-14)**: `git revert` the commit `feat(ci-runner): ninth-banner-k8s maxRunners 4 -> 8` and push. It restores `maxRunners: 4` and the 31-pod quota in one step; running jobs finish, the listener just stops scaling past 4. When to do it: §7 etcd row.
+- **NAS workspace (2026-11-25)**: `git revert` `43137f9b4`, `6eefddd2f` and `8f482f2d7` (claim, quota, mounts), then `23caeb34a` (class), and push. Flux prunes the claim; the PV stays `Released` (Retain) and the share data is untouched. Delete that PV only after the `docs/sops/storage-safety.md` Hard Rule 1 pre-flight. The trigger and template revert with the same commits (atomic replace of the trigger, §7). To keep the claim but stop mounting it for one run: `NAS=0`.
 - Stop runs: `kubectl delete jobs -n ci-runner --all`.
-- Remove the runner: `git revert` the commit that added `kubernetes/apps/ci-runner/` and push. The namespace is annotated `prune: disabled`, so delete it by hand afterwards: `kubectl delete ns ci-runner`.
+- Remove the runner: `git revert` the commit that added `kubernetes/apps/ci-runner/` and push. The NAS workspace PV (Retain) is then left `Released`; see the NAS bullet above. The namespace is annotated `prune: disabled`, so delete it by hand afterwards: `kubectl delete ns ci-runner`.
 
 ---
 
