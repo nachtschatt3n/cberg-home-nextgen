@@ -5,6 +5,10 @@ nodes ship kmsg to Elasticsearch, and `NodeKernelHardwareError` alerts on
 mce/Hardware-Error/thermal kmsg lines. Tier 3 (serial/netconsole) remains. Talos
 changes are applied out-of-band (talhelper + `talosctl`), not via Flux.
 
+**2026-11-25:** collector receivers for Talos service logs (5173), UniFi (5174)
+and UNAS (5175) syslog are live on 192.168.55.19; senders are not yet pointed
+at them. See `docs/sops/log-forwarding.md`.
+
 ### Tier 2d — hardware-error alert (DONE)
 
 edot-collector `count/hwerrors` connector taps the kmsg stream and emits
@@ -99,6 +103,10 @@ Key Talos facts (verified against `siderolabs/pkgs` kernel config + issue #13192
   **Kernel** logs (kmsg — where `mce:` / `Hardware Error` / panic lines appear)
   are a **separate** mechanism: the `KmsgLogConfig` document or the
   `talos.logging.kernel=` kernel arg.
+  Service-log shipping is staged in
+  `kubernetes/bootstrap/talos/patches/global/machine-service-logging.yaml` (udp
+  json_lines to 192.168.55.19:5173) and is NOT yet applied to any node; the
+  collector side is live. See `docs/sops/log-forwarding.md` section 4.2.
 - Kernel args (`install.extraKernelArgs`) apply **only on `talosctl upgrade`**,
   not on `apply-config`, and on v1.12+ are filtered/baked into the factory
   schematic (see `patches/global/machine-intelgpu.yaml`). `KmsgLogConfig`
