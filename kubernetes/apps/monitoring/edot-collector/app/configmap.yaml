@@ -312,6 +312,33 @@ data:
           # outage into permanent loss: retries were exhausted and the records
           # dropped. The queue's byte budget is the real bound now.
           max_retries: 0
+      # Dedicated exporter for the off-cluster syslog feeds (Talos service logs,
+      # UniFi, UNAS). Same ES target and retry policy as elasticsearch/logs, but
+      # its own, smaller persistent queue: a chatty or spoofed syslog flood can
+      # fill only THIS budget (and block only the syslog receivers), never the
+      # shared logs queue that the OTLP pod-log pipeline back-pressures on.
+      # Disk budget: 2 GiB logs + 4 GiB metrics + 256 MiB traces + 512 MiB
+      # syslog = ~6.75 GiB of the 10 GiB queue PVC. SOP: docs/sops/log-forwarding.md
+      elasticsearch/syslog:
+        endpoints:
+          - https://elasticsearch-es-http.monitoring.svc:9200
+        user: elastic
+        password: $${env:ES_PASSWORD}
+        tls:
+          insecure_skip_verify: true
+        logs_index: logs-generic-default
+        sending_queue:
+          enabled: true
+          storage: file_storage/queue
+          sizer: bytes
+          queue_size: 536870912
+          num_consumers: 2
+          block_on_overflow: true
+        retry:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 60s
+          max_retries: 0
       elasticsearch/metrics:
         endpoints:
           - https://elasticsearch-es-http.monitoring.svc:9200
@@ -428,15 +455,15 @@ data:
         logs/talos-service:
           receivers: [udp_log/talos-service]
           processors: [memory_limiter, transform/talos-service-name, batch]
-          exporters: [elasticsearch/logs]
+          exporters: [elasticsearch/syslog]
         logs/unifi:
           receivers: [udp_log/unifi]
           processors: [memory_limiter, resource/unifi, batch]
-          exporters: [elasticsearch/logs]
+          exporters: [elasticsearch/syslog]
         logs/unas:
           receivers: [udp_log/unas]
           processors: [memory_limiter, resource/unas, batch]
-          exporters: [elasticsearch/logs]
+          exporters: [elasticsearch/syslog]
         metrics/hwerrors:
           receivers: [count/hwerrors]
           processors: [batch]
