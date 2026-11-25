@@ -13,6 +13,9 @@ resources:
   - ./resource-limits.yaml
   - ./networkpolicy.yaml
   - ./storageclass.yaml
+  # needs the quota's persistentvolumeclaims >= 1 LIVE first: Flux dry-runs
+  # the whole set against the current quota (6eefddd2f)
+  - ./pvc.yaml
 generatorOptions:
   disableNameSuffixHash: true   # the Job template references the name verbatim
   annotations:
