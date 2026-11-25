@@ -8,6 +8,9 @@
 #    registry.npmjs.org (npm ci; every package-lock entry resolves there).
 #    Browsers are baked into the Playwright image, so no Playwright CDN.
 #    No other cluster Service, node, LAN or internet destination is reachable.
+#  - The NAS workspace PVC (pvc.yaml) needs NO rule here: the SMB mount is
+#    made by csi-smb-node on the node's host network, not from the pod, so
+#    pods still cannot reach the NAS (or port 445) themselves.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

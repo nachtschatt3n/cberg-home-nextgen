@@ -22,6 +22,17 @@ export CI=1 HOME=/work/home npm_config_cache=/work/npm-cache npm_config_update_n
 export E2E_OUT="$OUT" E2E_RUNNER=k8s
 log() { echo "[ci $(date -u +%H:%M:%S) ${SUITE} ${SHARD}/${N}] $*"; }
 
+# NAS workspace (docs/sops/ci-runner.md §2f), when the trigger mounted it:
+# NAS_SHARED (read-only) for inputs, NAS_SHARD_DIR for this shard's own output.
+# Rules for anything that writes there: only under NAS_SHARD_DIR, write to a
+# temporary name and rename when complete, nothing secret.
+nas_job=""
+if [ -n "${TNB_JOB:-}" ] && [ -d "/nas/farm/${TNB_JOB}" ]; then
+    nas_job="/nas/farm/${TNB_JOB}"
+    export NAS_SHARED=/nas/shared NAS_SHARD_DIR="$nas_job/shard-${SHARD}"
+    mkdir -p "$NAS_SHARD_DIR" || { log "NAS: cannot create $NAS_SHARD_DIR"; unset NAS_SHARD_DIR; }
+fi
+
 cd /work/src
 log "commit $(git rev-parse HEAD) on node ${NODE_NAME:-?}, workers ${WORKERS}, gpu flags: ${CHROMIUM_EXTRA_ARGS:-none}"
 t0=$(date +%s)
@@ -210,8 +221,26 @@ echo "$rc" >"$OUT/exit-code"
 log "results size: $(du -sh "$OUT" 2>/dev/null | cut -f1) in $OUT; 10 largest entries:"
 du -ah "$OUT" 2>/dev/null | sort -h | tail -10 | sed 's/^/  du: /'
 
+# NAS_OUT=1: this shard's results to /nas/farm/<job>/shard-N/results, copied
+# under a temporary name and renamed when complete, so a reader on the Mac never
+# sees half a folder. A failed copy is reported (nas=failed), not a test failure.
+nas_info=""
+if [ "${NAS_OUT:-0}" = 1 ]; then
+    if [ -n "${NAS_SHARD_DIR:-}" ]; then
+        nas_tmp="$NAS_SHARD_DIR/.results.tmp.$$"
+        rm -rf "$nas_tmp"
+        if cp -r "$OUT" "$nas_tmp" && mv -T "$nas_tmp" "$NAS_SHARD_DIR/results"; then
+            nas_info=" nas=ok"; log "NAS: results copied to $NAS_SHARD_DIR/results"
+        else
+            rm -rf "$nas_tmp"; nas_info=" nas=failed"; log "NAS: copy to $NAS_SHARD_DIR/results failed"
+        fi
+    else
+        nas_info=" nas=failed"; log "NAS: NAS_OUT=1 but no NAS workspace is mounted"
+    fi
+fi
+
 if [ "$rc" -eq 0 ]; then verdict=PASS; else verdict=FAIL; fi
-echo "CI-RESULT suite=${SUITE} shard=${SHARD}/${N} result=${verdict} rc=${rc}${count_info} test_seconds=${dur} total_seconds=$(( $(date +%s) - t0 ))"
+echo "CI-RESULT suite=${SUITE} shard=${SHARD}/${N} result=${verdict} rc=${rc}${count_info}${nas_info} test_seconds=${dur} total_seconds=$(( $(date +%s) - t0 ))"
 echo "CI-RESULTS-READY"
 # Hold for the collector (bounded). The trigger script copies /results and then
 # touches /results/.collected; COLLECT_WAIT_SECONDS=0 skips the wait.

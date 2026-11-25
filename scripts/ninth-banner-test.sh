@@ -38,6 +38,10 @@
 # <results>/<job>/pics/shard-N/<source>/, at most PICS_CAP_MB (default 200,
 # max 2000) per Job (split evenly over the shards; INDEX.txt lists what was
 # copied and what was over the cap).
+# NAS workspace (SOP §2f): NAS=1 (default for clipgate and the browser suites,
+# 0 for unit/sims) mounts /nas/shared read-only and /nas/farm/<job> read-write;
+# NAS_OUT=1 copies each shard's results to /nas/farm/<job>/shard-N/results,
+# which the Mac reads at TNB_NAS_MAC_DIR (default ~/nas-ai/ninth-banner)/farm/<job>/.
 # ---
 # Admission (docs/sops/ci-runner.md): the Job is created only once all parallel
 # shard pods first-fit, one at a time, into the schedulable nodes' free CPU
@@ -158,6 +162,14 @@ fi
 [[ "$cpu_req" =~ ^[1-4]$ ]] || { echo "CPU_REQ must be 1..4"; exit 2; }
 [[ "$gpu" =~ ^[01]$ ]] || { echo "GPU must be 0 or 1"; exit 2; }
 [[ "$workers" =~ ^[1-8]$ ]] || { echo "WORKERS must be 1..8"; exit 2; }
+# NAS workspace (SOP §2f): clipgate and the browser suites mount it by default,
+# unit and sims do not (NAS=0|1 overrides). NAS_OUT=1 also copies each shard's
+# results to /nas/farm/<job>/shard-N/results (Mac: $TNB_NAS_MAC_DIR/farm/<job>/).
+case "$suite" in unit|sims) nas="${NAS:-0}" ;; *) nas="${NAS:-1}" ;; esac
+nas_out="${NAS_OUT:-0}"
+[[ "$nas" =~ ^[01]$ && "$nas_out" =~ ^[01]$ ]] || { echo "NAS and NAS_OUT must be 0 or 1"; exit 2; }
+[ "$nas_out" = 0 ] || [ "$nas" = 1 ] || { echo "NAS_OUT=1 needs the NAS mount (NAS=1)"; exit 2; }
+nas_sed='/[[:space:]]#@nas$/d'; [ "$nas" = 1 ] && nas_sed='s/[[:space:]]*#@nas$//'
 [[ "${SPECS:-}" =~ ^[A-Za-z0-9._/@\ -]*$ ]] || { echo "SPECS: spec paths only"; exit 2; }
 [[ "${PROJECT:-}" =~ ^[A-Za-z0-9_-]*$ ]] || { echo "PROJECT: a project name only"; exit 2; }
 [[ "${DRY_RUN:-0}" =~ ^[01]$ ]] || { echo "DRY_RUN must be 0 or 1"; exit 2; }
@@ -233,7 +245,8 @@ sed -e "s|__JOB_NAME__|tnb-probe|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite
     -e "s|__LANE__|$lane|g" -e "s|__MEM_REQ__|$mem_req|g" -e "s|__MEM_LIM__|$mem_lim|g" \
     -e "s|__EPH_REQ__|$eph_req|g" -e "s|__EPH_LIM__|$eph_lim|g" \
     -e "s|__CHROMIUM_ARGS__||g" -e "s|__SPECS__||g" -e "s|__PROJECT__||g" \
-    -e "s|__CLIP_ARGS__||g" -e "s|__PICS__|0|g" -e "s|__PICS_ENV__||g" -e "s|__PICS_CAP_MB__|$pics_cap|g" "$TEMPLATE" > "$probe"
+    -e "s|__CLIP_ARGS__||g" -e "s|__PICS__|0|g" -e "s|__PICS_ENV__||g" -e "s|__PICS_CAP_MB__|$pics_cap|g" \
+    -e "s|__NAS_OUT__|0|g" -e "$nas_sed" "$TEMPLATE" > "$probe"
 # the pod's CPU request comes from the rendered pod spec, never hardcoded
 req_m="$(python3 "$admit" podreq "$probe")" || { rm -f "$probe"; echo "admission: cannot read the pod CPU request from the rendered template"; exit 3; }
 rm -f "$probe"
@@ -264,6 +277,7 @@ render() {
         -e "s|__EPH_REQ__|$eph_req|g" -e "s|__EPH_LIM__|$eph_lim|g" \
         -e "s|__CHROMIUM_ARGS__|$chromium_args|g" -e "s|__SPECS__|${SPECS:-}|g" -e "s|__PROJECT__|${PROJECT:-}|g" \
         -e "s|__CLIP_ARGS__|$clip_args|g" -e "s|__PICS__|$pics|g" -e "s|__PICS_ENV__|$pics_env|g" -e "s|__PICS_CAP_MB__|$pics_cap|g" \
+        -e "s|__NAS_OUT__|$nas_out|g" -e "$nas_sed" \
         "$TEMPLATE" > "$2"
 }
 if [ "${DRY_RUN:-0}" = 1 ]; then
@@ -699,6 +713,10 @@ fi
 say "artifacts: $dest  (shard-N/: junit.xml, playwright-report/, test-results/ traces, blob-report/; release: per part in shard-N/{release,responsive}/)"
 if [ "$suite" = clipgate ]; then
     say "clipgate tables: $dest/shard-N/gate-<hands>.log (+ gate-<hands>/*.json); one merged table: the game's coord/tools/farm-clipgate.sh"
+fi
+if grep -q '^            - name: NAS_OUT$' "$dest/job.yaml" 2>/dev/null \
+    && grep -A1 '^            - name: NAS_OUT$' "$dest/job.yaml" | grep -q 'value: "1"'; then
+    say "NAS: ${TNB_NAS_MAC_DIR:-$HOME/nas-ai/ninth-banner}/farm/$(basename "$dest")/shard-N/results (CI-RESULT nas=ok|failed per shard)"
 fi
 if [ -d "$dest/pics" ]; then
     say "pictures: $dest/pics/shard-N/ ($(find "$dest/pics" -type f ! -name INDEX.txt | wc -l | tr -d ' ') files; INDEX.txt per shard lists anything over the cap)"

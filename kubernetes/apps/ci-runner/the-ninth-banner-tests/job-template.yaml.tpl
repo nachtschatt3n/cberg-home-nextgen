@@ -145,6 +145,15 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            # NAS workspace (docs/sops/ci-runner.md §2f): run.sh finds
+            # /nas/farm/$TNB_JOB; NAS_OUT=1 copies this shard's results to
+            # /nas/farm/<job>/shard-N/results (temp name, then rename)
+            - name: TNB_JOB
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['batch.kubernetes.io/job-name']
+            - name: NAS_OUT
+              value: "__NAS_OUT__"
             # Node sees all 17 host CPUs; keep libuv/V8 helper pools sane
             - name: UV_THREADPOOL_SIZE
               value: "6"
@@ -167,6 +176,13 @@ spec:
             - { name: shm, mountPath: /dev/shm }
             - { name: results, mountPath: /results }
             - { name: scripts, mountPath: /opt/ci, readOnly: true }
+            # NAS workspace, runner container ONLY (never the clone init with
+            # the git credential). subPaths: this Job writes only its own
+            # farm/<job>/ and reads shared/; the rest of the share is not
+            # mounted. The trigger deletes the #@nas lines for NAS=0 (default
+            # for unit and sims). docs/sops/ci-runner.md §2f
+            - { name: nas, mountPath: /nas/shared, subPath: shared, readOnly: true }   #@nas
+            - { name: nas, mountPath: /nas/farm/__JOB_NAME__, subPath: farm/__JOB_NAME__ }   #@nas
       volumes:
         - name: work
           emptyDir: { sizeLimit: 10Gi }
@@ -191,3 +207,4 @@ spec:
           secret:
             secretName: the-ninth-banner-git-credential
             defaultMode: 0440
+        - { name: nas, persistentVolumeClaim: { claimName: the-ninth-banner-nas } }   #@nas

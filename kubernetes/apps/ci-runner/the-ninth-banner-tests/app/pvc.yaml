@@ -1,0 +1,21 @@
+---
+# Shared NAS workspace of the test farm (owner, 2026-11-25): the NAS folder
+# documents/mac-mini-ai/ninth-banner, which the Mac sees at
+# ~/nas-ai/ninth-banner. Class cifs-ninth-banner (Retain, subdir is that
+# folder; a delete of this PVC never removes data, docs/sops/storage-safety.md).
+# Shard pods mount it only through subPaths (job-template.yaml.tpl):
+#   /nas/shared       <- shared/        read-only
+#   /nas/farm/<job>   <- farm/<job>/    read-write, that Job only
+# Write rules: docs/sops/ci-runner.md §2f.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: the-ninth-banner-nas
+  namespace: ci-runner
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: cifs-ninth-banner
+  resources:
+    requests:
+      storage: 100Gi   # nominal: SMB does not enforce it
