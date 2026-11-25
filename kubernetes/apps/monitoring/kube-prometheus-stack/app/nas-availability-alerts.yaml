@@ -1,0 +1,78 @@
+---
+# NAS (UNAS) host availability. Added 2026-11-25 after a whole-host outage
+# (ICMP included, ~75s as seen by Uptime Kuma) that was invisible except through
+# consumer-pod errors: nothing paged because KumaMonitorDown needs 2m of DOWN.
+#
+# SOURCE: Uptime Kuma monitor #35 "UNAS" (ping) via the existing kuma /metrics
+# ServiceMonitor. No new probe was added: Kuma already pings the host every
+# heartbeat and Prometheus scrapes it every 30s. monitor_status: 1=up, 0=down,
+# 2=pending, 3=maintenance.
+#
+# EXPRESSION SHAPE: max_over_time(...[1m]) == 0 means "EVERY sample in the last
+# minute was 0", i.e. continuously down for >= 60s, and it needs no `for:` so it
+# does not depend on where the rule's 30s eval lands relative to the scrapes.
+# Replayed against 2026-11-25 01:30-02:30Z (the real outage) it is true at
+# 01:48:30 and 01:49:00 and nowhere else in the preceding 7 days; the 5m form is
+# correctly silent for that ~75s blip.
+#
+# KumaMonitorDown (uptime-kuma-alerts.yaml) still also pages for this monitor
+# after 2m; that is intentional redundancy, not a mistake to dedupe away.
+#
+# INERTNESS GUARD: both rules match nothing if the series or its labels vanish
+# (monitor renamed/deleted, Kuma scrape gone), which would read as "NAS healthy".
+# NasUnreachableMonitorAbsent keys on the exact monitor_id label so a rename
+# cannot silently disarm them.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: nas-availability-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: nas.availability
+      interval: 30s
+      rules:
+        - alert: NasUnreachable
+          expr: max_over_time(monitor_status{monitor_id="35", monitor_type="ping"}[1m]) == 0
+          labels:
+            severity: warning
+            category: storage
+            component: nas
+          annotations:
+            summary: "NAS ({{ $labels.monitor_name }}) has not answered ping for 1 minute"
+            description: >-
+              Uptime Kuma has seen every ping to the NAS fail for the last minute.
+              All CIFS/SMB-backed PVCs (media, paperless, nextcloud data, immich,
+              github-mirror, db-dumps, ...) stall while this holds. Check the NAS
+              power/link first, then consumer pods for CIFS mount errors.
+        - alert: NasUnreachableCritical
+          expr: max_over_time(monitor_status{monitor_id="35", monitor_type="ping"}[5m]) == 0
+          labels:
+            severity: critical
+            category: storage
+            component: nas
+          annotations:
+            summary: "NAS ({{ $labels.monitor_name }}) unreachable for 5 minutes"
+            description: >-
+              The NAS has not answered ping for 5 continuous minutes. This is no
+              longer a blip: SMB consumers will be erroring and wedged CIFS mounts
+              may need pod restarts after the host returns. Do NOT delete any
+              CIFS PVC (docs/sops/storage-safety.md).
+        - alert: NasUnreachableMonitorAbsent
+          expr: absent(monitor_status{monitor_id="35", monitor_type="ping"})
+          for: 10m
+          labels:
+            severity: warning
+            category: storage
+            component: nas
+          annotations:
+            summary: "NAS availability alerts are INERT: Kuma monitor #35 series is absent"
+            description: >-
+              No monitor_status series for Uptime Kuma monitor id 35 (UNAS ping)
+              for 10 minutes. NasUnreachable and NasUnreachableCritical cannot fire.
+              Check the uptime-kuma pod and ServiceMonitor, and that the monitor
+              was not renamed, re-created (new id) or deleted.

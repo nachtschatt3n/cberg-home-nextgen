@@ -1,0 +1,15 @@
+# Ship Talos SERVICE logs (machined, apid, kubelet, etcd, containerd, ...) off-box,
+# next to the kernel feed in machine-kmsg-logging.yaml. Legacy machine.logging
+# destination (there is no document-style config for service logs in Talos 1.14).
+# UDP json_lines to the edot-collector (LoadBalancer 192.168.55.19:5173 in the
+# monitoring namespace) -> Elasticsearch logs-generic-default with
+# resource.attributes.service.name = talos-<service>. UDP, not TCP: Talos senders
+# do not reconnect after a sink restart (see node-reboot-observability.md).
+# The collector side MUST be live before this is applied.
+# Applies with `talosctl apply-config --mode=no-reboot`; NOT applied yet.
+# SOP: docs/sops/log-forwarding.md
+machine:
+  logging:
+    destinations:
+      - endpoint: udp://192.168.55.19:5173/
+        format: json_lines
