@@ -53,6 +53,7 @@ All three nodes connect to Basement-SW-24-PoE.
 | k8s-gateway | 192.168.55.101 | Split-DNS (`*.${SECRET_DOMAIN}` → cluster) |
 | envoy-internal (Gateway) | 192.168.55.103 | **The** internal data plane — all LAN-only `HTTPRoute`s attach here |
 | envoy-external (Gateway) | 192.168.55.104 | **The** external data plane — public via cloudflared; `.100`/`.102` (ingress-nginx) were deleted 2026-09-07 (`ad1ea7c2`) |
+| edot-collector syslog receivers | 192.168.55.19 | UDP 5173 Talos service logs, 5174 UniFi syslog, 5175 UNAS syslog -> Elasticsearch (see `docs/sops/log-forwarding.md`) |
 | Wazuh syslog/CEF | 192.168.55.27 | UniFi → Wazuh manager UDP/514 (LB IP for SIEM ingest) |
 | PiKVM (per node) | — | KVM-over-IP for out-of-band node management |
 
@@ -75,6 +76,7 @@ Every existing LB service is pinned via `lbipam.cilium.io/ips` annotation so fut
 | `network/adguard-home-dns` | `.5` |
 | `home-automation/mosquitto-main` | `.15` |
 | `monitoring/edot-collector-talos-kmsg` | `.18` |
+| `monitoring/edot-collector-syslog` | `.19` |
 | `home-automation/home-assistant` | `.24` |
 | `home-automation/iobroker` | `.25` |
 | `home-automation/scrypted` | `.26` (decommissioned 2026-10-04 — service pruned, IP free) |
