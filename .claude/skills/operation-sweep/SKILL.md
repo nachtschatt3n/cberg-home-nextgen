@@ -75,8 +75,30 @@ sections that did not report.
    `redis-fleet-<ver>`; every app-template wrapper = `app-template-<ver>`;
    `flux-instance` + `flux-operator` = `flux-fleet-<ver>`), security-driven
    groups sort first, and a group whose live plan exists has `dispatch: false`.
-   Take the entries with `dispatch: true` **in list order, at most
-   `planner_dispatch_cap` (5) per sweep**, and dispatch ONE
+   **Plan supply is measured per DAY, not per sweep (2026-11-25).** The sweep
+   runs ~every 48 h, so a per-sweep cap of 5 starved the nightly. The cap is
+   now **`planner_dispatch_cap` (5) per CALENDAR DAY across sweep + window
+   Step 0.5** (count planners already named in today's `window_runs.notes`
+   `planners:` line and in today's cycle), i.e. a sweep may dispatch up to 10
+   when it follows a day with no planners. Before ANY planner dispatch, do
+   these in order and dispatch planners ONLY for what is left:
+
+   0. `python3 runbooks/plan-refine.py --json --coverage-json <file> > /tmp/refine-<cycle>.json`
+      (read-only report; add `--apply` only when no other session is editing
+      plans — then commit `changed_paths` with `git commit --only`). The window
+      agent already ran it at Step 0a tonight; reuse its report if < 24 h old.
+   1. **TEMPLATE FIRST:** `python3 runbooks/plan-generate.py scan --coverage-json <file> --write`
+      writes a `status: draft` plan for every eligible stateless image
+      patch/minor with no LLM — those groups need NO planner (list them on the
+      board as "template-generated, awaiting review").
+   2. **`planner_queue` from the refine report** (`dispatchable: true`
+      entries) comes BEFORE brand-new groups: a plan that rotted is a known
+      quantity; the planner RE-PLANS that file in place (keeps plan_id,
+      clears `needs_replan`, sets `status: draft`, drops `review:`).
+   3. Only then the `needs_plan_groups` below.
+
+   Take the entries with `dispatch: true` **in list order, within that daily
+   cap**, and dispatch ONE
    `upgrade-planner-agent` per group with `run_in_background: true`. Brief it
    with the group's `group_id` (use it as the plan_id / filename), every
    member (component, namespace, current→target, image repos), the
@@ -91,7 +113,9 @@ sections that did not report.
 2c. **Review drafts AND drain the review backlog (rule 4d0b; ops-retro
    2026-W40, F-2c849d1e).** Dispatch ONE `plan-reviewer-agent` (background,
    read-only, ~20 min) per draft written or retargeted since the previous
-   sweep, PLUS up to 5 more plans, oldest first, whose status is
+   sweep, PLUS up to 5 more plans PER DAY (not per sweep; 2026-11-25 — the
+   refiner's `review_queue` is the ordered list, plans whose review lapses
+   soonest first), whose status is
    `draft|vetted|awaiting-go` and that carry no `review: ready-for-go@…`
    line (or one older than 30 days) — skip `blocked` plans and files another
    session has dirty in `git status`. The since-last-sweep filter alone
@@ -101,6 +125,11 @@ sections that did not report.
    `status: vetted` only on `ready-for-go` (full rule in
    `.claude/agents/daily-operation.md` 4d0b). List the reviewed ids and
    verdicts on the board.
+   **A plan the refiner already EXTENDED (`review_refined`) is NOT in the
+   backlog** — its review is current by `maintenance-plan.py effective_review`.
+   Do not re-review a plan just because `review:` reads > 30 days when
+   `review_refined_base` equals it and the hard cap (60 d) has not passed; a
+   plan past the cap or flagged `needs_replan` gets a FULL reviewer pass.
 
 3. **Update the lists** (this is the "updates" half of the skill):
    - `python3 runbooks/sweep-run.py --reconcile-only` with the cycle id and

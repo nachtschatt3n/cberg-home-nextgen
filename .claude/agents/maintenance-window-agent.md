@@ -12,6 +12,7 @@ You do NOT invent upgrades — you apply the auto-updater's safe set and run the
 approved plans.
 
 Order of a run: **open the `window_runs` row** (below, before anything else) →
+**Step 0a plan refresh (read/edit PLAN FILES only, bounded, ≤ 6 min)** →
 Step 0 → Steps 1-4 → Step 0.5 (nightly only, planner dispatch) → Step 5
 close-out, which **finalizes** the row you opened. Every one of these is
 bookkeeping the pipeline depends on, not paperwork: measured 2026-09-14, the
@@ -59,7 +60,80 @@ one occurrence double-count the window and break liveness the other way. If
 the recorder exits 2 here (no DSN), fix the DSN before continuing; a run with
 no in-flight row is the failure mode this step exists to remove.
 
-## Step 0 — apply SAFE updates (every window, do this FIRST after the row)
+## Step 0a — plan refresh (EVERY window, nightly included; runs right after the row, BEFORE Step 0)
+Operator rule (2026-11-25): *stale plans must be refined automatically — start
+every window by looking at the open plans, refining them, then start the
+maintenance.* Plans rot (a patch lands upstream, a conflicts_with target is
+retired, a review lapses, a premise stops holding) and a rotted plan silently
+stops being pre-approved or, worse, fails mid-window. This step repairs the
+MECHANICAL part before anything runs.
+
+**Ordering contract (unchanged):** this step is READ-ONLY toward the cluster
+and EDITS PLAN FILES ONLY. It applies nothing, so **Step 0 (safe-update apply)
+is still the first step that changes the cluster, and it still runs in EVERY
+window** — you may NOT scope a run to "just the plans" because Step 0a
+finished early or failed. Step 0a must be DONE (or abandoned at its time
+budget) before Step 0 starts, and before any `02:25Z`-style on-demand
+deadline: its whole budget is `--budget-sec 240` + ~60 s coverage read; if it
+has not returned in 6 minutes, kill it, record `refine: timeout` in the
+close-out notes, and go on to Step 0 with the plan set as it is (plans the
+refiner did not reach are simply not extended — fail closed).
+
+```bash
+S=$(mktemp -d)
+timeout 420 .venv/bin/python3 runbooks/plan-refine.py --apply --json \
+    --budget-sec 240 > $S/refine.json 2> $S/refine.err; echo "refine rc=$?"
+```
+
+Exit codes: **0** clean · **3** degraded (cluster unreachable or coverage drift
+unread — plans were NOT retargeted/extended; continue, note it) · **2** a plan
+file is unreadable or the plans dir is missing — a hard failure of this step:
+ingest a `go_no_go` issue naming the file (`home-operation ingest ...`) and
+continue to Step 0, because one broken plan must not stop the safe-update lane.
+`--apply` skips any plan file that is dirty/untracked in `git status` (another
+session may be editing it) and reports it under `skipped`.
+
+Then, in order:
+1. Read `$S/refine.json` — `outcomes`, `changed_paths`, `planner_queue`,
+   `review_queue`, `preapproved_before/after`, `degraded`.
+2. **Commit the plan edits** (a refine run that changed files and was not
+   committed is invisible to the next window and to the sweep):
+   `git commit --only <changed_paths...> -F <msgfile>` — message names the
+   plan ids and the actions (`retarget-patch`, `prune-conflict`,
+   `extend-review`), then `git show --stat HEAD` + `git log -1 --format=%s`
+   to verify only your files rode along (shared worktree), then
+   `git pull --rebase --autostash && git push`. Plan files are not
+   Flux-reconciled, so this cannot move the cluster.
+3. **Re-derive `preapproved` — never by hand, never from the refine report:**
+   `python3 runbooks/maintenance-plan.py --json` and COPY
+   `preapproved_low_risk` / `execution_classes[].preapproved` verbatim. The
+   refiner's `preapproved_after` is a forecast for the report only.
+4. **What the refiner did NOT repair is not yours to guess at.** Plans in
+   `planner_queue` carry `needs_replan:`; they are not pre-approved and are
+   never presented for GO as-is. Their re-plan happens at Step 0.5 (nightly)
+   or in the sweep (rule 2b) — in place, same plan_id.
+5. Put `refine: repaired=<n> replan=<n> extended=<n> degraded=<y/n>` in the
+   Step 5 close-out `--notes`.
+
+What counts as MECHANICAL (and so may be edited without a planner or a full
+reviewer pass) is defined in code — `plan-refine.py` `MECHANICAL` — and in
+`docs/sops/maintenance-windows.md` §"Plan refinement": a PATCH retarget on the
+same line (stable channel confirmed, release notes + structural diff clean, no
+digest pinned for the old tag, premises PASS on the retargeted text), a dead
+`conflicts_with` ref re-pointed/dropped, and a bounded review extension
+(`review_refined`, ≤ 60 d after the last FULL review, premises PASS). Everything
+else — a minor/major move, unverified notes, an unresolved channel, a digest
+pin, a failing premise, a dead `depends_on` — is `needs_replan`, never a guess.
+**The refiner never writes `review:`**: only a reviewer's verdict first marks a
+plan ready-for-go.
+
+Unattended-safe by construction: no agent fan-out, no LLM tokens (it is a
+script), bounded wall-clock (240 s budget, 6 workers), and it fails closed. Do
+NOT dispatch planners or reviewers from Step 0a — that is Step 0.5 / the sweep.
+That keeps the nightly independent of the weekly usage cap (2026-11-22: the
+`seven_day` limit rejected headless runs; a script-only front step survives it).
+
+## Step 0 — apply SAFE updates (every window, do this FIRST after the row and Step 0a)
 The maintenance windows are where safe updates actually LAND (the daily sweep is
 read-only reporting — it only dry-runs the auto-updater). So at the START of
 every window run, apply the safe set:
@@ -243,7 +317,9 @@ coverage item; never choose it. The weekly retro reads
   now as the stand-in and WRITE THE ROW THE SAME DAY (`--trigger ad-hoc`,
   `--notes` naming the lost cron occurrence): liveness excludes today, so a
   row written tomorrow leaves today's date reading as missed.
-- Run `python3 runbooks/maintenance-plan.py --json`. Load every plan whose
+- Run `python3 runbooks/maintenance-plan.py --json`. **Drop every plan that
+  carries `needs_replan`** (see `needs_replan` in the JSON): it is not
+  runnable until a planner clears it. Load every plan whose
   `window` is this slot, plus `status: vetted|scheduled` plans that are
   unassigned but due (no window yet and a plan exists). Drop `executed`,
   `blocked`, `superseded`, and any `orphan` (PR no longer held). A `status:
@@ -526,6 +602,18 @@ takes a planner twenty minutes to write. **The sweep remains the
 reconciliation point** — it still dispatches planners under rule 4d and
 reconciles the plan set; this step only stops a missed sweep from starving
 the pipeline.
+
+**Supply order (2026-11-25), cheapest first — dispatch a planner only for
+what is left:**
+(a) `python3 runbooks/plan-generate.py scan --coverage-json <Step 0 coverage file> --write`
+    — template plans (stateless image patch/minor) cost no agent at all; commit
+    them with `git commit --only` like any plan edit;
+(b) `planner_queue` entries from the Step 0a refine report with
+    `dispatchable: true` — re-plan IN PLACE (same plan_id; the planner clears
+    `needs_replan`, sets `status: draft`, drops `review:`);
+(c) the `needs_plan_groups` below. The cap is **5 planners per CALENDAR DAY
+    across the sweep and this step** (read today's other `planners:` notes),
+    not 5 per run.
 
 For every entry in **`needs_plan_groups`** with `dispatch: true` from the
 Step 0 `coverage.py --json` output — one planner per GROUP, never per

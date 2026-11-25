@@ -107,6 +107,18 @@ the reason it was dispatched. Everything else you establish yourself.
     deleted object, a stale finding action, a missing test — each as
     `file + what + why`, only when you verified the `why` yourself.
 
+## Refined plans (2026-11-25)
+A plan may arrive with `retargeted_from:`, a `## Refinement log`, or
+`review_refined:` — `plan-refine.py` changed it mechanically. That does NOT lower
+your bar: you review the CURRENT target. Specifically re-check (a) the release
+notes for the new target (the refiner only proved no breaking signal in what the
+G3 engines could read), (b) that every fenced command / premise now names the new
+tag and nothing still names the old one, (c) that no digest or computed value
+was carried over from the old target. A plan carrying `needs_replan:` is not
+reviewable — return `needs-fix` naming the flag. Your `ready-for-go` is what
+writes `review:`; delete any `review_refined*` fields when you do (a full review
+supersedes the extension).
+
 ## Output — structured, terse
 
 Return ONLY this shape (the sweep/orchestrator parses it):

@@ -237,6 +237,16 @@ needs their decision, and what got auto-fixed.
       This is the mechanism that makes the PLAN lane cover the whole universe.
       (Manual/dry-run sweep: report the groups instead of dispatching, but
       never leave a `dispatch: true` group unactioned across cycles.)
+    - **4d0-refine — the sweep handles only what the REFINER flagged
+      (2026-11-25).** Staleness repair is no longer the sweep's job: every
+      maintenance window starts with `plan-refine.py` (window agent Step 0a),
+      which retargets patch drift, prunes dead `conflicts_with` refs and
+      extends mechanically-refreshed reviews. The sweep (a) reads the refine
+      report's `planner_queue` (`dispatchable: true`) and re-plans those files
+      in place (rule 2b of the operation-sweep skill, caps per DAY), (b) drains
+      the `review_queue` (rule 2c), and (c) runs `plan-generate.py scan` so
+      mechanical drafts need no planner. A plan carrying `needs_replan:` is
+      NEVER reviewed-and-vetted until a planner has cleared it.
     - **4d0b — REVIEW every draft before it can be vetted (added 2026-09-15).**
       A planner's draft is a claim, not a plan. For every plan file with
       `status: draft` that was written or retargeted since the previous

@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.11.07`
-> Last Updated: `2026-11-07`
+> Version: `2026.11.25`
+> Last Updated: `2026-11-25`
 
 ## 1) Description
 
@@ -301,6 +301,65 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   patch is marker-guarded and idempotent (safe to re-run); on a PVC rebuild,
   re-apply it (backup: `morning_briefing.py.bak-*`). If the block disappears from
   the briefing, that's the first thing to check.
+
+### Plan refinement — Step 0a of every window (2026.11.25)
+
+Operator rule: *most updates run by themselves in the nightly; stale plans are
+refined automatically; every window starts by looking at the open plans, refining
+them, then starting the maintenance.* The executor (SD-10/SD-11) was never the
+bottleneck — plan SUPPLY and plan FRESHNESS were (measured 2026-11-25: 23 drafts /
+9 vetted, only 1 pre-approved; planner cap 5 per ~48 h sweep; plans rotting from
+patch drift, dead `conflicts_with` refs and lapsed reviews).
+
+```
+open window_runs row -> Step 0a plan-refine (plan files only) -> Step 0 safe-update apply
+   -> Steps 1-4 (pre-approved + approved plans) -> Step 0.5 supply -> Step 5
+```
+
+**Ordering contract.** Step 0a edits PLAN FILES and reads the cluster; it applies
+nothing. Step 0 remains the first step that changes the cluster, in EVERY window;
+a run is never scoped to "just the plans". Budget: 240 s + coverage read, hard
+timeout 420 s, no LLM, no agent fan-out (usage-cap safe).
+
+**What the refiner (`runbooks/plan-refine.py`) does** for every open plan
+(draft|vetted|scheduled|awaiting-go). MECHANICAL (defined by `MECHANICAL` in code):
+
+| Action | Condition (all must hold) |
+|---|---|
+| `retarget-patch` | newer target is a PATCH on the same major.minor line and same suffix; coverage resolved it as the stable-channel head; G3 release notes + structural diff read CLEAN (images); the plan pins no `sha256:` next to the old tag; premises PASS on the retargeted text. Rewrites `target:`, premise `run:`/`expect_*` and fenced command blocks only (prose keeps naming the old tag; a "Refinement log" says so). |
+| `prune-conflict` / `repoint-conflict` | a `conflicts_with` ref names no plan: re-pointed at the live same-stem successor plan(s), else dropped. |
+| `extend-review` | a `ready-for-go` review lapses within 7 days, every change this run was mechanical, premises PASS, drift data was read, and the last FULL review is <= `refine.review_hard_cap_days` (60) old. Writes `review_refined` + `review_refined_base`; `maintenance-plan.py effective_review()` honours it only while the base equals the current `review:` date. **The refiner never writes `review:`.** |
+
+Everything else is `needs_replan: "<code>: <detail>"` + a `planner_queue` entry,
+and the plan loses SD-10/SD-11 pre-approval at once: `minor-or-major-drift`,
+`channel-unresolved`, `notes-unverified`, `digest-pinned-target`, `premise-fail`,
+`no-premises`, `dead-depends-on`, `unreadable-target`. A `premise-fail` first seen
+today is flagged but only `dispatchable` to a planner from the next day (a Flux
+reconcile in flight must not cost a planner). A premise-only flag clears itself
+when the premises pass again. A planner re-plans the file IN PLACE (same plan_id),
+clears the flag, sets `status: draft`, drops `review:`.
+
+**Fail closed:** unreadable plan / missing plans dir -> exit 2; cluster canary or
+coverage drift unavailable -> exit 3, NO retarget/extension/flag; infra-flavoured
+premise errors are `unchecked`, never `premise-fail`; premises not finished in the
+budget -> `unchecked`; dirty/untracked plan files are skipped in `--apply`; every
+write is re-parsed before it lands.
+
+**Supply (Step 0.5 + sweep 2b/2c).** Order: `plan-generate.py scan` (template
+drafts for stateless image patch/minor — no LLM) -> refine `planner_queue` (re-plan
+in place) -> `needs_plan_groups`. Caps are per CALENDAR DAY (5 planners, 5 extra
+reviews), not per sweep. Generated plans are `status: draft`; a template can
+self-review only when listed in `autonomy-policy.yaml generated_plans.reviewed_templates`
+(empty by default) and the plan still equals a re-generation from its inputs.
+Templates: `stateless` (git-revert) and `db-backed` (postgres within one major,
+`backup_gate` + `restore_proof` = `backup-restore-proof.py`, exit 0 only).
+
+**WEEKEND-ATTENDED.** `maintenance-plan.py weekend_class()` marks reboot,
+storage/longhorn, cni/cilium, dns/coredns, flux, etcd, talos/apiserver and gateway
+plans; `window-scheduler.py` auto-slots a VETTED one into the next attended window
+(reboot plans: reboot-capable only). Placement is clerical — the operator GO at
+the window is not. `risk:` is not an SD-11 condition, so a "no breaking change"
+plan is nightly pre-approved once reviewed (SD-11 floor tokens unchanged).
 
 ## 3) Blueprints
 
@@ -884,6 +943,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.11.25 | 2026-11-25 | **Plan refinement + supply (operator direction).** New `plan-refine.py` run as Step 0a of EVERY window (plan files only; Step 0 safe-update apply still first to change the cluster): mechanical repairs (patch retarget, dead conflicts_with, bounded review extension), `needs_replan` flag + planner queue for the rest; `effective_review()`/`needs_replan` honoured by SD-10/SD-11; `plan-generate.py` templates (stateless, db-backed with restore proof); planner/review caps per calendar day; WEEKEND-ATTENDED auto-slotting in `window-scheduler.py`. Tests `test-plan-refine.py`, `test-plan-generate.py`, `test-window-scheduler-weekend.py`. |
 | 2026.11.07 | 2026-11-07 | **Running-row poll budget 300s -> 480s** (`maintenance-window.py`, `_confirm_timeout`), with the measured latency table and budget arithmetic in §Completion poll; the nightly of 2026-11-07 raised exit 12 although the window ran (row at +330s). The ops-sweep recovery SOP is `docs/sops/operation-sweep-cron.md`. |
 | 2026.10.25 | 2026-10-25 | **Docs only.** Pointer to the planner-facing rules for premise commands (refused constructs, allowlist, `expect_*` semantics, worked examples); no runner behaviour changed. |
 | 2026.10.13 | 2026-10-13 | **Deliberate skips are WAIVED, not faked (operator decision, vacation).** New `window_runs` outcome `waived` (insert-only, reason in notes mandatory, past dates only, `ad-hoc` trigger): removes the occurrence from `window_runs_missing_count`, counted in the new `window_runs_waived_count`, never counted as a run and never covers another slot. `ops-retro.py` reports it on its own line. Test `runbooks/tests/test-window-liveness-waived.py`. |

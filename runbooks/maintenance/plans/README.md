@@ -57,6 +57,16 @@ reconciler entry tells you which you have, by the fields it carries:
 | `plan_target` + `now_target` | **DRIFTED** — the target moved after the plan was written | **Refresh in place**, keep the file (see below) |
 | `age_days` + `reason: unused > stale_after_days` | nothing moved; the plan just sat unused past 14 days | Re-investigate whether the work is still wanted at all — then refresh and re-date `generated:`, or supersede |
 
+**Automatic refinement (2026-11-25).** `runbooks/plan-refine.py` (Step 0a of every
+window) now does the *patch-only, evidence-backed* subset of this by itself:
+retarget on the same major.minor line when the stable channel is confirmed, the
+release notes + structural diff read clean, no digest is pinned for the old tag
+and the premises pass on the retargeted text. Anything else it does not touch —
+it writes `needs_replan: "<code>: <detail>"` and a planner re-plans the file in
+place (same `plan_id`; clear the flag, `status: draft`, drop `review:`). Do not
+hand-edit a retargeted plan's `target:` back; do not clear `needs_replan` without
+rewriting the plan.
+
 **Keep the `plan_id` when you refresh.** It is an identifier, not an assertion,
 and four separate things resolve by it:
 
