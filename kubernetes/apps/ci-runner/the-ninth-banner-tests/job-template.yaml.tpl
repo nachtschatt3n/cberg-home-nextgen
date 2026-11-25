@@ -4,7 +4,7 @@
 # `kubectl create`s one Job per run. docs/sops/ci-runner.md
 #
 # Indexed Job: one pod per shard (JOB_COMPLETION_INDEX -> --shard=i+1/N),
-# at most __PARALLELISM__ (3 GPU / 2 CPU; sims 6, 3 or 2 by free CPU) at a time per Job; node placement is
+# at most __PARALLELISM__ (3 GPU / 2 CPU; sims 6, 3 or 2, clipgate up to 12, by free CPU) at a time per Job; node placement is
 # left to the scheduler (all three nodes since 2026-10-12). backoffLimitPerIndex 0 +
 # maxFailedIndexes N: a failing shard is NOT retried and does NOT stop the
 # others, so every shard reports.
@@ -128,6 +128,19 @@ spec:
               value: "__SPECS__"
             - name: PROJECT
               value: "__PROJECT__"
+            # SUITE=clipgate: the gate's flags (allow-listed by the trigger and
+            # again by clipgate.sh; never a path, --out, --pics or --fit-solve)
+            - name: CLIP_ARGS
+              value: "__CLIP_ARGS__"
+            # picture collection (run.sh): PICS=1 copies test-results images,
+            # PICS_ENV names the specs' picture-folder variables (*_DIR,
+            # *_SHOTS); at most PICS_CAP_MB for the whole Job
+            - name: PICS
+              value: "__PICS__"
+            - name: PICS_ENV
+              value: "__PICS_ENV__"
+            - name: PICS_CAP_MB
+              value: "__PICS_CAP_MB__"
             - name: NODE_NAME
               valueFrom:
                 fieldRef:

@@ -41,7 +41,7 @@ if [ "$gpu" = 1 ]; then
 fi
 
 # proof of the renderer, logged for every browser suite
-if [ "$rc" -eq 0 ] && [ "$SUITE" != unit ] && [ "$SUITE" != sims ] && [ -d node_modules/playwright ]; then
+if [ "$rc" -eq 0 ] && [ "$SUITE" != unit ] && [ "$SUITE" != sims ] && [ "$SUITE" != clipgate ] && [ -d node_modules/playwright ]; then
     renderer=$(timeout 60 node -e '
 const { chromium } = require("playwright");
 (async () => { const b = await chromium.launch({ args: (process.env.PW_CHROMIUM_ARGS || "").split(/\s+/).filter(Boolean) });
@@ -71,6 +71,19 @@ need_gpu() {     # rendering suites fail their timing assertions on 4 software C
         log "suite '${SUITE}' runs on GPU only (CPU/SwiftShader fails its timing budgets, docs/sops/ci-runner.md)"; rc=2; return 1
     fi
 }
+
+# Review pictures (PICS_ENV, from the trigger): every name is an env variable the
+# game's specs read as their picture folder (POC3D_HEROES_SHOTS, REVIEW_DIR, ...);
+# each points at its own folder here, collected into $OUT/pics after the run.
+pics_src=/work/pics-src
+read -r -a pics_env <<<"${PICS_ENV:-}"
+for v in "${pics_env[@]}"; do
+    if [[ "$v" =~ ^[A-Z][A-Z0-9_]*(_DIR|_SHOTS)$ ]]; then
+        mkdir -p "$pics_src/$v"; export "$v=$pics_src/$v"
+    else
+        log "PICS_ENV: '$v' is not a picture-folder variable (*_DIR, *_SHOTS); ignored"
+    fi
+done
 
 t1=$(date +%s)
 if [ "$rc" -eq 0 ]; then
@@ -118,8 +131,12 @@ if [ "$rc" -eq 0 ]; then
                 log "this ref predates the sims planner (sims:shard script); not supported by the runner"; rc=2
             fi
             ;;
+        clipgate)
+            # the PoC 3D clipping gate, one share of the figures (CLIP_ARGS)
+            OUT="$OUT" SHARD="$SHARD" N="$N" bash /opt/ci/clipgate.sh; rc=$?
+            ;;
         *)
-            log "unknown SUITE '${SUITE}' (unit|e2e|nightly|responsive|release|sims)"; rc=2
+            log "unknown SUITE '${SUITE}' (unit|e2e|nightly|responsive|release|sims|clipgate)"; rc=2
             ;;
     esac
 fi
@@ -159,6 +176,33 @@ walk(process.argv[1]); console.log(plans, planned, executed);' "$OUT" 2>/dev/nul
     ;;
 esac
 [ -d reports ] && cp -r reports "$OUT/" 2>/dev/null
+
+# Picture collection (PICS=1 or PICS_ENV set): the images of the spec's own
+# picture folders and of Playwright's test-results, copied into $OUT/pics/ in
+# name order until this shard's share of the job's cap (PICS_CAP_MB / shards)
+# is used; the rest is counted, not copied. The collector moves them to
+# <results>/<job>/pics/shard-N/.
+if [ "${PICS:-0}" = 1 ] || [ "${#pics_env[@]}" -gt 0 ]; then
+    cap=$(( ${PICS_CAP_MB:-200} * 1024 * 1024 / N ))
+    node -e '
+const fs = require("fs"), path = require("path");
+const [out, cap, ...srcs] = process.argv.slice(1);
+const img = /\.(png|jpe?g|webp)$/i, list = [];
+const walk = (root, d) => { if (!fs.existsSync(d)) return; for (const n of fs.readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+  const f = path.join(d, n.name); if (n.isDirectory()) walk(root, f); else if (img.test(n.name)) list.push([root, f]); } };
+for (const s of srcs) { const [name, dir] = s.split("="); walk(name, dir); }
+let used = 0, copied = 0, skipped = 0, skippedBytes = 0; const index = [];
+for (const [name, f] of list) {
+  const size = fs.statSync(f).size, root = srcs.find((s) => s.startsWith(name + "=")).slice(name.length + 1);
+  const rel = path.join(name, path.relative(root, f));
+  if (used + size > +cap) { skipped++; skippedBytes += size; index.push(`skipped ${size} ${rel}`); continue; }
+  fs.mkdirSync(path.dirname(path.join(out, rel)), { recursive: true }); fs.copyFileSync(f, path.join(out, rel));
+  used += size; copied++; index.push(`copied ${size} ${rel}`);
+}
+fs.mkdirSync(out, { recursive: true }); fs.writeFileSync(path.join(out, "INDEX.txt"), index.join("\n") + "\n");
+console.log(`${copied} copied (${(used / 1048576).toFixed(1)} MiB), ${skipped} over the cap of ${(cap / 1048576).toFixed(1)} MiB not copied (${(skippedBytes / 1048576).toFixed(1)} MiB)`);
+' "$OUT/pics" "$cap" "test-results=$OUT/test-results" $(for v in "${pics_env[@]}"; do [ -d "$pics_src/$v" ] && echo "$v=$pics_src/$v"; done) 2>&1 | sed 's/^/[pics] /'
+fi
 git rev-parse HEAD >"$OUT/commit"
 echo "$rc" >"$OUT/exit-code"
 

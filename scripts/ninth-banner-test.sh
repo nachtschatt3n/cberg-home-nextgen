@@ -2,11 +2,12 @@
 # Run The Ninth Banner's test suites as a sharded Kubernetes Job on the
 # cluster (namespace ci-runner) and collect the results on this Mac.
 #
-#   scripts/ninth-banner-test.sh <ref> <unit|e2e|nightly|responsive|release|sims> [shards]
+#   scripts/ninth-banner-test.sh <ref> <unit|e2e|nightly|responsive|release|sims|clipgate> [shards]
 #   scripts/ninth-banner-test.sh --collect <job>
 #
 #   ref     commit sha (short ok), branch or tag of nachtschatt3n/the-ninth-banner
-#   shards  default: e2e/nightly/responsive/release 3, sims 6, unit 1 (forced)
+#   shards  default: e2e/nightly/responsive/release 3, sims 6, unit 1 (forced),
+#           clipgate 6 (never more than the figures in --rigs)
 #   --collect <job>  re-attach the collector to a Job that was submitted from
 #           this Mac and whose collector stopped: reads <results>/<job>/job.yaml,
 #           creates nothing, never posts the release commit status
@@ -24,6 +25,19 @@
 # time limit in seconds; default sims 12600, else 5400), DRY_RUN=1 (render the
 # Job for every parallelism the admission may pick and print its deadlines;
 # nothing is created).
+# clipgate (cpu lane): the game's PoC 3D clipping gate (tools/poc3d-clipgate.mjs),
+# CLIP_ARGS="--rigs <figure,...> [--only <clip,...>] [--items] [--kit]
+# [--hands fist|open|fist,open] [--level n] ..." (allow-listed: no path, no
+# --out/--pics/--fit-solve); the figures are dealt round-robin over the shards,
+# each gates its share with --pics 0; parallelism up to 12 by free CPU. Each
+# shard's tables: <results>/<job>/shard-N/gate-<hands>.log; the game's
+# coord/tools/farm-clipgate.sh merges them into the Mac run's table.
+# Pictures: PICS=1 copies the images of Playwright's test-results, PICS_ENV
+# ("POC3D_HEROES_SHOTS REVIEW_DIR", names ending _DIR or _SHOTS) points each
+# named variable at a folder in the pod and copies its images too, into
+# <results>/<job>/pics/shard-N/<source>/, at most PICS_CAP_MB (default 200,
+# max 2000) per Job (split evenly over the shards; INDEX.txt lists what was
+# copied and what was over the cap).
 # ---
 # Admission (docs/sops/ci-runner.md): the Job is created only once all parallel
 # shard pods first-fit, one at a time, into the schedulable nodes' free CPU
@@ -87,9 +101,36 @@ case "$suite" in
     unit) shards=1 ;;
     e2e|nightly|responsive|release) shards="${shards:-3}" ;;
     sims) shards="${shards:-6}" ;;
+    clipgate) shards="${shards:-6}" ;;
     *) echo "unknown suite '$suite'"; usage ;;
 esac
 [[ "$shards" =~ ^[1-9][0-9]?$ ]] || { echo "shards must be 1..99"; exit 2; }
+# CLIP_ARGS: only flags that choose WHAT the gate measures, each value letters,
+# digits and _@,.- (pasted into sed and YAML; the pod checks it again).
+clip_args="${CLIP_ARGS:-}"
+if [ "$suite" = clipgate ]; then
+    read -r -a cw <<<"$clip_args"; nrigs=0; ci=0
+    while [ "$ci" -lt "${#cw[@]}" ]; do
+        case "${cw[$ci]}" in
+            --items|--kit|--no-skirt|--raw-aim|--aim) ci=$((ci + 1)); continue ;;
+            --rigs|--only|--hands|--level|--item-level|--step|--pair|--knee|--whole-alt) ;;
+            *) echo "CLIP_ARGS: '${cw[$ci]}' is not allowed (--rigs --only --items --kit --hands --level --item-level --step --pair --knee --whole-alt --no-skirt --raw-aim --aim; never --out, --pics, --fit-solve or a path)"; exit 2 ;;
+        esac
+        cv="${cw[$((ci + 1))]:-}"
+        [[ "$cv" =~ ^[A-Za-z0-9_@,.-]+$ && "$cv" != -* ]] || { echo "CLIP_ARGS: ${cw[$ci]} needs a value of letters, digits and _@,.-"; exit 2; }
+        [ "${cw[$ci]}" != --rigs ] || nrigs=$(tr ',' '\n' <<<"$cv" | grep -c .)
+        if [ "${cw[$ci]}" = --hands ]; then [[ "$cv" =~ ^(fist|open|fist,open|open,fist)$ ]] || { echo "CLIP_ARGS: --hands fist, open or fist,open"; exit 2; }; fi
+        ci=$((ci + 2))
+    done
+    [ "$nrigs" -gt 0 ] || { echo "clipgate needs CLIP_ARGS=\"--rigs <figure,...> ...\""; exit 2; }
+    if [ "$shards" -gt "$nrigs" ]; then echo "note: $shards shards for $nrigs figures: $nrigs shards"; shards="$nrigs"; fi
+elif [ -n "$clip_args" ]; then
+    echo "CLIP_ARGS is for the clipgate suite only"; exit 2
+fi
+pics="${PICS:-0}"; pics_env="${PICS_ENV:-}"; pics_cap="${PICS_CAP_MB:-200}"
+[[ "$pics" =~ ^[01]$ ]] || { echo "PICS must be 0 or 1"; exit 2; }
+[[ "$pics_env" =~ ^([A-Z][A-Z0-9_]*(_DIR|_SHOTS)( |$))*$ ]] || { echo "PICS_ENV: names of picture-folder variables (ending _DIR or _SHOTS), space-separated"; exit 2; }
+[[ "$pics_cap" =~ ^[1-9][0-9]{0,3}$ ]] && [ "$pics_cap" -le 2000 ] || { echo "PICS_CAP_MB must be 1..2000"; exit 2; }
 # Per-JOB parallelism: CPU/SwiftShader mode 2, GPU mode 3 (below). The
 # cluster-wide limit is the namespace quota (the thermal gate was removed 2026-10-06).
 # Best-effort CI, GitHub CI is the gate.
@@ -104,7 +145,9 @@ esac
 # Lanes (resource profile only, SOP §2b): sims/unit without a browser run in the cpu
 # lane with small resources (single-threaded Node: ~1 core, <= 0.61Gi measured
 # 2026-10-04) and their own per-node slots; everything else is the browser lane.
-case "$suite" in unit|sims) [ "$gpu" = 0 ] && lane=cpu || lane=browser ;; *) lane=browser ;; esac
+case "$suite" in unit|sims) [ "$gpu" = 0 ] && lane=cpu || lane=browser ;;
+    clipgate) [ "$gpu" = 0 ] || { echo "clipgate is pure Node (no WebGL): GPU=0 only"; exit 2; }; lane=cpu ;;
+    *) lane=browser ;; esac
 if [ "$lane" = cpu ]; then
     cpu_req="${CPU_REQ:-1}"; cpu_lim="${CPU_LIM:-1.5}"; mem_req=1Gi; mem_lim=3Gi; eph_req=2Gi; eph_lim=8Gi
 else
@@ -149,7 +192,7 @@ pod_deadline="${TNB_POD_DEADLINE:-$pod_deadline}"
 [[ "$pod_deadline" =~ ^[1-9][0-9]{1,4}$ ]] || { echo "TNB_POD_DEADLINE must be whole seconds, 10..99999"; exit 2; }
 set_job_deadline() {   # from $parallelism: call again once the admission has picked it
     rounds=$(( (shards + parallelism - 1) / parallelism ))
-    if [ "$suite" = sims ]; then
+    if [ "$suite" = sims ] || [ "$suite" = clipgate ]; then
         deadline=$(( rounds * (pod_deadline + 300) ))
     else
         deadline=5400
@@ -189,7 +232,8 @@ sed -e "s|__JOB_NAME__|tnb-probe|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite
     -e "s|__CPU_REQ__|$cpu_req|g" -e "s|__CPU_LIM__|$cpu_lim|g" -e "s|__GPU_RES__|$gpu_res|g" \
     -e "s|__LANE__|$lane|g" -e "s|__MEM_REQ__|$mem_req|g" -e "s|__MEM_LIM__|$mem_lim|g" \
     -e "s|__EPH_REQ__|$eph_req|g" -e "s|__EPH_LIM__|$eph_lim|g" \
-    -e "s|__CHROMIUM_ARGS__||g" -e "s|__SPECS__||g" -e "s|__PROJECT__||g" "$TEMPLATE" > "$probe"
+    -e "s|__CHROMIUM_ARGS__||g" -e "s|__SPECS__||g" -e "s|__PROJECT__||g" \
+    -e "s|__CLIP_ARGS__||g" -e "s|__PICS__|0|g" -e "s|__PICS_ENV__||g" -e "s|__PICS_CAP_MB__|$pics_cap|g" "$TEMPLATE" > "$probe"
 # the pod's CPU request comes from the rendered pod spec, never hardcoded
 req_m="$(python3 "$admit" podreq "$probe")" || { rm -f "$probe"; echo "admission: cannot read the pod CPU request from the rendered template"; exit 3; }
 rm -f "$probe"
@@ -197,6 +241,13 @@ rm -f "$probe"
 if [ "$suite" = sims ]; then
     # 6 / 3 / 2: 3 still runs 6 shards in two rounds, for half the CPU of 6
     full=$(( shards < 6 ? shards : 6 )); mid=$(( full / 2 )); half=$(( shards < 2 ? shards : 2 ))
+    par_list="$full"
+    [ "$mid" -gt "$half" ] && [ "$mid" -lt "$full" ] && par_list="$par_list $mid"
+    [ "$half" -lt "$full" ] && par_list="$par_list $half"
+elif [ "$suite" = clipgate ]; then
+    # one core per shard (cpu lane): all shards at once (max 12) if they fit,
+    # else half, else 2; the admission below still checks every node and the quota
+    full=$(( shards < 12 ? shards : 12 )); mid=$(( (full + 1) / 2 )); half=$(( shards < 2 ? shards : 2 ))
     par_list="$full"
     [ "$mid" -gt "$half" ] && [ "$mid" -lt "$full" ] && par_list="$par_list $mid"
     [ "$half" -lt "$full" ] && par_list="$par_list $half"
@@ -212,6 +263,7 @@ render() {
         -e "s|__LANE__|$lane|g" -e "s|__MEM_REQ__|$mem_req|g" -e "s|__MEM_LIM__|$mem_lim|g" \
         -e "s|__EPH_REQ__|$eph_req|g" -e "s|__EPH_LIM__|$eph_lim|g" \
         -e "s|__CHROMIUM_ARGS__|$chromium_args|g" -e "s|__SPECS__|${SPECS:-}|g" -e "s|__PROJECT__|${PROJECT:-}|g" \
+        -e "s|__CLIP_ARGS__|$clip_args|g" -e "s|__PICS__|$pics|g" -e "s|__PICS_ENV__|$pics_env|g" -e "s|__PICS_CAP_MB__|$pics_cap|g" \
         "$TEMPLATE" > "$2"
 }
 if [ "${DRY_RUN:-0}" = 1 ]; then
@@ -296,7 +348,7 @@ parallelism="$(awk '/^  parallelism: /{print $2; exit}' "$dest/job.yaml")"
 deadline="$(awk '/^  activeDeadlineSeconds: /{print $2; exit}' "$dest/job.yaml")"
 pod_deadline="$(awk '/^      activeDeadlineSeconds: /{print $2; exit}' "$dest/job.yaml")"
 pod_deadline="${pod_deadline:-$deadline}"   # Jobs from before 2026-11-09 have no pod deadline
-[[ "$suite" =~ ^(unit|e2e|nightly|responsive|release|sims)$ && "$shards" =~ ^[1-9][0-9]?$ \
+[[ "$suite" =~ ^(unit|e2e|nightly|responsive|release|sims|clipgate)$ && "$shards" =~ ^[1-9][0-9]?$ \
     && "$deadline" =~ ^[1-9][0-9]*$ && "$pod_deadline" =~ ^[1-9][0-9]*$ ]] \
     || { echo "--collect: cannot read suite, shards and deadlines from $dest/job.yaml"; exit 2; }
 # the Job's start, to within seconds: job.yaml is written right before `kubectl create`
@@ -556,6 +608,10 @@ while [ "$ndone" -lt "$shards" ]; do
         if [ -n "$logs" ]; then printf '%s\n' "$logs" > "$dest/shard-$n.log"; fi
         if grep -q '^CI-RESULTS-READY' <<<"$logs"; then
             k cp -c runner "$NS/$pod:/results" "$dest" >/dev/null 2>&1 || say "  (copy of shard $n artifacts failed)"
+            # pictures (PICS / PICS_ENV): all shards' under <job>/pics/shard-N/
+            if [ -d "$dest/shard-$n/pics" ]; then
+                mkdir -p "$dest/pics"; rm -rf "$dest/pics/shard-$n"; mv "$dest/shard-$n/pics" "$dest/pics/shard-$n"
+            fi
             k exec -n "$NS" "$pod" -c runner -- touch /results/.collected >/dev/null 2>&1 || true
             line="$(grep '^CI-RESULT ' <<<"$logs" | tail -1 || true)"
             if [ -n "$line" ]; then
@@ -641,6 +697,12 @@ if [[ "$executed" =~ ^[0-9]+$ ]] && [[ "$planned" =~ ^[0-9]+$ ]] && [ "$executed
     say "WARNING: TEST-COUNT-MISMATCH: $((planned - executed)) planned tests never ran (dropped from the --test-list match; docs/sops/ci-runner.md)"
 fi
 say "artifacts: $dest  (shard-N/: junit.xml, playwright-report/, test-results/ traces, blob-report/; release: per part in shard-N/{release,responsive}/)"
+if [ "$suite" = clipgate ]; then
+    say "clipgate tables: $dest/shard-N/gate-<hands>.log (+ gate-<hands>/*.json); one merged table: the game's coord/tools/farm-clipgate.sh"
+fi
+if [ -d "$dest/pics" ]; then
+    say "pictures: $dest/pics/shard-N/ ($(find "$dest/pics" -type f ! -name INDEX.txt | wc -l | tr -d ' ') files; INDEX.txt per shard lists anything over the cap)"
+fi
 if ls "$dest"/shard-*/blob-report/*.zip "$dest"/shard-*/*/blob-report/*.zip >/dev/null 2>&1; then
     say "merged report (from a checkout of the game at ${sha:0:12}): npm run test:merge-reports -- \"$dest\" --out \"$dest/report\""
 fi

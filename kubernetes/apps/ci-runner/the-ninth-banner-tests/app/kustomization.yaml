@@ -23,3 +23,8 @@ configMapGenerator:
       - ./scripts/clone.sh
       - ./scripts/git-askpass.sh
       - ./scripts/run.sh
+      - ./scripts/clipgate.sh
+      # SUITE=clipgate: the game's 3D tool packages, pinned (copied from the
+      # game's poc3d-tools folder; npm ci --prefix in the pod, clipgate.sh)
+      - poc3d-tools-package.json=./poc3d-tools/package.json
+      - poc3d-tools-package-lock.json=./poc3d-tools/package-lock.json
