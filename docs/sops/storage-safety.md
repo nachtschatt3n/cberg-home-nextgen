@@ -151,6 +151,7 @@ constrained:**
 | `cifs-immich-icloud-backup` | `//192.168.55.240/backups` | `icloud-backup` | Retain |
 | `cifs-opencode-andreamosteller` | `//192.168.55.240/opencode` | `/andrea-opencode` | Retain |
 | `cifs-penpot-assets` | `//192.168.55.240/penpot` | `assets` | Retain |
+| `cifs-ninth-banner` (added 2026-11-25; ci-runner farm workspace, login `kube-system/csi-driver-smb`) | `//${NAS_HOSTNAME}/documents` | `/mac-mini-ai/ninth-banner` | Retain |
 
 `cifs-immich-icloud-backup` is mounted `ro` by BOTH of its consumers, so
 neither can write or delete the iCloud originals — iCloud stays source of

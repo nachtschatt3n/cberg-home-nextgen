@@ -1,0 +1,42 @@
+---
+# Shared NAS workspace for the Ninth Banner test farm (ci-runner).
+# Cluster-scoped, so the Kustomization's targetNamespace does not touch it.
+# Credentials: the EXISTING kube-system/csi-driver-smb login (used by every
+# other CIFS class here) is referenced cross-namespace; ci-runner holds no copy
+# of it (it must hold no cluster secrets, see ../../kustomization.yaml).
+# The mount is performed by csi-smb-node on the host network, so ci-runner's
+# CiliumNetworkPolicy needs no NAS egress rule for it.
+# subdir is the farm's own folder (never "/"); Retain so a PVC delete can never
+# wipe it. See docs/sops/storage-safety.md.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: "cifs-ninth-banner"
+provisioner: smb.csi.k8s.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nosharesock
+  - multichannel
+  - max_channels=4
+  - vers=3.1.1
+  - dir_mode=0777
+  - file_mode=0777
+  # the farm pods run as 1001:1001 (docs/sops/ci-runner.md)
+  - uid=1001
+  - gid=1001
+  - noperm
+  - noatime
+  - rsize=1048576
+  - wsize=1048576
+  - cache=loose
+  - actimeo=30
+  - serverino
+parameters:
+  source: "//${NAS_HOSTNAME}/documents"
+  subdir: "/mac-mini-ai/ninth-banner"
+  csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
+  csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"

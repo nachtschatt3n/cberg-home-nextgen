@@ -12,6 +12,7 @@ resources:
   - ./priorityclass.yaml
   - ./resource-limits.yaml
   - ./networkpolicy.yaml
+  - ./storageclass.yaml
 generatorOptions:
   disableNameSuffixHash: true   # the Job template references the name verbatim
   annotations:
