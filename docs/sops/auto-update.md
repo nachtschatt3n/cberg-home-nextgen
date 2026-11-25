@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.11.03`
-> Last Updated: `2026-11-03`
+> Version: `2026.11.25`
+> Last Updated: `2026-11-25`
 
 ## 1) Description
 
@@ -277,6 +277,67 @@ one (`path_block`, fail-safe hold when the file list is unreadable), because a
 consumer-specific hold is invisible in a shared depName. Test:
 `runbooks/tests/test-redis-notes-and-sure-redis-hold.py`.
 
+## 2b) Graded risk model and outcome lanes (2026-11-25 rebuild)
+
+Operator goal: most updates run by themselves in the nightly window; "if there is
+no major breaking change, it can be done automatically". Only cluster core
+(Longhorn, Cilium, Envoy/Gateway, CoreDNS, Talos/kubelet, Flux, external-dns)
+stays attended. Standing rule, NOT weakened: interruption and downtime are fine;
+DATA LOSS and FEATURE LOSS are not, and every irreversible data step needs a
+VERIFIED restore path. Code: `runbooks/lib/update_risk.py` (pure functions),
+called from `auto-update.py::classify` (PR lane) and `coverage.py::assign_lane`
+(direct-bump lane). Tests: `test-update-risk-lanes.py`, `test-auto-update-parse-pr.py`.
+
+**Outcome lanes** (`lane` on every auto-update result; `risk_lane` / `risk_lane_counts`
+in `coverage.py --json` beside the unchanged legacy `lane`):
+
+| Lane | Meaning | Who applies it |
+|---|---|---|
+| `AUTO` | no breaking evidence, reversible by `git revert` | nightly Step 0 (`auto-update.py --apply` / direct bump) |
+| `AUTO-BACKUP-GATED` | a schema/data migration, BUT the component has a `data_protection` entry: tracked nightly dump job + a named restore proof | plan pipeline (`auto-backup-gated` class in `autonomy-policy.yaml`); runs `restore_proof` at runtime, applies only on PASS. `auto-update.py` never merges these |
+| `PLAN` | real or unprovable breaking change, unknown class, true major, grouped PR, unreadable evidence | planner -> window agent |
+| `WEEKEND-ATTENDED` | cluster core; set by `lane: weekend-attended` on the deny rule | attended weekend window |
+| `WAIT` | not a risk lane: cooldown, CI pending, draft | self-resolves |
+
+**Signals**
+1. *Update type, read from the real title* (`parse_pr`): `!` marker or a major label =
+   major; grouped titles and titles with no version span are PLAN with their own
+   reason; a same-tag digest pair is `digest`. The only `parse_error` left is a title
+   naming no dependency.
+2. *Release-note breaking evidence, graded, not a heading match.* A "Breaking Changes"
+   heading with nothing under it (or "None") is boilerplate and holds nothing. Each
+   LISTED item is `acked` (policy `breaking_ack`: needle + measured evidence + hard
+   `until`; an ack lacking either is inert; it clears only its own item),
+   `untouched` (PATCH bumps only: a removal/rename item whose config tokens appear
+   nowhere in this component's own manifests, and which carries no obligation
+   wording such as "unless", "must", "default", "now requires"), or `blocking`
+   (everything else, including any item naming no token we could check). An
+   Upgrade/Migration section is advisory on a patch and blocking on a minor+ when it
+   demands action.
+3. *Migration + restore path.* A migration in the diff (G3s) is `AUTO-BACKUP-GATED`
+   only if `data_protection` lists the component, its dump CronJob manifest exists in
+   git, and it names a `restore_proof` (`runbooks/backup-restore-proof.py`, which
+   restores the newest Completed Longhorn backup into a scratch volume and boots
+   postgres on it; PostgreSQL-on-Longhorn only). A nightly dump alone is not a restore
+   proof. No entry => PLAN.
+4. *Blast radius*: deny-rule `lane:`. *Reversibility*: git-revert (AUTO) vs restore
+   (AUTO-BACKUP-GATED / PLAN).
+5. *Digest-only bumps*: `digest_bumps.stateless` (EXACT image match) is AUTO behind
+   the `digest` cooldown (24h) + CI; `digest_bumps.stateful` (substring match, the safe
+   direction) and anything unlisted is PLAN with the reason.
+
+**Fail closed**: release notes unreadable => PLAN (`gate=breaking-unverified`) unless
+the component has earned autonomy (section 2a); an unreadable PR file list, a policy
+that does not parse, a protection entry whose dump job is not in git, a target that is
+a floating series pointer or digest-twin of an `-rc` tag (`gate=prerelease`) => not
+AUTO. The authentik fail-open (2026-09-22) is this branch, now tested.
+
+**Home Assistant**: `runbooks/lib/ha-integration-gate.py snapshot|compare` reads
+config-entry states and per-integration entity availability before/after a bump (see
+its docstring; tolerates entities already unavailable before and BLE trackers awaiting
+adverts; reloads a failed entry once via the non-restarting endpoint; exits 1 with a
+table on regression, 2 when it cannot read HA). Test: `test-ha-integration-gate.py`.
+
 ## 3) Blueprints
 
 N/A (plain Python runbook + git-tracked policy YAML; no Authentik/Homepage/
@@ -443,11 +504,13 @@ dist-tag stay on `CHANNEL_RULES` membership (see
 Run the synthetic matrix. **It must assert every deny rule that exists, not a
 memorable subset** — a rule absent from the matrix is a rule the test cannot
 catch the removal of — and a rule whose `max:` is mis-stated is a hold the test
-cannot catch the WIDENING of. As of `2026.10.17` that is all 35 deny entries (the last seven rows, from `*longhorn*`, were missing before 2026-10-23):
+cannot catch the WIDENING of. As of `2026.11.25` that is all 41 deny entries (`*valkey*` and `*opentelemetry-kube-stack*` retired that day with evidence, `*flux-operator*`/`*flux-instance*` added):
 
 | Deny glob | Assert |
 |---|---|
-| `*authentik*` | held at every update_type (added 2026-09-22, `0193f2e4`, operator call) — the chart version and the two `patch-session-settings` initContainers are pinned SEPARATELY: the main server image is NOT pinned in values, so a chart-only bump DOES move the running image, while the initContainers (which pin `ghcr.io/goauthentik/server` inline at two sites) stay put and overlay an old `settings.py` onto new code, with nothing asserting the two agree (mechanism corrected 2026-09-26 — the earlier text had it backwards); and G3 reported its breaking-change signal "unverified (release notes unavailable)" while the item routed to AUTO anyway — a fail-open on the household SSO front door, which every forward-auth service and the Flux controllers that would revert a bad roll sit behind |
+| `*authentik*` | held at every update_type, `lane: plan` (added 2026-09-22; reason rewritten 2026-11-25) — the G3 fail-open that first justified it is RESOLVED (notes that cannot be read now route to PLAN in both lanes, `test-update-risk-lanes.py`); what remains is the independent split-PR hazard: Renovate opens the chart version (#570) and the two `patch-session-settings` initContainer pins (#565) as SEPARATE PRs, and a chart-only bump DOES move the running image while the initContainers lag, overlaying an old `settings.py` onto new code. Remove when one reviewed change moves all three pins (Renovate group + grouped-lockstep admission, or a coupled-pin gate) |
+| `*flux-operator*` | held at every update_type, `lane: weekend-attended` (added 2026-11-25) — the Flux distribution (operator + instance): the GitOps controllers that would revert a bad change are the thing being changed |
+| `*flux-instance*` | held at every update_type, `lane: weekend-attended` (added 2026-11-25) — same as `*flux-operator*` |
 | `*app-template*` | `max: patch` (narrowed 2026-09-12) — patch ALLOWED, minor held; major never reaches the rule (G1) |
 | `*toeverything/affine*` | held at every update_type (narrowed 2026-09-26 from `*affine*`, which also held sibling components such as `affine-redis` under the AFFiNE app's reason; matched by image repo in the direct-bump lane) |
 | `*cilium*` | held at every update_type |
@@ -474,18 +537,18 @@ cannot catch the WIDENING of. As of `2026.10.17` that is all 35 deny entries (th
 | `aqua:fluxcd/flux2` | held at every update_type (added 2026-11-02, F-39ab2c30, policy `2026.11.04`) — the flux CLI pin in `.mise.toml` FOLLOWS the cluster's Flux distribution and must never move ahead of it (same shape as the talosctl row); Renovate #448 had put it a minor ahead of v2.9.6 |
 | `siderolabs/*` | held at every update_type |
 | `*talos*` | held at every update_type |
-| `*valkey*` | held at every update_type (INTERIM, added 2026-09-21) — the only upstream tag above the pin is a PRE-RELEASE: a floating 2-component tag digest-identical to an `-rc1`, with no GA above the pin. Withdraw the rule when a real GA publishes, or it freezes valkey on a genuine future release. It also has to reach the DIRECT-BUMP lane, which resolves a deny rule by the component key first and then by each image repository the item names (`denied_for_item`) — the component key alone did not match this glob |
 | `*sure-redis*` | held at every update_type (added 2026-09-27, redis fleet planner) — sure's sidekiq-cron registers its cron jobs only at worker start and keeps them in this redis, so a redis roll can silently empty the schedule (bank sync included) while every probe stays green; the window plan must restart `sure-worker` and assert the `cron_jobs:default` set has 11 members. The Renovate depName is the SHARED `redis`, so this rule also carries `paths:` (the sure redis HelmRelease) and the PR lane holds any PR changing that file (`path_block`) |
 | `*longhorn*` | `max: patch` (added 2026-10-01, F-f79c74ac) — patch ALLOWED, minor+ held: the storage engine for every RWO volume; a minor is an engine/instance-manager line move (1.11->1.12 needed a hand-checked upgrade, `cd2ed987`; a 1.12.1 patch flipped a network-policy default that broke Prometheus scraping, `3c73a7b0`). Chart 1.13.0 was held only by the G5 cooldown and would have landed unattended; minor+ goes through a window plan |
 | `*bbilly1/tubearchivist*` | `max: patch` (added 2026-10-26, `01c7b407`) — 0.x project; a minor bump needs the probe Host header and ALLOWED_HOSTS handled in a plan (tube-archivist-0.6.0), while patches keep flowing; the glob also covers the `-es` image, whose 9.x major is a plan anyway |
-| `*kube-prometheus-stack*` | held at every update_type — TIME-BOXED (added 2026-11-02, `3139010e`, revisit by 2026-11-30): the Prometheus stack is the shared verification instrument of the pending maintenance plans, so an unattended Step 0 bump would blind their gates. Remove or narrow to `max: patch` after the Talos 1.14.5 roll completes |
+| `*kube-prometheus-stack*` | held at every update_type — TIME-BOXED (added 2026-11-02, `3139010e`, revisit by 2026-11-30): the Prometheus stack is the shared verification instrument of the pending maintenance plans, so an unattended Step 0 bump would blind their gates. Remove or narrow (to `max` patch) after the Talos 1.14.5 roll completes |
 | `*immich-redis*` | held at every update_type **with its own reason**, matched BEFORE `*immich*` (added 2026-11-03, policy `2026.11.03`) — the Immich redis is a non-persistent BullMQ queue store with no database or migrations, so the server's forward-only-migration reason is false for it; the hold is the redis-fleet lockstep + dropped queue on a roll. Verdict identical to `*immich*`, only the reason differs |
 | `*immich*` | held at every update_type (added 2026-10-22, `45ea8d8f`) — Immich server applies forward-only DB migrations and a revert after a migration crash-loops; plan lane only (dump + scratch-restore proof first) |
 | `*gha-runner-scale-set*` | held at every update_type (added 2026-10-06) — the ARC controller chart (arc-system) and the scale-set chart (ci-runner) must run the same version and are bumped together in one commit; an unattended bump of only one can wedge the runner scale set and may carry CRD changes. The runner AGENT image is not covered by this glob (see `docs/sops/ci-runner.md`) |
-| `*ninth-banner-feedback-db*` | held at every update_type (added 2026-10-17) and **path-scoped**: carries `paths:` (the init Job file) because the depName is the SHARED `pgvector/pgvector`. A bare tag bump of the immutable standalone Job fails the Kustomization apply and auto-reverted the whole nightly batch (PR #362). PR lane holds any PR changing that file (`path_block`); see `docs/sops/immutable-job-image-bumps.md` |
-| `*home-assistant/home-assistant*` | held at every update_type (added 2026-10-12, operator decision) — a release can change or remove any of the many integrations while the pod stays Ready, and the Step 0 health gate reads pod health, not per-integration load; every bump goes through a window plan that takes a backup first |
+| `*mealie*` | held at every update_type (Family Hub, Chrome 108 compat) — scan the target frontend with `runbooks/mealie-chrome108-scan.py` before any bump (`docs/sops/mealie-family-hub-compat.md`); the scan is the gate a future auto lane must run |
+| `otel/opentelemetry-collector-contrib` | held at every update_type (added 2026-11-09) — the collector rejects the exporter `mapping:` blocks; ships only with plan edot-collector-0.165.0 in an attended window |
+| `*ninth-banner*feedback-db*` | held at every update_type (added 2026-10-17) and **path-scoped**: carries `paths:` (the init Job file) because the depName is the SHARED `pgvector/pgvector`. A bare tag bump of the immutable standalone Job fails the Kustomization apply and auto-reverted the whole nightly batch (PR #362). PR lane holds any PR changing that file (`path_block`); see `docs/sops/immutable-job-image-bumps.md` |
+| `*home-assistant/home-assistant*` | `max: patch` + `post_apply_gate: ha-integration` (rewritten 2026-11-25; was a blanket operator hold of 2026-10-12) — patch ALLOWED only through the PR apply path: `auto-update.py` snapshots every config entry and entity with `runbooks/lib/ha-integration-gate.py` BEFORE the merge and compares after the rollout (one non-restarting entry reload per failed entry); a regression reverts the batch, an unreadable snapshot means the PR is not merged. The direct-bump lane has no post-apply hook, so an HA bump without a PR routes to PLAN. Minor and major stay PLAN |
 | `*mcr.microsoft.com/playwright*` | held at every update_type (added 2026-10-20, `ac3b596f`) — the ninth-banner CI runner image carries a Playwright browser bundle that must match the game repo's `@playwright/test` lockfile pin; PR #385 broke every E2E smoke run. Manual-only, in lockstep with the game repo; Renovate updates are also disabled in `renovate.json5`. See `docs/sops/ci-runner.md` |
-| `*opentelemetry-kube-stack*` | held at every update_type (added 2026-10-12, F-c01269d5) — chart 0.24.x ships a default-deny NetworkPolicy whose egress cannot match node addresses under Cilium, so the operator loses its API server and crash-loops, and the rollback then needs a Ready operator too (RollbackFailed). Remove the rule only when a fixed chart release is verified |
 
 Rule ORDER is load-bearing for the three `nextcloud` globs: the first match
 wins, so `*nextcloud-mcp*` and `*nextcloud-redis*` must precede `*nextcloud*`.
@@ -645,6 +708,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.11.25 | 2026-11-25 | **Risk model rebuilt (operator goal: most updates nightly, only cluster core attended).** New §2b: outcome lanes AUTO / AUTO-BACKUP-GATED / PLAN / WEEKEND-ATTENDED (+WAIT), graded breaking-change evidence instead of a heading match, `data_protection` catalogue for migrations, `breaking_ack` (dated, evidenced), `digest_bumps` classification, fail-closed on unreadable notes in the PR lane (the authentik fail-open), prerelease admission gate in the PR lane. `parse_pr` reads `!` majors, capitalised `Update`, `docker tag to`, grouped and versionless titles (14 previously unparseable PRs). Holds retired with evidence: `*valkey*`, `*opentelemetry-kube-stack*`; `*authentik*` reason rewritten to the one remaining hazard; Longhorn 1.12.2 breaking item acked (V2 data engine unused, measured). Core rules carry `lane: weekend-attended`. New `lib/ha-integration-gate.py`. Policy `2026.11.25`. |
 | 2026.11.03 | 2026-11-03 | Header format fix (F-2dfecfb2): the SOP header must be plain `YYYY.MM.DD` (doc-check section 7); the `.1` revision suffix of the entry below is folded into this date. No behaviour change. |
 | 2026.11.02.1 | 2026-11-02 | **`aqua:fluxcd/flux2` deny rule (policy `2026.11.04`, F-39ab2c30).** The flux CLI pin had been auto-merged to 2.10.0 (#448) against a cluster on distribution v2.9.6, contradicting `docs/sops/flux-upgrade.md` (CLI/distribution match). Pin reverted to 2.9.6; the rule keeps the next Renovate PR from re-applying it until the distribution moves. Matrix row added. Regression: `runbooks/tests/test-auto-update-policy-flux-cli-pin.py`. |
 | 2026.11.02 | 2026-11-02 | **`*immich-redis*` deny rule added above `*immich*` (policy `2026.11.03`).** First match wins, so the redis sidecar was held under the Immich SERVER's migration reason, which is false for a non-persistent queue store. Same verdict (held at every update_type), its own reason; matrix row added, order is load-bearing like the `nextcloud-*` trio. Regression: `runbooks/tests/test-auto-update-policy-immich-redis-order.py`. |

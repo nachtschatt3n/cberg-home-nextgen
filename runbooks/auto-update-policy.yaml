@@ -18,7 +18,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.11.07"
+version: "2026.11.25"
 
 # ── Image major ceilings (added 2026-10-23, F-6a859080) ─────────────────────
 # Caps the MAJOR line the version checker may propose for ONE image in ONE
@@ -49,6 +49,7 @@ minimum_release_age_hours: 48
 # to the base, never to 0. Delete the key to restore 48h for everything.
 minimum_release_age_hours_by_type:
   patch: 24
+  digest: 24   # same-tag rebuild of a stateless image (digest_bumps.stateless)
 
 # ── Security fast lane (item B.3, 2026-09-27) ────────────────────────────────
 # true => a NON-MAJOR bump whose CURRENT tag carries an open, non-accepted
@@ -103,6 +104,77 @@ age_waive:
   # waiver just could not see the marker.
   - {match: "*music-assistant*", until: 2026-12-31, reason: "CVE-fix waiver, first bound set 2026-09-22 (F-7eaae066); re-decide before it lapses"}
 
+# ── Digest-only bumps (2026-11-25) ───────────────────────────────────────────
+# Renovate renders a same-tag rebuild as `update <dep> ( abc1234 → def5678 )`. It
+# used to be typed update_type=unknown and therefore NEVER auto. It is now
+# classified by WHAT the image is:
+#   stateless  - listed EXACTLY (registry prefix and `library/` normalised, no
+#                substring match: over-matching here is the UNSAFE direction).
+#                AUTO-eligible behind the normal cooldown (digest: 24h) + CI.
+#   stateful   - globs (over-matching is the safe direction). Routed to the PLAN
+#                lane with the reason below: the tag does not move, but the
+#                binary under a live data directory does.
+#   anything else is `unclassified` and goes to PLAN (fail closed).
+digest_bumps:
+  stateless:
+    - python
+    - node
+    - ubuntu
+    - debian
+    - alpine
+    - busybox
+    - phpmyadmin
+    - actions/actions-runner
+  stateful:
+    - {match: "*postgres*", reason: "PostgreSQL engine image: a same-tag rebuild can move the minor binary under a live PGDATA; restore-from-dump is the only rollback"}
+    - {match: "*pgvector*", reason: "PostgreSQL+pgvector engine image: a same-tag rebuild can move the extension version under live data (extension upgrade is one-way)"}
+    - {match: "*mariadb*", reason: "MariaDB engine image: mariadb-upgrade is never run by the entrypoint; a rebuilt binary can leave old-format system tables"}
+    - {match: "*nextcloud*", reason: "Nextcloud: image rebuilds run occ migrations on start and can break custom apps (Mail) or stick maintenance mode"}
+    - {match: "*iobroker*", reason: "ioBroker: a rebuild can move js-controller and adapters under a persistent /opt/iobroker volume"}
+    - {match: "*valkey*", reason: "key-value engine: a rebuilt binary reads the persisted RDB/AOF"}
+    - {match: "*redis*", reason: "key-value engine: a rebuilt binary reads the persisted RDB/AOF"}
+
+# ── Data protection catalogue (2026-11-25) ───────────────────────────────────
+# A schema/data MIGRATION is AUTO-BACKUP-GATED only when the component is listed
+# here AND its dump CronJob manifest exists in git AND it names a restore proof.
+# The pipeline that applies it (maintenance-window plan, `auto-backup-gated`
+# class in autonomy-policy.yaml) runs `restore_proof` at RUNTIME and applies only
+# on PASS. Listing is a CLAIM that the proof tool fits the component: it is
+# runbooks/backup-restore-proof.py, which restores the newest Completed Longhorn
+# backup of the named volume into a scratch volume and boots postgres on it. It
+# fits POSTGRES-on-Longhorn only; mariadb/sqlite/NAS-backed data is NOT listed,
+# so a migration there stays PLAN (data-loss rule). A nightly pg_dump alone is a
+# dump, not a restore proof, and is not enough.
+data_protection:
+  - match: "teslamate/teslamate"
+    volume: teslamate-db
+    dump_job: kubernetes/apps/backup/db-dumps/home-automation/cronjob-teslamate-postgres.yaml
+    restore_proof: "runbooks/backup-restore-proof.py --volume teslamate-db --image <running postgres image>"
+  - match: "paperless-ngx"
+    volume: paperless-db-data
+    dump_job: kubernetes/apps/backup/db-dumps/office/cronjob-paperless-db.yaml
+    restore_proof: "runbooks/backup-restore-proof.py --volume paperless-db-data --image <running postgres image>"
+  - match: "nocodb"
+    volume: postgresql-data-5g
+    dump_job: kubernetes/apps/backup/db-dumps/databases/cronjob-postgresql.yaml
+    restore_proof: "runbooks/backup-restore-proof.py --volume postgresql-data-5g --image <running postgres image>"
+  - match: "mealie"
+    volume: mealie-pg-data
+    dump_job: kubernetes/apps/backup/db-dumps/office/cronjob-mealie-pg.yaml
+    restore_proof: "runbooks/backup-restore-proof.py --volume mealie-pg-data --image <running postgres image>"
+
+# ── Acknowledged breaking-change items (2026-11-25) ──────────────────────────
+# A release-notes item that LISTS a breaking change holds the bump unless it is
+# acked here: `needle` is a substring of the item text, `evidence` says why it
+# cannot touch this deployment (measured, dated), `until` is a hard expiry (an
+# ack with no `until` or no `evidence` is inert). Acks are per component and
+# per item, never per component wholesale: any OTHER item still holds.
+breaking_ack:
+  - match: "*longhorn*"
+    needle: "Legacy V2 Linked Clone"
+    until: 2027-02-28
+    evidence: "measured 2026-11-25: settings v2-data-engine=false, helmrelease v2DataEngine=false, 77 of 77 Longhorn volumes dataEngine=v1; the item concerns V2 linked-clone volumes only"
+
 # ── Hard blocks by dependency name ──────────────────────────────────────────
 # `match` is a shell-style glob against the Renovate depName (the token between
 # "update " and " (" in the PR title — image repo or chart name).
@@ -110,25 +182,24 @@ age_waive:
 # block the component entirely. e.g. max: patch  → allow patch, hold minor+.
 deny:
   - match: "*authentik*"
+    lane: plan
     reason: >-
-      HELD 2026-09-22 by operator decision. The chart bump 2026.8.2 to 2026.8.3
-      was sitting in the UNATTENDED AUTO lane for the 03:30 nightly window while
-      its own breaking-change gate reported "unverified (release notes
-      unavailable)" - G3 could not read the notes and the item routed to AUTO
-      anyway, which is a fail-open on the household SSO front door. Every service
-      behind forward-auth is downstream of a bad authentik roll, and the Flux
-      controllers that would revert it are reachable only through it.
-      SECOND REASON, independent of the first: the chart and the two
-      patch-session-settings initContainers are pinned SEPARATELY. The main
-      server/worker image is NOT pinned in values, so a chart-only bump DOES
-      move the running image (it follows the chart appVersion). What stays put
-      is the pair of patch-session-settings initContainers, which pin
-      ghcr.io/goauthentik/server inline at two sites and would then overlay an
-      OLD settings.py onto NEW server code, with nothing asserting they agree.
-      (Corrected 2026-09-26: the previous text said the running image stays put,
-      which is backwards.) REMOVE THIS RULE only when every upgrade moves the
-      chart version and BOTH initContainer pins together in one reviewed commit,
-      in an attended window, after confirming the target image tag is published.
+      PLAN lane (rewritten 2026-11-25). The ORIGINAL reason (2026-09-22) is
+      RESOLVED and no longer holds anything: G3 used to pass a bump whose release
+      notes it could not read; since 2026-11-25 both lanes FAIL CLOSED on that
+      (auto-update.py `breaking-unverified`, coverage.py PLAN routing), proven by
+      runbooks/tests/test-update-risk-lanes.py. What remains is the SECOND,
+      independent reason, re-measured 2026-11-25: Renovate opens the chart
+      version and the two `patch-session-settings` initContainer pins
+      (ghcr.io/goauthentik/server:<tag> at two sites in helmrelease.yaml) as
+      SEPARATE PRs (#570 moves only the chart, #565 only the two image pins).
+      The chart appVersion drives the running server image, so a chart-only bump
+      DOES move the running image while the two patch-session-settings
+      initContainers lag at the old tag: merging either PR alone overlays an OLD
+      settings.py onto NEW server code with nothing asserting they agree. REMOVE THIS RULE only when one reviewed change moves
+      the chart and BOTH pins together (a Renovate group rule for the chart +
+      goauthentik/server, plus grouped-lockstep admission in auto-update.py), or
+      a coupled-pin gate asserts equality before merge.
   # Reason REWRITTEN 2026-09-22 (F-af4e0882). The previous text justified the
   # hold with the 3.x -> 5.x MAJOR migration only — which G1 blocks on its own,
   # and which has since EXECUTED (every consumer is on one 5.x chart line) — so
@@ -162,6 +233,7 @@ deny:
   - match: "*toeverything/affine*"
     reason: "AFFiNE app image bumps carry breaking env→config.json changes even on patch tags (0.27.3) — hold for manual review."
   - match: "*cilium*"
+    lane: weekend-attended
     reason: "CNI datapath — never an unattended bump. The hold is about CONSEQUENCE,
       not a specific release: a bad cilium roll takes the cluster network with it, and
       every Flux controller that would revert it sits inside the failure domain.
@@ -175,6 +247,7 @@ deny:
       in-kernel BPF state, so every ordinary gate can pass while new-pod networking is
       broken), and an operator GO."
   - match: "*gateway-helm*"
+    lane: weekend-attended
     reason: "DEPLOYED and parallel-running since 69daf59c; bumped to 1.9.0 on 2026-08-16
       (phase 0.5) at zero Envoy traffic, which put the cluster back ON the support matrix
       (EG 1.9 covers k8s 1.33-1.36; 1.8 covered 1.32-1.35 only and this cluster runs 1.36).
@@ -186,11 +259,13 @@ deny:
       restart gate in docs/sops/k8s-gateway-dns.md (twice), and note that bundle's
       ValidatingAdmissionPolicy blocks rolling BACK to an older bundle-version."
   - match: "*gateway-crds-helm*"
+    lane: weekend-attended
     reason: "DEPLOYED — same hold as gateway-helm. The CRDs remain the actual outage trigger:
       k8s_gateway starts informers for the Gateway API route family and fails CLOSED for
       EVERY name if a version it expects is not served. Latent — it only fires when a
       k8s-gateway pod restarts. Never unattended."
   - match: "*k8s-gateway*"
+    lane: weekend-attended
     reason: >-
       Internal DNS for the entire cluster, pinned at chart 3.7.2. Upstream has
       relocated THREE times (ori-edge -> GitHub org -> Codeberg/kapsi.fi) and the
@@ -212,6 +287,7 @@ deny:
       output diff against the pinned chart plus the restart gate in
       docs/sops/k8s-gateway-dns.md. Never unattended.
   - match: "*envoy-gateway*"
+    lane: weekend-attended
     reason: "Catch-all for Envoy Gateway artifacts (image/chart aliases) — same hold as gateway-helm.
       A chart patch whose revendor.sh diff is header-only (CRD content unchanged) uses
       CRD-identity + k8s-gateway pod-age comparison + the DNS probe instead of the
@@ -224,6 +300,7 @@ deny:
   # *envoy-gateway* catch-all does not contain "envoyproxy/envoy". This closes
   # that door; the Renovate side is dependencyDashboardApproval.
   - match: "*envoyproxy/envoy*"
+    lane: weekend-attended
     reason: "Envoy DATA-PLANE image, pinned tag+digest in the EnvoyProxy resource
       (kubernetes/apps/network/envoy-gateway/app/gatewayclass.yaml). COUPLED to the
       controller: every Envoy Gateway release compiles in the Envoy it was tested with,
@@ -241,6 +318,7 @@ deny:
   # against the v0.22.0 source): the earlier text prescribed `--default-targets`,
   # which is crd-source-only and would reproduce the outage in a break-glass.
   - match: "*external-dns*"
+    lane: weekend-attended
     reason: "public DNS for every internet-facing hostname, and `policy: sync` DELETES a
       record before it can fail to recreate it — so a misconfigured target is an outage, not
       a no-op. v0.22.0 switched the default annotation prefix to GA with NO fallback
@@ -311,6 +389,7 @@ deny:
       the new binary. See docs/sops/mariadb-major-upgrade.md."
     max: patch
   - match: "*longhorn*"
+    lane: weekend-attended
     reason: "Storage engine for every RWO volume: a MINOR is an engine/instance-manager
       line move (1.11->1.12 needed a hand-checked upgrade, cd2ed987; the 1.12.1 patch
       flipped a network-policy default that broke Prometheus scraping, 3c73a7b0).
@@ -489,6 +568,7 @@ deny:
   - match: "*@openclaw/*"
     reason: "openclaw plugins (discord/codex) move in lockstep with the held host."
   - match: "*coredns*"
+    lane: weekend-attended
     reason: "CLUSTER DNS - held in the PLAN lane on purpose. Chart 1.49.0 (appVersion 1.14.7) landed
       2026-10-21 and the image.tag pin in helm-values.yaml was DROPPED, so the chart owns the tag
       again (the original pin-ahead-of-chart hazard is gone). The rule stays because 1.14.7 proved
@@ -513,6 +593,7 @@ deny:
       authorise one. Merge only after the cluster is actually on the new
       version. This is a local binary — no reboot window, no maintenance plan."
   - match: "siderolabs/*"
+    lane: weekend-attended
     reason: "Talos node image — needs a rolling node-reboot maintenance window, not a git merge."
   # Added 2026-11-02 (F-39ab2c30). The flux CLI pin in .mise.toml is a LOCAL binary that
   # must match the cluster's Flux distribution (docs/sops/flux-upgrade.md), exactly like
@@ -536,42 +617,14 @@ deny:
       purpose: GitHub stops assigning jobs to outdated runners, so it must stay
       current.
   - match: "*talos*"
+    lane: weekend-attended
     reason: "Talos/Kubernetes node-level component — reboot window required."
-  - match: "*valkey*"
-    reason: >-
-      INTERIM HOLD added 2026-09-21, scope corrected the same day. The only upstream
-      tag above the pinned 9.1.2 is a PRE-RELEASE: 9.2 is a floating 2-component tag
-      digest-identical to 9.2.0-rc1 (both sha256:b0eef48f..., pushed 1.7s apart), and
-      the full GA list for this image ends at 9.1.2 - 9.1.3, 9.1.4 and 9.2.0 all
-      return HTTP 404. Verified against the registry on 2026-09-19 and 2026-09-21.
-
-      WHERE THIS RULE APPLIES: the Renovate-PR lane in auto-update.py, whose G2 gate
-      calls policy_block(policy, parsed[dep], update_type) with the Renovate depName.
-      valkey/valkey matches this glob, so a Renovate PR for this image is blocked.
-
-      WHERE IT ALSO APPLIES NOW (F-7bad8aeb): coverage.py's direct-bump lane. That
-      lane reaches the deny traversal via denied_for_item(policy, item, key, utype)
-      from assign_lane and max_rule_fallbacks, which tries the COMPONENT key first
-      and then each image repository the item names. It previously passed the
-      component alone - penpot-cache - so an image-repository glob was never
-      consulted there, and this rule blocked the PR path while sitting inert in the
-      lane an unattended nightly actually applies. Both lanes honour it now.
-
-      ALSO COVERING THAT LANE: the floating-series-pointer check added in edeaabc8 -
-      a target naming fewer version components than the pin on the same major line
-      cannot be shown to be GA - which routes 9.1.2 -> 9.2 to PLAN. That check and
-      this rule are independent guards on the same hop.
-
-      REMOVAL CONDITION, NARROWED 2026-09-21: a GA 9.2.x appears on Docker Hub. The
-      digest-sibling work has since landed - security-check.py grew a prerelease
-      branch, and coverage.py the arity check - but auto-update.py's PR gate has NO
-      prerelease admission gate at all: its only prerelease awareness is the GitHub
-      release flag read in github_releases(), used solely to SKIP prereleases while
-      enumerating intermediate releases for G3. A Renovate PR for a GA-looking
-      digest-twin tag would therefore not be stopped by anything else, so this rule
-      is still the guard on that path and the earlier "or the digest-sibling check
-      lands" clause is withdrawn. Left beyond a real GA it would freeze valkey on a
-      genuine future release. security_ref: F-aff597aa, F-f2f1f1a9, F-7bad8aeb
+  - match: "*flux-operator*"
+    lane: weekend-attended
+    reason: "Flux distribution (flux-operator / flux-instance): the GitOps controllers that would revert a bad change are the thing being changed — attended window, sequenced by the flux-fleet plan (docs/sops/flux-upgrade.md)."
+  - match: "*flux-instance*"
+    lane: weekend-attended
+    reason: "Flux distribution (flux-operator / flux-instance): the GitOps controllers that would revert a bad change are the thing being changed — attended window, sequenced by the flux-fleet plan (docs/sops/flux-upgrade.md)."
   - match: "*sure-redis*"
     # A Renovate redis PR is keyed on the SHARED depName (`redis`), which this
     # glob cannot see — so the PR lane also holds any PR that CHANGES this file
@@ -609,18 +662,22 @@ deny:
       renames the Job in the same commit. Remove this rule once the Job is
       renamed per bump automatically or carries kustomize.toolkit.fluxcd.io/force.
   - match: "*home-assistant/home-assistant*"
+    max: patch
+    post_apply_gate: ha-integration
     reason: >-
-      HELD 2026-10-12 by operator decision. The operator runs many Home Assistant
-      integrations, and a release can change or remove any of them while the pod
-      stays Ready - the Step 0 health gate reads pod health, not whether each
-      integration still loads, so a bad bump looks green. Every HA bump therefore
-      goes through a window plan (runbooks/maintenance/plans/home-assistant-*.md)
-      that takes a backup first, checks the release notes for a recorder schema
-      migration (which makes a revert after start unsafe), and verifies each
-      integration against a baseline afterwards. Sequenced after the
-      opentelemetry-operator fix, so a monitoring gap cannot hide an HA
-      regression. REMOVE THIS RULE only when the operator wants HA back on the
-      unattended lane. security_ref: F-07517014
+      Home Assistant: PATCH bumps are AUTO behind the integration gate (rewritten
+      2026-11-25; the 2026-10-12 operator hold said the Step 0 health gate reads
+      pod health, not whether each integration still loads). That gap is closed by
+      runbooks/lib/ha-integration-gate.py: auto-update.py snapshots every config
+      entry and entity BEFORE merging and compares AFTER the rollout, reloading a
+      failed entry once via the non-restarting endpoint; a regression (entry no
+      longer loaded, entity newly unavailable or gone) reverts the batch, and an
+      unreadable snapshot means the PR is not merged at all. Minor and major bumps
+      stay in the PLAN lane: a minor changes or removes integrations on purpose and
+      needs the plan's backup + release-note review (recorder schema migration makes
+      a revert after start unsafe, and G3s holds a bumped schema constant). The
+      direct-bump lane has no post-apply hook, so coverage.py routes an HA bump WITHOUT
+      a Renovate PR to PLAN. security_ref: F-07517014
   - match: "*mcr.microsoft.com/playwright*"
     reason: >-
       HELD 2026-10-20. The ninth-banner CI runner image ships a Playwright
@@ -629,16 +686,6 @@ deny:
       every "E2E smoke (@ci)" run (missing chromium_headless_shell build). The
       image moves only together with the game repo's Playwright bump. Renovate
       updates for it are also disabled in .github/renovate.json5.
-  - match: "*opentelemetry-kube-stack*"
-    reason: >-
-      HELD 2026-10-12 (F-c01269d5). Chart 0.24.x ships a default-deny
-      NetworkPolicy for the operator whose egress cannot match node addresses
-      under Cilium, so the operator loses its API server and crash-loops; the
-      rollback then needs a Ready operator too, leaving the HelmRelease stuck in
-      RollbackFailed. Renovate keeps re-opening the bump, so the nightly would
-      re-poison itself. REMOVE THIS RULE only when a chart release is rendered
-      offline (helm template) and shown not to create that policy, or the policy
-      is disabled in values, and the bump goes through an attended window.
   - match: "otel/opentelemetry-collector-contrib"
     reason: >-
       HELD 2026-11-09. PR #500 (0.164.0 to 0.165.0) passed every auto-update gate

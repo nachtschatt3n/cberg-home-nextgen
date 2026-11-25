@@ -297,7 +297,7 @@ def main() -> int:
 
     # ── 6. wiring pins ──────────────────────────────────────────────────
     check("classify() actually calls structural_signal()",
-          "structural_signal(" in inspect.getsource(au.classify))
+          "structural_signal(" in inspect.getsource(au._classify))
     check("assign_lane() actually calls _direct_bump_structural_gate()",
           "_direct_bump_structural_gate(" in inspect.getsource(cov.assign_lane))
 

@@ -198,7 +198,7 @@ class DirectBumpBreakingGateTest(unittest.TestCase):
                     image_repo="ghcr.io/mealie-recipes/mealie")
 
     def test_breaking_signal_routes_a_safe_minor_to_plan(self):
-        cov.breaking_change_signal = lambda repo, tag: (
+        cov.breaking_change_signal = lambda repo, tag, *a, **k: (
             True, "breaking-change signal in release notes: HTTP_ALLOW_LIST")
         lane, reason, _ = cov.assign_lane(self._mealie(), POLICY, {}, [])
         self.assertEqual(lane, "PLAN", reason)
@@ -206,7 +206,7 @@ class DirectBumpBreakingGateTest(unittest.TestCase):
         self.assertIn("mealie-recipes/mealie", reason)   # names the repo it read
 
     def test_clean_notes_still_flow_to_auto(self):
-        cov.breaking_change_signal = lambda repo, tag: (False, "clean (release notes checked)")
+        cov.breaking_change_signal = lambda repo, tag, *a, **k: (False, "clean (release notes checked)")
         lane, reason, _ = cov.assign_lane(self._mealie(), POLICY, {}, [])
         self.assertEqual(lane, "AUTO", reason)
         self.assertNotIn("G3", reason)
@@ -218,20 +218,20 @@ class DirectBumpBreakingGateTest(unittest.TestCase):
         it until a human wrote a deny rule. Now: the repository resolved and no
         body came back -> PLAN, with the reason stated. The rate-limit guard
         lives in the NEXT test: a gate exception still passes through."""
-        cov.breaking_change_signal = lambda repo, tag: (False, "unverified (release notes unavailable)")
+        cov.breaking_change_signal = lambda repo, tag, *a, **k: (False, "unverified (release notes unavailable)")
         lane, reason, _ = cov.assign_lane(self._mealie(), POLICY, {}, [])
         self.assertEqual(lane, "PLAN", reason)
         self.assertIn("could not verify", reason)
 
     def test_renovate_pr_shortcut_is_not_double_gated(self):
         """auto-update.py applies G3 to PRs; the PR exit sits above this gate."""
-        cov.breaking_change_signal = lambda repo, tag: (True, "breaking")
+        cov.breaking_change_signal = lambda repo, tag, *a, **k: (True, "breaking")
         lane, reason, _ = cov.assign_lane(self._mealie(), POLICY, {"mealie": "999"}, [])
         self.assertEqual(lane, "AUTO")
         self.assertIn("Renovate PR #999", reason)
 
     def test_gate_failure_is_unverified_not_a_hold_and_not_a_clean_claim(self):
-        def boom(repo, tag):
+        def boom(repo, tag, *a, **k):
             raise RuntimeError("network")
         cov.breaking_change_signal = boom
         lane, reason, _ = cov.assign_lane(self._mealie(), POLICY, {}, [])
@@ -242,7 +242,7 @@ class DirectBumpBreakingGateTest(unittest.TestCase):
         """A component indexing several repos: the first repo that RESOLVES
         notes and says breaking wins, a repo with no notes does not mask it."""
         calls = []
-        def sig(repo, tag):
+        def sig(repo, tag, *a, **k):
             calls.append(repo)
             if repo == "memgraph/memgraph-mage":
                 return True, "breaking-change signal in release notes: x"
@@ -256,7 +256,7 @@ class DirectBumpBreakingGateTest(unittest.TestCase):
         self.assertIn("memgraph-mage", reason)
 
     def test_no_repository_stays_off_the_network(self):
-        def boom(repo, tag):
+        def boom(repo, tag, *a, **k):
             raise AssertionError("must not be called without a repository")
         cov.breaking_change_signal = boom
         lane, reason, _ = cov.assign_lane(

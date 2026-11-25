@@ -90,6 +90,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.resolve() / "lib"))
 import fast_lane  # noqa: E402  (shared with coverage.py — ONE definition of both fast lanes)
+import update_risk  # noqa: E402  (graded risk model — breaking evidence, protection, lanes)
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 REPO_ROOT = SCRIPT_DIR.parent
@@ -167,25 +168,88 @@ def _match_anywhere(dep, pat):
     return any(fnmatch.fnmatch(dep, g) for g in (pat, f"*{pat}", f"{pat}*", f"*{pat}*"))
 
 
-def policy_block(policy, dep, update_type):
-    """Return a reason string if a deny rule blocks (dep, update_type), else None."""
+def policy_rule(policy, dep, update_type):
+    """The deny rule that BLOCKS (dep, update_type), else None. First matching
+    rule decides (kept in lockstep with coverage.py::deny_rule_for)."""
     if policy.get("_deny_all"):
-        return "policy unavailable — deny-all fail-safe"
+        return {"reason": "policy unavailable — deny-all fail-safe"}
     for rule in policy.get("deny", []) or []:
         pat = rule.get("match", "")
         if not pat or not _match_anywhere(dep, pat):
             continue
         mx = rule.get("max")
-        if mx is None:
-            return rule.get("reason", f"blocked by deny rule {pat!r}")
-        # rule allows up to `mx`; block only if this update exceeds it
-        if RANK.get(update_type, 99) > RANK.get(mx, -1):
-            return f"{rule.get('reason','')} (allows ≤{mx}, this is {update_type})"
-        # Matched and permitted => decisive ALLOW; stop scanning. The first
-        # matching rule decides (2026-09-12). Kept in lockstep with
-        # coverage.py::deny_rule_for, whose docstring carries the reasoning.
+        if mx is None or RANK.get(update_type, 99) > RANK.get(mx, -1):
+            return rule
+        # Matched and permitted => decisive ALLOW; stop scanning.
         return None
     return None
+
+
+def policy_block(policy, dep, update_type):
+    """Return a reason string if a deny rule blocks (dep, update_type), else None."""
+    rule = policy_rule(policy, dep, update_type)
+    if rule is None:
+        return None
+    mx = rule.get("max")
+    if mx is None:
+        return rule.get("reason", f"blocked by deny rule {rule.get('match')!r}")
+    return f"{rule.get('reason','')} (allows ≤{mx}, this is {update_type})"
+
+
+def rule_lane(policy, dep, update_type):
+    """`lane:` of the blocking deny rule ('weekend-attended' | 'plan'), else None."""
+    rule = policy_rule(policy, dep, update_type)
+    if rule is None:
+        return None
+    return str(rule.get("lane") or "plan").lower()
+
+
+def rule_gate(policy, dep, update_type):
+    """Name of the POST-APPLY INTEGRATION GATE a matching deny rule requires for
+    updates it still ALLOWS (`post_apply_gate:`), else None. Unlike rule_lane this
+    reads the rule even when it does not block this update type."""
+    if policy.get("_deny_all"):
+        return None
+    for rule in policy.get("deny", []) or []:
+        pat = rule.get("match", "")
+        if pat and _match_anywhere(dep, pat):
+            return rule.get("post_apply_gate")
+    return None
+
+
+HA_GATE = SCRIPT_DIR / "lib" / "ha-integration-gate.py"
+
+
+def ha_gate_snapshot(path):
+    """(ok, detail): snapshot every HA config entry + entity state BEFORE a merge."""
+    rc, out, err = run([sys.executable, str(HA_GATE), "snapshot", "--out", str(path)], timeout=180)
+    return rc == 0, (out or err).strip()[-300:]
+
+
+def ha_gate_compare(path, settle=600):
+    """(ok, detail): compare AFTER the bump has rolled. Exit 1 = regression,
+    2 = unreadable: BOTH are not-ok (fail closed)."""
+    rc, out, err = run([sys.executable, str(HA_GATE), "compare", "--snapshot", str(path),
+                        "--settle", str(settle)], timeout=settle + 240)
+    return rc == 0, (out + err).strip()[-1500:]
+
+
+def digest_class(policy, dep):
+    """('stateless'|'stateful'|'unclassified', why) for a same-tag digest bump.
+    Stateful wins over stateless; anything unlisted is unclassified (=> PLAN)."""
+    dp = policy.get("digest_bumps") or {}
+    for e in dp.get("stateful") or []:
+        if _match_anywhere(dep, e.get("match", "")):
+            return "stateful", e.get("reason", "stateful engine")
+    n = fast_lane.norm_repo(dep)
+    forms = {n}
+    head, _, tail = n.partition("/")
+    if tail and ("." in head or ":" in head):
+        forms.add(tail)                      # drop a registry host
+    for g in dp.get("stateless") or []:
+        if str(g).strip().lower() in forms:  # EXACT, never substring
+            return "stateless", "stateless/idempotent image: a same-tag rebuild carries no data migration"
+    return "unclassified", "image not listed in policy digest_bumps — cannot tell whether a rebuild is data-bearing"
 
 
 # ── PR discovery + parse ─────────────────────────────────────────────────────
@@ -260,23 +324,85 @@ def list_renovate_prs():
 # `cur` is therefore UNKNOWN for shape (B); it is reported as such rather
 # than guessed, and nothing downstream gates on it (the safe/unsafe decision
 # comes from the PR's update-type LABEL, not from diffing cur→new).
+# Conventional-commit prefix Renovate puts in front of every title, with the
+# optional `!` it appends to a MAJOR (`feat(container)!: Update x ( 1 → 2 )`).
+_PREFIX_RE = re.compile(r"^\s*[\w-]+(?:\([^)]*\))?(?P<bang>!)?:\s*")
 _TITLE_RE = re.compile(
-    r"update\s+(?P<dep>.+?)\s+\(\s*(?P<cur>\S+)\s*(?:→|->|to)\s*(?P<new>\S+)\s*\)"
-)
+    r"update\s+(?P<dep>.+?)\s+\(\s*(?P<cur>\S+)\s*(?:→|->|to)\s*(?P<new>\S+)\s*\)",
+    re.IGNORECASE)
 _TITLE_BARE_RE = re.compile(
-    r"update\s+(?P<dep>\S+)\s+to\s+(?P<new>v?\d+(?:\.\d+)+[\w.+-]*)\s*$"
-)
+    r"update\s+(?P<dep>\S+(?:\s+\S+)??)(?:\s+docker\s+tag)?\s+to\s+"
+    r"(?P<new>v?\d+(?:\.\d+)+[\w.+-]*)\s*$", re.IGNORECASE)
+# A title that names a dep and NO version at all: `Update postgres`,
+# `update flate group (minor)`, `update python`. Renovate renders these for
+# grouped PRs and for a branch that spans several version lines.
+_TITLE_DEPONLY_RE = re.compile(
+    r"update\s+(?P<dep>.+?)(?:\s+\((?P<paren>[a-z, ]+)\))?\s*$", re.IGNORECASE)
+_DIGEST_RE = re.compile(r"^(?:sha256:)?[0-9a-f]{7,64}$")
+
+
+def _is_digest(v) -> bool:
+    """A bare hex digest prefix (Renovate renders `( 65a65fc → 63bb298 )` for a
+    same-tag rebuild)."""
+    return bool(_DIGEST_RE.match(str(v or "")))
+
+
+def _digest_pair(cur, new) -> bool:
+    """Both ends digests AND at least one contains an a-f letter, so a pair of
+    all-numeric build numbers is never mistaken for a rebuild (a real digest
+    prefix of 7 hex chars is all-numeric only ~1 time in 1500 per side)."""
+    return _is_digest(cur) and _is_digest(new) and bool(re.search(r"[a-f]", f"{cur}{new}"))
+
+
+def _is_grouped(dep: str) -> bool:
+    return bool(re.search(r"\bgroup\b", dep, re.IGNORECASE)) or "," in dep or " and " in dep.lower()
 
 
 def parse_pr(pr):
-    """Extract dep/cur/new + update_type. Returns dict or {'parse_error':...}."""
-    title = pr.get("title", "")
+    """Classify a Renovate title into dep/cur/new + the REAL update type.
+
+    Returns a dict with `dep`, `cur`, `new`, `update_type` plus flags:
+      cur_known   False when Renovate did not render the current version
+      grouped     several deps behind one PR (never auto-applied blind)
+      versionless the title names no version at all (cur/new are "?")
+      digest_only both ends are image digests: a same-tag rebuild
+      breaking_marker  the `!` conventional-commit marker was present
+    `{'parse_error': ...}` ONLY when not even a dependency name can be read.
+
+    update_type precedence: `!` marker or a major label => major (a title the
+    old parser rejected as "unparseable" is, in fact, a MAJOR — a PLAN-lane
+    item with a precise reason); then minor/patch/security labels; then digest
+    (both ends digests); else unknown. A label that DISAGREES with a `!`
+    marker resolves to the more dangerous reading.
+    """
+    raw = pr.get("title", "") or ""
     labels = [l["name"].lower() for l in pr.get("labels", [])]
 
     def has(k):
         return k in labels or f"type/{k}" in labels
 
-    if has("major"):
+    pm = _PREFIX_RE.match(raw)
+    bang = bool(pm and pm.group("bang"))
+    title = raw[pm.end():] if pm else raw
+
+    m = _TITLE_RE.search(title)
+    cur = None
+    versionless = False
+    if m:
+        dep, cur, new = m.group("dep").strip(), m.group("cur"), m.group("new")
+    else:
+        m = _TITLE_BARE_RE.search(title)
+        if m:
+            dep, new = m.group("dep").strip(), m.group("new")
+        else:
+            m = _TITLE_DEPONLY_RE.search(title)
+            if not m or not m.group("dep").strip():
+                return {"parse_error": "title names no dependency (no `update <dep>` clause)"}
+            dep, new, versionless = m.group("dep").strip(), "?", True
+    grouped = _is_grouped(dep)
+    digest_only = (not versionless) and cur is not None and _digest_pair(cur, new)
+
+    if bang or has("major"):
         utype = "major"
     elif has("minor"):
         utype = "minor"
@@ -284,24 +410,10 @@ def parse_pr(pr):
         utype = "patch"
     elif has("security"):
         utype = "security"
+    elif digest_only:
+        utype = "digest"
     else:
         utype = "unknown"
-
-    m = _TITLE_RE.search(title)
-    cur = None
-    if m:
-        dep, cur, new = m.group("dep").strip(), m.group("cur"), m.group("new")
-    else:
-        m = _TITLE_BARE_RE.search(title)
-        if not m:
-            return {"parse_error": (
-                "title not in `update <dep> ( x → y )` nor "
-                "`update <dep> to <x.y.z>` shape"
-            )}
-        dep, new = m.group("dep").strip(), m.group("new")
-    # grouped PRs update several deps ("... group") — never auto-merge blind
-    if " group" in dep or "," in dep or "and " in dep:
-        return {"parse_error": f"grouped/multi-dep PR ({dep!r}) — manual"}
     return {
         "dep": dep,
         # None (not "") when Renovate did not render the current version, so
@@ -310,6 +422,10 @@ def parse_pr(pr):
         "cur_known": cur is not None,
         "new": new,
         "update_type": utype,
+        "grouped": grouped,
+        "versionless": versionless,
+        "digest_only": digest_only,
+        "breaking_marker": bang,
     }
 
 
@@ -467,7 +583,11 @@ def release_tags_between(checker, dep, cur_tag, new_tag, timeout: int = 15):
                      f"{cur_tag} and {new_tag}")
 
 
-def breaking_signal(checker, dep, new_tag, cur_tag=None):
+# items the graded reader looked at and CLEARED, keyed (dep, target) — evidence for the reason line
+CLEARED: dict = {}
+
+
+def breaking_signal(checker, dep, new_tag, cur_tag=None, utype=None, corpus=None, policy=None):
     """Return (list_of_breaking_notes, resolved_bool). Empty list + resolved=True
     means 'checked, clean'. resolved=False means notes couldn't be fetched.
 
@@ -511,7 +631,14 @@ def breaking_signal(checker, dep, new_tag, cur_tag=None):
             if not notes or not notes.get("body"):
                 continue
             any_resolved = True
-            for d in checker.detect_breaking_changes(notes["body"], "minor") or []:
+            # GRADED read (update_risk): a bare "Breaking Changes" heading lists
+            # nothing and does not hold; each listed item is acked / proven
+            # untouched / blocking. Only BLOCKING items are returned.
+            res = update_risk.assess_notes(
+                notes["body"], dep=dep, version=tag, utype=utype, corpus=corpus,
+                acks=(policy or {}).get("breaking_ack"))
+            CLEARED.setdefault((dep, new_tag), []).extend(res["cleared"])
+            for d in res["blocking"]:
                 found.append(d if tag == rel_tag else f"[skipped release {tag}] {d}")
         except Exception:
             continue
@@ -1178,28 +1305,106 @@ def ci_state(number, defined=None):
 
 
 # ── classify one PR ──────────────────────────────────────────────────────────
+_WAIT_GATES = {"draft", "age", "ci"}
+
+
+def _lane_default(r):
+    """Risk lane for a result that did not set one: safe => AUTO; transient
+    gates (cooldown, CI, draft) => WAIT; everything else => PLAN."""
+    if r.get("verdict") == "safe":
+        return "AUTO"
+    return "WAIT" if r.get("gate") in _WAIT_GATES else "PLAN"
+
+
 def classify(pr, policy, checker):
+    """Gate one PR. The result always carries `lane` (AUTO | AUTO-BACKUP-GATED |
+    PLAN | WEEKEND-ATTENDED | WAIT): the risk-model outcome, separate from the
+    verdict (`safe` merges at Step 0; every `hold` is routed by its lane)."""
+    r = _classify(pr, policy, checker)
+    r.setdefault("lane", _lane_default(r))
+    return r
+
+
+def prerelease_hold(parsed):
+    """Reason when the target is a pre-release in disguise, else None. Needs a
+    known current tag. Never raises (a failed lookup is NOT a hold: the digest-
+    twin oracle is best-effort; the arity check below is offline)."""
+    if not parsed.get("cur_known"):
+        return None
+    try:
+        cov = _load_coverage()
+        return cov.prerelease_target_hold({"current": parsed["cur"], "target": parsed["new"],
+                                           "kind": "image", "image_repo": parsed["dep"]})
+    except Exception:
+        return None
+
+
+def _app_names(files):
+    out = set()
+    for f in files or []:
+        parts = Path(f).parts
+        if len(parts) >= 4 and parts[0] == "kubernetes" and parts[1] == "apps":
+            out.add(parts[3].lower())
+    return out
+
+
+def _classify(pr, policy, checker):
     r = {"number": pr["number"], "title": pr["title"], "url": pr.get("url", "")}
     if pr.get("isDraft"):
         return {**r, "verdict": "hold", "gate": "draft", "reason": "draft PR"}
     parsed = parse_pr(pr)
     if "parse_error" in parsed:
-        return {**r, "verdict": "hold", "gate": "parse", "reason": parsed["parse_error"]}
+        return {**r, "verdict": "hold", "gate": "parse", "lane": "PLAN",
+                "reason": parsed["parse_error"] + " — fail-closed to the PLAN lane"}
+    utype = parsed["update_type"]
     r.update(dep=parsed["dep"], cur=parsed["cur"], new=parsed["new"],
-             cur_known=parsed.get("cur_known", True),
-             update_type=parsed["update_type"])
+             cur_known=parsed.get("cur_known", True), update_type=utype)
 
-    # G1 type
-    if parsed["update_type"] not in SAFE_TYPES:
-        return {**r, "verdict": "hold", "gate": "type",
-                "reason": f"update_type={parsed['update_type']} (only patch/minor auto-apply)"}
+    # G2 lane first: a rule's `lane:` decides WHERE a hold is routed (weekend
+    # attended for cluster core), whatever gate happens to fire first below.
+    # A digest bump is a same-tag rebuild: judged as a PATCH by the rule list.
+    rtype = "patch" if utype == "digest" else utype
+    rl = rule_lane(policy, parsed["dep"], rtype)
+    core = {"lane": "WEEKEND-ATTENDED"} if rl == "weekend-attended" else {}
+
+    if parsed.get("grouped"):
+        return {**r, **core, "verdict": "hold", "gate": "grouped",
+                "reason": (f"grouped/multi-dep PR ({parsed['dep']!r}, {utype}): one title, several "
+                           f"components — each member needs its own assessment; PLAN lane")}
+    # G1 type — a true major is a PLAN item with its own reason, not "unparseable"
+    if utype == "major":
+        span = (f"{parsed['cur']} → {parsed['new']}" if not parsed.get("versionless")
+                else "version span not rendered in the title")
+        why = " (`!` breaking marker)" if parsed.get("breaking_marker") else ""
+        blocked = policy_block(policy, parsed["dep"], utype)
+        return {**r, **core, "verdict": "hold", "gate": "type",
+                "reason": f"MAJOR update{why}: {span} — needs an assessed window plan"
+                          + (f"; {blocked}" if blocked and core else "")}
+    if parsed.get("versionless"):
+        return {**r, **core, "verdict": "hold", "gate": "versionless",
+                "reason": (f"title names no version span (update_type={utype}): a branch or group "
+                           f"spanning several version lines cannot be attributed to ONE target — PLAN lane")}
+    if utype == "digest":
+        return _classify_digest(pr, r, parsed, policy, checker, core)
+    if utype not in SAFE_TYPES:
+        return {**r, **core, "verdict": "hold", "gate": "type",
+                "reason": (f"update_type={utype}: no patch/minor/major label and not a same-tag digest "
+                           f"bump — cannot be graded; PLAN lane")}
     # G2 policy
-    blocked = policy_block(policy, parsed["dep"], parsed["update_type"])
+    blocked = policy_block(policy, parsed["dep"], utype)
     if blocked:
-        return {**r, "verdict": "hold", "gate": "policy", "reason": blocked}
+        return {**r, **core, "verdict": "hold", "gate": "policy", "reason": blocked}
+    # PRE-RELEASE ADMISSION (2026-11-25): a target that is a floating series
+    # pointer or byte-identical to an -rc/-beta tag is not GA, whatever label
+    # Renovate put on it. coverage.py has the same gate for the no-PR lane.
+    pre = prerelease_hold(parsed)
+    if pre:
+        return {**r, "verdict": "hold", "gate": "prerelease", "lane": "PLAN", "reason": pre}
+    files = None
     # G2 by FILE — consumer-specific holds on a shared depName (sure-redis)
     if any(rule.get("paths") for rule in (policy.get("deny") or [])):
-        blocked = path_block(policy, pr_files(pr["number"]))
+        files = pr_files(pr["number"])
+        blocked = path_block(policy, files)
         if blocked:
             return {**r, "verdict": "hold", "gate": "policy", "reason": blocked}
     # G5 age (before the expensive gates; cheap policy checks already passed)
@@ -1210,33 +1415,77 @@ def classify(pr, policy, checker):
         r["security_ref"] = g5["security_ref"]
     if held:
         return {**r, "verdict": "hold", "gate": held[0], "reason": held[1]}
-    # G3 breaking
-    notes, resolved = breaking_signal(
-        checker, parsed["dep"], parsed["new"],
-        cur_tag=parsed["cur"] if parsed.get("cur_known") else None)
+    # G3 breaking — GRADED (update_risk): listed items are acked / proven
+    # untouched / blocking; an empty "Breaking Changes" heading is not a signal.
+    if files is None:
+        files = pr_files(pr["number"])
+    corpus = update_risk.corpus_from_files(REPO_ROOT, files)
+    cur_tag = parsed["cur"] if parsed.get("cur_known") else None
+    notes, resolved = breaking_signal(checker, parsed["dep"], parsed["new"], cur_tag=cur_tag,
+                                      utype=utype, corpus=corpus, policy=policy)
     if notes:
-        return {**r, "verdict": "hold", "gate": "breaking",
-                "reason": "breaking-change signal in release notes: " + "; ".join(n[:120] for n in notes[:2])}
+        return {**r, "verdict": "hold", "gate": "breaking", "lane": "PLAN",
+                "reason": "breaking-change evidence in release notes: " + "; ".join(n[:140] for n in notes[:2])}
+    earned_note = ""
+    if not resolved:
+        # FAIL CLOSED (2026-11-25): notes unreadable => PLAN, never AUTO. Only a
+        # component with a clean unattended track record may land unverified.
+        ok, why = fast_lane.earned(policy, fast_lane.keys_for(None, [parsed["dep"]]))
+        if not ok:
+            return {**r, "verdict": "hold", "gate": "breaking-unverified", "lane": "PLAN",
+                    "reason": (f"release notes could not be read — an unverified bump is never "
+                               f"AUTO (earned autonomy: {why})")}
+        earned_note = f" (notes unreadable — EARNED autonomy: {why})"
     r["breaking_checked"] = resolved
+    cleared = CLEARED.get((parsed["dep"], parsed["new"])) or []
     # G3s structural — the DIFF, not the prose (F-ea1000ff)
-    s_sigs, s_resolved, s_note = structural_signal(
-        checker, parsed["dep"], parsed["new"],
-        cur_tag=parsed["cur"] if parsed.get("cur_known") else None)
+    s_sigs, s_resolved, s_note = structural_signal(checker, parsed["dep"], parsed["new"], cur_tag=cur_tag)
     if s_sigs:
-        return {**r, "verdict": "hold", "gate": "structural",
-                "reason": "structural change in the diff (migration/schema): "
-                          + "; ".join(str(x)[:120] for x in s_sigs[:2])}
+        names = {parsed["dep"].lower(), parsed["dep"].rsplit("/", 1)[-1].lower()} | _app_names(files)
+        prot, pwhy = update_risk.protection_for(policy, names, REPO_ROOT)
+        lane, lwhy = update_risk.decide_lane(migration=True, protection=prot, notes_read=True)
+        sig = "; ".join(str(x)[:120] for x in s_sigs[:2])
+        out = {**r, "verdict": "hold", "gate": "structural", "lane": lane,
+               "reason": f"structural change in the diff (migration/schema): {sig} — {lwhy}"}
+        if prot:
+            out["backup_gate"] = {k: prot.get(k) for k in ("volume", "dump_job", "restore_proof")}
+        return out
     r["structural_checked"] = s_resolved
     r["structural_note"] = s_note
     # G4 ci
     ok, detail = ci_state(pr["number"])
     if not ok:
         return {**r, "verdict": "hold", "gate": "ci", "reason": detail}
-    return {**r, "verdict": "safe", "gate": "-",
-            "reason": "patch/minor, not denied, no breaking signal, CI green"
+    return {**r, "verdict": "safe", "gate": "-", "lane": "AUTO",
+            "reason": "patch/minor, not denied, no breaking evidence, CI green"
                       + (f" [fast lane: security, {r['security_ref']}]" if r.get("security_ref") else "")
-                      + ("" if resolved else " (release notes unavailable — relied on CI + policy)")
+                      + earned_note
+                      + (f" [{len(cleared)} listed item(s) cleared: {cleared[0][:90]}]" if cleared else "")
                       + ("" if s_resolved else f" (diff not inspected for migrations/schema — {s_note})")}
+
+
+def _classify_digest(pr, r, parsed, policy, checker, core):
+    """Same-tag rebuild (`( abc1234 → def5678 )`). Classified by WHAT the image
+    is: stateless/idempotent => AUTO-eligible behind the normal cooldown + CI;
+    stateful engines and anything unlisted => PLAN with the precise reason."""
+    blocked = policy_block(policy, parsed["dep"], "patch")
+    if blocked:
+        return {**r, **core, "verdict": "hold", "gate": "policy", "reason": blocked}
+    cls, why = digest_class(policy, parsed["dep"])
+    if cls != "stateless":
+        return {**r, **core, "verdict": "hold", "gate": "digest", "lane": "PLAN",
+                "reason": (f"same-tag digest rebuild of a {cls} image — {why}; the tag does not move "
+                           f"but the binary under a live data dir does. PLAN lane")}
+    g5 = {}
+    held = age_gate(pr, parsed, policy, checker, info=g5)
+    r["fast_lane"] = "normal"
+    if held:
+        return {**r, "verdict": "hold", "gate": held[0], "reason": held[1]}
+    ok, detail = ci_state(pr["number"])
+    if not ok:
+        return {**r, "verdict": "hold", "gate": "ci", "reason": detail}
+    return {**r, "verdict": "safe", "gate": "-", "lane": "AUTO",
+            "reason": f"digest-only rebuild of a stateless image ({why}); cooldown elapsed, CI green"}
 
 
 # ── apply: merge, reconcile, health-gate, revert ─────────────────────────────
@@ -1691,12 +1940,16 @@ def main(argv=None):
     safe = [c for c in classified if c["verdict"] == "safe"]
     held = [c for c in classified if c["verdict"] == "hold"]
 
+    lane_counts: dict = {}
+    for c in classified:
+        lane_counts[c.get("lane", "PLAN")] = lane_counts.get(c.get("lane", "PLAN"), 0) + 1
     for c in classified:
         icon = "✅" if c["verdict"] == "safe" else "⏸️ "
         log(f"{icon} #{c['number']} {c.get('dep','?')} {c.get('cur','')}→{c.get('new','')} "
             f"[{c.get('update_type','?')}] — {c['reason']}")
 
     result = {"trigger": trigger, "apply": apply, "safe": safe, "held": held,
+              "lane_counts": lane_counts,
               "merged": [], "reverted": [], "health": None,
               # where the fast lanes read from — "unverified" means that lane
               # was OFF this run (fail-safe), not that it found nothing
@@ -1717,6 +1970,7 @@ def main(argv=None):
         if args.json:
             emit_json(result)
         log(f"\n== {len(safe)} safe / {len(held)} held · dry-run (no changes) ==")
+        log("   risk lanes: " + ", ".join(f"{k}={v}" for k, v in sorted(lane_counts.items())))
         return 0
 
     # ---- APPLY ----
@@ -1757,6 +2011,30 @@ def main(argv=None):
         if args.json:
             emit_json(result)
         return 1
+    # POST-APPLY INTEGRATION GATE (2026-11-25): a rule carrying `post_apply_gate:
+    # ha-integration` (Home Assistant) lets patches through ONLY with a pre-merge
+    # snapshot of every config entry + entity; no snapshot => that PR is not merged.
+    ha_snapshot = None
+    ha_prs = [c for c in plan if rule_gate(policy, c.get("dep", ""), c.get("update_type")) == "ha-integration"]
+    if ha_prs:
+        import tempfile
+        fd, ha_snapshot = tempfile.mkstemp(prefix="ha-gate-", suffix=".json")
+        os.close(fd)
+        ok_s, why_s = ha_gate_snapshot(ha_snapshot)
+        if not ok_s:
+            for c in ha_prs:
+                log(f"  !! #{c['number']} {c['dep']}: HA integration snapshot unavailable -- NOT merging ({why_s[-160:]})")
+                result.setdefault("skipped", []).append(
+                    {"number": c["number"], "dep": c["dep"], "reason": "HA integration snapshot unavailable"})
+            plan = [c for c in plan if c not in ha_prs]
+            ha_snapshot = None
+            if not plan:
+                log("== nothing left to merge after dropping un-snapshotted HA bump(s) ==")
+                if args.json:
+                    emit_json(result)
+                return 0
+        else:
+            log(f"-- HA integration snapshot taken: {why_s.splitlines()[-1] if why_s else 'ok'}")
     result["preexisting"] = list(baseline["report"].values())
     if baseline["keys"]:
         log(f"-- {len(baseline['keys'])} problem(s) already present BEFORE the apply "
@@ -1794,6 +2072,13 @@ def main(argv=None):
         result["health"] = {"ok": ok, "problems": problems,
                             "readings": info.get("readings"),
                             "preexisting": info.get("preexisting", [])}
+        if ok and ha_snapshot and any(c in merged for c in ha_prs):
+            ok_h, detail_h = ha_gate_compare(ha_snapshot)
+            result["ha_integration_gate"] = {"ok": ok_h, "detail": detail_h}
+            if not ok_h:
+                ok = False
+                problems = list(problems) + ["HA integration gate FAILED after the bump: " + detail_h[-600:]]
+                result["health"]["ok"], result["health"]["problems"] = False, problems
     except Exception as e:  # noqa: BLE001 -- FAIL CLOSED on any post-merge exception
         if not merged:
             raise

@@ -100,7 +100,7 @@ def main() -> int:
     fc2.fetch_release_notes = lambda o, r, t: ({"body": "BREAKING: x"} if t == "8.10.2" else None)
     notes, _ = au.breaking_signal(fc2, "redis", "8.10.2-alpine", cur_tag="8.10.1-alpine")
     check("a breaking note at the stripped tag is attributed to the TARGET (not a skipped release)",
-          notes == ["BREAKING"], repr(notes))
+          len(notes) == 1 and "BREAKING" in notes[0] and "skipped" not in notes[0], repr(notes))
 
     print("\nsure-redis hold:")
     rule = next((r for r in POLICY.get("deny", []) if r.get("match") == "*sure-redis*"), None)

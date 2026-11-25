@@ -2018,7 +2018,8 @@ def _g3_range_gate(item):
         # and saying so in the AUTO reason would imply a gate that did work.
         return "n/a", ""
     for tag in between:
-        is_breaking, note = breaking_change_signal(dep, tag)
+        is_breaking, note = breaking_change_signal(dep, tag, utype=item.get("type"),
+                                                   component=item.get("component"))
         if is_breaking:
             return "breaking", (f"release {tag} is SKIPPED by this hop "
                                 f"({cur} → {tgt}) and {note}")
@@ -2139,7 +2140,7 @@ def _with_channel_measurement(reason, item, heads):
             f"a measurement]")
 
 
-def breaking_change_signal(image_repo: str, tag: str, cur: str = None):
+def breaking_change_signal(image_repo: str, tag: str, cur: str = None, utype: str = None, component: str = None):
     """(is_breaking, note) — G3 for a candidate that has no Renovate PR.
 
     Reuses auto-update.py's engine so the two lanes agree on what "breaking"
@@ -2158,7 +2159,7 @@ def breaking_change_signal(image_repo: str, tag: str, cur: str = None):
     opposite — it holds on unknown — because the channel IS the hazard the
     `max:` rule was written for.
     """
-    key = f"{image_repo}:{tag}"
+    key = f"{image_repo}:{tag}:{utype}:{component}"
     # `cur` matters ONLY for a non-GitHub (DISTRO_RELEASE_NOTES) image, whose
     # fetcher reads the whole cur..tag range in one go; for everything else
     # the range is walked by _g3_range_gate() and the target read is keyed
@@ -2166,13 +2167,20 @@ def breaking_change_signal(image_repo: str, tag: str, cur: str = None):
     mod = _auto_update_module()
     distro = mod.distro_range_read(_load_checker(), image_repo) if cur else False
     if distro:
-        key = f"{image_repo}:{cur}:{tag}"
+        key = f"{image_repo}:{cur}:{tag}:{utype}:{component}"
     if key in _G3_CACHE:
         return _G3_CACHE[key]
     out = (False, "unverified (release notes unavailable)")
     try:
+        # GRADED read (lib/update_risk.py): the component's own manifests are the
+        # corpus a removal item is checked against; policy supplies dated acks.
+        corpus = None
+        if component:
+            corpus = mod.update_risk.corpus_for_component(REPO_ROOT, component)
         notes, resolved = mod.breaking_signal(_load_checker(), image_repo, tag,
-                                              cur_tag=cur if distro else None)
+                                              cur_tag=cur if distro else None,
+                                              utype=utype, corpus=corpus,
+                                              policy=load_policy())
         if notes:
             out = (True, "breaking-change signal in release notes: "
                          + "; ".join(str(n)[:100] for n in notes[:2]))
@@ -2445,16 +2453,20 @@ def _direct_bump_breaking_gate(item):
                 # `cur` only for a non-GitHub notes source (its fetcher reads
                 # the whole range); the two-argument call is kept otherwise.
                 if _is_distro_repo(r):
-                    is_b, note = breaking_change_signal(r, item["target"], item.get("current"))
+                    is_b, note = breaking_change_signal(r, item["target"], item.get("current"),
+                                                        utype=item.get("type"), component=dep)
                 else:
-                    is_b, note = breaking_change_signal(r, item["target"])
+                    is_b, note = breaking_change_signal(r, item["target"],
+                                                        utype=item.get("type"), component=dep)
                 if is_b:
                     return True, f"{note} [{r}]"
                 if "checked" in note:
                     last = (False, note)
             return last
         if item.get("kind") == "chart":
-            return breaking_change_signal(item.get("component") or "", item["target"])
+            return breaking_change_signal(item.get("component") or "", item["target"],
+                                          utype=item.get("type"),
+                                          component=item.get("component") or "")
         return False, "unverified (not an image or chart)"
     except Exception as e:  # never let a gate failure read as a pass CLAIM
         return False, f"unverified ({type(e).__name__})"
@@ -2498,6 +2510,40 @@ def _direct_bump_structural_gate(item):
         return False, "unverified (not an image or chart)"
     except Exception as e:
         return False, f"unverified ({type(e).__name__})"
+
+
+def _post_apply_gate(policy, item, key):
+    """The `post_apply_gate` of the first deny rule matching this item's
+    component key or image repos (the rule need not BLOCK this update type)."""
+    names = [key] + [str(r).lower() for r in _item_repos(item)]
+    for rule in policy.get("deny", []) or []:
+        pat = rule.get("match", "")
+        if pat and any(_match_anywhere(n, pat) for n in names):
+            return rule.get("post_apply_gate")
+    return None
+
+
+def risk_lane(item, lane, reason, policy):
+    """The graded-model outcome (lib/update_risk.py LANES, or WAIT for a transient
+    cooldown) for an item the legacy lane vocabulary placed. The legacy `lane`
+    is UNCHANGED — every existing consumer keeps working — this is the extra
+    axis the plan pipeline reads: AUTO | AUTO-BACKUP-GATED | PLAN |
+    WEEKEND-ATTENDED | WAIT | REBUILD."""
+    if lane == "AUTO":
+        return "AUTO"
+    if lane == "REBUILD":
+        return "REBUILD"
+    if lane == "HELD":
+        return "WAIT" if "cooldown" in str(reason) else "PLAN"
+    if lane == "PLAN":
+        if "AUTO-BACKUP-GATED:" in str(reason):
+            return "AUTO-BACKUP-GATED"
+        comp = str(item.get("component", "")).lower()
+        rule = deny_rule_for_item(policy, item, comp, item.get("type"))
+        if rule and str(rule.get("lane") or "").lower() == "weekend-attended":
+            return "WEEKEND-ATTENDED"
+        return "PLAN"
+    return "PLAN"
 
 
 def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
@@ -2547,6 +2593,14 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
     pr_num, pr_note = renovate_pr_for(prs, item, {comp, key})
     if not item.get("max_rule_fallback") and pr_num:
         return "AUTO", f"Renovate PR #{pr_num}", None
+    # POST-APPLY GATE rules (`post_apply_gate:` — Home Assistant): patches are
+    # allowed ONLY on the PR path, where auto-update.py snapshots the
+    # integrations before the merge and compares after. The direct-bump lane has
+    # no such hook, so a gated component without a Renovate PR is a PLAN item.
+    _gate = _post_apply_gate(policy, item, key)
+    if _gate and not pr_num and utype in ("patch", "minor"):
+        return "PLAN", (f"component requires the `{_gate}` post-apply integration gate, which "
+                        f"only the Renovate-PR apply path runs — a direct bump would skip it"), None
     dn = denied_for_item(policy, item, key, utype)
     if dn or utype == "major" or utype == "unknown":
         return "PLAN", _with_channel_measurement(
@@ -2620,9 +2674,22 @@ def assign_lane(item, policy, prs, plans, ar_holds=None, heads=None):
         if "checked" in g3 or earned_note:
             is_struct, s_note = _direct_bump_structural_gate(item)
             if is_struct:
+                import update_risk as _ur
+                _names = {comp} | {str(r).lower() for r in _item_repos(item)}
+                _names |= {n.rsplit("/", 1)[-1] for n in list(_names)}
+                _prot, _pwhy = _ur.protection_for(policy, _names, REPO_ROOT)
+                if _prot:
+                    # Lane stays PLAN for every existing consumer; the marker lets
+                    # `risk_lane` read AUTO-BACKUP-GATED and carries the gate.
+                    item["backup_gate"] = {k: _prot.get(k) for k in ("volume", "dump_job", "restore_proof")}
+                    return "PLAN", (f"G3 structural signal — {s_note}; AUTO-BACKUP-GATED: "
+                                    f"declared restore path (dump {_prot.get('dump_job')}; "
+                                    f"gate `{_prot.get('restore_proof')}` must PASS at runtime). "
+                                    f"Applied by the plan pipeline, never by a bare bump"), None
                 return "PLAN", (f"G3 structural signal — {s_note}; a migration or "
-                                f"schema change needs an assessed window, never the "
-                                f"unattended lane"), None
+                                f"schema change needs an assessed window and NO verified "
+                                f"dump + restore proof is declared for it ({_pwhy}) — "
+                                f"never the unattended lane"), None
         g3_note = "" if "checked" in g3 else f"; G3 {g3}"
         if s_note and "checked" not in s_note:
             g3_note += f"; G3-structural {s_note}"
@@ -3252,6 +3319,15 @@ def group_needs_plan(needs_plan, plans, sec_rows=None) -> list:
     return groups
 
 
+def _risk_counts(lanes):
+    out: dict = {}
+    for entries in lanes.values():
+        for e in entries:
+            k = e.get("risk_lane") or "PLAN"
+            out[k] = out.get(k, 0) + 1
+    return out
+
+
 def reconcile():
     policy = load_policy()
     actionable = parse_actionable()
@@ -3329,7 +3405,8 @@ def reconcile():
                 continue
             seen_app_template = True
             it = {**it, "component": "app-template (≈all app-template wrappers)"}
-        entry = {**it, "lane": lane, "reason": reason}
+        entry = {**it, "lane": lane, "reason": reason,
+                 "risk_lane": risk_lane(it, lane, reason, policy)}
         if drift:
             entry["drift"] = drift
             # Also as DATA, for readers that consume the record rather than the
@@ -3396,6 +3473,8 @@ def reconcile():
 
     return {
         "counts": {k: len(v) for k, v in lanes.items()},
+        # graded-model axis (update_risk.LANES + WAIT/REBUILD): see risk_lane()
+        "risk_lane_counts": _risk_counts(lanes),
         # B.5: why each AUTO item is in the lane (earned | security | normal),
         # and where the fast lanes read from — "unverified" = that lane was OFF.
         "fast_lane_counts": {fl: sum(1 for e in lanes["AUTO"] if e.get("fast_lane") == fl)

@@ -75,7 +75,7 @@ def stub_range(between, note="stubbed"):
 
 
 def stub_notes(breaking_tags):
-    cov.breaking_change_signal = lambda repo, tag: (
+    cov.breaking_change_signal = lambda repo, tag, *a, **kw: (
         (True, "breaking-change signal in release notes: update ng-select to v24, "
                "handle breaking changes") if tag in breaking_tags
         else (False, "clean (release notes checked)"))
@@ -172,7 +172,7 @@ def main() -> int:
     check("assign_lane() actually calls the range gate", "_g3_range_gate(" in src)
     check("...and routes its `breaking` verdict to PLAN",
           '"breaking"' in src and "PLAN" in src)
-    au_src = inspect.getsource(au.classify)
+    au_src = inspect.getsource(au._classify)
     check("the PR lane passes the CURRENT version into G3 too, so a merged PR "
           "cannot leapfrog a breaking release either",
           "cur_tag=" in au_src, au_src[au_src.find("breaking_signal"):][:120])
