@@ -1,7 +1,7 @@
 # SOP: Off-cluster log forwarding (Talos, UniFi, UNAS) and NAS availability alert
 
 > Description: How Talos kernel + service logs, UniFi controller syslog and UNAS syslog reach Elasticsearch through the edot-collector, and how an unreachable NAS pages.
-> Version: `2026.11.25` (date versioning, e.g. `2026.02.04`)
+> Version: `2026.11.25b` (date versioning, e.g. `2026.02.04`)
 > Last Updated: `2026-11-25`
 > Owner: `platform / SRE`
 
@@ -41,7 +41,7 @@ Status at 2026-11-25 (be precise about what is live):
 | Kernel feed (unchanged) | `edot-collector-talos-kmsg`, `192.168.55.18:5171/udp` |
 | ES stream | `logs-generic-default` |
 | Filters | `resource.attributes.service.name` = `talos-kernel`, `talos-<service>` (e.g. `talos-machined`), `unifi`, `unas`; `attributes.log_source` carries the same tag; node = `attributes.net.peer.ip` |
-| Source of truth | `kubernetes/apps/monitoring/edot-collector/app/{configmap,deployment,service-syslog}.yaml`, `kubernetes/bootstrap/talos/patches/global/machine-service-logging.yaml`, `kubernetes/apps/monitoring/kube-prometheus-stack/app/nas-availability-alerts.yaml` |
+| Source of truth | `kubernetes/apps/monitoring/edot-collector/app/{configmap,deployment,service-syslog,networkpolicy-syslog}.yaml`, `kubernetes/bootstrap/talos/patches/global/machine-service-logging.yaml`, `kubernetes/apps/monitoring/kube-prometheus-stack/app/nas-availability-alerts.yaml` |
 | Why UDP | Talos senders never reconnect after a sink restart over TCP; UDP survives collector restarts |
 | Why raw bodies for UniFi/UNAS | dialect (RFC3164/5424) is unknown until a sender exists; a parse failure must never drop a line. Body stays verbatim, query with `wildcard` on `body.text` (KEYWORD field) |
 
@@ -50,6 +50,7 @@ Status at 2026-11-25 (be precise about what is live):
 ## 3) Blueprints
 
 - Receivers: `udp_log/talos-service`, `udp_log/unifi`, `udp_log/unas` and pipelines `logs/talos-service`, `logs/unifi`, `logs/unas` in the collector ConfigMap.
+- Exporter `elasticsearch/syslog` (own 512 MiB queue) serves the three syslog pipelines; CiliumNetworkPolicy `edot-collector-ingress` restricts ingress (see "Ingress restriction" below section 10).
 - Resource attributes: processors `resource/talos-kernel`, `resource/unifi`, `resource/unas`, `transform/talos-service-name`.
 - Talos: `machine.logging.destinations` -> `udp://192.168.55.19:5173/`, `format: json_lines` (listed in `talconfig.yaml` global patches).
 
@@ -96,7 +97,7 @@ The brief's `talos.logging.kernel=udp://...` kernel arg is the older mechanism. 
 
 ### 4.4 UniFi (UDM) syslog - OPERATOR CLICK-PATH (not done)
 
-**Measured 2026-11-25 (read-only):** no evidence Wazuh receives UniFi syslog today. Zero alerts with a UniFi decoder/CEF origin in 9 days of Wazuh alert files, no conntrack entry from the UDM to 192.168.55.27:514 on any node, and no UDM-sourced packet seen by `cilium-dbg monitor` on all 3 nodes over 100 s. Wazuh archives are empty (archiving off), so below-alert-level events cannot be excluded, but a firewall-log feed would have produced alerts. Consequence: pointing the UDM at the collector displaces nothing that works. Still an operator click (no `unifictl` write path), and if Wazuh was intended to receive it, fix that separately.
+**Wazuh status:** a read-only measurement on 2026-11-25 found no evidence that Wazuh receives UniFi syslog today; detail is kept on the sweep findings record, not in this repo. Pointing the UDM at the collector therefore displaces nothing known to work, but it is still an operator click (no `unifictl` write path).
 
 Not changed by an agent: `unifictl` has no syslog-target read or write command (`unifictl local log settings` returns alert settings only), so the current target cannot be read back safely.
 
@@ -153,6 +154,7 @@ kubectl -n monitoring run syslog-e2e --rm -i --restart=Never --image=busybox:1.3
 | No `talos-*` docs after 4.2 | sender stalled or wrong IP | `talosctl -n <node> get machineconfig v1alpha1 -o yaml` shows the destination; same url-toggle recipe as kmsg |
 | kmsg silent on one node after a collector roll | known sender stall | url-toggle recipe in node-reboot-observability.md (operator) |
 | UniFi/UNAS lines missing though configured | UDP from VLAN 30 blocked, or wrong port | `tcpdump`-free check: send a synthetic line from the sender's VLAN |
+| Sender configured but nothing arrives | source address not allowed by `edot-collector-ingress` (silent drop) | `kubectl -n monitoring get cnp edot-collector-ingress`; add the sender's address to the policy |
 | `NasUnreachableMonitorAbsent` fires | Kuma monitor renamed/recreated (new id) or scrape gone | fix the monitor id in the rule file, check the Kuma ServiceMonitor |
 
 ---
@@ -177,7 +179,7 @@ curl -s localhost:9090/api/v1/rules | python3 -c "import sys,json;[print(r['name
 
 ## 10) Security Check
 
-- Receivers accept unauthenticated UDP only from the sources allowed by `edot-collector-ingress` (nodes, UDM, UNAS) (see Ingress restriction); the LB IP is on the LAN-only VLAN 55 pool and is not published through any Gateway. A spoofed sender can inject log lines (log integrity is therefore advisory, not forensic).
+- Receivers accept unauthenticated UDP only from the sources allowed by `edot-collector-ingress` (nodes, UDM, UNAS) (see Ingress restriction); the LB IP is on the LAN-only VLAN 55 pool and is not published through any Gateway. A spoofed or node-network (hostNetwork) sender can inject log lines (log integrity is therefore advisory, not forensic).
 - Talos service logs can contain operational detail; the stream stays inside the cluster ES.
 - No credentials in any committed file; the collector password still comes from `elasticsearch-es-elastic-user`.
 
