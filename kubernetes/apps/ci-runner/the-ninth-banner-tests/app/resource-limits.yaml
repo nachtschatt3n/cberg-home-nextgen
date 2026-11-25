@@ -37,9 +37,12 @@ spec:
     services: "0"
     services.loadbalancers: "0"
     services.nodeports: "0"
-    # 2 (was 0, owner 2026-11-25): the NAS workspace PVC the-ninth-banner-nas
-    # plus one spare (a replacement claim while the first is swapped).
-    persistentvolumeclaims: "2"
+    # Owner 2026-11-25: ONE claim, and only on cifs-ninth-banner (the NAS
+    # workspace PVC the-ninth-banner-nas); a claim on any other class (e.g. a
+    # share-root media class) is refused. Was 0, then 2 (8f482f2d7). To swap
+    # the claim, raise both to 2 for the swap and back.
+    persistentvolumeclaims: "1"
+    cifs-ninth-banner.storageclass.storage.k8s.io/persistentvolumeclaims: "1"
     # Device-plugin resources: one shared iGPU slot per browser shard (bounded by the
     # quota and the 5 iGPU slots per node), and NEVER the plugin's
     # all-device monitoring resources or the NPU, whatever a future template edit asks for.

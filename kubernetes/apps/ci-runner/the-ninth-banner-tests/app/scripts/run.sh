@@ -26,10 +26,12 @@ log() { echo "[ci $(date -u +%H:%M:%S) ${SUITE} ${SHARD}/${N}] $*"; }
 # NAS_SHARED (read-only) for inputs, NAS_SHARD_DIR for this shard's own output.
 # Rules for anything that writes there: only under NAS_SHARD_DIR, write to a
 # temporary name and rename when complete, nothing secret.
+# /nas/shared follows NAS=1; /nas/farm/<job> exists only with NAS_OUT=1.
+[ -d /nas/shared ] && export NAS_SHARED=/nas/shared
 nas_job=""
 if [ -n "${TNB_JOB:-}" ] && [ -d "/nas/farm/${TNB_JOB}" ]; then
     nas_job="/nas/farm/${TNB_JOB}"
-    export NAS_SHARED=/nas/shared NAS_SHARD_DIR="$nas_job/shard-${SHARD}"
+    export NAS_SHARD_DIR="$nas_job/shard-${SHARD}"
     mkdir -p "$NAS_SHARD_DIR" || { log "NAS: cannot create $NAS_SHARD_DIR"; unset NAS_SHARD_DIR; }
 fi
 

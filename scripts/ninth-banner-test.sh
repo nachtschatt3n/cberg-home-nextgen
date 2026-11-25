@@ -39,8 +39,8 @@
 # max 2000) per Job (split evenly over the shards; INDEX.txt lists what was
 # copied and what was over the cap).
 # NAS workspace (SOP §2f): NAS=1 (default for clipgate and the browser suites,
-# 0 for unit/sims) mounts /nas/shared read-only and /nas/farm/<job> read-write;
-# NAS_OUT=1 copies each shard's results to /nas/farm/<job>/shard-N/results,
+# 0 for unit/sims) mounts /nas/shared read-only; NAS_OUT=1 also mounts
+# /nas/farm/<job> read-write (only then is a farm folder created) and copies each shard's results to /nas/farm/<job>/shard-N/results,
 # which the Mac reads at TNB_NAS_MAC_DIR (default ~/nas-ai/ninth-banner)/farm/<job>/.
 # ---
 # Admission (docs/sops/ci-runner.md): the Job is created only once all parallel
@@ -154,6 +154,8 @@ case "$suite" in unit|sims) [ "$gpu" = 0 ] && lane=cpu || lane=browser ;;
     *) lane=browser ;; esac
 if [ "$lane" = cpu ]; then
     cpu_req="${CPU_REQ:-1}"; cpu_lim="${CPU_LIM:-1.5}"; mem_req=1Gi; mem_lim=3Gi; eph_req=2Gi; eph_lim=8Gi
+    # unit only: 4Gi (owner 2026-11-25; 3Gi was OOMKilled in the game's checks)
+    [ "$suite" = unit ] && mem_lim=4Gi
 else
     cpu_req="${CPU_REQ:-2}"; cpu_lim="${CPU_LIM:-4}"; mem_req=6Gi; mem_lim=10Gi; eph_req=8Gi; eph_lim=16Gi
 fi
@@ -170,6 +172,9 @@ nas_out="${NAS_OUT:-0}"
 [[ "$nas" =~ ^[01]$ && "$nas_out" =~ ^[01]$ ]] || { echo "NAS and NAS_OUT must be 0 or 1"; exit 2; }
 [ "$nas_out" = 0 ] || [ "$nas" = 1 ] || { echo "NAS_OUT=1 needs the NAS mount (NAS=1)"; exit 2; }
 nas_sed='/[[:space:]]#@nas$/d'; [ "$nas" = 1 ] && nas_sed='s/[[:space:]]*#@nas$//'
+# /nas/farm/<job> (read-write) only on request (owner 2026-11-25): NAS_OUT=1;
+# without it no farm folder is created. /nas/shared (ro) follows NAS.
+nasout_sed='/[[:space:]]#@nasout$/d'; [ "$nas_out" = 1 ] && nasout_sed='s/[[:space:]]*#@nasout$//'
 [[ "${SPECS:-}" =~ ^[A-Za-z0-9._/@\ -]*$ ]] || { echo "SPECS: spec paths only"; exit 2; }
 [[ "${PROJECT:-}" =~ ^[A-Za-z0-9_-]*$ ]] || { echo "PROJECT: a project name only"; exit 2; }
 [[ "${DRY_RUN:-0}" =~ ^[01]$ ]] || { echo "DRY_RUN must be 0 or 1"; exit 2; }
@@ -246,7 +251,7 @@ sed -e "s|__JOB_NAME__|tnb-probe|g" -e "s|__REF__|$sha|g" -e "s|__SUITE__|$suite
     -e "s|__EPH_REQ__|$eph_req|g" -e "s|__EPH_LIM__|$eph_lim|g" \
     -e "s|__CHROMIUM_ARGS__||g" -e "s|__SPECS__||g" -e "s|__PROJECT__||g" \
     -e "s|__CLIP_ARGS__||g" -e "s|__PICS__|0|g" -e "s|__PICS_ENV__||g" -e "s|__PICS_CAP_MB__|$pics_cap|g" \
-    -e "s|__NAS_OUT__|0|g" -e "$nas_sed" "$TEMPLATE" > "$probe"
+    -e "s|__NAS_OUT__|0|g" -e "$nas_sed" -e "$nasout_sed" "$TEMPLATE" > "$probe"
 # the pod's CPU request comes from the rendered pod spec, never hardcoded
 req_m="$(python3 "$admit" podreq "$probe")" || { rm -f "$probe"; echo "admission: cannot read the pod CPU request from the rendered template"; exit 3; }
 rm -f "$probe"
@@ -277,7 +282,7 @@ render() {
         -e "s|__EPH_REQ__|$eph_req|g" -e "s|__EPH_LIM__|$eph_lim|g" \
         -e "s|__CHROMIUM_ARGS__|$chromium_args|g" -e "s|__SPECS__|${SPECS:-}|g" -e "s|__PROJECT__|${PROJECT:-}|g" \
         -e "s|__CLIP_ARGS__|$clip_args|g" -e "s|__PICS__|$pics|g" -e "s|__PICS_ENV__|$pics_env|g" -e "s|__PICS_CAP_MB__|$pics_cap|g" \
-        -e "s|__NAS_OUT__|$nas_out|g" -e "$nas_sed" \
+        -e "s|__NAS_OUT__|$nas_out|g" -e "$nas_sed" -e "$nasout_sed" \
         "$TEMPLATE" > "$2"
 }
 if [ "${DRY_RUN:-0}" = 1 ]; then

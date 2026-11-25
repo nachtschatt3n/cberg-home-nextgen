@@ -180,9 +180,10 @@ spec:
             # the git credential). subPaths: this Job writes only its own
             # farm/<job>/ and reads shared/; the rest of the share is not
             # mounted. The trigger deletes the #@nas lines for NAS=0 (default
-            # for unit and sims). docs/sops/ci-runner.md §2f
+            # for unit and sims) and the #@nasout line unless NAS_OUT=1, so a
+            # farm folder exists only for Jobs that asked for one. docs/sops/ci-runner.md §2f
             - { name: nas, mountPath: /nas/shared, subPath: shared, readOnly: true }   #@nas
-            - { name: nas, mountPath: /nas/farm/__JOB_NAME__, subPath: farm/__JOB_NAME__ }   #@nas
+            - { name: nas, mountPath: /nas/farm/__JOB_NAME__, subPath: farm/__JOB_NAME__ }   #@nasout
       volumes:
         - name: work
           emptyDir: { sizeLimit: 10Gi }
