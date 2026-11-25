@@ -714,10 +714,13 @@ def l_dry_render(bash, tag):
         r, rows = dry("main", "sims", "8")
         check(tag + "dry render sims 8: Job 25800 / 38700 / 51600 s",
               [row[:3] for row in rows] == [(6, 2, 25800), (3, 3, 38700), (2, 4, 51600)])
+        # unit: 2 shards by default since 2026-11-25 (vitest --shard), both at once
         r, rows = dry("main", "unit")
-        check(tag + "dry render unit: 5400 s for both, as before", [row[:4] for row in rows] == [(1, 1, 5400, 5400)])
+        check(tag + "dry render unit: 2 shards in 1 round, 5400 s for both", [row[:4] for row in rows] == [(2, 1, 5400, 5400)])
+        r, rows = dry("main", "unit", "1")
+        check(tag + "dry render unit 1: the old single pod, 5400 s for both", [row[:4] for row in rows] == [(1, 1, 5400, 5400)])
         r, rows = dry("main", "unit", TNB_POD_DEADLINE="60")
-        check(tag + "dry render unit, TNB_POD_DEADLINE=60: pod 60 s, Job 5400 s", [row[:4] for row in rows] == [(1, 1, 5400, 60)])
+        check(tag + "dry render unit, TNB_POD_DEADLINE=60: pod 60 s, Job 5400 s", [row[:4] for row in rows] == [(2, 1, 5400, 60)])
         r, rows = dry("main", "sims", TNB_POD_DEADLINE="2h")
         check(tag + "TNB_POD_DEADLINE must be whole seconds (exit 2)", r.returncode == 2 and rows == [])
         check(tag + "dry render: no kubectl call, no results folder, gh only read",

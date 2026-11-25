@@ -6,7 +6,8 @@
 #   scripts/ninth-banner-test.sh --collect <job>
 #
 #   ref     commit sha (short ok), branch or tag of nachtschatt3n/the-ninth-banner
-#   shards  default: e2e/nightly/responsive/release 3, sims 6, unit 1 (forced),
+#   shards  default: e2e/nightly/responsive/release 3, sims 6, unit 2 (vitest
+#           --shard=i/N; shard 1 also runs the other check steps, story-check, test:ci),
 #           clipgate 6 (never more than the figures in --rigs)
 #   --collect <job>  re-attach the collector to a Job that was submitted from
 #           this Mac and whose collector stopped: reads <results>/<job>/job.yaml,
@@ -102,7 +103,7 @@ say() {
 submit() {
 ref_in="$1"; suite="$2"; shards="${3:-}"
 case "$suite" in
-    unit) shards=1 ;;
+    unit) shards="${shards:-2}" ;;   # sharded vitest since 2026-11-25 (owner); 1 = the old single pod
     e2e|nightly|responsive|release) shards="${shards:-3}" ;;
     sims) shards="${shards:-6}" ;;
     clipgate) shards="${shards:-6}" ;;

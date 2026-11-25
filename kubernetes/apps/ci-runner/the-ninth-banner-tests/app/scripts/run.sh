@@ -103,9 +103,36 @@ if [ "$rc" -eq 0 ]; then
     case "$SUITE" in
         unit)
             # GitHub "Check & test" minus the Docker build (the image has the browsers)
-            npm run check && npx tsx tools/story-check.ts && \
-                { if has_script test:ci; then npm run test:ci -- --no-build; fi; }
-            rc=$?
+            if [ "$N" -eq 1 ]; then
+                npm run check && npx tsx tools/story-check.ts && \
+                    { if has_script test:ci; then npm run test:ci -- --no-build; fi; }
+                rc=$?
+            else
+                # Sharded (owner 2026-11-25): the game's `check` runs the whole
+                # vitest suite as its `npm test` step (~80 min on 2 CPU). Every
+                # shard runs `npm test -- --shard=i/N`; shard 1 also runs the
+                # other `check` steps (read from package.json at this ref, in
+                # order), story-check and test:ci. No `npm test` step = refuse.
+                steps=$(node -e 'const p = (require("./package.json").scripts.check || "").split(" && ").map((s) => s.trim());
+if (!p.includes("npm test")) process.exit(3); console.log(p.filter((s) => s !== "npm test").join("\n"));') \
+                    || { log "unit sharding: this ref's check script has no 'npm test' step; run unit with 1 shard"; steps=""; rc=2; }
+                if [ "$rc" -eq 0 ] && [ "$SHARD" -eq 1 ]; then
+                    while IFS= read -r step; do
+                        [ -n "$step" ] || continue
+                        log "check step: $step"
+                        bash -c "$step" </dev/null || { rc=$?; log "check step failed (rc=$rc): $step"; break; }
+                    done <<<"$steps"
+                fi
+                if [ "$rc" -eq 0 ]; then
+                    log "vitest shard ${SHARD}/${N}"
+                    npm test -- --shard="${SHARD}/${N}"; rc=$?
+                fi
+                if [ "$rc" -eq 0 ] && [ "$SHARD" -eq 1 ]; then
+                    npx tsx tools/story-check.ts && \
+                        { if has_script test:ci; then npm run test:ci -- --no-build; fi; }
+                    rc=$?
+                fi
+            fi
             ;;
         e2e)
             need_gpu && need_split && { npm run test:e2e:shard -- "$SHARD" "$N" "${extra[@]}"; rc=$?; }
