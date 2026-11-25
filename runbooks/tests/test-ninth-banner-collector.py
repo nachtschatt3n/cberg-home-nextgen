@@ -853,6 +853,23 @@ def m_nas_fallback(bash, tag):
         r = farm.collect(bash)
         check(tag + "nas re-attach: the verdict from the saved log, the artifacts from the NAS",
               kinds(farm.summary()) == ["PASS"] and farm.has(1, "junit.xml") and r.returncode == 0)
+    # release: artifacts from the NAS, never a verdict (the commit status rests on the pods' own lines)
+    with tempfile.TemporaryDirectory() as tmp:
+        farm = Farm(tmp, 1, suite="release", parallelism=1, deadline=5400, pod_deadline=5400,
+                    job="tnb-release-gpu-0123456-1125120000", nas_out=1)
+        farm.nas_results(1, 0)
+        os.symlink("/etc/hosts", os.path.join(farm.nas, "farm", farm.job, "shard-1", "results", "link"))
+        farm.look(1, "NOTFOUND", [])
+        farm.collect(bash)
+        check(tag + "nas: release never takes a verdict from the NAS copy", kinds(farm.summary()) == ["job gone"])
+    with tempfile.TemporaryDirectory() as tmp:
+        farm = Farm(tmp, 1, suite="clipgate", parallelism=1, deadline=5700, pod_deadline=5400, job=clip, nas_out=1)
+        farm.nas_results(1, 0)
+        os.symlink("/etc/hosts", os.path.join(farm.nas, "farm", farm.job, "shard-1", "results", "link"))
+        farm.look(1, "NOTFOUND", [])
+        farm.collect(bash)
+        check(tag + "nas: symlinks in the NAS copy are dropped",
+              farm.has(1, "junit.xml") and not os.path.lexists(os.path.join(farm.dest, "shard-1", "link")))
     # a Job without NAS_OUT=1 never reads the NAS folder
     with tempfile.TemporaryDirectory() as tmp:
         farm = Farm(tmp, 1, suite="clipgate", parallelism=1, deadline=5700, pod_deadline=5400, job=clip, nas_out=0)

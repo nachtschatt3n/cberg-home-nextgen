@@ -610,6 +610,7 @@ nas_copy() {   # <shard number> -> 0 when the NAS copy is now in <dest>/shard-N
     tmp="$dest/shard-$n.nas.tmp"
     rm -rf "$tmp"
     if ! cp -R "$src" "$tmp" 2>/dev/null; then rm -rf "$tmp"; say "  (copy of shard $n artifacts from the NAS failed: $src)"; return 1; fi
+    find "$tmp" -type l -exec rm -f {} + 2>/dev/null || true   # pod-written: no links out of the folder
     rm -rf "$dest/shard-$n"; mv "$tmp" "$dest/shard-$n"
     if [ -d "$dest/shard-$n/pics" ]; then
         mkdir -p "$dest/pics"; rm -rf "$dest/pics/shard-$n"; mv "$dest/shard-$n/pics" "$dest/pics/shard-$n"
@@ -620,6 +621,8 @@ nas_copy() {   # <shard number> -> 0 when the NAS copy is now in <dest>/shard-N
 # A shard with no pod left: its verdict from the NAS copy's exit-code, if there is one.
 nas_result() {   # <index> -> 0 when a line was recorded
     local i="$1" n=$(( $1 + 1 )) rc line verdict
+    # never for release: its commit status must rest on what the pods reported themselves
+    [ "$suite" != release ] || return 1
     [ "$nas_on" = 1 ] && [ -f "$nas_dir/shard-$n/results/exit-code" ] || return 1
     rc="$(tr -d ' \n' < "$nas_dir/shard-$n/results/exit-code" 2>/dev/null || true)"
     [[ "$rc" =~ ^[0-9]+$ ]] || return 1
@@ -682,6 +685,7 @@ grow() {
     read -r _ delta _ _ <<<"$verdict"
     [[ "$delta" =~ ^[0-9]+$ ]] && [ "$delta" -gt 0 ] || { grow_skip "unreadable admission answer"; return 0; }
     new=$(( cur + delta ))
+    [ "$new" -le "$grow_cap" ] || { grow_skip "admission answer above the cap of $grow_cap"; return 0; }
     if k patch job -n "$NS" "$job" --type=merge -p "{\"spec\":{\"parallelism\":$new}}" >/dev/null 2>&1; then
         say "  parallelism $cur -> $new (room freed)"; parallelism="$new"; grow_note=""
     else
