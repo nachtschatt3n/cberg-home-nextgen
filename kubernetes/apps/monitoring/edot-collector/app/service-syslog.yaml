@@ -1,0 +1,33 @@
+---
+# LoadBalancer for the non-pod log feeds (Talos service logs, UniFi syslog, UNAS
+# syslog) into the edot-collector. Separate from edot-collector-talos-kmsg on
+# purpose: the kmsg feed has a known sender-stall hazard on service changes, so
+# its Service is left untouched. All UDP (senders do not reconnect after a sink
+# restart). 192.168.55.19 was verified free 2026-11-25 (no Service, no ICMP
+# reply, inside the Cilium pool block .14-.199).
+# Ports: 5173 Talos service logs, 5174 UniFi (UDM) syslog, 5175 UNAS syslog.
+# SOP: docs/sops/log-forwarding.md
+apiVersion: v1
+kind: Service
+metadata:
+  name: edot-collector-syslog
+  namespace: monitoring
+  annotations:
+    lbipam.cilium.io/ips: "192.168.55.19"
+spec:
+  type: LoadBalancer
+  selector:
+    app: edot-collector
+  ports:
+    - name: talos-service
+      port: 5173
+      targetPort: 5173
+      protocol: UDP
+    - name: unifi-syslog
+      port: 5174
+      targetPort: 5174
+      protocol: UDP
+    - name: unas-syslog
+      port: 5175
+      targetPort: 5175
+      protocol: UDP

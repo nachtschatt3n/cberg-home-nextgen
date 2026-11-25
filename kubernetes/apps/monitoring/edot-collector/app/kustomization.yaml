@@ -8,6 +8,7 @@ resources:
   - ./deployment.yaml
   - ./service.yaml
   - ./service-talos-kmsg.yaml
+  - ./service-syslog.yaml
   - ./kmsg-heartbeat-daemonset.yaml
   - ./servicemonitor.yaml
   - ./httproute.yaml

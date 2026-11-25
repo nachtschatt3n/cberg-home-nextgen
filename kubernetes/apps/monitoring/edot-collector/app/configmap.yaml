@@ -67,12 +67,72 @@ data:
           - type: add
             field: attributes.log_source
             value: talos-kernel
+      # Talos SERVICE logs (machined, apid, kubelet, etcd, containerd, ...) shipped
+      # by machine.logging.destinations (json_lines over UDP) -- the sibling of
+      # the kmsg feed above, on its own port. UDP for the same reason as kmsg:
+      # Talos senders do not reconnect after a sink restart. Each record is
+      # {"msg","talos-level","talos-service","talos-time"}; net.peer.ip names the
+      # node. Source of truth: kubernetes/bootstrap/talos/patches/global/
+      # machine-service-logging.yaml. SOP: docs/sops/log-forwarding.md.
+      udp_log/talos-service:
+        listen_address: 0.0.0.0:5173
+        add_attributes: true
+        operators:
+          - type: json_parser
+            parse_from: body
+            parse_to: attributes
+            on_error: send_quiet
+          - type: move
+            from: attributes.msg
+            to: body
+            on_error: send_quiet
+          - type: add
+            field: attributes.log_source
+            value: talos-service
+      # UniFi (UDM) remote syslog. RAW on purpose: the body is kept verbatim (no
+      # rfc3164/rfc5424 parse) because the sender's dialect is not pinned until the
+      # operator enables forwarding, and a parse failure must never drop a line.
+      # Filter: resource.attributes.service.name = unifi.
+      udp_log/unifi:
+        listen_address: 0.0.0.0:5174
+        add_attributes: true
+        operators:
+          - type: add
+            field: attributes.log_source
+            value: unifi
+      # UNAS (NAS) syslog, same raw treatment. Filter: service.name = unas.
+      udp_log/unas:
+        listen_address: 0.0.0.0:5175
+        add_attributes: true
+        operators:
+          - type: add
+            field: attributes.log_source
+            value: unas
 
     processors:
       memory_limiter:
         check_interval: 1s
         limit_mib: 400
         spike_limit_mib: 100
+      # Distinguishing RESOURCE attributes for the non-pod log feeds, so ES queries
+      # filter on resource.attributes.service.name like they do for pods.
+      resource/talos-kernel:
+        attributes:
+          - {key: service.name, value: talos-kernel, action: upsert}
+      resource/unifi:
+        attributes:
+          - {key: service.name, value: unifi, action: upsert}
+      resource/unas:
+        attributes:
+          - {key: service.name, value: unas, action: upsert}
+      # talos-machined / talos-apid / talos-kubelet / ... taken from each record.
+      transform/talos-service-name:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - set(resource.attributes["service.name"], Concat(["talos", log.attributes["talos-service"]], "-")) where log.attributes["talos-service"] != nil
+              - set(resource.attributes["service.name"], "talos-service") where log.attributes["talos-service"] == nil
       filter/drop-malformed-json-log-keys:
         error_mode: ignore
         log_conditions:
@@ -360,11 +420,23 @@ data:
           exporters: [elasticsearch/logs]
         logs/talos-kernel:
           receivers: [udp_log/talos-kernel]
-          processors: [memory_limiter, batch]
+          processors: [memory_limiter, resource/talos-kernel, batch]
           # shares logs-generic-default (proven path); filter by
           # attributes.log_source=talos-kernel + attributes.net.peer.ip (node).
           # count/hwerrors also taps this stream to emit the hardware-error metric.
           exporters: [elasticsearch/logs, count/hwerrors]
+        logs/talos-service:
+          receivers: [udp_log/talos-service]
+          processors: [memory_limiter, transform/talos-service-name, batch]
+          exporters: [elasticsearch/logs]
+        logs/unifi:
+          receivers: [udp_log/unifi]
+          processors: [memory_limiter, resource/unifi, batch]
+          exporters: [elasticsearch/logs]
+        logs/unas:
+          receivers: [udp_log/unas]
+          processors: [memory_limiter, resource/unas, batch]
+          exporters: [elasticsearch/logs]
         metrics/hwerrors:
           receivers: [count/hwerrors]
           processors: [batch]

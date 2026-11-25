@@ -53,6 +53,15 @@ spec:
             - name: talos-kmsg
               containerPort: 5171
               protocol: UDP
+            - name: talos-svc
+              containerPort: 5173
+              protocol: UDP
+            - name: unifi-syslog
+              containerPort: 5174
+              protocol: UDP
+            - name: unas-syslog
+              containerPort: 5175
+              protocol: UDP
             - name: hwmetrics
               containerPort: 8889
               protocol: TCP
