@@ -24,9 +24,9 @@ Status at 2026-11-25 (be precise about what is live):
 | Feed | Collector side | Sender side |
 |---|---|---|
 | Talos kernel (kmsg) | LIVE since 2026-06-29, udp 5171 on .18 | LIVE (`KmsgLogConfig`). `talos.logging.kernel` kernel arg is NOT needed and must not be added |
-| Talos service logs | LIVE, udp 5173 on .19 | PREPARED in git, NOT applied to nodes |
-| UniFi syslog | LIVE, udp 5174 on .19 | NOT configured (operator action, section 4.4) |
-| UNAS syslog | LIVE, udp 5175 on .19 | NOT configured (operator action, section 4.5) |
+| Talos service logs | LIVE, udp 5173 on .19 | LIVE on all 3 nodes (hot-applied 2026-11-25, no reboot, etcd term unchanged) |
+| UniFi syslog | LIVE, udp 5174 on .19 | NOT configured (operator action, section 4.4). Measured: Wazuh receives nothing from the UDM either |
+| UNAS syslog | LIVE, udp 5175 on .19 | Unconfirmed that the product can forward syslog (section 4.5) |
 | NAS unreachable alert | n/a | LIVE (rules in Prometheus) |
 
 ---
@@ -75,7 +75,7 @@ machine:
 4. Commit, push, wait for the Recreate roll (~45 s), then repeat the control readings.
 5. A collector restart can stall a Talos kmsg sender (see node-reboot-observability.md). After the roll check per-node kmsg last-seen; `TalosKernelLogsMissingFromNode` catches a silent node after 3 h.
 
-### 4.2 Talos service logs: hot apply (no reboot) - OPERATOR / ATTENDED
+### 4.2 Talos service logs: hot apply (no reboot) - DONE 2026-11-25 (kept for re-runs)
 
 Prerequisite: the collector receiver on 5173 is live (it is).
 
@@ -96,6 +96,8 @@ The brief's `talos.logging.kernel=udp://...` kernel arg is the older mechanism. 
 
 ### 4.4 UniFi (UDM) syslog - OPERATOR CLICK-PATH (not done)
 
+**Measured 2026-11-25 (read-only):** no evidence Wazuh receives UniFi syslog today. Zero alerts with a UniFi decoder/CEF origin in 9 days of Wazuh alert files, no conntrack entry from the UDM to 192.168.55.27:514 on any node, and no UDM-sourced packet seen by `cilium-dbg monitor` on all 3 nodes over 100 s. Wazuh archives are empty (archiving off), so below-alert-level events cannot be excluded, but a firewall-log feed would have produced alerts. Consequence: pointing the UDM at the collector displaces nothing that works. Still an operator click (no `unifictl` write path), and if Wazuh was intended to receive it, fix that separately.
+
 Not changed by an agent: `unifictl` has no syslog-target read or write command (`unifictl local log settings` returns alert settings only), so the current target cannot be read back safely.
 
 Known: the repo documents UniFi -> Wazuh at `192.168.55.27:514/udp` (`security/wazuh-syslog-unifi`). UniFi's SIEM/activity-log target is a SINGLE host:port, so pointing it at the collector DISPLACES Wazuh. Decide first:
@@ -107,6 +109,8 @@ Known: the repo documents UniFi -> Wazuh at `192.168.55.27:514/udp` (`security/w
 Click-path (menu names vary by Network app version, verify on screen): UniFi Network -> Settings -> Control Plane -> Integrations -> Activity Logging / SIEM Server (or "Remote Logging" for device logs) -> enable Syslog, server `192.168.55.19`, port `5174`, UDP -> Apply. The UDM reaches the LB IP via inter-VLAN routing, which is fine for log volume.
 
 ### 4.5 UNAS syslog - OPERATOR (not done, not verified)
+
+2026-11-25 research (two web searches, standard mode): no Ubiquiti documentation or release note found that mentions syslog/remote-logging for UNAS / UniFi Drive. The UNAS is NOT adopted in the Network app (not in `unifictl local device list`), so the Network app's site remote-logging cannot cover it. Treat forwarding as unsupported until someone sees a setting in the UniFi Drive console; the NAS signal is the `NasUnreachable*` alerts.
 
 I could not verify that the UNAS product exposes a syslog-forwarding setting. Check the UNAS/UniFi Drive console Settings for a system-log or remote-syslog entry; if present, target `192.168.55.19` port `5175` UDP. If the product has none, the honest options are: (a) no NAS logs in ES, the alert below is the signal; (b) SSH + rsyslog forwarding, which is unsupported and typically wiped by firmware updates, so do not do it without an explicit decision.
 
@@ -173,11 +177,16 @@ curl -s localhost:9090/api/v1/rules | python3 -c "import sys,json;[print(r['name
 
 ## 10) Security Check
 
-- Receivers accept unauthenticated UDP from anywhere that can reach 192.168.55.19; the LB IP is on the LAN-only VLAN 55 pool and is not published through any Gateway. A spoofed sender can inject log lines (log integrity is therefore advisory, not forensic).
+- Receivers accept unauthenticated UDP only from the sources allowed by `edot-collector-ingress` (nodes, UDM, UNAS) (see Ingress restriction); the LB IP is on the LAN-only VLAN 55 pool and is not published through any Gateway. A spoofed sender can inject log lines (log integrity is therefore advisory, not forensic).
 - Talos service logs can contain operational detail; the stream stays inside the cluster ES.
 - No credentials in any committed file; the collector password still comes from `elasticsearch-es-elastic-user`.
 
 ---
+
+### Ingress restriction and queue isolation (2026-11-25)
+
+- `edot-collector-ingress` (CiliumNetworkPolicy, `networkpolicy-syslog.yaml`): there is no default-deny anywhere else in the cluster, so selecting the collector makes ITS ingress default-deny. Allowed: `cluster` entity to TCP 4317/4318/8888/8889/13133; `host`/`remote-node` to UDP 5171/5173-5175; UDM address to 5174; UNAS address to 5175. Ordinary pods cannot reach 5173-5175. Validated live: from a normal pod 0 of 9 synthetic lines landed, from a hostNetwork pod 9 of 9; Talos senders and OTLP kept ingesting. UDM/UNAS CIDR rules are unproven until those senders exist (if SNATed to a node IP they still match the node rule).
+- `elasticsearch/syslog` exporter with its own 512 MiB persistent queue serves the talos-service, unifi and unas pipelines (kernel feed unchanged). Queue budget total ~6.75 GiB of the 10 GiB PVC.
 
 ## 11) Rollback Plan
 
@@ -198,4 +207,5 @@ curl -s localhost:9090/api/v1/rules | python3 -c "import sys,json;[print(r['name
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.11.25b | 2026-11-25 | Talos service logs applied; Wazuh/UniFi measurement; UNAS finding; ingress CNP; syslog exporter queue |
 | 2026.11.25 | 2026-11-25 | Initial: collector receivers, Talos service-log patch (prepared), NAS alert, operator click-paths |
