@@ -77,16 +77,11 @@ conflicts_with:
 - frigate-reolink-go2rtc-flv
 - helm-drift-detection
 - icloud-drive-fleet-2.3.0
-- immich-machine-learning-3.4.1
-- immich-server-3.4.1
-- iobroker-v12.0.0-digest-005ba9c
 - kube-prometheus-stack-93.3.0
 - longhorn-1.13.0
 - mac-tooling-pins-2026-11
 - multus-macvlan-foundation
-- music-assistant-skill-b1ef33a
 - n8n-2.47.7
-- nextcloud-9.4.3
 - nextcloud-mcp-0.206.0
 - nextcloud-mcp-0.211.1
 - nocodb-2026.10.1
@@ -98,8 +93,9 @@ conflicts_with:
 - postgres-fleet-18.7-bookworm
 - redis-fleet-8.10.3
 - talos-power-tuning-ab
-- tube-archivist-elasticsearch-9.5.5
-- unpoller-5.9.5
+- nextcloud-12.0.2   # plan-refine 2026-11-26: successor of a dead ref
+- nextcloud-9.4.5   # plan-refine 2026-11-26: successor of a dead ref
+# plan-refine 2026-11-26: dead ref(s) immich-machine-learning-3.4.1, immich-server-3.4.1, iobroker-v12.0.0-digest-005ba9c, music-assistant-skill-b1ef33a, nextcloud-9.4.3, tube-archivist-elasticsearch-9.5.5, unpoller-5.9.5 pruned
 capability_change: true
 rollback_class: git-revert
 security_ref: F-f3f2af15
@@ -221,6 +217,8 @@ sops_refs:
 - docs/sops/unifi-device-firmware.md
 - docs/sops/maintenance-windows.md
 generated: '2026-11-16'
+needs_replan: "premise-fail: etcd-elections-24h-below-6: got '{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[{\"metric\":{},\"value\":[179; offsite-restic-seed-not-running: got '1', want exactly '0'"
+needs_replan_since: "2026-11-26"
 ---
 
 # Talos Linux node roll — v1.14.1 → v1.14.6, then Kubernetes v1.36.0 → v1.36.6

@@ -61,8 +61,6 @@ depends_on: []
 conflicts_with:
   # Same consumers / same files (reciprocity must be added on their side, see the §6 hand-off list):
   - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
-  - tube-archivist-0.6.0                # restarts deployment/tube-archivist, the consumer of leg 5; its gates call into it
-  - tube-archivist-elasticsearch-9.5.5  # same app, same namespace; never stack on a broker swap
   - nextcloud-mcp-0.203.0               # blocked — every gate calls into Nextcloud; lists nextcloud-redis restart
   - nextcloud-mcp-0.204.0               # blocked — successor chain of 0.203.0, same
   - bitnamilegacy-exit-nextcloud-db     # blocked — quiesces Nextcloud; never stack a session-store restart on a DB cutover
@@ -85,6 +83,7 @@ conflicts_with:
   # Dropped as dead refs (2026-11-02): authentik-web-max-requests (status executed), nextcloud-9.4.1 and nextcloud-whiteboard-2.1.2 (executed 2026-10-29, no plan file),
   # nextcloud-mcp-0.202.1 (superseded by 0.203.0), talos-linux-1.14.4 (superseded by 1.14.5), immich-server-3.3.5 /
   # paperless-db-13.0.2 / bitnamilegacy-exit-nextcloud-redis (executed), coredns-1.48.1 (superseded, successor has no file).
+  # plan-refine 2026-11-26: dead ref(s) tube-archivist-0.6.0, tube-archivist-elasticsearch-9.5.5 pruned
 exclusive: false
 capability_change: false                # same-behaviour patch bump on all nine; nextcloud-redis auth/config untouched
 autonomy_override: human-gated          # nextcloud-redis logs every user out and the sure-worker restart needs a human
@@ -245,6 +244,8 @@ premises:
       ENDING in it.
     run: grep -c "8\.10\.2-alpine$" kubernetes/apps/office/affine/app/redis-helmrelease.yaml
     expect_matches: '(?s)^1$'
+needs_replan: "premise-fail: open-webui-app-is-a-0-12-release: got 'ghcr.io/open-webui/open-webui:v0.13.0', want match /^ghcr\\.io/open-webui/open-webui:v; open-webui-chart-current: got '17.5.0', want exactly '17.0.0'"
+needs_replan_since: "2026-11-26"
 ---
 
 # redis fleet to 8.10.3-alpine (all 9 consumers; supersedes redis-fleet-8.10.2)

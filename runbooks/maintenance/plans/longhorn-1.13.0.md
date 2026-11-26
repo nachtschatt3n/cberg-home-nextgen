@@ -57,7 +57,6 @@ conflicts_with:
   # plans/ removed; executed jellyfin-config-rwo-migration dropped (executed now:2026-10-23).
   - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
   - redis-fleet-8.10.3   # reciprocal, 2026-11-02 sweep 2ad957af (sun-attended:2026-11-29)
-  - tube-archivist-elasticsearch-9.5.5   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # - grafana-chart-14.4.0  (dead ref: plan retired; removed 2026-11-16 by plan review)   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   - etcd-timeouts-5000-500           # reciprocal; that plan is status: blocked, window null (2026-11-06). NOT a
                                       # dependency of this plan: both read etcd/control-plane health, so never the
@@ -79,6 +78,7 @@ conflicts_with:
   # 2026-11-06: removed edot-collector-0.164.0 - plan executed in the NOW run 2026-11-06 and retired (dead ref in maintenance-plan.py --validate).
   - icloud-drive-fleet-2.3.0          # reciprocal: Recreate detaches/re-attaches two Longhorn volumes, incl.
                                       # icloud-docker-andrea-session (pvc-f6ec0213-…), ruled detached in §2.2a
+  # plan-refine 2026-11-26: dead ref(s) tube-archivist-elasticsearch-9.5.5 pruned
 exclusive: true                       # the storm fans out to 25 dependents (+ transitive); any other
                                       # plan's Flux-Ready gate in the same slot reads false-red, and
                                       # a one-way storage change must not share attribution.

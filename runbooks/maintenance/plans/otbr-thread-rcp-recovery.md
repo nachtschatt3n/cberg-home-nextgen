@@ -37,13 +37,12 @@ depends_on: []
 conflicts_with:
   - otbr-0.4.0                        # rolls the SAME Deployment; its premises (otbr-available, live imageID) need a
                                       #   running pod. Run THIS first, never in the same slot
-  - music-assistant-skill-b1ef33a     # reciprocal (it names this plan): same namespace, HA-adjacent restarts
-  - iobroker-v12.0.0-digest-005ba9c   # home-automation roll on the same night muddies attribution of gate 4.6/4.8
   - talos-linux-1.14.6                # node roll reboots k8s-nuc14-03 (otbr's pinned node) and flushes host netfilter
   - talos-linux-1.14.5                # same (sun-attended:2026-11-22)
   - talos-power-tuning-ab             # node-level apply-config on the same node set; keep attribution clean
   - longhorn-1.13.0                   # reciprocal: scale-up ATTACHES otbr-data; never during a Longhorn engine move
   - kube-prometheus-stack-93.3.0      # reciprocal: gate 4.4 reads Prometheus (the window's instrument is shared infra)
+  # plan-refine 2026-11-26: dead ref(s) music-assistant-skill-b1ef33a, iobroker-v12.0.0-digest-005ba9c pruned
 exclusive: false
 security_ref: null
 capability_change: false              # restores the behaviour that ran 2026-09-03 .. 2026-10-28; the core flash adds no

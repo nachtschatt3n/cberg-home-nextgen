@@ -63,8 +63,6 @@ touches:
 depends_on: []
 conflicts_with:
   - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
-  - tube-archivist-0.6.0   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
-  - tube-archivist-elasticsearch-9.5.5   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   - frigate-reolink-go2rtc-flv   # reciprocal, added 2026-10-26 (sweep a1721200 plan review)
   # 2026-10-25: pruned dead refs flux-fleet-0.60.0, chart-patches-coredns-reloader-blackbox, app-template-5.2.1, penpot-chart-1.10.0 (executed/retired)
   # RESOLVED 2026-09-27: talos-1.14.1 EXECUTED (cad2bd3f; 3-node roll in sun-attended:2026-09-27) and retired together with the superseded talos-1.14.0 -- refs removed per the dead-ref convention.
@@ -95,6 +93,7 @@ conflicts_with:
   # traccar-6.16.0 REMOVED 2026-09-29: executed green in nightly:2026-09-29 (3a943035), plan retired (1a40b257)
   - otel-operator-0.23.0              # reciprocal (it names this plan); HR bump -> attribution
   # REMOVED 2026-11-03 (plan retired cdf1cf53, chart live via 5aa609d5; dead ref) - otel-operator-0.26.1              # same HelmRelease family; reciprocal added 2026-11-02 (plan-reviewer)
+  # plan-refine 2026-11-26: dead ref(s) tube-archivist-0.6.0, tube-archivist-elasticsearch-9.5.5 pruned
 security_ref: null
 capability_change: false              # no user-visible behaviour changes; Flux reconciles the
                                       # same manifests, it merely starts to notice edits

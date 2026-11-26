@@ -237,6 +237,8 @@ generated: "2026-11-18"               # derived from the executed+retired cilium
                                       # (`git show 3505ff896^:runbooks/maintenance/plans/cilium-1.20.4.md`), with
                                       # its retire-commit correction (disableWait) baked in and every number
                                       # re-measured live. No older open cilium plan existed to supersede.
+needs_replan: "premise-fail: etcd-leader-changes-24h-below-6: got '0', want exactly '1'; lb-services-are-14: got '15', want exactly '14'; l2-leases-old-format-14: got '15', want exactly '14'"
+needs_replan_since: "2026-11-26"
 ---
 
 # cilium chart 1.20.4 → 1.20.5 (CNI datapath — plan lane by standing rule)

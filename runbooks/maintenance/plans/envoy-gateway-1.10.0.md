@@ -59,12 +59,12 @@ conflicts_with:                       # built 2026-11-07 from every non-terminal
   - etcd-timeouts-5000-500            # apiserver restarts confound the rolls, the CRD apply and the §4 gates (blocked)
   - redis-fleet-8.10.3                # it already declares a conflict with the 1.40.x pin plans (public-edge reads)
   # - open-webui-0.13.0  (dead ref: plan retired; removed 2026-11-16 by plan review)                 # same: its §4.6 reads the app through envoy-external
-  - tube-archivist-0.6.0              # shared gateway/envoy-external; its reachability gate reads through the edge
   - kube-prometheus-stack-93.3.0      # draft, exclusive; rolls Prometheus = the instrument §2.5/§4.2/§4.5 read (lists this plan already)
   - coredns-1.50.5                    # draft; cluster DNS roll confounds the §3.6 DNS gate and the dig checks (does NOT list this plan yet, §6.4)
-  - immich-server-3.4.1               # draft; its §4.8/§4.9 gates read through envoy-external (lists this plan already)
-  - nextcloud-9.4.3                   # draft; public-edge gates (status.php, /login) read through envoy-external (lists this plan already)
   - postgres-fleet-18.7-bookworm      # draft; lists this plan already (13 forward-auth policies live in this data plane)
+  - nextcloud-12.0.2   # plan-refine 2026-11-26: successor of a dead ref
+  - nextcloud-9.4.5   # plan-refine 2026-11-26: successor of a dead ref
+  # plan-refine 2026-11-26: dead ref(s) tube-archivist-0.6.0, immich-server-3.4.1, nextcloud-9.4.3 pruned
 capability_change: true               # Not a same-behaviour bump. The data plane crosses an Envoy MINOR (1.40: post-quantum
                                       # X25519MLKEM768 joins the default ECDH curves on every TLS handshake, event-driven drain,
                                       # container-aware worker count, removed runtime guards), and EG 1.10 changes live behaviour

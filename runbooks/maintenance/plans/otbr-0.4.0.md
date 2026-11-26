@@ -93,6 +93,8 @@ sops_refs:
   - docs/sops/verification-contents-not-shape.md
 generated: "2026-10-14"
 revised: "2026-10-23"
+needs_replan: "premise-fail: live-image-is-v0.4.0: command produced NO output \u2014 cannot satisfy expect_contains='sha256:790f21835c86e0d9b9071f; otbr-available: command produced NO output \u2014 cannot satisfy expect_exact='1'"
+needs_replan_since: "2026-11-26"
 ---
 
 # otbr v0.4.0 -- fix-forward: restore the four inverted env pins

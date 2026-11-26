@@ -68,6 +68,8 @@ premises:
     why: "The RTSP CSeq desync on the Reolink record path is the symptom this plan targets. Measured 2026-10-26: 143 lines/h (62 kitchen, 81 living_room)."
     run: kubectl logs deploy/frigate -n home-automation -c frigate --since=6h | grep -c -i 'cseq'
     expect_matches: '^[1-9]\d*$'
+needs_replan: "premise-fail: frigate-image-0.18.2: got 'ghcr.io/blakeblackshear/frigate:0.18.3', want exactly 'ghcr.io/blakeblackshear/frigat"
+needs_replan_since: "2026-11-26"
 ---
 
 # frigate-reolink-go2rtc-flv: move the two Reolink E330s onto the go2rtc HTTP-FLV restream

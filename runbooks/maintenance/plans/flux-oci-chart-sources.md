@@ -50,17 +50,7 @@ touches:
     - "fluxinstance/flux spec.kustomize.patches (Stage 10 — emptyDir sizeLimit)"
   shared: [flux-sources, cni-adjacent, cert-manager, storage/longhorn, monitoring, authentik, public-dns]
 depends_on: []
-conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, etcd-timeouts-5000-500, talos-linux-1.14.5, longhorn-1.13.0, descheduler-0.37.0, anythingllm-1.19, tube-archivist-0.6.0, frigate-reolink-go2rtc-flv, redis-fleet-8.10.3, postgres-digest-refresh-2026-11]   # RE-PLANNED 2026-11-03 against every open plan's frontmatter; 2026-11-06: edot-collector-0.164.0 removed (executed, retired)
-  # 2026-11-03: dropped dead refs otel-operator-0.23.0 (executed out-of-band 0e976cf5), jellyfin-12.1 (superseded by the 12.2 plan, itself later superseded), paperless-db-13.0.2 (executed a99794cc).
-  # 2026-11-03: ADDED flux-fleet-0.62.0/0.62.1 (draft: flux-operator + flux-instance HRs and fluxinstance/flux, which Stage 10 patches; each lists this plan),
-  #   etcd-timeouts-5000-500 (touches flux-system and perturbs the apiserver every Flux apply talks to; sun 11-08), authentik-2026.8.5 (sat 11-21; stage 5 switches authentik's chart source),
-  #   descheduler-0.37.0 / anythingllm-1.19 / jellyfin-3.7.0 (same HelmReleases as stage 4 / 5 / 7), edot-collector-0.164.0 (monitoring: the instrument our verification reads).
-  # Window ordering around sun-attended:2026-12-13 (all measured 2026-11-03): talos-linux-1.14.5 sun 11-22 (restarts source-controller; three weeks earlier, so a cold cache is long gone),
-  #   redis-fleet-8.10.3 sun 11-29, helm-drift-detection sat 11-28 (P1 warn: adds spec.driftDetection to every HelmRelease, so stage 3's helmrelease.yaml edits must be rebased on it),
-  #   envoy-proxy-config-distroless-v1.39.4 sun 12-06 (a week earlier; its own gateway restart gate must be finished and green before this plan starts), longhorn-1.13.0 sun 11-15.
-  #   The same-night kube-prometheus-stack bump rule: none is windowed on 12-13 today; if one is slotted, move it — stage 3 verification reads Prometheus for the node-feature and gpu series.
-  # 2026-11-03: REMOVED otel-operator-0.26.1 (plan retired cdf1cf53; the chart bump landed in 5aa609d5, live pin 0.26.1) -- dead ref. The same dead ref was removed from five sibling plans' conflicts_with.
-  # About twenty other plans list this plan reciprocally only because it edits HelmReleases; none shares a surface with the stage that runs on 12-13 and they are not repeated here.
+conflicts_with: [flux-reconciler-impersonation, helm-drift-detection, etcd-timeouts-5000-500, talos-linux-1.14.5, longhorn-1.13.0, descheduler-0.37.0, anythingllm-1.19, frigate-reolink-go2rtc-flv, redis-fleet-8.10.3, postgres-digest-refresh-2026-11]   # plan-refine 2026-11-26: dead ref(s) tube-archivist-0.6.0 pruned
 security_ref: null                     # F-0e310ef2 (plan-section, not security) RESOLVED 102ec800; no security finding drives this plan
 capability_change: true                # Stage 9 gives Flux chart-provenance ENFORCEMENT it
                                        # does not have today (spec.verify fails CLOSED), and

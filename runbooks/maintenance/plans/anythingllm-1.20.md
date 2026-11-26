@@ -116,6 +116,8 @@ sops_refs:
   - docs/sops/backup.md
   - docs/sops/verification-contents-not-shape.md
 generated: "2026-11-18"
+needs_replan: "premise-fail: live-image-still-1.19.0: got 'mintplexlabs/anythingllm:1.20.0', want exactly 'mintplexlabs/anythingllm:1.19.0'; manifest-pin-still-1.19.0: got '0', want exactly '1'; running-pod-is-1.19.0-digest: got 'docker.io/mintplexlabs/anythingllm@sha256:3e2b7bc8eb0f73a130fc575f1372bd4e7189e399a63"
+needs_replan_since: "2026-11-26"
 ---
 
 # anythingllm: 1.19.0 -> 1.20.0 (digest-pinned GA for the floating `1.20`)

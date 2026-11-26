@@ -153,6 +153,8 @@ sops_refs:
   - docs/sops/monitoring.md
   - docs/sops/verification-contents-not-shape.md
 generated: "2026-10-05"
+needs_replan: "premise-fail: soak-24h-recorded: command failed (rc=2): grep: /private/tmp/powerab-talos-power-tuning-ab/stats-soak-24h.jso; baseline-files-present: got '0', want exactly '6'; node02-excluded-from-ci: got '0', want exactly '1'"
+needs_replan_since: "2026-11-26"
 ---
 
 # Talos power tuning A/B: EPP and PL2/tau on nuc14-01/03, winner to all three nodes

@@ -84,6 +84,8 @@ premises:
     why: "The change lands via the redisinsight Kustomization; it must be Ready before the push."
     run: kubectl get kustomization redisinsight -n databases -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
     expect_exact: "True"
+needs_replan: "channel-unresolved: channel-unresolved: coverage could not confirm 3.10.2 is the stable-channel head"
+needs_replan_since: "2026-11-26"
 ---
 
 # redisinsight 3.8.0 -> 3.10.0
