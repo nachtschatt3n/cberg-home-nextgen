@@ -98,11 +98,19 @@ spec:
               # Size to the POD, not the node: without these the engine read
               # os.cpu_count()=18 on the node, started 8 workers that each load
               # every model, and was OOMKilled at 8Gi (2026-11-27).
-              MEMORYKEEPER_CPUS: "6"
-              MEMORYKEEPER_WORKERS: "4"
-              MEMORYKEEPER_HELPER_MB: "1500"
-              # Must stay consistent with the 12Gi memory limit below.
-              MEMORY_MACHINE_MEMORY_MB: "12288"
+              #
+              # 2026-11-28 raised for throughput: with 12288/1500 the engine's
+              # helper cap (MEMORY_MB*0.3/HELPER_MB) allowed only 2 helpers
+              # (~100 photos/min). Measured helper RSS ~1.1-1.15 GB, pod peak 2.9Gi.
+              MEMORYKEEPER_CPUS: "8"
+              MEMORYKEEPER_WORKERS: "6"
+              MEMORYKEEPER_HELPER_MB: "1200"
+              # DELIBERATELY ABOVE the 14Gi limit: it is the input to the helper
+              # cap formula (24576*0.3/1200 = 6), not a real budget. Real use is
+              # ~6 x 1.15 GB + main ~= 8.5 GB, under the limit. If the engine ever
+              # starts sizing caches/batches from this value, lower it to match
+              # the limit and accept fewer helpers.
+              MEMORY_MACHINE_MEMORY_MB: "24576"
               MEMORYKEEPER_BIND: "0.0.0.0"
               MEMORYKEEPER_ALLOWED_HOSTS: "memory-machine.${SECRET_DOMAIN}"
               MEMORYKEEPER_TRUST_PROXY: "1"
@@ -131,13 +139,18 @@ spec:
             env: *env
             resources:
               requests:
+                # cpu request stays 500m: k8s-nuc14-03 is at 96% CPU REQUESTED
+                # (16.3 of 17 cores), so a 2-core request would leave this pod
+                # (and the nightly sort pod) Pending. Requests do not cap usage —
+                # with no limit the pod still bursts into the node's idle cores.
                 cpu: 500m
                 memory: 3Gi
                 gpu.intel.com/i915: 1
               limits:
-                # No CPU limit (repo norm). 12Gi = MEMORY_MACHINE_MEMORY_MB; 8Gi
-                # OOMKilled during the first UI-started sort (2026-11-27).
-                memory: 12Gi
+                # No CPU limit (repo norm). 8Gi OOMKilled during the first
+                # UI-started sort (2026-11-27). 14Gi = ~8.5 GB expected peak with 6
+                # helpers plus headroom (see MEMORY_MACHINE_MEMORY_MB above).
+                memory: 14Gi
                 gpu.intel.com/i915: 1
             probes:
               # /api/ping needs an allowed Host header; localhost is accepted
@@ -206,17 +219,21 @@ spec:
               - |
                 set -eu
                 python -m memorykeeper init /out --source /photos
-                python -m memorykeeper scan /out --workers 4
+                python -m memorykeeper scan /out --workers 6
                 python -m memorykeeper pick /out
                 python -m memorykeeper copy /out
             env: *env
             resources:
               requests:
+                # cpu request stays 500m: k8s-nuc14-03 is at 96% CPU REQUESTED
+                # (16.3 of 17 cores), so a 2-core request would leave this pod
+                # (and the nightly sort pod) Pending. Requests do not cap usage —
+                # with no limit the pod still bursts into the node's idle cores.
                 cpu: 500m
                 memory: 3Gi
                 gpu.intel.com/i915: 1
               limits:
-                memory: 12Gi
+                memory: 14Gi
                 gpu.intel.com/i915: 1
             securityContext: *gpu
 
