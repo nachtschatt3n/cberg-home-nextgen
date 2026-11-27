@@ -1,14 +1,14 @@
 # SOP: Storage Safety — Destructive Operations on Persistent Storage
 
 > Description: Pre-flight, guardrails, and recovery procedure for destructive PVC/PV operations on shared-filesystem (CIFS/SMB/NFS) and Longhorn storage classes.
-> Version: `2026.10.04`
-> Last Updated: `2026-10-04`
+> Version: `2026.11.27`
+> Last Updated: `2026-11-27`
 > Owner: `cluster-ops`
 
 | Field | Value |
 |---|---|
-| **Version** | 2026.10.04 |
-| **Last Updated** | 2026-10-04 |
+| **Version** | 2026.11.27 |
+| **Last Updated** | 2026-11-27 |
 | **Owner** | cluster-ops |
 | **Applies to** | All `kubectl delete pvc/pv` actions, all StorageClass changes, any teardown of stateful workloads |
 
