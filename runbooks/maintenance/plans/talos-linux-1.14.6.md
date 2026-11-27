@@ -5,7 +5,7 @@ supersedes: talos-linux-1.14.5
 pr: 248
 kind: infra
 current: v1.14.1
-target: v1.14.6 + Kubernetes 1.36.6
+target: v1.14.7   # RETARGETED IN PLACE 2026-11-27 from v1.14.6 (plan_id kept; §1.0). Kubernetes Phase K is DEFERRED out of this plan (§3.2)
 update_type: patch
 risk: high
 est_duration_min: 180
@@ -31,18 +31,15 @@ touches:
   - runbooks/auto-update-policy.yaml
   - .mise.toml
   - kubernetes/bootstrap/talos/clusterconfig/
-  - 'node images: kube-apiserver/-controller-manager/-scheduler:v1.36.6 (cri ns) + siderolabs/kubelet:v1.36.6 (system ns) pre-pulled on all 3 nodes in Phase A (§3.7b, ~140 MB/node)'
-  - 'machine config (all 3 nodes, Phase K, NO_REBOOT): apiserver/controller-manager/scheduler/kubelet/kube-proxy image fields only'
-  - clusterrolebinding/system-bootstrap-approve-node-client-csr, system-bootstrap-node-bootstrapper, system-bootstrap-node-renewal, system:talos-nodes; clusterrole/system:talos-nodes; secret/kube-system/bootstrap-token-*; configmap/kube-system/kubeconfig-in-cluster (Phase K annotation-only SSA adoption, §1.5)
   - node/k8s-nuc14-01
   - node/k8s-nuc14-02
   - node/k8s-nuc14-03
-  - 'etcd (3 members, 3.7.1 -> 3.7.3: Talos-default image, NOT pinned in machine config — re-measured 2026-10-31; storage stays 3.7.0; defrag §3.8.0 + snapshot §3.8a)'
-  - all Longhorn replicas (158 = 79 volumes x numberOfReplicas 2, 2026-10-31)
+  - 'etcd (3 members, 3.7.1 -> 3.7.4: Talos v1.14.7 DefaultEtcdVersion, NOT pinned in machine config — re-measured 2026-10-31; live 3.7.1 x3 2026-11-27; storage stays 3.7.0; defrag §3.8.0 + snapshot §3.8a)'
+  - all Longhorn replicas (154 = 77 volumes x numberOfReplicas 2, re-counted live 2026-11-27)
   - imageupdateautomation (every main-pushing one NOT already suspended — 4 of 6 on 2026-10-31; enumerated live at §2.0b)
   - 'kernel sysctl kernel.modprobe: '''' -> /sbin/modprobe on every node (v1.14.5 Talos default, §1.2; measured empty 2026-10-31)'
   - 'backup/offsite restic Jobs (offsite-seed-*, nightly offsite-backup-apps/-core): must be finished (none Running) before ANY drain, section 2.3; never suspended (a suspended Job counts its deleted pod as failed and backoffLimit is 0); premise offsite-restic-seed-not-running'
-  - kernel 6.18.58 -> 6.18.63 on every node (the only node-visible delta of v1.14.5 -> v1.14.6 besides Go 1.26.11 and Flannel 0.28.10, which we do not run)
+  - kernel 6.18.51 -> 6.18.65 on every node (v1.14.7; the v1.14.6 -> v1.14.7 node-visible delta is kernel 6.18.63 -> 6.18.65, etcd 3.7.3 -> 3.7.4, libseccomp 2.6.2, kernel MEMORY_FAILURE on, logind D-Bus broker fix; Flannel 0.28.11 is inert, we run Cilium)
   shared:
   - apiserver
   - flux
@@ -111,7 +108,6 @@ finding_refs:
 - F-2cb2dbc9
 - F-e8bb3113
 - F-3625b9f6
-review: null
 status: draft
 window: null
 premises:
@@ -120,33 +116,33 @@ premises:
   run: kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.osImage}'
   expect_exact: Talos (v1.14.1) Talos (v1.14.1) Talos (v1.14.1)
 - id: etcd-protocol-3.7
-  why: Pre-window etcd is one server_version group, 3.7.x, count 3 (3.7.1 x3 re-read 2026-10-31 via talosctl etcd status). A mixed cluster (a half-done earlier roll) prints a second group and fails. After this roll the same query must read 3.7.3 x3 (§4.3 CONTENTS ASSERTION 6). Reads Prometheus through the apiserver service proxy.
+  why: Pre-window etcd is one server_version group, 3.7.x, count 3 (3.7.1 x3 re-read 2026-10-31 via talosctl etcd status; live 2026-11-27 count 3 at 3.7.1). A mixed cluster (a half-done earlier roll) prints a second group and fails. After this roll the same query must read 3.7.4 x3 (§4.3 CONTENTS ASSERTION 6). Reads Prometheus through the apiserver service proxy.
   run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count%20by%20(server_version)%20(etcd_server_version)'
   expect_matches: ^\{"status":"success","data":\{"resultType":"vector","result":\[\{"metric":\{"server_version":"3\.7\.[0-9]+"\},"value":\[[0-9.]+,"3"\]\}\]\}\}$
 - id: etcd-elections-24h-below-6
-  why: 'Section 2.3 NO-GO line as a premise: < 6 leader changes in 24h with no reboot (>= 6 = etcd already unstable). LIVE 2026-11-16: 41.01 in 24h (152-154 in 7d; F-27a3f024, F-33873912); re-read 07:05Z 54.02 - this premise FAILS TODAY, which is the proof it can fail. WINDOW-START ONLY: after the canary reboots this premise can never pass again, so it is never a per-node gate (section 2.2 node mode is). Regex dry-tested: "5.0017" and "0" pass; "6", "12.3", "41.014" fail. Must PASS at the operator GO AND again at window start. Never weaken, widen or skip.'
-  run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=max(increase(etcd_server_leader_changes_seen_total%5B24h%5D))'
-  expect_matches: '"value":\[[0-9.]+,"[0-5](\.[0-9]+)?"\]'
+  why: 'Section 2.2 start-mode NO-GO line as a premise: < 6 leader changes in 24h (worst member) with no reboot (>= 6 = etcd already unstable). REWRITTEN 2026-11-27: the run now ends in `jq -r` so the runner prints the SCALAR (the 2026-11-26 plan-refine flag showed the whole Prometheus JSON because the old regex was matched against raw JSON and its failure message echoed it; the extraction was never broken, the premise FAILED on live data: 11.0038). LIVE 2026-11-27 ~09:00Z: 11.0038 (per member 9.0 / 11.0 / 10.0; 7 d 58-60, down from 152-154 on 2026-11-16; F-27a3f024, F-33873912) -> FAILS TODAY, which is the proof it can fail. An empty result prints `null` (no data) and fails; NaN fails. Regex dry-tested: "5.0017", "0", "5" pass; "6", "11.003820771101076", "null", "NaN" fail. WINDOW-START ONLY: after the canary reboots this premise can never pass again, so it is never a per-node gate (section 2.2 node mode is). Must PASS at the operator GO AND again at window start. Never weaken, widen or skip. While it fails, plan-refine re-flags this plan premise-fail; that flag clears itself when the premise passes and is NOT a re-plan trigger.'
+  run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=max(increase(etcd_server_leader_changes_seen_total%5B24h%5D))' | jq -r '.data.result[0].value[1]'
+  expect_matches: ^[0-5](\.\d+)?$
 - id: etcd-elections-last-2h-zero
-  why: 'HARD etcd-quiet gate (new 2026-11-16): ZERO leader changes in the last 2 h. The 24h rule alone can pass on a day whose churn aged out at 22:00 and restarts at 06:00; a node drain on an etcd that elected within the last two hours is exactly the F-2cb2dbc9 pattern. LIVE 2026-11-16: earlier in the day the 1 h increase read 5.04 and the 2 h increase 11-15 on every member (fails); re-read 07:00Z: 0 on all three (the burst aged out, passes). Churn is bursty, which is why section 2.2 requires two reads 15 min apart. WINDOW-START ONLY, like the 24 h premise. A quiet counter prints exactly "0" (no increase); any election prints a non-zero float. Fails closed on empty (no data).'
-  run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=max(increase(etcd_server_leader_changes_seen_total%5B2h%5D))'
-  expect_matches: '"value":\[[0-9.]+,"0"\]'
+  why: 'HARD etcd-quiet gate: ZERO leader changes in the last 2 h (worst member). The 24h rule alone can pass on a day whose churn aged out at 22:00 and restarts at 06:00; a node drain on an etcd that elected within the last two hours is exactly the F-2cb2dbc9 pattern. REWRITTEN 2026-11-27 to print the scalar via `jq -r` (see the 24 h premise). A quiet counter prints exactly "0" (Prometheus formats a zero increase as 0); any election prints a non-zero float such as 1.00418410041841 (LIVE 2026-11-27 ~09:00Z: 1.0042 on all three members -> FAILS TODAY). Empty result prints `null` and fails. Churn is bursty, which is why section 2.2 requires two reads 15 min apart. WINDOW-START ONLY, like the 24 h premise.'
+  run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=max(increase(etcd_server_leader_changes_seen_total%5B2h%5D))' | jq -r '.data.result[0].value[1]'
+  expect_exact: '0'
 - id: etcd-wal-fsync-p99-below-50ms-10m
-  why: 'HARD etcd-quiet gate (new 2026-11-16): the WORST member''s 10-minute WAL fsync p99 is below 50 ms. Shared consumer NVMe (etcd + Longhorn + images) spikes 23-110 ms on busy days (2026-11-16: 88 ms on .11 over 5 m earlier; re-read 07:00Z over 10 m: 25.5 / 24.9 / 14.8 ms, passes). histogram_quantile over an unscraped/empty histogram prints NaN or nothing: neither matches, so it fails closed. Regex dry-tested: "0.0318", "0.0499" pass; "0.0880", "0.05", "0.1", "NaN" fail.'
-  run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=max(histogram_quantile(0.99,sum%20by%20(le,instance)(rate(etcd_disk_wal_fsync_duration_seconds_bucket%5B10m%5D))))'
-  expect_matches: '"value":\[[0-9.]+,"0\.0[0-4][0-9]*"\]'
+  why: 'HARD etcd-quiet gate (new 2026-11-16): the WORST member''s 10-minute WAL fsync p99 is below 50 ms. Shared consumer NVMe (etcd + Longhorn + images) spikes 23-110 ms on busy days (2026-11-16: 88 ms on .11 over 5 m earlier; re-read 07:00Z over 10 m: 25.5 / 24.9 / 14.8 ms, passes; LIVE 2026-11-27: 0.02659 = 26.6 ms, passes). Scalar via `jq -r` since 2026-11-27: histogram_quantile over an unscraped/empty histogram prints NaN or `null`: neither matches, so it fails closed. Regex dry-tested: "0.0318", "0.0499", "0.0265854335260115" pass; "0.0880", "0.05", "0.1", "NaN", "null" fail.'
+  run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=max(histogram_quantile(0.99,sum%20by%20(le,instance)(rate(etcd_disk_wal_fsync_duration_seconds_bucket%5B10m%5D))))' | jq -r '.data.result[0].value[1]'
+  expect_matches: ^0\.0[0-4]\d*$
 - id: offsite-restic-seed-not-running
-  why: 'No off-site restic job pod (the ~16 h seed offsite-seed-*, or the nightly offsite-backup-apps/core at 00:30/00:40 UTC) is Running: a node drain kills the pod, the Job has backoffLimit 0, so a part-written restic repository is left with a stale lock and the seed restarts from its last snapshot. LIVE 2026-11-16 07:05Z: TWO pods Running, both on k8s-nuc14-01: offsite-backup-core-29913160-hrxcr (the 00:40 UTC nightly, 6 h 25 m old) and offsite-seed-core-64pxh (Job offsite-seed-core re-created 06:44Z; the 22:07Z seed pod is gone) -> prints 2, fails. WINDOW-START ONLY: section 2.3 re-checks before every drain. grep -c prints the count (0 when none match), so an empty cluster does not fail-closed by accident.'
+  why: 'No off-site restic job pod (the ~16 h seed offsite-seed-*, the nightly offsite-backup-apps/core at 00:30/00:40 UTC, or since 2026-11 offsite-assure 13:15 UTC daily / offsite-backup-contents Mon 06:00 UTC / offsite-restore-proof 2nd 15:00 UTC) is Running: a node drain kills the pod, the Job has backoffLimit 0, so a part-written restic repository is left with a stale lock and the seed restarts from its last snapshot. LIVE 2026-11-16 07:05Z: TWO pods Running, both on k8s-nuc14-01: offsite-backup-core-29913160-hrxcr (the 00:40 UTC nightly, 6 h 25 m old) and offsite-seed-core-64pxh (Job offsite-seed-core re-created 06:44Z; the 22:07Z seed pod is gone) -> prints 2, fails. 2026-11-26 plan-refine read 1 (a nightly Job still running at that moment; that is the gate working, not a plan defect). LIVE 2026-11-27 ~09:00Z: 0 (offsite-backup-apps-29928990 Complete, offsite-backup-core-29929000 Failed - not running), passes. WINDOW-START ONLY: section 2.3 re-checks before every drain. grep -c prints the count (0 when none match), so an empty cluster does not fail-closed by accident.'
   run: kubectl get pods -n backup --field-selector=status.phase=Running -o name | grep -c offsite
   expect_exact: '0'
-- id: factory-publishes-schematic-v1.14.6
-  why: 'The Image Factory serves the OCI index for our schematic at v1.14.6 and its linux/amd64 entry is the digest measured 2026-11-16 (sha256:d488effd...5c10; the first request after a release builds the image on demand and can take minutes, so a premise timeout (60 s) on a COLD factory is a retry-once, not a NO-GO; section 3.1 is the hard gate with the v9.9.9 -> 404 control). Content-pinned: an intercepting middlebox answering every path, or a silently re-published tag, fails it.'
-  run: kubectl --kubeconfig=/dev/null --server=https://factory.talos.dev --token=none get --raw /v2/installer/43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3/manifests/v1.14.6
-  expect_matches: '"mediaType":"application/vnd\.oci\.image\.index\.v1\+json".*"digest":"sha256:d488effdca3f6f0d667d5ea61e31a6831e51290ccf49b0980d93ba301f575c10","platform":\{"architecture":"amd64","os":"linux"\}'
-- id: talos-v1.14.6-installable
-  why: The factory still lists v1.14.6 as installable (the 1.14 MINOR LINE at the reviewed patch; a NEWER 1.14.x patch does not fail this premise - it is the in-window 2.2b decision, default stay on v1.14.6, F-56452df7). Fails when v1.14.6 disappears from the list (pulled release) or the factory answers with something that is not the version array; the closing quote anchors against "v1.14.60".
+- id: factory-publishes-schematic-v1.14.7
+  why: 'The Image Factory serves the OCI index for our schematic at v1.14.7 and its linux/amd64 entry is the digest measured 2026-11-27 (sha256:2db295cf...e8fd; the first request after a release builds the image on demand and can take minutes, so a premise timeout (60 s) on a COLD factory is a retry-once, not a NO-GO; section 3.1 is the hard gate with the v9.9.9 -> 404 control, re-run 2026-11-27: v1.14.7 HTTP 200, v9.9.9 HTTP 404). Content-pinned: an intercepting middlebox answering every path, or a silently re-published tag, fails it.'
+  run: kubectl --kubeconfig=/dev/null --server=https://factory.talos.dev --token=none get --raw /v2/installer/43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3/manifests/v1.14.7
+  expect_matches: '"mediaType":"application/vnd\.oci\.image\.index\.v1\+json".*"digest":"sha256:2db295cf669f2fb7b9f91bebcded5b965656fd17d97eb3dd7c21f89eb0fce8fd","platform":\{"architecture":"amd64","os":"linux"\}'
+- id: talos-v1.14.7-installable
+  why: The factory still lists v1.14.7 as installable (the 1.14 MINOR LINE at the reviewed patch; a NEWER 1.14.x patch does not fail this premise - it is the in-window section 2.4 decision, default stay on v1.14.7, F-56452df7). Fails when v1.14.7 disappears from the list (pulled release) or the factory answers with something that is not the version array; the closing quote anchors against "v1.14.70". Live 2026-11-27 list ends at "v1.14.7".
   run: kubectl --kubeconfig=/dev/null --server=https://factory.talos.dev --token=none get --raw /versions
-  expect_matches: ^\[.*"v1\.14\.6".*\]$
+  expect_matches: ^\[.*"v1\.14\.7".*\]$
 - id: multidoc-migration-applied-on-all-nodes
   why: The 2026-10-04 multidoc migration (a7965251) put a KubeAPIServerConfig document into every node's live machine config. Expect 3; anything else means a node lost the multi-document config — STOP.
   run: 'talosctl --nodes=192.168.55.11,192.168.55.12,192.168.55.13 get machineconfig v1alpha1 -o yaml | grep -c ''kind: KubeAPIServerConfig'''
@@ -157,7 +153,7 @@ premises:
   run: talosctl --nodes=192.168.55.11,192.168.55.12,192.168.55.13 get machineconfig -o json | jq -sc 'group_by(.node)[]' | jq -c 'sort_by(.metadata.id)' | jq -c '[.[0].node, map(.metadata.id), unique_by(.spec)[1] == null]'
   expect_matches: ^\["192\.168\.55\.11",\[("persistent",)?"v1alpha1"\],true\]\s+\["192\.168\.55\.12",\[("persistent",)?"v1alpha1"\],true\]\s+\["192\.168\.55\.13",\[("persistent",)?"v1alpha1"\],true\]$
 - id: longhorn-all-volumes-replica-2
-  why: 'A RULE, not a count: every Longhorn volume has numberOfReplicas 2 (79 volumes on 2026-10-31; 80 on 2026-10-17; 94 on 2026-10-01). §2.5 measures the live set and §3.11 gates against that recording. Any volume at 1 or 3 changes the one-node-down arithmetic; an empty list fails.'
+  why: 'A RULE, not a count: every Longhorn volume has numberOfReplicas 2 (77 volumes on 2026-11-27; 79 on 2026-10-31; 80 on 2026-10-17; 94 on 2026-10-01). §2.5 measures the live set and §3.11 gates against that recording. Any volume at 1 or 3 changes the one-node-down arithmetic; an empty list fails.'
   run: kubectl get volumes.longhorn.io -n storage -o jsonpath='{.items[*].spec.numberOfReplicas}'
   expect_matches: ^2( 2)*$
 - id: no-volume-with-stale-replica-timeout-0
@@ -173,31 +169,31 @@ premises:
   run: kubectl get deploy -n databases pgadmin -o jsonpath='{.spec.selector.matchLabels}'
   expect_exact: '{"app":"pgadmin"}'
 - id: etcd-latency-histograms-scraped
-  why: §2.3b and §3.10b gate on the worst 5m-p99 of etcd WAL fsync and backend commit. An unscraped histogram reads EMPTY and a "< 50 ms" check would pass on no data. Expects 3 fsync + 3 commit series (6); a lost etcd target prints 4 or 5.
-  run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count(etcd_disk_wal_fsync_duration_seconds_count)%20%2B%20count(etcd_disk_backend_commit_duration_seconds_count)'
-  expect_matches: '"value":\[[0-9.]+,"6"\]'
+  why: §2.3b and §3.10b gate on the worst 5m-p99 of etcd WAL fsync and backend commit. An unscraped histogram reads EMPTY and a "< 50 ms" check would pass on no data. Expects 3 fsync + 3 commit series (6); a lost etcd target prints 4 or 5, no data prints null. Scalar via jq since 2026-11-27 (live 6).
+  run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count(etcd_disk_wal_fsync_duration_seconds_count)%20%2B%20count(etcd_disk_backend_commit_duration_seconds_count)' | jq -r '.data.result[0].value[1]'
+  expect_exact: '6'
 - id: kustomize-controller-write-metric-scraped
-  why: The < 5 MB/s kustomize-controller gate reads cAdvisor container_fs_writes_bytes_total for container=manager. The filter must select exactly one series; 0 (not scraped) or 2 (double count) fails here.
-  run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count(container_fs_writes_bytes_total%7Bnamespace%3D%22flux-system%22%2Ccontainer%3D%22manager%22%2Cpod%3D~%22kustomize-controller-.*%22%7D)'
-  expect_matches: '"value":\[[0-9.]+,"1"\]'
+  why: The < 5 MB/s kustomize-controller gate reads cAdvisor container_fs_writes_bytes_total for container=manager. The filter must select exactly one series; null (not scraped) or 2 (double count) fails here. Scalar via jq since 2026-11-27 (live 1).
+  run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count(container_fs_writes_bytes_total%7Bnamespace%3D%22flux-system%22%2Ccontainer%3D%22manager%22%2Cpod%3D~%22kustomize-controller-.*%22%7D)' | jq -r '.data.result[0].value[1]'
+  expect_exact: '1'
 - id: kubelets-on-1.36.0
-  why: Phase K's `current` is kubelet v1.36.0 x3. Anything else means a partial earlier upgrade-k8s run (re-run resumes; read §5.5 first) or someone already upgraded.
+  why: Kubelet is v1.36.0 x3 and this plan must leave it there (Phase K DEFERRED, section 3.2; a node OS roll does not move kubelet because talconfig pins kubernetesVersion). Anything else means a partial earlier upgrade-k8s run (read PROC §5.5 first) or someone already upgraded.
   run: kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.kubeletVersion}'
   expect_exact: v1.36.0 v1.36.0 v1.36.0
 - id: talconfig-pins-1.36.0
-  why: '§3.K2''s anchored sed rewrites exactly this line (dry-tested 2026-10-31 on a scratch copy already carrying talosVersion v1.14.5; same line as Renovate PR #233). A different value means the sed is a no-op and upgrade-k8s would read the wrong --to.'
+  why: 'The node roll keeps Kubernetes at v1.36.0: talconfig must still pin exactly this line (Renovate PR #233 now proposes v1.36.7 on it; it must NOT land before or during this roll). A different value means the Kubernetes pin moved under the roll and genconfig/§3.6 validation would render a different control plane.'
   run: 'grep -c ''^kubernetesVersion: v1.36.0$'' kubernetes/bootstrap/talos/talconfig.yaml'
   expect_exact: '1'
 - id: apiserver-configs-on-1.36.0
-  why: 'Talos'' own APIServerConfig resources (what upgrade-k8s patches) carry v1.36.0 on all nodes: 6 image lines across 3 nodes, measured 2026-10-05. §3.K6 expects 6 at v1.36.6.'
+  why: 'Talos'' own APIServerConfig resources (what upgrade-k8s patches) carry v1.36.0 on all nodes: 6 image lines across 3 nodes, measured 2026-10-05. Pre-roll fact; Phase K is deferred, so it must still read 6 after the roll too.'
   run: 'talosctl --nodes=192.168.55.11,192.168.55.12,192.168.55.13 get apiserverconfigs -o yaml | grep -c ''image: registry.k8s.io/kube-apiserver:v1.36.0'''
   expect_exact: '6'
 - id: build-info-scraped-12
-  why: '§3.K6''s CONTENTS ASSERTION reads kubernetes_build_info: 12 series (apiserver, kubelet, kube-scheduler, kube-controller-manager x3). Fewer means a scrape job went blind and the post-check could pass on an empty set.'
-  run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count(kubernetes_build_info%7Bgit_version%3D%22v1.36.0%22%7D)'
-  expect_matches: '"value":\[[0-9.]+,"12"\]'
+  why: 'kubernetes_build_info at v1.36.0: 12 series (apiserver, kubelet, kube-scheduler, kube-controller-manager x3). Fewer means a scrape job went blind (PROC §4.4 uses it as a floor); more or a different version means a component already moved. Scalar via jq since 2026-11-27 (live 12).'
+  run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=count(kubernetes_build_info%7Bgit_version%3D%22v1.36.0%22%7D)' | jq -r '.data.result[0].value[1]'
+  expect_exact: '12'
 - id: bootstrap-inventory-7
-  why: 'upgrade-k8s prunes against this SSA inventory. The 2026-10-05 dry-run diff showed 7 objects, all `configured` (annotation adoption), zero deletes, against an inventory of 7 entries. A different entry count means the prune set changed: §3.K4''s dry-run must be read action by action.'
+  why: 'upgrade-k8s prunes against this SSA inventory (7 entries, 2026-10-05). Kept although Phase K is deferred: it is the baseline the follow-up Kubernetes plan inherits, and a changed count now means something outside this plan touched the bootstrap set before a node roll.'
   run: kubectl get configmap -n kube-system talos-bootstrap-manifests-inventory -o jsonpath='{.data}'
   expect_matches: ^\{(?:"[^"]+":"[^"]*",?){7}\}$
 - id: longhorn-rebuild-limit-2
@@ -216,12 +212,16 @@ sops_refs:
 - docs/sops/monitoring.md
 - docs/sops/unifi-device-firmware.md
 - docs/sops/maintenance-windows.md
-generated: '2026-11-16'
-needs_replan: "premise-fail: etcd-elections-24h-below-6: got '{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[{\"metric\":{},\"value\":[179; offsite-restic-seed-not-running: got '1', want exactly '0'"
-needs_replan_since: "2026-11-26"
+generated: '2026-11-16'   # re-planned in place 2026-11-27 (upgrade-planner, nightly window Step 0.5): v1.14.6 -> v1.14.7, premises -> scalars, Phase K deferred
 ---
 
-# Talos Linux node roll — v1.14.1 → v1.14.6, then Kubernetes v1.36.0 → v1.36.6
+# Talos Linux node roll — v1.14.1 → v1.14.7 (retargeted in place from v1.14.6, 2026-11-27); Kubernetes Phase K DEFERRED
+
+> **RE-PLANNED IN PLACE 2026-11-27 (upgrade-planner, dispatched by the nightly window's Step 0.5).** The `plan_id`
+> stays `talos-linux-1.14.6` (other plans, window stamps and findings resolve by it); the **target is now v1.14.7**.
+> Read §1.0 first: it is the authoritative statement of what changed against the 2026-11-16 text below. Where
+> §1.1–§1.4 say "v1.14.6" they are the history of the previous hop and stay true for it; §2 onward has been rewritten
+> to v1.14.7 values (factory digest, talosctl checksum, kernel 6.18.65, etcd 3.7.4).
 
 > **SUPERSEDES `talos-linux-1.14.5`** (written 2026-11-16, upgrade-planner). v1.14.6 shipped 2026-11-11 and
 > Renovate PR #248 and finding F-912f4778 now both read `v1.14.1 → v1.14.6`. `talos-linux-1.14.5` is vetted
@@ -235,6 +235,76 @@ needs_replan_since: "2026-11-26"
 > **v1.14.5 → v1.14.6 per-commit reading** (§1.2); (5) the verdict on **stacking `etcd-timeouts-5000-500`** (§1.4: do not).
 
 ## 1) Summary & why held
+
+### 1.0 Re-plan 2026-11-27: retarget v1.14.6 → v1.14.7, Phase K deferred, premises fixed
+
+**Why it was flagged.** `plan-refine` set `needs_replan: premise-fail` on 2026-11-26 for three premises:
+- `etcd-elections-24h-below-6` / `etcd-elections-last-2h-zero` — the flag text showed raw Prometheus JSON, which read as
+  a broken extraction. **It was not broken:** the old premises matched a regex against the whole JSON body, and the
+  runner echoes the output it compared. Both FAILED on live data. Re-run 2026-11-27 ~09:00Z: 24 h max **11.0038**
+  (per member 9.0 / 11.0 / 10.0; 7 d 58-60, down from 152-154 on 2026-11-16), 2 h max **1.0042** on all three.
+  Both premises now pipe through `jq -r '.data.result[0].value[1]'` so the runner prints the number (`null` on no
+  data fails closed), with regexes re-tested on passing and failing values (frontmatter `why:`). The same
+  scalar form is applied to the fsync-p99, latency-series-count, kustomize-metric and build-info premises.
+  **They still FAIL today, and they should:** etcd churn (F-27a3f024, F-33873912) is still above this plan's NO-GO
+  line. Until they pass, `plan-refine` will keep flagging this plan `premise-fail`. That flag clears itself when
+  the premises pass again. It is the blocker working, not a planning defect, so it must not be re-dispatched as a
+  re-plan.
+- `offsite-restic-seed-not-running` got `1`: a nightly off-site Job was still running when plan-refine checked. The
+  fence did its job. Live 2026-11-27: `0` (passes). Three off-site CronJobs were added since 2026-11-16
+  (`offsite-assure` 13:15 UTC daily, `offsite-backup-contents` Mon 06:00 UTC, `offsite-restore-proof` 2nd of month
+  15:00 UTC). §2.3's fence now asserts their schedules too.
+
+**Retarget to v1.14.7: yes.** Upstream v1.14.7 was published 2026-11-24. Renovate PR #248 (`v1.14.1 → v1.14.7`),
+PR #247 (talosctl CLI `1.14.1 → 1.14.7`), finding F-912f4778 and the coverage held group `talos-linux-1.14.7` all
+track it. Nothing here was vetted or GO'd at v1.14.6 (`review: null`, no GO), so moving the target loses no
+approval. The argument of §1.1 point 3 applies again: one roll, to the newest patch, is better than landing a patch
+behind with the PR and finding still open. Release notes v1.14.7 (read 2026-11-24 tag, 5 talos + 7 pkgs commits),
+and what reaches OUR nodes:
+- **etcd 3.7.3 → 3.7.4** (`4fdb745d4`; `DefaultEtcdVersion = "v3.7.4"` at the tag). etcd v3.7.4 CHANGELOG (2026-11-18),
+  server section: *"Fix `--force-new-cluster` permanently bricking a member whose backend consistent index is ahead of
+  its WAL"*, *"Define `alarmStore` as an `atomic.Pointer` to avoid race condition"*, *"Fix etcd panics on startup
+  replaying legacy v2 member-attribute WAL entries"* (upstream PR #22634: a v3.5 → v3.6 → v3.7 upgrade path can
+  replay legacy v2 metadata WAL entries and panic at startup). Our members restart fine on 3.7.1 today, so this is
+  not proven to affect us. Still, a member start on every reboot is exactly what this roll does, so the fix is a
+  reason FOR 3.7.4, not a risk. No storage-version or WAL-format change: storage stays 3.7.0. The
+  `--force-new-cluster` fix matters for the `docs/sops/disaster-recovery.md` path only.
+- **Kernel 6.18.63 → 6.18.65** (pkgs `a1a4897`), plus `MEMORY_FAILURE` enabled (`e5ea794`; NUC14 has no ECC, so it is
+  inert in practice), libseccomp 2.6.2 (`62c1972`, container seccomp filter library), i40e DCB / DRBD 9.3.5 / Azure
+  NVMe udev / virtio UDP-GSO (no such hardware or module here: inert). The hwmon/thermal gate (PROC §4.4 #10) stays
+  and covers any kernel sensor rename.
+- **`82a8ef3ed` "serve logind D-Bus broker clients independently"** (`v1alpha1_dbus.go`, `logind/broker.go`,
+  `cgroup/membership.go`): Talos' logind shim is what kubelet's graceful-node-shutdown inhibitor talks to. A fix
+  there touches the drain → reboot path, and in the safe direction. Existing gates cover it: PROC §3.9/§3.10 watch
+  the node go down and come back, and pods must be evicted, not killed.
+- Flannel 0.28.11: inert (we run Cilium). Go stays 1.26.11. **The v1.14.6...v1.14.7 compare lists no
+  upgrade/sequencer/etcd-service file**, so `service etcd restart` is still refused (§1.4 holds), the rollback
+  mechanics of PROC §5 are unchanged, and `rollback_class: git-revert` stays honest. A drained
+  `talosctl upgrade --image <factory>:v1.14.1` is still the per-node revert, and etcd 3.7.4 → 3.7.1 is a patch
+  skew inside one minor.
+- Re-derived 2026-11-27 for v1.14.7: factory amd64 index digest `sha256:2db295cf669f…e8fd` (premise
+  `factory-publishes-schematic-v1.14.7`); `/image/<schematic>/v1.14.7/metal-amd64.iso` HTTP 200 and `v9.9.9` HTTP
+  404; talosctl `darwin-arm64` sha256 `7eb6696ead7f…85b9` (release `sha256sum.txt`); the BSD-sed dry-runs for
+  `talconfig.yaml`, `auto-update-policy.yaml` and `.mise.toml` (diffs in §3.0); `gh api` head
+  `v1.14.7 2026-11-24T11:59:52Z`.
+
+**Kubernetes Phase K is DEFERRED out of this plan (changed 2026-11-27).** Kubernetes v1.36.7 was published
+2026-11-25, and Renovate PR #233 now reads kubelet `v1.36.0 → v1.36.7`. PROC's Phase K is built around v1.36.6
+(about 55 PROC lines). Re-deriving it here would double this re-plan's surface for a step that was "expected to
+DEFER" anyway (PROC §3.K0). The window therefore takes PROC's designed DEFER branch unconditionally: no PROC
+§3.7b pre-pull and no K1–K7. The talosctl CLI pin (PROC §3.12) still runs last. Kubernetes stays v1.36.0, a
+supported skew for Talos v1.14.7 (`SupportedKubernetesVersions = 6` back from 1.37.1). **Follow-up owed:** a
+separate Kubernetes v1.36.7 plan, written after this roll on the new OS, which reuses PROC Phase K. It is listed
+under Open items.
+
+**Dependency status, stated honestly: `depends_on: [longhorn-1.13.0]` is NOT satisfied and that plan cannot run as
+written.** Live 2026-11-27: `helmrelease/longhorn` is at chart **1.12.2** (`current-longhorn-version` v1.12.2). The
+`longhorn-1.13.0` plan still says `current: 1.12.1`, carries `needs_replan: premise-fail` (its
+`longhorn-hr-chart-1-12-1-ready` premise reads `1.12.2 1.12.2 True`) and still holds `window:
+sun-attended:2026-11-22`, which has passed. This plan therefore cannot be scheduled until `longhorn-1.13.0` is
+re-planned against 1.12.2 and executed, or until the operator explicitly drops the dependency. The rule behind it
+stands: never roll nodes while a Longhorn engine/manager move is in flight. The other blocker is etcd churn, which
+is not ours to fix in this plan (Open item 2).
 
 ### 1.1 What changes, why held, why a NEW plan and not a retarget of 1.14.5
 
@@ -303,6 +373,12 @@ hop (etcd 3.7.1 → 3.7.3 stays inside storage version 3.7.0; the real per-node 
 
 ### 1.3 State measured 2026-11-16 (why this plan cannot run today)
 
+> **Re-measured 2026-11-27 ~09:00Z:** nodes 3 × Talos v1.14.1 / kernel 6.18.51 / kubelet v1.36.0; etcd 3.7.1 ×3,
+> leader `.11`; elections 24 h 9 / 11 / 10, 2 h 1.0 ×3, 7 d 58-60 (NO-GO on both lines); WAL fsync 10-min p99 worst
+> 26.6 ms (passes); Longhorn 77 volumes all `numberOfReplicas` 2, rebuild limit 2; HelmRelease longhorn 1.12.2; no
+> off-site Job running (`offsite-backup-core-29929000` from 00:40 UTC ended Failed, owned by the backup tier, not
+> this plan). The 2026-11-16 bullets below are history.
+
 - Nodes: 3 × Talos v1.14.1, kernel 6.18.51, kubelet v1.36.0, no reboot since 2026-09-27.
 - **etcd is NOT quiet over 24 h, and its quiet is bursty.** `increase(etcd_server_leader_changes_seen_total[24h])` = **41.01** earlier on 2026-11-16 and **51-54**
   at 07:05Z (7 d: 154; F-27a3f024, F-33873912); the 2 h count read 11-15 per member earlier and **0** at 07:00Z, WAL fsync p99 over 5 m reached **88 ms** on `.11`
@@ -366,6 +442,7 @@ SCR="$HOME/.cache/talos-1146"; mkdir -p "$SCR"; chmod 700 "$SCR"; stat -f '%Lp %
 git show 1641b605e:runbooks/maintenance/plans/talos-linux-1.14.5.md > "$SCR/PROC-1.14.5.md"   # the carried procedure, pinned
 wc -l "$SCR/PROC-1.14.5.md"                                                                    # MUST print 3096 (git show of 1641b605e, measured 2026-11-16; wc counts newlines)
 awk 'NR>=600 && /1\.14\.5|1145|6\.18\.58|c865077b/ {printf "%d ", NR}' "$SCR/PROC-1.14.5.md"; echo   # MUST equal the 117 numbers listed under section 3.0 (a different list = PROC changed under you: STOP)
+awk 'NR>=619 && /3\.7\.3/ {printf "%d ", NR}' "$SCR/PROC-1.14.5.md"; echo     # MUST print the 32 numbers of row S27 (section 3.0)
 ```
 `PROC` below = `$SCR/PROC-1.14.5.md`; "PROC §x" = that section. Everything not listed in §3.0/§2.2/§2.3/§3.1/§4.1 CA8–CA9 is
 executed exactly as PROC says, with the §3.0 table applied row by row (the table is complete: section 3.0 proves it with the awk line above).
@@ -377,7 +454,8 @@ executed exactly as PROC says, with the §3.0 table applied row by row (the tabl
 ```
 **PASS:** every premise passes. **Run it at the operator GO and once at window start, NEVER mid-roll:** the premises describe the
 PRE-roll world (`nodes-on-v1.14.1`, etcd `3.7.1` x3, the 2 h/24 h election premises, `kubelets-on-1.36.0`) and several of them
-legitimately FAIL after the canary reboots. **At 2026-11-16 07:05Z it prints FAIL for exactly two premises:**
+legitimately FAIL after the canary reboots. **At 2026-11-27 ~09:00Z it prints FAIL for exactly two premises:** `etcd-elections-24h-below-6` (got `11.003820771101076`) and
+`etcd-elections-last-2h-zero` (got `1.00418410041841`); `offsite-restic-seed-not-running` passes (`0`). History: **At 2026-11-16 07:05Z it prints FAIL for exactly two premises:**
 `etcd-elections-24h-below-6` (54.02) and `offsite-restic-seed-not-running` (2) - each a gate that can and does fail on live data.
 (Earlier the same day `etcd-elections-last-2h-zero` and `etcd-wal-fsync-p99-below-50ms-10m` also failed; by 07:00Z both read clean, which is
 why section 2.2 demands two reads 15 minutes apart.) The factory premise can take > 60 s on a cold tag: retry ONCE; a second failure is NO-GO.
@@ -486,7 +564,9 @@ def get(args):
 jobs = json.loads(open(src).read() if src else get(["jobs", "-n", "backup"]))["items"]
 cjs = json.loads(get(["cronjobs", "-n", "backup"]))["items"]
 want = {"offsite-backup-apps": "30 0 * * *", "offsite-backup-core": "40 0 * * *",
-        "offsite-backup-prune": "30 4 * * 0", "offsite-backup-check": "30 4 * * 3"}
+        "offsite-backup-prune": "30 4 * * 0", "offsite-backup-check": "30 4 * * 3",
+        # added 2026-11-27 (live CronJobs created after 2026-11-16):
+        "offsite-assure": "15 13 * * *", "offsite-backup-contents": "0 6 * * 1", "offsite-restore-proof": "0 15 2 * *"}
 got = {c["metadata"]["name"]: (c["spec"]["schedule"], c["spec"].get("timeZone"), bool(c["spec"].get("suspend")))
        for c in cjs if c["metadata"]["name"].startswith("offsite-")}
 bad = []
@@ -509,12 +589,12 @@ kubectl get pods -n backup --field-selector=status.phase=Running -o name | grep 
 **Handles "no such Job".** The script lists Jobs (`kubectl get jobs -n backup`) instead of reading `job/offsite-seed-core` by name, so a seed Job that already
 finished and was garbage-collected (`ttlSecondsAfterFinished: 604800`) or was never re-created reads as "no active job" = no fence, not as a `NotFound` error
 that would turn into a false NO-GO. (The earlier draft's `kubectl get job offsite-seed-core -o jsonpath=...` errored with `NotFound` in exactly that case.)
-Its blind-instrument guard is different: the four off-site CronJobs must exist with schedules `30 0 * * *`, `40 0 * * *`, `30 4 * * 0`, `30 4 * * 3`, timeZone
+Its blind-instrument guard is different: the seven off-site CronJobs must exist with schedules `30 0 * * *`, `40 0 * * *`, `30 4 * * 0`, `30 4 * * 3`, and (since 2026-11-27) `15 13 * * *` (assure), `0 6 * * 1` (contents), `0 15 2 * *` (restore-proof), timeZone
 `Etc/UTC`, not suspended - a missing or changed one prints `VERDICT FAIL` because the "nothing fires inside the window" argument below depended on them.
 **Dry-run 2026-11-16 07:05Z:** live printed `VERDICT FAIL` naming the two ACTIVE jobs (`offsite-backup-core-29913160`, `offsite-seed-core`; `offsite-backup-apps-29913150`
 Complete); a saved copy of that Job list with `status.active` set to 0 printed `VERDICT CLEAR`; an EMPTY Job list printed `VERDICT CLEAR` (the NotFound-equivalent case).
-**Scheduled Jobs cannot start inside the window by construction:** daily 00:30 / 00:40 UTC, prune Sun 04:30 UTC, check Wed 04:30 UTC, against `sun-attended` 09:00
-Europe/Berlin = 08:00 UTC (CET) to at most 11:20 UTC; only a Job that is still running from before 08:00 can overlap, and that is what the gate reads.
+**Scheduled Jobs cannot start inside the window by construction:** daily 00:30 / 00:40 UTC, prune Sun 04:30 UTC, check Wed 04:30 UTC, contents Mon 06:00 UTC, restore-proof the 2nd at 15:00 UTC, against `sun-attended` 09:00
+Europe/Berlin = 08:00 UTC (CET) to at most 11:20 UTC; only a Job that is still running from before 08:00 can overlap, and that is what the gate reads. **One exception to watch:** `offsite-assure` fires daily at 13:15 UTC. A roll that overruns toward PROC §7's 290-min upper bound (08:00 + Step 0 + 290 min, about 13:10 UTC) can reach it. If the third drain has not started by 12:45 UTC, re-run the fence immediately before it. The fence reads ACTIVE Jobs, so it catches assure if it has started.
 
 **If the gate is not CLEAR at the GO (days ahead):** nothing to do - the seed finishes on its own (the Job allows 48 h; a long nightly core run is the same Job class).
 **If it is not CLEAR at window start:** the default is NO-GO until it is. The only alternative is an OPERATOR-APPROVED KNOWING STOP, recorded in the run log with the
@@ -531,15 +611,15 @@ and run its lock check; restic dedups, so the cost is time, not data. The nightl
 gh api repos/siderolabs/talos/releases --jq '[.[] | select(.prerelease==false) | select(.tag_name|test("^v1[.]14[.]"))] | .[0] | "\(.tag_name)  \(.published_at)"'
 gh api repos/siderolabs/talos/releases --jq '[.[] | select(.prerelease==false) | select(.tag_name|test("^v1[.]13[.]"))] | .[0] | "\(.tag_name)  \(.published_at)"'   # control: a DIFFERENT line
 ```
-*Dry-run 2026-11-16:* first line `v1.14.6  2026-11-11T19:51:33Z`. Decision table exactly as PROC §2.2b: `v1.14.6` → proceed;
-newer `v1.14.N` → **default stay on v1.14.6**, retarget only under SD-6 with the operator present and every §3.0 row
+*Dry-run 2026-11-27:* first line `v1.14.7  2026-11-24T11:59:52Z`; control line `v1.13.13  2026-11-26T10:47:36Z`. Decision table exactly as PROC §2.2b: `v1.14.7` → proceed;
+newer `v1.14.N` → **default stay on v1.14.7**, retarget only under SD-6 with the operator present and every §3.0 row
 re-derived. A stable v1.15.x is out of scope.
 
 ### 2.5 Everything else (executed as PROC §2, in order)
 
 PROC §2.0 helper files (ten helpers: `lh_gate.py`, `etcdstat.py`, `nodegate.py`, `probe.py`, `hwmon.py`, `cifsproof.py`,
 …) written with their negative controls; §2.0b freeze + ImageUpdateAutomation enumeration; §2.1 baselines (Longhorn
-census 79 volumes / 158 replicas expected, re-read after `longhorn-1.13.0`); §2.3b/§3.10b latency gates; §2.4 roll
+census 77 volumes / 154 replicas live on 2026-11-27, re-read after `longhorn-1.13.0`); §2.3b/§3.10b latency gates; §2.4 roll
 order read from LIVE etcd leader (the leader is `.11` today, not the 1.14.5 comment's `.13`); §2.5 Longhorn arithmetic;
 §2.6 backup freshness; §2.8 hwmon/alerts baselines; §2.12b node-pinned workloads (frigate@02, matter-server+otbr@03).
 `kube-prometheus-stack` must not change on the day: the deny rule `*kube-prometheus-stack*` in
@@ -548,7 +628,7 @@ slot; `kube-prometheus-stack-93.3.0` (draft) is in `conflicts_with`.
 
 ## 3) Steps
 
-### 3.0 Substitution table - v1.14.5 -> v1.14.6 (COMPLETE: every PROC line that carries a v1.14.5-bearing value, 117 of them, is a row below)
+### 3.0 Substitution table - v1.14.5 -> v1.14.7 (retargeted 2026-11-27 from v1.14.6; rows re-derived, S10 changed, S27 added) (COMPLETE: every PROC line that carries a v1.14.5-bearing value, 117 of them, is a row below)
 
 PROC lines 1-433 are its frontmatter and banner and 434-618 its section 1 narrative: **replaced by this file's own frontmatter and section 1**, never executed.
 Lines 619-3096 (sections 2-7 and the open items) are executed or read; the awk line in section 2.0 lists every line there that matches
@@ -560,65 +640,66 @@ Lines 619-3096 (sections 2-7 and the open items) are executed or read; the awk l
 Every number is covered by one row below or by the "read as the new target" group. Rows S1-S12 keep the numbering of the first draft; S13-S26 were added by review
 (the first draft's table listed 13 rows and skipped, among others, the freeze announcement, the etcd snapshot name, the commit and revert messages, the K2/K3/K4
 expected strings and the 5.5 grep). **Value rows** mean the executing session applies the new reading when it reaches that PROC line; where a row says "sed below" the
-substitution is a literal edit whose diff is pasted below. Everything not on the list is the CURRENT state (v1.14.1, etcd 3.7.1, kubelet v1.36.0) or does not move (etcd 3.7.3,
-containerd 2.3.7, K8s 1.36.6, rollback target v1.14.1).
+substitution is a literal edit whose diff is pasted below. Everything not on the list is the CURRENT state (v1.14.1, etcd 3.7.1, kubelet v1.36.0) or does not move (containerd 2.3.7, K8s v1.36.0 - Phase K is DEFERRED, section 3.2 -, rollback target v1.14.1).
+etcd DOES move (3.7.1 -> 3.7.4): row S10 and the new row S27 cover every PROC line that names 3.7.3.
 
-| Row | PROC lines | v1.14.5 text in PROC | v1.14.6 reading | Evidence |
+| Row | PROC lines | v1.14.5 text in PROC | v1.14.7 reading | Evidence |
 |---|---|---|---|---|
 | S13 | 630, 1112, 1982 | `SCR="$HOME/.cache/talos-1145"` (setup and the two per-call re-sets) | `talos-1146` | scratch dir only; this file's section 2.0 already uses it |
 | S14 | 633 | `plan-premises.py talos-linux-1.14.5 --require-premises` | `talos-linux-1.14.6` | this plan's section 2.1 runs it |
-| S15 | 642, 648, 650, 651, 652, 653 | PROC 2.2b newer-patch check (`v1.14.5` is the head) | replaced by THIS file's section 2.4 (head must read `v1.14.6`) | `gh api` 2026-11-16 printed `v1.14.6  2026-11-11T19:51:33Z` |
+| S15 | 642, 648, 650, 651, 652, 653 | PROC 2.2b newer-patch check (`v1.14.5` is the head) | replaced by THIS file's section 2.4 (head must read `v1.14.7`) | `gh api` 2026-11-27 printed `v1.14.7  2026-11-24T11:59:52Z` |
 | S16 | 992, 2302 | `talos-1145-` nonce / probe string (`etcdstat.py` canary nonce; the pgadmin write-read probe in CA1) | `talos-1146-` | a label written to a file and read back; any unique string works, the compare is against itself |
 | S17 | 1065 | freeze announcement `... until the talos-linux-1.14.5 window ends` | `... until the talos-linux-1.14.6 window ends` | text read by the other sessions; they must see the new plan id |
-| S1 / S4 | 1436, 1440, 1501, 1502 | `for TAG in v1.14.5 v9.9.9`; PASS `v1.14.5 HTTP 200`; 3.4 head `v1.14.5` | `v1.14.6`; PASS `v1.14.6 HTTP 200` and `v9.9.9 HTTP 404`; 3.4 head `v1.14.6` (a newer patch follows 2.4) | measured 2026-11-16 (control 404, real tag 200); amd64 index digest `sha256:d488effdca3f6f0d667d5ea61e31a6831e51290ccf49b0980d93ba301f575c10`, pinned by premise `factory-publishes-schematic-v1.14.6` |
-| S2 / S3 | 1449, 1462, 1474, 1485 | `talosVersion: v1.14.5` and the deny-rule `currently v1.14.5)` text (seds and the pasted diff) | `v1.14.6` (seds and diff below) | BSD-sed dry-run 2026-11-16, diff pasted below |
-| S5 | 1509, 1510, 1511, 1512, 1515, 1516 | `talosctl-1.14.5`, `.../v1.14.5/talosctl-darwin-arm64`, `sha256sum.txt` URL, `shasum`, `version --client` ; hash `c865077b...3096`; client says `Talos v1.14.5` | `talosctl-1.14.6`, `.../v1.14.6/...`; hash **`dd290798702d60ce8c1f59f4c223d5bdbc9c0638db45a9827d7f6cb4bd4a3f39`**; client says `Talos v1.14.6` | `sha256sum.txt` re-read 2026-11-16 07:05Z (same hash); PASS only if published line AND `shasum -a 256` agree |
-| S6 | 1518, 1520, 1528, 1553, 1561, 1567, 1569, 1573, 1574, 1575, 1578 | `T2="$SCR/talosctl-1.14.5"`; both `--image=...:v1.14.5` flags in the talhelper line; the PASS text naming 1.14.5 (`is valid for metal mode`, `DIFFERENT = v1.14.5 has something new`, `1.14.5-only line`, `negA NOT yet run with v1.14.5`) | `talosctl-1.14.6`; `--image=...:v1.14.6` (both flags, same value); every `1.14.5` in that PASS text reads `1.14.6` | controls A and B are re-run in-window, never assumed; `wn145.txt` / `wn141.txt` are only file names, keep them |
-| S7 | 1589, 1591, 1597, 1599, 1611 | commit message: file `talos-1145-commit-msg.txt`; subject `node image v1.14.1 -> v1.14.5`; `validates identically under talosctl 1.14.1 and 1.14.5`; `v1.14.2..v1.14.5: kernel 6.18.58`; `Plan: ...talos-linux-1.14.5.md` | `talos-1146-commit-msg.txt`; `-> v1.14.6`; `1.14.1 and 1.14.6`; `v1.14.2..v1.14.6: kernel 6.18.63` (etcd 3.7.1 -> 3.7.3 and containerd 2.3.7 stay as written); `Plan: ...talos-linux-1.14.6.md` | `Supersedes Renovate PR #248` stays true: #248 now carries `talosVersion: v1.14.6` |
-| S18 | 1618, 1621 | PR #248 `rebased to v1.14.5`; `gh pr close 248 --comment "landed via <sha> (plan talos-linux-1.14.5 §3.7)"` | `rebased to v1.14.6`; `... (plan talos-linux-1.14.6 §3.7)` | `gh pr list` 2026-11-16: #248 `v1.14.1 -> v1.14.6` |
-| S19 | 1714, 1715 | `etcd-pre-v1.14.5.db` (snapshot, chmod, stat: three uses) | `etcd-pre-v1.14.6.db` | file name |
-| S8 / S9 | 1795, 1797, 1803, 2430, 2521, 2058, 2346, 2357 | `Tag: v1.14.5`; `Talos (v1.14.5)`; kernel `6.18.58-talos`; "a canary that came back on v1.14.5" | `Tag: v1.14.6`; `Talos (v1.14.6)`; kernel **`6.18.63-talos`**; containerd `containerd://2.3.7` unchanged | `constants.go` at both tags and release.toml `Linux: 6.18.63`; PASS compares against the live `kernelVersion` column |
-| S12 | 1940, 1941, 1942, 1947, 1948, 1950, 1951, 1955, 1957 | 3.12 CLI pin: heading `-> 1.14.5`; `grep -c 'Talos (v1.14.5)'`; the `.mise.toml` sed; `talos-1145-cli-msg.txt`; commit text `1.14.1 -> 1.14.5`, `report Talos v1.14.5`; `Client v1.14.5, servers v1.14.5`; `Fewer than 3 nodes on v1.14.5` | `1.14.6` everywhere (sed and diff below); PR #247 now reads `1.14.1 -> 1.14.6`; still LAST, after 5.4 | BSD-sed dry-run 2026-11-16 on a scratch copy of `.mise.toml`, diff pasted below |
-| S20 | 2083, 2086, 2108 | k8s-1.36.5 follow-up text `accepts a uniform v1.14.5`; K3 line count `12` = installer pair `:v1.14.1 -> :v1.14.5`; `client v1.14.1, servers v1.14.5` | `v1.14.6` in all three; the count stays `12` | shape only (two installer-image lines plus the five K8s pairs); re-measured in-window at 3.K3 |
-| S21 | 2129, 2133, 2141 | 3.K2 expected diff: context line `talosVersion: v1.14.5` (three places in the block) | `talosVersion: v1.14.6` | the only context line that moves |
-| S22 | 2157 | 3.K3 PASS: installer pair `:v1.14.1 -> :v1.14.5` | `:v1.14.1 -> :v1.14.6` | same shape: 12 lines per node, 0 non-image lines |
-| S23 | 2165, 2167, 2170, 2175 | 3.K4 `(now v1.14.5)` and the grep `'Talos version 1.14.5 is compatible with Kubernetes version 1.36.6'`; PASS text `names 1.14.5` | `Talos version 1.14.6 is compatible with Kubernetes version 1.36.6` (count 3); `names 1.14.6`; `1.14.1` still means a node is not on the target | string measured on the same code path as 1.14.5; confirmed in-window by the count of 3 |
-| S24 | 2217, 2218 | 3.K7 commit text `plan talos-linux-1.14.5, Phase K` and `after the v1.14.5 node roll` | `talos-linux-1.14.6` / `v1.14.6` | text |
-| S25 | 2244 | `did not boot v1.14.5's machined` | `v1.14.6's machined`; expectation `/sbin/modprobe` unchanged | the sysctl default is the same in v1.14.6 |
-| S26 | 2635, 2649, 2704, 2763 | 5.1 `Tag: v1.14.5` (two reads); 5.3 revert message `talos-1145-revert-msg.txt`, `Revert Talos v1.14.5 node config`, `Plan: talos-linux-1.14.5`; 5.5 `grep -c '^talosVersion: v1.14.5$'` expecting 1 | `v1.14.6` / `talos-1146-` / `talos-linux-1.14.6`; the grep expects `^talosVersion: v1.14.6$` | rollback target stays **v1.14.1** (`Tag: v1.14.1` after the downgrade-upgrade) |
-| S10 / S11 | (none) | etcd 3.7.3 on rolled members; rollback image `:v1.14.1` | **unchanged** | `DefaultEtcdVersion = "v3.7.3"` at v1.14.5 AND v1.14.6; no upgrade/sequencer file in the compare |
+| S1 / S4 | 1436, 1440, 1501, 1502 | `for TAG in v1.14.5 v9.9.9`; PASS `v1.14.5 HTTP 200`; 3.4 head `v1.14.5` | `v1.14.7`; PASS `v1.14.7 HTTP 200` and `v9.9.9 HTTP 404`; 3.4 head `v1.14.7` (a newer patch follows 2.4) | re-measured 2026-11-27 (v9.9.9 HTTP 404, v1.14.7 HTTP 200 on `/image/<schematic>/<tag>/metal-amd64.iso`); amd64 index digest `sha256:2db295cf669f2fb7b9f91bebcded5b965656fd17d97eb3dd7c21f89eb0fce8fd`, pinned by premise `factory-publishes-schematic-v1.14.7` |
+| S2 / S3 | 1449, 1462, 1474, 1485 | `talosVersion: v1.14.5` and the deny-rule `currently v1.14.5)` text (seds and the pasted diff) | `v1.14.7` (seds and diff below) | BSD-sed dry-run 2026-11-16, diff pasted below |
+| S5 | 1509, 1510, 1511, 1512, 1515, 1516 | `talosctl-1.14.5`, `.../v1.14.5/talosctl-darwin-arm64`, `sha256sum.txt` URL, `shasum`, `version --client` ; hash `c865077b...3096`; client says `Talos v1.14.5` | `talosctl-1.14.7`, `.../v1.14.7/...`; hash **`7eb6696ead7f6b1a2451fc50f022f4634cdaf7298af963e13c290c5583e185b9`**; client says `Talos v1.14.7` | `sha256sum.txt` of release v1.14.7 read 2026-11-27 (`talosctl-darwin-arm64` line); PASS only if published line AND `shasum -a 256` agree |
+| S6 | 1518, 1520, 1528, 1553, 1561, 1567, 1569, 1573, 1574, 1575, 1578 | `T2="$SCR/talosctl-1.14.5"`; both `--image=...:v1.14.5` flags in the talhelper line; the PASS text naming 1.14.5 (`is valid for metal mode`, `DIFFERENT = v1.14.5 has something new`, `1.14.5-only line`, `negA NOT yet run with v1.14.5`) | `talosctl-1.14.7`; `--image=...:v1.14.7` (both flags, same value); every `1.14.5` in that PASS text reads `1.14.7` | controls A and B are re-run in-window, never assumed; `wn145.txt` / `wn141.txt` are only file names, keep them |
+| S7 | 1589, 1591, 1597, 1599, 1611 | commit message: file `talos-1145-commit-msg.txt`; subject `node image v1.14.1 -> v1.14.5`; `validates identically under talosctl 1.14.1 and 1.14.5`; `v1.14.2..v1.14.5: kernel 6.18.58`; `Plan: ...talos-linux-1.14.5.md` | `talos-1146-commit-msg.txt`; `-> v1.14.7`; `1.14.1 and 1.14.7`; `v1.14.2..v1.14.7: kernel 6.18.65`; the message's `etcd 3.7.1 -> 3.7.3` reads `3.7.1 -> 3.7.4` (row S27); containerd 2.3.7 stays as written; `Plan: ...talos-linux-1.14.6.md` | `Supersedes Renovate PR #248` stays true: #248 now carries `talosVersion: v1.14.7` |
+| S18 | 1618, 1621 | PR #248 `rebased to v1.14.5`; `gh pr close 248 --comment "landed via <sha> (plan talos-linux-1.14.5 §3.7)"` | `rebased to v1.14.7`; `... (plan talos-linux-1.14.6 §3.7)` | `gh pr view 248` 2026-11-27: `update siderolabs/talos ( v1.14.1 → v1.14.7 )`, OPEN |
+| S19 | 1714, 1715 | `etcd-pre-v1.14.5.db` (snapshot, chmod, stat: three uses) | `etcd-pre-v1.14.7.db` | file name |
+| S8 / S9 | 1795, 1797, 1803, 2430, 2521, 2058, 2346, 2357 | `Tag: v1.14.5`; `Talos (v1.14.5)`; kernel `6.18.58-talos`; "a canary that came back on v1.14.5" | `Tag: v1.14.7`; `Talos (v1.14.7)`; kernel **`6.18.65-talos`**; containerd `containerd://2.3.7` unchanged | v1.14.7 release notes `Linux: 6.18.65` (pkgs `a1a4897`), read 2026-11-27; PASS compares against the live `kernelVersion` column |
+| S12 | 1940, 1941, 1942, 1947, 1948, 1950, 1951, 1955, 1957 | 3.12 CLI pin: heading `-> 1.14.5`; `grep -c 'Talos (v1.14.5)'`; the `.mise.toml` sed; `talos-1145-cli-msg.txt`; commit text `1.14.1 -> 1.14.5`, `report Talos v1.14.5`; `Client v1.14.5, servers v1.14.5`; `Fewer than 3 nodes on v1.14.5` | `1.14.7` everywhere (sed and diff below); PR #247 now reads `1.14.1 -> 1.14.7`; still LAST, after 5.4 | BSD-sed dry-run re-run 2026-11-27 on a scratch copy of `.mise.toml`, diff pasted below; `gh pr view 247` 2026-11-27: `1.14.1 → 1.14.7` |
+| S20 | 2083, 2086, 2108 | k8s-1.36.5 follow-up text `accepts a uniform v1.14.5`; K3 line count `12` = installer pair `:v1.14.1 -> :v1.14.5`; `client v1.14.1, servers v1.14.5` | `v1.14.7` in all three; the count stays `12` | shape only (two installer-image lines plus the five K8s pairs); re-measured in-window at 3.K3 - **Phase K DEFERRED (section 3.2): row not executed in this plan.** |
+| S21 | 2129, 2133, 2141 | 3.K2 expected diff: context line `talosVersion: v1.14.5` (three places in the block) | `talosVersion: v1.14.7` | the only context line that moves - **Phase K DEFERRED (section 3.2): row not executed in this plan.** |
+| S22 | 2157 | 3.K3 PASS: installer pair `:v1.14.1 -> :v1.14.5` | `:v1.14.1 -> :v1.14.7` | same shape: 12 lines per node, 0 non-image lines - **Phase K DEFERRED (section 3.2): row not executed in this plan.** |
+| S23 | 2165, 2167, 2170, 2175 | 3.K4 `(now v1.14.5)` and the grep `'Talos version 1.14.5 is compatible with Kubernetes version 1.36.6'`; PASS text `names 1.14.5` | `Talos version 1.14.7 is compatible with Kubernetes version 1.36.6` (count 3); `names 1.14.7`; `1.14.1` still means a node is not on the target | string measured on the same code path as 1.14.5; confirmed in-window by the count of 3 - **Phase K DEFERRED (section 3.2): row not executed in this plan.** |
+| S24 | 2217, 2218 | 3.K7 commit text `plan talos-linux-1.14.5, Phase K` and `after the v1.14.5 node roll` | `talos-linux-1.14.6` / `v1.14.7` | text - **Phase K DEFERRED (section 3.2): row not executed in this plan.** |
+| S25 | 2244 | `did not boot v1.14.5's machined` | `v1.14.7's machined`; expectation `/sbin/modprobe` unchanged | the sysctl default is the same in v1.14.7 |
+| S26 | 2635, 2649, 2704, 2763 | 5.1 `Tag: v1.14.5` (two reads); 5.3 revert message `talos-1145-revert-msg.txt`, `Revert Talos v1.14.5 node config`, `Plan: talos-linux-1.14.5`; 5.5 `grep -c '^talosVersion: v1.14.5$'` expecting 1 | `v1.14.7` / `talos-1146-` / `talos-linux-1.14.6`; the grep expects `^talosVersion: v1.14.7$` | rollback target stays **v1.14.1** (`Tag: v1.14.1` after the downgrade-upgrade) |
+| S10 / S11 | (none) | etcd target on rolled members; rollback image `:v1.14.1` | etcd target is now **3.7.4** (was 3.7.3 for v1.14.5/v1.14.6); rollback image `:v1.14.1` unchanged | `DefaultEtcdVersion = "v3.7.4"` in `pkg/machinery/constants/constants.go` at tag v1.14.7 (read 2026-11-27; it was `v3.7.3` at v1.14.5 and v1.14.6); the v1.14.6...v1.14.7 compare lists no upgrade/sequencer/etcd-service file (only `v1alpha1_dbus.go`, `cgroup/membership.go`, `logind/broker.go`, constants, gendata, docs) |
+| S27 | 652, 893, 920, 921, 1049, 1050, 1051, 1052, 1600, 1710, 1793, 1796, 1797, 1798, 2275, 2383, 2388, 2395, 2396, 2399, 2400, 2402, 2431, 2432, 2445, 2461, 2609, 2610, 2611, 2830, 2917, 3089 (32 lines; section 2.0's second awk line lists them) | every `3.7.3` (the etcd version a rolled member must report: `etcdstat.py rolled` `want = "3.7.3"` at 921, its controls 1049-1052, PROC 3.10 / 4.3 CA6 / 4.4 #2 expectations, the commit text, rollback prose) | `3.7.4` | v1.14.7 `DefaultEtcdVersion`. **Fail-safe if missed:** an un-substituted `want = "3.7.3"` makes `etcdstat.py rolled` print `PROTOCOL 3.7.4 != 3.7.3 (rolled)` + `VERDICT FAIL` on the canary = STOP, never a false pass. Storage version stays 3.7.0 (etcd 3.7.4 CHANGELOG lists no storage/WAL-format change; its server fixes are the `--force-new-cluster` consistent-index fix, an alarmStore race, and the legacy v2 WAL metadata replay panic on startup) |
 
 **Read as the new target, no edit needed (prose, history or reciprocity text that merely names the plan or version):** PROC lines 1912, 2612, 2631, 2663, 2666, 2682,
-2685, 2695, 2771 (rollback/abort prose: "v1.14.5" means the roll's target, read it as v1.14.6), 2809, 2868, 2870, 2871, 2877, 2878, 2890, 2891, 2894, 2896, 2901, 2906 (reciprocity and
-sibling-plan prose; this plan's section 6 supersedes it), 2923, 2925 (kernel `6.18.58` in the risk table: read `6.18.63`), 2937, 2949, 3017, 3056, 3072, 3076, 3085, 3095, 3096
-(open-item history). **Kept as written because still true for v1.14.6:** 2237 (on-demand module loading arrived in v1.14.5 and persists), 2370 (the `/etc/hosts` rendering change arrived in
-v1.14.5), 2620 (the `Rollback` source files are unchanged between v1.14.4, v1.14.5 and v1.14.6; the v1.14.5...v1.14.6 compare listed no upgrade/sequencer file).
+2685, 2695, 2771 (rollback/abort prose: "v1.14.5" means the roll's target, read it as v1.14.7), 2809, 2868, 2870, 2871, 2877, 2878, 2890, 2891, 2894, 2896, 2901, 2906 (reciprocity and
+sibling-plan prose; this plan's section 6 supersedes it), 2923, 2925 (kernel `6.18.58` in the risk table: read `6.18.65`), 2937, 2949, 3017, 3056, 3072, 3076, 3085, 3095, 3096
+(open-item history). **Kept as written because still true for v1.14.7:** 2237 (on-demand module loading arrived in v1.14.5 and persists), 2370 (the `/etc/hosts` rendering change arrived in
+v1.14.5), 2620 (the `Rollback` source files are unchanged between v1.14.4, v1.14.5 and v1.14.7; the v1.14.5...v1.14.7 compare listed no upgrade/sequencer file).
 
-**S2/S3 dry-tests (BSD sed, scratch copies of the live files, 2026-11-16):**
+**S2/S3 dry-tests (BSD sed, scratch copies of the live files, re-run for v1.14.7 on 2026-11-27):**
 ```bash
-sed -i '' -e 's|^talosVersion: v1\.14\.1$|talosVersion: v1.14.6|' kubernetes/bootstrap/talos/talconfig.yaml
+sed -i '' -e 's|^talosVersion: v1\.14\.1$|talosVersion: v1.14.7|' kubernetes/bootstrap/talos/talconfig.yaml
 git --no-pager diff kubernetes/bootstrap/talos/talconfig.yaml
-sed -i '' -e 's|kubernetes/bootstrap/talos/talconfig.yaml, currently v1\.14\.1), so it must|kubernetes/bootstrap/talos/talconfig.yaml, currently v1.14.6), so it must|' runbooks/auto-update-policy.yaml
+sed -i '' -e 's|kubernetes/bootstrap/talos/talconfig.yaml, currently v1\.14\.1), so it must|kubernetes/bootstrap/talos/talconfig.yaml, currently v1.14.7), so it must|' runbooks/auto-update-policy.yaml
 git --no-pager diff runbooks/auto-update-policy.yaml
 ```
 Resulting `-`/`+` pairs (the only lines that may differ; assert `1 insertion(+), 1 deletion(-)` per file, then bump the
-policy file's `version:` to the day's date, currently `"2026.11.07"`; `@@` numbers drift, never assert them):
+policy file's `version:` to the day's date, currently `"2026.11.25"` (re-read 2026-11-27); `@@` numbers drift, never assert them):
 ```diff
 -talosVersion: v1.14.1
-+talosVersion: v1.14.6
++talosVersion: v1.14.7
 -      kubernetes/bootstrap/talos/talconfig.yaml, currently v1.14.1), so it must
-+      kubernetes/bootstrap/talos/talconfig.yaml, currently v1.14.6), so it must
++      kubernetes/bootstrap/talos/talconfig.yaml, currently v1.14.7), so it must
 ```
-**S12 dry-test (BSD sed on a scratch copy of the live `.mise.toml`, 2026-11-16; the CLI-pin line carries a trailing comment that the sed leaves alone):**
+**S12 dry-test (BSD sed on a scratch copy of the live `.mise.toml`, re-run for v1.14.7 on 2026-11-27; the CLI-pin line carries a trailing comment that the sed leaves alone):**
 ```bash
-sed -i '' -e 's|^"aqua:siderolabs/talos" = "1\.14\.1"  # CLI pin|"aqua:siderolabs/talos" = "1.14.6"  # CLI pin|' .mise.toml
+sed -i '' -e 's|^"aqua:siderolabs/talos" = "1\.14\.1"  # CLI pin|"aqua:siderolabs/talos" = "1.14.7"  # CLI pin|' .mise.toml
 git --no-pager diff .mise.toml          # exactly ONE -/+ pair
 ```
 ```diff
 -"aqua:siderolabs/talos" = "1.14.1"  # CLI pin — track the CLUSTER (talosVersion in
-+"aqua:siderolabs/talos" = "1.14.6"  # CLI pin — track the CLUSTER (talosVersion in
++"aqua:siderolabs/talos" = "1.14.7"  # CLI pin — track the CLUSTER (talosVersion in
 ```
-Preconditions measured clean 2026-11-16: `git status --porcelain kubernetes/bootstrap/talos runbooks/auto-update-policy.yaml`
+Preconditions measured clean 2026-11-16 (re-check in-window): `git status --porcelain kubernetes/bootstrap/talos runbooks/auto-update-policy.yaml`
 printed nothing. If either file has foreign uncommitted edits in-window: STOP, let that session land first, commit with
 `git commit --only <path>`, and confirm `git log -1 --format=%s` is yours before pushing.
 
@@ -631,20 +712,26 @@ Execute PROC Phase A and Phase B **step by step as written**, with §3.0 substit
    passed twice at window start; it is NOT re-run here.
 2. **Before node 2 and node 3 (each drain):** `etcdquiet.py --mode node --since-epoch "$(cat "$SCR/returned-<previous node>.epoch")"` must print `VERDICT PASS`, AND
    §2.3 re-run (CLEAR, `0`). The previous node's `returned-<node>.epoch` is written at the first line of PROC 3.10 (`date +%s`, node seen `Ready`). A FAIL with a node
-   already on v1.14.6 = STOP part-rolled (PROC §3.11 split rule; PROC §5.2). Never roll a second node into an etcd that has elected since the last node returned.
+   already on v1.14.7 = STOP part-rolled (PROC §3.11 split rule; PROC §5.2). Never roll a second node into an etcd that has elected since the last node returned.
 3. **After each node returns:** run CA8 (§4.1) on that node, in addition to PROC §4.1.
 4. **Never re-run `plan-premises.py` mid-roll** (§2.1): `nodes-on-v1.14.1`, the etcd `3.7.1` group and both election premises are pre-roll facts.
+5. **Skip PROC §3.7b (the Kubernetes 1.36.6 image pre-pull)** and take PROC §3.K0's DEFER branch without running its clock (section 3.2). Nothing is pre-pulled onto the nodes for Phase K in this plan.
 
-### 3.2 Phase K — Kubernetes v1.36.0 → v1.36.6 (PROC §3 Phase K, unchanged; expected to DEFER)
+### 3.2 Phase K — DEFERRED (changed 2026-11-27; PROC §3.7b and §3.K1–§3.K7 are NOT executed)
 
-Run only if PROC §3.K0's clock admits it. **Two deltas for v1.14.6:** (a) PROC §3.K4's read-only dry-run is now expected
-to show *affinity* hunks on Talos bootstrap objects (commit `a02b84749`, §1.2) — read it object by object, and STOP on any
-`delete` or any object outside the 7-entry inventory (premise `bootstrap-inventory-7`); (b) after §3.K3's re-render run
-CA9. The `siderolabs/kubelet` deny-rule reason defect (PROC Open item 7) stands.
+Kubernetes stays **v1.36.0** through and after this window. PROC's Phase K targets v1.36.6, but v1.36.7 has been
+published (2026-11-25) and Renovate PR #233 tracks it, so running Phase K as written would land a superseded patch
+with no re-derived evidence (§1.0). At the point where PROC runs §3.K0, record `K0 DEFER (Phase K split out by
+plan, 2026-11-27)` in the run log and go straight to PROC §5.4 (lift the freeze), then PROC §3.12 (talosctl CLI pin
+→ 1.14.7, last). CA9 below and the `bootstrap-inventory-7` / `apiserver-configs-on-1.36.0` / `build-info-scraped-12`
+premises stay. They now assert that the node roll did NOT move Kubernetes, and they are the baseline the follow-up
+Kubernetes v1.36.7 plan inherits. **Do not merge PR #233 before or during this roll:** premise
+`talconfig-pins-1.36.0` fails if it lands. The earlier Phase-K-only notes (affinity hunks from `a02b84749` in
+§3.K4's dry-run, the `siderolabs/kubelet` deny-rule reason defect, PROC Open item 7) move to that follow-up plan.
 
 ## 4) Verification
 
-PROC §4.1–§4.7 apply, with §3.0 S9–S10 expectations (kernel `6.18.63-talos`, etcd 3.7.3 on rolled members). New and
+PROC §4.1–§4.6 apply (§4.7 is Phase K verification: not run, Phase K is deferred), with §3.0 S9–S10/S27 expectations (kernel `6.18.65-talos`, etcd 3.7.4 on rolled members). New and
 changed gates:
 
 ### 4.1 CONTENTS ASSERTIONS added by this plan
@@ -669,12 +756,12 @@ PY
 ```
 CONTENTS ASSERTION: every `nvme0n1pN` DiscoveredVolume on the returned node has a non-zero `offset` and ≥ 4 partitions —
 measured by `voloffset.py`, compared to the 2026-11-16 baseline on all three nodes (`p1@1048576 p2@105906176
-p3@106954752 p4@1155530752 p5@1156579328 p6@1261436928`, six partitions, `VERDICT PASS`). Guards the one v1.14.6 change
-that touches disk bookkeeping (`8f6c141db`). It fails on a zeroed offset (control proves it) and on a missing partition
+p3@106954752 p4@1155530752 p5@1156579328 p6@1261436928`, six partitions, `VERDICT PASS`). Guards the one change of the hop
+that touches disk bookkeeping (`8f6c141db`, arrived in v1.14.6, carried by v1.14.7). It fails on a zeroed offset (control proves it) and on a missing partition
 table (`partitions=0` < 4). It is a floor on the *discovery view*, not a data-integrity proof: Longhorn and CIFS proofs in
 PROC §4.1–§4.2 remain the data-path gates.
 
-**CA9 — encryption layout untouched** (only if Phase K re-renders; PROC §3.K3):
+**CA9 — encryption layout untouched** (run once at the end of the roll; with Phase K deferred nothing re-renders, so this is the no-change proof for the hop):
 ```bash
 grep -c -E '^ +- secretbox:|^ +- name: key2|^ +- identity:' kubernetes/bootstrap/talos/patches/controller/kube-etcd-encryption.yaml     # expect 3
 talosctl --nodes=192.168.55.11 get machineconfig v1alpha1 -o yaml | grep -c -E '^ +- secretbox:|^ +- name: key2|^ +- identity:'   # expect 3
@@ -692,13 +779,13 @@ it prints `0`: read the printed number, not `$?` (pipefail aside).
 CONTROL: metric etcd_server_leader_changes_seen_total — §2.2 reads `increase()` per member: start mode over 2 h and 24 h (ceiling 0 / 5.5), node mode since the last QUIET/RETURNED stamp (ceiling 0, window >= 600 s); floor: exactly 3 series.
 CONTROL: metric etcd_disk_wal_fsync_duration_seconds_bucket — §2.2 p99 over 10 m per member, ceiling 50 ms, 3/3 series (an unscraped histogram prints no series and fails).
 CONTROL: metric etcd_disk_backend_commit_duration_seconds_bucket — §2.2 p99 over 10 m, ceiling 100 ms, 3/3 series.
-CONTROL: metric etcd_server_version — PROC §4.4 #2: server_version count by group 3.7.1 ×3 before, 3.7.3 ×3 after (premise `etcd-protocol-3.7`).
-CONTROL: metric kubernetes_build_info — Phase K floor: 12 series (premise `build-info-scraped-12`), then 12 at v1.36.6.
+CONTROL: metric etcd_server_version — PROC §4.4 #2: server_version count by group 3.7.1 ×3 before, 3.7.4 ×3 after (premise `etcd-protocol-3.7`).
+CONTROL: metric kubernetes_build_info — 12 series at v1.36.0 before AND after the roll (premise `build-info-scraped-12`; Phase K deferred, so any series at another version after the roll is a FAIL).
 CONTROL: alertname etcdDatabaseHighFragmentationRatio — not firing at the end of the window (PROC §3.8.0 defrags before the roll; a firing alert afterwards means the db grew back or the defrag was skipped); PROC §4.4 #11 compares the whole alert SET against §2.8.
 
 ### 4.3 Whole-cluster verification
 
-PROC §4.4 #1–#11 as written (S9: kernel `6.18.63-talos`), then PROC §4.5–§4.7 for Phase K, then **a 24 h soak read** the
+PROC §4.4 #1–#11 as written (S9: kernel `6.18.65-talos`, S27: etcd 3.7.4 ×3), then PROC §4.5–§4.6 (§4.7 skipped: Phase K deferred), then **a 24 h soak read** the
 next morning: `etcdquiet.py` with `--max-elections-2h 999` is NOT the soak gate; the soak gate is the 24 h election line
 < 6 **and** no pattern-(ii) triage record (PROC §3.10). The roll itself MAY raise elections on each reboot (the
 expected, pre-recorded ones per PROC §3.10a); only an *unrecorded* election is a FAIL.
@@ -707,10 +794,9 @@ expected, pre-recorded ones per PROC §3.10a); only an *unrecorded* election is 
 
 PROC §5 applies unchanged: **§5.1 per-node, DRAINED** (`talosctl upgrade --image <factory installer>:v1.14.1` on a Ready
 node; bare `talosctl rollback` is only for a NotReady node and does not drain), **§5.2 stop, don't unwind** (a part-rolled
-cluster, nodes on mixed v1.14.1/v1.14.6, is a supported steady state while etcd is healthy), §5.2a window aborted before the
-canary, §5.3 git revert only after no node runs v1.14.6 (the commit is inert; Flux does not reconcile
-`kubernetes/bootstrap/talos/`), **§5.4 lift the push freeze on EVERY exit path**, §5.5 Phase K → 1.36.0 (`upgrade-k8s --to
-v1.36.0`). Additions for this plan:
+cluster, nodes on mixed v1.14.1/v1.14.7, is a supported steady state while etcd is healthy), §5.2a window aborted before the
+canary, §5.3 git revert only after no node runs v1.14.7 (the commit is inert; Flux does not reconcile
+`kubernetes/bootstrap/talos/`), **§5.4 lift the push freeze on EVERY exit path**; §5.5 (Phase K → 1.36.0) does not apply, since Phase K is deferred and Kubernetes never leaves v1.36.0. Additions for this plan:
 - **etcd gate trips mid-roll (§2.2 node-mode FAIL before node N+1):** STOP, do not roll further, lift the freeze per PROC §5.4,
   record the node list and the stamp used; the cluster is safe part-rolled. The etcd snapshot of PROC §3.8a is the defence in depth
   (`talosctl etcd snapshot`, mode 600, in `$SCR`; restore path `docs/sops/etcd.md` / `docs/sops/disaster-recovery.md`).
@@ -722,14 +808,15 @@ v1.36.0`). Additions for this plan:
 
 ## 6) Interference notes
 
-- **Exclusive Sunday.** `exclusive: true`; the slot is the operator's call. Slot facts: `sun-attended:2026-11-22` is
-  currently held by `talos-linux-1.14.5`; `longhorn-1.13.0` (its `depends_on`) missed `11-15`, so 11-22 may be consumed by
-  that plan instead — re-read `maintenance-plan.py --open` before assigning. `redis-fleet-8.10.3` is on 11-29 (the
-  continuation Sunday PROC §6.2 reserves); `helm-drift-detection` sat-attended 11-28. A hard-churn day is NO ROLL: the plan
+- **Exclusive Sunday.** `exclusive: true`; the slot is the operator's call. Slot facts re-read 2026-11-27
+  (`maintenance-plan.py --open`): `sun-attended:2026-11-29` redis-fleet-8.10.3 (draft), `12-13` flux-oci-chart-sources,
+  `12-20` postgres-digest-refresh-2026-11. `longhorn-1.13.0` still names the PAST slot 11-22 and is needs_replan.
+  The earliest this plan can take is the first free exclusive Sunday AFTER `longhorn-1.13.0` has executed, with
+  plan-reviewer `ready-for-go`, a fresh operator GO, and §2.2 passing twice. A hard-churn day is NO ROLL: the plan
   returns to the queue, it is not rescheduled into a Saturday (needs `allow_reboot`, Sunday only).
 - **Reciprocity owed** (conflicts here, not named back): every plan in this file's `conflicts_with` still names
   `talos-linux-1.14.5` only. `etcd-timeouts-5000-500` (blocked) must name `talos-linux-1.14.6` and its owner must pick up
-  §1.4. `talos-power-tuning-ab` baselines (kernel 6.18.51) will be re-baselined on 6.18.63.
+  §1.4. `talos-power-tuning-ab` baselines (kernel 6.18.51) will be re-baselined on 6.18.65.
 - **Shared surfaces** (`touches.shared`): apiserver, etcd, cilium, coredns, longhorn, envoy gateway + public edge,
   authentik, cert-manager, `monitoring` (the window's instrument — no Prometheus change same day), `igpu-i915`,
   `cifs-share`, `flux-source`/`git-main` (push freeze), `offsite-backup` (§2.3), node-pinned home-automation
@@ -737,11 +824,18 @@ v1.36.0`). Additions for this plan:
 - **`depends_on: [longhorn-1.13.0]`** — never roll nodes with a Longhorn engine/manager move in flight, and the rebuild
   gates are priced at the limit 2 that plan leaves alone.
 - **Duration:** 180 = the sun-attended schedulable cap (200 − 20 Step 0), priced as PROC §7 (OS roll 165–290 depending on
-  rebuild time R at limit 2, UNMEASURED; the canary measures it; Phase K 45 defers). v1.14.6 changes no mechanics. §2.2's two
+  rebuild time R at limit 2, UNMEASURED; the canary measures it; Phase K is deferred, 0 min). v1.14.7 changes no mechanics. §2.2's two
   15-minute-apart reads add ≤ 20 min at window start and are inside Step 0's slack only if Step 0 finishes early: if
   the window cannot afford them, that is a reason not to start.
 
 ## Open items / repo corrections (reported, not worked around)
+
+0. **(2026-11-27) Follow-ups from the in-place re-plan.** (a) **Kubernetes v1.36.7** needs its own plan (Renovate PR #233), written after
+   this roll and reusing PROC Phase K with v1.36.7 values; until then #233 must stay unmerged (premise `talconfig-pins-1.36.0`).
+   (b) **`longhorn-1.13.0` must be re-planned against live chart 1.12.2** before this plan can be scheduled (§1.0). (c) The dispatch brief
+   called the etcd premises' extraction "broken". It was not: a regex over raw JSON fails with the raw JSON echoed back. Converting them to
+   scalars fixes the readability, not a bug. A `premise-fail` on the two etcd premises is the designed churn gate and clears itself;
+   the dispatcher should not send it to re-plan again (repo correction for whatever routes `premise-fail` to Step 0.5 supply (b)).
 
 1. **Operator decision owed:** `etcd-timeouts-5000-500` was ordered BEFORE the roll on 2026-11-02; it is now `blocked`
    (Talos refuses `service etcd restart`). This plan drops it from `depends_on` and recommends the reboot-based follow-up of
@@ -755,8 +849,8 @@ v1.36.0`). Additions for this plan:
    step are wrong on Talos ≥ 1.14.1** (F-be3f5bf0): the mechanism is a reboot. Reported, not edited.
 5. **PROC Open items 1–14 still stand** (stale `talos-upgrade.md` §14.2 live-config text, ImageUpdateAutomation suspend rule,
    `siderolabs/kubelet` deny-rule reason, `talos-power-tuning-ab` premise, …); this file re-derives none of them.
-6. Premise `factory-publishes-schematic-v1.14.6` can exceed the runner's 60 s on a cold factory tag (measured: > 2 min for the
-   first v1.14.6 request, then instant). Warm it once at Phase A (§3.1 does).
+6. Premise `factory-publishes-schematic-v1.14.7` can exceed the runner's 60 s on a cold factory tag (measured: > 2 min for the
+   first v1.14.7 request, then instant). Warm it once at Phase A (§3.1 does).
 7. **Repo correction (found while fencing the off-site Jobs): `suspend` is not a pause for a `backoffLimit: 0` Job.** Kubernetes v1.36.0
    `job_controller.go` deletes a suspended Job's active pods, counts a deleted pod as failed (`isPodFailed`, "Count deleted Pods as failures") and fails the Job when
    `failed > backoffLimit` (lines 1067 and 1086). Any SOP, plan or agent advice that says "suspend the seed Job before maintenance" would fail it exactly as an eviction does. Read from
