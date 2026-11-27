@@ -33,6 +33,7 @@ touches:
     - arc-system                      # CNP arc-system-lockdown
     - arc-build                       # CNPs arc-build-egress, absenty-build-egress, rainbow-rescue-build-egress
     - default                         # §4.8 CNI-ADD canaries (created + deleted)
+    - monitoring                      # CNP edot-collector-ingress (L3/L4 ingress, new 2026-11-25) + LB VIP .19 (§4.7c)
   resources:
     - helmrelease/cilium              # kube-system — the only LIVE pin
     - daemonset/cilium                # 3 nodes; rolled ONE node at a time via temporary updateStrategy OnDelete (§3.4)
@@ -41,9 +42,10 @@ touches:
     - kubernetes/apps/kube-system/cilium/app/helmrelease.yaml      # version pin + temporary upgrade.disableWait
     - kubernetes/apps/kube-system/cilium/app/helm-values.yaml      # temporary updateStrategy OnDelete
     - kubernetes/bootstrap/apps/helmfile.yaml                      # bootstrap/DR-only pin, inert at runtime
-    - "14 LoadBalancer Services (VLAN 55 VIPs) announced via CiliumL2AnnouncementPolicy l2-policy"
-    - "14 cilium-l2announce-* Leases in kube-system — ALL RENAMED by 1.20.5 (<ns>-<svc> -> <ns>.<svc>, §1.4)"
-    - "6 CiliumNetworkPolicies (all L7 DNS + toFQDNs)"
+    - "15 LoadBalancer Services (VLAN 55 VIPs) announced via CiliumL2AnnouncementPolicy l2-policy"
+                                      # 15 since 2026-11-25: +monitoring/edot-collector-syslog .19 (e6b6c1dfe)
+    - "15 cilium-l2announce-* Leases in kube-system — ALL RENAMED by 1.20.5 (<ns>-<svc> -> <ns>.<svc>, §1.4)"
+    - "7 CiliumNetworkPolicies (6 egress L7 DNS + toFQDNs; 1 L3/L4 ingress: monitoring/edot-collector-ingress)"
   shared:
     - cilium                          # the CNI itself
     - cni                             # pod networking, kube-proxy replacement, policy enforcement
@@ -118,9 +120,9 @@ premises:                             # Every run: checked against plan-premises
     run: kubectl get ds -n kube-system cilium -o jsonpath='{.status.desiredNumberScheduled} {.status.numberReady}'
     expect_exact: "3 3"
   - id: etcd-leader-changes-24h-below-6
-    why: "etcd base-rate rule (docs/sops/etcd.md: >=6 leader changes/24h = already unstable = NO-GO). `< bool 6` returns 1 when quiet, 0 when not; an empty result (no scrape) also fails the grep. MEASURED 2026-11-18: 6.0 in 24h -> this premise FAILS TODAY (open findings F-33873912/F-6938f5a1). That is the gate working, not a defect: the plan is not runnable until churn subsides."
-    run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=max(increase(etcd_server_leader_changes_seen_total%5B24h%5D))%3Cbool%206' | grep -c -E '"value":\[[0-9.]+,"1"\]'
-    expect_exact: "1"
+    why: "etcd base-rate rule (docs/sops/etcd.md: >=6 leader changes/24h = already unstable = NO-GO). Reads the RAW worst-member 24h increase and matches a value below 6 (0..5.999). Re-planned 2026-11-27: the old form (`< bool 6` piped to grep -c for value 1) printed '0' for BOTH 'churning' and 'not scraped', so the failure line said nothing. Now the got-value IS the measurement. FAILS on: >=6 (e.g. '6.0', '11.0038'), an empty result list (etcd not scraped: no value field), an API/proxy error. MEASURED 2026-11-27: 11.0 (per member 9.0/11.0/10.0) -> this premise FAILS TODAY, open findings F-33873912/F-6938f5a1. That is the gate working: not runnable until churn subsides. Never relax it."
+    run: kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=max(increase(etcd_server_leader_changes_seen_total%5B24h%5D))'
+    expect_matches: "\"value\":\\[[0-9.]+,\"[0-5](\\.[0-9]+)?\"\\]"
   - id: updatestrategy-is-rollingupdate
     why: "§3.4a flips the DaemonSet to OnDelete; if it already is OnDelete a previous attempt stopped mid-roll."
     run: kubectl get ds -n kube-system cilium -o jsonpath='{.spec.updateStrategy.type}'
@@ -137,14 +139,14 @@ premises:                             # Every run: checked against plan-premises
     why: "§5.3 rolls back to the 1.20.4 revision recorded in §2q (measured: 26 deployed, 25 superseded)."
     run: helm history cilium -n kube-system | grep -c 'cilium-1.20.4'
     expect_matches: "^[1-9]"
-  - id: lb-services-are-14
-    why: "§4.4 diffs the LB table. 14 today (the 1.20.4 plan said 13; re-measured, never copied)."
+  - id: lb-services-are-15
+    why: "Staleness detector for the LB/VIP blast radius. 15 at re-plan 2026-11-27 (14 on 2026-11-18; +monitoring/edot-collector-syslog .19 created 2026-11-25). §3.4b/§4.4b derive their expected count from the §2e baseline FILE, so a future add only needs this pin re-measured, but a moved count still means re-read §1.4 for the new Service (eTP, policy) before running."
     run: kubectl get svc -A --no-headers | grep -c LoadBalancer
-    expect_exact: "14"
-  - id: l2-leases-old-format-14
-    why: "Baseline for §4.4b: 14 Leases in the pre-1.20.5 name format (cilium-l2announce-<ns>-<svc>)."
+    expect_exact: "15"
+  - id: l2-leases-old-format-15
+    why: "Baseline for §4.4b: one old-format Lease (cilium-l2announce-<ns>-<svc>) per LB Service = 15. Must equal lb-services-are-15; a mismatch means a VIP has no announcer before we start."
     run: kubectl get leases -n kube-system -o custom-columns=N:.metadata.name --no-headers | grep -c '^cilium-l2announce-'
-    expect_exact: "14"
+    expect_exact: "15"
   - id: l2-leases-new-format-0
     why: "Baseline for §4.4b: 0 Leases in the 1.20.5 format (<ns>.<svc>). If non-zero, a 1.20.5 agent already ran here."
     run: kubectl get leases -n kube-system -o custom-columns=N:.metadata.name --no-headers | grep -c 'cilium-l2announce-[a-z0-9-]*\.'
@@ -157,10 +159,10 @@ premises:                             # Every run: checked against plan-premises
     why: "A pool already in conflict re-allocates unpredictably on operator restart; §4.4 would misread it."
     run: kubectl get ciliumloadbalancerippool pool -o jsonpath='{.status.conditions[?(@.type=="cilium.io/PoolConflict")].status}'
     expect_exact: "False"
-  - id: cnp-count-is-6
-    why: "§1.4's applicability analysis and the §4.9 FQDN canary are written against exactly these 6 CNPs (was 4 at the 1.20.4 plan)."
+  - id: cnp-count-is-7
+    why: "§1.4's applicability analysis is written against exactly these 7 CNPs: 6 egress L7-DNS/toFQDNs (ci-runner x2, arc-system, arc-build x3) + monitoring/edot-collector-ingress (L3/L4 ingress only, added 2026-11-25 by 52ec990dd). Was 6 on 2026-11-18, 4 at the 1.20.4 plan."
     run: kubectl get cnp -A --no-headers | wc -l
-    expect_matches: "^ *6$"
+    expect_matches: "^ *7$"
   - id: cnps-all-valid
     why: "Baseline for §4.7b: all CNPs VALID=True before, so a post-upgrade False is attributable."
     run: kubectl get cnp -A --no-headers | awk '$4!="True"' | wc -l
@@ -169,10 +171,10 @@ premises:                             # Every run: checked against plan-premises
     why: "1.20.5 tightens egress rules combining toServices with toPorts. Vacuous only while no CNP uses toServices (measured 0)."
     run: kubectl get cnp -A -o json | grep -c toServices
     expect_exact: "0"
-  - id: k8s-netpol-count-is-5
-    why: "Baseline for §4.7a (enforcement count derives from 5 NetworkPolicies + 6 CNPs)."
+  - id: k8s-netpol-count-is-6
+    why: "Baseline for §4.7a (enforcement count derives from 6 NetworkPolicies + 7 CNPs). 6 since 2026-11-23: +ai/camofox-browser (ingress podSelector/namespaceSelector only, no ipBlock)."
     run: kubectl get netpol -A --no-headers | wc -l
-    expect_matches: "^ *5$"
+    expect_matches: "^ *6$"
   - id: no-cilium-envoyconfig-crd
     why: "1.20.5 bumps the embedded Envoy to 1.39 and carries gateway-api fixes; irrelevant only while Cilium's Envoy-config feature is absent."
     run: kubectl get crd -o name | awk '/envoyconfigs.cilium.io/' | wc -l
@@ -226,7 +228,6 @@ window: null                          # window agent assigns. Needs sun-attended
                                       # NOW run — NOT sat-attended (70 budget < 90). Free Sunday at authoring:
                                       # 2026-12-06 (11-22 longhorn, 11-29 redis-fleet, 12-13 flux-oci, 12-20
                                       # postgres-digest). Never nightly.
-review: null
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/auto-update.md
@@ -237,8 +238,10 @@ generated: "2026-11-18"               # derived from the executed+retired cilium
                                       # (`git show 3505ff896^:runbooks/maintenance/plans/cilium-1.20.4.md`), with
                                       # its retire-commit correction (disableWait) baked in and every number
                                       # re-measured live. No older open cilium plan existed to supersede.
-needs_replan: "premise-fail: etcd-leader-changes-24h-below-6: got '0', want exactly '1'; lb-services-are-14: got '15', want exactly '14'; l2-leases-old-format-14: got '15', want exactly '14'"
-needs_replan_since: "2026-11-26"
+replanned: "2026-11-27"                # in place after plan-refine premise-fail (lb 14->15, leases 14->15,
+                                      # etcd premise re-expressed). Also found and fixed: cnp 6->7, netpol 5->6.
+                                      # Upstream re-checked 2026-11-27: v1.20.5 is still the newest 1.20.x
+                                      # (gh release list + helm search); no retarget.
 ---
 
 # cilium chart 1.20.4 → 1.20.5 (CNI datapath — plan lane by standing rule)
@@ -317,8 +320,8 @@ Consequences, derived from the same file:
 - **Mixed-version window = two announcers per VIP.** 1.20.4 agents contend for the
   old-named Lease, 1.20.5 agents for the new one. They cannot see each other, so while
   the roll is part-way, each VIP is answered by one 1.20.4 node AND one 1.20.5 node
-  (after the first node rolls, that node holds all 14 new Leases). The LAN learns
-  whichever ARP reply it saw last. **This works here** because all 14 LB Services are
+  (after the first node rolls, that node holds all 15 new Leases). The LAN learns
+  whichever ARP reply it saw last. **This works here** because all 15 LB Services are
   `externalTrafficPolicy: Cluster` (premise `all-lb-services-etp-cluster`), KPR runs on
   every node and Maglev gives every node the same backend choice, so either announcer
   forwards correctly. Expect: possible one-off connection resets on long-lived TCP
@@ -329,7 +332,7 @@ Consequences, derived from the same file:
 - **End state cleans itself up.** The agent's leader election uses `ReleaseOnCancel:
   true`, so when the last 1.20.4 agent stops, it empties `holderIdentity` on the
   old-named Leases, and `leaseGC` (a 1-minute timer in every 1.20.5 agent) deletes
-  every `cilium-l2announce*` Lease with an empty holder. Expected end state: 14 new-format
+  every `cilium-l2announce*` Lease with an empty holder. Expected end state: 15 new-format
   Leases, 0 old-format. §4.4b asserts this. If an old Lease survives with a holder
   still set (an agent killed without a clean shutdown), it is inert. Nothing reads it.
   Delete it by hand only after the full roll (§4.4b).
@@ -349,6 +352,10 @@ routing, `bpf.masquerade`, `l2announcements`, L7 DNS proxy for 6 toFQDNs CNPs):
   namespaces use. §4.9 exercises it.
 - *"Fix restored endpoints getting only policy rules that select all endpoints."*
   This hits the restart path this roll exercises. §4.7 counts enforcement after.
+  Since 2026-11-25 it has a concrete target: `monitoring/edot-collector-ingress` is the
+  first INGRESS CNP here, selecting exactly one endpoint (the edot-collector pod). A restored
+  endpoint that came back with only select-all rules would lose that ingress allow-list;
+  §4.7c asserts the pod's endpoint still shows ingress enforcement `Enabled`.
 - *"l2announcer: Fix L2 announcements of new IPs stopping until the agent restarts
   after many selected services are removed at once"*; *"Fix nodes sending out ARP
   probes for their own IPs when L2 neighbor discovery is enabled"*.
@@ -365,7 +372,7 @@ Behaviour changes that **could** have mattered, each checked live, all **vacuous
 | 1.20.5 change | Live state | Verdict |
 |---|---|---|
 | Egress rules combining `toServices` + `toPorts` no longer allow any destination when the Service is missing/selector-less | 0 CNPs use `toServices` (premise `no-cnp-uses-toservices`) | vacuous |
-| L2 Lease rename (above) | 14 Leases, all old format; all LB svcs eTP=Cluster | handled: §3.4b, §4.4b |
+| L2 Lease rename (above) | 15 Leases, all old format; all LB svcs eTP=Cluster (incl. new edot-collector-syslog .19) | handled: §3.4b, §4.4b |
 | Gateway API route-ordering / GRPCRoute fixes; embedded Envoy bumped to 1.39.x | `enable-gateway-api` absent; no `envoyconfigs.cilium.io` CRD; `envoy.enabled: false` | vacuous |
 | IPAM: operator waits 30 min (was 3) before releasing IPs; multi-pool / ENI fixes | `ipam.mode: kubernetes` (node podCIDRs from k8s, not operator pools) | vacuous |
 | Operator default toleration `node-role.kubernetes.io/etcd` | nodes carry no taints | vacuous (rendered, harmless) |
@@ -374,14 +381,21 @@ Behaviour changes that **could** have mattered, each checked live, all **vacuous
 
 ### 1.5 Numbers that moved since the 1.20.4 plan (do not copy from it)
 
-| Fact | 1.20.4 plan (2026-10-24) | Live 2026-11-18 |
-|---|---|---|
-| LoadBalancer Services / L2 Leases | 13 / 13 | **14 / 14** (added: home-automation/dashcast .32) |
-| CiliumNetworkPolicies | 4 | **6** (+absenty-build-egress, +rainbow-rescue-build-egress in arc-build) |
-| k8s NetworkPolicies | 5 | 5 |
-| helm revision holding the current chart | 14 (1.20.2) | **26 (1.20.4, deployed)**; 25 is also chart 1.20.4 but carries OnDelete — see §2q |
-| `envoy-xds-mode` in cilium-config | `ads` | absent (removed by the 1.20.4 chart, as planned) |
-| etcd leader changes / 24h | 1 | **6.0 — premise FAILS today** |
+| Fact | 1.20.4 plan (2026-10-24) | Live 2026-11-18 | Live 2026-11-27 (re-plan) |
+|---|---|---|---|
+| LoadBalancer Services / L2 Leases | 13 / 13 | 14 / 14 (added: home-automation/dashcast .32) | **15 / 15** (added: monitoring/edot-collector-syslog .19, UDP 5173-5175, eTP=Cluster, created 2026-11-25) |
+| CiliumNetworkPolicies | 4 | 6 (+absenty-build-egress, +rainbow-rescue-build-egress in arc-build) | **7** (+monitoring/edot-collector-ingress, L3/L4 ingress, `fromEntities` + two `fromCIDR` /32s) |
+| k8s NetworkPolicies | 5 | 5 | **6** (+ai/camofox-browser, ingress podSelector only) |
+| helm revision holding the current chart | 14 (1.20.2) | **26 (1.20.4, deployed)**; 25 is also chart 1.20.4 but carries OnDelete — see §2q | unchanged (premise `rollback-revision-present` passes) |
+| `envoy-xds-mode` in cilium-config | `ads` | absent (removed by the 1.20.4 chart, as planned) | absent |
+| etcd leader changes / 24h (worst member) | 1 | 6.0 — premise FAILS | **11.0 (9/11/10 per member) — premise FAILS** |
+
+What the new LB Service changes: one more VIP rides the dual-announcer window (UDP syslog
+from node Talos, the UDM and the UNAS — fire-and-forget, so a mid-roll ARP flip loses at
+most a few log lines, no data store is touched) and one more Lease is renamed. It is
+eTP=Cluster like the rest, so §1.4's dual-announcer argument holds unchanged. Blast radius
+grows by one log-ingest path, not by a new class of failure. The new ingress CNP is the
+more interesting addition (see §1.4 "restored endpoints" and §4.7c).
 
 ### 1.6 Security
 
@@ -404,7 +418,7 @@ helm repo update cilium >/dev/null   # premise chart-1.20.5-is-published reads t
 #   PASS: every premise PASS, exit 0.
 #   A first FAIL naming only no-kustomization-in-flight / no-helmrelease-in-flight is Step 0
 #   still settling: wait ~60s and re-run ONCE. Any other FAIL, or a second FAIL, is a stop.
-#   KNOWN 2026-11-18: etcd-leader-changes-24h-below-6 FAILS (6.0/24h). Do NOT relax it.
+#   KNOWN 2026-11-27: etcd-leader-changes-24h-below-6 FAILS (got the raw value 11.0/24h). Do NOT relax it.
 #   Wait for the churn findings (F-33873912) to clear, or get an explicit operator override
 #   recorded in the window close-out.
 ```
@@ -442,7 +456,7 @@ rows = sorted((i['metadata']['namespace'] + '/' + i['metadata']['name'],
               for i in d['items'] if i['spec']['type'] == 'LoadBalancer')
 [print(n, ip) for n, ip in rows]
 " > /tmp/cilium-lb-before.txt
-wc -l < /tmp/cilium-lb-before.txt                      # PASS: 14
+wc -l < /tmp/cilium-lb-before.txt                      # PASS: 15 (= premise lb-services-are-15; §3.4b/§4.4b read this file)
 grep -c -E ' 192\.168\.55\.(103|104|5)$' /tmp/cilium-lb-before.txt   # PASS: 3 (envoy-internal, envoy-external, adguard)
 
 # h) LAN reachability baseline through both gateway VIPs + DNS VIP (measured 200/200/answers 2026-11-18).
@@ -463,6 +477,8 @@ done | grep -c 'Enabled' | tee /tmp/cilium-enf-before.txt
 for n in ci-runner arc-system arc-build; do kubectl get pods -n $n --no-headers; done | wc -l | tee /tmp/cilium-ci-pods-before.txt
 #   A WINDOW baseline (ARC runners scale with jobs), never a constant. `grep -c 'Enabled'`
 #   does not match "Disabled".
+#   Then run the §4.7c block (edot-collector ingress enforcement) once as a baseline.
+#   PASS: "edot ingress=Enabled". A baseline FAIL makes §4.7c informational; record why.
 
 # n) FQDN canary BASELINE — run the §4.9 block now, unchanged. PASS: ALLOW PASS and DENY PASS
 #    on all three nodes. If the baseline itself fails, §4.9 is INFORMATIONAL for this window:
@@ -689,16 +705,17 @@ for ip in $ORDER; do
   curl -sk -o /dev/null -w "envoy-external .104 -> %{http_code}\n" --max-time 10 --resolve "$HEXT:443:192.168.55.104" "https://$HEXT/" | grep -q ' 200' || { echo "STOP: .104 not 200"; exit 1; }
   dig +short +time=2 +tries=1 @192.168.55.5 kubernetes.io | grep -q '[0-9]' || { echo "STOP: AdGuard VIP .5 not answering"; exit 1; }
   NEWL=$(kubectl get leases -n kube-system -o custom-columns=N:.metadata.name --no-headers | grep -c 'cilium-l2announce-[a-z0-9-]*\.')
-  echo "new-format L2 leases: $NEWL (expect 14 once any node is on 1.20.5)"
-  [ "$NEWL" -eq 14 ] || { echo "STOP: $NEWL/14 new-format leases — a VIP has no 1.20.5 announcer"; exit 1; }
+  WANT=$(wc -l < /tmp/cilium-lb-before.txt | tr -d ' ')
+  echo "new-format L2 leases: $NEWL (expect $WANT = LB services in §2e baseline, 15 at re-plan)"
+  [ "$WANT" -ge 1 ] && [ "$NEWL" -eq "$WANT" ] || { echo "STOP: $NEWL/$WANT new-format leases — a VIP has no 1.20.5 announcer (or §2e baseline missing)"; exit 1; }
 done
 ROLL_EOF
 bash /tmp/cilium-roll.sh; echo "roll rc=$?"      # PASS: rc=0 and 3 nodes rolled.
 ```
 
 Why the per-node lease check is valid: after the first node rolls, that node is the
-only contender for the 14 new-format Leases and takes all of them within one
-lease-acquire cycle (seconds). A count below 14 after the 60 s settle means a Service
+only contender for the 15 new-format Leases and takes all of them within one
+lease-acquire cycle (seconds). A count below 15 after the 60 s settle means a Service
 is not being elected on the new side, so that VIP goes dark once its last 1.20.4
 announcer rolls. The check can FAIL. It reads 0 if the agent did not start the L2
 announcer at all.
@@ -806,7 +823,7 @@ rows = sorted((i['metadata']['namespace'] + '/' + i['metadata']['name'],
 [print(n, ip) for n, ip in rows]
 " > /tmp/cilium-lb-after.txt
 if diff /tmp/cilium-lb-before.txt /tmp/cilium-lb-after.txt; then echo 'LB TABLE UNCHANGED'; else echo 'LB TABLE CHANGED — FAIL'; fi
-#   PASS: LB TABLE UNCHANGED (14 rows).   FAIL: an IP empty or changed (LB-IPAM lost a pin).
+#   PASS: LB TABLE UNCHANGED (15 rows).   FAIL: an IP empty or changed (LB-IPAM lost a pin).
 ```
 
 **4.4b — CONTENTS: the L2 Lease rename completed (the 1.20.5-specific gate).**
@@ -814,7 +831,7 @@ if diff /tmp/cilium-lb-before.txt /tmp/cilium-lb-after.txt; then echo 'LB TABLE 
 ```
 CONTENTS ASSERTION: every LB Service is elected under the NEW Lease name and no old-format
 Lease is still held — measured by the two lease-name counts below, compared to the
-premise baselines old=14 / new=0.
+premise baselines old=15 / new=0 (expected count read from the §2e baseline file).
 ```
 
 ```bash
@@ -822,17 +839,20 @@ sleep 120   # leaseGC runs every 60 s in each 1.20.5 agent; give it two cycles a
 kubectl get leases -n kube-system -o custom-columns=N:.metadata.name,H:.spec.holderIdentity --no-headers \
   | .venv/bin/python3 -c "
 import sys
+want = sum(1 for _ in open('/tmp/cilium-lb-before.txt'))
+assert want >= 1, 'no §2e baseline'
 rows = [l.split() for l in sys.stdin if l.startswith('cilium-l2announce-')]
 new = [r for r in rows if '.' in r[0]]
 old = [r for r in rows if '.' not in r[0]]
 held_new = [r for r in new if len(r) > 1 and r[1] not in ('', '<none>')]
 held_old = [r for r in old if len(r) > 1 and r[1] not in ('', '<none>')]
 print('new=%d held_new=%d old=%d held_old=%d' % (len(new), len(held_new), len(old), len(held_old)))
-print('L2-LEASES OK' if len(new) == 14 and len(held_new) == 14 and len(held_old) == 0 else 'L2-LEASES FAIL')
+print('want=%d' % want)
+print('L2-LEASES OK' if len(new) == want and len(held_new) == want and len(held_old) == 0 else 'L2-LEASES FAIL')
 for r in old: print('  leftover old lease:', r)
 "
-#   PASS: "new=14 held_new=14 old=0 held_old=0" + L2-LEASES OK.
-#   FAIL: new < 14 or held_new < 14 -> a Service has no announcer (its VIP is dark on the LAN even though
+#   PASS: "new=15 held_new=15 old=0 held_old=0", "want=15" + L2-LEASES OK.
+#   FAIL: new < want or held_new < want -> a Service has no announcer (its VIP is dark on the LAN even though
 #         its Service still shows an IP: §4.4 cannot see this). held_old > 0 -> an agent is still 1.20.4
 #         (re-read §4.1).
 #   old > 0 with held_old == 0 just means GC has not run yet: wait 60 s and re-run. Persisting empty-holder
@@ -840,7 +860,7 @@ for r in old: print('  leftover old lease:', r)
 #     kubectl delete lease -n kube-system <exact old name>
 ```
 
-The 14 holder names should also be spread across nodes. Print them with the same command
+The 15 holder names should also be spread across nodes. Print them with the same command
 and compare against the old distribution (e.g. envoy-internal on 03, envoy-external on 02
 at authoring). Informational only: the election is free to move holders.
 
@@ -866,11 +886,27 @@ for p in $(kubectl get pods -n kube-system -l k8s-app=cilium -o name); do
 done | grep -c 'Enabled'
 for n in ci-runner arc-system arc-build; do kubectl get pods -n $n --no-headers; done | wc -l
 #   PASS: enforcement count == /tmp/cilium-enf-before.txt. If it differs, compare the CI-pod count
-#   against /tmp/cilium-ci-pods-before.txt: runner scaling moves it legitimately. A DROP with an
+#   against /tmp/cilium-ci-pods-before.txt: runner scaling moves it legitimately. Since 2026-11-25 the
+#   count also includes the edot-collector pod (ingress Enabled) and since 2026-11-23 camofox-browser;
+#   neither scales, so they do not move it. A DROP with an
 #   UNCHANGED CI-pod count is a FAIL (agents came up without policy print "Disabled").
 # b) CNP validity
 kubectl get cnp -A --no-headers | awk '$4!="True"{print "INVALID: "$0}' ; kubectl get cnp -A --no-headers | wc -l
-#   PASS: no INVALID line, count 6.   FAIL: any INVALID line.
+#   PASS: no INVALID line, count 7.   FAIL: any INVALID line.
+
+# c) The one ingress CNP still enforces on its endpoint (1.20.5 "restored endpoints" fix, §1.4).
+EPOD=$(kubectl get pods -n monitoring -l app=edot-collector -o jsonpath='{.items[0].metadata.name}')
+EIP=$(kubectl get pod -n monitoring "$EPOD" -o jsonpath='{.status.podIP}')
+ENODE=$(kubectl get pod -n monitoring "$EPOD" -o jsonpath='{.spec.nodeName}')
+AG=$(kubectl get pods -n kube-system -l k8s-app=cilium --field-selector spec.nodeName="$ENODE" -o name)
+echo "edot pod=$EPOD ip=$EIP node=$ENODE agent=$AG"
+kubectl -n kube-system exec "$AG" -c cilium-agent -- cilium-dbg endpoint list \
+  | awk -v ip="$EIP" 'index($0, " " ip " ") {print "edot ingress=" $2; f=1} END {if (!f) print "edot ingress=NOT-FOUND"}'
+#   PASS: "edot ingress=Enabled" (measured 2026-11-27 on k8s-nuc14-03, endpoint 1928, pre-upgrade).
+#   FAIL: "edot ingress=Disabled" -> the restored endpoint lost its ingress policy (policy not applied,
+#         the edot syslog ports are open to anything); "NOT-FOUND" -> empty pod/IP/agent variable or the
+#         endpoint is not managed on that node. Either is a §5 trigger if the pre-upgrade run PASSed.
+#   Run it ALSO in §2 (after §2m) as the baseline; a baseline FAIL makes this gate informational.
 ```
 
 **4.8 — A FRESH POD GETS NETWORKING, on every node.** This is the deny rule's
@@ -976,7 +1012,7 @@ flux reconcile source git flux-system && flux reconcile ks cilium -n kube-system
   disableWait commit), then revert the bump, loop per node, then §3.4c again.
 
 Confirm with §4.1 (expect chart 1.20.4, agent `sha256:20fe92e4…`, operator
-`sha256:7a7a3489…`), §4.3, §4.4, §4.4b with the formats reversed (expect old=14 held, new
+`sha256:7a7a3489…`), §4.3, §4.4, §4.4b with the formats reversed (expect old=15 held, new
 Leases GC'd), §4.5, §4.9.
 
 ### 5.3 Limb B — break-glass: datapath broken, Flux cannot act (works without Flux)
@@ -1031,7 +1067,7 @@ yet rolled need nothing. Mixed state during this is the same dual-announcer stat
 
 Rollback is another full agent roll with the same per-node blips, and the same
 dual-announcer window in reverse. Pull it for a real regression: a crash-loop, a dark VIP,
-§4.4b new<14 after GC, or a failed §4 gate whose baseline passed. Never pull it for a
+§4.4b new<15 after GC, or a failed §4 gate whose baseline passed. Never pull it for a
 transient blip during the roll.
 
 ---
@@ -1039,8 +1075,8 @@ transient blip during the roll.
 ## 6) Interference notes
 
 - **CURRENTLY NOT RUNNABLE: etcd gate.** Premise `etcd-leader-changes-24h-below-6` read
-  6.0 on 2026-11-18 (findings F-33873912/F-6938f5a1: leader churn). The plan is correct to
-  refuse. Rolling the CNI on the three etcd nodes while etcd flaps risks quorum loss.
+  6.0 on 2026-11-18 and **11.0 on 2026-11-27** (worst member; findings F-33873912/F-6938f5a1:
+  leader churn, getting worse, not better). The plan is correct to refuse. Rolling the CNI on the three etcd nodes while etcd flaps risks quorum loss.
   Schedule it, but expect the premise to decide GO on the day. Do not override it without
   an explicit operator decision recorded in the close-out.
 - **Attended + solo, both hard.** `exclusive: true` keeps every other plan out of the slot
