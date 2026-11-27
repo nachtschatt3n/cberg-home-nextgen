@@ -1,0 +1,16 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ./ghcr-secret.sops.yaml
+  - ./storageclass.yaml
+  - ./pvc.yaml
+  # longhorn-volume.yaml is deliberately NOT listed — targetNamespace: media
+  # would override its namespace: storage. Apply it by hand once
+  # (docs/sops/longhorn.md).
+  - ./longhorn-pv.yaml
+  - ./longhorn-pvc.yaml
+  - ./networkpolicy.yaml
+  - ./helmrelease.yaml
+  - ./httproute.yaml

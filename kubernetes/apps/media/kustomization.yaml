@@ -11,6 +11,7 @@ resources:
   - ./makemkv/ks.yaml
   - ./library-tools/ks.yaml
   - ./immich/ks.yaml
+  - ./memory-machine/ks.yaml
 patches:
   # PSA override: privileged required for jellyfin/plex /dev/dri access.
   # Target = not-used (namespace transformer runs after patches).

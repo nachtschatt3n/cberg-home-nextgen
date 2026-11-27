@@ -182,7 +182,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | databases | Database backends | 13 |
 | monitoring | Observability stack | 14 |
 | office | Productivity and document management | 11 |
-| media | Media servers | 5 |
+| media | Media servers | 6 |
 | download | Download managers | 2 |
 | kube-system | Core cluster infrastructure | 11 |
 | storage | Persistent storage (Longhorn) | 2 |

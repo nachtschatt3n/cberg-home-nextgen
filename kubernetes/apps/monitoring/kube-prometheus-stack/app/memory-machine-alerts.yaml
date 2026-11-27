@@ -1,0 +1,99 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: memory-machine-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: memory-machine.pods.health
+      interval: 30s
+      rules:
+        - alert: MemoryMachinePodNotReady
+          annotations:
+            summary: Memory Machine pod {{ $labels.pod }} is not ready
+            description: >-
+              Memory Machine pod {{ $labels.pod }} has been not ready for more
+              than 5 minutes. If the web UI pod is affected, check the startup
+              self-check first: it fails closed when outbound connections
+              SUCCEED (NetworkPolicy memory-machine must deny all egress), and
+              the OpenVINO/iGPU path (/dev/dri, gpu.intel.com/i915).
+          # Finished nightly-job pods (Succeeded/Failed) are ready=false by
+          # design; their outcome is covered by the cronjob group below.
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="media", pod=~"memory-machine-.*", condition="true"}
+              unless on(namespace, pod) kube_pod_status_phase{namespace="media", phase=~"Succeeded|Failed"} == 1
+            ) == 0
+          for: 5m
+          labels:
+            category: media
+            component: memory-machine
+            severity: critical
+        - alert: MemoryMachinePodCrashLooping
+          annotations:
+            summary: Memory Machine pod {{ $labels.pod }} is crash looping
+            description: >-
+              Memory Machine pod {{ $labels.pod }} has restarted
+              {{ $value | printf "%.0f" }} times in the last 15 minutes. Check logs.
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="media", pod=~"memory-machine-.*"}[15m]) * 900 > 2
+          for: 5m
+          labels:
+            category: media
+            component: memory-machine
+            severity: critical
+        - alert: MemoryMachinePodRestarted
+          annotations:
+            summary: Memory Machine pod {{ $labels.pod }} restarted
+            description: >-
+              Memory Machine pod {{ $labels.pod }} has restarted at least once in
+              the last 15 minutes. Monitor for repeated restarts.
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="media", pod=~"memory-machine-.*"}[15m]) > 0
+          for: 1m
+          labels:
+            category: media
+            component: memory-machine
+            severity: warning
+    # docs/sops/failed-job-alerting.md: the object-presence alert is bounded by
+    # the CronJob's ttlSecondsAfterFinished (86400 = one interval); the
+    # timestamp-based Stale alert is the honest "still broken" signal.
+    - name: memory-machine.cronjobs
+      interval: 1m
+      rules:
+        - alert: MemoryMachineSortFailed
+          annotations:
+            summary: Memory Machine nightly sort job failed
+            description: >-
+              Job {{ $labels.job_name }} (CronJob memory-machine-sort, namespace
+              media) failed (init/scan/pick/copy, backoffLimit 0, 12h deadline).
+              Check `kubectl -n media logs job/{{ $labels.job_name }}`.
+          expr: |
+            kube_job_failed{namespace="media", job_name=~"memory-machine-sort-.*"} > 0
+          for: 5m
+          labels:
+            category: media
+            component: memory-machine
+            severity: warning
+        - alert: MemoryMachineSortStale
+          annotations:
+            summary: No successful Memory Machine sort run in 48 hours
+            description: >-
+              CronJob memory-machine-sort (daily 02:30 Europe/Berlin) has not
+              completed successfully for 48h. Likely scheduling (node/GPU slot,
+              RWO volume), image pull, SMB mount, or a run exceeding the 12h
+              deadline. Survives failed-Job rotation, unlike MemoryMachineSortFailed.
+          # A CronJob that has never succeeded has no series; the first
+          # success arms this alert.
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{namespace="media", cronjob="memory-machine-sort"} > 48 * 3600
+          for: 30m
+          labels:
+            category: media
+            component: memory-machine
+            severity: warning

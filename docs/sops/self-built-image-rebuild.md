@@ -3,8 +3,8 @@
 > Description: How to clear CVEs on container images we build ourselves, where there is
 > no upstream version to bump to and remediation is a **rebuild in the source repo**
 > followed by a GitOps tag bump — not a version bump.
-> Version: `2026.11.13`
-> Last Updated: `2026-11-13`
+> Version: `2026.11.27`
+> Last Updated: `2026-11-27`
 > Owner: `homelab-operator`
 
 ---
@@ -57,6 +57,7 @@ Known first-party images and their source repos (extend as they are added):
 | `ghcr.io/nachtschatt3n/ai-sre` | `nachtschatt3n/ai-sre` |
 | `ghcr.io/nachtschatt3n/sure` | `nachtschatt3n/sure` |
 | `ghcr.io/nachtschatt3n/arag-web` | `nachtschatt3n/arag-web` |
+| `ghcr.io/nachtschatt3n/memory-machine` | `nachtschatt3n/memory-machine` (private; push CI tags `sha-<7hex>`) |
 | `ghcr.io/nachtschatt3n/sweep-dashboard` | `nachtschatt3n/sweep-dashboard` |
 | `ghcr.io/nachtschatt3n/gods-eye-view` | `nachtschatt3n/gods-eye-view` (branch `cberg`; packages the latest upstream `bilawalsidhu/gods-eye-view` release — weekly `container.yml` rebuild, or dispatch with `upstream_tag`) |
 | `ghcr.io/nachtschatt3n/gas-price-monitor` | `nachtschatt3n/gas-price-monitor` |
@@ -285,6 +286,7 @@ HTTP health probe.**
 | gods-eye-view | gods-eye-view (branch `cberg`) | V | container.yml | manual tag@digest | MANUAL | internet-facing, digest-pinned |
 | sure | sure (fork `main` == deploy `integration`) | S | scheduled-rebuild.yml | manual 40-hex sha | MANUAL | finance data + migrations; sure-agent owns deploys |
 | arag-web | arag-web | S | scheduled-rebuild.yml | manual sha | MANUAL | health-insurance data + migrations |
+| memory-machine | memory-machine (private) | S (push CI `sha-<7hex>`; weekly rebuild workflow not yet set up in the source repo) | — (to add: scheduled-rebuild.yml) | manual sha | MANUAL | private photo library; privileged iGPU pod; no Helm rollback gate wired yet |
 | zero-export-controller | zero-export-controller | V | scheduled-rebuild.yml | manual `0.4.2` | MANUAL | drives the inverters; solar-controller owns releases |
 | solarfocus-scraper | solarfocus-scraper | S | scheduled-rebuild.yml | manual sha | MANUAL | owning agent tags releases; candidate for AUTO |
 | pellet-price-monitor | pellet-price-monitor | S | scheduled-rebuild.yml | manual sha | MANUAL | no probes |
@@ -540,3 +542,5 @@ reconcile — never patch the Deployment directly (GitOps rule).
 - `2026.11.13`: `the-ninth-banner` row of the deploy-mode table: the preview's own policy
   `>=0.6.0` is applied (ImagePolicy `ninth-banner-preview` on the shared ImageRepository, IUA
   `ninth-banner-preview-image-updates`); the preview is AUTO on release tags from `v0.6.0` on.
+- `2026.11.27`: Add `ghcr.io/nachtschatt3n/memory-machine` (private package, `sha-<7hex>`, MANUAL)
+  to the first-party and deploy-mode tables; its source repo has no scheduled rebuild yet.

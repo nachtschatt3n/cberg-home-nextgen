@@ -1,0 +1,95 @@
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: "cifs-memory-machine-source"
+provisioner: smb.csi.k8s.io
+# READ-ONLY source mount: Andrea's iCloud photo backup (written by
+# backup/icloud-docker-andrea). Mount options are a verbatim copy of
+# cifs-immich-icloud-backup — `ro` + dir_mode=0555/file_mode=0444 — so
+# memory-machine can never write to or delete the iCloud originals.
+#
+# subdir is deliberately NARROWER than cifs-immich-icloud-backup (which spans
+# the icloud-backup PARENT, i.e. both Apple IDs): this class sees ONLY
+# `icloud-backup/andrea/photos`. Layout below it: all/YYYY/MM/<files>.
+#
+# reclaimPolicy MUST stay Retain and subdir MUST stay non-root, so a PVC delete
+# can never recursively wipe the share. See docs/sops/storage-safety.md
+# (2026-04-26 incident).
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nosharesock
+  - multichannel
+  - max_channels=4
+  - vers=3.1.1
+  - ro
+  - dir_mode=0555
+  - file_mode=0444
+  - uid=1000
+  - gid=1000
+  - noperm
+  - noatime
+  - rsize=1048576
+  - wsize=1048576
+  - cache=loose
+  - actimeo=30
+  - serverino
+parameters:
+  source: "//${NAS_HOSTNAME}/backups"
+  subdir: "icloud-backup/andrea/photos"
+  csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
+  csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: "cifs-memory-machine-output"
+provisioner: smb.csi.k8s.io
+# READ-WRITE output mount: memory-machine's sorted/picked copies under
+# `//NAS/media/memory-machine`. Everything here is DERIVED from the read-only
+# source above and regenerable, so it is NOT in the off-site backup set
+# (operator decision).
+#
+# Profile A (docs/sops/cifs-mount-options.md). Two pods write here — the `app`
+# Deployment and the nightly `sort` CronJob — but both are pinned to the SAME
+# node (RWO Longhorn index volume), and csi-driver-smb stages one mount per
+# volume per node that both pods bind-mount, so they share one kernel page/attr
+# cache and `cache=loose`/`actimeo=30` stays coherent between them.
+#
+# The SQLite index is NOT on this mount: <project>/.memorykeeper is overmounted
+# by a Longhorn subPath (see helmrelease.yaml), because SQLite locking over SMB
+# is unsafe.
+#
+# reclaimPolicy Retain and a NON-ROOT subdir are mandatory: this shares the
+# `media` share with plex/jellyfin, so a stray delete on a `/` subdir would be
+# catastrophic (docs/sops/storage-safety.md, 2026-04-26 incident).
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nosharesock
+  - multichannel
+  - max_channels=4
+  - vers=3.1.1
+  - dir_mode=0777
+  - file_mode=0777
+  - uid=1000
+  - gid=1000
+  - noperm
+  - noatime
+  - rsize=1048576
+  - wsize=1048576
+  - cache=loose
+  - actimeo=30
+  - serverino
+parameters:
+  source: "//${NAS_HOSTNAME}/media"
+  subdir: "memory-machine"
+  csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
+  csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"

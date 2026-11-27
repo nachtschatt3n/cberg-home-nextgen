@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://kubernetesjsonschema.dev/v1.18.1-standalone-strict/persistentvolumeclaim.json
+---
+# Source photos: read-only CIFS mount of Andrea's iCloud backup
+# (icloud-backup/andrea/photos). Mounted readOnly at /photos as well, so the
+# app is read-only on this tree twice over (SC `ro` + volumeMount readOnly).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memory-machine-source
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+    volume.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+  labels:
+    csi-driver-smb: "cifs-share"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Ti
+  storageClassName: cifs-memory-machine-source
+---
+# Output project tree (/out) on //NAS/media/memory-machine. Size is nominal —
+# SMB PVCs are not quota-enforced by the NAS.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memory-machine-output
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+    volume.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+  labels:
+    csi-driver-smb: "cifs-share"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Gi
+  storageClassName: cifs-memory-machine-output

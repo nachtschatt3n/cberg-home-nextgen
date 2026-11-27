@@ -1,0 +1,264 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: memory-machine
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 5.3.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 3
+  install:
+    timeout: 20m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 20m
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    # Shared by BOTH controllers (web UI + nightly sort job).
+    defaultPodOptions:
+      imagePullSecrets:
+        - name: memory-machine-ghcr-pull
+      # Same node for both pods: memory-machine-data is RWO Longhorn, and two
+      # pods can only share an RWO volume on the node it is attached to.
+      # Node choice is driven by GPU slots (gpu.intel.com/i915, 5 per node):
+      # nuc14-01 is full (immich x2, jellyfin, plex, makemkv), nuc14-02 runs
+      # frigate (live iGPU decode/detect), nuc14-03 has no iGPU consumer. This
+      # app takes TWO slots (app + sort each request one) — both fit on
+      # nuc14-03 with no contention for the iGPU itself. Tradeoff: a hard
+      # nodeSelector means no failover — if nuc14-03 is down the UI and the
+      # nightly run stay Pending until it returns (acceptable: derived data,
+      # no SLO). To move, change it here for both controllers at once.
+      nodeSelector:
+        kubernetes.io/hostname: k8s-nuc14-03
+      # Non-root (image default uid/gid 1000) even though the main containers
+      # are privileged for /dev/dri: the render node is root:44 (video) 0660 on
+      # Talos, so supplementalGroups [44] is all OpenVINO needs. Deliberate
+      # deviation from immich-machine-learning, which runs as root.
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        supplementalGroups: [44]
+
+    controllers:
+      app:
+        type: deployment
+        strategy: Recreate
+        initContainers:
+          # Creates the two subPath directories on the Longhorn volume AS UID
+          # 1000. If kubelet created them on first use they would be root-owned
+          # 0750 and unwritable for the app.
+          prepare: &prepare
+            image: &image
+              # Self-built: nachtschatt3n/memory-machine (private), GitHub Actions,
+              # tag scheme sha-<7hex>. MANUAL deploy mode
+              # (docs/sops/self-built-image-rebuild.md).
+              repository: ghcr.io/nachtschatt3n/memory-machine
+              tag: sha-45591bf
+              pullPolicy: IfNotPresent
+            command: ["/bin/sh", "-c"]
+            args: ["mkdir -p /vol/index /vol/home/home /vol/home/ov-cache"]
+            securityContext: &unprivileged
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+          # Idempotent: makes sure /out is an initialised project before the
+          # web UI opens it (the nightly job runs the same command first).
+          project-init:
+            image: *image
+            args: ["init", "/out", "--source", "/photos"]
+            env: &env
+              TZ: ${TIMEZONE}
+              MEMORYKEEPER_HOME: /data/home
+              MEMORYKEEPER_MODELS: /models
+              MEMORYKEEPER_ORT_PROVIDERS: "openvino:GPU"
+              MEMORYKEEPER_OV_CACHE: /data/ov-cache
+              # Tiny / dynamic-shape models stay on CPU (OpenVINO GPU recompiles
+              # per shape, which is slower than CPU for these).
+              MEMORYKEEPER_ORT_CPU_MODELS: "faces,finder"
+              MEMORYKEEPER_BIND: "0.0.0.0"
+              MEMORYKEEPER_ALLOWED_HOSTS: "memory-machine.${SECRET_DOMAIN}"
+              MEMORYKEEPER_TRUST_PROXY: "1"
+              # Set by the Authentik outpost via SecurityPolicy headersToBackend.
+              MEMORYKEEPER_PROXY_USER_HEADER: "X-authentik-username"
+              MEMORYKEEPER_ROOTS: "/photos:/out"
+              MEMORY_MACHINE_QUIET: "1"
+              # The startup self-check REQUIRES this connect to fail; the
+              # NetworkPolicy (networkpolicy.yaml) denies all egress.
+              MEMORYKEEPER_EGRESS_PROBE: "1.1.1.1:443"
+              OMP_NUM_THREADS: "3"
+              OPENBLAS_NUM_THREADS: "3"
+              MKL_NUM_THREADS: "3"
+            securityContext: *unprivileged
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                memory: 2Gi
+        containers:
+          app:
+            image: *image
+            # ENTRYPOINT stays `tini -- python -m memorykeeper`.
+            args: ["app", "--no-browser", "--port", "8765", "--project", "/out"]
+            env: *env
+            resources:
+              requests:
+                cpu: 500m
+                memory: 3Gi
+                gpu.intel.com/i915: 1
+              limits:
+                # No CPU limit (repo norm). Memory caps OpenVINO model load +
+                # batch peaks.
+                memory: 8Gi
+                gpu.intel.com/i915: 1
+            probes:
+              # /api/ping needs an allowed Host header; localhost is accepted
+              # alongside MEMORYKEEPER_ALLOWED_HOSTS.
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet: &ping
+                    path: /api/ping
+                    port: &port 8765
+                    httpHeaders:
+                      - name: Host
+                        value: localhost
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 6
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet: *ping
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 6
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet: *ping
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  # first start compiles OpenVINO kernels into /data/ov-cache
+                  failureThreshold: 60
+            # /dev/dri access, same mechanism as immich-machine-learning (ns
+            # media is PSA privileged). SYS_ADMIN is NOT added: it would be
+            # inert for a non-root process anyway.
+            securityContext: &gpu
+              privileged: true
+
+      sort:
+        type: cronjob
+        cronjob:
+          schedule: "30 2 * * *"
+          timeZone: Europe/Berlin
+          concurrencyPolicy: Forbid
+          startingDeadlineSeconds: 3600
+          backoffLimit: 0
+          activeDeadlineSeconds: 43200   # 12h hard stop
+          # docs/sops/failed-job-alerting.md: keep a few failed Jobs for
+          # diagnosis, but let them age out after ~one schedule interval so
+          # KubeJobFailed does not outlive a recovery.
+          successfulJobsHistory: 1
+          failedJobsHistory: 3
+          ttlSecondsAfterFinished: 86400
+        pod:
+          restartPolicy: Never
+        initContainers:
+          prepare: *prepare
+        containers:
+          sort:
+            image: *image
+            command: ["tini", "--", "/bin/sh", "-c"]
+            args:
+              - |
+                set -eu
+                python -m memorykeeper init /out --source /photos
+                python -m memorykeeper scan /out --workers 6
+                python -m memorykeeper pick /out
+                python -m memorykeeper copy /out
+            env: *env
+            resources:
+              requests:
+                cpu: 500m
+                memory: 3Gi
+                gpu.intel.com/i915: 1
+              limits:
+                memory: 8Gi
+                gpu.intel.com/i915: 1
+            securityContext: *gpu
+
+    service:
+      app:
+        controller: app
+        type: ClusterIP
+        ports:
+          http:
+            port: *port
+
+    persistence:
+      source:
+        existingClaim: memory-machine-source
+        globalMounts:
+          - path: /photos
+            readOnly: true
+      output:
+        existingClaim: memory-machine-output
+        globalMounts:
+          - path: /out
+      # Longhorn static volume, mounted twice via subPath. The `index` subPath
+      # is nested OVER the SMB /out mount at /out/.memorykeeper (the engine
+      # hard-codes <project>/.memorykeeper) so the SQLite index never lives on
+      # SMB. Both pods share it on one node; SQLite locking is safe on local
+      # ext4.
+      data:
+        existingClaim: memory-machine-data
+        advancedMounts:
+          app:
+            prepare:
+              - path: /vol
+            project-init: &data-mounts
+              - path: /out/.memorykeeper
+                subPath: index
+              - path: /data
+                subPath: home
+            app: *data-mounts
+          sort:
+            prepare:
+              - path: /vol
+            sort: *data-mounts
+      dev-dri:
+        type: hostPath
+        hostPath: /dev/dri
+        hostPathType: Directory
+        advancedMounts:
+          app:
+            app:
+              - path: /dev/dri
+          sort:
+            sort:
+              - path: /dev/dri
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp
