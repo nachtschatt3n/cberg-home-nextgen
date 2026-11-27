@@ -2,7 +2,7 @@
 # Static PV for the hand-applied Longhorn Volume `memory-machine-data`
 # (longhorn-volume.yaml). Holds two subPaths:
 #   index/ -> /out/.memorykeeper  (the engine's SQLite index; kept OFF SMB)
-#   home/  -> /data               (MEMORYKEEPER_HOME=/data/home, OpenVINO cache /data/ov-cache)
+#   home/  -> /data               (MEMORYKEEPER_HOME=/data/home; stale ov-cache/ from the first rollout is unused)
 apiVersion: v1
 kind: PersistentVolume
 metadata:

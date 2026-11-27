@@ -69,10 +69,10 @@ spec:
               # tag scheme sha-<7hex>. MANUAL deploy mode
               # (docs/sops/self-built-image-rebuild.md).
               repository: ghcr.io/nachtschatt3n/memory-machine
-              tag: sha-45591bf
+              tag: sha-8e94a62
               pullPolicy: IfNotPresent
             command: ["/bin/sh", "-c"]
-            args: ["mkdir -p /vol/index /vol/home/home /vol/home/ov-cache"]
+            args: ["mkdir -p /vol/index /vol/home/home"]
             securityContext: &unprivileged
               allowPrivilegeEscalation: false
               capabilities:
@@ -87,10 +87,22 @@ spec:
               MEMORYKEEPER_HOME: /data/home
               MEMORYKEEPER_MODELS: /models
               MEMORYKEEPER_ORT_PROVIDERS: "openvino:GPU"
-              MEMORYKEEPER_OV_CACHE: /data/ov-cache
-              # Tiny / dynamic-shape models stay on CPU (OpenVINO GPU recompiles
-              # per shape, which is slower than CPU for these).
-              MEMORYKEEPER_ORT_CPU_MODELS: "faces,finder"
+              # Stay on CPU: faces/finder are tiny / dynamic-shape (OpenVINO GPU
+              # recompiles per shape); picture (SigLIP uint8) runs ~1.9 s/photo on
+              # the iGPU, and fp32 on GPU drifts from the shipped tuning.
+              MEMORYKEEPER_ORT_CPU_MODELS: "faces,finder,picture"
+              # NO MEMORYKEEPER_OV_CACHE: the OpenVINO GPU model-cache export
+              # fails ("[GPU] Failed to write 4 bytes to stream") and every model
+              # then falls back to CPU. Without a cache the GPU path works.
+              #
+              # Size to the POD, not the node: without these the engine read
+              # os.cpu_count()=18 on the node, started 8 workers that each load
+              # every model, and was OOMKilled at 8Gi (2026-11-27).
+              MEMORYKEEPER_CPUS: "6"
+              MEMORYKEEPER_WORKERS: "4"
+              MEMORYKEEPER_HELPER_MB: "1500"
+              # Must stay consistent with the 12Gi memory limit below.
+              MEMORY_MACHINE_MEMORY_MB: "12288"
               MEMORYKEEPER_BIND: "0.0.0.0"
               MEMORYKEEPER_ALLOWED_HOSTS: "memory-machine.${SECRET_DOMAIN}"
               MEMORYKEEPER_TRUST_PROXY: "1"
@@ -123,9 +135,9 @@ spec:
                 memory: 3Gi
                 gpu.intel.com/i915: 1
               limits:
-                # No CPU limit (repo norm). Memory caps OpenVINO model load +
-                # batch peaks.
-                memory: 8Gi
+                # No CPU limit (repo norm). 12Gi = MEMORY_MACHINE_MEMORY_MB; 8Gi
+                # OOMKilled during the first UI-started sort (2026-11-27).
+                memory: 12Gi
                 gpu.intel.com/i915: 1
             probes:
               # /api/ping needs an allowed Host header; localhost is accepted
@@ -159,7 +171,7 @@ spec:
                   httpGet: *ping
                   periodSeconds: 10
                   timeoutSeconds: 5
-                  # first start compiles OpenVINO kernels into /data/ov-cache
+                  # first start compiles OpenVINO GPU kernels (no persistent cache)
                   failureThreshold: 60
             # /dev/dri access, same mechanism as immich-machine-learning (ns
             # media is PSA privileged). SYS_ADMIN is NOT added: it would be
@@ -194,7 +206,7 @@ spec:
               - |
                 set -eu
                 python -m memorykeeper init /out --source /photos
-                python -m memorykeeper scan /out --workers 6
+                python -m memorykeeper scan /out --workers 4
                 python -m memorykeeper pick /out
                 python -m memorykeeper copy /out
             env: *env
@@ -204,7 +216,7 @@ spec:
                 memory: 3Gi
                 gpu.intel.com/i915: 1
               limits:
-                memory: 8Gi
+                memory: 12Gi
                 gpu.intel.com/i915: 1
             securityContext: *gpu
 
