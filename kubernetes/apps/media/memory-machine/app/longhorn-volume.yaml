@@ -1,0 +1,20 @@
+---
+# NOT registered in kustomization.yaml on purpose: the app Kustomization's
+# targetNamespace: media would override namespace: storage and create a
+# broken duplicate Longhorn ignores. See docs/sops/longhorn.md.
+# Apply by hand ONCE, before the first Flux reconcile of this app:
+#   kubectl apply -f kubernetes/apps/media/memory-machine/app/longhorn-volume.yaml
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: memory-machine-data
+  namespace: storage
+spec:
+  size: "10737418240"   # 10 Gi
+  numberOfReplicas: 2
+  staleReplicaTimeout: 30
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false

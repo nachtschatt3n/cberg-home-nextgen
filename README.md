@@ -484,7 +484,7 @@ quarterly.
 
 ## 📦 Applications
 
-~144 apps across 21 namespaces. Full inventory with per-app purpose, exposure
+~146 apps across 21 namespaces. Full inventory with per-app purpose, exposure
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 
@@ -523,8 +523,8 @@ prometheus-pushgateway · sweep-dashboard · unpoller · uptime-kuma
 actual-budget · affine · arag-web · mealie · nextcloud · nextcloud-mcp ·
 omni-tools · paperless-ngx · penpot · sure · vaultwarden
 
-### 🎬 Media (`media` — 5)
-immich · jellyfin · library-tools · makemkv · plex
+### 🎬 Media (`media` — 6)
+immich · jellyfin · library-tools · makemkv · memory-machine · plex
 
 Library curation (nested per-item folder layout, NFO/poster sidecar standards,
 intake-from-JDownloader, dedup, Tube Archivist → Plex bridging) is documented

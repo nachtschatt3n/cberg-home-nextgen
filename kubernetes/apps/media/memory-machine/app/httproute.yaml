@@ -1,0 +1,101 @@
+---
+# memory-machine on envoy-internal (LAN-only), behind Authentik forward-auth.
+# Pattern + gotchas: docs/sops/gateway-api-httproute.md; the SecurityPolicy
+# below mirrors office/arag-web (see that file for the full rationale behind
+# headersToExtAuth and the deliberately NOT forwarded X-Forwarded-* headers).
+#
+# Access is restricted in Authentik (policy bindings on the `memory-machine`
+# application) to the two household accounts; the app additionally reads the
+# authenticated user from X-authentik-username (MEMORYKEEPER_PROXY_USER_HEADER,
+# MEMORYKEEPER_TRUST_PROXY=1). Envoy overwrites that header with the outpost's
+# value on every authorised request, so a client cannot spoof it through this
+# route; the NetworkPolicy keeps every other path to the pod closed.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: memory-machine
+  namespace: media
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/description: "Offline photo memories: sort and pick highlights"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: "Media"
+    gethomepage.dev/icon: "memories.png"
+    gethomepage.dev/name: "Memory Machine"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "memory-machine.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: memory-machine
+          port: 8765
+---
+# Callback route — separate and MORE specific than `/`; carries NO
+# SecurityPolicy, or the login flow could never complete.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: memory-machine-authentik-outpost
+  namespace: media
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "memory-machine.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /outpost.goauthentik.io }
+      backendRefs:
+        # Real cross-namespace Service (not ExternalName). Authorised by
+        # ReferenceGrant kube-system/memory-machine-outpost-access.
+        - group: ""
+          kind: Service
+          name: ak-outpost-memory-machine-forward-auth
+          namespace: kube-system
+          port: 9000
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: memory-machine-forward-auth
+  namespace: media
+spec:
+  targetRefs:                    # main route ONLY — never the callback route
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: memory-machine
+  extAuth:
+    failOpen: false              # outpost down => deny, never publish
+    # MANDATORY (see office/arag-web): without `cookie` the outpost never sees
+    # the session and every asset request opens a competing login flow.
+    headersToExtAuth:
+      - cookie
+      - accept
+      - user-agent
+    http:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-memory-machine-forward-auth
+          namespace: kube-system
+          port: 9000
+      path: /outpost.goauthentik.io/auth/envoy
+      headersToBackend:
+        - Set-Cookie
+        # The app's identity header (MEMORYKEEPER_PROXY_USER_HEADER).
+        - X-authentik-username

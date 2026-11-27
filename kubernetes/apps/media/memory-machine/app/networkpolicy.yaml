@@ -1,0 +1,41 @@
+# memory-machine is an OFFLINE app by design: its startup self-check connects
+# to MEMORYKEEPER_EGRESS_PROBE and refuses to run (fails closed) if that
+# connection succeeds. So this policy is load-bearing for the app's own
+# startup, not just hardening.
+#
+#  - egress: NONE. No DNS, no cluster Services, no LAN, no internet. Selecting
+#    the pods with policyTypes [Egress] and no egress rules denies everything.
+#    Cilium (the CNI, enable-policy=default) enforces plain NetworkPolicy; the
+#    denied probe is DROPPED (connect times out), not rejected.
+#  - ingress: only the envoy-internal data-plane pods (ns network) on 8765.
+#  - Neither SMB mount needs a rule: csi-smb-node mounts on the node's host
+#    network, not from the pod. Image pulls are done by the kubelet. Kubelet
+#    probes come from the host and are allowed by Cilium by default.
+#
+# Applies to BOTH controllers (app + sort): same label app.kubernetes.io/name.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: memory-machine
+  namespace: media
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: memory-machine
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: network
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+              gateway.envoyproxy.io/owning-gateway-name: envoy-internal
+      ports:
+        - protocol: TCP
+          port: 8765
+  egress: []

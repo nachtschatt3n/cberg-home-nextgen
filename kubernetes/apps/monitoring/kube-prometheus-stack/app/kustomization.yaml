@@ -26,6 +26,7 @@ resources:
   - ./unifi-backup-alerts.yaml
   - ./db-dumps-alerts.yaml
   - ./immich-alerts.yaml
+  - ./memory-machine-alerts.yaml
   - ./openclaw-alerts.yaml
   # - ./librechat-alerts.yaml  # DISABLED 2026-10-04 (operator: decommissioned, storage backed up on NAS)
   - ./next-ai-draw-io-alerts.yaml

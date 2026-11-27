@@ -1,0 +1,23 @@
+---
+# Static PV for the hand-applied Longhorn Volume `memory-machine-data`
+# (longhorn-volume.yaml). Holds two subPaths:
+#   index/ -> /out/.memorykeeper  (the engine's SQLite index; kept OFF SMB)
+#   home/  -> /data               (MEMORYKEEPER_HOME=/data/home, OpenVINO cache /data/ov-cache)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: memory-machine-data
+spec:
+  capacity:
+    storage: 10Gi
+  volumeMode: Filesystem
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: longhorn-static
+  csi:
+    driver: driver.longhorn.io
+    fsType: ext4
+    volumeAttributes:
+      numberOfReplicas: "2"
+      staleReplicaTimeout: "30"
+    volumeHandle: memory-machine-data

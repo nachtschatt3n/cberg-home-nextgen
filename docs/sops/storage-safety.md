@@ -1,14 +1,14 @@
 # SOP: Storage Safety — Destructive Operations on Persistent Storage
 
 > Description: Pre-flight, guardrails, and recovery procedure for destructive PVC/PV operations on shared-filesystem (CIFS/SMB/NFS) and Longhorn storage classes.
-> Version: `2026.10.04`
-> Last Updated: `2026-10-04`
+> Version: `2026.11.27`
+> Last Updated: `2026-11-27`
 > Owner: `cluster-ops`
 
 | Field | Value |
 |---|---|
-| **Version** | 2026.10.04 |
-| **Last Updated** | 2026-10-04 |
+| **Version** | 2026.11.27 |
+| **Last Updated** | 2026-11-27 |
 | **Owner** | cluster-ops |
 | **Applies to** | All `kubectl delete pvc/pv` actions, all StorageClass changes, any teardown of stateful workloads |
 
@@ -97,7 +97,7 @@ If the brief is ambiguous (e.g. "clean up the test resources"), enumerate what e
 
 **Every CIFS StorageClass on this cluster is `reclaimPolicy: Retain` (19/19
 verified live 2026-08-26; 18 live after `cifs-scrypted-media` was pruned with
-scrypted-nvr on 2026-10-04, 21 in the repo with `cifs-github-mirror` and `cifs-unifi-backup` added 2026-11-16 and `cifs-db-dumps` 2026-11-17, 22 with `cifs-ninth-banner` 2026-11-25 (22 live, verified 2026-11-25), Tier 3, Retain by manifest).** This table used to record 17 of them as `Delete`,
+scrypted-nvr on 2026-10-04, 21 in the repo with `cifs-github-mirror` and `cifs-unifi-backup` added 2026-11-16 and `cifs-db-dumps` 2026-11-17, 22 with `cifs-ninth-banner` 2026-11-25 (22 live, verified 2026-11-25), 24 in the repo with `cifs-memory-machine-output` (Tier 2) and `cifs-memory-machine-source` (Tier 3) added 2026-11-27, Retain by manifest).** This table used to record 17 of them as `Delete`,
 which had stopped being true. That is not a harmless over-warning: a table wrong
 on most of its rows teaches operators to discount it, and it hides real change —
 if someone flipped a class to `Delete`, the table would have looked identical.
@@ -131,6 +131,7 @@ not the whole share:**
 | `cifs-makemkv-media` | `//192.168.55.240/media` | `/Transcode` | Retain |
 | `cifs-tube-archivist-media` | `//192.168.55.240/media/downloads` | `/tube-archivist` | Retain |
 | `cifs-immich-cache` | `//192.168.55.240/media` | `immich-cache` | Retain |
+| `cifs-memory-machine-output` | `//192.168.55.240/media` | `memory-machine` | Retain |
 | `cifs-nextcloud-data` | `//192.168.55.240/nextcloud` | `data` | Retain |
 | `cifs-paperless-consume` | `//192.168.55.240/paperless_ngx` | `consume` | Retain |
 | `cifs-paperless-export` | `//192.168.55.240/paperless_ngx` | `export` | Retain |
@@ -152,8 +153,11 @@ constrained:**
 | `cifs-opencode-andreamosteller` | `//192.168.55.240/opencode` | `/andrea-opencode` | Retain |
 | `cifs-penpot-assets` | `//192.168.55.240/penpot` | `assets` | Retain |
 | `cifs-ninth-banner` | `//192.168.55.240/documents` | `/mac-mini-ai/ninth-banner` | Retain |
+| `cifs-memory-machine-source` | `//192.168.55.240/backups` | `icloud-backup/andrea/photos` | Retain |
 
 `cifs-ninth-banner` (added 2026-11-25) is the Ninth Banner test farm's workspace in `ci-runner` (docs/sops/ci-runner.md §2f); its pods see only `shared/` (read-only) and their own `farm/<job>/` through subPaths; login `kube-system/csi-driver-smb`, not copied into `ci-runner`.
+
+`cifs-memory-machine-source` (added 2026-11-27) is memory-machine's read-only view of ONE account's photos (`ro`, `dir_mode=0555`/`file_mode=0444`, plus a `readOnly` volumeMount) — deliberately narrower than `cifs-immich-icloud-backup`. Its sibling `cifs-memory-machine-output` (Tier 2) holds memory-machine's derived copies on the `media` share; regenerable, not in the off-site set.
 
 `cifs-immich-icloud-backup` is mounted `ro` by BOTH of its consumers, so
 neither can write or delete the iCloud originals — iCloud stays source of
