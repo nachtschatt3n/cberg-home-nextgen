@@ -2106,6 +2106,12 @@ spec:
                 if openclaw plugins inspect camofox-browser --runtime --json >/dev/null 2>&1; then
                   openclaw config set plugins.entries.camofox-browser.enabled true --strict-json || true
                   openclaw config set plugins.entries.camofox-browser.config '{"autoStart":false,"url":"http://camofox-browser.ai.svc.cluster.local:9377","maxSessions":5,"maxTabsPerSession":5,"sessionTimeoutMs":600000,"crashReportEnabled":false}' --strict-json || echo "WARN: camofox config set failed"
+                  # camofox is the ONLY browser (operator rule 2026-11-27): the built-in
+                  # headless Chromium is trivially fingerprinted (Amazon gives it no prices,
+                  # camofox reads them), and agents kept picking it over camofox_*. Only
+                  # disable it once camofox is confirmed installed, so we never end up with
+                  # no browser at all.
+                  openclaw config set browser.enabled false --strict-json || echo "WARN: browser disable failed"
                 fi
 
                 # OpenAI/Codex login RETIRED 2026-11-16 (agents run on the Anthropic key,
