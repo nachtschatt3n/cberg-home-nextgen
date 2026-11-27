@@ -5,10 +5,12 @@ component: redis                      # coverage group redis-fleet-8.10.3 (image
                                       # draft of 2026-10-27 carried the same key without ever touching that Deployment.
 supersedes: redis-fleet-8.10.2        # vetted 8-consumer plan (ready-for-go@2026-10-25), retargeted 8.10.2 -> 8.10.3 and RE-WIDENED to
                                       # all 9 consumers 2026-11-02 (reviewer option A; §1.0). Its legs are reused, re-verified live.
-pr: null                              # coverage.py needs_plan (direct-bump lane) — no Renovate PR
+pr: 240                               # Renovate PR #240 "update redis to v8.10.3" (all 9 files, MERGEABLE 2026-11-27). Do NOT merge it:
+                                      # the legs land one commit per file (§3). Once main matches, Renovate closes it as stale; close by
+                                      # hand if it lingers. (Was `pr: null` until 2026-11-27: the PR existed but was not recorded.)
 kind: image
-current: "redis:8.10.1-alpine on 8 consumers (databases/redis, databases/superset-redis-official, download/tube-archivist-redis, media/immich-redis, office/nextcloud-redis, office/paperless-redis, office/sure-redis, ai/open-webui-redis sidecar of chart open-webui 17.0.0) and redis:8.10.2-alpine on office/affine-redis"
-target: "redis:8.10.3-alpine on all 9 redis consumers: databases/redis, superset-redis-official, tube-archivist-redis, immich-redis, nextcloud-redis, paperless-redis, sure-redis, affine-redis and the open-webui redis sidecar (the open-webui APP v0.12.5 and chart 17.0.0 are NOT part of this plan)"
+current: "redis:8.10.1-alpine on 8 consumers (databases/redis, databases/superset-redis-official, download/tube-archivist-redis, media/immich-redis, office/nextcloud-redis, office/paperless-redis, office/sure-redis, ai/open-webui-redis sidecar of chart open-webui 17.5.0) and redis:8.10.2-alpine on office/affine-redis"
+target: "redis:8.10.3-alpine on all 9 redis consumers: databases/redis, superset-redis-official, tube-archivist-redis, immich-redis, nextcloud-redis, paperless-redis, sure-redis, affine-redis and the open-webui redis sidecar (the open-webui APP v0.13.0 and chart 17.5.0 are NOT part of this plan)"
 update_type: patch
 risk: medium                          # Each leg alone is low (same-minor patch; 8.10.2->8.10.3 is 6 commits, the only
                                       # server-behaviour change is gated on cluster_enabled; RDB_VERSION 15 unchanged).
@@ -30,7 +32,7 @@ touches:
     - deployment/superset-redis-official        # databases — plain manifest (superset Kustomization), requirepass
     - helmrelease/affine-redis                  # office — app-template 5.3.0, non-persistent BullMQ store (8.10.2 -> 8.10.3)
     - deployment/affine-redis
-    - helmrelease/open-webui                    # ai — ONLY the redis sidecar tag changes (chart 17.0.0, app v0.12.5 untouched)
+    - helmrelease/open-webui                    # ai — ONLY the redis sidecar tag changes (chart 17.5.0, app v0.13.0 untouched)
     - deployment/open-webui-redis
     - helmrelease/tube-archivist-redis          # download — RDB on pvc/tube-archivist-redis-data
     - deployment/tube-archivist-redis
@@ -60,6 +62,9 @@ touches:
 depends_on: []
 conflicts_with:
   # Same consumers / same files (reciprocity must be added on their side, see the §6 hand-off list):
+  - redis-fleet-8.12.0                # draft (2026-11-24, uncommitted at re-plan time) — same image, 3 of the same Deployments;
+                                      # it declares `supersedes: redis-fleet-8.10.3`. NEVER both in one window, and if THIS plan runs
+                                      # first that plan's 8.10.1-anchored seds/premises fail and it must re-plan. §1.0a.
   - postgres-digest-refresh-2026-11   # reciprocal, added 2026-11-08 (DB-restart plan; sun-attended:2026-12-20)
   - nextcloud-mcp-0.203.0               # blocked — every gate calls into Nextcloud; lists nextcloud-redis restart
   - nextcloud-mcp-0.204.0               # blocked — successor chain of 0.203.0, same
@@ -70,7 +75,13 @@ conflicts_with:
   - helm-drift-detection                # sat-attended:2026-11-28 — asserts Helm revisions IDENTICAL across releases; this plan upgrades 6 releases
   - flux-oci-chart-sources              # sun-attended:2026-12-13 — re-points app-template + open-webui chart sources
   - flux-reconciler-impersonation       # blocked — changes WHO applies the Kustomizations/HelmReleases this plan relies on
-  - talos-linux-1.14.5                  # node reboots (successor of talos-linux-1.14.4, which its own header supersedes)
+  - talos-linux-1.14.5                  # superseded (kept: ref stays valid) — node reboots
+  - talos-linux-1.14.6                  # draft — successor of 1.14.5, node reboots (added 2026-11-27; its frontmatter was UNPARSEABLE on
+                                      # 11-27, so --validate reports this ref as dead; the ref is real, fix is on that file, not here)
+  - coredns-1.50.5                      # draft — cluster DNS: every consumer re-resolves its redis Service on reconnect (added 2026-11-27)
+  - envoy-gateway-1.10.0                # awaiting-go — edge roll hides the open-webui/affine/sure/nextcloud reachability gates (added 2026-11-27)
+  - nextcloud-12.0.2                    # draft — restarts nextcloud + notify-push, the leg-9 consumers (added 2026-11-27)
+  - nextcloud-9.4.5                     # draft — same (helmrelease/nextcloud, cronjob/nextcloud-cron) (added 2026-11-27)
   - longhorn-1.13.0                     # sun-attended:2026-11-15 — two Longhorn PVCs are remounted here; never stack on a storage upgrade
   - envoy-proxy-config-distroless-v1.40.0  # public edge roll hides app reachability gates
   - envoy-proxy-config-distroless-v1.40.2  # same
@@ -78,8 +89,10 @@ conflicts_with:
   # The window's instrument (§4 reads Prometheus; a Grafana/operator/collector roll in the same slot confounds the controls):
   # - grafana-chart-14.4.0  (dead ref: plan retired; removed 2026-11-16 by plan review)                      # vetted — monitoring; the controls read Prometheus, Grafana is the operator's second instrument
   # REMOVED 2026-11-03 (plan retired cdf1cf53, chart live via 5aa609d5; dead ref) - otel-operator-0.26.1                # draft — monitoring; §4 reads Prometheus too
-  # No kube-prometheus-stack-* plan is open (it rides the auto lane). If one is filed, or Step 0 lands a kube-prometheus-stack
-  # bump the same night, add/serialize it: §4 reads Prometheus.
+  - kube-prometheus-stack-93.3.0        # draft (added 2026-11-27) — §4 reads Prometheus; a same-night kps roll confounds the controls.
+  # Any OTHER kube-prometheus-stack bump Step 0 lands the same night: serialize it too (§2 e note).
+  # open-webui app/chart bumps (Renovate #505 app v0.13.0->v0.13.5, #480 chart 17.5.0->18.5.0 MAJOR) have no plan file, so they
+  # cannot be named here; premises open-webui-app-is-a-0-13-release / open-webui-chart-current and §2 j stop leg 4 if either lands.
   # Dropped as dead refs (2026-11-02): authentik-web-max-requests (status executed), nextcloud-9.4.1 and nextcloud-whiteboard-2.1.2 (executed 2026-10-29, no plan file),
   # nextcloud-mcp-0.202.1 (superseded by 0.203.0), talos-linux-1.14.4 (superseded by 1.14.5), immich-server-3.3.5 /
   # paperless-db-13.0.2 / bitnamilegacy-exit-nextcloud-redis (executed), coredns-1.48.1 (superseded, successor has no file).
@@ -92,14 +105,19 @@ rollback_class: git-revert              # one commit per leg; RDB/AOF format unc
                                         # tube-archivist leg also takes a dump.rdb copy + Longhorn backup gate (§2 g, §3 leg 5).
 backup_gate: "Completed Longhorn backup < 26h for volume tube-archivist-redis-data and for the volume behind pvc databases/redis-data (§2 g, longhorn-backup-age.py); PLUS a local copy of tube-archivist dump.rdb taken in §3 leg 5 immediately before that leg (byte count compared)."
 finding_refs: [F-d2bb762b, F-8c50c463, F-d40c9c12, F-e8a41b1b, F-625d3a3f, F-c637a09a, F-2e326f86, F-3a75c9aa, F-3fcdca7b]
-                                        # the 9 per-consumer redis image findings (policy-cli finding list --grep redis, 2026-11-02):
-                                        # redis, superset-redis-official, affine-redis, open-webui, tube-archivist-redis,
-                                        # immich-redis, sure-redis, paperless-redis, nextcloud-redis -> 8.10.3-alpine.
-                                        # Related, NOT closed by this plan: F-8792dba3 (coverage.py lockstep scope), see §6.
-status: vetted                    # human-gated; window null until the operator GO (suggested sun-attended:2026-11-29, 80 of 180 min)
-review: ready-for-go@2026-11-02   # plan-reviewer 2026-11-02: needs-fix (fleet scope split, orphaned GO, stale digest, unfailable slot grep), rewritten to 9 consumers, delta re-review ready-for-go; HUMAN-GATED: a fresh operator GO on this plan_id is required (no earlier GO carries over)
-                                        # leg 3 (affine) is new. Needs a fresh plan-reviewer pass.
-window: "sun-attended:2026-11-29"      # OPERATOR GO 2026-11-02 (chat: do all of this now). Was SUGGESTION: "sun-attended:2026-11-29" (alternative sat-attended:2026-11-28 does NOT fit: 80 min > 70).
+                                        # the 9 per-consumer "-> 8.10.3-alpine" findings of 2026-11-02. RE-CHECKED 2026-11-27: all
+                                        # RESOLVED 2026-11-24 by the sweep (their cell moved to 8.12.0; resolved_commit is an unrelated
+                                        # openclaw commit). The OPEN per-consumer findings now read "-> 8.12.0-alpine" (F-7fcaa999,
+                                        # F-49bd6dc8, F-e3d69562, F-23bcd941, F-6d091215, F-abbae087, F-b6e91984, F-6762cdc1,
+                                        # F-734faac1) and are NOT listed: this plan does not reach 8.12.0 and must not make them read
+                                        # as planned. Related: F-8792dba3 (lockstep scope), F-4072d262 (8.12 persistent-redis
+                                        # downgrade path), see §1.0a/§6.
+status: draft                     # RE-PLANNED IN PLACE 2026-11-27 (plan-refine needs_replan premise-fail, open-webui drift). Was vetted /
+                                  # review ready-for-go@2026-11-02; review cleared so a plan-reviewer re-vets this rewrite (§0).
+window: "sun-attended:2026-11-29"      # KEPT AS-IS by the 2026-11-27 re-plan (planner does not re-stamp). The 11-02 operator GO survives
+                                        # only if the reviewer and coordinator accept §0's SD-6 reading (same scope, same risk); and the
+                                        # coordinator must first decide THIS plan vs redis-fleet-8.12.0 (§1.0a) before the slot runs.
+                                        # OPERATOR GO 2026-11-02 (chat: do all of this now). Was SUGGESTION: "sun-attended:2026-11-29" (alternative sat-attended:2026-11-28 does NOT fit: 80 min > 70).
                                         # Do NOT use 11-07/08/14/15/21/22 (each holds a conflicts_with plan). Re-stamp after review.
                                         # NOTE 2026-11-02: sun-attended:2026-11-29 is the RESERVED CONTINUATION slot for
                                         # talos-linux-1.14.5 (this plan names it in conflicts_with) if that roll's canary stops
@@ -114,9 +132,9 @@ sops_refs:
   - docs/sops/immich.md
   - docs/sops/vulnerability-disclosure.md
 generated: "2026-10-27"
-replanned: "2026-11-02"
+replanned: "2026-11-27"                # in place; previous replan 2026-11-02
 premises:
-  # Read-verb only. Each was measured 2026-11-02 and returned the expected value.
+  # Read-verb only. Each was re-measured 2026-11-27 (plan-premises.py) and returned the expected value.
   - id: databases-images-current
     why: >-
       `current:` claims 8.10.1-alpine on both databases redis Deployments (order redis,
@@ -148,19 +166,24 @@ premises:
     why: Same, for the open-webui redis sidecar (rendered by the chart from redis.image.tag).
     run: kubectl get deploy -n ai open-webui-redis -o jsonpath='{.spec.template.spec.containers[0].image}'
     expect_exact: redis:8.10.1-alpine
-  - id: open-webui-app-is-a-0-12-release
+  - id: open-webui-app-is-a-0-13-release
     why: >-
-      Leg 4 must change ONLY the sidecar tag. The app is v0.12.5 today (commit ab0c0636;
-      the earlier "held on cooldown for 0.12.4" premise is stale). Any v0.12.x passes here
-      because Step 0 may legitimately land a patch first; §2 j then proves git and the
-      live StatefulSet agree, which is what actually keeps leg 4 from rolling the app.
-      A v0.13 or other major/minor shift fails and means re-plan.
+      Leg 4 must change ONLY the sidecar tag. The app is v0.13.0 since 7a7b1b7d1 (2026-11-09,
+      plan open-webui-0.13.0); this premise replaced the v0.12.x one on 2026-11-27. Any v0.13.x
+      passes because Step 0 may legitimately land Renovate #505 (v0.13.5) first; §2 j then
+      proves git and the live StatefulSet agree, which is what keeps leg 4 from rolling the
+      app. Its in-process redis re-attach was re-read at v0.13.0 (§1.5); a v0.14 or other
+      minor/major shift fails and means re-plan (re-read socket/main.py).
     run: kubectl get sts -n ai open-webui -o jsonpath='{.spec.template.spec.containers[0].image}'
-    expect_matches: '^ghcr\.io/open-webui/open-webui:v0\.12\.\d+$'
+    expect_matches: '^ghcr\.io/open-webui/open-webui:v0\.13\.\d+$'
   - id: open-webui-chart-current
-    why: Leg 4 must not carry a chart bump; chart 17.0.0 is the live release.
+    why: >-
+      Leg 4 must not carry a chart bump, and its one-line render diff was measured at chart
+      17.5.0 (helm template 2026-11-27, §3 leg 4). Renovate #480 (17.5.0 -> 18.5.0, MAJOR) is
+      open; if it lands first the websocket.redis values path may move, so this fails and
+      means re-plan.
     run: kubectl get hr -n ai open-webui -o jsonpath='{.spec.chart.spec.version}'
-    expect_exact: 17.0.0
+    expect_exact: 17.5.0
   - id: open-webui-redis-default-config
     why: >-
       The sidecar runs the image defaults (no command override, no volume, RDB snapshots to the
@@ -244,11 +267,69 @@ premises:
       ENDING in it.
     run: grep -c "8\.10\.2-alpine$" kubernetes/apps/office/affine/app/redis-helmrelease.yaml
     expect_matches: '(?s)^1$'
-needs_replan: "premise-fail: open-webui-app-is-a-0-12-release: got 'ghcr.io/open-webui/open-webui:v0.13.0', want match /^ghcr\\.io/open-webui/open-webui:v; open-webui-chart-current: got '17.5.0', want exactly '17.0.0'"
-needs_replan_since: "2026-11-26"
 ---
 
 # redis fleet to 8.10.3-alpine (all 9 consumers; supersedes redis-fleet-8.10.2)
+
+## 0. Re-plan in place, 2026-11-27 (what changed, and whether it is material to the 11-02 GO)
+
+Trigger: `plan-refine` set `needs_replan: premise-fail` on 2026-11-26. Two premises failed live:
+the open-webui app is `v0.13.0` (premise expected `v0.12.x`) and its chart is `17.5.0` (expected
+`17.0.0`), both since `7a7b1b7d1` (2026-11-09, plan open-webui-0.13.0). The other 18 premises
+re-ran PASS on 2026-11-27. Everything below was re-measured live the same day.
+
+**Open-webui drift: premise/gate-only, NOT material (same scope, same risk; SD-6 same-risk
+amendment).** Evidence:
+1. Render: `helm template` of chart `open-webui` 17.5.0 with the live values, sidecar tag
+   8.10.1 vs 8.10.3, differs in exactly ONE line (`image: "redis:8.10.3-alpine"`, rendered line
+   201 of 304). Same values path (`websocket.redis.image.tag`), same object
+   (`deployment/open-webui-redis`, RollingUpdate 25%), app StatefulSet untouched. Same as at 17.0.0.
+2. Re-attach code re-read at `v0.13.0` (`backend/open_webui/socket/main.py`): still
+   `socketio.AsyncRedisManager` (or `AsyncRedisRoomChannelManager` if room channels are on; they
+   are not set here), and `redis_event_listener()` is still a `while True` that catches every
+   exception, logs `Redis event listener failed. Retrying.`, sleeps and doubles the interval.
+   New in 0.13: the session-pool / usage cleanup loops also use redis locks, each inside its own
+   `while True` with `... failed. Retrying.`; nothing durable lives in the sidecar (4 keys, all
+   `open-webui:*`, measured 2026-11-27).
+3. Rollback unchanged: one-file `git revert`, no app/DB change, no sqlite copy needed.
+
+What DID change in the plan because of it (all mechanical):
+- premises `open-webui-app-is-a-0-13-release` (`v0.13.x`) and `open-webui-chart-current` (`17.5.0`);
+- §2 f/§4 version baseline is `0.13.0`; Helm revision 61 -> 62 (was 60 -> 61);
+- **the §4 leg-4 re-attach gate was WRONG for today's app and is fixed**: app-side connections are
+  now 5 (2 `subscribe` + 3 command connections; sampled 3x), not 13, so the old floor `>= 8` could
+  never pass and would have driven an unnecessary `rollout restart sts/open-webui` and then a §5
+  rollback. New gate: `subscribe` connections `>= 2` AND app connections `>= 3` (§4 leg 4).
+
+**Other drift found on 2026-11-27 (also not a scope change, but the reviewer and operator should see it):**
+- **Target image re-pushed.** `redis:8.10.3-alpine` amd64 manifest is now
+  `sha256:41ed50f5c0d9cf8b2151ad63df24ba96d018ccc84804d0688e9b9f1ed3d9f558` (pushed 2026-11-05;
+  was `be7c1cad...072c7f`). Config diff: alpine-minirootfs 3.23.7 -> 3.23.8, `REDIS_VERSION=8.10.3`
+  unchanged, i.e. an official-image base refresh, same redis binary version. §2 b re-pinned. The old
+  pin would have printed `STOP_DIGEST_CHANGED`.
+- **Baselines moved**: Sure `cron_jobs:default` 11 -> **17**; tube-archivist 23 -> 61 keys; nextcloud
+  534 -> 800; sure 761 -> 981 keys. Gates that hard-coded 11 now read the §2 f value.
+- **`pr: 240`** recorded (Renovate "update redis to v8.10.3", all nine files). Do not merge it.
+- **conflicts_with** gained `redis-fleet-8.12.0`, `kube-prometheus-stack-93.3.0`, `coredns-1.50.5`,
+  `talos-linux-1.14.6`, `envoy-gateway-1.10.0`, `nextcloud-12.0.2`, `nextcloud-9.4.5`.
+
+### 0.1 The decision this re-plan cannot make: 8.10.3 vs 8.12.0 (coordinator / operator)
+
+`coverage.py --json` (2026-11-27) no longer targets 8.10.3 for ANY member: all nine read
+`-> 8.12.0-alpine`, three (immich, nextcloud, sure) as PLAN under the draft `redis-fleet-8.12.0`,
+the other six pulled into PLAN by lockstep behind it. That draft declares
+`supersedes: redis-fleet-8.10.3` but carries only 3 legs, so executing it alone would leave six
+members frozen in lockstep again (the F-8792dba3 shape). The 2026-11-02 per-member findings this
+plan referenced are resolved; the open ones read 8.12.0.
+
+Executing THIS plan on 11-29 is still technically sound (same-minor patch, RDB_VERSION 15 so the
+rollback loads both persisted files; 8.12 raises RDB_VERSION, see F-4072d262), and it would move
+all nine off 8.10.1. But it does NOT clear the coverage cells (they stay PLAN for 8.12.0), it costs
+a second nine-restart pass later, and it invalidates `redis-fleet-8.12.0`'s 8.10.1-anchored seds.
+Pick ONE before the slot: (A) run this plan as written, then re-plan 8.12.0 from 8.10.3; or (B)
+mark this plan superseded and widen `redis-fleet-8.12.0` to all nine with a persistent-redis
+backup/rollback procedure. Recommendation for the reviewer: do not vet this plan for 11-29 until
+that choice is recorded (`home-operation decide`).
 
 > **GO RESET (2026-11-02).** Any operator go/no-go recorded against `redis-fleet-8.10.2`, or
 > against the earlier 3-consumer draft of THIS plan_id, does **not** carry over. Both the target
@@ -280,7 +361,7 @@ needs_replan_since: "2026-11-26"
    AOF, superset, open-webui sidecar, tube-archivist RDB with the dump.rdb copy and the
    `ta:cookie` gate, paperless, with backup gates), each re-verified against the live cluster
    on 2026-11-02. New vs 8.10.2: leg 3 (affine-redis, 8.10.2 -> 8.10.3), and the open-webui leg
-   is now against app v0.12.5.
+   is now against app v0.12.5 (since 2026-11-09: app v0.13.0 / chart 17.5.0, §0).
 3. **Target.** Upstream `redis/redis` 8.10.3 was published 2026-10-26T11:56Z (`gh release list`:
    Latest; 8.12-rc1/rc2 are pre-releases and not a candidate). Docker Hub `redis:8.10.3-alpine`:
    `8.10.4-alpine` and `8.11.0-alpine` -> 404. **The tag was RE-PUSHED on 2026-10-29T03:05Z**
@@ -346,7 +427,7 @@ PONG` on 2026-11-02).
 ### 1.4 The trap this plan exists to catch: Sure's cron schedule
 
 `sure-redis` is non-persistent. Sure's recurring jobs (bank sync, market data, cleanups:
-`SCARD cron_jobs:default` = **11** on 2026-11-02) live ONLY in that redis and are written there
+`SCARD cron_jobs:default` = **11** on 2026-11-02, **17** on 2026-11-27) live ONLY in that redis and are written there
 ONLY at Sidekiq startup (sidekiq-cron 2.3.0, `lib/sidekiq/cron/schedule_loader.rb`,
 `config.on(:startup) { ... load_schedule }`; Sure's `AutoSyncScheduler.sync!` is likewise an
 `on(:startup)` hook). Swapping the redis under a running `sure-worker` leaves a healthy worker
@@ -357,17 +438,20 @@ the new redis is Ready and §4 asserts the count returns to 11.
 
 Only the sidecar changes. It runs the image defaults (no `command`, no volume, RDB snapshots to
 the container filesystem; premise `open-webui-redis-default-config`) and holds websocket/pubsub
-state (7 keys, 13 app connections on 2026-11-02). Upstream evidence for in-process re-attach
-(open-webui `v0.12.3`, `backend/open_webui/socket/main.py`, read 2026-10-25; unchanged
-structure expected in 0.12.5 but NOT re-read): the websocket manager is
+state (7 keys, 13 app connections on 2026-11-02; **4 keys, 5 app connections of which 2 are
+`subscribe`, on 2026-11-27 under app v0.13.0**). Upstream evidence for in-process re-attach
+(open-webui `v0.12.3`, read 2026-10-25; **RE-READ at `v0.13.0` on 2026-11-27, same structure,
+lines ~119 and ~1431 of `backend/open_webui/socket/main.py`**): the websocket manager is
 `socketio.AsyncRedisManager`, and `redis_event_listener()` runs `pubsub.subscribe`/`listen()`
 inside a `while True` that catches every exception, logs `Redis event listener failed.
 Retrying.`, sleeps `REDIS_PUBSUB_RECONNECT_INTERVAL` and doubles it up to
 `REDIS_PUBSUB_MAX_RECONNECT_INTERVAL`. That is source reading, not a measurement on this
 cluster, so §4 leg 4 measures it (client count returns) and gives the fallback
 (`kubectl rollout restart sts/open-webui -n ai`: image and DB unchanged, so safe, but it ends
-sessions on that pod briefly). The app is **v0.12.5** (commit ab0c0636); the old premise that
-open-webui is "held on cooldown for 0.12.4" is stale and removed.
+sessions on that pod briefly). The app is **v0.13.0** (commit 7a7b1b7d1, chart 17.5.0, 2026-11-09;
+was v0.12.5 at the 11-02 re-plan). v0.13.0 adds session-pool and usage cleanup loops that take
+redis locks; each runs in its own `while True` and logs `... failed. Retrying.` on error, so a
+redis swap costs them one retry, not a crash.
 
 ### 1.6 affine-redis (new leg, 8.10.2 -> 8.10.3)
 
@@ -388,7 +472,7 @@ proof of the same server line for the other members.
 | 1 | databases/redis | **AOF on PVC** | nothing (0 keys, 1 client = our own cli) | none | none: canary for the persisted-load path |
 | 2 | databases/superset-redis-official | none, `requirepass` | celery broker + results (1444 keys, 15 clients) | superset-worker, superset-celerybeat | in-flight celery results lost; reconnect in-process (celery `inspect ping` pong now) |
 | 3 | office/affine-redis | none | BullMQ queues (db4, 30 keys, 8 `bzpopmin` workers) | affine | queued jobs dropped; cron re-seeds in <= 30 s (§1.6) |
-| 4 | ai/open-webui-redis (sidecar) | RDB defaults, no volume | websocket/pubsub (7 keys, 13 app connections) | open-webui-0 | brief pubsub gap; app NOT rolled |
+| 4 | ai/open-webui-redis (sidecar) | RDB defaults, no volume | websocket/pubsub (4 keys, 5 app connections incl. 2 subscribers, 2026-11-27) | open-webui-0 | brief pubsub gap; app NOT rolled |
 | 5 | download/tube-archivist-redis | **RDB on PVC** | celery broker + **durable app state** (`ta:cookie`, no TTL; 23 keys, dump.rdb 6188 B) | tube-archivist | none if dump.rdb reloads |
 | 6 | media/immich-redis | none | BullMQ queues (66 keys) | immich-server (19 blocking workers) | queued/active jobs dropped; workers reconnect in-process |
 | 7 | office/sure-redis | none | sidekiq queues + **cron schedule** + Rails cache (761 keys) | sure-worker, sure-web | **schedule lost, worker restart required** |
@@ -406,8 +490,10 @@ cd /Users/mu/code/cberg-home-nextgen
 # b) target still current, cooldown satisfied, AMD64 MANIFEST digest unchanged since planning.
 #    PASS prints AGE_OK ... and DIGEST_MATCH. Anything else is a STOP.
 #    (The INDEX digest is printed for the record and saved for §4 v_fleet; it is NOT the pin:
-#    the index was re-pushed 2026-10-29 when riscv64 was added, the amd64 manifest was not.)
-WANT_AMD64=sha256:be7c1cada5a6eb1656adfa2635b99296af725881301b21f84f35a71fac072c7f
+#    the index was re-pushed 2026-10-29 when riscv64 was added, the amd64 manifest was not.
+#    The amd64 manifest WAS re-pushed 2026-11-05 (alpine 3.23.7 -> 3.23.8 base refresh, REDIS_VERSION
+#    8.10.3 unchanged); Hub last_updated 2026-11-11T21:05Z, index sha256:7958cfbb...1935c3 on 2026-11-27.)
+WANT_AMD64=sha256:41ed50f5c0d9cf8b2151ad63df24ba96d018ccc84804d0688e9b9f1ed3d9f558   # re-pinned 2026-11-27 (was be7c1cad...072c7f, §0)
 curl -s https://hub.docker.com/v2/repositories/library/redis/tags/8.10.3-alpine | WANT_AMD64="$WANT_AMD64" python3 -c '
 import sys, json, os, datetime as d
 try:
@@ -421,7 +507,8 @@ open("/tmp/redis-fleet3-index", "w").write(str(j.get("digest")))
 match = amd == [os.environ["WANT_AMD64"]]
 print("DIGEST_MATCH" if match else "STOP_DIGEST_CHANGED amd64=%s" % amd)
 sys.exit(0 if (a >= 48 and match) else 1)'
-#    Measured 2026-11-02: "AGE_OK 99.9 h 2026-10-29T03:05:12.925646Z INDEX sha256:21090af9...2883537 AMD64 ['sha256:be7c1cad...072c7f']"
+#    Measured 2026-11-27 (Hub tags API): amd64 ['sha256:41ed50f5...d9f558'], last_updated 2026-11-11T21:05:10Z -> AGE_OK ~370 h.
+#    History: 2026-11-02 "AGE_OK 99.9 h 2026-10-29T03:05:12.925646Z INDEX sha256:21090af9...2883537 AMD64 ['sha256:be7c1cad...072c7f']"
 #    then "DIGEST_MATCH". Negative control (WANT_AMD64=sha256:deadbeef): prints "STOP_DIGEST_CHANGED amd64=[...]", exit 1.
 #    FAILS as TOO_NEW (a re-push inside 48 h), STOP_DIGEST_CHANGED (the amd64 bits changed: re-read the compare in §1.2
 #    and re-pin), or FETCH_FAILED. A changed INDEX alone with DIGEST_MATCH is benign (another architecture was pushed).
@@ -431,6 +518,8 @@ for t in 8.10.3-alpine 8.10.4-alpine 8.11.0-alpine; do
   curl -s -o /dev/null -w "$t -> %{http_code}\n" https://hub.docker.com/v2/repositories/library/redis/tags/$t
 done
 #    FAILS as 8.10.3 -> 404 (withdrawn) or a newer tag -> 200 (refresh this plan; do not apply a superseded target).
+#    Measured 2026-11-27: 200 / 404 / 404. NOT probed on purpose: 8.12.0-alpine -> 200 (a newer MINOR line, the
+#    target of redis-fleet-8.12.0). That is the §0.1 decision, not a same-line supersession; do not add it here.
 
 # d) Flux sane
 flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
@@ -460,15 +549,15 @@ for x in databases/redis databases/superset-redis-official download/tube-archivi
   ns=${x%/*}; d=${x#*/}
   echo "## $x $(kubectl exec -n $ns deploy/$d -- sh -c 'redis-cli info server | grep ^redis_version; redis-cli info clients | grep ^connected_clients; redis-cli dbsize' | tr '\r\n' '  ')"
 done
-#    [redis 1 client/0 keys · superset 15/1444 · tube-archivist 6/23 · immich 81/66 · nextcloud 14/534 ·
-#     paperless 18/13 · sure 24/761 · affine 14/0 (its keys are in db4) · open-webui-redis 14/7] — floors-with-slack, not exact.
-kubectl exec -n office deploy/sure-redis -- redis-cli scard cron_jobs:default                                 # [11]
+#    [2026-11-27: redis 1 client/0 keys · superset 16/1444 · tube-archivist 6/61 · immich 83/66 · nextcloud 14/800 ·
+#     paperless 22/18 · sure 12/981 · affine 14/0 (its keys are in db4) · open-webui-redis 6/4] — floors-with-slack, not exact.
+kubectl exec -n office deploy/sure-redis -- redis-cli scard cron_jobs:default | tee /tmp/redis-fleet3-sure-cron   # [17 on 2026-11-27; 11 on 11-02] §4 leg 7 compares
 kubectl exec -n download deploy/tube-archivist-redis -- redis-cli exists ta:cookie                            # [1]
 kubectl exec -n media deploy/immich-redis -- sh -c 'redis-cli client list | grep -c "cmd=bzpopmin"'          # [19]
 kubectl exec -n office deploy/affine-redis -- sh -c 'redis-cli client list | grep -c "cmd=bzpopmin"; redis-cli -n 4 dbsize'   # [8, 30]
-kubectl exec -n ai deploy/open-webui-redis -- redis-cli client list | grep -c 'addr=10\.'                      # [13] app-side connections
-kubectl exec -n ai open-webui-0 -c open-webui -- python3 -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8080/api/version').read())" | tee /tmp/redis-fleet3-owui-version   # [{"version":"0.12.5",...}]
-kubectl get pod -n ai open-webui-0 -o jsonpath='{.status.startTime}{" restarts="}{.status.containerStatuses[0].restartCount}{"\n"}' | tee /tmp/redis-fleet3-owui0   # [2026-10-31T02:34:09Z restarts=0] — §4 leg 4 compares
+kubectl exec -n ai deploy/open-webui-redis -- sh -c 'redis-cli client list | grep -c "addr=10\."; redis-cli client list | grep -c "cmd=subscribe"'   # [5, 2] app-side connections, subscribers (2026-11-27)
+kubectl exec -n ai open-webui-0 -c open-webui -- python3 -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8080/api/version').read())" | tee /tmp/redis-fleet3-owui-version   # [{"version":"0.13.0",...}] (0.12.5 before 2026-11-09)
+kubectl get pod -n ai open-webui-0 -o jsonpath='{.status.startTime}{" restarts="}{.status.containerStatuses[0].restartCount}{"\n"}' | tee /tmp/redis-fleet3-owui0   # [2026-11-09T00:42:20Z restarts=2 on 2026-11-27] — §4 leg 4 compares
 # nextcloud-redis: AUTH control BEFORE the roll, so the post-roll NOAUTH result is not first-time evidence
 kubectl exec -n office deploy/nextcloud-redis -- sh -c 'env -u REDISCLI_AUTH redis-cli ping; redis-cli ping' # [NOAUTH Authentication required. / PONG]
 # AOF baseline on the canary
@@ -520,12 +609,12 @@ kill $PF 2>/dev/null
 GIT=$(grep -E '^[[:space:]]*tag:[[:space:]]*v[0-9]' kubernetes/apps/ai/open-webui/app/helmrelease.yaml | awk '{print $2}')
 LIVE=$(kubectl get sts -n ai open-webui -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://')
 echo "git=[$GIT] live=[$LIVE]"; if [ -n "$GIT" ] && [ "$GIT" = "$LIVE" ]; then echo OWUI_APP_IN_SYNC; else echo STOP_OWUI_APP_DRIFT; fi
-#    PASS: OWUI_APP_IN_SYNC (measured 2026-11-02: git=[v0.12.5] live=[v0.12.5]). FAILS as STOP_OWUI_APP_DRIFT (an open-webui bump is
+#    PASS: OWUI_APP_IN_SYNC (measured 2026-11-27: git=[v0.13.0] live=[v0.13.0]; 2026-11-02: v0.12.5 both). FAILS as STOP_OWUI_APP_DRIFT (an open-webui bump is
 #    merged but not rolled: leg 4 would roll the app too; let it settle first). The grep matches exactly one line (the app tag).
 ```
 
 Proceed only if (a) all premises PASS, (b) AGE_OK + DIGEST_MATCH, (c) 200/404/404, (d) clean,
-(e) SLOT_CLEAR, (f) the pre-roll NOAUTH/PONG pair, AOF baseline and schedule 11, (g) FRESH x2,
+(e) SLOT_CLEAR, (f) the pre-roll NOAUTH/PONG pair, AOF baseline and a NON-ZERO sure schedule (17 on 11-27), (g) FRESH x2,
 (i) PROM_OK, (j) OWUI_APP_IN_SYNC. For (h), proceed per leg when that leg's drain check is empty.
 **Announce** the Nextcloud sign-out before starting (the policy rule's attended-slot condition).
 
@@ -605,7 +694,7 @@ leg_commit
 wait_img office deploy/affine-redis redis:8.10.3-alpine
 ```
 
-### Leg 4: ai/open-webui, redis sidecar tag ONLY (chart 17.0.0 and app v0.12.5 untouched)
+### Leg 4: ai/open-webui, redis sidecar tag ONLY (chart 17.5.0 and app v0.13.0 untouched)
 
 No sqlite pre-copy and no alembic assertion are needed: the app image and DB are not touched.
 Two substitutions in one file (the comment line keeps the file honest):
@@ -618,14 +707,16 @@ sed -i '' -e 's/^\([[:space:]]*tag:[[:space:]]*\)8\.10\.1-alpine$/\18.10.3-alpin
 #   106c106
 #   <           tag: 8.10.1-alpine
 #   >           tag: 8.10.3-alpine
-#   (`tag: v0.12.5` at the app image is NOT matched: it has no 8.10.1 text)
+#   (`tag: v0.13.0` at the app image is NOT matched: it has no 8.10.1 text)
+#   Dry-run 2026-11-27 on a scratch copy of the live file (BSD sed): exactly the two hunks above.
+#   Render check 2026-11-27: helm template open-webui 17.5.0 before/after differs in ONE line, image: "redis:8.10.3-alpine".
 LEG=4 FILE=kubernetes/apps/ai/open-webui/app/helmrelease.yaml
 SUBJ="chore(open-webui): redis sidecar 8.10.1-alpine -> 8.10.3-alpine (plan redis-fleet-8.10.3 leg 4)"
 leg_commit
 wait_img ai deploy/open-webui-redis redis:8.10.3-alpine
 ```
 (open-webui-redis is `RollingUpdate 25%`: a new pod may briefly coexist with the old; harmless for an
-ephemeral pubsub store with no volume.) The Helm release moves from revision 60 to 61.
+ephemeral pubsub store with no volume.) The Helm release moves from revision 61 to 62 (chart open-webui-17.5.0; was 60 -> 61 at 17.0.0).
 
 ### Leg 5: download/tube-archivist-redis (persistent RDB)
 
@@ -806,16 +897,20 @@ Then `v_cons`.
 **Leg 4: open-webui (sidecar only).** `v_floor ai open-webui-redis; v_rt ai open-webui-redis`, then
 ```bash
 kubectl exec -n ai open-webui-0 -c open-webui -- python3 -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8080/api/version').read())" | diff - /tmp/redis-fleet3-owui-version && echo OWUI_VERSION_UNCHANGED
-#   PASS: OWUI_VERSION_UNCHANGED (same version as the §2 f baseline, 0.12.5). FAILS as a diff / connection error (app rolled or down).
+#   PASS: OWUI_VERSION_UNCHANGED (same version as the §2 f baseline, 0.13.0 on 2026-11-27). FAILS as a diff / connection error (app rolled or down).
 kubectl get pod -n ai open-webui-0 -o jsonpath='{.status.startTime}{" restarts="}{.status.containerStatuses[0].restartCount}{"\n"}' | diff - /tmp/redis-fleet3-owui0 && echo OWUI_APP_UNCHANGED
 #   PASS: OWUI_APP_UNCHANGED (the HR upgrade re-rendered identical StatefulSet values). FAILS as a diff: the app pod was
 #   recreated — acceptable only if /api/version above is unchanged (record it); a restart-count increase is a FAIL.
 for i in $(seq 1 12); do
-  C=$(kubectl exec -n ai deploy/open-webui-redis -- redis-cli client list | grep -c 'addr=10\.')
-  echo "t=$((i*10))s app_connections=$C"; [ "$C" -ge 8 ] && { echo OWUI_REATTACHED; break; }; sleep 10
-done; [ "$C" -ge 8 ] || echo OWUI_NOT_REATTACHED
-#   PASS: OWUI_REATTACHED within 2 min (baseline 13 app connections on 2026-11-02; floor 8, since a fresh redis starts at 0
-#   so the floor cannot pass by itself). FAILS as OWUI_NOT_REATTACHED / app_connections=0: the app did not reconnect
+  C=$(kubectl exec -n ai deploy/open-webui-redis -- sh -c 'redis-cli client list | grep -c "addr=10\."')
+  S=$(kubectl exec -n ai deploy/open-webui-redis -- sh -c 'redis-cli client list | grep -c "cmd=subscribe"')
+  echo "t=$((i*10))s app_connections=$C subscribers=$S"; [ "$C" -ge 3 ] && [ "$S" -ge 2 ] && { echo OWUI_REATTACHED; break; }; sleep 10
+done; [ "$C" -ge 3 ] && [ "$S" -ge 2 ] || echo OWUI_NOT_REATTACHED
+#   PASS: OWUI_REATTACHED within 2 min. Baseline 2026-11-27 (app v0.13.0): 5 app connections, 2 of them `cmd=subscribe`
+#   (sampled 3x: the AsyncRedisManager channel + redis_event_listener). REWRITTEN 2026-11-27: the old floor (>= 8 of a
+#   13-connection baseline under v0.12.5) can no longer pass against 5 and would have false-failed. A fresh redis starts
+#   at 0 subscribers and only the app's own listeners subscribe, so S >= 2 cannot pass by itself; `grep -c` prints 0
+#   (not empty) on no match, inside the pod's busybox sh. FAILS as OWUI_NOT_REATTACHED / subscribers=0: the app did not reconnect
 #   in-process -> `kubectl rollout restart sts/open-webui -n ai` once (image/DB unchanged), re-run the loop; still failing -> §5.
 ```
 CONTENTS ASSERTION, attended: sign in, open an existing chat (its history renders; an empty chat list
@@ -863,7 +958,10 @@ was mid-flight at the swap, run "Missing" for it. Then `v_cons`.
 **Leg 7: sure.** `v_floor office sure-redis; v_rt office sure-redis`, then the schedule is
 re-registered and a worker heartbeats:
 ```bash
-kubectl exec -n office deploy/sure-redis -- redis-cli scard cron_jobs:default    # PASS: 11 (§2 f). FAILS as 0: worker restart missing / did not load the schedule
+kubectl exec -n office deploy/sure-redis -- redis-cli scard cron_jobs:default | diff - /tmp/redis-fleet3-sure-cron && echo SURE_SCHEDULE_RESTORED
+#   PASS: SURE_SCHEDULE_RESTORED (same count as the §2 f baseline file; 17 on 2026-11-27, 11 on 11-02). FAILS as a diff
+#   showing 0: worker restart missing / did not load the schedule. A diff to another non-zero count: read the schedule
+#   (config/schedule.yml in the live image) before calling it a failure; never pass it silently.
 kubectl exec -n office deploy/sure-redis -- redis-cli scard processes            # PASS: >= 1 (Sidekiq heartbeat) [1]. FAILS as 0
 kubectl exec -n office deploy/sure-redis -- redis-cli exists cron_job:default:sync_all_accounts   # PASS: 1 [1] (AutoSyncScheduler on(:startup))
 kubectl port-forward -n office svc/sure 18085:80 >/dev/null 2>&1 & PF=$!; sleep 5
@@ -1034,7 +1132,7 @@ done only when the consumer is back on it.
 Leg-specific additions:
 - **Leg 7 (sure):** the revert swaps redis again, so the schedule is empty again:
   `kubectl rollout restart deploy/sure-worker -n office` once more, then assert
-  `scard cron_jobs:default` = 11. Forgetting this is the one way a rollback here causes silent
+  `scard cron_jobs:default` equals the §2 f baseline (`/tmp/redis-fleet3-sure-cron`, 17 on 2026-11-27). Forgetting this is the one way a rollback here causes silent
   harm (no bank sync until the next worker restart).
 - **Leg 5 (tube-archivist):** 8.10.1 loads the 8.10.3-written dump.rdb (same RDB_VERSION 15). If after
   either direction `exists ta:cookie` = 0 (snapshot not loaded): the only durable app value is the
@@ -1060,7 +1158,7 @@ Leg-specific additions:
 - **Helm wedged `pending-upgrade`** on any app-template leg: `docs/sops/application-update.md` §11
   (`helm rollback <rel> <rev> -n <ns> --wait=false`, then `flux reconcile helmrelease -n <ns> <rel> --force`).
   Revisions on 2026-11-02 (chart app-template 5.3.0): redis 16, tube-archivist-redis 17, immich-redis 13,
-  sure-redis 15, affine-redis 16, open-webui 60 (chart open-webui-17.0.0). Read them fresh at the
+  sure-redis 15, affine-redis 16 (unchanged on 2026-11-27), open-webui 61 (chart open-webui-17.5.0; was 60 at 17.0.0). Read them fresh at the
   window (helm-drift-detection / flux-oci-chart-sources may have moved them).
 
 Cleanup after a successful window (not a rollback): `rm -f /tmp/ta-dump-*.rdb /tmp/redis-fleet3-*`.
@@ -1078,9 +1176,16 @@ Cleanup after a successful window (not a rollback): `rm -f /tmp/ta-dump-*.rdb /t
   11-14, 11-15, 11-21, 11-22: each holds a plan in `conflicts_with` (helm-drift/otel-operator-0.26.1,
   etcd, python-fleet, longhorn, authentik, flux-oci-chart-sources). §2 e reads the scheduler and fails
   loudly if the slot is shared. The `window:` stamp was set at the operator GO (2026-11-02).
-- **Same-night Prometheus consumers.** §4 reads Prometheus: a same-night `kube-prometheus-stack` bump
-  (auto lane, no plan file, so it cannot be named in `conflicts_with`) would confound the controls.
-  Check Step 0's applied list before leg 1 (§2 e note).
+- **Same-night Prometheus consumers.** §4 reads Prometheus: `kube-prometheus-stack-93.3.0` (draft) is now
+  in `conflicts_with`; any other kube-prometheus-stack bump Step 0 lands the same night would confound
+  the controls too. Check Step 0's applied list before leg 1 (§2 e note).
+- **redis-fleet-8.12.0 (§0.1).** Same image, three of the same Deployments, declares it supersedes this
+  plan. Never both in one window. If this plan runs, that plan's premises (8.10.1 on immich/nextcloud/
+  sure) fail and it re-plans from 8.10.3; if that plan is chosen, mark this one superseded.
+- **open-webui Renovate PRs.** #505 (app v0.13.0 -> v0.13.5, patch) and #480 (chart 17.5.0 -> 18.5.0,
+  MAJOR) are open and touch the same HelmRelease file. If Step 0 lands #505 the same night, §2 j fails
+  until it has rolled (wait, then proceed: the `v0.13.x` premise still passes). If #480 lands, premise
+  `open-webui-chart-current` fails: re-plan leg 4 (the 18.x values path for the sidecar must be re-read).
 - **Order of work around Nextcloud:** the executed nextcloud-9.4.1 / whiteboard-2.1.2 plans no longer
   exist as files; any new Nextcloud chart/server plan filed before the window must be serialized BEFORE
   leg 9, never in the same hour.
