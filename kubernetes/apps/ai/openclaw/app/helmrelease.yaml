@@ -2111,7 +2111,11 @@ spec:
                   # camofox reads them), and agents kept picking it over camofox_*. Only
                   # disable it once camofox is confirmed installed, so we never end up with
                   # no browser at all.
+                  # browser.enabled alone is NOT enough: the plugin stays loaded and still
+                  # registers the `browser` tool (verified live 2026-11-27), so disable the
+                  # plugin entry too.
                   openclaw config set browser.enabled false --strict-json || echo "WARN: browser disable failed"
+                  openclaw config set plugins.entries.browser.enabled false --strict-json || echo "WARN: browser plugin disable failed"
                 fi
 
                 # OpenAI/Codex login RETIRED 2026-11-16 (agents run on the Anthropic key,
