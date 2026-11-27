@@ -196,6 +196,8 @@ sops_refs:
   - docs/sops/flux-dependency-revision-gate.md
   - docs/sops/verification-contents-not-shape.md
 generated: "2026-11-18"   # re-dated at the 2026-11-18 review (was 2026-10-01)
+needs_replan: "premise-fail: longhorn-hr-chart-1-12-1-ready: got '1.12.2 1.12.2 True', want exactly '1.12.1 1.12.1 True'; longhorn-settings-pre-state: got 'current-longhorn-version=v1.12.2 v2-data-engine=false concurrent-automatic-engine-upg"
+needs_replan_since: "2026-11-27"
 ---
 
 # Longhorn 1.12.1 -> 1.13.0 (chart + manager, then live engine drain)

@@ -131,6 +131,8 @@ sops_refs:
   - docs/sops/flux-dependency-revision-gate.md
 generated: "2026-09-11"
 replanned: "2026-11-03"
+review_refined: "2026-11-27"   # plan-refine: mechanical-only refresh, premises PASS (full review date unchanged)
+review_refined_base: "2026-11-03"
 ---
 
 # Migrate HTTP chart sources to OCIRepository + HelmRelease.chartRef

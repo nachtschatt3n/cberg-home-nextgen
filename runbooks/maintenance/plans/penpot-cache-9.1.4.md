@@ -70,6 +70,8 @@ premises:
 sops_refs:
   - docs/sops/application-update.md
 generated: "2026-11-19"
+needs_replan: "minor-or-major-drift: upstream moved 9.1.4 -> 9.2.1 (minor); a re-assessment is needed"
+needs_replan_since: "2026-11-27"
 ---
 
 # penpot-cache: valkey 9.1.3 -> 9.1.4 (GA patch on the pinned line; held only by the interim `*valkey*` rule)

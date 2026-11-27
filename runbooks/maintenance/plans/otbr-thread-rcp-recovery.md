@@ -109,6 +109,8 @@ premises:
       volume, or the BR would form/join a different network on scale-up.
     run: kubectl get pvc otbr-data -n home-automation -o jsonpath='{.status.phase} {.spec.volumeName}'
     expect_exact: "Bound pvc-da17b5c6-0d8c-42cf-9a25-bc444ac9a71d"
+needs_replan: "premise-fail: hr-last-changed-by-scale-down: got '4cbf54185b1ec8efac4b53b47e1345bc5f114b8d', want exactly '371bac303583369ca1826bbdbb23"
+needs_replan_since: "2026-11-27"
 ---
 
 # otbr-thread-rcp-recovery: core-firmware flash of the Thread SLZB, then scale otbr back to 1
