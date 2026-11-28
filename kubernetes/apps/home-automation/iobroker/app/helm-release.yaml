@@ -37,7 +37,7 @@ spec:
             nameOverride: iobroker
             image:
               repository: buanet/iobroker
-              tag: v12.0.0@sha256:005ba9c285887d2ca13dad94aab75a93bf2fea1c5016c6f54802c4e1c4fb0a27
+              tag: v12.0.0@sha256:723297a54558ade6f7f9397af0299c65a5b9d15ae2522988a5147ec6a6654d58
               #tag: v10.0.0
               pullPolicy: IfNotPresent
 
