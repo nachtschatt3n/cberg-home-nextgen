@@ -39,7 +39,7 @@ spec:
             - name: github-backup
               # Upstream image (published by the project on release tags), pinned
               # by tag AND index digest. Alpine + git + git-lfs; we never build it.
-              image: ghcr.io/josegonzalez/python-github-backup:0.68.0@sha256:d29c2686be901d72ccacce76c2674e486dc2626ad94b962958351f1f046b7388
+              image: ghcr.io/josegonzalez/python-github-backup:0.69.1@sha256:558c9501212ebac7735e960b2888aecd56b5bc4e9e0a49410a6ecc4d68b8a9fa
               imagePullPolicy: IfNotPresent
               command:
                 - /bin/sh
