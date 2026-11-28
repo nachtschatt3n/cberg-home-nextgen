@@ -68,7 +68,7 @@ spec:
               # openclaw 2026.11.1 engines: node >=24.16.0 <25 || >=26.1.0. Node 24 LTS line
               # (NOT 26: the earlier managed-codex failure was on 26). Digest-pinned
               # because upstream rebuilds 24.x-bookworm tags in place (2026-11-07).
-              tag: 24.22.3-bookworm@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496
+              tag: 24.22.3-bookworm@sha256:49f7adaf9f1574bc45c20ea317139b39a59d7e758d0e93745e112fd85cb42623
             command:
               - bash
               - -lc
@@ -866,7 +866,7 @@ spec:
               # openclaw 2026.11.1 engines: node >=24.16.0 <25 || >=26.1.0. Node 24 LTS line
               # (NOT 26: the earlier managed-codex failure was on 26). Digest-pinned
               # because upstream rebuilds 24.x-bookworm tags in place (2026-11-07).
-              tag: 24.22.3-bookworm@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496
+              tag: 24.22.3-bookworm@sha256:49f7adaf9f1574bc45c20ea317139b39a59d7e758d0e93745e112fd85cb42623
               pullPolicy: IfNotPresent
 
             command:
