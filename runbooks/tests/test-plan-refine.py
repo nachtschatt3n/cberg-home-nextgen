@@ -131,7 +131,11 @@ for pid, newt in (("redisinsight-3.10", "3.10.2"), ("coredns-1.50.5", "1.50.8"))
     r = by[pid]
     rt = any(a["type"] == "retarget-patch" for a in r["actions"])
     digest = r["outcome"] == "needs-replan" and r["replan"]["code"] == "digest-pinned-target"
-    check(f"{pid}: retargeted or refused on digest pin", rt or digest, json.dumps(r.get("replan")))
+    # The fixtures are the LIVE repo plans, and the nightly Step 0a retargets them. A plan
+    # that already targets the newest patch reports drift "<new>-><new>" and has nothing left
+    # to retarget -- that is the repaired end state, not a missed repair.
+    current = any(f == f"target-drift:{newt}->{newt}" for f in r.get("findings", []))
+    check(f"{pid}: retargeted, refused on digest pin, or already current", rt or digest or current, json.dumps(r.get("replan")))
     if rt:
         fm, body = pr.split_plan(new_texts[r["path"]])
         check(f"{pid}: target is {newt}", str(pr.fm_parse(fm)["target"]) == newt)

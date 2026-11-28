@@ -57,7 +57,7 @@ def check(name, ok, detail=""):
         FAILURES.append(name)
 
 
-NOW = dt.datetime(2026, 9, 27, 12, 0, tzinfo=dt.timezone.utc)
+NOW = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)  # live clock: the code under test reads the real one, a fixed date ages the 90d window out
 D = lambda days: NOW - dt.timedelta(days=days)  # noqa: E731
 POLICY = {"deny": [], "age_waive": [], "minimum_release_age_hours": 48,
           "minimum_release_age_hours_by_type": {"patch": 24},
