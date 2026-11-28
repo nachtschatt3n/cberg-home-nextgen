@@ -110,7 +110,7 @@ do_prune() {
     select_tier "$tier" || return 1
     start=$(date +%s)
     r unlock || return 1
-    r forget --host offsite --group-by host --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune || return 1
+    r forget --host offsite --group-by host --keep-daily 3 --keep-weekly 2 --keep-monthly 3 --prune || return 1
     size=$(r stats --mode raw-data --json | jq -r '.total_size') || return 1
     snaps=$(r snapshots --json --host offsite | jq 'length') || return 1
     end=$(date +%s)

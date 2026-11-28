@@ -191,8 +191,8 @@ Configure in Longhorn UI → Settings → Backup Retention:
 | Delete old backup job interval | 24h |
 
 Or configure per-volume in the volume settings. The 7-daily figure covers the
-on-site Longhorn store only; the off-site restic repos keep 7 daily / 4 weekly /
-12 monthly (weekly `offsite-backup-prune`).
+on-site Longhorn store only; the off-site restic repos keep 3 daily / 2 weekly /
+3 monthly (weekly `offsite-backup-prune`).
 
 ---
 
@@ -425,7 +425,7 @@ if the newest one will not mount.
 |---|---|---|---|
 | `offsite-backup-apps` | 00:30 daily | append-only | restic backup, tier apps |
 | `offsite-backup-core` | 00:40 daily | append-only | restic backup, tier core, upload limited to 40000 KiB/s |
-| `offsite-backup-prune` | Sun 04:30 | admin | `forget --prune`, keep 7 daily / 4 weekly / 12 monthly, both tiers |
+| `offsite-backup-prune` | Sun 04:30 | admin | `forget --prune`, keep 3 daily / 2 weekly / 3 monthly, both tiers |
 | `offsite-backup-check` | Wed 04:30 | admin | `check --read-data-subset=5%`, both tiers |
 | `offsite-backup-contents` | Mon 06:00 | append-only (read) | read-only contents exporter, see "Dashboard and contents view" |
 

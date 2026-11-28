@@ -296,7 +296,7 @@ spec:
                 claimName: backup-src-9
                 readOnly: true
 ---
-# Weekly retention (Sunday 04:30 UTC): forget --prune, keep 7 daily / 4 weekly / 12 monthly. Uses the admin (non-append-only) key, the ONLY place it is used.
+# Weekly retention (Sunday 04:30 UTC): forget --prune, keep 3 daily / 2 weekly / 3 monthly. Uses the admin (non-append-only) key, the ONLY place it is used.
 apiVersion: batch/v1
 kind: CronJob
 metadata:

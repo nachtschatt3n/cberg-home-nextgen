@@ -595,7 +595,7 @@ So there is no procedure here; it is an open gap tracked below.
 | Issues/PR history of mirrored repos as live objects | JSON only, no GitHub import API | Reference JSON |
 | Mac mini local-only state (section 12.1) | Not in git, backup not confirmed | See open gaps |
 | Windows desktop contents | No backup documented | Open gap |
-| Retention beyond 7 daily / 4 weekly / 12 monthly | By policy | |
+| Retention beyond 3 daily / 2 weekly / 3 monthly | By policy | |
 | Anything if age key AND the independent restic-password copy are both lost | Ciphertext only | Section 3 rows 1, 3, 18 |
 
 ## 15) Fire drills
