@@ -486,6 +486,22 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
   legit questions, v4 regressions). The revert regex now rewinds a v2/v3/v4
   line. Rollback: AGENTS.md from the backups; scrub back to v4 = revert the
   commit (one pod roll).
+  **Named timers: VOICE MODE v5.9 (2026-11-28):** a named timer request that
+  missed HA's local grammar ("Set Turkey leg timer to seven hours.") fell
+  through to OpenClaw, which replied with a long explanation and a phrase
+  that dropped the name ("... you could say: set a timer for seven hours."),
+  so the user set an unnamed timer. The v5.9 TIMERS bullet + reminder line:
+  for any timer request (start/cancel/pause/status), ONE short sentence with
+  the HA phrase, keeping name and duration, in the request's language, no
+  "?" and no explanation. Paired EN/DE examples ("Say: set a timer for seven
+  hours named turkey leg." / "Sag: Stelle einen Timer für sieben Stunden
+  namens Putenkeule.", cancel "Sag: Stoppe den Putenkeule Timer.") because
+  Haiku copied a lone English example verbatim for German input. Applied
+  in-pod to all three voice AGENTS.md (backups `.bak-pre-v59-20261128`) and
+  to the `workspace-agents*.md` first-boot keys. AGENTS.md is re-read on each
+  turn, so no restart is needed. Verified on household, voice-andrea and
+  voice-mathias with 6 EN/DE start/cancel/status cases. main/voice-mathias
+  AGENTS.md is now about 38.4K of the 40K `bootstrapMaxChars`.
   **LATENCY-DEBUG (TIME-BOXED, enabled 2026-11-20, REVERT on/after
   2026-11-21):** to explain the ~2.9 s prep gap (tool-catalog -> first model
   request), the ~3.4 s pre-session gap and plugin-reload stalls, the app
