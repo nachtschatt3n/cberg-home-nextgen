@@ -3,7 +3,7 @@
 
 Covers NodeCPUPackageHot (warning + critical), NodeCPUThermalCritAlarm,
 NodeCPUThermalThrottling, NodeNVMeHot (warning + critical at WCTEMP),
-NodeCPUPackagePowerAtCap, and the per-node absent guards NodeRAPLMetricsMissing /
+and the per-node absent guards NodeRAPLMetricsMissing /
 NodeCoretempMetricsMissing / NodeNVMeTempMetricsMissing.
 
 Both ways: the live rules must pass every case, AND each mutant below must
@@ -151,16 +151,7 @@ def tests():
         s(f"node_hwmon_temp_celsius{{{J},instance=\"n1\",{NVME}}}", "81.85x60"), s(wct, "81.85x60")],
         "alert_rule_test": [{"eval_time": "8m", "alertname": "NodeNVMeHot",
                              "exp_alerts": [{"exp_labels": nvme_labels("n1", "critical")}]}]})
-    # --- NodeCPUPackagePowerAtCap ------------------------------------------
-    pw = lab("n1", {"job": "node-exporter", "index": "0", "path": "/host/sys/class/powercap/intel-rapl:0"},
-             severity="info", category="node-hardware", component="cpu-power")
     rapl = f"node_rapl_package_joules_total{{{J},instance=\"n1\",index=\"0\",path=\"/host/sys/class/powercap/intel-rapl:0\"}}"
-    t.append({"interval": "30s", "input_series": [s(rapl, "0+1020x80")],  # 34 W
-              "alert_rule_test": [
-                  {"eval_time": "10m", "alertname": "NodeCPUPackagePowerAtCap", "exp_alerts": []},
-                  {"eval_time": "25m", "alertname": "NodeCPUPackagePowerAtCap", "exp_alerts": [{"exp_labels": pw}]}]})
-    t.append({"interval": "30s", "input_series": [s(rapl, "0+840x80")],  # 28 W
-              "alert_rule_test": [{"eval_time": "35m", "alertname": "NodeCPUPackagePowerAtCap", "exp_alerts": []}]})
     # --- per-node absent guards --------------------------------------------
     # n1 has everything, n2 has nothing but node_uname_info -> each guard fires for n2 only
     def guard(name, comp):
@@ -220,8 +211,6 @@ def mutants(groups):
         expr=find(g, "NodeCPUThermalThrottling")["expr"].replace("> 100", "> 50")))
     mut("NVMe critical > instead of >=", lambda g: find(g, "NodeNVMeHot", "critical").update(
         expr=find(g, "NodeNVMeHot", "critical")["expr"].replace(">=", ">")))
-    mut("power threshold 25", lambda g: find(g, "NodeCPUPackagePowerAtCap").update(
-        expr=find(g, "NodeCPUPackagePowerAtCap")["expr"].replace("> 31", "> 25")))
     for a, m in (("NodeRAPLMetricsMissing", "node_rapl_package_joules_total"),
                  ("NodeCoretempMetricsMissing", f'node_hwmon_temp_celsius{{{PKG}}}'),
                  ("NodeNVMeTempMetricsMissing", f'node_hwmon_temp_celsius{{{NVME}}}')):

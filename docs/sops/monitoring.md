@@ -707,7 +707,6 @@ PL1 = PL2 = 64 W on all three nodes (`constraint_{0,1}_power_limit_uw`).
 | `NodeCPUThermalThrottling` | `increase(..._throttles_total[15m]) > 100` for 30m, `keep_firing_for: 30m` | warning | 5 episodes, all node 02 |
 | `NodeNVMeHot` | composite > 65 °C for 10m | warning | 0 |
 | `NodeNVMeHot` | composite >= the drive's WCTEMP for 5m | critical | 0 |
-| `NodeCPUPackagePowerAtCap` | package > 58 W (90 % of the 64 W cap) for 15m | info | n/a (no RAPL history) |
 | `NodeRAPLMetricsMissing` / `NodeCoretempMetricsMissing` / `NodeNVMeTempMetricsMissing` | node-exporter up on a node but the series absent, 30m | warning | 0 (RAPL guard: would have fired on all 3 nodes for the whole window before the fix) |
 
 Why the temperature rules average: on a sensor this spiky, a raw
@@ -722,8 +721,7 @@ caps land. That is a true signal. The fix is power or cooling, not a pod limit.
 ### Follow-ups
 
 - **Power caps:** a `talos-sysfs-power-caps` maintenance plan (not yet
-  written as of 2026-10-04) will lower PL1. Retune `NodeCPUPackagePowerAtCap`
-  to ~90 % of the new cap **in the same commit**.
+  written as of 2026-10-04) will lower PL1. (`NodeCPUPackagePowerAtCap` was removed 2026-11-28: info alerts are not calls to action.)
 - **BIOS:** a BIOS-level fan/power-limit follow-up for the NUCs (node 02
   in particular) after the caps are measured.
 
