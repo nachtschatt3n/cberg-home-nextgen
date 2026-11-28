@@ -360,7 +360,7 @@ def drive_main(raise_in, revert_result=None):
             return f
         au.git_sync = boom("sync")
         au.reconcile = boom("reconcile")
-        au.post_apply_health = lambda ns, baseline=None: boom("gate")()
+        au.post_apply_health = lambda ns, baseline=None, **k: boom("gate")()
         au.revert_batch = lambda merged: (ev.append("revert") or (revert_result or (["abc1234"], [])))
         au.record_autonomy = lambda m, o: ev.append(f"autonomy:{o}") or []
         au._writer = lambda: None
@@ -399,6 +399,69 @@ check("revert impossible -> rc 3 and LEFT MERGED recorded with a reason",
 rc, ev, out = drive_main(None)
 check("healthy path still merges and records green", rc == 0 and "autonomy:green" in ev and "revert" not in ev,
       (rc, ev))
+
+# ---- F-08d5bc72 (2026-11-28): settle budget + pre-existing failing Job workloads ----
+def jpod(name, job, phase="Failed", ready=False):
+    p = pod(name, ready=ready, phase=phase)
+    p["metadata"]["ownerReferences"] = [{"kind": "Job", "name": job}]
+    return p
+
+
+# (a) settle budget: only a touched component with an entry extends the window
+pol = {"settle_budget_s": {"ai/openclaw": 1200}}
+check("budget: batch touching openclaw -> 1200s window",
+      au.settle_timeout_for({("ai", "openclaw"), ("x", "y")}, pol) == 1200)
+check("budget: batch NOT touching openclaw keeps the default window",
+      au.settle_timeout_for({("x", "y")}, pol) == au.SETTLE_TIMEOUT_S)
+check("budget: no policy key -> default",
+      au.settle_timeout_for({("ai", "openclaw")}, {}) == au.SETTLE_TIMEOUT_S)
+check("budget: malformed / lower values never shorten or lengthen the default",
+      au.settle_timeout_for({("ai", "openclaw")}, {"settle_budget_s": {"ai/openclaw": "900"}}) == au.SETTLE_TIMEOUT_S
+      and au.settle_timeout_for({("ai", "openclaw")}, {"settle_budget_s": {"ai/openclaw": 5}}) == au.SETTLE_TIMEOUT_S)
+check("budget: the shipped policy gives openclaw >= 900s",
+      au.settle_timeout_for({("ai", "openclaw")}, au.load_policy()) >= 900)
+check("budget: main() actually passes the budget to the gate",
+      "settle_timeout_for(all_apps, policy)" in src_main and "timeout=st_to" in src_main)
+# behavioural: a pod that becomes Ready only at t=420s fails with the default 300s window, passes with 1200s
+def slow_ready(timeout):
+    clock = {"t": 0.0}
+    def collect(_ns):
+        return ({}, ({} if clock["t"] >= 420 else NOTREADY), {})
+    def sleep(sec):
+        clock["t"] += sec
+    ok_, _p, _i = au.settle_health({"a"}, collect=collect, sleep=sleep, now=lambda: clock["t"],
+                                   timeout=timeout, poll=30)
+    return ok_
+check("slow starter: short window reverts (the bug), long budget settles", (not slow_ready(300)) and slow_ready(1200))
+
+# (b) Job workload already failing pre-apply is excluded; a NEW failing workload still counts
+try:
+    pre = [jpod("tnb-clip-e99-1128020940-0-aaaaa", "tnb-clip-e99-1128020940")]
+    au.run = fake_cluster(pods={"ci": pre})
+    base = au.capture_baseline({"ci"})
+    check("baseline records the already-failing Job workload", base["failed_workloads"] == {"ci/tnb-clip-e99"}, base["failed_workloads"])
+    later = pre + [jpod("tnb-clip-e99-1128020940-13-bbbbb", "tnb-clip-e99-1128020940"),
+                   jpod("tnb-clip-e99-1128033942-0-ccccc", "tnb-clip-e99-1128033942", phase="Pending")]
+    au.run = fake_cluster(pods={"ci": later})
+    h, sft, _ = au.collect_health({"ci"}, base)
+    check("new pods of a pre-failing Job workload are NOT regressions", not h and not sft, (h, sft))
+    new_bad = later + [jpod("other-job-99-0-ddddd", "other-job-99")]
+    au.run = fake_cluster(pods={"ci": new_bad})
+    h, sft, _ = au.collect_health({"ci"}, base)
+    check("a genuinely NEW failing Job workload still counts (hard)", any("other-job" in k for k in h), (h, sft))
+    # non-Job pod of the same name prefix, failing, is never excluded
+    au.run = fake_cluster(pods={"ci": [pod("tnb-clip-e99-1128020940-9-zzzzz", phase="Failed")]})
+    h, sft, _ = au.collect_health({"ci"}, base)
+    check("a Failed pod NOT owned by a Job is never excluded", bool(h), (h, sft))
+    # unreadable pod list in the baseline probe -> exclude nothing
+    au.run = fake_cluster(pods={"ci": pre}, fail=("ci",))
+    check("unreadable pod list -> no workloads excluded", au._failed_job_workloads({"ci"}) is None)
+    # negative control (mutant): without the exclusion the same reading regresses
+    au.run = fake_cluster(pods={"ci": later})
+    h, sft, _ = au.collect_health({"ci"}, {"restarts": {}})
+    check("negative control: without the baseline workloads the same pods ARE hard", bool(h), (h, sft))
+finally:
+    au.run = _real_run
 
 print(f"\n{'FAILED: ' + ', '.join(FAILURES) if FAILURES else 'ALL PASS'}")
 sys.exit(1 if FAILURES else 0)

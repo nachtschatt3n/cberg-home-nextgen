@@ -62,6 +62,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+from pathlib import Path
 import sys
 from datetime import datetime, timezone
 
@@ -189,7 +190,44 @@ def normalize_slot(slot: str, run_date: str) -> tuple[str, str | None]:
     return bare, warn
 
 
+def push_liveness_best_effort(env=None, loader=None) -> str:
+    """After a successful --finalize, refresh the Pushgateway liveness figures
+    (job maintenance-window-liveness) so MaintenanceWindowMissed* does not read
+    a snapshot up to 48h old (the only other pusher is sweep-run.py's
+    --reconcile-only branch). BEST EFFORT: never raises, never changes the exit
+    code. Returns the one log line it printed."""
+    try:
+        if loader is None:
+            import importlib.util
+            os.environ.setdefault("_MISE_ACTIVATED", "1")
+            spec = importlib.util.spec_from_file_location(
+                "sweep_run_liveness", Path(__file__).resolve().parent / "sweep-run.py")
+            mod = importlib.util.module_from_spec(spec)
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            spec.loader.exec_module(mod)
+        else:
+            mod = loader()
+        ok, why = mod.push_liveness_metrics(dict(os.environ if env is None else env))
+        line = (f"window-run-record: liveness metrics "
+                f"{'pushed' if ok else 'NOT pushed'} ({why})")
+    except BaseException as e:  # noqa: BLE001 -- never fail the finalize
+        line = f"window-run-record: liveness metrics NOT pushed ({type(e).__name__}: {e})"
+    print(line, file=sys.stderr)
+    return line
+
+
 def main(argv=None) -> int:
+    rc = _record(argv)
+    if rc == 0:
+        try:
+            if build_parser().parse_args(argv).finalize:
+                push_liveness_best_effort()
+        except BaseException:  # noqa: BLE001
+            pass
+    return rc
+
+
+def _record(argv=None) -> int:
     ap = build_parser()
     a = ap.parse_args(argv)
     err = validate_args(a)

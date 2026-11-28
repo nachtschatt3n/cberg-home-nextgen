@@ -1570,7 +1570,37 @@ def _pod_obj(key):
     return key.rsplit(":", 1)[0] if key.startswith("pod:") and key.count(":") >= 2 else None
 
 
-def _read_health(namespaces, restart_base=None):
+def _job_workload(ns, p):
+    """'ns/<workload>' for a pod owned by a Job, else None.
+
+    The workload is the owning Job's name with a trailing numeric run suffix
+    stripped, so every run of one CronJob (name-<epoch>) and every pod of one
+    Job map to the same key. Used only to recognise a CI/Job workload that was
+    ALREADY failing before the apply (F-08d5bc72)."""
+    for o in (p.get("metadata", {}) or {}).get("ownerReferences") or []:
+        if (o or {}).get("kind") == "Job" and o.get("name"):
+            return f"{ns}/{re.sub(r'-[0-9]+$', '', o['name']) or o['name']}"
+    return None
+
+
+def _failed_job_workloads(namespaces):
+    """Job workloads in `namespaces` with a Failed pod RIGHT NOW (pre-apply
+    baseline input). Returns None when any list is unreadable -- the caller
+    then excludes nothing (fail closed)."""
+    out = set()
+    for ns in sorted(namespaces):
+        items = _kubectl_json(["get", "pods", "-n", ns])
+        if items is None:
+            return None
+        for p in items:
+            if (p.get("status", {}) or {}).get("phase") == "Failed":
+                wl = _job_workload(ns, p)
+                if wl:
+                    out.add(wl)
+    return out
+
+
+def _read_health(namespaces, restart_base=None, failed_workloads=None):
     """One raw reading -> (hard, soft, pending, restarts).
 
     hard     = real-regression signals (crashloop/pull-error pods, Failed pods,
@@ -1623,6 +1653,8 @@ def _read_health(namespaces, restart_base=None):
             name = md.get("name")
             if md.get("deletionTimestamp"):
                 continue  # an old replica terminating is not the new state
+            if failed_workloads and _job_workload(ns, p) in failed_workloads:
+                continue  # Job workload already had Failed pods BEFORE the apply (F-08d5bc72)
             st = p.get("status", {}) or {}
             phase = st.get("phase")
             if phase == "Succeeded":
@@ -1660,7 +1692,9 @@ def collect_health(namespaces, baseline=None):
     # No baseline -> no restart comparison is possible (None), rather than
     # treating every historical restart as new. main() always passes one.
     restart_base = baseline.get("restarts", {}) if baseline is not None else None
-    hard, soft, pending, _ = _read_health(namespaces, restart_base)
+    hard, soft, pending, _ = _read_health(
+        namespaces, restart_base,
+        (baseline or {}).get("failed_workloads") or None)
     return hard, soft, pending
 
 
@@ -1671,18 +1705,21 @@ def capture_baseline(namespaces, reader=None):
               the gate's verdict, reported instead)
     pods    = pod objects already unhealthy (all their keys are excluded)
     unreadable = non-empty means the baseline is unusable -> do not merge."""
+    fw_probe = reader is None  # injected test readers do not get the extra kubectl call
     reader = reader or _read_health
     try:
         hard, soft, _, restarts = reader(namespaces, None)
+        failed_wl = (_failed_job_workloads(namespaces) if fw_probe else set()) or set()
     except Exception as e:  # noqa: BLE001 -- any failure here = unusable baseline
         return {"keys": set(), "pods": set(), "restarts": {}, "report": {},
+                "failed_workloads": set(),
                 "unreadable": [f"baseline reading failed: {type(e).__name__}: {e}"]}
     allk = {**soft, **hard}
     unreadable = [v for k, v in allk.items() if k.endswith(":unreadable")]
     keys = {k for k in allk if not k.endswith(":unreadable")}
     return {"keys": keys, "pods": {_pod_obj(k) for k in keys if _pod_obj(k)},
             "restarts": restarts, "report": {k: allk[k] for k in sorted(keys)},
-            "unreadable": unreadable}
+            "failed_workloads": failed_wl, "unreadable": unreadable}
 
 
 def settle_health(namespaces, collect=None, sleep=time.sleep, now=time.monotonic,
@@ -1782,9 +1819,24 @@ def settle_health(namespaces, collect=None, sleep=time.sleep, now=time.monotonic
         sleep(poll)
 
 
-def post_apply_health(namespaces, baseline=None):
+def settle_timeout_for(apps, policy):
+    """Settle window for THIS batch: SETTLE_TIMEOUT_S, extended only when a
+    touched (ns, app) has a `settle_budget_s` entry in the policy (keyed
+    "<ns>/<app>"). Slow-start components (openclaw: ~7 min to Ready after an
+    image change) get their budget; a batch that does not touch them keeps the
+    default. A malformed entry is ignored (default window), never a longer one."""
+    budgets = (policy or {}).get("settle_budget_s") or {}
+    best = SETTLE_TIMEOUT_S
+    for ns, app in apps:
+        v = budgets.get(f"{ns}/{app}") if isinstance(budgets, dict) else None
+        if isinstance(v, int) and not isinstance(v, bool) and v > best:
+            best = v
+    return best
+
+
+def post_apply_health(namespaces, baseline=None, timeout=None):
     """Compat wrapper: the settling health gate. Returns (ok, problems[], info{})."""
-    return settle_health(namespaces, baseline=baseline)
+    return settle_health(namespaces, baseline=baseline, timeout=timeout)
 
 
 def merge_pr(number):
@@ -2068,7 +2120,11 @@ def main(argv=None):
         reconcile(all_apps)
         log(f"-- waiting {RECONCILE_WAIT_S}s for rollout, then health gate --")
         time.sleep(RECONCILE_WAIT_S)
-        ok, problems, info = post_apply_health({ns for ns, _ in all_apps}, baseline=baseline)
+        st_to = settle_timeout_for(all_apps, policy)
+        if st_to != SETTLE_TIMEOUT_S:
+            log(f"-- settle window extended to {st_to}s (slow-start component in this batch) --")
+        ok, problems, info = post_apply_health({ns for ns, _ in all_apps}, baseline=baseline,
+                                               timeout=st_to)
         result["health"] = {"ok": ok, "problems": problems,
                             "readings": info.get("readings"),
                             "preexisting": info.get("preexisting", [])}

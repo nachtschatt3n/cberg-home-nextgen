@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.11.25`
-> Last Updated: `2026-11-25`
+> Version: `2026.11.28`
+> Last Updated: `2026-11-28`
 
 ## 1) Description
 
@@ -943,6 +943,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.11.28 | 2026-11-28 | **Liveness metrics refreshed by every finalized window.** `window-run-record.py --finalize` now best-effort pushes the Pushgateway job `maintenance-window-liveness` (reusing `sweep-run.push_liveness_metrics`, loaded by path) after the ledger write succeeds, so `MaintenanceWindowMissed*` no longer reads a snapshot up to 48h old (previously only `sweep-run.py --reconcile-only` pushed). Never raises, exit code unchanged, one stderr line; on failure the old snapshot ages and `MaintenanceWindowLivenessStale` still pages at 50h. Test `runbooks/tests/test-window-run-liveness-push.py`. |
 | 2026.11.25 | 2026-11-25 | **Plan refinement + supply (operator direction).** New `plan-refine.py` run as Step 0a of EVERY window (plan files only; Step 0 safe-update apply still first to change the cluster): mechanical repairs (patch retarget, dead conflicts_with, bounded review extension), `needs_replan` flag + planner queue for the rest; `effective_review()`/`needs_replan` honoured by SD-10/SD-11; `plan-generate.py` templates (stateless, db-backed with restore proof); planner/review caps per calendar day; WEEKEND-ATTENDED auto-slotting in `window-scheduler.py`. Tests `test-plan-refine.py`, `test-plan-generate.py`, `test-window-scheduler-weekend.py`. |
 | 2026.11.07 | 2026-11-07 | **Running-row poll budget 300s -> 480s** (`maintenance-window.py`, `_confirm_timeout`), with the measured latency table and budget arithmetic in §Completion poll; the nightly of 2026-11-07 raised exit 12 although the window ran (row at +330s). The ops-sweep recovery SOP is `docs/sops/operation-sweep-cron.md`. |
 | 2026.10.25 | 2026-10-25 | **Docs only.** Pointer to the planner-facing rules for premise commands (refused constructs, allowlist, `expect_*` semantics, worked examples); no runner behaviour changed. |

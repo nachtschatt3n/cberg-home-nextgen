@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.11.25`
-> Last Updated: `2026-11-25`
+> Version: `2026.11.28`
+> Last Updated: `2026-11-28`
 
 ## 1) Description
 
@@ -416,6 +416,37 @@ AUTO_UPDATE_APPLY=1 .venv/bin/python3 runbooks/auto-update.py --apply
 On 2026-10-23 the pre-settle gate read this state once and reverted six healthy
 merges (ledger rows were written as `reverted`; see the Version History entry).
 
+### Slow-start components and already-failing Job workloads (F-08d5bc72, 2026-11-28)
+
+Three nights running the whole safe batch was auto-reverted by two false
+positives; both are now handled in the gate, fail-closed semantics unchanged:
+
+- **Per-component settle budget.** `settle_budget_s` in
+  `runbooks/auto-update-policy.yaml` maps `"<namespace>/<app>"` (the
+  `kubernetes/apps/<ns>/<app>/` directory a merged PR touches) to a longer
+  settle window in seconds (`ai/openclaw: 1200` -- ~6-7 min to Ready after an
+  image change: fsGroup chown of ~364k files + plugin installs).
+  `settle_timeout_for()` picks `max(default 600s, budgets of the touched apps)`;
+  a batch that does not touch a budgeted app keeps the default. A malformed
+  entry never changes the window. Hard signals (3 consecutive crashloop /
+  Failed readings) still end the wait early. To give another slow starter room,
+  add one line to the map.
+- **Pre-failing Job workloads are not regressions.** The pre-apply baseline now
+  records every Job workload (owning Job name minus its trailing numeric run
+  suffix, so all runs of one CronJob / CI job share a key) that already had a
+  `Failed` pod. During the gate, ANY pod of such a workload (new retries, the
+  next run) is ignored. A Failed pod of a workload that was NOT failing before,
+  or not owned by a Job, still counts. An unreadable baseline pod list excludes
+  nothing. Caveat: workload identity is the Job's `ownerReference`; pods that
+  are not Job-owned (e.g. ARC runner pods owned by an EphemeralRunner) are not
+  matched and fall back to the old pre-existing-pod-name exclusion.
+- **Not done:** per-item revert. The revert path is whole-batch by design
+  (`revert_batch`); attributing a regression to one PR is not safe to automate
+  yet, so a real regression still reverts the whole batch.
+
+Tests: `runbooks/tests/test-auto-update-settle-gate.py` (each change has a
+negative control; removing either fix fails it).
+
 ## 6) Verification Tests
 
 ### Test 1: classifier correctness (no live merges)
@@ -708,6 +739,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.11.28 | 2026-11-28 | **Gate false positives fixed (F-08d5bc72).** `settle_budget_s` per-component settle window (openclaw 1200s) and exclusion of Job workloads already failing pre-apply. Policy `2026.11.28`. Per-item revert deliberately not implemented. |
 | 2026.11.25 | 2026-11-25 | **Risk model rebuilt (operator goal: most updates nightly, only cluster core attended).** New §2b: outcome lanes AUTO / AUTO-BACKUP-GATED / PLAN / WEEKEND-ATTENDED (+WAIT), graded breaking-change evidence instead of a heading match, `data_protection` catalogue for migrations, `breaking_ack` (dated, evidenced), `digest_bumps` classification, fail-closed on unreadable notes in the PR lane (the authentik fail-open), prerelease admission gate in the PR lane. `parse_pr` reads `!` majors, capitalised `Update`, `docker tag to`, grouped and versionless titles (14 previously unparseable PRs). Holds retired with evidence: `*valkey*`, `*opentelemetry-kube-stack*`; `*authentik*` reason rewritten to the one remaining hazard; Longhorn 1.12.2 breaking item acked (V2 data engine unused, measured). Core rules carry `lane: weekend-attended`. New `lib/ha-integration-gate.py`. Policy `2026.11.25`. |
 | 2026.11.03 | 2026-11-03 | Header format fix (F-2dfecfb2): the SOP header must be plain `YYYY.MM.DD` (doc-check section 7); the `.1` revision suffix of the entry below is folded into this date. No behaviour change. |
 | 2026.11.02.1 | 2026-11-02 | **`aqua:fluxcd/flux2` deny rule (policy `2026.11.04`, F-39ab2c30).** The flux CLI pin had been auto-merged to 2.10.0 (#448) against a cluster on distribution v2.9.6, contradicting `docs/sops/flux-upgrade.md` (CLI/distribution match). Pin reverted to 2.9.6; the rule keeps the next Renovate PR from re-applying it until the distribution moves. Matrix row added. Regression: `runbooks/tests/test-auto-update-policy-flux-cli-pin.py`. |

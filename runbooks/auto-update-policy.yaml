@@ -18,7 +18,15 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.11.25"
+version: "2026.11.28"
+
+# ── Settle budgets (added 2026-11-28, F-08d5bc72) ───────────────────────────
+# Per-component post-apply health-gate window, seconds, keyed "<namespace>/<app>"
+# (the kubernetes/apps/<ns>/<app>/ directory a PR touches). Used only when a
+# merged PR touches that app; every other batch keeps the default
+# (AUTO_UPDATE_SETTLE_TIMEOUT=600). Never shortens the default.
+settle_budget_s:
+  ai/openclaw: 1200   # ~6-7 min to Ready after an image change (fsGroup chown of ~364k files + plugin installs)
 
 # ── Image major ceilings (added 2026-10-23, F-6a859080) ─────────────────────
 # Caps the MAJOR line the version checker may propose for ONE image in ONE
