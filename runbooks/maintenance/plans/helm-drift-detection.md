@@ -108,7 +108,7 @@ autonomy_override: human-gated        # RESTRICTS only. P0 executed. P1 is a ded
 finding_refs: []
 review: ready-for-go@2026-11-06   # 2026-11-06 sweep 471de4f9 re-review: ready-for-go for P1 (warn) ONLY; all P1 gates re-proven fail-on-bad/pass-on-good live; nonblocking: stale counts (live 117 HR / 132 children), dead conflicts refs, P2/P3 gates need fail-closed wrapper. Prior: 2026-09-28   # plan-reviewer: needs-fix (render-gate false-FAIL on self-growing
                       # ConfigMap cluster-settings + 9 non-blocking) -> fixed -> READY-FOR-GO same day.
-status: vetted   # 2026-09-28 P1 RE-PLANNED (§1.5, §3.0.0): child patch is now JSON6902 op:add (proven to keep all
+status: awaiting-go   # 2026-11-28 sat-attended (cron, unattended): premises PASS, no GO -> go_no_go ingested, deferred. WAS vetted. 2026-09-28 P1 RE-PLANNED (§1.5, §3.0.0): child patch is now JSON6902 op:add (proven to keep all
                       # 18 null leaves on the 7 null-bearing HRs), with pre-commit parent/render gates and a
                       # post-apply values gate, each demonstrated to FAIL on the fbc220f7 shape. Vetted for P1
                       # ONLY, as a dedicated operator-GO NOW run; risk medium -> NOT SD-10 preapproved; no GO recorded.
@@ -119,7 +119,7 @@ status: vetted   # 2026-09-28 P1 RE-PLANNED (§1.5, §3.0.0): child patch is now
                       # spec.values, so chart defaults return. P1 is NOT spec-only for null-bearing values
                       # (7 HRs carry nulls). [Superseded 2026-09-28: the chosen fix is the JSON6902 child
                       # patch (§1.5); the nulls stay as they are.]
-window: "sat-attended:2026-11-28"   # MOVED 2026-11-02 from sat-attended:2026-11-07 (conflicts_with otel-operator-0.26.1, which the operator slotted there). Originally SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed: P1 only, as the LAST/only plan of an attended window (plan section 7)
+window: null   # 2026-11-28: cleared after deferral from sat-attended:2026-11-28 (no GO; unattended cron run). MOVED 2026-11-02 from sat-attended:2026-11-07 (conflicts_with otel-operator-0.26.1, which the operator slotted there). Originally SCHEDULED 2026-09-28 by maintenance-window-agent (operator: "schedule everything that needs to be scheduled"); GO needed: P1 only, as the LAST/only plan of an attended window (plan section 7)
                                       # set status back to `vetted`; after P1 and after P2 set
                                       # `awaiting-soak` (run-now.py refuses it, so no NOW run
                                       # can collapse a soak; flip to `vetted` when it ends)
