@@ -69,7 +69,7 @@ spec:
               # tag scheme sha-<7hex>. MANUAL deploy mode
               # (docs/sops/self-built-image-rebuild.md).
               repository: ghcr.io/nachtschatt3n/memory-machine
-              tag: sha-8e94a62
+              tag: sha-2920cf6
               pullPolicy: IfNotPresent
             command: ["/bin/sh", "-c"]
             args: ["mkdir -p /vol/index /vol/home/home"]
@@ -103,15 +103,15 @@ spec:
               # helper cap (MEMORY_MB*0.3/HELPER_MB) allowed only 2 helpers
               # (~100 photos/min). Measured helper RSS ~1.1-1.15 GB, pod peak 2.9Gi.
               MEMORYKEEPER_CPUS: "8"
-              # 6 -> 4 (2026-11-28): with 6 helpers the sort sat at ~8.8Gi, then
-              # climbed to 13.4Gi in ~6 min and was OOMKilled at 14Gi (likely 6
-              # concurrent decodes of ~60 MP panoramas). The cap formula below
-              # still allows 6; WORKERS is the binding limit.
-              MEMORYKEEPER_WORKERS: "4"
+              # 6 helpers again from sha-2920cf6 (2026-11-28). The earlier OOMs at
+              # 14Gi (6 AND 4 workers) were a helper leak: on Linux the engine never
+              # recycled helper processes (~0.5 GB / 2 min growth). 2920cf6 recycles
+              # them every 320 photos and turns the ORT CPU arena off.
+              MEMORYKEEPER_WORKERS: "6"
               MEMORYKEEPER_HELPER_MB: "1200"
               # DELIBERATELY ABOVE the 14Gi limit: it is the input to the helper
-              # cap formula (24576*0.3/1200 = 6), not a real budget. Real use with
-              # 4 helpers is well under the limit (6 helpers peaked >13.4Gi). If the engine ever
+              # cap formula (24576*0.3/1200 = 6), not a real budget. Pre-2920cf6 peaks
+              # >13.4Gi were the helper leak, not steady-state use. If the engine ever
               # starts sizing caches/batches from this value, lower it to match
               # the limit and accept fewer helpers.
               MEMORY_MACHINE_MEMORY_MB: "24576"
@@ -223,7 +223,7 @@ spec:
               - |
                 set -eu
                 python -m memorykeeper init /out --source /photos
-                python -m memorykeeper scan /out --workers 4
+                python -m memorykeeper scan /out --workers 6
                 python -m memorykeeper pick /out
                 python -m memorykeeper copy /out
             env: *env
