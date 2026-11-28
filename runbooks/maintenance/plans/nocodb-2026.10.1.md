@@ -126,6 +126,8 @@ sops_refs:
   - docs/sops/verification-contents-not-shape.md
   - docs/sops/gateway-api-httproute.md
 generated: "2026-11-09"
+needs_replan: "minor-or-major-drift: upstream moved 2026.10.1 -> 2026.11.0 (minor); a re-assessment is needed"
+needs_replan_since: "2026-11-28"
 ---
 
 # nocodb 2026.09.1 -> 2026.10.1

@@ -91,6 +91,8 @@ sops_refs:
   - docs/sops/verification-contents-not-shape.md
 generated: "2026-11-18"
 replanned: "2026-11-27"               # in place, after plan-refine premise-fail (image already at target)
+needs_replan: "premise-fail: pre-fault-backup-present: command failed (rc=1): Error from server (NotFound): backups.longhorn.io \"backup-6cf446180"
+needs_replan_since: "2026-11-28"
 ---
 
 # anythingllm: 1.20.0 landed via #555 — remainder: storage recovery + contents census

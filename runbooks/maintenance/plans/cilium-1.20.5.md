@@ -242,6 +242,8 @@ replanned: "2026-11-27"                # in place after plan-refine premise-fail
                                       # etcd premise re-expressed). Also found and fixed: cnp 6->7, netpol 5->6.
                                       # Upstream re-checked 2026-11-27: v1.20.5 is still the newest 1.20.x
                                       # (gh release list + helm search); no retarget.
+needs_replan: "premise-fail: etcd-leader-changes-24h-below-6: got '{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[{\"metric\":{},\"value\":[179; k8s-netpol-count-is-6: got '7', want match /^ *6$/"
+needs_replan_since: "2026-11-28"
 ---
 
 # cilium chart 1.20.4 → 1.20.5 (CNI datapath — plan lane by standing rule)

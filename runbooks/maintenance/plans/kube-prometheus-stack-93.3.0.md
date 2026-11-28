@@ -59,8 +59,6 @@ depends_on:
 conflicts_with:                   # Built 2026-11-14 from every non-terminal plan file whose touches name `monitoring` or whose
   - otel-operator-0.27.2
   - penpot-cache-9.1.4            # 4.x CONTROLs read kube-state-metrics through this Prometheus (reciprocal, added 2026-11-19)
-  - unpoller-5.9.5
-  - music-assistant-skill-b1ef33a
                                   # body reads Prometheus (authoring rule 4). The scheduler reads this field in both directions.
   - talos-linux-1.14.6            # EXCLUSIVE node roll (the plan of record): evicts Prometheus and reads it for its own gates
   - longhorn-1.13.0               # EXCLUSIVE storage engine move: the two volumes above re-attach
@@ -78,14 +76,10 @@ conflicts_with:                   # Built 2026-11-14 from every non-terminal pla
   - postgres-fleet-18.7-alpine
   - postgres-fleet-18.7-bookworm
   - redis-fleet-8.10.3
-  - tube-archivist-0.6.0
-  - tube-archivist-elasticsearch-9.5.5
   - frigate-reolink-go2rtc-flv
   - otbr-0.4.0
   - otbr-thread-rcp-recovery
   - icloud-drive-fleet-2.3.0
-  - immich-server-3.4.1
-  - immich-machine-learning-3.4.1
   - nocodb-2026.10.1
   - nextcloud-12.0.2
   - nextcloud-35.0.2-digest-d88929d
@@ -93,14 +87,14 @@ conflicts_with:                   # Built 2026-11-14 from every non-terminal pla
   - nextcloud-mcp-0.204.0
   - nextcloud-mcp-0.206.0
   - nextcloud-mcp-0.211.1         # added 2026-11-16 for symmetry: its gates read Prometheus and its own list now names this plan
-  - nextcloud-9.4.3               # same (retargeted from the retired 92.22.0 ref by the orchestrator 2026-11-16)
   - n8n-2.47.7                    # same
-  - python-fleet-3.15.2           # same
   - anythingllm-1.19
   - paperclip-26.04
   - penpot-cache-9.2
   - mac-tooling-pins-2026-11
   - bitnamilegacy-exit-nextcloud-db
+  - nextcloud-9.4.5   # plan-refine 2026-11-28: successor of a dead ref
+  # plan-refine 2026-11-28: dead ref(s) unpoller-5.9.5, music-assistant-skill-b1ef33a, tube-archivist-0.6.0, tube-archivist-elasticsearch-9.5.5, immich-server-3.4.1, immich-machine-learning-3.4.1, nextcloud-9.4.3, python-fleet-3.15.2 pruned
 exclusive: true                   # "its own slot, when no plan is mid-flight" is the policy rule's own wording; exclusive also
                                   # covers plans not written yet.
 security_ref: null                # no security evidence is attached to this group
@@ -208,6 +202,8 @@ sops_refs:
   - docs/sops/backup.md
   - docs/sops/verification-contents-not-shape.md
 generated: "2026-11-14"
+needs_replan: "premise-fail: talos-roll-has-happened: got '0', want exactly '3'"
+needs_replan_since: "2026-11-28"
 ---
 
 # kube-prometheus-stack: chart 92.22.0 -> 93.3.0 (operator 0.94.2 -> 0.95.2, Alertmanager 0.34.2 -> 0.35.0, CRD schema update)

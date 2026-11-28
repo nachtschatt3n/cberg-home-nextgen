@@ -38,8 +38,9 @@ conflicts_with:
   - redis-fleet-8.10.3                        # rolls deployment/paperless-redis AND checks deployment/paperless-ngx
   - flux-oci-chart-sources                    # stage 3 edits this same helmrelease.yaml (chart source move)
   - nextcloud-12.0.2                          # office-ns backup-restore plan: two restore-class rollbacks
-  - nextcloud-9.4.3                           # in one slot leave no rollback capacity for either
   - bitnamilegacy-exit-nextcloud-db           # (same convention as the executed paperless-db-13.0.2)
+  - nextcloud-9.4.5   # plan-refine 2026-11-28: successor of a dead ref
+  # plan-refine 2026-11-28: dead ref(s) nextcloud-9.4.3 pruned
 exclusive: false
 security_ref: null                            # no security driver. F-51c2b4cc / F-fcbc238d (AR-029, accepted,
                                               # on 3.4.2) exist; this plan makes NO claim about them -- re-read
@@ -99,6 +100,8 @@ premises:
     why: Second, independent restore source behind the in-window dump. Freshness (under 26h) is checked in pre-check 2.2.
     run: kubectl get cronjob db-dump-paperless-db -n office -o jsonpath='{.status.lastSuccessfulTime}'
     expect_matches: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
+needs_replan: "channel-unresolved: channel-unresolved: coverage could not confirm 3.5.1 is the stable-channel head"
+needs_replan_since: "2026-11-28"
 ---
 
 # paperless-ngx 3.4.2 -> 3.5.0 (app + scan-inbox-validator, one image fleet)

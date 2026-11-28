@@ -213,6 +213,8 @@ sops_refs:
 - docs/sops/unifi-device-firmware.md
 - docs/sops/maintenance-windows.md
 generated: '2026-11-16'   # re-planned in place 2026-11-27 (upgrade-planner, nightly window Step 0.5): v1.14.6 -> v1.14.7, premises -> scalars, Phase K deferred
+needs_replan: "premise-fail: etcd-elections-24h-below-6: got '14.004862799583188', want match /^[0-5](\\.\\d+)?$/; offsite-restic-seed-not-running: got '1', want exactly '0'"
+needs_replan_since: "2026-11-28"
 ---
 
 # Talos Linux node roll — v1.14.1 → v1.14.7 (retargeted in place from v1.14.6, 2026-11-27); Kubernetes Phase K DEFERRED
